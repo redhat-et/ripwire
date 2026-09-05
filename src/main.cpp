@@ -3091,20 +3091,36 @@ int main( int argc, char** argv )
     if( !cfg.since.empty() )
     {
         bool sinceResolvesSomewhere = false;
+        bool sinceHasBaseline       = false;   // N4: some root's history reaches the value (SinceScope::baselineSha)
         if( multiRoot )
         {
             for( const WorkspaceRoot& r : ws )
             {
-                sinceResolvesSomewhere = sinceResolvesSomewhere || resolveSinceScope( r.arg, cfg.since ).active;
+                const SinceScope scope = resolveSinceScope( r.arg, cfg.since );
+                sinceResolvesSomewhere = sinceResolvesSomewhere || scope.active;
+                sinceHasBaseline       = sinceHasBaseline || !scope.baselineSha.empty();
             }
         }
         else
         {
-            sinceResolvesSomewhere = resolveSinceScope( root, cfg.since ).active;
+            const SinceScope scope = resolveSinceScope( root, cfg.since );
+            sinceResolvesSomewhere = scope.active;
+            sinceHasBaseline       = !scope.baselineSha.empty();
         }
         if( !sinceResolvesSomewhere )
         {
             std::fprintf( stderr, "%s\n", sinceUnresolvedRefusal( cfg.since ).c_str() );
+            return 1;
+        }
+        // N4 (capture-audit verify-wave1 2026-09-04): the SECOND half of the one policy. A value that resolves as a
+        // window (a real date the history never reaches: 1999-01-01) is an honest window for the three window hosts
+        // and NO baseline for the host that compares against a commit. Which hosts need a baseline is decided HERE,
+        // beside the shape/range validation, from the shared resolution — never re-derived in a verb handler. The
+        // no-history root is left to --slice's own, more specific refusal (nothing to compare against at all).
+        const bool sinceHostNeedsBaseline = !cfg.sliceSpec.empty();
+        if( sinceHostNeedsBaseline && !sinceHasBaseline && gitRepoHasHistory( multiRoot ? ws[0].arg : root ) )
+        {
+            std::fprintf( stderr, "%s\n", sinceNoBaselineRefusal( cfg.since, multiRoot ? ws[0].arg : root ).c_str() );
             return 1;
         }
     }

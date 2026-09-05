@@ -56,6 +56,13 @@ struct SinceScope
     bool        isRev  = true;    // true → `revBoundary` is a commit-ish; false → `sinceDate` is a git approxidate
     std::string revBoundary;      // e.g. "HEAD~20" or a tag — used as `git log <revBoundary>..`
     std::string sinceDate;        // e.g. "2 weeks ago" — used as `git log --since=<sinceDate>`
+    // N4 (capture-audit verify-wave1 2026-09-04): the BASELINE COMMIT this value names — a revision is its own
+    // sha, a date is the newest commit at or before it — EMPTY when the history never reaches it (a date before
+    // the first commit). The window hosts (--hotspots/--cochange/--rank-by=churn) never read it: 1999.. is all
+    // of history and an honest window. The baseline host (--slice compares against a commit) needs it, and the
+    // decision that it is missing is made ONCE, in main.cpp beside the M8 validation, from this field — so a
+    // fifth consumer cannot resolve the same value by a different rule (slicediff.h used to resolve it itself).
+    std::string baselineSha;
 };
 
 // A --since value "looks like a date" only if EVERY alphabetic run in it is a date word (or an ISO
@@ -176,6 +183,16 @@ inline bool looksLikeDate( std::string_view s )
     return ( hasDigit || hasDateWord ) && leadingIsoDateIsReal( s );
 }
 
+// N4: THE ONE no-baseline refusal — a --since that is a real window but names no commit at or before it, on a
+// host that compares against a commit. Spelled here alone (sincecheck.sh's N4 source arm counts the files);
+// main.cpp decides it beside the M8 validation, slicediff.h prints the same sentence on its own degrade path.
+inline std::string sinceNoBaselineRefusal( std::string_view value, const std::string& root )
+{
+    return "ripwire: --since=" + std::string( value ) + " resolves to no commit in '" + root
+         + "' — beside --slice it names the revision to compare this variable's def-use slice against "
+           "(e.g. --since=HEAD~1, --since=<sha>, --since=\"2 weeks ago\")";
+}
+
 // THE ONE unresolvable---since refusal, shared by every host (M8). Four verbs consume --since and the
 // §P0.5c "a window nobody chose is not a measurement" fix landed on one of them; the other three either
 // worded it themselves or did not refuse at all. Hosts print this; nobody re-words it.
@@ -226,6 +243,8 @@ inline SinceScope resolveSinceScope( const std::string& root, std::string_view v
                 scope.active     = true;
                 scope.isRev      = true;
                 scope.revBoundary = val;
+                while( !line.empty() && ( line.back() == '\n' || line.back() == '\r' || line.back() == ' ' ) ) { line.pop_back(); }
+                scope.baselineSha = line;   // N4: the peeled sha rev-parse printed IS the baseline
                 return scope;
             }
         }
@@ -238,6 +257,21 @@ inline SinceScope resolveSinceScope( const std::string& root, std::string_view v
         scope.active    = true;
         scope.isRev     = false;
         scope.sinceDate = val;
+        // N4: the newest commit at or before the date — the baseline a commit-comparing host needs; empty when
+        // the history never reaches the date (the same `rev-list -1 --before` slicediff.h used to run itself).
+        const std::string cmd = "git -C " + shSingleQuote( root ) + " rev-list -1 --before=" + shSingleQuote( val ) + " HEAD 2>/dev/null";
+        std::FILE* pipe = popen( cmd.c_str(), "r" );
+        if( pipe )
+        {
+            std::string line;
+            const bool  got = readByteSafeLine( pipe, line );
+            const int   rc  = pclose( pipe );
+            if( got && rc == 0 )
+            {
+                while( !line.empty() && ( line.back() == '\n' || line.back() == '\r' || line.back() == ' ' ) ) { line.pop_back(); }
+                scope.baselineSha = line;
+            }
+        }
         return scope;
     }
 
