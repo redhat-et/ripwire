@@ -3406,6 +3406,67 @@ static inline void validateGrepHandleModifier( Config& c ) noexcept
     }
 }
 
+// ── THE --since HOST TABLE (capture-audit verify-wave2 N4, 2026-09-05) ────────────────────────────────
+// --since is a GLOBAL flag with five consumers in TWO CLASSES, and the classes ask different questions:
+//   WINDOW   hosts ask "how far back does the churn walk go". A value the repo's history never reaches
+//            (--since=1999-01-01) is simply ALL of history, and is answered with the window stamped as given.
+//   BASELINE hosts ask "which COMMIT do I compare against". The same value names no commit, so there is
+//            nothing to diff against and the run refuses.
+// Both answers are honest, and they are deliberately NOT the same answer — wave 1's N4 was closed at the
+// SOURCE (one resolver, one sentence) while the behaviours still diverged, and verify-wave2 was right that
+// "one policy" had not been shown. What makes it one policy is that the CLASS IS DECLARED HERE, once, and
+// every decision about --since reads this table: the "the flag would do nothing" refusal below, and the
+// no-baseline refusal in main.cpp — which used to spell its own half as `!cfg.sliceSpec.empty()`, a second
+// copy of the host list that a sixth consumer could contradict by omission. Now a new host adds one row and
+// inherits both decisions; a host that forgets the row cannot run with --since at all (the refusal below
+// fires), so the failure mode is loud rather than a silently wrong class.
+// Gate: test/sincecheck.sh re-derives these rows FROM THIS TABLE and asserts each one's behaviour on a
+// reachable value, an unreachable-but-real one, and an impossible one.
+struct SinceHost
+{
+    std::string_view flag;
+    bool             needsBaseline;   // true = compares against a COMMIT; false = walks a WINDOW
+};
+inline constexpr SinceHost kSinceHosts[] = {
+    { "--hotspots",            false },
+    { "--cochange",            false },
+    { "--rank-by=churn",       false },
+    { "--rank-by=churn-decay", false },
+    { "--slice",               true  },
+};
+
+// Is this host the one the run selected? One switch, beside the table it switches on, so the two cannot
+// drift; a flag this function does not know is never active.
+inline bool sinceHostActive( const Config& c, std::string_view flag ) noexcept
+{
+    if( flag == "--hotspots" )            { return c.hotspots; }
+    if( flag == "--cochange" )            { return c.cochange; }
+    if( flag == "--rank-by=churn" )       { return c.rankBy == RankBy::Churn; }
+    if( flag == "--rank-by=churn-decay" ) { return c.rankBy == RankBy::ChurnDecay; }
+    if( flag == "--slice" )               { return !c.sliceSpec.empty(); }
+    return false;
+}
+
+inline bool anySinceHostActive( const Config& c ) noexcept
+{
+    for( const SinceHost& h : kSinceHosts )
+    {
+        if( sinceHostActive( c, h.flag ) ) { return true; }
+    }
+    return false;
+}
+
+// Does the run's --since host need a COMMIT to compare against? Read by main.cpp beside the M8 shape/range
+// validation — the one place the no-baseline refusal is decided, now from the one place the class is stated.
+inline bool activeSinceHostNeedsBaseline( const Config& c ) noexcept
+{
+    for( const SinceHost& h : kSinceHosts )
+    {
+        if( h.needsBaseline && sinceHostActive( c, h.flag ) ) { return true; }
+    }
+    return false;
+}
+
 inline void validateModifierGuards( Config& c ) noexcept
 {
     validatePagingHonored( c );      // §P8/G2: --limit/--offset on a verb that windows nothing (see its header)
@@ -3563,8 +3624,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // card A4: --slice=SYM:VAR joins the list — there --since is not a churn WINDOW but the revision whose
     // def-use slice this one is diffed against (src/slicediff.h). Same flag, same two spellings, and the
     // same rule as every other pairing: a run where the flag would do nothing refuses instead.
-    if( !c.since.empty() && !c.hotspots && !c.cochange && c.sliceSpec.empty()
-        && c.rankBy != RankBy::Churn && c.rankBy != RankBy::ChurnDecay )
+    if( !c.since.empty() && !anySinceHostActive( c ) )
     {
         std::fprintf( stderr, "ripwire: --since=REV|DATE scopes --hotspots/--cochange/--rank-by=churn|churn-decay, and beside "
                               "--slice=SYM:VAR it names the revision to diff that variable's def-use slice against — pass one "

@@ -3187,7 +3187,11 @@ int main( int argc, char** argv )
         // and NO baseline for the host that compares against a commit. Which hosts need a baseline is decided HERE,
         // beside the shape/range validation, from the shared resolution — never re-derived in a verb handler. The
         // no-history root is left to --slice's own, more specific refusal (nothing to compare against at all).
-        const bool sinceHostNeedsBaseline = !cfg.sliceSpec.empty();
+        // N4 (verify-wave2): read off cli.h's kSinceHosts table — the ONE declaration of each host's class —
+        // instead of re-spelling the host list here. That second copy was what let "one policy" mean "one
+        // resolver" rather than "one rule": a sixth consumer could join --since and inherit the window class
+        // by omission, silently, from a condition that never mentioned it.
+        const bool sinceHostNeedsBaseline = activeSinceHostNeedsBaseline( cfg );
         if( sinceHostNeedsBaseline && !sinceHasBaseline && gitRepoHasHistory( multiRoot ? ws[0].arg : root ) )
         {
             std::fprintf( stderr, "%s\n", sinceNoBaselineRefusal( cfg.since, multiRoot ? ws[0].arg : root ).c_str() );
