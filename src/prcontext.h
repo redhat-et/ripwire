@@ -616,7 +616,12 @@ inline void writeAnchorNote( std::FILE* out, const std::string& anchorAttr )
                        "NOT at the ref's tip — the bundle is what THIS work changed since it forked, not how the two "
                        "trees differ today. base_moved= counts paths the BASE REF moved since the fork that this work "
                        "never touched (excluded here, and the same row class the abi verb names head moved: the other "
-                       "line moved, we did not author it). anchor=\"ref tip two dot\" instead means there was no merge "
+                       // §L10b: the real attribute value is \"ref-tip-two-dot\" (a hyphenated word, spelled that way
+                       // at every OTHER site: cli.h, prcontext.h's own anchorAttr builder below). This comment used
+                       // spaces instead, on the mistaken belief that a hyphen was unsafe inside an XML comment (G4
+                       // bans the literal TWO-DASH run "--", never a lone "-" — "ref-tip-two-dot" has none), so the
+                       // legend named a string the document never emits. Spelled to match.
+                       "line moved, we did not author it). anchor=\"ref-tip-two-dot\" instead means there was no merge "
                        "base at all (unrelated history) and the two dot view is what you are reading. -->" );
 }
 
