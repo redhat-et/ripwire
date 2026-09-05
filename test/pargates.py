@@ -133,6 +133,19 @@ GATE_BUDGET_SEC = {
     "estchargecheck.sh":          900,   # ~26 s idle local; rc=124 at the flat cap on all ubuntu legs.
     "pagingsweepcheck.sh":        900,   # ~34 s idle local; rc=124 at the flat cap on all ubuntu legs.
     "slicediffcheck.sh":          900,   # replays 57 labelled commits (checkout + --slice --since each); ~80 s local
+    # 2026-09-05 (capture-audit round landed, CI run 33978240573): three universe-sweep gates from that round hit
+    # rc=124 at exactly 300.0-300.1 s -- the cap signature again, not a hang. compactlegendcheck overran on ALL
+    # FIVE failing legs (it runs the compact legend rewrite over every XML verb, full and compact, plus the MCP
+    # twins), shapingflagcheck on the four ubuntu legs (every kShapingVerbs row probed on a shape where the budget
+    # binds, un-budgeted and budgeted), collectioncapcheck on macos-14 Release only (15 s idle local -- it lost
+    # the CPU to the two above at -j 3, the pagingsweepcheck story). Measured on the dev machine with the three
+    # running concurrently: 107 s, 166 s, 15 s wall. At the runner's 6-11x, the first two land past 900, so they
+    # take the 1200 that cppbenchcheck/regexbombcheck already use; collectioncapcheck takes 900 like pagingsweep.
+    # Making the two sweeps cheaper (one ingest shared across probes) is registered for the terminality round's
+    # battery-hygiene lane; a budget here is the hang tripwire, never the perf bar.
+    "compactlegendcheck.sh":     1200,
+    "shapingflagcheck.sh":       1200,
+    "collectioncapcheck.sh":      900,
                                           # under -j6, rc=124 at the flat cap on both ubuntu PLAIN legs of run
                                           # 33762934972 (Release legs and macOS fit). Warm replay landed with this row.
     "cppbenchcheck.sh":          1200,
