@@ -168,21 +168,16 @@ inline constexpr std::string_view kCompactDataPrefixes[] =
     "<!-- slice-since ripwire.slice/v1:",
 };
 
-inline bool startsWithSv( std::string_view s, std::string_view prefix ) noexcept
-{
-    return s.size() >= prefix.size() && s.compare( 0, prefix.size(), prefix ) == 0;
-}
-
 // A comment is stripped iff it opens like prose and is not one of the listed data comments.
 inline bool isCompactProseComment( std::string_view comment ) noexcept
 {
     for( std::string_view keep : kCompactDataPrefixes )
     {
-        if( startsWithSv( comment, keep ) ) { return false; }
+        if( comment.starts_with( keep ) ) { return false; }
     }
     for( std::string_view p : kCompactProsePrefixes )
     {
-        if( startsWithSv( comment, p ) ) { return true; }
+        if( comment.starts_with( p ) ) { return true; }
     }
     return false;
 }
@@ -244,14 +239,14 @@ inline CompactRootInfo findCompactRoot( std::string_view doc ) noexcept
     {
         const char c = doc[ i ];
         if( c == ' ' || c == '\n' || c == '\t' || c == '\r' ) { ++i;  continue; }
-        if( startsWithSv( doc.substr( i ), "<!--" ) )
+        if( doc.substr( i ).starts_with( "<!--" ) )
         {
             const std::size_t j = doc.find( "-->", i );
             if( j == std::string_view::npos ) { return r; }
             i = j + 3;
             continue;
         }
-        if( startsWithSv( doc.substr( i ), "<?" ) )
+        if( doc.substr( i ).starts_with( "<?" ) )
         {
             const std::size_t j = doc.find( "?>", i );
             if( j == std::string_view::npos ) { return r; }
@@ -284,7 +279,7 @@ inline std::string_view compactDocHead( std::string_view doc, const CompactRootI
     // skip comments between the root and its first child
     while( i < doc.size() )
     {
-        if( startsWithSv( doc.substr( i ), "<!--" ) )
+        if( doc.substr( i ).starts_with( "<!--" ) )
         {
             const std::size_t j = doc.find( "-->", i );
             i = j == std::string_view::npos ? doc.size() : j + 3;
@@ -319,12 +314,12 @@ inline std::string payloadSubCapAttrs( std::string_view doc )
     std::size_t i = 0;
     while( i < doc.size() )
     {
-        if( startsWithSv( doc.substr( i ), "<![CDATA[" ) )
+        if( doc.substr( i ).starts_with( "<![CDATA[" ) )
         {
             const std::size_t j = doc.find( "]]>", i );
             i = j == std::string_view::npos ? doc.size() : j + 3;
         }
-        else if( startsWithSv( doc.substr( i ), "<!--" ) )
+        else if( doc.substr( i ).starts_with( "<!--" ) )
         {
             const std::size_t j = doc.find( "-->", i );
             i = j == std::string_view::npos ? doc.size() : j + 3;
@@ -373,12 +368,12 @@ inline bool payloadHasAnyAttr( std::string_view doc, std::string_view attr )
     std::size_t i = 0;
     while( i < doc.size() )
     {
-        if( startsWithSv( doc.substr( i ), "<![CDATA[" ) )
+        if( doc.substr( i ).starts_with( "<![CDATA[" ) )
         {
             const std::size_t j = doc.find( "]]>", i );
             i = j == std::string_view::npos ? doc.size() : j + 3;
         }
-        else if( startsWithSv( doc.substr( i ), "<!--" ) )
+        else if( doc.substr( i ).starts_with( "<!--" ) )
         {
             const std::size_t j = doc.find( "-->", i );
             i = j == std::string_view::npos ? doc.size() : j + 3;
@@ -503,14 +498,14 @@ inline CompactOutcome applyCompactDialect( std::string& doc, std::string_view hi
     std::size_t rootOpenEndInOut = std::string::npos;
     while( i < n )
     {
-        if( startsWithSv( std::string_view( doc ).substr( i ), "<![CDATA[" ) )
+        if( std::string_view( doc ).substr( i ).starts_with( "<![CDATA[" ) )
         {
             const std::size_t j = doc.find( "]]>", i );
             const std::size_t e = j == std::string::npos ? n : j + 3;
             out.append( doc, i, e - i );
             i = e;
         }
-        else if( startsWithSv( std::string_view( doc ).substr( i ), "<!--" ) )
+        else if( std::string_view( doc ).substr( i ).starts_with( "<!--" ) )
         {
             const std::size_t j = doc.find( "-->", i );
             const std::size_t e = j == std::string::npos ? n : j + 3;

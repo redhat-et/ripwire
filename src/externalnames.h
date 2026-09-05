@@ -93,13 +93,15 @@ inline constexpr std::string_view kShellBuiltinNames[] = {
     "trap", "true", "type", "typeset", "ulimit", "umask", "unalias", "unset", "wait",
 };
 
+// wave-3 close: this file's own house shape — a strictly sorted constant table, pinned at compile time, read by
+// binary_search through svLess (isPythonBuiltin / isCFamilyStdName above). The hand loop P4 landed with read as a
+// 29-40 token clone of five unrelated tiny predicates in --quality-delta=ec5e3c3..HEAD; a std::find one-liner
+// cloned KindCounts::total instead. The sibling shape is the one this file already carries.
+static_assert( std::is_sorted( std::begin( kShellBuiltinNames ), std::end( kShellBuiltinNames ), rw::sortutil::svLess )
+               , "kShellBuiltinNames must be strictly sorted (binary search)" );
 inline bool isShellBuiltinName( std::string_view name ) noexcept
 {
-    for( std::string_view b : kShellBuiltinNames )
-    {
-        if( b == name ) { return true; }
-    }
-    return false;
+    return std::binary_search( std::begin( kShellBuiltinNames ), std::end( kShellBuiltinNames ), name, rw::sortutil::svLess );
 }
 
 inline constexpr std::string_view kCFamilyStdNames[] = {
