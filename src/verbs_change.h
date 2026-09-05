@@ -994,7 +994,9 @@ std::string runTraceLegendComment( std::string_view cmd, RunTraceDocKind kind )
             break;
         case RunTraceDocKind::Bundle:
             c += "The command FAILED and the captured text carried mappable frames: the <trace>/<sigs>/<bodies> bundle "
-                 "below is the byte-deterministic from-trace mapping of that text (its own legend precedes it above).";
+                 "below is the byte-deterministic from-trace mapping of that text (its own legend precedes it above). "
+                 "est_tokens= on the root prices duration_ms= at a fixed width (6 digits), so the price is deterministic "
+                 "while the value is measured.";
             break;
     }
     c += " -->";
@@ -1069,6 +1071,7 @@ std::optional<int> runRunTrace( const MainDispatch& d )
     prelude += renderRunTraceRecord( cap, timeoutSec, lines.size(), /*isFrameless=*/false );
     prelude += linesBlock;
     in.preludeXml = prelude;
+    in.preludeMeasuredDigits = std::to_string( cap.durationMs ).size();   // R1: priced at a fixed width, never charged live
 
     const FromTraceResult res = fromTraceBundleText( d.ing, d.g, text, label, in );
     if( res.ok )

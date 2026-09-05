@@ -22,6 +22,9 @@
 #   (G)  determinism, honestly scoped: the <run> record is MEASURED (duration_ms) and declared so; with
 #        duration_ms normalized, a fixed-output command yields byte-identical documents x2 — and the
 #        MAPPER itself (--from-trace on the captured text) is byte-deterministic x2 unnormalized
+#   (G2) the PRICE is deterministic (verify-wave1 R1): est_tokens= on the bundle root is identical across
+#        1-4 digit durations (duration_ms priced at a fixed width), the padded runs normalise to the same
+#        bytes, and the legend says how the measured value is priced
 #   (H)  exit-code disclosure: every emitted document above carries exit= or timed_out= on <run>
 #   (I)  --run-trace= (empty value) refuses loudly (table machinery)
 #   (J)  --run-timeout alone refuses loudly, naming both flags (modifier-alone contract)
@@ -191,6 +194,55 @@ if [ -s "$WORK/out/map1" ] && diff -q "$WORK/out/map1" "$WORK/out/map2" >/dev/nu
 else
     no "(G) --from-trace on the captured text is not byte-deterministic"
 fi
+
+# ── (G2) the PRICE is deterministic even though the duration is not (verify-wave1 R1) ──────────────────
+# M11 put est_tokens= on the bundle root, charged over the document's bytes — and the document carries the
+# MEASURED duration_ms=. A run whose duration crossed a digit width (9 → 10 ms, 999 → 1000 ms) moved
+# est_tokens by one, so two runs of a fixed-output command differed AFTER duration_ms was normalised (arm G
+# went ~30% red on a loaded machine). The contract: est_tokens= prices duration_ms at a FIXED width, so the
+# price is a function of the fixed output alone. Probe: ONE fixed command string (so task= and the legend
+# echo are byte-identical) whose sleep reads an environment variable sh -c inherits; three runs force 1-2, 3
+# and 4 digit durations. At 2.50 B/token a 3-byte digit swing ALWAYS crosses a token boundary, so an emitter
+# that charges the live digits cannot pass this arm by luck.
+PADCMD="sleep \${RTW_PAD:-0}; cat $WORK/traces/clang.txt >&2; exit 1"
+RTW_PAD=0    "$BIN" "$WORK" --run-trace="$PADCMD" >"$WORK/out/pad0.xml" 2>/dev/null
+RTW_PAD=0.12 "$BIN" "$WORK" --run-trace="$PADCMD" >"$WORK/out/pad3.xml" 2>/dev/null
+RTW_PAD=1.05 "$BIN" "$WORK" --run-trace="$PADCMD" >"$WORK/out/pad4.xml" 2>/dev/null
+d0="$( grep -o 'duration_ms="[0-9]*"' "$WORK/out/pad0.xml" | head -1 )"
+d3="$( grep -o 'duration_ms="[0-9]*"' "$WORK/out/pad3.xml" | head -1 )"
+d4="$( grep -o 'duration_ms="[0-9]*"' "$WORK/out/pad4.xml" | head -1 )"
+e0="$( grep -o '<ctx [^>]*est_tokens="[0-9]*"' "$WORK/out/pad0.xml" | grep -o 'est_tokens="[0-9]*"' )"
+e3="$( grep -o '<ctx [^>]*est_tokens="[0-9]*"' "$WORK/out/pad3.xml" | grep -o 'est_tokens="[0-9]*"' )"
+e4="$( grep -o '<ctx [^>]*est_tokens="[0-9]*"' "$WORK/out/pad4.xml" | grep -o 'est_tokens="[0-9]*"' )"
+if [ -n "$e0" ] && [ -n "$e4" ]; then
+    ok "(G2) the bundle root prices itself (est_tokens= present: $e0 / $e3 / $e4 at $d0 / $d3 / $d4)"
+else
+    no "(G2) est_tokens= missing from the run-trace bundle root (M11 regressed: '$e0' / '$e3' / '$e4')"
+fi
+# the padded runs must have widened the measured value, or the probe below asserts nothing
+w0="${d0//[^0-9]/}"; w4="${d4//[^0-9]/}"
+if [ -n "$w4" ] && [ "${#w4}" -ge 4 ] && [ -n "$w0" ] && [ "${#w0}" -le 2 ]; then
+    ok "(G2) probe is live: duration_ms widened from ${#w0} to ${#w4} digits across the padded runs"
+else
+    no "(G2) probe inert: duration_ms did not widen (${#w0} → ${#w4} digits) — the sleeps did not land"
+fi
+if [ "$e0" = "$e3" ] && [ "$e3" = "$e4" ]; then
+    ok "(G2) est_tokens= is identical across 1-4 digit durations — the price does not charge the measured digits"
+else
+    no "(G2) est_tokens= moves with the measured duration ($e0 at $d0, $e3 at $d3, $e4 at $d4): the price is timing-dependent"
+fi
+# and the whole document, duration normalised, is byte-identical across the three runs (arm G, widened)
+for k in 0 3 4; do
+    sed -E 's/duration_ms="[0-9]+"/duration_ms="X"/' "$WORK/out/pad$k.xml" >"$WORK/out/padnorm$k"
+done
+if diff -q "$WORK/out/padnorm0" "$WORK/out/padnorm3" >/dev/null && diff -q "$WORK/out/padnorm0" "$WORK/out/padnorm4" >/dev/null; then
+    ok "(G2) the three runs are byte-identical once duration_ms is normalised"
+else
+    no "(G2) the three runs differ beyond duration_ms: $( cmp "$WORK/out/padnorm0" "$WORK/out/padnorm4" 2>&1 | head -c 200 )"
+fi
+grep -q 'fixed width' "$WORK/out/pad0.xml" \
+    && ok "(G2) the legend states that est_tokens= prices duration_ms at a fixed width" \
+    || no "(G2) the legend does not say how the MEASURED duration_ms is priced"
 
 # ── (H) exit-code disclosure on EVERY document ─────────────────────────────────────────────────────────
 for doc in fail pass tmo miss bare; do
