@@ -608,6 +608,19 @@ inline constexpr std::size_t ceilingAllowanceBytes( std::size_t budgetTokens ) n
     return std::size_t( double( budgetTokens ) * kMinBytesPerToken * kCeilingFirstEntryTolerance );
 }
 
+// The SHAPING budget the same token count buys — tokens x the densest-language byte rate x the headroom.
+// Distinct from the allowance above (which spends kCeilingFirstEntryTolerance, an OVERSHOOT bar) and
+// deliberately adjacent to it, so the two are read together and never confused.
+//
+// P11/H9 (capture-audit 2026-09-04): this expression was open-coded at SIX sites — --for, --pack-task,
+// --from-trace, --recall and both of their MCP twins — which is how --recall's front doors came to hand the
+// builder a byte count and lose the token number its own header had to disclose (H9). One expression now,
+// so a budget flag's unit cannot mean two things depending on which verb read it. 0 = no ceiling.
+inline constexpr std::size_t budgetBytesForTokens( std::size_t budgetTokens ) noexcept
+{
+    return budgetTokens == 0 ? 0 : std::size_t( double( budgetTokens ) * kMinBytesPerToken * kBudgetHeadroom );
+}
+
 // CA4 §B3 — the SAME bar, for a lens whose caller resolved the token budget into BYTES before the call.
 // --from-trace's FromTraceInputs carries `bundleBudgetBytes` (already tokens x kMinBytesPerToken x
 // kBudgetHeadroom), so it cannot call the sibling above without a `budgetTokens` field its two call sites do

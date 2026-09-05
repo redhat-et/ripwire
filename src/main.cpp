@@ -1255,7 +1255,7 @@ int runDefaultMap( const MainDispatch& d )
         std::free( buf );
         return sz;
     };
-    const std::size_t maxTokensCeilingBytes = std::size_t( double( cfg.maxTokens ) * kMinBytesPerToken * kBudgetHeadroom );
+    const std::size_t maxTokensCeilingBytes = budgetBytesForTokens( std::size_t( cfg.maxTokens ) );
     // §F5 (cont.) — THE <ctx> WRAPPER IS PART OF THE MAP PORTION THE CALLER RECEIVES. A payload verb
     // (--pack-signatures / --pack-top-n / --expand / --outline) opens `<ctx>` BEFORE serialize()'s own bytes
     // (the fprintf below, ahead of the §H7 pre-render), so everything through `</r>` is 5 bytes larger than

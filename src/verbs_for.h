@@ -715,9 +715,8 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     // on this surface", not "not computed this run" — reserved generously (each count is realistically
     // 0..a few hundred, well under 7 digits) rather than measured exactly at charge time.
     constexpr std::size_t kJsonSurfaceCountsBytes = 96;
-    const std::size_t bundleBudget = in.tokenBudget > 0
-        ? std::size_t( double( in.tokenBudget ) * kMinBytesPerToken * kBudgetHeadroom )
-        : kForPayloadBudgetBytes;
+    const std::size_t bundleBudget = in.tokenBudget > 0 ? budgetBytesForTokens( in.tokenBudget )
+                                                        : kForPayloadBudgetBytes;
     const std::size_t fixedBytes = header.size() + kJsonEnvelopeBytes + kJsonSurfaceCountsBytes
                                   + ( in.noteIndex ? kJsonNotesStanzaBytes : 0 );
     const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;
@@ -1790,7 +1789,7 @@ std::optional<int> runForLens( const MainDispatch& d )
 
         // the bundle budget: default kForPayloadBudgetBytes; an explicit --token-budget beats it
         const std::size_t bundleBudget = cfg.tokenBudget > 0
-            ? std::size_t( double( cfg.tokenBudget ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
+            ? rw::budgetBytesForTokens( std::size_t( cfg.tokenBudget ) )
             : rw::kForPayloadBudgetBytes;
         // D2 (audit regressions, 2026-08-08): the adaptive note's own bytes are EXEMPT from the <sigs> trim
         // charge (headerStr contains adaptiveNote verbatim, so subtracting its size prices the header as the
@@ -1972,7 +1971,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             // tag and the two header attributes spliced in below — and never MORE than the budget they already
             // had, so a run WITHOUT --token-budget is byte-identical.
             detailBodyBudget = cfg.maxTokens > 0
-                ? std::size_t( double( cfg.maxTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
+                ? rw::budgetBytesForTokens( std::size_t( cfg.maxTokens ) )
                 : cfg.packBudgetBytes;
             if( cfg.tokenBudget > 0 )
             {

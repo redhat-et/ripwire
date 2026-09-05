@@ -1384,9 +1384,8 @@ inline std::string mentionsJson( const std::string& root, const std::string& sym
 inline std::string forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
                                 std::size_t budgetTokens = 0 )
 {
-    const std::size_t forBudgetBytes = budgetTokens > 0
-        ? std::size_t( double( budgetTokens ) * kMinBytesPerToken * kBudgetHeadroom )
-        : kForPayloadBudgetBytes;
+    const std::size_t forBudgetBytes = budgetTokens > 0 ? budgetBytesForTokens( budgetTokens )
+                                                        : kForPayloadBudgetBytes;
     const McpIndex&          ix        = getIndex( root );
     const IngestResult&      ing       = ix.ing;
     // Routing is the DEFAULT here, exactly as for the CLI --for: a deterministic confidence-gated
@@ -3226,9 +3225,8 @@ inline std::string fromTraceText( const std::string& root, const std::string& tr
     const notes::NoteIndex* const notesPtr  = noteIndex.empty() ? nullptr : &noteIndex;
 
     FromTraceInputs in;
-    in.bundleBudgetBytes = budgetTokens > 0
-        ? std::size_t( double( budgetTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
-        : rw::kForPayloadBudgetBytes;
+    in.bundleBudgetBytes = budgetTokens > 0 ? rw::budgetBytesForTokens( budgetTokens )
+                                            : rw::kForPayloadBudgetBytes;
     in.fanIn  = &fanIn;
     in.impure = &impure;
     in.redact = redact;

@@ -307,7 +307,7 @@ inline constexpr std::size_t kDefaultRecallMaxTokens   = 8000;
 // conversion lives here, beside the default it converts. Gate: test/budgetpolicycheck.sh arms (B) and (C).
 inline std::size_t recallBytesForTokens( std::size_t maxTokens ) noexcept
 {
-    return maxTokens == 0 ? 0 : std::size_t( double( maxTokens ) * kMinBytesPerToken * kBudgetHeadroom );
+    return budgetBytesForTokens( maxTokens );   // serialize.h owns the one expression; this names it for recall
 }
 
 // A recalled body is raw markdown, and the budget cut lands wherever the byte count says — including
