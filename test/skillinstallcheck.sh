@@ -217,4 +217,37 @@ if [ -n "$BIN" ] && [ -x "$BIN" ]; then
     fi
 fi
 
+# ── (D) --hook run from a CHECKOUT when a DIFFERENT copy is already registered ────────────────────
+# The registration and refresh tests keyed on `.command == $cmd`, an EXACT absolute path. A machine
+# with the Homebrew copy registered (/opt/homebrew/share/ripwire/hooks/ripwire-nudge.sh) that then
+# runs `skills/install.sh --hook` out of a git checkout compares two different paths, concludes "not
+# registered", and APPENDS a second entry. Both entries then fire on every matching call, so every
+# meter row is written twice — and the stale entry keeps the old broken matcher, so the duplicate
+# does not even buy the fix it was run for. Found 2026-09-05 on the operator's own machine while
+# closing the terminality round: PreToolUse, SessionStart and UserPromptSubmit each ended up doubled.
+# An existing registration is therefore identified by the SCRIPT, never by which copy registered it.
+hookMatcherExpected="$( sed -n 's/^hookMatcher="\(.*\)"$/\1/p' "$SK/install.sh" | head -n1 )"
+D_HOME="$TMP/dup-home"; mkdir -p "$D_HOME/.claude"
+cat >"$D_HOME/.claude/settings.json" <<'DUPJSON'
+{"hooks":{"PreToolUse":[{"matcher":"Read|Glob|Grep|Bash|mcp__ripwire__","hooks":[{"type":"command","command":"/opt/homebrew/share/ripwire/hooks/ripwire-nudge.sh"}]}],"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"/opt/homebrew/share/ripwire/hooks/ripwire-nudge.sh --session-start"}]}],"UserPromptSubmit":[{"matcher":"*","hooks":[{"type":"command","command":"/opt/homebrew/share/ripwire/hooks/ripwire-claude-route.sh"}]}]}}
+DUPJSON
+HOME="$D_HOME" bash "$SK/install.sh" --hook >"$TMP/dup.out" 2>&1
+DUPSET="$D_HOME/.claude/settings.json"
+if jq -e . "$DUPSET" >/dev/null 2>&1
+then
+    ok "(D) settings.json is still valid JSON after a checkout-run --hook"
+else
+    no "(D) --hook left invalid JSON in a settings file that already carried a registration"
+fi
+for _k in PreToolUse SessionStart UserPromptSubmit
+do
+    _n="$( jq --arg k "$_k" '[ (.hooks[$k] // [])[] | .hooks[]? | select(.command | test("ripwire-(nudge|claude-route)[.]sh")) ] | length' "$DUPSET" 2>/dev/null )"
+    [ "$_n" = "1" ] \
+        && ok "(D) $_k holds exactly ONE ripwire hook entry after a checkout-run --hook" \
+        || no "(D) $_k holds ${_n:-?} ripwire hook entries after a checkout-run --hook (expected 1 — a duplicate double-counts every row)"
+done
+jq -e --arg m "$hookMatcherExpected" 'any((.hooks.PreToolUse // [])[]?; (any(.hooks[]?; .command | test("ripwire-nudge[.]sh"))) and .matcher == $m)' "$DUPSET" >/dev/null 2>&1 \
+    && ok "(D) the surviving PreToolUse entry carries the CURRENT matcher, not the stale one it was found with" \
+    || no "(D) the surviving PreToolUse entry kept a stale matcher: $( jq -c '[ (.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher ]' "$DUPSET" 2>/dev/null )"
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

@@ -27,21 +27,39 @@ src="$( cd "$( dirname "$0" )" && pwd )"
 hookMatcher="^(Read|Glob|Grep|Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)$"
 codexHookMatcher="^(Bash|Read|Glob|Grep|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)$"
 
+# ── IDENTIFYING AN EXISTING REGISTRATION: BY SCRIPT, NEVER BY WHICH COPY REGISTERED IT (2026-09-05).
+# Every test below used to be `.command == $cmd`, an EXACT absolute path. A machine with the Homebrew
+# copy registered (/opt/homebrew/share/ripwire/hooks/ripwire-nudge.sh) that then ran this installer
+# out of a git checkout compared two different paths, concluded "not registered", and APPENDED a
+# second entry. Both entries fire on every matching call, so the substitution meter counts every row
+# TWICE — and the entry left behind keeps its old matcher, so the duplicate does not even buy the fix
+# the operator ran the installer for. That happened on this project's own machine while closing the
+# terminality round: PreToolUse, SessionStart and UserPromptSubmit all ended up doubled.
+#
+# `jqIsScript` matches the hook by its SCRIPT NAME, so any copy's registration is recognised. The
+# command's first word is taken before the suffix test, because the SessionStart entry carries a
+# trailing ` --session-start` argument. When an entry is found, both its matcher AND its command are
+# brought to the current values: refreshing one and not the other is how the stale half survives.
+# test/skillinstallcheck.sh arm (D) drives the exact scenario and counts the entries.
+jqIsScript='def isScript($n): (.command // "") | split(" ")[0] | endswith("/hooks/" + $n);'
+
 # ── refresh_hook_matcher SETTINGS HOOKSCRIPT — bring an ALREADY-registered entry's matcher up to date.
 # An entry written by an older installer carries an older matcher, and a stale one undercounts forever,
 # silently, in exactly the sessions that use the tool most. Still idempotent: a matcher that already
 # agrees is left untouched, and this never adds, removes or reorders an entry.
 refresh_hook_matcher()
 {
-    if ! jq -e --arg cmd "$2" --arg m "$3" \
-        'any((.hooks.PreToolUse // [])[]?; (any(.hooks[]?; .command == $cmd)) and (.matcher != $m))' \
+    if ! jq -e --arg cmd "$2" --arg m "$3" --arg n "ripwire-nudge.sh" "$jqIsScript"'
+        any((.hooks.PreToolUse // [])[]?; (any(.hooks[]?; isScript($n))) and ((.matcher != $m) or (any(.hooks[]?; isScript($n) and .command != $cmd))))' \
         "$1" >/dev/null 2>&1; then
         echo "ripwire PreToolUse hook already registered in $1 ($2) — nothing to do."
         return 0
     fi
     tmp="$( mktemp )"
-    if jq --arg cmd "$2" --arg m "$3" \
-        '.hooks.PreToolUse |= map( if any(.hooks[]?; .command == $cmd) then .matcher = $m else . end )' \
+    if jq --arg cmd "$2" --arg m "$3" --arg n "ripwire-nudge.sh" "$jqIsScript"'
+        .hooks.PreToolUse |= map( if any(.hooks[]?; isScript($n))
+                                  then .matcher = $m | .hooks |= map( if isScript($n) then .command = $cmd else . end )
+                                  else . end )' \
         "$1" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$1"; then
         echo "ripwire PreToolUse hook already registered in $1 — refreshed its matcher to \"$3\"."
     else
@@ -70,9 +88,18 @@ install_claude_route()
     }
     chmod +x "$routeScript" 2>/dev/null || true
 
-    if jq -e --arg cmd "$routeScript" \
-        'any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; .command == $cmd)' "$1" >/dev/null 2>&1; then
-        echo "ripwire UserPromptSubmit router already registered in $1 ($routeScript) — nothing to do."
+    if jq -e --arg n "ripwire-claude-route.sh" "$jqIsScript"'
+        any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; isScript($n))' "$1" >/dev/null 2>&1; then
+        tmp="$( mktemp )"
+        if jq --arg cmd "$routeScript" --arg n "ripwire-claude-route.sh" "$jqIsScript"'
+            .hooks.UserPromptSubmit |= map( .hooks |= map( if isScript($n) then .command = $cmd else . end ) )' \
+            "$1" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$1"; then
+            echo "ripwire UserPromptSubmit router already registered in $1 — command refreshed to $routeScript."
+        else
+            rm -f "$tmp"
+            echo "skills/install.sh: could not refresh the router command in $1 (is it valid JSON?); nothing changed." >&2
+            return 1
+        fi
         return 0
     fi
 
@@ -118,8 +145,8 @@ install_claude_hook()
     mkdir -p "$( dirname "$settings" )"
     [ -f "$settings" ] || echo '{}' >"$settings"
 
-    if jq -e --arg cmd "$hookScript" \
-        'any((.hooks.PreToolUse // [])[]?.hooks[]?; .command == $cmd)' \
+    if jq -e --arg n "ripwire-nudge.sh" "$jqIsScript"'
+        any((.hooks.PreToolUse // [])[]?.hooks[]?; isScript($n))' \
         "$settings" >/dev/null 2>&1; then
         refresh_hook_matcher "$settings" "$hookScript" "$hookMatcher" || return $?
         install_claude_route "$settings"
