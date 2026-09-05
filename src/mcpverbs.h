@@ -418,13 +418,48 @@ inline std::string analyzeToString( const std::string& root, int topK, bool stab
 // point the CLI --whereis calls with cfg.pageLimit/cfg.pageOffset, so the legend's "raise the default cap
 // with limit=N (offset=M pages)" is now true on this surface too, with the same has_more=/next_offset=
 // disclosure that lets a paging loop terminate. Defaulted to {} ⇒ byte-identical to the un-paged answer.
+//
+// L6 (capture-audit 2026-09-04, lane L5's found-not-fixed): the SEED and the NEAR-MISS now cross to this
+// surface. Two facts, both index questions, both previously CLI-only:
+//   * `@FILE:LINE` — a documented selector spelling. The CLI resolves it before scanning anything; here it
+//     fell through as a LITERAL and grepped the string "@src/arch.h:507" across 4,867 blobs, reporting a
+//     true and useless hits="0" shaped exactly like a name this repo never had. An agent holding a diff
+//     hunk or a stack frame — the caller this spelling exists for — got the wrong answer, confidently.
+//   * the near-miss on a zero — "is this a name this repo never had, or a keystroke away from one it has?"
+// The header above says this verb deliberately avoids getIndex(), and that reasoning is intact and kept:
+// it was about supplying def sites for a LABEL (head_labels= stays "lexical" here, which the root still
+// discloses), not about resolving the caller's own selector or explaining a zero. Both calls below are
+// LAZY — the seed one only when the selector starts with '@', the near-miss one only on an empty hit list
+// — so the ordinary request still touches no index and pays nothing. On an unresolvable seed the function
+// returns "" with `seedFault` set, and the dispatcher speaks the shared refusal triple over -32602 rather
+// than answering a question the caller did not ask.
 inline std::string whereisText( const std::string& root, const std::string& symbol, const std::string& filter,
-                                std::size_t maxHits, McpPageArgs page = {} )
+                                std::size_t maxHits, McpPageArgs page = {}, bool* seedFault = nullptr )
 {
-    const crossref::WhereResult res = crossref::computeWhereis( root, symbol, filter );
+    std::string sel = symbol;
+    std::string seedSpec;
+    if( !sel.empty() && sel.front() == '@' )
+    {
+        const std::vector<NodeId> seeded = resolveAllByNameQualified( getIndex( root ).ing, sel );
+        if( seeded.empty() )
+        {
+            if( seedFault != nullptr ) { *seedFault = true; }
+            return {};
+        }
+        seedSpec = sel;
+        sel      = getIndex( root ).ing.symbols[ seeded.front() ].name;
+    }
+    crossref::WhereResult res = crossref::computeWhereis( root, sel, filter );
     if( !res.ok )
     {
         return {};
+    }
+    res.seedSpec = std::move( seedSpec );
+    // The tree zero stays an answer; the near-miss only says WHICH zero it is. Computed only on the zero,
+    // so a real hit list costs nothing and is byte-identical to before.
+    if( res.hits.empty() )
+    {
+        res.nearMiss = didYouMean( getIndex( root ).ing, sel );
     }
     return captureXml( [ & ]( std::FILE* f ) { crossref::writeWhereisPage( f, res, maxHits, page.limit, page.offset ); } );
 }
@@ -3943,6 +3978,84 @@ inline std::vector<std::string_view> batchKnownVerbs()
     std::vector<std::string_view> known( std::begin( kBatchServedVerbs ), std::end( kBatchServedVerbs ) );
     known.insert( known.end(), std::begin( kBatchVerbAliases ), std::end( kBatchVerbAliases ) );
     return known;
+}
+
+// M5 (capture-audit 2026-09-04): ONE `verb:arg` sub-query grammar, spoken by BOTH batch front doors.
+//
+// THE FINDING. `--batch=FILE` took `verb:arg` LINES with CLI verb names (`callers:fnv1a64`); MCP `batch`
+// took `{verb, …args}` OBJECTS with MCP verb names and refused the string form outright. One verb, one
+// name, two grammars — so an agent that had learned the CLI spelling paid a failed call to learn the MCP
+// one, and the capture's own `["for:…","callers:…"]` example was a refusal captioned as a success.
+//
+// The conversion below was a lambda inside main.cpp's --batch arm; it is here now, beside the registry it
+// resolves against, so the MCP arm can accept the same line and produce the byte-identical sub-query object
+// runBatchSub already consumed. The CLI VERB NAMES were already aliased (kBatchVerbAliases: callers,
+// callees), which is why the fix is one grammar rather than two vocabularies.
+//
+// Returns "" for a blank line or a `#` comment (the CLI's own skip rule). A `verb` with no colon is a
+// no-argument sub-query (`analyze`), which is legal; whether the verb EXISTS is runBatchSub's judgment, not
+// this function's — it composes, it does not validate.
+inline std::string batchObjectFromCliSpec( std::string_view spec )
+{
+    const std::size_t b = spec.find_first_not_of( " \t\r" );
+    if( b == std::string_view::npos )
+    {
+        return {};   // blank
+    }
+    const std::size_t e    = spec.find_last_not_of( " \t\r" );
+    const std::string line( spec.substr( b, e - b + 1 ) );
+    if( line.empty() || line[ 0 ] == '#' )
+    {
+        return {};   // comment
+    }
+    const std::size_t colon = line.find( ':' );
+    const std::string verb  = ( colon == std::string::npos ) ? line : line.substr( 0, colon );
+    const std::string arg   = ( colon == std::string::npos ) ? std::string{} : line.substr( colon + 1 );
+
+    const auto  j   = []( const std::string& v ) { return mcpdetail::jsonEscape( v ); };
+    std::string obj = "{\"verb\":\"" + j( verb ) + "\"";
+    if( verb == "path_between" )
+    {
+        const std::size_t comma = arg.find( ',' );
+        const std::string from  = ( comma == std::string::npos ) ? arg : arg.substr( 0, comma );
+        const std::string to    = ( comma == std::string::npos ) ? std::string{} : arg.substr( comma + 1 );
+        obj += ",\"from\":\"" + j( from ) + "\",\"to\":\"" + j( to ) + "\"";
+    }
+    else if( !arg.empty() )
+    {
+        const char* key = "symbol";                          // callers/callees/impact/uses/mentions/owners/find_*
+        if( verb == "for" || verb == "exemplar" ) { key = "task"; }
+        else if( verb == "grep" )                 { key = "pattern"; }
+        else if( verb == "lego" )                 { key = "type"; }
+        else if( verb == "cochange" )             { key = "file"; }
+        else if( verb == "fetch_body" )           { key = "handle"; }
+        obj += ",\"" + std::string( key ) + "\":\"" + j( arg ) + "\"";
+    }
+    obj += "}";
+    return obj;
+}
+
+// M5: is `spec` a `verb:arg` line naming a verb this batch actually serves? The MCP arm needs this BEFORE
+// it commits to reading a `queries` array as strings: an array of arbitrary strings (the hostile
+// `queries:[1,"x",null]` the M8 refusal covers) must keep getting the bad-value sentence, not be silently
+// reinterpreted as a sub-query named "x". So the string grammar is accepted only when EVERY element names
+// a served verb — a precise test, not a shape guess.
+inline bool isBatchCliSpec( std::string_view spec )
+{
+    const std::size_t b = spec.find_first_not_of( " \t\r" );
+    if( b == std::string_view::npos )
+    {
+        return false;
+    }
+    const std::string_view trimmed = spec.substr( b );
+    const std::size_t      colon   = trimmed.find( ':' );
+    std::string_view       verb    = colon == std::string_view::npos ? trimmed : trimmed.substr( 0, colon );
+    while( !verb.empty() && ( verb.back() == ' ' || verb.back() == '\t' || verb.back() == '\r' ) )
+    {
+        verb.remove_suffix( 1 );
+    }
+    const std::vector<std::string_view> known = batchKnownVerbs();
+    return std::find( known.begin(), known.end(), verb ) != known.end();
 }
 
 // §B6 M9 (batch half): "" when `verb` IS served, else name it, offer the near-miss, and list the served set

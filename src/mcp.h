@@ -767,7 +767,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    "{\"name\":\"slice\",\"description\":\"WHERE IS THIS VARIABLE DEFINED AND USED inside one function — NAME-BASED intra-procedural def-use rows of one variable inside ONE uniquely-resolved definition (the ARISE slicer, arXiv:2605.03117). symbol alone lists the sliceable locals to pick from; add var (or spell symbol as SYM:VAR / file:name:VAR) for the per-line rows: k=def|use|both, t=the strongest role on the line, the trimmed source line as CDATA. flow=back|fwd|both adds the TRANSITIVE cross-statement data-flow slice over reaching-definition edges — back = statements whose values feed the seed, fwd = what its value reaches — bounded by depth (an integer in 1..32, default 8, disclosed; a cutting bound emits flow_truncated). @FILE:LINE line-seeds resolve here too and complete the paper's (file, line[, variable]) seed: a seed line naming exactly ONE sliceable local pre-picks it (disclosed as var_from=\\\"seed\\\"), zero or several serve the inventory with the candidates marked. Reaching definitions are FLOW-SENSITIVE for C-family and Python (root reach=cfg: kills on every path, joins at branch/loop/try merges; each use row's rd= lists the lines of the defs that reach it) and source-order for JS/TS/Go/Java/Rust (reach=linear). LIMITS, stated not implied: name-based (no alias analysis, shadowing may over-include), intra-procedural (rows never cross into callers/callees — impact/uses give that half), line-granular, the statement is the unit (a nested lambda/def body, ?: and short-circuit fold into it; goto untracked — the legend names each), and flow follows DATA dependence only — no control dependence (the guard deciding whether a def executes is never a row). Served languages: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust — every other language refuses loudly, never an empty success. An ambiguous symbol refuses listing the spellings that pick one. The root carries at= (the commit this scan ran at; a trailing +dirty means the working tree differed from it). Single-root; read-only.\","
                    + mcprefuse::toolMetadataFor( "slice", pathIsRequired ) + "},"
                    // A4-R3 batch — one-turn context sweep: N read sub-queries in ONE round-trip, merged + deduped.
-                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array of {verb, ...args} over the SAME path; each verb is one of " + mcpBatchServedVerbsList( omitGitVerbs ) + " (plus the two ALIASES callers=find_referencing_symbols and callees=find_symbol) with that verb's own args (task/pattern/symbol/type/from/to/handle, and limit/offset on the verbs that page). The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: the 3 edit verbs and quality_baseline (side effects), quality_delta (a heavy both-trees pass, out of place in a fast sweep), batch itself (it does not nest), slice (a per-definition on-disk re-parse, not yet in the sweep), and the whole-repo / cross-branch set (situational_awareness, memory_recall, connect, explore — and its alias pack_task — from_trace, edit_check, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift). Result is one <batch> of <q i verb ok> elements IN ORDER, each sub-answer verbatim in CDATA; a failing sub-query becomes an inline ok=0 err= entry (never fails the batch); identical payloads dedup to <dup-of q=\\\"i\\\"/>; over 16 → capped honestly (capped=\\\"1\\\", n<requested). Use to gather a task's whole context in one round-trip instead of many.\","
+                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array over the SAME path, in EITHER grammar: {verb, ...args} objects, or the CLI --batch file's own \\\"verb:arg\\\" strings (queries=[\\\"for:parse the config\\\",\\\"callers:escapeXml\\\"]) - one grammar, both front doors, so a spelling learned on the CLI works here. Each verb is one of " + mcpBatchServedVerbsList( omitGitVerbs ) + " (plus the two ALIASES callers=find_referencing_symbols and callees=find_symbol) with that verb's own args (task/pattern/symbol/type/from/to/handle, and limit/offset on the verbs that page). The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: the 3 edit verbs and quality_baseline (side effects), quality_delta (a heavy both-trees pass, out of place in a fast sweep), batch itself (it does not nest), slice (a per-definition on-disk re-parse, not yet in the sweep), and the whole-repo / cross-branch set (situational_awareness, memory_recall, connect, explore — and its alias pack_task — from_trace, edit_check, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift). Result is one <batch> of <q i verb ok> elements IN ORDER, each sub-answer verbatim in CDATA; a failing sub-query becomes an inline ok=0 err= entry (never fails the batch); identical payloads dedup to <dup-of q=\\\"i\\\"/>; over 16 → capped honestly (capped=\\\"1\\\", n<requested). Use to gather a task's whole context in one round-trip instead of many.\","
                    + mcprefuse::toolMetadataFor( "batch", pathIsRequired ) + "}"
                    "]}}";
             }
@@ -1398,9 +1398,18 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 else if( name == "whereis" && !path.empty() && !symbol.empty() )
                 {
                     // §B6 M4: limit/offset are read by the SAME mcpPageArgs the batch arm uses (mcpverbs.h).
+                    // L6 (capture-audit 2026-09-04): an UNRESOLVABLE @FILE:LINE seed is now its own refusal
+                    // — the shared triple (flag + problem + the per-fault clause selectorrefuse.h speaks for
+                    // the CLI), not a hits="0" answer about the literal string. `seedFault` distinguishes it
+                    // from the non-git degrade, which is the other way whereisText returns "".
                     resp = pagedResult( [ & ]( McpPageArgs pg )
                     {
-                        const std::string t = whereisText( path, symbol, kind, crossref::kWhereisHits, pg );
+                        bool              seedFault = false;
+                        const std::string t = whereisText( path, symbol, kind, crossref::kWhereisHits, pg, &seedFault );
+                        if( seedFault )
+                        {
+                            return errResultMsg( -32602, mcprefuse::notFound( getIndex( path ).ing, "symbol", symbol ) );
+                        }
                         return t.empty() ? errResult( -32602, "not a git repository (or no HEAD commit) — no refs to search" ) : textResult( t );
                     } );
                 }
@@ -1659,7 +1668,32 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     }
                     else
                     {
-                        const std::vector<std::string> objs      = mcpdetail::arrayObjects( arr );
+                        // M5 (capture-audit 2026-09-04): BOTH grammars. `queries` may be the
+                        // `{verb, …args}` objects this surface has always taken, OR the `"verb:arg"` lines
+                        // the CLI --batch file takes — the capture's own example used the second and got a
+                        // refusal captioned as a success. The string form is accepted only when EVERY
+                        // element names a verb batch actually serves (isBatchCliSpec), so the hostile
+                        // `queries:[1,"x",null]` the M8 bad-value refusal covers keeps getting that
+                        // refusal instead of being reinterpreted as a sub-query named "x". Objects win a
+                        // mixed array: an array that already parses as objects is answered as one.
+                        std::vector<std::string> objs = mcpdetail::arrayObjects( arr );
+                        if( objs.empty() )
+                        {
+                            const std::vector<std::string> specs = mcpdetail::arrayStrings( args, "queries" );
+                            const bool allServed = !specs.empty()
+                                                && std::all_of( specs.begin(), specs.end(),
+                                                                []( const std::string& q ) { return isBatchCliSpec( q ); } );
+                            if( allServed )
+                            {
+                                for( const std::string& q : specs )
+                                {
+                                    if( std::string obj = batchObjectFromCliSpec( q ); !obj.empty() )
+                                    {
+                                        objs.push_back( std::move( obj ) );
+                                    }
+                                }
+                            }
+                        }
                         const std::size_t               requested = objs.size();
                         if( requested == 0 )
                         {

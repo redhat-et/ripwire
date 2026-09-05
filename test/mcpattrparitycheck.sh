@@ -252,6 +252,42 @@ for label, args, elem, mcpVerb, mcpArgs in (
     check( ma is not None and "filter" in ma,
            "%s (MCP, filtered): the root echoes filter= (%s)" % ( label, "yes" if ma and "filter" in ma else "NO" ) )
 
+# ═══ SELECTOR parity: the same spellings resolve, and the same zero is explained ═══════════════════════
+print( "" )
+print( "=== SELECTOR: whereis answers the CLI's selector spellings on both surfaces ===" )
+# lane L5's found-not-fixed, taken here (H14's "same verb, same contract" half): MCP `whereis` treated an
+# @FILE:LINE seed as a LITERAL string and grepped it across every blob — a true, useless hits="0" shaped
+# exactly like a name this repo never had — and explained a zero with no near-miss where the CLI does.
+# The seed is DERIVED, never pinned. A hard-coded file:line rots the first time the file moves, and a probe
+# that silently starts exercising the REFUSAL path instead of the RESOLUTION path is worse than no probe.
+# --edit-check reports a symbol's definition site; that line is one an @FILE:LINE seed must resolve.
+edp      = re.search( r'<edit-check sym="escapeXml"[^>]*\bp="([^"]+)"', cli( [ "--edit-check=escapeXml" ] ) )
+seedSpec = ( "@" + edp.group( 1 ) ) if edp else ""
+check( bool( seedSpec ),
+       "whereis: derived an @FILE:LINE seed from escapeXml's own definition site (%s)"
+       % ( seedSpec or "DERIVATION FAILED — fix this probe, do not pin a literal" ) )
+for label, sel in ( ( "@FILE:LINE seed", seedSpec ), ( "near-miss", "escapXml" ) ):
+    if not sel:
+        continue
+    cx = cli( [ "--whereis=" + sel ] )
+    mx = mcp( "whereis", { "path": ROOT, "symbol": sel } )
+    if mx.startswith( "__ERROR__" ):
+        check( False, "whereis %s: MCP refused (%s)" % ( label, mx[ :100 ] ) )
+        continue
+    cnote = re.findall( r"<selector-note [^>]*>", cx )
+    mnote = re.findall( r"<selector-note [^>]*>", mx )
+    check( cnote and cnote == mnote,
+           "whereis %s: the selector-note is identical on both surfaces (%s)"
+           % ( label, cnote[ 0 ] if cnote else "the CLI emitted none — probe is stale, fix it" ) )
+    # and the ANSWER itself: a resolved seed must not be answered about the literal string.
+    ca, ma = xmlRootAttrs( cx, "whereis" ) or {}, xmlRootAttrs( mx, "whereis" ) or {}
+    check( "sym" in ca and "sym" in ma, "whereis %s: both roots carry sym=" % label )
+    csym = re.search( r'<whereis sym="([^"]*)"', stripComments( cx ) )
+    msym = re.search( r'<whereis sym="([^"]*)"', stripComments( mx ) )
+    check( csym and msym and csym.group( 1 ) == msym.group( 1 ),
+           "whereis %s: both surfaces resolved the selector to the same symbol (%s vs %s)"
+           % ( label, csym.group( 1 ) if csym else "?", msym.group( 1 ) if msym else "?" ) )
+
 print( "" )
 if fails == 0: print( "ALL PASS" )
 else:          print( "%d CHECK(S) FAILED" % fails )
