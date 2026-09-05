@@ -174,6 +174,63 @@ PY
         || no "(3) the receipt's tests_to_run disagrees with the verb it replaces"
 fi
 
+# ── ARM 3b — the FOLD carries the COMPLETENESS KEYS its standalone twin carries (verify-wave2 F3) ──────
+# Arms 2 and 3 compare the fields the fold COPIES, and that is exactly where the gap was: the standalone
+# roots carry the resolver gauge and the floor marker, and the folded objects did not.
+#
+#   receipt : "edit_check":{"status":…,"callers":2,"incompatible":2,"sites":[…]}, "tests_to_run":[]
+#   twin    : <edit-check … callers="2" incompatible="2" graph_ambiguous="5923" graph_unresolved="2952" counts_floor="1">
+#   twin    : <affected … tests="0" reached="105" script_gates_unmodelled="558" counts_floor="1" graph_ambiguous=…>
+#
+# So `"tests_to_run":[]` was an UNLABELLED ZERO — the twin says "0 modelled tests, 558 shell gates the walk
+# cannot see, counts are floors"; the fold said `[]`. That is H5/H14's own rule (a CSR-derived count carries
+# counts_floor; a disclosure survives into every sibling surface or is DECLARED) missed on the surface this
+# wave built. THE RULE: a folded sub-result carries the same completeness keys its standalone twin carries.
+#
+# MECHANICAL, not a hand-written list of the four keys we happen to have fixed: the wanted set is read off
+# the TWIN'S OWN ROOT at run time and filtered to the honesty vocabulary below, so a disclosure a future
+# round adds to --edit-check or --affected reds this arm until the fold carries it too.
+DISCLOSURE_VOCAB='counts_floor graph_ambiguous graph_unresolved script_gates_unmodelled tests'
+python3 - "$TMP/r1.json" "$EC_ROOT" "$AFF" "$DISCLOSURE_VOCAB" <<'F3_EOF' >"$TMP/f3.res" 2>&1
+import sys, json, re
+receipt = json.load( open( sys.argv[1] ) )
+vocab   = set( sys.argv[4].split() )
+
+def rootAttrs( tag ):
+    return dict( re.findall( r'([a-z_]+)="([^"]*)"', tag ) )
+
+ecRoot  = rootAttrs( sys.argv[2] )
+affTag  = re.search( r"<affected [^>]*>", sys.argv[3] )
+if not affTag:
+    print( "the --affected root did not parse — this arm has no twin to compare against" ); raise SystemExit( 1 )
+affRoot = rootAttrs( affTag.group( 0 ) )
+
+def agrees( have, want ):
+    return str( have ).lower() == want.lower() or ( want == "1" and str( have ).lower() == "true" )
+
+bad = []
+# (i) edit_check: the fold is an OBJECT, so the keys belong inside it
+ec = receipt.get( "edit_check", {} )
+for k in sorted( set( ecRoot ) & vocab ):
+    if k not in ec:
+        bad.append( "edit_check is missing %s (the standalone --edit-check root carries %s=%r)" % ( k, k, ecRoot[k] ) )
+    elif not agrees( ec[k], ecRoot[k] ):
+        bad.append( "edit_check %s=%r disagrees with the twin's %r" % ( k, ec[k], ecRoot[k] ) )
+# (ii) tests_to_run is an ARRAY and cannot carry attributes, so its completeness keys are its SIBLINGS on
+#      the receipt root — the same place --affected puts them relative to its own <test> rows.
+for k in sorted( set( affRoot ) & vocab ):
+    if k not in receipt:
+        bad.append( "the receipt is missing %s beside tests_to_run (--affected carries %s=%r) — an unlabelled zero"
+                    % ( k, k, affRoot[k] ) )
+    elif not agrees( receipt[k], affRoot[k] ):
+        bad.append( "receipt %s=%r disagrees with --affected's %r" % ( k, receipt[k], affRoot[k] ) )
+if bad:
+    print( "\n".join( "    " + b for b in bad ) ); raise SystemExit( 1 )
+print( "OK: edit_check carries %s; the receipt carries %s beside tests_to_run"
+       % ( ",".join( sorted( set( ecRoot ) & vocab ) ), ",".join( sorted( set( affRoot ) & vocab ) ) ) )
+F3_EOF
+if [ $? -eq 0 ]; then ok "(3b) $( cat "$TMP/f3.res" )"; else no "(3b) the folded sub-results drop disclosures their standalone twins carry:"; cat "$TMP/f3.res"; fi
+
 # ── ARM 4 — the loop is ONE call ───────────────────────────────────────────────────────────────────────
 # The point of the finding, stated as an assertion rather than left implied: edit -> verify -> tests-to-run
 # used to be three invocations, and all three answers must now come out of the first one.
@@ -282,6 +339,37 @@ print("OK")
 ' >/dev/null 2>&1 \
     && ok "(8) --edit-plan --apply carries the per-op edit_check" \
     || { no "(8) the apply receipt carries no per-op edit_check"; printf '%s\n' "$APPLY" | head -c 500; echo; }
+
+# (8b) F3, the same rule on the PLAN receipt: callers= and callers_union= are read off the same name-based
+# CSR --edit-check's callers= is, so they carry the same floor and the same gauge. The per-op edit_check
+# object goes through postCheckJson, so it inherits the fold's keys; the root's callers_union= is the plan
+# receipt's OWN CSR-derived count and needs its own.
+for MODE in --dry-run --apply; do
+    fresh
+    mkdir -p "$TMP/w/plans"; cp "$TMP/payload.py" "$TMP/w/plans/body.py"
+    cat > "$TMP/w/plans/p.json" <<'PLAN_EOF'
+{"version":1,"edits":[{"op":"replace_symbol_body","target":"area_of_triangle","file":"geo.py","payload":"body.py"}]}
+PLAN_EOF
+    R="$( cd "$TMP/w" && "$BIN" . --edit-plan=plans/p.json "$MODE" 2>/dev/null )"
+    printf '%s' "$R" | python3 -c '
+import sys, json
+r = json.load( sys.stdin )
+bad = []
+if "callers_union" in r and "counts_floor" not in r:
+    bad.append( "callers_union=%r on the root with no counts_floor — a CSR-derived count read as a total" % ( r[ "callers_union" ], ) )
+for i, op in enumerate( r.get( "operations", [] ) ):
+    if "callers" in op and "counts_floor" not in op and "counts_floor" not in r:
+        bad.append( "operations[%d].callers=%r carries no floor" % ( i, op[ "callers" ] ) )
+    ec = op.get( "edit_check" )
+    if ec is not None and "counts_floor" not in ec:
+        bad.append( "operations[%d].edit_check drops counts_floor its standalone twin carries" % ( i, ) )
+if bad:
+    print( "; ".join( bad ) ); raise SystemExit( 1 )
+print( "OK" )
+' >"$TMP/f3b.res" 2>&1 \
+        && ok "(8b) --edit-plan $MODE: every CSR-derived count on the receipt carries the floor its twin carries" \
+        || { no "(8b) --edit-plan $MODE receipt: $( cat "$TMP/f3b.res" )"; }
+done
 
 # ── ARM 9 — every receipt is still valid JSON, and the write half is untouched ─────────────────────────
 for f in "$TMP/r1.json" "$TMP/r5.json"; do
