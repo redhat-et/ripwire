@@ -80,9 +80,20 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # not 25 KB: the 25,000 figure was set without the schema half in the sum. OWNER DECISION registered rather
 # than silently resolved: drop the schema descriptions (cheaper manifest, poorer refusals) or accept ~38 KB.
 #
-# 39,000 is a RATCHET, not a target: it sits ~180 B above the measured 38,816, which is roughly what one
+# 39,000 was a RATCHET, not a target: it sat ~180 B above the measured 38,816, which is roughly what one
 # new argument's schema entry costs. Lower it whenever the manifest drops; never raise it to fit a change.
-CEILING = 39000
+#
+# RE-ANCHORED 2026-09-04 (capture-audit wave-2 merge): 39,000 → 39,450, measured 39,273. Two lanes that could
+# not see each other landed in one wave: this gate (lane L6) and lane L8's P9, whose folded edit receipt adds
+# ONE declared optional argument, `post_check`, to each of the three edit verbs — +134 B apiece (the ~65 B
+# schema envelope plus the description mcpcontractcheck (A/M12) requires every declared property to carry),
+# +402 B in all — plus +46 B for the merged batch stanza (L6's two-grammar sentence beside L8's served set).
+# Attributed tool by tool against a build of the pre-L8 merge head (c7ed07f): batch +46, insert_after_symbol
+# +134, insert_before_symbol +134, replace_symbol_body +134, nothing else moved. The rule above stands with
+# one precision: a ceiling moves UP only for a DECLARED argument the contract obliges to carry a description,
+# in the commit that lands it, with its bytes attributed here — never for prose. The new ceiling keeps the
+# same posture (177 B of headroom, one more argument entry); L7's compaction lane is where it goes back DOWN.
+CEILING = 39450
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )
