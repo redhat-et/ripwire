@@ -151,7 +151,7 @@ inline std::vector<std::string_view> wrapUseWhenBlurbLines()
         "- Who calls X: `--callers=SYM`. \"Is it safe to change X?\" needs the full blast radius:",
         "  `--impact=SYM` (transitive) plus `--uses=SYM` (every read/write/import site).",
         "- Apply a whole-symbol edit without a whole-file Read: `--replace-symbol-body=SYM` plus `--edit-payload=FILE|-`",
-        "  (or insert-before/after); then `--edit-check=SYM`. Add `--edit-target-file=PATH` only for ambiguity.",
+        "  (or insert-before/after); the receipt carries region, blob_sha, edit_check, tests_to_run + ONE next= — no re-read after it; `--edit-check=SYM` is for a contract question WITHOUT an edit in hand.",
         "- Before writing a new fn/class/helper: `--exemplar=\"<what you're writing>\"` — duplicates are born on small tasks.",
         "- Before calling work done: `--quality-delta` (what you made worse), then `--test-gate`.",
         "- Trust notes: counts marked counts_floor are floors, not totals; a zero means \"none",

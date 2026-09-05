@@ -2521,10 +2521,12 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     // says which world the caller is in. Both pasteable spellings STAY either way — a re-ask after a
     // further edit needs the qualified `file:symbol` form, and this is the one place the tool teaches it
     // (test/rootrelemitcheck.sh ARM7 asserts the printed --edit-check actually runs).
-    std::fprintf( stderr, "ripwire edit: applied atomically; %s --edit-check=%s:%s, then --affected=%s\n",
-                  cfg.noPostCheck ? "post-check skipped — verify with"
-                                  : "the receipt already carries edit_check and tests_to_run; re-ask with",
-                  outcome.file.c_str(), outcome.symbol.c_str(), outcome.file.c_str() );
+    // E2 (terminality round A): ONE next, the receipt's own (METHODOLOGY §9 #3). The receipt carries the post-edit
+    // region and blob_sha always, plus edit_check/tests_to_run unless --no-post-check — so this line names what is
+    // in hand and the single call that follows; never a second command. test/receiptpostcheck.sh (12) and
+    // test/edithandlehintcheck.sh assert the printed next is the receipt's and RUNS.
+    std::fprintf( stderr, "ripwire edit: applied atomically; receipt carries region, blob_sha%s; next: %s\n",
+                  cfg.noPostCheck ? " (post-check skipped)" : ", edit_check, tests_to_run", outcome.next.c_str() );
     return 0;
 }
 

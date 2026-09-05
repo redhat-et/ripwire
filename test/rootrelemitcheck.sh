@@ -401,8 +401,11 @@ for spelling in abs rel; do
   if [ "$spelling" = abs ]; then RT="$ED"; else RT="."; fi
   ( cd "$ED" && "$BIN" "$RT" --insert-after-symbol=area_of_triangle --edit-payload="$TMP/payload.txt" \
       > "$TMP/edit.out" 2> "$TMP/edit.err" )
-  rcpt=$( sed -n 's/.*"file":"\([^"]*\)".*/\1/p' "$TMP/edit.out" )
-  hint=$( sed -n 's/.*--edit-check=\([^:]*\):.*/\1/p' "$TMP/edit.err" )
+  rcpt=$( python3 -c 'import sys,json; print(json.load(open(sys.argv[1])).get("file",""))' "$TMP/edit.out" 2>/dev/null )
+  # E2: the stderr line names ONE next (the receipt's own). Its file spelling is what this arm checks against the
+  # receipt's "file"; the qualified --edit-check=<file>:<sym> the receipt teaches must ALSO run with that spelling.
+  nxt=$( sed -n 's/.*next: //p' "$TMP/edit.err" | head -1 )
+  hint=$( printf '%s' "$nxt" | sed -n 's/^--[a-z-]*=\([^:]*\).*/\1/p' )
   if [ -z "$rcpt" ]; then
     no "ARM7/$spelling the edit verb produced no receipt — the arm would be a false green ($( head -c 120 "$TMP/edit.err" ))"
     continue
@@ -412,10 +415,18 @@ for spelling in abs rel; do
     *)      ok "ARM7/$spelling edit receipt \"file\":\"$rcpt\" is root-relative" ;;
   esac
   if [ "$hint" = "$rcpt" ]; then
-    ok "ARM7/$spelling the --edit-check= hint pastes the receipt's own spelling ($hint)"
+    ok "ARM7/$spelling the next= hint pastes the receipt's own spelling ($nxt)"
+  elif [ -n "$nxt" ] && [ -z "$hint" ]; then
+    ok "ARM7/$spelling the next= is a run= recipe, not a path-carrying flag ($nxt) — nothing to mis-spell"
   else
-    no "ARM7/$spelling the --edit-check= hint says '$hint' but the receipt says '$rcpt'"
+    no "ARM7/$spelling the next= hint says '$hint' but the receipt says '$rcpt' (next: $nxt)"
   fi
+  if [ -n "$hint" ] && ( cd "$ED" && "$BIN" "$RT" $nxt >/dev/null 2>&1 ); then
+    ok "ARM7/$spelling the printed next ($nxt) actually runs"
+  elif [ -n "$hint" ]; then
+    no "ARM7/$spelling the printed next ($nxt) does NOT run"
+  fi
+  hint="$rcpt"   # the qualified re-ask spelling the receipt teaches — assert it runs verbatim
   # the hint is only useful if the command it prints RUNS — the strongest form of this assertion
   if ( cd "$ED" && "$BIN" "$RT" --edit-check="$hint:area_of_triangle" >/dev/null 2>&1 ); then
     ok "ARM7/$spelling the printed --edit-check=$hint:area_of_triangle actually runs"
