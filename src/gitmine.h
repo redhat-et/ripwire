@@ -212,6 +212,36 @@ inline std::string sinceUnresolvedRefusal( std::string_view value )
 // neither a resolvable rev nor date-shaped) degrades to `active=false` + one stderr note; callers then
 // fall back to their pre-flag default window, so a bad --since can never crash or silently scope to
 // zero commits without explanation.
+// popen a shell command and return its trimmed stdout ("" on any failure — never crashes). THE one copy of the
+// popen-trim shape in the tool: the quality.h git one-liners, the doctor probes, crossref.h and binstale.h all
+// reach it as quality::popenTrimmed (a using-declaration of this). It lives HERE — the lower header, which
+// quality.h includes — because resolveSinceScope needed the same reader (N4, 2026-09-04) and a second copy in
+// this file was a --quality-delta new-clone-of-reused-helper row. Built on readByteSafeLine (infra/stdinline.h),
+// the G3 byte-safe line reader every git pipe in this header uses: no fixed buffer to split a long path on
+// (churnjoincheck's G3 arm forbids fgets here), a high byte never sign-changed. Lines are re-joined with the
+// '\n' the reader consumed, so multi-line callers (crossref.h, the rename map) read exactly what fgets gave them.
+inline std::string popenTrimmed( const std::string& cmd )
+{
+    std::FILE* pipe = popen( cmd.c_str(), "r" );
+    if( !pipe )
+    {
+        return {};
+    }
+    std::string out;
+    std::string line;
+    while( readByteSafeLine( pipe, line ) )
+    {
+        out += line;
+        out += '\n';
+    }
+    pclose( pipe );
+    while( !out.empty() && ( out.back() == '\n' || out.back() == '\r' || out.back() == ' ' ) )
+    {
+        out.pop_back();
+    }
+    return out;
+}
+
 inline SinceScope resolveSinceScope( const std::string& root, std::string_view value )
 {
     SinceScope scope;
@@ -222,56 +252,32 @@ inline SinceScope resolveSinceScope( const std::string& root, std::string_view v
 
     const std::string val( value );
 
-    // 1) try as a revision boundary — deterministic, preferred when it resolves.
+    // 1) try as a revision boundary — deterministic, preferred when it resolves. The peeled sha rev-parse prints
+    //    IS the baseline (N4); before N4 only its EXISTENCE was read. popenTrimmed is the G3 reader
+    //    (readByteSafeLine) every git pipe in this header uses — gitCommandLines is defined further down.
     {
-        const std::string cmd = "git -C " + shSingleQuote( root )
-                               + " rev-parse --verify --quiet " + shSingleQuote( val + "^{commit}" )
-                               + " 2>/dev/null";
-        std::FILE* pipe = popen( cmd.c_str(), "r" );
-        if( pipe )
+        const std::string sha = popenTrimmed( "git -C " + shSingleQuote( root )
+                                              + " rev-parse --verify --quiet " + shSingleQuote( val + "^{commit}" ) + " 2>/dev/null" );
+        if( !sha.empty() )
         {
-            // G3: readByteSafeLine, like every other git-pipe reader in this file. This one was harmless
-            // (rev-parse prints a 40-byte sha and only its EXISTENCE is read), but "harmless" is a property
-            // of today's command, not of the reader — and a survivor of the old pattern is what made the
-            // migration claim below false the first time. gitCommandLines is not reachable here: it is
-            // defined further down this header.
-            std::string line;
-            const bool  got = readByteSafeLine( pipe, line );
-            const int   rc  = pclose( pipe );
-            if( got && rc == 0 )
-            {
-                scope.active     = true;
-                scope.isRev      = true;
-                scope.revBoundary = val;
-                while( !line.empty() && ( line.back() == '\n' || line.back() == '\r' || line.back() == ' ' ) ) { line.pop_back(); }
-                scope.baselineSha = line;   // N4: the peeled sha rev-parse printed IS the baseline
-                return scope;
-            }
+            scope.active      = true;
+            scope.isRev       = true;
+            scope.revBoundary = val;
+            scope.baselineSha = sha;
+            return scope;
         }
     }
 
     // 2) not a resolvable rev — try as a date (git's approxidate), gated by looksLikeDate() to catch
-    // obvious garbage before it silently becomes a 0-commit window.
+    // obvious garbage before it silently becomes a 0-commit window. N4: the newest commit at or before the
+    // date is the baseline a commit-comparing host needs — empty when the history never reaches the date
+    // (the same `rev-list -1 --before` slicediff.h used to run itself).
     if( looksLikeDate( val ) )
     {
-        scope.active    = true;
-        scope.isRev     = false;
-        scope.sinceDate = val;
-        // N4: the newest commit at or before the date — the baseline a commit-comparing host needs; empty when
-        // the history never reaches the date (the same `rev-list -1 --before` slicediff.h used to run itself).
-        const std::string cmd = "git -C " + shSingleQuote( root ) + " rev-list -1 --before=" + shSingleQuote( val ) + " HEAD 2>/dev/null";
-        std::FILE* pipe = popen( cmd.c_str(), "r" );
-        if( pipe )
-        {
-            std::string line;
-            const bool  got = readByteSafeLine( pipe, line );
-            const int   rc  = pclose( pipe );
-            if( got && rc == 0 )
-            {
-                while( !line.empty() && ( line.back() == '\n' || line.back() == '\r' || line.back() == ' ' ) ) { line.pop_back(); }
-                scope.baselineSha = line;
-            }
-        }
+        scope.active      = true;
+        scope.isRev       = false;
+        scope.sinceDate   = val;
+        scope.baselineSha = popenTrimmed( "git -C " + shSingleQuote( root ) + " rev-list -1 --before=" + shSingleQuote( val ) + " HEAD 2>/dev/null" );
         return scope;
     }
 
