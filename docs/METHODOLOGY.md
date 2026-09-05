@@ -222,7 +222,7 @@ which is where the two goals meet.
 
    *The harness-policy exclusion (owner ruling, 2026-09-05, terminality round A).* Claude Code's harness reads a
    file before it edits it — the Read-before-edit policy. On the EDIT verbs (`--replace-symbol-body`,
-   `--insert-*-symbol`, `--edit-plan`, `--safe-delete` and their MCP twins) that Read follows the receipt whatever
+   `--insert-before-symbol`, `--insert-after-symbol`, `--edit-plan`, `--safe-delete` and their MCP twins) that Read follows the receipt whatever
    the receipt says, so counting it as a post-call sweep would measure the runner's policy and call it the verb's
    terminality; other runners (codex, opencode, aider) carry no such policy, and Claude's may change. The metric
    therefore NEVER charges a Read of the edit's own target file against an edit verb: it is reported as

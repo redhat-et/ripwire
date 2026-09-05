@@ -1651,7 +1651,7 @@ fi
 # (an OBJECT), hook_event_name, tool_name, tool_input, tool_use_id.
 livejson()
 {
-    printf '{"session_id":"%s","transcript_path":"/Users/op/.claude/projects/-Users-op-repo/%s.jsonl","cwd":"%s","scratchpad_dir":"/private/tmp/claude-501/-Users-op-repo/%s/scratchpad","prompt_id":"prompt-%s","permission_mode":"auto","effort":{"level":"high"},"hook_event_name":"PreToolUse","tool_name":"%s","tool_input":%s,"tool_use_id":"toolu_01%s"}' \
+    printf '{"session_id":"%s","transcript_path":"/home/op/.claude/projects/-home-op-repo/%s.jsonl","cwd":"%s","scratchpad_dir":"/private/tmp/claude-501/-home-op-repo/%s/scratchpad","prompt_id":"prompt-%s","permission_mode":"auto","effort":{"level":"high"},"hook_event_name":"PreToolUse","tool_name":"%s","tool_input":%s,"tool_use_id":"toolu_01%s"}' \
         "$1" "$1" "$REPO" "$1" "$1" "$2" "$3" "$1"
 }
 TV2="$TMP/tv2"; mkdir -p "$TV2"; LV2="$TMP/v2.jsonl"
