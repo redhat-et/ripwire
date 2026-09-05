@@ -287,6 +287,91 @@ else:
     try:    http.wait( 10 )
     except Exception: http.kill()
 
+# ═══ (G) M13 — a CLI verb that PAGES has a twin that pages; a CLI verb with a BUDGET has a twin with one ═══
+# capture-audit 2026-09-04. Only grep/impact/uses/whereis took limit/offset over MCP, while their CLI twins
+# and six more (cochange, owners, doc_drift, stray_content, mentions, --callers/--callees) were all in
+# cli.h's honorsPaging set. The refusal was loud — "unknown field: 'limit'" — but loud is not answerable: an
+# MCP-only agent had no page 2 for any of them, and `for` had no ceiling at all though `--for
+# --token-budget` has existed for its whole life.
+#
+# The expected set is DERIVED, never restated: kPagingHonoringVerbs is the string cli.h prints in its own
+# refusal, mapped to MCP names through the one twin table below (the only hand-written part, because the
+# rename CLI->MCP is genuinely a naming decision and nothing in the source states it). A CLI verb with no
+# MCP twin is skipped BY NAME, so "it has no twin" can never quietly become "we forgot".
+CLI_H = open( os.path.join( ROOT, "src", "cli.h" ), encoding = "utf-8" ).read()
+m = re.search( r'kPagingHonoringVerbs\s*=\s*((?:\s*"[^"]*")+)\s*;', CLI_H )
+pagingCli = set( re.findall( r"--[a-z-]+", m.group( 1 ) ) ) if m else set()
+check( len( pagingCli ) >= 30, "(G) parsed %d paging verbs out of cli.h's kPagingHonoringVerbs" % len( pagingCli ) )
+
+# CLI flag -> the MCP verb that answers the same question. "" = deliberately no twin (the reason is the
+# comment beside it), and those rows are reported, not silently dropped.
+TWIN = {
+    "--callers": "find_referencing_symbols", "--callees": "find_symbol",
+    "--cochange": "cochange", "--owners": "owners", "--doc-drift": "doc_drift",
+    "--whereis": "whereis", "--stray-content": "stray_content", "--mentions": "mentions",
+    # kPagingHonoringVerbs spells the grep family "--grep/--regex"; the regex splits it into two tokens.
+    "--impact": "impact", "--uses": "uses", "--grep": "grep", "--regex": "grep",
+    # No MCP twin at all — each is a CLI-only report verb (no tools/list stanza answers it).
+    "--lint": "", "--hotspots": "", "--tree": "", "--deps": "", "--clones": "", "--communities": "",
+    "--community": "", "--match": "", "--pattern": "", "--exercises": "", "--seams": "", "--zoom": "",
+    "--external-surface": "", "--dead-code": "", "--graph-query": "", "--test-gate": "",
+    "--readability": "", "--ensemble": "", "--quality-panel": "", "--context-ratio": "",
+    "--nonlocal-state": "", "--comment-coherence": "", "--naming-consistency": "", "--safe-delete": "",
+}
+unmapped = sorted( v for v in pagingCli if v not in TWIN )
+check( not unmapped, "(G) every paging CLI verb is classified twin-or-not (%s)" % ( ",".join( unmapped ) or "none unmapped" ) )
+
+missingPage = []
+for cliVerb in sorted( pagingCli ):
+    twin = TWIN.get( cliVerb, "" )
+    if not twin or twin not in verbFields:
+        continue
+    have = set( verbFields[ twin ] )
+    if not { "limit", "offset" } <= have:
+        missingPage.append( "%s->%s declares %s" % ( cliVerb, twin, sorted( have ) ) )
+for row in missingPage[ :8 ]:
+    print( "  FAIL  (G) " + row )
+check( not missingPage, "(G/M13) every MCP twin of a paging CLI verb declares limit+offset" )
+
+# The budget half of the same rule: cli.h's kShapingVerbs says which verbs honor --token-budget; every one
+# of them that HAS an MCP twin must declare budget_tokens.
+mb = re.search( r"inline constexpr ShapingVerb kShapingVerbs\[\]\s*=\s*\{(.*?)\n\};", CLI_H, re.S )
+budgetCli = []
+for line in ( mb.group( 1 ).splitlines() if mb else [] ):
+    row = line.split( "//" )[ 0 ].strip()
+    if not row.startswith( "{" ): continue
+    f = [ x.strip() for x in row.strip( "{}," ).split( "," ) ]
+    if len( f ) > 5 and f[ 5 ] == "true": budgetCli.append( f[ 0 ].strip( '"' ) )
+BUDGET_TWIN = { "--for": "for", "--pack-task": "explore", "--from-trace": "from_trace",
+                "--handoff": "", "--run-trace": "" }   # the last two are CLI-only verbs
+check( len( budgetCli ) >= 4, "(G) parsed %d --token-budget honoring rows out of kShapingVerbs" % len( budgetCli ) )
+missingBudget = [ "%s->%s declares %s" % ( c, BUDGET_TWIN[ c ], sorted( verbFields[ BUDGET_TWIN[ c ] ] ) )
+                  for c in budgetCli
+                  if BUDGET_TWIN.get( c ) and "budget_tokens" not in verbFields.get( BUDGET_TWIN[ c ], [] ) ]
+for row in missingBudget:
+    print( "  FAIL  (G) " + row )
+check( not missingBudget, "(G/M13) every MCP twin of a --token-budget verb declares budget_tokens" )
+
+# DECLARED is not HONORED: prove the window actually moves rows on the verbs this round added, and that a
+# second page starts where the first said it would. One live probe per newly-paged verb, on this repo.
+srvG = Stdio()
+for verb, args, arrayKey in ( ( "find_referencing_symbols", { "path": ROOT, "symbol": "escapeXml" }, "calledBy" ),
+                              ( "cochange",                 { "path": ROOT, "file": "src/main.cpp" },  "rows" ),
+                              ( "mentions",                 { "path": ROOT, "symbol": "escapeXml" },  "files" ) ):
+    a1 = dict( args ); a1.update( { "limit": 2, "offset": 0 } )
+    a2 = dict( args ); a2.update( { "limit": 2, "offset": 2 } )
+    try:
+        p1 = json.loads( srvG.tool( verb, a1 )[ "result" ][ "content" ][ 0 ][ "text" ] )
+        p2 = json.loads( srvG.tool( verb, a2 )[ "result" ][ "content" ][ 0 ][ "text" ] )
+    except Exception as e:
+        check( False, "(G) %s limit/offset probe failed: %s" % ( verb, e ) )
+        continue
+    rows1, rows2 = p1.get( arrayKey, [] ), p2.get( arrayKey, [] )
+    check( len( rows1 ) <= 2 and rows1 != rows2 and p1.get( "next_offset" ) == 2,
+           "(G) %s: limit=2 serves %d rows, offset=2 serves different rows, next_offset=%s"
+           % ( verb, len( rows1 ), p1.get( "next_offset" ) ) )
+srvG.close()
+
 # ═══ (F) the edit verbs' file identity behind a refusal — these verbs delete code when they are wrong ══════
 def identity( p ):
     st = os.stat( p )

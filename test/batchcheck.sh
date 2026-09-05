@@ -208,6 +208,39 @@ printf '%s' "$CLIBIG" | grep -q 'requested="20" cap="16" capped="1"' \
     && ok "CLI: stdin '-' form works and over-cap is reported honestly" \
     || no "CLI: stdin/cap handling wrong"
 
+# ═══════════════════════════════════════════════════════════════════════════
+echo
+echo "=== (g) M5 — ONE sub-query grammar: the CLI's verb:arg strings answer over MCP too ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# capture-audit 2026-09-04 M5: `--batch=FILE` took `verb:arg` LINES with CLI verb names; MCP `batch` took
+# {verb, …args} OBJECTS with MCP verb names and REFUSED the string form. One verb, one name, two grammars —
+# so the capture's own ["for:…","callers:…"] example was a refusal captioned as a success, and an agent that
+# knew the CLI spelling paid a failed call to learn the other one. Both grammars now answer; the assertion
+# is that they answer THE SAME, not merely that neither errors.
+STR="$( call_batch '["for:distance between two points","callers:distance"]' )"
+OBJ="$( call_batch '[{"verb":"for","task":"distance between two points"},{"verb":"callers","symbol":"distance"}]' )"
+case "$STR" in
+    __ERR__*) no "(g) the verb:arg string form is still refused: $( printf '%s' "$STR" | head -c 160 )" ;;
+    *)  [ "$STR" = "$OBJ" ] \
+            && ok "(g) queries=[\"for:…\",\"callers:…\"] answers BYTE-IDENTICALLY to the object form" \
+            || no "(g) the two grammars produced different answers for the same two questions" ;;
+esac
+# and the CLI file form of the same two lines agrees with both (one grammar, three front doors: CLI file,
+# live MCP verb, MCP batch) — modulo the root, which legitimately differs between the surfaces.
+printf 'for:distance between two points\ncallers:distance\n' > "$TMP/g.txt"
+CLIG="$( "$BIN" "$FIX" --batch="$TMP/g.txt" 2>/dev/null )"
+printf '%s' "$CLIG" | grep -q '<q i="0" verb="for" ok="1">' \
+    && printf '%s' "$CLIG" | grep -q '<q i="1" verb="callers" ok="1">' \
+    && ok "(g) the CLI file form parses the identical two lines to the identical two sub-verbs" \
+    || no "(g) the CLI file form disagrees with the MCP string form about these lines"
+# The GUARD: an array of arbitrary strings is NOT silently reinterpreted as sub-queries. `["x"]` names no
+# served verb, so it must keep getting the bad-value refusal rather than becoming a sub-query called "x".
+BAD="$( call_batch '[1,"x",null]' )"
+case "$BAD" in
+    __ERR__*) ok "(g) an array of arbitrary values still gets the bad-value refusal, not a string-grammar read" ;;
+    *)        no "(g) [1,\"x\",null] was accepted — the string grammar is too permissive" ;;
+esac
+
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME CHECKS FAILED"
 exit "$fail"

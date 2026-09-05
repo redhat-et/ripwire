@@ -161,6 +161,11 @@ inline int effectiveRowCap( int pageLimit, int historicCap ) noexcept
 // answer discloses shown=/capped= plus has_more=/next_offset= so a paging loop terminates.
 inline constexpr int kCallHierarchyRowCap = 40;
 inline constexpr int kUseSiteRowCap       = 100;
+// M13 (capture-audit 2026-09-04): --cochange's per-file partner cap. It was a bare `30` literal inside
+// verbs_report.h's --cochange arm and NOTHING at all on the MCP twin, which served every partner uncapped
+// — the two surfaces disagreeing about the size of one answer. Named here for the same reason as the two
+// above: a cap that lives at its call site is a cap the sibling surface forgets to have.
+inline constexpr int kCochangePartnerCap  = 30;
 
 // ── LB-H (r10 GitNexus round) — the display cap on --impact's SECONDARY import tier ──────────────────────
 // Deliberately the SAME 40 as the symbol rows above rather than a third number: it counts a comparable

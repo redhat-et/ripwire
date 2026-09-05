@@ -64,10 +64,18 @@ git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' > "$TMP/
 # kShapingVerbs (the pre-existing M6 bundle-vs-whole-file logic already read them), so this is a re-pin, not
 # a column change: 16->17 / 12->13. CLI recall's bounded default adds one more maxTokens policy read:
 # 17->18; the verb already honored explicit --max-tokens, so its table column remains unchanged.
+# H9 (capture-audit 2026-09-04, 18->21->20): THREE new policy reads, then ONE fewer site than before —
+# hoisting the tokens-to-bytes expression into serialize.h::budgetBytesForTokens collapsed two open-coded
+# `cfg.maxTokens` reads into one call. Same verbs, same columns; one less place to write the arithmetic. --for reads it once to
+# decide whether to print max_tokens= (its kShapingVerbs carve-out: honored only under --detail=N),
+# --from-trace reads it once to carry the same ceiling onto its root, and --recall's arm reads it once more
+# now that the token count rather than a byte budget travels to the header. Every one of them is a
+# DISCLOSURE of a budget the verb already honored — the columns those three verbs sit in are unchanged, so
+# this is a re-pin, exactly as the --expand and recall-default re-pins above were.
 MAXSITES="$( grep -c 'cfg\.maxTokens\|c\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
 TOPSITES="$( grep -c 'cfg\.topK\|c\.topK'           src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
-[ "$MAXSITES" = 18 ] && ok "(A) --max-tokens has 18 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
-                     || no "(A) --max-tokens read sites moved 18 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
+[ "$MAXSITES" = 20 ] && ok "(A) --max-tokens has 20 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
+                     || no "(A) --max-tokens read sites moved 20 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
 [ "$TOPSITES" = 13 ] && ok "(A) --top-k has 13 read sites outside cli.h" \
                      || no "(A) --top-k read sites moved 13 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
 # no OTHER file may read them: a third file would be a verb family this table has never heard of.

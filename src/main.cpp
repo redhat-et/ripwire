@@ -34,6 +34,7 @@
 #include "partition.h"             // --pack-task --partition=N — the fan-out form (core + N slices), same assembler.
                                    //   BEFORE mcp.h so mcpverbs.h's explore verb can reach packTaskPartitionText (same rule packtask.h follows).
 #include "tracelocus.h"            // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
+#include "callhierarchy.h"        // H14/M13: the shared --callers/--callees / MCP find_* 1-hop computation (CLI == MCP rows)
 #include "editcheck.h"             // L4: the shared --edit-check / MCP edit_check contract-comparison core (editCheckBundleText)
 #include "slice.h"                 // lane/paper-slice: --slice=SYM[:VAR] — the ARISE-motivated def-use slice core (sliceBundleText)
 #include "editpreview.h"           // card A1: the PRE-APPLY contract preview (editpreview::run) — BEFORE mcp.h, which
@@ -1359,7 +1360,7 @@ int runDefaultMap( const MainDispatch& d )
         std::free( buf );
         return sz;
     };
-    const std::size_t maxTokensCeilingBytes = std::size_t( double( cfg.maxTokens ) * kMinBytesPerToken * kBudgetHeadroom );
+    const std::size_t maxTokensCeilingBytes = budgetBytesForTokens( std::size_t( cfg.maxTokens ) );
     // §F5 (cont.) — THE <ctx> WRAPPER IS PART OF THE MAP PORTION THE CALLER RECEIVES. A payload verb
     // (--pack-signatures / --pack-top-n / --expand / --outline) opens `<ctx>` BEFORE serialize()'s own bytes
     // (the fprintf below, ahead of the §H7 pre-render), so everything through `</r>` is 5 bytes larger than
@@ -3020,48 +3021,9 @@ int main( int argc, char** argv )
             std::fclose( f );
         }
 
-        // one `verb:arg` line → the same JSON sub-query object the MCP `queries` array carries, so
-        // runBatchSub sees identical input on both surfaces. Values are JSON-escaped (an arg may hold
-        // any byte). path_between takes `from,to` (split on the first comma); analyze takes no arg.
-        const auto cliBatchObject = []( const std::string& verb, const std::string& arg ) -> std::string
-        {
-            const auto j = []( const std::string& s ) { return rw::mcpdetail::jsonEscape( s ); };
-            std::string obj = "{\"verb\":\"" + j( verb ) + "\"";
-            if( verb == "path_between" )
-            {
-                const std::size_t comma = arg.find( ',' );
-                const std::string from  = ( comma == std::string::npos ) ? arg : arg.substr( 0, comma );
-                const std::string to    = ( comma == std::string::npos ) ? std::string{} : arg.substr( comma + 1 );
-                obj += ",\"from\":\"" + j( from ) + "\",\"to\":\"" + j( to ) + "\"";
-            }
-            else if( !arg.empty() )
-            {
-                const char* key = "symbol";                          // callers/callees/impact/uses/mentions/owners/find_*
-                if( verb == "for" || verb == "exemplar" )
-                {
-                    key = "task";
-                }
-                else if( verb == "grep" )
-                {
-                    key = "pattern";
-                }
-                else if( verb == "lego" )
-                {
-                    key = "type";
-                }
-                else if( verb == "cochange" )
-                {
-                    key = "file";
-                }
-                else if( verb == "fetch_body" )
-                {
-                    key = "handle";
-                }
-                obj += ",\"" + std::string( key ) + "\":\"" + j( arg ) + "\"";
-            }
-            obj += "}";
-            return obj;
-        };
+        // M5 (capture-audit 2026-09-04): the `verb:arg` -> sub-query conversion this arm used to own as a
+        // local lambda now lives in mcpverbs.h beside the served-verb registry, so the MCP `batch` verb can
+        // accept the SAME line and produce the byte-identical object. One grammar, two front doors.
 
         RedactCounts        rc;
         RedactCounts* const rp = cfg.noRedact ? nullptr : &rc;
@@ -3094,10 +3056,7 @@ int main( int argc, char** argv )
                 continue; // count, don't process past the cap
             }
 
-            const std::size_t colon = line.find( ':' );
-            const std::string verb  = ( colon == std::string::npos ) ? line : line.substr( 0, colon );
-            const std::string arg   = ( colon == std::string::npos ) ? std::string{} : line.substr( colon + 1 );
-            subs.push_back( runBatchSub( root, cliBatchObject( verb, arg ), cfg.topK, cfg.stable, rp ) );
+            subs.push_back( runBatchSub( root, rw::batchObjectFromCliSpec( line ), cfg.topK, cfg.stable, rp ) );
         }
 
         std::fputs( batchText( subs, requested, kBatchCap ).c_str(), stdout );

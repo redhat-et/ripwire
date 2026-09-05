@@ -1979,7 +1979,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               cc.json (apiVersion 1.3) — write FILE or redirect stdout; feeds a CodeCharta 3D city\n"
         "    --batch=FILE               one-turn context sweep: FILE ('-'=stdin) is newline-delimited `verb:arg` sub-queries\n"
         "                               (for/grep/callers/callees/impact/uses/mentions/analyze/lego/owners/cochange/exemplar,\n"
-        "                               path_between:FROM,TO), answered in ONE deduped <batch>; caps at 16 (over-cap = capped=1)\n\n"
+        "                               path_between:FROM,TO), answered in ONE deduped <batch>; caps at 16 (over-cap = capped=1).\n"
+        "                               THE SAME `verb:arg` line is accepted by the MCP `batch` verb's queries array\n"
+        "                               (queries=[\"for:parse the config\",\"callers:escapeXml\"]), which also takes the\n"
+        "                               {verb, ...args} object form — one grammar to learn, both front doors.\n\n"
         "  self-diagnosis\n"
         "    --doctor                   environment self-check: binary-vs-PATH staleness, grammar tags.scm compile,\n"
         "                               cache-dir health, git reachability, tree-sitter version, and TRACKED-BINARY\n"
@@ -2063,8 +2066,11 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               versioned schema id (ripwire.for/v1, ripwire.grep/v1, ripwire.slice/v1), and shortens\n"
         "                               repeated explanatory prose — the slice rows are byte-identical to the full form, so the\n"
         "                               many-small-calls seed loop pays the rules once, not per call. Unsupported verbs refuse.\n"
-        "    --json                     machine-parseable JSON instead of XML, SAME content, keys mirror the XML attr\n"
-        "                               names 1:1 — supported for the default map, --for, --pack-task, --callers/--callees/\n"
+        "    --json                     machine-parseable JSON instead of XML, keys mirror the XML attr names 1:1. Every\n"
+        "                               ROOT attribute survives; a verb that serves fewer SECTIONS than its XML form NAMES\n"
+        "                               them in lens= on the root (--for --json: lens=\"compose,lego,routes,docs\" — their\n"
+        "                               *_total counts are there, their rows are not) — supported for the default map,\n"
+        "                               --for, --pack-task, --callers/--callees/\n"
         "                               --impact, --quality-delta, --test-gate, --metrics (the CI/scripting verbs), plus\n"
         "                               --plan-lanes which is JSON-native. That set is an ALLOW-list: every other verb (and --format=columnar/candidates, --detail,\n"
         "                               --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than\n"
@@ -3041,10 +3047,16 @@ inline constexpr PagingFamilyFlagGuard kTopKGuard
     "nothing ranked to cap",
     "ripwire <dir> --hotspots --limit=3"
 };
+// H9 (capture-audit 2026-09-04): both sentences must name EVERY kShapingVerbs row that honors the flag.
+// They did not: `--html` (which renders the map and inherits its ceiling) was missing from the first and
+// `--handoff` (whose writeHandoffPacket has taken the budget since M4) from the second — so a caller who
+// hit this refusal was told, in the tool's own words, that a budget it does honor does not exist there.
+// test/budgetpolicycheck.sh arm (A) re-derives both lists from the table on every run, so the next verb to
+// grow a budget column cannot leave the sentence behind.
 inline constexpr PagingFamilyFlagGuard kMaxTokensGuard
 {
-    "--max-tokens is honored by the default map, --recall, --connect, --pr-context, --from-trace and "
-    "--for --detail=N — none of them in the --limit/--offset-honoring set (",
+    "--max-tokens is honored by the default map (and --html, which renders it), --recall, --connect, "
+    "--pr-context, --from-trace and --for --detail=N — none of them in the --limit/--offset-honoring set (",
     ")",
     "no byte budget to shape",
     "ripwire <dir> --hotspots --limit=3"
@@ -3052,7 +3064,7 @@ inline constexpr PagingFamilyFlagGuard kMaxTokensGuard
 inline constexpr PagingFamilyFlagGuard kTokenBudgetGuard
 {
     "--token-budget is honored by the default map (the CI gate), --for, --pack-task, --recall, "
-    "--from-trace and --run-trace — none of them in the --limit/--offset-honoring set (",
+    "--handoff, --from-trace and --run-trace — none of them in the --limit/--offset-honoring set (",
     ")",
     "no byte budget to gate",
     "ripwire <dir> --callers=SYM --limit=3"

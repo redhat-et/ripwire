@@ -121,7 +121,11 @@ def no_( m ):
 TABLE = {
     # ── the paper-round (2026-08-28) serving-shape emitters — all three interpolate ONLY fixed vocabulary
     # and integers, so every worst case is compile-time arithmetic, not input-dependent ───────────────────
-    ( "src/verbs_for.h", "attrBuf" ):  ( 1, "safe", "attrBuf[48]: ' confidence=\"%s\" margin_pct=\"%d\"' where %s is the two-value literal high|low and %d is a 0..100 percent — worst case ' confidence=\"high\" margin_pct=\"100\"' = 34 B against 47 usable + NUL, 13 B of margin. No user text can reach either interpoland." ),
+    # capture-audit 2026-09-04 (L6, H14): moved verbatim from src/verbs_for.h to src/lexical.h with the
+    # ForConfidence struct it fills — the MCP `for` twin serves confidence=/margin_pct= from the same
+    # derivation now instead of omitting the routing gauge. The buffer, the format and the bound are
+    # unchanged; only the file is.
+    ( "src/lexical.h", "attrBuf" ):  ( 1, "safe", "attrBuf[48]: ' confidence=\"%s\" margin_pct=\"%d\"' where %s is the two-value literal high|low and %d is a 0..100 percent — worst case ' confidence=\"high\" margin_pct=\"100\"' = 34 B against 47 usable + NUL, 13 B of margin. No user text can reach either interpoland." ),
     ( "src/packtask.h", "tag" ):       ( 1, "safe", "tag[112]: '<bodies shown=\"0\" total=\"%zu\" capped=\"%d\"%s></bodies>' — %zu is a vector size (20 digits at absolute most), %d is 0|1, %s is the literal ' compress=\"1\"' or empty. Worst case 40 fixed + 20 + 1 + 13 = 74 B against 111 usable. Escaper irrelevant: no interpoland carries text." ),
     ( "src/serialize.h", "open" ):     ( 1, "safe", "open[112]: '<bodies shown=\"%zu\" total=\"%zu\" capped=\"%d\"%s>' — two sizes, a 0|1, and the same fixed compress literal. Worst case 33 fixed + 40 + 1 + 13 = 87 B against 111 usable. Same all-numeric/fixed-vocab class as its packtask.h sibling." ),
     # ── src/cli.h ────────────────────────────────────────────────────────────────────────────────────────
@@ -262,7 +266,15 @@ if not bad:
 # net new CALL is one. editcheck.h itself goes 4 -> 5 mentions, which is that same one call. sites/rows are
 # unmoved because the new call interpolates only %zu — it is not a string-interpolating site, so it neither
 # joins the 30 nor needs a TABLE row, and (S1)/(S2) both stayed green across the change.
-EXPECTED = { "mentions": 221, "calls": 199, "sites": 42, "rows": 29, "widthforms": 3 }   # 2026-09-04 (capture-audit wave-1 merge, L4): +4 calls/+4 mentions, +1 site/+1 row — re-derived from `git diff ec5e3c3 -- src/`, not from the delta: (a) graphGaugeAttrXml/Json (graphlegend.h, M15): two %zu into a local buf, no %s; (b) serialize.h's rank-adaptive `<sigs shown=%zu total=%zu capped="1">` open tag (lens 4 F7): two %zu into open[], no %s; (c) pageview.h:293, the H8 floor marker appended after the paging half — the ONE new string-interpolating site, and the new TABLE row above (fixed literal, sized by the remaining capacity). L5's packLego hdr pair (the pin below) is unchanged.
+EXPECTED = { "mentions": 222, "calls": 200, "sites": 42, "rows": 29, "widthforms": 3 }
+#            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
+#            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the
+#            H9 ` max_tokens="%d"` ceiling disclosure: a single %d of a caller-supplied INTEGER, no %s,
+#            nothing escaped, worst case ' max_tokens="-2147483648"' = 26 B against 31 usable + NUL. It
+#            therefore does not join the string-interpolating population that (S1)/(S2) enumerate, which
+#            is why sites and rows are unmoved. The verbs_for.h attrBuf row above moved file (H14) with
+#            no change to its buffer, format or bound.
+#            2026-09-04 (capture-audit wave-1 merge, L4): +4 calls/+4 mentions, +1 site/+1 row — re-derived from `git diff ec5e3c3 -- src/`, not from the delta: (a) graphGaugeAttrXml/Json (graphlegend.h, M15): two %zu into a local buf, no %s; (b) serialize.h's rank-adaptive `<sigs shown=%zu total=%zu capped="1">` open tag (lens 4 F7): two %zu into open[], no %s; (c) pageview.h:293, the H8 floor marker appended after the paging half — the ONE new string-interpolating site, and the new TABLE row above (fixed literal, sized by the remaining capacity). L5's packLego hdr pair (the pin below) is unchanged.
 #            2026-09-04 (capture-audit L5, H6/F2): +1 call/+1 mention — packLego's iface start-tag snprintf became an if/else PAIR so the TARGETED form can carry defs= (serialize.h ~5460). Re-derived from the diff, not from the delta: one snprintf line became two, both into the SAME `char hdr[64]` (widened from 48 for the extra ` defs="%zu"`), and both interpolate only %zu — no %s, nothing escaped — so neither joins the string-interpolating population and sites/rows are unmoved. (S1)/(S2) stayed green across the change
 #            2026-09-03 (Phase 5 external= round): +1 call/+1 mention — the JSON header's `"external":%zu,` snprintf into the existing hdr[256] (one %zu, ≤ 32 B, the `"locality_pinned":%zu,` twin beside it); no %s, nothing escaped — re-read and sized before this pin
 #            2026-09-03 (round 5 merge): mentions 213 -> 216 with calls/sites/rows UNCHANGED. Re-read, not re-counted:

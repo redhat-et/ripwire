@@ -226,7 +226,9 @@ FAILFAST = {
     "deadprecisioncheck.sh":    ( "verdict is a TRAILING python3 heredoc; its rc IS the script's",       1 ),
     "isolateprovenancecheck.sh":( "verdict is a TRAILING python3 heredoc; its rc IS the script's",       1 ),
     "lintprecisioncheck.sh":    ( "verdict is a TRAILING python3 heredoc; its rc IS the script's",       1 ),
+    "mcpattrparitycheck.sh":    ( "python3 heredoc's rc captured into `rc` and re-exited; FORCED by breaking one RENAME entry, rc read, not inferred", 1 ),
     "mcpcontractcheck.sh":      ( "python3 heredoc's rc captured into `rc`, propagated by a brace group", 1 ),
+    "mcpmanifestcheck.sh":       ( "verdict is a TRAILING python3 heredoc (sys.exit); FORCED by appending a bogus routing-sentence pin, rc read, not inferred", 1 ),
     # type3clonecheck.sh was pinned here until 2026-08-11, when its PART 2 (clone grouping + duplication
     # %) gained a real accumulator (`p2fail`) so every drifted attribute is named in one run instead of
     # only the first. PART 1's cap_run arms are still fail-fast, but arm (B) now reaches the terminal

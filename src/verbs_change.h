@@ -631,14 +631,13 @@ std::optional<int> runFromTrace( const MainDispatch& d )
     }
 
     FromTraceInputs in;
-    in.bundleBudgetBytes = cfg.tokenBudget > 0
-        ? std::size_t( double( cfg.tokenBudget ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
-        : rw::kForPayloadBudgetBytes;
+    in.bundleBudgetBytes = cfg.tokenBudget > 0 ? rw::budgetBytesForTokens( std::size_t( cfg.tokenBudget ) )
+                                               : rw::kForPayloadBudgetBytes;
     in.budgetTokens      = cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : 0;   // M11: budget_tokens= on the root
     in.sigLadderBudgetBytes = cfg.packBudgetBytes;
-    in.bodyBudgetBytes      = cfg.maxTokens > 0
-        ? std::size_t( double( cfg.maxTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
-        : cfg.packBudgetBytes;
+    in.bodyBudgetBytes      = cfg.maxTokens > 0 ? rw::budgetBytesForTokens( std::size_t( cfg.maxTokens ) )
+                                                : cfg.packBudgetBytes;
+    in.maxTokens            = cfg.maxTokens > 0 ? std::size_t( cfg.maxTokens ) : 0;   // H9: max_tokens= on the root
     in.compress = cfg.compress;
     in.fanIn    = d.fanInPtr;
     in.impure   = d.impurePtr;
@@ -1082,9 +1081,8 @@ std::optional<int> runRunTrace( const MainDispatch& d )
     const std::string linesBlock = renderRunTraceLines( lines, /*isFailure=*/true );
 
     FromTraceInputs in;
-    in.bundleBudgetBytes = cfg.tokenBudget > 0
-        ? std::size_t( double( cfg.tokenBudget ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
-        : rw::kForPayloadBudgetBytes;
+    in.bundleBudgetBytes = cfg.tokenBudget > 0 ? rw::budgetBytesForTokens( std::size_t( cfg.tokenBudget ) )
+                                               : rw::kForPayloadBudgetBytes;
     in.budgetTokens      = cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : 0;   // M11: budget_tokens= on the root
     in.sigLadderBudgetBytes = cfg.packBudgetBytes;
     in.bodyBudgetBytes      = cfg.packBudgetBytes;

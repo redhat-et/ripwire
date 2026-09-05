@@ -279,9 +279,9 @@ struct RecallShape
     bool        isOverCeiling  = false;   // W3FIX M1: the finished artifact exceeds the --max-tokens byte budget
                                           // it was shaped against — only reachable when the header floor alone
                                           // (kRecallHeaderReserveBytes + the verbatim task echo) is over it.
-    std::size_t maxTokens       = 0;       // disclosed when the effective ceiling EQUALS the 8K default policy — an
-                                          // explicit --max-tokens=8000 is byte-indistinguishable here, and the
-                                          // disclosure is equally true of it (effective ceiling, not flag provenance)
+    std::size_t maxTokens      = 0;       // H9: the ceiling ACTUALLY APPLIED, in tokens (0 = unbounded). Disclosed
+                                          // whenever it is non-zero — see recallBytesForTokens for why this used
+                                          // to read "8000 or nothing" and what that cost.
 };
 
 struct RecallBundle
@@ -296,6 +296,19 @@ inline constexpr std::size_t kRecallHeaderReserveBytes = 320;
 inline constexpr std::size_t kRecallTruncNoteBytes     = 128;
 inline constexpr std::size_t kRecallMinBodyBytes       = 240;
 inline constexpr std::size_t kDefaultRecallMaxTokens   = 8000;
+
+// H9 (capture-audit 2026-09-04): the ONE token→byte conversion for recall's ceiling, and the reason it is a
+// function rather than an expression repeated at each front door. It used to be spelled out twice — once in
+// verbs_for.h's --recall arm and once in mcpverbs.h's `memory_recall` — and each door then handed
+// buildRecall a BYTE count, at which point the token number the caller asked for was gone. That is why the
+// header could disclose a ceiling only when it happened to equal the 8000 default: the only comparison left
+// was `maxBytes == defaultMaxBytes`, so `--max-tokens=1500` (and MCP `budget_tokens=1500`, which maps to
+// that same flag) applied a real ceiling and named none. The TOKEN count now travels to the header and the
+// conversion lives here, beside the default it converts. Gate: test/budgetpolicycheck.sh arms (B) and (C).
+inline std::size_t recallBytesForTokens( std::size_t maxTokens ) noexcept
+{
+    return budgetBytesForTokens( maxTokens );   // serialize.h owns the one expression; this names it for recall
+}
 
 // A recalled body is raw markdown, and the budget cut lands wherever the byte count says — including
 // INSIDE a ```fenced code block. The emitted doc then ends with an OPENED fence nothing ever closes: the
@@ -822,11 +835,14 @@ inline std::optional<std::pair<std::string, std::string>> buildSectionGranularBo
 // §B10.1: `redact` is REQUIRED — no default. A recalled doc is whole-file prose straight off disk, which is
 // the same credential seam packSource has; W3-N1's rule ("a new emitting clone cannot silently opt out")
 // applies to it exactly. nullptr = --no-redact, spelled deliberately. The one caller already passed it.
+// H9: the ceiling arrives as TOKENS (0 = no cap) — the unit the caller asked in and the unit the header
+// discloses. The byte budget is derived here, once, by recallBytesForTokens.
 inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<float>& scores,
-                                 std::string_view task, int k, std::size_t maxBytes, bool docsOnly,
+                                 std::string_view task, int k, std::size_t maxTokens, bool docsOnly,
                                  RedactCounts* redact,
                                  std::string_view rootArg = {} )   // R-R: the separator line's path root
 {
+    const std::size_t maxBytes = recallBytesForTokens( maxTokens );
     // R-R: same convention every other lens's pathRel uses — the "━━ <path>" separator is a DISPLAY path and
     // was the last CLI surface still printing the checkout prefix once per recalled doc.
     const std::string recallRootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
@@ -846,9 +862,7 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
     shape.matchedCount  = selected.matchedCount;  // §B2: TRUE relevant count, pre-top-k
     shape.selectedCount = top.size();             // post-top-k, pre-budget (bookkeeping for the capped note)
     shape.demotedCount  = selected.demotedMatchCount;
-    const std::size_t defaultMaxBytes = std::size_t( double( kDefaultRecallMaxTokens ) * kMinBytesPerToken
-                                                     * kBudgetHeadroom );
-    shape.maxTokens = maxBytes == defaultMaxBytes ? kDefaultRecallMaxTokens : 0;
+    shape.maxTokens     = maxTokens;              // H9: the ceiling applied, whatever it is (0 = unbounded)
 
     for( const Recalled& r : top )
     {
@@ -1083,7 +1097,7 @@ inline int emitRecallBudgeted( std::FILE* out, const RecallBundle& bundle, std::
 // gated by test/recallparitycheck.sh, which asserts the two doors return the same bundle byte for byte.
 inline RecallBundle recallFor( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                const std::vector<NodeId>& outTargets, std::string_view task, int k,
-                               std::size_t maxBytes, RedactCounts* redact, std::string_view rootArg )   // R-R
+                               std::size_t maxTokens, RedactCounts* redact, std::string_view rootArg )   // R-R
 {
     // R-R: one root fact, spent twice — the ranker scores the root-relative path spelling, buildRecall
     // prints it. Unguarded because rootPrefixOf( "" ) is "" (its trailing-slash loop needs size() > 1), so
@@ -1091,7 +1105,7 @@ inline RecallBundle recallFor( const IngestResult& ing, const std::vector<std::u
     const std::string        prefix = rw::sarif::rootPrefixOf( rootArg );
     const std::vector<float> scores = lexicalScores( ing, outOff, outTargets, task, /*pruneTopK=*/0,
                                                      /*alwaysExact=*/nullptr, /*pathFieldDefaultW=*/1, prefix );
-    return buildRecall( ing, scores, task, k, maxBytes, /*docsOnly=*/true, redact, rootArg );
+    return buildRecall( ing, scores, task, k, maxTokens, /*docsOnly=*/true, redact, rootArg );
 }
 
 // (`writeRecall( out, ing, scores, … )` used to live here — a "render it and hand it over" wrapper that took

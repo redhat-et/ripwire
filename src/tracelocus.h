@@ -778,6 +778,9 @@ struct FromTraceInputs
     std::size_t                        budgetTokens         = 0;                        // M11: the --token-budget as passed (0 = none) — budget_tokens= on the root_tokens into bytes
     std::size_t                        sigLadderBudgetBytes = 0;                        // packSignatures per-doc ladder (0 = unlimited)
     std::size_t                        bodyBudgetBytes      = 0;                        // packBodies budget for the rank-1 full body (0 = unlimited)
+    std::size_t                        maxTokens            = 0;                        // H9: the --max-tokens ceiling as PASSED (0 = none) — max_tokens= on the root.
+                                                                                         // bodyBudgetBytes is derived from it and also carries the packBudget default,
+                                                                                         // so it cannot answer "what ceiling did the caller ask for"
     bool                                compress             = false;
     const std::vector<std::uint32_t>*  fanIn  = nullptr;
     const std::vector<char>*           impure = nullptr;
@@ -942,7 +945,8 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
         h += " bytes = ceiling + the single-entry overshoot a whole first signature costs). ";
         // M11: the root's machine-readable price, defined beside the ledger prose.
         h += "On the root: est_tokens= prices the delivered bundle in tokens, budget_tokens= is the token target you passed (absent "
-             "when none); over_ceiling= is 1 when the header floor exceeds it (the bundle is then complete, not trimmed).";
+             "when none), max_tokens= is the body ceiling you passed via the max_tokens flag (absent when none); over_ceiling= is 1 when the "
+             "header floor exceeds it (the bundle is then complete, not trimmed).";
         h += extraNotes;
         h += " -->";
         return h;
@@ -1015,6 +1019,11 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
         {
             std::string attrs = pricedRootAttr( pricedBytesOf( doc.size() ), kBytesPerTokenDefault, 0, nullptr );
             if( in.budgetTokens > 0 ) { attrs += " budget_tokens=\"" + std::to_string( in.budgetTokens ) + "\""; }
+            // H9: --max-tokens bounds the rank-1 BODY here, and the bundle really does shrink for it
+            // (13.6 KB -> 2.6 KB on the audit's probe) — so the ceiling gets named, exactly as
+            // budget_tokens= names --token-budget's. The two flags are separate columns in cli.h's
+            // kShapingVerbs and --from-trace is the one verb whose row sets both, so both can appear.
+            if( in.maxTokens > 0 )    { attrs += " max_tokens=\"" + std::to_string( in.maxTokens ) + "\""; }
             if( overCeiling )         { attrs += " over_ceiling=\"1\""; }
             return attrs;
         };

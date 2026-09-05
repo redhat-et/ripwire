@@ -1270,7 +1270,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
     // pairs repo-wide (high co-change + no #include either way).
     if( cfg.cochange )
     {
-        const int         cap = cfg.packTopN > 0 ? cfg.packTopN : 30;
+        const int         cap = cfg.packTopN > 0 ? cfg.packTopN : rw::kCochangePartnerCap;   // M13: one cap, both surfaces
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
 

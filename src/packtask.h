@@ -1148,7 +1148,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
 
     // ── the deterministic byte budget (default 6K tokens; in.budgetTokens overrides) ────────────────────────
     const std::size_t budgetTokens = in.budgetTokens > 0 ? in.budgetTokens : std::size_t( kPackTaskDefaultTokens );
-    const std::size_t bundleBudget = std::size_t( double( budgetTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom );
+    const std::size_t bundleBudget = rw::budgetBytesForTokens( budgetTokens );
     // §B1.7 fixup + W3FIX M1: the header's user-length text is bytes kPackTaskHeaderReserve (a fixed 1024)
     // cannot bound. The fixup charged the verbatim task=/route= ATTRIBUTES and left the SIBLING one line away —
     // the comment's echo of the same text — free, so the ceiling still blew out ~3.4x on a long task. Charge

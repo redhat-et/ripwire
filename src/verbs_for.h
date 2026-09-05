@@ -453,31 +453,11 @@ inline std::string rootOpenWithSchema( std::string rootOpen, std::string_view sc
 // far beyond the served head cannot justify trust in the head, and quoting it here would claim exactly
 // that. A free function over the cut rather than more lines in runForLens, which is already one of the
 // largest functions in this file (the forLensHeaderText precedent).
-struct ForConfidence
-{
-    std::string attrs;      // ` confidence="high|low" margin_pct="N"` — root facts, every ladder rung
-    std::string note;       // the legend clause defining both (legend-coverage contract)
-    const char* level = ""; // "high" | "low" — the JSON dialect's key value
-    int         marginPct = 0;
-};
-
-inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN )
-{
-    ForConfidence out;
-    const bool servedComplete = cut.positiveHits > 0 && cut.positiveHits <= std::size_t( servedTopN );
-    out.level     = ( !cut.hitCeiling || servedComplete ) ? "high" : "low";
-    out.marginPct = cut.hitCeiling ? 0 : cut.dropPct;
-    char attrBuf[ 48 ];
-    std::snprintf( attrBuf, sizeof( attrBuf ), " confidence=\"%s\" margin_pct=\"%d\"", out.level, out.marginPct );
-    out.attrs = attrBuf;
-    // no "--" anywhere (rides inside an XML comment, where "--" is ill-formed — G4). TERSE on purpose:
-    // this rides EVERY --for header and its bytes are charged under an explicit budget, so each word
-    // competes with a sig row (the W3-S short-spelling precedent). The full mapping: the --for help text.
-    out.note = " [confidence= derives from the ranked head's largest relative score drop (margin_pct=, whole "
-               "percent, 0 = none; the same gap the adaptive flag cuts at). low = flat ranking: treat the set "
-               "as a starting point, not an answer]";
-    return out;
-}
+// A6/H14: ForConfidence + deriveForConfidence moved to lexical.h, beside the adaptiveCut they read — the
+// MCP `for` twin serves confidence=/margin_pct= from the SAME derivation now instead of omitting the
+// routing trust gauge entirely (capture-audit H14). Nothing about the numbers changed.
+using rw::ForConfidence;
+using rw::deriveForConfidence;
 
 inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p, std::string_view extraNotes )
 {
@@ -756,9 +736,8 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     // on this surface", not "not computed this run" — reserved generously (each count is realistically
     // 0..a few hundred, well under 7 digits) rather than measured exactly at charge time.
     constexpr std::size_t kJsonSurfaceCountsBytes = 96;
-    const std::size_t bundleBudget = in.tokenBudget > 0
-        ? std::size_t( double( in.tokenBudget ) * kMinBytesPerToken * kBudgetHeadroom )
-        : kForPayloadBudgetBytes;
+    const std::size_t bundleBudget = in.tokenBudget > 0 ? budgetBytesForTokens( in.tokenBudget )
+                                                        : kForPayloadBudgetBytes;
     const std::size_t fixedBytes = header.size() + kJsonEnvelopeBytes + kJsonSurfaceCountsBytes
                                   + ( in.noteIndex ? kJsonNotesStanzaBytes : 0 );
     const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;
@@ -774,9 +753,19 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     // §B1.4: built once, used on both the degrade path below and the normal return — these three are plain
     // size_t values already computed by the caller (no rendering, no redaction seam), so unlike est_tokens
     // there is no "cannot compute it here" case that would justify omitting them on the degrade path too.
+    // H14 (capture-audit 2026-09-04): the three counts, and the DECLARATION of what they count. The XML
+    // form carries <compose>/<field> rows, <d>/<doc> doc-mention rows and a <routes> block; this dialect
+    // has always carried their COUNTS and none of their rows, under a --help sentence promising the "SAME
+    // content" — so `compose_total:10` beside no compose array read as a bug or as an empty result, and an
+    // agent using --json to pick a type to reuse got the number 10 and nothing to reuse. Emitting the rows
+    // is registered as follow-up work; the honesty half lands now, in the shape the lens itself proposed:
+    // the sections this dialect does not serve are NAMED on the root, so a reader knows to ask the XML form
+    // for them rather than concluding they are empty. Gate: test/mcpattrparitycheck.sh's --for --json arm,
+    // which fails both on an undeclared drop AND on a name here that IS served.
     const std::string surfaceCountsStanza = ",\"lego_total\":" + std::to_string( in.legoTotal )
                                            + ",\"compose_total\":" + std::to_string( in.composeTotal )
-                                           + ",\"routes_total\":" + std::to_string( in.routesTotal );
+                                           + ",\"routes_total\":" + std::to_string( in.routesTotal )
+                                           + ",\"lens\":\"compose,lego,routes,docs\"";
 
     // DEEP-TAIL d2, JSON dialect: always-present (B1.4: a total of 0 must mean genuinely none). Default
     // row cap here (the degrade path below needs a stanza before any budget is knowable); the normal path
@@ -1540,7 +1529,46 @@ std::optional<int> runForLens( const MainDispatch& d )
         // the mapping, the two derived strings, and the reasoning behind both live ONCE in
         // deriveForConfidence (above runForLens) — forTopN is final here (floor cut applied), which is
         // what the completeness ground needs.
-        const ForConfidence forConf = deriveForConfidence( forCut, forTopN );
+        ForConfidence forConf = deriveForConfidence( forCut, forTopN );
+        // The confidence pair's own bytes, captured BEFORE the budget clause below is appended — see the
+        // charging note there for why the two disclosures are charged differently.
+        const std::size_t confidenceOwnBytes = forConf.attrs.size() + forConf.note.size();
+
+        // H9 (capture-audit 2026-09-04): the CEILING this bundle was shaped against, named on the root.
+        // `--for --token-budget=1500` re-shapes the whole answer — the root goes `bundle="compact"
+        // bodies="0" reason="budget"` — and the audit found that N itself appeared nowhere, so a reader
+        // could see THAT a budget cut the bundle but never WHICH one, and could not tell a 1500-token cut
+        // from a 15,000-token one. `--pack-task`, the sibling that takes the same flag, has always printed
+        // `budget_tokens=`; this is the same attribute, on the verb that was missing it. `--max-tokens` is
+        // read by --for only under --detail=N (cli.h's kShapingVerbs carve-out), so `max_tokens=` is
+        // charged to exactly that shape and absent otherwise — an attribute that appeared on a run where
+        // the flag was inert would be its own false disclosure.
+        //
+        // CHARGING, and why it splits from the confidence pair's. Both ride forConf, but only the
+        // confidence half is EXEMPT from the byte budget (confidenceExemptBytes is taken from
+        // confidenceOwnBytes above, captured before this append): confidence= must survive a tight ceiling
+        // because it qualifies the ANSWER — the fordisclosurecheck precedent. These two attributes qualify
+        // the BUDGET, and a budget disclosure that made the bundle exceed its own budget would be the
+        // funniest possible way to fail this finding. So they are charged like any other bytes, and the
+        // clause is written terse for the reason forLensHeaderText's W3-S note records at length: this
+        // header has a MEASURED hard byte constraint (fornotesbudgetcheck), where 150 bytes of prose is
+        // 2% of a 1550-token ceiling. Gate: test/budgetpolicycheck.sh arm (B).
+        const bool forGateBudget  = cfg.tokenBudget > 0;
+        const bool forBodyCeiling = cfg.maxTokens > 0 && cfg.detail > 0;   // the kShapingVerbs carve-out, read once
+        if( forGateBudget )
+        {
+            forConf.attrs += " budget_tokens=\"" + std::to_string( cfg.tokenBudget ) + "\"";
+        }
+        if( forBodyCeiling )
+        {
+            forConf.attrs += " max_tokens=\"" + std::to_string( cfg.maxTokens ) + "\"";
+        }
+        if( forGateBudget || forBodyCeiling )
+        {
+            // No "--" in this string: it rides inside an XML comment, where a double hyphen is ill-formed
+            // (G4). The flags are named without their dashes for exactly that reason.
+            forConf.note += " [budget_tokens=/max_tokens=: the token ceiling this bundle was shaped against]";
+        }
 
         // §L10b: mention_anchored=/doc_mentions= — the machine form of mentionNote/docMentionNote, EACH
         // present only when its own note fired (unlike confidence=/at=, these are not facts of every
@@ -1797,7 +1825,7 @@ std::optional<int> runForLens( const MainDispatch& d )
 
         // the bundle budget: default kForPayloadBudgetBytes; an explicit --token-budget beats it
         const std::size_t bundleBudget = cfg.tokenBudget > 0
-            ? std::size_t( double( cfg.tokenBudget ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
+            ? rw::budgetBytesForTokens( std::size_t( cfg.tokenBudget ) )
             : rw::kForPayloadBudgetBytes;
         // D2 (audit regressions, 2026-08-08): the adaptive note's own bytes are EXEMPT from the <sigs> trim
         // charge (headerStr contains adaptiveNote verbatim, so subtracting its size prices the header as the
@@ -1832,7 +1860,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // counts the emitted header verbatim, so leftBytes hands the bodies ~240 B less and the bundle
         // total never crosses the ceiling — charging the sig side as well was double-counting one cost.
         // est_tokens measures the emitted header in both regimes, so nothing under-reports either way.
-        const std::size_t confidenceExemptBytes = forConf.attrs.size() + forConf.note.size() + forAtAttrStr.size();
+        const std::size_t confidenceExemptBytes = confidenceOwnBytes + forAtAttrStr.size();
         // DEEP-TAIL: the tail legend's bytes are exempt from the sig-trim charge in BOTH regimes, the
         // confidence-disclosure precedent verbatim — the tail's contract is that the ranked head is
         // byte-identical with and without it, and charging the clause here would shrink <sigs> to pay for
@@ -1986,7 +2014,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             // tag and the two header attributes spliced in below — and never MORE than the budget they already
             // had, so a run WITHOUT --token-budget is byte-identical.
             detailBodyBudget = cfg.maxTokens > 0
-                ? std::size_t( double( cfg.maxTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
+                ? rw::budgetBytesForTokens( std::size_t( cfg.maxTokens ) )
                 : cfg.packBudgetBytes;
             if( cfg.tokenBudget > 0 )
             {
@@ -2412,15 +2440,15 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         const bool               defaultRecallBudget = cfg.maxTokens == 0;
         const std::size_t        recallMaxTokens = defaultRecallBudget ? rw::kDefaultRecallMaxTokens
                                                                        : std::size_t( cfg.maxTokens );
-        const std::size_t        budget = std::size_t( double( recallMaxTokens ) * rw::kMinBytesPerToken
-                                                       * rw::kBudgetHeadroom );
+        // H9: the TOKEN count is what travels now — recall.h's recallBytesForTokens owns the one conversion,
+        // so the header discloses the ceiling actually applied instead of only the 8000 default.
         // §B2: --top-k=N now actually SHAPES how many docs recall emits (was accept-and-ignore — --help and
         // the --limit refusal both already promised this). Default stays 8 when the user never passed the flag.
         const int                 recallK = cfg.topKExplicit ? cfg.topK : 8;
         // recallFor (recall.h) is the ONE rank-then-build call MCP `memory_recall` also makes — the recall
         // lens's pathFieldDefaultW=1 and its root-prefix derivation live there, so the two front doors cannot
         // drift apart again (gate: test/recallparitycheck.sh).
-        const RecallBundle       bundle = recallFor( ing, g.outOff, g.outTargets, cfg.recall, recallK, budget,
+        const RecallBundle       bundle = recallFor( ing, g.outOff, g.outTargets, cfg.recall, recallK, recallMaxTokens,
                                                      redactPtr, recallRootArg );   // docs only; R-R
 
         const int                rc     = emitRecallBudgeted( stdout, bundle, cfg.tokenBudget );

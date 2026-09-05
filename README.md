@@ -885,8 +885,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="src/graph.h:2542"/>
 <s t="fn" n="anchoredLexicalRank" p="src/graph.h:3034"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:976"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:1091"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:977"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:1092"/>
 <s t="fn" n="getIndex" p="src/mcpindex.h:1104"/>
 </callers>
 ```
@@ -1507,7 +1507,7 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 
 ### In the tests
 
-`test/regression.sh` names **530 gate scripts** and is the authoritative list;
+`test/regression.sh` names **533 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a

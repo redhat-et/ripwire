@@ -608,6 +608,19 @@ inline constexpr std::size_t ceilingAllowanceBytes( std::size_t budgetTokens ) n
     return std::size_t( double( budgetTokens ) * kMinBytesPerToken * kCeilingFirstEntryTolerance );
 }
 
+// The SHAPING budget the same token count buys — tokens x the densest-language byte rate x the headroom.
+// Distinct from the allowance above (which spends kCeilingFirstEntryTolerance, an OVERSHOOT bar) and
+// deliberately adjacent to it, so the two are read together and never confused.
+//
+// P11/H9 (capture-audit 2026-09-04): this expression was open-coded at SIX sites — --for, --pack-task,
+// --from-trace, --recall and both of their MCP twins — which is how --recall's front doors came to hand the
+// builder a byte count and lose the token number its own header had to disclose (H9). One expression now,
+// so a budget flag's unit cannot mean two things depending on which verb read it. 0 = no ceiling.
+inline constexpr std::size_t budgetBytesForTokens( std::size_t budgetTokens ) noexcept
+{
+    return budgetTokens == 0 ? 0 : std::size_t( double( budgetTokens ) * kMinBytesPerToken * kBudgetHeadroom );
+}
+
 // CA4 §B3 — the SAME bar, for a lens whose caller resolved the token budget into BYTES before the call.
 // --from-trace's FromTraceInputs carries `bundleBudgetBytes` (already tokens x kMinBytesPerToken x
 // kBudgetHeadroom), so it cannot call the sibling above without a `budgetTokens` field its two call sites do
@@ -2082,6 +2095,14 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         // the run's size, so it does not move between two runs over the same tree, and a byte-stable prefix
         // that hides "this ranking is unfinished" would be a cache optimisation buying silence.
         h += renderDisclosure( ann.prDisclosure, DiscloseAs::XmlAttrs );
+        // H14 (capture-audit 2026-09-04): --stable's omissions, DECLARED. Both are deliberate and both are
+        // argued for above — k= is globally volatile so dropping it is what buys the byte-stable prefix, and
+        // est_tokens= follows it for the same reason. But an agent reading a --stable map (which is what
+        // every MCP `analyze` call gets) saw 185 rows with no rank attribute and nothing saying the score
+        // exists elsewhere: membership is by PageRank, the emitted order is by file, and the score was
+        // simply gone. lens= names what is missing, so "absent" reads as "not served here", never as "not
+        // computed". Gate: test/mcpattrparitycheck.sh, whose lens= arm also fails on a stale name.
+        if( stable ) { h += " lens=\"k,est_tokens\""; }
         h += ">";
         return h;
     };
