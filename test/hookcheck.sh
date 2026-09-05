@@ -1523,7 +1523,7 @@ if git -C "$WTMAIN" worktree add -q -b wtbranch "$WTLINK" >/dev/null 2>&1; then
     # falsify the path, which is the field that says where the row came from.
     GOTREPO="$( meterrowget "$LW1" 1 repo )"
     case "$GOTREPO" in
-        *vibrant-euler-dd516f) ok "TAG1b tag: `repo` still names the worktree the call happened in" ;;
+        *vibrant-euler-dd516f) ok "TAG1b tag: repo= still names the worktree the call happened in" ;;
         *) no "TAG1b tag: repo=[$GOTREPO] — folding the tag must not falsify the path" ;;
     esac
 else
