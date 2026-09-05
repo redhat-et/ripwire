@@ -468,13 +468,16 @@ inline constexpr const char* kPartitionLegend =
     // used to live here (why two overlap measures differ, why tokens==est_tokens) is in --help --pack-task and
     // docs/COMMANDS.md. Lens 8 table 1: the partitioned answer spent 28% of its bytes on legend (4 copies of the
     // bundle legend); the gate is partitioncheck's P10 arm — prose legend <= 1.3x a single bundle's.
+    // merge-fix(wave3): V2's F2 wording cut the SHARED bundle legend by 12 B (single 1684 -> 1672), which shrank the
+    // 1.3x allowance by 15.6 B while the partitioned prose fell only 12 B (2187 -> 2175 vs 2173.6). 17 B cut here
+    // ("their ", "of its own") — every attribute still defined; measured 2158 <= 2173.6.
     "<!-- ripwire partitioned task bundle: ONE shared core plus N minimally overlapping slices along call-graph communities; each "
     "<bundle> is one agent's ctx. requested=N asked, partitions= carved; modules=/split= groups found / cuts forced; core_symbols= the "
     "shared core, surface= core plus the assignable remainder; budget_per_agent_tokens= core plus ONE partition (= core_budget_tokens + "
     "partition_budget_tokens), total_bytes= all bundles; overlap_mean=/overlap_max= pairwise Jaccard over the ids partitions name, "
-    "pre-trim; shared_symbols= the ids TWO OR MORE partitions name, union_symbols= ids any names (their ratio and overlap_mean COINCIDE at "
+    "pre-trim; shared_symbols= the ids TWO OR MORE partitions name, union_symbols= ids any names (ratio and overlap_mean COINCIDE at "
     "partitions=2 only); core_overlap= the core surface a partition reaches anyway; tokens= = est_tokens= (bytes / 2.36). Each ctx "
-    "carries NO legend of its own: the task-bundle legend follows once; a trimmed slice carries one data comment. -->";
+    "carries NO legend: the task-bundle legend follows once; a trimmed slice carries one data comment. -->";
 
 // THE verb: `--pack-task="TASK" --partition=N`. Returns the whole <ctx-partitions>…</ctx-partitions> document
 // (never touches stdout — the caller owns the sink, exactly like packTaskBundleText). `jsonOut`, when given,
