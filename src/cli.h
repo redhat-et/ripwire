@@ -1984,7 +1984,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               isn't writable, ...) — a passing row never carries hint=.\n"
         "                               The root carries TWO shas, and they answer different questions: at= is the\n"
         "                               TREE's HEAD (+dirty) right now, built_from= is the commit THIS BINARY was\n"
-        "                               compiled from (byte-identical to --version's \"git <sha>\"). They differ from\n"
+        "                               compiled from (byte-identical to --version's own built_from=). They differ from\n"
         "                               the moment you commit until the next build — normal, so a mismatch is\n"
         "                               reported, never gated; a stale PATH copy shadowing a fresh build is the\n"
         "                               binary-path row's job and is decided on inode/mtime/size, not on this sha.\n"
@@ -3899,7 +3899,19 @@ inline void validateConfig( Config& c ) noexcept
     // supplies the payload; alone it would emit nothing at all, and on a set-returning verb like --graph-query
     // a 0 would fall into that verb's legacy `topK > 0 ? cap : ALL` arm and dump the whole matched set. Confine
     // it to the four payload verbs and refuse everywhere else, naming the fix.
-    if( c.topK == 0 && c.expand.empty() && c.outline.empty() && !c.packSignatures && c.packTopN <= 0 )
+    //
+    // §L10b LOW tail: --recall's OWN help text says --top-k=N "shapes HOW MANY docs are emitted" — a doc
+    // count, never the ranked-map rows the generic T2 wording below promises. The generic refusal used to
+    // fire on `--recall --top-k=0` too and told the reader "no ranked map, payload only", which is a category
+    // error for a verb that never had a ranked map to begin with. Same refusal (0 is still meaningless: it
+    // asks to recall zero documents), wording matched to what --top-k actually means on this verb.
+    if( c.topK == 0 && !c.recall.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --recall --top-k=0 means \"emit zero documents\" — raise it (--top-k=N) "
+                              "or drop it for the default of 8\n" );
+        c.ok = false;
+    }
+    else if( c.topK == 0 && c.expand.empty() && c.outline.empty() && !c.packSignatures && c.packTopN <= 0 )
     {
         std::fprintf( stderr, "ripwire: --top-k=0 means \"no ranked map, payload only\" — pass a payload verb "
                               "(--expand=SYM / --outline=SYM / --pack-signatures / --pack-top-n=N), or use --top-k=1 for the smallest map\n" );
@@ -3933,7 +3945,12 @@ inline Config parseArgs( int argc, char** argv ) noexcept
         // in CMakeLists.txt), so this can never drift from the CMake version test/versioncheck.sh checks.
         if( a == "--version" || a == "-v" )
         {
-            std::printf( "ripwire %s (%s, %s %s, git %s)\n", kRipwireVersion, kRipwireBuildType,
+            // §L10b LOW tail: this sha is the commit the BINARY was compiled from, the same fact
+            // --doctor's own built_from= names (verbs_doctor.h; byte-identical, test/doctorcheck.sh arm
+            // H) — labelled the same way here rather than left as a bare "git <sha>" a reader could
+            // mistake for the tree's current HEAD (that is --doctor's separate at=, which moves the
+            // moment you commit without rebuilding; this one does not, until the next build).
+            std::printf( "ripwire %s (%s, %s %s, built_from=%s)\n", kRipwireVersion, kRipwireBuildType,
                          kRipwireCompilerId, kRipwireCompilerVer, kRipwireGitStamp );
             std::exit( 0 );
         }

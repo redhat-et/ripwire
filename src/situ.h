@@ -281,7 +281,22 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
         std::fprintf( out, "at: %s\n", situAtStamp.c_str() );
     }
     if( changedSyms.empty() )
-    { std::fprintf( out, "  (no indexed symbols in the changed files — nothing to analyze)\n" ); return; }
+    {
+        // §L10b LOW tail: this one line used to fire for two DIFFERENT reasons under the same wording —
+        // nChanged==0 (a clean working tree; git diff HEAD returned nothing) and nChanged>0 with every
+        // changed file carrying no indexed symbol (doc-only / config-only edits). The zero-diff case reads
+        // as though changed files exist but lack symbols, which is false when there are no changed files
+        // at all. The MCP JSON twin (mcpverbs.h) already split this correctly; the CLI text form did not.
+        if( nChanged == 0 )
+        {
+            std::fprintf( out, "  (0 changed files — working tree is clean, nothing to analyze)\n" );
+        }
+        else
+        {
+            std::fprintf( out, "  (no indexed symbols in the %u changed file(s) — nothing to analyze)\n", nChanged );
+        }
+        return;
+    }
 
     // (1) blast radius — transitive callers (everything that reaches the changed symbols), per non-changed file
     const std::vector<NodeId>  reach = transitiveCallers( g, changedSyms );

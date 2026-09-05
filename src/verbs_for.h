@@ -98,7 +98,12 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     {
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul );
-        out.routeNote  = " [routed: " + rc.reason + shapeDemotionNote( shape ) + "]";
+        // §L10b: no leading space+"[" — this string lands ONLY in the route= attribute value (and its JSON
+        // "route" twin) now, never spliced into free comment prose, so the bracket that used to visually
+        // demarcate it inside a sentence just made the attribute value start with a stray " [". The
+        // trailing "]" stays: test/adaptivecheck.sh and test/routecheck.sh's routeof()/reasonOf() helpers
+        // use it as a stop-anchor (grep -oE 'routed: [^]]*').
+        out.routeNote  = "routed: " + rc.reason + shapeDemotionNote( shape ) + "]";
         out.docTierTag = shapeDocTierTag( shape );   // §A4f: the machine form of the same fact, for --format=candidates
         out.routeTag   = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
         out.anchorDefs = std::move( const_cast<RouteChoice&>( rc ).anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)
@@ -130,8 +135,9 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         MentionBoostInfo mentionInfo;
         if( applyMentionBoost( ing, task, lensRank, &mentionInfo ) )
         {
-            char nb[ 160 ];
-            std::snprintf( nb, sizeof( nb ), " [mention anchor: %u file%s + %u symbols named in the task, score lifted to within 5%% of the top score]",
+            char nb[ 220 ];
+            std::snprintf( nb, sizeof( nb ), " [mention anchor: %u file%s + %u symbols named in the task, score lifted to within 5%% of the top score; "
+                           "mention_anchored= on the root repeats this total]",
                            mentionInfo.fileCount, mentionInfo.fileCount == 1 ? "" : "s", mentionInfo.symbolCount );
             out.mentionNote  = nb;
             out.anchorLifts  = mentionInfo.fileCount + mentionInfo.symbolCount;   // §A4f: the count the candidates root emits
@@ -220,11 +226,12 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         DocMentionBoostInfo docMentionInfo;
         if( applyDocMentionBoost( g, lensRank, &docMentionInfo ) )
         {
-            char nb[ 160 ];
-            std::snprintf( nb, sizeof( nb ), " [doc mentions: %u doc%s discussing %u top-ranked symbol%s surfaced]",
+            char nb[ 220 ];
+            std::snprintf( nb, sizeof( nb ), " [doc mentions: %u doc%s discussing %u top-ranked symbol%s surfaced; doc_mentions= on the root repeats the doc count]",
                            docMentionInfo.docCount, docMentionInfo.docCount == 1 ? "" : "s",
                            docMentionInfo.anchorCount, docMentionInfo.anchorCount == 1 ? "" : "s" );
-            out.docMentionNote = nb;
+            out.docMentionNote  = nb;
+            out.docMentionCount = docMentionInfo.docCount;   // §L10b: machine form for the doc_mentions= root attribute
         }
     }
     return out;
@@ -334,6 +341,11 @@ struct ForLensNotes
     const std::string& mention;
     const std::string& boost;
     const std::string& docMention;
+    // §L10b: the XML twins of mention_anchored=/doc_mentions= (verbs_for.h ForLensHeaderParts) — same
+    // absent-unless-present convention as `mention`/`docMention` above (0 only when the note above is
+    // also ""; the emitter below gates on the STRING, not these, so a genuine zero can never occur here).
+    std::uint32_t       mentionAnchored = 0;
+    std::uint32_t       docMentions     = 0;
     const std::string& adaptive;
     const std::string& floor;       // LB-A: the relevance floor's shrink note, "" when it did not fire
     // the confidence disclosure is the exception to absent-unless-present: it is a FACT of every ranking
@@ -385,6 +397,10 @@ struct ForLensHeaderParts
     std::string_view gitAtAttr;        // M10: ` at="<sha>[+dirty]"` (gitstamp::atAttr) — "" on multi-root/non-git;
                                         // same ALWAYS-present, never-budget-dropped treatment as confidenceAttrs
                                         // above, for the same reason (a root fact, not a content row).
+    std::string_view mentionDocAttrs;  // §L10b: ` mention_anchored="N"`/` doc_mentions="N"`, EACH present only
+                                        // when its own note fired (unlike confidenceAttrs/gitAtAttr, these are
+                                        // not facts of every ranking) — machine form of mentionNote/docMentionNote,
+                                        // spliced the same way so the ladder's route-dropped rebuild keeps it.
     bool             anchor     = false;   // --anchor's EXPERIMENTAL caveat paragraph
     bool             autoBundle = false;   // T3: auto mode is on (cfg.detail==0, no --signatures-only) — appends the bundle=auto legend
     bool             compactBundle = false;   // COMPACT conceptual serving: appends the bundle=compact legend INSTEAD of the auto one — never both, because only one of the two sections can be emitted
@@ -526,11 +542,12 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     std::string h;
     h.reserve( 640 + std::max( kForAutoBundleLegend.size(), kForCompactBundleLegend.size() ) + p.rootOpenStr.size() + p.taskNote.size() + p.adaptiveNote.size()
                + p.mentionNote.size() + p.boostNote.size() + p.docMentionNote.size() + p.floorNote.size()
-               + p.confidenceAttrs.size() + p.confidenceNote.size() + p.gitAtAttr.size() + extraNotes.size() );
-    h += rootOpenWithSchema( rootOpenWithExtraAttrs( rootOpenWithExtraAttrs( withRouteAttr ? std::string( p.rootOpenStr )
+               + p.confidenceAttrs.size() + p.confidenceNote.size() + p.gitAtAttr.size() + p.mentionDocAttrs.size() + extraNotes.size() );
+    h += rootOpenWithSchema( rootOpenWithExtraAttrs( rootOpenWithExtraAttrs( rootOpenWithExtraAttrs( withRouteAttr ? std::string( p.rootOpenStr )
                                                                    : rw::ctxRootOpen( p.task, {}, p.rootArg ),
                                                      p.confidenceAttrs ),
                                                      p.gitAtAttr ),
+                                                     p.mentionDocAttrs ),
                              p.compactLegend ? "ripwire.for/v1" : std::string_view() );
     if( p.compactLegend )
     {
@@ -625,6 +642,8 @@ inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes&
     if( !notes.mention.empty() )
     {
         h += ",\"mention\":\"" + jsonStr( notes.mention ) + "\"";
+        // §L10b: the XML twin's mention_anchored= — same absent-unless-present gate as the prose above.
+        h += ",\"mention_anchored\":" + std::to_string( notes.mentionAnchored );
     }
     if( !notes.boost.empty() )
     {
@@ -633,6 +652,8 @@ inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes&
     if( !notes.docMention.empty() )
     {
         h += ",\"doc_mention\":\"" + jsonStr( notes.docMention ) + "\"";
+        // §L10b: the XML twin's doc_mentions= — same absent-unless-present gate as the prose above.
+        h += ",\"doc_mentions\":" + std::to_string( notes.docMentions );
     }
     if( !notes.adaptive.empty() )
     {
@@ -1521,6 +1542,20 @@ std::optional<int> runForLens( const MainDispatch& d )
         // what the completeness ground needs.
         const ForConfidence forConf = deriveForConfidence( forCut, forTopN );
 
+        // §L10b: mention_anchored=/doc_mentions= — the machine form of mentionNote/docMentionNote, EACH
+        // present only when its own note fired (unlike confidence=/at=, these are not facts of every
+        // ranking — a query that anchors or surfaces no docs carries neither). Same lr.anchorLifts the
+        // candidates root's anchored= already reads (§A4f); lr.docMentionCount is new (§L10b, packtask.h).
+        std::string mentionDocAttrsStr;
+        if( !mentionNote.empty() )
+        {
+            mentionDocAttrsStr += " mention_anchored=\"" + std::to_string( lr.anchorLifts ) + "\"";
+        }
+        if( !docMentionNote.empty() )
+        {
+            mentionDocAttrsStr += " doc_mentions=\"" + std::to_string( lr.docMentionCount ) + "\"";
+        }
+
         // M10: --for reads git for the per-file churn= column (folded onto the bundle below, mined once in
         // main.cpp's gitCoChangeAndChurnCached pass) and, before this fix, carried no anchor — an agent
         // quoting churn= into a handoff had nothing checkable to pin it to. Single-root only (same gate
@@ -1556,8 +1591,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         // turns the disclosure off on EITHER serving shape — test/fordisclosurecheck.sh.
         ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
                                         mentionNote, boostNote, docMentionNote, floorNote,
-                                        forConf.attrs, forConf.note, forAtAttrStr, cfg.anchor,
-                                        plan.autoBodies, plan.compact, cfg.legend == "compact",
+                                        forConf.attrs, forConf.note, forAtAttrStr, mentionDocAttrsStr,
+                                        cfg.anchor, plan.autoBodies, plan.compact, cfg.legend == "compact",
                                         /*tailLegend=*/true, flRootArg };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
@@ -1673,7 +1708,8 @@ std::optional<int> runForLens( const MainDispatch& d )
 
             const int jsonRc = emitForLensJson( stdout,
                                                 forLensJsonHeader( cfg.forTask, ForLensNotes{ routeNoteRaw, mentionNote, boostNote,
-                                                                                              docMentionNote, adaptiveNote, floorNote,
+                                                                                              docMentionNote, lr.anchorLifts, lr.docMentionCount,
+                                                                                              adaptiveNote, floorNote,
                                                                                               forConf.level,
                                                                                               forConf.marginPct, forWeak,
                                                                                               forAtStamp,

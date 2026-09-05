@@ -837,9 +837,17 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
 
         if( cfg.qualityBaseline )
         {
-            const bool wrote = quality::writeBaseline( quality::computeSnapshot( ing, g, cfg.rootPath ), baselineFile, gitHeadSha( root ) );
-            std::fprintf( stderr, wrote ? "ripwire: wrote %s (snapshot of %zu symbols)\n" : "ripwire: could not write %s\n",
-                          baselineFile.c_str(), ing.symbols.size() );
+            // §L10b LOW tail: this used to report ing.symbols.size() — every raw indexed symbol — while the
+            // sidecar computeSnapshot() actually WRITES one row per DISTINCT canonId (overloads collapse to
+            // their MAX, and a symbol with no canonId at all — g.canonId[i].empty() — is skipped entirely),
+            // a smaller number by construction (12,854 vs 13,358 on this tree at the time this was found).
+            // ccxBySym is computed for every one of those rows without exception, so its size is the true
+            // count of what the file holds.
+            const quality::Snapshot snap  = quality::computeSnapshot( ing, g, cfg.rootPath );
+            const bool               wrote = quality::writeBaseline( snap, baselineFile, gitHeadSha( root ) );
+            std::fprintf( stderr, wrote ? "ripwire: wrote %s (snapshot of %zu per-symbol rows, %zu indexed symbols total)\n"
+                                        : "ripwire: could not write %s\n",
+                          baselineFile.c_str(), snap.ccxBySym.size(), ing.symbols.size() );
             return wrote ? 0 : 1;
         }
 

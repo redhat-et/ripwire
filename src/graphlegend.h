@@ -123,7 +123,9 @@ inline constexpr const char* kLegoLegend =
     "source text by NAME, so dynamic dispatch, callbacks, macros and cross-language calls can be missing; read a "
     "zero as \"none found\", never as \"none exists\". graph_ambiguous=/graph_unresolved= are the whole graph's resolver "
     "gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header's "
-    "ambiguous=/unresolved=. -->";
+    "ambiguous=/unresolved=. On a NAMED target only, methods=\"0\" caveat=\"not-extracted-for-lang\" means the method "
+    "contract itself is not read soundly for this interface's language (currently C++/ObjC only) — implementors= "
+    "still stands, this caveat is about <m> rows alone. -->";
 
 // The COUNTING-UNIT clause (the L-CS routing item).
 //

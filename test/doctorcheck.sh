@@ -302,7 +302,7 @@ echo "$CAPOUT1" | xmllint --noout - 2>/dev/null && ok "L10: over-the-cap output 
 # state between a commit and the next build, and a check that fails there would cry wolf every commit —
 # the FACT is the deliverable, the verdict would be noise. (Owner call if that should ever become a check.)
 HOUT="$( "$BIN" "$REPO" --doctor --no-cache 2>/dev/null )"
-VSTAMP="$( "$BIN" --version 2>/dev/null | sed -n 's/.*git \([^)]*\))$/\1/p' )"
+VSTAMP="$( "$BIN" --version 2>/dev/null | sed -n 's/.*built_from=\([^)]*\))$/\1/p' )"   # §L10b: --version's own bare "git <sha>" is now labelled built_from= too
 BUILT="$( printf '%s' "$HOUT" | sed -n 's/.*<doctor[^>]* built_from="\([^"]*\)".*/\1/p' )"
 [ -n "$BUILT" ] \
     && ok "H: --doctor root carries built_from= (the binary's own commit)" \

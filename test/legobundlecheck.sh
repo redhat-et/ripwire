@@ -160,7 +160,9 @@ fi
 # Every other byte is unchanged, which is still what this arm is for.
 # RE-PINNED AGAIN at the wave-1 merge (capture-audit H6, lane L5 singledefcheck): <iface> gains defs="1" — Shape is
 # unambiguous, and --lego now discloses the definition count beside the pick.
-LEGO_LEGEND='<!-- ripwire lego: ONE interface/base type — its method contract (<m>, where the language captures it soundly) and every implementor (<impl>) the extends/implements edges reach, own-language only; implementors= counts them. counts_floor="1": every graph-derived count here is a FLOOR, never a total. Call edges are extracted from source text by NAME, so dynamic dispatch, callbacks, macros and cross-language calls can be missing; read a zero as "none found", never as "none exists". graph_ambiguous=/graph_unresolved= are the whole graph'"'"'s resolver gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header'"'"'s ambiguous=/unresolved=. -->'
+# RE-PINNED AGAIN (§L10b LOW tail): the legend gained one clause defining methods="0" caveat="not-extracted-for-lang"
+# (the value --lego=Vehicle prints on a Rust trait, previously nowhere spelled out).
+LEGO_LEGEND='<!-- ripwire lego: ONE interface/base type — its method contract (<m>, where the language captures it soundly) and every implementor (<impl>) the extends/implements edges reach, own-language only; implementors= counts them. counts_floor="1": every graph-derived count here is a FLOOR, never a total. Call edges are extracted from source text by NAME, so dynamic dispatch, callbacks, macros and cross-language calls can be missing; read a zero as "none found", never as "none exists". graph_ambiguous=/graph_unresolved= are the whole graph'"'"'s resolver gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header'"'"'s ambiguous=/unresolved=. On a NAMED target only, methods="0" caveat="not-extracted-for-lang" means the method contract itself is not read soundly for this interface'"'"'s language (currently C++/ObjC only) — implementors= still stands, this caveat is about <m> rows alone. -->'
 printf '%s' "<ctx root=\"test/legofix\">${LEGO_LEGEND}"'<lego graph_ambiguous="0" graph_unresolved="0" counts_floor="1"><iface n="Shape" p="shapes.h" defs="1" implementors="2"><m pure="1">virtual double area() const = 0</m><m pure="1">virtual void draw() const = 0</m><impl n="Circle" p="shapes.h"/><impl n="Square" p="shapes.h"/></iface></lego></ctx>' >"$TMP/standalone.golden"
 cmp -s "$TMP/standalone" "$TMP/standalone.golden" \
     && ok "--lego=Shape standalone byte-identical to the reference output (bundle-only change)" \
@@ -185,6 +187,17 @@ fi
 printf '%s' "$ONLEGO" | grep -q '<impl n="Triangle"' \
     && no "mutation-check: matched a Triangle impl that does not exist (gate is broken)" \
     || ok "mutation-check: absent Triangle correctly not matched (gate discriminates)"
+
+# ── 8) §L10b LOW tail: --lego=Vehicle (a Rust trait) prints caveat="not-extracted-for-lang" with no
+#      clause anywhere defining that value — fixed by the legend addition this arm's LEGO_LEGEND above
+#      already pins; this arm checks the VALUE actually fires on the fixture and that the legend defines it.
+"$BIN" test/legofix --no-cache --lego=Vehicle >"$TMP/vehicle" 2>/dev/null
+grep -q 'caveat="not-extracted-for-lang"' "$TMP/vehicle" \
+    && ok "--lego=Vehicle (Rust trait): caveat=\"not-extracted-for-lang\" fires" \
+    || no "--lego=Vehicle did not carry the expected caveat (fixture or extraction changed)"
+grep -q 'caveat="not-extracted-for-lang" means the method contract itself is not read soundly' "$TMP/vehicle" \
+    && ok "--lego legend now DEFINES caveat=\"not-extracted-for-lang\" (previously nowhere spelled out)" \
+    || no "--lego legend still does not define the caveat value"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"

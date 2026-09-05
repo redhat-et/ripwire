@@ -43,6 +43,18 @@ grep -q 'route="' "$TMP/for.xml" \
     && ok "--for keeps the route= attribute (the machine-readable copy)" \
     || no "--for lost the route= attribute — the surviving copy must be the ATTRIBUTE, not the comment"
 
+# (a1) §L10b LOW tail: route= used to carry the old free-comment splicing form verbatim — a leading
+# space then "[" (`route=" [routed: ..."`), a relic from when this string was spliced mid-sentence into a
+# comment. Now that route= is the SOLE copy (per (a) above), the bracket that used to demarcate it inside
+# prose just makes the attribute value start with a stray " [". Trimmed; the JSON "route" key (the same
+# raw string) gets the same trim for free.
+grep -oE 'route="[^"]*"' "$TMP/for.xml" | grep -q '^route=" \[' \
+    && no "--for route= still starts with a stray space+bracket" \
+    || ok "--for route= no longer starts with a stray space+bracket"
+grep -oE 'route="routed: ' "$TMP/for.xml" >/dev/null \
+    && ok "--for route= starts directly with 'routed: ' (no leading filler)" \
+    || no "--for route= does not start with 'routed: ' — the trim moved the anchor, not just the space"
+
 # (a2) --for on the CONCEPTUAL route (2026-08-23 serving-shape sweep): the same single-copy contract on
 #      the COMPACT serving shape. (a)'s query anchors, so it pins the contract only on the auto body walk;
 #      the compact bundle rebuilds its header through the same builder with a DIFFERENT enrichment plan
@@ -65,11 +77,17 @@ if [ "$n" = 1 ]; then ok "--pack-task emits 'routed:' exactly once (got $n)"; el
 grep -q 'route="' "$TMP/pt.xml" \
     && ok "--pack-task keeps the route= attribute" \
     || no "--pack-task lost the route= attribute"
+grep -oE 'route="[^"]*"' "$TMP/pt.xml" | grep -q '^route=" \[' \
+    && no "--pack-task route= still starts with a stray space+bracket" \
+    || ok "--pack-task route= no longer starts with a stray space+bracket"
 
 # (c) JSON dialect: exactly one "route" key.
 "$BIN" fix --for="buildGraph" --json --no-cache >"$TMP/for.json" 2>/dev/null
 n="$( grep -o '"route"' "$TMP/for.json" | wc -l | tr -d ' ' )"
 if [ "$n" = 1 ]; then ok '--for --json carries one "route" key'; else no "--for --json carries $n \"route\" keys (want 1)"; fi
+grep -o '"route":"[^"]*"' "$TMP/for.json" | grep -q '"route":" \[' \
+    && no "--for --json \"route\" value still starts with a stray space+bracket" \
+    || ok "--for --json \"route\" value no longer starts with a stray space+bracket (same raw string as route=)"
 
 # (d) --query's leading routed comment is the ONLY copy there (no route= attribute on the default map) — keep it.
 "$BIN" fix --query="buildGraph" --no-cache >"$TMP/q.xml" 2>/dev/null

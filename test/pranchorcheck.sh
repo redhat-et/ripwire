@@ -121,6 +121,14 @@ git -C "$REPO" checkout -qf feature
 grep -q 'anchor="ref-tip-two-dot"' "$ORPHAN" && ok 'unrelated history degrades to anchor="ref-tip-two-dot"' \
                                              || no 'unrelated history degrades to anchor="ref-tip-two-dot"'
 
+# §L10b LOW tail: the anchoring: comment used to spell the SAME value with spaces ('anchor="ref tip two
+# dot"'), a mistaken belief that a hyphen (not the banned literal "--") was unsafe inside an XML comment —
+# so the legend prose named a string the document never emits. Both must now agree.
+grep -q 'anchor=.ref tip two dot.' "$ORPHAN" && no 'legend prose still spells anchor as "ref tip two dot" (space-separated, does not match the real attribute)' \
+                                             || ok 'legend prose no longer spells anchor with spaces'
+grep -q 'anchor=.ref-tip-two-dot. instead means' "$ORPHAN" && ok 'legend prose now spells anchor="ref-tip-two-dot" (matches the real attribute)' \
+                                             || no 'legend prose does not define anchor="ref-tip-two-dot" at all'
+
 # ── determinism + G4 ──────────────────────────────────────────────────────────────────────────────────
 "$BIN" "$REPO" --pr-context=mainline >"$TMP/a.xml" 2>/dev/null
 "$BIN" "$REPO" --pr-context=mainline >"$TMP/b.xml" 2>/dev/null

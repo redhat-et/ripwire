@@ -135,6 +135,18 @@ cd "$QWORK"
 rc_qb=$?
 if [ "$rc_qb" -eq 0 ] && [ -f .ripwire_quality_baseline ]; then
     ok "quality: baseline written via 'ripwire .' (exit 0, sidecar present)"
+    # §L10b LOW tail: this stderr line used to claim "snapshot of %zu symbols" using ing.symbols.size() —
+    # every raw indexed symbol — while the sidecar actually writes one row per DISTINCT canonId (overloads
+    # collapse to their MAX; a symbol with no canonId is skipped), a SMALLER number by construction. The
+    # message now names both counts explicitly rather than one number that isn't what got written.
+    grep -qE 'wrote .* \(snapshot of [0-9]+ per-symbol rows, [0-9]+ indexed symbols total\)' "$TMPA/q_base.err" \
+        && ok "quality: baseline stderr names per-symbol ROWS separately from total indexed symbols" \
+        || { no "quality: baseline stderr does not distinguish rows-written from symbols-indexed"; cat "$TMPA/q_base.err"; }
+    ROWS="$( grep -oE '[0-9]+ per-symbol rows' "$TMPA/q_base.err" | grep -oE '^[0-9]+' )"
+    TOTAL="$( grep -oE '[0-9]+ indexed symbols total' "$TMPA/q_base.err" | grep -oE '^[0-9]+' )"
+    [ -n "$ROWS" ] && [ -n "$TOTAL" ] && [ "$ROWS" -le "$TOTAL" ] \
+        && ok "quality: rows written ($ROWS) <= symbols indexed ($TOTAL) — never a lie in the other direction" \
+        || no "quality: rows-written ($ROWS) exceeds symbols-indexed ($TOTAL), which cannot happen honestly"
 else
     no "quality: baseline write via '.' failed (exit $rc_qb)"; cat "$TMPA/q_base.err"
 fi

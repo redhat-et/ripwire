@@ -319,5 +319,19 @@ else
     no "the golden capture test/docdriftfix.golden.xml is missing (regenerate it — see the note above)"
 fi
 
+# ── §L10b LOW tail: the <history> element's own attributes (probed=/commits=/removed-names=/truncated=)
+#    had no clause on this legend either (the same gap as --whereis's copy) — one shared sentence
+#    (gitoracle.h kHistoryProbeLegend), present ONLY when --with-history made <history> reachable. The
+#    golden comparison above already proves a PLAIN --doc-drift run pays nothing for it (no clause = no
+#    byte drift on the golden); this checks the --with-history run gains it.
+"$BIN" "$CORPUS" --doc-drift --with-history --no-cache >"$TMP/wh.xml" 2>/dev/null
+grep -q 'history probed="1" means the git-log name-history walk ran' "$TMP/wh.xml" \
+    && ok "L10b: --doc-drift --with-history legend now DEFINES the <history> element" \
+    || no "L10b: --doc-drift --with-history legend still does not define <history>"
+if command -v xmllint >/dev/null 2>&1; then
+    xmllint --noout "$TMP/wh.xml" 2>/dev/null && ok "L10b: --doc-drift --with-history XML well-formed" \
+                                               || no "L10b: --doc-drift --with-history XML malformed"
+fi
+
 [ $fail -eq 0 ] && echo "docdriftcheck: ALL PASS" || echo "docdriftcheck: FAILURES"
 exit $fail

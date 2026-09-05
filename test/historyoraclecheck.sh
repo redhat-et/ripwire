@@ -292,5 +292,17 @@ if command -v xmllint >/dev/null 2>&1; then
     xmllint --noout "$TMP/w4" 2>/dev/null && ok "L10 fixture: whereis --with-history XML well-formed" || no "L10 fixture: whereis --with-history XML malformed"
 fi
 
+# ── §L10b LOW tail: the <history> element's own attributes (probed=/commits=/removed-names=/truncated=)
+#    had NO clause on this legend at all — a reader could see commits="1205" with no idea what was
+#    counted. One shared sentence (gitoracle.h kHistoryProbeLegend), present ONLY when --with-history
+#    actually made <history> reachable (a plain --whereis run pays nothing for it).
+grep -q 'history probed="1" means the git-log name-history walk ran' "$TMP/w4" \
+    && ok "L10b: --whereis --with-history legend now DEFINES the <history> element" \
+    || no "L10b: --whereis --with-history legend still does not define <history>"
+"$BIN" "$R2" --whereis=stableOnHeadHelper >"$TMP/w5" 2>/dev/null
+grep -q 'history probed="1" means' "$TMP/w5" \
+    && no "L10b: plain --whereis (no --with-history) carries the <history> legend clause it has no element for" \
+    || ok "L10b: plain --whereis pays nothing for the <history> clause (no --with-history, no <history> element either)"
+
 [ $fail -eq 0 ] && echo "historyoraclecheck: ALL PASS" || echo "historyoraclecheck: FAILURES"
 exit $fail
