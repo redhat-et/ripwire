@@ -312,6 +312,27 @@ static const char kScriptSim[] = R"JS(
   // state them. A subset view's L was never expected to equal EDGE_TOTAL; the whole-map view's is.
   var selfEdgesDropped = 0;
   var labelSet = new Set();      // local indices that get a persistent text label (see loadSubset's rule)
+  // ---- module HULLS: the groups draw() outlines, rebuilt per load (see loadSubset's hull block).
+  var hullGroups = [];           // [{ comm, name, idx: [local indices] }], largest first
+  var hullsTotal = 0;            // modules with >= MIN_HULL_MEMBERS in view — the DENOMINATOR the caption states
+  var hullsDrawn = 0;            // ...and how many survived draw()'s dispersion test and the cap
+  var MAX_HULLS = 12, MIN_HULL_MEMBERS = 3;
+  var HULL_PAD_PX = 16;          // how far the outline stands off its outermost members, in SCREEN px
+  // A convex hull only means "these belong together" if the group IS spatially together, and Louvain
+  // communities are not always laid out that way: on this repository's own default map the three largest
+  // are `size`/`find`/`empty` — name-based hubs whose members are scattered across the whole picture —
+  // and their hulls came out as huge overlapping lenses covering most of the canvas. That is not
+  // containment, it is a wash, and it made the picture WORSE than no outline at all.
+  //
+  // The test is PURITY, not size, because purity is what containment actually claims: an outline is
+  // drawn only when most of what it encloses belongs to it. Measured over the hull's bounding box rather
+  // than the hull itself — a point-in-polygon test per node per group is O(N x groups x vertices) every
+  // frame and this is O(N x groups), which is what keeps it affordable at the 5000-node ceiling. The box
+  // is the looser test of the two, so it errs toward drawing, never toward a silent drop.
+  //
+  // HULL_CANDIDATES bounds that cost from the other side: only the largest few groups are ever
+  // considered, because they are the only ones whose outline tells a reader anything at this scale.
+  var HULL_PURITY = 0.5, HULL_CANDIDATES = 24;
   var labelDegreeOrder = [];     // the same set as an ARRAY in descending importance, so the declutter in
                                  // draw() places the ones that matter first and drops the collisions
   var MAX_LABELS = 24;
@@ -467,6 +488,44 @@ static const char kScriptSim[] = R"JS(
       labelSeenNames.add(nodes[li].label);
       labelDegreeOrder.push(li);
       labelSet.add(li);
+    }
+
+    // ---- module HULLS: which groups get an outline.
+    //
+    // WHAT THIS REPLACES. Module identity was carried by hue alone, `commColor[comm % 12]` — twelve
+    // colours over 26 modules on this repository's own default page, 31 on the README hero, and 299 and
+    // 188 on two larger corpora. At --top-k=2000 that is 24-25 distinct modules sharing every hue, while
+    // the legend printed "m0 ... m11" and said nothing about the collision, so two adjacent
+    // same-coloured clusters read as one module and there was no way to tell from the picture that they
+    // were not. Twelve categorical hues is roughly the ceiling for a colour channel and the module count
+    // is unbounded, so no palette fixes this: CONTAINMENT is the only channel that can honestly express
+    // 26-299 groups, and it is also the single largest "this hairball has structure" win available.
+    //
+    // The outline is independent of --color-by. It says WHICH MODULE; the fill inside still says
+    // whatever lens the reader picked, so a `cx` view shows hot symbols AND the module boundaries they
+    // sit inside instead of making the reader choose.
+    //
+    // A group needs MIN_HULL_MEMBERS points before a hull means anything (two points are a line), and at
+    // most MAX_HULLS are drawn because 26 overlapping outlines is the hairball again in a second
+    // channel. Both the cap and the total are handed to the caption — an undisclosed cap would be this
+    // page implying it had drawn every module.
+    hullGroups = [];
+    hullsTotal = 0;
+    if (typeof MODULES !== 'undefined' && MODULES.length) {
+      var byComm = new Map();
+      for (var hi = 0; hi < N; hi++) {
+        var hc = nodes[hi].comm;
+        if (hc < 0 || hc >= MODULES.length) { continue; }
+        if (!byComm.has(hc)) { byComm.set(hc, []); }
+        byComm.get(hc).push(hi);
+      }
+      var groups = [];
+      byComm.forEach(function(idx, c) {
+        if (idx.length >= MIN_HULL_MEMBERS) { groups.push({ comm: c, name: MODULES[c].name, idx: idx }); }
+      });
+      hullsTotal = groups.length;
+      groups.sort(function(a,b){ return b.idx.length - a.idx.length || a.comm - b.comm; });
+      hullGroups = groups.slice(0, HULL_CANDIDATES);   // draw() applies the purity test and the cap — both need geometry
     }
 
     ox = 0; oy = 0; scale = 1; autoFit = true;
@@ -646,6 +705,34 @@ static const char kScriptDraw[] = R"JS(
   // enumerator — and the caption's key is built from the same lookup, so such a page would say so.
   function shapeFor(n) { return SHAPES[SYM_SHAPES[n.type]] || SHAPES.circle; }
 
+  // ---- module hull geometry.
+  //
+  // Monotone-chain convex hull over [{x,y}] — O(n log n), and free beside the O(n^2) force sim that
+  // placed the points in the first place. Returns the hull ring; fewer than three non-collinear points
+  // has no hull, and the caller skips those groups rather than drawing a line and calling it a region.
+  function convexHull(pts) {
+    if (pts.length < 3) { return []; }
+    var p = pts.slice().sort(function(a,b){ return a.x - b.x || a.y - b.y; });
+    function cross(o,a,b){ return (a.x-o.x)*(b.y-o.y) - (a.y-o.y)*(b.x-o.x); }
+    var lo = [], up = [], i;
+    for (i = 0; i < p.length; i++) {
+      while (lo.length >= 2 && cross(lo[lo.length-2], lo[lo.length-1], p[i]) <= 0) { lo.pop(); }
+      lo.push(p[i]);
+    }
+    for (i = p.length - 1; i >= 0; i--) {
+      while (up.length >= 2 && cross(up[up.length-2], up[up.length-1], p[i]) <= 0) { up.pop(); }
+      up.push(p[i]);
+    }
+    lo.pop(); up.pop();
+    return lo.concat(up);
+  }
+  // '#rrggbb' + alpha -> 'rgba(r,g,b,a)'. The palettes are hex because that is the form a CSS legend
+  // swatch needs; a translucent canvas fill needs the channels.
+  function hexRgba(hex, a) {
+    var v = parseInt(hex.slice(1), 16);
+    return 'rgba(' + ((v >> 16) & 255) + ',' + ((v >> 8) & 255) + ',' + (v & 255) + ',' + a + ')';
+  }
+
   // --- draw ---
   // Radius reads IN-VIEW DEGREE, with rank as a tiebreak. The old `4 + 60*sqrt(rank)` spanned 4.60-11.78 px
   // with a MEAN of 5.10 on the README cut — every node a ~5 px dot — while in-view degree over the same
@@ -674,6 +761,70 @@ static const char kScriptDraw[] = R"JS(
     if (selected >= 0) {
       hl = new Set(nbr[selected]);
       hl.add(selected);
+    }
+
+    // ---- module HULLS, behind everything. Containment is the channel; see loadSubset's hull block for
+    // the 12-hues-over-26-modules collision it replaces and why no palette could have fixed it.
+    //
+    // Each outline is pushed HULL_PAD_PX (a screen quantity, converted here like every other one on this
+    // canvas) outward from the group's centroid so it clears its own members instead of threading
+    // through them, and it is drawn as a rounded blob — quadratic curves through the edge midpoints,
+    // one pass over the same vertices — because a hard polygon reads as a diagram of a region and a
+    // rounded one reads as the region. The fill is deliberately faint: the outline is a second channel
+    // sitting UNDER whatever --color-by the reader chose, and a hull that competes with the node colours
+    // has taken the lens away from them.
+    var hullAnchors = [];
+    hullsDrawn = 0;
+    for (var gi = 0; gi < hullGroups.length && hullsDrawn < MAX_HULLS; gi++) {
+      var grp = hullGroups[gi], gpts = [], mi;
+      for (mi = 0; mi < grp.idx.length; mi++) { gpts.push({ x: nodes[grp.idx[mi]].x, y: nodes[grp.idx[mi]].y }); }
+      var ring = convexHull(gpts);
+      if (ring.length < 3) { continue; }
+      var gcx = 0, gcy = 0, hj;
+      for (hj = 0; hj < ring.length; hj++) { gcx += ring[hj].x; gcy += ring[hj].y; }
+      gcx /= ring.length; gcy /= ring.length;
+      var padw = HULL_PAD_PX/scale, ex = [], topY = Infinity, topX = 0;
+      for (hj = 0; hj < ring.length; hj++) {
+        var vx = ring[hj].x - gcx, vy = ring[hj].y - gcy, vd = Math.sqrt(vx*vx + vy*vy) || 1;
+        var pxw = ring[hj].x + vx/vd*padw, pyw = ring[hj].y + vy/vd*padw;
+        ex.push({ x: pxw, y: pyw });
+        if (pyw < topY) { topY = pyw; topX = pxw; }
+      }
+      // THE PURITY TEST — see HULL_PURITY for the three lenses that made it necessary. If most of what
+      // this outline would enclose is NOT this module, the outline is not saying "these belong
+      // together", it is saying nothing over the top of everything else.
+      var bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+      for (hj = 0; hj < ex.length; hj++) {
+        if (ex[hj].x < bx0) bx0 = ex[hj].x;  if (ex[hj].x > bx1) bx1 = ex[hj].x;
+        if (ex[hj].y < by0) by0 = ex[hj].y;  if (ex[hj].y > by1) by1 = ex[hj].y;
+      }
+      var inside = 0;
+      for (var qi = 0; qi < N; qi++) {
+        var qn = nodes[qi];
+        if (qn.x >= bx0 && qn.x <= bx1 && qn.y >= by0 && qn.y <= by1) { inside++; }
+      }
+      if (inside > 0 && grp.idx.length/inside < HULL_PURITY) { continue; }
+      hullsDrawn++;
+      ctx.beginPath();
+      ctx.moveTo((ex[ex.length-1].x + ex[0].x)/2, (ex[ex.length-1].y + ex[0].y)/2);
+      for (hj = 0; hj < ex.length; hj++) {
+        var nxt = ex[(hj + 1) % ex.length];
+        ctx.quadraticCurveTo(ex[hj].x, ex[hj].y, (ex[hj].x + nxt.x)/2, (ex[hj].y + nxt.y)/2);
+      }
+      ctx.closePath();
+      var hcol = commColor[grp.comm % 12];
+      ctx.fillStyle = hexRgba(hcol, 0.085);
+      ctx.fill();
+      ctx.strokeStyle = hexRgba(hcol, 0.42);
+      ctx.lineWidth = 1.4/scale;
+      ctx.stroke();
+      // The name is a module's TOP-RANKED MEMBER (MODULES[].name — the same string the overview card
+      // uses), so on a repository whose hubs are container primitives it can read as an ordinary symbol
+      // name, and the picture already has a node labelled exactly that a few pixels away. The member
+      // count is what makes the two legible as different KINDS of thing — "clone ·9" is a group of
+      // nine, "clone" is a symbol — and it is the number a reader wants from a region anyway.
+      hullAnchors.push({ sx: topX*scale + ox, sy: topY*scale + oy - 6,
+                         text: grp.name + ' ·' + grp.idx.length, color: hcol });
     }
 
     // ---- edges, WITH THEIR DIRECTION DRAWN.
@@ -800,12 +951,13 @@ static const char kScriptDraw[] = R"JS(
     // draws, which is the same collision by a second route).
     var labelCells = new Set();
     var CELL_W = 8, CELL_H = 16, LABEL_H = 13;
-    function placeLabel(i) {
-      var n = nodes[i];
-      var rpx = nodeRadiusPx(n);                            // already a SCREEN radius
-      var sx = n.x*scale + ox + rpx + 3, sy = n.y*scale + oy + 4;
-      var wpx = ctx.measureText(n.label).width;             // screen px directly — the font is screen px now
-      // A label anchored well off the canvas is not drawn — and this is a GUARD, not an optimisation.
+    // placeTextAt is the whole placement rule — cull, reserve, halo, draw — with no idea what the text
+    // is FOR. It was placeLabel(i) and nothing else until the hulls needed names too; a second copy for
+    // hull labels would have been a second occupancy grid's worth of behaviour that could disagree with
+    // this one about what overlaps what, which is precisely the overprinting this grid exists to stop.
+    function placeTextAt(text, sx, sy, fill, alpha) {
+      var wpx = ctx.measureText(text).width;                // screen px directly — the font is screen px now
+      // Text anchored well off the canvas is not drawn — and this is a GUARD, not an optimisation.
       // The cell walk below advances an integer counter held in a double, and above 2^53 `c++` stops
       // advancing, so ONE label at an extreme coordinate turns `for (c = c0; c <= c1; c++)` into a loop
       // that cannot terminate: no error, no console message, a permanently frozen tab. MAX_STEP stops
@@ -817,7 +969,7 @@ static const char kScriptDraw[] = R"JS(
       if (c1 - c0 > 200) c1 = c0 + 200;                     // a pathological label cannot monopolise the grid
       for (var rr = r0; rr <= r1; rr++) { for (var c = c0; c <= c1; c++) { if (labelCells.has(c + ':' + rr)) return false; } }
       for (var rr2 = r0; rr2 <= r1; rr2++) { for (var c2 = c0; c2 <= c1; c2++) { labelCells.add(c2 + ':' + rr2); } }
-      ctx.globalAlpha = (hl && !hl.has(i)) ? 0.25 : 0.95;
+      ctx.globalAlpha = alpha;
       // A HALO first. The occupancy grid stops labels colliding with each OTHER; it says nothing about
       // what is underneath them, and in a dense view a name lands on top of a node disc — #d6d9de on a
       // bright teal is barely readable, which is the same lost label by a different route. Stroking the
@@ -825,11 +977,24 @@ static const char kScriptDraw[] = R"JS(
       ctx.lineJoin = 'round';
       ctx.lineWidth = LABEL_HALO_PX;
       ctx.strokeStyle = 'rgba(10,10,10,0.9)';
-      ctx.strokeText(n.label, sx, sy);
-      ctx.fillStyle = '#e6e9ee';
-      ctx.fillText(n.label, sx, sy);
+      ctx.strokeText(text, sx, sy);
+      ctx.fillStyle = fill;
+      ctx.fillText(text, sx, sy);
       return true;
     }
+    function placeLabel(i) {
+      var n = nodes[i], rpx = nodeRadiusPx(n);              // rpx is already a SCREEN radius
+      return placeTextAt(n.label, n.x*scale + ox + rpx + 3, n.y*scale + oy + 4,
+                         '#e6e9ee', (hl && !hl.has(i)) ? 0.25 : 0.95);
+    }
+    // Hull names go in FIRST, through the same grid: a region's name outranks any single symbol's,
+    // because it is the only thing on the canvas that says what a whole cluster IS. Drawn in the hull's
+    // own colour so the name and the outline are visibly the same object.
+    ctx.font = '600 12px sans-serif';
+    for (var ha = 0; ha < hullAnchors.length; ha++) {
+      placeTextAt(hullAnchors[ha].text, hullAnchors[ha].sx, hullAnchors[ha].sy, hullAnchors[ha].color, 0.95);
+    }
+    ctx.font = '11px sans-serif';
     var forced = [];
     if (hovered  >= 0) forced.push(hovered);
     if (selected >= 0) forced.push(selected);
@@ -1093,7 +1258,17 @@ static const char kScriptRouter[] = R"JS(
     // SYM_SHAPES, the identical lookup draw() marks a node with, so the key cannot name a shape the
     // picture does not draw; and it lists only the kinds actually IN THIS VIEW, because a fixed roster
     // would print marks a reader can hunt for and never find.
-    var l3 = ( currentView === 'overview' || N === 0 ) ? '' : k('shape') + shapeKey();
+    // The HULL count is a truncation and is stated as one. MAX_HULLS caps how many module outlines are
+    // drawn because 26 overlapping regions is the hairball again in a second channel; a cap the picture
+    // does not admit to would leave a reader counting outlines and concluding the repository has twelve
+    // modules. `>=3 in view` is the other half of the same disclosure — a two-member module has no hull
+    // to draw, so it is absent from the picture for a reason the caption names rather than a reason the
+    // reader has to guess.
+    var hullNote = ( hullsTotal > 0 )
+                 ? '  ' + k('hulls') + hullsDrawn + ' of ' + hullsTotal + ' modules with ' + MIN_HULL_MEMBERS +
+                   '+ nodes in view (cap ' + MAX_HULLS + '; an outline enclosing mostly other modules is not drawn)'
+                 : '';
+    var l3 = ( currentView === 'overview' || N === 0 ) ? '' : k('shape') + shapeKey() + hullNote;
     el.innerHTML = l3 ? ( l1 + '<br>' + l2 + '<br>' + l3 ) : ( l1 + '<br>' + l2 );
   }
 

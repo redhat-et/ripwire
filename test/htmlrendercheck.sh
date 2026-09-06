@@ -48,6 +48,9 @@
 #   (S) SHAPE   symbol KIND on the only nominal-only channel, from ONE table indexed by SymKind, with
 #               the key on the caption the PNG export stamps
 #   (T) LAYOUT  seeded and pulled in the VIEWPORT'S proportions, so a 16:9 frame is not half empty
+#   (U) HULLS   module identity as CONTAINMENT, because comm % 12 collides 24-25 ways at top-k 2000 —
+#               drawn behind the graph, independent of --color-by, purity-tested, and both truncations
+#               (the cap and the purity drop) stated in the caption
 #
 # Usage:
 #   test/htmlrendercheck.sh                          # uses build/ripwire on test/fixture
@@ -161,12 +164,15 @@ pin 'labelCells\.has' 'labelCells.has' "(B3) a colliding label is skipped, not o
 pin 'LABEL_H'        'LABEL_H'        "(B4) the occupancy grid reserves the label's height band (LABEL_H), not one row"
 # (B5) the placed box uses the MEASURED text width, not a per-character estimate: an estimate that runs
 #      short reserves less than it draws, which is the same collision by another route.
-pin 'measureText\(n\.label\)' 'measureText(n.label)' "(B5) the reserved box is the measured text width"
+#      (B5)/(B7)/(B12) name `text` rather than `n.label` because the placement rule was lifted out of
+#      placeLabel into placeTextAt when module hulls needed names too — same rule, one caller more. A
+#      second copy of it for hull labels would have been a second thing deciding what overlaps what.
+pin 'measureText\(text\)' 'measureText(text)' "(B5) the reserved box is the measured text width"
 # (B6) the grid stops labels colliding with each OTHER and says nothing about what is UNDER them. In a
 #      dense view a name lands on a node disc, and #d6d9de over bright teal is the same lost label by
 #      another route. Every label is stroked in the background colour before it is filled.
 pin 'LABEL_HALO_PX' 'LABEL_HALO_PX' "(B6) labels carry a dark halo so they stay legible over a node"
-pin 'strokeText\(n\.label' 'strokeText' "(B7) that halo is actually stroked behind the glyphs"
+pin 'strokeText\(text' 'strokeText' "(B7) that halo is actually stroked behind the glyphs"
 # (B8)-(B11) THE LABEL PASS IS DRAWN IN SCREEN SPACE. It used to sit inside the world transform at
 #     `(11/scale) px` with a `LABEL_HALO_PX/scale` halo — a screen-constant size written as a world one.
 #     It renders identically and costs whatever the zoom says: at the scale a settled 1000-node map fits
@@ -184,7 +190,7 @@ absent 'ctx\.lineWidth = LABEL_HALO_PX/scale' "(B11) so is the 1/zoom halo pen t
 #     `for (c = c0; c <= c1; c++)` a loop with no exit — the frozen tab of (D6), by its own mechanism.
 #     Culling an anchor that is off-canvas by more than LABEL_CULL_PX bounds c0/c1 by construction, so
 #     termination no longer depends on the sim behaving.
-inbody placeLabel 'LABEL_CULL_PX' 'LABEL_CULL_PX' "(B12) an off-canvas label anchor is culled, so the occupancy walk always terminates"
+inbody placeTextAt 'LABEL_CULL_PX' 'LABEL_CULL_PX' "(B12) an off-canvas text anchor is culled, so the occupancy walk always terminates"
 
 # ── (C) node radius by in-view degree ────────────────────────────────────────────────────────────────
 pin 'Math\.sqrt\(n\.deg' 'n.deg' "(C1) nodeRadius is driven by in-view degree"
@@ -640,6 +646,58 @@ absent 'ax\[i\] \+= gravity\*\(cx-nodes\[i\]\.x\)' "(T5) the isotropic pull it r
 #      viewport draws the graph as a line — the same class of unbounded-input defect as the zoom band
 #      (K) and the per-tick displacement cap (D6), both of which were found the hard way.
 inbody simTick 'Math\.min\(2\.5' '2.5' "(T6) that ratio is clamped, so an extreme window cannot flatten the graph into a line"
+
+# ── (U) MODULE HULLS — containment, because hue cannot count past twelve ──────────────────────────────
+#
+#     Module identity was carried by hue alone: commColor[comm % 12], twelve colours over 26 distinct
+#     modules on this repository's own default page, 31 on the README hero, and 299 and 188 on two
+#     larger corpora. At --top-k=2000 that is 24-25 modules sharing every hue while the legend printed
+#     "m0 ... m11" and said nothing about the collision, so two adjacent same-coloured clusters read as
+#     one module and nothing in the picture could tell a reader they were not. Twelve categorical hues
+#     is roughly the ceiling of a colour channel and the module count is unbounded, so no palette fixes
+#     this — containment is the only channel that can honestly express 26 to 299 groups.
+pin 'function convexHull' 'function convexHull' "(U1) the page computes a hull for a module's members"
+inbody draw 'hullGroups\[gi\]' 'hullGroups[gi]' "(U2) and draw() outlines them"
+# (U3) BEHIND THE GRAPH. An outline drawn over the edges and nodes is a lid, not a region; the whole
+#      point is that it sits under the picture. Checked by ORDER in the emitted script, which is the one
+#      thing a grep gate can actually verify about a canvas draw sequence.
+uHull="$( grep -n 'module HULLS, behind everything' "$PAGE" | head -1 | cut -d: -f1 )"
+uEdge="$( grep -n 'edges, WITH THEIR DIRECTION DRAWN' "$PAGE" | head -1 | cut -d: -f1 )"
+uNode="$( grep -nF 'shapeFor(n).path' "$PAGE" | head -1 | cut -d: -f1 )"
+if [ -n "$uHull" ] && [ -n "$uEdge" ] && [ -n "$uNode" ] && [ "$uHull" -lt "$uEdge" ] && [ "$uEdge" -lt "$uNode" ]; then
+    ok "(U3) hulls are painted before the edges and the edges before the nodes (lines $uHull < $uEdge < $uNode)"
+else
+    no "(U3) draw order is hull=$uHull edge=$uEdge node=$uNode — an outline over the graph is a lid, not a region"
+fi
+# (U4) THE OUTLINE IS NOT THE LENS. It says WHICH MODULE; the node fill still says whatever --color-by
+#      the reader picked, so a cx view shows hot symbols AND the boundaries they sit inside. If the hull
+#      took its colour from colorForNode it would have eaten the lens it is supposed to sit under.
+inbody draw 'commColor\[grp\.comm % 12\]' 'commColor[grp.comm % 12]' "(U4) a hull is coloured by its MODULE, independently of --color-by"
+# (U5) THE PURITY TEST. A convex hull only means "these belong together" if the group is spatially
+#      together, and Louvain communities are not always laid out that way: on this repository's own map
+#      the three largest are name-based hubs (`size`, `find`, `empty`) whose members are scattered over
+#      the whole picture, and their hulls came out as huge overlapping lenses covering most of the
+#      canvas — not containment, a wash, and worse than no outline at all. Without this arm the feature
+#      passes its other arms while making the flagship picture harder to read.
+inbody draw 'HULL_PURITY' 'HULL_PURITY' "(U5) an outline that would enclose mostly OTHER modules is not drawn"
+pin 'HULL_CANDIDATES' 'HULL_CANDIDATES' "(U6) and that test's cost is bounded — it is O(N x groups) every frame at up to 5000 nodes"
+# (U7)/(U8) BOTH TRUNCATIONS ARE STATED. The cap and the purity test each remove modules from the
+#      picture, and a reader counting outlines would otherwise conclude the repository has twelve
+#      modules. Non-negotiable #3: every truncation is disclosed, and a zero means "none found".
+inbody renderProv 'hullsDrawn' 'hullsDrawn' "(U7) the caption states how many outlines were drawn of how many modules qualify"
+inbody renderProv 'MAX_HULLS' 'MAX_HULLS' "(U8) and names the cap, so the count cannot be read as the module total"
+# (U9) a two-point "hull" is a line segment, which is not a region and reads as a stray edge.
+pin 'MIN_HULL_MEMBERS = 3' 'MIN_HULL_MEMBERS = 3' "(U9) three members minimum — two points are a line, not a region"
+# (U10) the outline stands off its members in SCREEN units, like every other measurement on this canvas
+inbody draw 'HULL_PAD_PX/scale' 'HULL_PAD_PX/scale' "(U10) the outline's standoff is a screen quantity, so it survives the auto-fit zoom"
+# (U11)/(U12) HULL NAMES GO THROUGH THE SAME OCCUPANCY GRID as node labels. A second placement path
+#      would be a second thing that decides what overlaps what, and the two would disagree — which is
+#      the overprinting arm (B) exists to stop, re-introduced by a new caller. (U12) is the control:
+#      there is exactly ONE occupancy set on the page.
+inbody draw 'placeTextAt\(hullAnchors' 'placeTextAt' "(U11) hull names are placed by the same decluttering rule as node labels"
+ncells="$( grep -c 'var labelCells = new Set' "$PAGE" )"
+[ "$ncells" = "1" ] && ok "(U12) control: exactly one label occupancy grid on the page ($ncells)" \
+                    || no "(U12) control: $ncells occupancy grids — two placement rules will disagree about what overlaps"
 
 echo
 echo "  ($mutants mutation controls ran and went red on their mutants)"
