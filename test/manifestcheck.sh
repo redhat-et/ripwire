@@ -19,6 +19,26 @@ if [ "$fail" = 0 ]; then
     printf 'PASS: every top-level *check.sh gate is listed in regression.sh\n'
 fi
 
+# ── a gate name parked PAST the loop's `; do` is silently disabled ─────────────────────────────────
+# Both arms above can pass while a gate never runs: "every gate file is listed" greps the whole line and
+# still finds the name, and the count arm only notices if the stated count was NOT independently moved to
+# match. A merge resolver that whitespace-splits this line produces exactly that state -- the gate is off,
+# the manifest agrees with itself, and nothing says so. Assert the loop line's TAIL carries no gate token.
+loopTail="$( python3 -c "
+import re, sys
+text = open(sys.argv[1]).read()
+m = re.search(r'for _g in .*?; do(.*)', text)
+print('' if not m else m.group(1))
+" "$REGRESSION" )"
+strayGates="$( printf '%s' "$loopTail" | tr ' \t' '\n\n' | grep -E '^[a-z0-9_]+check$' || true )"
+if [ -n "$strayGates" ]; then
+    printf 'FAIL: gate name(s) parked AFTER the loop'"'"'s `; do` in test/regression.sh — listed, counted as absent, and never run:\n'
+    printf '        %s\n' $strayGates
+    fail=1
+else
+    printf 'PASS: no gate name is stranded past the loop'"'"'s `; do` in test/regression.sh\n'
+fi
+
 # ── gate-count drift: docs/EVALS.md §8 quotes the loop's length as a known-honest number; that
 # quote must equal the loop's ACTUAL length or it is itself the exact stale-docstring drift §8 is
 # complaining about. Both sides are derived here, not hand-copied, so they cannot silently disagree
@@ -33,6 +53,11 @@ m = re.search(r'for _g in (.*?); do', text, re.S)
 sys.exit('no loop found') if not m else print(len(m.group(1).split()))
 " "$REGRESSION" )"
 evalsStated="$( grep -oE 'loop in `test/regression\.sh` names [0-9]+' "$EVALS" | head -1 | grep -oE '[0-9]+$' )"
+# The line the §8 claim actually sits on, derived the same way the number is. A hard-coded line number
+# here was wrong by ~5,800 lines and pointed a reader at a published measurement to edit instead of the
+# claim -- the same class of defect the count check itself exists to catch.
+evalsLine="$( grep -nE 'loop in `test/regression\.sh` names [0-9]+' "$EVALS" | head -1 | cut -d: -f1 )"
+[ -n "$evalsLine" ] || evalsLine="?"
 if [ -z "$evalsStated" ]; then
     printf 'FAIL: docs/EVALS.md has no "loop in `test/regression.sh` names N" sentence to check (§8)\n'
     fail=1
@@ -42,7 +67,7 @@ elif [ -z "$loopNames" ]; then
 elif [ "$evalsStated" = "$loopNames" ]; then
     printf 'PASS: docs/EVALS.md §8 gate count (%s) matches test/regression.sh loop length (%s)\n' "$evalsStated" "$loopNames"
 else
-    printf 'FAIL: docs/EVALS.md §8 says the loop names %s, but it actually names %s — update docs/EVALS.md:395\n' "$evalsStated" "$loopNames"
+    printf 'FAIL: docs/EVALS.md §8 says the loop names %s, but it actually names %s — update docs/EVALS.md:%s\n' "$evalsStated" "$loopNames" "$evalsLine"
     fail=1
 fi
 
