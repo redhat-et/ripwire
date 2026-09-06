@@ -26,7 +26,8 @@
 #   4) THE ZERO-VIEWPORT SEED. A hidden tab/iframe boots the canvas at W=H=0, so a spread of
 #      min(W,H)*0.7 seeded every node at the SAME point — and coincident nodes have dx=dy=0, so the
 #      repulsion force is zero forever and the layout can never separate (the "one dot" render).
-#      Arm (7) pins the 300-world-unit floor and the ABSENCE of the unfloored expression.
+#      Arm (7) pins the 300-world-unit floor and the ABSENCE of the unfloored expression. The spread
+#      is PER-AXIS since 2026-09-06 (it seeds in the viewport's proportions), so the arm holds both.
 #
 # Usage:
 #   test/htmlcolorcheck.sh                          # uses build/ripwire on test/fixture
@@ -198,13 +199,17 @@ else
 fi
 
 # ── 7) the ZERO-VIEWPORT seed: spread floored so a W=H=0 boot cannot seed every node coincident ──────
-if grep -q 'Math.max(Math.min(W,H)\*0.7, 300)' "$TMP/out.html"; then
-    ok "(7a) seed spread is floored at 300 world units"
+#      The spread became PER-AXIS on 2026-09-06 (it seeds in the viewport's own proportions — see
+#      test/htmlrendercheck.sh arm (T) for why), so the floor is now two floors and BOTH must hold: a
+#      hidden tab boots at W=H=0, and one unfloored axis still collapses every node onto one line, where
+#      the repulsion between coincident points is zero and the cluster can never separate.
+if grep -q 'var SPREAD_X = Math.max(W\*0.7, 300), SPREAD_Y = Math.max(H\*0.7, 300);' "$TMP/out.html"; then
+    ok "(7a) both seed spreads are floored at 300 world units"
 else
-    no "(7a) seed spread is not floored — a zero-sized viewport seeds every node coincident (one-dot render)"
+    no "(7a) a seed spread is not floored — a zero-sized viewport seeds every node coincident (one-dot render)"
 fi
-if grep -q '(rng()-0.5)\*Math.min(W,H)\*0.7' "$TMP/out.html"; then
-    no "(7b) the UNFLOORED seed expression survives — the floor is dead code next to it"
+if grep -q '(rng()-0.5)\*Math.min(W,H)\*0.7\|(rng()-0.5)\*W\*0.7\|(rng()-0.5)\*H\*0.7' "$TMP/out.html"; then
+    no "(7b) an UNFLOORED seed expression survives — the floor is dead code next to it"
 else
     ok "(7b) no unfloored seed expression remains"
 fi
@@ -220,19 +225,28 @@ fi
 # ── 9) PALETTE — the shared cx/churn ramp reads as a blue→orange TEMPERATURE spectrum (the owner's own
 #      framing: "hotspots... colour spectrum from dark blue to orange"), not a green→red traffic light.
 #      Green→red leans entirely on red-green hue discrimination, which protanopia/deuteranopia (~8% of
-#      men) cannot make — the two ends can look alike. A blue→teal→gold→orange→deep-orange ramp keeps
+#      men) cannot make — the two ends can look alike. A blue→azure→aqua→amber→gold ramp keeps
 #      every step on the blue-yellow axis those forms of colour-blindness do NOT impair, and every stop
-#      is bright enough (contrast >= 4.9:1 against the canvas's #111 background, measured) to read on the
-#      dark canvas — a literal navy/near-black "dark blue" would vanish there instead. Pins the exact 5
-#      hex stops AND that neither the old green nor the old red stop survives on THIS ramp specifically —
-#      rampColor is grepped as its own line; the 'tested' mode's green/red PASS/FAIL binary (a different,
-#      deliberately-binary convention, colorForNode's 'tested' branch + its legend) is untouched by this
-#      arm on purpose, not by omission.
+#      is bright enough (worst stop 4.75:1 against the canvas's #111 background, measured) to read on the
+#      dark canvas — a literal navy/near-black "dark blue" would vanish there instead.
+#
+#      THIS ARM PINS THE IDENTITY, NOT THE PROPERTIES. The five stops changed on 2026-09-06 because the
+#      ramp that shipped before was not monotone in luminance (its dark→light order was [4,3,1,0,2], so
+#      the brightest swatch was the MIDDLE bucket) and its first two stops were 29/441 apart under
+#      deuteranopia. Those are measured properties and a hex pin is the wrong instrument for them — it
+#      passes for any five colours somebody typed. They are re-derived from the stops the page actually
+#      emits by test/htmlrendercheck.sh arm (Q): luminance monotonicity, contrast against the ground, and
+#      a Brettel/Viénot CVD simulation, each with its own mutation control. What stays here is what this
+#      file is for — that the emitted ramp is the one the colour payload is documented to carry, and that
+#      neither the old green nor the old red stop survives on THIS ramp specifically. rampColor is
+#      grepped as its own line; the 'tested' mode's own two fills (a different, deliberately-binary
+#      convention, colorForNode's 'tested' branch + its legend) are untouched by this arm on purpose,
+#      not by omission.
 rampLine="$( grep -m1 'var rampColor' "$TMP/out.html" )"
-if printf '%s' "$rampLine" | grep -qF "['#4fc3f7','#26c6da','#ffd54f','#ff9800','#e65100']"; then
-    ok "(9a) rampColor is the blue-to-orange 5-stop heat ramp"
+if printf '%s' "$rampLine" | grep -qF "['#4b81c9','#0fa3ff','#2bccc0','#ffce1c','#fff794']"; then
+    ok "(9a) rampColor is the cool-to-hot 5-stop heat ramp"
 else
-    no "(9a) rampColor is not the expected blue-to-orange ramp"
+    no "(9a) rampColor is not the expected cool-to-hot ramp"
     printf '    got: %s\n' "$rampLine"
 fi
 if printf '%s' "$rampLine" | grep -q '#2ecc71\|#e74c3c'; then

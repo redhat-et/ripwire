@@ -1453,7 +1453,12 @@ int runDefaultMap( const MainDispatch& d )
         // posture; no evidence ⇒ the page's CHURN_OK legend note discloses instead of lying zeros.
         std::vector<std::uint32_t> htmlChurn( ing.files.size(), 0 );
         const rw::SinceScope       htmlScope;   // inactive: --html has no --since form
-        const bool htmlChurnOk = mineChurnPerFile( ing, root, multiRoot, ws, std::string_view(), htmlScope, "18 months ago", htmlChurn );
+        // ONE spelling of the window, mined with it and then printed by the page's churn legend. It used to
+        // be a bare literal here and the legend said only "0 1-2 3-9 10-29 30+" — five buckets of an unnamed
+        // unit over an unstated horizon, which reads as "commits ever". Naming a constant and passing it is
+        // what keeps the page from making a claim the run cannot back.
+        static constexpr const char* kHtmlChurnWindow = "18 months ago";
+        const bool htmlChurnOk = mineChurnPerFile( ing, root, multiRoot, ws, std::string_view(), htmlScope, kHtmlChurnWindow, htmlChurn );
 
         // tested for the --color-by=tested lens: QMetrics is computed upstream only under
         // --metrics/--for/--exemplar, so on a bare --html run testedPtr is null and every node would
@@ -1479,7 +1484,8 @@ int runDefaultMap( const MainDispatch& d )
                 return 1;
             }
         }
-        writeHtml( htmlOut, ing, rank, g, mapTopK, HtmlColorExtras{ testedPtr, &htmlChurn, htmlChurnOk, cfg.colorBy }, mapRootArg );   // R-R
+        writeHtml( htmlOut, ing, rank, g, mapTopK,
+                   HtmlColorExtras{ testedPtr, &htmlChurn, htmlChurnOk, cfg.colorBy, kHtmlChurnWindow, cfg.rankBy }, mapRootArg );   // R-R
         if( htmlOut != stdout )
         {
             std::fclose( htmlOut );
@@ -2277,8 +2283,77 @@ bool isBareMapRun( const rw::Config& c )
 //                (identifiers and signatures are never redacted, by design): on the bare map there is nothing
 //                to un-redact, so the refusal names a body-serving verb.
 //   --refetch    re-clones a git-URL root and reaches nothing on a local path.
+//   --html       H1 (2026-09-06): writeHtml() is called from ONE place — runDefaultMap — and every
+//                navigation/report verb pre-empts the default map in the dispatch chain below, so
+//                `--around=SYM --html=F` exited 0, wrote no file, and said nothing. See kHtmlRideAlong.
+
+// H1 — the flags --html composes WITH, beyond kMapShapingFlags.
+//
+// THE DEFECT. `ripwire <dir> --around=writeHtml --html=/tmp/h.html` exited 0 and wrote nothing; the same
+// argv without --around wrote 59 KB. Same for --callers/--impact/--for/--lint/--hotspots, and a derived
+// sweep of the whole flag universe (test/htmlhostcheck.sh) found 74 flag x --html combinations in that
+// state. The MIRROR of this guard already existed and was loud: `--color-by` without `--html` refuses and
+// names --html (cli.h validateModifierGuards). This is the other half.
+//
+// REFUSE, NOT HONOUR — the decision, and why. Honouring would mean rendering the verb's scoped node set as
+// the page, and that is a worse answer than it sounds: the page's three views are an overview of Louvain
+// MODULES, a module subgraph, and a depth-bounded EGO GRAPH, all computed client-side over the whole
+// selected map. Over a 20-node --around slice the module overview is empty and the ego graph is a
+// re-derivation of the slice itself, so `--around=X --html=F` would produce a page answering a different
+// question from the one --around answers, with no tell. The page ALREADY does what that caller wants, and
+// now does it by name: `#node/X/2` is the depth-2 neighbourhood of X, so the refusal has somewhere real to
+// point. Refusing is also the smaller change (one predicate, no new emit path) and it is the one that
+// satisfies non-negotiable #3 — a caller can tell a no-op from a typo.
+//
+// DERIVED, NOT ENUMERATED. The 74 verbs are not listed here. firstFlagOutside() walks kBoolFlags/kViewFlags
+// — the rows parseArgs itself matched — so the refusal is "anything that is not on the compose list",
+// which makes a verb added tomorrow refuse tomorrow with nobody editing anything. Every previous closure of
+// this family in this repo was done by enumerating members and re-opened on the member nobody enumerated
+// (jsonUnsupportedVerb's 77-arm chain missed 12; the shaping-flag guards missed 18). The residual risk runs
+// the OTHER way — a new MAP-SHAPING flag would refuse until it is added below — and that direction is the
+// safe one: a loud refusal on a legal combination is noticed the first time it happens, a silent drop is
+// not. test/htmlhostcheck.sh arm (B) pins the compose list from the behaviour side.
+//
+// The list itself: kMapShapingFlags (a bare --json run IS the default map and these shape it) plus --html's
+// own two spellings, --query (the dispatch chain hoists it straight into runDefaultMap), the map's
+// body-serving riders that append blocks to the same map (--expand/--outline/--pack-signatures), and the
+// crawl/ordering shapers. Verified against the sweep: every one of these still WRITES the page.
+inline constexpr std::string_view kHtmlRideAlong[] =
+{
+    "--html", "--query", "--expand", "--outline", "--pack-signatures", "--exclude",
+    "--most-important-last", "--no-auto-order", "--no-post-check", "--route", "--stable",
+};
+
+// the verb that answered instead of the default map, or empty when --html is honoured on this run
+std::string_view htmlPreemptedBy( const rw::Config& c )
+{
+    if( !c.html )
+    {
+        return {};
+    }
+    // The hand-written parseArgs residue the flag tables cannot see, named explicitly — the same honest cost
+    // jsonUnsupportedVerb pays at its own top, and the same member isBareMapRun already spells out. --export
+    // writes a compile_commands-style JSON and returns before the map; without this line it was the ONE flag
+    // the derived sweep still found silent after the walk closed the other 73.
+    if( c.exportCcJson )
+    {
+        return "--export=cc.json";
+    }
+    return firstFlagOutside( c, kMapShapingFlags, kHtmlRideAlong );
+}
+
 std::optional<int> refuseInertMainModifiers( const rw::Config& cfg )
 {
+    if( const std::string_view verb = htmlPreemptedBy( cfg ); !verb.empty() )
+    {
+        // The pointer is phrased so it reads correctly for a verb with no symbol (--lint, --export) as well as
+        // for one with (--around=SYM): it names the page's own route rather than assuming the argv had a name.
+        std::fprintf( stderr, "ripwire: --html renders the DEFAULT map as a self-contained graph page, and %.*s answers instead — nothing was written. "
+                              "Pass --html on its own (e.g. ripwire <dir> --html=g.html); a single symbol's neighbourhood is a ROUTE INTO that page, "
+                              "g.html#node/SYM/2, not a second verb beside it\n",
+                      int( verb.size() ), verb.data() );
+        return 1;
+    }
     if( cfg.noRedact && isBareMapRun( cfg ) )
     {
         std::fprintf( stderr, "ripwire: --no-redact serves bodies VERBATIM and the default map carries no bodies (identifiers and signatures are never "
