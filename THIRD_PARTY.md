@@ -55,6 +55,7 @@ is why the sizes are what they are — `parser.c` is one big static table, not h
 | `deps/java` | tree-sitter-java (v0.23.5) | Ayman Nadeem | MIT | `94703d5a6bed02b98e438d7cad1136c01a60ba2c` | https://github.com/tree-sitter/tree-sitter-java | 2.5 MB |
 | `deps/javascript` | tree-sitter-javascript (v0.23.1) | Max Brunsfeld | MIT | `3a837b6f3658ca3618f2022f8707e29739c91364` | https://github.com/tree-sitter/tree-sitter-javascript | 2.4 MB |
 | `deps/ts_typescript` | tree-sitter-typescript (v0.23.2; supplies both the `typescript` and `tsx` grammars) | Max Brunsfeld | MIT | `f975a621f4e7f532fe322e13c4f79495e0a7b2e7` | https://github.com/tree-sitter/tree-sitter-typescript | 17 MB |
+| `deps/elixir` | tree-sitter-elixir (ABI 14) | Elixir contributors | Apache-2.0, MIT (generated sources; see NOTICE) | `4b0c7118760af58a2e7081bbc8396e136f820b37` | https://github.com/elixir-lang/tree-sitter-elixir | 12 MB |
 | `deps/ruby` | tree-sitter-ruby (v0.23.1) | Rob Rix | MIT | `71bd32fb7607035768799732addba884a37a6210` | https://github.com/tree-sitter/tree-sitter-ruby | 15 MB |
 | `deps/bash` | tree-sitter-bash (v0.23.3) | Max Brunsfeld | MIT | `487734f87fd87118028a65a4599352fa99c9cde8` | https://github.com/tree-sitter/tree-sitter-bash | 10 MB |
 | `deps/csharp` | tree-sitter-c-sharp (v0.23.5) | Max Brunsfeld, Damien Guard, Amaan Qureshi and contributors | MIT | `cac6d5fb595f5811a076336682d5d595ac1c9e85` | https://github.com/tree-sitter/tree-sitter-c-sharp | 28 MB |

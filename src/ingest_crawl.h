@@ -57,7 +57,7 @@ struct LangEntry
 // `std::array<bool, kLangTable.size()> present` (the grammar-prewarm set,
 // below) exact too, and it turns "added a row and forgot the extent" into a compile error rather than a
 // silent drop.
-constexpr std::array<LangEntry, 40> kLangTable = {{
+constexpr std::array<LangEntry, 42> kLangTable = {{
     { ".cpp",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cc",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cxx",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
@@ -147,6 +147,8 @@ constexpr std::array<LangEntry, 40> kLangTable = {{
     { ".phtml", Lang::Php,       &tree_sitter_php,        "php"        },   // PHP template (markup + <?php ?> islands) — same grammar, same query
     // Lua: no classes, no imports. The five function-definition spellings and the one call node are the
     // whole extractable structure (queries/lua/tags.scm states the metatable/dynamic-dispatch floor).
+    { ".ex",   Lang::Elixir,     &tree_sitter_elixir,     "elixir"     },
+    { ".exs",  Lang::Elixir,     &tree_sitter_elixir,     "elixir"     },
     { ".lua",  Lang::Lua,        &tree_sitter_lua,        "lua"        },   // Lua — function/method defs (5 shapes) + calls
     { ".md",   Lang::Markdown,   &tree_sitter_markdown,   ""           },   // Markdown DOC tier — headings/sections via extractMarkdown()'s custom tree walk; NO tags.scm (query stays "")
     { ".markdown", Lang::Markdown, &tree_sitter_markdown, ""           },   // sibling extension, same walk — scope disclosed: .md/.markdown only
@@ -361,7 +363,7 @@ std::string finalSegment( std::string_view raw )   // allocates a std::string �
 // a measured regression (--quality-delta scored the inline ternary at +3 ccx).
 std::string defNameFromCapture( Lang lang, std::string_view raw )
 {
-    if( lang == Lang::Json || lang == Lang::Toml || lang == Lang::Yaml )
+    if( lang == Lang::Json || lang == Lang::Toml || lang == Lang::Yaml || lang == Lang::Elixir )
     {
         return std::string( raw );
     }

@@ -16,9 +16,9 @@ deterministic call graph — what to touch, what it breaks, which tests to run �
 around and reading whole files.
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
-JavaScript · Java · Ruby · PHP · Lua · Bash · C# · JSON · TOML · YAML · Markdown — [twenty-one
-vendored grammars](#languages), and adding another is a vendored tree-sitter grammar plus one row in a
-declarative table.
+JavaScript · Java · Ruby · PHP · Lua · Elixir · Bash · C# · JSON · TOML · YAML · Markdown — [twenty-two
+vendored grammars](#languages). Language support combines a vendored tree-sitter grammar, extraction
+queries and a declarative extension table, with grammar-specific capture filters where needed.
 
 ### See the map — not just the numbers
 
@@ -619,7 +619,7 @@ cmake -S . -B build && cmake --build build -j
 **Or build from source.** Requirements: CMake 3.24+ and a C++23 compiler — that means clang 16+ /
 AppleClang 15+ (Xcode 15) / gcc 13+ / MSVC 19.36+, and if your distro's CMake is older than 3.24,
 `pip install cmake` or `brew install cmake` gets a current one everywhere. Nothing else —
-tree-sitter's core, all 21 grammars and the test framework are vendored under `third_party/deps`,
+tree-sitter's core, all 22 grammars and the test framework are vendored under `third_party/deps`,
 so there is no download step and no package manager to satisfy. Prove that with the network off:
 add `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
 
@@ -633,7 +633,7 @@ cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release && cmake --build build-re
 cmake -S . -B build && cmake --build build -j
 ```
 
-Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, PHP, Lua, Bash, Go,
+Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, PHP, Lua, Elixir, Bash, Go,
 Rust, Swift, C#** — plus JSON/TOML/YAML config keys, markdown sections, Metal, and CUDA (`<<<>>>`
 launches are call edges).
 
@@ -1516,7 +1516,7 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 
 ### In the tests
 
-`test/regression.sh` names **542 gate scripts** and is the authoritative list;
+`test/regression.sh` names **543 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -1679,18 +1679,22 @@ imports. Dynamic dispatch — `$fn()`, `call_user_func`, `__call` — names its 
 a stated floor, not a silence), **Lua** (all five spellings that define a function, including the
 `M.f = function` and table-constructor forms; `function M:f()` is a method. Metatable inheritance is
 a runtime call with no syntax to read, so a Lua corpus reports no inheritance edges — stated, not
-implied), Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
+implied), **Elixir** (`.ex`/`.exs` — modules, protocols, functions, macros, guards and delegates;
+literal ExUnit tests, local calls, remote calls and pipes. Quoted AST, module attributes and macro-generated definitions are excluded;
+bare zero-arity calls outside pipes, dynamic dispatch, alias/import/use resolution and protocol
+implementation dispatch are not inferred), Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
 `[tool.ruff.lint]` table is one symbol under its full dotted name, and
 `pyproject.toml`/`Cargo.toml`/CI workflows become greppable), and **Markdown** (`.md`/`.markdown` —
 the DOC tier: every heading, ATX or setext, is a section symbol whose span runs to the next
 same-or-higher heading, so `--for` ranks the section, `--expand` serves the section body, `--recall`
 answers section-granular, and links/`backtick` mentions are doc→doc and doc→code edges).
-Twenty-one tree-sitter grammars, all vendored.
+Twenty-two tree-sitter grammars, all vendored.
 
 Want another language? The pipeline is language-agnostic past the parse: a new language is a
-vendored tree-sitter grammar, its query file, and one row in the declarative
+vendored tree-sitter grammar, its query file, and entries in the declarative
 `extension → { grammar, queries }` table (the "declarative constexpr tables" rule in
-[`CONTRIBUTING.md`](CONTRIBUTING.md)) — open an issue naming the grammar and the repo you'd run it on.
+[`CONTRIBUTING.md`](CONTRIBUTING.md)). Some grammars also need capture filters: Elixir, for example,
+represents definitions as ordinary calls. Open an issue naming the grammar and the repo you'd run it on.
 
 Notebooks, HTML and CSV are indexed as *documents* for `--recall` and the doc↔code edges behind
 `--mentions`; Office and PDF join them through an optional bridge. Markdown graduated from that

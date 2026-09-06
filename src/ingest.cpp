@@ -154,6 +154,7 @@ extern "C"
     const TSLanguage* tree_sitter_markdown( void );
     const TSLanguage* tree_sitter_php( void );
     const TSLanguage* tree_sitter_lua( void );
+    const TSLanguage* tree_sitter_elixir( void );
 }
 
 // ── the ingest-family sections (2026-08-29 split; ingest() phases followed 2026-08-30) ──────────────
@@ -176,6 +177,7 @@ extern "C"
 #include "ingest_docs.h"
 #include "ingest_names.h"
 #include "ingest_binds.h"
+#include "ingest_elixir.h"
 #include "ingest_sidecap.h"
 #include "ingest_prewarm.h"
 #include "ingest_parsepool.h"

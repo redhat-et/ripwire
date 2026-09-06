@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-06, Elixir: kParserVer 77 -> 81 and kIngestParserVerMirror -> 81 for the new grammar,
+#   definition/call filters and metrics. Skip old rich 78 and intermediate development 79/80.
+#   Extraction identity invalidates snapshots; no Snapshot-side semantics changed, scheme stays 8.
 # 2026-09-03, PHASE 5 — the external-name veto + the receiver MRO walk (test/externalvetocheck.sh, test/mrowalkcheck.sh,
 #   docs/EVALS.md "Phase 5"): kParserVer 76 -> 77 — three Python ingest FACTS moved: a `super()` call receiver
 #   classifies the new RecvKind::SuperObj (appended) instead of None; every import statement records the NAMES it

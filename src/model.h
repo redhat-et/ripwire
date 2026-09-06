@@ -97,9 +97,9 @@ inline const char* symTag( SymKind k ) noexcept
 // clamp into the identical Unknown-bucket headroom in serialize.h, zero renumbering of Cpp..Yaml.
 // UNLIKE Json/Toml/Yaml these two are CODE languages with real call graphs — they are simply the next
 // two free indexes, and APPENDING (never inserting) is what keeps every on-disk cache key stable.
-enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml, Php, Lua };
+enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml, Php, Lua, Elixir };
 
-// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua").
+// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua|ex").
 // The canonical home for this switch: previously duplicated privately in htmlexport.h, moved here so a THIRD
 // caller (naming-consistency's per-language vote groups) reuses it instead of growing a second copy.
 inline const char* langTag( Lang l ) noexcept
@@ -125,6 +125,7 @@ inline const char* langTag( Lang l ) noexcept
         case Lang::Yaml:       return "yaml";
         case Lang::Php:        return "php";
         case Lang::Lua:        return "lua";
+        case Lang::Elixir:     return "ex";
         default:               return "?";
     }
 }

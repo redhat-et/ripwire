@@ -1506,6 +1506,11 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 continue;
             }
 
+            if( le.lang == Lang::Elixir && !elixirKeepCapture( roleNode, nameNode, isDef, kind, src ) )
+            {
+                continue;
+            }
+
             if( isDef )
             {
                 RawDef d;
@@ -1521,7 +1526,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // defBodyNodeOf = the `body:` field, PLUS the macro-edges round's one addition: a #define's
             // replacement text (`value:` field) is adopted as a macro symbol's body, set before the climb
             // below so the climb is skipped for macros.
-            TSNode body    = defBodyNodeOf( roleNode, kind );
+            TSNode body    = le.lang == Lang::Elixir ? elixirBody( roleNode, src ) : defBodyNodeOf( roleNode, kind );
             // LB-E testmacroblock: the def is TWO SIBLING nodes (see testMacroBlockPartsOf) — adopt the
             // sibling compound_statement as the body and the title literal as the name BEFORE the shared
             // span/complexity code below. The span's endByte and the loc row window are extended past
@@ -1548,7 +1553,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // No-op for every pre-existing Var capture (Swift/C#/Go/Python parents hit a scope-stop or the
             // file root before any "body"-owning ancestor — verified byte-identical on the gate corpora).
             // A Field's span is its own field_declaration / defining assignment — the Var rule, same reason.
-            if( ts_node_is_null( body ) && kind != SymKind::Var && kind != SymKind::Field )
+            if( ts_node_is_null( body ) && kind != SymKind::Var && kind != SymKind::Field && le.lang != Lang::Elixir )
             {
                 TSNode child = roleNode;
                 TSNode p     = ts_node_parent( roleNode );
@@ -1652,7 +1657,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 const std::uint32_t endRow   = ts_node_end_point( isTestMacroBlock ? body : defNode ).row;   // LB-E: rows through the sibling block
                 d.loc = ( endRow >= startRow ) ? ( endRow - startRow + 1u ) : 1u;
             }
-            d.params    = fnOrMethod ? countParams( defNode ) : std::uint16_t( 0 );
+            d.params    = fnOrMethod ? ( le.lang == Lang::Elixir ? elixirParams( defNode ) : countParams( defNode ) ) : std::uint16_t( 0 );
             // LB-E: a testmacroblock's parameter surface is the MACRO's business, not visible here — claim
             // inexact so the resolver's arity narrowing never trusts params=0 on a test-title symbol.
             d.arityExact = ( fnOrMethod && !isTestMacroBlock ) ? std::uint8_t( cc_paramArityExact( defNode, le.lang, kind ) ? 1 : 0 ) : std::uint8_t( 0 );   // B2.2
@@ -1673,6 +1678,12 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.kind      = kind;
             d.lang      = le.lang;
             d.name      = isTestMacroBlock ? std::string( nameTxt ) : defNameFromCapture( le.lang, nameTxt );   // LB-E: a title is a display string — see testMacroTitleOf
+            if( le.lang == Lang::Elixir && elixirTarget( roleNode, src ) == "test" )
+            {
+                // Static ExUnit title; interpolation was rejected by elixirKeepCapture.
+                d.name = "test " + std::string( nameTxt.substr( 1, nameTxt.size() - 2 ) );
+                d.testScope = 1;
+            }
             if( le.lang == Lang::Cpp )                              // canonical scope (E#4): out-of-line `A::b` → "A", else enclosing class/namespace
             {
                 d.scope = qualifierOf( nameNode, src );
@@ -1688,6 +1699,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             else if( le.lang == Lang::Rust )
             { // H4: `impl Widget { fn new() }` → "Widget" — see rustEnclosingScopeOf
                 d.scope = rustEnclosingScopeOf( nameNode, src, /*includeModules=*/true );
+            }
+            else if( le.lang == Lang::Elixir )
+            {
+                d.scope = elixirScope( roleNode, src );
             }
             defs.push_back( std::move( d ) );
             if( kind == SymKind::Class || kind == SymKind::Struct || kind == SymKind::Interface )
@@ -1726,6 +1741,19 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 r.lang      = le.lang;
                 r.role      = isImportRef ? RefRole::Import : RefRole::Call;   // ABS-3: @reference.call is a call use-site; @reference.import a using-decl re-export
                 r.name      = finalSegment( nameTxt );
+                if( le.lang == Lang::Elixir )
+                {
+                    r.qualifier = elixirScope( roleNode, src );
+                    const TSNode target = ts_node_child_by_field_name( roleNode, "target", 6 );
+                    if( !ts_node_is_null( target ) && std::strcmp( ts_node_type( target ), "dot" ) == 0 )
+                    {
+                        const TSNode receiver = ts_node_child_by_field_name( target, "left", 4 );
+                        if( !ts_node_is_null( receiver ) && std::strcmp( ts_node_type( receiver ), "alias" ) == 0 )
+                        {
+                            r.qualifier = std::string( nodeTextOf( receiver, src ) );
+                        }
+                    }
+                }
                 if( le.lang == Lang::Cpp )
                 {
                     r.qualifier = qualifierOf( nameNode, src ); // `A::b()` → "A" (E#4 canonical resolve)

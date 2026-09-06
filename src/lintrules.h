@@ -77,7 +77,7 @@ inline bool isValidSeverity( std::string_view s ) noexcept
 inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
 {
     struct Row { std::string_view name; Lang lang; };
-    static constexpr std::array<Row, 15> kMap = { {
+    static constexpr std::array<Row, 16> kMap = { {
         { "cpp",        Lang::Cpp        },
         { "python",     Lang::Python     },
         { "typescript", Lang::TypeScript },
@@ -93,6 +93,7 @@ inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
         { "c",          Lang::C          },
         { "php",        Lang::Php        },
         { "lua",        Lang::Lua        },
+        { "elixir",     Lang::Elixir     },
     } };
     for( const Row& r : kMap )
     {
@@ -124,7 +125,7 @@ inline Lang langOfPath( std::string_view path ) noexcept
     }
 
     struct Row { std::string_view ext; Lang lang; };
-    static const std::array<Row, 30> kExt = { {
+    static const std::array<Row, 32> kExt = { {
         { ".cpp", Lang::Cpp }, { ".cc", Lang::Cpp }, { ".cxx", Lang::Cpp },
         { ".h", Lang::Cpp }, { ".hpp", Lang::Cpp }, { ".hh", Lang::Cpp }, { ".hxx", Lang::Cpp }, { ".c", Lang::C },
         { ".py", Lang::Python },
@@ -140,6 +141,7 @@ inline Lang langOfPath( std::string_view path ) noexcept
         { ".cs", Lang::CSharp },
         { ".php", Lang::Php },
         { ".lua", Lang::Lua },
+        { ".ex", Lang::Elixir }, { ".exs", Lang::Elixir },
     } };
     for( const Row& r : kExt )
     {
@@ -179,7 +181,7 @@ inline bool dependencyCapable( Lang lang ) noexcept
         case Lang::Rust: case Lang::Go: case Lang::Swift:
         case Lang::Java: case Lang::CSharp: case Lang::Php:
             return true;
-        case Lang::Bash: case Lang::Ruby: case Lang::Lua: case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Markdown: case Lang::Unknown:
+        case Lang::Bash: case Lang::Ruby: case Lang::Lua: case Lang::Elixir: case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Markdown: case Lang::Unknown:
         default:
             return false;
     }

@@ -172,7 +172,7 @@ inline std::string_view cc_boolOp( TSNode n, std::string_view src ) noexcept
 inline bool cc_isBooleanJoin( TSNode n, std::string_view src, Lang lang ) noexcept
 {
     const std::string_view o        = cc_operatorText( n, src );
-    const bool             wordLang = ( lang == Lang::Lua || lang == Lang::Php );
+    const bool             wordLang = ( lang == Lang::Lua || lang == Lang::Php || lang == Lang::Elixir );
     return    o == "&&" || o == "||"
            || ( wordLang && ( o == "and" || o == "or" ) )
            || ( lang == Lang::Php && o == "xor" );
@@ -1043,7 +1043,15 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         const std::uint32_t ctrl = ( evCtx != nullptr && isNamed ) ? ev_noteNode( *evCtx, n, t, frame.ctrl, lang, src ) : frame.ctrl;
 
         // cyclomatic (flat decision count) accumulated in the SAME DFS as cognitive — one walk, both metrics.
-        if( isNamed && isDecisionType( t, lang ) )
+        // Elixir controls are ordinary calls whose target text supplies the keyword.
+        const auto elixirKeyword = lang == Lang::Elixir ? nodeFieldText( n, "target", 6, src ) : std::string_view{};
+        if( elixirKeyword == "quote" )
+        {
+            continue; // quoted AST is not executed control flow
+        }
+        const bool elixirDecision = elixirKeyword == "if" || elixirKeyword == "unless" || elixirKeyword == "for" || elixirKeyword == "with";
+        const bool elixirControl = elixirDecision || elixirKeyword == "case" || elixirKeyword == "cond" || elixirKeyword == "receive" || elixirKeyword == "try";
+        if( isNamed && ( isDecisionType( t, lang ) || elixirDecision || ( lang == Lang::Elixir && std::strcmp( t, "stab_clause" ) == 0 ) ) )
         {
             ++acc.cyclo;
         }
@@ -1063,12 +1071,12 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         {
             acc.locals += cc_countLocalDeclarators( n );
         }
-        else if( std::strcmp( t, "binary_expression" ) == 0 && cc_isBooleanJoin( n, src, lang ) )
+        else if( ( std::strcmp( t, "binary_expression" ) == 0 || ( lang == Lang::Elixir && std::strcmp( t, "binary_operator" ) == 0 ) ) && cc_isBooleanJoin( n, src, lang ) )
         {
             ++acc.cyclo;   // Myers' &&/|| extension — see cc_isBooleanJoin for the two spelling families
         }
 
-        if( isNamed && cc_isNestingControl( t, lang ) )
+        if( isNamed && ( cc_isNestingControl( t, lang ) || elixirControl ) )
         {
             const bool   isIf = ( std::strcmp( t, "if_statement" ) == 0 || std::strcmp( t, "if_expression" ) == 0 );
             const TSNode p    = ts_node_parent( n );
