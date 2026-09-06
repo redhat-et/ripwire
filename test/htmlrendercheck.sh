@@ -21,7 +21,8 @@
 #   (A) LABELS  selected by in-view DEGREE, one per distinct name, degree-1 suppressed
 #   (B) LABELS  greedy occupancy-grid declutter, so two labels cannot overprint into one word
 #   (C) NODES   radius driven by in-view degree (hubs findable), rank only as a tiebreak
-#   (D) SIM     settled before first paint, under a wall-clock budget that degrades to progressive
+#   (D) SIM     settled before first paint under a wall-clock budget that degrades to progressive —
+#               and the progressive tail bounded by the same clock, so a big map stops rather than hangs
 #   (E) LEGEND  every mode names its metric and its units, and the churn window is DERIVED from
 #               src/main.cpp's own mineChurnPerFile call so the page cannot claim a stale window
 #   (F) CAPTION provenance block: root, ranker, top-k, nodes/edges, colour metric — behaviourally
@@ -36,6 +37,10 @@
 #   (M) CSS     the invalid `.module-card { data-module-card:1; }` declaration is gone
 #   (N) LANG    every model.h::langTag value has a swatch — DERIVED from the langTag switch itself
 #   (O) determinism (byte-identical run-to-run) and self-containment on the rendered page
+#   (P) WHOLE MAP  a #graph route that draws the ENTIRE selected node set on the canvas, and boots
+#               into it, so `ripwire DIR --html=F` is a picture in ONE command with no fragment to
+#               paste — plus the controls that the module overview stayed reachable and that the
+#               settle budget was REUSED rather than a second one invented beside it
 #
 # Usage:
 #   test/htmlrendercheck.sh                          # uses build/ripwire on test/fixture
@@ -91,6 +96,47 @@ absent()
     if grep -qE -- "$1" "$PAGE"; then no "$2 — the replaced form survives: $( grep -oE -- "$1" "$PAGE" | head -1 )"; else ok "$2"; fi
 }
 
+# ── body-scoped arms. pin()/absent() judge the WHOLE 70 KB page, which is the wrong scope for a claim
+#    about one function: "the page mentions loadSubset somewhere" is true of four functions at once and
+#    says nothing about the one under test. (J2) and (L2) already needed this and each hand-rolled an
+#    awk range — with no mutation control, because there was nowhere to put one. These two helpers give
+#    the same scoping AND the control, so a body-scoped arm is held to the same bar as a pin().
+#
+#    fnbody FUNC — print FUNC's body. The renderer's functions are all at two-space indent inside the
+#    emitted <script>, so the closing `  }` at that indent is the end of the body and every nested block
+#    closes deeper. An empty body is a broken derivation, and both callers below fail on one by name
+#    rather than passing vacuously over nothing.
+fnbody(){ awk "/function $1\\(/,/^  \\}/" "$PAGE"; }
+
+# inbody FUNC PATTERN TOKEN DESC — PATTERN must match inside FUNC's body, and must MISS that same body
+# with every occurrence of literal TOKEN corrupted (the MUTANT control, pin()'s discipline at function
+# scope).
+inbody()
+{
+    local fn="$1" pat="$2" tok="$3" desc="$4"
+    fnbody "$fn" > "$TMP/body.txt"
+    if [ ! -s "$TMP/body.txt" ]; then no "$desc — no body found for $fn() (the awk range broke; the arm asserts nothing)"; return; fi
+    if ! grep -qE -- "$pat" "$TMP/body.txt"; then no "$desc — not found inside $fn()"; return; fi
+    # shellcheck disable=SC2001
+    sed "s/$( printf '%s' "$tok" | sed 's/[][\.*^$\/&]/\\&/g' )/zzRIPWIREMUTANTzz/g" "$TMP/body.txt" > "$TMP/bodymut.txt"
+    if grep -qE -- "$pat" "$TMP/bodymut.txt"; then
+        no "$desc — MUTANT CONTROL VACUOUS: the pattern still matches with '$tok' corrupted, so it is not testing this"
+    else
+        mutants=$(( mutants + 1 ))
+        ok "$desc"
+    fi
+}
+
+# notinbody FUNC PATTERN DESC — the form must NOT appear inside FUNC's body. absent() at function scope;
+# its own control is the non-empty body, without which "not found" is indistinguishable from "not read".
+notinbody()
+{
+    local fn="$1" pat="$2" desc="$3"
+    fnbody "$fn" > "$TMP/body.txt"
+    if [ ! -s "$TMP/body.txt" ]; then no "$desc — no body found for $fn() (the awk range broke; the arm asserts nothing)"; return; fi
+    if grep -qE -- "$pat" "$TMP/body.txt"; then no "$desc — found inside $fn(): $( grep -oE -- "$pat" "$TMP/body.txt" | head -1 )"; else ok "$desc"; fi
+}
+
 # ── (A) label selection by in-view degree, deduplicated by name, degree-1 suppressed ─────────────────
 pin 'labelDegreeOrder' 'labelDegreeOrder' "(A1) labels are ordered by a named in-view-degree rule (labelDegreeOrder)"
 pin 'labelSeenNames'   'labelSeenNames'   "(A2) at most one label per distinct name (labelSeenNames)"
@@ -114,6 +160,24 @@ pin 'measureText\(n\.label\)' 'measureText(n.label)' "(B5) the reserved box is t
 #      another route. Every label is stroked in the background colour before it is filled.
 pin 'LABEL_HALO_PX' 'LABEL_HALO_PX' "(B6) labels carry a dark halo so they stay legible over a node"
 pin 'strokeText\(n\.label' 'strokeText' "(B7) that halo is actually stroked behind the glyphs"
+# (B8)-(B11) THE LABEL PASS IS DRAWN IN SCREEN SPACE. It used to sit inside the world transform at
+#     `(11/scale) px` with a `LABEL_HALO_PX/scale` halo — a screen-constant size written as a world one.
+#     It renders identically and costs whatever the zoom says: at the scale a settled 1000-node map fits
+#     at, fitView pins `scale` on its 0.05 floor, so those become 220 px glyphs stroked with a 60 px
+#     round-join pen, 24 of them per frame, and the tab stops responding and does not come back. Bisected
+#     — the same map with the sim ON and this block skipped renders instantly. Both halves are pinned,
+#     because leaving either one scaled reopens it: the font (B8) and the halo pen (B9), each with the
+#     defective form as its ABSENCE control (B10)/(B11).
+pin "ctx\.font = '11px sans-serif'" "'11px sans-serif'" "(B8) the label font is a constant screen size, not 11/scale"
+pin 'ctx\.lineWidth = LABEL_HALO_PX;' 'ctx.lineWidth = LABEL_HALO_PX;' "(B9) and so is the halo pen — neither grows as the view zooms out"
+absent "ctx\.font = \(11/scale\)" "(B10) the 1/zoom label font that froze a whole-map view is gone"
+absent 'ctx\.lineWidth = LABEL_HALO_PX/scale' "(B11) so is the 1/zoom halo pen that stroked it"
+# (B12) and the cell walk TERMINATES unconditionally. It advances an integer counter held in a double;
+#     above 2^53 `c++` stops advancing, so one label at an extreme coordinate makes
+#     `for (c = c0; c <= c1; c++)` a loop with no exit — the frozen tab of (D6), by its own mechanism.
+#     Culling an anchor that is off-canvas by more than LABEL_CULL_PX bounds c0/c1 by construction, so
+#     termination no longer depends on the sim behaving.
+inbody placeLabel 'LABEL_CULL_PX' 'LABEL_CULL_PX' "(B12) an off-canvas label anchor is culled, so the occupancy walk always terminates"
 
 # ── (C) node radius by in-view degree ────────────────────────────────────────────────────────────────
 pin 'Math\.sqrt\(n\.deg' 'n.deg' "(C1) nodeRadius is driven by in-view degree"
@@ -133,6 +197,23 @@ pin 'MAX_NODE_PX'    'MAX_NODE_PX'    "(C5) that band has a CEILING — an unbou
 pin 'SETTLE_BUDGET_MS' 'SETTLE_BUDGET_MS' "(D1) the pre-paint settle carries a wall-clock budget"
 pin 'function settle'  'function settle'  "(D2) a named settle() runs the sim before the first draw"
 pin 'settleTimedOut'   'settleTimedOut'   "(D3) exceeding the budget degrades to progressive draw, disclosed by a flag"
+# (D4)/(D5) the PROGRESSIVE TAIL is bounded by the same clock. (D1)-(D3) bound how long the page BLOCKS
+#     and, alone, bound nothing about the work the layout goes on to do: step() ran every remaining tick
+#     however long they took. At the 5000-node ceiling that is ~20 s of sim (65 ms a tick, measured) plus
+#     a 5000-node redraw per frame, and a page opened there pegged its tab past five minutes — a hang,
+#     not a degrade, in the view the page now boots into. (D5) is the honesty half: a layout that stopped
+#     short must SAY it stopped short, or an under-converged picture ships as a finished one.
+inbody step 'LAYOUT_BUDGET_MS' 'LAYOUT_BUDGET_MS' "(D4) the progressive tail stops when the TOTAL layout allowance is spent"
+inbody renderProv 'layoutStopped' 'layoutStopped'  "(D5) and a layout that stopped short says so in the caption"
+# (D6)/(D7) THE INTEGRATOR IS NUMERICALLY BOUNDED. The spring term is linear in distance with no cap, so
+#     effective stiffness scales with a node's DEGREE and explicit Euler at this damping goes unstable
+#     past roughly degree 100. Measured on this repository's own map: --top-k=500 (max degree 70)
+#     converges to a 5.7e3 extent; --top-k=1000 (max degree 130) reaches 1.3e94 by step 280; --top-k=3000
+#     reaches Infinity. The consequence was not an ugly layout — past 2^53 `c++` on a coordinate is a
+#     no-op, so placeLabel's cell walk never terminated and the tab froze with no error at all. (D7) is
+#     the ABSENCE control: the unclamped integrate step must be gone, not sitting beside the clamped one.
+inbody simTick 'MAX_STEP' 'MAX_STEP' "(D6) the integrator caps the displacement one node may take in a tick"
+absent 'nodes\[i\]\.vx = \(nodes\[i\]\.vx \+ ax\[i\]\)\*dampen;' "(D7) the unclamped integrate step that diverged to 1e94 is gone"
 
 # ── (E) the legend names its metric and its units ────────────────────────────────────────────────────
 pin 'cyclomatic complexity' 'cyclomatic complexity' "(E1) cx legend names cyclomatic complexity"
@@ -197,6 +278,13 @@ pin 'id="savePng"' 'id="savePng"' "(I2) it is reachable from a control in the ba
 #      with the caption stamped into it.
 pin 'stampProvenance' 'stampProvenance' "(I3) the exported PNG has the provenance caption stamped into it"
 pin 'exportBitmap'    'exportBitmap'    "(I4) the export composes its own bitmap rather than shipping the raw canvas"
+# (I5) and that stamp must FIT the bitmap it is stamped into. The caption is one long unwrapped line of
+#      monospace against a bitmap as wide as whatever viewport produced it: at the fixed 13 px it started
+#      at, the first real 880-px export cut the root path mid-word and lost the colour metric past the
+#      right edge — provenance silently truncated inside the artifact that exists to carry it, and the
+#      surviving half reads as complete. (I6) is the ABSENCE control: the fixed-size font is gone.
+pin 'STAMP_FONT_MIN' 'STAMP_FONT_MIN' "(I5) the stamped caption is fitted to the bitmap width, with a readability floor"
+absent "g\.font = '13px ui-monospace" "(I6) the fixed-size stamp font that clipped the caption at the frame edge is gone"
 
 # ── (J) resize re-fits when autoFit is on ────────────────────────────────────────────────────────────
 #     step() early-returns once SIM_STEPS >= MAX_SIM, so after settling fitView could never run again:
@@ -277,6 +365,51 @@ if grep -oE 'https?://[^"'"'"' <>]+' "$PAGE" 2>/dev/null | grep -vq 'xmlns'; the
 else
     ok "(O3) self-contained: no http(s):// resource references beyond xmlns"
 fi
+
+# ── (P) the whole-map route, and the boot default ────────────────────────────────────────────────────
+#     --html advertises a force-directed call graph and the page had no view that drew one over the
+#     selected node set: the only canvas views were #module/ID and #node/ID[/DEPTH], both subsets, and
+#     the landing page was a wall of Louvain cards. The consequence is not cosmetic — it meant NO --html
+#     picture was reproducible by a single command, because every hero needed a hand-pasted fragment
+#     after the run. These arms pin the route, pin that it is a CANVAS view over the whole set rather
+#     than the card grid under a new name, and pin which view the page boots into.
+pin 'function renderGraph' 'function renderGraph' "(P1) a named whole-map view exists (renderGraph)"
+inbody renderGraph 'loadSubset\(ids, LINKS\)' 'loadSubset(ids, LINKS)' "(P2a) it hands the sim the WHOLE LINKS array, not a filtered subset"
+inbody renderGraph 'i < GN' 'GN' "(P2b) and every selected node (0..GN-1), not a neighbourhood"
+inbody renderGraph 'setChrome\(false, true\)' 'setChrome(false, true)' "(P3) it shows the CANVAS and hides the card grid"
+notinbody renderGraph 'renderOverviewCards' "(P4) control for (P3): the whole-map view does not fall back to drawing module cards"
+# (P5)/(P6) the BOOT DEFAULT. Both halves are needed: that the whole map is what an unhashed page opens
+#     on (P5), and that the module cards are no longer that (P6, ABSENCE). A page that sets #graph in
+#     one place and #overview in another boots on whichever runs last, which is exactly the class of
+#     defect a positive-only arm passes over.
+pin "location\.hash = '#graph'" "'#graph'" "(P5) an unhashed page boots into the whole map"
+absent "location\.hash = '#overview';" "(P6) the module-card overview is no longer the boot default"
+# (P7)/(P8) reachability, in both directions — the boot change must not have DELETED either view.
+pin 'href="#graph"'    'href="#graph"'    "(P7) the whole map is reachable by name from the bar"
+pin 'href="#overview"' 'href="#overview"' "(P8) control: the module overview is still reachable from the bar"
+pin 'function renderOverview\(' 'function renderOverview' "(P9) control: the module overview still exists as a view"
+inbody route "parts\[0\] === 'overview'" "'overview'" "(P10) the router still routes #overview to it explicitly"
+# (P11) the caption must NAME this view. renderProv states what the picture is, and a view it cannot
+#       name would caption the hero as one of the other two — a false provenance line on the one
+#       artifact the caption exists for.
+inbody renderProv 'whole map' 'whole map' "(P11) the provenance caption names the whole-map view"
+# (P12)/(P13) THE DEGRADE IS REUSED, NOT REINVENTED. The sim is 300 O(n^2) steps — ~38 ms per step at
+#       n=5000, so ~11.5 s of compute — and loadSubset already runs it under one wall-clock budget that
+#       degrades to the progressive rAF path and discloses itself in the caption. A second budget beside
+#       it would be a second thing to keep honest and a second thing to get wrong. (P12) asserts the new
+#       view carries no settle/rAF machinery of its own; (P13) is its control — the PRE-PAINT budget is
+#       declared exactly once, so (P12) cannot pass by the budget having moved somewhere else.
+#       (LAYOUT_BUDGET_MS, arm (D4), is the same mechanism's second checkpoint on the same clock and not
+#       a second mechanism: one settle(), one layoutT0, one caption line.)
+notinbody renderGraph 'SETTLE_BUDGET_MS|LAYOUT_BUDGET_MS|requestAnimationFrame|simTick|function settle' "(P12) the whole-map view runs no settle loop of its own — it reaches the budget through loadSubset"
+nbudget="$( grep -c 'var SETTLE_BUDGET_MS' "$PAGE" )"
+[ "$nbudget" = "1" ] && ok "(P13) control: the pre-paint settle budget is declared exactly once ($nbudget)" \
+                     || no "(P13) control: $nbudget settle budgets declared — a second degrade path was invented beside the first"
+# (P14)/(P15) the whole-map view is the ONE view whose edge count a reader will check against the caption's
+#       EDGE_TOTAL, and the sim drops self-edges (s === t) that EDGE_TOTAL counts. Undisclosed, that is
+#       a caption whose two numbers disagree with no explanation on the page.
+pin 'selfEdgesDropped' 'selfEdgesDropped' "(P14) self-calls the sim cannot draw are counted, not silently dropped"
+inbody renderProv 'selfEdgesDropped' 'selfEdgesDropped' "(P15) and disclosed in the caption beside the counts"
 
 echo
 echo "  ($mutants mutation controls ran and went red on their mutants)"

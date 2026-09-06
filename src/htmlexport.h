@@ -64,7 +64,7 @@ inline std::string jsonEscape( std::string_view s )
 // the emitted bytes, which are pure C++ output above this script — the seeded `rng()` below is for
 // deterministic-per-load initial layout, not for anything persisted).
 //
-// It is emitted as THREE adjacent string literals, concatenated back to back into one <script> in
+// It is emitted as FIVE adjacent string literals, concatenated back to back into one <script> in
 // declaration order. That is an editing split and nothing else — the same move src/main.cpp and
 // src/ingest.cpp made into verbs_*.h / ingest_*.h sections, for the same reason: one 850-line literal is
 // not a surface anyone can navigate, and --quality-delta reads a literal's length exactly the way it
@@ -250,8 +250,9 @@ static const char kScriptColour[] = R"JS(
   // -- end of section 1 --
 )JS";
 
-// SECTION 2 of the renderer: the graph state and the picture — the sim subset, the force integration,
-// the settle-before-paint driver, and draw(). Split from section 1 for the reason src/main.cpp and
+// SECTION 2 of the renderer: the graph STATE — the sim subset, the force integration and its stability
+// clamp, and the settle-before-paint driver. The picture it produces is section 3. Split from section 1
+// for the reason src/main.cpp and
 // src/ingest.cpp were split into verbs_*.h / ingest_*.h sections: the compile unit is unchanged (adjacent
 // literals are emitted back to back, in order, into one <script>), only the editing surface moved. An
 // 850-line string literal is not a thing anyone can navigate, and --quality-delta reads its length the
@@ -261,6 +262,9 @@ static const char kScriptSim[] = R"JS(
   // carry {gid, x, y, vx, vy, label, type, lang, rank, comm, cx, ts, file}; `gid` maps back to the
   // NODES index for lookups; the last four feed colorForNode. ----
   var nodes = [], links = [], N = 0, L = 0, nbr = [];
+  // Self-calls the sim cannot draw, counted per load (see loadSubset's edge loop) so the caption can
+  // state them. A subset view's L was never expected to equal EDGE_TOTAL; the whole-map view's is.
+  var selfEdgesDropped = 0;
   var labelSet = new Set();      // local indices that get a persistent text label (see loadSubset's rule)
   var labelDegreeOrder = [];     // the same set as an ARRAY in descending importance, so the declutter in
                                  // draw() places the ones that matter first and drops the collisions
@@ -268,6 +272,29 @@ static const char kScriptSim[] = R"JS(
   var MIN_LABEL_DEGREE = 2;      // rule 3: a node with one in-view edge is fringe and its name buys nothing
   var MIN_NODE_PX = 3.0, MAX_NODE_PX = 15.0;   // a node's on-screen radius band (see nodeRadiusPx)
   var LABEL_HALO_PX = 3.0;       // the dark outline stroked behind every label (see placeLabel)
+  var LABEL_CULL_PX = 2000;      // a label anchored further than this off-canvas is skipped (see placeLabel)
+  // THE INTEGRATOR'S STABILITY LIMIT, and the freeze that came of not having one.
+  //
+  // The spring term is LINEAR in distance with no cap, so a node's effective stiffness scales with its
+  // DEGREE, and explicit Euler at this damping is stable up to roughly degree 100 and unstable past it.
+  // Measured on this repository's own map: at --top-k=500 (max degree 70) the layout converges to a
+  // 5.7e3 extent; at --top-k=1000 (max degree 130) it grows exponentially — 6.3e3 after one tick, 1.3e94
+  // after 280 — and at --top-k=3000 it reaches Infinity outright.
+  //
+  // What that DID is much worse than an ugly layout. Once a coordinate passes 2^53, adding 1 to it is a
+  // no-op in a double, so placeLabel's `for (c = c0; c <= c1; c++)` cell walk stops advancing and NEVER
+  // TERMINATES: the tab freezes solid, with no error, no console message and no recovery. It was found
+  // by bisection — the same map renders instantly with the sim running and the label block skipped —
+  // and it would have been reachable before this view existed, through a depth-3 neighbourhood of any
+  // degree-130 hub; a view over the whole map just makes it reachable by opening the page.
+  //
+  // Capping the DISPLACEMENT one node may take in one tick is the standard remedy and it restores
+  // stability rather than merely bounding the damage: at top-k 1000 the peak step falls from 6.7e100 to
+  // 6.1e3 and the layout converges to 8.0e3; at top-k 3000, from Infinity to 1.4e4. It binds only during
+  // the first violent ticks of a crowded seed — 0.27% of integrations on a 120-node map, whose settled
+  // extent moves 2.71e3 to 2.72e3, a difference no picture shows. placeLabel's own cull is the second
+  // half: this stops the divergence, that stops any future one from being able to freeze anything.
+  var MAX_STEP = 500;            // world units a node may move in one tick
   var ox = 0, oy = 0, scale = 1, autoFit = true;
   var dragging = -1, panStart = null, hovered = -1, selected = -1;
   var searchSet = null;
@@ -288,6 +315,17 @@ static const char kScriptSim[] = R"JS(
   // provenance caption, never silent.
   var SETTLE_BUDGET_MS = 2000;
   var settleTimedOut = false;
+  // ...and the TOTAL allowance, progressive tail included. The pre-paint budget above bounds how long the
+  // page BLOCKS; on its own it bounds nothing about how much work the layout goes on to do, because step()
+  // then runs every remaining tick no matter how long they take. That gap was survivable while every view
+  // was a subset and only survivable then: at the 5000-node ceiling the remainder is ~20 s of sim (65 ms a
+  // tick, measured) plus a full 5000-node/13819-edge redraw per frame, and a page opened there pegged its
+  // tab past five minutes — not a degrade, a hang, in the view the page now BOOTS into. Same clock, same
+  // flag, same caption: when the allowance is gone the layout stops where it is and renderProv states the
+  // step it stopped at, so an under-converged picture is labelled as one rather than passed off as final.
+  var LAYOUT_BUDGET_MS = 6000;
+  var layoutStopped = false;
+  var layoutT0 = 0;
   var DPR = 1;                   // devicePixelRatio at the last resize(); the backing store is scaled by it
   var seed = 42;
   function rng() { seed = (seed * 1664525 + 1013904223) & 0xffffffff; return (seed >>> 0) / 4294967296; }
@@ -311,9 +349,18 @@ static const char kScriptSim[] = R"JS(
     }
     N = nodes.length;
     links = [];
+    selfEdgesDropped = 0;
     for (var k = 0; k < edges.length; k++) {
       var s = gidToLocal.get(edges[k].s), t = gidToLocal.get(edges[k].t);
-      if (s !== undefined && t !== undefined && s !== t) links.push({ s: s, t: t });
+      if (s === undefined || t === undefined) continue;
+      // A self-call is a real edge — EDGE_TOTAL counts it — and a force layout has nowhere to put it: a
+      // spring from a node to itself has zero length and zero direction. Dropping it is right; dropping
+      // it SILENTLY was fine only while every view was a subset, where nobody expects L to equal
+      // EDGE_TOTAL. The whole-map view is the one place a reader checks the caption's two edge counts
+      // against each other, so the difference is counted here and stated by renderProv rather than left
+      // as an unexplained gap between two numbers on the same screen.
+      if (s === t) { selfEdgesDropped++; continue; }
+      links.push({ s: s, t: t });
     }
     L = links.length;
     nbr = [];
@@ -423,13 +470,15 @@ static const char kScriptSim[] = R"JS(
       ax[i] += gravity*(cx-nodes[i].x);
       ay[i] += gravity*(cy-nodes[i].y);
     }
-    // integrate
+    // integrate, with the per-tick displacement capped at MAX_STEP (see its declaration for the
+    // exponential divergence this bounds, and the frozen tab that divergence produced)
     for (var i = 0; i < N; i++) {
       if (i === dragging) continue;
-      nodes[i].vx = (nodes[i].vx + ax[i])*dampen;
-      nodes[i].vy = (nodes[i].vy + ay[i])*dampen;
-      nodes[i].x += nodes[i].vx;
-      nodes[i].y += nodes[i].vy;
+      var vx = (nodes[i].vx + ax[i])*dampen, vy = (nodes[i].vy + ay[i])*dampen;
+      var sp = Math.sqrt(vx*vx + vy*vy);
+      if (sp > MAX_STEP) { var q = MAX_STEP/sp; vx *= q; vy *= q; }
+      nodes[i].vx = vx; nodes[i].vy = vy;
+      nodes[i].x += vx;  nodes[i].y += vy;
     }
   }
 
@@ -439,26 +488,48 @@ static const char kScriptSim[] = R"JS(
   // progressive rAF path so a very large graph degrades instead of hanging the tab (non-negotiable: a
   // recoverable limit is a degrade, and it is disclosed — renderProv prints "settling…" while it is true).
   function settle() {
-    var t0 = now();
+    layoutT0 = now();
     settleTimedOut = false;
+    layoutStopped = false;
     while (SIM_STEPS < MAX_SIM) {
       simTick();
-      if (now() - t0 > SETTLE_BUDGET_MS) { settleTimedOut = true; break; }
+      if (now() - layoutT0 > SETTLE_BUDGET_MS) { settleTimedOut = true; break; }
     }
     if (autoFit) fitView();
     draw();
     if (settleTimedOut) requestAnimationFrame(step);
   }
 
-  // the progressive driver — the pre-settle behaviour, now reached only past the budget
+  // the progressive driver — the pre-settle behaviour, now reached only past the pre-paint budget, and
+  // itself bounded by the TOTAL allowance (see LAYOUT_BUDGET_MS). It watches the same clock settle()
+  // started, so "2 s before the first paint, 6 s of layout in all" is one budget with two checkpoints
+  // rather than two budgets that can disagree.
   function step() {
     if (SIM_STEPS >= MAX_SIM) { settleTimedOut = false; renderProv(); return; }
+    if (now() - layoutT0 > LAYOUT_BUDGET_MS) {
+      layoutStopped = true; settleTimedOut = false;
+      if (autoFit) fitView();
+      draw();
+      renderProv();
+      return;
+    }
     simTick();
     if (autoFit) fitView();
     draw();
     requestAnimationFrame(step);
   }
 
+  // -- end of section 2 --
+)JS";
+
+// SECTION 3 of the renderer: the PICTURE — node size, the backdrop, draw() and its label declutter, and
+// the hit test that has to agree with what was drawn. Split from section 2 at the boundary section 2's
+// own header already named ("the graph state AND the picture"), for the reason the first split states:
+// the translation unit is unchanged (adjacent literals are emitted back to back, in order, into one
+// <script>) and only the editing surface moved. It is also what --quality-delta reported when this lane's
+// fixes pushed section 2 past 450 lines, which is the metric working as intended rather than a number to
+// dodge — the seam is where a reader would put one.
+static const char kScriptDraw[] = R"JS(
   // --- draw ---
   // Radius reads IN-VIEW DEGREE, with rank as a tiebreak. The old `4 + 60*sqrt(rank)` spanned 4.60-11.78 px
   // with a MEAN of 5.10 on the README cut — every node a ~5 px dot — while in-view degree over the same
@@ -535,7 +606,10 @@ static const char kScriptSim[] = R"JS(
       }
     }
 
-    // ---- labels, decluttered by a greedy occupancy grid.
+    ctx.globalAlpha = 1.0;
+    ctx.restore();
+
+    // ---- labels, decluttered by a greedy occupancy grid, drawn in SCREEN space.
     //
     // They used to be drawn in local-index order with no collision test at all, so two labels whose boxes
     // overlapped simply printed on top of each other: `release`/`resize`/`size` came out as "reisleaze",
@@ -546,7 +620,19 @@ static const char kScriptSim[] = R"JS(
     // the same at every zoom). Placement is in descending importance — labelDegreeOrder first, then the
     // always-shown hovered/selected/centre — so when two labels collide the more important one is the one
     // that survives. A skipped label is not lost: hover, click or search brings any node's name back.
-    ctx.font = (11/scale) + 'px sans-serif';
+    //
+    // THE TEXT IS DRAWN OUTSIDE THE WORLD TRANSFORM, and this is not a tidiness preference. It used to be
+    // drawn inside it at `(11/scale) px` with a `LABEL_HALO_PX/scale` halo — a screen-constant size
+    // expressed as a world quantity, which renders identically and costs whatever the zoom says. At the
+    // scale a settled 1000-node map fits at, fitView pins `scale` on its 0.05 floor, so those became 220 px
+    // glyphs stroked with a 60 px round-join pen, twenty-four of them per frame: the tab stopped responding
+    // and never came back. Bisected to this block (a build with the sim on and the labels skipped renders
+    // the same map instantly). Every coordinate below is the screen coordinate the occupancy grid was
+    // ALREADY computing, so the picture is unchanged pixel for pixel — the difference is that the cost no
+    // longer scales with 1/zoom. Node radii were converted to screen units for the same reason one commit
+    // earlier; the labels were the half that was left behind, and only a whole-map view was large enough
+    // to show it.
+    ctx.font = '11px sans-serif';
     // CELL_H is the grid's row pitch; LABEL_H is how tall a drawn label actually is. They are different
     // numbers and conflating them was a real bug: reserving only the row the BASELINE lands in leaves two
     // labels 5 px apart claiming different rows either side of a 16 px boundary. Measured in a browser on
@@ -558,9 +644,16 @@ static const char kScriptSim[] = R"JS(
     var CELL_W = 8, CELL_H = 16, LABEL_H = 13;
     function placeLabel(i) {
       var n = nodes[i];
-      var r  = nodeRadiusPx(n)/scale;
-      var sx = (n.x + r)*scale + ox + 3, sy = n.y*scale + oy + 4;
-      var wpx = ctx.measureText(n.label).width * scale;     // world units -> screen px (font is 11/scale)
+      var rpx = nodeRadiusPx(n);                            // already a SCREEN radius
+      var sx = n.x*scale + ox + rpx + 3, sy = n.y*scale + oy + 4;
+      var wpx = ctx.measureText(n.label).width;             // screen px directly — the font is screen px now
+      // A label anchored well off the canvas is not drawn — and this is a GUARD, not an optimisation.
+      // The cell walk below advances an integer counter held in a double, and above 2^53 `c++` stops
+      // advancing, so ONE label at an extreme coordinate turns `for (c = c0; c <= c1; c++)` into a loop
+      // that cannot terminate: no error, no console message, a permanently frozen tab. MAX_STEP stops
+      // the divergence that produced such coordinates; this makes the loop's termination unconditional
+      // rather than contingent on the sim staying well behaved. The `!(...)` form rejects NaN too.
+      if (!(sx > -LABEL_CULL_PX && sx < W + LABEL_CULL_PX && sy > -LABEL_CULL_PX && sy < H + LABEL_CULL_PX)) { return false; }
       var c0 = Math.floor(sx/CELL_W), c1 = Math.floor((sx + wpx)/CELL_W);
       var r0 = Math.floor((sy - LABEL_H)/CELL_H), r1 = Math.floor((sy + 2)/CELL_H);
       if (c1 - c0 > 200) c1 = c0 + 200;                     // a pathological label cannot monopolise the grid
@@ -572,11 +665,11 @@ static const char kScriptSim[] = R"JS(
       // bright teal is barely readable, which is the same lost label by a different route. Stroking the
       // glyphs in the canvas background before filling them makes every label legible over anything.
       ctx.lineJoin = 'round';
-      ctx.lineWidth = LABEL_HALO_PX/scale;
+      ctx.lineWidth = LABEL_HALO_PX;
       ctx.strokeStyle = 'rgba(10,10,10,0.9)';
-      ctx.strokeText(n.label, n.x + r + 3/scale, n.y + 4/scale);
+      ctx.strokeText(n.label, sx, sy);
       ctx.fillStyle = '#e6e9ee';
-      ctx.fillText(n.label, n.x + r + 3/scale, n.y + 4/scale);
+      ctx.fillText(n.label, sx, sy);
       return true;
     }
     var forced = [];
@@ -592,7 +685,6 @@ static const char kScriptSim[] = R"JS(
       for (var li = 0; li < labelDegreeOrder.length; li++) placeLabel(labelDegreeOrder[li]);
     }
     ctx.globalAlpha = 1.0;
-    ctx.restore();
 
     // tooltip — now names the FILE. 13 label names covered 28 nodes on the README cut (three different
     // `empty`, three `find`), and the page emitted a FILES array it never read, so the one question a
@@ -626,11 +718,12 @@ static const char kScriptSim[] = R"JS(
     return -1;
   }
 
-  // -- end of section 2 --
+  // -- end of section 3 --
 )JS";
 
-// SECTION 3 of the renderer: everything that responds to a person — resize, mouse, wheel, search, the
-// hash router and its views, the provenance caption, the PNG export, and boot.
+// SECTION 4 of the renderer: everything that responds to a person — resize, mouse, wheel, the search
+// box and the results panel it fills, and the depth slider. The hash router and the views it renders are
+// section 5.
 static const char kScriptViews[] = R"JS(
   // ---- resize. Two defects lived here.
   //
@@ -774,7 +867,15 @@ static const char kScriptViews[] = R"JS(
     if (currentView === 'node') renderNode(centreGid, false);
   });
 
-  // ---- ROUTER: #overview | #module/ID | #node/ID[/DEPTH] ----
+  // -- end of section 4 --
+)JS";
+
+// SECTION 5 of the renderer: the ROUTER and what it renders — the three views, the provenance caption,
+// the PNG export, and boot. Section 4 is the hand on the controls; this is where a hash becomes a
+// picture. Same split rationale as sections 2/3 above: one literal, one editing surface, no change to
+// the emitted document beyond the seam comments.
+static const char kScriptRouter[] = R"JS(
+  // ---- ROUTER: #graph (home) | #overview | #module/ID | #node/ID[/DEPTH] ----
   var currentView = null;
   var centreGid = -1;   // NODES index the current #node view is centred on (-1 outside node view)
 
@@ -804,12 +905,22 @@ static const char kScriptViews[] = R"JS(
              k('top-k') + '<b>' + TOPK + '</b> of ' + SYM_TOTAL + ' symbols (' + pct + '%)  ' +
              k('map') + '<b>' + NODE_TOTAL + '</b> nodes / <b>' + EDGE_TOTAL + '</b> call edges';
     var viewName = currentView === 'overview' ? MODULES.length + ' modules'
+                 : currentView === 'graph'    ? 'whole map'
                  : currentView === 'module'   ? 'module subgraph'
                  : 'depth-' + egoDepth + ' neighbourhood';
-    var l2 = k('view') + '<b>' + viewName + '</b>' + (currentView === 'overview' ? '' : ': ' + N + ' nodes / ' + L + ' edges') + '  ' +
+    // Self-calls are counted in EDGE_TOTAL on line 1 and cannot be drawn (loadSubset says why). In a
+    // subset view nobody compares L against EDGE_TOTAL; in the whole-map view the two numbers sit on the
+    // same screen over the same node set, and an unexplained difference between them is precisely the
+    // silent inconsistency this caption exists to prevent.
+    var drops = ( currentView !== 'overview' && selfEdgesDropped > 0 )
+              ? ' (' + selfEdgesDropped + ' self-call' + (selfEdgesDropped === 1 ? '' : 's') + ' not drawn)' : '';
+    var l2 = k('view') + '<b>' + viewName + '</b>' + (currentView === 'overview' ? '' : ': ' + N + ' nodes / ' + L + ' edges' + drops) + '  ' +
              k('colour') + '<b>' + escHtml(metric) + '</b>' + (mode === 'churn' && !CHURN_OK ? ' <b>unavailable (no git history)</b>' : '') + '  ' +
              k('labels') + 'top ' + MAX_LABELS + ' by in-view degree, one per name' +
-             (settleTimedOut ? '  <b>settling…</b> (layout over the ' + SETTLE_BUDGET_MS + ' ms budget, still converging)' : '');
+             (settleTimedOut ? '  <b>settling…</b> (layout over the ' + SETTLE_BUDGET_MS + ' ms budget, still converging)'
+              : layoutStopped ? '  <b>layout stopped at step ' + SIM_STEPS + ' of ' + MAX_SIM + '</b> (the ' + LAYOUT_BUDGET_MS +
+                                ' ms layout budget is spent — positions are under-converged, drag to adjust)'
+              : '');
     el.innerHTML = l1 + '<br>' + l2;
   }
 
@@ -852,6 +963,43 @@ static const char kScriptViews[] = R"JS(
     var q = search.value.trim().toLowerCase();
     if (q) { overviewSearch(q); } else { document.getElementById('hits').style.display = 'none'; renderOverviewCards(null); stackCardsBelowHits(); }
     renderProv();
+  }
+
+  // ---- #graph — the WHOLE selected node set, drawn. This is the page's home view.
+  //
+  // WHY IT HAD TO EXIST. --html's own --help line calls the artifact a "force-directed call graph", and
+  // until this route the page had no view that drew one: #module/ID and #node/ID[/DEPTH] are both proper
+  // SUBSETS, and the landing view was a grid of Louvain cards. Two consequences, and the second is the
+  // one that mattered.
+  //
+  //   1. The cards are a weak first screen on their own terms. Measured on this repository's own map:
+  //      65% of them are single-file, 35% carry `in 0 / out 0` (not one cross-module edge), the median
+  //      card holds 2 symbols, and the largest are titled `size`, `find`, `empty`, `push_back` — a
+  //      community named after its highest-ranked member is named after a container primitive.
+  //   2. NO --html PICTURE WAS REPRODUCIBLE BY A SINGLE COMMAND. Every hero needed a fragment pasted in
+  //      after the run, and the README's was `#node/431/2` — a POSITION in the rank-sorted array, so not
+  //      a name and not stable across --top-k. Name-addressable routes fixed half of that; a run whose
+  //      output is the picture fixes the other half. `ripwire DIR --rank-by=rrf --color-by=cx --html=F`
+  //      IS the image now, with nothing to paste and nothing to remember.
+  //
+  // The module overview loses nothing but the boot slot: same route, same bar link, same search-into-
+  // modules path. A view that answers "how is this repository grouped" is a good second screen and was a
+  // poor first one, because it is an ANSWER about the map and the map itself was never on screen.
+  //
+  // COST, AND WHY IT DEGRADES RATHER THAN HANGS. This is the largest view the page can build — up to the
+  // 5000-node ceiling writeHtml selects at — against a sim that is 300 O(n^2) steps, ~38 ms per step at
+  // n=5000. Nothing new is needed for that and nothing new is added: loadSubset already settles under one
+  // wall-clock budget and hands the remainder to the progressive rAF path, and renderProv says
+  // "settling…" for exactly as long as that is true. A second budget here would be a second thing to
+  // keep honest and a second thing to get wrong.
+  function renderGraph() {
+    currentView = 'graph'; centreGid = -1;
+    crumbEl.style.display = 'none';
+    setChrome(false, true);
+    var ids = [];
+    for (var i = 0; i < GN; i++) { ids.push(i); }
+    loadSubset(ids, LINKS);   // renders the caption itself, once N/L are known
+    info.textContent = GN + ' symbols · ' + MODULES.length + ' modules · click a node to open its neighbourhood';
   }
 
   function renderModule(mid) {
@@ -909,24 +1057,36 @@ static const char kScriptViews[] = R"JS(
     return -1;
   }
 
+  // ---- ROUTER. Boot sets the hash, and setting it fires hashchange, so route() used to run TWICE at
+  // boot: harmless when the landing view was a card grid, and a doubled full-map settle now that it is
+  // not. routedHash makes route() idempotent on the hash it last rendered. Nothing real is suppressed —
+  // every navigation on this page changes the hash, and the browser fires no hashchange for a set to
+  // the value already there (which is why click-the-current-node already went through its own branch).
+  var routedHash = null;
   function route() {
     var h = location.hash.replace(/^#/, '');
+    if (h === routedHash) { return; }
+    routedHash = h;
     var parts = h.split('/');
-    if (parts[0] === 'module' && parts[1] !== undefined) {
+    if (parts[0] === 'overview') {
+      renderOverview();
+    } else if (parts[0] === 'module' && parts[1] !== undefined) {
       renderModule(parseInt(parts[1], 10) || 0);
     } else if (parts[0] === 'node' && parts[1] !== undefined) {
       if (parts[2] !== undefined) { egoDepth = Math.max(1, Math.min(3, parseInt(parts[2],10)||2)); depthSlider.value = String(egoDepth); depthVal.textContent = String(egoDepth); }
       var gid = gidForRoute(parts[1]);
       if (gid < 0) {
-        // an unresolvable route is SAID, not silently redirected to node 0 (which is what parseInt||0 did)
-        renderOverview();
+        // an unresolvable route is SAID, not silently redirected to node 0 (which is what parseInt||0 did).
+        // It lands on the home view — the whole map, which is the thing you can then search — rather than
+        // on whichever view happened to be the landing page when this branch was written.
+        renderGraph();
         info.textContent = 'no symbol named "' + decodeURIComponent(parts[1]) + '" in this map (top ' + NODE_TOTAL + ' of ' + SYM_TOTAL + ')';
         return;
       }
       var already = trail[trailPos] === gid;
       renderNode(gid, !already);
     } else {
-      renderOverview();
+      renderGraph();   // '#graph', an empty hash, and any hash this router does not recognise
     }
   }
   window.addEventListener('hashchange', route);
@@ -947,14 +1107,36 @@ static const char kScriptViews[] = R"JS(
   // bug report, a slide: every one of them travels without the page around it. So the export draws the
   // graph into its own bitmap with the caption stamped underneath, in the page's own colours.
   var STAMP_H = 44;
+  var STAMP_PAD = 14, STAMP_FONT_MAX = 13, STAMP_FONT_MIN = 8;
+  function stampFont(px) { return px + 'px ui-monospace,SFMono-Regular,Menlo,monospace'; }
+  // The caption is one long unwrapped line of monospace, and the exported bitmap is as wide as whatever
+  // viewport produced it. At a fixed 13 px the first real export CLIPPED it at the frame edge: the root
+  // path stopped mid-word and the colour metric — the thing the picture is coloured BY — was gone
+  // entirely, cut off past the right margin with nothing to say so. That is the export existing to carry
+  // provenance and silently dropping half of it, which is worse than not stamping at all, because the
+  // remaining half looks complete. The font is fitted to the widest line instead (never larger than 13,
+  // floored at 8 where monospace stops being readable), and a line that STILL does not fit is elided
+  // with a marker so the loss is visible in the image rather than at its edge.
   function stampProvenance(g, w, y) {
     var el = document.getElementById('prov');
-    var lines = el ? el.innerText.split('\n') : [];
+    var lines = el ? el.innerText.split('\n').slice(0, 2) : [];
     g.fillStyle = '#0b0b0b';  g.fillRect(0, y, w, STAMP_H);
     g.fillStyle = '#2a2a2a';  g.fillRect(0, y, w, 1);
+    var avail = w - 2*STAMP_PAD, widest = 0, i;
+    g.font = stampFont(STAMP_FONT_MAX);
+    for (i = 0; i < lines.length; i++) { widest = Math.max(widest, g.measureText(lines[i]).width); }
+    var px = STAMP_FONT_MAX;
+    if (widest > avail && widest > 0) { px = Math.max(STAMP_FONT_MIN, Math.floor(STAMP_FONT_MAX*avail/widest)); }
+    g.font = stampFont(px);
     g.fillStyle = '#9aa1aa';
-    g.font = '13px ui-monospace,SFMono-Regular,Menlo,monospace';
-    for (var i = 0; i < lines.length && i < 2; i++) { g.fillText(lines[i], 14, y + 19 + i*17); }
+    for (i = 0; i < lines.length; i++) {
+      var t = lines[i];
+      if (g.measureText(t).width > avail) {
+        while (t.length > 1 && g.measureText(t + '…').width > avail) { t = t.slice(0, -1); }
+        t = t + '…';
+      }
+      g.fillText(t, STAMP_PAD, y + 19 + i*17);
+    }
   }
   function exportBitmap() {
     var out = document.createElement('canvas');
@@ -970,7 +1152,7 @@ static const char kScriptViews[] = R"JS(
     return out;
   }
   document.getElementById('savePng').addEventListener('click', function() {
-    if (canvas.style.display === 'none') { info.textContent = 'nothing to export from the overview — open a module or a symbol first'; return; }
+    if (canvas.style.display === 'none') { info.textContent = 'nothing to export from the module list — open Graph, a module or a symbol first'; return; }
     draw();                                     // guarantee the frame is current, not a stale hover state
     var a = document.createElement('a');
     var slug = (currentView === 'node' && centreGid >= 0) ? NODES[centreGid].label : (currentView || 'graph');
@@ -982,7 +1164,7 @@ static const char kScriptViews[] = R"JS(
   // boot
   if (GN === 0) { setChrome(false, true); resize(); paintBackdrop(); ctx.fillStyle='#888'; ctx.font='18px sans-serif'; ctx.fillText('No nodes', 40, 40); renderProv(); return; }
   resize();
-  if (!location.hash) location.hash = '#overview';
+  if (!location.hash) location.hash = '#graph';   // the boot default: the map itself (see renderGraph)
   route();
   resize();   // the caption's height is only knowable once it has content; re-measure so the canvas fits
 })();
@@ -1203,7 +1385,13 @@ inline void writeDocumentShell( std::FILE* out )
         "<body>\n"
         "<div id=\"bar\">\n"
         "  <h1>ripwire wiki</h1>\n"
-        "  <a class=\"nav\" href=\"#overview\">Overview</a>\n"
+        // Two named routes in the bar, in the order the page uses them. "Graph" is the boot view (the
+        // whole selected map — see the renderGraph header for why it is the boot view and not the cards);
+        // the module overview keeps its route and its link and is simply no longer the landing page. Its
+        // link is relabelled from "Overview" to "Modules" because it is no longer an overview of anything
+        // the reader has not already seen — it is one specific lens on the map now on screen behind it.
+        "  <a class=\"nav\" href=\"#graph\">Graph</a>\n"
+        "  <a class=\"nav\" href=\"#overview\">Modules</a>\n"
         "  <input id=\"search\" type=\"text\" placeholder=\"search labels...\">\n"
         "  <span id=\"depth\">depth <input id=\"depthSlider\" type=\"range\" min=\"1\" max=\"3\" value=\"2\" style=\"width:60px\"><span id=\"depthVal\">2</span></span>\n"
         "  <span id=\"info\"></span>\n"
@@ -1548,7 +1736,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     std::fprintf( out, "];\n" );
 
     // inline the JS sim + wiki router
-    std::fprintf( out, "%s%s%s", kScriptColour, kScriptSim, kScriptViews );
+    std::fprintf( out, "%s%s%s%s%s", kScriptColour, kScriptSim, kScriptDraw, kScriptViews, kScriptRouter );
 
     std::fprintf( out,
         "</script>\n"

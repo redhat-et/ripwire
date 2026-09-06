@@ -522,7 +522,7 @@ $ ./build/ripwire . --tree
 
 **Answers:** self-contained HTML force-directed call graph of the DEFAULT map (no CDN — redirect or write FILE).
 
-A navigation or report verb answers instead of the map, so --html beside one refuses rather than writing nothing; for a single symbol's neighbourhood open the page at FILE#node/SYM/2
+A navigation or report verb answers instead of the map, so --html beside one refuses rather than writing nothing. The page OPENS on the whole selected map, so the run is the picture; FILE#node/SYM/2 opens one symbol's neighbourhood and FILE#overview the module (community) list
 
 **Try it**
 
@@ -537,7 +537,7 @@ $ ./build/ripwire . --html=<scratch>/aux/map2.html
 
 **Caveats (stated by the binary):**
 
-- A navigation or report verb answers instead of the map, so --html beside one refuses rather than writing nothing;
+- A navigation or report verb answers instead of the map, so --html beside one refuses rather than writing nothing.
 
 ### `--color-by=MODE`
 
