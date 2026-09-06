@@ -160,14 +160,44 @@ A change is rejected — automatically — if any of these is true:
 - the CSR property test fails;
 - the determinism gate fails.
 
-Two failure modes this project has actually shipped, and now gates against:
+### The failure mode that keeps coming back: an arm that cannot fail
 
-- **A gate that cannot observe what it asserts** ("green while inert"). If a gate's probe target
-  can vanish — an empty diff, a missing fixture, a keyword the fixture never spells — the gate
-  passes for the wrong reason. Add a presence guard: assert the thing you are about to search for
-  actually exists, then assert the property.
-- **A gate that counts.** Anchor your counts (`grep -c '^  PASS'`, not `grep -c PASS`) or a banner
-  line will silently join the tally.
+A suite's verdict is a **conjunction over the arms that actually fired**. An arm that runs but
+cannot reach a verdict is silently dropped from that conjunction while staying in the file — so
+reading the file never finds it, and **the suite gets greener as it gets emptier**.
+
+Six distinct routes to it have shipped or nearly shipped here. They look nothing alike in a diff:
+
+| | shape | what it does |
+| --- | --- | --- |
+| 1 | **wrong population** | examines a set that cannot contain the defect (a pattern matching `std::vector` in a codebase whose containers are `HashMap`) |
+| 2 | **wrong artifact** | correct check, aimed at the wrong input (a file-shaped `sed` range applied to diff output) |
+| 3 | **empty equals agreement** | compares two extractions that both returned nothing; nothing matches nothing |
+| 4 | **prose liveness** | the evidence the arm is live is in the commit message, not in the code |
+| 5 | **no contrast** | a control whose two arms differ in nothing (a mutation that did not take; an arithmetic identity like `n+9 != n`) |
+| 6 | **missing reporter** | the arm concludes but cannot record — it calls a helper the gate never defines, prints neither PASS nor FAIL, and the gate still exits 0 |
+
+Two older, narrower cases of the same thing, kept because they are cheap to check for:
+
+- **A vanishing probe target** — an empty diff, a missing fixture, a keyword the fixture never
+  spells. Add a presence guard: assert the thing you are about to search for exists, *then* assert
+  the property.
+- **A count that counts the wrong unit** — `grep -c` counts *lines*, not occurrences, so two hits on
+  one line read as one. Anchor counts (`grep -c '^  PASS'`, never bare `grep -c PASS`), and reach
+  for `grep -o | wc -l` when you mean occurrences.
+
+**Care is not sufficient, and the record says so:** five of those six were introduced by someone who
+already knew about the others, several while fixing one. So the rule is mechanical, not attentional:
+
+1. **A control must mutate real input and re-run the identical extraction over it** — never compare
+   fabricated numbers, and never assert a property of the mutation instead of of the check.
+2. **Assert the mutation took** (`cmp -s`, or re-grep for the injected value) *before* trusting the
+   outcome. A control over an unmutated copy passes and proves nothing.
+3. **Prove the control fires from a `bash` script**, not from an interactive shell. The two are
+   different interpreters with different tools on `PATH`, and the thing you validate interactively
+   is not the thing that runs.
+4. **Prefer an arm that has been observed RED.** An arm that has only ever been green has not been
+   shown to have a failing state at all.
 
 ---
 
