@@ -186,7 +186,24 @@ extern "C"
 namespace rw
 {
 
+// ---- index-identity disclosure (declared in ingest.h; contract and motivation there) ----
+// Two thin exports out of this TU's unnamed namespace, so `--doctor` reads the SAME constants the cache
+// guard is compiled against and runs the SAME openCacheFrame the read path runs. Nothing here parses, so
+// both are safe to call from doctor's pre-ingest phase.
+CacheIdentity cacheIdentity() noexcept
+{
+    CacheIdentity id;
+    id.cacheVersion  = kCacheVersion;
+    id.parserVerLean = parserVerFor( false );
+    id.parserVerRich = parserVerFor( true );
+    id.artifactArch  = kArtifactArch;
+    return id;
+}
 
+const char* cacheArtifactVerdict( const std::string& path, bool captureValueUses )
+{
+    return cacheRejectName( inspectCacheArtifact( path, captureValueUses ) );
+}
 
 IngestResult ingest( const char* rootDir, const std::vector<std::string>& excludeSubstr, std::string_view cacheFile,
                      std::size_t maxFileBytes, bool captureValueUses, std::string_view excludeLabel, bool respectGitignore )

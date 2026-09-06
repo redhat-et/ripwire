@@ -141,6 +141,30 @@ inline std::string doctorBinaryPathVerdictAttr( bool copied, const std::string& 
                 + newerPath + " directly" ), esc ) ) + "\"";
 }
 
+// --doctor check 7's verdict. The failing case is the one an agent cannot otherwise see: a `--cache=PATH`
+// the user NAMED that this binary refused, which today costs a CI job its whole warm-restore purpose while
+// exiting 0 in silence. The hint names the refusal AND the remedy, which differs by reason — a format or
+// extraction mismatch is regenerated with --index-out, a corrupt or missing file is a supply problem.
+inline std::string doctorIndexCacheHint( bool named, const char* leanVerdict, const char* richVerdict,
+                                         const std::string& path, std::vector<char>& esc )
+{
+    const std::string lean( leanVerdict );
+    const std::string rich( richVerdict );
+    if( !named || lean == "ok" || rich == "ok" )
+    {
+        return "";
+    }
+    const bool regenerable = ( lean == "format-version" || lean == "parser-version" || lean == "artifact-arch" );
+    const std::string remedy = regenerable
+        ? "this binary's extraction identity does not match the artifact — regenerate it with --index-out=BASE "
+          "from THIS binary on THIS architecture, or drop --cache= and let the run cold-parse"
+        : "the file named by --cache= is not a usable ripwire artifact — check the path and that the "
+          "--index-out step actually ran, or drop --cache= and let the run cold-parse";
+    return " hint=\"" + std::string( rw::escapeXml( std::string_view(
+                  "UNUSED: --cache=" + path + " was refused (lean=" + lean + " rich=" + rich + ") and the run "
+                  "cold-parses instead — " + remedy ), esc ) ) + "\"";
+}
+
 inline std::string doctorGrammarsHint( int loaded, int expected, const std::string& failedLabels, std::vector<char>& esc )
 {
     if( loaded == expected )
@@ -151,6 +175,107 @@ inline std::string doctorGrammarsHint( int loaded, int expected, const std::stri
                   "failed to compile: " + failedLabels
                 + " — a build/embedded-resource mismatch (rebuild with cmake --build build -j; "
                   "if it persists the embedded tags.scm for that language is stale)" ), esc ) ) + "\"";
+}
+
+// --doctor's legend, pulled out of runDoctor: a 20-line string constant is not part of dispatching seven
+// checks, and leaving it inline charged every word of documentation to that function's verbosity — which
+// is a tax on EXPLAINING the output, precisely the wrong incentive for the verb whose job is disclosure.
+// Byte-identical to the inline literal it replaces (test/doctorcheck.sh, test/legendcoveragecheck.sh).
+// NB no flag is spelled with its leading dashes anywhere below: an XML comment may not contain a double
+// hyphen, and this whole string is one comment.
+inline const char* doctorLegendComment()
+{
+    return "<!-- doctor: checks=/passed= are the row count/how many passed; each <c name= ok=> is one check, its OTHER "
+                       "attributes are check-specific (see help). cache-dir's blobs= is capped at 4096 (kMaxCacheBlobCount); "
+                       "blobs_floor=\"1\" means the cap fired and blobs= is AT LEAST that many, not exactly (absent = the true "
+                       "count); truncated=\"1\" covers that AND an I/O error mid-scan, so blobs_floor= is the narrower, more "
+                       "useful claim when both matter. volatile= on a row NAMES that row's own attributes that read LIVE machine "
+                       "state — cache-dir scans a per-user directory every ripwire process writes into, so two runs of this "
+                       "deterministic binary legitimately differ in exactly those fields and in nothing else; a determinism "
+                       "comparison strips the named attributes, never the row. tracked-binaries' truncated=\"1\" means the "
+                       "git-history scan was SKIPPED entirely (too many tracked files), so its stale=\"0\" there means "
+                       "unmeasured, never a clean scan. index-cache states the INDEX-VERSION CONTRACT "
+                       "(cache_version/parser_ver_lean/parser_ver_rich/artifact_arch — an artifact is reusable only by a "
+                       "binary carrying all four) and, for the artifact this root would consume, whether THIS binary can "
+                       "open it: lean=/rich= are one of ok | absent | not-regular | unreadable | truncated | not-a-cache | "
+                       "format-version | parser-version | artifact-arch | checksum | corrupt-frame, plus disabled "
+                       "(the no-cache flag: nothing was consulted, which is neither ok nor absent). That is a FORMAT "
+                       "verdict on an artifact, NEVER a freshness verdict on the index: every invocation re-validates each "
+                       "file, so an answer is not stale because lean= is not ok — it is merely slower. source= says whether "
+                       "the artifact was named on the cache= flag or picked automatically, and only a NAMED artifact this "
+                       "binary cannot read is ok=\"0\" (a missing auto blob is the ordinary cold-start miss). "
+                       "NB no flag below is spelled with its leading dashes: an XML comment may not contain a "
+                       "double hyphen, and this legend is one comment. -->";
+}
+
+// --doctor check 7's body: index identity + the artifact this root would consume. THE INDEX-VERSION
+// CONTRACT, finally stated to the user. kCacheVersion/kParserVer/kArtifactArch decide whether any
+// committed --index-out artifact is reusable, and before this row they appeared in no output at all — so a
+// consumer could neither pin them nor explain why a previously working artifact stopped hitting, and
+// `ripwire DIR --cache=/gone.bin` exited 0 in silence with bytes identical to a valid-artifact run.
+//
+// WHAT lean=/rich= ARE AND ARE NOT. A FORMAT verdict on ONE artifact — can this binary open it — never a
+// freshness verdict on the index. Per-file freshness is re-validated on every invocation (the stat gate +
+// racy rule), which docs/EVALS.md "card A3" measured, and which is precisely why that section REJECTED an
+// equivalent attribute on the map root: warm output is asserted byte-identical to cold, so nothing varying
+// with cache state may reach stdout's map. --doctor is a diagnostic, not the map.
+//
+// BOTH families, because src/ingest_cache.h's own comment warns that a team committing only the lean
+// artifact gets NO warm hit on --for/--exemplar/--metrics/--uses. A single fused verdict would answer "ok"
+// to a team whose flagship verb cold-parses every time.
+//
+// No roots=, and no multi-root branch: main.cpp REFUSES --doctor in a multi-root workspace before this
+// runs ("its cache-dir/git checks are per-repo; run it per root"), so a per-root verdict can never be
+// presented as if it covered N roots, and a constant roots="1" would buy no information for its bytes
+// (G4). test/cacheidentitycheck.sh (E) pins that refusal, because the day --doctor accepts a workspace
+// this row silently starts under-reporting.
+struct DoctorIndexCache { std::string attrs; bool ok = true; };
+
+inline DoctorIndexCache doctorIndexCacheRow( const rw::Config& cfg, std::vector<char>& esc )
+{
+    const rw::CacheIdentity id = rw::cacheIdentity();
+    DoctorIndexCache    out;
+    out.attrs  = "cache_version=\"" + std::to_string( id.cacheVersion ) + "\"";
+    out.attrs += " parser_ver_lean=\"" + std::to_string( id.parserVerLean ) + "\"";
+    out.attrs += " parser_ver_rich=\"" + std::to_string( id.parserVerRich ) + "\"";
+    out.attrs += " artifact_arch=\"" + std::to_string( id.artifactArch ) + "\"";
+
+    const bool  named       = !cfg.cacheFile.empty();
+    std::string namedPath;
+    const char* leanVerdict = "disabled";
+    const char* richVerdict = "disabled";
+    if( cfg.noCache )
+    {
+        // Neither ok nor absent: no artifact was consulted at all. Saying so is the third state the
+        // honesty contract requires — collapsing it into "absent" would claim a lookup happened and missed.
+        out.attrs += " source=\"disabled\"";
+    }
+    else
+    {
+        namedPath = named ? std::string( cfg.cacheFile )
+                          : defaultCachePath( std::string( cfg.rootPath ), /*captureValueUses=*/false );
+        // The two families share ONE path only when the user named it: an auto run has a per-family blob.
+        const std::string richPath = named ? namedPath
+                                           : defaultCachePath( std::string( cfg.rootPath ), /*captureValueUses=*/true );
+        out.attrs  += named ? " source=\"cache-flag\"" : " source=\"auto\"";
+        out.attrs  += " lean_path=\"" + std::string( rw::escapeXml( namedPath, esc ) ) + "\"";
+        out.attrs  += " rich_path=\"" + std::string( rw::escapeXml( richPath, esc ) ) + "\"";
+        leanVerdict = rw::cacheArtifactVerdict( namedPath, /*captureValueUses=*/false );
+        richVerdict = rw::cacheArtifactVerdict( richPath, /*captureValueUses=*/true );
+        // ok="0" ONLY for an artifact the user NAMED and this binary cannot read: a stated expectation not
+        // met. A missing AUTO blob is a first run on a cold machine — the ordinary, correct, self-healing
+        // miss — and failing there would report every fresh checkout as sick.
+        out.ok      = !named || ( std::string_view( leanVerdict ) == "ok" ) || ( std::string_view( richVerdict ) == "ok" );
+    }
+    out.attrs += " lean=\"" + std::string( leanVerdict ) + "\"";
+    out.attrs += " rich=\"" + std::string( richVerdict ) + "\"";
+    // The same declaration cache-dir makes, for the same reason: both verdicts read a per-user directory
+    // any concurrent ripwire process writes into, so two runs of this deterministic binary may legitimately
+    // disagree on exactly these fields and on nothing else. The four identity numbers and the paths are
+    // pure functions of the binary and the root, and are deliberately NOT listed.
+    out.attrs += " volatile=\"lean,rich\"";
+    out.attrs += doctorIndexCacheHint( named, leanVerdict, richVerdict, namedPath, esc );
+    return out;
 }
 
 // --doctor check 2's probe, in full: does each compiled-in grammar's tags.scm actually compile
@@ -569,6 +694,14 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
         row( "tracked-binaries", ok, attrs );
     }
 
+    // ---- check 7: index identity + the artifact this root would consume. Body in doctorIndexCacheRow
+    // above (same reason the grammar probe and the cache-dir stats are free functions: runDoctor already
+    // dispatches six checks, and a seventh three-branch body lands its nesting-weighted complexity there).
+    {
+        const DoctorIndexCache ic = doctorIndexCacheRow( cfg, esc );
+        row( "index-cache", ic.ok, ic.attrs );
+    }
+
     const DoctorAgentRows agentRows = doctorAgentRows( cfg, argv0 );
     checks += agentRows.checks;
     okCount += agentRows.passed;
@@ -598,18 +731,10 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
     // already knew was confusing (blobs= landing on the scan cap either means "exactly that many" or
     // "at least that many" and the bare number cannot say which), so the legend names exactly that one,
     // plus the one other zero-vs-unmeasured ambiguity on this document (tracked-binaries' truncated=)
-    // rather than restating every attribute's --help sentence here.
-    std::string out = "<!-- doctor: checks=/passed= are the row count/how many passed; each <c name= ok=> is one check, its OTHER "
-                       "attributes are check-specific (see help). cache-dir's blobs= is capped at 4096 (kMaxCacheBlobCount); "
-                       "blobs_floor=\"1\" means the cap fired and blobs= is AT LEAST that many, not exactly (absent = the true "
-                       "count); truncated=\"1\" covers that AND an I/O error mid-scan, so blobs_floor= is the narrower, more "
-                       "useful claim when both matter. volatile= on a row NAMES that row's own attributes that read LIVE machine "
-                       "state — cache-dir scans a per-user directory every ripwire process writes into, so two runs of this "
-                       "deterministic binary legitimately differ in exactly those fields and in nothing else; a determinism "
-                       "comparison strips the named attributes, never the row. tracked-binaries' truncated=\"1\" means the "
-                       "git-history scan was SKIPPED entirely (too many tracked files), so its stale=\"0\" there means "
-                       "unmeasured, never a clean scan. -->"
-                       "<doctor checks=\"" + std::to_string( checks ) + "\" passed=\"" + std::to_string( okCount ) + "\"" + agentRows.rootAttr + doctorAt + doctorBuiltFrom + ">";
+    // rather than restating every attribute's --help sentence here. The literal itself lives in
+    // doctorLegendComment() above (a string constant is not part of dispatching seven checks).
+    std::string out = doctorLegendComment();
+    out += "<doctor checks=\"" + std::to_string( checks ) + "\" passed=\"" + std::to_string( okCount ) + "\"" + agentRows.rootAttr + doctorAt + doctorBuiltFrom + ">";
     out += rows;
     out += "</doctor>";
     std::fputs( out.c_str(), stdout );
