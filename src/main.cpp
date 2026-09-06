@@ -1453,7 +1453,12 @@ int runDefaultMap( const MainDispatch& d )
         // posture; no evidence ⇒ the page's CHURN_OK legend note discloses instead of lying zeros.
         std::vector<std::uint32_t> htmlChurn( ing.files.size(), 0 );
         const rw::SinceScope       htmlScope;   // inactive: --html has no --since form
-        const bool htmlChurnOk = mineChurnPerFile( ing, root, multiRoot, ws, std::string_view(), htmlScope, "18 months ago", htmlChurn );
+        // ONE spelling of the window, mined with it and then printed by the page's churn legend. It used to
+        // be a bare literal here and the legend said only "0 1-2 3-9 10-29 30+" — five buckets of an unnamed
+        // unit over an unstated horizon, which reads as "commits ever". Naming a constant and passing it is
+        // what keeps the page from making a claim the run cannot back.
+        static constexpr const char* kHtmlChurnWindow = "18 months ago";
+        const bool htmlChurnOk = mineChurnPerFile( ing, root, multiRoot, ws, std::string_view(), htmlScope, kHtmlChurnWindow, htmlChurn );
 
         // tested for the --color-by=tested lens: QMetrics is computed upstream only under
         // --metrics/--for/--exemplar, so on a bare --html run testedPtr is null and every node would
@@ -1479,7 +1484,8 @@ int runDefaultMap( const MainDispatch& d )
                 return 1;
             }
         }
-        writeHtml( htmlOut, ing, rank, g, mapTopK, HtmlColorExtras{ testedPtr, &htmlChurn, htmlChurnOk, cfg.colorBy }, mapRootArg );   // R-R
+        writeHtml( htmlOut, ing, rank, g, mapTopK,
+                   HtmlColorExtras{ testedPtr, &htmlChurn, htmlChurnOk, cfg.colorBy, kHtmlChurnWindow, cfg.rankBy }, mapRootArg );   // R-R
         if( htmlOut != stdout )
         {
             std::fclose( htmlOut );

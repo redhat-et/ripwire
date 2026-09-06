@@ -75,11 +75,20 @@ static const char kScript[] = R"JS(
   var depthVal = document.getElementById('depthVal');
   var W = canvas.width, H = canvas.height;
 
-  // colour by lang
-  var langColor = {
-    cpp: '#4a90d9', py: '#f4c542', ts: '#2d79c7', go: '#00acd7',
-    rs: '#dea584', swift: '#fa7343', objc: '#9b59b6', md: '#7f8c8d', '?': '#95a5a6'
-  };
+  // colour by lang. The palette is EMITTED (LANG_COLORS above — htmlexport.h::kLangColors, one entry per
+  // model.h Lang enumerator, static_asserted against the roster) and never spelled here: the hand-written
+  // copy that used to sit in this spot had 9 keys against langTag's 19, so eleven languages fell through to
+  // an unlabelled grey. The legend below is built from the same object, so there is no second list to drift.
+  var langColor = LANG_COLORS;
+
+  // ---- the `tested` lens' two channels. H5: colorForNode used to return '#2ecc71' / '#e74c3c' — exactly
+  // the red-vs-green discrimination the rampColor comment three lines down refuses for cx/churn, and for the
+  // same reason. Under simulated deuteranopia that pair collapses from a perceptual distance of 231 to 82:
+  // two olives. So `tested` now carries a channel that is NOT hue — tested nodes are FILLED, untested nodes
+  // are hollow with a dashed ring — and the hues move onto the blue-yellow axis the ramp already uses, as
+  // reinforcement rather than as the message. A monochrome print of this page is still readable.
+  var TESTED_FILL = '#26c6da', UNTESTED_FILL = '#ff9800';
+  var testedStroke = function(n) { return !n.ts; };   // untested ⇒ dashed ring instead of a solid disc
 
   // ---- --color-by palettes. commColor: 12 categorical dark-bg-friendly hues (comm % 12).
   // rampColor: shared 5-step BLUE→ORANGE temperature ramp for cx/churn over FIXED thresholds (fixed
@@ -104,36 +113,48 @@ static const char kScript[] = R"JS(
     if (mode === 'community') return n.comm < 0 ? '#666' : commColor[n.comm % 12];
     if (mode === 'cx') return rampColor[rampStep(n.cx, CX_STEPS)];
     if (mode === 'churn') return CHURN_OK ? rampColor[rampStep(FCHURN[n.file] || 0, CHURN_STEPS)] : '#666';
-    if (mode === 'tested') return n.ts ? '#2ecc71' : '#e74c3c';
-    return langColor[n.lang] || '#999';
+    if (mode === 'tested') return n.ts ? TESTED_FILL : UNTESTED_FILL;
+    return langColor[n.lang] || langColor['?'];
   }
 
-  // legend for the CURRENT mode, rendered into the #legend span (replaces the old static lang-only HTML)
+  // legend for the CURRENT mode, rendered into the #legend span.
+  //
+  // Every mode now NAMES ITS METRIC AND ITS UNITS. It used to emit a bare `0 1-4 5-9 10-19 20+` — five
+  // swatches and five number ranges, with nothing anywhere on the page saying ranges of WHAT. The same
+  // five buckets are cyclomatic complexity in one mode and git commits in another, and a reader landing on
+  // a screenshot could not tell which, nor that "3-9" meant three commits inside an 18-month window rather
+  // than three commits ever. The window is not spelled here either: it comes from CHURN_WINDOW, which the
+  // C++ fills with the string it actually handed mineChurnPerFile.
   function renderLegend() {
     var el = document.getElementById('legend');
     function sw(c) { return '<span style="background:' + c + '"></span>'; }
+    function ring(c) { return '<span style="background:transparent;border:2px dashed ' + c + ';box-sizing:border-box"></span>'; }
+    function name(t) { return '<span class="lg">' + t + '</span> '; }
     var html = '', i, lbl;
     if (mode === 'community') {
       var maxComm = -1;
       for (i = 0; i < NODES.length; i++) if (NODES[i].comm > maxComm) { maxComm = NODES[i].comm; }
       var shown = Math.min(maxComm + 1, 12);
+      html = name('module (community):');
       for (i = 0; i < shown; i++) html += sw(commColor[i]) + 'm' + i + ' ';
       html += sw('#666') + 'none';
     } else if (mode === 'cx') {
       lbl = ['0','1-4','5-9','10-19','20+'];
+      html = name('cyclomatic complexity:');
       for (i = 0; i < 5; i++) html += sw(rampColor[i]) + lbl[i] + ' ';
     } else if (mode === 'churn') {
       if (!CHURN_OK) {
         html = 'churn unavailable (no git history)';
       } else {
         lbl = ['0','1-2','3-9','10-29','30+'];
+        html = name('commits (' + (CHURN_WINDOW || 'window not recorded') + '), per FILE:');
         for (i = 0; i < 5; i++) html += sw(rampColor[i]) + lbl[i] + ' ';
       }
     } else if (mode === 'tested') {
-      html = sw('#2ecc71') + 'tested ' + sw('#e74c3c') + 'untested';
+      html = name('has a test:') + sw(TESTED_FILL) + 'tested ' + ring(UNTESTED_FILL) + 'untested (hollow)';
     } else {
-      html = sw('#4a90d9') + 'cpp ' + sw('#f4c542') + 'py ' + sw('#2d79c7') + 'ts ' + sw('#00acd7') + 'go ' +
-             sw('#dea584') + 'rs ' + sw('#fa7343') + 'swift ' + sw('#9b59b6') + 'objc ' + sw('#7f8c8d') + 'md';
+      html = name('language:');
+      for (var k in langColor) { if (Object.prototype.hasOwnProperty.call(langColor, k)) { html += sw(langColor[k]) + (k === '?' ? 'unknown' : k) + ' '; } }
     }
     el.innerHTML = html;
   }
@@ -220,11 +241,32 @@ static const char kScript[] = R"JS(
   // carry {gid, x, y, vx, vy, label, type, lang, rank, comm, cx, ts, file}; `gid` maps back to the
   // NODES index for lookups; the last four feed colorForNode. ----
   var nodes = [], links = [], N = 0, L = 0, nbr = [];
-  var labelSet = new Set();   // local indices that get a persistent text label (top-ranked per view)
+  var labelSet = new Set();      // local indices that get a persistent text label (see loadSubset's rule)
+  var labelDegreeOrder = [];     // the same set as an ARRAY in descending importance, so the declutter in
+                                 // draw() places the ones that matter first and drops the collisions
+  var MAX_LABELS = 24;
+  var MIN_LABEL_DEGREE = 2;      // rule 3: a node with one in-view edge is fringe and its name buys nothing
   var ox = 0, oy = 0, scale = 1, autoFit = true;
   var dragging = -1, panStart = null, hovered = -1, selected = -1;
   var searchSet = null;
   var SIM_STEPS = 0, MAX_SIM = 300;
+  // The canvas paints its OWN background before anything else. The #111 used to live only on <body>, so the
+  // canvas itself was transparent — which is invisible on screen and fatal on export: toDataURL composites
+  // onto WHITE, where the #d6d9de labels and the 0.28-alpha edges simply disappear. A picture of this graph
+  // was not obtainable from the page that draws it.
+  var CANVAS_BG = '#111111';
+  // Zoom band. `scale *= factor` was unbounded: a wheel flick reached 0 or Infinity with no way back, and
+  // the only recovery was a reload. The floor is below fitView's own 0.05 clamp so a fitted view is never
+  // pinned against it; the ceiling is where a 4 px node fills the viewport.
+  var SCALE_MIN = 0.02, SCALE_MAX = 8;
+  // Pre-paint settling budget (item 4). The sim is 300 O(n^2) steps: 0.2 s at n=239, 0.5 s at n=850, ~11.5 s
+  // at n=5000. Running it to completion before the first paint makes the picture appear finished and makes a
+  // screenshot reproducible; running it unconditionally would hang the tab on the big end. So it is a budget,
+  // and blowing the budget DEGRADES to the old progressive draw rather than freezing — disclosed in the
+  // provenance caption, never silent.
+  var SETTLE_BUDGET_MS = 2000;
+  var settleTimedOut = false;
+  var DPR = 1;                   // devicePixelRatio at the last resize(); the backing store is scaled by it
   var seed = 42;
   function rng() { seed = (seed * 1664525 + 1013904223) & 0xffffffff; return (seed >>> 0) / 4294967296; }
 
@@ -246,13 +288,6 @@ static const char kScript[] = R"JS(
                    x: W/2 + (rng()-0.5)*SPREAD, y: H/2 + (rng()-0.5)*SPREAD, vx: 0, vy: 0 });
     }
     N = nodes.length;
-    // persistent labels: the view's top-24 by rank (bounded — labelling every node of a large module
-    // is unreadable soup; hover/selection/search label the rest on demand)
-    labelSet = new Set();
-    var byRank = [];
-    for (var i = 0; i < N; i++) byRank.push(i);
-    byRank.sort(function(a,b){ return nodes[b].rank - nodes[a].rank || a - b; });
-    for (var i = 0; i < Math.min(24, N); i++) labelSet.add(byRank[i]);
     links = [];
     for (var k = 0; k < edges.length; k++) {
       var s = gidToLocal.get(edges[k].s), t = gidToLocal.get(edges[k].t);
@@ -262,13 +297,57 @@ static const char kScript[] = R"JS(
     nbr = [];
     for (var i = 0; i < N; i++) nbr.push([]);
     for (var k = 0; k < L; k++) { nbr[links[k].s].push(links[k].t); nbr[links[k].t].push(links[k].s); }
+    // IN-VIEW degree, resolved once per load: it drives label selection AND node radius, and both used to
+    // read `rank` instead — a GLOBAL score that says nothing about this view.
+    for (var i = 0; i < N; i++) { nodes[i].deg = nbr[i].length; }
+
+    // ---- persistent labels. Three rules, and the measurement that chose them.
+    //
+    // The old rule was "top 24 by rank". On this repository's own README cut — the depth-2 neighbourhood of
+    // lexicalScoresTiered, 239 nodes — it spent 22 of its 24 labels on container methods (size, empty, buf,
+    // push_back, find, clear, end, reserve, begin, emplace_back, back, pop_back, grow, min), 13 of them from
+    // src/infra/svector.h alone, and left exactly 2 for functions this repository is actually about.
+    //
+    // Ranking by in-view DEGREE alone does not fix that, and neither does rank x degree: those container
+    // methods ARE the hubs (size has in-view degree 111, push_back 59, empty 49), so both rules re-elect
+    // them. The measurable culprit is something else — 13 NAMES covered 28 of those nodes. Three different
+    // `find`, three `empty`, two each of `buf`/`end`/`begin`/`back`/`data`/`push_back`: the label set was
+    // spending its budget printing the same word again and again over different symbols, which is not only
+    // clutter but ambiguous (nothing on the page said which `find`).
+    //
+    //   1. order by IN-VIEW degree (rank breaks ties) — importance in THIS picture, not in the repository
+    //   2. at most one label per distinct NAME — the rule that actually frees the budget
+    //   3. drop degree-1 nodes — a leaf with one edge is fringe; its name costs a slot and explains nothing
+    //
+    // Measured on that same cut: 24 labels over 24 distinct names, and 11 of them domain functions
+    // (lexicalScoresTiered, namingLensChecks, resolveAtSeed, gitLogFileSets, buildPreciseIncludeAdj,
+    // lexicalScoresNameExactTiered, getIndex, resolveAllByNameQualified, declaredFieldsFor,
+    // joinNormalizeLookup, lexicalNormalize) against 2 before. rank x degree scored 1.
+    //
+    // Rule 2 hides symbols, so the page must SAY so rather than let a reader infer "one find exists": the
+    // provenance caption states the rule, the tooltip and info line name the FILE, and hover/search/select
+    // still label any node on demand. The centre of a #node view is always labelled (draw() forces it).
+    labelSet = new Set();
+    labelDegreeOrder = [];
+    var byDegree = [];
+    for (var i = 0; i < N; i++) { if (nodes[i].deg >= MIN_LABEL_DEGREE) { byDegree.push(i); } }
+    byDegree.sort(function(a,b){ return nodes[b].deg - nodes[a].deg || nodes[b].rank - nodes[a].rank || a - b; });
+    var labelSeenNames = new Set();
+    for (var i = 0; i < byDegree.length && labelDegreeOrder.length < MAX_LABELS; i++) {
+      var li = byDegree[i];
+      if (labelSeenNames.has(nodes[li].label)) continue;
+      labelSeenNames.add(nodes[li].label);
+      labelDegreeOrder.push(li);
+      labelSet.add(li);
+    }
 
     ox = 0; oy = 0; scale = 1; autoFit = true;
     dragging = -1; panStart = null; hovered = -1; selected = -1; searchSet = null;
     SIM_STEPS = 0;
     info.textContent = '';
-    if (N === 0) { ctx.clearRect(0,0,W,H); ctx.fillStyle='#888'; ctx.font='18px sans-serif'; ctx.fillText('No nodes', 40, 40); return; }
-    step();
+    if (N === 0) { paintBackdrop(); ctx.fillStyle='#888'; ctx.font='18px sans-serif'; ctx.fillText('No nodes', 40, 40); renderProv(); return; }
+    settle();
+    renderProv();
   }
 
   // frame ALL nodes into the viewport with padding. Called each settling frame (while autoFit) so the graph
@@ -288,8 +367,11 @@ static const char kScript[] = R"JS(
   }
 
   // --- simulation ---
-  function step() {
-    if (SIM_STEPS >= MAX_SIM) return;
+  // simTick() is ONE integration step and paints nothing. It was previously fused with the draw + rAF
+  // driver, which is why the page could only ever be watched settling: there was no way to ask for the
+  // finished layout. settle() below runs it in a tight loop; step() keeps the progressive path for the
+  // over-budget case.
+  function simTick() {
     SIM_STEPS++;
     var repulse = 1500, spring = 0.04, rest = 80, dampen = 0.82, gravity = 0.025;
     var cx = W/2, cy = H/2;
@@ -327,16 +409,54 @@ static const char kScript[] = R"JS(
       nodes[i].x += nodes[i].vx;
       nodes[i].y += nodes[i].vy;
     }
+  }
+
+  function now() { return (window.performance && window.performance.now) ? window.performance.now() : Date.now(); }
+
+  // Run the whole sim before the first paint, under a wall-clock budget. Over budget, hand the rest to the
+  // progressive rAF path so a very large graph degrades instead of hanging the tab (non-negotiable: a
+  // recoverable limit is a degrade, and it is disclosed — renderProv prints "settling…" while it is true).
+  function settle() {
+    var t0 = now();
+    settleTimedOut = false;
+    while (SIM_STEPS < MAX_SIM) {
+      simTick();
+      if (now() - t0 > SETTLE_BUDGET_MS) { settleTimedOut = true; break; }
+    }
+    if (autoFit) fitView();
+    draw();
+    if (settleTimedOut) requestAnimationFrame(step);
+  }
+
+  // the progressive driver — the pre-settle behaviour, now reached only past the budget
+  function step() {
+    if (SIM_STEPS >= MAX_SIM) { settleTimedOut = false; renderProv(); return; }
+    simTick();
     if (autoFit) fitView();
     draw();
     requestAnimationFrame(step);
   }
 
   // --- draw ---
-  function nodeRadius(n) { return Math.max(4, Math.min(20, 4 + 60*Math.sqrt(n.rank))); }
+  // Radius reads IN-VIEW DEGREE, with rank as a tiebreak. The old `4 + 60*sqrt(rank)` spanned 4.60-11.78 px
+  // with a MEAN of 5.10 on the README cut — every node a ~5 px dot — while in-view degree over the same
+  // nodes spanned 1 to 111. The picture carried a hub/leaf distinction it never drew, so a hairball was the
+  // honest rendering of it. sqrt keeps the growth sub-linear so a degree-111 hub is ~4x a degree-2 leaf and
+  // not 55x; the small rank term separates equal-degree nodes without ever reordering different-degree ones.
+  function nodeRadius(n) { return Math.max(4, Math.min(24, 4 + 2.2*Math.sqrt(n.deg || 0) + 8*Math.sqrt(n.rank))); }
+
+  // The canvas's own background, painted as the FIRST op of every frame. clearRect leaves transparent
+  // pixels; on screen the body's #111 shows through and it looks fine, but every export path (toDataURL,
+  // the PNG button, a browser "save image") composites transparency onto white, where this page's light
+  // labels and 28%-alpha edges vanish. Painting it is what makes the picture exportable at all.
+  function paintBackdrop() {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.fillStyle = CANVAS_BG;
+    ctx.fillRect(0, 0, W, H);
+  }
 
   function draw() {
-    ctx.clearRect(0, 0, W, H);
+    paintBackdrop();
     ctx.save();
     ctx.translate(ox, oy); ctx.scale(scale, scale);
 
@@ -361,7 +481,9 @@ static const char kScript[] = R"JS(
     }
     ctx.globalAlpha = 1.0;
 
-    // nodes
+    // nodes. In `tested` mode an UNTESTED node is drawn hollow with a dashed ring instead of a filled
+    // disc — the second, non-hue channel H5 is about. Every other mode fills as before.
+    var hollow = (mode === 'tested');
     for (var i = 0; i < N; i++) {
       var n = nodes[i];
       var r = Math.max(nodeRadius(n), 3.5/scale);   // floor the ON-SCREEN radius so nodes stay visible when zoomed out
@@ -369,44 +491,90 @@ static const char kScript[] = R"JS(
       ctx.globalAlpha = dim ? 0.18 : 1.0;
       ctx.beginPath();
       ctx.arc(n.x, n.y, r, 0, 2*Math.PI);
-      ctx.fillStyle = colorForNode(n);
-      ctx.fill();
+      if (hollow && testedStroke(n)) {
+        ctx.fillStyle = CANVAS_BG; ctx.fill();
+        ctx.setLineDash([3/scale, 2.5/scale]);
+        ctx.strokeStyle = colorForNode(n); ctx.lineWidth = Math.max(1.4/scale, r*0.3); ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        ctx.fillStyle = colorForNode(n);
+        ctx.fill();
+      }
       if (i === selected || i === hovered || n.gid === centreGid) {
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 2/scale; ctx.stroke();
       }
     }
 
-    // labels: top-ranked nodes of the view, search matches (which REPLACE the rank set while a query
-    // is live — matches are what you are looking for), and the hovered/selected/centre node. Text is
-    // constant SCREEN size (fs/scale), so zooming changes label density, never label size; capped at
-    // 80 per frame, lowest local index first (≈ highest global rank first) to bound the clutter.
+    // ---- labels, decluttered by a greedy occupancy grid.
+    //
+    // They used to be drawn in local-index order with no collision test at all, so two labels whose boxes
+    // overlapped simply printed on top of each other: `release`/`resize`/`size` came out as "reisleaze",
+    // `empty`/`end` as "eand". Text that is unreadable is worse than absent — it still costs the pixels and
+    // now also costs the reader's trust in the ones that ARE legible.
+    //
+    // The grid is a Set of "col:row" cells over SCREEN space (constant cell size, so the declutter behaves
+    // the same at every zoom). Placement is in descending importance — labelDegreeOrder first, then the
+    // always-shown hovered/selected/centre — so when two labels collide the more important one is the one
+    // that survives. A skipped label is not lost: hover, click or search brings any node's name back.
     ctx.font = (11/scale) + 'px sans-serif';
-    var drawnLabels = 0;
-    for (var i = 0; i < N && drawnLabels < 80; i++) {
-      var wanted = (searchSet ? searchSet.has(i) : labelSet.has(i)) || i === hovered || i === selected || nodes[i].gid === centreGid;
-      if (!wanted) continue;
+    // CELL_H is the grid's row pitch; LABEL_H is how tall a drawn label actually is. They are different
+    // numbers and conflating them was a real bug: reserving only the row the BASELINE lands in leaves two
+    // labels 5 px apart claiming different rows either side of a 16 px boundary. Measured in a browser on
+    // the README cut, that still left 2 overprinting pairs after the grid went in — one of them over the
+    // centre symbol's own name. The box now spans every row the text touches, and its width is MEASURED
+    // rather than estimated from the character count (an estimate that runs short reserves less than it
+    // draws, which is the same collision by a second route).
+    var labelCells = new Set();
+    var CELL_W = 8, CELL_H = 16, LABEL_H = 13;
+    function placeLabel(i) {
       var n = nodes[i];
+      var r  = Math.max(nodeRadius(n), 3.5/scale);
+      var sx = (n.x + r)*scale + ox + 3, sy = n.y*scale + oy + 4;
+      var wpx = ctx.measureText(n.label).width * scale;     // world units -> screen px (font is 11/scale)
+      var c0 = Math.floor(sx/CELL_W), c1 = Math.floor((sx + wpx)/CELL_W);
+      var r0 = Math.floor((sy - LABEL_H)/CELL_H), r1 = Math.floor((sy + 2)/CELL_H);
+      if (c1 - c0 > 200) c1 = c0 + 200;                     // a pathological label cannot monopolise the grid
+      for (var rr = r0; rr <= r1; rr++) { for (var c = c0; c <= c1; c++) { if (labelCells.has(c + ':' + rr)) return false; } }
+      for (var rr2 = r0; rr2 <= r1; rr2++) { for (var c2 = c0; c2 <= c1; c2++) { labelCells.add(c2 + ':' + rr2); } }
       ctx.globalAlpha = (hl && !hl.has(i)) ? 0.25 : 0.9;
       ctx.fillStyle = '#d6d9de';
-      ctx.fillText(n.label, n.x + Math.max(nodeRadius(n), 3.5/scale) + 3/scale, n.y + 4/scale);
-      drawnLabels++;
+      ctx.fillText(n.label, n.x + r + 3/scale, n.y + 4/scale);
+      return true;
+    }
+    var forced = [];
+    if (hovered  >= 0) forced.push(hovered);
+    if (selected >= 0) forced.push(selected);
+    for (var i = 0; i < N; i++) { if (nodes[i].gid === centreGid) { forced.push(i); break; } }
+    for (var fi = 0; fi < forced.length; fi++) placeLabel(forced[fi]);   // never decluttered away
+    if (searchSet) {
+      // a live query REPLACES the standing set — matches are what you are looking for
+      var shown = 0;
+      for (var i = 0; i < N && shown < 80; i++) { if (searchSet.has(i) && placeLabel(i)) shown++; }
+    } else {
+      for (var li = 0; li < labelDegreeOrder.length; li++) placeLabel(labelDegreeOrder[li]);
     }
     ctx.globalAlpha = 1.0;
     ctx.restore();
 
-    // tooltip
+    // tooltip — now names the FILE. 13 label names covered 28 nodes on the README cut (three different
+    // `empty`, three `find`), and the page emitted a FILES array it never read, so the one question a
+    // duplicate name raises was the one question the UI could not answer.
     if (hovered >= 0) {
       var n = nodes[hovered];
       var sx = n.x*scale+ox, sy = n.y*scale+oy;
-      var msg = n.label + ' [' + n.type + ']';
-      ctx.fillStyle = 'rgba(0,0,0,0.75)';
-      ctx.font = '12px monospace';
+      var msg = n.label + ' [' + n.type + ']  ' + fileOf(n);
+      ctx.fillStyle = 'rgba(0,0,0,0.82)';
+      ctx.font = '12px ui-monospace,SFMono-Regular,Menlo,monospace';
       var tw = ctx.measureText(msg).width;
       ctx.fillRect(sx+8, sy-18, tw+10, 22);
       ctx.fillStyle = '#fff';
       ctx.fillText(msg, sx+13, sy-2);
     }
   }
+
+  // FILES[n.file] — the path, or an honest blank when the payload has no entry for it. FILES was emitted
+  // and never read anywhere in this script (2241 bytes of dead payload on this repository's own map).
+  function fileOf(n) { return (FILES && n.file < FILES.length) ? FILES[n.file] : ''; }
 
   // canvas → world coords
   function toWorldXY(px, py) { return { x: (px-ox)/scale, y: (py-oy)/scale }; }
@@ -420,11 +588,38 @@ static const char kScript[] = R"JS(
     return -1;
   }
 
-  // resize
+  // ---- resize. Two defects lived here.
+  //
+  // H10 (sharpness): the backing store was set to the CSS pixel count, so on any retina display the whole
+  // canvas was rendered at 1x and scaled up by the compositor — every node edge and every label soft. The
+  // backing store is now devicePixelRatio times the CSS size, with the CSS size pinned in style so the page
+  // still lays out in CSS pixels; paintBackdrop() re-establishes the DPR transform each frame, so all
+  // drawing code keeps working in CSS-pixel coordinates and nothing else had to change.
+  //
+  // H8 (a stranded camera): step() early-returns once SIM_STEPS >= MAX_SIM, so after settling fitView could
+  // never run again — and resize() set canvas.width, which CLEARS the canvas, then redrew with the old
+  // camera. Measured: a viewport change dropped the graph from 238788 to 27174 lit pixels, and in one case
+  // left a fully blank canvas while the info bar read "221 nodes in view", recoverable only by reload.
+  // Re-fitting whenever autoFit is still on restores the invariant the settling loop used to maintain.
+  function chromeTop() {
+    var p = document.getElementById('prov');
+    return 36 + ((p && p.offsetHeight) ? p.offsetHeight : 0);
+  }
   function resize() {
-    canvas.width  = window.innerWidth;
-    canvas.height = window.innerHeight;
-    W = canvas.width; H = canvas.height;
+    var top = chromeTop();
+    var cssW = Math.max(1, window.innerWidth), cssH = Math.max(1, window.innerHeight - top);
+    DPR = Math.max(1, Math.min(4, window.devicePixelRatio || 1));
+    canvas.style.marginTop = top + 'px';
+    canvas.style.width  = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+    canvas.width  = Math.round(cssW*DPR);
+    canvas.height = Math.round(cssH*DPR);
+    W = cssW; H = cssH;                      // the drawing code's coordinate space stays CSS pixels
+    var el;
+    if ((el = document.getElementById('crumb'))) el.style.top = top + 'px';
+    if ((el = document.getElementById('hits')))  el.style.top = top + 'px';
+    stackCardsBelowHits();   // cards clear the results panel when it is open (see its comment)
+    if (autoFit) fitView();
     draw();
   }
   window.addEventListener('resize', resize);
@@ -467,25 +662,65 @@ static const char kScript[] = R"JS(
       location.hash = '#node/' + n.gid;
     }
   });
+  // H12: the zoom is CLAMPED. `scale *= factor` compounded without bound, so a few wheel flicks reached
+  // 0 or Infinity and there was no gesture that came back — the graph was gone and the only fix was a
+  // reload. The factor is recomputed from the clamped scale so the cursor stays the anchor at the rails.
   canvas.addEventListener('wheel', function(e) {
     e.preventDefault();
     autoFit = false;   // user takes control of the camera
-    var factor = e.deltaY < 0 ? 1.1 : 0.91;
-    var cx = e.clientX, cy = e.clientY;
+    var want = scale * (e.deltaY < 0 ? 1.1 : 0.91);
+    var next = Math.max(SCALE_MIN, Math.min(SCALE_MAX, want));
+    var factor = next / scale;
+    if (factor === 1) return;
+    var cx = e.clientX, cy = e.clientY - chromeTop();
     ox = cx - (cx - ox)*factor; oy = cy - (cy - oy)*factor;
-    scale *= factor;
+    scale = next;
     draw();
   }, { passive: false });
 
-  // search — filters the CURRENT view's node set only
+  // ---- search. On the canvas views it filters the CURRENT node set. On the OVERVIEW it used to do
+  // nothing at all: renderOverview never calls loadSubset, so N === 0 and this loop ran zero times — the
+  // box you land on matched nothing, always, and said nothing about it. That is the same silent-failure
+  // shape as H1, in a control the user's eye lands on first. It now searches the WHOLE symbol set (the
+  // only set the landing page has) and renders the hits as links into the node view.
   search.addEventListener('input', function() {
     var q = search.value.trim().toLowerCase();
+    if (currentView === 'overview') { overviewSearch(q); return; }
     if (!q) { searchSet = null; draw(); return; }
     searchSet = new Set();
     for (var i = 0; i < N; i++)
       if (nodes[i].label.toLowerCase().indexOf(q) >= 0) searchSet.add(i);
     draw();
   });
+
+  // #hits and #cards are both position:fixed at the chrome's bottom edge, so the results panel would sit
+  // ON TOP of the first row of module cards. Measured in a browser: hits occupied 76-105 px and cards
+  // started at 76. The cards start below whatever the panel currently occupies.
+  function stackCardsBelowHits() {
+    var h = document.getElementById('hits');
+    var visible = h && h.style.display === 'block';
+    cardsEl.style.top = (chromeTop() + (visible ? h.offsetHeight : 0)) + 'px';
+  }
+
+  function overviewSearch(q) {
+    var el = document.getElementById('hits');
+    if (!q) { el.style.display = 'none'; el.innerHTML = ''; renderOverviewCards(null); stackCardsBelowHits(); return; }
+    var hits = [];
+    for (var i = 0; i < NODES.length; i++) {
+      if (NODES[i].label.toLowerCase().indexOf(q) >= 0) hits.push(i);
+    }
+    var html = '<span class="n">' + hits.length + ' symbol' + (hits.length === 1 ? '' : 's') + ' match "' + escHtml(q) + '"' +
+               (hits.length > 40 ? ' (first 40)' : '') + '</span>';
+    for (var h = 0; h < hits.length && h < 40; h++) {
+      var nd = NODES[hits[h]];
+      html += '<a href="#node/' + hits[h] + '/2">' + escHtml(nd.label) + '</a>';
+    }
+    if (!hits.length) html += '<span class="n">nothing in this map — the page holds the top ' + NODE_TOTAL + ' of ' + SYM_TOTAL + ' symbols</span>';
+    el.innerHTML = html;
+    el.style.display = 'block';
+    renderOverviewCards(q);
+    stackCardsBelowHits();
+  }
 
   // depth slider (node-view ego graph radius, 1-3)
   var egoDepth = 2;
@@ -503,15 +738,49 @@ static const char kScript[] = R"JS(
     cardsEl.className = showCards ? 'show' : '';
     canvas.style.display = showCanvas ? 'block' : 'none';
     depthSlider.parentElement.style.visibility = (currentView === 'node') ? 'visible' : 'hidden';
+    if (!showCards) { document.getElementById('hits').style.display = 'none'; }
   }
 
-  function renderOverview() {
-    currentView = 'overview'; centreGid = -1;
-    crumbEl.style.display = 'none';
-    setChrome(true, false);
-    var html = '';
+  // ---- the provenance caption. Two lines under the bar naming what this picture IS: the root it was
+  // built from, the ranker whose scores set the sizes, the top-k that bounded the selection and what
+  // fraction of the repository that is, the counts in the CURRENT view, and the colour metric. This tool
+  // states every truncation it makes in its XML header and the page stated nothing at all about itself —
+  // a screenshot of it could not be audited, which is exactly the disclosure the rest of the tool is for.
+  // The label rule goes here too: rule 2 of loadSubset deliberately shows one label per name, and a
+  // reader must not have to infer that from the picture.
+  function renderProv() {
+    var el = document.getElementById('prov');
+    if (!el) return;
+    function k(t) { return '<span class="k">' + t + '</span> '; }
+    var metric = { lang: 'language', community: 'module (community)', cx: 'cyclomatic complexity',
+                   churn: 'commits (' + (CHURN_WINDOW || 'window not recorded') + ')', tested: 'has a test' }[mode] || mode;
+    var pct = SYM_TOTAL ? Math.round(1000*NODE_TOTAL/SYM_TOTAL)/10 : 0;
+    var l1 = k('root') + '<b>' + escHtml(ROOT || '.') + '</b>  ' +
+             k('ranker') + '<b>' + escHtml(RANKER) + '</b>  ' +
+             k('top-k') + '<b>' + TOPK + '</b> of ' + SYM_TOTAL + ' symbols (' + pct + '%)  ' +
+             k('map') + '<b>' + NODE_TOTAL + '</b> nodes / <b>' + EDGE_TOTAL + '</b> call edges';
+    var viewName = currentView === 'overview' ? MODULES.length + ' modules'
+                 : currentView === 'module'   ? 'module subgraph'
+                 : 'depth-' + egoDepth + ' neighbourhood';
+    var l2 = k('view') + '<b>' + viewName + '</b>' + (currentView === 'overview' ? '' : ': ' + N + ' nodes / ' + L + ' edges') + '  ' +
+             k('colour') + '<b>' + escHtml(metric) + '</b>' + (mode === 'churn' && !CHURN_OK ? ' <b>unavailable (no git history)</b>' : '') + '  ' +
+             k('labels') + 'top ' + MAX_LABELS + ' by in-view degree, one per name' +
+             (settleTimedOut ? '  <b>settling…</b> (layout over the ' + SETTLE_BUDGET_MS + ' ms budget, still converging)' : '');
+    el.innerHTML = l1 + '<br>' + l2;
+  }
+
+  // the module cards, optionally filtered to modules whose name or any MEMBER matches `q` (the overview
+  // half of the search fix — a card list that ignores the query would be the same inert control again)
+  function renderOverviewCards(q) {
+    var html = '', kept = 0;
     for (var m = 0; m < MODULES.length; m++) {
       var mod = MODULES[m];
+      if (q) {
+        var hit = mod.name.toLowerCase().indexOf(q) >= 0;
+        for (var j = 0; !hit && j < mod.members.length; j++) { if (NODES[mod.members[j]].label.toLowerCase().indexOf(q) >= 0) hit = true; }
+        if (!hit) continue;
+      }
+      kept++;
       html += '<div class="card module-card" data-module-card="1" data-mid="' + m + '">';
       html += '<h2>' + escHtml(mod.name) + '</h2>';
       html += '<div class="meta">' + mod.fileCount + ' files · ' + mod.symCount + ' symbols · in ' + mod.inCross + ' / out ' + mod.outCross + '</div>';
@@ -523,12 +792,22 @@ static const char kScript[] = R"JS(
       html += '</ul></div>';
     }
     if (MODULES.length === 0) html = '<div style="color:#999;padding:20px">No multi-symbol modules detected — the graph is too small or too sparse for community grouping.</div>';
+    else if (q && kept === 0) html = '<div style="color:#999;padding:20px">No module contains a symbol matching "' + escHtml(q) + '".</div>';
     cardsEl.innerHTML = html;
     var els = cardsEl.querySelectorAll('[data-module-card]');
     for (var i = 0; i < els.length; i++) {
       els[i].addEventListener('click', function() { location.hash = '#module/' + this.getAttribute('data-mid'); });
     }
-    info.textContent = MODULES.length + ' modules';
+    info.textContent = (q ? kept + ' of ' + MODULES.length : MODULES.length) + ' modules';
+  }
+
+  function renderOverview() {
+    currentView = 'overview'; centreGid = -1;
+    crumbEl.style.display = 'none';
+    setChrome(true, false);
+    var q = search.value.trim().toLowerCase();
+    if (q) { overviewSearch(q); } else { document.getElementById('hits').style.display = 'none'; renderOverviewCards(null); stackCardsBelowHits(); }
+    renderProv();
   }
 
   function renderModule(mid) {
@@ -564,7 +843,26 @@ static const char kScript[] = R"JS(
     if (addToTrail !== false) pushTrail(gid);
     renderCrumb();
     var n = NODES[gid];
-    info.textContent = n.label + ' · ' + n.type + ' · rank=' + n.rank + ' · depth=' + egoDepth + ' · ' + eg.ids.length + ' nodes in view';
+    info.textContent = n.label + ' · ' + n.type + ' · ' + fileOf(n) + ' · rank=' + n.rank + ' · depth=' + egoDepth + ' · ' + eg.ids.length + ' nodes in view';
+    renderProv();
+  }
+
+  // ---- #node/WHAT[/DEPTH] — WHAT is a symbol NAME, or (still) a numeric NODES index.
+  //
+  // The index is a position in the rank-sorted NODES array, so `#node/431/2` is not a name, is not stable
+  // across --top-k, and is not something a document can be written against: the README's own hero link is
+  // exactly that, and it silently addresses a different symbol the moment the map is regenerated with a
+  // different ceiling. Resolving by name first makes `#node/lexicalScoresTiered/2` mean what it says, and
+  // keeps every existing numeric link working. A name that appears on several symbols resolves to the
+  // highest-ranked one — deterministic (NODES is rank-sorted, so it is the first match) and disclosed in
+  // the info line, which names the file the winner came from.
+  function gidForRoute(what) {
+    if (/^[0-9]+$/.test(what)) { var ix = parseInt(what, 10); return (ix >= 0 && ix < NODES.length) ? ix : -1; }
+    var want = decodeURIComponent(what);
+    for (var i = 0; i < NODES.length; i++) { if (NODES[i].label === want) return i; }
+    var lower = want.toLowerCase();
+    for (var j = 0; j < NODES.length; j++) { if (NODES[j].label.toLowerCase() === lower) return j; }
+    return -1;
   }
 
   function route() {
@@ -573,8 +871,14 @@ static const char kScript[] = R"JS(
     if (parts[0] === 'module' && parts[1] !== undefined) {
       renderModule(parseInt(parts[1], 10) || 0);
     } else if (parts[0] === 'node' && parts[1] !== undefined) {
-      var gid = parseInt(parts[1], 10) || 0;
       if (parts[2] !== undefined) { egoDepth = Math.max(1, Math.min(3, parseInt(parts[2],10)||2)); depthSlider.value = String(egoDepth); depthVal.textContent = String(egoDepth); }
+      var gid = gidForRoute(parts[1]);
+      if (gid < 0) {
+        // an unresolvable route is SAID, not silently redirected to node 0 (which is what parseInt||0 did)
+        renderOverview();
+        info.textContent = 'no symbol named "' + decodeURIComponent(parts[1]) + '" in this map (top ' + NODE_TOTAL + ' of ' + SYM_TOTAL + ')';
+        return;
+      }
       var already = trail[trailPos] === gid;
       renderNode(gid, !already);
     } else {
@@ -586,14 +890,29 @@ static const char kScript[] = R"JS(
   // colour-mode selector: initial value from the baked COLOR_MODE; a change re-renders legend + canvas
   var modeSel = document.getElementById('colorMode');
   modeSel.value = COLOR_MODE;
-  modeSel.addEventListener('change', function() { mode = modeSel.value; renderLegend(); draw(); });
+  modeSel.addEventListener('change', function() { mode = modeSel.value; renderLegend(); renderProv(); draw(); });
   renderLegend();
 
+  // ---- PNG export. With the canvas painting its own background and its backing store scaled by DPR, this
+  // is now the correct way to get a picture of the graph out of the page: an OS screenshot is capped at the
+  // display's own resolution and includes the browser chrome, whereas toDataURL hands back exactly the
+  // backing store — DPR x the CSS size, background composited, nothing else in the frame.
+  document.getElementById('savePng').addEventListener('click', function() {
+    if (canvas.style.display === 'none') { info.textContent = 'nothing to export from the overview — open a module or a symbol first'; return; }
+    draw();                                     // guarantee the frame is current, not a stale hover state
+    var a = document.createElement('a');
+    var slug = (currentView === 'node' && centreGid >= 0) ? NODES[centreGid].label : (currentView || 'graph');
+    a.download = 'ripwire-' + String(slug).replace(/[^A-Za-z0-9_.-]+/g, '_') + '-' + mode + '.png';
+    a.href = canvas.toDataURL('image/png');
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  });
+
   // boot
-  if (GN === 0) { setChrome(false, true); ctx.fillStyle='#888'; ctx.font='18px sans-serif'; ctx.fillText('No nodes', 40, 40); return; }
+  if (GN === 0) { setChrome(false, true); resize(); paintBackdrop(); ctx.fillStyle='#888'; ctx.font='18px sans-serif'; ctx.fillText('No nodes', 40, 40); renderProv(); return; }
   resize();
   if (!location.hash) location.hash = '#overview';
   route();
+  resize();   // the caption's height is only knowable once it has content; re-measure so the canvas fits
 })();
 )JS";
 
@@ -630,6 +949,77 @@ inline const char* colorByLabel( ColorBy m ) noexcept
     return idx < kColorByNameCount ? kColorByNames[ idx ] : kColorByNames[0];
 }
 
+// The ranker's name for the page's provenance caption. Same NAME TABLE shape as kColorByNames above, and
+// beside it deliberately: main.cpp's §B2.1 ternary names only the three rankers that STAMP the XML header
+// (authority/hub/rrf, nullptr for the rest), which is the right answer for a header attribute that must
+// stay absent on a default run and the wrong one for a caption that has to say something on every run.
+// Declaration ORDER is the index and the static_assert pins it, so adding a RankBy enumerator without a
+// name is a compile error rather than a page that silently mislabels its own ranks.
+inline constexpr const char* kRankByNames[] = { "pagerank", "authority", "hub", "rrf", "churn", "churn-decay" };
+inline constexpr std::size_t kRankByNameCount = sizeof( kRankByNames ) / sizeof( kRankByNames[0] );
+static_assert( kRankByNameCount == std::size_t( RankBy::ChurnDecay ) + 1,
+               "kRankByNames must carry one name per RankBy enumerator, in declaration order" );
+
+inline const char* rankByPageLabel( RankBy r ) noexcept
+{
+    const std::size_t idx = std::size_t( r );
+    return idx < kRankByNameCount ? kRankByNames[ idx ] : kRankByNames[0];
+}
+
+// H4 — the language palette, indexed by the Lang enumerator so it cannot fall behind the roster.
+//
+// It already had. model.h::langTag emits 19 tags; the page's hand-written `langColor` object carried 9
+// keys and its hand-written legend listed 8, so ELEVEN languages (js sh java rb json cs c toml yaml php
+// lua) fell through to an unlabelled `#999` — on this repository six Bash symbols rendered as a grey the
+// legend never explained, which is "not measured" painted as if it were an answer (non-negotiable #3).
+// Two hand-maintained lists behind one enum is the drift shape; ONE table indexed BY the enum, with the
+// same static_assert kColorByNames uses, is the fix — and the page's swatches AND its legend are both
+// generated from this array, so no second list is left to drift.
+//
+// Hues: the nine that existed keep their exact values, so a cpp/py/ts/go/rs/swift/objc/md corpus emits the
+// same colours it always did; the eleven new ones are each language's conventional colour, picked to stay
+// separable on the page's #111 canvas. `?` (Lang::Unknown) keeps the neutral grey, which is honest — an
+// unknown language IS the absence of a measurement — and the legend now labels that swatch as such.
+inline constexpr const char* kLangColors[] = {
+    "#4a90d9",   // Cpp
+    "#f4c542",   // Python
+    "#2d79c7",   // TypeScript
+    "#00acd7",   // Go
+    "#dea584",   // Rust
+    "#fa7343",   // Swift
+    "#9b59b6",   // ObjC
+    "#7f8c8d",   // Markdown
+    "#e8d44d",   // JavaScript
+    "#89e051",   // Bash
+    "#b07219",   // Java
+    "#c9455f",   // Ruby
+    "#95a5a6",   // Unknown ("?")
+    "#a8b5c4",   // Json
+    "#68217a",   // CSharp
+    "#7aa6c2",   // C
+    "#a0703c",   // Toml
+    "#cb9a3d",   // Yaml
+    "#8892bf",   // Php
+    "#4b8bbe",   // Lua
+};
+inline constexpr std::size_t kLangColorCount = sizeof( kLangColors ) / sizeof( kLangColors[0] );
+static_assert( kLangColorCount == std::size_t( Lang::Lua ) + 1,
+               "kLangColors must carry one hex colour per Lang enumerator, in declaration order — a language with "
+               "no swatch renders as an unlabelled grey the legend cannot explain" );
+
+// Emit the LANG_COLORS map the page's swatches and legend are BOTH built from: langTag(L) -> hex, in
+// enumerator order. Deterministic by construction (a constexpr array walked in index order), and the one
+// place the roster is stated.
+inline void writeLangPalette( std::FILE* out )
+{
+    std::fprintf( out, "const LANG_COLORS = {" );
+    for( std::size_t i = 0; i < kLangColorCount; ++i )
+    {
+        std::fprintf( out, "%s\"%s\":\"%s\"", i ? "," : "", langTag( Lang( i ) ), kLangColors[i] );
+    }
+    std::fprintf( out, "};\n" );
+}
+
 // Side data for the --color-by node-colour modes. Every export embeds ALL five modes' data; the
 // pointers may be null (the caller's pipeline may not have computed them), in which case the page
 // still renders — tested falls to 0, churn to 0 with churnEvidence=false disclosing "no git history".
@@ -639,6 +1029,8 @@ struct HtmlColorExtras
     const std::vector<std::uint32_t>* fileChurn     = nullptr;   // per-ORIGINAL-file commit counts (ing.files index), may be null
     bool                              churnEvidence = false;     // false ⇒ no git history: churn mode discloses instead of lying zeros
     ColorBy                           initialMode   = ColorBy::Lang;
+    std::string_view                  churnWindow;               // the window the caller actually MINED ("18 months ago"), for the legend
+    RankBy                            ranker        = RankBy::PageRank;   // for the provenance caption — which ranks these are
 };
 
 // The three --color-by JS constants, emitted as ONE section because they are one payload: the
@@ -657,8 +1049,15 @@ inline void writeColorPayload( std::FILE* out, const std::vector<std::uint32_t>&
     std::fprintf( out, "];\n" );
     // whether git evidence existed — 0 ⇒ churn mode discloses "unavailable" instead of lying zeros
     std::fprintf( out, "const CHURN_OK = %d;\n", color.churnEvidence ? 1 : 0 );
+    // the WINDOW those commit counts were mined over. The legend used to print a bare "0 1-2 3-9 10-29 30+"
+    // with no unit and no horizon, so "3-9" could be read as three commits ever; it is three commits inside
+    // this window. Passed in by the caller rather than spelled in the JS, because the JS cannot know what
+    // main.cpp handed mineChurnPerFile — a hardcoded string here is a claim the page cannot back.
+    std::fprintf( out, "const CHURN_WINDOW = \"%s\";\n", jsonEscape( color.churnWindow ).c_str() );
     // the baked initial colour mode (--color-by=MODE); the in-page selector switches live from here
     std::fprintf( out, "const COLOR_MODE = \"%s\";\n", colorByLabel( color.initialMode ) );
+    // the ranker whose scores the `rank` field carries — the provenance caption's second fact
+    std::fprintf( out, "const RANKER = \"%s\";\n", rankByPageLabel( color.ranker ) );
 }
 
 // writeHtml — emit a self-contained HTML wiki document to `out`.
@@ -846,6 +1245,8 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         "#info { font-size:12px; color:#aaa; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n"
         "#legend { font-size:11px; color:#999; white-space:nowrap; }\n"
         "#legend span { display:inline-block; width:10px; height:10px; border-radius:50%%; margin-right:3px; }\n"
+        // the metric NAME inside the legend is text, not a swatch — it must escape the circle rule above
+        "#legend span.lg { width:auto; height:auto; border-radius:0; color:#c8ccd2; margin-right:5px; }\n"
         "#colorMode { background:#222; border:1px solid #444; color:#eee; padding:3px 6px;\n"
         "             border-radius:4px; font-size:12px; }\n"
         "#depth { font-size:11px; color:#999; display:flex; align-items:center; gap:4px; white-space:nowrap; }\n"
@@ -865,7 +1266,23 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         ".card .meta { font-size:11px; color:#999; margin-bottom:6px; }\n"
         ".card ul { list-style:none; font-size:11px; color:#ccc; }\n"
         ".card li { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n"
-        ".module-card { data-module-card:1; }\n"
+        // H11: `.module-card { data-module-card:1; }` used to sit here. `data-module-card:1` is not a CSS
+        // declaration — the property does not exist, so the whole rule was dropped by every parser that has
+        // ever read this page. The ATTRIBUTE the overview router selects on is written by renderOverview
+        // (data-module-card="1") and is unaffected; this was dead bytes shaped like a selector.
+        "#prov { position:fixed; left:0; right:0; z-index:8; background:rgba(0,0,0,.55); color:#8f96a0;\n"
+        "        font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; padding:3px 12px;\n"
+        "        white-space:nowrap; overflow-x:auto; border-bottom:1px solid #222; }\n"
+        "#prov b { color:#c8ccd2; font-weight:600; }\n"
+        "#prov .k { color:#6f757e; }\n"
+        "#bar button { background:#222; border:1px solid #444; color:#eee; padding:3px 8px;\n"
+        "              border-radius:4px; font-size:12px; cursor:pointer; }\n"
+        "#bar button:hover { border-color:#7fb2ff; }\n"
+        "#hits { position:fixed; top:36px; left:0; right:0; z-index:9; background:rgba(20,20,20,.92);\n"
+        "        font-size:12px; padding:6px 12px; display:none; max-height:40%%; overflow:auto; }\n"
+        "#hits a { color:#7fb2ff; text-decoration:none; margin-right:14px; display:inline-block; }\n"
+        "#hits a:hover { text-decoration:underline; }\n"
+        "#hits .n { color:#8f96a0; margin-right:10px; }\n"
         "</style>\n"
         "</head>\n"
         "<body>\n"
@@ -878,10 +1295,18 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         "  <select id=\"colorMode\"><option value=\"lang\">lang</option><option value=\"community\">community</option>"
             "<option value=\"cx\">cx</option><option value=\"churn\">churn</option><option value=\"tested\">tested</option></select>\n"
         "  <span id=\"legend\"></span>\n"
+        "  <button id=\"savePng\" title=\"download this view as a PNG\">PNG</button>\n"
         "</div>\n"
+        // The provenance caption. This tool's whole posture is disclosure — every truncation stated, every
+        // count labelled a floor — and the page stated NOTHING about itself: not the root it maps, not which
+        // ranker produced the sizes, not how many of the repository's symbols it is showing. Two lines, filled
+        // by renderProv() from the baked constants above, so the picture can be read (or screenshotted into a
+        // README) without the argv that made it.
+        "<div id=\"prov\"></div>\n"
+        "<div id=\"hits\"></div>\n"
         "<div id=\"crumb\"></div>\n"
         "<div id=\"cards\"></div>\n"
-        "<canvas id=\"c\" style=\"margin-top:36px\"></canvas>\n"
+        "<canvas id=\"c\"></canvas>\n"
         "<script>\n"
     );
 
@@ -959,6 +1384,17 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         std::fprintf( out, "\n" );
     }
     std::fprintf( out, "];\n" );
+
+    // The remaining provenance facts for the caption. NODE_TOTAL/EDGE_TOTAL are the whole selected map;
+    // the caption states them beside the CURRENT view's counts, because "221 nodes in view" out of 200 and
+    // out of 5000 are different claims and the page used to make neither. TOPK is the ceiling that produced
+    // the selection (the effective one, after --max-tokens/adaptive have cut it — the number that explains
+    // the map you are looking at, not the number that was typed).
+    std::fprintf( out, "const TOPK = %zu;\n", cap );
+    std::fprintf( out, "const NODE_TOTAL = %zu;\n", cap );
+    std::fprintf( out, "const EDGE_TOTAL = %zu;\n", edges.size() );
+    std::fprintf( out, "const SYM_TOTAL = %zu;\n", S );
+    writeLangPalette( out );
 
     // emit MODULES array — the Overview cards, sorted (member count desc, commId asc). `members` and
     // `top` are selected-array (NODES) indices; `neigh` is the sorted, deduped list of OTHER display
