@@ -10,7 +10,7 @@ columns in results.json stand as measured and re-running them would only add noi
 The questions are read from the SAME questions.json and are NOT re-derived, re-scoped
 or re-selected. The scorer is the SAME scorer.py. Nothing here may change either.
 
-Usage:  RIPWIRE_POST=/abs/path/to/build/ripwire python3 rerun_post.py
+Usage:  RW_H2H_HOME=<scratch h2h tree> RIPWIRE_POST=<post-fix ripwire> python3 rerun_post.py
 """
 from __future__ import annotations
 import json, os, subprocess, sys

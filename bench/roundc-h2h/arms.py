@@ -10,14 +10,34 @@ credentials are never inherited.
 from __future__ import annotations
 import os, random, re, subprocess, time
 
-H = "$RW_H2H_HOME"
+# The harness tree and the binary are SESSION-LOCAL and are read from the environment: a checked-out path
+# under someone's home directory is not a fact about this experiment, and test/ripwirepubliccheck.sh refuses
+# one in a tracked file. RW_H2H_HOME is the scratch tree holding corpus/, run/senv.sh and the arm binaries;
+# RIPWIRE_BIN is the ripwire under test. Neither has a default, because a wrong default would run silently.
+H = os.environ.get("RW_H2H_HOME", "")
 CORPUS = f"{H}/corpus/rocksdb"
 SENV = f"{H}/run/senv.sh"
 GORTEX = f"{H}/gortex/prefix/gortex"
 CCC = f"{H}/bin/ccc"
-RG = "/opt/homebrew/bin/rg"
-RIPWIRE = "$RIPWIRE"
+RG = os.environ.get("RW_H2H_RG", "rg")
+RIPWIRE = os.environ.get("RIPWIRE_BIN", "")
 TIMEOUT = 300
+
+
+def scrub(argv):
+    """Recorded provenance, without the machine it ran on. The results files are TRACKED, and a checked-out
+    path under someone's home directory is not a fact about this experiment — test/ripwirepubliccheck.sh
+    refuses one, and it was right to: the first version of these files leaked both the home directory and the
+    session scratch path into a public repo. Applied at the ONE place argv is recorded, so no arm can forget."""
+    subs = [(H, "$RW_H2H_HOME"), (RIPWIRE, "$RIPWIRE")]
+    out = []
+    for a in argv:
+        a = str(a)
+        for pre, name in subs:
+            if pre:
+                a = a.replace(pre, name)
+        out.append(a)
+    return out
 
 
 def _run(argv, cwd=None, env=None):
@@ -27,7 +47,7 @@ def _run(argv, cwd=None, env=None):
         out, rc = p.stdout, p.returncode
     except subprocess.TimeoutExpired as e:
         out, rc = (e.stdout or b""), 124
-    return out, (time.perf_counter() - t0) * 1000.0, rc, argv
+    return out, (time.perf_counter() - t0) * 1000.0, rc, scrub(argv)
 
 
 # ---------------------------------------------------------------- ripwire
@@ -115,8 +135,8 @@ def rg_floor(q, max_reads=200):
         except OSError:
             pass
     return (bytes(out), (time.perf_counter() - t0) * 1000.0, p.returncode,
-            [RG, "-l", "--fixed-strings", "--", lit, CORPUS,
-             f"+whole-file-reads(n<={max_reads})"])
+            scrub([RG, "-l", "--fixed-strings", "--", lit, CORPUS,
+                   f"+whole-file-reads(n<={max_reads})"]))
 
 
 # ---------------------------------------------------------------- placebo
