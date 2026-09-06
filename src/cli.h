@@ -760,6 +760,7 @@ inline void printPlanLanesUsage( std::FILE* out ) noexcept
         "                               55.5%% shared, largest gains on weaker lane models — and wall clock got WORSE).\n" );
 }
 
+/// Print the authoritative CLI usage and flag catalog to the caller-provided output stream.
 inline void printUsage( std::FILE* out ) noexcept
 {
     std::fprintf( out,

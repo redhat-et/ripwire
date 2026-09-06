@@ -169,6 +169,7 @@ inline std::string_view cc_boolOp( TSNode n, std::string_view src ) noexcept
 //     hypothetical grammar spelling some non-boolean operator `or` would start scoring.
 // Python is deliberately absent from both: its `and`/`or` parse to a `boolean_operator` NODE, which
 // isDecisionType already names, so counting it here too would double it.
+/// Recognize short-circuit boolean joins, including word operators supported by the given language.
 inline bool cc_isBooleanJoin( TSNode n, std::string_view src, Lang lang ) noexcept
 {
     const std::string_view o        = cc_operatorText( n, src );
@@ -1002,6 +1003,8 @@ inline void ev_finalize( EvCtx& ctx, std::uint32_t& evOut, std::array<std::uint8
 
 // A4-F25: NOT noexcept — the frame-stack vector allocates, so under memory pressure bad_alloc must be
 // allowed to propagate to the per-file degrade catch, not turn into terminate().
+/// Accumulate syntactic complexity and nesting in one iterative walk from start.
+/// Update acc in place using the supplied initial depth/nesting; quoted Elixir AST is excluded.
 inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view src, CcAccum& acc, int startDepth,
                       bool countLocals,   // Phase 1: countLocals gates on lang (model.h localsCountedLang), C/C++ only
                       Lang lang, EvCtx* evCtx )   // essential complexity: nullptr outside model.h evCountedLang — zero work then

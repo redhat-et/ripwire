@@ -74,6 +74,7 @@ inline bool isValidSeverity( std::string_view s ) noexcept
 
 // language token (as written in `language:`) → Lang enum. Declarative table, not an if-chain. Only the
 // grammar-bearing languages are accepted (Markdown has no tree-sitter grammar → no AST rules).
+/// Parse a supported language token; assign out only on success and otherwise return false.
 inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
 {
     struct Row { std::string_view name; Lang lang; };
@@ -111,6 +112,7 @@ inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
 // a header (.h) is treated as Cpp here (the same conservative choice ingest.cpp's kLangTable makes —
 // `.h` ownership is inherently ambiguous, see model.h's Lang-enum comment) — documented degrade: an
 // ObjC .h rule may not match, prefer .m/.mm fixtures for ObjC. `.c` (L3) is its OWN language, NOT Cpp.
+/// Classify a path by its supported extension, returning Unknown when no extension matches.
 inline Lang langOfPath( std::string_view path ) noexcept
 {
     const std::size_t dot = path.rfind( '.' );
@@ -172,6 +174,7 @@ inline Lang langOfPath( std::string_view path ) noexcept
 // counterexample: a Cargo.toml [dependencies] table names real dependencies. They are PACKAGE deps, not the
 // physical file-include edges this graph is built from, and inventing a node for one would put a name with
 // no in-repo file behind it into a denominator that propagation_cost divides by.
+/// Return whether this language has syntax-backed dependency extraction for dependency rules.
 inline bool dependencyCapable( Lang lang ) noexcept
 {
     switch( lang )

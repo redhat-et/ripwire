@@ -12,6 +12,7 @@ namespace
 // Included by ingest.cpp after the shared AST helpers.
 // Elixir keywords are identifiers, so tags.scm alone cannot distinguish def f(x) from
 // ordinary(f(x)). Keep the text gates local to this grammar instead of changing every tags pass.
+/// Return an identifier call target as a view into src, or an empty view for null or remote targets.
 std::string_view elixirTarget( TSNode node, std::string_view src ) noexcept
 {
     if( ts_node_is_null( node ) )
@@ -26,17 +27,20 @@ std::string_view elixirTarget( TSNode node, std::string_view src ) noexcept
     return nodeTextOf( target, src );
 }
 
+/// Return whether target introduces a function, macro, guard, or delegate definition.
 bool elixirFunctionKeyword( std::string_view target ) noexcept
 {
     constexpr std::string_view keywords[] = { "def", "defp", "defmacro", "defmacrop", "defguard", "defguardp", "defdelegate" };
     return std::find( std::begin( keywords ), std::end( keywords ), target ) != std::end( keywords );
 }
 
+/// Return whether target introduces a statically named module or protocol, excluding defimpl.
 bool elixirModuleKeyword( std::string_view target ) noexcept
 {
     return target == "defmodule" || target == "defprotocol";
 }
 
+/// Find the direct arguments child of node; return a null node when node or its arguments are absent.
 TSNode elixirArguments( TSNode node ) noexcept
 {
     if( ts_node_is_null( node ) )
@@ -54,6 +58,7 @@ TSNode elixirArguments( TSNode node ) noexcept
     return {};
 }
 
+/// Return the first direct call argument, or a null node for an absent or empty argument list.
 TSNode elixirFirstArgument( TSNode node ) noexcept
 {
     const TSNode args = elixirArguments( node );
@@ -61,6 +66,8 @@ TSNode elixirFirstArgument( TSNode node ) noexcept
 }
 
 // Both `do ... end` and `do: expression` carry a body, but neither has a body: field.
+/// Find a definition's direct do-block or do-keyword value without adopting an ancestor's body.
+/// node must be non-null; src must contain its source span. Return a null node when no body exists.
 TSNode elixirBody( TSNode node, std::string_view src ) noexcept
 {
     for( std::uint32_t childId = 0; childId < ts_node_named_child_count( node ); ++childId )
@@ -100,6 +107,8 @@ TSNode elixirBody( TSNode node, std::string_view src ) noexcept
     return {};
 }
 
+/// Count syntactic parameters in an ordinary or guarded definition head, saturating at UINT16_MAX.
+/// Missing argument lists count as zero; this does not infer callable arities from default values.
 std::uint16_t elixirParams( TSNode node ) noexcept
 {
     TSNode head = elixirFirstArgument( node );
@@ -112,6 +121,9 @@ std::uint16_t elixirParams( TSNode node ) noexcept
     return std::uint16_t( std::min( count, std::uint32_t( 65535 ) ) );
 }
 
+/// Decide whether a candidate definition or call capture represents supported executable Elixir syntax.
+/// role and name are non-null query captures into src. Reject quoted, attributed, dynamic, and defimpl
+/// syntax; retain executable defaults while excluding declaration heads and argument patterns.
 bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std::string_view src ) noexcept
 {
     // Quoted syntax and module attributes (notably @spec/@type) are not runtime call sites.
@@ -191,6 +203,8 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
     return true;
 }
 
+/// Build the enclosing static module/protocol scope, outermost first, from ancestors of node.
+/// Return an owned dotted name, or an empty string at file scope; alias resolution is not inferred.
 std::string elixirScope( TSNode node, std::string_view src )
 {
     std::string scope;

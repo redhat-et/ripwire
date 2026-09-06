@@ -343,7 +343,7 @@ std::string finalSegment( std::string_view raw )   // allocates a std::string �
 }
 
 // ---- the DEF-name policy: which captured names get finalSegment's scope split, and which are whole ----
-// Every code language wants the split — `ns::f` / `pkg.F` must key on the bare `f` that byName resolves.
+// Most code languages want the split — `ns::f` / `pkg.F` must key on the bare `f` that byName resolves.
 // The DATA-CONFIG languages want the opposite, because there a `.` is part of the NAME and not a scope
 // separator: a TOML table header IS its dotted spelling, so `[tool.ruff.lint]` must be findable as
 // `tool.ruff.lint` rather than as `lint` — a name that collides with every other `lint` in a repo and makes
@@ -355,12 +355,16 @@ std::string finalSegment( std::string_view raw )   // allocates a std::string �
 // Covering all three is the sibling-completeness rule docs/METHODOLOGY.md §3 calls the dominant
 // defect class here — fixing the instance and leaving its sibling broken is the failure it names.
 //
-// Widening a name here cannot widen the CALL GRAPH: the data-config languages emit zero @reference
-// captures, and graph.h's langCompatible already keeps each lang-isolated from every code language.
+// For data-config languages, preserving dots cannot widen the call graph: they emit no @reference
+// captures, and graph.h's langCompatible isolates them from code languages.
+// Elixir DOES emit call references. Its module/protocol names retain their dotted spelling here;
+// function-definition captures are already bare names. captureTagsFacts still applies finalSegment
+// to reference names, so preserving Elixir definition captures does not create a byName mismatch.
 //
 // This lives beside finalSegment rather than inside captureTagsFacts on purpose — the caller is a very
 // large function already over the complexity bar, and a policy branch buried in it is both invisible and
 // a measured regression (--quality-delta scored the inline ternary at +3 ccx).
+/// Return an owned definition lookup name, preserving config keys and Elixir module names verbatim.
 std::string defNameFromCapture( Lang lang, std::string_view raw )
 {
     if( lang == Lang::Json || lang == Lang::Toml || lang == Lang::Yaml || lang == Lang::Elixir )

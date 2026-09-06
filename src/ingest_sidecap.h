@@ -1360,6 +1360,8 @@ inline void foldFieldDefs( std::vector<RawDef>& defs, std::size_t first, Lang la
     defs.resize( write );
 }
 
+/// Append definitions and references captured by the language query, with language-specific filtering.
+/// Captured spans refer to src and root; a null cursor appends nothing. Existing output rows are retained.
 void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawDef>& defs, std::vector<RawRef>& refs )
 {

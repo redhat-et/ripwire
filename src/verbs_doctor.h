@@ -351,6 +351,7 @@ inline bool doctorParseProbe( const TSLanguage* ( *grammar )( void ) )
     return ok;
 }
 
+/// Exercise every registered grammar and its embedded query, reporting loaded and expected totals.
 inline DoctorGrammarProbe doctorProbeGrammars()
 {
     struct GEntry { const char* querySub; const TSLanguage* (*grammar)( void ); const char* label; };

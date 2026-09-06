@@ -102,6 +102,7 @@ enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC,
 // short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua|ex").
 // The canonical home for this switch: previously duplicated privately in htmlexport.h, moved here so a THIRD
 // caller (naming-consistency's per-language vote groups) reuses it instead of growing a second copy.
+/// Return the stable short output label for a language, or "?" for an unknown value.
 inline const char* langTag( Lang l ) noexcept
 {
     switch( l )

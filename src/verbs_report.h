@@ -1843,6 +1843,7 @@ bool lessLangCount( const LangCount& a, const LangCount& b ) noexcept
     return std::tie( b.files, an ) < std::tie( a.files, bn );
 }
 
+/// Count indexed files and symbols by language and return rows ordered by file count and language name.
 std::vector<LangCount> computeLangCounts( const rw::IngestResult& ing )
 {
     using namespace rw;
