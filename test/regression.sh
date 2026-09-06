@@ -193,6 +193,13 @@ if RIPWIRE_BIN="$BIN" bash "$ROOT/test/compresscheck.sh" >/dev/null 2>&1; then o
 #     empty-diff contract, --token-budget composition). Uses the same binary under test.
 if RIPWIRE_BIN="$BIN" bash "$ROOT/test/handoffcheck.sh" >/dev/null 2>&1; then ok "handoff gate (test/handoffcheck.sh)"; else no "handoff gate (test/handoffcheck.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/handoffcheck.sh" 2>&1 | grep -i fail | head -8; fi
 
+# 3q) printf-family byte-parity fence (harvest-B lane R8, PLAN_HARVEST_B_2026-09-05.md §2/§8 item H) — a
+#     printf/fprintf/snprintf -> std::format/std::print conversion must not move one byte of any verb's
+#     stdout/stderr; per-verb/per-stream SHA-256 against test/printf_parity.manifest. Individually invoked
+#     (not folded into the bulk absorb loop below) so this gate's addition does not perturb that loop's
+#     length, which docs/EVALS.md §8 quotes verbatim (owned by a different thread this round).
+if RIPWIRE_BIN="$BIN" bash "$ROOT/test/printffmtparitycheck.sh" >/dev/null 2>&1; then ok "printf/fmt parity gate (test/printffmtparitycheck.sh)"; else no "printf/fmt parity gate (test/printffmtparitycheck.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/printffmtparitycheck.sh" 2>&1 | grep -i fail | head -8; fi
+
 # Delivery contract is kept separate because it does not need the binary under test: it drives the
 # curl installer with a sealed local release fixture and inspects the release workflow itself.
 if bash "$ROOT/test/releaseinstallcheck.sh" >/dev/null 2>&1; then
