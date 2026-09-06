@@ -91,9 +91,43 @@ the top 10 on **58.3%** of instances — the best alternative lands 40.0% — wh
 
 ### See the map — not just the numbers
 
-<p align="center"><img src="docs/assets/colorby-hero.jpg" alt="ripwire --html --color-by=cx: the depth-2 call-graph neighbourhood of lexicalScoresTiered (240 nodes) in this repository, force-directed, nodes on a blue-to-orange complexity scale" width="880"></p>
+<p align="center"><img src="docs/assets/graph-cx.png" alt="ripwire --html on Django's migration autodetector: 120 symbols, 183 call edges, arrows pointing caller to callee, nodes coloured by cyclomatic complexity on a five-stop blue-to-yellow scale, module outlines drawn as translucent regions, and low-confidence call edges drawn with dashed shafts" width="880"></p>
 
-<p align="center"><sub>One self-contained HTML file (<code>--html[=FILE]</code>), no server, no CDN, click any node to recentre. <code>--color-by=lang|community|cx|churn|tested</code> sets the initial node colour; the page embeds all five and keeps a live selector. Shown here: <code>cx</code> — cyclomatic complexity — over the depth-2 neighbourhood of <code>lexicalScoresTiered</code>, 240 of this repository's own symbols; <code>churn</code> colours the same graph by git history instead. Both share one five-stop blue-to-orange scale rather than the usual green-to-red, so reading it never depends on telling red from green.</sub></p>
+<p align="center"><sub><b>Django's migration autodetector, coloured by complexity.</b> Thresholds are fixed, so the colour means the same thing on every repo you point it at.</sub></p>
+
+```bash
+ripwire path/to/django/db/migrations --rank-by=rrf --top-k=120 --color-by=cx --html=map.html
+```
+
+<table>
+<tr>
+<td width="50%"><img src="docs/assets/graph-lens-cx-churn.png" alt="The same graph twice: above coloured by cyclomatic complexity, below by git commit count. Most nodes sit in a different colour band between the two." width="430"></td>
+<td width="50%"><img src="docs/assets/graph-uncertainty.png" alt="A close crop showing solid and dashed call edges side by side; dashed shafts mark calls the resolver could not pin to a single target" width="430"></td>
+</tr>
+<tr>
+<td><sub><b>The same graph, re-coloured by git churn.</b> 76% of these nodes move to a different band — structure and history disagree, and one run shows you both.</sub></td>
+<td><sub><b>A dashed shaft is a guess.</b> 40 of 183 edges here fall below the resolver's confidence bar. No other tool marks which of its arrows it is unsure about.</sub></td>
+</tr>
+</table>
+
+<details>
+<summary>How to read these pictures — the five lenses, the fixed thresholds, and what the renderer refuses to draw</summary>
+
+One self-contained HTML file (`--html[=FILE]`), no server, no CDN, no external asset. `--color-by=lang|community|cx|churn|tested` sets the initial colour; the page embeds all five and keeps a live selector, so switching lens costs no second run.
+
+Read from the figures above, which state their own rules in a sidecar saved beside each image:
+
+- **arrow points caller → callee** — the graph is directed, and the page draws it that way.
+- **`40 of 183 shafts dashed = resolver confidence below 0.20`** — per *edge*, not per symbol. A symbol-level "this function makes some ambiguous calls" would mark every one of its edges, which would be a lie about most of them.
+- **labels: top 24 by in-view degree, one per name** — one label per distinct name, so a picture of a container class stops crowding out the functions you asked about.
+- **shapes: ● fn ■ cls ✚ var** — kind is nominal data on a nominal channel; complexity never uses shape.
+- **module outlines: `7 of 12 modules with 3+ nodes in view (cap 12; 3 dropped as too thin to read as a region; 2 dropped as enclosing mostly other modules)`** — three separate truncations, each with its own count and its own reason.
+
+The `cx` and `churn` ramps share one five-stop scale, ordered so lightness rises with the value — it survives greyscale printing, and every adjacent pair stays separable under protanopia, deuteranopia and tritanopia. Thresholds are fixed rather than per-corpus quantiles, so a hot node cannot be manufactured by a cold repository.
+
+`churn` needs real git history: a shallow clone reports every file as one commit, and a directory with no repository says `churn unavailable` rather than drawing zeros.
+
+</details>
 
 ### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
 
