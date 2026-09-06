@@ -381,7 +381,7 @@ real work, and the joke is aimed at the trade-offs, never the authors.</sub>
 **Name a symbol and it is the first hit — and it is never a mystery which ranker answered.** Every
 `--for` query is served by one of three lanes; a confidence-gated router picks by reading the
 query's *shape*, discloses its choice on the output (`route=`), and `--no-route` overrides it.
-Routing lifts recall@1 on name-shaped queries **61.2% → 91.3%** in `src/`, **59.3% → 85.5%** at the
+Routing lifts recall@1 on name-shaped queries **61.1% → 91.3%** in `src/`, **59.2% → 85.5%** at the
 repository root — and the gate is load-bearing in both directions: route *everything* to the name
 lane and prose queries collapse from **0.967 MRR to 0.016**. Both numbers ship together. Reproduce
 with `ripwire <dir> --eval-retrieval`, which grades EVERY doc-commented symbol in the corpus and
@@ -391,7 +391,7 @@ prints its own `population=`/`scored=`/`rule=`; the full per-ranker tables are i
 | Lane | Built for | Why it wins there | Where it loses |
 | --- | --- | --- | --- |
 | **name-exact** | identifier-shaped queries (`chooseForRanker`, `pack task`) | whole-name match ignores body noise: **91.3%** recall@1, **0.960** MRR in `src/` | scores zero on any word that is not literally a name — forced onto prose it dies (**0.016** MRR) |
-| **subtoken+body** | prose and task queries ("where is the content hash computed") | the only lane that matches vocabulary living in doc comments and bodies | exact names drown in shared subtokens (**61.2%** recall@1 on name queries) |
+| **subtoken+body** | prose and task queries ("where is the content hash computed") | the only lane that matches vocabulary living in doc comments and bodies | exact names drown in shared subtokens (**61.1%** recall@1 on name queries) |
 | **mention anchor** | a pasted path, `Type.method`, or issue URL | a literal mention is lifted above any score — paste the ticket, don't paraphrase it | adds nothing when the query names no artifact |
 
 <details>

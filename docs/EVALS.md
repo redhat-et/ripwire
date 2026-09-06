@@ -444,7 +444,7 @@ this section is simply the first measurement of *this* configuration under a des
 
 ### Query-shape routing
 
-Known-item retrieval over EVERY doc-commented symbol in the corpus (2,988 in `src/`, 3,499 at the
+Known-item retrieval over EVERY doc-commented symbol in the corpus (3,010 in `src/`, 3,521 at the
 root — the eval prints its own `population=`/`scored=`/`rule=`), two synthetic queries per symbol (the
 whole name; a stopworded phrase from the doc comment's first line), four rankers, gold rank measured.
 Reproduce with `ripwire <dir> --eval-retrieval`. Recorded in `bench/ANSWERQUALITY.md`.
@@ -461,13 +461,13 @@ verified identical on a pristine worktree (no untracked local files in the sampl
 
 | Query shape | ungated (subtoken) | routed |
 | --- | --- | --- |
-| Name-shaped queries, `src/` — MRR | 0.746 | **0.960** |
-| Name-shaped queries, `src/` — recall@1 | 61.2% | **91.3%** |
-| Name-shaped queries, repository root — MRR | 0.724 | **0.922** |
-| Name-shaped queries, repository root — recall@1 | 59.3% | **85.5%** |
+| Name-shaped queries, `src/` — MRR | 0.745 | **0.960** |
+| Name-shaped queries, `src/` — recall@1 | 61.1% | **91.3%** |
+| Name-shaped queries, repository root — MRR | 0.723 | **0.922** |
+| Name-shaped queries, repository root — recall@1 | 59.2% | **85.5%** |
 
 The router is **confidence-gated**, and the gate is the interesting part: doc-phrase queries score
-**0.967** MRR (`src/`) and **0.929** (root) with the gate, against **0.016** and **0.018** if every
+**0.967** MRR (`src/`) and **0.929** (root) with the gate, against **0.016** and **0.017** if every
 query is forced down the name-exact lane. An ungated router routes the wrong queries — and the cost
 is not degradation but collapse. Both numbers are published together. Since `fa4639e` the gate also
 declines in the other direction: a query whose words all name symbols is still refused the
