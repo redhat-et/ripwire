@@ -240,8 +240,8 @@ jobs:
       # Whichever is found is ECHOED, so the log always records which compiler actually built this leg rather
       # than leaving it to be inferred.
       #
-      # Floor is 14, not merely "whichever toolset exists": src/verbs_lint.h's printf-family pilot calls
-      # std::print (<print>), which libstdc++ implements starting at GCC 14 — see that file's include-comment
+      # Floor is 13, not merely "whichever toolset exists": src/verbs_lint.h's printf-family pilot calls
+      # std::format (<format>), which libstdc++ implements starting at GCC 13 — see that file's shim comment
       # for the evidence (CI run IDs). A
       # probe that accepted 12/13 here would report "toolset found, leg is fine" right up to the AppStream
       # refresh that makes it false; raise this floor again if a later conversion needs a newer libstdc++.
@@ -250,13 +250,13 @@ jobs:
           set -eu
           dnf install -y cmake git libxml2 python3 make diffutils findutils
           found=""
-          for v in $( seq 20 -1 14 ); do
+          for v in $( seq 20 -1 13 ); do
             if dnf install -y "gcc-toolset-$v-gcc-c++"; then
               found="$v"
               break
             fi
           done
-          [ -n "$found" ] || { echo "no gcc-toolset-N (N>=14) in this UBI9 AppStream — this tree's C++23 <print> needs libstdc++ 14+; gcc-toolset-13 and older cannot build it"; exit 1; }
+          [ -n "$found" ] || { echo "no gcc-toolset-N (N>=13) in this UBI9 AppStream — this tree's C++23 <format> needs libstdc++ 13+; gcc-toolset-12 and older cannot build it"; exit 1; }
           echo "TOOLSET=$found" >> "$GITHUB_ENV"
 
       - name: Record the toolchain this leg is using

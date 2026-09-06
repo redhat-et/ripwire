@@ -21,7 +21,11 @@
 # the committed manifest test/printf_parity.manifest. Any mismatch — hash OR exit code — is a FAIL naming
 # exactly which verb and which stream changed.
 #
-# Deliberately EXCLUDED from the corpus: --doctor (self_mtime/self_size/cache blobs= are documented
+# Deliberately EXCLUDED from the corpus: --for, --hotspots and --owners, whose output is derived from GIT
+# HISTORY (churn, blame). The manifest is necessarily pinned BEFORE the commit that carries it, and making
+# that commit changes churn and ownership — so those three can never hold a pin: the gate would be red on
+# the very commit that pinned it, every time. They are covered by their own gates; printf parity does not
+# need them. Also excluded: --doctor (self_mtime/self_size/cache blobs= are documented
 # VOLATILE fields — doctor's own legend says a determinism comparison must strip them, so a naive
 # byte-hash here would false-positive on every rebuild regardless of any printf change); --quality-delta
 # (a state-writing verb per the lane brief's rule 9 — out of scope for a read-only parity fence); and
@@ -66,7 +70,7 @@ hashfile(){
 # ── the verb corpus ──────────────────────────────────────────────────────────────────────────────────
 # label -> (needsCorpus 0|1, argv...). needsCorpus=1 verbs get "$CORPUS --no-cache" prepended; 0 verbs
 # (--version/--help) are global and take no positional path at all.
-LABELS="flagless lint lint_sarif lint_select lint_naming lint_catalog match pattern for_verb callers impact hotspots clones owners help"
+LABELS="flagless lint lint_sarif lint_select lint_naming lint_catalog match pattern callers impact clones help"
 
 argsFor(){
     case "$1" in
@@ -78,12 +82,9 @@ argsFor(){
         lint_catalog) echo "1|--lint-catalog";;
         match)       echo "1|--match=(function_definition) @m";;
         pattern)     echo "1|--pattern=distance(\$A, \$B)";;
-        for_verb)    echo "1|--for=distance";;
         callers)     echo "1|--callers=distance";;
         impact)      echo "1|--impact=perimeter";;
-        hotspots)    echo "1|--hotspots";;
         clones)      echo "1|--clones";;
-        owners)      echo "1|--owners";;
         help)        echo "0|--help";;
     esac
 }

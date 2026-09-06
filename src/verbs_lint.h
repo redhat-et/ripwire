@@ -2,7 +2,7 @@
 
 #include <algorithm>   // std::any_of (H8: findings_capped over the emitted rules)
 #include <format>      // std::format — the printf-family pilot conversion (see test/printffmtparitycheck.sh)
-#include <print>       // std::print — same pilot; zero-dependency C++23. Floor is libstdc++ 14 / gcc-toolset-14
+#include <cstdio>     // std::fputs — the pilot emits through fputs(format(...)) so it needs only libstdc++ 13
                        // (std::format alone needs only 13): confirmed present on every CI leg as of this commit —
                        // RHEL/UBI9 CI run 33981920823 ("rhel (ubi9, plain)") and the manylinux_2_28 release leg
                        // (DEVTOOLSET_ROOTPATH=/opt/rh/gcc-toolset-14/root) CI run 31665948282 ("build (linux-x64)")
@@ -13,6 +13,19 @@
 #if !defined( RIPWIRE_MAIN_TU )
 #error "verbs_lint.h is a SECTION of src/main.cpp's translation unit - include it only from main.cpp (see the verb-family split note there)"
 #endif
+
+// The printf-family pilot emits through these two shims rather than std::print: <print> is libstdc++ 14+,
+// and the ubuntu-24.04 gcc legs run gcc 13, which has <format> but not <print>. Same call shape, same
+// bytes (std::format renders the string; fputs writes it unchanged), one version floor lower.
+template<class... A> inline void lintPrintOut( std::format_string<A...> f, A&&... a )
+{
+    std::fputs( std::format( f, std::forward<A>( a )... ).c_str(), stdout );
+}
+template<class... A> inline void lintPrintErr( std::format_string<A...> f, A&&... a )
+{
+    std::fputs( std::format( f, std::forward<A>( a )... ).c_str(), stderr );
+}
+
 
 // verbs_lint.h — the --lint verb family, moved VERBATIM from main.cpp in the 2026-08-29 split: the
 // number/lambda/return body-scan primitives, the symbol-level checks, the rule plumbing (catalog,
@@ -448,7 +461,7 @@ void printLintRuleTallyRow( const std::string& name, const std::string* sev, std
     // capture-audit 2026-09-04 (truncvocabcheck arm (F)): the match-budget floor is rule 4's marker on the
     // count= it floors — count_capped="1" — not a BARE capped="1" with no shown= beside it, which read as
     // rule 3's window bit missing its pair. Same fact, the vocabulary's own spelling for it.
-    std::print( "<rule name=\"{}\"{} count=\"{}\" shown_rows=\"{}\" rows_capped=\"{}\"{}{}{}/>", name, sevPart, count, shown,
+    lintPrintOut( "<rule name=\"{}\"{} count=\"{}\" shown_rows=\"{}\" rows_capped=\"{}\"{}{}{}/>", name, sevPart, count, shown,
                 shown < count ? 1u : 0u, capped ? " count_capped=\"1\"" : "", applicable ? "" : " applicable=\"0\"",
                 compiled ? "" : " compiled=\"0\"" );
 }
@@ -604,7 +617,7 @@ buildHeatAnnotations( std::string_view withProfile, const rw::IngestResult& ing,
     const auto profRows = parseProfTsv( std::string( withProfile ) );
     if( !profRows )
     {
-        std::print( stderr, "ripwire: --with-profile={}: no readable #PROF_TSV block there — generate one with a "
+        lintPrintErr( "ripwire: --with-profile={}: no readable #PROF_TSV block there — generate one with a "
                             "RIPWIRE_PROFILE build (ripwire <dir> 2>report.txt), or pass that report verbatim\n",
                     withProfile );
         return std::nullopt;
@@ -743,20 +756,20 @@ int emitLintCatalog()
 {
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( rw::escapeXml( s, esc ) ); };
-    std::print( "<!-- ripwire lint-catalog: the built-in lint rule registry, one row per rule, in the SAME order the plain lint "
+    lintPrintOut( "<!-- ripwire lint-catalog: the built-in lint rule registry, one row per rule, in the SAME order the plain lint "
                 "run's own tally uses. sev/cat/rationale describe the rule; lang= is the language TOKEN SET (the spelling the "
                 "lint-rules loader's own language: field accepts) whose grammar can ever satisfy this rule's query or scan — a "
                 "STRUCTURAL ceiling, not which languages happen to be in any one corpus (that disclosure is the lint run's own "
                 "applicable=/inert_rules=). since= is the ripwire release the rule first shipped in. -->" );
-    std::print( "<lintcatalog rules=\"{}\">", rw::lintcatalog::kLintCatalog.size() );
+    lintPrintOut( "<lintcatalog rules=\"{}\">", rw::lintcatalog::kLintCatalog.size() );
     for( const rw::lintcatalog::LintCatalogRow& row : rw::lintcatalog::kLintCatalog )
     {
-        std::print( "<rule name=\"{}\" sev=\"{}\" cat=\"{}\" lang=\"{}\" since=\"{}\">{}</rule>",
+        lintPrintOut( "<rule name=\"{}\" sev=\"{}\" cat=\"{}\" lang=\"{}\" since=\"{}\">{}</rule>",
                     ex( row.name ), ex( row.severity ), ex( row.category ),
                     ex( rw::lintcatalog::lintCatalogLangList( row.langMask ) ), ex( row.since ),
                     ex( row.rationale ) );
     }
-    std::print( "</lintcatalog>" );
+    lintPrintOut( "</lintcatalog>" );
     return 0;
 }
 
@@ -784,7 +797,7 @@ std::optional<rw::lintcatalog::LintSelection> resolveLintSelection( const rw::Co
     {
         if( !rw::lintcatalog::splitLintPrefixList( raw, tokens ) )
         {
-            std::print( stderr, "ripwire: {}: malformed PREFIX list (empty entry) — comma-separate PREFIXes, e.g. {}=cache-,goto\n",
+            lintPrintErr( "ripwire: {}: malformed PREFIX list (empty entry) — comma-separate PREFIXes, e.g. {}=cache-,goto\n",
                         flagName, flagName );
             return false;
         }
@@ -805,7 +818,7 @@ std::optional<rw::lintcatalog::LintSelection> resolveLintSelection( const rw::Co
                     msg += " (did you mean '" + near + "'?)";
                 }
                 msg += " — see --lint-catalog for the full registry\n";
-                std::print( stderr, "{}", msg );
+                lintPrintErr( "{}", msg );
                 return false;
             }
         }
@@ -1275,7 +1288,7 @@ std::optional<int> runLint( const MainDispatch& d )
                         // patterns, zero patterns, and a mis-quoted query alike, and naming the wrong one
                         // would be its own small fabrication. Show the query as received and let the
                         // reader see the stray quote / second pattern for themselves.
-                        std::print( stderr, "ripwire: --match: this query captures nothing — add @name, e.g. '(if_statement) @m'. "
+                        lintPrintErr( "ripwire: --match: this query captures nothing — add @name, e.g. '(if_statement) @m'. "
                                             "ripwire auto-captures only a query that is exactly ONE top-level pattern, and will not guess for this one "
                                             "(query as received: {})\n",
                                     matchQuery );
@@ -1294,7 +1307,7 @@ std::optional<int> runLint( const MainDispatch& d )
             // so a hits="0" here would be a failure wearing a result. Refuse, exactly like an invalid --regex.
             if( !mq.uncompiled.empty() )
             {
-                std::print( stderr, "ripwire: --match: the query compiled for no grammar — refusing rather than reporting a zero it did not measure "
+                lintPrintErr( "ripwire: --match: the query compiled for no grammar — refusing rather than reporting a zero it did not measure "
                                     "(query as received: {}){}\n",
                             cfg.match, matchNearestKindClause( mq.nearestKind, mq.nearestGrammar ) );
                 return 1;
@@ -1309,14 +1322,14 @@ std::optional<int> runLint( const MainDispatch& d )
             char              mpab[ kPageDisclosureCap ];
             // §L3: no `attr="value"` spelled out below for grammars=/eligible_files=/of_files= — a naive
             // whole-line grep (matchcapturecheck.sh's own idiom) would match the WORDED example first.
-            std::print( "<!-- ripwire match: tree-sitter structural query; each hit = a captured node + its enclosing symbol. "
+            lintPrintOut( "<!-- ripwire match: tree-sitter structural query; each hit = a captured node + its enclosing symbol. "
                         "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (engine match limit reached) and the "
                         "root then also carries counts_floor=\"1\" and capped=\"1\" — rows exist that NO page holds (the engine cap, not the "
                         "window, dropped them; narrow the query), while has_more= keeps its window meaning so a loop still terminates. "
                         "auto_captured=\"1\" ⇒ the query bound no @capture and ripwire appended `@m` to its single top-level pattern. "
                         "grammars= names every grammar the query compiled against; eligible_files=/of_files= are corpus files in that "
                         "language set vs total indexed files. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->" );
-            std::print( "<match hits=\"{}\"{} hits_capped=\"{}\"{} grammars=\"{}\" eligible_files=\"{}\" of_files=\"{}\"{}>",
+            lintPrintOut( "<match hits=\"{}\"{} hits_capped=\"{}\"{} grammars=\"{}\" eligible_files=\"{}\" of_files=\"{}\"{}>",
                         ms.size(),
                         pageDisclosure( mpab, sizeof( mpab ), matchShown, ms.size(), matchPage.end,
                                         cfg.pageLimit, cfg.pageOffset, true, kXmlPageSyntax,
@@ -1332,11 +1345,11 @@ std::optional<int> runLint( const MainDispatch& d )
                 const AstMatch&         m  = ms[ hitIndex ];
                 const Symbol*           e  = enclosing( m.fileId, m.startByte );
                 const std::string_view  rp = lintSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ m.fileId ], lintRootPrefix ) : std::string_view( ing.files[ m.fileId ] );
-                std::print( "<m p=\"{}:{}\" in=\"{}\">", ex( rp ), m.line, e ? ex( e->name ) : "" );
+                lintPrintOut( "<m p=\"{}:{}\" in=\"{}\">", ex( rp ), m.line, e ? ex( e->name ) : "" );
                 emitEscaped( m.text );
-                std::print( "</m>" );
+                lintPrintOut( "</m>" );
             }
-            std::print( "</match>" );
+            lintPrintOut( "</match>" );
             return 0;
         }
 
@@ -1351,19 +1364,19 @@ std::optional<int> runLint( const MainDispatch& d )
             const PatternSearchOutcome ps = runPatternSearch( ing, cfg.pattern );
             if( !ps.refusal.empty() )
             {
-                std::print( stderr, "{}", ps.refusal );
+                lintPrintErr( "{}", ps.refusal );
                 return 1;
             }
             const PageWindow  patPage  = pageWindow( ps.matches.size(), effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
             const std::size_t patShown = patPage.end - patPage.begin;
             char              ppab[ kPageDisclosureCap ];
-            std::print( "{}", kPatternLegend );
+            lintPrintOut( "{}", kPatternLegend );
             // unresolved_in= is withheld only when it could not mislead: a run that found matches AND read
             // every file it serves. The moment a served-language file went unscanned (skipped_files>0), the
             // partial resolution is exactly what explains it, hits>0 or not — V-3's second case, where a
             // matched .tsx sat beside a silently unread .ts.
             const bool tellUnresolved = ps.matches.empty() || ps.skippedFiles > 0;
-            std::print( "<pattern hits=\"{}\"{} hits_capped=\"{}\" q=\"{}\" grammars=\"{}\" shapes=\"{}\" unsupported=\"{}\"{}{} eligible_files=\"{}\" skipped_files=\"{}\" of_files=\"{}\"{}>",
+            lintPrintOut( "<pattern hits=\"{}\"{} hits_capped=\"{}\" q=\"{}\" grammars=\"{}\" shapes=\"{}\" unsupported=\"{}\"{}{} eligible_files=\"{}\" skipped_files=\"{}\" of_files=\"{}\"{}>",
                         ps.matches.size(),
                         pageDisclosure( ppab, sizeof( ppab ), patShown, ps.matches.size(), patPage.end, cfg.pageLimit, cfg.pageOffset, true,
                                         kXmlPageSyntax, /*collectionCapped=*/ ps.matches.size() >= rw::pattern::kMaxHits ),   // H8
@@ -1383,11 +1396,11 @@ std::optional<int> runLint( const MainDispatch& d )
                 const rw::AstMatch&    m  = ps.matches[ hitIndex ];
                 const Symbol*          e  = enclosing( m.fileId, m.startByte );
                 const std::string_view rp = lintSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ m.fileId ], lintRootPrefix ) : std::string_view( ing.files[ m.fileId ] );
-                std::print( "<m p=\"{}:{}\" in=\"{}\">", ex( rp ), m.line, e ? ex( e->name ) : "" );
+                lintPrintOut( "<m p=\"{}:{}\" in=\"{}\">", ex( rp ), m.line, e ? ex( e->name ) : "" );
                 emitEscaped( m.text );
-                std::print( "</m>" );
+                lintPrintOut( "</m>" );
             }
-            std::print( "</pattern>" );
+            lintPrintOut( "</pattern>" );
             return 0;
         }
 
@@ -1684,7 +1697,7 @@ std::optional<int> runLint( const MainDispatch& d )
             userRules = loadLintRules( std::string( cfg.lintRulesDir ) );
             if( userRules.empty() )
             {
-                std::print( stderr, "ripwire: --lint-rules={}: no rules loaded\n", cfg.lintRulesDir );
+                lintPrintErr( "ripwire: --lint-rules={}: no rules loaded\n", cfg.lintRulesDir );
                 return 1;
             }
             const auto [ userFindings, saturatedUserRuleIds, uncompiledIds ] = runLintRules( ing, userRules );
@@ -1854,7 +1867,7 @@ std::optional<int> runLint( const MainDispatch& d )
         }
 
         // §P8 collision, documented not renamed — see the --grep legend above for the full reasoning.
-        std::print( "<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; "
+        lintPrintOut( "<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; "
                     "in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). "
                     "A rule named atom-X is an atom of confusion (Gopstein, FSE 2017): a C-family shape that misleads READERS, C/C++/ObjC/CUDA only. "
                     "Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. "
@@ -1883,7 +1896,7 @@ std::optional<int> runLint( const MainDispatch& d )
                     "well-formed query that ran and found nothing); absent ⇒ the query compiled. -->" );
         if( !cfg.withProfile.empty() )
         {
-            std::print( "<!-- with-profile: heat_* on a finding = MEASURED inclusive totals of the joined #PROF_TSV scope — the nearest "
+            lintPrintOut( "<!-- with-profile: heat_* on a finding = MEASURED inclusive totals of the joined #PROF_TSV scope — the nearest "
                         "PROFILE_SCOPE site at/above the finding inside its own enclosing symbol. Columns are whatever counter tier the "
                         "profiled run armed; an ABSENT heat column was not measured, never zero. heat_joined= on the root counts annotated "
                         "findings; 0 is honest (no finding sits inside a profiled scope), never an error. -->" );
@@ -1901,7 +1914,7 @@ std::optional<int> runLint( const MainDispatch& d )
             // run (a small corpus under kLintDefaultPayloadBytes) is byte-identical to before this change.
             // Distinct from findings_capped= below, which is rule 4's FLOOR marker on the total itself.
             char lintPageBuf[ kPageDisclosureCap ];
-            std::print( "<lint findings=\"{}\"{}{}{}{}{}>", outs.size(),
+            lintPrintOut( "<lint findings=\"{}\"{}{}{}{}{}>", outs.size(),
                         pageDisclosure( lintPageBuf, sizeof( lintPageBuf ), shownCount, outs.size(), lintPage.end,
                                        cfg.pageLimit, cfg.pageOffset, /*discloseCap=*/true, kXmlPageSyntax,
                                        /*collectionCapped=*/ anyRuleCapped ),   // H8: a floored rule floors findings=
@@ -1940,18 +1953,18 @@ std::optional<int> runLint( const MainDispatch& d )
             const std::string_view  rp = lintSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ m.fileId ], lintRootPrefix ) : std::string_view( ing.files[ m.fileId ] );
             if( m.sev.empty() )
             { // built-in finding — unchanged shape (no sev=)
-                std::print( "<f rule=\"{}\" p=\"{}:{}\" in=\"{}\"{}>", ex( m.rule ), ex( rp ), m.line, e ? ex( e->name ) : "",
+                lintPrintOut( "<f rule=\"{}\" p=\"{}:{}\" in=\"{}\"{}>", ex( m.rule ), ex( rp ), m.line, e ? ex( e->name ) : "",
                             heatByFinding.empty() ? std::string() : heatByFinding[ findingIndex ] );
             }
             else
             { // user finding — carries sev=
-                std::print( "<f rule=\"{}\" sev=\"{}\" p=\"{}:{}\" in=\"{}\"{}>", ex( m.rule ), ex( m.sev ), ex( rp ), m.line, e ? ex( e->name ) : "",
+                lintPrintOut( "<f rule=\"{}\" sev=\"{}\" p=\"{}:{}\" in=\"{}\"{}>", ex( m.rule ), ex( m.sev ), ex( rp ), m.line, e ? ex( e->name ) : "",
                             heatByFinding.empty() ? std::string() : heatByFinding[ findingIndex ] );
             }
             emitEscaped( m.text );
-            std::print( "</f>" );
+            lintPrintOut( "</f>" );
         }
-        std::print( "</lint>" );
+        lintPrintOut( "</lint>" );
         return 0;
     }
     return std::nullopt;
