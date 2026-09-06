@@ -316,7 +316,13 @@ static const char kScriptSim[] = R"JS(
                                  // draw() places the ones that matter first and drops the collisions
   var MAX_LABELS = 24;
   var MIN_LABEL_DEGREE = 2;      // rule 3: a node with one in-view edge is fringe and its name buys nothing
-  var MIN_NODE_PX = 3.0, MAX_NODE_PX = 15.0;   // a node's on-screen radius band (see nodeRadiusPx)
+  // A node's on-screen radius band (see nodeRadiusPx). The FLOOR moved 3.0 -> 4.0 when kind became a
+  // shape: shape is only a channel above roughly 8 px across, and a floor of 3.0 drew every zero-degree
+  // node — which is every `sec` and every `var`, the two kinds that most need to be told apart from a
+  // function — as a 6 px mark where a square, a bar and a circle are the same speck. 4.0 puts the
+  // smallest mark at 8 px and leaves the ceiling alone, so the degree signal the band carries is
+  // unchanged everywhere it was already visible.
+  var MIN_NODE_PX = 4.0, MAX_NODE_PX = 15.0;
   var LABEL_HALO_PX = 3.0;       // the dark outline stroked behind every label (see placeLabel)
   var LABEL_CULL_PX = 2000;      // a label anchored further than this off-canvas is skipped (see placeLabel)
   // THE INTEGRATOR'S STABILITY LIMIT, and the freeze that came of not having one.
@@ -576,6 +582,46 @@ static const char kScriptSim[] = R"JS(
 // fixes pushed section 2 past 450 lines, which is the metric working as intended rather than a number to
 // dodge — the seam is where a reader would put one.
 static const char kScriptDraw[] = R"JS(
+  // ---- node SHAPE, one table, two readers.
+  //
+  // SYM_SHAPES (emitted above — htmlexport.h::kSymShapes, one entry per model.h SymKind enumerator,
+  // static_asserted against the roster) maps the `type` string every NODES record already carries to a
+  // key of this object; each entry carries BOTH the canvas path that draws the mark and the glyph the
+  // caption's shape key prints for it, so the picture and its own legend cannot describe different
+  // shapes. `type` was in the payload from the beginning and reached nothing but a hover tooltip.
+  //
+  // Every path is written in terms of one radius `r` and normalised to the SAME AREA as a circle of that
+  // radius, so shape says kind and only size says degree. Without that a square would read as a bigger
+  // node than a circle at identical degree — a second variable smuggled into a nominal channel:
+  //   square   half-side  0.89r   (4q^2      = pi r^2)
+  //   diamond  half-diag  1.25r   (2d^2      = pi r^2)
+  //   triangle circumrad  1.55r   (1.299R^2  = pi r^2)
+  //   bar      1.48r x 0.53r      (4wh       = pi r^2, at 2.8:1 so it reads as a rule and not a box)
+  //   plus/cross  arm half-thickness 0.40r, half-length 1.18r   (8ab - 4a^2 = pi r^2)
+  var PLUS_PTS = [[-0.40,-1.18],[0.40,-1.18],[0.40,-0.40],[1.18,-0.40],[1.18,0.40],[0.40,0.40],
+                  [0.40,1.18],[-0.40,1.18],[-0.40,0.40],[-1.18,0.40],[-1.18,-0.40],[-0.40,-0.40]];
+  function plusPath(p, x, y, r, rot) {
+    for (var pi = 0; pi < 12; pi++) {
+      var dx = PLUS_PTS[pi][0]*r, dy = PLUS_PTS[pi][1]*r;
+      if (rot) { var tq = (dx - dy)*0.70710678; dy = (dx + dy)*0.70710678; dx = tq; }
+      if (pi) { p.lineTo(x + dx, y + dy); } else { p.moveTo(x + dx, y + dy); }
+    }
+    p.closePath();
+  }
+  var SHAPES = {
+    circle:   { glyph: '●', reach: 1.00, path: function(p,x,y,r){ p.moveTo(x+r, y); p.arc(x, y, r, 0, 2*Math.PI); } },
+    diamond:  { glyph: '◆', reach: 1.25, path: function(p,x,y,r){ var q = r*1.25; p.moveTo(x, y-q); p.lineTo(x+q, y); p.lineTo(x, y+q); p.lineTo(x-q, y); p.closePath(); } },
+    square:   { glyph: '■', reach: 1.26, path: function(p,x,y,r){ var q = r*0.89; p.moveTo(x-q, y-q); p.lineTo(x+q, y-q); p.lineTo(x+q, y+q); p.lineTo(x-q, y+q); p.closePath(); } },
+    triangle: { glyph: '▲', reach: 1.55, path: function(p,x,y,r){ var q = r*1.55; p.moveTo(x, y-q); p.lineTo(x + q*0.866, y + q*0.5); p.lineTo(x - q*0.866, y + q*0.5); p.closePath(); } },
+    bar:      { glyph: '▬', reach: 1.57, path: function(p,x,y,r){ var w = r*1.48, h = r*0.53; p.moveTo(x-w, y-h); p.lineTo(x+w, y-h); p.lineTo(x+w, y+h); p.lineTo(x-w, y+h); p.closePath(); } },
+    plus:     { glyph: '✚', reach: 1.25, path: function(p,x,y,r){ plusPath(p, x, y, r, 0); } },
+    cross:    { glyph: '✖', reach: 1.25, path: function(p,x,y,r){ plusPath(p, x, y, r, 1); } }
+  };
+  // A node's mark. The `|| SHAPES.circle` is a rendering guard, not a policy: kSymShapes is
+  // static_asserted to cover every SymKind, so it can only fire on a page whose payload predates a new
+  // enumerator — and the caption's key is built from the same lookup, so such a page would say so.
+  function shapeFor(n) { return SHAPES[SYM_SHAPES[n.type]] || SHAPES.circle; }
+
   // --- draw ---
   // Radius reads IN-VIEW DEGREE, with rank as a tiebreak. The old `4 + 60*sqrt(rank)` spanned 4.60-11.78 px
   // with a MEAN of 5.10 on the README cut — every node a ~5 px dot — while in-view degree over the same
@@ -679,7 +725,7 @@ static const char kScriptDraw[] = R"JS(
       var dim = (hl && !hl.has(i)) || (searchSet && !searchSet.has(i));
       ctx.globalAlpha = dim ? 0.18 : 1.0;
       ctx.beginPath();
-      ctx.arc(n.x, n.y, r, 0, 2*Math.PI);
+      shapeFor(n).path(ctx, n.x, n.y, r);
       if (hollow && testedStroke(n)) {
         ctx.fillStyle = CANVAS_BG; ctx.fill();
         ctx.setLineDash([3/scale, 2.5/scale]);
@@ -799,7 +845,11 @@ static const char kScriptDraw[] = R"JS(
   function hitTest(px, py) {
     var w = toWorldXY(px, py);
     for (var i = N-1; i >= 0; i--) {
-      var n = nodes[i], r = nodeRadiusPx(n)*1.2/scale;   // the DRAWN size, so a click matches what the eye aimed at
+      // The DRAWN size, so a click matches what the eye aimed at — and since a mark is no longer always
+      // a circle, that size is the shape's own REACH (its farthest point from centre, the one number the
+      // SHAPES table has to carry for this) and not the nominal radius. A flat 1.2x was right while
+      // everything was a disc and under-covered a triangle (1.55) and a bar (1.57) the moment it wasn't.
+      var n = nodes[i], r = nodeRadiusPx(n)*shapeFor(n).reach*1.15/scale;
       var dx = w.x-n.x, dy = w.y-n.y;
       if (dx*dx+dy*dy <= r*r) return i;
     }
@@ -1012,7 +1062,31 @@ static const char kScriptRouter[] = R"JS(
               : layoutStopped ? '  <b>layout stopped at step ' + SIM_STEPS + ' of ' + MAX_SIM + '</b> (the ' + LAYOUT_BUDGET_MS +
                                 ' ms layout budget is spent — positions are under-converged, drag to adjust)'
               : '');
-    el.innerHTML = l1 + '<br>' + l2;
+    // Line 3 is the SHAPE key, and it is on the caption rather than in the bar's legend for one reason:
+    // the caption is what stampProvenance burns into the exported PNG. A picture that encodes symbol kind
+    // in its marks and travels without a way to read them is exactly the undisclosed channel this block
+    // exists to prevent — the same argument that put the ranker and the top-k here. It is built from
+    // SYM_SHAPES, the identical lookup draw() marks a node with, so the key cannot name a shape the
+    // picture does not draw; and it lists only the kinds actually IN THIS VIEW, because a fixed roster
+    // would print marks a reader can hunt for and never find.
+    var l3 = ( currentView === 'overview' || N === 0 ) ? '' : k('shape') + shapeKey();
+    el.innerHTML = l3 ? ( l1 + '<br>' + l2 + '<br>' + l3 ) : ( l1 + '<br>' + l2 );
+  }
+
+  // the shape key's text: one entry per shape present, naming every kind that shares it (class/struct/
+  // interface collapse onto the square, var/field onto the plus — the collapses kSymShapes chose).
+  function shapeKey() {
+    var order = [], kinds = {};
+    for (var i = 0; i < N; i++) {
+      var t = nodes[i].type, sh = SYM_SHAPES[t] || 'circle';
+      if (!Object.prototype.hasOwnProperty.call(kinds, sh)) { kinds[sh] = []; order.push(sh); }
+      if (kinds[sh].indexOf(t) < 0) { kinds[sh].push(t); }
+    }
+    var out = [];
+    for (var j = 0; j < order.length; j++) {
+      out.push('<b>' + (SHAPES[order[j]] || SHAPES.circle).glyph + '</b> ' + escHtml(kinds[order[j]].join('/')));
+    }
+    return out.join('  ');
   }
 
   // the module cards, optionally filtered to modules whose name or any MEMBER matches `q` (the overview
@@ -1201,8 +1275,17 @@ static const char kScriptRouter[] = R"JS(
   // caption was added to fix, surviving into the one artifact the caption exists for. A README image, a
   // bug report, a slide: every one of them travels without the page around it. So the export draws the
   // graph into its own bitmap with the caption stamped underneath, in the page's own colours.
-  var STAMP_H = 44;
+  // The stamp's height is DERIVED from how many caption lines there are, not pinned at the two there
+  // used to be. A constant here silently truncated the caption the day it grew a third line — the shape
+  // key — which is the clipping defect STAMP_FONT_MIN below already exists to stop, arriving by the
+  // other axis.
+  var STAMP_MAX_LINES = 4, STAMP_LINE_H = 17, STAMP_TOP = 19, STAMP_BOT = 8;
   var STAMP_PAD = 14, STAMP_FONT_MAX = 13, STAMP_FONT_MIN = 8;
+  function stampLines() {
+    var el = document.getElementById('prov');
+    return el ? el.innerText.split('\n').slice(0, STAMP_MAX_LINES) : [];
+  }
+  function stampHeight() { var n = stampLines().length; return n ? STAMP_TOP + STAMP_LINE_H*(n - 1) + STAMP_BOT : 0; }
   function stampFont(px) { return px + 'px ui-monospace,SFMono-Regular,Menlo,monospace'; }
   // The caption is one long unwrapped line of monospace, and the exported bitmap is as wide as whatever
   // viewport produced it. At a fixed 13 px the first real export CLIPPED it at the frame edge: the root
@@ -1213,9 +1296,8 @@ static const char kScriptRouter[] = R"JS(
   // floored at 8 where monospace stops being readable), and a line that STILL does not fit is elided
   // with a marker so the loss is visible in the image rather than at its edge.
   function stampProvenance(g, w, y) {
-    var el = document.getElementById('prov');
-    var lines = el ? el.innerText.split('\n').slice(0, 2) : [];
-    g.fillStyle = '#0b0b0b';  g.fillRect(0, y, w, STAMP_H);
+    var lines = stampLines();
+    g.fillStyle = '#0b0b0b';  g.fillRect(0, y, w, stampHeight());
     g.fillStyle = '#2a2a2a';  g.fillRect(0, y, w, 1);
     var avail = w - 2*STAMP_PAD, widest = 0, i;
     g.font = stampFont(STAMP_FONT_MAX);
@@ -1230,13 +1312,13 @@ static const char kScriptRouter[] = R"JS(
         while (t.length > 1 && g.measureText(t + '…').width > avail) { t = t.slice(0, -1); }
         t = t + '…';
       }
-      g.fillText(t, STAMP_PAD, y + 19 + i*17);
+      g.fillText(t, STAMP_PAD, y + STAMP_TOP + i*STAMP_LINE_H);
     }
   }
   function exportBitmap() {
     var out = document.createElement('canvas');
     out.width  = canvas.width;
-    out.height = canvas.height + Math.round(STAMP_H*DPR);
+    out.height = canvas.height + Math.round(stampHeight()*DPR);
     var g = out.getContext('2d');
     g.setTransform(DPR, 0, 0, DPR, 0, 0);
     g.fillStyle = CANVAS_BG;  g.fillRect(0, 0, out.width/DPR, out.height/DPR);
@@ -1350,6 +1432,42 @@ static_assert( kLangColorCount == std::size_t( Lang::Lua ) + 1,
                "kLangColors must carry one hex colour per Lang enumerator, in declaration order — a language with "
                "no swatch renders as an unlabelled grey the legend cannot explain" );
 
+// The node SHAPE roster, indexed by the SymKind enumerator — the same table shape as kLangColors above,
+// and beside it deliberately, for the same reason: two hand-maintained lists behind one enum is the
+// drift shape that left eleven languages in an unlabelled grey. This one is indexed BY the enum with
+// the same static_assert, so adding a SymKind without a shape is a compile error rather than a symbol
+// that silently renders as something it is not.
+//
+// WHY SHAPE AT ALL. `type` is already in every NODES record and reached nothing but a hover tooltip.
+// Kind is NOMINAL data — there is no order in which a class is more than a macro — and shape is the one
+// visual channel that is nominal-only, so this is the correct pairing rather than a decoration. The need
+// is measured, not aesthetic: on one corpus 1,078 of 2,000 selected nodes are markdown SECTIONS and
+// VARIABLES — things that cannot carry a call edge at all — drawn as circles identical to functions,
+// which is the whole reason 69% of that page read as isolated dots. A reader could not tell "this
+// repository's functions are disconnected" (alarming, and false) from "most of what is on screen is
+// documentation and data" (ordinary, and true).
+//
+// The collapses are deliberate and the caption's key names them: class/struct/interface all mean "a
+// type" and share the square; var and field both mean "a slot" and share the plus. `other` gets that
+// plus rotated 45° rather than falling through to the function circle, because a fallback to circle
+// would be the page asserting that 20 corpus-wide symbols are functions.
+inline constexpr const char* kSymShapes[] = {
+    "circle",     // Function
+    "diamond",    // Method
+    "square",     // Class
+    "square",     // Struct
+    "square",     // Interface
+    "plus",       // Var
+    "bar",        // Section
+    "triangle",   // Macro
+    "plus",       // Field
+    "cross",      // Other
+};
+inline constexpr std::size_t kSymShapeCount = sizeof( kSymShapes ) / sizeof( kSymShapes[0] );
+static_assert( kSymShapeCount == std::size_t( SymKind::Other ) + 1,
+               "kSymShapes must carry one shape per SymKind enumerator, in declaration order — a kind with no "
+               "shape falls back to the function circle, which is the page asserting something false about it" );
+
 
 // Side data for the --color-by node-colour modes. Every export embeds ALL five modes' data; the
 // pointers may be null (the caller's pipeline may not have computed them), in which case the page
@@ -1364,12 +1482,15 @@ struct HtmlColorExtras
     RankBy                            ranker        = RankBy::PageRank;   // for the provenance caption — which ranks these are
 };
 
-// The three --color-by JS constants, emitted as ONE section because they are one payload: the
-// file-keyed churn array, the flag saying whether that array is evidence at all, and the baked
-// initial mode. Its own function so writeHtml — already a 360-line emitter — grows by a call.
+// The APPEARANCE payload, emitted as ONE section because it is one payload: everything the page needs
+// to decide what a node looks like before it decides where it goes. The file-keyed churn array, the flag
+// saying whether that array is evidence at all, the baked initial colour mode, the language palette, and
+// the SymKind→shape roster. Its own function so writeHtml — already a 360-line emitter — grows by a
+// call. It was writeColorPayload while colour was all of it; the name moved with the content rather
+// than leaving a function called "color" emitting the shape table.
 // `fileList` maps FILES index → ing.files index; churn is file-granularity, so it is keyed by the
 // former and looked up through the latter.
-inline void writeColorPayload( std::FILE* out, const std::vector<std::uint32_t>& fileList, const HtmlColorExtras& color )
+inline void writeAppearancePayload( std::FILE* out, const std::vector<std::uint32_t>& fileList, const HtmlColorExtras& color )
 {
     std::fprintf( out, "const FCHURN = [" );
     for( std::size_t i = 0; i < fileList.size(); ++i )
@@ -1406,11 +1527,23 @@ inline void writeColorPayload( std::FILE* out, const std::vector<std::uint32_t>&
         std::fprintf( out, "%s\"%s\":\"%s\"", i ? "," : "", langTag( Lang( i ) ), kLangColors[i] );
     }
     std::fprintf( out, "};\n" );
+    // ...and the SHAPE roster the page's node marks AND the caption's shape key are both built from. It
+    // rides in this function rather than one of its own for the reason the LANG palette does: this IS
+    // the appearance payload, and a separate emitter beside it would be another copy of the same
+    // comma-separated JSON loop. Deterministic by construction — a constexpr array walked in index
+    // order, keyed by the same symTag the NODES records' `type` field carries, so the JS looks a node's
+    // shape up by the string it already has.
+    std::fprintf( out, "const SYM_SHAPES = {" );
+    for( std::size_t i = 0; i < kSymShapeCount; ++i )
+    {
+        std::fprintf( out, "%s\"%s\":\"%s\"", i ? "," : "", symTag( SymKind( i ) ), kSymShapes[i] );
+    }
+    std::fprintf( out, "};\n" );
 }
 
 // The document SHELL — <head>, the whole stylesheet, and the chrome (#bar, #prov, #hits, #crumb,
 // #cards, the canvas) — up to the opening <script>. Lifted out of writeHtml for the reason
-// writeColorPayload states at its own head: writeHtml is a 400-line emitter and this is a nameable,
+// writeAppearancePayload states at its own head: writeHtml is a 400-line emitter and this is a nameable,
 // input-free concept, so the caller grows by a call instead of by ninety lines of literal. Nothing here
 // depends on the graph; every byte is constant.
 inline void writeDocumentShell( std::FILE* out )
@@ -1733,8 +1866,9 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     }
     std::fprintf( out, "];\n" );
 
-    // the --color-by payload: per-FILES-index churn, its evidence flag, and the baked initial mode
-    writeColorPayload( out, fileList, color );
+    // the appearance payload: per-FILES-index churn, its evidence flag, the baked initial colour mode,
+    // the language palette, and the SymKind→shape roster
+    writeAppearancePayload( out, fileList, color );
 
     // emit LINKS array — sorted (s, t) pairs
     std::fprintf( out, "const LINKS = [\n" );

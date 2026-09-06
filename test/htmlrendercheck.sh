@@ -550,6 +550,72 @@ pin 'callers / ' 'callers / ' "(R10) the node view states how much of the neighb
 # (R11) and the CAPTION says which way an arrow points, because a screenshot travels without the page.
 inbody renderProv 'arrow points caller' 'arrow points caller' "(R11) the provenance caption states that an arrow points caller → callee"
 
+# ── (S) NODE SHAPE carries symbol KIND, and the picture says which shape means what ───────────────────
+#
+#     `type` reaches the page in every NODES record and used to reach nothing but a hover tooltip. Kind
+#     is NOMINAL — there is no order in which a class is more than a macro — and shape is the only
+#     nominal-ONLY visual channel, so this is the textbook pairing rather than decoration. The need is
+#     measured: on one corpus 1,078 of 2,000 selected nodes are markdown sections and variables, neither
+#     of which can carry a call edge, and both were drawn as circles identical to functions — which is
+#     why 69% of that page read as isolated dots, and why a reader could not tell "the functions here are
+#     disconnected" (alarming, false) from "most of this is documentation and data" (ordinary, true).
+#
+#     (S1)/(S2) ONE TABLE, indexed by the enum. This is the kLangColors lesson: two hand-maintained lists
+#     behind one enum left eleven languages in an unlabelled grey. The roster is DERIVED here from
+#     model.h's own symTag switch, so a new SymKind with no shape fails this gate the way it fails the
+#     static_assert.
+shapesLine="$( grep -m1 'const SYM_SHAPES' "$PAGE" )"
+if [ -z "$shapesLine" ]; then
+    no "(S1) the page carries no SYM_SHAPES roster"
+else
+    # the roster is read out of symTag()'s OWN switch body — not a hand-copied list of kinds here, which
+    # would be the second list this arm exists to forbid. An empty derivation is a broken arm, not a pass.
+    symtags="$( awk '/^inline const char\* symTag\(/,/^\}/' "$ROOT/src/model.h" | grep -oE 'return "[a-z]+";' | grep -oE '"[a-z]+"' | tr -d '"' | sort -u )"
+    ntags="$( printf '%s\n' "$symtags" | grep -c . )"
+    if [ "$ntags" -lt 10 ]; then
+        no "(S1) derived only $ntags kinds from model.h::symTag — the awk range broke and this arm asserts nothing"
+    else
+        missing=""
+        for tag in $symtags; do
+            printf '%s' "$shapesLine" | grep -q "\"$tag\":\"[a-z]*\"" || missing="$missing $tag"
+        done
+        [ -z "$missing" ] && ok "(S1) all $ntags kinds model.h::symTag emits have a shape in the emitted roster" \
+                          || no "(S1) symTag kinds with no shape:$missing — they would fall back to the function circle"
+    fi
+fi
+nshape="$( printf '%s' "$shapesLine" | grep -oE '"[a-z]+":"[a-z]+"' | wc -l | tr -d ' ' )"
+[ "$nshape" = "10" ] && ok "(S2) control: the roster is one entry per SymKind enumerator, not a subset ($nshape)" \
+                     || no "(S2) control: the emitted shape roster has $nshape entries, not the 10 SymKind enumerators"
+# (S3)/(S4) the roster is actually WHAT IS DRAWN. A payload nothing reads is the FILES array's old defect
+#      (2241 bytes emitted and never looked at), and the absence control is the arc that used to draw
+#      every node regardless of kind.
+inbody draw 'shapeFor\(n\)\.path' 'shapeFor(n).path' "(S3) draw() marks each node with its kind's own path"
+absent 'ctx\.arc\(n\.x, n\.y, r, 0, 2\*Math\.PI\)' "(S4) the unconditional circle every node used to be drawn as is gone"
+# (S5) SHAPE IS ONLY A CHANNEL ABOVE ~8 PX. The floor moved 3.0 -> 4.0 with the shapes, because at 3.0 a
+#      zero-degree node — which is every `sec` and every `var`, the two kinds that most need telling apart
+#      from a function — drew as a 6 px mark where a square, a bar and a circle are the same speck.
+minpx="$( grep -oE 'var MIN_NODE_PX = [0-9.]+' "$PAGE" | grep -oE '[0-9.]+$' )"
+if [ -n "$minpx" ] && ge "$minpx" 4.0; then
+    ok "(S5) the smallest mark is ${minpx} px in radius — 8 px across, where a shape is still a shape"
+else
+    no "(S5) MIN_NODE_PX is ${minpx:-unset}: below 4.0 the shape channel is invisible on exactly the kinds it exists for"
+fi
+# (S6) area normalisation — shape says KIND and size says DEGREE. Without it a square reads as a bigger
+#      node than a circle at identical degree, which is a second variable smuggled into a nominal channel.
+pin 'reach: 1\.00' 'reach: 1.00' "(S6a) each shape declares its own extent, so it can be normalised and hit-tested"
+inbody hitTest 'shapeFor\(n\)\.reach' 'shapeFor(n).reach' "(S6b) the hit test follows the drawn mark's reach, not a flat radius that under-covers a triangle"
+absent 'nodeRadiusPx\(n\)\*1\.2/scale' "(S6c) the flat 1.2x hit radius that was only ever right for a disc is gone"
+# (S7)/(S8) THE KEY. A picture that encodes kind in its marks and cannot be read is an undisclosed
+#      channel — the exact defect the provenance caption exists to prevent. It is built from SYM_SHAPES,
+#      the same lookup draw() uses, so the key cannot name a shape the picture does not draw.
+pin 'function shapeKey' 'function shapeKey' "(S7) the page emits a shape key"
+inbody shapeKey 'SYM_SHAPES\[t\]' 'SYM_SHAPES[t]' "(S8a) that key is built from the SAME roster the marks are drawn from"
+inbody renderProv 'shapeKey\(\)' 'shapeKey()' "(S8b) and it is on the provenance caption, which is what the PNG export stamps"
+# (S9) so the STAMP has to grow with the caption. A constant height silently truncated it the day it
+#      gained a third line, which is the clipping defect (I5) already exists to stop, by the other axis.
+pin 'function stampHeight' 'function stampHeight' "(S9a) the stamped strip's height is derived from the caption's line count"
+absent 'slice\(0, 2\)' "(S9b) the two-line ceiling that would have dropped the shape key from every exported PNG is gone"
+
 echo
 echo "  ($mutants mutation controls ran and went red on their mutants)"
 if [ "$fail" -eq 0 ]; then
