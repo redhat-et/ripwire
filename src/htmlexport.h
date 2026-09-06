@@ -97,19 +97,50 @@ static const char kScriptColour[] = R"JS(
   // two olives. So `tested` now carries a channel that is NOT hue — tested nodes are FILLED, untested nodes
   // are hollow with a dashed ring — and the hues move onto the blue-yellow axis the ramp already uses, as
   // reinforcement rather than as the message. A monochrome print of this page is still readable.
-  var TESTED_FILL = '#26c6da', UNTESTED_FILL = '#ff9800';
+  // The two fills are ramp STOPS, not a third palette beside it: they were '#26c6da'/'#ff9800', which were
+  // stops of the ramp this page used to carry, and became orphan hues the moment that ramp was replaced.
+  // Untested is the BRIGHTER of the pair, on the same "risk is what glows" rule the ramp below states.
+  var TESTED_FILL = '#2bccc0', UNTESTED_FILL = '#ffce1c';
   var testedStroke = function(n) { return !n.ts; };   // untested ⇒ dashed ring instead of a solid disc
 
   // ---- --color-by palettes. commColor: 12 categorical dark-bg-friendly hues (comm % 12).
-  // rampColor: shared 5-step BLUE→ORANGE temperature ramp for cx/churn over FIXED thresholds (fixed
-  // beats quantiles for legend honesty — the same bucket means the same thing in every repo). Blue→
-  // orange keeps every step off the red/green axis (protanopia/deuteranopia, ~8% of men, cannot
-  // always tell those apart) while staying bright enough for this page's #111 canvas (>= 4.9:1).
-  // cx buckets:    0 | 1-4 | 5-9 | 10-19 | 20+   → boundaries [1,5,10,20]
-  // churn buckets: 0 | 1-2 | 3-9 | 10-29 | 30+   → boundaries [1,3,10,30]
+  //
+  // rampColor: the shared 5-step COOL→HOT ramp for cx/churn over FIXED thresholds (fixed beats quantiles
+  // for legend honesty — the same bucket means the same thing in every repo).
+  //   cx buckets:    0 | 1-4 | 5-9 | 10-19 | 20+   → boundaries [1,5,10,20]
+  //   churn buckets: 0 | 1-2 | 3-9 | 10-29 | 30+   → boundaries [1,3,10,30]
+  //
+  // THE RAMP IT REPLACES WAS AN ORDINAL SCALE THAT DID NOT ORDER. ['#4fc3f7','#26c6da','#ffd54f',
+  // '#ff9800','#e65100'] measured:
+  //   • Relative luminance 0.474 / 0.459 / 0.694 / 0.437 / 0.227 — dark→light order [4,3,1,0,2]. The
+  //     BRIGHTEST swatch was the MIDDLE bucket and the DARKEST was the top one, so in greyscale, in
+  //     print, or to any reader who reads lightness before hue, an ordinal ramp arrived as a permutation.
+  //     Worse for this page specifically: the hottest bucket was the one that RECEDED into the #111
+  //     canvas, so the picture dimmed exactly where it should have shouted.
+  //   • Steps 0 and 1 collapsed under colour blindness — 29/441 RGB distance under both protanopia and
+  //     deuteranopia (1.03:1 in luminance). On the README hero 71.6% of nodes sit in those two stops, so
+  //     for ~8% of male readers nearly three-quarters of the flagship image was one flat colour.
+  //
+  // The replacement is monotone in luminance and ordered COOL-DIM → HOT-BRIGHT, which is the direction
+  // that makes the metric legible at a glance on a dark ground: the calm majority sits at the dim end and
+  // the rare 20+ nodes are the ones that glow. Measured with a Brettel/Viénot CVD simulation:
+  //   stop  hex       rel.lum   vs #111    protan/deutan/tritan distance to the NEXT stop
+  //   0     #4b81c9   0.2141    4.75:1     67.0 / 60.8 / 67.7
+  //   1     #0fa3ff   0.3352    6.93:1     82.8 / 78.7 / 62.9
+  //   2     #2bccc0   0.4751    9.44:1    171.3 / 205.6 / 203.4
+  //   3     #ffce1c   0.6549   12.68:1    131.6 / 149.6 /  60.8
+  //   4     #fff794   0.8992   17.07:1        —
+  // Worst pair over ALL ten pairs, not just adjacent ones: 80.2 normal / 67.0 protan / 60.8 deutan /
+  // 60.8 tritan, against the old ramp's 50.3 / 29.0 / 29.0 / 41.1 — the protan/deutan bottleneck more
+  // than doubles. Every stop clears 4.5:1 against the canvas ground (the old ramp's floor was 4.98:1 and
+  // is preserved at 4.75:1, still above the bar), and the ramp stays on the blue-yellow axis
+  // protanopia/deuteranopia do NOT impair: no step is red, and step 2 is a cyan-teal at hue 176°, chosen
+  // over the numerically-better green at 168° precisely so that no adjacent pair is a red/green pairing.
+  // The gate does not take any of this on trust — test/htmlrendercheck.sh arm (Q) re-derives the
+  // luminance and the three CVD simulations from the stops the page actually emits.
   var commColor = ['#4a90d9','#e67e22','#2ecc71','#e74c3c','#9b59b6','#f4c542',
                    '#1abc9c','#e84393','#00acd7','#a3d977','#dea584','#7f8c8d'];
-  var rampColor = ['#4fc3f7','#26c6da','#ffd54f','#ff9800','#e65100'];
+  var rampColor = ['#4b81c9','#0fa3ff','#2bccc0','#ffce1c','#fff794'];
   var CX_STEPS = [1,5,10,20], CHURN_STEPS = [1,3,10,30];
   function rampStep(v, steps) {
     var s = 0;

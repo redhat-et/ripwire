@@ -411,6 +411,106 @@ nbudget="$( grep -c 'var SETTLE_BUDGET_MS' "$PAGE" )"
 pin 'selfEdgesDropped' 'selfEdgesDropped' "(P14) self-calls the sim cannot draw are counted, not silently dropped"
 inbody renderProv 'selfEdgesDropped' 'selfEdgesDropped' "(P15) and disclosed in the caption beside the counts"
 
+# ── (Q) the cx/churn ramp is an ORDINAL scale, MEASURED — not a pinned list of hex strings ────────────
+#
+#     Every other arm in this file pins an expression. This one cannot: the property under test is not
+#     "the ramp is these five strings", it is "the five strings the page emits are a usable ordinal
+#     scale", and a hex pin passes on the day someone swaps in five prettier colours that happen not to
+#     be one. So the stops are PARSED OUT OF THE EMITTED PAGE and the properties are re-derived from
+#     them — WCAG relative luminance, and a Brettel/Viénot 1999 LMS simulation of protanopia,
+#     deuteranopia and tritanopia — the same way arm (E) derives the churn window from main.cpp and arm
+#     (N) derives the language roster from model.h's own switch.
+#
+#     THE THREE DEFECTS THIS MEASURES, all of them live on the ramp it replaced:
+#       Q2  luminance was NOT monotone: 0.474 / 0.459 / 0.694 / 0.437 / 0.227, dark→light order
+#           [4,3,1,0,2]. The brightest swatch was the middle bucket and the darkest the top one, so
+#           greyscale (or a lightness-first reader, or a printed page) received a permutation of an
+#           ordinal scale — and on a #111 canvas the HOTTEST bucket was the one that receded.
+#       Q3  every stop must still clear 4.5:1 against the canvas ground. A ramp can be made monotone
+#           by darkening its low end into the background, which trades one defect for another.
+#       Q4  steps 0 and 1 were 29/441 apart under BOTH protanopia and deuteranopia — indistinguishable —
+#           and 71.6% of the README hero's nodes are in those two stops.
+#
+#     The MUTANT CONTROL is the old ramp itself: the identical derivation is re-run over a copy of the
+#     page carrying the five stops that shipped before, and each arm must go RED there. A derived arm
+#     with no control is a derivation that could be computing anything.
+rampmetrics()   # rampmetrics FILE → "mono minContrast minAdjNormal minAdjProtan minAdjDeutan minAdjTritan"
+{
+    python3 - "$1" <<'PY'
+import re, sys, math
+txt = open(sys.argv[1]).read()
+m = re.search(r'var rampColor = \[([^\]]*)\]', txt)
+if not m: print("NORAMP"); raise SystemExit
+stops = re.findall(r'#[0-9a-fA-F]{6}', m.group(1))
+if len(stops) != 5: print("NSTOPS", len(stops)); raise SystemExit
+def rgb(h): h = h.lstrip('#'); return tuple(int(h[i:i+2], 16)/255 for i in (0, 2, 4))
+def lin(c): return c/12.92 if c <= 0.04045 else ((c+0.055)/1.055)**2.4
+def gam(c):
+    c = max(0.0, min(1.0, c)); return c*12.92 if c <= 0.0031308 else 1.055*c**(1/2.4)-0.055
+def lum(h):
+    r, g, b = [lin(x) for x in rgb(h)]; return 0.2126*r + 0.7152*g + 0.0722*b
+# Brettel/Vienot 1999 LMS dichromat simulation (the standard sRGB approximation)
+M  = [[0.31399022,0.63951294,0.04649755],[0.15537241,0.75789446,0.08670142],[0.01775239,0.10944209,0.87256922]]
+Mi = [[5.47221206,-4.6419601,0.16963708],[-1.1252419,2.29317094,-0.1678952],[0.02980165,-0.19318073,1.16364789]]
+S  = {'protan':[[0,1.05118294,-0.05116099],[0,1,0],[0,0,1]],
+      'deutan':[[1,0,0],[0.9513092,0,0.04866992],[0,0,1]],
+      'tritan':[[1,0,0],[0,1,0],[-0.86744736,1.86727089,0]]}
+def mv(A, v): return [sum(A[i][j]*v[j] for j in range(3)) for i in range(3)]
+def sim(h, k):
+    out = mv(Mi, mv(S[k], mv(M, [lin(x) for x in rgb(h)])))
+    return tuple(gam(c) for c in out)
+def dist(a, b): return math.sqrt(sum((x-y)**2 for x, y in zip(a, b)))*255
+L  = [lum(s) for s in stops]
+bg = lum('#111111')
+mono = "yes" if all(L[i] < L[i+1] for i in range(4)) or all(L[i] > L[i+1] for i in range(4)) else "no"
+minc = min((max(l, bg)+0.05)/(min(l, bg)+0.05) for l in L)
+out = [mono, "%.2f" % minc, "%.1f" % min(dist(rgb(stops[i]), rgb(stops[i+1])) for i in range(4))]
+for k in ('protan', 'deutan', 'tritan'):
+    out.append("%.1f" % min(dist(sim(stops[i], k), sim(stops[i+1], k)) for i in range(4)))
+print(" ".join(out))
+PY
+}
+# ge A B — A >= B in floating point, without depending on bc being installed
+ge(){ awk -v a="$1" -v b="$2" 'BEGIN{ exit !(a+0 >= b+0) }'; }
+sed "s/var rampColor = \[[^]]*\]/var rampColor = ['#4fc3f7','#26c6da','#ffd54f','#ff9800','#e65100']/" "$PAGE" > "$TMP/rampmutant.html"
+read -r qMono qCon qNorm qPro qDeu qTri <<<"$( rampmetrics "$PAGE" )"
+read -r mMono mCon mNorm mPro mDeu mTri <<<"$( rampmetrics "$TMP/rampmutant.html" )"
+if [ "$mMono" = "no" ] && [ -n "$mDeu" ] && ! ge "$mDeu" 40; then
+    mutants=$(( mutants + 1 ))
+    ok "(Q1) MUTANT CONTROL: the derivation reproduces the OLD ramp's defects over a page carrying it (mono=$mMono, deutan min-adj=$mDeu) — it is measuring the ramp"
+else
+    no "(Q1) MUTANT CONTROL VACUOUS: over the OLD ramp the derivation reports mono=$mMono deutan=$mDeu, so it is not measuring what it claims"
+fi
+[ "$qMono" = "yes" ] && ok "(Q2) the ramp is MONOTONE in relative luminance — an ordinal scale greyscale still orders" \
+                     || no "(Q2) the ramp is not monotone in luminance (mono=$qMono) — in greyscale its buckets arrive permuted"
+if [ -n "$qCon" ] && ge "$qCon" 4.5; then
+    ok "(Q3) every stop clears 4.5:1 against the #111 canvas (worst $qCon:1) — monotone was not bought by sinking the low end into the ground"
+else
+    no "(Q3) a ramp stop falls below 4.5:1 against the canvas ground (worst $qCon:1)"
+fi
+qcvd=ok
+for d in "$qPro" "$qDeu" "$qTri"; do
+    { [ -n "$d" ] && ge "$d" 45; } || qcvd=bad
+done
+if [ "$qcvd" = "ok" ]; then
+    ok "(Q4) adjacent stops stay apart under protanopia/deuteranopia/tritanopia ($qPro/$qDeu/$qTri per 441, against $mPro/$mDeu/$mTri for the ramp this replaced)"
+else
+    no "(Q4) an adjacent pair collapses under simulated colour blindness ($qPro/$qDeu/$qTri per 441) — the old ramp's own defect"
+fi
+# (Q5) the `tested` lens' two fills are ramp STOPS, not a third palette. They used to be two hexes of the
+#      OLD ramp, which is exactly how a palette swap leaves orphan hues behind on a page nobody re-reads.
+rampline="$( grep -m1 'var rampColor' "$PAGE" )"
+qfills=ok
+for v in TESTED_FILL UNTESTED_FILL; do
+    c="$( grep -oE "$v = '#[0-9a-f]{6}'" "$PAGE" | grep -oE '#[0-9a-f]{6}' | head -1 )"
+    if [ -z "$c" ]; then
+        no "(Q5) the tested-lens fill $v could not be read from the page"; qfills=bad
+    elif ! printf '%s' "$rampline" | grep -qF "$c"; then
+        no "(Q5) the tested-lens fill $v=$c is not a stop of the ramp — an orphan hue beside the palette"; qfills=bad
+    fi
+done
+[ "$qfills" = "ok" ] && ok "(Q5) both tested-lens fills are stops of the ramp, so the page carries ONE colour identity"
+
 echo
 echo "  ($mutants mutation controls ran and went red on their mutants)"
 if [ "$fail" -eq 0 ]; then
