@@ -2833,15 +2833,18 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
     unsigned churnMonths = 0, std::vector<std::uint32_t>* outChurn = nullptr,
     std::uint32_t onlyRoot = UINT32_MAX )
 {
+    // F1: the churn sub-window's cutoff, resolved ONCE from HEAD's own committer epoch — the same anchor the
+    // co-change window (inside gitLogNameOnlyRaw) uses, so the two horizons this one walk yields agree.
+    const std::int64_t churnCutoff = rw::defaultWindowCutoffEpoch( root, churnMonths );
     if( !hasEnclosingGitRepo( root ) )
     {
-        return resolveCommitStream( RawCommitStream{}, ing, maxFiles, churnMonths, outChurn, onlyRoot );
+        return resolveCommitStream( RawCommitStream{}, ing, maxFiles, churnCutoff, outChurn, onlyRoot );
     }
 
     const std::string headSha = gitHeadSha( root );
     if( headSha.empty() )
     {
-        return resolveCommitStream( gitLogNameOnlyRaw( root, coSince ), ing, maxFiles, churnMonths, outChurn, onlyRoot );
+        return resolveCommitStream( gitLogNameOnlyRaw( root, coSince ), ing, maxFiles, churnCutoff, outChurn, onlyRoot );
     }
 
     const std::string repoHex  = headSnapRepoHex( root );
@@ -2856,13 +2859,13 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
     std::string      blob;
     if( readQSnapBlob( cachePath, blob ) == 1 && deserializeRawCommitStream( blob, keyMat, raw ) )
     {
-        return resolveCommitStream( raw, ing, maxFiles, churnMonths, outChurn, onlyRoot );   // warm hit — no walk
+        return resolveCommitStream( raw, ing, maxFiles, churnCutoff, outChurn, onlyRoot );   // warm hit — no walk
     }
 
     raw = gitLogNameOnlyRaw( root, coSince );                                      // cold — the 431 ms walk
     atomicWriteFile( cachePath, serializeRawCommitStream( raw, keyMat ) );         // best-effort; a failed
                                                                                      // write just recomputes next time
-    return resolveCommitStream( raw, ing, maxFiles, churnMonths, outChurn, onlyRoot );
+    return resolveCommitStream( raw, ing, maxFiles, churnCutoff, outChurn, onlyRoot );
 }
 
 // `root` = the ingest root exactly as invoked (cfg.rootPath). It is folded into every baseline key via

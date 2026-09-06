@@ -1062,7 +1062,7 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
     const PageWindow ccPw = pageWindow( ps.size(), effectiveRowCap( page.limit, kCochangePartnerCap ), page.offset );
     char             ccPab[ kPageDisclosureCap ];
     out += "\"file\":\"" + mcpdetail::jsonEscape( ccRel( fid ) ) + "\",\"commits\":" + std::to_string( commits )
-         + ",\"window\":\"18mo\",\"sub_windows\":" + std::to_string( subWindows )
+         + ",\"window\":\"" + rw::defaultWindowLabel( root, "18mo" ) + "\",\"sub_windows\":" + std::to_string( subWindows )
          + ",\"partners\":" + std::to_string( ps.size() )
          + pageDisclosure( ccPab, sizeof( ccPab ), ccPw.end - ccPw.begin, ps.size(), ccPw.end,
                            page.limit, page.offset, /*discloseCap=*/true, kJsonPageSyntax )

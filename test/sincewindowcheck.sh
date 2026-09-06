@@ -110,8 +110,12 @@ oc="$("$BIN" "$OLD" --cochange --no-cache 2>"$NR/oc.err")"; ocrc=$?
 grep -qi "git unavailable" "$NR/oc.err" \
   && no "--cochange said 'git unavailable' on a repo WITH git and WITH history" \
   || ok "--cochange did not claim 'git unavailable' on a real history"
-if printf '%s' "$oc" | grep -q 'commits="[1-9]'; then ok "--cochange default window mined a non-zero commit count"
-else no "--cochange default window mined 0 commits from a 6-commit history"; echo "     got: $(printf '%s' "$oc" | head -c 300)"; fi
+if printf '%s' "$oc" | grep -q 'pairs="[1-9]'; then ok "--cochange default window found co-change pairs in a >18mo-old history"
+else no "--cochange default window found 0 pairs in a 6-commit history of co-edited files"; echo "     got: $(printf '%s' "$oc" | grep -o '<cochange[^>]*>')"; fi
+# the per-file form carries commits= — the floor --situ has to propagate (4d).
+ocf="$("$BIN" "$OLD" --cochange=db/wal_manager.cc --no-cache 2>/dev/null)"
+if printf '%s' "$ocf" | grep -q 'commits="[1-9]'; then ok "--cochange=FILE reports a non-zero in-window commit count"
+else no "--cochange=FILE mined 0 commits from a 6-commit history"; echo "     got: $(printf '%s' "$ocf" | grep -o '<cochange[^>]*>')"; fi
 printf '%s' "$oc" | grep -q 'window="18mo@HEAD"' \
   && ok "--cochange discloses the anchor (window=\"18mo@HEAD\")" \
   || { no "--cochange must name the anchor that produced its window (want window=\"18mo@HEAD\")"; echo "     got: $(printf '%s' "$oc" | grep -o 'window="[^\"]*"' | head -1)"; }
@@ -120,8 +124,8 @@ printf '%s' "$oc" | grep -q 'window="18mo@HEAD"' \
 oh="$("$BIN" "$OLD" --hotspots --no-cache 2>"$NR/oh.err")"; ohrc=$?
 [ "$ohrc" -eq 0 ] && ok "--hotspots default window ranks a >18mo-old history (exit 0)" \
                   || { no "--hotspots default window refused a real history (exit $ohrc)"; echo "     stderr: $(cat "$NR/oh.err")"; }
-if printf '%s' "$oh" | grep -q 'commits="[1-9]'; then ok "--hotspots default window mined a non-zero commit count"
-else no "--hotspots default window mined 0 commits from a 6-commit history"; echo "     got: $(printf '%s' "$oh" | head -c 300)"; fi
+if printf '%s' "$oh" | grep -q 'ranked="[1-9]'; then ok "--hotspots default window ranked a file on >18mo-old churn"
+else no "--hotspots default window ranked nothing from a 6-commit history"; echo "     got: $(printf '%s' "$oh" | grep -o '<hotspots[^>]*>')"; fi
 
 # 4c) --rank-by=churn must find churn evidence, and its stamp must name the anchor.
 orc_out="$("$BIN" "$OLD" --rank-by=churn --no-cache 2>"$NR/or.err")"
