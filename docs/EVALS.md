@@ -11502,6 +11502,18 @@ truncated to the same byte budget the ripwire arm actually consumed on that ques
 the placebo on a question, that question is **not** evidence of a ranking win, and the readout says so
 row-by-row rather than in a footnote.
 
+**AMENDMENT (2026-09-06, after the run — a fix to the INSTRUMENT, binding on the NEXT round, and it changes
+nothing about this one).** As registered, the placebo comparison is undefined on a row where **both** arms are
+incomplete: both then score their full emitted bytes, and the placebo's budget *is* ripwire's emitted bytes
+truncated to whole lines, so the placebo wins by that truncation slack and nothing else — measured below,
+`margin == −slack` on every one of the 20 such rows, median −12 B. **A mutually-incomplete row is a TIE from
+now on, not a placebo win**, and the readout must report the tie count as its own column rather than folding
+it into either arm. The tie rule is not applied retroactively: this round is scored strictly as it was
+registered, and — checked both ways before the amendment was written — the verdict is identical under either
+reading (6/30 as registered; 6–4 restricted to the ten rows a completion actually decided; a majority of 30
+was required either way). **The stop condition stands and no ranking claim is published from this round.**
+Fixing the rule is about the next round's instrument, not about this round's result.
+
 ### What this comparison will NOT show, written before it runs
 
 - **One corpus, one language, one commit.** RocksDB is C++. Nothing here transfers to the TypeScript, Python
@@ -11590,7 +11602,7 @@ That is the case `docs/METHODOLOGY.md` §8 exists to catch, caught.
 is load-bearing — the true 23-month age is exactly what makes ripwire's 18-month history windows inert below.
 (2) The placebo comparison is undefined when both arms are incomplete: both score full emitted bytes, the
 placebo's budget *is* ripwire's emitted bytes truncated to whole lines, so it wins by the truncation slack —
-measured, `margin == −slack` on all 20 such rows. It should declare those rows ties. (3) The `rg` floor's
+measured, `margin == −slack` on all 20 such rows. **Amended above**: such rows are ties from the next round on. (3) The `rg` floor's
 output order is unspecified, and `rg`'s parallel walk makes its score nondeterministic — **×276 across five
 identical runs** on one question. Published with `--sort path`, which fixes it, and which moves rows in both
 directions. (4) "Named" credits a path occurring inside quoted source: **11 of the floor's 22 completions
@@ -11649,3 +11661,56 @@ environment back.
 **Pre-registered exclusion, honoured:** question 4 (`04cbc77b9`, a mechanical license-header sweep) is
 excluded from the S4 sub-total and reported anyway with its exclusion visible. No further exclusion was
 applied; the four metric defects above are published as defects rather than used to drop rows.
+
+### POST-FIX RE-RUN — the same 30 questions, after the losses were converted into code (2026-09-06)
+
+The loss list above is the deliverable, so it was implemented and the **frozen** questions were re-run on the
+fixed binary. Nothing was re-registered, re-derived or re-scoped: the same `questions.json`, the same
+`scorer.py`, the same corpus at the same pin. Only ripwire and the placebo were re-run, because only they can
+move — the placebo's budget IS ripwire's emitted bytes, and gortex / cocoindex-code / the `rg` floor are
+untouched by a change to ripwire, so their columns above stand as measured. Harness:
+`bench/roundc-h2h/rerun_post.py` → `results_post.json`.
+
+What changed in the tool: the default history window now anchors on HEAD's own committer date instead of the
+wall clock (taken from gortex, which mined 9,854 co-change edges on the corpus where ripwire returned zero
+rows); `--situ` propagates the `commits=`/`window=` floor its own component verb already emitted; and `--situ`
+surfaces the named file's declaration/definition partner (taken from cocoindex, which answered q15 in 55 B
+where ripwire missed the gold entirely in 3,104 B) — by shared `(scope, name)` symbol identity, not by
+embeddings and not by file extension.
+
+| paired, ripwire-warm | before | after |
+| --- | ---: | ---: |
+| questions completed | 6/30 | **9/30** |
+| gold files named | 26/129 (20%) | **29/129 (22%)** |
+| S2 ("what else has to change with `<file>`") recall | 2/14 | **5/14** |
+| beats the placebo, strictly as registered | 6/30 | **9/30** |
+| beats the placebo, under the amended tie rule | 6–20–4 | **9–17–4** |
+
+The three new completions are q15, q16 and q17 — exactly the rows whose gold IS the named file's declaration
+partner (`db/wal_manager.h`, `table/get_context.h`, `db/db_impl/db_impl.h`), each now complete at **651 / 654 /
+656 B** against an incomplete 3,104 / 3,114 / 3,115 B before, and cocoindex's 55 B on q15 stands as the cheaper
+answer. q13 was already complete and is now reached at 729 B instead of 1,187 B (its gold is the second decl/def
+partner). q18's gold is `block_builder.cc` from `block.cc` — not a declaration partner, and the new row
+correctly does not claim it. S2's emitted bytes rose 16,354 → 19,561 B for those three completions.
+
+**The stop condition still fires, and that is published as the result.** 9 of 30 is not the required majority
+of 16. The tool is measurably better on the axis the losses named and it still does not clear the bar the
+registration set before the run. Two reasons, both already in the loss list and neither addressed by this
+lane's changes: S5 is unmoved at 2/30 (see the refutation below), and 17 rows remain mutually incomplete,
+where the comparison is decided by line-truncation slack rather than by ranking.
+
+**The collapsing hypothesis, tested first and REFUTED.** L-3 (S5 served by nothing) and L-5 (the co-change
+window inert on a 23-month-old corpus) looked like one defect: S5 *is* the history question. They are two.
+The verb frozen for S5, `--rank-by=churn-decay`, was **already** anchored on HEAD (`window="all-history
+half-life=90d"`, `gitmine.h::gitLogDecayedFileWeights` reads `gitHeadCommitEpoch`, never `std::time`), so the
+wall-clock defect cannot be its cause. Measured directly, by emulating the fix exactly — an 18-month window
+anchored at HEAD's date, `--rank-by=churn --since=2023-04-17`: S5 recall **1/30**, *worse* than the frozen
+arm's 2/30 and nowhere near the placebo's 21/30. The real S5 gap is density, not history: at the matched
+31,708-byte budget ripwire's bundle names **71 distinct files** (180 symbol rows) while the placebo's bare path
+list names ~976 — a 14× paths-per-byte gap on a question whose gold is a file list. That is a missing verb
+shape, not a broken window, and it is not fixed here.
+
+**Cost of the fix, stated because it is not free.** S1/S4 bundles grew ~30–70 B each: on this pinned corpus the
+churn lens now carries real churn where it previously carried none, which is the anchoring change doing its job
+and is paid for in bytes. S3 and S5 are byte-identical before and after. Cold and warm remain byte-identical on
+all 30 questions.
