@@ -109,10 +109,23 @@ pin 'LABEL_H'        'LABEL_H'        "(B4) the occupancy grid reserves the labe
 # (B5) the placed box uses the MEASURED text width, not a per-character estimate: an estimate that runs
 #      short reserves less than it draws, which is the same collision by another route.
 pin 'measureText\(n\.label\)' 'measureText(n.label)' "(B5) the reserved box is the measured text width"
+# (B6) the grid stops labels colliding with each OTHER and says nothing about what is UNDER them. In a
+#      dense view a name lands on a node disc, and #d6d9de over bright teal is the same lost label by
+#      another route. Every label is stroked in the background colour before it is filled.
+pin 'LABEL_HALO_PX' 'LABEL_HALO_PX' "(B6) labels carry a dark halo so they stay legible over a node"
+pin 'strokeText\(n\.label' 'strokeText' "(B7) that halo is actually stroked behind the glyphs"
 
 # ── (C) node radius by in-view degree ────────────────────────────────────────────────────────────────
 pin 'Math\.sqrt\(n\.deg' 'n.deg' "(C1) nodeRadius is driven by in-view degree"
 absent '4 \+ 60\*Math\.sqrt\(n\.rank\)' "(C2) the old rank-only radius (mean 5.10 px on a 1-111 degree span) is gone"
+# (C3) the on-screen minimum must be a UNIFORM boost, not a per-node clamp. `Math.max(nodeRadius(n),
+#      3.5/scale)` looks like a visibility floor and is a flattener: at the scale a 239-node view fits at
+#      (0.125) the floor term is 28 world units, larger than EVERY nodeRadius, so all 239 nodes rendered at
+#      exactly 3.5 px and the degree signal (C1) computes was invisible in precisely the picture that needed
+#      it. A single per-frame multiplier lifts the smallest node to the floor and preserves every ratio.
+pin 'nodeRadiusPx'   'nodeRadiusPx'   "(C3) node size is a SCREEN-space band (nodeRadiusPx), so a hub reads as one at every zoom"
+pin 'MAX_NODE_PX'    'MAX_NODE_PX'    "(C5) that band has a CEILING — an unbounded hub becomes a blob that occludes its neighbours' labels"
+absent 'Math\.max\(nodeRadius\(n\), 3\.5/scale\)' "(C4) the per-node screen clamp that flattened every radius at low zoom is gone"
 
 # ── (D) settle before first paint, under a wall-clock budget ─────────────────────────────────────────
 pin 'SETTLE_BUDGET_MS' 'SETTLE_BUDGET_MS' "(D1) the pre-paint settle carries a wall-clock budget"
@@ -176,6 +189,12 @@ absent 'canvas\.width  = window\.innerWidth;' "(H4) the 1x, DPR-unaware resize i
 # ── (I) PNG export ───────────────────────────────────────────────────────────────────────────────────
 pin 'toDataURL'   'toDataURL'   "(I1) a PNG export path exists (canvas.toDataURL)"
 pin 'id="savePng"' 'id="savePng"' "(I2) it is reachable from a control in the bar"
+# (I3) the export must carry the page's own provenance. The caption is DOM, so toDataURL() on the canvas
+#      alone produced an image that states nothing about itself — which is the exact defect the caption was
+#      added to fix, surviving into the artifact the caption exists for. The exported bitmap is composed
+#      with the caption stamped into it.
+pin 'stampProvenance' 'stampProvenance' "(I3) the exported PNG has the provenance caption stamped into it"
+pin 'exportBitmap'    'exportBitmap'    "(I4) the export composes its own bitmap rather than shipping the raw canvas"
 
 # ── (J) resize re-fits when autoFit is on ────────────────────────────────────────────────────────────
 #     step() early-returns once SIM_STEPS >= MAX_SIM, so after settling fitView could never run again:

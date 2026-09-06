@@ -266,6 +266,8 @@ static const char kScriptSim[] = R"JS(
                                  // draw() places the ones that matter first and drops the collisions
   var MAX_LABELS = 24;
   var MIN_LABEL_DEGREE = 2;      // rule 3: a node with one in-view edge is fringe and its name buys nothing
+  var MIN_NODE_PX = 3.0, MAX_NODE_PX = 15.0;   // a node's on-screen radius band (see nodeRadiusPx)
+  var LABEL_HALO_PX = 3.0;       // the dark outline stroked behind every label (see placeLabel)
   var ox = 0, oy = 0, scale = 1, autoFit = true;
   var dragging = -1, panStart = null, hovered = -1, selected = -1;
   var searchSet = null;
@@ -463,7 +465,7 @@ static const char kScriptSim[] = R"JS(
   // nodes spanned 1 to 111. The picture carried a hub/leaf distinction it never drew, so a hairball was the
   // honest rendering of it. sqrt keeps the growth sub-linear so a degree-111 hub is ~4x a degree-2 leaf and
   // not 55x; the small rank term separates equal-degree nodes without ever reordering different-degree ones.
-  function nodeRadius(n) { return Math.max(4, Math.min(24, 4 + 2.2*Math.sqrt(n.deg || 0) + 8*Math.sqrt(n.rank))); }
+  function nodeRadiusPx(n) { return Math.max(MIN_NODE_PX, Math.min(MAX_NODE_PX, 3 + 1.5*Math.sqrt(n.deg || 0) + 5*Math.sqrt(n.rank))); }
 
   // The canvas's own background, painted as the FIRST op of every frame. clearRect leaves transparent
   // pixels; on screen the body's #111 shows through and it looks fine, but every export path (toDataURL,
@@ -501,12 +503,20 @@ static const char kScriptSim[] = R"JS(
     }
     ctx.globalAlpha = 1.0;
 
+    // Node size is a SCREEN quantity converted to world units here, exactly the way the labels already
+    // are — a hub has to look like a hub at every zoom, and it must never grow into a blob that swallows
+    // the labels around it. Two earlier shapes both failed on this cut and are worth naming: a per-node
+    // max against a 3.5-px-over-scale floor FLATTENED everything (at the 0.125 scale a 239-node view fits
+    // at, the floor term exceeded every radius, so all 239 nodes drew at the same 3.5 px and the degree
+    // signal was invisible in the one picture that needed it); a uniform per-frame multiplier fixed the
+    // small end and blew up the large one, turning degree-111 hubs into 36 px discs that occluded four
+    // labels. A screen-space band does both jobs and is zoom-invariant.
     // nodes. In `tested` mode an UNTESTED node is drawn hollow with a dashed ring instead of a filled
     // disc — the second, non-hue channel H5 is about. Every other mode fills as before.
     var hollow = (mode === 'tested');
     for (var i = 0; i < N; i++) {
       var n = nodes[i];
-      var r = Math.max(nodeRadius(n), 3.5/scale);   // floor the ON-SCREEN radius so nodes stay visible when zoomed out
+      var r = nodeRadiusPx(n)/scale;   // screen px -> world units, inside the transformed draw
       var dim = (hl && !hl.has(i)) || (searchSet && !searchSet.has(i));
       ctx.globalAlpha = dim ? 0.18 : 1.0;
       ctx.beginPath();
@@ -548,7 +558,7 @@ static const char kScriptSim[] = R"JS(
     var CELL_W = 8, CELL_H = 16, LABEL_H = 13;
     function placeLabel(i) {
       var n = nodes[i];
-      var r  = Math.max(nodeRadius(n), 3.5/scale);
+      var r  = nodeRadiusPx(n)/scale;
       var sx = (n.x + r)*scale + ox + 3, sy = n.y*scale + oy + 4;
       var wpx = ctx.measureText(n.label).width * scale;     // world units -> screen px (font is 11/scale)
       var c0 = Math.floor(sx/CELL_W), c1 = Math.floor((sx + wpx)/CELL_W);
@@ -556,8 +566,16 @@ static const char kScriptSim[] = R"JS(
       if (c1 - c0 > 200) c1 = c0 + 200;                     // a pathological label cannot monopolise the grid
       for (var rr = r0; rr <= r1; rr++) { for (var c = c0; c <= c1; c++) { if (labelCells.has(c + ':' + rr)) return false; } }
       for (var rr2 = r0; rr2 <= r1; rr2++) { for (var c2 = c0; c2 <= c1; c2++) { labelCells.add(c2 + ':' + rr2); } }
-      ctx.globalAlpha = (hl && !hl.has(i)) ? 0.25 : 0.9;
-      ctx.fillStyle = '#d6d9de';
+      ctx.globalAlpha = (hl && !hl.has(i)) ? 0.25 : 0.95;
+      // A HALO first. The occupancy grid stops labels colliding with each OTHER; it says nothing about
+      // what is underneath them, and in a dense view a name lands on top of a node disc — #d6d9de on a
+      // bright teal is barely readable, which is the same lost label by a different route. Stroking the
+      // glyphs in the canvas background before filling them makes every label legible over anything.
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = LABEL_HALO_PX/scale;
+      ctx.strokeStyle = 'rgba(10,10,10,0.9)';
+      ctx.strokeText(n.label, n.x + r + 3/scale, n.y + 4/scale);
+      ctx.fillStyle = '#e6e9ee';
       ctx.fillText(n.label, n.x + r + 3/scale, n.y + 4/scale);
       return true;
     }
@@ -601,7 +619,7 @@ static const char kScriptSim[] = R"JS(
   function hitTest(px, py) {
     var w = toWorldXY(px, py);
     for (var i = N-1; i >= 0; i--) {
-      var n = nodes[i], r = nodeRadius(n)*1.2;
+      var n = nodes[i], r = nodeRadiusPx(n)*1.2/scale;   // the DRAWN size, so a click matches what the eye aimed at
       var dx = w.x-n.x, dy = w.y-n.y;
       if (dx*dx+dy*dy <= r*r) return i;
     }
@@ -923,13 +941,41 @@ static const char kScriptViews[] = R"JS(
   // is now the correct way to get a picture of the graph out of the page: an OS screenshot is capped at the
   // display's own resolution and includes the browser chrome, whereas toDataURL hands back exactly the
   // backing store — DPR x the CSS size, background composited, nothing else in the frame.
+  // The exported bitmap is COMPOSED, not the raw canvas. The provenance caption is DOM, so a plain
+  // canvas.toDataURL() hands back a picture that states nothing about itself — the exact defect the
+  // caption was added to fix, surviving into the one artifact the caption exists for. A README image, a
+  // bug report, a slide: every one of them travels without the page around it. So the export draws the
+  // graph into its own bitmap with the caption stamped underneath, in the page's own colours.
+  var STAMP_H = 44;
+  function stampProvenance(g, w, y) {
+    var el = document.getElementById('prov');
+    var lines = el ? el.innerText.split('\n') : [];
+    g.fillStyle = '#0b0b0b';  g.fillRect(0, y, w, STAMP_H);
+    g.fillStyle = '#2a2a2a';  g.fillRect(0, y, w, 1);
+    g.fillStyle = '#9aa1aa';
+    g.font = '13px ui-monospace,SFMono-Regular,Menlo,monospace';
+    for (var i = 0; i < lines.length && i < 2; i++) { g.fillText(lines[i], 14, y + 19 + i*17); }
+  }
+  function exportBitmap() {
+    var out = document.createElement('canvas');
+    out.width  = canvas.width;
+    out.height = canvas.height + Math.round(STAMP_H*DPR);
+    var g = out.getContext('2d');
+    g.setTransform(DPR, 0, 0, DPR, 0, 0);
+    g.fillStyle = CANVAS_BG;  g.fillRect(0, 0, out.width/DPR, out.height/DPR);
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.drawImage(canvas, 0, 0);
+    g.setTransform(DPR, 0, 0, DPR, 0, 0);
+    stampProvenance(g, out.width/DPR, canvas.height/DPR);
+    return out;
+  }
   document.getElementById('savePng').addEventListener('click', function() {
     if (canvas.style.display === 'none') { info.textContent = 'nothing to export from the overview — open a module or a symbol first'; return; }
     draw();                                     // guarantee the frame is current, not a stale hover state
     var a = document.createElement('a');
     var slug = (currentView === 'node' && centreGid >= 0) ? NODES[centreGid].label : (currentView || 'graph');
     a.download = 'ripwire-' + String(slug).replace(/[^A-Za-z0-9_.-]+/g, '_') + '-' + mode + '.png';
-    a.href = canvas.toDataURL('image/png');
+    a.href = exportBitmap().toDataURL('image/png');
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   });
 
