@@ -520,7 +520,9 @@ $ ./build/ripwire . --tree
 
 ### `--html[=FILE]`
 
-**Answers:** self-contained HTML force-directed call graph (no CDN — redirect or write FILE)
+**Answers:** self-contained HTML force-directed call graph of the DEFAULT map (no CDN — redirect or write FILE).
+
+A navigation or report verb answers instead of the map, so --html beside one refuses rather than writing nothing; for a single symbol's neighbourhood open the page at FILE#node/SYM/2
 
 **Try it**
 
@@ -532,6 +534,10 @@ $ ./build/ripwire . --html=<scratch>/aux/map2.html
 ```
 
 **Shaped by:** `--color-by`, `--legend`
+
+**Caveats (stated by the binary):**
+
+- A navigation or report verb answers instead of the map, so --html beside one refuses rather than writing nothing;
 
 ### `--color-by=MODE`
 
@@ -4726,7 +4732,7 @@ what is the weather in Paris	none	neg
 
 **Answers:** this catalog
 
-**Shaped by:** `--color-by`, `--around`, `--callers`, `--callees`, `--affected`, `--expand`, `--metrics`, `--nonlocal-state`
+**Shaped by:** `--html`, `--color-by`, `--around`, `--callers`, `--callees`, `--affected`, `--expand`, `--metrics`
 
 ### `-v, --version`
 
