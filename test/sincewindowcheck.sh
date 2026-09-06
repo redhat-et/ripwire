@@ -167,6 +167,30 @@ printf '%s' "$on" | grep -q 'noise/b.cc' \
   && { no "F3 guard is inert: two 13-symbol files sharing ONE name were reported as a decl/def pair"; echo "     got: $(printf '%s' "$on" | grep -A3 'decl/def')"; } \
   || ok "F3 guard rejects a one-name collision between two large files (the majority test is live)"
 
+# The sharper control, and the one dogfooding actually needed: two TINY files that each DEFINE the same one
+# function pass any majority test on shared names, and are still not a decl/def pair — nothing is declared in
+# one and defined in the other. Every shell gate in test/ defines ok/no/fail, which is how the first version
+# of this rule answered `--situ` with `test/w2verbscheck.sh (10 shared symbols)`.
+mkdir -p twin
+printf 'int only_one( int x ) { return x + 1; }\n' > twin/p.cc
+printf 'int only_one( int x ) { return x + 2; }\n' > twin/q.cc
+_c "2019-08-05T10:00:00 +0000" twin
+tw="$("$BIN" "$OLD" --situ=twin/p.cc --no-cache 2>/dev/null)"
+printf '%s' "$tw" | grep -q 'twin/q.cc' \
+  && { no "F3 pairs two files that both DEFINE the same name — that is a shared name, not a decl/def pair"; echo "     got: $(printf '%s' "$tw" | grep -A3 'decl/def')"; } \
+  || ok "F3 refuses two files that both DEFINE the same symbol (the decl-vs-def half is live)"
+
+# ...and the positive twin of that control, so the arm above cannot pass by the rule being inert: a header
+# that DECLARES what a same-sized source DEFINES must still be found.
+mkdir -p pair
+printf 'int declared_only( int x );\n' > pair/r.h
+printf '#include "pair/r.h"\nint declared_only( int x ) { return x + 3; }\n' > pair/r.cc
+_c "2019-09-05T10:00:00 +0000" pair
+pr="$("$BIN" "$OLD" --situ=pair/r.cc --no-cache 2>/dev/null)"
+printf '%s' "$pr" | grep -q 'pair/r.h' \
+  && ok "F3 still finds a one-symbol decl/def pair (the refusal above is selective, not blanket)" \
+  || { no "F3 missed a one-symbol header/impl pair"; echo "     got: $(printf '%s' "$pr" | head -c 500)"; }
+
 # 4e3) F2's EMPTY-WINDOW branch: a tree with git but NO commits must say the zero is not a measurement,
 #      rather than the old "(none, or no git history)" that meant neither.
 NH="$(mktemp -d)"; mkdir -p "$NH/db"

@@ -11687,11 +11687,20 @@ embeddings and not by file extension.
 | beats the placebo, under the amended tie rule | 6–20–4 | **9–17–4** |
 
 The three new completions are q15, q16 and q17 — exactly the rows whose gold IS the named file's declaration
-partner (`db/wal_manager.h`, `table/get_context.h`, `db/db_impl/db_impl.h`), each now complete at **651 / 654 /
-656 B** against an incomplete 3,104 / 3,114 / 3,115 B before, and cocoindex's 55 B on q15 stands as the cheaper
-answer. q13 was already complete and is now reached at 729 B instead of 1,187 B (its gold is the second decl/def
+partner (`db/wal_manager.h`, `table/get_context.h`, `db/db_impl/db_impl.h`), each now complete at **664 / 667 /
+669 B** against an incomplete 3,104 / 3,114 / 3,115 B before, and cocoindex's 55 B on q15 stands as the cheaper
+answer. q13 was already complete and is now reached at 742 B instead of 1,187 B (its gold is the second decl/def
 partner). q18's gold is `block_builder.cc` from `block.cc` — not a declaration partner, and the new row
-correctly does not claim it. S2's emitted bytes rose 16,354 → 19,561 B for those three completions.
+correctly does not claim it. S2's emitted bytes rose 16,354 → 19,617 B for those three completions.
+
+**A defect in the fix, found by dogfooding it and fixed before this was written.** The partner rule first
+matched on `(scope, name)` alone under a majority guard. Run against this repo's own 17-file diff it answered
+`test/w2verbscheck.sh (10 shared symbols)`: every shell gate here defines `ok`, `no`, `fail`. Those files all
+DEFINE those names and none DECLARES them, so they are not a decl/def pair — the rule now requires the two
+sides to disagree about which they are (a body-carrying span is a definition, a signature-only span is a
+declaration), and the majority guard is taken per (changed file, partner) PAIR rather than in aggregate, where
+a `min()` against the largest changed file made the bar *easier* for every small partner. Both halves carry
+their own gate arm, positive and negative.
 
 **The stop condition still fires, and that is published as the result.** 9 of 30 is not the required majority
 of 16. The tool is measurably better on the axis the losses named and it still does not clear the bar the

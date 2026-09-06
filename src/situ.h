@@ -230,16 +230,23 @@ inline bool cliRefusesFileList( const IngestResult& ing, std::string_view flag, 
 // does not transitively depend on the source that implements it. It is a different relationship, and one
 // ripwire ALREADY KNOWS — it needs no embeddings (G3 stands; no embedding mode is being added).
 //
-// THE RELATIONSHIP, stated so it is not a C++ special case: another file that defines symbols under the SAME
-// (scope, name) identity as the file you named. That covers a C/C++ header/impl pair, an Objective-C .h/.m,
-// a C# partial class, a Python .pyi stub and a TypeScript .d.ts — without reading a single file extension or
-// comparing basenames, both of which are guesses about a convention rather than facts about the code.
+// THE RELATIONSHIP, stated so it is not a C++ special case: another file where the SAME (scope, name)
+// symbols are DECLARED that this file DEFINES, or vice versa. That covers a C/C++ header/impl pair, an
+// Objective-C .h/.m, a Python .pyi stub and a TypeScript .d.ts, without reading one file extension or
+// comparing one basename — both of which are guesses about a convention rather than facts about the code.
 //
-// THE GUARD, and it is a MAJORITY test rather than a threshold pulled from the air: two files that merely
-// happen to share one common free-function name (`init`, `main`, `run`) are not a decl/def pair, and a big
-// file sharing one name with another big file is noise. So a partner qualifies only when the shared symbols
-// are at least HALF of the smaller file's symbols — 2*shared >= min(symbols(a), symbols(b)). wal_manager.h
-// (3 symbols) and wal_manager.cc (2) share 2 ⇒ qualifies; two 40-symbol files sharing one name ⇒ does not.
+// THE DECL-vs-DEF HALF IS LOAD-BEARING, and it was found by dogfooding rather than reasoned out. A first
+// version matched on (scope, name) alone under a majority guard, and `--situ` on this repo's own 17-file
+// diff answered `test/w2verbscheck.sh (10 shared symbols)` — every shell gate here defines `ok`, `no`,
+// `fail`, `run`. Those files all DEFINE those names; none DECLARES them, so they are not a decl/def pair and
+// the corrected rule drops them to zero shared. A symbol is a DEFINITION when its span carries a body
+// (`sigEndByte < endByte`, the same test quality.h's body-shaped checks use) and a pure DECLARATION when it
+// does not; a shared name counts only when the two sides disagree about which it is.
+//
+// THE SECOND GUARD is a MAJORITY test, per (changed file, partner) PAIR and never in aggregate — the same
+// dogfooding run showed why: an aggregate `min()` taken against the LARGEST changed file makes the bar
+// EASIER for every small partner, which is the opposite of what a guard is for. A pair qualifies when the
+// shared symbols are at least half of the smaller of the two files: 2*shared >= min(symbols(c), symbols(p)).
 // The row publishes `shared`, so the reader audits the judgment rather than trusting it.
 //
 // The partner is NOT part of the blast radius and is never merged into it: the counts in section [1] stay
@@ -247,23 +254,29 @@ inline bool cliRefusesFileList( const IngestResult& ing, std::string_view flag, 
 struct DeclDefPartner
 {
     std::uint32_t fileId = 0;
-    std::uint32_t shared = 0;   // symbols this file shares by (scope, name) with the changed file(s)
+    std::uint32_t shared = 0;   // symbols this file DECLARES that a changed file DEFINES, or vice versa
 };
 
 inline std::vector<DeclDefPartner> declDefPartners( const IngestResult& ing, const std::vector<char>& changedFile )
 {
-    const std::uint32_t              F = std::uint32_t( ing.files.size() );
-    std::vector<DeclDefPartner>      out;
-    std::vector<std::uint32_t>       symsPerFile( F, 0 );
+    const std::uint32_t         F = std::uint32_t( ing.files.size() );
+    std::vector<DeclDefPartner> out;
+    std::vector<std::uint32_t>  symsPerFile( F, 0 );
     for( const Symbol& s : ing.symbols )
     {
         ++symsPerFile[ s.fileId ];
     }
 
-    // (scope \x1f name) of every symbol in a CHANGED file → nothing but membership; \x1f cannot occur in an
-    // identifier, so the join is exact and needs no second field.
-    HashMap<std::string, std::uint8_t> changedKeys;
-    std::string                        key;
+    // a symbol whose span carries a body is a DEFINITION; one whose span ends at its signature is a pure
+    // DECLARATION. The one test, spelled once, so both passes below cannot read it differently.
+    const auto isDefinition = []( const Symbol& s ) { return s.sigEndByte < s.endByte; };
+
+    // Every CHANGED symbol, indexed by its (scope \x1f name) identity. \x1f cannot occur in an identifier,
+    // so the join is exact and needs no second field.
+    struct ChangedSym { std::uint32_t fileId; bool isDef; };
+    std::vector<ChangedSym>                            changedSyms;
+    HashMap<std::string, std::vector<std::uint32_t>>   byKey;   // key -> indices into changedSyms
+    std::string                                        key;
     for( const Symbol& s : ing.symbols )
     {
         if( !changedFile[ s.fileId ] )
@@ -271,15 +284,17 @@ inline std::vector<DeclDefPartner> declDefPartners( const IngestResult& ing, con
             continue;
         }
         key.assign( s.scope ).append( 1, '\x1f' ).append( s.name );
-        changedKeys[ key ] = 1;
+        byKey[ key ].push_back( std::uint32_t( changedSyms.size() ) );
+        changedSyms.push_back( ChangedSym{ s.fileId, isDefinition( s ) } );
     }
-    if( changedKeys.empty() )
+    if( changedSyms.empty() )
     {
         return out;
     }
 
-    // the same key over every NON-changed file: how many of its symbols the changed set also defines.
-    std::vector<std::uint32_t> sharedPerFile( F, 0 );
+    // ONE pass over the non-changed symbols, tallying per (changed file, partner file) PAIR. The pair count
+    // is bounded by the matches themselves, so a diff that shares nothing costs one hash lookup per symbol.
+    HashMap<std::uint64_t, std::uint32_t> pairShared;
     for( const Symbol& s : ing.symbols )
     {
         if( changedFile[ s.fileId ] )
@@ -287,33 +302,39 @@ inline std::vector<DeclDefPartner> declDefPartners( const IngestResult& ing, con
             continue;
         }
         key.assign( s.scope ).append( 1, '\x1f' ).append( s.name );
-        if( changedKeys.find( key ) != changedKeys.end() )
-        {
-            ++sharedPerFile[ s.fileId ];
-        }
-    }
-
-    // the smaller file of the pair is the CHANGED side's largest — using the largest changed file makes the
-    // majority test the HARDEST to pass, so a partner that clears it clears it against every changed file.
-    std::uint32_t changedMax = 0;
-    for( std::uint32_t f = 0; f < F; ++f )
-    {
-        if( changedFile[f] && symsPerFile[f] > changedMax )
-        {
-            changedMax = symsPerFile[f];
-        }
-    }
-    for( std::uint32_t f = 0; f < F; ++f )
-    {
-        const std::uint32_t shared = sharedPerFile[f];
-        if( shared == 0 )
+        const auto it = byKey.find( key );
+        if( it == byKey.end() )
         {
             continue;
         }
-        const std::uint32_t smaller = ( symsPerFile[f] < changedMax ) ? symsPerFile[f] : changedMax;
-        if( 2u * shared >= smaller )
+        const bool otherIsDef = isDefinition( s );
+        for( std::uint32_t ci : it->second )
         {
-            out.push_back( DeclDefPartner{ f, shared } );
+            if( changedSyms[ci].isDef == otherIsDef )
+            {
+                continue;   // both define it, or both merely declare it — a shared NAME, not a decl/def pair
+            }
+            ++pairShared[ ( std::uint64_t( changedSyms[ci].fileId ) << 32 ) | s.fileId ];
+        }
+    }
+
+    // the majority test, per pair; a partner keeps its BEST pair, so one qualifying changed file is enough.
+    std::vector<std::uint32_t> bestShared( F, 0 );
+    for( const auto& [ pair, shared ] : pairShared )
+    {
+        const std::uint32_t c = std::uint32_t( pair >> 32 );
+        const std::uint32_t p = std::uint32_t( pair & 0xFFFFFFFFu );
+        const std::uint32_t smaller = ( symsPerFile[c] < symsPerFile[p] ) ? symsPerFile[c] : symsPerFile[p];
+        if( 2u * shared >= smaller && shared > bestShared[p] )
+        {
+            bestShared[p] = shared;
+        }
+    }
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        if( bestShared[f] != 0 )
+        {
+            out.push_back( DeclDefPartner{ f, bestShared[f] } );
         }
     }
     std::sort( out.begin(), out.end(), [ & ]( const DeclDefPartner& a, const DeclDefPartner& b )
@@ -321,11 +342,10 @@ inline std::vector<DeclDefPartner> declDefPartners( const IngestResult& ing, con
     return out;
 }
 
-inline constexpr std::size_t kSituPartnerFileRowsShown = 4;   // section [1] — decl/def partner rows
-
 inline constexpr std::size_t kSituBlastFilesShown = 8;    // section [1] — blast-radius file rows
 inline constexpr std::size_t kSituTestRowsShown   = 25;   // section [2] — tests-to-run rows
 inline constexpr std::size_t kSituPartnerRowsShown = 8;   // section [3] — co-change partner rows
+inline constexpr std::size_t kSituPartnerFileRowsShown = 4;   // section [1] — decl/def partner rows
 
 inline std::string situShowingNote( std::size_t shownCap, std::size_t rowTotal, const char* rowNoun )
 {
@@ -347,7 +367,7 @@ inline void writeSituDeclDefRows( std::FILE* out, const std::vector<DeclDefPartn
     {
         return;
     }
-    std::fprintf( out, "        decl/def partners of the file(s) you named (%zu)%s — same (scope, name) symbols in another file (a header/impl pair, a stub, a partial class); NOT transitive dependents, so they are absent from the list below:\n",
+    std::fprintf( out, "        decl/def partners of the file(s) you named (%zu)%s — symbols DECLARED there and DEFINED here, or the reverse (a header/impl pair, a stub, a partial class); NOT transitive dependents, so they are absent from the list below:\n",
                   partnerFiles.size(), situShowingNote( kSituPartnerFileRowsShown, partnerFiles.size(), "files" ).c_str() );
     for( std::size_t i = 0; i < partnerFiles.size() && i < kSituPartnerFileRowsShown; ++i )
     {
