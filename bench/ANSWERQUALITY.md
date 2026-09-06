@@ -152,17 +152,30 @@ query's ranking is unchanged (the router falls back — only a header note is ad
 
 ## Known-item retrieval eval — query-TIME ranker validation (`--eval-retrieval`, 2026-07-05)
 
+> **The 2026-07-05 tables in this section were produced by a DEFECTIVE INSTRUMENT and are kept as the
+> historical record, not as current numbers.** That sampler took the first 150 doc-commented symbols in
+> symbol-id order — i.e. in PATH order — so a documented file added under an early-sorting directory
+> silently moved every figure below with the ranker byte-identical. Measured at `db6a416d`, one identical
+> 60-symbol probe file in an otherwise byte-identical corpus scored subtoken/name MRR **0.834** at
+> `aaa_probe/` against **0.729** at `zzz_probe/`, and subtoken/doc-phrase **0.620** against **0.976** —
+> up to a third of an MRR from path spelling alone.
+>
+> The bias is ARBITRARY, not consistently flattering: it reports whichever corner of the tree sorts first,
+> and on this repo that went OPPOSITE ways on the two published roots — at the root the slice UNDERSTATED
+> (subtoken/name 0.598 against a true 0.724), in `src/` it OVERSTATED slightly (name-exact/name 0.977
+> against 0.974). Current numbers: **§ Re-measured 2026-09-05** below.
+
 The `--eval` co-change table above and the HONEST CAVEAT flag the exact gap this closes: the co-change
 eval is **seed-based** and cannot validate a *query-time* ranker choice. `--eval-retrieval` is the
-standard **known-item IR eval**: for a deterministic sample of doc-commented symbols (stable id order,
-cap 150), it builds two synthetic queries per symbol — (a) the whole NAME, (b) a stopworded phrase from
+standard **known-item IR eval**: over EVERY doc-commented symbol in the corpus (the eval prints its own
+`population=`/`scored=`/`rule=`), it builds two synthetic queries per symbol — (a) the whole NAME, (b) a stopworded phrase from
 the doc-comment's first line — and measures the rank of the gold symbol (in the corpus by construction,
 so leave-nothing-out is correct) for four rankers: **subtoken+body** (`lexicalScores`, `--for` default),
 **name-exact** (`lexicalScoresNameExact`), **anchored** (`anchoredLexicalRank` over subtoken+body), and
 **routed** (`chooseForRanker`'s pick). Deterministic (the gold rank is a pure function of the score
 vector). Reproduce: `ripwire <dir> --eval-retrieval`.
 
-### `ripwire src/` (150 doc-commented symbols)
+### `ripwire src/` (150 doc-commented symbols) — 2026-07-05, defective sampler
 ```
   ranker    query-mode     MRR  recall@1  recall@5 recall@10
   subtoken  name         0.859     76.7%     97.3%     98.7%
@@ -176,7 +189,7 @@ vector). Reproduce: `ripwire <dir> --eval-retrieval`.
 ```
 (routed/doc-phrase 0.993 is the CONFIDENCE-GATED router — before the gate it was 0.427; see the note below.)
 
-### `ripwire .` (repo root; 150 doc-commented symbols)
+### `ripwire .` (repo root; 150 doc-commented symbols) — 2026-07-05, defective sampler
 ```
   ranker    query-mode     MRR  recall@1  recall@5 recall@10
   subtoken  name         0.725     63.3%     83.3%     84.7%
@@ -189,6 +202,68 @@ vector). Reproduce: `ripwire <dir> --eval-retrieval`.
   routed    doc-phrase   0.789     76.7%     81.3%     82.0%
 ```
 (routed/doc-phrase 0.789 is the CONFIDENCE-GATED router — before the gate it was 0.146; see the note below.)
+
+### Re-measured 2026-09-05 — census sampler, midrank ties (THE CURRENT NUMBERS)
+
+Two instrument defects were fixed together; the ranker was not touched, and the movement below is entirely
+the instrument telling the truth where it previously did not.
+
+1. **The sample was taken in path order.** Fixed: the population is now every qualifying symbol, and the
+   eval is exhaustive over it (`rule=exhaustive`, `population=`/`scored=` printed on every run).
+2. **Ties were broken by symbol id — i.e. by path.** A gold symbol under an early-sorting directory won
+   every tie it was in. Fixed: rank is now the MIDRANK, `1 + #better + #tied/2`, which no ordering can move.
+
+Decomposed on the repository root, one change at a time:
+
+| | subtoken/name MRR | name-exact/name MRR | name-exact/name recall@1 |
+| --- | --- | --- | --- |
+| 150-symbol path-ordered slice, id ties (old) | 0.598 | 0.829 | 75.3% |
+| census population, id ties | 0.724 | 0.939 | 90.8% |
+| census population, midrank ties (**current**) | 0.724 | 0.922 | 85.4% |
+
+On THIS root the sampler fix does nearly all the movement and moves numbers UP, because the head of the
+root's path order is `bench/` and `docs/` — harder than the corpus as a whole. That direction is not a
+property of head-slicing; in `src/`, whose path order starts inside the source tree, the same fix moves
+name-exact/name MRR the other way and barely at all (0.977 → 0.974). Read the slice as *arbitrary*, not
+as easy or hard.
+
+The midrank fix then moves name-exact recall@1 down 5.4 points. Most of that is tie-luck removed — gold
+symbols had been winning ties they had not earned because their file sorted early — but part is the
+convention itself: midrank is deliberately pessimistic, scoring a two-way tie at the top as 1.5, which
+takes no recall@1 credit where id-tiebreak handed it rank 1 whenever gold's id was lowest.
+
+### `ripwire src/` (population 2,986, scored 2,986, rule=exhaustive)
+```
+  ranker    query-mode     MRR  recall@1  recall@5 recall@10
+  subtoken  name         0.746     61.3%     91.8%     96.0%
+  subtoken  doc-phrase   0.968     95.3%     98.4%     98.8%
+  name-exact name         0.960     91.3%     99.3%     99.4%
+  name-exact doc-phrase   0.016      0.8%      2.4%      2.6%
+  anchored  name         0.748     62.3%     91.0%     94.6%
+  anchored  doc-phrase   0.963     94.6%     98.2%     98.7%
+  routed    name         0.960     91.3%     99.3%     99.4%
+  routed    doc-phrase   0.967     95.3%     98.3%     98.6%
+```
+(routing chose name-exact on 2,984/2,986 NAME queries.)
+
+### `ripwire .` (repo root; population 3,497, scored 3,497, rule=exhaustive)
+```
+  ranker    query-mode     MRR  recall@1  recall@5 recall@10
+  subtoken  name         0.724     59.3%     88.9%     93.4%
+  subtoken  doc-phrase   0.930     90.8%     95.2%     95.9%
+  name-exact name         0.922     85.4%     97.5%     98.4%
+  name-exact doc-phrase   0.018      0.6%      2.7%      3.5%
+  anchored  name         0.726     60.5%     87.6%     92.1%
+  anchored  doc-phrase   0.925     90.0%     94.9%     95.8%
+  routed    name         0.922     85.4%     97.5%     98.5%
+  routed    doc-phrase   0.929     90.8%     95.1%     95.7%
+```
+(routing chose name-exact on 3,495/3,497 NAME queries.)
+
+**The verdict below is unchanged by the re-measurement** — every ordering it rests on still holds:
+name-exact wins the NAME mode, collapses on doc-phrase, subtoken+body is the mirror image, and routed
+tracks the better lane on both. Only the magnitudes moved. Its prose still quotes the 2026-07-05 figures,
+which is deliberate: it is the record of what was concluded then, from what was measured then.
 
 ### Verdict (honest — the data drives it, not the other way round)
 

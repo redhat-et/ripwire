@@ -17,6 +17,7 @@
 #include "graph.h"
 #include "gitmine.h"
 #include "lexical.h"   // subtokens()
+#include "arch.h"      // rw::fnv1a64 — the path-free sample key; never a second copy of the hash
 #include "infra/jsonesc.h"   // W2-M0: rw::jsonStringEnd — the canonical escape-aware JSON string walk
 
 #include <algorithm>
@@ -385,18 +386,35 @@ inline int runEval( const std::string& root, const IngestResult& ing, const Grap
 
 // rank (1-based) of `gold` in `score`, sorted desc with id tie-break (matches every other ranker here).
 // A gold symbol with a non-positive score that ties many zeros still gets a well-defined deterministic rank.
-inline std::size_t rankOfSymbol( const std::vector<float>& score, NodeId gold )
+// MIDRANK over ties — the standard IR/statistics convention, and the SECOND place path spelling used to
+// decide a published number. This used to break ties by `i < gold`, i.e. by symbol id, i.e. by CRAWL order,
+// i.e. by path: a gold symbol under an early-sorting directory won every tie it was in and one under a
+// late-sorting directory lost every tie. That is invisible while the ranker has signal and total where it
+// has none — on the name-exact/doc-phrase row nearly every symbol ties at 0, so the reported rank was
+// essentially "how many files sort before mine", and the row's recall@1 was luck, not retrieval.
+//
+// The gold's rank is now its EXPECTED rank under a fair shuffle of the symbols it ties with:
+//     1 + #{strictly better} + #{tied with gold, excluding gold} / 2
+// which no ordering of the corpus can move. It is fractional by construction, so recall@k reads as
+// "the expected rank is within k" — a two-way tie at the top scores 1.5 and does NOT take recall@1
+// credit, which is the pessimistic-but-fair reading of a coin flip.
+inline double rankOfSymbol( const std::vector<float>& score, NodeId gold )
 {
     const float g = score[ gold ];
-    std::size_t better = 0;                                   // symbols strictly ahead of gold in (score desc, id asc)
+    std::size_t better = 0;                                   // symbols scoring strictly ahead of gold
+    std::size_t tied   = 0;                                   // symbols scoring exactly gold, gold itself excluded
     for( NodeId i = 0; i < score.size(); ++i )
     {
-        if( score[i] > g || ( score[i] == g && i < gold ) )
+        if( score[i] > g )
         {
             ++better;
         }
+        else if( score[i] == g && i != gold )
+        {
+            ++tied;
+        }
     }
-    return better + 1;
+    return 1.0 + double( better ) + double( tied ) / 2.0;
 }
 
 // first non-empty line of the doc-comment block above `s`, lowercased comment markers stripped, split into
@@ -477,9 +495,9 @@ inline std::string docPhraseFirstLine( const std::string& src, std::size_t defSt
 }
 
 struct RetrievalAcc { double mrr = 0; std::size_t r1 = 0, r5 = 0, r10 = 0, n = 0; };
-inline void addRetrieval( RetrievalAcc& a, std::size_t rank )
+inline void addRetrieval( RetrievalAcc& a, double rank )
 {
-    a.mrr += 1.0 / double( rank );
+    a.mrr += 1.0 / rank;
     if( rank <= 1 )
     {
         ++a.r1;
@@ -495,13 +513,56 @@ inline void addRetrieval( RetrievalAcc& a, std::size_t rank )
     ++a.n;
 }
 
-inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
+// The sampler is an INSTRUMENT, and until 2026-09-05 it reported properties of the CORPUS while claiming to
+// report properties of the RANKER. It walked symbol ids from 0 and stopped at the first 150 doc-commented
+// symbols; ids are assigned in CRAWL order and the crawl is sorted by path (that ordering is deliberate — it
+// is what makes the whole tool deterministic), so the gold set was really "whichever 150 doc-commented
+// symbols sort earliest by path". `bench/` sorts before `src/`. A contributor who documented a benchmark
+// harness — touching no ranking code whatsoever — displaced real symbols off the tail and moved a PUBLISHED
+// number with the ranker byte-identical. Measured at db6a416d with ONE identical 60-symbol probe file placed
+// at two paths in an otherwise byte-identical corpus: subtoken/name MRR 0.834 at `aaa_probe/` versus 0.729 at
+// `zzz_probe/`, and subtoken/doc-phrase 0.620 versus 0.976. A third of an MRR from path spelling alone.
+//
+// So: the population is EVERY qualifying symbol, and membership depends only on a symbol's OWN scope::name
+// identity — never on its path, never on how many symbols happen to precede it. At or below kMaxScored the
+// eval is EXHAUSTIVE (there is no sample, so there is no sampling rule left to get wrong); above it the cut
+// is by smallest fnv1a64(scope::name), which is path-free and order-free, and it cuts on the KEY so every
+// symbol sharing an identity is admitted or refused together rather than being split by a count boundary.
+// Either way the report PRINTS population/scored/rule, because a sample whose rule is invisible is precisely
+// the thing that failed here (METHODOLOGY §9 #6: every number has an instrument).
+//
+// This eval is NOT a golden. Two DISTINCT sensitivities were conflated when the defect was first reported,
+// and only the first is a bug: (1) sample membership depending on path ORDER — fixed here; (2) ranks moving
+// because the CORPUS changed — irreducible and legitimate, since more files mean more distractors. Growing
+// the repo still moves these numbers, and should.
+// One gold item: the symbol to be recovered, plus the two synthetic queries built from it. `key` is the
+// PATH-FREE identity the population is ordered and cut by — deliberately not the path-qualified key the
+// quality baselines use, because this one must be invariant under MOVING a file, which is the whole
+// property test/knownitemcheck.sh's order-independence arm asserts.
+struct RetrievalGoldItem
 {
-    constexpr std::size_t kMaxSample = 150;
+    std::uint64_t key = 0;
+    NodeId        gold = kNoNode;
+    std::string   name;
+    std::string   phrase;
+    std::string   scope;
+};
 
-    // ---- deterministic sample: symbols WITH a usable doc-phrase, in stable (id) order, cap kMaxSample ----
+struct RetrievalGold
+{
+    std::vector<RetrievalGoldItem> scored;              // what the eval will actually grade, in canonical order
+    std::size_t                    population = 0;      // how many symbols QUALIFIED, whether or not they were scored
+    bool                           exhaustive = true;   // scored == population: no sample, so no sampling rule
+};
+
+// THE POPULATION: every symbol carrying a usable doc-phrase, in crawl order (the caller imposes the
+// canonical order — this function must not be trusted to, and does not claim to). Kept separate from the
+// cut below because "who is eligible" and "which of the eligible are graded" are the two questions the old
+// single fused loop answered at once, which is exactly how it managed to answer the second one by path.
+inline std::vector<RetrievalGoldItem> qualifyingGoldPool( const IngestResult& ing )
+{
     // Read each file's content once, cached; a symbol qualifies iff docPhraseFirstLine yields a non-empty
-    // stopworded phrase (so BOTH query modes are well-defined for every sampled symbol — same gold set).
+    // stopworded phrase (so BOTH query modes are well-defined for every scored symbol — same gold set).
     HashMap<std::uint32_t, std::string> contents;
     const auto contentOf = [ & ]( std::uint32_t fid ) -> const std::string&
     {
@@ -516,9 +577,8 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
         return contents.emplace( fid, std::move( s ) ).first->second;
     };
 
-    struct Sample { NodeId gold; std::string name; std::string phrase; };
-    std::vector<Sample> sample;
-    for( NodeId id = 0; id < ing.symbols.size() && sample.size() < kMaxSample; ++id )
+    std::vector<RetrievalGoldItem> pool;
+    for( NodeId id = 0; id < ing.symbols.size(); ++id )
     {
         const Symbol& s = ing.symbols[id];
         if( s.name.size() < 3 )
@@ -535,8 +595,75 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
         {
             continue;
         }
-        sample.push_back( { id, s.name, std::move( phrase ) } );
+        const std::uint64_t key = rw::fnv1a64( s.scope.empty() ? s.name : ( s.scope + "::" + s.name ) );
+        pool.push_back( { key, id, s.name, std::move( phrase ), s.scope } );
     }
+    return pool;
+}
+
+// Order the population canonically and cut it to `maxScored`. Nothing here may consult crawl order, path,
+// or position — the whole contract of this function is that its output depends only on the identities in
+// the population, which is what test/knownitemcheck.sh's order-independence arm holds it to.
+inline RetrievalGold buildRetrievalGold( const IngestResult& ing, std::size_t maxScored )
+{
+    std::vector<RetrievalGoldItem> pool = qualifyingGoldPool( ing );
+
+    RetrievalGold out;
+    out.population = pool.size();
+    if( pool.empty() )
+    {
+        return out;
+    }
+
+    // Canonical order: by the path-free key, then by the identity itself, then by the phrase. Crawl order —
+    // and therefore path order — is never consulted, so both WHICH symbols are scored and the ORDER their
+    // reciprocal ranks accumulate in are identical however the tree is laid out.
+    std::sort( pool.begin(), pool.end(), [ ]( const RetrievalGoldItem& a, const RetrievalGoldItem& b )
+    {
+        if( a.key != b.key )     { return a.key < b.key; }
+        if( a.scope != b.scope ) { return a.scope < b.scope; }
+        if( a.name != b.name )   { return a.name < b.name; }
+        return a.phrase < b.phrase;
+    } );
+
+    if( out.population <= maxScored )
+    {
+        out.scored = std::move( pool );
+        return out;
+    }
+
+    // Cut on the KEY, never on a raw count: a whole identity is admitted or refused together, so the cut
+    // cannot be decided by which of two same-named symbols the crawl happened to reach first.
+    out.exhaustive = false;
+    std::size_t cut = 0;
+    while( cut < pool.size() && out.scored.size() < maxScored )
+    {
+        const std::uint64_t k = pool[cut].key;
+        std::size_t         e = cut;
+        while( e < pool.size() && pool[e].key == k )
+        {
+            ++e;
+        }
+        for( std::size_t i = cut; i < e; ++i )
+        {
+            out.scored.push_back( std::move( pool[i] ) );
+        }
+        cut = e;
+    }
+    return out;
+}
+
+inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
+{
+    // Chosen so this repo's own two published roots (`src/` and `.`) both run EXHAUSTIVE — the numbers we
+    // publish carry no sampling rule at all. It is a safety valve for corpora far larger than ours, not a
+    // budget: each scored symbol costs 8 whole-corpus rankings, so an unbounded eval is quadratic.
+    constexpr std::size_t kMaxScored = 4000;
+
+    const RetrievalGold                   goldSet    = buildRetrievalGold( ing, kMaxScored );
+    const std::size_t                     population = goldSet.population;
+    const bool                            exhaustive = goldSet.exhaustive;
+    const std::vector<RetrievalGoldItem>& sample     = goldSet.scored;
     if( sample.empty() ) { std::fprintf( stderr, "ripwire --eval-retrieval: no doc-commented symbols to sample\n" ); return 1; }
 
     // rankers: subtoken+body (--for default), name-exact, anchored (over subtoken+body), routed (chooseForRanker).
@@ -546,7 +673,7 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
 
     const auto scoreAndRank = [ & ]( const std::vector<float>& sc, NodeId gold ) { return rankOfSymbol( sc, gold ); };
 
-    for( const Sample& sm : sample )
+    for( const RetrievalGoldItem& sm : sample )
     {
         // (a) NAME query
         {
@@ -587,6 +714,20 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
                      100.0 * double( a.r1 ) / N, 100.0 * double( a.r5 ) / N, 100.0 * double( a.r10 ) / N );
     };
     std::printf( "ripwire --eval-retrieval  (known-item, %zu doc-commented symbols; gold is in-corpus by construction)\n", sample.size() );
+    // The sampling rule states itself. `exhaustive` means scored == population: there is no sample and no
+    // rule, so nothing about the corpus's layout can reach the numbers below.
+    if( exhaustive )
+    {
+        std::printf( "  sample: population=%zu scored=%zu rule=exhaustive (every qualifying symbol; path- and order-independent)\n",
+                     population, sample.size() );
+    }
+    else
+    {
+        std::printf( "  sample: population=%zu scored=%zu rule=smallest-key CAPPED — a SUBSET, not the population\n"
+                     "          (smallest fnv1a64(scope::name) over the population, cut on the key so an identity is never split;\n"
+                     "           path- and order-independent, but a corpus this size is NOT graded exhaustively — say so when citing it)\n",
+                     population, sample.size() );
+    }
     std::printf( "  %-9s %-11s %6s %9s %9s %9s\n", "ranker", "query-mode", "MRR", "recall@1", "recall@5", "recall@10" );
     row( "subtoken", "name",      subN );
     row( "subtoken", "doc-phrase",subP );

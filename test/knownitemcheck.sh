@@ -100,5 +100,75 @@ RT_NM="$( mrrof routed 'name' )"
     && ok "routed/name MRR ($RT_NM) within 0.03 of name-exact/name ($NE_NM) — identifier-query win preserved" \
     || no "routed/name MRR ($RT_NM) NOT within 0.03 of name-exact/name ($NE_NM) — routing lost the identifier win"
 
+# ── #8/#9/#10: THE SAMPLER. Everything above grades the RANKER; these three grade the INSTRUMENT that
+#    chooses which symbols the ranker is graded on. The defect they exist for: the gold set was built by
+#    walking symbol ids from 0 and stopping at the first kMaxSample doc-commented symbols. Symbol ids are
+#    assigned in CRAWL order and the crawl is sorted by path, so the sample was "whichever N doc-commented
+#    symbols sort earliest by path" — a documented file added under an early-sorting directory silently
+#    displaces real symbols off the tail and MOVES A PUBLISHED NUMBER with the ranker byte-identical.
+#    Measured on db6a416d with an identical 60-symbol probe placed at two paths: aaa_probe/ gave
+#    subtoken/name MRR 0.834, zzz_probe/ gave 0.729. Same corpus, same content, 0.105 MRR from spelling.
+#    A sample whose rule is invisible is the thing that failed, so the eval must PRINT its own population
+#    and rule, and membership must depend only on a symbol's own identity — never on what sorts before it.
+
+PROBE_N=60
+# A BOUNDED corpus, not all of src/: the eval is now exhaustive over its population, so a full-src arm
+# would cost ~40 s each and these three arms run four of them. A fixed 24-file slice keeps the sampler
+# arms in seconds while still giving the ranker a few hundred real symbols to be graded on. The slice is
+# taken in sorted order so it is the same 24 files on every machine.
+mkcorpus(){ # $1 = dest dir, $2 = probe subdir ("" for none)
+    rm -rf "$1"; mkdir -p "$1/src"
+    ls "$ROOT/src"/*.h | sort | head -24 | while read -r f; do cp "$f" "$1/src/"; done
+    if [ -n "$2" ]; then
+        mkdir -p "$1/$2"
+        i=0
+        : >"$1/$2/probe.h"
+        while [ "$i" -lt "$PROBE_N" ]; do
+            printf '// Probe helper number %d that reconciles a widget ledger for the sampler gate.\ninline int probeReconcileLedger%02d( int x ) { return x + %d; }\n\n' "$i" "$i" "$i" >>"$1/$2/probe.h"
+            i=$(( i + 1 ))
+        done
+    fi
+}
+rows(){ grep -E '^  (subtoken|name-exact|anchored|routed) +(name|doc-phrase) ' "$1"; }
+# the sampler's self-disclosure line: "  sample: population=N scored=M rule=..."
+popof(){ grep -oE 'population=[0-9]+' "$1" | head -1 | grep -oE '[0-9]+'; }
+scoredof(){ grep -oE 'scored=[0-9]+' "$1" | head -1 | grep -oE '[0-9]+'; }
+
+mkcorpus "$TMP/early" "aaa_probe"
+mkcorpus "$TMP/late"  "zzz_probe"
+mkcorpus "$TMP/plain" ""
+"$BIN" "$TMP/early" --eval-retrieval --no-cache >"$TMP/early.txt" 2>/dev/null
+"$BIN" "$TMP/late"  --eval-retrieval --no-cache >"$TMP/late.txt"  2>/dev/null
+"$BIN" "$TMP/plain" --eval-retrieval --no-cache >"$TMP/plain.txt" 2>/dev/null
+
+# ── #8: ORDER-INDEPENDENCE. Two corpora with byte-identical content differing ONLY in where the probe
+#    file sorts must produce identical numbers. This is the defect, reproduced as a test. ───────────────
+if diff <( rows "$TMP/early.txt" ) <( rows "$TMP/late.txt" ) >/dev/null 2>&1; then
+    ok "sampler order-independent: probe at an EARLY vs LATE path gives identical numbers"
+else
+    no "sampler is PATH-ORDER DEPENDENT — the same probe file moves the numbers by where it sorts:"
+    diff <( rows "$TMP/early.txt" ) <( rows "$TMP/late.txt" ) | sed 's/^/      /'
+fi
+
+# ── #9: the sample must DISCLOSE its own population, how many it scored, and by what rule. A sample that
+#    does not say how big the population was cannot be audited for silent shrinkage. ────────────────────
+P_E="$( popof "$TMP/early.txt" )"; S_E="$( scoredof "$TMP/early.txt" )"
+{ [ -n "$P_E" ] && [ -n "$S_E" ] && grep -q 'rule=' "$TMP/early.txt" && [ "$P_E" -ge "$S_E" ] 2>/dev/null; } \
+    && ok "sample self-disclosed: population=$P_E scored=$S_E and a named rule= (population >= scored)" \
+    || no "sample does not disclose population=/scored=/rule= (got population='$P_E' scored='$S_E') — an invisible sampling rule is unauditable"
+
+# ── #10: POPULATION RE-DERIVATION. Independently derived: the probe adds exactly PROBE_N qualifying
+#    doc-commented symbols, so population must rise by exactly PROBE_N. Derives the count from a
+#    CONTROLLED INPUT rather than reimplementing docPhraseFirstLine (which would just clone the bug). ──
+P_P="$( popof "$TMP/plain.txt" )"
+if [ -n "$P_E" ] && [ -n "$P_P" ]; then
+    DELTA=$(( P_E - P_P ))
+    [ "$DELTA" -eq "$PROBE_N" ] \
+        && ok "population re-derives: adding $PROBE_N doc-commented symbols raised population by exactly $DELTA" \
+        || no "population moved by $DELTA, expected exactly $PROBE_N ($P_P -> $P_E) — the sampler is miscounting its own population"
+else
+    no "cannot re-derive population — no population= field emitted"
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

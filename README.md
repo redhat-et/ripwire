@@ -381,15 +381,17 @@ real work, and the joke is aimed at the trade-offs, never the authors.</sub>
 **Name a symbol and it is the first hit — and it is never a mystery which ranker answered.** Every
 `--for` query is served by one of three lanes; a confidence-gated router picks by reading the
 query's *shape*, discloses its choice on the output (`route=`), and `--no-route` overrides it.
-Routing lifts recall@1 on name-shaped queries **70.0% → 98.0%** in `src/`, **56.0% → 81.3%** at the
+Routing lifts recall@1 on name-shaped queries **61.3% → 91.3%** in `src/`, **59.3% → 85.4%** at the
 repository root — and the gate is load-bearing in both directions: route *everything* to the name
-lane and prose queries collapse from **0.982 MRR to 0.018**. Both numbers ship together. Reproduce
-with `ripwire <dir> --eval-retrieval`.
+lane and prose queries collapse from **0.967 MRR to 0.016**. Both numbers ship together. Reproduce
+with `ripwire <dir> --eval-retrieval`, which grades EVERY doc-commented symbol in the corpus and
+prints its own `population=`/`scored=`/`rule=`; the full per-ranker tables are in
+[`bench/ANSWERQUALITY.md`](bench/ANSWERQUALITY.md#re-measured-2026-09-05--census-sampler-midrank-ties-the-current-numbers).
 
 | Lane | Built for | Why it wins there | Where it loses |
 | --- | --- | --- | --- |
-| **name-exact** | identifier-shaped queries (`chooseForRanker`, `pack task`) | whole-name match ignores body noise: **98.0%** recall@1, **0.990** MRR in `src/` | scores zero on any word that is not literally a name — forced onto prose it dies (**0.018** MRR) |
-| **subtoken+body** | prose and task queries ("where is the content hash computed") | the only lane that matches vocabulary living in doc comments and bodies | exact names drown in shared subtokens (**70.0%** recall@1 on name queries) |
+| **name-exact** | identifier-shaped queries (`chooseForRanker`, `pack task`) | whole-name match ignores body noise: **91.3%** recall@1, **0.960** MRR in `src/` | scores zero on any word that is not literally a name — forced onto prose it dies (**0.016** MRR) |
+| **subtoken+body** | prose and task queries ("where is the content hash computed") | the only lane that matches vocabulary living in doc comments and bodies | exact names drown in shared subtokens (**61.3%** recall@1 on name queries) |
 | **mention anchor** | a pasted path, `Type.method`, or issue URL | a literal mention is lifted above any score — paste the ticket, don't paraphrase it | adds nothing when the query names no artifact |
 
 <details>
@@ -416,7 +418,7 @@ no symbol name in it still lands:
 
 **How the router picks.** The gate is built on cheap, corpus-derived evidence, and its bias reflects
 an asymmetry the table above makes plain: a *missed* name-route costs a few ranks; a *false* one is
-catastrophic (0.018 MRR).
+catastrophic (0.016 MRR).
 
 1. **Identifier shape is trusted outright.** A camelCase/snake token — or a short query carrying
    one — routes name-exact. Someone who types `chooseForRanker` is naming, not describing.
@@ -431,7 +433,7 @@ catastrophic (0.018 MRR).
    that failed and why. `--no-route` forces the conceptual lane when you disagree.
 
 The proof the gate earns its keep: the routed lane matches the *best* single lane on both query
-modes simultaneously — 0.990 MRR on names (equal to forced name-exact) and 0.982 on prose (within
+modes simultaneously — 0.960 MRR on names (equal to forced name-exact) and 0.967 on prose (within
 noise of pure subtoken+body, `src/`). No single lane does that.
 
 The honest boundary: the router classifies the query's shape — it cannot rescue vocabulary that is
@@ -889,7 +891,7 @@ spot:
 ```
 $ ripwire . --callers=rankGraphTeleport
 <callers of="rankGraphTeleport" defs="1" count="6" root="." hop_tested="0" hop_untested="6" counts_floor="1">
-<s t="fn" n="runEval" p="src/eval.h:168"/>
+<s t="fn" n="runEval" p="src/eval.h:169"/>
 <s t="fn" n="rankGraph" p="src/graph.h:2542"/>
 <s t="fn" n="anchoredLexicalRank" p="src/graph.h:3091"/>
 <s t="fn" n="churnRankedGraph" p="src/main.cpp:983"/>

@@ -444,9 +444,15 @@ this section is simply the first measurement of *this* configuration under a des
 
 ### Query-shape routing
 
-Known-item retrieval over deterministically sampled doc-commented symbols, two synthetic queries per
-symbol (the whole name; a stopworded phrase from the doc comment's first line), four rankers, gold
-rank measured. Reproduce with `ripwire <dir> --eval-retrieval`. Recorded in `bench/ANSWERQUALITY.md`.
+Known-item retrieval over EVERY doc-commented symbol in the corpus (2,986 in `src/`, 3,497 at the
+root — the eval prints its own `population=`/`scored=`/`rule=`), two synthetic queries per symbol (the
+whole name; a stopworded phrase from the doc comment's first line), four rankers, gold rank measured.
+Reproduce with `ripwire <dir> --eval-retrieval`. Recorded in `bench/ANSWERQUALITY.md`.
+
+**Re-pinned 2026-09-05** — these four numbers moved when the sampler defect below was fixed, with the
+ranker untouched. The previous figures (0.797/70.0% and 0.683/56.0% ungated, 0.990/98.0% and
+0.876/81.3% routed) were measured on a 150-symbol slice taken in PATH order, which was systematically
+easier than the corpus it claimed to represent; see "The sampler measured the corpus, not the ranker".
 
 Re-derived 2026-08-08 at the anchor-plausibility fix (`fa4639e`, §7's r7 entry): the corpus has
 grown since the original measurement, so both sides were re-measured on the current tree —
@@ -455,13 +461,13 @@ verified identical on a pristine worktree (no untracked local files in the sampl
 
 | Query shape | ungated (subtoken) | routed |
 | --- | --- | --- |
-| Name-shaped queries, `src/` — MRR | 0.797 | **0.990** |
-| Name-shaped queries, `src/` — recall@1 | 70.0% | **98.0%** |
-| Name-shaped queries, repository root — MRR | 0.683 | **0.876** |
-| Name-shaped queries, repository root — recall@1 | 56.0% | **81.3%** |
+| Name-shaped queries, `src/` — MRR | 0.746 | **0.960** |
+| Name-shaped queries, `src/` — recall@1 | 61.3% | **91.3%** |
+| Name-shaped queries, repository root — MRR | 0.724 | **0.922** |
+| Name-shaped queries, repository root — recall@1 | 59.3% | **85.4%** |
 
 The router is **confidence-gated**, and the gate is the interesting part: doc-phrase queries score
-**0.982** MRR (`src/`) and **0.794** (root) with the gate, against **0.018** and **0.002** if every
+**0.967** MRR (`src/`) and **0.929** (root) with the gate, against **0.016** and **0.018** if every
 query is forced down the name-exact lane. An ungated router routes the wrong queries — and the cost
 is not degradation but collapse. Both numbers are published together. Since `fa4639e` the gate also
 declines in the other direction: a query whose words all name symbols is still refused the
@@ -5694,6 +5700,77 @@ each tree for the probe-4 control.
 ## 7. Honest counterexamples
 
 Every one of these is measured, in-tree, and published on purpose.
+
+**The sampler measured the corpus, not the ranker — 2026-09-05.** For fourteen months `--eval-retrieval`
+built its gold set by walking symbol ids from 0 and stopping at the first 150 doc-commented symbols. Symbol
+ids are assigned in crawl order and the crawl is sorted by path — that ordering is deliberate, it is what
+makes the tool deterministic — so the gold set was really *"whichever 150 doc-commented symbols sort
+earliest by path"*. `bench/` sorts before `src/`. **A contributor who added a docstring to a benchmark
+harness, touching no ranking code whatsoever, moved a published number.** Every retrieval figure this
+project publishes was drawn from that sample.
+
+Reproduced as a controlled experiment at `db6a416d`: one identical 60-symbol doc-commented probe file, one
+otherwise byte-identical corpus, only the probe's *path* varied.
+
+| probe path | subtoken/name MRR | subtoken/doc-phrase MRR |
+| --- | --- | --- |
+| `aaa_probe/probe.h` (sorts early) | **0.834** | **0.620** |
+| `zzz_probe/probe.h` (sorts late) | **0.729** | **0.976** |
+
+Same content, same corpus size, same ranker: **0.105 MRR** and **0.356 MRR** from path spelling alone.
+
+A second instance of the same defect sat in the metric itself: `rankOfSymbol` broke score ties by
+`i < gold`, i.e. by symbol id, i.e. by path. Invisible where the ranker has signal and total where it has
+none — on the name-exact/doc-phrase row nearly every symbol ties at zero, so the reported rank was
+essentially *"how many files sort before mine"* and that row's recall@1 was luck, not retrieval.
+
+**Fixed, gate first.** `test/knownitemcheck.sh` gained three arms — order-independence (the same probe at an
+early vs late path must give identical numbers), sample self-disclosure (`population=`/`scored=`/`rule=`),
+and population re-derivation (adding N doc-commented symbols must raise `population` by exactly N). All
+three were red on `db6a416d`. The population is now every qualifying symbol and the eval is exhaustive over
+it; ties use the midrank `1 + #better + #tied/2`, which no ordering can move.
+
+**Every published `--eval-retrieval` number moved, and none of it was a ranking change.** Decomposed one
+fix at a time on the repository root:
+
+| | subtoken/name MRR | name-exact/name MRR | name-exact/name recall@1 |
+| --- | --- | --- | --- |
+| path-ordered 150-slice, id ties (published until now) | 0.598 | 0.829 | 75.3% |
+| census population, id ties | 0.724 | 0.939 | 90.8% |
+| census population, midrank ties (**current**) | 0.724 | 0.922 | 85.4% |
+
+On this root the sampler fix does nearly all of it and moves numbers **up** — but that direction is not a
+property of head-slicing, and calling the slice "systematically easier" or "systematically harder" would be
+the same kind of overreach this entry exists to record. The slice measures whichever corner of the tree sorts
+first, and on this repo the two published roots disagree: at the root it UNDERSTATED (subtoken/name 0.598
+against a true 0.724), in `src/` it OVERSTATED slightly (name-exact/name 0.977 against 0.974). The honest word
+is **arbitrary**.
+
+The consistent downward movement in `src/` is therefore the MIDRANK fix, not the sampler: on `src/` the
+sampler moved name-exact/name MRR by 0.003 and the midrank by 0.014. Most of that is tie-luck removed, but
+part is the convention — midrank is deliberately pessimistic, scoring a two-way tie at the top as 1.5, which
+takes no recall@1 credit where id-tiebreak gave rank 1 whenever gold's id was lowest. Do not describe the
+whole delta as luck.
+
+The two defects **compound**, which is why neither was visible alone: a sample biased toward early-path
+symbols, graded by a metric that rewards early-path symbols.
+
+What was deliberately NOT done: the fixture was not touched. Stripping the docstrings or excluding `bench/`
+would have restored 0.600 while leaving the defect in place, would need redoing every time any early-sorting
+file gained a comment, and would teach the next contributor that documenting code breaks the build. The
+number was never the thing to protect; the *meaning* of the number was.
+
+Two sensitivities were conflated when this was first reported, and only one is a bug. **(1)** Sample
+membership depending on path order — a defect, fixed. **(2)** Ranks moving because the corpus changed — 
+irreducible and legitimate, since more files mean more distractors. This eval is not a golden and growing
+the repo still moves it; that is the eval working, not failing.
+
+Cost, stated plainly: exhaustive scoring is ~23× the work of the old 150-symbol slice, because each scored
+symbol drives eight whole-corpus rankings including two full PageRank power iterations. It buys nothing for
+users of the tool — the ranker is byte-identical — and nobody pays it in a normal workflow: it is not an MCP
+verb, `skills/ripwire-router/SKILL.md` classes it as a maintainer harness rather than an agent moment, and
+the only automated caller is `knownitemcheck` on `src/`. It buys honest published numbers, and that is all
+it buys.
 
 **`--pack-signatures` can make output bigger.** On this repository, `svector::push_back`:
 

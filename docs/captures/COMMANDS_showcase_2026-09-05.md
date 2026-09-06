@@ -3754,20 +3754,21 @@ ripwire --eval  (co-change recovery, averaged over 80 historical commits)
 
 *Known-item retrieval eval: MRR + recall@k per ranker per query mode.*
 
-**wall time: 8.44s**
+**wall time: 186.50s**
 
 `````
-ripwire --eval-retrieval  (known-item, 150 doc-commented symbols; gold is in-corpus by construction)
+ripwire --eval-retrieval  (known-item, 3497 doc-commented symbols; gold is in-corpus by construction)
+  sample: population=3497 scored=3497 rule=exhaustive (every qualifying symbol; path- and order-independent)
   ranker    query-mode     MRR  recall@1  recall@5 recall@10
-  subtoken  name         0.598     49.3%     74.0%     82.7%
-  subtoken  doc-phrase   0.744     70.0%     78.7%     80.7%
-  name-exact name         0.829     75.3%     94.7%     97.3%
-  name-exact doc-phrase   0.020      1.3%      2.7%      3.3%
-  anchored  name         0.589     47.3%     72.0%     79.3%
-  anchored  doc-phrase   0.741     70.0%     78.0%     80.0%
-  routed    name         0.830     75.3%     94.7%     98.7%
-  routed    doc-phrase   0.741     70.0%     78.0%     80.0%
-  note: routing chose name-exact on 148/150 NAME queries (a NAME query is always identifier-shaped);
+  subtoken  name         0.724     59.3%     88.9%     93.4%
+  subtoken  doc-phrase   0.930     90.8%     95.2%     95.9%
+  name-exact name         0.922     85.4%     97.5%     98.4%
+  name-exact doc-phrase   0.018      0.6%      2.7%      3.5%
+  anchored  name         0.726     60.5%     87.6%     92.1%
+  anchored  doc-phrase   0.925     90.0%     94.9%     95.8%
+  routed    name         0.922     85.4%     97.5%     98.5%
+  routed    doc-phrase   0.929     90.8%     95.1%     95.7%
+  note: routing chose name-exact on 3495/3497 NAME queries (a NAME query is always identifier-shaped);
         the confidence gate routes doc-phrase queries to name-exact ONLY when EVERY content word names a symbol
         (or an explicit camel/snake token appears) AND every matched name is specific enough to anchor on —
         a common name (many definitions, or a subtoken carried by many symbol names) declines the route — so
