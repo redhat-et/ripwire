@@ -72,4 +72,94 @@ p1="$("$BIN" "$REPO" --cochange --since="$FUTURE" --no-cache 2>/dev/null)"
 p2="$("$BIN" "$REPO" --cochange --since="$FUTURE" --no-cache 2>/dev/null)"
 [ "$p1" = "$p2" ] && ok "--cochange empty-window deterministic" || no "--cochange empty-window not deterministic"
 
+
+# ── 4) THE DEFAULT WINDOW'S ANCHOR (F1/F2/F3, round C lane D) ────────────────────────────────────────────────
+# Arms 1-3 above cover an EXPLICIT --since. This arm covers the window nobody asks for: the DEFAULT one.
+# `git log --since="18 months ago"` resolves against the WALL CLOCK, so a repo whose newest commit predates
+# that cutoff — every pinned corpus, every archived release, every eval checkout — reads as if it had no
+# history at all. Measured on the head-to-head corpus (RocksDB @0e2801ac3, HEAD 2024-10-17): --cochange
+# returned zero rows where gortex, walking the same history, mined 9,854 co-change edges. The default window
+# therefore anchors on HEAD's own committer epoch; an EXPLICIT --since stays wall-clock-relative, because
+# that one is the user's own choice (arms 1-3 keep proving it).
+#
+# The fixture is a real repo with real history, every commit BACKDATED past the widest default window (18mo),
+# which is what makes it a test of the anchor and not of git.
+OLD="$(mktemp -d)"; trap 'rm -rf "$REPO" "$NR" "$OLD"' EXIT
+cd "$OLD" || exit 1
+git init -q; git config user.email x@y; git config user.name x
+mkdir -p db
+printf '#pragma once\nstruct WalManager\n{\n    int purge( int n );\n    int archive( int n );\n};\n' > db/wal_manager.h
+printf '#include "db/wal_manager.h"\nint WalManager::purge( int n ) { if( n > 0 ) { return n; } return 0; }\nint WalManager::archive( int n ) { return purge( n ) + 1; }\n' > db/wal_manager.cc
+printf '#include "db/wal_manager.h"\nint applyVersion( int n ) { WalManager w; return w.archive( n ); }\n' > db/version_set.cc
+_c(){ export GIT_AUTHOR_DATE="$1" GIT_COMMITTER_DATE="$1"; git add -A; git commit -qm "$2"; }
+_c "2019-01-05T10:00:00 +0000" seed
+_i=1
+while [ "$_i" -le 5 ]; do
+  printf '// touch %s\n' "$_i" >> db/wal_manager.cc
+  printf '// touch %s\n' "$_i" >> db/version_set.cc
+  _c "2019-0$(( _i + 1 ))-05T10:00:00 +0000" "pair $_i"
+  _i=$(( _i + 1 ))
+done
+unset GIT_AUTHOR_DATE GIT_COMMITTER_DATE
+
+# 4a) --cochange must MINE this history, not refuse it. The refusal was factually false: git is present and
+#     six commits exist; only the wall-clock window was empty.
+oc="$("$BIN" "$OLD" --cochange --no-cache 2>"$NR/oc.err")"; ocrc=$?
+[ "$ocrc" -eq 0 ] && ok "--cochange default window mines a >18mo-old history (exit 0)" \
+                  || { no "--cochange default window refused a real history (exit $ocrc)"; echo "     stderr: $(cat "$NR/oc.err")"; }
+grep -qi "git unavailable" "$NR/oc.err" \
+  && no "--cochange said 'git unavailable' on a repo WITH git and WITH history" \
+  || ok "--cochange did not claim 'git unavailable' on a real history"
+if printf '%s' "$oc" | grep -q 'commits="[1-9]'; then ok "--cochange default window mined a non-zero commit count"
+else no "--cochange default window mined 0 commits from a 6-commit history"; echo "     got: $(printf '%s' "$oc" | head -c 300)"; fi
+printf '%s' "$oc" | grep -q 'window="18mo@HEAD"' \
+  && ok "--cochange discloses the anchor (window=\"18mo@HEAD\")" \
+  || { no "--cochange must name the anchor that produced its window (want window=\"18mo@HEAD\")"; echo "     got: $(printf '%s' "$oc" | grep -o 'window="[^\"]*"' | head -1)"; }
+
+# 4b) --hotspots: same window, same anchor, same refusal to invent a missing repo.
+oh="$("$BIN" "$OLD" --hotspots --no-cache 2>"$NR/oh.err")"; ohrc=$?
+[ "$ohrc" -eq 0 ] && ok "--hotspots default window ranks a >18mo-old history (exit 0)" \
+                  || { no "--hotspots default window refused a real history (exit $ohrc)"; echo "     stderr: $(cat "$NR/oh.err")"; }
+if printf '%s' "$oh" | grep -q 'commits="[1-9]'; then ok "--hotspots default window mined a non-zero commit count"
+else no "--hotspots default window mined 0 commits from a 6-commit history"; echo "     got: $(printf '%s' "$oh" | head -c 300)"; fi
+
+# 4c) --rank-by=churn must find churn evidence, and its stamp must name the anchor.
+orc_out="$("$BIN" "$OLD" --rank-by=churn --no-cache 2>"$NR/or.err")"
+printf '%s' "$orc_out" | grep -q 'no churn evidence' \
+  && { no "--rank-by=churn found no churn in a 6-commit history (window unanchored)"; echo "     $(printf '%s' "$orc_out" | grep -o 'window="[^\"]*"' | head -1)"; } \
+  || ok "--rank-by=churn found churn evidence in a >18mo-old history"
+printf '%s' "$orc_out" | grep -q 'window="12mo@HEAD"\|window="18mo@HEAD"' \
+  && ok "--rank-by=churn discloses the anchor in window=" \
+  || { no "--rank-by=churn must name the anchor in window="; echo "     got: $(printf '%s' "$orc_out" | grep -o 'window="[^\"]*"' | head -1)"; }
+
+# 4d) F2 — --situ COMPOSES co-change and must carry its component's floor through. `(0)` plus
+#     `(none, or no git history)` conflates "no partners found" with "the window could not look", which is
+#     exactly what non-negotiable #3 forbids; --cochange on the same tree refuses loudly.
+os="$("$BIN" "$OLD" --situ=db/wal_manager.cc --no-cache 2>/dev/null)"
+printf '%s' "$os" | grep -q 'window=' \
+  && ok "--situ propagates the co-change window= disclosure" \
+  || { no "--situ drops the commits=/window= disclosure its own --cochange component emits"; echo "     got: $(printf '%s' "$os" | grep -A1 'co-change')"; }
+printf '%s' "$os" | grep -q 'commits=' \
+  && ok "--situ propagates the co-change commits= floor" \
+  || no "--situ must state how many commits its co-change window saw"
+
+# 4e) F3 — the named file's OWN header. A structural relationship ripwire already knows: db/wal_manager.cc
+#     declares its symbols in db/wal_manager.h. It was absent from --situ's output entirely while a
+#     222-file transitive list was ranked by dependent-symbol count above it.
+printf '%s' "$os" | grep -q 'db/wal_manager.h' \
+  && ok "--situ surfaces the named file's own header" \
+  || { no "--situ=db/wal_manager.cc never names db/wal_manager.h"; echo "     got: $(printf '%s' "$os" | head -c 600)"; }
+
+# 4f) determinism + well-formedness on the anchored path (the anchor must not import the wall clock).
+oc1="$("$BIN" "$OLD" --cochange --no-cache 2>/dev/null)"; oc2="$("$BIN" "$OLD" --cochange --no-cache 2>/dev/null)"
+[ "$oc1" = "$oc2" ] && ok "--cochange anchored window deterministic" || no "--cochange anchored window not deterministic"
+printf '%s' "$oc1" | xmllint --noout - 2>/dev/null && ok "--cochange anchored output is well-formed XML" || no "--cochange anchored XML malformed"
+
+# 4g) an EXPLICIT --since is the user's own choice and stays wall-clock-relative — the opt-out, and the reason
+#     no new flag exists. A future date must still be an honest empty window here.
+oe="$("$BIN" "$OLD" --cochange --since="$FUTURE" --no-cache 2>/dev/null)"
+printf '%s' "$oe" | grep -q 'commits="0"' \
+  && ok "an explicit --since is NOT re-anchored (future date still empties the window)" \
+  || { no "an explicit --since must stay literal — anchoring it would steal the user's own choice"; echo "     got: $(printf '%s' "$oe" | head -c 300)"; }
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
