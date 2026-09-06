@@ -118,14 +118,16 @@ pin 'strokeText\(n\.label' 'strokeText' "(B7) that halo is actually stroked behi
 # ── (C) node radius by in-view degree ────────────────────────────────────────────────────────────────
 pin 'Math\.sqrt\(n\.deg' 'n.deg' "(C1) nodeRadius is driven by in-view degree"
 absent '4 \+ 60\*Math\.sqrt\(n\.rank\)' "(C2) the old rank-only radius (mean 5.10 px on a 1-111 degree span) is gone"
-# (C3) the on-screen minimum must be a UNIFORM boost, not a per-node clamp. `Math.max(nodeRadius(n),
-#      3.5/scale)` looks like a visibility floor and is a flattener: at the scale a 239-node view fits at
-#      (0.125) the floor term is 28 world units, larger than EVERY nodeRadius, so all 239 nodes rendered at
-#      exactly 3.5 px and the degree signal (C1) computes was invisible in precisely the picture that needed
-#      it. A single per-frame multiplier lifts the smallest node to the floor and preserves every ratio.
+# (C3)-(C5) node size must be a SCREEN quantity with BOTH ends bounded, and both bounds were learned the
+#      hard way on a real 239-node picture. A per-node max against a 3.5-px-over-scale floor FLATTENED
+#      everything: at the 0.125 scale that view fits at, the floor term is 28 world units — larger than
+#      every radius — so all 239 nodes drew at the same 3.5 px and the degree signal (C1) computes was
+#      invisible in the one picture that needed it. Replacing it with a uniform per-frame multiplier fixed
+#      the small end and blew up the large one: degree-111 hubs became 36 px discs that occluded four
+#      labels. A screen-space band with a floor AND a ceiling does both jobs and is zoom-invariant.
 pin 'nodeRadiusPx'   'nodeRadiusPx'   "(C3) node size is a SCREEN-space band (nodeRadiusPx), so a hub reads as one at every zoom"
-pin 'MAX_NODE_PX'    'MAX_NODE_PX'    "(C5) that band has a CEILING — an unbounded hub becomes a blob that occludes its neighbours' labels"
 absent 'Math\.max\(nodeRadius\(n\), 3\.5/scale\)' "(C4) the per-node screen clamp that flattened every radius at low zoom is gone"
+pin 'MAX_NODE_PX'    'MAX_NODE_PX'    "(C5) that band has a CEILING — an unbounded hub becomes a blob that occludes its neighbours' labels"
 
 # ── (D) settle before first paint, under a wall-clock budget ─────────────────────────────────────────
 pin 'SETTLE_BUDGET_MS' 'SETTLE_BUDGET_MS' "(D1) the pre-paint settle carries a wall-clock budget"
