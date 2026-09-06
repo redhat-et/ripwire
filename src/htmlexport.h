@@ -82,13 +82,15 @@ static const char kScript[] = R"JS(
   };
 
   // ---- --color-by palettes. commColor: 12 categorical dark-bg-friendly hues (comm % 12).
-  // rampColor: shared 5-step green→red ramp for cx/churn over FIXED thresholds (fixed beats
-  // quantiles for legend honesty — the same bucket means the same thing in every repo).
+  // rampColor: shared 5-step BLUE→ORANGE temperature ramp for cx/churn over FIXED thresholds (fixed
+  // beats quantiles for legend honesty — the same bucket means the same thing in every repo). Blue→
+  // orange keeps every step off the red/green axis (protanopia/deuteranopia, ~8% of men, cannot
+  // always tell those apart) while staying bright enough for this page's #111 canvas (>= 4.9:1).
   // cx buckets:    0 | 1-4 | 5-9 | 10-19 | 20+   → boundaries [1,5,10,20]
   // churn buckets: 0 | 1-2 | 3-9 | 10-29 | 30+   → boundaries [1,3,10,30]
   var commColor = ['#4a90d9','#e67e22','#2ecc71','#e74c3c','#9b59b6','#f4c542',
                    '#1abc9c','#e84393','#00acd7','#a3d977','#dea584','#7f8c8d'];
-  var rampColor = ['#2ecc71','#a3d977','#f4c542','#e67e22','#e74c3c'];
+  var rampColor = ['#4fc3f7','#26c6da','#ffd54f','#ff9800','#e65100'];
   var CX_STEPS = [1,5,10,20], CHURN_STEPS = [1,3,10,30];
   function rampStep(v, steps) {
     var s = 0;
