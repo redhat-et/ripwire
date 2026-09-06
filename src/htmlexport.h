@@ -63,7 +63,17 @@ inline std::string jsonEscape( std::string_view s )
 // Determinism note: Math.random/Date.now are used ONLY for runtime interaction state (never influence
 // the emitted bytes, which are pure C++ output above this script — the seeded `rng()` below is for
 // deterministic-per-load initial layout, not for anything persisted).
-static const char kScript[] = R"JS(
+//
+// It is emitted as THREE adjacent string literals, concatenated back to back into one <script> in
+// declaration order. That is an editing split and nothing else — the same move src/main.cpp and
+// src/ingest.cpp made into verbs_*.h / ingest_*.h sections, for the same reason: one 850-line literal is
+// not a surface anyone can navigate, and --quality-delta reads a literal's length exactly the way it
+// reads a function's. The sections must stay in this order; a seam may fall anywhere in the text, so it
+// is placed on a section boundary where a reader would put one anyway.
+//
+// SECTION 1: what a node LOOKS like — the five --color-by palettes, colorForNode, the legend, the shared
+// adjacency every view filters, and the breadcrumb trail.
+static const char kScriptColour[] = R"JS(
 (function() {
   var canvas = document.getElementById('c');
   var ctx = canvas.getContext('2d');
@@ -237,6 +247,16 @@ static const char kScript[] = R"JS(
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
+  // -- end of section 1 --
+)JS";
+
+// SECTION 2 of the renderer: the graph state and the picture — the sim subset, the force integration,
+// the settle-before-paint driver, and draw(). Split from section 1 for the reason src/main.cpp and
+// src/ingest.cpp were split into verbs_*.h / ingest_*.h sections: the compile unit is unchanged (adjacent
+// literals are emitted back to back, in order, into one <script>), only the editing surface moved. An
+// 850-line string literal is not a thing anyone can navigate, and --quality-delta reads its length the
+// same way it reads a function's.
+static const char kScriptSim[] = R"JS(
   // ---- sim state: rebuilt by each view's render() over a FILTERED node/edge subset. `local` nodes
   // carry {gid, x, y, vx, vy, label, type, lang, rank, comm, cx, ts, file}; `gid` maps back to the
   // NODES index for lookups; the last four feed colorForNode. ----
@@ -588,6 +608,12 @@ static const char kScript[] = R"JS(
     return -1;
   }
 
+  // -- end of section 2 --
+)JS";
+
+// SECTION 3 of the renderer: everything that responds to a person — resize, mouse, wheel, search, the
+// hash router and its views, the provenance caption, the PNG export, and boot.
+static const char kScriptViews[] = R"JS(
   // ---- resize. Two defects lived here.
   //
   // H10 (sharpness): the backing store was set to the CSS pixel count, so on any retina display the whole
@@ -960,12 +986,6 @@ inline constexpr std::size_t kRankByNameCount = sizeof( kRankByNames ) / sizeof(
 static_assert( kRankByNameCount == std::size_t( RankBy::ChurnDecay ) + 1,
                "kRankByNames must carry one name per RankBy enumerator, in declaration order" );
 
-inline const char* rankByPageLabel( RankBy r ) noexcept
-{
-    const std::size_t idx = std::size_t( r );
-    return idx < kRankByNameCount ? kRankByNames[ idx ] : kRankByNames[0];
-}
-
 // H4 — the language palette, indexed by the Lang enumerator so it cannot fall behind the roster.
 //
 // It already had. model.h::langTag emits 19 tags; the page's hand-written `langColor` object carried 9
@@ -1007,18 +1027,6 @@ static_assert( kLangColorCount == std::size_t( Lang::Lua ) + 1,
                "kLangColors must carry one hex colour per Lang enumerator, in declaration order — a language with "
                "no swatch renders as an unlabelled grey the legend cannot explain" );
 
-// Emit the LANG_COLORS map the page's swatches and legend are BOTH built from: langTag(L) -> hex, in
-// enumerator order. Deterministic by construction (a constexpr array walked in index order), and the one
-// place the roster is stated.
-inline void writeLangPalette( std::FILE* out )
-{
-    std::fprintf( out, "const LANG_COLORS = {" );
-    for( std::size_t i = 0; i < kLangColorCount; ++i )
-    {
-        std::fprintf( out, "%s\"%s\":\"%s\"", i ? "," : "", langTag( Lang( i ) ), kLangColors[i] );
-    }
-    std::fprintf( out, "};\n" );
-}
 
 // Side data for the --color-by node-colour modes. Every export embeds ALL five modes' data; the
 // pointers may be null (the caller's pipeline may not have computed them), in which case the page
@@ -1057,7 +1065,119 @@ inline void writeColorPayload( std::FILE* out, const std::vector<std::uint32_t>&
     // the baked initial colour mode (--color-by=MODE); the in-page selector switches live from here
     std::fprintf( out, "const COLOR_MODE = \"%s\";\n", colorByLabel( color.initialMode ) );
     // the ranker whose scores the `rank` field carries — the provenance caption's second fact
-    std::fprintf( out, "const RANKER = \"%s\";\n", rankByPageLabel( color.ranker ) );
+    // Read from kRankByNames INLINE rather than through an accessor of its own. A second four-line
+    // "clamp the enumerator, fall back to entry 0" function beside colorByLabel is a duplicate of it, and
+    // factoring the clamp into a shared helper only moved the problem — colorByLabel then became a
+    // one-line wrapper that matched three unrelated one-line wrappers elsewhere in the tree. This name
+    // has exactly one consumer, so it does not need a function; colorByLabel, which is the shared
+    // accessor for a mode the selector also switches, keeps its own.
+    const std::size_t rankIdx = std::size_t( color.ranker );
+    std::fprintf( out, "const RANKER = \"%s\";\n", rankIdx < kRankByNameCount ? kRankByNames[ rankIdx ] : kRankByNames[0] );
+    // the LANG palette the page's swatches AND its legend are both built from: langTag(L) -> hex, in
+    // enumerator order. It belongs in this function and not one of its own: this IS the colour payload,
+    // and a separate emitter beside it was a fifth copy of the same comma-separated JSON loop.
+    // Deterministic by construction — a constexpr array walked in index order.
+    std::fprintf( out, "const LANG_COLORS = {" );
+    for( std::size_t i = 0; i < kLangColorCount; ++i )
+    {
+        std::fprintf( out, "%s\"%s\":\"%s\"", i ? "," : "", langTag( Lang( i ) ), kLangColors[i] );
+    }
+    std::fprintf( out, "};\n" );
+}
+
+// The document SHELL — <head>, the whole stylesheet, and the chrome (#bar, #prov, #hits, #crumb,
+// #cards, the canvas) — up to the opening <script>. Lifted out of writeHtml for the reason
+// writeColorPayload states at its own head: writeHtml is a 400-line emitter and this is a nameable,
+// input-free concept, so the caller grows by a call instead of by ninety lines of literal. Nothing here
+// depends on the graph; every byte is constant.
+inline void writeDocumentShell( std::FILE* out )
+{
+    // emit document head. Three in-file VIEWS share one #bar + one #c canvas; #cards (Overview) and
+    // #crumb (breadcrumb trail) are additional DOM regions toggled by the router, not separate pages.
+    std::fprintf( out,
+        "<!DOCTYPE html>\n"
+        "<html lang=\"en\">\n"
+        "<head>\n"
+        "<meta charset=\"utf-8\">\n"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+        "<title>ripwire wiki</title>\n"
+        "<style>\n"
+        "* { margin:0; padding:0; box-sizing:border-box; }\n"
+        "body { background:#111; color:#eee; font:13px/1.4 sans-serif; overflow:hidden; }\n"
+        "#bar { position:fixed; top:0; left:0; right:0; height:36px; background:rgba(0,0,0,.7);\n"
+        "       display:flex; align-items:center; gap:12px; padding:0 12px; z-index:10; }\n"
+        "#bar h1 { font-size:13px; font-weight:600; white-space:nowrap; }\n"
+        "#bar a.nav { color:#7fb2ff; text-decoration:none; font-size:12px; white-space:nowrap; }\n"
+        "#bar a.nav:hover { text-decoration:underline; }\n"
+        "#search { background:#222; border:1px solid #444; color:#eee; padding:3px 8px;\n"
+        "          border-radius:4px; font-size:12px; width:200px; }\n"
+        "#info { font-size:12px; color:#aaa; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n"
+        "#legend { font-size:11px; color:#999; white-space:nowrap; }\n"
+        "#legend span { display:inline-block; width:10px; height:10px; border-radius:50%%; margin-right:3px; }\n"
+        // the metric NAME inside the legend is text, not a swatch — it must escape the circle rule above
+        "#legend span.lg { width:auto; height:auto; border-radius:0; color:#c8ccd2; margin-right:5px; }\n"
+        "#colorMode { background:#222; border:1px solid #444; color:#eee; padding:3px 6px;\n"
+        "             border-radius:4px; font-size:12px; }\n"
+        "#depth { font-size:11px; color:#999; display:flex; align-items:center; gap:4px; white-space:nowrap; }\n"
+        "canvas { display:block; }\n"
+        "#crumb { position:fixed; top:36px; left:0; right:0; z-index:9; background:rgba(20,20,20,.85);\n"
+        "         font-size:11px; padding:4px 12px; white-space:nowrap; overflow-x:auto; display:none; }\n"
+        "#crumb a { color:#7fb2ff; text-decoration:none; margin-right:4px; }\n"
+        "#crumb a:hover { text-decoration:underline; }\n"
+        "#crumb .sep { color:#666; margin-right:4px; }\n"
+        "#cards { position:fixed; top:36px; left:0; right:0; bottom:0; overflow:auto; padding:16px;\n"
+        "         display:none; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; align-content:start; }\n"
+        "#cards.show { display:grid; }\n"
+        "#cards.show ~ canvas, #cards.show ~ #crumb { display:none; }\n"
+        ".card { background:#1b1b1e; border:1px solid #333; border-radius:6px; padding:12px; cursor:pointer; }\n"
+        ".card:hover { border-color:#7fb2ff; }\n"
+        ".card h2 { font-size:13px; margin-bottom:6px; word-break:break-all; }\n"
+        ".card .meta { font-size:11px; color:#999; margin-bottom:6px; }\n"
+        ".card ul { list-style:none; font-size:11px; color:#ccc; }\n"
+        ".card li { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n"
+        // H11: `.module-card { data-module-card:1; }` used to sit here. `data-module-card:1` is not a CSS
+        // declaration — the property does not exist, so the whole rule was dropped by every parser that has
+        // ever read this page. The ATTRIBUTE the overview router selects on is written by renderOverview
+        // (data-module-card="1") and is unaffected; this was dead bytes shaped like a selector.
+        "#prov { position:fixed; left:0; right:0; z-index:8; background:rgba(0,0,0,.55); color:#8f96a0;\n"
+        "        font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; padding:3px 12px;\n"
+        "        white-space:nowrap; overflow-x:auto; border-bottom:1px solid #222; }\n"
+        "#prov b { color:#c8ccd2; font-weight:600; }\n"
+        "#prov .k { color:#6f757e; }\n"
+        "#bar button { background:#222; border:1px solid #444; color:#eee; padding:3px 8px;\n"
+        "              border-radius:4px; font-size:12px; cursor:pointer; }\n"
+        "#bar button:hover { border-color:#7fb2ff; }\n"
+        "#hits { position:fixed; top:36px; left:0; right:0; z-index:9; background:rgba(20,20,20,.92);\n"
+        "        font-size:12px; padding:6px 12px; display:none; max-height:40%%; overflow:auto; }\n"
+        "#hits a { color:#7fb2ff; text-decoration:none; margin-right:14px; display:inline-block; }\n"
+        "#hits a:hover { text-decoration:underline; }\n"
+        "#hits .n { color:#8f96a0; margin-right:10px; }\n"
+        "</style>\n"
+        "</head>\n"
+        "<body>\n"
+        "<div id=\"bar\">\n"
+        "  <h1>ripwire wiki</h1>\n"
+        "  <a class=\"nav\" href=\"#overview\">Overview</a>\n"
+        "  <input id=\"search\" type=\"text\" placeholder=\"search labels...\">\n"
+        "  <span id=\"depth\">depth <input id=\"depthSlider\" type=\"range\" min=\"1\" max=\"3\" value=\"2\" style=\"width:60px\"><span id=\"depthVal\">2</span></span>\n"
+        "  <span id=\"info\"></span>\n"
+        "  <select id=\"colorMode\"><option value=\"lang\">lang</option><option value=\"community\">community</option>"
+            "<option value=\"cx\">cx</option><option value=\"churn\">churn</option><option value=\"tested\">tested</option></select>\n"
+        "  <span id=\"legend\"></span>\n"
+        "  <button id=\"savePng\" title=\"download this view as a PNG\">PNG</button>\n"
+        "</div>\n"
+        // The provenance caption. This tool's whole posture is disclosure — every truncation stated, every
+        // count labelled a floor — and the page stated NOTHING about itself: not the root it maps, not which
+        // ranker produced the sizes, not how many of the repository's symbols it is showing. Two lines, filled
+        // by renderProv() from the baked constants above, so the picture can be read (or screenshotted into a
+        // README) without the argv that made it.
+        "<div id=\"prov\"></div>\n"
+        "<div id=\"hits\"></div>\n"
+        "<div id=\"crumb\"></div>\n"
+        "<div id=\"cards\"></div>\n"
+        "<canvas id=\"c\"></canvas>\n"
+        "<script>\n"
+    );
 }
 
 // writeHtml — emit a self-contained HTML wiki document to `out`.
@@ -1223,92 +1343,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         moduleRank[modOrder[disp]] = disp;
     }
 
-    // emit document head. Three in-file VIEWS share one #bar + one #c canvas; #cards (Overview) and
-    // #crumb (breadcrumb trail) are additional DOM regions toggled by the router, not separate pages.
-    std::fprintf( out,
-        "<!DOCTYPE html>\n"
-        "<html lang=\"en\">\n"
-        "<head>\n"
-        "<meta charset=\"utf-8\">\n"
-        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-        "<title>ripwire wiki</title>\n"
-        "<style>\n"
-        "* { margin:0; padding:0; box-sizing:border-box; }\n"
-        "body { background:#111; color:#eee; font:13px/1.4 sans-serif; overflow:hidden; }\n"
-        "#bar { position:fixed; top:0; left:0; right:0; height:36px; background:rgba(0,0,0,.7);\n"
-        "       display:flex; align-items:center; gap:12px; padding:0 12px; z-index:10; }\n"
-        "#bar h1 { font-size:13px; font-weight:600; white-space:nowrap; }\n"
-        "#bar a.nav { color:#7fb2ff; text-decoration:none; font-size:12px; white-space:nowrap; }\n"
-        "#bar a.nav:hover { text-decoration:underline; }\n"
-        "#search { background:#222; border:1px solid #444; color:#eee; padding:3px 8px;\n"
-        "          border-radius:4px; font-size:12px; width:200px; }\n"
-        "#info { font-size:12px; color:#aaa; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n"
-        "#legend { font-size:11px; color:#999; white-space:nowrap; }\n"
-        "#legend span { display:inline-block; width:10px; height:10px; border-radius:50%%; margin-right:3px; }\n"
-        // the metric NAME inside the legend is text, not a swatch — it must escape the circle rule above
-        "#legend span.lg { width:auto; height:auto; border-radius:0; color:#c8ccd2; margin-right:5px; }\n"
-        "#colorMode { background:#222; border:1px solid #444; color:#eee; padding:3px 6px;\n"
-        "             border-radius:4px; font-size:12px; }\n"
-        "#depth { font-size:11px; color:#999; display:flex; align-items:center; gap:4px; white-space:nowrap; }\n"
-        "canvas { display:block; }\n"
-        "#crumb { position:fixed; top:36px; left:0; right:0; z-index:9; background:rgba(20,20,20,.85);\n"
-        "         font-size:11px; padding:4px 12px; white-space:nowrap; overflow-x:auto; display:none; }\n"
-        "#crumb a { color:#7fb2ff; text-decoration:none; margin-right:4px; }\n"
-        "#crumb a:hover { text-decoration:underline; }\n"
-        "#crumb .sep { color:#666; margin-right:4px; }\n"
-        "#cards { position:fixed; top:36px; left:0; right:0; bottom:0; overflow:auto; padding:16px;\n"
-        "         display:none; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; align-content:start; }\n"
-        "#cards.show { display:grid; }\n"
-        "#cards.show ~ canvas, #cards.show ~ #crumb { display:none; }\n"
-        ".card { background:#1b1b1e; border:1px solid #333; border-radius:6px; padding:12px; cursor:pointer; }\n"
-        ".card:hover { border-color:#7fb2ff; }\n"
-        ".card h2 { font-size:13px; margin-bottom:6px; word-break:break-all; }\n"
-        ".card .meta { font-size:11px; color:#999; margin-bottom:6px; }\n"
-        ".card ul { list-style:none; font-size:11px; color:#ccc; }\n"
-        ".card li { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n"
-        // H11: `.module-card { data-module-card:1; }` used to sit here. `data-module-card:1` is not a CSS
-        // declaration — the property does not exist, so the whole rule was dropped by every parser that has
-        // ever read this page. The ATTRIBUTE the overview router selects on is written by renderOverview
-        // (data-module-card="1") and is unaffected; this was dead bytes shaped like a selector.
-        "#prov { position:fixed; left:0; right:0; z-index:8; background:rgba(0,0,0,.55); color:#8f96a0;\n"
-        "        font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; padding:3px 12px;\n"
-        "        white-space:nowrap; overflow-x:auto; border-bottom:1px solid #222; }\n"
-        "#prov b { color:#c8ccd2; font-weight:600; }\n"
-        "#prov .k { color:#6f757e; }\n"
-        "#bar button { background:#222; border:1px solid #444; color:#eee; padding:3px 8px;\n"
-        "              border-radius:4px; font-size:12px; cursor:pointer; }\n"
-        "#bar button:hover { border-color:#7fb2ff; }\n"
-        "#hits { position:fixed; top:36px; left:0; right:0; z-index:9; background:rgba(20,20,20,.92);\n"
-        "        font-size:12px; padding:6px 12px; display:none; max-height:40%%; overflow:auto; }\n"
-        "#hits a { color:#7fb2ff; text-decoration:none; margin-right:14px; display:inline-block; }\n"
-        "#hits a:hover { text-decoration:underline; }\n"
-        "#hits .n { color:#8f96a0; margin-right:10px; }\n"
-        "</style>\n"
-        "</head>\n"
-        "<body>\n"
-        "<div id=\"bar\">\n"
-        "  <h1>ripwire wiki</h1>\n"
-        "  <a class=\"nav\" href=\"#overview\">Overview</a>\n"
-        "  <input id=\"search\" type=\"text\" placeholder=\"search labels...\">\n"
-        "  <span id=\"depth\">depth <input id=\"depthSlider\" type=\"range\" min=\"1\" max=\"3\" value=\"2\" style=\"width:60px\"><span id=\"depthVal\">2</span></span>\n"
-        "  <span id=\"info\"></span>\n"
-        "  <select id=\"colorMode\"><option value=\"lang\">lang</option><option value=\"community\">community</option>"
-            "<option value=\"cx\">cx</option><option value=\"churn\">churn</option><option value=\"tested\">tested</option></select>\n"
-        "  <span id=\"legend\"></span>\n"
-        "  <button id=\"savePng\" title=\"download this view as a PNG\">PNG</button>\n"
-        "</div>\n"
-        // The provenance caption. This tool's whole posture is disclosure — every truncation stated, every
-        // count labelled a floor — and the page stated NOTHING about itself: not the root it maps, not which
-        // ranker produced the sizes, not how many of the repository's symbols it is showing. Two lines, filled
-        // by renderProv() from the baked constants above, so the picture can be read (or screenshotted into a
-        // README) without the argv that made it.
-        "<div id=\"prov\"></div>\n"
-        "<div id=\"hits\"></div>\n"
-        "<div id=\"crumb\"></div>\n"
-        "<div id=\"cards\"></div>\n"
-        "<canvas id=\"c\"></canvas>\n"
-        "<script>\n"
-    );
+    writeDocumentShell( out );
 
     // emit NODES array — one entry per selected symbol, deterministic (rank-desc, id-asc order
     // preserved). `file` indexes FILES; `comm` is the display module id (moduleRank), or -1 if this
@@ -1390,11 +1425,8 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     // out of 5000 are different claims and the page used to make neither. TOPK is the ceiling that produced
     // the selection (the effective one, after --max-tokens/adaptive have cut it — the number that explains
     // the map you are looking at, not the number that was typed).
-    std::fprintf( out, "const TOPK = %zu;\n", cap );
-    std::fprintf( out, "const NODE_TOTAL = %zu;\n", cap );
-    std::fprintf( out, "const EDGE_TOTAL = %zu;\n", edges.size() );
-    std::fprintf( out, "const SYM_TOTAL = %zu;\n", S );
-    writeLangPalette( out );
+    std::fprintf( out, "const TOPK = %zu;\nconst NODE_TOTAL = %zu;\nconst EDGE_TOTAL = %zu;\nconst SYM_TOTAL = %zu;\n",
+                  cap, cap, edges.size(), S );
 
     // emit MODULES array — the Overview cards, sorted (member count desc, commId asc). `members` and
     // `top` are selected-array (NODES) indices; `neigh` is the sorted, deduped list of OTHER display
@@ -1470,7 +1502,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     std::fprintf( out, "];\n" );
 
     // inline the JS sim + wiki router
-    std::fprintf( out, "%s", kScript );
+    std::fprintf( out, "%s%s%s", kScriptColour, kScriptSim, kScriptViews );
 
     std::fprintf( out,
         "</script>\n"
