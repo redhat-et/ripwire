@@ -287,6 +287,11 @@ struct RecallShape
                                           // named only the shaping one — so the number the run actually turned
                                           // on lived in prose and on stderr. Priced through the same header
                                           // fixpoint as max_tokens=, so est_tokens covers its own bytes.
+    std::size_t shareBytes     = 0;       // §C4: the PER-DOCUMENT byte ceiling the budget was divided into, when
+                                          // one actually bound a document (0 = no document was cut by its share
+                                          // — either nothing was truncated, or the whole budget went to one doc).
+                                          // A ceiling applied is a ceiling named (H9); a zero here means "the
+                                          // share bound nothing", never "the share was not computed".
 };
 
 struct RecallBundle
@@ -301,6 +306,15 @@ inline constexpr std::size_t kRecallHeaderReserveBytes = 320;
 inline constexpr std::size_t kRecallTruncNoteBytes     = 128;
 inline constexpr std::size_t kRecallMinBodyBytes       = 240;
 inline constexpr std::size_t kDefaultRecallMaxTokens   = 8000;
+
+// §C4 — the smallest slice worth giving a document A SHARE OF THE BUDGET for: ~350 tokens, one screen of
+// prose. Distinct from kRecallMinBodyBytes above, and the distinction is the whole point. kRecallMinBodyBytes
+// is the LAST-RESORT floor — the least text that is not an insult when a budget can afford exactly one
+// document. kRecallShareFloorBytes is the floor for a document competing for a share of a budget that has
+// other documents to serve: it decides HOW MANY documents the budget is divided among, so that raising the
+// document count never degrades every answer into a row of stubs. 900 bytes is deliberately near codesight's
+// measured wiki-article size (~300 tokens), the shape this card was harvested from.
+inline constexpr std::size_t kRecallShareFloorBytes = 900;
 
 // H9 (capture-audit 2026-09-04): the ONE token→byte conversion for recall's ceiling, and the reason it is a
 // function rather than an expression repeated at each front door. It used to be spelled out twice — once in
@@ -561,7 +575,7 @@ inline std::optional<std::string> loadRecallBody( const IngestResult& ing, std::
 
 // The bundle's header line — the ONLY place the honest-shape fields are written. Keeps the legacy prefix
 // ("K relevant of N docs, best-first", which recallrelcheck parses) and appends the machine-readable
-// total=/shown=/capped=/truncated=/generated_demoted=/est_tokens= tail. `truncated=` appears only when
+// total=/shown=/capped=/truncated=/generated_demoted=/share_bytes=/est_tokens= tail. `truncated=` appears only when
 // something WAS cut; `generated_demoted=` only when the ranking actually moved a generated doc down — an
 // absent field means it did not happen, never that it was not looked for (the §P0.1 honest-limit rule).
 //
@@ -574,6 +588,12 @@ inline std::optional<std::string> loadRecallBody( const IngestResult& ing, std::
 // text agree exactly and there is nothing to disambiguate — the same "charged where the attribute is" rule
 // the map legend's conditional clauses follow. It is appended AFTER the last attribute, never between two,
 // so the header's `name=value` tail stays scannable.
+// " name=N", or "" at zero — the ONE place the header's silence-means-nothing-happened rule is spelled.
+inline std::string optionalRecallAttr( std::string_view name, std::size_t value )
+{
+    return value == 0 ? std::string() : " " + std::string( name ) + "=" + std::to_string( value );
+}
+
 inline std::string formatRecallHeader( std::string_view task, const RecallShape& shape, std::size_t estTokens )
 {
     // W3FIX M1 (same class as --for/--pack-task): `over_ceiling=1` — the artifact is larger than the --max-tokens
@@ -581,32 +601,23 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     // no body cut can shrink (kRecallHeaderReserveBytes + task.size() is charged, and a long enough task simply
     // leaves payloadBudget at 0 with the header still over). Absent ⇒ within the budget, or no --max-tokens at
     // all: the same silence-means-nothing-happened rule truncated=/generated_demoted= follow below.
-    std::string overCeilingAttr;
-    if( shape.isOverCeiling )
-    {
-        overCeilingAttr = " over_ceiling=1";
-    }
-    const std::string maxTokensAttr = shape.maxTokens > 0
-        ? " max_tokens=" + std::to_string( shape.maxTokens )
+    // §C4: max_tokens=, budget_tokens=, share_bytes= and generated_demoted= are FOUR spellings of one rule —
+    // a fact stated when it happened and silent when it did not — and they were four copies of one ternary.
+    // The zero test lives in optionalRecallAttr now, so a fifth cannot arrive with a different idea of what
+    // "absent" means. share_bytes= is the newest of them: the THIRD ceiling this run can apply and the only
+    // per-document one, named because without it a reader sees the top hit truncated well inside a budget
+    // that could have held it whole and nothing on the page says why.
+    const std::string overCeilingAttr   = shape.isOverCeiling ? " over_ceiling=1" : "";
+    const std::string maxTokensAttr     = optionalRecallAttr( "max_tokens", shape.maxTokens );
+    const std::string budgetTokensAttr  = optionalRecallAttr( "budget_tokens", shape.budgetTokens );
+    const std::string shareBytesAttr    = optionalRecallAttr( "share_bytes", shape.shareBytes );
+    const std::string demotedAttr       = optionalRecallAttr( "generated_demoted", shape.demotedCount );
+    const std::string truncAttr         = optionalRecallAttr( "truncated", shape.truncatedCount );
+    // §L4.3 — see the header comment for why it is conditional and why it trails
+    const std::string linesNote = shape.truncatedCount > 0
+        ? "  [lines= on a doc is its SELECTED section range — pre-truncation; the per-doc"
+          " truncation marker names the bytes actually emitted]"
         : std::string();
-    // F4: the GATE's ceiling beside the SHAPING one, in the same unit. Absent when no --token-budget was
-    // passed, so every document that never had one is byte-identical.
-    const std::string budgetTokensAttr = shape.budgetTokens > 0
-        ? " budget_tokens=" + std::to_string( shape.budgetTokens )
-        : std::string();
-    std::string truncAttr;
-    std::string linesNote;   // §L4.3 — see the header comment for why it is conditional and why it trails
-    if( shape.truncatedCount > 0 )
-    {
-        truncAttr = " truncated=" + std::to_string( shape.truncatedCount );
-        linesNote = "  [lines= on a doc is its SELECTED section range — pre-truncation; the per-doc"
-                    " truncation marker names the bytes actually emitted]";
-    }
-    std::string demotedAttr;
-    if( shape.demotedCount > 0 )
-    {
-        demotedAttr = " generated_demoted=" + std::to_string( shape.demotedCount );
-    }
     // §B2: the numerator and total= are the TRUE relevant count (matchedCount, pre-top-k) — shown= is what
     // this run actually emitted; capped= (isCapped) is honest about the gap between the two, whatever cut
     // caused it (--top-k, the byte budget, or an unreadable file).
@@ -620,7 +631,7 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     // --doc-drift's docs= (markdown by extension), and the two must not share a noun.
     std::string line;
     line.reserve( 160 + task.size() + truncAttr.size() + demotedAttr.size() + overCeilingAttr.size()
-                  + maxTokensAttr.size() + budgetTokensAttr.size() + linesNote.size() );
+                  + maxTokensAttr.size() + budgetTokensAttr.size() + shareBytesAttr.size() + linesNote.size() );
     line += "ripwire recall — \"";
     line += task;
     line += "\" — ";
@@ -638,6 +649,7 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     line += overCeilingAttr;
     line += maxTokensAttr;
     line += budgetTokensAttr;
+    line += shareBytesAttr;
     line += " est_tokens=";
     line += std::to_string( estTokens );
     line += linesNote;
@@ -839,10 +851,160 @@ inline std::optional<std::pair<std::string, std::string>> buildSectionGranularBo
     return std::make_pair( std::move( body ), std::move( note ) );
 }
 
+// §C4 (harvest-B) — DIVIDE the payload budget across the selected documents, instead of handing it to
+// document #1. What this replaces, and why it was a defect rather than a policy:
+//
+// The budget loop used to be greedy first-fit — walk the ranking, give each document all the room left,
+// and `break` the moment one had to be truncated. One long top hit therefore consumed the entire budget
+// and every other matching document was reported as "capped". Measured on the operator's own 157-document
+// agent-memory directory (`--top-k=6 --max-tokens=5000`): `total=157 shown=1 truncated=1`, the single
+// emitted document being 9,859 bytes of one 17 KB note. On a synthetic corpus of one huge on-topic
+// document plus five 150-byte on-topic documents, `--max-tokens` of 2000, 5000 and 8000 all returned
+// `shown=1`: 750 bytes of matching prose was dropped from a 20,000-byte budget, and TRIPLING the budget
+// bought more of document #1 and never a second document. The number of documents an agent got back was
+// decided by the size of the top hit, not by the budget it asked for.
+//
+// The allocation is WATER-FILLING, which is what makes the fix safe in both directions:
+//   1. Serve a rank PREFIX — the most documents that can each be given a slice worth reading
+//      (kRecallShareFloorBytes). Ranking still decides WHO; the budget decides HOW MANY.
+//   2. Divide the remaining bytes equally, then let every document that needs LESS than its share take
+//      only what it needs and hand the surplus back to the ones that need more. Repeat until no document
+//      is satisfied by the current share. So five 150-byte notes cost 750 bytes, not five equal shares —
+//      spreading never wastes budget on documents that are already whole.
+// The equal share is therefore an upper bound, not a quota, and it is monotone: a bigger budget can never
+// return fewer documents (gate: recallbudgetcheck §8.9).
+//
+// The opposite failure — dividing a budget by --top-k when only one document matched, so a single-hit
+// query gets one stub and wastes the rest of the ceiling — is what the prefix rule in step 1 exists to
+// prevent, and it has its own arm (§8.4). A document that alone cannot clear the share floor still gets
+// served under the last-resort kRecallMinBodyBytes floor rather than nothing at all.
+//
+// `overhead[i]` is what document i costs BEFORE any body byte (its separator line plus the two newlines
+// that frame the body); `demand[i]` is its full body size. `alloc[i]` is the returned allowance for that
+// document's body PLUS its truncation marker, so the sum of overhead + alloc over the served prefix never
+// exceeds `payloadBudget` — the caller's ceiling is under-used, never overshot.
+struct RecallShares
+{
+    std::vector<std::size_t> alloc;              // per-document allowance (body + truncation marker), rank order
+    std::size_t              servedCount = 0;    // the rank prefix that got an allowance at all
+    std::size_t              shareBytes  = 0;    // the equal share that BOUND a document; 0 = it bound none
+};
+
+// §C4 step 1 — HOW MANY documents the budget is divided among: the longest rank PREFIX in which every
+// document can still be served a slice worth reading. A document smaller than the share floor costs only
+// what it IS, so a run of short memory notes never shortens the prefix.
+//
+// The last-resort clause is the anti-regression: a budget too small for even ONE readable slice still
+// serves the top document down to kRecallMinBodyBytes, exactly as the pre-§C4 greedy loop did. Serving
+// nothing where something fits would be a regression dressed as a policy.
+inline std::size_t recallServedPrefix( const std::vector<std::size_t>& overhead, const std::vector<std::size_t>& demand,
+                                       std::size_t payloadBudget )
+{
+    const std::size_t shareFloorCost = kRecallShareFloorBytes + kRecallTruncNoteBytes;
+    std::size_t       served         = 0;
+    std::size_t       floorSum       = 0;
+    for( std::size_t i = 0; i < demand.size(); ++i )
+    {
+        const std::size_t minCost = overhead[i] + std::min( demand[i], shareFloorCost );
+        if( floorSum + minCost > payloadBudget )
+        {
+            break;
+        }
+        floorSum += minCost;
+        ++served;
+    }
+    const std::size_t lastResortCost = kRecallMinBodyBytes + kRecallTruncNoteBytes;
+    if( served == 0 && !demand.empty() && overhead[0] + std::min( demand[0], lastResortCost ) <= payloadBudget )
+    {
+        served = 1;
+    }
+    return served;
+}
+
+// §C4 step 2 — HOW MUCH each of them gets. Classic water-filling over the bytes left once the prefix's fixed
+// overhead is paid: divide equally, let every document that needs LESS than its share take only what it
+// needs, hand the surplus back, repeat. `alloc` is filled for the satisfied documents; the returned share is
+// what each UNSATISFIED one is bound to (0 = every document was satisfied, so nothing was bound).
+//
+// The share is non-decreasing across passes — a document is removed only when it takes at or below the
+// current average — which is what guarantees the final share is never below the floor recallServedPrefix
+// admitted the prefix on, so a truncated document is always served at least kRecallShareFloorBytes.
+inline std::size_t waterFillRecallShares( const std::vector<std::size_t>& demand, std::size_t served, std::size_t avail,
+                                          std::vector<char>& isSatisfied, std::vector<std::size_t>& alloc )
+{
+    std::size_t remaining   = avail;
+    std::size_t unsatisfied = served;
+    std::size_t share       = 0;
+    while( unsatisfied > 0 )
+    {
+        share               = remaining / unsatisfied;
+        std::size_t settled = 0;
+        for( std::size_t i = 0; i < served; ++i )
+        {
+            if( isSatisfied[i] || demand[i] > share )
+            {
+                continue;
+            }
+            alloc[i]       = demand[i];
+            isSatisfied[i] = 1;
+            remaining     -= demand[i];
+            --unsatisfied;
+            ++settled;
+        }
+        if( settled == 0 )
+        {
+            break;   // nobody fits inside the share any more — the rest are bound by it
+        }
+    }
+    if( unsatisfied == 0 )
+    {
+        return 0;   // every document whole: no share bound anything, and the header says nothing (H9)
+    }
+    // Whoever is left splits the final share; the integer remainder goes to the highest-ranked of them,
+    // which is both the useful choice and a deterministic one (no ties to break).
+    std::size_t surplus = remaining - share * unsatisfied;
+    for( std::size_t i = 0; i < served; ++i )
+    {
+        if( isSatisfied[i] )
+        {
+            continue;
+        }
+        alloc[i] = share + ( surplus > 0 ? 1 : 0 );
+        surplus -= ( surplus > 0 ? 1 : 0 );
+    }
+    return share;
+}
+
+inline RecallShares allocateRecallShares( const std::vector<std::size_t>& overhead,
+                                          const std::vector<std::size_t>& demand, std::size_t payloadBudget )
+{
+    VERIFY( overhead.size() == demand.size() );
+
+    RecallShares out;
+    out.alloc.assign( demand.size(), 0 );
+    out.servedCount = payloadBudget == 0 ? 0 : recallServedPrefix( overhead, demand, payloadBudget );
+    if( out.servedCount == 0 )
+    {
+        return out;
+    }
+
+    // The bytes left for bodies once the served prefix's separators are paid for. recallServedPrefix admitted
+    // the prefix only if overhead + a floor per document fitted, so this subtraction cannot underflow.
+    std::size_t avail = payloadBudget;
+    for( std::size_t i = 0; i < out.servedCount; ++i )
+    {
+        avail -= overhead[i];
+    }
+    std::vector<char> isSatisfied( out.servedCount, 0 );
+    out.shareBytes = waterFillRecallShares( demand, out.servedCount, avail, isSatisfied, out.alloc );
+    return out;
+}
+
 // Build the recall bundle IN MEMORY: each top file's path + relevance + body, best-first. `maxBytes` (0 =
-// no cap) SHAPES it — bodies are dropped from the BOTTOM of the ranking and the last one may be truncated
-// within itself, both DISCLOSED (per-doc `[truncated: …]`, header `capped=1`/`truncated=N`, a closing
-// `(capped: …)` note). Building before writing is what lets --token-budget gate BEFORE a byte is emitted.
+// no cap) SHAPES it — the budget is DIVIDED across the selected docs by allocateRecallShares above (docs
+// past the served rank prefix are dropped from the BOTTOM of the ranking; any doc may be truncated within
+// itself), all DISCLOSED (per-doc `[truncated: …]`, header `capped=1`/`truncated=N`/`share_bytes=N`, a
+// closing `(capped: …)` note). Building before writing is what lets --token-budget gate BEFORE a byte is emitted.
 // §B10.1: `redact` is REQUIRED — no default. A recalled doc is whole-file prose straight off disk, which is
 // the same credential seam packSource has; W3-N1's rule ("a new emitting clone cannot silently opt out")
 // applies to it exactly. nullptr = --no-redact, spelled deliberately. The one caller already passed it.
@@ -877,6 +1039,21 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
     shape.maxTokens     = maxTokens;              // H9: the ceiling applied, whatever it is (0 = unbounded)
     shape.budgetTokens  = budgetTokens;           // F4: the GATING ceiling beside the shaping one (0 = none)
 
+    // §C4 — LOAD, then ALLOCATE, then EMIT. The three used to be one greedy pass, and that is precisely why
+    // document #1 could take the whole budget: a loop that decides one document's slice from `payload.size()`
+    // alone cannot know that five more documents are waiting behind it. Sizing every candidate BEFORE any
+    // byte is committed is what makes a fair division expressible at all.
+    struct LoadedDoc
+    {
+        std::string sep;    // the "━━ path (relevance …) ━━[notes]" separator line
+        std::string body;   // the emitted prose: section-granular when the document has matching headings
+    };
+    std::vector<LoadedDoc>   loadedDocs;
+    std::vector<std::size_t> overhead;   // per document, the bytes it costs before any body byte
+    std::vector<std::size_t> demand;     // per document, its full body size
+    loadedDocs.reserve( top.size() );
+    overhead.reserve( top.size() );
+    demand.reserve( top.size() );
     for( const Recalled& r : top )
     {
         // V5: fileId is an INDEX into files[], and this VERIFY guards the NEAREST dereference — which is
@@ -896,54 +1073,47 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         }
         if( !loaded )
         {
-            continue;
-        }
-        std::string body = std::move( *loaded );
-
-        const std::string demotedNote = formatDemotedNote( r.generated ) + sectionNote;
-        const std::string_view sepPath = rootArg.empty() ? std::string_view( ing.files[ r.fileId ] )
-                                                         : rw::sarif::rootRelativeUri( ing.files[ r.fileId ], recallRootPrefix );
-        const std::string sep         = formatRecallSeparator( sepPath, r.score, demotedNote );
-        const std::size_t sepBytes    = sep.size();
-
-        // the budget decision for THIS doc: full, sliced, or not at all. `used` is the payload so far.
-        std::size_t keepBytes    = body.size();
-        bool        isTruncated  = false;
-        if( maxBytes )
-        {
-            const std::size_t used  = payload.size();
-            const std::size_t floor = sepBytes + 2 + kRecallMinBodyBytes;
-            if( used + floor > payloadBudget )
-            {
-                break; // no room for a meaningful slice
-            }
-            const std::size_t room = payloadBudget - used - sepBytes - 2;   // 2 = the separator's own newline + body's
-            if( body.size() > room )
-            {
-                keepBytes   = ( room > kRecallTruncNoteBytes ) ? room - kRecallTruncNoteBytes : kRecallMinBodyBytes;
-                isTruncated = true;
-            }
+            continue;   // unreadable on disk: skipped, never a stub — counted by the capped note's budgetOmitted
         }
 
-        payload     += sep;
-        markupBytes += sepBytes;
+        const std::string      demotedNote = formatDemotedNote( r.generated ) + sectionNote;
+        const std::string_view sepPath     = rootArg.empty() ? std::string_view( ing.files[ r.fileId ] )
+                                                             : rw::sarif::rootRelativeUri( ing.files[ r.fileId ], recallRootPrefix );
+        LoadedDoc              doc;
+        doc.sep  = formatRecallSeparator( sepPath, r.score, demotedNote );
+        doc.body = std::move( *loaded );
+        overhead.push_back( doc.sep.size() + 2 );   // 2 = the separator's own newline + the body's
+        demand.push_back( doc.body.size() );
+        loadedDocs.push_back( std::move( doc ) );
+    }
+
+    const RecallShares shares = maxBytes ? allocateRecallShares( overhead, demand, payloadBudget ) : RecallShares{};
+    const std::size_t  emitCount = maxBytes ? shares.servedCount : loadedDocs.size();
+    shape.shareBytes = shares.shareBytes;   // H9: 0 = the share bound nothing, and the header then says nothing
+
+    for( std::size_t i = 0; i < emitCount; ++i )
+    {
+        LoadedDoc&        doc         = loadedDocs[i];
+        const bool        isTruncated = maxBytes && doc.body.size() > shares.alloc[i];
+        payload     += doc.sep;
+        markupBytes += doc.sep.size();
         if( isTruncated )
         {
-            const std::string note = truncateRecallBody( body, keepBytes );
+            // The marker is reserved at kRecallTruncNoteBytes and always costs less, so the allowance is
+            // under-used rather than overshot — the ceiling direction the whole budget path holds to.
+            const std::size_t keepBytes = shares.alloc[i] > kRecallTruncNoteBytes ? shares.alloc[i] - kRecallTruncNoteBytes
+                                                                                  : kRecallMinBodyBytes;
+            const std::string note      = truncateRecallBody( doc.body, keepBytes );
             payload     += note;
             markupBytes += note.size();
             ++shape.truncatedCount;
         }
         payload += '\n';
-        payload += body;    // append, not printf: an embedded NUL must not truncate the doc
+        payload += doc.body;    // append, not printf: an embedded NUL must not truncate the doc
         payload += '\n';
         markupBytes += 2;
-        bodyBytes   += body.size();
+        bodyBytes   += doc.body.size();
         ++shape.shownCount;
-        if( isTruncated )
-        {
-            break; // the budget is spent — the next doc would be a 0-byte stub
-        }
     }
 
     // the closing note. "no relevant documents" is reserved for a ranking that FOUND none — a budget that
@@ -1077,6 +1247,23 @@ inline std::string withHeaderAttrAfter( std::string_view fullHeaderLine, std::st
     return line;
 }
 
+// The third member of the family above: REMOVE an attribute the emitted document cannot vouch for. Both
+// callers are the withheld branch below, where a SHAPING fact (over_ceiling=, share_bytes=) would otherwise
+// stand on a header describing the one line that WAS printed. `attr` carries its own leading space and
+// trailing '=' — " over_ceiling=" — so it cannot match inside another attribute's value. Absent: no-op.
+inline std::string withoutHeaderAttr( std::string_view fullHeaderLine, std::string_view attr )
+{
+    std::string       line( fullHeaderLine );
+    const std::size_t at = line.find( attr );
+    if( at == std::string::npos )
+    {
+        return line;
+    }
+    const std::size_t nextAt = line.find( ' ', at + attr.size() );
+    line.erase( at, nextAt == std::string::npos ? std::string::npos : nextAt - at );
+    return line;
+}
+
 // Emit an already-built bundle under --token-budget's GATE personality (D10), returning the process exit
 // code: 3 — the map family's "too big" code — when the bundle's own est_tokens exceeds `budgetTokens`, 0
 // otherwise. Over budget, stdout gets ONLY the (corrected) header line plus a withheld note: §P6.8's lesson
@@ -1104,19 +1291,16 @@ inline int emitRecallBudgeted( std::FILE* out, const RecallBundle& bundle, std::
         if( headerEnd != std::string::npos )
         {
             std::string honest = withHeaderField( std::string_view( bundle.text ).substr( 0, headerEnd + 1 ), " shown=", 0 );
-            // F4/F5: over_ceiling= is a statement ABOUT est_tokens, and on this branch est_tokens is rewritten
-            // to price the refusal header — the only thing that was emitted. The flag arrived from the SHAPING
-            // stage, where it described the artifact this gate then withheld, so leaving it here puts a label
-            // on a 200-token document claiming it busted a 8000-token ceiling. The withheld artifact's own
-            // price is disclosed beside it (withheld_est_tokens=) and in the note, so nothing is lost; what
-            // goes is a marker no number on this line can confirm. (Measured on the audit's own probe:
+            // F4/F5 (over_ceiling=), §C4 (share_bytes=): both are SHAPING facts about the bundle this branch
+            // WITHHELD, and est_tokens= right beside them is rewritten to price the refusal header — the only
+            // thing that was emitted. Leaving them puts a label on a 200-token document claiming it busted an
+            // 8000-token ceiling, and a per-document share on a document that was never divided. What goes is
+            // in each case a marker no number on this line can confirm; the withheld artifact's own price stays
+            // beside them under withheld_est_tokens=, so nothing is lost. (Measured on the audit's own probe:
             // `over_ceiling=1 max_tokens=8000 budget_tokens=1500 est_tokens=200 withheld_est_tokens=6677` —
             // three ceilings and a price, none of which the flag was about.)
-            const std::size_t ocAt = honest.find( " over_ceiling=1" );
-            if( ocAt != std::string::npos )
-            {
-                honest.erase( ocAt, std::string_view( " over_ceiling=1" ).size() );
-            }
+            honest = withoutHeaderAttr( honest, " over_ceiling=" );
+            honest = withoutHeaderAttr( honest, " share_bytes=" );
             // F4: the two numbers the refusal turns on, beside each other and beside the price of what WAS
             // printed — est_tokens= stays normatively about this run's own output (182 tokens of header and
             // note), so the estimate that lost to the budget rides under the name that says what it is.

@@ -274,5 +274,137 @@ case "$MCP_FULL" in
     *) no "MCP budget_tokens=1000000: tail sentinel missing — explicit budget did not lift the ceiling" ;;
 esac
 
+# ── 8. SPREAD: the budget is divided across the matched documents, not handed to document #1 ────────
+# Harvest-B card C4. The §P2 arms above froze that --max-tokens BOUNDS the artifact; they never froze
+# WHO gets the bytes. buildRecall's budget loop was greedy first-fit — the first document was given all
+# the remaining room, truncated to fill it, and the loop then `break`ed — so ONE long top hit erased the
+# whole rest of the corpus at every budget:
+#
+#   157-doc agent-memory dir, --top-k=6 --max-tokens=5000  →  total=157 shown=1 truncated=1
+#   this corpus (1 huge + 5 small, ALL on-topic), --max-tokens=2000/5000/8000 → shown=1, shown=1, shown=1
+#
+# The count of documents an agent gets back was decided by the SIZE OF THE TOP HIT, not by the budget:
+# tripling the budget bought more of document #1 and never a second document. Five 150-byte documents
+# that would have cost 750 bytes of a 20,000-byte budget were dropped as "capped".
+#
+# The property frozen here is a RANGE, deliberately — not a fixed shown=. Too little spreading is the
+# defect above; too MUCH spreading is the opposite failure (dividing a budget by --top-k when only one
+# document matched, so a single-hit query returns one 240-byte stub and wastes 90% of the ceiling).
+# Arms 8.1/8.2 pin the floor, 8.4 pins the ceiling, 8.9 pins monotonicity between them.
+#
+# FAMILY (rule 4): the population is every front door onto the ranked-then-budgeted recall bundle —
+# derived from src/ here, not hard-coded, so a THIRD door added later fails 8.7 loudly instead of
+# silently keeping the old allocator. Today: verbs_for.h (CLI --recall) + mcpverbs.h (MCP memory_recall).
+echo "  ---- §8 spread (harvest-B C4) ----"
+S="$TMP/spread"; mkdir -p "$S"
+{
+    echo "# Quality delta gating exit codes"
+    for i in $( seq 1 2600 ); do
+        echo "The quality delta gate reports gating findings and the exit codes it returns; gating exit code $i."
+    done
+    echo "SENTINEL_SPREAD_BIG"
+} > "$S/big_gating.md"
+for n in a b c d e; do
+    {
+        echo "# Quality delta gating note $n"
+        echo "The quality delta gating exit codes note $n explains gating and exit codes for delta quality."
+        echo "SENTINEL_SPREAD_$n"
+    } > "$S/small_$n.md"
+done
+srun(){ perl -e 'alarm 60; exec @ARGV' "$BIN" "$S" --recall="$Q" --no-cache "$@" 2>"$TMP/serr"; }
+shown_of(){ head -1 "$1" | grep -oE ' shown=[0-9]+' | grep -oE '[0-9]+'; }
+
+srun --max-tokens=5000 > "$TMP/sp5.out"; SP5_RC=$?
+SP5_SHOWN="$( shown_of "$TMP/sp5.out" )"; SP5_B=$( wc -c < "$TMP/sp5.out" | tr -d ' ' )
+{ [ "$SP5_RC" = 0 ] && [ -n "$SP5_SHOWN" ] && [ "$SP5_SHOWN" -ge 4 ]; } \
+    && ok "8.1 spread: --max-tokens=5000 over 6 matched docs emits shown=$SP5_SHOWN (>=4) — the top hit does not take the whole budget" \
+    || no "8.1 spread: --max-tokens=5000 emits shown=$SP5_SHOWN of 6 matched (expected >=4, exit=$SP5_RC) — greedy first-fit: document #1 consumed the budget"
+SP_MISSING=""
+for n in a b c d e; do
+    grep -q "SENTINEL_SPREAD_$n" "$TMP/sp5.out" || SP_MISSING="$SP_MISSING small_$n"
+done
+SP_PRESENT=$(( 5 - $( printf '%s' "$SP_MISSING" | wc -w | tr -d ' ' ) ))
+[ "$SP_PRESENT" -ge 3 ] \
+    && ok "8.2 spread: $SP_PRESENT of 5 small on-topic docs reached the reader under a 5000-token budget" \
+    || no "8.2 spread: only $SP_PRESENT of 5 small on-topic docs emitted (missing:$SP_MISSING) — ~750 bytes of matched prose dropped from a ~12000-byte budget"
+SP_LIMIT=18750   # 5000 tok * 2.5 B/tok * 1.5 slack, the same outer bound arm 1 uses
+[ "$SP5_B" -le "$SP_LIMIT" ] \
+    && ok "8.3 spread: the artifact is still BOUNDED ($SP5_B <= $SP_LIMIT bytes) — spreading did not raise the ceiling" \
+    || no "8.3 spread: $SP5_B bytes exceeds $SP_LIMIT — the per-doc share overspent the budget"
+
+# 8.4 the opposite failure: ONE matching doc must still receive the WHOLE budget, never budget/top-k.
+O="$TMP/onehit"; mkdir -p "$O"
+{
+    echo "# Quality delta gating exit codes"
+    for i in $( seq 1 2600 ); do
+        echo "The quality delta gate reports gating findings and the exit codes it returns; gating exit code $i."
+    done
+} > "$O/big_gating.md"
+{
+    echo "# Unrelated glyph rasterization"
+    echo "Bezier tessellation, subpixel antialiasing and hinting for the text render layer."
+} > "$O/render.md"
+perl -e 'alarm 60; exec @ARGV' "$BIN" "$O" --recall="$Q" --no-cache --max-tokens=5000 > "$TMP/one.out" 2>/dev/null
+ONE_B=$( wc -c < "$TMP/one.out" | tr -d ' ' )
+ONE_SHOWN="$( shown_of "$TMP/one.out" )"
+{ [ "$ONE_SHOWN" = 1 ] && [ "$ONE_B" -ge 6000 ]; } \
+    && ok "8.4 no over-spread: a single matched doc still gets the whole budget (shown=1, $ONE_B bytes)" \
+    || no "8.4 no over-spread: single-hit corpus emitted shown=$ONE_SHOWN in $ONE_B bytes (expected shown=1, >=6000) — the budget was divided by --top-k instead of by the MATCH count"
+
+# 8.5 H9 ("a ceiling applied is a ceiling named"): the per-document share IS a ceiling. Named when it
+# bound a document; ABSENT when it bound nothing, the same silence-means-nothing-happened rule
+# truncated=/generated_demoted=/over_ceiling= already follow on this header.
+grep -qE ' share_bytes=[0-9]+' "$TMP/sp5.out" \
+    && ok "8.5 disclosure: the header names the per-document share it applied (share_bytes=)" \
+    || no "8.5 disclosure: a per-document ceiling was applied and named none — H9 violated: $( head -c 220 "$TMP/sp5.out" )"
+srun --max-tokens=1000000 > "$TMP/spfull.out"
+grep -qE ' share_bytes=' "$TMP/spfull.out" \
+    && no "8.5b disclosure: share_bytes= appears on an unbounded run where no share bound anything" \
+    || ok "8.5b disclosure: share_bytes= is absent when the share bound nothing (silence = it did not happen)"
+
+# 8.6 inert when the budget is not binding: every body whole, exactly as before this change.
+SPF_SHOWN="$( shown_of "$TMP/spfull.out" )"
+SPF_MISSING=""
+for s in SENTINEL_SPREAD_BIG SENTINEL_SPREAD_a SENTINEL_SPREAD_b SENTINEL_SPREAD_c SENTINEL_SPREAD_d SENTINEL_SPREAD_e; do
+    grep -q "$s" "$TMP/spfull.out" || SPF_MISSING="$SPF_MISSING $s"
+done
+{ [ "$SPF_SHOWN" = 6 ] && [ -z "$SPF_MISSING" ]; } \
+    && ok "8.6 inert at a non-binding budget: shown=6, every body whole (all tail sentinels present)" \
+    || no "8.6 inert at a non-binding budget: shown=$SPF_SHOWN, missing tails:$SPF_MISSING — spreading truncated a run it had no reason to touch"
+
+# 8.7 FAMILY: derive the front doors from src/, then exercise EVERY one of them at the same budget.
+DOORS="$( grep -rlE '(^|[^[:alnum:]_])recallFor\(' "$ROOT/src" | grep -v '/recall\.h$' | LC_ALL=C sort | xargs -n1 basename | tr '\n' ' ' )"
+DOOR_N=$( printf '%s' "$DOORS" | wc -w | tr -d ' ' )
+[ "$DOOR_N" = 2 ] \
+    && ok "8.7 family: exactly the 2 known recall front doors exist ($DOORS)" \
+    || no "8.7 family: src/ has $DOOR_N recall front doors ($DOORS) — a door was added and this gate does not exercise it"
+SINIT='{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+SCALL='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_recall","arguments":{"path":"'"$S"'","task":"'"$Q"'","budget_tokens":5000}}}'
+printf '%s\n%s\n' "$SINIT" "$SCALL" | perl -e 'alarm 60; exec @ARGV' "$BIN" --mcp >"$TMP/spmcp.out" 2>/dev/null
+MCP_SP="$( grep '"id":2' "$TMP/spmcp.out" )"
+MCP_SP_SHOWN="$( printf '%s' "$MCP_SP" | grep -oE ' shown=[0-9]+' | head -1 | grep -oE '[0-9]+' )"
+{ [ -n "$MCP_SP_SHOWN" ] && [ "$MCP_SP_SHOWN" = "$SP5_SHOWN" ] && [ "$MCP_SP_SHOWN" -ge 4 ]; } \
+    && ok "8.7b family: MCP memory_recall spreads identically to the CLI (shown=$MCP_SP_SHOWN on both doors)" \
+    || no "8.7b family: MCP memory_recall shown=$MCP_SP_SHOWN vs CLI shown=$SP5_SHOWN (both must be >=4) — the two doors do not share the allocator"
+
+# 8.8 determinism of the spread allocation (it is arithmetic over a sorted list; nothing may make it drift)
+srun --max-tokens=5000 > "$TMP/sp5b.out"
+cmp -s "$TMP/sp5.out" "$TMP/sp5b.out" \
+    && ok "8.8 spread allocation is deterministic (byte-identical run to run)" \
+    || no "8.8 spread allocation is NOT deterministic"
+
+# 8.9 monotonicity: a bigger budget may never return FEWER documents, AND somewhere on the scale it must
+# buy an additional one. This is what made the defect so hard to see from the outside — 2000, 5000 and 8000
+# tokens all returned exactly one document, so the flag looked like it was working (the artifact really did
+# grow) while the answer's SHAPE never moved. The low point is 400 tokens deliberately: too small for even
+# one readable share, so it exercises the last-resort floor at the same time (one document, not zero).
+srun --max-tokens=400  > "$TMP/sp04.out"
+srun --max-tokens=2000 > "$TMP/sp2.out"
+SP04_SHOWN="$( shown_of "$TMP/sp04.out" )"; SP2_SHOWN="$( shown_of "$TMP/sp2.out" )"
+{ [ -n "$SP04_SHOWN" ] && [ -n "$SP2_SHOWN" ] && [ "$SP04_SHOWN" -ge 1 ] && [ "$SP04_SHOWN" -le "$SP2_SHOWN" ] \
+      && [ "$SP2_SHOWN" -le "$SP5_SHOWN" ] && [ "$SP5_SHOWN" -gt "$SP04_SHOWN" ]; } \
+    && ok "8.9 monotone in the budget: shown=$SP04_SHOWN (400) <= $SP2_SHOWN (2K) <= $SP5_SHOWN (5K), and 5K > 400" \
+    || no "8.9 not monotone in the budget: shown=$SP04_SHOWN (400) / $SP2_SHOWN (2K) / $SP5_SHOWN (5K) — a bigger budget bought no additional document (or a starved one served none)"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
