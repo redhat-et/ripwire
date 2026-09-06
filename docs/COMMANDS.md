@@ -616,7 +616,7 @@ $ ./build/ripwire . --no-stable --top-k=3
 
 **Answers:** ego graph around SYM   [--around-depth=N, default 1] [--around-fanout=K, default 32] (default depth 1 since 2026-09-05: depth 2 was 3x the whole default map on this repo;
 
-the root's depth= says which; --around-depth=2 restores the 2-hop neighbourhood) the root echoes all three (of= depth= fanout=), so the boundary of what could appear is readable
+the root's depth= says which; --around-depth=2 restores the 2-hop neighbourhood) the root echoes all three (of= depth= fanout=), so the boundary of what could appear is readable and, when a bound actually CUT, which one: depth_truncated="1" (a symbol one hop past depth= is absent) / fanout_cut="N" (N distinct symbols the fanout cap dropped, absent from the whole answer, exact not a floor). Neither is emitted when its bound cut nothing, so absent = the bound did not bind and raising it would return nothing new
 
 **Try it**
 

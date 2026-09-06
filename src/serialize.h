@@ -1463,9 +1463,41 @@ struct MapAnnotations
         int         depth  = 0;     // of the ego walk (depth=)
         int         fanout = 0;     // per-hop neighbour cap (fanout=)
         std::size_t defs   = 0;     // definitions the seed NAME has; >1 means a pick was made
+        // harvest B card C2: the bound that BIT, not only the bound that was SET. Stating depth=/fanout= made
+        // the boundary readable; it did not tell the reader whether either one CUT — and "fanout=32" alone
+        // cannot distinguish a ceiling that never bound from a knife. Both render ONLY when non-zero, so a
+        // neighbourhood the bounds did not clip is byte-identical to before (presence has to mean something).
+        std::uint32_t fanoutCut      = 0;       // symbols the fanout cap dropped that are absent from the whole answer (exact)
+        bool          depthTruncated = false;   // ≥1 symbol one hop past the last emitted hop is absent
     };
     SeedDisclosure seed{};
 };
+
+// ---- C2 (harvest B): the seeded map's BITE disclosure, attribute half and legend half -------------------
+// Kept beside each other and out of serialize() so the pair can never drift: an attribute this tool emits
+// with no legend clause is exactly what legendcoveragecheck exists to catch, and the two conditions below
+// are the SAME condition written once each.
+inline std::string seedBiteAttrs( const MapAnnotations::SeedDisclosure& s )
+{
+    // countFieldIfAbove IS the "shown only when it says something the default doesn't already imply" idiom
+    // (see its comment above) — exactly this attribute's rule, so it composes rather than re-derives it.
+    std::string a = s.depthTruncated ? std::string( " depth_truncated=\"1\"" ) : std::string();
+    return a += countFieldIfAbove( s.fanoutCut, 0, " fanout_cut=\"", "\"" );
+}
+
+// "" on a walk neither bound clipped — absent attributes, absent clause, zero bytes, byte-identical output.
+inline const char* seedBiteLegend( const MapAnnotations::SeedDisclosure& s ) noexcept
+{
+    if( !s.depthTruncated && s.fanoutCut == 0 )
+    {
+        return "";
+    }
+    return "<!-- a bound BIT this walk, so raising it would return more: depth_truncated=1 means at least one symbol one hop past "
+           "depth= is absent; fanout_cut=N means N distinct symbols were dropped by the fanout= cap and appear NOWHERE here (exact, "
+           "not a floor: a neighbour another hub re-admitted is not counted). Neither attribute is emitted when its bound cut "
+           "nothing, so absent means that bound did not bind and raising it returns nothing new. The knobs are around-depth=N and "
+           "around-fanout=K. -->";
+}
 
 // §B2.1 — the ranker-specific legend clause, one per non-default ranker, emitted ONLY on that ranker's map
 // for the same reason kChurnRankLegend is: a flag-only fact does not belong in the string every other run
@@ -1977,6 +2009,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                   "neighbours kept per hop are its whole boundary, so a row's absence means outside them, not nonexistent. "
                   "defs= (only when >1) = that NAME has N definitions and the lowest-id one was walked; qualify with "
                   "file:name or @FILE:LINE to pick another. -->";
+        legend += seedBiteLegend( ann.seed );   // C2: charged only on a run whose root carries a bite attribute (the at= rule)
     }
     if( metrics )
     {
@@ -2130,6 +2163,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             h += " depth=\"";   h += std::to_string( ann.seed.depth );     h += "\"";
             h += " fanout=\"";  h += std::to_string( ann.seed.fanout );    h += "\"";
             if( ann.seed.defs > 1 ) { h += " defs=\"";  h += std::to_string( ann.seed.defs );  h += "\""; }
+            h += seedBiteAttrs( ann.seed );   // C2: each bound's BITE, right after the bound it qualifies (empty when neither bit)
         }
         // §A9.6: after at= (so gitstampcheck's `<r at="<sha>` byte sequence is unmoved) — see MapAnnotations.
         if( churnWindow != nullptr ) { h += " rank_by=\"";  h += ann.churnRankLabel;  h += "\" window=\"";  h += escapeXml( *churnWindow, esc );  h += "\""; }

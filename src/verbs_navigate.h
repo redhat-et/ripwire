@@ -2322,8 +2322,9 @@ std::optional<int> runAround( const MainDispatch& d )
         // M20: --around renders through the shared map serializer, so its root used to be the PLAIN map
         // root — no of=, no depth=, no fanout=. The seed and the two bounds that decide what the
         // neighbourhood contains now ride on it (serialize.h::MapAnnotations::SeedDisclosure).
+        // C2 (harvest B): the last two are which bound CUT — only the walk knows, so they ride out of EgoGraph.
         rw::MapAnnotations aroundAnn;
-        aroundAnn.seed = { ing.symbols[ focus ].name, cfg.aroundDepth, cfg.aroundFanout, definitionCountOfName( ing, focus ) };
+        aroundAnn.seed = { ing.symbols[ focus ].name, cfg.aroundDepth, cfg.aroundFanout, definitionCountOfName( ing, focus ), eg.fanoutCut, eg.depthTruncated };
 
         serialize( stdout, ing, rank, g.outOff, g.outTargets, int( eg.nodes.size() ), cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, false, g.outProv.empty() ? nullptr : &g.outProv, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, /*autoOrder=*/false, /*outEstTokens=*/nullptr, aroundCompose.tokens + aroundRoutes.tokens + wrap.tokens, aroundAnn, /*statsFirstScreen=*/false, aroundRootArg, &g.locPinOut, g.externalCalls );
 

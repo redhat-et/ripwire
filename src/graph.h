@@ -2622,6 +2622,13 @@ struct EgoGraph
     std::vector<NodeId>       nodes;       // focus first, then by (hopDist, NodeId)
     std::vector<std::uint8_t> hopDist;     // parallel to nodes
     std::vector<std::int8_t>  direction;   // -1 caller-side, +1 callee-side, 0 focus
+    // ── which bound actually BIT (harvest B card C2). The bounds themselves already ride the --around root
+    //    (depth=/fanout=, M20); these two say whether either one CUT, which is the half a reader needs to
+    //    tell "X is not a neighbour" from "X was outside the cap". Both are EXACT, never floors: each is
+    //    measured against the FINAL node set, so a neighbour one site's cap dropped and another site
+    //    re-admitted is not counted as missing.
+    std::uint32_t             fanoutCut      = 0;       // distinct symbols the fanout cap dropped that appear NOWHERE in `nodes`
+    bool                      depthTruncated = false;   // ≥1 symbol adjacent to the final frontier is absent: the DEPTH bound ended the walk
 };
 
 // §P8 seam 2: a pasted `p="path:line"` locator → the bare path. --hotspots/--clones/--grep/--lint/
@@ -2881,6 +2888,50 @@ inline std::vector<NodeId> resolveAllByScopeQualified( const IngestResult& ing, 
 // carry the same spec grammar as separate loops, and the moment the Scope::name tier landed in both, the
 // clone lens flagged the pair — one resolver, one pick rule, no drift.
 
+// ---- which bound BIT (EgoGraph::fanoutCut / ::depthTruncated) -------------------------------------------
+// Both answers are scored against the FINISHED walk, which is why they are two small passes after it rather
+// than counters inside it: a cut EVENT is not a lost symbol. `dist` is the walk's visit map (<0 = never
+// reached), so "still missing at the end" is one comparison and neither number can overclaim.
+
+// distinct ids the fanout cap dropped that NO other expansion site went on to admit. Exact, not a floor.
+// Deterministic: sort + unique over ids, then an ascending scan. `dropped` is consumed (sorted in place).
+inline std::uint32_t egoFanoutCut( const std::vector<int>& dist, std::vector<NodeId>& dropped )
+{
+    std::sort( dropped.begin(), dropped.end() );
+    dropped.erase( std::unique( dropped.begin(), dropped.end() ), dropped.end() );
+    std::uint32_t missing = 0;
+    for( NodeId v : dropped )
+    {
+        if( v < dist.size() && dist[v] < 0 )
+        {
+            ++missing;
+        }
+    }
+    return missing;
+}
+
+// did the DEPTH bound end the walk, or did the walk exhaust its component? A non-empty final frontier is not
+// proof on its own — those nodes may have no unseen neighbours left, in which case the bound cost nothing.
+// The honest test is one adjacency pass: does any frontier node touch a symbol this answer lacks?
+inline bool egoDepthTruncated( const Graph& g, const std::vector<int>& dist, const std::vector<NodeId>& frontier )
+{
+    const std::size_t N    = dist.size();
+    const auto*       inRo = g.inEdges.rowOffsets();
+    const auto*       inCi = g.inEdges.colIndices();
+    for( NodeId u : frontier )
+    {
+        for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
+        {
+            if( g.outTargets[k] < N && dist[ g.outTargets[k] ] < 0 ) { return true; }
+        }
+        for( std::uint32_t k = inRo[u]; k < inRo[u + 1]; ++k )
+        {
+            if( inCi[k] < N && dist[ inCi[k] ] < 0 ) { return true; }
+        }
+    }
+    return false;
+}
+
 // k-hop neighbourhood of `focus`, BOTH directions (callees via out-edges, callers via in-edges),
 // fan-out-capped per node by (weight desc, NodeId asc). dist=min on first visit. Deterministic.
 inline EgoGraph egoGraph( const Graph& g, NodeId focus, int depth = 2, int fanout = 32 )
@@ -2903,6 +2954,7 @@ inline EgoGraph egoGraph( const Graph& g, NodeId focus, int depth = 2, int fanou
 
     struct Nb { NodeId v; float w; std::int8_t d; };
     std::vector<NodeId> frontier = { focus };
+    std::vector<NodeId> droppedByFanout;   // every id the cap cut, at every site; deduped and re-checked below
     for( int hop = 1; hop <= depth && !frontier.empty(); ++hop )
     {
         std::vector<NodeId> next;
@@ -2922,6 +2974,9 @@ inline EgoGraph egoGraph( const Graph& g, NodeId focus, int depth = 2, int fanou
             {
                 std::partial_sort( nbs.begin(), nbs.begin() + fanout, nbs.end(),
                                    []( const Nb& a, const Nb& b ) { return a.w != b.w ? a.w > b.w : a.v < b.v; } );
+                // record the cut ids BEFORE the resize; they are scored against the final node set afterwards
+                std::transform( nbs.begin() + fanout, nbs.end(), std::back_inserter( droppedByFanout ),
+                                []( const Nb& n ) { return n.v; } );
                 nbs.resize( fanout );
             }
             std::sort( nbs.begin(), nbs.end(), []( const Nb& a, const Nb& b ) { return a.v < b.v; } );   // stable visit order
@@ -2938,6 +2993,8 @@ inline EgoGraph egoGraph( const Graph& g, NodeId focus, int depth = 2, int fanou
         }
         frontier = std::move( next );
     }
+    eg.fanoutCut      = egoFanoutCut( dist, droppedByFanout );        // see both helpers above: scored against
+    eg.depthTruncated = egoDepthTruncated( g, dist, frontier );       // the FINISHED walk, so neither overclaims
     return eg;
 }
 
