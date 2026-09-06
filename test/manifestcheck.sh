@@ -32,6 +32,37 @@ text = open(sys.argv[1]).read()
 m = re.search(r'for _g in (.*?); do', text, re.S)
 sys.exit('no loop found') if not m else print(len(m.group(1).split()))
 " "$REGRESSION" )"
+# ── SYNTAX ARM: test/regression.sh must actually PARSE ────────────────────────────────────────────
+# Nothing in this repository syntax-checks the file that drives every gate. Verified empirically:
+# appending an unterminated `if` to regression.sh leaves `bash -n` reporting "syntax error: unexpected
+# end of file" while THIS gate still exits 0 -- and CI agrees, because ci.yml runs pargates.py, which
+# carries skip={"regression.sh"} and only PARSES the file for gate names, never executing it. The only
+# other gate using `bash -n` is hookcheck.sh, which does not target this file.
+#
+# That matters most at a merge. The conflict this file takes is inside the single `for _g in ...; do`
+# line, and a resolution that leaves it unterminated -- or that produces TWO loops -- ships green
+# through the full local suite and through CI. Running the suite is not the same as running the driver.
+if bash -n "$REGRESSION" 2>/dev/null; then
+    printf 'PASS: (SYNTAX) test/regression.sh parses — the driver of every gate is itself syntactically valid\n' 
+else
+    printf 'FAIL: test/regression.sh does not parse:\n'
+    bash -n "$REGRESSION" 2>&1 | sed 's/^/    /'
+    fail=1
+fi
+# CONTROL: corrupt a real copy and re-run the identical check over it. Asserts the injection took
+# before trusting the outcome -- an unmutated copy would pass and prove nothing.
+synTmp="$( mktemp -t manifestcheck_syn.XXXXXX )"
+cp "$REGRESSION" "$synTmp"
+printf '\nif [ 1 = 1 ]; then\n' >> "$synTmp"
+if cmp -s "$REGRESSION" "$synTmp"; then
+    printf 'FAIL: (SYNTAX) mutation control did not take — the copy is unchanged, so it proves nothing\n'; fail=1
+elif bash -n "$synTmp" 2>/dev/null; then
+    printf 'FAIL: (SYNTAX) mutation control is inert: bash -n accepts a deliberately unterminated copy\n'; fail=1
+else
+    printf 'PASS: (SYNTAX) mutation control: the same check rejects a deliberately unterminated copy\n' 
+fi
+rm -f "$synTmp"
+
 # ── TAIL ARM: nothing may sit between the gate list and `do` ────────────────────────────────────────
 # A gate name parked AFTER the loop's `; do` is not in the loop and never runs, yet BOTH existing arms
 # stay green: "every gate FILE is listed" matches the name anywhere in the file, and the count is
@@ -266,6 +297,28 @@ for name in scripts:
             print( "test/%s: %s used at line %d, defined at line %d" % ( name, fname, k + 1, defAt + 1 ) )
 PY
 )"
+# I2 — a gate that CALLS a reporting helper it never DEFINES. The arm above catches use-before-
+# definition; it cannot see use-without-definition, and the consequence is identical and quieter: the
+# call expands to nothing, bash prints "ok: command not found" on stderr, the arm produces no PASS and
+# no FAIL, and the gate exits 0 having silently skipped a check. I did exactly this in this file an
+# hour ago -- two SYNTAX arms called `ok`, which manifestcheck.sh does not define, and the run stayed
+# green. Restricted to the known reporting-helper names, because a gate legitimately calls hundreds of
+# real commands and only these four decide whether a result is reported at all.
+undefHelper="$( for _f in "$ROOT"/test/*.sh; do
+    for _h in ok no pass warn; do
+        grep -qE "^[[:space:]]*${_h}[[:space:]]+[\"']" "$_f" 2>/dev/null || continue
+        grep -qE "^[[:space:]]*(function[[:space:]]+)?${_h}[[:space:]]*\(\)" "$_f" 2>/dev/null && continue
+        printf '%s calls %s but never defines it\n' "$( basename "$_f" )" "$_h"
+    done
+done )"
+if [ -z "$undefHelper" ]; then
+    printf 'PASS: no gate calls a reporting helper it never defines\n'
+else
+    printf 'FAIL: a gate calls a reporting helper it never defines (the arm prints nothing and the gate still exits 0):\n'
+    printf '%s\n' "$undefHelper" | sed 's/^/        /'
+    fail=1
+fi
+
 if [ -z "$usedBeforeDef" ]; then
     printf 'PASS: no gate calls a shell function above its definition\n'
 else
