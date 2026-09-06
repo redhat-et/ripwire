@@ -217,6 +217,30 @@ else
     no "(8) the flagless XML map is empty or leaked colour-mode payload"
 fi
 
+# ── 9) PALETTE — the shared cx/churn ramp reads as a blue→orange TEMPERATURE spectrum (the owner's own
+#      framing: "hotspots... colour spectrum from dark blue to orange"), not a green→red traffic light.
+#      Green→red leans entirely on red-green hue discrimination, which protanopia/deuteranopia (~8% of
+#      men) cannot make — the two ends can look alike. A blue→teal→gold→orange→deep-orange ramp keeps
+#      every step on the blue-yellow axis those forms of colour-blindness do NOT impair, and every stop
+#      is bright enough (contrast >= 4.9:1 against the canvas's #111 background, measured) to read on the
+#      dark canvas — a literal navy/near-black "dark blue" would vanish there instead. Pins the exact 5
+#      hex stops AND that neither the old green nor the old red stop survives on THIS ramp specifically —
+#      rampColor is grepped as its own line; the 'tested' mode's green/red PASS/FAIL binary (a different,
+#      deliberately-binary convention, colorForNode's 'tested' branch + its legend) is untouched by this
+#      arm on purpose, not by omission.
+rampLine="$( grep -m1 'var rampColor' "$TMP/out.html" )"
+if printf '%s' "$rampLine" | grep -qF "['#4fc3f7','#26c6da','#ffd54f','#ff9800','#e65100']"; then
+    ok "(9a) rampColor is the blue-to-orange 5-stop heat ramp"
+else
+    no "(9a) rampColor is not the expected blue-to-orange ramp"
+    printf '    got: %s\n' "$rampLine"
+fi
+if printf '%s' "$rampLine" | grep -q '#2ecc71\|#e74c3c'; then
+    no "(9b) rampColor still carries the old green/red traffic-light stop"
+else
+    ok "(9b) rampColor carries neither the old green nor the old red stop"
+fi
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "ALL PASS"
