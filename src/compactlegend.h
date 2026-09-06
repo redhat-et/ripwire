@@ -70,7 +70,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "uses",        "uses",        "resolvable use-sites of of=: <u role=call|macro|read|write|import|extends|type p=file:line in_id=>" },
     { "impact",      "impact",      "transitive blast radius of of=: <s t= n= p=> reach set, <f via= p=> importers" },
     { "path",        "path",        "one DIRECTED call path from= to to=, each <s t= n= p=> a hop; reachable=0 hops=0 when none" },
-    { "connect",     "connect",     "minimal joining subgraph over the terminals: <g> groups, <t n= p=> nodes, <e f= t=> edges, <unconnected>" },
+    { "connect",     "connect",     "minimal joining subgraph: <g> groups, <t> terminals, <s connects=> joins, <e f= t=> edges, <unconnected>" },
     { "at",          "at",          "enclosing-definition chain at p=:l=: sym= innermost, chain= outermost-first, <s n= t= l= el=> spans" },
     { "mentions",    "mentions",    "markdown FILES naming of= in backticks (docs=, sections=): <doc p= mentions=>; not a call edge" },
     { "whereis",     "whereis",     "every LOCAL ref whose tree holds sym= (refs_scanned=, blobs=), HEAD first: <hit ref= tip= date= p= l= kind= t=>" },
@@ -210,6 +210,12 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "tier_partial",      "tier_partial=1: tier elected under a partial classification" },
     { "dangling",          "dangling=1: matches nothing indexed", true },
     { "amb",               "amb=K: K calls split over several defs", true },
+    // A6 (2026-09-06): --connect's join-quality label. connects= is a plain count the purpose line already
+    // names; the LABEL is what needs a reading, because a reader who meets hub="1" with no floor beside it
+    // cannot tell what it is a label FOR. ONE term, not two: hub_floor= is unconditional on that root, so it
+    // always rides and can define hub="1" in the same clause — two terms did not fit the 400 B ceiling, and
+    // the ceiling is the point of this dialect. The full legend carries the derivation.
+    { "hub_floor",         "hub_floor=D: connects= >= D is hub=1, vacuous" },
     { "next",              "next=: the one pasteable follow-up", true },
     { "scrubbed",          "scrubbed=1: this CDATA is not the bytes (]]> split or C0 replaced)", true },
     { "preview",           "preview=1: an UNWRITTEN payload; <overwrite l= end= bytes=> = the span an apply replaces, CDATA as on disk (shown=/capped=1/elided_lines= when cut)" },

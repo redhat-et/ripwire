@@ -4592,10 +4592,26 @@ inline std::vector<char> testSymbolForwardReach( const IngestResult& ing, const 
 // pairwise distances are all ∞ within R form separate groups (§2.5) — singleton groups are the emitter's
 // <unconnected> block; the output ALWAYS contains every terminal (honest partitions, never a silent empty).
 //
+// §2.4a — WHICH of several equally-short joins. prev[] used to be the FIRST-discovered parent, and discovery
+// order is out-edges then in-edges, each ascending by node id — an id assigned in crawl order, which is
+// sorted by PATH. So among equally-short joins the reported one was decided by file name, and the answer to
+// "how do these two symbols relate?" came back as `empty`, `push_back`, `size` (see connectJoinBreadth
+// below for the measured population). The relaxation now runs on ties: a candidate parent at the SAME
+// distance replaces the incumbent iff ( connects, id ) is smaller — informativeness first, id still the
+// total final tie-break. Distance is untouched, so path length, node count and edge count are untouched:
+// this changes WHICH equally-short answer is returned and nothing else about the answer's shape. It does
+// NOT reach a hub at distance 2 that beats a meaningful join at distance 3; no tie-break can, and none is
+// claimed. Prim's (dist, minId, maxId) rule over terminal PAIRS is deliberately unchanged — the defect is a
+// parent choice, and on a 2-terminal --connect Prim has no choice to make at all.
+//
 // Determinism (§3, byte-identical by construction): BFS visits out-edges first then in-edges, each ascending
-// by id (both CSRs are id-sorted), so prev[] is the first-discovered = lexicographically-smallest-by-id equal-
-// length path; Prim ties break on (dist, minId, maxId); every emitted list is id-/(from,to)-sorted; truncation
-// drops from a sorted order. Pure integer BFS/MST — no float, no clock, no I/O; exact, not tolerance-banded.
+// by id (both CSRs are id-sorted); on a tie prev[] resolves by the (connects, id) minimum over EVERY parent
+// at the minimal distance — and because BFS expands in non-decreasing distance order, every such parent is
+// offered exactly once, so the winner is a minimum over a total order and cannot depend on expansion order
+// (the rule REMOVES an order dependence rather than adding one; prev[] chains still descend strictly in
+// distance, so they stay acyclic). Prim ties break on (dist, minId, maxId); every emitted list is
+// id-/(from,to)-sorted; truncation drops from a sorted order. Pure integer BFS/MST — no float, no clock, no
+// I/O; exact, not tolerance-banded.
 //
 // Complexity (§6): T bounded BFS = O( T·(V+E) ) worst case over the two existing CSRs — T is capped at
 // kMaxTerminals = 16 and R at kMaxRadius = 12, so in practice the radius-bounded frontier touches far less
@@ -4611,6 +4627,64 @@ namespace connectcfg
     inline constexpr std::uint32_t kMaxRadius     = 12;
     inline constexpr std::uint32_t kDefaultRadius = 6;
     inline constexpr std::uint16_t kUnreachable   = 0xFFFFu;   // BFS "not reached within R" sentinel
+}
+
+// ---- §2.4a how much a join EXPLAINS: the IDF of the Steiner search --------------------------------------
+// `connects(v)` = the number of DISTINCT symbols v joins in the UNDIRECTED view this search actually walks —
+// its callers PLUS its callees, both O(1) off the two CSRs the graph already carries. It is not fan-in
+// alone, because the search is not directed: a dispatcher that CALLS five hundred things joins any two of
+// them exactly as vacuously as a leaf five hundred things call.
+//
+// Why the number matters. A join node that connects everything connects nothing. `empty` carries 764 callers
+// in this repository, so "both call something named `empty`" is not a relationship between two symbols, it
+// is a coincidence of the STL — and --connect reported exactly that, because equal-distance alternatives
+// were resolved by node id, which is assigned in crawl order, which is sorted by path. Measured over an
+// 869-pair population of this repo's own call graph, 186 of the 201 wrong joins (92.5%) were an STL or hub
+// name. docs/EVALS.md, "--connect's equal-distance join", registers the mechanism and the PAIRED band this
+// is measured against (the population instrument belongs to the round that commissioned it, not to this file).
+inline std::uint32_t connectJoinBreadth( const Graph& g, NodeId v ) noexcept
+{
+    const std::size_t N = g.wOutDeg.size();
+    if( v >= N )
+    {
+        return 0;
+    }
+    std::uint32_t breadth = g.outOff[ v + 1 ] - g.outOff[ v ];
+    if( g.inEdges.rows() == N )                      // the same degrade condition the BFS below uses for haveIn
+    {
+        const auto* ro = g.inEdges.rowOffsets();
+        breadth += ro[ v + 1 ] - ro[ v ];
+    }
+    return breadth;
+}
+
+// The HUB FLOOR, derived rather than fitted. A node with `connects` neighbours manufactures C(connects,2)
+// derived symbol-pair relationships on its own; the graph ASSERTS `edges` of them. So the floor is the
+// smallest D whose derived count exceeds the whole graph's asserted count — D(D-1)/2 > edges — the degree at
+// which one node alone joins more distinct pairs than there are call edges to join anything with.
+// Closed-form integer bisection over one number the map header already prints: no histogram, no sort, no
+// float, and no constant fitted to make a population look good (this project rejects those on sight). It
+// self-scales as sqrt(2E), which is exactly why the round that commissioned it registered a PAIRED band —
+// the repository IS the corpus, so a rebase moves the floor and an absolute level would be meaningless.
+// 186 here at symbols=13909 edges=17144. A graph so dense that even D=65535 does not clear it returns 65535,
+// a floor nothing reaches: no row is labelled, which is the honest degrade rather than a wrong label.
+inline std::uint32_t connectHubFloor( const Graph& g ) noexcept
+{
+    const std::uint64_t edges = std::uint64_t( g.outTargets.size() );
+    std::uint32_t       lo = 2, hi = 0xFFFFu;        // pairs(65535) ~ 2.1e9, past any edge count this tool indexes
+    while( lo < hi )                                 // smallest D with D(D-1)/2 > edges (monotone in D)
+    {
+        const std::uint32_t mid = lo + ( hi - lo ) / 2;
+        if( std::uint64_t( mid ) * ( mid - 1 ) / 2 > edges )
+        {
+            hi = mid;
+        }
+        else
+        {
+            lo = mid + 1;
+        }
+    }
+    return lo;
 }
 
 // one reported call edge — ALWAYS true caller→callee direction, whichever way the undirected search walked it.
@@ -4677,6 +4751,19 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
     std::vector<std::vector<std::uint16_t>> dist( T );
     std::vector<std::vector<NodeId>>        prev( T );
     std::vector<std::vector<std::uint8_t>>  prevViaOut( T );
+
+    // §2.4a: at EQUAL distance, the parent that connects FEWER things wins; the node id is still the total
+    // final tie-break, so the result stays byte-identical run to run. See the header comment above and
+    // connectJoinBreadth for why this is the right question to ask of a join node.
+    const auto moreInformative = [ & ]( NodeId cand, NodeId cur ) noexcept -> bool
+    {
+        if( cur == kNoNode )
+        {
+            return true;   // defensive: only the BFS source has no parent, and its dist is 0 (never a tie)
+        }
+        const std::uint32_t bCand = connectJoinBreadth( g, cand ), bCur = connectJoinBreadth( g, cur );
+        return bCand != bCur ? bCand < bCur : cand < cur;
+    };
     {
         std::vector<NodeId> q;
         q.reserve( 256 );
@@ -4689,6 +4776,32 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
             dist[ti][ src ] = 0;
             q.clear();
             q.push_back( src );
+
+            // ONE relaxation step, shared by the out-CSR and in-CSR halves — they differ ONLY in the
+            // discovery channel they record. The two halves used to be the same four lines twice, and
+            // §2.4a's tie-break would have made them the same EIGHT lines twice: a rule with a comparison
+            // in it, written down twice, is how the two halves silently drift apart (this file's own
+            // shortestPath/shortestPathAny fold is the precedent, and --quality-delta flagged that one).
+            // `viaOut` is the CSR truth recorded at the moment of discovery: 1 = u CALLS v, 0 = v CALLS u.
+            const auto relax = [ & ]( NodeId u, std::uint16_t du, NodeId v, std::uint8_t viaOut )
+            {
+                if( v >= N )
+                {
+                    return;
+                }
+                if( dist[ti][v] == connectcfg::kUnreachable )
+                {
+                    dist[ti][v] = std::uint16_t( du + 1 );  prev[ti][v] = u;  prevViaOut[ti][v] = viaOut;
+                    q.push_back( v );
+                    return;
+                }
+                // §2.4a: an EQUAL-distance alternative parent — take it iff it explains more.
+                if( dist[ti][v] == du + 1 && moreInformative( u, prev[ti][v] ) )
+                {
+                    prev[ti][v] = u;  prevViaOut[ti][v] = viaOut;
+                }
+            };
+
             for( std::size_t head = 0; head < q.size(); ++head )
             {
                 const NodeId        u  = q[ head ];
@@ -4701,26 +4814,14 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
                 // out-edges first (ascending by construction — buildGraph stores targets ascending per source)
                 for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
                 {
-                    const NodeId v = g.outTargets[ k ];
-                    if( v >= N || dist[ti][v] != connectcfg::kUnreachable )
-                    {
-                        continue;
-                    }
-                    dist[ti][v] = std::uint16_t( du + 1 );  prev[ti][v] = u;  prevViaOut[ti][v] = 1u;
-                    q.push_back( v );
+                    relax( u, du, g.outTargets[ k ], 1u );
                 }
                 // then in-edges (row u's callers, ascending — the in-CSR fill preserves (from,to) sort order)
                 if( haveIn )
                 {
                     for( std::uint32_t k = inRo[u]; k < inRo[u + 1]; ++k )
                     {
-                        const NodeId v = inCi[ k ];
-                        if( v >= N || dist[ti][v] != connectcfg::kUnreachable )
-                        {
-                            continue;
-                        }
-                        dist[ti][v] = std::uint16_t( du + 1 );  prev[ti][v] = u;  prevViaOut[ti][v] = 0u;
-                        q.push_back( v );
+                        relax( u, du, inCi[ k ], 0u );
                     }
                 }
             }

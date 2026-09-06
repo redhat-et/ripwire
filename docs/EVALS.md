@@ -11594,3 +11594,118 @@ instruments sharing one constant rather than one instrument serving two routes. 
 BM25 parameters** a legitimate successor question, and it is deliberately left as a question: it needs
 its own registration, its own band, and an instrument this lane has not touched. Recorded here so the
 successor inherits the observation without inheriting a tuned constant.
+## `--connect`'s equal-distance join — informativeness before id, and the join's own disclosure — PRE-REGISTERED 2026-09-06 (after the RED gate at `52756446`, before any implementation code and before any number)
+
+**The defect, as measured by the round that commissioned this lane.** Over an **869-item population of
+symbol pairs drawn from this repository's own call graph**, `--connect=A,B` returned a join node other than
+the expected one in 201 cases. **186 of those 201 (92.5%) join through an STL or hub name**: the
+most-returned join nodes are `empty` **79** times, `VERIFY` 27, `DYNMAP_VERIFY` 26, `push_back` 22,
+`reserve` 20, `size` 18, `min` 13, `find` 6. The worked example:
+`./build/ripwire . --connect=computeQualityDelta,gitFileCommitCountsInDayWindow` answers
+`<s n="empty" t="method" p="src/notes.h:431"/>` — the reported relationship between a quality-delta
+computation and a git-history query is that *both call something named `empty`*. **A join node that
+connects everything connects nothing**: this is the `--connect` analogue of IDF, and the verb does not
+apply it.
+
+**Where it comes from.** `connectSubgraph()` (`src/graph.h`) runs one bounded BFS per terminal and records
+the **first-discovered** parent; discovery order is out-edges then in-edges, each ascending by node id — and
+node ids are assigned in crawl order, which is **sorted by path**. So among several *equally short* joins,
+the one reported is the one whose FILE sorts first. This is the production-verb instance of the defect §7's
+"The sampler measured the corpus, not the ranker" already recognises in the eval harness, where
+`rankOfSymbol` broke score ties by symbol id (i.e. by path) and was moved to midrank.
+
+**What is claimed — two parts, both additive, both deterministic.**
+
+1. **Informativeness before id, at equal distance only.** During each terminal's BFS, when a node `v` is
+   reached again at *exactly* the distance it already has, the candidate parent `u` replaces the incumbent
+   iff `( connects(u), u ) < ( connects(prev[v]), prev[v] )`, where `connects(x)` is the number of DISTINCT
+   symbols `x` connects in the undirected view the search actually walks — its **callers plus its callees**,
+   both read O(1) off the CSRs the graph already carries. The comparison is a total order over two integers,
+   so the final tie-break is still the node id and byte-identical output is still guaranteed by
+   construction. Because BFS expands in non-decreasing distance order, *every* parent at the minimal
+   distance is offered exactly once, so the winner does not depend on expansion order — the change REMOVES
+   an order dependence rather than adding one. Distance is untouched, so the path length, the node count and
+   the edge count of the answer are untouched: the "minimal" contract is preserved exactly and only *which*
+   of several equally-short answers is chosen moves.
+   **Scope, stated:** the Prim terminal-MST tie-break `(dist, minId, maxId)` over terminal PAIRS is NOT
+   changed. The measured defect is the identity of a returned join node, which is a BFS parent choice; on a
+   2-terminal `--connect` — the whole measured population — Prim has no choice to make at all.
+   **What it cannot fix, stated:** a hub join at distance 2 still beats a meaningful join at distance 3
+   outright. No tie-break reaches that case, and this registration does not claim to.
+
+2. **Disclosure — the join says how much it explains.** Every Steiner `<s>` row carries `connects="N"`; a
+   row whose `N` is at or above the derived floor also carries `hub="1"`; the `<connect>` root carries
+   `hub_floor="N"`, so the label is always readable against the threshold that produced it. `connects=` is a
+   threshold-free FACT and is emitted unconditionally — an honest *"the only join found is a symbol that
+   connects 764 other things"* is worth more than a confident bare `empty`. Terminals do not carry it (they
+   were named by the caller; the search chose the intermediaries), exactly as `defs=` already splits.
+
+**The floor is DERIVED, not fitted — and here is the derivation.** A join node `J` asserts one relationship
+per pair of its neighbours, so on its own it manufactures `C(connects(J), 2)` derived relationships. The
+graph asserts `E` call edges. **`hub_floor` is the smallest `D` with `D·(D−1)/2 > E`** — the degree at which
+a single node manufactures more distinct symbol-pair joins than the entire call graph contains asserted
+edges. Nothing is fitted to make this population look good: it is closed-form integer arithmetic over one
+number the map header already prints, it self-scales with the corpus (it grows as `√(2E)`), and it needs no
+histogram, no sort and no extra pass. On this repository today (`symbols=13909 edges=17144`) it evaluates to
+**`hub_floor=186`**. For calibration, measured before this registration by
+`--graph-query='fanin(all,N)'`: 4917 symbols have fan-in ≥ 1, 139 have ≥ 10, 20 have ≥ 100, 10 have ≥ 200
+— so the label fires on roughly the top ten-to-fifteen nodes of 13909 (≈0.1%), and `empty@src/notes.h`
+(764 callers) is one of them while `computeDelta@src/quality.h` (3 callers + 38 callees = 41) is not.
+**`hub_floor` moves with the corpus, and the repository IS the corpus** — which is precisely why the band
+below is paired rather than an absolute level.
+
+**What was already known when this registration was written — stated so the prediction is not read as
+blinder than it is.** Before writing this section the following were measured: (a) the fixture behaviour now
+pinned by `test/connectjoincheck.sh`; (b) the fan-in histogram quoted above; (c) the worked example's
+candidate set — `--callers`/`--callees` on both terminals show their neighbourhoods intersect in exactly
+three nodes, `computeDelta@src/quality.h:5284` (41 connections), `empty@src/notes.h:431` (764) and
+`empty@src/scipoverlay.h:106`. Conjunct **C7** is therefore an ANNOUNCED consequence of the mechanism, not
+a blind prediction, and is marked as such in the table. Nothing about the 869-item population's before/after
+distribution — the headline, C2 — was measured, and it is not measurable from this lane: the population
+instrument belongs to the commissioning round.
+
+**Instruments.** (a) `test/connectjoincheck.sh`, committed RED at `52756446` **before any implementation
+code**, in `test/regression.sh` in the same commit — 11 FAIL / 11 PASS, with three mutation self-tests
+already passing so each assertion is known to be able to see its own regression. It pins BEHAVIOUR: one
+logical graph (two terminals; a 42-connection hub and a 2-connection informative join, both at the same
+distance) laid out TWICE with the file names swapped, and the answer must be the same join either way.
+(b) The commissioning round's 869-pair population, re-run by its owner against the same corpus with the
+before and after binaries. (c) The 543-gate battery.
+
+**The band, fixed here, verbatim. It is a PAIRED comparison — the same corpus and the same population,
+before vs after — never an absolute level; this project has twice had an absolute-level figure invalidated
+by corpus drift while paired deltas were unaffected. A miss on any conjunct is a registered NEGATIVE with
+the numbers, and the band is never moved after a number.**
+
+| conjunct | requirement |
+| --- | --- |
+| **C1** gate | `test/connectjoincheck.sh` green on `build/ripwire` **and** on `asan/ripwire` under `LSAN_OPTIONS=suppressions=lsan_suppressions.txt` — all 11 arms that are RED at `52756446` PASS, with the three mutation self-tests still passing |
+| **C2** direction — **the headline, paired** | over the same 869-pair population, before (`52756446`) vs after: the count of pairs whose reported Steiner set contains a node with `connects ≥ hub_floor` **strictly DECREASES**, and hub→non-hub moves **strictly exceed** non-hub→hub moves. Equal counts, or a net increase, is a registered NEGATIVE. The magnitude is REPORTED, not banded — no honest floor for it can be derived from what this lane knows |
+| **C3** minimality invariance — paired, per pair | for **every** pair in the population, `terminals=`, `nodes=`, `edges=`, `radius=` and `groups=` are identical before and after. Only the identity of `<s>` rows (and the `<e>` rows incident to them) may move. ONE pair whose subgraph SIZE changes falsifies "same distance, same size" and is a NEGATIVE |
+| **C4** connectivity invariance | the `<unconnected>` partition is unchanged over the population — a tie-break may not decide whether two symbols are related at all |
+| **C5** determinism | `./build/ripwire . >a; ./build/ripwire . >b; diff -q a b` clean; `--connect` ×3 byte-identical and warm == cold (gate arm G); no float, no clock, no hash-order in the new path |
+| **C6** battery | the 543-gate suite shows **no NEW failure** against the same run at `52756446`; pinned `--connect` captures that legitimately move are updated in the implementation commit, never after it |
+| **C7** worked example — **announced, not blind** (see above) | `--connect=computeQualityDelta,gitFileCommitCountsInDayWindow` reports `computeDelta` (41 connections) rather than `empty` (764) |
+| **C8** surface consistency | CLI and MCP `connect` carry the same `connects=`/`hub=`/`hub_floor=`; the full legend DEFINES all three; the compact dialect gives `hub=`/`hub_floor=` a reading and stays under its 400 B ceiling; `legendcoveragecheck`, `compactlegendcheck`, `attrvocabcheck`, `mcpattrparitycheck` green |
+
+**The prediction, including the honest possibility that the mechanism does nothing.** The tie-break can only
+fire where an equal-distance ALTERNATIVE exists. Where a hub is the *only* join at the minimal distance,
+part 1 is inert by construction and only part 2's disclosure moves — and lane A3 of this same round derived
+a threshold from BM25's arithmetic, registered INERT, and was right. So, stated as three separable
+outcomes:
+
+- **Predicted (most likely): C2 POSITIVE with a large residue.** Hub names are hubs precisely because many
+  symbols touch them, which makes them the likeliest *first* discovery but does not create an alternative.
+  The prediction is that a substantial minority-to-majority of the 186 hub joins have a lower-`connects`
+  alternative at the same distance and flip, while the rest stay — and are then served WITH `hub="1"` and
+  their count, which is the honest answer for them.
+- **Possible: C2 INERT.** If this graph's hub joins are overwhelmingly the *only* short join between their
+  pairs, the count barely moves. That would be a registered NEGATIVE on C2 and the lane would ship the gate,
+  the disclosure (part 2 stands on its own — it is a §3 honesty fix, not a ranking claim) and revert part 1.
+- **Excluded by construction, and gated: C3/C4 regressions.** The mechanism cannot change a distance, so a
+  changed `nodes=`/`edges=`/`groups=` would be a bug in the implementation, not a property of the idea.
+
+**The falsifiable claim.** *"When several joins are equally short, `--connect` reports the one that explains
+the most — and when the only join it can find explains nothing, it says so instead of naming it
+confidently."* C2 and C7 are how the first half can be false; C1's arms (D)/(E)/(F) and C8 are how the
+second half can be.

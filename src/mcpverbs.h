@@ -2653,6 +2653,13 @@ inline constexpr char kConnectHeader[] =
     " whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=."
     " defs= on a terminal row = that NAME has N definitions and the lowest-id one was used; qualify with file:name"
     " to pick another. Steiner rows never carry it."
+    " connects= on a Steiner row = how many DISTINCT symbols that intermediary joins (its callers plus its"
+    " callees, the undirected view this search walks), so you can see how much the join actually explains;"
+    " hub=\"1\" says connects= is at or above hub_floor= on the root, and hub_floor= is DERIVED from this graph,"
+    " not tuned: the smallest D with D(D-1)/2 > edges, the degree at which one node alone joins more distinct"
+    " symbol pairs than the whole call graph has edges. Read a hub=\"1\" join as \"the only join found is a symbol"
+    " that connects that many other things\", never as a relationship. Equal-distance joins are resolved by the"
+    " LOWER connects= (node id only breaks a remaining tie), so the answer does not depend on file order."
     " max_tokens= is the token ceiling this bundle was SHAPED against (the max_tokens flag; absent = none"
     " was asked for); est_tokens= is what it cost, truncated=\"paths\" says the shaping had to cut, and"
     " over_ceiling=\"1\" says est_tokens exceeds max_tokens anyway (the trim ran out of things to drop before it"
@@ -2663,7 +2670,10 @@ inline constexpr char kConnectHeader[] =
 // BOUNDED rather than measured — a wide start-tag with every counter at five digits and truncated="paths"
 // present, plus the 10-byte close. Over-covering slightly is the safe direction: an estimate that
 // UNDER-reports is the defect being fixed here, one that over-reports merely trims a little earlier.
-inline constexpr std::size_t kConnectRootBytes = 200;   // H5/M15: + counts_floor="1" (17 B) + graph_ambiguous=/graph_unresolved= (≤ 59 B), with margin
+inline constexpr std::size_t kConnectRootBytes = 260;   // H5/M15: + counts_floor="1" (17 B) + graph_ambiguous=/graph_unresolved= (≤ 59 B); A6: + hub_floor= (≤ 18 B).
+                                                        // 200 was already short of the widest start tag it claims to bound (that spelling measures ~228 B
+                                                        // before hub_floor=), and short is the ONE direction this constant may not be — re-derived by
+                                                        // counting the wide spelling attribute by attribute, then rounded up for the next attribute's margin.
 
 // The ONE estimator both the trim-loop fit check and the printed est_tokens go through. Never inline the
 // arithmetic at a call site again: two copies of this formula is exactly how the payload-only scope bug
@@ -2700,6 +2710,10 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     // once here because connectEstTokens must be called with the same value in both places.
     const std::string  connectRootAttr = rootArg.empty() ? std::string() : ( " root=\"" + ex( rootArg ) + "\"" );
     const std::size_t  connectExtraBytes = connectRootAttr.size() + std::strlen( rootRelPathsLegend( !rootArg.empty() ) );
+
+    // §2.4a: the derived hub threshold every Steiner row's connects= is read against, computed ONCE (it is a
+    // property of the graph, not of a row) and named on the root so the label is never a bare assertion.
+    const std::uint32_t hubFloor = connectHubFloor( g );
 
     // per-file content cache for the Steiner sig= attributes (each needed file read at most once).
     HashMap<std::uint32_t, std::string> contents;
@@ -2815,6 +2829,20 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
             for( NodeId sN : steiner )
             {
                 symAttr( payload, "s", sN );
+                // §2.4a disclosure (non-negotiable #3). The Steiner row is the thing the agent did NOT name
+                // and is being asked to believe, so it says how much it explains: connects= is how many
+                // distinct symbols this intermediary joins, and hub="1" says that count is at or above the
+                // graph's own derived floor. An honest "the only join found connects 764 other things" is
+                // worth more than a confident bare `empty`. Both are FACTS off the CSR, so they are never
+                // dropped by the --max-tokens trim (which drops sig= bodies and then whole legs); they cost
+                // ~14 B a row and they are the reason the row can be trusted or discounted at all.
+                // Terminals never carry them — the caller named those; the search chose these.
+                const std::uint32_t sConnects = connectJoinBreadth( g, sN );
+                payload.append( " connects=\"" ).append( std::to_string( sConnects ) ).append( "\"" );
+                if( sConnects >= hubFloor )
+                {
+                    payload.append( " hub=\"1\"" );
+                }
                 if( withSigs )
                 {
                     const Symbol&      sy  = ing.symbols[ sN ];
@@ -2842,6 +2870,13 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
             nodeTotal += 1;
             payload.append( "<unconnected radius=\"" ).append( std::to_string( res.radius ) ).append( "\">" );
             symAttr( payload, "t", grp.terminals[ 0 ] );
+            // The SAME disclosure the <g> arm makes above, on the arm that makes the STRONGER claim. An
+            // unconnected terminal is still resolveFocus's lowest-id pick among N same-named definitions,
+            // and "no relationship within radius R" is exactly where answering about one of N silently
+            // changes the answer. Derived from definitionCountOfName — the same call the <g> arm uses —
+            // so the two can never drift into disagreeing about what the name resolved to.
+            const std::size_t loneDefs = definitionCountOfName( ing, grp.terminals[ 0 ] );
+            if( loneDefs > 1 ) { payload.append( " defs=\"" ).append( std::to_string( loneDefs ) ).append( "\"" ); }
             payload.append( "/></unconnected>" );
         }
 
@@ -2886,8 +2921,8 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
         estTokens = connectEstTokens( payload.size(), connectExtraBytes + std::strlen( connectOverAttr ) );
     }
     std::fprintf( out, "%s%s", kConnectHeader, rootRelPathsLegend( !rootArg.empty() ) );
-    std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\"%s%s%s%s%s>",
-                  res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups, estTokens,
+    std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\" hub_floor=\"%u\"%s%s%s%s%s>",
+                  res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups, estTokens, hubFloor,
                   connectCeiling, connectOverAttr,
                   truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str(),
                   graphCountFloorAttrXml( g ).c_str() );   // H5/M15: nodes=/edges= are read off the name-based CSR — a floor, with the gauge
