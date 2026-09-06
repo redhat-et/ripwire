@@ -235,31 +235,31 @@ symbols had been winning ties they had not earned because their file sorted earl
 convention itself: midrank is deliberately pessimistic, scoring a two-way tie at the top as 1.5, which
 takes no recall@1 credit where id-tiebreak handed it rank 1 whenever gold's id was lowest.
 
-### `ripwire src/` (population 3,010, scored 3,010, rule=exhaustive)
+### `ripwire src/` (population 3,008, scored 3,008, rule=exhaustive)
 ```
   subtoken  name         0.745     61.1%     91.8%     96.0%
-  subtoken  doc-phrase   0.967     95.2%     98.3%     98.8%
+  subtoken  doc-phrase   0.967     95.3%     98.4%     98.8%
   name-exact name         0.960     91.3%     99.3%     99.4%
   name-exact doc-phrase   0.016      0.8%      2.4%      2.6%
   anchored  name         0.748     62.3%     91.1%     94.6%
   anchored  doc-phrase   0.963     94.5%     98.2%     98.7%
   routed    name         0.960     91.3%     99.3%     99.4%
-  routed    doc-phrase   0.967     95.2%     98.3%     98.6%
+  routed    doc-phrase   0.967     95.3%     98.3%     98.6%
 ```
-(routing chose name-exact on 3,008/3,010 NAME queries.)
+(routing chose name-exact on 3,006/3,008 NAME queries.)
 
-### `ripwire .` (repo root; population 3,521, scored 3,521, rule=exhaustive)
+### `ripwire .` (repo root; population 3,519, scored 3,519, rule=exhaustive)
 ```
-  subtoken  name         0.723     59.2%     88.9%     93.4%
+  subtoken  name         0.724     59.2%     88.9%     93.4%
   subtoken  doc-phrase   0.930     90.9%     95.2%     95.9%
   name-exact name         0.922     85.5%     97.5%     98.4%
   name-exact doc-phrase   0.017      0.6%      2.7%      3.5%
   anchored  name         0.726     60.6%     87.6%     92.1%
-  anchored  doc-phrase   0.925     89.9%     94.9%     95.8%
+  anchored  doc-phrase   0.925     90.0%     94.9%     95.8%
   routed    name         0.922     85.5%     97.5%     98.5%
   routed    doc-phrase   0.929     90.9%     95.1%     95.7%
 ```
-(routing chose name-exact on 3,519/3,521 NAME queries.)
+(routing chose name-exact on 3,517/3,519 NAME queries.)
 
 **The verdict below is unchanged by the re-measurement** — every ordering it rests on still holds:
 name-exact wins the NAME mode, collapses on doc-phrase, subtoken+body is the mirror image, and routed

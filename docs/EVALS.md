@@ -444,7 +444,7 @@ this section is simply the first measurement of *this* configuration under a des
 
 ### Query-shape routing
 
-Known-item retrieval over EVERY doc-commented symbol in the corpus (3,010 in `src/`, 3,521 at the
+Known-item retrieval over EVERY doc-commented symbol in the corpus (3,008 in `src/`, 3,519 at the
 root — the eval prints its own `population=`/`scored=`/`rule=`), two synthetic queries per symbol (the
 whole name; a stopworded phrase from the doc comment's first line), four rankers, gold rank measured.
 Reproduce with `ripwire <dir> --eval-retrieval`. Recorded in `bench/ANSWERQUALITY.md`.
@@ -463,7 +463,7 @@ verified identical on a pristine worktree (no untracked local files in the sampl
 | --- | --- | --- |
 | Name-shaped queries, `src/` — MRR | 0.745 | **0.960** |
 | Name-shaped queries, `src/` — recall@1 | 61.1% | **91.3%** |
-| Name-shaped queries, repository root — MRR | 0.723 | **0.922** |
+| Name-shaped queries, repository root — MRR | 0.724 | **0.922** |
 | Name-shaped queries, repository root — recall@1 | 59.2% | **85.5%** |
 
 The router is **confidence-gated**, and the gate is the interesting part: doc-phrase queries score

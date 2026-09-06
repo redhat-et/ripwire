@@ -733,11 +733,6 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
     std::vector<RowOutcome> outcomes[kArmCount];
     std::size_t             routerMagnetWins = 0;
 
-    // Same hoist as --eval-retrieval and --eval-mined: lexicalScores re-opens every file in the tree on
-    // every call, so a loop over prompts re-read the whole corpus per prompt (METHODOLOGY §3 — the sibling
-    // instances of a defect are the defect). Byte-identical scores; the scan just stops going via the kernel.
-    const std::vector<std::string> corpusText = buildLexicalCorpusText( ing );
-
     for( const PromptRow& row : rows )
     {
         const std::vector<std::string> qUnique = uniqueQueryTokens( row.prompt );
@@ -753,7 +748,7 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
             const RouteChoice        rc   = chooseForRanker( ing, row.prompt );
             const std::vector<float> base = ( rc.which == LexMode::NameExact )
                                           ? lexicalScoresNameExact( ing, row.prompt )
-                                          : lexicalScores( ing, g.outOff, g.outTargets, row.prompt, 0, nullptr, 0, {}, &corpusText );
+                                          : lexicalScores( ing, g.outOff, g.outTargets, row.prompt );
             const std::vector<float> fileScore = maxPoolToFiles( ing, base, fileCount );
             std::vector<double>      pooled( skillCount, 0.0 );
             for( std::uint32_t f = 0; f < fileCount; ++f )
