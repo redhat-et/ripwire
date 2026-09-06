@@ -230,15 +230,26 @@ fi
 # header comment was a round older again at "27 folded plus 220 surveyed". Prose that illustrates a
 # derived number is itself a claim about that number, and an unchecked illustration drifts exactly
 # like an unchecked headline -- it just looks like commentary, which is why nobody re-derives it.
-disj="$( grep -oE 'field study [0-9]+ folded \*plus\* [0-9]+ surveyed' "$LINEAGE" | head -1 )"
+# The sentence carries FOUR numbers, not two: "N folded plus M surveyed -- not X picked out of Y".
+# An earlier draft of this arm checked only N and M. That is exactly where round-c's copy of this
+# sentence went wrong -- "41 folded plus 237 surveyed -- not 41 picked out of 239", with 237 and 239
+# two clauses apart -- and nothing saw it. All four must equal the table-derived pair. Flattened
+# through tr because the sentence wraps across a line break in the source.
+disjFlat="$( tr '\n' ' ' < "$LINEAGE" )"
+disj="$( printf '%s' "$disjFlat" | grep -oE 'field study [0-9]+ folded \*plus\* [0-9]+ surveyed[^.]*picked *out of [0-9]+' | head -1 )"
 dj_folded="$( printf '%s' "$disj" | grep -oE '[0-9]+ folded' | grep -oE '^[0-9]+' )"
 dj_surveyed="$( printf '%s' "$disj" | grep -oE '[0-9]+ surveyed' | grep -oE '^[0-9]+' )"
 if [ -z "$dj_folded" ] || [ -z "$dj_surveyed" ]; then
     no "(E10) docs/LINEAGE.md has no 'field study N folded plus M surveyed' sentence to check"
-elif [ "$dj_folded" = "$d_folded" ] && [ "$dj_surveyed" = "$d_surveyed" ]; then
-    ok "(E10) LINEAGE's disjointness sentence ($dj_folded folded + $dj_surveyed surveyed) matches its own tables"
 else
-    no "(E10) LINEAGE's disjointness sentence says $dj_folded folded + $dj_surveyed surveyed, but its tables enumerate $d_folded + $d_surveyed"
+    dj_picked="$( printf '%s' "$disj" | grep -oE 'not [0-9]+ picked' | grep -oE '[0-9]+' )"
+    dj_outof="$(  printf '%s' "$disj" | grep -oE 'out of [0-9]+'     | grep -oE '[0-9]+' )"
+    if [ "$dj_folded" = "$d_folded" ] && [ "$dj_surveyed" = "$d_surveyed" ] \
+       && [ "$dj_picked" = "$d_folded" ] && [ "$dj_outof" = "$d_surveyed" ]; then
+        ok "(E10) LINEAGE's disjointness sentence agrees with its own tables on all four numbers ($dj_folded/$dj_surveyed/$dj_picked/$dj_outof)"
+    else
+        no "(E10) LINEAGE's disjointness sentence states $dj_folded folded + $dj_surveyed surveyed, not $dj_picked picked out of $dj_outof — its tables enumerate $d_folded + $d_surveyed"
+    fi
 fi
 # (E10-control) MUTATE A REAL COPY and re-run the identical extraction over it. An earlier draft of
 # this control compared d_folded+9 against d_folded -- arithmetic that is true by construction and
