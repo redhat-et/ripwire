@@ -671,11 +671,21 @@ inline std::string gitRepoToplevel( const std::string& absDir )
 // that probe a dozen times for a number that cannot change under it — the same argument gitRepoToplevel's
 // memo makes, and the same shape.
 inline std::int64_t gitHeadCommitEpoch( const std::string& root );
+inline bool         hasEnclosingGitRepo( const std::string& root );
 
 inline std::int64_t gitHeadCommitEpochCached( const std::string& root )
 {
     static std::mutex                          anchorMutex;
     static HashMap<std::string, std::int64_t>  anchorByRoot;
+
+    // A NON-GIT root must cost ZERO git subprocesses, not one that merely fails — test/nongitqmetricscheck.sh
+    // pins that with a fake `git` on PATH that records every invocation, and this anchor read is on the path
+    // of every history-windowed verb, so without the stat-based pre-check the whole rich-retrieval lane on a
+    // non-repo tree grew a popen. (Found by that gate, in this lane, exactly as it was written to.)
+    if( !hasEnclosingGitRepo( root ) )
+    {
+        return 0;
+    }
 
     {
         const std::lock_guard<std::mutex> lock{ anchorMutex };

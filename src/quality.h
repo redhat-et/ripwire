@@ -2833,13 +2833,14 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
     unsigned churnMonths = 0, std::vector<std::uint32_t>* outChurn = nullptr,
     std::uint32_t onlyRoot = UINT32_MAX )
 {
-    // F1: the churn sub-window's cutoff, resolved ONCE from HEAD's own committer epoch — the same anchor the
-    // co-change window (inside gitLogNameOnlyRaw) uses, so the two horizons this one walk yields agree.
-    const std::int64_t churnCutoff = rw::defaultWindowCutoffEpoch( root, churnMonths );
     if( !hasEnclosingGitRepo( root ) )
     {
-        return resolveCommitStream( RawCommitStream{}, ing, maxFiles, churnCutoff, outChurn, onlyRoot );
+        return resolveCommitStream( RawCommitStream{}, ing, maxFiles, /*churnCutoff=*/0, outChurn, onlyRoot );
     }
+    // F1: the churn sub-window's cutoff, resolved ONCE from HEAD's own committer epoch — the same anchor the
+    // co-change window (inside gitLogNameOnlyRaw) uses, so the two horizons this one walk yields agree.
+    // AFTER the no-repo check, so a non-git root never reaches the anchor read at all.
+    const std::int64_t churnCutoff = rw::defaultWindowCutoffEpoch( root, churnMonths );
 
     const std::string headSha = gitHeadSha( root );
     if( headSha.empty() )
