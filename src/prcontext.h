@@ -625,6 +625,7 @@ inline std::string prLegendText( const std::string& baseEscaped )
                  "as their own <file> section); it is NOT the <f> row count — see the row-cap sentence below. Files are ordered by BLAST RADIUS (transitive dependents descending, path breaking ties), not alphabetically. "
                  "sections= on changed-symbols counts a doc file's headings, collapsed into that number instead of one callers-zero row each; count= still counts every INDEXED symbol, sections included, so count minus sections is the number of rows that follow. "
                  "Every nested list below is a TOP-N subset of its element's own total, fixed per element (impact <f> at 20, per-symbol <caller> at 12, cochange <partner> at 12, tests <test> at 40, owners <author> at 5 — the L0 defaults; "
+                 "&lt;cochange window= commits=&gt;: the git window the partners were mined in (a DEFAULT window is measured back from HEAD's own committer date and says so: 18mo@HEAD) and how many commits it contained — commits=0 means the window could not look, which is not the same fact as no partners. "
                  "max-tokens only lowers these further via the trim ladder, nothing raises them past L0): each capped element carries its own shown=/capped= pair so the cut is never silent — for the untrimmed list use impact=SYM/callers=SYM "
                  "(blast radius/callers), affected=FILE or situ (tests), cochange (partners), or owners (authors) instead. direction= names which SIDE this bundle reviews (worktree-since-head, head-since-fork, head-since-ref-tip); "
                  "a no-ref-work row says the base ref's tip IS the merge base, i.e. it carries no divergent work of its own. deterministic. "
@@ -954,7 +955,8 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     // A4-P10: mine the co-change file-sets ONCE for the whole bundle (was one `git log` popen PER changed
     // file — unbounded storm). Deterministic for a fixed HEAD, so every per-file probe below is identical.
     // Mined ONCE here even when the budget forces several render passes below (each pass is pure re-emission).
-    const auto coSets = gitCommitFileSets( root, ing, "18 months ago", 30, nullptr, onlyRoot );
+    const auto        coSets   = gitCommitFileSets( root, ing, "18 months ago", 30, nullptr, onlyRoot );
+    const std::string coWindow = defaultWindowLabel( root, "18mo" );   // F2: <cochange commits=> had no window to read it against
 
     // A4-P?: mine file OWNERSHIP ONCE too (was gitFileAuthors(root, ing, f) — one `git log` popen PER changed
     // file, the residual author-storm: a 213-file diff spawned 213 subprocesses). The whole-repo pass mines
@@ -1144,7 +1146,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             const PrShownCap pSc = prShownCap( outside.size(), trim.cochangeCap );
             if( trim.cochangeCap > 0 )
             {
-                std::fprintf( o, "<cochange commits=\"%u\" partners=\"%zu\" shown=\"%zu\" capped=\"%u\">", commits, outside.size(), pSc.shown, pSc.capped );
+                std::fprintf( o, "<cochange window=\"%s\" commits=\"%u\" partners=\"%zu\" shown=\"%zu\" capped=\"%u\">", coWindow.c_str(), commits, outside.size(), pSc.shown, pSc.capped );
                 for( std::size_t i = 0; i < pSc.shown; ++i )
                 {
                     std::fprintf( o, "<partner p=\"%s\" deg=\"%.2f\"%s/>", ex( prPathRel( outside[i]->fileId ) ).c_str(),
@@ -1154,7 +1156,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             }
             else
             {
-                std::fprintf( o, "<cochange commits=\"%u\" partners=\"%zu\" shown=\"%zu\" capped=\"%u\"/>", commits, outside.size(), pSc.shown, pSc.capped );
+                std::fprintf( o, "<cochange window=\"%s\" commits=\"%u\" partners=\"%zu\" shown=\"%zu\" capped=\"%u\"/>", coWindow.c_str(), commits, outside.size(), pSc.shown, pSc.capped );
             }
 
             // (7) owners of this file (gitmine, recency-weighted). A4-P?: answered from the once-mined

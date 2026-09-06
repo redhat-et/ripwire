@@ -219,9 +219,133 @@ inline bool cliRefusesFileList( const IngestResult& ing, std::string_view flag, 
 // the "showing N of M <noun>" form; §H6 (W3FIX) gives the other two the SAME form from the SAME function
 // rather than two more hand-written parentheticals — the sentence that exists three times is the sentence
 // that gets fixed once. Empty when nothing was dropped, so an untruncated section is byte-unchanged.
+
+// ── the named file's own DECLARATION/DEFINITION partner (F3, round C) ────────────────────────────────────
+//
+// TAKEN FROM COCOINDEX. Measured in the round-C head-to-head: `--situ=db/wal_manager.cc` on RocksDB spent
+// 3,104 bytes and never named `db/wal_manager.h` — the gold answer — anywhere in its output, while an
+// embedding search returned that header as result #1 in 55 bytes. Same shape on `table/get_context.cc`.
+// ripwire's S2 recall was 2/14. The cause is not retrieval: section [1] ranks by DEPENDENT-SYMBOL COUNT,
+// which systematically surfaces the largest test files and can never surface the header, because a header
+// does not transitively depend on the source that implements it. It is a different relationship, and one
+// ripwire ALREADY KNOWS — it needs no embeddings (G3 stands; no embedding mode is being added).
+//
+// THE RELATIONSHIP, stated so it is not a C++ special case: another file where the SAME (scope, name)
+// symbols are DECLARED that this file DEFINES, or vice versa. That covers a C/C++ header/impl pair, an
+// Objective-C .h/.m, a Python .pyi stub and a TypeScript .d.ts, without reading one file extension or
+// comparing one basename — both of which are guesses about a convention rather than facts about the code.
+//
+// THE DECL-vs-DEF HALF IS LOAD-BEARING, and it was found by dogfooding rather than reasoned out. A first
+// version matched on (scope, name) alone under a majority guard, and `--situ` on this repo's own 17-file
+// diff answered `test/w2verbscheck.sh (10 shared symbols)` — every shell gate here defines `ok`, `no`,
+// `fail`, `run`. Those files all DEFINE those names; none DECLARES them, so they are not a decl/def pair and
+// the corrected rule drops them to zero shared. A symbol is a DEFINITION when its span carries a body
+// (`sigEndByte < endByte`, the same test quality.h's body-shaped checks use) and a pure DECLARATION when it
+// does not; a shared name counts only when the two sides disagree about which it is.
+//
+// THE SECOND GUARD is a MAJORITY test, per (changed file, partner) PAIR and never in aggregate — the same
+// dogfooding run showed why: an aggregate `min()` taken against the LARGEST changed file makes the bar
+// EASIER for every small partner, which is the opposite of what a guard is for. A pair qualifies when the
+// shared symbols are at least half of the smaller of the two files: 2*shared >= min(symbols(c), symbols(p)).
+// The row publishes `shared`, so the reader audits the judgment rather than trusting it.
+//
+// The partner is NOT part of the blast radius and is never merged into it: the counts in section [1] stay
+// exactly what they were, and this is a separate, separately-labelled fact printed above them.
+struct DeclDefPartner
+{
+    std::uint32_t fileId = 0;
+    std::uint32_t shared = 0;   // symbols this file DECLARES that a changed file DEFINES, or vice versa
+};
+
+inline std::vector<DeclDefPartner> declDefPartners( const IngestResult& ing, const std::vector<char>& changedFile )
+{
+    const std::uint32_t         F = std::uint32_t( ing.files.size() );
+    std::vector<DeclDefPartner> out;
+    std::vector<std::uint32_t>  symsPerFile( F, 0 );
+    for( const Symbol& s : ing.symbols )
+    {
+        ++symsPerFile[ s.fileId ];
+    }
+
+    // a symbol whose span carries a body is a DEFINITION; one whose span ends at its signature is a pure
+    // DECLARATION. The one test, spelled once, so both passes below cannot read it differently.
+    const auto isDefinition = []( const Symbol& s ) { return s.sigEndByte < s.endByte; };
+
+    // Every CHANGED symbol, indexed by its (scope \x1f name) identity. \x1f cannot occur in an identifier,
+    // so the join is exact and needs no second field.
+    struct ChangedSym { std::uint32_t fileId; bool isDef; };
+    std::vector<ChangedSym>                            changedSyms;
+    HashMap<std::string, std::vector<std::uint32_t>>   byKey;   // key -> indices into changedSyms
+    std::string                                        key;
+    for( const Symbol& s : ing.symbols )
+    {
+        if( !changedFile[ s.fileId ] )
+        {
+            continue;
+        }
+        key.assign( s.scope ).append( 1, '\x1f' ).append( s.name );
+        byKey[ key ].push_back( std::uint32_t( changedSyms.size() ) );
+        changedSyms.push_back( ChangedSym{ s.fileId, isDefinition( s ) } );
+    }
+    if( changedSyms.empty() )
+    {
+        return out;
+    }
+
+    // ONE pass over the non-changed symbols, tallying per (changed file, partner file) PAIR. The pair count
+    // is bounded by the matches themselves, so a diff that shares nothing costs one hash lookup per symbol.
+    HashMap<std::uint64_t, std::uint32_t> pairShared;
+    for( const Symbol& s : ing.symbols )
+    {
+        if( changedFile[ s.fileId ] )
+        {
+            continue;
+        }
+        key.assign( s.scope ).append( 1, '\x1f' ).append( s.name );
+        const auto it = byKey.find( key );
+        if( it == byKey.end() )
+        {
+            continue;
+        }
+        const bool otherIsDef = isDefinition( s );
+        for( std::uint32_t ci : it->second )
+        {
+            if( changedSyms[ci].isDef == otherIsDef )
+            {
+                continue;   // both define it, or both merely declare it — a shared NAME, not a decl/def pair
+            }
+            ++pairShared[ ( std::uint64_t( changedSyms[ci].fileId ) << 32 ) | s.fileId ];
+        }
+    }
+
+    // the majority test, per pair; a partner keeps its BEST pair, so one qualifying changed file is enough.
+    std::vector<std::uint32_t> bestShared( F, 0 );
+    for( const auto& [ pair, shared ] : pairShared )
+    {
+        const std::uint32_t c = std::uint32_t( pair >> 32 );
+        const std::uint32_t p = std::uint32_t( pair & 0xFFFFFFFFu );
+        const std::uint32_t smaller = ( symsPerFile[c] < symsPerFile[p] ) ? symsPerFile[c] : symsPerFile[p];
+        if( 2u * shared >= smaller && shared > bestShared[p] )
+        {
+            bestShared[p] = shared;
+        }
+    }
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        if( bestShared[f] != 0 )
+        {
+            out.push_back( DeclDefPartner{ f, bestShared[f] } );
+        }
+    }
+    std::sort( out.begin(), out.end(), [ & ]( const DeclDefPartner& a, const DeclDefPartner& b )
+               { return a.shared != b.shared ? a.shared > b.shared : ing.files[a.fileId] < ing.files[b.fileId]; } );
+    return out;
+}
+
 inline constexpr std::size_t kSituBlastFilesShown = 8;    // section [1] — blast-radius file rows
 inline constexpr std::size_t kSituTestRowsShown   = 25;   // section [2] — tests-to-run rows
 inline constexpr std::size_t kSituPartnerRowsShown = 8;   // section [3] — co-change partner rows
+inline constexpr std::size_t kSituPartnerFileRowsShown = 4;   // section [1] — decl/def partner rows
 
 inline std::string situShowingNote( std::size_t shownCap, std::size_t rowTotal, const char* rowNoun )
 {
@@ -230,6 +354,38 @@ inline std::string situShowingNote( std::size_t shownCap, std::size_t rowTotal, 
         return {};
     }
     return " (showing " + std::to_string( shownCap ) + " of " + std::to_string( rowTotal ) + " " + rowNoun + ")";
+}
+
+// Section [1]'s decl/def rows and section [3]'s empty-co-change line, as their own emitters: writeSituation
+// is already this file's largest function and the quality bar counts what a caller ADDS to it, so a fact that
+// is nameable gets a name. `pathRel` is the caller's own root-relative spelling, passed in rather than
+// re-derived, so the rows here cannot disagree with the rows around them.
+template <typename PathRelFn>
+inline void writeSituDeclDefRows( std::FILE* out, const std::vector<DeclDefPartner>& partnerFiles, PathRelFn pathRel )
+{
+    if( partnerFiles.empty() )
+    {
+        return;
+    }
+    std::fprintf( out, "        decl/def partners of the file(s) you named (%zu)%s — symbols DECLARED there and DEFINED here, or the reverse (a header/impl pair, a stub, a partial class); NOT transitive dependents, so they are absent from the list below:\n",
+                  partnerFiles.size(), situShowingNote( kSituPartnerFileRowsShown, partnerFiles.size(), "files" ).c_str() );
+    for( std::size_t i = 0; i < partnerFiles.size() && i < kSituPartnerFileRowsShown; ++i )
+    {
+        const std::string_view pp = pathRel( partnerFiles[i].fileId );
+        std::fprintf( out, "        %.*s  (%u shared symbols)\n", int( pp.size() ), pp.data(), partnerFiles[i].shared );
+    }
+}
+
+// F2: the two causes the old "(none, or no git history)" conflated, told apart by the only fact that
+// separates them — how many commits the window actually contained.
+inline void writeSituEmptyCochangeLine( std::FILE* out, std::size_t coCommits )
+{
+    if( coCommits == 0 )
+    {
+        std::fprintf( out, "        (the window above mined 0 commits — no git history reached it, so this zero is NOT a measurement of coupling)\n" );
+        return;
+    }
+    std::fprintf( out, "        (none — %zu commits were mined and none co-edited a file outside your diff)\n", coCommits );
 }
 
 inline void writeSituation( std::FILE* out, const std::string& root, const IngestResult& ing, const Graph& g,
@@ -336,6 +492,9 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     }
     std::fprintf( out, "  [1] blast radius: %zu symbols across %zu files transitively depend on these changes%s\n",
                   reach.size(), affected.size(), blastNote.c_str() );
+    // F3: the decl/def partner FIRST — it is the answer to "what else has to change with this file" that the
+    // dependent-symbol ranking below can never produce, because a header does not depend on its own source.
+    writeSituDeclDefRows( out, declDefPartners( ing, changedFile ), situPathRel );
     {   // H5/M15: the same floor + gauge the XML graph verbs mark, in this report's prose (one fold: graphGaugeAttrXml's)
         std::size_t gaugeAmb = 0, gaugeUnresolved = 0;
         for( std::uint32_t k : g.ambOut )        { gaugeAmb        += k; }
@@ -381,7 +540,9 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     // (3) co-change partners NOT in the diff — "you usually edit these together; did you forget?"
     // A4-P10: mine the commit file-sets ONCE (not one `git log` popen per probed file) and answer every probe
     // from the shared sets — identical result (mining is deterministic for a fixed HEAD), no subprocess storm.
-    const auto                     coSets = gitCommitFileSets( root, ing, "18 months ago", 30, nullptr, onlyRoot );
+    const auto                     coSets     = gitCommitFileSets( root, ing, "18 months ago", 30, nullptr, onlyRoot );
+    const std::string              coWindow   = defaultWindowLabel( root, "18mo" );   // F2: see SituationFacts::coWindow
+    const std::size_t              coCommits  = coSets.size();
     HashMap<std::uint32_t, double> partnerDeg;
     std::uint32_t                  probed = 0;
     for( std::uint32_t f = 0; f < F && probed < 20; ++f )
@@ -409,11 +570,14 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     std::sort( partners.begin(), partners.end(), [ & ]( const auto& a, const auto& b )
                { return a.second != b.second ? a.second > b.second : ing.files[a.first] < ing.files[b.first]; } );
     // §H6 (W3FIX): same undisclosed cap as [2] — 18 partners, 8 rows on this repo's own src/graph.h probe.
-    std::fprintf( out, "  [3] co-change — usually edited with these but NOT in your diff (%zu)%s:\n",
-                  partners.size(), situShowingNote( kSituPartnerRowsShown, partners.size(), "files" ).c_str() );
+    // F2: window=/commits= ride on the header, so the count below is readable as a measurement — or as the
+    // absence of one. --cochange, the component this composes, already emits both.
+    std::fprintf( out, "  [3] co-change — usually edited with these but NOT in your diff (%zu) window=\"%s\" commits=\"%zu\"%s:\n",
+                  partners.size(), coWindow.c_str(), coCommits,
+                  situShowingNote( kSituPartnerRowsShown, partners.size(), "files" ).c_str() );
     if( partners.empty() )
     {
-        std::fprintf( out, "        (none, or no git history)\n" );
+        writeSituEmptyCochangeLine( out, coCommits );
     }
     for( std::size_t i = 0; i < partners.size() && i < kSituPartnerRowsShown; ++i )
     {
@@ -441,6 +605,16 @@ struct SituationFacts
                                                                   //   so existing readers of blastRadius are untouched.
     std::vector<std::uint32_t>                    tests;          // test files among blastRadius (path asc) — the tests to run
     std::vector<std::pair<std::uint32_t, double>> forgotten;     // (file, co-change degree) usually edited together but NOT in the diff (deg desc, path asc)
+    // F2 (round C): the WINDOW `forgotten` was mined in, and how many commits it actually saw. `forgotten`
+    // is a COMPOSED number — --cochange, the component verb, refuses loudly (`commits="0" window="18mo@HEAD"`,
+    // exit 1) on a tree whose window is empty, while every composing surface rendered a bare `(0)` and, in the
+    // CLI report, "(none, or no git history)". That conflates "no partners found" with "the window could not
+    // look", which is exactly what non-negotiable #3 forbids: a zero means "none found", never "none exists".
+    // Carried on the FACTS, not re-derived per surface, so the CLI report, the MCP JSON and --handoff cannot
+    // disclose it three ways or two of them forget.
+    std::vector<DeclDefPartner>                   declDef;       // F3: files defining the SAME (scope, name) symbols as the changed set — the header/impl pair the transitive list cannot reach
+    std::string                                   coWindow;      // the window label its co-change was mined in ("18mo@HEAD"), empty only if never mined
+    std::size_t                                   coCommits = 0; // commits that window actually contained — 0 ⇒ the zero above is not a measurement
     std::vector<std::pair<std::uint32_t, std::uint64_t>> hotspots; // (changed file, cx×churn score) for high-risk changed files (score desc, path asc)
     std::vector<std::string>                      modulesTouched; // distinct TOP-LEVEL directory of each changed file (sorted)
 };
@@ -520,6 +694,9 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
     // A4-P10: mine the commit file-sets ONCE and answer every probe from the shared sets (was one `git log`
     // popen per probed file — up to 40 — the O(files)-subprocess storm). Deterministic for a fixed HEAD.
     const auto                     coSets = gitCommitFileSets( root, ing, "18 months ago", 30 );
+    facts.declDef  = declDefPartners( ing, changedFile );  // F3: same relationship, same rule, one implementation
+    facts.coWindow = defaultWindowLabel( root, "18mo" );   // F2: the composed zero's window travels WITH the zero
+    facts.coCommits = coSets.size();
     HashMap<std::uint32_t, double> partnerDeg;
     std::uint32_t                  probed = 0;
     for( std::uint32_t f = 0; f < F && probed < 40; ++f )

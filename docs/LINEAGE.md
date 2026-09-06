@@ -21,13 +21,14 @@ licence in [`THIRD_PARTY.md`](../THIRD_PARTY.md). First-party code under `src/` 
 third-party code lives under `third_party/` and keeps its own licence. Citing a paper means the idea
 was read and applied, not that any of its text or code is here.
 
-**The counts, derived from the tables below:** **36 repositories** and **67 papers** are folded, and
-a labelled survey of **231 tools** contributed nothing and says so. **The two sets are disjoint by
+**The counts, derived from the tables below:** **41 repositories** and **67 papers** are folded, and
+a labelled survey of **237 tools** contributed nothing and says so. **The two sets are disjoint by
 construction, so they add rather than nest:** a tool that contributed a lesson gets a row in §3a and
-is never repeated in §3b, which makes the field study 34 folded *plus* 222 surveyed — not 34 picked
-out of 222. `test/readmedriftcheck.sh` re-derives all three numbers from these tables on every run,
+is never repeated in §3b, which makes the field study 41 folded *plus* 237 surveyed — not 41 picked
+out of 239. `test/readmedriftcheck.sh` re-derives all three numbers from these tables on every run,
 fails if the README's sentence disagrees, and proves the disjointness itself (arm E6) rather than
-taking this paragraph's word for it.
+taking this paragraph's word for it. Arm E9 checks this second restatement of the pair independently
+of the bolded one three lines above, after a previous round updated one and not the other.
 
 ---
 
@@ -231,13 +232,21 @@ shipped target links, and it is named in the near-miss paragraph below rather th
 | [golang.org/x/tools deadcode](https://pkg.go.dev/golang.org/x/tools/cmd/deadcode) | Frame "dead" as NOT-REACHABLE-FROM-a-declared-entry-point: build a call graph via RTA from every `main` and report what it never reaches, so a chain of any length can be dead. Ripwire's delta: `--dead-code` is not this — it is in-degree/linkage-evidence based (zero in-edges plus internal `static` linkage on a free function), no entry-point traversal and no whole-program closure. The reachability framing this row names is planned separately as `--unreachable-from` and is not shipped. | `--dead-code`'s in-degree + `static`-linkage check (`src/main.cpp`) |
 | [SVF](https://github.com/SVF-tools/SVF) | Resolve an indirect call through a variable→function binding table rather than giving up on it — points-to analysis' core move, stripped from IR scale to AST scale: one hop, same-file evidence, and a tombstone on reassignment instead of a merged points-to set. Ripwire's delta: no IR and no whole-program build, so the binding is written-evidence only and the blind spot is disclosed rather than approximated. | `src/ingest_binds.h`; gate `test/fnptrcheck.sh`, whose arm (t) pins the same-file limit as a KNOWN blind spot |
 | [Code Pathfinder](https://github.com/shivasurya/code-pathfinder) | Emit findings in SARIF 2.1.0 so they land in the host's existing code-scanning UI instead of a bespoke format nobody ingests — distribution is part of the tool, not a wrapper around it. | `--sarif` (with `--lint`), `src/sarif.h`; gate `test/sarifcheck.sh` |
+| [SpotBugs](https://github.com/spotbugs/spotbugs) | Confidence is a disclosed axis SEPARATE from severity: "how sure am I" is answered independently of "how bad is it", so a consumer can filter on either without the other moving. Ripwire's delta: the axis landed on the CALL GRAPH, not on the linter — `--lint`'s built-ins carry no `sev=` at all by design, and a tree-sitter match has no resolver ambiguity, so a confidence number there would be invented rather than measured. | `prov="split"`, the third value of the existing per-edge provenance attribute, emitted on each arm of a k-way pick the resolver could not decide and keyed from the same predicate that increments `ambOut` (`src/graph.h`, `src/serialize.h`); gate `test/resolverhonestycheck.sh` |
+| [graphify](https://github.com/Graphify-Labs/graphify) | Edge confidence is not a number in a footer — it is drawn: a guessed edge must LOOK different from a resolved one in the rendered graph, every time, not only in the text. Ripwire's delta: dashed rather than faded, because a faded solid line reads as a DISTANT edge rather than an uncertain one. | `--html`'s two-pass edge paint and the `"a":1` flag in LINKS (`src/htmlexport.h`), with a counted legend clause; gate `test/htmlexport.sh`. Before this the renderer contained zero occurrences of amb/confidence/dashed/opacity — ripwire computed `amb=` and discarded it at render time |
+| [gortex](https://github.com/zzet/gortex) | Mine the repository's OWN history, not the last N months of wall-clock time. A window anchored to `now` is right for a live checkout and wrong for every pinned corpus, archived release and eval — and eval corpora are pinned by definition. Measured: on rocksdb at `0e2801ac` (HEAD dated 2024-10-17) gortex mined 9,854 co-change edges where ripwire's `--cochange` returned zero rows and exited 1 claiming "git unavailable / no history", which was false on both counts. | The default history window anchors on HEAD's committer date across all five miner construction sites and six window labels (`src/gitmine.h`, `src/main.cpp`, `src/verbs_report.h`, `src/mcpverbs.h`); an explicit `--since` is never re-anchored, so it is the opt-out. Gate `test/sincewindowcheck.sh` arm 4 |
 | [vulture](https://github.com/jendrikseipp/vulture) | Attach a CONFIDENCE tier (60-100%) to each dead-code finding instead of one undifferentiated list, so the near-certain findings can be triaged separately from the merely-plausible ones. Ripwire's delta: `--dead-code`'s `confidence="high"` is currently a FIXED literal on every finding, not tiers — tiering by ripwire's own evidence (linkage + in-degree + amb on incoming edges), explicitly NOT vulture's self-described-rough 60/90/100 numbers, is planned and not yet shipped. | the fixed `confidence="high"` literal on every `--dead-code` finding (`src/main.cpp`) |
+| [codesight](https://github.com/Houseofmvps/codesight) | A per-facet write budget sized to roughly one screen of prose (~300 tokens per generated article) generalises to a SHARE floor: the least a document can be given and still be worth serving when one fixed budget is divided among several competing documents — distinct from the absolute last-resort minimum, which is a different, smaller number. | `kRecallShareFloorBytes = 900` in the water-filling recall budget (`src/recall.h`) |
+| [cocoindex-code](https://github.com/cocoindex-io/cocoindex-code) | Staleness is not only "does the index still describe the tree" — already solved here — it is also "can THIS BINARY read this artifact": a foreign format, parser, or architecture version has to refuse cleanly and NAME why, not misread silently. | `--doctor` check 7's `<c n="index-cache">` row and the named `CacheReject` refusal enum (`src/ingest_cache.h`). **Second lesson, same repo, taken 2026-09-06:** when the question names a file, that file's own declaration/definition partner is the answer far more often than the largest thing that transitively depends on it — measured, cocoindex returned `db/wal_manager.h` as result #1 in 55 B where `--situ` missed it entirely in 3,104 B. Now surfaced ahead of the transitive list in `--situ`. **codanna** reached the same incremental-as-a-contract framing independently and is credited here rather than given a duplicate row, because the lesson and the artifact it points at are the same one |
 
 **Read and not folded, and worth naming because they are the near misses.** A scoped-snippet view
 with scope breadcrumbs — the one rung of the detail ladder that is still missing here — was designed
 against `grep-ast`'s TreeContext and never shipped. `graphify` contributed a measured head-to-head
 comparison and no design lesson, so it appears in [`EVALS.md`](EVALS.md) §2 and not in §3a — it is
-still in the surveyed table below, where a catalogued-and-not-borrowed-from tool belongs.
+still in the surveyed table below, where a catalogued-and-not-borrowed-from tool belongs. codesight's
+own detectors (routes, schema/ORM, UI components) are read and declined separately from the size
+lesson folded above: they have no C or C++ support at all, which is exactly the language band
+codesight's own README disclaims and ripwire's own scope begins.
 
 And [pdqsort](https://github.com/orlp/pdqsort) is the near miss that is actually *in the tree*: it is
 vendored at `third_party/pdqsort.hpp`, licensed and attributed in [`THIRD_PARTY.md`](../THIRD_PARTY.md)
@@ -258,6 +267,14 @@ tool is counted twice and the two counts add rather than nest. That is not a pro
 `test/readmedriftcheck.sh` intersects the two tables' names and fails on any overlap, and arm (E7)
 fails if any name appears twice *within* this table.
 
+**A Round-B observation (2026-09-05), the most reusable thing that harvest learned.** The "code
+intelligence for AI agents" category — the Repo-map and context-for-agents row below, ripwire's own
+most direct competitive neighbourhood — is roughly **seven direct competitors, every one of them
+created between 2025-07 and 2026-07.** Rank this cohort by momentum (commits/90d, contributors,
+releases), not stars: star counts in this specific cohort are hype-inflated relative to established
+repositories (Understand-Anything shows a 325:1 star:watcher ratio against Dgraph's 61:1), while
+fork:star ratios (roughly 8-19:1 across the cohort) look organic by the same measure.
+
 | Category | Tools surveyed | n |
 | --- | --- | --- |
 | IDE pair-programmers | Copilot, Cursor, Windsurf, Continue.dev, Tabnine, Codeium, Amazon Q Developer, JetBrains AI, Supermaven, Zed AI | 10 |
@@ -266,7 +283,7 @@ fails if any name appears twice *within* this table.
 | Code-mod and migration | OpenRewrite, Codemod, comby, jscodeshift, Sourcegraph Batch Changes | 5 |
 | AI pull-request reviewers | CodeRabbit, Greptile, Graphite Diamond, Cursor Bugbot, Qodo Merge, DeepSource, Sourcery, Ellipsis, Bito, Korbit, Cubic, Baz, Entelligence, CodeAnt, Devlo, Trag, Panto, Macroscope | 18 |
 | Deterministic linters and aggregators | ESLint, Biome, oxlint, Pylint, Cppcheck, Bandit, reviewdog, pre-commit, MegaLinter, Trunk, Qlty, ShellCheck | 12 |
-| Compile- or type-required analysis | SonarQube, Clang Static Analyzer, Infer, Clippy, golangci-lint, Staticcheck, SpotBugs, Coverity, Error Prone, Doop, Phasar | 11 |
+| Compile- or type-required analysis | SonarQube, Clang Static Analyzer, Infer, Clippy, golangci-lint, Staticcheck, Coverity, Error Prone, Doop, Phasar | 10 |
 | Security and supply chain | Snyk, Socket, gitleaks, TruffleHog, Trivy, Checkov, KICS, Grype, Syft, OSV-Scanner, Dependabot, Renovate, sigstore, Pixee, ZeroPath, Mobb, Copilot Autofix | 17 |
 | Type checkers | mypy, pyright, ty, pyrefly, tsgo, Sorbet, PHPStan, Psalm | 8 |
 | Formal methods and contracts | Kani, CBMC, ESBMC, KLEE, Dafny, Verus, Frama-C, Why3, TLA+, Apalache, Alloy, SPARK, Lean, Rocq, JML | 15 |
@@ -280,20 +297,40 @@ fails if any name appears twice *within* this table.
 | Version control and release | gh CLI, Graphite, Sapling, jujutsu, git-branchless, semantic-release, changesets | 7 |
 | Code search engines | grep.app, OpenGrok, livegrep | 3 |
 | Code intelligence and index formats | LSP, Kythe, LSIF, clangd | 4 |
-| Repo-map and context-for-agents | CodeGraph (npm), Code-Graph-RAG (vitali87), GitNexus, tree-sitter-analyzer, graphify, repowise, grepai, Repomix, gitingest, kit, claude-context, codanna, grep-ast | 13 |
+| Repo-map and context-for-agents | CodeGraph (npm), Code-Graph-RAG (vitali87), GitNexus, tree-sitter-analyzer, repowise, grepai, Repomix, gitingest, kit, claude-context, codanna, grep-ast, Understand-Anything, Tura | 14 |
 | Debugging and time travel | gdb, lldb, rr, Pernosco, Replay.io, WinDbg-TTD, Sentry Autofix, Rollbar | 8 |
 | Profilers | perf, py-spy, pprof, Coz, hyperfine, criterion | 6 |
-| Agent memory and context compression | Mem0, Letta, Zep, cognee, headroom, LLMLingua | 6 |
+| Agent memory and context compression | Mem0, Letta, Zep, cognee, headroom, LLMLingua, Ix | 7 |
 | Evaluation and observability | LangSmith, Langfuse, Braintrust, Galileo, Arize, AgentOps, Promptfoo, Ragas, DeepEval, OpenTelemetry | 10 |
 | Clone and duplication detection | PMD-CPD, jscpd | 2 |
-| Code metrics and churn | cqmetrics, churn (danmayer) | 2 |
+| Code metrics and churn | cqmetrics, churn (danmayer), code-forensics | 3 |
 | Documentation and diagrams | Doxygen, Sphinx, Mintlify, Swimm, Mermaid, CodeSee | 6 |
+| Graph databases | Dgraph, NebulaGraph | 2 |
+| Benchmark-only research artifacts | Chronos (Kodezi) | 1 |
+| Formatting libraries | fmtlib/fmt | 1 |
 
 **CodeGraph is not Code-Graph-RAG.** The r7 head-to-head round's opponent was `@colbymchenry/codegraph`
 (npm), listed above as "CodeGraph (npm)" — an unrelated project from `vitali87/code-graph-rag`
 (Python, Memgraph-backed), listed separately as "Code-Graph-RAG (vitali87)" despite the
 near-identical name. Both names are recorded so neither the r7 result nor a future head-to-head
 against the other can be misread as being about the same tool.
+
+**Round B's 2026-09-05 additions to this table, and why each was read and declined.**
+Understand-Anything's 27-way type taxonomy and 3-step complexity badge are TypeScript/web-shaped;
+`--color-by=cx`'s continuous ramp and user-definable `--arch` layers are more general. Ix's per-field
+zero-vs-omitted disclosure is already sharper here (see `serialize.h`'s `locals=` applicability
+guard), and its savings ledger conflicts with the telemetry-stays-local rule. Chronos (Kodezi) is not
+a system — its own README states "research paper, benchmarks, and evaluation results only", and
+`reference_implementations/NOTICE.md` states the published code is not the model; its Adaptive
+Graph-Guided Retrieval adaptive-depth stop was read and declined because an adaptive boundary cannot
+be stated in one attribute. Dgraph and NebulaGraph contribute query-language vocabulary only —
+ripwire already discloses more than DQL, which documents no `hasNextPage` and no total-count
+mechanism at all. code-forensics has been dead since 2023-01 and ships no licence file despite a
+README claim of one; its ideas (temporal coupling, a per-module knowledge map) are read, never a
+line taken. Tura is AGPL-3.0, a licence hazard under the same rule that keeps Spiral's code out of
+this tree (§3a) — README only, nothing built against it. fmtlib/fmt was explicitly rejected: C++23
+`std::format` is already in the standard library and every CI leg carries libstdc++ 13+, so vendoring
+it would be a G3 regression.
 
 ---
 

@@ -43,10 +43,15 @@ struct Graph
     std::vector<std::uint32_t> outOff;      // N+1 — resolved out-edges (CSR), for <c> children
     std::vector<NodeId>        outTargets;  // callee node ids, deduped, ascending within a source
     std::vector<float>         outVals;     // per-out-edge weight, parallel to outTargets (HITS hub step)
-    std::vector<std::uint8_t>  outProv;     // per-out-edge provenance, parallel to outTargets:
-                                            //   0 = name-based guess (the common case, absent from XML),
-                                            //   1 = PRECISE (a SCIP index pinned this (from,to)) → serialize
-                                            // emits prov="scip". Empty ⇒ no --scip run (all name-based).
+    std::vector<std::uint8_t>  outProv;     // per-out-edge provenance — THE CONFIDENCE AXIS, parallel to outTargets and
+                                            // orthogonal to rank/importance (k=) and to any severity:
+                                            //   0 = name-based, uniquely resolved (the common case, absent from XML),
+                                            //   1 = PRECISE (a SCIP index pinned this (from,to)) → prov="scip",
+                                            //   2 = A4-R5 cross-language FFI binding                → prov="binding",
+                                            //   3 = C1 one arm of a k-way split the resolver could  → prov="split".
+                                            //       not choose between (the per-edge half of ambOut)
+                                            // Empty ⇒ no overlay, no FFI edge and nothing split: every edge uniquely
+                                            // resolved, so the whole attribute is absent (omit-at-confident).
     std::size_t                scipDocsSeen = 0;   // # SCIP documents consumed (0 unless --scip); honesty summary
     std::size_t                scipEdgesPinned = 0;   // # (from,to) edges the SCIP index pinned; honesty summary
     std::vector<std::vector<NodeId>> implementors;   // base-class id → derived class ids (inheritance/Lego view)
@@ -1314,6 +1319,19 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     std::string              bindKey;       // A4-R5 reused "<fileId>#var" key buffer for the ctypes-handle gate
     HashMap<std::uint64_t, char> bindingEdges;   // A4-R5 (from<<32|to) keys of edges resolved via an FFI alias —
                                                  // consumed below to stamp prov (outProv=2) + the amb honesty mark
+    HashMap<std::uint64_t, char> splitEdges;     // C1: (from<<32|to) keys of edges that are an ARM of a k-way split the
+                                                 // resolver could not choose between — the per-EDGE half of the per-SYMBOL
+                                                 // ambOut counter, consumed below to stamp prov (outProv=3). ambOut says K
+                                                 // of this symbol's CALLS were guesses; this says WHICH EDGES they were,
+                                                 // which the aggregate cannot express and a consumer deciding what to
+                                                 // re-read from source is exactly asking. Filled from the SAME predicate
+                                                 // that increments ambOut, so the two can never disagree.
+                                                 // NOT reserved, deliberately, and the same call bindingEdges above makes:
+                                                 // there is no cheap prior for the split count at declaration time (it is
+                                                 // an OUTPUT of the resolve loop), the map is find-only and never iterated
+                                                 // so its bucket layout cannot reach output, and it is filled inside a loop
+                                                 // whose per-reference tier work dominates the growth cascade by orders of
+                                                 // magnitude. A guessed reserve would be a made-up number in a hot struct.
     std::vector<NodeId>      rule3Out;   // reused Rule-3 output buffer (candidates from the single included file)
     std::string              qkey;       // reused "qualifier::name" buffer for the E#4 canonical lookup (no per-ref alloc)
     std::vector<std::size_t> locShare;   // reused per-candidate sharedLocality memo (computed once per tier, below)
@@ -1990,6 +2008,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // audit's found silent-pick bug). A call pinned to ONE target — by a qualifier, `this->`, Rule 3's file
         // narrow, or the locality tie-break — is NOT flagged. Low-noise "resolver can't be sure which; read
         // source". This is where canonical resolution SUPPRESSES amb that the old pre-tier count raised.
+        //
+        // C1 (Round C lane B): `splitPick` is set by the SAME predicate, and is read by the edge-emission loop
+        // below to key `splitEdges`. One predicate, two granularities — the per-symbol count and the per-edge
+        // marks are derived from one decision, so the biconditional the gate asserts (a symbol carries amb= iff
+        // at least one of its edges carries prov="split") holds by construction rather than by agreement.
+        bool splitPick = false;
         if( !scipPinned && !bindingPinned )   // a SCIP-pinned call is PRECISE — never an ambiguity clue (that is the whole point).
         {
             std::uint32_t pickTargets = 0;   // non-self tier survivors = EXACTLY the targets the 1/k edge split spans
@@ -2003,12 +2027,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             if( pickTargets > 1 )
             {
                 ++g.ambOut[r.fromSymbol];
+                splitPick = true;
             }
         }
         // A4-R5 provenance (visible today, no serialize change): a cross-language binding edge is resolved via a
         // name-pattern binding table, not direct name resolution — so it carries the existing amb= "verify in
         // source" honesty mark (and feeds the header `ambiguous=N`). Conservative: an FFI edge is NEVER a silent
-        // confident edge. The precise prov="binding" label rides outProv=2 below (pending the serialize one-liner).
+        // confident edge. The precise prov="binding" label rides outProv=2 below (serialize.h emits it).
         if( bindingPinned )
         {
             ++g.ambOut[r.fromSymbol];
@@ -2075,6 +2100,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             EdgeAcc& e = acc[ ekey ];
             e.confSum += base;
             e.nref    += 1;
+            if( splitPick )
+            {
+                splitEdges[ekey] = 1;   // C1: remember (from,to) for prov="split" — every arm of the split, never a subset
+            }
             if( bindingPinned )
             {
                 bindingEdges[ekey] = 1; // A4-R5: remember (from,to) for prov="binding"
@@ -2110,10 +2139,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     }
     g.outTargets.resize( edges.size() );
     g.outVals.resize( edges.size() );
-    // provenance: allocate outProv ONLY when an overlay was supplied OR an A4-R5 binding edge exists —
-    // the common run keeps it EMPTY so serialize emits no prov= (zero token cost, byte-identical to before).
-    //   1 = PRECISE (SCIP-pinned) → prov="scip";  2 = A4-R5 cross-language FFI binding → prov="binding".
-    if( scip || !bindingEdges.empty() )
+    // provenance: allocate outProv ONLY when an overlay was supplied OR an A4-R5 binding edge exists OR the
+    // resolver had to split at least one call — a corpus that resolves cleanly keeps it EMPTY so serialize
+    // emits no prov= at all (zero token cost, byte-identical to before; test/golden.xml is the standing proof).
+    //   1 = PRECISE (SCIP-pinned) → prov="scip";  2 = A4-R5 cross-language FFI binding → prov="binding";
+    //   3 = C1 one arm of a k-way split the resolver could not choose between → prov="split".
+    if( scip || !bindingEdges.empty() || !splitEdges.empty() )
     {
         g.outProv.assign( edges.size(), 0u );
     }
@@ -2132,6 +2163,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             else if( !bindingEdges.empty() && bindingEdges.find( ( std::uint64_t( e.from ) << 32 ) | e.to ) != bindingEdges.end() )
             {
                 g.outProv[ pos ] = 2u;                                             // (from,to) an FFI binding edge
+            }
+            // C1 precedence, and it is deliberate: scip PINS an edge (precise), binding NAMES the mechanism that
+            // resolved it (and already carries its own amb= mark), split says the resolver could not choose. A
+            // binding edge that is also a split keeps the more specific label; prov= is single-valued, and the
+            // symbol's amb= counts it either way, so nothing is lost by the ordering.
+            else if( !splitEdges.empty() && splitEdges.find( ( std::uint64_t( e.from ) << 32 ) | e.to ) != splitEdges.end() )
+            {
+                g.outProv[ pos ] = 3u;                                             // (from,to) one arm of a k-way split
             }
         }
     }

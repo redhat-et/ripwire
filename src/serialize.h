@@ -1696,7 +1696,9 @@ inline constexpr const char* kMetricsLegend =
     "and yield/await/defer, hence Bash carries no ev) ev_why=which-jumps-raised-it tag:count "
     "cbo=coupling lcom4=cohesion "
     "amp=change-amplification tested=1 role=hub(fan-in 8+; uses spells role "
-    "call|macro|read|write|import|extends). Absent=N/A, never 0. -->";
+    "call|macro|read|write|import|extends). Absence is PER-KEY: N/A for params/nest/locals/cbo/lcom4/amp "
+    "(wrong kind, or a language the metric is not counted for); a MEASURED value for loc/tested/ppalt/humps/deep "
+    "(0), ev (1) and role (fan-in below 8). -->";
 
 // §B13.4 — the --max-tokens fit's own legend clause, emitted ONLY on a map --max-tokens shaped, for the same
 // reason kChurnRankLegend is: a flag-only fact does not belong in the string every other run shares. It names
@@ -1980,7 +1982,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // written once the document it describes has been measured (PHASE 2 below) and the legend's own bytes
     // are part of what it describes.
     std::string legend = outProv
-        ? "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=scip(precise;else name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree(builtin/stdlib-name-without-in-repo-evidence,external-import,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->"
+        ? "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=per-EDGE-confidence(orthogonal-to-k):scip(index-pinned;precise)|binding(cross-lang-FFI)|split(one-arm-of-a-k-way-pick;read-source;these-are-the-edges-amb=-counts)(absent=uniquely-resolved-name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree(builtin/stdlib-name-without-in-repo-evidence,external-import,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->"
         : "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree(builtin/stdlib-name-without-in-repo-evidence,external-import,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->";
     // R-E fix (2026-08-19): root= was added to <r> with nothing defining it — legendcoveragecheck's arm (A)
     // named it on nine roster verbs at once (the default map, --around, and every map-* variant share this
@@ -2038,16 +2040,26 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     const std::size_t ambTotal        = counterTotal( ambOut );          // calls the resolver could not pin to one target
     const std::size_t unresolvedTotal = counterTotal( unresolvedOut );   // calls to an in-repo name, all defs lang-filtered
     const std::size_t locPinTotal     = counterTotal( locPinOut );       // Phase 4: calls the locality prior ALONE pinned
-    std::size_t preciseTotal = 0;                              // how many out-edges the SCIP index pinned
+    // C1 DRIFT FIX (Round C lane B, found by re-reading this header's own output). `precise=` means "how many
+    // out-edges a SCIP index PINNED", and the emitter's own comment below says it is "emitted ONLY under
+    // --scip". Both were true when outProv held only {0, 1}. A4-R5 then added value 2 (an FFI binding edge)
+    // and this counter — `v ? 1 : 0` — silently began reporting binding edges as SCIP-precise: ripwire's own
+    // default map, with no --scip anywhere, printed `precise=3` for 3 FFI binding edges, which is the exact
+    // "a surface that quietly guesses" shape docs/ARCHITECTURE.md §4 forbids. It is load-bearing here because
+    // C1 adds value 3, which would have inflated the same number by every split edge in the corpus.
+    // The counter now names ONE value, and the attribute is absent at zero (the tool-wide absent-if-0
+    // convention that lpin=/external=/locality_pinned= already follow) so a run with no overlay says nothing
+    // rather than saying `precise=0` about a measurement it never made.
+    std::size_t preciseTotal = 0;                              // how many out-edges the SCIP index pinned (value 1 ONLY)
     if( outProv )
     {
         for( std::uint8_t v : *outProv )
         {
-            preciseTotal += ( v ? 1u : 0u );
+            preciseTotal += ( v == 1u ? 1u : 0u );
         }
     }
-    char precAttr[ 40 ];  precAttr[ 0 ] = '\0';                // emitted ONLY under --scip (else absent → no golden churn)
-    if( outProv )
+    char precAttr[ 40 ];  precAttr[ 0 ] = '\0';                // emitted only when a SCIP overlay pinned something
+    if( preciseTotal > 0 )
     {
         std::snprintf( precAttr, sizeof( precAttr ), " precise=%zu", preciseTotal );
     }
@@ -2414,11 +2426,18 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                 w.write( "<c n=\"" );
                 w.write( escapeXml( ing.symbols[ outTargets[e] ].name, esc ) );
                 // A4-R5: prov="scip" on a SCIP-pinned (precise) edge, prov="binding" on an FFI
-                // binding-table edge (pybind/extern-C/JNI). Absent = name-based guess (the common case →
-                // zero token cost). outProv parallels outTargets exactly, so index `e` is the same edge.
+                // binding-table edge (pybind/extern-C/JNI). C1: prov="split" on one arm of a k-way split the
+                // resolver could not choose between. Absent = name-based AND uniquely resolved (the common case
+                // → zero token cost). outProv parallels outTargets exactly, so index `e` is the same edge.
+                //
+                // C1, and this is the whole point of the marker: `amb="K"` on the enclosing <s> says K of this
+                // symbol's CALLS were guesses and cannot say WHICH edges, so a consumer honouring the honesty
+                // signal had to distrust every <c> child. prov="split" names the arms, and the suspect set
+                // becomes the guessed edges and nothing else.
                 if( outProv && e < outProv->size() && ( *outProv )[e] )
                 {
-                    w.write( ( *outProv )[e] == 2u ? "\" prov=\"binding" : "\" prov=\"scip" );
+                    const std::uint8_t pv = ( *outProv )[e];
+                    w.write( pv == 3u ? "\" prov=\"split" : pv == 2u ? "\" prov=\"binding" : "\" prov=\"scip" );
                 }
                 w.write( "\"/>" );
             }
@@ -6467,18 +6486,22 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     }
 
     writeJsonUnindexed( w, esc, h.ing.crawlSkips );   // §L1, JSON lane — see its own header
-    // §A4d: `precise=N` — how many out-edges the SCIP overlay / an FFI binding actually pinned.
-    // Emitted ONLY when a provenance vector was supplied, exactly like the XML attribute (absent ⇒ nothing
-    // was measured, never a fabricated 0 that would read as "no edge is precise").
+    // §A4d: `precise=N` — how many out-edges the SCIP overlay actually pinned. C1 drift fix, the JSON half of
+    // the XML fix above and by the same argument: this counted every NONZERO provenance value, so an FFI
+    // binding (2) and now a k-way split arm (3) were both reported as SCIP-precise. Emitted only when the
+    // count is non-zero (absent ⇒ nothing was pinned, never a fabricated 0 nor a borrowed one).
     if( h.outProv )
     {
         std::size_t preciseTotal = 0;
         for( std::uint8_t v : *h.outProv )
         {
-            preciseTotal += ( v ? 1u : 0u );
+            preciseTotal += ( v == 1u ? 1u : 0u );
         }
-        std::snprintf( hdr, sizeof( hdr ), "\"precise\":%zu,", preciseTotal );
-        w.write( hdr );
+        if( preciseTotal > 0 )
+        {
+            std::snprintf( hdr, sizeof( hdr ), "\"precise\":%zu,", preciseTotal );
+            w.write( hdr );
+        }
     }
     w.write( "\"order\":" );
     writeJsonStr( w, h.orderAttr, esc );
@@ -6725,9 +6748,14 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
                 firstC = false;
                 w.write( "{\"n\":" );  writeJsonStr( w, ing.symbols[ outTargets[e] ].name, esc );
                 // §A4d: prov mirrors the XML attribute 1:1 — "scip" for a SCIP-pinned edge, "binding" for a
-                // decoded FFI binding. outProv parallels outTargets exactly, so index `e` is the same edge.
+                // decoded FFI binding, "split" (C1) for one arm of a k-way split the resolver could not choose
+                // between. outProv parallels outTargets exactly, so index `e` is the same edge. The two dialects
+                // MUST spell the same vocabulary: test/mcpclidiffcheck.sh is the gate that says so.
                 if( outProv && e < outProv->size() && (*outProv)[e] )
-                { w.write( ",\"prov\":" );  writeJsonStr( w, (*outProv)[e] == 2u ? "binding" : "scip", esc ); }
+                {
+                    const std::uint8_t pv = (*outProv)[e];
+                    w.write( ",\"prov\":" );  writeJsonStr( w, pv == 3u ? "split" : pv == 2u ? "binding" : "scip", esc );
+                }
                 w.write( "}" );
             }
             w.write( "]}" );

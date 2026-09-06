@@ -72,6 +72,10 @@ inline constexpr const char* kHandoffLegendTail =
     "&lt;heuristic n= candidates= capped=&gt;: n= is the rows in the packet, candidates= how many the three classes "
     "produced before their own per-class caps (cochange 8, notes 8, docs 4), capped=1 when a cap dropped one — so "
     "candidates - n - withheld_rows is what the caps removed and nothing is lost silently. "
+    "cochange_window= is the git window the cochange rows were mined in (a DEFAULT window is measured back from "
+    "HEAD's own committer date and says so: 18mo@HEAD) and cochange_commits= is how many commits that window "
+    "actually contained — cochange_commits=0 means the window could not look, which is NOT the same fact as "
+    "zero cochange rows. "
     "budget= is the token-budget cap; withheld=1 when heuristic rows were dropped to fit it, withheld_rows= how many "
     "(the map's spelling: a boolean, the count beside it) — verified rows are never dropped; est_tokens= prices the "
     "delivered packet in tokens and over_ceiling= is 1 when even the verified floor exceeds budget= (the packet is then "
@@ -309,8 +313,14 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
         }
         doc += ">";
         doc += v;
+        // F2: the cochange rows below are mined in a window; without it a zero-row heuristic block reads as
+        // "nothing co-changes here" when it can mean "the window saw no commits". Same two names as --situ.
+        // F2's two attributes go AFTER the existing three, never before: `<heuristic n="…"` is a shape three
+        // gates and the legend read positionally, and prepending an attribute silently unmatches all of them.
         doc += "<heuristic n=\"" + std::to_string( keepRows ) + "\" candidates=\"" + std::to_string( candidates )
-             + "\" capped=\"" + ( candidates > rows.size() ? "1" : "0" ) + "\">";
+             + "\" capped=\"" + ( candidates > rows.size() ? "1" : "0" )
+             + "\" cochange_window=\"" + std::string( escapeXml( facts.coWindow, esc ) )
+             + "\" cochange_commits=\"" + std::to_string( facts.coCommits ) + "\">";
         for( std::size_t i = 0; i < keepRows; ++i )
         {
             doc += rows[i].xml;

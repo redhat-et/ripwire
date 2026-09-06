@@ -390,11 +390,18 @@ inline std::string captureXml( const std::function<void( std::FILE* )>& render )
 // placement change, same single emission.
 //
 // The same call also passes outProv and bindLabel, on the SAME reasoning and with the same emptiness
-// convention main.cpp uses (`empty() ? nullptr : &`). `precise=` is NOT a SCIP-only attribute — outProv
-// also carries FFI binding provenance, which this tree has (precise="3") with no --scip anywhere, so
-// withholding it dropped a real edge-provenance fact and a real bind= identity from the agent's map.
+// convention main.cpp uses (`empty() ? nullptr : &`). outProv is the per-EDGE confidence axis and carries
+// more than SCIP: FFI binding provenance (prov="binding") and, since C1, the arms of a k-way split the
+// resolver could not choose between (prov="split"), both of which this tree has with no --scip anywhere —
+// so withholding it dropped a real edge-provenance fact and a real bind= identity from the agent's map.
 // (Found by test/mcpclidiffcheck.sh, which is the point of having it: the first version of this fix
 // null-passed both and explained the absence away.)
+//
+// CORRECTION, C1 (Round C lane B): the sentence this comment used to carry — "`precise=` is NOT a SCIP-only
+// attribute … which this tree has (precise="3")" — was reasoning from a bug, not describing a design.
+// `precise=` means "edges a SCIP index PINNED"; the counter summed every non-zero outProv, so this tree's
+// precise="3" was 3 FFI binding edges reported as index-pinned. serialize.h now counts value 1 alone and
+// omits the attribute at zero. outProv is still passed here, for the reason above.
 inline std::string analyzeToString( const std::string& root, int topK, bool stable = false )
 {
     const McpIndex& ix = getIndex( root );                  // parse once, reuse across calls
@@ -1062,7 +1069,7 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
     const PageWindow ccPw = pageWindow( ps.size(), effectiveRowCap( page.limit, kCochangePartnerCap ), page.offset );
     char             ccPab[ kPageDisclosureCap ];
     out += "\"file\":\"" + mcpdetail::jsonEscape( ccRel( fid ) ) + "\",\"commits\":" + std::to_string( commits )
-         + ",\"window\":\"18mo\",\"sub_windows\":" + std::to_string( subWindows )
+         + ",\"window\":\"" + rw::defaultWindowLabel( root, "18mo" ) + "\",\"sub_windows\":" + std::to_string( subWindows )
          + ",\"partners\":" + std::to_string( ps.size() )
          + pageDisclosure( ccPab, sizeof( ccPab ), ccPw.end - ccPw.begin, ps.size(), ccPw.end,
                            page.limit, page.offset, /*discloseCap=*/true, kJsonPageSyntax )
@@ -1132,6 +1139,29 @@ inline std::string situationFileListRefusal( const std::string& root, const std:
     }
     const IngestResult& ing = getIndex( root ).ing;
     return fileListRefusalText( ing, "", "files", root, diffOrEmpty, changedMaskFromListChecked( ing, diffOrEmpty ) );
+}
+
+// The decl/def-partner array plus the co-change window/commit floor, as ONE fragment: situationDiffJson is
+// already over the complexity bar and a nameable fact gets a name rather than another inline block. Emits
+// `,"decl_def_partners":[…],"cochange_window":"…","cochange_commits":N` — the leading comma is the caller's
+// `]` closing the array before it, so the two halves of the seam are read together.
+template <typename PathRelFn>
+inline std::string declDefAndWindowJson( const SituationFacts& facts, PathRelFn pathRel )
+{
+    std::string out = ",\"decl_def_partners\":[";
+    bool        first = true;
+    for( const DeclDefPartner& dp : facts.declDef )
+    {
+        if( !first )
+        {
+            out += ",";
+        }
+        first = false;
+        out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( pathRel( dp.fileId ) ) ) + "\",\"shared_symbols\":"
+             + std::to_string( dp.shared ) + "}";
+    }
+    return out + "],\"cochange_window\":\"" + mcpdetail::jsonEscape( facts.coWindow ) + "\",\"cochange_commits\":"
+         + std::to_string( facts.coCommits );
 }
 
 inline std::string situationDiffJson( const std::string& root, const std::string& diffOrEmpty )
@@ -1243,7 +1273,12 @@ inline std::string situationDiffJson( const std::string& root, const std::string
         }
     }
 
-    out += "],\"forgotten\":[";
+    // F3: the decl/def partners of the changed set — the header/impl relationship the blast_radius array
+    // above cannot carry, because a header does not transitively depend on the source that implements it.
+    // F2: and the window the co-change zero below was mined in — a JSON reader that only sees an empty
+    // `forgotten` array cannot tell "no partners" from "the window mined nothing", and this surface is the
+    // one where that reads most like an answer.
+    out += "]" + declDefAndWindowJson( facts, situJPathRel ) + ",\"forgotten\":[";
     {
         bool first = true;
         for( const auto& [ f, deg ] : facts.forgotten )

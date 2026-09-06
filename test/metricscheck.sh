@@ -103,5 +103,30 @@ printf '%s' "$( sattr_sc covered )" | grep -q ' amp="1"' && ok "amp degrades to 
 # 7) well-formed XML on the metrics output (G4).
 command -v xmllint >/dev/null 2>&1 && { printf '%s' "$MAP" | xmllint --noout - 2>/dev/null && ok "xml well-formed (--metrics)" || no "xml malformed (--metrics)"; } || ok "xml well-formed (xmllint absent — skipped)"
 
+# 8) LEGEND ABSENCE HONESTY (Round C, lane E) — the legend's absence rule must match the EMITTER.
+#    kMetricsLegend closed with the universal claim "Absent=N/A, never 0.", and the emitter contradicts it
+#    on this very corpus: serialize.h omits ppalt when it is 0 ("if( s.ppAlt > 0 )"), tested when it is 0
+#    ("omit when 0 (lean output)"), humps/deep below the nest bar, role below fan-in 8, and ev when it is
+#    exactly 1 — five keys whose absence is a MEASURED VALUE, not "not applicable". Two of the legend's own
+#    earlier clauses (ev "absent on a cx row means exactly 1", humps/deep "never a hidden 0") already said so,
+#    so the closing sentence contradicted the same string it ends. This arm asserts the three witnesses are
+#    live on this fixture and that the legend makes no universal N/A claim over them.
+#    Reference measurement (src, --metrics, 4907 rows): 3300 of 3319 fn/method rows carry no ppalt= (all are
+#    a true 0) and 3258 rows carry cx= with no ev= (all are a true 1).
+LEG="$( printf '%s' "$MAP" | sed -n '1,/-->/p' )"
+ROWS="$( printf '%s' "$MAP" | sed 's/</\n</g' | grep '^<s ' )"
+W_EV="$(  printf '%s' "$ROWS" | grep 'cx='                     | grep -vc 'ev='    )"
+W_PP="$(  printf '%s' "$ROWS" | grep -E 't="(fn|method)"'      | grep -vc 'ppalt=' )"
+W_TS="$(  printf '%s' "$ROWS" | grep -vc 'tested='                                 )"
+[ "$W_EV" -gt 0 ] && [ "$W_PP" -gt 0 ] && [ "$W_TS" -gt 0 ] \
+    && ok "absence witnesses live on this corpus (cx-without-ev=$W_EV, fn-without-ppalt=$W_PP, no-tested=$W_TS)" \
+    || no "no absence witness on this corpus — the arm below would assert vacuously (ev=$W_EV ppalt=$W_PP tested=$W_TS)"
+printf '%s' "$LEG" | grep -q 'Absent=N/A, never 0' \
+    && no "metrics legend claims absence is universally N/A while $W_PP rows omit a ppalt that is 0 and $W_EV omit an ev that is 1" \
+    || ok "metrics legend makes no universal Absent=N/A claim"
+printf '%s' "$LEG" | grep -q 'ppalt' && printf '%s' "$LEG" | grep -qi 'measured value' \
+    && ok "metrics legend states which keys' absence is a measured value" \
+    || no "metrics legend does not say which keys' absence is a measured value (ppalt/tested/ev/humps/role)"
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"

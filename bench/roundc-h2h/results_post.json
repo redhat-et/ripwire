@@ -1,0 +1,1682 @@
+[
+ {
+  "qid": 1,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 5714,
+  "emitted_bytes": 5714,
+  "complete": false,
+  "hits": 2,
+  "n_gold": 7,
+  "files_named_before_ttca": 27,
+  "total_files_named": 27,
+  "last_gold_rank": null,
+  "wall_ms": 3251.1,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--for=How does db/compaction/compaction_job.cc reach util/compaction_job_stats_impl.cc?"
+  ]
+ },
+ {
+  "qid": 1,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 5714,
+  "emitted_bytes": 5714,
+  "complete": false,
+  "hits": 2,
+  "n_gold": 7,
+  "files_named_before_ttca": 27,
+  "total_files_named": 27,
+  "last_gold_rank": null,
+  "wall_ms": 987.6,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--for=How does db/compaction/compaction_job.cc reach util/compaction_job_stats_impl.cc?"
+  ]
+ },
+ {
+  "qid": 1,
+  "arm": "placebo",
+  "ttca_bytes": 5700,
+  "emitted_bytes": 5700,
+  "complete": false,
+  "hits": 2,
+  "n_gold": 7,
+  "files_named_before_ttca": 175,
+  "total_files_named": 175,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=1 budget=5714B"
+  ]
+ },
+ {
+  "qid": 2,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 2964,
+  "emitted_bytes": 6667,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 4,
+  "total_files_named": 29,
+  "last_gold_rank": 4,
+  "wall_ms": 3744.9,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--for=How does table/block_based/block_based_table_reader.cc reach table/table_reader.h?"
+  ]
+ },
+ {
+  "qid": 2,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 2964,
+  "emitted_bytes": 6667,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 4,
+  "total_files_named": 29,
+  "last_gold_rank": 4,
+  "wall_ms": 1216.9,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--for=How does table/block_based/block_based_table_reader.cc reach table/table_reader.h?"
+  ]
+ },
+ {
+  "qid": 2,
+  "arm": "placebo",
+  "ttca_bytes": 6665,
+  "emitted_bytes": 6665,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 214,
+  "total_files_named": 214,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=2 budget=6667B"
+  ]
+ },
+ {
+  "qid": 3,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 5590,
+  "emitted_bytes": 5590,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 3,
+  "files_named_before_ttca": 27,
+  "total_files_named": 27,
+  "last_gold_rank": null,
+  "wall_ms": 5191.0,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--for=How does db/db_impl/db_impl.cc reach db/wide/wide_columns.cc?"
+  ]
+ },
+ {
+  "qid": 3,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 5590,
+  "emitted_bytes": 5590,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 3,
+  "files_named_before_ttca": 27,
+  "total_files_named": 27,
+  "last_gold_rank": null,
+  "wall_ms": 1052.3,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--for=How does db/db_impl/db_impl.cc reach db/wide/wide_columns.cc?"
+  ]
+ },
+ {
+  "qid": 3,
+  "arm": "placebo",
+  "ttca_bytes": 5523,
+  "emitted_bytes": 5523,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 3,
+  "files_named_before_ttca": 174,
+  "total_files_named": 174,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=3 budget=5590B"
+  ]
+ },
+ {
+  "qid": 4,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 6233,
+  "emitted_bytes": 6233,
+  "complete": false,
+  "hits": 2,
+  "n_gold": 6,
+  "files_named_before_ttca": 27,
+  "total_files_named": 27,
+  "last_gold_rank": null,
+  "wall_ms": 4170.2,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--for=How does utilities/merge_operators/string_append/stringappend.cc reach utilities/transactions/lock/range/range_tree/lib/standalone_port.cc?"
+  ]
+ },
+ {
+  "qid": 4,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 6233,
+  "emitted_bytes": 6233,
+  "complete": false,
+  "hits": 2,
+  "n_gold": 6,
+  "files_named_before_ttca": 27,
+  "total_files_named": 27,
+  "last_gold_rank": null,
+  "wall_ms": 1632.1,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--for=How does utilities/merge_operators/string_append/stringappend.cc reach utilities/transactions/lock/range/range_tree/lib/standalone_port.cc?"
+  ]
+ },
+ {
+  "qid": 4,
+  "arm": "placebo",
+  "ttca_bytes": 6225,
+  "emitted_bytes": 6225,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 6,
+  "files_named_before_ttca": 188,
+  "total_files_named": 188,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=4 budget=6233B"
+  ]
+ },
+ {
+  "qid": 5,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 5710,
+  "emitted_bytes": 5710,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 5,
+  "files_named_before_ttca": 26,
+  "total_files_named": 26,
+  "last_gold_rank": null,
+  "wall_ms": 3532.0,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--for=How does db/db_iter.cc reach db/wide/wide_columns_helper.h?"
+  ]
+ },
+ {
+  "qid": 5,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 5710,
+  "emitted_bytes": 5710,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 5,
+  "files_named_before_ttca": 26,
+  "total_files_named": 26,
+  "last_gold_rank": null,
+  "wall_ms": 872.2,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--for=How does db/db_iter.cc reach db/wide/wide_columns_helper.h?"
+  ]
+ },
+ {
+  "qid": 5,
+  "arm": "placebo",
+  "ttca_bytes": 5707,
+  "emitted_bytes": 5707,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 5,
+  "files_named_before_ttca": 172,
+  "total_files_named": 172,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=5 budget=5710B"
+  ]
+ },
+ {
+  "qid": 6,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 6133,
+  "emitted_bytes": 6133,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 9,
+  "files_named_before_ttca": 27,
+  "total_files_named": 27,
+  "last_gold_rank": null,
+  "wall_ms": 3783.8,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--for=How does db/blob/blob_file_cache.cc reach utilities/transactions/optimistic_transaction_db_impl.h?"
+  ]
+ },
+ {
+  "qid": 6,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 6133,
+  "emitted_bytes": 6133,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 9,
+  "files_named_before_ttca": 27,
+  "total_files_named": 27,
+  "last_gold_rank": null,
+  "wall_ms": 1056.0,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--for=How does db/blob/blob_file_cache.cc reach utilities/transactions/optimistic_transaction_db_impl.h?"
+  ]
+ },
+ {
+  "qid": 6,
+  "arm": "placebo",
+  "ttca_bytes": 6116,
+  "emitted_bytes": 6116,
+  "complete": false,
+  "hits": 2,
+  "n_gold": 9,
+  "files_named_before_ttca": 187,
+  "total_files_named": 187,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=6 budget=6133B"
+  ]
+ },
+ {
+  "qid": 7,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 1781,
+  "emitted_bytes": 1862,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 3,
+  "total_files_named": 4,
+  "last_gold_rank": 3,
+  "wall_ms": 1565.7,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--affected=db/compaction/compaction_job.h"
+  ]
+ },
+ {
+  "qid": 7,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 1781,
+  "emitted_bytes": 1862,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 3,
+  "total_files_named": 4,
+  "last_gold_rank": 3,
+  "wall_ms": 446.4,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--affected=db/compaction/compaction_job.h"
+  ]
+ },
+ {
+  "qid": 7,
+  "arm": "placebo",
+  "ttca_bytes": 1804,
+  "emitted_bytes": 1804,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 58,
+  "total_files_named": 58,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=7 budget=1862B"
+  ]
+ },
+ {
+  "qid": 8,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 9792,
+  "emitted_bytes": 9792,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 137,
+  "total_files_named": 137,
+  "last_gold_rank": null,
+  "wall_ms": 1672.3,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--affected=table/block_fetcher.cc"
+  ]
+ },
+ {
+  "qid": 8,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 9792,
+  "emitted_bytes": 9792,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 137,
+  "total_files_named": 137,
+  "last_gold_rank": null,
+  "wall_ms": 454.7,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--affected=table/block_fetcher.cc"
+  ]
+ },
+ {
+  "qid": 8,
+  "arm": "placebo",
+  "ttca_bytes": 8917,
+  "emitted_bytes": 9787,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 269,
+  "total_files_named": 293,
+  "last_gold_rank": 269,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=8 budget=9792B"
+  ]
+ },
+ {
+  "qid": 9,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 7714,
+  "emitted_bytes": 10288,
+  "complete": true,
+  "hits": 5,
+  "n_gold": 5,
+  "files_named_before_ttca": 111,
+  "total_files_named": 145,
+  "last_gold_rank": 111,
+  "wall_ms": 1761.7,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--affected=db/column_family.cc"
+  ]
+ },
+ {
+  "qid": 9,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 7714,
+  "emitted_bytes": 10288,
+  "complete": true,
+  "hits": 5,
+  "n_gold": 5,
+  "files_named_before_ttca": 111,
+  "total_files_named": 145,
+  "last_gold_rank": 111,
+  "wall_ms": 481.2,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--affected=db/column_family.cc"
+  ]
+ },
+ {
+  "qid": 9,
+  "arm": "placebo",
+  "ttca_bytes": 10261,
+  "emitted_bytes": 10261,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 5,
+  "files_named_before_ttca": 318,
+  "total_files_named": 318,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=9 budget=10288B"
+  ]
+ },
+ {
+  "qid": 10,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 1814,
+  "emitted_bytes": 1814,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 3,
+  "total_files_named": 3,
+  "last_gold_rank": null,
+  "wall_ms": 1499.8,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--affected=cache/tiered_secondary_cache.cc"
+  ]
+ },
+ {
+  "qid": 10,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 1814,
+  "emitted_bytes": 1814,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 3,
+  "total_files_named": 3,
+  "last_gold_rank": null,
+  "wall_ms": 351.9,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--affected=cache/tiered_secondary_cache.cc"
+  ]
+ },
+ {
+  "qid": 10,
+  "arm": "placebo",
+  "ttca_bytes": 1805,
+  "emitted_bytes": 1805,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 57,
+  "total_files_named": 57,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=10 budget=1814B"
+  ]
+ },
+ {
+  "qid": 11,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 9643,
+  "emitted_bytes": 9643,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 2,
+  "files_named_before_ttca": 135,
+  "total_files_named": 135,
+  "last_gold_rank": null,
+  "wall_ms": 1445.1,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--affected=db/db_impl/db_impl.cc"
+  ]
+ },
+ {
+  "qid": 11,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 9643,
+  "emitted_bytes": 9643,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 2,
+  "files_named_before_ttca": 135,
+  "total_files_named": 135,
+  "last_gold_rank": null,
+  "wall_ms": 390.6,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--affected=db/db_impl/db_impl.cc"
+  ]
+ },
+ {
+  "qid": 11,
+  "arm": "placebo",
+  "ttca_bytes": 9639,
+  "emitted_bytes": 9639,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 2,
+  "files_named_before_ttca": 286,
+  "total_files_named": 286,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=11 budget=9643B"
+  ]
+ },
+ {
+  "qid": 12,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 6233,
+  "emitted_bytes": 9195,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 86,
+  "total_files_named": 128,
+  "last_gold_rank": 86,
+  "wall_ms": 1621.2,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--affected=db/write_batch.cc"
+  ]
+ },
+ {
+  "qid": 12,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 6233,
+  "emitted_bytes": 9195,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 86,
+  "total_files_named": 128,
+  "last_gold_rank": 86,
+  "wall_ms": 314.3,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--affected=db/write_batch.cc"
+  ]
+ },
+ {
+  "qid": 12,
+  "arm": "placebo",
+  "ttca_bytes": 9169,
+  "emitted_bytes": 9169,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 288,
+  "total_files_named": 288,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=12 budget=9195B"
+  ]
+ },
+ {
+  "qid": 13,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 742,
+  "emitted_bytes": 2797,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 2,
+  "total_files_named": 11,
+  "last_gold_rank": 2,
+  "wall_ms": 1394.0,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--situ=db/compaction/compaction_job.h"
+  ]
+ },
+ {
+  "qid": 13,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 742,
+  "emitted_bytes": 2797,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 2,
+  "total_files_named": 11,
+  "last_gold_rank": 2,
+  "wall_ms": 403.2,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--situ=db/compaction/compaction_job.h"
+  ]
+ },
+ {
+  "qid": 13,
+  "arm": "placebo",
+  "ttca_bytes": 2776,
+  "emitted_bytes": 2776,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 86,
+  "total_files_named": 86,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=13 budget=2797B"
+  ]
+ },
+ {
+  "qid": 14,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 2437,
+  "emitted_bytes": 2437,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 9,
+  "files_named_before_ttca": 9,
+  "total_files_named": 9,
+  "last_gold_rank": null,
+  "wall_ms": 1181.3,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--situ=table/block_based/binary_search_index_reader.cc"
+  ]
+ },
+ {
+  "qid": 14,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 2437,
+  "emitted_bytes": 2437,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 9,
+  "files_named_before_ttca": 9,
+  "total_files_named": 9,
+  "last_gold_rank": null,
+  "wall_ms": 404.8,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--situ=table/block_based/binary_search_index_reader.cc"
+  ]
+ },
+ {
+  "qid": 14,
+  "arm": "placebo",
+  "ttca_bytes": 2412,
+  "emitted_bytes": 2412,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 9,
+  "files_named_before_ttca": 76,
+  "total_files_named": 76,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=14 budget=2437B"
+  ]
+ },
+ {
+  "qid": 15,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 664,
+  "emitted_bytes": 3496,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 1,
+  "total_files_named": 28,
+  "last_gold_rank": 1,
+  "wall_ms": 1138.3,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--situ=db/wal_manager.cc"
+  ]
+ },
+ {
+  "qid": 15,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 664,
+  "emitted_bytes": 3496,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 1,
+  "total_files_named": 28,
+  "last_gold_rank": 1,
+  "wall_ms": 375.3,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--situ=db/wal_manager.cc"
+  ]
+ },
+ {
+  "qid": 15,
+  "arm": "placebo",
+  "ttca_bytes": 3463,
+  "emitted_bytes": 3463,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 111,
+  "total_files_named": 111,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=15 budget=3496B"
+  ]
+ },
+ {
+  "qid": 16,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 667,
+  "emitted_bytes": 3505,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 1,
+  "total_files_named": 29,
+  "last_gold_rank": 1,
+  "wall_ms": 1443.7,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--situ=table/get_context.cc"
+  ]
+ },
+ {
+  "qid": 16,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 667,
+  "emitted_bytes": 3505,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 1,
+  "total_files_named": 29,
+  "last_gold_rank": 1,
+  "wall_ms": 584.1,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--situ=table/get_context.cc"
+  ]
+ },
+ {
+  "qid": 16,
+  "arm": "placebo",
+  "ttca_bytes": 3496,
+  "emitted_bytes": 3496,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 108,
+  "total_files_named": 108,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=16 budget=3505B"
+  ]
+ },
+ {
+  "qid": 17,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 669,
+  "emitted_bytes": 3919,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 1,
+  "total_files_named": 34,
+  "last_gold_rank": 1,
+  "wall_ms": 1292.3,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--situ=db/db_impl/db_impl.cc"
+  ]
+ },
+ {
+  "qid": 17,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 669,
+  "emitted_bytes": 3919,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 1,
+  "total_files_named": 34,
+  "last_gold_rank": 1,
+  "wall_ms": 513.4,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--situ=db/db_impl/db_impl.cc"
+  ]
+ },
+ {
+  "qid": 17,
+  "arm": "placebo",
+  "ttca_bytes": 3906,
+  "emitted_bytes": 3906,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 119,
+  "total_files_named": 119,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=17 budget=3919B"
+  ]
+ },
+ {
+  "qid": 18,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 3485,
+  "emitted_bytes": 3485,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 28,
+  "total_files_named": 28,
+  "last_gold_rank": null,
+  "wall_ms": 1632.3,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--situ=table/block_based/block.cc"
+  ]
+ },
+ {
+  "qid": 18,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 3485,
+  "emitted_bytes": 3485,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 28,
+  "total_files_named": 28,
+  "last_gold_rank": null,
+  "wall_ms": 417.0,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--situ=table/block_based/block.cc"
+  ]
+ },
+ {
+  "qid": 18,
+  "arm": "placebo",
+  "ttca_bytes": 3479,
+  "emitted_bytes": 3479,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 107,
+  "total_files_named": 107,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=18 budget=3485B"
+  ]
+ },
+ {
+  "qid": 19,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 5091,
+  "emitted_bytes": 5091,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 28,
+  "total_files_named": 28,
+  "last_gold_rank": null,
+  "wall_ms": 3461.1,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--for=Print unknown writebatch tag (#13062)"
+  ]
+ },
+ {
+  "qid": 19,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 5091,
+  "emitted_bytes": 5091,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 28,
+  "total_files_named": 28,
+  "last_gold_rank": null,
+  "wall_ms": 826.4,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--for=Print unknown writebatch tag (#13062)"
+  ]
+ },
+ {
+  "qid": 19,
+  "arm": "placebo",
+  "ttca_bytes": 5091,
+  "emitted_bytes": 5091,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 155,
+  "total_files_named": 155,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=19 budget=5091B"
+  ]
+ },
+ {
+  "qid": 20,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 8427,
+  "emitted_bytes": 8427,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 27,
+  "total_files_named": 27,
+  "last_gold_rank": null,
+  "wall_ms": 3197.9,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--for=Remove close when fd == -1. (#12732)"
+  ]
+ },
+ {
+  "qid": 20,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 8427,
+  "emitted_bytes": 8427,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 27,
+  "total_files_named": 27,
+  "last_gold_rank": null,
+  "wall_ms": 922.9,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--for=Remove close when fd == -1. (#12732)"
+  ]
+ },
+ {
+  "qid": 20,
+  "arm": "placebo",
+  "ttca_bytes": 3948,
+  "emitted_bytes": 8412,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 126,
+  "total_files_named": 256,
+  "last_gold_rank": 126,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=20 budget=8427B"
+  ]
+ },
+ {
+  "qid": 21,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 5977,
+  "emitted_bytes": 5977,
+  "complete": false,
+  "hits": 2,
+  "n_gold": 21,
+  "files_named_before_ttca": 28,
+  "total_files_named": 28,
+  "last_gold_rank": null,
+  "wall_ms": 3314.1,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--for=Add initial support for TimedPut API (#12419)"
+  ]
+ },
+ {
+  "qid": 21,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 5977,
+  "emitted_bytes": 5977,
+  "complete": false,
+  "hits": 2,
+  "n_gold": 21,
+  "files_named_before_ttca": 28,
+  "total_files_named": 28,
+  "last_gold_rank": null,
+  "wall_ms": 773.7,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--for=Add initial support for TimedPut API (#12419)"
+  ]
+ },
+ {
+  "qid": 21,
+  "arm": "placebo",
+  "ttca_bytes": 5961,
+  "emitted_bytes": 5961,
+  "complete": false,
+  "hits": 2,
+  "n_gold": 21,
+  "files_named_before_ttca": 179,
+  "total_files_named": 179,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=21 budget=5977B"
+  ]
+ },
+ {
+  "qid": 22,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 2256,
+  "emitted_bytes": 5777,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 1,
+  "total_files_named": 28,
+  "last_gold_rank": 1,
+  "wall_ms": 3392.6,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--for=Fix WRITE_STALL start_time (#12147)"
+  ]
+ },
+ {
+  "qid": 22,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 2256,
+  "emitted_bytes": 5777,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 1,
+  "total_files_named": 28,
+  "last_gold_rank": 1,
+  "wall_ms": 1409.4,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--for=Fix WRITE_STALL start_time (#12147)"
+  ]
+ },
+ {
+  "qid": 22,
+  "arm": "placebo",
+  "ttca_bytes": 5748,
+  "emitted_bytes": 5748,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 179,
+  "total_files_named": 179,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=22 budget=5777B"
+  ]
+ },
+ {
+  "qid": 23,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 7579,
+  "emitted_bytes": 7579,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 27,
+  "total_files_named": 27,
+  "last_gold_rank": null,
+  "wall_ms": 5009.7,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--for=Fix a bug in MultiGet when skip_memtable is true (#11700)"
+  ]
+ },
+ {
+  "qid": 23,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 7579,
+  "emitted_bytes": 7579,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 27,
+  "total_files_named": 27,
+  "last_gold_rank": null,
+  "wall_ms": 804.9,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--for=Fix a bug in MultiGet when skip_memtable is true (#11700)"
+  ]
+ },
+ {
+  "qid": 23,
+  "arm": "placebo",
+  "ttca_bytes": 7572,
+  "emitted_bytes": 7572,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 229,
+  "total_files_named": 229,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=23 budget=7579B"
+  ]
+ },
+ {
+  "qid": 24,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 5002,
+  "emitted_bytes": 5002,
+  "complete": false,
+  "hits": 4,
+  "n_gold": 18,
+  "files_named_before_ttca": 27,
+  "total_files_named": 27,
+  "last_gold_rank": null,
+  "wall_ms": 3773.6,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--for=Record the `persist_user_defined_timestamps` flag in manifest (#11515)"
+  ]
+ },
+ {
+  "qid": 24,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 5002,
+  "emitted_bytes": 5002,
+  "complete": false,
+  "hits": 4,
+  "n_gold": 18,
+  "files_named_before_ttca": 27,
+  "total_files_named": 27,
+  "last_gold_rank": null,
+  "wall_ms": 1262.7,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--for=Record the `persist_user_defined_timestamps` flag in manifest (#11515)"
+  ]
+ },
+ {
+  "qid": 24,
+  "arm": "placebo",
+  "ttca_bytes": 4974,
+  "emitted_bytes": 4974,
+  "complete": false,
+  "hits": 5,
+  "n_gold": 18,
+  "files_named_before_ttca": 154,
+  "total_files_named": 154,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=24 budget=5002B"
+  ]
+ },
+ {
+  "qid": 25,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 31708,
+  "emitted_bytes": 31708,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 3,
+  "files_named_before_ttca": 71,
+  "total_files_named": 71,
+  "last_gold_rank": null,
+  "wall_ms": 2710.9,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--rank-by=churn-decay"
+  ]
+ },
+ {
+  "qid": 25,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 31708,
+  "emitted_bytes": 31708,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 3,
+  "files_named_before_ttca": 71,
+  "total_files_named": 71,
+  "last_gold_rank": null,
+  "wall_ms": 1552.0,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--rank-by=churn-decay"
+  ]
+ },
+ {
+  "qid": 25,
+  "arm": "placebo",
+  "ttca_bytes": 31692,
+  "emitted_bytes": 31692,
+  "complete": false,
+  "hits": 2,
+  "n_gold": 3,
+  "files_named_before_ttca": 976,
+  "total_files_named": 976,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=25 budget=31708B"
+  ]
+ },
+ {
+  "qid": 26,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 31708,
+  "emitted_bytes": 31708,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 3,
+  "files_named_before_ttca": 71,
+  "total_files_named": 71,
+  "last_gold_rank": null,
+  "wall_ms": 1755.9,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--rank-by=churn-decay"
+  ]
+ },
+ {
+  "qid": 26,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 31708,
+  "emitted_bytes": 31708,
+  "complete": false,
+  "hits": 1,
+  "n_gold": 3,
+  "files_named_before_ttca": 71,
+  "total_files_named": 71,
+  "last_gold_rank": null,
+  "wall_ms": 1221.9,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--rank-by=churn-decay"
+  ]
+ },
+ {
+  "qid": 26,
+  "arm": "placebo",
+  "ttca_bytes": 25529,
+  "emitted_bytes": 31678,
+  "complete": true,
+  "hits": 3,
+  "n_gold": 3,
+  "files_named_before_ttca": 786,
+  "total_files_named": 972,
+  "last_gold_rank": 786,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=26 budget=31708B"
+  ]
+ },
+ {
+  "qid": 27,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 31708,
+  "emitted_bytes": 31708,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 71,
+  "total_files_named": 71,
+  "last_gold_rank": null,
+  "wall_ms": 2150.5,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--rank-by=churn-decay"
+  ]
+ },
+ {
+  "qid": 27,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 31708,
+  "emitted_bytes": 31708,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 1,
+  "files_named_before_ttca": 71,
+  "total_files_named": 71,
+  "last_gold_rank": null,
+  "wall_ms": 966.7,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--rank-by=churn-decay"
+  ]
+ },
+ {
+  "qid": 27,
+  "arm": "placebo",
+  "ttca_bytes": 29699,
+  "emitted_bytes": 31671,
+  "complete": true,
+  "hits": 1,
+  "n_gold": 1,
+  "files_named_before_ttca": 909,
+  "total_files_named": 970,
+  "last_gold_rank": 909,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=27 budget=31708B"
+  ]
+ },
+ {
+  "qid": 28,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 31708,
+  "emitted_bytes": 31708,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 10,
+  "files_named_before_ttca": 71,
+  "total_files_named": 71,
+  "last_gold_rank": null,
+  "wall_ms": 1800.4,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--rank-by=churn-decay"
+  ]
+ },
+ {
+  "qid": 28,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 31708,
+  "emitted_bytes": 31708,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 10,
+  "files_named_before_ttca": 71,
+  "total_files_named": 71,
+  "last_gold_rank": null,
+  "wall_ms": 1019.2,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--rank-by=churn-decay"
+  ]
+ },
+ {
+  "qid": 28,
+  "arm": "placebo",
+  "ttca_bytes": 31694,
+  "emitted_bytes": 31694,
+  "complete": false,
+  "hits": 7,
+  "n_gold": 10,
+  "files_named_before_ttca": 965,
+  "total_files_named": 965,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=28 budget=31708B"
+  ]
+ },
+ {
+  "qid": 29,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 31708,
+  "emitted_bytes": 31708,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 11,
+  "files_named_before_ttca": 71,
+  "total_files_named": 71,
+  "last_gold_rank": null,
+  "wall_ms": 2098.4,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--rank-by=churn-decay"
+  ]
+ },
+ {
+  "qid": 29,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 31708,
+  "emitted_bytes": 31708,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 11,
+  "files_named_before_ttca": 71,
+  "total_files_named": 71,
+  "last_gold_rank": null,
+  "wall_ms": 1150.2,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--rank-by=churn-decay"
+  ]
+ },
+ {
+  "qid": 29,
+  "arm": "placebo",
+  "ttca_bytes": 31703,
+  "emitted_bytes": 31703,
+  "complete": false,
+  "hits": 8,
+  "n_gold": 11,
+  "files_named_before_ttca": 984,
+  "total_files_named": 984,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=29 budget=31708B"
+  ]
+ },
+ {
+  "qid": 30,
+  "arm": "ripwire-cold",
+  "ttca_bytes": 31708,
+  "emitted_bytes": 31708,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 2,
+  "files_named_before_ttca": 71,
+  "total_files_named": 71,
+  "last_gold_rank": null,
+  "wall_ms": 2150.3,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--no-cache",
+   "--rank-by=churn-decay"
+  ]
+ },
+ {
+  "qid": 30,
+  "arm": "ripwire-warm",
+  "ttca_bytes": 31708,
+  "emitted_bytes": 31708,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 2,
+  "files_named_before_ttca": 71,
+  "total_files_named": 71,
+  "last_gold_rank": null,
+  "wall_ms": 1282.9,
+  "rc": 0,
+  "argv": [
+   "$RIPWIRE",
+   "$RW_H2H_HOME/corpus/rocksdb",
+   "--rank-by=churn-decay"
+  ]
+ },
+ {
+  "qid": 30,
+  "arm": "placebo",
+  "ttca_bytes": 31694,
+  "emitted_bytes": 31694,
+  "complete": false,
+  "hits": 0,
+  "n_gold": 2,
+  "files_named_before_ttca": 970,
+  "total_files_named": 970,
+  "last_gold_rank": null,
+  "wall_ms": 0.0,
+  "rc": 0,
+  "argv": [
+   "placebo:random-rank seed=30 budget=31708B"
+  ]
+ }
+]

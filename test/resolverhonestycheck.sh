@@ -202,6 +202,111 @@ a1="$( hdr "$F/f1" ambiguous )"; a1="${a1:-0}"
                 || no "F1 header ambiguous=$a1 does not reflect the 2-way pick"
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# INVARIANT 3 — ATTRIBUTABILITY: the admitted guess is attributable to the EDGES it was made on.
+#
+# INVARIANT 2 proves the guess is ADMITTED. It does not prove it is LOCATABLE, and those are different
+# properties. `amb="K"` is a per-SYMBOL aggregate over CALLS; the `<c>` children are the EDGES. A reader
+# holding `<s n="push_back" amb="2"><c n="buf"/><c n="buf"/><c n="grow"/>` (ripwire's own tree, verbatim)
+# knows two of push_back's calls were guessed and cannot tell which of the three edges to distrust — so a
+# consumer acting on the honesty signal must distrust ALL of them. That is the confidence axis being
+# computed and then thrown away at the point of emission, which is precisely the defect class §4 of
+# docs/ARCHITECTURE.md ("do not add a surface that quietly rounds, guesses, or omits") exists to forbid.
+#
+# The per-edge disclosure folds into the EXISTING per-edge provenance attribute `prov=` (whose closed
+# vocabulary already carries scip = SCIP-pinned precise and binding = cross-language FFI), as a third
+# value `split` — this edge is one arm of a k-way split the resolver could not choose between.
+#
+#   [B] cases: EVERY edge that is an arm of the split carries prov="split".
+#   [A] cases: NO edge carries prov="split" — a confident edge is never marked (omit-at-confident, so a
+#              fully-resolved corpus stays byte-identical; test/golden.xml is the standing proof).
+#   BICONDITIONAL: a symbol carries amb= if and only if at least one of its edges carries prov="split".
+#                  One direction alone is satisfiable by marking everything or nothing.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+echo "── INVARIANT 3: ATTRIBUTABILITY (the guess names its own edges, not just its symbol) ──"
+
+# edge_provs DIR SYM → one line per <c> child of SYM: "<calleeName> <prov or '-'>". Parsed, not grepped:
+# the marker is an ATTRIBUTE of a specific child element and a substring search cannot say which child.
+edge_provs(){
+    run "$1" | python3 -c '
+import sys, xml.etree.ElementTree as ET
+sym = sys.argv[1]
+try:
+    root = ET.fromstring( sys.stdin.read() )
+except Exception as e:
+    print( "PARSE-ERROR", e ); raise SystemExit( 0 )
+for s in root.iter( "s" ):
+    if s.get( "n" ) == sym:
+        for c in s.findall( "c" ):
+            print( c.get( "n" ), c.get( "prov" ) or "-" )
+' "$2"
+}
+# how many of SYM's edges carry prov="split"
+split_edges(){ edge_provs "$1" "$2" | awk '$2 == "split"' | wc -l | tr -d ' '; }
+# how many edges SYM has at all
+all_edges(){   edge_provs "$1" "$2" | grep -c . | tr -d ' '; }
+
+# [B] every arm of the split is marked — n edges, n marked.
+for pair in "f1:bar:same-dir 2-way" "f8:bar8:decl-only 2-way" "f9:compute9:pure-virtual 2-way"; do
+    d="${pair%%:*}"; rest="${pair#*:}"; sym="${rest%%:*}"; label="${rest#*:}"
+    n="$( all_edges "$F/$d" "$sym" )"; k="$( split_edges "$F/$d" "$sym" )"
+    if [ "$n" -ge 2 ] && [ "$k" = "$n" ]; then
+        ok "F${d#f} [B] $label: all $n edges carry prov=\"split\" (the guess is attributable)"
+    else
+        no "F${d#f} [B] $label: $n edges but only $k marked prov=\"split\" — amb= names the symbol, nothing names the EDGE"
+        edge_provs "$F/$d" "$sym" | sed 's/^/    /'
+    fi
+done
+
+# [A] a confident edge is never marked (omit-at-confident: this is what keeps golden.xml byte-identical).
+#
+# PRESENCE GUARD, and why the [A] roster is two cases and not three. INVARIANT 2 checks F3's Rule-1 pin
+# through --callees, which reports 1 edge. The DEFAULT MAP's F3 row carries ZERO <c> children: `int run();`
+# and `int B::run()` merge into one overloads="2" row and the surviving row is the declaration, which has
+# no calls. A per-EDGE assertion over F3 would therefore be asserting over an empty set and would pass for
+# the wrong reason (METHODOLOGY §1, "a gate that cannot observe what it asserts"). F3 stays in INVARIANT 2,
+# where it is observable, and the [A] roster below asserts its own precondition before asserting anything.
+a_witnesses=0
+for d_sym in "f2:bar" "f4:run"; do
+    [ "$( all_edges "$F/${d_sym%%:*}" "${d_sym#*:}" )" -ge 1 ] && a_witnesses=$(( a_witnesses + 1 ))
+done
+[ "$a_witnesses" = 2 ] && ok "[A] precondition: both confident witnesses still emit >=1 <c> edge (arm is not inert)"                        || no "[A] precondition GONE: only $a_witnesses of 2 confident witnesses emit an edge — the omit-at-confident arm cannot observe what it asserts"
+for pair in "f2:bar:same-file unique" "f4:run:Rule-3 pin"; do
+    d="${pair%%:*}"; rest="${pair#*:}"; sym="${rest%%:*}"; label="${rest#*:}"
+    n="$( all_edges "$F/$d" "$sym" )"; k="$( split_edges "$F/$d" "$sym" )"
+    [ "$n" -ge 1 ] && [ "$k" = 0 ] \
+      && ok "F${d#f} [A] $label: $n confident edge(s), 0 marked (omit-at-confident holds)" \
+      || { no "F${d#f} [A] $label: $k of $n confident edges wrongly marked prov=\"split\""; edge_provs "$F/$d" "$sym" | sed 's/^/    /'; }
+done
+
+# BICONDITIONAL — amb= present ⟺ ≥1 split edge, checked on BOTH a [B] and an [A] case so neither
+# "mark everything" nor "mark nothing" satisfies it.
+b_amb="$( amb_of "$F/f1" bar )"; b_k="$( split_edges "$F/f1" bar )"
+a_amb="$( amb_of "$F/f2" bar )"; a_k="$( split_edges "$F/f2" bar )"
+if [ -n "$b_amb" ] && [ "$b_k" -ge 1 ] && [ -z "$a_amb" ] && [ "$a_k" = 0 ]; then
+    ok "biconditional: amb= ⟺ ≥1 prov=\"split\" edge (F1 has both, F2 has neither)"
+else
+    no "biconditional broken: F1 amb='$b_amb' split=$b_k ; F2 amb='$a_amb' split=$a_k"
+fi
+
+# The COUNTING-UNIT clause, gated. amb= counts CALLS; prov="split" marks EDGES; one call split k ways
+# makes k edges, so the two numbers are NOT required to be equal and a gate that demanded equality would
+# be asserting a falsehood. What IS required: a symbol whose calls were all confident has neither.
+# F1 is the witness that the units differ — 1 ambiguous call, 2 split edges.
+[ "$( amb_of "$F/f1" bar )" = 'amb="1"' ] && [ "$( split_edges "$F/f1" bar )" = 2 ] \
+  && ok "counting units differ and both are honest: F1 = 1 ambiguous CALL, 2 split EDGES" \
+  || no "F1 unit witness moved: amb=$( amb_of "$F/f1" bar ) split_edges=$( split_edges "$F/f1" bar )"
+
+# MUTATION self-test for INVARIANT 3 — prove the per-edge assertion is load-bearing and is NOT satisfied
+# by the pre-existing amb= alone. Force every edge's prov to '-' (what the binary emitted BEFORE this
+# marker existed) and assert the [B] arm above would then FAIL.
+forced_k=0; n1="$( all_edges "$F/f1" bar )"
+if [ "$n1" -ge 2 ] && [ "$forced_k" != "$n1" ]; then
+    ok "mutation: with prov blanked on F1 ($n1 edges), the [B] arm WOULD FAIL (per-edge assertion is load-bearing)"
+else
+    no "mutation: F1 lost its ≥2-edge precondition ($n1) — the INVARIANT 3 arm is inert"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # MUTATION SELF-TEST — prove the amb assertion is LOAD-BEARING. We simulate "what if amb were silently 0"
 # on a case that MUST report amb (F8: the decl-only 2-way pick, 2 edges). If the gate's logic would still
 # PASS with amb forced empty, the assertion is a tautology. We re-run check_signal's logic with amb

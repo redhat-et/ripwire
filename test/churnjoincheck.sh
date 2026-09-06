@@ -212,8 +212,11 @@ done
     || ok "--hotspots stays quiet when every git path binds exactly (no false alarm)"
 
 # ── 3. §B2.2 — a churn prior with NO in-window evidence must say so ─────────────────────────────────
-# Every commit here is dated 2019: `--rank-by=churn`'s 18-month window matches nothing, so the prior is
-# uniform and the ranking IS the structural one.
+# Every commit here is dated 2019. That USED to be how this arm produced an empty window: the 18-month
+# default was measured from the wall clock, so a 2019 history fell outside it. F1 (round C) anchors the
+# DEFAULT window on HEAD's own committer date, so a 2019 tree is now inside its own window — which is the
+# whole point of that change, and is asserted positively below before the empty-window contract is re-armed
+# through the one path that can still empty a window on a repo with history: an EXPLICIT future --since.
 mkdir -p "$R3/src"
 printf 'int helperB( int x ) { return x + 1; }\nint a( int x ) { if( x ) return 1; return helperB( x ); }\n' > "$R3/src/a.cpp"
 printf 'int c( int x ) { return a( x ) + helperB( x ); }\n' > "$R3/src/c.cpp"
@@ -224,7 +227,18 @@ printf '// more\n' >> "$R3/src/a.cpp"
 D 2019-02-01T12:00:00; git -C "$R3" add -A >/dev/null; git -C "$R3" commit -qm c2
 unset GIT_AUTHOR_DATE GIT_COMMITTER_DATE
 
-"$BIN" "$R3" --rank-by=churn --top-k=5 > "$TMP/z.xml" 2>"$TMP/z.err"; zrc=$?
+# F1: the DEFAULT window now reaches this 2019 history, and says which anchor let it.
+"$BIN" "$R3" --rank-by=churn --top-k=5 > "$TMP/anch.xml" 2>"$TMP/anch.err"
+grep -oE 'window="[^"]*"' "$TMP/anch.xml" | head -1 | grep -q '18mo@HEAD' \
+    && ok "F1: the default churn window is anchored on HEAD and stamps 18mo@HEAD on a 2019 history" \
+    || no "F1: the default churn window did not anchor: $( grep -oE 'window="[^"]*"' "$TMP/anch.xml" | head -1 )"
+grep -oE 'window="[^"]*"' "$TMP/anch.xml" | head -1 | grep -qi 'no churn evidence' \
+    && no "F1: a 2019 history is inside a HEAD-anchored 18-month window, yet the prior found no evidence" \
+    || ok "F1: the anchored window found real churn evidence in a >18mo-old history"
+
+# The empty-window contract, re-armed through an EXPLICIT future --since — the user's own value, never
+# re-anchored, and now the only way a repo WITH history can present an empty churn window.
+"$BIN" "$R3" --rank-by=churn --since=2099-01-01 --top-k=5 > "$TMP/z.xml" 2>"$TMP/z.err"; zrc=$?
 "$BIN" "$R3"                 --top-k=5 > "$TMP/p.xml" 2>/dev/null
 [ "$zrc" -eq 0 ] && ok "zero-evidence --rank-by=churn still exits 0 (a structural map is a valid answer)" \
     || no "zero-evidence --rank-by=churn exit $zrc, want 0"
@@ -240,7 +254,7 @@ grep -qi 'churn' "$TMP/z.err" \
     && ok "zero-evidence churn prints one stderr note (the --map-diff 'using uniform ranking' precedent)" \
     || no "zero-evidence churn is silent on stderr"
 # the JSON dialect must carry the same stamp (churnjsonstampcheck's XML/JSON agreement, one value over)
-"$BIN" "$R3" --rank-by=churn --top-k=5 --json > "$TMP/z.json" 2>/dev/null
+"$BIN" "$R3" --rank-by=churn --since=2099-01-01 --top-k=5 --json > "$TMP/z.json" 2>/dev/null
 grep -qi '"window":"[^"]*no churn evidence' "$TMP/z.json" \
     && ok "the JSON stamp discloses the empty churn signal identically" \
     || no "JSON window= hides what the XML discloses: $( grep -oE '"window":"[^"]*"' "$TMP/z.json" | head -1 )"
@@ -248,8 +262,8 @@ grep -qi '"window":"[^"]*no churn evidence' "$TMP/z.json" \
 # CONTROL: a repo WITH in-window churn keeps the plain window label and stays quiet (no over-firing)
 if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
     "$BIN" "$ROOT" --rank-by=churn --top-k=3 > "$TMP/live.xml" 2>"$TMP/live.err"
-    grep -q 'window="18mo"' "$TMP/live.xml" \
-        && ok 'CONTROL: a repo with real churn still stamps exactly window="18mo"' \
+    grep -q 'window="18mo@HEAD"' "$TMP/live.xml" \
+        && ok 'CONTROL: a repo with real churn still stamps exactly window="18mo@HEAD"' \
         || no "CONTROL: the live repo's window label changed: $( grep -oE 'window="[^"]*"' "$TMP/live.xml" | head -1 )"
     grep -qi 'churn' "$TMP/live.err" \
         && no "CONTROL: the empty-churn note fired on a repo that HAS churn: $( head -c 200 "$TMP/live.err" )" \

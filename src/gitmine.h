@@ -637,6 +637,209 @@ inline std::string gitRepoToplevel( const std::string& absDir )
     return top;
 }
 
+// ── THE DEFAULT HISTORY WINDOW'S ANCHOR: HEAD's committer date, never the wall clock ─────────────────────
+//
+// Every miner in this file that is handed no explicit --since falls back to a RELATIVE window spelled as a
+// git approxidate: "12 months ago" (--hotspots, the map's churn lens), "18 months ago" (--cochange, --situ,
+// --pr-context, --rank-by=churn), "36 months ago" (the eval oracle). git resolves all of those against the
+// WALL CLOCK. That is right for a live checkout and wrong for everything else — a pinned corpus, an archived
+// release, a bisect checkout, any eval, and eval corpora are pinned by definition. The whole history then
+// falls outside the window, and the verbs do not report an empty window: they report NO REPOSITORY.
+//
+// MEASURED, which is why this exists (round-C head-to-head, RocksDB @0e2801ac3, HEAD 2024-10-17, 12,938
+// commits, run 2026-09-06): `--cochange` exited 1 with "git unavailable / no history (need a git repo)" on
+// that tree, while a competitor walking the same history mined 9,854 co-change edges. Both halves of that
+// sentence were false — git was present and the history was there. Only the window was empty.
+//
+// So the DEFAULT window anchors on HEAD's own committer epoch: the same WIDTH, measured back from the commit
+// the map describes instead of from the day the map was printed. An EXPLICIT --since is NEVER re-anchored;
+// that value is a decision the user made, and re-anchoring it would take it away from them. That is also why
+// this needs no opt-out flag — `--since="18 months ago"` reproduces the old window exactly.
+//
+// THREE PROPERTIES, none of them subtle:
+//   * a pinned tree's history is inside its own window, always;
+//   * the default window becomes a pure function of (repo, HEAD), so these verbs stop changing overnight on
+//     an unchanged tree — which is what the determinism contract wanted from them all along;
+//   * `window="18mo@HEAD"` names the anchor that produced it, so a reader can tell the two regimes apart.
+//
+// DEGRADE: no git, no HEAD, an unparseable stamp (a bare directory, a fresh `git init` with no commit) ⇒ the
+// caller's literal relative value passes through UNCHANGED, exactly as before, and the stamp says `18mo`
+// with no `@HEAD`. A disclosed fallback, not a silent one.
+
+// HEAD's committer epoch, MEMOIZED per root. `gitHeadCommitEpoch` (below) is one `git log -1` popen; the
+// anchor is now read by every history verb and by the window= stamp beside it, so a run would otherwise pay
+// that probe a dozen times for a number that cannot change under it — the same argument gitRepoToplevel's
+// memo makes, and the same shape.
+inline std::int64_t gitHeadCommitEpoch( const std::string& root );
+inline bool         hasEnclosingGitRepo( const std::string& root );
+
+inline std::int64_t gitHeadCommitEpochCached( const std::string& root )
+{
+    static std::mutex                          anchorMutex;
+    static HashMap<std::string, std::int64_t>  anchorByRoot;
+
+    // A NON-GIT root must cost ZERO git subprocesses, not one that merely fails — test/nongitqmetricscheck.sh
+    // pins that with a fake `git` on PATH that records every invocation, and this anchor read is on the path
+    // of every history-windowed verb, so without the stat-based pre-check the whole rich-retrieval lane on a
+    // non-repo tree grew a popen. (Found by that gate, in this lane, exactly as it was written to.)
+    if( !hasEnclosingGitRepo( root ) )
+    {
+        return 0;
+    }
+
+    {
+        const std::lock_guard<std::mutex> lock{ anchorMutex };
+        const auto                        it = anchorByRoot.find( root );
+        if( it != anchorByRoot.end() )
+        {
+            return it->second;
+        }
+    }
+    const std::int64_t epoch = gitHeadCommitEpoch( root );
+
+    const std::lock_guard<std::mutex> lock{ anchorMutex };
+    anchorByRoot[ root ] = epoch;
+    return epoch;
+}
+
+// Proleptic-Gregorian civil <-> days-since-1970, spelled out here rather than reached through gmtime_r /
+// timegm: those carry a libc's local-timezone posture into a number two machines must agree on byte-for-byte,
+// and the wall-clock helper below it (approxMonthsAgoEpoch) already shows what localtime does to a window.
+// Howard Hinnant's public-domain algorithms, transcribed with every mixed-sign expression made explicit
+// because -fsanitize=integer is on for the G1 build.
+inline std::int64_t daysFromCivil( std::int64_t y, unsigned m, unsigned d )
+{
+    y -= ( m <= 2 ) ? 1 : 0;
+    const std::int64_t era = ( y >= 0 ? y : y - 399 ) / 400;
+    const unsigned     yoe = unsigned( y - era * 400 );                                       // [0, 399]
+    const unsigned     doy = ( 153u * ( m > 2 ? m - 3u : m + 9u ) + 2u ) / 5u + d - 1u;       // [0, 365]
+    const unsigned     doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;                        // [0, 146096]
+    return era * 146097 + std::int64_t( doe ) - 719468;
+}
+
+inline void civilFromDays( std::int64_t z, std::int64_t& y, unsigned& m, unsigned& d )
+{
+    z += 719468;
+    const std::int64_t era = ( z >= 0 ? z : z - 146096 ) / 146097;
+    const unsigned     doe = unsigned( z - era * 146097 );                                    // [0, 146096]
+    const unsigned     yoe = ( doe - doe / 1460u + doe / 36524u - doe / 146096u ) / 365u;     // [0, 399]
+    const unsigned     doy = doe - ( 365u * yoe + yoe / 4u - yoe / 100u );                    // [0, 365]
+    const unsigned     mp  = ( 5u * doy + 2u ) / 153u;                                        // [0, 11]
+    d = doy - ( 153u * mp + 2u ) / 5u + 1u;                                                   // [1, 31]
+    m = ( mp < 10u ) ? mp + 3u : mp - 9u;                                                     // [1, 12]
+    y = std::int64_t( yoe ) + era * 400 + ( ( m <= 2 ) ? 1 : 0 );
+}
+
+// `months` calendar months before `epoch`, in UTC, normalizing an overflowing day FORWARD exactly as git's
+// own approxidate does (`tm_mon -= months` then mktime, so 31 March minus one month is 3 March, not 28
+// February). Mirroring that normalization is the point: the window's width must be the one git would have
+// produced, with only its anchor changed.
+inline std::int64_t monthsBeforeEpoch( std::int64_t epoch, unsigned months )
+{
+    const std::int64_t days     = ( epoch >= 0 ) ? ( epoch / 86400 ) : -( ( -epoch + 86399 ) / 86400 );   // floor-div: epoch 0 is 1970, but a repo CAN predate it
+    const std::int64_t secOfDay = epoch - days * 86400;
+    std::int64_t       y        = 0;
+    unsigned           m        = 0;
+    unsigned           d        = 0;
+    civilFromDays( days, y, m, d );
+
+    const std::int64_t monthIndex = y * 12 + std::int64_t( m ) - 1 - std::int64_t( months );
+    const std::int64_t ny         = ( monthIndex >= 0 ) ? ( monthIndex / 12 ) : -( ( -monthIndex + 11 ) / 12 );
+    const unsigned     nm         = unsigned( monthIndex - ny * 12 ) + 1u;                                // [1, 12]
+    return ( daysFromCivil( ny, nm, 1 ) + std::int64_t( d ) - 1 ) * 86400 + secOfDay;
+}
+
+// "<N> months ago" -> N; 0 for every other shape. Deliberately NARROW: the only relative default windows in
+// this tree are month windows, so a parser that also guessed at weeks/days/years would be a second source of
+// truth for shapes nobody emits. An absolute date, an "@<epoch>", or a user's own --since value returns 0 and
+// is therefore passed through untouched — which is what makes the resolver below idempotent.
+inline unsigned relativeMonthsAgo( std::string_view s )
+{
+    std::size_t i = 0;
+    while( i < s.size() && s[i] == ' ' )
+    {
+        ++i;
+    }
+    unsigned n = 0;
+    std::size_t digits = 0;
+    while( i < s.size() && s[i] >= '0' && s[i] <= '9' && n < 100000u )
+    {
+        n = n * 10u + unsigned( s[i] - '0' );
+        ++i;
+        ++digits;
+    }
+    if( digits == 0 || n == 0 )
+    {
+        return 0;
+    }
+    while( i < s.size() && s[i] == ' ' )
+    {
+        ++i;
+    }
+    const std::string_view rest = s.substr( i );
+    return ( rest == "months ago" || rest == "month ago" ) ? n : 0u;
+}
+
+// THE default window's `--since` VALUE: `@<epoch>` anchored on HEAD when both the shape and the anchor
+// resolve, else the caller's own literal, byte-for-byte unchanged. Idempotent by construction (an `@<epoch>`
+// is not "<N> months ago", so a second pass cannot move an already-resolved window).
+inline std::string defaultWindowSince( const std::string& root, std::string_view relativeSince )
+{
+    const unsigned months = relativeMonthsAgo( relativeSince );
+    if( months == 0 )
+    {
+        return std::string{ relativeSince };
+    }
+    const std::int64_t headEpoch = gitHeadCommitEpochCached( root );
+    if( headEpoch <= 0 )
+    {
+        return std::string{ relativeSince };   // no anchor to measure from — the wall clock is the honest fallback, and the stamp says so
+    }
+    return "@" + std::to_string( monthsBeforeEpoch( headEpoch, months ) );
+}
+
+// The stamp's half of the SAME decision, so the label and the window it labels cannot disagree: true only
+// when defaultWindowSince would actually anchor for this root.
+inline bool defaultWindowIsAnchored( const std::string& root )
+{
+    return gitHeadCommitEpochCached( root ) > 0;
+}
+
+// The window= stamp for a DEFAULT (unscoped) window: "18mo" -> "18mo@HEAD" when anchored, "18mo" when the
+// anchor was unavailable and the wall clock is what produced it. One spelling, so --cochange, --hotspots,
+// --rank-by=churn, --situ and the MCP twins cannot each invent their own.
+inline std::string defaultWindowLabel( const std::string& root, std::string_view width )
+{
+    return std::string{ width } + ( defaultWindowIsAnchored( root ) ? "@HEAD" : "" );
+}
+
+// The churn SUB-window's cutoff epoch, from the SAME anchor by the SAME rule: gitCoChangeAndChurn slices a
+// shorter churn horizon out of the longer co-change walk, and the two cannot be allowed to disagree about
+// what "N months ago" means. 0 months ⇒ 0 ⇒ no churn slice was asked for. The no-HEAD degrade falls back to
+// the wall-clock form (approxMonthsAgoEpoch, declared below) — the same value it produced before, which is
+// moot in practice because a tree with no HEAD has no commits to bucket.
+inline std::int64_t approxMonthsAgoEpoch( unsigned months );
+
+inline std::int64_t defaultWindowCutoffEpoch( const std::string& root, unsigned months )
+{
+    if( months == 0 )
+    {
+        return 0;
+    }
+    const std::int64_t headEpoch = gitHeadCommitEpochCached( root );
+    return ( headEpoch > 0 ) ? monthsBeforeEpoch( headEpoch, months ) : approxMonthsAgoEpoch( months );
+}
+
+// THE `git log` window clause for a miner that has BOTH a caller-supplied default and an optional --since
+// scope: gitCommitFileSets and gitChurnCounts spelled this identically, and F1's anchor would have had to be
+// threaded through both spellings. One builder, so the default window and the scoped window are resolved by
+// one rule for every miner that has both.
+inline std::string historyWindowArgs( const std::string& root, const SinceScope* scope, const char* defaultSince )
+{
+    const std::string anchored = defaultWindowSince( root, defaultSince );
+    return scope ? sinceLogArgs( *scope, anchored.c_str() ) : ( "--since=" + shSingleQuote( anchored ) + " " );
+}
+
 // How this ingest spells a path versus how GIT spells the same path, for ONE root. Git's `--name-only` paths
 // are relative to the repo TOPLEVEL; `ing.files[f]` is the crawl root's spelling plus the file's path under it.
 // So for every file of one root:
@@ -1175,8 +1378,7 @@ inline std::vector<std::vector<std::uint32_t>> gitCommitFileSets( const std::str
                                                                   std::uint32_t onlyRoot = UINT32_MAX )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitCommitFileSets (git log --name-only popen)" );
-    const std::string windowArgs = scope ? sinceLogArgs( *scope, since ) : ( "--since=" + shSingleQuote( since ) + " " );
-    return gitLogFileSets( root, ing, windowArgs, maxFiles, onlyRoot );
+    return gitLogFileSets( root, ing, historyWindowArgs( root, scope, since ), maxFiles, onlyRoot );
 }
 
 // B3 (co-change prior boost): per-commit changed-file sets over the LAST `commitCount` commits reachable
@@ -1226,7 +1428,7 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitLogNameOnlyRaw (git log --name-only popen)" );
     RawCommitStream out;
     const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
-                          + " log " + kMergeDiffArgs + "--since=" + shSingleQuote( coSince )
+                          + " log " + kMergeDiffArgs + "--since=" + shSingleQuote( defaultWindowSince( root, coSince ) )   // F1: HEAD-anchored when `coSince` is a default month window
                           + " --name-only --format=tformat:__C__%x20%ct 2>/dev/null";
     std::FILE* pipe = popen( cmd.c_str(), "r" );
     if( !pipe )
@@ -1276,7 +1478,8 @@ inline std::string gitWindowBoundarySha( const std::string& root, const std::str
     // G3: the shared reader, not a private `char buf[128]` + fgets accumulate. `| tail -1` already reduces
     // the output to one line, so `.back()` is that line; gitCommandLines has already stripped its CR/LF tail.
     const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
-                          + " log --since=" + shSingleQuote( coSince ) + " --format=%H 2>/dev/null | tail -1";
+                          + " log --since=" + shSingleQuote( defaultWindowSince( root, coSince ) )   // F1: the probe must resolve the window it guards, by the same rule
+                          + " --format=%H 2>/dev/null | tail -1";
     const GitCommandLines res = gitCommandLines( cmd );
     if( !res.isStarted || res.lines.empty() )
     {
@@ -1291,7 +1494,7 @@ inline std::string gitWindowBoundarySha( const std::string& root, const std::str
 // path (gitCoChangeAndChurn, below) share ONE resolver instead of two copies that could drift.
 inline std::vector<std::vector<std::uint32_t>> resolveCommitStream(
     const RawCommitStream& raw, const IngestResult& ing, std::size_t maxFiles,
-    unsigned churnMonths, std::vector<std::uint32_t>* outChurn, std::uint32_t onlyRoot = UINT32_MAX )
+    std::int64_t churnCutoff, std::vector<std::uint32_t>* outChurn, std::uint32_t onlyRoot = UINT32_MAX )
 {
     std::vector<std::vector<std::uint32_t>> sets;
     if( outChurn )
@@ -1309,12 +1512,11 @@ inline std::vector<std::vector<std::uint32_t>> resolveCommitStream(
     const auto         resolve   = [ & ]( const std::string& gp ) { return resolveGitPath( byGitPath, gp ); };
 
     // churn: raw repo-relative path → #in-window commits touching it (identical to gitChurnCounts' `counts`).
-    const std::int64_t                  churnCutoff = ( outChurn && churnMonths ) ? approxMonthsAgoEpoch( churnMonths ) : 0;
     HashMap<std::string, std::uint32_t> churnCounts;
 
     for( const RawCommitStream::Commit& c : raw.commits )
     {
-        const bool inChurnWindow = ( outChurn && c.epoch >= churnCutoff );   // slice the churn sub-window off the same stream
+        const bool inChurnWindow = ( outChurn && churnCutoff != 0 && c.epoch >= churnCutoff );   // slice the churn sub-window off the same stream
         std::vector<std::uint32_t> cur;
         for( const std::string& p : c.paths )
         {
@@ -1356,8 +1558,10 @@ inline std::vector<std::vector<std::uint32_t>> resolveCommitStream(
 // marker line ("__C__ <epoch>"); adding the epoch changes no file line, so the co-change sets are identical to
 // gitCommitFileSets'. Churn counts raw repo-relative path occurrences of in-window commits and suffix-maps
 // them to fileIds exactly as gitChurnCounts does (no C-unquote there either — same A4-F13 behavior, preserved
-// for identity). Degrades cleanly: no git → empty sets + all-zero churn. Determinism note: `churnMonths`
-// resolves through approxMonthsAgoEpoch (wall-clock-relative, same as the gitChurnCounts it replaces).
+// for identity). Degrades cleanly: no git → empty sets + all-zero churn. Determinism note (F1): `churnMonths`
+// now resolves through defaultWindowCutoffEpoch — HEAD's committer epoch, the same anchor the co-change
+// window itself uses — so the two horizons sliced out of ONE walk cannot disagree, and neither drifts
+// overnight. It falls back to approxMonthsAgoEpoch (wall-clock) only when there is no HEAD to anchor on.
 //
 // This UNCACHED form is now a thin raw-walk + resolve composition (below) — kept as-is for
 // any caller that doesn't want the memoized path. The two rich-verb call sites (main.cpp's --metrics/--for
@@ -1370,7 +1574,7 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurn(
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitCoChangeAndChurn (single git log --name-only popen)" );
     const RawCommitStream raw = gitLogNameOnlyRaw( root, coSince );
-    return resolveCommitStream( raw, ing, maxFiles, churnMonths, outChurn, onlyRoot );
+    return resolveCommitStream( raw, ing, maxFiles, defaultWindowCutoffEpoch( root, churnMonths ), outChurn, onlyRoot );
 }
 
 // ── short-horizon churn (GitClear 2026: +15% "new code rewritten within two weeks" in AI-authored code) ──
@@ -2757,7 +2961,7 @@ inline bool applyCoChangeBoost( const IngestResult& ing, const std::vector<std::
 inline bool gitChurnCounts( const std::string& root, const rw::IngestResult& ing, std::vector<std::uint32_t>& out, const char* since, const rw::SinceScope* scope = nullptr,
                      std::uint32_t onlyRoot = UINT32_MAX )   // multi-root §5: count ONLY files of that root
 {
-    const std::string windowArgs = scope ? rw::sinceLogArgs( *scope, since ) : ( "--since=" + shSingleQuote( since ) + " " );
+    const std::string windowArgs = rw::historyWindowArgs( root, scope, since );
     const rw::GitCommandLines touched = rw::gitCommandLines(
         "git -c core.quotepath=false -C " + shSingleQuote( root ) + " log " + rw::kMergeDiffArgs + windowArgs + "--name-only --format= 2>/dev/null" );
     if( !touched.isStarted )
