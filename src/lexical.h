@@ -90,6 +90,53 @@ inline void subtokens( std::string_view id, std::vector<std::string>& out )
 // has real, non-incidental lexical grounding somewhere in the corpus.
 inline constexpr float kWeakLexicalScoreThreshold = 1.0f;
 
+// ─── BM25 PARAMETERS — the ONE definition every scoring site in this file reads (A4 unification) ──────
+// k1 (term-frequency saturation) and b (length normalization) used to be declared TWICE — once in
+// lexicalScoresTiered, once in lexicalScoresNameExactTiered — as separate `constexpr double k1 = 1.5, b =
+// 0.75;` lines that had to be kept in sync by hand. The early-termination bound in lexicalScoresTiered's
+// pruned branch (bm25ImpactBound below) derived its cap from ITS OWN local copy, which is the trap: change
+// k1 or b at one site without also updating the bound and MaxScore pruning starts discarding candidates
+// whose true score exceeds the now-stale cap — no crash, no error, just a quietly worse top-K. Both
+// scoring sites and the bound now read the SAME resolved (k1,b), so they cannot drift apart again.
+// test/bm25boundcheck.sh asserts the bound stays a genuine upper bound for whatever this resolves to.
+//
+// RIPWIRE_BM25_K1 / RIPWIRE_BM25_B override the shipped defaults, clamped to a range that keeps BM25 in a
+// sane regime (k1 <= 0 collapses term-frequency saturation to a step function; b outside [0,1] inverts or
+// overshoots length normalization) — the RIPWIRE_PATHTOK_W / RIPWIRE_BASENAME_W precedent a few hundred
+// lines below, calibration sweeps ONLY (bench/bm25_sweep.py). A nonzero-from-default value shipping as the
+// new default requires the sweep's own pre-registered acceptance verdict (docs/EVALS.md); this commit
+// changes neither shipped value.
+struct Bm25Params
+{
+    double k1;
+    double b;
+};
+
+inline constexpr Bm25Params kBm25Default{ 1.5, 0.75 };
+
+inline Bm25Params resolveBm25Params() noexcept
+{
+    Bm25Params p = kBm25Default;
+    if( const char* k1Env = std::getenv( "RIPWIRE_BM25_K1" ) )
+    {
+        p.k1 = std::clamp( std::atof( k1Env ), 0.1, 10.0 );
+    }
+    if( const char* bEnv = std::getenv( "RIPWIRE_BM25_B" ) )
+    {
+        p.b = std::clamp( std::atof( bEnv ), 0.0, 1.0 );
+    }
+    return p;
+}
+
+// The provably-safe per-term impact bound (MaxScore "max contribution"), derived from the SAME (k1,b) the
+// exact scoring loop uses. idf: this term's IDF. T: the largest weighted tf of this term anywhere in the
+// corpus (tfMaxOf[u] at the call site). See lexicalScoresTiered's pruned branch for the full monotonicity
+// proof this bound relies on — it holds for ANY k1 > 0 and ANY b in [0,1], not just the shipped defaults.
+inline double bm25ImpactBound( double idf, double T, const Bm25Params& p ) noexcept
+{
+    return idf * ( T * ( p.k1 + 1.0 ) ) / ( T + p.k1 * ( 1.0 - p.b ) ) * ( 1.0 + 1e-9 );
+}
+
 // BM25 score of `query` against each symbol's doc (name subtokens + callees' names + DOC-COMMENT & BODY
 // text). Returns a per-symbol score vector (size = symbols.size()). Cold path: one query.
 //
@@ -879,7 +926,8 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     }
     avgdl /= double( S ? S : 1 );
 
-    constexpr double   k1 = 1.5, b = 0.75;
+    const Bm25Params    bm25Params = resolveBm25Params();       // A4: the ONE definition — see above
+    const double        k1 = bm25Params.k1, b = bm25Params.b;
     std::vector<float> score( S, 0.f );
 
     // ── H2 (B0 round 2): MaxScore-style safe pruning — only when the caller opted in AND the env
@@ -944,7 +992,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 const int    n    = dfreq[u];
                 const double idf  = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
                 const double T    = double( tfMaxOf[u] );
-                const double cap1 = idf * ( T * ( k1 + 1.0 ) ) / ( T + k1 * ( 1.0 - b ) ) * ( 1.0 + 1e-9 );
+                const double cap1 = bm25ImpactBound( idf, T, bm25Params );          // A4: shared bound, same (k1,b)
                 capOcc[u]         = cap1 * double( occCount[u] );
             }
         }
@@ -1080,7 +1128,8 @@ inline std::vector<float> lexicalScores( const IngestResult& ing, const std::vec
 // not every builder and every graph. This variant scores the query — tokenized on WHITESPACE only, NOT
 // subtokenized — against each symbol's document = its WHOLE lowercased name (one token; and its
 // container::name as a second whole token when a scope exists, so "graph::buildgraph" can also match).
-// Same BM25 constants (k1=1.5, b=0.75) and the same Section down-weight as lexicalScores. bench/
+// Same BM25 parameters (resolveBm25Params(), the ONE definition above) and the same Section down-weight as
+// lexicalScores — literally the same declaration since A4's unification, not just the same values. bench/
 // ANSWERQUALITY.md's co-change table shows whole-name BM25 wins at deeper k — but that is a SEED-based
 // finding, so this ships only behind --route (experimental) until query-time evidence justifies it.
 //
@@ -1199,7 +1248,8 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
         }
     }
 
-    constexpr double   k1 = 1.5, b = 0.75;
+    const Bm25Params    bm25Params = resolveBm25Params();        // A4: the ONE definition — see above
+    const double        k1 = bm25Params.k1, b = bm25Params.b;
     std::vector<float> score( S, 0.f );
     for( std::size_t i = 0; i < S; ++i )
     {

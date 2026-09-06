@@ -11465,3 +11465,132 @@ paired delta is immune to any population shift that moves both arms together. Re
 deltas wherever the question allows it, and on absolute levels only where it does not. The primary
 condition here is likewise insulated for a different reason — django and webpack are pinned by commit
 *and* tree hash, so this repository's own churn cannot reach them.
+## BM25 parameter sweep (lane A4, 2026-09-05) — PRE-REGISTERED (before the sweep runs, before any number)
+
+**What this registers.** PI-SERINI (arXiv 2605.10848) reports that on its fixed-corpus benchmark, tuning
+BM25 alone was worth +18.0% answer accuracy and +11.1% surfaced-evidence recall over default BM25, and that
+increasing retrieval depth was worth +25.3% surfaced-evidence recall over a shallow setting — a different
+benchmark, not this repo. This section registers what "does the same headroom exist here" means, and the
+band that decides it, before the sweep that answers it runs (CLAUDE.md non-negotiable #1, applied to a
+measurement rather than a gate).
+
+**Instrument.** `bench/bm25_sweep.py`, committed alongside this section. It shells out to `ripwire <root>
+--eval-retrieval` once per (k1,b) cell — the CORRECTED census sampler (exhaustive population, midrank ties,
+fixed at 1f283e4a, the commit this lane is based on) — reading the resolved BM25 parameters through
+`RIPWIRE_BM25_K1`/`RIPWIRE_BM25_B` (src/lexical.h's `resolveBm25Params()`, landed this lane as the A4
+unification of the two previously-duplicated `k1`/`b` declarations behind one bound-safe definition —
+test/bm25boundcheck.sh). A measurement harness, not a gate: it is not wired into test/regression.sh or
+test/pargates.py and never fails the build over a number it reports (owner rule: a bench is a ledger, never
+red CI).
+
+**Corpus.** `src/` — 2988 doc-commented symbols, `rule=exhaustive` (population==scored, path- and
+order-independent) — the same corpus and sampler README.md / this file's §4 currently publish against
+(91.3% name-exact/name recall@1; MRR 0.960 name-exact/name, 0.967 routed/doc-phrase, 0.968
+subtoken/doc-phrase, as of 1f283e4a).
+
+**Grid.** k1 ∈ {0.5, 1.5, 3.5}, b ∈ {0.0, 0.5, 0.75, 1.0} — 12 cells, always including the shipped default
+(k1=1.5, b=0.75). Coarse and wide by deliberate choice: each cell costs roughly 90–150s on this corpus
+(`--eval-retrieval`'s own cost note: "each scored symbol drives eight whole-corpus rankings, two of them
+full PageRank power iterations"), so the grid trades resolution for covering the FULL clamp range
+([0.1,10.0] × [0,1], src/lexical.h's documented `RIPWIRE_BM25_K1`/`RIPWIRE_BM25_B` clamp) rather than
+densely sampling a narrow neighborhood around the default. "Retrieval depth" is deliberately NOT a third
+swept input: `--eval-retrieval` already reports recall@1/@5/@10 from ONE ranking per query, so the depth
+axis PI-SERINI swept separately is already a column of this table, not a knob this sweep needs to add.
+
+**Metrics and accept/reject band.**
+
+- **Primary metric: name-exact/name MRR.** The identifier-query ranker, which routing forwards nearly
+  every NAME-shaped query to (`chooseForRanker`; `--eval-retrieval`'s own `note:` line reports the
+  fraction). The closest analogue here to PI-SERINI's "answer accuracy": get the named symbol back,
+  ranked first.
+- **Secondary metric: subtoken/doc-phrase MRR.** The conceptual-query ranker (`--for`'s default
+  fallback) — the closest analogue to PI-SERINI's "surfaced-evidence recall" for prose queries.
+- **Depth read-out.** recall@1/@5/@10 on both metrics above, at the best and default cells, reported
+  alongside MRR rather than folded into one number — a config that trades recall@1 for recall@10 is a
+  different tool than one that improves both, and the table must show which.
+- **ACCEPT (a real tuning win).** The best cell's name-exact/name MRR exceeds the default cell's by more
+  than 2 MRR points (≥ 0.02 absolute) with NO metric in the full 8-row table regressing by more than 1
+  point (≥ 0.01 MRR, or ≥ 1.0 recall@K percentage points) at that same cell. A win that only exists by
+  trading losses elsewhere does not clear this band.
+- **REJECT (defaults already near-optimal).** The best cell's improvement is under the 0.02 MRR
+  threshold, or clears it only by regressing another metric past its own 0.01/1.0-point floor. Registered
+  here as an equally publishable outcome per this lane's brief — "the current defaults are already at the
+  optimum" is not a failed sweep.
+- **Reproduce.** `bench/bm25_sweep.py` with no arguments reproduces this exact grid against `src/`; a run
+  against a different binary or corpus is a different, differently-cited number, never silently
+  substituted for this one.
+
+The sweep table and the verdict against this band are recorded immediately below, once the sweep has run.
+### The sweep, RUN — measured 2026-09-06 against the band registered above: REJECT (defaults near-optimal)
+
+Run on the lane binary AFTER rebasing onto `5884ba01`, over `src/`, with the corrected sampler
+disclosing its own population: **`population=3012 scored=3012 rule=exhaustive`**.
+
+```
+bm25_sweep: corpus=src cells=12 population=3012 scored=3012 rule=exhaustive
+   k1     b        name-exact/name    subtoken/doc-phrase            routed/name      routed/doc-phrase
+  0.5   0.0  0.960 r1= 91.2 r10= 99.4  0.776 r1= 62.3 r10= 98.4  0.960 r1= 91.2 r10= 99.4  0.775 r1= 62.3 r10= 98.3
+  0.5   0.5  0.960 r1= 91.3 r10= 99.4  0.974 r1= 96.4 r10= 99.0  0.960 r1= 91.3 r10= 99.4  0.974 r1= 96.4 r10= 98.8
+  0.5  0.75  0.960 r1= 91.3 r10= 99.4  0.974 r1= 96.3 r10= 99.0  0.960 r1= 91.3 r10= 99.4  0.973 r1= 96.3 r10= 98.9
+  0.5   1.0  0.960 r1= 91.3 r10= 99.4  0.972 r1= 96.0 r10= 98.9  0.960 r1= 91.3 r10= 99.4  0.971 r1= 95.9 r10= 98.8
+  1.5   0.0  0.960 r1= 91.2 r10= 99.4  0.647 r1= 43.3 r10= 97.9  0.960 r1= 91.2 r10= 99.4  0.647 r1= 43.3 r10= 97.9
+  1.5   0.5  0.960 r1= 91.3 r10= 99.4  0.971 r1= 95.9 r10= 98.9  0.960 r1= 91.3 r10= 99.4  0.971 r1= 95.9 r10= 98.8
+  1.5  0.75  0.960 r1= 91.3 r10= 99.4  0.967 r1= 95.3 r10= 98.8  0.960 r1= 91.3 r10= 99.4  0.967 r1= 95.3 r10= 98.6 <- default
+  1.5   1.0  0.960 r1= 91.3 r10= 99.4  0.961 r1= 94.3 r10= 98.6  0.960 r1= 91.3 r10= 99.4  0.960 r1= 94.2 r10= 98.5
+  3.5   0.0  0.960 r1= 91.2 r10= 99.4  0.484 r1= 24.3 r10= 95.0  0.960 r1= 91.2 r10= 99.4  0.484 r1= 24.3 r10= 94.9
+  3.5   0.5  0.960 r1= 91.3 r10= 99.4  0.965 r1= 94.9 r10= 98.7  0.960 r1= 91.3 r10= 99.4  0.965 r1= 94.9 r10= 98.6
+  3.5  0.75  0.960 r1= 91.3 r10= 99.4  0.957 r1= 93.7 r10= 98.6  0.960 r1= 91.3 r10= 99.4  0.957 r1= 93.7 r10= 98.5
+  3.5   1.0  0.960 r1= 91.3 r10= 99.4  0.937 r1= 90.5 r10= 98.1  0.960 r1= 91.3 r10= 99.4  0.936 r1= 90.4 r10= 98.0
+primary metric: name-exact/name MRR
+  default (k1=1.5, b=0.75): MRR=0.960 recall@1=91.3%
+  best    (k1=0.5, b=0.0): MRR=0.960 recall@1=91.2%  (+0.0% MRR vs default)
+```
+
+**Why this table is the one that counts.** An earlier run of the identical grid was taken before the
+rebase, at `population=2988`. The repository *is* the corpus, so rebasing changed the population and
+invalidated it — the sweep was therefore re-run rather than carried over. Recording both the number
+and the rule (`population=`/`scored=`/`rule=`) with every figure is what makes that detectable, and it
+is the reason this section quotes the line rather than just the metric.
+
+**The conclusion was invariant to the corpus shift, which is worth stating.** Across a 24-symbol
+population change, every cell moved by at most 0.003 MRR, no cell changed rank, and the verdict is
+identical. A sweep whose verdict flipped on 24 symbols would be measuring the corpus; this one is not.
+
+**Verdict: REJECT**, in the registered sense — *"the current defaults are already at the optimum" is
+not a failed sweep.* ACCEPT required the best cell's **name-exact/name MRR** to beat the default by
+at least 0.02. It beats it by **0.000**.
+
+**The primary metric is not merely near-optimal, it is FLAT.** name-exact/name MRR reads **0.960 in
+all twelve cells**, and recall@1 moves only between 91.2 and 91.3 percent across the entire documented
+clamp range — k1 from 0.5 to 3.5, b from 0 to 1. The identifier ranker is, to three decimals,
+**indifferent to both BM25 parameters**. That is a stronger statement than "we picked good defaults":
+on this route there is no tuning to do, because ranking is decided by exact-match signal before BM25's
+term-frequency saturation or length normalization get a vote.
+
+**PI-SERINI's headroom does not reproduce here, and the reason is legible.** Their +18.0 percent answer
+accuracy came from tuning BM25 on a prose corpus where BM25 *is* the ranker. On the primary route here
+BM25 is a tiebreaker underneath an exact-match signal, so the parameter that carried their win has
+nothing to carry. Registered as a **negative transfer**, not as a failure to find a win.
+
+**The secondary metric tells the opposite story, and it is the interesting half.** subtoken/doc-phrase
+MRR ranges from **0.484 to 0.974** across the same grid — a 0.490 spread on the very axis the primary
+route ignores. Two facts worth keeping:
+
+- **`b = 0` is catastrophic on the conceptual route and invisible on the name-exact one.** At the
+  shipped k1, MRR falls 0.967 to 0.647 and recall@1 falls 95.3 to 43.3 percent, while name-exact does
+  not move at all. Turning off length normalization destroys prose retrieval and leaves identifier
+  retrieval untouched. This is the concrete reason `test/bm25boundcheck.sh` exists: a parameter change
+  can be catastrophic on one route while every number on the other route stays reassuringly still.
+- **The shipped default is NOT the best cell for prose.** k1 = 0.5 with b = 0.5 reads **0.974,
+  recall@1 96.4** against the default's **0.967, recall@1 95.3** — **+0.007 MRR, +1.1 points of
+  recall@1**. Real, reproducible, and **below this band's 0.02 floor**, so it is recorded as an
+  observation and explicitly NOT claimed as a win. A default flip on a +0.007 secondary gain is not on
+  the table from this lane, and picking k1 after seeing this table would be exactly the tuning the
+  band was written to prevent.
+
+**What this lane establishes for the router.** The two rankers have **opposite parameter sensitivity**
+— one flat across the whole space, the other spanning 0.490 MRR — which is evidence they are different
+instruments sharing one constant rather than one instrument serving two routes. That makes **per-route
+BM25 parameters** a legitimate successor question, and it is deliberately left as a question: it needs
+its own registration, its own band, and an instrument this lane has not touched. Recorded here so the
+successor inherits the observation without inheriting a tuned constant.
