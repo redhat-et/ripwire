@@ -66,5 +66,49 @@ else
     no "isolated binary did not extract Elixir definitions and call edges"
 fi
 
+# Execute the generated C++ interface, rather than trusting a source-text count. When
+# testing an installed binary, configure the source tree in scratch space to obtain its query model.
+generatedDir="$( dirname "$BIN" )/generated"
+if [ ! -f "$generatedDir/embedded_queries.h" ]; then
+    if cmake -S "$ROOT" -B "$TMP/query-model" -DFETCHCONTENT_FULLY_DISCONNECTED=ON >"$TMP/configure.log" 2>&1; then
+        generatedDir="$TMP/query-model/generated"
+    else
+        no "could not configure the embedded-query model"
+        cat "$TMP/configure.log"
+    fi
+fi
+cat > "$TMP/query-model.cpp" <<'CPP'
+#include "embedded_queries.h"
+#include <cstdio>
+
+/// Emit each embedded query's name and exact bytes through the public generated lookup interface.
+int main()
+{
+    for( const auto& query : rw::embedded_queries::kEmbeddedQueries )
+    {
+        const auto source = rw::embedded_queries::queryFor( query.sub );
+        if( source != query.source ) return 1;
+        std::printf( "%.*s\t", int( query.sub.size() ), query.sub.data() );
+        for( unsigned char byte : source ) std::printf( "%02x", unsigned( byte ) );
+        std::putchar( '\n' );
+    }
+}
+CPP
+if "${CXX:-c++}" -std=c++17 -I"$generatedDir" "$TMP/query-model.cpp" -o "$TMP/query-model-bin" \
+    && "$TMP/query-model-bin" > "$TMP/queries.tsv" \
+    && python3 - "$ROOT/queries" "$TMP/queries.tsv" <<'PYQUERIES'
+import pathlib, sys
+expected = {p.parent.name: p.read_bytes() for p in pathlib.Path(sys.argv[1]).glob('*/tags.scm')}
+rows = [line.split('\t') for line in pathlib.Path(sys.argv[2]).read_text().splitlines()]
+actual = {name: bytes.fromhex(source) for name, source in rows}
+assert len(actual) == len(rows), 'duplicate embedded query names'
+assert expected and actual == expected, f'query set or contents differ: missing={expected.keys()-actual.keys()}, extra={actual.keys()-expected.keys()}'
+PYQUERIES
+then
+    ok "generated lookup serves every committed query with identical contents and no extras"
+else
+    no "complete embedded-query inventory or contents differ from committed queries"
+fi
+
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"
