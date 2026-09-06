@@ -11229,7 +11229,7 @@ ships E1's exactness fix (a correctness fix, not a band) and nothing else from E
 
 ---
 
-## Head-to-head vs gortex / cocoindex-code / codanna — PRE-REGISTERED 2026-09-06 (before any arm is installed or run)
+## Head-to-head vs gortex / cocoindex-code / codanna — PRE-REGISTERED 2026-09-06 (before any arm is run)
 
 **What this registers, and what it refuses to register.** Round C scoped a head-to-head against the three
 closest functional peers surfaced by the 2026-09-05 recon. Before designing it, the **gold-set-construction
@@ -11533,7 +11533,20 @@ either foreign arm cannot be brought up on the pinned corpus, its column is publ
 zero, and the remaining arms plus the `rg` floor still run. (4) Nothing from this registration reaches
 `README.md` — README may only quote what this file pins, and this section pins no number.
 
-**Status at registration: NOT RUN.** No arm is installed on this machine; `command -v gortex ccc codanna` is
-empty at the time of writing, and the audit above was performed on read-only clones. Installing and running
-the arms is a separate, costed decision recorded for the owner; this section is the registration and contains
-no result.
+**Status at registration: NOT RUN.** The audit above was performed entirely on read-only clones, with no arm
+built or executed. This section is the registration and contains no result.
+
+**Correction, same day, to what an earlier draft of this paragraph claimed.** That draft said "no arm is
+installed on this machine; `command -v gortex ccc codanna` is empty at the time of writing". By the time this
+section was committed that was **already false**: the owner authorised installation mid-round, and two arms
+were installed before this commit landed — gortex **v0.64.0+aa0da6b** (release tarball, SHA256 verified against
+the release `checksums.txt`; the `curl | sh` installer deliberately not used) and cocoindex-code **0.2.41**
+with the `[full]` extra (`uv tool install --python 3.12`, isolated tool directory). Neither is on the system
+`PATH`; both live in a session scratch directory. codanna remains uninstalled.
+
+The claim this registration actually rests on is unchanged and is the one that matters: **no arm had been RUN,
+and no measurement of any kind existed, when this section was committed.** Installation is setup, not
+measurement. The distinction is recorded here rather than quietly corrected, because a registration whose
+value is its timestamp cannot carry a false statement about its own preconditions — and because "the arms were
+not installed" is exactly the kind of incidentally-true-when-drafted claim that this document's own method
+(§METHODOLOGY 8) exists to stop from ageing into a lie.
