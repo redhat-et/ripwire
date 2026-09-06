@@ -234,22 +234,29 @@ jobs:
 
       # RHEL 9's default gcc is 11, which does not implement C++23 — CMakeLists sets CXX_STANDARD 23 with
       # STANDARD_REQUIRED ON, so the configure would fail outright. gcc-toolset-N is Red Hat's own supported
-      # answer (a parallel-installable newer GCC in /opt/rh). Probe newest-first rather than pinning one
-      # version: which toolsets a given UBI9 AppStream carries changes over the RHEL 9.x lifecycle, and a
-      # hard pin turns a routine repo refresh into a red leg. Whichever is found is ECHOED, so the log always
-      # records which compiler actually built this leg rather than leaving it to be inferred.
+      # answer (a parallel-installable newer GCC in /opt/rh). Probe newest-first rather than pinning one exact
+      # version: which toolsets a given UBI9 AppStream carries changes over the RHEL 9.x lifecycle, and a hard
+      # pin on one N turns a routine repo refresh into a red leg the day that exact package is dropped.
+      # Whichever is found is ECHOED, so the log always records which compiler actually built this leg rather
+      # than leaving it to be inferred.
+      #
+      # Floor is 14, not merely "whichever toolset exists": src/verbs_lint.h's printf-family pilot calls
+      # std::print (<print>), which libstdc++ implements starting at GCC 14 — see that file's include-comment
+      # for the evidence (CI run IDs) and PLAN_HARVEST_B_2026-09-05.md §2 item H for the full reasoning. A
+      # probe that accepted 12/13 here would report "toolset found, leg is fine" right up to the AppStream
+      # refresh that makes it false; raise this floor again if a later conversion needs a newer libstdc++.
       - name: Install the RHEL build toolchain
         run: |
           set -eu
           dnf install -y cmake git libxml2 python3 make diffutils findutils
           found=""
-          for v in 14 13 12; do
+          for v in $( seq 20 -1 14 ); do
             if dnf install -y "gcc-toolset-$v-gcc-c++"; then
               found="$v"
               break
             fi
           done
-          [ -n "$found" ] || { echo "no gcc-toolset-{14,13,12} in this UBI9 AppStream — C++23 is not buildable here"; exit 1; }
+          [ -n "$found" ] || { echo "no gcc-toolset-N (N>=14) in this UBI9 AppStream — this tree's C++23 <print> needs libstdc++ 14+; gcc-toolset-13 and older cannot build it"; exit 1; }
           echo "TOOLSET=$found" >> "$GITHUB_ENV"
 
       - name: Record the toolchain this leg is using
