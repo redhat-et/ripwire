@@ -31,9 +31,28 @@
 # config-sensitive code path they share, and running the whole family here would blow the budget without
 # adding a new FAILURE CLASS, only more instances of one already covered.
 #
-# BUDGET: kept under ~120s on a laptop — a `--depth 1` clone of this repo runs ~3s, and the three gates
-# together run ~30-35s warm (measured on this lane: qdrefpaircheck ~20s, grepbytescheck ~8s,
-# fornotesbudgetcheck ~3s). No build happens here: RIPWIRE_BIN (or $1) names an ALREADY-BUILT binary,
+# COST: a LEDGER, not a budget — 2026-09-06. This used to FAIL above ~120s, with the remedy "the subset
+# needs trimming, not the budget widening". That remedy assumed the only way to overrun was the subset
+# GROWING. It was wrong twice over, and it red CI run 34011016958 on both macos-14 legs (157s / 170s) with
+# nothing in the subset having changed:
+#
+#   1. The per-gate estimates went stale as the gates themselves grew. MEASURED 2026-09-06 on an idle-ish
+#      laptop: qdrefpaircheck 25s (est ~20s, fine), grepbytescheck 13s (est ~8s), and fornotesbudgetcheck
+#      36s against an estimate of ~3s — 12x, because rungs were added to it after this header was written.
+#      Nobody re-derives a wall-clock threshold when they make an unrelated gate slower.
+#   2. A 4-vCPU CI runner at -j 3 is a 6-11x multiplier (pargates.py's own header says so, and it holds:
+#      grepbytescheck 13s local -> 92s on macos-14). Inside the clone the ordering even INVERTS, because a
+#      `--depth 1` clone has no history for the churn/blame gate to walk: CI measured qdrefpaircheck 3-4s,
+#      fornotesbudgetcheck 56-64s, grepbytescheck 92-97s.
+#
+# So the threshold was a laptop number policing a machine 7x slower, and the house rule pargates.py states
+# is exactly this: BUILD AND CI COST NEVER GATE ON WALL CLOCK — a time limit is a hang tripwire, not a perf
+# bar. The per-gate seconds and the total are now printed as a LEDGER (the disclosure that keeps subset
+# growth visible, which is what the old bar was really protecting), and only a 900s HANG tripwire fails.
+# All three failure classes are kept: trimming one to buy seconds would have spent the arm's whole reason
+# for existing on a number that was never measuring what it claimed to.
+#
+# No build happens here: RIPWIRE_BIN (or $1) names an ALREADY-BUILT binary,
 # reused as-is inside the clone — the clone supplies fresh SOURCE/git state, not a fresh binary.
 #
 # Usage:
@@ -94,10 +113,11 @@ done
 
 END="$( date +%s )"
 ELAPSED=$(( END - START ))
-if [ "$ELAPSED" -le 120 ]; then
-    ok "total wall time ${ELAPSED}s (budget: ~120s)"
-else
-    no "total wall time ${ELAPSED}s exceeded the ~120s budget — the subset needs trimming, not the budget widening (see this file's own header on why the subset stays small)"
+# LEDGER, not a bar. The per-gate seconds above plus this total are the disclosure that keeps subset
+# growth visible; neither reds the suite. See this file's header for why the old <=120s FAIL was wrong.
+printf '  LEDGER  total wall time %ss (3 subset gates + clone; per-gate seconds above)\n' "$ELAPSED"
+if [ "$ELAPSED" -gt 900 ]; then
+    no "total wall time ${ELAPSED}s exceeded the 900s HANG TRIPWIRE — that is not slowness, something is stuck"
 fi
 
 echo
