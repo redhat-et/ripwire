@@ -11287,3 +11287,67 @@ The sweep table and the verdict against this band are recorded immediately below
 ### The sweep, RUN — measured 2026-09-05 against the band registered above
 
 _(recorded once `bench/bm25_sweep.py` has completed on `src/`)_
+
+### The sweep, RUN — measured 2026-09-05 against the band registered above: REJECT (defaults near-optimal)
+
+Run on the lane binary over `src/`, the corrected sampler disclosing its own population on every cell
+(`population=2988 scored=2988 rule=exhaustive`).
+
+```
+bm25_sweep: corpus=src cells=12 population=2988 scored=2988 rule=exhaustive
+   k1     b        name-exact/name    subtoken/doc-phrase            routed/name      routed/doc-phrase
+  0.5   0.0  0.960 r1= 91.2 r10= 99.4  0.778 r1= 62.7 r10= 98.5  0.960 r1= 91.2 r10= 99.4  0.778 r1= 62.7 r10= 98.4
+  0.5   0.5  0.960 r1= 91.3 r10= 99.4  0.974 r1= 96.4 r10= 99.0  0.960 r1= 91.3 r10= 99.4  0.974 r1= 96.4 r10= 98.8
+  0.5  0.75  0.960 r1= 91.3 r10= 99.4  0.974 r1= 96.4 r10= 99.0  0.960 r1= 91.3 r10= 99.4  0.974 r1= 96.4 r10= 98.9
+  0.5   1.0  0.960 r1= 91.3 r10= 99.4  0.972 r1= 96.0 r10= 98.9  0.960 r1= 91.3 r10= 99.4  0.971 r1= 96.0 r10= 98.8
+  1.5   0.0  0.960 r1= 91.2 r10= 99.4  0.650 r1= 43.7 r10= 98.0  0.960 r1= 91.2 r10= 99.4  0.650 r1= 43.7 r10= 98.0
+  1.5   0.5  0.960 r1= 91.3 r10= 99.4  0.971 r1= 96.0 r10= 98.9  0.960 r1= 91.3 r10= 99.4  0.971 r1= 96.0 r10= 98.8
+  1.5  0.75  0.960 r1= 91.3 r10= 99.4  0.968 r1= 95.3 r10= 98.8  0.960 r1= 91.3 r10= 99.4  0.967 r1= 95.3 r10= 98.6 <- default
+  1.5   1.0  0.960 r1= 91.3 r10= 99.4  0.962 r1= 94.3 r10= 98.7  0.960 r1= 91.3 r10= 99.4  0.961 r1= 94.3 r10= 98.5
+  3.5   0.0  0.960 r1= 91.2 r10= 99.4  0.486 r1= 24.6 r10= 95.0  0.960 r1= 91.2 r10= 99.4  0.486 r1= 24.6 r10= 95.0
+  3.5   0.5  0.960 r1= 91.3 r10= 99.4  0.965 r1= 95.0 r10= 98.7  0.960 r1= 91.3 r10= 99.4  0.965 r1= 95.0 r10= 98.6
+  3.5  0.75  0.960 r1= 91.3 r10= 99.4  0.958 r1= 93.8 r10= 98.6  0.960 r1= 91.3 r10= 99.4  0.957 r1= 93.8 r10= 98.5
+  3.5   1.0  0.960 r1= 91.3 r10= 99.4  0.937 r1= 90.5 r10= 98.1  0.960 r1= 91.3 r10= 99.4  0.937 r1= 90.5 r10= 98.0
+primary metric: name-exact/name MRR
+  default (k1=1.5, b=0.75): MRR=0.960 recall@1=91.3%
+  best    (k1=0.5, b=0.0): MRR=0.960 recall@1=91.2%  (+0.0% MRR vs default)
+```
+
+**Verdict: REJECT**, in the registered sense — *"the current defaults are already at the optimum" is
+not a failed sweep.* ACCEPT required the best cell's **name-exact/name MRR** to beat the default by
+at least 0.02. It beats it by **0.000**.
+
+**The primary metric is not merely near-optimal, it is FLAT.** name-exact/name MRR reads **0.960 in
+all twelve cells**, and recall@1 moves only between 91.2 and 91.3 percent across the entire documented
+clamp range — k1 from 0.5 to 3.5, b from 0 to 1. The identifier ranker is, to three decimals,
+**indifferent to both BM25 parameters**. That is a stronger statement than "we picked good defaults":
+on this route there is no tuning to do, because ranking is decided by exact-match signal before BM25's
+term-frequency saturation or length normalization get a vote.
+
+**PI-SERINI's headroom does not reproduce here, and the reason is legible.** Their +18.0 percent answer
+accuracy came from tuning BM25 on a prose corpus where BM25 *is* the ranker. On the primary route here
+BM25 is a tiebreaker underneath an exact-match signal, so the parameter that carried their win has
+nothing to carry. Registered as a **negative transfer**, not as a failure to find a win.
+
+**The secondary metric tells the opposite story, and it is the interesting half.** subtoken/doc-phrase
+MRR ranges from **0.486 to 0.974** across the same grid — a 0.488 spread on the very axis the primary
+route ignores. Two facts worth keeping:
+
+- **`b = 0` is catastrophic on the conceptual route and invisible on the name-exact one.** At the
+  shipped k1, MRR falls 0.968 to 0.650 and recall@1 falls 95.3 to 43.7 percent, while name-exact does
+  not move at all. Turning off length normalization destroys prose retrieval and leaves identifier
+  retrieval untouched. This is the concrete reason `test/bm25boundcheck.sh` exists: a parameter change
+  can be catastrophic on one route while every number on the other route stays reassuringly still.
+- **The shipped default is NOT the best cell for prose.** k1 = 0.5 with b in {0.5, 0.75} reads
+  **0.974, recall@1 96.4** against the default's **0.968, recall@1 95.3** — **+0.006 MRR, +1.1 points
+  of recall@1**. Real, reproducible, and **below this band's 0.02 floor**, so it is recorded as an
+  observation and explicitly NOT claimed as a win. A default flip on a +0.006 secondary gain is not on
+  the table from this lane, and picking k1 after seeing this table would be exactly the tuning the
+  band was written to prevent.
+
+**What this lane establishes for the router.** The two rankers have **opposite parameter sensitivity**
+— one flat across the whole space, the other spanning 0.488 MRR — which is evidence they are different
+instruments sharing one constant rather than one instrument serving two routes. That makes **per-route
+BM25 parameters** a legitimate successor question, and it is deliberately left as a question: it needs
+its own registration, its own band, and an instrument this lane has not touched. Recorded here so the
+successor inherits the observation without inheriting a tuned constant.
