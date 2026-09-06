@@ -154,6 +154,33 @@ printf '%s' "$os" | grep -q 'db/wal_manager.h' \
   && ok "--situ surfaces the named file's own header" \
   || { no "--situ=db/wal_manager.cc never names db/wal_manager.h"; echo "     got: $(printf '%s' "$os" | head -c 600)"; }
 
+# 4e2) F3 NEGATIVE CONTROL — the majority guard must be LIVE, not decorative. Two large files that share
+#      exactly one common free-function name are NOT a decl/def pair, and reporting them would make the row
+#      above worthless. Same tree, so this is a control on the same run, not a different fixture.
+cd "$OLD" || exit 1
+mkdir -p noise
+{ echo 'int shared_helper( int x ) { return x; }'; _k=1; while [ "$_k" -le 12 ]; do printf 'int an_%s( int x ) { return x + %s; }\n' "$_k" "$_k"; _k=$(( _k + 1 )); done; } > noise/a.cc
+{ echo 'int shared_helper2( int x ) { return x; }'; echo 'int shared_helper( int x ) { return x + 99; }'; _k=1; while [ "$_k" -le 12 ]; do printf 'int bn_%s( int x ) { return x + %s; }\n' "$_k" "$_k"; _k=$(( _k + 1 )); done; } > noise/b.cc
+_c "2019-07-05T10:00:00 +0000" noise
+on="$("$BIN" "$OLD" --situ=noise/a.cc --no-cache 2>/dev/null)"
+printf '%s' "$on" | grep -q 'noise/b.cc' \
+  && { no "F3 guard is inert: two 13-symbol files sharing ONE name were reported as a decl/def pair"; echo "     got: $(printf '%s' "$on" | grep -A3 'decl/def')"; } \
+  || ok "F3 guard rejects a one-name collision between two large files (the majority test is live)"
+
+# 4e3) F2's EMPTY-WINDOW branch: a tree with git but NO commits must say the zero is not a measurement,
+#      rather than the old "(none, or no git history)" that meant neither.
+NH="$(mktemp -d)"; mkdir -p "$NH/db"
+printf 'int f( int x ){ if( x ) { return 1; } return 0; }\n' > "$NH/db/x.cc"
+( cd "$NH" && git init -q && git config user.email x@y && git config user.name x )
+os0="$("$BIN" "$NH" --situ=db/x.cc --no-cache 2>/dev/null)"
+printf '%s' "$os0" | grep -q 'commits="0"' && printf '%s' "$os0" | grep -q 'NOT a measurement' \
+  && ok "--situ tells an empty WINDOW apart from an empty RESULT (non-negotiable #3)" \
+  || { no "--situ still conflates 'no partners' with 'the window could not look'"; echo "     got: $(printf '%s' "$os0" | grep -A1 'co-change')"; }
+printf '%s' "$os0" | grep -q 'window="18mo"' \
+  && ok "the unanchorable window drops @HEAD rather than claiming an anchor it does not have" \
+  || { no "a repo with no HEAD must stamp window=\"18mo\" (no @HEAD)"; echo "     got: $(printf '%s' "$os0" | grep -o 'window="[^\"]*"' | head -1)"; }
+rm -rf "$NH"
+
 # 4f) determinism + well-formedness on the anchored path (the anchor must not import the wall clock).
 oc1="$("$BIN" "$OLD" --cochange --no-cache 2>/dev/null)"; oc2="$("$BIN" "$OLD" --cochange --no-cache 2>/dev/null)"
 [ "$oc1" = "$oc2" ] && ok "--cochange anchored window deterministic" || no "--cochange anchored window not deterministic"

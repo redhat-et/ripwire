@@ -1243,7 +1243,27 @@ inline std::string situationDiffJson( const std::string& root, const std::string
         }
     }
 
-    out += "],\"forgotten\":[";
+    // F3: the decl/def partners of the changed set — the header/impl relationship the blast_radius array
+    // above cannot carry, because a header does not transitively depend on the source that implements it.
+    out += "],\"decl_def_partners\":[";
+    {
+        bool firstDd = true;
+        for( const DeclDefPartner& dp : facts.declDef )
+        {
+            if( !firstDd )
+            {
+                out += ",";
+            }
+            firstDd = false;
+            out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( dp.fileId ) ) ) + "\",\"shared_symbols\":"
+                 + std::to_string( dp.shared ) + "}";
+        }
+    }
+    // F2: the composed co-change zero's own window and commit count — a JSON reader that only sees an empty
+    // `forgotten` array cannot tell "no partners" from "the window mined nothing", and this surface is the one
+    // where that reads most like an answer.
+    out += "],\"cochange_window\":\"" + mcpdetail::jsonEscape( facts.coWindow ) + "\",\"cochange_commits\":"
+         + std::to_string( facts.coCommits ) + ",\"forgotten\":[";
     {
         bool first = true;
         for( const auto& [ f, deg ] : facts.forgotten )
