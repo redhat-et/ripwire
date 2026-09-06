@@ -11439,3 +11439,29 @@ about the mechanisms, and a successor should bring an instrument this family has
 existed), the fixture, this registration and this negative. The implementation stays in tree,
 env-gated, byte-inert off — the same disposition the R3 stemming machinery has, and for the same
 reason: the mechanism is correct and gated, and the corpus is what declines it.
+
+#### Re-measured after the rebase onto `5884ba01` — verdict unchanged
+
+The tables above are stamped with the commits they were taken at (`d0b7ce4`, `d7a2a04`) and are left
+as measured; rewriting a stamped table would falsify its provenance. This is the re-measurement on the
+rebased base, which carries the corrected exhaustive sampler:
+
+`population=3521 scored=3521 rule=exhaustive (every qualifying symbol; path- and order-independent)`
+
+| ranker | query-mode | MRR | r@1 | armed vs disarmed |
+| --- | --- | ---: | ---: | --- |
+| subtoken | name | 0.723 | 59.2% | byte-identical |
+| subtoken | doc-phrase | 0.930 | 90.8% | byte-identical |
+| name-exact | name | 0.922 | 85.5% | byte-identical |
+| routed | doc-phrase | 0.929 | 90.8% | byte-identical |
+
+The absolute level drifted by 0.001 on `subtoken/name` (0.724 → 0.723) with the population moving
+3,499 → 3,521; **condition 3's Δ is still exactly 0.000**, because it is a *paired* comparison of the
+same binary against the same corpus.
+
+**That is the design point worth carrying, not the number.** A band written on an absolute level would
+have had to be re-derived after a rebase that changed nothing about the mechanism; a band written on a
+paired delta is immune to any population shift that moves both arms together. Register bands on paired
+deltas wherever the question allows it, and on absolute levels only where it does not. The primary
+condition here is likewise insulated for a different reason — django and webpack are pinned by commit
+*and* tree hash, so this repository's own churn cannot reach them.
