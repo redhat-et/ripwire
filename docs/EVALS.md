@@ -11550,3 +11550,102 @@ measurement. The distinction is recorded here rather than quietly corrected, bec
 value is its timestamp cannot carry a false statement about its own preconditions — and because "the arms were
 not installed" is exactly the kind of incidentally-true-when-drafted claim that this document's own method
 (§METHODOLOGY 8) exists to stop from ageing into a lie.
+
+### RESULT — RUN 2026-09-06, under the registration above
+
+**The placebo stop condition FIRED. No ranking claim is published from this round.**
+
+`docs/METHODOLOGY.md` §8's placebo arm was pre-committed above with a consequence: *"If ripwire does not beat
+the placebo on a majority of questions, no ranking claim is published from this round at all, whatever the
+arm-vs-arm table says."* **ripwire beats the random-rank placebo on 6 of 30 questions.** A majority (≥16) was
+required. The consequence is therefore honoured here: the table below is published because the losses are the
+result, and **no claim of ranking superiority over any arm is made or implied by it.**
+
+All five registered arms plus the placebo ran on all 30 questions; nothing is absent, and codanna stayed out.
+The harness is committed at `bench/roundc-h2h/` — `scorer.py` is the single metric implementation every arm is
+scored through, and `derive_questions.py` re-derives the frozen question table from the corpus (it reproduces
+all 30 commits, all 30 `n` values and all five eligible/stride pairs exactly).
+
+| arm | complete | gold files named | median TTCA | median wall (contaminated) |
+| --- | ---: | ---: | ---: | ---: |
+| ripwire cold | 6/30 | 26/129 = 20% | 5,787 B | 1,914 ms |
+| ripwire warm | 6/30 | 26/129 = 20% | 5,787 B | 774 ms |
+| gortex v0.64.0, warm/daemon | 4/30 | 11/129 = 9% | 1,039 B | 547 ms |
+| cocoindex-code 0.2.41, warm | 7/30 | 18/129 = 14% | 8,319 B | 313 ms |
+| `rg` floor | 22/30 | 99/129 = 77% | 117,211 B | 72 ms |
+| **placebo (random rank, matched budget)** | 4/30 | 37/129 = 29% | 5,807 B | — |
+
+Wall time is contaminated — two other sessions were live on this machine throughout — so the byte columns are
+the headline and every millisecond is an upper bound of unknown tightness. **ripwire cold and warm emit
+byte-identical output on all 30 questions**: the cache buys 2.5× latency and changes no answer.
+
+**The single most important row is the placebo's.** On the six "what changed recently in `<dir>`" questions it
+names 21 of 30 gold files to ripwire's 2 — not by retrieving anything, but because ripwire's 31.7 KB bundle
+sets a matched budget in which a list of random paths covers **976 of the corpus's 1,286 C/C++ files, 76% of
+the corpus**. Without the placebo arm this round would have published a recall figure that was mostly budget.
+That is the case `docs/METHODOLOGY.md` §8 exists to catch, caught.
+
+**Four defects in the registration itself, found by running it.** (1) It dates the corpus pin "2026-10-17";
+`0e2801ac3` is dated **2024-10-17**. The pin is correct and verified (12,938 revisions), but the two-year error
+is load-bearing — the true 23-month age is exactly what makes ripwire's 18-month history windows inert below.
+(2) The placebo comparison is undefined when both arms are incomplete: both score full emitted bytes, the
+placebo's budget *is* ripwire's emitted bytes truncated to whole lines, so it wins by the truncation slack —
+measured, `margin == −slack` on all 20 such rows. It should declare those rows ties. (3) The `rg` floor's
+output order is unspecified, and `rg`'s parallel walk makes its score nondeterministic — **×276 across five
+identical runs** on one question. Published with `--sort path`, which fixes it, and which moves rows in both
+directions. (4) "Named" credits a path occurring inside quoted source: **11 of the floor's 22 completions
+reach the gold only through an `#include` line**, not through the ranked `rg -l` list.
+
+**Losses, published before any win, per the registration.** Every one was re-run with the arm order reversed;
+ripwire, gortex and cocoindex-code reproduced byte-for-byte on 42/42 re-runs.
+
+- **The `rg` floor's 77% is a haystack.** Its scored window names up to 1,029 of the corpus's 1,286 C/C++
+  files on a question with 5 gold files. Breadth at low byte cost is what this metric rewards.
+- **No arm serves "what changed recently in `<dir>`".** ripwire 2/30, gortex 0/30, cocoindex 1/30. ripwire's
+  verb is question-independent — byte-identical output for all six. A diagnostic re-run scoped to the named
+  directory is **worse** (0/30), so this is not an artifact of verb choice.
+- **`--situ` buries the `.cc`'s own `.h`.** Asked what changes with `db/wal_manager.cc`, ripwire never names
+  `db/wal_manager.h` in 3,104 B, ranking a 222-file transitive blast radius by dependent-symbol count so the
+  largest test files surface instead. cocoindex returns the gold as result #1 in **55 bytes**. ripwire's S2
+  recall is 2/14.
+- **ripwire's co-change lens is inert on any pinned historical corpus, and `--situ` does not disclose it.**
+  The 18-month window is measured from wall-clock *now*; the corpus HEAD is 23 months old, so zero commits
+  fall inside it and `--cochange` returns zero rows repo-wide. `--cochange` and `--rank-by=churn` are both
+  **honest** about this in their own headers (`commits="0" window="18mo"`,
+  `window="18mo (no churn evidence)"`). **`--situ` is the gap**: it renders only
+  `co-change — usually edited with these but NOT in your diff (0)` and mentions neither the window nor the
+  commit count, so a zero that means "the window was empty" reads as "there are none". That is the case
+  non-negotiable #3 forbids. On the same corpus **gortex's `enrich cochange` mines 9,854 co-change edges**,
+  because it mines the repository's own history rather than a wall-clock window — the disclosure fix is the
+  small one, anchoring the window to HEAD's date is the real one.
+- **gortex's `affected` answers every S3 question with the same two or three test *helpers*** — 0/11, with
+  three of six exiting 3 and empty. ripwire's `--affected` is its best shape here at 8/11.
+- **gortex's `context --entry-point` does not anchor**: given `-e table/get_context.cc` it returned
+  `OptionChangeMigration` from `utilities/option_change_migration/`.
+- **cocoindex's chunker ranks a `CMakeLists.txt` test enumeration as its top semantic hit** (score 0.645) for
+  a question about C++ change coupling.
+- **gortex's column is a properly-brought-up zero, not a setup artifact.** `gortex enrich all` was run
+  (953.6 s; 42,542 blame nodes, 34,416 churn symbols, 9,854 co-change edges) and all 30 questions
+  re-measured: recall unchanged at 11/129, S5 unchanged at 0/30. The reason is a defect in gortex's own
+  `docs` verb, which reports `_No blame metadata on graph nodes_` while `analyze --kind ownership` reads 501
+  owners out of the same store at the same moment.
+
+**The capability ripwire does not have, recorded as the registration required whichever way the numbers fell,
+and supported by the data rather than merely repeated.** cocoindex-code's embedding retrieval wins exactly
+where the answer is "the header of the file you named" and the question carries no anchor ripwire's ranker can
+use — q15 above is the clean case (55 B, result #1, against ripwire incomplete at 3,104 B), with q17, q19 and
+q23 on the same pattern. cocoindex completes 7/30 to ripwire's 6. ripwire has no embedding mode by design
+(G3), and on a question with neither a name nor a path anchor this is a mode it structurally lacks.
+
+**One-time setup, reported once and never folded into a per-question figure.** ripwire has no setup step — its
+parse is paid inside the measured cold column. gortex: `track` 110.4 s, 797 MB store (+15.9 min for the
+optional enrichment). cocoindex-code: `init` 59.9 s + `index` 173.6 s, 1.1 GB install, 87 MB model, 273 MB
+project index. **No arm used an API key and no dollars were spent.** cocoindex-code ships usage tracking that
+must be disabled by environment variable (`COCOINDEX_DISABLE_USAGE_TRACKING=1`, set for every run here);
+gortex has a cloud login that was never used; **ripwire has no telemetry at all.** Every third-party
+invocation ran under `env -i` with an explicit allowlist, verified by reading the daemon's own reported
+environment back.
+
+**Pre-registered exclusion, honoured:** question 4 (`04cbc77b9`, a mechanical license-header sweep) is
+excluded from the S4 sub-total and reported anyway with its exclusion visible. No further exclusion was
+applied; the four metric defects above are published as defects rather than used to drop rows.
