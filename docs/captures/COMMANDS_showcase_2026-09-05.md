@@ -3754,7 +3754,7 @@ ripwire --eval  (co-change recovery, averaged over 80 historical commits)
 
 *Known-item retrieval eval: MRR + recall@k per ranker per query mode.*
 
-**wall time: 187.92s**
+**wall time: 124.34s**
 
 `````
 ripwire --eval-retrieval  (known-item, 3521 doc-commented symbols; gold is in-corpus by construction)

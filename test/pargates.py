@@ -137,6 +137,16 @@ GATE_BUDGET_SEC = {
     "estchargecheck.sh":          900,   # ~26 s idle local; rc=124 at the flat cap on all ubuntu legs.
     "pagingsweepcheck.sh":        900,   # ~34 s idle local; rc=124 at the flat cap on all ubuntu legs.
     "slicediffcheck.sh":          900,   # replays 57 labelled commits (checkout + --slice --since each); ~80 s local
+    "knownitemcheck.sh":          900,   # 2026-09-05: --eval-retrieval stopped sampling 150 symbols in PATH order and
+                                         # now grades its whole population exhaustively (the sampler measured the corpus,
+                                         # not the ranker -- docs/EVALS.md section 7). The gate runs it twice on src/ for
+                                         # the determinism arm plus three bounded corpora for the order-independence arm:
+                                         # ~132 s idle local, where it was ~10 s. Under the flat cap this is the same
+                                         # rc=124-at-300.0 s signature the three gates above carry, and the two entries
+                                         # directly above are 26 s and 34 s local -- a 4-vCPU leg running -j 3 has no
+                                         # chance of fitting 132 s. Per the header: a budget here is a HANG TRIPWIRE,
+                                         # not a perf bar; the eval is deliberately exhaustive and its cost is the price
+                                         # of a number that no longer moves with a file's path.
     # 2026-09-05 (capture-audit round landed, CI run 33978240573): three universe-sweep gates from that round hit
     # rc=124 at exactly 300.0-300.1 s -- the cap signature again, not a hang. compactlegendcheck overran on ALL
     # FIVE failing legs (it runs the compact legend rewrite over every XML verb, full and compact, plus the MCP
