@@ -708,7 +708,7 @@ function row(s, y, h, cols, opts={}){
   kicker(s, "// how it stays true", AMBER);
   title(s, "Proven, not promised");
   const cards = [
-    ["542 gate scripts", "the suite runs on every push — plus determinism, cache-transparency and golden contracts; the gate count itself is gated against the runner's own loop"],
+    ["547 gate scripts", "the suite runs on every push — plus determinism, cache-transparency and golden contracts; the gate count itself is gated against the runner's own loop"],
     ["byte-identical, always", "two runs over the same tree produce the same bytes; warm equals cold. Enforced in CI, twice — Release AND a plain flavour, because NDEBUG once blinded a whole class of checks"],
     ["differential refactoring", "a refactor must prove it changed nothing observable: two binaries, hundreds of argv vectors, stdout + stderr + exit codes byte-identical"],
     ["held-out labels, authored blind", "eval labels were written by reading source before the ranker ever ran on them — so the eval is allowed to say the ranker is wrong. It has."],
@@ -732,7 +732,7 @@ function row(s, y, h, cols, opts={}){
   title(s, "Claims you can trust, because we publish what failed", { size: 32 });
 
   card(s, MX, 1.72, 3.86, 1.72);
-  stat(s, "542", "gate scripts named by test/regression.sh — and the COUNT itself is gated against the runner's own loop, so it cannot go stale quietly",
+  stat(s, "547", "gate scripts named by test/regression.sh — and the COUNT itself is gated against the runner's own loop, so it cannot go stale quietly",
     MX+0.15, 1.86, 3.56, CYAN, { bsize: 42, bh: 0.66, lsize: 9.5 });
   card(s, 4.68, 1.72, 3.86, 1.72, CARD2);
   stat(s, "8", "registered NEGATIVES — changes built, gated green, measured against a band written before the code, and reverted rather than tuned",
@@ -971,7 +971,7 @@ function row(s, y, h, cols, opts={}){
     ["179 long flags · 29 slides",        "bash test/deckclaimcheck.sh"],
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
     ["74.7% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
-    ["542 gate scripts",                  "bash test/manifestcheck.sh"],
+    ["547 gate scripts",                  "bash test/manifestcheck.sh"],
     ["36 repos · 67 papers · 231 surveyed","bash test/readmedriftcheck.sh"],
     ["the ten moments, any row",          "ripwire . --callers=SYM | wc -c"],
     ["the head-to-head table",            "bench/headtohead/r4-2026-08-06/"],
