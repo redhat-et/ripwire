@@ -788,10 +788,10 @@ inline std::string grepTierKeys( const GrepTierReport& tier, bool floorAlreadyEm
         }
     }
     keys += ",\"tier_parsed\":" + std::to_string( tier.tieredFileCount );
-    if( tier.unclassifiedHits > 0 )
-    {
-        keys += ",\"tier_unclassified\":" + std::to_string( tier.unclassifiedHits );
-    }
+    // C5: the CLI grepTierAttrs() twin — unconditional there, unconditional here. A dialect that drops the
+    // qualifier drops it for good on this surface: an MCP-only agent has no CLI to re-ask from before
+    // trusting tier=. Gate: test/emittertruthcheck.sh (Z2b).
+    keys += ",\"tier_unclassified\":" + std::to_string( tier.unclassifiedHits );
     if( tier.budgetHit != nullptr )
     {
         keys += std::string( ",\"tier_budget\":\"" ) + tier.budgetHit + "\"" + ( floorAlreadyEmitted ? "" : rw::kGraphCountFloorAttrJson );   // N2: the CLI twin's floor

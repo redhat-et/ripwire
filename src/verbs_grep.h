@@ -318,10 +318,14 @@ std::string grepTierAttrs( const rw::GrepTierReport& tier, bool floorAlreadyEmit
         }
     }
     attrs += " tier_parsed=\"" + std::to_string( tier.tieredFileCount ) + "\"";
-    if( tier.unclassifiedHits > 0 )
-    {
-        attrs += " tier_unclassified=\"" + std::to_string( tier.unclassifiedHits ) + "\"";
-    }
+    // C5 (harvest-B 2026-09-05): UNCONDITIONAL, like tier_parsed= beside it. The legend above has always
+    // said "always EMITTED, never suppressed" and this line used to guard the field behind `> 0`, so a fully
+    // classified answer printed the promise and withheld the field. The reading is why the promise was made:
+    // tier_unclassified= qualifies the tier= LABEL, so "0" is the PROOF the label was elected over EVERY
+    // hit, and absence is the one state a reader cannot interpret — it reads equally as "none" and as "the
+    // emitter dropped it". 24 bytes, and only on answers that already carry a tier disclosure at all.
+    // Gate: test/emittertruthcheck.sh (Z2a)/(Z2b).
+    attrs += " tier_unclassified=\"" + std::to_string( tier.unclassifiedHits ) + "\"";
     if( tier.budgetHit != nullptr )
     {
         attrs += std::string( " tier_budget=\"" ) + tier.budgetHit + "\"" + ( floorAlreadyEmitted ? "" : rw::kGraphCountFloorAttrXml );   // N2: the floor rides with its cause

@@ -379,5 +379,193 @@ else
     ok "P12.3: no absolute byte-identical map-diff claim in cli.h/README"
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# P2.Z — THE ZERO-VS-OMITTED DISCLOSURE FAMILY (harvest-B card C5, 2026-09-05)
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# THE PROPERTY: an attribute the tool's own CONSUMER-VISIBLE text declares unconditional is actually
+# unconditional — it rides even when its value is 0, on every surface that carries it.
+#
+# Why this arm belongs in emittertruthcheck and not in a gate of its own. Every other check in this file
+# pins a behaviour that USED to lie to the caller; this one pins the narrowest possible lie, and the one
+# no other gate in the tree can see. test/legendcoveragecheck.sh asks "is every attribute you EMITTED
+# defined in the legend?" — its enumeration is built FROM the emitted document, so an attribute that was
+# SUPPRESSED is structurally invisible to it. test/truncvocabcheck.sh owns the paging/cap vocabulary and
+# its rules are all "if shown= then …", so it cannot see an element that emits nothing either. The gap
+# between them is exactly this: a legend that promises a field and an emitter that drops it at zero.
+#
+# The live case that made the arm (RED before the fix, on db6a416d): --grep prints, in its own legend,
+# "tier_unclassified= hits in files nothing classified — always EMITTED, never suppressed", and
+# grepTierAttrs()/grepTierKeys() guarded it behind `unclassifiedHits > 0`. A comment-only match with every
+# hit file classified therefore printed `tier="comment" tier_parsed="2"` and NO tier_unclassified= — while
+# the legend beside it swore the field could not be missing. The reading is load-bearing: tier_unclassified
+# is what qualifies the tier= LABEL, so "0" is the PROOF the label covers every hit, and absence is the one
+# state a reader cannot interpret. Same defect on the MCP twin, which has no CLI to re-ask from.
+#
+# (Z1) is the family half, and it is the arm's first question: WHICH MEMBER IS MISSING FROM THIS LIST?
+# The roster is DERIVED from src/ (every consumer-visible string literal that claims unconditionality),
+# never typed from memory, and compared against the expected set below. A new claim — in a new emitter or
+# in an old one — fails this gate until someone decides whether it is true and gives it a (Z2) probe.
+# Keyed by file + claim phrase, not line number, so the roster survives ordinary prose edits and re-opens
+# the question when a claim itself changes. Source `//` comments are deliberately OUT of the family: the
+# claim a consumer relies on is the one the tool PRINTS.
+echo "== P2.Z zero-vs-omitted: a declared-unconditional attribute rides at zero =="
+
+ZROSTER_EXPECTED="$( cat <<'EOF'
+cli.h|always carries|1
+cli.h|never dropped|2
+cli.h|never suppressed|1
+cli.h|prints even at 0|1
+handoff.h|never dropped|1
+ingest_astquery.h|never suppressed|1
+landingplan.h|always printed|1
+verbs_grep.h|always emitted|1
+verbs_grep.h|never suppressed|1
+verbs_quality.h|printed even at zero|1
+verbs_report.h|never omitted|1
+EOF
+)"
+
+ZROSTER_DERIVED="$( python3 - "$ROOT/src" <<'PY'
+import re, os, sys, collections
+SRC = sys.argv[1]
+CLAIM = re.compile( r'(always (?:EMITTED|emitted|present|printed|carries|rides)'
+                    r'|never (?:omitted|suppressed|absent|dropped|conditional)'
+                    r'|prints? even at (?:0|zero)|printed even at (?:0|zero)|even when zero)' )
+LIT = re.compile( r'"((?:[^"\\]|\\.)*)"' )
+seen = collections.Counter()
+for root, dirs, fns in os.walk( SRC ):
+    for fn in sorted( fns ):
+        if not fn.endswith( ( '.h', '.cpp' ) ):
+            continue
+        for line in open( os.path.join( root, fn ), errors='replace' ):
+            if line.lstrip().startswith( '//' ):
+                continue
+            for lit in LIT.findall( line ):
+                for m in CLAIM.finditer( lit ):
+                    seen[ ( fn, m.group( 1 ).lower() ) ] += 1
+for ( fn, ph ), n in sorted( seen.items() ):
+    print( '%s|%s|%d' % ( fn, ph, n ) )
+PY
+)"
+
+# presence guard: an extractor that finds nothing would make the whole arm green and inert.
+if [ -z "$ZROSTER_DERIVED" ]; then
+    no "(Z1) presence guard: the unconditionality-claim extractor found NOTHING in src/ — the arm is inert"
+elif [ "$ZROSTER_DERIVED" = "$ZROSTER_EXPECTED" ]; then
+    ok "(Z1) the unconditionality-claim roster is unchanged ($( printf '%s\n' "$ZROSTER_DERIVED" | wc -l | tr -d ' ' ) claims)"
+else
+    no "(Z1) the unconditionality-claim family CHANGED — a claim was added, moved or reworded; decide whether it is true, give it a (Z2) probe, then update ZROSTER_EXPECTED"
+    printf '%s\n' "$ZROSTER_DERIVED" | diff -u <( printf '%s\n' "$ZROSTER_EXPECTED" ) - | sed -n '1,40p'
+fi
+
+# ── (Z2a) tier_unclassified= — the claim's own verb, CLI ────────────────────────────────────────────
+# The corpus is built here rather than borrowed: the property is about a ZERO, so the probe must MAKE the
+# zero. A token that appears only inside comments elects tier="comment" (so the disclosure block rides at
+# all), and two tiny files are classified well inside the tier budget (so unclassifiedHits is 0).
+ZSB="$TMP/zerosb"; mkdir -p "$ZSB"
+cat > "$ZSB/a.cpp" <<'EOF'
+// ZEROMARK_probe lives only in this comment
+int alpha( int x ) { return x + 1; }
+EOF
+cat > "$ZSB/b.cpp" <<'EOF'
+int beta( int x ) { return x * 2; }   // ZEROMARK_probe again, still only prose
+EOF
+
+"$BIN" "$ZSB" --grep=ZEROMARK_probe --no-cache > "$TMP/ztier.xml" 2>/dev/null
+zRoot="$( grep -o '<grep [^>]*>' "$TMP/ztier.xml" | head -1 )"
+if [ -z "$zRoot" ]; then
+    no "(Z2a) presence guard: --grep produced no <grep> root on the zero corpus — the probe is inert"
+elif ! printf '%s' "$zRoot" | grep -q 'tier_parsed='; then
+    no "(Z2a) presence guard: the span-tier disclosure did NOT ride on the zero corpus (no tier_parsed=) — the probe no longer exercises the claim"
+else
+    ok "(Z2a) presence guard: the span-tier disclosure rides on the zero corpus (tier_parsed= present)"
+    if printf '%s' "$zRoot" | grep -q 'tier_unclassified='; then
+        zVal="$( printf '%s' "$zRoot" | sed -n 's/.*tier_unclassified="\([^"]*\)".*/\1/p' )"
+        if [ "$zVal" = "0" ]; then
+            ok "(Z2a) --grep: tier_unclassified=\"0\" rides at zero, as its legend promises"
+        else
+            no "(Z2a) --grep: tier_unclassified=\"$zVal\" — the probe stopped being a ZERO case; rebuild the corpus so it is one"
+        fi
+    else
+        no "(Z2a) --grep DROPPED tier_unclassified= at zero while its own legend says 'always EMITTED, never suppressed' — root: $zRoot"
+    fi
+fi
+# the claim itself must still be printed, or (Z2a) is asserting against nothing
+"$BIN" "$ZSB" --grep=ZEROMARK_probe --no-cache 2>/dev/null | grep -q 'always EMITTED, never suppressed' \
+    && ok "(Z2a) presence guard: the legend clause under test is still printed by the verb" \
+    || no "(Z2a) presence guard: --grep no longer prints the 'always EMITTED, never suppressed' clause"
+
+# ── (Z2b) tier_unclassified= — the MCP twin ─────────────────────────────────────────────────────────
+# Crossing the CLI/MCP seam is the point: an MCP-only agent has no CLI to re-ask from, so a dialect that
+# drops a confidence qualifier drops it for good.
+zMcp="$( printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"grep","arguments":{"path":"'"$ZSB"'","pattern":"ZEROMARK_probe"}}}' \
+    | "$BIN" --mcp --no-cache 2>/dev/null | tail -1 )"
+if ! printf '%s' "$zMcp" | grep -q 'tier_parsed'; then
+    no "(Z2b) presence guard: the MCP grep verb returned no span-tier disclosure — the probe is inert"
+elif printf '%s' "$zMcp" | grep -q 'tier_unclassified'; then
+    ok "(Z2b) MCP grep: tier_unclassified rides at zero (CLI/MCP parity on the claim)"
+else
+    no "(Z2b) MCP grep DROPPED tier_unclassified at zero — the CLI legend's promise does not hold on the MCP surface"
+fi
+
+# ── (Z2c) register-macro-excluded= — 'printed even at zero' (verbs_quality.h + cli.h) ────────────────
+# A fresh repo with no self-registering test macro makes the honest zero this claim is about.
+ZQ="$TMP/zerorepo"; mkdir -p "$ZQ"
+(
+  cd "$ZQ" && git init -q . && git config user.email t@t && git config user.name t
+  printf 'int keep( int a ) { return a + 1; }\n' > lib.h
+  git add lib.h && git commit -qm base
+  printf 'int keep( int a ) { return a + 1; }\nint added( int a ) { return a + 2; }\n' > lib.h
+) >/dev/null 2>&1
+"$BIN" "$ZQ" --quality-delta --no-cache > "$TMP/zqd.xml" 2>/dev/null
+"$BIN" "$ZQ" --quality-delta --json --no-cache > "$TMP/zqd.json" 2>/dev/null
+if ! grep -q '<quality-delta ' "$TMP/zqd.xml"; then
+    no "(Z2c) presence guard: --quality-delta produced no root on the zero repo — the probe is inert"
+else
+    zRme="$( sed -n 's/.*register-macro-excluded="\([^"]*\)".*/\1/p' "$TMP/zqd.xml" | head -1 )"
+    [ -n "$zRme" ] && ok "(Z2c) --quality-delta XML: register-macro-excluded=\"$zRme\" rides at zero" \
+                   || no "(Z2c) --quality-delta XML DROPPED register-macro-excluded= — cli.h says it 'prints even at 0'"
+    grep -q '"register-macro-excluded"' "$TMP/zqd.json" \
+        && ok "(Z2c) --quality-delta --json: register-macro-excluded rides at zero" \
+        || no "(Z2c) --quality-delta --json DROPPED register-macro-excluded"
+fi
+
+# ── (Z2d) sub_windows= — 'the denominator and is never omitted' (verbs_report.h) ─────────────────────
+"$BIN" "$ROOT" --cochange --no-cache > "$TMP/zco.xml" 2>/dev/null
+zCoRoot="$( grep -o '<cochange [^>]*>' "$TMP/zco.xml" | head -1 )"
+if [ -z "$zCoRoot" ]; then
+    ok "(Z2d) --cochange produced no root here (no git history) — probe skipped, not asserted"
+elif printf '%s' "$zCoRoot" | grep -q 'sub_windows='; then
+    ok "(Z2d) --cochange: sub_windows= rides, as its legend promises"
+else
+    no "(Z2d) --cochange DROPPED sub_windows= — its own legend says it 'is never omitted'"
+fi
+
+# ── (Z2e) confidence=/margin_pct= — 'the <ctx> root always carries' (cli.h) ──────────────────────────
+# margin_pct is 0 on the zero corpus, which is precisely the value a present-only emitter would drop.
+"$BIN" "$ZSB" --for="alpha" --no-cache > "$TMP/zfor.xml" 2>/dev/null
+"$BIN" "$ZSB" --for="alpha" --json --no-cache > "$TMP/zfor.json" 2>/dev/null
+zForRoot="$( grep -o '<ctx [^>]*>' "$TMP/zfor.xml" | head -1 )"
+if [ -z "$zForRoot" ]; then
+    no "(Z2e) presence guard: --for produced no <ctx> root on the zero corpus — the probe is inert"
+else
+    printf '%s' "$zForRoot" | grep -q 'confidence=' && printf '%s' "$zForRoot" | grep -q 'margin_pct=' \
+        && ok "(Z2e) --for XML: the <ctx> root carries confidence=/margin_pct= at margin_pct=0" \
+        || no "(Z2e) --for XML dropped confidence=/margin_pct= — cli.h says the <ctx> root ALWAYS carries them"
+    grep -q '"confidence"' "$TMP/zfor.json" && grep -q '"margin_pct"' "$TMP/zfor.json" \
+        && ok "(Z2e) --for --json: the same two keys ride" \
+        || no "(Z2e) --for --json dropped confidence/margin_pct"
+fi
+# (Z2f) the three surface counts --for's JSON reserves budget for BECAUSE 0 must mean "genuinely none on
+# this surface", not "not computed this run" (verbs_for.h §B1.4).
+zMissing=""
+for k in lego_total compose_total routes_total; do
+    grep -q "\"$k\"" "$TMP/zfor.json" || zMissing="$zMissing $k"
+done
+[ -z "$zMissing" ] && ok "(Z2f) --for --json: lego_total/compose_total/routes_total all ride at 0" \
+                   || no "(Z2f) --for --json dropped at zero:$zMissing"
+
 [ "$fail" = "0" ] && { echo "ALL PASS"; exit 0; }
 echo "FAILURES PRESENT"; exit 1
