@@ -4679,21 +4679,21 @@ _Known-item retrieval eval: MRR + recall@k per ranker per query mode._
 
 ```
 $ ./build/ripwire . --eval-retrieval
-ripwire --eval-retrieval  (known-item, 3519 doc-commented symbols; gold is in-corpus by construction)
-  sample: population=3519 scored=3519 rule=exhaustive (every qualifying symbol; path- and order-independent)
+ripwire --eval-retrieval  (known-item, 3522 doc-commented symbols; gold is in-corpus by construction)
+  sample: population=3522 scored=3522 rule=exhaustive (every qualifying symbol; path- and order-independent)
+  ingest: lex=rich (persisted subtoken stats; no per-query corpus re-tokenize)
   ranker    query-mode     MRR  recall@1  recall@5 recall@10
   subtoken  name         0.724     59.2%     88.9%     93.4%
   subtoken  doc-phrase   0.930     90.9%     95.2%     95.9%
   name-exact name         0.922     85.5%     97.5%     98.4%
   name-exact doc-phrase   0.017      0.6%      2.7%      3.5%
-  anchored  name         0.726     60.6%     87.6%     92.1%
+  anchored  name         0.727     60.6%     87.6%     92.1%
   anchored  doc-phrase   0.925     90.0%     94.9%     95.8%
   routed    name         0.922     85.5%     97.5%     98.5%
   routed    doc-phrase   0.929     90.9%     95.1%     95.7%
-  note: routing chose name-exact on 3517/3519 NAME queries (a NAME query is always identifier-shaped);
+  note: routing chose name-exact on 3520/3522 NAME queries (a NAME query is always identifier-shaped);
         the confidence gate routes doc-phrase queries to name-exact ONLY when EVERY content word names a symbol
-        (or an explicit camel/snake token appears) AND every matched name is specific enough to anchor on —
-... [3 more line(s); run it to see the whole thing]
+... [4 more line(s); run it to see the whole thing]
 ```
 
 ### `--eval-mined=FILE`

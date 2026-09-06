@@ -444,7 +444,7 @@ this section is simply the first measurement of *this* configuration under a des
 
 ### Query-shape routing
 
-Known-item retrieval over EVERY doc-commented symbol in the corpus (3,008 in `src/`, 3,519 at the
+Known-item retrieval over EVERY doc-commented symbol in the corpus (3,011 in `src/`, 3,522 at the
 root — the eval prints its own `population=`/`scored=`/`rule=`), two synthetic queries per symbol (the
 whole name; a stopworded phrase from the doc comment's first line), four rankers, gold rank measured.
 Reproduce with `ripwire <dir> --eval-retrieval`. Recorded in `bench/ANSWERQUALITY.md`.

@@ -513,6 +513,40 @@ inline void addRetrieval( RetrievalAcc& a, double rank )
     ++a.n;
 }
 
+// THE INSTRUMENT, stated before the numbers it produced. Both lines exist because the thing they name went
+// wrong invisibly: the SAMPLE was drawn in path order for as long as this eval existed (docs/EVALS.md §7),
+// and the RANKING PATH silently fell back to re-tokenizing the corpus per query because this verb was
+// missing from needsValueUses. Neither cost a wrong answer; both cost the ability to notice. Split out of
+// runEvalRetrieval so "declare the regime" is one readable unit rather than prologue to a reporting loop.
+inline void printRetrievalDisclosure( std::size_t population, std::size_t scored, bool exhaustive, bool hasLexStats )
+{
+    // The sampling rule states itself. `exhaustive` means scored == population: there is no sample and no
+    // rule, so nothing about the corpus's layout can reach the numbers below.
+    if( exhaustive )
+    {
+        std::printf( "  sample: population=%zu scored=%zu rule=exhaustive (every qualifying symbol; path- and order-independent)\n",
+                     population, scored );
+    }
+    else
+    {
+        std::printf( "  sample: population=%zu scored=%zu rule=smallest-key CAPPED — a SUBSET, not the population\n"
+                     "          (smallest fnv1a64(scope::name) over the population, cut on the key so an identity is never split;\n"
+                     "           path- and order-independent, but a corpus this size is NOT graded exhaustively — say so when citing it)\n",
+                     population, scored );
+    }
+    // The RANKING PATH states itself too. lexicalScoresTiered scores either from per-symbol subtoken stats
+    // persisted at parse time (`rich` — pure lookups) or by re-tokenizing the whole corpus per query
+    // (`scan`), and which one it takes is decided by whether this verb is in main.cpp's needsValueUses. The
+    // eval was NOT, so it ran `scan` for as long as it existed: ~6,000 corpus re-tokenizes per run, 94% of
+    // its CPU, and not one byte of output said so. The two paths are proven equivalent by
+    // test/postingscheck.sh, so this never changes a number — it names the regime a number was produced
+    // under, which is the same disclosure the sampling rule above had to grow for the same reason.
+    std::printf( "  ingest: lex=%s (%s)\n",
+                 hasLexStats ? "rich" : "scan",
+                 hasLexStats ? "persisted subtoken stats; no per-query corpus re-tokenize"
+                             : "LEAN ingest — every query re-tokenizes the corpus; add this verb to needsValueUses" );
+}
+
 // The sampler is an INSTRUMENT, and until 2026-09-05 it reported properties of the CORPUS while claiming to
 // report properties of the RANKER. It walked symbol ids from 0 and stopped at the first 150 doc-commented
 // symbols; ids are assigned in CRAWL order and the crawl is sorted by path (that ordering is deliberate — it
@@ -714,20 +748,7 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
                      100.0 * double( a.r1 ) / N, 100.0 * double( a.r5 ) / N, 100.0 * double( a.r10 ) / N );
     };
     std::printf( "ripwire --eval-retrieval  (known-item, %zu doc-commented symbols; gold is in-corpus by construction)\n", sample.size() );
-    // The sampling rule states itself. `exhaustive` means scored == population: there is no sample and no
-    // rule, so nothing about the corpus's layout can reach the numbers below.
-    if( exhaustive )
-    {
-        std::printf( "  sample: population=%zu scored=%zu rule=exhaustive (every qualifying symbol; path- and order-independent)\n",
-                     population, sample.size() );
-    }
-    else
-    {
-        std::printf( "  sample: population=%zu scored=%zu rule=smallest-key CAPPED — a SUBSET, not the population\n"
-                     "          (smallest fnv1a64(scope::name) over the population, cut on the key so an identity is never split;\n"
-                     "           path- and order-independent, but a corpus this size is NOT graded exhaustively — say so when citing it)\n",
-                     population, sample.size() );
-    }
+    printRetrievalDisclosure( population, sample.size(), exhaustive, ing.hasLexStats );
     std::printf( "  %-9s %-11s %6s %9s %9s %9s\n", "ranker", "query-mode", "MRR", "recall@1", "recall@5", "recall@10" );
     row( "subtoken", "name",      subN );
     row( "subtoken", "doc-phrase",subP );

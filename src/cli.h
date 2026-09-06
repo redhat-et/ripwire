@@ -522,6 +522,26 @@ struct Config
     bool             ok              = true;      // false ⇒ parse error / usage printed
 };
 
+// THE lean/rich decision, in ONE place. A rich ingest carries per-symbol persisted subtoken statistics
+// (ingest_model.h builds them under this very flag), which is what lets lexicalScoresTiered score from
+// lookups instead of re-tokenizing the whole corpus per query. Verbs that score MANY queries against one
+// tree need it; single-query verbs are better off lean, because an expensive rich parse to save one scan
+// is a loss (measured: --recall's entire lexical cost is ~0.03 s against --for's ~0.23 s).
+//
+// It is a FUNCTION rather than an expression inlined at the dispatch site because being an unverifiable
+// enumeration is precisely how it went wrong: --eval-retrieval/-mined/-skills each score thousands of
+// queries and were absent from it, so they re-tokenized the corpus ~6,000 times per run for as long as
+// they existed, with nothing in any output naming the regime. Now --doctor derives its rich_verbs= roster
+// by ASKING this predicate per verb (verbs_doctor.h), so the published roster cannot drift from the
+// behaviour, and test/knownitemcheck.sh asserts that roster is both complete and discriminating.
+inline bool needsValueUses( const Config& cfg ) noexcept
+{
+    return !cfg.usesSym.empty() || cfg.metrics || !cfg.forTask.empty() || !cfg.exemplar.empty()
+           || cfg.contextRatio || cfg.nonlocalState || cfg.qualityPanel
+           || !cfg.verifyClaim.empty()          // uses()/unused() claims count read/write use-sites
+           || cfg.evalRetrieval || !cfg.evalMined.empty() || !cfg.evalSkills.empty();
+}
+
 inline bool startsWith( std::string_view s, std::string_view p ) noexcept
 {
     return s.size() >= p.size() && std::memcmp( s.data(), p.data(), p.size() ) == 0;

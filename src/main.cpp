@@ -3389,15 +3389,8 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     // /--context-ratio/--nonlocal-state/--quality-panel — the local-reasoning lens counts read/write sites, and
     // nonlocal-state's attribution is read/write USE SITES by definition, so a lean ingest would hand either a
     // confident, wrong zero; --quality-panel builds two of its six families out of exactly those two lenses.
-    const bool needsValueUses = !cfg.usesSym.empty() || cfg.metrics || !cfg.forTask.empty() || !cfg.exemplar.empty()
-                                || cfg.contextRatio || cfg.nonlocalState || cfg.qualityPanel
-                                || !cfg.verifyClaim.empty()    // G4: uses()/unused() claims count read/write use-sites — a lean ingest would hand a confident, wrong zero
-                                // 2026-09-06: the eval harnesses score MANY queries against one tree, and a LEAN
-                                // ingest carries no persisted subtoken stats (ingest_model.h gates them on this
-                                // very flag), so lexicalScoresTiered fell to its scan branch and re-tokenized the
-                                // whole corpus PER QUERY -- 6,020 scans for one --eval-retrieval run. They are
-                                // rich for the same reason --for is: they ARE --for, run in a loop.
-                                || cfg.evalRetrieval || !cfg.evalMined.empty() || !cfg.evalSkills.empty();
+    const bool needsValueUses = rw::needsValueUses( cfg );   // cli.h — ONE definition, and --doctor's
+                                                            // rich_verbs= roster is derived from it
     IngestResult ing;
     if( multiRoot )
     {

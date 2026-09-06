@@ -170,5 +170,54 @@ else
     no "cannot re-derive population — no population= field emitted"
 fi
 
+# ── #11/#12: WHICH INGEST PATH THE RUN TOOK, disclosed. The defect these exist for cost 94% of this eval's
+#    CPU and was invisible in every byte of output. lexicalScoresTiered has carried a persisted-stats path
+#    since B0.2 (per-symbol subtoken stats built once at parse time, pure lookups per query); it is taken
+#    only when the ingest is RICH, and main.cpp's needsValueUses enumerates which verbs ask for that. The
+#    eval verbs were simply missing from the list, so they fell to the scan branch and re-tokenized the
+#    whole corpus on every one of ~6,000 calls. Nothing said so: a 16x per-query swing, decided by a flag,
+#    with no attribute naming it anywhere. Finding it needed a temporary fprintf compiled into the branch.
+#    So the regime states itself now, the same way the sampler's own rule had to (#9): lex= on the eval's
+#    disclosure line, lex_stats= on doctor's index-cache row.
+
+LEXOUT="$TMP/lex.txt"
+"$BIN" src --eval-retrieval --no-cache >"$LEXOUT" 2>/dev/null
+LEXPATH="$( grep -oE 'lex=[a-z-]+' "$LEXOUT" | head -1 | cut -d= -f2 )"
+{ [ -n "$LEXPATH" ] && [ "$LEXPATH" = "rich" ]; } \
+    && ok "eval discloses its lexical path and it is RICH (lex=$LEXPATH) — persisted stats, no per-query corpus re-tokenize" \
+    || no "eval's lexical path is '${LEXPATH:-<undisclosed>}', expected rich — a LEAN ingest silently re-tokenizes the corpus per query (add the verb to main.cpp's needsValueUses), and an UNDISCLOSED path is the invisibility that hid it for as long as this eval has existed"
+
+# ── #12: MEMBERSHIP, disclosed and re-derived. --doctor never ingests, so it cannot honestly report "the
+#    path this run took"; what it can answer is the question that was actually unanswerable — WHICH VERBS
+#    ask for the rich ingest. That enumeration lives in exactly one place (needsValueUses) and doctor's
+#    roster is derived by ASKING that predicate per verb, never by restating the list, so the roster cannot
+#    drift from the behaviour the way a second hand-written copy would. cachesplitcheck already proves the
+#    lean/rich MECHANISM; nothing proved its MEMBERSHIP, which is the gap the eval fell through.
+DOCOUT="$TMP/doc.txt"
+"$BIN" src --doctor >"$DOCOUT" 2>/dev/null
+ROSTER="$( grep -oE 'rich_verbs="[^"]*"' "$DOCOUT" | head -1 | cut -d'"' -f2 )"
+if [ -z "$ROSTER" ]; then
+    no "--doctor does not disclose rich_verbs= — which verbs get the persisted-stats path is unanswerable from any output, which is exactly how the eval sat on the scan path unnoticed"
+else
+    # the eval verbs must be IN it (the defect), and a known-lean verb must be OUT of it (the control: a
+    # roster that listed everything would satisfy the first assertion while meaning nothing).
+    inRoster(){ case ",$ROSTER," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
+    miss=""
+    for v in eval-retrieval eval-mined eval-skills for exemplar uses metrics; do
+        inRoster "$v" || miss="$miss $v"
+    done
+    extra=""
+    for v in grep callers doctor expand; do
+        inRoster "$v" && extra="$extra $v"
+    done
+    if [ -n "$miss" ]; then
+        no "--doctor's rich_verbs= omits:$miss — a verb that scores many queries against one tree and is NOT in needsValueUses re-tokenizes the corpus per query"
+    elif [ -n "$extra" ]; then
+        no "--doctor's rich_verbs= wrongly includes lean verb(s):$extra — a roster that names everything proves nothing (it would satisfy the membership check while meaning nothing)"
+    else
+        ok "rich_verbs= roster is complete and discriminating: the eval verbs are in it, nav/read verbs are not"
+    fi
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

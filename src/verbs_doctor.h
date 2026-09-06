@@ -231,6 +231,45 @@ inline const char* doctorLegendComment()
 // this row silently starts under-reporting.
 struct DoctorIndexCache { std::string attrs; bool ok = true; };
 
+// The rich-verb roster, DERIVED by asking needsValueUses (cli.h) one verb at a time — never a second copy
+// of the list, because a hand-written copy is exactly what would drift back into a lie. Each probe sets the
+// ONE field that verb's flag sets and asks the predicate; whatever it answers is what the dispatcher will
+// do. A verb missing here is a roster gap, not a behaviour gap — test/knownitemcheck.sh asserts the roster
+// is both complete over the verbs that loop and empty of the nav/read verbs that do not.
+inline std::string doctorRichVerbRoster()
+{
+    struct Probe { const char* verb; void ( *arm )( rw::Config& ); };
+    static const Probe kProbes[] = {
+        { "for",             []( rw::Config& c ) { c.forTask     = "x"; } },
+        { "uses",            []( rw::Config& c ) { c.usesSym     = "x"; } },
+        { "metrics",         []( rw::Config& c ) { c.metrics     = true; } },
+        { "exemplar",        []( rw::Config& c ) { c.exemplar    = "x"; } },
+        { "context-ratio",   []( rw::Config& c ) { c.contextRatio  = true; } },
+        { "nonlocal-state",  []( rw::Config& c ) { c.nonlocalState = true; } },
+        { "quality-panel",   []( rw::Config& c ) { c.qualityPanel  = true; } },
+        { "verify",          []( rw::Config& c ) { c.verifyClaim = "x"; } },
+        { "eval-retrieval",  []( rw::Config& c ) { c.evalRetrieval = true; } },
+        { "eval-mined",      []( rw::Config& c ) { c.evalMined   = "x"; } },
+        { "eval-skills",     []( rw::Config& c ) { c.evalSkills  = "x"; } },
+        // deliberately probed and expected LEAN — a roster that named everything would prove nothing:
+        { "grep",            []( rw::Config& c ) { c.grep        = "x"; } },
+        { "callers",         []( rw::Config& c ) { c.callers     = "x"; } },
+        { "expand",          []( rw::Config& c ) { c.expand.push_back( "x" ); } },
+    };
+    std::string roster;
+    for( const Probe& p : kProbes )
+    {
+        rw::Config probe;
+        p.arm( probe );
+        if( rw::needsValueUses( probe ) )
+        {
+            if( !roster.empty() ) { roster += ','; }
+            roster += p.verb;
+        }
+    }
+    return roster;
+}
+
 inline DoctorIndexCache doctorIndexCacheRow( const rw::Config& cfg, std::vector<char>& esc )
 {
     const rw::CacheIdentity id = rw::cacheIdentity();
@@ -239,6 +278,10 @@ inline DoctorIndexCache doctorIndexCacheRow( const rw::Config& cfg, std::vector<
     out.attrs += " parser_ver_lean=\"" + std::to_string( id.parserVerLean ) + "\"";
     out.attrs += " parser_ver_rich=\"" + std::to_string( id.parserVerRich ) + "\"";
     out.attrs += " artifact_arch=\"" + std::to_string( id.artifactArch ) + "\"";
+    // WHICH VERBS consume the rich artifact — the membership this row's lean=/rich= verdicts are about.
+    // Answers "will my verbs get the persisted-stats path", which no output could answer before: the eval
+    // verbs sat on the scan path, re-tokenizing the corpus per query, and nothing said so.
+    out.attrs += " rich_verbs=\"" + doctorRichVerbRoster() + "\"";
 
     const bool  named       = !cfg.cacheFile.empty();
     std::string namedPath;
