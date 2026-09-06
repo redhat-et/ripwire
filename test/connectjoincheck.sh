@@ -203,5 +203,32 @@ else
     ok "(K) python3 absent — MCP parity skipped"
 fi
 
+# ── (L) the <unconnected> arm discloses defs= too ─────────────────────────────────────────────────────
+# A terminal is a caller-typed selector resolved by resolveFocus's LOWEST-ID pick, so a name with N
+# definitions silently answers about one of them. The <g> arm says so (defs=), the <unconnected> arm did
+# not — and <unconnected> is where the claim is STRONGEST ("no relationship within radius R") and where
+# picking 1 of N most changes the answer. Same enrichment, one arm: the exact asymmetry selectorrefuse.h
+# was created to collapse. Not introduced by this lane; pre-existing, fixed here because this lane owns
+# the emitter.
+UNC="$TMP/unc"
+mkdir -p "$UNC"
+echo "void dup() {}"    > "$UNC/a_dup.cpp"
+echo "void dup() {}"    > "$UNC/b_dup.cpp"
+echo "void lonely() {}" > "$UNC/c_lonely.cpp"
+UOUT="$( "$BIN" "$UNC" --connect=lonely,dup 2>/dev/null )"
+if printf '%s' "$UOUT" | grep -q '<unconnected'; then
+    ok "(L) fixture is genuinely unconnected (the arm under test is reached)"
+    # the dup terminal resolves to one of TWO definitions, so its row must carry defs="2"
+    printf '%s' "$UOUT" | grep -q '<unconnected[^>]*>[^<]*<t n="dup"[^>]*defs="2"' \
+        && ok "(L) <unconnected> terminal discloses defs= when the name is ambiguous" \
+        || no "(L) <unconnected> terminal omits defs= for an ambiguous name: $( brief "$UOUT" )"
+    # mutation control: the single-definition terminal must NOT carry defs= (absent, never defs="1")
+    printf '%s' "$UOUT" | grep -q '<t n="lonely"[^>]*defs=' \
+        && no "(L) mutation: an unambiguous terminal wrongly carries defs=" \
+        || ok "(L) mutation control: an unambiguous terminal carries no defs="
+else
+    no "(L) fixture did not produce <unconnected> — the arm under test was never reached"
+fi
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"

@@ -2870,6 +2870,13 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
             nodeTotal += 1;
             payload.append( "<unconnected radius=\"" ).append( std::to_string( res.radius ) ).append( "\">" );
             symAttr( payload, "t", grp.terminals[ 0 ] );
+            // The SAME disclosure the <g> arm makes above, on the arm that makes the STRONGER claim. An
+            // unconnected terminal is still resolveFocus's lowest-id pick among N same-named definitions,
+            // and "no relationship within radius R" is exactly where answering about one of N silently
+            // changes the answer. Derived from definitionCountOfName — the same call the <g> arm uses —
+            // so the two can never drift into disagreeing about what the name resolved to.
+            const std::size_t loneDefs = definitionCountOfName( ing, grp.terminals[ 0 ] );
+            if( loneDefs > 1 ) { payload.append( " defs=\"" ).append( std::to_string( loneDefs ) ).append( "\"" ); }
             payload.append( "/></unconnected>" );
         }
 
