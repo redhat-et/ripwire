@@ -20,12 +20,6 @@ JavaScript · Java · Ruby · PHP · Lua · Bash · C# · JSON · TOML · YAML �
 vendored grammars](#languages), and adding another is a vendored tree-sitter grammar plus one row in a
 declarative table.
 
-### See the map — not just the numbers
-
-<p align="center"><img src="docs/assets/colorby-hero.jpg" alt="ripwire --html --color-by=cx: the depth-2 call-graph neighbourhood of lexicalScoresTiered (240 nodes) in this repository, force-directed, nodes on a blue-to-orange complexity scale" width="880"></p>
-
-<p align="center"><sub>One self-contained HTML file (<code>--html[=FILE]</code>), no server, no CDN, click any node to recentre. <code>--color-by=lang|community|cx|churn|tested</code> sets the initial node colour; the page embeds all five and keeps a live selector. Shown here: <code>cx</code> — cyclomatic complexity — over the depth-2 neighbourhood of <code>lexicalScoresTiered</code>, 240 of this repository's own symbols; <code>churn</code> colours the same graph by git history instead. Both share one five-stop blue-to-orange scale rather than the usual green-to-red, so reading it never depends on telling red from green.</sub></p>
-
 ### No API key. No embeddings. No index server. No daemon.
 
 One self-contained binary on your own machine, offline, installed in one line — and the same line
@@ -94,6 +88,12 @@ top of the real output, which also self-reports the bundle's cost — `est_token
 And against five retrieval competitors on a held-out LocBench slice, it finds **all** gold files in
 the top 10 on **58.3%** of instances — the best alternative lands 40.0% — while indexing in 0.31 s.
 [The full leaderboard, losses included ↓](#graph-ranked-retrieval-it-finds-the-right-files-more-often-than-the-alternatives)
+
+### See the map — not just the numbers
+
+<p align="center"><img src="docs/assets/colorby-hero.jpg" alt="ripwire --html --color-by=cx: the depth-2 call-graph neighbourhood of lexicalScoresTiered (240 nodes) in this repository, force-directed, nodes on a blue-to-orange complexity scale" width="880"></p>
+
+<p align="center"><sub>One self-contained HTML file (<code>--html[=FILE]</code>), no server, no CDN, click any node to recentre. <code>--color-by=lang|community|cx|churn|tested</code> sets the initial node colour; the page embeds all five and keeps a live selector. Shown here: <code>cx</code> — cyclomatic complexity — over the depth-2 neighbourhood of <code>lexicalScoresTiered</code>, 240 of this repository's own symbols; <code>churn</code> colours the same graph by git history instead. Both share one five-stop blue-to-orange scale rather than the usual green-to-red, so reading it never depends on telling red from green.</sub></p>
 
 ### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
 
@@ -189,24 +189,6 @@ indexed but cannot vouch for carries a parse-health row; every file the crawl pa
 itemized with its reason. A confident-looking map that lies by omission is the failure mode this
 tool refuses.
 [What it misses, and what to run next →](#what-it-misses-and-what-to-run-next)
-
-### Saves Tokens: It answers for a fraction of the context
-
-On mid-task questions it had never seen, ripwire answers at **5.0%** of what a grep-and-read pass
-spends — **5.2%** on the questions both arms fully answered. `--pack-signatures` returns **81% fewer
-bytes** than full bodies at top-50. The output is already dense enough that running a dedicated
-context compressor over it saved **exactly 0 tokens**.
-
-Both of those first two figures moved when they were re-derived on 2026-08-23, and they moved in
-**opposite** directions — 7.3% → 5.0% overall, but 1.7% → 5.2% on the both-answered subset. Same
-frozen questions, same frozen verb ladders, same corpus pin, same tokenizer; the naive arm reproduced
-to the token. What changed is where ripwire spends: the compact conceptual route made its *misses*
-much cheaper, while richer default bundles made the questions it *answers* dearer. Both numbers are
-printed because printing only the one that improved would be the failure this project exists to not
-commit. The full per-question re-derivation is in the Round 3 note under [Measured](#measured).
-
-It is also cheap enough to call on reflex: this repository parses in **~0.15 s** cold and **~0.10 s**
-warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessing.
 
 ### Graph-Ranked Retrieval: It finds the right files more often than the alternatives
 
@@ -445,6 +427,24 @@ per-lane table and history in [docs/EVALS.md §4](docs/EVALS.md).
 
 </details>
 
+### Saves Tokens: It answers for a fraction of the context
+
+On mid-task questions it had never seen, ripwire answers at **5.0%** of what a grep-and-read pass
+spends — **5.2%** on the questions both arms fully answered. `--pack-signatures` returns **74.7%
+fewer bytes** than full bodies at top-50 (re-derived on this tree, 2026-09-06). The output is already
+dense enough that running a dedicated context compressor over it saved **exactly 0 tokens**.
+
+Both of those first two figures moved when they were re-derived on 2026-08-23, and they moved in
+**opposite** directions — 7.3% → 5.0% overall, but 1.7% → 5.2% on the both-answered subset. Same
+frozen questions, same frozen verb ladders, same corpus pin, same tokenizer; the naive arm reproduced
+to the token. What changed is where ripwire spends: the compact conceptual route made its *misses*
+much cheaper, while richer default bundles made the questions it *answers* dearer. Both numbers are
+printed because printing only the one that improved would be the failure this project exists to not
+commit. The full per-question re-derivation is in the Round 3 note under [Measured](#measured).
+
+It is also cheap enough to call on reflex: this repository parses in **~0.15 s** cold and **~0.10 s**
+warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessing.
+
 ### Better Code: It automates the review judgments nobody has time to make — every lens from published research
 
 `--quality-panel` runs the calls a good reviewer makes by hand — is this function too tangled, is it
@@ -541,7 +541,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 </p>
 
 <p align="center">
-  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 27 slides</b></a> — every figure names the instrument that pins it<br>
+  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 29 slides</b></a> — every figure names the instrument that pins it<br>
   <sub>renders in your browser · <a href="present/ripwire-showcase.pptx">pptx</a> beside it · <a href="docs/EVALS.md">the numbers behind it</a></sub>
 </p>
 
@@ -592,7 +592,7 @@ ranking, bodies, callers and tests in one budgeted bundle.
 **Prebuilt binary** — macOS (arm64 / x86-64) and Linux (arm64 / x86-64, built for **RHEL 8+**;
 every release is smoke-tested on a RHEL 9 userland before it publishes). Downloads the latest
 [GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
-to `~/.local/bin`. From v0.2.2 the release tarball also ships the seventeen agent skills, and the
+to `~/.local/bin`. From v0.2.2 the release tarball also ships the eighteen agent skills, and the
 installer stages them under `~/.local/share/ripwire/skills` **and activates them for every agent it
 detects** (Claude Code, Codex), printing one line per agent saying what it did. An agent that is not
 installed is never given a skills directory, hooks are never registered without an explicit `--hook`,
@@ -1565,13 +1565,13 @@ ripwire wrap aider       # no MCP:   a ranked map file, and the aider invocation
 ripwire wrap --all       # detect every installed agent and emit each one's config
 ```
 
-**One stdio server, 30 verbs** — 15 read, 12 flagship-reflex, 3 span-addressed edit — and a client
+**One stdio server, 31 verbs** — 16 read, 12 flagship-reflex, 3 span-addressed edit — and a client
 that isn't one of the six above can be pointed at the same process by hand.
 
 <details>
-<summary>What the 30 verbs are — lazy body handles, the edit verbs' safety contract, the pre-print skill scan, and the hand-written stanza for any other MCP client</summary>
+<summary>What the 31 verbs are — lazy body handles, the edit verbs' safety contract, the pre-print skill scan, and the hand-written stanza for any other MCP client</summary>
 
-That registers one stdio server — `ripwire --mcp` — exposing **30 verbs**: 15 read verbs, 12
+That registers one stdio server — `ripwire --mcp` — exposing **31 verbs**: 16 read verbs, 12
 flagship-reflex verbs, and 3 span-addressed edit verbs. Read verbs mirror the CLI (`analyze`, `for`,
 `grep`, `cochange`, `fetch_body`, `lego`, `mentions`, `owners`, `memory_recall`,
 `situational_awareness`, `batch`, …); `find_symbol` and `find_referencing_symbols` attach a stable
@@ -1603,7 +1603,7 @@ socket instead of stdio, `ripwire --listen=HOST:PORT` serves the same verbs.
 
 `skills/` ships **eighteen task-shaped skills** that tell an agent *which* verb answers the moment it
 is in — orienting cold, tracing a call, sizing a refactor, checking a diff, hunting a bug, writing
-tests, reviewing security. Without them an agent has 30 verbs and no map of when each applies; the skills name the moment
+tests, reviewing security. Without them an agent has 31 verbs and no map of when each applies; the skills name the moment
 each verb is for. Install as symlinks back into this repo, so edits here take effect
 immediately:
 
@@ -1713,7 +1713,7 @@ tier: it parses with its own vendored grammar, so its headings are symbols, not 
 | Orientation for a coding agent working *on* this repository | [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) |
 | User-visible capabilities, behaviour changes, known limits | [`CHANGELOG.md`](CHANGELOG.md) |
 | Vendored dependencies and their licences | [`THIRD_PARTY.md`](THIRD_PARTY.md) |
-| The whole tool in 27 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
+| The whole tool in 29 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
 
 If a document disagrees with `--help`, the document is the bug.
 

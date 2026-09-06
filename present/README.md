@@ -1,6 +1,6 @@
 # present/ — the showcase deck
 
-`ripwire-showcase.pptx` (and its PDF render) is the tool in 27 slides: what it is, the verb
+`ripwire-showcase.pptx` (and its PDF render) is the tool in 29 slides: what it is, the verb
 surface, the measured numbers, and the honesty contract — for anyone who wants the pitch before
 the README.
 

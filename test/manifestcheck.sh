@@ -53,24 +53,73 @@ fi
 # passing manifestcheck reported confidence about a number it had not actually checked. That is
 # METHODOLOGY §3 (a fix that lands on one family member and not its siblings) applied to a gate, and
 # the fix is the §3 fix: enumerate the family, assert over ALL of it. Every "<N> gate scripts" claim
-# in the file is now derived-vs-stated, so a new one added later is covered without editing this gate.
-gateCountClaims="$( grep -nE '[0-9]+ gate scripts' "$EVALS" || true )"
-if [ -z "$gateCountClaims" ]; then
-    printf 'FAIL: docs/EVALS.md has no "<N> gate scripts" claim — the presence guard for this arm found nothing to check\n'
-    fail=1
-else
+# in a scanned file is derived-vs-stated, so a new one added later is covered without editing this gate.
+#
+# WIDENED 2026-09-06 from docs/EVALS.md to the whole FAMILY of files that state this number, for the
+# third instance of exactly the drift the paragraph above describes. README.md and the showcase deck
+# generator both quote the gate count, and neither was scanned: while the loop stood at 542 the deck's
+# own "every claim, and the command that re-derives it" slide said **451**, in a row that NAMES THIS
+# GATE as the command that re-derives it — a claim citing its own instrument, that the instrument had
+# never read. The deck shipped that way through a public PDF. "Enumerate the family, assert over ALL
+# of it" was the right lesson and it was applied to one file's siblings instead of the number's; the
+# family is every prose surface that states the count, not every line of one document.
+#
+# The site list is declared ONCE and drives the scan, exactly as test/deckclaimcheck.sh arm (B) does
+# with its own — a duplicated list is the bug both arms keep being widened to fix. A file that does
+# not exist is skipped; a file that exists and states NO count fails, because "no wrong count" is
+# vacuously true of a document that stopped making the claim, and a claim deleted is a claim drifted.
+gateCountSites=( "docs/EVALS.md" "README.md" "present/deck5_ripwire_build.js" )
+
+scanGateCounts() {                   # $1 = file, $2 = its display path → prints "line:number" per claim
+    grep -nE '[0-9]+ gate scripts' "$1" || true
+}
+
+for site in "${gateCountSites[@]}"; do
+    sitePath="$ROOT/$site"
+    [ -f "$sitePath" ] || continue
+    gateCountClaims="$( scanGateCounts "$sitePath" )"
+    if [ -z "$gateCountClaims" ]; then
+        printf 'FAIL: %s has no "<N> gate scripts" claim — the presence guard for this arm found nothing to check\n' "$site"
+        fail=1
+        continue
+    fi
     while IFS= read -r claim; do
+        [ -z "$claim" ] && continue
         claimLine="${claim%%:*}"
         claimNum="$( printf '%s' "$claim" | grep -oE '[0-9]+ gate scripts' | grep -oE '^[0-9]+' )"
         if [ "$claimNum" = "$loopNames" ]; then
-            printf 'PASS: docs/EVALS.md:%s gate count (%s) matches the loop\n' "$claimLine" "$claimNum"
+            printf 'PASS: %s:%s gate count (%s) matches the loop\n' "$site" "$claimLine" "$claimNum"
         else
-            printf 'FAIL: docs/EVALS.md:%s says %s gate scripts, but the loop names %s\n' "$claimLine" "$claimNum" "$loopNames"
+            printf 'FAIL: %s:%s says %s gate scripts, but the loop names %s\n' "$site" "$claimLine" "$claimNum" "$loopNames"
             fail=1
         fi
     done <<EOF
 $gateCountClaims
 EOF
+done
+
+# MUTATION CONTROL for the arm above. Every site passing proves only that some numbers were read and
+# compared equal — never that a WRONG one would have been seen. The deck is the mutated site on
+# purpose: it is the one this widening was written for, and the one whose scan had never run. A copy
+# with the count deliberately shifted must be extracted, must actually differ from the derived loop
+# length, and must be seen to differ by the SAME comparison the live arm uses.
+mutSrc="$ROOT/present/deck5_ripwire_build.js"
+if [ -f "$mutSrc" ]; then
+    mutTmp="$( mktemp -t manifestcheck_mut.XXXXXX )"
+    trap 'rm -f "$mutTmp"' EXIT
+    wrongCount=$(( loopNames + 7 ))
+    sed -E "s/${loopNames} gate scripts/${wrongCount} gate scripts/g" "$mutSrc" > "$mutTmp"
+    mutClaims="$( scanGateCounts "$mutTmp" )"
+    mutNum="$( printf '%s' "$mutClaims" | head -1 | grep -oE '[0-9]+ gate scripts' | grep -oE '^[0-9]+' )"
+    if [ -z "$mutNum" ]; then
+        printf 'FAIL: mutation control: could not re-extract a gate count from the mutated deck copy at all\n'
+        fail=1
+    elif [ "$mutNum" = "$loopNames" ]; then
+        printf 'FAIL: mutation control: the injected wrong count did not take (%s still equals the derived %s) — the control is vacuous\n' "$mutNum" "$loopNames"
+        fail=1
+    else
+        printf 'PASS: mutation control: a fabricated deck gate count (%s) is correctly seen as disagreeing with the loop (%s)\n' "$mutNum" "$loopNames"
+    fi
 fi
 
 # ── I1 (capture-audit verify-wave1 2026-09-04): a gate that CALLS a shell function ABOVE its definition is

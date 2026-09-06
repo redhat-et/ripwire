@@ -153,7 +153,7 @@ function row(s, y, h, cols, opts={}){
     s.addText(flags, { x: MX+6.3,  y: y+0.04, w: 5.65, h: 0.58, fontFace: MONO, fontSize: 9, color: CYAN, valign: "middle", margin: 0 });
     y += 0.74;
   }
-  foot(s, "--help is generated from the binary's own flag table — 179 long flags; docs/COMMANDS.md carries an entry for every one of them, 94 with a recorded invocation and its output");
+  foot(s, "--help is generated from the binary's own flag table — 179 long flags; docs/COMMANDS.md carries an entry for every one of them, 161 with a recorded invocation and its output");
 }
 
 /* ── S5 · the moments ───────────────────────────────────────────────────── */
@@ -187,7 +187,7 @@ function row(s, y, h, cols, opts={}){
 {
   const s = p.addSlide(); bg(s);
   kicker(s, "// new since 2026-08-15 — each figure re-derived on the binary that ships", CYAN);
-  title(s, "What the last eight days added", { size: 32 });
+  title(s, "What 2026-08-15 to 2026-08-23 added", { size: 32 });
   const shipped = [
     ["--pattern", "search by code SHAPE, not by node kinds",
      "foo($X, ...) across 13 grammar objects / 11 languages. On this repo VERIFY($X) finds 101 hits over 625 eligible files, each with its enclosing symbol. A pattern no served grammar resolves REFUSES (exit 1) instead of reporting hits=0.", CYAN],
@@ -221,7 +221,7 @@ function row(s, y, h, cols, opts={}){
 {
   const s = p.addSlide(); bg(s);
   kicker(s, "// new since 2026-08-23 — each figure measured, dated, and re-derivable", CYAN);
-  title(s, "What the last seven days added", { size: 32 });
+  title(s, "What 2026-08-23 to 2026-08-30 added", { size: 32 });
   const rows = [
     ["--slice-flow", "cross-statement data-flow slicing\n(ARISE, arXiv:2605.03117)",
      "The paper's own slicer — reaching-definition edges, a seed plus a direction, a bounded BFS that stops at function boundaries — implemented and MEASURED on a registered fix-commit protocol: flow rows lift function-level added-line recall 0.163 → 0.198 at 25% of --expand's whole-body bytes (whose recall is 1.0 by construction). 7 commits / 38 instances, cpp only — a thin corpus, reported as thin.", CYAN],
@@ -239,6 +239,32 @@ function row(s, y, h, cols, opts={}){
     y += 1.70;
   }
   foot(s, "sources: docs/EVALS.md §--slice-flow (registered protocol + per-instance ledger) · bench/PROFILE.md 2026-08-30 — no number travels without its caveat");
+}
+
+/* ── S5d · new since 2026-08-30 ───────────────────────────────── */
+{
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// new since 2026-08-30 — the window this deck did not cover until now", CYAN);
+  title(s, "What 2026-08-30 to 2026-09-06 added", { size: 32 });
+  const rows = [
+    [".gitignore, honoured\nby default", "named for ripgrep, whose\ndefining default this is",
+     "The crawl walked ignored files; in a git work tree it now consults git's own rules and skips what the repository already declared uninteresting. This root, three checkouts under an ignored bench/external/: files= 8,674 \u2192 1,522, cold 2.81 s \u2192 0.52 s, warm 0.63 s \u2192 0.10 s \u2014 and --no-ignore restores the previous walk exactly. Nothing drops silently: ignored_files= is exact, ignored_dirs= says the walk STOPPED there so those contents are UNKNOWN rather than zero, and both are ABSENT when the rules dropped nothing \u2014 so a tree with nothing ignored is byte-identical to what it produced before.", GREEN],
+    ["--html --color-by", "the map, rendered \u2014\nno server, no CDN",
+     "One self-contained HTML file: a force-directed call graph you click to recentre. --color-by=lang|community|cx|churn|tested sets the INITIAL colour only \u2014 the page embeds all five and keeps a live selector, so switching lens costs no second run. One five-stop blue-to-orange scale rather than the usual green-to-red, so reading it never depends on telling red from green.", CYAN],
+    ["--eval-retrieval,\nre-sampled", "the sampler was measuring\nthe corpus, not the ranker",
+     "For fourteen months the gold set was the first 150 doc-commented symbols in PATH order \u2014 and bench/ sorts before src/, so adding a docstring to a benchmark harness moved a published number without touching ranking code. One 60-symbol probe, one corpus, only its PATH varied: 0.105 and 0.356 MRR from spelling alone. Now exhaustive \u2014 population=3011 scored=3011 rule=exhaustive \u2014 and EVERY retrieval figure this project publishes was re-derived under it.", AMBER],
+    ["--plan-lanes", "which lanes would collide,\nBEFORE a line is written",
+     "Where --merge-scout says \"these branches already conflict\", this says \"these lanes WOULD conflict if assigned this way\" \u2014 no ref to resolve, no re-ingest. Each lane now also carries an advisory execution profile (model + reasoning effort) that labels its own evidence basis=\"structural-only\" and versions its policy separately from the schema, so a recommendation cannot quietly claim more than the structure it read.", CYAN],
+  ];
+  let y = 1.70;
+  for (const [flag, what, detail, c] of rows){
+    card(s, MX, y, 12.09, 1.17);
+    s.addText(flag,   { x: MX+0.18, y: y+0.09, w: 2.55, h: 0.50, fontFace: MONO, fontSize: 12, bold: true, color: c, margin: 0 });
+    s.addText(what,   { x: MX+0.18, y: y+0.60, w: 2.55, h: 0.50, fontFace: SANS, fontSize: 9, italic: true, color: MUTED, margin: 0 });
+    s.addText(detail, { x: MX+2.95, y: y+0.08, w: 9.0,  h: 1.01, fontFace: SANS, fontSize: 10, color: TEXT, valign: "middle", margin: 0 });
+    y += 1.25;
+  }
+  foot(s, "CHANGELOG.md [Unreleased] carries the ignore-default measurement and its ledger in bench/PROFILE.md \u00b7 the sampler negative is docs/EVALS.md \u00a77, published as a counterexample against our own published numbers");
 }
 
 /* ── S6 · head-to-head, round 4 ─────────────────────────────────────────── */
@@ -547,11 +573,11 @@ function row(s, y, h, cols, opts={}){
 /* ── S7c · the ten moments ──────────────────────────────────────────────── */
 {
   const s = p.addSlide(); bg(s);
-  kicker(s, "// re-measured on this repository, 2026-08-08 — run any row yourself", CYAN);
+  kicker(s, "// docs/EVALS.md §5, pinned on this repository 2026-08-08 (the --for row re-pinned 2026-08-22)", CYAN);
   title(s, "Ten everyday moments, and what each one costs", { size: 32 });
   const moments = [
     ["Orient me in this repo",                 "ripwire .",                    "~5.6K",   "~20K–25K",    "3.6×–4.5×"],
-    ["Where is X handled?",                    "--for=\"…\"",                  "~1.9K",   "~4.9K–20K",   "2.6×–10.7×"],
+    ["Where is X handled?",                    "--for=\"…\"",                  "~2.1K",   "~4.9K–20K",   "2.3×–9.3×"],
     ["What do I already know?",                "--recall=\"…\"",               "~15K",    "~445K",       "29.2×"],
     ["Set me up for this task",                "--pack-task=\"…\"",            "~2.1K",   "~16K–80K",    "7.7×–37.7×"],
     ["Show me this one function",              "--expand=SYM --top-k=0",       "~260–16.5K", "~43K–174K", "2.6×–670×"],
@@ -582,8 +608,8 @@ function row(s, y, h, cols, opts={}){
   s.addText([
     { text: "Figures are ~tokens (≈ bytes/4). Every row is scored same-correct-answer-or-it-doesn't-count — both sides were checked, not assumed — and every ratio is a ", options: { color: MUTED } },
     { text: "range", options: { color: TEXT, bold: true } },
-    { text: ": the cheap end and the honest end of what an agent would actually read, never the single most flattering number.", options: { color: MUTED } },
-  ], { x: MX, y: 6.78, w: 12.09, h: 0.5, fontFace: SANS, fontSize: 10, margin: 0 });
+    { text: ": the cheap end and the honest end of what an agent would actually read, never the single most flattering number. Absolute counts belong to the corpus AT THE PIN — .gitignore became a crawl default on 2026-09-03, which moved what a re-run reads; the commands, not the constants, are what reproduces.", options: { color: MUTED } },
+  ], { x: MX, y: 6.78, w: 12.09, h: 0.62, fontFace: SANS, fontSize: 10, margin: 0 });
 }
 
 /* ── S8 · token economy ─────────────────────────────────────────────────── */
@@ -592,21 +618,21 @@ function row(s, y, h, cols, opts={}){
   kicker(s, "// the cost lever", CYAN);
   title(s, "Smaller answers that are also better answers");
   card(s, MX, 1.95, 5.9, 2.5);
-  stat(s, "81.4%", "fewer element bytes at top-50 — the --pack-signatures ladder,\nroot-neutralised, re-derived on this repo every run", MX+0.2, 2.25, 5.5, CYAN, { bsize: 52, lsize: 12 });
+  stat(s, "74.7%", "fewer element bytes at top-50 — the --pack-signatures ladder,\nroot-neutralised, re-derived on this repo every run", MX+0.2, 2.25, 5.5, CYAN, { bsize: 52, lsize: 12 });
   card(s, MX, 4.65, 5.9, 1.9);
   s.addText("This figure survived its own audit: three corrections deep, re-derived root-neutrally after the original was shown to depend on how the corpus path was spelled — three spellings of one root read 18.6 points apart before that subtraction. top-50 is the quotable number because the payload is top-50 whatever --top-k says.",
     { x: MX+0.25, y: 4.85, w: 5.4, h: 1.55, fontFace: SANS, fontSize: 12.5, color: MUTED, margin: 0 });
   card(s, 7.25, 1.95, 5.35, 2.5);
   s.addText("Ask for a symbol by NAME and the router uses the name-exact ranker:", { x: 7.5, y: 2.15, w: 4.9, h: 0.6, fontFace: SANS, fontSize: 13, bold: true, color: TEXT, margin: 0 });
   s.addText([
-    { text: "MRR  0.797 → 0.990\n", options: { color: GREEN, bold: true } },
-    { text: "recall@1  70.0% → 98.0%\n", options: { color: GREEN, bold: true } },
-    { text: "name-shaped queries on src/, held-out labels, re-derived 2026-08-08", options: { color: MUTED } },
+    { text: "MRR  0.745 → 0.960\n", options: { color: GREEN, bold: true } },
+    { text: "recall@1  61.1% → 91.3%\n", options: { color: GREEN, bold: true } },
+    { text: "name-shaped queries on src/, all 3,011 doc-commented symbols scored, re-pinned 2026-09-05", options: { color: MUTED } },
   ], { x: 7.5, y: 2.8, w: 4.9, h: 1.5, fontFace: MONO, fontSize: 14, margin: 0 });
   card(s, 7.25, 4.65, 5.35, 1.9);
   s.addText("And the pollution metric — fixture and generated paths contaminating results — is driven to 0.0% on the ranking lane while recall went UP, not down.",
     { x: 7.5, y: 4.85, w: 4.9, h: 1.55, fontFace: SANS, fontSize: 12.5, color: MUTED, margin: 0 });
-  foot(s, "docs/EVALS.md §4–§5 — showcasecapturecheck re-derives the byte-reduction triple; recallevalcheck pins the ranking bars");
+  foot(s, "docs/EVALS.md §4–§5 — showcasecapturecheck re-derives the byte-reduction triple; `ripwire src --eval-retrieval` re-derives the ranking bars, scoring every doc-commented symbol rather than a sample");
 }
 
 /* ── S9 · the tripwire ──────────────────────────────────────────────────── */
@@ -637,7 +663,7 @@ function row(s, y, h, cols, opts={}){
   card(s, 8.5, 5.25, 4.1, 1.45);
   s.addText([
     { text: "The map grades itself before it answers. ", options: { color: TEXT, bold: true } },
-    { text: "This repository's own src/: files=116 symbols=4204 edges=11727 ambiguous=5469 unresolved=1295.", options: { color: MUTED, fontFace: MONO } },
+    { text: "This repository's own src/: files=153 symbols=5122 edges=14182 ambiguous=5982 unresolved=1598.", options: { color: MUTED, fontFace: MONO } },
   ], { x: 8.68, y: 5.36, w: 3.8, h: 1.24, fontFace: SANS, fontSize: 10, margin: 0 });
   foot(s, "docs/EVALS.md §8 lists the numbers this project refuses to publish, each with its reason");
 }
@@ -682,7 +708,7 @@ function row(s, y, h, cols, opts={}){
   kicker(s, "// how it stays true", AMBER);
   title(s, "Proven, not promised");
   const cards = [
-    ["451 gate scripts", "the suite runs on every push — plus determinism, cache-transparency and golden contracts; the gate count itself is gated against the runner's own loop"],
+    ["542 gate scripts", "the suite runs on every push — plus determinism, cache-transparency and golden contracts; the gate count itself is gated against the runner's own loop"],
     ["byte-identical, always", "two runs over the same tree produce the same bytes; warm equals cold. Enforced in CI, twice — Release AND a plain flavour, because NDEBUG once blinded a whole class of checks"],
     ["differential refactoring", "a refactor must prove it changed nothing observable: two binaries, hundreds of argv vectors, stdout + stderr + exit codes byte-identical"],
     ["held-out labels, authored blind", "eval labels were written by reading source before the ranker ever ran on them — so the eval is allowed to say the ranker is wrong. It has."],
@@ -706,7 +732,7 @@ function row(s, y, h, cols, opts={}){
   title(s, "Claims you can trust, because we publish what failed", { size: 32 });
 
   card(s, MX, 1.72, 3.86, 1.72);
-  stat(s, "451", "gate scripts named by test/regression.sh — and the COUNT itself is gated against the runner's own loop, so it cannot go stale quietly",
+  stat(s, "542", "gate scripts named by test/regression.sh — and the COUNT itself is gated against the runner's own loop, so it cannot go stale quietly",
     MX+0.15, 1.86, 3.56, CYAN, { bsize: 42, bh: 0.66, lsize: 9.5 });
   card(s, 4.68, 1.72, 3.86, 1.72, CARD2);
   stat(s, "8", "registered NEGATIVES — changes built, gated green, measured against a band written before the code, and reverted rather than tuned",
@@ -832,7 +858,7 @@ function row(s, y, h, cols, opts={}){
   s.addText("claude · cursor · codex · windsurf · gemini · aider — or --all to detect every one you have installed",
     { x: 5.2, y: 1.95, w: 7.4, h: 0.55, fontFace: SANS, fontSize: 12, color: MUTED, valign: "middle", margin: 0 });
   const cards = [
-    ["30 MCP verbs", "15 read verbs mirroring the CLI, 12 flagship reflexes (impact, uses, edit_check, from_trace, connect …), 3 span-addressed edit verbs with a safety contract"],
+    ["31 MCP verbs", "16 read verbs mirroring the CLI, 12 flagship reflexes (impact, uses, edit_check, from_trace, connect …), 3 span-addressed edit verbs with a safety contract"],
     ["lazy-body handles", "read verbs return signatures and a stable handle; the agent fetches a body only when it decides it needs one — names by default, bytes on request"],
     ["18 agent skills", "moment-matched workflows (orient, navigate, change-check, quality-bar …) — wrap prints the recipe, skills/install.sh installs them"],
     ["11 orchestrator loops", "copy-paste prompts in prompts/: run the same audit, eval and head-to-head machinery that built this tool, on your own repository"],
@@ -853,14 +879,52 @@ function row(s, y, h, cols, opts={}){
   foot(s, "the MCP server exposes the same deterministic engine — one index, shared with the CLI, staleness-checked");
 }
 
+/* ── S12ab · the edit loop ──────────────────────────────────────────────── */
+{
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// it does not only read", CYAN);
+  title(s, "Span-addressed edits: the map writes back", { size: 32 });
+
+  card(s, MX, 1.68, 6.1, 2.42);
+  s.addText("Three verbs, one resolved span", { x: MX+0.2, y: 1.80, w: 5.7, h: 0.34, fontFace: SANS, fontSize: 14, bold: true, color: CYAN, margin: 0 });
+  s.addText([
+    { text: "--replace-symbol-body=TARGET\n--insert-before-symbol=TARGET\n--insert-after-symbol=TARGET\n", options: { color: TEXT } },
+    { text: "  --edit-payload=FILE|-", options: { color: MUTED } },
+  ], { x: MX+0.2, y: 2.18, w: 5.7, h: 1.1, fontFace: MONO, fontSize: 11.5, margin: 0 });
+  s.addText("TARGET is a name, an @FILE:LINE seed — paste the location out of a diff hunk or a compiler error and it binds the innermost enclosing definition — or a freshness-pinned handle from --grep --handles. No line numbers to keep in your head, and no whole-file rewrite.",
+    { x: MX+0.2, y: 3.24, w: 5.7, h: 0.78, fontFace: SANS, fontSize: 10.5, color: MUTED, margin: 0 });
+
+  card(s, 7.0, 1.68, 5.62, 2.42, CARD2);
+  s.addText("The refusals are the feature", { x: 7.2, y: 1.80, w: 5.22, h: 0.34, fontFace: SANS, fontSize: 14, bold: true, color: AMBER, margin: 0 });
+  s.addText("Freshness hash, lock, a re-check immediately before the rename, fsync, mode preserved, atomic rename. A target that resolves to more than one definition refuses. An empty payload refuses rather than being read as a deletion. Every refusal leaves the file byte-identical, and every success prints a JSON receipt whose span is the POST-EDIT byte range — where the payload now sits, not where it was aimed.",
+    { x: 7.2, y: 2.18, w: 5.22, h: 1.84, fontFace: SANS, fontSize: 10.5, color: MUTED, margin: 0 });
+
+  card(s, MX, 4.26, 6.1, 1.92);
+  s.addText("Preview the bytes before they exist", { x: MX+0.2, y: 4.38, w: 5.7, h: 0.34, fontFace: SANS, fontSize: 14, bold: true, color: GREEN, margin: 0 });
+  s.addText("--edit-check=SYM --edit-payload=- --dry-run splices the payload over the span IN MEMORY, re-parses that one file, rebuilds the call graph over the re-derived tree, and answers the contract question about bytes nobody has written: did the signature change, and which callers does it break? Preview, then apply — no Read of the file in between.",
+    { x: MX+0.2, y: 4.76, w: 5.7, h: 1.3, fontFace: SANS, fontSize: 10.5, color: MUTED, margin: 0 });
+
+  card(s, 7.0, 4.26, 5.62, 1.92);
+  s.addText("Several edits, one transaction", { x: 7.2, y: 4.38, w: 5.22, h: 0.34, fontFace: SANS, fontSize: 14, bold: true, color: CYAN, margin: 0 });
+  s.addText("--edit-plan=FILE is a versioned JSON multi-edit plan and its mode is EXPLICIT: exactly one of --dry-run or --apply, and neither is not a default. Every target, payload and span is preflighted before any write; overlapping edits refuse; payload paths are confined to the plan's own directory, so an absolute path or a '..' escape refuses and names what it resolved to.",
+    { x: 7.2, y: 4.76, w: 5.22, h: 1.3, fontFace: SANS, fontSize: 10.5, color: MUTED, margin: 0 });
+
+  card(s, MX, 6.32, 12.09, 0.62, CARD2);
+  s.addText([
+    { text: "Same engine on both seats: ", options: { color: TEXT, bold: true } },
+    { text: "the three MCP edit verbs are these three flags, and the navigation the deck has no room for is the same story — --graph-query, --whereis, --stray-content, --at, --arch, --owners, --export, --help-task all sit in docs/COMMANDS.md with a recorded invocation and its output.", options: { color: MUTED } },
+  ], { x: MX+0.25, y: 6.41, w: 11.6, h: 0.46, fontFace: SANS, fontSize: 11, valign: "middle", margin: 0 });
+  foot(s, "every claim on this slide is stated by `ripwire --help` and captured in docs/COMMANDS.md — test/deckcheck.sh proves each flag named here exists in the shipped binary");
+}
+
 /* ── S12b · the research inside ─────────────────────────────────────────── */
 {
   const s = p.addSlide(); bg(s);
   kicker(s, "// standing on giants", AMBER);
   title(s, "The research inside — classic and current");
   s.addText([
-    { text: "34 repositories + 54 papers folded", options: { color: TEXT, bold: true } },
-    { text: "  ·  and a labelled survey of 221 tools that contributed nothing, which says so — every row with the lesson taken and where it lives: docs/LINEAGE.md", options: { color: MUTED } },
+    { text: "36 repositories + 67 papers folded", options: { color: TEXT, bold: true } },
+    { text: "  ·  and a labelled survey of 231 tools that contributed nothing, which says so — every row with the lesson taken and where it lives: docs/LINEAGE.md", options: { color: MUTED } },
   ], { x: MX, y: 1.58, w: 12.0, h: 0.34, fontFace: SANS, fontSize: 13, margin: 0 });
   const classics = [
     ["1976", "Cyclomatic complexity — McCabe", "the metric behind --hotspots"],
@@ -904,11 +968,11 @@ function row(s, y, h, cols, opts={}){
   kicker(s, "// do not take any of it on trust", AMBER);
   title(s, "Every claim, and the command that re-derives it");
   const claims = [
-    ["179 long flags · 27 slides",        "bash test/deckclaimcheck.sh"],
+    ["179 long flags · 29 slides",        "bash test/deckclaimcheck.sh"],
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
-    ["81.4% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
-    ["451 gate scripts",                  "bash test/manifestcheck.sh"],
-    ["34 repos · 54 papers · 221 surveyed","bash test/readmedriftcheck.sh"],
+    ["74.7% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
+    ["542 gate scripts",                  "bash test/manifestcheck.sh"],
+    ["36 repos · 67 papers · 231 surveyed","bash test/readmedriftcheck.sh"],
     ["the ten moments, any row",          "ripwire . --callers=SYM | wc -c"],
     ["the head-to-head table",            "bench/headtohead/r4-2026-08-06/"],
     ["the oracle round",                  "bench/headtohead/r9-2026-08-09/RESULTS.md"],
