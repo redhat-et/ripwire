@@ -102,3 +102,4 @@
 --ignored	git's own ls-files option, same quoted command — not a ripwire flag
 --exclude-standard	git's own ls-files option, same quoted command — not a ripwire flag
 --directory	git's own ls-files option, same quoted command — not a ripwire flag
+--lane	bench/recalleval/run_recalleval.py's own flag ("--lane recall|ranking|both", which labelled query set to score) quoted in docs/EVALS.md's term-margin pre-registration — not a ripwire flag (the --bin/--repo precedent)

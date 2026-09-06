@@ -11342,3 +11342,242 @@ outcomes:
 the most — and when the only join it can find explains nothing, it says so instead of naming it
 confidently."* C2 and C7 are how the first half can be false; C1's arms (D)/(E)/(F) and C8 are how the
 second half can be.
+
+## Corpus-statistics term margin — SIRA transfer, PRE-REGISTERED 2026-09-05 (before any feature code)
+
+**What this registers.** One mechanism, one instrument, one band, and one prediction — written before
+the implementation exists and after the gate that measures it (`test/termmargincheck.sh`, committed
+red at `d0b7ce4`).
+
+**The idea, and the half of it that is deliberately not ported.** SIRA (arXiv 2605.06647) reframes
+query-term weighting: do not weight a term by how *relevant* it looks, weight it by whether it
+**separates** the target from corpus-level confusers. Its pipeline discards terms that are absent from
+the corpus, overly common, or unlikely to create retrieval margin, then makes a single weighted BM25
+call over the survivors. Its LLM-based vocabulary-enrichment step is **out of scope and is not
+replicated** — there is no runtime ML in this tool and there will not be. What transfers is the
+corpus-statistics filter, which is pure IDF-margin arithmetic over the index ripwire already builds.
+
+**Why this repository is a plausible host for it.** The conceptual ranker (`lexicalScoresTiered`,
+`src/lexical.h`) has **no query-side stopword list at all** — `--for="how does the csrf token get
+validated on an incoming request"` scores `how`, `does`, `the`, `on` and `an` as query terms with
+whatever mass the corpus gives them. A stopword list would be a hardcoded, language-specific,
+English-only wart; a corpus-statistics margin test is the same idea derived from the corpus in front
+of it, and it generalizes to a Rust tree's `let`, `mut`, `self` without anybody writing them down.
+
+### The rule, stated so it can be wrong
+
+Per unique query term `u`, with `S` = corpus symbol count, `df_u` = symbols whose weighted tf of `u`
+is nonzero, and `nameDf_u` = symbols whose **NAME field alone** carries `u`:
+
+```
+separatesDoc( u )  :=  2 * df_u      <= S           # idf_u >= ln 2  — the term carries >= one bit
+separatesName( u ) :=  nameDf_u > 0  &&  2 * nameDf_u <= S
+suppress( u )      :=  df_u > 0  &&  !separatesDoc( u )  &&  !separatesName( u )
+                       AND at least one PRESENT, non-suppressed term remains   # the sole-anchor guard
+```
+
+A suppressed term's contribution is skipped in both scoring branches; `dl` is untouched (the same
+posture the R3 variant guard already takes — evidence vanishes, document length does not). Terms are
+kept or dropped, never fractionally weighted, so a kept term's arithmetic is **bit-identical** to the
+unfiltered scorer and the MaxScore impact bound stays exactly the bound it was.
+
+**The threshold is derived, not tuned.** At `df = S/2`, BM25's own `idf = ln( (S-n+0.5)/(n+0.5) + 1 )`
+evaluates to exactly **ln 2**: the term carries one bit — observing it halves the candidate space.
+Above `S/2` it carries less than a bit. That is the whole of the constant. It is an exact integer
+comparison (`2*df > S`), so it is deterministic and corpus-relative, and there is no knob to move.
+
+**Three properties are structural, not asserted.** Suppression is a pure function of `df` and
+`nameDf`, both integers accumulated in fixed doc order → deterministic, and identical on the scan and
+persisted-stats branches → postings parity and the cache format are untouched. A suppressed term's
+impact cap is zero and a kept term's is unchanged, so pruned and exhaustive scoring stay
+byte-identical to each other. And `nameDf` is measured in pass 1, before the pass-2 branch split.
+
+### The prior this round is arguing with, stated first
+
+This repository has **rejected three rounds in this exact family** and the rejections are the reason
+the rule has the shape above:
+
+- **LB-1 filler-strip + IDF floor (§7), rejected.** The floor "dropped a truth's *own* name carrier
+  (`module`, for `DeterministicModuleIdsPlugin`) and flipped a current hit to a miss." That floor was
+  a threshold on `idf` **alone**. `separatesName` exists precisely because of it: a term that names
+  between 1 and `S/2` symbols is kept no matter what its document frequency says, so **the recorded
+  LB-1 casualty is provably outside this rule's suppression set** — a claim this round must check
+  against the measured `nameDf`, not assert.
+- **Un-guarded query stemming, and the IDF-guarded retry (§7), both rejected.** Their standing lesson,
+  quoted in `kDensityFloor`'s own derivation: *"Evidence is reduced, never deleted — the recorded
+  lesson of the filler-strip and IDF-floor negatives, both of which removed query evidence and cut
+  both ways."* **This round deletes.** That is a deliberate disagreement with the recorded lesson, on
+  the ground that the prior deletions had no name-field test and no sole-anchor guard, and it is
+  registered here as the round's main exposure rather than discovered in the result. If this round is
+  rejected, the recorded third-attempt condition (*"variants contribute at REDUCED weight — attack the
+  margin mechanism, not the frequency mechanism"*) is the retry shape, and it needs its own
+  registration.
+
+### Instruments and baselines, measured on the unmodified binary at `d0b7ce4`
+
+**Primary — the external-corpus retrieval slice** (`bench/recalleval/run_extcorpus.py`, django and
+webpack at the `extcorpus.lock` pins, both verified against commit **and** tree hash before scoring).
+It is primary because its 54 labels are natural-language task questions ("how does tree shaking mark
+exports as unused"), which is the query shape the mechanism is about, on corpora big enough
+(`S = 30,429` webpack / `S = 47,699` django) for corpus statistics to mean something:
+
+| Bucket | n | strict r@1 | strict r@5 | strict r@10 | strict MRR |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `diagnostic-class` | 14 | 21.4% | 50.0% | 57.1% | 0.332 |
+| `thin-registration` | 14 | 42.9% | 50.0% | 64.3% | 0.486 |
+| `subsystem-directory` | 14 | 7.1% | 28.6% | 50.0% | 0.159 |
+| `vendored-asset` | 12 | 16.7% | 58.3% | 58.3% | 0.336 |
+
+Every row reproduces the baseline recorded for the density round to the digit, on a corpus pinned by
+tree hash — so this is the same instrument reading the same numbers, not a re-baseline.
+
+**Secondary — the frozen in-tree ranking lane** (`run_recalleval.py --lane ranking`, `snapshot.srcpack`
+at commit `7a3194b`, n = 32, skipped = 0): strict r@1 **53.1%**, r@5 **68.8%**, MRR **0.601**; lenient
+56.2 / 71.9 / 0.639; pollution@5 0.0%.
+
+**Guard — known-item retrieval** (`--eval-retrieval`, exhaustive over all 3,497 doc-commented symbols
+under the sampler corrected at `1f283e4a`; the rows the filter can touch are the ones that run through
+`lexicalScoresTiered`):
+
+| ranker | query-mode | MRR | r@1 | r@5 | r@10 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| subtoken | name | 0.724 | 59.3% | 88.9% | 93.4% |
+| subtoken | doc-phrase | 0.930 | 90.8% | 95.2% | 95.9% |
+| anchored | name | 0.726 | 60.5% | 87.6% | 92.1% |
+| anchored | doc-phrase | 0.925 | 90.0% | 94.9% | 95.8% |
+| routed | doc-phrase | 0.929 | 90.8% | 95.1% | 95.7% |
+
+### The band
+
+**ACCEPT** requires all three, and a default flip remains the owner's call, not this lane's:
+
+1. **Primary:** net **≥ +2** flipped rows in strict recall@5 over the 54-row external slice, with
+   **ZERO** rows flipped hit → miss. The no-flip clause is not this round's invention — it is the
+   condition the LB-3 round's own rejection recorded for any successor.
+2. **Secondary:** the in-tree ranking lane's strict MRR does not fall by more than **0.005**.
+3. **Guard:** neither `subtoken` row of `--eval-retrieval` falls by more than **0.005** MRR.
+
+**REJECT** otherwise — explicitly including the case where nothing moves at all.
+
+### The prediction, registered before the measurement: INERT
+
+`df > S/2` means a term present in more than **15,214** of webpack's symbols or **23,849** of django's,
+counting every one-line arrow function and every tiny helper. On prose corpora — SIRA's population —
+words like *the* and *how* clear that bar easily. On a code corpus the document population is far more
+numerous and far more lexically diverse, and the prediction here is that **no query term on the slice
+trips the bar, the filter suppresses nothing, and the measured result is exactly 0 flipped rows.**
+
+That prediction is registered so it can be wrong in both directions. If it holds, the finding is not
+"the constant was too strict" — it is **that a faithful transfer of SIRA's filter, with its threshold
+derived from BM25's own arithmetic rather than fitted to the slice, does not fire on real code**, and
+re-cutting the threshold after seeing that is exactly the move pre-registration exists to forbid.
+
+**The ladder, declared now so it cannot be chosen later.** The one-bit criterion generalizes: a term
+separates iff `idf_u >= k * ln 2`. `RIPWIRE_TERMMARGIN_BITS=k` (calibration only, the same posture as
+`RIPWIRE_PATHTOK_W`) exposes `k = 1` (the rule, `df ≈ S/2`), `k = 2` (`df ≈ S/4`) and `k = 3`
+(`df ≈ S/8`). **All three rungs will be reported. Only `k = 1` is eligible to ship in this round.**
+Selecting a rung after seeing the slice is tuning; a rung other than 1 would need its own registration
+against an instrument this round has not touched. No rung will be added to the ladder after this line.
+
+**NEGATIVE consequence, pre-committed.** A miss on any of the three conditions ships the gate, the
+fixture and the registration, records the negative under this heading, and leaves the arm env-gated
+and off by default — which is where it starts, so the flagless map, `--for`, and every other verb are
+byte-identical either way (arm (e) of `test/termmargincheck.sh` asserts exactly that).
+
+### RESULT — measured at `d7a2a04`, against the band registered above: **REJECT**, and the prediction held
+
+**The census, which is the finding.** Every one of the 54 external-slice labels was re-run with the arm
+on and the decision trace read back, at all three declared rungs: **476 query-term decisions per rung**
+(1,428 in total), on django (`S = 47,699`) and webpack (`S = 30,429`).
+
+| rung | df cut | terms suppressed | saved by `separatesName` | terms failing the doc test |
+| --- | ---: | ---: | ---: | ---: |
+| **`k = 1` (the rule)** | ≈ `S/2` | **0 of 476** | 0 | **0** |
+| `k = 2` (ladder, not eligible) | ≈ `S/4` | 1 of 476 | 12 | 13 |
+| `k = 3` (ladder, not eligible) | ≈ `S/8` | 1 of 476 | 85 | 86 |
+
+At the derived one-bit threshold **the filter suppresses nothing at all**. The densest query term in the
+whole slice is `test` on django at **22,308 / 47,699 = 46.8%** — under the bar. The next densest are
+`with` at 25.3%, `is` at 23.4%, and `the` at 22.2% on django and 26.1% on webpack. A code corpus's
+document population is numerous and lexically diverse enough that even an English article does not reach
+half of it, and the interrogatives the mechanism was aimed at are nowhere near: `how` is
+**270 / 30,429 = 0.9%** on webpack.
+
+**The three registered conditions.**
+
+| # | Condition | Measured | |
+| --- | --- | --- | --- |
+| 1 | primary: net **≥ +2** flipped rows, zero hit → miss | **0 flipped rows** — the whole 54-row report is **byte-identical** to the disarmed run at every rung | **MISS** |
+| 2 | in-tree ranking lane strict MRR within 0.005 | byte-identical: 0.601 → 0.601, Δ **0.000** | met |
+| 3 | `--eval-retrieval` subtoken rows within 0.005 MRR | byte-identical: name 0.724, doc-phrase 0.930, Δ **0.000** | met |
+
+**Verdict: REJECT on condition 1.** The arm stays env-gated and off; nothing about a flagless run, `--for`,
+`--recall` or any other verb moves. There is no tuning step after this line, and the threshold is not
+re-cut: the pre-registration named exactly this outcome and named re-cutting as the move it forbids.
+
+**What the negative actually says.** Not "the constant was too strict" — the constant is `idf ≥ ln 2`,
+which is the definition of a term carrying one bit, and it is the same constant on any corpus. The
+finding is that **SIRA's filter is a prose-corpus mechanism, and a code corpus does not have the term
+distribution it needs.** On the document populations SIRA measures over, function words saturate; over
+30,000–48,000 code symbols they do not come close, because the symbol population is an order of
+magnitude larger and every symbol carries its own identifier vocabulary. Query-term dilution on this
+ranker is real — the r7 round measured natural-language queries at 4/22 — but it is **not** a
+*saturation* phenomenon, and a saturation test cannot reach it. That is a genuine narrowing of the
+search space and it is the round's contribution.
+
+**The LB-1 claim, CHECKED rather than asserted.** The registration promised to check, not assert, that
+this rule's suppression set excludes the recorded LB-1 casualty. Measured: `module` on webpack sits at
+**df = 5,514 / 30,429 (18.1%), nameDf = 1,132**. At `k = 1` and `k = 2` it is kept by the doc test; at
+`k = 3` — the first rung aggressive enough to reach it — it fails the doc test and is **kept by
+`separatesName`, exactly the guard written for it**. A df-only floor of the LB-1 shape at that rung
+would have deleted **86 of 476** query terms; **85 of the 86 are name carriers**, `module` among them.
+The name-field test is therefore doing the work it was designed for, on the specific casualty that
+killed the earlier round — measured, on the corpus where it happened.
+
+**One measured defect in the rule, recorded for any successor.** `separatesName`'s lower bound is
+`nameDf > 0`, and that is far too permissive. At `k = 3` it keeps `the` on django on the strength of
+**29 name carriers out of 47,699 symbols** — a claim to separation three orders of magnitude thinner
+than `module`'s 1,132, treated identically. Any retry must give the name field a real lower bound
+(a share of `S`, or the `routeCarrierCap` the LB-2 anchor machinery already computes), not a test for
+non-emptiness. Combined with the third-attempt condition the LB-3 round recorded — *contribute at
+REDUCED weight; attack the margin mechanism, not the frequency mechanism* — that is the shape of a
+fourth attempt, and it needs its own registration and its own never-tuned instrument.
+
+**Where this sits in the family, and one caution about the instrument.** This is the **fourth**
+rejection in the query-evidence family — after LB-1's filler-strip + IDF floor, un-guarded query
+stemming, and the IDF-guarded retry. The standing lesson those three recorded, that a *reduced-weight*
+term rather than a dropped one is the only shape with an unexhausted path, survives this round
+completely untouched: this round dropped terms, so it never tested the lesson. And four rounds have now
+failed to move the 54-row external slice. That is evidence about the slice's sensitivity as much as
+about the mechanisms, and a successor should bring an instrument this family has not already spent.
+
+**What ships from this lane:** `test/termmargincheck.sh` (21 arms, ten of them red before the code
+existed), the fixture, this registration and this negative. The implementation stays in tree,
+env-gated, byte-inert off — the same disposition the R3 stemming machinery has, and for the same
+reason: the mechanism is correct and gated, and the corpus is what declines it.
+
+#### Re-measured after the rebase onto `5884ba01` — verdict unchanged
+
+The tables above are stamped with the commits they were taken at (`d0b7ce4`, `d7a2a04`) and are left
+as measured; rewriting a stamped table would falsify its provenance. This is the re-measurement on the
+rebased base, which carries the corrected exhaustive sampler:
+
+`population=3521 scored=3521 rule=exhaustive (every qualifying symbol; path- and order-independent)`
+
+| ranker | query-mode | MRR | r@1 | armed vs disarmed |
+| --- | --- | ---: | ---: | --- |
+| subtoken | name | 0.723 | 59.2% | byte-identical |
+| subtoken | doc-phrase | 0.930 | 90.8% | byte-identical |
+| name-exact | name | 0.922 | 85.5% | byte-identical |
+| routed | doc-phrase | 0.929 | 90.8% | byte-identical |
+
+The absolute level drifted by 0.001 on `subtoken/name` (0.724 → 0.723) with the population moving
+3,499 → 3,521; **condition 3's Δ is still exactly 0.000**, because it is a *paired* comparison of the
+same binary against the same corpus.
+
+**That is the design point worth carrying, not the number.** A band written on an absolute level would
+have had to be re-derived after a rebase that changed nothing about the mechanism; a band written on a
+paired delta is immune to any population shift that moves both arms together. Register bands on paired
+deltas wherever the question allows it, and on absolute levels only where it does not. The primary
+condition here is likewise insulated for a different reason — django and webpack are pinned by commit
+*and* tree hash, so this repository's own churn cannot reach them.
