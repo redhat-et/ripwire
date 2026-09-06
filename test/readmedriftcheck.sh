@@ -35,8 +35,8 @@
 #       control, exactly as (C) is (B)'s, and E6/E7 carry their own.
 #
 # WHY E6-E8 EXIST. A count can be arithmetically correct and still be a lie about a SET. LINEAGE.md
-# claims its folded tables and its surveyed table are DISJOINT — that is what makes "27 folded plus
-# 220 surveyed" an addition rather than a subset relation, and it is the whole justification for
+# claims its folded tables and its surveyed table are DISJOINT — that is what makes "36 folded plus
+# 231 surveyed" an addition rather than a subset relation, and it is the whole justification for
 # printing both numbers in one sentence. Nothing checked it, and it was false in four places at once
 # (Aider, Cody and octocode were folded rows repeated in the survey; RepoGraph was a §2 paper row
 # repeated there too). E7's failure mode is cheaper still: `comby` was listed in two different
@@ -222,6 +222,44 @@ elif [ "$bad_repos" = "$d_folded" ]; then
 else
     ok "(E4) mutation control: a fabricated repository count ($bad_repos) is correctly seen as disagreeing with the derived count ($d_folded)"
 fi
+
+# (E10) LINEAGE's DISJOINTNESS SENTENCE must carry the same numbers as its own header.
+# E5 checks the header. Nothing checked the sentence two lines below it that EXPLAINS the header --
+# and it had drifted a full round behind: the header read 36 repositories / 231 tools while the
+# sentence still said "34 folded plus 222 surveyed -- not 34 picked out of 222". The gate's OWN
+# header comment was a round older again at "27 folded plus 220 surveyed". Prose that illustrates a
+# derived number is itself a claim about that number, and an unchecked illustration drifts exactly
+# like an unchecked headline -- it just looks like commentary, which is why nobody re-derives it.
+disj="$( grep -oE 'field study [0-9]+ folded \*plus\* [0-9]+ surveyed' "$LINEAGE" | head -1 )"
+dj_folded="$( printf '%s' "$disj" | grep -oE '[0-9]+ folded' | grep -oE '^[0-9]+' )"
+dj_surveyed="$( printf '%s' "$disj" | grep -oE '[0-9]+ surveyed' | grep -oE '^[0-9]+' )"
+if [ -z "$dj_folded" ] || [ -z "$dj_surveyed" ]; then
+    no "(E10) docs/LINEAGE.md has no 'field study N folded plus M surveyed' sentence to check"
+elif [ "$dj_folded" = "$d_folded" ] && [ "$dj_surveyed" = "$d_surveyed" ]; then
+    ok "(E10) LINEAGE's disjointness sentence ($dj_folded folded + $dj_surveyed surveyed) matches its own tables"
+else
+    no "(E10) LINEAGE's disjointness sentence says $dj_folded folded + $dj_surveyed surveyed, but its tables enumerate $d_folded + $d_surveyed"
+fi
+# (E10-control) MUTATE A REAL COPY and re-run the identical extraction over it. An earlier draft of
+# this control compared d_folded+9 against d_folded -- arithmetic that is true by construction and
+# exercises none of the parsing above. That is the vacuous-control shape this suite has now been bitten
+# by three times: the control must fail when the thing it guards is broken, which means it has to run
+# the SAME extraction over deliberately wrong INPUT, not over a fabricated number.
+dj_tmp="$( mktemp -t readmedrift_e10.XXXXXX )"
+dj_bad=$(( d_folded + 9 ))
+sed -E "s/field study ${d_folded} folded \*plus\* ${d_surveyed} surveyed/field study ${dj_bad} folded *plus* ${d_surveyed} surveyed/" "$LINEAGE" > "$dj_tmp"
+if ! grep -qE "field study ${dj_bad} folded" "$dj_tmp"; then
+    no "(E10) mutation control did not take -- the injection found no sentence to corrupt, so it proves nothing"
+else
+    m_disj="$( grep -oE 'field study [0-9]+ folded \*plus\* [0-9]+ surveyed' "$dj_tmp" | head -1 )"
+    m_folded="$( printf '%s' "$m_disj" | grep -oE '[0-9]+ folded' | grep -oE '^[0-9]+' )"
+    if [ "$m_folded" = "$d_folded" ]; then
+        no "(E10) mutation control is inert: the extraction still reads $m_folded from a corrupted copy"
+    else
+        ok "(E10) mutation control: the same extraction reads $m_folded from a corrupted LINEAGE and is seen to disagree with the derived $d_folded"
+    fi
+fi
+rm -f "$dj_tmp"
 
 # (E5) docs/LINEAGE.md's own header prose must equal its own tables
 set -- $( counts_from "$LINEAGE" )

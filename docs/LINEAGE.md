@@ -24,8 +24,8 @@ was read and applied, not that any of its text or code is here.
 **The counts, derived from the tables below:** **36 repositories** and **67 papers** are folded, and
 a labelled survey of **231 tools** contributed nothing and says so. **The two sets are disjoint by
 construction, so they add rather than nest:** a tool that contributed a lesson gets a row in §3a and
-is never repeated in §3b, which makes the field study 34 folded *plus* 222 surveyed — not 34 picked
-out of 222. `test/readmedriftcheck.sh` re-derives all three numbers from these tables on every run,
+is never repeated in §3b, which makes the field study 36 folded *plus* 231 surveyed — not 36 picked
+out of 231. `test/readmedriftcheck.sh` re-derives all three numbers from these tables on every run,
 fails if the README's sentence disagrees, and proves the disjointness itself (arm E6) rather than
 taking this paragraph's word for it.
 
