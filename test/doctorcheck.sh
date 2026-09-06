@@ -72,9 +72,17 @@ echo "happy-path output:"; echo "$OUT"; echo "(exit=$RC)"; echo
 
 [ "$RC" -eq 0 ] && ok "happy path exits 0" || no "happy path exit code was $RC, expected 0"
 
-echo "$OUT" | grep -q '<doctor checks="6"' && ok "checks=\"6\"" || no "missing checks=\"6\""
+# checks= is DERIVED from the rows the run actually emitted, not pinned at a literal: the literal was 6,
+# then 7 when the index-cache row landed, and a pinned count only ever measures how recently someone edited
+# this line. What is worth asserting is the INVARIANT — the denominator equals the row population — plus
+# the named row set below, which is the assertion that catches a row silently disappearing.
+EMITTED_ROWS="$( echo "$OUT" | grep -o '<c n="' | wc -l | tr -d ' ' )"
+DECLARED_CHECKS="$( echo "$OUT" | grep -o '<doctor checks="[0-9]*"' | grep -o '[0-9]*' )"
+[ -n "$DECLARED_CHECKS" ] && [ "$DECLARED_CHECKS" = "$EMITTED_ROWS" ] \
+    && ok "checks=\"$DECLARED_CHECKS\" equals the emitted <c n=> row count" \
+    || no "checks=\"${DECLARED_CHECKS:-<absent>}\" disagrees with the $EMITTED_ROWS rows actually emitted"
 
-for row in binary-path grammars cache-dir git tree-sitter tracked-binaries; do
+for row in binary-path grammars cache-dir git tree-sitter tracked-binaries index-cache; do
     echo "$OUT" | grep -q "<c n=\"$row\" ok=" \
         && ok "row present: $row" \
         || no "row missing: $row"

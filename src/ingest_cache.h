@@ -892,9 +892,49 @@ struct ReadFd
     bool valid() const noexcept { return fd >= 0; }
 };
 
+// WHICH guard refused a blob. `ok == false` used to be the whole answer for every reason at once —
+// absent, wrong shape, foreign version/parserVer/arch, torn, or a table that failed its checksum or its
+// bounds — which is exactly right for the READ path (they all mean "reparse") and useless to a person
+// holding a committed artifact that stopped working. The refusals are the SAME set the fused bool always
+// covered; naming them costs one byte in the frame and is what makes `--doctor`'s index-cache row possible.
+//
+// The reason= spelling beside each enumerator IS the user-facing vocabulary: `cacheRejectName` returns it,
+// `--doctor` prints it, and `test/cacheidentitycheck.sh` (C) reads this block to assert that every refusal
+// branch in openCacheFrame carries one and that doctor's legend documents every value.
+enum class CacheReject : std::uint8_t
+{
+    Ok,              // reason="ok"              — the frame opened and validated
+    Absent,          // reason="absent"          — nothing at that path (the ordinary cold-start miss)
+    NotRegular,      // reason="not-regular"     — a directory/device/fifo, or a path that changed shape under us
+    Unreadable,      // reason="unreadable"      — a regular file whose open() was refused (permissions)
+    Truncated,       // reason="truncated"       — shorter than a frame, or a short read of header/trailer/table
+    NotACache,       // reason="not-a-cache"     — magic mismatch: some other file entirely
+    FormatVersion,   // reason="format-version"  — a ripwire blob of a different kCacheVersion
+    ParserVersion,   // reason="parser-version"  — right format, different kParserVer (an extraction change, or the lean/rich family split)
+    ArtifactArch,    // reason="artifact-arch"   — right format, foreign endianness or pointer width
+    Checksum,        // reason="checksum"        — header+offset-table checksum mismatch (a damaged write)
+    CorruptFrame,    // reason="corrupt-frame"   — structural invariant broken (exact-fit, entry bounds, table ordering)
+    Count            // enumerator count, never a value — the static_assert below binds the table to the enum
+};
+
+// A parallel table rather than a switch (the symTag/pinMechName idiom): the static_assert makes adding an
+// enumerator without its name a COMPILE error, which a switch's default arm cannot do, and a name lookup
+// this small has no reason to be branchy.
+inline constexpr const char* kCacheRejectNames[] = {
+    "ok", "absent", "not-regular", "unreadable", "truncated", "not-a-cache",
+    "format-version", "parser-version", "artifact-arch", "checksum", "corrupt-frame"
+};
+static_assert( std::size( kCacheRejectNames ) == static_cast<std::size_t>( CacheReject::Count ),
+               "every CacheReject enumerator needs its user-facing reason= name" );
+
+inline const char* cacheRejectName( CacheReject r ) noexcept
+{
+    const std::size_t i = static_cast<std::size_t>( r );
+    return i < std::size( kCacheRejectNames ) ? kCacheRejectNames[i] : "corrupt-frame";
+}
+
 // A validated, still-open v15 blob: everything a caller needs to pull records out of it by pathHash.
-// `ok == false` means "there is no usable cache here" for every reason — absent, wrong shape, foreign
-// version/parserVer/arch, torn, or a table that failed its checksum or its bounds.
+// `ok == false` means "there is no usable cache here"; `reason` says WHICH guard said so.
 struct CacheFrame
 {
     ReadFd                  blob;
@@ -902,6 +942,7 @@ struct CacheFrame
     std::uint64_t           tableOffset = 0; // records live in [ kCacheHeaderBytes, tableOffset )
     long long               mtimeNs     = -1;// the blob's own mtime — the warm-run racy-rule reference
     bool                    ok          = false;
+    CacheReject             reason      = CacheReject::Absent;   // meaningful only while ok == false
 };
 
 // pread the whole of [ off, off+n ) into `dst`. Short reads are retried (a pread on a regular file can
@@ -932,22 +973,28 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
     CacheFrame frame;
     if( !isReadableCacheBlob( path ) )
     {
+        // The read path treats "nothing there" and "wrong shape" identically; the disclosure surface does
+        // not, so the shape is re-asked here — on a branch that is already refusing, never on the hot path.
+        frame.reason = ( shapeOfPath( path ) == PathShape::Absent ) ? CacheReject::Absent : CacheReject::NotRegular;
         return frame;   // absent (silent) or an odd shape (already disclosed by isReadableCacheBlob)
     }
 
     if( !frame.blob.openOnce( path ) )
     {
+        frame.reason = CacheReject::Unreadable;
         return frame;
     }
 
     struct stat st;
     if( ::fstat( frame.blob.fd, &st ) != 0 || !S_ISREG( st.st_mode ) )
     {
+        frame.reason = CacheReject::NotRegular;
         return frame;
     }
     const std::uint64_t fileBytes = std::uint64_t( st.st_size );
     if( fileBytes < kCacheHeaderBytes + kCacheTrailerBytes )
     {
+        frame.reason = CacheReject::Truncated;
         return frame;   // too short to hold even an empty frame — an ordinary corrupt/partial file
     }
 
@@ -955,6 +1002,7 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
     char header[ kCacheHeaderBytes ];
     if( !preadExact( frame.blob.fd, header, kCacheHeaderBytes, 0 ) )
     {
+        frame.reason = CacheReject::Truncated;
         return frame;
     }
     {
@@ -965,20 +1013,32 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
         const std::uint8_t arch = std::uint8_t( header[ 12 ] );
         if( magic != kCacheMagic )
         {
+            frame.reason = CacheReject::NotACache;
             return frame;
         }
         if( version != kCacheVersion )
         {
             // v14 (and every older format) is REJECTED, not misread: the records moved behind an offset
-            // table, so a pre-v15 blob has no table to trust. Disclosed rather than silent, because this
-            // is the one guard a format bump is supposed to trip exactly once per stale blob.
+            // table, so a pre-v15 blob has no table to trust. The alert is DEBUG-ONLY (NDEBUG deletes it,
+            // and every installed binary is Release) — --doctor's index-cache row is where a user of a
+            // shipped binary reads this. Same for the two guards below, split from one fused test because
+            // "your binary's extraction changed" and "this artifact came from another architecture" are
+            // different things to be told about a committed artifact.
             DEGRADED_PATH_ALERT( "ingest: cache blob is a different format version — rejected and rebuilt (full reparse)" );
+            frame.reason = CacheReject::FormatVersion;
             return frame;
         }
-        if( parserVer != parserVerFor( captureValueUses ) || arch != kArtifactArch )
+        if( parserVer != parserVerFor( captureValueUses ) )
         {
-            DEGRADED_PATH_ALERT( "ingest: cache blob parserVer/arch mismatch (older or foreign binary) — rejected and rebuilt (full reparse)" );
-            return frame;   // a different extraction identity or a foreign arch — the ordinary self-heal
+            DEGRADED_PATH_ALERT( "ingest: cache blob parserVer mismatch (older binary, or the other lean/rich family) — rejected and rebuilt (full reparse)" );
+            frame.reason = CacheReject::ParserVersion;
+            return frame;
+        }
+        if( arch != kArtifactArch )
+        {
+            DEGRADED_PATH_ALERT( "ingest: cache blob arch mismatch (foreign endianness/pointer width) — rejected and rebuilt (full reparse)" );
+            frame.reason = CacheReject::ArtifactArch;
+            return frame;
         }
         // header[13:21) is the legacy wall-clock write stamp — diagnostic only (see saveCache).
     }
@@ -989,6 +1049,7 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
     char trailer[ kCacheTrailerBytes ];
     if( !preadExact( frame.blob.fd, trailer, kCacheTrailerBytes, fileBytes - kCacheTrailerBytes ) )
     {
+        frame.reason = CacheReject::Truncated;
         return frame;
     }
     std::uint64_t tableOffset = 0, tableSum = 0;
@@ -1002,6 +1063,7 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
         || tableOffset + std::uint64_t( entryCount ) * kCacheEntryBytes + kCacheTrailerBytes != fileBytes )
     {
         DEGRADED_PATH_ALERT( "ingest: cache blob trailer does not describe the file (torn write) — cache treated as corrupt" );
+        frame.reason = CacheReject::CorruptFrame;
         return frame;
     }
 
@@ -1012,11 +1074,13 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
     if( entryCount != 0
         && !preadExact( frame.blob.fd, hdrTable.data() + kCacheHeaderBytes, std::size_t( entryCount ) * kCacheEntryBytes, tableOffset ) )
     {
+        frame.reason = CacheReject::Truncated;
         return frame;
     }
     if( blobChecksum( std::string_view( hdrTable.data(), hdrTable.size() ) ) != tableSum )
     {
         DEGRADED_PATH_ALERT( "ingest: cache offset-table checksum mismatch — cache treated as corrupt (full reparse)" );
+        frame.reason = CacheReject::Checksum;
         return frame;
     }
 
@@ -1038,6 +1102,7 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
         {
             DEGRADED_PATH_ALERT( "ingest: cache offset-table entry out of bounds or out of order — cache treated as corrupt" );
             frame.entries.clear();
+            frame.reason = CacheReject::CorruptFrame;
             return frame;
         }
     }
@@ -1047,7 +1112,24 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
     // same stat() domain and granularity every per-file mtime is compared against.
     frame.mtimeNs = statSizeTimes( path ).mtimeNs;
     frame.ok      = true;
+    frame.reason  = CacheReject::Ok;
     return frame;
+}
+
+// The DISCLOSURE seam: classify an artifact WITHOUT deserialising a record out of it, so `--doctor` can
+// answer "can this binary read the artifact you handed it, and if not, which guard said no" for the price
+// of a header + offset-table read. Deliberately the SAME openCacheFrame the read path runs — a second,
+// simpler copy of the guard would be free to drift, and a disclosure that disagrees with the behaviour it
+// describes is worse than none.
+//
+// What this does NOT answer, and the row that prints it must not imply: whether the artifact's per-file
+// records still match the tree. That is decided per file at ingest time (the stat gate + the racy rule),
+// re-run on EVERY invocation — see docs/EVALS.md "card A3", which measured that and rejected a freshness
+// attribute on the CLI map for it. This is a FORMAT verdict about an artifact, not a freshness verdict
+// about an index.
+inline CacheReject inspectCacheArtifact( const std::string& path, bool captureValueUses )
+{
+    return openCacheFrame( path, captureValueUses ).reason;
 }
 
 // The half-open [ first, last ) span of table entries carrying `pathHash`. A u64 FNV collision across a

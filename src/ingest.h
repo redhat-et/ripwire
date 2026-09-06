@@ -270,6 +270,34 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                      bool captureValueUses = true, std::string_view excludeLabel = {},
                      bool respectGitignore = true );
 
+// ---- index-identity disclosure (the two functions behind --doctor's index-cache row) ----
+//
+// WHY THIS IS PUBLIC API AND NOT A SECOND COPY OF THE GUARD. `kCacheVersion`, `kParserVer` and
+// `kArtifactArch` decide whether ANY committed `--index-out` artifact is reusable, and until this pair
+// existed they had no user-visible surface at all: `--doctor`, `--help` and the map header named none of
+// them, and every refusal reached the user only through DEGRADED_PATH_ALERT, which NDEBUG (i.e. every
+// installed binary — install.sh configures Release) compiles out. So `ripwire DIR --cache=/gone.bin`
+// exited 0, printed nothing on either stream, and emitted bytes identical to a valid-artifact run.
+// Gate: test/cacheidentitycheck.sh. The definitions live in ingest.cpp because the guard they wrap
+// (openCacheFrame) is internal to that TU, and running the REAL guard rather than a doctor-local
+// re-implementation is the point — a disclosure free to drift from the behaviour it describes is worse
+// than none.
+struct CacheIdentity
+{
+    std::uint32_t cacheVersion  = 0;   // kCacheVersion — the on-disk format generation
+    std::uint32_t parserVerLean = 0;   // parserVerFor(false) — the extraction identity of the lean family
+    std::uint32_t parserVerRich = 0;   // parserVerFor(true)  — …and of the rich family (--for/--exemplar/--metrics/--uses)
+    unsigned      artifactArch  = 0;   // kArtifactArch — endianness | sizeof(void*) << 1
+};
+CacheIdentity cacheIdentity() noexcept;
+
+// The verdict for ONE artifact, as the stable lowercase vocabulary CacheReject declares (see
+// src/ingest_cache.h): "ok" | "absent" | "not-regular" | "unreadable" | "truncated" | "not-a-cache" |
+// "format-version" | "parser-version" | "artifact-arch" | "checksum" | "corrupt-frame". A FORMAT verdict
+// about an artifact, never a freshness verdict about an index: per-file freshness is re-validated on every
+// invocation (docs/EVALS.md, "card A3"), which is why no equivalent may be emitted on the map.
+const char* cacheArtifactVerdict( const std::string& path, bool captureValueUses );
+
 // ---- shared AST-query pass (powers --match structural search + --lint) ----
 // Re-parse the already-crawled files in parallel and run one or more tree-sitter queries over each tree.
 // Each spec's query is compiled against every grammar it is VALID for (others are skipped), so a

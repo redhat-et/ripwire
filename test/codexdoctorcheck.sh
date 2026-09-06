@@ -56,9 +56,20 @@ run_doctor()
 
 OUT="$( run_doctor )"; RC=$?
 [ "$RC" -eq 0 ] && ok "fully wired fake Codex surface exits 0" || no "healthy Codex doctor exited $RC: $OUT"
-printf '%s' "$OUT" | grep -q '<doctor checks="10" passed="10" agent="codex"' \
-    && ok "Codex selection adds four checks and labels the report" \
-    || no "Codex doctor root did not report checks=10 passed=10 agent=codex"
+# DERIVED, not pinned at 10: what this arm actually asserts is that --agent=codex adds exactly FOUR rows to
+# whatever the base doctor emits, that every row passed on a fully wired surface, and that the report is
+# labelled. A literal total measures the BASE check count instead — it was 10, then 11 when the base grew an
+# index-cache row, and re-pinning the number teaches nobody what the arm is for.
+BASE_ROWS="$( HOME="$HOME_FAKE" CODEX_HOME="$CODEX_FAKE" AGENTS_HOME="$AGENTS_FAKE" \
+    PATH="$BINDIR:/usr/bin:/bin" TMPDIR="$CACHE" "$BINDIR/ripwire" "$REPO" --doctor --no-cache 2>/dev/null \
+    | grep -o '<c n="' | wc -l | tr -d ' ' )"
+CODEX_CHECKS="$( printf '%s' "$OUT" | grep -o '<doctor checks="[0-9]*"' | grep -o '[0-9]*' )"
+CODEX_PASSED="$( printf '%s' "$OUT" | grep -o 'passed="[0-9]*"' | head -1 | grep -o '[0-9]*' )"
+[ -n "$BASE_ROWS" ] && [ "$CODEX_CHECKS" = "$(( BASE_ROWS + 4 ))" ] \
+    && [ "$CODEX_PASSED" = "$CODEX_CHECKS" ] \
+    && printf '%s' "$OUT" | grep -q 'agent="codex"' \
+    && ok "Codex selection adds four checks (base $BASE_ROWS -> $CODEX_CHECKS), all passed, and labels the report" \
+    || no "Codex doctor reported checks=\"$CODEX_CHECKS\" passed=\"$CODEX_PASSED\" against a base of $BASE_ROWS rows (expected checks=passed=$(( BASE_ROWS + 4 )) and agent=\"codex\")"
 for row in codex-binary codex-skills codex-hooks codex-mcp; do
     printf '%s' "$OUT" | grep -q "<c n=\"$row\" ok=\"1\"" \
         && ok "healthy row present: $row" || no "healthy row missing/failing: $row"
