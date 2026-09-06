@@ -390,11 +390,18 @@ inline std::string captureXml( const std::function<void( std::FILE* )>& render )
 // placement change, same single emission.
 //
 // The same call also passes outProv and bindLabel, on the SAME reasoning and with the same emptiness
-// convention main.cpp uses (`empty() ? nullptr : &`). `precise=` is NOT a SCIP-only attribute — outProv
-// also carries FFI binding provenance, which this tree has (precise="3") with no --scip anywhere, so
-// withholding it dropped a real edge-provenance fact and a real bind= identity from the agent's map.
+// convention main.cpp uses (`empty() ? nullptr : &`). outProv is the per-EDGE confidence axis and carries
+// more than SCIP: FFI binding provenance (prov="binding") and, since C1, the arms of a k-way split the
+// resolver could not choose between (prov="split"), both of which this tree has with no --scip anywhere —
+// so withholding it dropped a real edge-provenance fact and a real bind= identity from the agent's map.
 // (Found by test/mcpclidiffcheck.sh, which is the point of having it: the first version of this fix
 // null-passed both and explained the absence away.)
+//
+// CORRECTION, C1 (Round C lane B): the sentence this comment used to carry — "`precise=` is NOT a SCIP-only
+// attribute … which this tree has (precise="3")" — was reasoning from a bug, not describing a design.
+// `precise=` means "edges a SCIP index PINNED"; the counter summed every non-zero outProv, so this tree's
+// precise="3" was 3 FFI binding edges reported as index-pinned. serialize.h now counts value 1 alone and
+// omits the attribute at zero. outProv is still passed here, for the reason above.
 inline std::string analyzeToString( const std::string& root, int topK, bool stable = false )
 {
     const McpIndex& ix = getIndex( root );                  // parse once, reuse across calls

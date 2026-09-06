@@ -112,9 +112,16 @@ printf '%s' "$MAP" | grep -qE 'files=1 symbols=23 edges=11 shown=23 est_tokens=[
 printf '%s' "$MAP" | grep -q '<s t="fn" n="callerQualified" amb="1"' \
     && ok "callerQualified carries amb=\"1\" — the pick pair, disclosed per-row" \
     || no "callerQualified is missing its amb=\"1\" row attribute"
-[ "$( printf '%s' "$MAP" | grep -oE '<c n="pick"/>' | wc -l | tr -d ' ' )" = 2 ] \
+# C1 (Round C lane B): the split arms now carry the per-EDGE disclosure prov="split", so the row is
+# `<c n="pick" prov="split"/>`. The count assertion matches the OPEN TAG rather than a closed literal, and a
+# second assertion pins the marker itself — the split is the thing this arm is about, and until now the gate
+# could only see that two edges existed, not that the tool admitted which ones were the guess.
+[ "$( printf '%s' "$MAP" | grep -oE '<c n="pick"[^>]*/>' | wc -l | tr -d ' ' )" = 2 ] \
     && ok "the ambiguous call splits onto BOTH pick defs (2 rows), never picks one" \
     || no "the ambiguous call did not split onto both pick defs"
+[ "$( printf '%s' "$MAP" | grep -oE '<c n="pick" prov="split"/>' | wc -l | tr -d ' ' )" = 2 ] \
+    && ok "both pick edges carry prov=\"split\" — the guess names its own edges, not just its symbol" \
+    || no "the split arms are not marked prov=\"split\" (amb= says the symbol guessed, nothing says which edge)"
 # and the canonical sites did NOT become ambiguous: exactly ONE ambiguous call in the whole fixture.
 printf '%s' "$MAP" | grep -qE '<s t="fn" n="callerTemplated"( |>)' \
     && ! printf '%s' "$MAP" | grep -q 'n="callerTemplated" amb=' \
