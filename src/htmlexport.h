@@ -391,13 +391,20 @@ static const char kScriptSim[] = R"JS(
     // seed spread floored at 300 world units: a zero-sized viewport at boot (hidden tab/iframe — W=H=0)
     // used to seed every node at the SAME point, and coincident nodes have dx=dy=0 so the repulsion
     // force is zero forever — the cluster could never separate. autoFit reframes whatever spread we pick.
-    var SPREAD = Math.max(Math.min(W,H)*0.7, 300);
+    // ...and seeded in the VIEWPORT'S OWN ASPECT, not a square. The spread used to be one number,
+    // min(W,H)*0.7, so every layout started inside a square and — a force sim being a local optimiser
+    // that mostly preserves the gross shape of its seed — settled to a roughly circular cloud. Measured
+    // on the README hero at 1600x900: the settled graph used 86% of the canvas HEIGHT and 37% of its
+    // WIDTH, so nearly half the picture was empty margin on a 16:9 frame. Seeding in the frame's own
+    // proportions costs nothing (the physics is untouched, and the seeded LCG is still the same seeded
+    // LCG) and fills it.
+    var SPREAD_X = Math.max(W*0.7, 300), SPREAD_Y = Math.max(H*0.7, 300);
     for (var i = 0; i < ids.length; i++) {
       var gid = ids[i], src = NODES[gid];
       gidToLocal.set(gid, i);
       nodes.push({ gid: gid, label: src.label, type: src.type, lang: src.lang, rank: src.rank,
                    comm: src.comm, cx: src.cx, ts: src.ts, file: src.file,
-                   x: W/2 + (rng()-0.5)*SPREAD, y: H/2 + (rng()-0.5)*SPREAD, vx: 0, vy: 0 });
+                   x: W/2 + (rng()-0.5)*SPREAD_X, y: H/2 + (rng()-0.5)*SPREAD_Y, vx: 0, vy: 0 });
     }
     N = nodes.length;
     links = [];
@@ -517,10 +524,27 @@ static const char kScriptSim[] = R"JS(
       ax[s] += f*dx; ay[s] += f*dy;
       ax[t] -= f*dx; ay[t] -= f*dy;
     }
-    // gravity to centre
+    // Gravity to centre, in the VIEWPORT'S OWN PROPORTIONS. An isotropic pull produces a circular
+    // cloud, and this page is drawn on a 16:9 canvas: measured on the README hero at 1600x900, the
+    // settled graph used 86% of the height and 37% of the width, so the flagship picture was almost half
+    // empty margin. Seeding in the frame's aspect (loadSubset) starts it right and an isotropic well
+    // pulls it back round over 300 steps, so the well is elliptical too — the pull is weaker along the
+    // long axis. The RATIO is the calibration and it was measured, not derived: at gravY/gravX = (W/H)^2
+    // the settled cloud came out at aspect 3.6 in a 1.98 frame, i.e. the cloud's aspect tracks the
+    // gravity ratio almost linearly rather than as the g^(-1/3) a linear-force-against-1/r^2 argument
+    // predicts (the springs dominate). So the ratio is set to the FRAME's aspect, which lands the cloud
+    // just inside it and leaves a margin instead of stretching the picture flat.
+    //
+    // WHAT IT COSTS, stated because it is a real cost. A force layout's one claim is "near means
+    // related", and it is rotation-invariant: an anisotropic well makes "near" mildly direction-
+    // dependent, so a horizontal gap and a vertical gap of the same pixel length no longer mean quite
+    // the same thing. The exponent keeps that mild at the aspects a browser window actually has, and it
+    // is the deliberate trade for a picture that uses the frame it is drawn in.
+    var wellA = Math.sqrt(Math.max(0.4, Math.min(2.5, (W > 0 && H > 0) ? W/H : 1)));
+    var gravX = gravity/wellA, gravY = gravity*wellA;
     for (var i = 0; i < N; i++) {
-      ax[i] += gravity*(cx-nodes[i].x);
-      ay[i] += gravity*(cy-nodes[i].y);
+      ax[i] += gravX*(cx-nodes[i].x);
+      ay[i] += gravY*(cy-nodes[i].y);
     }
     // integrate, with the per-tick displacement capped at MAX_STEP (see its declaration for the
     // exponential divergence this bounds, and the frozen tab that divergence produced)

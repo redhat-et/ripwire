@@ -41,6 +41,13 @@
 #               into it, so `ripwire DIR --html=F` is a picture in ONE command with no fragment to
 #               paste — plus the controls that the module overview stayed reachable and that the
 #               settle budget was REUSED rather than a second one invented beside it
+#   (Q) RAMP    the cx/churn ramp MEASURED, not pinned — luminance monotonicity, contrast against the
+#               canvas ground, and a Brettel/Viénot CVD simulation re-derived from the emitted stops
+#   (R) EDGES   the call graph draws its DIRECTION — an arrowhead, and an adjacency that keeps callers
+#               and callees in separate lists instead of symmetrising them
+#   (S) SHAPE   symbol KIND on the only nominal-only channel, from ONE table indexed by SymKind, with
+#               the key on the caption the PNG export stamps
+#   (T) LAYOUT  seeded and pulled in the VIEWPORT'S proportions, so a 16:9 frame is not half empty
 #
 # Usage:
 #   test/htmlrendercheck.sh                          # uses build/ripwire on test/fixture
@@ -615,6 +622,24 @@ inbody renderProv 'shapeKey\(\)' 'shapeKey()' "(S8b) and it is on the provenance
 #      gained a third line, which is the clipping defect (I5) already exists to stop, by the other axis.
 pin 'function stampHeight' 'function stampHeight' "(S9a) the stamped strip's height is derived from the caption's line count"
 absent 'slice\(0, 2\)' "(S9b) the two-line ceiling that would have dropped the shape key from every exported PNG is gone"
+
+# ── (T) THE LAYOUT FILLS THE FRAME IT IS DRAWN IN ─────────────────────────────────────────────────────
+#
+#     Measured on the README hero at 1600x900: the settled graph used 86% of the canvas HEIGHT and 37%
+#     of its WIDTH. Nearly half of the flagship picture was empty margin, for one reason — every layout
+#     was seeded inside a SQUARE (min(W,H)*0.7 on both axes) and then pulled to the centre by an
+#     ISOTROPIC well, and a circular cloud on a 16:9 canvas cannot be anything else. Both halves have to
+#     move: an aspect-correct seed alone is pulled back round over 300 steps, and an elliptical well
+#     alone fights a square start for most of them.
+inbody loadSubset 'SPREAD_X' 'SPREAD_X' "(T1) the seed spread is per-axis, in the viewport's own proportions"
+absent 'Math\.max\(Math\.min\(W,H\)\*0\.7, 300\)' "(T2) the single square seed spread that produced a circular cloud is gone"
+inbody simTick 'gravX' 'gravX' "(T3) the gravity well is elliptical, not isotropic"
+inbody simTick 'W/H' 'W/H' "(T4) and its ratio comes from the FRAME's aspect rather than a constant somebody picked"
+absent 'ax\[i\] \+= gravity\*\(cx-nodes\[i\]\.x\)' "(T5) the isotropic pull it replaces is gone — two wells would fight"
+# (T6) the anisotropy is CLAMPED. A browser window can be any shape, and an unclamped ratio on a 10:1
+#      viewport draws the graph as a line — the same class of unbounded-input defect as the zoom band
+#      (K) and the per-tick displacement cap (D6), both of which were found the hard way.
+inbody simTick 'Math\.min\(2\.5' '2.5' "(T6) that ratio is clamped, so an extreme window cannot flatten the graph into a line"
 
 echo
 echo "  ($mutants mutation controls ran and went red on their mutants)"

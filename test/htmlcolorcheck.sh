@@ -26,7 +26,8 @@
 #   4) THE ZERO-VIEWPORT SEED. A hidden tab/iframe boots the canvas at W=H=0, so a spread of
 #      min(W,H)*0.7 seeded every node at the SAME point — and coincident nodes have dx=dy=0, so the
 #      repulsion force is zero forever and the layout can never separate (the "one dot" render).
-#      Arm (7) pins the 300-world-unit floor and the ABSENCE of the unfloored expression.
+#      Arm (7) pins the 300-world-unit floor and the ABSENCE of the unfloored expression. The spread
+#      is PER-AXIS since 2026-09-06 (it seeds in the viewport's proportions), so the arm holds both.
 #
 # Usage:
 #   test/htmlcolorcheck.sh                          # uses build/ripwire on test/fixture
@@ -198,13 +199,17 @@ else
 fi
 
 # ── 7) the ZERO-VIEWPORT seed: spread floored so a W=H=0 boot cannot seed every node coincident ──────
-if grep -q 'Math.max(Math.min(W,H)\*0.7, 300)' "$TMP/out.html"; then
-    ok "(7a) seed spread is floored at 300 world units"
+#      The spread became PER-AXIS on 2026-09-06 (it seeds in the viewport's own proportions — see
+#      test/htmlrendercheck.sh arm (T) for why), so the floor is now two floors and BOTH must hold: a
+#      hidden tab boots at W=H=0, and one unfloored axis still collapses every node onto one line, where
+#      the repulsion between coincident points is zero and the cluster can never separate.
+if grep -q 'var SPREAD_X = Math.max(W\*0.7, 300), SPREAD_Y = Math.max(H\*0.7, 300);' "$TMP/out.html"; then
+    ok "(7a) both seed spreads are floored at 300 world units"
 else
-    no "(7a) seed spread is not floored — a zero-sized viewport seeds every node coincident (one-dot render)"
+    no "(7a) a seed spread is not floored — a zero-sized viewport seeds every node coincident (one-dot render)"
 fi
-if grep -q '(rng()-0.5)\*Math.min(W,H)\*0.7' "$TMP/out.html"; then
-    no "(7b) the UNFLOORED seed expression survives — the floor is dead code next to it"
+if grep -q '(rng()-0.5)\*Math.min(W,H)\*0.7\|(rng()-0.5)\*W\*0.7\|(rng()-0.5)\*H\*0.7' "$TMP/out.html"; then
+    no "(7b) an UNFLOORED seed expression survives — the floor is dead code next to it"
 else
     ok "(7b) no unfloored seed expression remains"
 fi
