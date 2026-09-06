@@ -107,9 +107,15 @@ runVerb(){
         set -- $argLine
     fi
     if [ "$needsCorpus" = "1" ]; then
-        "$BIN" "$CORPUS" --no-cache "$@" >"$TMP/out" 2>"$TMP/err"
+        # RELATIVE corpus path, run from $ROOT, and the reason is the whole reason this manifest is
+        # portable: ripwire ECHOES the root it was given (root="..."), and the length of that string
+        # also moves est_tokens. An absolute path therefore bakes the checkout's own location into
+        # every hash, so a manifest pinned in one directory can never pass in another — not in CI, not
+        # in a second worktree, not in a fresh clone. Measured: the same binary on the same corpus gave
+        # est_tokens=909 under .../ripwire-wt-integrate and 935 under a /private/tmp clone.
+        ( cd "$ROOT" && "$BIN" test/fixture --no-cache "$@" ) >"$TMP/out" 2>"$TMP/err"
     else
-        "$BIN" "$@" >"$TMP/out" 2>"$TMP/err"
+        ( cd "$ROOT" && "$BIN" "$@" ) >"$TMP/out" 2>"$TMP/err"
     fi
     return $?
 }
