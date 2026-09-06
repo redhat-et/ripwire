@@ -82,3 +82,37 @@ assert len(rows) == 1
 assert rows[0].get('loaded') == rows[0].get('expected') == '22', rows[0].attrib
 print('  PASS doctor loads all 22 grammars and queries')
 PYDOC
+
+mkdir "$TMP/boundaries"
+cat > "$TMP/boundaries/boundaries.ex" <<'EX'
+defmodule Boundary do
+  def render(x), do: x
+  def seed(), do: 1
+  def wrap(x), do: x
+  def run(x \\ wrap(seed())), do: x
+  def guarded(x \\ seed()) when is_integer(x), do: x
+  def pattern(%Unknown{value: x}), do: x
+  def invoke(), do: Boundary.render(1)
+  defimpl Inspect, for: Any do
+    def render(x), do: hidden(x)
+    def hidden(x), do: Boundary.seed()
+  end
+end
+defimpl Inspect, for: Atom do
+  def outside_impl(x), do: Boundary.seed()
+end
+EX
+"$BIN" "$TMP/boundaries" --no-cache > "$TMP/boundaries.xml"
+python3 - "$TMP/boundaries.xml" <<'PYBOUND'
+import sys, xml.etree.ElementTree as ET
+rows = list(ET.parse(sys.argv[1]).iter('s'))
+syms = {s.get('n'): s for s in rows}
+assert len([s for s in rows if s.get('n') == 'render']) == 1
+assert {'Boundary', 'render', 'seed', 'wrap', 'run', 'guarded', 'pattern', 'invoke'} == set(syms), set(syms)
+assert {c.get('n') for c in syms['invoke'].iter('c')} == {'render'}
+assert {c.get('n') for c in syms['run'].iter('c')} == {'wrap', 'seed'}
+assert 'seed' in {c.get('n') for c in syms['guarded'].iter('c')}
+assert not list(syms['pattern'].iter('c'))
+assert not list(syms['Boundary'].iter('c')), 'implementation calls leaked into enclosing module'
+print('  PASS implementation isolation and executable defaults without declaration-head edges')
+PYBOUND

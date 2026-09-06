@@ -117,7 +117,7 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
     // Quoted syntax and module attributes (notably @spec/@type) are not runtime call sites.
     for( TSNode parent = ts_node_parent( role ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
     {
-        if( elixirTarget( parent, src ) == "quote"
+        if( elixirTarget( parent, src ) == "quote" || elixirTarget( parent, src ) == "defimpl"
             || ( std::strcmp( ts_node_type( parent ), "unary_operator" ) == 0 && nodeFieldText( parent, "operator", 8, src ) == "@" ) )
         {
             return false;
@@ -165,10 +165,15 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
     {
         return false;
     }
-    // A function head is itself a call. Exclude its entire argument pattern (including defaults),
-    // without excluding the guard's calls or the function body.
+    bool inDefault = false;
     for( TSNode parent = ts_node_parent( role ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
     {
+        if( std::strcmp( ts_node_type( parent ), "binary_operator" ) == 0 && nodeFieldText( parent, "operator", 8, src ) == "\\\\" )
+        {
+            const TSNode value = ts_node_child_by_field_name( parent, "right", 5 );
+            inDefault = inDefault || ( !ts_node_is_null( value ) && ts_node_start_byte( role ) >= ts_node_start_byte( value )
+                                      && ts_node_end_byte( role ) <= ts_node_end_byte( value ) );
+        }
         if( !elixirFunctionKeyword( elixirTarget( parent, src ) ) )
         {
             continue;
@@ -180,7 +185,7 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
         }
         if( !ts_node_is_null( head ) && ts_node_start_byte( name ) >= ts_node_start_byte( head ) && ts_node_end_byte( name ) <= ts_node_end_byte( head ) )
         {
-            return false;
+            return inDefault;
         }
     }
     return true;

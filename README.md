@@ -1680,7 +1680,8 @@ a stated floor, not a silence), **Lua** (all five spellings that define a functi
 `M.f = function` and table-constructor forms; `function M:f()` is a method. Metatable inheritance is
 a runtime call with no syntax to read, so a Lua corpus reports no inheritance edges — stated, not
 implied), **Elixir** (`.ex`/`.exs` — modules, protocols, functions, macros, guards and delegates;
-literal ExUnit tests, local calls, remote calls and pipes. Quoted AST, module attributes and macro-generated definitions are excluded;
+literal ExUnit tests, local calls (including executable default expressions), remote calls and pipes.
+Quoted AST, module attributes, `defimpl` bodies and macro-generated definitions are excluded;
 bare zero-arity calls outside pipes, dynamic dispatch, alias/import/use resolution and protocol
 implementation dispatch are not inferred), Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
 `[tool.ruff.lint]` table is one symbol under its full dotted name, and

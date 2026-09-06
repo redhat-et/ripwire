@@ -28,6 +28,7 @@ fi
 
 mkdir -p "$TMP/isolated/corpus"
 cp "$BIN" "$TMP/isolated/ripwire"
+cp "$ROOT/test/elixirfix/math.ex" "$TMP/isolated/corpus/"
 cp "$ROOT/test/fixture/geometry.cpp" "$ROOT/test/fixture/geometry.h" "$TMP/isolated/corpus/"
 
 ( cd / && "$TMP/isolated/ripwire" "$TMP/isolated/corpus" --no-cache >"$TMP/a.xml" 2>"$TMP/a.err" )
@@ -52,13 +53,17 @@ else
     no "isolated output is not well-formed XML or xmllint is unavailable"
 fi
 
-queryCount="$( find "$ROOT/queries" -mindepth 2 -maxdepth 2 -name tags.scm | wc -l | tr -d ' ' )"
-generatedHeader="$( dirname "$BIN" )/generated/embedded_queries.h"
-if [ "$queryCount" = 19 ] && [ -f "$generatedHeader" ] \
-    && grep -q 'kEmbeddedQueryCount = 19' "$generatedHeader"; then
-    ok "generated table accounts for all 19 committed query sources"
+if python3 - "$TMP/a.xml" <<'PY'
+import sys, xml.etree.ElementTree as ET
+syms = {s.get('n'): s for s in ET.parse(sys.argv[1]).iter('s')}
+assert {'Sample.Math', 'square', 'twice', 'secret', 'answer'} <= set(syms)
+assert 'square' in {c.get('n') for c in syms['twice'].iter('c')}
+assert 'secret' in {c.get('n') for c in syms['answer'].iter('c')}
+PY
+then
+    ok "isolated binary extracts Elixir definitions and call edges"
 else
-    no "generated table does not prove coverage of all 19 query sources"
+    no "isolated binary did not extract Elixir definitions and call edges"
 fi
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'

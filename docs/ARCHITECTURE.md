@@ -129,14 +129,19 @@ node in the `--deps`/`--arch` graph. Both floors are asserted from the outside b
 `test/phpcheck.sh` and `test/luacheck.sh` so they stay decisions rather than drift.
 
 Elixir's grammar models definitions as calls. Its tags query selects candidate shapes; the small
-`ingest_elixir.h` capture filter checks definition keywords, excludes function-head references, module attributes and
+`ingest_elixir.h` capture filter checks definition keywords, excludes declaration-head/pattern references, module attributes, `defimpl` bodies and
 quoted AST, and locates block/keyword bodies. Macros, guards and literal ExUnit tests are parsed `fn` symbols. Local and
-remote calls and pipes produce references; module scope qualifies definitions. Alias/import/use
+remote calls, executable default expressions and pipes produce references; module scope qualifies definitions.
+Default-expression edges are syntactic possibilities; they are not narrowed by which arguments a caller supplies. Alias/import/use
 resolution, macro expansion, dynamic dispatch and protocol implementation dispatch remain outside
 this initial port. Bare identifiers outside pipes are omitted because they may be variables or
 zero-arity calls. Metrics count syntactic controls, clause arms and boolean joins, not expanded macros;
 arity narrowing is deliberately disabled (default arguments and pipes change call arity).
 `test/elixircheck.sh` covers extraction, call-site mutation, metrics and cold/warm determinism.
+
+Elixir extraction revision 83 (rich 84) excludes protocol implementation captures and retains calls in default values.
+Both extraction identity constants moved from 81 to 83 to avoid reusing rich revision 82. The required
+`qschemetrip` source-change pin is refreshed for this extraction change; snapshot scheme 8 is unchanged.
 
 The three config lanes are *data*, not code: they emit `t="sec"` symbols and **zero call edges**, and
 `langCompatible` keeps a config key from ever resolving a same-spelled code symbol. They differ in

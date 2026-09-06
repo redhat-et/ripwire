@@ -101,8 +101,35 @@ grep -q 'check_cxx_source_compiles' "$CMAKE" && grep -q 'LLVMFuzzerTestOneInput'
     && grep -q 'same upstream LLVM installation' "$CMAKE" \
     && ok "libFuzzer availability uses a real link probe with remediation" || no "libFuzzer link probe/remediation missing"
 
-fuzzTargetCount="$( grep -c '^  add_ripwire_fuzzer(' "$CMAKE" )"
-[ "$fuzzTargetCount" = 20 ] && ok "20 grammar fuzz targets declared" || no "expected 20 grammar fuzz targets, found $fuzzTargetCount"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+mkdir -p "$TMP/build/.cmake/api/v1/query"
+touch "$TMP/build/.cmake/api/v1/query/codemodel-v2"
+if cmake -S "$ROOT" -B "$TMP/build" -DRIPWIRE_FUZZ=ON >"$TMP/configure.log" 2>&1; then
+    if python3 - "$TMP/build/.cmake/api/v1/reply" <<'PY'
+import json, pathlib, sys
+reply = pathlib.Path(sys.argv[1])
+index = json.loads(next(reply.glob('index-*.json')).read_text())
+model = json.loads((reply / index['reply']['codemodel-v2']['jsonFile']).read_text())
+expected = {'ripwire_fuzz_' + name for name in
+            'cpp python go rust typescript tsx swift objc javascript bash java ruby json toml yaml csharp c php elixir lua'.split()}
+assert model['configurations']
+for config in model['configurations']:
+    targets = [json.loads((reply / t['jsonFile']).read_text()) for t in config['targets']]
+    actual = {t['name'] for t in targets if t['type'] == 'EXECUTABLE' and t['name'].startswith('ripwire_fuzz_')}
+    assert actual == expected, (actual, expected)
+PY
+    then
+        ok "configured model contains all 20 grammar fuzz executables"
+    else
+        no "configured grammar fuzz executable set differs"
+    fi
+elif grep -Eq 'RIPWIRE_FUZZ requires (Clang|a Clang toolchain)' "$TMP/configure.log"; then
+    printf '  SKIP  configured fuzz targets require a Clang toolchain with libFuzzer\n'
+else
+    cat "$TMP/configure.log"
+    no "fuzzer CMake configuration failed"
+fi
 grep -q 'EXCLUDE_FROM_ALL' "$CMAKE" && ok "fuzz targets excluded from normal builds" || no "fuzz targets can enter normal builds"
 
 grep -q 'LLVMFuzzerTestOneInput' "$HARNESS" && grep -q 'ts_parser_parse_string' "$HARNESS" \
