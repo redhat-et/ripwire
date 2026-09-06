@@ -11226,3 +11226,64 @@ docs/SUBSTITUTION_METER.md.
 **NEGATIVE consequence, pre-committed.** A lane that misses its band ships the gate and the fixture, reverts the
 feature code, and records the negative under this heading. Lane E below 80% or with task pass under native
 ships E1's exactness fix (a correctness fix, not a band) and nothing else from E2–E4.
+
+## BM25 parameter sweep (lane A4, 2026-09-05) — PRE-REGISTERED (before the sweep runs, before any number)
+
+**What this registers.** PI-SERINI (arXiv 2605.10848) reports that on its fixed-corpus benchmark, tuning
+BM25 alone was worth +18.0% answer accuracy and +11.1% surfaced-evidence recall over default BM25, and that
+increasing retrieval depth was worth +25.3% surfaced-evidence recall over a shallow setting — a different
+benchmark, not this repo. This section registers what "does the same headroom exist here" means, and the
+band that decides it, before the sweep that answers it runs (CLAUDE.md non-negotiable #1, applied to a
+measurement rather than a gate).
+
+**Instrument.** `bench/bm25_sweep.py`, committed alongside this section. It shells out to `ripwire <root>
+--eval-retrieval` once per (k1,b) cell — the CORRECTED census sampler (exhaustive population, midrank ties,
+fixed at 1f283e4a, the commit this lane is based on) — reading the resolved BM25 parameters through
+`RIPWIRE_BM25_K1`/`RIPWIRE_BM25_B` (src/lexical.h's `resolveBm25Params()`, landed this lane as the A4
+unification of the two previously-duplicated `k1`/`b` declarations behind one bound-safe definition —
+test/bm25boundcheck.sh). A measurement harness, not a gate: it is not wired into test/regression.sh or
+test/pargates.py and never fails the build over a number it reports (owner rule: a bench is a ledger, never
+red CI).
+
+**Corpus.** `src/` — 2988 doc-commented symbols, `rule=exhaustive` (population==scored, path- and
+order-independent) — the same corpus and sampler README.md / this file's §4 currently publish against
+(91.3% name-exact/name recall@1; MRR 0.960 name-exact/name, 0.967 routed/doc-phrase, 0.968
+subtoken/doc-phrase, as of 1f283e4a).
+
+**Grid.** k1 ∈ {0.5, 1.5, 3.5}, b ∈ {0.0, 0.5, 0.75, 1.0} — 12 cells, always including the shipped default
+(k1=1.5, b=0.75). Coarse and wide by deliberate choice: each cell costs roughly 90–150s on this corpus
+(`--eval-retrieval`'s own cost note: "each scored symbol drives eight whole-corpus rankings, two of them
+full PageRank power iterations"), so the grid trades resolution for covering the FULL clamp range
+([0.1,10.0] × [0,1], src/lexical.h's documented `RIPWIRE_BM25_K1`/`RIPWIRE_BM25_B` clamp) rather than
+densely sampling a narrow neighborhood around the default. "Retrieval depth" is deliberately NOT a third
+swept input: `--eval-retrieval` already reports recall@1/@5/@10 from ONE ranking per query, so the depth
+axis PI-SERINI swept separately is already a column of this table, not a knob this sweep needs to add.
+
+**Metrics and accept/reject band.**
+
+- **Primary metric: name-exact/name MRR.** The identifier-query ranker, which routing forwards nearly
+  every NAME-shaped query to (`chooseForRanker`; `--eval-retrieval`'s own `note:` line reports the
+  fraction). The closest analogue here to PI-SERINI's "answer accuracy": get the named symbol back,
+  ranked first.
+- **Secondary metric: subtoken/doc-phrase MRR.** The conceptual-query ranker (`--for`'s default
+  fallback) — the closest analogue to PI-SERINI's "surfaced-evidence recall" for prose queries.
+- **Depth read-out.** recall@1/@5/@10 on both metrics above, at the best and default cells, reported
+  alongside MRR rather than folded into one number — a config that trades recall@1 for recall@10 is a
+  different tool than one that improves both, and the table must show which.
+- **ACCEPT (a real tuning win).** The best cell's name-exact/name MRR exceeds the default cell's by more
+  than 2 MRR points (≥ 0.02 absolute) with NO metric in the full 8-row table regressing by more than 1
+  point (≥ 0.01 MRR, or ≥ 1.0 recall@K percentage points) at that same cell. A win that only exists by
+  trading losses elsewhere does not clear this band.
+- **REJECT (defaults already near-optimal).** The best cell's improvement is under the 0.02 MRR
+  threshold, or clears it only by regressing another metric past its own 0.01/1.0-point floor. Registered
+  here as an equally publishable outcome per this lane's brief — "the current defaults are already at the
+  optimum" is not a failed sweep.
+- **Reproduce.** `bench/bm25_sweep.py` with no arguments reproduces this exact grid against `src/`; a run
+  against a different binary or corpus is a different, differently-cited number, never silently
+  substituted for this one.
+
+The sweep table and the verdict against this band are recorded immediately below, once the sweep has run.
+
+### The sweep, RUN — measured 2026-09-05 against the band registered above
+
+_(recorded once `bench/bm25_sweep.py` has completed on `src/`)_
