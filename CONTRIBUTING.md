@@ -176,6 +176,19 @@ Six distinct routes to it have shipped or nearly shipped here. They look nothing
 | 4 | **prose liveness** | the evidence the arm is live is in the commit message, not in the code |
 | 5 | **no contrast** | a control whose two arms differ in nothing (a mutation that did not take; an arithmetic identity like `n+9 != n`) |
 | 6 | **missing reporter** | the arm concludes but cannot record — it calls a helper the gate never defines, prints neither PASS nor FAIL, and the gate still exits 0 |
+| 7 | **true but narrower** | the arm asserts a real property *strictly weaker* than its name implies, and is permanently green on the weaker one |
+
+Shape 7 is the odd one and the reason it earns a row: nothing about it is broken. The determinism
+gate runs the binary twice, the two runs genuinely differ, the comparison is real, the assertion is
+true, and it has caught regressions. But it asserts **same argv → same file** while its name invites
+**same argv → same picture** — and the emitted `LINKS` order turned out to decide the force-layout
+above ~500 nodes, so a re-sort would change every picture with that gate green throughout. The arm
+never leaves the conjunction; the conjunction just proves less than it appears to.
+
+That makes the remedy different from shapes 1–6. Those are fixed by making the arm fire. This one is
+fixed by asserting the missing property — or, where that is impossible, by naming the limit at the
+place a reader will meet it. Watch for it especially when a gate's *name* is doing work its *code* is
+not: "my arms do differ, so I am not shape 5" is exactly the reasoning that lets this one through.
 
 Two older, narrower cases of the same thing, kept because they are cheap to check for:
 
