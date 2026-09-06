@@ -88,6 +88,15 @@ BINARY_EXTENSIONS = {
                # SECRET_OK makes for snapshot.mdpack). Regenerate only via
                # `make_snapshot.py --freeze --corpus src`; never hand-edit — recallevalcheck's check #0
                # hashes the contents and would red first.
+    ".jpg",    # docs/assets/colorby-hero.jpg — the README front-page hero, a headless-Chrome screenshot
+               # of --html --color-by=cx JPEG-compressed (screenshot -> PNG rasterises the ramp's five
+               # hex stops faithfully; PNG palette-quantizing it below ~200 KB collapsed the whole point
+               # of the image, muddying every colour stop into near-identical brownish tones, so JPEG at
+               # quality ~90 is the format that keeps the palette legible AND stays small). Added
+               # 2026-09-05 by the showcase-refresh lane (harvest round B, §7); it failed here once
+               # naming the file, and this is the row plus the reason. Regenerate only via the
+               # documented capture recipe (headless Chromium screenshot of a `--html` export,
+               # cropped/resized/re-encoded); never hand-edit.
 }
 
 def scan(paths, label):

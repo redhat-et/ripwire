@@ -20,6 +20,12 @@ JavaScript · Java · Ruby · PHP · Lua · Bash · C# · JSON · TOML · YAML �
 vendored grammars](#languages), and adding another is a vendored tree-sitter grammar plus one row in a
 declarative table.
 
+### See the map — not just the numbers
+
+<p align="center"><img src="docs/assets/colorby-hero.jpg" alt="ripwire --html --color-by=cx: the depth-2 call-graph neighbourhood of lexicalScoresTiered (240 nodes) in this repository, force-directed, nodes on a blue-to-orange complexity scale" width="880"></p>
+
+<p align="center"><sub>One self-contained HTML file (<code>--html[=FILE]</code>), no server, no CDN, click any node to recentre. <code>--color-by=lang|community|cx|churn|tested</code> sets the initial node colour; the page embeds all five and keeps a live selector. Shown here: <code>cx</code> — cyclomatic complexity — over the depth-2 neighbourhood of <code>lexicalScoresTiered</code>, 240 of this repository's own symbols; <code>churn</code> colours the same graph by git history instead. Both share one five-stop blue-to-orange scale rather than the usual green-to-red, so reading it never depends on telling red from green.</sub></p>
+
 ### No API key. No embeddings. No index server. No daemon.
 
 One self-contained binary on your own machine, offline, installed in one line — and the same line
