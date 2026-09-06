@@ -11403,3 +11403,67 @@ variant, not a drop, is the only shape with an unexhausted path — survives thi
 because this round dropped terms rather than down-weighting them. A successor should attack weight,
 not membership. It should also not reuse this instrument: four rounds have now failed to move the
 54-row external slice, which is evidence about the slice's sensitivity as much as about the mechanisms.
+
+### RESULT — measured at `d7a2a04`, against the band registered above: **REJECT**, and the prediction held
+
+**The census, which is the finding.** Every one of the 54 external-slice labels was re-run with the arm
+on and the decision trace read back, at all three declared rungs: **476 query-term decisions per rung**
+(1,428 in total), on django (`S = 47,699`) and webpack (`S = 30,429`).
+
+| rung | df cut | terms suppressed | saved by `separatesName` | terms failing the doc test |
+| --- | ---: | ---: | ---: | ---: |
+| **`k = 1` (the rule)** | ≈ `S/2` | **0 of 476** | 0 | **0** |
+| `k = 2` (ladder, not eligible) | ≈ `S/4` | 1 of 476 | 12 | 13 |
+| `k = 3` (ladder, not eligible) | ≈ `S/8` | 1 of 476 | 85 | 86 |
+
+At the derived one-bit threshold **the filter suppresses nothing at all**. The densest query term in the
+whole slice is `test` on django at **22,308 / 47,699 = 46.8%** — under the bar. The next densest are
+`with` at 25.3%, `is` at 23.4%, and `the` at 22.2% on django and 26.1% on webpack. A code corpus's
+document population is numerous and lexically diverse enough that even an English article does not reach
+half of it, and the interrogatives the mechanism was aimed at are nowhere near: `how` is
+**270 / 30,429 = 0.9%** on webpack.
+
+**The three registered conditions.**
+
+| # | Condition | Measured | |
+| --- | --- | --- | --- |
+| 1 | primary: net **≥ +2** flipped rows, zero hit → miss | **0 flipped rows** — the whole 54-row report is **byte-identical** to the disarmed run at every rung | **MISS** |
+| 2 | in-tree ranking lane strict MRR within 0.005 | byte-identical: 0.601 → 0.601, Δ **0.000** | met |
+| 3 | `--eval-retrieval` subtoken rows within 0.005 MRR | byte-identical: name 0.724, doc-phrase 0.930, Δ **0.000** | met |
+
+**Verdict: REJECT on condition 1.** The arm stays env-gated and off; nothing about a flagless run, `--for`,
+`--recall` or any other verb moves. There is no tuning step after this line, and the threshold is not
+re-cut: the pre-registration named exactly this outcome and named re-cutting as the move it forbids.
+
+**What the negative actually says.** Not "the constant was too strict" — the constant is `idf ≥ ln 2`,
+which is the definition of a term carrying one bit, and it is the same constant on any corpus. The
+finding is that **SIRA's filter is a prose-corpus mechanism, and a code corpus does not have the term
+distribution it needs.** On the document populations SIRA measures over, function words saturate; over
+30,000–48,000 code symbols they do not come close, because the symbol population is an order of
+magnitude larger and every symbol carries its own identifier vocabulary. Query-term dilution on this
+ranker is real — the r7 round measured natural-language queries at 4/22 — but it is **not** a
+*saturation* phenomenon, and a saturation test cannot reach it. That is a genuine narrowing of the
+search space and it is the round's contribution.
+
+**The LB-1 claim, CHECKED rather than asserted.** The registration promised to check, not assert, that
+this rule's suppression set excludes the recorded LB-1 casualty. Measured: `module` on webpack sits at
+**df = 5,514 / 30,429 (18.1%), nameDf = 1,132**. At `k = 1` and `k = 2` it is kept by the doc test; at
+`k = 3` — the first rung aggressive enough to reach it — it fails the doc test and is **kept by
+`separatesName`, exactly the guard written for it**. A df-only floor of the LB-1 shape at that rung
+would have deleted **86 of 476** query terms; **85 of the 86 are name carriers**, `module` among them.
+The name-field test is therefore doing the work it was designed for, on the specific casualty that
+killed the earlier round — measured, on the corpus where it happened.
+
+**One measured defect in the rule, recorded for any successor.** `separatesName`'s lower bound is
+`nameDf > 0`, and that is far too permissive. At `k = 3` it keeps `the` on django on the strength of
+**29 name carriers out of 47,699 symbols** — a claim to separation three orders of magnitude thinner
+than `module`'s 1,132, treated identically. Any retry must give the name field a real lower bound
+(a share of `S`, or the `routeCarrierCap` the LB-2 anchor machinery already computes), not a test for
+non-emptiness. Combined with the third-attempt condition the LB-3 round recorded — *contribute at
+REDUCED weight; attack the margin mechanism, not the frequency mechanism* — that is the shape of a
+fourth attempt, and it needs its own registration and its own never-tuned instrument.
+
+**What ships from this lane:** `test/termmargincheck.sh` (21 arms, ten of them red before the code
+existed), the fixture, this registration and this negative. The implementation stays in tree,
+env-gated, byte-inert off — the same disposition the R3 stemming machinery has, and for the same
+reason: the mechanism is correct and gated, and the corpus is what declines it.
