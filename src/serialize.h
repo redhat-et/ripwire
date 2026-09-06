@@ -1696,7 +1696,9 @@ inline constexpr const char* kMetricsLegend =
     "and yield/await/defer, hence Bash carries no ev) ev_why=which-jumps-raised-it tag:count "
     "cbo=coupling lcom4=cohesion "
     "amp=change-amplification tested=1 role=hub(fan-in 8+; uses spells role "
-    "call|macro|read|write|import|extends). Absent=N/A, never 0. -->";
+    "call|macro|read|write|import|extends). Absence is PER-KEY: N/A for params/nest/locals/cbo/lcom4/amp "
+    "(wrong kind, or a language the metric is not counted for); a MEASURED value for loc/tested/ppalt/humps/deep "
+    "(0), ev (1) and role (fan-in below 8). -->";
 
 // §B13.4 — the --max-tokens fit's own legend clause, emitted ONLY on a map --max-tokens shaped, for the same
 // reason kChurnRankLegend is: a flag-only fact does not belong in the string every other run shares. It names
