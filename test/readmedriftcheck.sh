@@ -341,6 +341,87 @@ else
     ok "(E8) all $path_count repo-relative paths cited by docs/LINEAGE.md exist in the tree"
 fi
 
+# ── (E9) the DECK — the third surface that states the lineage counts, and the one nothing read ──────
+# (E) enumerated the family as "README.md plus LINEAGE.md's own header". It is three files, not two:
+# present/deck5_ripwire_build.js states the same three counts on its research slide AND again, in a
+# short form, on the "every claim, and the command that re-derives it" slide — in a row that names
+# THIS GATE as the command re-deriving them. That row read "34 repos · 54 papers · 221 surveyed" while
+# the tables enumerated 36 / 67 / 231, and it shipped into a public PDF citing a gate that had never
+# opened the file. Same lesson as deckclaimcheck.sh arm (B)'s 2026-08-31 widening, same shape, same
+# fix: a claim about the counts is not exempt from the arm for living inside a slide generator.
+#
+# The deck spells the counts its own way, so this arm does NOT reuse counts_from() (which anchors on
+# README's "M repositories and P papers" prose). Two spellings, both required and both compared:
+#   long  — "<M> repositories + <P> papers folded" … "survey of <N> tools"
+#   short — "<M> repos · <P> papers · <N> surveyed"
+# Requiring BOTH is deliberate: deleting the row is the easy way out of a red, and a claim deleted is
+# a claim drifted — the same demand (B2) makes of the slide count.
+DECK="$ROOT/present/deck5_ripwire_build.js"
+if [ ! -f "$DECK" ]; then
+    no "(E9) missing present/deck5_ripwire_build.js — the deck's lineage counts have no file to check (was it moved? this arm must follow it)"
+else
+    deck_flat="$( sed 's/\*//g' "$DECK" | tr '\n' ' ' | tr -s ' ' )"
+    deck_long="$(  printf '%s' "$deck_flat" | grep -oE '[0-9]+ repositories \+ [0-9]+ papers folded' | head -1 )"
+    deck_surv="$(  printf '%s' "$deck_flat" | grep -oE 'survey of [0-9]+ tools' | head -1 )"
+    deck_short="$( printf '%s' "$deck_flat" | grep -oE '[0-9]+ repos [^0-9]+ [0-9]+ papers [^0-9]+ [0-9]+ surveyed' | head -1 )"
+
+    dl_repos="$(  printf '%s' "$deck_long"  | grep -oE '^[0-9]+' )"
+    dl_papers="$( printf '%s' "$deck_long"  | sed -E 's/^[0-9]+ repositories \+ ([0-9]+) papers folded$/\1/' )"
+    dl_tools="$(  printf '%s' "$deck_surv"  | grep -oE '[0-9]+' )"
+    set -- $( printf '%s' "$deck_short" | grep -oE '[0-9]+' )
+    ds_repos="${1:-}"; ds_papers="${2:-}"; ds_tools="${3:-}"
+
+    # (E9a) REQUIRE — both spellings must still be there. A grep that stopped matching would otherwise
+    #       compare nothing and report a permanent PASS, the green-while-inert shape (E1) guards for.
+    if [ -z "$dl_repos" ] || [ -z "$dl_papers" ] || [ -z "$dl_tools" ]; then
+        no "(E9a) the deck no longer states its lineage counts in the long form ('<M> repositories + <P> papers folded' … 'survey of <N> tools') — the claim was deleted or reworded, which is a drift, not a fix"
+    elif [ -z "$ds_repos" ] || [ -z "$ds_papers" ] || [ -z "$ds_tools" ]; then
+        no "(E9a) the deck no longer states its lineage counts in the short re-derive-row form ('<M> repos · <P> papers · <N> surveyed')"
+    else
+        ok "(E9a) the deck states its lineage counts in both forms (long: $dl_repos/$dl_papers/$dl_tools · short: $ds_repos/$ds_papers/$ds_tools)"
+    fi
+
+    # (E9b) DRIFT — every deck spelling must equal what LINEAGE.md's own tables enumerate.
+    deck9fail=0
+    for pair in "long:$dl_repos:$dl_papers:$dl_tools" "short:$ds_repos:$ds_papers:$ds_tools"; do
+        form="${pair%%:*}"; rest="${pair#*:}"
+        m="${rest%%:*}"; rest="${rest#*:}"
+        pp="${rest%%:*}"; nn="${rest#*:}"
+        # (E9a) already reported a form it could not extract; do not report the same fact twice.
+        # Spelled as an explicit if rather than `[ ] || [ ] || [ ] && continue`: that compound parses
+        # as ((A||B)||C)&&D, which is right here by luck, and is the shape that silently stops being
+        # right the moment someone adds a fourth clause.
+        if [ -z "$m" ] || [ -z "$pp" ] || [ -z "$nn" ]; then
+            continue
+        fi
+        if [ "$m" = "$d_folded" ] && [ "$pp" = "$d_papers" ] && [ "$nn" = "$d_surveyed" ]; then
+            ok "(E9b) the deck's $form form states $m repositories / $pp papers / $nn tools, matching docs/LINEAGE.md's tables"
+        else
+            no "(E9b) the deck's $form form states $m / $pp / $nn but docs/LINEAGE.md's tables enumerate $d_folded / $d_papers / $d_surveyed — update present/deck5_ripwire_build.js and rebuild the deck"
+            deck9fail=1
+        fi
+    done
+
+    # (E9c) MUTATION CONTROL for (E9b) — what (E4) is for (E2). Both spellings are shifted in one copy,
+    #       because an arm that only ever saw the long form would pass while the short row lied, which
+    #       is precisely how the deck's re-derive row went stale under a green suite.
+    E9TMP="$( mktemp -d )"
+    wrong_folded=$(( d_folded + 5 ))
+    sed -E -e "s/${d_folded} repositories \+ /${wrong_folded} repositories + /" \
+           -e "s/${d_folded} repos /${wrong_folded} repos /" "$DECK" > "$E9TMP/deck_bad.js"
+    bad_flat="$( sed 's/\*//g' "$E9TMP/deck_bad.js" | tr '\n' ' ' | tr -s ' ' )"
+    bad_long="$(  printf '%s' "$bad_flat" | grep -oE '[0-9]+ repositories \+ [0-9]+ papers folded' | head -1 | grep -oE '^[0-9]+' )"
+    bad_short="$( printf '%s' "$bad_flat" | grep -oE '[0-9]+ repos [^0-9]+ [0-9]+ papers [^0-9]+ [0-9]+ surveyed' | head -1 | grep -oE '^[0-9]+' )"
+    if [ -z "$bad_long" ] || [ -z "$bad_short" ]; then
+        no "(E9c) mutation control: could not re-extract both fabricated counts from the mutated deck copy (long='$bad_long' short='$bad_short')"
+    elif [ "$bad_long" = "$d_folded" ] || [ "$bad_short" = "$d_folded" ]; then
+        no "(E9c) mutation control: an injected wrong count did not take (long=$bad_long short=$bad_short, derived $d_folded) — the control is vacuous"
+    else
+        ok "(E9c) mutation control: fabricated deck counts (long=$bad_long, short=$bad_short) are correctly seen as disagreeing with the derived $d_folded"
+    fi
+    rm -rf "$E9TMP"
+fi
+
 # ── (F) the GATE-SCRIPT count — README's third advertised number, and the only one nothing checked ──
 # README.md's "In the tests" section states `test/regression.sh` names **N gate scripts**. That is an
 # advertised count of an enumerated thing, exactly like the flag count in (B) and the lineage counts in

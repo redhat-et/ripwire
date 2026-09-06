@@ -617,6 +617,75 @@ print("OK" if "no indexed symbol spans line 2" in msg else "GOT:" + json.dumps(r
     && ok "@seed (7h): mentions faulted seed refuses with the at-diagnosis" \
     || no "@seed (7h): mentions faulted-seed refusal wrong: $( cat "$TMP/at_menbad" )"
 
+# ─── (8) the ADVERTISED verb count in prose — derived here, never remembered ──────────────────────
+# L4 above asserts tools/list shows exactly $L4_COUNT verbs. That number is also PRINTED, in prose, on
+# three shipped surfaces — README.md, skills/ripwire-mcp/SKILL.md and the showcase deck generator —
+# and until now not one of them was compared against the server that defines it. All three said 30
+# while tools/list served 31, because the count was transcribed by hand at each site and the gate that
+# knew the truth never looked at any of them.
+#
+# This arm is the derive-then-compare discipline the rest of the suite uses (test/manifestcheck.sh's
+# gate-count arm, test/readmedriftcheck.sh's lineage arm, test/deckclaimcheck.sh's slide-count arm),
+# pointed at the number this gate is already holding: the LIVE tools/list length. Nothing is pinned —
+# add a verb and every site is expected to move with it.
+#
+# SCAN + REQUIRE, one declared list: a site may not state a count that disagrees, and must state one.
+# A claim deleted is a claim drifted — deleting the sentence is the cheapest way out of a red, and it
+# leaves a reader with no count at all rather than a wrong one, which is not an improvement.
+verbCountSites=( "README.md" "skills/ripwire-mcp/SKILL.md" "present/deck5_ripwire_build.js" )
+# The digits must start a WORD. Without the left boundary this matched "B11 verbs" — the internal
+# label for a verb-parity workstream in skills/ripwire-mcp/SKILL.md — and reported a fabricated
+# 11-vs-31 disagreement. A scan arm that invents reds is worse than one that misses: it teaches the
+# next maintainer to skim past this gate's output.
+verbClaimRe='(^|[^0-9A-Za-z])[0-9]+ (MCP )?verbs'
+
+scanVerbCounts() { sed 's/\*//g' "$1" | grep -noE "$verbClaimRe" || true; }
+verbClaimNum()  { printf '%s' "$1" | sed -E 's/^[0-9]+://' | grep -oE '[0-9]+ (MCP )?verbs' | grep -oE '^[0-9]+'; }
+
+if [ -z "${L4_COUNT:-}" ] || ! [ "$L4_COUNT" -gt 0 ] 2>/dev/null; then
+    no "(8) no live tools/list verb count to compare prose against (L4_COUNT='${L4_COUNT:-}') — this arm would be vacuous"
+else
+    for site in "${verbCountSites[@]}"; do
+        sitePath="$ROOT/$site"
+        [ -f "$sitePath" ] || { no "(8) $site is missing — a surface that states the verb count must exist to be checked"; continue; }
+        claims="$( scanVerbCounts "$sitePath" )"
+        if [ -z "$claims" ]; then
+            no "(8) $site states no '<N> verbs' count — the claim was deleted or reworded, which is a drift, not a fix"
+            continue
+        fi
+        while IFS= read -r claim; do
+            [ -z "$claim" ] && continue
+            claimLine="${claim%%:*}"
+            claimNum="$( verbClaimNum "$claim" )"
+            if [ "$claimNum" = "$L4_COUNT" ]; then
+                ok "(8) $site:$claimLine states $claimNum verbs, matching the live tools/list"
+            else
+                no "(8) $site:$claimLine states $claimNum verbs, but tools/list serves $L4_COUNT"
+            fi
+        done <<EOF
+$claims
+EOF
+    done
+
+    # MUTATION CONTROL. Every site agreeing proves only that numbers were read; prove a wrong one is
+    # still seen. The deck is the mutated site deliberately — it is the surface whose stale 30 shipped
+    # into a public PDF, and the one this arm was added for.
+    mutDeck="$ROOT/present/deck5_ripwire_build.js"
+    if [ -f "$mutDeck" ]; then
+        mutOut="$TMP/mcpverbcount_bad.js"
+        wrongVerbs=$(( L4_COUNT + 4 ))
+        sed -E "s/${L4_COUNT} (MCP )?verbs/${wrongVerbs} \1verbs/g" "$mutDeck" > "$mutOut"
+        mutNum="$( verbClaimNum "$( scanVerbCounts "$mutOut" | head -1 )" )"
+        if [ -z "$mutNum" ]; then
+            no "(8) mutation control: could not re-extract a verb count from the mutated deck copy at all"
+        elif [ "$mutNum" = "$L4_COUNT" ]; then
+            no "(8) mutation control: the injected wrong count did not take ($mutNum still equals the live $L4_COUNT) — the control is vacuous"
+        else
+            ok "(8) mutation control: a fabricated deck verb count ($mutNum) is correctly seen as disagreeing with tools/list ($L4_COUNT)"
+        fi
+    fi
+fi
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo
 if [ "$fail" -eq 0 ]; then

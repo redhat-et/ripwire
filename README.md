@@ -541,7 +541,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 </p>
 
 <p align="center">
-  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 27 slides</b></a> — every figure names the instrument that pins it<br>
+  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 29 slides</b></a> — every figure names the instrument that pins it<br>
   <sub>renders in your browser · <a href="present/ripwire-showcase.pptx">pptx</a> beside it · <a href="docs/EVALS.md">the numbers behind it</a></sub>
 </p>
 
@@ -592,7 +592,7 @@ ranking, bodies, callers and tests in one budgeted bundle.
 **Prebuilt binary** — macOS (arm64 / x86-64) and Linux (arm64 / x86-64, built for **RHEL 8+**;
 every release is smoke-tested on a RHEL 9 userland before it publishes). Downloads the latest
 [GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
-to `~/.local/bin`. From v0.2.2 the release tarball also ships the seventeen agent skills, and the
+to `~/.local/bin`. From v0.2.2 the release tarball also ships the eighteen agent skills, and the
 installer stages them under `~/.local/share/ripwire/skills` **and activates them for every agent it
 detects** (Claude Code, Codex), printing one line per agent saying what it did. An agent that is not
 installed is never given a skills directory, hooks are never registered without an explicit `--hook`,
@@ -1565,13 +1565,13 @@ ripwire wrap aider       # no MCP:   a ranked map file, and the aider invocation
 ripwire wrap --all       # detect every installed agent and emit each one's config
 ```
 
-**One stdio server, 30 verbs** — 15 read, 12 flagship-reflex, 3 span-addressed edit — and a client
+**One stdio server, 31 verbs** — 16 read, 12 flagship-reflex, 3 span-addressed edit — and a client
 that isn't one of the six above can be pointed at the same process by hand.
 
 <details>
-<summary>What the 30 verbs are — lazy body handles, the edit verbs' safety contract, the pre-print skill scan, and the hand-written stanza for any other MCP client</summary>
+<summary>What the 31 verbs are — lazy body handles, the edit verbs' safety contract, the pre-print skill scan, and the hand-written stanza for any other MCP client</summary>
 
-That registers one stdio server — `ripwire --mcp` — exposing **30 verbs**: 15 read verbs, 12
+That registers one stdio server — `ripwire --mcp` — exposing **31 verbs**: 16 read verbs, 12
 flagship-reflex verbs, and 3 span-addressed edit verbs. Read verbs mirror the CLI (`analyze`, `for`,
 `grep`, `cochange`, `fetch_body`, `lego`, `mentions`, `owners`, `memory_recall`,
 `situational_awareness`, `batch`, …); `find_symbol` and `find_referencing_symbols` attach a stable
@@ -1603,7 +1603,7 @@ socket instead of stdio, `ripwire --listen=HOST:PORT` serves the same verbs.
 
 `skills/` ships **eighteen task-shaped skills** that tell an agent *which* verb answers the moment it
 is in — orienting cold, tracing a call, sizing a refactor, checking a diff, hunting a bug, writing
-tests, reviewing security. Without them an agent has 30 verbs and no map of when each applies; the skills name the moment
+tests, reviewing security. Without them an agent has 31 verbs and no map of when each applies; the skills name the moment
 each verb is for. Install as symlinks back into this repo, so edits here take effect
 immediately:
 
@@ -1713,7 +1713,7 @@ tier: it parses with its own vendored grammar, so its headings are symbols, not 
 | Orientation for a coding agent working *on* this repository | [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) |
 | User-visible capabilities, behaviour changes, known limits | [`CHANGELOG.md`](CHANGELOG.md) |
 | Vendored dependencies and their licences | [`THIRD_PARTY.md`](THIRD_PARTY.md) |
-| The whole tool in 27 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
+| The whole tool in 29 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
 
 If a document disagrees with `--help`, the document is the bug.
 
