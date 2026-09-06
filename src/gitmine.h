@@ -800,12 +800,7 @@ inline bool defaultWindowIsAnchored( const std::string& root )
 // --rank-by=churn, --situ and the MCP twins cannot each invent their own.
 inline std::string defaultWindowLabel( const std::string& root, std::string_view width )
 {
-    std::string label{ width };
-    if( defaultWindowIsAnchored( root ) )
-    {
-        label += "@HEAD";
-    }
-    return label;
+    return std::string{ width } + ( defaultWindowIsAnchored( root ) ? "@HEAD" : "" );
 }
 
 // The churn SUB-window's cutoff epoch, from the SAME anchor by the SAME rule: gitCoChangeAndChurn slices a
@@ -823,6 +818,16 @@ inline std::int64_t defaultWindowCutoffEpoch( const std::string& root, unsigned 
     }
     const std::int64_t headEpoch = gitHeadCommitEpochCached( root );
     return ( headEpoch > 0 ) ? monthsBeforeEpoch( headEpoch, months ) : approxMonthsAgoEpoch( months );
+}
+
+// THE `git log` window clause for a miner that has BOTH a caller-supplied default and an optional --since
+// scope: gitCommitFileSets and gitChurnCounts spelled this identically, and F1's anchor would have had to be
+// threaded through both spellings. One builder, so the default window and the scoped window are resolved by
+// one rule for every miner that has both.
+inline std::string historyWindowArgs( const std::string& root, const SinceScope* scope, const char* defaultSince )
+{
+    const std::string anchored = defaultWindowSince( root, defaultSince );
+    return scope ? sinceLogArgs( *scope, anchored.c_str() ) : ( "--since=" + shSingleQuote( anchored ) + " " );
 }
 
 // How this ingest spells a path versus how GIT spells the same path, for ONE root. Git's `--name-only` paths
@@ -1363,11 +1368,7 @@ inline std::vector<std::vector<std::uint32_t>> gitCommitFileSets( const std::str
                                                                   std::uint32_t onlyRoot = UINT32_MAX )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitCommitFileSets (git log --name-only popen)" );
-    // F1: `since` is the caller's DEFAULT window and is resolved against HEAD's committer date, not the wall
-    // clock (see defaultWindowSince). An ACTIVE scope is the user's own --since and goes through untouched.
-    const std::string anchored   = defaultWindowSince( root, since );
-    const std::string windowArgs = scope ? sinceLogArgs( *scope, anchored.c_str() ) : ( "--since=" + shSingleQuote( anchored ) + " " );
-    return gitLogFileSets( root, ing, windowArgs, maxFiles, onlyRoot );
+    return gitLogFileSets( root, ing, historyWindowArgs( root, scope, since ), maxFiles, onlyRoot );
 }
 
 // B3 (co-change prior boost): per-commit changed-file sets over the LAST `commitCount` commits reachable
@@ -2950,9 +2951,7 @@ inline bool applyCoChangeBoost( const IngestResult& ing, const std::vector<std::
 inline bool gitChurnCounts( const std::string& root, const rw::IngestResult& ing, std::vector<std::uint32_t>& out, const char* since, const rw::SinceScope* scope = nullptr,
                      std::uint32_t onlyRoot = UINT32_MAX )   // multi-root §5: count ONLY files of that root
 {
-    // F1: same rule as gitCommitFileSets — the DEFAULT window anchors on HEAD, an active scope does not.
-    const std::string anchored   = rw::defaultWindowSince( root, since );
-    const std::string windowArgs = scope ? rw::sinceLogArgs( *scope, anchored.c_str() ) : ( "--since=" + shSingleQuote( anchored ) + " " );
+    const std::string windowArgs = rw::historyWindowArgs( root, scope, since );
     const rw::GitCommandLines touched = rw::gitCommandLines(
         "git -c core.quotepath=false -C " + shSingleQuote( root ) + " log " + rw::kMergeDiffArgs + windowArgs + "--name-only --format= 2>/dev/null" );
     if( !touched.isStarted )

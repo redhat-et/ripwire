@@ -1134,6 +1134,29 @@ inline std::string situationFileListRefusal( const std::string& root, const std:
     return fileListRefusalText( ing, "", "files", root, diffOrEmpty, changedMaskFromListChecked( ing, diffOrEmpty ) );
 }
 
+// The decl/def-partner array plus the co-change window/commit floor, as ONE fragment: situationDiffJson is
+// already over the complexity bar and a nameable fact gets a name rather than another inline block. Emits
+// `,"decl_def_partners":[…],"cochange_window":"…","cochange_commits":N` — the leading comma is the caller's
+// `]` closing the array before it, so the two halves of the seam are read together.
+template <typename PathRelFn>
+inline std::string declDefAndWindowJson( const SituationFacts& facts, PathRelFn pathRel )
+{
+    std::string out = ",\"decl_def_partners\":[";
+    bool        first = true;
+    for( const DeclDefPartner& dp : facts.declDef )
+    {
+        if( !first )
+        {
+            out += ",";
+        }
+        first = false;
+        out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( pathRel( dp.fileId ) ) ) + "\",\"shared_symbols\":"
+             + std::to_string( dp.shared ) + "}";
+    }
+    return out + "],\"cochange_window\":\"" + mcpdetail::jsonEscape( facts.coWindow ) + "\",\"cochange_commits\":"
+         + std::to_string( facts.coCommits );
+}
+
 inline std::string situationDiffJson( const std::string& root, const std::string& diffOrEmpty )
 {
     const McpIndex&     ix  = getIndex( root );
@@ -1245,25 +1268,10 @@ inline std::string situationDiffJson( const std::string& root, const std::string
 
     // F3: the decl/def partners of the changed set — the header/impl relationship the blast_radius array
     // above cannot carry, because a header does not transitively depend on the source that implements it.
-    out += "],\"decl_def_partners\":[";
-    {
-        bool firstDd = true;
-        for( const DeclDefPartner& dp : facts.declDef )
-        {
-            if( !firstDd )
-            {
-                out += ",";
-            }
-            firstDd = false;
-            out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( dp.fileId ) ) ) + "\",\"shared_symbols\":"
-                 + std::to_string( dp.shared ) + "}";
-        }
-    }
-    // F2: the composed co-change zero's own window and commit count — a JSON reader that only sees an empty
-    // `forgotten` array cannot tell "no partners" from "the window mined nothing", and this surface is the one
-    // where that reads most like an answer.
-    out += "],\"cochange_window\":\"" + mcpdetail::jsonEscape( facts.coWindow ) + "\",\"cochange_commits\":"
-         + std::to_string( facts.coCommits ) + ",\"forgotten\":[";
+    // F2: and the window the co-change zero below was mined in — a JSON reader that only sees an empty
+    // `forgotten` array cannot tell "no partners" from "the window mined nothing", and this surface is the
+    // one where that reads most like an answer.
+    out += "]" + declDefAndWindowJson( facts, situJPathRel ) + ",\"forgotten\":[";
     {
         bool first = true;
         for( const auto& [ f, deg ] : facts.forgotten )

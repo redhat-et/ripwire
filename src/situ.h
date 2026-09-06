@@ -336,6 +336,38 @@ inline std::string situShowingNote( std::size_t shownCap, std::size_t rowTotal, 
     return " (showing " + std::to_string( shownCap ) + " of " + std::to_string( rowTotal ) + " " + rowNoun + ")";
 }
 
+// Section [1]'s decl/def rows and section [3]'s empty-co-change line, as their own emitters: writeSituation
+// is already this file's largest function and the quality bar counts what a caller ADDS to it, so a fact that
+// is nameable gets a name. `pathRel` is the caller's own root-relative spelling, passed in rather than
+// re-derived, so the rows here cannot disagree with the rows around them.
+template <typename PathRelFn>
+inline void writeSituDeclDefRows( std::FILE* out, const std::vector<DeclDefPartner>& partnerFiles, PathRelFn pathRel )
+{
+    if( partnerFiles.empty() )
+    {
+        return;
+    }
+    std::fprintf( out, "        decl/def partners of the file(s) you named (%zu)%s — same (scope, name) symbols in another file (a header/impl pair, a stub, a partial class); NOT transitive dependents, so they are absent from the list below:\n",
+                  partnerFiles.size(), situShowingNote( kSituPartnerFileRowsShown, partnerFiles.size(), "files" ).c_str() );
+    for( std::size_t i = 0; i < partnerFiles.size() && i < kSituPartnerFileRowsShown; ++i )
+    {
+        const std::string_view pp = pathRel( partnerFiles[i].fileId );
+        std::fprintf( out, "        %.*s  (%u shared symbols)\n", int( pp.size() ), pp.data(), partnerFiles[i].shared );
+    }
+}
+
+// F2: the two causes the old "(none, or no git history)" conflated, told apart by the only fact that
+// separates them — how many commits the window actually contained.
+inline void writeSituEmptyCochangeLine( std::FILE* out, std::size_t coCommits )
+{
+    if( coCommits == 0 )
+    {
+        std::fprintf( out, "        (the window above mined 0 commits — no git history reached it, so this zero is NOT a measurement of coupling)\n" );
+        return;
+    }
+    std::fprintf( out, "        (none — %zu commits were mined and none co-edited a file outside your diff)\n", coCommits );
+}
+
 inline void writeSituation( std::FILE* out, const std::string& root, const IngestResult& ing, const Graph& g,
                             const std::vector<char>& changedFile,
                             std::uint32_t onlyRoot = UINT32_MAX )   // multi-root §5: co-change mined within that root only
@@ -442,19 +474,7 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
                   reach.size(), affected.size(), blastNote.c_str() );
     // F3: the decl/def partner FIRST — it is the answer to "what else has to change with this file" that the
     // dependent-symbol ranking below can never produce, because a header does not depend on its own source.
-    {
-        const std::vector<DeclDefPartner> partnerFiles = declDefPartners( ing, changedFile );
-        if( !partnerFiles.empty() )
-        {
-            std::fprintf( out, "        decl/def partners of the file(s) you named (%zu)%s — same (scope, name) symbols in another file (a header/impl pair, a stub, a partial class); NOT transitive dependents, so they are absent from the list below:\n",
-                          partnerFiles.size(), situShowingNote( kSituPartnerFileRowsShown, partnerFiles.size(), "files" ).c_str() );
-            for( std::size_t i = 0; i < partnerFiles.size() && i < kSituPartnerFileRowsShown; ++i )
-            {
-                const std::string_view pp = situPathRel( partnerFiles[i].fileId );
-                std::fprintf( out, "        %.*s  (%u shared symbols)\n", int( pp.size() ), pp.data(), partnerFiles[i].shared );
-            }
-        }
-    }
+    writeSituDeclDefRows( out, declDefPartners( ing, changedFile ), situPathRel );
     {   // H5/M15: the same floor + gauge the XML graph verbs mark, in this report's prose (one fold: graphGaugeAttrXml's)
         std::size_t gaugeAmb = 0, gaugeUnresolved = 0;
         for( std::uint32_t k : g.ambOut )        { gaugeAmb        += k; }
@@ -537,15 +557,7 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
                   situShowingNote( kSituPartnerRowsShown, partners.size(), "files" ).c_str() );
     if( partners.empty() )
     {
-        // The two causes this line used to conflate, now told apart by the only fact that separates them.
-        if( coCommits == 0 )
-        {
-            std::fprintf( out, "        (the window above mined 0 commits — no git history reached it, so this zero is NOT a measurement of coupling)\n" );
-        }
-        else
-        {
-            std::fprintf( out, "        (none — %zu commits were mined and none co-edited a file outside your diff)\n", coCommits );
-        }
+        writeSituEmptyCochangeLine( out, coCommits );
     }
     for( std::size_t i = 0; i < partners.size() && i < kSituPartnerRowsShown; ++i )
     {
