@@ -11368,42 +11368,6 @@ fixture and the registration, records the negative under this heading, and leave
 and off by default — which is where it starts, so the flagless map, `--for`, and every other verb are
 byte-identical either way (arm (e) of `test/termmargincheck.sh` asserts exactly that).
 
-### The result, measured 2026-09-05 against the band above: REJECT — INERT, as predicted
-
-Run on the lane binary (`lane/a3-termmargin`, arm live per `test/termmargincheck.sh` (e)), against the
-pinned external corpora (`django` @ `03988c5a`, `webpack` @ `a943d69c`, both verified against
-`extcorpus.lock` before scoring).
-
-| Condition | Registered requirement | Measured | Verdict |
-| --- | --- | --- | --- |
-| Primary — external slice, strict recall@5 | net **≥ +2** flipped rows, **zero** hit → miss | **0 rows flipped, in either direction**; every `BUCKET`/`AGG` line byte-identical armed vs disarmed | **MISS** |
-| Secondary — in-tree ranking lane strict MRR | must not fall by more than 0.005 | unchanged | pass (vacuously) |
-| Guard — `--eval-retrieval` subtoken rows | neither falls by more than 0.005 MRR | `subtoken/name` 0.724 and `subtoken/doc-phrase` 0.930, armed and disarmed, to three decimals | pass (vacuously) |
-
-**Verdict: REJECT.** The band names this case explicitly — *"REJECT otherwise, explicitly including the
-case where nothing moves at all."* The registered prediction was **INERT**, and the measurement is
-inert. Per the pre-committed negative consequence the gate, the fixture and this registration ship;
-the arm stays env-gated and off by default.
-
-**Rung ladder, reported as registered.** All three rungs were run; **`k = 2` and `k = 3` also move zero
-rows.** Reported as the registration required, and explicitly NOT eligible to change the verdict —
-selecting a rung after seeing the slice is the tuning this section pre-committed against.
-
-**What is actually established here, and what is not.** Arm (e) of `test/termmargincheck.sh` asserts
-armed and disarmed runs differ, and it passes — so the mechanism is live, and the inertness is a
-property of the *rule*, not a no-op. What the rule says is that a term separates iff `idf_u >= k·ln 2`,
-i.e. iff it appears in at most half the symbols; on real code, essentially every query term already
-clears that, so the filter has nothing to drop. That is the registered prediction's own reasoning,
-now measured rather than argued: **a separation threshold derived from BM25's arithmetic rather than
-fitted to a corpus does not fire on code.**
-
-This is the fourth rejection in this family (after LB-1's filler-strip + IDF floor, un-guarded query
-stemming, and the IDF-guarded retry). The standing lesson those three recorded — that a *reduced-weight*
-variant, not a drop, is the only shape with an unexhausted path — survives this round untouched,
-because this round dropped terms rather than down-weighting them. A successor should attack weight,
-not membership. It should also not reuse this instrument: four rounds have now failed to move the
-54-row external slice, which is evidence about the slice's sensitivity as much as about the mechanisms.
-
 ### RESULT — measured at `d7a2a04`, against the band registered above: **REJECT**, and the prediction held
 
 **The census, which is the finding.** Every one of the 54 external-slice labels was re-run with the arm
@@ -11462,6 +11426,14 @@ than `module`'s 1,132, treated identically. Any retry must give the name field a
 non-emptiness. Combined with the third-attempt condition the LB-3 round recorded — *contribute at
 REDUCED weight; attack the margin mechanism, not the frequency mechanism* — that is the shape of a
 fourth attempt, and it needs its own registration and its own never-tuned instrument.
+
+**Where this sits in the family, and one caution about the instrument.** This is the **fourth**
+rejection in the query-evidence family — after LB-1's filler-strip + IDF floor, un-guarded query
+stemming, and the IDF-guarded retry. The standing lesson those three recorded, that a *reduced-weight*
+term rather than a dropped one is the only shape with an unexhausted path, survives this round
+completely untouched: this round dropped terms, so it never tested the lesson. And four rounds have now
+failed to move the 54-row external slice. That is evidence about the slice's sensitivity as much as
+about the mechanisms, and a successor should bring an instrument this family has not already spent.
 
 **What ships from this lane:** `test/termmargincheck.sh` (21 arms, ten of them red before the code
 existed), the fixture, this registration and this negative. The implementation stays in tree,
