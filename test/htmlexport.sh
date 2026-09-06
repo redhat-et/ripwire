@@ -79,6 +79,57 @@ grep -q "id=\"crumb\""      "$TMP/out.html" && ok "wiki: breadcrumb trail elemen
 mod_count="$( grep -c '"symCount"' "$TMP/out.html" 2>/dev/null || echo 0 )"
 [ "$mod_count" -ge 1 ] && ok "wiki: MODULES array has >= 1 entry (found $mod_count)" || no "wiki: MODULES array is empty (found $mod_count)"
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# 9) EDGE CONFIDENCE IS RENDERED, not discarded (Round C, lane B).
+#
+# ripwire resolves every call edge and records, per edge, whether it had to guess — the same fact the XML
+# map discloses as prov="split" on a <c> child and aggregates into amb=/ambiguous=. Before this arm the
+# HTML export threw that away at render time: LINKS entries were plain {s,t} pairs and every edge in the
+# picture was drawn identically, so the one view a human actually looks at was the one view that could not
+# say which edges were guesses. This arm pins that the fact reaches the payload, reaches the paint, and
+# reaches a legend a reader can find without reading the source.
+#
+# PRESENCE GUARD FIRST. test/fixture resolves cleanly (ambiguous=0), so an arm run against it would assert
+# over an empty set and pass for the wrong reason. The guard builds a corpus with a KNOWN two-way split and
+# refuses to continue unless the corpus really has one.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+AMB="$TMP/ambcorpus"; mkdir -p "$AMB"
+printf 'int foo() { return 1; }\n'     > "$AMB/a.cpp"
+printf 'int foo() { return 2; }\n'     > "$AMB/b.cpp"
+printf 'int bar() { return foo(); }\n' > "$AMB/caller.cpp"
+amb_n="$( "$BIN" "$AMB" --no-cache 2>/dev/null | grep -oE 'ambiguous=[0-9]+' | head -1 | grep -oE '[0-9]+' )"
+amb_n="${amb_n:-0}"
+if [ "$amb_n" -ge 1 ]; then
+    ok "edge-confidence presence guard: the probe corpus really has ambiguous=$amb_n (arm is observable)"
+
+    "$BIN" "$AMB" --html --no-cache >"$TMP/amb.html" 2>/dev/null
+    # (a) the per-edge flag reaches the LINKS payload — omitted on confident edges, so grep for a marked one
+    grep -qE '\{"s":[0-9]+,"t":[0-9]+,"a":1\}' "$TMP/amb.html" \
+      && ok "edge confidence: LINKS carries the per-edge low-confidence flag on a split edge" \
+      || no "edge confidence: LINKS entries are still plain {s,t} — amb= is computed and discarded at render time"
+    # (b) the flag reaches the PAINT: a distinct stroke, not just a datum nobody draws
+    grep -q 'setLineDash' "$TMP/amb.html" \
+      && ok "edge confidence: the renderer strokes low-confidence edges distinctly (setLineDash)" \
+      || no "edge confidence: no distinct stroke — the flag is in the payload but invisible in the picture"
+    # (c) the meaning reaches a LEGEND a reader can find (the honesty vocabulary is in the OUTPUT, docs/METHODOLOGY §6)
+    # anchored on a phrase that appears ONLY in the rendered legend string — 'could not choose' also occurs
+    # in the embedded script's own comments, so grepping for it would pass with the legend clause deleted.
+    grep -q 'read the source before trusting one' "$TMP/amb.html" \
+      && ok "edge confidence: the view carries a legend defining the low-confidence stroke" \
+      || no "edge confidence: the stroke is rendered with nothing on screen defining it"
+    # (d) OMIT AT CONFIDENT — test/fixture resolves cleanly, so no edge there may carry the flag.
+    grep -q '"a":1' "$TMP/out.html" \
+      && no "edge confidence: a cleanly-resolved corpus wrongly carries the low-confidence flag (omit-at-confident broken)" \
+      || ok "edge confidence: a cleanly-resolved corpus carries no flag at all (omit-at-confident holds)"
+    # (e) determinism of the marked view
+    "$BIN" "$AMB" --html --no-cache >"$TMP/amb2.html" 2>/dev/null
+    diff -q "$TMP/amb.html" "$TMP/amb2.html" >/dev/null \
+      && ok "edge confidence: marked view is byte-identical run-to-run" \
+      || no "edge confidence: marked view is not deterministic"
+else
+    no "edge-confidence presence guard FAILED: the probe corpus reports ambiguous=$amb_n — this arm cannot observe what it asserts"
+fi
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "ALL PASS"
