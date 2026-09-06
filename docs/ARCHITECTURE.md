@@ -112,11 +112,7 @@ loop that survives them.
 Concurrency: one tree-sitter parser per worker thread (parsers are not thread-safe), files
 dispatched as work items.
 
-Languages: C++, C, Objective-C/Objective-C++, Metal (parsed with the C++ grammar), CUDA (parsed
-with the vendored tree-sitter-cuda grammar, a generated superset of tree-sitter-cpp), Python,
-TypeScript, JavaScript, Java, Ruby, PHP (the `php/` sub-grammar, so a `.php`/`.phtml` file whose
-first byte is markup still indexes), Lua, Elixir (.ex/.exs), Bash, Go, Rust, Swift, C#, plus JSON, TOML and YAML
-configuration keys.
+Supported languages and formats are listed in [README.md](../README.md#languages).
 
 Two of those carry a stated floor rather than a silence. **PHP**: dynamic dispatch — `$fn()`,
 `$obj->$name()`, `call_user_func`, `__call` magic, `new $class` — names its callee at run time, so
@@ -127,6 +123,8 @@ over an ordinary table, so a Lua corpus correctly reports no inheritance edges a
 is a plain function call rather than an import directive (as in Ruby), so a `.lua` file is never a
 node in the `--deps`/`--arch` graph. Both floors are asserted from the outside by
 `test/phpcheck.sh` and `test/luacheck.sh` so they stay decisions rather than drift.
+
+<a id="elixir-extraction"></a>
 
 Elixir's grammar models definitions as calls. Its tags query selects candidate shapes; the small
 `ingest_elixir.h` capture filter checks definition keywords, excludes declaration-head/pattern references, module attributes, `defimpl` bodies and

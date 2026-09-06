@@ -16,9 +16,8 @@ deterministic call graph — what to touch, what it breaks, which tests to run �
 around and reading whole files.
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
-JavaScript · Java · Ruby · PHP · Lua · Elixir · Bash · C# · JSON · TOML · YAML · Markdown — [twenty-two
-vendored grammars](#languages). Language support combines a vendored tree-sitter grammar, extraction
-queries and a declarative extension table, with grammar-specific capture filters where needed.
+JavaScript · Java · Ruby · PHP · Lua · Elixir · Bash · C# · JSON · TOML · YAML · Markdown — see
+[language support and limits](#languages).
 
 ### See the map — not just the numbers
 
@@ -619,7 +618,7 @@ cmake -S . -B build && cmake --build build -j
 **Or build from source.** Requirements: CMake 3.24+ and a C++23 compiler — that means clang 16+ /
 AppleClang 15+ (Xcode 15) / gcc 13+ / MSVC 19.36+, and if your distro's CMake is older than 3.24,
 `pip install cmake` or `brew install cmake` gets a current one everywhere. Nothing else —
-tree-sitter's core, all 22 grammars and the test framework are vendored under `third_party/deps`,
+tree-sitter's core, the grammars listed in [THIRD_PARTY.md](THIRD_PARTY.md) and the test framework are vendored under `third_party/deps`,
 so there is no download step and no package manager to satisfy. Prove that with the network off:
 add `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
 
@@ -633,9 +632,7 @@ cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release && cmake --build build-re
 cmake -S . -B build && cmake --build build -j
 ```
 
-Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, PHP, Lua, Elixir, Bash, Go,
-Rust, Swift, C#** — plus JSON/TOML/YAML config keys, markdown sections, Metal, and CUDA (`<<<>>>`
-launches are call edges).
+See [Languages](#languages) for supported source and document formats.
 
 To put it on `PATH`, `./install.sh` builds and atomically installs the binary plus the matching
 `skills/` and `hooks/` assets into a detected prefix (Homebrew's if present, `~/.local` otherwise;
@@ -1141,7 +1138,7 @@ Three limits travel with this table. ¹ repowise's walls include a fresh MCP-ser
 resident-server usage is faster. ² codeseek's raw row returned **0 results on 60/60 queries** — its
 keyless fallback matches function names only, so that row measures a query-protocol boundary, not its
 embedder-backed shipping mode (unbenchmarked here). And the slice is **Python-dominant** — 107 of 134
-gold files are `.py` — so this measures Python localization, not all twelve indexed languages.
+gold files are `.py` — so this measures Python localization, not every [supported language](#languages).
 **Vexp and CodeIndexer were excluded, not beaten**: their free tiers (node/project/chunk caps) cannot
 run a fair 60-instance sweep. An independent adversarial pass attacked the r2 comparison's design, and
 its findings and dispositions ship with that report
@@ -1516,7 +1513,7 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 
 ### In the tests
 
-`test/regression.sh` names **543 gate scripts** and is the authoritative list;
+`test/regression.sh` is the authoritative gate list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -1680,16 +1677,14 @@ a stated floor, not a silence), **Lua** (all five spellings that define a functi
 `M.f = function` and table-constructor forms; `function M:f()` is a method. Metatable inheritance is
 a runtime call with no syntax to read, so a Lua corpus reports no inheritance edges — stated, not
 implied), **Elixir** (`.ex`/`.exs` — modules, protocols, functions, macros, guards and delegates;
-literal ExUnit tests, local calls (including executable default expressions), remote calls and pipes.
-Quoted AST, module attributes, `defimpl` bodies and macro-generated definitions are excluded;
-bare zero-arity calls outside pipes, dynamic dispatch, alias/import/use resolution and protocol
-implementation dispatch are not inferred), Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
+literal ExUnit tests, local calls, remote calls and pipes; see the
+[static-analysis limits](docs/ARCHITECTURE.md#elixir-extraction)), Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
 `[tool.ruff.lint]` table is one symbol under its full dotted name, and
 `pyproject.toml`/`Cargo.toml`/CI workflows become greppable), and **Markdown** (`.md`/`.markdown` —
 the DOC tier: every heading, ATX or setext, is a section symbol whose span runs to the next
 same-or-higher heading, so `--for` ranks the section, `--expand` serves the section body, `--recall`
 answers section-granular, and links/`backtick` mentions are doc→doc and doc→code edges).
-Twenty-two tree-sitter grammars, all vendored.
+All grammars are vendored; [THIRD_PARTY.md](THIRD_PARTY.md) owns their inventory and provenance.
 
 Want another language? The pipeline is language-agnostic past the parse: a new language is a
 vendored tree-sitter grammar, its query file, and entries in the declarative
