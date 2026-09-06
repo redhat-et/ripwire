@@ -444,7 +444,7 @@ this section is simply the first measurement of *this* configuration under a des
 
 ### Query-shape routing
 
-Known-item retrieval over EVERY doc-commented symbol in the corpus (2,986 in `src/`, 3,497 at the
+Known-item retrieval over EVERY doc-commented symbol in the corpus (2,988 in `src/`, 3,499 at the
 root — the eval prints its own `population=`/`scored=`/`rule=`), two synthetic queries per symbol (the
 whole name; a stopworded phrase from the doc comment's first line), four rankers, gold rank measured.
 Reproduce with `ripwire <dir> --eval-retrieval`. Recorded in `bench/ANSWERQUALITY.md`.
@@ -462,9 +462,9 @@ verified identical on a pristine worktree (no untracked local files in the sampl
 | Query shape | ungated (subtoken) | routed |
 | --- | --- | --- |
 | Name-shaped queries, `src/` — MRR | 0.746 | **0.960** |
-| Name-shaped queries, `src/` — recall@1 | 61.3% | **91.3%** |
+| Name-shaped queries, `src/` — recall@1 | 61.2% | **91.3%** |
 | Name-shaped queries, repository root — MRR | 0.724 | **0.922** |
-| Name-shaped queries, repository root — recall@1 | 59.3% | **85.4%** |
+| Name-shaped queries, repository root — recall@1 | 59.3% | **85.5%** |
 
 The router is **confidence-gated**, and the gate is the interesting part: doc-phrase queries score
 **0.967** MRR (`src/`) and **0.929** (root) with the gate, against **0.016** and **0.018** if every
@@ -5733,11 +5733,14 @@ it; ties use the midrank `1 + #better + #tied/2`, which no ordering can move.
 **Every published `--eval-retrieval` number moved, and none of it was a ranking change.** Decomposed one
 fix at a time on the repository root:
 
+*(all three rows measured at `db6a416d`, so the third is the fix as measured THEN — the shipped
+figure moves as the corpus grows, and the tables above are the current ones)*
+
 | | subtoken/name MRR | name-exact/name MRR | name-exact/name recall@1 |
 | --- | --- | --- | --- |
 | path-ordered 150-slice, id ties (published until now) | 0.598 | 0.829 | 75.3% |
 | census population, id ties | 0.724 | 0.939 | 90.8% |
-| census population, midrank ties (**current**) | 0.724 | 0.922 | 85.4% |
+| census population, midrank ties (**the fix**) | 0.724 | 0.922 | 85.4% |
 
 On this root the sampler fix does nearly all of it and moves numbers **up** — but that direction is not a
 property of head-slicing, and calling the slice "systematically easier" or "systematically harder" would be

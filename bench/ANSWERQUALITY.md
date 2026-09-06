@@ -215,11 +215,14 @@ the instrument telling the truth where it previously did not.
 
 Decomposed on the repository root, one change at a time:
 
+*(all three rows measured at `db6a416d`, so the third is the fix as measured THEN — the shipped
+figure moves as the corpus grows, and the tables above are the current ones)*
+
 | | subtoken/name MRR | name-exact/name MRR | name-exact/name recall@1 |
 | --- | --- | --- | --- |
 | 150-symbol path-ordered slice, id ties (old) | 0.598 | 0.829 | 75.3% |
 | census population, id ties | 0.724 | 0.939 | 90.8% |
-| census population, midrank ties (**current**) | 0.724 | 0.922 | 85.4% |
+| census population, midrank ties (**the fix**) | 0.724 | 0.922 | 85.4% |
 
 On THIS root the sampler fix does nearly all the movement and moves numbers UP, because the head of the
 root's path order is `bench/` and `docs/` — harder than the corpus as a whole. That direction is not a
@@ -232,33 +235,31 @@ symbols had been winning ties they had not earned because their file sorted earl
 convention itself: midrank is deliberately pessimistic, scoring a two-way tie at the top as 1.5, which
 takes no recall@1 credit where id-tiebreak handed it rank 1 whenever gold's id was lowest.
 
-### `ripwire src/` (population 2,986, scored 2,986, rule=exhaustive)
+### `ripwire src/` (population 2,988, scored 2,988, rule=exhaustive)
 ```
-  ranker    query-mode     MRR  recall@1  recall@5 recall@10
-  subtoken  name         0.746     61.3%     91.8%     96.0%
-  subtoken  doc-phrase   0.968     95.3%     98.4%     98.8%
+  subtoken  name         0.746     61.2%     91.8%     96.0%
+  subtoken  doc-phrase   0.967     95.3%     98.4%     98.8%
   name-exact name         0.960     91.3%     99.3%     99.4%
   name-exact doc-phrase   0.016      0.8%      2.4%      2.6%
   anchored  name         0.748     62.3%     91.0%     94.6%
-  anchored  doc-phrase   0.963     94.6%     98.2%     98.7%
+  anchored  doc-phrase   0.963     94.5%     98.2%     98.7%
   routed    name         0.960     91.3%     99.3%     99.4%
   routed    doc-phrase   0.967     95.3%     98.3%     98.6%
 ```
-(routing chose name-exact on 2,984/2,986 NAME queries.)
+(routing chose name-exact on 2,986/2,988 NAME queries.)
 
-### `ripwire .` (repo root; population 3,497, scored 3,497, rule=exhaustive)
+### `ripwire .` (repo root; population 3,499, scored 3,499, rule=exhaustive)
 ```
-  ranker    query-mode     MRR  recall@1  recall@5 recall@10
   subtoken  name         0.724     59.3%     88.9%     93.4%
   subtoken  doc-phrase   0.930     90.8%     95.2%     95.9%
-  name-exact name         0.922     85.4%     97.5%     98.4%
+  name-exact name         0.922     85.5%     97.5%     98.4%
   name-exact doc-phrase   0.018      0.6%      2.7%      3.5%
   anchored  name         0.726     60.5%     87.6%     92.1%
   anchored  doc-phrase   0.925     90.0%     94.9%     95.8%
-  routed    name         0.922     85.4%     97.5%     98.5%
-  routed    doc-phrase   0.929     90.8%     95.1%     95.7%
+  routed    name         0.922     85.5%     97.5%     98.5%
+  routed    doc-phrase   0.929     90.8%     95.0%     95.7%
 ```
-(routing chose name-exact on 3,495/3,497 NAME queries.)
+(routing chose name-exact on 3,497/3,499 NAME queries.)
 
 **The verdict below is unchanged by the re-measurement** — every ordering it rests on still holds:
 name-exact wins the NAME mode, collapses on doc-phrase, subtoken+body is the mirror image, and routed

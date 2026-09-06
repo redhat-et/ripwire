@@ -118,11 +118,52 @@ inline constexpr float kWeakLexicalScoreThreshold = 1.0f;
 // defined with the LB-2 anchor-plausibility machinery below; the LB-3 variant guard reuses the bound
 inline std::uint32_t routeCarrierCap( const IngestResult& ing ) noexcept;
 
+// THE pass-2 scan text for one file, resolved by one rule in one place: the caller's preloaded corpus when
+// it supplied one, the docText override when the file has one, else the file's bytes read into `scratch`.
+// Returns nullptr or an EMPTY string for "skip this file" — which is what an out-of-range preloaded entry,
+// an empty docText override and an unreadable file have always meant. `scratch` is the caller's reusable
+// buffer so the disk path still allocates once per worker, not once per file.
+//
+// buildLexicalCorpusText below preloads THROUGH THIS SAME FUNCTION, so a preloaded corpus is byte-identical
+// to what the disk path would have scanned by construction rather than by two rules agreeing.
+inline const std::string* lexicalScanText( const IngestResult& ing, std::size_t f,
+                                           const std::vector<std::string>* preloaded, std::string& scratch )
+{
+    if( preloaded != nullptr )
+    {
+        return ( f < preloaded->size() ) ? &( *preloaded )[f] : nullptr;
+    }
+    // P1-B: a document file (notebook/html/csv) is indexed by its EXTRACTED text, not its raw bytes, so a
+    // query matches the notebook's prose/code, not its JSON envelope (read-only lookup — docText is never
+    // written here, so concurrent finds are safe).
+    if( const auto it = ing.docText.find( std::uint32_t( f ) ); it != ing.docText.end() )
+    {
+        return &it->second;
+    }
+    scratch.clear();
+    std::ifstream in( diskPath( ing, std::uint32_t( f ) ), std::ios::binary );
+    if( in )
+    {
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        scratch = ss.str();
+    }
+    return &scratch;
+}
+
+// preloadedFileText (optional): the corpus text the pass-2 scan would otherwise READ FROM DISK, indexed by
+// file id. Every call re-opens every file in the corpus — fine for one query, ruinous for a caller in a loop:
+// --eval-retrieval issues 2 calls per scored symbol, so on this repo it was ~11.8 MILLION file opens per run
+// and 48% of the eval's CPU was system time. A caller that scores many queries against ONE unchanging tree
+// builds this once (buildLexicalCorpusText) and hands it in. Entry semantics MIRROR the disk path exactly:
+// text[f] empty means "skip this file", which is what an empty docText override and an unreadable file both
+// already meant. nullptr keeps the original read-from-disk behaviour for every other caller.
 inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                                const std::vector<NodeId>& outTargets, std::string_view query,
                                                std::size_t pruneTopK, const std::vector<char>* alwaysExact,
                                                const std::vector<float>* symbolScoreMul, int pathFieldDefaultW = 0,
-                                               int basenameFieldDefaultW = 0, std::string_view pathRootPrefix = {} )
+                                               int basenameFieldDefaultW = 0, std::string_view pathRootPrefix = {},
+                                               const std::vector<std::string>* preloadedFileText = nullptr )
 {
     PROFILE_SCOPE_DESCRIBE( "lexical: lexicalScores (BM25 over symbols)" );
     const std::size_t S = ing.symbols.size();
@@ -614,23 +655,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                     {
                         continue; // no symbols in this file → skip
                     }
-                    // P1-B: a document file (notebook/html/csv) is indexed by its EXTRACTED text, not its raw
-                    // bytes, so a query matches the notebook's prose/code, not its JSON envelope (read-only
-                    // lookup — docText is never written here, so concurrent finds are safe).
-                    if( const auto it = ing.docText.find( std::uint32_t( f ) ); it != ing.docText.end() )
+                    const std::string* src = lexicalScanText( ing, f, preloadedFileText, loadedText );
+                    if( src != nullptr && !src->empty() )
                     {
-                        if( !it->second.empty() )
-                        {
-                            scanFileSymbols( f, it->second );
-                        }
-                        continue;
-                    }
-                    loadedText.clear();
-                    std::ifstream in( diskPath( ing, std::uint32_t( f ) ), std::ios::binary );
-                    if( in ) { std::ostringstream ss; ss << in.rdbuf(); loadedText = ss.str(); }
-                    if( !loadedText.empty() )
-                    {
-                        scanFileSymbols( f, loadedText ); // unreadable/empty → degrade (skip), as before
+                        scanFileSymbols( f, *src ); // unreadable/empty → degrade (skip), as before
                     }
                 }
             }
@@ -904,10 +932,29 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 inline std::vector<float> lexicalScores( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                          const std::vector<NodeId>& outTargets, std::string_view query,
                                          std::size_t pruneTopK = 0, const std::vector<char>* alwaysExact = nullptr,
-                                         int pathFieldDefaultW = 0, std::string_view pathRootPrefix = {} )
+                                         int pathFieldDefaultW = 0, std::string_view pathRootPrefix = {},
+                                         const std::vector<std::string>* preloadedFileText = nullptr )
 {
     return lexicalScoresTiered( ing, outOff, outTargets, query, pruneTopK, alwaysExact, nullptr, pathFieldDefaultW,
-                                /*basenameFieldDefaultW=*/0, pathRootPrefix );
+                                /*basenameFieldDefaultW=*/0, pathRootPrefix, preloadedFileText );
+}
+
+// Resolve the pass-2 scan text for every file ONCE, by the same rule the on-disk path uses: a docText
+// override when the file has one, the file's bytes otherwise, and an empty string for anything unreadable
+// (which both paths already treat as "skip"). Hand the result to lexicalScores/lexicalScoresTiered when
+// scoring many queries against one unchanging tree.
+inline std::vector<std::string> buildLexicalCorpusText( const IngestResult& ing )
+{
+    std::vector<std::string> text( ing.files.size() );
+    std::string              scratch;
+    for( std::size_t f = 0; f < ing.files.size(); ++f )
+    {
+        if( const std::string* src = lexicalScanText( ing, f, nullptr, scratch ); src != nullptr )
+        {
+            text[f] = *src;
+        }
+    }
+    return text;
 }
 
 // ─── whole-name / name-exact BM25 (EXPERIMENTAL, --route's identifier-query ranker) ──────────────────

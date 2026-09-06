@@ -666,6 +666,12 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
     const std::vector<RetrievalGoldItem>& sample     = goldSet.scored;
     if( sample.empty() ) { std::fprintf( stderr, "ripwire --eval-retrieval: no doc-commented symbols to sample\n" ); return 1; }
 
+    // Resolve the corpus text ONCE. lexicalScores re-opens every file in the tree on every call, which is
+    // right for a single query and ruinous here: two calls per scored symbol over 3,497 symbols was ~11.8
+    // million file opens per run, and 48% of this eval's CPU was system time. Hoisting the read out of the
+    // per-query loop changes no scored value — the scan sees byte-identical text, just not via the kernel.
+    const std::vector<std::string> corpusText = buildLexicalCorpusText( ing );
+
     // rankers: subtoken+body (--for default), name-exact, anchored (over subtoken+body), routed (chooseForRanker).
     // Two query modes: name (a), doc-phrase (b). One RetrievalAcc per (ranker, mode).
     RetrievalAcc subN, subP, exN, exP, anN, anP, rtN, rtP;
@@ -677,7 +683,7 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
     {
         // (a) NAME query
         {
-            const std::vector<float> sub = lexicalScores( ing, g.outOff, g.outTargets, sm.name );
+            const std::vector<float> sub = lexicalScores( ing, g.outOff, g.outTargets, sm.name, 0, nullptr, 0, {}, &corpusText );
             const std::vector<float> ex  = lexicalScoresNameExact( ing, sm.name );
             const std::vector<float> an  = anchoredLexicalRank( g, sub );
             const RouteChoice        rc  = chooseForRanker( ing, sm.name );
@@ -693,7 +699,7 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
         }
         // (b) DOC-PHRASE query
         {
-            const std::vector<float> sub = lexicalScores( ing, g.outOff, g.outTargets, sm.phrase );
+            const std::vector<float> sub = lexicalScores( ing, g.outOff, g.outTargets, sm.phrase, 0, nullptr, 0, {}, &corpusText );
             const std::vector<float> ex  = lexicalScoresNameExact( ing, sm.phrase );
             const std::vector<float> an  = anchoredLexicalRank( g, sub );
             const RouteChoice        rc  = chooseForRanker( ing, sm.phrase );
@@ -1050,6 +1056,10 @@ inline int runEvalMined( const std::string& root, const IngestResult& ing, const
     // string keys only — no fuzzy suffix matching (a basename collision must not silently mis-credit
     // a ranker).
     const std::uint32_t F = std::uint32_t( ing.files.size() );
+    // Same hoist as --eval-retrieval: lexicalScores re-opens every file in the tree on every call, so a loop
+    // over mined pairs re-read the whole corpus per pair (METHODOLOGY §3 — the sibling instances of a defect
+    // are the defect). Byte-identical scores; the scan just stops going via the kernel.
+    const std::vector<std::string> corpusText = buildLexicalCorpusText( ing );
     HashMap<std::string, std::uint32_t> pathToFile;               // gold-path → fileId (as-crawled + root-relative)
     const std::string rootPrefix = root.empty() ? std::string() : ( root.back() == '/' ? root : root + "/" );
     for( std::uint32_t f = 0; f < F; ++f )
@@ -1089,7 +1099,7 @@ inline int runEvalMined( const std::string& root, const IngestResult& ing, const
         // see the block comment above. Computed once, scored into both rows (never a drifted second impl).
         const RouteChoice        rc   = chooseForRanker( ing, p.query );
         const std::vector<float> base = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExact( ing, p.query )
-                                                                            : lexicalScores( ing, g.outOff, g.outTargets, p.query );
+                                                                            : lexicalScores( ing, g.outOff, g.outTargets, p.query, 0, nullptr, 0, {}, &corpusText );
         const std::vector<float> forFileScore = maxPoolToFiles( ing, base, F );
         addMinedRow( forA[idx],   rankFiles( forFileScore ), gold, goldTotal );
         addMinedRow( queryA[idx], rankFiles( forFileScore ), gold, goldTotal );
