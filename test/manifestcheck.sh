@@ -32,6 +32,32 @@ text = open(sys.argv[1]).read()
 m = re.search(r'for _g in (.*?); do', text, re.S)
 sys.exit('no loop found') if not m else print(len(m.group(1).split()))
 " "$REGRESSION" )"
+# ── TAIL ARM: nothing may sit between the gate list and `do` ────────────────────────────────────────
+# A gate name parked AFTER the loop's `; do` is not in the loop and never runs, yet BOTH existing arms
+# stay green: "every gate FILE is listed" matches the name anywhere in the file, and the count is
+# derived from the same text. It is produced by the obvious merge resolution -- whitespace-splitting
+# the ~12,000-char list line and appending -- which yields
+#     for _g in ... connectjoincheck; do termmargincheck;;
+# `bash -n` clean, exit 0, gate silently disabled. This arm reads the tail of the list line directly:
+# after `; do` there must be nothing. Its mutation control parks a name there and requires a red.
+loopTail="$( awk '/^for _g in /{ sub(/^.*; do/, ""); print; exit }' "$REGRESSION" )"
+if [ -n "$( printf '%s' "$loopTail" | tr -d '[:space:]' )" ]; then
+    printf 'FAIL: text sits after the gate loop'"'"'s "; do" — those names never run: %s\n' "$loopTail"
+    fail=1
+else
+    printf 'PASS: nothing follows the gate loop'"'"'s "; do" — no gate is parked outside the loop\n'
+fi
+tailMut="$( mktemp -t manifestcheck_tail.XXXXXX )"
+awk '/^for _g in /{ print $0 " parkedcheck;"; next } { print }' "$REGRESSION" > "$tailMut"
+tailMutTail="$( awk '/^for _g in /{ sub(/^.*; do/, ""); print; exit }' "$tailMut" )"
+if [ -n "$( printf '%s' "$tailMutTail" | tr -d '[:space:]' )" ]; then
+    printf 'PASS: mutation control: a gate parked after "; do" is caught (saw "%s")\n' "$tailMutTail"
+else
+    printf 'FAIL: mutation control: a gate parked after "; do" was NOT caught — the tail arm is inert\n'
+    fail=1
+fi
+rm -f "$tailMut"
+
 evalsStated="$( grep -oE 'loop in `test/regression\.sh` names [0-9]+' "$EVALS" | head -1 | grep -oE '[0-9]+$' )"
 # DERIVE the line pointer instead of hard-coding it. This message used to end "update
 # docs/EVALS.md:395" as a literal. The sentence it checks has since moved to line 6217, so the gate
