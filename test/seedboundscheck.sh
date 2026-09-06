@@ -108,6 +108,111 @@ printf '%s' "$OUT" | grep -o '<s [^>]*>' | grep -q 'defs=' \
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 echo
+echo "=== a BOUNDED traversal discloses the bound that BIT, not only the bound that was SET ==="
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+# THE SECOND DEFECT, one round on from the first (harvest B card C2, 2026-09-05). M20 above made the BOUND
+# readable: --around's root now carries depth= and fanout=. It did not make the BITE readable. The gate's own
+# framing above says the reader "could not tell 'X is not in this neighbourhood' from 'X was outside the
+# fanout'" — with the bound echoed but no bite flag that sentence is STILL true, because a reader handed
+# fanout="32" cannot tell whether 32 was a ceiling that never bound or a knife that cut.
+#
+# MEASURED on db6a416d, this repo:  --around=buildGraph                     → 31 <s> rows
+#                                   --around=buildGraph --around-fanout=200 → 72 <s> rows
+# 41 direct neighbours dropped, and nothing in the answer says so. The verb's own legend claims "a row's
+# absence means outside them, not nonexistent" — true, but unactionable: it cannot tell the agent whether
+# raising the bound would return anything, which is the whole "can I ask for more?" question.
+#
+# THE FAMILY is every traversal with a settable bound, and the property is stated in both directions: the
+# attribute appears when the bound cut, and is ABSENT when it did not (an always-present flag carries no
+# information). --slice-flow (flow_truncated="1") and --connect (truncated="paths", <unconnected radius=>)
+# already comply and are asserted here because the property belongs to the family, not to --around.
+#
+# RED-FIRST (base binary db6a416d): both --around arms; the --slice-flow and --connect arms pass on it.
+R2="$TMP/hub"; mkdir -p "$R2"
+cat > "$R2/hub.cpp" <<'EOF'
+int n1( int x ) { return x + 1; }
+int n2( int x ) { return x + 2; }
+int n3( int x ) { return x + 3; }
+int n4( int x ) { return x + 4; }
+int n5( int x ) { return x + 5; }
+int n6( int x ) { return x + 6; }
+int hub( int x ) { return n1( x ) + n2( x ) + n3( x ) + n4( x ) + n5( x ) + n6( x ); }
+int mid2( int x ) { return hub( x ); }
+int top2( int x ) { return mid2( x ); }
+EOF
+ROOT2(){ "$BIN" "$R2" "$@" --no-cache 2>/dev/null | sed 's/<!--[^>]*-->//g' | grep -o '<r [^>]*>' | head -1; }
+
+# Three runs over ONE fixture isolate the two bounds from each other, which is the property that makes each
+# attribute worth reading: a single "something was cut" flag would not tell the agent WHICH knob to turn.
+#
+#  1) fanout alone.  --around=hub --around-fanout=2 --around-depth=9: hub has 7 undirected neighbours
+#     (6 callees + mid2) so the cap cuts 5, and hub is their ONLY route, so no later hop re-admits them —
+#     fanout_cut="5", exactly. The depth is deliberately generous: the walk exhausts what the cap left it,
+#     so depth_truncated must be ABSENT even though 5 symbols are missing. Wrong attribution is a failure.
+EL="$( ROOT2 --around=hub --around-depth=9 --around-fanout=2 )"
+printf '%s' "$EL" | grep -qF 'fanout_cut="5"' \
+  && ok '--around fanout=2 on a 7-neighbour hub: root discloses fanout_cut="5" (exact, not a floor)' \
+  || no "--around: the fanout cap cut 5 symbols and the answer does not say so — 'X is absent' is unreadable: $EL"
+printf '%s' "$EL" | grep -q 'depth_truncated=' \
+  && no "--around: a FANOUT cut is reported as a DEPTH truncation — the agent would raise the wrong knob: $EL" \
+  || ok "--around depth=9 fanout=2: no depth_truncated= (the walk exhausted what the cap left it)"
+
+#  2) depth alone.  --around=n1 --around-depth=1 --around-fanout=50: n1's one neighbour is hub, whose other
+#     seven neighbours sit one hop further out. Nothing is capped; the depth bound alone ends the walk.
+EL="$( ROOT2 --around=n1 --around-depth=1 --around-fanout=50 )"
+printf '%s' "$EL" | grep -qF 'depth_truncated="1"' \
+  && ok '--around depth=1 with symbols one hop further out: root discloses depth_truncated="1"' \
+  || no "--around: the depth bound left reachable symbols out and the answer does not say so: $EL"
+printf '%s' "$EL" | grep -q 'fanout_cut=' \
+  && no "--around: fanout_cut= reported where fanout=50 could not bind on a 1-neighbour seed: $EL" \
+  || ok "--around depth=1 fanout=50: no fanout_cut= (the cap never bound)"
+
+#  3) neither.  Bounds wide enough to bind nothing emit NEITHER attribute — presence has to mean something,
+#     and an unclipped neighbourhood must stay byte-identical to the pre-C2 output.
+EL="$( ROOT2 --around=hub --around-depth=9 --around-fanout=50 )"
+printf '%s' "$EL" | grep -q 'fanout_cut=' \
+  && no "--around: fanout_cut= emitted where the cap never bound — the flag is noise: $EL" \
+  || ok "--around fanout=50: no fanout_cut= (absent means the cap never bound)"
+printf '%s' "$EL" | grep -q 'depth_truncated=' \
+  && no "--around: depth_truncated= emitted where the walk exhausted the component: $EL" \
+  || ok "--around depth=9: no depth_truncated= (absent means the walk reached the end)"
+
+# the legend defines what it emits (the house rule, legendcoveragecheck's subject)
+LEG="$( "$BIN" "$R2" --around=hub --around-depth=1 --around-fanout=2 --no-cache 2>/dev/null | sed 's/<r .*//' )"
+for word in 'depth_truncated=' 'fanout_cut='; do
+    # charged where the attribute is (the at= rule): the clause must be ABSENT from an unclipped run too,
+    # asserted just below — a legend the default map pays for is the defect this house rule exists to stop.
+    printf '%s' "$LEG" | grep -qF "$word" \
+      && ok "--around legend defines $word" \
+      || no "--around emits $word with no legend clause"
+done
+LEG="$( "$BIN" "$R2" --around=hub --around-depth=9 --around-fanout=50 --no-cache 2>/dev/null | sed 's/<r .*//' )"
+printf '%s' "$LEG" | grep -qE 'depth_truncated=|fanout_cut=' \
+  && no "--around: an unclipped walk still pays for the bite legend — charge the clause where the attributes are" \
+  || ok "--around: an unclipped walk carries no bite clause (zero bytes when neither bound bit)"
+
+# --- the family members that already comply -------------------------------------------------------------
+# --slice-flow: depth= is the bound, flow_truncated="1" is the bite. Both halves, on the same symbol.
+SL(){ "$BIN" "$ROOT" --slice=connectSubgraph:res --slice-flow=both "$@" --no-cache 2>/dev/null | grep -o '<slice [^>]*>' | head -1; }
+printf '%s' "$( SL --slice-depth=1 )" | grep -qF 'flow_truncated="1"' \
+  && ok '--slice-flow --slice-depth=1: discloses flow_truncated="1"' \
+  || no "--slice-flow: a depth-1 flow slice does not disclose its truncation"
+printf '%s' "$( SL --slice-depth=32 )" | grep -q 'flow_truncated=' \
+  && no "--slice-flow --slice-depth=32: flow_truncated= emitted where the bound never bound" \
+  || ok "--slice-flow --slice-depth=32: no flow_truncated= (absent means the flow closed)"
+
+# --connect: radius= rides the root AND every <unconnected> block, so an empty join names the bound in force.
+# hub—mid2—top2 is two undirected hops, so radius 1 cannot join them: the emptiness IS radius-scoped.
+UNC="$( "$BIN" "$R2" --connect=hub,top2 --connect-radius=1 --no-cache 2>/dev/null | sed 's/<!--[^>]*-->//g' )"
+printf '%s' "$UNC" | grep -qE '<connect [^>]*radius="1"' \
+  && ok '--connect: the root echoes the radius actually searched' \
+  || no "--connect: the root does not echo radius=: $( printf '%s' "$UNC" | grep -o '<connect [^>]*>' )"
+printf '%s' "$UNC" | grep -qE '<unconnected [^>]*radius="1"' \
+  && ok '--connect: an <unconnected> block names the radius its emptiness is scoped to' \
+  || no "--connect: <unconnected> does not name the bound — 'no join' reads as 'no join exists'"
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+echo
 echo "=== the two seeded verbs that already complied (the property is the family's) ==="
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 "$BIN" "$R" --path=dup,leaf --no-cache 2>/dev/null | grep -q 'from_defs="2"' \
