@@ -193,7 +193,7 @@ if RIPWIRE_BIN="$BIN" bash "$ROOT/test/compresscheck.sh" >/dev/null 2>&1; then o
 #     empty-diff contract, --token-budget composition). Uses the same binary under test.
 if RIPWIRE_BIN="$BIN" bash "$ROOT/test/handoffcheck.sh" >/dev/null 2>&1; then ok "handoff gate (test/handoffcheck.sh)"; else no "handoff gate (test/handoffcheck.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/handoffcheck.sh" 2>&1 | grep -i fail | head -8; fi
 
-# 3q) printf-family byte-parity fence (harvest-B lane R8, PLAN_HARVEST_B_2026-09-05.md §2/§8 item H) — a
+# 3q) printf-family byte-parity fence — a
 #     printf/fprintf/snprintf -> std::format/std::print conversion must not move one byte of any verb's
 #     stdout/stderr; per-verb/per-stream SHA-256 against test/printf_parity.manifest. Individually invoked
 #     (not folded into the bulk absorb loop below) so this gate's addition does not perturb that loop's

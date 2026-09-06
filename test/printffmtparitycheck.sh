@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # printffmtparitycheck.sh — the byte-parity fence for any printf-family -> std::format/std::print
-# conversion (harvest-B lane R8, PLAN_HARVEST_B_2026-09-05.md §2/§8 item H).
+# conversion.
 #
 # THE PROPERTY THIS GATE PROVES, AND WHY IT IS THE WHOLE SAFETY STORY FOR THAT MIGRATION: the codebase
 # is printf-family by deliberate choice (0 std::cout, 1529 fprintf/printf/snprintf/sprintf call sites
@@ -29,6 +29,13 @@
 # is edited, which is true of every commit in a printf-family conversion BEFORE it lands, so this verb
 # false-positives on the gate's own normal use and would falsely blame the conversion for a byte change
 # that is really "you have uncommitted changes"; confirmed live during the R8 pilot conversion).
+#
+# MAINTENANCE COST, stated so nobody mistakes it for a defect: this manifest pins ABSOLUTE output hashes,
+# so ANY change to any verb's bytes reds it — a legitimate disclosure added by an unrelated lane just as
+# surely as a bad printf conversion. That is the same contract test/golden.xml and the showcase capture
+# carry, and the same remedy applies: re-pin with UPDATE_GOLDEN=1 and REVIEW THE DIFF, confirming every
+# moved verb is explained by a change you meant. It is a fence around a conversion batch, not a claim that
+# output is frozen forever.
 #
 # Usage:
 #   bash test/printffmtparitycheck.sh                    # compare against the committed manifest

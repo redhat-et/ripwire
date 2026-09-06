@@ -242,7 +242,7 @@ jobs:
       #
       # Floor is 14, not merely "whichever toolset exists": src/verbs_lint.h's printf-family pilot calls
       # std::print (<print>), which libstdc++ implements starting at GCC 14 — see that file's include-comment
-      # for the evidence (CI run IDs) and PLAN_HARVEST_B_2026-09-05.md §2 item H for the full reasoning. A
+      # for the evidence (CI run IDs). A
       # probe that accepted 12/13 here would report "toolset found, leg is fine" right up to the AppStream
       # refresh that makes it false; raise this floor again if a later conversion needs a newer libstdc++.
       - name: Install the RHEL build toolchain

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <algorithm>   // std::any_of (H8: findings_capped over the emitted rules)
-#include <format>      // std::format — harvest-B R8 printf-family pilot (PLAN_HARVEST_B_2026-09-05.md §2/§8 item H)
+#include <format>      // std::format — the printf-family pilot conversion (see test/printffmtparitycheck.sh)
 #include <print>       // std::print — same pilot; zero-dependency C++23. Floor is libstdc++ 14 / gcc-toolset-14
                        // (std::format alone needs only 13): confirmed present on every CI leg as of this commit —
                        // RHEL/UBI9 CI run 33981920823 ("rhel (ubi9, plain)") and the manylinux_2_28 release leg
