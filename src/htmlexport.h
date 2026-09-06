@@ -31,6 +31,7 @@
 #include "cli.h"         // for ColorBy — the --color-by=MODE enum baked into COLOR_MODE (no cycle: cli.h pulls ingest.h/version.h only)
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -220,6 +221,31 @@ static const char kScriptColour[] = R"JS(
   // crosses both directions, because a symbol's neighbourhood genuinely is its callers AND its callees;
   // what it no longer does is forget which was which, so the node view can state the split.
   var GN = NODES.length, GL = LINKS.length;
+
+  // ---- per-edge RESOLVER CONFIDENCE, folded into the LINKS records once.
+  //
+  // LCONF is emitted parallel to LINKS (Graph::outVals in hundredths — see writeHtml for what the
+  // number is made of). It is folded in here rather than carried as a parallel array because every view
+  // hands loadSubset either LINKS itself or copies of its records, and a positional array would have to
+  // be re-indexed correctly at each of those seams — three chances to get an off-by-one wrong in a
+  // channel whose whole job is to be trustworthy.
+  //
+  // THE THRESHOLD, and why this one. 0.20 is the weakest confidence graph.h assigns to a call it DID
+  // pin to a single target (its widest resolution tier). Below it, the confidence was either divided
+  // among several candidate definitions the resolver could not choose between, or deboosted for an
+  // overcommon or leading-underscore name. So "dashed" means "this edge is a guess", derived from the
+  // resolver's own tier constants rather than from a percentile of whatever this corpus happens to
+  // contain — the same reason the cx/churn ramp uses fixed thresholds.
+  //
+  // It errs toward NOT dashing, and that is worth naming: an edge resolved at the 0.2 tier with one
+  // candidate draws solid, and a 0.5-tier call split two ways lands at 0.25 and also draws solid. The
+  // dash is a floor on doubt, not a census of it. Measured share dashed: 16.9% of 243 edges on this
+  // repository's default page, 21.9% of 183 on the README hero, 28.2% of 4712 at --top-k=2000.
+  var LOW_CONF = 20;
+  for (var ci = 0; ci < GL; ci++) {
+    LINKS[ci].c = ( typeof LCONF !== 'undefined' && ci < LCONF.length ) ? LCONF[ci] : 100;
+  }
+
   var gout = [], gin = [];
   for (var i = 0; i < GN; i++) { gout.push([]); gin.push([]); }
   for (var k = 0; k < GL; k++) {
@@ -251,8 +277,10 @@ static const char kScriptColour[] = R"JS(
     var idSet = seen;
     var edges = [];
     for (var k = 0; k < GL; k++) {
-      var s = LINKS[k].s, t = LINKS[k].t;
-      if (idSet.has(s) && idSet.has(t)) edges.push({ s: s, t: t });
+      // the RECORD, not a fresh {s,t}: a rebuilt pair drops the confidence this edge was emitted with,
+      // and an edge that silently loses its own doubt draws solid — a false statement, in the one view
+      // where a reader is looking closely at a handful of edges
+      if (idSet.has(LINKS[k].s) && idSet.has(LINKS[k].t)) edges.push(LINKS[k]);
     }
     return { ids: ids, edges: edges, callees: callees, callers: callers };
   }
@@ -311,6 +339,7 @@ static const char kScriptSim[] = R"JS(
   // Self-calls the sim cannot draw, counted per load (see loadSubset's edge loop) so the caption can
   // state them. A subset view's L was never expected to equal EDGE_TOTAL; the whole-map view's is.
   var selfEdgesDropped = 0;
+  var lowConfEdges = 0;          // in-view edges below LOW_CONF — the caption states the count with the threshold
   var labelSet = new Set();      // local indices that get a persistent text label (see loadSubset's rule)
   // ---- module HULLS: the groups draw() outlines, rebuilt per load (see loadSubset's hull block).
   var hullGroups = [];           // [{ comm, name, idx: [local indices] }], largest first
@@ -430,6 +459,7 @@ static const char kScriptSim[] = R"JS(
     N = nodes.length;
     links = [];
     selfEdgesDropped = 0;
+    lowConfEdges = 0;
     for (var k = 0; k < edges.length; k++) {
       var s = gidToLocal.get(edges[k].s), t = gidToLocal.get(edges[k].t);
       if (s === undefined || t === undefined) continue;
@@ -440,7 +470,9 @@ static const char kScriptSim[] = R"JS(
       // against each other, so the difference is counted here and stated by renderProv rather than left
       // as an unexplained gap between two numbers on the same screen.
       if (s === t) { selfEdgesDropped++; continue; }
-      links.push({ s: s, t: t });
+      var ec = ( edges[k].c === undefined ) ? 100 : edges[k].c;
+      if (ec < LOW_CONF) { lowConfEdges++; }
+      links.push({ s: s, t: t, c: ec });
     }
     L = links.length;
     nbr = [];
@@ -847,18 +879,28 @@ static const char kScriptDraw[] = R"JS(
     //
     // Both passes are ONE path each rather than a beginPath/stroke per edge. Same pixels, and it is what
     // makes a second pass over up to 13819 edges affordable at all.
+    // A LOW-CONFIDENCE SHAFT IS DASHED. See LOW_CONF for what the number behind it is, where the
+    // threshold comes from, and which direction it errs in. Two passes because a dash pattern is canvas
+    // STATE and cannot vary inside one path; the alternative is a beginPath/stroke per edge, which is
+    // what this loop was before and what makes 13819 edges unaffordable.
     var ARROW_LEN_PX = 7.0, ARROW_HALF_PX = 3.2, MIN_ARROW_SHAFT_PX = 13.0;
+    var DASH_ON_PX = 4.0, DASH_OFF_PX = 3.5;
     ctx.strokeStyle = '#8a8f98';
     ctx.lineWidth = 0.8/scale;
     ctx.globalAlpha = 0.26;
-    ctx.beginPath();
-    for (var k = 0; k < L; k++) {
-      var s = links[k].s, t = links[k].t;
-      if (hl && !hl.has(s) && !hl.has(t)) continue;
-      ctx.moveTo(nodes[s].x, nodes[s].y);
-      ctx.lineTo(nodes[t].x, nodes[t].y);
+    for (var pass = 0; pass < 2; pass++) {
+      ctx.setLineDash(pass ? [DASH_ON_PX/scale, DASH_OFF_PX/scale] : []);
+      ctx.beginPath();
+      for (var k = 0; k < L; k++) {
+        var s = links[k].s, t = links[k].t;
+        if (hl && !hl.has(s) && !hl.has(t)) continue;
+        if ((links[k].c < LOW_CONF) !== (pass === 1)) continue;
+        ctx.moveTo(nodes[s].x, nodes[s].y);
+        ctx.lineTo(nodes[t].x, nodes[t].y);
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
+    ctx.setLineDash([]);
     var alen = ARROW_LEN_PX/scale, ahalf = ARROW_HALF_PX/scale;
     ctx.fillStyle = '#c3c9d2';
     ctx.globalAlpha = 0.62;
@@ -1241,10 +1283,15 @@ static const char kScriptRouter[] = R"JS(
     // silent inconsistency this caption exists to prevent.
     var drops = ( currentView !== 'overview' && selfEdgesDropped > 0 )
               ? ' (' + selfEdgesDropped + ' self-call' + (selfEdgesDropped === 1 ? '' : 's') + ' not drawn)' : '';
+    // The dashed shafts need a key, and it has to name the THRESHOLD and not just the word "low":
+    // "some of these edges are uncertain" is not a disclosure, it is a mood. Stated as a count so a
+    // reader can weigh it, and as a number so it means the same thing on every page.
+    var dashes = ( currentView !== 'overview' && lowConfEdges > 0 )
+               ? ', <b>' + lowConfEdges + '</b> dashed = resolver confidence below ' + (LOW_CONF/100).toFixed(2) : '';
     // "caller → callee" is stated for the same reason every other fact on this line is: the picture now
     // draws a direction, and a screenshot travelling without this caption would leave the reader to
     // guess which end of an arrow is the one doing the calling.
-    var l2 = k('view') + '<b>' + viewName + '</b>' + (currentView === 'overview' ? '' : ': ' + N + ' nodes / ' + L + ' edges, arrow points caller → callee' + drops) + '  ' +
+    var l2 = k('view') + '<b>' + viewName + '</b>' + (currentView === 'overview' ? '' : ': ' + N + ' nodes / ' + L + ' edges, arrow points caller → callee' + dashes + drops) + '  ' +
              k('colour') + '<b>' + escHtml(metric) + '</b>' + (mode === 'churn' && !CHURN_OK ? ' <b>unavailable (no git history)</b>' : '') + '  ' +
              k('labels') + 'top ' + MAX_LABELS + ' by in-view degree, one per name' +
              (settleTimedOut ? '  <b>settling…</b> (layout over the ' + SETTLE_BUDGET_MS + ' ms budget, still converging)'
@@ -1883,8 +1930,22 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         idxOf[order[k]] = k;
     }
 
-    // build LINKS: edges among selected nodes, sorted (s asc, t asc) for determinism
-    struct Edge { std::uint32_t s, t; };
+    // build LINKS: edges among selected nodes, sorted (s asc, t asc) for determinism.
+    //
+    // `w` is Graph::outVals[e] — the resolver's OWN per-edge weight, parallel to outTargets, and until
+    // now computed, stored, and never exported anywhere: not to XML, not to JSON, not here. (outProv is
+    // a different quantity and IS exported, but only under --scip; this is not that.) It is what the
+    // resolver believed about this specific (caller, callee) pair: the tier confidence it resolved at
+    // (1.0 same-file, 0.5 and 0.2 for the wider tiers), times a 0.1 deboost for an overcommon or
+    // leading-underscore name, DIVIDED BY the number of candidate targets when the call could not be
+    // pinned to one, times sqrt(number of references) for repeat evidence, capped at 8.
+    //
+    // THE GRANULARITY IS THE POINT. The XML's `amb="K"` is a PER-SYMBOL count — "K of this symbol's
+    // calls hit a name with several definitions" — and 35.4% of emitted call edges carry it. Dashing
+    // all of a symbol's edges because one of its calls was ambiguous would be a false statement about
+    // every other edge it has, which is why the honest signal had to come from the per-edge array and
+    // not from the symbol-level number that was already on hand.
+    struct Edge { std::uint32_t s, t; float w; };
     std::vector<Edge> edges;
     for( NodeId k = 0; k < cap; ++k )
     {
@@ -1895,11 +1956,15 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
             const NodeId tgt = outTargets[e];
             if( tgt < S && idxOf[tgt] != kNoNode )
             {
-                edges.push_back( { si, idxOf[tgt] } );
+                // outVals is sized to outTargets by buildGraph; the guard covers a Graph assembled by a
+                // harness that filled only the topology (degrade to "no confidence stated", never a
+                // read past the end)
+                const float w = ( e < g.outVals.size() ) ? g.outVals[e] : 0.f;
+                edges.push_back( { si, idxOf[tgt], w } );
             }
         }
     }
-    // sort (s, t) for determinism
+    // sort (s, t) for determinism — the weight rides along and never orders anything
     std::sort( edges.begin(), edges.end(), [ ]( const Edge& a, const Edge& b )
     { return a.s != b.s ? a.s < b.s : a.t < b.t; } );
     // deduplicate (same symbol can appear via different resolve paths)
@@ -2079,6 +2144,20 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
             std::fprintf( out, "," );
         }
         std::fprintf( out, "\n" );
+    }
+    std::fprintf( out, "];\n" );
+
+    // ...and the per-edge resolver confidence, as a PARALLEL array in hundredths rather than a `"w":`
+    // key inside each LINKS record. Same reason FCHURN is keyed by file index instead of copied into
+    // every node: at the 5000-node ceiling this map carries 13819 edges, where the key text alone would
+    // be ~85 KB of a page that has to load with no network. Integers because the consumer is a
+    // threshold comparison, not arithmetic — two decimal places is far finer than the decision needs,
+    // and a fixed-point integer cannot print differently on a different libc.
+    std::fprintf( out, "const LCONF = [" );
+    for( std::size_t k = 0; k < edges.size(); ++k )
+    {
+        const long hundredths = std::lround( double( edges[k].w ) * 100.0 );
+        std::fprintf( out, "%s%ld", k ? "," : "", hundredths < 0 ? 0L : ( hundredths > 800L ? 800L : hundredths ) );
     }
     std::fprintf( out, "];\n" );
 

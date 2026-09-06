@@ -51,6 +51,9 @@
 #   (U) HULLS   module identity as CONTAINMENT, because comm % 12 collides 24-25 ways at top-k 2000 —
 #               drawn behind the graph, independent of --color-by, purity-tested, and both truncations
 #               (the cap and the purity drop) stated in the caption
+#   (V) EDGE CONFIDENCE  Graph::outVals — computed, stored and never exported anywhere — reaches the
+#               page PER EDGE (not the per-symbol amb= that was already on hand and would be a lie on
+#               two edges in three) and dashes a low-confidence shaft, with count and threshold stated
 #
 # Usage:
 #   test/htmlrendercheck.sh                          # uses build/ripwire on test/fixture
@@ -698,6 +701,47 @@ inbody draw 'placeTextAt\(hullAnchors' 'placeTextAt' "(U11) hull names are place
 ncells="$( grep -c 'var labelCells = new Set' "$PAGE" )"
 [ "$ncells" = "1" ] && ok "(U12) control: exactly one label occupancy grid on the page ($ncells)" \
                     || no "(U12) control: $ncells occupancy grids — two placement rules will disagree about what overlaps"
+
+# ── (V) PER-EDGE RESOLVER CONFIDENCE, drawn as a dashed shaft ─────────────────────────────────────────
+#
+#     Graph::outVals holds a float per out-edge — the confidence the resolver had in that specific
+#     (caller, callee) pair — and it was computed, stored, and exported NOWHERE: not to XML, not to
+#     JSON, not to this page. (outProv is a different quantity and is exported, but only under --scip.)
+#     Meanwhile 35.4% of emitted call edges carry the symbol-level `amb=`, which is the WRONG number for
+#     this: it counts how many of a SYMBOL's calls were ambiguous, so dashing all of that symbol's edges
+#     would be a false statement about every one of them that was not. These arms hold the granularity,
+#     not just the feature.
+lconf="$( grep -m1 'const LCONF' "$PAGE" )"
+if [ -z "$lconf" ]; then
+    no "(V1) the page carries no per-edge confidence array"
+else
+    nconf="$( printf '%s' "$lconf" | grep -oE '[0-9]+' | wc -l | tr -d ' ' )"
+    nlink="$( grep -cE '^  \{"s":[0-9]+,"t":[0-9]+\}' "$PAGE" | tr -d ' ' )"
+    # THE GRANULARITY ARM. One value per EDGE, positionally parallel to LINKS — not one per symbol,
+    # which is the number that was already on hand and would have been a lie on 2 edges in 3.
+    [ "$nconf" = "$nlink" ] && ok "(V1) one confidence value per EDGE, parallel to LINKS ($nconf of $nlink)" \
+                            || no "(V1) LCONF holds $nconf values for $nlink edges — not a per-edge quantity"
+    # (V2) control: the array must actually VARY. A constant would satisfy (V1) exactly, draw a picture
+    #      with no dashes in it, and pass every other arm here.
+    ndistinct="$( printf '%s' "$lconf" | grep -oE '[0-9]+' | sort -u | wc -l | tr -d ' ' )"
+    [ "$ndistinct" -ge 3 ] && ok "(V2) control: it carries real per-edge values, not a constant ($ndistinct distinct)" \
+                           || no "(V2) control: LCONF has only $ndistinct distinct values — it is not carrying the resolver's weights"
+fi
+# (V3)-(V5) the threshold is NAMED, is what selects the dash, and the dash is a screen quantity like
+#      every other measurement on this canvas (a world-space dash disappears at the auto-fit zoom).
+pin 'var LOW_CONF' 'var LOW_CONF' "(V3) the confidence threshold is a named constant, not a number buried in a branch"
+inbody draw 'links\[k\]\.c < LOW_CONF' 'LOW_CONF' "(V4) a shaft is dashed by ITS OWN edge's confidence against that threshold"
+inbody draw 'DASH_ON_PX/scale' 'DASH_ON_PX/scale' "(V5) the dash pattern is a screen size, so it survives the auto-fit zoom"
+# (V6)/(V7) DISCLOSURE. "Some of these edges are uncertain" is a mood, not a disclosure: the caption has
+#      to give the COUNT and the THRESHOLD, so the picture means the same thing on every page and a
+#      reader can weigh it rather than guess at it.
+inbody renderProv 'lowConfEdges' 'lowConfEdges' "(V6) the caption states how many shafts are dashed"
+inbody renderProv 'LOW_CONF' 'LOW_CONF' "(V7) and the numeric threshold that made them dashed"
+# (V8)/(V9) the ego view must hand loadSubset the LINKS RECORDS, not rebuilt {s,t} pairs: a rebuilt pair
+#      drops the confidence and the edge draws solid — an edge silently losing its own doubt, in the one
+#      view where a reader is looking closely at a handful of edges.
+inbody egoGraph 'edges\.push\(LINKS\[k\]\)' 'edges.push(LINKS[k])' "(V8) the ego view passes the edge records through, so an edge cannot lose its confidence on the way"
+absent 'edges\.push\(\{ s: s, t: t \}\)' "(V9) the rebuilt {s,t} pair that dropped it is gone"
 
 echo
 echo "  ($mutants mutation controls ran and went red on their mutants)"
