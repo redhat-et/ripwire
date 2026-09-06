@@ -31,8 +31,10 @@
 #   (E) the LINEAGE arm — README.md's "M repositories and P papers … survey of N tools" sentence must
 #       equal the row counts of docs/LINEAGE.md's own tables. Same discipline as (B), different
 #       ground truth: an advertised number is an ENUMERATED number, so the enumeration is the
-#       authority and the prose is checked against it. Sub-arms E1-E8 below; E4 is (E)'s mutation
-#       control, exactly as (C) is (B)'s, and E6/E7 carry their own.
+#       authority and the prose is checked against it. Sub-arms E1-E9 below; E4 is (E)'s mutation
+#       control, exactly as (C) is (B)'s, and E6/E7 carry their own. E9 checks a SECOND restatement
+#       of the folded/surveyed pair that drifted independently of the one E5 checks — see E9's own
+#       comment for the round that found it stale.
 #
 # WHY E6-E8 EXIST. A count can be arithmetically correct and still be a lie about a SET. LINEAGE.md
 # claims its folded tables and its surveyed table are DISJOINT — that is what makes "27 folded plus
@@ -232,6 +234,31 @@ elif [ "$l_repos" = "$d_folded" ] && [ "$l_papers" = "$d_papers" ] && [ "$l_tool
     ok "(E5) docs/LINEAGE.md's header ($l_repos / $l_papers / $l_tools) agrees with its own tables"
 else
     no "(E5) docs/LINEAGE.md's header states $l_repos / $l_papers / $l_tools but its own tables enumerate $d_folded / $d_papers / $d_surveyed"
+fi
+
+# (E9) docs/LINEAGE.md's header carries a SECOND folded/surveyed restatement, in the very next
+#      sentence, that is NOT the bolded pair (E5) checks: "...which makes the field study N folded
+#      *plus* M surveyed — not N picked out of M." This is a repositories/tools pair, not a
+#      papers pair — "the field study" names the tool field (§3), so it is checked against
+#      d_folded/d_surveyed, the same ground truth as (E2)/(E5), not against d_papers.
+#
+#      Round C found this sentence stuck at "34 folded plus 222 surveyed" while the bolded pair
+#      three lines earlier had already moved to 36/231 — a previous round updated one restatement of
+#      the pair and missed the other, and Round C's own prompt had already copied the stale 34/222
+#      forward as if it were current. Nothing before this arm re-derived this SPECIFIC sentence: (E5)
+#      greps for the bolded "**N repositories**"/"**N papers**"/"survey of **N tools**" forms only,
+#      which this sentence does not use (it says "N folded *plus* M surveyed", no "repositories" or
+#      "papers" or "survey of" token in reach), so (E5) walked straight past it every time.
+fp_flat="$( sed 's/\*//g' "$LINEAGE" | tr '\n' ' ' | tr -s ' ' )"
+fp_pair="$( printf '%s' "$fp_flat" | grep -oE '[0-9]+ folded plus [0-9]+ surveyed' | head -1 )"
+fp_folded="$(   printf '%s' "$fp_pair" | grep -oE '^[0-9]+' )"
+fp_surveyed="$( printf '%s' "$fp_pair" | sed -E 's/^[0-9]+ folded plus ([0-9]+) surveyed$/\1/' )"
+if [ -z "$fp_folded" ] || [ -z "$fp_surveyed" ]; then
+    no "(E9) could not find the '<N> folded plus <M> surveyed' restatement in docs/LINEAGE.md's header prose to check"
+elif [ "$fp_folded" = "$d_folded" ] && [ "$fp_surveyed" = "$d_surveyed" ]; then
+    ok "(E9) docs/LINEAGE.md's 'N folded plus M surveyed' restatement ($fp_folded / $fp_surveyed) agrees with its own tables"
+else
+    no "(E9) docs/LINEAGE.md's header restates the pair as '$fp_folded folded plus $fp_surveyed surveyed' but its own tables enumerate $d_folded folded / $d_surveyed surveyed — this is the SAME pair (E5) checks in bolded form a few lines earlier; the prose restatement drifted independently and (E5)'s green did not catch it"
 fi
 
 # ── (E6/E7) the DISJOINTNESS arms — the set claim behind the counts ─────────────────────────────────
