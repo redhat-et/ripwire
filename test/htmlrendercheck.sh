@@ -511,6 +511,45 @@ for v in TESTED_FILL UNTESTED_FILL; do
 done
 [ "$qfills" = "ok" ] && ok "(Q5) both tested-lens fills are stops of the ramp, so the page carries ONE colour identity"
 
+# ── (R) EDGE DIRECTION — LINKS is directed and the renderer used to discard that twice ────────────────
+#
+#     writeHtml builds LINKS straight off the CSR (`s` = caller, `t` = callee, from outOff/outTargets),
+#     and the page threw the direction away in two separate places: draw() rendered each edge as a bare
+#     moveTo/lineTo with nothing at either end, and the shared adjacency was built symmetrically
+#     (`gnbr[s].push(t); gnbr[t].push(s)`), after which the ego-graph BFS could not tell a caller from a
+#     callee and walked one as if it were the other. Measured on real pages: MUTUAL pairs — the only
+#     case where an undirected edge loses nothing — are 1 of 243 on the default page, 5 of 4721 at
+#     --top-k=2000, 0 of 646 on another corpus; self-calls 0 everywhere. So the direction being dropped
+#     was unambiguous for 99.6-100% of edges.
+pin 'ARROW_LEN_PX' 'ARROW_LEN_PX' "(R1) edges carry an arrowhead sized by a named constant"
+inbody draw 'ctx\.fill\(\);' 'ctx.fill();' "(R2) that head is a filled mark on the canvas, not a comment about one"
+# (R3) THE HEAD IS A SCREEN QUANTITY. The page auto-fits a settled map at scale ~0.10-0.15, so a head
+#      sized in world units to look right at 1:1 is a third of a pixel there — present in the code and
+#      absent from every picture the page actually produces. Node radii (C3) and label glyphs (B8) were
+#      each converted for exactly this reason; an arrowhead added in world units would be the third
+#      instance of the same bug.
+inbody draw 'ARROW_LEN_PX/scale' 'ARROW_LEN_PX/scale' "(R3) the head is a SCREEN size converted to world units, so it survives the auto-fit zoom"
+# (R4) and it is placed at the TARGET end, backed off that node's own radius — a head centred on the
+#      callee is a head drawn underneath it.
+inbody draw 'nodeRadiusPx\(b\)' 'nodeRadiusPx(b)' "(R4) the head is backed off the TARGET node's radius, so it points at the callee instead of under it"
+# (R5) a head on an edge shorter than the head is all head and no shaft — noise, and a fill per edge to
+#      draw it. The skip is what keeps a second pass over up to 13819 edges affordable.
+inbody draw 'MIN_ARROW_SHAFT_PX' 'MIN_ARROW_SHAFT_PX' "(R5) an edge too short on screen to carry a head does not get one"
+# (R6)/(R7) THE ADJACENCY IS DIRECTED. Both halves are needed: the two directed lists exist and are
+#      built asymmetrically (R6), and the symmetrised list they replace is GONE (R7) — a fix that lands
+#      beside the bug it replaces is not a fix, and here it would mean two adjacencies disagreeing.
+pin 'gout\[s\]\.push\(t\); gin\[t\]\.push\(s\)' 'gout[s].push(t); gin[t].push(s)' "(R6) the shared adjacency keeps callers and callees in separate lists"
+absent 'gnbr\[s\]\.push\(t\); gnbr\[t\]\.push\(s\)' "(R7) the symmetrised adjacency that made a caller indistinguishable from a callee is gone"
+absent 'ginFrom' "(R8) and so is the second, partial in-edge list that sat beside it (gin now serves both readers)"
+# (R9)/(R10) the ego walk still crosses BOTH directions — a symbol's neighbourhood genuinely is its
+#      callers and its callees, and a directed-only walk would silently halve every #node view. What it
+#      no longer does is forget which was which, so the view can state the split.
+inbody egoGraph 'gout\[u\]' 'gout[u]' "(R9a) the ego walk follows callees"
+inbody egoGraph 'gin\[u\]' 'gin[u]' "(R9b) control: and callers, so the neighbourhood is not halved by making it directed"
+pin 'callers / ' 'callers / ' "(R10) the node view states how much of the neighbourhood is callers and how much callees"
+# (R11) and the CAPTION says which way an arrow points, because a screenshot travels without the page.
+inbody renderProv 'arrow points caller' 'arrow points caller' "(R11) the provenance caption states that an arrow points caller → callee"
+
 echo
 echo "  ($mutants mutation controls ran and went red on their mutants)"
 if [ "$fail" -eq 0 ]; then

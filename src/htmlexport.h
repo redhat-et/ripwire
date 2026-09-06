@@ -202,32 +202,47 @@ static const char kScriptColour[] = R"JS(
 
   // ---- global adjacency over ALL selected nodes (NODES/LINKS indices), for BFS ego-graphs and
   // for the "entry points" / cross-link computations. Built once; every view is a FILTERED render
-  // over this shared graph, never a re-fetch. ----
+  // over this shared graph, never a re-fetch.
+  //
+  // IT IS KEPT DIRECTED. LINKS is a directed call graph — `s` is the caller and `t` the callee, built
+  // in writeHtml straight off the CSR's outOff/outTargets — and this block used to open by throwing
+  // that away: ONE adjacency list, each edge pushed into it from both ends, after which nothing
+  // downstream could tell a caller from a callee. Measured on the pages this tool actually emits, the direction
+  // discarded there is almost never ambiguous: MUTUAL pairs (A calls B and B calls A, the only case
+  // where an undirected edge loses nothing) are 1 of 243 on the default page, 5 of 4721 at --top-k=2000
+  // and 0 of 646 on another corpus, and self-calls are 0 everywhere. So 99.6-100% of edges had exactly
+  // one true direction and the renderer symmetrised all of them.
+  //
+  // Two things were wrong with that, and only the second is invisible. draw() had no direction to draw
+  // (fixed there, with a head). And egoGraph walked the symmetrised list, so a depth-2 neighbourhood
+  // reached "my caller's other callees" by the same step as "my callee's callees" and presented them
+  // identically — the sibling-of-a-caller arrives looking like a grandchild. The walk below still
+  // crosses both directions, because a symbol's neighbourhood genuinely is its callers AND its callees;
+  // what it no longer does is forget which was which, so the node view can state the split.
   var GN = NODES.length, GL = LINKS.length;
-  var gnbr = [];
-  for (var i = 0; i < GN; i++) gnbr.push([]);
+  var gout = [], gin = [];
+  for (var i = 0; i < GN; i++) { gout.push([]); gin.push([]); }
   for (var k = 0; k < GL; k++) {
     var s = LINKS[k].s, t = LINKS[k].t;
-    if (s !== t) { gnbr[s].push(t); gnbr[t].push(s); }
+    if (s !== t) { gout[s].push(t); gin[t].push(s); }
   }
-  // directed in-neighbours (for "entry point" = high in-degree from OUTSIDE the module)
-  var ginFrom = [];
-  for (var i = 0; i < GN; i++) ginFrom.push([]);
-  for (var k = 0; k < GL; k++) ginFrom[LINKS[k].t].push(LINKS[k].s);
 
-  // k-hop BFS ego graph around `centre` (a NODES index), depth 1-3. Returns {ids: [...], edges: [{s,t}]}
-  // where ids/edges are expressed in ORIGINAL NODES/LINKS index space (the caller remaps to a local
-  // 0..n-1 index for the sim). This is the Sourcetrail-style recenter: computed fresh at every click,
+  // k-hop BFS ego graph around `centre` (a NODES index), depth 1-3. Returns
+  // {ids, edges: [{s,t}], callees, callers} where ids/edges are expressed in ORIGINAL NODES/LINKS index
+  // space (the caller remaps to a local 0..n-1 index for the sim) and callees/callers are the DEPTH-1
+  // counts in each direction. This is the Sourcetrail-style recenter: computed fresh at every click,
   // over the full in-memory LINKS array — no server round-trip.
   function egoGraph(centre, depth) {
     var seen = new Set([centre]);
     var frontier = [centre];
+    var callees = (gout[centre] || []).length, callers = (gin[centre] || []).length;
     for (var d = 0; d < depth; d++) {
       var next = [];
       for (var fi = 0; fi < frontier.length; fi++) {
         var u = frontier[fi];
-        var nb = gnbr[u] || [];
-        for (var j = 0; j < nb.length; j++) if (!seen.has(nb[j])) { seen.add(nb[j]); next.push(nb[j]); }
+        var outs = gout[u] || [], ins = gin[u] || [];
+        for (var j = 0; j < outs.length; j++) if (!seen.has(outs[j])) { seen.add(outs[j]); next.push(outs[j]); }
+        for (var j2 = 0; j2 < ins.length; j2++) if (!seen.has(ins[j2])) { seen.add(ins[j2]); next.push(ins[j2]); }
       }
       frontier = next;
       if (!frontier.length) break;
@@ -239,7 +254,7 @@ static const char kScriptColour[] = R"JS(
       var s = LINKS[k].s, t = LINKS[k].t;
       if (idSet.has(s) && idSet.has(t)) edges.push({ s: s, t: t });
     }
-    return { ids: ids, edges: edges };
+    return { ids: ids, edges: edges, callees: callees, callers: callers };
   }
 
   // ---- breadcrumb trail (Sourcetrail "recenter" history): an array of visited #node/ID hashes with
@@ -591,18 +606,60 @@ static const char kScriptDraw[] = R"JS(
       hl.add(selected);
     }
 
-    // edges
+    // ---- edges, WITH THEIR DIRECTION DRAWN.
+    //
+    // LINKS is a directed call graph and this loop used to render it as `moveTo(source) lineTo(target)`
+    // with nothing at either end, so a picture of a call graph could not answer "which of these two
+    // calls the other" — the single most basic question the graph exists to answer. It is a near-free
+    // thing to draw here because the direction is near-unambiguous in the data: mutual pairs are 1 of
+    // 243 on the default page, 5 of 4721 at --top-k=2000, 0 of 646 on another corpus, and self-calls
+    // (which loadSubset drops and the caption counts) are 0 everywhere. A head is therefore a true
+    // statement about 99.6-100% of the edges it is drawn on.
+    //
+    // THE HEAD IS A SCREEN QUANTITY, converted to world units here — the same rule node radii and label
+    // glyphs already follow, and for the same reason: the page auto-fits a settled map at scale ~0.10 to
+    // ~0.15, where a world-space head sized to look right at 1:1 is a third of a pixel and simply is not
+    // there. The tip is backed off the target's own radius so it points AT the node instead of being
+    // buried under it, and an edge whose VISIBLE shaft is shorter than MIN_ARROW_SHAFT_PX gets no head
+    // at all: on a dense cluster those are all head and no line, which reads as noise and costs a fill
+    // per edge to draw.
+    //
+    // Both passes are ONE path each rather than a beginPath/stroke per edge. Same pixels, and it is what
+    // makes a second pass over up to 13819 edges affordable at all.
+    var ARROW_LEN_PX = 7.0, ARROW_HALF_PX = 3.2, MIN_ARROW_SHAFT_PX = 13.0;
     ctx.strokeStyle = '#8a8f98';
     ctx.lineWidth = 0.8/scale;
-    ctx.globalAlpha = 0.28;
+    ctx.globalAlpha = 0.26;
+    ctx.beginPath();
     for (var k = 0; k < L; k++) {
       var s = links[k].s, t = links[k].t;
       if (hl && !hl.has(s) && !hl.has(t)) continue;
-      ctx.beginPath();
       ctx.moveTo(nodes[s].x, nodes[s].y);
       ctx.lineTo(nodes[t].x, nodes[t].y);
-      ctx.stroke();
     }
+    ctx.stroke();
+    var alen = ARROW_LEN_PX/scale, ahalf = ARROW_HALF_PX/scale;
+    ctx.fillStyle = '#c3c9d2';
+    ctx.globalAlpha = 0.62;
+    ctx.beginPath();
+    for (var k2 = 0; k2 < L; k2++) {
+      var s2 = links[k2].s, t2 = links[k2].t;
+      if (hl && !hl.has(s2) && !hl.has(t2)) continue;
+      var a = nodes[s2], b = nodes[t2];
+      var dx = b.x - a.x, dy = b.y - a.y;
+      var d = Math.sqrt(dx*dx + dy*dy);
+      if (!(d > 0)) continue;
+      var rs = nodeRadiusPx(a)/scale, rt = nodeRadiusPx(b)/scale;
+      if ((d - rs - rt)*scale < MIN_ARROW_SHAFT_PX) continue;
+      var ux = dx/d, uy = dy/d;
+      var tipX = b.x - ux*rt, tipY = b.y - uy*rt;
+      var baseX = tipX - ux*alen, baseY = tipY - uy*alen;
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(baseX - uy*ahalf, baseY + ux*ahalf);
+      ctx.lineTo(baseX + uy*ahalf, baseY - ux*ahalf);
+      ctx.closePath();
+    }
+    ctx.fill();
     ctx.globalAlpha = 1.0;
 
     // Node size is a SCREEN quantity converted to world units here, exactly the way the labels already
@@ -945,7 +1002,10 @@ static const char kScriptRouter[] = R"JS(
     // silent inconsistency this caption exists to prevent.
     var drops = ( currentView !== 'overview' && selfEdgesDropped > 0 )
               ? ' (' + selfEdgesDropped + ' self-call' + (selfEdgesDropped === 1 ? '' : 's') + ' not drawn)' : '';
-    var l2 = k('view') + '<b>' + viewName + '</b>' + (currentView === 'overview' ? '' : ': ' + N + ' nodes / ' + L + ' edges' + drops) + '  ' +
+    // "caller → callee" is stated for the same reason every other fact on this line is: the picture now
+    // draws a direction, and a screenshot travelling without this caption would leave the reader to
+    // guess which end of an arrow is the one doing the calling.
+    var l2 = k('view') + '<b>' + viewName + '</b>' + (currentView === 'overview' ? '' : ': ' + N + ' nodes / ' + L + ' edges, arrow points caller → callee' + drops) + '  ' +
              k('colour') + '<b>' + escHtml(metric) + '</b>' + (mode === 'churn' && !CHURN_OK ? ' <b>unavailable (no git history)</b>' : '') + '  ' +
              k('labels') + 'top ' + MAX_LABELS + ' by in-view degree, one per name' +
              (settleTimedOut ? '  <b>settling…</b> (layout over the ' + SETTLE_BUDGET_MS + ' ms budget, still converging)'
@@ -1047,7 +1107,7 @@ static const char kScriptRouter[] = R"JS(
     // entry points: members with an in-edge from OUTSIDE this module (high outside in-degree first)
     var entryCount = new Map();
     for (var i = 0; i < ids.length; i++) {
-      var gid = ids[i], cnt = 0, froms = ginFrom[gid] || [];
+      var gid = ids[i], cnt = 0, froms = gin[gid] || [];
       for (var j = 0; j < froms.length; j++) if (!idSet.has(froms[j])) cnt++;
       if (cnt > 0) entryCount.set(gid, cnt);
     }
@@ -1066,7 +1126,11 @@ static const char kScriptRouter[] = R"JS(
     if (addToTrail !== false) pushTrail(gid);
     renderCrumb();
     var n = NODES[gid];
-    info.textContent = n.label + ' · ' + n.type + ' · ' + fileOf(n) + ' · rank=' + n.rank + ' · depth=' + egoDepth + ' · ' + eg.ids.length + ' nodes in view';
+    // The caller/callee split is stated because the walk that built this view crosses BOTH directions
+    // and the picture would otherwise leave a reader to count arrowheads to find out how much of a
+    // neighbourhood is "who needs me" and how much is "what I need".
+    info.textContent = n.label + ' · ' + n.type + ' · ' + fileOf(n) + ' · rank=' + n.rank + ' · depth=' + egoDepth +
+                       ' · ' + eg.ids.length + ' nodes in view · ' + eg.callers + ' callers / ' + eg.callees + ' callees at depth 1';
     renderProv();
   }
 
