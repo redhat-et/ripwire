@@ -20,12 +20,6 @@ JavaScript · Java · Ruby · PHP · Lua · Bash · C# · JSON · TOML · YAML �
 vendored grammars](#languages), and adding another is a vendored tree-sitter grammar plus one row in a
 declarative table.
 
-### See the map — not just the numbers
-
-<p align="center"><img src="docs/assets/colorby-hero.jpg" alt="ripwire --html --color-by=cx: the depth-2 call-graph neighbourhood of lexicalScoresTiered (240 nodes) in this repository, force-directed, nodes on a blue-to-orange complexity scale" width="880"></p>
-
-<p align="center"><sub>One self-contained HTML file (<code>--html[=FILE]</code>), no server, no CDN, click any node to recentre. <code>--color-by=lang|community|cx|churn|tested</code> sets the initial node colour; the page embeds all five and keeps a live selector. Shown here: <code>cx</code> — cyclomatic complexity — over the depth-2 neighbourhood of <code>lexicalScoresTiered</code>, 240 of this repository's own symbols; <code>churn</code> colours the same graph by git history instead. Both share one five-stop blue-to-orange scale rather than the usual green-to-red, so reading it never depends on telling red from green.</sub></p>
-
 ### No API key. No embeddings. No index server. No daemon.
 
 One self-contained binary on your own machine, offline, installed in one line — and the same line
@@ -94,6 +88,12 @@ top of the real output, which also self-reports the bundle's cost — `est_token
 And against five retrieval competitors on a held-out LocBench slice, it finds **all** gold files in
 the top 10 on **58.3%** of instances — the best alternative lands 40.0% — while indexing in 0.31 s.
 [The full leaderboard, losses included ↓](#graph-ranked-retrieval-it-finds-the-right-files-more-often-than-the-alternatives)
+
+### See the map — not just the numbers
+
+<p align="center"><img src="docs/assets/colorby-hero.jpg" alt="ripwire --html --color-by=cx: the depth-2 call-graph neighbourhood of lexicalScoresTiered (240 nodes) in this repository, force-directed, nodes on a blue-to-orange complexity scale" width="880"></p>
+
+<p align="center"><sub>One self-contained HTML file (<code>--html[=FILE]</code>), no server, no CDN, click any node to recentre. <code>--color-by=lang|community|cx|churn|tested</code> sets the initial node colour; the page embeds all five and keeps a live selector. Shown here: <code>cx</code> — cyclomatic complexity — over the depth-2 neighbourhood of <code>lexicalScoresTiered</code>, 240 of this repository's own symbols; <code>churn</code> colours the same graph by git history instead. Both share one five-stop blue-to-orange scale rather than the usual green-to-red, so reading it never depends on telling red from green.</sub></p>
 
 ### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
 
@@ -189,24 +189,6 @@ indexed but cannot vouch for carries a parse-health row; every file the crawl pa
 itemized with its reason. A confident-looking map that lies by omission is the failure mode this
 tool refuses.
 [What it misses, and what to run next →](#what-it-misses-and-what-to-run-next)
-
-### Saves Tokens: It answers for a fraction of the context
-
-On mid-task questions it had never seen, ripwire answers at **5.0%** of what a grep-and-read pass
-spends — **5.2%** on the questions both arms fully answered. `--pack-signatures` returns **81% fewer
-bytes** than full bodies at top-50. The output is already dense enough that running a dedicated
-context compressor over it saved **exactly 0 tokens**.
-
-Both of those first two figures moved when they were re-derived on 2026-08-23, and they moved in
-**opposite** directions — 7.3% → 5.0% overall, but 1.7% → 5.2% on the both-answered subset. Same
-frozen questions, same frozen verb ladders, same corpus pin, same tokenizer; the naive arm reproduced
-to the token. What changed is where ripwire spends: the compact conceptual route made its *misses*
-much cheaper, while richer default bundles made the questions it *answers* dearer. Both numbers are
-printed because printing only the one that improved would be the failure this project exists to not
-commit. The full per-question re-derivation is in the Round 3 note under [Measured](#measured).
-
-It is also cheap enough to call on reflex: this repository parses in **~0.15 s** cold and **~0.10 s**
-warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessing.
 
 ### Graph-Ranked Retrieval: It finds the right files more often than the alternatives
 
@@ -444,6 +426,24 @@ then has little to grab; that gap is measured and recorded in
 per-lane table and history in [docs/EVALS.md §4](docs/EVALS.md).
 
 </details>
+
+### Saves Tokens: It answers for a fraction of the context
+
+On mid-task questions it had never seen, ripwire answers at **5.0%** of what a grep-and-read pass
+spends — **5.2%** on the questions both arms fully answered. `--pack-signatures` returns **74.7%
+fewer bytes** than full bodies at top-50 (re-derived on this tree, 2026-09-06). The output is already
+dense enough that running a dedicated context compressor over it saved **exactly 0 tokens**.
+
+Both of those first two figures moved when they were re-derived on 2026-08-23, and they moved in
+**opposite** directions — 7.3% → 5.0% overall, but 1.7% → 5.2% on the both-answered subset. Same
+frozen questions, same frozen verb ladders, same corpus pin, same tokenizer; the naive arm reproduced
+to the token. What changed is where ripwire spends: the compact conceptual route made its *misses*
+much cheaper, while richer default bundles made the questions it *answers* dearer. Both numbers are
+printed because printing only the one that improved would be the failure this project exists to not
+commit. The full per-question re-derivation is in the Round 3 note under [Measured](#measured).
+
+It is also cheap enough to call on reflex: this repository parses in **~0.15 s** cold and **~0.10 s**
+warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessing.
 
 ### Better Code: It automates the review judgments nobody has time to make — every lens from published research
 
