@@ -60,7 +60,9 @@ grep -q '(window=12mo)' "$TMP/ok" && no 'header comment still hardcodes (window=
 
 # ── 3. no --since at all: the default window, in both places, unchanged
 "$BIN" "$ROOT" --hotspots >"$TMP/def" 2>/dev/null; rcd=$?
-[ "$rcd" -eq 0 ] && grep -q '<hotspots window="12mo"' "$TMP/def" && grep -q '(window=12mo)' "$TMP/def" \
+# F1 (round C): the default window is HEAD-anchored and its label says so, in BOTH places — the attribute
+# and the header comment must still agree, which is the property this arm exists for.
+[ "$rcd" -eq 0 ] && grep -q '<hotspots window="12mo@HEAD"' "$TMP/def" && grep -q '(window=12mo@HEAD)' "$TMP/def" \
     && ok 'default --hotspots: window="12mo" in both attribute and comment' \
     || no "default --hotspots: exit $rcd, window/comment not both 12mo"
 

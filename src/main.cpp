@@ -1006,7 +1006,7 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
         }
         rw::RankedGraph    ranked = isDecay ? rankGraphTeleport( d.g, churnDecayTeleportWorkspace( rootDirs, d.ing, &hasChurnEvidence ) )
                                             : rankGraphTeleport( d.g, churnTeleportWorkspace( rootDirs, d.ing, "18 months ago", &hasChurnEvidence ) );
-        std::string        window = churnWindowStamp( isDecay ? churnDecayWindowLabel( "all-history" ) : std::string( "18mo" ), hasChurnEvidence );
+        std::string        window = churnWindowStamp( isDecay ? churnDecayWindowLabel( "all-history" ) : rw::defaultWindowLabel( d.root, "18mo" ), hasChurnEvidence );
         discloseEmptyChurn( window );
         return { std::move( ranked.rank ), std::move( window ), { ranked.iterationCount, ranked.hasConverged, true } };
     }
@@ -1022,7 +1022,10 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
         return { std::move( ranked.rank ), std::move( window ), { ranked.iterationCount, ranked.hasConverged, true } };
     }
     rw::RankedGraph    ranked = rankGraphTeleport( d.g, churnTeleport( d.root, d.ing, "18 months ago", d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
-    std::string        window = churnWindowStamp( isScoped ? std::string_view( d.cfg.since ) : std::string_view( "18mo" ), hasChurnEvidence );
+    // F1: the DEFAULT window's stamp names the anchor that produced it ("18mo@HEAD"); an ACTIVE --since is
+    // the user's own value and is stamped verbatim, exactly as before.
+    const std::string  defaultWindow = rw::defaultWindowLabel( d.root, "18mo" );
+    std::string        window = churnWindowStamp( isScoped ? std::string_view( d.cfg.since ) : std::string_view( defaultWindow ), hasChurnEvidence );
     discloseEmptyChurn( window );
     return { std::move( ranked.rank ), std::move( window ), { ranked.iterationCount, ranked.hasConverged, true } };
 }
@@ -1126,7 +1129,7 @@ int runDefaultMap( const MainDispatch& d )
     std::string        queryRouteNote;   // leading routed comment for --query (empty under --no-route)
     std::size_t        mapDiffChanged = 0;      // D6: teleport-seed file count, only meaningful when mapDiffActive
     bool               mapDiffActive  = false;  // true only under --map-diff — gates the header's changed= attribute
-    std::string        churnWindowLabel = "18mo";   // §A9.6: churn's window label; an ACTIVE --since overrides it below
+    std::string        churnWindowLabel = rw::defaultWindowLabel( root, "18mo" );   // §A9.6: churn's window label (F1: "@HEAD" when anchored); an ACTIVE --since overrides it below
     if( !cfg.query.empty() )
     {
         // --query: PURE lexical (BM25) relevance. eval-at-scale showed fusing PageRank importance

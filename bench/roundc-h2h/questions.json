@@ -1,0 +1,792 @@
+[
+ {
+  "qid": 1,
+  "shape": "S4",
+  "commit": "2647d5c661c8285598150f001ced96142c693269",
+  "short": "2647d5c66",
+  "subject": "Fix Compaction Stats (#13071)",
+  "question": "How does db/compaction/compaction_job.cc reach util/compaction_job_stats_impl.cc?",
+  "gold": [
+   "db/compaction/compaction_job.h",
+   "db/compaction/compaction_outputs.h",
+   "db/compaction/compaction_service_job.cc",
+   "db/compaction/compaction_state.cc",
+   "db/compaction/subcompaction_state.cc",
+   "db/compaction/subcompaction_state.h",
+   "db/db_impl/db_impl_compaction_flush.cc"
+  ],
+  "n": 7,
+  "src": [
+   "db/compaction/compaction_job.cc",
+   "db/compaction/compaction_job.h",
+   "db/compaction/compaction_outputs.h",
+   "db/compaction/compaction_service_job.cc",
+   "db/compaction/compaction_state.cc",
+   "db/compaction/subcompaction_state.cc",
+   "db/compaction/subcompaction_state.h",
+   "db/db_impl/db_impl_compaction_flush.cc",
+   "util/compaction_job_stats_impl.cc"
+  ],
+  "test": [
+   "db/compaction/compaction_job_test.cc",
+   "db/compaction/compaction_service_test.cc",
+   "db/db_secondary_test.cc"
+  ]
+ },
+ {
+  "qid": 2,
+  "shape": "S4",
+  "commit": "961468f92e210d9fa5e3b8ca7aef1d5b2c3d4b5c",
+  "short": "961468f92",
+  "subject": "Fix TSAN-reported data race with uncache_aggressiveness (#12753)",
+  "question": "How does table/block_based/block_based_table_reader.cc reach table/table_reader.h?",
+  "gold": [
+   "table/block_based/block_based_table_reader.h"
+  ],
+  "n": 1,
+  "src": [
+   "table/block_based/block_based_table_reader.cc",
+   "table/block_based/block_based_table_reader.h",
+   "table/table_reader.h"
+  ],
+  "test": []
+ },
+ {
+  "qid": 3,
+  "shape": "S4",
+  "commit": "341219536725fd8fabb037c0d8ab192c4b038a60",
+  "short": "341219536",
+  "subject": "Introduce MultiCfIterator (#12153)",
+  "question": "How does db/db_impl/db_impl.cc reach db/wide/wide_columns.cc?",
+  "gold": [
+   "db/db_impl/db_impl.h",
+   "db/multi_cf_iterator.cc",
+   "db/multi_cf_iterator.h"
+  ],
+  "n": 3,
+  "src": [
+   "db/db_impl/db_impl.cc",
+   "db/db_impl/db_impl.h",
+   "db/multi_cf_iterator.cc",
+   "db/multi_cf_iterator.h",
+   "db/wide/wide_columns.cc"
+  ],
+  "test": [
+   "db/db_test.cc",
+   "db/multi_cf_iterator_test.cc"
+  ]
+ },
+ {
+  "qid": 4,
+  "shape": "S4",
+  "commit": "04cbc77b907e484f50b0b52eaed8878457d23095",
+  "short": "04cbc77b9",
+  "subject": "Add missing license to source files (#12083)",
+  "question": "How does utilities/merge_operators/string_append/stringappend.cc reach utilities/transactions/lock/range/range_tree/lib/standalone_port.cc?",
+  "gold": [
+   "utilities/merge_operators/string_append/stringappend.h",
+   "utilities/merge_operators/string_append/stringappend2.cc",
+   "utilities/transactions/lock/range/range_tree/lib/db.h",
+   "utilities/transactions/lock/range/range_tree/lib/portability/toku_assert_subst.h",
+   "utilities/transactions/lock/range/range_tree/lib/portability/toku_external_pthread.h",
+   "utilities/transactions/lock/range/range_tree/lib/portability/txn_subst.h"
+  ],
+  "n": 6,
+  "src": [
+   "utilities/merge_operators/string_append/stringappend.cc",
+   "utilities/merge_operators/string_append/stringappend.h",
+   "utilities/merge_operators/string_append/stringappend2.cc",
+   "utilities/transactions/lock/range/range_tree/lib/db.h",
+   "utilities/transactions/lock/range/range_tree/lib/portability/toku_assert_subst.h",
+   "utilities/transactions/lock/range/range_tree/lib/portability/toku_external_pthread.h",
+   "utilities/transactions/lock/range/range_tree/lib/portability/txn_subst.h",
+   "utilities/transactions/lock/range/range_tree/lib/standalone_port.cc"
+  ],
+  "test": []
+ },
+ {
+  "qid": 5,
+  "shape": "S4",
+  "commit": "8fc78a3a9e1d24ba55731b70c0c25cef0765dbc8",
+  "short": "8fc78a3a9",
+  "subject": "Add helper methods WideColumnsHelper::{Has,Get}DefaultColumn (#11813)",
+  "question": "How does db/db_iter.cc reach db/wide/wide_columns_helper.h?",
+  "gold": [
+   "db/merge_helper.cc",
+   "db/merge_operator.cc",
+   "db/version_set.cc",
+   "db/version_set_sync_and_async.h",
+   "db/wide/wide_column_serialization.cc"
+  ],
+  "n": 5,
+  "src": [
+   "db/db_iter.cc",
+   "db/merge_helper.cc",
+   "db/merge_operator.cc",
+   "db/version_set.cc",
+   "db/version_set_sync_and_async.h",
+   "db/wide/wide_column_serialization.cc",
+   "db/wide/wide_columns_helper.h"
+  ],
+  "test": []
+ },
+ {
+  "qid": 6,
+  "shape": "S4",
+  "commit": "17bc27741f313a4d6d281c714027356f361229d0",
+  "short": "17bc27741",
+  "subject": "Improve memory efficiency of many OptimisticTransactionDBs (#11439)",
+  "question": "How does db/blob/blob_file_cache.cc reach utilities/transactions/optimistic_transaction_db_impl.h?",
+  "gold": [
+   "db/blob/blob_file_cache.h",
+   "db/memtable.h",
+   "db/table_cache.cc",
+   "db/table_cache.h",
+   "util/cast_util.h",
+   "util/hash.h",
+   "util/mutexlock.h",
+   "utilities/transactions/optimistic_transaction.cc",
+   "utilities/transactions/optimistic_transaction_db_impl.cc"
+  ],
+  "n": 9,
+  "src": [
+   "db/blob/blob_file_cache.cc",
+   "db/blob/blob_file_cache.h",
+   "db/memtable.h",
+   "db/table_cache.cc",
+   "db/table_cache.h",
+   "util/cast_util.h",
+   "util/hash.h",
+   "util/mutexlock.h",
+   "utilities/transactions/optimistic_transaction.cc",
+   "utilities/transactions/optimistic_transaction_db_impl.cc",
+   "utilities/transactions/optimistic_transaction_db_impl.h"
+  ],
+  "test": [
+   "utilities/transactions/optimistic_transaction_test.cc"
+  ]
+ },
+ {
+  "qid": 7,
+  "shape": "S3",
+  "commit": "11f21cf86b519a6f33b44f3cd3e3fe3fb1d1e315",
+  "short": "11f21cf86",
+  "subject": "Preserve Options File (#13074)",
+  "question": "Which tests cover db/compaction/compaction_job.h?",
+  "gold": [
+   "db/compaction/compaction_service_test.cc"
+  ],
+  "n": 1,
+  "src": [
+   "db/compaction/compaction_job.h",
+   "db/compaction/compaction_service_job.cc",
+   "db/db_impl/db_impl.cc",
+   "db/db_impl/db_impl.h",
+   "db/db_impl/db_impl_compaction_flush.cc",
+   "db/db_impl/db_impl_files.cc",
+   "db/db_impl/db_impl_secondary.cc",
+   "db/job_context.h"
+  ],
+  "test": [
+   "db/compaction/compaction_service_test.cc"
+  ]
+ },
+ {
+  "qid": 8,
+  "shape": "S3",
+  "commit": "0ae3d9f98deac3259d16eb64009df659d3c8259b",
+  "short": "0ae3d9f98",
+  "subject": "Fix stale memory access with FSBuffer and tiered sec cache (#12712)",
+  "question": "Which tests cover table/block_fetcher.cc?",
+  "gold": [
+   "cache/tiered_secondary_cache_test.cc"
+  ],
+  "n": 1,
+  "src": [
+   "table/block_fetcher.cc",
+   "table/block_fetcher.h"
+  ],
+  "test": [
+   "cache/tiered_secondary_cache_test.cc"
+  ]
+ },
+ {
+  "qid": 9,
+  "shape": "S3",
+  "commit": "f2546b6623279d155d0faa291137623e9f3e3846",
+  "short": "f2546b662",
+  "subject": "Support returning write unix time in iterator property (#12428)",
+  "question": "Which tests cover db/column_family.cc?",
+  "gold": [
+   "db/compaction/tiered_compaction_test.cc",
+   "db/db_iterator_test.cc",
+   "db/write_batch_test.cc",
+   "java/rocksjni/write_batch_test.cc",
+   "table/table_test.cc"
+  ],
+  "n": 5,
+  "src": [
+   "db/column_family.cc",
+   "db/column_family.h",
+   "db/db_impl/db_impl.cc",
+   "db/db_impl/db_impl.h",
+   "db/db_impl/db_impl_open.cc",
+   "db/db_iter.cc",
+   "db/db_iter.h",
+   "db/dbformat.h",
+   "db/flush_job.cc",
+   "db/forward_iterator.cc",
+   "db/forward_iterator.h",
+   "db/job_context.h",
+   "db/memtable.cc",
+   "db/memtable.h",
+   "db/memtable_list.cc",
+   "db/memtable_list.h",
+   "db/repair.cc",
+   "table/block_based/block_based_table_iterator.h",
+   "table/block_based/block_based_table_reader.cc",
+   "table/block_based/block_based_table_reader.h",
+   "table/internal_iterator.h",
+   "table/iterator_wrapper.h",
+   "table/merging_iterator.cc"
+  ],
+  "test": [
+   "db/compaction/tiered_compaction_test.cc",
+   "db/db_iterator_test.cc",
+   "db/write_batch_test.cc",
+   "java/rocksjni/write_batch_test.cc",
+   "table/table_test.cc"
+  ]
+ },
+ {
+  "qid": 10,
+  "shape": "S3",
+  "commit": "c1b84d04373928e1f9557cf84c30dd20a71ad9e5",
+  "short": "c1b84d043",
+  "subject": "Fix false negative in TieredSecondaryCache nvm cache lookup (#12134)",
+  "question": "Which tests cover cache/tiered_secondary_cache.cc?",
+  "gold": [
+   "cache/tiered_secondary_cache_test.cc"
+  ],
+  "n": 1,
+  "src": [
+   "cache/tiered_secondary_cache.cc",
+   "cache/tiered_secondary_cache.h"
+  ],
+  "test": [
+   "cache/tiered_secondary_cache_test.cc"
+  ]
+ },
+ {
+  "qid": 11,
+  "shape": "S3",
+  "commit": "f2b623bcc1ad0d633164b3824b4b683b1b57ce28",
+  "short": "f2b623bcc",
+  "subject": "GetEntity Support for ReadOnlyDB and SecondaryDB (#11799)",
+  "question": "Which tests cover db/db_impl/db_impl.cc?",
+  "gold": [
+   "db/db_secondary_test.cc",
+   "db/wide/db_wide_basic_test.cc"
+  ],
+  "n": 2,
+  "src": [
+   "db/db_impl/db_impl.cc",
+   "db/db_impl/db_impl.h",
+   "db/db_impl/db_impl_readonly.cc",
+   "db/db_impl/db_impl_readonly.h",
+   "db/db_impl/db_impl_secondary.cc",
+   "db/db_impl/db_impl_secondary.h",
+   "monitoring/thread_status_util_debug.cc",
+   "util/thread_operation.h"
+  ],
+  "test": [
+   "db/db_secondary_test.cc",
+   "db/wide/db_wide_basic_test.cc"
+  ]
+ },
+ {
+  "qid": 12,
+  "shape": "S3",
+  "commit": "3e7fc88167302ca4ae8734616bccd3f31e4fe538",
+  "short": "3e7fc8816",
+  "subject": "add WriteBatch::Release() (#11482)",
+  "question": "Which tests cover db/write_batch.cc?",
+  "gold": [
+   "db/write_batch_test.cc"
+  ],
+  "n": 1,
+  "src": [
+   "db/write_batch.cc"
+  ],
+  "test": [
+   "db/write_batch_test.cc"
+  ]
+ },
+ {
+  "qid": 13,
+  "shape": "S2",
+  "commit": "eca4f106bb9994045e31ca463187ecf5dc211b3f",
+  "short": "eca4f106b",
+  "subject": "Add file_checksum from FileChecksumGenFactory and Tests for corrupted output (#13060)",
+  "question": "If I change db/compaction/compaction_job.h, what else has to change with it?",
+  "gold": [
+   "db/compaction/compaction_service_job.cc"
+  ],
+  "n": 1,
+  "src": [
+   "db/compaction/compaction_job.h",
+   "db/compaction/compaction_service_job.cc"
+  ],
+  "test": [
+   "db/compaction/compaction_job_test.cc",
+   "db/compaction/compaction_service_test.cc"
+  ]
+ },
+ {
+  "qid": 14,
+  "shape": "S2",
+  "commit": "5cf3bed00fd794999f5bd3bfc106f8b46cb41fe1",
+  "short": "5cf3bed00",
+  "subject": "Eliminate some parameters redundant with ReadOptions (#12761)",
+  "question": "If I change table/block_based/binary_search_index_reader.cc, what else has to change with it?",
+  "gold": [
+   "table/block_based/block_based_table_reader.cc",
+   "table/block_based/block_based_table_reader_impl.h",
+   "table/block_based/block_based_table_reader_sync_and_async.h",
+   "table/block_based/hash_index_reader.cc",
+   "table/block_based/index_reader_common.cc",
+   "table/block_based/index_reader_common.h",
+   "table/block_based/partitioned_index_reader.cc",
+   "table/block_based/uncompression_dict_reader.cc",
+   "table/block_based/uncompression_dict_reader.h"
+  ],
+  "n": 9,
+  "src": [
+   "table/block_based/binary_search_index_reader.cc",
+   "table/block_based/block_based_table_reader.cc",
+   "table/block_based/block_based_table_reader_impl.h",
+   "table/block_based/block_based_table_reader_sync_and_async.h",
+   "table/block_based/hash_index_reader.cc",
+   "table/block_based/index_reader_common.cc",
+   "table/block_based/index_reader_common.h",
+   "table/block_based/partitioned_index_reader.cc",
+   "table/block_based/uncompression_dict_reader.cc",
+   "table/block_based/uncompression_dict_reader.h"
+  ],
+  "test": []
+ },
+ {
+  "qid": 15,
+  "shape": "S2",
+  "commit": "096fb9b67d19a9a180e7c906b4a0cdb2b2d0c1f6",
+  "short": "096fb9b67",
+  "subject": "Fix data race in WalManager (#12439)",
+  "question": "If I change db/wal_manager.cc, what else has to change with it?",
+  "gold": [
+   "db/wal_manager.h"
+  ],
+  "n": 1,
+  "src": [
+   "db/wal_manager.cc",
+   "db/wal_manager.h"
+  ],
+  "test": []
+ },
+ {
+  "qid": 16,
+  "shape": "S2",
+  "commit": "324453e5790f52557d02abf64a2dcadbaa54c8fa",
+  "short": "324453e57",
+  "subject": "Fix rowcache get returning incorrect timestamp (#11952)",
+  "question": "If I change table/get_context.cc, what else has to change with it?",
+  "gold": [
+   "table/get_context.h"
+  ],
+  "n": 1,
+  "src": [
+   "table/get_context.cc",
+   "table/get_context.h"
+  ],
+  "test": [
+   "db/db_with_timestamp_basic_test.cc"
+  ]
+ },
+ {
+  "qid": 17,
+  "shape": "S2",
+  "commit": "cff6490bc4a63a9162830a2595158ff86bee1d98",
+  "short": "cff6490bc",
+  "subject": "Add IOActivity.kMultiGetEntity (#11842)",
+  "question": "If I change db/db_impl/db_impl.cc, what else has to change with it?",
+  "gold": [
+   "db/db_impl/db_impl.h"
+  ],
+  "n": 1,
+  "src": [
+   "db/db_impl/db_impl.cc",
+   "db/db_impl/db_impl.h"
+  ],
+  "test": []
+ },
+ {
+  "qid": 18,
+  "shape": "S2",
+  "commit": "77dda0d9d820657e03c222505b9045c62af08dd6",
+  "short": "77dda0d9d",
+  "subject": "Fix use after move in data block hash index (#11505)",
+  "question": "If I change table/block_based/block.cc, what else has to change with it?",
+  "gold": [
+   "table/block_based/block_builder.cc"
+  ],
+  "n": 1,
+  "src": [
+   "table/block_based/block.cc",
+   "table/block_based/block_builder.cc"
+  ],
+  "test": [
+   "table/block_based/block_test.cc"
+  ]
+ },
+ {
+  "qid": 19,
+  "shape": "S1",
+  "commit": "5bb363edc72c31d57abe4c9eace5bb48d0e3bba3",
+  "short": "5bb363edc",
+  "subject": "Print unknown writebatch tag (#13062)",
+  "question": "Where is Print unknown writebatch tag (#13062) implemented?",
+  "gold": [
+   "db/write_batch.cc"
+  ],
+  "n": 1,
+  "src": [
+   "db/write_batch.cc"
+  ],
+  "test": []
+ },
+ {
+  "qid": 20,
+  "shape": "S1",
+  "commit": "a211e065520b80a2a5a28a795aae1a71e1b139dc",
+  "short": "a211e0655",
+  "subject": "Remove close when fd == -1. (#12732)",
+  "question": "Where is Remove close when fd == -1. (#12732) implemented?",
+  "gold": [
+   "env/io_posix.cc"
+  ],
+  "n": 1,
+  "src": [
+   "env/io_posix.cc"
+  ],
+  "test": []
+ },
+ {
+  "qid": 21,
+  "shape": "S1",
+  "commit": "1104eaa35e5af4ec0b31379c06cad47d5449b0fa",
+  "short": "1104eaa35",
+  "subject": "Add initial support for TimedPut API (#12419)",
+  "question": "Where is Add initial support for TimedPut API (#12419) implemented?",
+  "gold": [
+   "db/builder.cc",
+   "db/compaction/compaction_iteration_stats.h",
+   "db/compaction/compaction_iterator.cc",
+   "db/compaction/compaction_iterator.h",
+   "db/db_iter.cc",
+   "db/dbformat.cc",
+   "db/dbformat.h",
+   "db/flush_job.cc",
+   "db/memtable.cc",
+   "db/merge_helper.cc",
+   "db/seqno_to_time_mapping.cc",
+   "db/seqno_to_time_mapping.h",
+   "db/write_batch.cc",
+   "db/write_batch_internal.h",
+   "table/block_based/block.cc",
+   "table/get_context.cc",
+   "table/sst_file_dumper.cc",
+   "util/write_batch_util.h",
+   "utilities/debug.cc",
+   "utilities/write_batch_with_index/write_batch_with_index.cc",
+   "utilities/write_batch_with_index/write_batch_with_index_internal.cc"
+  ],
+  "n": 21,
+  "src": [
+   "db/builder.cc",
+   "db/compaction/compaction_iteration_stats.h",
+   "db/compaction/compaction_iterator.cc",
+   "db/compaction/compaction_iterator.h",
+   "db/db_iter.cc",
+   "db/dbformat.cc",
+   "db/dbformat.h",
+   "db/flush_job.cc",
+   "db/memtable.cc",
+   "db/merge_helper.cc",
+   "db/seqno_to_time_mapping.cc",
+   "db/seqno_to_time_mapping.h",
+   "db/write_batch.cc",
+   "db/write_batch_internal.h",
+   "table/block_based/block.cc",
+   "table/get_context.cc",
+   "table/sst_file_dumper.cc",
+   "util/write_batch_util.h",
+   "utilities/debug.cc",
+   "utilities/write_batch_with_index/write_batch_with_index.cc",
+   "utilities/write_batch_with_index/write_batch_with_index_internal.cc"
+  ],
+  "test": [
+   "db/compaction/compaction_iterator_test.cc",
+   "db/compaction/tiered_compaction_test.cc",
+   "db/db_basic_test.cc",
+   "db/db_iter_test.cc",
+   "db/flush_job_test.cc",
+   "db/memtable_list_test.cc",
+   "db/seqno_time_test.cc",
+   "db/write_batch_test.cc"
+  ]
+ },
+ {
+  "qid": 22,
+  "shape": "S1",
+  "commit": "cd577f605948894b51fbaab39d1df03a04dfd70f",
+  "short": "cd577f605",
+  "subject": "Fix WRITE_STALL start_time (#12147)",
+  "question": "Where is Fix WRITE_STALL start_time (#12147) implemented?",
+  "gold": [
+   "db/db_impl/db_impl_write.cc"
+  ],
+  "n": 1,
+  "src": [
+   "db/db_impl/db_impl_write.cc"
+  ],
+  "test": []
+ },
+ {
+  "qid": 23,
+  "shape": "S1",
+  "commit": "0dac75d54232cac007cb9a2ca0a3962a83d8caa9",
+  "short": "0dac75d54",
+  "subject": "Fix a bug in MultiGet when skip_memtable is true (#11700)",
+  "question": "Where is Fix a bug in MultiGet when skip_memtable is true (#11700) implemented?",
+  "gold": [
+   "db/db_impl/db_impl.cc"
+  ],
+  "n": 1,
+  "src": [
+   "db/db_impl/db_impl.cc"
+  ],
+  "test": []
+ },
+ {
+  "qid": 24,
+  "shape": "S1",
+  "commit": "7521478b4397ef08a2c790335eff6a042bfc087e",
+  "short": "7521478b4",
+  "subject": "Record the `persist_user_defined_timestamps` flag in manifest (#11515)",
+  "question": "Where is Record the `persist_user_defined_timestamps` flag in manifest (#11515) implemented?",
+  "gold": [
+   "db/builder.cc",
+   "db/compaction/compaction_outputs.cc",
+   "db/db_impl/db_impl_compaction_flush.cc",
+   "db/db_impl/db_impl_experimental.cc",
+   "db/db_impl/db_impl_open.cc",
+   "db/experimental.cc",
+   "db/external_sst_file_ingestion_job.cc",
+   "db/flush_job.cc",
+   "db/import_column_family_job.cc",
+   "db/repair.cc",
+   "db/table_cache.cc",
+   "db/version_edit.cc",
+   "db/version_edit.h",
+   "db/version_set.cc",
+   "table/block_based/block_based_table_builder.cc",
+   "table/meta_blocks.cc",
+   "table/sst_file_dumper.cc",
+   "table/table_properties.cc"
+  ],
+  "n": 18,
+  "src": [
+   "db/builder.cc",
+   "db/compaction/compaction_outputs.cc",
+   "db/db_impl/db_impl_compaction_flush.cc",
+   "db/db_impl/db_impl_experimental.cc",
+   "db/db_impl/db_impl_open.cc",
+   "db/experimental.cc",
+   "db/external_sst_file_ingestion_job.cc",
+   "db/flush_job.cc",
+   "db/import_column_family_job.cc",
+   "db/repair.cc",
+   "db/table_cache.cc",
+   "db/version_edit.cc",
+   "db/version_edit.h",
+   "db/version_set.cc",
+   "table/block_based/block_based_table_builder.cc",
+   "table/meta_blocks.cc",
+   "table/sst_file_dumper.cc",
+   "table/table_properties.cc"
+  ],
+  "test": [
+   "db/compaction/compaction_job_test.cc",
+   "db/compaction/compaction_picker_test.cc",
+   "db/version_builder_test.cc",
+   "db/version_edit_test.cc",
+   "db/version_set_test.cc"
+  ]
+ },
+ {
+  "qid": 25,
+  "shape": "S5",
+  "commit": "2fef013616ac8e474d19f6b0815155a37ae9350f",
+  "short": "2fef01361",
+  "subject": "Fix a bug for surfacing write unix time (#13057)",
+  "question": "What changed recently in db/?",
+  "gold": [
+   "db/forward_iterator.cc",
+   "db/version_set.cc",
+   "table/iterator.cc"
+  ],
+  "n": 3,
+  "src": [
+   "db/forward_iterator.cc",
+   "db/version_set.cc",
+   "table/iterator.cc"
+  ],
+  "test": [
+   "db/compaction/tiered_compaction_test.cc"
+  ]
+ },
+ {
+  "qid": 26,
+  "shape": "S5",
+  "commit": "9f4c597d839ed9fa9d1a5ed7ea393a150fa9adf8",
+  "short": "9f4c597d8",
+  "subject": "FaultInjectionTestFS read unsynced data by default (#12729)",
+  "question": "What changed recently in file/?",
+  "gold": [
+   "file/writable_file_writer.h",
+   "utilities/fault_injection_fs.cc",
+   "utilities/fault_injection_fs.h"
+  ],
+  "n": 3,
+  "src": [
+   "file/writable_file_writer.h",
+   "utilities/fault_injection_fs.cc",
+   "utilities/fault_injection_fs.h"
+  ],
+  "test": [
+   "db/fault_injection_test.cc"
+  ]
+ },
+ {
+  "qid": 27,
+  "shape": "S5",
+  "commit": "f77b788545fe23750030c8da12f06b4ffaf6b7f9",
+  "short": "f77b78854",
+  "subject": "Fix a bug in `LRUCacheShard::LRU_Insert` (#12429)",
+  "question": "What changed recently in cache/?",
+  "gold": [
+   "cache/lru_cache.cc"
+  ],
+  "n": 1,
+  "src": [
+   "cache/lru_cache.cc"
+  ],
+  "test": [
+   "cache/lru_cache_test.cc"
+  ]
+ },
+ {
+  "qid": 28,
+  "shape": "S5",
+  "commit": "e7c6259447df84c96f4dc555f8d4ccefcc0a54f2",
+  "short": "e7c625944",
+  "subject": "Make auto_readahead_size default true (#12080)",
+  "question": "What changed recently in file/?",
+  "gold": [
+   "file/file_prefetch_buffer.cc",
+   "file/file_prefetch_buffer.h",
+   "table/block_based/block_based_table_iterator.cc",
+   "table/block_based/block_based_table_iterator.h",
+   "table/block_based/block_based_table_reader.cc",
+   "table/block_based/block_based_table_reader.h",
+   "table/block_based/block_prefetcher.cc",
+   "table/block_based/block_prefetcher.h",
+   "table/block_based/partitioned_filter_block.cc",
+   "table/block_based/partitioned_index_reader.cc"
+  ],
+  "n": 10,
+  "src": [
+   "file/file_prefetch_buffer.cc",
+   "file/file_prefetch_buffer.h",
+   "table/block_based/block_based_table_iterator.cc",
+   "table/block_based/block_based_table_iterator.h",
+   "table/block_based/block_based_table_reader.cc",
+   "table/block_based/block_based_table_reader.h",
+   "table/block_based/block_prefetcher.cc",
+   "table/block_based/block_prefetcher.h",
+   "table/block_based/partitioned_filter_block.cc",
+   "table/block_based/partitioned_index_reader.cc"
+  ],
+  "test": [
+   "file/prefetch_test.cc",
+   "table/table_test.cc"
+  ]
+ },
+ {
+  "qid": 29,
+  "shape": "S5",
+  "commit": "5b5b011cdd8429ce5bcdf35a058ea747cef2083b",
+  "short": "5b5b011cd",
+  "subject": "Avoid double block cache lookup during Seek with async_io option (#11616)",
+  "question": "What changed recently in table/block_based/?",
+  "gold": [
+   "table/block_based/block_based_table_iterator.cc",
+   "table/block_based/block_based_table_reader.cc",
+   "table/block_based/block_based_table_reader.h",
+   "table/block_based/block_based_table_reader_impl.h",
+   "table/block_based/block_based_table_reader_sync_and_async.h",
+   "table/block_based/filter_block_reader_common.cc",
+   "table/block_based/index_reader_common.cc",
+   "table/block_based/partitioned_filter_block.cc",
+   "table/block_based/partitioned_index_iterator.cc",
+   "table/block_based/partitioned_index_reader.cc",
+   "table/block_based/uncompression_dict_reader.cc"
+  ],
+  "n": 11,
+  "src": [
+   "table/block_based/block_based_table_iterator.cc",
+   "table/block_based/block_based_table_reader.cc",
+   "table/block_based/block_based_table_reader.h",
+   "table/block_based/block_based_table_reader_impl.h",
+   "table/block_based/block_based_table_reader_sync_and_async.h",
+   "table/block_based/filter_block_reader_common.cc",
+   "table/block_based/index_reader_common.cc",
+   "table/block_based/partitioned_filter_block.cc",
+   "table/block_based/partitioned_index_iterator.cc",
+   "table/block_based/partitioned_index_reader.cc",
+   "table/block_based/uncompression_dict_reader.cc"
+  ],
+  "test": [
+   "file/prefetch_test.cc"
+  ]
+ },
+ {
+  "qid": 30,
+  "shape": "S5",
+  "commit": "98c6d7fd8026e6d0a7d1d48da1eba7cffb38774f",
+  "short": "98c6d7fd8",
+  "subject": "Internal API for generating semi-random salt (#11331)",
+  "question": "What changed recently in env/?",
+  "gold": [
+   "env/unique_id_gen.cc",
+   "env/unique_id_gen.h"
+  ],
+  "n": 2,
+  "src": [
+   "env/unique_id_gen.cc",
+   "env/unique_id_gen.h"
+  ],
+  "test": [
+   "env/env_test.cc"
+  ]
+ }
+]

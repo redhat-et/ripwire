@@ -11226,3 +11226,500 @@ docs/SUBSTITUTION_METER.md.
 **NEGATIVE consequence, pre-committed.** A lane that misses its band ships the gate and the fixture, reverts the
 feature code, and records the negative under this heading. Lane E below 80% or with task pass under native
 ships E1's exactness fix (a correctness fix, not a band) and nothing else from E2–E4.
+
+---
+
+## Head-to-head vs gortex / cocoindex-code / codanna — PRE-REGISTERED 2026-09-06 (before any arm is run)
+
+**What this registers, and what it refuses to register.** Round C scoped a head-to-head against the three
+closest functional peers surfaced by the 2026-09-05 recon. Before designing it, the **gold-set-construction
+audit below was run against each arm's own source**, read-only, from pinned clones. Nothing was installed,
+built or executed — deliberately, because the audit's finding decides whether a comparison is worth paying
+for, and two of the three arms turned out to publish numbers that **cannot be placed beside ours at all**.
+That refutation is the round's first result. Everything after it is fixed BEFORE any arm runs.
+
+### The precondition: how each arm builds its own eval sample
+
+The defect being hunted is any non-random subsetting — first-N, path order, alphabetical, size order, a fixed
+hand-picked list, or a sample drawn *after* a filter that correlates with the metric. This project has its own
+scar here: until 2026-09-05 ripwire's retrieval gold set was "the first 150 doc-commented symbols in crawl
+order", and one identical 60-symbol probe file moved MRR by a third of a point purely by being renamed from
+`aaa_probe/` to `zzz_probe/` (`src/eval.h:516-538`). "First-N flatters" is the wrong heuristic — that bias ran
+*against* the tool. The rule applied below is therefore mechanical: read the code that BUILDS the sample, not
+the code that reports the score.
+
+| Arm | Pinned at | Its own gold set | Verdict on its published numbers |
+| --- | --- | --- | --- |
+| **gortex** (`zzet/gortex`) | `aa0da6be1aceea9f2acd9e772b258c477dc6dc03`, tag `v0.64.0` | hand-written, checked in, **on gortex's own repository** | **not placeable beside ours** |
+| **cocoindex-code** (`cocoindex-io/cocoindex-code`) | `47605cf099456ae117bbade9a66c2d5a0f82e416`, tag `v0.2.41` | **none — no eval harness exists** | nothing published to compare |
+| **codanna** (`bartolli/codanna`) | `12e823c4d965dc8269322869df760dd12d19e415`, tag `v0.16.0` | none for retrieval quality; throughput only | nothing published to compare |
+| **bare `rg` + whole-file reads** | ripgrep 15.1.0 | none needed — it has no index and no sample | **always comparable** |
+
+**gortex — three findings, all from its own source.**
+
+1. *Two published benchmarks share one hand-written 10-query list, on the tool's own repo.*
+   `bench/baselines/queries.json` and `bench/token-efficiency/queries.json` are byte-distinct files with
+   **identical query arrays**, and their two `groundtruth.json` files carry identical maps. Ten queries, gold
+   answers hand-assigned by the tool's authors, against the tool's own tree — stated outright in
+   `bench/token-efficiency/groundtruth.json:2`: "Curated against the gortex repo at the time the benchmark
+   first ran; extending the bench means adding rows here." There is no sampler; there is a literal list. Four
+   of the ten (`AddObservation`, `IsSymbolQuery`, `FileCoherenceSignal`, `alphaFuse`) are bare symbol names —
+   the "find the function named `foo`" shape `prompts/head-to-head.md` §2 rules out because every tool wins it.
+2. *The NDCG@10 denominator is per-arm variable.* `bench/baselines/main.go:194-239` skips a query for the arm
+   that errored on it (`if r.Error != "" { continue }`, `:201`) and divides by a per-arm `counted`
+   (`:233`, `:238`). An adapter that fails a query has that query removed from **its own** denominator, so the
+   arms in one published table are not scored over the same N. This is the correlated-filter shape exactly.
+3. *The published table has 8 rows; the registered gold set has 10.* `graph build edges` and `token counting
+   tiktoken` are in `queries.json` but absent from `BENCHMARK.md` §2's table, and `git log -S` puts **all ten
+   queries and the eight-row table in one commit, `f278957e` (2026-05-18)** — so this is not staleness. The
+   harness itself does not drop them: `bench/token-efficiency/main.go:232-242` medians over every row and
+   `:171-179` renders a failed pipeline as `ERR` rather than omitting it. The loss is in `BENCHMARK.md`'s own
+   stated update protocol — "re-run … **paste the new table into this file**" — an unverified manual
+   transcription step between harness and publication. A headline median over an undisclosed 8-of-10 subset
+   cannot be reconciled against the tool's own checked-in fixture.
+
+**What gortex does RIGHT, recorded because it bears on the verdict.** Its larger fixture
+(`bench/fixtures/retrieval.yaml`, `gortex-seed-v2`, 156 cases) is scored by `internal/eval/recall/recall.go`
+with a **fixed denominator for every ranker** — `res.Recall[k] = Hits[k] / res.Cases` where
+`Cases = len(fixture.Cases)` (`:176`, `:270-272`); no case is ever dropped. Cases whose gold no longer
+exists in the corpus are **warned about, not removed** (`cmd/gortex/eval_recall.go:145-150`), so they depress
+every arm equally. Three of its 62 referenced gold files no longer exist at `v0.64.0`
+(`cmd/gortex/init_doctor.go`, `cmd/gortex/server.go`, `pkg/wire/decoder.go`, reached by cases
+`mh-init-subcommands`, `mh-cmd-commands`, `mh-wire-format`), which makes its published R@K a **floor** —
+correct behaviour, but `BENCHMARK.md` §5 does not say so. And `998f0b5c` repointed a dead gold ID with an
+unusually honest commit message that names the effect on cross-revision comparability. The fixture is still
+hand-curated on its own repo ("Keep this fixture hand-curated", `bench/fixtures/retrieval.yaml:5,42`), with
+63 of 156 cases in an `exact` tier whose query IS the symbol name.
+
+**The route that DOES exist.** `internal/eval/stdbench/loaders.go` ships loaders for three
+**third-party-constructed** datasets — CoIR/BEIR (`:63`), SWE-ContextBench (arXiv 2602.08316, `:175`),
+ContextBench (arXiv 2602.05892, `:181`) — none vendored, all user-supplied via `--dataset`. gortex publishes
+no number from any of them. A shared external gold set is therefore *available* for both tools and is
+registered here as a **later rung**, not this one.
+
+**cocoindex-code — nothing to audit, because nothing is published.** The repo is 81 tracked files with no
+`bench/`, no `eval`, no fixture, no ground truth, and no test that scores retrieval quality. Its only quality
+figures are third-party MTEB leaderboard scores for candidate *embedding models*
+(`scripts/MTEB-RANKINGS.md`, generated by `scripts/find_best_models.py:14` from the live MTEB dataset) — a
+model-selection aid measured on public IR benchmarks by other people, never a measurement of `ccc` on a
+codebase. An arm that publishes no number cannot publish a biased one; it also cannot be cited beside ours.
+
+**The one cocoindex-code capability ripwire does not have, recorded so it is not buried.** cocoindex-code
+offers genuine semantic / embedding retrieval with **no exact-name requirement** — "finding code by
+description, exploring unfamiliar codebases, fuzzy/conceptual matches, or locating implementations without
+knowing exact names". ripwire's `--for` is name/subtoken/BM25 over a PageRank'd call graph and has no
+embedding mode by design (G3, zero dependencies). On a question carrying neither a name nor a path anchor,
+this is a mode ripwire structurally lacks, and any table produced under this registration must say so
+whichever way the numbers fall.
+
+**codanna — throughput, not retrieval quality.** `src/cli/commands/benchmark.rs` measures parser
+symbols/second (`:59` "Target: >10,000 symbols/second"); the README's only performance sentence (`:172`) is
+throughput plus warm-lookup latency, with the methodology hosted off-repo at `docs.codanna.sh` and therefore
+outside this audit. The one thing called a "gold run" —
+`examples/resolution_precision/js.rs:4-11`, 1470 class-match / 87 inherited / 117 unverifiable / 0 mismatch on
+a three.js slice — is **codanna's own prior output frozen as a regression baseline**, not an independently
+established truth, and its own header says the tool "never checks that a call to that method, on that
+receiver, exists there" (`examples/resolution_precision/main.rs:30-35`). No retrieval-quality gold set exists.
+
+**And the same test, applied to ourselves.** ripwire's `--eval-retrieval` gold set at `6be65b86` is every
+symbol with a ≥3-character name carrying a non-empty doc-phrase, exhaustive at or below `kMaxScored = 4000`
+and otherwise cut by smallest `fnv1a64(scope::name)` — path-free and order-free, with population/scored/rule
+printed on every run (`src/eval.h:562-605` the population, `:607-645` the cut, `:661` `kMaxScored`, `:717-729` the printed rule). That fixes the sampling defect, but it
+does **not** make those numbers usable here: its two query modes are the symbol's own name and its own
+doc-phrase, i.e. known-item retrieval — the shape `prompts/head-to-head.md` §2 forbids, for the same reason
+gortex's `exact` tier is forbidden. **ripwire's published retrieval numbers are excluded from this
+head-to-head by the same rule that excludes gortex's.** So is the existing §2 corpus slice ("the first 60
+scored held-out instances in stable dataset order"): first-N is not used again below.
+
+### Verdict
+
+**A published comparison of anyone's existing numbers is impossible, for every arm.** gortex's are curated by
+its authors on its own repository with a per-arm denominator and an unreconcilable published N; cocoindex-code
+and codanna publish no retrieval-quality numbers at all; and ripwire's own are known-item by construction.
+Quoting any of them beside another would be a category error, not a comparison.
+
+**A comparison run under THIS registration is possible, for gortex, cocoindex-code and the `rg` floor** — on a
+corpus none of the four arms authored, with a gold set derived by arithmetic from that corpus's own history,
+and one metric implementation called from every arm. codanna is **not** registered as an arm this round (it
+buys no axis gortex and cocoindex-code do not already cover, at a ~150 MB model download). That is the
+comparison specified below.
+
+### The arms, and their pins
+
+| Arm | Pin | Invocation posture |
+| --- | --- | --- |
+| **ripwire** | this repository at `6be65b86`, plain `build/ripwire`, binary sha256 recorded at run time | default flags; `--for` / `--callers` / `--impact` / `--affected` / `--map-diff` as the question shape dictates |
+| **gortex** | `aa0da6be1aceea9f2acd9e772b258c477dc6dc03` (`v0.64.0`), Apache-2.0 | prebuilt binary; `daemon start --detach` + `track` then the compact-facade MCP verbs |
+| **cocoindex-code** | `47605cf099456ae117bbade9a66c2d5a0f82e416` (`v0.2.41`), Apache-2.0 | `ccc index` then `ccc search`, `[full]` local-embeddings variant, no API key |
+| **`rg` floor** | ripgrep 15.1.0 | `rg` for the literal, then whole-file reads of every file it names — what a user without any of these tools does |
+| **placebo** | n/a | see below; mandatory under `docs/METHODOLOGY.md` §8 |
+
+**Cache and daemon state, declared as an asymmetry rather than smoothed over.** These arms do not have a
+common notion of "cold", and pretending otherwise is the lie `prompts/head-to-head.md` §1 names. Registered
+now, before any figure exists:
+
+- **ripwire** is measured **twice** on every question: once **cold** (no `~/.ripwire` cache entry for the
+  corpus; the parse is paid inside the measured window) and once **warm** (cache present). Both columns are
+  published. Its existing README/EVALS numbers are cold, and a warm-only table would not be comparable to them.
+- **gortex is daemon-first and is measured WARM ONLY.** Its quick start is `daemon start --detach` +
+  `track`, and the graph is resident and incrementally patched thereafter. A cold gortex column would measure
+  a posture its own documentation does not recommend. The daemon is started, the corpus tracked, and indexing
+  confirmed complete **before** the measured window opens; the one-time index cost is reported separately as
+  setup, never folded into a per-question figure.
+- **cocoindex-code is likewise WARM ONLY** — `ccc index` completes before the window opens, and its embedding
+  daemon is warm.
+- **`rg` has no index**, so its cold and warm columns are the same number; that is the point of keeping it.
+- Consequence, stated on every table this produces: **ripwire-warm vs gortex is the like-for-like row;
+  ripwire-cold vs gortex is ripwire paying an indexing cost gortex has already paid.** Both are reported.
+  Neither is called "the" result.
+
+**One-time model downloads count as SETUP, not per-question cost.** cocoindex-code's `[full]` install pulls
+torch plus an embedding model; gortex's default embedder is baked in and downloads nothing. Downloads happen
+before the measured window, are reported once in bytes and wall time, and never enter a per-question figure.
+The asymmetry is disclosed rather than amortised.
+
+### The corpus — deliberately authored by none of the arms
+
+**RocksDB at `0e2801ac30b3f283c3b14e523ba3667eca024f09`** (v9.7.3, 2026-10-17 upstream date; 2,066 tracked
+files, 1,286 C/C++). One corpus, one commit, for every arm. It is chosen because **no arm's authors wrote
+it** — the single defect that invalidates gortex's own published tables is that they are measured on gortex's
+own repository, and running this comparison on *ripwire's* repository would reproduce that defect with the
+home team changed. RocksDB is already a registered ripwire corpus (§9's ensemble ladder), is public and
+redistributable, and is squarely in the language all four arms claim as first-class.
+
+### The questions — N = 30, fixed here, derived by arithmetic and not by eye
+
+Selected from RocksDB's own history, so that no arm's output and no author's judgement about "a good question"
+touches the sample. The rule, executed once and frozen in this table:
+
+1. **Window:** the 1,200 first-parent commits ending at the corpus pin.
+2. **Source set** of a commit: its touched files matching
+   `^(db|table|util|file|utilities|memtable|cache|env|options|monitoring)/.*\.(cc|h)$` and NOT matching
+   `[^/]*test[^/]*\.(cc|h)$`. **Test set:** its touched files matching `_test\.cc$`.
+3. Five question shapes, each with an eligibility predicate, applied in **decreasing restrictiveness** so the
+   scarce shapes fill first: S4 (`|src| ≥ 3`), S3 (`|src| ≥ 1 ∧ |test| ≥ 1`), S2 (`|src| ≥ 2`), S1
+   (`|src| ≥ 1`), S5 (`|src| ≥ 1`). A commit serves **at most one** shape.
+4. Per shape: build the eligible list in first-parent order, `stride = ⌊L/6⌋`, take indices
+   `0, stride, …, 5·stride`. Six per shape, thirty in all. Eligible counts and strides at the pin:
+   S4 `L=270, stride=45` · S3 `L=403, stride=67` · S2 `L=408, stride=68` · S1 `L=734, stride=122` ·
+   S5 `L=728, stride=121`.
+5. The question text is a fixed template per shape, filled from the commit — **never hand-written**:
+   S1 `Where is <commit subject> implemented?` · S2 `If I change <first src file>, what else has to change
+   with it?` · S3 `Which tests cover <first src file>?` · S4 `How does <first src file> reach <last src
+   file>?` · S5 `What changed recently in <dir of first src file>?`
+
+**Not one question is "find the function named `foo`".** Every shape is one of the five the brief for this
+round fixed — where is X handled / who breaks if I change Y / which tests cover Z / how does A reach B / what
+changed recently — and each appears exactly six times.
+
+### The gold
+
+**Gold is the commit's own touched-file set, partitioned by shape** — established by `git show --name-only`
+against the pinned corpus, so it is derived from the repository and not from any arm's output:
+
+| Shape | Question | Gold |
+| --- | --- | --- |
+| S1 | where is X handled | every source file the commit touched |
+| S2 | who breaks if I change Y | every source file **except** the one named in the question |
+| S3 | which tests cover Z | every `*_test.cc` the commit touched |
+| S4 | how does A reach B | the source files between the two named endpoints |
+| S5 | what changed recently | every source file the commit touched |
+
+**Three limits on this gold, all declared now.** (a) It is a *localization* gold: an arm is credited for
+naming the right files, never for prose quality. (b) S1 and S5 share a gold set by construction — the
+questions differ (topical vs temporal) and probe different verbs, but their gold does not, and no claim will
+treat them as independent evidence of two things. (c) **S4's gold is a proxy, and a weak one**: files changing
+in one commit is evidence they lie on a connecting path, not proof. One selected row makes the proxy plainly
+invalid — question 4, commit `04cbc77b9` "Add missing license to source files (#12083)", a mechanical sweep in
+which nothing reaches anything. It is **pre-registered as excluded from the S4 sub-total and reported anyway
+with its exclusion visible**, per `prompts/head-to-head.md` §2: an excluded instance is a finding about the
+metric, not a free win. That is 1 exclusion in 30, declared before any arm ran; the target for every other row
+is zero, and any further exclusion discovered mid-run is published as a metric defect, not applied silently.
+
+**The frozen question set.** Fixed at registration; this table is the instrument.
+
+| # | shape | rocksdb commit | the question (template-filled) | gold | `n` |
+| ---: | --- | --- | --- | --- | ---: |
+| 1 | S4 | `2647d5c66` | How does `db/compaction/compaction_job.cc` reach `util/compaction_job_stats_impl.cc`? | `db/compaction/compaction_job.h`, `db/compaction/compaction_outputs.h` +5 more | 7 |
+| 2 | S4 | `961468f92` | How does `table/block_based/block_based_table_reader.cc` reach `table/table_reader.h`? | `table/block_based/block_based_table_reader.h` | 1 |
+| 3 | S4 | `341219536` | How does `db/db_impl/db_impl.cc` reach `db/wide/wide_columns.cc`? | `db/db_impl/db_impl.h`, `db/multi_cf_iterator.cc` +1 more | 3 |
+| 4 | S4 | `04cbc77b9` | How does `utilities/merge_operators/string_append/stringappend.cc` reach `utilities/transactions/lock/range/range_tree/lib/standalone_port.cc`? | `utilities/merge_operators/string_append/stringappend.h`, `utilities/merge_operators/string_append/stringappend2.cc` +4 more | 6 |
+| 5 | S4 | `8fc78a3a9` | How does `db/db_iter.cc` reach `db/wide/wide_columns_helper.h`? | `db/merge_helper.cc`, `db/merge_operator.cc` +3 more | 5 |
+| 6 | S4 | `17bc27741` | How does `db/blob/blob_file_cache.cc` reach `utilities/transactions/optimistic_transaction_db_impl.h`? | `db/blob/blob_file_cache.h`, `db/memtable.h` +7 more | 9 |
+| 7 | S3 | `11f21cf86` | Which tests cover `db/compaction/compaction_job.h`? | `db/compaction/compaction_service_test.cc` | 1 |
+| 8 | S3 | `0ae3d9f98` | Which tests cover `table/block_fetcher.cc`? | `cache/tiered_secondary_cache_test.cc` | 1 |
+| 9 | S3 | `f2546b662` | Which tests cover `db/column_family.cc`? | `db/compaction/tiered_compaction_test.cc`, `db/db_iterator_test.cc` +3 more | 5 |
+| 10 | S3 | `c1b84d043` | Which tests cover `cache/tiered_secondary_cache.cc`? | `cache/tiered_secondary_cache_test.cc` | 1 |
+| 11 | S3 | `f2b623bcc` | Which tests cover `db/db_impl/db_impl.cc`? | `db/db_secondary_test.cc`, `db/wide/db_wide_basic_test.cc` | 2 |
+| 12 | S3 | `3e7fc8816` | Which tests cover `db/write_batch.cc`? | `db/write_batch_test.cc` | 1 |
+| 13 | S2 | `eca4f106b` | If I change `db/compaction/compaction_job.h`, what else has to change with it? | `db/compaction/compaction_service_job.cc` | 1 |
+| 14 | S2 | `5cf3bed00` | If I change `table/block_based/binary_search_index_reader.cc`, what else has to change with it? | `table/block_based/block_based_table_reader.cc`, `table/block_based/block_based_table_reader_impl.h` +7 more | 9 |
+| 15 | S2 | `096fb9b67` | If I change `db/wal_manager.cc`, what else has to change with it? | `db/wal_manager.h` | 1 |
+| 16 | S2 | `324453e57` | If I change `table/get_context.cc`, what else has to change with it? | `table/get_context.h` | 1 |
+| 17 | S2 | `cff6490bc` | If I change `db/db_impl/db_impl.cc`, what else has to change with it? | `db/db_impl/db_impl.h` | 1 |
+| 18 | S2 | `77dda0d9d` | If I change `table/block_based/block.cc`, what else has to change with it? | `table/block_based/block_builder.cc` | 1 |
+| 19 | S1 | `5bb363edc` | Where is **Print unknown writebatch tag (#13062)** implemented? | `db/write_batch.cc` | 1 |
+| 20 | S1 | `a211e0655` | Where is **Remove close when fd == -1. (#12732)** implemented? | `env/io_posix.cc` | 1 |
+| 21 | S1 | `1104eaa35` | Where is **Add initial support for TimedPut API (#12419)** implemented? | `db/builder.cc`, `db/compaction/compaction_iteration_stats.h` +19 more | 21 |
+| 22 | S1 | `cd577f605` | Where is **Fix WRITE_STALL start_time (#12147)** implemented? | `db/db_impl/db_impl_write.cc` | 1 |
+| 23 | S1 | `0dac75d54` | Where is **Fix a bug in MultiGet when skip_memtable is true (#11700)** implemented? | `db/db_impl/db_impl.cc` | 1 |
+| 24 | S1 | `7521478b4` | Where is **Record the `persist_user_defined_timestamps` flag in manifest (#11515)** implemented? | `db/builder.cc`, `db/compaction/compaction_outputs.cc` +16 more | 18 |
+| 25 | S5 | `2fef01361` | What changed recently in `db/`? | `db/forward_iterator.cc`, `db/version_set.cc` +1 more | 3 |
+| 26 | S5 | `9f4c597d8` | What changed recently in `file/`? | `file/writable_file_writer.h`, `utilities/fault_injection_fs.cc` +1 more | 3 |
+| 27 | S5 | `f77b78854` | What changed recently in `cache/`? | `cache/lru_cache.cc` | 1 |
+| 28 | S5 | `e7c625944` | What changed recently in `file/`? | `file/file_prefetch_buffer.cc`, `file/file_prefetch_buffer.h` +8 more | 10 |
+| 29 | S5 | `5b5b011cd` | What changed recently in `table/block_based/`? | `table/block_based/block_based_table_iterator.cc`, `table/block_based/block_based_table_reader.cc` +9 more | 11 |
+| 30 | S5 | `98c6d7fd8` | What changed recently in `env/`? | `env/unique_id_gen.cc`, `env/unique_id_gen.h` | 2 |
+
+### The metric — one implementation, called from every arm
+
+`prompts/head-to-head.md` §3's rule is that a metric implemented twice disagrees with itself. **The scorer is
+written once**, takes `(question_id, arm, ordered file list, bytes emitted, wall ms)` and is the only code
+that computes anything:
+
+1. **Tokens-to-correct-answer** — bytes the arm actually emitted, cumulated over its output in the order the
+   arm produced it, up to and including the point at which **every** gold file for that question has been
+   named. An arm that never names them all scores its **full emitted bytes** and is marked `incomplete`;
+   that is a measurement, not an exclusion. Bytes are what each arm actually wrote, never what it could have
+   written with better flags.
+2. **Wall time** — measured around the arm's own invocation, cache/daemon state named in the same row.
+
+Both are **paired per question**: same question, every arm, and reported per question before any aggregate.
+**Arm order alternates per question** by question index parity, so no arm systematically benefits from a
+warmer page cache or a cooler machine. Aggregates, if published, are medians of the paired per-question
+values and never a mean of per-arm totals.
+
+**A `0` from a call-graph verb is a floor, never "there are none"** — scoring one as a confident negative is a
+metric bug on our side, and the scorer records it as a floor.
+
+### The placebo arm — mandatory, not optional
+
+`docs/METHODOLOGY.md` §8 binds every retrieval head-to-head registered here to a placebo at matched token
+cost. Without it, a win reads as "ranking helped" when the evidence only supports "less context helped".
+Registered arm: **random-rank at matched budget** — for each question, files drawn uniformly at random from
+the corpus's indexed C/C++ universe (seeded per question with the question index, so it is reproducible),
+truncated to the same byte budget the ripwire arm actually consumed on that question. If ripwire does not beat
+the placebo on a question, that question is **not** evidence of a ranking win, and the readout says so
+row-by-row rather than in a footnote.
+
+**AMENDMENT (2026-09-06, after the run — a fix to the INSTRUMENT, binding on the NEXT round, and it changes
+nothing about this one).** As registered, the placebo comparison is undefined on a row where **both** arms are
+incomplete: both then score their full emitted bytes, and the placebo's budget *is* ripwire's emitted bytes
+truncated to whole lines, so the placebo wins by that truncation slack and nothing else — measured below,
+`margin == −slack` on every one of the 20 such rows, median −12 B. **A mutually-incomplete row is a TIE from
+now on, not a placebo win**, and the readout must report the tie count as its own column rather than folding
+it into either arm. The tie rule is not applied retroactively: this round is scored strictly as it was
+registered, and — checked both ways before the amendment was written — the verdict is identical under either
+reading (6/30 as registered; 6–4 restricted to the ten rows a completion actually decided; a majority of 30
+was required either way). **The stop condition stands and no ranking claim is published from this round.**
+Fixing the rule is about the next round's instrument, not about this round's result.
+
+### What this comparison will NOT show, written before it runs
+
+- **One corpus, one language, one commit.** RocksDB is C++. Nothing here transfers to the TypeScript, Python
+  or Rust behaviour of any arm.
+- **N = 30, paired.** Enough to see a large effect and its loss buckets; not enough for a small one. No
+  significance claim will be attached to a difference this N cannot support.
+- **It does not measure agent outcomes.** It measures what each tool emits and what that costs, not whether a
+  task got solved (§3b is that instrument).
+- **cocoindex-code's embedding retrieval is a mode ripwire does not have.** On any question where the
+  question text carries no name and no path, a ripwire win is a win at *its* game and the row will say so.
+- **The gold is patch-derived**, so it credits file localization only, with S4's proxy weakness above.
+- **It reads on none of the arms' published numbers**, which the audit above found unusable — this
+  registration replaces them, it does not reconcile with them.
+- **A shared third-party benchmark (CoIR / SWE-ContextBench / ContextBench) is a later rung**, not this one.
+  gortex already ships loaders for all three; ripwire ships none. Building that arm is a separate,
+  owner-funded round.
+
+### Losses first, and the negative consequence, pre-committed
+
+Per `prompts/head-to-head.md` §4: every question an arm loses or ties is bucketed (wrong ranking / missing
+edge — dynamic dispatch, callback, macro / question shape the verb does not serve / output the reader could
+not act on / the baseline is simply better here), both outputs quoted, the question re-run to prove it is not
+a cache or ordering artifact. **The losses are published before the wins, in the same document.**
+
+**Pre-committed consequences.** (1) If ripwire loses overall, that is the result and it is published under
+this heading with the loss buckets as the finding. (2) If ripwire does not beat the **placebo** on a majority
+of questions, no ranking claim is published from this round at all, whatever the arm-vs-arm table says. (3) If
+either foreign arm cannot be brought up on the pinned corpus, its column is published as **absent**, never as
+zero, and the remaining arms plus the `rg` floor still run. (4) Nothing from this registration reaches
+`README.md` — README may only quote what this file pins, and this section pins no number.
+
+**Status at registration: NOT RUN.** The audit above was performed entirely on read-only clones, with no arm
+built or executed. This section is the registration and contains no result.
+
+**Correction, same day, to what an earlier draft of this paragraph claimed.** That draft said "no arm is
+installed on this machine; `command -v gortex ccc codanna` is empty at the time of writing". By the time this
+section was committed that was **already false**: the owner authorised installation mid-round, and two arms
+were installed before this commit landed — gortex **v0.64.0+aa0da6b** (release tarball, SHA256 verified against
+the release `checksums.txt`; the `curl | sh` installer deliberately not used) and cocoindex-code **0.2.41**
+with the `[full]` extra (`uv tool install --python 3.12`, isolated tool directory). Neither is on the system
+`PATH`; both live in a session scratch directory. codanna remains uninstalled.
+
+The claim this registration actually rests on is unchanged and is the one that matters: **no arm had been RUN,
+and no measurement of any kind existed, when this section was committed.** Installation is setup, not
+measurement. The distinction is recorded here rather than quietly corrected, because a registration whose
+value is its timestamp cannot carry a false statement about its own preconditions — and because "the arms were
+not installed" is exactly the kind of incidentally-true-when-drafted claim that this document's own method
+(§METHODOLOGY 8) exists to stop from ageing into a lie.
+
+### RESULT — RUN 2026-09-06, under the registration above
+
+**The placebo stop condition FIRED. No ranking claim is published from this round.**
+
+`docs/METHODOLOGY.md` §8's placebo arm was pre-committed above with a consequence: *"If ripwire does not beat
+the placebo on a majority of questions, no ranking claim is published from this round at all, whatever the
+arm-vs-arm table says."* **ripwire beats the random-rank placebo on 6 of 30 questions.** A majority (≥16) was
+required. The consequence is therefore honoured here: the table below is published because the losses are the
+result, and **no claim of ranking superiority over any arm is made or implied by it.**
+
+All five registered arms plus the placebo ran on all 30 questions; nothing is absent, and codanna stayed out.
+The harness is committed at `bench/roundc-h2h/` — `scorer.py` is the single metric implementation every arm is
+scored through, and `derive_questions.py` re-derives the frozen question table from the corpus (it reproduces
+all 30 commits, all 30 `n` values and all five eligible/stride pairs exactly).
+
+| arm | complete | gold files named | median TTCA | median wall (contaminated) |
+| --- | ---: | ---: | ---: | ---: |
+| ripwire cold | 6/30 | 26/129 = 20% | 5,787 B | 1,914 ms |
+| ripwire warm | 6/30 | 26/129 = 20% | 5,787 B | 774 ms |
+| gortex v0.64.0, warm/daemon | 4/30 | 11/129 = 9% | 1,039 B | 547 ms |
+| cocoindex-code 0.2.41, warm | 7/30 | 18/129 = 14% | 8,319 B | 313 ms |
+| `rg` floor | 22/30 | 99/129 = 77% | 117,211 B | 72 ms |
+| **placebo (random rank, matched budget)** | 4/30 | 37/129 = 29% | 5,807 B | — |
+
+Wall time is contaminated — two other sessions were live on this machine throughout — so the byte columns are
+the headline and every millisecond is an upper bound of unknown tightness. **ripwire cold and warm emit
+byte-identical output on all 30 questions**: the cache buys 2.5× latency and changes no answer.
+
+**The single most important row is the placebo's.** On the six "what changed recently in `<dir>`" questions it
+names 21 of 30 gold files to ripwire's 2 — not by retrieving anything, but because ripwire's 31.7 KB bundle
+sets a matched budget in which a list of random paths covers **976 of the corpus's 1,286 C/C++ files, 76% of
+the corpus**. Without the placebo arm this round would have published a recall figure that was mostly budget.
+That is the case `docs/METHODOLOGY.md` §8 exists to catch, caught.
+
+**Four defects in the registration itself, found by running it.** (1) It dates the corpus pin "2026-10-17";
+`0e2801ac3` is dated **2024-10-17**. The pin is correct and verified (12,938 revisions), but the two-year error
+is load-bearing — the true 23-month age is exactly what makes ripwire's 18-month history windows inert below.
+(2) The placebo comparison is undefined when both arms are incomplete: both score full emitted bytes, the
+placebo's budget *is* ripwire's emitted bytes truncated to whole lines, so it wins by the truncation slack —
+measured, `margin == −slack` on all 20 such rows. **Amended above**: such rows are ties from the next round on. (3) The `rg` floor's
+output order is unspecified, and `rg`'s parallel walk makes its score nondeterministic — **×276 across five
+identical runs** on one question. Published with `--sort path`, which fixes it, and which moves rows in both
+directions. (4) "Named" credits a path occurring inside quoted source: **11 of the floor's 22 completions
+reach the gold only through an `#include` line**, not through the ranked `rg -l` list.
+
+**Losses, published before any win, per the registration.** Every one was re-run with the arm order reversed;
+ripwire, gortex and cocoindex-code reproduced byte-for-byte on 42/42 re-runs.
+
+- **The `rg` floor's 77% is a haystack.** Its scored window names up to 1,029 of the corpus's 1,286 C/C++
+  files on a question with 5 gold files. Breadth at low byte cost is what this metric rewards.
+- **No arm serves "what changed recently in `<dir>`".** ripwire 2/30, gortex 0/30, cocoindex 1/30. ripwire's
+  verb is question-independent — byte-identical output for all six. A diagnostic re-run scoped to the named
+  directory is **worse** (0/30), so this is not an artifact of verb choice.
+- **`--situ` buries the `.cc`'s own `.h`.** Asked what changes with `db/wal_manager.cc`, ripwire never names
+  `db/wal_manager.h` in 3,104 B, ranking a 222-file transitive blast radius by dependent-symbol count so the
+  largest test files surface instead. cocoindex returns the gold as result #1 in **55 bytes**. ripwire's S2
+  recall is 2/14.
+- **ripwire's co-change lens is inert on any pinned historical corpus, and `--situ` does not disclose it.**
+  The 18-month window is measured from wall-clock *now*; the corpus HEAD is 23 months old, so zero commits
+  fall inside it and `--cochange` returns zero rows repo-wide. `--cochange` and `--rank-by=churn` are both
+  **honest** about this in their own headers (`commits="0" window="18mo"`,
+  `window="18mo (no churn evidence)"`). **`--situ` is the gap**: it renders only
+  `co-change — usually edited with these but NOT in your diff (0)` and mentions neither the window nor the
+  commit count, so a zero that means "the window was empty" reads as "there are none". That is the case
+  non-negotiable #3 forbids. On the same corpus **gortex's `enrich cochange` mines 9,854 co-change edges**,
+  because it mines the repository's own history rather than a wall-clock window — the disclosure fix is the
+  small one, anchoring the window to HEAD's date is the real one.
+- **gortex's `affected` answers every S3 question with the same two or three test *helpers*** — 0/11, with
+  three of six exiting 3 and empty. ripwire's `--affected` is its best shape here at 8/11.
+- **gortex's `context --entry-point` does not anchor**: given `-e table/get_context.cc` it returned
+  `OptionChangeMigration` from `utilities/option_change_migration/`.
+- **cocoindex's chunker ranks a `CMakeLists.txt` test enumeration as its top semantic hit** (score 0.645) for
+  a question about C++ change coupling.
+- **gortex's column is a properly-brought-up zero, not a setup artifact.** `gortex enrich all` was run
+  (953.6 s; 42,542 blame nodes, 34,416 churn symbols, 9,854 co-change edges) and all 30 questions
+  re-measured: recall unchanged at 11/129, S5 unchanged at 0/30. The reason is a defect in gortex's own
+  `docs` verb, which reports `_No blame metadata on graph nodes_` while `analyze --kind ownership` reads 501
+  owners out of the same store at the same moment.
+
+**The capability ripwire does not have, recorded as the registration required whichever way the numbers fell,
+and supported by the data rather than merely repeated.** cocoindex-code's embedding retrieval wins exactly
+where the answer is "the header of the file you named" and the question carries no anchor ripwire's ranker can
+use — q15 above is the clean case (55 B, result #1, against ripwire incomplete at 3,104 B), with q17, q19 and
+q23 on the same pattern. cocoindex completes 7/30 to ripwire's 6. ripwire has no embedding mode by design
+(G3), and on a question with neither a name nor a path anchor this is a mode it structurally lacks.
+
+**One-time setup, reported once and never folded into a per-question figure.** ripwire has no setup step — its
+parse is paid inside the measured cold column. gortex: `track` 110.4 s, 797 MB store (+15.9 min for the
+optional enrichment). cocoindex-code: `init` 59.9 s + `index` 173.6 s, 1.1 GB install, 87 MB model, 273 MB
+project index. **No arm used an API key and no dollars were spent.** cocoindex-code ships usage tracking that
+must be disabled by environment variable (`COCOINDEX_DISABLE_USAGE_TRACKING=1`, set for every run here);
+gortex has a cloud login that was never used; **ripwire has no telemetry at all.** Every third-party
+invocation ran under `env -i` with an explicit allowlist, verified by reading the daemon's own reported
+environment back.
+
+**Pre-registered exclusion, honoured:** question 4 (`04cbc77b9`, a mechanical license-header sweep) is
+excluded from the S4 sub-total and reported anyway with its exclusion visible. No further exclusion was
+applied; the four metric defects above are published as defects rather than used to drop rows.
+
+### POST-FIX RE-RUN — the same 30 questions, after the losses were converted into code (2026-09-06)
+
+The loss list above is the deliverable, so it was implemented and the **frozen** questions were re-run on the
+fixed binary. Nothing was re-registered, re-derived or re-scoped: the same `questions.json`, the same
+`scorer.py`, the same corpus at the same pin. Only ripwire and the placebo were re-run, because only they can
+move — the placebo's budget IS ripwire's emitted bytes, and gortex / cocoindex-code / the `rg` floor are
+untouched by a change to ripwire, so their columns above stand as measured. Harness:
+`bench/roundc-h2h/rerun_post.py` → `results_post.json`.
+
+What changed in the tool: the default history window now anchors on HEAD's own committer date instead of the
+wall clock (taken from gortex, which mined 9,854 co-change edges on the corpus where ripwire returned zero
+rows); `--situ` propagates the `commits=`/`window=` floor its own component verb already emitted; and `--situ`
+surfaces the named file's declaration/definition partner (taken from cocoindex, which answered q15 in 55 B
+where ripwire missed the gold entirely in 3,104 B) — by shared `(scope, name)` symbol identity, not by
+embeddings and not by file extension.
+
+| paired, ripwire-warm | before | after |
+| --- | ---: | ---: |
+| questions completed | 6/30 | **9/30** |
+| gold files named | 26/129 (20%) | **29/129 (22%)** |
+| S2 ("what else has to change with `<file>`") recall | 2/14 | **5/14** |
+| beats the placebo, strictly as registered | 6/30 | **9/30** |
+| beats the placebo, under the amended tie rule | 6–20–4 | **9–17–4** |
+
+The three new completions are q15, q16 and q17 — exactly the rows whose gold IS the named file's declaration
+partner (`db/wal_manager.h`, `table/get_context.h`, `db/db_impl/db_impl.h`), each now complete at **664 / 667 /
+669 B** against an incomplete 3,104 / 3,114 / 3,115 B before, and cocoindex's 55 B on q15 stands as the cheaper
+answer. q13 was already complete and is now reached at 742 B instead of 1,187 B (its gold is the second decl/def
+partner). q18's gold is `block_builder.cc` from `block.cc` — not a declaration partner, and the new row
+correctly does not claim it. S2's emitted bytes rose 16,354 → 19,617 B for those three completions.
+
+**A defect in the fix, found by dogfooding it and fixed before this was written.** The partner rule first
+matched on `(scope, name)` alone under a majority guard. Run against this repo's own 17-file diff it answered
+`test/w2verbscheck.sh (10 shared symbols)`: every shell gate here defines `ok`, `no`, `fail`. Those files all
+DEFINE those names and none DECLARES them, so they are not a decl/def pair — the rule now requires the two
+sides to disagree about which they are (a body-carrying span is a definition, a signature-only span is a
+declaration), and the majority guard is taken per (changed file, partner) PAIR rather than in aggregate, where
+a `min()` against the largest changed file made the bar *easier* for every small partner. Both halves carry
+their own gate arm, positive and negative.
+
+**The stop condition still fires, and that is published as the result.** 9 of 30 is not the required majority
+of 16. The tool is measurably better on the axis the losses named and it still does not clear the bar the
+registration set before the run. Two reasons, both already in the loss list and neither addressed by this
+lane's changes: S5 is unmoved at 2/30 (see the refutation below), and 17 rows remain mutually incomplete,
+where the comparison is decided by line-truncation slack rather than by ranking.
+
+**The collapsing hypothesis, tested first and REFUTED.** L-3 (S5 served by nothing) and L-5 (the co-change
+window inert on a 23-month-old corpus) looked like one defect: S5 *is* the history question. They are two.
+The verb frozen for S5, `--rank-by=churn-decay`, was **already** anchored on HEAD (`window="all-history
+half-life=90d"`, `gitmine.h::gitLogDecayedFileWeights` reads `gitHeadCommitEpoch`, never `std::time`), so the
+wall-clock defect cannot be its cause. Measured directly, by emulating the fix exactly — an 18-month window
+anchored at HEAD's date, `--rank-by=churn --since=2023-04-17`: S5 recall **1/30**, *worse* than the frozen
+arm's 2/30 and nowhere near the placebo's 21/30. The real S5 gap is density, not history: at the matched
+31,708-byte budget ripwire's bundle names **71 distinct files** (180 symbol rows) while the placebo's bare path
+list names ~976 — a 14× paths-per-byte gap on a question whose gold is a file list. That is a missing verb
+shape, not a broken window, and it is not fixed here.
+
+**Cost of the fix, stated because it is not free.** S1/S4 bundles grew ~30–70 B each: on this pinned corpus the
+churn lens now carries real churn where it previously carried none, which is the anchoring change doing its job
+and is paid for in bytes. S3 and S5 are byte-identical before and after. Cold and warm remain byte-identical on
+all 30 questions.

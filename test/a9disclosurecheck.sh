@@ -156,8 +156,11 @@ case "$S" in *'<m pure="1">'*) ok '§A9.4 --lego=Shape keeps its <m> contract ro
 CH="$( perl -e 'alarm 180; exec @ARGV' "$BIN" "$ROOT" --rank-by=churn --top-k=5 2>/dev/null | grep -oE '<r [^>]*>' | head -1 )"
 case "$CH" in *'rank_by="churn"'*) ok '§A9.6 --rank-by=churn <r> carries rank_by="churn"' ;;
               *) no "§A9.6 --rank-by=churn <r> has no rank_by=: $CH" ;; esac
-case "$CH" in *'window="18mo"'*)   ok '§A9.6 --rank-by=churn <r> carries window="18mo"' ;;
-              *) no "§A9.6 --rank-by=churn <r> has no window=: $CH" ;; esac
+# F1 (round C): the DEFAULT window is anchored on HEAD's committer date, and the stamp names the anchor —
+# "18mo@HEAD" — so a reader can tell a HEAD-anchored window from a wall-clock one. The `@HEAD` half is
+# CONDITIONAL on git being present, which it is for this arm (it runs against $ROOT), so both halves are pinned.
+case "$CH" in *'window="18mo@HEAD"'*) ok '§A9.6 --rank-by=churn <r> carries window="18mo@HEAD" (width + anchor)' ;;
+              *) no "§A9.6 --rank-by=churn <r> has no anchored window=: $CH" ;; esac
 case "$CH" in *'at="'*)            ok '§A9.6 --rank-by=churn <r> carries the at= stamp (map-diff precedent)' ;;
               *) no "§A9.6 --rank-by=churn <r> has no at= stamp: $CH" ;; esac
 # --since must relabel the window rather than keep advertising the default.

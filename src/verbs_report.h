@@ -1198,7 +1198,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         std::vector<char> sinceEsc;
         const std::string windowLabel = ( !cfg.since.empty() && sinceScope.active )
                                        ? std::string( escapeXml( std::string_view( cfg.since ), sinceEsc ) )
-                                       : "12mo";
+                                       : rw::defaultWindowLabel( root, "12mo" );   // F1: the default window is HEAD-anchored and says so
         std::string windowLabelInComment = windowLabel;   // "--" is illegal inside an XML comment (G4)
         for( std::size_t i = 1; i < windowLabelInComment.size(); ++i )
         {
@@ -1285,7 +1285,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         std::vector<char> coSinceEsc;
         const std::string coWindowLabel = ( !cfg.since.empty() && sinceScope.active )
                                          ? std::string( escapeXml( std::string_view( cfg.since ), coSinceEsc ) )
-                                         : "18mo";
+                                         : rw::defaultWindowLabel( root, "18mo" );   // F1: the default window is HEAD-anchored and says so
 
         if( !cfg.cochangeFile.empty() )                                    // partners of one file → shared core (gitmine.h)
         {

@@ -102,3 +102,9 @@
 --ignored	git's own ls-files option, same quoted command — not a ripwire flag
 --exclude-standard	git's own ls-files option, same quoted command — not a ripwire flag
 --directory	git's own ls-files option, same quoted command — not a ripwire flag
+--dataset	gortex's own ContextBench option, quoted in docs/EVALS.md's round-C head-to-head registration as how that arm's benchmark corpora are supplied (none vendored) — a foreign tool flag, not a ripwire flag
+--detach	gortex's own daemon option ("gortex daemon start --detach"), quoted in the same registration as that arm's warm-only quick start — a foreign tool flag, not a ripwire flag
+--entry-point	gortex's own `context` option, quoted in the same round's loss list (L-7: `-e table/get_context.cc` did not move its briefing off the task string) — a foreign tool flag, not a ripwire flag
+--kind	gortex's own `analyze` option ("analyze --kind ownership"), quoted in the same loss list as the verb that reads back blame metadata its own `docs` verb claims is absent — a foreign tool flag, not a ripwire flag
+--python	uv's own tool-install option ("uv tool install --python 3.12"), quoted in the same registration as how the cocoindex-code arm was installed into an isolated tool directory — a foreign tool flag, not a ripwire flag
+--sort	ripgrep's own option ("rg -l --sort path"), quoted in the same round's loss L-2 as the fix that makes the rg floor arm deterministic (its walk order moved the measured byte offset by 276x across identical runs) — a foreign tool flag, not a ripwire flag

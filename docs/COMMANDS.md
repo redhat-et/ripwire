@@ -2133,7 +2133,7 @@ $ ./build/ripwire . --cochange --cochange-groups
 
 **Answers:** scope --hotspots/--cochange/--rank-by=churn|churn-decay to commits after this point: a revision (HEAD~20, a tag/sha — deterministic) or a git approxidate ("2 weeks ago" — wall-clock-relative).
 
-e.g. --hotspots --since="1 week ago" ranks by RECENT churn (the regression lens). Absent ⇒ each verb's OWN bounded default window, NOT all history: --hotspots 12 months, --rank-by=churn 18 months, --cochange 18 months (--rank-by=churn-decay is the ONE exception: its default IS all history, because the 90-day half-life makes a cut-off unnecessary — it stamps that too). All of them STAMP the window they used (window="12mo"/"18mo", or the resolved --since value) — --cochange gained its window= in the same round that gave it sub_windows=, and this clause used to say it had none. An UNRESOLVABLE value is refused by --hotspots (exit 1 — its window is part of the measurement) and degrades to the verb's own default window elsewhere BESIDE --slice=SYM:VAR it is not a window at all: it names the revision whose def-use slice of that variable this run is diffed against — see --slice
+e.g. --hotspots --since="1 week ago" ranks by RECENT churn (the regression lens). Absent ⇒ each verb's OWN bounded default window, NOT all history: --hotspots 12 months, --rank-by=churn 18 months, --cochange 18 months (--rank-by=churn-decay is the ONE exception: its default IS all history, because the 90-day half-life makes a cut-off unnecessary — it stamps that too). All of them STAMP the window they used AND the anchor that produced it: a DEFAULT window is measured back from HEAD's OWN committer date, never the wall clock, and says so (window="12mo@HEAD"/"18mo@HEAD"), so a pinned corpus, an archived release or a bisect checkout has its history INSIDE its own window — unanchored, a 2024 checkout read in 2026 reported no repository at all. A value you pass HERE is never re-anchored: it is stamped verbatim, so --since="18 months ago" is the wall-clock window on request. An UNRESOLVABLE value is refused by --hotspots (exit 1 — its window is part of the measurement) and degrades to the verb's own default window elsewhere BESIDE --slice=SYM:VAR it is not a window at all: it names the revision whose def-use slice of that variable this run is diffed against — see --slice
 
 **Try it**
 
@@ -2163,6 +2163,7 @@ $ ./build/ripwire . --hotspots --since="2 weeks ago"
 **Caveats (stated by the binary):**
 
 - Absent ⇒ each verb's OWN bounded default window, NOT all history: --hotspots 12 months, --rank-by=churn 18 months, --cochange 18 months (--rank-by=churn-decay is the ONE exception: its default IS all history, because the 90-day half-life makes a cut-off unnecessary — it stamps that too).
+- A value you pass HERE is never re-anchored: it is stamped verbatim, so --since="18 months ago" is the wall-clock window on request.
 - An UNRESOLVABLE value is refused by --hotspots (exit 1 — its window is part of the measurement) and degrades to the verb's own default window elsewhere BESIDE --slice=SYM:VAR it is not a window at all: it names the revision whose def-use slice of that variable this run is diffed against — see --slice
 
 ### `--arch=FILE`

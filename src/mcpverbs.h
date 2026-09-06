@@ -1069,7 +1069,7 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
     const PageWindow ccPw = pageWindow( ps.size(), effectiveRowCap( page.limit, kCochangePartnerCap ), page.offset );
     char             ccPab[ kPageDisclosureCap ];
     out += "\"file\":\"" + mcpdetail::jsonEscape( ccRel( fid ) ) + "\",\"commits\":" + std::to_string( commits )
-         + ",\"window\":\"18mo\",\"sub_windows\":" + std::to_string( subWindows )
+         + ",\"window\":\"" + rw::defaultWindowLabel( root, "18mo" ) + "\",\"sub_windows\":" + std::to_string( subWindows )
          + ",\"partners\":" + std::to_string( ps.size() )
          + pageDisclosure( ccPab, sizeof( ccPab ), ccPw.end - ccPw.begin, ps.size(), ccPw.end,
                            page.limit, page.offset, /*discloseCap=*/true, kJsonPageSyntax )
@@ -1139,6 +1139,29 @@ inline std::string situationFileListRefusal( const std::string& root, const std:
     }
     const IngestResult& ing = getIndex( root ).ing;
     return fileListRefusalText( ing, "", "files", root, diffOrEmpty, changedMaskFromListChecked( ing, diffOrEmpty ) );
+}
+
+// The decl/def-partner array plus the co-change window/commit floor, as ONE fragment: situationDiffJson is
+// already over the complexity bar and a nameable fact gets a name rather than another inline block. Emits
+// `,"decl_def_partners":[…],"cochange_window":"…","cochange_commits":N` — the leading comma is the caller's
+// `]` closing the array before it, so the two halves of the seam are read together.
+template <typename PathRelFn>
+inline std::string declDefAndWindowJson( const SituationFacts& facts, PathRelFn pathRel )
+{
+    std::string out = ",\"decl_def_partners\":[";
+    bool        first = true;
+    for( const DeclDefPartner& dp : facts.declDef )
+    {
+        if( !first )
+        {
+            out += ",";
+        }
+        first = false;
+        out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( pathRel( dp.fileId ) ) ) + "\",\"shared_symbols\":"
+             + std::to_string( dp.shared ) + "}";
+    }
+    return out + "],\"cochange_window\":\"" + mcpdetail::jsonEscape( facts.coWindow ) + "\",\"cochange_commits\":"
+         + std::to_string( facts.coCommits );
 }
 
 inline std::string situationDiffJson( const std::string& root, const std::string& diffOrEmpty )
@@ -1250,7 +1273,12 @@ inline std::string situationDiffJson( const std::string& root, const std::string
         }
     }
 
-    out += "],\"forgotten\":[";
+    // F3: the decl/def partners of the changed set — the header/impl relationship the blast_radius array
+    // above cannot carry, because a header does not transitively depend on the source that implements it.
+    // F2: and the window the co-change zero below was mined in — a JSON reader that only sees an empty
+    // `forgotten` array cannot tell "no partners" from "the window mined nothing", and this surface is the
+    // one where that reads most like an answer.
+    out += "]" + declDefAndWindowJson( facts, situJPathRel ) + ",\"forgotten\":[";
     {
         bool first = true;
         for( const auto& [ f, deg ] : facts.forgotten )
