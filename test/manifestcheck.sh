@@ -33,6 +33,13 @@ m = re.search(r'for _g in (.*?); do', text, re.S)
 sys.exit('no loop found') if not m else print(len(m.group(1).split()))
 " "$REGRESSION" )"
 evalsStated="$( grep -oE 'loop in `test/regression\.sh` names [0-9]+' "$EVALS" | head -1 | grep -oE '[0-9]+$' )"
+# DERIVE the line pointer instead of hard-coding it. This message used to end "update
+# docs/EVALS.md:395" as a literal. The sentence it checks has since moved to line 6217, so the gate
+# was sending anyone who tripped it to an unrelated line -- one carrying a published
+# clustered-bootstrap lower bound and a --for file@10 figure. Following that instruction would have
+# edited a measurement and left the real claim stale. A gate whose own pointer goes stale is the
+# same failure family this arm exists to catch, so the pointer is now computed from the match.
+evalsStatedLine="$( grep -nE 'loop in `test/regression\.sh` names [0-9]+' "$EVALS" | head -1 | cut -d: -f1 )"
 if [ -z "$evalsStated" ]; then
     printf 'FAIL: docs/EVALS.md has no "loop in `test/regression.sh` names N" sentence to check (§8)\n'
     fail=1
@@ -42,7 +49,7 @@ elif [ -z "$loopNames" ]; then
 elif [ "$evalsStated" = "$loopNames" ]; then
     printf 'PASS: docs/EVALS.md §8 gate count (%s) matches test/regression.sh loop length (%s)\n' "$evalsStated" "$loopNames"
 else
-    printf 'FAIL: docs/EVALS.md §8 says the loop names %s, but it actually names %s — update docs/EVALS.md:395\n' "$evalsStated" "$loopNames"
+    printf 'FAIL: docs/EVALS.md §8 says the loop names %s, but it actually names %s — update docs/EVALS.md:%s\n' "$evalsStated" "$loopNames" "$evalsStatedLine"
     fail=1
 fi
 
@@ -70,8 +77,16 @@ fi
 # vacuously true of a document that stopped making the claim, and a claim deleted is a claim drifted.
 gateCountSites=( "docs/EVALS.md" "README.md" "present/deck5_ripwire_build.js" )
 
-scanGateCounts() {                   # $1 = file, $2 = its display path → prints "line:number" per claim
-    grep -nE '[0-9]+ gate scripts' "$1" || true
+scanGateCounts() {                   # $1 = file → prints "line:number" per claim, BOTH spellings
+    # Spelling 1, prose: "<N> gate scripts".
+    # Spelling 2, the deck's stat() call: stat(s, "<N>", "gate scripts named by ...") — the number and
+    # its label are SEPARATE ARGUMENTS, so spelling 1's regex cannot see it. That blind spot was live:
+    # present/deck5_ripwire_build.js states this count three times (711, 735, 974) and only 711 and 974
+    # were ever scanned. A count commit would have moved those two and left 735 behind, on the very
+    # line whose own text claims the number "cannot go stale" because it is gated. It was not gated.
+    { grep -nE '[0-9]+ gate scripts' "$1" | sed -E 's/^([0-9]+):.*[^0-9]([0-9]+) gate scripts.*/\1:\2/'
+      grep -nE '"[0-9]+"[[:space:]]*,[[:space:]]*"gate scripts' "$1" | sed -E 's/^([0-9]+):.*"([0-9]+)"[[:space:]]*,[[:space:]]*"gate scripts.*/\1:\2/'
+    } | sort -t: -k1,1n -u || true
 }
 
 for site in "${gateCountSites[@]}"; do
@@ -86,7 +101,7 @@ for site in "${gateCountSites[@]}"; do
     while IFS= read -r claim; do
         [ -z "$claim" ] && continue
         claimLine="${claim%%:*}"
-        claimNum="$( printf '%s' "$claim" | grep -oE '[0-9]+ gate scripts' | grep -oE '^[0-9]+' )"
+        claimNum="${claim##*:}"
         if [ "$claimNum" = "$loopNames" ]; then
             printf 'PASS: %s:%s gate count (%s) matches the loop\n' "$site" "$claimLine" "$claimNum"
         else
@@ -108,17 +123,38 @@ if [ -f "$mutSrc" ]; then
     mutTmp="$( mktemp -t manifestcheck_mut.XXXXXX )"
     trap 'rm -f "$mutTmp"' EXIT
     wrongCount=$(( loopNames + 7 ))
-    sed -E "s/${loopNames} gate scripts/${wrongCount} gate scripts/g" "$mutSrc" > "$mutTmp"
+    # Mutate BOTH spellings. The old control rewrote only "<N> gate scripts", so it never exercised
+    # the stat(s, "<N>", "gate scripts …") path at all — a control that cannot reach the code it
+    # guards is the inert shape this whole round has been closing.
+    # Mutate from whatever the deck CURRENTLY states, not from the loop's length. The two are equal
+    # on a healthy tree but deliberately differ mid-round (the count is set once at an integration
+    # tip), and a control keyed to the loop silently injects nothing in exactly that window — it
+    # would have reported a vacuous pass precisely when the arm most needed proving.
+    cp "$mutSrc" "$mutTmp"
+    for _cur in $( scanGateCounts "$mutSrc" | awk -F: '{print $2}' | sort -u ); do
+        sed -E -i.bak -e "s/${_cur} gate scripts/${wrongCount} gate scripts/g" \
+                      -e "s/\"${_cur}\"([[:space:]]*,[[:space:]]*\"gate scripts)/\"${wrongCount}\"\1/g" \
+                      "$mutTmp"
+        rm -f "${mutTmp}.bak"
+    done
     mutClaims="$( scanGateCounts "$mutTmp" )"
-    mutNum="$( printf '%s' "$mutClaims" | head -1 | grep -oE '[0-9]+ gate scripts' | grep -oE '^[0-9]+' )"
-    if [ -z "$mutNum" ]; then
+    mutCount="$( printf '%s\n' "$mutClaims" | grep -c . )"
+    mutAgreeing="$( printf '%s\n' "$mutClaims" | awk -F: -v L="$loopNames" '$2==L' | grep -c . )"
+    mutSpelling2="$( printf '%s\n' "$mutClaims" | awk -F: -v W="$wrongCount" '$2==W' | grep -c . )"
+    if [ -z "$mutClaims" ]; then
         printf 'FAIL: mutation control: could not re-extract a gate count from the mutated deck copy at all\n'
         fail=1
-    elif [ "$mutNum" = "$loopNames" ]; then
-        printf 'FAIL: mutation control: the injected wrong count did not take (%s still equals the derived %s) — the control is vacuous\n' "$mutNum" "$loopNames"
+    elif [ "$mutCount" -lt 3 ]; then
+        printf 'FAIL: mutation control: the deck states this count at 3 sites but the scan saw %s — a spelling is unscanned\n' "$mutCount"
+        fail=1
+    elif [ "$mutAgreeing" -ne 0 ]; then
+        printf 'FAIL: mutation control: %s mutated site(s) still read %s — the injection did not take, the control is vacuous\n' "$mutAgreeing" "$loopNames"
+        fail=1
+    elif [ "$mutSpelling2" -ne "$mutCount" ]; then
+        printf 'FAIL: mutation control: only %s of %s mutated sites carry the injected value\n' "$mutSpelling2" "$mutCount"
         fail=1
     else
-        printf 'PASS: mutation control: a fabricated deck gate count (%s) is correctly seen as disagreeing with the loop (%s)\n' "$mutNum" "$loopNames"
+        printf 'PASS: mutation control: all %s fabricated deck gate counts (%s) are seen to disagree with the loop (%s) — both spellings scanned\n' "$mutCount" "$wrongCount" "$loopNames"
     fi
 fi
 
