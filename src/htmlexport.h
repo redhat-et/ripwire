@@ -108,6 +108,11 @@ static const char kScript[] = R"JS(
     return langColor[n.lang] || '#999';
   }
 
+  // C1 — how many LINKS carry the per-edge low-confidence flag. Counted ONCE: it is a property of the
+  // baked payload, not of the current view, and the legend clause below must not claim a per-view number.
+  var AMB_LINKS = 0;
+  for (var _k = 0; _k < LINKS.length; _k++) if (LINKS[_k].a) { AMB_LINKS++; }
+
   // legend for the CURRENT mode, rendered into the #legend span (replaces the old static lang-only HTML)
   function renderLegend() {
     var el = document.getElementById('legend');
@@ -134,6 +139,15 @@ static const char kScript[] = R"JS(
     } else {
       html = sw('#4a90d9') + 'cpp ' + sw('#f4c542') + 'py ' + sw('#2d79c7') + 'ts ' + sw('#00acd7') + 'go ' +
              sw('#dea584') + 'rs ' + sw('#fa7343') + 'swift ' + sw('#9b59b6') + 'objc ' + sw('#7f8c8d') + 'md';
+    }
+    // C1 EDGE-CONFIDENCE clause. The node swatches above colour the node legend; this names the one thing
+    // that is true of the LINES. Emitted only when the payload actually has such an edge — a corpus that
+    // resolved cleanly gets no clause, because a legend for a stroke nobody can see is noise, not honesty.
+    // The count is of edges DRAWN in this document (the selected top-K subgraph), never of the whole graph.
+    if (AMB_LINKS > 0) {
+      html += '<span class="ec"> \u2014 dashed edge: the resolver could not choose between same-name'
+            + ' definitions and split the call over all of them (' + AMB_LINKS + ' of ' + LINKS.length
+            + ' drawn); read the source before trusting one.</span>';
     }
     el.innerHTML = html;
   }
@@ -175,7 +189,7 @@ static const char kScript[] = R"JS(
     var edges = [];
     for (var k = 0; k < GL; k++) {
       var s = LINKS[k].s, t = LINKS[k].t;
-      if (idSet.has(s) && idSet.has(t)) edges.push({ s: s, t: t });
+      if (idSet.has(s) && idSet.has(t)) edges.push({ s: s, t: t, a: LINKS[k].a });   // C1: carry the per-edge confidence bit
     }
     return { ids: ids, edges: edges };
   }
@@ -256,7 +270,7 @@ static const char kScript[] = R"JS(
     links = [];
     for (var k = 0; k < edges.length; k++) {
       var s = gidToLocal.get(edges[k].s), t = gidToLocal.get(edges[k].t);
-      if (s !== undefined && t !== undefined && s !== t) links.push({ s: s, t: t });
+      if (s !== undefined && t !== undefined && s !== t) links.push({ s: s, t: t, a: edges[k].a });   // C1: carry the per-edge confidence bit
     }
     L = links.length;
     nbr = [];
@@ -347,18 +361,34 @@ static const char kScript[] = R"JS(
       hl.add(selected);
     }
 
-    // edges
+    // edges — TWO passes, because C1's confidence bit must survive as a different KIND of line and not as
+    // a shade: a faded solid line is indistinguishable from a distant one, a dashed line is not. Pass 1 is
+    // the edges the resolver pinned uniquely, pass 2 the arms of a k-way split it could not choose between
+    // (LINKS[k].a === 1; absent on every confident edge). The order is fixed, so the picture is stable.
     ctx.strokeStyle = '#8a8f98';
     ctx.lineWidth = 0.8/scale;
     ctx.globalAlpha = 0.28;
     for (var k = 0; k < L; k++) {
       var s = links[k].s, t = links[k].t;
+      if (links[k].a) continue;
       if (hl && !hl.has(s) && !hl.has(t)) continue;
       ctx.beginPath();
       ctx.moveTo(nodes[s].x, nodes[s].y);
       ctx.lineTo(nodes[t].x, nodes[t].y);
       ctx.stroke();
     }
+    ctx.setLineDash([3/scale, 3/scale]);
+    ctx.globalAlpha = 0.18;
+    for (var k = 0; k < L; k++) {
+      if (!links[k].a) continue;
+      var s2 = links[k].s, t2 = links[k].t;
+      if (hl && !hl.has(s2) && !hl.has(t2)) continue;
+      ctx.beginPath();
+      ctx.moveTo(nodes[s2].x, nodes[s2].y);
+      ctx.lineTo(nodes[t2].x, nodes[t2].y);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
     ctx.globalAlpha = 1.0;
 
     // nodes
@@ -703,8 +733,14 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         idxOf[order[k]] = k;
     }
 
-    // build LINKS: edges among selected nodes, sorted (s asc, t asc) for determinism
-    struct Edge { std::uint32_t s, t; };
+    // build LINKS: edges among selected nodes, sorted (s asc, t asc) for determinism.
+    //
+    // C1 — `amb` is the per-edge CONFIDENCE bit, read straight off g.outProv (3 = one arm of a k-way split
+    // the resolver could not choose between; the same fact the XML map spells prov="split"). Before this the
+    // export dropped it on the floor: every edge in the picture was drawn identically, so the one view a
+    // human actually looks at was the only surface that could not say which edges were guesses.
+    struct Edge { std::uint32_t s, t; std::uint8_t amb; };
+    const std::vector<std::uint8_t>& outProv = g.outProv;
     std::vector<Edge> edges;
     for( NodeId k = 0; k < cap; ++k )
     {
@@ -715,16 +751,30 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
             const NodeId tgt = outTargets[e];
             if( tgt < S && idxOf[tgt] != kNoNode )
             {
-                edges.push_back( { si, idxOf[tgt] } );
+                const std::uint8_t amb = ( e < outProv.size() && outProv[e] == 3u ) ? std::uint8_t( 1 ) : std::uint8_t( 0 );
+                edges.push_back( { si, idxOf[tgt], amb } );
             }
         }
     }
-    // sort (s, t) for determinism
+    // sort (s, t) for determinism — amb is deliberately NOT a sort key, so it cannot reorder anything
     std::sort( edges.begin(), edges.end(), [ ]( const Edge& a, const Edge& b )
     { return a.s != b.s ? a.s < b.s : a.t < b.t; } );
-    // deduplicate (same symbol can appear via different resolve paths)
-    edges.erase( std::unique( edges.begin(), edges.end(), [ ]( const Edge& a, const Edge& b )
-    { return a.s == b.s && a.t == b.t; } ), edges.end() );
+    // deduplicate (same symbol can appear via different resolve paths). The flag is OR-FOLDED into the
+    // survivor rather than inherited from whichever row sorted first: an edge one of whose resolutions was a
+    // guess IS a guess, and std::unique's keep-the-first rule would make that answer depend on sort order.
+    {
+        std::size_t writeIndex = 0;
+        for( std::size_t readIndex = 0; readIndex < edges.size(); ++readIndex )
+        {
+            if( writeIndex > 0 && edges[writeIndex - 1].s == edges[readIndex].s && edges[writeIndex - 1].t == edges[readIndex].t )
+            {
+                edges[writeIndex - 1].amb = std::uint8_t( edges[writeIndex - 1].amb | edges[readIndex].amb );
+                continue;
+            }
+            edges[writeIndex++] = edges[readIndex];
+        }
+        edges.resize( writeIndex );
+    }
 
     // ---- module (community) grouping over the FULL graph, restricted to the selected node set ----
     // communities() is deterministic (id-order local-moving, ties → lower id) so this is byte-stable.
@@ -846,6 +896,8 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         "#info { font-size:12px; color:#aaa; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n"
         "#legend { font-size:11px; color:#999; white-space:nowrap; }\n"
         "#legend span { display:inline-block; width:10px; height:10px; border-radius:50%%; margin-right:3px; }\n"
+        // C1: the edge-confidence clause is a SENTENCE, not a swatch — undo the colour-dot rule above for it.
+        "#legend span.ec { display:inline; width:auto; height:auto; border-radius:0; margin:0; color:#7a7f88; }\n"
         "#colorMode { background:#222; border:1px solid #444; color:#eee; padding:3px 6px;\n"
         "             border-radius:4px; font-size:12px; }\n"
         "#depth { font-size:11px; color:#999; display:flex; align-items:center; gap:4px; white-space:nowrap; }\n"
@@ -947,11 +999,14 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     // the --color-by payload: per-FILES-index churn, its evidence flag, and the baked initial mode
     writeColorPayload( out, fileList, color );
 
-    // emit LINKS array — sorted (s, t) pairs
+    // emit LINKS array — sorted (s, t) pairs. C1: `"a":1` is the per-edge low-confidence flag (one arm of a
+    // k-way split the resolver could not choose between — the XML map's prov="split"). OMITTED at confident,
+    // so a cleanly-resolving corpus emits the identical bytes it emitted before this existed.
     std::fprintf( out, "const LINKS = [\n" );
     for( std::size_t k = 0; k < edges.size(); ++k )
     {
-        std::fprintf( out, "  {\"s\":%u,\"t\":%u}", unsigned( edges[k].s ), unsigned( edges[k].t ) );
+        std::fprintf( out, "  {\"s\":%u,\"t\":%u%s", unsigned( edges[k].s ), unsigned( edges[k].t ),
+                      edges[k].amb ? ",\"a\":1}" : "}" );
         if( k + 1 < edges.size() )
         {
             std::fprintf( out, "," );
