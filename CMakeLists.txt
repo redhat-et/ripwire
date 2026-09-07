@@ -449,13 +449,13 @@ add_ts_grammar(c      https://github.com/tree-sitter/tree-sitter-c.git          
 # LANGUAGE_VERSION]=[13,15] for core v0.26.9. Ships a scanner.c (inherited from cpp: raw strings)
 # which the macro picks up. The tag is lightweight, so the SHA below IS the tagged commit.
 add_ts_grammar(cuda   https://github.com/tree-sitter-grammars/tree-sitter-cuda.git 48b066f334f4cf2174e05a50218ce2ed98b6fd01)  # v0.21.1
+add_ts_grammar(elixir https://github.com/elixir-lang/tree-sitter-elixir.git 4b0c7118760af58a2e7081bbc8396e136f820b37)  # ABI 14
 # Lua (.lua): tree-sitter-grammars/tree-sitter-lua — there is no first-party Lua grammar under
 # tree-sitter/. v0.5.0 → ABI 15, in [MIN_COMPATIBLE, LANGUAGE_VERSION]=[13,15] for core v0.26.9.
 # Ships a scanner.c (long-bracket `[[ … ]]` strings and `--[[ … ]]` block comments, whose level count
 # the LR parser cannot express) which the macro picks up. That scanner DOES allocate and DOES
 # serialize (unlike toml's stateless one), but through create/destroy/serialize callbacks the core
 # owns — no new leak surface, and the G1 leg is run with the existing suppressions unchanged.
-add_ts_grammar(elixir https://github.com/elixir-lang/tree-sitter-elixir.git 4b0c7118760af58a2e7081bbc8396e136f820b37)  # ABI 14
 add_ts_grammar(lua    https://github.com/tree-sitter-grammars/tree-sitter-lua.git 10fe0054734eec83049514ea2e718b2a56acd0c9)  # v0.5.0
 
 # PHP (.php): the official tree-sitter org grammar. Like TypeScript this repo hosts TWO sub-grammars

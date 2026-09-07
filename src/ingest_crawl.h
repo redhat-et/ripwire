@@ -145,10 +145,10 @@ constexpr std::array<LangEntry, 42> kLangTable = {{
     // as one. Both extensions therefore share one row shape; no separate template tier exists or is needed.
     { ".php",  Lang::Php,        &tree_sitter_php,        "php"        },   // PHP — classes/interfaces/traits/enums/functions/methods + calls
     { ".phtml", Lang::Php,       &tree_sitter_php,        "php"        },   // PHP template (markup + <?php ?> islands) — same grammar, same query
-    // Lua: no classes, no imports. The five function-definition spellings and the one call node are the
-    // whole extractable structure (queries/lua/tags.scm states the metatable/dynamic-dispatch floor).
     { ".ex",   Lang::Elixir,     &tree_sitter_elixir,     "elixir"     },
     { ".exs",  Lang::Elixir,     &tree_sitter_elixir,     "elixir"     },
+    // Lua: no classes, no imports. The five function-definition spellings and the one call node are the
+    // whole extractable structure (queries/lua/tags.scm states the metatable/dynamic-dispatch floor).
     { ".lua",  Lang::Lua,        &tree_sitter_lua,        "lua"        },   // Lua — function/method defs (5 shapes) + calls
     { ".md",   Lang::Markdown,   &tree_sitter_markdown,   ""           },   // Markdown DOC tier — headings/sections via extractMarkdown()'s custom tree walk; NO tags.scm (query stays "")
     { ".markdown", Lang::Markdown, &tree_sitter_markdown, ""           },   // sibling extension, same walk — scope disclosed: .md/.markdown only

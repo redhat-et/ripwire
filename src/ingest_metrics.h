@@ -157,16 +157,15 @@ inline std::string_view cc_boolOp( TSNode n, std::string_view src ) noexcept
     return ( o == "&&" || o == "||" || o == "and" || o == "or" ) ? o : std::string_view{};
 }
 
-// Myers' &&/|| extension for CYCLOMATIC counting: does this `binary_expression` join two conditions?
+// Myers' &&/|| extension for CYCLOMATIC counting: does this binary operator join two conditions?
 // Extracted from cc_walk rather than written inline — the PHP/Lua port needed a second spelling family
 // (the WORD operators), and the inline form scored a measured +12 cx / +13 LOC on cc_walk, which is a
 // --quality-delta regression on a function already at the top of this file's complexity distribution.
 //
 // Two spelling families, and the Lang gate is what keeps the second from touching any other grammar:
-//   * `&&` / `||`  — C/C++/ObjC, TS/JS, Java, C#, Swift, Rust, Go, PHP. Two bytes.
-//   * `and`/`or`/`xor` — Lua (its ONLY spelling) and PHP (its low-precedence alternative). `or` is also
-//     two bytes, so the Lang test, not the length test, is what makes this sound: without it a
-//     hypothetical grammar spelling some non-boolean operator `or` would start scoring.
+//   * `&&` / `||` — symbolic joins in the binary-expression nodes visited by cc_walk.
+//   * `and`/`or` — Lua, PHP and Elixir; `xor` — PHP only. `or` is also two bytes, so the Lang test,
+//     not the length test, keeps a grammar's non-boolean spelling from accidentally scoring.
 // Python is deliberately absent from both: its `and`/`or` parse to a `boolean_operator` NODE, which
 // isDecisionType already names, so counting it here too would double it.
 /// Recognize short-circuit boolean joins, including word operators supported by the given language.
