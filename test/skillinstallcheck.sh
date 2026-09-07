@@ -18,6 +18,8 @@ no(){ echo "  FAIL  $1"; fail=1; }
 [ -f "$SK/install.sh" ] || { echo "no skills/install.sh"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# Each invocation below owns its HOME; inherited agent overrides must not escape it.
+unset CODEX_HOME AGENTS_HOME HERMES_HOME
 DST="$TMP/skills"
 
 # ---- 1) install.sh deploys EVERY user-facing shipped skill (the deployment-drift catch) ----

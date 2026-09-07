@@ -11,6 +11,8 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# Detection and activation must use only the per-invocation homes below.
+unset CODEX_HOME AGENTS_HOME HERMES_HOME RIPWIRE_NO_ACTIVATE
 FAKE="$TMP/fake"; mkdir -p "$FAKE" "$TMP/assets/ripwire-0.3.6-macos-arm64/skills/ripwire-router" "$TMP/assets/ripwire-0.3.6-macos-arm64/hooks"
 
 printf '#!/bin/sh\necho "ripwire 0.3.6 (Release, Test)"\n' >"$TMP/assets/ripwire-0.3.6-macos-arm64/ripwire"
@@ -239,6 +241,11 @@ if grep -qE 'cp[^|;]*"\$binDir/ripwire"' "$INSTALL"; then
     no "(F3) something still cp's directly onto \$binDir/ripwire — the overwrite path is reachable"
 else
     ok "(F3) nothing cp's onto the destination path; the temp file is the only thing copied"
+fi
+
+if [ "${1:-}" != "--isolation-child" ]; then
+    python3 "$ROOT/test/installer_isolation.py" "${RIPWIRE_BIN:-$ROOT/build/ripwire}" \
+        || no "installer gates escaped their fixture homes or failed with inherited overrides"
 fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
