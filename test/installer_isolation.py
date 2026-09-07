@@ -2,6 +2,7 @@
 """Run installer gates with inherited agent homes outside their temporary fixtures."""
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
@@ -9,11 +10,11 @@ import tempfile
 
 def snapshot(root):
     return {
-        str(path.relative_to(root)): (
+        str(path.relative_to(root)): (stat.S_IMODE(path.lstat().st_mode), (
             ("link", os.readlink(path)) if path.is_symlink()
             else ("directory",) if path.is_dir()
             else ("file", path.read_bytes())
-        )
+        ))
         for path in root.rglob("*")
     }
 
@@ -38,6 +39,15 @@ with tempfile.TemporaryDirectory(prefix="ripwire-installer-sentinels-") as tempo
     (claude / "settings.json").write_text('{"sentinel": true}\n')
     (outside / "CODEX_HOME" / "hooks.json").write_text('{"sentinel": true}\n')
     before = snapshot(outside)
+    sentinel = outside / "CODEX_HOME" / "hooks.json"
+    mode = stat.S_IMODE(sentinel.lstat().st_mode)
+    sentinel.chmod(mode ^ stat.S_IXUSR)
+    if snapshot(outside) == before:
+        sys.exit("  FAIL  snapshot missed a permission-only sentinel change")
+    sentinel.chmod(mode)
+    if snapshot(outside) != before:
+        sys.exit("  FAIL  sentinel permissions were not restored")
+    print("  PASS  snapshot detects permission-only changes")
     failed = False
     for gate, argument in (("skillinstallcheck.sh", str(binary)),
                            ("releaseinstallcheck.sh", "--isolation-child")):
