@@ -1,0 +1,7 @@
+class A {
+  int f(int x) => x * 2;
+  void g() {
+    this..f(1)..f(2);
+  }
+}
+int top() => 1;

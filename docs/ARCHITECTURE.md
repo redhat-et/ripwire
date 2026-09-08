@@ -140,6 +140,20 @@ zero-arity calls. Metrics count syntactic controls, clause arms and boolean join
 arity narrowing is deliberately disabled (default arguments and pipes change call arity).
 `test/elixircheck.sh` covers extraction, call-site mutation, metrics and cold/warm determinism.
 
+<a id="dart-extraction"></a>
+**Dart extraction.** tree-sitter-dart makes `function_body` a SIBLING of `function_signature` /
+`method_signature`, never a `body` field and never a child. The shared ancestor walk in
+`ingest_sidecap.h` therefore finds no body, the definition's span stops at the signature, and every
+call inside the body attributes to the nearest ENCLOSING symbol instead — measured on
+`test/dartfix` before the fix: `square` landed on the class `Calculator` rather than the method
+`accumulate`, and the three top-level edges were lost entirely (5 edges where 8 were expected). A
+`Lang::Dart` arm adopts the immediately-following `function_body` sibling and runs the span, the
+row extent and `complexityOf` through it — the same shape LB-E already uses for a test-macro
+block. An abstract member (`void f();`) has no such sibling, so it stays a declaration. Every
+other language is byte-identical across the change (verified against the pre-change binary on
+`src/` and on the multi-language `test/` fixture corpus). `test/dartcheck.sh` covers extraction,
+cascades, the constructor floor, call-site mutation, metrics and cold/warm determinism.
+
 Elixir extraction landed at revision 78 (rich 79) — `kParserVer` in `src/ingest_cache.h`, mirrored by
 `kIngestParserVerMirror` in `src/quality.h`. The required `qschemetrip` source-change pin is refreshed
 for this extraction change; snapshot scheme 8 is unchanged.

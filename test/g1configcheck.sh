@@ -140,7 +140,7 @@ grep -q 'max_total_time=' "$RUNNER" && grep -q 'max_len=65536' "$RUNNER" && grep
     && ok "fuzz runner is time-, input-, and concurrency-bounded" || no "bounded fuzz runner contract missing"
 
 seedCount="$( find "$ROOT/test/fuzz/seeds" -mindepth 2 -maxdepth 2 -name valid | wc -l | tr -d ' ' )"
-[ "$seedCount" = 20 ] && ok "all 20 grammars have valid seeds" || no "expected 20 grammar seeds, found $seedCount"
+[ "$seedCount" = 21 ] && ok "all 21 grammars have valid seeds" || no "expected 21 grammar seeds, found $seedCount"
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"

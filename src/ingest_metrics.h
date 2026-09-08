@@ -1367,7 +1367,8 @@ inline bool cc_isParamList( const char* t ) noexcept
            || std::strcmp( t, "parameter_clause" ) == 0     // Swift
            || std::strcmp( t, "method_parameters" )== 0     // Ruby `def f(a, b)`
            || std::strcmp( t, "block_parameters" ) == 0     // Ruby `{ |x, y| ... }`
-           || std::strcmp( t, "lambda_parameters" )== 0;    // Ruby `->(n) { ... }`
+           || std::strcmp( t, "lambda_parameters" )== 0     // Ruby `->(n) { ... }`
+           || std::strcmp( t, "formal_parameter_list" ) == 0;  // Dart (NOT TS/JS's formal_parameters)
 }
 // a named parameter node (skip `self`/`this`-only? no — count as written, deterministic). Anonymous separators
 // (',', '(', ')') are unnamed → excluded by ts_node_is_named.

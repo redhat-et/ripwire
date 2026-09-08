@@ -155,6 +155,7 @@ extern "C"
     const TSLanguage* tree_sitter_php( void );
     const TSLanguage* tree_sitter_lua( void );
     const TSLanguage* tree_sitter_elixir( void );
+    const TSLanguage* tree_sitter_dart( void );
 }
 
 // ── the ingest-family sections (2026-08-29 split; ingest() phases followed 2026-08-30) ──────────────

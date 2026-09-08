@@ -32,7 +32,7 @@ namespace
 // serialize.h's calibration array can size on it (model.h documents why), and ingest never assigns it.
 inline constexpr const char* kLangName[] = {
     "cpp", "py", "ts", "go", "rust", "swift", "objc", "md", "js", "sh", "java", "rb", "?", "json", "cs", "c", "toml", "yaml",
-    "php", "lua", "ex",
+    "php", "lua", "ex", "dart",
 };
 
 static_assert( std::size( kLangName ) == rw::kLangCount,

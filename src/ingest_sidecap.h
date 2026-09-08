@@ -1638,14 +1638,43 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 }
             }
 
+            // Dart: the grammar makes `function_body` a SIBLING of `function_signature` /
+            // `method_signature`, never a "body" field and never a child — so the ancestor walk above
+            // leaves body null and the definition's span stops at the closing paren of the signature.
+            // Every call in the body then falls to the nearest ENCLOSING symbol: measured before this
+            // arm, test/dartfix put `square` on the class `Calculator` instead of the method
+            // `accumulate`, and the three top-level edges (twice->square, answer->secret,
+            // branchy->square) were lost entirely — 5 edges where 8 were expected. Adopt the
+            // immediately-following function_body sibling and run the span through it, the same shape
+            // LB-E already uses for a test-macro block. An abstract member (`void f();`) has no such
+            // sibling: the scan stops at the next NAMED node, body stays null, and it stays a
+            // declaration. Gate: test/dartcheck.sh.
+            bool dartSiblingBody = false;
+            if( ts_node_is_null( body ) && le.lang == Lang::Dart )
+            {
+                for( TSNode sib = ts_node_next_sibling( defNode ); !ts_node_is_null( sib ); sib = ts_node_next_sibling( sib ) )
+                {
+                    if( std::strcmp( ts_node_type( sib ), "function_body" ) == 0 )
+                    {
+                        body            = sib;
+                        dartSiblingBody = true;
+                        break;
+                    }
+                    if( ts_node_is_named( sib ) ) { break; }   // the signature/body pair ended
+                }
+            }
+            // Both flags mean the same thing to the three span consumers below: the code this symbol
+            // owns lives in a SIBLING node, so byte/row extents and complexity must run through it.
+            const bool spanThroughBody = isTestMacroBlock || dartSiblingBody;
+
             d.startByte = ts_node_start_byte( defNode );
-            d.endByte   = isTestMacroBlock ? ts_node_end_byte( body ) : ts_node_end_byte( defNode );   // LB-E: the span runs THROUGH the sibling block
+            d.endByte   = spanThroughBody ? ts_node_end_byte( body ) : ts_node_end_byte( defNode );   // LB-E: the span runs THROUGH the sibling block
             d.nameByte  = nameByte;
             d.bodyByte  = ts_node_is_null( body ) ? 0u : ts_node_start_byte( body );
             const bool  fnOrMethod = ( kind == SymKind::Function || kind == SymKind::Method );
             // LB-E: for a testmacroblock the body SIBLING is where the code lives — complexityOf walks
             // INSIDE its root node, so handing it defNode (the bare macro statement) would count nothing.
-            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal ] = fnOrMethod ? complexityOf( isTestMacroBlock ? body : defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {} };
+            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal ] = fnOrMethod ? complexityOf( spanThroughBody ? body : defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {} };
             d.cx        = cxVal;
             d.ccx       = ccxVal;
             d.locals    = localsVal;   // Phase 1: floor count, C/C++ only (model.h localsCountedLang) — 0 elsewhere, never emitted there
@@ -1657,7 +1686,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // param count + max nesting for functions/methods only (0 otherwise, absent in emit). All descriptive.
             {
                 const std::uint32_t startRow = ts_node_start_point( defNode ).row;
-                const std::uint32_t endRow   = ts_node_end_point( isTestMacroBlock ? body : defNode ).row;   // LB-E: rows through the sibling block
+                const std::uint32_t endRow   = ts_node_end_point( spanThroughBody ? body : defNode ).row;   // LB-E: rows through the sibling block
                 d.loc = ( endRow >= startRow ) ? ( endRow - startRow + 1u ) : 1u;
             }
             d.params    = fnOrMethod ? ( le.lang == Lang::Elixir ? elixirParams( defNode ) : countParams( defNode ) ) : std::uint16_t( 0 );

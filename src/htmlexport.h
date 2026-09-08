@@ -2153,6 +2153,8 @@ inline constexpr const char* kLangColors[] = {
     "#4b8bbe",   // Lua
     "#b07ce8",   // Elixir — the language's conventional violet, lightened away from CSharp's #68217a and
                  // ObjC's #9b59b6 (the two nearest hues) so three purples stay separable on the #111 canvas.
+    "#29b6f6",   // Dart — the language's conventional cyan-blue, pushed lighter/more saturated than Go's
+                 // #00acd7 and Cpp's #4a90d9 so the three blues stay separable on the #111 canvas.
 };
 inline constexpr std::size_t kLangColorCount = sizeof( kLangColors ) / sizeof( kLangColors[0] );
 // NB the bound names the LAST enumerator, so appending one to Lang leaves this assert TRUE and silently

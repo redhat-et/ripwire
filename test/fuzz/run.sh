@@ -31,7 +31,7 @@ cleanup()
 }
 trap cleanup EXIT
 
-GRAMMARS="cpp python go rust typescript tsx swift objc javascript bash java ruby json elixir"
+GRAMMARS="cpp python go rust typescript tsx swift objc javascript bash java ruby json elixir dart"
 mkdir -p "$TMP/artifacts" "$TMP/logs"
 
 run_one()
