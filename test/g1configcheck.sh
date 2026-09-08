@@ -112,7 +112,7 @@ reply = pathlib.Path(sys.argv[1])
 index = json.loads(next(reply.glob('index-*.json')).read_text())
 model = json.loads((reply / index['reply']['codemodel-v2']['jsonFile']).read_text())
 expected = {'ripwire_fuzz_' + name for name in
-            'cpp python go rust typescript tsx swift objc javascript bash java ruby json toml yaml csharp c php elixir lua'.split()}
+            'cpp python go rust typescript tsx swift objc javascript bash java ruby json toml yaml csharp c php elixir gleam lua'.split()}
 assert model['configurations']
 for config in model['configurations']:
     targets = [json.loads((reply / t['jsonFile']).read_text()) for t in config['targets']]

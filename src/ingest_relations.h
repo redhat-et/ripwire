@@ -1550,6 +1550,13 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
         // by captureIncludes through elixirAliasGroup, one Include per member.
         target = elixirDirectiveTarget( n, src );
     }
+    else if( std::strcmp( t, "import" ) == 0 && lang == Lang::Gleam )              // Gleam `import module/path`
+    {
+        if( const TSNode module = ts_node_child_by_field_name( n, "module", 6 ); !ts_node_is_null( module ) )
+        {
+            target = importSpecifierText( module, src );
+        }
+    }
     else if( std::strcmp( t, "use_declaration" ) == 0 )                  // Rust `use crate::a::b;`
     {
         // argument:(scoped_identifier|scoped_use_list|identifier|…)  → `crate::a::b`. A brace group

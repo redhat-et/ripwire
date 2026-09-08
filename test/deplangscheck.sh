@@ -53,9 +53,9 @@ DEPS="$( cat "$TMP/deps" )"
 LANGS="$( printf '%s' "$DEPS" | grep -oE 'dep_langs="[^"]*"' | head -1 )"
 
 # ── (A) the published set, exactly ────────────────────────────────────────────────────────────────────
-EXPECT='dep_langs="cpp,py,ts,go,rs,swift,objc,js,sh,java,rb,cs,c,php,lua,ex"'
+EXPECT='dep_langs="cpp,py,ts,go,rs,swift,objc,js,sh,java,rb,cs,c,php,lua,ex,gleam"'
 [ "$LANGS" = "$EXPECT" ] \
-    && ok "(A) <health dep_langs=> is exactly the 16-language capable set, in Lang-enum order" \
+    && ok "(A) <health dep_langs=> is exactly the 17-language capable set, in Lang-enum order" \
     || no "(A) dep_langs= drifted: got [$LANGS] want [$EXPECT]"
 
 # ── (B) MUTATION CONTROL for (A) — the exclusions are real ────────────────────────────────────────────
@@ -66,7 +66,7 @@ for l in md json toml yaml; do
         && no "(B) mutation control: $l is listed as dependency-capable — the exclusion was lost" \
         || ok "(B) mutation control: $l is NOT in the capable set"
 done
-for l in sh rb lua ex; do
+for l in sh rb lua ex gleam; do
     printf '%s' "$LANGS" | grep -qE "[\"',]$l[,\"]" \
         && ok "(B) $l IS in the capable set (kParserVer 81)" \
         || no "(B) $l is missing from the capable set"

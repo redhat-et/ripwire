@@ -1646,7 +1646,7 @@ std::optional<int> runVerify( const MainDispatch& d )
 // by the Lang enum (model.h; small and POD) rather than a hashable composite key or nested map.
 struct ExtSurfaceAcc  { std::uint32_t refs = 0; std::uint32_t calls = 0; };
 struct ExtSurfaceName { std::string name; rw::Lang lang; std::uint32_t refs; std::uint32_t calls; };
-constexpr std::size_t kExtSurfaceLangSlots = std::size_t( rw::Lang::Elixir ) + 1;   // cardinality of enum class rw::Lang (model.h)
+constexpr std::size_t kExtSurfaceLangSlots = rw::kLangCount;
 
 inline rw::HashMap<std::string, std::array<ExtSurfaceAcc, kExtSurfaceLangSlots>>
 accumulateExternalSurface( const rw::IngestResult& ing, const rw::HashMap<std::string, char>& defined )
