@@ -34,6 +34,15 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-09, DART (test/dartcheck.sh): kParserVer 81 -> 82 and kIngestParserVerMirror -> 82. A 23rd
+#   grammar joins kLangTable, so a tree holding .dart files that a v81 blob describes carries ZERO
+#   symbols where a real set exists and must be rejected. Record SHAPES are unchanged, so kCacheVersion
+#   stays 16 — the same precedent as the four-language import round below, where the extracted SET grew
+#   and only parserVer moved. The commit also extends the definition SPAN for Dart only (ingest_sidecap.h
+#   Lang::Dart sibling-body arm) and adds formal_parameter_list to cc_isParamList; both are extraction
+#   identity, which is exactly what parserVer covers, and every other language is byte-identical
+#   (verified against the pre-change binary on src/ and on the multi-language test/ fixture corpus). No
+#   Snapshot-side function changed, kQSnapCacheScheme stays 8.
 # 2026-09-07, FOUR-LANGUAGE IMPORTS (test/bashsourcecheck.sh, test/luarequirecheck.sh,
 #   test/rubyrequirecheck.sh, test/eliximportcheck.sh, test/deplangscheck.sh): kParserVer 80 -> 81 and
 #   kIngestParserVerMirror -> 81. Bash `source`/`.`, Lua `require`, Ruby `require`/`require_relative`/
