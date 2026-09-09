@@ -253,11 +253,20 @@ if [ -d "$extractedDir/skills" ]; then
                 echo "install.sh: could not activate the Codex skills; run: bash \"$skillsShareDir/install.sh\" --codex" >&2
             fi
         fi
+        if [ -d "${HERMES_HOME:-$HOME/.hermes}" ]; then
+            if bash "$skillsShareDir/install.sh" --hermes >/dev/null 2>&1; then
+                echo "install.sh: activated the ripwire skills for Hermes (${HERMES_HOME:-$HOME/.hermes}/skills)"
+                activated=$(( activated + 1 ))
+            else
+                echo "install.sh: could not activate the Hermes skills; run: bash \"$skillsShareDir/install.sh\" --hermes" >&2
+            fi
+        fi
     fi
     if [ "$activated" -eq 0 ]; then
         echo "  Activate them (symlinks into the agent's skill dir, safe to re-run):"
         echo "    Claude Code: bash \"$skillsShareDir/install.sh\""
         echo "    Codex:       bash \"$skillsShareDir/install.sh\" --codex"
+        echo "    Hermes:      bash \"$skillsShareDir/install.sh\" --hermes"
     fi
     if [ -d "$extractedDir/hooks" ]; then
         rm -rf "$hooksShareDir"

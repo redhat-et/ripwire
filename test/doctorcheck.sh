@@ -88,7 +88,7 @@ DECLARED_CHECKS="$( echo "$OUT" | grep -o '<doctor checks="[0-9]*"' | grep -o '[
     && ok "checks=\"$DECLARED_CHECKS\" equals the emitted <c n=> row count" \
     || no "checks=\"${DECLARED_CHECKS:-<absent>}\" disagrees with the $EMITTED_ROWS rows actually emitted"
 
-for row in binary-path grammars cache-dir git tree-sitter tracked-binaries index-cache; do
+for row in binary-path grammars cache-dir git tree-sitter tracked-binaries index-cache git-config-trust; do
     echo "$OUT" | grep -q "<c n=\"$row\" ok=" \
         && ok "row present: $row" \
         || no "row missing: $row"

@@ -24,7 +24,7 @@ namespace rw
 
 // Row is deduced from the MEMBER POINTER, not from the container, so this binds to a C array and to a
 // std::array alike — the two callers happen to use one of each (wrap's kAgentTargets is a plain array,
-// ingest's kLangTable is a std::array<LangEntry, 42>).
+// ingest's kLangTable is a std::array<LangEntry, 46>).
 // The KEY type is deduced too, not fixed to string_view: the third caller (lanes.h::findClaimByKey)
 // matches a std::uint64_t. --quality-delta found that one — it flagged this helper as a clone of it,
 // which is how a two-instance dedup turned out to be a three-instance one.

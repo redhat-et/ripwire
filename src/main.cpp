@@ -59,7 +59,8 @@ static_assert( rw::kTestGateCcxBarMirror == rw::quality::kCcxBar, "situ.h kTestG
 #include "taskroute.h"             // --help-task: deterministic task -> one safe CLI recommendation or abstention
 #include "quality.h"
 #include "cloneidiom.h"          // idiom-class demotion for clone findings — the closed 3-idiom shape classifier both --clones and the quality-delta duplication kind annotate rows with
-#include "gitstamp.h"              // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor, shared by
+#include "gitstamp.h"
+#include "githarden.h"      // harvest 2026-09-09: the git-config trust boundary — one call in main(), before any thread              // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor, shared by
                                    // --hotspots / --quality-delta / --doctor below (each verb's own file pulls it too)
 #include "binstale.h"              // --doctor's tracked-binary-staleness check (git-order, not mtime)
 #include "codexdoctor.h"           // --doctor --agent=codex: live binary/skills/hooks/MCP surface parity
@@ -2789,6 +2790,10 @@ int main( int argc, char** argv )
     {
         return 1;
     }
+    // harvest 2026-09-09: a hook-form core.fsmonitor in a crawl root's own .git/config is a command git would run on
+    // every read-only call this process makes; neutralise it HERE — one site, before any thread or git child — and
+    // disclose it (stderr + --doctor). githarden.h holds the measurement and the reasoning.
+    githarden::hardenForRoots( cfg.roots );
     return runWithCompactLegend( cfg, argv );
 }
 

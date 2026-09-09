@@ -1,0 +1,907 @@
+{
+ "bin": "build/ripwire",
+ "corpora": {
+  "private-cpp-tree": {
+   "file": "math/doctest.h",
+   "root_label": "a private 1500-file C++ tree",
+   "rows": [
+    {
+     "argv": [],
+     "bytes": 29123,
+     "bytes_per_o200k": 2.7159,
+     "cl100k": 10570,
+     "compact_bytes": 27881,
+     "compact_err_pct": 13.85,
+     "compact_est_tokens": 11773,
+     "compact_o200k": 10341,
+     "err_pct": 9.79,
+     "est_tokens": 11773,
+     "legend_bytes": 1242,
+     "legend_o200k": 382,
+     "legend_share_pct": 3.56,
+     "o200k": 10723,
+     "rc": 0,
+     "verb": "map"
+    },
+    {
+     "argv": [
+      "--top-k=10"
+     ],
+     "bytes": 2936,
+     "bytes_per_o200k": 2.9478,
+     "cl100k": 996,
+     "compact_bytes": 1694,
+     "compact_err_pct": 93.0,
+     "compact_est_tokens": 1185,
+     "compact_o200k": 614,
+     "err_pct": 18.98,
+     "est_tokens": 1185,
+     "legend_bytes": 1242,
+     "legend_o200k": 382,
+     "legend_share_pct": 38.35,
+     "o200k": 996,
+     "rc": 0,
+     "verb": "map-topk10"
+    },
+    {
+     "argv": [
+      "--json"
+     ],
+     "bytes": 29377,
+     "bytes_per_o200k": 2.9545,
+     "cl100k": 9942,
+     "est_tokens": null,
+     "o200k": 9943,
+     "rc": 0,
+     "verb": "map-json"
+    },
+    {
+     "argv": [
+      "--metrics",
+      "--top-k=40"
+     ],
+     "bytes": 14746,
+     "bytes_per_o200k": 2.6512,
+     "cl100k": 5471,
+     "compact_bytes": 12103,
+     "compact_err_pct": 24.89,
+     "compact_est_tokens": 5961,
+     "compact_o200k": 4773,
+     "err_pct": 7.17,
+     "est_tokens": 5961,
+     "legend_bytes": 2643,
+     "legend_o200k": 789,
+     "legend_share_pct": 14.19,
+     "o200k": 5562,
+     "rc": 0,
+     "verb": "metrics"
+    },
+    {
+     "argv": [
+      "--pack-signatures",
+      "--top-k=40"
+     ],
+     "bytes": 17065,
+     "bytes_per_o200k": 2.9478,
+     "cl100k": 5703,
+     "compact_bytes": 15790,
+     "compact_err_pct": 27.27,
+     "compact_est_tokens": 6860,
+     "compact_o200k": 5390,
+     "err_pct": 18.5,
+     "est_tokens": 6860,
+     "legend_bytes": 1275,
+     "legend_o200k": 399,
+     "legend_share_pct": 6.89,
+     "o200k": 5789,
+     "rc": 0,
+     "verb": "pack-signatures"
+    },
+    {
+     "argv": [
+      "--for=how are tokens counted and budgeted"
+     ],
+     "bytes": 9021,
+     "bytes_per_o200k": 3.1366,
+     "cl100k": 2904,
+     "compact_bytes": 8963,
+     "compact_err_pct": 22.35,
+     "compact_est_tokens": 3585,
+     "compact_o200k": 2930,
+     "err_pct": 25.45,
+     "est_tokens": 3608,
+     "legend_bytes": 58,
+     "legend_o200k": -54,
+     "legend_share_pct": -1.88,
+     "o200k": 2876,
+     "rc": 0,
+     "verb": "for-conceptual"
+    },
+    {
+     "argv": [
+      "--for=TEST_CASE"
+     ],
+     "bytes": 3318,
+     "bytes_per_o200k": 3.5186,
+     "cl100k": 935,
+     "compact_bytes": 2613,
+     "compact_err_pct": 26.36,
+     "compact_est_tokens": 997,
+     "compact_o200k": 789,
+     "err_pct": 35.63,
+     "est_tokens": 1279,
+     "legend_bytes": 705,
+     "legend_o200k": 154,
+     "legend_share_pct": 16.33,
+     "o200k": 943,
+     "rc": 0,
+     "verb": "for-named"
+    },
+    {
+     "argv": [
+      "--for=how are tokens counted and budgeted",
+      "--json"
+     ],
+     "bytes": 8274,
+     "bytes_per_o200k": 3.1,
+     "cl100k": 2747,
+     "est_tokens": null,
+     "o200k": 2669,
+     "rc": 0,
+     "verb": "for-json"
+    },
+    {
+     "argv": [
+      "--pack-task=fix the token estimate"
+     ],
+     "bytes": 11449,
+     "bytes_per_o200k": 3.3793,
+     "cl100k": 3423,
+     "compact_bytes": 10092,
+     "compact_err_pct": 38.76,
+     "compact_est_tokens": 4221,
+     "compact_o200k": 3042,
+     "err_pct": 24.59,
+     "est_tokens": 4221,
+     "legend_bytes": 1357,
+     "legend_o200k": 346,
+     "legend_share_pct": 10.21,
+     "o200k": 3388,
+     "rc": 0,
+     "verb": "pack-task"
+    },
+    {
+     "argv": [
+      "--expand=TEST_CASE"
+     ],
+     "bytes": 1695,
+     "bytes_per_o200k": 3.4173,
+     "cl100k": 496,
+     "compact_bytes": 1229,
+     "compact_err_pct": 2.27,
+     "compact_est_tokens": 405,
+     "compact_o200k": 396,
+     "err_pct": -18.35,
+     "est_tokens": 405,
+     "legend_bytes": 466,
+     "legend_o200k": 100,
+     "legend_share_pct": 20.16,
+     "o200k": 496,
+     "rc": 0,
+     "verb": "expand"
+    },
+    {
+     "argv": [
+      "--callers=TEST_CASE"
+     ],
+     "bytes": 8264,
+     "bytes_per_o200k": 3.7292,
+     "cl100k": 2182,
+     "compact_bytes": 4956,
+     "compact_est_tokens": null,
+     "compact_o200k": 1478,
+     "est_tokens": null,
+     "legend_bytes": 3308,
+     "legend_o200k": 738,
+     "legend_share_pct": 33.3,
+     "o200k": 2216,
+     "rc": 0,
+     "verb": "callers"
+    },
+    {
+     "argv": [
+      "--callees=TEST_CASE"
+     ],
+     "bytes": 3838,
+     "bytes_per_o200k": 4.1627,
+     "cl100k": 916,
+     "compact_bytes": 659,
+     "compact_est_tokens": null,
+     "compact_o200k": 209,
+     "est_tokens": null,
+     "legend_bytes": 3179,
+     "legend_o200k": 713,
+     "legend_share_pct": 77.33,
+     "o200k": 922,
+     "rc": 0,
+     "verb": "callees"
+    },
+    {
+     "argv": [
+      "--impact=TEST_CASE"
+     ],
+     "bytes": 10984,
+     "bytes_per_o200k": 3.5512,
+     "cl100k": 3063,
+     "compact_bytes": 7594,
+     "compact_est_tokens": null,
+     "compact_o200k": 2321,
+     "est_tokens": null,
+     "legend_bytes": 3390,
+     "legend_o200k": 772,
+     "legend_share_pct": 24.96,
+     "o200k": 3093,
+     "rc": 0,
+     "verb": "impact"
+    },
+    {
+     "argv": [
+      "--uses=TEST_CASE"
+     ],
+     "bytes": 10235,
+     "bytes_per_o200k": 3.5464,
+     "cl100k": 2785,
+     "compact_bytes": 6246,
+     "compact_est_tokens": null,
+     "compact_o200k": 1994,
+     "est_tokens": null,
+     "legend_bytes": 3989,
+     "legend_o200k": 892,
+     "legend_share_pct": 30.91,
+     "o200k": 2886,
+     "rc": 0,
+     "verb": "uses"
+    },
+    {
+     "argv": [
+      "--around=TEST_CASE"
+     ],
+     "bytes": 9035,
+     "bytes_per_o200k": 2.819,
+     "cl100k": 3047,
+     "compact_bytes": 7605,
+     "compact_err_pct": 30.95,
+     "compact_est_tokens": 3643,
+     "compact_o200k": 2782,
+     "err_pct": 13.67,
+     "est_tokens": 3643,
+     "legend_bytes": 1430,
+     "legend_o200k": 423,
+     "legend_share_pct": 13.2,
+     "o200k": 3205,
+     "rc": 0,
+     "verb": "around"
+    },
+    {
+     "argv": [
+      "--edit-check=TEST_CASE"
+     ],
+     "bytes": 348224,
+     "bytes_per_o200k": 3.5172,
+     "cl100k": 97575,
+     "compact_bytes": 342339,
+     "compact_est_tokens": null,
+     "compact_o200k": 97709,
+     "est_tokens": null,
+     "legend_bytes": 5885,
+     "legend_o200k": 1297,
+     "legend_share_pct": 1.31,
+     "o200k": 99006,
+     "rc": 0,
+     "verb": "edit-check"
+    },
+    {
+     "argv": [
+      "--grep=token"
+     ],
+     "bytes": 32149,
+     "bytes_per_o200k": 3.5809,
+     "cl100k": 8890,
+     "compact_bytes": 25881,
+     "compact_est_tokens": null,
+     "compact_o200k": 7564,
+     "est_tokens": null,
+     "legend_bytes": 6268,
+     "legend_o200k": 1414,
+     "legend_share_pct": 15.75,
+     "o200k": 8978,
+     "rc": 0,
+     "verb": "grep"
+    },
+    {
+     "argv": [
+      "--hotspots"
+     ],
+     "bytes": 6582,
+     "bytes_per_o200k": 2.9555,
+     "cl100k": 2222,
+     "compact_bytes": 5465,
+     "compact_est_tokens": null,
+     "compact_o200k": 1987,
+     "est_tokens": null,
+     "legend_bytes": 1117,
+     "legend_o200k": 240,
+     "legend_share_pct": 10.78,
+     "o200k": 2227,
+     "rc": 0,
+     "verb": "hotspots"
+    },
+    {
+     "argv": [
+      "--lint"
+     ],
+     "bytes": 56589,
+     "bytes_per_o200k": 3.0643,
+     "cl100k": 18607,
+     "compact_bytes": 53998,
+     "compact_est_tokens": null,
+     "compact_o200k": 17863,
+     "est_tokens": null,
+     "legend_bytes": 2591,
+     "legend_o200k": 604,
+     "legend_share_pct": 3.27,
+     "o200k": 18467,
+     "rc": 0,
+     "verb": "lint"
+    },
+    {
+     "argv": [
+      "--tree"
+     ],
+     "bytes": 13265,
+     "bytes_per_o200k": 2.9478,
+     "cl100k": 4369,
+     "compact_bytes": 12543,
+     "compact_est_tokens": null,
+     "compact_o200k": 4344,
+     "est_tokens": null,
+     "legend_bytes": 722,
+     "legend_o200k": 156,
+     "legend_share_pct": 3.47,
+     "o200k": 4500,
+     "rc": 0,
+     "verb": "tree"
+    },
+    {
+     "argv": [
+      "--clones"
+     ],
+     "bytes": 19145,
+     "bytes_per_o200k": 3.1432,
+     "cl100k": 6093,
+     "compact_bytes": 16115,
+     "compact_est_tokens": null,
+     "compact_o200k": 5424,
+     "est_tokens": null,
+     "legend_bytes": 3030,
+     "legend_o200k": 667,
+     "legend_share_pct": 10.95,
+     "o200k": 6091,
+     "rc": 0,
+     "verb": "clones"
+    },
+    {
+     "argv": [
+      "--situ"
+     ],
+     "bytes": 1826,
+     "bytes_per_o200k": 3.7572,
+     "cl100k": 486,
+     "est_tokens": null,
+     "o200k": 486,
+     "rc": 0,
+     "verb": "situ"
+    },
+    {
+     "argv": [
+      "--recall=how are tokens counted"
+     ],
+     "bytes": 11912,
+     "bytes_per_o200k": 3.6185,
+     "cl100k": 3328,
+     "est_tokens": null,
+     "o200k": 3292,
+     "rc": 0,
+     "verb": "recall"
+    },
+    {
+     "argv": [
+      "--test-gate"
+     ],
+     "bytes": 3232,
+     "bytes_per_o200k": 3.843,
+     "cl100k": 833,
+     "compact_refused": "",
+     "est_tokens": null,
+     "o200k": 841,
+     "rc": 4,
+     "verb": "test-gate"
+    },
+    {
+     "argv": [
+      "--affected=math/doctest.h"
+     ],
+     "bytes": 17006,
+     "bytes_per_o200k": 3.2849,
+     "cl100k": 5081,
+     "compact_bytes": 15537,
+     "compact_est_tokens": null,
+     "compact_o200k": 4844,
+     "est_tokens": null,
+     "legend_bytes": 1469,
+     "legend_o200k": 333,
+     "legend_share_pct": 6.43,
+     "o200k": 5177,
+     "rc": 0,
+     "verb": "affected"
+    }
+   ],
+   "symbol": "TEST_CASE"
+  },
+  "self": {
+   "file": "src/infra/svector.h",
+   "root_label": "this repository",
+   "rows": [
+    {
+     "argv": [],
+     "bytes": 24756,
+     "bytes_per_o200k": 2.5388,
+     "cl100k": 9561,
+     "compact_bytes": 23762,
+     "compact_err_pct": 6.15,
+     "compact_est_tokens": 10022,
+     "compact_o200k": 9441,
+     "err_pct": 2.78,
+     "est_tokens": 10022,
+     "legend_bytes": 994,
+     "legend_o200k": 310,
+     "legend_share_pct": 3.18,
+     "o200k": 9751,
+     "rc": 0,
+     "verb": "map"
+    },
+    {
+     "argv": [
+      "--top-k=10"
+     ],
+     "bytes": 2860,
+     "bytes_per_o200k": 2.8686,
+     "cl100k": 985,
+     "compact_bytes": 1866,
+     "compact_err_pct": 68.12,
+     "compact_est_tokens": 1155,
+     "compact_o200k": 687,
+     "err_pct": 15.85,
+     "est_tokens": 1155,
+     "legend_bytes": 994,
+     "legend_o200k": 310,
+     "legend_share_pct": 31.09,
+     "o200k": 997,
+     "rc": 0,
+     "verb": "map-topk10"
+    },
+    {
+     "argv": [
+      "--json"
+     ],
+     "bytes": 25352,
+     "bytes_per_o200k": 2.7521,
+     "cl100k": 9091,
+     "est_tokens": null,
+     "o200k": 9212,
+     "rc": 0,
+     "verb": "map-json"
+    },
+    {
+     "argv": [
+      "--metrics",
+      "--top-k=40"
+     ],
+     "bytes": 12016,
+     "bytes_per_o200k": 2.5824,
+     "cl100k": 4623,
+     "compact_bytes": 9621,
+     "compact_err_pct": 23.45,
+     "compact_est_tokens": 4859,
+     "compact_o200k": 3936,
+     "err_pct": 4.43,
+     "est_tokens": 4859,
+     "legend_bytes": 2395,
+     "legend_o200k": 717,
+     "legend_share_pct": 15.41,
+     "o200k": 4653,
+     "rc": 0,
+     "verb": "metrics"
+    },
+    {
+     "argv": [
+      "--pack-signatures",
+      "--top-k=40"
+     ],
+     "bytes": 15710,
+     "bytes_per_o200k": 2.913,
+     "cl100k": 5353,
+     "compact_bytes": 14683,
+     "compact_err_pct": 24.5,
+     "compact_est_tokens": 6307,
+     "compact_o200k": 5066,
+     "err_pct": 16.95,
+     "est_tokens": 6307,
+     "legend_bytes": 1027,
+     "legend_o200k": 327,
+     "legend_share_pct": 6.06,
+     "o200k": 5393,
+     "rc": 0,
+     "verb": "pack-signatures"
+    },
+    {
+     "argv": [
+      "--for=how are tokens counted and budgeted"
+     ],
+     "bytes": 9725,
+     "bytes_per_o200k": 3.0486,
+     "cl100k": 3160,
+     "compact_bytes": 9562,
+     "compact_err_pct": 18.94,
+     "compact_est_tokens": 3825,
+     "compact_o200k": 3216,
+     "err_pct": 21.94,
+     "est_tokens": 3890,
+     "legend_bytes": 163,
+     "legend_o200k": -26,
+     "legend_share_pct": -0.82,
+     "o200k": 3190,
+     "rc": 0,
+     "verb": "for-conceptual"
+    },
+    {
+     "argv": [
+      "--for=buf"
+     ],
+     "bytes": 3822,
+     "bytes_per_o200k": 3.2472,
+     "cl100k": 1173,
+     "compact_bytes": 3124,
+     "compact_err_pct": 17.56,
+     "compact_est_tokens": 1205,
+     "compact_o200k": 1025,
+     "err_pct": 26.08,
+     "est_tokens": 1484,
+     "legend_bytes": 698,
+     "legend_o200k": 152,
+     "legend_share_pct": 12.91,
+     "o200k": 1177,
+     "rc": 0,
+     "verb": "for-named"
+    },
+    {
+     "argv": [
+      "--for=how are tokens counted and budgeted",
+      "--json"
+     ],
+     "bytes": 7774,
+     "bytes_per_o200k": 3.051,
+     "cl100k": 2560,
+     "est_tokens": null,
+     "o200k": 2548,
+     "rc": 0,
+     "verb": "for-json"
+    },
+    {
+     "argv": [
+      "--pack-task=fix the token estimate"
+     ],
+     "bytes": 11671,
+     "bytes_per_o200k": 3.3673,
+     "cl100k": 3456,
+     "compact_bytes": 10410,
+     "compact_err_pct": 31.04,
+     "compact_est_tokens": 4120,
+     "compact_o200k": 3144,
+     "err_pct": 18.87,
+     "est_tokens": 4120,
+     "legend_bytes": 1261,
+     "legend_o200k": 322,
+     "legend_share_pct": 9.29,
+     "o200k": 3466,
+     "rc": 0,
+     "verb": "pack-task"
+    },
+    {
+     "argv": [
+      "--expand=buf"
+     ],
+     "bytes": 26539,
+     "bytes_per_o200k": 2.5814,
+     "cl100k": 10091,
+     "compact_bytes": 24634,
+     "compact_err_pct": 7.54,
+     "compact_est_tokens": 10474,
+     "compact_o200k": 9740,
+     "err_pct": 1.88,
+     "est_tokens": 10474,
+     "legend_bytes": 1905,
+     "legend_o200k": 541,
+     "legend_share_pct": 5.26,
+     "o200k": 10281,
+     "rc": 0,
+     "verb": "expand"
+    },
+    {
+     "argv": [
+      "--callers=buf"
+     ],
+     "bytes": 5373,
+     "bytes_per_o200k": 3.4487,
+     "cl100k": 1521,
+     "compact_bytes": 2396,
+     "compact_est_tokens": null,
+     "compact_o200k": 889,
+     "est_tokens": null,
+     "legend_bytes": 2977,
+     "legend_o200k": 669,
+     "legend_share_pct": 42.94,
+     "o200k": 1558,
+     "rc": 0,
+     "verb": "callers"
+    },
+    {
+     "argv": [
+      "--callees=buf"
+     ],
+     "bytes": 3750,
+     "bytes_per_o200k": 4.1993,
+     "cl100k": 887,
+     "compact_bytes": 571,
+     "compact_est_tokens": null,
+     "compact_o200k": 180,
+     "est_tokens": null,
+     "legend_bytes": 3179,
+     "legend_o200k": 713,
+     "legend_share_pct": 79.84,
+     "o200k": 893,
+     "rc": 0,
+     "verb": "callees"
+    },
+    {
+     "argv": [
+      "--impact=buf"
+     ],
+     "bytes": 6674,
+     "bytes_per_o200k": 3.3023,
+     "cl100k": 1969,
+     "compact_bytes": 3284,
+     "compact_est_tokens": null,
+     "compact_o200k": 1249,
+     "est_tokens": null,
+     "legend_bytes": 3390,
+     "legend_o200k": 772,
+     "legend_share_pct": 38.2,
+     "o200k": 2021,
+     "rc": 0,
+     "verb": "impact"
+    },
+    {
+     "argv": [
+      "--uses=buf"
+     ],
+     "bytes": 7917,
+     "bytes_per_o200k": 3.3964,
+     "cl100k": 2285,
+     "compact_bytes": 4259,
+     "compact_est_tokens": null,
+     "compact_o200k": 1508,
+     "est_tokens": null,
+     "legend_bytes": 3658,
+     "legend_o200k": 823,
+     "legend_share_pct": 35.31,
+     "o200k": 2331,
+     "rc": 0,
+     "verb": "uses"
+    },
+    {
+     "argv": [
+      "--around=buf"
+     ],
+     "bytes": 6033,
+     "bytes_per_o200k": 2.8404,
+     "cl100k": 2078,
+     "compact_bytes": 4851,
+     "compact_err_pct": 37.39,
+     "compact_est_tokens": 2436,
+     "compact_o200k": 1773,
+     "err_pct": 14.69,
+     "est_tokens": 2436,
+     "legend_bytes": 1182,
+     "legend_o200k": 351,
+     "legend_share_pct": 16.53,
+     "o200k": 2124,
+     "rc": 0,
+     "verb": "around"
+    },
+    {
+     "argv": [
+      "--edit-check=buf"
+     ],
+     "bytes": 7986,
+     "bytes_per_o200k": 3.8748,
+     "cl100k": 2013,
+     "compact_bytes": 2101,
+     "compact_est_tokens": null,
+     "compact_o200k": 764,
+     "est_tokens": null,
+     "legend_bytes": 5885,
+     "legend_o200k": 1297,
+     "legend_share_pct": 62.93,
+     "o200k": 2061,
+     "rc": 0,
+     "verb": "edit-check"
+    },
+    {
+     "argv": [
+      "--grep=token"
+     ],
+     "bytes": 68695,
+     "bytes_per_o200k": 3.1402,
+     "cl100k": 21522,
+     "compact_bytes": 62482,
+     "compact_est_tokens": null,
+     "compact_o200k": 20477,
+     "est_tokens": null,
+     "legend_bytes": 6213,
+     "legend_o200k": 1399,
+     "legend_share_pct": 6.4,
+     "o200k": 21876,
+     "rc": 0,
+     "verb": "grep"
+    },
+    {
+     "argv": [
+      "--hotspots"
+     ],
+     "bytes": 6002,
+     "bytes_per_o200k": 2.8311,
+     "cl100k": 2077,
+     "compact_bytes": 4885,
+     "compact_est_tokens": null,
+     "compact_o200k": 1880,
+     "est_tokens": null,
+     "legend_bytes": 1117,
+     "legend_o200k": 240,
+     "legend_share_pct": 11.32,
+     "o200k": 2120,
+     "rc": 0,
+     "verb": "hotspots"
+    },
+    {
+     "argv": [
+      "--lint"
+     ],
+     "bytes": 56147,
+     "bytes_per_o200k": 2.9386,
+     "cl100k": 18957,
+     "compact_bytes": 53556,
+     "compact_est_tokens": null,
+     "compact_o200k": 18503,
+     "est_tokens": null,
+     "legend_bytes": 2591,
+     "legend_o200k": 604,
+     "legend_share_pct": 3.16,
+     "o200k": 19107,
+     "rc": 0,
+     "verb": "lint"
+    },
+    {
+     "argv": [
+      "--tree"
+     ],
+     "bytes": 11755,
+     "bytes_per_o200k": 2.7574,
+     "cl100k": 4092,
+     "compact_bytes": 11033,
+     "compact_est_tokens": null,
+     "compact_o200k": 4107,
+     "est_tokens": null,
+     "legend_bytes": 722,
+     "legend_o200k": 156,
+     "legend_share_pct": 3.66,
+     "o200k": 4263,
+     "rc": 0,
+     "verb": "tree"
+    },
+    {
+     "argv": [
+      "--clones"
+     ],
+     "bytes": 18652,
+     "bytes_per_o200k": 2.9819,
+     "cl100k": 6128,
+     "compact_bytes": 15622,
+     "compact_est_tokens": null,
+     "compact_o200k": 5588,
+     "est_tokens": null,
+     "legend_bytes": 3030,
+     "legend_o200k": 667,
+     "legend_share_pct": 10.66,
+     "o200k": 6255,
+     "rc": 0,
+     "verb": "clones"
+    },
+    {
+     "argv": [
+      "--situ"
+     ],
+     "bytes": 210,
+     "bytes_per_o200k": 3.3333,
+     "cl100k": 64,
+     "est_tokens": null,
+     "o200k": 63,
+     "rc": 0,
+     "verb": "situ"
+    },
+    {
+     "argv": [
+      "--recall=how are tokens counted"
+     ],
+     "bytes": 15246,
+     "bytes_per_o200k": 3.7672,
+     "cl100k": 4050,
+     "est_tokens": null,
+     "o200k": 4047,
+     "rc": 0,
+     "verb": "recall"
+    },
+    {
+     "argv": [
+      "--test-gate"
+     ],
+     "bytes": 2078,
+     "bytes_per_o200k": 3.9134,
+     "cl100k": 526,
+     "compact_bytes": 805,
+     "compact_est_tokens": null,
+     "compact_o200k": 253,
+     "est_tokens": null,
+     "legend_bytes": 1273,
+     "legend_o200k": 278,
+     "legend_share_pct": 52.35,
+     "o200k": 531,
+     "rc": 0,
+     "verb": "test-gate"
+    },
+    {
+     "argv": [
+      "--affected=src/infra/svector.h"
+     ],
+     "bytes": 4267,
+     "bytes_per_o200k": 3.6039,
+     "cl100k": 1156,
+     "compact_bytes": 2798,
+     "compact_est_tokens": null,
+     "compact_o200k": 851,
+     "est_tokens": null,
+     "legend_bytes": 1469,
+     "legend_o200k": 333,
+     "legend_share_pct": 28.12,
+     "o200k": 1184,
+     "rc": 0,
+     "verb": "affected"
+    }
+   ],
+   "symbol": "buf"
+  }
+ },
+ "redaction": "corpus roots and the binary path are recorded as LABELS, never as absolute paths, and the second corpus is named by its shape rather than its name: it is a private tree and this file is public. bench/tokenaudit/sweep.py writes it this way; nothing else was altered, every count below is the measurement as taken.",
+ "schema": "ripwire.tokenaudit/v1",
+ "version": "ripwire 0.5.0 (dev, AppleClang 21.0.0.21000101, emit=std::print, built_from=4c10be9d7)"
+}

@@ -276,4 +276,20 @@ jq -e --arg m "$hookMatcherExpected" 'any((.hooks.PreToolUse // [])[]?; (any(.ho
     && ok "(D) the surviving PreToolUse entry carries the CURRENT matcher, not the stale one it was found with" \
     || no "(D) the surviving PreToolUse entry kept a stale matcher: $( jq -c '[ (.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher ]' "$DUPSET" 2>/dev/null )"
 
+# ── (E) --openclaw --hook is refused: openclaw's before_tool_call is a plugin API, not a shell hook slot ──
+# Without the refusal arm the installer links the skills and silently drops --hook, and the operator
+# walks away believing a hook is armed. Temp HOME: the refusal fires after linking, so this must never
+# run against the real ~/.agents.
+OC_HOME="$TMP/openclaw-hook-home"; mkdir -p "$OC_HOME"
+HOME="$OC_HOME" bash "$SK/install.sh" --openclaw --hook >/dev/null 2>&1
+OC_HOOK_STATUS=$?
+{ [ "$OC_HOOK_STATUS" -eq 2 ]; } \
+    && ok "(E) --openclaw --hook fails with exit status 2 (no shell hook slot for the openclaw target)" \
+    || no "(E) --openclaw --hook exited $OC_HOOK_STATUS, expected 2 — or it succeeded, which is wrong"
+# The refusal fires after linking, so the links must have landed in the temp HOME — if a future edit
+# drops the HOME= containment, this fails (temp home empty) instead of silently writing ~/.agents.
+{ [ -e "$OC_HOME/.agents/skills/ripwire-router" ]; } \
+    && ok "(E) the refused run contained its skill links to the temp HOME" \
+    || no "(E) the refused run linked nowhere visible — HOME= containment may be broken"
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

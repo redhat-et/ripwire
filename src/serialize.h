@@ -1004,8 +1004,22 @@ inline constexpr double bytesPerTokenFor( Lang l ) noexcept
 // to ~52x under). A formula per payload is exactly how that recurs, so no emitter estimates its own size
 // any more: each one MEASURES the bytes it actually wrote and converts them HERE, at the calibrated rate
 // for what those bytes ARE (a kTokenCalib / model-weighted rate for markup+signatures,
-// kBytesPerTokenBody for def bodies and raw source). Rounds to nearest so the number never systematically
-// under-reads. VERIFY, not a clamp: a non-positive rate is a corrupt caller, never a runtime condition.
+// kBytesPerTokenBody for def bodies and raw source). Rounds to nearest (0.5 up).
+//
+// WHAT THE ROUNDING DOES NOT BUY, MEASURED (2026-09-09, bench/tokenaudit). This comment used to end
+// "so the number never systematically under-reads", and rounding to nearest does not deliver that — it
+// moves a number by at most half a token, and the error here is a RATE error worth tens of percent. The
+// signed error against real o200k_base, over 50 invocations on two live corpora plus 8 pinned ones on
+// test/estcalibfix, runs -18.4% to +41.7%: the small legend-heavy bundles OVER-read (the legend is
+// English prose measured at 3.1-4.7 B/tok, charged here at the ~2.5 B/tok signature rate), and --expand's
+// short dense bodies UNDER-read at kBytesPerTokenBody (-16.4% on the fixture, -18.4% on a 1500-file C++
+// tree). The direction is a property of the DOCUMENT SHAPE, not of the corpus language the rate is keyed
+// on, which is why one rate per language cannot fix it and why the number is a calibrated estimate rather
+// than a bound. It is now gated as an envelope rather than asserted as a direction:
+// test/tokenbudgetcheck.sh #18 holds every pinned invocation inside a measured band and the set's MAPE
+// under a ceiling, against counts bench/tokenaudit/pin.py writes into test/estcalib.manifest.
+//
+// VERIFY, not a clamp: a non-positive rate is a corrupt caller, never a runtime condition.
 inline std::size_t tokensForEmittedBytes( std::size_t emittedBytes, double bytesPerToken ) noexcept
 {
     VERIFY( bytesPerToken > 0.0 );

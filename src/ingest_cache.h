@@ -203,10 +203,24 @@ constexpr std::uint32_t kCacheVersion = 18;           // 18: #62 — call refs i
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 85;           // bump on any grammar/.scm/extraction change
-                                                      // 85 = Elixir module/name/arity identities, lexical imports,
+constexpr std::uint32_t kParserVer    = 86;           // bump on any grammar/.scm/extraction change
+                                                      // 86 = Elixir module/name/arity identities, lexical imports,
                                                       //    defaults, captures, delegates, attributes and contracts.
                                                       //    Existing bind/ref layouts; quality mirror changes with it.
+                                                      // 85 = 2026-09-09 (test/textdocscheck.sh): the plain-text
+                                                      //    prose tier — .rst/.adoc/.org/.mdx join kLangTable on
+                                                      //    Lang::Markdown and the markdown block grammar. The
+                                                      //    CRAWL ADMITS FILES IT PREVIOUSLY REFUSED, so a v84
+                                                      //    blob describes a strictly smaller corpus: its file
+                                                      //    list has no record for the .rst it never saw, and a
+                                                      //    warm run over it would answer a document query with
+                                                      //    the pre-lane silence. That is the one class of change
+                                                      //    a per-file stat gate cannot self-heal — the file is
+                                                      //    not stale, it is ABSENT — so the header version is
+                                                      //    the only guard. Record shapes are unchanged (a
+                                                      //    markdown file's records already existed), so
+                                                      //    kCacheVersion stays 18. quality.h's
+                                                      //    kIngestParserVerMirror bumped in the SAME commit.
                                                       // 84 = 2026-09-08 (test/rubyrecvcheck.sh): a Ruby constant
                                                       //    RECEIVER (`User.find`, `App::Mailer.deliver`) is a
                                                       //    symbolic directive, one per (file, innermost open,

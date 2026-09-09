@@ -65,6 +65,7 @@
 #include "filter.h"             // isTestPath — the shared test partition
 #include "arch.h"               // relForHash
 #include "darkflags.h"          // the gate harvest, reused whole
+#include "docparse.h"           // isProseExtension / lowerExtOf — the shared prose vocabulary
 #include "serialize.h"          // escapeXml
 #include "testmap.h"            // M21(b): TestRunnerIndex / runAttrDisclosed — the ONE run= hint the tests_to_run family shares
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT
@@ -216,11 +217,13 @@ inline bool isCFamilyPath( std::string_view p ) noexcept { return hasAnyExt( p, 
 // The ENV lane cannot use the allowlist above — `getenv` / `os.environ.get` is language-agnostic and the
 // harvest finds it in Python and shell too — so it screens the other way: drop the file types where a gate
 // name is being TALKED ABOUT rather than read (a fenced snippet in a design doc, a committed audit report).
-inline constexpr std::string_view kProseExtTable[] = {
-    ".md", ".markdown", ".mdx", ".txt", ".rst", ".adoc", ".html", ".htm", ".csv", ".tsv", ".ipynb",
-};
-
-inline bool isProsePath( std::string_view p ) noexcept { return hasAnyExt( p, kProseExtTable ); }
+// The shared prose vocabulary (docparse.h), not a private table: this list and the four others like it
+// disagreed about `.org` (here: absent) and about `.pdf`/`.docx` (here: absent, though the index reads
+// them through the markitdown bridge), so the same file could be prose to one lens and code to the next.
+inline bool isProsePath( std::string_view p ) noexcept
+{
+    return docparse::isProseExtension( docparse::lowerExtOf( p ) );
+}
 
 inline bool isCMakePath( std::string_view p ) noexcept
 {

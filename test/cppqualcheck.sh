@@ -208,9 +208,12 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # on-disk ack ledger through the same canonical helper to decide whether the rendered ledger already equals its
 # bytes (the idempotent-ack path). Measured 19 with BOTH the ec5e3c3 binary and the merged one on this tree —
 # a corpus fact, not a resolver change.
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 19 ] \
-    && ok "repo: --uses=readWholeFile count=19 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 19"
+# 19 -> 22 2026-09-09 (harvest githarden): githarden.h's local-config pre-scan reads the `.git` gitdir FILE, the
+# gitdir's `commondir`, and each config candidate through the same canonical helper — three sites for one probe,
+# rather than a fourth fopen/fread of its own.
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 22 ] \
+    && ok "repo: --uses=readWholeFile count=22 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 22"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"

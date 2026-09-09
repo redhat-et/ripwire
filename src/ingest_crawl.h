@@ -54,11 +54,36 @@ struct LangEntry
 
 // Order does not matter (linear scan); kept grouped by language for readability.
 // The extent is EXACT, not headroom: it was 32 with 32 rows, .toml made it 33, .pyi made it 34 and the
-// .yml/.yaml pair made it 36, and the .php/.phtml/.lua trio made it 40. Sizing it to the row count is what makes
+// .yml/.yaml pair made it 36, the .php/.phtml/.lua trio made it 40, and the .rst/.adoc/.org/.mdx prose
+// quartet made it 46. Sizing it to the row count is what makes
 // `std::array<bool, kLangTable.size()> present` (the grammar-prewarm set,
 // below) exact too, and it turns "added a row and forgot the extent" into a compile error rather than a
 // silent drop.
-constexpr std::array<LangEntry, 42> kLangTable = {{
+//
+// THE PLAIN-TEXT PROSE FORMATS (.rst/.adoc/.org/.mdx), on the SAME grammar and the same walk as markdown.
+// docparse.h's kMarkdownGrammarExts is the NAME list every reader-facing prose lens consults; the
+// static_assert under this table ties the two together so neither can grow alone. Four SINGLE-PURPOSE
+// prose extensions — an extension that exists for nothing but documents — that the crawl indexed nowhere
+// before 2026-09-09, so a repository whose decision history lives in `docs/adr/*.rst` got "0 relevant of 0
+// document files" out of --recall.
+//
+// WHY THE MARKDOWN GRAMMAR AND NOT AN EXTRACTOR PER FORMAT. Measured, not assumed. reStructuredText's
+// title underlines (`=====`, `-----`) ARE setext headings, so the existing section tier tiles a real .rst
+// document with no new code at all and --recall serves the DECISION rather than the whole file. On a real
+// 292-file, 2.28 MB astropy `.rst` documentation tree, five pre-registered questions at three budgets:
+// heading-tiled answered 15/15 while the same prose with its setext underlines removed (the one-unit
+// control) answered 9/15, and tiled was CHEAPER at every budget (mean est_tokens 1299/2659/5379 against
+// 1436/2781/6041 at max-tokens 2000/4000/8000). An extractor per format would have bought that same
+// benefit for a docText copy of every byte, a second body-resolution rule and a fifth parser to keep
+// deterministic. `=` and `-` cover 1321 of that corpus's 1948 underlines (67.8%); `*`/`^`/`"`/`~`/`+`/`#`
+// titles are read as prose, which costs recall precision inside a file and nothing else.
+//
+// WHAT THIS HONESTLY DOES NOT DO, disclosed because --recall says `section-granular` only when it is true:
+// AsciiDoc's `== Section` and Org-mode's `* Heading` are NOT markdown headings (the former is a paragraph,
+// the latter a list item), so those files carry the file-level node alone and serve as ONE whole-file
+// unit. A heading detector per format is a later lane with its own measurement. `.mdx` is markdown with
+// JSX, which the block grammar already reads as html blocks (opaque). Gate: test/textdocscheck.sh.
+constexpr std::array<LangEntry, 46> kLangTable = {{
     { ".cpp",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cc",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cxx",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
@@ -152,8 +177,33 @@ constexpr std::array<LangEntry, 42> kLangTable = {{
     // whole extractable structure (queries/lua/tags.scm states the metatable/dynamic-dispatch floor).
     { ".lua",  Lang::Lua,        &tree_sitter_lua,        "lua"        },   // Lua — function/method defs (5 shapes) + calls
     { ".md",   Lang::Markdown,   &tree_sitter_markdown,   ""           },   // Markdown DOC tier — headings/sections via extractMarkdown()'s custom tree walk; NO tags.scm (query stays "")
-    { ".markdown", Lang::Markdown, &tree_sitter_markdown, ""           },   // sibling extension, same walk — scope disclosed: .md/.markdown only
+    { ".markdown", Lang::Markdown, &tree_sitter_markdown, ""           },   // sibling extension, same walk
+    { ".rst",  Lang::Markdown,   &tree_sitter_markdown,   ""           },   // reStructuredText — underlined titles tile as setext
+    { ".adoc", Lang::Markdown,   &tree_sitter_markdown,   ""           },   // AsciiDoc — whole-file unit (see above)
+    { ".org",  Lang::Markdown,   &tree_sitter_markdown,   ""           },   // Org-mode — whole-file unit (see above)
+    { ".mdx",  Lang::Markdown,   &tree_sitter_markdown,   ""           },   // MDX — markdown with JSX islands
 }};
+
+// SIBLING-COMPLETENESS GUARD (METHODOLOGY §3), at COMPILE time. docparse.h owns the NAME list every
+// reader-facing prose lens consults; this table owns the GRAMMAR rows. Adding a format to one and not the
+// other is exactly the defect this lane fixed — `.rst` counted as prose for ordering while the crawl
+// indexed it nowhere — so it is made impossible rather than merely documented.
+constexpr bool everyMarkdownGrammarExtHasARow() noexcept
+{
+    for( const std::string_view ext : docparse::kMarkdownGrammarExts )
+    {
+        const LangEntry* row = findByField( kLangTable, &LangEntry::ext, ext );
+        if( row == nullptr || row->lang != Lang::Markdown )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+static_assert( everyMarkdownGrammarExtHasARow(),
+               "every docparse::kMarkdownGrammarExts entry needs a kLangTable row on Lang::Markdown — "
+               "a prose format admitted by one and not the other is indexed nowhere while every lens calls it prose" );
 
 const LangEntry* lookupLang( std::string_view ext ) noexcept
 {

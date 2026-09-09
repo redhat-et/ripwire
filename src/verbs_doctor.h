@@ -276,6 +276,10 @@ inline const char* doctorLegendComment()
                        "file, so an answer is not stale because lean= is not ok — it is merely slower. source= says whether "
                        "the artifact was named on the cache= flag or picked automatically, and only a NAMED artifact this "
                        "binary cannot read is ok=\"0\" (a missing auto blob is the ordinary cold-start miss). "
+                       "git-config-trust reads the checkout's OWN core.fsmonitor as this process saw it at startup: hook is a "
+                       "COMMAND git would run on every read-only call, and neutralised=\"1\" says core.fsmonitor=false was "
+                       "appended to git's environment override for this run (stderr said so as git_harden=fsmonitor-hook); "
+                       "builtin, off and unset are left untouched and neutralised=\"0\". "
                        "NB no flag below is spelled with its leading dashes: an XML comment may not contain a "
                        "double hyphen, and this legend is one comment. -->";
 }
@@ -621,6 +625,21 @@ inline DoctorAgentRows doctorAgentRows( const rw::Config& cfg, const char* argv0
     return out;
 }
 
+// --doctor check 8's body: the git-config trust boundary (harvest 2026-09-09; measurement + reasoning in
+// githarden.h). Reads the form main() probed BEFORE it applied the override — a re-probe here would see the
+// override and report "off" for the very root whose file says hook. Informational: a hook-form key is the
+// CHECKOUT's state, not a broken setup, and the neutralisation IS the verdict — so the row is ok="1" always, the
+// way tree-sitter's is.
+inline std::string doctorGitConfigTrustAttrs( const rw::Config& cfg )
+{
+    using namespace rw;
+    const githarden::FsmonitorForm form        = githarden::startupFormFor( cfg.rootPath );
+    const bool                     neutralised = form == githarden::FsmonitorForm::Hook && githarden::g_startup.applied;
+    std::string attrs = "fsmonitor=\"" + std::string( githarden::fsmonitorFormName( form ) ) + "\"";
+    attrs += " neutralised=\"" + std::string( neutralised ? "1" : "0" ) + "\"";
+    return attrs;
+}
+
 int runDoctor( const rw::Config& cfg, const char* argv0 )
 {
     using namespace rw;
@@ -830,6 +849,10 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
         const DoctorIndexCache ic = doctorIndexCacheRow( cfg, esc );
         row( "index-cache", ic.ok, ic.attrs );
     }
+
+    // ---- check 8: the git-config trust boundary — body in doctorGitConfigTrustAttrs above, for the same reason
+    // check 7's lives in doctorIndexCacheRow: runDoctor is a dispatcher, and every check body it absorbs lands there.
+    row( "git-config-trust", true, doctorGitConfigTrustAttrs( cfg ) );
 
     const DoctorAgentRows agentRows = doctorAgentRows( cfg, argv0 );
     checks += agentRows.checks;

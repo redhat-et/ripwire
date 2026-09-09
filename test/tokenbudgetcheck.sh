@@ -318,5 +318,86 @@ else
     done
 fi
 
+# ── #18: THE CALIBRATION BAND — est_tokens against a REAL tokenizer, pinned ────────────────────────────
+# THE GAP THIS CLOSES. Everything above measures the estimate's PROPERTIES: present, positive,
+# deterministic, monotone under a tighter budget, and bounded by an allowance derived from the estimate's
+# OWN constants. Not one arm asks whether the number is TRUE. This file's own header said so — "the
+# MAPE-vs-tiktoken number is REPORTED by the agent in the T1 write-up (tiktoken isn't a build
+# dependency)" — which makes the accuracy of the tool's most-quoted number a thing a human typed into a
+# document once, in 2026-07, and nothing has re-derived since. METHODOLOGY §9 principle 6: measuring gets
+# its own instrument. This is it.
+#
+# HOW IT AVOIDS THE DEPENDENCY. The tokenizer runs OUT OF BAND (bench/tokenaudit/pin.py, by hand, with
+# tiktoken) and writes real o200k_base/cl100k_base counts into test/estcalib.manifest. This arm reads
+# numbers. No package, no network, bash + python3's stdlib + the binary — the same contract as
+# test/printf_parity.manifest.
+#
+# WHY THE PINS DO NOT ROT, and why the fixture is copied. test/estcalibfix is frozen, and the copy is
+# crawled from a temp dir by a RELATIVE path: outside any repository there is no `at="<sha>+dirty"` stamp
+# to change under a commit (or under a concurrent gate — the same shared-resource class this file's header
+# records at #14), and root="f" is one byte on every machine, so a deep checkout path cannot move the
+# count. Both artifacts that CAN move these numbers are the ones under test: the fixture and the emitter.
+#
+# THE BAND IS AN ENVELOPE, NOT A TARGET, and it is deliberately signed-asymmetric-free. Measured on three
+# corpora (this fixture, this repository, a 1500-file private C++ tree; bench/tokenaudit/README.md) the
+# signed error runs -18.4% to +41.7%: est_tokens OVER-reads the small legend-heavy bundles (the legend is
+# English prose at ~4.4 B/tok charged at a ~2.5 B/tok signature rate) and UNDER-reads --expand's dense
+# small bodies. So the band is +-, not a one-sided "never under-reads" floor: that claim was in
+# src/serialize.h and this instrument is what disproved it. What the band DOES buy is that the error
+# cannot silently double — a rate table edit, a new emitter charging bytes at the wrong rate, or a legend
+# that grows into a document whose price is quoted at the markup rate all leave the band.
+EST_MAN="$ROOT/test/estcalib.manifest"
+EST_FIX="$ROOT/test/estcalibfix"
+if [ ! -r "$EST_MAN" ] || [ ! -d "$EST_FIX" ]; then
+    no "#18: test/estcalib.manifest or test/estcalibfix missing — the calibration band cannot be measured"
+else
+    EST_TMP="$( mktemp -d )"
+    cp -R "$EST_FIX" "$EST_TMP/f"
+    est_pins=0
+    est_abs_sum=0
+    while read -r label o200k cl100k pinned_est rest; do
+        case "$label" in ""|\#*) continue ;; esac
+        # shellcheck disable=SC2086  # $rest is the pinned argv: deliberately word-split, never quoted
+        EST_OUT="$( cd "$EST_TMP" && "$BIN" f $rest 2>/dev/null )"
+        EST_GOT="$( printf '%s' "$EST_OUT" | grep -oE 'est_tokens="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"
+        if [ -z "$EST_GOT" ]; then
+            no "#18 $label: no est_tokens in the output — the pin says this verb prices itself"
+            continue
+        fi
+        est_pins=$(( est_pins + 1 ))
+        EST_ERR="$( python3 -c "print( round( 100.0 * ( $EST_GOT - $o200k ) / $o200k, 2 ) )" )"
+        EST_ABS="$( python3 -c "print( int( round( abs( 100.0 * ( $EST_GOT - $o200k ) / $o200k ) ) ) )" )"
+        est_abs_sum=$(( est_abs_sum + EST_ABS ))
+        EST_LO="$( python3 -c "print( int( $o200k * 0.75 ) )" )"
+        EST_HI="$( python3 -c "print( int( $o200k * 1.55 ) )" )"
+        if [ "$EST_GOT" -ge "$EST_LO" ] && [ "$EST_GOT" -le "$EST_HI" ]; then
+            ok "#18 $label: est=$EST_GOT vs o200k=$o200k (cl100k=$cl100k), ${EST_ERR}% — inside [$EST_LO,$EST_HI]"
+        else
+            no "#18 $label: est=$EST_GOT vs o200k=$o200k, ${EST_ERR}% — OUTSIDE the measured band [$EST_LO,$EST_HI]"
+        fi
+    done < "$EST_MAN"
+    rm -rf "$EST_TMP"
+
+    # #18b AGGREGATE. A per-pin band tolerates one verb drifting to the edge; the MAPE is the number the
+    # T1 write-up quoted by hand and is what moves when the RATE TABLE is wrong rather than one emitter.
+    # 30 is the measured 21% plus headroom — tighten it when a calibration round earns the tightening.
+    if [ "$est_pins" -gt 0 ]; then
+        EST_MAPE=$(( est_abs_sum / est_pins ))
+        if [ "$EST_MAPE" -le 30 ]; then
+            ok "#18b est_tokens MAPE vs o200k = ${EST_MAPE}% over $est_pins pins (ceiling 30%)"
+        else
+            no "#18b est_tokens MAPE vs o200k = ${EST_MAPE}% over $est_pins pins — past the 30% ceiling"
+        fi
+    fi
+
+    # #18c MUTATION CONTROL. Eight pins are committed; a loop that measured fewer (a manifest truncated by
+    # a merge, a verb that stopped printing est_tokens) asserted less than the PASS lines above suggest.
+    if [ "$est_pins" -ge 8 ]; then
+        ok "#18c $est_pins pins measured against the tokenizer manifest"
+    else
+        no "#18c only $est_pins pin(s) measured — the band arms above asserted almost nothing"
+    fi
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

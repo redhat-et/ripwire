@@ -453,7 +453,7 @@ inline LineSyntax lineSyntaxFor( std::string_view path )
             return syn;
         }
     }
-    if( ext == ".md" || ext == ".markdown" || ext == ".rst" || ext == ".txt" || docparse::isDocExtension( ext ) )
+    if( docparse::isProseExtension( ext ) )   // the shared prose vocabulary, not a fifth private list
     {
         syn.isProse = true;
     }

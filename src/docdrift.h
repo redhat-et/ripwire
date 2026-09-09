@@ -315,12 +315,16 @@ inline bool isMarkdownPath( std::string_view path )
     return ext == ".md" || ext == ".markdown";
 }
 
-// A file the index carries as a DOCUMENT rather than as code (docparse.h: notebooks, exported HTML, CSV).
-// It must not vouch for a name, and its numbers are not declarations — an exported HTML report claiming
-// `storyA_reserved[2]` is a rendering of a doc, not the code the doc is being checked against.
+// A file the index carries as a DOCUMENT rather than as code (docparse.h: the markdown-grammar formats —
+// .md/.markdown/.rst/.adoc/.org/.mdx — plus notebooks, exported HTML, CSV). It must not vouch for a name,
+// and its numbers are not declarations — an exported HTML report claiming `storyA_reserved[2]` is a
+// rendering of a doc, not the code the doc is being checked against. Asks docparse's INDEX question
+// directly: the old `isMarkdownPath( path ) || isDocExtension( ... )` spelling went stale the moment the
+// crawl learned a prose format that is neither markdown nor an extractor kind (`.rst`, 2026-09-09), and
+// silently let a reStructuredText document vouch for a symbol name.
 inline bool isIndexedDocPath( std::string_view path )
 {
-    return isMarkdownPath( path ) || docparse::isDocExtension( lowerExtOf( path ) );
+    return docparse::isIndexedDocExtension( lowerExtOf( path ) );
 }
 
 // Split a qualified spelling into its final segment and the scope directly above it:

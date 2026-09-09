@@ -109,8 +109,10 @@ mkdir -p "$TEST_HOME/.claude" "$TEST_HOME/.codex"
 
 # Run wrap --all with HOME redirected. XDG_CONFIG_HOME must be cleared too: opencode resolves its
 # config dir through xdg-basedir, so a developer (or CI image) with XDG_CONFIG_HOME set would leak a
-# real opencode install into this fake home and break the surface count below.
-WRAP_ALL_OUT="$( HOME="$TEST_HOME" XDG_CONFIG_HOME= "$BIN" wrap --all 2>&1 )"
+# real opencode install into this fake home and break the surface count below. HERMES_HOME gets the
+# same clearing treatment: Hermes is detected via ${HERMES_HOME:-~/.hermes}, and a leaked real
+# HERMES_HOME would count a Hermes surface that is not actually in this fake home.
+WRAP_ALL_OUT="$( HOME="$TEST_HOME" XDG_CONFIG_HOME= HERMES_HOME= "$BIN" wrap --all 2>&1 )"
 
 # Check that both agents are mentioned
 if echo "$WRAP_ALL_OUT" | grep -q 'claude'; then
@@ -147,7 +149,7 @@ else
 fi
 
 # Det-gate: run twice and verify output is identical
-WRAP_ALL_OUT2="$( HOME="$TEST_HOME" "$BIN" wrap --all 2>&1 )"
+WRAP_ALL_OUT2="$( HOME="$TEST_HOME" XDG_CONFIG_HOME= HERMES_HOME= "$BIN" wrap --all 2>&1 )"
 if [ "$WRAP_ALL_OUT" = "$WRAP_ALL_OUT2" ]; then
     ok "wrap --all output is deterministic (byte-identical on two runs)"
 else

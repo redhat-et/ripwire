@@ -26,6 +26,7 @@
 #include "gitmine.h"     // gitCommandLines — byte-safe git pipe reader
 #include "serialize.h"   // escapeXml + kMinBytesPerToken
 #include "infra/jsonesc.h"     // shSingleQuote
+#include "docparse.h"          // isIndexedDocExtension / lowerExtOf — the shared prose vocabulary
 #include <algorithm>
 #include <cstdio>
 #include <string>
@@ -49,9 +50,13 @@ inline std::string gitOneLine( const std::string& root, const char* args )
     return ( r.isStarted && r.status == 0 && !r.lines.empty() ) ? r.lines[0] : std::string();
 }
 
-inline bool isMarkdownPath( std::string_view p ) noexcept
+// The DESIGN DOCUMENTS a brief may cite. Any file the index carries as a document qualifies — the brief's
+// job is to hand a successor the doc that says WHY, and an ADR does not stop being one for being written
+// in reStructuredText. Was a private `.md`/`.markdown` suffix test until 2026-09-09; docparse.h's
+// vocabulary is now the single answer, so a format the crawl learns reaches the brief on the same day.
+inline bool isIndexedDocPath( std::string_view p ) noexcept
 {
-    return p.size() > 3 && ( p.ends_with( ".md" ) || p.ends_with( ".markdown" ) );
+    return docparse::isIndexedDocExtension( docparse::lowerExtOf( p ) );
 }
 
 } // namespace handoff_detail
@@ -249,7 +254,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
     if( !recallQuery.empty() && recallQuery != " " )
     {
         const std::vector<float> score = lexicalScores( ing, g.outOff, g.outTargets, recallQuery );
-        std::vector<std::pair<float, std::uint32_t>> best;   // (max symbol score, fileId) per markdown file
+        std::vector<std::pair<float, std::uint32_t>> best;   // (max symbol score, fileId) per document file
         std::vector<float> fileBest( ing.files.size(), 0.f );
         for( std::size_t i = 0; i < ing.symbols.size(); ++i )
         {
@@ -258,7 +263,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
         }
         for( std::uint32_t f = 0; f < ing.files.size(); ++f )
         {
-            if( fileBest[f] > 0.f && isMarkdownPath( ing.files[f] ) )
+            if( fileBest[f] > 0.f && isIndexedDocPath( ing.files[f] ) )
             {
                 best.emplace_back( fileBest[f], f );
             }

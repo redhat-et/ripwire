@@ -209,10 +209,13 @@ inline void forEachIdentifier( std::string_view line, OnName onName )
 // A prose path contributes weaker evidence than a code path: a name deleted from a DOC only proves the doc
 // changed. The probe records both, preferring a code site, so a "removed" row cites the code deletion when
 // one exists (see recordRemoval below).
+// Widened 2026-09-09 from a private `.md/.markdown/.txt/.rst` list to the shared vocabulary: a name
+// deleted from an AsciiDoc note, an Org roadmap, an exported HTML report or a notebook proves exactly as
+// little as one deleted from a markdown file, and the four lists that used to answer this question all
+// disagreed about which formats those were (docparse.h's vocabulary note).
 inline bool isProsePath( std::string_view path )
 {
-    const std::string ext = docparse::lowerExtOf( path );   // the shared extension step, not a third copy
-    return ext == ".md" || ext == ".markdown" || ext == ".txt" || ext == ".rst";
+    return docparse::isProseExtension( docparse::lowerExtOf( path ) );
 }
 
 // ── the cache blob (per repo, per HEAD sha) ──────────────────────────────────────────────────────────────

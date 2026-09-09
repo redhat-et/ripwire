@@ -165,7 +165,7 @@ clauses and boolean joins before macro expansion. These limits apply to CLI and 
 
 `test/elixircheck.sh`, `test/eliximportcheck.sh` and `test/elixirsemanticcheck.sh` cover extraction,
 metrics, exact target selection against decoys, lexical boundaries, contracts, CLI/MCP use-site parity,
-call-site mutation and cold/warm determinism. This extraction uses parser revision 85 (rich 86),
+call-site mutation and cold/warm determinism. This extraction uses parser revision 86 (rich 87),
 mirrored in `src/quality.h`; record format 18 and snapshot scheme 8 are unchanged.
 
 The three config lanes are *data*, not code: they emit `t="sec"` symbols and **zero call edges**, and
