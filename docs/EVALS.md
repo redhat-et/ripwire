@@ -13168,12 +13168,12 @@ read a postings index would save is a read the rest of the tool has already stop
 (path, line) hit sets, ripwire `--grep-in=any --limit=1000000` against tgrep and rg. **tgrep and rg
 agreed with each other on every query at every rung**, so every disagreement below is ripwire's.
 
-| corpus | exact agreement, pre-fix | after this round's two fixes |
-| --- | --- | --- |
-| rwsrc | 8 / 9 | **9 / 9** |
-| rwtree | 6 / 9 | 6 / 9 (the three residuals are one declared class) |
-| canyonraid48 | 7 / 9 | 7 / 9 |
-| go | 4 / 9 | not re-measured (see the llvm rung's cost) |
+| corpus | exact agreement, pre-fix | after this round's two fixes | what moved |
+| --- | --- | --- | --- |
+| rwsrc | 8 / 9 | **9 / 9** | `^#include` 1 → 1,648 (rg: 1,648) |
+| rwtree | 6 / 9 | 6 / 9 | `^#include` 29 → 2,149 of rg's 2,828; every one of the 679 still missing is under `third_party/` |
+| canyonraid48 | 7 / 9 | 7 / 9 | `^#include` 26 → 6,171 against rg's 6,171 — but with a ±4 symmetric difference (4 in `CMakeFiles/`, pruned; 4 in a gitignored `.bak`, served) |
+| go | 4 / 9 | not re-measured — a ripwire pass over `go` is ~1 s a query and the machine was committed to the llvm rung | — |
 
 Three buckets, and only the first was a defect in the matcher:
 
