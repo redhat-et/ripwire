@@ -13153,7 +13153,20 @@ Against rg, Q\* is 9.5 queries at 2,240 files, 5.3 at 3,248, 4.6 at 15,865 and *
 against ripwire-warm it is 1.7, 1.4, 1.2 and **0.1** — below a single query at the top rung, meaning a
 resident index would have paid for itself before the first `--grep` on that tree finished. Against a
 median of 26 grep-class commands per grepping session: **the crossover has already flipped at the
-smallest realistic repository size, and by one to two orders of magnitude.** It has not flipped at 159
+smallest realistic repository size, and by one to two orders of magnitude.**
+
+**The top rung's ripwire-warm column was superseded the same day, and the number above is kept as the
+record of what this harness measured.** The profiling lane (`ChaConeMemo`, commit `bc38d419`, its own
+section "the super-linear warm floor was the CHA-lite cone") re-timed the same six frozen queries with the
+same argv on the plain build, warm, three reps: 8.99 s (L1), 9.00 s (L3), 9.20 s (L6, the absent literal),
+9.23 s (R3), 9.11 s (R4), against 176–215 s here — measured by that lane on its tip, not by
+`bench/tgrep-h2h/`, and cited rather than copied into the table. Re-deriving this section's own formula
+with its own tgrep numbers (B = 11.113 s, q\_index = 2.7513 s over the same six) and a post-fix
+q\_scan ≈ 9.3 s gives **Q\* ≈ 1.7 against ripwire-warm at 182,555 files, not 0.1**: a resident index
+still pays for itself inside a two-query session at that scale, but no longer before the first query
+finishes. tgrep's columns did not move. This harness's own re-run of the llvm rung on the merged tree is
+registered as owed, so the table can carry a measured post-fix row rather than a cited one. It has not
+flipped at 159
 files, where rg outruns the index outright — the one honest "no" in the table.
 
 **The top rung, where the gap stops being an optimisation question.** Per-query medians on
@@ -13219,10 +13232,14 @@ ingest that precedes it is not lazy in the same way. **And that floor is not lin
 per file it is 40.2 µs at 2,240 files, 39.1 µs at 15,865 — flat — and 937.8 µs at 182,555. Between
 those last two rungs the corpus grew 11.5× and the floor grew 276×, a 24× per-file regression on a
 tree whose cold peak RSS is 6.45 GB. Nothing in the gate suite exercises a corpus large enough to see
-it. Whether that floor is the graph or the cache load
-plus per-file validation is one experiment away (stub the graph build, re-time) and is not decided
-here — which of the two it is chooses between two very different designs, and guessing would be the
-opposite of what this section is for.
+it. **Answered the same day** (the profiling lane, `bc38d419`): it was the graph — 143 of 154 s inside
+`buildGraph` was the CHA-lite inheritance cone rebuilt per call, 86,667 rebuilds for 2,984 receiver types
+with a quadratic dedup, so the flat rungs were flat because those corpora had no deep hierarchies, not
+because the code was linear. Memoised (`ChaConeMemo`, `src/graph.h`, gated by `test/chaconecheck.sh`,
+default maps byte-identical pre/post on go and llvm), warm llvm `--grep` went 159.7 s → 9.2 s and the
+per-file floor 50 µs at 182,555 against 33 µs at 15,865 — 1.5×, not 24×. The super-linearity this
+harness measured was real; its cause is now named and removed, and what remains is that lane's stated
+floor (the linear candidate passes), not this one's.
 
 ### Losses first — the agreement matrix
 
