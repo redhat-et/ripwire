@@ -13185,7 +13185,11 @@ index is more work than the one scan it saves" — also "the scan is already fre
 What the numbers point at instead is the **warm-ingest floor**: 0.09 s at 2,240 files, ~0.6 s at
 15,865, ~171 s at 182,555, paid on every `--grep` call to annotate at most 100 printed hits with `in=`.
 `grepEnrich` already builds its enclosing-symbol index only for files that actually have hits; the
-ingest that precedes it is not lazy in the same way. Whether that floor is the graph or the cache load
+ingest that precedes it is not lazy in the same way. **And that floor is not linear in corpus size**:
+per file it is 40.2 µs at 2,240 files, 39.1 µs at 15,865 — flat — and 937.8 µs at 182,555. Between
+those last two rungs the corpus grew 11.5× and the floor grew 276×, a 24× per-file regression on a
+tree whose cold peak RSS is 6.45 GB. Nothing in the gate suite exercises a corpus large enough to see
+it. Whether that floor is the graph or the cache load
 plus per-file validation is one experiment away (stub the graph build, re-time) and is not decided
 here — which of the two it is chooses between two very different designs, and guessing would be the
 opposite of what this section is for.
