@@ -83,10 +83,13 @@ legend's token share ran 3.2% (whole map) to **79.8% (`--callees`)**, with `--ed
 started this (callstack/agent-device #2400, "a fixed per-call preamble, 62% of `--callers`' whole
 response") while placing `--callers` itself at 42.9%/33.3% on the two corpora here.
 
-**4. `--legend=compact` is not a saving on `--for`.** Measured −0.8% (this repo) and −1.9% (the C++ tree):
-the compact posture emitted *more* tokens, because `--for` is budget-shaped and the bytes the legend frees
-are refilled from the trim ladder's tail. `--help`'s advice ("MAKING REPEATED CALLS? USE compact") is right
-for the navigation verbs and wrong-signed for the bundle it also names as "a little".
+**4. `--legend=compact` is not a saving on `--for`.** Measured −0.8% (this repo) and −1.9% (the C++ tree)
+at `4c10be9d`: the compact posture emitted *more* tokens, because `--for` is budget-shaped and the bytes the
+legend frees are refilled from the trim ladder's tail. Re-measured after the commit that added this
+directory, the same two arms read −0.1% and −1.9% — the magnitude moves with the corpus, the direction is
+what to carry: a wash or a small loss, never the 39-66% token saving the navigation verbs show. `--help`'s
+advice ("MAKING REPEATED CALLS? USE compact") is right for the navigation verbs and wrong-signed for the
+bundle it also names as "a little".
 
 **5. What a `--token-budget=N` actually delivers.** Real o200k tokens as a fraction of the requested N,
 and the reported `est_tokens` error at that budget:

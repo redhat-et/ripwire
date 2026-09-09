@@ -12905,9 +12905,12 @@ whole response"); `--callers` itself measures 42.9% / 33.3% on the two corpora h
 smaller answer than either, and the *shape* of their finding reproduces.
 
 One negative worth recording: **`--legend=compact` is not a saving on `--for`.** Measured −0.8% and −1.9%
-in tokens — the compact posture emitted *more*, because `--for` is budget-shaped and the bytes the legend
-frees are refilled from the trim ladder's tail. `--help`'s advice is right for the navigation verbs and
-wrong-signed for the bundle it also names.
+in tokens at `4c10be9d` — the compact posture emitted *more* — because `--for` is budget-shaped and the
+bytes the legend frees are refilled from the trim ladder's tail. Re-measured after this section's own
+commit the same two arms read −0.1% and −1.9%, so the magnitude moves with the corpus and the DIRECTION is
+what to carry: on `--for` the compact posture is a wash or a small loss, never the 39-66% token saving the
+navigation verbs show. `--help`'s advice is right for the navigation verbs and wrong-signed for the bundle
+it also names.
 
 ### 3. The loop the per-call number cannot see (`bench/tokenaudit/loop_ledger.py`)
 
