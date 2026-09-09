@@ -13093,3 +13093,139 @@ q_index = 2.7513 s over the same six) and a post-fix q_scan of ≈ 9.3 s gives *
 ripwire-warm** where the lane read 0.1 — the resident index still pays for itself inside a two-query
 session at this scale, but no longer "before the first query finishes". tgrep itself was not re-run; only
 the ripwire column moved.
+## Head-to-head vs tgrep (microsoft/tgrep 1.0.5) — the resident-index crossover, and two losses converted to code (2026-09-09)
+
+**Instrument.** `bench/tgrep-h2h/`: `queries.json` (16 queries frozen before any arm was timed, each
+with its selectivity and purpose), `arms.py` (the verb map and the DELIVERY POSTURE of each arm),
+`run.py` (the ladder driver), `readout.py` (every table below), `results.json` (the run, scrubbed of
+absolute paths). Raw per-arm output is written outside the checkout and is not tracked — an untracked
+file in this tree makes `git status --porcelain` dirty, which flips the `+dirty` half of every stamped
+verb's `at=` anchor for any determinism arm running beside the harness.
+
+**Versions and corpora.** ripwire `4c10be9d`, plain build (never Release: `NDEBUG` compiles
+`DEGRADED_PATH_ALERT` out). tgrep 1.0.5 at `50f5d8f6a54e9e4d16d021954cfcd4e77d342d7b`, `cargo build
+--release`. `rg` from Homebrew, always with `--sort path`. One 18-core macOS arm64 host, shared with
+concurrent harvest lanes. Ladder by `rg --files` count: `rw-hv-A/src` 159 · the ripwire tree 2,240 ·
+`canyonraid48` 3,248 · `golang/go` `49c3ea64` 15,865 · `llvm/llvm-project` `2061c237` (shallow) 182,555.
+
+**The question, stated correctly — the round brief's framing was half right.** `--grep`/`--regex` was
+a Zoekt-style trigram index until 2026-07-27, when P3 removed it: building a **per-invocation** index
+cost 1860 ms / 814 MB on a 2815-file tree and was thrown away after one query, which is strictly more
+work than the single scan it replaced. **That verdict is not re-opened and it still holds.** tgrep's
+index is *resident* — built once, held by a server, reused by every query in a session — so the
+question is not *index versus scan*, it is: after how many queries in one session, and at what corpus
+size, does a **persisted** index pay for itself? That is Q\* = B / (q_scan − q_index).
+
+### One-off costs
+
+| corpus | files | ripwire cold (ingest+scan) | peak RSS | ripwire cache on disk | tgrep index build | peak RSS | index on disk |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| rwsrc | 159 | 0.190 s | 0.17 GB | 4.6 MB | 0.056 s | 41 MB | 6.3 MB |
+| rwtree | 2,240 | 0.383 s | 0.36 GB | 10.0 MB | 0.437 s | 211 MB | 33.4 MB |
+| canyonraid48 | 3,248 | 1.097 s | 0.83 GB | 21.4 MB | 0.395 s | 132 MB | 47.8 MB |
+| go | 15,865 | 1.826 s | 1.27 GB | 58.8 MB | 1.042 s | 159 MB | 120.3 MB |
+
+**What "warm" means for `--grep`, measured.** The warm cache restores the tree-sitter symbol graph;
+it does not cache text. On `go`: cold 1.826 s, warm 0.512 s — the 1.3 s difference is the parse, and
+the 0.51 s that remains is the read-and-scan of 227 MB, paid again on every single call. `--grep`'s
+`in=` is what the cache buys; the hit set is not.
+
+### Q\* — queries per session at which the index has paid for itself
+
+Means over all 16 frozen queries; B is tgrep's index build.
+
+| corpus | files | q_scan (rg) | q_scan (ripwire warm) | q_index (tgrep) | B | Q\* vs rg | Q\* vs ripwire-warm |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| rwsrc | 159 | 0.0107 s | 0.0783 s | 0.0128 s | 0.056 s | never — the index is slower | 1 |
+| rwtree | 2,240 | 0.1062 s | 0.3185 s | 0.0602 s | 0.437 s | 10 | 2 |
+| canyonraid48 | 3,248 | 0.1087 s | 0.3237 s | 0.0342 s | 0.395 s | 5 | 1 |
+| go | 15,865 | 0.3707 s | 1.0095 s | 0.1418 s | 1.042 s | 5 | 1 |
+
+**The realistic session query count, with an instrument.** `~/.ripwire/substitution.jsonl` classifies
+every recorded tool event; 14,872 carry `class="grep"` across 522 sessions. Of the 96 sessions that
+grep at all, the median issues **26** grep-class commands (p25 8, p75 198, p90 449, max 1,975).
+Q\* ≤ 10 from 2,240 files upward, against a median of 26: **the crossover has already flipped at the
+smallest realistic repository size, and by an order of magnitude.** It has not flipped at 159 files,
+where rg outruns the index outright.
+
+**Would it fit ripwire's own cache?** The two ratios that decide whether "put the index in the cache"
+is even a candidate:
+
+| corpus | tgrep build ÷ ripwire cold ingest | tgrep index bytes ÷ ripwire cache bytes |
+| --- | ---: | ---: |
+| rwsrc | 0.29× | 1.37× |
+| rwtree | 1.14× | 3.33× |
+| canyonraid48 | 0.36× | 2.23× |
+| go | 0.57× | 2.05× |
+
+Building a trigram index costs the same order as the parse the warm cache already pays for once, and
+would grow the artifact 2–3×. And the enabling fact is already in the tree: the warm ingest is a
+`(size, mtime, ctime)` stat gate that "skips read+hash" when all three match
+(`src/ingest_cache.h:1236-1239`) — it is `--grep` alone that re-reads every byte on every call. The
+read a postings index would save is a read the rest of the tool has already stopped paying.
+
+### Losses first — the agreement matrix
+
+(path, line) hit sets, ripwire `--grep-in=any --limit=1000000` against tgrep and rg. **tgrep and rg
+agreed with each other on every query at every rung**, so every disagreement below is ripwire's.
+
+| corpus | exact agreement, pre-fix | after this round's two fixes |
+| --- | --- | --- |
+| rwsrc | 8 / 9 | **9 / 9** |
+| rwtree | 6 / 9 | 6 / 9 (the three residuals are one declared class) |
+| canyonraid48 | 7 / 9 | 7 / 9 |
+| go | 4 / 9 | not re-measured (see the llvm rung's cost) |
+
+Three buckets, and only the first was a defect in the matcher:
+
+- **Bucket A — `^` and `$` were FILE anchors. FIXED.** `--regex='^#include'` reported 1 hit on
+  `rw-hv-A/src` where `rg -n '^#include' src` reported 1,648; on canyonraid48, 26 against 6,171; on
+  `go`, 14 against 2,389. `--regex` hands a whole file's bytes to one `std::sregex_iterator` built
+  with `ECMAScript | optimize`, so ECMAScript's `^` matched only at offset 0 of that buffer. The verb's
+  own answer is line-shaped. Fixed by `std::regex::multiline` through one shared `kGrepRegexSyntax`
+  constant (`src/search.h`), gated by `test/grepanchorcheck.sh`; post-fix ripwire returns exactly
+  1,648. **The gate suite's own blind spot is the finding behind the finding:**
+  `test/regexcheck.sh` has carried `'^int '` in its battery since it was written, commented "an
+  anchored line start" — and its independent `grep -lE` oracle arm runs a *shorter* pattern list that
+  omits that pattern. Soundness (`prefiltered == full-scan`) and determinism were both satisfied by a
+  consistently wrong anchor.
+- **Bucket B — the built-in crawl denylist, undisclosed under `complete="1"`. DISCLOSED.** On this
+  repository `--grep='malloc('` served 33 hits carrying `complete="1"` where `rg -F 'malloc(' .`
+  found 78 matching lines; the 45 missing are exactly the lines under `third_party/`. `rw::kCrawlSkipDirs`
+  prunes `vendor`, `third_party`, `build`, `dist`, `out`, `target`, `node_modules`, `captures` whole,
+  and increments a directory counter that only `--skipped` reported — while the grep legend claimed
+  `corpus_excluded=` covered "the built-in crawl policy", which it never did. Now `corpus_pruned_dirs=`
+  on the CLI root and the MCP twin, and the legend's false clause is corrected. The *policy* is
+  unchanged and remains right (LINEAGE §3a, the ripgrep row); what changed is that the answer says so.
+- **Bucket C — unindexed extensions past the 500-candidate cap. NOT FIXED, already disclosed.**
+  `.s` on `go` (27 hits of `pthread_[a-z_]+_init` missing), `.yaml` on canyonraid48 (42 of 46 hits of
+  `[0-9a-f]{8}-[0-9a-f]{4}`). `unindexed_candidates_capped="1"` already says the candidate list was a
+  floor, so this is a documented ceiling and not a silent loss. Raising it is a ranking question, not
+  a correctness one, and is not attempted here.
+
+One further defect the matrix surfaced, in the *other* direction and NOT fixed here: `--grep` **serves**
+hits from files the repository's `.gitignore` excludes when those files carry an unindexed extension —
+`canyon/personality.cpp.bak` on canyonraid48 (`.gitignore:78:canyon/*.bak`), four hits, which `rg` does
+not serve. `recordPreSizeDrop` records the `unsupported` row *before* the ignore test
+(`src/ingest_crawl.h`, and that ordering is deliberate and commented), so `grepCollectAux` never sees
+the ignore verdict. Recorded here with its fix location; not folded, because the safe fix moves a crawl
+ordering the code argues for on other grounds.
+
+### What this comparison does NOT show
+
+- **The scan is all it prices.** Neither tgrep nor rg carries a symbol graph, so nothing here speaks to
+  what `--grep` is *for* — the `in=` enclosing-symbol chain, the `<enc>` caller counts, `--handles`.
+  ripwire's per-query cost includes work the baselines do not do at all.
+- **Most of tgrep's win is not the index.** On R4 `[Qq]z[Xx]v.*[Jj]w`, a pattern tgrep's own `--stats`
+  reports as `MatchAll (full scan) (candidates: 159/159)`, tgrep-via-server answers `go` in 0.026 s
+  against rg's 0.397 s and `tgrep --no-index`'s 0.569 s. With zero index contribution the server is
+  still 15× faster than rg — that is its 50,000-entry resident file-CONTENT cache, and `rg --files`
+  (walk only, 0.03 s versus 0.79 s for the full query) rules out the directory walk as the explanation.
+  A one-shot CLI (G5) cannot hold anything resident between invocations, so **that half of the win is
+  unavailable to ripwire at any price.** Only the postings half is portable.
+- **One machine, shared, arms run back to back rather than interleaved.** The conclusions turn on
+  10×–100× gaps and a Q\* one to two orders of magnitude below the observed session query count; a 2×
+  noise factor moves none of them.
+- **One tgrep posture.** Index pre-built, server warm — the posture tgrep's own README advertises. A
+  cold `tgrep serve` answers from an *empty* index and returns nothing until the first build publishes;
+  tgrep documents that in `AGENTS.md` and it is not measured here.
