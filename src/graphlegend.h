@@ -320,11 +320,13 @@ inline constexpr const char* kImpactLegendOpen =
 // INSIDE A FUNCTION BODY is still a real dependency — the importer tier must still name the file — but a
 // WEAKER one than a top-level require: it only fires if and when that function actually runs (webpack's
 // own lib/index.js lazy-getter barrel, `get ChunkGraph() { return require("./ChunkGraph"); }`, is the
-// shape that motivated capturing it at all). lazy="1" on a row means EVERY edge from that importer into
-// SYM's def file(s) is one of these function-body calls; lazy="0" means at least one is an ordinary
-// top-level (unconditional) require/import, so the dependency also holds at module-load time.
+// shape that motivated capturing it at all). Ruby joined the lane at parser version 82 (`autoload`, lazy by
+// definition) and 83 (a constant receiver inside a method/lambda/block), so the legend names the closure,
+// not a language. lazy="1" on a row means EVERY edge from that importer into SYM's def file(s) is one of
+// these closure-written directives; lazy="0" means at least one is load-time (an ordinary top-level
+// require/import, a class-body or file-level receiver), so the dependency also holds at load.
 inline constexpr const char* kImpactImportTierLegend =
-    "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM, as <f via=\"import\" p=\"…\" lazy=\"0|1\"/> rows after the symbol rows — not call reach, never added to reaches= (different units, files vs symbols; an importer may use a different symbol from that file, or none at all). DIRECT (one hop), never the transitive include cone. lazy=\"1\" (TS/JS only) means every one of that importer's edges into SYM's file is a require()/import() written INSIDE A FUNCTION BODY, firing only if and when that function runs; lazy=\"0\" means at least one edge is an ordinary top-level require/import (module-load time too). shown_importers=/importers_capped= disclose that listing's own truncation (importers= stays the full count); limit=/offset= window the symbol rows only. ";
+    "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM, as <f via=\"import\" p=\"…\" lazy=\"0|1\"/> rows after the symbol rows — not call reach, never added to reaches= (different units, files vs symbols; an importer may use a different symbol from that file, or none at all). DIRECT (one hop), never the transitive include cone. lazy=\"1\" means every one of that importer's edges into SYM's file is written INSIDE A CLOSURE (a TS/JS require()/import() in a function body, a Ruby constant receiver in a method/lambda/block, a Ruby autoload), firing only if and when it runs; lazy=\"0\" means at least one edge is load-time. shown_importers=/importers_capped= disclose that listing's own truncation (importers= stays the full count); limit=/offset= window the symbol rows only. ";
 
 // The columnar form re-serializes the SYMBOL rows as parallel arrays and has no row shape for a second
 // listing, so it carries importers= alone. Said in band rather than left as a shape difference a reader

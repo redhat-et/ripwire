@@ -1538,9 +1538,10 @@ constexpr std::uint16_t kMaxImportContainerDepth = 256;
 // language gate makes that impossible by construction rather than by relying on where the walk goes.
 //
 // `isAngle` is C/C++/ObjC only: `<x.h>` (external) vs `"x.h"` (quote), returned alongside the target so
-// path-precise resolution can leave angle includes unresolved. `isLazy` is TS/JS only (kParserVer 72):
-// true when `insideFn` says this call sits inside a function-body container — see kJsFunctionContainers
-// and captureIncludes' `insideFn` propagation below. Allocates a std::string → not noexcept.
+// path-precise resolution can leave angle includes unresolved. `isLazy` (kParserVer 72, TS/JS; Ruby since
+// parser version 82/83): true when `insideFn` says this call sits inside a closure container — see
+// kJsFunctionContainers, the Ruby closure kinds, and captureIncludes' `insideFn` propagation below — or when
+// the directive is a Ruby `autoload`. Allocates a std::string → not noexcept.
 // `isSymbolic` (parser version 82, Ruby only): the target is a CONSTANT resolved through the corpus's own
 // class/module index, never a path — see model.h Include::isSymbolic.
 struct DirectiveTarget { std::string target; bool isAngle; bool isLazy; bool isSymbolic; bool isReceiver; };

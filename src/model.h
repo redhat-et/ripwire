@@ -484,8 +484,11 @@ struct Include
                                     //   name the file) but semantically WEAKER: it fires only if and when
                                     //   that function runs. Ruby (parser version 82): true for every `autoload`,
                                     //   which is lazy by definition (the file loads on the constant's first
-                                    //   use). false for every other directive kind and for a top-level TS/JS
-                                    //   require/import. See ingest.cpp::captureIncludes.
+                                    //   use); Ruby (parser version 83): true for a constant receiver inside a
+                                    //   method/lambda/block, and (parser version 85) only when EVERY
+                                    //   occurrence of that (file, open, name) is inside one. false for every
+                                    //   other directive kind and for a top-level TS/JS require/import. See
+                                    //   ingest.cpp::captureIncludes.
     bool          isSymbolic = false; // parser version 82: true ⇒ `target` names a language-level SYMBOL (a Ruby
                                     //   constant: superclass, include/extend/prepend argument, path-less
                                     //   `autoload :Name`), resolved through the corpus's OWN definition index
