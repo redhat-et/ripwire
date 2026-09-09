@@ -58,6 +58,11 @@ inline void dedupRawDefs( std::vector<RawDef>& rawDefs )
                    {
                        return a.nameByte < b.nameByte;
                    }
+                   if( a.lang == Lang::Elixir && b.lang == Lang::Elixir )
+                   {
+                       if( a.scope != b.scope ) { return a.scope < b.scope; }
+                       if( a.name != b.name ) { return a.name < b.name; }
+                   }
                    // same identity: most-specific kind first so unique() keeps it
                    const int specificityA = specificity( a.kind ), specificityB = specificity( b.kind );
                    if( specificityA != specificityB )
@@ -76,7 +81,8 @@ inline void dedupRawDefs( std::vector<RawDef>& rawDefs )
 
     const auto sameIdentity = []( const RawDef& a, const RawDef& b ) noexcept
     {
-        return a.fileId == b.fileId && a.nameByte == b.nameByte;
+        return a.fileId == b.fileId && a.nameByte == b.nameByte
+            && ( a.lang != Lang::Elixir || ( a.scope == b.scope && a.name == b.name ) );
     };
     rawDefs.erase( std::unique( rawDefs.begin(), rawDefs.end(), sameIdentity ), rawDefs.end() );
 }
@@ -224,7 +230,8 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
                    {
                        return a.name < b.name;
                    }
-                   return a.startByte < b.startByte;   // stable last-resort tiebreak
+                   if( a.startByte != b.startByte ) { return a.startByte < b.startByte; }
+                   return a.scope < b.scope;   // shared Elixir implementation bodies have distinct module scopes
                } );
 
     result.symbols.reserve( rawDefs.size() );
@@ -554,6 +561,48 @@ inline std::vector<std::uint32_t> orderReferences( const std::vector<RawRef>& ra
     return refOrder;
 }
 
+// A multi-target defimpl shares written spans; give each implementation its own attributed references.
+inline void expandElixirImplementationReferences( IngestResult& result )
+{
+    HashMap<std::string, std::vector<NodeId>> sharedSpans;
+    const auto keyOf = []( const Symbol& symbol )
+    {
+        return std::to_string( symbol.fileId ) + ":" + std::to_string( symbol.sigStartByte ) + ":" + std::to_string( symbol.endByte );
+    };
+    std::size_t count = 0;
+    for( const Symbol& symbol : result.symbols ) { count += symbol.lang == Lang::Elixir ? 1 : 0; }
+    if( count == 0 ) { return; }
+    sharedSpans.reserve( count );
+    for( const Symbol& symbol : result.symbols )
+    {
+        if( symbol.lang == Lang::Elixir ) { sharedSpans[ keyOf( symbol ) ].push_back( symbol.id ); }
+    }
+    std::vector<Reference> expanded;
+    for( Reference& ref : result.references )
+    {
+        if( ref.lang != Lang::Elixir || ref.fromSymbol >= result.symbols.size() ) { continue; }
+        const auto found = sharedSpans.find( keyOf( result.symbols[ ref.fromSymbol ] ) );
+        if( found == sharedSpans.end() || found->second.size() < 2 ) { continue; }
+        const auto& nodes = found->second;
+        const std::string& primary = result.symbols[ nodes.front() ].scope;
+        const Reference original = ref;
+        for( NodeId node : nodes )
+        {
+            Reference clone = original;
+            clone.fromSymbol = node;
+            const std::string& scope = result.symbols[ node ].scope;
+            if( clone.recv == RecvKind::None && clone.role != RefRole::Import && clone.role != RefRole::Extends ) { clone.qualifier = scope; }
+            else if( clone.recv == RecvKind::ElixirSelfModule && !primary.empty() && clone.qualifier.starts_with( primary ) )
+            {
+                clone.qualifier.replace( 0, primary.size(), scope );
+            }
+            if( node == original.fromSymbol ) { ref = std::move( clone ); }
+            else { expanded.push_back( std::move( clone ) ); }
+        }
+    }
+    result.references.insert( result.references.end(), std::make_move_iterator( expanded.begin() ), std::make_move_iterator( expanded.end() ) );
+}
+
 // rawRefs is consumed here (never read again) → MOVE its 5 strings into each Reference instead of copying.
 inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, const std::vector<std::uint32_t>& refOrder, const DefSpanIndex& spanIndex )
 {
@@ -584,6 +633,7 @@ inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, 
         ref.startByte   = r.startByte;                // shadow fix round: for the block-span containment test
         ref.fromSymbol  = refSweep.find( r.fileId, r.startByte );
     }
+    expandElixirImplementationReferences( result );
 }
 
 // member-variable round (card A3): a Python field is DEFINED by its first `self.x = …` assignment, and that very

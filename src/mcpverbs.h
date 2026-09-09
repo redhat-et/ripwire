@@ -2349,9 +2349,10 @@ inline std::string usesText( const std::string& root, const std::string& symbol,
 
     struct UseSite { std::uint32_t fileId; std::uint32_t line; RefRole role; std::string in; };
     std::vector<UseSite> sites;
+    const ElixirResolver elixirResolver( ing );
     for( const Reference& r : ing.references )
     {
-        if( r.calleeName != sym )
+        if( r.lang == Lang::Elixir && !defs.empty() ? !elixirResolver.reachesAny( r, defs ) : r.calleeName != sym )
         {
             continue;
         }

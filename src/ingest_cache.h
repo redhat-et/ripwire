@@ -79,10 +79,10 @@ struct RawBind
     std::uint32_t startByte = 0;   // position inside the enclosing function (for enclosing-def attribution)
     Lang          lang      = Lang::Unknown;
     LocalBindKind kind      = LocalBindKind::Type;   // Type = Rule 2 var→type; FnDecl/FnAssign = L3 var→function
-    std::uint32_t spanStart = 0;   // kind==VarDecl only: the declaring BLOCK's byte span (shadow scope);
-    std::uint32_t spanEnd   = 0;   //   {0,0} on every other kind — see model.h Binding
+    std::uint32_t spanStart = 0;   // lexical visibility or declaration span; see model.h Binding/LocalBindKind
+    std::uint32_t spanEnd   = 0;
     std::string   var;             // the declared variable identifier (`x`)
-    std::string   importedName;    // JsImport only; persisted beside the local name and module target.
+    std::string   importedName;    // ES export identity or Elixir callable/import fact; see LocalBindKind.
     std::string   typeName;        // kind==Type: the written type's final segment (`Foo`);
                                    // kind==FnDecl/FnAssign: the bound function name (or an L3 sentinel)
 };
@@ -203,7 +203,10 @@ constexpr std::uint32_t kCacheVersion = 18;           // 18: #62 — call refs i
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 84;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 85;           // bump on any grammar/.scm/extraction change
+                                                      // 85 = Elixir module/name/arity identities, lexical imports,
+                                                      //    defaults, captures, delegates, attributes and contracts.
+                                                      //    Existing bind/ref layouts; quality mirror changes with it.
                                                       // 84 = 2026-09-08 (test/rubyrecvcheck.sh): a Ruby constant
                                                       //    RECEIVER (`User.find`, `App::Mailer.deliver`) is a
                                                       //    symbolic directive, one per (file, innermost open,

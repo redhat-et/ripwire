@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-09, ELIXIR SEMANTICS (test/elixirsemanticcheck.sh): parserVer and its quality mirror
+#   move 84 -> 85 for module/name/arity identities, lexical imports, defaults, captures, delegates,
+#   attributes and protocol/behaviour relationships. Binding/Reference record layouts are unchanged:
+#   kCacheVersion stays 18 and kQSnapCacheScheme stays 8. Old extraction facts must be re-parsed.
 # 2026-09-07, ES DEFAULT IMPORTS (test/lib/jsdefaultimport.sh): kParserVer and its quality mirror
 #   move 81 -> 82 for default import/export facts. Record layouts and Snapshot-side functions are
 #   unchanged: kCacheVersion stays 16 and kQSnapCacheScheme stays 8.

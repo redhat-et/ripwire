@@ -15,6 +15,18 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — Elixir module and arity resolution (parser version 85)
+
+Elixir calls now resolve by module, name and arity, with lexical aliases, filtered imports, default
+arguments, pipes, captures and delegates. Nested modules and each target of a multi-target `defimpl`
+have separate identities. Types, callbacks and attributes are navigable, and protocol/behaviour
+relationships appear in the existing relationship views. CLI and MCP use-site queries share the same
+resolution rules; unknown modules and excluded imports no longer fall back to unrelated functions.
+
+The implementation uses the existing vendored parser and cache records, with no Elixir runtime
+dependency. Macro expansion and runtime dispatch remain static-analysis limits; the supported syntax
+and boundaries are documented in [Elixir extraction](docs/ARCHITECTURE.md#elixir-extraction).
+
 ### Added — a Ruby constant receiver is a dependency (parser version 83)
 
 Round two of the Ruby constant work. Parser version 82 gave the declarative spellings — `class X < Base`,

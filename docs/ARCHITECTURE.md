@@ -126,23 +126,47 @@ node in the `--deps`/`--arch` graph. Both floors are asserted from the outside b
 
 <a id="elixir-extraction"></a>
 
-Elixir's grammar models definitions as calls. Its tags query selects candidate shapes; the small
-`ingest_elixir.h` capture filter checks definition keywords, excludes declaration-head/pattern references, module attributes and
-quoted AST, and locates block/keyword bodies. `defimpl P, for: T` is indexed as the module Elixir itself
-generates — `P.T`, an ABSOLUTE name that nesting inside a `defmodule` does not qualify — so an implementation
-clause that shares a name with the enclosing module's function is a second row with its own canonical id,
-not a dropped definition. Macros, guards and literal ExUnit tests are parsed `fn` symbols. Local and
-remote calls, executable default expressions and pipes produce references; module scope qualifies definitions.
-Default-expression edges are syntactic possibilities; they are not narrowed by which arguments a caller supplies. Alias/import/use
-resolution, macro expansion, dynamic dispatch and protocol implementation DISPATCH remain outside this
-initial port: implementations are indexed, but a call through a protocol is not narrowed to them. Bare identifiers outside pipes are omitted because they may be variables or
-zero-arity calls. Metrics count syntactic controls, clause arms and boolean joins, not expanded macros;
-arity narrowing is deliberately disabled (default arguments and pipes change call arity).
-`test/elixircheck.sh` covers extraction, call-site mutation, metrics and cold/warm determinism.
+Elixir `.ex` and `.exs` files use the vendored grammar and the shared tags-query engine. No Elixir,
+Mix, language server, compiler, or application execution is required. `ingest_elixir.h` interprets the
+grammar's ordinary call nodes as declarations and collects lexical facts; `elixir_resolve.h` uses those
+facts in the graph and CLI/MCP use-site queries. The existing binding and reference cache records carry
+the facts without adding fields to every language's symbols or references.
 
-Elixir extraction landed at revision 78 (rich 79) — `kParserVer` in `src/ingest_cache.h`, mirrored by
-`kIngestParserVerMirror` in `src/quality.h`. The required `qschemetrip` source-change pin is refreshed
-for this extraction change; snapshot scheme 8 is unchanged.
+The extraction covers nested and explicitly rooted modules, structs/exceptions, protocols, single- and
+multi-target implementations (including an implicit enclosing-module target), public/private functions,
+macros, guards, delegates, operator definitions, guarded clauses, and literal ExUnit tests. Functions
+are identified by **module, name and arity**: `MyApp.Work::run/1` selects one arity; the existing
+`MyApp.Work::run` selector selects all arities. Each written clause retains its source span. Default
+arguments add callable lookup arities that resolve to those source definitions, without fabricated bodies.
+`defimpl P, for: [A, B]` produces separate `P.A` and `P.B` scopes, each with its own calls.
+
+Aliases (including groups and `as:`), `require ... as:`, nested-module aliases, `__MODULE__` and
+`Elixir.` root qualification resolve in lexical source order. Imports support `only`, `except`,
+`:functions` and `:macros`; private functions are callable only locally. Local calls, static remote
+calls, zero-arity bare calls, pipes, named captures, executable defaults, and `defdelegate to:/as:`
+share the arity-aware resolver. Bound parameters and pattern variables are excluded as calls. A
+missing module, excluded import or wrong arity stays unresolved; an unrelated same-named function
+does not supply an edge. Multiple matching clauses remain candidate destinations.
+
+Types (`@type`, `@typep`, `@opaque`) and callbacks (`@callback`, `@macrocallback`) are navigable
+declarations, named `@type name/N` and `@callback name/N`. Ordinary attributes are `@name` symbols;
+their expressions can carry calls and reads appear in `--uses`. Documentation, specs and other
+metadata do not become executable calls. Alias/import/require/use and behaviour declarations supply
+module dependencies resolved through declared module identities, regardless of umbrella/file layout.
+`@behaviour` and `defimpl` supply contract/implementation relationships for `--uses` and `--lego`.
+
+**Static limits:** quoted AST and macro-generated definitions are not expanded. `use` records the
+dependency, but does not execute `__using__`; framework DSLs and generated Phoenix/Ecto functions
+therefore need an explicit source definition to appear. Runtime module receivers, `apply`, anonymous
+function dispatch, protocol dispatch by runtime argument type, and HEEx template execution are not
+inferred. Type expressions are indexed as declarations, not type-checked. Default-expression edges
+are syntactic possibilities, not narrowed by supplied arguments. Metrics count written controls,
+clauses and boolean joins before macro expansion. These limits apply to CLI and MCP alike.
+
+`test/elixircheck.sh`, `test/eliximportcheck.sh` and `test/elixirsemanticcheck.sh` cover extraction,
+metrics, exact target selection against decoys, lexical boundaries, contracts, CLI/MCP use-site parity,
+call-site mutation and cold/warm determinism. This extraction uses parser revision 85 (rich 86),
+mirrored in `src/quality.h`; record format 18 and snapshot scheme 8 are unchanged.
 
 The three config lanes are *data*, not code: they emit `t="sec"` symbols and **zero call edges**, and
 `langCompatible` keeps a config key from ever resolving a same-spelled code symbol. They differ in

@@ -1265,11 +1265,9 @@ inline std::uint32_t resolveElixirModule( std::string_view target, const HashMap
 // `.ex`/`.exs` includer this is one pass over `ing.includes` that finds nothing and allocates nothing, so
 // every other language's cost is unchanged. An empty result is the caller's signal to pass nullptr.
 //
-// ROUND FLOOR, stated once. This layer resolves the FILE edge for all four languages added at parser
-// version 81. It does NOT feed the name-level resolver: an Elixir `alias A.B.C` also binds the local name
-// `C`, a Ruby `require` makes a constant autoloadable, and neither narrows a later call the way a Python
-// import now does through Phase 5's binding table. `--deps`/`--arch`/`--impact`/`--cochange` see these
-// edges; `--callers`/`--callees` still resolve those languages' calls by the global name ladder alone.
+// Resolve Elixir file dependencies from declared module identities, independent of the file layout.
+// Lexical aliases are already expanded at ingest. Function calls use ElixirResolver's separate
+// module/name/arity index; this unique-module index serves --deps/--arch/--impact/--cochange.
 inline HashMap<std::string, std::uint32_t> buildElixirModuleIndex( const IngestResult& ing )
 {
     HashMap<std::string, std::uint32_t> modules;
@@ -1287,11 +1285,13 @@ inline HashMap<std::string, std::uint32_t> buildElixirModuleIndex( const IngestR
     {
         return modules;
     }
+    modules.reserve( ing.files.size() );
     for( const Symbol& s : ing.symbols )
     {
-        if( s.lang != Lang::Elixir || s.kind != SymKind::Other || s.name.empty() || s.fileId >= F )
+        if( s.lang != Lang::Elixir || !s.scope.empty() || s.name.empty() || s.fileId >= F
+            || ( s.kind != SymKind::Other && s.kind != SymKind::Class && s.kind != SymKind::Struct && s.kind != SymKind::Interface ) )
         {
-            continue;   // queries/elixir/tags.scm's @definition.module is the ONLY Elixir SymKind::Other
+            continue;   // only module/protocol/struct containers, never attributes or type declarations
         }
         const auto [ it, inserted ] = modules.try_emplace( s.name, s.fileId );
         if( !inserted && it->second != s.fileId )
