@@ -13181,9 +13181,21 @@ Three buckets, and only the first was a defect in the matcher:
   this tree's `src/` where `rg -n '^#include' src` reported 1,648; on the private tree, 26 against 6,171; on
   `go`, 14 against 2,389. `--regex` hands a whole file's bytes to one `std::sregex_iterator` built
   with `ECMAScript | optimize`, so ECMAScript's `^` matched only at offset 0 of that buffer. The verb's
-  own answer is line-shaped. Fixed by `std::regex::multiline` through one shared `kGrepRegexSyntax`
-  constant (`src/search.h`), gated by `test/grepanchorcheck.sh`; post-fix ripwire returns exactly
-  1,648. **The gate suite's own blind spot is the finding behind the finding:**
+  own answer is line-shaped. Fixed by making `grepScanText` search **one line at a time**
+  (`src/search.h`), gated by `test/grepanchorcheck.sh`; post-fix ripwire returns exactly 1,648.
+  **`std::regex::multiline` is the obvious fix and it is unusable**: Apple libc++'s
+  `__l_anchor_multiline<char>::__exec` reads `*std::prev(__s.__current_)` before testing whether the
+  position is the first character, so at offset 0 it reads one byte before the buffer — `--regex='^'`
+  over `src/` crashed 8 of 10 runs, and a 40-line standalone with no ripwire code faulted on 74 of
+  this repository's ~130 headers, single-threaded. It surfaced as five *nondeterministic* gate-suite
+  shard failures in CI run 34357046881 rather than as one red arm, and twenty targeted plain-build
+  gates passed on the crashing binary; one ASan run on the command the change touched would have named
+  it immediately. The line-at-a-time replacement is what grep, rg and tgrep do, costs nothing
+  measurable (six regexes on this tree, whole-buffer vs line-oriented medians: 0.77/0.78, 0.55/0.46,
+  0.53/0.54, 0.32/0.34, 0.75/0.84, 0.42/0.42 s), and narrows one thing that is now stated in `--help`:
+  a match may no longer span lines. Arm I of the gate is the crash regression; arm J pins that a
+  trailing newline terminates the last line rather than beginning an empty one, against `grep -c '^'`
+  itself (a second defect the first cut of the rewrite had). **The gate suite's own blind spot is the finding behind the finding:**
   `test/regexcheck.sh` has carried `'^int '` in its battery since it was written, commented "an
   anchored line start" — and its independent `grep -lE` oracle arm runs a *shorter* pattern list that
   omits that pattern. Soundness (`prefiltered == full-scan`) and determinism were both satisfied by a
