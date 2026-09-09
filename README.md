@@ -7,7 +7,7 @@
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-none-blue.svg)](THIRD_PARTY.md)
 [![Slides](https://img.shields.io/badge/slides-the%20showcase%20deck-56d6e8.svg)](present/ripwire-showcase.pdf)
 
-# Rip'n Fast. Less Tokens. Better Code.
+# Rip'n Fast. Fewer Tokens. Better Code.
 
 ## Give your coding agent a map before it reads the repo.
 
@@ -1122,7 +1122,9 @@ trailing `…`.
 <summary><code>--callers</code> — a call graph built on the spot, and why <code>count="6"</code> ships labelled a floor</summary>
 
 **Ten seconds, no index server, no embeddings, no API key** — a parse and a call graph, built on the
-spot:
+spot. The rows below are a real capture: the callers and their files are gate-held current
+(`test/readmeexamplecheck.sh`), the `:line` suffixes were true when captured and drift as the files
+grow — nothing can keep a line number true in a document, so it is not claimed here.
 
 ```
 $ ripwire . --callers=rankGraphTeleport
