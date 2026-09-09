@@ -1308,6 +1308,27 @@ inline std::optional<std::string> catastrophicRegexConstruct( const std::string&
     return std::nullopt;
 }
 
+// ── THE syntax option set every --regex construction uses ─────────────────────────────────────────────
+//
+// One constant, three construction sites (the compile probe below, the indexed-file worker, and the
+// unindexed-aux scan). A pattern that COMPILES under one flag set and MATCHES under another is a defect
+// with no symptom, and this file spelled the literal out three times.
+//
+// `multiline` is the load-bearing member, added 2026-09-09 after the tgrep head-to-head
+// (`bench/tgrep-h2h/`) priced its absence. --regex hands a whole file's bytes to ONE sregex_iterator, so
+// without this flag ECMAScript's `^` matches only at offset 0 of that buffer and `$` only at its very
+// end — the anchors were FILE anchors. Measured: `--regex='^#include'` over this repository's own src/
+// at 4c10be9d answered hits="1" where `rg -n '^#include' src` answered 1648; over canyonraid48, 26
+// against 6171. The verb's answer is LINE-shaped (one <hit l=> per line, whose CDATA is that line) and
+// every other tool an agent holds — grep, rg, tgrep, every editor's find box — reads `^` as a line
+// anchor, so a file anchor was a confident wrong answer in the one syntax nobody re-reads the manual
+// for. `.` is unaffected: ECMAScript's dot excludes line terminators with or without this flag, so a
+// `.*` still cannot cross a newline. The trigram prefilter is unaffected too — Cox treats an anchor as ε
+// (riAnchor above), which is sound under either reading, so no candidate set narrows on one.
+// Gated by test/grepanchorcheck.sh (arm C carries a [\s\S]* mutation control proving the dot arm is not
+// vacuous; arm E re-checks prefilter soundness with an anchor in the pattern).
+constexpr auto kGrepRegexSyntax = std::regex::ECMAScript | std::regex::multiline | std::regex::optimize;
+
 inline std::optional<std::string> regexCompileError( const std::string& pat )
 {
     if( std::optional<std::string> portability = nonPortableRegexEscape( pat ) )
@@ -1319,7 +1340,7 @@ inline std::optional<std::string> regexCompileError( const std::string& pat )
         return bomb; // M2: likewise — decided from the text, before any engine sees it
     }
 
-    try                                { const std::regex probe( pat, std::regex::ECMAScript | std::regex::optimize ); (void)probe; }
+    try                                { const std::regex probe( pat, kGrepRegexSyntax ); (void)probe; }
     catch( const std::regex_error& e ) { return std::string( e.what() ); }
     catch( ... )                       { return std::string( "invalid regular expression" ); }
     return std::nullopt;
@@ -1411,7 +1432,7 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
     const auto                              fileWorker = [ & ]
     {
         std::regex reLocal;
-        if( regex ) { try { reLocal = std::regex( pat, std::regex::ECMAScript | std::regex::optimize ); } catch( ... ) { workerDegraded.store( true, std::memory_order_relaxed ); return; } }
+        if( regex ) { try { reLocal = std::regex( pat, kGrepRegexSyntax ); } catch( ... ) { workerDegraded.store( true, std::memory_order_relaxed ); return; } }
         std::string text;
         try
         {
@@ -1597,7 +1618,7 @@ inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::str
     std::regex re;
     if( regex )
     {
-        try { re = std::regex( pat, std::regex::ECMAScript | std::regex::optimize ); }
+        try { re = std::regex( pat, kGrepRegexSyntax ); }
         catch( ... ) { out.degraded = true; return out; }   // T1: nothing scanned — a caller may not read this empty set as a complete zero
     }
 
