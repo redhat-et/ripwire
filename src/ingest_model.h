@@ -562,6 +562,14 @@ inline std::vector<std::uint32_t> orderReferences( const std::vector<RawRef>& ra
 }
 
 // A multi-target defimpl shares written spans; give each implementation its own attributed references.
+//
+// ORDER: the clones are spliced in BESIDE the reference they were cloned from, never appended to the tail.
+// emitReferences hands this function a vector in (fileId, startByte, name, role, isInherit) order, and two
+// consumers read that order rather than re-deriving it: graph.h's chaUpDeclared records a derived type's
+// direct bases in source order (`super()` resolution), and editpreview.h splices a re-parsed file in by
+// partitioning ing.references on fileId, which only reproduces a real re-ingest while each file's refs are
+// one contiguous ascending run. A clone shares its original's whole sort key — only fromSymbol and the
+// rewritten qualifier differ — so the position next to it is exactly where a sort would have put it.
 inline void expandElixirImplementationReferences( IngestResult& result )
 {
     HashMap<std::string, std::vector<NodeId>> sharedSpans;
@@ -577,9 +585,10 @@ inline void expandElixirImplementationReferences( IngestResult& result )
     {
         if( symbol.lang == Lang::Elixir ) { sharedSpans[ keyOf( symbol ) ].push_back( symbol.id ); }
     }
-    std::vector<Reference> expanded;
-    for( Reference& ref : result.references )
+    std::vector<std::pair<std::size_t, Reference>> expanded;   // (index of the original, the clone) — spliced in below
+    for( std::size_t refIndex = 0; refIndex < result.references.size(); ++refIndex )
     {
+        Reference& ref = result.references[ refIndex ];
         if( ref.lang != Lang::Elixir || ref.fromSymbol >= result.symbols.size() ) { continue; }
         const auto found = sharedSpans.find( keyOf( result.symbols[ ref.fromSymbol ] ) );
         if( found == sharedSpans.end() || found->second.size() < 2 ) { continue; }
@@ -597,10 +606,23 @@ inline void expandElixirImplementationReferences( IngestResult& result )
                 clone.qualifier.replace( 0, primary.size(), scope );
             }
             if( node == original.fromSymbol ) { ref = std::move( clone ); }
-            else { expanded.push_back( std::move( clone ) ); }
+            else { expanded.emplace_back( refIndex, std::move( clone ) ); }
         }
     }
-    result.references.insert( result.references.end(), std::make_move_iterator( expanded.begin() ), std::make_move_iterator( expanded.end() ) );
+    if( expanded.empty() ) { return; }
+    std::vector<Reference> merged;
+    merged.reserve( result.references.size() + expanded.size() );
+    std::size_t nextClone = 0;                                 // expanded is already in ascending original-index order
+    for( std::size_t refIndex = 0; refIndex < result.references.size(); ++refIndex )
+    {
+        merged.push_back( std::move( result.references[ refIndex ] ) );
+        while( nextClone < expanded.size() && expanded[ nextClone ].first == refIndex )
+        {
+            merged.push_back( std::move( expanded[ nextClone ].second ) );
+            ++nextClone;
+        }
+    }
+    result.references = std::move( merged );
 }
 
 // rawRefs is consumed here (never read again) → MOVE its 5 strings into each Reference instead of copying.

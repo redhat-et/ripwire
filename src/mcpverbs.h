@@ -2354,9 +2354,17 @@ inline std::string usesText( const std::string& root, const std::string& symbol,
     struct UseSite { std::uint32_t fileId; std::uint32_t line; RefRole role; std::string in; };
     std::vector<UseSite> sites;
     const ElixirResolver elixirResolver( ing );
+    // CLI parity (mcpclidiffcheck): the Elixir resolver path is gated on the selector's ELIXIR definitions —
+    // the CLI's resolveUsesSelector filters exactly this way, off the RAW selector, before the @-seed rebind.
+    // Gating on `defs` instead would take the resolver path for an Elixir reference whose calleeName merely
+    // matches a definition in another language: reachesAny then matches nothing and the use-site disappears
+    // here while the CLI still reports it through the name filter — a surface divergence, not a narrowing.
+    std::vector<NodeId> elixirDefs = resolveAllByNameQualified( ing, symbol );
+    std::erase_if( elixirDefs, [ & ]( NodeId node ) { return ing.symbols[ node ].lang != Lang::Elixir; } );
     for( const Reference& r : ing.references )
     {
-        if( r.lang == Lang::Elixir && !defs.empty() ? !elixirResolver.reachesAny( r, defs ) : r.calleeName != sym )
+        const bool elixirPath = ( r.lang == Lang::Elixir && !elixirDefs.empty() );
+        if( elixirPath ? !elixirResolver.reachesAny( r, elixirDefs ) : r.calleeName != sym )
         {
             continue;
         }

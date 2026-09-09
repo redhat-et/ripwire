@@ -417,8 +417,8 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
     const ElixirResolver elixirResolver( ing );
     for( const Reference& r : ing.references )
     {
-        if( r.lang == Lang::Elixir && !sel.elixirDefs.empty()
-            ? !elixirResolver.reachesAny( r, sel.elixirDefs ) : r.calleeName != sel.siteMatchName )
+        const bool elixirPath = ( r.lang == Lang::Elixir && !sel.elixirDefs.empty() );
+        if( elixirPath ? !elixirResolver.reachesAny( r, sel.elixirDefs ) : r.calleeName != sel.siteMatchName )
         {
             continue;
         }

@@ -163,6 +163,18 @@ inferred. Type expressions are indexed as declarations, not type-checked. Defaul
 are syntactic possibilities, not narrowed by supplied arguments. Metrics count written controls,
 clauses and boolean joins before macro expansion. These limits apply to CLI and MCP alike.
 
+Four resolution gaps are open, each reproduced against Elixir 1.20.3 / OTP 29 and each a floor rather
+than a wrong answer everywhere else: a later `import M, except: [...]` **replaces** an earlier
+`import M, only: [...]` selection instead of subtracting from it, so a function that was never imported
+can supply an edge (`src/elixir_resolve.h`); a dotted nested declaration such as `defmodule Inner.Deep`
+inside `defmodule Outer` does not register the enclosing module's implicit prefix alias, so a later
+`Inner.Deep.target()` resolves to nothing (`src/ingest_elixir.h`); inside a multi-target `defimpl`,
+`alias __MODULE__, as: Current` binds every implementation's `Current.f()` to the FIRST target's `f`
+rather than its own (`src/ingest_model.h`); and an explicit named capture of an underscore-prefixed
+function (`&_seed/0`) is dropped by the unused-parameter filter (`src/ingest_elixir.h`). Bodyless
+function headers carrying defaults do not preserve transitive caller reachability, and executable
+`unquote` / `bind_quoted` expressions are omitted with the rest of the quoted-AST filter.
+
 `test/elixircheck.sh`, `test/eliximportcheck.sh` and `test/elixirsemanticcheck.sh` cover extraction,
 metrics, exact target selection against decoys, lexical boundaries, contracts, CLI/MCP use-site parity,
 call-site mutation and cold/warm determinism. This extraction uses parser revision 86 (rich 87),
