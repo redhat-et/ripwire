@@ -100,10 +100,15 @@ git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' > "$TMP/
 # now that the token count rather than a byte budget travels to the header. Every one of them is a
 # DISCLOSURE of a budget the verb already honored — the columns those three verbs sit in are unchanged, so
 # this is a re-pin, exactly as the --expand and recall-default re-pins above were.
+# #61 (2026-09-09, 20->21): ONE more read, and the same kind. --for --detail=N already honored --max-tokens
+# (it bounds the bodies) and already printed max_tokens= on its root; what it never did was say whether the
+# DOCUMENT stayed inside the ceiling it named. The new site hands cfg.maxTokens to verbs_for.h's
+# forLensOverCeiling so the root can carry over_ceiling="1" when est_tokens exceeds it. Nothing about which
+# verbs read the flag changed, so kShapingVerbs' honorsMaxTokens column is untouched and this is a re-pin.
 MAXSITES="$( grep -c 'cfg\.maxTokens\|c\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
 TOPSITES="$( grep -c 'cfg\.topK\|c\.topK'           src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
-[ "$MAXSITES" = 20 ] && ok "(A) --max-tokens has 20 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
-                     || no "(A) --max-tokens read sites moved 20 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
+[ "$MAXSITES" = 21 ] && ok "(A) --max-tokens has 21 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
+                     || no "(A) --max-tokens read sites moved 21 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
 [ "$TOPSITES" = 13 ] && ok "(A) --top-k has 13 read sites outside cli.h" \
                      || no "(A) --top-k read sites moved 13 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
 # no OTHER file may read them: a third file would be a verb family this table has never heard of.

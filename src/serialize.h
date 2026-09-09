@@ -1057,6 +1057,26 @@ inline std::string pricedRootAttr( std::size_t markupBytes, double markupRate, s
 // comment, where a double hyphen is ill-formed (G4).
 inline constexpr std::string_view kOverCeilingLegend = " over_ceiling=1 says est_tokens exceeds budget_tokens";
 
+// #61 (2026-09-09): the same sentence for the OTHER ceiling a task lens can be handed. `--for --detail=N`
+// reads --max-tokens (cli.h's kShapingVerbs carve-out) and prints max_tokens= on its root, so a root can
+// name budget_tokens=, max_tokens=, or BOTH — and METHODOLOGY §9 #6 requires the definition to name the
+// ceiling actually on the document carrying it. Keyed on which ceilings the ROOT CARRIES rather than on
+// which one was exceeded: that keeps the choice independent of the est_tokens fixpoint the label rides
+// inside (the fixpoint only ever RAISES the number, so a which-one-fired spelling could be made stale by
+// the very bytes it costs), and it leaves a budget-only document byte-identical to what it was before.
+inline constexpr std::string_view kOverCeilingMaxTokensLegend = " over_ceiling=1 says est_tokens exceeds max_tokens";
+inline constexpr std::string_view kOverCeilingBothLegend      = " over_ceiling=1 says est_tokens exceeds budget_tokens or max_tokens";
+
+// The selector, so no surface picks the wording by hand. One sentence, one predicate, per document.
+inline constexpr std::string_view overCeilingLegendFor( bool namesBudgetTokens, bool namesMaxTokens ) noexcept
+{
+    if( namesBudgetTokens && namesMaxTokens )
+    {
+        return kOverCeilingBothLegend;
+    }
+    return namesMaxTokens ? kOverCeilingMaxTokensLegend : kOverCeilingLegend;
+}
+
 // Splices `attrs` into the FIRST start-tag of `doc` (the root — its own attribute values are XML-escaped, so
 // the first '>' closes it). No-op, with a degrade alert, if the document has no start-tag at all.
 inline void spliceRootAttrs( std::string& doc, std::string_view attrs, std::size_t rootTagAt = 0 )

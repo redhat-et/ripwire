@@ -978,6 +978,10 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
                     // twins — present only when non-zero, same condition as the CLI emitter.
                     + ( ing.crawlSkips.excludedFiles > 0 ? ( ",\"corpus_excluded\":" + std::to_string( ing.crawlSkips.excludedFiles ) ) : std::string() )
                     + ( !ing.skippedOversize.empty() ? ( ",\"corpus_oversize\":" + std::to_string( ing.skippedOversize.size() ) ) : std::string() )
+                    // …and the third one (2026-09-09, the tgrep head-to-head): the built-in crawl denylist's
+                    // whole-subtree prune, which neither of the two above ever counted. Same condition as the
+                    // CLI emitter (grepCorpusAttrs), so the two dialects cannot disagree about what was searched.
+                    + ( ing.crawlSkips.prunedDirs > 0 ? ( ",\"corpus_pruned_dirs\":" + std::to_string( ing.crawlSkips.prunedDirs ) ) : std::string() )
                     // §R-J: unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped=
                     // (helper above) — mcpclidiffcheck's LENS2 fact-parity arm requires scanned= at minimum.
                     + grepUnindexedKeys( aux )

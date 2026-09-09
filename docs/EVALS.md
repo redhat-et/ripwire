@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 567 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 570 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -5579,7 +5579,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **567 gate scripts**, all of which exist on disk.
+naming **570 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -6491,7 +6491,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 567. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 570. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -13007,3 +13007,332 @@ dumps that the generated-document demotion does not catch (no marker, no fences 
 `classifyGeneratedDoc` states about itself). `.txt` stays prose to every reader-facing lens and an
 unindexed extension in `unindexed=`, alongside `.log`, `.lock` and `.out`. An evidence-based admission
 test that reads BYTES rather than the extension is the open follow-up.
+
+## The super-linear warm `--grep` floor: measured to one operation, fixed, byte-identical (2026-09-09)
+
+The tgrep head-to-head of 2026-09-09 (its section "Head-to-head vs tgrep (microsoft/tgrep 1.0.5)" lands
+with the harvest-tgrep lane) left one item open: warm `--grep` cost 40.2 µs/file at 2,240 files,
+39.1 µs at 15,865 and 937.8 µs at 182,555 — a 24× per-file regression across an 11.5× corpus step — and
+it named the decisive experiment: time the verb with the graph construction stubbed out. This section
+ran that experiment, then followed the house perf reflex (start from the measurement, inspect only the
+symbols the profile names). The full phase tables and the reproduce block are in `bench/PROFILE.md`
+("2026-09-09 — the super-linear warm `--grep` floor"); this is the evidence chain and the verdict.
+
+**The stub, without a stub.** `--help-task` returns before `buildGraph` and shares `--grep`'s lean cache
+blob, so it is the crawl + cache-load + validation + model-build arm with the graph removed. Warm on
+llvm-project (182,555 files, same checkout as the head-to-head), interleaved, two reps each:
+
+| arm | wall | peak RSS |
+| --- | ---: | ---: |
+| `--grep=<absent literal>` | 159.7 s, 153.9 s | 6.15 GB |
+| `--callers=main` (graph, no scan) | 152.9 s, 151.8 s | 5.91 GB |
+| `--help-task` (no graph) | 3.8 s, 3.4 s | 5.93 GB |
+
+The floor did move — by 150 s. The cost is the graph; the cache load plus per-file validation is
+16 µs/file on llvm against 28 µs/file on go, linear; and the memory-cliff hypothesis is refuted on the
+same row, since the 5.9 GB is the ingest's own tables and is present in the arm that takes 3.8 s.
+
+**Which operation.** The ingest path already carried `PROFILE_SCOPE_DESCRIBE` scopes at the grep path's
+granularity for crawl, cache and model; `buildGraph` carried one scope for the whole function. This round
+added the loop and post-loop scopes that land, plus a scratch six-span split inside the per-reference
+loop. Of 153.2 s in the loop, 145.1 s sat in ONE span — CHA-lite cone + arity + locality — across
+2,213,632 references at a mean 65.5 µs and a worst case of 41.7 ms. Split again: arity 0.015 s, locality
+0.27 s, **the CHA-lite cone ≈ 143 s**. The obvious hypothesis was measured and rejected: the five linear
+passes over same-name candidates visited 1.23 billion candidates and cost 3.3 s.
+
+The cone was recomputed per call: 86,667 BFS pairs for 2,984 distinct receiver types (≈29 rebuilds each),
+mean cone 1,075 class names, quadratic `std::find` dedup, 1.65 ms a cone. On go the same span is 1.1 ms
+in total because the model has no inheritance edges there — the flat rungs of the ladder were flat because
+the corpora had no deep hierarchies, not because the code was linear.
+
+**The fix and its proof.** `ChaConeMemo` (`src/graph.h`) computes each receiver type's cone once, over
+interned class names, with the per-call walk's exact seed, discovery order and 4,096 outer-loop cap, and
+answers membership by binary search. Warm llvm: `--grep` 9.2 s / 9.0 s, `--callers` 8.6 s / 8.7 s, the
+default map 248 s → 10 s; `--help-task` unchanged. Default maps at `--top-k=100000` are byte-identical
+pre/post on go (10,415,057 B) and llvm (21,802,319 B). Gate `test/chaconecheck.sh` pins the set the memo
+must reproduce: a cone keyed on the receiver type and not the callee (Dog and Cat on one `speak`), the
+memo-hit path from a second file, a receiver with no inheritance facts degrading rather than emptying the
+tier, a parameter-receiver control, and the cap's own shape (Base→{A,B}, A→A1..A4095, B→B1: B is never
+expanded, so B1::m is outside the cone; count=4095, amb="1"). All arms pass against the pre-fix binary —
+the expected values are the per-call walk's own answers — and 24 existing resolver gates pass unchanged.
+
+**What remains, stated as a floor.** Warm `--grep` on llvm is 9 s: `buildGraph` 5.9 s (the resolve loop
+4.5 s, of which the candidate spray over 1.23 billion visits is 2.2 s), ingest 2.8 s, the 2.9 GB scan
+1.0 s on its own thread. Per file that is 50 µs at 182,555 files against 33 µs at 15,865 — 1.5×, not 24×.
+`rg` answers the same absent literal in 4.3 s; a resident tgrep in 0.018 s. The next rung is the linear
+candidate passes, which is a different design (a per-name file/directory index) and is not started here.
+The cold parse on llvm carried the same ~186 s cone cost inside its 231 s and was not re-measured.
+
+**The head-to-head's top rung, re-timed post-fix.** The same six frozen queries the lane declared for the
+llvm rung, the same argv (`--grep-in=any`), the plain build with the memo, warm, three reps each, medians:
+
+| query | ripwire warm, head-to-head (pre-fix) | **ripwire warm, post-fix** |
+| --- | ---: | ---: |
+| L1 `pthread_mutex_lock` | 193.09 s | **8.99 s** |
+| L3 `TODO` | 195.58 s | **9.00 s** |
+| L6 `zzqxvnotpresentzz` (absent) | 176.35 s | **9.20 s** |
+| R3 `malloc.*free` | 215.34 s | **9.23 s** |
+| R4 `[Qq]z[Xx]v.*[Jj]w` (prefilter-defeating) | 171.19 s | **9.11 s** |
+| R1 `^#include` | 233.06 s | 10.08 s — not comparable: this branch predates the lane's line-anchor fix |
+
+Every query is now within a second of the absent literal: the scan is still hidden behind the graph, the
+graph is just 17× smaller.
+
+**A correctness finding the timing table surfaced, stated as one.** The tgrep lane replaces `grepScanText`'s
+one-iterator-per-file regex scan with one per LINE, so that `^` and `$` mean line anchors. Priced interleaved on
+the scan's own `grep/1` scope with the lane merged onto this fix (host load 31; the pair-wise scope, not the
+wall clock, is the comparison): on llvm-project R1 `^#include` returns **1,487 hits on main and 289,646 on
+the lane** — 288,159 matches today's shipped binary misses silently, on one query, while reporting a confident
+count — and the per-line shape is *faster* (3.40 s against 4.48 s), because bounding each search to a line
+stops `.*` from running across lines, so it does strictly less work per attempt. R3 `malloc.*free` 2.28 → 1.68 s;
+the prefilter-defeating R4, which scans every byte, 1.27 → 1.50 s (+0.22 s on 2.9 GB, ≈3 ns a line); the literal
+control 1.16 → 1.20 s (an unchanged path: the noise floor). On go every pair is within noise or faster,
+including a forced full scan. Nothing super-linear, and the largest cost is 18% on the one pattern with no
+literal at all. Re-deriving the lane's Q\* formula with its own tgrep numbers (B = 11.113 s,
+q_index = 2.7513 s over the same six) and a post-fix q_scan of ≈ 9.3 s gives **Q\* ≈ 1.7 queries against
+ripwire-warm** where the lane read 0.1 — the resident index still pays for itself inside a two-query
+session at this scale, but no longer "before the first query finishes". tgrep itself was not re-run; only
+the ripwire column moved.
+## Head-to-head vs tgrep (microsoft/tgrep 1.0.5) — the resident-index crossover, and two losses converted to code (2026-09-09)
+
+**Instrument.** `bench/tgrep-h2h/`: `queries.json` (16 queries frozen before any arm was timed, each
+with its selectivity and purpose), `arms.py` (the verb map and the DELIVERY POSTURE of each arm),
+`run.py` (the ladder driver), `readout.py` (every table below), `results.json` (the run, scrubbed of
+absolute paths). Raw per-arm output is written outside the checkout and is not tracked — an untracked
+file in this tree makes `git status --porcelain` dirty, which flips the `+dirty` half of every stamped
+verb's `at=` anchor for any determinism arm running beside the harness.
+
+**Versions and corpora.** ripwire `4c10be9d`, plain build (never Release: `NDEBUG` compiles
+`DEGRADED_PATH_ALERT` out). tgrep 1.0.5 at `50f5d8f6a54e9e4d16d021954cfcd4e77d342d7b`, `cargo build` in its release profile. `rg` from Homebrew, always with `--sort path`. One 18-core macOS arm64 host, shared with
+concurrent harvest lanes. Ladder by ripgrep's own file-listing count: this tree's `src/` 159 · the whole ripwire tree 2,240 ·
+a private C++/ObjC++ tree (`privcpp` in the harness, named in the local ledger) 3,248 · `golang/go` `49c3ea64` 15,865 · `llvm/llvm-project` `2061c237` (shallow) 182,555.
+
+**The question, stated correctly — the round brief's framing was half right.** `--grep`/`--regex` was
+a Zoekt-style trigram index until 2026-07-27, when P3 removed it: building a **per-invocation** index
+cost 1860 ms / 814 MB on a 2815-file tree and was thrown away after one query, which is strictly more
+work than the single scan it replaced. **That verdict is not re-opened and it still holds.** tgrep's
+index is *resident* — built once, held by a server, reused by every query in a session — so the
+question is not *index versus scan*, it is: after how many queries in one session, and at what corpus
+size, does a **persisted** index pay for itself? That is Q\* = B / (q_scan − q_index).
+
+### One-off costs
+
+| corpus | files | ripwire cold (ingest+scan) | peak RSS | ripwire cache on disk | tgrep index build | peak RSS | index on disk |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| rwsrc | 159 | 0.190 s | 0.17 GB | 4.6 MB | 0.056 s | 41 MB | 6.3 MB |
+| rwtree | 2,240 | 0.383 s | 0.36 GB | 10.0 MB | 0.437 s | 211 MB | 33.4 MB |
+| privcpp | 3,248 | 1.097 s | 0.83 GB | 21.4 MB | 0.395 s | 132 MB | 47.8 MB |
+| go | 15,865 | 1.826 s | 1.27 GB | 58.8 MB | 1.042 s | 159 MB | 120.3 MB |
+| llvm-project | 182,555 | 252.7 s | 6.01 GB | 542.0 MB | 11.1 s | 541 MB | 1,037.3 MB |
+
+**What "warm" means for `--grep`, measured.** The warm cache restores the tree-sitter symbol graph;
+it does not cache text. On `go`: cold 1.826 s, warm 0.512 s — the 1.3 s difference is the parse, and
+the 0.51 s that remains is the read-and-scan of 227 MB, paid again on every single call. `--grep`'s
+`in=` is what the cache buys; the hit set is not.
+
+### Q\* — queries per session at which the index has paid for itself
+
+Means over all 16 frozen queries; B is tgrep's index build.
+
+| corpus | files | ripwire queries | q_scan (rg, all 16) | q_scan (ripwire warm) | q_index (tgrep, all 16) | B | Q\* vs rg | Q\* vs ripwire-warm |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| this tree's `src/` | 159 | 16/16 | 0.0107 s | 0.0783 s | 0.0128 s | 0.056 s | never — the index is slower | 0.9 |
+| the ripwire tree | 2,240 | 16/16 | 0.1062 s | 0.3185 s | 0.0602 s | 0.437 s | **9.5** | **1.7** |
+| privcpp | 3,248 | 16/16 | 0.1087 s | 0.3237 s | 0.0342 s | 0.395 s | **5.3** | **1.4** |
+| go | 15,865 | 16/16 | 0.3707 s | 1.0095 s | 0.1418 s | 1.042 s | **4.6** | **1.2** |
+| llvm-project | 182,555 | 6/16 | 7.2005 s | 197.4362 s | 2.7513 s | 11.113 s | **2.5** | **0.1** |
+
+The ripwire column on the llvm rung is the declared six-query subset (`run.py`'s `RW_QUERIES`), so its
+Q\* is computed against tgrep's mean over *those same six*, never against tgrep's mean over sixteen —
+the two would be different workloads. Every other rung ran all sixteen on every arm.
+
+**The realistic session query count, with an instrument.** `~/.ripwire/substitution.jsonl` classifies
+every recorded tool event; 14,872 carry `class="grep"` across 522 sessions. Of the 96 sessions that
+grep at all, the median issues **26** grep-class commands (p25 8, p75 198, p90 449, max 1,975).
+Against rg, Q\* is 9.5 queries at 2,240 files, 5.3 at 3,248, 4.6 at 15,865 and **2.5 at 182,555**;
+against ripwire-warm it is 1.7, 1.4, 1.2 and **0.1** — below a single query at the top rung, meaning a
+resident index would have paid for itself before the first `--grep` on that tree finished. Against a
+median of 26 grep-class commands per grepping session: **the crossover has already flipped at the
+smallest realistic repository size, and by one to two orders of magnitude.**
+
+**The top rung's ripwire-warm column was superseded the same day, and the number above is kept as the
+record of what this harness measured.** The profiling lane (`ChaConeMemo`, commit `bc38d419`, its own
+section "the super-linear warm floor was the CHA-lite cone") re-timed the same six frozen queries with the
+same argv on the plain build, warm, three reps: 8.99 s (L1), 9.00 s (L3), 9.20 s (L6, the absent literal),
+9.23 s (R3), 9.11 s (R4), against 176–215 s here — measured by that lane on its tip, not by
+`bench/tgrep-h2h/`, and cited rather than copied into the table. Re-deriving this section's own formula
+with its own tgrep numbers (B = 11.113 s, q\_index = 2.7513 s over the same six) and a post-fix
+q\_scan ≈ 9.3 s gives **Q\* ≈ 1.7 against ripwire-warm at 182,555 files, not 0.1**: a resident index
+still pays for itself inside a two-query session at that scale, but no longer before the first query
+finishes. tgrep's columns did not move. This harness's own re-run of the llvm rung on the merged tree is
+registered as owed, so the table can carry a measured post-fix row rather than a cited one. It has not
+flipped at 159
+files, where rg outruns the index outright — the one honest "no" in the table.
+
+**The top rung, where the gap stops being an optimisation question.** Per-query medians on
+llvm-project (182,555 files, 2.9 GB), ripwire warm:
+
+| query | ripwire warm | tgrep (resident) | tgrep `--no-index` | rg |
+| --- | ---: | ---: | ---: | ---: |
+| L1 `pthread_mutex_lock` (rare literal) | 193.09 s | 0.011 s | 8.70 s | 5.25 s |
+| L3 `TODO` (medium literal) | 195.58 s | 0.089 s | 8.33 s | 4.48 s |
+| L6 `zzqxvnotpresentzz` (absent) | 176.35 s | 0.018 s | 7.72 s | 4.30 s |
+| R1 `^#include` | 233.06 s | 1.81 s | 13.57 s | 5.85 s |
+| R3 `malloc.*free` | 215.34 s | 0.028 s | 9.08 s | 4.09 s |
+| R4 `[Qq]z[Xx]v.*[Jj]w` (prefilter-defeating, 0 hits) | 171.19 s | 11.24 s | 17.38 s | 13.47 s |
+| L2 `return` (delivery-bound, 326 MB out) | not run | 7.30 s | 9.86 s | 8.73 s |
+| L4 `int` (delivery-bound, 563 MB out) | not run | 10.43 s | 14.43 s | **6.90 s** |
+
+Two readings. First, **ripwire needs three minutes to say "not found"** on that tree — 176 s against
+tgrep's 0.018 s and rg's 4.30 s. Second, **L4 is the one cell where rg beats tgrep**, which is exactly
+the failure mode tgrep's own BENCHMARKS.md names ("a query returning tens of thousands of matches can
+spend more on delivery than the index ever saved on file selection") — their model predicts our data
+on their own losing cell, which is the reason to trust the rest of their table.
+
+**Would it fit ripwire's own cache?** The two ratios that decide whether "put the index in the cache"
+is even a candidate:
+
+| corpus | tgrep build ÷ ripwire cold ingest | tgrep index bytes ÷ ripwire cache bytes |
+| --- | ---: | ---: |
+| rwsrc | 0.29× | 1.37× |
+| rwtree | 1.14× | 3.33× |
+| privcpp | 0.36× | 2.23× |
+| go | 0.57× | 2.05× |
+| llvm-project | 0.04× | 1.91× |
+
+Building a trigram index costs the same order as the parse the warm cache already pays for once, and
+would grow the artifact 2–3×. **It is affordable, and it would buy almost nothing — which is the most
+useful thing this round measured.**
+
+`src/verbs_grep.h::startGrepScanPrefetch` already runs the text scan on its own thread, concurrent
+with the graph build, so ripwire's warm per-query cost is `max(ingest, scan)` — and the ingest wins at
+every rung. Timed interleaved on the same warm cache, against a verb that builds the same graph and
+scans no text:
+
+| corpus | warm `--callers=main` (no text scan) | warm `--grep` (full text scan) |
+| --- | ---: | ---: |
+| the ripwire tree, 2,240 files | 0.09 s | 0.09 s |
+| `go`, 15,865 files | ~0.62 s | ~0.65 s |
+
+At the top of the ladder it is not close: on llvm-project the *absent literal* `zzqxvnotpresentzz`
+costs **176.4 s** and the prefilter-defeating, zero-hit regex `[Qq]z[Xx]v.*[Jj]w` — a full
+`std::regex` verification of 2.9 GB — costs **171.2 s**. Two completely different scan workloads, the
+same wall time, because neither is what the clock is measuring. A postings index attacks the side of
+that `max()` that is already free: it would save ~0% of a literal query at any rung, and only the
+excess on the heaviest regexes (`^#include` 233 s, `malloc.*free` 215 s against a ~171 s floor), for
+the price of a new on-disk format, a new field in the cache-identity contract and a soundness gate per
+pattern shape.
+
+**So P3's removal note is right for a second reason it does not yet state.** Not only "building the
+index is more work than the one scan it saves" — also "the scan is already free behind the ingest".
+What the numbers point at instead is the **warm-ingest floor**: 0.09 s at 2,240 files, ~0.6 s at
+15,865, ~171 s at 182,555, paid on every `--grep` call to annotate at most 100 printed hits with `in=`.
+`grepEnrich` already builds its enclosing-symbol index only for files that actually have hits; the
+ingest that precedes it is not lazy in the same way. **And that floor is not linear in corpus size**:
+per file it is 40.2 µs at 2,240 files, 39.1 µs at 15,865 — flat — and 937.8 µs at 182,555. Between
+those last two rungs the corpus grew 11.5× and the floor grew 276×, a 24× per-file regression on a
+tree whose cold peak RSS is 6.45 GB. Nothing in the gate suite exercises a corpus large enough to see
+it. **Answered the same day** (the profiling lane, `bc38d419`): it was the graph — 143 of 154 s inside
+`buildGraph` was the CHA-lite inheritance cone rebuilt per call, 86,667 rebuilds for 2,984 receiver types
+with a quadratic dedup, so the flat rungs were flat because those corpora had no deep hierarchies, not
+because the code was linear. Memoised (`ChaConeMemo`, `src/graph.h`, gated by `test/chaconecheck.sh`,
+default maps byte-identical pre/post on go and llvm), warm llvm `--grep` went 159.7 s → 9.2 s and the
+per-file floor 50 µs at 182,555 against 33 µs at 15,865 — 1.5×, not 24×. The super-linearity this
+harness measured was real; its cause is now named and removed, and what remains is that lane's stated
+floor (the linear candidate passes), not this one's.
+
+### Losses first — the agreement matrix
+
+(path, line) hit sets, ripwire `--grep-in=any --limit=1000000` against tgrep and rg, over the nine
+queries the frozen set declares as the agreement subset. **tgrep and rg agreed with each other on
+every one of those, at every rung**, so every disagreement below is ripwire's.
+
+Outside that subset tgrep and rg differ on exactly three `go` cells, and both causes were traced
+rather than assumed — neither is the trigram index, since `tgrep --no-index` reproduces both:
+`R2 TODO|FIXME|XXX` misses four lines in `src/regexp/testdata/basic.dat`, because `.dat` is one of
+the ~65 extensions tgrep's walker rejects as binary before ever reading the file
+(`tgrep-core/src/walker.rs`), which ripgrep does not do; `L4 int` and `L5 err` differ by a byte on
+the lines of `crlf.input`-style files, because tgrep always strips a trailing `\r` where rg keeps it
+unless told otherwise. Both are documented in tgrep's README — and neither is disclosed on the ANSWER, which
+is the asymmetry the disclosure table below is about: ripwire's skipped classes ride on the root
+element, tgrep's live in prose.
+
+| corpus | exact agreement, pre-fix | after this round's two fixes | what moved |
+| --- | --- | --- | --- |
+| rwsrc | 8 / 9 | **9 / 9** | `^#include` 1 → 1,648 (rg: 1,648) |
+| rwtree | 6 / 9 | 6 / 9 | `^#include` 29 → 2,149 of rg's 2,828; every one of the 679 still missing is under `third_party/` |
+| privcpp | 7 / 9 | 7 / 9 | `^#include` 26 → 6,171 against rg's 6,171 — but with a ±4 symmetric difference (4 in `CMakeFiles/`, pruned; 4 in a gitignored `.bak`, served) |
+| go | 4 / 9 | not re-measured — a ripwire pass over `go` is ~1 s a query and the machine was committed to the llvm rung | — |
+
+Three buckets, and only the first was a defect in the matcher:
+
+- **Bucket A — `^` and `$` were FILE anchors. FIXED.** `--regex='^#include'` reported 1 hit on
+  this tree's `src/` where `rg -n '^#include' src` reported 1,648; on the private tree, 26 against 6,171; on
+  `go`, 14 against 2,389. `--regex` hands a whole file's bytes to one `std::sregex_iterator` built
+  with `ECMAScript | optimize`, so ECMAScript's `^` matched only at offset 0 of that buffer. The verb's
+  own answer is line-shaped. Fixed by making `grepScanText` search **one line at a time**
+  (`src/search.h`), gated by `test/grepanchorcheck.sh`. Post-fix, ripwire's `(path,line)` hit set over
+  this tree's `src/` equals `rg -n`'s **exactly** on five anchored patterns: `^#include` 1,648,
+  `^int ` 18, `^\s*//` 41,005, `h>$` 42, and `^$` 9,936 — the last two being the zero-width cases the
+  trailing-newline rule decides.
+  **`std::regex::multiline` is the obvious fix and it is unusable**: Apple libc++'s
+  `__l_anchor_multiline<char>::__exec` reads `*std::prev(__s.__current_)` before testing whether the
+  position is the first character, so at offset 0 it reads one byte before the buffer — `--regex='^'`
+  over `src/` crashed 8 of 10 runs, and a 40-line standalone with no ripwire code faulted on 74 of
+  this repository's ~130 headers, single-threaded. It surfaced as five *nondeterministic* gate-suite
+  shard failures in CI run 34357046881 rather than as one red arm, and twenty targeted plain-build
+  gates passed on the crashing binary; one ASan run on the command the change touched would have named
+  it immediately. The line-at-a-time replacement is what grep, rg and tgrep do, costs nothing
+  measurable (six regexes on this tree, whole-buffer vs line-oriented medians: 0.77/0.78, 0.55/0.46,
+  0.53/0.54, 0.32/0.34, 0.75/0.84, 0.42/0.42 s), and narrows one thing that is now stated in `--help`:
+  a match may no longer span lines. Arm I of the gate is the crash regression; arm J pins that a
+  trailing newline terminates the last line rather than beginning an empty one, against `grep -c '^'`
+  itself (a second defect the first cut of the rewrite had). **The gate suite's own blind spot is the finding behind the finding:**
+  `test/regexcheck.sh` has carried `'^int '` in its battery since it was written, commented "an
+  anchored line start" — and its independent `grep -lE` oracle arm runs a *shorter* pattern list that
+  omits that pattern. Soundness (`prefiltered == full-scan`) and determinism were both satisfied by a
+  consistently wrong anchor.
+- **Bucket B — the built-in crawl denylist, undisclosed under `complete="1"`. DISCLOSED.** On this
+  repository `--grep='malloc('` served 33 hits carrying `complete="1"` where `rg -F 'malloc(' .`
+  found 78 matching lines; the 45 missing are exactly the lines under `third_party/`. `rw::kCrawlSkipDirs`
+  prunes `vendor`, `third_party`, `build`, `dist`, `out`, `target`, `node_modules`, `captures` whole,
+  and increments a directory counter that only `--skipped` reported — while the grep legend claimed
+  `corpus_excluded=` covered "the built-in crawl policy", which it never did. Now `corpus_pruned_dirs=`
+  on the CLI root and the MCP twin, and the legend's false clause is corrected. The *policy* is
+  unchanged and remains right (LINEAGE §3a, the ripgrep row); what changed is that the answer says so.
+- **Bucket C — unindexed extensions past the 500-candidate cap. NOT FIXED, already disclosed.**
+  `.s` on `go` (27 hits of `pthread_[a-z_]+_init` missing), `.yaml` on the private tree (42 of 46 hits of
+  `[0-9a-f]{8}-[0-9a-f]{4}`). `unindexed_candidates_capped="1"` already says the candidate list was a
+  floor, so this is a documented ceiling and not a silent loss. Raising it is a ranking question, not
+  a correctness one, and is not attempted here.
+
+One further defect the matrix surfaced, in the *other* direction and NOT fixed here: `--grep` **serves**
+hits from files the repository's `.gitignore` excludes when those files carry an unindexed extension —
+a gitignored `.bak` file in the private tree (`.gitignore:78:canyon/*.bak`), four hits, which `rg` does
+not serve. `recordPreSizeDrop` records the `unsupported` row *before* the ignore test
+(`src/ingest_crawl.h`, and that ordering is deliberate and commented), so `grepCollectAux` never sees
+the ignore verdict. Recorded here with its fix location; not folded, because the safe fix moves a crawl
+ordering the code argues for on other grounds.
+
+### What this comparison does NOT show
+
+- **The scan is all it prices.** Neither tgrep nor rg carries a symbol graph, so nothing here speaks to
+  what `--grep` is *for* — the `in=` enclosing-symbol chain, the `<enc>` caller counts, `--handles`.
+  ripwire's per-query cost includes work the baselines do not do at all.
+- **Most of tgrep's win is not the index.** On R4 `[Qq]z[Xx]v.*[Jj]w`, a pattern tgrep's own `--stats`
+  reports as `MatchAll (full scan) (candidates: 159/159)`, tgrep-via-server answers `go` in 0.026 s
+  against rg's 0.397 s and `tgrep --no-index`'s 0.569 s. With zero index contribution the server is
+  still 15× faster than rg — that is its 50,000-entry resident file-CONTENT cache, and ripgrep's file listing
+  (the walk alone, 0.03 s versus 0.79 s for the full query) rules out the directory walk as the explanation.
+  A one-shot CLI (G5) cannot hold anything resident between invocations, so **that half of the win is
+  unavailable to ripwire at any price.** Only the postings half is portable.
+- **One machine, shared, and the load was not constant.** Arms ran back to back per query rather than
+  interleaved, and at the end of the llvm rung the 18-core host was at a 1-minute load average of 38.8
+  with 62 concurrent `ripwire` processes belonging to other work; the earlier cells were taken under
+  materially lighter load. The conclusions turn on 10×–10⁴× gaps, on a Q\* one to two orders of
+  magnitude below the observed session query count, and on comparisons between two ripwire cells taken
+  minutes apart — none of which a 2× noise factor moves. A single llvm absolute is an order of
+  magnitude, not a precise figure.
+- **One tgrep posture.** Index pre-built, server warm — the posture tgrep's own README advertises. A
+  cold `tgrep serve` answers from an *empty* index and returns nothing until the first build publishes;
+  tgrep documents that in `AGENTS.md` and it is not measured here.

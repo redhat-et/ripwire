@@ -518,6 +518,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
 // re-sorted by the model-build tail), reserving each family's exact total first.
 inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
 {
+    PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: merge per-thread facts" );
     RawFacts raw;
     std::size_t totDefs = 0, totRefs = 0, totIncs = 0, totBinds = 0, totFfis = 0, totRouteDefs = 0, totRouteUses = 0, totConstOpens = 0;
     for( const RawFacts& tf : tFacts )
@@ -755,9 +756,12 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
 
         installCompiledQueriesAndOpenGate( prewarm );   // join async compiles, publish, open the gate (ingest_prewarm.h)
 
+        {
+            PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: workers run + join" );
         for( std::thread& th : pool )
         {
             th.join();
+        }
         }
 
         raw = mergeThreadFacts( tFacts );

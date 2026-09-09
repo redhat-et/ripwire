@@ -102,11 +102,38 @@ BIGJSON="$( cd "$ROOT" && git ls-files -z '*.json' | xargs -0 -I{} sh -c 'test $
     || no "premise FAILED: no >256K .json in the tree — the invariant arm above cannot discriminate"
 
 # and the drop is disclosed at a ceiling that no longer catches it generically (this is the red-first arm:
-# the pre-fix binary reports the attribute ABSENT here, so the count reads as a false zero)
+# the pre-fix binary reports the attribute ABSENT here, so the count reads as a false zero).
+#
+# 2026-09-09: the expectation is DERIVED from the tool's own --skipped rows, no longer assumed. The old form
+# asserted skipped_oversize == BIGJSON, i.e. "nothing but the JSON lane drops at 1M" — a fact about this
+# tree's SHAPE, not about the tool — and it expired the day docs/EVALS.md crossed 1,048,576 B (1M is
+# 1024*1024, cli.h parseByteSize): every shard carrying this gate went red on a landing tip, and it read as a
+# libstdc++-vs-libc++ split only because the macOS Release leg had been cancelled. Three arms replace it,
+# each an invariant of the TOOL: (a) the JSON-lane rows at 1M are exactly the BIGJSON files; (b) every
+# OTHER oversize row names a file that really is over 1,048,576 B on disk — a ceiling never drops a file
+# under it; (c) the header's skipped_oversize= equals the rows itemized. A tree with no non-JSON file over
+# 1 MiB passes (b) and (c) vacuously with OTHERROWS=0, which is the old arm's case, so nothing is weakened.
+SKIPPED_ROWS="$( "$BIN" "$ROOT" --max-file-size=1M --skipped 2>/dev/null | tr '>' '\n' | grep 'why="oversize"' )"
 SKIP1M="$( "$BIN" "$ROOT" --max-file-size=1M --top-k=1 2>/dev/null | grep -oE 'skipped_oversize=[0-9]+' | head -1 | grep -oE '[0-9]+' )"
-[ "${SKIP1M:-0}" = "${BIGJSON:-0}" ] \
-    && ok "--max-file-size=1M discloses skipped_oversize=$SKIP1M — the $BIGJSON .json the JSON-lane ceiling dropped" \
-    || no "--max-file-size=1M reports skipped_oversize=${SKIP1M:-<absent>}, expected $BIGJSON (the JSON-lane drop is uncounted)"
+JSONROWS="$( printf '%s\n' "$SKIPPED_ROWS" | grep -c 'limit="262144"' | tr -d ' ' )"
+ALLROWS="$(  printf '%s\n' "$SKIPPED_ROWS" | grep -c 'why="oversize"' | tr -d ' ' )"
+OTHERROWS=$(( ALLROWS - JSONROWS ))
+[ "${JSONROWS:-0}" = "${BIGJSON:-0}" ] \
+    && ok "--max-file-size=1M discloses the $BIGJSON .json the JSON-lane ceiling dropped, one row each" \
+    || no "--max-file-size=1M itemizes $JSONROWS JSON-lane rows, expected $BIGJSON (the JSON-lane drop is uncounted)"
+UNDER=0
+while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    [ "$( wc -c <"$ROOT/$p" | tr -d ' ' )" -gt 1048576 ] || UNDER=$(( UNDER + 1 ))
+done <<EOF_ROWS
+$( printf '%s\n' "$SKIPPED_ROWS" | grep -v 'limit="262144"' | grep -oE ' p="[^"]+"' | sed 's/ p="//;s/"$//' )
+EOF_ROWS
+[ "$UNDER" = 0 ] \
+    && ok "every non-JSON oversize row at 1M ($OTHERROWS) names a file really over 1,048,576 B (a ceiling never drops a file under it)" \
+    || no "$UNDER non-JSON oversize row(s) at 1M name files UNDER the ceiling"
+[ "${SKIP1M:-0}" = "$(( JSONROWS + OTHERROWS ))" ] \
+    && ok "skipped_oversize=$SKIP1M equals the rows itemized ($JSONROWS JSON-lane + $OTHERROWS at the 1M ceiling)" \
+    || no "skipped_oversize=${SKIP1M:-<absent>} disagrees with the itemized rows ($JSONROWS + $OTHERROWS)"
 
 # ── 3. still valid XML and still deterministic under the ceiling
 "$BIN" "$ROOT" --max-file-size=8K --top-k=3 >"$TMP/d1" 2>/dev/null

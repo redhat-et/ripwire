@@ -15,7 +15,7 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
-### Added — Elixir module and arity resolution (parser version 85)
+### Added — Elixir module and arity resolution (parser version 86)
 
 Elixir calls now resolve by module, name and arity, with lexical aliases, filtered imports, default
 arguments, pipes, captures and delegates. Nested modules and each target of a multi-target `defimpl`
@@ -26,6 +26,17 @@ resolution rules; unknown modules and excluded imports no longer fall back to un
 The implementation uses the existing vendored parser and cache records, with no Elixir runtime
 dependency. Macro expansion and runtime dispatch remain static-analysis limits; the supported syntax
 and boundaries are documented in [Elixir extraction](docs/ARCHITECTURE.md#elixir-extraction).
+
+### Fixed — the super-linear warm floor under every graph-building verb (`--grep`, `--callers`, the map)
+
+On llvm-project (182,555 files, warm cache) a `--grep` for an absent literal took ~157 s, `--callers=main`
+~152 s and the default map 248 s, while the same crawl + cache load + model build without the graph took
+3.8 s. Profiled to one operation: the resolver rebuilt a receiver type's inheritance cone (two BFS walks
+with quadratic dedup) on every still-ambiguous receiver-typed call — 86,667 rebuilds for 2,984 distinct
+types, 143 s of the 154 s run. `ChaConeMemo` (`src/graph.h`) computes each cone once with the identical
+walk and cap; warm `--grep` is now 9 s, `--callers` 8.6 s, the map 10 s, and default maps are byte-identical
+before and after on go and llvm. Gate `test/chaconecheck.sh`; the phase tables are in `bench/PROFILE.md`
+and the evidence chain in `docs/EVALS.md` (2026-09-09).
 
 ### Added — a Ruby constant receiver is a dependency (parser version 83)
 

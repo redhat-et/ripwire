@@ -730,6 +730,42 @@ inline bool forLensJsonOverCeiling( std::size_t tokenBudget, std::size_t ceiling
     return tokenBudget > 0 && ( bundleBytes > ceilingAllowance || estTokens > tokenBudget );
 }
 
+// #61 (redhat-et/ripwire#61, YogevKr, 2026-09-08) — THE OVER-CEILING PREDICATE for the XML dialect, and the
+// SECOND ceiling a `--for` root can name. Written as a free function for the reason its JSON sibling above
+// is: runForLens is one of the largest bodies in this file, and the rule this expresses is a contract of its
+// own rather than a step in that emitter.
+//
+// --max-tokens reaches this verb through cli.h's isForDetailBudget carve-out and shapes the BODIES
+// (runForLens's detailBodyBudget) — the header, signatures, legend and symbol table are never charged
+// against it — so `--for=Q --detail=30 --max-tokens=300` shipped `max_tokens="300"` beside
+// `est_tokens="2640"`: a ceiling named on a document 8.8x past it, in silence, while `<bodies capped="1">`
+// disclosed the body cut honestly right beside it.
+//
+// THE PARTIAL APPLICATION STAYS; THE SILENCE DOES NOT. METHODOLOGY §9 #2 — "when a ceiling would cut
+// something above the cliff, compress first, move prose into attributes second, and if it still does not
+// fit, exceed the ceiling with over_ceiling="1" rather than drop the row that would have terminated the
+// search". Thirty small functions totalling ~3.4K tokens, COMPLETE, are the terminating answer; a rung that
+// trimmed them to fit 300 tokens would make the tool worse and would still have been perfectly honest. What
+// was missing is §9 #6, "a ceiling attribute names the ceiling actually applied": the VERDICT. So this is
+// the same rule, the same unit and the same attribute budget_tokens already answers to (packtask.h F2) —
+// over_ceiling="1" whenever est_tokens exceeds a ceiling THIS ROOT STATES. The default map has computed the
+// identical verdict since §F5 (main.cpp, maxTokensFit.isOverCeiling); this path had no equivalent, which is
+// the "as the default map does" the reporter's Expected behavior cites.
+//
+// CONVERGENCE is unchanged and for the unchanged reason: the attribute and its legend clause only ADD bytes,
+// so a document over EITHER ceiling stays over it and the caller's est_tokens fixpoint never oscillates.
+// ladderFired is the W3FIX ceiling ladder's last rung (a --token-budget state); it is kept as its own input
+// rather than folded into the budget comparison because the rung fires on BYTES against the allowance, which
+// is a strictly wider condition than the token comparison beside it — dropping it would narrow what the
+// attribute means. Gate: test/formaxtokenscheck.sh.
+inline bool forLensOverCeiling( bool ladderFired, std::size_t tokenBudget, int maxTokens, bool hasBodyCeiling,
+                                std::size_t estTokens ) noexcept
+{
+    return ladderFired
+        || ( tokenBudget > 0 && estTokens > tokenBudget )
+        || ( hasBodyCeiling && maxTokens > 0 && estTokens > std::size_t( maxTokens ) );
+}
+
 // DEEP-TAIL d2, JSON dialect — the tail stanza and its explicit-regime fit, as a free function over
 // emitForLensJson's locals (the forSigSideCeiling/ForLensHeaderParts precedent: that emitter is already
 // carrying the whole envelope fixpoint). Default regime: the full row cap. Explicit regime: the hard
@@ -1987,7 +2023,11 @@ std::optional<int> runForLens( const MainDispatch& d )
         // R1: the wording lives in serialize.h beside pricedRootAttr now — the MCP `for` twin needs the SAME
         // sentence and could not reach a constant local to this function. Bound to a local name unchanged so
         // the byte arithmetic in this block still reads against one identifier.
-        constexpr std::string_view kForOverCeilingLegend = rw::kOverCeilingLegend;
+        // #61: which sentence depends on which ceilings this root NAMES (forGateBudget / forBodyCeiling, both
+        // settled far above at the H9 splice), so the binding is const rather than constexpr. Keyed on the
+        // attributes present, not on which ceiling was exceeded — see overCeilingLegendFor. A budget-only run
+        // still selects kOverCeilingLegend, so nothing about --for --token-budget moves by a byte.
+        const std::string_view kForOverCeilingLegend = rw::overCeilingLegendFor( forGateBudget, forBodyCeiling );
         const std::size_t     headerSpliceReserve   = kEstTokensAttrReserve + kForEstTokensLegend.size() + ( forWeak ? kWeakAttrBytes : 0u );
         bool                  forOverCeiling        = false;   // N1: set when the ladder's last rung fired (root over_ceiling="1")
 
@@ -2315,14 +2355,16 @@ std::optional<int> runForLens( const MainDispatch& d )
             // Both numbers sit on ONE root in ONE unit, so a reader can subtract them; withholding the
             // attribute that reconciles them is worse than the pre-N1 silence, because the wave's own
             // cross-verb rule says over_ceiling= names an overshoot. THE RULE: over_ceiling="1" whenever
-            // est_tokens exceeds the budget the caller stated, on every rung; absent means inside it.
+            // est_tokens exceeds A CEILING THE ROOT NAMES, on every rung; absent means inside all of them.
             //
             // The label is decided INSIDE the fixpoint because its own 17 bytes are part of the document the
             // number prices. Convergence: adding the attribute only RAISES est_tokens, so a document already
             // over the budget stays over — the flag never oscillates. A document that lands exactly ON the
             // budget stays unlabelled and its printed number is exactly the budget, which is honest.
-            const bool  budgeted = cfg.tokenBudget > 0;
             std::string overAttr;
+            // #61: the predicate is forLensOverCeiling (above runForLens, beside its JSON twin) — it answers
+            // to BOTH ceilings a --for root can name, and carries the §9 argument for disclosing rather than
+            // trimming the --max-tokens overshoot.
             // The est_tokens fixpoint, run once WITHOUT the label and — only if the label is owed — once more
             // WITH it and with the legend clause that defines it. Two stages rather than one flag inside the
             // loop, because the DEFINITION is header bytes: splicing it unconditionally would charge every
@@ -2349,7 +2391,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             auto              priced    = priceFixpoint( markupBytes, 0 );
             std::size_t       estTokens = priced.first;
             std::string       attr      = priced.second;
-            if( forOverCeiling || ( budgeted && estTokens > std::size_t( cfg.tokenBudget ) ) )
+            if( forLensOverCeiling( forOverCeiling, cfg.tokenBudget, cfg.maxTokens, forBodyCeiling, estTokens ) )
             {
                 // The attribute rides the root, so its definition rides the legend of the document that
                 // carries it. On the ladder's last rung the bracket note explains the RUNG; this clause

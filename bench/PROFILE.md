@@ -1077,3 +1077,99 @@ done
 
 Name the subtree `ext/`, not `vendor/` — the crawl's taxonomy filter skips a directory called `vendor`
 outright, so a corpus built under that name silently measures 1,000 files in both arms.
+
+## 2026-09-09 — the super-linear warm `--grep` floor: one stage, one operation, 143 s of 154 s on llvm-project
+
+LEDGER row, never a gate (the no-perf-budget rule). The correctness gate this round landed is
+`test/chaconecheck.sh`; it asserts sets, never seconds. The question came from the tgrep head-to-head
+(docs/EVALS.md, "Head-to-head vs tgrep"): warm `--grep` cost 40 µs/file at 2,240 and 15,865 files and
+938 µs/file at 182,555, and the decisive experiment named there was "stub the graph build, re-time".
+
+### Instrument and argv
+
+One binary, `cmake -S . -B build_prof -DRIPWIRE_PROFILE=ON` (plain flags otherwise — never Release, `NDEBUG`
+compiles `DEGRADED_PATH_ALERT` and the profiler out). This round first added the scopes the ingest path
+lacked at the grep path's granularity: `buildGraph/3..8` (the resolve loop and the five passes after it),
+the parse pool's worker join and per-thread merge, and the two corpus-wide model post-passes. The
+per-reference split inside the loop (six span timers + volume counters) was a scratch patch, not landed.
+
+Corpora by `rg --files`: `golang/go` `49c3ea64` 15,865 files; `llvm/llvm-project` `2061c237` (shallow)
+182,555 files, 2.9 GB — the same checkouts the head-to-head used. Warm = a dedicated `TMPDIR` per corpus,
+primed once (llvm cold prime: 231 s wall, 367 s user on 18 cores, peak RSS 6.49 GB). Arms interleaved
+`grep, help, callers` × 2 reps; `/usr/bin/time -l` for wall + RSS. 18-core Apple Silicon, 48 GB, shared:
+the 1-minute load ranged 2.3–26 across the session, so read the ratios, not the third digit.
+
+```
+TMPDIR=<per-corpus> build_prof/ripwire <root> --grep=zzqxvnotpresentzz   # the absent literal (full scan)
+TMPDIR=<per-corpus> build_prof/ripwire <root> --callers=main             # same graph, NO text scan
+TMPDIR=<per-corpus> build_prof/ripwire <root> --help-task=zzqxvnotpresentzz   # crawl + cache + model, NO graph
+```
+
+`--help-task` returns before `buildGraph` and uses the same lean cache blob as `--grep`, so it IS the
+"graph stubbed out" arm the head-to-head asked for, with no code change.
+
+### Result — the decisive experiment, then the profile, then the operation
+
+| llvm-project, warm, wall | pre-fix (2 reps) | **post-fix (2 reps)** |
+| --- | --- | --- |
+| `--grep=<absent>` | 159.7 s, 153.9 s | **9.2 s, 9.0 s** |
+| `--callers=main` | 152.9 s, 151.8 s | **8.6 s, 8.7 s** |
+| `--help-task` (no graph) | 3.8 s, 3.4 s | 3.7 s, 3.4 s |
+| default map, `--top-k=100000` | 248 s | **10 s** |
+| peak RSS, any arm | 5.9–6.2 GB | 5.8–5.9 GB |
+
+**The floor is the graph, and only the graph.** The arm that runs the identical crawl, cache load,
+validation and model build but never builds the graph took 3.8 s at the same 5.9 GB RSS. The cache load
+plus per-file validation is 16 µs/file on llvm against 28 µs/file on go — linear, if anything sub-linear.
+The memory-cliff hypothesis is refuted by the same row: RSS is the ingest's reference tables, present with
+and without the graph, and wall did not move with it.
+
+Profile scopes, llvm warm `--grep`, pre-fix (rep 1, 159.7 s wall): `buildGraph` 154.6 s, of which the
+per-reference resolve loop 153.2 s; `ingest: total` 4.7 s (crawl 1.8 incl. the git ignore probe 1.3,
+model 1.2, parse pool 1.2, loadCache 0.4); `grep/1 grepCollect scan` 1.07 s on its own thread. The 2.9 GB
+text scan is 1 s; the answer waited 153 s for the graph.
+
+Inside the loop, `--callers=main` warm, six spans over the SAME 4,546,850 references:
+
+| span (per reference) | calls | total | mean |
+| --- | ---: | ---: | ---: |
+| a: role filter + byName + SCIP/binding tiers | 5,162,745 | 0.11 s | 0.02 µs |
+| b: canonical + L3 + ES import + rules 1/2/2b/2c/3 | 4,546,850 | 1.09 s | 0.24 µs |
+| c: external veto + candidate spray + namespace gate | 4,517,099 | 2.18 s | 0.48 µs |
+| d: tier ladder (same file / same dir / unique) | 4,137,640 | 1.07 s | 0.26 µs |
+| **e: CHA-lite cone + arity + locality** | 2,213,632 | **145.1 s** | **65.5 µs** (max 41.7 ms) |
+| f: amb + confidence + edge emission | 2,213,632 | 0.31 s | 0.14 µs |
+
+The obvious suspect was innocent: the five linear passes over the same-name candidate list visited
+1,226,680,236 candidates (`test` 502 M of them, 7,405 defs; `S` 291 M; `foo` 76 M) and cost 3.3 s in
+total — ~3 ns a visit, sequential ids, the prefetcher's happy case. Splitting span e once more: arity
+0.015 s, the S6-C locality tie-break 0.27 s, **the CHA-lite cone ≈ 143 s.**
+
+**The operation.** For every still-ambiguous call with a known receiver static type, the loop rebuilt the
+type's inheritance cone — two BFS walks over the class-NAME graph, `std::vector<std::string>` with an
+O(n²) `std::find` dedup, capped at 4,096 per walk — and tested each tier candidate by another linear
+`std::find`. Counters: **86,667 cones for 2,984 distinct receiver types** (each rebuilt ~29×), mean cone
+1,075 names (Σ 93,185,627), 1.65 ms a cone. On go the same span is 1.1 ms total — zero cones, because the
+model has no class-inheritance edges there — which is why the floor looked flat until the corpus had deep
+hierarchies. That is the super-linearity: Σ over calls of (cone size)², where both factors grow with the
+tree.
+
+**The fix** (`src/graph.h`, `ChaConeMemo`): one cone per receiver type, computed on first use over class
+names interned to dense ids in byte-sorted order, the walk verbatim (same seed, discovery order and the
+outer-loop-only cap), membership by binary search. Post-fix the loop is 4.5 s; span c's 2.2 s of
+candidate spray is now the largest remaining item and is a different, linear-per-candidate fix. Default
+maps are **byte-identical** pre/post on both corpora (go 10,415,057 B; llvm 21,802,319 B) and the six
+resolver gates plus 18 more pass unchanged. Per file, the warm `--grep` floor is now 50 µs at 182,555
+files against 33 µs at 15,865 — the 24× per-file regression is 1.5×.
+
+### Reproduce
+
+```
+cmake -S . -B build_prof -DRIPWIRE_PROFILE=ON && cmake --build build_prof -j
+git clone --depth 1 https://github.com/llvm/llvm-project <scratch>/llvm-project    # ~2.9 GB, ~182,555 files
+export TMPDIR=<scratch>/tmp-llvm; mkdir -p "$TMPDIR"
+build_prof/ripwire <scratch>/llvm-project --grep=zzqxvnotpresentzz >/dev/null 2>prime.err   # cold prime
+for rep in 1 2; do for arm in --grep=zzqxvnotpresentzz --help-task=zzq --callers=main; do
+  /usr/bin/time -l build_prof/ripwire <scratch>/llvm-project "$arm" >/dev/null 2>"$arm.$rep.err"; done; done
+# the stderr report's "hottest scopes" table is the phase split; buildGraph/3 is the resolve loop
+```

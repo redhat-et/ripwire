@@ -377,6 +377,22 @@ std::string grepCorpusAttrs( const rw::IngestResult& ing )
     {
         attrs += " corpus_oversize=\"" + std::to_string( ing.skippedOversize.size() ) + "\"";
     }
+    // THE THIRD WAY A FILE LEAVES THE CORPUS, and until 2026-09-09 the only one --grep did not name.
+    // corpus_excluded= counts an --exclude= hit; corpus_oversize= counts the size ceiling. Neither fires
+    // for the BUILT-IN crawl denylist (rw::kCrawlSkipDirs — vendor, third_party, build, dist, out,
+    // target, node_modules, captures, …), which prunes those subtrees whole and increments a DIRECTORY
+    // counter (CrawlSkips::prunedDirs) that only the skipped verb reported. So a grep answer could carry
+    // complete="1" over a corpus that had silently lost entire trees. Measured on this repository at
+    // 4c10be9d: `--grep='malloc('` served 33 hits with complete="1" where `rg -F 'malloc(' .` found 78 —
+    // the missing 45 are every line under third_party/, 58% of the truth, behind a completeness claim.
+    // A DIRECTORY count is the honest cheap unit: files under a pruned subtree are never stat'd, so a
+    // file count would cost a second walk to report a number nothing else needs. Same convention as its
+    // two siblings — present only when non-zero, absent means zero — and the same spelling the skipped
+    // verb already uses (pruned_dirs=), prefixed corpus_ like the rest of this family.
+    if( ing.crawlSkips.prunedDirs > 0 )
+    {
+        attrs += " corpus_pruned_dirs=\"" + std::to_string( ing.crawlSkips.prunedDirs ) + "\"";
+    }
     return attrs;
 }
 
@@ -714,7 +730,9 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "this answer a zero really is zero and a hit absent above is absent from every indexed file. The claim is "
                  "complete-within-the-index ONLY: most files the ingest skipped were never scanned (the skipped verb lists exactly "
                  "which, with reasons; the ONE exception is the unindexed_files_scanned= class right below, itself never covered by "
-                 "complete=), and files outside the indexed roots are outside the claim. It never appears on a regex answer (the "
+                 "complete=), and files outside the indexed roots are outside the claim. The largest single subtraction is named on "
+                 "the root itself: corpus_pruned_dirs= below counts the subtrees the built-in crawl denylist removed WHOLE, so read "
+                 "this claim as exhaustive over what was indexed, never over what is on disk. It never appears on a regex answer (the "
                  "prefilter is a performance switch that may not change the answer, so neither mode claims), a capped or paged listing, "
                  "or a scan that could not read a file; its ABSENCE claims nothing. The enc rows' caller counts stay FLOORS regardless "
                  "— complete= speaks for the hit rows alone. "
@@ -745,10 +763,13 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  // same absent-means-none convention as skippedOversize itself (model.h). Deliberately no
                  // literal 'hits="0"' example below (a quoted numeric example — the quality-delta legend's
                  // own rule, restated here after it bit a naive ` hits="N"` extraction downstream twice).
-                 "corpus_excluded= counts files an exclude filter (or built-in crawl policy) kept OUT of the index entirely; "
-                 "corpus_oversize= counts files the crawl SAW but dropped for exceeding the size ceiling. Both answer what an "
+                 "corpus_excluded= counts files a caller's own exclude filter kept OUT of the index entirely; "
+                 "corpus_oversize= counts files the crawl SAW but dropped for exceeding the size ceiling; "
+                 "corpus_pruned_dirs= counts the DIRECTORIES the BUILT-IN crawl denylist pruned whole — vendor, third_party, "
+                 "build, dist, out, target, node_modules and the rest — a directory count and not a file count, because files "
+                 "beneath a pruned subtree are never stat'd and so were never counted. All three answer what an "
                  "otherwise-empty answer alone cannot: not in this repo, or in a file that was never scanned — the skipped "
-                 "verb itemizes the rows behind either count. "
+                 "verb itemizes the rows behind the first two and reports the third as its own pruned_dirs=. "
                  // P3 (L7): next= on the root, defined where the reader meets it
                  "next= is the one pasteable follow-up: the at verb on the top hit; the next page (compact legend) when cut; "
                  "the conceptual lens on a zero-hit answer. "

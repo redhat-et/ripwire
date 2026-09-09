@@ -95,7 +95,7 @@ $ ./build/ripwire . --top-k=5
 
 **Answers:** budget the map to ~N tokens (binary-search top-K) — SHAPES the map to fit.
 
-THE FIT IS A BYTE CEILING, and it is deliberately CONSERVATIVE: N is converted at 2.36 B/tok (the densest calibrated language, so N holds for any corpus) times a 0.90 headroom factor. The map's own est_tokens uses THIS corpus's language-weighted rate instead, so a conformant fit REPORTS a number below the N you asked for — expect ~10-20% of N unused. The shaped map discloses both: max_tokens=N (asked) and fit_bytes=B (honoured). Consequence for composing it with --token-budget=N below: the two Ns are different units, so the same N on both is NOT a tautology. At a SMALL N the map's fixed floor (envelope + legend) can exceed fit_bytes with even one symbol emitted — that map says over_ceiling=1 rather than overshoot in silence, and its est_tokens can then exceed N. XML only: the --json map carries no max_tokens=/fit_bytes= keys yet, and its fit is measured in XML bytes. On --recall it SHAPES the doc bundle, and the ceiling is SPLIT ACROSS the docs rather than handed to the top hit: the budget serves the longest rank PREFIX it can give each doc a readable slice, then divides the bytes equally — a doc needing LESS than its share takes only what it needs and the surplus flows to the ones needing more. One long top hit no longer erases the rest of the corpus, and a bigger ceiling never returns FEWER docs. Docs past the prefix are dropped from the BOTTOM of the ranking; selection ORDER never changes. Every cut is DISCLOSED (header total=/shown=/capped=/truncated=/share_bytes=, a per-doc [truncated: X of Y bytes] marker, and a closing (capped: …) note); share_bytes= is that per-doc ceiling and is ABSENT when it bound no doc.
+THE FIT IS A BYTE CEILING, and it is deliberately CONSERVATIVE: N is converted at 2.36 B/tok (the densest calibrated language, so N holds for any corpus) times a 0.90 headroom factor. The map's own est_tokens uses THIS corpus's language-weighted rate instead, so a conformant fit REPORTS a number below the N you asked for — expect ~10-20% of N unused. The shaped map discloses both: max_tokens=N (asked) and fit_bytes=B (honoured). Consequence for composing it with --token-budget=N below: the two Ns are different units, so the same N on both is NOT a tautology. At a SMALL N the map's fixed floor (envelope + legend) can exceed fit_bytes with even one symbol emitted — that map says over_ceiling=1 rather than overshoot in silence, and its est_tokens can then exceed N. XML only: the --json map carries no max_tokens=/fit_bytes= keys yet, and its fit is measured in XML bytes. On --recall it SHAPES the doc bundle, and the ceiling is SPLIT ACROSS the docs rather than handed to the top hit: the budget serves the longest rank PREFIX it can give each doc a readable slice, then divides the bytes equally — a doc needing LESS than its share takes only what it needs and the surplus flows to the ones needing more. One long top hit no longer erases the rest of the corpus, and a bigger ceiling never returns FEWER docs. Docs past the prefix are dropped from the BOTTOM of the ranking; selection ORDER never changes. Every cut is DISCLOSED (header total=/shown=/capped=/truncated=/share_bytes=, a per-doc [truncated: X of Y bytes] marker, and a closing (capped: …) note); share_bytes= is that per-doc ceiling and is ABSENT when it bound no doc. On --for --detail=N it bounds THE BODIES ALONE: the header, signatures, legend and symbol table are not charged against it, so the bundle can price past N. That is deliberate — a ceiling bounds the tail and never the head, and a complete small answer is not worth cutting to fit — so the root DISCLOSES the overshoot instead, carrying over_ceiling="1" beside max_tokens=N whenever est_tokens exceeds N. Reach for --token-budget=N when the whole DOCUMENT must be bounded; this flag SHAPES.
 
 **Try it**
 
@@ -198,7 +198,7 @@ $ ./build/ripwire . --for="rankGraphTeleport"
 ... [18 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--top-k`, `--token-budget`, `--signatures-only`, `--auto-bodies`, `--no-route`, `--adaptive`, `--no-mention-boost`, `--no-doc-mention`
+**Shaped by:** `--top-k`, `--max-tokens`, `--token-budget`, `--signatures-only`, `--auto-bodies`, `--no-route`, `--adaptive`, `--no-mention-boost`
 
 **Caveats (stated by the binary):**
 
@@ -1167,7 +1167,7 @@ $ ./build/ripwire . --test-gate
 
 **Answers:** literal / regex search + enclosing symbol + the matched line.
 
-SPAN-TIERED by default (see --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses what it held back. --grep-in=any is the exhaustive VIEW -- every hit, no tiering. For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance).
+SPAN-TIERED by default (see --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses what it held back. --grep-in=any is the exhaustive VIEW -- every hit, no tiering. For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance). --regex is LINE-ORIENTED, like grep/rg: each line is its own search range, so ^ and $ are LINE anchors and no match may span a newline (a trailing CR sits outside the range).
 
 **Try it**
 
@@ -1472,7 +1472,7 @@ $ ./build/ripwire . --query="teleport pagerank" --top-k=5
 
 **Answers:** (with --for) importance-weighted detail: FULL bodies for the top-N ranked symbols + signatures for the rest, in ONE call — spend body tokens only on the head the rank identifies.
 
-Composes with --max-tokens (bounds the bodies) and --adaptive. 0 = off.
+Composes with --max-tokens (bounds the BODIES ONLY, never the bundle — see --max-tokens: past its ceiling the root says over_ceiling="1" rather than cut the rows that answered) and --adaptive. 0 = off.
 
 **Try it**
 
@@ -1494,7 +1494,11 @@ $ ./build/ripwire . --for="pagerank power iteration" --detail=2
 ... [20 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--for`, `--signatures-only`, `--auto-bodies`, `--compress`, `--owners`, `--plan`, `--abi`, `--flip`
+**Shaped by:** `--max-tokens`, `--for`, `--signatures-only`, `--auto-bodies`, `--compress`, `--owners`, `--plan`, `--abi`
+
+**Caveats (stated by the binary):**
+
+- Composes with --max-tokens (bounds the BODIES ONLY, never the bundle — see --max-tokens: past its ceiling the root says over_ceiling="1" rather than cut the rows that answered) and --adaptive.
 
 ### `--pack-signatures`
 

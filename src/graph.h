@@ -548,6 +548,143 @@ inline bool keepRustQualifiedCandidates( const IngestResult& ing, const HashMap<
     return true;
 }
 
+// ── B2.1 CHA-lite cone memo (perf round 2026-09-09: the super-linear warm --grep floor) ─────────────────
+// A receiver type's inheritance CONE — {type} ∪ transitive ancestors ∪ transitive descendants over the
+// class-NAME graph — is a pure function of the type name once chaUp/chaDown are built, yet the resolve loop
+// recomputed it on EVERY still-ambiguous receiver-typed call: two BFS walks with an O(n²) std::find dedup
+// over std::string. Measured warm on llvm-project (182,555 files): 86,667 walks for 2,984 distinct receiver
+// types, mean cone 1,075 names, 1.65 ms each — 143 s of a 154 s --callers/--grep run, the whole of the
+// floor docs/EVALS.md's tgrep head-to-head left open (bench/PROFILE.md carries the phase table).
+//
+// The memo computes each cone ONCE. Class names are interned to dense ids assigned in byte-sorted name order,
+// the walk is the per-call walk verbatim — same seed, same discovery order, same `out.size() < kChaConeCap`
+// test at the OUTER loop only (the adjacency list that crosses the cap is pushed whole; nothing after it is
+// expanded) — and membership is a binary search, so the set is exactly the one the per-call walk produced.
+// test/chaconecheck.sh pins that, arm 5 being the cap's own shape. A receiver type with no inheritance facts
+// is not interned at all: its cone is {itself}, answered by string equality, as the per-call walk did.
+struct ChaConeMemo
+{
+    static constexpr std::size_t   kChaConeCap = 4096;          // per-walk discovery cap, unchanged from the per-call walk
+    static constexpr std::uint32_t kNoCone     = 0xFFFFFFFFu;
+
+    // A cone handle: an INDEX into the memo's cone table, resolved inside contains() on every use, so no handle
+    // can dangle when the table grows (a raw pointer would be invalidated by the next fill). `index == kNoCone`
+    // ⇒ the receiver type has no inheritance facts: membership is equality with the type itself.
+    struct Cone
+    {
+        std::uint32_t index;
+    };
+
+    ChaConeMemo( const HashMap<std::string, std::vector<std::string>>& chaUp,
+                 const HashMap<std::string, std::vector<std::string>>& chaDown )
+    {
+        for( const auto& [ k, v ] : chaUp )
+        {
+            names_.push_back( k );
+            names_.insert( names_.end(), v.begin(), v.end() );
+        }
+        for( const auto& [ k, v ] : chaDown )
+        {
+            names_.push_back( k );
+            names_.insert( names_.end(), v.begin(), v.end() );
+        }
+        std::sort( names_.begin(), names_.end() );
+        names_.erase( std::unique( names_.begin(), names_.end() ), names_.end() );
+        idOf_.reserve( names_.size() );
+        for( std::uint32_t i = 0; i < names_.size(); ++i )
+        {
+            idOf_.emplace( names_[ i ], i );
+        }
+        up_.assign( names_.size(), {} );
+        down_.assign( names_.size(), {} );
+        fillAdjacency( chaUp, up_ );
+        fillAdjacency( chaDown, down_ );
+        stamp_.assign( names_.size(), 0 );
+        coneIndex_.assign( names_.size(), kNoCone );
+    }
+
+    Cone coneFor( std::string_view recvType )
+    {
+        key_.assign( recvType );
+        const auto rit = idOf_.find( key_ );
+        if( rit == idOf_.end() )
+        {
+            return Cone{ kNoCone };
+        }
+        const std::uint32_t root = rit->second;
+        if( coneIndex_[ root ] == kNoCone )
+        {
+            walk( up_,   root, upScratch_ );     // {recvType} ∪ ancestors
+            walk( down_, root, downScratch_ );   // {recvType} ∪ descendants — a SEPARATE walk, never chaDown out of an ancestor
+            std::vector<std::uint32_t> cone( upScratch_ );
+            cone.insert( cone.end(), downScratch_.begin(), downScratch_.end() );
+            std::sort( cone.begin(), cone.end() );
+            cone.erase( std::unique( cone.begin(), cone.end() ), cone.end() );
+            coneIndex_[ root ] = std::uint32_t( cones_.size() );
+            cones_.push_back( std::move( cone ) );
+        }
+        return Cone{ coneIndex_[ root ] };
+    }
+
+    // Is a candidate's enclosing scope inside `cone`? A scope no inheritance fact ever named cannot be in any
+    // interned cone; a scope-less free function is never a member-call target and is correctly excluded.
+    bool contains( Cone cone, std::string_view recvType, const std::string& scope ) const
+    {
+        if( cone.index == kNoCone )
+        {
+            return scope == recvType;
+        }
+        const auto                        it  = idOf_.find( scope );
+        const std::vector<std::uint32_t>& ids = cones_[ cone.index ];   // resolved NOW, never held across a fill
+        return it != idOf_.end() && std::binary_search( ids.begin(), ids.end(), it->second );
+    }
+
+private:
+    void fillAdjacency( const HashMap<std::string, std::vector<std::string>>& adj, std::vector<std::vector<std::uint32_t>>& out ) const
+    {
+        for( const auto& [ k, v ] : adj )
+        {
+            std::vector<std::uint32_t>& row = out[ idOf_.find( k )->second ];
+            row.reserve( v.size() );
+            for( const std::string& nm : v )   // v is sorted+unique (built so in buildGraph) ⇒ ascending ids, the per-call order
+            {
+                row.push_back( idOf_.find( nm )->second );
+            }
+        }
+    }
+
+    // The per-call walk, over ids: seeded at `root`, discovery order = adjacency order, dedup by epoch stamp
+    // (== the old `std::find( out, nm ) == out.end()`), capped at the OUTER loop exactly as before.
+    void walk( const std::vector<std::vector<std::uint32_t>>& adj, std::uint32_t root, std::vector<std::uint32_t>& out )
+    {
+        ++epoch_;
+        out.clear();
+        out.push_back( root );
+        stamp_[ root ] = epoch_;
+        for( std::size_t qi = 0; qi < out.size() && out.size() < kChaConeCap; ++qi )
+        {
+            for( const std::uint32_t nb : adj[ out[ qi ] ] )
+            {
+                if( stamp_[ nb ] != epoch_ )
+                {
+                    stamp_[ nb ] = epoch_;
+                    out.push_back( nb );
+                }
+            }
+        }
+    }
+
+    std::vector<std::string>                 names_;       // interned class names, byte-sorted (id = index)
+    HashMap<std::string, std::uint32_t>      idOf_;
+    std::vector<std::vector<std::uint32_t>>  up_, down_;   // adjacency by id, rows in sorted-name order
+    std::vector<std::uint32_t>               stamp_;       // epoch-stamped visited set for walk()
+    std::uint32_t                            epoch_ = 0;
+    std::vector<std::uint32_t>               coneIndex_;   // root id → index into cones_, or kNoCone
+    std::vector<std::vector<std::uint32_t>>  cones_;       // sorted id sets, one per computed receiver type
+    std::vector<std::uint32_t>               upScratch_, downScratch_;
+    std::string                              key_;         // reused lookup buffer (no per-call allocation)
+};
+
 // THE TIER-3 CANONICAL RESCUE (H4 V3 M-3) — why `canonical` sits beside `narrowed` in buildGraph's tier-3
 // gate. Tier 3 is "a UNIQUE global, else DROP". A Rule-1 narrowed call has always been exempt, because it is
 // pinned to ONE scope and is therefore resolved rather than guessed. A CANONICAL hit is pinned in exactly the
@@ -1701,9 +1838,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( auto& [ k, v ] : chaUp )   { std::sort( v.begin(), v.end() ); v.erase( std::unique( v.begin(), v.end() ), v.end() ); }
         for( auto& [ k, v ] : chaDown ) { std::sort( v.begin(), v.end() ); v.erase( std::unique( v.begin(), v.end() ), v.end() ); }
     }
-    std::vector<std::string> chaAllowed;   // reused per-call cone (allowed class-name set) buffer
-    std::vector<std::string> chaDesc;      // reused per-call descendants-closure scratch (kept separate from the
-                                           //   ancestors walk so following one direction can never leak siblings)
+    ChaConeMemo              chaCones( chaUp, chaDown );   // one cone per receiver type, computed on first use (see the type)
     std::vector<NodeId>      filtScratch;  // reused per-call survivor buffer for CHA-lite / arity filtering
 
     // ---- census arming + the ORACLE side (eval-only; src/pincensus.h) ------------------------------
@@ -1737,6 +1872,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             g.pinCensus.addOracleRow( nd.from, nd.calleeName, nd.kind );
         }
     }
+    {
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/3: resolve loop (per reference)" );
     for( const Reference& r : ing.references )
     {
         // file-scope / inheritance / doc-mention / HAS-A → not a call. ABS-3: read/write/import use-sites
@@ -2216,51 +2353,17 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 const std::string_view recvType = narrower.receiverStaticType( r, ing.symbols[ r.fromSymbol ].scope );
                 if( !recvType.empty() )
                 {
-                    // Build the strict cone = {recvType} ∪ ANCESTORS ∪ DESCENDANTS via TWO fully-independent
-                    // directional closures, each seeded ONLY at recvType. A value/pointer of static type T is
-                    // dynamically T or a subtype, so its target is either an override in T / a subtype OR the
-                    // definition T inherits from an ancestor — but NEVER a sibling's method (a T can never BE a
-                    // sibling). Keeping the closures separate (never following chaDown out of an ancestor) is
-                    // what excludes siblings/cousins for precision, while still never dropping a true target.
-                    // Directional BFS into `out`, seeded at recvType. Index by a COPIED key — push_back may
-                    // reallocate `out`, so a held reference would dangle.
-                    const auto closure = [ & ]( const HashMap<std::string, std::vector<std::string>>& adj,
-                                                std::vector<std::string>& out )
-                    {
-                        out.clear();
-                        out.emplace_back( recvType );
-                        for( std::size_t qi = 0; qi < out.size() && out.size() < 4096; ++qi )
-                        {
-                            const std::string cur = out[ qi ];
-                            const auto it = adj.find( cur );
-                            if( it == adj.end() )
-                            {
-                                continue;
-                            }
-                            for( const std::string& nm : it->second )
-                            {
-                                if( std::find( out.begin(), out.end(), nm ) == out.end() )
-                                {
-                                    out.push_back( nm );
-                                }
-                            }
-                        }
-                    };
-                    closure( chaUp,   chaAllowed );              // {recvType} ∪ ancestors
-                    closure( chaDown, chaDesc );                 // {recvType} ∪ descendants
-                    for( const std::string& nm : chaDesc )
-                    { // merge descendants into the allowed cone (dedup)
-                        if( std::find( chaAllowed.begin(), chaAllowed.end(), nm ) == chaAllowed.end() )
-                        {
-                            chaAllowed.push_back( nm );
-                        }
-                    }
-                    // keep only candidates whose enclosing class name is in the cone (a scope-less free function
-                    // is not a member-call target ⇒ correctly excluded). Degrade if the intersection is empty.
+                    // The strict cone = {recvType} ∪ ANCESTORS ∪ DESCENDANTS, two fully-independent directional
+                    // walks each seeded ONLY at recvType (never chaDown out of an ancestor, so a sibling's method —
+                    // which a T can never BE — is excluded while a true target never is). Computed once per receiver
+                    // type by ChaConeMemo (its header carries the measurement that moved it out of this loop) and
+                    // answered here by membership: keep only candidates whose enclosing class name is in the cone (a
+                    // scope-less free function is not a member-call target ⇒ correctly excluded). Degrade if empty.
+                    const ChaConeMemo::Cone cone = chaCones.coneFor( recvType );
                     filtScratch.clear();
                     for( NodeId c : tier )
                     {
-                        if( std::find( chaAllowed.begin(), chaAllowed.end(), ing.symbols[ c ].scope ) != chaAllowed.end() )
+                        if( chaCones.contains( cone, recvType, ing.symbols[ c ].scope ) )
                         {
                             filtScratch.push_back( c );
                         }
@@ -2521,7 +2624,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
         }
     }
+    }
 
+    {
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/4: flatten edges + out/in CSR" );
     // flatten + cap + sort by (from, to) — deterministic regardless of map order
     struct E { NodeId from, to; float w; };
     std::vector<E> edges;
@@ -2610,6 +2716,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( const E& e : edges ) { const std::uint32_t pos = cur[ e.to ]++; ci[ pos ] = e.from; val[ pos ] = e.w; }
     }
     VERIFY( verifyCsr( g.inEdges, N ) );
+    }
 
     // inheritance edges (Lego view): isInherit refs (derived → base name) → implementors[base] += derived.
     // Resolve the base name to class-like symbols (any-file, by name); dedup. The socket→bricks relation.
@@ -2618,6 +2725,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // than restated, because a second copy of one rule is how the two copies end up disagreeing.
     const auto isClassLike = []( SymKind k ) noexcept
     { return namespaceCompatible( RefRole::Extends, k ); };
+    {
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/5: inheritance edges" );
     for( const Reference& r : ing.references )
     {
         if( !r.isInherit )
@@ -2682,6 +2791,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             g.implementors[ baseId ].push_back( derived );
         }
     }
+    }
     for( std::vector<NodeId>& v : g.implementors )
     {
         std::sort( v.begin(), v.end() );
@@ -2692,6 +2802,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // Resolve the name to real DEFINITIONS (body present), any file; stored OUT of the call graph so a doc
     // mentioning a symbol never inflates its PageRank / blast radius. "what docs discuss this symbol".
     g.mentions.assign( N, {} );
+    {
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/6: doc mentions" );
     for( const Reference& r : ing.references )
     {
         if( !r.isDocLink || r.fromSymbol == kNoNode )
@@ -2720,6 +2832,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             g.mentions[ def ].push_back( r.fromSymbol );
         }
     }
+    }
     for( std::vector<NodeId>& v : g.mentions )
     {
         std::sort( v.begin(), v.end() );
@@ -2729,6 +2842,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // S5-E HAS-A composition edges: isCompose refs (owner class → member type name) → composeEdges.
     // Resolve the type name to class/struct symbols (any-file, by name); store OUTSIDE the call graph so
     // PageRank, ranks, and the default map are UNCHANGED. Sorted (ownerSym, typeSym) for determinism.
+    {
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/7: HAS-A compose edges" );
     for( const Reference& r : ing.references )
     {
         if( !r.isCompose || r.fromSymbol == kNoNode )
@@ -2780,6 +2895,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             g.composeEdges.push_back( std::move( ce ) );  break;
         }
     }
+    }
     // sort by (ownerSym, typeSym, fieldName) for determinism; dedup on (ownerSym, fieldName) — the
     // type name is the primary identity (one field has exactly one declared type).
     std::sort( g.composeEdges.begin(), g.composeEdges.end(),
@@ -2810,6 +2926,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // extends resolvers above use. Ambiguous USEs (matching ≥2 DISTINCT resolved handlers) and unresolved
     // USEs (matching zero) synthesize NO edge — never a guess (mirrors the amb=/unresolved= honesty posture).
     {
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/8: HTTP-route edges" );
         const auto isFunctionLike = []( SymKind k ) noexcept { return k == SymKind::Function || k == SymKind::Method; };
 
         std::vector<NodeId> defHandler( ing.routeDefs.size(), kNoNode );   // per-DEF resolved handler symbol

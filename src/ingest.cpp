@@ -325,7 +325,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // macro-edges round: the corpus-wide role="macro" retag (model.h). AFTER the model is assembled and
     // AFTER saveCache (which stores the per-file truth, role=Call) — a #define added in one file must
     // re-judge every OTHER file's cached call sites on the next run, so the retag can never be persisted.
-    retagMacroCallReferences( result );
+    {
+        PROFILE_SCOPE_DESCRIBE( "ingest/build-model: macro retag (corpus-wide post-pass)" );
+        retagMacroCallReferences( result );
+    }
 
     // r9 shadow suppression (model.h): a reference inside a function whose LOCAL declarations bind the same
     // name as a variable belongs to the local, not to any same-named indexed symbol — erase it here, the one
@@ -334,7 +337,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // macro retag (role="macro" is preprocessor evidence and stays) and AFTER saveCache (per-file truth is
     // persisted unsuppressed; the collision gate depends on the whole corpus' symbols, so the judgment can
     // never be cached per-file — same reasoning as the retag above).
-    suppressShadowedReferences( result );
+    {
+        PROFILE_SCOPE_DESCRIBE( "ingest/build-model: shadow suppression (r9 post-pass)" );
+        suppressShadowedReferences( result );
+    }
 
     return result;
 }
