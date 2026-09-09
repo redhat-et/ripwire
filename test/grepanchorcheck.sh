@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # grepanchorcheck.sh — gate for what `^` and `$` MEAN in --regex.
 #
-# THE DEFECT THIS PINS. --regex hands the whole file's bytes to one
-# `std::sregex_iterator( text.begin(), text.end(), re )` built with
-# `std::regex::ECMAScript | std::regex::optimize`. Without `std::regex::multiline`,
-# ECMAScript's `^` matches only at OFFSET 0 of that buffer and `$` only at its very end —
-# so `--regex='^#include'` answered about the first line of each file and nothing else.
+# THE DEFECT THIS PINS. --regex used to hand the whole file's bytes to one
+# `std::sregex_iterator( text.begin(), text.end(), re )`, so ECMAScript's `^` matched only at
+# OFFSET 0 of that buffer and `$` only at its very end — `--regex='^#include'` answered about
+# the first line of each file and nothing else.
 # Measured on this repository's own src/ at 4c10be9d: ripwire reported hits="1", `rg -n
 # '^#include' src` reported 1648. The answer was not a zero (which the legend governs), it
 # was a confident, undisclosed 0.06% of the truth, in the one syntax every agent already
@@ -19,11 +18,22 @@
 # This gate closes that: every arm here compares against grep/rg, which is the semantics the
 # comment already claimed.
 #
+# WHY THE FIX IS NOT `std::regex::multiline`. That flag is the obvious repair and it is unusable here.
+# Apple libc++'s `__l_anchor_multiline<char>::__exec` reads `*std::prev(__s.__current_)` before it tests
+# whether the position IS the first character, so at offset 0 it reads one byte BEFORE the buffer.
+# Measured 2026-09-09: a 40-line standalone with no ripwire code faulted on 74 of ~130 of this
+# repository's own headers, single-threaded, and `--regex='^'` over src/ crashed 8 of 10 runs. So
+# grepScanText searches ONE LINE AT A TIME instead, and arm (I) below is the crash regression itself.
+#
 # Assertions:
 #   A  `^` is a LINE anchor: every line starting with the literal is a hit, not just line 1
 #      (the arm that was RED: pre-fix this reported 1 hit out of 6)
 #   B  `$` is a LINE anchor: a match at end-of-LINE, not only end-of-FILE
-#   C  `.` still does NOT cross a newline — multiline must not smuggle in dotall
+#   C  a match does not cross a newline — the LINE-ORIENTED contract, in both directions: `.` never
+#      could (ECMAScript's dot excludes line terminators) and an explicitly newline-crossing class
+#      cannot either, because each line is now its own search range. The control for this arm is
+#      WITHIN-line: the same pattern must match when both halves sit on one line, which is what proves
+#      the arm measures the line boundary rather than a pattern that cannot match at all
 #   D  independent oracle, (file,line) EXACT: for the anchored battery ripwire's hit set is
 #      exactly `grep -nE`'s. Not a superset check — an anchor that over-matches is as wrong
 #      as one that under-matches, and the equality is what says so
@@ -32,6 +42,11 @@
 #   F  determinism: two runs byte-identical
 #   G  MUTATION self-tests — each assertion must be able to see its own regression
 #   H  G4: xmllint --noout clean
+#   I  CRASH REGRESSION, and the reason arm (I) exists at all: `--regex='^'` over a real corpus,
+#      ten times, must exit 0 every time. This is the arm that goes red the day someone "simplifies"
+#      grepScanText back to a whole-buffer iterator plus `std::regex::multiline` — a standard-library
+#      out-of-bounds read that no output assertion can see, because the process dies before it emits
+#      anything. 8 of 10 runs faulted while that flag was in the tree.
 #
 # Usage:  test/grepanchorcheck.sh              # uses build/ripwire
 #         RIPWIRE_BIN=asan/ripwire test/grepanchorcheck.sh
@@ -108,11 +123,15 @@ B_N="$( printf '%s\n' "$B_RW" | grep -c . )"
     && ok "(B) \$ is a line anchor — $B_N hits at end-of-line" \
     || no "(B) \$ anchored to the FILE, not the line: $B_N hits (expected >=3)"
 
-# ── C) `.` still does not cross a newline (multiline is not dotall) ────────────────────────────────────
+# ── C) a match does not cross a newline, in both directions ────────────────────────────────────────────
 C_N="$( rw 'stdio.*stdlib' | hitset | grep -c . )"
 [ "$C_N" -eq 0 ] \
-    && ok "(C) . does not cross a newline — a cross-line .* still matches nothing" \
-    || no "(C) . crossed a newline ($C_N hits): multiline leaked dotall semantics"
+    && ok "(C) . does not cross a newline — the two halves are on different lines, no hit" \
+    || no "(C) . crossed a newline ($C_N hits)"
+C2_N="$( rw 'stdio[\s\S]*stdlib' | hitset | grep -c . )"
+[ "$C2_N" -eq 0 ] \
+    && ok "(C) an EXPLICITLY newline-crossing class does not cross one either — line-oriented contract" \
+    || no "(C) [\\s\\S]* crossed a newline ($C2_N hits): the search range is not one line"
 
 # ── D) independent oracle, EXACT (file,line) equality over the anchored battery ────────────────────────
 for p in '^#include' 'h>$' '^int ' '^ *#include' '^#include <[a-z]*\.h>$'; do
@@ -157,13 +176,15 @@ MUT_D="$( printf '%s\n' "$A_RW" | sed '1s/:[0-9]*$/:999/' )"
 [ "$MUT_D" = "$A_GR" ] \
     && no "(G) mutation (one line number moved): still equals the oracle — (D) is decoration" \
     || ok "(G) mutation (one line number moved) correctly FAILS assertion (D)"
-# (C) dotall: a fixture line that WOULD match if . crossed newlines proves the arm can fire.
-printf 'stdio\nstdlib\n' > "$C/gamma.c"
-MUT_C="$( "$BIN" "$C" --regex='stdio[\s\S]*stdlib' --grep-in=any --no-cache 2>/dev/null | hitset | grep -c . )"
+# (C) control, WITHIN-line: the same two patterns must both match when the halves share a line, so (C)
+# is measuring the line boundary and not a pattern that could never match anything.
+printf 'x stdio y stdlib z\n' > "$C/gamma.c"
+MUT_C1="$( "$BIN" "$C" --regex='stdio.*stdlib'      --grep-in=any --no-cache 2>/dev/null | hitset | grep -c . )"
+MUT_C2="$( "$BIN" "$C" --regex='stdio[\s\S]*stdlib' --grep-in=any --no-cache 2>/dev/null | hitset | grep -c . )"
 rm -f "$C/gamma.c"
-[ "$MUT_C" -ge 1 ] \
-    && ok "(G) mutation control: an EXPLICITLY newline-crossing class does match ($MUT_C) — (C) is not vacuous" \
-    || no "(G) mutation control: even [\\s\\S]* matched nothing — (C) cannot distinguish anything"
+[ "$MUT_C1" -ge 1 ] && [ "$MUT_C2" -ge 1 ] \
+    && ok "(G) control: both patterns match WITHIN one line ($MUT_C1/$MUT_C2) — (C) is not vacuous" \
+    || no "(G) control: a same-line fixture matched nothing ($MUT_C1/$MUT_C2) — (C) cannot distinguish anything"
 
 # ── H) G4: well-formed XML ─────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
@@ -171,6 +192,27 @@ if command -v xmllint >/dev/null 2>&1; then
 else
     ok "(H) xmllint absent — skipped"
 fi
+
+# ── I) CRASH REGRESSION: the anchor must not reintroduce libc++'s out-of-bounds multiline node ────────
+# A bare `^` matches once per LINE, which is the densest anchor workload there is, and it is what made
+# the libc++ node fault. Ten runs over this repository's own src/ (real source text: the fault is
+# content-dependent, so a three-line fixture cannot see it). Any non-zero exit here is a crash.
+crashes=0
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    "$BIN" "$ROOT/src" --regex='^' --grep-in=any >/dev/null 2>&1 || crashes=$(( crashes + 1 ))
+done
+[ "$crashes" -eq 0 ] \
+    && ok "(I) bare ^ over src/ exited 0 on all 10 runs — no out-of-bounds anchor node" \
+    || no "(I) bare ^ over src/ FAILED $crashes/10 runs — a crash, not an output defect (see the header)"
+# control: the same ten-run shape on a pattern that has always been safe must stay clean, so a red (I)
+# means the anchor and not the machine.
+ctl=0
+for i in 1 2 3 4 5; do
+    "$BIN" "$ROOT/src" --regex='include' --grep-in=any >/dev/null 2>&1 || ctl=$(( ctl + 1 ))
+done
+[ "$ctl" -eq 0 ] \
+    && ok "(I) control: an unanchored pattern is clean over the same corpus" \
+    || no "(I) control also failed $ctl/5 — the corpus or the binary is broken, not the anchor"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"

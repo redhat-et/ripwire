@@ -1022,27 +1022,70 @@ inline void grepScanText( const std::string& text, const std::string& pat,
 
     if( re != nullptr )
     {
-        // std::sregex_iterator can throw regex_error (error_complexity/error_space) mid-scan on a
-        // catastrophic-backtracking pattern over a pathological file — construction succeeded (the pattern
+        // LINE-ORIENTED MATCHING (2026-09-09) — each line is its own search range, which is what makes
+        // `^` and `$` LINE anchors without asking the standard library for `std::regex::multiline`.
+        //
+        // Two things forced this shape, and both are load-bearing:
+        //
+        //  1. THE SEMANTICS. Handing the whole file to one iterator made ECMAScript's `^` match only at
+        //     offset 0 and `$` only at end-of-file, in a verb whose every answer is a LINE (`l=`, one line
+        //     of CDATA). `--regex='^#include'` reported 1 hit on src/ where rg reported 1648. grep, rg,
+        //     tgrep and every editor's find box read those anchors per line; so does this now.
+        //  2. WHY NOT std::regex::multiline. It is the obvious fix and it is not usable. Apple libc++'s
+        //     `__l_anchor_multiline<char>::__exec` reads `*std::prev(__s.__current_)` before testing
+        //     whether the match position IS the first character, so at offset 0 it reads one byte BEFORE
+        //     the buffer. Measured 2026-09-09 on this tree: a 40-line standalone with no ripwire code —
+        //     default-constructed regex, assigned, `sregex_iterator` per file — faults on 74 of ~130 of
+        //     this repository's own headers, single-threaded, and `--regex='^'` over src/ crashed 8 of 10
+        //     runs (EXC_BAD_ACCESS in that frame, address one byte low; SIGBUS when the string's buffer
+        //     starts a page). Content-dependent, because a byte before a heap buffer is usually readable.
+        //     A gate cannot defend against a standard-library out-of-bounds read; not using the node can.
+        //
+        // Consequence, stated because it is a real narrowing: a match may no longer SPAN lines. `.` never
+        // could (ECMAScript's dot excludes line terminators), but `[\s\S]*` could and now cannot — the
+        // same line-oriented contract grep and rg have, where crossing lines is an opt-in mode neither
+        // this verb nor rg's default offers. A trailing `\r` is outside every line's range, so `$` behaves
+        // on CRLF input the way rg's `--crlf` does rather than never matching.
+        //
+        // std::regex_iterator can throw regex_error (error_complexity/error_space) mid-scan on a
+        // catastrophic-backtracking pattern over a pathological line — construction succeeded (the pattern
         // itself compiled fine), the blowup happens during matching. Only construction was guarded before
         // this (A4-F10); an uncaught throw here reached std::terminate and killed the whole run over one
         // bad file. Degrade: keep this file's hits so far and move on to the next file.
         try
         {
-            for( auto it = std::sregex_iterator( text.begin(), text.end(), *re ); it != std::sregex_iterator(); ++it )
+            const char*   base      = text.data();
+            std::size_t   lineBegin = 0;
+            bool          capped    = false;
+            while( !capped )
             {
-                const std::size_t pos = std::size_t( it->position() );
-                out.push_back( { lineAt( pos ), std::uint32_t( pos ) } );
-                if( out.size() >= hitCapCount )
+                const std::size_t nl      = text.find( '\n', lineBegin );
+                const std::size_t lineEnd = ( nl == std::string::npos ) ? text.size() : nl;
+                std::size_t       matchEnd = lineEnd;
+                if( matchEnd > lineBegin && text[ matchEnd - 1 ] == '\r' ) { --matchEnd; }
+
+                for( auto it = std::cregex_iterator( base + lineBegin, base + matchEnd, *re ); it != std::cregex_iterator(); ++it )
+                {
+                    out.push_back( { line, std::uint32_t( lineBegin + std::size_t( it->position() ) ) } );
+                    if( out.size() >= hitCapCount )
+                    {
+                        capped = true;
+                        break;
+                    }
+                }
+                if( nl == std::string::npos )
                 {
                     break;
                 }
+                lineBegin = nl + 1;
+                ++line;
             }
         }
         catch( const std::regex_error& )
         {
             DEGRADED_PATH_ALERT( "grep: regex match blew up (catastrophic backtracking?) — file skipped" );
         }
+        scanned = text.size();   // the literal branch's cursor is not shared with this one; keep it honest
     }
     else
     {
@@ -1314,20 +1357,17 @@ inline std::optional<std::string> catastrophicRegexConstruct( const std::string&
 // unindexed-aux scan). A pattern that COMPILES under one flag set and MATCHES under another is a defect
 // with no symptom, and this file spelled the literal out three times.
 //
-// `multiline` is the load-bearing member, added 2026-09-09 after the tgrep head-to-head
-// (`bench/tgrep-h2h/`) priced its absence. --regex hands a whole file's bytes to ONE sregex_iterator, so
-// without this flag ECMAScript's `^` matches only at offset 0 of that buffer and `$` only at its very
-// end — the anchors were FILE anchors. Measured: `--regex='^#include'` over this repository's own src/
-// at 4c10be9d answered hits="1" where `rg -n '^#include' src` answered 1648; over canyonraid48, 26
-// against 6171. The verb's answer is LINE-shaped (one <hit l=> per line, whose CDATA is that line) and
-// every other tool an agent holds — grep, rg, tgrep, every editor's find box — reads `^` as a line
-// anchor, so a file anchor was a confident wrong answer in the one syntax nobody re-reads the manual
-// for. `.` is unaffected: ECMAScript's dot excludes line terminators with or without this flag, so a
-// `.*` still cannot cross a newline. The trigram prefilter is unaffected too — Cox treats an anchor as ε
-// (riAnchor above), which is sound under either reading, so no candidate set narrows on one.
-// Gated by test/grepanchorcheck.sh (arm C carries a [\s\S]* mutation control proving the dot arm is not
-// vacuous; arm E re-checks prefilter soundness with an anchor in the pattern).
-constexpr auto kGrepRegexSyntax = std::regex::ECMAScript | std::regex::multiline | std::regex::optimize;
+// NOTE WHAT IS **NOT** HERE: `std::regex::multiline`. Line anchors are what this verb owes its reader,
+// but that flag is how you do NOT get them on this platform — Apple libc++'s `__l_anchor_multiline`
+// reads one byte before the buffer at offset 0 and faults on real source text (the measurement is in
+// grepScanText's header, where the replacement lives). `^` and `$` are line anchors because
+// grepScanText searches ONE LINE AT A TIME, not because of a syntax option. Leave this set alone: the
+// prefilter's compile probe and both scanners must agree about what compiles, and adding `multiline`
+// here would reintroduce a standard-library out-of-bounds read that no gate in this tree can catch.
+// The trigram prefilter is unaffected either way — Cox treats an anchor as ε (riAnchor above), which is
+// sound under both readings, so no candidate set narrows on one.
+// Gated by test/grepanchorcheck.sh.
+constexpr auto kGrepRegexSyntax = std::regex::ECMAScript | std::regex::optimize;
 
 inline std::optional<std::string> regexCompileError( const std::string& pat )
 {
