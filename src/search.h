@@ -1054,13 +1054,17 @@ inline void grepScanText( const std::string& text, const std::string& pat,
         // bad file. Degrade: keep this file's hits so far and move on to the next file.
         try
         {
+            // A trailing newline TERMINATES the last line, it does not begin an empty one, and an empty
+            // file has no lines at all: grep reports one match of `^` per real line and none in an empty
+            // file. Without both guards a zero-width pattern gains one phantom hit per file, on a line
+            // number no reader could open — the two conditions below are those two rules.
             const char*   base      = text.data();
             std::size_t   lineBegin = 0;
             bool          capped    = false;
-            while( !capped )
+            while( !capped && !text.empty() )
             {
-                const std::size_t nl      = text.find( '\n', lineBegin );
-                const std::size_t lineEnd = ( nl == std::string::npos ) ? text.size() : nl;
+                const std::size_t nl       = text.find( '\n', lineBegin );
+                const std::size_t lineEnd  = ( nl == std::string::npos ) ? text.size() : nl;
                 std::size_t       matchEnd = lineEnd;
                 if( matchEnd > lineBegin && text[ matchEnd - 1 ] == '\r' ) { --matchEnd; }
 
@@ -1073,9 +1077,9 @@ inline void grepScanText( const std::string& text, const std::string& pat,
                         break;
                     }
                 }
-                if( nl == std::string::npos )
+                if( nl == std::string::npos || nl + 1 >= text.size() )
                 {
-                    break;
+                    break;   // last line, or the newline that terminated it was the final byte
                 }
                 lineBegin = nl + 1;
                 ++line;

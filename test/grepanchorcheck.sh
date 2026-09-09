@@ -42,6 +42,11 @@
 #   F  determinism: two runs byte-identical
 #   G  MUTATION self-tests — each assertion must be able to see its own regression
 #   H  G4: xmllint --noout clean
+#   J  ZERO-WIDTH LINE COUNTING at the file's edges: `^` matches exactly once per REAL line, so
+#      ripwire's hit count equals `grep -c '^'` on all four shapes — trailing newline, no trailing
+#      newline, an empty file, and a file that is one newline. A trailing newline terminates the last
+#      line, it does not begin an empty one; without that rule a zero-width pattern gains one phantom
+#      hit per file, on a line number no reader could open
 #   I  CRASH REGRESSION, and the reason arm (I) exists at all: `--regex='^'` over a real corpus,
 #      ten times, must exit 0 every time. This is the arm that goes red the day someone "simplifies"
 #      grepScanText back to a whole-buffer iterator plus `std::regex::multiline` — a standard-library
@@ -213,6 +218,21 @@ done
 [ "$ctl" -eq 0 ] \
     && ok "(I) control: an unanchored pattern is clean over the same corpus" \
     || no "(I) control also failed $ctl/5 — the corpus or the binary is broken, not the anchor"
+
+# ── J) zero-width matching at the file's edges, against grep -c '^' ────────────────────────────────────
+E="$TMP/edges"; mkdir -p "$E"
+printf 'a\nb\n' > "$E/trailing_nl.c"      # ends with a newline
+printf 'a\nb'    > "$E/no_trailing_nl.c"   # does not
+: > "$E/empty.c"                           # no bytes at all
+printf '\n'      > "$E/just_nl.c"          # exactly one newline
+for f in trailing_nl no_trailing_nl empty just_nl; do
+    rwn="$( "$BIN" "$E/$f.c" --regex='^' --grep-in=any --limit=100000 --no-cache 2>/dev/null \
+            | sed 's/<!--.*-->//' | grep -o 'hits="[0-9]*"' | head -1 | grep -o '[0-9]*' )"
+    gn="$( grep -c '^' "$E/$f.c" )"
+    [ "$rwn" = "$gn" ] \
+        && ok "(J) ^ counts lines like grep on $( printf '%-16s' "$f" ) ($rwn)" \
+        || no "(J) ^ counted $rwn where grep -c '^' counted $gn on $f — phantom or missing final line"
+done
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"
