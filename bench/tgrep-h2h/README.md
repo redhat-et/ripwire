@@ -52,7 +52,7 @@ python3 readout.py
 `RW_H2H_HOME` holds `idx/<corpus>` (tgrep's index), `tmp/<corpus>` (the `TMPDIR` that holds ripwire's
 warm cache) and `raw/` (every arm's captured output).
 
-Four things a re-run must keep, because each was a defect found the first time:
+Five things a re-run must keep, because each was a defect found the first time:
 
 1. **`rg --sort path`.** Round C's README already required it; without it the floor arm is
    nondeterministic.
@@ -61,11 +61,15 @@ Four things a re-run must keep, because each was a defect found the first time:
    inside the checkout for the `+dirty` half of its `at=` anchor — a `raw/` beside this script would
    flip every determinism arm running in parallel with the harness (the 2026-09-09 gate-isolation
    finding). `RAW_DIR=` overrides it; the default is `$RW_H2H_HOME/raw`.
-3. **tgrep gets its own `--index-path` outside the corpus.** Left to itself `tgrep serve` writes
+3. **Scrub `results.json` before you commit it.** One rung is a private tree and
+   `test/ripwirepubliccheck.sh` arm 1 is zero-tolerance about its name; `results.json` records the
+   corpus key and every `argv`, so a re-run regenerates the leak. `run.py` now scrubs every ladder
+   root to a `$CORPUS_<NAME>` placeholder on write — check it, do not assume it.
+4. **tgrep gets its own `--index-path` outside the corpus.** Left to itself `tgrep serve` writes
    `.tgrep/` into the tree being measured, which would modify a read-only measurement corpus and
    change what every gitignore-aware arm sees. Verified after the run: the private corpus has no `.tgrep`
    and its `git status` is byte-for-byte what it was before.
-4. **The llvm rung's ripwire cells are declared, not silent.** A single ripwire `--regex` run over
+5. **The llvm rung's ripwire cells are declared, not silent.** A single ripwire `--regex` run over
    llvm-project's 182,555 files is 3–4 minutes (`[Ee]rror[A-Z][a-zA-Z]+` 2 m 57 s,
    `[Qq]z[Xx]v.*[Jj]w` 3 m 27 s, `[0-9a-f]{8}-[0-9a-f]{4}` 4 m 07 s, and the *literal* `return`
    4 m 31 s warm), where tgrep and rg answer the same queries in under a second. A median of five on
@@ -77,11 +81,14 @@ Four things a re-run must keep, because each was a defect found the first time:
 
 ## What the comparison does NOT show
 
-- **One machine, shared.** Every figure was taken on one 18-core macOS arm64 host that was running
-  other work at the time (concurrent harvest lanes). Arms were run back to back per query rather than
-  interleaved, so contention can bias a single cell. The conclusions here turn on 10×–100× gaps and a
-  Q\* that is one to two orders of magnitude below the observed per-session query count, none of
-  which a 2× noise factor moves.
+- **One machine, shared, and the load was not constant.** Every figure was taken on one 18-core macOS
+  arm64 host that was running other work throughout (concurrent harvest lanes); at the end of the llvm
+  rung the 1-minute load average was 38.8 with 62 concurrent `ripwire` processes, none of them this
+  harness's. Arms were run back to back per query rather than interleaved, so a single cell can be
+  biased. The conclusions turn on 10×–10⁴× gaps, on a Q\* one to two orders of magnitude below the
+  observed per-session query count, and on comparisons between two ripwire cells taken minutes apart —
+  none of which a 2× noise factor moves. A single llvm absolute is an order of magnitude, not a
+  precise figure.
 - **One `tgrep` server posture.** tgrep was measured with its index already built and its server
   warm — the posture its own README advertises. A cold `tgrep serve` answers from an *empty* index
   and returns nothing until the first build publishes; that failure mode is documented in tgrep's
