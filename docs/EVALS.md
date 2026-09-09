@@ -13158,10 +13158,37 @@ is even a candidate:
 | go | 0.57× | 2.05× |
 
 Building a trigram index costs the same order as the parse the warm cache already pays for once, and
-would grow the artifact 2–3×. And the enabling fact is already in the tree: the warm ingest is a
-`(size, mtime, ctime)` stat gate that "skips read+hash" when all three match
-(`src/ingest_cache.h:1236-1239`) — it is `--grep` alone that re-reads every byte on every call. The
-read a postings index would save is a read the rest of the tool has already stopped paying.
+would grow the artifact 2–3×. **It is affordable, and it would buy almost nothing — which is the most
+useful thing this round measured.**
+
+`src/verbs_grep.h::startGrepScanPrefetch` already runs the text scan on its own thread, concurrent
+with the graph build, so ripwire's warm per-query cost is `max(ingest, scan)` — and the ingest wins at
+every rung. Timed interleaved on the same warm cache, against a verb that builds the same graph and
+scans no text:
+
+| corpus | warm `--callers=main` (no text scan) | warm `--grep` (full text scan) |
+| --- | ---: | ---: |
+| the ripwire tree, 2,240 files | 0.09 s | 0.09 s |
+| `go`, 15,865 files | ~0.62 s | ~0.65 s |
+
+At the top of the ladder it is not close: on llvm-project the *absent literal* `zzqxvnotpresentzz`
+costs **176.4 s** and the prefilter-defeating, zero-hit regex `[Qq]z[Xx]v.*[Jj]w` — a full
+`std::regex` verification of 2.9 GB — costs **171.2 s**. Two completely different scan workloads, the
+same wall time, because neither is what the clock is measuring. A postings index attacks the side of
+that `max()` that is already free: it would save ~0% of a literal query at any rung, and only the
+excess on the heaviest regexes (`^#include` 233 s, `malloc.*free` 215 s against a ~171 s floor), for
+the price of a new on-disk format, a new field in the cache-identity contract and a soundness gate per
+pattern shape.
+
+**So P3's removal note is right for a second reason it does not yet state.** Not only "building the
+index is more work than the one scan it saves" — also "the scan is already free behind the ingest".
+What the numbers point at instead is the **warm-ingest floor**: 0.09 s at 2,240 files, ~0.6 s at
+15,865, ~171 s at 182,555, paid on every `--grep` call to annotate at most 100 printed hits with `in=`.
+`grepEnrich` already builds its enclosing-symbol index only for files that actually have hits; the
+ingest that precedes it is not lazy in the same way. Whether that floor is the graph or the cache load
+plus per-file validation is one experiment away (stub the graph build, re-time) and is not decided
+here — which of the two it is chooses between two very different designs, and guessing would be the
+opposite of what this section is for.
 
 ### Losses first — the agreement matrix
 
