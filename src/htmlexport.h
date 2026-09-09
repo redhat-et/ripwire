@@ -2159,7 +2159,7 @@ inline constexpr std::size_t kLangColorCount = sizeof( kLangColors ) / sizeof( k
 // unprotecting: Elixir landed with no swatch and compiled clean, and test/htmlrendercheck.sh's (N2) arm —
 // which walks langTag() against the emitted LANG_COLORS — is what actually caught it. Move this bound in
 // the same commit that appends a Lang, and trust (N2), not this line, to notice if you forget.
-static_assert( kLangColorCount == std::size_t( Lang::Elixir ) + 1,
+static_assert( kLangColorCount == kLangCount,
                "kLangColors must carry one hex colour per Lang enumerator, in declaration order — a language with "
                "no swatch renders as an unlabelled grey the legend cannot explain" );
 

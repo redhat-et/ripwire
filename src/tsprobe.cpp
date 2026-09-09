@@ -35,7 +35,7 @@ inline constexpr const char* kLangName[] = {
     "php", "lua", "ex",
 };
 
-static_assert( std::size( kLangName ) == std::size_t( rw::Lang::Elixir ) + 1,
+static_assert( std::size( kLangName ) == rw::kLangCount,
                "kLangName drifted from the Lang enum — update both together" );
 
 // SymKind has no table here: rw::symTag() already IS the declarative one. Only its count is needed,

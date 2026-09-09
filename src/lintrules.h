@@ -271,7 +271,7 @@ inline bool dependencyPairCapable( Lang a, Lang b ) noexcept
 inline std::string dependencyCapableLangTags()
 {
     std::string out;
-    for( std::size_t i = 0; i <= std::size_t( Lang::Elixir ); ++i )
+    for( std::size_t i = 0; i < kLangCount; ++i )
     {
         const Lang l = Lang( i );
         if( l == Lang::Unknown || !dependencyCapable( l ) )
