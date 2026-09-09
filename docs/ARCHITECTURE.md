@@ -46,12 +46,15 @@ runs. The parse itself runs one tree-sitter parser per worker thread and merges 
 lists afterwards, which is safe precisely because the definitions and references are re-sorted before
 they are used — collection order never reaches the output.
 
-**`.gitignore` is not consulted.** Skipping is a fixed, committed denylist (`kCrawlSkipDirs[]` in
-`src/ingest.h`, shared with the CMake walk in `darkflags.h` so the two crawlers cannot disagree about
-what counts as source), not a per-repository ignore file. That is a real difference from a
-`.gitignore`-aware tool in both directions: a build directory this repository happens not to ignore is
-still pruned, and a directory a project ignores but that is not on the list is still indexed. What is
-skipped:
+**`.gitignore` is consulted, after the denylist.** Skipping starts from a fixed, committed denylist
+(`kCrawlSkipDirs[]` in `src/ingest.h`, shared with the CMake walk in `darkflags.h` so the two crawlers
+cannot disagree about what counts as source). In a git work tree the crawl then also honours git's own
+ignore verdict — one `git ls-files --others --ignored --exclude-standard --directory` fork per root, so
+the answer is git's and never a re-implemented matcher — and `--no-ignore` turns that half off. The
+denylist still prunes a build directory the repository happens not to ignore; what the repository
+ignores leaves the map and is disclosed as `ignored_files=` / `ignored_dirs=`, and the `--grep`
+unindexed scan reads none of it either (a gitignored file of an unindexed extension is in no class at
+all, the same treatment an `--exclude`'d one gets). What the denylist skips:
 
 - **directories by NAME:** `.git`, `.claude`, `.hg`, `.svn`, `node_modules`, `vendor`, `third_party`,
   `.cache`, `build`, `dist`, `out`, `target`, `.venv`, `venv`, `__pycache__`, `.idea`, `.vscode`,

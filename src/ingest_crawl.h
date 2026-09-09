@@ -828,16 +828,34 @@ void recordCrawlDrop( std::vector<SkippedFile>& rows, std::uint64_t& exactCount,
 // the user did NOT ask to hide (an --exclude'd .ml is requested absence, not a language this build cannot
 // read). Swap the two and both classes start lying.
 //
+// THE THIRD TEST, FOR ONE CLASS ONLY (§N6-C, closed 2026-09-09). The unsupported-ext population is not
+// merely reported — grep's aux scan (search.h grepCollectAux) READS it and SERVES its hits — so it must
+// hold only files the REPOSITORY did not ask to hide either, on exactly the rule it already applies to
+// --exclude. Before this test existed the crawl asked the ignore set only about files that survived
+// here, so a file that was both gitignored and of an unindexed extension was rowed as unsupported-ext:
+// measured, --regex='^#include' served four hits from a `.cpp.bak` beside its source that the
+// repository's own .gitignore names (rg does not open it), while unindexed_files_scanned= and
+// unsupported_ext= both counted it, so nothing disclosed that an ignored file had been read.
+// test/grepignorecheck.sh pins the fix. `ignored` is a LAZY predicate for the same reason fullPath is:
+// the lookup stringifies the path, so it is paid only once the two cheaper tests have already admitted
+// the file to this class — never for a binary asset or an --exclude'd file, and never for an indexable
+// file, which takes the crawl's own ignore test after this returns false. A file dropped here is in NO
+// class — neither this one nor ignored=, exactly as an --exclude'd unsupported-ext file is in neither
+// this one nor excluded=: ignored= describes only what would OTHERWISE HAVE BEEN INDEXED (the number the
+// map header's accounting invariant carries), and a language this build cannot read that the repository
+// hid is not a disclosure the reader is owed. --no-ignore makes the predicate false, so the escape hatch
+// restores the row and both counts with it.
+//
 // `fullPath` is the caller's LAZY path materializer, taken as a template parameter rather than a
 // std::string: a monorepo crawl walks far more non-source files than source ones, and stringifying every
 // one of them to record the handful that are reportable would be a real per-file cost for nothing.
-template< typename PathFn >
+template< typename PathFn, typename IgnoredFn >
 bool recordPreSizeDrop( CrawlSkips& skips, HashMap<std::string, std::uint64_t>& extTally,
-                        const std::string& ext, bool excluded, const fs::directory_entry& entry, PathFn&& fullPath )
+                        const std::string& ext, bool excluded, const fs::directory_entry& entry, PathFn&& fullPath, IgnoredFn&& ignored )
 {
     if( lookupLang( ext ) == nullptr && !docparse::isDocExtension( ext ) )
     {
-        if( !excluded && !isNonTextExtension( ext ) )
+        if( !excluded && !isNonTextExtension( ext ) && !ignored() )
         {
             ++extTally[ ext ];
             recordCrawlDrop( skips.unsupported, skips.unsupportedFiles, fullPath(), ext, entry );
@@ -1002,8 +1020,11 @@ GitIgnoreSet collectGitIgnored( const char* rootDir )
 // extension classification and the --exclude match (the same reason recordPreSizeDrop's header gives for
 // its own two): `ignored` then only ever describes a file that would OTHERWISE HAVE BEEN INDEXED, which is
 // what lets the header's accounting invariant carry it — indexed= + oversize= + excluded= + ignored= = the
-// population the crawl enumerated — and keeps unsupported_ext=/unindexed= meaning exactly what they meant
-// before this lane. The DIRECTORY test runs after the built-in denylist for the mirror reason: ignoredDirs=
+// population the crawl enumerated. The ONE earlier consult is recordPreSizeDrop's unsupported-ext branch,
+// which asks the same predicate before it records a row and records NOTHING when the answer is yes: that
+// class is served by grep's aux scan, so unsupported_ext=/unindexed= describe the population grep actually
+// reads, and an ignored file of an unindexed extension is counted in neither class (its header has the
+// measured leak). The DIRECTORY test runs after the built-in denylist for the mirror reason: ignoredDirs=
 // then counts only the subtrees no rule this build already carried had pruned.
 bool pathInIgnoreSet( const std::vector<std::string>& sorted, std::string_view rel ) noexcept
 {
@@ -1220,16 +1241,26 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         // doc post-pass instead). Use the filename here so rejected regular files do not pay to stringify the
         // full path; materialize the full path only after the extension survives.
         //
+        // §N6-C: the repository's own verdict on this file, ONE lazy predicate shared by the two sites that
+        // ask it — the lookup stringifies the path (relForHash over fullPath), so it is evaluated only where
+        // a class actually consults it, never for a binary asset or an --exclude'd file. False under
+        // --no-ignore, on a non-git root, and when git could not answer (ignoreSet.available).
+        const auto ignored = [ & ]() -> bool
+        {
+            return ignoreSet.available && pathInIgnoreSet( ignoreSet.files, relForHash( fullPath(), rootDir ) );
+        };
+
         // §L1: the two NON-SIZE drops are classified and recorded together (recordPreSizeDrop) — see its
-        // header for why the two tests must run in that order, and why they are not written inline here.
+        // header for why the tests must run in that order, why the unsupported-ext class alone consults the
+        // ignore verdict BEFORE it records a row, and why none of it is written inline here.
         const std::string ext = lowerExtensionOf( name );
-        if( recordPreSizeDrop( skips, extTally, ext, excluded, *it, fullPath ) )
+        if( recordPreSizeDrop( skips, extTally, ext, excluded, *it, fullPath, ignored ) )
         {
             continue;
         }
 
         // §N6-C: AFTER the extension and the --exclude match — see pathInIgnoreSet's header for the ordering.
-        if( ignoreSet.available && pathInIgnoreSet( ignoreSet.files, relForHash( fullPath(), rootDir ) ) )
+        if( ignored() )
         {
             recordCrawlDrop( skips.ignored, skips.ignoredFiles, fullPath(), ext, *it );
             continue;

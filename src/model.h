@@ -821,7 +821,10 @@ struct CrawlSkips
     // extension classification, the --exclude match and the built-in denylist, so every existing counter
     // keeps exactly the meaning it had: ignoredFiles counts files that would OTHERWISE HAVE BEEN INDEXED
     // (which is what makes it the number the header's accounting invariant can carry), and ignoredDirs
-    // counts only the subtrees no other rule had already pruned.
+    // counts only the subtrees no other rule had already pruned. The one class that consults the verdict
+    // EARLIER is `unsupported` above: grep serves that population, so a gitignored file of an unindexed
+    // extension is not rowed there either — it is in no class at all, exactly as an --exclude'd one
+    // already was (ingest_crawl.h recordPreSizeDrop's header).
     std::vector<SkippedFile>  ignored;              // capped rows, path-sorted — the individual ignored files
     std::vector<SkippedFile>  ignoredDirRows;       // capped rows, path-sorted — the pruned subtrees (bytes 0, ext "")
     std::uint64_t             ignoredFiles    = 0;  // EXACT count (rows may be fewer)
