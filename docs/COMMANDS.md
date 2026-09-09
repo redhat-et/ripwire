@@ -1167,7 +1167,7 @@ $ ./build/ripwire . --test-gate
 
 **Answers:** literal / regex search + enclosing symbol + the matched line.
 
-SPAN-TIERED by default (see --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses what it held back. --grep-in=any is the exhaustive VIEW -- every hit, no tiering. For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance).
+SPAN-TIERED by default (see --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses what it held back. --grep-in=any is the exhaustive VIEW -- every hit, no tiering. For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance). --regex is LINE-ORIENTED, like grep/rg: each line is its own search range, so ^ and $ are LINE anchors and no match may span a newline (a trailing CR sits outside the range).
 
 **Try it**
 

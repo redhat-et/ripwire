@@ -1115,6 +1115,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses\n"
         "                               what it held back. --grep-in=any is the exhaustive VIEW -- every hit, no tiering.\n"
         "                               For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance).\n"
+        "                               --regex is LINE-ORIENTED, like grep/rg: each line is its own search range, so ^ and $\n"
+        "                               are LINE anchors and no match may span a newline (a trailing CR sits outside the range).\n"
         "      --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit\n"
         "      --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex)\n"
         "      --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)\n"
