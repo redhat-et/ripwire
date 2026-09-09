@@ -3678,6 +3678,1498 @@
    },
    "tgrep_status": "Server status for $RW_H2H_HOME/../corpus/go\n  PID:        72184\n  Port:       61132\n  Files:      15084\n  Trigrams:   479833\n  Cache:      0/50000\n  Watcher:    active\n  Watch mode: native (requested: auto)\n  Watch budget: 8192\n  Poll interval: 120s (after completion)\n  Reconcile:  idle\n  Last successful reconcile: 1s ago\n  Reconcile pending: no\n  Reconcile overdue: no\n  Last reconcile duration: 92ms\n  Indexing:   complete"
   },
+  "llvm": {
+   "corpus": "llvm",
+   "files_rg": 182555,
+   "queries": {
+    "L1": {
+     "pat": "pthread_mutex_lock",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 96023,
+      "hits_set": 345,
+      "max_s": 5.4653,
+      "median_s": 5.2506,
+      "min_s": 5.1941,
+      "rc": 0,
+      "reps": 3
+     },
+     "rw-warm": {
+      "argv": [
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RW_H2H_HOME/../corpus/llvm-project",
+       "--grep=pthread_mutex_lock",
+       "--grep-in=any"
+      ],
+      "bytes": 20665,
+      "max_s": 193.094,
+      "median_s": 193.094,
+      "min_s": 193.094,
+      "rc": 0,
+      "reps": 1
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RW_H2H_HOME/../corpus/llvm-project",
+       "--grep=pthread_mutex_lock",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 49158,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "4",
+       "files": "111",
+       "has_more": "0",
+       "hits": "313",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=clang/lib/StaticAnalyzer/Checkers/BlockInCriticalSectionChecker.cpp:231",
+       "next_offset": "313",
+       "offset": "0",
+       "pattern": "pthread_mutex_lock",
+       "root": "$RW_H2H_HOME/../corpus/llvm-project",
+       "shown": "313",
+       "total": "313",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 312,
+      "max_s": 321.3871,
+      "median_s": 321.3871,
+      "min_s": 321.3871,
+      "rc": 0,
+      "reps": 1
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 96023,
+      "max_s": 16.4788,
+      "median_s": 8.6959,
+      "min_s": 7.1591,
+      "rc": 0,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 96023,
+      "hits_set": 345,
+      "max_s": 0.0411,
+      "median_s": 0.0112,
+      "min_s": 0.0111,
+      "rc": 0,
+      "reps": 3
+     }
+    },
+    "L2": {
+     "pat": "return",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "return",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 326090093,
+      "hits_set": 1152157,
+      "max_s": 13.7301,
+      "median_s": 8.7289,
+      "min_s": 8.4355,
+      "rc": 0,
+      "reps": 3
+     },
+     "rw-warm": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "rw-warm-all": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "return",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 326089935,
+      "max_s": 10.6539,
+      "median_s": 9.8639,
+      "min_s": 7.9313,
+      "rc": 0,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "return",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 326089935,
+      "hits_set": 1152157,
+      "max_s": 7.6914,
+      "median_s": 7.304,
+      "min_s": 6.8518,
+      "rc": 0,
+      "reps": 3
+     }
+    },
+    "L3": {
+     "pat": "TODO",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "TODO",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 4731588,
+      "hits_set": 15895,
+      "max_s": 4.5233,
+      "median_s": 4.4754,
+      "min_s": 4.1754,
+      "rc": 0,
+      "reps": 3
+     },
+     "rw-warm": {
+      "argv": [
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RW_H2H_HOME/../corpus/llvm-project",
+       "--grep=TODO",
+       "--grep-in=any"
+      ],
+      "bytes": 32233,
+      "max_s": 195.5835,
+      "median_s": 195.5835,
+      "min_s": 195.5835,
+      "rc": 0,
+      "reps": 1
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RW_H2H_HOME/../corpus/llvm-project",
+       "--grep=TODO",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 2232244,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "4",
+       "files": "4224",
+       "has_more": "0",
+       "hits": "12261",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=.ci/buildbot/worker.py:271",
+       "next_offset": "12261",
+       "offset": "0",
+       "pattern": "TODO",
+       "root": "$RW_H2H_HOME/../corpus/llvm-project",
+       "shown": "12261",
+       "total": "12261",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "55"
+      },
+      "hits_set": 12305,
+      "max_s": 196.938,
+      "median_s": 196.938,
+      "min_s": 196.938,
+      "rc": 0,
+      "reps": 1
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "TODO",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 4731583,
+      "max_s": 14.5568,
+      "median_s": 8.3275,
+      "min_s": 6.3887,
+      "rc": 0,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "TODO",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 4731583,
+      "hits_set": 15895,
+      "max_s": 0.3475,
+      "median_s": 0.0886,
+      "min_s": 0.0815,
+      "rc": 0,
+      "reps": 3
+     }
+    },
+    "L4": {
+     "pat": "int",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "int",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 562982159,
+      "hits_set": 1802431,
+      "max_s": 6.9524,
+      "median_s": 6.8986,
+      "min_s": 6.7969,
+      "rc": 0,
+      "reps": 3
+     },
+     "rw-warm": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "rw-warm-all": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "int",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 562968213,
+      "max_s": 19.2573,
+      "median_s": 14.4344,
+      "min_s": 9.4941,
+      "rc": 0,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "int",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 562968213,
+      "hits_set": 1802382,
+      "max_s": 12.2152,
+      "median_s": 10.4324,
+      "min_s": 8.8694,
+      "rc": 0,
+      "reps": 3
+     }
+    },
+    "L5": {
+     "pat": "err",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "err",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 155502230,
+      "hits_set": 497586,
+      "max_s": 5.3452,
+      "median_s": 5.0509,
+      "min_s": 4.8569,
+      "rc": 0,
+      "reps": 3
+     },
+     "rw-warm": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "rw-warm-all": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "err",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 155502150,
+      "max_s": 9.9387,
+      "median_s": 9.8852,
+      "min_s": 9.522,
+      "rc": 0,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "err",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 155502150,
+      "hits_set": 497586,
+      "max_s": 2.2287,
+      "median_s": 1.7938,
+      "min_s": 1.6317,
+      "rc": 0,
+      "reps": 3
+     }
+    },
+    "L6": {
+     "pat": "zzqxvnotpresentzz",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 4.4203,
+      "median_s": 4.3043,
+      "min_s": 4.1825,
+      "rc": 1,
+      "reps": 3
+     },
+     "rw-warm": {
+      "argv": [
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RW_H2H_HOME/../corpus/llvm-project",
+       "--grep=zzqxvnotpresentzz",
+       "--grep-in=any"
+      ],
+      "bytes": 5952,
+      "max_s": 176.3529,
+      "median_s": 176.3529,
+      "min_s": 176.3529,
+      "rc": 0,
+      "reps": 1
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RW_H2H_HOME/../corpus/llvm-project",
+       "--grep=zzqxvnotpresentzz",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 6018,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "4",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=zzqxvnotpresentzz",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "zzqxvnotpresentzz",
+       "root": "$RW_H2H_HOME/../corpus/llvm-project",
+       "shown": "0",
+       "total": "0",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 203.0969,
+      "median_s": 203.0969,
+      "min_s": 203.0969,
+      "rc": 0,
+      "reps": 1
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 0,
+      "max_s": 15.9483,
+      "median_s": 7.7193,
+      "min_s": 5.8584,
+      "rc": 1,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0276,
+      "median_s": 0.0176,
+      "min_s": 0.0173,
+      "rc": 1,
+      "reps": 3
+     }
+    },
+    "L7": {
+     "pat": "malloc(",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "malloc(",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 1175978,
+      "hits_set": 4136,
+      "max_s": 4.2042,
+      "median_s": 4.1747,
+      "min_s": 4.1148,
+      "rc": 0,
+      "reps": 3
+     },
+     "rw-warm": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "rw-warm-all": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "malloc(",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 1175978,
+      "max_s": 5.806,
+      "median_s": 5.7977,
+      "min_s": 5.7904,
+      "rc": 0,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "malloc(",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 1175978,
+      "hits_set": 4136,
+      "max_s": 0.08,
+      "median_s": 0.0488,
+      "min_s": 0.0482,
+      "rc": 0,
+      "reps": 3
+     }
+    },
+    "L8": {
+     "pat": "SPDX-License-Identifier",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 13369433,
+      "hits_set": 44876,
+      "max_s": 26.1026,
+      "median_s": 13.8821,
+      "min_s": 10.8636,
+      "rc": 0,
+      "reps": 3
+     },
+     "rw-warm": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "rw-warm-all": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 13369430,
+      "max_s": 6.3095,
+      "median_s": 6.2742,
+      "min_s": 6.2112,
+      "rc": 0,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 13369430,
+      "hits_set": 44876,
+      "max_s": 0.7375,
+      "median_s": 0.2448,
+      "min_s": 0.2408,
+      "rc": 0,
+      "reps": 3
+     }
+    },
+    "R1": {
+     "pat": "^#include",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "^#include",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 80212766,
+      "hits_set": 296323,
+      "max_s": 6.4477,
+      "median_s": 5.854,
+      "min_s": 5.7211,
+      "rc": 0,
+      "reps": 3
+     },
+     "rw-warm": {
+      "argv": [
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RW_H2H_HOME/../corpus/llvm-project",
+       "--regex=^#include",
+       "--grep-in=any"
+      ],
+      "bytes": 19333,
+      "max_s": 233.0572,
+      "median_s": 233.0572,
+      "min_s": 233.0572,
+      "rc": 0,
+      "reps": 1
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RW_H2H_HOME/../corpus/llvm-project",
+       "--regex=^#include",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 183719,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "4",
+       "files": "1487",
+       "has_more": "0",
+       "hits": "1487",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=clang-tools-extra/clang-tidy/custom/CustomTidyModule.cpp:1",
+       "next_offset": "1487",
+       "offset": "0",
+       "pattern": "^#include",
+       "root": "$RW_H2H_HOME/../corpus/llvm-project",
+       "shown": "1487",
+       "total": "1487",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 1487,
+      "max_s": 214.7163,
+      "median_s": 214.7163,
+      "min_s": 214.7163,
+      "rc": 0,
+      "reps": 1
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "^#include",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 80212734,
+      "max_s": 22.3997,
+      "median_s": 13.5663,
+      "min_s": 12.6038,
+      "rc": 0,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "^#include",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 80212734,
+      "hits_set": 296323,
+      "max_s": 3.0191,
+      "median_s": 1.8119,
+      "min_s": 1.6523,
+      "rc": 0,
+      "reps": 3
+     }
+    },
+    "R2": {
+     "pat": "TODO|FIXME|XXX",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 10803786,
+      "hits_set": 36448,
+      "max_s": 6.8825,
+      "median_s": 6.7757,
+      "min_s": 6.1462,
+      "rc": 0,
+      "reps": 3
+     },
+     "rw-warm": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "rw-warm-all": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 10803779,
+      "max_s": 9.8665,
+      "median_s": 7.9173,
+      "min_s": 7.5701,
+      "rc": 0,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 10803779,
+      "hits_set": 36448,
+      "max_s": 0.3073,
+      "median_s": 0.1924,
+      "min_s": 0.1882,
+      "rc": 0,
+      "reps": 3
+     }
+    },
+    "R3": {
+     "pat": "malloc.*free",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "malloc.*free",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 96905,
+      "hits_set": 303,
+      "max_s": 4.1225,
+      "median_s": 4.0925,
+      "min_s": 4.0325,
+      "rc": 0,
+      "reps": 3
+     },
+     "rw-warm": {
+      "argv": [
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RW_H2H_HOME/../corpus/llvm-project",
+       "--regex=malloc.*free",
+       "--grep-in=any"
+      ],
+      "bytes": 24109,
+      "max_s": 215.3408,
+      "median_s": 215.3408,
+      "min_s": 215.3408,
+      "rc": 0,
+      "reps": 1
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RW_H2H_HOME/../corpus/llvm-project",
+       "--regex=malloc.*free",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 48490,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "4",
+       "files": "105",
+       "has_more": "0",
+       "hits": "213",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=clang-tools-extra/clang-tidy/cppcoreguidelines/NoMallocCheck.h:39",
+       "next_offset": "213",
+       "offset": "0",
+       "pattern": "malloc.*free",
+       "root": "$RW_H2H_HOME/../corpus/llvm-project",
+       "shown": "213",
+       "total": "213",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "1"
+      },
+      "hits_set": 214,
+      "max_s": 177.2974,
+      "median_s": 177.2974,
+      "min_s": 177.2974,
+      "rc": 0,
+      "reps": 1
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "malloc.*free",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 96905,
+      "max_s": 13.6186,
+      "median_s": 9.077,
+      "min_s": 8.9563,
+      "rc": 0,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "malloc.*free",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 96905,
+      "hits_set": 303,
+      "max_s": 0.084,
+      "median_s": 0.0278,
+      "min_s": 0.0269,
+      "rc": 0,
+      "reps": 3
+     }
+    },
+    "R4": {
+     "pat": "[Qq]z[Xx]v.*[Jj]w",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 15.2915,
+      "median_s": 13.4705,
+      "min_s": 13.4227,
+      "rc": 1,
+      "reps": 3
+     },
+     "rw-warm": {
+      "argv": [
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RW_H2H_HOME/../corpus/llvm-project",
+       "--regex=[Qq]z[Xx]v.*[Jj]w",
+       "--grep-in=any"
+      ],
+      "bytes": 5898,
+      "max_s": 171.1886,
+      "median_s": 171.1886,
+      "min_s": 171.1886,
+      "rc": 0,
+      "reps": 1
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RW_H2H_HOME/../corpus/llvm-project",
+       "--regex=[Qq]z[Xx]v.*[Jj]w",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5964,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "4",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=&apos;[Qq]z[Xx]v.*[Jj]w&apos;",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "[Qq]z[Xx]v.*[Jj]w",
+       "root": "$RW_H2H_HOME/../corpus/llvm-project",
+       "shown": "0",
+       "total": "0",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 173.3927,
+      "median_s": 173.3927,
+      "min_s": 173.3927,
+      "rc": 0,
+      "reps": 1
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 0,
+      "max_s": 22.0388,
+      "median_s": 17.3771,
+      "min_s": 16.3083,
+      "rc": 1,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 18.6887,
+      "median_s": 11.2405,
+      "min_s": 6.3837,
+      "rc": 1,
+      "reps": 3
+     }
+    },
+    "R5": {
+     "pat": "[Ee]rror[A-Z][a-zA-Z]+",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 6689689,
+      "hits_set": 23138,
+      "max_s": 14.4152,
+      "median_s": 13.4193,
+      "min_s": 11.1575,
+      "rc": 0,
+      "reps": 3
+     },
+     "rw-warm": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "rw-warm-all": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 6689688,
+      "max_s": 20.649,
+      "median_s": 14.1556,
+      "min_s": 13.7874,
+      "rc": 0,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 6689688,
+      "hits_set": 23138,
+      "max_s": 1.5197,
+      "median_s": 0.3249,
+      "min_s": 0.2673,
+      "rc": 0,
+      "reps": 3
+     }
+    },
+    "R6": {
+     "pat": "[Mm][Uu][Tt][Ee][Xx]",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 5516369,
+      "hits_set": 18628,
+      "max_s": 7.8651,
+      "median_s": 6.4118,
+      "min_s": 5.8307,
+      "rc": 0,
+      "reps": 3
+     },
+     "rw-warm": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "rw-warm-all": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 5516369,
+      "max_s": 16.5351,
+      "median_s": 16.2295,
+      "min_s": 11.6454,
+      "rc": 0,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 5516369,
+      "hits_set": 18628,
+      "max_s": 7.6344,
+      "median_s": 6.8297,
+      "min_s": 6.204,
+      "rc": 0,
+      "reps": 3
+     }
+    },
+    "R7": {
+     "pat": "pthread_[a-z_]+_init",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 169597,
+      "hits_set": 598,
+      "max_s": 7.7326,
+      "median_s": 5.7917,
+      "min_s": 5.3856,
+      "rc": 0,
+      "reps": 3
+     },
+     "rw-warm": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "rw-warm-all": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 169597,
+      "max_s": 11.1588,
+      "median_s": 9.0268,
+      "min_s": 7.9263,
+      "rc": 0,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 169597,
+      "hits_set": 598,
+      "max_s": 0.0846,
+      "median_s": 0.0479,
+      "min_s": 0.0165,
+      "rc": 0,
+      "reps": 3
+     }
+    },
+    "R8": {
+     "pat": "[0-9a-f]{8}-[0-9a-f]{4}",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 4427531,
+      "hits_set": 12416,
+      "max_s": 12.1135,
+      "median_s": 6.6269,
+      "min_s": 6.0204,
+      "rc": 0,
+      "reps": 3
+     },
+     "rw-warm": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "rw-warm-all": {
+      "skipped": "not in RW_QUERIES (declared subset for this rung)"
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 4427531,
+      "max_s": 11.4086,
+      "median_s": 8.824,
+      "min_s": 8.0963,
+      "rc": 0,
+      "reps": 3
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/llvm",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$RW_H2H_HOME/../corpus/llvm-project"
+      ],
+      "bytes": 4427531,
+      "hits_set": 12416,
+      "max_s": 3.9328,
+      "median_s": 3.6037,
+      "min_s": 2.8231,
+      "rc": 0,
+      "reps": 3
+     }
+    }
+   },
+   "root": "$RW_H2H_HOME/../corpus/llvm-project",
+   "rw_cache_bytes": 568340992,
+   "rw_cache_bytes_warm": 568340992,
+   "rw_cold": {
+    "peak_rss_bytes": 6452314112,
+    "reps": 1,
+    "wall_s": 252.731
+   },
+   "tgrep_index": {
+    "index_bytes": 1087718511,
+    "peak_rss_bytes": 567427072,
+    "rc": 0,
+    "stderr": "nput operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n              206957  voluntary context switches\n              369720  involuntary context switches\n        452191048217  instructions retired\n        202167621332  cycles elapsed\n           560874408  peak memory footprint",
+    "stdout": "",
+    "wall_s": 11.113
+   },
+   "tgrep_status": "Server status for $RW_H2H_HOME/../corpus/llvm-project\n  PID:        34809\n  Port:       61799\n  Files:      178936\n  Trigrams:   503838\n  Cache:      0/50000\n  Watcher:    active\n  Watch mode: native (requested: auto)\n  Watch budget: 8192\n  Poll interval: 120s (after completion)\n  Reconcile:  running\n  Last successful reconcile: never\n  Reconcile pending: no\n  Reconcile overdue: no\n  Indexing:   complete"
+  },
   "rwsrc": {
    "corpus": "rwsrc",
    "files_rg": 159,

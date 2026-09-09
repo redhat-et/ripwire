@@ -184,6 +184,9 @@ def main():
     qs = json.load(open(os.path.join(HERE, "queries.json")))
     allq = qs["literals"] + qs["regexes"]
     want = sys.argv[1:] or list(LADDER)
+    # Every corpus ROOT is scrubbed to a placeholder above, longest-first, because one of the
+    # rungs is a private tree and test/ripwirepubliccheck.sh arm 1 is zero-tolerance about its
+    # name; the corpus KEY in RW_H2H_LADDER is the caller's to choose and must not name it either.
     # raw/ lives OUTSIDE the checkout on purpose. An untracked file anywhere inside this
     # tree makes `git status --porcelain` dirty, and every stamped verb reads that command
     # from any crawl root inside the checkout for the `+dirty` half of its at= anchor - so a
@@ -202,7 +205,9 @@ def main():
         # under a session scratchpad carries a session id. results.json is committed; the raw
         # outputs are not, for the same reason. Placeholders, not deletion, so a re-run reads.
         blob = json.dumps(res, indent=1, sort_keys=True)
-        for real, ph in ((HOME, "$RW_H2H_HOME"), (os.path.expanduser("~"), "$HOME")):
+        for real, ph in [(HOME, "$RW_H2H_HOME")] + \
+                        [(v, "$CORPUS_" + k.upper()) for k, v in sorted(LADDER.items(), key=lambda kv: -len(kv[1]))] + \
+                        [(os.path.expanduser("~"), "$HOME")]:
             blob = blob.replace(real, ph)
         with open(outp, "w") as f:
             f.write(blob)

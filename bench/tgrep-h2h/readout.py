@@ -26,10 +26,22 @@ ARMS = ["rw-warm", "rw-warm-all", "tgrep-warm", "tgrep-cold", "rg"]
 AGREE = ["L1", "L6", "L7", "L8", "R1", "R3", "R4", "R7", "R8"]
 
 
-def med(c, arm, qs):
-    v = [C[c]["queries"][q][arm].get("median_s") for q in qs if q in C[c]["queries"]]
+def med(c, arm, qs=None):
+    """Mean median-wall over `qs` (default: every query this corpus recorded for `arm`)."""
+    keys = qs if qs is not None else list(C[c]["queries"])
+    v = [C[c]["queries"][q][arm].get("median_s") for q in keys if q in C[c]["queries"]]
     v = [x for x in v if x is not None and x < 1e9]
     return sum(v) / len(v) if v else float("nan")
+
+
+def rwkeys(c):
+    """The queries this corpus actually ran the ripwire arms on.
+
+    The llvm rung runs ripwire over a DECLARED subset (see run.py's RW_QUERIES), so a Q* that
+    compared ripwire's mean over six queries against rg's over sixteen would be comparing two
+    different workloads. Every ripwire-vs-X figure below is restricted to this set; the rg-vs-tgrep
+    figures use all sixteen, and the table says which is which."""
+    return [q for q, row in C[c]["queries"].items() if row["rw-warm"].get("median_s") is not None]
 
 
 print("## corpus ladder — one-off costs\n")
@@ -57,18 +69,20 @@ for c in ORDER:
         print("| %s | `%s` | %s | %d |" % (q, row["pat"], " | ".join(cells), row["rg"]["bytes"]))
 
 print("\n## Q* — queries per session at which an index pays for itself\n")
-print("| corpus | files | mean q_scan (rg) | mean q_scan (rw warm) | mean q_index (tgrep) "
+print("| corpus | files | ripwire queries | mean q_scan (rg, all 16) | mean q_scan (rw warm) | mean q_index (tgrep, all 16) "
       "| B (tgrep build) | Q* vs rg | Q* vs ripwire-warm |")
 print("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
-allq = list(C[ORDER[0]]["queries"])
 for c in ORDER:
     B = C[c]["tgrep_index"]["wall_s"]
-    qs = med(c, "rg", allq)
-    qw = med(c, "rw-warm", allq)
-    qi = med(c, "tgrep-warm", allq)
-    f = lambda s: ("%.0f" % (B / (s - qi))) if s > qi else "never (index is slower)"
-    print("| %s | %d | %.4f | %.4f | %.4f | %.3f | %s | %s |" %
-          (c, C[c]["files_rg"], qs, qw, qi, B, f(qs), f(qw)))
+    rwq = rwkeys(c)                      # the ripwire arms' own query set on this rung
+    qs = med(c, "rg")                    # all 16
+    qi = med(c, "tgrep-warm")            # all 16
+    qw = med(c, "rw-warm", rwq)          # the declared subset
+    qi_rw = med(c, "tgrep-warm", rwq)    # the SAME subset, for the ripwire comparison
+    f = lambda s, ix: ("%.1f" % (B / (s - ix))) if s > ix else "never (index is slower)"
+    print("| %s | %d | %d/%d | %.4f | %.4f | %.4f | %.3f | %s | %s |" %
+          (c, C[c]["files_rg"], len(rwq), len(C[c]["queries"]), qs, qw, qi, B,
+           f(qs, qi), f(qw, qi_rw)))
 
 print("\n## agreement matrix — (path,line) hit sets\n")
 print("| corpus | q | ripwire | tgrep | rg | verdict |")

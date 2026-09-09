@@ -13123,6 +13123,7 @@ size, does a **persisted** index pay for itself? That is Q\* = B / (q_scan − q
 | rwtree | 2,240 | 0.383 s | 0.36 GB | 10.0 MB | 0.437 s | 211 MB | 33.4 MB |
 | privcpp | 3,248 | 1.097 s | 0.83 GB | 21.4 MB | 0.395 s | 132 MB | 47.8 MB |
 | go | 15,865 | 1.826 s | 1.27 GB | 58.8 MB | 1.042 s | 159 MB | 120.3 MB |
+| llvm-project | 182,555 | 252.7 s | 6.01 GB | 542.0 MB | 11.1 s | 541 MB | 1,037.3 MB |
 
 **What "warm" means for `--grep`, measured.** The warm cache restores the tree-sitter symbol graph;
 it does not cache text. On `go`: cold 1.826 s, warm 0.512 s — the 1.3 s difference is the parse, and
@@ -13133,19 +13134,47 @@ the 0.51 s that remains is the read-and-scan of 227 MB, paid again on every sing
 
 Means over all 16 frozen queries; B is tgrep's index build.
 
-| corpus | files | q_scan (rg) | q_scan (ripwire warm) | q_index (tgrep) | B | Q\* vs rg | Q\* vs ripwire-warm |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| rwsrc | 159 | 0.0107 s | 0.0783 s | 0.0128 s | 0.056 s | never — the index is slower | 1 |
-| rwtree | 2,240 | 0.1062 s | 0.3185 s | 0.0602 s | 0.437 s | 10 | 2 |
-| privcpp | 3,248 | 0.1087 s | 0.3237 s | 0.0342 s | 0.395 s | 5 | 1 |
-| go | 15,865 | 0.3707 s | 1.0095 s | 0.1418 s | 1.042 s | 5 | 1 |
+| corpus | files | ripwire queries | q_scan (rg, all 16) | q_scan (ripwire warm) | q_index (tgrep, all 16) | B | Q\* vs rg | Q\* vs ripwire-warm |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| this tree's `src/` | 159 | 16/16 | 0.0107 s | 0.0783 s | 0.0128 s | 0.056 s | never — the index is slower | 0.9 |
+| the ripwire tree | 2,240 | 16/16 | 0.1062 s | 0.3185 s | 0.0602 s | 0.437 s | **9.5** | **1.7** |
+| privcpp | 3,248 | 16/16 | 0.1087 s | 0.3237 s | 0.0342 s | 0.395 s | **5.3** | **1.4** |
+| go | 15,865 | 16/16 | 0.3707 s | 1.0095 s | 0.1418 s | 1.042 s | **4.6** | **1.2** |
+| llvm-project | 182,555 | 6/16 | 7.2005 s | 197.4362 s | 2.7513 s | 11.113 s | **2.5** | **0.1** |
+
+The ripwire column on the llvm rung is the declared six-query subset (`run.py`'s `RW_QUERIES`), so its
+Q\* is computed against tgrep's mean over *those same six*, never against tgrep's mean over sixteen —
+the two would be different workloads. Every other rung ran all sixteen on every arm.
 
 **The realistic session query count, with an instrument.** `~/.ripwire/substitution.jsonl` classifies
 every recorded tool event; 14,872 carry `class="grep"` across 522 sessions. Of the 96 sessions that
 grep at all, the median issues **26** grep-class commands (p25 8, p75 198, p90 449, max 1,975).
-Q\* ≤ 10 from 2,240 files upward, against a median of 26: **the crossover has already flipped at the
-smallest realistic repository size, and by an order of magnitude.** It has not flipped at 159 files,
-where rg outruns the index outright.
+Against rg, Q\* is 9.5 queries at 2,240 files, 5.3 at 3,248, 4.6 at 15,865 and **2.5 at 182,555**;
+against ripwire-warm it is 1.7, 1.4, 1.2 and **0.1** — below a single query at the top rung, meaning a
+resident index would have paid for itself before the first `--grep` on that tree finished. Against a
+median of 26 grep-class commands per grepping session: **the crossover has already flipped at the
+smallest realistic repository size, and by one to two orders of magnitude.** It has not flipped at 159
+files, where rg outruns the index outright — the one honest "no" in the table.
+
+**The top rung, where the gap stops being an optimisation question.** Per-query medians on
+llvm-project (182,555 files, 2.9 GB), ripwire warm:
+
+| query | ripwire warm | tgrep (resident) | tgrep `--no-index` | rg |
+| --- | ---: | ---: | ---: | ---: |
+| L1 `pthread_mutex_lock` (rare literal) | 193.09 s | 0.011 s | 8.70 s | 5.25 s |
+| L3 `TODO` (medium literal) | 195.58 s | 0.089 s | 8.33 s | 4.48 s |
+| L6 `zzqxvnotpresentzz` (absent) | 176.35 s | 0.018 s | 7.72 s | 4.30 s |
+| R1 `^#include` | 233.06 s | 1.81 s | 13.57 s | 5.85 s |
+| R3 `malloc.*free` | 215.34 s | 0.028 s | 9.08 s | 4.09 s |
+| R4 `[Qq]z[Xx]v.*[Jj]w` (prefilter-defeating, 0 hits) | 171.19 s | 11.24 s | 17.38 s | 13.47 s |
+| L2 `return` (delivery-bound, 326 MB out) | not run | 7.30 s | 9.86 s | 8.73 s |
+| L4 `int` (delivery-bound, 563 MB out) | not run | 10.43 s | 14.43 s | **6.90 s** |
+
+Two readings. First, **ripwire needs three minutes to say "not found"** on that tree — 176 s against
+tgrep's 0.018 s and rg's 4.30 s. Second, **L4 is the one cell where rg beats tgrep**, which is exactly
+the failure mode tgrep's own BENCHMARKS.md names ("a query returning tens of thousands of matches can
+spend more on delivery than the index ever saved on file selection") — their model predicts our data
+on their own losing cell, which is the reason to trust the rest of their table.
 
 **Would it fit ripwire's own cache?** The two ratios that decide whether "put the index in the cache"
 is even a candidate:
@@ -13156,6 +13185,7 @@ is even a candidate:
 | rwtree | 1.14× | 3.33× |
 | privcpp | 0.36× | 2.23× |
 | go | 0.57× | 2.05× |
+| llvm-project | 0.04× | 1.91× |
 
 Building a trigram index costs the same order as the parse the warm cache already pays for once, and
 would grow the artifact 2–3×. **It is affordable, and it would buy almost nothing — which is the most
