@@ -1102,28 +1102,41 @@ inline std::vector<std::string> rubyMixinTargets( TSNode n, std::string_view src
 // restricts to constants (a class name, a superclass, a mixin argument); a RECEIVER is not such a position —
 // `repo::Finder.call` and `self.class::Foo.bar` are scope_resolutions whose head is an identifier or a call,
 // and naming them as constants would invent a dependency on nothing. Empty when any segment is not a constant.
+//
+// A LOOP, not a recursion (parser version 85). `A::B::C` parses left-nested — scope_resolution(scope:
+// scope_resolution(scope: A, name: B), name: C) — so the chain's depth is its segment count, and a recursive
+// check spent one native frame per segment: a 5000-segment receiver overflowed a parse worker's stack (SIGBUS,
+// measured on macOS) and took the whole run with it, before the depth-bounded walk in captureIncludes ever saw
+// the node. The gate builds a 150 000-segment chain and expects one directive.
 inline bool rubyIsConstantChain( TSNode n ) noexcept
 {
-    if( ts_node_is_null( n ) )
+    for( ;; )
     {
-        return false;
+        if( ts_node_is_null( n ) )
+        {
+            return false;
+        }
+        const char* t = ts_node_type( n );
+        if( std::strcmp( t, "constant" ) == 0 )
+        {
+            return true;
+        }
+        if( std::strcmp( t, "scope_resolution" ) != 0 )
+        {
+            return false;
+        }
+        const TSNode name  = ts_node_child_by_field_name( n, "name", 4 );
+        const TSNode scope = ts_node_child_by_field_name( n, "scope", 5 );
+        if( ts_node_is_null( name ) || std::strcmp( ts_node_type( name ), "constant" ) != 0 )
+        {
+            return false;
+        }
+        if( ts_node_is_null( scope ) )
+        {
+            return true;   // null scope = the absolute `::A` form: the chain's head
+        }
+        n = scope;   // one segment inward; the loop is the recursion, minus the frame
     }
-    const char* t = ts_node_type( n );
-    if( std::strcmp( t, "constant" ) == 0 )
-    {
-        return true;
-    }
-    if( std::strcmp( t, "scope_resolution" ) != 0 )
-    {
-        return false;
-    }
-    const TSNode name  = ts_node_child_by_field_name( n, "name", 4 );
-    const TSNode scope = ts_node_child_by_field_name( n, "scope", 5 );
-    if( ts_node_is_null( name ) || std::strcmp( ts_node_type( name ), "constant" ) != 0 )
-    {
-        return false;
-    }
-    return ts_node_is_null( scope ) || rubyIsConstantChain( scope );   // null scope = the absolute `::A` form
 }
 
 // Parser version 83 (test/rubyrecvcheck.sh): a CONSTANT RECEIVER — `User.find`, `App::Mailer.deliver`,
@@ -1816,7 +1829,7 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
     {
         stack.push_back( { kids[i - 1], 0, false, kNoOpenIdx } );   // nothing is inside a function or an open at the file root
     }
-    HashMap<std::string, char> seenReceivers;   // (openIdx '\x1f' written) → seen; per file, receivers only
+    HashMap<std::string, std::uint32_t> seenReceivers;   // (openIdx '\x1f' written) → index in incs; per file, receivers only
 
     while( !stack.empty() )
     {
@@ -1914,14 +1927,23 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
         if( !target.empty() && isReceiver )
         {
             // The receiver dedupe (parser version 83). Key = innermost open + the name as written; the FIRST
-            // occurrence in source order wins and carries the byte, and with it the lazy bit. Declarative
-            // directives never come through here: each `include`/`< Base`/`autoload` IS a statement of its own.
+            // occurrence in source order carries the byte. The lazy bit is the AND over every occurrence (parser
+            // version 85): a receiver inside a method written ABOVE the same receiver at class-body level used to
+            // leave the directive lazy, and resolve.h's pair rule — one load-time directive makes the pair
+            // load-time — then never saw the load-time site, so the structure lost a real dependency and the
+            // answer depended on statement order. A later load-time site now clears the retained record's bit.
+            // Declarative directives never come through here: each `include`/`< Base`/`autoload` IS a statement.
             std::string key = std::to_string( frame.openIdx );
             key += '\x1f';
             key += target;
-            if( seenReceivers.try_emplace( std::move( key ), 1 ).second )
+            if( auto [ it, fresh ] = seenReceivers.try_emplace( std::move( key ), 0u ); fresh )
             {
                 emitDirective( std::move( target ), isSymbolic );
+                it->second = static_cast<std::uint32_t>( incs.size() - 1 );
+            }
+            else if( !isLazy )
+            {
+                incs[ it->second ].isLazy = false;
             }
         }
         else if( !target.empty() )

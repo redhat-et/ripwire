@@ -15,6 +15,55 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Fixed — a Ruby receiver's lazy bit is order-blind, and a deep constant chain no longer overflows the stack (parser version 85)
+
+Two defects in the receiver round (parser version 83 above, 84 on main after the renumber), both found by
+review after the merge and both reproduced before they were fixed.
+
+**A load-time site below a lazy one was lost.** The receiver dedupe keeps one `Include` per (file, innermost
+open, written name), and the first occurrence in source order carried the lazy bit. A `Helper.fmt` inside a
+method written *above* the same `Helper.fmt` at class-body level therefore left the directive lazy; resolve.h's
+pair rule — one load-time directive makes the pair load-time — never saw the load-time site, and the
+structure dropped a real dependency. Two files that differ only in the order of those two lines read `ccd="3"
+shape="vertical"` with a god file one way and `ccd="2" shape="horizontal" lazy_edges="1"` the other. The lazy
+bit is now the AND over every occurrence: the first site still carries the byte, and a later load-time site
+clears the bit on the retained record (`captureIncludes`, `seenReceivers` now maps to the record's index).
+
+**A 5000-segment chain killed the run.** `rubyIsConstantChain` recursed once per segment of a left-nested
+`scope_resolution`, and the depth bound in `captureIncludes` sits *after* `directiveTargetOf`, so a generated
+`A::A::…::A.call` of 5 000 segments overflowed a parse worker's stack — SIGBUS, exit 138, no output, measured
+on macOS; 2 000 survived. The check is a loop now. Nothing else on the path recurses per segment: the walk is
+an explicit stack, the resolver splits the text.
+
+**`--help` said `lazy="1"` was TS/JS only.** It has read Ruby closures and autoloads since parser version 83;
+the `--impact` line now says so, and `docs/COMMANDS.md` is regenerated from it.
+
+Measured (`--deps --limit=100000`, parser version 83 → 85, the same four corpora as the receiver round; the
+gems are Rails 7.2.3.2, the apps are the same two):
+
+| corpus | ccd | nccd | shape | lazy_edges | bytes |
+| --- | --- | --- | --- | --- | --- |
+| activesupport `lib/` (282) | 15 299 → 15 299 | 7.59 → 7.59 | tangled | 945 → 935 | 75 970 → 75 988 |
+| activerecord `lib/` (395) | 4 088 → 4 325 | 1.36 → 1.44 | vertical | 1 026 → 1 023 | 114 745 → 114 763 |
+| a Rails app, 4683 files / 3532 `.rb` | 13 170 → 13 172 | 0.32 → 0.32 | horizontal | 5 632 → 5 630 | 750 913 → 750 915 |
+| a second Rails app, 1967 / 1895 `.rb` | 6 382 → 6 382 | 0.34 → 0.34 | horizontal | 1 830 → 1 830 | 363 733 → 363 750 |
+
+Read together: the pairs that flip are the ones written lazy-first and load-time-second in one body — ten on
+activesupport, three on activerecord, two on the first app, none on the second — and on activerecord three of
+them sit on a spine (ccd +237). No shape moves. Wall time unchanged. Cold == warm on activerecord and the
+first app; two `--no-cache` runs identical on all four.
+
+**Record shape unchanged**, so cache format 17 holds; the extraction identity moved (a cached lazy bit could be
+wrong), so cached Ruby files re-parse once. `kIngestParserVerMirror` moves in the same diff.
+
+Gate: `test/rubyrecvcheck.sh` gains `lib/app/eager_after_lazy.rb` (18 fixture files; ccd 20 → 22, helper.rb
+afferent 2 → 3, a row arm with no `lazy_edges=`, the `--impact=Helper` importer tier) and a deep-chain arm that
+generates a 150 000-segment receiver at gate time and expects one directive and exit 0. Written red first: six
+arms fail against the parser-version-84 binary — the eager-after-lazy importer reads `lazy="1"`, health reads
+`ccd="21" lazy_edges="10"`, the deep chain exits 138. ASan/UBSan clean on both fixtures, the deep chain, and
+the cache round-trip. Re-pins with reasons in-file: `qschemetrip.hash` (parser mirror), `printf_parity.manifest`
+(`help` bytes).
+
 ### Added — a Ruby constant receiver is a dependency (parser version 83)
 
 Round two of the Ruby constant work. Parser version 82 gave the declarative spellings — `class X < Base`,

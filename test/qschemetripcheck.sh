@@ -48,6 +48,11 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   stays 8. The same commit flips lintrules.h::dependencyCapable for those four languages, which moves
 #   dep_files=/ccd/acd/nccd and --arch's propagation_cost on any corpus holding them; that is disclosed in
 #   the output itself as <health dep_langs=> rather than only here.
+# 2026-09-09, RUBY RECEIVER DEDUPE + DEEP CHAIN (test/rubyrecvcheck.sh): kParserVer 84 -> 85 and
+#   kIngestParserVerMirror -> 85. A receiver's lazy bit is now the AND over its occurrences (a method-body site
+#   above a class-body site used to leave the directive lazy, and the structure lost the load-time edge), and
+#   the constant-chain check is a loop (a 5000-segment chain overflowed a worker stack). Record shape and
+#   kCacheVersion (17) unchanged — cached Ruby files re-parse; no serialize/deserialize/computeSnapshot change.
 # 2026-09-08, RUBY CONSTANT RECEIVERS (test/rubyrecvcheck.sh): kParserVer 82 -> 83 and kIngestParserVerMirror
 #   -> 83. A constant RECEIVER (`User.find`, `App::Mailer.deliver`) is a symbolic Include, one per (file,
 #   innermost open, written name), lazy inside a closure; the Ruby walk descends every node. The record shape

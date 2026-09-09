@@ -203,7 +203,7 @@ constexpr std::uint32_t kCacheVersion = 18;           // 18: #62 — call refs i
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 84;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 85;           // bump on any grammar/.scm/extraction change
                                                       // 84 = 2026-09-08 (test/rubyrecvcheck.sh): a Ruby constant
                                                       //    RECEIVER (`User.find`, `App::Mailer.deliver`) is a
                                                       //    symbolic directive, one per (file, innermost open,
