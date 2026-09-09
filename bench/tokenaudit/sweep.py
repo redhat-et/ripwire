@@ -25,9 +25,10 @@
 # WHAT IT IS NOT. Not a gate. tiktoken is not a build dependency and never will be (G3: one
 # deterministic build step, nothing host-installed), and o200k_base is not Claude's tokenizer —
 # it is the closest public stand-in, which is exactly why kTokenCalib was calibrated against it and
-# why a gate that needs it at runtime would be a dependency problem. The gate this round adds
-# (test/estcalibcheck.sh) reads PINNED counts out of a manifest this script writes; re-running this
-# script is how the manifest is regenerated, deliberately by hand.
+# why a gate that needs it at runtime would be a dependency problem. The gate arm this round adds
+# (test/tokenbudgetcheck.sh #18 — absorbed into the gate that already owns est_tokens rather than added
+# beside it) reads PINNED counts out of test/estcalib.manifest, which bench/tokenaudit/pin.py writes;
+# regenerating that manifest is a deliberate manual step, never a build step.
 #
 # Usage:
 #   python3 bench/tokenaudit/sweep.py --bin build/ripwire --out bench/tokenaudit/results/x.json \
@@ -142,7 +143,14 @@ def main():
     encs = {"o200k": tiktoken.get_encoding("o200k_base"),
             "cl100k": tiktoken.get_encoding("cl100k_base")}
 
-    result = {"bin": binpath, "corpora": {}, "schema": "ripwire.tokenaudit/v1"}
+    # REDACTION IS BY CONSTRUCTION, not by review. This file's output is COMMITTED, and the corpora a
+    # calibration run wants are exactly the ones that must not appear in a public repository: someone's
+    # home directory, and a private tree whose NAME is the leak. test/ripwirepubliccheck.sh caught all
+    # three classes (an absolute home path, a private tree's name, a personal identifier) on the first run of
+    # this script, in the results JSON. So no path is written at all: the caller's LABEL is the identity,
+    # and a label that names a private tree is the caller's to choose well.
+    result = {"bin": os.path.basename(binpath), "corpora": {}, "schema": "ripwire.tokenaudit/v1",
+              "redaction": "corpus roots and the binary path are labels, never paths — this file is public"}
     ver, _, _ = run(binpath, ".", ["--version"])
     result["version"] = ver.decode("utf-8", "replace").strip().splitlines()[0] if ver else ""
 
@@ -182,7 +190,7 @@ def main():
                 else:
                     row["compact_refused"] = cerr.strip()[:200]
             rows.append(row)
-        result["corpora"][name] = {"root": path, "symbol": sym, "file": fil, "rows": rows}
+        result["corpora"][name] = {"root_label": name, "symbol": sym, "file": fil, "rows": rows}
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w") as f:

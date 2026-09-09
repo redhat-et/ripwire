@@ -1,9 +1,9 @@
 {
- "bin": "/Users/qgames/AppDevelopLocal/project2/rw-hv-B/build/ripwire",
+ "bin": "build/ripwire",
  "corpora": {
-  "canyonraid48": {
+  "private-cpp-tree": {
    "file": "math/doctest.h",
-   "root": "/Users/qgames/AppDevelopLocal/project2/canyonraid48",
+   "root_label": "a private 1500-file C++ tree",
    "rows": [
     {
      "argv": [],
@@ -450,7 +450,7 @@
   },
   "self": {
    "file": "src/infra/svector.h",
-   "root": "/Users/qgames/AppDevelopLocal/project2/rw-hv-B",
+   "root_label": "this repository",
    "rows": [
     {
      "argv": [],
@@ -901,6 +901,7 @@
    "symbol": "buf"
   }
  },
+ "redaction": "corpus roots and the binary path are recorded as LABELS, never as absolute paths, and the second corpus is named by its shape rather than its name: it is a private tree and this file is public. bench/tokenaudit/sweep.py writes it this way; nothing else was altered, every count below is the measurement as taken.",
  "schema": "ripwire.tokenaudit/v1",
  "version": "ripwire 0.5.0 (dev, AppleClang 21.0.0.21000101, emit=std::print, built_from=4c10be9d7)"
 }

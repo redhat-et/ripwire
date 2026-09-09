@@ -19,6 +19,10 @@ The split is the point. G3 is one deterministic build step with nothing host-ins
 imported tiktoken would be a dependency the build contract forbids. The tokenizer runs by hand and writes
 numbers; the gate reads numbers. Same shape as `test/printf_parity.manifest`.
 
+The corpus **labels** are what the results JSON records — never a path, never a private tree's name.
+`test/ripwirepubliccheck.sh` caught all three leak classes in this directory's first committed results
+file; `sweep.py` now writes labels by construction so the gate has nothing to catch.
+
 ```bash
 python3 -m venv /tmp/tokvenv && /tmp/tokvenv/bin/pip install tiktoken
 /tmp/tokvenv/bin/python bench/tokenaudit/sweep.py --bin build/ripwire \
