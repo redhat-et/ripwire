@@ -13224,7 +13224,10 @@ Three buckets, and only the first was a defect in the matcher:
   `go`, 14 against 2,389. `--regex` hands a whole file's bytes to one `std::sregex_iterator` built
   with `ECMAScript | optimize`, so ECMAScript's `^` matched only at offset 0 of that buffer. The verb's
   own answer is line-shaped. Fixed by making `grepScanText` search **one line at a time**
-  (`src/search.h`), gated by `test/grepanchorcheck.sh`; post-fix ripwire returns exactly 1,648.
+  (`src/search.h`), gated by `test/grepanchorcheck.sh`. Post-fix, ripwire's `(path,line)` hit set over
+  this tree's `src/` equals `rg -n`'s **exactly** on five anchored patterns: `^#include` 1,648,
+  `^int ` 18, `^\s*//` 41,005, `h>$` 42, and `^$` 9,936 — the last two being the zero-width cases the
+  trailing-newline rule decides.
   **`std::regex::multiline` is the obvious fix and it is unusable**: Apple libc++'s
   `__l_anchor_multiline<char>::__exec` reads `*std::prev(__s.__current_)` before testing whether the
   position is the first character, so at offset 0 it reads one byte before the buffer — `--regex='^'`
