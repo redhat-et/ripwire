@@ -13165,8 +13165,19 @@ read a postings index would save is a read the rest of the tool has already stop
 
 ### Losses first — the agreement matrix
 
-(path, line) hit sets, ripwire `--grep-in=any --limit=1000000` against tgrep and rg. **tgrep and rg
-agreed with each other on every query at every rung**, so every disagreement below is ripwire's.
+(path, line) hit sets, ripwire `--grep-in=any --limit=1000000` against tgrep and rg, over the nine
+queries the frozen set declares as the agreement subset. **tgrep and rg agreed with each other on
+every one of those, at every rung**, so every disagreement below is ripwire's.
+
+Outside that subset tgrep and rg differ on exactly three `go` cells, and both causes were traced
+rather than assumed — neither is the trigram index, since `tgrep --no-index` reproduces both:
+`R2 TODO|FIXME|XXX` misses four lines in `src/regexp/testdata/basic.dat`, because `.dat` is one of
+the ~65 extensions tgrep's walker rejects as binary before ever reading the file
+(`tgrep-core/src/walker.rs`), which ripgrep does not do; `L4 int` and `L5 err` differ by a byte on
+the lines of `crlf.input`-style files, because tgrep always strips a trailing `\r` where rg keeps it
+unless told otherwise. Both are documented in tgrep's README — and neither is disclosed on the ANSWER, which
+is the asymmetry the disclosure table below is about: ripwire's skipped classes ride on the root
+element, tgrep's live in prose.
 
 | corpus | exact agreement, pre-fix | after this round's two fixes | what moved |
 | --- | --- | --- | --- |
