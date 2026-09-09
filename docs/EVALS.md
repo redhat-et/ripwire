@@ -13104,8 +13104,8 @@ verb's `at=` anchor for any determinism arm running beside the harness.
 
 **Versions and corpora.** ripwire `4c10be9d`, plain build (never Release: `NDEBUG` compiles
 `DEGRADED_PATH_ALERT` out). tgrep 1.0.5 at `50f5d8f6a54e9e4d16d021954cfcd4e77d342d7b`, `cargo build` in its release profile. `rg` from Homebrew, always with `--sort path`. One 18-core macOS arm64 host, shared with
-concurrent harvest lanes. Ladder by ripgrep's own file-listing count: `rw-hv-A/src` 159 · the ripwire tree 2,240 ·
-`canyonraid48` 3,248 · `golang/go` `49c3ea64` 15,865 · `llvm/llvm-project` `2061c237` (shallow) 182,555.
+concurrent harvest lanes. Ladder by ripgrep's own file-listing count: this tree's `src/` 159 · the whole ripwire tree 2,240 ·
+a private C++/ObjC++ tree (`privcpp` in the harness, named in the local ledger) 3,248 · `golang/go` `49c3ea64` 15,865 · `llvm/llvm-project` `2061c237` (shallow) 182,555.
 
 **The question, stated correctly — the round brief's framing was half right.** `--grep`/`--regex` was
 a Zoekt-style trigram index until 2026-07-27, when P3 removed it: building a **per-invocation** index
@@ -13121,7 +13121,7 @@ size, does a **persisted** index pay for itself? That is Q\* = B / (q_scan − q
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | rwsrc | 159 | 0.190 s | 0.17 GB | 4.6 MB | 0.056 s | 41 MB | 6.3 MB |
 | rwtree | 2,240 | 0.383 s | 0.36 GB | 10.0 MB | 0.437 s | 211 MB | 33.4 MB |
-| canyonraid48 | 3,248 | 1.097 s | 0.83 GB | 21.4 MB | 0.395 s | 132 MB | 47.8 MB |
+| privcpp | 3,248 | 1.097 s | 0.83 GB | 21.4 MB | 0.395 s | 132 MB | 47.8 MB |
 | go | 15,865 | 1.826 s | 1.27 GB | 58.8 MB | 1.042 s | 159 MB | 120.3 MB |
 
 **What "warm" means for `--grep`, measured.** The warm cache restores the tree-sitter symbol graph;
@@ -13137,7 +13137,7 @@ Means over all 16 frozen queries; B is tgrep's index build.
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | rwsrc | 159 | 0.0107 s | 0.0783 s | 0.0128 s | 0.056 s | never — the index is slower | 1 |
 | rwtree | 2,240 | 0.1062 s | 0.3185 s | 0.0602 s | 0.437 s | 10 | 2 |
-| canyonraid48 | 3,248 | 0.1087 s | 0.3237 s | 0.0342 s | 0.395 s | 5 | 1 |
+| privcpp | 3,248 | 0.1087 s | 0.3237 s | 0.0342 s | 0.395 s | 5 | 1 |
 | go | 15,865 | 0.3707 s | 1.0095 s | 0.1418 s | 1.042 s | 5 | 1 |
 
 **The realistic session query count, with an instrument.** `~/.ripwire/substitution.jsonl` classifies
@@ -13154,7 +13154,7 @@ is even a candidate:
 | --- | ---: | ---: |
 | rwsrc | 0.29× | 1.37× |
 | rwtree | 1.14× | 3.33× |
-| canyonraid48 | 0.36× | 2.23× |
+| privcpp | 0.36× | 2.23× |
 | go | 0.57× | 2.05× |
 
 Building a trigram index costs the same order as the parse the warm cache already pays for once, and
@@ -13172,13 +13172,13 @@ agreed with each other on every query at every rung**, so every disagreement bel
 | --- | --- | --- | --- |
 | rwsrc | 8 / 9 | **9 / 9** | `^#include` 1 → 1,648 (rg: 1,648) |
 | rwtree | 6 / 9 | 6 / 9 | `^#include` 29 → 2,149 of rg's 2,828; every one of the 679 still missing is under `third_party/` |
-| canyonraid48 | 7 / 9 | 7 / 9 | `^#include` 26 → 6,171 against rg's 6,171 — but with a ±4 symmetric difference (4 in `CMakeFiles/`, pruned; 4 in a gitignored `.bak`, served) |
+| privcpp | 7 / 9 | 7 / 9 | `^#include` 26 → 6,171 against rg's 6,171 — but with a ±4 symmetric difference (4 in `CMakeFiles/`, pruned; 4 in a gitignored `.bak`, served) |
 | go | 4 / 9 | not re-measured — a ripwire pass over `go` is ~1 s a query and the machine was committed to the llvm rung | — |
 
 Three buckets, and only the first was a defect in the matcher:
 
 - **Bucket A — `^` and `$` were FILE anchors. FIXED.** `--regex='^#include'` reported 1 hit on
-  `rw-hv-A/src` where `rg -n '^#include' src` reported 1,648; on canyonraid48, 26 against 6,171; on
+  this tree's `src/` where `rg -n '^#include' src` reported 1,648; on the private tree, 26 against 6,171; on
   `go`, 14 against 2,389. `--regex` hands a whole file's bytes to one `std::sregex_iterator` built
   with `ECMAScript | optimize`, so ECMAScript's `^` matched only at offset 0 of that buffer. The verb's
   own answer is line-shaped. Fixed by `std::regex::multiline` through one shared `kGrepRegexSyntax`
@@ -13197,14 +13197,14 @@ Three buckets, and only the first was a defect in the matcher:
   on the CLI root and the MCP twin, and the legend's false clause is corrected. The *policy* is
   unchanged and remains right (LINEAGE §3a, the ripgrep row); what changed is that the answer says so.
 - **Bucket C — unindexed extensions past the 500-candidate cap. NOT FIXED, already disclosed.**
-  `.s` on `go` (27 hits of `pthread_[a-z_]+_init` missing), `.yaml` on canyonraid48 (42 of 46 hits of
+  `.s` on `go` (27 hits of `pthread_[a-z_]+_init` missing), `.yaml` on the private tree (42 of 46 hits of
   `[0-9a-f]{8}-[0-9a-f]{4}`). `unindexed_candidates_capped="1"` already says the candidate list was a
   floor, so this is a documented ceiling and not a silent loss. Raising it is a ranking question, not
   a correctness one, and is not attempted here.
 
 One further defect the matrix surfaced, in the *other* direction and NOT fixed here: `--grep` **serves**
 hits from files the repository's `.gitignore` excludes when those files carry an unindexed extension —
-`canyon/personality.cpp.bak` on canyonraid48 (`.gitignore:78:canyon/*.bak`), four hits, which `rg` does
+a gitignored `.bak` file in the private tree (`.gitignore:78:canyon/*.bak`), four hits, which `rg` does
 not serve. `recordPreSizeDrop` records the `unsupported` row *before* the ignore test
 (`src/ingest_crawl.h`, and that ordering is deliberate and commented), so `grepCollectAux` never sees
 the ignore verdict. Recorded here with its fix location; not folded, because the safe fix moves a crawl

@@ -20,7 +20,7 @@ import sys
 
 R = json.load(open(sys.argv[1] if len(sys.argv) > 1 else "results.json"))
 C = R["corpora"]
-ORDER = [c for c in ("rwsrc", "rwtree", "canyonraid48", "go", "llvm") if c in C]
+ORDER = [c for c in ("rwsrc", "rwtree", "privcpp", "go", "llvm") if c in C]
 ORDER += [c for c in C if c not in ORDER]
 ARMS = ["rw-warm", "rw-warm-all", "tgrep-warm", "tgrep-cold", "rg"]
 AGREE = ["L1", "L6", "L7", "L8", "R1", "R3", "R4", "R7", "R8"]

@@ -1,7 +1,7 @@
 {
  "corpora": {
-  "canyonraid48": {
-   "corpus": "canyonraid48",
+  "privcpp": {
+   "corpus": "privcpp",
    "files_rg": 3248,
    "queries": {
     "L1": {
@@ -18,7 +18,7 @@
        "-F",
        "-e",
        "pthread_mutex_lock",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -29,8 +29,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=pthread_mutex_lock",
        "--grep-in=any"
       ],
@@ -42,8 +42,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=pthread_mutex_lock",
        "--grep-in=any",
        "--limit=1000000"
@@ -62,7 +62,7 @@
        "next_offset": "0",
        "offset": "0",
        "pattern": "pthread_mutex_lock",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "0",
        "total": "0",
        "unindexed_files_scanned": "58",
@@ -79,7 +79,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -89,7 +89,7 @@
        "-F",
        "-e",
        "pthread_mutex_lock",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 0,
       "max_s": 2.7352,
@@ -101,7 +101,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -110,7 +110,7 @@
        "-F",
        "-e",
        "pthread_mutex_lock",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -134,7 +134,7 @@
        "-F",
        "-e",
        "return",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 4667502,
       "hits_set": 21106,
@@ -145,8 +145,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=return",
        "--grep-in=any"
       ],
@@ -158,8 +158,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=return",
        "--grep-in=any",
        "--limit=1000000"
@@ -178,7 +178,7 @@
        "next_offset": "20355",
        "offset": "0",
        "pattern": "return",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "20355",
        "total": "20355",
        "unindexed_files_scanned": "58",
@@ -195,7 +195,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -205,7 +205,7 @@
        "-F",
        "-e",
        "return",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 4666944,
       "max_s": 2.7281,
@@ -217,7 +217,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -226,7 +226,7 @@
        "-F",
        "-e",
        "return",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 4666944,
       "hits_set": 21106,
@@ -250,7 +250,7 @@
        "-F",
        "-e",
        "TODO",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 57636,
       "hits_set": 295,
@@ -261,8 +261,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=TODO",
        "--grep-in=any"
       ],
@@ -274,8 +274,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=TODO",
        "--grep-in=any",
        "--limit=1000000"
@@ -294,7 +294,7 @@
        "next_offset": "304",
        "offset": "0",
        "pattern": "TODO",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "304",
        "total": "304",
        "unindexed_files_scanned": "58",
@@ -311,7 +311,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -321,7 +321,7 @@
        "-F",
        "-e",
        "TODO",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 57626,
       "max_s": 2.7408,
@@ -333,7 +333,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -342,7 +342,7 @@
        "-F",
        "-e",
        "TODO",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 57626,
       "hits_set": 295,
@@ -366,7 +366,7 @@
        "-F",
        "-e",
        "int",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 14650694,
       "hits_set": 65953,
@@ -377,8 +377,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=int",
        "--grep-in=any"
       ],
@@ -390,8 +390,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=int",
        "--grep-in=any",
        "--limit=1000000"
@@ -410,7 +410,7 @@
        "next_offset": "76558",
        "offset": "0",
        "pattern": "int",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "76558",
        "total": "76558",
        "unindexed_files_scanned": "58",
@@ -427,7 +427,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -437,7 +437,7 @@
        "-F",
        "-e",
        "int",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 14647486,
       "max_s": 2.7977,
@@ -449,7 +449,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -458,7 +458,7 @@
        "-F",
        "-e",
        "int",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 14647486,
       "hits_set": 65953,
@@ -482,7 +482,7 @@
        "-F",
        "-e",
        "err",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 3304658,
       "hits_set": 7859,
@@ -493,8 +493,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=err",
        "--grep-in=any"
       ],
@@ -506,8 +506,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=err",
        "--grep-in=any",
        "--limit=1000000"
@@ -526,7 +526,7 @@
        "next_offset": "8870",
        "offset": "0",
        "pattern": "err",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "8870",
        "total": "8870",
        "unindexed_files_scanned": "58",
@@ -543,7 +543,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -553,7 +553,7 @@
        "-F",
        "-e",
        "err",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 3304629,
       "max_s": 2.82,
@@ -565,7 +565,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -574,7 +574,7 @@
        "-F",
        "-e",
        "err",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 3304629,
       "hits_set": 7859,
@@ -598,7 +598,7 @@
        "-F",
        "-e",
        "zzqxvnotpresentzz",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -609,8 +609,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=zzqxvnotpresentzz",
        "--grep-in=any"
       ],
@@ -622,8 +622,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=zzqxvnotpresentzz",
        "--grep-in=any",
        "--limit=1000000"
@@ -642,7 +642,7 @@
        "next_offset": "0",
        "offset": "0",
        "pattern": "zzqxvnotpresentzz",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "0",
        "total": "0",
        "unindexed_files_scanned": "58",
@@ -659,7 +659,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -669,7 +669,7 @@
        "-F",
        "-e",
        "zzqxvnotpresentzz",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 0,
       "max_s": 2.7288,
@@ -681,7 +681,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -690,7 +690,7 @@
        "-F",
        "-e",
        "zzqxvnotpresentzz",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -714,7 +714,7 @@
        "-F",
        "-e",
        "malloc(",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 15335,
       "hits_set": 100,
@@ -725,8 +725,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=malloc(",
        "--grep-in=any"
       ],
@@ -738,8 +738,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=malloc(",
        "--grep-in=any",
        "--limit=1000000"
@@ -758,7 +758,7 @@
        "next_offset": "100",
        "offset": "0",
        "pattern": "malloc(",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "100",
        "total": "100",
        "unindexed_files_scanned": "58",
@@ -775,7 +775,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -785,7 +785,7 @@
        "-F",
        "-e",
        "malloc(",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 15335,
       "max_s": 2.6093,
@@ -797,7 +797,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -806,7 +806,7 @@
        "-F",
        "-e",
        "malloc(",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 15335,
       "hits_set": 100,
@@ -830,7 +830,7 @@
        "-F",
        "-e",
        "SPDX-License-Identifier",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 334,
       "hits_set": 3,
@@ -841,8 +841,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=SPDX-License-Identifier",
        "--grep-in=any"
       ],
@@ -854,8 +854,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--grep=SPDX-License-Identifier",
        "--grep-in=any",
        "--limit=1000000"
@@ -874,7 +874,7 @@
        "next_offset": "3",
        "offset": "0",
        "pattern": "SPDX-License-Identifier",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "3",
        "total": "3",
        "unindexed_files_scanned": "58",
@@ -891,7 +891,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -901,7 +901,7 @@
        "-F",
        "-e",
        "SPDX-License-Identifier",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 334,
       "max_s": 2.6114,
@@ -913,7 +913,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -922,7 +922,7 @@
        "-F",
        "-e",
        "SPDX-License-Identifier",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 334,
       "hits_set": 3,
@@ -945,7 +945,7 @@
        "-H",
        "-e",
        "^#include",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 790169,
       "hits_set": 6171,
@@ -956,8 +956,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=^#include",
        "--grep-in=any"
       ],
@@ -969,8 +969,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=^#include",
        "--grep-in=any",
        "--limit=1000000"
@@ -988,7 +988,7 @@
        "next_offset": "26",
        "offset": "0",
        "pattern": "^#include",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "26",
        "total": "26",
        "unindexed_files_scanned": "58",
@@ -1005,7 +1005,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1014,7 +1014,7 @@
        "--no-index",
        "-e",
        "^#include",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 790026,
       "max_s": 2.8353,
@@ -1026,7 +1026,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1034,7 +1034,7 @@
        "-H",
        "-e",
        "^#include",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 790026,
       "hits_set": 6171,
@@ -1057,7 +1057,7 @@
        "-H",
        "-e",
        "TODO|FIXME|XXX",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 59645,
       "hits_set": 307,
@@ -1068,8 +1068,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=TODO|FIXME|XXX",
        "--grep-in=any"
       ],
@@ -1081,8 +1081,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=TODO|FIXME|XXX",
        "--grep-in=any",
        "--limit=1000000"
@@ -1100,7 +1100,7 @@
        "next_offset": "320",
        "offset": "0",
        "pattern": "TODO|FIXME|XXX",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "320",
        "total": "320",
        "unindexed_files_scanned": "58",
@@ -1117,7 +1117,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1126,7 +1126,7 @@
        "--no-index",
        "-e",
        "TODO|FIXME|XXX",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 59635,
       "max_s": 2.7213,
@@ -1138,7 +1138,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1146,7 +1146,7 @@
        "-H",
        "-e",
        "TODO|FIXME|XXX",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 59635,
       "hits_set": 307,
@@ -1169,7 +1169,7 @@
        "-H",
        "-e",
        "malloc.*free",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 640,
       "hits_set": 4,
@@ -1180,8 +1180,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=malloc.*free",
        "--grep-in=any"
       ],
@@ -1193,8 +1193,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=malloc.*free",
        "--grep-in=any",
        "--limit=1000000"
@@ -1212,7 +1212,7 @@
        "next_offset": "4",
        "offset": "0",
        "pattern": "malloc.*free",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "4",
        "total": "4",
        "unindexed_files_scanned": "58",
@@ -1229,7 +1229,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1238,7 +1238,7 @@
        "--no-index",
        "-e",
        "malloc.*free",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 640,
       "max_s": 2.7169,
@@ -1250,7 +1250,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1258,7 +1258,7 @@
        "-H",
        "-e",
        "malloc.*free",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 640,
       "hits_set": 4,
@@ -1281,7 +1281,7 @@
        "-H",
        "-e",
        "[Qq]z[Xx]v.*[Jj]w",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -1292,8 +1292,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=[Qq]z[Xx]v.*[Jj]w",
        "--grep-in=any"
       ],
@@ -1305,8 +1305,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=[Qq]z[Xx]v.*[Jj]w",
        "--grep-in=any",
        "--limit=1000000"
@@ -1324,7 +1324,7 @@
        "next_offset": "0",
        "offset": "0",
        "pattern": "[Qq]z[Xx]v.*[Jj]w",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "0",
        "total": "0",
        "unindexed_files_scanned": "58",
@@ -1341,7 +1341,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1350,7 +1350,7 @@
        "--no-index",
        "-e",
        "[Qq]z[Xx]v.*[Jj]w",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 0,
       "max_s": 2.6331,
@@ -1362,7 +1362,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1370,7 +1370,7 @@
        "-H",
        "-e",
        "[Qq]z[Xx]v.*[Jj]w",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -1393,7 +1393,7 @@
        "-H",
        "-e",
        "[Ee]rror[A-Z][a-zA-Z]+",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 16659,
       "hits_set": 88,
@@ -1404,8 +1404,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=[Ee]rror[A-Z][a-zA-Z]+",
        "--grep-in=any"
       ],
@@ -1417,8 +1417,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=[Ee]rror[A-Z][a-zA-Z]+",
        "--grep-in=any",
        "--limit=1000000"
@@ -1436,7 +1436,7 @@
        "next_offset": "101",
        "offset": "0",
        "pattern": "[Ee]rror[A-Z][a-zA-Z]+",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "101",
        "total": "101",
        "unindexed_files_scanned": "58",
@@ -1453,7 +1453,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1462,7 +1462,7 @@
        "--no-index",
        "-e",
        "[Ee]rror[A-Z][a-zA-Z]+",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 16659,
       "max_s": 2.7786,
@@ -1474,7 +1474,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1482,7 +1482,7 @@
        "-H",
        "-e",
        "[Ee]rror[A-Z][a-zA-Z]+",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 16659,
       "hits_set": 88,
@@ -1505,7 +1505,7 @@
        "-H",
        "-e",
        "[Mm][Uu][Tt][Ee][Xx]",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 11258,
       "hits_set": 65,
@@ -1516,8 +1516,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=[Mm][Uu][Tt][Ee][Xx]",
        "--grep-in=any"
       ],
@@ -1529,8 +1529,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=[Mm][Uu][Tt][Ee][Xx]",
        "--grep-in=any",
        "--limit=1000000"
@@ -1548,7 +1548,7 @@
        "next_offset": "84",
        "offset": "0",
        "pattern": "[Mm][Uu][Tt][Ee][Xx]",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "84",
        "total": "84",
        "unindexed_files_scanned": "58",
@@ -1565,7 +1565,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1574,7 +1574,7 @@
        "--no-index",
        "-e",
        "[Mm][Uu][Tt][Ee][Xx]",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 11258,
       "max_s": 2.6323,
@@ -1586,7 +1586,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1594,7 +1594,7 @@
        "-H",
        "-e",
        "[Mm][Uu][Tt][Ee][Xx]",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 11258,
       "hits_set": 65,
@@ -1617,7 +1617,7 @@
        "-H",
        "-e",
        "pthread_[a-z_]+_init",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -1628,8 +1628,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=pthread_[a-z_]+_init",
        "--grep-in=any"
       ],
@@ -1641,8 +1641,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=pthread_[a-z_]+_init",
        "--grep-in=any",
        "--limit=1000000"
@@ -1660,7 +1660,7 @@
        "next_offset": "0",
        "offset": "0",
        "pattern": "pthread_[a-z_]+_init",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "0",
        "total": "0",
        "unindexed_files_scanned": "58",
@@ -1677,7 +1677,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1686,7 +1686,7 @@
        "--no-index",
        "-e",
        "pthread_[a-z_]+_init",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 0,
       "max_s": 2.6295,
@@ -1698,7 +1698,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1706,7 +1706,7 @@
        "-H",
        "-e",
        "pthread_[a-z_]+_init",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -1729,7 +1729,7 @@
        "-H",
        "-e",
        "[0-9a-f]{8}-[0-9a-f]{4}",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 12770,
       "hits_set": 46,
@@ -1740,8 +1740,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
        "--grep-in=any"
       ],
@@ -1753,8 +1753,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$PRIV_CORPUS",
        "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
        "--grep-in=any",
        "--limit=1000000"
@@ -1772,7 +1772,7 @@
        "next_offset": "4",
        "offset": "0",
        "pattern": "[0-9a-f]{8}-[0-9a-f]{4}",
-       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "root": "$PRIV_CORPUS",
        "shown": "4",
        "total": "4",
        "unindexed_files_scanned": "58",
@@ -1789,7 +1789,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1798,7 +1798,7 @@
        "--no-index",
        "-e",
        "[0-9a-f]{8}-[0-9a-f]{4}",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 12768,
       "max_s": 2.805,
@@ -1810,7 +1810,7 @@
       "argv": [
        "$RW_H2H_HOME/../tgrep/target/release/tgrep",
        "--index-path",
-       "$RW_H2H_HOME/idx/canyonraid48",
+       "$RW_H2H_HOME/idx/privcpp",
        "--sort",
        "path",
        "-n",
@@ -1818,7 +1818,7 @@
        "-H",
        "-e",
        "[0-9a-f]{8}-[0-9a-f]{4}",
-       "$HOME/AppDevelopLocal/project2/canyonraid48"
+       "$PRIV_CORPUS"
       ],
       "bytes": 12768,
       "hits_set": 46,
@@ -1829,7 +1829,7 @@
      }
     }
    },
-   "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+   "root": "$PRIV_CORPUS",
    "rw_cache_bytes": 22447001,
    "rw_cache_bytes_warm": 22447001,
    "rw_cold": {
@@ -1845,7 +1845,7 @@
     "stdout": "",
     "wall_s": 0.395
    },
-   "tgrep_status": "Server status for $HOME/AppDevelopLocal/project2/canyonraid48\n  PID:        41187\n  Port:       60998\n  Files:      2408\n  Trigrams:   193994\n  Cache:      0/50000\n  Watcher:    active\n  Watch mode: native (requested: auto)\n  Watch budget: 8192\n  Poll interval: 120s (after completion)\n  Reconcile:  idle\n  Last successful reconcile: 1s ago\n  Reconcile pending: no\n  Reconcile overdue: no\n  Last reconcile duration: 16ms\n  Indexing:   complete"
+   "tgrep_status": "Server status for $PRIV_CORPUS\n  PID:        41187\n  Port:       60998\n  Files:      2408\n  Trigrams:   193994\n  Cache:      0/50000\n  Watcher:    active\n  Watch mode: native (requested: auto)\n  Watch budget: 8192\n  Poll interval: 120s (after completion)\n  Reconcile:  idle\n  Last successful reconcile: 1s ago\n  Reconcile pending: no\n  Reconcile overdue: no\n  Last reconcile duration: 16ms\n  Indexing:   complete"
   },
   "go": {
    "corpus": "go",
@@ -1876,7 +1876,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=pthread_mutex_lock",
        "--grep-in=any"
@@ -1889,7 +1889,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=pthread_mutex_lock",
        "--grep-in=any",
@@ -1991,7 +1991,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=return",
        "--grep-in=any"
@@ -2004,7 +2004,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=return",
        "--grep-in=any",
@@ -2106,7 +2106,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=TODO",
        "--grep-in=any"
@@ -2119,7 +2119,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=TODO",
        "--grep-in=any",
@@ -2221,7 +2221,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=int",
        "--grep-in=any"
@@ -2234,7 +2234,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=int",
        "--grep-in=any",
@@ -2336,7 +2336,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=err",
        "--grep-in=any"
@@ -2349,7 +2349,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=err",
        "--grep-in=any",
@@ -2451,7 +2451,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=zzqxvnotpresentzz",
        "--grep-in=any"
@@ -2464,7 +2464,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=zzqxvnotpresentzz",
        "--grep-in=any",
@@ -2566,7 +2566,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=malloc(",
        "--grep-in=any"
@@ -2579,7 +2579,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=malloc(",
        "--grep-in=any",
@@ -2681,7 +2681,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=SPDX-License-Identifier",
        "--grep-in=any"
@@ -2694,7 +2694,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--grep=SPDX-License-Identifier",
        "--grep-in=any",
@@ -2795,7 +2795,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=^#include",
        "--grep-in=any"
@@ -2808,7 +2808,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=^#include",
        "--grep-in=any",
@@ -2906,7 +2906,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=TODO|FIXME|XXX",
        "--grep-in=any"
@@ -2919,7 +2919,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=TODO|FIXME|XXX",
        "--grep-in=any",
@@ -3017,7 +3017,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=malloc.*free",
        "--grep-in=any"
@@ -3030,7 +3030,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=malloc.*free",
        "--grep-in=any",
@@ -3128,7 +3128,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=[Qq]z[Xx]v.*[Jj]w",
        "--grep-in=any"
@@ -3141,7 +3141,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=[Qq]z[Xx]v.*[Jj]w",
        "--grep-in=any",
@@ -3239,7 +3239,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=[Ee]rror[A-Z][a-zA-Z]+",
        "--grep-in=any"
@@ -3252,7 +3252,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=[Ee]rror[A-Z][a-zA-Z]+",
        "--grep-in=any",
@@ -3350,7 +3350,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=[Mm][Uu][Tt][Ee][Xx]",
        "--grep-in=any"
@@ -3363,7 +3363,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=[Mm][Uu][Tt][Ee][Xx]",
        "--grep-in=any",
@@ -3461,7 +3461,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=pthread_[a-z_]+_init",
        "--grep-in=any"
@@ -3474,7 +3474,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=pthread_[a-z_]+_init",
        "--grep-in=any",
@@ -3572,7 +3572,7 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
        "--grep-in=any"
@@ -3585,7 +3585,7 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RIPWIRE_TREE/build/ripwire",
        "$RW_H2H_HOME/../corpus/go",
        "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
        "--grep-in=any",
@@ -3696,7 +3696,7 @@
        "-F",
        "-e",
        "pthread_mutex_lock",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -3707,8 +3707,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=pthread_mutex_lock",
        "--grep-in=any"
       ],
@@ -3720,8 +3720,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=pthread_mutex_lock",
        "--grep-in=any",
        "--limit=1000000"
@@ -3739,7 +3739,7 @@
        "next_offset": "0",
        "offset": "0",
        "pattern": "pthread_mutex_lock",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "0",
        "total": "0",
        "unindexed_files_scanned": "1",
@@ -3765,7 +3765,7 @@
        "-F",
        "-e",
        "pthread_mutex_lock",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "max_s": 0.0201,
@@ -3786,7 +3786,7 @@
        "-F",
        "-e",
        "pthread_mutex_lock",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -3810,7 +3810,7 @@
        "-F",
        "-e",
        "return",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 979246,
       "hits_set": 7963,
@@ -3821,8 +3821,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=return",
        "--grep-in=any"
       ],
@@ -3834,8 +3834,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=return",
        "--grep-in=any",
        "--limit=1000000"
@@ -3853,7 +3853,7 @@
        "next_offset": "8013",
        "offset": "0",
        "pattern": "return",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "8013",
        "total": "8013",
        "unindexed_files_scanned": "1",
@@ -3879,7 +3879,7 @@
        "-F",
        "-e",
        "return",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 979246,
       "max_s": 0.0202,
@@ -3900,7 +3900,7 @@
        "-F",
        "-e",
        "return",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 979246,
       "hits_set": 7963,
@@ -3924,7 +3924,7 @@
        "-F",
        "-e",
        "TODO",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 479,
       "hits_set": 3,
@@ -3935,8 +3935,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=TODO",
        "--grep-in=any"
       ],
@@ -3948,8 +3948,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=TODO",
        "--grep-in=any",
        "--limit=1000000"
@@ -3967,7 +3967,7 @@
        "next_offset": "3",
        "offset": "0",
        "pattern": "TODO",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "3",
        "total": "3",
        "unindexed_files_scanned": "1",
@@ -3993,7 +3993,7 @@
        "-F",
        "-e",
        "TODO",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 479,
       "max_s": 0.0202,
@@ -4014,7 +4014,7 @@
        "-F",
        "-e",
        "TODO",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 479,
       "hits_set": 3,
@@ -4038,7 +4038,7 @@
        "-F",
        "-e",
        "int",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 1897108,
       "hits_set": 12040,
@@ -4049,8 +4049,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=int",
        "--grep-in=any"
       ],
@@ -4062,8 +4062,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=int",
        "--grep-in=any",
        "--limit=1000000"
@@ -4081,7 +4081,7 @@
        "next_offset": "13699",
        "offset": "0",
        "pattern": "int",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "13699",
        "total": "13699",
        "unindexed_files_scanned": "1",
@@ -4107,7 +4107,7 @@
        "-F",
        "-e",
        "int",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 1897108,
       "max_s": 0.0396,
@@ -4128,7 +4128,7 @@
        "-F",
        "-e",
        "int",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 1897108,
       "hits_set": 12040,
@@ -4152,7 +4152,7 @@
        "-F",
        "-e",
        "err",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 247753,
       "hits_set": 1416,
@@ -4163,8 +4163,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=err",
        "--grep-in=any"
       ],
@@ -4176,8 +4176,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=err",
        "--grep-in=any",
        "--limit=1000000"
@@ -4195,7 +4195,7 @@
        "next_offset": "1510",
        "offset": "0",
        "pattern": "err",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "1510",
        "total": "1510",
        "unindexed_files_scanned": "1",
@@ -4221,7 +4221,7 @@
        "-F",
        "-e",
        "err",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 247753,
       "max_s": 0.0203,
@@ -4242,7 +4242,7 @@
        "-F",
        "-e",
        "err",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 247753,
       "hits_set": 1416,
@@ -4266,7 +4266,7 @@
        "-F",
        "-e",
        "zzqxvnotpresentzz",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -4277,8 +4277,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=zzqxvnotpresentzz",
        "--grep-in=any"
       ],
@@ -4290,8 +4290,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=zzqxvnotpresentzz",
        "--grep-in=any",
        "--limit=1000000"
@@ -4309,7 +4309,7 @@
        "next_offset": "0",
        "offset": "0",
        "pattern": "zzqxvnotpresentzz",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "0",
        "total": "0",
        "unindexed_files_scanned": "1",
@@ -4335,7 +4335,7 @@
        "-F",
        "-e",
        "zzqxvnotpresentzz",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "max_s": 0.0204,
@@ -4356,7 +4356,7 @@
        "-F",
        "-e",
        "zzqxvnotpresentzz",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -4380,7 +4380,7 @@
        "-F",
        "-e",
        "malloc(",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 117,
       "hits_set": 1,
@@ -4391,8 +4391,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=malloc(",
        "--grep-in=any"
       ],
@@ -4404,8 +4404,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=malloc(",
        "--grep-in=any",
        "--limit=1000000"
@@ -4423,7 +4423,7 @@
        "next_offset": "1",
        "offset": "0",
        "pattern": "malloc(",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "1",
        "total": "1",
        "unindexed_files_scanned": "1",
@@ -4449,7 +4449,7 @@
        "-F",
        "-e",
        "malloc(",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 117,
       "max_s": 0.0203,
@@ -4470,7 +4470,7 @@
        "-F",
        "-e",
        "malloc(",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 117,
       "hits_set": 1,
@@ -4494,7 +4494,7 @@
        "-F",
        "-e",
        "SPDX-License-Identifier",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 1338,
       "hits_set": 12,
@@ -4505,8 +4505,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=SPDX-License-Identifier",
        "--grep-in=any"
       ],
@@ -4518,8 +4518,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--grep=SPDX-License-Identifier",
        "--grep-in=any",
        "--limit=1000000"
@@ -4537,7 +4537,7 @@
        "next_offset": "11",
        "offset": "0",
        "pattern": "SPDX-License-Identifier",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "11",
        "total": "11",
        "unindexed_files_scanned": "1",
@@ -4563,7 +4563,7 @@
        "-F",
        "-e",
        "SPDX-License-Identifier",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 1338,
       "max_s": 0.0203,
@@ -4584,7 +4584,7 @@
        "-F",
        "-e",
        "SPDX-License-Identifier",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 1338,
       "hits_set": 12,
@@ -4607,7 +4607,7 @@
        "-H",
        "-e",
        "^#include",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 190353,
       "hits_set": 1648,
@@ -4618,8 +4618,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=^#include",
        "--grep-in=any"
       ],
@@ -4631,8 +4631,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=^#include",
        "--grep-in=any",
        "--limit=1000000"
@@ -4649,7 +4649,7 @@
        "next_offset": "1",
        "offset": "0",
        "pattern": "^#include",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "1",
        "total": "1",
        "unindexed_files_scanned": "1",
@@ -4674,7 +4674,7 @@
        "--no-index",
        "-e",
        "^#include",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 190353,
       "max_s": 0.0204,
@@ -4694,7 +4694,7 @@
        "-H",
        "-e",
        "^#include",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 190353,
       "hits_set": 1648,
@@ -4717,7 +4717,7 @@
        "-H",
        "-e",
        "TODO|FIXME|XXX",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 2009,
       "hits_set": 12,
@@ -4728,8 +4728,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=TODO|FIXME|XXX",
        "--grep-in=any"
       ],
@@ -4741,8 +4741,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=TODO|FIXME|XXX",
        "--grep-in=any",
        "--limit=1000000"
@@ -4759,7 +4759,7 @@
        "next_offset": "12",
        "offset": "0",
        "pattern": "TODO|FIXME|XXX",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "12",
        "total": "12",
        "unindexed_files_scanned": "1",
@@ -4784,7 +4784,7 @@
        "--no-index",
        "-e",
        "TODO|FIXME|XXX",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 2009,
       "max_s": 0.0202,
@@ -4804,7 +4804,7 @@
        "-H",
        "-e",
        "TODO|FIXME|XXX",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 2009,
       "hits_set": 12,
@@ -4827,7 +4827,7 @@
        "-H",
        "-e",
        "malloc.*free",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 339,
       "hits_set": 2,
@@ -4838,8 +4838,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=malloc.*free",
        "--grep-in=any"
       ],
@@ -4851,8 +4851,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=malloc.*free",
        "--grep-in=any",
        "--limit=1000000"
@@ -4869,7 +4869,7 @@
        "next_offset": "2",
        "offset": "0",
        "pattern": "malloc.*free",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "2",
        "total": "2",
        "unindexed_files_scanned": "1",
@@ -4894,7 +4894,7 @@
        "--no-index",
        "-e",
        "malloc.*free",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 339,
       "max_s": 0.0203,
@@ -4914,7 +4914,7 @@
        "-H",
        "-e",
        "malloc.*free",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 339,
       "hits_set": 2,
@@ -4937,7 +4937,7 @@
        "-H",
        "-e",
        "[Qq]z[Xx]v.*[Jj]w",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -4948,8 +4948,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=[Qq]z[Xx]v.*[Jj]w",
        "--grep-in=any"
       ],
@@ -4961,8 +4961,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=[Qq]z[Xx]v.*[Jj]w",
        "--grep-in=any",
        "--limit=1000000"
@@ -4979,7 +4979,7 @@
        "next_offset": "0",
        "offset": "0",
        "pattern": "[Qq]z[Xx]v.*[Jj]w",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "0",
        "total": "0",
        "unindexed_files_scanned": "1",
@@ -5004,7 +5004,7 @@
        "--no-index",
        "-e",
        "[Qq]z[Xx]v.*[Jj]w",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "max_s": 0.0202,
@@ -5024,7 +5024,7 @@
        "-H",
        "-e",
        "[Qq]z[Xx]v.*[Jj]w",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -5047,7 +5047,7 @@
        "-H",
        "-e",
        "[Ee]rror[A-Z][a-zA-Z]+",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 4988,
       "hits_set": 35,
@@ -5058,8 +5058,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=[Ee]rror[A-Z][a-zA-Z]+",
        "--grep-in=any"
       ],
@@ -5071,8 +5071,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=[Ee]rror[A-Z][a-zA-Z]+",
        "--grep-in=any",
        "--limit=1000000"
@@ -5089,7 +5089,7 @@
        "next_offset": "42",
        "offset": "0",
        "pattern": "[Ee]rror[A-Z][a-zA-Z]+",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "42",
        "total": "42",
        "unindexed_files_scanned": "1",
@@ -5114,7 +5114,7 @@
        "--no-index",
        "-e",
        "[Ee]rror[A-Z][a-zA-Z]+",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 4988,
       "max_s": 0.0209,
@@ -5134,7 +5134,7 @@
        "-H",
        "-e",
        "[Ee]rror[A-Z][a-zA-Z]+",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 4988,
       "hits_set": 35,
@@ -5157,7 +5157,7 @@
        "-H",
        "-e",
        "[Mm][Uu][Tt][Ee][Xx]",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 5736,
       "hits_set": 43,
@@ -5168,8 +5168,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=[Mm][Uu][Tt][Ee][Xx]",
        "--grep-in=any"
       ],
@@ -5181,8 +5181,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=[Mm][Uu][Tt][Ee][Xx]",
        "--grep-in=any",
        "--limit=1000000"
@@ -5199,7 +5199,7 @@
        "next_offset": "62",
        "offset": "0",
        "pattern": "[Mm][Uu][Tt][Ee][Xx]",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "62",
        "total": "62",
        "unindexed_files_scanned": "1",
@@ -5224,7 +5224,7 @@
        "--no-index",
        "-e",
        "[Mm][Uu][Tt][Ee][Xx]",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 5736,
       "max_s": 0.0204,
@@ -5244,7 +5244,7 @@
        "-H",
        "-e",
        "[Mm][Uu][Tt][Ee][Xx]",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 5736,
       "hits_set": 43,
@@ -5267,7 +5267,7 @@
        "-H",
        "-e",
        "pthread_[a-z_]+_init",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -5278,8 +5278,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=pthread_[a-z_]+_init",
        "--grep-in=any"
       ],
@@ -5291,8 +5291,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=pthread_[a-z_]+_init",
        "--grep-in=any",
        "--limit=1000000"
@@ -5309,7 +5309,7 @@
        "next_offset": "0",
        "offset": "0",
        "pattern": "pthread_[a-z_]+_init",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "0",
        "total": "0",
        "unindexed_files_scanned": "1",
@@ -5334,7 +5334,7 @@
        "--no-index",
        "-e",
        "pthread_[a-z_]+_init",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "max_s": 0.0204,
@@ -5354,7 +5354,7 @@
        "-H",
        "-e",
        "pthread_[a-z_]+_init",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -5377,7 +5377,7 @@
        "-H",
        "-e",
        "[0-9a-f]{8}-[0-9a-f]{4}",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -5388,8 +5388,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
        "--grep-in=any"
       ],
@@ -5401,8 +5401,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE/src",
        "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
        "--grep-in=any",
        "--limit=1000000"
@@ -5419,7 +5419,7 @@
        "next_offset": "0",
        "offset": "0",
        "pattern": "[0-9a-f]{8}-[0-9a-f]{4}",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "root": "$RIPWIRE_TREE/src",
        "shown": "0",
        "total": "0",
        "unindexed_files_scanned": "1",
@@ -5444,7 +5444,7 @@
        "--no-index",
        "-e",
        "[0-9a-f]{8}-[0-9a-f]{4}",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "max_s": 0.0405,
@@ -5464,7 +5464,7 @@
        "-H",
        "-e",
        "[0-9a-f]{8}-[0-9a-f]{4}",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+       "$RIPWIRE_TREE/src"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -5475,7 +5475,7 @@
      }
     }
    },
-   "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+   "root": "$RIPWIRE_TREE/src",
    "rw_cache_bytes": 4844582,
    "rw_cache_bytes_warm": 4844582,
    "rw_cold": {
@@ -5491,7 +5491,7 @@
     "stdout": "",
     "wall_s": 0.056
    },
-   "tgrep_status": "Server status for $HOME/AppDevelopLocal/project2/rw-hv-A/src\n  PID:        31588\n  Port:       60786\n  Files:      159\n  Trigrams:   69580\n  Cache:      0/50000\n  Watcher:    active\n  Watch mode: native (requested: auto)\n  Watch budget: 8192\n  Poll interval: 120s (after completion)\n  Reconcile:  idle\n  Last successful reconcile: 1s ago\n  Reconcile pending: no\n  Reconcile overdue: no\n  Last reconcile duration: 4ms\n  Indexing:   complete"
+   "tgrep_status": "Server status for $RIPWIRE_TREE/src\n  PID:        31588\n  Port:       60786\n  Files:      159\n  Trigrams:   69580\n  Cache:      0/50000\n  Watcher:    active\n  Watch mode: native (requested: auto)\n  Watch budget: 8192\n  Poll interval: 120s (after completion)\n  Reconcile:  idle\n  Last successful reconcile: 1s ago\n  Reconcile pending: no\n  Reconcile overdue: no\n  Last reconcile duration: 4ms\n  Indexing:   complete"
   },
   "rwtree": {
    "corpus": "rwtree",
@@ -5511,7 +5511,7 @@
        "-F",
        "-e",
        "pthread_mutex_lock",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 1082,
       "hits_set": 9,
@@ -5522,8 +5522,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=pthread_mutex_lock",
        "--grep-in=any"
       ],
@@ -5535,8 +5535,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=pthread_mutex_lock",
        "--grep-in=any",
        "--limit=1000000"
@@ -5555,7 +5555,7 @@
        "next_offset": "9",
        "offset": "0",
        "pattern": "pthread_mutex_lock",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "9",
        "total": "9",
        "unindexed_files_scanned": "205",
@@ -5582,7 +5582,7 @@
        "-F",
        "-e",
        "pthread_mutex_lock",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 1082,
       "max_s": 0.185,
@@ -5603,7 +5603,7 @@
        "-F",
        "-e",
        "pthread_mutex_lock",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 1082,
       "hits_set": 9,
@@ -5627,7 +5627,7 @@
        "-F",
        "-e",
        "return",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 6862270,
       "hits_set": 51951,
@@ -5638,8 +5638,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=return",
        "--grep-in=any"
       ],
@@ -5651,8 +5651,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=return",
        "--grep-in=any",
        "--limit=1000000"
@@ -5671,7 +5671,7 @@
        "next_offset": "14019",
        "offset": "0",
        "pattern": "return",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "14019",
        "total": "14019",
        "unindexed_files_scanned": "205",
@@ -5698,7 +5698,7 @@
        "-F",
        "-e",
        "return",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 6862270,
       "max_s": 0.295,
@@ -5719,7 +5719,7 @@
        "-F",
        "-e",
        "return",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 6862270,
       "hits_set": 51951,
@@ -5743,7 +5743,7 @@
        "-F",
        "-e",
        "TODO",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 20451,
       "hits_set": 96,
@@ -5754,8 +5754,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=TODO",
        "--grep-in=any"
       ],
@@ -5767,8 +5767,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=TODO",
        "--grep-in=any",
        "--limit=1000000"
@@ -5787,7 +5787,7 @@
        "next_offset": "30",
        "offset": "0",
        "pattern": "TODO",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "30",
        "total": "30",
        "unindexed_files_scanned": "205",
@@ -5814,7 +5814,7 @@
        "-F",
        "-e",
        "TODO",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 20451,
       "max_s": 0.1877,
@@ -5835,7 +5835,7 @@
        "-F",
        "-e",
        "TODO",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 20451,
       "hits_set": 96,
@@ -5859,7 +5859,7 @@
        "-F",
        "-e",
        "int",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 20835639,
       "hits_set": 124267,
@@ -5870,8 +5870,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=int",
        "--grep-in=any"
       ],
@@ -5883,8 +5883,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=int",
        "--grep-in=any",
        "--limit=1000000"
@@ -5903,7 +5903,7 @@
        "next_offset": "42106",
        "offset": "0",
        "pattern": "int",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "42106",
        "total": "42106",
        "unindexed_files_scanned": "205",
@@ -5930,7 +5930,7 @@
        "-F",
        "-e",
        "int",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 20835639,
       "max_s": 0.2976,
@@ -5951,7 +5951,7 @@
        "-F",
        "-e",
        "int",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 20835639,
       "hits_set": 124267,
@@ -5975,7 +5975,7 @@
        "-F",
        "-e",
        "err",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 5913128,
       "hits_set": 35781,
@@ -5986,8 +5986,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=err",
        "--grep-in=any"
       ],
@@ -5999,8 +5999,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=err",
        "--grep-in=any",
        "--limit=1000000"
@@ -6019,7 +6019,7 @@
        "next_offset": "6485",
        "offset": "0",
        "pattern": "err",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "6485",
        "total": "6485",
        "unindexed_files_scanned": "205",
@@ -6046,7 +6046,7 @@
        "-F",
        "-e",
        "err",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 5913128,
       "max_s": 0.2406,
@@ -6067,7 +6067,7 @@
        "-F",
        "-e",
        "err",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 5913128,
       "hits_set": 35781,
@@ -6091,7 +6091,7 @@
        "-F",
        "-e",
        "zzqxvnotpresentzz",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 1420,
       "hits_set": 11,
@@ -6102,8 +6102,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=zzqxvnotpresentzz",
        "--grep-in=any"
       ],
@@ -6115,8 +6115,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=zzqxvnotpresentzz",
        "--grep-in=any",
        "--limit=1000000"
@@ -6135,7 +6135,7 @@
        "next_offset": "11",
        "offset": "0",
        "pattern": "zzqxvnotpresentzz",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "11",
        "total": "11",
        "unindexed_files_scanned": "205",
@@ -6162,7 +6162,7 @@
        "-F",
        "-e",
        "zzqxvnotpresentzz",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 1420,
       "max_s": 0.1874,
@@ -6183,7 +6183,7 @@
        "-F",
        "-e",
        "zzqxvnotpresentzz",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 1420,
       "hits_set": 11,
@@ -6207,7 +6207,7 @@
        "-F",
        "-e",
        "malloc(",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 8417,
       "hits_set": 57,
@@ -6218,8 +6218,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=malloc(",
        "--grep-in=any"
       ],
@@ -6231,8 +6231,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=malloc(",
        "--grep-in=any",
        "--limit=1000000"
@@ -6251,7 +6251,7 @@
        "next_offset": "12",
        "offset": "0",
        "pattern": "malloc(",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "12",
        "total": "12",
        "unindexed_files_scanned": "205",
@@ -6278,7 +6278,7 @@
        "-F",
        "-e",
        "malloc(",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 8417,
       "max_s": 0.1844,
@@ -6299,7 +6299,7 @@
        "-F",
        "-e",
        "malloc(",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 8417,
       "hits_set": 57,
@@ -6323,7 +6323,7 @@
        "-F",
        "-e",
        "SPDX-License-Identifier",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 2674,
       "hits_set": 23,
@@ -6334,8 +6334,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=SPDX-License-Identifier",
        "--grep-in=any"
       ],
@@ -6347,8 +6347,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--grep=SPDX-License-Identifier",
        "--grep-in=any",
        "--limit=1000000"
@@ -6367,7 +6367,7 @@
        "next_offset": "19",
        "offset": "0",
        "pattern": "SPDX-License-Identifier",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "19",
        "total": "19",
        "unindexed_files_scanned": "205",
@@ -6394,7 +6394,7 @@
        "-F",
        "-e",
        "SPDX-License-Identifier",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 2674,
       "max_s": 0.252,
@@ -6415,7 +6415,7 @@
        "-F",
        "-e",
        "SPDX-License-Identifier",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 2674,
       "hits_set": 23,
@@ -6438,7 +6438,7 @@
        "-H",
        "-e",
        "^#include",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 318373,
       "hits_set": 2822,
@@ -6449,8 +6449,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=^#include",
        "--grep-in=any"
       ],
@@ -6462,8 +6462,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=^#include",
        "--grep-in=any",
        "--limit=1000000"
@@ -6481,7 +6481,7 @@
        "next_offset": "23",
        "offset": "0",
        "pattern": "^#include",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "23",
        "total": "23",
        "unindexed_files_scanned": "205",
@@ -6507,7 +6507,7 @@
        "--no-index",
        "-e",
        "^#include",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 318373,
       "max_s": 0.2972,
@@ -6527,7 +6527,7 @@
        "-H",
        "-e",
        "^#include",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 318373,
       "hits_set": 2822,
@@ -6550,7 +6550,7 @@
        "-H",
        "-e",
        "TODO|FIXME|XXX",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 30026,
       "hits_set": 162,
@@ -6561,8 +6561,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=TODO|FIXME|XXX",
        "--grep-in=any"
       ],
@@ -6574,8 +6574,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=TODO|FIXME|XXX",
        "--grep-in=any",
        "--limit=1000000"
@@ -6593,7 +6593,7 @@
        "next_offset": "149",
        "offset": "0",
        "pattern": "TODO|FIXME|XXX",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "149",
        "total": "149",
        "unindexed_files_scanned": "205",
@@ -6619,7 +6619,7 @@
        "--no-index",
        "-e",
        "TODO|FIXME|XXX",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 30026,
       "max_s": 0.1874,
@@ -6639,7 +6639,7 @@
        "-H",
        "-e",
        "TODO|FIXME|XXX",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 30026,
       "hits_set": 162,
@@ -6662,7 +6662,7 @@
        "-H",
        "-e",
        "malloc.*free",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 1670,
       "hits_set": 12,
@@ -6673,8 +6673,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=malloc.*free",
        "--grep-in=any"
       ],
@@ -6686,8 +6686,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=malloc.*free",
        "--grep-in=any",
        "--limit=1000000"
@@ -6705,7 +6705,7 @@
        "next_offset": "12",
        "offset": "0",
        "pattern": "malloc.*free",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "12",
        "total": "12",
        "unindexed_files_scanned": "205",
@@ -6731,7 +6731,7 @@
        "--no-index",
        "-e",
        "malloc.*free",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 1670,
       "max_s": 0.2505,
@@ -6751,7 +6751,7 @@
        "-H",
        "-e",
        "malloc.*free",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 1670,
       "hits_set": 12,
@@ -6774,7 +6774,7 @@
        "-H",
        "-e",
        "[Qq]z[Xx]v.*[Jj]w",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -6785,8 +6785,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=[Qq]z[Xx]v.*[Jj]w",
        "--grep-in=any"
       ],
@@ -6798,8 +6798,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=[Qq]z[Xx]v.*[Jj]w",
        "--grep-in=any",
        "--limit=1000000"
@@ -6817,7 +6817,7 @@
        "next_offset": "0",
        "offset": "0",
        "pattern": "[Qq]z[Xx]v.*[Jj]w",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "0",
        "total": "0",
        "unindexed_files_scanned": "205",
@@ -6843,7 +6843,7 @@
        "--no-index",
        "-e",
        "[Qq]z[Xx]v.*[Jj]w",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 0,
       "max_s": 0.2586,
@@ -6863,7 +6863,7 @@
        "-H",
        "-e",
        "[Qq]z[Xx]v.*[Jj]w",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -6886,7 +6886,7 @@
        "-H",
        "-e",
        "[Ee]rror[A-Z][a-zA-Z]+",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 49681,
       "hits_set": 220,
@@ -6897,8 +6897,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=[Ee]rror[A-Z][a-zA-Z]+",
        "--grep-in=any"
       ],
@@ -6910,8 +6910,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=[Ee]rror[A-Z][a-zA-Z]+",
        "--grep-in=any",
        "--limit=1000000"
@@ -6929,7 +6929,7 @@
        "next_offset": "51",
        "offset": "0",
        "pattern": "[Ee]rror[A-Z][a-zA-Z]+",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "51",
        "total": "51",
        "unindexed_files_scanned": "205",
@@ -6955,7 +6955,7 @@
        "--no-index",
        "-e",
        "[Ee]rror[A-Z][a-zA-Z]+",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 49681,
       "max_s": 0.2319,
@@ -6975,7 +6975,7 @@
        "-H",
        "-e",
        "[Ee]rror[A-Z][a-zA-Z]+",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 49681,
       "hits_set": 220,
@@ -6998,7 +6998,7 @@
        "-H",
        "-e",
        "[Mm][Uu][Tt][Ee][Xx]",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 20692,
       "hits_set": 140,
@@ -7009,8 +7009,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=[Mm][Uu][Tt][Ee][Xx]",
        "--grep-in=any"
       ],
@@ -7022,8 +7022,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=[Mm][Uu][Tt][Ee][Xx]",
        "--grep-in=any",
        "--limit=1000000"
@@ -7041,7 +7041,7 @@
        "next_offset": "98",
        "offset": "0",
        "pattern": "[Mm][Uu][Tt][Ee][Xx]",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "98",
        "total": "98",
        "unindexed_files_scanned": "205",
@@ -7067,7 +7067,7 @@
        "--no-index",
        "-e",
        "[Mm][Uu][Tt][Ee][Xx]",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 20692,
       "max_s": 0.1878,
@@ -7087,7 +7087,7 @@
        "-H",
        "-e",
        "[Mm][Uu][Tt][Ee][Xx]",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 20692,
       "hits_set": 140,
@@ -7110,7 +7110,7 @@
        "-H",
        "-e",
        "pthread_[a-z_]+_init",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -7121,8 +7121,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=pthread_[a-z_]+_init",
        "--grep-in=any"
       ],
@@ -7134,8 +7134,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=pthread_[a-z_]+_init",
        "--grep-in=any",
        "--limit=1000000"
@@ -7153,7 +7153,7 @@
        "next_offset": "0",
        "offset": "0",
        "pattern": "pthread_[a-z_]+_init",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "0",
        "total": "0",
        "unindexed_files_scanned": "205",
@@ -7179,7 +7179,7 @@
        "--no-index",
        "-e",
        "pthread_[a-z_]+_init",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 0,
       "max_s": 0.1862,
@@ -7199,7 +7199,7 @@
        "-H",
        "-e",
        "pthread_[a-z_]+_init",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 0,
       "hits_set": 0,
@@ -7222,7 +7222,7 @@
        "-H",
        "-e",
        "[0-9a-f]{8}-[0-9a-f]{4}",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 25973,
       "hits_set": 72,
@@ -7233,8 +7233,8 @@
      },
      "rw-warm": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
        "--grep-in=any"
       ],
@@ -7246,8 +7246,8 @@
      },
      "rw-warm-all": {
       "argv": [
-       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "$RIPWIRE_TREE/build/ripwire",
+       "$RIPWIRE_TREE",
        "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
        "--grep-in=any",
        "--limit=1000000"
@@ -7265,7 +7265,7 @@
        "next_offset": "69",
        "offset": "0",
        "pattern": "[0-9a-f]{8}-[0-9a-f]{4}",
-       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "root": "$RIPWIRE_TREE",
        "shown": "69",
        "total": "69",
        "unindexed_files_scanned": "205",
@@ -7291,7 +7291,7 @@
        "--no-index",
        "-e",
        "[0-9a-f]{8}-[0-9a-f]{4}",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 25973,
       "max_s": 0.2403,
@@ -7311,7 +7311,7 @@
        "-H",
        "-e",
        "[0-9a-f]{8}-[0-9a-f]{4}",
-       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+       "$RIPWIRE_TREE"
       ],
       "bytes": 25973,
       "hits_set": 72,
@@ -7322,7 +7322,7 @@
      }
     }
    },
-   "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+   "root": "$RIPWIRE_TREE",
    "rw_cache_bytes": 10512105,
    "rw_cache_bytes_warm": 10512105,
    "rw_cold": {
@@ -7338,9 +7338,9 @@
     "stdout": "",
     "wall_s": 0.437
    },
-   "tgrep_status": "Server status for $HOME/AppDevelopLocal/project2/rw-hv-A\n  PID:        33302\n  Port:       60885\n  Files:      2231\n  Trigrams:   147332\n  Cache:      0/50000\n  Watcher:    active\n  Watch mode: native (requested: auto)\n  Watch budget: 8192\n  Poll interval: 120s (after completion)\n  Reconcile:  idle\n  Last successful reconcile: 1s ago\n  Reconcile pending: no\n  Reconcile overdue: no\n  Last reconcile duration: 14ms\n  Indexing:   complete"
+   "tgrep_status": "Server status for $RIPWIRE_TREE\n  PID:        33302\n  Port:       60885\n  Files:      2231\n  Trigrams:   147332\n  Cache:      0/50000\n  Watcher:    active\n  Watch mode: native (requested: auto)\n  Watch budget: 8192\n  Poll interval: 120s (after completion)\n  Reconcile:  idle\n  Last successful reconcile: 1s ago\n  Reconcile pending: no\n  Reconcile overdue: no\n  Last reconcile duration: 14ms\n  Indexing:   complete"
   }
  },
- "ripwire_bin": "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+ "ripwire_bin": "$RIPWIRE_TREE/build/ripwire",
  "tgrep_bin": "$RW_H2H_HOME/../tgrep/target/release/tgrep"
 }

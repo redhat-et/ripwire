@@ -19,7 +19,7 @@ does a persisted index pay for itself?* The harness answers that with Q\*, not w
 | `arms.py` | the five arm adapters and the frozen verb map, plus the one hit-set extractor each output shape needs. The delivery posture of every arm is part of its definition and is written down there. |
 | `run.py` | the ladder driver: per corpus it measures ripwire's cold ingest, tgrep's index build (wall, peak RSS, index bytes), starts `tgrep serve`, waits for `Indexing: complete`, then times every (query, arm) cell. |
 | `readout.py` | the tables: one-off costs, per-query medians, Q\*, the agreement matrix, and the in-cache index cost. |
-| `results.json` | the recorded run. |
+| `results.json` | the recorded run. The `privcpp` rung is a private C++/ObjC++ tree named in the local ledger, not in this repository; every path in the file is a `$RIPWIRE_TREE` / `$PRIV_CORPUS` / `$RW_H2H_HOME` placeholder, because `test/ripwirepubliccheck.sh` arm 1 is zero-tolerance about the private tree's name and arm 2 about absolute home paths. Scrub before you commit a re-run, not after. |
 
 ## The arms
 
@@ -63,7 +63,7 @@ Four things a re-run must keep, because each was a defect found the first time:
    finding). `RAW_DIR=` overrides it; the default is `$RW_H2H_HOME/raw`.
 3. **tgrep gets its own `--index-path` outside the corpus.** Left to itself `tgrep serve` writes
    `.tgrep/` into the tree being measured, which would modify a read-only measurement corpus and
-   change what every gitignore-aware arm sees. Verified after the run: `canyonraid48` has no `.tgrep`
+   change what every gitignore-aware arm sees. Verified after the run: the private corpus has no `.tgrep`
    and its `git status` is byte-for-byte what it was before.
 4. **The llvm rung's ripwire cells are declared, not silent.** A single ripwire `--regex` run over
    llvm-project's 182,555 files is 3–4 minutes (`[Ee]rror[A-Z][a-zA-Z]+` 2 m 57 s,
