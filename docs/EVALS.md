@@ -13103,9 +13103,8 @@ file in this tree makes `git status --porcelain` dirty, which flips the `+dirty`
 verb's `at=` anchor for any determinism arm running beside the harness.
 
 **Versions and corpora.** ripwire `4c10be9d`, plain build (never Release: `NDEBUG` compiles
-`DEGRADED_PATH_ALERT` out). tgrep 1.0.5 at `50f5d8f6a54e9e4d16d021954cfcd4e77d342d7b`, `cargo build
---release`. `rg` from Homebrew, always with `--sort path`. One 18-core macOS arm64 host, shared with
-concurrent harvest lanes. Ladder by `rg --files` count: `rw-hv-A/src` 159 · the ripwire tree 2,240 ·
+`DEGRADED_PATH_ALERT` out). tgrep 1.0.5 at `50f5d8f6a54e9e4d16d021954cfcd4e77d342d7b`, `cargo build` in its release profile. `rg` from Homebrew, always with `--sort path`. One 18-core macOS arm64 host, shared with
+concurrent harvest lanes. Ladder by ripgrep's own file-listing count: `rw-hv-A/src` 159 · the ripwire tree 2,240 ·
 `canyonraid48` 3,248 · `golang/go` `49c3ea64` 15,865 · `llvm/llvm-project` `2061c237` (shallow) 182,555.
 
 **The question, stated correctly — the round brief's framing was half right.** `--grep`/`--regex` was
@@ -13219,8 +13218,8 @@ ordering the code argues for on other grounds.
 - **Most of tgrep's win is not the index.** On R4 `[Qq]z[Xx]v.*[Jj]w`, a pattern tgrep's own `--stats`
   reports as `MatchAll (full scan) (candidates: 159/159)`, tgrep-via-server answers `go` in 0.026 s
   against rg's 0.397 s and `tgrep --no-index`'s 0.569 s. With zero index contribution the server is
-  still 15× faster than rg — that is its 50,000-entry resident file-CONTENT cache, and `rg --files`
-  (walk only, 0.03 s versus 0.79 s for the full query) rules out the directory walk as the explanation.
+  still 15× faster than rg — that is its 50,000-entry resident file-CONTENT cache, and ripgrep's file listing
+  (the walk alone, 0.03 s versus 0.79 s for the full query) rules out the directory walk as the explanation.
   A one-shot CLI (G5) cannot hold anything resident between invocations, so **that half of the win is
   unavailable to ripwire at any price.** Only the postings half is portable.
 - **One machine, shared, arms run back to back rather than interleaved.** The conclusions turn on
