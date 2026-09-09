@@ -1,0 +1,7346 @@
+{
+ "corpora": {
+  "canyonraid48": {
+   "corpus": "canyonraid48",
+   "files_rg": 3248,
+   "queries": {
+    "L1": {
+     "pat": "pthread_mutex_lock",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.1824,
+      "median_s": 0.0761,
+      "min_s": 0.0729,
+      "rc": 1
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=pthread_mutex_lock",
+       "--grep-in=any"
+      ],
+      "bytes": 5822,
+      "max_s": 0.1884,
+      "median_s": 0.1864,
+      "min_s": 0.1835,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=pthread_mutex_lock",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5888,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "13",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=pthread_mutex_lock",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "pthread_mutex_lock",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "0",
+       "total": "0",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 0.187,
+      "median_s": 0.1837,
+      "min_s": 0.1792,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 0,
+      "max_s": 2.7352,
+      "median_s": 2.671,
+      "min_s": 2.6655,
+      "rc": 1
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0101,
+      "median_s": 0.0053,
+      "min_s": 0.0051,
+      "rc": 1
+     }
+    },
+    "L2": {
+     "pat": "return",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "return",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 4667502,
+      "hits_set": 21106,
+      "max_s": 0.1325,
+      "median_s": 0.128,
+      "min_s": 0.1259,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=return",
+       "--grep-in=any"
+      ],
+      "bytes": 27034,
+      "max_s": 0.1881,
+      "median_s": 0.1843,
+      "min_s": 0.1777,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=return",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 3467149,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "13",
+       "files": "1614",
+       "has_more": "0",
+       "hits": "20355",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=.agents/workflows/cast-review.js:146",
+       "next_offset": "20355",
+       "offset": "0",
+       "pattern": "return",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "20355",
+       "total": "20355",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "882"
+      },
+      "hits_set": 21008,
+      "max_s": 0.3496,
+      "median_s": 0.2974,
+      "min_s": 0.2896,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "return",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 4666944,
+      "max_s": 2.7281,
+      "median_s": 2.6706,
+      "min_s": 2.632,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "return",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 4666944,
+      "hits_set": 21106,
+      "max_s": 0.1331,
+      "median_s": 0.0756,
+      "min_s": 0.0752,
+      "rc": 0
+     }
+    },
+    "L3": {
+     "pat": "TODO",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "TODO",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 57636,
+      "hits_set": 295,
+      "max_s": 0.0782,
+      "median_s": 0.0768,
+      "min_s": 0.0709,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=TODO",
+       "--grep-in=any"
+      ],
+      "bytes": 24511,
+      "max_s": 0.1886,
+      "median_s": 0.1871,
+      "min_s": 0.1841,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=TODO",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 79497,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "13",
+       "files": "112",
+       "has_more": "0",
+       "hits": "304",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=Metal/AAPLMetalRenderer.mm:297",
+       "next_offset": "304",
+       "offset": "0",
+       "pattern": "TODO",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "304",
+       "total": "304",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "4"
+      },
+      "hits_set": 303,
+      "max_s": 0.1884,
+      "median_s": 0.1832,
+      "min_s": 0.1805,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "TODO",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 57626,
+      "max_s": 2.7408,
+      "median_s": 2.7301,
+      "min_s": 2.6693,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "TODO",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 57626,
+      "hits_set": 295,
+      "max_s": 0.0106,
+      "median_s": 0.0104,
+      "min_s": 0.0101,
+      "rc": 0
+     }
+    },
+    "L4": {
+     "pat": "int",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "int",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 14650694,
+      "hits_set": 65953,
+      "max_s": 0.1329,
+      "median_s": 0.1305,
+      "min_s": 0.124,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=int",
+       "--grep-in=any"
+      ],
+      "bytes": 29564,
+      "max_s": 0.1878,
+      "median_s": 0.1839,
+      "min_s": 0.1791,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=int",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 15059923,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "13",
+       "files": "2163",
+       "has_more": "0",
+       "hits": "76558",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=.agents/workflows/cast-review.js:69",
+       "next_offset": "76558",
+       "offset": "0",
+       "pattern": "int",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "76558",
+       "total": "76558",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "1913"
+      },
+      "hits_set": 65233,
+      "max_s": 0.5673,
+      "median_s": 0.5669,
+      "min_s": 0.565,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "int",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 14647486,
+      "max_s": 2.7977,
+      "median_s": 2.7782,
+      "min_s": 2.7681,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "int",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 14647486,
+      "hits_set": 65953,
+      "max_s": 0.246,
+      "median_s": 0.2406,
+      "min_s": 0.2334,
+      "rc": 0
+     }
+    },
+    "L5": {
+     "pat": "err",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "err",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 3304658,
+      "hits_set": 7859,
+      "max_s": 0.1328,
+      "median_s": 0.127,
+      "min_s": 0.1259,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=err",
+       "--grep-in=any"
+      ],
+      "bytes": 45059,
+      "max_s": 0.1888,
+      "median_s": 0.1866,
+      "min_s": 0.1845,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=err",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 2479536,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "13",
+       "files": "1066",
+       "has_more": "0",
+       "hits": "8870",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=Common/AAPLCommonDefinitions.h:63",
+       "next_offset": "8870",
+       "offset": "0",
+       "pattern": "err",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "8870",
+       "total": "8870",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "474"
+      },
+      "hits_set": 7554,
+      "max_s": 0.2408,
+      "median_s": 0.2389,
+      "min_s": 0.2372,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "err",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 3304629,
+      "max_s": 2.82,
+      "median_s": 2.7344,
+      "min_s": 2.689,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "err",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 3304629,
+      "hits_set": 7859,
+      "max_s": 0.0415,
+      "median_s": 0.039,
+      "min_s": 0.0375,
+      "rc": 0
+     }
+    },
+    "L6": {
+     "pat": "zzqxvnotpresentzz",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.1288,
+      "median_s": 0.0758,
+      "min_s": 0.0731,
+      "rc": 1
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=zzqxvnotpresentzz",
+       "--grep-in=any"
+      ],
+      "bytes": 5819,
+      "max_s": 0.1884,
+      "median_s": 0.1858,
+      "min_s": 0.1816,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=zzqxvnotpresentzz",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5885,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "13",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=zzqxvnotpresentzz",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "zzqxvnotpresentzz",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "0",
+       "total": "0",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 0.1873,
+      "median_s": 0.1839,
+      "min_s": 0.1835,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 0,
+      "max_s": 2.7288,
+      "median_s": 2.7163,
+      "min_s": 2.583,
+      "rc": 1
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0104,
+      "median_s": 0.0054,
+      "min_s": 0.0051,
+      "rc": 1
+     }
+    },
+    "L7": {
+     "pat": "malloc(",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "malloc(",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 15335,
+      "hits_set": 100,
+      "max_s": 0.0767,
+      "median_s": 0.0747,
+      "min_s": 0.0735,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=malloc(",
+       "--grep-in=any"
+      ],
+      "bytes": 20480,
+      "max_s": 0.1883,
+      "median_s": 0.1859,
+      "min_s": 0.1841,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=malloc(",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 21108,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "13",
+       "files": "13",
+       "has_more": "0",
+       "hits": "100",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=Metal/SignedDistanceGenerator.mm:143",
+       "next_offset": "100",
+       "offset": "0",
+       "pattern": "malloc(",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "100",
+       "total": "100",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 100,
+      "max_s": 0.1884,
+      "median_s": 0.1852,
+      "min_s": 0.1824,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "malloc(",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 15335,
+      "max_s": 2.6093,
+      "median_s": 2.5743,
+      "min_s": 2.5717,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "malloc(",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 15335,
+      "hits_set": 100,
+      "max_s": 0.02,
+      "median_s": 0.0107,
+      "min_s": 0.0107,
+      "rc": 0
+     }
+    },
+    "L8": {
+     "pat": "SPDX-License-Identifier",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 334,
+      "hits_set": 3,
+      "max_s": 0.0782,
+      "median_s": 0.0777,
+      "min_s": 0.0764,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=SPDX-License-Identifier",
+       "--grep-in=any"
+      ],
+      "bytes": 6121,
+      "max_s": 0.186,
+      "median_s": 0.1837,
+      "min_s": 0.1828,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--grep=SPDX-License-Identifier",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 6187,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "13",
+       "files": "3",
+       "has_more": "0",
+       "hits": "3",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=infrastucture/stl.h:8",
+       "next_offset": "3",
+       "offset": "0",
+       "pattern": "SPDX-License-Identifier",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "3",
+       "total": "3",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 3,
+      "max_s": 0.1885,
+      "median_s": 0.1873,
+      "min_s": 0.1861,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 334,
+      "max_s": 2.6114,
+      "median_s": 2.5948,
+      "min_s": 2.5599,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 334,
+      "hits_set": 3,
+      "max_s": 0.0107,
+      "median_s": 0.0104,
+      "min_s": 0.0052,
+      "rc": 0
+     }
+    },
+    "R1": {
+     "pat": "^#include",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "^#include",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 790169,
+      "hits_set": 6171,
+      "max_s": 0.1333,
+      "median_s": 0.1307,
+      "min_s": 0.1287,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=^#include",
+       "--grep-in=any"
+      ],
+      "bytes": 8821,
+      "max_s": 0.2983,
+      "median_s": 0.2954,
+      "min_s": 0.2919,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=^#include",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 8889,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "13",
+       "files": "26",
+       "has_more": "0",
+       "hits": "26",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=Metal/BRDF.metal:1",
+       "next_offset": "26",
+       "offset": "0",
+       "pattern": "^#include",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "26",
+       "total": "26",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 26,
+      "max_s": 0.2982,
+      "median_s": 0.2946,
+      "min_s": 0.2894,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "^#include",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 790026,
+      "max_s": 2.8353,
+      "median_s": 2.7952,
+      "min_s": 2.7869,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "^#include",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 790026,
+      "hits_set": 6171,
+      "max_s": 0.0442,
+      "median_s": 0.0417,
+      "min_s": 0.0389,
+      "rc": 0
+     }
+    },
+    "R2": {
+     "pat": "TODO|FIXME|XXX",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 59645,
+      "hits_set": 307,
+      "max_s": 0.1332,
+      "median_s": 0.1265,
+      "min_s": 0.1254,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=TODO|FIXME|XXX",
+       "--grep-in=any"
+      ],
+      "bytes": 25240,
+      "max_s": 0.5672,
+      "median_s": 0.5602,
+      "min_s": 0.5071,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=TODO|FIXME|XXX",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 83117,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "13",
+       "files": "123",
+       "has_more": "0",
+       "hits": "320",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=Metal/AAPLMetalRenderer.mm:297",
+       "next_offset": "320",
+       "offset": "0",
+       "pattern": "TODO|FIXME|XXX",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "320",
+       "total": "320",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "4"
+      },
+      "hits_set": 317,
+      "max_s": 0.5674,
+      "median_s": 0.565,
+      "min_s": 0.5107,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 59635,
+      "max_s": 2.7213,
+      "median_s": 2.7153,
+      "min_s": 2.711,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 59635,
+      "hits_set": 307,
+      "max_s": 0.011,
+      "median_s": 0.0108,
+      "min_s": 0.0106,
+      "rc": 0
+     }
+    },
+    "R3": {
+     "pat": "malloc.*free",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "malloc.*free",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 640,
+      "hits_set": 4,
+      "max_s": 0.126,
+      "median_s": 0.1244,
+      "min_s": 0.0748,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=malloc.*free",
+       "--grep-in=any"
+      ],
+      "bytes": 6446,
+      "max_s": 0.4625,
+      "median_s": 0.4586,
+      "min_s": 0.4043,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=malloc.*free",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 6512,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "13",
+       "files": "4",
+       "has_more": "0",
+       "hits": "4",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=bullet/LinearMath/btAlignedAllocator.h:20",
+       "next_offset": "4",
+       "offset": "0",
+       "pattern": "malloc.*free",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "4",
+       "total": "4",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 4,
+      "max_s": 0.5184,
+      "median_s": 0.4599,
+      "min_s": 0.4451,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "malloc.*free",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 640,
+      "max_s": 2.7169,
+      "median_s": 2.6858,
+      "min_s": 2.6164,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "malloc.*free",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 640,
+      "hits_set": 4,
+      "max_s": 0.0111,
+      "median_s": 0.0109,
+      "min_s": 0.0108,
+      "rc": 0
+     }
+    },
+    "R4": {
+     "pat": "[Qq]z[Xx]v.*[Jj]w",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0779,
+      "median_s": 0.0776,
+      "min_s": 0.0754,
+      "rc": 1
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=[Qq]z[Xx]v.*[Jj]w",
+       "--grep-in=any"
+      ],
+      "bytes": 5765,
+      "max_s": 0.2972,
+      "median_s": 0.2878,
+      "min_s": 0.2863,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=[Qq]z[Xx]v.*[Jj]w",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5831,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "13",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=&apos;[Qq]z[Xx]v.*[Jj]w&apos;",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "[Qq]z[Xx]v.*[Jj]w",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "0",
+       "total": "0",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 0.2973,
+      "median_s": 0.2937,
+      "min_s": 0.2929,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 0,
+      "max_s": 2.6331,
+      "median_s": 2.6259,
+      "min_s": 2.5837,
+      "rc": 1
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0209,
+      "median_s": 0.0208,
+      "min_s": 0.0204,
+      "rc": 1
+     }
+    },
+    "R5": {
+     "pat": "[Ee]rror[A-Z][a-zA-Z]+",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 16659,
+      "hits_set": 88,
+      "max_s": 0.1335,
+      "median_s": 0.13,
+      "min_s": 0.1247,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=[Ee]rror[A-Z][a-zA-Z]+",
+       "--grep-in=any"
+      ],
+      "bytes": 23664,
+      "max_s": 0.4602,
+      "median_s": 0.4562,
+      "min_s": 0.4513,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=[Ee]rror[A-Z][a-zA-Z]+",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 26474,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "13",
+       "files": "27",
+       "has_more": "0",
+       "hits": "101",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=Metal/AAPLMetalRenderer.mm:3053",
+       "next_offset": "101",
+       "offset": "0",
+       "pattern": "[Ee]rror[A-Z][a-zA-Z]+",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "101",
+       "total": "101",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 88,
+      "max_s": 0.4584,
+      "median_s": 0.4537,
+      "min_s": 0.4484,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 16659,
+      "max_s": 2.7786,
+      "median_s": 2.7639,
+      "min_s": 2.7271,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 16659,
+      "hits_set": 88,
+      "max_s": 0.0118,
+      "median_s": 0.011,
+      "min_s": 0.0107,
+      "rc": 0
+     }
+    },
+    "R6": {
+     "pat": "[Mm][Uu][Tt][Ee][Xx]",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 11258,
+      "hits_set": 65,
+      "max_s": 0.1283,
+      "median_s": 0.1231,
+      "min_s": 0.078,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=[Mm][Uu][Tt][Ee][Xx]",
+       "--grep-in=any"
+      ],
+      "bytes": 14256,
+      "max_s": 0.298,
+      "median_s": 0.2966,
+      "min_s": 0.2931,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=[Mm][Uu][Tt][Ee][Xx]",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 17630,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "13",
+       "files": "17",
+       "has_more": "0",
+       "hits": "84",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=Motion/userMotion.h:46",
+       "next_offset": "84",
+       "offset": "0",
+       "pattern": "[Mm][Uu][Tt][Ee][Xx]",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "84",
+       "total": "84",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 57,
+      "max_s": 0.2985,
+      "median_s": 0.2929,
+      "min_s": 0.2892,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 11258,
+      "max_s": 2.6323,
+      "median_s": 2.6251,
+      "min_s": 2.6136,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 11258,
+      "hits_set": 65,
+      "max_s": 0.0209,
+      "median_s": 0.0208,
+      "min_s": 0.0208,
+      "rc": 0
+     }
+    },
+    "R7": {
+     "pat": "pthread_[a-z_]+_init",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0779,
+      "median_s": 0.0771,
+      "min_s": 0.0747,
+      "rc": 1
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=pthread_[a-z_]+_init",
+       "--grep-in=any"
+      ],
+      "bytes": 5771,
+      "max_s": 0.2965,
+      "median_s": 0.2957,
+      "min_s": 0.2896,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=pthread_[a-z_]+_init",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5837,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "13",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=&apos;pthread_[a-z_]+_init&apos;",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "pthread_[a-z_]+_init",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "0",
+       "total": "0",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 0.2946,
+      "median_s": 0.2941,
+      "min_s": 0.2905,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 0,
+      "max_s": 2.6295,
+      "median_s": 2.6174,
+      "min_s": 2.6134,
+      "rc": 1
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.011,
+      "median_s": 0.0107,
+      "min_s": 0.0055,
+      "rc": 1
+     }
+    },
+    "R8": {
+     "pat": "[0-9a-f]{8}-[0-9a-f]{4}",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 12770,
+      "hits_set": 46,
+      "max_s": 0.1859,
+      "median_s": 0.183,
+      "min_s": 0.1819,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
+       "--grep-in=any"
+      ],
+      "bytes": 6504,
+      "max_s": 1.1009,
+      "median_s": 1.0446,
+      "min_s": 0.897,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 6570,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "13",
+       "files": "3",
+       "has_more": "0",
+       "hits": "4",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=billboard/billboard.h:212",
+       "next_offset": "4",
+       "offset": "0",
+       "pattern": "[0-9a-f]{8}-[0-9a-f]{4}",
+       "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+       "shown": "4",
+       "total": "4",
+       "unindexed_files_scanned": "58",
+       "unindexed_files_skipped": "223",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 4,
+      "max_s": 0.9945,
+      "median_s": 0.9771,
+      "min_s": 0.9426,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 12768,
+      "max_s": 2.805,
+      "median_s": 2.7787,
+      "min_s": 2.772,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/canyonraid48",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$HOME/AppDevelopLocal/project2/canyonraid48"
+      ],
+      "bytes": 12768,
+      "hits_set": 46,
+      "max_s": 0.0241,
+      "median_s": 0.0227,
+      "min_s": 0.0221,
+      "rc": 0
+     }
+    }
+   },
+   "root": "$HOME/AppDevelopLocal/project2/canyonraid48",
+   "rw_cache_bytes": 22447001,
+   "rw_cache_bytes_warm": 22447001,
+   "rw_cold": {
+    "peak_rss_bytes": 893829120,
+    "reps": 3,
+    "wall_s": 1.097
+   },
+   "tgrep_index": {
+    "index_bytes": 50155417,
+    "peak_rss_bytes": 138772480,
+    "rc": 0,
+    "stderr": "nput operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 536  voluntary context switches\n                5435  involuntary context switches\n         19459249758  instructions retired\n          4906098255  cycles elapsed\n           127762960  peak memory footprint",
+    "stdout": "",
+    "wall_s": 0.395
+   },
+   "tgrep_status": "Server status for $HOME/AppDevelopLocal/project2/canyonraid48\n  PID:        41187\n  Port:       60998\n  Files:      2408\n  Trigrams:   193994\n  Cache:      0/50000\n  Watcher:    active\n  Watch mode: native (requested: auto)\n  Watch budget: 8192\n  Poll interval: 120s (after completion)\n  Reconcile:  idle\n  Last successful reconcile: 1s ago\n  Reconcile pending: no\n  Reconcile overdue: no\n  Last reconcile duration: 16ms\n  Indexing:   complete"
+  },
+  "go": {
+   "corpus": "go",
+   "files_rg": 15865,
+   "queries": {
+    "L1": {
+     "pat": "pthread_mutex_lock",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 3838,
+      "hits_set": 15,
+      "max_s": 0.351,
+      "median_s": 0.3461,
+      "min_s": 0.3414,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=pthread_mutex_lock",
+       "--grep-in=any"
+      ],
+      "bytes": 7401,
+      "max_s": 0.5689,
+      "median_s": 0.5611,
+      "min_s": 0.5592,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=pthread_mutex_lock",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 7618,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "4",
+       "has_more": "0",
+       "hits": "12",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=src/runtime/cgo/gcc_libinit_unix.c:50",
+       "next_offset": "12",
+       "offset": "0",
+       "pattern": "pthread_mutex_lock",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "12",
+       "total": "12",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 11,
+      "max_s": 0.6796,
+      "median_s": 0.6197,
+      "min_s": 0.5626,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 3838,
+      "max_s": 0.5658,
+      "median_s": 0.5599,
+      "min_s": 0.557,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 3838,
+      "hits_set": 15,
+      "max_s": 0.0111,
+      "median_s": 0.011,
+      "min_s": 0.0109,
+      "rc": 0
+     }
+    },
+    "L2": {
+     "pat": "return",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "return",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 48390801,
+      "hits_set": 185241,
+      "max_s": 0.5109,
+      "median_s": 0.4595,
+      "min_s": 0.4565,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=return",
+       "--grep-in=any"
+      ],
+      "bytes": 19776,
+      "max_s": 0.5725,
+      "median_s": 0.563,
+      "min_s": 0.5573,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=return",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 17852510,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "6307",
+       "has_more": "0",
+       "hits": "163239",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=.github/ISSUE_TEMPLATE/00-bug.yml:84",
+       "next_offset": "163239",
+       "offset": "0",
+       "pattern": "return",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "163239",
+       "total": "163239",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "55"
+      },
+      "hits_set": 157745,
+      "max_s": 2.2637,
+      "median_s": 1.8607,
+      "min_s": 1.8021,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "return",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 48390801,
+      "max_s": 0.6783,
+      "median_s": 0.6687,
+      "min_s": 0.6653,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "return",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 48390801,
+      "hits_set": 185241,
+      "max_s": 0.7277,
+      "median_s": 0.5672,
+      "min_s": 0.5059,
+      "rc": 0
+     }
+    },
+    "L3": {
+     "pat": "TODO",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "TODO",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 1229459,
+      "hits_set": 4401,
+      "max_s": 0.3512,
+      "median_s": 0.3461,
+      "min_s": 0.3432,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=TODO",
+       "--grep-in=any"
+      ],
+      "bytes": 28632,
+      "max_s": 0.6281,
+      "median_s": 0.5689,
+      "min_s": 0.5533,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=TODO",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 505456,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "1048",
+       "has_more": "0",
+       "hits": "2772",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=misc/cgo/gmp/gmp.go:186",
+       "next_offset": "2772",
+       "offset": "0",
+       "pattern": "TODO",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "2772",
+       "total": "2772",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "906"
+      },
+      "hits_set": 3672,
+      "max_s": 0.7798,
+      "median_s": 0.6214,
+      "min_s": 0.6123,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "TODO",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 1229459,
+      "max_s": 0.6192,
+      "median_s": 0.6096,
+      "min_s": 0.5655,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "TODO",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 1229459,
+      "hits_set": 4401,
+      "max_s": 0.0441,
+      "median_s": 0.0403,
+      "min_s": 0.0217,
+      "rc": 0
+     }
+    },
+    "L4": {
+     "pat": "int",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "int",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 102283233,
+      "hits_set": 381543,
+      "max_s": 0.52,
+      "median_s": 0.513,
+      "min_s": 0.5068,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=int",
+       "--grep-in=any"
+      ],
+      "bytes": 24178,
+      "max_s": 0.5687,
+      "median_s": 0.5629,
+      "min_s": 0.5115,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=int",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 44688884,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "8730",
+       "has_more": "0",
+       "hits": "326547",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=.github/ISSUE_TEMPLATE/11-language-change.yml:17",
+       "next_offset": "326547",
+       "offset": "0",
+       "pattern": "int",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "326547",
+       "total": "326547",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "85071"
+      },
+      "hits_set": 307212,
+      "max_s": 3.91,
+      "median_s": 3.9087,
+      "min_s": 3.8804,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "int",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 102283224,
+      "max_s": 0.7803,
+      "median_s": 0.7715,
+      "min_s": 0.7281,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "int",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 102283224,
+      "hits_set": 381543,
+      "max_s": 1.1583,
+      "median_s": 0.9965,
+      "min_s": 0.9939,
+      "rc": 0
+     }
+    },
+    "L5": {
+     "pat": "err",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "err",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 41205764,
+      "hits_set": 157261,
+      "max_s": 0.407,
+      "median_s": 0.4059,
+      "min_s": 0.3981,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=err",
+       "--grep-in=any"
+      ],
+      "bytes": 23423,
+      "max_s": 0.5169,
+      "median_s": 0.5121,
+      "min_s": 0.5073,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=err",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 15659125,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "4933",
+       "has_more": "0",
+       "hits": "147524",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=.github/ISSUE_TEMPLATE/00-bug.yml:76",
+       "next_offset": "147524",
+       "offset": "0",
+       "pattern": "err",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "147524",
+       "total": "147524",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "9227"
+      },
+      "hits_set": 126919,
+      "max_s": 1.2043,
+      "median_s": 1.1576,
+      "min_s": 1.1418,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "err",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 41205763,
+      "max_s": 0.6193,
+      "median_s": 0.6159,
+      "min_s": 0.6054,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "err",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 41205763,
+      "hits_set": 157261,
+      "max_s": 0.462,
+      "median_s": 0.4033,
+      "min_s": 0.4027,
+      "rc": 0
+     }
+    },
+    "L6": {
+     "pat": "zzqxvnotpresentzz",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.3469,
+      "median_s": 0.2997,
+      "min_s": 0.2977,
+      "rc": 1
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=zzqxvnotpresentzz",
+       "--grep-in=any"
+      ],
+      "bytes": 5922,
+      "max_s": 0.5652,
+      "median_s": 0.5638,
+      "min_s": 0.5165,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=zzqxvnotpresentzz",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5988,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=zzqxvnotpresentzz",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "zzqxvnotpresentzz",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "0",
+       "total": "0",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 0.5732,
+      "median_s": 0.5666,
+      "min_s": 0.5627,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 0,
+      "max_s": 0.5586,
+      "median_s": 0.5116,
+      "min_s": 0.51,
+      "rc": 1
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0437,
+      "median_s": 0.0134,
+      "min_s": 0.0132,
+      "rc": 1
+     }
+    },
+    "L7": {
+     "pat": "malloc(",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "malloc(",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 24126,
+      "hits_set": 94,
+      "max_s": 0.354,
+      "median_s": 0.3523,
+      "min_s": 0.3407,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=malloc(",
+       "--grep-in=any"
+      ],
+      "bytes": 16987,
+      "max_s": 0.5189,
+      "median_s": 0.5146,
+      "min_s": 0.5052,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=malloc(",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 17259,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "47",
+       "has_more": "0",
+       "hits": "86",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=src/cmd/cgo/out.go:1774",
+       "next_offset": "86",
+       "offset": "0",
+       "pattern": "malloc(",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "86",
+       "total": "86",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 85,
+      "max_s": 0.5655,
+      "median_s": 0.5136,
+      "min_s": 0.5047,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "malloc(",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 24126,
+      "max_s": 0.5677,
+      "median_s": 0.5054,
+      "min_s": 0.5028,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "malloc(",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 24126,
+      "hits_set": 94,
+      "max_s": 0.0417,
+      "median_s": 0.0136,
+      "min_s": 0.0132,
+      "rc": 0
+     }
+    },
+    "L8": {
+     "pat": "SPDX-License-Identifier",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.3559,
+      "median_s": 0.349,
+      "min_s": 0.3009,
+      "rc": 1
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=SPDX-License-Identifier",
+       "--grep-in=any"
+      ],
+      "bytes": 5940,
+      "max_s": 0.6237,
+      "median_s": 0.6143,
+      "min_s": 0.5672,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--grep=SPDX-License-Identifier",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 6006,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=SPDX-License-Identifier",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "SPDX-License-Identifier",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "0",
+       "total": "0",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 0.6243,
+      "median_s": 0.5706,
+      "min_s": 0.5666,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 0,
+      "max_s": 0.5688,
+      "median_s": 0.5167,
+      "min_s": 0.513,
+      "rc": 1
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.014,
+      "median_s": 0.0139,
+      "min_s": 0.0136,
+      "rc": 1
+     }
+    },
+    "R1": {
+     "pat": "^#include",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "^#include",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 561891,
+      "hits_set": 2389,
+      "max_s": 0.3516,
+      "median_s": 0.3495,
+      "min_s": 0.3439,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=^#include",
+       "--grep-in=any"
+      ],
+      "bytes": 7339,
+      "max_s": 0.7859,
+      "median_s": 0.7775,
+      "min_s": 0.7757,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=^#include",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 7407,
+      "header": {
+       "capped": "0",
+       "files": "12",
+       "has_more": "0",
+       "hits": "12",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=src/cmd/cgo/internal/testsanitizers/testdata/libfuzzer2.c:1",
+       "next_offset": "12",
+       "offset": "0",
+       "pattern": "^#include",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "12",
+       "total": "12",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "2"
+      },
+      "hits_set": 14,
+      "max_s": 0.8893,
+      "median_s": 0.8366,
+      "min_s": 0.7856,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "^#include",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 561891,
+      "max_s": 0.7279,
+      "median_s": 0.6649,
+      "min_s": 0.6218,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "^#include",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 561891,
+      "hits_set": 2389,
+      "max_s": 0.0457,
+      "median_s": 0.0236,
+      "min_s": 0.0223,
+      "rc": 0
+     }
+    },
+    "R2": {
+     "pat": "TODO|FIXME|XXX",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 1419007,
+      "hits_set": 4708,
+      "max_s": 0.3541,
+      "median_s": 0.3476,
+      "min_s": 0.3448,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=TODO|FIXME|XXX",
+       "--grep-in=any"
+      ],
+      "bytes": 27828,
+      "max_s": 1.9847,
+      "median_s": 1.9688,
+      "min_s": 1.8532,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=TODO|FIXME|XXX",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 541201,
+      "header": {
+       "capped": "0",
+       "files": "1122",
+       "has_more": "0",
+       "hits": "3041",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=misc/cgo/gmp/gmp.go:186",
+       "next_offset": "3041",
+       "offset": "0",
+       "pattern": "TODO|FIXME|XXX",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "3041",
+       "total": "3041",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "925"
+      },
+      "hits_set": 3922,
+      "max_s": 2.012,
+      "median_s": 1.9281,
+      "min_s": 1.8231,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 1418063,
+      "max_s": 0.5629,
+      "median_s": 0.5622,
+      "min_s": 0.5602,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 1418063,
+      "hits_set": 4704,
+      "max_s": 0.0613,
+      "median_s": 0.0432,
+      "min_s": 0.0415,
+      "rc": 0
+     }
+    },
+    "R3": {
+     "pat": "malloc.*free",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "malloc.*free",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 3285,
+      "hits_set": 12,
+      "max_s": 0.3537,
+      "median_s": 0.3501,
+      "min_s": 0.3461,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=malloc.*free",
+       "--grep-in=any"
+      ],
+      "bytes": 7757,
+      "max_s": 1.1656,
+      "median_s": 1.1136,
+      "min_s": 1.1054,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=malloc.*free",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 7825,
+      "header": {
+       "capped": "0",
+       "files": "10",
+       "has_more": "0",
+       "hits": "11",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=src/crypto/internal/boring/rsa.go:161",
+       "next_offset": "11",
+       "offset": "0",
+       "pattern": "malloc.*free",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "11",
+       "total": "11",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 11,
+      "max_s": 1.1157,
+      "median_s": 1.1113,
+      "min_s": 1.0662,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "malloc.*free",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 3285,
+      "max_s": 0.5684,
+      "median_s": 0.5618,
+      "min_s": 0.5157,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "malloc.*free",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 3285,
+      "hits_set": 12,
+      "max_s": 0.0228,
+      "median_s": 0.0138,
+      "min_s": 0.0136,
+      "rc": 0
+     }
+    },
+    "R4": {
+     "pat": "[Qq]z[Xx]v.*[Jj]w",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.4111,
+      "median_s": 0.397,
+      "min_s": 0.3437,
+      "rc": 1
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=[Qq]z[Xx]v.*[Jj]w",
+       "--grep-in=any"
+      ],
+      "bytes": 5868,
+      "max_s": 1.0087,
+      "median_s": 0.9928,
+      "min_s": 0.9515,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=[Qq]z[Xx]v.*[Jj]w",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5934,
+      "header": {
+       "capped": "0",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=&apos;[Qq]z[Xx]v.*[Jj]w&apos;",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "[Qq]z[Xx]v.*[Jj]w",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "0",
+       "total": "0",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 1.0581,
+      "median_s": 1.0512,
+      "min_s": 0.994,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 0,
+      "max_s": 0.5719,
+      "median_s": 0.5685,
+      "min_s": 0.56,
+      "rc": 1
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0797,
+      "median_s": 0.0256,
+      "min_s": 0.0221,
+      "rc": 1
+     }
+    },
+    "R5": {
+     "pat": "[Ee]rror[A-Z][a-zA-Z]+",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 551159,
+      "hits_set": 1887,
+      "max_s": 0.4101,
+      "median_s": 0.348,
+      "min_s": 0.3375,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=[Ee]rror[A-Z][a-zA-Z]+",
+       "--grep-in=any"
+      ],
+      "bytes": 23867,
+      "max_s": 1.6596,
+      "median_s": 1.6555,
+      "min_s": 1.6434,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=[Ee]rror[A-Z][a-zA-Z]+",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 244742,
+      "header": {
+       "capped": "0",
+       "files": "258",
+       "has_more": "0",
+       "hits": "1744",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=src/bufio/scan.go:304",
+       "next_offset": "1744",
+       "offset": "0",
+       "pattern": "[Ee]rror[A-Z][a-zA-Z]+",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "1744",
+       "total": "1744",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "71"
+      },
+      "hits_set": 1702,
+      "max_s": 1.7589,
+      "median_s": 1.5427,
+      "min_s": 1.4314,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 551159,
+      "max_s": 0.8922,
+      "median_s": 0.6164,
+      "min_s": 0.5678,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 551159,
+      "hits_set": 1887,
+      "max_s": 0.0253,
+      "median_s": 0.0236,
+      "min_s": 0.0222,
+      "rc": 0
+     }
+    },
+    "R6": {
+     "pat": "[Mm][Uu][Tt][Ee][Xx]",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 551292,
+      "hits_set": 2196,
+      "max_s": 0.4017,
+      "median_s": 0.3524,
+      "min_s": 0.3503,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=[Mm][Uu][Tt][Ee][Xx]",
+       "--grep-in=any"
+      ],
+      "bytes": 21538,
+      "max_s": 0.9557,
+      "median_s": 0.9513,
+      "min_s": 0.9464,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=[Mm][Uu][Tt][Ee][Xx]",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 256124,
+      "header": {
+       "capped": "0",
+       "files": "419",
+       "has_more": "0",
+       "hits": "2215",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=src/archive/zip/register.go:41",
+       "next_offset": "2215",
+       "offset": "0",
+       "pattern": "[Mm][Uu][Tt][Ee][Xx]",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "2215",
+       "total": "2215",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "39"
+      },
+      "hits_set": 2016,
+      "max_s": 0.9498,
+      "median_s": 0.9431,
+      "min_s": 0.9359,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 551292,
+      "max_s": 0.6208,
+      "median_s": 0.5651,
+      "min_s": 0.5555,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 551292,
+      "hits_set": 2196,
+      "max_s": 0.026,
+      "median_s": 0.0256,
+      "min_s": 0.0239,
+      "rc": 0
+     }
+    },
+    "R7": {
+     "pat": "pthread_[a-z_]+_init",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 20244,
+      "hits_set": 79,
+      "max_s": 0.5108,
+      "median_s": 0.3619,
+      "min_s": 0.344,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=pthread_[a-z_]+_init",
+       "--grep-in=any"
+      ],
+      "bytes": 12196,
+      "max_s": 1.1972,
+      "median_s": 1.1526,
+      "min_s": 1.1,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=pthread_[a-z_]+_init",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 13241,
+      "header": {
+       "capped": "0",
+       "files": "13",
+       "has_more": "0",
+       "hits": "61",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=src/runtime/cgo/pthread_unix.c:30",
+       "next_offset": "61",
+       "offset": "0",
+       "pattern": "pthread_[a-z_]+_init",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "61",
+       "total": "61",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 52,
+      "max_s": 1.159,
+      "median_s": 1.1067,
+      "min_s": 1.1,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 20244,
+      "max_s": 0.7038,
+      "median_s": 0.6797,
+      "min_s": 0.6303,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 20244,
+      "hits_set": 79,
+      "max_s": 0.0125,
+      "median_s": 0.0124,
+      "min_s": 0.0123,
+      "rc": 0
+     }
+    },
+    "R8": {
+     "pat": "[0-9a-f]{8}-[0-9a-f]{4}",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 566656,
+      "hits_set": 1497,
+      "max_s": 0.3988,
+      "median_s": 0.353,
+      "min_s": 0.351,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
+       "--grep-in=any"
+      ],
+      "bytes": 32713,
+      "max_s": 3.1514,
+      "median_s": 3.0791,
+      "min_s": 2.6156,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$RW_H2H_HOME/../corpus/go",
+       "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 246977,
+      "header": {
+       "capped": "0",
+       "files": "32",
+       "has_more": "0",
+       "hits": "1158",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=.github/ISSUE_TEMPLATE/04-vuln.yml:16",
+       "next_offset": "1158",
+       "offset": "0",
+       "pattern": "[0-9a-f]{8}-[0-9a-f]{4}",
+       "root": "$RW_H2H_HOME/../corpus/go",
+       "shown": "1158",
+       "total": "1158",
+       "unindexed_candidates_capped": "1",
+       "unindexed_files_scanned": "500",
+       "unindexed_hits": "108"
+      },
+      "hits_set": 1256,
+      "max_s": 2.5035,
+      "median_s": 2.3085,
+      "min_s": 2.2487,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 566656,
+      "max_s": 0.6701,
+      "median_s": 0.6226,
+      "min_s": 0.5655,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/go",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$RW_H2H_HOME/../corpus/go"
+      ],
+      "bytes": 566656,
+      "hits_set": 1497,
+      "max_s": 0.043,
+      "median_s": 0.0423,
+      "min_s": 0.0387,
+      "rc": 0
+     }
+    }
+   },
+   "root": "$RW_H2H_HOME/../corpus/go",
+   "rw_cache_bytes": 61638585,
+   "rw_cache_bytes_warm": 61638585,
+   "rw_cold": {
+    "peak_rss_bytes": 1358872576,
+    "reps": 3,
+    "wall_s": 1.826
+   },
+   "tgrep_index": {
+    "index_bytes": 126145624,
+    "peak_rss_bytes": 166674432,
+    "rc": 0,
+    "stderr": "nput operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                4725  voluntary context switches\n               17471  involuntary context switches\n         36320652429  instructions retired\n         19146856542  cycles elapsed\n           159875672  peak memory footprint",
+    "stdout": "",
+    "wall_s": 1.042
+   },
+   "tgrep_status": "Server status for $RW_H2H_HOME/../corpus/go\n  PID:        72184\n  Port:       61132\n  Files:      15084\n  Trigrams:   479833\n  Cache:      0/50000\n  Watcher:    active\n  Watch mode: native (requested: auto)\n  Watch budget: 8192\n  Poll interval: 120s (after completion)\n  Reconcile:  idle\n  Last successful reconcile: 1s ago\n  Reconcile pending: no\n  Reconcile overdue: no\n  Last reconcile duration: 92ms\n  Indexing:   complete"
+  },
+  "rwsrc": {
+   "corpus": "rwsrc",
+   "files_rg": 159,
+   "queries": {
+    "L1": {
+     "pat": "pthread_mutex_lock",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0102,
+      "median_s": 0.0099,
+      "min_s": 0.0096,
+      "rc": 1
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=pthread_mutex_lock",
+       "--grep-in=any"
+      ],
+      "bytes": 5769,
+      "max_s": 0.0778,
+      "median_s": 0.0757,
+      "min_s": 0.0716,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=pthread_mutex_lock",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5835,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=pthread_mutex_lock",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "pthread_mutex_lock",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "0",
+       "total": "0",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 0.0778,
+      "median_s": 0.0755,
+      "min_s": 0.0741,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "max_s": 0.0201,
+      "median_s": 0.0199,
+      "min_s": 0.0095,
+      "rc": 1
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.01,
+      "median_s": 0.0049,
+      "min_s": 0.0046,
+      "rc": 1
+     }
+    },
+    "L2": {
+     "pat": "return",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "return",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 979246,
+      "hits_set": 7963,
+      "max_s": 0.0102,
+      "median_s": 0.0099,
+      "min_s": 0.0099,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=return",
+       "--grep-in=any"
+      ],
+      "bytes": 20991,
+      "max_s": 0.0404,
+      "median_s": 0.0403,
+      "min_s": 0.0392,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=return",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 1053375,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "155",
+       "has_more": "0",
+       "hits": "8013",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=abicheck.h:163",
+       "next_offset": "8013",
+       "offset": "0",
+       "pattern": "return",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "8013",
+       "total": "8013",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "19"
+      },
+      "hits_set": 7963,
+      "max_s": 0.0775,
+      "median_s": 0.0773,
+      "min_s": 0.0744,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "return",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 979246,
+      "max_s": 0.0202,
+      "median_s": 0.02,
+      "min_s": 0.0198,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "return",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 979246,
+      "hits_set": 7963,
+      "max_s": 0.041,
+      "median_s": 0.0401,
+      "min_s": 0.0397,
+      "rc": 0
+     }
+    },
+    "L3": {
+     "pat": "TODO",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "TODO",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 479,
+      "hits_set": 3,
+      "max_s": 0.0101,
+      "median_s": 0.0099,
+      "min_s": 0.0093,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=TODO",
+       "--grep-in=any"
+      ],
+      "bytes": 6207,
+      "max_s": 0.0408,
+      "median_s": 0.0404,
+      "min_s": 0.0394,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=TODO",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 6273,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "3",
+       "has_more": "0",
+       "hits": "3",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=clones.h:123",
+       "next_offset": "3",
+       "offset": "0",
+       "pattern": "TODO",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "3",
+       "total": "3",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 3,
+      "max_s": 0.0778,
+      "median_s": 0.0759,
+      "min_s": 0.0409,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "TODO",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 479,
+      "max_s": 0.0202,
+      "median_s": 0.02,
+      "min_s": 0.0099,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "TODO",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 479,
+      "hits_set": 3,
+      "max_s": 0.01,
+      "median_s": 0.005,
+      "min_s": 0.0047,
+      "rc": 0
+     }
+    },
+    "L4": {
+     "pat": "int",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "int",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 1897108,
+      "hits_set": 12040,
+      "max_s": 0.0104,
+      "median_s": 0.0101,
+      "min_s": 0.0099,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=int",
+       "--grep-in=any"
+      ],
+      "bytes": 28590,
+      "max_s": 0.0728,
+      "median_s": 0.07,
+      "min_s": 0.0407,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=int",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 2105222,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "157",
+       "has_more": "0",
+       "hits": "13699",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=abicheck.h:19",
+       "next_offset": "13699",
+       "offset": "0",
+       "pattern": "int",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "13699",
+       "total": "13699",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "119"
+      },
+      "hits_set": 12040,
+      "max_s": 0.0766,
+      "median_s": 0.076,
+      "min_s": 0.0735,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "int",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 1897108,
+      "max_s": 0.0396,
+      "median_s": 0.0387,
+      "min_s": 0.0202,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "int",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 1897108,
+      "hits_set": 12040,
+      "max_s": 0.0409,
+      "median_s": 0.0398,
+      "min_s": 0.0382,
+      "rc": 0
+     }
+    },
+    "L5": {
+     "pat": "err",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "err",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 247753,
+      "hits_set": 1416,
+      "max_s": 0.0103,
+      "median_s": 0.0102,
+      "min_s": 0.01,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=err",
+       "--grep-in=any"
+      ],
+      "bytes": 23407,
+      "max_s": 0.0782,
+      "median_s": 0.0765,
+      "min_s": 0.0751,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=err",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 259134,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "120",
+       "has_more": "0",
+       "hits": "1510",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=abicheck.h:10",
+       "next_offset": "1510",
+       "offset": "0",
+       "pattern": "err",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "1510",
+       "total": "1510",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 1416,
+      "max_s": 0.0781,
+      "median_s": 0.0752,
+      "min_s": 0.0744,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "err",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 247753,
+      "max_s": 0.0203,
+      "median_s": 0.0202,
+      "min_s": 0.02,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "err",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 247753,
+      "hits_set": 1416,
+      "max_s": 0.0104,
+      "median_s": 0.0101,
+      "min_s": 0.0094,
+      "rc": 0
+     }
+    },
+    "L6": {
+     "pat": "zzqxvnotpresentzz",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0103,
+      "median_s": 0.0102,
+      "min_s": 0.0101,
+      "rc": 1
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=zzqxvnotpresentzz",
+       "--grep-in=any"
+      ],
+      "bytes": 5766,
+      "max_s": 0.0779,
+      "median_s": 0.0775,
+      "min_s": 0.0719,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=zzqxvnotpresentzz",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5832,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=zzqxvnotpresentzz",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "zzqxvnotpresentzz",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "0",
+       "total": "0",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 0.0776,
+      "median_s": 0.0749,
+      "min_s": 0.0406,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "max_s": 0.0204,
+      "median_s": 0.0202,
+      "min_s": 0.0191,
+      "rc": 1
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0099,
+      "median_s": 0.005,
+      "min_s": 0.0047,
+      "rc": 1
+     }
+    },
+    "L7": {
+     "pat": "malloc(",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "malloc(",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 117,
+      "hits_set": 1,
+      "max_s": 0.0101,
+      "median_s": 0.0101,
+      "min_s": 0.0098,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=malloc(",
+       "--grep-in=any"
+      ],
+      "bytes": 5865,
+      "max_s": 0.0408,
+      "median_s": 0.0406,
+      "min_s": 0.0404,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=malloc(",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5931,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "1",
+       "has_more": "0",
+       "hits": "1",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=alloccount.cpp:47",
+       "next_offset": "1",
+       "offset": "0",
+       "pattern": "malloc(",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "1",
+       "total": "1",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 1,
+      "max_s": 0.0406,
+      "median_s": 0.0405,
+      "min_s": 0.0396,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "malloc(",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 117,
+      "max_s": 0.0203,
+      "median_s": 0.0201,
+      "min_s": 0.0188,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "malloc(",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 117,
+      "hits_set": 1,
+      "max_s": 0.0101,
+      "median_s": 0.0049,
+      "min_s": 0.0048,
+      "rc": 0
+     }
+    },
+    "L8": {
+     "pat": "SPDX-License-Identifier",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 1338,
+      "hits_set": 12,
+      "max_s": 0.0103,
+      "median_s": 0.01,
+      "min_s": 0.0099,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=SPDX-License-Identifier",
+       "--grep-in=any"
+      ],
+      "bytes": 7044,
+      "max_s": 0.0738,
+      "median_s": 0.0405,
+      "min_s": 0.0388,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--grep=SPDX-License-Identifier",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 7112,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "files": "11",
+       "has_more": "0",
+       "hits": "11",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=infra/Diagnostics.h:1",
+       "next_offset": "11",
+       "offset": "0",
+       "pattern": "SPDX-License-Identifier",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "11",
+       "total": "11",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "1"
+      },
+      "hits_set": 12,
+      "max_s": 0.076,
+      "median_s": 0.0406,
+      "min_s": 0.0396,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 1338,
+      "max_s": 0.0203,
+      "median_s": 0.0202,
+      "min_s": 0.0198,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 1338,
+      "hits_set": 12,
+      "max_s": 0.0101,
+      "median_s": 0.005,
+      "min_s": 0.0049,
+      "rc": 0
+     }
+    },
+    "R1": {
+     "pat": "^#include",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "^#include",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 190353,
+      "hits_set": 1648,
+      "max_s": 0.0102,
+      "median_s": 0.0101,
+      "min_s": 0.0097,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=^#include",
+       "--grep-in=any"
+      ],
+      "bytes": 5762,
+      "max_s": 0.0846,
+      "median_s": 0.0767,
+      "min_s": 0.0738,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=^#include",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5828,
+      "header": {
+       "capped": "0",
+       "files": "1",
+       "has_more": "0",
+       "hits": "1",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=pagerank.cpp:1",
+       "next_offset": "1",
+       "offset": "0",
+       "pattern": "^#include",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "1",
+       "total": "1",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 1,
+      "max_s": 0.0778,
+      "median_s": 0.0764,
+      "min_s": 0.0728,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "^#include",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 190353,
+      "max_s": 0.0204,
+      "median_s": 0.0201,
+      "min_s": 0.018,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "^#include",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 190353,
+      "hits_set": 1648,
+      "max_s": 0.0202,
+      "median_s": 0.0186,
+      "min_s": 0.0117,
+      "rc": 0
+     }
+    },
+    "R2": {
+     "pat": "TODO|FIXME|XXX",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 2009,
+      "hits_set": 12,
+      "max_s": 0.0107,
+      "median_s": 0.0102,
+      "min_s": 0.01,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=TODO|FIXME|XXX",
+       "--grep-in=any"
+      ],
+      "bytes": 7688,
+      "max_s": 0.128,
+      "median_s": 0.0774,
+      "min_s": 0.0758,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=TODO|FIXME|XXX",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 7756,
+      "header": {
+       "capped": "0",
+       "files": "10",
+       "has_more": "0",
+       "hits": "12",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=clones.h:123",
+       "next_offset": "12",
+       "offset": "0",
+       "pattern": "TODO|FIXME|XXX",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "12",
+       "total": "12",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 12,
+      "max_s": 0.132,
+      "median_s": 0.1302,
+      "min_s": 0.0776,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 2009,
+      "max_s": 0.0202,
+      "median_s": 0.0202,
+      "min_s": 0.0198,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 2009,
+      "hits_set": 12,
+      "max_s": 0.0101,
+      "median_s": 0.01,
+      "min_s": 0.0097,
+      "rc": 0
+     }
+    },
+    "R3": {
+     "pat": "malloc.*free",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "malloc.*free",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 339,
+      "hits_set": 2,
+      "max_s": 0.0102,
+      "median_s": 0.0102,
+      "min_s": 0.0101,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=malloc.*free",
+       "--grep-in=any"
+      ],
+      "bytes": 6115,
+      "max_s": 0.1324,
+      "median_s": 0.1315,
+      "min_s": 0.1277,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=malloc.*free",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 6181,
+      "header": {
+       "capped": "0",
+       "files": "1",
+       "has_more": "0",
+       "hits": "2",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=graph.h:1341",
+       "next_offset": "2",
+       "offset": "0",
+       "pattern": "malloc.*free",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "2",
+       "total": "2",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 2,
+      "max_s": 0.1335,
+      "median_s": 0.1303,
+      "min_s": 0.127,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "malloc.*free",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 339,
+      "max_s": 0.0203,
+      "median_s": 0.0201,
+      "min_s": 0.0189,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "malloc.*free",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 339,
+      "hits_set": 2,
+      "max_s": 0.0102,
+      "median_s": 0.0102,
+      "min_s": 0.01,
+      "rc": 0
+     }
+    },
+    "R4": {
+     "pat": "[Qq]z[Xx]v.*[Jj]w",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0101,
+      "median_s": 0.01,
+      "min_s": 0.0099,
+      "rc": 1
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=[Qq]z[Xx]v.*[Jj]w",
+       "--grep-in=any"
+      ],
+      "bytes": 5712,
+      "max_s": 0.0406,
+      "median_s": 0.0403,
+      "min_s": 0.0385,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=[Qq]z[Xx]v.*[Jj]w",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5778,
+      "header": {
+       "capped": "0",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=&apos;[Qq]z[Xx]v.*[Jj]w&apos;",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "[Qq]z[Xx]v.*[Jj]w",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "0",
+       "total": "0",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 0.0408,
+      "median_s": 0.0402,
+      "min_s": 0.0399,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "max_s": 0.0202,
+      "median_s": 0.02,
+      "min_s": 0.0188,
+      "rc": 1
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0104,
+      "median_s": 0.0102,
+      "min_s": 0.0094,
+      "rc": 1
+     }
+    },
+    "R5": {
+     "pat": "[Ee]rror[A-Z][a-zA-Z]+",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 4988,
+      "hits_set": 35,
+      "max_s": 0.0106,
+      "median_s": 0.0101,
+      "min_s": 0.0101,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=[Ee]rror[A-Z][a-zA-Z]+",
+       "--grep-in=any"
+      ],
+      "bytes": 11747,
+      "max_s": 0.1332,
+      "median_s": 0.1315,
+      "min_s": 0.1204,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=[Ee]rror[A-Z][a-zA-Z]+",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 12482,
+      "header": {
+       "capped": "0",
+       "files": "6",
+       "has_more": "0",
+       "hits": "42",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=ingest_astquery.h:214",
+       "next_offset": "42",
+       "offset": "0",
+       "pattern": "[Ee]rror[A-Z][a-zA-Z]+",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "42",
+       "total": "42",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 35,
+      "max_s": 0.1338,
+      "median_s": 0.1319,
+      "min_s": 0.1278,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 4988,
+      "max_s": 0.0209,
+      "median_s": 0.0198,
+      "min_s": 0.0194,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 4988,
+      "hits_set": 35,
+      "max_s": 0.0105,
+      "median_s": 0.0103,
+      "min_s": 0.0102,
+      "rc": 0
+     }
+    },
+    "R6": {
+     "pat": "[Mm][Uu][Tt][Ee][Xx]",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 5736,
+      "hits_set": 43,
+      "max_s": 0.0101,
+      "median_s": 0.0101,
+      "min_s": 0.01,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=[Mm][Uu][Tt][Ee][Xx]",
+       "--grep-in=any"
+      ],
+      "bytes": 12362,
+      "max_s": 0.0778,
+      "median_s": 0.0771,
+      "min_s": 0.0724,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=[Mm][Uu][Tt][Ee][Xx]",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 14382,
+      "header": {
+       "capped": "0",
+       "files": "11",
+       "has_more": "0",
+       "hits": "62",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=dmm.h:66",
+       "next_offset": "62",
+       "offset": "0",
+       "pattern": "[Mm][Uu][Tt][Ee][Xx]",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "62",
+       "total": "62",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 43,
+      "max_s": 0.0779,
+      "median_s": 0.0778,
+      "min_s": 0.0766,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 5736,
+      "max_s": 0.0204,
+      "median_s": 0.0201,
+      "min_s": 0.0185,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 5736,
+      "hits_set": 43,
+      "max_s": 0.0105,
+      "median_s": 0.0103,
+      "min_s": 0.0101,
+      "rc": 0
+     }
+    },
+    "R7": {
+     "pat": "pthread_[a-z_]+_init",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0103,
+      "median_s": 0.0101,
+      "min_s": 0.0096,
+      "rc": 1
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=pthread_[a-z_]+_init",
+       "--grep-in=any"
+      ],
+      "bytes": 5718,
+      "max_s": 0.0773,
+      "median_s": 0.0754,
+      "min_s": 0.0741,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=pthread_[a-z_]+_init",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5784,
+      "header": {
+       "capped": "0",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=&apos;pthread_[a-z_]+_init&apos;",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "pthread_[a-z_]+_init",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "0",
+       "total": "0",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 0.0779,
+      "median_s": 0.0775,
+      "min_s": 0.0765,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "max_s": 0.0204,
+      "median_s": 0.0203,
+      "min_s": 0.0196,
+      "rc": 1
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0103,
+      "median_s": 0.0102,
+      "min_s": 0.01,
+      "rc": 1
+     }
+    },
+    "R8": {
+     "pat": "[0-9a-f]{8}-[0-9a-f]{4}",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0204,
+      "median_s": 0.0203,
+      "min_s": 0.0194,
+      "rc": 1
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
+       "--grep-in=any"
+      ],
+      "bytes": 5724,
+      "max_s": 0.1878,
+      "median_s": 0.1811,
+      "min_s": 0.1335,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5790,
+      "header": {
+       "capped": "0",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=&apos;[0-9a-f]{8}-[0-9a-f]{4}&apos;",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "[0-9a-f]{8}-[0-9a-f]{4}",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+       "shown": "0",
+       "total": "0",
+       "unindexed_files_scanned": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 0.1925,
+      "median_s": 0.1284,
+      "min_s": 0.128,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "max_s": 0.0405,
+      "median_s": 0.0401,
+      "min_s": 0.0386,
+      "rc": 1
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwsrc",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/src"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0102,
+      "median_s": 0.0097,
+      "min_s": 0.0093,
+      "rc": 1
+     }
+    }
+   },
+   "root": "$HOME/AppDevelopLocal/project2/rw-hv-A/src",
+   "rw_cache_bytes": 4844582,
+   "rw_cache_bytes_warm": 4844582,
+   "rw_cold": {
+    "peak_rss_bytes": 179093504,
+    "reps": 3,
+    "wall_s": 0.19
+   },
+   "tgrep_index": {
+    "index_bytes": 6632961,
+    "peak_rss_bytes": 43466752,
+    "rc": 0,
+    "stderr": "nput operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   1  voluntary context switches\n                 762  involuntary context switches\n          1572062332  instructions retired\n           461838252  cycles elapsed\n            36635104  peak memory footprint",
+    "stdout": "",
+    "wall_s": 0.056
+   },
+   "tgrep_status": "Server status for $HOME/AppDevelopLocal/project2/rw-hv-A/src\n  PID:        31588\n  Port:       60786\n  Files:      159\n  Trigrams:   69580\n  Cache:      0/50000\n  Watcher:    active\n  Watch mode: native (requested: auto)\n  Watch budget: 8192\n  Poll interval: 120s (after completion)\n  Reconcile:  idle\n  Last successful reconcile: 1s ago\n  Reconcile pending: no\n  Reconcile overdue: no\n  Last reconcile duration: 4ms\n  Indexing:   complete"
+  },
+  "rwtree": {
+   "corpus": "rwtree",
+   "files_rg": 2240,
+   "queries": {
+    "L1": {
+     "pat": "pthread_mutex_lock",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 1082,
+      "hits_set": 9,
+      "max_s": 0.0775,
+      "median_s": 0.0771,
+      "min_s": 0.0719,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=pthread_mutex_lock",
+       "--grep-in=any"
+      ],
+      "bytes": 6513,
+      "max_s": 0.133,
+      "median_s": 0.1272,
+      "min_s": 0.1251,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=pthread_mutex_lock",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 6712,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "15",
+       "files": "2",
+       "has_more": "0",
+       "hits": "9",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=bench/tgrep-h2h/queries.json:7",
+       "next_offset": "9",
+       "offset": "0",
+       "pattern": "pthread_mutex_lock",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "9",
+       "total": "9",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 9,
+      "max_s": 0.1336,
+      "median_s": 0.1307,
+      "min_s": 0.1302,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 1082,
+      "max_s": 0.185,
+      "median_s": 0.1826,
+      "min_s": 0.1816,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "pthread_mutex_lock",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 1082,
+      "hits_set": 9,
+      "max_s": 0.0104,
+      "median_s": 0.0103,
+      "min_s": 0.0101,
+      "rc": 0
+     }
+    },
+    "L2": {
+     "pat": "return",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "return",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 6862270,
+      "hits_set": 51951,
+      "max_s": 0.1323,
+      "median_s": 0.1298,
+      "min_s": 0.1256,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=return",
+       "--grep-in=any"
+      ],
+      "bytes": 28130,
+      "max_s": 0.1324,
+      "median_s": 0.1259,
+      "min_s": 0.1245,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=return",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 1892728,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "15",
+       "files": "1107",
+       "has_more": "0",
+       "hits": "14019",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=.github/workflows/ci.yml:62",
+       "next_offset": "14019",
+       "offset": "0",
+       "pattern": "return",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "14019",
+       "total": "14019",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "424"
+      },
+      "hits_set": 14026,
+      "max_s": 0.1881,
+      "median_s": 0.1821,
+      "min_s": 0.1794,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "return",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 6862270,
+      "max_s": 0.295,
+      "median_s": 0.2931,
+      "min_s": 0.2352,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "return",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 6862270,
+      "hits_set": 51951,
+      "max_s": 0.2334,
+      "median_s": 0.1832,
+      "min_s": 0.1804,
+      "rc": 0
+     }
+    },
+    "L3": {
+     "pat": "TODO",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "TODO",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 20451,
+      "hits_set": 96,
+      "max_s": 0.1271,
+      "median_s": 0.0772,
+      "min_s": 0.0742,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=TODO",
+       "--grep-in=any"
+      ],
+      "bytes": 19442,
+      "max_s": 0.1325,
+      "median_s": 0.1284,
+      "min_s": 0.1265,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=TODO",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 19834,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "15",
+       "files": "10",
+       "has_more": "0",
+       "hits": "30",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=src/clones.h:123",
+       "next_offset": "30",
+       "offset": "0",
+       "pattern": "TODO",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "30",
+       "total": "30",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "41"
+      },
+      "hits_set": 70,
+      "max_s": 0.1329,
+      "median_s": 0.132,
+      "min_s": 0.1262,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "TODO",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 20451,
+      "max_s": 0.1877,
+      "median_s": 0.1858,
+      "min_s": 0.1794,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "TODO",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 20451,
+      "hits_set": 96,
+      "max_s": 0.0104,
+      "median_s": 0.0103,
+      "min_s": 0.0103,
+      "rc": 0
+     }
+    },
+    "L4": {
+     "pat": "int",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "int",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 20835639,
+      "hits_set": 124267,
+      "max_s": 0.1331,
+      "median_s": 0.131,
+      "min_s": 0.1295,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=int",
+       "--grep-in=any"
+      ],
+      "bytes": 30119,
+      "max_s": 0.133,
+      "median_s": 0.1317,
+      "min_s": 0.1272,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=int",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 7254588,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "15",
+       "files": "1377",
+       "has_more": "0",
+       "hits": "42106",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=.codex-plugin/plugin.json:21",
+       "next_offset": "42106",
+       "offset": "0",
+       "pattern": "int",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "42106",
+       "total": "42106",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "4600"
+      },
+      "hits_set": 38732,
+      "max_s": 0.241,
+      "median_s": 0.2376,
+      "min_s": 0.1893,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "int",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 20835639,
+      "max_s": 0.2976,
+      "median_s": 0.2937,
+      "min_s": 0.287,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "int",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 20835639,
+      "hits_set": 124267,
+      "max_s": 0.3514,
+      "median_s": 0.3454,
+      "min_s": 0.2979,
+      "rc": 0
+     }
+    },
+    "L5": {
+     "pat": "err",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "err",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 5913128,
+      "hits_set": 35781,
+      "max_s": 0.1315,
+      "median_s": 0.1279,
+      "min_s": 0.1202,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=err",
+       "--grep-in=any"
+      ],
+      "bytes": 62185,
+      "max_s": 0.1333,
+      "median_s": 0.1321,
+      "min_s": 0.1294,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=err",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 1291224,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "15",
+       "files": "734",
+       "has_more": "0",
+       "hits": "6485",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=.github/pargates-shard-weights.json:33",
+       "next_offset": "6485",
+       "offset": "0",
+       "pattern": "err",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "6485",
+       "total": "6485",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "866"
+      },
+      "hits_set": 6340,
+      "max_s": 0.1314,
+      "median_s": 0.1301,
+      "min_s": 0.129,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "err",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 5913128,
+      "max_s": 0.2406,
+      "median_s": 0.2376,
+      "min_s": 0.2325,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "err",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 5913128,
+      "hits_set": 35781,
+      "max_s": 0.133,
+      "median_s": 0.1326,
+      "min_s": 0.1271,
+      "rc": 0
+     }
+    },
+    "L6": {
+     "pat": "zzqxvnotpresentzz",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 1420,
+      "hits_set": 11,
+      "max_s": 0.1248,
+      "median_s": 0.0737,
+      "min_s": 0.0699,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=zzqxvnotpresentzz",
+       "--grep-in=any"
+      ],
+      "bytes": 6874,
+      "max_s": 0.1342,
+      "median_s": 0.1311,
+      "min_s": 0.1271,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=zzqxvnotpresentzz",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 7072,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "15",
+       "files": "3",
+       "has_more": "0",
+       "hits": "11",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=bench/tgrep-h2h/queries.json:12",
+       "next_offset": "11",
+       "offset": "0",
+       "pattern": "zzqxvnotpresentzz",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "11",
+       "total": "11",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 11,
+      "max_s": 0.1335,
+      "median_s": 0.1334,
+      "min_s": 0.1277,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 1420,
+      "max_s": 0.1874,
+      "median_s": 0.1854,
+      "min_s": 0.1847,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "zzqxvnotpresentzz",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 1420,
+      "hits_set": 11,
+      "max_s": 0.0108,
+      "median_s": 0.0106,
+      "min_s": 0.0105,
+      "rc": 0
+     }
+    },
+    "L7": {
+     "pat": "malloc(",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "malloc(",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 8417,
+      "hits_set": 57,
+      "max_s": 0.0774,
+      "median_s": 0.0742,
+      "min_s": 0.0737,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=malloc(",
+       "--grep-in=any"
+      ],
+      "bytes": 7138,
+      "max_s": 0.1339,
+      "median_s": 0.1326,
+      "min_s": 0.125,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=malloc(",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 7306,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "15",
+       "files": "5",
+       "has_more": "0",
+       "hits": "12",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=src/alloccount.cpp:47",
+       "next_offset": "12",
+       "offset": "0",
+       "pattern": "malloc(",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "12",
+       "total": "12",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 12,
+      "max_s": 0.1338,
+      "median_s": 0.1323,
+      "min_s": 0.1289,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "malloc(",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 8417,
+      "max_s": 0.1844,
+      "median_s": 0.1821,
+      "min_s": 0.1797,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "malloc(",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 8417,
+      "hits_set": 57,
+      "max_s": 0.0107,
+      "median_s": 0.0107,
+      "min_s": 0.0104,
+      "rc": 0
+     }
+    },
+    "L8": {
+     "pat": "SPDX-License-Identifier",
+     "regex": false,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 2674,
+      "hits_set": 23,
+      "max_s": 0.1422,
+      "median_s": 0.129,
+      "min_s": 0.0739,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=SPDX-License-Identifier",
+       "--grep-in=any"
+      ],
+      "bytes": 7848,
+      "max_s": 0.133,
+      "median_s": 0.1308,
+      "min_s": 0.1266,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--grep=SPDX-License-Identifier",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 8064,
+      "header": {
+       "capped": "0",
+       "complete": "1",
+       "corpus_oversize": "15",
+       "files": "13",
+       "has_more": "0",
+       "hits": "19",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=src/infra/Diagnostics.h:1",
+       "next_offset": "19",
+       "offset": "0",
+       "pattern": "SPDX-License-Identifier",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "19",
+       "total": "19",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "1"
+      },
+      "hits_set": 20,
+      "max_s": 0.1482,
+      "median_s": 0.1428,
+      "min_s": 0.1299,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 2674,
+      "max_s": 0.252,
+      "median_s": 0.2416,
+      "min_s": 0.197,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-F",
+       "-e",
+       "SPDX-License-Identifier",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 2674,
+      "hits_set": 23,
+      "max_s": 0.0121,
+      "median_s": 0.0106,
+      "min_s": 0.0105,
+      "rc": 0
+     }
+    },
+    "R1": {
+     "pat": "^#include",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "^#include",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 318373,
+      "hits_set": 2822,
+      "max_s": 0.1283,
+      "median_s": 0.0766,
+      "min_s": 0.0746,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=^#include",
+       "--grep-in=any"
+      ],
+      "bytes": 8574,
+      "max_s": 0.4617,
+      "median_s": 0.4293,
+      "min_s": 0.3489,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=^#include",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 8642,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "15",
+       "files": "23",
+       "has_more": "0",
+       "hits": "23",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=src/pagerank.cpp:1",
+       "next_offset": "23",
+       "offset": "0",
+       "pattern": "^#include",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "23",
+       "total": "23",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "6"
+      },
+      "hits_set": 29,
+      "max_s": 0.4245,
+      "median_s": 0.3639,
+      "min_s": 0.2928,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "^#include",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 318373,
+      "max_s": 0.2972,
+      "median_s": 0.295,
+      "min_s": 0.2886,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "^#include",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 318373,
+      "hits_set": 2822,
+      "max_s": 0.1427,
+      "median_s": 0.1331,
+      "min_s": 0.1298,
+      "rc": 0
+     }
+    },
+    "R2": {
+     "pat": "TODO|FIXME|XXX",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 30026,
+      "hits_set": 162,
+      "max_s": 0.1314,
+      "median_s": 0.1269,
+      "min_s": 0.0781,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=TODO|FIXME|XXX",
+       "--grep-in=any"
+      ],
+      "bytes": 26773,
+      "max_s": 0.6668,
+      "median_s": 0.6172,
+      "min_s": 0.6141,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=TODO|FIXME|XXX",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 35912,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "15",
+       "files": "40",
+       "has_more": "0",
+       "hits": "149",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=skills/install.sh:349",
+       "next_offset": "149",
+       "offset": "0",
+       "pattern": "TODO|FIXME|XXX",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "149",
+       "total": "149",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "56"
+      },
+      "hits_set": 129,
+      "max_s": 0.6726,
+      "median_s": 0.6196,
+      "min_s": 0.6165,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 30026,
+      "max_s": 0.1874,
+      "median_s": 0.1839,
+      "min_s": 0.1811,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "TODO|FIXME|XXX",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 30026,
+      "hits_set": 162,
+      "max_s": 0.0208,
+      "median_s": 0.0106,
+      "min_s": 0.0102,
+      "rc": 0
+     }
+    },
+    "R3": {
+     "pat": "malloc.*free",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "malloc.*free",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 1670,
+      "hits_set": 12,
+      "max_s": 0.1412,
+      "median_s": 0.0778,
+      "min_s": 0.0752,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=malloc.*free",
+       "--grep-in=any"
+      ],
+      "bytes": 7195,
+      "max_s": 0.4561,
+      "median_s": 0.4546,
+      "min_s": 0.4507,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=malloc.*free",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 7379,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "15",
+       "files": "5",
+       "has_more": "0",
+       "hits": "12",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=src/graph.h:1341",
+       "next_offset": "12",
+       "offset": "0",
+       "pattern": "malloc.*free",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "12",
+       "total": "12",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 12,
+      "max_s": 0.6758,
+      "median_s": 0.5922,
+      "min_s": 0.5732,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "malloc.*free",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 1670,
+      "max_s": 0.2505,
+      "median_s": 0.2458,
+      "min_s": 0.2446,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "malloc.*free",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 1670,
+      "hits_set": 12,
+      "max_s": 0.0124,
+      "median_s": 0.0106,
+      "min_s": 0.01,
+      "rc": 0
+     }
+    },
+    "R4": {
+     "pat": "[Qq]z[Xx]v.*[Jj]w",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.1466,
+      "median_s": 0.1334,
+      "min_s": 0.131,
+      "rc": 1
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=[Qq]z[Xx]v.*[Jj]w",
+       "--grep-in=any"
+      ],
+      "bytes": 5759,
+      "max_s": 0.58,
+      "median_s": 0.4089,
+      "min_s": 0.3961,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=[Qq]z[Xx]v.*[Jj]w",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5825,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "15",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=&apos;[Qq]z[Xx]v.*[Jj]w&apos;",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "[Qq]z[Xx]v.*[Jj]w",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "0",
+       "total": "0",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 0.5826,
+      "median_s": 0.4693,
+      "min_s": 0.4205,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 0,
+      "max_s": 0.2586,
+      "median_s": 0.2525,
+      "min_s": 0.2409,
+      "rc": 1
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Qq]z[Xx]v.*[Jj]w",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0497,
+      "median_s": 0.0217,
+      "min_s": 0.0209,
+      "rc": 1
+     }
+    },
+    "R5": {
+     "pat": "[Ee]rror[A-Z][a-zA-Z]+",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 49681,
+      "hits_set": 220,
+      "max_s": 0.1331,
+      "median_s": 0.1297,
+      "min_s": 0.1244,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=[Ee]rror[A-Z][a-zA-Z]+",
+       "--grep-in=any"
+      ],
+      "bytes": 20950,
+      "max_s": 0.7529,
+      "median_s": 0.6738,
+      "min_s": 0.516,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=[Ee]rror[A-Z][a-zA-Z]+",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 21685,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "15",
+       "files": "12",
+       "has_more": "0",
+       "hits": "51",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=src/ingest_astquery.h:214",
+       "next_offset": "51",
+       "offset": "0",
+       "pattern": "[Ee]rror[A-Z][a-zA-Z]+",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "51",
+       "total": "51",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "64"
+      },
+      "hits_set": 107,
+      "max_s": 0.7492,
+      "median_s": 0.6819,
+      "min_s": 0.6284,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 49681,
+      "max_s": 0.2319,
+      "median_s": 0.1843,
+      "min_s": 0.1823,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Ee]rror[A-Z][a-zA-Z]+",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 49681,
+      "hits_set": 220,
+      "max_s": 0.0209,
+      "median_s": 0.0207,
+      "min_s": 0.0202,
+      "rc": 0
+     }
+    },
+    "R6": {
+     "pat": "[Mm][Uu][Tt][Ee][Xx]",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 20692,
+      "hits_set": 140,
+      "max_s": 0.1309,
+      "median_s": 0.1294,
+      "min_s": 0.1277,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=[Mm][Uu][Tt][Ee][Xx]",
+       "--grep-in=any"
+      ],
+      "bytes": 18966,
+      "max_s": 0.3472,
+      "median_s": 0.3424,
+      "min_s": 0.2915,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=[Mm][Uu][Tt][Ee][Xx]",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 21774,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "15",
+       "files": "21",
+       "has_more": "0",
+       "hits": "98",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=src/dmm.h:66",
+       "next_offset": "98",
+       "offset": "0",
+       "pattern": "[Mm][Uu][Tt][Ee][Xx]",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "98",
+       "total": "98",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "8"
+      },
+      "hits_set": 78,
+      "max_s": 0.351,
+      "median_s": 0.2987,
+      "min_s": 0.2926,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 20692,
+      "max_s": 0.1878,
+      "median_s": 0.1867,
+      "min_s": 0.1828,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[Mm][Uu][Tt][Ee][Xx]",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 20692,
+      "hits_set": 140,
+      "max_s": 0.0208,
+      "median_s": 0.0207,
+      "min_s": 0.0199,
+      "rc": 0
+     }
+    },
+    "R7": {
+     "pat": "pthread_[a-z_]+_init",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0779,
+      "median_s": 0.0773,
+      "min_s": 0.0756,
+      "rc": 1
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=pthread_[a-z_]+_init",
+       "--grep-in=any"
+      ],
+      "bytes": 5765,
+      "max_s": 0.4068,
+      "median_s": 0.4032,
+      "min_s": 0.4008,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=pthread_[a-z_]+_init",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 5831,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "15",
+       "files": "0",
+       "has_more": "0",
+       "hits": "0",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--for=&apos;pthread_[a-z_]+_init&apos;",
+       "next_offset": "0",
+       "offset": "0",
+       "pattern": "pthread_[a-z_]+_init",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "0",
+       "total": "0",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "0"
+      },
+      "hits_set": 0,
+      "max_s": 0.4551,
+      "median_s": 0.4083,
+      "min_s": 0.3945,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 0,
+      "max_s": 0.1862,
+      "median_s": 0.1828,
+      "min_s": 0.1787,
+      "rc": 1
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "pthread_[a-z_]+_init",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 0,
+      "hits_set": 0,
+      "max_s": 0.0107,
+      "median_s": 0.0106,
+      "min_s": 0.0101,
+      "rc": 1
+     }
+    },
+    "R8": {
+     "pat": "[0-9a-f]{8}-[0-9a-f]{4}",
+     "regex": true,
+     "rg": {
+      "argv": [
+       "/opt/homebrew/bin/rg",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 25973,
+      "hits_set": 72,
+      "max_s": 0.1317,
+      "median_s": 0.1277,
+      "min_s": 0.1256,
+      "rc": 0
+     },
+     "rw-warm": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
+       "--grep-in=any"
+      ],
+      "bytes": 20707,
+      "max_s": 0.7837,
+      "median_s": 0.7266,
+      "min_s": 0.7233,
+      "rc": 0
+     },
+     "rw-warm-all": {
+      "argv": [
+       "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "--regex=[0-9a-f]{8}-[0-9a-f]{4}",
+       "--grep-in=any",
+       "--limit=1000000"
+      ],
+      "bytes": 33812,
+      "header": {
+       "capped": "0",
+       "corpus_oversize": "15",
+       "files": "4",
+       "has_more": "0",
+       "hits": "69",
+       "hits_capped": "0",
+       "limit": "1000000",
+       "next": "--at=bench/tgrep-h2h/results.json:78",
+       "next_offset": "69",
+       "offset": "0",
+       "pattern": "[0-9a-f]{8}-[0-9a-f]{4}",
+       "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+       "shown": "69",
+       "total": "69",
+       "unindexed_files_scanned": "205",
+       "unindexed_files_skipped": "1",
+       "unindexed_hits": "22"
+      },
+      "hits_set": 72,
+      "max_s": 0.7611,
+      "median_s": 0.7224,
+      "min_s": 0.7121,
+      "rc": 0
+     },
+     "tgrep-cold": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "--no-index",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 25973,
+      "max_s": 0.2403,
+      "median_s": 0.2392,
+      "min_s": 0.2361,
+      "rc": 0
+     },
+     "tgrep-warm": {
+      "argv": [
+       "$RW_H2H_HOME/../tgrep/target/release/tgrep",
+       "--index-path",
+       "$RW_H2H_HOME/idx/rwtree",
+       "--sort",
+       "path",
+       "-n",
+       "--no-heading",
+       "-H",
+       "-e",
+       "[0-9a-f]{8}-[0-9a-f]{4}",
+       "$HOME/AppDevelopLocal/project2/rw-hv-A"
+      ],
+      "bytes": 25973,
+      "hits_set": 72,
+      "max_s": 0.0422,
+      "median_s": 0.0218,
+      "min_s": 0.0214,
+      "rc": 0
+     }
+    }
+   },
+   "root": "$HOME/AppDevelopLocal/project2/rw-hv-A",
+   "rw_cache_bytes": 10512105,
+   "rw_cache_bytes_warm": 10512105,
+   "rw_cold": {
+    "peak_rss_bytes": 384499712,
+    "reps": 3,
+    "wall_s": 0.383
+   },
+   "tgrep_index": {
+    "index_bytes": 35036017,
+    "peak_rss_bytes": 221167616,
+    "rc": 0,
+    "stderr": "nput operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 316  voluntary context switches\n                7626  involuntary context switches\n         29677965250  instructions retired\n          5778469124  cycles elapsed\n           137593384  peak memory footprint",
+    "stdout": "",
+    "wall_s": 0.437
+   },
+   "tgrep_status": "Server status for $HOME/AppDevelopLocal/project2/rw-hv-A\n  PID:        33302\n  Port:       60885\n  Files:      2231\n  Trigrams:   147332\n  Cache:      0/50000\n  Watcher:    active\n  Watch mode: native (requested: auto)\n  Watch budget: 8192\n  Poll interval: 120s (after completion)\n  Reconcile:  idle\n  Last successful reconcile: 1s ago\n  Reconcile pending: no\n  Reconcile overdue: no\n  Last reconcile duration: 14ms\n  Indexing:   complete"
+  }
+ },
+ "ripwire_bin": "$HOME/AppDevelopLocal/project2/rw-hv-A/build/ripwire",
+ "tgrep_bin": "$RW_H2H_HOME/../tgrep/target/release/tgrep"
+}
