@@ -8,9 +8,9 @@
 # ignore verdict was ever consulted: collectSources classified the extension first (recordPreSizeDrop, which
 # rowed any grammar-less, non-asset extension as unsupported-ext) and tested the ignore set only on what
 # survived. A file that was BOTH gitignored AND of an unindexed extension was therefore never asked, and
-# grep read it and served it. Measured 2026-09-09 on the canyonraid48 corpus:
-#   ripwire <root> --regex='^#include' --grep-in=any   → four hits inside canyon/personality.cpp.bak
-#   git check-ignore -v canyon/personality.cpp.bak      → .gitignore:78:canyon/*.bak
+# grep read it and served it. Measured 2026-09-09 on a private validation corpus:
+#   ripwire <root> --regex='^#include' --grep-in=any   → four hits inside <dir>/personality.cpp.bak
+#   git check-ignore -v <dir>/personality.cpp.bak      → .gitignore:78:<dir>/*.bak
 #   rg '^#include'                                      → does not open it
 # The header's own counters agreed with the leak: unindexed_files_scanned= counted the file, and the
 # skipped verb's unsupported_ext= counted it too, so nothing disclosed that an ignored file had been read.
