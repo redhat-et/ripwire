@@ -13276,9 +13276,13 @@ ordering the code argues for on other grounds.
   (the walk alone, 0.03 s versus 0.79 s for the full query) rules out the directory walk as the explanation.
   A one-shot CLI (G5) cannot hold anything resident between invocations, so **that half of the win is
   unavailable to ripwire at any price.** Only the postings half is portable.
-- **One machine, shared, arms run back to back rather than interleaved.** The conclusions turn on
-  10×–100× gaps and a Q\* one to two orders of magnitude below the observed session query count; a 2×
-  noise factor moves none of them.
+- **One machine, shared, and the load was not constant.** Arms ran back to back per query rather than
+  interleaved, and at the end of the llvm rung the 18-core host was at a 1-minute load average of 38.8
+  with 62 concurrent `ripwire` processes belonging to other work; the earlier cells were taken under
+  materially lighter load. The conclusions turn on 10×–10⁴× gaps, on a Q\* one to two orders of
+  magnitude below the observed session query count, and on comparisons between two ripwire cells taken
+  minutes apart — none of which a 2× noise factor moves. A single llvm absolute is an order of
+  magnitude, not a precise figure.
 - **One tgrep posture.** Index pre-built, server warm — the posture tgrep's own README advertises. A
   cold `tgrep serve` answers from an *empty* index and returns nothing until the first build publishes;
   tgrep documents that in `AGENTS.md` and it is not measured here.
