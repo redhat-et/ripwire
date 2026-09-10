@@ -2162,6 +2162,10 @@ inline constexpr const char* kLangColors[] = {
                  // already occupy that hue and a fourth purple is exactly the separability collision the
                  // Elixir row above exists to avoid. A warm rose, closer to Ruby's #c9455f than to any
                  // purple but still one step around the wheel from it.
+    "#2fa198",   // GDScript — a TEAL, deliberately not Godot's brand blue (#478cbf): that hue collides with
+                 // Lua's #4b8bbe and sits inside a band already holding Cpp/TypeScript/Go/C/Php. Teal is
+                 // unused in this palette, so it stays separable on the #111 canvas — the same reasoning
+                 // the Elixir and Kotlin rows above applied to the purples.
 };
 inline constexpr std::size_t kLangColorCount = sizeof( kLangColors ) / sizeof( kLangColors[0] );
 // NB the bound names the LAST enumerator, so appending one to Lang leaves this assert TRUE and silently

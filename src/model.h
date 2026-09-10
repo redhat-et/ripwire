@@ -104,14 +104,14 @@ inline const char* symTag( SymKind k ) noexcept
 // JVM-bridged to Java via graph.h's langCompatible (mirroring the existing Cpp<->ObjC and Cpp<->C
 // bridges) so a mixed Kotlin+Java module (the Android norm) resolves calls across the language
 // boundary instead of dropping every one of them as unresolved.
-enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml, Php, Lua, Elixir, Dart, Kotlin };
+enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml, Php, Lua, Elixir, Dart, Kotlin, GDScript };
 // The number of Lang enumerators. MUST stay ( last enumerator + 1 ): any per-language array sized by
 // a LITERAL silently drops the tail when a language is appended, and the drop is invisible because
 // the affected code paths just see a zero. That happened: nonlocalstate.h's filesByLang was a
 // hardcoded 16 while Php(18), Lua(19) and Elixir(20) existed, so --nonlocal-state never disclosed
 // those three as unanalyzed even though kUnanalyzedLangs listed Php and Lua. Size per-language
 // arrays with this, never with a number.
-inline constexpr std::size_t kLangCount = static_cast<std::size_t>( Lang::Kotlin ) + 1;
+inline constexpr std::size_t kLangCount = static_cast<std::size_t>( Lang::GDScript ) + 1;
 
 // short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua|ex|dart|kt").
 // The canonical home for this switch: previously duplicated privately in htmlexport.h, moved here so a THIRD
@@ -143,6 +143,7 @@ inline const char* langTag( Lang l ) noexcept
         case Lang::Elixir:     return "ex";
         case Lang::Dart:       return "dart";
         case Lang::Kotlin:     return "kt";
+        case Lang::GDScript:   return "gd";
         default:               return "?";
     }
 }

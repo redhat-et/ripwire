@@ -81,7 +81,7 @@ inline bool isValidSeverity( std::string_view s ) noexcept
 inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
 {
     struct Row { std::string_view name; Lang lang; };
-    static constexpr std::array<Row, 18> kMap = { {
+    static constexpr std::array<Row, 19> kMap = { {
         { "cpp",        Lang::Cpp        },
         { "python",     Lang::Python     },
         { "typescript", Lang::TypeScript },
@@ -100,6 +100,7 @@ inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
         { "elixir",     Lang::Elixir     },
         { "dart",       Lang::Dart       },
         { "kotlin",     Lang::Kotlin     },
+        { "gdscript",   Lang::GDScript   },
     } };
     for( const Row& r : kMap )
     {
@@ -132,7 +133,7 @@ inline Lang langOfPath( std::string_view path ) noexcept
     }
 
     struct Row { std::string_view ext; Lang lang; };
-    static const std::array<Row, 34> kExt = { {
+    static const std::array<Row, 35> kExt = { {
         { ".cpp", Lang::Cpp }, { ".cc", Lang::Cpp }, { ".cxx", Lang::Cpp },
         { ".h", Lang::Cpp }, { ".hpp", Lang::Cpp }, { ".hh", Lang::Cpp }, { ".hxx", Lang::Cpp }, { ".c", Lang::C },
         { ".py", Lang::Python },
@@ -151,6 +152,7 @@ inline Lang langOfPath( std::string_view path ) noexcept
         { ".ex", Lang::Elixir }, { ".exs", Lang::Elixir },
         { ".dart", Lang::Dart },
         { ".kt", Lang::Kotlin },
+        { ".gd", Lang::GDScript },
     } };
     for( const Row& r : kExt )
     {

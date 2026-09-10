@@ -86,7 +86,7 @@ struct LangEntry
 // the latter a list item), so those files carry the file-level node alone and serve as ONE whole-file
 // unit. A heading detector per format is a later lane with its own measurement. `.mdx` is markdown with
 // JSX, which the block grammar already reads as html blocks (opaque). Gate: test/textdocscheck.sh.
-constexpr std::array<LangEntry, 48> kLangTable = {{
+constexpr std::array<LangEntry, 49> kLangTable = {{
     { ".cpp",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cc",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cxx",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
@@ -179,7 +179,12 @@ constexpr std::array<LangEntry, 48> kLangTable = {{
     { ".dart", Lang::Dart,       &tree_sitter_dart,       "dart"       },
     // Lua: no classes, no imports. The five function-definition spellings and the one call node are the
     // whole extractable structure (queries/lua/tags.scm states the metatable/dynamic-dispatch floor).
-    { ".lua",  Lang::Lua,        &tree_sitter_lua,        "lua"        },   // Lua — function/method defs (5 shapes) + calls
+    { ".lua",  Lang::Lua,        &tree_sitter_lua,        "lua"        },
+    // GDScript (.gd): Godot's language. A .gd FILE IS A CLASS BODY — `class_name` names it, top-level
+    // `func`/`var` are its members — which is why queries/gdscript/tags.scm captures file-scope defs as
+    // function/var rather than needing an enclosing class node. `.tscn`/`.tres`/`.gdshader` are NOT
+    // indexed: they are scene/resource/shader formats with their own grammars, and none is vendored here.
+    { ".gd",   Lang::GDScript,   &tree_sitter_gdscript,   "gdscript"   },   // GDScript — class/func/var/const/enum/signal defs + calls   // Lua — function/method defs (5 shapes) + calls
     // Kotlin: `.kts` (Gradle script DSL) is deliberately NOT a row here yet — its trailing-lambda
     // density needs its own parse-quality probe before riding this grammar; `.kt` only for now.
     { ".kt",   Lang::Kotlin,     &tree_sitter_kotlin,     "kotlin"     },   // Kotlin — classes/objects/interfaces/functions + calls; JVM-bridged to Java (graph.h langCompatible)

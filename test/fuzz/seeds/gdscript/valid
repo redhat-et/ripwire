@@ -1,0 +1,30 @@
+class_name Seed
+extends Node2D
+
+signal hit(who: Node)
+
+const MAX := 3
+enum State { IDLE, RUN }
+
+@export var hp: int = 1
+@onready var spr: Sprite2D = $Sprite
+var v := Vector2.ZERO
+static var n := 0
+
+class Inner:
+	var q := 1
+	func m() -> int:
+		return q
+
+func take(d: int) -> void:
+	_apply(d)
+	spr.set_modulate(d)
+	match d:
+		0: pass
+		_: hit.emit(self)
+
+func _apply(d: int) -> void:
+	hp -= d
+	for i in range(MAX):
+		if i > 0 and hp < 0:
+			break

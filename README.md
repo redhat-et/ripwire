@@ -1816,9 +1816,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>618 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>619 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **618 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **619 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -2649,7 +2649,7 @@ file, and one row in the extension table.
 | Metal (MSL) | `.metal` | Indexed with the C++ grammar. |
 | CUDA | `.cu`, `.cuh` | `<<<>>>` launch sites are call edges. |
 | Python | `.py` | |
-| TypeScript / JavaScript | `.ts`, `.tsx`, `.js`, `.jsx` | Named imports and default imports resolve. One vendored dependency supplies two of the 24 grammars, `typescript` and `tsx`. |
+| TypeScript / JavaScript | `.ts`, `.tsx`, `.js`, `.jsx` | Named imports and default imports resolve. One vendored dependency supplies two of the 25 grammars, `typescript` and `tsx`. |
 | Java | `.java` | Qualified `new` calls resolve in a precise tier. |
 | Kotlin | `.kt` | Shares one call graph with Java. A file with string templates past 128 levels is refused and listed by `--skipped`. |
 | Ruby | `.rb` | Superclasses, mixins, `autoload`, and constant receivers are read. |
@@ -2662,6 +2662,7 @@ file, and one row in the extension table.
 | Go | `.go` | Qualified calls are rejected and fenced, not guessed. |
 | Rust | `.rs` | Scoped, turbofish, and `Self::` calls resolve in a precise tier. |
 | Bash | `.sh`, `.bash` | |
+| GDScript | `.gd` | A file is a class body: `class_name` names it and file-scope `func`/`var` are its members. A signal is indexed as a member. `preload`/`load` produce no dependency edge. `.tscn`, `.tres`, and `.gdshader` are not indexed. |
 | JSON | `.json` | Config keys become symbols. The lane emits no call edges. |
 | TOML | `.toml` | A table header is one symbol. Keys below it are one level down. |
 | YAML | `.yml`, `.yaml` | Mapping depth 2 is the cut. Sequence levels are transparent. |

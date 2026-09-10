@@ -603,6 +603,15 @@ inline constexpr TokenCalib kTokenCalib[] =
                                    // Java/CSharp when tokenbudgetcheck next gets a PHP corpus sample. Same
                                    // headroom clamp as CSharp/C/Toml/Yaml above: `s.lang==Php` (18) never
                                    // reaches contentBytesByLang[13].
+    { Lang::GDScript,   2.36 },   // REASONED, not measured — GDScript is Python's shape (indentation, snake_case
+                                   // members, `func`/`var`), so it borrows Python's MEASURED 2.36 rather than
+                                   // guessing a new rate. It is deliberately the DENSE end of the plausible band:
+                                   // Godot's PascalCase API names (CharacterBody2D, get_tree) push the true rate
+                                   // up toward the 2.55 Java/CSharp band, and under-stating bytes/token OVER-states
+                                   // the token count, which shrinks a budget rather than overrunning it — the safe
+                                   // direction. Recalibrate with Python when tokenbudgetcheck gets a .gd corpus.
+                                   // Same headroom clamp as every append since CSharp: `s.lang==GDScript` (23)
+                                   // never reaches contentBytesByLang[13].
     { Lang::Lua,        2.40 },   // REASONED, not measured — Lua's convention is short lower-case and
                                    // snake_case names over a very small keyword set, the same identifier shape
                                    // that put Ruby at the dense end of the band, so Lua borrows Ruby's exact

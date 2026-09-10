@@ -231,7 +231,7 @@ constexpr std::uint32_t kCacheVersion = 22;           // 22: RawDef gains `inter
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 96;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 98;           // bump on any grammar/.scm/extraction change
                                                       // 96 = 2026-09-13 (internal linkage, test/decltodefcheck.sh arm
                                                       //    B2): every C/C++ def carries a new syntactic
                                                       //    `internalLinkage` bit — inside an anonymous namespace at any
