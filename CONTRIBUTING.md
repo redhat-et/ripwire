@@ -289,6 +289,59 @@ already knew about the others, several while fixing one. So the rule is mechanic
   ordered container); and `unordered_dense` invalidates references on insert (values live in one
   vector), so never hold a `T&` into it across an insert.
 
+### Sorting
+
+There is no "preferred" sort here. Which one is right is decided by a property of the DATA, and the
+wrong choice is measurably worse — not merely no better.
+
+**Answer the three questions in order. The first one disqualifies most sites.**
+
+1. **Magnitude.** Unless the sum of elements sorted per run reaches roughly 10^6, use `std::sort` and
+   stop. Every sort site in this tree except one costs 0.5 ms or less per run, and five of seven
+   measured corpora cannot see any of this at all.
+
+2. **How was the set BUILT?** This, not `n`, is the covariate that decided all four sites measured on
+   2026-09-10.
+   - **Appended in ascending id order** (a walk over ids, `push_back` per hit) → the input arrives
+     already sorted. `std::sort` detects that in O(n) and does almost nothing. **Radix must not be
+     routed here at any n**: it always pays its full passes. Measured on django's `implementors`
+     (646,700 elements, max n = 2,401, 100.0% pre-sorted, zero adjacent descents) radix is **2.87x
+     WORSE**. If you want the detection explicit, `if( !std::is_sorted( a, b ) ) { std::sort( a, b ); }`
+     is the cheapest arm measured — 0.35x, beating pdqsort at 0.73x and timsort at 0.58x. That guard is
+     already the house pattern: see `radixSortRefSegment` in `src/ingest_model.h`.
+   - **Emitted by a scattered graph walk** (discovery order, ~0.18+ adjacent descents per element) →
+     radix earns its place. `transitiveIncludeSet` is 1.6-3.9% pre-sorted, and going radix took
+     `buildGraph/2b` on `rails` from 65.2 ms to 35.0 ms (-46%), `buildGraph` -16%, and the whole run
+     -7.8%/-8.5% over two independent n=21 interleaved A/Bs.
+
+3. **Payload width.** Radix pays only for a narrow record with a direct key.
+   **The two thresholds in `src/infra/sortutil.h` describe DIFFERENT WORK and must never be unified.**
+   `kRadixThreshold = 2048` guards 12-byte `Edge` records moved through two key passes plus a
+   `scores[id]` gather. The 4-byte `NodeId` path with a 12-bit key range skips its no-op passes and
+   runs TWO passes rather than four, so its measured crossover is 64-128. Honouring 2048 literally on
+   the `NodeId` path would have forfeited the entire 2b win, because those closures top out at n=1,420.
+
+**Two honesty notes, so nobody repeats the reasoning that produced them.**
+
+- Radix's edge on 2b is **not raw speed**. `std::stable_sort` ties it there (0.28x both), including on
+  synthetic pure-random data of the same shape: both quicksort-family arms sit one side of a 4x gap and
+  both merge/radix-family arms the other. What radix buys is caller-owned scratch and **zero per-call
+  allocation**, which is a G2 property. Say that, rather than claiming it is faster than everything.
+- **timsort was measured and refused.** It wins on no site on any of seven corpora, is the worst arm on
+  2b (1.71x, 6.0x slower than radix), and loses on the pre-sorted sites to the three-line `is_sorted`
+  guard above. It is vendored for toolbox parity only and has no call site. Do not add one without a
+  measurement that beats both `std::sort` and the guard on YOUR data.
+
+**Before you convert a sort, and before you delete one.** A sort can be load-bearing for reasons that
+have nothing to do with speed: if the input order is deterministic but is not id order, the sort is
+what makes the output a pure function of the input, and removing it violates non-negotiable #2 even
+though every test still passes. Conversely a `std::unique` after a sort may be dead by construction —
+2b's removed exactly **0 duplicates in 24,216 calls across six corpora**, because an epoch stamp
+already guaranteed uniqueness. Measure the count before assuming either way. Note also that fixture
+gates are weak here: with 2b's sort deleted entirely, **every fixture arm stayed green**, because
+fixture closures are under ten elements and incidentally ascending. Only a 400-node scrambled synthetic
+with an independent oracle failed.
+
 ### Interfaces
 
 - **Structured-binding returns** over out-params: `auto [ nodes, edges ] = build( … );`.
