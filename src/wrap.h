@@ -101,7 +101,7 @@ struct AgentTarget
 
 inline constexpr AgentTarget kAgentTargets[] = {
     { "claude",   "Claude Code",  "CLAUDE.md",                   "",
-      "~/.claude",           "~/.claude/skills",                 "",            true,  WrapPrimary::Cli,     McpForm::CliAdd,     "claude mcp add ripwire -- ",          " --mcp\n",            "" },
+      "~/.claude",           "${CLAUDE_CONFIG_DIR:-~/.claude}/skills", "",       true,  WrapPrimary::Cli,     McpForm::CliAdd,     "claude mcp add ripwire -- ",          " --mcp\n",            "" },
     { "codex",    "OpenAI Codex", "AGENTS.md",                   "",
       "~/.codex",            "${AGENTS_HOME:-~/.agents}/skills", " --codex",    true,  WrapPrimary::Cli,     McpForm::Toml,       "",                                    "",                    "" },
     { "cursor",   "Cursor",       ".cursor/rules (a .mdc file)", "",
@@ -411,6 +411,18 @@ inline std::function<bool()> agentDetector( const AgentTarget& row, const std::s
     if( row.homeDir.empty() )
     {
         return []() { return true; };   // aider ships no config dir — it is always available
+    }
+
+    if( row.name == "claude" )
+    {
+        // CLAUDE_CONFIG_DIR relocates the entire config directory away from ~/.claude.
+        return [ home ]() -> bool
+        {
+            std::error_code ec;
+            const char*       ccd     = std::getenv( "CLAUDE_CONFIG_DIR" );
+            const std::string configDir = ( ccd && *ccd ) ? std::string( ccd ) : home + "/.claude";
+            return fs::is_directory( configDir, ec ) && !ec;
+        };
     }
 
     if( row.name == "opencode" )

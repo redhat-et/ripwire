@@ -2296,7 +2296,7 @@ inline constexpr char kHelpTail[] =
         "                               carries the human tally line\n"
         "    --scan-skill=FILE          scan a single skill file before installing (any file, not just .md)\n"
         "    --scan-skills[=DIR]        scan a skills directory before installing — every text file, .md and .sh alike\n"
-        "                               scan DIR (or .agents/skills/ + ~/.claude/skills/ + ${CODEX_HOME:-~/.codex}/skills/).\n"
+        "                               scan DIR (or .agents/skills/ + ${CLAUDE_CONFIG_DIR:-~/.claude}/skills/ + ${CODEX_HOME:-~/.codex}/skills/).\n"
         "                               EVERY text file, .md and .sh alike — a skill dir's executables are the\n"
         "                               files most worth scanning. skipped= counts what it could not scan\n"
         "                               (binary content, or unreadable); denylisted subtrees (.git, node_modules,\n"

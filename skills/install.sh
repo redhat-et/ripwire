@@ -135,7 +135,7 @@ install_claude_route()
 # once per session per pattern. Idempotent — re-running does not duplicate the settings.json entry.
 install_claude_hook()
 {
-    settings="$HOME/.claude/settings.json"
+    settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
     hookScript="$( dirname "$src" )/hooks/ripwire-nudge.sh"
     chmod +x "$hookScript" 2>/dev/null || true
 
@@ -301,7 +301,7 @@ case "$mode" in
                   echo "  Installing there anyway; openclaw will not discover these skills until that is unset." >&2
               fi ;;
     codex-legacy) dst="${CODEX_HOME:-$HOME/.codex}/skills" ;;
-    claude) dst="$HOME/.claude/skills" ;;
+    claude) dst="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills" ;;
     hermes) dst="${HERMES_HOME:-$HOME/.hermes}/skills" ;;
     path) dst="$explicitPath" ;;
 esac

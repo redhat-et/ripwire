@@ -43,9 +43,9 @@ cmake --install build-install --prefix "$prefix" --component ripwire
 # meaning: Codex skills plus its advisory hooks.
 skillsInstaller="$prefix/share/ripwire/skills/install.sh"
 if [ -z "${RIPWIRE_NO_ACTIVATE:-}" ] && [ -f "$skillsInstaller" ]; then
-    if [ -d "$HOME/.claude" ]; then
+    if [ -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ]; then
         if bash "$skillsInstaller" >/dev/null 2>&1; then
-            echo "install.sh: activated the ripwire skills for Claude Code ($HOME/.claude/skills)"
+            echo "install.sh: activated the ripwire skills for Claude Code (${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills)"
         else
             echo "install.sh: could not activate the Claude Code skills; run: bash \"$skillsInstaller\"" >&2
         fi

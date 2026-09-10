@@ -237,9 +237,9 @@ if [ -d "$extractedDir/skills" ]; then
     # provision agent homes later. test/releaseinstallcheck.sh arms (E1)-(E6) pin all of it.
     activated=0
     if [ -z "${RIPWIRE_NO_ACTIVATE:-}" ]; then
-        if [ -d "$HOME/.claude" ]; then
+        if [ -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ]; then
             if bash "$skillsShareDir/install.sh" >/dev/null 2>&1; then
-                echo "install.sh: activated the ripwire skills for Claude Code ($HOME/.claude/skills)"
+                echo "install.sh: activated the ripwire skills for Claude Code (${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills)"
                 activated=$(( activated + 1 ))
             else
                 echo "install.sh: could not activate the Claude Code skills; run: bash \"$skillsShareDir/install.sh\"" >&2

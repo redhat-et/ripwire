@@ -3122,8 +3122,13 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         else
         {
             addDir( ".agents/skills" );
-            const char* homeEnv = std::getenv( "HOME" );
-            if( homeEnv && *homeEnv )
+            const char* homeEnv        = std::getenv( "HOME" );
+            const char* claudeConfigEnv = std::getenv( "CLAUDE_CONFIG_DIR" );
+            if( claudeConfigEnv && *claudeConfigEnv )
+            {
+                addDir( std::string( claudeConfigEnv ) + "/skills" );
+            }
+            else if( homeEnv && *homeEnv )
             {
                 addDir( std::string( homeEnv ) + "/.claude/skills" );
             }
