@@ -357,6 +357,14 @@ def main():
         return 0
 
     if args.sites:
+        # THE FIRST-RECORD READING, and the reason a `| grep -c` over this output needs its recipe named.
+        # The key is the REMARK name (r.name); the CALLEE lives in r.detail and is not part of it. So a
+        # site that names several callees — 242 of the ingest TU's 1,425 NoDefinition sites do — collapses
+        # to whichever it named FIRST, and `--sites … | grep -c ts_` therefore counts "sites whose first
+        # record names a ts_ accessor", not "sites that call one". Over the same data that answers 951
+        # (any record), 947 (first — this loop), 827 (predominant) or 826 (every). docs/OPTREMARKS.md §7
+        # carries the four readings; §5's published 831 is a first-record figure whose recipe returns 947.
+        # If you are about to publish a count derived from this loop, say which reading it is.
         seen = collections.Counter()
         shown = 0
         for r in sorted( remarks, key = lambda r: ( r.file, r.line ) ):
