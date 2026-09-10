@@ -1025,7 +1025,10 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         stack.pop_back();
         if( frame.depth > 512 )
         {
-            continue; // pathological-AST guard (file size is already capped at 1 MB)
+            continue; // pathological-AST guard. NOT "file size is capped at 1 MB" — kDefaultMaxFileBytes has
+                      // been 4 MB since 2026-07 and --max-file-size raises it further. The guard stands on its
+                      // own measurement instead: max AST depth observed on this tree is 103 against this 512,
+                      // and the bound has never fired (instrumented 2026-09-10 over 15,926 symbols).
         }
         const TSNode        n          = frame.node;
         const std::uint32_t nesting    = frame.nesting;

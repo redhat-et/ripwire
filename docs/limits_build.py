@@ -19,6 +19,29 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 DECL = re.compile(r'^\s*inline\s+constexpr\s+[\w:<>, ]*?\b(k[A-Z][A-Za-z0-9_]*)\s*=\s*([0-9][0-9_.eE+-]*)\s*;(.*)$')
 KEY  = re.compile(r'Max|Cap|Limit|Top|Budget|Ceil|Threshold|Rows|Len|Depth|Width')
 
+# A CAP answers "how many of X survive". A HYPERPARAMETER answers "how is X weighted or apportioned".
+# They are not the same instrument and must not share a table: a cap is judged by what it truncates and
+# gated by shown/total, while a weight is judged by an eval and gated by the EVALS anchor that SET it.
+# The tell is the value itself — 0.90 cannot be a row count — plus a small set of names that are ratios
+# spelled as integers. Filed here after a review caught five ratios sitting in the cap table (2026-09-10).
+# `Threshold` is here, not in KEY: both of this tree's thresholds are CLASSIFICATION BOUNDARIES
+# (">5 defs of the same name => common"; "past this => classify into pain/useless"). Neither truncates
+# anything, so neither can be judged by shown/total. Min(Len|Words|Chars) likewise: the tree's only
+# two are kSpecificMinLen/kSpecificMinWords, ELIGIBILITY thresholds for a rank multiplier in the
+# name-scoring family (graph.h, the aider heuristic). capsweep found kSpecificMinLen to have the
+# WIDEST measured blast radius of any constant here — 14 invocations across 9 verbs — which is
+# precisely why it must not sit in a table of things judged by what they truncate.
+WEIGHT_NAME = re.compile(r'Mul|Blend|Share|Tolerance|Headroom|Decay|Weight|Prior|Factor|Ratio|Threshold'
+                          r'|Min(?:Len|Words|Chars)')
+def is_weight(name, val):
+    if WEIGHT_NAME.search(name):
+        return True
+    try:
+        f = float(val)
+    except ValueError:
+        return False
+    return f != int(f)                      # a fractional "cap" is a proportion, not a count
+
 def scan():
     caps, disc = [], collections.defaultdict(set)
     files = sorted(ROOT.joinpath('src').rglob('*.h')) + sorted(ROOT.joinpath('src').rglob('*.cpp'))
@@ -35,6 +58,11 @@ def scan():
             caps.append((m.group(1), m.group(2), rel, i, note))
     return caps, disc
 
+def partition(caps):
+    real  = [c for c in caps if not is_weight(c[0], c[1])]
+    weights = [c for c in caps if is_weight(c[0], c[1])]
+    return real, weights
+
 def render(caps, disc):
     out = []
     w = out.append
@@ -45,11 +73,24 @@ def render(caps, disc):
     w('it fires. A cap is a **routing decision**: it decides what an agent can and cannot find. Set one')
     w('where the pathological tail is, never near the typical case — and when it fires, say so')
     w('(`*_capped="1"` with a `*_total=`), because a silent cut reads to the caller as "none exists".\n')
+    caps, weights = partition(caps)
     silent = [c for c in caps if not disc.get(c[2])]
     w('| total caps | files | caps whose file discloses | caps whose file discloses NOTHING |')
     w('| --- | --- | --- | --- |')
     w('| %d | %d | %d | **%d** |\n' % (len(caps), len({c[2] for c in caps}),
                                        len(caps) - len(silent), len(silent)))
+    if weights:
+        w = out.append
+        w('## Not caps — ranking and apportionment parameters\n')
+        w('These decide **how** something is weighted or apportioned, not **how many** of it survive, so')
+        w('they are judged by a different instrument: an eval that sets the value, not a `shown=`/`total=`')
+        w('pair. A value of `0.90` cannot be a row count. Each needs a `docs/EVALS.md` anchor naming the')
+        w('measurement that chose it; listing them beside truncation caps invites tuning them by intuition.\n')
+        w('| constant | value | site | note |')
+        w('| --- | --- | --- | --- |')
+        for n, v, rel, ln, note in sorted(weights):
+            w('| `%s` | `%s` | `%s:%d` | %s |' % (n, v, rel, ln, note.replace('|', '\\|')[:130] or '—'))
+        w('')
     for rel in sorted({c[2] for c in caps}):
         rows = [c for c in caps if c[2] == rel]
         d = ', '.join('`%s_capped`' % a for a in sorted(disc.get(rel, []))) or '**none**'

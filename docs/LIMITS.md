@@ -10,7 +10,23 @@ where the pathological tail is, never near the typical case — and when it fire
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 120 | 51 | 66 | **54** |
+| 114 | 50 | 62 | **52** |
+
+## Not caps — ranking and apportionment parameters
+
+These decide **how** something is weighted or apportioned, not **how many** of it survive, so
+they are judged by a different instrument: an eval that sets the value, not a `shown=`/`total=`
+pair. A value of `0.90` cannot be a row count. Each needs a `docs/EVALS.md` anchor naming the
+measurement that chose it; listing them beside truncation caps invites tuning them by intuition.
+
+| constant | value | site | note |
+| --- | --- | --- | --- |
+| `kBudgetHeadroom` | `0.90` | `src/serialize.h:604` | — |
+| `kCeilingFirstEntryTolerance` | `1.15` | `src/serialize.h:615` | — |
+| `kCommonNameDefThreshold` | `5` | `src/graph.h:244` | >5 defs of the same name ⇒ common (aider's) |
+| `kCoreBudgetShare` | `0.34` | `src/partition.h:84` | — |
+| `kSpecificMinLen` | `8` | `src/graph.h:250` | ≥8 chars …  (aider's) |
+| `kZoneDistanceThreshold` | `0.5` | `src/arch.h:742` | \|A+I-1\| past this → classify into pain/useless |
 
 ### `src/accessshape.h`
 
@@ -20,14 +36,6 @@ Discloses: `loops_capped`
 | --- | --- | --- | --- |
 | `kMaxLoopsModeled` | `20000` | 164 | — |
 | `kQueryBudget` | `50000` | 155 | — |
-
-### `src/arch.h`
-
-Discloses: **none**
-
-| constant | value | line | note |
-| --- | --- | --- | --- |
-| `kZoneDistanceThreshold` | `0.5` | 742 | \|A+I-1\| past this → classify into pain/useless |
 
 ### `src/atoms.h`
 
@@ -142,12 +150,10 @@ Discloses: `importers_capped`
 
 | constant | value | line | note |
 | --- | --- | --- | --- |
-| `kCommonNameDefThreshold` | `5` | 244 | >5 defs of the same name ⇒ common (aider's) |
 | `kMaxEdges` | `256` | 5385 | total emitted edge cap |
 | `kMaxNodes` | `96` | 5384 | total emitted node cap (§3 size caps) |
 | `kMaxRadius` | `12` | 5387 | — |
 | `kMaxTerminals` | `16` | 5383 | >16 is the CALLER's usage error; the core CLAMPS (never VERIFYs on hostile input) |
-| `kSpecificMinLen` | `8` | 250 | ≥8 chars …  (aider's) |
 
 ### `src/handoff.h`
 
@@ -337,7 +343,6 @@ Discloses: **none**
 
 | constant | value | line | note |
 | --- | --- | --- | --- |
-| `kCoreBudgetShare` | `0.34` | 84 | — |
 | `kMaxPartitions` | `16` | 81 | — |
 
 ### `src/pattern.h`
@@ -409,8 +414,6 @@ Discloses: `calls_capped`, `inc_capped`, `sibs_capped`
 
 | constant | value | line | note |
 | --- | --- | --- | --- |
-| `kBudgetHeadroom` | `0.90` | 604 | — |
-| `kCeilingFirstEntryTolerance` | `1.15` | 615 | — |
 | `kForAnchorBodyBudgetBytes` | `22800` | 793 | — |
 | `kForAutoBodyBudgetBytes` | `6000` | 759 | — |
 | `kForCapTailSigBytes` | `96` | 726 | — |
