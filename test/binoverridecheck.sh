@@ -109,6 +109,7 @@ EXEMPT = {
     "reusefirstworkflowcheck.sh":"checks skills/ripwire-reuse-first/SKILL.md content; pure file check",
     "ripwirepubliccheck.sh":     "checks git-tracked files for leaked private content; pure file/grep check",
     "svectorcheck.sh":           "compiles isolated $CXX probes for the svector container; never invokes build/ripwire",
+    "timsortcheck.sh":           "compiles isolated $CXX harnesses for the vendored timsort header (correctness, determinism and the zero-allocation workspace property); never invokes build/ripwire",
 }
 
 toRun = [ g for g in gates if g not in EXEMPT ]

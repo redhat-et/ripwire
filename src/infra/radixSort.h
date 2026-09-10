@@ -28,8 +28,20 @@
 //    * Packed <word,index> pairs (sortKeyLargePairs) turn the index scatter into
 //      a sequential read, the most cache-friendly layout once keys spill L1.
 //
-//  Possible future tricks (measure before adding — the current paths already
-//  beat timsort 3-6x on random float keys):
+//  How these paths compare against a mostly-sorted specialist (measured 2026-09-10 on the
+//  REAL captured id sets of all three candidate call sites, seven corpora; bench/PROFILE.md):
+//  the answer depends entirely on how the input was BUILT, and is 6x in both directions.
+//    * Scattered (a graph walk's discovery order, ~0.18 adjacent descents per element):
+//      radix beats timsort 6.0x — 10.8 ms vs 64.8 ms on rails' buildGraph/2b closures.
+//    * Already ascending (a push_back in id order, 0 descents): radix LOSES 3.3x to plain
+//      std::sort, and 5.6x to timsort, because it cannot exploit order and pays every pass
+//      regardless. Do not route such a caller here at any n — the covariate is descents per
+//      element, not n, so no size threshold rescues it.
+//  timsort itself is vendored (timsort.hpp) but has NO call site and won nowhere: a three-line
+//  std::is_sorted guard in front of std::sort beats it on every pre-sorted site (0.35x vs 0.58x
+//  on django's implementors). fastSort.h's header comment is the three-way decision table.
+//
+//  Possible future tricks (measure before adding):
 //    * 11-bit digits (2048 bins, 3 passes for 32-bit instead of 4) trade the
 //      NEON byte path for one fewer full scatter; a likely win for large N.
 //    * Software write-combining buffers per bin to tame the scattered stores.
