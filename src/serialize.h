@@ -2691,27 +2691,25 @@ inline std::string cleanSig( const char* data, std::size_t a, std::size_t b, Red
 
     constexpr std::size_t  kMaxSig = 240;
     std::string            sig;  sig.reserve( raw.size() < kMaxSig ? raw.size() : kMaxSig );
-    bool                   inSpace = false;
+    bool                   inSpace   = false;
+    bool                   truncated = false;
     for( char c : raw )
     {
         if( c == ' ' || c == '\t' || c == '\n' || c == '\r' )
         { if( !sig.empty() && !inSpace ) { sig.push_back( ' ' ); inSpace = true; } }
         else
         {
-            // hard cap — never cut mid-codepoint (G4): if the byte we are ABOUT to drop is a UTF-8
-            // continuation (10xxxxxx), the tail codepoint straddles the cap → back off the partial
-            // continuation run and its lead byte (same rule as the packSource budget cut).
-            if( sig.size() >= kMaxSig )
+            // The hard cap. Collect ONE byte past it rather than stopping AT it: truncateUtf8WithEllipsis
+            // below does the codepoint back-off itself, and it can only see that a cut is owed when the
+            // string it is handed is longer than the cap. `truncated` carries the fact separately because
+            // the trailing-space trim below can pull a cut string back to exactly kMaxSig (a signature of
+            // exactly 240 bytes followed by a space, then more) — and a cut that trims back under the cap
+            // is still a cut. This is the cap that used to `break` here and return the prefix with NO
+            // marker at all, on EVERY emitted signature: --pack-signatures, --for's <sigs>, the <calls>
+            // callee rows, --lego's contract and impl rows. METHODOLOGY §9 #3, "never cut silently".
+            if( sig.size() > kMaxSig )
             {
-                if( ( static_cast<unsigned char>( c ) & 0xC0 ) == 0x80 )
-                {
-                    std::size_t cut = sig.size();
-                    while( cut > 0 && ( static_cast<unsigned char>( sig[cut - 1] ) & 0xC0 ) == 0x80 )
-                    {
-                        --cut;
-                    }
-                    sig.resize( cut > 0 ? cut - 1 : 0 );
-                }
+                truncated = true;
                 break;
             }
             sig.push_back( c ); inSpace = false;
@@ -2720,6 +2718,18 @@ inline std::string cleanSig( const char* data, std::size_t a, std::size_t b, Red
     while( !sig.empty() && sig.back() == ' ' )
     {
         sig.pop_back();
+    }
+    // ONE truncator, the one the three OTHER signature cuts already call (kForTailSigBytes,
+    // kForCapTailSigBytes, packtask.h's tail sig): UTF-8-safe prefix + a visible U+2026. A signature is
+    // already a RENDERING rather than raw file bytes — the body is stripped, whitespace runs collapse — so
+    // the in-band marker is the house spelling here, and it costs 3 bytes only on a signature that was cut.
+    if( sig.size() > kMaxSig )
+    {
+        truncateUtf8WithEllipsis( sig, kMaxSig );
+    }
+    else if( truncated )
+    {
+        sig += "\xE2\x80\xA6";
     }
     return sig;
 }
@@ -3487,13 +3497,24 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                                                              //   (no extra cost). Only meaningful on the rank-adaptive
                                                              //   ladder path below; left at 0 on every other path —
                                                              //   see droppedPositiveCount above for the shared arithmetic.
-                            std::vector<NodeId>* shownIdsOut = nullptr )   // lane 2 (2026-09-07): the ids of the rows this call
+                            std::vector<NodeId>* shownIdsOut = nullptr,   // lane 2 (2026-09-07): the ids of the rows this call
                                                              //   EMITTED, emitted order — see pushShownSigId. nullptr ⇒ not
                                                              //   wanted. Filled on the flat lens path only.
+                            bool* cappedOut = nullptr )      // did the H1 ladder TRIM this block? The JSON twin
+                                                             //   (packSignaturesJson outCapped) has always reported it;
+                                                             //   this side made the caller re-read the rendered bytes for
+                                                             //   the same fact. A caller needs it to splice the legend
+                                                             //   clause defining the budget_bytes= the capped open tag
+                                                             //   carries — a clause that must cost nothing when the
+                                                             //   ladder did not fire.
 {
     if( droppedPositiveOut )
     {
         *droppedPositiveOut = 0;   // default: unset until the ladder path (below) computes the real count
+    }
+    if( cappedOut )
+    {
+        *cappedOut = false;   // default: no ladder ran, or it ran and trimmed nothing
     }
     resetShownSigIds( shownIdsOut );
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F1): the MCP `for` verb has no byte budget, and 0 must never mean
@@ -3809,10 +3830,20 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         // <calls>, <bodies>) said how many it was handed. shown= = rows printed, total= = rows handed to the
         // ladder; capped="1" with shown == total means every row survived but was SHRUNK (doc excerpts /
         // signature tails cut). Absent = untrimmed. Gate: truncvocabcheck.sh arms (C) + (F).
+        if( cappedOut )
+        {
+            *cappedOut = capped;
+        }
         if( capped )
         {
             std::size_t shownRows = 0;
             for( const SigEntry& e : entries ) { if( !e.dropped ) { ++shownRows; } }
+            // NOTE for anyone adding an attribute here: this open tag is BYTE-PINNED by
+            // forbudgetmonotoncheck, whose invariant is that the sig section renders byte-identically at
+            // the default ceiling and at any explicit ceiling above it. An attribute whose VALUE depends on
+            // the run (the operative byte budget, say) breaks that identity even when every served row is
+            // the same. The --for lens names its ceiling on the <ctx> root instead, spliced after this
+            // render (verbs_for.h, budget_bytes=), which is why cappedOut above exists.
             char open[ 80 ];
             std::snprintf( open, sizeof( open ), "<sigs shown=\"%zu\" total=\"%zu\" capped=\"1\">", shownRows, entries.size() );
             w.write( open );

@@ -921,6 +921,15 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     const std::size_t ceilingAllowance  = in.tokenBudget > 0 ? ceilingAllowanceBytes( in.tokenBudget ) : 0;
 
     const std::string budgetStanza      = forLensJsonBudgetStanza( in.tokenBudget );   // R1
+    // The XML root's budget_bytes= twin (runForLens, below its own long note): the DEFAULT byte ceiling,
+    // named on a bundle the ladder actually cut. budgetStanza directly above names the caller's own
+    // --token-budget and rides only when one was passed; this rides only when one was NOT, so the two are
+    // exclusive and a trimmed bundle always names exactly one ceiling. Zero bytes when nothing was cut
+    // (the droppedPositiveStanza shape directly above — §9 #6 with the pr_converged economy). The R1
+    // charging rule applies unchanged: these bytes are charged, never exempt.
+    const std::string sigsCeilingStanza = ( sigsCapped && in.tokenBudget == 0 )
+                                            ? ",\"budget_bytes\":" + std::to_string( kForPayloadBudgetBytes )
+                                            : std::string();
 
     // DEEP-TAIL, explicit-regime fit (forLensJsonTailStanza above): residual-funded, sigs untouched.
     // lane 2: same rule as the XML twin — the tail excludes the files of the rows actually emitted, not the whole surface
@@ -928,11 +937,13 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     tailStanza = forLensJsonTailStanza( jsonTail, in.tokenBudget, ceilingAllowance,
                                         header.size() + sigsJson.size() + notesStanza.size()
                                             + surfaceCountsStanza.size() + envelopeTextBytes
-                                            + budgetStanza.size() );
+                                            + budgetStanza.size()
+                                            + sigsCeilingStanza.size() );   // the residual the tail is funded from must see this disclosure's bytes
     const std::size_t bundleBytesBase   = header.size() + sigsJson.size() + notesStanza.size()
                                         + surfaceCountsStanza.size() + tailStanza.size() + envelopeTextBytes
                                         + droppedPositiveStanza.size()   // A2: 0 bytes on the (overwhelming) no-drop path
-                                        + budgetStanza.size();           // R1: 0 bytes without an explicit --token-budget
+                                        + budgetStanza.size()            // R1: 0 bytes without an explicit --token-budget
+                                        + sigsCeilingStanza.size();      // 0 bytes when the ladder did not fire
 
     std::size_t estTokens   = 0;
     std::size_t bundleBytes = bundleBytesBase;
@@ -976,6 +987,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     std::fwrite( notesStanza.data(), 1, notesStanza.size(), out );
     std::fwrite( droppedPositiveStanza.data(), 1, droppedPositiveStanza.size(), out );   // A2
     std::fwrite( budgetStanza.data(), 1, budgetStanza.size(), out );                     // R1: beside the label it is compared against
+    std::fwrite( sigsCeilingStanza.data(), 1, sigsCeilingStanza.size(), out );           // the ceiling the ladder applied, when it fired
     std::fwrite( overCeiling.data(), 1, overCeiling.size(), out );
     std::fprintf( out, ",\"capped\":%s,\"est_tokens\":%zu,\"sigs\":", sigsCapped ? "true" : "false", estTokens );
     std::fwrite( sigsJson.data(), 1, sigsJson.size(), out );
@@ -2044,6 +2056,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // headerStr is already flushed to stdout by the time that path runs and cannot be edited retroactively
         // (the same reason est_tokens is "omitted", not "wrong", on that path — see its DEGRADED_PATH_ALERT).
         std::size_t forDroppedPositive = 0;
+        bool        forSigsCapped      = false;   // did the H1 ladder trim <sigs>? — decides the budget_bytes= legend clause below
         {
             char*       sbuf = nullptr;
             std::size_t ssz  = 0;
@@ -2057,7 +2070,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 flRootArg,                                   // R-E: root-relative p=
                                 /*hasRelevanceFloor=*/true,                  // LB-A: shrink past the zero-score tail, never pad
                                 &forDroppedPositive,                         // A2: exact count, see droppedPositiveCount
-                                &shownSigIds );                              // lane 2: the rows actually emitted — the tail excludes THESE files
+                                &shownSigIds,                                // lane 2: the rows actually emitted — the tail excludes THESE files
+                                &forSigsCapped );                            // did the ladder fire? — the budget_bytes= clause rides only then
                 std::fflush( sm );  std::fclose( sm );
                 if( sbuf ) { sigsStr.assign( sbuf, ssz );  std::free( sbuf ); }
                 sigsPreRendered = true;
@@ -2092,7 +2106,47 @@ std::optional<int> runForLens( const MainDispatch& d )
             std::snprintf( nb, sizeof( nb ), " dropped_positive=\"%zu\"", forDroppedPositive );
             droppedPositiveNote = nb;
         }
-        const std::size_t droppedPositiveSpliceReserve = droppedPositiveNote.size();
+        // ── budget_bytes= — THE CEILING A DEFAULT RUN NEVER NAMED (METHODOLOGY §9 #6) ──────────────────
+        // H9 above put budget_tokens= on the root, but ONLY when the caller passed --token-budget. A run
+        // without that flag is still budgeted — kForPayloadBudgetBytes is enforced on EVERY --for — so the
+        // default bundle disclosed THAT the ladder had cut it (<sigs shown= total= capped="1">) while the
+        // number that did the cutting appeared nowhere, and a reader could not tell the built-in ceiling
+        // from a caller's own. §9 #6: "a ceiling attribute names the ceiling actually applied". Compare
+        // --pack-task, whose default lands on its root as budget_tokens="6000"; same class of ceiling, two
+        // different honesty outcomes until now.
+        //
+        // THE UNIT IS BYTES, and that is the whole reason the attribute is not simply budget_tokens=. What
+        // the default applies is a BYTE constant: bundleBudget is kForPayloadBudgetBytes verbatim here, and
+        // the ladder compares rendered bytes against it. A token spelling would have to divide by a rate,
+        // and the two rates in play disagree on purpose — est_tokens prices at kBytesPerTokenDefault (2.50)
+        // while a ceiling is SIZED at the conservative kMinBytesPerToken — so any token number printed here
+        // would be one the tool never applied, which is the exact failure §9 #6 names. In the EXPLICIT
+        // regime the caller's own number is the honest one and budget_tokens= already carries it, so this
+        // attribute is default-regime-only: the two never both ride, and never neither.
+        //
+        // SCOPE, stated in the clause because the root also carries est_tokens: this ceiling bounds the
+        // RANKED PAYLOAD (sigs + lego + compose + routes + the charged header). The auto bodies ride
+        // kForAutoBodyBudgetBytes ON TOP of it, so a bundle whose est_tokens prices out above this number
+        // is not over any ceiling — which is also why it is not wired into over_ceiling, whose rule is
+        // stated over the TOKEN ceilings the root names.
+        //
+        // COST: zero unless the ceiling actually bit. Both the attribute and the clause defining it ride on
+        // forSigsCapped — the ladder's own verdict, returned by packSignatures above — which is the
+        // pr_converged shape (src/prconverge.h) and the same conditional splice kForOverCeilingLegend and
+        // kForEstTokensLegend use, for the measured reason recorded there: fornotesbudgetcheck's rungs are
+        // tight enough that an unconditional ~130 B of disclosure re-anchors two unrelated fixtures.
+        // Spliced AFTER the sigs render (with dropped_positive= / autoAttr below), never before it, so the
+        // ladder's own input is untouched and the <sigs> block stays byte-identical to the pre-fix render —
+        // forbudgetmonotoncheck pins exactly that identity across ceilings. No "--" in the clause: it rides
+        // inside an XML comment, where a double hyphen is ill-formed (G4).
+        const bool        forDefaultCeiling = forSigsCapped && cfg.tokenBudget == 0;
+        const std::string sigsCeilingAttr   = forDefaultCeiling
+            ? " budget_bytes=\"" + std::to_string( rw::kForPayloadBudgetBytes ) + "\""
+            : std::string();
+        const std::string sigsCeilingNote   = forDefaultCeiling
+            ? std::string( " [budget_bytes= is the default BYTE ceiling this ranked payload was shaped against; it bounds that payload, not the whole document est_tokens prices]" )
+            : std::string();
+        const std::size_t droppedPositiveSpliceReserve = droppedPositiveNote.size() + sigsCeilingNote.size() + sigsCeilingAttr.size();
 
         // §P3 × §P4: the budget trim above can drop files the lego scope still references — narrow the lego
         // block to the RENDERED sigs' files and re-render (a byte-subset of what the budget already charged
@@ -2268,6 +2322,17 @@ std::optional<int> runForLens( const MainDispatch& d )
                 headerStr.insert( rootCloseAt, autoAttr ); // else: unexpected shape, header left as-is (attr dropped, section still disclosed by its own element)
             }
         }
+        // budget_bytes= joins the root the same way and at the same point, and for the same reason: its
+        // presence is decided by the sigs render, and est_tokens below must price a header that already
+        // carries it.
+        if( !sigsCeilingAttr.empty() )
+        {
+            const std::size_t rootCloseAt = headerStr.find( "><!--" );
+            if( rootCloseAt != std::string::npos )
+            {
+                headerStr.insert( rootCloseAt, sigsCeilingAttr ); // else: unexpected shape, header left as-is
+            }
+        }
 
         // R4 + §L2: weak="1" — same insert-before-"-->" mechanism as est_tokens below, but unconditional on
         // sigsPreRendered (forWeak is known from lr.maxLexicalScore regardless of the sigs render path).
@@ -2300,6 +2365,16 @@ std::optional<int> runForLens( const MainDispatch& d )
             if( closeAt != std::string::npos )
             {
                 headerStr.insert( closeAt, droppedPositiveNote ); // else: unexpected shape, header left as-is
+            }
+        }
+        // ... and the budget_bytes= clause, at the same splice point and for the same reason: its presence
+        // is decided by the render above, and the attribute it defines rides only a trimmed <sigs>.
+        if( !sigsCeilingNote.empty() )
+        {
+            const std::size_t closeAt = headerStr.rfind( " -->" );
+            if( closeAt != std::string::npos )
+            {
+                headerStr.insert( closeAt, sigsCeilingNote ); // else: unexpected shape, header left as-is
             }
         }
 

@@ -1771,6 +1771,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // once flushed to `mem`, cannot be edited retroactively (the same reason the CLI twin's degrade path
     // never gets the attribute). Byte-for-byte the same content this call always produced.
     std::size_t mcpDroppedPositive = 0;
+    bool        mcpSigsCapped      = false;   // did the H1 ladder trim <sigs>? — decides the budget_bytes= disclosure below
     std::vector<rw::NodeId> mcpShownIds;   // lane 2: the sigs rows actually emitted — the tail excludes these files, not the whole surface
     std::string sigsStr = renderToString( [ & ]( std::FILE* m2 )
     {
@@ -1782,7 +1783,8 @@ inline std::string forTaskText( const std::string& root, const std::string& task
                         flRootArg,                            // R-E: root-relative p=, same argument the CLI twin passes
                         /*hasRelevanceFloor=*/true,           // LB-A: shrink past the zero-score tail, never pad
                         &mcpDroppedPositive,                  // A2: exact count, see droppedPositiveCount (serialize.h)
-                        &mcpShownIds );                       // lane 2: see verbs_for.h shownSigIds
+                        &mcpShownIds,                         // lane 2: see verbs_for.h shownSigIds
+                        &mcpSigsCapped );                     // the ladder's own verdict — see the budget_bytes= splice below
     } );
     // A2: same insert-before-"-->" splice as the CLI twin (verbs_for.h) — absent entirely on the (overwhelming)
     // no-drop path, so headerStr's bytes are unchanged there (byte-identical to the pre-A2 output). Bare
@@ -1796,6 +1798,28 @@ inline std::string forTaskText( const std::string& root, const std::string& task
             char nb[ 40 ];
             std::snprintf( nb, sizeof( nb ), " dropped_positive=\"%zu\"", mcpDroppedPositive );
             headerStr.insert( closeAt, nb ); // else: unexpected shape, header left as-is
+        }
+    }
+    // budget_bytes= — the CLI twin's disclosure (verbs_for.h, where the full argument lives), on this
+    // surface for the §P8 reason every other fragment in this function is: one element name, one attribute
+    // order, both surfaces. This dialect is budgeted by DEFAULT exactly as the CLI is (forBudgetBytes above
+    // is kForPayloadBudgetBytes when the caller passed no budget_tokens), and it disclosed the cut
+    // (<sigs capped="1">) without naming what did the cutting. Same two conditions as the CLI: the ladder
+    // actually fired, and the caller named no ceiling of their own — so exactly one ceiling rides a trimmed
+    // bundle. Same clause text, so the two dialects say the same sentence. Spliced AFTER the sigs render,
+    // like dropped_positive= above, so sigsBudget and therefore the served row set are untouched; est_tokens
+    // is spliced onto the finished document further down and so prices these bytes.
+    if( mcpSigsCapped && budgetTokens == 0 )
+    {
+        const std::size_t rootCloseAt = headerStr.find( "><!--" );
+        if( rootCloseAt != std::string::npos )
+        {
+            headerStr.insert( rootCloseAt, " budget_bytes=\"" + std::to_string( rw::kForPayloadBudgetBytes ) + "\"" );
+        }
+        const std::size_t closeAt = headerStr.rfind( " -->" );
+        if( closeAt != std::string::npos )
+        {
+            headerStr.insert( closeAt, " [budget_bytes= is the default BYTE ceiling this ranked payload was shaped against; it bounds that payload, not the whole document est_tokens prices]" );
         }
     }
     std::fwrite( headerStr.data(), 1, headerStr.size(), mem );

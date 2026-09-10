@@ -63,7 +63,9 @@ inline std::uint32_t triAt( const std::string& s, std::size_t i ) noexcept
 // outside every indexed symbol. The emitters attach that symbol's 1-hop caller count straight off the
 // in-edge CSR, which needs the id, not just the breadcrumb name. Trailing with a default member
 // initializer, so the pre-field aggregate initializers keep their meaning unchanged.
-struct GrepHit { std::uint32_t fileId; std::uint32_t line; std::string enclosing; std::string text; std::string before; std::string after; NodeId enclosingId = kNoNode; };
+// `lineBytes` = the WHOLE matched line's byte length, set ONLY when kGrepMatchedLineMaxBytes cut `text`;
+// 0 means "not truncated" and costs the emitters nothing (the pr_converged shape — presence is the fact).
+struct GrepHit { std::uint32_t fileId; std::uint32_t line; std::string enclosing; std::string text; std::string before; std::string after; NodeId enclosingId = kNoNode; std::uint32_t lineBytes = 0; };
 
 // ─── Russ Cox regex→trigram prefilter ─────────────────────────────────────────────────────────────
 //
@@ -940,7 +942,22 @@ inline constexpr std::size_t kGrepMatchedLineMaxBytes = 512;
 
 // The MATCHED line itself (P5): the text the agent actually searched for, which neither the bare hit nor
 // the before/after blocks ever showed. Empty when the hit line is out of range (degrade, never OOB).
-inline std::string grepMatchedLine( const std::string& s, const std::vector<std::size_t>& lineStarts, std::uint32_t line )
+//
+// THE CUT IS DISCLOSED, not silent. `fullBytesOut` (optional) is set to the WHOLE line's byte length when
+// — and only when — the cap fired, and left alone otherwise, so a caller's 0 means "not truncated". This
+// is the ONE piece of content a grep answer carries, and a 512-byte source line and a truncated 50 KB
+// minified line used to print byte-identical payloads with nothing on the row telling them apart
+// (METHODOLOGY §9 #3/#4: never cut silently, and the honesty lives in an attribute). The number is the
+// TRUE size rather than a bare capped="1" because it is what decides the reader's next move — the row
+// already carries the deterministic follow-up (p=/l= and the root's next=), and how much was dropped is
+// what says whether following it is worth a read.
+//
+// No ellipsis here, deliberately, and this is where this cut differs from cleanSig's: a grep payload is
+// RAW FILE BYTES by contract — the boolean --and/--not filter reads the same line (grepWholeLine below),
+// and the --at= follow-up on the row is expected to reproduce it — so a character that is not in the file
+// must not be spliced into it. The attribute carries the fact instead.
+inline std::string grepMatchedLine( const std::string& s, const std::vector<std::size_t>& lineStarts, std::uint32_t line,
+                                    std::uint32_t* fullBytesOut = nullptr )
 {
     const std::uint32_t lineCount = grepRealLineCount( s, lineStarts );
     if( line < 1 || line > lineCount )
@@ -950,6 +967,10 @@ inline std::string grepMatchedLine( const std::string& s, const std::vector<std:
     std::string text = grepLineRangeText( s, lineStarts, lineCount, line, line );
     if( text.size() > kGrepMatchedLineMaxBytes )
     {
+        if( fullBytesOut != nullptr )
+        {
+            *fullBytesOut = std::uint32_t( text.size() );
+        }
         std::size_t cut = kGrepMatchedLineMaxBytes;
         while( cut > 0 && ( static_cast<unsigned char>( text[cut] ) & 0xC0 ) == 0x80 )
         {
@@ -1627,6 +1648,7 @@ struct GrepAuxHit
     std::string   path;
     std::uint32_t line;
     std::string   text;   // matched line, same kGrepMatchedLineMaxBytes cap as an indexed hit
+    std::uint32_t lineBytes = 0;   // ... and the same disclosure: the WHOLE line's size when that cap cut it, else 0
 };
 
 // What grepCollectAux scanned, and exactly why any candidate was excluded — every one of these is a COUNT
@@ -1704,7 +1726,9 @@ inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::str
         }
         for( const GrepMatchSite& s : sites )
         {
-            out.hits.push_back( GrepAuxHit{ row.path, s.line, grepMatchedLine( text, lineStarts, s.line ) } );
+            std::uint32_t auxLineBytes = 0;
+            std::string   auxText        = grepMatchedLine( text, lineStarts, s.line, &auxLineBytes );
+            out.hits.push_back( GrepAuxHit{ row.path, s.line, std::move( auxText ), auxLineBytes } );
         }
     }
     return out;
@@ -1802,9 +1826,9 @@ inline std::vector<GrepHit> grepEnrich( const IngestResult& ing, std::span<const
         {
             chain = e->scope.empty() ? e->name : ( e->scope + "::" + e->name );
         }
-        GrepHit h{ r.fileId, r.line, std::move( chain ), {}, {}, {}, e ? e->id : kNoNode };
+        GrepHit h{ r.fileId, r.line, std::move( chain ), {}, {}, {}, e ? e->id : kNoNode, 0 };
         ensureFileLoaded( r.fileId );
-        h.text = grepMatchedLine( fileText, lineStarts, r.line );
+        h.text = grepMatchedLine( fileText, lineStarts, r.line, &h.lineBytes );
         if( ctxBefore > 0 )
         {
             h.before = grepContextSlice( fileText, lineStarts, r.line, ctxBefore, /*before=*/true );
@@ -1890,7 +1914,11 @@ inline std::vector<GrepFileGroup> grepGroupByFile( std::span<const GrepHit> hits
             bool folded = false;
             for( GrepCollapsedHit& c : group.hits )
             {
-                if( c.hit.text == h.text )
+                // lineBytes joins the fold key: two >512 B lines can share a byte-identical 512 B PREFIX
+                // and differ in true length, and folding those under one row would print one line_bytes=
+                // for sites it does not describe. Untruncated rows all carry 0, so this is byte-identical
+                // to the old key everywhere the cap did not fire.
+                if( c.hit.text == h.text && c.hit.lineBytes == h.lineBytes )
                 {
                     c.more.push_back( GrepHitSite{ h.line, h.enclosing, h.enclosingId } );
                     folded = true;

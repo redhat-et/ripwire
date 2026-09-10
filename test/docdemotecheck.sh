@@ -99,6 +99,16 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-09-10 (cap-disclosure lane, fix 2): docdemotegolden_for.xml 5505 -> 5517 B (est_tokens
+# "2202" -> "2207") and docdemotegolden_noroute.xml 9556 -> 9568 B (est_tokens "3386" -> "3391"). ONE
+# identified change, +12 B on each = FOUR three-byte U+2026 markers: cleanSig's 240-byte cap
+# (kMaxSig, src/serialize.h) used to break a signature mid-token with NO marker at all, and now ends it
+# through truncateUtf8WithEllipsis like the tool's three other signature cuts. This fixture is where it
+# shows: a markdown section's "signature" is prose, so four of these rows were over the cap and had been
+# truncated invisibly for the life of the golden. Verified before re-pinning: with est_tokens= normalised
+# and the four new ellipses deleted, live and previous goldens are byte-identical on BOTH fixtures — no
+# ranking, demotion, route or budget byte moved, and neither root is capped, so budget_bytes= (the same
+# lane's fix 3) is absent from both. Gate: capdisclosurecheck arms B1/B2/B3.
 # RE-PIN 2026-09-07 (head-to-head vs Graft, lane 2): both goldens +33 B, the tail legend clause only — the
 # file-grain tail now excludes the files of the sigs rows actually SHOWN instead of the whole 40-candidate
 # surface, and the clause defining the tail says so. Verified before re-pinning: with every comment and
