@@ -1247,7 +1247,7 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
         out.section = rw::chargeSection( [ & ]( std::FILE* f )
             { rw::packBodies( f, ing, autoBodyIds, /*budgetBytes=*/1, g.outOff, g.outTargets, cfg.compress, redactPtr,
                                /*ranges=*/nullptr, /*noteIndex=*/nullptr, nullptr, /*truncateOversizedFirst=*/false,
-                               /*withFileContext=*/false, fabRootArg ); },
+                               /*withFileContext=*/false, fabRootArg, &lensRank ); },
             rw::kBytesPerTokenBody );
         if( !out.section.isRendered )
         {
@@ -1269,7 +1269,7 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
     out.section = rw::chargeSection( [ & ]( std::FILE* f )
         { rw::packBodies( f, ing, autoBodyIds, autoBodyBudget, g.outOff, g.outTargets, cfg.compress, redactPtr,
                            /*ranges=*/nullptr, /*noteIndex=*/nullptr, &autoEmitted, /*truncateOversizedFirst=*/false,
-                           /*withFileContext=*/false, fabRootArg ); },
+                           /*withFileContext=*/false, fabRootArg, &lensRank ); },
         rw::kBytesPerTokenBody );
 
     if( !out.section.isRendered )
@@ -2166,7 +2166,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             detailSection = rw::chargeSection( [ & ]( std::FILE* f )
                 { packBodies( f, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets, cfg.compress, redactPtr,
                               /*ranges=*/nullptr, notesPtr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
-                              /*withFileContext=*/false, flRootArg ); },   // L3: --detail bodies surface notes too (part of the --for bundle)
+                              /*withFileContext=*/false, flRootArg, &lensRank ); },   // L3: --detail bodies surface notes too (part of the --for bundle)
                 rw::kBytesPerTokenBody );
         }
 
@@ -2466,7 +2466,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             rw::emitChargedSection( stdout, detailSection, [ & ]{ packBodies( stdout, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets,
                                                                               cfg.compress, redactPtr, /*ranges=*/nullptr, notesPtr,
                                                                               /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
-                                                                              /*withFileContext=*/false, flRootArg ); } );
+                                                                              /*withFileContext=*/false, flRootArg, &lensRank ); } );
         }
         else if( autoSection.isRendered && !autoSection.xml.empty() )
         {

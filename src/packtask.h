@@ -339,6 +339,12 @@ struct PackTaskInputs
     RedactCounts*                      redact = nullptr;
     const notes::NoteIndex*            notes  = nullptr;
 
+    // Query relevance for ORDERING each emitted body's <calls> callee listing when the 16-row cap or the
+    // byte budget CUTS it — serialize.h CalleeCallsSink::rank carries the finding and the measurement.
+    // packTaskBundleText fills this from its own LensRanking (below, beside the fanIn self-supply), so
+    // every caller — CLI --pack-task and the MCP verb alike — gets the ranked cut without spelling it.
+    const std::vector<float>*          calleeRank = nullptr;
+
     // §6 --partition: a PRE-COMPUTED Q3 clone-membership lens. findClones() is a pure function of `ing`, so a
     // fan-out that assembles N+1 bundles from the SAME index would otherwise pay for N+1 identical clone
     // passes. nullptr ⇒ this function computes its own (every existing caller, unchanged).
@@ -879,14 +885,17 @@ inline std::size_t reflowListSection( PackTaskSection& section, std::string_view
 // the exact bytes packBodies would emit for ONE node alone, minus the fixed <bodies ...></bodies> wrapper
 // (`wrapperLen`, measured once by the caller) — i.e. this node's own share of `children`. Called under the
 // caller's RedactTallyFreeze, so a probe never bills the redaction tally a second time (§B10.2's rule).
-inline std::size_t probeBodyCost( const IngestResult& ing, const Graph& g, NodeId id, bool compress,
-                                  RedactCounts* redact, std::size_t wrapperLen, std::string_view rootArg = {} )
+inline std::size_t probeBodyCost( const IngestResult& ing, const Graph& g, NodeId id, const PackTaskInputs& in,
+                                  std::size_t wrapperLen )
 {
     EmittedBodies     dummy;
+    // in.calleeRank is threaded through the PROBE, not only the real render: it decides WHICH callee rows
+    // survive the <calls> cut, and different rows are different signature bytes. A probe run without it
+    // would price a listing the bundle will never emit, and every fit decision downstream inherits that.
     const std::string one = packTaskRenderToString( [ & ]( std::FILE* m )
     {
-        packBodies( m, ing, { id }, SIZE_MAX, g.outOff, g.outTargets, compress, redact, nullptr, nullptr, &dummy,
-                   /*truncateOversizedFirst=*/true, /*withFileContext=*/false, rootArg );
+        packBodies( m, ing, { id }, SIZE_MAX, g.outOff, g.outTargets, in.compress, in.redact, nullptr, nullptr, &dummy,
+                   /*truncateOversizedFirst=*/true, /*withFileContext=*/false, in.rootArg, in.calleeRank );
     } );
     return one.size() > wrapperLen ? one.size() - wrapperLen : 0;
 }
@@ -996,7 +1005,7 @@ inline std::string restatePackTaskBodiesWrapper( const IngestResult& ing, const 
 // side of the trade the retrieval contract wants to be on.
 inline std::vector<NodeId> selectMonotoneBodySubset( const IngestResult& ing, const Graph& g,
                                                       const std::vector<NodeId>& bodyIds, std::size_t bodiesBudget,
-                                                      bool compress, RedactCounts* redact, std::string_view rootArg = {} )
+                                                      const PackTaskInputs& in )
 {
     if( bodyIds.empty() )
     {
@@ -1006,15 +1015,15 @@ inline std::vector<NodeId> selectMonotoneBodySubset( const IngestResult& ing, co
     std::vector<std::size_t> cost( n, 0 );
     std::size_t               wrapperLen = 0;
     {
-        const RedactTallyFreeze freeze( redact );   // every probe below is off the books
+        const RedactTallyFreeze freeze( in.redact );   // every probe below is off the books
         EmittedBodies            dummy;
         wrapperLen = packTaskRenderToString( [ & ]( std::FILE* m )
         {
-            packBodies( m, ing, {}, SIZE_MAX, g.outOff, g.outTargets, compress, redact, nullptr, nullptr, &dummy );
+            packBodies( m, ing, {}, SIZE_MAX, g.outOff, g.outTargets, in.compress, in.redact, nullptr, nullptr, &dummy );
         } ).size();
         for( std::size_t i = 0; i < n; ++i )
         {
-            cost[i] = probeBodyCost( ing, g, bodyIds[i], compress, redact, wrapperLen, rootArg );
+            cost[i] = probeBodyCost( ing, g, bodyIds[i], in, wrapperLen );
         }
     }
     // reserve the measured wrapper cost PLUS kPackTaskWrapReserve's existing generous margin (digit-width
@@ -1093,6 +1102,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     if( !in.fanIn ) { localFanIn = fanInFromInEdges( ing, g );  in.fanIn = &localFanIn; }
 
     const std::vector<float>& rank     = lr.rank;
+    in.calleeRank                      = &rank;   // this bundle HAS a query: its bodies' <calls> listings are cut by relevance, not by node id
     const int                 rankTopN = in.rankTopN > 0 ? int( in.rankTopN ) : kPackTaskRankTopN;
 
     // top ranked ids (score desc, id asc). Body candidates = the top heads with a POSITIVE score.
@@ -1388,12 +1398,12 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // §H5: `emittedBodies` is packBodies' own report of what it emitted. It is the ONE answer to "which
         // bodies?" — the XML is those bytes, the JSON tail below re-serializes the same record, and bodiesKept
         // counts it.
-        const std::vector<NodeId> renderIds = selectMonotoneBodySubset( ing, g, bodyIds, bodiesBudget, in.compress, in.redact, in.rootArg );
+        const std::vector<NodeId> renderIds = selectMonotoneBodySubset( ing, g, bodyIds, bodiesBudget, in );
         bodiesStr  = packTaskRenderToString( [ & ]( std::FILE* m )
         {
             packBodies( m, ing, renderIds, bodiesBudget, g.outOff, g.outTargets, in.compress, in.redact,
                         /*ranges=*/nullptr, /*noteIndex=*/nullptr, &emittedBodies, /*truncateOversizedFirst=*/true,
-                        /*withFileContext=*/false, in.rootArg );
+                        /*withFileContext=*/false, in.rootArg, in.calleeRank );
         } );
         bodiesKept = emittedBodies.kept.size();
         // §W2-K: restate total=/capped= and splice in omission markers for whatever OUR pre-selection

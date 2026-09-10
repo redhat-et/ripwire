@@ -4284,20 +4284,27 @@ struct CalleeCallsSink
     // It also reads no files: a name and a line come from the symbol table, where the signature has to be
     // sliced out of the callee's own source. Nothing is silently dropped for an unreadable span here.
     bool                          namesOnly = false;
-    // Optional query relevance for ORDERING a callee listing that has to be CUT (namesOnly only; nullptr
-    // ⇒ the CSR's own node-id order, which is what every pre-existing caller keeps).
+    // Optional query relevance for ORDERING a callee listing that has to be CUT. nullptr ⇒ the CSR's own
+    // node-id order, which is what a caller with NO query in scope keeps (--expand, --around, --exemplar).
     //
-    // A body's <calls> list is node-id order because it is almost always COMPLETE, and the order of a
-    // complete listing carries no claim. The compact bundle cuts these listings routinely — its whole
-    // allowance is smaller than one body — and an arbitrary cut of a listing is a real defect however it
-    // is disclosed: `shown="4" capped="1"` is honest about the fact and silent about the choice. Every
-    // other listing in this tool that can be cut is ordered by something (the ranked map by score, the
-    // caller list source-before-test); this one had nothing. With a rank vector it keeps the callees the
-    // QUERY is about, which is the only ordering a task lens can defend.
+    // A callee listing was node-id order everywhere because it is OFTEN complete, and the order of a
+    // complete listing carries no claim. But both routes that render one cut it routinely — the compact
+    // bundle's whole allowance is smaller than one body, and a body's own listing stops at kCalleeRowCap
+    // — and an arbitrary cut of a listing is a real defect however it is disclosed: `shown="4"
+    // capped="1"` is honest about the fact and silent about the choice. Every other listing in this tool
+    // that can be cut is ordered by something (the ranked map by score, the caller list
+    // source-before-test); this one had nothing. With a rank vector it keeps the callees the QUERY is
+    // about, which is the only ordering a task lens can defend.
     //
     // Found by measurement, and worth saying so: on the class-B query about turning a filter call into
     // SQL, `split_exclude`'s nine callees were cut to the first four by node id and dropped
     // `build_filter` — the one callee the query was actually about.
+    //
+    // 2026-09-10: that fix reached the compact route ONLY. It was conditioned on `namesOnly && rank`, and
+    // the one caller passing a rank was packHops — so packBodies' <calls> under every emitted body kept
+    // the sixteen LOWEST node ids on --for, --pack-task and --from-trace, the three verbs that always
+    // have a query. The ordering is a property of a CUT listing, not of a rendering, so the condition is
+    // now the rank alone and packBodies threads one in (`calleeRank`); gate test/callsrankordercheck.sh.
     const std::vector<float>*     rank = nullptr;
 };
 
@@ -4322,9 +4329,11 @@ inline void appendCallsBlock( std::string& out, std::uint32_t total, int shown, 
 }
 
 // The walk order for one symbol's callee listing: the CSR's own (node-id ascending) by default, or query
-// relevance when the caller supplied a rank and asked for the names-only rendering — see CalleeCallsSink::rank for
-// why an arbitrarily-ordered CUT listing is a defect worth a sort. The tie-break is node id, so the order
-// is TOTAL and the output stays deterministic whatever the scores do.
+// relevance whenever the caller supplied a rank — see CalleeCallsSink::rank for why an arbitrarily-ordered
+// CUT listing is a defect worth a sort, and for why the rendering (names-only vs signature) has no say in
+// it. The tie-break is node id, so the order is TOTAL and the output stays deterministic whatever the
+// scores do — a partial order here would make the bytes depend on the sort implementation, which
+// CONTRIBUTING #2 rules out even when the ranking still "looks right".
 //
 // Extracted rather than inlined because emitCalleeCallsBlock is a budget walk with a disclosure contract
 // and this is a comparator — two different things, and folding them together is what pushed that
@@ -4335,7 +4344,7 @@ inline std::vector<NodeId> calleeWalkOrder( NodeId id, const std::vector<std::ui
                                             const std::vector<NodeId>& outTargets, const CalleeCallsSink& sink )
 {
     std::vector<NodeId> walk( outTargets.begin() + outOff[id], outTargets.begin() + outOff[id + 1] );
-    if( !sink.namesOnly || sink.rank == nullptr )
+    if( sink.rank == nullptr )
     {
         return walk;                                   // the CSR's own order, materialized (see below)
     }
@@ -4618,8 +4627,11 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
                                                                         //   default and is byte-identical.
                         bool withFileContext = false,                  // V1: sibs=/inc= on each <b> — see FileExpandContext above.
                                                                         //   false (every caller but --expand) ⇒ byte-identical.
-                        std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
+                        std::string_view rootArg = {},   // R-E (2026-08-17): same single-root-only root
                                                           // argument serialize() takes — see its comment.
+                        const std::vector<float>* calleeRank = nullptr )   // orders each body's CUT <calls> listing; nullptr (a verb with
+                                                                            //   no query: --expand/--around/--exemplar) ⇒ node-id order,
+                                                                            //   byte-identical. See CalleeCallsSink::rank.
 {
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F2): the MCP `exemplar` verb has no byte budget, and 0 must never
     // mean "cap at zero bytes" (the cap fired before the first body and emitted a bare <bodies></bodies>).
@@ -4860,9 +4872,10 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
 
             // L4+: the 1-hop callee signatures — a body in isolation is the worst context unit (cAST);
             // its callees' shapes make it a self-contained, composable bundle. §P10.1: the disclosed
-            // total=/shown=/capped= block — see emitCalleeCallsBlock above.
+            // total=/shown=/capped= block — see emitCalleeCallsBlock above; `calleeRank` decides which
+            // rows survive when it CUTS one, which is far from rare here (CalleeCallsSink::rank).
             emitCalleeCallsBlock( children, id, outOff, outTargets, ing, contentOf, esc, used, budgetBytes,
-                                  CalleeCallsSink{ redact, record ? &record->calls : nullptr } );
+                                  CalleeCallsSink{ redact, record ? &record->calls : nullptr, /*namesOnly=*/false, calleeRank } );
             const std::string bodyNotes = renderNoteChildren( noteIndex, symbolNoteTarget( noteIndex, ing, s ), esc );   // L3/D5
             children += bodyNotes;
             used += bodyNotes.size();                                                                   // W3-N2: same charge-never-trim rule

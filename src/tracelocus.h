@@ -999,7 +999,10 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
             packBodies( m, ing, bodyIds, in.bodyBudgetBytes, g.outOff, g.outTargets, in.compress, in.redact,
                         /*ranges=*/nullptr, in.notes,                 // L3: the rank-1 body surfaces notes too
                         /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true, /*withFileContext=*/false,
-                        in.rootArg );                                 // R-R: root-relative <b p=…>
+                        in.rootArg,                                   // R-R: root-relative <b p=…>
+                        &rank );                                      // the served body's CUT <calls> ordered by the TRACE's own rank
+                                                                       // (traceRankOf): a callee that is ITSELF a frame of this trace
+                                                                       // scores positive, so the edge the trace walked survives the cut.
             std::fflush( m );  std::fclose( m );
             if( buf ) { whole.append( buf, sz );  std::free( buf ); }
         }
