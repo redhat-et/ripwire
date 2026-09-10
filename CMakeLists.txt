@@ -65,12 +65,14 @@ add_compile_options(${RIPWIRE_ARCH_FLAGS})
 # ---- link-time optimization: -DRIPWIRE_LTO=ON ----
 # The one change the optimization-remarks pass actually justified (docs/OPTREMARKS.md, finding F1).
 #
-# WHAT THE REMARKS SAID. In src/ingest.cpp — where the profiler puts ~26% of a cold run, in
-# `captureTagsFacts` — 397 of 636 distinct `inline/NoDefinition` remarks name a tree-sitter C entry
-# point (ts_node_start_byte, ts_node_end_byte, ts_node_type, ts_query_capture_name_for_id, …). Those
-# are three-line accessors, but they live in separately compiled C objects, so each one is an opaque
-# call that also acts as a memory barrier: 5448 `gvn/LoadClobbered … clobbered by call` remarks in
-# that same TU are the downstream damage. No source edit reaches this — the definitions are in another
+# WHAT THE REMARKS SAID. In the ingest translation unit — where the profiler puts ~24% of a cold run,
+# in `captureTagsFacts` (src/ingest_sidecap.h since the split) — 831 of 1437 distinct
+# `inline/NoDefinition` remarks name a tree-sitter C entry point (ts_node_child_by_field_name,
+# ts_node_is_null, ts_node_type, ts_node_start_byte, …). Those are three-line accessors, but they live
+# in separately compiled C objects, so each one is an opaque call that also acts as a memory barrier:
+# 7683 `gvn/LoadClobbered … clobbered by call` remarks in that same TU are the downstream damage.
+# (Counts re-derived 2026-09-10 over the whole TU; the original 397/636 and 5448 were measured against
+# src/ingest.cpp alone, which after the split is 0.2% of it — docs/OPTREMARKS.md §8.) No source edit reaches this — the definitions are in another
 # translation unit, which is precisely what LTO fixes.
 #
 # WHAT IT MEASURED (this repo as corpus, 937 files, Apple Silicon; FOUR independent interleaved A/Bs,

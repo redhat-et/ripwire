@@ -1602,8 +1602,8 @@ via `PL2_CACHE_MISS_LD`).
 **Every number on this page is the DEFAULT build — and there is a faster one you can opt into.** A
 clang optimization-remarks pass over `src/` (`-DRIPWIRE_OPT_REMARKS=ON`; the whole triage is in
 [`docs/OPTREMARKS.md`](docs/OPTREMARKS.md)) found that the phases above spend their time calling
-tree-sitter's C API across a translation-unit boundary — 397 of 636 distinct `inline/NoDefinition`
-remarks in the hot TU name a `ts_*` accessor. Two build options answer that, both **off by default**:
+tree-sitter's C API across a translation-unit boundary — 831 of 1,437 distinct `inline/NoDefinition`
+sites in the hot TU name a `ts_*` accessor. Two build options answer that, both **off by default**:
 
 | build | cold | warm | |
 | --- | --- | --- | --- |
@@ -1820,9 +1820,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>573 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary>
+<summary><b>574 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary>
 
-`test/regression.sh` names **573 gate scripts** and is the authoritative list;
+`test/regression.sh` names **574 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a

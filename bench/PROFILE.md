@@ -86,8 +86,18 @@ the *pre-fix diagnosis*; the query-compile column is then cut by the optimizatio
 
 Everything else in this document profiles the **default build**. A clang optimization-remarks pass
 over `src/` (`-DRIPWIRE_OPT_REMARKS=ON`) found the hot phases above are call-bound across a
-translation-unit boundary into tree-sitter's C API — 397 of 636 distinct `inline/NoDefinition`
-remarks in `src/ingest.cpp` name a `ts_*` accessor. Two build options answer that:
+translation-unit boundary into tree-sitter's C API — **831 of 1,437 distinct `inline/NoDefinition`
+sites in the ingest translation unit name a `ts_*` accessor**. Two build options answer that:
+
+> **Corrected 2026-09-10, and the correction matters more than the number.** This paragraph read
+> "397 of 636 … in `src/ingest.cpp`" until today. That pass ran with a `scripts/optremarks.py`
+> `HOT_FILES` list that had gone stale at the ingest split: it named `src/ingest.cpp` and none of the
+> fifteen `src/ingest_*.h` sections the hot phases had moved into. `--hot` was reading **69 of the
+> translation unit's 33,957 first-party remarks — 0.2%** — so *any* ingest conclusion drawn from
+> `--hot` between the split and this date was drawn from a 0.2% sample and should be treated as
+> unverified until re-run. This one was re-run: over the whole TU the finding does not just survive,
+> it grows (831/1,437 sites, up from 397/636), so the LTO and PGO rows below stand — on the re-run,
+> not on the original sample. `test/optremarkshotcheck.sh` now gates the list against the tree.
 
 | build | cold | warm | cost |
 |---|---|---|---|

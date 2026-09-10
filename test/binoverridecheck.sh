@@ -100,6 +100,7 @@ EXEMPT = {
     "loopconservationcheck.sh":  "reads test/regression.sh's absorb loop via `git show REF:...` across HEAD and its merge parents (a pure git-history check); never invokes build/ripwire",
     "manifestcheck.sh":          "checks that every test/*check.sh is listed in test/regression.sh; pure file check",
     "optremarkscheck.sh":        "checks -DRIPWIRE_OPT_REMARKS/-DRIPWIRE_PGO CMake config text; no binary invocation",
+    "optremarkshotcheck.sh":     "audits scripts/optremarks.py's HOT_FILES/COLD_FILES against the SOURCE TREE (os.walk over src/, plus each file's own RIPWIRE_<X>_TU guard); the subject is a triage list versus the files it claims to cover, so no ripwire binary is bound or executed at all",
     "pargatescheck.sh":          "meta-check of test/pargates.py's own source; pure file check",
     "pmccheck.sh":               "builds its OWN standalone harness binary, independent of build/ripwire",
     "portablebuildcheck.sh":     "CMake-configure-level gate only; the gate's own banner says 'no ripwire binary needed'",

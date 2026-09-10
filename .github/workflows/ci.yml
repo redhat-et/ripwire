@@ -87,7 +87,18 @@ jobs:
 
       - name: Install clang-format / clang-tidy (PINNED major — see the job comment)
         run: |
-          ls /etc/apt/sources.list.d/ && sudo rm -f /etc/apt/sources.list.d/google-chrome*   # the runner image ships a Chrome apt source (deb822 .sources on 24.04, not .list); its "Hash Sum mismatch" killed every Linux job on 2026-09-09
+          # Third-party apt sources ship in the runner image and are outside our control. TWICE now
+          # one has been mid-publish when a job ran and taken every Linux job on every branch down
+          # with it: `apt-get update` exits 100 and the leg dies in setup, before a single gate runs,
+          # with a failure that looks nothing like a package problem. google-chrome on 2026-09-09
+          # ("Hash Sum mismatch"; deb822 .sources on 24.04, not .list) and packages.microsoft.com on
+          # 2026-09-10 ("403 Forbidden ... is no longer signed"). Naming vendors one at a time only
+          # ever fixes the last outage, so: we install ubuntu-archive packages ONLY, and every
+          # non-ubuntu source goes. -print names what went, so a future reader can tell whether a
+          # missing package traces back to here.
+          ls /etc/apt/sources.list.d/ || true
+          sudo find /etc/apt/sources.list.d -type f \( -name '*.list' -o -name '*.sources' \) \
+               ! -name 'ubuntu*' -print -delete || true
           wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh "$CLANG_VERSION" all
@@ -191,7 +202,18 @@ jobs:
       - name: Install tooling (Linux)
         if: runner.os == 'Linux'
         run: |
-          ls /etc/apt/sources.list.d/ && sudo rm -f /etc/apt/sources.list.d/google-chrome*   # the runner image ships a Chrome apt source (deb822 .sources on 24.04, not .list); its "Hash Sum mismatch" killed every Linux job on 2026-09-09
+          # Third-party apt sources ship in the runner image and are outside our control. TWICE now
+          # one has been mid-publish when a job ran and taken every Linux job on every branch down
+          # with it: `apt-get update` exits 100 and the leg dies in setup, before a single gate runs,
+          # with a failure that looks nothing like a package problem. google-chrome on 2026-09-09
+          # ("Hash Sum mismatch"; deb822 .sources on 24.04, not .list) and packages.microsoft.com on
+          # 2026-09-10 ("403 Forbidden ... is no longer signed"). Naming vendors one at a time only
+          # ever fixes the last outage, so: we install ubuntu-archive packages ONLY, and every
+          # non-ubuntu source goes. -print names what went, so a future reader can tell whether a
+          # missing package traces back to here.
+          ls /etc/apt/sources.list.d/ || true
+          sudo find /etc/apt/sources.list.d -type f \( -name '*.list' -o -name '*.sources' \) \
+               ! -name 'ubuntu*' -print -delete || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc clang
 
@@ -270,7 +292,18 @@ jobs:
           fetch-depth: 0
       - name: Install tooling
         run: |
-          ls /etc/apt/sources.list.d/ && sudo rm -f /etc/apt/sources.list.d/google-chrome*   # the runner image ships a Chrome apt source (deb822 .sources on 24.04, not .list); its "Hash Sum mismatch" killed every Linux job on 2026-09-09
+          # Third-party apt sources ship in the runner image and are outside our control. TWICE now
+          # one has been mid-publish when a job ran and taken every Linux job on every branch down
+          # with it: `apt-get update` exits 100 and the leg dies in setup, before a single gate runs,
+          # with a failure that looks nothing like a package problem. google-chrome on 2026-09-09
+          # ("Hash Sum mismatch"; deb822 .sources on 24.04, not .list) and packages.microsoft.com on
+          # 2026-09-10 ("403 Forbidden ... is no longer signed"). Naming vendors one at a time only
+          # ever fixes the last outage, so: we install ubuntu-archive packages ONLY, and every
+          # non-ubuntu source goes. -print names what went, so a future reader can tell whether a
+          # missing package traces back to here.
+          ls /etc/apt/sources.list.d/ || true
+          sudo find /etc/apt/sources.list.d -type f \( -name '*.list' -o -name '*.sources' \) \
+               ! -name 'ubuntu*' -print -delete || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc
       - name: Configure with the image's stock gcc 13 (plain flavour)
@@ -422,7 +455,18 @@ jobs:
       - name: Install tooling (Linux)
         if: runner.os == 'Linux'
         run: |
-          ls /etc/apt/sources.list.d/ && sudo rm -f /etc/apt/sources.list.d/google-chrome*   # the runner image ships a Chrome apt source (deb822 .sources on 24.04, not .list); its "Hash Sum mismatch" killed every Linux job on 2026-09-09
+          # Third-party apt sources ship in the runner image and are outside our control. TWICE now
+          # one has been mid-publish when a job ran and taken every Linux job on every branch down
+          # with it: `apt-get update` exits 100 and the leg dies in setup, before a single gate runs,
+          # with a failure that looks nothing like a package problem. google-chrome on 2026-09-09
+          # ("Hash Sum mismatch"; deb822 .sources on 24.04, not .list) and packages.microsoft.com on
+          # 2026-09-10 ("403 Forbidden ... is no longer signed"). Naming vendors one at a time only
+          # ever fixes the last outage, so: we install ubuntu-archive packages ONLY, and every
+          # non-ubuntu source goes. -print names what went, so a future reader can tell whether a
+          # missing package traces back to here.
+          ls /etc/apt/sources.list.d/ || true
+          sudo find /etc/apt/sources.list.d -type f \( -name '*.list' -o -name '*.sources' \) \
+               ! -name 'ubuntu*' -print -delete || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc clang
 

@@ -48,8 +48,13 @@ The wide pass is genuinely expensive, and the cost is not spread evenly:
 | translation unit | records, unfiltered | records, `inline\|loop-vectorize\|slp-vectorizer\|licm\|gvn\|*unswitch\|loop-idiom` |
 | --- | --- | --- |
 | `src/pagerank.cpp` | 994 (0.8 MB) | 622 (0.55 MB) |
-| `src/ingest.cpp` | 161,159 (142 MB) | 128,495 (104 MB) |
+| `src/ingest.cpp` (the TU: + 15 `ingest_*.h` sections) | 161,159 (142 MB) | 128,495 (104 MB) |
 | `src/main.cpp` | >1 M, **>800 MB and still growing** | 983,888 (~38 MB region at capture) |
+
+Re-measured 2026-09-10 on the same narrowed filter, after the ingest and main splits: `pagerank.cpp`
+582 (1 MB), `ingest.cpp` **200,556 (178 MB)**, `main.cpp` **1,753,329 (1.5 GB)**. The splits moved
+where a record's `DebugLoc` points — into `src/ingest_*.h` and `src/verbs_*.h` — but not how much of
+it there is: these are the same translation units, compiled the same way.
 
 `src/main.cpp` is one ~605 KB translation unit holding thousands of functions, and the
 per-function-per-pass bookkeeping classes (`size-info/FunctionMISizeChange`,
@@ -114,14 +119,18 @@ Narrowed record, first-party only, hot-set files (39,915 remarks). Top classes a
 
 ## 5. F1 — the first remark that moved a number
 
-**The remark.** In `src/ingest.cpp` — the TU holding the two phases that are 31% of a cold run —
-**397 of 636 distinct `inline/NoDefinition` sites name a tree-sitter C entry point**:
+**The remark.** In the **ingest translation unit** — `src/ingest.cpp` plus the fifteen
+`src/ingest_*.h` sections it includes, holding the two phases that are ~29% of a cold run —
+**831 of 1,437 distinct `inline/NoDefinition` sites name a tree-sitter C entry point**:
 `ts_node_start_byte`, `ts_node_end_byte`, `ts_node_type`, `ts_node_is_null`,
 `ts_node_child_by_field_name`, `ts_node_start_point`, `ts_query_capture_name_for_id`,
 `ts_query_cursor_next_match`. Each is a two-or-three-line accessor. Each is also, from the
 optimizer's point of view, an opaque call that clobbers memory — which is why the same TU carries
-**5,448 `gvn/LoadClobbered … clobbered by call` remarks**. The capture loop reloads everything it
+**7,683 `gvn/LoadClobbered … clobbered by call` remarks**. The capture loop reloads everything it
 holds across every one of those accessor calls.
+
+*(Both counts are the 2026-09-10 re-run over the whole TU. The original pass reported 397/636 and
+5,448 against `src/ingest.cpp` alone, which after the split is 0.2% of the TU — see §8.)*
 
 `will not be inlined … because its definition is unavailable` is not a cost-model opinion. It is a
 statement of fact about translation units, and no source edit inside `ingest.cpp` reaches it. The
@@ -248,7 +257,7 @@ and the build-model sorts are 1.7 ms of a 2.7 s cold CPU profile. There is no ve
 that shows up in a wall-clock number.
 
 **D2 — hoisting the escaped-struct loads out of the hottest loop (tested, reverted).**
-`ingest.cpp:4953` — `for( uint16_t ci = 0; ci < match.capture_count; ++ci )` over
+`ingest_sidecap.h:1428` (`ingest.cpp:4953` before the split) — `for( uint16_t ci = 0; ci < match.capture_count; ++ci )` over
 `match.captures[ci]` — carries `gvn/LoadClobbered` (`load of type i16 … clobbered by call`) and
 `licm/LoadWithLoopInvariantAddressInvalidated`, because `match` had its address taken by
 `ts_query_cursor_next_match` and every accessor call in the body therefore clobbers it. I hoisted
@@ -303,7 +312,7 @@ B0.2 persisted subtoken stats path replaces it). The remark points at a loop the
 ```bash
 scripts/optremarks.sh --passes 'inline|loop-vectorize|slp-vectorizer|licm|gvn|.*unswitch|loop-idiom'
 python3 scripts/optremarks.py --hot --top 40
-python3 scripts/optremarks.py --file src/ingest.cpp --name NoDefinition --sites 30000 --width 200 | grep -c ts_
+python3 scripts/optremarks.py --file src/ingest --name NoDefinition --sites 30000 --width 200 | grep -c ts_
 ```
 
 The profile column in §3:
@@ -316,6 +325,59 @@ cmake -S . -B build_prof -DRIPWIRE_PROFILE=ON && cmake --build build_prof -j 6
 Any A/B must be interleaved and reported as median **and** min over at least ~20 runs per arm — and
 then **repeated end to end at least once more**. D2 is what a single non-interleaved run would have
 let you publish; F1's four-run spread is what a single run would have let you *oversell*.
+
+## 8. The hot set went stale, silently, and what the other 98% turned out to hold
+
+**What happened.** `--hot` narrows the record to `HOT_FILES`, a literal list matched EXACTLY. The
+ingest split moved ~18,000 lines out of `src/ingest.cpp` into fifteen `src/ingest_*.h` sections of the
+same translation unit. Every path in the list still existed, so nothing failed and no gate fired. The
+compiler kept emitting the same remarks; their `DebugLoc` simply began naming the section headers,
+which the list did not contain.
+
+| | remarks |
+| --- | --- |
+| ingest translation unit, first-party | 33,957 |
+| of those, seen by `--hot` (i.e. attributed to `src/ingest.cpp`) | **69 — 0.20%** |
+| `--hot` total, before the refresh | 29,467 |
+| `--hot` total, after | **56,488 (1.92×)** |
+
+The two hottest own-code phases in the tool were among the hidden 98% for the entire time:
+`ingest_sidecap.h` (`captureTagsFacts` 23.7% + `captureSideFacts` 5.6% of a cold run) and
+`ingest_parsepool.h` (the tag flush, 10.2%). **Treat every `--hot` conclusion about ingest recorded
+before 2026-09-10 as unverified.** §5's was re-run and grew; nothing else was resting on it.
+
+**Why the existing gate did not catch it.** `test/optremarkscheck.sh` asserts the *inverse* — that
+`--hot` does not DROP a file `HOT_FILES` names — and stayed green throughout, because
+`src/ingest.cpp` is still listed and still exists. A list can be perfectly self-consistent about
+itself while describing a tree that has moved. The missing assertion was coverage, and coverage has
+to be asserted against the source tree, not against the list.
+`test/optremarkshotcheck.sh` now does that: every file the tree groups with a hot one — by the
+section's own `RIPWIRE_<X>_TU` `#error` guard, or by name family — must be in `HOT_FILES` or in
+`COLD_FILES` **with a stated reason**, and a ceiling arm keeps the list from buying coverage by
+growing into a copy of the tree.
+
+### 8b. F3 — a lead from the newly-covered 98%, deliberately NOT acted on
+
+Re-triaging the previously hidden remarks surfaced one class that neither F1 nor any dismissal in §6
+explains: **528 distinct `inline/NoDefinition` sites naming `strcmp`** — 414 of them in files that
+were invisible before the refresh, concentrated in `ingest_metrics.h` (129), `ingest_binds.h` (94),
+`ingest_sidecap.h` (79) and `ingest_relations.h` (71). They are node-kind dispatch chains such as
+`isDecisionType`, `cc_isNestingControl`, `ev_ctrlKindFor` and `bindsVisitNode`: a linear
+`std::strcmp( t, "if_statement" ) == 0 || std::strcmp( t, "for_statement" ) == 0 || …` roughly forty
+comparisons long, evaluated **per AST node**, inside the walk that is ~29% of a cold run.
+
+It is not D4. D4 dismisses libc `NoDefinition` because inlining a syscall wrapper saves nothing;
+these are leaf string compares in a per-node dispatch, and the chain is linear in the number of node
+kinds. It is not F1 either: LTO cannot make libc's `strcmp` definition available, so the answer that
+covered the `ts_*` accessors does not reach this.
+
+**No change is being made here, and that is the point.** This is a lead, not a result. The rules in
+§7 apply to it in full — interleaved A/B, median and min over ≥20 runs per arm, repeated end to end,
+plus a corpus that is not this one — and D2 is the standing reminder of what happens when a remark is
+real, the fix is correct, and the wall clock does not move. Recorded here so the next pass starts
+from it rather than rediscovering it.
+
+---
 
 `test/optremarkscheck.sh` gates the parser against a committed fixture (exact counts, the wrapped
 `DebugLoc` continuation line, the `Args`-nested `DebugLoc` that a naive line reader mis-attributes)

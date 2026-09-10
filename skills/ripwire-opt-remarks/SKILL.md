@@ -34,8 +34,8 @@ cmake -S . -B build_prof -DRIPWIRE_PROFILE=ON && cmake --build build_prof -j 6
 ```
 
 On this codebase the answer is stable and counterintuitive: **PageRank is ~1 ms** of a ~2.7 s cold CPU
-profile, the build-model sorts are ~1.7 ms, and ~31% sits in two phases of `src/ingest.cpp`
-(`captureTagsFacts`, `captureSideFacts`) that spend it calling tree-sitter. So a remark in
+profile, the build-model sorts are ~1.7 ms, and ~29% sits in two phases now living in
+`src/ingest_sidecap.h` (`captureTagsFacts`, `captureSideFacts`) that spend it calling tree-sitter. So a remark in
 `src/pagerank.cpp`, `src/infra/sortutil.h` or `src/infra/radixSort.inl` is dismissible on arithmetic before
 you read it. Re-derive this table if you touch the pipeline; do not trust this paragraph forever.
 
@@ -45,6 +45,14 @@ you read it. Re-derive this table if you touch the pipeline; do not trust this p
 scripts/optremarks.sh --passes 'inline|loop-vectorize|slp-vectorizer|licm|gvn|.*unswitch|loop-idiom'
 python3 scripts/optremarks.py --hot --top 40
 ```
+
+`--hot` narrows to a literal list (`HOT_FILES`) rather than a heuristic, so what the report calls
+"hot" stays reviewable. That list once went stale silently — the ingest split moved the hot phases
+into `src/ingest_*.h` sections of the same TU, every listed path still existed, and `--hot` quietly
+fell to 0.2% coverage of that TU. `test/optremarkshotcheck.sh` now gates the list against the tree
+(`docs/OPTREMARKS.md` §8). If you split or rename a hot file, run that gate: it will tell you which
+files you now owe a decision on, and `COLD_FILES` is where a deliberate exclusion goes, with its
+reason.
 
 Never in `build/` — CMake refuses it by name, because `build/ripwire` is the binary every gate and
 bench number is measured against. Never with a build type: `RIPWIRE_ARCH_FLAGS` is already `-O2`, and
@@ -57,9 +65,9 @@ classes fire (`src/main.cpp` unfiltered exceeds 800 MB of YAML), then narrow.
 
 **`Missed inline NoDefinition`, callee in another TU that you own the build of.**
 *Meaning:* the definition is not visible, full stop — not a cost-model opinion.
-*Confirmed here:* 397 of 636 distinct `NoDefinition` sites in `src/ingest.cpp` name a tree-sitter C
-accessor (`ts_node_start_byte`, `ts_node_type`, `ts_query_capture_name_for_id`, …), each a two-line
-function compiled into a separate C object, inside the phases that are 31% of a cold run.
+*Confirmed here:* 831 of 1,437 distinct `NoDefinition` sites in the ingest translation unit name a
+tree-sitter C accessor (`ts_node_child_by_field_name`, `ts_node_is_null`, `ts_node_type`, …), each a
+two-line function compiled into a separate C object, inside the phases that are ~29% of a cold run.
 *Fix pattern:* make the definition available — **link-time optimization**, not a source edit.
 *Measured:* `-DRIPWIRE_LTO=ON`, four interleaved A/Bs (9/21/21/31 runs per arm) → **cold 1–6% faster,
 warm 0–3%**, every cold statistic in every run favouring LTO; output byte-identical, build time
@@ -104,7 +112,7 @@ worth doing"* is a legitimate, common verdict.
 
 **`Missed licm LoadWithLoopInvariantAddressInvalidated` + `gvn LoadClobbered` on an address-escaped
 struct in a call-heavy loop.**
-*Confirmed here:* `src/ingest.cpp:4953`, `for( uint16_t ci = 0; ci < match.capture_count; ++ci )` over
+*Confirmed here:* `src/ingest_sidecap.h:1428`, `for( uint16_t ci = 0; ci < match.capture_count; ++ci )` over
 `match.captures[ci]`. `match` had its address taken by `ts_query_cursor_next_match`, so every
 accessor call in the body clobbers it: the trip count and the capture base were reloaded on every
 iteration, inside the single hottest own-code loop in the tool.
