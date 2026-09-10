@@ -2,7 +2,7 @@
 # timsortcheck.sh — the vendored timsort's correctness, provenance and ZERO-ALLOCATION contract.
 #
 # WHY THIS GATE EXISTS
-#   src/infra/timsort.hpp is a tool with NO CALL SITE. That is deliberate — it was measured against
+#   third_party/timsort.hpp is a tool with NO CALL SITE. That is deliberate — it was measured against
 #   std::sort, radix, pdqsort, std::stable_sort and a three-line std::is_sorted guard on the real captured
 #   id sets of three call sites across seven corpora, and it won nowhere (bench/PROFILE.md, 2026-09-10).
 #   It is vendored so the layer offers the third algorithm rather than a silent gap, and the facade names
@@ -55,7 +55,7 @@ CXX="${CXX:-c++}"
 . "$ROOT/scripts/cxxstd.sh"
 CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
-HDR="$ROOT/src/infra/timsort.hpp"
+HDR="$ROOT/third_party/timsort.hpp"
 FACADE="$ROOT/src/infra/fastSort.h"
 HARNESS="$ROOT/test/timsort_harness.cpp"
 LEDGER="$ROOT/bench/PROFILE.md"
@@ -67,26 +67,26 @@ echo "timsortcheck: CXX=$CXX"
 
 # ── A: presence ──────────────────────────────────────────────────────────────────────────────────────
 missing=0
-for f in src/infra/timsort.hpp src/infra/fastSort.h test/timsort_harness.cpp bench/PROFILE.md; do
+for f in third_party/timsort.hpp src/infra/fastSort.h test/timsort_harness.cpp bench/PROFILE.md; do
     if [ ! -f "$ROOT/$f" ]; then no "A: missing $f — nothing to check"; missing=1; fi
 done
 if [ "$missing" -ne 0 ]; then echo "SOME CHECKS FAILED"; exit 1; fi
 ok "A: vendored header, facade, harness and ledger all present"
 
-# ── B: self-contained (G3) — the layer's include path and NOTHING else ───────────────────────────────
+# ── B: self-contained (G3) — third_party/ alone and NOTHING else ───────────────────────────────
 cat > "$WORK/alone.cpp" <<'EOF'
 #include "timsort.hpp"
 #include <vector>
 int main() { std::vector<int> v { 3, 1, 2 }; gfx::timsort( v.begin(), v.end() ); return v[ 0 ] == 1 ? 0 : 1; }
 EOF
-if "$CXX" "$CXXSTD" -O1 -Wall -Wextra -Werror -I"$ROOT/src/infra" "$WORK/alone.cpp" -o "$WORK/alone" 2>"$WORK/alone.log"; then
+if "$CXX" "$CXXSTD" -O1 -Wall -Wextra -Werror -I"$ROOT/third_party" "$WORK/alone.cpp" -o "$WORK/alone" 2>"$WORK/alone.log"; then
     if "$WORK/alone" >/dev/null 2>&1; then
-        ok "B: timsort.hpp compiles and runs standalone against src/infra alone, warnings-as-errors"
+        ok "B: timsort.hpp compiles and runs standalone against third_party/ alone, warnings-as-errors"
     else
         no "B: standalone TU built but did not sort"
     fi
 else
-    no "B: timsort.hpp is not self-contained against -I src/infra (or warns)"
+    no "B: timsort.hpp is not self-contained against -I third_party (or warns)"
     sed 's/^/    /' "$WORK/alone.log" | head -20
 fi
 
@@ -168,16 +168,17 @@ if [ "$harnessBuilt" -eq 1 ]; then
 fi
 
 # ── G: mutation control — simulate the patch being dropped by a re-vendor ────────────────────────────
-#    BOTH layer headers are copied into the scratch include dir, and src/infra is kept OFF the mutated
-#    build's include path. A quoted #include resolves against the INCLUDING FILE'S OWN DIRECTORY before
-#    any -I, so a scratch copy of timsort.hpp alone is invisible: the real src/infra/fastSort.h would
-#    pull in its real neighbour and this control would report a perfect zero forever, which is exactly
-#    what it did on first run.
+#    The mutated header is placed so that -I"$WORK/mut" SHADOWS the real third_party/ copy, and the
+#    facade is copied beside it. Two ways this control can silently prove nothing, and BOTH were hit
+#    for real: a quoted #include resolves against the INCLUDING FILE'S OWN DIRECTORY before any -I, so
+#    while both headers lived in src/infra/ a scratch copy of timsort.hpp alone was invisible; and now
+#    that timsort lives in third_party/, the mutated copy MUST precede $ROOT/third_party on the include
+#    path or the real header wins. The cmp below is what stops either from passing as a zero.
 mkdir -p "$WORK/mut/infra"
 cp "$FACADE" "$WORK/mut/infra/fastSort.h"
 sed 's/tmp_(workspace\.tmp_), pending_(workspace\.pending_)/tmp_(ownedTmp_), pending_(ownedPending_)/' \
-    "$HDR" > "$WORK/mut/infra/timsort.hpp"
-if cmp -s "$HDR" "$WORK/mut/infra/timsort.hpp"; then
+    "$HDR" > "$WORK/mut/timsort.hpp"
+if cmp -s "$HDR" "$WORK/mut/timsort.hpp"; then
     no "G: the mutation did not take — the workspace constructor's initialiser list was not found, so this control proves nothing"
 else
     if "$CXX" "$CXXSTD" -O2 -w -I"$WORK/mut" -I"$ROOT/third_party" "$HARNESS" -o "$WORK/hmut" 2>"$WORK/mut.log"; then
@@ -229,7 +230,7 @@ done
 scanCallSites(){   # $1... = directories to scan
     grep -rn --include='*.h' --include='*.hpp' --include='*.cpp' -e 'infra::sort::stable' -e 'gfx::timsort' \
          "$@" 2>/dev/null \
-        | grep -v '/infra/fastSort\.h:' | grep -v '/infra/timsort\.hpp:' | wc -l | tr -d ' '
+        | grep -v '/infra/fastSort\.h:' | grep -v '/third_party/timsort\.hpp:' | wc -l | tr -d ' '
 }
 mkdir -p "$WORK/probe"
 printf 'void f() { infra::sort::stable( a, b, c ); }\n' > "$WORK/probe/user.cpp"

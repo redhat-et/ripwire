@@ -1178,7 +1178,7 @@ for rep in 1 2; do for arm in --grep=zzqxvnotpresentzz --help-task=zzq --callers
 
 LEDGER rows, never a gate (the no-perf-budget rule). No call site changes in this round. The two edits it
 produced are a comment correction in `src/infra/radixSort.h` and, after the measurement was over, a
-deliberate override of its own recommendation — `src/infra/timsort.hpp` is now vendored and named as the
+deliberate override of its own recommendation — `third_party/timsort.hpp` is now vendored and named as the
 third entry in `src/infra/fastSort.h`, with **no caller routed to it**. The measurement below is why that
 entry carries the warning it does; read it before you reach for the third algorithm.
 
