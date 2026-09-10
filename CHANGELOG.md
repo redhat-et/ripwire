@@ -15,6 +15,51 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — `scripts/optremarks.py --sites-by-count`, remark sites ranked by how hard they fire
+
+`--sites` lists distinct sites in source order, which cannot answer "where does this class fire
+*hardest*" — ranking the LICM bail-outs previously meant a scratch script outside the repo, with its
+own parser and no gate on it. `--sites-by-count N` ranks the same `(file, line, name)` unit through
+the same `parse_record_file` the gate pins, so its counts cannot disagree with `--sites`: a row's
+count is exactly what `--sites` collapses into that line. Ties break on path, so two runs are
+byte-identical (verified on the real 2.06 M-record tree). A site carrying more than one variant
+prints the most common, discloses the rest on the row, and the summary NAMES that selection and counts
+the ambiguous sites — 3,567 real sites carry more than one variant, one of them 62 — which is the
+direct fix for the class of unreproducible figure documented in `docs/OPTREMARKS.md` §7 — and the two site modes are mutually exclusive, with both at once refused rather than
+resolved to one. Twelve arms in `test/optremarkscheck.sh` §(1b), including a mutation control that
+drops one duplicate from a fixture built out of the committed fixture's own records and asserts the
+count follows it down, and an arm pinning that a non-positive N prints no ranking rather than a list
+truncated from the wrong end (2026-09-10).
+
+### Fixed — the `.*unswitch` term in the optimization-remarks recipe matched nothing, and said nothing
+
+`docs/OPTREMARKS.md` §2 and §7, `skills/ripwire-opt-remarks/SKILL.md` and the driver all advertised
+`.*unswitch` in the `--passes` filter. Now `D9` in `docs/OPTREMARKS.md` §6. Zero `unswitch`
+records exist in all 2,056,640 records of the narrowed pass or in its 768 MB `-Rpass` stderr stream, and the term was in the collection filter for
+that run — so it was asked for and returned nothing. Verified not to be a filter artifact: two
+synthetic loops that require unswitching, under a completely unfiltered `-Rpass=.*` on the same Apple
+clang 21, produce no `simple-loop-unswitch` record either — not the trivial case, not the
+non-trivial one, and not under `-mllvm -enable-nontrivial-unswitch`, where the transform demonstrably
+fired (IR 200 → 580 lines). `-print-pipeline-passes` shows the `-O2` pipeline instantiating it as
+`simple-loop-unswitch<no-nontrivial;trivial>`, and D9 names the instruments that CAN see the pass
+(`-print-pipeline-passes`, an IR diff) rather than stopping at "the remark never fires". A fourth
+measurement settles it: re-running with the term REMOVED returns a record identical to the digit —
+2,056,640 records, same seven per-pass counts — across two commits whose only non-comment difference
+is a constant. Removed from the recipe, because a filter term that silently matches nothing reads as
+coverage (2026-09-10).
+
+### Fixed — `scripts/optremarks.sh --help` truncated itself, and pointed at a skill path that never existed
+
+`--help` printed a hardcoded `sed -n '2,32p'` line range that the header had already outgrown, cutting
+off the usage examples and the "a remark is an OBSERVATION, not a defect" rule that is the whole
+point of the tool. It now prints the header block itself (`awk` to the first non-comment line), so the
+range cannot rot again. The same header pointed readers at `skills/clang-opt-remarks/SKILL.md`; the
+skill has always been at `skills/ripwire-opt-remarks/`. Also corrected in `README.md`: the "two
+faster builds" block claimed LTO is on by default, said both options were off by default, and labelled
+`cmake -S . -B build` as the LTO arm — three statements that cannot all hold. A plain dev configure
+leaves `RIPWIRE_LTO` OFF and any `CMAKE_BUILD_TYPE` turns it ON, which is what the four configure arms
+in `test/optremarkscheck.sh` already assert (2026-09-10).
+
 ### Fixed — the super-linear warm floor under every graph-building verb (`--grep`, `--callers`, the map)
 
 On llvm-project (182,555 files, warm cache) a `--grep` for an absent literal took ~157 s, `--callers=main`

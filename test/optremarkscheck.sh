@@ -21,6 +21,12 @@
 #   3. RIPWIRE_PGO=use WITH NO PROFILE. -fprofile-use pointed at a file that is not there compiles
 #      clean and produces an ordinary binary; the next person benchmarks it and reports that PGO
 #      bought nothing. CMakeLists refuses at configure time, and that refusal is gated below.
+#   4. A SITE COUNT THAT IS NOT A COUNT. --sites-by-count ranks sites by how many remarks landed on
+#      each, and a ranking is exactly the shape that looks right while being wrong: sorted by the
+#      wrong key, tie-broken on dict order, or counting a unit --sites does not share. Section (1b)
+#      pins all three against a fixture BUILT from the committed one's own records, with a mutation
+#      control that drops a duplicate and asserts the count follows it down.
+#      (The hot set itself is gated separately, by test/optremarkshotcheck.sh.)
 #
 # Usage:  bash test/optremarkscheck.sh
 
@@ -87,6 +93,113 @@ python3 "$TRIAGE" --build-dir "$TMP/no-such-tree" >"$TMP/empty.out" 2>"$TMP/empt
 [ "$emptyRc" -eq 2 ] && grep -q 'configure with -DRIPWIRE_OPT_REMARKS=ON' "$TMP/empty.err" \
     && ok "an empty tree exits 2 with instructions, never 0 with an empty triage" \
     || no "a missing/unbuilt tree did not fail loudly (rc=$emptyRc)"
+
+# ── (1b) --sites-by-count: the per-site RANKING, and the contrast that proves it ranks by COUNT ──────
+# WHY THE INPUT IS BUILT HERE. Every site in the committed fixture fires exactly once, so a count mode
+# over it alone cannot tell "ordered by count" from "ordered by path" — CONTRIBUTING.md §2 shape 5, a
+# control whose two arms differ in nothing. The ranking input is therefore assembled in $TMP out of the
+# fixture's OWN records: two more copies of the src/lexical.h:517 Analysis record beside an untouched
+# sample.opt.yaml. That site sorts LAST by path and FIRST by count, so the two modes are separable by
+# their output alone. The committed fixture keeps the exact counts the arms above pin, and the gate
+# never writes into the checkout.
+CNT="$TMP/countfix"; mkdir -p "$CNT"
+cp "$FIX/sample.opt.yaml" "$CNT/sample.opt.yaml"
+{ for _i in 1 2; do sed -n '/^--- !Analysis$/,/^\.\.\.$/p' "$FIX/sample.opt.yaml"; done; } > "$CNT/extra.opt.yaml"
+[ "$( grep -c "File: 'src/lexical.h', Line: 517" "$CNT/extra.opt.yaml" )" = "2" ] \
+    && ok "count fixture built: src/lexical.h:517 duplicated to 3 hits total (the contrast the ranking needs)" \
+    || no "count fixture did not duplicate the Analysis record — every ranking arm below would prove nothing"
+
+BYCNT="$TMP/bycount.txt"
+python3 "$TRIAGE" --build-dir "$CNT" --sites-by-count 10 --width 200 >"$BYCNT" 2>&1
+grep -q '8 remarks total, 4 in first-party sources' "$BYCNT" \
+    && ok "--sites-by-count reads the same records the gated parser does (8 total, 4 first-party)" \
+    || { no "--sites-by-count's record count disagrees with the parser the arms above pin"; sed -n '1p' "$BYCNT"; }
+byFirst="$( grep -E '^ *[0-9]+  src/' "$BYCNT" | head -1 )"
+printf '%s' "$byFirst" | grep -qE '^ *3  src/lexical\.h:517 ' \
+    && ok "--sites-by-count ranks src/lexical.h:517 first, carrying its true count of 3" \
+    || no "--sites-by-count did not lead with the 3-hit site (got: $byFirst)"
+
+SITESCNT="$TMP/sites_on_countfix.txt"
+python3 "$TRIAGE" --build-dir "$CNT" --sites 10 --width 200 >"$SITESCNT" 2>&1
+sitesFirst="$( grep -E '^src/' "$SITESCNT" | head -1 )"
+case "$sitesFirst" in
+    src/ingest.cpp:4984*) ok "--sites over the SAME tree still leads with src/ingest.cpp:4984 — count order is demonstrably not path order" ;;
+    *) no "--sites' path order did not differ from --sites-by-count's count order (got: $sitesFirst) — the two modes are not separable on this input" ;;
+esac
+[ "$( grep -c '^src/lexical.h:517 ' "$SITESCNT" )" = "1" ] \
+    && ok "--sites still collapses those 3 hits into ONE row — the count is exactly what --sites hides" \
+    || no "--sites' dedupe key drifted; --sites-by-count's count no longer describes a --sites row"
+
+# Equal counts must break on (file, line, name), never on dict insertion order — the committed fixture
+# is the tie case, every site in it firing exactly once.
+python3 "$TRIAGE" --build-dir "$FIX" --sites-by-count 10 --width 200 >"$TMP/bycount_tie.txt" 2>&1
+tieFirst="$( grep -E '^ *[0-9]+  src/' "$TMP/bycount_tie.txt" | head -1 )"
+printf '%s' "$tieFirst" | grep -qE '^ *1  src/ingest\.cpp:4984 ' \
+    && ok "a count tie breaks by path: src/ingest.cpp:4984 before src/lexical.h:517" \
+    || no "a count tie did not break deterministically by path (got: $tieFirst)"
+
+python3 "$TRIAGE" --build-dir "$CNT" --sites-by-count 10 --width 200 >"$TMP/bycount_again.txt" 2>&1
+# Two runs that both FAILED are also byte-identical, so the comparison is only evidence once there are
+# rows to compare — nothing matching nothing is CONTRIBUTING.md §2 shape 3, and this arm was written
+# green against a triage that did not yet have the flag.
+if [ "$( grep -cE '^ *[0-9]+  src/' "$BYCNT" )" -lt 2 ]; then
+    no "determinism arm has nothing to compare — --sites-by-count emitted fewer than two ranked rows"
+elif cmp -s "$BYCNT" "$TMP/bycount_again.txt"; then
+    ok "two identical --sites-by-count runs are byte-identical (the ranking carries no run-to-run order)"
+else
+    no "--sites-by-count moved between two identical runs"
+fi
+
+python3 "$TRIAGE" --build-dir "$CNT" --name NoDefinition --sites-by-count 10 >"$TMP/bycount_filt.txt" 2>&1
+[ "$( grep -cE '^ *[0-9]+  src/' "$TMP/bycount_filt.txt" )" = "1" ] && grep -qE '^ *1  src/ingest\.cpp:4984 ' "$TMP/bycount_filt.txt" \
+    && ok "--sites-by-count rides the same --kind/--pass/--name/--file/--hot filters as every other mode" \
+    || { no "--sites-by-count ignored --name — its counts could disagree with --sites over the same query"; grep -E '^ *[0-9]+  src/' "$TMP/bycount_filt.txt" | head -3; }
+
+python3 "$TRIAGE" --build-dir "$CNT" --sites 5 --sites-by-count 5 >"$TMP/bothmodes.out" 2>"$TMP/bothmodes.err"; bothRc=$?
+# A bare rc!=0 would also be satisfied by "unrecognized arguments" from a triage that never learned the
+# flag — the right check aimed at the wrong refusal. Pin the mutual-exclusion wording itself.
+[ "$bothRc" -ne 0 ] && grep -q 'not allowed with' "$TMP/bothmodes.err" \
+    && ok "--sites and --sites-by-count together are REFUSED as mutually exclusive, not silently resolved to one" \
+    || { no "both site modes at once were not refused as a conflict (rc=$bothRc) — which one answered would be unknowable"; sed -n '$p' "$TMP/bothmodes.err"; }
+
+python3 "$TRIAGE" --build-dir "$CNT" --sites-by-count -1 --width 200 >"$TMP/bycount_neg.txt" 2>&1
+grep -qE '^-?[0-9]+ of [0-9]+ distinct sites shown' "$TMP/bycount_neg.txt" && grep -q '^-' "$TMP/bycount_neg.txt" \
+    && no "--sites-by-count -1 printed a negative site count — a number that cannot be a count was printed as one" \
+    || ok "--sites-by-count with a non-positive N prints no ranking rather than a list truncated from the wrong end"
+
+# ── the multi-variant disclosure: one site, two different messages ───────────────────────────────────
+# A (file, line, name) can name more than one callee — 3,567 sites on the real record do, one of them
+# 62 ways — and the ranking shows only the predominant one. That is the ambiguity behind an unreproducible
+# published count (docs/OPTREMARKS.md §7: 831 published against 947 from the printed recipe), so the row
+# has to DISCLOSE the others rather than let a reader infer that a site names one thing. No site in the
+# committed fixture carries two variants, so the contrast is built here by changing ONE field of a real
+# record — and the arm asserts that mutation took before believing the outcome.
+VAR="$TMP/variantfix"; mkdir -p "$VAR"
+sed -n '/^--- !Analysis$/,/^\.\.\.$/p' "$FIX/sample.opt.yaml" >"$VAR/a.opt.yaml"
+sed -n '/^--- !Analysis$/,/^\.\.\.$/p' "$FIX/sample.opt.yaml" | sed "s/not beneficial'/not beneficial SECONDVARIANT'/" >"$VAR/b.opt.yaml"
+if grep -q 'SECONDVARIANT' "$VAR/b.opt.yaml" && [ "$( grep -c "File: 'src/lexical.h', Line: 517" "$VAR/a.opt.yaml" "$VAR/b.opt.yaml" | grep -c ':1$' )" = "2" ]; then
+    ok "variant fixture built: ONE site (src/lexical.h:517) carrying two different messages"
+else
+    no "variant fixture did not take — the disclosure arms below would prove nothing"
+fi
+python3 "$TRIAGE" --build-dir "$VAR" --sites-by-count 10 --width 200 >"$TMP/variant.txt" 2>&1
+grep -qE '^ *2  src/lexical\.h:517 .*\[\+1 more variant\(s\) at this site\]' "$TMP/variant.txt" \
+    && ok "a site with two messages reports count 2 and DISCLOSES the variant it did not print" \
+    || { no "the multi-variant disclosure did not fire on a site that has two"; grep -E '^ *[0-9]+  src/' "$TMP/variant.txt" | head -2; }
+grep -q 'message = the predominant variant at it, and 1 site(s) here carry more than one' "$TMP/variant.txt" \
+    && ok "the summary NAMES the site->message selection and counts the ambiguous sites (the 831-vs-947 trap)" \
+    || { no "the summary does not name which variant the message column shows"; tail -1 "$TMP/variant.txt"; }
+
+# CONTROL: mutate the real input — drop one duplicate, using the same extraction that built it — and
+# re-run the IDENTICAL query. A computed count follows the input down to 2; a printed constant does not.
+sed -n '/^--- !Analysis$/,/^\.\.\.$/p' "$FIX/sample.opt.yaml" >"$CNT/extra.opt.yaml"
+[ "$( grep -c "File: 'src/lexical.h', Line: 517" "$CNT/extra.opt.yaml" )" = "1" ] \
+    && ok "control: the mutation took — one of the two duplicates is gone from the built fixture" \
+    || no "control: the mutation did not take; the arm below would pass over unmutated input"
+python3 "$TRIAGE" --build-dir "$CNT" --sites-by-count 10 --width 200 >"$TMP/bycount_mut.txt" 2>&1
+grep -qE '^ *2  src/lexical\.h:517 ' "$TMP/bycount_mut.txt" \
+    && ok "control: the count FOLLOWED the input down to 2 — it is computed, not printed" \
+    || { no "control: the count did not follow the mutated input"; grep -E '^ *[0-9]+  src/' "$TMP/bycount_mut.txt" | head -3; }
 
 # ── (2) the build-tree contract: refused in build/ and asan/, accepted elsewhere ────────────────────
 grep -q '^option(RIPWIRE_OPT_REMARKS .* OFF)$' "$ROOT/CMakeLists.txt" \

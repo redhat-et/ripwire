@@ -8,6 +8,7 @@ turn that pile into the two questions worth asking:
 
     which remark CLASSES fire at all, and how often   (--summary, the default)
     where does a given class fire in OUR hot code     (--pass/--name/--file, and --hot)
+    which SITES does it fire on hardest                (--sites in source order, --sites-by-count ranked)
 
 Design constraints, both deliberate:
 
@@ -24,6 +25,7 @@ Usage:
     python3 scripts/optremarks.py                              # summary over build_remarks/
     python3 scripts/optremarks.py --hot                        # summary restricted to the hot set
     python3 scripts/optremarks.py --pass loop-vectorize --sites 40
+    python3 scripts/optremarks.py --pass licm --hot --sites-by-count 20    # the worst LICM sites, ranked
     python3 scripts/optremarks.py --name NoDefinition --file src/clones.h
 """
 
@@ -263,8 +265,14 @@ def main():
     ap.add_argument( "--name", default = "", help = "filter by remark Name, e.g. MissedDetails" )
     ap.add_argument( "--file", default = "", help = "filter by source path substring" )
     ap.add_argument( "--detail", default = "", help = "filter by message substring — '_ZN2rw' keeps only remarks about OUR symbols" )
-    ap.add_argument( "--width", type = int, default = 110, help = "--sites message width" )
-    ap.add_argument( "--sites", type = int, default = 0, help = "list this many individual sites instead of the summary" )
+    ap.add_argument( "--width", type = int, default = 110, help = "--sites / --sites-by-count message width" )
+    # Two modes over the SAME unit, answering different questions — one lists sites in source order, the
+    # other ranks them by how many remarks landed on each. Asking for both at once has no defensible
+    # answer, so it is refused rather than resolved to whichever branch the code happens to check first.
+    siteModes = ap.add_mutually_exclusive_group()
+    siteModes.add_argument( "--sites", type = int, default = 0, help = "list this many individual sites instead of the summary" )
+    siteModes.add_argument( "--sites-by-count", dest = "sitesByCount", type = int, default = 0,
+                            help = "rank those same sites by how many remarks collapsed into each, most-hit first" )
     ap.add_argument( "--top", type = int, default = 25 )
     args = ap.parse_args()
 
@@ -309,6 +317,44 @@ def main():
     for name, n in sorted( per_tu, key = lambda t: -t[ 1 ] ):
         print( "  %-28s %8d" % ( name, n ) )
     print()
+
+    # A non-positive N is not a request for a ranking; ranked[ : -1 ] would truncate from the wrong end
+    # under a summary line reading "-1 of 2 distinct sites shown", and a number that cannot be a count
+    # must never be printed as one.
+    if args.sitesByCount > 0:
+        # Same unit as --sites — one row per (file, line, name) — so a row's count is exactly the number
+        # of remarks --sites collapses into that one line, and the two modes can never disagree about
+        # what a "site" is. Ranked by count, then by (file, line, name): a tie must not ride dict
+        # insertion order, which is the same determinism contract the tool itself is held to.
+        #
+        # One (file, line, name) can carry more than one VARIANT — the same Name at the same line from
+        # both an Analysis and a Missed record, or two different callees on one call-heavy line. On the
+        # real record 335 sites do, one of them with ten distinct messages. The most common variant is
+        # shown and the rest are DISCLOSED, never silently dropped: a count is only honest if the row it
+        # sits beside says what it is counting.
+        perSite = collections.Counter()
+        byVariant = collections.defaultdict( collections.Counter )
+        for r in remarks:
+            key = ( r.file, r.line, r.name )
+            perSite[ key ] += 1
+            byVariant[ key ][ ( r.kind, r.pass_, r.detail ) ] += 1
+        ranked = sorted( perSite.items(), key = lambda kv: ( -kv[ 1 ], kv[ 0 ] ) )
+        for ( path, line, name ), n in ranked[ : args.sitesByCount ]:
+            variants = byVariant[ ( path, line, name ) ]
+            ( kind, pass_, detail ), _top = sorted( variants.items(), key = lambda kv: ( -kv[ 1 ], kv[ 0 ] ) )[ 0 ]
+            extra = "  [+%d more variant(s) at this site]" % ( len( variants ) - 1 ) if len( variants ) > 1 else ""
+            print( "%7d  %s:%d  [%s/%s/%s]  %s%s" % ( n, path, line, kind, pass_, name, detail[ : args.width ], extra ) )
+        multiVariant = sum( 1 for k in perSite if len( byVariant[ k ] ) > 1 )
+        # NAME THE SELECTION. A site can name more than one callee, so "how many sites name X" has
+        # several defensible answers over the same list — first record, predominant, any, all — and a
+        # published figure that does not say which is not reproducible from its own recipe (this bit
+        # the ts_* count in §5 of docs/OPTREMARKS.md: 831 published, 947 from the printed recipe).
+        # The message column here is the PREDOMINANT variant, and the row says so rather than leaving
+        # the reader to infer it.
+        print( "\n%d of %d distinct sites shown, %d matching remarks — count = the remarks --sites collapses "
+               "into that site; message = the predominant variant at it, and %d site(s) here carry more than one" %
+               ( min( args.sitesByCount, len( ranked ) ), len( ranked ), len( remarks ), multiVariant ) )
+        return 0
 
     if args.sites:
         seen = collections.Counter()

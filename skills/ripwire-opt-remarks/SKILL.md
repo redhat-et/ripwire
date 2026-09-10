@@ -42,9 +42,14 @@ you read it. Re-derive this table if you touch the pipeline; do not trust this p
 ## Step 1 — collect
 
 ```bash
-scripts/optremarks.sh --passes 'inline|loop-vectorize|slp-vectorizer|licm|gvn|.*unswitch|loop-idiom'
+scripts/optremarks.sh --passes 'inline|loop-vectorize|slp-vectorizer|licm|gvn|loop-idiom'
 python3 scripts/optremarks.py --hot --top 40
+python3 scripts/optremarks.py --hot --pass licm --sites-by-count 20   # worst sites first, not source order
 ```
+
+(`.*unswitch` was in that filter until 2026-09-10 and matched nothing: `SimpleLoopUnswitch` emits no
+records on Apple clang 21 even when it demonstrably fires. `docs/OPTREMARKS.md` §7 has the three
+measurements.)
 
 `--hot` narrows to a literal list (`HOT_FILES`) rather than a heuristic, so what the report calls
 "hot" stays reviewable. That list once went stale silently — the ingest split moved the hot phases

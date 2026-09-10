@@ -1601,19 +1601,19 @@ via `PL2_CACHE_MISS_LD`).
 </details>
 
 <details>
-<summary>The two opt-in faster builds — LTO on by default, PGO at 14–25% cold, and why the output stays byte-identical</summary>
+<summary>The two faster builds — LTO with any build type, PGO at 14–25% cold, and why the output stays byte-identical</summary>
 
 **Every number on this page is the DEFAULT build — and there is a faster one you can opt into.** A
 clang optimization-remarks pass over `src/` (`-DRIPWIRE_OPT_REMARKS=ON`; the whole triage is in
 [`docs/OPTREMARKS.md`](docs/OPTREMARKS.md)) found that the phases above spend their time calling
 tree-sitter's C API across a translation-unit boundary — 831 of 1,437 distinct `inline/NoDefinition`
-sites in the hot TU name a `ts_*` accessor. Two build options answer that, both **off by default**:
+sites in the hot TU name a `ts_*` accessor. Two build options answer that:
 
 | build | cold | warm | |
 | --- | --- | --- | --- |
-| `-DRIPWIRE_LTO=OFF` | baseline | baseline | the fast edit loop, not the fast binary |
-| **default** (`cmake -S . -B build`, LTO on) | 1–6% faster | 0–3% faster | |
-| `scripts/pgobuild.sh` (PGO on top of LTO) | **14–25% faster** (6–16% over the default) | 5–10% faster | the fastest binary this tree can produce |
+| `cmake -S . -B build` (plain dev configure, LTO off) | baseline | baseline | the fast edit loop, not the fast binary |
+| `-DCMAKE_BUILD_TYPE=Release` (implies LTO on) | 1–6% faster | 0–3% faster | what a release actually ships |
+| `scripts/pgobuild.sh` (PGO on top of LTO) | **14–25% faster** (6–16% over LTO alone) | 5–10% faster | the fastest binary this tree can produce |
 
 Measured by interleaved A/B (`A,B,A,B,…`, median **and** min, 9–31 runs per arm, repeated) on this
 repository *and* on a ~2000-file C++ tree that appears in no training run — the held-out corpus shows

@@ -45,7 +45,7 @@ producing an empty record.
 
 The wide pass is genuinely expensive, and the cost is not spread evenly:
 
-| translation unit | records, unfiltered | records, `inline\|loop-vectorize\|slp-vectorizer\|licm\|gvn\|*unswitch\|loop-idiom` |
+| translation unit | records, unfiltered | records, `inline\|loop-vectorize\|slp-vectorizer\|licm\|gvn\|loop-idiom` |
 | --- | --- | --- |
 | `src/pagerank.cpp` | 994 (0.8 MB) | 622 (0.55 MB) |
 | `src/ingest.cpp` (the TU: + 15 `ingest_*.h` sections) | 161,159 (142 MB) | 128,495 (104 MB) |
@@ -301,6 +301,42 @@ class by an order of magnitude, and the least actionable one-by-one: it fires pe
 value is *aggregate* — a dense cluster of `clobbered by call` in one function means that function is
 call-bound, which is how F1 was found. Never triage these individually.
 
+**D9 — the `unswitch` classes, which do not exist on this toolchain.** The `--passes` recipe carried
+`.*unswitch` from the first pass until 2026-09-10 and it matched nothing, ever. Three measurements, in
+increasing strength:
+
+1. **Zero** `unswitch` records in all 2,056,640 records of the 2026-09-10 narrowed pass — the same
+   four translation units §2 tabulates — and zero in its 768 MB `-Rpass` stderr stream. The term was
+   in the collection filter for that run, so it was asked for and returned nothing. (Same zero on the
+   2026-09-09 tree, 1,954,538 records.)
+2. The only `Pass` names that record contains at all are `gvn` (1,421,933), `inline` (315,228), `licm` (190,927), `slp-vectorizer` (66,452),
+   `loop-vectorize` (56,940), `loop-idiom` (2,752) and `inline-cost` (2,408) — `inline-cost` arriving because
+   clang's pass filter is a substring search, not a full match.
+3. **Not a filter artifact.** Two synthetic loops that require unswitching, compiled by the same Apple
+   clang 21 under a completely unfiltered `-Rpass=.* -Rpass-missed=.* -Rpass-analysis=.*`, produce no
+   `simple-loop-unswitch` record either — neither the trivial case (a loop-invariant condition guarding
+   an exit) nor the non-trivial one, and not under `-mllvm -enable-nontrivial-unswitch`, where the
+   transform demonstrably *did* fire: the IR grew 200 → 580 lines.
+
+**What is dismissed here is the instrument, not the optimization** — so name the instrument that can
+still see it, rather than stopping at "the remark never fires":
+
+- `-mllvm -print-pipeline-passes` shows the `-O2` pipeline instantiating the pass as
+  `simple-loop-unswitch<no-nontrivial;trivial>`. It is present, and non-trivial unswitching is off at
+  `-O2` by default — which is a fact about the pipeline that no remark was ever going to tell you.
+- Whether it *fired* is an IR question: compile `-S -emit-llvm` with and without
+  `-mllvm -enable-nontrivial-unswitch` and diff, or ask for `-mllvm -print-after=simple-loop-unswitch`.
+
+A fourth measurement arrived by accident and is the most direct of all: the pass was re-run with the
+term **removed** from the filter, and the record came back **identical to the digit** — 2,056,640
+records and the same seven per-pass counts. The two runs sit on different commits (`d2994c89` and
+`dc48e1e9`), but the only non-comment change between them is `kParserVer 86 → 87`, a constant, so the
+codegen is the same and the comparison holds. Asking for `.*unswitch` and not asking for it collect
+exactly the same bytes.
+
+Removed from the recipe rather than left in place, because a filter term that silently matches nothing
+reads as coverage — the green-while-inert shape `CONTRIBUTING.md` §2 gates against everywhere else.
+
 **D8 — `src/lexical.h`'s BM25 loops.** `VectorizationNotBeneficial` at `:490/:517/:532/:577` and 22
 LICM sites in the `scanField` token matcher looked like the best remaining source-level candidate.
 Profiling the actual `--for` path killed it: `lexicalScores` is **0.886 ms of a 95 ms run**, and the
@@ -310,10 +346,68 @@ B0.2 persisted subtoken stats path replaces it). The remark points at a loop the
 ## 7. Reproducing
 
 ```bash
-scripts/optremarks.sh --passes 'inline|loop-vectorize|slp-vectorizer|licm|gvn|.*unswitch|loop-idiom'
+scripts/optremarks.sh --passes 'inline|loop-vectorize|slp-vectorizer|licm|gvn|loop-idiom'
 python3 scripts/optremarks.py --hot --top 40
 python3 scripts/optremarks.py --file src/ingest --name NoDefinition --sites 30000 --width 200 | grep -c ts_
 ```
+
+About 4½ minutes wall, 1.8 GB of records and a 768 MB log, all inside `build_remarks/`. That filter
+carried a `.*unswitch` term until 2026-09-10, which matched nothing on this toolchain — see §6 D9.
+
+### Ranking sites by how often they fire
+
+`--sites` lists distinct sites in source order, which answers "where does this class fire" but not
+"where does it fire *hardest*" — and ranking the LICM bail-outs by hand once meant a scratch script
+outside the repo, with its own parser and no gate on it. `--sites-by-count` ranks the same sites
+through the same `parse_record_file` the gate pins. The unit is identical to `--sites`'
+`(file, line, name)`, so a row's count is exactly the number of remarks `--sites` collapses into that
+one line; ties break on path, so two runs are byte-identical.
+
+```bash
+python3 scripts/optremarks.py --hot --pass licm --name LoadWithLoopInvariantAddressInvalidated \
+        --sites-by-count 6 --width 62
+```
+
+```
+    181  src/ingest_cache.h:1830  [Missed/licm/LoadWithLoopInvariantAddressInvalidated]  failed to move load with loop-inv
+     86  src/ingest_cache.h:1330  [Missed/licm/LoadWithLoopInvariantAddressInvalidated]  failed to move load with loop-inv
+     74  src/ingest_crawl.h:1171  [Missed/licm/LoadWithLoopInvariantAddressInvalidated]  failed to move load with loop-inv
+     62  src/ingest_sidecap.h:109  [Missed/licm/LoadWithLoopInvariantAddressInvalidated]  failed to move load with loop-inv
+     59  src/clones.h:406  [Missed/licm/LoadWithLoopInvariantAddressInvalidated]  failed to move load with loop-inv
+     49  src/graph.h:1786  [Missed/licm/LoadWithLoopInvariantAddressInvalidated]  failed to move load with loop-inv
+
+6 of 371 distinct sites shown, 3030 matching remarks — count = the remarks --sites collapses into that
+site; message = the predominant variant at it, and 0 site(s) here carry more than one
+```
+
+*Recorded on `dc48e1e9`.* The line numbers above are the most perishable thing on this page — a
+comment-only commit moved two of them by 30 between `d2994c89` and `dc48e1e9` while every count above
+stayed identical — so the stamp is there to make a stale block obviously dated rather than quietly
+wrong.
+
+That ordering is the point: `src/ingest_cache.h:1830` alone is 6.0% of that class, and no amount of
+reading `--sites`' path-ordered list surfaces it. The two modes are mutually exclusive and asking for
+both is refused rather than resolved to one. Where one site carries more than one variant — the same
+`Name` from both an `Analysis` and a `Missed` record, or two different callees on one call-heavy line
+— the most common is printed and the rest disclosed on the row (`[+N more variant(s) at this site]`).
+On the hot set 3,567 sites do, one of them with 62 distinct variants, so this is a disclosure that
+actually fires rather than a hypothetical.
+
+**A site naming more than one callee is also why an `inline/NoDefinition` count needs its definition
+stated.** Over the ingest TU's 1,425 `NoDefinition` sites, "how many name a `ts_*` accessor" answers
+**951** (at least one record at the site does), **947** (`--sites`' first record does — the recipe
+above), **827** (the site's predominant record does) or **826** (every record does). 242 of those
+sites carry more than one variant, which is the whole spread. Quote which one you mean.
+
+This is not hypothetical bookkeeping: **§5 publishes 831, and the recipe printed above yields 947.**
+An independent run reproduced §5's other two figures for that section *exactly* — 1,437 sites and
+7,683 `gvn/LoadClobbered … clobbered by call` — while returning 947 for the `ts_*` numerator, so the
+two runs saw the same population and only that one figure moves. (On today's tree the same recipe
+gives 1,425 / 947 / 7,615: the population drifts a little with the code, the numerator does not.) The
+recipe as printed is therefore not reproducing the published figure, and the readings above are the
+reason. Deciding which reading §5 means, and stating it beside the number everywhere it appears
+(`README.md`, `bench/PROFILE.md`, `CMakeLists.txt`), is owed and tracked separately — that is a
+change to a published claim, not to this tool.
 
 The profile column in §3:
 
@@ -380,7 +474,9 @@ from it rather than rediscovering it.
 ---
 
 `test/optremarkscheck.sh` gates the parser against a committed fixture (exact counts, the wrapped
-`DebugLoc` continuation line, the `Args`-nested `DebugLoc` that a naive line reader mis-attributes)
-and runs the real configure that proves the `build/` refusal — because a triage tool that silently
-parses fewer records reports "nothing to fix", which is the green-while-inert failure this suite
-gates against everywhere else.
+`DebugLoc` continuation line, the `Args`-nested `DebugLoc` that a naive line reader mis-attributes),
+gates `--sites-by-count`'s ranking, tie-break and mutual exclusion against a fixture built from that
+same fixture's own records, and runs the real configure that proves the `build/` refusal — because a
+triage tool that silently parses fewer records, ranks on the wrong key, or reads the wrong files
+reports "nothing to fix", which is the green-while-inert failure this suite gates against everywhere
+else. The hot set itself is gated separately, by `test/optremarkshotcheck.sh` (§8).

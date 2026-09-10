@@ -29,8 +29,9 @@
 #
 # Everything after `--` is forwarded to scripts/optremarks.py:
 #   scripts/optremarks.sh --triage-only -- --hot --pass loop-vectorize --sites 40
+#   scripts/optremarks.sh --triage-only -- --hot --pass licm --sites-by-count 20   # worst sites first
 #
-# A remark is an OBSERVATION, not a defect. docs/OPTREMARKS.md and skills/clang-opt-remarks/SKILL.md
+# A remark is an OBSERVATION, not a defect. docs/OPTREMARKS.md and skills/ripwire-opt-remarks/SKILL.md
 # carry the triage rules and the measured outcomes; do not act on a remark without a bench number.
 
 set -u
@@ -49,7 +50,7 @@ while [ $# -gt 0 ]; do
         --passes)       PASSES="${2:-}"; shift 2 ;;
         --clean)        rm -rf "$TREE"; echo "removed $TREE"; exit 0 ;;
         --)             shift; forward=( "$@" ); break ;;
-        -h|--help)      sed -n '2,32p' "$0"; exit 0 ;;
+        -h|--help)      awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "$0"; exit 0 ;;
         *)              echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
 done
