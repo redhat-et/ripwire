@@ -194,7 +194,7 @@ else
 fi
 
 # ── (h) --help documents the grammar ─────────────────────────────────────────────────────────────────
-H="$( "$BIN" --help 2>&1 )"
+H="$( "$BIN" --help=all 2>&1 )"
 printf '%s' "$H" | grep -q 'FILE:NAME' \
   && ok "(h) --help documents the FILE:NAME selector grammar" \
   || no "(h) --help does not document FILE:NAME"

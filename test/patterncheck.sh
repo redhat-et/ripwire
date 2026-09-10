@@ -350,7 +350,7 @@ else
 fi
 
 # ── 9. the coverage contract is DISCLOSED, not implied ────────────────────────────────────────────────
-"$BIN" --help >"$TMP/help" 2>&1
+"$BIN" --help=all >"$TMP/help" 2>&1
 grep -q -- '--pattern=' "$TMP/help" && ok "--help documents --pattern=" || no "--help does not mention --pattern="
 grep -q 'pattern' "$TMP/all" && ok "the emitted element/legend names the verb" || no "no legend on the pattern output"
 # unsupported families are NAMED, so a user of ruby/bash learns it from the tool and not from a zero

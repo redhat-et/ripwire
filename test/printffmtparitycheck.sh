@@ -68,9 +68,13 @@ hashfile(){
 }
 
 # ── the verb corpus ──────────────────────────────────────────────────────────────────────────────────
+# Both --help TIERS are pinned, and so is one addressed entry. `help` is the budgeted first screen;
+# `help_all` is the complete catalog every gate and docs/docs_commands_build.py reads; `help_one` proves
+# the per-flag address still serves a whole entry. Pinning only one of them would let a change move the
+# other silently, which is exactly the split this fence is guarding.
 # label -> (needsCorpus 0|1, argv...). needsCorpus=1 verbs get "$CORPUS --no-cache" prepended; 0 verbs
 # (--version/--help) are global and take no positional path at all.
-LABELS="flagless lint lint_sarif lint_select lint_naming lint_catalog match pattern callers impact clones help"
+LABELS="flagless lint lint_sarif lint_select lint_naming lint_catalog match pattern callers impact clones help help_all help_one"
 
 argsFor(){
     case "$1" in
@@ -86,6 +90,8 @@ argsFor(){
         impact)      echo "1|--impact=perimeter";;
         clones)      echo "1|--clones";;
         help)        echo "0|--help";;
+        help_all)    echo "0|--help=all";;
+        help_one)    echo "0|--help=--uses";;
     esac
 }
 

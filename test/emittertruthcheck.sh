@@ -271,7 +271,7 @@ done
 # The other half of the same reconciliation: every value the error string advertises must also be documented
 # in --help — a real, working value that --help omits is exactly the fabrication class deckcheck exists to
 # catch, just in text deckcheck cannot see (the binary's own --help/error strings, not a doc file).
-helptext="$( "$BIN" --help 2>&1 )"
+helptext="$( "$BIN" --help=all 2>&1 )"
 # collect every value --help actually advertises after "--format=" (e.g. "--format=xml|columnar|rows" and
 # the standalone "--format=candidates" line), then check each error-advertised value is among them — not a
 # bare substring match, which "rows"/"xml" would false-match against unrelated English prose elsewhere in

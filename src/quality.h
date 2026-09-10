@@ -1398,7 +1398,11 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 18;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 86;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 87;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 87 = 2026-09-10 (Elixir module/name/arity resolution,
+                                                          //    rebased onto main): RE-BUMPED from the fork's 86 —
+                                                          //    main had already spent 86 on the Ruby receiver dedupe.
+                                                          //    See ingest_cache.h's kParserVer note.
                                                           // 78 = 2026-09-07 (Elixir): a twenty-second grammar and its
                                                           //    definition/call filters.
                                                           // 79 = 2026-09-07 (ES import facts): named import aliases and

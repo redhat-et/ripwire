@@ -731,10 +731,9 @@ inline bool parseByteSize( const char* s, std::size_t& out ) noexcept
 // The --plan-lanes rows, split out of printUsage's one giant literal rather than appended to it: this verb's
 // help carries the whole claim-key argument and the auto-carve caveat (the single most important sentence in
 // it), which is a paragraph, not a row — and printUsage is already the longest function in this file.
-inline void printPlanLanesUsage( std::FILE* out ) noexcept
-{
-    std::fprintf( out,
-        "    --plan-lanes=N --task=GOAL PRE-HOC lane plan: BEFORE a line is written, if this task is split across N isolated\n"
+inline constexpr char kHelpPlanLanes[] =
+        "    --plan-lanes=N --task=GOAL   plan lanes BEFORE any code: which of N parallel worktrees would collide, and how to land them\n"
+        "                               PRE-HOC lane plan: BEFORE a line is written, if this task is split across N isolated\n"
         "                               worktrees (N=2..16), which lanes would COLLIDE and in what order should they land.\n"
         "                               Where --merge-scout says \"these branches already conflict\", this says \"these lanes\n"
         "                               WOULD conflict if assigned this way\" — no ref to resolve, no archive, no re-ingest.\n"
@@ -754,17 +753,15 @@ inline void printPlanLanesUsage( std::FILE* out ) noexcept
         "                               behavior or security sensitivity; the orchestrator must override those cases. Single-root only.\n"
         "                               AUTO-CARVE SPLITS THE RANKED SURFACE, NOT\n"
         "                               YOUR SENTENCE: if your task has enumerable parts, use --brief and write one line per part.\n"
-        "    --plan-lanes --brief=FILE  the explicit form of the above: one non-blank line per lane, N = the line count. Each line\n"
+        "    --plan-lanes --brief=FILE  the explicit form of the above: one line per lane in FILE, N = the line count\n"
+        "                               the explicit form of the above: one non-blank line per lane, N = the line count. Each line\n"
         "                               is ranked on its own — no community carve, no bin packing — so the lane boundaries are the\n"
         "                               ones you wrote. This is the mode whose precision is defensible; prefer it when you can.\n"
-        "                               Lane isolation is a QUALITY argument, not a speed one (CAID, arXiv 2603.21489: 63.3%% vs\n"
-        "                               55.5%% shared, largest gains on weaker lane models — and wall clock got WORSE).\n" );
-}
+        "                               Lane isolation is a QUALITY argument, not a speed one (CAID, arXiv 2603.21489: 63.3% vs\n"
+        "                               55.5% shared, largest gains on weaker lane models — and wall clock got WORSE).\n";
 
 /// Print the authoritative CLI usage and flag catalog to the caller-provided output stream.
-inline void printUsage( std::FILE* out ) noexcept
-{
-    std::fprintf( out,
+inline constexpr char kHelpHead[] =
         "ripwire — the \"ripgrep of AI context\": parse a codebase, rank symbols by Personalized PageRank,\n"
         "stream a deterministic minified XML map to stdout. Zero runtime deps. Languages: C++, C, ObjC/ObjC++,\n"
         "Metal (MSL, .metal — C++ grammar), CUDA (.cu/.cuh — tree-sitter-cuda, <<<>>> launches are call edges),\n"
@@ -782,7 +779,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "       ripwire wrap <agent>             # print the recipe to wire ripwire into claude|cursor|codex|aider|...\n\n"
         "  understand a codebase cold\n"
         "    <dir>                      ranked symbol map (start here)\n"
-        "    --top-k=N                  keep the N highest-ranked symbols (default 200) — applies to the default map,\n"
+        "    --top-k=N                  keep only the N highest-ranked symbols (default 200)\n"
+        "                               keep the N highest-ranked symbols (default 200) — applies to the default map,\n"
         "                               plain --query, and --format=candidates (incl. with --for). --for's OWN\n"
         "                               signature/lego/compose bundle self-limits via --pack-top-n instead — --top-k is\n"
         "                               INERT there (documented, not fixed — a real fix is a behavior change).\n"
@@ -797,7 +795,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               2.36 B/tok (the densest calibrated language, so N holds for any corpus) times a 0.90\n"
         "                               headroom factor. The map's own est_tokens uses THIS corpus's language-weighted rate\n"
         "                               instead, so a conformant fit REPORTS a number below the N you asked for — expect\n"
-        "                               ~10-20%% of N unused. The shaped map discloses both: max_tokens=N (asked) and\n"
+        "                               ~10-20% of N unused. The shaped map discloses both: max_tokens=N (asked) and\n"
         "                               fit_bytes=B (honoured). Consequence for composing it with --token-budget=N below:\n"
         "                               the two Ns are different units, so the same N on both is NOT a tautology.\n"
         "                               At a SMALL N the map's fixed floor (envelope + legend) can exceed fit_bytes with\n"
@@ -820,7 +818,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               answer is not worth cutting to fit — so the root DISCLOSES the overshoot instead,\n"
         "                               carrying over_ceiling=\"1\" beside max_tokens=N whenever est_tokens exceeds N. Reach\n"
         "                               for --token-budget=N when the whole DOCUMENT must be bounded; this flag SHAPES.\n"
-        "    --token-budget=N[K|M|G]    two personalities depending on the verb:\n"
+        "    --token-budget=N[K|M|G]    cap the whole document at N tokens — a hard gate on the map, a trim-to-fit on the task lenses\n"
+        "                               two personalities depending on the verb:\n"
         "                                 - default map / --query / --recall: a CI GATE — exit 3 if the emitted DOCUMENT's\n"
         "                                   est_tokens exceeds N. That is the map PLUS every block appended after it\n"
         "                                   (<sigs>/<src>/<bodies>/<outline>), each charged from the bytes it actually\n"
@@ -840,9 +839,9 @@ inline void printUsage( std::FILE* out ) noexcept
         "                                   --json GATES AT A DIFFERENT NUMBER for the same request, and NOT by a fixed\n"
         "                                   factor: the flag measures the DOCUMENT that was emitted, and whether JSON or\n"
         "                                   XML is smaller flips with RESULT SIZE on this corpus. Small: JSON wins\n"
-        "                                   (MEASURED on src --top-k=20: est_tokens 1146 XML vs 899 JSON, ~22%% smaller).\n"
+        "                                   (MEASURED on src --top-k=20: est_tokens 1146 XML vs 899 JSON, ~22% smaller).\n"
         "                                   Large: XML wins instead (MEASURED on src --top-k=200: est_tokens 9405 XML vs\n"
-        "                                   9724 JSON, ~3%% LARGER) — the crossover sits near top-k~100-150 here, so the\n"
+        "                                   9724 JSON, ~3% LARGER) — the crossover sits near top-k~100-150 here, so the\n"
         "                                   same N can pass or fail differently under --json depending on dialect AND\n"
         "                                   size — never assume one direction, measure the request you actually gate.\n"
         "                                 - --for / --pack-task / --from-trace / --run-trace: SHAPES instead of gating — overrides that\n"
@@ -856,12 +855,14 @@ inline void printUsage( std::FILE* out ) noexcept
         "                                   header floor alone exceeds the ceiling: the lens drops the comment's DUPLICATE echo\n"
         "                                   first (task_echo: dropped (ceiling); task= keeps the verbatim copy), then labels it\n"
         "                                   over_ceiling (--recall: over_ceiling=1) — never a trim it did not actually do.\n"
-        "    --help-task=TASK           deterministic enhanced help: recommend ONE executable Ripwire CLI command for this\n"
+        "    --help-task=TASK           describe a task, get ONE recommended command back — or an honest abstention\n"
+        "                               deterministic enhanced help: recommend ONE executable Ripwire CLI command for this\n"
         "                               repository and task, or abstain when evidence/applicability is insufficient. Reports\n"
         "                               the intent, integer score/margin and repository facts; never calls a model, executes\n"
         "                               the recommendation, or accesses the network. Structured claims/traces/symbols outrank\n"
         "                               lexical cues. Recommendation only; pipe trace text to stdin for --from-trace=-.\n"
-        "    --for=TASK                 the task lens: ranked signatures + metrics framed for reuse. The bundle enforces a\n"
+        "    --for=TASK                 the task lens: say what you are doing, get the signatures and bodies to read first\n"
+        "                               the task lens: ranked signatures + metrics framed for reuse. The bundle enforces a\n"
         // §B7.5 (CA4): this said <sigs payload="capped"> — the STRING ENUM the §P8 vocabulary migration
         // replaced with the boolean capped="1" every other truncating element spells (serialize.h's own
         // comment records the rename). No output the tool can emit has contained payload= since; --help was
@@ -908,14 +909,17 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               and more positive matches than the head shows) — treat the set as a starting point,\n"
         "                               not an answer; high means a material cliff inside the served head (margin_pct= is\n"
         "                               that drop as a whole percent) or every positive match already shown\n"
-        "    --signatures-only          (with --for) opt out of the terminal-by-default bundle: no auto bodies, no bundle=\"auto\"\n"
+        "    --signatures-only          (with --for) signatures only: no automatic bodies in the bundle\n"
+        "                               (with --for) opt out of the terminal-by-default bundle: no auto bodies, no bundle=\"auto\"\n"
         "                               attribute — the signatures-only lens exactly as before. Contradicts --detail=N (refused\n"
         "                               together); --detail=N remains the explicit body knob and supersedes the automatic pick\n"
-        "    --auto-bodies              (with --for) opt out of COMPACT conceptual serving: restore the rank-first auto <bodies>\n"
+        "    --auto-bodies              (with --for) restore the automatic body walk on the conceptual route\n"
+        "                               (with --for) opt out of COMPACT conceptual serving: restore the rank-first auto <bodies>\n"
         "                               walk on the subtoken+body route (bundle=\"auto\", up to 6 full bodies) instead of the\n"
         "                               <hops> edge section. Inert on the name-exact route, where the allowance already runs.\n"
         "                               Contradicts --signatures-only and --detail=N (refused with either)\n"
-        "    --no-route                 (with --for/--query) force plain subtoken+body BM25. Routing is now the DEFAULT: a deterministic,\n"
+        "    --no-route                 (with --for) skip the query-shape router and always rank by subtoken+body BM25\n"
+        "                               (with --for/--query) force plain subtoken+body BM25. Routing is now the DEFAULT: a deterministic,\n"
         "                               confidence-gated query-shape router picks name-exact BM25 when the query NAMES a symbol (identifier\n"
         "                               syntax, or every content word is a symbol name) else subtoken+body, and prints which/why in the\n"
         "                               header. It only routes with a query (the plain map is unaffected). --no-route restores the old behavior.\n"
@@ -927,32 +931,38 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               down (repo meta-prose - issue templates, CONTRIBUTING, changelogs - twice as hard) and route= names the\n"
         "                               shape, its evidence and both factors. Demotion, never exclusion, and the mention anchor still lifts a\n"
         "                               document the task NAMES. --no-route has no route= to disclose it in, so it does not demote either.\n"
-        "    --adaptive                 (with --for/--query) cut the result at the relevance CLIFF — the largest relative score gap\n"
+        "    --adaptive                 (with --for/--query) cut the result at the relevance cliff instead of at a fixed K\n"
+        "                               (with --for/--query) cut the result at the relevance CLIFF — the largest relative score gap\n"
         "                               (Adaptive-k), floor 5, ceiling = the existing top-k; a sharp query returns few, a flat/broad one\n"
         "                               hits the ceiling. Prints [adaptive: kept K of N ...] in the header. Without it, output is unchanged.\n"
-        "    --no-mention-boost         (with --for) disable the query-mention anchor. By DEFAULT, a file, dotted module, or\n"
+        "    --no-mention-boost         (with --for) stop lifting symbols the task text names by path, module or Type.method\n"
+        "                               (with --for) disable the query-mention anchor. By DEFAULT, a file, dotted module, or\n"
         "                               Scope.symbol literally NAMED in the task text (a path, `pkg.module`, `Type.method` — even\n"
-        "                               inside a URL) has its SCORE lifted to within 5%% of the top score; the header says what\n"
+        "                               inside a URL) has its SCORE lifted to within 5% of the top score; the header says what\n"
         "                               anchored. That is a score promise, not a rank one: on a flat/tied head the anchored hit\n"
         "                               can still land several ranks below #1. Inert (byte-identical) when the text names\n"
         "                               nothing indexed. RIPWIRE_NO_MENTION=1 disables it\n"
         "                               everywhere (incl. MCP `for`).\n"
-        "    --no-doc-mention           (with --for) disable doc-mention surfacing. By DEFAULT, a markdown doc that names one of\n"
+        "    --no-doc-mention           (with --for) stop surfacing markdown docs that name the task's top symbols\n"
+        "                               (with --for) disable doc-mention surfacing. By DEFAULT, a markdown doc that names one of\n"
         "                               the task's top-resolved symbols in a `backtick` (the same doc<->code edges --mentions=SYM\n"
         "                               reads) is lifted into the bundle, strictly below that symbol's own score — closing the\n"
         "                               \"the doc explains it but shares no words with the query\" gap. Inert (byte-identical)\n"
         "                               when no resolved symbol has a mentioning doc. RIPWIRE_NO_DOC_MENTION=1 disables it\n"
         "                               everywhere (incl. MCP `for`/`pack_task`).\n"
-        "    --lego=TYPE                the interface->impls view for ONE named interface/base: its signature, method contract,\n"
+        "    --lego=TYPE                show one interface and every class implementing it — the contract, then the existing impls\n"
+        "                               the interface->impls view for ONE named interface/base: its signature, method contract,\n"
         "                               and every implementor (own-language only). file:name disambiguates a same-named type.\n"
         "                               No contract for a language this surface cannot read soundly: methods=0 caveat=… says so.\n"
-        "    --exemplar=TASK|KIND       before you write: the repo's best-in-class instance to IMITATE. Just pass a plain task —\n"
+        "    --exemplar=TASK|KIND       before you write: the repo's best existing example of this kind of code, to imitate\n"
+        "                               before you write: the repo's best-in-class instance to IMITATE. Just pass a plain task —\n"
         "                               --exemplar=\"format byte sizes\" — and the KIND is inferred from the top match; or name a\n"
         "                               KIND directly (fn|method|class|struct|iface|var). Picks by ROLE — lowest cognitive cx\n"
         "                               under a hard ccx ceiling, then tested + highest fan-in; test-fixture paths de-prioritized —\n"
         "                               NOT text similarity (similar-snippet retrieval measurably hurts). A weak task match falls\n"
         "                               back to fn (low_confidence=1); an all-over-ceiling kind flags over_ccx_bar=1\n"
-        "    --recall=TASK              recall the most relevant DOCS — memory/plans/designs, full bodies (md, .ipynb/.html/.csv,\n"
+        "    --recall=TASK              search the DOCS, not the code — the most relevant plans, designs and notes, in full\n"
+        "                               recall the most relevant DOCS — memory/plans/designs, full bodies (md, .ipynb/.html/.csv,\n"
         "                               plus Office/PDF via the optional markitdown bridge). This is the tool's LARGEST output:\n"
         "                               its header reports est_tokens + total=/shown=/capped=, where total= is the TRUE relevant\n"
         "                               count (score > 0) and shown= is what this run actually emitted. The header's \"of N document\n"
@@ -978,22 +988,27 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               output (a capture/API dump quotes every term, so BM25 hands it every query). Never\n"
         "                               dropped: it still wins when nothing else matches. Each one says [generated_demoted:\n"
         "                               marker|size+fences] on its own line and the header tallies generated_demoted=N\n"
-        "    --tree                     file-by-file orientation map (top symbols per file). Default window: the 80 files with the\n"
+        "    --tree                     orient file by file: each file's top symbols, 80 files by default\n"
+        "                               file-by-file orientation map (top symbols per file). Default window: the 80 files with the\n"
         "                               best-ranked symbols (shown=/capped=/total=/next_offset= disclose the cut, next= pastes the\n"
         "                               next page); --limit=N/--offset=M window it explicitly (--limit=100000 = every file)\n"
-        "    --html[=FILE]              self-contained HTML force-directed call graph of the DEFAULT map (no CDN — redirect or\n"
+        "    --html[=FILE]              write the map as a self-contained interactive call graph you can open in a browser\n"
+        "                               self-contained HTML force-directed call graph of the DEFAULT map (no CDN — redirect or\n"
         "                               write FILE). A navigation or report verb answers instead of the map, so --html beside one\n"
         "                               refuses rather than writing nothing. The page OPENS on the whole selected map, so the run is\n"
         "                               the picture; FILE#node/SYM/2 opens one symbol's neighbourhood and FILE#overview the module\n"
         "                               (community) list\n"
-        "    --color-by=MODE            (with --html) node colour: lang (default) | community | cx | churn | tested — the page embeds all\n"
+        "    --color-by=MODE            (with --html) colour the nodes by lang, community, complexity, churn or tested\n"
+        "                               (with --html) node colour: lang (default) | community | cx | churn | tested — the page embeds all\n"
         "                               five and keeps a live selector; the flag only sets the initial mode\n"
-        "    --order=MODE               emit order: stable (path/id order — provider KV-cache hits across re-runs) |\n"
+        "    --order=MODE               choose emit order: stable, important-first (the default), or important-last\n"
+        "                               emit order: stable (path/id order — provider KV-cache hits across re-runs) |\n"
         "                               important-first (rank order, the default; no auto-flip) | important-last\n"
         "                               (highest-rank content emitted last — recency bias for an LLM). Large default\n"
-        "                               maps auto-flip to important-last past ~50%% of a nominal 32K window\n"
+        "                               maps auto-flip to important-last past ~50% of a nominal 32K window\n"
         "                               (est_tokens>16000) unless MODE is explicitly given.\n"
-        "    --no-stable                opt out of the stable ordering that --mcp/--listen enable by default. Read ONLY there:\n"
+        "    --no-stable                (--mcp/--listen only) turn off the stable ordering those two enable by default\n"
+        "                               opt out of the stable ordering that --mcp/--listen enable by default. Read ONLY there:\n"
         "                               on the CLI it changes nothing and says so on stderr (the map is important-first\n"
         "                               unless you pass --order=stable)\n\n"
         "  navigate / answer a question\n"
@@ -1005,10 +1020,12 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               absent) / fanout_cut=\"N\" (N distinct symbols the fanout cap dropped, absent from the whole answer,\n"
         "                               exact not a floor). Neither is emitted when its bound cut nothing, so absent = the bound did not\n"
         "                               bind and raising it would return nothing new\n"
-        "    --callers=SYM              who calls SYM (1-hop in-edges). file:name disambiguates a same-named symbol across files (like --around/--lego);\n"
+        "    --callers=SYM              show SYM's direct callers (1-hop in-edges)\n"
+        "                               who calls SYM (1-hop in-edges). file:name disambiguates a same-named symbol across files (like --around/--lego);\n"
         "                               Scope::name picks one scope's definition — the sym= spelling edit-check prints resolves everywhere\n"
         "    --callees=SYM              what SYM calls (1-hop out-edges). file:name disambiguates like --callers\n"
-        "    --uses=SYM                 the statically resolvable use-sites of SYM (role=call|macro|read|write|import|extends|type, file:line); external=\"1\" if SYM has no in-corpus def.\n"
+        "    --uses=SYM                 show every place SYM is used, not just called — reads, writes, imports, extends\n"
+        "                               the statically resolvable use-sites of SYM (role=call|macro|read|write|import|extends|type, file:line); external=\"1\" if SYM has no in-corpus def.\n"
         "                               file:name narrows defs= AND the role=\"call\" sites (kept only where the call RESOLVES to a chosen def —\n"
         "                               --callers' own narrowing); read/write/import/extends carry no resolution and stay name-matched.\n"
         "                               narrowed_roles=/defs_of_name=/call_sites_of_name= (file: qualifier only) disclose what narrowed and\n"
@@ -1017,7 +1034,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               inside the owner pin; v.f pins through v's recorded type, else every owner is a candidate and the row carries amb=K\n"
         "                               (never a silent pin); write = assignment/compound/++ (address-of and by-reference passing are NOT claimed). A bare\n"
         "                               field name shared by several owners REFUSES with the Owner.field spellings; C/C++/Python fields only, others refuse\n"
-        "    --graph-query=EXPR         composable node-set query over the call graph: sources name(\"X\")/all; filters kind|cx|fanin|file|layer;\n"
+        "    --graph-query=EXPR         query the call graph directly: pick a node set, filter it, walk it, combine the results\n"
+        "                               composable node-set query over the call graph: sources name(\"X\")/all; filters kind|cx|fanin|file|layer;\n"
         "                               bounded closure callers|callees(SET[,depth]); joins and|or|not.  e.g. and(callers(name(\"foo\"),2),kind(all,fn));\n"
         "                               file() regex example: file(\"src/.*\\\\.cpp\") (or in bash, use single quotes: file('src/.*\\.cpp'))\n"
         "                               layer(SET,NAME) keeps the architecture layer NAME (game|infra|render|math|audio|ai|test) — the SAME\n"
@@ -1030,22 +1048,27 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               (including a VALID layer with no members in a tree that does have layers).\n"
         "                               Ranked result set is capped at --top-k (default 200); --limit overrides that cap (raise or lower it),\n"
         "                               --offset pages past it — see --limit=N --offset=M above\n"
-        "    --external-surface         names referenced but never defined in-corpus (the stdlib/third-party surface), by ref count;\n"
+        "    --external-surface         list the names this repo uses but never defines — its stdlib and third-party surface\n"
+        "                               names referenced but never defined in-corpus (the stdlib/third-party surface), by ref count;\n"
         "                               each row's lang= is the REFERENCING file's language — a name called from several languages\n"
         "                               (e.g. printf: C stdio call vs Bash builtin) gets one row PER language, not a merged count.\n"
         "                               Default window: 100 rows (shown=/capped=/next_offset=, next= pastes the next page; --limit=N\n"
         "                               raises it) and the sh BUILTINS (echo printf cd exit test …) are dropped — builtins_excluded=\n"
         "                               counts them; --include-builtins keeps them\n"
         "    --path=SRC,DST             shortest directed call-path SRC -> DST\n"
-        "    --connect=A,B,C            minimal connecting subgraph over 2..16 symbols: terminals + fewest joining intermediaries +\n"
+        "    --connect=A,B,C            show how 2..16 symbols relate: the smallest subgraph that joins them\n"
+        "                               minimal connecting subgraph over 2..16 symbols: terminals + fewest joining intermediaries +\n"
         "                               call edges in TRUE direction (finds the shared-caller join a directed --path can't)   [--connect-radius=N (1..12, default 6)]\n"
-        "    --impact=SYM               transitive blast radius — the indexed symbols that reach SYM (a floor, see counts_floor). file:name disambiguates like --callers\n"
+        "    --impact=SYM               show everything that reaches SYM — the transitive blast radius before a change\n"
+        "                               transitive blast radius — the indexed symbols that reach SYM (a floor, see counts_floor). file:name disambiguates like --callers\n"
         "                               importers= is a SECOND, weaker reach beside it: the files that directly include/import a file defining SYM,\n"
         "                               emitted as <f via=\"import\" lazy=\"0|1\"> rows (format=columnar carries the count only). NEVER added to reaches= —\n"
         "                               files and symbols are different units, and an importer may use a different symbol from that file, or none at all.\n"
-        "                               lazy=\"1\" (TS/JS only): every one of that importer's edges is a require()/import() written inside a function\n"
-        "                               body, not at module load time — still a real dependency, weaker than a top-level one\n"
-        "    counts_floor=\"1\"           on --callers/--callees/--uses/--impact/--edit-check every count is a FLOOR, never a total: the\n"
+        "                               lazy=\"1\": every one of that importer's edges is written inside a closure — a TS/JS require()/import()\n"
+        "                               inside a function body, a Ruby constant receiver inside a method/lambda/block, a Ruby autoload —\n"
+        "                               not at load time: still a real dependency, weaker than a top-level one\n"
+        "    counts_floor=\"1\"           every count on the graph verbs is a FLOOR, never a total; a 0 means none found\n"
+        "                               on --callers/--callees/--uses/--impact/--edit-check every count is a FLOOR, never a total: the\n"
         "                               call graph is extracted from source text by name, so dynamic dispatch\n"
         "                               and declarations that parse without a call expression (C++ most-vexing-parse) contribute no edge;\n"
         "                               a call through a function pointer/callback is an edge only when ONE function is bound to that\n"
@@ -1055,7 +1078,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               indexed function-like #define (t=\"macro\"); a shared name stays a plain call, an unindexed\n"
         "                               macro's site is no edge. Read a 0 as \"none found\", never as \"none exists\". Those five\n"
         "                               verbs also count DISTINCT (caller,callee) pairs, while --uses counts call SITES — see each verb's own legend\n"
-        "    pr_iters=\"N\"               on every PageRank-ordered document (the map, and the tree, seams, communities, zoom,\n"
+        "    pr_iters=\"N\"               how many PageRank iterations produced this ordering\n"
+        "                               on every PageRank-ordered document (the map, and the tree, seams, communities, zoom,\n"
         "                               impact, graph-query and exercises verbs, plus their MCP twins): how many power iterations produced that\n"
         "                               ordering. The iteration stops when the L1 residual between successive rank vectors falls below\n"
         "                               tolerance, or at a fixed iteration ceiling, whichever comes first. pr_converged=\"0\" is emitted\n"
@@ -1064,7 +1088,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               the converged path is the normal one and must cost zero bytes), and absence of pr_iters= itself\n"
         "                               means the document was not ordered by a power iteration at all (a lexical query score, or a hub\n"
         "                               or authority HITS vector), never that the count is unknown\n"
-        "    --verify=\"CLAIM\"           VERIFY A CLAIM about the code in ONE call: a CLOSED claim language in, a three-valued verdict out\n"
+        "    --verify=\"CLAIM\"           check a claim about the code in one call: confirmed, refuted, or not-established\n"
+        "                               VERIFY A CLAIM about the code in ONE call: a CLOSED claim language in, a three-valued verdict out\n"
         "                               (confirmed / refuted / not-established) with the evidence rows inline — the collapse of the manual\n"
         "                               verification grep-chain. Shapes: calls(A,B) does A transitively call B; uses(SYM) / unused(SYM) is\n"
         "                               SYM referenced anywhere / nowhere; contains(FILE, \"LIT\") do FILE's indexed bytes contain the\n"
@@ -1076,10 +1101,12 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               collection-ceiling, scan-degraded, extraction-floor); see counts_floor above for why. An unknown\n"
         "                               shape refuses loudly with the whole vocabulary; SYM takes the shared selector grammar (name,\n"
         "                               file:name, Scope::name, canonical id), FILE is a path substring\n"
-        "    --mentions=SYM             markdown docs (plans/designs) that name SYM in a `backtick` (doc↔code). An @FILE:LINE\n"
+        "    --mentions=SYM             find the markdown docs that name SYM in backticks — the doc-to-code link\n"
+        "                               markdown docs (plans/designs) that name SYM in a `backtick` (doc↔code). An @FILE:LINE\n"
         "                               seed rebinds to the innermost enclosing definition and answers, disclosing sym=\n"
         "    the pre-PR family — plumbing (--affected) to mid-task report (--situ) to gate (--test-gate):\n"
-        "    --affected=F1,F2|SYM       test files that transitively reach the changed files -- or the changed SYMBOL. Each item may be\n"
+        "    --affected=F1,F2|SYM       name the test files that reach these changed files, or this changed symbol\n"
+        "                               test files that transitively reach the changed files -- or the changed SYMBOL. Each item may be\n"
         "                               `path`, `./path`, `path:LINE` / `path:N-M` (paste a --hotspots/--clones/--grep/--lint/\n"
         "                               --quality-delta row's locator verbatim; the trailing line locator is stripped, same for\n"
         "                               --situ/--test-gate), or a symbol: `NAME`, `file:NAME`, `path::scope::name`.\n"
@@ -1094,7 +1121,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               script_gates_unmodelled= counts the script runners under test/, recursively (a path count; not\n"
         "                               every one invokes the binary) that this call's graph walk cannot see either way (script-to-binary is not\n"
         "                               a call edge) — a corpus-wide fact, not scoped to the changed set given\n"
-        "    --exercises=TESTFILE       the INVERSE of --affected: the non-test symbols this test file transitively calls into --\n"
+        "    --exercises=TESTFILE       show what a test file actually covers: the non-test symbols it reaches\n"
+        "                               the INVERSE of --affected: the non-test symbols this test file transitively calls into --\n"
         "                               what it actually covers. The first question when a test fails and you have its name and\n"
         "                               nothing else. Ranked by PageRank, capped at 40 rows (raise with --limit; --offset pages).\n"
         "                               A NON-TEST path REFUSES rather than answering generically: this verb IS the test/non-test\n"
@@ -1105,19 +1133,22 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --situ[=F1,F2]             situational awareness for a change: blast radius + tests + co-change (default = git diff)\n"
         "                               Its co-change section is the check for Fowler's SHOTGUN SURGERY: the files this change\n"
         "                               usually lands in but did not. Backtested on two histories (EVALS.md): a named partner is\n"
-        "                               edited within the next 3 commits in 56%% / 32%% of alarms, against a 1-2%% chance baseline\n"
-        "    --handoff                  continuation packet for the NEXT session: <verified> disk truth (branch/sha, changed files+symbols,\n"
+        "                               edited within the next 3 commits in 56% / 32% of alarms, against a 1-2% chance baseline\n"
+        "    --handoff                  brief the next session — verified disk truth first, labelled guesses second\n"
+        "                               continuation packet for the NEXT session: <verified> disk truth (branch/sha, changed files+symbols,\n"
         "                               blast radius, tests-to-run) + <heuristic> labeled suggestions (co-change partners, committed notes,\n"
         "                               plan/design doc pointers via a branch+commit-subject query). Empty diff is fine — the packet still\n"
         "                               carries branch/sha + heuristics. Composes with --token-budget=N (drops heuristic rows tail-first,\n"
         "                               disclosed as withheld= in the header; verified rows are never dropped). Single-root only.\n"
-        "    --test-gate[=F1,F2]        agent self-check before a PR (pair with --quality-delta): names the tests to run + the UNTESTED blast radius;\n"
+        "    --test-gate[=F1,F2]        before a PR: name the tests to run and the untested blast radius; exit 4 if either is non-empty\n"
+        "                               agent self-check before a PR (pair with --quality-delta): names the tests to run + the UNTESTED blast radius;\n"
         "                               exit 4 if either obligation is non-empty (run the tests, then rely on green). (default = git diff)\n"
         "      run= on a test row        --affected/--situ/--test-gate/--exercises/--pr-context/--pack-task name harness FILES, not commands. A row carries\n"
         "                               run=\"<cmd>\" when a runner is DERIVABLE from real evidence: a test-dir .sh/.py whose basename stem\n"
         "                               matches the harness's, or whose TEXT names the harness file. Spelled with the same root you scanned,\n"
         "                               so it pastes straight into a shell. NO run= means NOT DERIVABLE -- never a guessed suite command\n"
-        "    --grep=STR | --regex=PAT   literal / regex search + enclosing symbol + the matched line. SPAN-TIERED by default (see\n"
+        "    --grep=STR | --regex=PAT   search for a literal or a regex; every hit comes back with its enclosing symbol\n"
+        "                               literal / regex search + enclosing symbol + the matched line. SPAN-TIERED by default (see\n"
         "                               --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses\n"
         "                               what it held back. --grep-in=any is the exhaustive VIEW -- every hit, no tiering.\n"
         "                               For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance).\n"
@@ -1136,27 +1167,33 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               tiering off entirely -- the exhaustive view. Hit files are parsed on\n"
         "                               demand under a fixed budget; tier_budget= says so when it stops, and hits it never\n"
         "                               classified are emitted, never suppressed.\n"
-        "    --handles                  (with --grep/--regex) add h= to each unique editable enclosing-symbol row: a stable\n"
+        "    --handles                  (with --grep/--regex) add a stable edit handle h= to each enclosing-symbol row\n"
+        "                               (with --grep/--regex) add h= to each unique editable enclosing-symbol row: a stable\n"
         "                               identity plus the file-content hash pinned when grep ran. Ambiguous or document-only\n"
         "                               rows get no handle; a later edit must refuse after any file change rather than\n"
         "                               retarget stale coordinates.\n"
         "    --match=QUERY              tree-sitter structural (shape) query\n"
-        "    --pattern=PAT              structural search written in CODE, not in node kinds: --pattern='foo($X, ...)'. $NAME binds one\n"
+        "    --pattern=PAT              structural search written in CODE, not in node kinds: --pattern='foo($X, ...)'\n"
+        "                               structural search written in CODE, not in node kinds: --pattern='foo($X, ...)'. $NAME binds one\n"
         "                               node (repeat it and both sites must match structurally); $_ binds nothing; ... (or $$$) is an\n"
         "                               ellipsis over siblings, matched by ONE first-match-wins probe under a hard cap -- both facts on\n"
         "                               the element. Comments are transparent, everything else is kind- and text-exact ($A + $B does not\n"
         "                               match a - b). Served: c cpp objc java csharp javascript typescript python go rust swift; ruby,\n"
         "                               bash and the data tiers are named in unsupported= instead of answered. A pattern no served\n"
         "                               grammar resolves, or that collapses to a bare token, is REFUSED -- never reported as hits=0.\n"
-        "    --query=TERMS              raw BM25 ranking (debug); use --for\n\n"
+        "    --query=TERMS              raw BM25 ranking, for debugging the ranker — reach for --for instead\n"
+        "                               raw BM25 ranking (debug); use --for\n"
+        "\n"
         "  zoom the detail ladder\n"
-        "    --detail=N                 (with --for) importance-weighted detail: FULL bodies for the top-N ranked symbols +\n"
+        "    --detail=N                 (with --for) full bodies for the top N symbols, signatures for the rest\n"
+        "                               (with --for) importance-weighted detail: FULL bodies for the top-N ranked symbols +\n"
         "                               signatures for the rest, in ONE call — spend body tokens only on the head the rank\n"
         "                               identifies. Composes with --max-tokens (bounds the BODIES ONLY, never the bundle —\n"
         "                               see --max-tokens: past its ceiling the root says over_ceiling=\"1\" rather than cut\n"
         "                               the rows that answered) and --adaptive. 0 = off.\n"
-        "    --pack-signatures          body-elided decl skeletons — ~72-90%% fewer element bytes than the same symbols'\n"
-        "                               full --expand bodies (roughly 80%% at the top-50 sigs payload cap — the sigs\n"
+        "    --pack-signatures          print declaration skeletons with the bodies elided — far cheaper than full bodies\n"
+        "                               body-elided decl skeletons — ~72-90% fewer element bytes than the same symbols'\n"
+        "                               full --expand bodies (roughly 80% at the top-50 sigs payload cap — the sigs\n"
         "                               payload is top-50 whatever --top-k is set to, and --top-k's own default is 200),\n"
         "                               measured at top-10/50/100 on this repo with the corpus-root prefix subtracted\n"
         "                               from both sides: that prefix repeats inside every element, is charged in both\n"
@@ -1166,7 +1203,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               Like the --format=columnar sibling, a small result can invert it — a signature\n"
         "                               plus its doc comment can be bigger than a short body.\n"
         "    --outline=A,B,...          control-flow skeletons of A,B,...  (same selector grammar as --expand, minus the range)\n"
-        "    --expand=A,B,...           full bodies of A,B,...  Selector grammar per item (the tail after the LAST ':' decides;\n"
+        "    --expand=A,B,...           print these symbols' full bodies, plus the signatures of what they call\n"
+        "                               full bodies of A,B,...  Selector grammar per item (the tail after the LAST ':' decides;\n"
         "                               a tail STARTING WITH A DIGIT is a range, anything else is a name):\n"
         "                                 NAME                every def of that name  |  FILE:NAME           that file's def\n"
         "                                 NAME:START-END      body slice              |  FILE:NAME:START-END selector + slice\n"
@@ -1199,12 +1237,14 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               BOTH the exact-name default and mode= auto-selection and keeps the classic undecorated shape; a\n"
         "                               SYM:START-END slice opts out of mode= auto-selection only (serving the whole file would invert\n"
         "                               an explicit narrowing) but still gets the exact-name top-k=0 default when it applies.\n"
-        "    --compress                 strip comments + collapse blank runs from SERVED BODIES (~20-35%% token cut): --expand/\n"
+        "    --compress                 strip comments and collapse blank runs from every body this run serves\n"
+        "                               strip comments + collapse blank runs from SERVED BODIES (~20-35% token cut): --expand/\n"
         "                               --outline, --for's auto/anchor and --detail=N bodies, --pack-task, --from-trace and\n"
         "                               --exemplar. Disclosed per bundle as compress=\"1\" on the <bodies> element; without the\n"
         "                               flag, output is byte-identical. String literals survive; the ranked SET never changes.\n"
         "    --pack-top-n=N             pack the N top symbols' bodies  [--pack-budget-bytes=B]\n"
-        "    --no-redact                emit source/doc text VERBATIM, redacting nothing. Modifies the BODY-serving verbs\n"
+        "    --no-redact                emit source and doc text verbatim, redacting nothing\n"
+        "                               emit source/doc text VERBATIM, redacting nothing. Modifies the BODY-serving verbs\n"
         "                               (--expand, --for, --pack-task, --recall, --slice, --connect, --from-trace, --batch,\n"
         "                               --mcp); the default map carries no bodies (identifiers and signatures are never\n"
         "                               redacted), so bare on the map it is refused, naming one of them\n"
@@ -1215,7 +1255,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --grep-context neighbours, and --note-add/--notes text. --grep is the exception on\n"
         "                               purpose — auditing a repo FOR secrets needs the hit you searched for shown verbatim.\n\n"
         "  assess quality / structure\n"
-        "    --metrics                  annotate fan-in/out + complexity (descriptive; coupling is the validated signal, complexity is a size-correlated one).\n"
+        "    --metrics                  annotate every symbol with fan-in, fan-out and complexity\n"
+        "                               annotate fan-in/out + complexity (descriptive; coupling is the validated signal, complexity is a size-correlated one).\n"
         "                               also surfaces amp= (--metrics/--for/--exemplar): amp = |direct callers| (symbol-level, the\n"
         "                               in-edge CSR) + |co-change partners of the symbol's FILE| (file-level, mined from git history) —\n"
         "                               a deliberate GRANULARITY MIX, not a graph-only count; degrades to callers-only (still valid) when\n"
@@ -1241,7 +1282,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               together — a tangle (many humps, few deep lines each) and a long blocked-sequential\n"
         "                               body (one hump, many deep lines) have the same nest= but opposite refactors. Absent\n"
         "                               exactly when nest is below the bar (not-deep), never a hidden 0.\n"
-        "    --deps                     file->file dependency graph (god-files, cycles — validated); its nccd (Lakos) is a\n"
+        "    --deps                     build the file-to-file dependency graph — god-files and cycles\n"
+        "                               file->file dependency graph (god-files, cycles — validated); its nccd (Lakos) is a\n"
         "                               design heuristic, not independently outcome-validated. instab= (Martin's I=Ce/(Ca+Ce))\n"
         "                               counts project includes ONLY -- system/third-party headers are excluded from Ce,\n"
         "                               matching stabledeps' gap= so gap == consumer's instab - provider's instab always.\n"
@@ -1257,11 +1299,13 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               (lazy=1) and in the row's inc t= list, NOT in afferent/instab/transitive/godfiles/\n"
         "                               stabledeps/cycles/ccd/acd/nccd/shape. <health lazy_edges=> counts the pairs left out,\n"
         "                               a row's lazy_edges= its own; both absent when 0\n"
-        "    --hotspots                 complexity x recent git churn (maintenance pain); each row's top= is the worst function's\n"
+        "    --hotspots                 rank files by complexity times recent git churn — where maintenance hurts\n"
+        "                               complexity x recent git churn (maintenance pain); each row's top= is the worst function's\n"
         "                               BARE name, top_ccx= its cognitive complexity, top_l= its source line (build an --expand\n"
         "                               selector from p=/top_l=/top=, not from top= alone — it no longer carries a :line suffix)\n"
         "    --clones                   token-normalized duplicate bodies\n"
-        "    --readability              per-function readability lens, LEAST readable first: vol= Halstead volume V (N*log2(eta)),\n"
+        "    --readability              rank functions least-readable first, by volume, token entropy and length\n"
+        "                               per-function readability lens, LEAST readable first: vol= Halstead volume V (N*log2(eta)),\n"
         "                               ent= Shannon token entropy E, lines= L, posnett= sigmoid(8.87 - 0.033V + 0.40L - 1.5E)\n"
         "                               (Posnett/Hindle/Devanbu, MSR 2011). APPROXIMATION, disclosed: ONE token-class table serves\n"
         "                               every language (keywords + punctuation = operators, identifiers + literals = operands),\n"
@@ -1269,7 +1313,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               The formula was fitted on snippets of 20 lines or fewer, so it is a RANKING lens, not a\n"
         "                               grade: read the ORDER of the rows, not the number on any one of them. Pages with limit=N\n"
         "                               (offset=M); default 40 rows. Declarations with no body are not measured.\n"
-        "    --nonlocal-state           per function, the NON-LOCAL MUTABLE STATE it can reach, MOST WRITES FIRST: writes= reads= are the\n"
+        "    --nonlocal-state           per function, the non-local mutable state it can reach, most writes first\n"
+        "                               per function, the NON-LOCAL MUTABLE STATE it can reach, MOST WRITES FIRST: writes= reads= are the\n"
         "                               distinct cells this function OR its transitive callees write / read; direct_writes= direct_reads=\n"
         "                               are the subsets in its own body. A cell is a file/namespace-scope variable, a function-local static,\n"
         "                               or a Python module global; a const/constexpr/consteval declaration is not a cell. Each cell child\n"
@@ -1286,8 +1331,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               COVERS C++, ObjC and Python -- the languages whose read/write USE SITES the index carries. Every\n"
         "                               other indexed language is named on the root as unanalyzed_langs= and contributes no cells and no\n"
         "                               rows: that absence is NOT a measured zero. Pages with limit=N (offset=M); default 40 rows.\n"
-        "    --ensemble                 the FAMILY JOIN: per function, which of FOUR orthogonal evidence families fire, ranked by the COUNT of distinct families\n"
-        "    --quality-panel[=PRESET]   THE SINGLE COMMAND: the whole quality panel in ONE ranked report. Per function, which of SIX evidence\n"
+        "    --ensemble                 join four independent evidence families per function, ranked by how many agree\n"
+        "                               the FAMILY JOIN: per function, which of FOUR orthogonal evidence families fire, ranked by the COUNT of distinct families\n"
+        "    --quality-panel[=PRESET]   the whole quality panel in ONE ranked report: which of six evidence families fire\n"
+        "                               THE SINGLE COMMAND: the whole quality panel in ONE ranked report. Per function, which of SIX evidence\n"
         "                               families fire -- structural (shape), lexical (identifier text), confusion (syntactic construct),\n"
         "                               historical (git churn), colocation (what you must read from outside this file), state (this function's\n"
         "                               OWN BODY touching non-local mutable state) -- ranked by the COUNT of distinct families, NEVER by a\n"
@@ -1315,7 +1362,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               are published so it can be checked instead of trusted. The join=deep+untested annotation puts two\n"
         "                               facts already in the report side by side (sustained depth, no reaching test) because that pair is\n"
         "                               where a refactor is most wanted and least safe; counting it would be one family wearing a second hat.\n"
-        "    --context-ratio            the LOCAL-REASONING lens: to understand this symbol, how much must you know that is NOT in front\n"
+        "    --context-ratio            per symbol, how much you must know that is NOT in front of you\n"
+        "                               the LOCAL-REASONING lens: to understand this symbol, how much must you know that is NOT in front\n"
         "                               of you? Per symbol (and rolled up per file) the distinct in-corpus definitions and files its\n"
         "                               reference sites resolve to, and the share of them defined OUTSIDE its own file — as an edge\n"
         "                               count (ent_ratio=) and, weighted by the tokens a reader must actually read, as read_ratio=.\n"
@@ -1328,18 +1376,20 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               land in ext=, which locals and parameters DOMINATE, so ext= is not a dependency count and is\n"
         "                               excluded from both ratios. ents=/files= are FLOORS. Pages with limit=N (offset=M); default 40\n"
         "                               symbol rows and 40 file rows. An ORDERING, never a grade and never a threshold.\n"
-        "    --naming-calibration       score the naming-* lint rules against this repo's OWN rename history: one git log pass mines\n"
+        "    --naming-calibration       score the naming-* lint rules against this repo's OWN rename history\n"
+        "                               score the naming-* lint rules against this repo's OWN rename history: one git log pass mines\n"
         "                               old->new identifier substitutions, joins each to the symbol it became at HEAD, and scores\n"
         "                               BOTH spellings with the same predicates --lint runs. old=fires on the abandoned spelling,\n"
         "                               new=fires on the chosen one, proxy=old/(old+new), where 0.50 is exactly chance. A NOISY\n"
         "                               PROXY, stated as one -- rebrands, moves and API changes all look like renames -- so read\n"
         "                               pairs= (the sample size) first; the group rules report scope=group-rule, not a fake 0/0.\n"
         "                               Exit 0 always: the per-rule floor lives in test/namingcalibrationcheck.sh\n"
-        "    --naming-consistency       TIER A convention normalization (section 9.2): the corpus's OWN case-convention vote per\n"
+        "    --naming-consistency       normalize to the corpus's own case convention, voted per language and kind\n"
+        "                               TIER A convention normalization (section 9.2): the corpus's OWN case-convention vote per\n"
         "                               (language, kind) group among multi-token eligible names -- a single-token name, or one split\n"
         "                               only on digit boundaries, carries no case signal and is silently excluded. A group DECIDES\n"
         "                               only when its leading style (camel/pascal/snake/screaming) clears a 20-name sample floor AND\n"
-        "                               a 90%% agreement floor; short of either it reports style=UNAVAILABLE with why= naming which\n"
+        "                               a 90% agreement floor; short of either it reports style=UNAVAILABLE with why= naming which\n"
         "                               bar it missed, never a guessed winner. Every off-convention name in a DECIDED group\n"
         "                               (including mixed -- naming-case's own finding, a separator AND a transition in one name,\n"
         "                               which never wins a vote) gets propose=: its OWN subtokens mechanically recombined into the\n"
@@ -1347,7 +1397,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               from the corpus rather than invented. propose= is a SUGGESTION, never a safe-to-blind-apply\n"
         "                               rename -- an actual rename needs --uses to prove the complete reference set first. Exit 0\n"
         "                               always: a lens, not a gate. Pages limit=N (offset=M); default 40 rows\n"
-        "    --naming-locals            OPT-IN --lint MODIFIER (requires --lint; refused alone), OFF by default:\n"
+        "    --naming-locals            (with --lint) run the naming rules over local variables too; off by default\n"
+        "                               OPT-IN --lint MODIFIER (requires --lint; refused alone), OFF by default:\n"
         "                               local-variable-indexing plan Phase 2 (docs/LOCALS_INDEXING.md). Runs the\n"
         "                               naming-short/naming-wordy/naming-underscore/naming-case predicates (same tags, same rule\n"
         "                               bodies as the existing Symbol-scoped checks) against LOCAL variable names too, C/C++ only,\n"
@@ -1361,7 +1412,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               plain --lint run and not a candidate for it yet: the plan's own hard blocker (a hand-curated\n"
         "                               fixture corpus AND a manual real-corpus audit for idiomatic-short-name skew -- i/j/k/buf/tmp/\n"
         "                               err) has not run. Exit 0 always; findings ride the same naming-* tallies/floors as --lint\n"
-        "    --comment-coherence        per function/method WITH A DOC COMMENT, two published content measures, MOST NAME-RESTATING\n"
+        "    --comment-coherence        rank doc comments most-name-restating first, by two published content measures\n"
+        "                               per function/method WITH A DOC COMMENT, two published content measures, MOST NAME-RESTATING\n"
         "                               FIRST: c_coeff (Steidl/Hummel/Juergens, ICPC 2013) is the fraction of the comment's words within\n"
         "                               Levenshtein distance <2 of a word in the symbol's own (split) name — HIGH c_coeff IS BAD, it\n"
         "                               means the comment mostly repeats the name and adds no information (the opposite of the naive\n"
@@ -1377,15 +1429,18 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               = Fowler's SHOTGUN SURGERY in its measurable, historical form: change coupling (Gall 1998,\n"
         "                               Zimmermann 2005). The static form — callers spread over many files (Lanza & Marinescu\n"
         "                               2006) — was measured on two corpora and does NOT predict it, so it is not a flag (EVALS.md)\n"
-        "    --cochange-recur=K         (with --cochange) report only pairs whose co-change RECURS in K or more of the mined\n"
+        "    --cochange-recur=K         (with --cochange) keep only pairs whose co-change recurs in K or more sub-windows\n"
+        "                               (with --cochange) report only pairs whose co-change RECURS in K or more of the mined\n"
         "                               window's sub-windows, so a one-off refactor sprint stops reading like an eighteen-month\n"
         "                               structural defect (Clio, ICSE 2011). Every row carries recur= with or without this flag;\n"
         "                               the header publishes sub_windows= (the denominator) and min_recur= when the filter is on\n"
-        "    --cochange-groups          (with --cochange, repo-wide only) emit Modularity Violation GROUPS instead of pairs:\n"
+        "    --cochange-groups          (with --cochange) report co-change GROUPS instead of pairs, naming the file to fix\n"
+        "                               (with --cochange, repo-wide only) emit Modularity Violation GROUPS instead of pairs:\n"
         "                               \"X co-changes with {A,B,C}, none of which it depends on\" is ONE row that names the file\n"
         "                               to fix (Mo/Cai/Kazman, IEEE TSE 2019). A greedy cover, disclosed as greedy — set cover is\n"
         "                               NP-hard, so the group count is an upper bound on the minimum, not the minimum\n"
-        "    --since=REV|DATE           scope --hotspots/--cochange/--rank-by=churn|churn-decay to commits after this point:\n"
+        "    --since=REV|DATE           limit the churn-based verbs to commits after this revision or date\n"
+        "                               scope --hotspots/--cochange/--rank-by=churn|churn-decay to commits after this point:\n"
         "                               a revision (HEAD~20, a tag/sha — deterministic) or a git approxidate\n"
         "                               (\"2 weeks ago\" — wall-clock-relative). e.g. --hotspots --since=\"1 week ago\"\n"
         "                               ranks by RECENT churn (the regression lens). Absent ⇒ each verb's OWN\n"
@@ -1409,14 +1464,16 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               and degrades to the verb's own default window elsewhere\n"
         "                               BESIDE --slice=SYM:VAR it is not a window at all: it names the revision whose\n"
         "                               def-use slice of that variable this run is diffed against — see --slice\n"
-        "    --arch=FILE                enforce layering rules (exit 2 on violation); the Martin Ca/Ce/I/A/D block it emits is a\n"
+        "    --arch=FILE                enforce layering rules from a rules file; exit 2 on a violation\n"
+        "                               enforce layering rules (exit 2 on violation); the Martin Ca/Ce/I/A/D block it emits is a\n"
         "                               design heuristic, not independently outcome-validated (never gates).\n"
         "                               propagation_cost's N is dependency-capable files only, same denominator as --deps <health>.\n"
         "                               Layer substrings and regex path-rules match the ROOT-RELATIVE path (src/core/x.cpp), not the\n"
         "                               spelling you passed, so a rules file means the same thing in every checkout\n"
         "    --arch=FILE --baseline     write .ripwire_arch_baseline (accept current debt as baseline), exit 0\n"
         "    --arch=FILE --baseline-update  merge current violations into baseline (accept new debt), exit 0\n"
-        "    --lint                     built-in AST checks (c-cast, goto, unsafe-c-fn, naming-*, cache-* data-layout, ...). naming-uninformative\n"
+        "    --lint                     run the built-in AST checks: c-cast, goto, unsafe-c-fn, naming-*, cache-* data-layout\n"
+        "                               built-in AST checks (c-cast, goto, unsafe-c-fn, naming-*, cache-* data-layout, ...). naming-uninformative\n"
         "                               is ONE-SIDED by design: it fires only when a name's subtokens are ALL corpus-common\n"
         "                               (BM25 idf over the identifier-name corpus) AND its body clears a size floor — a\n"
         "                               high-idf (distinctive) name is never penalised, unlike the withdrawn name<->body rule.\n"
@@ -1424,17 +1481,20 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               registered languages (see --lint-catalog) intersect NONE of the corpus' languages carries\n"
         "                               applicable=\"0\" (its count=\"0\" is then structural inertness, not a measurement), and the\n"
         "                               root tallies inert_rules=\"N\"; see --lint-catalog for the full registry\n"
-        "    --lint-catalog             the built-in rule registry: one row per rule with sev=/category=/rationale/lang=/since= — no\n"
+        "    --lint-catalog             list the built-in rule registry, one row per rule — no corpus needed\n"
+        "                               the built-in rule registry: one row per rule with sev=/category=/rationale/lang=/since= — no\n"
         "                               corpus needed. Every built-in rule from every pack (base checks, atoms-*, cache-*, naming-*, the\n"
         "                               symbol-level checks) has exactly one row; lang= is the SAME token spelling --lint-rules'\n"
         "                               language: field accepts, so it round-trips into a user rule\n"
         "    --lint-rules=DIR           load user lint rules (YAML, ast-grep style) from DIR — runs with, or instead of, --lint\n"
-        "    --lint-select=PREFIX[,...] (with --lint / --lint-rules) run ONLY rules whose name starts with one of these PREFIXes (or\n"
+        "    --lint-select=PREFIX[,...]   (with --lint) run only the rules whose name starts with one of these prefixes\n"
+        "                               (with --lint / --lint-rules) run ONLY rules whose name starts with one of these PREFIXes (or\n"
         "                               '*' for all) — comma-separated, e.g. cache- selects the whole cache-* family. The root then\n"
         "                               carries selected=\"K of N\" plus the raw select=/ignore= you passed, so a filtered zero is never\n"
         "                               confusable with an unfiltered one. An unresolvable PREFIX (matches no rule) refuses (exit 1),\n"
         "                               naming the nearest rule/family by edit distance\n"
-        "    --lint-ignore=PREFIX[,...] (with --lint / --lint-rules) DROP rules whose name starts with one of these PREFIXes (or '*' to\n"
+        "    --lint-ignore=PREFIX[,...]   (with --lint) drop the rules whose name starts with one of these prefixes\n"
+        "                               (with --lint / --lint-rules) DROP rules whose name starts with one of these PREFIXes (or '*' to\n"
         "                               drop everything, e.g. paired with --lint-select elsewhere to isolate one family) — applied AFTER\n"
         "                               --lint-select narrows the set; same unresolvable-PREFIX refusal and root disclosure as --lint-select\n"
         "    --sarif                    (with --lint / --lint-rules) the SAME findings as SARIF 2.1.0 instead of the native XML\n"
@@ -1445,32 +1505,38 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               with no SARIF home (per-rule capped= floor, enclosing symbol, raw sev=) ride in\n"
         "                               properties rather than being dropped; URIs are relative to the scanned root. Always the\n"
         "                               FULL result set — refuses loudly alongside limit=/offset= paging, --match and --with-profile\n"
-        "    --with-profile=FILE        (with --lint) join MEASURED heat onto findings: FILE is a RIPWIRE_PROFILE build's report\n"
+        "    --with-profile=FILE        (with --lint) join measured runtime heat from a profile report onto the findings\n"
+        "                               (with --lint) join MEASURED heat onto findings: FILE is a RIPWIRE_PROFILE build's report\n"
         "                               (its #PROF_TSV block); a finding whose enclosing symbol contains a PROFILE_SCOPE site\n"
         "                               gains heat_* attributes (scope, calls, total_ms, and whichever counter columns the\n"
         "                               profiled run armed — l1d_mpki etc.). Static shape x measured weight; joins nothing\n"
         "                               silently — a missing file or a FILE with no #PROF_TSV block refuses loudly\n"
-        "    --communities              cluster the call graph into cohesive modules (each row's id= drills down below; drill= names the verb)\n"
-        "    --community=ID             ONE module from that partition: its FULL ranked member list (40 rows by default, raise with\n"
+        "    --communities              cluster the call graph into cohesive modules; each row's id= drills down\n"
+        "                               cluster the call graph into cohesive modules (each row's id= drills down below; drill= names the verb)\n"
+        "    --community=ID             open one module from the partition: its members, and its bridges to other modules\n"
+        "                               ONE module from that partition: its FULL ranked member list (40 rows by default, raise with\n"
         "                               --limit, page with --offset) plus its bridge edges to every other module it touches. ID is an\n"
         "                               id= from --communities/--zoom; ids live in 0..partition-1 (the child's partition= — the full\n"
         "                               label space, isolated singletons included), so a single-member module is a legal drill-down\n"
         "                               and reports size=\"1\". modules= counts the non-isolated communities (same number as the\n"
         "                               parent's modules=). An id outside 0..partition-1 REFUSES, naming the valid range and the\n"
         "                               nearest legal id -- a bad id is a typo, not an empty module\n"
-        "    --zoom[=depth]             NESTED module hierarchy (multi-level Louvain) + cross-module bridges; --zoom --mermaid = nested diagram.\n"
+        "    --zoom[=depth]             show the nested module hierarchy plus the bridges between modules\n"
+        "                               NESTED module hierarchy (multi-level Louvain) + cross-module bridges; --zoom --mermaid = nested diagram.\n"
         "                               Default window: the top 2 levels (levels_shown=; a module at the cut carries children= for its\n"
         "                               unprinted child modules; --zoom-levels=N prints N, 0 = all) over the 40 largest top modules\n"
         "                               (shown=/capped=/next_offset=, next= pastes the next page; --limit=N/--offset=M window them)\n"
         "    --report                   architecture summary (modules, god-files, cycles) as markdown\n"
         "    --seams                    cross-module call seams no test reaches (untested integration seams)\n"
         "    --mermaid                  module (directory) dependency graph as a Mermaid diagram (paste/render)\n"
-        "    --owners[=SYM]             bus-factor: recency-weighted author ownership per file; bf=1 = one person holds >80%%\n"
+        "    --owners[=SYM]             bus factor: recency-weighted author ownership per file\n"
+        "                               bus-factor: recency-weighted author ownership per file; bf=1 = one person holds >80%\n"
         "                               of weighted commits. Files with authors=1 (deterministically bf=1 share=1.00) fold into ONE\n"
         "                               <uniform files=\"N\"/> summary row instead of N identical rows; --detail=N restores the full listing.\n"
         "                               An @FILE:LINE seed rebinds to the innermost enclosing definition (sym= names it) and\n"
         "                               analyses exactly that definition's file\n"
-        "    --dead-code[=DIR]          high-confidence internal source functions with no caller in the indexed tree; =DIR scopes to whole path components (dir or filename) and REFUSES a filter that names nothing indexed.\n"
+        "    --dead-code[=DIR]          list internal functions with no caller anywhere in the indexed tree\n"
+        "                               high-confidence internal source functions with no caller in the indexed tree; =DIR scopes to whole path components (dir or filename) and REFUSES a filter that names nothing indexed.\n"
         "                               A symbol whose definition is produced by a SELF-REGISTERING test/benchmark macro is never reported: doctest TEST_CASE/\n"
         "                               TEST_CASE_FIXTURE/SCENARIO, gtest TEST/TEST_F/TEST_P, Catch2, Google Benchmark — a static initializer registers them, so a\n"
         "                               name-based call graph cannot see the caller and every one of them would be a false positive. Extend the list for your own\n"
@@ -1479,14 +1545,17 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               such a symbol still participates in clone detection.\n"
         "                               A LEADING ./ anchors DIR at the repo ROOT (=./src matches only the top-level src/ subtree); a bare name (=src) matches that\n"
         "                               component ANYWHERE in the tree, including nested (test/fixture/src/…)\n"
-        "    --quality-baseline         snapshot ccx/clones/dead-code to .ripwire_quality_baseline (run BEFORE a change, on a CLEAN tree). On a tree that\n"
+        "    --quality-baseline         snapshot today's complexity, clones and dead code as the floor to measure against\n"
+        "                               snapshot ccx/clones/dead-code to .ripwire_quality_baseline (run BEFORE a change, on a CLEAN tree). On a tree that\n"
         "                               DIFFERS from HEAD it computes the HEAD delta FIRST and REFUSES (exit 1) rather than pin the debt already in the\n"
         "                               tree as the floor — it names how many gating findings it would absorb and the first of them. Commit, or pass\n"
         "                               --allow-dirty.\n"
-        "    --allow-dirty              (with --quality-baseline) pin anyway: the sidecar is stamped with the dirty pin and the absorbed count, and every\n"
+        "    --allow-dirty              (with --quality-baseline) pin the baseline even though the tree differs from HEAD\n"
+        "                               (with --quality-baseline) pin anyway: the sidecar is stamped with the dirty pin and the absorbed count, and every\n"
         "                               later --quality-delta against it carries baseline_absorbed=\"N\" — so a green exit beside that attribute reads as\n"
         "                               \"clean SINCE THE PIN\", never \"clean\". Refused alone.\n"
-        "    --quality-delta            agent self-check before a PR (pair with --test-gate): report ONLY what a change made worse vs the baseline (10 kinds: complexity/verbosity/nesting/params/dup/dead/api-surface + error-masking/short-horizon-churn/reuse-decline);\n"
+        "    --quality-delta            before a PR: report ONLY what your change made worse, across 10 kinds\n"
+        "                               agent self-check before a PR (pair with --test-gate): report ONLY what a change made worse vs the baseline (10 kinds: complexity/verbosity/nesting/params/dup/dead/api-surface + error-masking/short-horizon-churn/reuse-decline);\n"
         "                               every finding is classified by ORIGIN: a symbol that EXISTED at the baseline and got worse (preexisting-worse=\"N\", no attribute on the row) vs one that exists only\n"
         "                               because the code is NEW (new-symbol=\"N\", origin=\"new-symbol\" on the row). A small numeric delta is additionally sev=\"minor\". EXIT 2 ONLY on preexisting-worse AND\n"
         "                               major AND unacked — the gating=\"N\" header count. New-symbol rows are still PRINTED (they are the debt you are adding — read them), they just never gate; exit 0 means\n"
@@ -1507,7 +1576,8 @@ inline void printUsage( std::FILE* out ) noexcept
         // R-I: the WAVE-level form. Its own row rather than a bracket on the one above, because the floor it
         // compares against is a different KIND of thing (a commit, not a sidecar or the working tree) and the
         // row above spends eight lines on sidecar staleness that this form never touches.
-        "    --quality-delta=REV|A..B   the same 10-kind report between two COMMITTED TREES instead of the working tree vs a baseline — the WAVE-level measurement (=A..B = tree B against tree A;\n"
+        "    --quality-delta=REV|A..B   the same 10-kind report between two committed trees — a whole branch at once\n"
+        "                               the same 10-kind report between two COMMITTED TREES instead of the working tree vs a baseline — the WAVE-level measurement (=A..B = tree B against tree A;\n"
         "                               =REV = that commit against its FIRST PARENT; an EMPTY side of the range means HEAD). Same grammar --dmm= takes, and A...B is REFUSED rather than read as A..B.\n"
         "                               Use it to measure a whole integration branch at once (--quality-delta=<merge-base>..<head>): per-lane checks each compare against their own baseline and cannot\n"
         "                               see a regression the WAVE introduced. Identical output contract to the bare form — same kinds, gating=\"N\", exit 2, and the same .ripwire_quality_acks ratchet\n"
@@ -1515,13 +1585,15 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               No sidecar is read, written or deleted by this form, and at= is omitted: the two refs ARE the anchor. A==B is a legal, empty, exit-0 comparison.\n"
         "                               ONE KIND CANNOT BE MEASURED HERE and says so as churn=\"unavailable\": short-horizon-churn needs git history at the tree being judged, and both trees are\n"
         "                               materialized OUT of the repo into temp dirs. The other 9 kinds are computed exactly as the bare form computes them.\n"
-        "    --dmm[=REV|A..B]           the DELTA MAINTAINABILITY MODEL scalar: ONE comparable number in [0,1] for a change, so quality becomes TRENDABLE across commits instead of a per-kind list (di Biase, Rastogi, Bruntink and van Deursen, TechDebt 2019; thresholds and arithmetic from PyDriller's deltamaintainability reference implementation). Bare = the WORKING TREE vs git HEAD (what --quality-delta compares); =REV = that commit vs its FIRST PARENT (the per-commit scalar); =A..B = tree B vs tree A.\n"
+        "    --dmm[=REV|A..B]           score a change as ONE number in [0,1], so quality trends across commits\n"
+        "                               the DELTA MAINTAINABILITY MODEL scalar: ONE comparable number in [0,1] for a change, so quality becomes TRENDABLE across commits instead of a per-kind list (di Biase, Rastogi, Bruntink and van Deursen, TechDebt 2019; thresholds and arithmetic from PyDriller's deltamaintainability reference implementation). Bare = the WORKING TREE vs git HEAD (what --quality-delta compares); =REV = that commit vs its FIRST PARENT (the per-commit scalar); =A..B = tree B vs tree A.\n"
         "                               A UNIT is a function/method definition with a body; its VOLUME is its line span. Per property a unit is LOW risk iff size: loc<=15, complexity: cyclomatic<=5, interfacing: params<=2. good = low-risk volume ADDED plus high-risk volume REMOVED; bad = low-risk REMOVED plus high-risk ADDED; dmm = good/(good+bad). So DELETING a god function scores 1.000 and GROWING one scores 0.000.\n"
         "                               The three sub-scores (size/complexity/interfacing) are emitted alongside the combined one because they are separately actionable; the combined one POOLS them (summed good over summed good+bad) and is labelled combine=\"pooled\", since the paper publishes the three separately and no aggregate.\n"
         "                               IT IS A DELTA, NEVER A LEVEL: a unit you edit without changing its size, complexity or parameter count sits in the same bin with the same volume on both sides and contributes NOTHING. Touching bad code is not punished, deliberately, because a gate that punishes it is a gate people route around.\n"
         "                               dmm=\"UNAVAILABLE\" means good+bad was 0 (a rename, a literal edit, a comment reflow): the change is outside what the model measures. That is NEVER to be read as 1.000 or 0.000, and reason= says which case it was. Same token per property.\n"
         "                               VOLUME IS PHYSICAL LINE SPAN (size_metric=\"physical-loc\"), where the reference implementation uses non-comment non-blank lines, so a heavily commented unit crosses the size threshold here earlier. NO THRESHOLD, NO VERDICT, ALWAYS EXIT 0.\n"
-        "    --quality-ack[=REASON]     accept the current findings into .ripwire_quality_acks (per-finding ratchet): re-runs suppress them honestly (acked=\"N\") until one WORSENS past its acked size.\n"
+        "    --quality-ack[=REASON]     accept the current findings as known, until one of them gets worse\n"
+        "                               accept the current findings into .ripwire_quality_acks (per-finding ratchet): re-runs suppress them honestly (acked=\"N\") until one WORSENS past its acked size.\n"
         "                               =REASON implies the --quality-delta report it acks; the reason-less spelling needs --quality-delta\n"
         "                               beside it (refused alone). An ack with 0 findings to accept writes nothing and says so.\n"
         "      --ack-only=SUBSTR[,SUBSTR] (with --quality-ack) ack only SOME findings — those whose KIND, canonical id, or\n"
@@ -1566,7 +1638,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               is in play (it compares two COMMITTED trees), or when it expands to nothing. An ack\n"
         "                               written under it records by=diff, which a later run does NOT sweep: an auto-scope\n"
         "                               meant one file set then and another now, so re-checking it would invent findings.\n"
-        "    --edit-check=SYM           fast per-symbol post-edit contract check: SYM's param count + publicness NOW vs git HEAD\n"
+        "    --edit-check=SYM           after an edit: did SYM's contract change, and which callers no longer fit?\n"
+        "                               fast per-symbol post-edit contract check: SYM's param count + publicness NOW vs git HEAD\n"
         "                               (unchanged/new-symbol/contract-change with was/now), plus its 1-hop callers with any call-site\n"
         "                               provably incompatible with the NEW arity flagged. A contract is PER DEFINITION, so a SYM\n"
         "                               matching several definition sites REFUSES (exit 1) and lists the file:name spellings that\n"
@@ -1583,7 +1656,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               on a payload that is unreadable, empty, oversize or NUL-bearing, on one whose splice raises\n"
         "                               the file's parse errors, on one that does not define SYM, and on a span the file's current\n"
         "                               bytes no longer fit. Single-root, and it previews a body REPLACEMENT only.\n"
-        "    --replace-symbol-body=TARGET   atomically replace one uniquely-resolved definition with the bytes from --edit-payload=FILE|-\n"
+        "    --replace-symbol-body=TARGET   replace one definition's body atomically with the bytes from --edit-payload\n"
+        "                               atomically replace one uniquely-resolved definition with the bytes from --edit-payload=FILE|-\n"
         "                               (ONE trailing newline on the payload folds into the newline already after the span — a heredoc\n"
         "                               or echo always appends one the span never had; disclosed as trailing_newline_folded=true; a\n"
         "                               second one, a deliberate blank line, stays)\n"
@@ -1618,13 +1692,15 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               you to run: edit_check={status,callers,incompatible,sites} — the same answer\n"
         "                               --edit-check=FILE:SYM gives, sites naming each broken caller's call LINES — and\n"
         "                               tests_to_run, the same rows --affected=FILE gives, run recipe included; and exactly ONE\n"
-        "                               next= (a contract-change with broken callers: --uses=FILE:SYM; else the first run= recipe;\n"
+        "                               next= (a contract-change with broken callers: --uses=FILE:SYM; else the first run= recipe\n"
+        "                               in EVIDENCE order (a changed or partner test outranks a deeper graph hop);\n"
         "                               else --test-gate=FILE; under --no-post-check: --edit-check=FILE:SYM). Edit, see what\n"
         "                               landed, verify and find the tests to run is ONE call.\n"
         "      --no-post-check          skip that folded verification (the index refresh it needs is the one the next verb call\n"
         "                               would pay for anyway; pass this when you are about to edit again immediately). The MCP\n"
         "                               spelling is post_check:false. Single-root only.\n"
-        "    --edit-plan=FILE           versioned JSON multi-edit transaction: {version:1, edits:[{op,target,file?,payload}]};\n"
+        "    --edit-plan=FILE           apply several edits as one transaction, described in a versioned JSON file\n"
+        "                               versioned JSON multi-edit transaction: {version:1, edits:[{op,target,file?,payload}]};\n"
         "                               op is one of replace_symbol_body, insert_before_symbol, insert_after_symbol\n"
         "                               each target takes the same forms as TARGET above (a name, an @FILE:LINE seed, a handle)\n"
         "      --dry-run | --apply      the plan's explicit mode: --dry-run preflights and prints the receipt without writing,\n"
@@ -1640,7 +1716,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               how many files it restored, and ends with the ONE call that shows the state — next: a git\n"
         "                               diff (exit-code mode) over the plan's files from <root>; exit 0 IS the claim, checked against git.\n"
         "                               A crash between file renames remains a disclosed limit.\n"
-        "    --safe-delete=SYM          \"can I delete this?\" — ONE call composing signals the tool already computes for one\n"
+        "    --safe-delete=SYM          \"can I delete this?\" — one call joining callers, blast radius, tests and history\n"
+        "                               \"can I delete this?\" — ONE call composing signals the tool already computes for one\n"
         "                               already-resolved SYM: 1-hop callers=, the transitive --impact blast radius (impact_reaches=),\n"
         "                               every --uses read/write/import/call/extends site (uses=), how much of the blast radius the\n"
         "                               tested= lens covers (tested_self=/radius_tested=/radius_untested=), and --dead-code's own\n"
@@ -1649,7 +1726,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               proven-wrong edges. FACTS only: risk= names what was found — none-found (zero callers AND\n"
         "                               zero uses), untested-radius (a radius exists and none of it is test-covered), or\n"
         "                               uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict.\n"
-        "    --slice=SYM[:VAR]          NAME-BASED intra-procedural def-use slice of variable VAR inside the ONE uniquely-resolved\n"
+        "    --slice=SYM[:VAR]          trace one variable's definitions and uses inside one function\n"
+        "                               NAME-BASED intra-procedural def-use slice of variable VAR inside the ONE uniquely-resolved\n"
         "                               definition SYM (statement-level def-use edges as a queryable primitive — the ARISE result,\n"
         "                               arXiv:2605.03117). One <s l= k= t=> row per line touching VAR, source order: k=def|use|both|\n"
         "                               scope = a Python global/nonlocal statement, neither read nor write; t=param|decl|\n"
@@ -1694,7 +1772,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               status= names each way the symbol can be absent at REV, and comparable=\"0\" says\n"
         "                               outright that no comparison was made and the emptiness is not evidence. Refused on the\n"
         "                               bare inventory: a dependence diff needs a seed variable.\n"
-        "    --slice-flow=back|fwd|both  TRANSITIVE cross-statement data-flow slice (modifies --slice=SYM:VAR; refused alone or on\n"
+        "    --slice-flow=back|fwd|both   (with --slice) follow the value flow transitively — back, forward, or in both directions\n"
+        "                               TRANSITIVE cross-statement data-flow slice (modifies --slice=SYM:VAR; refused alone or on\n"
         "                               the bare inventory — a flow needs a seed variable). Follows VALUE FLOW over\n"
         "                               reaching-definition def-use edges — a use of v reaches the last def of v in source order\n"
         "                               before it — by bounded BFS from the seed variable, the ARISE paper's own slicer semantics\n"
@@ -1708,10 +1787,12 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               CHAINING (a multi-LINE statement chains as ONE unit), a shadowed name's bindings walk\n"
         "                               separately (never into each other's block), data dependence only — no control\n"
         "                               dependence (the guard deciding whether a def executes is never a row).\n"
-        "    --slice-depth=N            the --slice-flow BFS depth bound, 1..32 (default 8, always disclosed as depth= on the\n"
+        "    --slice-depth=N            (with --slice-flow) bound the walk at N hops; 1..32, default 8\n"
+        "                               the --slice-flow BFS depth bound, 1..32 (default 8, always disclosed as depth= on the\n"
         "                               root). A bound that cuts a live frontier is disclosed as flow_truncated=\"1\" — a short\n"
         "                               slice means \"bounded here\", never \"nothing further exists\". Refused without --slice-flow.\n"
-        "    --at=FILE:LINE             the ENCLOSING-DEFINITION CHAIN at one location (1-based line), outermost->innermost —\n"
+        "    --at=FILE:LINE             name the definitions enclosing one line, outermost first — when you hold a location, not a name\n"
+        "                               the ENCLOSING-DEFINITION CHAIN at one location (1-based line), outermost->innermost —\n"
         "                               for when you hold a compiler error / diff hunk / stack frame, not a name. <s n= t= l=\n"
         "                               el=/> rows, indexed definitions only; sym= names the innermost. The SAME seed composes\n"
         "                               into any SYM selector as @FILE:LINE (--callers=@src/f.cpp:120, --expand=@...,\n"
@@ -1723,7 +1804,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               ambiguous or unmatched path, a line past EOF, a line inside no indexed definition, or\n"
         "                               two disjoint definitions sharing the line each REFUSE with a specific diagnosis (exit\n"
         "                               1) — never a guess, never an empty chain.\n"
-        "    --pr-context[=BASEREF]     no-LLM review-evidence bundle for the diff (working-tree, or vs BASEREF): per changed file,\n"
+        "    --pr-context[=BASEREF]     build the review evidence for a diff: per file, its callers, blast radius, tests and owners\n"
+        "                               no-LLM review-evidence bundle for the diff (working-tree, or vs BASEREF): per changed file,\n"
         "                               its symbols + callers + blast radius + affected tests + co-change partners + owners.\n"
         "                               The bundle is BUDGETED by default (8000 tokens, budget_default=\"1\" on the root; --token-budget=N\n"
         "                               or --max-tokens=N set it explicitly): per-file structural counts survive first, the deep\n"
@@ -1738,7 +1820,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               (excluded, not silently); anchor=\"ref-tip-two-dot\" = no merge-base (unrelated history).\n"
         "                               direction= always names the SIDE you are reading, and a no-ref-work row fires when\n"
         "                               BASEREF's tip IS the merge base -- it carries no divergent work, so every row is HEAD's.\n"
-        "    --merge-scout=REF[,REF...] read-only cross-branch overlap: for each REF, the symbols it changed vs its merge-base\n"
+        "    --merge-scout=REF[,REF...]   compare branches before landing: which symbols two refs both touched, and the merge order\n"
+        "                               read-only cross-branch overlap: for each REF, the symbols it changed vs its merge-base\n"
         "                               with HEAD (git-archive TEMP copies — never checked out, never mutates a ref); the dirty\n"
         "                               working tree joins as an implicit extra arm. Pairwise: a changed symbol on TWO arms is a\n"
         "                               same-symbol conflict, two arms touching different symbols in the same file is a textual\n"
@@ -1748,11 +1831,12 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               HEAD — a file an arm never opened can never show up because the live line moved.\n"
         "                               head_conflicts= is what that anchor hides, kept as its own row class: symbols this arm\n"
         "                               changed that the LIVE LINE also changed since the arm forked (HEAD is not an arm, so no\n"
-        "                               pairwise comparison can see it). Single-root only.\n"
-        );
-    printPlanLanesUsage( out );
-    std::fprintf( out,
-        "    --stray-content[=SUBSTR]   \"where does this content live?\" across ALL branches — the question `git cherry` cannot\n"
+        "                               pairwise comparison can see it). Single-root only.\n";
+
+// The third and last block of the catalog, after the --plan-lanes rows.
+inline constexpr char kHelpTail[] =
+        "    --stray-content[=SUBSTR]   \"where does this content live?\" across every branch — what `git cherry` cannot answer\n"
+        "                               \"where does this content live?\" across ALL branches — the question `git cherry` cannot\n"
         "                               answer. Per local ref (SUBSTR filters ref names): the lines its own divergent work\n"
         "                               AUTHORED vs its merge-base with HEAD that the live line does NOT have, and a verdict.\n"
         "                               v=\"unmerged\" = genuinely absent; v=\"superseded\" = the live line removed the SAME base\n"
@@ -1767,7 +1851,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               LIMITS: line-granular, not semantic — a rewrite that shares no deleted base line reads\n"
         "                               as unmerged; binary/oversized blobs are reported diffable=\"0\" with no counts.\n"
         "                               Read-only (cat-file/diff/ls-tree); single-root only.\n"
-        "    --plan                     (with --stray-content) \"of all my branches, which still hold REAL work, and in what\n"
+        "    --plan                     (with --stray-content) which branches still hold real work, and in what order to land them\n"
+        "                               (with --stray-content) \"of all my branches, which still hold REAL work, and in what\n"
         "                               order should I land them?\" Selects the refs --stray-content calls v=\"unmerged\", DROPS\n"
         "                               the v=\"superseded\" ones (landing them would re-do work the live line already did —\n"
         "                               the exact waste --stray-content exists to catch), and feeds the survivors to\n"
@@ -1780,7 +1865,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               (12) bounds it to the top-N unmerged refs BY STRAY SIZE; --detail lifts the bound to\n"
         "                               scout everything. This is an EXPLICIT opt-in \"before you land\" call, not a per-\n"
         "                               question one — the default map's ~0.10s path is untouched. Read-only; single-root only.\n"
-        "    --abi                      (with --stray-content) the CROSS-BRANCH ABI-BREAK gate `--layout` and `--stray-content`\n"
+        "    --abi                      (with --stray-content) the cross-branch ABI-break gate for a struct that changed shape\n"
+        "                               (with --stray-content) the CROSS-BRANCH ABI-BREAK gate `--layout` and `--stray-content`\n"
         "                               each miss alone: a branch that adds one field to a dual-compile uniform struct merges\n"
         "                               textually clean and reads as a harmless \"+1 field\" to a line-granular diff. SCOPE is\n"
         "                               what each ref AUTHORED — the paths `git diff base..tip` reports against its own MERGE\n"
@@ -1818,7 +1904,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               unmodelable=, not compared; the authorship anchor is per PATH, so a branch changing\n"
         "                               struct S in one file while the live line changes S's mirror in another is a merge hazard\n"
         "                               only `--layout=S` on the merged result can see. Read-only; single-root only.\n"
-        "    --whereis=SYM              which REF's tree defines or mentions SYM — HEAD first, then every local branch, with\n"
+        "    --whereis=SYM              find which branch's tree defines or mentions SYM, HEAD first\n"
+        "                               which REF's tree defines or mentions SYM — HEAD first, then every local branch, with\n"
         "                               on-head=\"0\" naming the case the verb exists for: content that lives only on a branch.\n"
         "                               Each distinct blob is read ONCE (content-addressed), so N branches cost ~one tree.\n"
         "                               kind=\"def\" on a HEAD row is the PARSED index's answer (head_labels=\"index\"); on a REF row it\n"
@@ -1831,7 +1918,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               is invisible. Add --with-history: a <fate> row then says v=\"never\" or v=\"removed\"\n"
         "                               with the commit, date and file that removed it. Remote-tracking refs are excluded\n"
         "                               (they mirror local ones); refs are capped, narrow with --stray-content=SUBSTR.\n"
-        "    --flags[=SUBSTR]           the dark-content dashboard: what is BUILT but OFF in this repo. Harvests all three gate\n"
+        "    --flags[=SUBSTR]           the dark-content dashboard: what is built but switched OFF in this repo\n"
+        "                               the dark-content dashboard: what is BUILT but OFF in this repo. Harvests all three gate\n"
         "                               patterns — #ifndef/#define header gates, CMake option(), and getenv() reads — and reports\n"
         "                               gate, kind (compile/cmake/env), default, the size of the code it guards (#if regions and\n"
         "                               their LOC), and its read sites. When a name is BOTH a header gate and a CMake option the\n"
@@ -1845,7 +1933,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               are excluded, and a gate read as a VALUE (constexpr bool k = F != 0, then if constexpr)\n"
         "                               reports regions=\"0\" honestly — its code is a C++ branch, not an #if region.\n"
         "                               Pair it with --flip=NAME below to size ONE gate instead of listing them all.\n"
-        "    --flip=NAME                (with --flags) the BLAST RADIUS of turning ONE gate ON: which code becomes live, how\n"
+        "    --flip=NAME                (with --flags) the blast radius of turning ONE gate on\n"
+        "                               (with --flags) the BLAST RADIUS of turning ONE gate ON: which code becomes live, how\n"
         "                               much, which SYMBOLS hold it, what those transitively reach, and which TESTS cover it —\n"
         "                               the actionable sequel to --flags' list. Reports #if regions AND the C++ branch sites a\n"
         "                               value-style gate governs (constexpr bool k = F != 0, then if constexpr( k )): the\n"
@@ -1867,7 +1956,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               instead of a host. Single-root only (the harvest reads on-disk paths, which a merged\n"
         "                               workspace relabels) — run it per root. Exit 0 always otherwise: a report, not a gate;\n"
         "                               an unknown gate name refuses (exit 1) and names the near-misses.\n"
-        "    --layout=STRUCT            the CPU/GPU contract view for ONE struct/class: its fields in declaration order with\n"
+        "    --layout=STRUCT            show one struct's memory layout — fields in order, with computed offsets, sizes and padding\n"
+        "                               the CPU/GPU contract view for ONE struct/class: its fields in declaration order with\n"
         "                               COMPUTED offsets/sizes/padding, every static_assert in the index that mentions it, and\n"
         "                               EVERY same-name definition compared field-by-field (the mirror/stub drift check that a\n"
         "                               dual-compile uniform block needs on every edit). file:name disambiguates a same-named\n"
@@ -1887,7 +1977,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               C-FAMILY files only (a TypeScript/Swift class has no byte layout) — .metal IS one\n"
         "                               of them (indexed under the C++ grammar, see kLangTable), so a Metal struct's layout is\n"
         "                               modelled like any other C-family aggregate.\n"
-        "    --field-affinity[=STRUCT]  the CACHE-LOCALITY lens: which fields are READ TOGETHER but declared FAR APART. Builds a\n"
+        "    --field-affinity[=STRUCT]  find fields that are read together but declared far apart — the cache-locality lens\n"
+        "                               the CACHE-LOCALITY lens: which fields are READ TOGETHER but declared FAR APART. Builds a\n"
         "                               static field CO-ACCESS affinity graph (one observation per indexed C-family function\n"
         "                               body) and diffs it against the DECLARED field order and 64-byte cache-line geometry,\n"
         "                               reusing --layout's LP64 offset model. Bare = every aggregate in the repo, ranked by\n"
@@ -1910,7 +2001,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               finding. validate= names the instrumented PROFILE_SCOPE whose hardware counters would\n"
         "                               confirm the hypothesis (see docs/FIELDAFFINITY.md for the worked example). C/C++/ObjC\n"
         "                               only. Exit 0 always: a report, not a gate.\n"
-        "    --doc-drift[=SUBSTR]       which of this repo's DOC claims are now false. Verifies the CHECKABLE anchors in every\n"
+        "    --doc-drift[=SUBSTR]       check which of this repo's documented claims are now false\n"
+        "                               which of this repo's DOC claims are now false. Verifies the CHECKABLE anchors in every\n"
         "                               markdown file (SUBSTR filters doc paths) against the live index and prints ONLY the ones\n"
         "                               that no longer hold, four kinds: file:line refs (why=\"missing-file\" the path is gone,\n"
         "                               \"past-eof\" the file is shorter than that, \"line-moved\" the line is no longer inside the\n"
@@ -1956,7 +2048,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               Root element carries at=\"<sha>[+dirty][+shallow]\" (omitted on a non-git root) — the commit these\n"
         "                               counts were computed against, so a number quoted from this report stays comparable\n"
         "                               across a HEAD that moves mid-session.\n"
-        "    --doc-drift --gateability  turn \"CI stays non-gating\" into a finishable to-do list: for every doc that STILL has a\n"
+        "    --doc-drift --gateability  turn \"CI stays non-gating\" into a finishable list: which docs still have live failing anchors\n"
+        "                               turn \"CI stays non-gating\" into a finishable to-do list: for every doc that STILL has a\n"
         "                               LIVE (undated) failing anchor, prints its path and live=N (how many of its rows a date\n"
         "                               would fix), plus projected_drift= — repo-wide drift= if EVERY listed doc got the fix.\n"
         "                               The fix is always the same one this lane already reads for rec=\"title\"/\"stamp\": an ISO\n"
@@ -1965,7 +2058,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               not a mandate — dating a doc that is genuinely a live/current reference (not a\n"
         "                               snapshot-in-time record) would hide real rot rather than honestly classify it. Requires\n"
         "                               --doc-drift (refused loudly alone).\n"
-        "    --with-history             OPT-IN: let --doc-drift and --whereis ask git HISTORY whether a name was ever in this\n"
+        "    --with-history             opt in: let --doc-drift and --whereis ask git history whether a name ever existed here\n"
+        "                               OPT-IN: let --doc-drift and --whereis ask git HISTORY whether a name was ever in this\n"
         "                               repo, and which commit removed it. ONE `git log -p` walk over everything reachable from\n"
         "                               HEAD, tokenizing removed lines — the pickaxe's semantics without the pickaxe's cost\n"
         "                               (`git log -S` per name is ~126 s at 247 names on a 2900-file repo; this is ~3 s, and\n"
@@ -1979,7 +2073,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               removed LINE carrying the name, so a name whose last removal was from a doc rather than\n"
         "                               code is reported with that doc as its site. A repo deeper than the walk bound reports\n"
         "                               truncated=\"1\" and answers unknown — never \"never\" — for anything it did not reach.\n"
-        "    --plan-lint=FILE           the house PLAN/DESIGN format's STRUCTURE check — never semantics, that stays\n"
+        "    --plan-lint=FILE           check a PLAN/DESIGN file's structure — never its semantics\n"
+        "                               the house PLAN/DESIGN format's STRUCTURE check — never semantics, that stays\n"
         "                               --doc-drift's job. FILE is read directly (like --from-trace's FILE, not through the\n"
         "                               crawled index), so it need not live inside any indexed root. GRAMMAR, narrow and\n"
         "                               opt-in on purpose (real house plans do not converge on one dialect): a card is\n"
@@ -2011,7 +2106,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               known, disclosed gap. Exit 2 when dialect=\"1\" and gating is non-zero (unlike\n"
         "                               --doc-drift's always-0 report — nothing here has a legitimate \"dated on purpose\"\n"
         "                               reading); exit 0 clean or dialect=\"0\"; exit 1 only when FILE could not be read.\n"
-        "    --from-trace=FILE          map a stack trace / sanitizer report / compiler-error text ('-'=stdin) onto the indexed\n"
+        "    --from-trace=FILE          map a stack trace, sanitizer report or compiler error onto the indexed symbols\n"
+        "                               map a stack trace / sanitizer report / compiler-error text ('-'=stdin) onto the indexed\n"
         "                               symbols: table-driven frame extraction (python / asan / node / compiler / generic),\n"
         "                               ranked INNERMOST-first over in-corpus frames only (out-of-corpus frames are listed and\n"
         "                               counted, never ranked). Each frame binds by its own NAME first (resolved_by=\"name\") and\n"
@@ -2033,7 +2129,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               innermost frame keeps rank 1, but the hop rows rank in <sigs> ahead of the remaining\n"
         "                               frames and the top one's body is served beside it. A non-test trace is unaffected.\n"
         "                               Unparseable input refuses loudly (never an empty map).\n"
-        "    --run-trace=\"CMD\"          EXEC-MODE --from-trace — the whole fix-loop entry in ONE call. Runs CMD under `sh -c`\n"
+        "    --run-trace=\"CMD\"          run CMD, then map its failure output onto the code — the whole fix loop in one call\n"
+        "                               EXEC-MODE --from-trace — the whole fix-loop entry in ONE call. Runs CMD under `sh -c`\n"
         "                               (the make trust model: your user, your environment, stdin=/dev/null, NO sandbox),\n"
         "                               captures stdout+stderr interleaved, and on a NON-ZERO exit serves the --from-trace\n"
         "                               bundle for the captured text (frames mapped innermost-first, the innermost in-corpus\n"
@@ -2048,11 +2145,13 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --top-k / --max-tokens are not read here. ripwire's exit: 0 = the command succeeded;\n"
         "                               4 = it failed or timed out (the report is on stdout either way); 1 = ripwire itself\n"
         "                               could not spawn it.\n"
-        "    --run-timeout=SECONDS      cap for --run-trace's command (default 600 s; always disclosed as timeout_s=). A\n"
+        "    --run-timeout=SECONDS      cap --run-trace's command; default 600 s\n"
+        "                               cap for --run-trace's command (default 600 s; always disclosed as timeout_s=). A\n"
         "                               command still running at the cap has its whole process group killed and is reported\n"
         "                               timed_out=\"1\" — an honest TIMEOUT, never an empty success. Modifies --run-trace\n"
         "                               only; refused loudly alone.\n"
-        "    --note-add=\"TARGET: text\"  pin a field note (write-side memory) to TARGET — a SYMBOL in any spelling the read verbs\n"
+        "    --note-add=\"TARGET: text\"  pin a note to a symbol or file, committed to .ripwire_notes and resurfaced later\n"
+        "                               pin a field note (write-side memory) to TARGET — a SYMBOL in any spelling the read verbs\n"
         "                               resolve (bare name, file:name, Scope::name, the canonical id path::scope::name, or\n"
         "                               @FILE:LINE) or a FILE PATH — in the committed, sorted .ripwire_notes at the repo root.\n"
         "                               A symbol is CANONICALISED to its canonical id on write (the id --for/--expand key notes\n"
@@ -2067,7 +2166,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               than a wrong sha. MUTATES one file; single-root only. text with no causal/decision\n"
         "                               marker (\"because\"/\"chose\"/\"over\"/\"instead\"/etc.) gets a gentle stderr tip toward the\n"
         "                               decision shape — never a refusal, the add always proceeds.\n"
-        "    --notes                    list all field notes grouped by target; a target with no matching indexed symbol/file is\n"
+        "    --notes                    list every field note, grouped by target\n"
+        "                               list all field notes grouped by target; a target with no matching indexed symbol/file is\n"
         "                               flagged dangling=\"1\" (legal — surfaced nowhere, listed here). Read-only.\n"
         "                               Notes surface automatically as <note d=\"date\" [sha=\"…\" branch=\"…\"]> children on the\n"
         "                               symbols/files that --for and --expand emit (and the MCP for / fetch_body verbs); the\n"
@@ -2075,7 +2175,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               terseness — the full sha lives in .ripwire_notes on disk. An OLDER .ripwire_notes (3\n"
         "                               fields, pre-provenance) reads and surfaces exactly as before, with no sha/branch shown.\n"
         "                               Absent/empty file = zero effect.\n"
-        "    --pack-task=\"TASK\"          the budget-shared task bundle: ONE call assembling, under ONE deterministic budget\n"
+        "    --pack-task=\"TASK\"         the whole orientation dance in ONE call, under ONE shared budget\n"
+        "                               the budget-shared task bundle: ONE call assembling, under ONE deterministic budget\n"
         "                               (default 6K tokens; --token-budget overrides), the whole orientation dance in FIXED order —\n"
         "                               (1) routed+anchored ranking, (2) top-K full bodies, (3) their 1-hop caller signatures,\n"
         "                               (4) their field notes, (5) tests_to_run for the top files, emitted in FIXED order\n"
@@ -2099,21 +2200,25 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               one module the split is a rank cut, not a semantic one (read split= and overlap_max before\n"
         "                               trusting the slices). Refuses loudly without --pack-task, or outside 2..16;\n"
         "                               --with-graph does not compose with it (N+1 bundles, no single graph — says so on stderr).\n"
-        "    --with-graph               (with --for/--pack-task) append a compact MERMAID flowchart of the bundle's top-N (<=8)\n"
+        "    --with-graph               (with --for/--pack-task) append a small Mermaid flowchart of the bundle's top anchors\n"
+        "                               (with --for/--pack-task) append a compact MERMAID flowchart of the bundle's top-N (<=8)\n"
         "                               ranked anchors + their 1-hop call edges among themselves — <graph fmt=\"mermaid\"><![CDATA[\n"
         "                               flowchart LR ...]]></graph>, right before </ctx>. Reuses the --mermaid emitter's syntax.\n"
         "                               Costs tokens beyond the sigs it sits next to — worth it only when the reading agent\n"
         "                               renders mermaid natively. Off by default and purely additive: omitted, output is byte-identical.\n"
-        "    --export=cc.json[:FILE]    export per-file metrics (loc/symbols/cx/cognitive_cx/fan-in/fan-out/churn) as CodeCharta\n"
+        "    --export=cc.json[:FILE]    export per-file metrics as CodeCharta cc.json for its 3D city view\n"
+        "                               export per-file metrics (loc/symbols/cx/cognitive_cx/fan-in/fan-out/churn) as CodeCharta\n"
         "                               cc.json (apiVersion 1.3) — write FILE or redirect stdout; feeds a CodeCharta 3D city\n"
-        "    --batch=FILE               one-turn context sweep: FILE ('-'=stdin) is newline-delimited `verb:arg` sub-queries\n"
+        "    --batch=FILE               run several lookups in one turn: FILE is newline-delimited `verb:arg` sub-queries\n"
+        "                               one-turn context sweep: FILE ('-'=stdin) is newline-delimited `verb:arg` sub-queries\n"
         "                               (for/grep/callers/callees/impact/uses/mentions/analyze/lego/owners/cochange/exemplar,\n"
         "                               path_between:FROM,TO), answered in ONE deduped <batch>; caps at 16 (over-cap = capped=1).\n"
         "                               THE SAME `verb:arg` line is accepted by the MCP `batch` verb's queries array\n"
         "                               (queries=[\"for:parse the config\",\"callers:escapeXml\"]), which also takes the\n"
         "                               {verb, ...args} object form — one grammar to learn, both front doors.\n\n"
         "  self-diagnosis\n"
-        "    --doctor                   environment self-check: binary-vs-PATH staleness, grammar tags.scm compile,\n"
+        "    --doctor                   check the environment: stale binary, grammars, cache health, git, index identity\n"
+        "                               environment self-check: binary-vs-PATH staleness, grammar tags.scm compile,\n"
         "                               cache-dir health, git reachability, tree-sitter version, INDEX IDENTITY, and TRACKED-BINARY\n"
         "                               staleness (a committed binary whose last commit is a git-history ANCESTOR of a\n"
         "                               same-directory/same-stem source's last commit — never mtime, which a fresh\n"
@@ -2155,10 +2260,13 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               children (neutralised=\"1\", and a stderr line carrying git_harden=fsmonitor-hook);\n"
         "                               the boolean forms are git's builtin daemon and are left alone. Not a verdict on\n"
         "                               your setup — ok=\"1\" always; the neutralisation is the verdict.\n"
-        "    --agent=codex|claude       (with --doctor) also inspect that agent's LIVE CLI-first integration: PATH binary, exact\n" "                               installed-skill manifest parity, advisory hook executability, and the secondary\n"
+        "    --agent=codex|claude       (with --doctor) also inspect that agent's live integration with ripwire\n"
+        "                               (with --doctor) also inspect that agent's LIVE CLI-first integration: PATH binary, exact\n"
+        "                               installed-skill manifest parity, advisory hook executability, and the secondary\n"
         "                               mcp_servers.ripwire command/--mcp args. Read-only; emits fixed repair commands and\n"
         "                               never prints config contents or shell command lines. Other values refuse.\n"
-        "    --skipped                  WHY the index does not contain a file, and which files it DOES contain but cannot\n"
+        "    --skipped                  say WHY a file is missing from the index, and which indexed files it cannot vouch for\n"
+        "                               WHY the index does not contain a file, and which files it DOES contain but cannot\n"
         "                               vouch for. <f p= why= bytes=/> per DROPPED file: why=oversize (limit= names the ceiling\n"
         "                               — --max-file-size, or the fixed .json/.yaml config ceilings it does not raise),\n"
         "                               why=excluded (--exclude hit), why=unsupported-ext (ext= has no grammar in this build —\n"
@@ -2187,7 +2295,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               row per finding (never emitted on the exit-3 refusal path); stderr\n"
         "                               carries the human tally line\n"
         "    --scan-skill=FILE          scan a single skill file before installing (any file, not just .md)\n"
-        "    --scan-skills[=DIR]        scan DIR (or .agents/skills/ + ~/.claude/skills/ + ${CODEX_HOME:-~/.codex}/skills/).\n"
+        "    --scan-skills[=DIR]        scan a skills directory before installing — every text file, .md and .sh alike\n"
+        "                               scan DIR (or .agents/skills/ + ~/.claude/skills/ + ${CODEX_HOME:-~/.codex}/skills/).\n"
         "                               EVERY text file, .md and .sh alike — a skill dir's executables are the\n"
         "                               files most worth scanning. skipped= counts what it could not scan\n"
         "                               (binary content, or unreadable); denylisted subtrees (.git, node_modules,\n"
@@ -2195,26 +2304,30 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               for vulnerabilities\n"
         "    --force                    (wrap) proceed even if CRITICAL findings are found\n\n"
         "  knobs / modes\n"
-        "    --rank-by=pagerank|authority|hub|rrf|churn|churn-decay   ranking signal (churn = git change-frequency prior, and\n"
+        "    --rank-by=pagerank|authority|hub|rrf|churn|churn-decay   choose the ranking signal: structure, authority, hub, fusion or churn\n"
+        "                               ranking signal (churn = git change-frequency prior, and\n"
         "                               stamps its own map with rank_by/window/at so it cannot pass for the structural one;\n"
         "                               churn-decay = the same prior with each commit weighted 0.5^(age_days/90) instead of\n"
         "                               counted equally, so recent edits outweigh old ones. Its age clock is HEAD's OWN commit\n"
         "                               timestamp, never the wall clock, so the default (whole-history) run is byte-stable for a\n"
         "                               fixed tree; the half-life is disclosed in window=. default pagerank)\n"
-        "    --format=xml|columnar|rows output shape for the FLAT list verbs (--callers/--callees/--uses/--impact):\n"
+        "    --format=xml|columnar|rows   choose the output shape for the flat list verbs\n"
+        "                               output shape for the FLAT list verbs (--callers/--callees/--uses/--impact):\n"
         "                               xml (default, byte-identical) or columnar (a <paths> table + parallel arrays: fields=\n"
         "                               path,name,line,kind on --callers/--callees/--impact, path,line,role,in_id on --uses —\n"
         "                               the emitted block's own legend states the zip/n=/&#44;-escape contract;\n"
-        "                               ~15-60%% fewer tokens on multi-row results, by de-duplicating the repeated per-row markup + paths; results of a few rows\n"
+        "                               ~15-60% fewer tokens on multi-row results, by de-duplicating the repeated per-row markup + paths; results of a few rows\n"
         "                               can be LARGER — the paths/cols scaffold has a fixed cost). rows is an alias\n"
         "                               for columnar. Any OTHER verb refuses (exit 1) — it has no row list to re-encode. Map is\n"
         "                               unaffected.\n"
-        "    --format=candidates        (with --for/--query) a FLAT top-K export for an EXTERNAL reranker: one\n"
+        "    --format=candidates        (with --for/--query) a flat top-K export for an external reranker\n"
+        "                               (with --for/--query) a FLAT top-K export for an EXTERNAL reranker: one\n"
         "                               <cand r= s= n= id= k= p= l=><sig>..</sig></cand> row per result — identity + score +\n"
         "                               signature only, no lens/quality extras, no doc bodies. Composes with --top-k.\n"
-        "    --legend=full|compact     output legend posture for EVERY XML verb. MAKING REPEATED CALLS (an agent, a\n"
+        "    --legend=full|compact      choose the legend posture for every XML verb — use compact when calling repeatedly\n"
+        "                               output legend posture for EVERY XML verb. MAKING REPEATED CALLS (an agent, a\n"
         "                               script, a benchmark harness)? USE compact. The legend is a FIXED ~3 KB per call,\n"
-        "                               so its share is a function of ANSWER SIZE, not of the verb: at least 50%% of a\n"
+        "                               so its share is a function of ANSWER SIZE, not of the verb: at least 50% of a\n"
         "                               small --callers/--uses/--impact/--affected answer (and more on --callees and\n"
         "                               --edit-check), a little of a large --for bundle. Every ROW is byte-identical; the\n"
         "                               only payload change is a schema=\"ripwire.<verb>/v1\" attribute the root GAINS.\n"
@@ -2233,7 +2346,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               Runs with nothing to compact refuse it, naming the verb: prose/markdown/JSON answers\n"
         "                               (--situ --recall --report --mermaid --html --plan-lanes --sarif --eval*) and the writers\n"
         "                               (edit verbs, --note-add, --quality-baseline/--quality-ack, --index-out, --export).\n"
-        "    --json                     machine-parseable JSON instead of XML, keys mirror the XML attr names 1:1. Every\n"
+        "    --json                     emit JSON instead of XML; keys mirror the XML attribute names one to one\n"
+        "                               machine-parseable JSON instead of XML, keys mirror the XML attr names 1:1. Every\n"
         "                               ROOT attribute survives; a verb that serves fewer SECTIONS than its XML form NAMES\n"
         "                               them in lens= on the root (--for --json: lens=\"compose,lego,routes,docs\" — their\n"
         "                               *_total counts are there, their rows are not) — supported for the default map,\n"
@@ -2243,7 +2357,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than\n"
         "                               silently falling back to XML — a verb added tomorrow refuses by default.\n"
         "                               Deterministic: same 2-run byte-diff + stable key order contract as the XML.\n"
-        "    --limit=N --offset=M       paginate a high-cardinality verb. HONORED by: --deps --callers --callees --tree\n"
+        "    --limit=N --offset=M       paginate a high-cardinality verb\n"
+        "                               paginate a high-cardinality verb. HONORED by: --deps --callers --callees --tree\n"
         "                               --lint --hotspots --clones --cochange --owners --communities --community --doc-drift\n"
         "                               --whereis --grep/--regex --match --pattern --impact --uses --exercises --seams\n"
         "                               --zoom --external-surface --dead-code --mentions --graph-query --stray-content\n"
@@ -2277,14 +2392,16 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --around/--exemplar/--report/--mermaid/--map-diff/--metrics and the default map)\n"
         "                               answer with a single fixed-shape result that has no row list to window at all.\n"
         "    --exclude=SUBSTR           drop matching paths (repeatable)   --ignore-tests\n"
-        "    --map-diff                 the FULL map, re-ranked with a PageRank teleport toward git-changed files (working tree\n"
+        "    --map-diff                 re-rank the whole map toward git-changed files, so recent work floats up\n"
+        "                               the FULL map, re-ranked with a PageRank teleport toward git-changed files (working tree\n"
         "                               vs HEAD) — changed files and their neighbours float up, but every file can still appear;\n"
         "                               this is NOT a filter to only-changed symbols. changed=\"N\" in the header names the seed\n"
         "                               file count (0 on a clean tree or no-git — teleport degrades to uniform; ranked CONTENT is\n"
         "                               then identical to the plain default map, but not byte-identical: the map-diff header keeps\n"
         "                               its changed= and at= stamp). Want only-changed instead? --pr-context.\n"
         "    --cache=PATH               incremental cache at PATH (re-parse only changed files)\n"
-        "    --index-out=BASE           CI generate-and-exit: cold-parse the tree and write the committable index artifact,\n"
+        "    --index-out=BASE           cold-parse the tree, write the committable index artifact, and exit without a map\n"
+        "                               CI generate-and-exit: cold-parse the tree and write the committable index artifact,\n"
         "                               then exit 0 with NO map on stdout. Writes BOTH families — BASE.lean.ripwirecache (map/\n"
         "                               nav/--pr-context) and BASE.rich.ripwirecache (--for/--exemplar/--metrics/--uses are RICH,\n"
         "                               a lean-only artifact leaves them cold). Consume in a PR job with --cache=BASE.lean.ripwirecache\n"
@@ -2293,23 +2410,28 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               NOT byte-identical run-to-run (the header stamps the blob write time); the contract is\n"
         "                               RESTORE-EQUIVALENCE (a --cache restore == a cold parse), never blob-byte-identity.\n"
         "    --no-cache                 disable the warm-by-default per-root TMPDIR cache (forces a cold parse)\n"
-        "    --no-ignore                crawl paths the repository's own .gitignore covers. DEFAULT: in a git work tree the\n"
+        "    --no-ignore                crawl the paths the repository's .gitignore covers; by default they are skipped\n"
+        "                               crawl paths the repository's own .gitignore covers. DEFAULT: in a git work tree the\n"
         "                               crawl honours git's ignore rules (node_modules/, .venv/, target/, build/, dist/ —\n"
         "                               whatever the repo declared), and the header discloses ignored_files= /\n"
         "                               ignored_dirs= when it dropped anything. A non-git root, a missing git binary, or a\n"
         "                               root that is ITSELF inside an ignored subtree all keep the full walk; --skipped's\n"
         "                               ignore_mode= says which of the four applied, and rows the ignored set.\n"
-        "    --max-file-size=N[K|M|G]   skip files larger than N bytes (default 4MB; raise for repos with\n"
+        "    --max-file-size=N[K|M|G]   skip files larger than N bytes; default 4MB\n"
+        "                               skip files larger than N bytes (default 4MB; raise for repos with\n"
         "                               big hand-authored source, e.g. --max-file-size=100M; suffix = 1024^n).\n"
         "                               .json carries a SECOND, fixed 256KB ceiling this flag does not raise\n"
         "                               (that size of .json is data, not config, and explodes the symbol\n"
         "                               table); files it drops are counted in the header's skipped_oversize=\n"
-        "    --refetch                  when the root is a git URL, force a fresh clone instead of reusing the\n"
+        "    --refetch                  when the root is a git URL, clone it fresh instead of reusing the cached copy\n"
+        "                               when the root is a git URL, force a fresh clone instead of reusing the\n"
         "                               cached one (default: reuse forever; stderr notes the cached clone's age)\n"
-        "    --scip=index.scip          consume a SCIP index as a PRECISION overlay: precise call edges replace\n"
+        "    --scip=index.scip          consume a SCIP index as a precision overlay: exact call edges replace name guesses\n"
+        "                               consume a SCIP index as a PRECISION overlay: precise call edges replace\n"
         "                               name-based guesses (tagged prov=\"scip\"), ambiguous= drops. Missing/corrupt\n"
         "                               index → degrades to name-based (never fails). Zero deps (hand-rolled reader).\n"
-        "    --pin-census=FILE          eval-only: write a per-call-site census of WHICH mechanism resolved each call\n"
+        "    --pin-census=FILE          eval only: record which mechanism resolved each call site\n"
+        "                               eval-only: write a per-call-site census of WHICH mechanism resolved each call\n"
         "                               (unique/qualified/receiver-rule/cone/arity/locality/split/scip/binding) and the\n"
         "                               canonical id of every surviving target — the identity <c n=\"NAME\"/> omits. Under\n"
         "                               --scip it also writes the index's covered sites, so a precision join needs no\n"
@@ -2319,9 +2441,11 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               Binds 127.0.0.1 by default (bare PORT = loopback); one listener serves ONE\n"
         "                               workspace fixed at startup. A non-loopback host (e.g. 0.0.0.0:8080) REQUIRES\n"
         "                               --mcp-token and refuses to start without it. No TLS — reverse-proxy it.\n"
-        "    --mcp-token=T              shared bearer token gating every HTTP request (or set RIPWIRE_MCP_TOKEN);\n"
+        "    --mcp-token=T              require this bearer token on every HTTP request; mandatory for a non-loopback bind\n"
+        "                               shared bearer token gating every HTTP request (or set RIPWIRE_MCP_TOKEN);\n"
         "                               a missing/wrong token gets a 401. Required for a non-loopback bind.\n"
-        "    --allow-remote-edits       permit the edit verbs over --listen (refused by default: a remote file-writer\n"
+        "    --allow-remote-edits       permit the edit verbs over --listen; refused by default\n"
+        "                               permit the edit verbs over --listen (refused by default: a remote file-writer\n"
         "                               is a different trust contract); forces the token requirement even on loopback\n"
         "    --eval-stray=FILE          labelled verdict-accuracy eval for --stray-content: FILE is TSV `ref<TAB>verdict`\n"
         "                               (merged|superseded|unmerged, '#' comments ok). Emits per-case want=/got= plus an\n"
@@ -2329,26 +2453,229 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               threshold change against real labels instead of eyeballing it. A ref absent from\n"
         "                               the report scores as merged (merged refs are omitted by design).\n"
         "    --eval                     self-eval (co-change recall vs BM25)\n"
-        "    --eval-retrieval           known-item retrieval eval: for symbols WITH a doc-comment, query by NAME and\n"
+        "    --eval-retrieval           measure the rankers on known-item retrieval — MRR and recall@1/5/10 per query mode\n"
+        "                               known-item retrieval eval: for symbols WITH a doc-comment, query by NAME and\n"
         "                               by a doc-comment PHRASE; reports MRR + recall@1/5/10 per ranker (subtoken+body,\n"
         "                               name-exact, anchored, routed) per query-mode. Validates query-TIME ranker choice.\n"
-        "    --eval-mined=FILE          session-trace-mined retrieval eval: consumes a minedpair.jsonl artifact from\n"
+        "    --eval-mined=FILE          retrieval eval over real (query, gold-files) pairs mined from session traces\n"
+        "                               session-trace-mined retrieval eval: consumes a minedpair.jsonl artifact from\n"
         "                               bench/mine_traces.py (real (query, gold-files) pairs mined from local Claude\n"
         "                               Code session transcripts) and reports recall@5/10/20 + Acc@k + MRR per arm\n"
         "                               (for/query/anchor/random), assisted vs unassisted.\n"
-        "    --eval-skills=FILE         labelled skill-ROUTING eval: ROOT is a skills directory (one SKILL.md per\n"
+        "    --eval-skills=FILE         measure skill routing against a labelled prompt corpus\n"
+        "                               labelled skill-ROUTING eval: ROOT is a skills directory (one SKILL.md per\n"
         "                               subdir); FILE is TSV `prompt<TAB>skill[,skill]|none<TAB>provenance`. Scores\n"
         "                               deterministic selectors (keyword overlap = the trivial baseline, BM25 over\n"
         "                               descriptions/full text, name match, the routed --for ranker) on top-1-in-\n"
         "                               permitted-set plus positive/negative separation (AUC) — does the right skill\n"
         "                               fire, does every skill stay quiet on off-topic prompts. Ambiguous moments\n"
         "                               carry a permitted SET; `none` rows are first-class.\n"
-        "    -h, --help                 this catalog\n"
+        "    -h, --help                 this catalog, one line per flag  (--help=--FLAG, --help=SECTION, or --help=all)\n"
         "    -v, --version              print the version + short build info, exit 0\n\n"
-        "determinism: output is byte-identical run-to-run  (ripwire <dir> >a; ripwire <dir> >b; diff -q a b)\n" );
+        "every line above is a summary. --help=--FLAG prints that flag's full text — the caveats, the units, what it\n"
+        "refuses and why. --help=SECTION does one family; --help=all is the whole catalog (~46K tokens).\n"
+        "determinism: output is byte-identical run-to-run  (ripwire <dir> >a; ripwire <dir> >b; diff -q a b)\n";
+
+// ── the two tiers ───────────────────────────────────────────────────────────────────────────────────
+// The catalog above is ONE text and stays one text — nothing here deletes a line of it. What changed is
+// that a reader no longer has to buy all of it to read any of it.
+//
+// The evidence that made this a split rather than a trim: a third-party evaluation (callstack/agent-device
+// #2400, 2026-09-08) measured ripwire spending ~10% MORE tokens than grep-and-read and traced it to the
+// per-call legend, whose fix — --legend=compact — was ALREADY documented here. It sat four lines into a
+// schema description, 92% of the way down a 1597-line document, and an evaluator holding the exact
+// question did not find it. The defect that produced was not that the text was long. It was that a fact
+// inside it had no address. So:
+//
+//   tier 1  `--help`             one line per row. What exists, and roughly what it does.
+//   tier 2  `--help=<flag>`      that row's every disclosure — now addressable, which is the fix.
+//           `--help=<section>`   one family at full detail.
+//           `--help=all`         the whole catalog, exactly as before.
+//
+// Tier 2 is what every MACHINE consumer reads (the gates that harvest the advertised surface,
+// docs/docs_commands_build.py). Tier 1 is what a human or an agent reads. Neither can starve the other:
+// test/helpbudgetcheck.sh holds tier 1 to a token ceiling AND asserts tier 2 still carries every row.
+enum class HelpTier : std::uint8_t
+{
+    Concise,   // one line per row
+    Full,      // the entire catalog
+    Pick       // one flag, or one section
+};
+
+// A line's role in the catalog, decided by indentation alone — the same contract
+// docs/docs_commands_build.py's parse_help() has always parsed this text with.
+enum class HelpLine : std::uint8_t
+{
+    Section,   // two spaces then text: a family heading
+    Entry,     // four spaces then a flag, or a two-column `label   description` row
+    Subhead,   // four spaces of prose that is not a row (a mid-section aside)
+    Cont,      // five or more spaces: an entry's continuation — tier 2's whole payload
+    Loose      // blank, or column-zero prose (preamble, usage block, closing line)
+};
+
+inline HelpLine classifyHelpLine( std::string_view l ) noexcept
+{
+    const std::size_t text = l.find_first_not_of( ' ' );
+    if( text == std::string_view::npos || text == 0 ) { return HelpLine::Loose; }
+    if( text == 2 ) { return HelpLine::Section; }
+    if( text >= 5 ) { return HelpLine::Cont; }
+    // At four: a flag row always starts with '-'; anything else is a row only if it has the
+    // two-column shape (`label` + two-or-more spaces + description), which is how the shared
+    // legend rows — counts_floor="1", pr_iters="N", <dir> — earn an entry of their own.
+    if( l[text] == '-' ) { return HelpLine::Entry; }
+    const std::size_t gap = l.find( ' ', text );
+    if( gap == std::string_view::npos ) { return HelpLine::Subhead; }
+    return gap + 1 < l.size() && l[gap + 1] == ' ' ? HelpLine::Entry : HelpLine::Subhead;
 }
 
-inline void usage() noexcept { printUsage( stderr ); }
+// Strip a flag spelling down to its bare name: leading dashes off, value/alternation suffix off.
+inline std::string_view helpBareName( std::string_view s ) noexcept
+{
+    while( !s.empty() && s.front() == '-' ) { s.remove_prefix( 1 ); }
+    const std::size_t cut = s.find_first_of( "=[,| \t" );
+    return cut == std::string_view::npos ? s : s.substr( 0, cut );
+}
+
+// Does this entry line answer to `want`? Leading dashes are optional on both sides, and every flag
+// spelled in the row's LABEL counts — `--grep=STR | --regex=PAT` is one row that two names must reach,
+// and so is `--limit=N --offset=M`.
+//
+// Only the label column is searched, and within it only the leading token and tokens that start with a
+// dash. Both narrowings are load-bearing. Searching the DESCRIPTION makes `--help=--for` match
+// --help-task, whose prose reads "recommend ONE executable command for this repository"; matching bare
+// words makes it match any row that happens to say "for". A row answers to the flags it DEFINES, never
+// to the flags it mentions.
+inline bool helpEntryAnswersTo( std::string_view line, std::string_view want ) noexcept
+{
+    const std::string_view target = helpBareName( want );
+    if( target.empty() ) { return false; }
+    const std::size_t first = line.find_first_not_of( ' ' );
+    if( first == std::string_view::npos ) { return false; }
+
+    // The label column ends at the first two-space run — the gap before the description. A row with no
+    // such gap (the --plan-lanes header line) is all label, and the dash rule below keeps it honest.
+    const std::size_t gap   = line.find( "  ", first );
+    const std::size_t limit = gap == std::string_view::npos ? line.size() : gap;
+
+    for( std::size_t i = first; i < limit; ++i )
+    {
+        const bool startsToken = i == first || line[i - 1] == ' ' || line[i - 1] == '|';
+        if( !startsToken ) { continue; }
+        if( i != first && line[i] != '-' ) { continue; }
+        if( helpBareName( line.substr( i, limit - i ) ) == target ) { return true; }
+    }
+    return false;
+}
+
+// A section is picked by any run of its heading — `--help=quality` finds "assess quality / structure".
+inline bool helpSectionAnswersTo( std::string_view heading, std::string_view want ) noexcept
+{
+    if( want.size() < 3 || heading.size() < want.size() ) { return false; }
+    const auto lower = []( char c ) noexcept { return c >= 'A' && c <= 'Z' ? char( c + 32 ) : c; };
+    for( std::size_t i = 0; i + want.size() <= heading.size(); ++i )
+    {
+        std::size_t k = 0;
+        while( k < want.size() && lower( heading[i + k] ) == lower( want[k] ) ) { ++k; }
+        if( k == want.size() ) { return true; }
+    }
+    return false;
+}
+
+// Streaming state, carried across the three text blocks so an entry that straddles a block boundary
+// is still one entry.
+struct HelpFilter
+{
+    HelpTier         tier    = HelpTier::Full;
+    std::string_view want;                        // Pick only
+    bool             wantIsSection = false;       // Pick: `want` named a heading, so serve to the next one
+    bool             serving = false;             // Pick: inside the selected entry or section
+    bool             hit     = false;             // Pick: anything served at all
+};
+
+// The Pick state machine, split out of the emit loop so each stays under the complexity bar and the
+// selection rule can be read on its own: a SECTION match serves until the next heading, an ENTRY match
+// serves that entry's continuations, and column-zero prose ends a served entry.
+inline bool helpPickKeeps( HelpFilter& f, HelpLine kind, std::string_view line ) noexcept
+{
+    if( kind == HelpLine::Section )
+    {
+        f.serving = helpSectionAnswersTo( line, f.want );
+        if( f.serving ) { f.wantIsSection = true; f.hit = true; }
+    }
+    else if( kind == HelpLine::Entry && !f.wantIsSection )
+    {
+        f.serving = helpEntryAnswersTo( line, f.want );
+        if( f.serving ) { f.hit = true; }
+    }
+    else if( kind == HelpLine::Loose && !f.wantIsSection )
+    {
+        f.serving = false;
+    }
+    return f.serving;
+}
+
+inline void emitHelpBlock( std::FILE* out, HelpFilter& f, std::string_view text ) noexcept
+{
+    while( !text.empty() )
+    {
+        const std::size_t nl   = text.find( '\n' );
+        const std::size_t take = nl == std::string_view::npos ? text.size() : nl + 1;
+        const std::string_view raw  = text.substr( 0, take );
+        const std::string_view line = nl == std::string_view::npos ? raw : raw.substr( 0, raw.size() - 1 );
+        text.remove_prefix( take );
+
+        const HelpLine kind = classifyHelpLine( line );
+        const bool keep = f.tier == HelpTier::Full    ? true
+                        : f.tier == HelpTier::Concise ? kind != HelpLine::Cont
+                                                      : helpPickKeeps( f, kind, line );
+        if( keep ) { std::fwrite( raw.data(), 1, raw.size(), out ); }
+    }
+}
+
+/// Print the CLI usage and flag catalog to `out` at the requested tier.
+/// `want` is read only for HelpTier::Pick. Returns false when a Pick matched nothing.
+inline bool printUsageTier( std::FILE* out, HelpTier tier, std::string_view want ) noexcept
+{
+    HelpFilter f{ tier, want, false, false, false };
+    emitHelpBlock( out, f, kHelpHead );
+    emitHelpBlock( out, f, kHelpPlanLanes );
+    emitHelpBlock( out, f, kHelpTail );
+    return tier != HelpTier::Pick || f.hit;
+}
+
+/// Print the authoritative CLI usage and flag catalog to the caller-provided output stream.
+inline void printUsage( std::FILE* out ) noexcept { printUsageTier( out, HelpTier::Full, {} ); }
+
+// `--help=X` — tier 2. Its own function rather than an arm inside parseArgs, which is already the
+// most complex function in this file and does not need eleven more branches to serve a help selector.
+[[noreturn]] inline void serveHelpSelector( std::string_view want ) noexcept
+{
+    if( want == "all" ) { printUsage( stdout ); std::exit( 0 ); }
+    if( want.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --help= needs a flag, a section name, or 'all' (e.g. --help=--for, --help=quality, --help=all)\n" );
+        std::exit( 2 );
+    }
+    if( printUsageTier( stdout, HelpTier::Pick, want ) ) { std::exit( 0 ); }
+    // An honest miss names the tier that WOULD have the answer rather than printing it unasked.
+    std::fprintf( stderr, "ripwire: --help=%.*s matched no flag or section — `ripwire --help` lists every row, `--help=all` is the whole catalog\n",
+                  int( want.size() ), want.data() );
+    std::exit( 2 );
+}
+
+// A parse error is not a request for the catalog. Forgetting the positional <dir> is the most likely
+// first-run mistake there is, and it used to answer with all 185 KB of tier 2 on stderr — ~46 000
+// tokens for a typo, when an UNKNOWN FLAG had always cost 32 bytes. The tool already knew the right
+// shape for a mistake; it just never applied it here.
+inline void usage() noexcept
+{
+    std::fprintf( stderr,
+        "ripwire: no <dir> given — the repository to map is the one required argument.\n"
+        "  ripwire .                     the ranked map of the current directory\n"
+        "  ripwire . --for=\"TASK\"        the task lens: what to read first\n"
+        "  ripwire --help                every flag, one line each\n"
+        "  ripwire --help=--for          one flag in full  (also --help=<section>, --help=all)\n" );
+}
 
 // ── the flag tables — the 91 arms that are exactly "set one member" ─────────────────────────────────
 // House style is declarative tables over scattered switch/if (CLAUDE.md), and this is that rule applied
@@ -4253,7 +4580,10 @@ inline Config parseArgs( int argc, char** argv ) noexcept
     {
         const std::string_view a = argv[i];          // argv strings are NUL-terminated
 
-        if( a == "--help" || a == "-h" ) { printUsage( stdout ); std::exit( 0 ); }   // self-doc; first instinct must not error
+        // self-doc; first instinct must not error. Bare --help is TIER 1 (one line per row); --help=X
+        // is tier 2 — the whole entry for one flag, one section, or `all` for the entire catalog.
+        if( a == "--help" || a == "-h" ) { printUsageTier( stdout, HelpTier::Concise, {} ); std::exit( 0 ); }
+        if( a.starts_with( "--help=" ) ) { serveHelpSelector( a.substr( 7 ) ); }   // never returns
 
         // --version — one line, exit 0. Version + compiler come from the SAME generated
         // version.h --help's "determinism" line points at (single source: project(ripwire VERSION ...)

@@ -228,7 +228,7 @@ echo
 echo "=== --help names the defaults the root now echoes ==="
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 HELP="$TMP/help.txt"
-"$BIN" --help >"$HELP" 2>/dev/null
+"$BIN" --help=all >"$HELP" 2>/dev/null
 grep -qF -- '--around-depth=N, default 1' "$HELP" \
   && ok "--help names --around-depth's default" || no "--help still gives no default for --around-depth"
 grep -qF -- '--around-fanout=K, default 32' "$HELP" \

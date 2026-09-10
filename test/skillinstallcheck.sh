@@ -196,7 +196,7 @@ else
         fi
         echo "     unhomed flag -> $flg (not in any SKILL.md, not in the UNROUTED allowlist)"
         unhomed=$(( unhomed + 1 ))
-    done < <( "$BIN" --help 2>&1 | grep -oE -- '--[a-z][a-z-]*' | sort -u )
+    done < <( "$BIN" --help=all 2>&1 | grep -oE -- '--[a-z][a-z-]*' | sort -u )
     [ "$unhomed" -eq 0 ] && ok "every --help flag names a skill home or is explicitly UNROUTED" \
                          || no "$unhomed --help flag(s) have no skill home and aren't in the UNROUTED allowlist"
 fi

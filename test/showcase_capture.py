@@ -25,15 +25,84 @@ except ImportError as exc:
              f"refusing to write an unscrubbed capture")
 
 # --- helper input files -------------------------------------------------
-# A realistic fabricated ASan report. Frame line numbers are the CURRENT ones for those
-# symbols, so the locus lane is being asked a fair question.
-TRACE = """AddressSanitizer:DEADLYSIGNAL
+
+def openBraceLine( lines, i ):
+    """Index of the line carrying the opening brace of the definition matched at i, or -1 if there is none.
+
+    -1 means "that match was a DECLARATION, keep looking" — the distinction bodySeed's first version got
+    wrong by testing for `;` on the line AFTER the match, so an ordinary prototype block with no blank
+    line after it walked into the next function and returned a line inside IT.
+    """
+    code = lines[i].split( '//' )[0].rstrip()
+    if code.endswith( ';' ):
+        return -1                                 # a declaration at the match line itself
+    if '{' in code:
+        return i                                  # brace on the signature line
+    for j in range( i + 1, min( i + 10, len( lines ) ) ):
+        t = lines[j].split( '//' )[0].strip()
+        if t == '':
+            continue                              # blank, or a comment-only line between sig and brace
+        if t.endswith( ';' ):
+            return -1                             # a MULTI-LINE declaration
+        if '{' in t:
+            return j
+        # anything else is a continued parameter list or trailing specifier: keep walking
+    return -1
+
+def bodySeed( rel, sigRe ):
+    """First body line (1-based) of the DEFINITION whose signature matches sigRe.
+
+    These line numbers used to be typed as literals, and the comment above the trace fixture asserted
+    they were "the CURRENT ones for those symbols". That assertion decayed the moment anything above
+    them moved. What actually happened, precisely, because a wrong story here is worse than none:
+    the 2930 literal was written on 2026-09-08 and PR #72 shifted rankGraphTeleport to 2943 the NEXT
+    DAY, so the refusal lived about one day and never reached main — main's own 09-08 capture shows
+    l="2930" sym="rankGraphTeleport", resolved. The lasting damage was the earlier literal 1148: the
+    09-05 and 09-07 captures on main published `rankGraphTeleport p="src/graph.h:1148"` while 1148
+    resolved to buildGraph. That shipped. It exited 0, so NO exit-code arm can ever see it — which is
+    why showcasecapturecheck grew a live arm asserting the seed resolves to the symbol it names, and
+    why deriving the line is not on its own enough.
+
+    The scan is deliberately plain TEXT, never a ripwire query: a fixture that asked ripwire where its
+    own symbols are could not fail, and being able to fail is the whole job of a fixture.
+
+    Requires the signature to be followed by a line that is exactly `{` (or to end in one), so a
+    forward declaration or a `;`-terminated prototype cannot match ahead of the real definition and
+    hand back a line outside any body. Returns the first line after that brace, comment or not; the
+    only contract is that it is INSIDE the definition, which is what a seed has to be.
+    """
+    path  = os.path.join( REPO, rel )
+    lines = open( path, encoding='utf-8' ).read().splitlines()
+    rx    = re.compile( sigRe )
+    for i, line in enumerate( lines ):
+        if not rx.search( line ):
+            continue
+        brace = openBraceLine( lines, i )
+        if brace < 0:
+            continue
+        if brace == i and '}' in lines[i].split( '{', 1 )[1]:
+            return i + 1                          # a one-liner: the only line inside it is this one
+        if brace + 1 < len( lines ):
+            return brace + 2
+    sys.exit( f"showcase_capture: no DEFINITION matching /{sigRe}/ in {rel} (a declaration alone does not "
+              f"count) — the seed fixture names a symbol this tree no longer defines; fix the pattern "
+              f"rather than shipping a stale seed" )
+
+TELEPORT_LN = bodySeed( 'src/graph.h', r'^inline RankedGraph rankGraphTeleport\(' )
+RANKGRAPH_LN = bodySeed( 'src/graph.h', r'^inline RankedGraph rankGraph\(' )
+DEFAULTMAP_LN = bodySeed( 'src/main.cpp', r'^int runDefaultMap\(' )
+MAIN_LN = bodySeed( 'src/main.cpp', r'^int main\(' )
+
+# A realistic fabricated ASan report. Frame line numbers are DERIVED above from the current source,
+# so the locus lane is being asked a fair question on every regeneration, not just the day this was
+# written.
+TRACE = f"""AddressSanitizer:DEADLYSIGNAL
 =================================================================
 ==41337==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000018 (pc 0x000102f4a1c8 bp 0x00016d2f1a40 sp 0x00016d2f19e0 T0)
-    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:2930
-    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:2971
-    #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:1121
-    #3 0x102e01a44 in main src/main.cpp:2780
+    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:{TELEPORT_LN}
+    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:{RANKGRAPH_LN}
+    #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:{DEFAULTMAP_LN}
+    #3 0x102e01a44 in main src/main.cpp:{MAIN_LN}
     #4 0x1a2b3c0dc in start+0x9dc (dyld:arm64e+0x60dc)
 ==41337==ABORTING
 """
@@ -191,7 +260,17 @@ REPO_DIRTY_LINES = subprocess.run("git status --porcelain", shell=True, cwd=REPO
 REPO_DIRTY = bool(REPO_DIRTY_LINES)
 TREE = "a DIRTY tree" if REPO_DIRTY else "a CLEAN tree"
 def onTree(clean, dirty):
-    """Pick the caption that matches the tree this run is actually recording against."""
+    """Pick the caption that matches the tree this run is actually recording against.
+
+    A DIRTY caption must also DISCLOSE that the block's recorded exit code is a real one. These verbs
+    exit non-zero exactly when the working copy has something to say (test-gate 4, quality-delta 2),
+    so a dirty regeneration is the mode in which they carry an exit at all — and a caption that only
+    explained WHY the rows are populated left showcasecapturecheck arm (E) correctly red on an
+    otherwise honest capture. Every dirty branch of a verb that CAN exit
+    non-zero names it (test-gate 4, quality-delta 2, edit-check 1). The ones that cannot — pr-context,
+    map-diff — say nothing about an exit: promising a "recorded exit code" the renderer never prints is
+    the same lie pointed the other way, prose written to satisfy a regex. With no exit line, arm (E)
+    never asks."""
     return dirty if REPO_DIRTY else clean
 
 # --- command table ------------------------------------------------------
@@ -288,21 +367,24 @@ add(S4, f"{BIN} . --exercises=test/regression.sh", "Which symbols a TEST FILE ex
 add(S4, f"{BIN} . --community=0", "Drill into ONE call-graph community by id — the drill= the --communities output itself advertises.")
 add(S4, f"{BIN} . --quality-delta", onTree(
     "On a CLEAN tree: nothing got worse, exit 0. The gating shape is in the sandbox section below.",
-    "Recorded against a DIRTY tree, so any row below is a real regression in the working copy. The sandbox section below shows the same gating shape on a known, deliberate edit."))
+    "Recorded against a DIRTY tree, so any row below is a real regression in the working copy — the recorded exit code says whether anything gated. The sandbox section below shows the same gating shape on a known, deliberate edit."))
 add(S4, f"{BIN} . --edit-check=rankGraphTeleport", onTree(
     "Fast per-symbol post-edit contract check vs git HEAD (unchanged on a clean tree).",
-    "Fast per-symbol post-edit contract check vs git HEAD — recorded against a DIRTY tree, so the verdict describes the working copy, not HEAD alone."))
+    "Fast per-symbol post-edit contract check vs git HEAD — recorded against a DIRTY tree, so the verdict describes the working copy, not HEAD alone, and the recorded exit code is the working copy's."))
 add(S4, f"{BIN} . --pr-context", onTree(
     "No-LLM review-evidence bundle for the working-tree diff (clean tree = empty).",
     "No-LLM review-evidence bundle for the working-tree diff — recorded against a DIRTY tree, so it is populated rather than empty."))
 add(S4, f"{BIN} . --pr-context=HEAD~1", "The BASEREF form: diffed against merge-base(BASEREF, HEAD), never the ref tip — here the previous commit on the current line (a ref with NO merge base falls back to a disclosed two-dot diff: anchor=\"ref-tip-two-dot\").")
 add(S4, f"{BIN} . --merge-scout=HEAD~2,HEAD~1", "Pairwise cross-arm conflict sites + suggested landing order (any committish sharing a merge base with HEAD works as an arm; one that does not is reported ok=\"0\", never compared).", timeout=600)
-add(S4, f"{BIN} . --stray-content=lane", "Which lane-* refs still hold divergent authored work vs HEAD, with verdicts.", timeout=600)
-# wave-3 close (2026-09-05): the two ref-family substrings used to be hard-coded (`worktree-agent-a1`, `r27`) and
-# matched nothing on this checkout — both blocks recorded a refusal under a caption describing the healthy path
-# (showcasecapturecheck arm E). A family substring is now the first of a preferred list that selects >= 1 local
-# ref, else the first real ref itself; the caption follows the choice, so a checkout with none of the families
-# still records an honest block (a REAL ref, caption saying so) rather than a refusal captioned as a measurement.
+# wave-3 close (2026-09-05): the two ref-family substrings below used to be hard-coded (`worktree-agent-a1`,
+# `r27`) and matched nothing on this checkout — both blocks recorded a refusal under a caption describing the
+# healthy path (showcasecapturecheck arm E). A family substring is now the first of a preferred list that
+# selects >= 1 local ref, else the first real ref itself; the caption follows the choice, so a checkout with
+# none of the families still records an honest block (a REAL ref, caption saying so) rather than a refusal
+# captioned as a measurement. 2026-09-10: the plain `--stray-content=lane` / `--stray-content=lane --abi` pair
+# just below was still hard-coded to "lane" and hit the exact same failure the moment a checkout's short-lived
+# `lane/*` branches were merged and deleted (routine post-merge cleanup, so this is the COMMON case, not an
+# edge one) — moved onto the same _refFamily mechanism rather than adding a third ad hoc substring.
 _localRefs = subprocess.run( "git for-each-ref --format='%(refname:short)' refs/heads", shell=True, cwd=REPO, capture_output=True ).stdout.decode().split()
 def _refFamily( preferred ):
     for sub in preferred:
@@ -311,10 +393,11 @@ def _refFamily( preferred ):
     return ( _localRefs[0] if _localRefs else "no-such-ref" ), False
 _famA, _famAIsFamily = _refFamily( [ "worktree-agent-", "feat/", "fix/", "lane/" ] )
 _famB, _famBIsFamily = _refFamily( [ "lane/", "feat/", "fix/", "worktree-agent-" ] )
+add(S4, f"{BIN} . --stray-content={_famB}", ( "Which lane-* refs still hold divergent authored work vs HEAD, with verdicts." if _famBIsFamily else "Which refs of one real branch (no lane-* family on this checkout) still hold divergent authored work vs HEAD, with verdicts." ), timeout=600)
 add(S4, f"{BIN} . --stray-content={_famA}", ( "A second ref family (the substring picked at capture time from the refs this checkout really has): merged refs are OMITTED from the rows and counted in merged=; refs sharing no merge base with HEAD (a shallow clone, or a pre-rewrite history) land in unknown= with ok=\"0\" — the counters always reconcile against refs=." if _famAIsFamily else "A single real ref (no ref family exists on this checkout, so the substring is one branch name): the counters still reconcile against refs=." ), timeout=600)
 add(S4, f"{BIN} . --stray-content={_famB} --plan", ( "Select the genuinely-unmerged refs of one family and feed them to merge-scout for a landing order (a merged family yields an empty landing set — still a measurement, disclosed on the root)." if _famBIsFamily else "The landing plan over a single real ref." ), timeout=900)
 add(S4, f"{BIN} . --stray-content=zzzz-no-such-ref --plan", "A --plan filter that selects NO ref REFUSES (exit 1) naming the substring — before the wave-3 close this fell through to the '>512 refs match' sentence, and --abi under the same filter answered an empty measurement at exit 0.")
-add(S4, f"{BIN} . --stray-content=lane --abi", "Cross-branch ABI-break gate: struct byte-contract drift on each ref's AUTHORED paths.", timeout=600)
+add(S4, f"{BIN} . --stray-content={_famB} --abi", ( "Cross-branch ABI-break gate: struct byte-contract drift on each ref's AUTHORED paths — exit 2 when any drift row is found (the only kind that gates), 0 when the compared refs are clean, and exit 1 if the --stray-content filter matches no ref at all." if _famBIsFamily else "Cross-branch ABI-break gate over the same single real ref as above (no lane-* family on this checkout): exit 2 when any drift row is found, 0 when clean." ), timeout=600)
 add(S4, f"{BIN} . --whereis=rankGraphTeleport", "Which ref's tree defines or mentions SYM — HEAD first, then every local branch.", timeout=600)
 add(S4, f"{BIN} . --whereis=computeOnePairOverlap --with-history", "Same, plus a git-history <fate> row (never / removed-by-commit) for names no tree carries.", timeout=600)
 add(S4, f"{BIN} . --flags", "The dark-content dashboard: gates BUILT but OFF. CHANGED: no longer invents gates from comments/heredocs, so the count only reflects real ifndef/define, CMake option(), and getenv gates.")
@@ -373,8 +456,8 @@ add(S7, f"{BIN} --version", "Version + short build info.")
 
 
 S2B = "navigate — seeds, claims, slices, shapes"
-add(S2B, f"{BIN} . --at=src/graph.h:2930", "Hold a LOCATION, not a name: the enclosing-definition chain at FILE:LINE (a compiler error, a diff hunk, a stack frame), outermost -> innermost.")
-add(S2B, f"{BIN} . --callers=@src/graph.h:2930", "The same seed in a SELECTOR position: @FILE:LINE resolves to the innermost enclosing definition, then --callers runs on it.")
+add(S2B, f"{BIN} . --at=src/graph.h:{TELEPORT_LN}", "Hold a LOCATION, not a name: the enclosing-definition chain at FILE:LINE (a compiler error, a diff hunk, a stack frame), outermost -> innermost.")
+add(S2B, f"{BIN} . --callers=@src/graph.h:{TELEPORT_LN}", "The same seed in a SELECTOR position: @FILE:LINE resolves to the innermost enclosing definition, then --callers runs on it.")
 add(S2B, f"{BIN} . --at=src/graph.h:999999", "A seed past the end of the file — the refusal shape for a faulted location.")
 add(S2B, f'{BIN} . --verify="calls(runDefaultMap, rankGraphTeleport)"', "VERIFY a closed claim in one call: three-valued verdict (confirmed / refuted / not-established) with the evidence rows inline.")
 add(S2B, f'{BIN} . --verify="unused(rankGraphTeleport)"', "A claim that is FALSE — the refuted shape, with the references that refute it.")
@@ -408,7 +491,7 @@ add(S2B, f"{BIN} . --handoff --token-budget=1200", "The same packet under a hard
 add(S2B, f"{BIN} . --skipped", "WHY a file is not in the index (oversize / excluded / unsupported-ext / gitignored) and which indexed files it cannot vouch for (degraded-parse, minified-suspect), plus the per-language census.")
 add(S2B, f"{BIN} . --no-ignore --top-k=3", "Crawl paths the repo's own .gitignore covers (default honours it and discloses ignored_files=/ignored_dirs= only when it dropped anything — this repo's crawl drops nothing, so the header is identical to the default map's; --skipped's ignore_mode= says which rule applied).")
 add(S2B, f"{BIN} . --no-stable --top-k=3", "--no-stable outside --mcp: what the flag does (or says) when there is no stable-by-default ordering to opt out of.")
-add(S2B, f'{BIN} . --run-trace="cat {trace_path}; exit 1"', "EXEC-MODE --from-trace: run a command, and on a non-zero exit map its captured output onto indexed symbols in the same call — the whole fix-loop entry.")
+add(S2B, f'{BIN} . --run-trace="cat {trace_path}; exit 1"', "EXEC-MODE --from-trace: run a command, and on a non-zero exit map its captured output onto indexed symbols in the same call — the whole fix-loop entry. ripwire exits 4 here because the wrapped command failed, which is the signal, not an incident.")
 add(S2B, f'{BIN} . --run-trace="true"', "A command that exits 0: a minimal success record (exit, measured duration, disclosed output tail) and NO bundle — nothing failed, nothing to map.")
 add(S2B, f'{BIN} . --run-trace="sleep 30" --run-timeout=2', "A command still running at the cap: its process group is killed and the run reports timed_out=1 — an honest timeout, never an empty success.", timeout=120)
 add(S2B, f"{BIN} . --run-timeout=5", "--run-timeout alone is refused loudly (it only modifies --run-trace).")

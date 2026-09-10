@@ -203,10 +203,36 @@ constexpr std::uint32_t kCacheVersion = 18;           // 18: #62 — call refs i
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 86;           // bump on any grammar/.scm/extraction change
-                                                      // 86 = Elixir module/name/arity identities, lexical imports,
-                                                      //    defaults, captures, delegates, attributes and contracts.
-                                                      //    Existing bind/ref layouts; quality mirror changes with it.
+constexpr std::uint32_t kParserVer    = 87;           // bump on any grammar/.scm/extraction change
+                                                      // 87 = 2026-09-10 (Elixir module/name/arity resolution,
+                                                      //    test/elixirsemanticcheck.sh, rebased onto main): module/
+                                                      //    name/arity identities, lexical aliases, filtered imports,
+                                                      //    default arguments, pipes, captures, delegates, attributes
+                                                      //    and protocol/behaviour contracts. Existing bind/ref record
+                                                      //    layouts are unchanged (kCacheVersion stays 18,
+                                                      //    kQSnapCacheScheme stays 8); old Elixir extraction facts
+                                                      //    must be re-parsed. Landed at 87 (not the 86 the fork
+                                                      //    carried) — main had already spent 86 on the Ruby receiver
+                                                      //    dedupe below (test/rubyrecvcheck.sh), landing the same
+                                                      //    day: RE-BUMPED to the next free number over main's tip,
+                                                      //    never keeping the fork's value (the same rule applied at
+                                                      //    78, 80, 69 and 65 below). quality.h's
+                                                      //    kIngestParserVerMirror bumped in the SAME commit.
+                                                      // 86 = 2026-09-09 (test/rubyrecvcheck.sh): a Ruby constant
+                                                      //    RECEIVER's lazy bit is the AND over its occurrences —
+                                                      //    a later load-time site clears the bit the first,
+                                                      //    closure-written site set, so the answer no longer
+                                                      //    depends on statement order; and rubyIsConstantChain
+                                                      //    walks the left-nested scope_resolution ITERATIVELY
+                                                      //    (a 5 000-segment chain overflowed a parse worker's
+                                                      //    stack). A cached v85 blob can hold a lazy bit this
+                                                      //    binary would compute as load-time, so the extraction
+                                                      //    identity moves. Record shapes unchanged (Include's
+                                                      //    four fields), so kCacheVersion stays 18. RE-BUMPED
+                                                      //    from 85 on landing: main had already spent 85 on the
+                                                      //    plain-text prose tier below, per the collision rule.
+                                                      //    quality.h's kIngestParserVerMirror bumped in the
+                                                      //    SAME commit.
                                                       // 85 = 2026-09-09 (test/textdocscheck.sh): the plain-text
                                                       //    prose tier — .rst/.adoc/.org/.mdx join kLangTable on
                                                       //    Lang::Markdown and the markdown block grammar. The

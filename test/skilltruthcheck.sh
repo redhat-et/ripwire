@@ -119,7 +119,7 @@ grep -q 'all 21 MCP verbs' "$ROOT/src/wrap.h" \
 # locals= (the nesting profile) next to amp=/ppalt=, and --lint's help line must name the cache-* pack.
 # Both claims are executed against the binary, not just grepped as prose: --metrics really emits ev= on a
 # known guard-return function, and --lint really fires a cache-* rule on the cachelint fixture.
-helpOut="$( "$BIN" --help 2>/dev/null )"
+helpOut="$( "$BIN" --help=all 2>/dev/null )"
 { grep -q 'ev=N essential complexity' <<<"$helpOut" && grep -q 'ev_why=' <<<"$helpOut"; } \
     && ok "--help documents ev=/ev_why= (essential complexity) next to amp=/ppalt=" \
     || no "--help does not document ev=/ev_why="
@@ -169,7 +169,7 @@ grep -qi 'not data flow' "$FINDBUG" \
 grep -q -- '--slice' "$FINDBUG" \
     && ok "find-bug skill's Honesty line documents --slice/--slice-flow data-flow support" \
     || no "find-bug skill's Honesty line does not mention --slice/--slice-flow"
-helpOut2="$( "$BIN" --help 2>/dev/null )"
+helpOut2="$( "$BIN" --help=all 2>/dev/null )"
 { grep -q -- '--slice=' <<<"$helpOut2" && grep -q -- '--slice-flow' <<<"$helpOut2"; } \
     && ok "--help still ships --slice=/--slice-flow (the flags the find-bug skill now names)" \
     || no "--help no longer ships --slice=/--slice-flow — the skill fix now names a retired flag"

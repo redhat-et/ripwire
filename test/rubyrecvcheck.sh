@@ -18,7 +18,10 @@
 #      `validates_with Foo`) or a RESCUE class is NOT a receiver — a DISCLOSED FLOOR of this round.
 #   2. DEDUPE at extraction, per (file, innermost nesting open, written name): Zeitwerk loads a constant ONCE per
 #      process, on its first reference; the second `User.find` in the same body is not a new dependency. The
-#      FIRST occurrence in source order carries the byte and therefore the lazy bit. The declarative shapes stay
+#      FIRST occurrence in source order carries the byte; the lazy bit is the AND over every occurrence — one
+#      load-time site makes the directive load-time, whichever order the sites come in (a receiver inside a
+#      method written ABOVE the same receiver at class-body level was, before parser version 86, a lazy
+#      directive, and the load-time dependency vanished from the structure). The declarative shapes stay
 #      one directive per occurrence (each IS a statement). The nesting is IN the key: `User` inside `module
 #      Admin` and `User` at file level may be different constants, and are in this fixture. A different spelling
 #      of the same constant (`Time` and `::Time`) is a different directive — the spelling is what the reader sees.
@@ -40,13 +43,18 @@
 #      structure leaves out, and a file row carries lazy_edges=N for its own. A lazy edge is not an
 #      unresolved one: the unresolved row has no lazy_edges= and no importer; the lazy row has both.
 #
-# Fixture test/rubyrecvfix (crawl root = the fixture; 17 .rb files under lib/):
+# The receiver chain is validated ITERATIVELY (parser version 86): `A::B::…::Z` is a left-nested scope_resolution
+# and a recursive check overflowed a parse worker's stack at ~5000 segments (SIGBUS, measured on macOS, the
+# whole run gone). A chain of 150 000 segments is generated at gate time and must come out as ONE directive.
+#
+# Fixture test/rubyrecvfix (crawl root = the fixture; 18 .rb files under lib/):
 #   lib/app/report.rb         Helper (class body, lazy=0), User ×2 (deduped), App::Mailer, Time ×2 (deduped),
 #                             ::Time (own spelling), `raise Errors::Boom` + `rescue Errors::Boom` (floor) → 5 rows
 #   lib/app/two_scopes.rb     `User.find` under App::Sync AND under App::Admin::Resync — same file, same written
 #                             name, two nestings → TWO directives, to lib/app/user.rb and lib/app/admin/user.rb
 #   lib/app/lazy_levels.rb    Helper at class-body level (lazy=0); Mailer in a lambda, User in a singleton method,
 #                             Admin::User in a do-block (all lazy=1)
+#   lib/app/eager_after_lazy.rb  `Helper.fmt` inside a method FIRST, then at class-body level → ONE directive, lazy=0
 #   lib/app/admin/audit.rb    `User.find` inside App::Admin → App::Admin::User (LEXICAL), not App::User
 #   lib/app/admin/export.rb   `::App::User.find` inside App::Admin → lib/app/user.rb (ABSOLUTE)
 #   lib/script.rb             no module: `User.find` at file level → the top-level `class User` (lib/user.rb), lazy=0
@@ -120,8 +128,8 @@ expect lib/user.rb:User \
     '<f via="import" p="lib/script.rb" lazy="0"/> ' \
     'resolve: OBJECT LEVEL — script.rb has no module, so `User` is the top-level class; a file-level receiver is load-time (lazy="0")'
 expect Helper \
-    '<f via="import" p="lib/app/lazy_levels.rb" lazy="0"/> <f via="import" p="lib/app/report.rb" lazy="0"/> ' \
-    'lazy: a receiver at CLASS-BODY level runs at load — `Helper.fmt` in report.rb (constant initializer) and lazy_levels.rb (bare statement) are lazy="0"'
+    '<f via="import" p="lib/app/eager_after_lazy.rb" lazy="0"/> <f via="import" p="lib/app/lazy_levels.rb" lazy="0"/> <f via="import" p="lib/app/report.rb" lazy="0"/> ' \
+    'lazy: a receiver at CLASS-BODY level runs at load — `Helper.fmt` in report.rb (constant initializer), lazy_levels.rb (bare statement) and eager_after_lazy.rb (below a lazy site) are lazy="0"'
 expect Mailer \
     '<f via="import" p="lib/app/lazy_levels.rb" lazy="1"/> <f via="import" p="lib/app/report.rb" lazy="1"/> ' \
     'lazy: a receiver inside a LAMBDA (lazy_levels `-> { Mailer.deliver }`) and inside a method body (report) is lazy="1"'
@@ -139,22 +147,23 @@ printf '%s' "$DEPS" | grep -q '<f p="lib/app/errors.rb" includes="1" afferent="0
     || no "round one regression: errors.rb row: $( frow lib/app/errors.rb )"
 
 # ── 3. CAPABILITY ────────────────────────────────────────────────────────────────────────────────────
-printf '%s' "$DEPS" | grep -q '<health files="17" dep_files="17"' \
-    && ok 'capability: all 17 .rb files are dependency-capable' \
+printf '%s' "$DEPS" | grep -q '<health files="18" dep_files="18"' \
+    && ok 'capability: all 18 .rb files are dependency-capable' \
     || no "capability: health wrong: $( printf '%s' "$DEPS" | grep -oE '<health [^/]*/>' )"
 
 # ── 4. STRUCTURE vs USE: a lazy edge is in --impact and the rows, not in the load-time structure ────
 # Load-time edges in this fixture: report.rb → helper.rb (class-body `Helper.fmt`), lazy_levels.rb → helper.rb
-# (class-body), script.rb → lib/user.rb (file level). Everything else resolved is inside a closure: 9 pairs.
-# ccd = Σ transitive cones (self included): 14 files × 1 + 3 files × 2 = 20; acd = 20/17 = 1.2.
-printf '%s' "$DEPS" | grep -q '<health files="17" dep_files="17" ccd="20" acd="1.2" ' \
-    && ok 'structure: ccd counts the 3 load-time edges only — 20 over 17 files, acd 1.2 (with the 9 lazy edges in it would be one tangle)' \
+# (class-body), eager_after_lazy.rb → helper.rb (class-body site below a method site), script.rb → lib/user.rb
+# (file level). Everything else resolved is inside a closure: 9 pairs.
+# ccd = Σ transitive cones (self included): 14 files × 1 + 4 files × 2 = 22; acd = 22/18 = 1.2.
+printf '%s' "$DEPS" | grep -q '<health files="18" dep_files="18" ccd="22" acd="1.2" ' \
+    && ok 'structure: ccd counts the 4 load-time edges only — 22 over 18 files, acd 1.2 (with the 9 lazy edges in it would be one tangle)' \
     || no "structure: health: $( printf '%s' "$DEPS" | grep -oE '<health [^/]*/>' )"
 printf '%s' "$DEPS" | grep -qE '<health [^>]*shape="horizontal" lazy_edges="9" dep_langs=' \
     && ok 'structure: <health lazy_edges="9"> discloses the resolved pairs the structure leaves out; the shape stays horizontal' \
     || no "structure: lazy_edges=/shape= wrong: $( printf '%s' "$DEPS" | grep -oE '<health [^/]*/>' )"
-[ "$( printf '%s' "$DEPS" | grep -oE '<godfiles [^>]*>.*</godfiles>' | sed 's|</godfiles>.*||' )" = '<godfiles total="2" shown="2" capped="0"><f p="lib/app/helper.rb" afferent="2"/><f p="lib/user.rb" afferent="1"/>' ] \
-    && ok 'structure: godfiles = the two load-time importees (helper.rb ×2, lib/user.rb ×1); App::User with its 4 lazy importers is not a god file' \
+[ "$( printf '%s' "$DEPS" | grep -oE '<godfiles [^>]*>.*</godfiles>' | sed 's|</godfiles>.*||' )" = '<godfiles total="2" shown="2" capped="0"><f p="lib/app/helper.rb" afferent="3"/><f p="lib/user.rb" afferent="1"/>' ] \
+    && ok 'structure: godfiles = the two load-time importees (helper.rb ×3, lib/user.rb ×1); App::User with its 4 lazy importers is not a god file' \
     || no "structure: godfiles: $( printf '%s' "$DEPS" | grep -oE '<godfiles [^>]*>.*</godfiles>' | sed 's|</godfiles>.*||' )"
 printf '%s' "$DEPS" | grep -q '<f p="lib/app/user.rb"' \
     && no "structure: lib/app/user.rb has a --deps row — its importers are all lazy, so it has no load-time afferent and no directive of its own: $( frow lib/app/user.rb )" \
@@ -171,11 +180,24 @@ printf '%s' "$DEPS" | grep -q '<f p="lib/app/user.rb"' \
 [ "$( frow lib/script.rb )" = '<f p="lib/script.rb" includes="1" afferent="0" instab="1.00" transitive="2">' ] \
     && ok 'structure: script.rb — a file-level receiver is a load-time edge: transitive 2, no lazy_edges= attribute' \
     || no "structure: script.rb row: $( frow lib/script.rb )"
+[ "$( frow lib/app/eager_after_lazy.rb )" = '<f p="lib/app/eager_after_lazy.rb" includes="1" afferent="0" instab="1.00" transitive="2">' ] \
+    && ok 'structure: ORDER-BLIND — eager_after_lazy.rb'"'"'s method-body `Helper.fmt` comes first in source, the class-body one second: one directive, load-time (transitive 2, no lazy_edges=)' \
+    || no "structure: eager_after_lazy.rb row (a lazy first occurrence must not hide the load-time site below it): $( frow lib/app/eager_after_lazy.rb )"
 [ "$( frow lib/app/dynamic.rb )" = '<f p="lib/app/dynamic.rb" includes="1" afferent="0" instab="0.00" transitive="1">' ] \
     && ok 'structure: LAZY ≠ UNRESOLVED — dynamic.rb'"'"'s `Object` row resolves to nothing: no lazy_edges= attribute (two_scopes.rb, same instab, carries lazy_edges="2")' \
     || no "structure: dynamic.rb row: $( frow lib/app/dynamic.rb )"
 
-# ── 5. root spelling, determinism, warm == cold, well-formed XML ─────────────────────────────────────
+# ── 5. DEEP CHAIN: the constant-chain check must not recurse per segment ─────────────────────────────
+mkdir -p "$TMP/deep/lib"
+python3 -c 'import sys; open(sys.argv[1], "w").write("class Deep\n  " + "::".join(["A"] * 150000) + ".call\nend\n")' "$TMP/deep/lib/deep.rb" 2>/dev/null \
+    || awk 'BEGIN { printf "class Deep\n  A"; for( i = 1; i < 150000; ++i ) { printf "::A" }; printf ".call\nend\n" }' >"$TMP/deep/lib/deep.rb"
+"$BIN" "$TMP/deep" --deps --limit=10 --no-cache >"$TMP/deepout" 2>/dev/null
+deepRc=$?
+[ "$deepRc" -eq 0 ] && grep -q '<f p="lib/deep.rb" includes="1"' "$TMP/deepout" \
+    && ok 'deep chain: a 150 000-segment constant receiver is ONE directive and the run exits 0 (a recursive chain check overflowed a worker stack at ~5000)' \
+    || no "deep chain: exit=$deepRc row=$( grep -oE '<f p="lib/deep.rb"[^>]*>' "$TMP/deepout" | head -1 )"
+
+# ── 6. root spelling, determinism, warm == cold, well-formed XML ─────────────────────────────────────
 ( cd "$FIX" && "$BIN" . --deps --limit=100000 --no-cache 2>/dev/null ) | sed 's/ root="[^"]*"//' >"$TMP/dots"
 "$BIN" "$FIX" --deps --limit=100000 --no-cache 2>/dev/null | sed 's/ root="[^"]*"//' >"$TMP/abs"
 cmp -s "$TMP/dots" "$TMP/abs" \

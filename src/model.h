@@ -8,6 +8,7 @@
 //        → rank:  personalized PageRank over the CSR
 //        → serialize: top-K symbols (by rank) → minified XML, grouped by file.
 
+#include "infra/profileScope.h"
 #include "smallvec.h"   // rw::SmallVec — THE ONE ALIAS; the per-key span lists and per-file id buckets below
 
 #include <algorithm>   // std::sort — symbolsByFile below
@@ -484,8 +485,11 @@ struct Include
                                     //   name the file) but semantically WEAKER: it fires only if and when
                                     //   that function runs. Ruby (parser version 82): true for every `autoload`,
                                     //   which is lazy by definition (the file loads on the constant's first
-                                    //   use). false for every other directive kind and for a top-level TS/JS
-                                    //   require/import. See ingest.cpp::captureIncludes.
+                                    //   use); Ruby (parser version 83): true for a constant receiver inside a
+                                    //   method/lambda/block, and (parser version 86) only when EVERY
+                                    //   occurrence of that (file, open, name) is inside one. false for every
+                                    //   other directive kind and for a top-level TS/JS require/import. See
+                                    //   ingest.cpp::captureIncludes.
     bool          isSymbolic = false; // parser version 82: true ⇒ `target` names a language-level SYMBOL (a Ruby
                                     //   constant: superclass, include/extend/prepend argument, path-less
                                     //   `autoload :Name`), resolved through the corpus's OWN definition index
@@ -826,7 +830,10 @@ struct CrawlSkips
     // extension classification, the --exclude match and the built-in denylist, so every existing counter
     // keeps exactly the meaning it had: ignoredFiles counts files that would OTHERWISE HAVE BEEN INDEXED
     // (which is what makes it the number the header's accounting invariant can carry), and ignoredDirs
-    // counts only the subtrees no other rule had already pruned.
+    // counts only the subtrees no other rule had already pruned. The one class that consults the verdict
+    // EARLIER is `unsupported` above: grep serves that population, so a gitignored file of an unindexed
+    // extension is not rowed there either — it is in no class at all, exactly as an --exclude'd one
+    // already was (ingest_crawl.h recordPreSizeDrop's header).
     std::vector<SkippedFile>  ignored;              // capped rows, path-sorted — the individual ignored files
     std::vector<SkippedFile>  ignoredDirRows;       // capped rows, path-sorted — the pruned subtrees (bytes 0, ext "")
     std::uint64_t             ignoredFiles    = 0;  // EXACT count (rows may be fewer)
@@ -1159,15 +1166,21 @@ inline bool shadowSuppressedSite( const Reference& r, const ShadowEvidence& ev, 
     {
         return false;   // a receiver- or scope-qualified name can never resolve to a plain local
     }
-    if( ev.defNames.find( r.calleeName ) == ev.defNames.end() )
-    {
-        return false;   // no indexed symbol carries the name — nothing to falsely attribute to
-    }
+    // ORDER IS A COST DECISION, not a semantic one: all four guards are pure predicates ANDed together, so
+    // any order gives the same verdict — but they are not equally selective. `varSpans` is keyed on
+    // "<callingSymbol>#<name>" and hits only when THIS caller declares a local of exactly this name (rare);
+    // `defNames` hits whenever ANY indexed symbol anywhere carries the name (common). Testing the common one
+    // first spent a second string hash on nearly every reference in the corpus to learn nothing. The
+    // selective test now runs first, and the name-collision gate is asked only of the sites that got past it.
     buildShadowKey( key, r.fromSymbol, r.calleeName );
     const auto it = ev.varSpans.find( key );
     if( it == ev.varSpans.end() || ev.fnBindKeys.find( key ) != ev.fnBindKeys.end() )
     {
         return false;   // no declared local — or a fn-binding var, whose references must survive
+    }
+    if( ev.defNames.find( r.calleeName ) == ev.defNames.end() )
+    {
+        return false;   // no indexed symbol carries the name — nothing to falsely attribute to
     }
     for( const auto& [ spanStart, spanEnd ] : it->second )   // VarSpan is an aggregate — the binding reads as before
     {
@@ -1181,6 +1194,7 @@ inline bool shadowSuppressedSite( const Reference& r, const ShadowEvidence& ev, 
 
 inline void suppressShadowedReferences( IngestResult& ing )
 {
+    PROFILE_SCOPE_DESCRIBE( "model/shadow: total" );
     ShadowEvidence ev;
     std::string    key;
     for( const Binding& b : ing.bindings )
@@ -1211,11 +1225,17 @@ inline void suppressShadowedReferences( IngestResult& ing )
     {
         return;   // VarDecl-free corpus (no captured C++/ObjC local declarations): byte-identical output
     }
-    for( const Symbol& s : ing.symbols )   // the collision gate: some indexed symbol must carry the name
     {
-        ev.defNames.try_emplace( s.name, 1 );
+        PROFILE_SCOPE_DESCRIBE( "model/shadow: defNames set (one hash insert per symbol)" );
+        for( const Symbol& s : ing.symbols )   // the collision gate: some indexed symbol must carry the name
+        {
+            ev.defNames.try_emplace( s.name, 1 );
+        }
     }
-    std::erase_if( ing.references, [ & ]( const Reference& r ) { return shadowSuppressedSite( r, ev, key ); } );
+    {
+        PROFILE_SCOPE_DESCRIBE( "model/shadow: erase_if over references" );
+        std::erase_if( ing.references, [ & ]( const Reference& r ) { return shadowSuppressedSite( r, ev, key ); } );
+    }
 }
 
 // ONE file's symbol-id bucket, and the whole index. Named so the ten independent reimplementations of this

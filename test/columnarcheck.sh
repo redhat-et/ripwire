@@ -127,7 +127,7 @@ fi
 # LARGER (the paths/cols scaffold has a fixed cost: --callers=parseArgs measured +119.6%). The corrected
 # text names the range, scopes it to multi-row results, and discloses the small-result floor — both
 # halves asserted so neither can silently regress to a one-sided claim.
-HELP="$( "$BIN" --help 2>&1 )"
+HELP="$( "$BIN" --help=all 2>&1 )"
 printf '%s' "$HELP" | grep -q '15-60% fewer tokens on multi-row results' \
     && ok "--help states the measured 15-60% range for --format=columnar, not a flat 50%+ floor (§A10.10)" \
     || no "--help still claims a flat ~50%+ savings figure for --format=columnar"

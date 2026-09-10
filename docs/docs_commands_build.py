@@ -162,7 +162,7 @@ def tool_name_of( binPath ):
 
 def help_text_of( binPath ):
     try:
-        run = subprocess.run( [ binPath, '--help' ], capture_output = True, text = True, timeout = 120 )
+        run = subprocess.run( [ binPath, '--help=all' ], capture_output = True, text = True, timeout = 120 )
     except OSError as exc:
         sys.exit( 'docs_commands_build: cannot run %s (%s)' % ( binPath, exc ) )
     if run.returncode != 0 and not run.stdout:

@@ -134,7 +134,7 @@ The always-loaded ripwire primer trains the READ verbs (`--for`/`--recall`/`--ca
   `ripwire <dir> --quality-panel[=strict|default|lenient]`, the six-family panel (→ **ripwire-fresh-eyes**).
   **It is a lens, not a gate** — always exits 0; `--quality-delta` above is the only pass here that gates.
 
-`ripwire --help` is the full flag catalog; every skill re-verifies its commands against the shipped binary.
+`ripwire --help` lists every flag on one line; `--help=--FLAG` prints one flag in full and `--help=all` the whole catalog. Every skill re-verifies its commands against the shipped binary.
 
 **Installing these skills:** `bash skills/install.sh` symlinks every `ripwire-*` skill into the Claude
 skill home (its codex mode targets `${AGENTS_HOME:-~/.agents}/skills`; `--codex-legacy` retains

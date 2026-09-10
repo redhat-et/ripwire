@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="470" height="52" viewBox="0 0 470 52" role="img" aria-label="Paddle out with a map.">
+  <title>Paddle out with a map.</title>
+  <g transform="translate(18 26) rotate(-24)">
+    <ellipse cx="0" cy="0" rx="19" ry="6.4" fill="#56D6E8"/>
+    <path d="M -19 0 L 19 0" stroke="#0D1117" stroke-width="1.1" opacity="0.55"/>
+    <path d="M 12 3.2 L 15 8.4" stroke="#F2B84B" stroke-width="2.2" stroke-linecap="round"/>
+  </g>
+  <text x="235" y="34" text-anchor="middle" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif"
+        font-size="30" font-style="italic" font-weight="600" fill="#56D6E8">Paddle out with a map.</text>
+  <g transform="translate(452 26) scale(-1 1) rotate(-24)">
+    <ellipse cx="0" cy="0" rx="19" ry="6.4" fill="#56D6E8"/>
+    <path d="M -19 0 L 19 0" stroke="#0D1117" stroke-width="1.1" opacity="0.55"/>
+    <path d="M 12 3.2 L 15 8.4" stroke="#F2B84B" stroke-width="2.2" stroke-linecap="round"/>
+  </g>
+</svg>

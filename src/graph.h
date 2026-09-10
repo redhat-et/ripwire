@@ -447,107 +447,6 @@ inline std::string_view rustFileModuleOf( std::string_view path ) noexcept
     return ( up == std::string_view::npos ) ? dir : dir.substr( up + 1 );
 }
 
-// H4 W3 — the RUST qualified-call scope guard.
-//
-// A Rust call written with an explicit `Scope::` path can ONLY mean a member of that scope: the language has
-// no ADL and no using-directive, so `Vec::new()` can never denote `Widget::new()`. When the canonical tier
-// MISSED (no def is keyed `qualifier::name`) the bare-name spray has just offered every same-named def in the
-// tree — and for an EXTERNAL qualified call that is exactly how a false edge is born. W1-MEASURE named this
-// case; it reproduces on test/rustqualfix, where `external_caller`'s `Vec::<u32>::new()` bound the local
-// `Widget::new` before this guard existed.
-//
-// A qualified call names a MEMBER of the scope it spells, so a candidate survives on exactly three grounds:
-//   * its `scope` IS the qualifier — an `impl`/`trait`/inline-`mod` member;
-//   * it is a member of the FILE MODULE the qualifier names (see rustFileModuleOf) — a Rust module can be
-//     spelled by the DIRECTORY LAYOUT (`src/gadget/mod.rs`, `src/util.rs`) with no AST node in the file
-//     spelling it, so `crate::gadget::gadget_free()` reaches a def whose `scope` is legitimately empty;
-//   * its scope IMPLEMENTS the qualifier as a TRAIT — `Shape::area(&w)` names the trait while the def lives
-//     on the implementor, which is precisely the `impl Shape for Widget` edge chaUp holds. The ancestor walk
-//     is transitive (a supertrait chain `trait Shape: Draw` is one more hop) and bounded like the CHA cones.
-//
-// V3 M-2 — WHY THE FILE-MODULE TEST AND NOT A BARE "keep scope-EMPTY defs". The first version of this guard
-// kept every scope-less candidate, on the reasoning that a file module cannot be seen in the AST. But in Rust
-// EVERY top-level `fn` in EVERY file has scope="", not just file-module members, so the keep-rule was far
-// broader than its own comment claimed: with `pub fn new() {}` at the top of lib.rs, the external
-// `Vec::<u32>::new()` bound it — count 0 -> 1, no `amb=`, `ambiguous=` unmoved. A confident false edge with
-// zero disclosure: exactly the defect this plan exists to kill, reintroduced by its own fix. The file-module
-// test is the precise version of the same idea and needs no new evidence — it is Rust's module-file rule,
-// already implemented from the other direction in resolve.h::resolveRustImport. It separates the two cases
-// the bare rule conflated: `gadget_free` in `src/gadget/mod.rs` IS a member of module `gadget` and survives;
-// a top-level `new` in `src/lib.rs` is a member of no named module and cannot answer for `Vec::new()`.
-//
-// Returns false when NOTHING survives — the call is external in the only scope it could have meant, and the
-// caller drops it the way site A drops any name with no in-repo def, WITHOUT touching `unresolved=`. That
-// gauge means "defined in-repo but lang-filtered"; inflating it with genuine externals is the exact
-// distortion honesty lever #2 exists to prevent. `cand` is left untouched when it returns false.
-//
-// The "does this guard apply at all" test lives HERE rather than at the call site on purpose: buildGraph is
-// already the tree's highest-complexity function, and a six-operand `&&` chain in its body is exactly the
-// kind of growth --quality-delta gates on. `alreadyPinned` = the site was resolved by SCIP / the canonical
-// tier / Rule 1-2-3, in which case there is no bare-name spray to guard.
-inline bool keepRustQualifiedCandidates( const IngestResult& ing, const HashMap<std::string, std::vector<std::string>>& chaUp,
-                                         const Reference& r, bool alreadyPinned, std::vector<NodeId>& cand )
-{
-    if( alreadyPinned || r.lang != Lang::Rust || r.qualifier.empty() || cand.empty() )
-    {
-        return true; // guard does not apply
-    }
-    const std::string& qualifier = r.qualifier;
-
-    std::vector<std::string> ancestors;                                  // transitive chaUp closure of one candidate scope
-    const auto implementsQualifier = [ & ]( const std::string& scopeName ) -> bool
-    {
-        if( scopeName.empty() )
-        {
-            return false;
-        }
-        ancestors.clear();
-        ancestors.push_back( scopeName );
-        for( std::size_t queueIndex = 0; queueIndex < ancestors.size() && ancestors.size() < 4096; ++queueIndex )
-        {
-            const std::string current = ancestors[ queueIndex ];         // COPIED — push_back may reallocate
-            const auto        upIt    = chaUp.find( current );
-            if( upIt == chaUp.end() )
-            {
-                continue;
-            }
-            for( const std::string& up : upIt->second )
-            {
-                if( up == qualifier )
-                {
-                    return true;
-                }
-                if( std::find( ancestors.begin(), ancestors.end(), up ) == ancestors.end() )
-                {
-                    ancestors.push_back( up );
-                }
-            }
-        }
-        return false;
-    };
-
-    std::vector<NodeId> survivors;
-    for( NodeId c : cand )
-    {
-        const Symbol&      cs        = ing.symbols[ c ];
-        const std::string& candScope = cs.scope;
-        // a scope-less def answers ONLY for the file module it actually lives in — never for any qualifier.
-        const bool memberOfFileModule =    candScope.empty()
-                                        && cs.fileId < ing.files.size()
-                                        && rustFileModuleOf( ing.files[ cs.fileId ] ) == qualifier;
-        if( candScope == qualifier || memberOfFileModule || implementsQualifier( candScope ) )
-        {
-            survivors.push_back( c );
-        }
-    }
-    if( survivors.empty() )
-    {
-        return false;
-    }
-    cand.swap( survivors );
-    return true;
-}
-
 // ── B2.1 CHA-lite cone memo (perf round 2026-09-09: the super-linear warm --grep floor) ─────────────────
 // A receiver type's inheritance CONE — {type} ∪ transitive ancestors ∪ transitive descendants over the
 // class-NAME graph — is a pure function of the type name once chaUp/chaDown are built, yet the resolve loop
@@ -601,6 +500,7 @@ struct ChaConeMemo
         fillAdjacency( chaDown, down_ );
         stamp_.assign( names_.size(), 0 );
         coneIndex_.assign( names_.size(), kNoCone );
+        ancIndex_.assign( names_.size(), kNoCone );
     }
 
     Cone coneFor( std::string_view recvType )
@@ -624,6 +524,46 @@ struct ChaConeMemo
             cones_.push_back( std::move( cone ) );
         }
         return Cone{ coneIndex_[ root ] };
+    }
+
+    // Does `scopeName`'s transitive BASE closure reach `qualifier`? The Rust qualified-call guard's question
+    // (keepRustQualifiedCandidates below): `Shape::area(&w)` names the trait while the def lives on the
+    // implementor, so a candidate whose scope IMPLEMENTS the qualifier — directly or up a supertrait chain —
+    // is admissible. It used to be answered by a fresh BFS per CANDIDATE per REFERENCE, over
+    // `std::vector<std::string>` with a std::string copy per queue element and an O(n²) std::find dedup;
+    // measured warm on rust-lang/rust-analyzer (2,303 files), 7,539 active calls cost 23.9 ms — 47% of the
+    // whole resolve loop. Here the closure is the SAME walk (same seed, same discovery order, same
+    // outer-loop-only kChaConeCap) over ids, computed once per scope name, answered by binary search.
+    //
+    // Equivalent to the short-circuiting per-candidate walk, and the argument is short: that walk returned
+    // true the moment it ENCOUNTERED `qualifier` while expanding a frontier, and every name it encounters is
+    // one this walk pushes. Stopping early therefore never reached a name the full capped walk misses, and
+    // continuing past the hit only adds names AFTER it — so `qualifier ∈ closure` is true exactly when the
+    // per-candidate walk returned true. The seed is in the closure, which is harmless: the caller already
+    // tests `candScope == qualifier` on its own line, so both spellings answer the same. test/rustanccheck.sh.
+    bool ancestorsReach( const std::string& scopeName, const std::string& qualifier )
+    {
+        const auto sit = idOf_.find( scopeName );
+        if( sit == idOf_.end() )
+        {
+            return false;   // a scope no inheritance fact ever named has no bases to walk
+        }
+        const auto qit = idOf_.find( qualifier );
+        if( qit == idOf_.end() )
+        {
+            return false;   // the qualifier is not a name any `impl`/`extends` edge mentions
+        }
+        const std::uint32_t root = sit->second;
+        if( ancIndex_[ root ] == kNoCone )
+        {
+            walk( up_, root, upScratch_ );
+            std::vector<std::uint32_t> closure( upScratch_ );
+            std::sort( closure.begin(), closure.end() );
+            ancIndex_[ root ] = std::uint32_t( ancestors_.size() );
+            ancestors_.push_back( std::move( closure ) );
+        }
+        const std::vector<std::uint32_t>& ids = ancestors_[ ancIndex_[ root ] ];   // resolved NOW, never held across a fill
+        return std::binary_search( ids.begin(), ids.end(), qit->second );
     }
 
     // Is a candidate's enclosing scope inside `cone`? A scope no inheritance fact ever named cannot be in any
@@ -681,9 +621,88 @@ private:
     std::uint32_t                            epoch_ = 0;
     std::vector<std::uint32_t>               coneIndex_;   // root id → index into cones_, or kNoCone
     std::vector<std::vector<std::uint32_t>>  cones_;       // sorted id sets, one per computed receiver type
+    std::vector<std::uint32_t>               ancIndex_;    // root id → index into ancestors_, or kNoCone
+    std::vector<std::vector<std::uint32_t>>  ancestors_;   // sorted id sets, one per computed base closure
     std::vector<std::uint32_t>               upScratch_, downScratch_;
     std::string                              key_;         // reused lookup buffer (no per-call allocation)
 };
+
+// H4 W3 — the RUST qualified-call scope guard.
+//
+// A Rust call written with an explicit `Scope::` path can ONLY mean a member of that scope: the language has
+// no ADL and no using-directive, so `Vec::new()` can never denote `Widget::new()`. When the canonical tier
+// MISSED (no def is keyed `qualifier::name`) the bare-name spray has just offered every same-named def in the
+// tree — and for an EXTERNAL qualified call that is exactly how a false edge is born. W1-MEASURE named this
+// case; it reproduces on test/rustqualfix, where `external_caller`'s `Vec::<u32>::new()` bound the local
+// `Widget::new` before this guard existed.
+//
+// A qualified call names a MEMBER of the scope it spells, so a candidate survives on exactly three grounds:
+//   * its `scope` IS the qualifier — an `impl`/`trait`/inline-`mod` member;
+//   * it is a member of the FILE MODULE the qualifier names (see rustFileModuleOf) — a Rust module can be
+//     spelled by the DIRECTORY LAYOUT (`src/gadget/mod.rs`, `src/util.rs`) with no AST node in the file
+//     spelling it, so `crate::gadget::gadget_free()` reaches a def whose `scope` is legitimately empty;
+//   * its scope IMPLEMENTS the qualifier as a TRAIT — `Shape::area(&w)` names the trait while the def lives
+//     on the implementor, which is precisely the `impl Shape for Widget` edge chaUp holds. The ancestor walk
+//     is transitive (a supertrait chain `trait Shape: Draw` is one more hop) and bounded like the CHA cones.
+//
+// V3 M-2 — WHY THE FILE-MODULE TEST AND NOT A BARE "keep scope-EMPTY defs". The first version of this guard
+// kept every scope-less candidate, on the reasoning that a file module cannot be seen in the AST. But in Rust
+// EVERY top-level `fn` in EVERY file has scope="", not just file-module members, so the keep-rule was far
+// broader than its own comment claimed: with `pub fn new() {}` at the top of lib.rs, the external
+// `Vec::<u32>::new()` bound it — count 0 -> 1, no `amb=`, `ambiguous=` unmoved. A confident false edge with
+// zero disclosure: exactly the defect this plan exists to kill, reintroduced by its own fix. The file-module
+// test is the precise version of the same idea and needs no new evidence — it is Rust's module-file rule,
+// already implemented from the other direction in resolve.h::resolveRustImport. It separates the two cases
+// the bare rule conflated: `gadget_free` in `src/gadget/mod.rs` IS a member of module `gadget` and survives;
+// a top-level `new` in `src/lib.rs` is a member of no named module and cannot answer for `Vec::new()`.
+//
+// Returns false when NOTHING survives — the call is external in the only scope it could have meant, and the
+// caller drops it the way site A drops any name with no in-repo def, WITHOUT touching `unresolved=`. That
+// gauge means "defined in-repo but lang-filtered"; inflating it with genuine externals is the exact
+// distortion honesty lever #2 exists to prevent. `cand` is left untouched when it returns false.
+//
+// The "does this guard apply at all" test lives HERE rather than at the call site on purpose: buildGraph is
+// already the tree's highest-complexity function, and a six-operand `&&` chain in its body is exactly the
+// kind of growth --quality-delta gates on. `alreadyPinned` = the site was resolved by SCIP / the canonical
+// tier / Rule 1-2-3, in which case there is no bare-name spray to guard.
+inline bool keepRustQualifiedCandidates( const IngestResult& ing, ChaConeMemo& chaCones,
+                                         const Reference& r, bool alreadyPinned, std::vector<NodeId>& cand )
+{
+    if( alreadyPinned || r.lang != Lang::Rust || r.qualifier.empty() || cand.empty() )
+    {
+        return true; // guard does not apply
+    }
+    const std::string& qualifier = r.qualifier;
+
+    // The transitive base closure of one candidate scope — memoised per scope name by ChaConeMemo, whose
+    // header carries the measurement that moved it out of this per-candidate loop.
+    const auto implementsQualifier = [ & ]( const std::string& scopeName ) -> bool
+    {
+        return !scopeName.empty() && chaCones.ancestorsReach( scopeName, qualifier );
+    };
+
+    std::vector<NodeId> survivors;
+    for( NodeId c : cand )
+    {
+        const Symbol&      cs        = ing.symbols[ c ];
+        const std::string& candScope = cs.scope;
+        // a scope-less def answers ONLY for the file module it actually lives in — never for any qualifier.
+        const bool memberOfFileModule =    candScope.empty()
+                                        && cs.fileId < ing.files.size()
+                                        && rustFileModuleOf( ing.files[ cs.fileId ] ) == qualifier;
+        if( candScope == qualifier || memberOfFileModule || implementsQualifier( candScope ) )
+        {
+            survivors.push_back( c );
+        }
+    }
+    if( survivors.empty() )
+    {
+        return false;
+    }
+    cand.swap( survivors );
+    return true;
+}
+
 
 // THE TIER-3 CANONICAL RESCUE (H4 V3 M-3) — why `canonical` sits beside `narrowed` in buildGraph's tier-3
 // gate. Tier 3 is "a UNIQUE global, else DROP". A Rule-1 narrowed call has always been exempt, because it is
@@ -746,6 +765,7 @@ struct FnPtrBindTables
 
 inline FnPtrBindTables buildFnPtrBindTables( const IngestResult& ing )
 {
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/2f: L3 fn-pointer bind tables" );
     FnPtrBindTables   t;
     std::string       key;
     const std::string emptyTarget;
@@ -848,6 +868,7 @@ struct FieldNarrowTables
 
 inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing )
 {
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/2d: Rule-2b field-narrow tables" );
     FieldNarrowTables t;
     std::string       key;   // reused "Class#field" / "<fromSymbol>#var" key buffer
     for( const Reference& cr : ing.references )
@@ -906,6 +927,7 @@ struct ExternalVetoTables
 
 inline ExternalVetoTables buildExternalVetoTables( const IngestResult& ing )
 {
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/2e: Phase-5 external-veto tables" );
     ExternalVetoTables t;
     std::string        key;   // reused "<fileId>#name" buffer
     const auto fileKey = [ & ]( std::uint32_t fileId, std::string_view name )
@@ -1313,6 +1335,7 @@ inline std::pair<std::uint32_t, JsImportOutcome> resolveJsImportModule( std::str
 
 inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncludeCtx* workspace )
 {
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/2g: JS/TS import tables" );
     JsImportTables tables;
     if( std::none_of( ing.bindings.begin(), ing.bindings.end(), []( const Binding& b ) { return b.kind == LocalBindKind::JsImport; } ) )
     {
@@ -1425,31 +1448,37 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // resolution locality tie-break (below) and serialize's `id=` attribute share one definition. Deterministic.
     g.canonId.resize( N );
     g.localityKey.resize( N );
-    for( const Symbol& s : ing.symbols )
     {
-        g.canonId[ s.id ]     = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
-        g.localityKey[ s.id ] = localityKeyOf( ing.files[ s.fileId ], s.scope, s.name );   // == canonId when scoped
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/1a: canonId + localityKey (per symbol)" );
+        for( const Symbol& s : ing.symbols )
+        {
+            g.canonId[ s.id ]     = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
+            g.localityKey[ s.id ] = localityKeyOf( ing.files[ s.fileId ], s.scope, s.name );   // == canonId when scoped
+        }
     }
 
     // A4-R5 JNI: decode every `Java_pkg_Cls_method` C/C++ def to its readable dotted Java name and stash it as
     // the symbol's binding label. No ingest capture / cache change — it is a pure function of the def NAME. The
     // vector stays EMPTY (no allocation) when the tree holds no JNI export, so a JNI-free corpus is unaffected.
-    for( const Symbol& s : ing.symbols )
     {
-        if( ( s.lang != Lang::Cpp && s.lang != Lang::ObjC ) || s.name.size() <= 5 || s.name.compare( 0, 5, "Java_" ) != 0 )
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/1b: JNI name decode (per symbol)" );
+        for( const Symbol& s : ing.symbols )
         {
-            continue;
+            if( ( s.lang != Lang::Cpp && s.lang != Lang::ObjC ) || s.name.size() <= 5 || s.name.compare( 0, 5, "Java_" ) != 0 )
+            {
+                continue;
+            }
+            std::string readable = decodeJniName( s.name );
+            if( readable.empty() )
+            {
+                continue;
+            }
+            if( g.bindLabel.empty() )
+            {
+                g.bindLabel.assign( N, std::string() );
+            }
+            g.bindLabel[ s.id ] = std::move( readable );
         }
-        std::string readable = decodeJniName( s.name );
-        if( readable.empty() )
-        {
-            continue;
-        }
-        if( g.bindLabel.empty() )
-        {
-            g.bindLabel.assign( N, std::string() );
-        }
-        g.bindLabel[ s.id ] = std::move( readable );
     }
 
     // ── Multi-root workspace: name-based resolution NEVER crosses roots. Every
@@ -1467,12 +1496,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // file → directory id (path up to the last '/')
     HashMap<std::string, std::uint32_t> dirIds;
     std::vector<std::uint32_t>          fileDir( ing.files.size(), 0 );
-    for( std::size_t f = 0; f < ing.files.size(); ++f )
     {
-        std::string_view p     = ing.files[f];
-        const std::size_t sl   = p.rfind( '/' );
-        std::string       dir  = ( sl == std::string_view::npos ) ? std::string() : std::string( p.substr( 0, sl ) );
-        fileDir[f] = dirIds.emplace( std::move( dir ), std::uint32_t( dirIds.size() ) ).first->second;
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/1c: fileDir (dir interning)" );
+        for( std::size_t f = 0; f < ing.files.size(); ++f )
+        {
+            std::string_view p     = ing.files[f];
+            const std::size_t sl   = p.rfind( '/' );
+            std::string       dir  = ( sl == std::string_view::npos ) ? std::string() : std::string( p.substr( 0, sl ) );
+            fileDir[f] = dirIds.emplace( std::move( dir ), std::uint32_t( dirIds.size() ) ).first->second;
+        }
     }
 
     // name → candidate definition ids. rw::svector<,2>: most names define 1-2 symbols, so the id-list is
@@ -1481,9 +1513,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // insertion order exactly like std::vector, so the resolved graph — and the output — is unchanged.
     HashMap<std::string, rw::SmallVec<NodeId, 2>> byName;
     byName.reserve( N );                          // ≤ one entry per symbol → skip the rehash cascade
-    for( const Symbol& s : ing.symbols )
     {
-        byName[ s.name ].push_back( s.id );
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/1d: byName (name -> def ids)" );
+        for( const Symbol& s : ing.symbols )
+        {
+            byName[ s.name ].push_back( s.id );
+        }
     }
 
     // decl/def collapse (adversarial-review #1): a C++ header decl + its .cpp def are TWO same-named
@@ -1494,66 +1529,69 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // resolution targets — forward declarations of one function aren't an ambiguity and must not shadow or
     // block it. Names with no def anywhere (extern / pure-virtual only) keep their decls (best available).
     const auto hasBody = [ & ]( NodeId id ) noexcept { return ing.symbols[id].endByte > ing.symbols[id].sigEndByte; };
-    for( auto& [ name, ids ] : byName )
     {
-        if( !multiRoot )
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/1e: decl/def collapse" );
+        for( auto& [ name, ids ] : byName )
         {
-            bool anyDef = false;
-            for( NodeId id : ids )
+            if( !multiRoot )
             {
-                if( hasBody( id ) )
-                {
-                    anyDef = true;
-                    break;
-                }
-            }
-            if( !anyDef )
-            {
-                continue;
-            }
-            rw::SmallVec<NodeId, 2> defs;
-            for( NodeId id : ids )
-            {
-                if( hasBody( id ) )
-                {
-                    defs.push_back( id );
-                }
-            }
-            ids = std::move( defs );
-        }
-        else
-        {
-            // multi-root: collapse PER ROOT — root A's def must not evict root B's decl-only best-available
-            // target (each root's solo resolution behavior is preserved exactly; lookups are root-filtered).
-            bool anyRootCollapses = false;
-            const auto rootHasDef = [ & ]( std::uint32_t r ) noexcept
-            {
+                bool anyDef = false;
                 for( NodeId id : ids )
                 {
-                    if( ing.fileRoot[ing.symbols[id].fileId] == r && hasBody( id ) )
+                    if( hasBody( id ) )
                     {
-                        return true;
+                        anyDef = true;
+                        break;
                     }
                 }
-                return false;
-            };
-            for( NodeId id : ids )
-            {
-                if( !hasBody( id ) && rootHasDef( ing.fileRoot[ ing.symbols[id].fileId ] ) ) { anyRootCollapses = true; break; }
-            }
-            if( !anyRootCollapses )
-            {
-                continue;
-            }
-            rw::SmallVec<NodeId, 2> kept;
-            for( NodeId id : ids )
-            {
-                if( hasBody( id ) || !rootHasDef( ing.fileRoot[ing.symbols[id].fileId] ) )
+                if( !anyDef )
                 {
-                    kept.push_back( id );
+                    continue;
                 }
+                rw::SmallVec<NodeId, 2> defs;
+                for( NodeId id : ids )
+                {
+                    if( hasBody( id ) )
+                    {
+                        defs.push_back( id );
+                    }
+                }
+                ids = std::move( defs );
             }
-            ids = std::move( kept );
+            else
+            {
+                // multi-root: collapse PER ROOT — root A's def must not evict root B's decl-only best-available
+                // target (each root's solo resolution behavior is preserved exactly; lookups are root-filtered).
+                bool anyRootCollapses = false;
+                const auto rootHasDef = [ & ]( std::uint32_t r ) noexcept
+                {
+                    for( NodeId id : ids )
+                    {
+                        if( ing.fileRoot[ing.symbols[id].fileId] == r && hasBody( id ) )
+                        {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                for( NodeId id : ids )
+                {
+                    if( !hasBody( id ) && rootHasDef( ing.fileRoot[ ing.symbols[id].fileId ] ) ) { anyRootCollapses = true; break; }
+                }
+                if( !anyRootCollapses )
+                {
+                    continue;
+                }
+                rw::SmallVec<NodeId, 2> kept;
+                for( NodeId id : ids )
+                {
+                    if( hasBody( id ) || !rootHasDef( ing.fileRoot[ing.symbols[id].fileId] ) )
+                    {
+                        kept.push_back( id );
+                    }
+                }
+                ids = std::move( kept );
+            }
         }
     }
 
@@ -1564,15 +1602,18 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     HashMap<std::string, rw::SmallVec<NodeId, 2>> canonByName;
     canonByName.reserve( N );
     std::string canonKey;
-    for( const Symbol& s : ing.symbols )
     {
-        if( s.scope.empty() || !hasBody( s.id ) )
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/1f: canonByName (scope::name -> def ids)" );
+        for( const Symbol& s : ing.symbols )
         {
-            continue;
+            if( s.scope.empty() || !hasBody( s.id ) )
+            {
+                continue;
+            }
+            canonKey.clear();
+            canonKey.append( s.scope ).append( "::" ).append( s.name );
+            canonByName[ canonKey ].push_back( s.id );
         }
-        canonKey.clear();
-        canonKey.append( s.scope ).append( "::" ).append( s.name );
-        canonByName[ canonKey ].push_back( s.id );
     }
 
     // P2-D Rule 2 binding table: per-scope `(fromSymbol, var) → type` from ingest's local var→type bindings,
@@ -1585,6 +1626,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     HashMap<std::string, std::string> varType;
     varType.reserve( ing.bindings.size() );
     {
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/1g: varType binding table" );
         std::string key;   // reused key buffer — same "<fromSymbol>#var" bytes as before, one alloc amortized
         for( const Binding& b : ing.bindings )
         {
@@ -1615,11 +1657,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // corpus, so `Cls.m()` can read its receiver token as the type it names. Consumed via Narrower::rule2cClassNameRecv.
     HashMap<std::string, char> classNames;
     classNames.reserve( N / 8 + 1 );
-    for( const Symbol& s : ing.symbols )
     {
-        if( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface )
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/1h: classNames set" );
+        for( const Symbol& s : ing.symbols )
         {
-            classNames.try_emplace( s.name, '\0' );
+            if( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface )
+            {
+                classNames.try_emplace( s.name, '\0' );
+            }
         }
     }
 
@@ -1647,9 +1692,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     const JsImportTables jsImports = buildJsImportTables( ing, includeContext.fileRoot ? &includeContext : nullptr );
     // per-symbol fileId view for Rule 3 (group a candidate def by its file without passing the whole IngestResult).
     std::vector<std::uint32_t> symFileId( N );
-    for( const Symbol& s : ing.symbols )
     {
-        symFileId[s.id] = s.fileId;
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/1i: symFileId view" );
+        for( const Symbol& s : ing.symbols )
+        {
+            symFileId[s.id] = s.fileId;
+        }
     }
 
     // ── A4-R5 cross-language FFI binding alias tables ────────────────────────────────────────────────
@@ -1666,6 +1714,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     HashMap<std::string, char>                    ctypesHandle;   // "<fileId>#<var>"      → a ctypes CDLL handle var
     if( !ing.bindingAliases.empty() )
     {
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: FFI binding alias tables" );
         std::string        sk;    // reused scope::name / "<fileId>#var" key buffer
         std::vector<NodeId> tgt;
         const auto pushCFamily = [ & ]( const rw::SmallVec<NodeId, 2>& srcIds )
@@ -1807,6 +1856,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     {
         const auto isClassLikeK = []( SymKind k ) noexcept
         { return k == SymKind::Class || k == SymKind::Struct || k == SymKind::Interface; };
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/2h: CHA-lite inheritance name graph" );
         for( const Reference& ir : ing.references )
         {
             if( !ir.isInherit )
@@ -2247,7 +2297,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
         // ---- H4 W3: RUST qualified-call scope guard — see keepRustQualifiedCandidates ------------------
         const bool alreadyPinned = scipPinned || canonical || narrowed;
-        if( !keepRustQualifiedCandidates( ing, chaUp, r, alreadyPinned, cand ) && bindingTier.empty() )
+        if( !keepRustQualifiedCandidates( ing, chaCones, r, alreadyPinned, cand ) && bindingTier.empty() )
         {
             continue;                                                           // qualified-external → no edge
         }

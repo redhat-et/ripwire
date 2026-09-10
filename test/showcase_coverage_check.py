@@ -14,8 +14,10 @@ Prints one line per check, prefixed PASS/FAIL, in the same idiom as the bash arm
                     "Not run" header sentence (bracket-optional-suffix notation like `--baseline[-update]`
                     is expanded to both `--baseline` and `--baseline-update`, matching the two literal
                     rows --help actually prints for that pair).
-  (E) caption-vs-error — a block whose caption does NOT mention refus/error/exit/timeout must not contain
-                    the MCP error shape `"error":{` or a `**exit code:` line between its heading and body.
+  (E) caption-vs-error — a block whose caption does not DISCLOSE an exit (name it, say REFUSES, or say
+                    "refusal/error shape") must not contain the MCP error shape `"error":{` or a
+                    `**exit code:` line between its heading and body. A bare "error" in prose about
+                    the subject matter does not exempt — see the note at REFUSAL_WORDS.
   (F) contrast-pair — two CONSECUTIVE `## ` headings where the second command is the first PLUS exactly
                     one added `--`-flag token must have DIFFERING blocks (the whole point of showing them
                     back to back is the contrast; a byte-identical pair demonstrates nothing).
@@ -99,7 +101,7 @@ def body_of(rawChunk):
 
 
 # ── (D) flag coverage ─────────────────────────────────────────────────────────────────────────────
-helpText = subprocess.run([BIN, '--help'], capture_output=True, text=True, timeout=120).stdout
+helpText = subprocess.run([BIN, '--help=all'], capture_output=True, text=True, timeout=120).stdout
 _preamble, sections = dcb.parse_help(helpText)
 allFlags = {f for f in dcb.binary_flags(sections) if f.startswith('--')}
 
@@ -128,12 +130,65 @@ check('(D) coverage', not missing,
       else ('%d/%d flags covered (heading or Not-run)' % (len(allFlags), len(allFlags))))
 
 # ── (E) caption vs error/exit-code shape ──────────────────────────────────────────────────────────
-REFUSAL_WORDS = re.compile(r'refus|error|exit|timeout', re.I)
+# A caption EXEMPTS its block from this arm only when it DISCLOSES the exit, and the caption is read
+# with its --flag tokens REMOVED first. Both halves are scars.
+#
+# The word half: the seed demo `--at=FILE:LINE` was captioned "...(a compiler error, a diff hunk, a
+# stack frame)...", which matched a bare /error/ and hid a real exit 1. Matching a subject-matter word
+# is CONTRIBUTING §2 shape 1 — shape where a value was meant. Flag-stripping is the same bug one word
+# smaller: without it "Pairs with --run-timeout to cap the command" exempts on the flag's NAME.
+#
+# The number half: a caption may NAME an exit, and then the name must be true. "exits 0: a minimal
+# success record" over a block that exits 4 is worse than saying nothing — it is a wrong answer with a
+# confident shape. So when the caption names any exit number, one of them must be the block's own.
+#
+# Deliberately NOT accepted as a disclosure: a bare "non-zero exit" with no number. That is what the
+# --run-trace caption said while the block exited 4, and it was describing the WRAPPED command's exit,
+# not ripwire's. Accepting it would re-cut the hole this arm exists to close.
+FLAG_TOKEN   = re.compile(r'--[A-Za-z0-9][A-Za-z0-9-]*')
+# These two must agree on what an exit LOOKS like, or the arm contradicts itself: round 5 found
+# "ripwire exited 1" flagged (CAPTION_EXIT read it, DISCLOSE did not) while "exit code: 1" over a
+# block that exits 4 was exempt (DISCLOSE read it, CAPTION_EXIT's [-\s]* did not admit the colon, so
+# the number rule never fired). One shared spelling of the number, used by both.
+_EXIT_N      = r'exit(?:s|ed)?[-\s]*(?:code|status)?[-\s:]*(\d+)'
+DISCLOSE     = re.compile(r'refus|' + _EXIT_N + r'|exit[-\s]?(?:code|status)|timed[ -]?out|timeout|error shape|error form', re.I)
+CAPTION_EXIT = re.compile(_EXIT_N, re.I)
+BLOCK_EXIT   = re.compile(r'^\*\*exit code:\s*(\d+)', re.M)
+
+# A number is only a claim about THIS block when it is asserted. "exit 2 on violation" / "exit 2 =
+# CRITICAL, 1 = WARN" state the verb's CONTRACT and stay true whichever way the recorded run went;
+# enforcing them would turn two honest captions red. "exits 0: a minimal success record" over a block
+# that exits 4 asserts, and is wrong. So the number rule fires on assertive numbers only.
+CONDITIONAL = re.compile(r'\s*(?:if|when(?:ever)?|unless|on\b|=|or\b|,\s*\d)', re.I)
+
+def caption_exits( bare ):
+    """Exit numbers the caption ASSERTS about this block (conditional/contract numbers excluded)."""
+    out = set()
+    for m in CAPTION_EXIT.finditer( bare ):
+        if not CONDITIONAL.match( bare[m.end():m.end() + 12] ):
+            out.add( m.group( 1 ) )
+    return out
+
+def caption_discloses( caption, chunk ):
+    """True when the caption tells the reader this block exits non-zero, and any exit it ASSERTS is right."""
+    bare = FLAG_TOKEN.sub( ' ', caption )
+    if not DISCLOSE.search( bare ):
+        return False
+    named = caption_exits( bare )
+    # A block with no `**exit code:` line exited 0 — the renderer prints the line only for rc != 0. That
+    # is why the empty case is 0 and not "unknown": a caption asserting "REFUSES (exit 1)" over a block
+    # that quietly succeeded is a refusal that REGRESSED, and reading the absence as unknown would make
+    # this arm green for exactly that.
+    actual = set( BLOCK_EXIT.findall( chunk ) ) or { '0' }
+    if named and not ( named & actual ):
+        return False        # it asserted an exit, and asserted the wrong one
+    return True
+
 eBad = []
 for i, hm in enumerate(heads):
     rawChunk = chunk_of(i)
     caption = caption_of(rawChunk)
-    if REFUSAL_WORDS.search(caption):
+    if caption_discloses(caption, rawChunk):
         continue
     hasErrorShape = '"error":{' in rawChunk
     hasExitLine = re.search(r'^\*\*exit code:', rawChunk, re.M) is not None
@@ -145,9 +200,9 @@ for i, hm in enumerate(heads):
             why.append('**exit code: line present')
         eBad.append('%s [%s]' % (hm.group(1)[:70], ', '.join(why)))
 check('(E) caption-vs-error', not eBad,
-      ('%d block(s) whose caption never says refus/error/exit/timeout but the block does: %s'
+      ('%d block(s) whose caption does not DISCLOSE an exit (name it, or say REFUSES / refusal shape) but the block has one: %s'
        % (len(eBad), '; '.join(eBad[:5]) + (' ...' if len(eBad) > 5 else ''))) if eBad
-      else 'every non-refusal-captioned block is free of the MCP error shape and an exit-code line')
+      else 'every block that exits non-zero says so in its caption; no undisclosed MCP error shape either')
 
 # ── (F) contrast pairs: consecutive headings differing by exactly one added --flag token ───────────
 fBad = []

@@ -321,9 +321,9 @@ cmp -s "$TMP/fp.out" "$TMP/fd.out" \
 
 # ── (E) --help must state --from-trace's budget ────────────────────────────────────────────────────────
 # The named §B9.2 gap: --from-trace DOES honour --max-tokens and --help never said so.
-"$BIN" --help 2>&1 | tr '\n' ' ' | grep -q -- '--from-trace' && HELPOK=1 || HELPOK=0
+"$BIN" --help=all 2>&1 | tr '\n' ' ' | grep -q -- '--from-trace' && HELPOK=1 || HELPOK=0
 [ "$HELPOK" = 1 ] || no "(E) --help does not mention --from-trace at all"
-"$BIN" --help 2>&1 | sed -n '/--from-trace=FILE/,/--note-add/p' | grep -q -- '--max-tokens' \
+"$BIN" --help=all 2>&1 | sed -n '/--from-trace=FILE/,/--note-add/p' | grep -q -- '--max-tokens' \
     && ok "(E) --help's --from-trace paragraph states that it honors --max-tokens" \
     || no "(E) --help's --from-trace paragraph still never mentions --max-tokens"
 

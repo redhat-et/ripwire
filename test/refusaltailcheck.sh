@@ -102,7 +102,7 @@ OUT="$( "$BIN" "$R" --edit-plan="$R/plan.json" --dry-run --no-cache 2>&1 1>/dev/
 printf '%s' "$OUT" | grep -qF 'replace_symbol_body' \
   && ok "C the unknown-op refusal names the supported ops" \
   || no "C the unknown-op refusal names no supported set: $OUT"
-HELPF="$TMP/help.txt"; "$BIN" --help >"$HELPF" 2>/dev/null
+HELPF="$TMP/help.txt"; "$BIN" --help=all >"$HELPF" 2>/dev/null
 grep -qF 'replace_symbol_body' "$HELPF" \
   && ok "C --help lists the edit-plan op vocabulary" \
   || no "C --help still documents {op,target,file?,payload} without naming the op values"

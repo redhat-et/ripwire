@@ -20,10 +20,16 @@
 #       to 72-90%, and nothing compared the two.
 #   (D)-(G) H16 (capture-audit 2026-09-04, lens0-orchestrator.md) — the capture's OWN coverage and internal
 #       consistency, via test/showcase_coverage_check.py: (D) every --help flag is captured or listed
-#       Not-run; (E) a caption that never says refus/error/exit/timeout must not sit over an error/exit-code
+#       Not-run; (E) a caption that does not DISCLOSE an exit (name it truly, or say REFUSES / refusal
+#       shape) must not sit over an error/exit-code
 #       block; (F) a "contrast pair" (two consecutive headings differing by one added flag) must actually
 #       differ; (G) a caption naming a header clause ([doc mentions/[mention anchor/[adaptive) must find it
 #       in the block, unless the caption is describing the clause's ABSENCE. See that file's own docstring.
+#   (H) SEED RESOLUTION — a published `--at=src/graph.h:LINE` demo must both PUBLISH and still RESOLVE
+#       to the symbol the demo is about. This is the one shape (E) structurally cannot see: a seed that
+#       drifts onto a line inside a DIFFERENT function exits 0 with a well-formed <at> element naming
+#       the wrong symbol. main's 09-05 and 09-07 captures shipped exactly that — l="1148"
+#       sym="buildGraph" under a rankGraphTeleport demo — and this arm is red on both.
 #
 # NOTE: the python3 helpers below live in FILES under $TMP, not `<<'PY' ... PY` heredocs inside a `$( )`
 # command substitution — macOS's stock bash (3.2.57, frozen there for licensing reasons) has a long-standing
@@ -288,7 +294,7 @@ print('OK' if not bad else 'DRIFT ' + '; '.join('top-%d caption %.1f%% vs recoun
         # two numbers --help states for --pack-signatures and asserts they equal the C-band bounds above (not
         # a second hand-copied 72/90 — same $bandLow/$bandHigh variables), so a future recalibration of the
         # band and a forgotten --help edit cannot silently drift apart again.
-        helpText="$( "$BIN" --help 2>&1 )"
+        helpText="$( "$BIN" --help=all 2>&1 )"
         helpRange="$( printf '%s' "$helpText" | python3 -c "
 import re, sys
 m = re.search( r'~([0-9]+(?:\.[0-9])?)-([0-9]+(?:\.[0-9])?)% fewer element bytes', sys.stdin.read() )
@@ -384,6 +390,36 @@ EOF
 (empty)
 `````
 
+## `./build/ripwire . --mutant-e-prose`
+
+*Hold a LOCATION: the chain at FILE:LINE (a compiler error, a diff hunk, a stack frame).*
+
+**exit code: 1**
+
+`````
+(empty)
+`````
+
+## `./build/ripwire . --mutant-e-number`
+
+*exits 0: a minimal success record, nothing to map.*
+
+**exit code: 4**
+
+`````
+(empty)
+`````
+
+## `./build/ripwire . --mutant-e-flagname`
+
+*Pairs with --run-timeout to cap the command it wraps.*
+
+**exit code: 1**
+
+`````
+(empty)
+`````
+
 ## `./build/ripwire . --for="x"`
 
 *Doc-mention surfacing: the legend's [doc mentions: …] clause says it fired.*
@@ -437,10 +473,27 @@ EOF
     fLine="$( printf '%s\n' "$efgOut" | grep '(F) contrast-pair' )"
     gLine="$( printf '%s\n' "$efgOut" | grep '(G) header-clause' )"
 
-    case "$eLine" in
-        FAIL\ *mutant-e-bad*) ok "(E) mutation control: the undisclosed-exit-code block is caught, and the properly-captioned one (--mutant-e-good) is not: $eLine" ;;
-        *)                    no "(E) mutation control did not catch the undisclosed exit code (or false-flagged the good block): $eLine" ;;
-    esac
+    # (E) has one true positive per hole it has ever had, plus the negative control, plus PRESENCE
+    # guards. The guards are the point of rule 2: strip "a compiler error" out of the prose fixture and
+    # the arm below would still print ok while proving nothing, because that mutant would have collapsed
+    # into a copy of --mutant-e-bad. An arm that cannot tell "the mutation was caught" from "the mutation
+    # was never made" is the shape this whole file exists to catch.
+    for probe in 'a compiler error:mutant-e-prose' 'exits 0:mutant-e-number' 'run-timeout:mutant-e-flagname'; do
+        needle="${probe%%:*}"
+        if ! grep -q -- "$needle" "$MTMP/efg.md"; then
+            no "(E) fixture guard: '$needle' is not in the mutant capture, so the ${probe#*:} arm is asserting on a mutation that was never made"
+        fi
+    done
+    eMissed=""
+    for want in mutant-e-bad mutant-e-prose mutant-e-number mutant-e-flagname; do
+        case "$eLine" in *"$want"*) ;; *) eMissed="$eMissed $want" ;; esac
+    done
+    case "$eLine" in *mutant-e-good*) eMissed="$eMissed (false-flagged:mutant-e-good)" ;; esac
+    if [ -z "$eMissed" ]; then
+        ok "(E) mutation control: all four undisclosed shapes are caught — wordless, prose-only ('a compiler error'), NAMED-BUT-WRONG exit ('exits 0' over exit 4), and flag-NAME-only ('--run-timeout') — while the disclosing caption (--mutant-e-good) is not: $eLine"
+    else
+        no "(E) mutation control missed or false-flagged:$eMissed — the arm does not see every shape it claims to: $eLine"
+    fi
     case "$fLine" in
         FAIL\ *mutant-f-bad*) ok "(F) mutation control: the byte-identical contrast pair is caught, and the real-contrast pair (--mutant-f-good) is not: $fLine" ;;
         *)                    no "(F) mutation control did not catch the byte-identical pair (or false-flagged the differing one): $fLine" ;;
@@ -448,6 +501,64 @@ EOF
     case "$gLine" in
         FAIL\ *"--for=\"x\""*) ok "(G) mutation control: the unfulfilled [doc mentions claim is caught, and the 'no [doc mentions]' negation is correctly NOT flagged: $gLine" ;;
         *)                     no "(G) mutation control did not catch the unfulfilled header-clause claim (or false-flagged the negation caption): $gLine" ;;
+    esac
+fi
+
+# ── (H) the seed a published demo names must RESOLVE to the symbol that demo is about ────────────────
+#
+# Arm (E) can only see a seed that has drifted far enough to REFUSE. The damaging case exits 0: the
+# 09-05 and 09-07 captures on main published `rankGraphTeleport p="src/graph.h:1148"` while line 1148
+# had drifted into buildGraph. Right shape, wrong symbol, exit 0, invisible to every arm above — and it
+# shipped. Deriving the seed at capture time (bodySeed) fixes the harness going forward but proves
+# nothing about the capture sitting in docs/ right now, which is what readers actually get. So: read the
+# seed back OUT of the newest capture's own heading and ask the binary what lives there.
+SEEDSYM="rankGraphTeleport"
+graphLines="$( wc -l < "$ROOT/src/graph.h" | tr -d ' ' )"
+# EVERY in-range --at=src/graph.h:N heading is checked, not `head -1` of them. Picking the first was
+# order-dependent: the capture also carries a deliberate past-the-end seed, and section order was the
+# only reason the resolved demo came first. The past-the-end demo is excluded by line count, which is
+# the property that actually distinguishes it, rather than by its position or its literal value.
+seedCands="$( grep '^## ' "$newestCapture" | grep -oE -- '--at=src/graph\.h:[0-9]+' | grep -oE '[0-9]+$' | sort -un )"
+seedChecked=0
+for cand in $seedCands; do
+    [ "$cand" -gt "$graphLines" ] && continue          # the deliberate faulted-location demo
+    seedChecked=$(( seedChecked + 1 ))
+
+    # (1) what the capture PUBLISHES — that is what a reader gets, and where the 1148/buildGraph defect
+    # lived: main's 09-05 and 09-07 both carry <at l="1148" sym="buildGraph"> under a rankGraphTeleport demo.
+    recSym="$( grep -oE '<at p="src/graph\.h" l="'"$cand"'" sym="[^"]*"' "$newestCapture" | grep -oE 'sym="[^"]*"' | head -1 )"
+    if [ "$recSym" = "sym=\"$SEEDSYM\"" ]; then
+        ok "(H) the capture PUBLISHES sym=\"$SEEDSYM\" for src/graph.h:$cand — the reader is given the symbol the demo is about"
+    else
+        no "(H) the capture publishes [${recSym:-no sym= at all}] for src/graph.h:$cand but the demo is about $SEEDSYM — a right-shaped, wrong-symbol seed exits 0 and no exit-code arm can see it"
+    fi
+
+    # (2) does it STILL resolve that way here? A capture can be internally honest and simply stale.
+    seedOut="$( "$BIN" "$ROOT" "--at=src/graph.h:$cand" 2>&1 )"
+    case "$seedOut" in
+        *"sym=\"$SEEDSYM\""*) ok "(H) the published seed src/graph.h:$cand still resolves to $SEEDSYM (not merely to SOME symbol, and not merely non-refusing)" ;;
+        *)
+            gotSym="$( printf '%s' "$seedOut" | grep -oE 'sym="[^"]*"' | head -1 )"
+            no "(H) the published seed src/graph.h:$cand does NOT resolve to $SEEDSYM — got [${gotSym:-a refusal}]; regenerate the capture, which re-derives the seed via bodySeed, rather than editing the number by hand" ;;
+    esac
+done
+if [ "$seedChecked" -eq 0 ]; then
+    no "(H) no in-range --at=src/graph.h:LINE heading in $( basename "$newestCapture" ) — the seed demo this arm exists for is gone, or every seed is past the end of the file"
+fi
+
+# Mutation control: the comparison must be able to say NO. A line in a DIFFERENT function has to report
+# that other symbol. The line is the signature line itself — no +N offset, because a hard-coded offset
+# is the exact species of hazard this commit exists to remove, and --at resolves a signature line to its
+# own definition anyway.
+otherLine="$( grep -n '^inline RankedGraph rankGraph(' "$ROOT/src/graph.h" | head -1 | cut -d: -f1 )"
+if [ -z "$otherLine" ]; then
+    no "(H) mutation control: no 'inline RankedGraph rankGraph(' in src/graph.h — cannot build the negative case, so (H) above is unproven"
+else
+    otherOut="$( "$BIN" "$ROOT" "--at=src/graph.h:$otherLine" 2>&1 )"
+    case "$otherOut" in
+        *"sym=\"$SEEDSYM\""*) no "(H) mutation control: src/graph.h:$otherLine (inside rankGraph) ALSO reported sym=\"$SEEDSYM\" — the comparison cannot discriminate, so (H) proves nothing" ;;
+        *sym=*)                ok "(H) mutation control: a line inside a DIFFERENT function reports that other symbol, so the comparison discriminates (the arm can fail)" ;;
+        *)                     no "(H) mutation control: --at on src/graph.h:$otherLine produced no sym= at all — cannot tell discrimination from breakage: $( printf '%s' "$otherOut" | head -c 120 )" ;;
     esac
 fi
 

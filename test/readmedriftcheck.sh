@@ -83,7 +83,7 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -f "$README" ] || { echo "readmedriftcheck: missing $README"; exit 2; }
 [ -f "$LINEAGE" ] || { echo "readmedriftcheck: missing $LINEAGE — arm (E) has no ground truth to check against"; exit 2; }
 
-HELP="$( "$BIN" --help 2>&1 )"
+HELP="$( "$BIN" --help=all 2>&1 )"
 
 # ── (A) derive the distinct flag count from --help ──────────────────────────────────────────────────
 # Reuses flagsurfacecheck.sh's own harvest idiom verbatim (see its "the advertised surface" comment).
@@ -225,6 +225,44 @@ elif [ "$bad_repos" = "$d_folded" ]; then
     no "(E4) mutation control: the injected wrong count did not take ($bad_repos still equals the derived $d_folded) — the control is vacuous"
 else
     ok "(E4) mutation control: a fabricated repository count ($bad_repos) is correctly seen as disagreeing with the derived count ($d_folded)"
+fi
+
+# (E2b) EVERY copy of the README pair must agree — one distinct value, however many times it is printed.
+#       (E2) extracts the FIRST "<M> repositories and <P> papers" and stops (`head -1`). README carries the pair
+#       TWICE (the <summary> line near the top, and the bolded sentence in the honesty section ~1,600 lines
+#       down), so a second copy that drifted was a published number with NO instrument on it — the exact
+#       merge-clean-but-wrong shape the 2026-09-09 landing round hit four times over (a gate count carried by
+#       two lanes, a stacked count conflicting outright, a printf-parity row, shapingflagcheck's read-site
+#       pin). `sort -u` over ALL matches asserts one distinct pair, which also catches a FUTURE third copy
+#       that disagrees; the copy count is reported, never pinned, so adding a copy is free and drifting one
+#       is not.
+pairs_from() {                       # $1 = file → every distinct "<M> repositories and <P> papers", one per line
+    sed 's/\*//g' "$1" | tr '\n' ' ' | tr -s ' ' | grep -oE '[0-9]+ repositories and [0-9]+ papers' | sort -u
+}
+readme_pairs="$( pairs_from "$README" )"
+readme_pair_copies="$( sed 's/\*//g' "$README" | tr '\n' ' ' | tr -s ' ' | grep -oE '[0-9]+ repositories and [0-9]+ papers' | wc -l | tr -d ' ' )"
+readme_distinct="$( printf '%s\n' "$readme_pairs" | grep -c . )"
+if [ "$readme_distinct" -eq 1 ]; then
+    ok "(E2b) README.md's $readme_pair_copies copies of the lineage pair agree on one value ($readme_pairs)"
+else
+    no "(E2b) README.md prints $readme_distinct DIFFERENT lineage pairs across $readme_pair_copies copies — every copy must agree: $( printf '%s' "$readme_pairs" | tr '\n' ';' )"
+fi
+
+# (E2c) mutation control for (E2b): mutate ONLY THE SECOND copy in a temp copy — the one (E2)'s `head -1`
+#       can never see — assert the mutation took, and re-run the identical extraction; it must now report two
+#       distinct pairs. A control that mutated the first copy would be caught by (E2) and prove nothing about
+#       this arm.
+first_pair="$( printf '%s\n' "$readme_pairs" | head -1 )"
+wrong_pair="$( printf '%s' "$first_pair" | sed -E "s/^[0-9]+/$(( d_folded + 7 ))/" )"
+awk -v pat="$first_pair" -v rep="$wrong_pair" 'BEGIN{c=0} { if (index($0, pat) > 0) { c++; if (c == 2) { sub(pat, rep) } } print }' "$README" > "$TMP/README_second_copy_bad.md"
+if [ "$readme_pair_copies" -lt 2 ]; then
+    no "(E2c) mutation control: README.md carries only $readme_pair_copies copy of the pair, so a second-copy mutation cannot be staged — the control is void, not passed"
+elif [ "$( grep -c -F "$wrong_pair" "$TMP/README_second_copy_bad.md" )" -ne 1 ]; then
+    no "(E2c) mutation control: the second-copy mutation did not take ($wrong_pair not found exactly once in the mutated copy)"
+elif [ "$( pairs_from "$TMP/README_second_copy_bad.md" | grep -c . )" -eq 2 ]; then
+    ok "(E2c) mutation control: a drifted SECOND copy ($wrong_pair) is seen as a second distinct pair — the arm fires where (E2) alone would stay green ((E2) on the mutated copy still reads: $( counts_from "$TMP/README_second_copy_bad.md" | awk '{print $1}' ) repositories)"
+else
+    no "(E2c) mutation control: a drifted second copy was NOT seen as a distinct pair — the arm cannot fail"
 fi
 
 # (E10) LINEAGE's DISJOINTNESS SENTENCE must carry the same numbers as its own header.

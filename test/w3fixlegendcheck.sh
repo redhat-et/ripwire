@@ -500,7 +500,7 @@ verbatim(){ "$BIN" "$REDSB" --no-cache "$@" 2>/dev/null | grep -c "$KEY" || true
                                         || no "--grep redacted its hit line — the help's stated exception is wrong"
 [ "$( verbatim --regex='AKIA\w+' )" -gt 0 ] && ok "--regex hit lines are NOT redacted, as stated" \
                                             || no "--regex behaviour disagrees with the help"
-HELPTXT="$( "$BIN" --help 2>&1 )"
+HELPTXT="$( "$BIN" --help=all 2>&1 )"
 case "$HELPTXT" in
     *"credentials in emitted bodies are redacted"*) no "--help still carries the stale bodies-only redaction sentence";;
 esac

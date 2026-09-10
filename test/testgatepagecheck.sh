@@ -157,7 +157,7 @@ printf '%s' "$S2" | grep -qE 'across (0|[1-8]) files transitively depend on thes
 # PC-2 — --help's hand-typed "HONORED by:" list and the runtime refusal message's list (kPagingHonoringVerbs)
 # must name the SAME set. Extract both from the LIVE binary (not a hardcoded copy of either) and diff them.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
-HELPTEXT="$( "$BIN" --help 2>&1 | tr '\n' ' ' )"
+HELPTEXT="$( "$BIN" --help=all 2>&1 | tr '\n' ' ' )"
 HELPLIST="$( printf '%s' "$HELPTEXT" | sed -E 's/.*HONORED by: //; s/ Emit at most N rows.*//' )"
 [ -n "$HELPLIST" ] && ok "PC-2: --help's HONORED-by list extracted" || no "PC-2: could not find --help's HONORED-by list"
 

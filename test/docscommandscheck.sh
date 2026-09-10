@@ -329,7 +329,7 @@ def lost_flags( helpText ):
     return out
 
 # ── (H1) the ledger, against the real binary ──────────────────────────────────────────────────────
-helpText = subprocess.run( [ BIN, '--help' ], capture_output = True, text = True, timeout = 120 ).stdout
+helpText = subprocess.run( [ BIN, '--help=all' ], capture_output = True, text = True, timeout = 120 ).stdout
 live = sorted( lost_flags( helpText ) )
 pinned = sorted( LEDGER )
 newLoss = [ f for f in live if f not in pinned ]
@@ -431,7 +431,7 @@ smellEntries() {   # $1 = help text → the entries whose own lines name the sme
         cur != "" && tolower($0) ~ /shotgun surgery/ { hit[cur] = 1 }
         END { for( k in hit ) { print k } }' | LC_ALL=C sort
 }
-helpText="$( "$BIN" --help 2>/dev/null )"
+helpText="$( "$BIN" --help=all 2>/dev/null )"
 smellWant=$'--cochange[=FILE]\n--situ[=F1,F2]'
 # presence guard first: the two entries must exist at all, or the extraction below searches an empty target
 while IFS= read -r spec; do

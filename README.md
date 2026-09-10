@@ -15,10 +15,28 @@
 deterministic call graph — what to touch, what it breaks, which tests to run — instead of grepping
 around and reading whole files.
 
-***Paddle out with a map.***
+<p align="center"><img src="docs/assets/paddle-out.svg" alt="Paddle out with a map." width="470"></p>
+
+### The goal: one question, one complete answer.
+
+**Terminality is the objective.** Ask the codebase a question and the answer should carry everything
+you need — no follow-on grep, no three more whole-file reads to fill in what it left out. A call
+followed by three greps is the same search paid for twice: it does not save you tokens and it does
+not make the coding faster.
+
+**Two things make that reachable in practice, and neither is the destination.** Answers are honest
+about their own limits — a count that cannot be a total is labelled a floor, a zero means "none
+found" and never "none exists", every truncation is disclosed — so an answer never looks more
+complete than it is, and the map never degrades the code by guessing. And an answer can be given a
+token budget, so what one costs is something you ask for rather than discover; where a complete
+answer will not fit, it says it went over rather than silently dropping the row you needed.
+
+Those two are the stair-steps: honest about what is missing, priced in what it spends. The step they
+climb toward is a question fully answered in one call, which is not always trivial to reach — and
+where it is not, the output says so rather than pretending otherwise.
 
 <details>
-<summary><b>Fifty years of software-engineering results, and research from last month.</b> 43 repositories and 69 papers folded — McCabe (1976) through to <b>seven papers published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in, all of it put into a single blazing-fast compiled executable</summary>
+<summary><b>Fifty years of software-engineering results, and research from last month.</b> 46 repositories and 69 papers folded — McCabe (1976) through to <b>seven papers published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in, all of it put into a single blazing-fast compiled executable</summary>
 
 Beside those sits a labelled survey of **237 tools** that contributed nothing and says so. The two
 sets are disjoint by construction, so they add rather than nest — a tool that gave a lesson is never
@@ -773,6 +791,8 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 
 Around the core sit 179 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
+`--help` prints one line per flag (~4.5K tokens); `--help=--FLAG` prints that flag's full entry with
+every caveat, `--help=SECTION` one family, and `--help=all` the whole catalog.
 Not sure which of them fits the task in front of you? `ripwire . --help-task="<task in words>"`
 recommends ONE executable command with the evidence behind the pick — advice only, it never runs
 the recommendation — and abstains honestly when the evidence is too thin to name a winner.
@@ -1647,7 +1667,7 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 <summary>43 repositories, 69 papers and a 237-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**43 repositories and 69 papers** into one deterministic executable, alongside a labelled
+**46 repositories and 69 papers** into one deterministic executable, alongside a labelled
 survey of 237 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables
@@ -1800,9 +1820,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>570 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary>
+<summary><b>573 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary>
 
-`test/regression.sh` names **570 gate scripts** and is the authoritative list;
+`test/regression.sh` names **573 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a

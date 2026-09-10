@@ -1332,6 +1332,15 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         {
             testSeeds = bodyIds;
         }
+        // DELIBERATELY NOT --affected's row set, and not testmap.h::affectedAnswerForFile. That answers
+        // "which tests cover this CHANGE"; the seeds here are the top-RANKED bodies of a task bundle, which
+        // is a different question: `changed=` is meaningless for them, and "partner of a ranked file" would
+        // be a claim nothing supports. The edit receipt was unified with --affected (2026-09-09) precisely
+        // because it DOES answer the same question and had drifted; this one must not be "fixed" to match.
+        // NOT a clean bill of health: the fallback above (testSeeds = bodyIds when every ranked body is
+        // itself a test) has the SAME reached-minus-seeds blind spot the receipt just lost — a test among
+        // the seeds cannot appear in its own reach. That is worth fixing on its own terms; it is the
+        // UNIFICATION that is refused here, not the defect.
         const std::vector<NodeId>  reach = transitiveCallers( g, testSeeds );
         std::vector<char>          fseen( ing.files.size(), 0 );
         for( NodeId n : reach )

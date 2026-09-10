@@ -580,7 +580,7 @@ echo "--- (L) capped=\"1\" ⇒ the paging quintet, on the DEFAULT window (M2) --
 python3 - "$BIN" "$ROOT" <<'PYL'
 import re, subprocess, sys
 BIN, ROOT = sys.argv[1], sys.argv[2]
-helptxt = subprocess.run( [ BIN, "--help" ], capture_output=True, text=True ).stdout
+helptxt = subprocess.run( [ BIN, "--help=all" ], capture_output=True, text=True ).stdout
 m = re.search( r'HONORED by:(.*?)Emit at most', helptxt, re.S )
 if not m:
     print( "  FAIL  (L) --help has no 'HONORED by: ... Emit at most' paragraph — the verb universe cannot be derived" ); sys.exit( 1 )

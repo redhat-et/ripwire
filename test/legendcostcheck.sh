@@ -27,7 +27,7 @@ fail() { printf '  FAIL  %s\n' "$*"; FAILED=$(( FAILED + 1 )); }
 ok()   { printf '  PASS  %s\n' "$*"; }
 [ -x "$BIN" ] || { echo "legendcostcheck: no binary at $BIN — build first"; exit 2; }
 
-"$BIN" --help >"$TMP/help" 2>/dev/null
+"$BIN" --help=all >"$TMP/help" 2>/dev/null
 
 # ── the published claim, read from the binary's own help text ──────────────────────────────────
 LO="$( grep -oE 'at least [0-9]+% of a' "$TMP/help" | head -1 | grep -oE '[0-9]+' )"

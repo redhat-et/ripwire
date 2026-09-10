@@ -114,6 +114,11 @@ d_exit=$?
 
 # --help should exit 0
 "$BIN" --help >"$TMP/e_stdout" 2>"$TMP/e_stderr"
+# --help is TIER 1 (one line per flag) and is what arm (e) below checks, because it is what a user
+# types. Arms (h)/(g) check DISCLOSURE CONTENT — caveats, hedged ranges — which lives in tier 2, so
+# they read the complete catalog. Pointing a content assertion at tier 1 would make it pass or fail on
+# where a sentence sits rather than on whether the tool still states it.
+"$BIN" --help=all >"$TMP/e_stdout_all" 2>/dev/null
 e_exit=$?
 
 [ "$e_exit" -eq 0 ] \
@@ -160,10 +165,10 @@ g4_err="$( "$BIN" "$CORPUS" --for="widget" --no-cache 2>&1 1>/dev/null )"
 
 # ── (h) X9(d): --help is honest about which verbs --top-k applies to (--for's OWN bundle is inert) ──
 
-grep -q 'INERT there' "$TMP/e_stdout" \
+grep -q 'INERT there' "$TMP/e_stdout_all" \
     && ok "X9(d): --help documents --top-k as inert on --for's own bundle" \
     || no "X9(d): --help --top-k entry missing the --for-is-inert caveat"
-grep -q 'top-k' "$TMP/e_stdout" \
+grep -q 'top-k' "$TMP/e_stdout_all" \
     && ok "X9(d): --help still documents --top-k itself" \
     || no "X9(d): --help lost the --top-k entry entirely"
 
@@ -182,7 +187,7 @@ grep -q 'top-k' "$TMP/e_stdout" \
 entry_of(){ awk -v flag="$1" '
     index( $0, "    " flag ) == 1 { inb=1; print; next }
     inb && /^    --/                { exit }
-    inb                             { print }' "$TMP/e_stdout"; }
+    inb                             { print }' "$TMP/e_stdout_all"; }
 
 for _pair in "--pack-signatures" "--format=xml|columnar|rows"; do
     _blk="$( entry_of "$_pair" )"
@@ -198,7 +203,7 @@ for _pair in "--pack-signatures" "--format=xml|columnar|rows"; do
         || { no "(g) $_pair gives a range but never says which way it moves"; printf '%s\n' "$_blk"; }
 done
 # the exact string the finding was written from, pinned so it cannot come back by a later reflow.
-grep -q 'body-elided decl skeletons (~70% fewer tokens)' "$TMP/e_stdout" \
+grep -q 'body-elided decl skeletons (~70% fewer tokens)' "$TMP/e_stdout_all" \
     && no "(g) the bare unhedged --pack-signatures figure is back in --help" \
     || ok "(g) the bare unhedged --pack-signatures figure is gone from --help"
 

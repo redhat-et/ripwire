@@ -35,7 +35,7 @@ git -C "$REPO" add router.cpp
 git -C "$REPO" commit -qm base
 route(){ "$BIN" "$REPO" --no-cache --help-task="$1" 2>"$TMP/err"; }
 
-"$BIN" --help 2>&1 | grep -q -- '--help-task=' && ok "--help advertises --help-task=" || no "--help does not advertise --help-task="
+"$BIN" --help=all 2>&1 | grep -q -- '--help-task=' && ok "--help advertises --help-task=" || no "--help does not advertise --help-task="
 V="$( route 'calls(betaNode, alphaNode)' )"
 case "$V" in *'status="recommend"'*'intent="verify-claim"'*'--verify='*) ok "closed claim -> --verify";; *) no "closed claim route wrong: $V";; esac
 C="$( route 'How do alphaNode, betaNode, and gammaNode connect?' )"
@@ -199,7 +199,7 @@ if command -v xmllint >/dev/null 2>&1; then xmllint --noout "$TMP/q1" 2>/dev/nul
 "$BIN" "$REPO" "$ROOT/test/fixture" --help-task='plan a feature' >/dev/null 2>"$TMP/multi.err"; rc=$?
 [ "$rc" -ne 0 ] && grep -qi 'single-root' "$TMP/multi.err" && ok "multi-root routing refuses" || no "multi-root routing did not refuse"
 for f in --verify --connect --expand --grep --grep-context --edit-check --from-trace --situ --pack-task --exemplar --for \
-         --edit-plan --dry-run --handles --legend --doctor --agent=codex --test-gate --slice --slice-flow --at --uses --seams; do "$BIN" --help 2>&1 | grep -q -- "$f" || no "recommended flag absent from --help: $f"; done
+         --edit-plan --dry-run --handles --legend --doctor --agent=codex --test-gate --slice --slice-flow --at --uses --seams; do "$BIN" --help=all 2>&1 | grep -q -- "$f" || no "recommended flag absent from --help: $f"; done
 
 # ── byte-compat: the verify-claim template must emit the SHIPPED --verify grammar byte-exactly ─────────
 # (PLAN 2026-08-13 addendum: gate against the real verb's PARSER, never a copy of its syntax.)

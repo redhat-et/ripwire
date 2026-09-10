@@ -211,7 +211,7 @@ grep -q rwGateVendorSymbol "$TMP/rooted" && ok "a root that is itself ignored is
     || no '--no-ignore does not disclose ignore_mode="off"'
 
 # ── 12. the flag is in --help (the deckcheck allowlist row for --no-ignore retires with it).
-"$BIN" --help 2>&1 | grep -q -- '--no-ignore' && ok "--no-ignore is documented in --help" \
+"$BIN" --help=all 2>&1 | grep -q -- '--no-ignore' && ok "--no-ignore is documented in --help" \
     || no "--no-ignore is missing from --help"
 
 [ "$fail" -eq 0 ] && { echo "gitignorecheck: PASS"; exit 0; }

@@ -69,7 +69,7 @@ def card_literals() -> list[str]:
 
 
 def help_blocks(binary: Path) -> list[str]:
-    proc = subprocess.run([str(binary), "--help"], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+    proc = subprocess.run([str(binary), "--help=all"], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
     blocks: list[str] = []
     current: list[str] = []
     for line in proc.stdout.splitlines():

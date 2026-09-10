@@ -52,7 +52,7 @@
 # below): `--rank-by=bogus` is as false a claim as `--bogus`, and --help prints those enums verbatim.
 #
 # A token is allowed if EITHER:
-#   (a) it appears in `$BIN --help` (the ground truth: what the shipped binary actually parses), or
+#   (a) it appears in `$BIN --help=all` (the ground truth: what the shipped binary actually parses), or
 #   (b) it is listed in test/deckcheck_allowlist.txt with a reason — genuine prose false positives:
 #       a REAL ripwire flag --help deliberately omits (RIPWIRE_DEV-gated experiment, deprecated
 #       --order alias, a `wrap`-subcommand-only flag), or a flag that belongs to a DIFFERENT tool
@@ -95,7 +95,7 @@ TOKEN_RE='--[A-Za-z][A-Za-z0-9_-]*'
 PROSE_RE='(^|[^-/_A-Za-z0-9])'"$TOKEN_RE"
 
 # ── ground truth: every --flag token the shipped binary's own --help prints ─────────────────────────
-"$BIN" --help >"$TMP/help.txt" 2>&1
+"$BIN" --help=all >"$TMP/help.txt" 2>&1
 grep -oE -- "$TOKEN_RE" "$TMP/help.txt" | sort -u >"$TMP/valid.txt"
 validCount=$( wc -l <"$TMP/valid.txt" | tr -d ' ' )
 [ "$validCount" -gt 0 ] || { echo "deckcheck: --help printed zero --flag tokens — broken build or empty help; refusing to run"; exit 2; }
@@ -260,7 +260,7 @@ echo "deckcheck: scanned ${#SOURCES[@]} file(s), ${usedCount} distinct --flag to
 # ── §P9 "amp= definition": --help must define amp= numerically and distinguish it from --impact's
 # reaches=, not just print the bare token — a stray-flag scan (the rest of this gate) can't catch a
 # documented-but-undefined attribute, so this is a narrow, separate content assertion.
-HELPTXT="$( "$BIN" --help 2>&1 )"
+HELPTXT="$( "$BIN" --help=all 2>&1 )"
 printf '%s' "$HELPTXT" | grep -q 'amp = |direct callers|' \
     && ok_amp=1 || ok_amp=0
 printf '%s' "$HELPTXT" | grep -q 'NOT the same quantity as --impact'"'"'s reaches=' \

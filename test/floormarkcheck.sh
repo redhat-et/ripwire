@@ -317,7 +317,7 @@ HITS="$HITS$( grep -ni "$RETIRED" "$ROOT/test/showcase_capture.py" 2>/dev/null |
 [ -z "$HITS" ] \
     && ok "(5) the phrase \"$RETIRED\" appears in no emitted string in src/, and nowhere at all in README.md or skills/" \
     || { no "(5) the retired phrase \"$RETIRED\" is still in the tree:"; printf '%s\n' "$HITS" | sed 's/^/          /' | head -8; }
-"$BIN" --help >"$TMP/help.txt" 2>&1
+"$BIN" --help=all >"$TMP/help.txt" 2>&1
 grep -qi "$RETIRED" "$TMP/help.txt" \
     && no "(5) --help still promises \"$RETIRED\"" \
     || ok "(5) --help does not promise \"$RETIRED\""

@@ -9,7 +9,7 @@
 
 #include "mcpindex.h"
 #include "editcheck.h"        // P9: the SAME four computations --edit-check renders as XML — folded into the receipt as JSON
-#include "testmap.h"          // P9: testsReachingFile + runFieldJsonDisclosed — the SAME rows --affected=FILE emits
+#include "testmap.h"          // P9: affectedAnswerForFile + testRowEvidence + runFieldJsonDisclosed — the SAME rows --affected=FILE emits
 #include "didyoumean.h"       // M9: boundedEditDistance / nearestIndexedFileClause — ONE near-miss policy for read and edit
 #include "selectorrefuse.h"   // atSeedFaultClause + indexHasFileMatching — the @FILE:LINE at-diagnosis, ONE set of fault sentences on every surface
 #include "infra/hashutil.h"   // sanitizer-clean modulo-2^64 FNV multiplication
@@ -855,7 +855,7 @@ namespace mcpedit
     //
     // Both halves are the STANDALONE verbs' own computations, called directly rather than re-derived:
     // editcheck.h's editCheckOverloadSet / editCheckContractVsHead / editCheckCallers / editCheckVerdict /
-    // editCheckCallSites are exactly what editCheckBundleText renders as XML, and testsReachingFile is what
+    // editCheckCallSites are exactly what editCheckBundleText renders as XML, and affectedAnswerForFile is what
     // runAffected walks. That is what lets test/receiptpostcheck.sh assert the receipt EQUALS a separate
     // --edit-check and a separate --affected: not a promise, a shared call.
 
@@ -1017,22 +1017,41 @@ namespace mcpedit
         return out;
     }
 
-    // `"tests_to_run":[{"p":…,"run":…|"run_unknown":true}]` — the SAME rows --affected=<that file> emits,
-    // through the SAME TestRunnerIndex and the SAME not-derivable disclosure the whole row family shares.
+    // `"tests_to_run":[{"p":…,<evidence>,"run":…|"run_unknown":true}]` — the SAME rows --affected=<that
+    // file> emits, through the SAME affectedAnswer, the SAME TestRunnerIndex and the SAME not-derivable
+    // disclosure the whole row family shares. <evidence> is testRowEvidence(Json): seed_kind/partner/hops,
+    // spelled as verbs_change.h spells them. The root carries "order" and "partners" beside "tests".
     inline std::string testsToRunReceiptJson( const IngestResult& ing, const Graph& g, const std::string& root, std::uint32_t fileId )
     {
-        const std::vector<std::uint32_t> testFiles = testsReachingFile( ing, g, fileId );
-        const TestRunnerIndex            runners( ing );
-        const auto                       jesc = []( std::string_view t ) { return mcpdetail::jsonEscape( std::string( t ) ); };
-        const std::string                prefix = rw::sarif::rootPrefixOf( root );
-        std::string                      out = ",\"tests_to_run\":[";
-        for( std::size_t i = 0; i < testFiles.size(); ++i )
+        // The SAME answer --affected=<this file> gives, through the SAME function — see
+        // testmap.h::affectedAnswerForFile for why this used to be a private walk and what that cost.
+        const AffectedAnswer  ans = rw::affectedAnswerForFile( ing, g, fileId );
+        const TestRunnerIndex runners( ing );
+        const auto            jesc   = []( std::string_view t ) { return mcpdetail::jsonEscape( std::string( t ) ); };
+        const std::string     prefix = rw::sarif::rootPrefixOf( root );
+        std::string           out    = ",\"tests_to_run\":[";
+        for( std::size_t i = 0; i < ans.rows.size(); ++i )
         {
+            TestRow row = ans.rows[i];   // by value: see below
             if( i ) { out += ","; }
-            out += "{\"p\":\"" + mcpdetail::jsonEscape( std::string( rw::sarif::rootRelativeUri( ing.files[ testFiles[i] ], prefix ) ) ) + "\""
-                 + rw::runFieldJsonDisclosed( runners, testFiles[i], jesc ) + "}";
+            // A matched TEST file's changed= is spelled seed_kind="test" on --affected (verbs_change.h does
+            // exactly this), because "the argument matched it, run it" is a different fact from "you edited
+            // a file this test reaches". The receipt stands in for that verb, so it spells it the same way.
+            const bool seedTest = row.fileId < ans.isSeedTestFile.size() && ans.isSeedTestFile[ row.fileId ] != 0;
+            row.changed         = false;   // the IDENTICAL statement verbs_change.h uses, not a re-derivation
+            // The evidence rides the row, through the ONE builder --affected and --test-gate --json already
+            // use, so a receipt row can never say less than the verb it stands in for. A row that arrived on
+            // partner= or seed_kind= alone is a WEAKER claim than a graph-reached one, and dropping the
+            // attribute would serve it as though it were the same.
+            out += "{\"p\":\"" + mcpdetail::jsonEscape( std::string( rw::sarif::rootRelativeUri( ing.files[ row.fileId ], prefix ) ) ) + "\""
+                 + ( seedTest ? ",\"seed_kind\":\"test\"" : "" )
+                 + rw::testRowEvidence( row, rw::EvDialect::Json )
+                 + rw::runFieldJsonDisclosed( runners, row.fileId, jesc ) + "}";
         }
         out += "]";
+        // the root-level companions --affected carries beside its rows, so the two documents disclose the
+        // same facts about the same list
+        out += ",\"order\":\"evidence\",\"partners\":" + std::to_string( rw::testRowPartnerCount( ans.rows ) );
         // F3: `"tests_to_run":[]` was an UNLABELLED ZERO. Its twin says "0 modelled tests, N shell gates the
         // call-graph walk cannot see, counts are floors"; the fold said `[]`, which a reader takes for
         // "nothing tests this" rather than "nothing that is a CALL EDGE tests this" (a shell harness runs the
@@ -1040,7 +1059,7 @@ namespace mcpedit
         // keys ride beside it — the same place --affected puts them relative to its own <test> rows, the same
         // counter (testmap.h::scriptGatesUnmodelledCount) and the same key names writeTestGateReportJson and
         // MCP situational_awareness already use. Never a second number.
-        out += ",\"tests\":" + std::to_string( testFiles.size() );
+        out += ",\"tests\":" + std::to_string( ans.rows.size() );
         out += ",\"script_gates_unmodelled\":" + std::to_string( scriptGatesUnmodelledCount( ing ) );
         out += graphCountFloorAttrJson( g );
         return out;
@@ -1123,9 +1142,10 @@ namespace mcpedit
         }
         if( nextOut != nullptr )
         {
-            const std::vector<std::uint32_t> testFiles = withTests ? testsReachingFile( ing, g, editedFile ) : std::vector<std::uint32_t>{};
+            // evidence order now, so next= suggests the changed/partner test ahead of a deeper graph hop
+            const std::uint32_t firstTest = withTests ? rw::firstTestFileForFile( ing, g, editedFile ) : rw::kNoFile;
             *nextOut = receiptNextFor( fileIdentity, symbolName, out,
-                                       testFiles.empty() ? std::string() : TestRunnerIndex( ing ).commandFor( testFiles[0] ) );
+                                       firstTest == rw::kNoFile ? std::string() : TestRunnerIndex( ing ).commandFor( firstTest ) );
         }
         return out;
     }

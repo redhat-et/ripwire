@@ -34,12 +34,13 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
-# 2026-09-09, ELIXIR SEMANTICS (test/elixirsemanticcheck.sh): parserVer and its quality mirror
-#   move 85 -> 86 for module/name/arity identities, lexical imports, defaults, captures, delegates,
+# 2026-09-10, ELIXIR SEMANTICS (test/elixirsemanticcheck.sh), rebased onto main: parserVer and its quality
+#   mirror move 86 -> 87 for module/name/arity identities, lexical imports, defaults, captures, delegates,
 #   attributes and protocol/behaviour relationships. Binding/Reference record layouts are unchanged:
 #   kCacheVersion stays 18 and kQSnapCacheScheme stays 8. Old extraction facts must be re-parsed.
-#   Upstream's prose tier already uses 85, so the integrated extractor takes 86 to reject
-#   caches from both independent 85 implementations.
+#   Landed at 87, not the 86 the fork carried — main had already spent 86 on the Ruby receiver dedupe
+#   below (test/rubyrecvcheck.sh), landing the same day: RE-BUMPED to the next free number over main's
+#   tip, per the collision rule in ingest_cache.h's kParserVer note.
 # 2026-09-09, PLAIN-TEXT PROSE TIER (test/textdocscheck.sh): kParserVer 84 -> 85 and
 #   kIngestParserVerMirror -> 85. `.rst`/`.adoc`/`.org`/`.mdx` join kLangTable on Lang::Markdown and the
 #   markdown BLOCK grammar, so the CRAWL ADMITS FILES IT PREVIOUSLY REFUSED. That is the one class of
@@ -62,6 +63,13 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   stays 8. The same commit flips lintrules.h::dependencyCapable for those four languages, which moves
 #   dep_files=/ccd/acd/nccd and --arch's propagation_cost on any corpus holding them; that is disclosed in
 #   the output itself as <health dep_langs=> rather than only here.
+# 2026-09-09, RUBY RECEIVER DEDUPE + DEEP CHAIN (test/rubyrecvcheck.sh): kParserVer 85 -> 86 and
+#   kIngestParserVerMirror -> 86. A receiver's lazy bit is now the AND over its occurrences (a method-body site
+#   above a class-body site used to leave the directive lazy, and the structure lost the load-time edge), and
+#   the constant-chain check is a loop (a 5000-segment chain overflowed a worker stack). Record shape and
+#   kCacheVersion (18) unchanged — cached Ruby files re-parse; no serialize/deserialize/computeSnapshot change.
+#   RE-BUMPED from 85 on landing: main had already spent 85 on the plain-text prose tier (test/textdocscheck.sh),
+#   per the collision rule in ingest_cache.h's kParserVer note.
 # 2026-09-08, RUBY CONSTANT RECEIVERS (test/rubyrecvcheck.sh): kParserVer 82 -> 83 and kIngestParserVerMirror
 #   -> 83. A constant RECEIVER (`User.find`, `App::Mailer.deliver`) is a symbolic Include, one per (file,
 #   innermost open, written name), lazy inside a closure; the Ruby walk descends every node. The record shape

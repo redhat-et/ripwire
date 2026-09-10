@@ -663,36 +663,46 @@ inline constexpr std::string_view kRunHintLegendClause =
     "run= is the command that discharges a test row; run_unknown=\"1\" means none is derivable for that "
     "harness (a guess would be worse than none) — a row carries one or the other, never neither. ";
 
-// ── P9 (capture-audit 2026-09-04) — the tests_to_run FILE SET for ONE changed file ────────────────────
-// The seeds are that file's own symbols, the walk is transitiveCallers, the partition is isTestPath, and
-// the sort is path-ascending: BYTE FOR BYTE what verbs_change.h's runAffected does after
-// resolveAffectedSeeds took its file reading, lifted here so the edit receipt cannot answer a different
-// question from the verb its own stderr hint used to point at. Seeding from the fileId directly (rather
-// than re-running the path-PATTERN match) is deliberate: --affected=geo.py is a substring pattern that also
-// matches test/check_geo.py, and a receipt knows exactly which file it wrote.
-inline std::vector<std::uint32_t> testsReachingFile( const IngestResult& ing, const Graph& g, std::uint32_t fileId )
+// ── P9 (capture-audit 2026-09-04) — the tests_to_run row set for ONE changed file ────────────────────
+// The FILE reading of --affected, seeded by file id rather than by a path pattern, for callers that already
+// hold the file (the MCP edit receipt wrote it and knows which). It routes through the SAME affectedAnswer
+// the verb uses, so the two cannot answer differently. Seeding from the fileId rather than re-running the
+// path-PATTERN match is the one deliberate difference and it is preserved: `--affected=geo.py` is a
+// substring pattern that also matches test/check_geo.py, and a receipt knows exactly which file it wrote.
+//
+// WHY THIS IS NOT A PRIVATE WALK ANY MORE. It was one, with the comment "BYTE FOR BYTE what runAffected
+// does" — TRUE when written (050a6b07, 2026-09-04): --affected was then the same bare
+// transitiveCallers/isTestPath walk. Two commits orphaned it within days, both touching neither mcpedit.h
+// nor packtask.h: 015e5a0f (2026-09-05) made a test that IS the edit target list itself (seed_kind="test"),
+// and 7dae6522 (2026-09-07) added the partner tier. A bare walk can produce NEITHER — transitiveCallers
+// returns reached MINUS seeds, so the edit target can never appear, and nothing knew about partners. The
+// receipt therefore answered "tests":0 for 100% of test-file edits, under a --help promising the rows
+// --affected gives. One seam now, so a third tier cannot land at one site and not the other.
+inline AffectedAnswer affectedAnswerForFile( const IngestResult& ing, const Graph& g, std::uint32_t fileId )
 {
-    std::vector<NodeId> seeds;
+    AffectedSeeds sel;
+    sel.sawFileItem = true;
     for( NodeId i = 0; i < NodeId( ing.symbols.size() ); ++i )
     {
         if( ing.symbols[i].fileId == fileId )
         {
-            seeds.push_back( i );
+            sel.seeds.push_back( i );
         }
     }
-    std::vector<char>          seen( ing.files.size(), 0 );
-    std::vector<std::uint32_t> testFiles;
-    for( NodeId n : transitiveCallers( g, seeds ) )
-    {
-        if( const std::uint32_t f = ing.symbols[n].fileId; !seen[f] && isTestPath( ing.files[f] ) )
-        {
-            seen[f] = 1;
-            testFiles.push_back( f );
-        }
-    }
-    std::sort( testFiles.begin(), testFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
-    return testFiles;
+    partitionAffectedSeedsByTestPath( ing, sel );
+    return affectedAnswer( ing, g, sel );
 }
+
+// The FIRST test row for a file, in EVIDENCE order, or rw::kNoFile when there is none — the receipt's
+// next= hint suggests ONE command, so it needs one row, not the list. Evidence order is what makes that
+// the changed or partner test rather than a deeper graph hop. Reuses resolve.h's kNoFile sentinel: a
+// second constant of the same value and meaning is the kind of near-duplicate this tree lints for.
+inline std::uint32_t firstTestFileForFile( const IngestResult& ing, const Graph& g, std::uint32_t fileId )
+{
+    const AffectedAnswer ans = affectedAnswerForFile( ing, g, fileId );
+    return ans.rows.empty() ? rw::kNoFile : ans.rows.front().fileId;
+}
+
 
 // ── §P9 N5 / §B7.3 — the blindness this whole map shares, counted ONCE ────────────────────────────────
 // Every verb built on the call-graph walk (--affected, --test-gate, --situ) is blind to the same thing: a

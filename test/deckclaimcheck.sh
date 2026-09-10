@@ -27,7 +27,7 @@ GEN="$ROOT/present/deck5_ripwire_build.js"
 [ -f "$GEN" ] || { echo "deckclaimcheck: missing $GEN"; exit 2; }
 
 # ── (A) flag count ──────────────────────────────────────────────────────────────────────────────
-derived="$( "$BIN" --help 2>&1 | grep -oE '\-\-[a-z][a-z0-9-]+' | sort -u | wc -l | tr -d ' ' )"
+derived="$( "$BIN" --help=all 2>&1 | grep -oE '\-\-[a-z][a-z0-9-]+' | sort -u | wc -l | tr -d ' ' )"
 bad="$( grep -oE '[0-9]+ long flags' "$GEN" | grep -v "^${derived} long flags$" || true )"
 [ -z "$bad" ] || { echo "deckclaimcheck: stale claim(s), binary has $derived flags: $bad"; exit 1; }
 grep -q "${derived} long flags" "$GEN" || { echo "deckclaimcheck: generator does not state derived count $derived"; exit 1; }

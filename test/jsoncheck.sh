@@ -358,7 +358,7 @@ done < "$UNIV"
 [ "$nRefuse" -ge 150 ] && ok "#8b: $nRefuse flags refused --json loudly, naming themselves" \
                        || no "#8b: only $nRefuse flags refused (want >= 150) — the sweep is not covering the universe"
 # --help's supported-set sentence must name every JSON verb the sweep found (it omitted --metrics for a round).
-HELPJSON="$( "$BIN" --help 2>&1 | sed -n '/^    --json /,/refuses loudly/p' | tr '\n' ' ' )"
+HELPJSON="$( "$BIN" --help=all 2>&1 | sed -n '/^    --json /,/refuses loudly/p' | tr '\n' ' ' )"
 for v in $jsonVerbs; do
     case "$v" in --for|--pack-task|--callers|--callees|--impact|--quality-delta|--test-gate|--metrics)
         printf '%s' "$HELPJSON" | grep -q -- "$v" || no "#8b: --help's --json paragraph does not name $v, which answers in JSON" ;;

@@ -94,7 +94,7 @@ BADRC=$?
     || no "--order=bogus did not refuse loudly (exit $BADRC)"
 
 # ── (d) --help surface ───────────────────────────────────────────────────────────────────────────────
-HELP="$( "$BIN" --help 2>&1 )"
+HELP="$( "$BIN" --help=all 2>&1 )"
 printf '%s\n' "$HELP" | grep -q -- '--order=' \
     && ok "--help lists --order=" || no "--help is missing --order="
 printf '%s\n' "$HELP" | grep -q -- '--no-stable' \
