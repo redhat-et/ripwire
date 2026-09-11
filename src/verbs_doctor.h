@@ -627,6 +627,7 @@ inline DoctorAgentRows doctorAgentRows( const rw::Config& cfg, const char* argv0
     return out;
 }
 
+/// Runs the machine-local doctor checks and emits the complete diagnostic result with honest failure states.
 // --doctor check 8's body: the git-config trust boundary (harvest 2026-09-09; measurement + reasoning in
 // githarden.h). Reads the form main() probed BEFORE it applied the override — a re-probe here would see the
 // override and report "off" for the very root whose file says hook. Informational: a hook-form key is the
@@ -668,7 +669,11 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
     // `which ripwire`'s) ----
     {
         const std::string selfPath  = selfExecutablePath( argv0 );
+#if defined(_WIN32)
+        const std::string whichPath = doctorPopenTrim( "where ripwire.exe 2>NUL" );
+#else
         const std::string whichPath = doctorPopenTrim( "which ripwire 2>/dev/null" );
+#endif
         struct stat        selfSt {};
         struct stat         whichSt {};
         const bool haveSelf  = !selfPath.empty()  && ::stat( selfPath.c_str(),  &selfSt )  == 0;

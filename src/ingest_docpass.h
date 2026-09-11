@@ -25,39 +25,50 @@ namespace rw
 // function of the file BYTES, so bridge results are cached under the shared cache dir keyed by
 // content hash; the "ripwire-" prefix keeps eviction inside the existing family sweep (whose
 // age+size caps also bound a markitdown UPGRADE's staleness — the input-bytes key alone would never
-// notice one). An EMPTY extraction is never cached: "" means markitdown absent or errored — a fact
-// about the machine, not the bytes. Hand-rolled kinds (ipynb/html/csv) stay uncached (microseconds);
-// cacheEnabled=false (--no-cache) bypasses the sidecar entirely. tmpKey keeps concurrent workers'
+// notice one). Hand-rolled extractors use the same content-hash sidecar with a parser-version prefix.
+// An EMPTY extraction is never cached: "" means markitdown absent or errored — a fact about the machine,
+// not the bytes. cacheEnabled=false (--no-cache) bypasses the sidecars entirely. tmpKey keeps concurrent workers'
 // unpublished temp files distinct; the publish itself is a whole-file rename, so a concurrent
 // reader sees every byte or none.
 inline std::string docTextViaBridgeCache( const std::string& path, const std::string& ext, bool cacheEnabled, std::uint32_t tmpKey )
 {
     std::string text;
-    std::string bridgeBlobPath;
-    if( cacheEnabled && docparse::docKindOf( ext ) == docparse::DocKind::Markitdown )
+    std::string textBlobPath;
+    const docparse::DocKind kind = docparse::docKindOf( ext );
+    if( cacheEnabled && kind != docparse::DocKind::None )
     {
         std::string docBytes;
         if( docparse::detail::readWholeFile( path, docBytes ) )
         {
             char blobName[ 64 ];
-            rw::formatTo( blobName, sizeof( blobName ), "ripwire-docmd-{:016x}.bin",
-                           static_cast<unsigned long long>( fnv1a64( docBytes ) ) );
-            bridgeBlobPath = quality::resolveCacheBlobPath( quality::cacheDirLadder(), blobName );
-            docparse::detail::readWholeFile( bridgeBlobPath, text );   // miss ⇒ text stays empty
+            if( kind == docparse::DocKind::Markitdown )
+            {
+                rw::formatTo( blobName, sizeof( blobName ), "ripwire-docmd-{:016x}.bin",
+                               static_cast<unsigned long long>( fnv1a64( docBytes ) ) );
+            }
+            else
+            {
+                // Hand-rolled extraction is also pure, but its parser is part of the cache identity.
+                // Bump this when the ipynb/html/csv text shape changes; stale text is worse than a miss.
+                rw::formatTo( blobName, sizeof( blobName ), "ripwire-doctxt-1-{:016x}.bin",
+                               static_cast<unsigned long long>( fnv1a64( docBytes ) ) );
+            }
+            textBlobPath = quality::resolveCacheBlobPath( quality::cacheDirLadder(), blobName );
+            docparse::detail::readWholeFile( textBlobPath, text );   // miss ⇒ text stays empty
         }
     }
     if( text.empty() )
     {
         text = docparse::parseDocFile( path, ext );
-        if( !text.empty() && !bridgeBlobPath.empty() )
+        if( !text.empty() && !textBlobPath.empty() )
         {
-            const std::string tmp = bridgeBlobPath + ".tmp" + std::to_string( tmpKey );
+            const std::string tmp = textBlobPath + ".tmp" + std::to_string( tmpKey );
             std::FILE* fp = std::fopen( tmp.c_str(), "wb" );
             if( fp != nullptr )
             {
                 const bool wroteAll = std::fwrite( text.data(), 1, text.size(), fp ) == text.size();
                 std::fclose( fp );
-                if( !wroteAll || std::rename( tmp.c_str(), bridgeBlobPath.c_str() ) != 0 )
+                if( !wroteAll || std::rename( tmp.c_str(), textBlobPath.c_str() ) != 0 )
                 {
                     std::remove( tmp.c_str() );
                 }

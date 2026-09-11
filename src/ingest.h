@@ -220,7 +220,7 @@ inline bool looksBinary( std::string_view bytes ) noexcept
 constexpr std::string_view kCrawlSkipDirs[] = {
     ".git", ".claude", ".hg", ".svn", "node_modules", "vendor", "third_party",
     ".cache", "build", "dist", "out", "target", ".venv", "venv", "__pycache__",
-    ".idea", ".vscode",
+    ".idea", ".vscode", ".worktrees", ".worktrees-clean", "worktrees",
     // CMake / compiler-id build dirs (generated stubs, not source — break --around=main etc.)
     "asan", "build_prof", "CMakeFiles",
     // Generated output captures (docs/captures/ here): a doc that quotes every verb's output out-scores

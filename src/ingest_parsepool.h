@@ -768,6 +768,11 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
 
         raw = mergeThreadFacts( tFacts );
 
+        // The aggregate owns the moved fact payloads now. Release the per-thread vector storage before the
+        // cache write and before returning to the model-build tail; keeping these empty-but-capacious vectors
+        // alive needlessly raises the cold-run peak on large trees.
+        std::vector<RawFacts>().swap( tFacts );
+
         // P1-15: the SAME drift count, carried out of the function instead of only to stderr. The MCP
         // server discloses it per incremental pass (`_reingest`), which it could not do from an env-gated
         // print. Read once here, after the pool join that orders every worker's increment.

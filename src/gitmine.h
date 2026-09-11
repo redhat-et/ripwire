@@ -1571,11 +1571,12 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
 inline std::string gitWindowBoundarySha( const std::string& root, const std::string& coSince )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitWindowBoundarySha (cheap window-drift probe)" );
-    // G3: the shared reader, not a private `char buf[128]` + fgets accumulate. `| tail -1` already reduces
-    // the output to one line, so `.back()` is that line; gitCommandLines has already stripped its CR/LF tail.
+    // G3: the shared reader, not a private `char buf[128]` + fgets accumulate. Git's reverse/max-count
+    // options reduce the output to one line, so `back()` is that line; gitCommandLines has already stripped
+    // its CR/LF tail.
     const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
                           + " log --since=" + shSingleQuote( defaultWindowSince( root, coSince ) )   // F1: the probe must resolve the window it guards, by the same rule
-                          + " --format=%H 2>/dev/null | tail -1";
+                          + " --format=%H --reverse --max-count=1 2>/dev/null";
     const GitCommandLines res = gitCommandLines( cmd );
     if( !res.isStarted || res.lines.empty() )
     {

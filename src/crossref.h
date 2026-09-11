@@ -462,6 +462,7 @@ struct StreamBlobStats
     }
 };
 
+/// Streams requested git objects in one framed batch while bounding buffered blob memory.
 template<class OnBlob>
 inline void streamBlobs( const std::string& root, const std::vector<std::string>& shas, OnBlob onBlob,
                          StreamBlobStats* stats = nullptr )
@@ -492,8 +493,13 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
         std::fclose( lf );
     }
 
+#ifdef _WIN32
+    const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
+                          + " cat-file --batch < " + rw_short_path( listPath ) + " 2>/dev/null";
+#else
     const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
                           + " cat-file --batch < " + shSingleQuote( listPath ) + " 2>/dev/null";
+#endif
     std::FILE* pipe = popen( cmd.c_str(), "r" );
     if( !pipe )
     {
@@ -689,10 +695,15 @@ struct RefInfo
 // out.size(): a filter matching only the checked-out branch has SELECTED something (the answer is "nothing
 // but the ref you are on"), while a filter matching no branch name at all has selected nothing and must
 // refuse rather than report refs="0" — which reads as "no branch carries stray work".
+/// Enumerates local branches in deterministic order and excludes the checked-out ref from stray-content results.
 inline std::vector<RefInfo> enumerateRefs( const std::string& root, std::string_view filter, const std::string& headSha,
                                            std::size_t* filterNameHits = nullptr )
 {
+#ifdef _WIN32
+    const std::string raw = gitCapture( root, "for-each-ref --sort=refname --format=^%(refname:short^)^|^%(objectname^)^|^%(committerdate:short^) refs/heads 2>/dev/null" );
+#else
     const std::string raw = gitCapture( root, "for-each-ref --sort=refname --format='%(refname:short)|%(objectname)|%(committerdate:short)' refs/heads 2>/dev/null" );
+#endif
     std::vector<RefInfo> out;
     for( std::string_view line : splitLines( raw ) )
     {

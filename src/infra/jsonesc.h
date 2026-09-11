@@ -267,8 +267,32 @@ inline bool isJsonWs( char c ) noexcept
 // it in for free. gitmine.h's rw::shSingleQuote is the more widely used name (main.cpp, prcontext.h,
 // quality.h, mcp server) — kept as the canonical spelling; docparse.h's detail::shellQuote now
 // forwards here instead of carrying its own copy.
+/// Quotes a command argument for the active shell without allowing path data to expand variables.
 inline std::string shSingleQuote( const std::string& s )
 {
+#if defined(_WIN32)
+    // On Windows, cmd.exe /c expands %VAR% inside double quotes (e.g. C:\src\100%repo%).
+    // Closing the quote, escaping % as ^%, and reopening the quote ("foo"^%"bar") prevents cmd.exe
+    // from expanding the variable, while CommandLineToArgvW joins the segments into foo%bar.
+    std::string out = "\"";
+    for( char c : s )
+    {
+        if( c == '"' )
+        {
+            out += "\\\"";
+        }
+        else if( c == '%' )
+        {
+            out += "\"^%\"";
+        }
+        else
+        {
+            out += c;
+        }
+    }
+    out += "\"";
+    return out;
+#else
     std::string out = "'";
     for( char c : s )
     {
@@ -280,6 +304,7 @@ inline std::string shSingleQuote( const std::string& s )
     }
     out += "'";
     return out;
+#endif
 }
 
 }   // namespace rw

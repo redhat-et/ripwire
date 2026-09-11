@@ -81,7 +81,9 @@
 #include <mutex>
 #include <vector>
 #include <algorithm>
+#if !defined(_WIN32)
 #include <pthread.h>
+#endif
 
 #include "fastmath.h"              // ALWAYS_INLINE + cache-line size (via platform.h), fastmath::min/max (integral)
 #include "profilePmc.h"            // prof::pmc — optional Apple Silicon HW counters

@@ -781,8 +781,145 @@ std::string runCaptureText( RunCapture& cap )
 
 // fork/exec `sh -c CMD` in its own process group, drain the pipe under a poll() deadline, SIGKILL the whole
 // group at the cap, and decode the exit honestly. Zero new dependencies — POSIX only (G3/G5).
+/// Captures a bounded subprocess run while killing its complete process tree on timeout.
 RunCapture runCommandCapture( const std::string& cmd, std::uint32_t timeoutSec )
 {
+#if defined(_WIN32)
+    RunCapture cap;
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof( sa );
+    sa.bInheritHandle = TRUE;
+
+    HANDLE hRead = NULL, hWrite = NULL;
+    if( !CreatePipe( &hRead, &hWrite, &sa, 0 ) )
+    {
+        cap.isSpawnFailed = true;
+        return cap;
+    }
+    SetHandleInformation( hRead, HANDLE_FLAG_INHERIT, 0 );
+
+    HANDLE hJob = CreateJobObjectA( NULL, NULL );
+    if( hJob != NULL )
+    {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli{};
+        jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject( hJob, JobObjectExtendedLimitInformation, &jeli, sizeof( jeli ) );
+    }
+
+    STARTUPINFOA si{};
+    si.cb = sizeof( si );
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = NULL;
+    si.hStdOutput = hWrite;
+    si.hStdError = hWrite;
+
+    char sysDir[ MAX_PATH ];
+    const UINT sysDirLen = GetSystemDirectoryA( sysDir, MAX_PATH );
+    const std::string cmdExePath = ( sysDirLen > 0 && sysDirLen < MAX_PATH )
+                                       ? std::string( sysDir ) + "\\cmd.exe"
+                                       : "C:\\Windows\\System32\\cmd.exe";
+
+    PROCESS_INFORMATION pi{};
+    std::string fullCmd = "\"" + cmdExePath + "\" /d /c " + cmd;
+    std::vector<char> cmdBuf( fullCmd.begin(), fullCmd.end() );
+    cmdBuf.push_back( '\0' );
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto elapsedMs = [ & ]() -> std::int64_t
+    { return std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() - t0 ).count(); };
+
+    BOOL ok = CreateProcessA(
+        cmdExePath.c_str(),
+        cmdBuf.data(),
+        NULL,
+        NULL,
+        TRUE,
+        CREATE_SUSPENDED | CREATE_NO_WINDOW,
+        NULL,
+        NULL,
+        &si,
+        &pi
+    );
+
+    CloseHandle( hWrite );
+
+    if( !ok )
+    {
+        CloseHandle( hRead );
+        if( hJob ) CloseHandle( hJob );
+        cap.isSpawnFailed = true;
+        return cap;
+    }
+
+    if( hJob )
+    {
+        AssignProcessToJobObject( hJob, pi.hProcess );
+    }
+    ResumeThread( pi.hThread );
+    CloseHandle( pi.hThread );
+
+    const std::int64_t timeoutMs = std::int64_t( timeoutSec ) * 1000;
+    char buf[ 65536 ];
+
+    for( ;; )
+    {
+        const std::int64_t nowMs = elapsedMs();
+        if( !cap.isTimedOut && nowMs >= timeoutMs )
+        {
+            cap.isTimedOut = true;
+            if( hJob ) TerminateJobObject( hJob, 1 );
+            TerminateProcess( pi.hProcess, 1 );
+        }
+
+        DWORD bytesAvail = 0;
+        if( PeekNamedPipe( hRead, NULL, 0, NULL, &bytesAvail, NULL ) && bytesAvail > 0 )
+        {
+            DWORD bytesRead = 0;
+            if( ReadFile( hRead, buf, sizeof( buf ), &bytesRead, NULL ) && bytesRead > 0 )
+            {
+                runCaptureAppend( cap, buf, static_cast<std::size_t>( bytesRead ) );
+                continue;
+            }
+        }
+
+        DWORD waitRes = WaitForSingleObject( pi.hProcess, 15 );
+        if( waitRes == WAIT_OBJECT_0 || cap.isTimedOut )
+        {
+            // Drain remaining
+            DWORD bytesRead = 0;
+            while( PeekNamedPipe( hRead, NULL, 0, NULL, &bytesAvail, NULL ) && bytesAvail > 0 )
+            {
+                if( ReadFile( hRead, buf, sizeof( buf ), &bytesRead, NULL ) && bytesRead > 0 )
+                {
+                    runCaptureAppend( cap, buf, static_cast<std::size_t>( bytesRead ) );
+                }
+                else
+                {
+                    break;
+                }
+            }
+            break;
+        }
+    }
+
+    DWORD exitCode = 0;
+    GetExitCodeProcess( pi.hProcess, &exitCode );
+    cap.durationMs = static_cast<std::uint64_t>( elapsedMs() );
+    if( !cap.isTimedOut )
+    {
+        cap.isExitedNormally = true;
+        cap.exitCode = static_cast<int>( exitCode );
+    }
+    else
+    {
+        cap.termSignal = 9;
+    }
+
+    CloseHandle( hRead );
+    CloseHandle( pi.hProcess );
+    if( hJob ) CloseHandle( hJob );
+    return cap;
+#else
     RunCapture cap;
     int fds[2];
     if( pipe( fds ) != 0 )
@@ -885,6 +1022,7 @@ RunCapture runCommandCapture( const std::string& cmd, std::uint32_t timeoutSec )
         cap.termSignal = WTERMSIG( status );
     }
     return cap;
+#endif
 }
 
 // split the captured text into its NON-EMPTY lines (views into `text`) — wsdetail::segmentsOf is the shared

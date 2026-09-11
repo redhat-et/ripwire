@@ -49,6 +49,7 @@
 #include "mcpserver.h"             // the optional remote MCP transport (--listen), picked below
 #include "editplan.h"              // CLI-first versioned multi-edit transactions
 #include "wrap.h"
+#include "infra/processLock.h"      // serialize concurrent heavy CLI runs for the same root
 
 // P8 (L7): the test-gate root's ccx_bar= (situ.h kTestGateCcxBarMirror) is quality.h's kCcxBar — one bar, two spellings,
 // pinned equal in the one TU that sees both (quality.h is also compiled standalone by the bench/probe targets).
@@ -202,6 +203,25 @@ std::string defaultCachePath( const std::string& root, bool captureValueUses )
     rw::formatTo( tail, sizeof( tail ), "ripwire-{:016x}-{}.bin",
                    static_cast<unsigned long long>( h ), captureValueUses ? "rich" : "lean" );
     return resolveCacheBlobPath( cacheDirLadder(), tail );
+}
+
+std::string canonicalProcessLockPart( std::string_view path )
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path canonical = fs::weakly_canonical( fs::path( path ), ec );
+    return ec ? std::string( path ) : canonical.generic_string();
+}
+
+std::string ingestProcessLockPath( std::string_view identity )
+{
+    char name[ 64 ];
+    std::snprintf( name, sizeof( name ), "ripwire-ingest-%016llx.lock",
+                   static_cast<unsigned long long>( rw::fnv1a64( identity ) ) );
+    const std::string lockDir = cacheDirLadder() + "/locks";
+    std::error_code  ec;
+    std::filesystem::create_directories( std::filesystem::path( lockDir ), ec );
+    return lockDir + "/" + name;
 }
 
 // computeHeadSnapshot / gitHeadSha / gitRepoHasHistory / cacheDirLadder now live in quality.h (the
@@ -3499,6 +3519,25 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             return 1;
         }
     }
+
+    // The lock spans the complete heavy CLI pipeline, including buildGraph and serialization. Locking only
+    // ingest would still let two processes overlap during the graph's peak, which is exactly the memory hazard
+    // this guard is meant to prevent. The identity is the canonical root for a single-root run, or the ordered
+    // canonical root set for a multi-root run; the lockfile lives in the per-user cache, never in the workspace.
+    std::string ingestLockIdentity;
+    if( multiRoot )
+    {
+        for( const WorkspaceRoot& r : ws )
+        {
+            ingestLockIdentity += canonicalProcessLockPart( r.arg );
+            ingestLockIdentity.push_back( '\0' );
+        }
+    }
+    else
+    {
+        ingestLockIdentity = canonicalProcessLockPart( root );
+    }
+    const rw::infra::ProcessLock ingestProcessLock( ingestProcessLockPath( ingestLockIdentity ) );
 
     // --index-out=BASE (both-families amendment): the CI generate-and-exit path.
     // Cold-parse the tree TWICE — once lean, once rich — writing BASE.lean.ripwirecache and

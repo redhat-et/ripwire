@@ -210,7 +210,11 @@ inline bool appendGitConfigOverride( const char* key, const char* value )
     const std::string   keyN  = "GIT_CONFIG_KEY_" + std::to_string( n );
     const std::string   valN  = "GIT_CONFIG_VALUE_" + std::to_string( n );
     const std::string   count = std::to_string( n + 1 );
+#if defined(_WIN32)
+    return ::_putenv_s( keyN.c_str(), key ) == 0 && ::_putenv_s( valN.c_str(), value ) == 0 && ::_putenv_s( "GIT_CONFIG_COUNT", count.c_str() ) == 0;
+#else
     return ::setenv( keyN.c_str(), key, 1 ) == 0 && ::setenv( valN.c_str(), value, 1 ) == 0 && ::setenv( "GIT_CONFIG_COUNT", count.c_str(), 1 ) == 0;
+#endif
 }
 
 // ── the startup record, kept so --doctor reports the SAME probe main() acted on ─────────────────────────────

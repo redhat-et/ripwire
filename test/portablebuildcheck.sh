@@ -25,10 +25,11 @@
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
 set -u
-ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+ROOT="$( cd "$( dirname "$0" )/.." && ( pwd -W 2>/dev/null || pwd ) )"
 MODULE="$ROOT/cmake/PortableFlags.cmake"
 CMAKE_TOP="$ROOT/CMakeLists.txt"
 TMP="$( mktemp -d )"
+TMP="$( cd "$TMP" && ( pwd -W 2>/dev/null || pwd ) )"
 trap 'rm -rf "$TMP"' EXIT
 fail=0
 

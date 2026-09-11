@@ -75,6 +75,38 @@ is compiled out and freshness comes from the per-request stat sweep — that is 
 a degradation, so it is silent and the staleness contract is unchanged. You can build and run that
 path on a Mac with `cmake -S . -B build-nokqueue -DCMAKE_CXX_FLAGS=-DRIPWIRE_HAS_KQUEUE=0`.
 
+### Building on Windows
+
+ripwire builds natively on Windows (x64) with Clang and the MSVC ABI, with zero external runtime
+dependencies (linking only system `kernel32`, `ws2_32`, `advapi32`, `shell32`).
+
+From an **x64 Native Tools Command Prompt for Visual Studio** (with `clang` and `ninja` on `PATH`):
+
+```cmd
+cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+cmake --build build -j
+```
+
+For maximum performance (Release mode with ThinLTO and host-CPU vectorization):
+
+```cmd
+cmake -S . -B build-release -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release -DRIPWIRE_NATIVE=ON
+cmake --build build-release -j
+```
+
+Profile-Guided Optimization (PGO) is also supported on Windows via `scripts/pgobuild.sh` (under Git Bash) or CMake (`-DRIPWIRE_PGO=generate` and `-DRIPWIRE_PGO=use`), providing an additional 2–11% speedup across hot capture, query, and AST linting paths.
+
+Or using the Visual Studio generator with Clang-CL:
+
+```cmd
+cmake -S . -B build -T ClangCL
+cmake --build build --config Release
+```
+
+The resulting binaries (`build/ripwire.exe` and `build/ripwire_probe.exe`) embed an application
+manifest opting into `longPathAware` (handling arbitrary deep paths up to NTFS 32k limits) and UTF-8
+active code page.
+
 ### Determinism gate
 
 Output is a sorted top-K. A sort has no tolerance band, so the contract is byte-identity:

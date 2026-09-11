@@ -283,6 +283,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     //    the deterministic merge, and the dirty-gated saveCache (ingest_parsepool.h).
     RawFacts raw = runParsePool( result, rootDir, cacheFile, captureValueUses, cache, cacheStats, scan, prewarm );
 
+    // Cache facts are only needed by the parse pool. Release their map and bucket storage before the model tail
+    // creates symbols/references, so a warm run does not carry the cache and the assembled model at once.
+    HashMap<std::string, FileFacts>().swap( cache );
+
     result.fileHealth = std::move( scan.health );   // §L1: after saveCache, before the (unmeasured) doc pass
 
     // ── doc post-pass (P1-B): every collected document file (notebook/html/csv/…) becomes a docText
@@ -307,17 +311,25 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
     // 4) attribute each reference to its enclosing definition (innermost span containing it) — the
     //    per-file DefSpanIndex + DefSweep cursor every fact family below shares (ingest_model.h).
-    const DefSpanIndex spanIndex = buildDefSpanIndex( result, raw.defs );
+    DefSpanIndex spanIndex = buildDefSpanIndex( result, raw.defs );
 
     // references: order a uint32 index permutation (radix by startByte), then MOVE each RawRef's strings
     // into its Reference while the shared sweep attributes fromSymbol (ingest_model.h).
-    const std::vector<std::uint32_t> refOrder = orderReferences( raw.refs, result.files.size() );
+    std::vector<std::uint32_t> refOrder = orderReferences( raw.refs, result.files.size() );
     emitReferences( result, raw.refs, refOrder, spanIndex );
+    std::vector<std::uint32_t>().swap( refOrder );
+    std::vector<RawRef>().swap( raw.refs );
     dropFieldDefinitionSites( result, fieldDefs );   // member-variable round: a field's defining assignment is not a use of it
+    std::vector<RawDef>().swap( fieldDefs );
+
+    // Symbol names/scopes and the definition spans have been transferred to the model/index; the raw definition
+    // object array is no longer read after this point.
+    std::vector<RawDef>().swap( raw.defs );
 
     // P2-D Rule 2 bindings, A4-R5 FFI aliases, B6.3 route defs/uses — each in its deterministic total
     // order, span-attributed families over the same DefSpanIndex (ingest_model.h).
     emitBindings( result, raw.binds, spanIndex );
+    std::vector<RawBind>().swap( raw.binds );
 
     result.includes = std::move( raw.incs );   // physical dependencies (#include / import), for --deps
     result.constOpens = std::move( raw.constOpens );   // parser version 82: Ruby class/module opens → resolve.h's constant index
@@ -325,6 +337,11 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     emitBindingAliases( result, raw.ffis );
     emitRouteDefs( result, raw.routeDefs );
     emitRouteUses( result, raw.routeUses, spanIndex );
+    std::vector<RawRouteUse>().swap( raw.routeUses );
+
+    // No later model pass needs the containment index. Drop it before the macro/shadow passes, which operate on
+    // the assembled result and can otherwise overlap its storage with a dead span table.
+    spanIndex = DefSpanIndex{};
 
     // macro-edges round: the corpus-wide role="macro" retag (model.h). AFTER the model is assembled and
     // AFTER saveCache (which stores the per-file truth, role=Call) — a #define added in one file must
