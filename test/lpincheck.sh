@@ -99,6 +99,63 @@ grep -q '"locality_pinned":1' "$TMP/map.json" && ok "(G) --json header carries \
 "$BIN" "$FIXTURE" --json --no-cache 2>/dev/null | grep -q '"lpin"\|"locality_pinned"' && no "(G) --json on test/fixture emits the keys with nothing to disclose" \
     || ok "(G) --json on test/fixture: both keys absent"
 
+# ── (I) the caller never wins its own locality tie-break — the LANGUAGE-AGNOSTIC arm ──────────────
+# src/graph.h scores a tier candidate that IS the caller `c == r.fromSymbol` as locality ZERO. Without it the
+# caller's own def matches itself on every segment, wins the tie-break alone, and emission then drops it as a
+# self-loop: the site produces NO edge at all, silently. Found through Ruby (test/rubyscopecheck.sh's facade
+# arm) but nothing about it is Ruby — the fixture below is PYTHON and was measured RED before the fix (edges=0)
+# and GREEN after (2 split edges, amb="1"). This arm is the reason a revert of that one line goes red for the
+# right reason, in a language the Ruby gates never touch.
+#
+# STATED FLOOR, pinned here so it stays a decision rather than an oversight: the fix is the TIE-BREAK only.
+# Tier 1 admits same-FILE candidates and stops when any exist, so a caller that is the only same-file candidate
+# is still selected alone and still dropped as a self-loop — the second fixture below (two files) is that
+# residual, asserted to produce NOTHING. Widening tier 1 past the caller would mint a cross-file edge the
+# same-file tier already outranked; a call on another instance of the caller's own class is a real self-loop.
+SELFD="$TMP/selfwin"; mkdir -p "$SELFD"
+cat > "$SELFD/facade.py" <<'PYEOF'
+class Facade:
+    def publish_event(self, event):
+        return notifier.publish_event(event)
+
+
+class Fanout:
+    def publish_event(self, event):
+        return 1
+
+
+class Subscriber:
+    def publish_event(self, event):
+        return 2
+PYEOF
+"$BIN" "$SELFD" --no-cache >"$TMP/selfwin.xml" 2>/dev/null
+SW="$( sed 's/></>\n</g' "$TMP/selfwin.xml" | awk '/id="facade.py::Facade::publish_event"/{f=1;print;next} /^<s /{f=0} f' )"
+[ "$( printf '%s' "$SW" | grep -c '<c n="publish_event"' )" = 2 ] \
+    && ok "(I) the facade keeps BOTH real targets (2 edges) — the caller no longer wins its own tie-break" \
+    || no "(I) facade.py::Facade::publish_event has $( printf '%s' "$SW" | grep -c '<c n="publish_event"' ) publish_event edges, want 2: $SW"
+printf '%s' "$SW" | grep -q 'amb="1"' && ok "(I) …disclosed as an honest split (amb=\"1\")" \
+    || no "(I) the facade split is not marked amb=\"1\": $( printf '%s' "$SW" | head -1 )"
+printf '%s' "$SW" | grep -q 'lpin=' && no "(I) the facade carries lpin= — a two-way tie was pinned: $( printf '%s' "$SW" | head -1 )" \
+    || ok "(I) …and no lpin= (a tie is left a tie)"
+printf '%s' "$SW" | grep -q 'prov="split"' && ok "(I) …and the edges carry prov=\"split\"" \
+    || no "(I) the split edges lack prov=\"split\": $SW"
+# the residual: caller alone in the same-file tier ⇒ still nothing, by design
+RESD="$TMP/selfwin_resid"; mkdir -p "$RESD"
+cat > "$RESD/a.py" <<'PYEOF'
+class Alpha:
+    def ping(self, other):
+        return other.ping(1)
+PYEOF
+cat > "$RESD/b.py" <<'PYEOF'
+class Beta:
+    def ping(self, n):
+        return n
+PYEOF
+RESH="$( "$BIN" "$RESD" --no-cache 2>/dev/null | grep -o '<!-- files=[^>]*-->' | head -1 )"
+printf '%s' "$RESH" | grep -q ' edges=0 ' \
+    && ok "(I) stated floor holds: a caller alone in the SAME-FILE tier still yields no edge (tier 1 is untouched)" \
+    || no "(I) the tier-1 residual moved — update this arm AND src/graph.h's stated floor: $RESH"
+
 # ── (H) determinism + well-formedness ─────────────────────────────────────────────────────────────
 "$BIN" "$CORPUS" --no-cache >"$TMP/map2.xml" 2>/dev/null
 cmp -s "$TMP/map.xml" "$TMP/map2.xml" && ok "(H) two runs byte-identical" || no "(H) the map is not deterministic"

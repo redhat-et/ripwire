@@ -395,6 +395,17 @@ pyec(){ "$BIN" "$PYFIX" --edit-check="$1" --no-cache 2>/dev/null; }
 
 OUTI_M="$( pyec mod.py:bump )"
 OUTI_F="$( pyec mod.py:freefn )"
+# (h2) 2026-09-06 (stranger audit): $PYFIX is not a git repository, and until today that answered
+# status="new-symbol" for a symbol that plainly exists — a false contract claim on any tarball or export.
+# No HEAD means no comparison: status="no-baseline", no was/now, and never "new-symbol".
+if printf '%s' "$OUTI_F" | grep -q 'status="no-baseline"'; then
+    ok "(h2) non-git root -> status=\"no-baseline\" (nothing compared, nothing claimed)"
+else
+    no "(h2) non-git root did not answer no-baseline: $( printf '%s' "$OUTI_F" | grep -o 'status="[^"]*"' )"
+fi
+printf '%s' "$OUTI_F" | grep -q 'status="new-symbol"' \
+    && no "(h2) non-git root still calls an existing symbol new-symbol" \
+    || ok "(h2) non-git root never says new-symbol"
 # both selectors must resolve, or the two arms below assert nothing (trap #20: a pin that stops measuring).
 if ! printf '%s%s' "$OUTI_M" "$OUTI_F" | grep -q '<edit-check '; then
     no "(i) the Python fixture did not resolve — the implicit-receiver arms measured nothing"

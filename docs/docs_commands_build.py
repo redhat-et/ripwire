@@ -99,6 +99,50 @@ def scrub_author_attrs( text ):
 # Internal-only document names from the private development tree, if a sample happens to rank one.
 INTERNAL_DOC = re.compile( r'\b(?:PLAN_|AUDIT|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|DESIGN_|RESEARCH_)[A-Za-z0-9_.-]*' )
 
+# A row whose PATH was anonymised is a row from an INTERNAL document, and its section HEADINGS are
+# internal too. INTERNAL_DOC above only ever matches the FILENAME token: on a `<sym p= id=>` row it
+# rewrites the path, while id= carries the section HEADING as bare text — no filename in it at all,
+# so nothing there matches and it survives untouched. That is how 21 internal planning headings reached
+# docs/captures/COMMANDS_showcase_2026-08-10.md and public main (4d40fa8a) — the scrub was hiding
+# the name and publishing the contents, which is the wrong half. Redact the identifying payload of
+# any row whose p= is already the anonymised name, keeping the row so counts and structure still
+# read true. No example is spelled out here on purpose: an internal filename written literally in
+# this comment is itself a finding, and test/ripwirepubliccheck.sh is right to say so.
+INTERNAL_ROW  = re.compile( r'<[A-Za-z][A-Za-z0-9_]*\b[^>]*\bp="NOTES\.md"[^>]*/?>' )
+INTERNAL_ATTR    = re.compile( r'\b(id|n)="[^"]*"' )
+INTERNAL_ATTR_KV = re.compile( r'\b(id|n)="([^"]*)"' )
+
+
+def redactable_internal_value( value ):
+    """A heading is text; a COUNT is not. `test/docdriftfix/NOTES.md` is a tracked PUBLIC fixture and
+    doc-drift emits `<weak-file-line p="NOTES.md" n="1">` for it, where n= is the number of weak
+    anchors. Redacting that would corrupt a number and ship it as the tool's answer — worse than the
+    leak this function exists to stop, by this file's own standard. A purely numeric value cannot be
+    a heading, so it is never redacted."""
+    return not value.isdigit()
+
+
+def unredacted_internal_row( line ):
+    """The leak PREDICATE for the shape scrub_internal_rows removes, shared with `assert_scrubbed`
+    so the two cannot disagree — the same discipline `find_address` uses. Returns the offending row,
+    or None."""
+    for row in INTERNAL_ROW.finditer( line ):
+        if any( v != '<internal>' and redactable_internal_value( v )
+                for _, v in INTERNAL_ATTR_KV.findall( row.group( 0 ) ) ):
+            return row.group( 0 )
+    return None
+
+
+def scrub_internal_rows( text ):
+    """Redact id=/n= on rows already anonymised to NOTES.md — the heading text is internal too."""
+    def redact( row ):
+        return INTERNAL_ATTR_KV.sub(
+            lambda a: a.group( 0 ) if not redactable_internal_value( a.group( 2 ) )
+                                   else '%s="<internal>"' % a.group( 1 ),
+            row.group( 0 ) )
+    return INTERNAL_ROW.sub( redact, text )
+
+
 MAX_SAMPLE_LINES = 14
 MAX_SAMPLE_BYTES = 1600
 
@@ -118,7 +162,7 @@ def tool_name_of( binPath ):
 
 def help_text_of( binPath ):
     try:
-        run = subprocess.run( [ binPath, '--help' ], capture_output = True, text = True, timeout = 120 )
+        run = subprocess.run( [ binPath, '--help=all' ], capture_output = True, text = True, timeout = 120 )
     except OSError as exc:
         sys.exit( 'docs_commands_build: cannot run %s (%s)' % ( binPath, exc ) )
     if run.returncode != 0 and not run.stdout:
@@ -310,6 +354,17 @@ def pick_sample( entry, captures ):
     return best
 
 
+def pattern_sample( captures, marker ):
+    """A hand-authored PATTERN subsection (see render_recall_pattern) needs ONE specific real
+    invocation, not pick_sample's generic per-flag pick — several captured commands can share a flag,
+    and pick_sample would happily hand back a different one. MARKER is a substring unique to the
+    intended command; the first captured item containing it, with a non-empty body, wins."""
+    for item in captures:
+        if marker in item[ 'cmd' ] and item[ 'body' ]:
+            return item
+    return None
+
+
 # ── scrubbing + trimming ──────────────────────────────────────────────────────────────────────────
 
 def scrub( text, name ):
@@ -319,6 +374,7 @@ def scrub( text, name ):
     text = scrub_author_attrs( text )
     text = scrub_emails( text )
     text = INTERNAL_DOC.sub( 'NOTES.md', text )
+    text = scrub_internal_rows( text )
     return text
 
 
@@ -416,6 +472,92 @@ def shaped_by( entry, sections ):
 
 def anchor_of( spec ):
     return re.sub( r'[^a-z0-9]+', '-', spec.lower() ).strip( '-' )
+
+
+# The --recall FLAG's own --help text says nothing about pointing it at a directory that is not a
+# source repo, because that usage needs no new flag at all — it is documented here as a hand-authored
+# subsection, not derived from --help like every other section in this file. The one real invocation
+# is still pulled from the SAME showcase capture every other sample in this document comes from (see
+# pattern_sample), so the doc's "everything here is either read from --help or a real recorded run"
+# contract holds for this subsection too.
+#
+# NO `**Caveats:**` BLOCK HERE, deliberately — do not add one back. This document's own "How to read a
+# section" defines Caveats as "the limits the binary itself states for this flag ... extracted from its
+# own help text, so they cannot drift from the code". A hand-authored bullet under that heading claims a
+# provenance it does not have, and this subsection had exactly that: a KNOWN LIMIT describing --recall
+# serving a document-order PREFIX instead of the ranked sections, still printed after the passage-serving
+# fix landed in src/recall.h, because nothing derived it from anything and so nothing could retire it.
+# The two conditions that DO govern this pattern (a `.md` extension, and `##` headings in the dump) are
+# not defects and will not expire, so they belong in the prose above, where they read as instructions for
+# writing the dump rather than as apologies for the tool.
+RECALL_PATTERN_MARKER = 'field affinity cache line data layout which fields are read together'
+
+
+def render_recall_pattern( captures, name ):
+    out = []
+    w   = out.append
+    sample = pattern_sample( captures, RECALL_PATTERN_MARKER )
+
+    w( '#### Pattern: a directory of dumped tool output as a knowledge base' )
+    w( '' )
+    w( '**Answers:** can `--recall` serve as a zero-setup knowledge base over dumped tool output — a' )
+    w( '`git log`, an API response dump, a fetched doc, `<tool> --help` text — sitting in a scratch' )
+    w( 'directory, instead of a source repo?' )
+    w( '' )
+    w( 'Yes, unmodified. `--recall` never distinguishes "a codebase" from any other directory it can' )
+    w( 'walk: point it at the scratch dir and query it. No index to build, no daemon, no mutable store' )
+    w( 'between runs — the whole cost is one cold parse. Two conditions decide whether it works at all,' )
+    w( 'and both are yours, because the file you write is the only thing that sets them:' )
+    w( '' )
+    w( '1. **Dump to `.md`.** `--recall` ranks DOCUMENT files: `.md`, plus the docparse\'d' )
+    w( '   `.ipynb`/`.html`/`.csv` (and Office/PDF through the optional markitdown bridge). `.txt`,' )
+    w( '   `.log`, `.json` and extensionless files are **not** documents to it. A directory of those' )
+    w( '   answers `0 relevant of 0 document files` and exits 0 — which reads like "nothing matched' )
+    w( '   your terms" when what happened is "nothing was indexed at all". Redirect to `notes.md`,' )
+    w( '   never `notes.txt`. The recorded run below is that rule\'s own demonstration: its scratch dir' )
+    w( '   holds five dumps, and the header says `2 relevant of 2 document files` because only the two' )
+    w( '   `.md` ones are documents — the `git log`, the `--help` text and the JSON access log are not' )
+    w( '   in the population at all.' )
+    w( '' )
+    w( '2. **Keep `##` headings in the dump.** A headed document is served as whole ranked SECTIONS, so' )
+    w( '   an answer buried mid-file arrives at a small `--max-tokens`, and — while the served document' )
+    w( '   SET stays fixed — a larger ceiling returns a strict superset of it; the `[sections: S of R' )
+    w( '   selected (N in doc) … lines="…"; dropped_by_budget=D]` note names the ranges you actually got' )
+    w( '   and what the ceiling cost. A HEADLESS dump has no sections to rank, so it is cut front-first' )
+    w( '   and carries no such note.' )
+    w( '' )
+    w( '   That per-document guarantee is not global: dump SEVERAL headed documents into the same' )
+    w( '   scratch dir and a larger ceiling can admit another one, which re-divides the shared budget' )
+    w( '   and can shrink an already-served document\'s own slice — `share_bytes=` in the header' )
+    w( '   discloses exactly that redivision when it happens.' )
+    w( '' )
+    w( '   Measured on a 73811-byte, 2001-line dump whose answer sat at line 1748: the headed copy' )
+    w( '   served exactly that answer at `--max-tokens=1000` (`lines="1748-1752"`, est_tokens=194),' )
+    w( '   while the headless copy of the same content withheld it at 1000, 2000, 4000, 8000 and 16000' )
+    w( '   and produced it only at 40000 — by which point the front-first cut had emitted the whole' )
+    w( '   file.' )
+    w( '' )
+    if sample:
+        w( '**Try it**' )
+        w( '' )
+        caption = scrub( sample[ 'caption' ], name )
+        if caption and not COORD.search( caption ):
+            w( '_%s_' % caption )
+            w( '' )
+        w( '```' )
+        w( '$ ' + rewrite_command( sample[ 'cmd' ], name ) )
+        for line in trim_sample( sample[ 'body' ], name ):
+            w( line )
+        w( '```' )
+        w( '' )
+    return out
+
+
+def recall_pattern_if_due( spec, captures, name ):
+    """The one line render()'s entry loop calls — kept a plain call, no `if`, so this hand-authored
+    subsection adds zero branches to render() itself (already well past its own complexity bar; the
+    branch belongs here, on a fresh symbol, not stacked onto that one)."""
+    return render_recall_pattern( captures, name ) if spec == '--recall=TASK' else []
 
 
 def render( name, preamble, sections, captures, capturePath ):
@@ -522,6 +664,8 @@ def render( name, preamble, sections, captures, capturePath ):
                     w( '- %s' % scrub_prose( c, name ) )
                 w( '' )
 
+            out.extend( recall_pattern_if_due( spec, captures, name ) )
+
     w( '---' )
     w( '' )
     w( '_Generated by `docs/docs_commands_build.py`. See `docs/README.md` for the documentation index._' )
@@ -541,6 +685,10 @@ def assert_scrubbed( text, what = 'refusing to write' ):
             bad.append( '%d: email address: %s' % ( i, line.strip()[ :90 ] ) )
         elif INTERNAL_DOC.search( line ):
             bad.append( '%d: internal document name: %s' % ( i, line.strip()[ :90 ] ) )
+        elif unredacted_internal_row( line ) is not None:
+            # the shape that shipped once: path anonymised, heading text not
+            bad.append( '%d: internal document HEADING on an anonymised row: %s'
+                        % ( i, unredacted_internal_row( line )[ :90 ] ) )
     if bad:
         sys.exit( 'docs_commands_build: %s — scrub violations:\n  %s' % ( what, '\n  '.join( bad[ :20 ] ) ) )
 

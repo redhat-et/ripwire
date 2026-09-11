@@ -91,21 +91,27 @@ else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi
 
-# ── §P9.4: files that CANNOT participate in the #include/import graph (.sh/.md — no grammar or import ──
-# syntax captureIncludes() recognizes) must not dilute --deps <health>'s nccd/acd nor --arch's
-# propagation_cost. Both must be computed over dependency-capable files only, with the SAME denominator.
+# ── §P9.4: files that CANNOT participate in the #include/import graph (.md/.json — no import syntax at ──
+# all) must not dilute --deps <health>'s nccd/acd nor --arch's propagation_cost. Both must be computed
+# over dependency-capable files only, with the SAME denominator.
 # archmetricsfix (9 C-family files) has a hand-computed propagation_cost = 16/81 = 0.198 (see the header
-# comment above) and a hand-computed CCD; copy it and add TWO non-capable files with no edges (a .sh and a
-# .md) — if they leaked into N, both numbers would be diluted toward a LARGER N (0.198 * 81/121 = 0.132,
+# comment above) and a hand-computed CCD; copy it and add TWO non-capable files with no edges (a .md and a
+# .json) — if they leaked into N, both numbers would be diluted toward a LARGER N (0.198 * 81/121 = 0.132,
 # CCD/N would drop too). They must not move at all: excluding non-capable files means N stays 9.
+#
+# The .sh that used to be one of these two MOVED at kParserVer 81 — Bash `source`/`.` is now a captured
+# directive and .sh is dependency-capable — so it is no longer a valid negative control and has become the
+# POSITIVE one below. .md is still excluded on purpose (it mints doc→doc link edges but a README that
+# links twelve designs is not twelve files of change amplification — see lintrules.h::dependencyCapable);
+# .json has no file-level import at all.
 DCAP="$TMP/depcap"
 cp -R "$FIX" "$DCAP"
-printf '#!/usr/bin/env bash\necho hi\n' > "$DCAP/deploy.sh"
 printf '# notes\n\nnothing to see here\n'  > "$DCAP/README.md"
+printf '{ "note": "not a dependency" }\n'  > "$DCAP/data.json"
 
 DEPS_DCAP="$( "$BIN" "$DCAP" --deps --no-cache 2>/dev/null )"
 printf '%s' "$DEPS_DCAP" | grep -qE '<health files="11"[^>]*\bdep_files="9"' \
-    && ok "P9.4: <health> discloses BOTH files=11 (corpus, incl. .sh/.md) and dep_files=9 (denominator)" \
+    && ok "P9.4: <health> discloses BOTH files=11 (corpus, incl. .md/.json) and dep_files=9 (denominator)" \
     || no "P9.4: <health> files=/dep_files= wrong or missing: $( printf '%s' "$DEPS_DCAP" | grep -o '<health[^/]*/>' )"
 printf '%s' "$DEPS_DCAP" | grep -qE '<health[^>]*\bnccd="0\.66"' \
     && ok "P9.4: --deps nccd unmoved by the two non-capable files (still computed over dep_files=9)" \
@@ -116,6 +122,24 @@ DCAP_PC="$( pc "$ARCH_DCAP" )"
 [ "$DCAP_PC" = "$EXPECT" ] \
     && ok "P9.4: --arch propagation_cost unmoved by the two non-capable files (still $EXPECT, same N as --deps)" \
     || no "P9.4: --arch propagation_cost shifted to '$DCAP_PC' (expected unchanged $EXPECT) — denominators disagree"
+
+# ── POSITIVE CONTROL for the same denominator (kParserVer 81) — without it, the three assertions above
+# pass just as well on a build where dependencyCapable() returned false for EVERYTHING. Add ONE .sh with
+# no edges to the same 9-file fixture: it must now COUNT, so dep_files goes 9 -> 10 and propagation_cost
+# becomes 17/100 = 0.170 (the .sh seeds a root that reaches only itself: +1 numerator, +19 denominator).
+# Both numbers moving together is the "same N" claim proven in the direction that can actually fail.
+DCAPSH="$TMP/depcapsh"
+cp -R "$FIX" "$DCAPSH"
+printf '#!/usr/bin/env bash\necho hi\n' > "$DCAPSH/deploy.sh"
+
+DEPS_SH="$( "$BIN" "$DCAPSH" --deps --no-cache 2>/dev/null )"
+printf '%s' "$DEPS_SH" | grep -qE '<health files="10"[^>]*\bdep_files="10"' \
+    && ok "P9.4 positive: a .sh is dependency-CAPABLE at parser version 81 — dep_files=10 of files=10" \
+    || no "P9.4 positive: the .sh did not join the denominator: $( printf '%s' "$DEPS_SH" | grep -o '<health[^/]*/>' )"
+SH_PC="$( pc "$( "$BIN" "$DCAPSH" --arch="$DCAPSH/sibling.arch" --no-cache 2>/dev/null )" )"
+[ "$SH_PC" = "0.170" ] \
+    && ok "P9.4 positive: --arch propagation_cost moved with it (17/100 = 0.170, same N as --deps)" \
+    || no "P9.4 positive: propagation_cost is '$SH_PC', expected 0.170 — the two denominators disagree"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

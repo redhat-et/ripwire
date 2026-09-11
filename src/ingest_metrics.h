@@ -30,45 +30,45 @@ namespace
 // parameter existed (the Lua carve-out is the only place `lang` is read).
 inline bool isDecisionType( const char* t, Lang lang ) noexcept
 {
-    return    std::strcmp( t, "if_statement" ) == 0       || std::strcmp( t, "if_expression" ) == 0
-           || std::strcmp( t, "for_statement" ) == 0      || std::strcmp( t, "for_range_loop" ) == 0
-           || std::strcmp( t, "for_in_statement" ) == 0   || std::strcmp( t, "for_expression" ) == 0
-           || std::strcmp( t, "while_statement" ) == 0    || std::strcmp( t, "while_expression" ) == 0
-           || ( std::strcmp( t, "do_statement" ) == 0 && lang != Lang::Lua ) || std::strcmp( t, "loop_expression" ) == 0
+    return    kindIs( t, "if_statement" )       || kindIs( t, "if_expression" )
+           || kindIs( t, "for_statement" )      || kindIs( t, "for_range_loop" )
+           || kindIs( t, "for_in_statement" )   || kindIs( t, "for_expression" )
+           || kindIs( t, "while_statement" )    || kindIs( t, "while_expression" )
+           || ( kindIs( t, "do_statement" ) && lang != Lang::Lua ) || kindIs( t, "loop_expression" )
            // Lua: `repeat … until c` is a real post-test loop, and `elseif c then` is the flat +1 arm of
            // an if-chain (a SIBLING statement in this grammar, not a child clause, so cc_walk's else-if
            // flattening below never sees it and it must be counted here).
-           || std::strcmp( t, "repeat_statement" ) == 0   || std::strcmp( t, "elseif_statement" ) == 0
+           || kindIs( t, "repeat_statement" )   || kindIs( t, "elseif_statement" )
            // PHP 8: each `match` arm is a decision, exactly like C#'s switch_expression_arm and Ruby's
            // `when`. `match_default_expression` is the fall-through arm and is deliberately NOT counted,
            // matching how a C-family `default:` label is not a decision.
-           || std::strcmp( t, "match_conditional_expression" ) == 0
-           || std::strcmp( t, "case_statement" ) == 0     || std::strcmp( t, "match_arm" ) == 0
-           || std::strcmp( t, "expression_case" ) == 0    || std::strcmp( t, "communication_case" ) == 0
-           || std::strcmp( t, "catch_clause" ) == 0       || std::strcmp( t, "except_clause" ) == 0
-           || std::strcmp( t, "conditional_expression" ) == 0 || std::strcmp( t, "ternary_expression" ) == 0
-           || std::strcmp( t, "boolean_operator" ) == 0    // Python `and`/`or`
+           || kindIs( t, "match_conditional_expression" )
+           || kindIs( t, "case_statement" )     || kindIs( t, "match_arm" )
+           || kindIs( t, "expression_case" )    || kindIs( t, "communication_case" )
+           || kindIs( t, "catch_clause" )       || kindIs( t, "except_clause" )
+           || kindIs( t, "conditional_expression" ) || kindIs( t, "ternary_expression" )
+           || kindIs( t, "boolean_operator" )    // Python `and`/`or`
            // Ruby (tree-sitter-ruby node kinds): block `if`/`elsif`/`unless`/`while`/`until`/`for`, the
            // trailing modifier forms (`x if a`), each `when`/`in_clause` arm, `rescue`, and the `? :`
            // `conditional`. Ruby's `case`/`case_match` head is a nesting container (see cc_isNestingControl),
            // NOT a decision — each `when`/`in_clause` arm is the decision, matching C-family case_statement.
-           || std::strcmp( t, "if" ) == 0                 || std::strcmp( t, "elsif" ) == 0
-           || std::strcmp( t, "unless" ) == 0             || std::strcmp( t, "while" ) == 0
-           || std::strcmp( t, "until" ) == 0              || std::strcmp( t, "for" ) == 0
-           || std::strcmp( t, "if_modifier" ) == 0        || std::strcmp( t, "unless_modifier" ) == 0
-           || std::strcmp( t, "while_modifier" ) == 0     || std::strcmp( t, "until_modifier" ) == 0
-           || std::strcmp( t, "when" ) == 0               || std::strcmp( t, "in_clause" ) == 0
-           || std::strcmp( t, "rescue" ) == 0             || std::strcmp( t, "conditional" ) == 0
+           || kindIs( t, "if" )                 || kindIs( t, "elsif" )
+           || kindIs( t, "unless" )             || kindIs( t, "while" )
+           || kindIs( t, "until" )              || kindIs( t, "for" )
+           || kindIs( t, "if_modifier" )        || kindIs( t, "unless_modifier" )
+           || kindIs( t, "while_modifier" )     || kindIs( t, "until_modifier" )
+           || kindIs( t, "when" )               || kindIs( t, "in_clause" )
+           || kindIs( t, "rescue" )             || kindIs( t, "conditional" )
            // C# (tree-sitter-c-sharp): `foreach` is a distinct loop node (not `for_statement`); each
            // classic-switch `case`/`default` arm is a `switch_section`, each modern switch-expression
            // arm is a `switch_expression_arm` — both are the per-arm decision, matching Ruby's `when`.
-           || std::strcmp( t, "foreach_statement" ) == 0   || std::strcmp( t, "switch_section" ) == 0
-           || std::strcmp( t, "switch_expression_arm" ) == 0
+           || kindIs( t, "foreach_statement" )   || kindIs( t, "switch_section" )
+           || kindIs( t, "switch_expression_arm" )
            // Swift `guard cond else { exit }` — a decision point every cyclomatic tool counts, previously
            // missed (kParserVer 44). Also load-bearing for essential complexity: ev's per-construct weights
            // mirror this predicate exactly (ev_ctrl machinery below), so counting the guard-else exit in ev
            // without counting the guard here would break the structural ev <= cx containment.
-           || std::strcmp( t, "guard_statement" ) == 0;
+           || kindIs( t, "guard_statement" );
 }
 
 // (cyclomatic is now counted inside the fused cc_walk / complexityOf below — one DFS computes cx AND ccx.)
@@ -84,37 +84,37 @@ inline bool isDecisionType( const char* t, Lang lang ) noexcept
 // block, not a loop or a try, so it neither scores nor deepens nesting. Every other language is unchanged.
 inline bool cc_isNestingControl( const char* t, Lang lang ) noexcept
 {
-    return    std::strcmp( t, "if_statement" ) == 0      || std::strcmp( t, "if_expression" ) == 0
-           || std::strcmp( t, "for_statement" ) == 0     || std::strcmp( t, "for_range_loop" ) == 0
-           || std::strcmp( t, "for_in_statement" ) == 0  || std::strcmp( t, "for_expression" ) == 0
-           || std::strcmp( t, "while_statement" ) == 0   || std::strcmp( t, "while_expression" ) == 0
-           || ( std::strcmp( t, "do_statement" ) == 0 && lang != Lang::Lua ) || std::strcmp( t, "loop_expression" ) == 0
+    return    kindIs( t, "if_statement" )      || kindIs( t, "if_expression" )
+           || kindIs( t, "for_statement" )     || kindIs( t, "for_range_loop" )
+           || kindIs( t, "for_in_statement" )  || kindIs( t, "for_expression" )
+           || kindIs( t, "while_statement" )   || kindIs( t, "while_expression" )
+           || ( kindIs( t, "do_statement" ) && lang != Lang::Lua ) || kindIs( t, "loop_expression" )
            // Lua `repeat … until c` opens a nested body and scores, exactly like `while`. Lua's
            // `elseif_statement` is deliberately absent for the C-family else-if reason: flat +1, no deeper
            // nesting — and because it is a SIBLING here, cc_walk's else-if detector cannot flatten it, so
            // admitting it would charge 1+nesting for what is one arm of one chain.
-           || std::strcmp( t, "repeat_statement" ) == 0
-           || std::strcmp( t, "switch_statement" ) == 0  || std::strcmp( t, "switch_expression" ) == 0
-           || std::strcmp( t, "match_expression" ) == 0
-           || std::strcmp( t, "catch_clause" ) == 0      || std::strcmp( t, "except_clause" ) == 0
-           || std::strcmp( t, "conditional_expression" ) == 0 || std::strcmp( t, "ternary_expression" ) == 0
+           || kindIs( t, "repeat_statement" )
+           || kindIs( t, "switch_statement" )  || kindIs( t, "switch_expression" )
+           || kindIs( t, "match_expression" )
+           || kindIs( t, "catch_clause" )      || kindIs( t, "except_clause" )
+           || kindIs( t, "conditional_expression" ) || kindIs( t, "ternary_expression" )
            // Ruby (tree-sitter-ruby): the block control forms each open a nested body, so they raise nesting
            // AND score. `case`/`case_match` is the switch-equivalent container (flat +1, arms score via
            // isDecisionType — mirrors switch_statement). The trailing MODIFIER forms (`x if a`) have no nested
            // body and are deliberately absent here — they count as decisions only, matching the C-family model.
-           || std::strcmp( t, "if" ) == 0                || std::strcmp( t, "unless" ) == 0
-           || std::strcmp( t, "while" ) == 0             || std::strcmp( t, "until" ) == 0
-           || std::strcmp( t, "for" ) == 0               || std::strcmp( t, "case" ) == 0
-           || std::strcmp( t, "case_match" ) == 0        || std::strcmp( t, "rescue" ) == 0
-           || std::strcmp( t, "conditional" ) == 0
-           || std::strcmp( t, "foreach_statement" ) == 0;   // C# `foreach (var x in xs)` — a distinct loop node
+           || kindIs( t, "if" )                || kindIs( t, "unless" )
+           || kindIs( t, "while" )             || kindIs( t, "until" )
+           || kindIs( t, "for" )               || kindIs( t, "case" )
+           || kindIs( t, "case_match" )        || kindIs( t, "rescue" )
+           || kindIs( t, "conditional" )
+           || kindIs( t, "foreach_statement" );   // C# `foreach (var x in xs)` — a distinct loop node
            // NOTE: Ruby `elsif` is intentionally NOT here — like a C-family else-if / Python elif_clause it is a
            // flat +1 that does not deepen nesting; it is handled in the elif_clause/else_clause branch of cc_walk.
 }
 inline bool cc_isNestingOnly( const char* t ) noexcept   // raises nesting, scores nothing (lambdas/closures)
 {
-    return    std::strcmp( t, "lambda_expression" ) == 0 || std::strcmp( t, "lambda" ) == 0
-           || std::strcmp( t, "closure_expression" ) == 0;
+    return    kindIs( t, "lambda_expression" ) || kindIs( t, "lambda" )
+           || kindIs( t, "closure_expression" );
 }
 
 // A node's source text, or "" when the node is null or its byte range does not lie inside `src`. The
@@ -157,22 +157,22 @@ inline std::string_view cc_boolOp( TSNode n, std::string_view src ) noexcept
     return ( o == "&&" || o == "||" || o == "and" || o == "or" ) ? o : std::string_view{};
 }
 
-// Myers' &&/|| extension for CYCLOMATIC counting: does this `binary_expression` join two conditions?
+// Myers' &&/|| extension for CYCLOMATIC counting: does this binary operator join two conditions?
 // Extracted from cc_walk rather than written inline — the PHP/Lua port needed a second spelling family
 // (the WORD operators), and the inline form scored a measured +12 cx / +13 LOC on cc_walk, which is a
 // --quality-delta regression on a function already at the top of this file's complexity distribution.
 //
 // Two spelling families, and the Lang gate is what keeps the second from touching any other grammar:
-//   * `&&` / `||`  — C/C++/ObjC, TS/JS, Java, C#, Swift, Rust, Go, PHP. Two bytes.
-//   * `and`/`or`/`xor` — Lua (its ONLY spelling) and PHP (its low-precedence alternative). `or` is also
-//     two bytes, so the Lang test, not the length test, is what makes this sound: without it a
-//     hypothetical grammar spelling some non-boolean operator `or` would start scoring.
+//   * `&&` / `||` — symbolic joins in the binary-expression nodes visited by cc_walk.
+//   * `and`/`or` — Lua, PHP and Elixir; `xor` — PHP only. `or` is also two bytes, so the Lang test,
+//     not the length test, keeps a grammar's non-boolean spelling from accidentally scoring.
 // Python is deliberately absent from both: its `and`/`or` parse to a `boolean_operator` NODE, which
 // isDecisionType already names, so counting it here too would double it.
+/// Recognize short-circuit boolean joins, including word operators supported by the given language.
 inline bool cc_isBooleanJoin( TSNode n, std::string_view src, Lang lang ) noexcept
 {
     const std::string_view o        = cc_operatorText( n, src );
-    const bool             wordLang = ( lang == Lang::Lua || lang == Lang::Php );
+    const bool             wordLang = ( lang == Lang::Lua || lang == Lang::Php || lang == Lang::Elixir );
     return    o == "&&" || o == "||"
            || ( wordLang && ( o == "and" || o == "or" ) )
            || ( lang == Lang::Php && o == "xor" );
@@ -225,7 +225,7 @@ inline bool cc_declHasStructuredBinding( TSNode n, int depth ) noexcept
     for( std::uint32_t ci = 0; ci < childCount; ++ci )
     {
         const TSNode child = ts_node_child( n, ci );
-        if( std::strcmp( ts_node_type( child ), "structured_binding_declarator" ) == 0 )
+        if( kindIs( ts_node_type( child ), "structured_binding_declarator" ) )
         {
             return true;
         }
@@ -250,12 +250,12 @@ inline bool cc_declHasStructuredBinding( TSNode n, int depth ) noexcept
 // C/C++ ONLY (model.h localsCountedLang) — the caller gates on lang before ever reaching here.
 inline bool cc_isCountableLocalDecl( TSNode n, const char* t ) noexcept
 {
-    if( std::strcmp( t, "declaration" ) != 0 )
+    if( !kindIs( t, "declaration" ) )
     {
         return false;
     }
     const TSNode parent = ts_node_parent( n );
-    if( ts_node_is_null( parent ) || std::strcmp( ts_node_type( parent ), "compound_statement" ) != 0 )
+    if( ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "compound_statement" ) )
     {
         return false;
     }
@@ -269,7 +269,7 @@ inline bool cc_isCountableLocalDecl( TSNode n, const char* t ) noexcept
 inline bool cc_isDeclaratorField( TSNode declNode, std::uint32_t ci ) noexcept
 {
     const char* fieldName = ts_node_field_name_for_child( declNode, ci );
-    return fieldName != nullptr && std::strcmp( fieldName, "declarator" ) == 0;
+    return fieldName != nullptr && kindIs( fieldName, "declarator" );
 }
 
 // L3 fix (2026-08-08 audit): a `declaration` node already proven countable by cc_isCountableLocalDecl can
@@ -548,62 +548,62 @@ inline void ev_countWhy( EvCtx& ctx, EvWhyTag tag ) noexcept
 inline bool ev_ctrlKindFor( const char* t, Lang lang, CtrlKind& kindOut ) noexcept
 {
     // branches
-    if(    std::strcmp( t, "if_statement" ) == 0        || std::strcmp( t, "if_expression" ) == 0
-        || std::strcmp( t, "conditional_expression" ) == 0 || std::strcmp( t, "ternary_expression" ) == 0
-        || std::strcmp( t, "guard_statement" ) == 0     || std::strcmp( t, "conditional" ) == 0
-        || std::strcmp( t, "elif_clause" ) == 0         || std::strcmp( t, "else_clause" ) == 0
-        || std::strcmp( t, "elsif" ) == 0               || std::strcmp( t, "if" ) == 0
-        || std::strcmp( t, "unless" ) == 0              || std::strcmp( t, "if_modifier" ) == 0
-        || std::strcmp( t, "unless_modifier" ) == 0 )
+    if(    kindIs( t, "if_statement" )        || kindIs( t, "if_expression" )
+        || kindIs( t, "conditional_expression" ) || kindIs( t, "ternary_expression" )
+        || kindIs( t, "guard_statement" )     || kindIs( t, "conditional" )
+        || kindIs( t, "elif_clause" )         || kindIs( t, "else_clause" )
+        || kindIs( t, "elsif" )               || kindIs( t, "if" )
+        || kindIs( t, "unless" )              || kindIs( t, "if_modifier" )
+        || kindIs( t, "unless_modifier" ) )
     {
         kindOut = CtrlKind::Branch;
         return true;
     }
     // loops (Swift's do_statement is a TRY and is handled below)
-    if(    std::strcmp( t, "for_statement" ) == 0       || std::strcmp( t, "for_range_loop" ) == 0
-        || std::strcmp( t, "for_in_statement" ) == 0    || std::strcmp( t, "for_expression" ) == 0
-        || std::strcmp( t, "while_statement" ) == 0     || std::strcmp( t, "while_expression" ) == 0
-        || std::strcmp( t, "loop_expression" ) == 0     || std::strcmp( t, "foreach_statement" ) == 0
-        || std::strcmp( t, "repeat_while_statement" ) == 0
-        || ( std::strcmp( t, "do_statement" ) == 0 && lang != Lang::Swift )
-        || std::strcmp( t, "while" ) == 0               || std::strcmp( t, "until" ) == 0
-        || std::strcmp( t, "for" ) == 0                 || std::strcmp( t, "while_modifier" ) == 0
-        || std::strcmp( t, "until_modifier" ) == 0 )
+    if(    kindIs( t, "for_statement" )       || kindIs( t, "for_range_loop" )
+        || kindIs( t, "for_in_statement" )    || kindIs( t, "for_expression" )
+        || kindIs( t, "while_statement" )     || kindIs( t, "while_expression" )
+        || kindIs( t, "loop_expression" )     || kindIs( t, "foreach_statement" )
+        || kindIs( t, "repeat_while_statement" )
+        || ( kindIs( t, "do_statement" ) && lang != Lang::Swift )
+        || kindIs( t, "while" )               || kindIs( t, "until" )
+        || kindIs( t, "for" )                 || kindIs( t, "while_modifier" )
+        || kindIs( t, "until_modifier" ) )
     {
         kindOut = CtrlKind::Loop;
         return true;
     }
     // switch/match heads (weight 0 — the arms carry the decisions, as in cx)
-    if(    std::strcmp( t, "switch_statement" ) == 0    || std::strcmp( t, "switch_expression" ) == 0
-        || std::strcmp( t, "match_expression" ) == 0    || std::strcmp( t, "match_statement" ) == 0
-        || std::strcmp( t, "expression_switch_statement" ) == 0 || std::strcmp( t, "type_switch_statement" ) == 0
-        || std::strcmp( t, "select_statement" ) == 0    || std::strcmp( t, "case" ) == 0
-        || std::strcmp( t, "case_match" ) == 0 )
+    if(    kindIs( t, "switch_statement" )    || kindIs( t, "switch_expression" )
+        || kindIs( t, "match_expression" )    || kindIs( t, "match_statement" )
+        || kindIs( t, "expression_switch_statement" ) || kindIs( t, "type_switch_statement" )
+        || kindIs( t, "select_statement" )    || kindIs( t, "case" )
+        || kindIs( t, "case_match" ) )
     {
         kindOut = CtrlKind::Switch;
         return true;
     }
     // arms
-    if(    std::strcmp( t, "case_statement" ) == 0      || std::strcmp( t, "switch_section" ) == 0
-        || std::strcmp( t, "switch_expression_arm" ) == 0 || std::strcmp( t, "match_arm" ) == 0
-        || std::strcmp( t, "expression_case" ) == 0     || std::strcmp( t, "communication_case" ) == 0
-        || std::strcmp( t, "default_case" ) == 0        || std::strcmp( t, "type_case" ) == 0
-        || std::strcmp( t, "case_clause" ) == 0         || std::strcmp( t, "switch_entry" ) == 0
-        || std::strcmp( t, "switch_rule" ) == 0         || std::strcmp( t, "switch_block_statement_group" ) == 0
-        || std::strcmp( t, "when" ) == 0                || std::strcmp( t, "in_clause" ) == 0 )
+    if(    kindIs( t, "case_statement" )      || kindIs( t, "switch_section" )
+        || kindIs( t, "switch_expression_arm" ) || kindIs( t, "match_arm" )
+        || kindIs( t, "expression_case" )     || kindIs( t, "communication_case" )
+        || kindIs( t, "default_case" )        || kindIs( t, "type_case" )
+        || kindIs( t, "case_clause" )         || kindIs( t, "switch_entry" )
+        || kindIs( t, "switch_rule" )         || kindIs( t, "switch_block_statement_group" )
+        || kindIs( t, "when" )                || kindIs( t, "in_clause" ) )
     {
         kindOut = CtrlKind::Case;
         return true;
     }
     // try / catch (Swift spells try as do_statement + catch_block)
-    if(    std::strcmp( t, "try_statement" ) == 0       || std::strcmp( t, "try_with_resources_statement" ) == 0
-        || std::strcmp( t, "begin" ) == 0               || ( std::strcmp( t, "do_statement" ) == 0 && lang == Lang::Swift ) )
+    if(    kindIs( t, "try_statement" )       || kindIs( t, "try_with_resources_statement" )
+        || kindIs( t, "begin" )               || ( kindIs( t, "do_statement" ) && lang == Lang::Swift ) )
     {
         kindOut = CtrlKind::Try;
         return true;
     }
-    if(    std::strcmp( t, "catch_clause" ) == 0        || std::strcmp( t, "except_clause" ) == 0
-        || std::strcmp( t, "catch_block" ) == 0         || std::strcmp( t, "rescue" ) == 0 )
+    if(    kindIs( t, "catch_clause" )        || kindIs( t, "except_clause" )
+        || kindIs( t, "catch_block" )         || kindIs( t, "rescue" ) )
     {
         kindOut = CtrlKind::Catch;
         return true;
@@ -611,27 +611,27 @@ inline bool ev_ctrlKindFor( const char* t, Lang lang, CtrlKind& kindOut ) noexce
     // function boundaries — the jump barrier. A miss here is the ONE table error that would OVER-count
     // (a return inside an unrecognised closure shape would mark the outer function's constructs), which
     // is why this list errs wide and every entry was probe-verified.
-    if(    std::strcmp( t, "lambda_expression" ) == 0   || std::strcmp( t, "lambda" ) == 0
-        || std::strcmp( t, "closure_expression" ) == 0  || std::strcmp( t, "function_definition" ) == 0
-        || std::strcmp( t, "function_declaration" ) == 0 || std::strcmp( t, "function_expression" ) == 0
-        || std::strcmp( t, "arrow_function" ) == 0      || std::strcmp( t, "generator_function" ) == 0
-        || std::strcmp( t, "generator_function_declaration" ) == 0 || std::strcmp( t, "method_definition" ) == 0
-        || std::strcmp( t, "method_declaration" ) == 0  || std::strcmp( t, "func_literal" ) == 0
-        || std::strcmp( t, "function_item" ) == 0       || std::strcmp( t, "lambda_literal" ) == 0
-        || std::strcmp( t, "local_function_statement" ) == 0 || std::strcmp( t, "anonymous_method_expression" ) == 0
-        || std::strcmp( t, "method" ) == 0              || std::strcmp( t, "singleton_method" ) == 0 )
+    if(    kindIs( t, "lambda_expression" )   || kindIs( t, "lambda" )
+        || kindIs( t, "closure_expression" )  || kindIs( t, "function_definition" )
+        || kindIs( t, "function_declaration" ) || kindIs( t, "function_expression" )
+        || kindIs( t, "arrow_function" )      || kindIs( t, "generator_function" )
+        || kindIs( t, "generator_function_declaration" ) || kindIs( t, "method_definition" )
+        || kindIs( t, "method_declaration" )  || kindIs( t, "func_literal" )
+        || kindIs( t, "function_item" )       || kindIs( t, "lambda_literal" )
+        || kindIs( t, "local_function_statement" ) || kindIs( t, "anonymous_method_expression" )
+        || kindIs( t, "method" )              || kindIs( t, "singleton_method" ) )
     {
         kindOut = CtrlKind::Fn;
         return true;
     }
     // Ruby blocks — a jump scope of their own (`each do … next end`: next is the block's normal exit);
     // lang-gated because Go/Java/C# spell their PLAIN braces "block", which must stay out of the arena.
-    if( lang == Lang::Ruby && ( std::strcmp( t, "block" ) == 0 || std::strcmp( t, "do_block" ) == 0 ) )
+    if( lang == Lang::Ruby && ( kindIs( t, "block" ) || kindIs( t, "do_block" ) ) )
     {
         kindOut = CtrlKind::Block;
         return true;
     }
-    if( std::strcmp( t, "labeled_statement" ) == 0 )
+    if( kindIs( t, "labeled_statement" ) )
     {
         kindOut = CtrlKind::Labelled;
         return true;
@@ -724,16 +724,16 @@ inline std::uint32_t ev_noteNode( EvCtx& ctx, TSNode n, const char* t, std::uint
         }
     };
 
-    if( std::strcmp( t, "return_statement" ) == 0 || std::strcmp( t, "return_expression" ) == 0
-        || std::strcmp( t, "co_return_statement" ) == 0 || ( isRuby && std::strcmp( t, "return" ) == 0 ) )
+    if( kindIs( t, "return_statement" ) || kindIs( t, "return_expression" )
+        || kindIs( t, "co_return_statement" ) || ( isRuby && kindIs( t, "return" ) ) )
     {
         noteReturn();
     }
-    else if( std::strcmp( t, "throw_statement" ) == 0 || std::strcmp( t, "raise_statement" ) == 0 )
+    else if( kindIs( t, "throw_statement" ) || kindIs( t, "raise_statement" ) )
     {
         noteThrow();
     }
-    else if( std::strcmp( t, "break_statement" ) == 0 || std::strcmp( t, "continue_statement" ) == 0 )
+    else if( kindIs( t, "break_statement" ) || kindIs( t, "continue_statement" ) )
     {
         const bool             isBreak = ( t[0] == 'b' );
         const std::string_view label   = ev_normalizeLabel( ev_childText( n, src, { "statement_identifier", "label_name", "identifier" } ) );
@@ -750,7 +750,7 @@ inline std::uint32_t ev_noteNode( EvCtx& ctx, TSNode n, const char* t, std::uint
             noteEscape( mask, isBreak );
         }
     }
-    else if( std::strcmp( t, "break_expression" ) == 0 || std::strcmp( t, "continue_expression" ) == 0 )
+    else if( kindIs( t, "break_expression" ) || kindIs( t, "continue_expression" ) )
     {
         // Rust: `break 'label` / `continue 'label` carry a label child; a bare break targets the loop only.
         const std::string_view label = ev_normalizeLabel( ev_childText( n, src, { "label", "loop_label" } ) );
@@ -763,11 +763,11 @@ inline std::uint32_t ev_noteNode( EvCtx& ctx, TSNode n, const char* t, std::uint
             noteEscape( kEvTgtLoop, t[0] == 'b' );
         }
     }
-    else if( isRuby && ( std::strcmp( t, "break" ) == 0 || std::strcmp( t, "next" ) == 0 ) )
+    else if( isRuby && ( kindIs( t, "break" ) || kindIs( t, "next" ) ) )
     {
         noteEscape( kEvTgtLoop | kEvTgtBlock, false );
     }
-    else if( isRuby && ( std::strcmp( t, "redo" ) == 0 || std::strcmp( t, "retry" ) == 0 ) )
+    else if( isRuby && ( kindIs( t, "redo" ) || kindIs( t, "retry" ) ) )
     {
         // genuine back edges outside every prime (§3.1): mark the chain AND the target construct itself —
         // even a redo sitting directly in the loop body makes that loop a hand-rolled goto shape.
@@ -779,7 +779,7 @@ inline std::uint32_t ev_noteNode( EvCtx& ctx, TSNode n, const char* t, std::uint
             ev_countWhy( ctx, EvWhyTag::BackEdge );
         }
     }
-    else if( std::strcmp( t, "goto_statement" ) == 0 )
+    else if( kindIs( t, "goto_statement" ) )
     {
         if( lang == Lang::CSharp && ( ev_hasAnonKeyword( n, src, "case" ) || ev_hasAnonKeyword( n, src, "default" ) ) )
         {
@@ -800,7 +800,7 @@ inline std::uint32_t ev_noteNode( EvCtx& ctx, TSNode n, const char* t, std::uint
             }
         }
     }
-    else if( std::strcmp( t, "fallthrough_statement" ) == 0 )
+    else if( kindIs( t, "fallthrough_statement" ) )
     {
         // Go — an explicit intra-switch goto; counts (§3.1). The arm itself is marked (no arm-exit grace),
         // and propagation then keeps the switch and every sibling arm. (Swift's fallthrough is an
@@ -811,7 +811,7 @@ inline std::uint32_t ev_noteNode( EvCtx& ctx, TSNode n, const char* t, std::uint
             ev_countWhy( ctx, EvWhyTag::Fallthrough );
         }
     }
-    else if( std::strcmp( t, "yield_statement" ) == 0 )
+    else if( kindIs( t, "yield_statement" ) )
     {
         if( lang == Lang::Java )
         {
@@ -828,7 +828,7 @@ inline std::uint32_t ev_noteNode( EvCtx& ctx, TSNode n, const char* t, std::uint
             noteReturn();   // `yield break` ends the iterator — a return; `yield return` is a suspension, not a jump
         }
     }
-    else if( std::strcmp( t, "control_transfer_statement" ) == 0 )
+    else if( kindIs( t, "control_transfer_statement" ) )
     {
         // Swift wraps break/continue/return/throw in one node kind; the keyword is its first token.
         const std::uint32_t a = ts_node_start_byte( n );
@@ -1002,6 +1002,8 @@ inline void ev_finalize( EvCtx& ctx, std::uint32_t& evOut, std::array<std::uint8
 
 // A4-F25: NOT noexcept — the frame-stack vector allocates, so under memory pressure bad_alloc must be
 // allowed to propagate to the per-file degrade catch, not turn into terminate().
+/// Accumulate syntactic complexity and nesting in one iterative walk from start.
+/// Update acc in place using the supplied initial depth/nesting; quoted Elixir AST is excluded.
 inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view src, CcAccum& acc, int startDepth,
                       bool countLocals,   // Phase 1: countLocals gates on lang (model.h localsCountedLang), C/C++ only
                       Lang lang, EvCtx* evCtx )   // essential complexity: nullptr outside model.h evCountedLang — zero work then
@@ -1023,7 +1025,10 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         stack.pop_back();
         if( frame.depth > 512 )
         {
-            continue; // pathological-AST guard (file size is already capped at 1 MB)
+            // pathological-AST guard, independent of file size: the old justification "file size is already capped at 1 MB" went
+            // stale when kDefaultMaxFileBytes became 4 MB (2026-07) and --max-file-size can raise it further. Measured 2026-09-10
+            // on this tree (15,926 symbols): deepest real frame 103 against a bound of 512 — 5x headroom, inert.
+            continue;
         }
         const TSNode        n          = frame.node;
         const std::uint32_t nesting    = frame.nesting;
@@ -1043,7 +1048,15 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         const std::uint32_t ctrl = ( evCtx != nullptr && isNamed ) ? ev_noteNode( *evCtx, n, t, frame.ctrl, lang, src ) : frame.ctrl;
 
         // cyclomatic (flat decision count) accumulated in the SAME DFS as cognitive — one walk, both metrics.
-        if( isNamed && isDecisionType( t, lang ) )
+        // Elixir controls are ordinary calls whose target text supplies the keyword.
+        const auto elixirKeyword = lang == Lang::Elixir ? nodeFieldText( n, "target", 6, src ) : std::string_view{};
+        if( elixirKeyword == "quote" )
+        {
+            continue; // quoted AST is not executed control flow
+        }
+        const bool elixirDecision = elixirKeyword == "if" || elixirKeyword == "unless" || elixirKeyword == "for" || elixirKeyword == "with";
+        const bool elixirControl = elixirDecision || elixirKeyword == "case" || elixirKeyword == "cond" || elixirKeyword == "receive" || elixirKeyword == "try";
+        if( isNamed && ( isDecisionType( t, lang ) || elixirDecision || ( lang == Lang::Elixir && kindIs( t, "stab_clause" ) ) ) )
         {
             ++acc.cyclo;
         }
@@ -1063,17 +1076,17 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         {
             acc.locals += cc_countLocalDeclarators( n );
         }
-        else if( std::strcmp( t, "binary_expression" ) == 0 && cc_isBooleanJoin( n, src, lang ) )
+        else if( ( kindIs( t, "binary_expression" ) || ( lang == Lang::Elixir && kindIs( t, "binary_operator" ) ) ) && cc_isBooleanJoin( n, src, lang ) )
         {
             ++acc.cyclo;   // Myers' &&/|| extension — see cc_isBooleanJoin for the two spelling families
         }
 
-        if( isNamed && cc_isNestingControl( t, lang ) )
+        if( isNamed && ( cc_isNestingControl( t, lang ) || elixirControl ) )
         {
-            const bool   isIf = ( std::strcmp( t, "if_statement" ) == 0 || std::strcmp( t, "if_expression" ) == 0 );
+            const bool   isIf = ( kindIs( t, "if_statement" ) || kindIs( t, "if_expression" ) );
             const TSNode p    = ts_node_parent( n );
             const bool   elseIf = isIf && !ts_node_is_null( p )
-                                  && ( std::strcmp( ts_node_type( p ), "if_statement" ) == 0 || std::strcmp( ts_node_type( p ), "if_expression" ) == 0 );
+                                  && ( kindIs( ts_node_type( p ), "if_statement" ) || kindIs( ts_node_type( p ), "if_expression" ) );
             const std::uint32_t childNest = elseIf ? nesting : nesting + 1;   // else-if doesn't deepen
             acc.cog += elseIf ? 1u : ( 1u + nesting );                           // flat +1 for else-if, else +1+nesting
             if( childNest > acc.maxNest )
@@ -1088,8 +1101,8 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             }
             continue;
         }
-        if( isNamed && ( std::strcmp( t, "elif_clause" ) == 0 || std::strcmp( t, "else_clause" ) == 0
-                         || std::strcmp( t, "elsif" ) == 0 ) )   // else / elif / else-if (+ Ruby `elsif`): flat +1 (cognitive)
+        if( isNamed && ( kindIs( t, "elif_clause" ) || kindIs( t, "else_clause" )
+                         || kindIs( t, "elsif" ) ) )   // else / elif / else-if (+ Ruby `elsif`): flat +1 (cognitive)
         {
             acc.cog += 1u;
             collectChildren( n, cursor.cur, kids );
@@ -1097,7 +1110,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             {
                 const TSNode c  = kids[ i - 1 ];
                 const char*  ct = ts_node_type( c );
-                if( std::strcmp( ct, "if_statement" ) == 0 || std::strcmp( ct, "if_expression" ) == 0 )
+                if( kindIs( ct, "if_statement" ) || kindIs( ct, "if_expression" ) )
                 {
                     // C-family `else if`: descend into the if's CHILDREN so cognitive doesn't re-score it as a
                     // fresh control — but cyclomatic still counts that `if` as a decision (parity with the old walk).
@@ -1213,12 +1226,12 @@ inline void ln_extractDeclaratorIdentifiers( TSNode node, std::vector<TSNode>& o
         return;   // pathological-AST guard — real declarator nesting never legitimately needs this deep
     }
     const char* t = ts_node_type( node );
-    if( std::strcmp( t, "identifier" ) == 0 || std::strcmp( t, "field_identifier" ) == 0 )
+    if( kindIs( t, "identifier" ) || kindIs( t, "field_identifier" ) )
     {
         outIdents.push_back( node );
         return;
     }
-    if( std::strcmp( t, "reference_declarator" ) == 0 )
+    if( kindIs( t, "reference_declarator" ) )
     {
         const std::uint32_t n = ts_node_child_count( node );
         for( std::uint32_t i = 0; i < n; ++i )
@@ -1227,13 +1240,13 @@ inline void ln_extractDeclaratorIdentifiers( TSNode node, std::vector<TSNode>& o
         }
         return;
     }
-    if( std::strcmp( t, "init_declarator" ) == 0 || std::strcmp( t, "pointer_declarator" ) == 0 || std::strcmp( t, "array_declarator" ) == 0 )
+    if( kindIs( t, "init_declarator" ) || kindIs( t, "pointer_declarator" ) || kindIs( t, "array_declarator" ) )
     {
         const std::uint32_t n = ts_node_child_count( node );
         for( std::uint32_t i = 0; i < n; ++i )
         {
             const char* fieldName = ts_node_field_name_for_child( node, i );
-            if( fieldName != nullptr && std::strcmp( fieldName, "declarator" ) == 0 )
+            if( fieldName != nullptr && kindIs( fieldName, "declarator" ) )
             {
                 ln_extractDeclaratorIdentifiers( ts_node_child( node, i ), outIdents, depth - 1 );
             }
@@ -1273,7 +1286,7 @@ inline std::uint8_t ln_declDepth( TSNode declNode, TSNode funcRoot ) noexcept
     TSNode       cur   = ts_node_parent( declNode );
     while( !ts_node_is_null( cur ) )
     {
-        if( std::strcmp( ts_node_type( cur ), "compound_statement" ) == 0 )
+        if( kindIs( ts_node_type( cur ), "compound_statement" ) )
         {
             ++depth;
             if( depth == 255 )
@@ -1351,13 +1364,14 @@ inline void ln_collectLocalDecls( TSNode node, TSNode funcRoot, int depth, std::
 // NUMBER on --metrics (never a 7±2 threshold — that myth is debunked, §1d kill-list).
 inline bool cc_isParamList( const char* t ) noexcept
 {
-    return    std::strcmp( t, "parameter_list" )   == 0     // C++/ObjC/Go
-           || std::strcmp( t, "parameters" )       == 0     // Python / Rust / Swift
-           || std::strcmp( t, "formal_parameters" )== 0     // TypeScript / JS
-           || std::strcmp( t, "parameter_clause" ) == 0     // Swift
-           || std::strcmp( t, "method_parameters" )== 0     // Ruby `def f(a, b)`
-           || std::strcmp( t, "block_parameters" ) == 0     // Ruby `{ |x, y| ... }`
-           || std::strcmp( t, "lambda_parameters" )== 0;    // Ruby `->(n) { ... }`
+    return    kindIs( t, "parameter_list" )          // C++/ObjC/Go
+           || kindIs( t, "parameters" )              // Python / Rust / Swift
+           || kindIs( t, "formal_parameters" )       // TypeScript / JS
+           || kindIs( t, "parameter_clause" )        // Swift
+           || kindIs( t, "method_parameters" )       // Ruby `def f(a, b)`
+           || kindIs( t, "block_parameters" )        // Ruby `{ |x, y| ... }`
+           || kindIs( t, "lambda_parameters" )       // Ruby `->(n) { ... }`
+           || kindIs( t, "formal_parameter_list" );  // Dart (NOT TS/JS's formal_parameters)
 }
 // a named parameter node (skip `self`/`this`-only? no — count as written, deterministic). Anonymous separators
 // (',', '(', ')') are unnamed → excluded by ts_node_is_named.
@@ -1375,6 +1389,8 @@ inline std::uint16_t countParams( TSNode defNode )   // A4-F25: NOT noexcept —
     {
         const PF f = stack.back();
         stack.pop_back();
+        // re-derivation bound (2026-09-10): tripped 97 times over 15,926 symbols but deepest found param list was depth 6;
+        // raising to 64/256 yielded identical 12,785 params, proving bound is inert (measured C++/mixed, not at scale)
         if( f.depth > 12 )
         {
             continue; // params live near the signature; bound the search
@@ -1391,7 +1407,7 @@ inline std::uint16_t countParams( TSNode defNode )   // A4-F25: NOT noexcept —
                     continue; // skip '(', ')', ',' separators
                 }
                 const char* ct = ts_node_type( c );
-                if( std::strcmp( ct, "comment" ) == 0 )
+                if( kindIs( ct, "comment" ) )
                 {
                     continue; // a comment inside the list is not a parameter
                 }
@@ -1450,8 +1466,8 @@ inline bool cc_paramArityExact( TSNode defNode, Lang lang, SymKind kind ) noexce
     {
         return    std::strstr( t, "variadic" ) != nullptr || std::strstr( t, "splat" )   != nullptr
                || std::strstr( t, "spread" )   != nullptr || std::strstr( t, "optional" )!= nullptr
-               || std::strstr( t, "default" )  != nullptr || std::strcmp( t, "rest_pattern" ) == 0
-               || std::strcmp( t, "..." ) == 0 || std::strcmp( t, "=" ) == 0;
+               || std::strstr( t, "default" )  != nullptr || kindIs( t, "rest_pattern" )
+               || kindIs( t, "..." ) || kindIs( t, "=" );
     };
 
     struct PF { TSNode n; std::uint16_t depth; };
@@ -1465,6 +1481,7 @@ inline bool cc_paramArityExact( TSNode defNode, Lang lang, SymKind kind ) noexce
     {
         const PF f = stack.back();
         stack.pop_back();
+        // same re-derivation bound as the first param walk (see comment above the first if)
         if( f.depth > 12 )
         {
             continue;
@@ -1524,10 +1541,10 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
             break;
         }
         const char* pt = ts_node_type( p );
-        if(    std::strcmp( pt, "call_expression" )       == 0     // C++/TS/JS/Swift
-            || std::strcmp( pt, "call" )                  == 0     // Python
-            || std::strcmp( pt, "method_invocation" )     == 0     // Java
-            || std::strcmp( pt, "invocation_expression" ) == 0 )   // C#
+        if(    kindIs( pt, "call_expression" )     // C++/TS/JS/Swift
+            || kindIs( pt, "call" )                // Python
+            || kindIs( pt, "method_invocation" )   // Java
+            || kindIs( pt, "invocation_expression" ) )   // C#
         { call = p; found = true; break; }
         n = p;
     }
@@ -1545,8 +1562,8 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
         {
             const TSNode c = ts_node_child( call, i );
             const char* ct = ts_node_type( c );
-            if(    std::strcmp( ct, "argument_list" )  == 0 || std::strcmp( ct, "arguments" ) == 0
-                || std::strcmp( ct, "value_arguments" )== 0 )     // Swift
+            if(    kindIs( ct, "argument_list" ) || kindIs( ct, "arguments" )
+                || kindIs( ct, "value_arguments" ) )     // Swift
             { args = c; break; }
         }
     }
@@ -1566,11 +1583,11 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
             continue; // skip '(' ')' ',' separators
         }
         const char* ct = ts_node_type( c );
-        if( std::strcmp( ct, "comment" ) == 0 )
+        if( kindIs( ct, "comment" ) )
         {
             continue;
         }
-        if( std::strstr( ct, "splat" ) != nullptr || std::strstr( ct, "spread" ) != nullptr || std::strcmp( ct, "..." ) == 0 )
+        if( std::strstr( ct, "splat" ) != nullptr || std::strstr( ct, "spread" ) != nullptr || kindIs( ct, "..." ) )
         {
             return { 0, false };                                  // `f(*args)` / `f(...xs)` → unreliable
         }

@@ -7,20 +7,60 @@
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-none-blue.svg)](THIRD_PARTY.md)
 [![Slides](https://img.shields.io/badge/slides-the%20showcase%20deck-56d6e8.svg)](present/ripwire-showcase.pdf)
 
-# Rip'n Fast. Less Tokens. Better Code.
+# Rip'n Fast. Fewer Tokens. Better Code.
 
-## Give your coding agent a map before it reads the repo.
+**The ripgrep of AI context. Give your coding agent a map before it reads the repo.**
 
-**ripwire is the ripgrep of AI context.** Point it at any repository and your agent gets a ranked,
-deterministic call graph — what to touch, what it breaks, which tests to run — instead of grepping
-around and reading whole files.
+Point it at any repository and your agent gets a ranked, deterministic call graph — what to touch,
+what it breaks, which tests to run — instead of grepping around and reading whole files.
+
+<p align="center"><img src="docs/assets/paddle-out.svg" alt="Paddle out with a map. See the rip before you’re in it." width="470"><br><a href="https://trendshift.io/repositories/217924?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-217924"><img src="https://trendshift.io/api/badge/trendshift/repositories/217924/daily?language=C%2B%2B" alt="Trendshift: C++ Repository of the Day badge for redhat-et/ripwire" width="250" height="55"></a></p>
+
+<details>
+<summary><b>Fifty years of software-engineering results, and research from last month.</b> 46 repositories and 69 papers folded — McCabe (1976) through to <b>seven published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in</summary>
+
+Beside those sits a labelled survey of **237 tools** that contributed nothing and says so. The two
+sets are disjoint by construction, so they add rather than nest — a tool that gave a lesson is never
+counted twice.
+
+**Both halves are load-bearing, and they are doing different jobs.** The settled results are what
+make the quality lens trustworthy: McCabe on complexity (1976), Halstead on volume (1977), Spärck
+Jones on term specificity (1972), Nagappan & Ball on churn. Fifty years of replication means those
+are not opinions, and a tool that measures your code should be built on the ones that survived.
+
+The recent work is what makes it *current*: **seventeen of the folded papers are from 2026, seven
+published in the last two months and three in the last thirty days** (dates as of 2026-09-08; every
+row carries its arXiv id, so the claim is checkable rather than atmospheric). Retrieval for coding
+agents, context-compression cost, placebo-controlled localization — that literature is months old,
+not decades, and several rows were folded within weeks of the paper appearing.
+
+Neither half alone would be enough. A tool built only on the classics would not know what an agent
+needs; one built only on last month's preprints would have nothing underneath it. And the newest row
+is a result that **failed** when it was tested here — which is the point of writing them down. All three counts are re-derived from that document's own tables by
+`test/readmedriftcheck.sh` on every run, which fails if this page and those tables disagree, so the
+claim cannot quietly drift. The row-by-row ledger is
+[`docs/LINEAGE.md`](docs/LINEAGE.md).
+</details>
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
-JavaScript · Java · Ruby · PHP · Lua · Bash · C# · JSON · TOML · YAML · Markdown — [twenty-one
-vendored grammars](#languages), and adding another is a vendored tree-sitter grammar plus one row in a
-declarative table.
+JavaScript · Java · Ruby · PHP · Lua · Elixir · Dart · Bash · C# · JSON · TOML · YAML · Markdown — see
+[language support and limits](#languages).
 
-### No API key. No embeddings. No index server. No daemon.
+<p align="center"><img src="docs/assets/no-deps.svg"
+  alt="No API key. No embeddings. No index server. No daemon." width="470"></p>
+
+<details>
+<summary><b>One process, no server</b> — indexes this repository in <b>0.25 s</b> using <b>6.6 MB</b>, against <b>46.8 s</b> and <b>391 MB</b> for the graph-database MCP server it was measured against; warm queries answer in <b>197 ms</b> to its <b>1,082 ms</b></summary>
+
+Measured on 48 matched questions across django, webpack and this repository. Across all three,
+ripwire indexes in **0.25–0.45 s** and **6.6–16.5 MB** against that server's **23–52 s** and
+**391–623 MB**. The full method, the wins named one by one and the losses included, is in
+[Against the leading graph-database code-context MCP server](#against-the-leading-graph-database-code-context-mcp-server)
+and [`docs/EVALS.md`](docs/EVALS.md).
+</details>
+
+<details>
+<summary>One binary, offline — and the same line <b>activates the skills</b> for every agent it finds: Claude Code · Codex · Cursor · Windsurf · Gemini · opencode · aider</summary>
 
 One self-contained binary on your own machine, offline, installed in one line — and the same line
 installs *and activates* the task-shaped skills that teach your agent *when* to reach for it, not
@@ -29,79 +69,125 @@ agent can run shell commands — Claude Code, Codex, Cursor, Windsurf, Gemini, o
 set up the moment the install finishes; [the MCP server is the optional second
 interface](#set-it-up-in-your-coding-agent). Install it and ask it something before you finish
 reading this page:
+</details>
 
 ```bash
 RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
-ripwire . --for="incremental cache invalidation"
+export PATH="$HOME/.local/bin:$PATH"      # where it installed; the installer prints this line if you need it
+cd your-repo
+ripwire . --for="<the change you are about to make, in words>"
 ```
 
-One deterministic, token-budgeted answer: the relevant symbols, their callers, the change risks, and
-the tests that reach them. Run on this repository (2026-08-30), that second line answers in about
-4.3K tokens with:
+Every install route (prebuilt, from source, per-agent skills, hooks, the MCP server) is in [INSTALL.md](INSTALL.md).
 
-- **The ranked symbols, in rank order** — the cache-header constant `kCacheMagic` first (with its doc
-  comment quoted in place and the one `next=` call that opens it), then `spanTierMemoPath` (the
-  cache-path composer), `ingestCommitTree`, … `ingest` — each row with its file, line, and signature.
-- **Risk, annotated in place** — complexity, git churn (`ingest` shows 128 recent edits),
-  change amplification (touch `ingest` and 266 graph nodes feel it), purity and test coverage. The
-  fragile spots are visible *before* anything touches them.
-- **One-hop call context** — `spanTierMemoPath` calls `shaKeyedCachePath`, `headSnapRepoHex`,
-  `exclConfigHex`; no second query needed to see the neighbourhood.
-- **Its own confidence** — this answer says `confidence="high"` with the score margin attached; a
-  flat ranking says `low`, so it reads as a starting point instead of masquerading as an answer.
+**Reach for the CLI first — it is the cheaper interface.** The MCP server is the optional second
+way in, and its convenience has a cost the shell pipe does not carry: its verb schemas sit in your
+agent's context every session, whether or not it calls them.
 
-### If it works on your codebase, tell us what it got wrong
+### The goal: one question, one complete answer.
 
-Every number on this page is a measurement on a corpus we happen to have. **Yours is one we don't.**
-
-After you have actually used it on your own repository for a while, hand your agent
-[`prompts/improve-for-my-language.md`](prompts/improve-for-my-language.md). It harvests that
-session's own transcript — where ripwire answered, where it missed, where you fell back to grep —
-and every finding it produces has to cite the moment it came from: what you asked, which command
-ran, what came back. Open an issue with the result.
-
-That is worth more to this project than a bug report, because it arrives in the form the project
-already runs on: evidence with its provenance attached, not an impression. Several languages here
-are one contributor's corpus away from being measurably better, and we cannot see your code.
+**Terminality is the objective.** Ask the codebase a question and the answer should carry everything
+you need — no follow-on grep, no three more whole-file reads to fill in what it left out. A call
+followed by three greps is the same search paid for twice: it does not save you tokens and it does
+not make the coding faster.
 
 <details>
-<summary>The actual wire format — what your agent reads (minified XML; trimmed and line-wrapped here)</summary>
+<summary>The two stair-steps that make it reachable — <b>honest about what is missing</b>, <b>priced in what it spends</b></summary>
 
-```xml
-<ctx task="incremental cache invalidation" confidence="high" margin_pct="20"
-     bundle="compact" bodies="0" reason="compact-route" est_tokens="3995">
-  <sigs shown="23" total="40" capped="1">
-    <d l="106" n="kCacheMagic" p="src/ingest_cache.h" cx="0" in="0" churn="11" amp="71" pure="1" r="1"
-       next="--expand=src/ingest_cache.h:kCacheMagic">
-      <doc>incremental cache (--cache): per-file content hash + raw facts so a
-           re-run re-parses ONLY …</doc>constexpr std::uint32_t kCacheMagic = …</d>
-    <d l="1307" n="spanTierMemoPath" p="src/ingest_astquery.h" cx="1" in="2" churn="5" amp="44" r="2"> … </d>
-    <d l="247" n="ingestCommitTree" p="src/dmm.h" cx="6" in="1" churn="6" amp="27" r="3"> … </d>
-    …
-    <d l="191" n="ingest" p="src/ingest.cpp" cx="4" in="14" churn="128" amp="266" tested="1" r="13"> … </d>
-    … </sigs>
-  <hops shown="2" total="6" capped="1" noedge="2">
-    <h l="1307" p="src/ingest_astquery.h" n="spanTierMemoPath">
-      <calls total="3"><c n="shaKeyedCachePath" l="1621"/> … </calls></h> … </hops>
-</ctx>
-```
+**Two things make that reachable in practice, and neither is the destination.** Answers are honest
+about their own limits — a count that cannot be a total is labelled a floor, a zero means "none
+found" and never "none exists", every truncation is disclosed — so an answer never looks more
+complete than it is, and the map never degrades the code by guessing. And an answer can be given a
+token budget, so what one costs is something you ask for rather than discover; where a complete
+answer will not fit, it says it went over rather than silently dropping the row you needed.
 
-`cx=` complexity, `churn=` git edit frequency, `amp=` change amplification, `r=` rank; `<hops>` rows
-carry the one-hop call context, caps disclosed. Every attribute is defined in the one legend at the
-top of the real output, which also self-reports the bundle's cost — `est_tokens="3995"` here.
+Those two are the stair-steps: honest about what is missing, priced in what it spends. The step they
+climb toward is a question fully answered in one call, which is not always trivial to reach — and
+where it is not, the output says so rather than pretending otherwise.
+</details>
+
+### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
+
+<details>
+<summary>How these ten rows were measured — <b>2026-08-08</b>, figures in ~tokens (≈ bytes/4), every ratio from a real run reproduced by the command in its row</summary>
+
+Ten everyday moments, re-measured on this repository, 2026-08-08. Figures are ~tokens (≈ bytes/4);
+every ratio comes from a real run, reproduced by the command in its row — raw byte counts and exact
+commands in
+[`docs/EVALS.md` §5](docs/EVALS.md#readme-grade-rows-re-measured-on-this-repository-2026-08-08).
+</details>
+
+Ordered understand → navigate → review-the-change:
+
+| Ask it | Command | ripwire | naive read | token savings |
+| --- | --- | --- | --- | --- |
+| "Orient me in this repo" | `ripwire .` | **~5.6K tok** | ~20K–25K tok — read `README.md` (+`docs/ARCHITECTURE.md`) | 3.6×–4.5× |
+| "Where is X handled?" | `ripwire . --for="…"` | **~2.1K tok** | ~4.9K–20K tok — `grep -rn <term> src/`, then read the file it points at | 2.3×–9.3× |
+| "What do I already know?" | `ripwire . --recall="…"` | **~15K tok** | ~445K tok — read all 119 markdown docs this repo carries | 29.2× |
+| "Set me up for this task" | `ripwire . --pack-task="…"` | **~2.1K tok** | ~16K–80K tok — read every relevant file, whole | 7.7×–37.7× |
+| "Show me this one function" | `ripwire . --expand=SYM --top-k=0` | **~260–16.5K tok** body (+~5.7K for the ranked-neighborhood bundle) | ~43K–174K tok — read the whole file it lives in | 2.6×–670× |
+| "Who calls this function?" | `ripwire . --callers=SYM` | **~580 tok** | ~40K–52K tok — `grep -rn SYM src/` (mostly noise), then open 2–3 files to sort real calls from mentions | 69.2×–89.1× |
+| "Is it safe to change this?" | `ripwire . --impact=SYM` + `--uses=SYM` | **~1.3K tok** | ~18K tok — open every direct-use file, whole | 14.4× |
+| "I have a stack trace" | `ripwire . --from-trace=FILE` | **~1.4K tok** | ~124K–298K tok — grep all 7 frame names, then open the innermost file(s) | 86.9×–208.6× |
+| "I changed these files — tests? blast radius?" | `ripwire . --situ` | **~410 tok** | ~3K–132K tok — `git diff` + `grep -rn <syms> test/`, then open the candidates | 7.3×–324.2× |
+| "Review this PR/diff" | `ripwire . --pr-context=REF` | **~1.9K tok** | ~4.8K–51K tok — `git diff REF`, then open the touched files | 2.6×–27.5× |
+
+<details>
+<summary>Same-correct-answer verification, and the honesty line these ratios come with</summary>
+
+**These aren't summaries that gamble with information.** Each row is scored
+same-correct-answer-or-it-doesn't-count, and both sides were checked, not assumed: orient surfaces
+this repo's own pipeline files (`ingest.cpp`, `graph.h`, `serialize.h`) in the first screen, the same
+three `docs/ARCHITECTURE.md` names as central; the `--for` row lands `mcpStale`
+(`src/mcpindex.h:633`), the actual staleness check, 5th-ranked; `--recall` lands the container-rule
+doc (`AGENTS.md`) that states, verbatim, the same "no `std::map`" rule `CONTRIBUTING.md` explains in
+full; `--pack-task` names the same three touch points a human would — `cachelint.h`, `mergeCachePack`
+(`src/main.cpp:1787`), the `lintrules.h` helpers it reuses; `--expand --top-k=0` hands back the
+requested function's complete, unmodified body — the ranked-neighborhood addition costs the same
+~22.6 KB regardless of which function you ask for, confirmed on two (a fixed floor, not per-function
+variance); `--callers` on `langOfPath` names its 2 real callers, the same ones a `grep` hit-list
+buries under 5 files of comment-only mentions; `--impact`+`--uses` on `coversOrEquals` names the same
+2 direct call sites `--uses` alone would, plus (disclosed) a transitive reach `--uses` doesn't cover
+at all; `--from-trace` resolves all 7 frames of a real call chain by name to the same definitions a
+per-frame grep would eventually find, mixed with call sites and comments; `--situ` on a 2-file diff
+names the same 6 real test harnesses, 2 of which a filename grep across `test/` cannot find even
+after opening every one of its 41 candidates — a completeness gap, not just a byte one; `--pr-context`
+surfaces co-change partners (`test/regression.sh`, `src/main.cpp`) a raw `git diff` has no way to
+know were usually touched and weren't this time — Fowler's *Shotgun Surgery* checked rather than
+merely named (the backtest is in [`docs/EVALS.md`](docs/EVALS.md)). The map ranks and discloses — it never paraphrases
+your code — and every truncation is disclosed in the header.
+
+**The honesty line, made concrete:** the same auto-selection behind the `--expand` row also runs the
+other way. On a small file (`pageRankDouble` in `src/pagerank.cpp`, 5,559 B) the ranked bundle would
+cost 27,916 B — nearly 5× more than the file — so ripwire serves the file itself instead, disclosed
+as `mode="whole-file"` on the response, not silently.
+[`docs/EVALS.md` §7](docs/EVALS.md#7-honest-counterexamples) lists that and the other counterexamples
+this project publishes against itself.
 
 </details>
 
-| The agent without a map | The agent with ripwire |
-| --- | --- |
-| greps a common word, gets hundreds of hits across dozens of files | one ranked answer — `est_tokens="3995"` on this repository (re-derived 2026-09-05, the run above) |
-| reads whole files to find the symbols that matter | those symbols, with complexity, churn and test coverage inline |
-| finds the callers only if it thinks to grep for them too | callers, blast radius and the tests to run, in the same bundle |
-| pays for every line it read, right or wrong | measured at **5.0%** of what that grep-and-read pass spends (re-derived 2026-08-23) |
+<details>
+<summary><b>Where those savings compound: an orchestrator that matches tasks to models — every lane it spawns starts cold on the same tree.</b> The map is the one artifact that does not have to be rediscovered per agent, and the quality verbs hand a verdict back instead of a pile of files to re-read</summary>
 
-And against five retrieval competitors on a held-out LocBench slice, it finds **all** gold files in
-the top 10 on **58.3%** of instances — the best alternative lands 40.0% — while indexing in 0.31 s.
-[The full leaderboard, losses included ↓](#graph-ranked-retrieval-it-finds-the-right-files-more-often-than-the-alternatives)
+The shape: plan the work, then run a loop that matches each task to the model that fits it. Every
+thread it spawns opens with an empty context on a repository it has never seen. **Orienting an empty
+context to a large repository is the most repeated cost in the whole system, and the one this tool
+was built for** — it is also the cost that grows with the size of the tree, which is why the pattern
+matters more the bigger the repository gets.
+
+`--for` and `--pack-task` answer it in a single call, at the per-call rates in the table above,
+instead of a grep-and-read tour that every lane pays over again from scratch.
+
+The return path matters as much. `--quality-delta`, `--test-gate` and `--edit-check` answer *what did
+I make worse*, *which tests must run*, *did I change a contract* — quantitative answers a lane can
+hand back as a verdict, rather than a transcript the orchestrator has to read to find out what
+happened.
+
+**What is and is not claimed here.** Every figure on this page is a single-agent measurement. That
+the saving compounds with the number of cold orientations follows from the fixed-cost mechanism, but
+it is pre-registered and **unrun** — the reason the pattern is worth trying, not a result this
+project has published.
+</details>
 
 ### See the map — not just the numbers
 
@@ -143,59 +229,80 @@ The `cx` and `churn` ramps share one five-stop scale, ordered so lightness rises
 
 </details>
 
-### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
+One deterministic answer: the relevant symbols, their callers, the change risks, and
+the tests that reach them. The task is yours to phrase — ask about *your* code, not ours. Run on this
+repository (2026-08-30), `ripwire . --for="incremental cache invalidation"` produced about 4.3K
+estimated tokens, not an enforced token budget. It includes:
 
-Ten everyday moments, re-measured on this repository, 2026-08-08. Figures are ~tokens (≈ bytes/4);
-every ratio comes from a real run, reproduced by the command in its row — raw byte counts and exact
-commands in
-[`docs/EVALS.md` §5](docs/EVALS.md#readme-grade-rows-re-measured-on-this-repository-2026-08-08).
-
-Ordered understand → navigate → review-the-change:
-
-| Ask it | Command | ripwire | naive read | token savings |
-| --- | --- | --- | --- | --- |
-| "Orient me in this repo" | `ripwire .` | **~5.6K tok** | ~20K–25K tok — read `README.md` (+`docs/ARCHITECTURE.md`) | 3.6×–4.5× |
-| "Where is X handled?" | `ripwire . --for="…"` | **~2.1K tok** | ~4.9K–20K tok — `grep -rn <term> src/`, then read the file it points at | 2.3×–9.3× |
-| "What do I already know?" | `ripwire . --recall="…"` | **~15K tok** | ~445K tok — read all 119 markdown docs this repo carries | 29.2× |
-| "Set me up for this task" | `ripwire . --pack-task="…"` | **~2.1K tok** | ~16K–80K tok — read every relevant file, whole | 7.7×–37.7× |
-| "Show me this one function" | `ripwire . --expand=SYM --top-k=0` | **~260–16.5K tok** body (+~5.7K for the ranked-neighborhood bundle) | ~43K–174K tok — read the whole file it lives in | 2.6×–670× |
-| "Who calls this function?" | `ripwire . --callers=SYM` | **~580 tok** | ~40K–52K tok — `grep -rn SYM src/` (mostly noise), then open 2–3 files to sort real calls from mentions | 69.2×–89.1× |
-| "Is it safe to change this?" | `ripwire . --impact=SYM` + `--uses=SYM` | **~1.3K tok** | ~18K tok — open every direct-use file, whole | 14.4× |
-| "I have a stack trace" | `ripwire . --from-trace=FILE` | **~1.4K tok** | ~124K–298K tok — grep all 7 frame names, then open the innermost file(s) | 86.9×–208.6× |
-| "I changed these files — tests? blast radius?" | `ripwire . --situ` | **~410 tok** | ~3K–132K tok — `git diff` + `grep -rn <syms> test/`, then open the candidates | 7.3×–324.2× |
-| "Review this PR/diff" | `ripwire . --pr-context=REF` | **~1.9K tok** | ~4.8K–51K tok — `git diff REF`, then open the touched files | 2.6×–27.5× |
+*This is what the output looks like, not the token-savings recipe.* A bare `--for` on every question
+is the most expensive way to use this tool — see [Where it pays most](#where-it-pays-most-and-where-it-does-not)
+and the three controls below it.
 
 <details>
-<summary>Same-correct-answer verification, and the honesty line these ratios come with</summary>
+<summary>What those <b>4.3K tokens</b> actually contain — ranked symbols with their doc comments quoted in place, risk annotated on every row, one-hop callers, and the answer's own <code>confidence=</code></summary>
 
-**These aren't summaries that gamble with information.** Each row is scored
-same-correct-answer-or-it-doesn't-count, and both sides were checked, not assumed: orient surfaces
-this repo's own pipeline files (`ingest.cpp`, `graph.h`, `serialize.h`) in the first screen, the same
-three `docs/ARCHITECTURE.md` names as central; the `--for` row lands `mcpStale`
-(`src/mcpindex.h:633`), the actual staleness check, 5th-ranked; `--recall` lands the container-rule
-doc (`AGENTS.md`) that states, verbatim, the same "no `std::map`" rule `CONTRIBUTING.md` explains in
-full; `--pack-task` names the same three touch points a human would — `cachelint.h`, `mergeCachePack`
-(`src/main.cpp:1787`), the `lintrules.h` helpers it reuses; `--expand --top-k=0` hands back the
-requested function's complete, unmodified body — the ranked-neighborhood addition costs the same
-~22.6 KB regardless of which function you ask for, confirmed on two (a fixed floor, not per-function
-variance); `--callers` on `langOfPath` names its 2 real callers, the same ones a `grep` hit-list
-buries under 5 files of comment-only mentions; `--impact`+`--uses` on `coversOrEquals` names the same
-2 direct call sites `--uses` alone would, plus (disclosed) a transitive reach `--uses` doesn't cover
-at all; `--from-trace` resolves all 7 frames of a real call chain by name to the same definitions a
-per-frame grep would eventually find, mixed with call sites and comments; `--situ` on a 2-file diff
-names the same 6 real test harnesses, 2 of which a filename grep across `test/` cannot find even
-after opening every one of its 41 candidates — a completeness gap, not just a byte one; `--pr-context`
-surfaces co-change partners (`test/regression.sh`, `src/main.cpp`) a raw `git diff` has no way to
-know were usually touched and weren't this time. The map ranks and discloses — it never paraphrases
-your code — and every truncation is disclosed in the header.
+- **The ranked symbols, in rank order** — the cache-header constant `kCacheMagic` first (with its doc
+  comment quoted in place and the one `next=` call that opens it), then `spanTierMemoPath` (the
+  cache-path composer), `ingestCommitTree`, … `ingest` — each row with its file, line, and signature.
+- **Risk, annotated in place** — complexity, git churn (`ingest` shows 128 recent edits),
+  change amplification (touch `ingest` and 266 graph nodes feel it), purity and test coverage. The
+  fragile spots are visible *before* anything touches them.
+- **One-hop call context** — `spanTierMemoPath` calls `shaKeyedCachePath`, `headSnapRepoHex`,
+  `exclConfigHex`; no second query needed to see the neighbourhood.
+- **Its own confidence** — this answer says `confidence="high"` with the score margin attached; a
+  flat ranking says `low`, so it reads as a starting point instead of masquerading as an answer.
+  `confidence=` measures how clearly the ranking separates its head from the rest, not whether the
+  head is what you meant: ask a repository about a concept it does not contain and the best lexical
+  matches still rank, confidently. Phrase the task in your code's own words.
+</details>
 
-**The honesty line, made concrete:** the same auto-selection behind the `--expand` row also runs the
-other way. On a small file (`pageRankDouble` in `src/pagerank.cpp`, 5,559 B) the ranked bundle would
-cost 27,916 B — nearly 5× more than the file — so ripwire serves the file itself instead, disclosed
-as `mode="whole-file"` on the response, not silently.
-[`docs/EVALS.md` §7](docs/EVALS.md#7-honest-counterexamples) lists that and the other counterexamples
-this project publishes against itself.
+<details>
+<summary>The actual wire format — what your agent reads (minified XML; trimmed and line-wrapped here)</summary>
 
+```xml
+<ctx task="incremental cache invalidation" confidence="high" margin_pct="20"
+     bundle="compact" bodies="0" reason="compact-route" est_tokens="3995">
+  <sigs shown="23" total="40" capped="1">
+    <d l="106" n="kCacheMagic" p="src/ingest_cache.h" cx="0" in="0" churn="11" amp="71" pure="1" r="1"
+       next="--expand=src/ingest_cache.h:kCacheMagic">
+      <doc>incremental cache (--cache): per-file content hash + raw facts so a
+           re-run re-parses ONLY …</doc>constexpr std::uint32_t kCacheMagic = …</d>
+    <d l="1307" n="spanTierMemoPath" p="src/ingest_astquery.h" cx="1" in="2" churn="5" amp="44" r="2"> … </d>
+    <d l="247" n="ingestCommitTree" p="src/dmm.h" cx="6" in="1" churn="6" amp="27" r="3"> … </d>
+    …
+    <d l="191" n="ingest" p="src/ingest.cpp" cx="4" in="14" churn="128" amp="266" tested="1" r="13"> … </d>
+    … </sigs>
+  <hops shown="2" total="6" capped="1" noedge="2">
+    <h l="1307" p="src/ingest_astquery.h" n="spanTierMemoPath">
+      <calls total="3"><c n="shaKeyedCachePath" l="1621"/> … </calls></h> … </hops>
+</ctx>
+```
+
+`cx=` complexity, `churn=` git edit frequency, `amp=` change amplification, `r=` rank; `<hops>` rows
+carry the one-hop call context, caps disclosed. Every attribute is defined in the one legend at the
+top of the real output, which also self-reports the bundle's cost — `est_tokens="3995"` here.
+
+</details>
+
+| The agent without a map | The agent with ripwire |
+| --- | --- |
+| greps a common word, gets hundreds of hits across dozens of files | one ranked answer — `est_tokens="3995"` on this repository (re-derived 2026-09-05, the run above) |
+| reads whole files to find the symbols that matter | those symbols, with complexity, churn and test coverage inline |
+| finds the callers only if it thinks to grep for them too | callers, blast radius and the tests to run, in the same bundle |
+| pays for every line it read, right or wrong | **5.0%** of what that grep-and-read pass spends — on a 12-question set where it strictly satisfied **5** to the naive arm's **11** (re-derived 2026-08-23) |
+
+**Both halves of that sentence, because one without the other is an overclaim.** The 5.0% is context
+compression, not equal task completion: on the five questions *both* arms strictly satisfied, ripwire
+spends **5.2%** of what the naive pass spends. Cheap context that answers less is not a saving if the
+agent then retries. The full adjudication, the four ranking defects behind the eleven-to-five gap, and
+the run where this number got **worse** are in [Measured](#measured).
+
+<details>
+<summary><b>58.3%</b> of instances with <b>all</b> gold files in the top 10 — the best alternative lands <b>40.0%</b>, while indexing in <b>0.31 s</b></summary>
+
+And against five retrieval competitors on a held-out LocBench slice, it finds **all** gold files in
+the top 10 on **58.3%** of instances — the best alternative lands 40.0% — while indexing in 0.31 s.
+[The full leaderboard, losses included ↓](#graph-ranked-retrieval-it-finds-the-right-files-more-often-than-the-alternatives)
 </details>
 
 ### Against the leading graph-database code-context MCP server
@@ -229,6 +336,9 @@ what the competitor does better:
 [`docs/EVALS.md` §2](docs/EVALS.md#2-head-to-head-against-other-tools).
 </details>
 
+<details>
+<summary><b>Nothing it is unsure about reaches your agent unlabelled</b> — unindexed languages named in the map's first line, a parse-health row on any file it cannot vouch for, every skipped file itemized with its reason</summary>
+
 **Nothing it is unsure about reaches your agent unlabelled — and nothing it could not see goes
 unnamed.** Every guess is marked in the output, and every mark has a next step — up to handing it a
 compiler-grade index. Point it at a repository whose main language it has no grammar for and the
@@ -236,15 +346,20 @@ map's first line says so (`unindexed="ml:793,mli:607,…"` on a facebook/infer c
 indexed but cannot vouch for carries a parse-health row; every file the crawl passed over is
 itemized with its reason. A confident-looking map that lies by omission is the failure mode this
 tool refuses.
+</details>
 [What it misses, and what to run next →](#what-it-misses-and-what-to-run-next)
 
 ### Graph-Ranked Retrieval: It finds the right files more often than the alternatives
+
+<details>
+<summary><b>58.3% against 40.0%</b> for the best tool tested, and it answers before they finish indexing — N = 60 paired, zero exclusions, every arm re-run on one day</summary>
 
 **58.3% against 40.0% for the best tool tested — and it answers before they finish indexing.** Every
 arm below was re-run in full on 2026-08-08 — one ripwire binary (the profile-guided release build
 that now ships), one evaluator, one 60-instance held-out LocBench slice: paired, zero exclusions,
 same gold set, and the metric code imported unmodified into every arm. *Strict file@10 = **all** gold files inside the top 10*, which is whether
 your agent starts in the right place at all.
+</details>
 
 | Round 4 — LocBench, Python-dominant | strict file@10 | any@10 | index (median) | query (median) |
 | --- | --- | --- | --- | --- |
@@ -254,6 +369,9 @@ your agent starts in the right place at all.
 | graphify 0.9.34 | 31.7% | 46.7% | 7.82 s | 0.614 s |
 | Aider repo-map 0.86.2 | 20.0% | 35.0% | *(inside query)* | 2.920 s |
 | codeseek 0.1.31 (better of its two arms) | 15.0% | 20.0% | 3.37 s | 0.040 s |
+
+<details>
+<summary>What this table costs us — six paired losses named, a runner-up we had under-credited at <b>26.7%</b> and corrected to <b>40.0%</b>, and the multi-file stratum no arm solves</summary>
 
 Ripwire leads every arm on both accuracy metrics and in both strata. Paired, the losses are small and
 they are published: **2** instances to codebase-memory-mcp, **2** to repowise, **1** each to graphify
@@ -281,10 +399,13 @@ wherever they live — not by file path alone. On an astral-sh/ruff clone (5,945
 (`ripwire <ruff> --ignore-tests`, 2026-08-14; the per-language fixtures are pinned by
 `test/testscopecheck.sh`).
 
+</details>
+
 ---
 
 *The table above, read two other ways. Every figure in both is one of its measured numbers; only the
-manners and the cynicism are editorial.*
+manners and the cynicism are editorial. Should the reader find the manners excessive, the author begs
+them to recall that the alternative was a second table.*
 
 <details>
 <summary>📖 &nbsp;<b>The same table, as narrated by Jane Austen</b></summary>
@@ -408,6 +529,9 @@ real work, and the joke is aimed at the trade-offs, never the authors.</sub>
 
 ---
 
+<details>
+<summary><b>Name a symbol and it is the first hit</b> — routing lifts recall@1 <b>61.1% → 91.3%</b>; route <i>everything</i> to the name lane and prose queries collapse <b>0.967 → 0.016 MRR</b>. Both numbers ship together</summary>
+
 **Name a symbol and it is the first hit — and it is never a mystery which ranker answered.** Every
 `--for` query is served by one of three lanes; a confidence-gated router picks by reading the
 query's *shape*, discloses its choice on the output (`route=`), and `--no-route` overrides it.
@@ -417,6 +541,7 @@ lane and prose queries collapse from **0.967 MRR to 0.016**. Both numbers ship t
 with `ripwire <dir> --eval-retrieval`, which grades EVERY doc-commented symbol in the corpus and
 prints its own `population=`/`scored=`/`rule=`; the full per-ranker tables are in
 [`bench/ANSWERQUALITY.md`](bench/ANSWERQUALITY.md#re-measured-2026-09-05--census-sampler-midrank-ties-the-current-numbers).
+</details>
 
 | Lane | Built for | Why it wins there | Where it loses |
 | --- | --- | --- | --- |
@@ -477,10 +602,17 @@ per-lane table and history in [docs/EVALS.md §4](docs/EVALS.md).
 
 ### Saves Tokens: It answers for a fraction of the context
 
+<details>
+<summary><b>5.0%</b> of what a grep-and-read pass spends — <b>5.2%</b> on the questions both arms fully answered, and a dedicated context compressor run over the output saved <b>exactly 0 tokens</b></summary>
+
 On mid-task questions it had never seen, ripwire answers at **5.0%** of what a grep-and-read pass
 spends — **5.2%** on the questions both arms fully answered. `--pack-signatures` returns **74.7%
 fewer bytes** than full bodies at top-50 (re-derived on this tree, 2026-09-06). The output is already
 dense enough that running a dedicated context compressor over it saved **exactly 0 tokens**.
+</details>
+
+<details>
+<summary>Why both figures are printed — <b>7.3% → 5.0%</b> overall, but <b>1.7% → 5.2%</b> on the questions both arms answered</summary>
 
 Both of those first two figures moved when they were re-derived on 2026-08-23, and they moved in
 **opposite** directions — 7.3% → 5.0% overall, but 1.7% → 5.2% on the both-answered subset. Same
@@ -493,7 +625,56 @@ commit. The full per-question re-derivation is in the Round 3 note under [Measur
 It is also cheap enough to call on reflex: this repository parses in **~0.15 s** cold and **~0.10 s**
 warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessing.
 
+</details>
+
+### Where it pays most, and where it does not
+
+<details>
+<summary><b>A map is a fixed cost paid once per context — strongest of all under an orchestrator that matches tasks to models: every lane it spawns starts cold on the same tree.</b> It pays again on the checking pass, and it <b>does not pay</b> on a question one <code>grep</code> already answers</summary>
+
+**A map is a fixed cost paid once per context, so it pays in proportion to what that context goes on
+to do with it.** Two shapes get the most out of it, and one gets nothing.
+
+- **Orienting a context that does not know the repository.** This is the strongest case, and it is
+  strongest of all under an orchestrator that matches tasks to models: every lane it spawns starts
+  cold on the same tree, and each one would otherwise re-derive the same structure from scratch. The
+  map is the one artifact that does not have to be rediscovered per agent.
+- **The checking pass at the end.** `--quality-delta`, `--test-gate` and `--edit-check` answer
+  questions — *what did I make worse, which tests must run, did I change a contract* — that an agent
+  cannot answer by reading more source, at any budget.
+- **It does not pay on a question one `grep` already answers.** The map is charged whether or not it
+  was needed, so a narrow lookup in a file you can already name is cheaper without it. `--help-task`
+  exists to make that call, and a flat ranking says `confidence="low"` rather than pretending.
+</details>
+
+**Getting the saving takes three things, and a bare `--for` is none of them.**
+
+<details>
+<summary>The three controls that decide what it costs — <b>a budget</b> (<code>--token-budget</code> / <code>--top-k</code>), <b>routing</b> (<code>--help-task</code>), and <b>the skills</b> that teach an agent when <i>not</i> to reach for it</summary>
+
+1. **A budget.** `--token-budget=N` caps the bundle; `--top-k=N` caps the rows. Unbudgeted `--for` returns
+   a rich terminal bundle by design — right when it ends the question, wasteful when it does not.
+2. **Routing.** `ripwire . --help-task="<task>"` names the ONE command the task actually wants, and
+   abstains when the evidence is thin. It is advice, it never runs anything. An answer of "just grep
+   for it" is a correct answer and the tool will give it.
+3. **The skills.** `skills/install.sh` teaches an agent *when* to reach for which verb. Without them
+   an agent has 175 flags and no map of which moment each is for, and it will reach for the map every
+   time — including the times it should not.
+</details>
+
+<details>
+<summary><b>What is measured and what is not</b> — these are single-agent figures; that the saving grows with the number of cold orientations is pre-registered and <b>unrun</b>, not a published result</summary>
+
+**What is measured and what is not.** The per-question figures above and in [Measured](#measured) are
+single-agent measurements. That the saving grows with the number of cold orientations follows from the
+fixed-cost mechanism but is **not a published result** — it is pre-registered and unrun. Treat the
+single-agent numbers as the measured ones.
+</details>
+
 ### Better Code: It automates the review judgments nobody has time to make — every lens from published research
+
+<details>
+<summary><b>Six independent evidence families</b>, each implementing published work — the largest correlation between any two is <b>+0.168</b>, which is what makes agreement corroboration rather than one metric counted twice</summary>
 
 `--quality-panel` runs the calls a good reviewer makes by hand — is this function too tangled, is it
 named badly, does it hide control flow inside an idiom, does its history say it keeps breaking, must
@@ -505,6 +686,10 @@ lesson taken from each paper, and the rules measured and *withdrawn*, in
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Pooled over five corpora (n = 27,889) the largest correlation
 between any two families is **+0.168**: they really are measuring different things, so two families
 firing on the same function is corroboration rather than one metric counted twice.
+</details>
+
+<details>
+<summary>Why this matters most for code an agent wrote — empty-catch masking <b>+47%</b>, rewritten-within-two-weeks <b>+15%</b>, and reuse declining</summary>
 
 That matters most for code an agent wrote. Empty-catch error masking is **+47%** more common in
 AI-authored commits, a function rewritten again inside two weeks **+15%** more likely, and reuse is
@@ -513,10 +698,16 @@ AI-authored commits, a function rewritten again inside two weeks **+15%** more l
 change made worse** — then `--exemplar` shows the pattern in your own repo to copy, and `--test-gate`
 names the tests that must run before "done."
 
+</details>
+
+<details>
+<summary>Reproducing all of it — dated, sourced measurements in <code>docs/EVALS.md</code>, each with its instrument, its corpus and its counterexamples, because the losses ship beside the wins</summary>
+
 Tree-local numbers above are reproducible with the commands shown; the rest are dated, sourced
 measurements in [`docs/EVALS.md`](docs/EVALS.md) — each with its instrument, its corpus, and its
 counterexamples, because the losses ship beside the wins. Zero runtime dependencies, C++23, builds
 with the network off.
+</details>
 
 Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, opencode, aider**, and any agent that can
 call a CLI.
@@ -602,11 +793,17 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 
 ## What it answers
 
+<details>
+<summary><b>179 long flags</b> across seven families, plus the MCP server — and <code>--help-task</code> names the ONE command a task wants, or abstains honestly when the evidence is too thin</summary>
+
 Around the core sit 179 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
+`--help` prints one line per flag (~4.5K tokens); `--help=--FLAG` prints that flag's full entry with
+every caveat, `--help=SECTION` one family, and `--help=all` the whole catalog.
 Not sure which of them fits the task in front of you? `ripwire . --help-task="<task in words>"`
 recommends ONE executable command with the evidence behind the pick — advice only, it never runs
 the recommendation — and abstains honestly when the evidence is too thin to name a winner.
+</details>
 
 <details>
 <summary>Which surface is the authority — <code>--help</code> vs <code>docs/COMMANDS.md</code> — and the four reflex verbs worth memorising</summary>
@@ -637,19 +834,27 @@ ranking, bodies, callers and tests in one budgeted bundle.
 
 ## Quickstart
 
+<details>
+<summary><b>Prebuilt binary</b> — macOS and Linux (arm64 / x86-64, built for <b>RHEL 8+</b>), SHA-256 verified, shipping <b>seventeen agent skills</b> the installer activates for every agent it detects</summary>
+
 **Prebuilt binary** — macOS (arm64 / x86-64) and Linux (arm64 / x86-64, built for **RHEL 8+**;
 every release is smoke-tested on a RHEL 9 userland before it publishes). Downloads the latest
 [GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
-to `~/.local/bin`. From v0.2.2 the release tarball also ships the eighteen agent skills, and the
+to `~/.local/bin`. From v0.2.2 the release tarball also ships the seventeen agent skills, and the
 installer stages them under `~/.local/share/ripwire/skills` **and activates them for every agent it
-detects** (Claude Code, Codex), printing one line per agent saying what it did. An agent that is not
+detects** (Claude Code, Codex), printing one line per agent saying what it did. Sixteen of the
+seventeen are for using the tool; the one about compiling ripwire itself (`ripwire-opt-remarks`,
+`audience: contributor` in its front matter) stays staged unless you pass `--contributor` to
+`skills/install.sh`. An agent that is not
 installed is never given a skills directory, hooks are never registered without an explicit `--hook`,
 and `RIPWIRE_NO_ACTIVATE=1` stages without activating for image builds. When no agent is detected the
 activation one-liner is printed instead:
 
 ```bash
 RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
+export PATH="$HOME/.local/bin:$PATH"      # not on PATH by default on macOS or most Linux shells; add it to your rc file
 ```
+</details>
 
 **Building it yourself needs CMake 3.24+ and a C++23 compiler, and nothing else installed first** —
 every dependency is vendored in-tree, so the build completes with the network off.
@@ -658,7 +863,7 @@ every dependency is vendored in-tree, so the build completes with the network of
 git clone https://github.com/redhat-et/ripwire.git
 cd ripwire
 cmake -S . -B build && cmake --build build -j
-./build/ripwire .          # the ranked map — start here on an unfamiliar repo
+./build/ripwire . --max-tokens=3000   # the ranked map — start here on an unfamiliar repo (bare it is ~22 KB here; this keeps the head at ~6 KB)
 ```
 
 <details>
@@ -667,7 +872,7 @@ cmake -S . -B build && cmake --build build -j
 **Or build from source.** Requirements: CMake 3.24+ and a C++23 compiler — that means clang 16+ /
 AppleClang 15+ (Xcode 15) / gcc 13+ / MSVC 19.36+, and if your distro's CMake is older than 3.24,
 `pip install cmake` or `brew install cmake` gets a current one everywhere. Nothing else —
-tree-sitter's core, all 21 grammars and the test framework are vendored under `third_party/deps`,
+tree-sitter's core, the grammars listed in [THIRD_PARTY.md](THIRD_PARTY.md) and the test framework are vendored under `third_party/deps`,
 so there is no download step and no package manager to satisfy. Prove that with the network off:
 add `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
 
@@ -681,9 +886,7 @@ cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release && cmake --build build-re
 cmake -S . -B build && cmake --build build -j
 ```
 
-Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, PHP, Lua, Bash, Go,
-Rust, Swift, C#** — plus JSON/TOML/YAML config keys, markdown sections, Metal, and CUDA (`<<<>>>`
-launches are call edges).
+See [Languages](#languages) for supported source and document formats.
 
 To put it on `PATH`, `./install.sh` builds and atomically installs the binary plus the matching
 `skills/` and `hooks/` assets into a detected prefix (Homebrew's if present, `~/.local` otherwise;
@@ -696,7 +899,7 @@ Wiring it into your agent takes one more minute — `wrap` **prints** the recipe
 never edits your config:
 
 ```bash
-ripwire wrap claude             # prints: claude mcp add ripwire -- ripwire --mcp
+ripwire wrap claude             # prints the wiring: the CLI call first, `claude mcp add` as the alternative
 ripwire wrap --all              # detect every installed agent, print each one's recipe
 skills/install.sh --codex       # Codex CLI: the task-shaped skills that say when to query — and when to stop
 ```
@@ -704,7 +907,7 @@ skills/install.sh --codex       # Codex CLI: the task-shaped skills that say whe
 Four commands worth learning first:
 
 ```bash
-ripwire .                                          # the ranked map — start here
+ripwire . --max-tokens=3000                        # the ranked map — start here (bare it is ~22 KB / ~9K est_tokens on this repo; this keeps the head at ~6 KB / ~2.5K)
 ripwire . --for="incremental cache invalidation"   # the task lens: what to touch, ranked
 ripwire . --callers=someFunction                   # who calls it
 ripwire . --test-gate                              # before you commit: which tests must run
@@ -741,10 +944,14 @@ contract, gated on every pull request and every push to main, not a tendency.
 
 ## The quality panel
 
+<details>
+<summary><b>4,956</b> eligible functions on this repository, and 2-of-6 agreement leaves <b>401</b> worth a second look — an <b>8.1%</b> shortlist</summary>
+
 **Six independent evidence families, ranked by how many of them agree — never one blended score.**
 Pointed at this repository's **4,956** eligible functions, 2-of-6 agreement leaves **401** worth a
 second look: an **8.1%** shortlist. Pooled over five corpora (n = 27,889) no two families correlate
 above **+0.168**, which is what makes agreement corroboration rather than one metric counted twice.
+</details>
 What each family actually looks at — on this repository's own source, not a synthetic example:
 
 | Family | Question | Backing verb | On this repo |
@@ -903,18 +1110,26 @@ rather than blurring it:
 
 </details>
 
+<details>
+<summary>The full citation table, the evidence tiers, and the naming rule that was <b>withdrawn</b> for flagging this repository's best-named functions</summary>
+
 Full citation table, evidence tiers, and what got measured and *withdrawn* (a naming rule that
 flagged this repository's best-named functions, kept as the standing argument for measuring before
 shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
+</details>
 
 ---
 
 ## Real runs
 
+<details>
+<summary><b>Four real invocations</b> against this repository, printed as the binary actually prints them — including why <code>--callers</code>' count is a floor and what <code>amb=</code> admits</summary>
+
 **Four real invocations against this repository**, each printed as the binary actually prints it:
 `--callers` (and why its count is a floor), the default ranked map (and what `amb=` admits),
 `--test-gate` (exit 4 while obligations remain), and `--from-trace` (feed it the error itself, not a
 paraphrase of one).
+</details>
 
 <details>
 <summary>How these excerpts were edited — minified output wrapped for reading, and exactly which numbers are elided</summary>
@@ -934,16 +1149,18 @@ trailing `…`.
 <summary><code>--callers</code> — a call graph built on the spot, and why <code>count="6"</code> ships labelled a floor</summary>
 
 **Ten seconds, no index server, no embeddings, no API key** — a parse and a call graph, built on the
-spot:
+spot. The rows below are a real capture: the callers and their files are gate-held current
+(`test/readmeexamplecheck.sh`), the `:line` suffixes were true when captured and drift as the files
+grow — nothing can keep a line number true in a document, so it is not claimed here.
 
 ```
 $ ripwire . --callers=rankGraphTeleport
 <callers of="rankGraphTeleport" defs="1" count="6" root="." hop_tested="0" hop_untested="6" counts_floor="1">
 <s t="fn" n="runEval" p="src/eval.h:169"/>
-<s t="fn" n="rankGraph" p="src/graph.h:2581"/>
-<s t="fn" n="anchoredLexicalRank" p="src/graph.h:3130"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:983"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:1101"/>
+<s t="fn" n="rankGraph" p="src/graph.h:3101"/>
+<s t="fn" n="anchoredLexicalRank" p="src/graph.h:3650"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:995"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:1120"/>
 <s t="fn" n="getIndex" p="src/mcpindex.h:1104"/>
 </callers>
 ```
@@ -1136,17 +1353,25 @@ cmake --build build 2>&1 | ./build/ripwire . --from-trace=-
 
 ## Measured
 
+<details>
+<summary><b>Read this first if you are here to check whether the tool is oversold</b> — every number with its instrument and corpus, plus the claims this project deliberately does <i>not</i> publish</summary>
+
 Every published number lives in **[`docs/EVALS.md`](docs/EVALS.md)** with the instrument that produced
 it, the corpus it ran on, and the in-tree file that pins it — alongside a counterexample section and a
 list of the claims this project deliberately does *not* publish. Read those first if you are here to
 check whether the tool is oversold.
+</details>
 
 ### Against other tools
+
+<details>
+<summary><b>Round 4: 58.3% against 40.0%</b> — a <b>1.46×</b> margin at a <b>0.31 s</b> index; N = 60 paired, zero exclusions, all arms re-run 2026-08-08</summary>
 
 **Round 4 (re-run in full 2026-08-08): 58.3% strict file@10 against 40.0% for the best competitor —
 a 1.46× margin, at a 0.31 s index.** N = 60 paired instances, zero exclusions, one binary (the
 profile-guided release build that now ships), one evaluator, all arms re-run on the same day.
 *Strict file@10 = all gold files inside the top 10.*
+</details>
 
 | Arm | strict file@10 | any@10 | index (median) | query (median) |
 | --- | --- | --- | --- | --- |
@@ -1189,7 +1414,7 @@ Three limits travel with this table. ¹ repowise's walls include a fresh MCP-ser
 resident-server usage is faster. ² codeseek's raw row returned **0 results on 60/60 queries** — its
 keyless fallback matches function names only, so that row measures a query-protocol boundary, not its
 embedder-backed shipping mode (unbenchmarked here). And the slice is **Python-dominant** — 107 of 134
-gold files are `.py` — so this measures Python localization, not all twelve indexed languages.
+gold files are `.py` — so this measures Python localization, not every [supported language](#languages).
 **Vexp and CodeIndexer were excluded, not beaten**: their free tiers (node/project/chunk caps) cannot
 run a fair 60-instance sweep. An independent adversarial pass attacked the r2 comparison's design, and
 its findings and dispositions ship with that report
@@ -1276,10 +1501,14 @@ has been re-adjudicated here — the satisfaction column is unchanged, so those 
 
 </details>
 
+<details>
+<summary><b>LocBench held-out, N = 243 across 78 repositories</b> — strict file@10 <b>60.9%</b> against <b>27.6%</b> pre-routing, a paired <b>+33.33pp</b>, bought for <b>−39.4%</b> on the token ceiling</summary>
+
 **LocBench held-out, N = 243 across 78 repositories.** Strict file@10 **60.9%**, against **27.6%** for
 the pre-routing baseline — a paired **+33.33pp** with a clustered-bootstrap 95% lower bound of
 **+25.00pp**, bought for +3.4% warm latency and **−39.4%** on the production token ceiling. More
 accurate *and* cheaper, which is why it shipped.
+</details>
 
 ### What it saves you, in tokens
 
@@ -1288,7 +1517,7 @@ pins it:
 
 | Where the saving comes from | Measured | Pinned by |
 | --- | --- | --- |
-| `--pack-signatures` — body-elided declaration skeletons instead of full bodies | **80.2% fewer element bytes** at top-50 (84.5% at top-10, 80.6% at top-100) — re-derived 2026-08-30 | `test/showcasecapturecheck.sh`, re-derived from this repo every run |
+| `--pack-signatures` — body-elided declaration skeletons instead of full bodies | **81.8% fewer element bytes** at top-50 (89.5% at top-10, 84.3% at top-100) — re-derived 2026-09-10 | `test/showcasecapturecheck.sh`, re-derived from this repo every run |
 | Query-shape routing, on the production token ceiling | **−39.4%** p50, while strict file@10 rose +33.33pp | `bench/locbench/`, [EVALS §3](docs/EVALS.md) |
 | A whole-question bundle against a naive agent read | **96.0% fewer tokens (24.9×)** — 14,758 against 367,192, tiktoken `cl100k_base`, six realistic questions | `bench/BENCHMARK.md` — *historical, private corpus, not reproducible from this tree* |
 
@@ -1329,12 +1558,17 @@ four-fact grep re-derivation lives in [`docs/EVALS.md` §5](docs/EVALS.md).
 
 ### Where its own cycles go — hardware counters, per scope
 
+<details>
+<summary><b>3.2–3.5 instructions per cycle</b> across parse and query, and the <b>≈167×</b> fewer instructions a warm run retires</summary>
+
 **Every pipeline phase is bracketed by two hardware-counter reads, and the numbers say what
 wall-clock cannot.** Parse and query retire **3.2–3.5 instructions per cycle**; the graph phases
 stream at 32–35 L1D MPKI and still hold IPC above 3.1 (guardrail G2 doing its visible job); and a
 warm run replaces the dominant phase's 8.74 B instructions with a 52.3 M-instruction cache load,
 **≈167× fewer**. Two opt-in builds go faster still — PGO by **14–25% cold** — with **byte-identical**
 output on every one.
+
+</details>
 
 <details>
 <summary>How the self-profiler measures — kperf / <code>perf_event_open</code>, the per-scope counter table, and the three things it says that wall-clock cannot</summary>
@@ -1375,8 +1609,8 @@ via `PL2_CACHE_MISS_LD`).
 **Every number on this page is the DEFAULT build — and there is a faster one you can opt into.** A
 clang optimization-remarks pass over `src/` (`-DRIPWIRE_OPT_REMARKS=ON`; the whole triage is in
 [`docs/OPTREMARKS.md`](docs/OPTREMARKS.md)) found that the phases above spend their time calling
-tree-sitter's C API across a translation-unit boundary — 397 of 636 distinct `inline/NoDefinition`
-remarks in the hot TU name a `ts_*` accessor. Two build options answer that, both **off by default**:
+tree-sitter's C API across a translation-unit boundary — 831 of 1,437 distinct `inline/NoDefinition`
+sites in the hot TU name a `ts_*` accessor. Two build options answer that, both **off by default**:
 
 | build | cold | warm | |
 | --- | --- | --- | --- |
@@ -1436,8 +1670,11 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 
 ## Standing on the whole field
 
+<details>
+<summary>43 repositories, 69 papers and a 237-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
+
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**41 repositories and 67 papers** into one deterministic executable, alongside a labelled
+**46 repositories and 69 papers** into one deterministic executable, alongside a labelled
 survey of 237 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables
@@ -1450,6 +1687,8 @@ arm's failures happening silently at the planner→sub-agent hand-off
 ([arXiv:2608.01507](https://arxiv.org/abs/2608.01507)). A single process answering in one call has no
 hand-off to fail at.
 
+</details>
+
 ---
 
 ## The honesty contract
@@ -1459,14 +1698,26 @@ and this tool ships the check.**
 
 ### What it misses, and what to run next
 
+<details>
+<summary>What a name-based call graph cannot see — dynamic dispatch, a callback routed through a table, a symbol that exists only after macro expansion</summary>
+
 A name-based call graph cannot see dynamic dispatch, a callback routed through a table, or a symbol
 that exists only after macro expansion. Every static tool has that horizon; the one that costs you a
 bug is the one that hides it. So the contract is not *it sees everything* — it is **nothing it is
 unsure about reaches your agent unlabelled.**
 
+</details>
+
+<details>
+<summary><b>Measured against a compiler-grade oracle, its silent-miss count is zero</b> — of 68 answers six were imperfect and four flagged themselves; no imperfect answer arrived unmarked</summary>
+
 **Measured against a compiler-grade oracle, its silent-miss count is zero.** Of 68 answers scored
 against a `scip-clang` index, six were imperfect and four flagged themselves; the other two were
 right, and the oracle was the one that could not see the files. No imperfect answer arrived unmarked.
+</details>
+
+<details>
+<summary>Three ways to escalate on purpose — <code>--expand</code> for the body, <code>--uses</code>/<code>--impact</code> for the blast radius, <code>--scip</code> for compiler-grade edges</summary>
 
 When a mark says the cheap answer is not enough, escalate on purpose — never by guessing:
 
@@ -1475,6 +1726,8 @@ When a mark says the cheap answer is not enough, escalate on purpose — never b
    radius. `--callers` alone under-counts, and says so.
 3. **`--scip=index.scip`** — hand it a compiler-grade index and precise edges *replace* the
    name-based guesses, tagged `prov="scip"`. Missing or corrupt index degrades; it never fails.
+
+</details>
 
 <details>
 <summary>The six marks the output uses — <code>amb=</code>, <code>ambiguous=</code>, <code>counts_floor=</code>, <code>unresolved=</code>, <code>external=</code>, <code>--skipped</code></summary>
@@ -1524,9 +1777,13 @@ number are listed with it. Receipt, per-query scores and reproduction:
 
 ### In the output
 
+<details>
+<summary><b>Three rules the output enforces on itself</b> — a zero reads as <i>none found</i> never <i>none exists</i>; every truncation says what it withheld; every count names its unit</summary>
+
 **Three rules the output enforces on itself:** a zero reads as *none found*, never *none exists*;
 every truncation says what it withheld and how to page it; and every count names its unit, because
 the units differ by verb.
+</details>
 
 <details>
 <summary>The three rules in full — <code>counts_floor="1"</code>, the <code>shown_*</code>/<code>*_capped=</code> paging vocabulary, and why two counts can disagree honestly</summary>
@@ -1543,6 +1800,9 @@ the units differ by verb.
 </details>
 
 ### In the numbers
+
+<details>
+<summary>Four negatives published on purpose — including PageRank as a co-change ranker: <b>3.8%</b> recall@5 against plain lexical's <b>40.3%</b></summary>
 
 The evaluation labels were authored by reading the source and deciding which symbol *is* the on-task
 answer — never by transcribing the ranker's own output — so the eval is allowed to say the ranker is
@@ -1562,9 +1822,14 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 - **Strict multi-file localization is hard and stays hard.** Held-out LocBench: single-file gold
   73.4%, multi-file 18.2%. Every corpus shows the same cliff.
 
+</details>
+
 ### In the tests
 
-`test/regression.sh` names **547 gate scripts** and is the authoritative list;
+<details>
+<summary><b>587 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+
+`test/regression.sh` names **587 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -1574,9 +1839,14 @@ and requires stdout, stderr and exit code to match on each.
 The house rule behind all of it: **write the gate before the code it measures.** A ranking, a token
 estimate and a call graph all look plausible whether or not they are correct.
 
+</details>
+
 ---
 
 ## Set it up in your coding agent
+
+<details>
+<summary>Why the CLI is primary and MCP is opt-in — the per-session context cost that decides it, and the edit verbs both surfaces expose</summary>
 
 **If your agent can run shell commands, it is already set up.** The CLI is the primary interface:
 `ripwire` on `PATH` costs the agent nothing until the moment it runs a command — no server to
@@ -1597,24 +1867,32 @@ That MCP convenience has a
 cost the CLI doesn't carry — the verb schemas sit in the agent's context every session — so register
 it when you want those verbs, not as a default.
 
+</details>
+
 ### 1. (Optional) Register the MCP server
 
 `ripwire wrap <agent>` prints the recipe for the agent you name. It **prints**; it never edits your
 config — you read the line, then run it.
 
 ```bash
-ripwire wrap claude      # MCP:      claude mcp add ripwire -- ripwire --mcp
-ripwire wrap cursor      # MCP:      the mcpServers stanza for .cursor/mcp.json (or ~/.cursor/mcp.json)
+ripwire wrap claude      # CLI-first: the CLI call, then `claude mcp add` as the warm-index alternative
 ripwire wrap codex       # CLI-first: optional MCP restricted to audit/health verbs in Codex TOML
-ripwire wrap windsurf    # MCP:      that client's stanza
-ripwire wrap gemini      # MCP:      that client's stanza
-ripwire wrap opencode    # CLI-1st:  the AGENTS.md wiring; its "mcp" stanza offered as the alternative
-ripwire wrap aider       # no MCP:   a ranked map file, and the aider invocation that reads it
+ripwire wrap opencode    # CLI-first: the AGENTS.md wiring; its "mcp" stanza offered as the alternative
+ripwire wrap openclaw    # CLI-first: same ~/.agents/skills root Codex uses; no shell hook slot
+ripwire wrap hermes      # CLI-first: hermes mcp add as the warm-index alternative; hook port pending
+ripwire wrap cursor      # MCP:       the mcpServers stanza for .cursor/mcp.json (or ~/.cursor/mcp.json)
+ripwire wrap windsurf    # MCP:       that client's stanza
+ripwire wrap gemini      # MCP:       that client's stanza
+ripwire wrap aider       # no MCP:    a ranked map file, and the aider invocation that reads it
 ripwire wrap --all       # detect every installed agent and emit each one's config
 ```
 
+<details>
+<summary><b>One stdio server, 31 verbs</b> — 16 read, 12 flagship-reflex, 3 span-addressed edit</summary>
+
 **One stdio server, 31 verbs** — 16 read, 12 flagship-reflex, 3 span-addressed edit — and a client
 that isn't one of the six above can be pointed at the same process by hand.
+</details>
 
 <details>
 <summary>What the 31 verbs are — lazy body handles, the edit verbs' safety contract, the pre-print skill scan, and the hand-written stanza for any other MCP client</summary>
@@ -1649,6 +1927,9 @@ socket instead of stdio, `ripwire --listen=HOST:PORT` serves the same verbs.
 
 ### 2. Install the skills
 
+<details>
+<summary>Eighteen task-shaped skills, every install mode, and the <code>--scan-skills</code> verdict to read first</summary>
+
 `skills/` ships **eighteen task-shaped skills** that tell an agent *which* verb answers the moment it
 is in — orienting cold, tracing a call, sizing a refactor, checking a diff, hunting a bug, writing
 tests, reviewing security. Without them an agent has 31 verbs and no map of when each applies; the skills name the moment
@@ -1656,11 +1937,12 @@ each verb is for. Install as symlinks back into this repo, so edits here take ef
 immediately:
 
 ```bash
-skills/install.sh                 # → ~/.claude/skills
+skills/install.sh                 # → ${CLAUDE_CONFIG_DIR:-~/.claude}/skills
 skills/install.sh --codex         # → ${AGENTS_HOME:-~/.agents}/skills (canonical Codex/agent path)
 skills/install.sh --codex --hook  # → also install Codex's task router, CLI nudge + session primer
 skills/install.sh --codex-legacy  # → ${CODEX_HOME:-~/.codex}/skills (older Codex installs)
 skills/install.sh /some/path      # → an explicit destination
+skills/install.sh --contributor   # → also the contributor-facing skill (compiling ripwire itself)
 ripwire --scan-skills=skills      # read the security scanner's verdict first, if you would rather
 ```
 
@@ -1669,11 +1951,13 @@ The script's own header documents its other modes, including the opt-in advisory
 `AGENTS.md`, `.cursor/rules`, …) and works from a prebuilt install with no checkout — from v0.2.2
 it points at the installer's staged copy of the skills when the cwd is not a checkout.
 
+</details>
+
 ---
 
 ## Improve it with your agent
 
-[`prompts/`](prompts/) holds eleven **self-contained orchestrator prompts**: the loops this project is
+[`prompts/`](prompts/) holds twelve **self-contained orchestrator prompts**: the loops this project is
 built with, written so a coding agent can run them. They encode the workflow rather than describing
 it.
 
@@ -1710,9 +1994,31 @@ study, a sibling sweep, a live command tour, a showcase build — are listed wit
 
 </details>
 
+### If it works on your codebase, tell us what it got wrong
+
+Every number on this page is a measurement on a corpus we happen to have. **Yours is one we don't.**
+
+<details>
+<summary>Send evidence, not an impression — <code>prompts/improve-for-my-language.md</code> harvests your session's own transcript, and every finding it produces has to cite the moment it came from</summary>
+
+After a session on your own repository — your first one counts, and counts most — hand your agent
+[`prompts/improve-for-my-language.md`](prompts/improve-for-my-language.md). It harvests that
+session's own transcript — where ripwire answered, where it missed, where you fell back to grep —
+and every finding it produces has to cite the moment it came from: what you asked, which command
+ran, what came back. Open an issue with the result.
+
+That is worth more to this project than a bug report, because it arrives in the form the project
+already runs on: evidence with its provenance attached, not an impression. Several languages here
+are one contributor's corpus away from being measurably better, and we cannot see your code.
+</details>
+
+
 ---
 
 ## Languages
+
+<details>
+<summary><b>23</b> vendored grammars, and what each parser does and does not see — CUDA launch edges, PHP dynamic dispatch, Lua metatables</summary>
 
 C, C++, Objective-C / Objective-C++, **Metal** (Metal Shading Language, `.metal` — indexed with the
 C++ grammar, since MSL is a C++14 dialect, so a dual-compile header's symbols resolve from both the
@@ -1727,22 +2033,27 @@ imports. Dynamic dispatch — `$fn()`, `call_user_func`, `__call` — names its 
 a stated floor, not a silence), **Lua** (all five spellings that define a function, including the
 `M.f = function` and table-constructor forms; `function M:f()` is a method. Metatable inheritance is
 a runtime call with no syntax to read, so a Lua corpus reports no inheritance edges — stated, not
-implied), Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
+implied), **Dart** (`.dart` — classes, mixins, extensions, enums, typedefs, functions, methods, getters/setters; `recv.m()`, `recv?.m()` and cascade `..m()` invocations are edges. Two stated floors: named constructors and factories index under the CLASS name, so `C()`, `C.seeded()` and `factory C.fromA()` are overloads of `C`; and `noSuchMethod` dynamic dispatch names its callee at run time. The grammar makes a function body a SIBLING of its signature rather than a child, so the definition span is extended through it at capture time — without that, every call in a body attributes to the enclosing class), **Elixir** (`.ex`/`.exs` — modules, protocols, protocol implementations, functions, macros, guards and delegates;
+literal ExUnit tests, local calls, remote calls and pipes; see the
+[static-analysis limits](docs/ARCHITECTURE.md#elixir-extraction)), Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
 `[tool.ruff.lint]` table is one symbol under its full dotted name, and
 `pyproject.toml`/`Cargo.toml`/CI workflows become greppable), and **Markdown** (`.md`/`.markdown` —
 the DOC tier: every heading, ATX or setext, is a section symbol whose span runs to the next
 same-or-higher heading, so `--for` ranks the section, `--expand` serves the section body, `--recall`
 answers section-granular, and links/`backtick` mentions are doc→doc and doc→code edges).
-Twenty-one tree-sitter grammars, all vendored.
+All grammars are vendored; [THIRD_PARTY.md](THIRD_PARTY.md) owns their inventory and provenance.
 
 Want another language? The pipeline is language-agnostic past the parse: a new language is a
-vendored tree-sitter grammar, its query file, and one row in the declarative
+vendored tree-sitter grammar, its query file, and entries in the declarative
 `extension → { grammar, queries }` table (the "declarative constexpr tables" rule in
-[`CONTRIBUTING.md`](CONTRIBUTING.md)) — open an issue naming the grammar and the repo you'd run it on.
+[`CONTRIBUTING.md`](CONTRIBUTING.md)). Some grammars also need capture filters: Elixir, for example,
+represents definitions as ordinary calls. Open an issue naming the grammar and the repo you'd run it on.
 
 Notebooks, HTML and CSV are indexed as *documents* for `--recall` and the doc↔code edges behind
 `--mentions`; Office and PDF join them through an optional bridge. Markdown graduated from that
 tier: it parses with its own vendored grammar, so its headings are symbols, not just document text.
+
+</details>
 
 ---
 

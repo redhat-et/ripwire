@@ -122,5 +122,27 @@ else
     fi
 fi
 
+# ── #6 (2026-09-08, the std::print floor): --version DISCLOSES which formatted-output emitter this binary
+# compiled in. The house emitter (src/infra/emit.h) is std::print where the standard library has <print>
+# and std::format+fputs where it does not (libstdc++ < 14; libc++ below a macOS 14 deployment target), by
+# feature test, so every toolchain BUILDS — which is exactly why the choice has to be printed: a leg that
+# silently took the fallback would otherwise read as "the floor holds". CI asserts the value per leg
+# (ci.yml/release.yml); this arm asserts only that the disclosure exists and speaks the closed vocabulary.
+# Its control strips the token from a copy of the same line and requires the identical extraction to fail.
+emitToken="$( printf '%s' "$OUT_LONG" | grep -oE 'emit=[^,)]+' | head -1 )"
+case "$emitToken" in
+    "emit=std::print"|"emit=std::format+fputs") ok "--version discloses the emitter it compiled in ($emitToken)";;
+    "") no "--version carries no emit= token — which emitter built this binary is undisclosed: $OUT_LONG";;
+    *)  no "--version's emit= value is outside the closed vocabulary {std::print, std::format+fputs}: $emitToken";;
+esac
+emitMut="$( printf '%s' "$OUT_LONG" | sed -E 's/emit=[^,)]+//' )"
+if [ -n "$emitToken" ] && [ "$emitMut" = "$OUT_LONG" ]; then
+    no "emit= mutation control did not take — the token was found but could not be stripped from a copy"
+elif [ -n "$( printf '%s' "$emitMut" | grep -oE 'emit=[^,)]+' )" ]; then
+    no "emit= mutation control is inert — the token was stripped and the extraction still finds one"
+else
+    ok "emit= mutation control — stripping the token from a copy of the line loses it (the arm can fail)"
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

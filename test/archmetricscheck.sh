@@ -64,12 +64,16 @@ printf 'allow path src/(\\w+)/.* -> src/.*\ndeny path src/(\\w+)/.* -> src/(?!\\
 na="$( arch "$TMP/allow.arch" | grep -o '<v ' | wc -l | tr -d ' ' )"
 [ "$na" = 0 ] && ok "allow rule overrides deny (allow-listed → 0 violations)" || no "allow override failed ($na violations)"
 
-# ── 3) malformed path-regex DEGRADES — rule skipped, no hang, no crash (guarded by alarm in arch()) ───
+# ── 3) malformed path-regex is REFUSED — no hang, no crash, no silently-disarmed rule (alarm-guarded) ───
+# Until 2026-09-06 this arm pinned "degrades: rule skipped, exit 0/2, <arch> emitted" — which is the CI
+# failure mode the stranger audit found: one stray paren kept the rule in pathRules= and turned exit 2 into
+# exit 0 with violations="0". A FROM regex that does not compile now rejects the file like every other
+# malformed line (test/archcheck.sh D9), naming the line, and emits no <arch> a reader could take for a pass.
 printf 'deny path src/(\\w+/.* -> src/[\n' > "$TMP/bad.arch"
-perl -e 'alarm 8; exec @ARGV' "$BIN" "$FIX" --arch="$TMP/bad.arch" --no-cache >"$TMP/bad.out" 2>/dev/null; rc=$?
-{ [ "$rc" = 0 ] || [ "$rc" = 2 ]; } && grep -q '<arch' "$TMP/bad.out" \
-    && ok "malformed path-regex degrades (skipped, no hang/crash, well-formed output, exit $rc)" \
-    || no "malformed path-regex did not degrade cleanly (exit $rc)"
+perl -e 'alarm 8; exec @ARGV' "$BIN" "$FIX" --arch="$TMP/bad.arch" --no-cache >"$TMP/bad.out" 2>"$TMP/bad.err"; rc=$?
+[ "$rc" = 1 ] && [ ! -s "$TMP/bad.out" ] && grep -q 'bad.arch:1' "$TMP/bad.err" \
+    && ok "malformed path-regex is refused (exit 1, line named, no <arch> emitted, no hang/crash)" \
+    || no "malformed path-regex was not refused cleanly (exit $rc, stdout $( wc -c <"$TMP/bad.out" )B, stderr: $( head -c 160 "$TMP/bad.err" ))"
 
 # ── 4) Martin metrics, per module (2dp tolerance) ────────────────────────────────────────────────────
 # §P6.5: core has ZERO types (free functions only) — D would compute to 1.00 (the pathological "every

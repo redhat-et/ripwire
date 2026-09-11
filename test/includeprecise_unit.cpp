@@ -9,6 +9,7 @@
 #include "../src/ingest.h"
 #include "../src/resolve.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -99,6 +100,118 @@ int main( int argc, char** argv )
     check( !has( trans[aH], aH ), "transitive closure: a.h does NOT include itself" );
     check( has( trans[bH], cH ) && !has( trans[bH], aH ),
            "transitive closure: b.h reaches c.h but not a.h (direction respected)" );
+
+    // ── (d2) POSTCONDITION over EVERY closure: sorted ascending, and duplicate-free ──────────────
+    // `trans[f]` is consumed by std::binary_search (rule3IncludeFile), so ASCENDING ORDER is the
+    // contract, not a nicety. Duplicate-freedom is the separate invariant the epoch stamp in the walk
+    // already guarantees — asserted here so that guarantee is checked by a gate rather than assumed by
+    // a reader. Both arms run over every file in the fixture, including the diamond and the cycle below.
+    {
+        bool allSorted = true, allUnique = true;
+        std::size_t worstFile = 0;
+        for( std::size_t f = 0; f < trans.size(); ++f )
+        {
+            if( !std::is_sorted( trans[f].begin(), trans[f].end() ) )
+            {
+                allSorted = false; worstFile = f;
+            }
+            if( std::adjacent_find( trans[f].begin(), trans[f].end() ) != trans[f].end() )
+            {
+                allUnique = false; worstFile = f;
+            }
+        }
+        check( allSorted, "closure postcondition: EVERY trans[f] is sorted ascending (binary_search contract)" );
+        check( allUnique, "closure postcondition: EVERY trans[f] is duplicate-free (epoch-stamp invariant)" );
+        (void)worstFile;
+    }
+
+    // ── (d3) DIAMOND: two distinct paths reach the same file — the duplicate-producing shape ──────
+    // diamond/top.h includes left.h and right.h; BOTH include shared.h. A walk without the epoch stamp
+    // would append shared.h twice. This is the population that makes the uniqueness arm above non-vacuous.
+    {
+        const std::uint32_t top    = fileEndingWith( ing, "includeprecisefix/diamond/top.h" );
+        const std::uint32_t left   = fileEndingWith( ing, "includeprecisefix/diamond/left.h" );
+        const std::uint32_t right  = fileEndingWith( ing, "includeprecisefix/diamond/right.h" );
+        const std::uint32_t shared = fileEndingWith( ing, "includeprecisefix/diamond/shared.h" );
+        check( top < trans.size() && left < trans.size() && right < trans.size() && shared < trans.size(),
+               "diamond fixture located (top/left/right/shared)" );
+        if( top < trans.size() && shared < trans.size() )
+        {
+            const std::size_t sharedCount = std::size_t( std::count( trans[top].begin(), trans[top].end(), NodeId( shared ) ) );
+            check( sharedCount == 1, "diamond: top.h reaches shared.h EXACTLY ONCE despite two distinct paths" );
+            check( has( trans[top], left ) && has( trans[top], right ), "diamond: top.h reaches both left.h and right.h" );
+        }
+    }
+
+    // ── (d4) CYCLE: mutually-including headers terminate, and neither lands in its own set ────────
+    {
+        const std::uint32_t pH = fileEndingWith( ing, "includeprecisefix/cyc/p.h" );
+        const std::uint32_t qH = fileEndingWith( ing, "includeprecisefix/cyc/q.h" );
+        check( pH < trans.size() && qH < trans.size(), "cycle fixture located (cyc/p.h, cyc/q.h)" );
+        if( pH < trans.size() && qH < trans.size() )
+        {
+            check( has( trans[pH], qH ) && has( trans[qH], pH ), "cycle: p.h and q.h each reach the other" );
+            check( !has( trans[pH], pH ) && !has( trans[qH], qH ), "cycle: neither file lands in its OWN closure" );
+        }
+    }
+
+    // ── (d5) LARGE-N arm: closures above the radix threshold, against an INDEPENDENT oracle ───────
+    // THE FIXTURE CANNOT REACH THIS CODE PATH. Every closure above is under ten elements, so a
+    // size-routed sort inside transitiveIncludeSet would take its small-input branch on all of them and
+    // the large-input branch would be gated by nothing at all (CONTRIBUTING.md §2, shape 1: a population
+    // that cannot contain the defect). transitiveIncludeSet is a pure function of `adj`, so this arm
+    // hands it a synthetic 400-node graph directly. The adjacency is a deliberately SCRAMBLED expander
+    // (i*7+13, i*29+5, i*101+61 mod N) so discovery order is nowhere near sorted order — a chain would
+    // arrive pre-sorted and prove nothing about the sort at all. The oracle is an independent
+    // mark-and-sweep reachability, written differently from the code under test.
+    {
+        constexpr std::uint32_t N = 400;
+        std::vector<std::vector<std::uint32_t>> synth( N );
+        for( std::uint32_t i = 0; i < N; ++i )
+        {
+            synth[i] = { ( i * 7 + 13 ) % N, ( i * 29 + 5 ) % N, ( i * 101 + 61 ) % N };
+            std::sort( synth[i].begin(), synth[i].end() );
+            synth[i].erase( std::unique( synth[i].begin(), synth[i].end() ), synth[i].end() );
+        }
+        const auto got = transitiveIncludeSet( synth );
+
+        bool bigEnough = false, matches = true, sortedAll = true, uniqueAll = true;
+        std::size_t maxClosure = 0;
+        for( std::uint32_t s0 = 0; s0 < N; ++s0 )
+        {
+            // independent oracle: iterate-to-fixpoint mark sweep, then materialise ascending by scan.
+            std::vector<char> reach( N, 0 );
+            reach[s0] = 2;                              // 2 = seed (excluded from the answer)
+            bool changed = true;
+            while( changed )
+            {
+                changed = false;
+                for( std::uint32_t v = 0; v < N; ++v )
+                {
+                    if( reach[v] == 0 ) { continue; }
+                    for( std::uint32_t w : synth[v] )
+                    {
+                        if( reach[w] == 0 ) { reach[w] = 1; changed = true; }
+                    }
+                }
+            }
+            std::vector<std::uint32_t> want;
+            for( std::uint32_t v = 0; v < N; ++v ) { if( reach[v] == 1 ) { want.push_back( v ); } }
+
+            const std::vector<NodeId>& have = got[s0];
+            maxClosure = std::max( maxClosure, have.size() );
+            if( have.size() >= 128 ) { bigEnough = true; }
+            if( !std::is_sorted( have.begin(), have.end() ) ) { sortedAll = false; }
+            if( std::adjacent_find( have.begin(), have.end() ) != have.end() ) { uniqueAll = false; }
+            if( have.size() != want.size() ) { matches = false; }
+            else { for( std::size_t k = 0; k < want.size(); ++k ) { if( have[k] != want[k] ) { matches = false; break; } } }
+        }
+        std::printf( "  INFO  synthetic closure max=%zu (radix path needs >=128)\n", maxClosure );
+        check( bigEnough,  "large-N arm is NON-VACUOUS: at least one synthetic closure exceeds the radix threshold" );
+        check( sortedAll,  "large-N: every synthetic closure is sorted ascending" );
+        check( uniqueAll,  "large-N: every synthetic closure is duplicate-free" );
+        check( matches,    "large-N: every synthetic closure equals an INDEPENDENT mark-sweep oracle, element for element" );
+    }
 
     // ── determinism: build the set twice, identical ──────────────────────────────────────────────
     const auto trans2 = transitiveIncludeSet( buildPreciseIncludeAdj( ing ) );

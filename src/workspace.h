@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // workspace.h — multi-root workspaces: N crawl roots → ONE merged symbol graph.
 //
@@ -116,7 +118,7 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
         }
         if( dup )
         {
-            std::fprintf( stderr, "ripwire: duplicate root '%s' ignored (same directory already listed)\n", a.c_str() );
+            rw::emitTo( stderr, "ripwire: duplicate root '{}' ignored (same directory already listed)\n", a.c_str() );
             continue;
         }
         out.push_back( { a, real, std::string() } );
@@ -136,7 +138,7 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
             if( inner.size() > outer.size() && inner.compare( 0, outer.size(), outer ) == 0
                 && inner[ outer.size() ] == '/' )
             {
-                std::fprintf( stderr, "ripwire: nested roots are not allowed: '%s' is inside '%s' — pass disjoint roots "
+                rw::emitTo( stderr, "ripwire: nested roots are not allowed: '{}' is inside '{}' — pass disjoint roots "
                                       "(to focus on a subtree, use --for / DIR-scoped verbs instead)\n",
                               out[j].arg.c_str(), out[i].arg.c_str() );
                 return false;

@@ -2206,27 +2206,27 @@ ripwire: no ./.ripwire_quality_baseline — auto-comparing the working tree vs g
 <no-work note="no divergent work vs merge-base — see --stray-content"/>
 </arm>
 <arm ref="working-tree" base="dd6d9768c" ok="1" changed="142" head_conflicts="0">
-<sym p="NOTES.md" id="12. Open questions needing the owner"/>
-<sym p="NOTES.md" id="13. Open questions worth writing down (no decision needed yet)"/>
-<sym p="NOTES.md" id="9.2 Correction tiers — auto-fix is safe exactly where the target is computable"/>
-<sym p="NOTES.md" id="3.3 The label schema — specificity labels are first-class"/>
-<sym p="NOTES.md" id="3. Corpus layout, pair structure, label schema"/>
-<sym p="NOTES.md" id="5. Pack B — naming (10 pairs), feeding the next pre-registered round"/>
-<sym p="NOTES.md" id="NOTES.md"/>
-<sym p="NOTES.md" id="Execution process (on go-ahead)"/>
-<sym p="NOTES.md" id="1.3 The honest counter-argument, and where it bites"/>
-<sym p="NOTES.md" id="6.3 The twin as `--quality-delta` baseline"/>
-<sym p="NOTES.md" id="5.1 XML (`--metrics`)"/>
-<sym p="NOTES.md" id="3. What each language contributes — and what is deliberately not counted"/>
-<sym p="NOTES.md" id="8c. Local reasoning / colocation — commercial tool survey (VERIFIED 2026-08-05; academic side pending)"/>
-<sym p="NOTES.md" id="Full-audit plan — 2026-08-08 (token-efficiency emphasis)"/>
-<sym p="NOTES.md" id="2. Algorithm — the AST shortcut, and why no CFG is required"/>
-<sym p="NOTES.md" id="4. Comment quality (pairs with existing doc_drift)"/>
-<sym p="NOTES.md" id="7. Steering AI agents (goal 2 evidence)"/>
-<sym p="NOTES.md" id="LOW"/>
-<sym p="NOTES.md" id="5.2 The omission rule — lossless, and more so than `humps`"/>
-<sym p="NOTES.md" id="4.4 The disagreement matrix — this pack&apos;s core report"/>
-<sym p="NOTES.md" id="8c.5 The three capabilities exist PAIRWISE across tools, never together"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
+<sym p="NOTES.md" id="<internal>"/>
 … [127 more display lines; full output is 14585 bytes on 1 raw line(s)]
 `````
 

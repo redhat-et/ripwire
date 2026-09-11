@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // flipimpact.h — `--flags --flip=NAME`, the ONE-GATE BLAST RADIUS (the sequel `--flags` demands).
 //
@@ -65,6 +67,7 @@
 #include "filter.h"             // isTestPath — the shared test partition
 #include "arch.h"               // relForHash
 #include "darkflags.h"          // the gate harvest, reused whole
+#include "docparse.h"           // isProseExtension / lowerExtOf — the shared prose vocabulary
 #include "serialize.h"          // escapeXml
 #include "testmap.h"            // M21(b): TestRunnerIndex / runAttrDisclosed — the ONE run= hint the tests_to_run family shares
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT
@@ -216,11 +219,13 @@ inline bool isCFamilyPath( std::string_view p ) noexcept { return hasAnyExt( p, 
 // The ENV lane cannot use the allowlist above — `getenv` / `os.environ.get` is language-agnostic and the
 // harvest finds it in Python and shell too — so it screens the other way: drop the file types where a gate
 // name is being TALKED ABOUT rather than read (a fenced snippet in a design doc, a committed audit report).
-inline constexpr std::string_view kProseExtTable[] = {
-    ".md", ".markdown", ".mdx", ".txt", ".rst", ".adoc", ".html", ".htm", ".csv", ".tsv", ".ipynb",
-};
-
-inline bool isProsePath( std::string_view p ) noexcept { return hasAnyExt( p, kProseExtTable ); }
+// The shared prose vocabulary (docparse.h), not a private table: this list and the four others like it
+// disagreed about `.org` (here: absent) and about `.pdf`/`.docx` (here: absent, though the index reads
+// them through the markitdown bridge), so the same file could be prose to one lens and code to the next.
+inline bool isProsePath( std::string_view p ) noexcept
+{
+    return docparse::isProseExtension( docparse::lowerExtOf( p ) );
+}
 
 inline bool isCMakePath( std::string_view p ) noexcept
 {
@@ -1054,7 +1059,7 @@ inline std::size_t writeCappedRows( std::FILE* out, const char* moreAttr, const 
     }
     if( seq.size() > shown )
     {
-        std::fprintf( out, "<more %s=\"%zu\"/>", moreAttr, seq.size() - shown );
+        rw::emitTo( out, "<more {}=\"{}\"/>", moreAttr, seq.size() - shown );
     }
     return shown;
 }
@@ -1063,16 +1068,16 @@ inline std::size_t writeCappedRows( std::FILE* out, const char* moreAttr, const 
 template<class Seq, class Row>
 inline void writeCappedList( std::FILE* out, const char* tag, const Seq& seq, std::size_t maxRows, Row&& row )
 {
-    std::fprintf( out, "<%s n=\"%zu\">", tag, seq.size() );
+    rw::emitTo( out, "<{} n=\"{}\">", tag, seq.size() );
     writeCappedRows( out, tag, seq, maxRows, row );
-    std::fprintf( out, "</%s>", tag );
+    rw::emitTo( out, "</{}>", tag );
 }
 
 // The doc comment, the `<flip …>` header attributes, and the four situational rows that qualify them
 // (already-lit / also / parent / capped) plus the family roll-up.
 inline void writeFlipHeader( std::FILE* out, const FlipResult& res, const XmlEscaper& ex )
 {
-    std::fprintf( out, "<!-- ripwire flip: the blast radius of turning ONE gate ON. lights = the code that becomes live: r rows "
+    rw::emitTo( out, "<!-- ripwire flip: the blast radius of turning ONE gate ON. lights = the code that becomes live: r rows "
                        "are #if regions, b rows are C++ branch sites (a gate read as a VALUE through a constexpr bool, via= names "
                        "the binding). hosts = the indexed defs that code sits inside; downstream = what those defs transitively "
                        "CALL (what starts executing); dependents = what transitively calls THEM. tests = test files reaching the "
@@ -1083,7 +1088,7 @@ inline void writeFlipHeader( std::FILE* out, const FlipResult& res, const XmlEsc
                        "C family source only and treats a file declaring its OWN constant of that name as shadowing the gate's, "
                        "but a third header's same named constant (included, not redeclared) would still count. A lit site inside "
                        "no indexed def counts into filescope instead of a host. "
-                       "%s"
+                       "{}"
                        // §B12.5 — the cross-verb UNIT collision, in the same words on each verb that spells it.
                        "UNIT: untested= here counts HOSTS (indexed defs this gate lights that no test reaches). The test gate "
                        "verb spells untested= over impacted SYMBOLS and the seams verb over cross-directory call EDGES, so the "
@@ -1091,9 +1096,9 @@ inline void writeFlipHeader( std::FILE* out, const FlipResult& res, const XmlEsc
                        // M21(b): the run=/run_unknown= rule, from testmap.h's ONE constant.
                        std::string( rw::kRunHintLegendClause ).c_str() );
 
-    std::fprintf( out, "<flip gate=\"%s\" kind=\"%s\" default=\"%s\" dark=\"%d\" runtime=\"%d\" p=\"%s\" l=\"%u\""
-                       " family=\"%zu\" regions=\"%u\" loc=\"%u\" branches=\"%zu\" bindings=\"%zu\""
-                       " hosts=\"%zu\" filescope=\"%u\" downstream=\"%zu\" dependents=\"%zu\" tests=\"%zu\" untested=\"%zu\" files=\"%zu\">",
+    rw::emitTo( out, "<flip gate=\"{}\" kind=\"{}\" default=\"{}\" dark=\"{}\" runtime=\"{}\" p=\"{}\" l=\"{}\""
+                       " family=\"{}\" regions=\"{}\" loc=\"{}\" branches=\"{}\" bindings=\"{}\""
+                       " hosts=\"{}\" filescope=\"{}\" downstream=\"{}\" dependents=\"{}\" tests=\"{}\" untested=\"{}\" files=\"{}\">",
                   ex( res.name ).c_str(), darkflags::gateKindTag( res.kind ), ex( res.def ).c_str(),
                   res.isDark ? 1 : 0, res.isRuntime ? 1 : 0, ex( res.defSite.path ).c_str(), res.defSite.line,
                   res.family.size(), res.totalRegions, res.totalLines, res.branches.size(), res.bindings.size(),
@@ -1103,26 +1108,26 @@ inline void writeFlipHeader( std::FILE* out, const FlipResult& res, const XmlEsc
     // the contradiction row: this gate is ALREADY lit by the winning declaration, and dark only in the other
     if( !res.isDark )
     {
-        std::fprintf( out, "<already-lit note=\"the winning default already builds this code; the radius below is what the other declaration keeps dark\"/>" );
+        rw::emitRaw( out, "<already-lit note=\"the winning default already builds this code; the radius below is what the other declaration keeps dark\"/>" );
     }
     if( res.hasAlso )
     {
-        std::fprintf( out, "<also kind=\"%s\" default=\"%s\" p=\"%s\" l=\"%u\"/>",
+        rw::emitTo( out, "<also kind=\"{}\" default=\"{}\" p=\"{}\" l=\"{}\"/>",
                       darkflags::gateKindTag( res.alsoKind ), ex( res.alsoDef ).c_str(),
                       ex( res.alsoSite.path ).c_str(), res.alsoSite.line );
     }
     if( !res.parent.empty() )
     {
-        std::fprintf( out, "<parent name=\"%s\" siblings=\"%u\"/>", ex( res.parent ).c_str(), res.siblingCount );
+        rw::emitTo( out, "<parent name=\"{}\" siblings=\"{}\"/>", ex( res.parent ).c_str(), res.siblingCount );
     }
     if( res.familyCapped )
     {
-        std::fprintf( out, "<capped what=\"family\" at=\"%zu\"/>", kMaxFamily );
+        rw::emitTo( out, "<capped what=\"family\" at=\"{}\"/>", kMaxFamily );
     }
 
     for( const FamilyMember& m : res.family )
     {
-        std::fprintf( out, "<member name=\"%s\" via=\"%s\" regions=\"%u\" loc=\"%u\" branches=\"%u\"/>",
+        rw::emitTo( out, "<member name=\"{}\" via=\"{}\" regions=\"{}\" loc=\"{}\" branches=\"{}\"/>",
                       ex( m.name ).c_str(), m.isSelf ? "self" : "alias", m.regions, m.lines, m.branches );
     }
 }
@@ -1131,19 +1136,19 @@ inline void writeFlipHeader( std::FILE* out, const FlipResult& res, const XmlEsc
 inline void writeFlipLights( std::FILE* out, const FlipResult& res, const IngestResult& ing,
                              const XmlEscaper& ex, std::size_t maxRows )
 {
-    std::fprintf( out, "<lights r=\"%zu\" b=\"%zu\">", res.regions.size(), res.branches.size() );
+    rw::emitTo( out, "<lights r=\"{}\" b=\"{}\">", res.regions.size(), res.branches.size() );
     writeCappedRows( out, "r", res.regions, maxRows, [ & ]( const LitRegion& r )
     {
-        std::fprintf( out, "<r p=\"%s\" l=\"%u\" lines=\"%u\" gate=\"%s\" syms=\"%u\"/>",
+        rw::emitTo( out, "<r p=\"{}\" l=\"{}\" lines=\"{}\" gate=\"{}\" syms=\"{}\"/>",
                       ex( r.path ).c_str(), r.line, r.lines, ex( r.gate ).c_str(), r.hostCount );
     } );
     writeCappedRows( out, "b", res.branches, maxRows, [ & ]( const LitBranch& b )
     {
-        std::fprintf( out, "<b p=\"%s\" l=\"%u\" gate=\"%s\" via=\"%s\" sym=\"%s\"/>",
+        rw::emitTo( out, "<b p=\"{}\" l=\"{}\" gate=\"{}\" via=\"{}\" sym=\"{}\"/>",
                       ex( b.path ).c_str(), b.line, ex( b.gate ).c_str(), ex( b.via ).c_str(),
                       b.host == kNoNode ? "" : ex( ing.symbols[ b.host ].name ).c_str() );
     } );
-    std::fprintf( out, "</lights>" );
+    rw::emitRaw( out, "</lights>" );
 }
 
 inline void writeFlip( std::FILE* out, const FlipResult& res, const IngestResult& ing,
@@ -1159,20 +1164,20 @@ inline void writeFlip( std::FILE* out, const FlipResult& res, const IngestResult
 
     for( const ValueBinding& b : res.bindings )
     {
-        std::fprintf( out, "<bind name=\"%s\" gate=\"%s\" p=\"%s\" l=\"%u\" uses=\"%u\"/>",
+        rw::emitTo( out, "<bind name=\"{}\" gate=\"{}\" p=\"{}\" l=\"{}\" uses=\"{}\"/>",
                       ex( b.name ).c_str(), ex( b.gate ).c_str(), ex( b.path ).c_str(), b.line, b.uses );
     }
 
     writeCappedList( out, "hosts", res.hosts, maxRows, [ & ]( NodeId h )
     {
         const Symbol& s = ing.symbols[h];
-        std::fprintf( out, "<h sym=\"%s\" p=\"%s\" l=\"%u\" ccx=\"%u\" tested=\"%d\"/>",
+        rw::emitTo( out, "<h sym=\"{}\" p=\"{}\" l=\"{}\" ccx=\"{}\" tested=\"{}\"/>",
                       ex( qualifiedName( s ) ).c_str(), ex( rel( s.fileId ) ).c_str(), s.line, s.ccx, isTested( h ) ? 1 : 0 );
     } );
     writeCappedList( out, "downstream", res.downstream, maxRows, [ & ]( NodeId d )
     {
         const Symbol& s = ing.symbols[d];
-        std::fprintf( out, "<d sym=\"%s\" p=\"%s\" ccx=\"%u\"/>",
+        rw::emitTo( out, "<d sym=\"{}\" p=\"{}\" ccx=\"{}\"/>",
                       ex( qualifiedName( s ) ).c_str(), ex( rel( s.fileId ) ).c_str(), s.ccx );
     } );
     // M21(b) (capture-audit 2026-09-04): this <t> listing is a tests_to_run row family like every other,
@@ -1182,27 +1187,27 @@ inline void writeFlip( std::FILE* out, const FlipResult& res, const IngestResult
     const rw::TestRunnerIndex flipRunners( ing );
     writeCappedList( out, "tests", res.tests, maxRows, [ & ]( std::uint32_t f )
     {
-        std::fprintf( out, "<t p=\"%s\"%s/>", ex( rel( f ) ).c_str(), rw::runAttrDisclosed( flipRunners, f, ex ).c_str() );
+        rw::emitTo( out, "<t p=\"{}\"{}/>", ex( rel( f ) ).c_str(), rw::runAttrDisclosed( flipRunners, f, ex ).c_str() );
     } );
     writeCappedList( out, "untested", res.untested, maxRows, [ & ]( NodeId u )
     {
         const Symbol& s = ing.symbols[u];
-        std::fprintf( out, "<u sym=\"%s\" p=\"%s\" l=\"%u\" ccx=\"%u\"/>",
+        rw::emitTo( out, "<u sym=\"{}\" p=\"{}\" l=\"{}\" ccx=\"{}\"/>",
                       ex( qualifiedName( s ) ).c_str(), ex( rel( s.fileId ) ).c_str(), s.line, s.ccx );
     } );
 
     if( !res.buildSites.empty() )
     {
-        std::fprintf( out, "<build n=\"%zu\" note=\"CMake read sites: a switch here can add whole translation units or link targets, which this verb does NOT follow\">",
+        rw::emitTo( out, "<build n=\"{}\" note=\"CMake read sites: a switch here can add whole translation units or link targets, which this verb does NOT follow\">",
                       res.buildSites.size() );
         writeCappedRows( out, "build", res.buildSites, maxRows, [ & ]( const darkflags::Site& s )
         {
-            std::fprintf( out, "<c p=\"%s\" l=\"%u\"/>", ex( s.path ).c_str(), s.line );
+            rw::emitTo( out, "<c p=\"{}\" l=\"{}\"/>", ex( s.path ).c_str(), s.line );
         } );
-        std::fprintf( out, "</build>" );
+        rw::emitRaw( out, "</build>" );
     }
 
-    std::fprintf( out, "</flip>" );
+    rw::emitRaw( out, "</flip>" );
 }
 
 }}   // namespace rw::flipimpact

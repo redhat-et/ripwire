@@ -31,7 +31,7 @@ def extract_flags_from_help(binary_path=None, help_text=None):
     if help_text is None:
         try:
             result = subprocess.run(
-                [binary_path, "--help"],
+                [binary_path, "--help=all"],
                 capture_output=True,
                 text=True,
                 timeout=30

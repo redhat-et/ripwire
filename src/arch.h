@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // arch.h — architectural fitness functions (layering rules) for --arch.
 // The rules are the USER's, declared in a small text file; ripwire imposes no architecture of its own —
@@ -349,7 +352,7 @@ inline ArchRules parseArchRules( const std::string& path )
     // mirroring parseLintRuleFile's badLine/"file skipped" contract exactly.
     const auto badLine = [ & ]( std::size_t lineNo, const char* why ) -> bool
     {
-        std::fprintf( stderr, "ripwire: --arch: %s:%zu: %s — rules file rejected\n", path.c_str(), lineNo, why );
+        rw::emitTo( stderr, "ripwire: --arch: {}:{}: {} — rules file rejected\n", path.c_str(), lineNo, why );
         DEGRADED_PATH_ALERT( "arch: malformed rules line — rules file rejected" );
         return false;
     };
@@ -405,7 +408,14 @@ inline ArchRules parseArchRules( const std::string& path )
                 // so it stays a soft degrade rather than rejecting the whole file. The TO regex is compiled
                 // per-edge after backref substitution (so it is validated there too).
                 try { pr.fromRe = std::regex( fromRe, std::regex::ECMAScript ); }
-                catch( const std::regex_error& ) { pr.bad = true; DEGRADED_PATH_ALERT( "arch: malformed FROM path-regex — rule skipped" ); }
+                catch( const std::regex_error& )
+                {
+                    // 2026-09-06 stranger audit: this used to keep the rule (pathRules= counted it) and skip it,
+                    // so one stray paren turned a CI gate's exit 2 into exit 0 with violations="0". Same D9
+                    // discipline as every other malformed line: refuse the whole file, name the line.
+                    ok = badLine( lineNo, "FROM path-regex does not compile as ECMAScript — check parentheses and escapes (want e.g.: deny path src/a\\.cpp -> src/b\\.cpp)" );
+                    break;
+                }
                 r.pathRules.push_back( std::move( pr ) );
             }
             else                                               // layer-name rule: `allow|deny FROM -> TO`
@@ -676,10 +686,10 @@ inline bool archWriteBaseline( const std::string&                         sideca
     {
         return false;
     }
-    std::fprintf( f, "# ripwire arch baseline — do not edit by hand. Regenerate with --baseline or --baseline-update.\n" );
+    rw::emitRaw( f, "# ripwire arch baseline — do not edit by hand. Regenerate with --baseline or --baseline-update.\n" );
     for( std::uint64_t h : sorted )
     {
-        std::fprintf( f, "%016llx\n", static_cast<unsigned long long>( h ) );
+        rw::emitTo( f, "{:016x}\n", static_cast<unsigned long long>( h ) );
     }
     std::fclose( f );
     return true;

@@ -52,6 +52,14 @@
 #       legend must still state the count is exact.
 #   (D) also sweeps the JSON spellings ("hits_capped":/"findings_capped":/"tier_budget":) and the two new XML
 #       markers, so an MCP twin can no longer emit a cap marker without the floor.
+#   (I) run-vs-feature (2026-09-10): every arm above decides its verdict by reading an attribute out of a
+#       file, so a command that DIES leaves the attribute missing for a reason that has nothing to do with
+#       the feature. On 2026-09-09 arm (F) went red on one macOS CI shard with "tier_budget= did not fire
+#       ... ()" — the empty parens were the whole story, the grep never returned a document — and two
+#       engineers read the sentence, believed it about WHICH thing failed, and spent an evening falsifying
+#       hypotheses about tier classification. Every $BIN call in this file now goes through runBin (rc and
+#       stderr kept), every guard appends whyEmpty, and (I) proves that suffix discriminates: a dead run
+#       names its rc and first stderr line, a clean run adds nothing, an unconverted call site says so.
 #
 # RED-FIRST: against the audited binary (A) and (B) fail on all three shapes and (C) fails the select arm;
 # (D) fails on every emitter. (F)/(G) are RED on e3b52d3+wave-1 (tier_budget without a floor on --regex='e\w+'
@@ -74,6 +82,60 @@ echo "collectioncapcheck: BIN=$BIN"
 # rootOf FILE — the first start-tag AFTER the leading legend comments (never a legend's worded example).
 rootOf(){ perl -0pe 's#<!--.*?-->##gs' "$1" | grep -oE '<[a-zA-Z][a-zA-Z_-]*( [^>]*)?>' | head -1; }
 attr(){ printf '%s' "$1" | sed -nE "s/.* $2=\"([^\"]*)\".*/\1/p"; }
+
+# runBin OUT ARGS... — run $BIN keeping its exit code and stderr beside OUT, so that a failed RUN can
+# never be reported as a failed FEATURE.
+#
+# Every arm below decides its verdict by reading an attribute out of OUT. When the command dies, OUT is
+# empty, the attribute is missing, and a presence guard says "X did not fire" — naming a cause it has
+# not established. That is not hypothetical: on 2026-09-09 arm (F) went red on one macOS CI shard with
+#
+#     FAIL (F) presence guard — tier_budget= did not fire on --regex='e\w+' over this repo; ... ()
+#
+# The empty parens were the whole story — $GT held no root, so the grep never returned a document and
+# the tier logic was never reached. Two engineers instead read the sentence, believed the arm about
+# WHICH thing failed, and spent the evening falsifying two hypotheses about tier classification. The
+# stderr line that would have named the real cause had gone to /dev/null.
+runBin(){ local out="$1"; shift; "$BIN" "$@" >"$out" 2>"$out.err"; printf '%s' "$?" >"$out.rc"; }
+
+# whyEmpty OUT — a suffix naming WHY the output is unusable, or empty when the run was clean.
+# Append it to any verdict derived from OUT: a clean run that simply did not exercise the feature adds
+# nothing, so honest arms read exactly as before, and anything else stops the message short of blaming
+# the feature. Four distinguishable states, because "the run failed" is not one thing:
+#
+#   rc missing   the call site still uses a bare $BIN — say so, or a half-converted file looks covered
+#   rc > 128     KILLED by signal rc-128. This is the state a CI runner produces under memory pressure
+#                or a harness timeout, and it is the one most likely to be misread as a feature result,
+#                because the process never got to write a diagnostic of its own.
+#   rc != 0      the binary refused or errored and its own stderr says why — quote the first line
+#   rc == 0 but  the run SUCCEEDED and wrote nothing. Distinct from every case above and the most
+#   OUT empty    confusing to meet cold, so it gets its own sentence rather than falling through to
+#                "the feature did not fire", which is what it would otherwise be reported as.
+whyEmpty(){
+    local rc sig signame; rc="$( cat "$1.rc" 2>/dev/null )"
+    if [ -z "$rc" ]; then
+        printf ' — NOTE: this arm did not record the run rc (still a bare $BIN call), so a dead run here would read as a feature failure'
+        return 0
+    fi
+    if [ "$rc" -gt 128 ] 2>/dev/null; then
+        sig=$(( rc - 128 ))
+        case "$sig" in
+            9)  signame=' (SIGKILL — on a CI runner usually the OOM killer or a harness timeout)' ;;
+            15) signame=' (SIGTERM)' ;;
+            6)  signame=' (SIGABRT)' ;;
+            11) signame=' (SIGSEGV)' ;;
+            *)  signame='' ;;
+        esac
+        printf ' — THE RUN WAS KILLED by signal %s%s, so this arm establishes NOTHING about the feature' "$sig" "$signame"
+        return 0
+    fi
+    if [ "$rc" != "0" ]; then
+        printf ' — THE RUN ITSELF FAILED (rc=%s), so this arm establishes NOTHING about the feature; stderr[1]: %s' \
+            "$rc" "$( head -1 "$1.err" 2>/dev/null | cut -c1-160 )"
+        return 0
+    fi
+    [ -s "$1" ] || printf ' — THE RUN EXITED 0 AND WROTE NOTHING, which is a silent-empty-output bug in its own right, not this feature failing'
+}
 
 # capFloor LABEL ROOT MARKER — rule (i) on one root element whose rule-4 MARKER fired.
 capFloor(){
@@ -98,14 +160,14 @@ capFloor(){
 
 echo
 echo "=== (A) --match: the engine hit cap (kMatchMaxHits) presented honestly ==="
-"$BIN" . --match='(call_expression)' >"$TMP/match_bare.xml" 2>/dev/null
-"$BIN" . --match='(call_expression)' --limit=99999999 >"$TMP/match_all.xml" 2>/dev/null
-"$BIN" . --match='(call_expression)' --limit=3 --offset=3 >"$TMP/match_page.xml" 2>/dev/null
+runBin "$TMP/match_bare.xml" . --match='(call_expression)'
+runBin "$TMP/match_all.xml" . --match='(call_expression)' --limit=99999999
+runBin "$TMP/match_page.xml" . --match='(call_expression)' --limit=3 --offset=3
 capFloor "(A) match bare"           "$( rootOf "$TMP/match_bare.xml" )" hits_capped
 capFloor "(A) match --limit=99999999" "$( rootOf "$TMP/match_all.xml" )"  hits_capped
 capFloor "(A) match --limit=3 --offset=3" "$( rootOf "$TMP/match_page.xml" )" hits_capped
 # and the un-capped control: a query well under the engine cap says hits_capped="0" and carries NO floor.
-"$BIN" . --match='(namespace_definition)' >"$TMP/match_small.xml" 2>/dev/null
+runBin "$TMP/match_small.xml" . --match='(namespace_definition)'
 SMALL="$( rootOf "$TMP/match_small.xml" )"
 if [ "$( attr "$SMALL" hits_capped )" = "0" ]; then
     case "$SMALL" in
@@ -118,9 +180,9 @@ fi
 
 echo
 echo "=== (B) --lint: a rule's per-rule match budget (findings_capped) presented honestly ==="
-"$BIN" . --lint >"$TMP/lint_bare.xml" 2>/dev/null
-"$BIN" . --lint --limit=99999999 >"$TMP/lint_all.xml" 2>/dev/null
-"$BIN" . --lint --limit=3 --offset=3 >"$TMP/lint_page.xml" 2>/dev/null
+runBin "$TMP/lint_bare.xml" . --lint
+runBin "$TMP/lint_all.xml" . --lint --limit=99999999
+runBin "$TMP/lint_page.xml" . --lint --limit=3 --offset=3
 capFloor "(B) lint bare"              "$( rootOf "$TMP/lint_bare.xml" )" findings_capped
 capFloor "(B) lint --limit=99999999"  "$( rootOf "$TMP/lint_all.xml" )"  findings_capped
 capFloor "(B) lint --limit=3 --offset=3" "$( rootOf "$TMP/lint_page.xml" )" findings_capped
@@ -130,7 +192,7 @@ echo "=== (C) root findings_capped == OR(emitted <rule count_capped=>) after sel
 # The capped rule on this corpus, read off the plain run (never hard-coded: the corpus decides).
 CAPPED_RULE="$( grep -oE '<rule name="[^"]+"[^>]* count_capped="1"' "$TMP/lint_bare.xml" | head -1 | sed -E 's/<rule name="([^"]+)".*/\1/' )"
 if [ -z "$CAPPED_RULE" ]; then
-    no "(C) presence guard — no <rule> row carries count_capped=\"1\" on this corpus; the OR property cannot be exercised"
+    no "(C) presence guard — no <rule> row carries count_capped=\"1\" on this corpus; the OR property cannot be exercised$( whyEmpty "$TMP/lint_bare.xml" )"
 else
     ok "(C) presence guard — '$CAPPED_RULE' saturates its per-rule budget on this corpus"
 fi
@@ -161,21 +223,21 @@ if [ -n "$CAPPED_RULE" ]; then
     # a select that DROPS the capped rule (prefix 'cache-' keeps the cache pack; the capped rule is not one of them)
     SELECT_PREFIX="cache-"
     case "$CAPPED_RULE" in cache-*) SELECT_PREFIX="atom-";; esac
-    "$BIN" . --lint --lint-select="$SELECT_PREFIX" >"$TMP/lint_select.xml" 2>/dev/null
+    runBin "$TMP/lint_select.xml" . --lint --lint-select="$SELECT_PREFIX"
     grep -qE "<rule name=\"$CAPPED_RULE\"" "$TMP/lint_select.xml" \
         && no "(C) select presence guard — --lint-select=$SELECT_PREFIX still prints the capped rule '$CAPPED_RULE'" \
         || ok "(C) select presence guard — --lint-select=$SELECT_PREFIX drops '$CAPPED_RULE'"
     orProperty "(C) --lint-select=$SELECT_PREFIX" "$TMP/lint_select.xml"
-    "$BIN" . --lint --lint-ignore="$CAPPED_RULE" >"$TMP/lint_ignore.xml" 2>/dev/null
+    runBin "$TMP/lint_ignore.xml" . --lint --lint-ignore="$CAPPED_RULE"
     orProperty "(C) --lint-ignore=$CAPPED_RULE" "$TMP/lint_ignore.xml"
     # a select that KEEPS the capped rule must keep the flag (the OR must not have become "always 0")
-    "$BIN" . --lint --lint-select="$CAPPED_RULE" >"$TMP/lint_keep.xml" 2>/dev/null
+    runBin "$TMP/lint_keep.xml" . --lint --lint-select="$CAPPED_RULE"
     orProperty "(C) --lint-select=$CAPPED_RULE" "$TMP/lint_keep.xml"
     [ "$( attr "$( rootOf "$TMP/lint_keep.xml" )" findings_capped )" = "1" ] \
         && ok "(C) selecting the capped rule alone keeps findings_capped=\"1\" (the OR is live, not a constant 0)" \
         || no "(C) selecting the capped rule alone LOST findings_capped=\"1\""
     # the SARIF twin under the same select agrees with the XML root
-    "$BIN" . --lint --lint-select="$SELECT_PREFIX" --sarif >"$TMP/lint_select.sarif" 2>/dev/null
+    runBin "$TMP/lint_select.sarif" . --lint --lint-select="$SELECT_PREFIX" --sarif
     python3 - "$TMP/lint_select.sarif" <<'PY' && ok "(C) SARIF twin under --lint-select=$SELECT_PREFIX: run-level findingsCapped is false (agrees with the XML root)" \
                                              || no "(C) SARIF twin under --lint-select=$SELECT_PREFIX still says findingsCapped:true (inherited from the dropped rule)"
 import json, sys
@@ -234,10 +296,10 @@ printf '<lint findings="3" findings_capped="1"><rule name="a" count="3" count_ca
 
 echo
 echo "=== (F) tier_budget= — a partial span-tier classification floors the root (CLI + MCP), rows still whole ==="
-"$BIN" . --regex='e\w+' --no-cache >"$TMP/grep_tier.xml" 2>/dev/null
+runBin "$TMP/grep_tier.xml" . --regex='e\w+' --no-cache
 GT="$( rootOf "$TMP/grep_tier.xml" )"
 if [ -z "$( attr "$GT" tier_budget )" ]; then
-    no "(F) presence guard — tier_budget= did not fire on --regex='e\\w+' over this repo; the arm asserts nothing ($GT)"
+    no "(F) presence guard — tier_budget= did not fire on --regex='e\\w+' over this repo; the arm asserts nothing ($GT)$( whyEmpty "$TMP/grep_tier.xml" )"
 else
     ok "(F) presence guard — tier_budget=\"$( attr "$GT" tier_budget )\" fired on --regex='e\\w+'"
     [ "$( attr "$GT" counts_floor )" = "1" ] \
@@ -248,7 +310,7 @@ else
         || no "(F) counts_floor= is spelled more than once on the root: $GT"
 fi
 # control: a small literal grep — no tier_budget, hits_capped="0" — carries no floor
-"$BIN" . --grep=kGraphCountFloorAttrXml --no-cache >"$TMP/grep_small.xml" 2>/dev/null
+runBin "$TMP/grep_small.xml" . --grep=kGraphCountFloorAttrXml --no-cache
 GS="$( rootOf "$TMP/grep_small.xml" )"
 if [ -z "$( attr "$GS" tier_budget )" ] && [ "$( attr "$GS" hits_capped )" = "0" ]; then
     case "$GS" in
@@ -256,7 +318,7 @@ if [ -z "$( attr "$GS" tier_budget )" ] && [ "$( attr "$GS" hits_capped )" = "0"
         *)                    ok "(F) control: no tier_budget=, hits_capped=\"0\" ⇒ no counts_floor= on the root" ;;
     esac
 else
-    no "(F) control: --grep=kGraphCountFloorAttrXml tripped a cap on this corpus — pick a rarer literal: $GS"
+    no "(F) control: --grep=kGraphCountFloorAttrXml tripped a cap on this corpus — pick a rarer literal: $GS$( whyEmpty "$TMP/grep_small.xml" )"
 fi
 # the MCP twin: the same two shapes, and the key spelled ONCE (a floor beside hits_capped must not double up)
 python3 - "$BIN" >"$TMP/mcp_tier.out" 2>&1 <<'PY'
@@ -297,7 +359,7 @@ echo "=== (G) defs_capped= — a name with more definitions than defs_per_name_c
 FIX9="$TMP/defs9"; mkdir -p "$FIX9"
 for i in 1 2 3 4 5 6 7 8 9; do printf 'int dup( int x ) { return x + %d; }\n' "$i" >"$FIX9/dup$i.cpp"; done
 printf 'int dup( int x );\nint use() { return dup( 1 ); }\n' >"$FIX9/use.cpp"
-"$BIN" "$FIX9" --context-ratio --no-cache >"$TMP/cr9.xml" 2>/dev/null
+runBin "$TMP/cr9.xml" "$FIX9" --context-ratio --no-cache
 CR9="$( rootOf "$TMP/cr9.xml" )"
 CAPV="$( attr "$CR9" defs_per_name_cap )"
 [ -n "$CAPV" ] && [ "$CAPV" -lt 9 ] 2>/dev/null \
@@ -316,7 +378,7 @@ perl -0pe 's#-->#-->\n#g' "$TMP/cr9.xml" | grep -q 'defs_capped=' \
 FIX2="$TMP/defs2"; mkdir -p "$FIX2"
 for i in 1 2; do printf 'int dup( int x ) { return x + %d; }\n' "$i" >"$FIX2/dup$i.cpp"; done
 printf 'int dup( int x );\nint use() { return dup( 1 ); }\n' >"$FIX2/use.cpp"
-"$BIN" "$FIX2" --context-ratio --no-cache >"$TMP/cr2.xml" 2>/dev/null
+runBin "$TMP/cr2.xml" "$FIX2" --context-ratio --no-cache
 CR2="$( rootOf "$TMP/cr2.xml" )"
 case "$CR2" in
     *defs_capped=*|*'counts_floor="1"'*) no "(G) control: 2 definitions under the cap and the root carries a fired marker or a floor: $CR2" ;;
@@ -325,10 +387,10 @@ esac
 
 echo
 echo "=== (H) rows_capped= is a SAMPLE over EXACT counts — never counts_floor (the control the enumeration needed) ==="
-"$BIN" . --lint --limit=3 --no-cache >"$TMP/lint_rows.xml" 2>/dev/null
+runBin "$TMP/lint_rows.xml" . --lint --limit=3 --no-cache
 RC_ROWS="$( grep -oE '<rule [^>]*rows_capped="1"[^>]*/>' "$TMP/lint_rows.xml" | wc -l | tr -d ' ' )"
 if [ "$RC_ROWS" = "0" ]; then
-    no "(H) presence guard — no <rule> row carries rows_capped=\"1\" under --lint --limit=3 on this repo"
+    no "(H) presence guard — no <rule> row carries rows_capped=\"1\" under --lint --limit=3 on this repo$( whyEmpty "$TMP/lint_rows.xml" )"
 else
     ok "(H) presence guard — $RC_ROWS <rule> row(s) carry rows_capped=\"1\" under --limit=3"
     [ "$( grep -oE '<rule [^>]*rows_capped="1"[^>]*/>' "$TMP/lint_rows.xml" | grep -c 'counts_floor' )" = "0" ] \
@@ -344,10 +406,10 @@ printf 'int a() { return 1; }\n' >"$FIXR/a.cpp"
 python3 -c 'import sys,os
 d=sys.argv[1]
 for i in range(501): open(os.path.join(d,"blob%03d.zzz"%i),"w").write("x\n")' "$FIXR"
-"$BIN" "$FIXR" --skipped --no-cache >"$TMP/rep501.md" 2>/dev/null
+runBin "$TMP/rep501.md" "$FIXR" --skipped --no-cache
 REL="$( grep -oE '<[a-zA-Z_-]+ [^>]*rows_capped="1"[^>]*>' "$TMP/rep501.md" | head -1 )"
 if [ -z "$REL" ]; then
-    no "(H) presence guard — --skipped on 501 unsupported files carries no rows_capped=\"1\" element ($( grep -oE 'unsupported="[0-9]+"' "$TMP/rep501.md" | head -1 ))"
+    no "(H) presence guard — --skipped on 501 unsupported files carries no rows_capped=\"1\" element ($( grep -oE 'unsupported="[0-9]+"' "$TMP/rep501.md" | head -1 ))$( whyEmpty "$TMP/rep501.md" )"
 else
     ok "(H) presence guard — the --skipped root carries rows_capped=\"1\" on 501 unsupported files"
     case "$REL" in
@@ -368,6 +430,78 @@ if command -v xmllint >/dev/null 2>&1; then
     done
 else
     no "(G4) xmllint is NOT INSTALLED — the arm could not run"
+fi
+
+# ── (I) run-vs-feature: a verdict derived from a DEAD run must not name the feature ──────────────────
+#
+# The arm the 2026-09-09 macOS shard needed and did not have. Every guard above reads an attribute out
+# of a file; when the command that wrote it dies, the attribute is missing for a reason that has nothing
+# to do with the feature under test. The guards now append whyEmpty; this proves that suffix actually
+# discriminates instead of being decoration.
+echo
+echo "=== (I) a verdict from a DEAD run names the run, not the feature ==="
+: >"$TMP/i_dead.xml"; printf '3' >"$TMP/i_dead.xml.rc"; printf 'ripwire: could not open index\nsecond line\n' >"$TMP/i_dead.xml.err"
+: >"$TMP/i_live.xml"; printf '0' >"$TMP/i_live.xml.rc"; : >"$TMP/i_live.xml.err"
+: >"$TMP/i_kill.xml"; printf '137' >"$TMP/i_kill.xml.rc"; : >"$TMP/i_kill.xml.err"
+printf '<grep/>' >"$TMP/i_ok.xml"; printf '0' >"$TMP/i_ok.xml.rc"; : >"$TMP/i_ok.xml.err"
+: >"$TMP/i_silent.xml"; printf '0' >"$TMP/i_silent.xml.rc"; : >"$TMP/i_silent.xml.err"
+deadMsg="$( whyEmpty "$TMP/i_dead.xml" )"
+killMsg="$( whyEmpty "$TMP/i_kill.xml" )"
+okMsg="$( whyEmpty "$TMP/i_ok.xml" )"
+silentMsg="$( whyEmpty "$TMP/i_silent.xml" )"
+unrecMsg="$( whyEmpty "$TMP/i_never_ran.xml" )"
+
+case "$deadMsg" in
+    *"THE RUN ITSELF FAILED (rc=3)"*"could not open index"*)
+        ok "(I) a refusal is named with its rc AND its first stderr line, so the verdict cannot be read as a feature failure" ;;
+    *)  no "(I) a refusal produced no diagnostic naming rc and stderr: [$deadMsg]" ;;
+esac
+case "$deadMsg" in
+    *'second line'*) no "(I) whyEmpty spilled the whole stderr — one line is the contract, a wall of text gets skipped rather than read: [$deadMsg]" ;;
+    *)               ok "(I) only the FIRST stderr line is quoted, so the diagnostic stays readable" ;;
+esac
+# A KILLED run is the CI case: the process never reached its own error path, so there is no stderr to
+# quote and rc is the only evidence there is. Reporting it as a plain non-zero exit would send the next
+# reader looking for a ripwire message that was never written.
+case "$killMsg" in
+    *"KILLED by signal 9"*"OOM killer"*) ok "(I) a killed run is named by SIGNAL, with the reading a CI runner actually needs (137 is not an exit code)" ;;
+    *)                                   no "(I) rc=137 was not decoded as a signal — the next reader hunts for a stderr line that cannot exist: [$killMsg]" ;;
+esac
+# The arm above matches SUBSTRINGS, and the first draft of whyEmpty passed it while emitting raw shell
+# source: a nested case-inside-printf leaked `printf ' (SIGKILL ...)';;` verbatim, which contains both
+# substrings and so satisfied the assertion without ever producing a sentence. Shape matched where a
+# value was meant, in the arm written to catch exactly that. So: no diagnostic may carry shell syntax.
+for m in "$deadMsg" "$killMsg" "$silentMsg" "$unrecMsg"; do
+    case "$m" in
+        *";;"*|*"printf "*|*'$( '*|*"esac"*)
+            no "(I) a diagnostic leaked SHELL SOURCE instead of prose — a substring assertion would still pass on it: [$m]" ;;
+    esac
+done
+ok "(I) no diagnostic carries shell syntax (;; printf esac \$( ) — the messages are sentences, not source"
+# Exited 0 and wrote nothing: currently indistinguishable from "the feature did not fire", and the more
+# alarming of the two, so it must not be silent.
+case "$silentMsg" in
+    *"EXITED 0 AND WROTE NOTHING"*) ok "(I) a silent-empty success is called out as its own bug rather than blamed on the feature" ;;
+    *)                              no "(I) a run that exited 0 and wrote nothing added no diagnostic: [$silentMsg]" ;;
+esac
+# The negative control is the load-bearing half: a clean run WITH output must add NOTHING, or every
+# honest arm in this file grows a spurious suffix and the signal is worth nothing.
+if [ -z "$okMsg" ]; then
+    ok "(I) control: a clean run that produced output adds nothing, so honest verdicts are unchanged"
+else
+    no "(I) control: a CLEAN run still appended a diagnostic — every arm would carry noise: [$okMsg]"
+fi
+case "$unrecMsg" in
+    *"did not record the run rc"*) ok "(I) an unconverted call site says so, so a half-converted file cannot look fully covered" ;;
+    *)                             no "(I) a call site with no recorded rc was treated as clean: [$unrecMsg]" ;;
+esac
+# The discrimination that matters: all four unusable states must differ from the clean one AND from
+# each other. Identical text for two different causes is the entire defect this arm exists for.
+if [ "$deadMsg" != "$okMsg" ] && [ "$killMsg" != "$okMsg" ] && [ "$silentMsg" != "$okMsg" ] \
+   && [ "$deadMsg" != "$killMsg" ] && [ "$deadMsg" != "$silentMsg" ] && [ "$killMsg" != "$silentMsg" ]; then
+    ok "(I) refusal, kill, silent-empty and clean all yield DIFFERENT text — the defect was that the first three were indistinguishable from the last"
+else
+    no "(I) two distinct causes still yield identical text — the arm proves nothing: refusal=[$deadMsg] kill=[$killMsg] silent=[$silentMsg] clean=[$okMsg]"
 fi
 
 echo

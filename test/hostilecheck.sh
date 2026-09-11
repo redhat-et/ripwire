@@ -298,6 +298,25 @@ else
     no "source: git clone invocation missing the A3-F15 hardening (protocol allow-list / '--')"
 fi
 
+# ─── unreadable root (2026-09-06 stranger audit) ─────────────────────────────────────────────────
+# A root that EXISTS but cannot be opened (chmod 000, another user's checkout) came back as an empty map at
+# exit 0 — indistinguishable from "no source here". It is refused now, with the reason, like a missing root.
+if [ "$( id -u )" = "0" ]; then
+    echo "  SKIP  unreadable root: running as root, chmod 000 does not block reads"
+else
+    UNREADROOT="$TMP/unreadable_root"
+    mkdir -p "$UNREADROOT"; printf 'int f(){return 1;}\n' >"$UNREADROOT/f.cpp"
+    chmod 000 "$UNREADROOT"
+    "$BIN" "$UNREADROOT" --no-cache >"$TMP/unread.out" 2>"$TMP/unread.err"
+    rc_unread=$?
+    chmod 700 "$UNREADROOT"
+    if [ "$rc_unread" -eq 1 ] && grep -q 'root path cannot be read' "$TMP/unread.err" && [ ! -s "$TMP/unread.out" ]; then
+        ok "unreadable root: refused (exit 1, reason on stderr, no empty map served)"
+    else
+        no "unreadable root: expected exit 1 + 'root path cannot be read' + no map; got exit $rc_unread, stdout $(wc -c <"$TMP/unread.out")B, stderr: $(head -c 200 "$TMP/unread.err")"
+    fi
+fi
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo
 if [ "$fail" -eq 0 ]; then

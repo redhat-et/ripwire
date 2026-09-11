@@ -39,6 +39,9 @@
 --no-prose	repowise (competitor) flag, quoted in docs/EVALS.md §2 r2 head-to-head arm description — not a ripwire flag
 --codex	skills/install.sh's canonical Codex destination mode, not a ripwire binary flag
 --codex-legacy	skills/install.sh's compatibility mode for older CODEX_HOME skill installs, not a ripwire binary flag
+--hermes	skills/install.sh's Hermes destination mode (links into ${HERMES_HOME:-~/.hermes}/skills), quoted in INSTALL.md's skills table — not a ripwire binary flag
+--openclaw	skills/install.sh's openclaw destination mode (links into ~/.agents/skills, openclaw's compatibility skill root), quoted in INSTALL.md's skills table — not a ripwire binary flag
+--contributor	skills/install.sh's own flag (2026-09-06): also activate the skill whose front matter says audience: contributor (ripwire-opt-remarks, about compiling ripwire itself) — held back by default, not a ripwire binary flag
 --evaluator	bench/agentloop/run_agentloop.py harness flag ("--evaluator none|swebench") quoted in docs/EVALS.md §2 agent-loop pilot setup — not a ripwire binary flag
 --max-changeset-size	Code Maat's own flag ("code-maat --max-changeset-size 30"), quoted in docs/LINEAGE.md where ripwire's independently-derived 30-file bulk-commit cap is compared to the published value — not a ripwire flag
 --top	scripts/optremarks.py's own flag ("optremarks.py --top 40", how many rows the triage summary prints) quoted in docs/OPTREMARKS.md and skills/ripwire-opt-remarks, not a ripwire flag
@@ -109,3 +112,6 @@
 --lane	bench/recalleval/run_recalleval.py's own flag ("--lane recall|ranking|both", which labelled query set to score) quoted in docs/EVALS.md's term-margin pre-registration — not a ripwire flag (the --bin/--repo precedent)
 --python	uv's own tool-install option ("uv tool install --python 3.12"), quoted in the same registration as how the cocoindex-code arm was installed into an isolated tool directory — a foreign tool flag, not a ripwire flag
 --sort	ripgrep's own option ("rg -l --sort path"), quoted in the same round's loss L-2 as the fix that makes the rg floor arm deterministic (its walk order moved the measured byte offset by 276x across identical runs) — a foreign tool flag, not a ripwire flag
+--porcelain	git's own flag ("git status --porcelain", the command src/gitstamp.h runs for the at="…+dirty" bit) quoted in CONTRIBUTING.md §1's rule against writing into the shared checkout, not a ripwire flag
+--stats	tgrep's own flag ("tgrep --stats", which prints its query plan) quoted in docs/EVALS.md's tgrep head-to-head where the plan line is the evidence, not a ripwire flag
+--no-index	tgrep's own flag ("tgrep --no-index", its brute-force scanner) named in docs/EVALS.md and bench/tgrep-h2h/README.md as the control arm of that head-to-head, not a ripwire flag

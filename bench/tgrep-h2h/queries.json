@@ -1,0 +1,26 @@
+{
+  "frozen": "2026-09-09, before any arm was timed",
+  "note": "L1 and R1 were run once each as smoke probes while the arms were being wired; R1 is IN the set precisely because that probe found a semantic divergence, and it is declared here rather than reported as a discovery. No query was added or removed after any timing existed.",
+  "agreement_subset": ["L1", "L6", "L7", "L8", "R1", "R3", "R4", "R7", "R8"],
+  "agreement_rule": "hit sets are compared only where every arm's full emission is affordable (yield bounded); the high-yield queries are timed but not set-compared, and that exclusion is stated in the table.",
+  "literals": [
+    {"id": "L1", "pat": "pthread_mutex_lock",      "why": "rare identifier, high selectivity"},
+    {"id": "L2", "pat": "return",                  "why": "very common word, delivery-bound"},
+    {"id": "L3", "pat": "TODO",                    "why": "medium selectivity"},
+    {"id": "L4", "pat": "int",                     "why": "3-char token, very common, substring-heavy"},
+    {"id": "L5", "pat": "err",                     "why": "3-char token, exactly one trigram"},
+    {"id": "L6", "pat": "zzqxvnotpresentzz",       "why": "absent from every corpus - the zero-hit floor"},
+    {"id": "L7", "pat": "malloc(",                 "why": "medium, punctuation inside the literal"},
+    {"id": "L8", "pat": "SPDX-License-Identifier", "why": "long literal, medium frequency, many distinct trigrams"}
+  ],
+  "regexes": [
+    {"id": "R1", "pat": "^#include",                "why": "anchored - probes ^ semantics (line vs file)"},
+    {"id": "R2", "pat": "TODO|FIXME|XXX",           "why": "alternation over indexable branches"},
+    {"id": "R3", "pat": "malloc.*free",             "why": ".* between two indexable literals - prefilter should still bite"},
+    {"id": "R4", "pat": "[Qq]z[Xx]v.*[Jj]w",        "why": "defeats the trigram prefilter (char classes + .*) AND yields ~0 - isolates FIND cost from DELIVER cost"},
+    {"id": "R5", "pat": "[Ee]rror[A-Z][a-zA-Z]+",   "why": "char-class prefix, medium yield"},
+    {"id": "R6", "pat": "[Mm][Uu][Tt][Ee][Xx]",     "why": "case-insensitivity spelled portably - std::regex ECMAScript has no inline (?i), Rust regex does"},
+    {"id": "R7", "pat": "pthread_[a-z_]+_init",     "why": "rare, indexable literal prefix"},
+    {"id": "R8", "pat": "[0-9a-f]{8}-[0-9a-f]{4}",  "why": "bounded repetition over char classes - no literal at all"}
+  ]
+}

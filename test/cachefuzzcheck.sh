@@ -360,10 +360,24 @@ echo "=== filesystem-shape cache-path mutations — DEV build ==="
 # /dev/null-sized: point --cache directly at /dev/null (reads as empty; writes are discarded).
 run_one_dev "devnull_cache_path" "/dev/null"
 
-# a DIRECTORY sits at the cache path instead of a file.
+# a DIRECTORY sits at the cache path instead of a file. 2026-09-06 (stranger audit): this used to be "degrade to
+# exit 0" — read as corrupt, write refused, a byte-identical map served — the fixed --cache=<nonexistent dir>
+# bug's twin. --cache names a FILE; a directory is a usage error and is REFUSED (exit 1) naming the flag, the
+# problem and an accepted form, same as the nonexistent-directory refusal beside it in main.cpp.
 DIRPATH="$TMP/dir_as_cache"
 mkdir -p "$DIRPATH"
-run_one_dev "directory_at_cache_path" "$DIRPATH"
+"$BIN" "$FIXTURE" --cache="$DIRPATH" --no-stable >"$TMP/dev_dircache.xml" 2>"$TMP/dev_dircache.err"
+rc_dir=$?
+if [ "$rc_dir" -eq 1 ] && grep -q -- '--cache=.*is a directory' "$TMP/dev_dircache.err" && grep -q 'e\.g\. --cache=' "$TMP/dev_dircache.err"; then
+    ok "[directory_at_cache_path] refused: exit 1, names --cache, the problem and an example path"
+else
+    no "[directory_at_cache_path] expected a refusal (exit 1 naming --cache); got exit $rc_dir, stderr: $(head -c 300 "$TMP/dev_dircache.err")"
+fi
+if [ ! -s "$TMP/dev_dircache.xml" ]; then
+    ok "[directory_at_cache_path] no map served on the refusal"
+else
+    no "[directory_at_cache_path] a map was served alongside the refusal"
+fi
 
 # unreadable permissions on an otherwise-good cache file (skip cleanly if running as root, where
 # chmod 000 does not actually block reads).
@@ -387,6 +401,60 @@ run_one_dev "symlink_to_valid_cache" "$SYMGOOD"
 SYMDANGLE="$TMP/symlink_dangling.cache"
 ln -sf "$TMP/does_not_exist_$$" "$SYMDANGLE"
 run_one_dev "symlink_dangling" "$SYMDANGLE"
+
+# ── disclosure (2026-09-06 stranger audit): a Release binary keeps NO DEGRADED_PATH_ALERT, so every reject
+#    above used to be byte-identical to a healthy run — a torn blob, an older binary's blob, a full disk: all
+#    silent, every run. The map stays byte-identical (arms above); stderr now says what happened, once. The
+#    ordinary cold-start miss stays silent, and a good cache says nothing (the controls). ──
+echo
+echo "=== disclosure: a rejected cache says so on stderr; a good or absent one does not ==="
+# fresh mutants: every rejected cache Part 1 ran against was REWRITTEN as a good one by that very run (the
+# self-heal this arm is about), so the files under $MUTDIR are healthy by now. Cut two new ones from $GOOD.
+DISCDIR="$TMP/disclose"; mkdir -p "$DISCDIR"
+# XOR the last byte, as Part 1's mut_trailer_corrupted does — never WRITE a constant: on the one CI leg
+# (macos-14 Release, run 34090630725) where that byte already was 0xFF, a constant left the mutant equal to
+# the good cache, nothing was rejected, and this arm reported "no disclosure" about a cache that was fine.
+python3 - "$GOOD" "$DISCDIR/trailer_bytes_corrupted.cache" <<'PYMUT'
+import sys
+b = bytearray( open( sys.argv[1], "rb" ).read() )
+b[-1] ^= 0xFF
+open( sys.argv[2], "wb" ).write( bytes( b ) )
+PYMUT
+: >"$DISCDIR/empty_file.cache"
+for dname in trailer_bytes_corrupted empty_file; do
+    "$BIN" "$FIXTURE" --cache="$DISCDIR/$dname.cache" --no-stable >/dev/null 2>"$TMP/disc_$dname.err"
+    if grep -q "ripwire: cache .*$dname.cache: [a-z-]* — not used" "$TMP/disc_$dname.err"; then
+        ok "[disclose:$dname] stderr names the cache file and the reject reason"
+    else
+        no "[disclose:$dname] no disclosure on stderr for a rejected cache: $(head -c 200 "$TMP/disc_$dname.err")"
+    fi
+done
+"$BIN" "$FIXTURE" --cache="$GOOD" --no-stable >/dev/null 2>"$TMP/disc_good.err"
+if grep -q 'ripwire: cache' "$TMP/disc_good.err"; then
+    no "[disclose:control] a GOOD cache produced a cache notice: $(head -c 200 "$TMP/disc_good.err")"
+else
+    ok "[disclose:control] a good cache is silent"
+fi
+"$BIN" "$FIXTURE" --cache="$TMP/absent_$$.cache" --no-stable >/dev/null 2>"$TMP/disc_absent.err"
+if grep -q 'ripwire: cache' "$TMP/disc_absent.err"; then
+    no "[disclose:control] an ABSENT cache (the ordinary cold start) produced a notice: $(head -c 200 "$TMP/disc_absent.err")"
+else
+    ok "[disclose:control] an absent cache (cold start) is silent"
+fi
+rm -f "$TMP/absent_$$.cache"
+if [ "$( id -u )" = "0" ]; then
+    note "[disclose:unwritable] running as root — chmod 500 does not block writes, skipping"
+else
+    RODIR="$TMP/ro_cache_dir"; mkdir -p "$RODIR"; chmod 500 "$RODIR"
+    "$BIN" "$FIXTURE" --cache="$RODIR/c.cache" --no-stable >"$TMP/disc_ro.xml" 2>"$TMP/disc_ro.err"
+    rc_ro=$?
+    chmod 700 "$RODIR"
+    if [ "$rc_ro" -eq 0 ] && grep -q 'ripwire: cache .*cannot write' "$TMP/disc_ro.err" && diff -q "$TMP/truth.xml" "$TMP/disc_ro.xml" >/dev/null 2>&1; then
+        ok "[disclose:unwritable] an unwritable cache dir: map served (exit 0, ground truth), stderr says it cannot write"
+    else
+        no "[disclose:unwritable] expected exit 0 + a 'cannot write' notice; got exit $rc_ro, stderr: $(head -c 200 "$TMP/disc_ro.err")"
+    fi
+fi
 
 echo
 echo "=== Part 1: same mutation table — ASan build ==="

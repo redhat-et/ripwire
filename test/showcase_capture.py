@@ -25,15 +25,84 @@ except ImportError as exc:
              f"refusing to write an unscrubbed capture")
 
 # --- helper input files -------------------------------------------------
-# A realistic fabricated ASan report. Frame line numbers are the CURRENT ones for those
-# symbols, so the locus lane is being asked a fair question.
-TRACE = """AddressSanitizer:DEADLYSIGNAL
+
+def openBraceLine( lines, i ):
+    """Index of the line carrying the opening brace of the definition matched at i, or -1 if there is none.
+
+    -1 means "that match was a DECLARATION, keep looking" — the distinction bodySeed's first version got
+    wrong by testing for `;` on the line AFTER the match, so an ordinary prototype block with no blank
+    line after it walked into the next function and returned a line inside IT.
+    """
+    code = lines[i].split( '//' )[0].rstrip()
+    if code.endswith( ';' ):
+        return -1                                 # a declaration at the match line itself
+    if '{' in code:
+        return i                                  # brace on the signature line
+    for j in range( i + 1, min( i + 10, len( lines ) ) ):
+        t = lines[j].split( '//' )[0].strip()
+        if t == '':
+            continue                              # blank, or a comment-only line between sig and brace
+        if t.endswith( ';' ):
+            return -1                             # a MULTI-LINE declaration
+        if '{' in t:
+            return j
+        # anything else is a continued parameter list or trailing specifier: keep walking
+    return -1
+
+def bodySeed( rel, sigRe ):
+    """First body line (1-based) of the DEFINITION whose signature matches sigRe.
+
+    These line numbers used to be typed as literals, and the comment above the trace fixture asserted
+    they were "the CURRENT ones for those symbols". That assertion decayed the moment anything above
+    them moved. What actually happened, precisely, because a wrong story here is worse than none:
+    the 2930 literal was written on 2026-09-08 and PR #72 shifted rankGraphTeleport to 2943 the NEXT
+    DAY, so the refusal lived about one day and never reached main — main's own 09-08 capture shows
+    l="2930" sym="rankGraphTeleport", resolved. The lasting damage was the earlier literal 1148: the
+    09-05 and 09-07 captures on main published `rankGraphTeleport p="src/graph.h:1148"` while 1148
+    resolved to buildGraph. That shipped. It exited 0, so NO exit-code arm can ever see it — which is
+    why showcasecapturecheck grew a live arm asserting the seed resolves to the symbol it names, and
+    why deriving the line is not on its own enough.
+
+    The scan is deliberately plain TEXT, never a ripwire query: a fixture that asked ripwire where its
+    own symbols are could not fail, and being able to fail is the whole job of a fixture.
+
+    Requires the signature to be followed by a line that is exactly `{` (or to end in one), so a
+    forward declaration or a `;`-terminated prototype cannot match ahead of the real definition and
+    hand back a line outside any body. Returns the first line after that brace, comment or not; the
+    only contract is that it is INSIDE the definition, which is what a seed has to be.
+    """
+    path  = os.path.join( REPO, rel )
+    lines = open( path, encoding='utf-8' ).read().splitlines()
+    rx    = re.compile( sigRe )
+    for i, line in enumerate( lines ):
+        if not rx.search( line ):
+            continue
+        brace = openBraceLine( lines, i )
+        if brace < 0:
+            continue
+        if brace == i and '}' in lines[i].split( '{', 1 )[1]:
+            return i + 1                          # a one-liner: the only line inside it is this one
+        if brace + 1 < len( lines ):
+            return brace + 2
+    sys.exit( f"showcase_capture: no DEFINITION matching /{sigRe}/ in {rel} (a declaration alone does not "
+              f"count) — the seed fixture names a symbol this tree no longer defines; fix the pattern "
+              f"rather than shipping a stale seed" )
+
+TELEPORT_LN = bodySeed( 'src/graph.h', r'^inline RankedGraph rankGraphTeleport\(' )
+RANKGRAPH_LN = bodySeed( 'src/graph.h', r'^inline RankedGraph rankGraph\(' )
+DEFAULTMAP_LN = bodySeed( 'src/main.cpp', r'^int runDefaultMap\(' )
+MAIN_LN = bodySeed( 'src/main.cpp', r'^int main\(' )
+
+# A realistic fabricated ASan report. Frame line numbers are DERIVED above from the current source,
+# so the locus lane is being asked a fair question on every regeneration, not just the day this was
+# written.
+TRACE = f"""AddressSanitizer:DEADLYSIGNAL
 =================================================================
 ==41337==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000018 (pc 0x000102f4a1c8 bp 0x00016d2f1a40 sp 0x00016d2f19e0 T0)
-    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:1148
-    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:1174
-    #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:5155
-    #3 0x102e01a44 in main src/main.cpp:5594
+    #0 0x102f4a1c8 in rw::rankGraphTeleport(Graph const&, std::vector<float> const&, float) src/graph.h:{TELEPORT_LN}
+    #1 0x102f3e884 in rw::rankGraph(Graph const&, float) src/graph.h:{RANKGRAPH_LN}
+    #2 0x102e11f30 in runDefaultMap(MainDispatch const&) src/main.cpp:{DEFAULTMAP_LN}
+    #3 0x102e01a44 in main src/main.cpp:{MAIN_LN}
     #4 0x1a2b3c0dc in start+0x9dc (dyld:arm64e+0x60dc)
 ==41337==ABORTING
 """
@@ -143,6 +212,43 @@ def mcp_call(verb, **args):
     return json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
                        "params": {"name": verb, "arguments": dict(path=".", **args)}}, separators=(",", ":"))
 
+# --- directory-as-knowledge-base fixture ------------------------------------------------------------
+# --recall never distinguishes "a codebase" from any other directory it can walk. This scratch dir
+# holds only DUMPED TOOL OUTPUT — a git log, this repo's own generated command reference, --help
+# text, an architecture doc, and a fabricated API access log — the shapes an agent actually
+# accumulates mid-task, never crawled as source. Real files, built at capture time, not fabricated
+# sample text.
+KBCORPUS = os.path.join(AUX, "kbcorpus")
+os.makedirs(KBCORPUS, exist_ok=True)
+_kbGitLog = subprocess.run("git log --stat -n 400", shell=True, cwd=REPO, capture_output=True).stdout.decode(errors="replace")
+open(os.path.join(KBCORPUS, "git-log-stat.txt"), "w").write(_kbGitLog)
+shutil.copy(os.path.join(REPO, "docs", "COMMANDS.md"), os.path.join(KBCORPUS, "commands.md"))
+shutil.copy(os.path.join(REPO, "docs", "ARCHITECTURE.md"), os.path.join(KBCORPUS, "architecture.md"))
+_kbHelp = subprocess.run(f"{ABIN} --help", shell=True, cwd=REPO, capture_output=True).stdout.decode(errors="replace")
+open(os.path.join(KBCORPUS, "ripwire-help.txt"), "w").write(_kbHelp)
+# A fabricated 1,200-row JSON access log — the kind of API/tool dump an agent pastes into a scratch
+# dir mid-task. Seeded so the capture is reproducible.
+import random as _kbrandom, datetime as _kbdatetime
+_kbRng      = _kbrandom.Random(42)
+_kbPaths    = ["/api/v1/users", "/api/v1/orders", "/api/v1/products", "/api/v1/search", "/api/v1/health",
+               "/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/cart", "/api/v1/checkout", "/api/v1/webhooks"]
+_kbMethods  = ["GET", "POST", "PUT", "DELETE", "PATCH"]
+_kbStatuses = [200, 200, 200, 201, 204, 301, 400, 401, 403, 404, 404, 500, 502, 503]
+_kbBase     = _kbdatetime.datetime(2026, 8, 1)
+_kbRows = [{
+    "id": i,
+    "ts": (_kbBase + _kbdatetime.timedelta(seconds=i * 37)).isoformat() + "Z",
+    "method": _kbRng.choice(_kbMethods),
+    "path": _kbRng.choice(_kbPaths),
+    "status": _kbRng.choice(_kbStatuses),
+    "latency_ms": round(_kbRng.uniform(1.2, 890.5), 2),
+    "ip": f"10.{_kbRng.randint(0,255)}.{_kbRng.randint(0,255)}.{_kbRng.randint(0,255)}",
+    "user_agent": _kbRng.choice(["curl/8.4.0", "Mozilla/5.0", "python-requests/2.31", "Go-http-client/1.1"]),
+    "bytes_sent": _kbRng.randint(120, 98304),
+} for i in range(1200)]
+open(os.path.join(KBCORPUS, "access-log.json"), "w").write(json.dumps(_kbRows, indent=2))
+KBCORPUS_BYTES = sum(os.path.getsize(os.path.join(KBCORPUS, f)) for f in os.listdir(KBCORPUS))
+
 # --- the recorded tree condition ----------------------------------------
 # The diff-aware verbs (--situ / --test-gate / --quality-delta / --pr-context / --map-diff / --edit-check)
 # answer a question ABOUT THE WORKING TREE, so their captions are claims about the tree this run recorded
@@ -154,7 +260,17 @@ REPO_DIRTY_LINES = subprocess.run("git status --porcelain", shell=True, cwd=REPO
 REPO_DIRTY = bool(REPO_DIRTY_LINES)
 TREE = "a DIRTY tree" if REPO_DIRTY else "a CLEAN tree"
 def onTree(clean, dirty):
-    """Pick the caption that matches the tree this run is actually recording against."""
+    """Pick the caption that matches the tree this run is actually recording against.
+
+    A DIRTY caption must also DISCLOSE that the block's recorded exit code is a real one. These verbs
+    exit non-zero exactly when the working copy has something to say (test-gate 4, quality-delta 2),
+    so a dirty regeneration is the mode in which they carry an exit at all — and a caption that only
+    explained WHY the rows are populated left showcasecapturecheck arm (E) correctly red on an
+    otherwise honest capture. Every dirty branch of a verb that CAN exit
+    non-zero names it (test-gate 4, quality-delta 2, edit-check 1). The ones that cannot — pr-context,
+    map-diff — say nothing about an exit: promising a "recorded exit code" the renderer never prints is
+    the same lie pointed the other way, prose written to satisfy a regex. With no exit line, arm (E)
+    never asks."""
     return dirty if REPO_DIRTY else clean
 
 # --- command table ------------------------------------------------------
@@ -181,6 +297,7 @@ add(S1, f'{BIN} . --exemplar="format byte sizes for humans"', "The repo's best-i
 add(S1, f'{BIN} . --help-task="calls(runDefaultMap, rankGraphTeleport)"', "Deterministic enhanced help: a closed claim in the task is a structured shape, so the router recommends the ONE command that answers it (--verify) with the evidence behind the pick. Advice only — nothing executes.")
 add(S1, f'{BIN} . --help-task="write a cheerful release announcement"', "The honest half of the contract: a task with no ripwire-shaped evidence ABSTAINS with zero commands rather than guessing.")
 add(S1, f'{BIN} . --recall="quality delta gating exit codes"', "Most relevant DOCS' full bodies (markdown only) — recall what is already written down.")
+add(S1, f'{BIN} {KBCORPUS} --recall="field affinity cache line data layout which fields are read together" --top-k=3 --max-tokens=1200', f"The directory-as-knowledge-base pattern: --recall pointed at a {KBCORPUS_BYTES}-byte scratch dir of DUMPED TOOL OUTPUT (a git log, this repo's own generated command reference, --help text, an architecture doc, a fabricated JSON access log) instead of a source repo — no index to build, no daemon.")
 add(S1, f"{BIN} . --tree", "File-by-file orientation map (top symbols per file).")
 add(S1, f"{BIN} . --html={html_out}", "Self-contained HTML force-directed call graph.", post=f"wc -c {html_out}")
 add(S1, f"{BIN} . --order=stable --top-k=5", "Stable (path/id) emit order — provider KV-cache hits across re-runs.")
@@ -216,7 +333,7 @@ add(S2, f'{BIN} . --query="teleport pagerank" --top-k=5', "Raw BM25 ranking (deb
 
 S3 = "zoom the detail ladder"
 add(S3, f'{BIN} . --for="pagerank power iteration" --detail=2', "Importance-weighted detail: FULL bodies for top-2, signatures for the rest.")
-add(S3, f"{BIN} . --pack-signatures --top-k=10", "Body-elided decl skeletons — recounted on this corpus. Measured as element bytes: the <d> signature+doc elements --pack-signatures emits, against the SAME symbols' full <b> bodies from --expand, with the CORPUS-ROOT PREFIX SUBTRACTED FROM BOTH SIDES. That subtraction is the whole methodology and the figure is meaningless without it: the root repeats inside every element's id= and p=, it is not what this verb elides, and counting it makes the headline a function of how deep the checkout happens to sit on disk — on one corpus, three spellings of the same root read 18.6 points apart before the subtraction and agree exactly after it. Root-neutralised on THIS repo: 80.9% fewer bytes at top-10, 75.6% at top-50, 73.7% at top-100 (re-derived 2026-09-05 at the capture-audit close: lane L7's P16 caps --expand's sibs= at 8 names, which SHRINKS the body side of this ratio and moved the figure down from 84.5/80.2/80.6 — the V1 2026-08-15 re-center, when sibs=/inc= first grew the body side from 70.0/61.0/63.8, in reverse; both were real re-derivations, not tolerance edits). top-50 is the number to quote, because the sigs payload is top-50 regardless of --top-k and is therefore what THIS command emits. A single small/trivial body can still invert it (signature+doc bigger than the body), like the --format=columnar sibling below. test/showcasecapturecheck.sh (C) re-derives all three from this repo every run, in the same quantity, and fails if the caption and the recount drift apart.")
+add(S3, f"{BIN} . --pack-signatures --top-k=10", "Body-elided decl skeletons — recounted on this corpus. Measured as element bytes: the <d> signature+doc elements --pack-signatures emits, against the SAME symbols' full <b> bodies from --expand, with the CORPUS-ROOT PREFIX SUBTRACTED FROM BOTH SIDES. That subtraction is the whole methodology and the figure is meaningless without it: the root repeats inside every element's id= and p=, it is not what this verb elides, and counting it makes the headline a function of how deep the checkout happens to sit on disk — on one corpus, three spellings of the same root read 18.6 points apart before the subtraction and agree exactly after it. Root-neutralised on THIS repo: 89.5% fewer bytes at top-10, 81.8% at top-50, 84.3% at top-100 (re-derived 2026-09-10 at the sibs= cap raise: kMaxExpandSibs went 8 -> 100, so --expand's <b> bodies now carry the file context the old cap hid — 89.3% of all sibling names — and the body side is this ratio's DENOMINATOR, so the figure rises without --pack-signatures eliding anything new. Measured on a fixed tree with the top-50 membership and the signature side unchanged: top-50 from 71.0. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-09 at the printf-family -> std::print conversion: converting ~1,500 emitter call sites to rw::emitTo/emitRaw/formatTo across 93 files changes how large the ranked symbols' BODIES are, and the body side is this ratio's denominator — top-50 from 72.3. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-08 at the confident-zero round, issues #62/#63/#66: that change adds symbols to src/graphlegend.h and the new src/preprocdead.h and re-homes two long comment blocks from call sites onto the helpers they explain, which moves both WHICH symbols the ranked top-50 holds and how large their bodies are — top-50 from 74.0. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-06 at the stranger-audit fix round: the doctor, cache-sweep and html-provenance bodies grew this corpus's BODY side, moving top-50 from 75.6 — a real re-derivation, not a tolerance edit; before that, re-derived 2026-09-05 at the capture-audit close: lane L7's P16 caps --expand's sibs= at 8 names, which SHRINKS the body side of this ratio and moved the figure down from 84.5/80.2/80.6 — the V1 2026-08-15 re-center, when sibs=/inc= first grew the body side from 70.0/61.0/63.8, in reverse; both were real re-derivations, not tolerance edits). top-50 is the number to quote, because the sigs payload is top-50 regardless of --top-k and is therefore what THIS command emits. A single small/trivial body can still invert it (signature+doc bigger than the body), like the --format=columnar sibling below. test/showcasecapturecheck.sh (C) re-derives all three from this repo every run, in the same quantity, and fails if the caption and the recount drift apart.")
 add(S3, f"{BIN} . --outline=rankGraphTeleport --top-k=0", "Control-flow skeleton of one symbol, payload-only via the new --top-k=0.")
 add(S3, f"{BIN} . --outline=rankGraphTeleport:1-10 --top-k=0", "CHANGED: a line range on --outline is now STRIPPED with a stderr note (it used to refuse).")
 add(S3, f"{BIN} . --expand=rankGraphTeleport --top-k=0", "Full body + inline callee signatures.")
@@ -250,10 +367,10 @@ add(S4, f"{BIN} . --exercises=test/regression.sh", "Which symbols a TEST FILE ex
 add(S4, f"{BIN} . --community=0", "Drill into ONE call-graph community by id — the drill= the --communities output itself advertises.")
 add(S4, f"{BIN} . --quality-delta", onTree(
     "On a CLEAN tree: nothing got worse, exit 0. The gating shape is in the sandbox section below.",
-    "Recorded against a DIRTY tree, so any row below is a real regression in the working copy. The sandbox section below shows the same gating shape on a known, deliberate edit."))
+    "Recorded against a DIRTY tree, so any row below is a real regression in the working copy — the recorded exit code says whether anything gated. The sandbox section below shows the same gating shape on a known, deliberate edit."))
 add(S4, f"{BIN} . --edit-check=rankGraphTeleport", onTree(
     "Fast per-symbol post-edit contract check vs git HEAD (unchanged on a clean tree).",
-    "Fast per-symbol post-edit contract check vs git HEAD — recorded against a DIRTY tree, so the verdict describes the working copy, not HEAD alone."))
+    "Fast per-symbol post-edit contract check vs git HEAD — recorded against a DIRTY tree, so the verdict describes the working copy, not HEAD alone, and the recorded exit code is the working copy's."))
 add(S4, f"{BIN} . --pr-context", onTree(
     "No-LLM review-evidence bundle for the working-tree diff (clean tree = empty).",
     "No-LLM review-evidence bundle for the working-tree diff — recorded against a DIRTY tree, so it is populated rather than empty."))
@@ -276,7 +393,7 @@ _famB, _famBIsFamily = _refFamily( [ "lane/", "feat/", "fix/", "worktree-agent-"
 add(S4, f"{BIN} . --stray-content={_famA}", ( "A second ref family (the substring picked at capture time from the refs this checkout really has): merged refs are OMITTED from the rows and counted in merged=; refs sharing no merge base with HEAD (a shallow clone, or a pre-rewrite history) land in unknown= with ok=\"0\" — the counters always reconcile against refs=." if _famAIsFamily else "A single real ref (no ref family exists on this checkout, so the substring is one branch name): the counters still reconcile against refs=." ), timeout=600)
 add(S4, f"{BIN} . --stray-content={_famB} --plan", ( "Select the genuinely-unmerged refs of one family and feed them to merge-scout for a landing order (a merged family yields an empty landing set — still a measurement, disclosed on the root)." if _famBIsFamily else "The landing plan over a single real ref." ), timeout=900)
 add(S4, f"{BIN} . --stray-content=zzzz-no-such-ref --plan", "A --plan filter that selects NO ref REFUSES (exit 1) naming the substring — before the wave-3 close this fell through to the '>512 refs match' sentence, and --abi under the same filter answered an empty measurement at exit 0.")
-add(S4, f"{BIN} . --stray-content=lane --abi", "Cross-branch ABI-break gate: struct byte-contract drift on each ref's AUTHORED paths.", timeout=600)
+add(S4, f"{BIN} . --stray-content=lane --abi", "Cross-branch ABI-break gate: struct byte-contract drift on each ref's AUTHORED paths — exit 2 when any drift row is found (the only kind that gates), 0 when the compared refs are clean, and exit 1 if the --stray-content filter matches no ref at all.", timeout=600)
 add(S4, f"{BIN} . --whereis=rankGraphTeleport", "Which ref's tree defines or mentions SYM — HEAD first, then every local branch.", timeout=600)
 add(S4, f"{BIN} . --whereis=computeOnePairOverlap --with-history", "Same, plus a git-history <fate> row (never / removed-by-commit) for names no tree carries.", timeout=600)
 add(S4, f"{BIN} . --flags", "The dark-content dashboard: gates BUILT but OFF. CHANGED: no longer invents gates from comments/heredocs, so the count only reflects real ifndef/define, CMake option(), and getenv gates.")
@@ -335,8 +452,8 @@ add(S7, f"{BIN} --version", "Version + short build info.")
 
 
 S2B = "navigate — seeds, claims, slices, shapes"
-add(S2B, f"{BIN} . --at=src/graph.h:1148", "Hold a LOCATION, not a name: the enclosing-definition chain at FILE:LINE (a compiler error, a diff hunk, a stack frame), outermost -> innermost.")
-add(S2B, f"{BIN} . --callers=@src/graph.h:1148", "The same seed in a SELECTOR position: @FILE:LINE resolves to the innermost enclosing definition, then --callers runs on it.")
+add(S2B, f"{BIN} . --at=src/graph.h:{TELEPORT_LN}", "Hold a LOCATION, not a name: the enclosing-definition chain at FILE:LINE (a compiler error, a diff hunk, a stack frame), outermost -> innermost.")
+add(S2B, f"{BIN} . --callers=@src/graph.h:{TELEPORT_LN}", "The same seed in a SELECTOR position: @FILE:LINE resolves to the innermost enclosing definition, then --callers runs on it.")
 add(S2B, f"{BIN} . --at=src/graph.h:999999", "A seed past the end of the file — the refusal shape for a faulted location.")
 add(S2B, f'{BIN} . --verify="calls(runDefaultMap, rankGraphTeleport)"', "VERIFY a closed claim in one call: three-valued verdict (confirmed / refuted / not-established) with the evidence rows inline.")
 add(S2B, f'{BIN} . --verify="unused(rankGraphTeleport)"', "A claim that is FALSE — the refuted shape, with the references that refute it.")
@@ -370,7 +487,7 @@ add(S2B, f"{BIN} . --handoff --token-budget=1200", "The same packet under a hard
 add(S2B, f"{BIN} . --skipped", "WHY a file is not in the index (oversize / excluded / unsupported-ext / gitignored) and which indexed files it cannot vouch for (degraded-parse, minified-suspect), plus the per-language census.")
 add(S2B, f"{BIN} . --no-ignore --top-k=3", "Crawl paths the repo's own .gitignore covers (default honours it and discloses ignored_files=/ignored_dirs= only when it dropped anything — this repo's crawl drops nothing, so the header is identical to the default map's; --skipped's ignore_mode= says which rule applied).")
 add(S2B, f"{BIN} . --no-stable --top-k=3", "--no-stable outside --mcp: what the flag does (or says) when there is no stable-by-default ordering to opt out of.")
-add(S2B, f'{BIN} . --run-trace="cat {trace_path}; exit 1"', "EXEC-MODE --from-trace: run a command, and on a non-zero exit map its captured output onto indexed symbols in the same call — the whole fix-loop entry.")
+add(S2B, f'{BIN} . --run-trace="cat {trace_path}; exit 1"', "EXEC-MODE --from-trace: run a command, and on a non-zero exit map its captured output onto indexed symbols in the same call — the whole fix-loop entry. ripwire exits 4 here because the wrapped command failed, which is the signal, not an incident.")
 add(S2B, f'{BIN} . --run-trace="true"', "A command that exits 0: a minimal success record (exit, measured duration, disclosed output tail) and NO bundle — nothing failed, nothing to map.")
 add(S2B, f'{BIN} . --run-trace="sleep 30" --run-timeout=2', "A command still running at the cap: its process group is killed and the run reports timed_out=1 — an honest timeout, never an empty success.", timeout=120)
 add(S2B, f"{BIN} . --run-timeout=5", "--run-timeout alone is refused loudly (it only modifies --run-trace).")

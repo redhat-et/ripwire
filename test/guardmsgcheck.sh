@@ -57,8 +57,13 @@ guard()
 }
 
 # ── the 20 guards, in source order ────────────────────────────────────────────────────────────────────
-# 1. no root at all → usage() dump (the only guard with no ripwire: prefix)
-guard "no-root prints usage"        'ripgrep of AI context'
+# 1. no root at all. This used to dump the WHOLE 185 KB catalog to stderr — ~46 000 tokens for the
+# likeliest first-run mistake there is, when an unknown flag had always cost 32 bytes — and it was the
+# only guard here without the `ripwire: ` prefix. Both were fixed together (two-tier --help,
+# 2026-09-09): it is now a short refusal in the same shape as the other nineteen, and what it must
+# still do is NAME THE FLAG THAT ANSWERS, so a reader is one hop from the catalog rather than buried
+# in it. That is what this arm pins — the naming, not the wording around it.
+guard "no-root prints usage"        'no <dir> given'
 
 # 2. --listen serves one fixed workspace, so it needs a root (bare --mcp does not)
 guard "--listen without a root"     'serves ONE workspace fixed at startup'  --listen=127.0.0.1:8765

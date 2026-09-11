@@ -186,7 +186,7 @@ fi
 [ "$( grep -c '' "$TMP/a" )" -le 1 ] && ok "output is minified (no stray newlines)" || no "newlines outside CDATA"
 
 # ── 10) the user-visible language list names CUDA (doc/binary agreement) ──────────────────────────────
-"$BIN" --help 2>&1 | grep -qi 'CUDA' \
+"$BIN" --help=all 2>&1 | grep -qi 'CUDA' \
     && ok "--help advertises CUDA" || no "--help does not mention CUDA"
 grep -qi 'CUDA' "$ROOT/README.md" \
     && ok "README advertises CUDA" || no "README does not mention CUDA"

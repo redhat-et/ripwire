@@ -253,7 +253,7 @@ Read those groups apart. Averaging them produces a number that means nothing.
 ## The literal-grep cede (P4.2, 2026-08-29)
 
 Agents correctly drop to `rg`/`grep` for a known-literal hunt — our own docs concede the case (see
-the `ripwire-efficient`/`ripwire-orient`/`ripwire-navigate` skills) — and the base one-time nudge used
+the `ripwire-orient` (with its `map-before-you-read.md` companion, once the efficient skill)/`ripwire-navigate` skills) — and the base one-time nudge used
 to fire on that first call regardless of what the pattern looked like, nagging about a comparison it
 loses. The base tier's `grep`/`bash-grep` categories are now gated: `category` is demoted back to `""`
 (the identical "observed, no nudge pattern applies" verdict a single-file, non-recursive grep already

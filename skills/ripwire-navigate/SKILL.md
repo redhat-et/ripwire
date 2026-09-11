@@ -1,17 +1,10 @@
 ---
 name: ripwire-navigate
 description: >
-  Trace how code connects and understand ONE symbol in depth — who calls a function, what it calls, how one
-  symbol reaches another, the flow from A to B or a bounded neighborhood around one definition, a full-body
-  deep-dive of a named symbol with its callers/callees/design-docs, or
-  find a literal / regex / AST-shape with its enclosing symbol. Use when you know (or can name) the symbol
-  and need the call graph, its contract, or to locate code precisely — instead of grepping and guessing.
-  Also the answer to "is it safe to change X?" (blast radius, not just 1-hop callers). And the N-way
-  relate moment: a ticket names THREE OR MORE symbols or layers and you cannot see how they meet —
-  `--connect=A,B,C` returns the minimal subgraph tying them together, including the shared-caller join a
-  pairwise A-to-B path never sees. Run the ONE verb
-  that matches the question; when its answer is unambiguous, stop — don't stack callers + callees +
-  impact as a ritual. Backed by ripwire (deterministic, on PATH).
+  You can NAME the symbol: who calls it, what it calls, the path from A to B, its full body, or an
+  exact literal/regex match. 'Safe to change or rename X — what breaks downstream?' = the transitive
+  blast radius, not 1-hop callers. Three or more symbols → --connect. Run the one verb that fits, then
+  stop.
 allowed-tools: Bash, Read
 ---
 
@@ -26,6 +19,34 @@ allowed-tools: Bash, Read
 `<dir>` = the repo or subsystem. Calls are warm after the first parse. Tracing across a split
 service+client checkout — pass every root, `ripwire dir1 dir2 --impact=SYM` — the merged graph carries the
 cross-root evidence edges (include/import/FFI) a single-root call would never see.
+
+## Keep the legend on the FIRST call, drop it on every call after
+
+Every XML verb prefixes its answer with a legend defining the attributes. You need it once. After that
+you are paying for prose you have already read — and the cost is worst on exactly the verbs you call
+most, because the legend is a fixed size while these answers are small. Measured on ripwire's own repo:
+
+| verb | saved by `--legend=compact` |
+| --- | --- |
+| `--callers=SYM` | **~70%** |
+| `--uses=SYM` | **~65%** |
+| `--impact=SYM` | **~50%** |
+| `--affected=F1,F2` | **~67%** |
+| `--for="..."` | ~4% |
+
+**The payload is byte-identical** — the entire difference is legend prose. (Percentages, not byte counts:
+an exact byte total goes stale the next time anyone edits a legend, and a stale number in a skill is worse
+than no number. `ripwire --help` carries the range, and a gate holds it to it.) So:
+
+- **Orientation** (`--for`, `--pack-task`): leave the legend on. It is ~4% there, and it is where you
+  learn what `amb=`, `cx=` and `counts_floor=` mean. Reading a map whose legend you skipped is how
+  confident misreadings happen.
+- **Every navigation call after** (`--callers`, `--uses`, `--impact`, `--expand`): add
+  `--legend=compact`. Across a seven-call session that is ~34% fewer bytes, ~2,900 tokens.
+
+The MCP server already defaults to compact for this reason — the tool description carries the schema, so
+the legend would be redundant on every call. The CLI defaults to `full` because a human reading one map
+needs it. If you are an agent making repeated calls, you are the case the CLI default is not tuned for.
 
 ## `--callers` is 1-hop — don't let it answer "is it safe to change X?"
 

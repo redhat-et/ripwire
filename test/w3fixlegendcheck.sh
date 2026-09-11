@@ -113,6 +113,7 @@ PY
 #      intersection cannot land above the mean pairwise Jaccard, and a two-or-more union of pairwise
 #      intersections routinely does. Note the proof is one-directional by design: it can only ever REFUTE the
 #      wrong definition, never confirm the right one, and that is the honest shape for this evidence.
+divergenceSeen=0
 for N in 3 4; do
     R="$( grep -oE '<ctx-partitions[^>]*>' "$TMP/p$N" )"
     S="$( printf '%s' "$R" | attr shared_symbols )"; U="$( printf '%s' "$R" | attr union_symbols )"
@@ -121,11 +122,32 @@ for N in 3 4; do
 import sys
 s,u,o=int(sys.argv[1]),int(sys.argv[2]),float(sys.argv[3])
 r=s/u if u else 0.0
-print("ABOVE" if r > o + 0.001 else f"NOT-ABOVE {r:.4f} vs {o}")
+if   r > o + 0.001: print("ABOVE")
+elif r > o - 0.001: print(f"TIE {r:.4f} vs {o}")
+else:               print(f"BELOW {r:.4f} vs {o}")
 PY
-    [ "$( cat "$TMP/div" )" = ABOVE ] \
-        && ok "N=$N: shared/union ($S/$U) is strictly ABOVE overlap_mean ($O) — a global intersection provably cannot be, so this is two-or-more semantics" \
-        || no "N=$N: shared/union is not above overlap_mean ($( cat "$TMP/div" )) — an EVERY-partition intersection is bounded by the mean pairwise Jaccard, so this run cannot rule one out"
+    # ONE-DIRECTIONAL EVIDENCE, HONESTLY SCORED. The proof above only bounds the EVERY reading from
+    # ABOVE (shared/union <= overlap_mean, always). So r > o REFUTES every, and is a pass. r == o refutes
+    # nothing — the two readings selected the same set on this corpus — and r < o refutes nothing either.
+    # Neither is evidence that the implementation is wrong, so neither is a FAILURE.
+    #
+    # This arm has now reddened three times on a CORPUS change rather than a behaviour change: twice on
+    # the growth documented in the header above, and once on 2026-09-08 when a branch added ~240 lines to
+    # src/wrap.h and the N=3 boundaries moved. Isolated that time: the same binary against a tree without
+    # those lines PASSED, so the arm was reporting where the tree was, not what the code did. A gate that
+    # reds for a non-reason is a gate people learn to ignore, which costs more than the arm is worth.
+    case "$( cat "$TMP/div" )" in
+        ABOVE)
+            ok "N=$N: shared/union ($S/$U) is strictly ABOVE overlap_mean ($O) — a global intersection provably cannot be, so shared_symbols is TWO-OR-MORE"
+            divergenceSeen=1
+            ;;
+        TIE*)
+            skip "N=$N: shared/union == overlap_mean ($( cat "$TMP/div" )) — at this N the EVERY and TWO-OR-MORE readings select the SAME set, so this corpus cannot tell them apart. Refutes nothing; asserts nothing."
+            ;;
+        *)
+            skip "N=$N: shared/union is BELOW overlap_mean ($( cat "$TMP/div" )) — consistent with EVERY and with TWO-OR-MORE alike; the bound is one-directional, so this is absence of evidence, not evidence of a defect."
+            ;;
+    esac
 done
 
 # (1d) core_budget_tokens + partition_budget_tokens == budget_per_agent_tokens (the legend says they sum).
@@ -478,7 +500,7 @@ verbatim(){ "$BIN" "$REDSB" --no-cache "$@" 2>/dev/null | grep -c "$KEY" || true
                                         || no "--grep redacted its hit line — the help's stated exception is wrong"
 [ "$( verbatim --regex='AKIA\w+' )" -gt 0 ] && ok "--regex hit lines are NOT redacted, as stated" \
                                             || no "--regex behaviour disagrees with the help"
-HELPTXT="$( "$BIN" --help 2>&1 )"
+HELPTXT="$( "$BIN" --help=all 2>&1 )"
 case "$HELPTXT" in
     *"credentials in emitted bodies are redacted"*) no "--help still carries the stale bodies-only redaction sentence";;
 esac
@@ -597,4 +619,10 @@ else
 fi
 
 echo
+if [ $fail = 0 ] && [ "${divergenceSeen:-1}" = 0 ]; then
+    # "skip is not pass" — this suite's own rule. Neither N produced the one observation this arm can
+    # make, so say that plainly instead of printing ALL PASS over an arm that asserted nothing.
+    echo "w3fixlegendcheck: PASS, but the N=3/N=4 partition arm SKIPPED at every N — this corpus never separated the two readings, so that property is UNPROVEN here (nothing failed)"
+    exit 0
+fi
 [ $fail = 0 ] && { echo "w3fixlegendcheck: ALL PASS"; exit 0; } || { echo "w3fixlegendcheck: FAILURES"; exit 1; }

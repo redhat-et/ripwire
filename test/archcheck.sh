@@ -157,6 +157,19 @@ rc_badkw=$?
     && ok "unrecognized keyword ('denyy'): exit 1 with a line diagnostic" \
     || no "unrecognized keyword: expected exit 1 + diagnostic, got exit $rc_badkw, stderr: $(cat "$TMP/bad_kw.err")"
 
+# 2026-09-06 (stranger audit): a `deny path` rule whose FROM regex does not compile used to be KEPT (pathRules=
+# counted it) and skipped — one stray paren turned a CI gate's exit 2 into exit 0 with violations="0". Same
+# refusal as the two shapes above, naming the line.
+printf 'deny path src/a\\.cpp( -> src/b\\.cpp\n' >"$TMP/bad_regex.txt"
+"$BIN" . --arch="$TMP/bad_regex.txt" --no-cache >"$TMP/bad_regex.out" 2>"$TMP/bad_regex.err"
+rc_badre=$?
+[ "$rc_badre" -eq 1 ] && grep -q 'bad_regex.txt:1' "$TMP/bad_regex.err" && grep -q 'does not compile' "$TMP/bad_regex.err" \
+    && ok "uncompilable FROM path-regex: exit 1 with a line diagnostic (the rule is not silently disarmed)" \
+    || no "uncompilable FROM path-regex: expected exit 1 + diagnostic, got exit $rc_badre, stderr: $(cat "$TMP/bad_regex.err")"
+[ ! -s "$TMP/bad_regex.out" ] \
+    && ok "uncompilable FROM path-regex: no XML emitted on refusal" \
+    || no "uncompilable FROM path-regex: XML emitted alongside the refusal (violations=\"0\" would read as a pass)"
+
 # a well-formed file is UNAFFECTED by the tightened parser (no false-positive rejection).
 "$BIN" . --arch=rules.txt --no-cache >/dev/null 2>"$TMP/wellformed.err"
 rc_wf=$?

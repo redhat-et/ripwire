@@ -233,25 +233,93 @@ else
     ok "live corroboration: the signal fires on a real dependency-capable pair too: $livePos"
 fi
 
-# ── 2b. §A9.3 — every row with a DEP-INCAPABLE side must carry dep_capable="0" and must NOT carry
-#      surprising="1". Swept over the UNCAPPED run: one leaked row is the whole defect (a .pdf<->.pptx
-#      pair rendered as hidden coupling), so a sampled check would not be a gate.
-badRows="$( grep -oE '<pair [^>]*/>' "$TMP/full" | grep 'surprising="1"' \
-            | grep -E '(a|b)="[^"]*\.(sh|md|pdf|pptx|json|rb|txt)"' | head -n3 )"
+# ── 2b. §A9.3 — every row whose two sides could NOT share a static dependency must carry dep_capable="0"
+#      and must NOT carry surprising="1". Swept over the UNCAPPED run: one leaked row is the whole defect
+#      (a .pdf<->.pptx pair rendered as hidden coupling), so a sampled check would not be a gate.
+#
+#      THE PREDICATE IS PAIRWISE, NOT PER-FILE (kParserVer 81). This arm used to read "one side is
+#      .sh/.md/.pdf/.json => incapable", which was a correct SHORTHAND only while .sh was incapable. Bash,
+#      Ruby, Lua and Elixir became dependency-capable in the four-language import round, so the sweep is
+#      now written as the real rule: surprising= is defined only where both sides resolve in the SAME
+#      dependency dialect (lintrules.h::dependencyPairCapable). A .sh CAN `source` a .sh — that pair is
+#      now legitimately surprising-eligible — and a .sh still cannot `source` a .h, so THAT pair must
+#      stay dep_capable="0". Written as a dialect comparison rather than a file-type list, this arm is
+#      strictly stronger than the one it replaces: it also catches the .js<->.h and .py<->.cpp
+#      cross-dialect rows the old per-file form always let through.
+dialectOf(){   # path -> dialect token, or "none"
+    case "${1##*.}" in
+        c|cc|cpp|cxx|h|hpp|hh|hxx|m|mm) printf 'cfam' ;;
+        ts|tsx|mts|cts|js|jsx|mjs|cjs)  printf 'web'  ;;
+        py) printf 'py' ;;   go) printf 'go' ;;   rs) printf 'rs' ;;
+        swift) printf 'swift' ;;  java) printf 'java' ;;  cs) printf 'cs' ;;  php) printf 'php' ;;
+        sh|bash|zsh) printf 'sh' ;;  rb) printf 'rb' ;;  lua) printf 'lua' ;;  ex|exs) printf 'ex' ;;
+        *) printf 'none' ;;
+    esac
+}
+badRows=""
+while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    pa="$( printf '%s' "$row" | sed -E 's/.* a="([^"]*)".*/\1/' )"
+    pb="$( printf '%s' "$row" | sed -E 's/.* b="([^"]*)".*/\1/' )"
+    da="$( dialectOf "$pa" )"; db="$( dialectOf "$pb" )"
+    if [ "$da" = "none" ] || [ "$da" != "$db" ]; then
+        badRows="$badRows$row
+"
+    fi
+done <<EOF
+$( grep -oE '<pair [^>]*/>' "$TMP/full" | grep 'surprising="1"' )
+EOF
 if [ -n "$badRows" ]; then
-    no "§A9.3: a dependency-INCAPABLE pair still claims surprising=\"1\" (vacuously true, reads as hidden coupling):"
-    printf '        %s\n' "$badRows"
+    no "§A9.3: a pair that could not share a static dependency still claims surprising=\"1\" (vacuously true, reads as hidden coupling):"
+    printf '%s' "$badRows" | head -n3 | sed 's/^/        /'
 else
-    ok "§A9.3: no .sh/.md/.pdf/.pptx/.json-sided pair carries surprising=\"1\" (uncapped sweep)"
+    ok "§A9.3: every surprising=\"1\" row has BOTH sides in the same dependency dialect (uncapped sweep)"
 fi
 
-depRow="$( grep -oE '<pair [^>]*/>' "$TMP/full" | grep -E '(a|b)="[^"]*\.sh"' | head -n1 )"
+# The dep_capable="0" tell, on a CROSS-dialect .sh row: a .sh and a C-family/Python/JS file can never
+# share an include edge, so the row must keep its place and say why.
+depRow=""
+while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    pa="$( printf '%s' "$row" | sed -E 's/.* a="([^"]*)".*/\1/' )"
+    pb="$( printf '%s' "$row" | sed -E 's/.* b="([^"]*)".*/\1/' )"
+    da="$( dialectOf "$pa" )"; db="$( dialectOf "$pb" )"
+    if { [ "$da" = "sh" ] && [ "$db" != "sh" ]; } || { [ "$db" = "sh" ] && [ "$da" != "sh" ]; }; then
+        depRow="$row"; break
+    fi
+done <<EOF
+$( grep -oE '<pair [^>]*/>' "$TMP/full" )
+EOF
 if [ -z "$depRow" ]; then
-    skip "live dep_capable=\"0\" tell — no .sh-sided pair clears the co-change support floor in THIS corpus's history (fresh-history export); the duty is discharged by the fixture §A9.3 arm above"
+    skip "live dep_capable=\"0\" tell — no CROSS-dialect .sh-sided pair clears the co-change support floor in THIS corpus's history (fresh-history export); the duty is discharged by the fixture §A9.3 arm above"
 elif echo "$depRow" | grep -q 'dep_capable="0"'; then
-    ok "§A9.3: a .sh-sided pair keeps its row and carries the dep_capable=\"0\" tell: $depRow"
+    ok "§A9.3: a cross-dialect .sh-sided pair keeps its row and carries the dep_capable=\"0\" tell: $depRow"
 else
-    no "§A9.3: a .sh-sided pair carries neither surprising= nor dep_capable=\"0\" — the row is silent about why: $depRow"
+    no "§A9.3: a cross-dialect .sh-sided pair carries neither surprising= nor dep_capable=\"0\" — the row is silent about why: $depRow"
+fi
+
+# POSITIVE CONTROL for the pairwise rule (kParserVer 81) — without it, every assertion above passes on a
+# build where dependencyPairCapable() returned false for everything. A .sh<->.sh pair IS capable now, so
+# it must carry a surprising= verdict (either value) and must NOT be dismissed with dep_capable="0".
+shShRow=""
+while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    pa="$( printf '%s' "$row" | sed -E 's/.* a="([^"]*)".*/\1/' )"
+    pb="$( printf '%s' "$row" | sed -E 's/.* b="([^"]*)".*/\1/' )"
+    if [ "$( dialectOf "$pa" )" = "sh" ] && [ "$( dialectOf "$pb" )" = "sh" ]; then
+        shShRow="$row"; break
+    fi
+done <<EOF
+$( grep -oE '<pair [^>]*/>' "$TMP/full" )
+EOF
+if [ -z "$shShRow" ]; then
+    skip "live .sh<->.sh capability — no shell-to-shell pair clears the co-change support floor in THIS corpus's history"
+elif echo "$shShRow" | grep -q 'dep_capable="0"'; then
+    no "§A9.3 positive: a .sh<->.sh pair is dismissed dep_capable=\"0\", but a shell script CAN source a shell script: $shShRow"
+elif echo "$shShRow" | grep -q 'surprising='; then
+    ok "§A9.3 positive: a .sh<->.sh pair is pair-capable and carries a real surprising= verdict: $shShRow"
+else
+    no "§A9.3 positive: a .sh<->.sh pair is silent — neither surprising= nor dep_capable=: $shShRow"
 fi
 
 # ── 2c. §A9.3 — the per-file path must speak the SAME vocabulary as the repo-wide one (§P9.1's rule,

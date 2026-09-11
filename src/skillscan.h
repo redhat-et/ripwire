@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // skillscan.h — P1-C automatic skill security scanning.
 // Scans markdown skill files LINE BY LINE for four vulnerability categories:
@@ -917,23 +920,23 @@ inline void printSkillScanArtifact( std::FILE* out, const std::vector<SkillScanR
     const std::size_t shown  = total < kSkillScanFindingCap ? total : kSkillScanFindingCap;
     const bool         capped = shown < total;
 
-    std::fprintf( out, "<skillscan files=\"%d\" findings=\"%zu\"", filesScanned, total );
+    rw::emitTo( out, "<skillscan files=\"{}\" findings=\"{}\"", filesScanned, total );
     if( filesSkipped > 0 )
     {
-        std::fprintf( out, " skipped=\"%d\"", filesSkipped );
+        rw::emitTo( out, " skipped=\"{}\"", filesSkipped );
     }
     if( capped )
     {
-        std::fprintf( out, " shown=\"%zu\" capped=\"1\"", shown );
+        rw::emitTo( out, " shown=\"{}\" capped=\"1\"", shown );
     }
-    std::fprintf( out, " verdict=\"%s\">", verdict );
+    rw::emitTo( out, " verdict=\"{}\">", verdict );
     for( std::size_t i = 0; i < shown; ++i )
     {
         const SkillScanRow& r = rows[i];
-        std::fprintf( out, "<f p=\"%s:%d\" rule=\"%s\" sev=\"%s\"/>",
+        rw::emitTo( out, "<f p=\"{}:{}\" rule=\"{}\" sev=\"{}\"/>",
                      escapeXmlAttr( r.path ).c_str(), r.finding.line, r.finding.rule, skillSeverityAttr( r.finding.sev ).c_str() );
     }
-    std::fprintf( out, "</skillscan>\n" );
+    rw::emitRaw( out, "</skillscan>\n" );
 }
 
 }   // namespace rw

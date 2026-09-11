@@ -1,0 +1,200 @@
+# capsweep corpus — one real invocation per line, harvested from the recorded showcase run so the
+# population is what the tool is actually asked to do, not what a harness author would think to try.
+# The root is already on the line where a verb takes one; do not prepend another.
+# $RIPWIRE_CAPSWEEP_TMP stands in for the scratch directory of the run this was harvested from — the
+# literal was a machine-local macOS temp path, which would have pinned the corpus to one laptop.
+--scan-skill=skills/ripwire-orient/SKILL.md
+--scan-skills=skills
+--version
+.
+. --affected=src/graph.h
+. --arch=test/archfix/rules.txt
+. --around=rankGraphTeleport
+. --around=rankGraphTeleport --around-depth=2
+. --around=rankGraphTeleport --around-fanout=4
+. --at=src/graph.h:3062
+. --at=src/graph.h:999999
+. --batch=$RIPWIRE_CAPSWEEP_TMP
+. --cache=$RIPWIRE_CAPSWEEP_TMP
+. --callees=rankGraphTeleport
+. --callers=@src/graph.h:3062
+. --callers=DoesNotExist
+. --callers=rankGraphTeleport
+. --callers=rankGraphTeleport --format=bogus
+. --callers=rankGraphTeleport --format=columnar
+. --callers=rankGraphTeleport --json
+. --callers=rankGraphTeleport --legend=compact
+. --clones
+. --cochange
+. --cochange --cochange-groups
+. --cochange --cochange-recur=2
+. --comment-coherence --limit=8
+. --communities
+. --community=0
+. --connect=rankGraphTeleport,runEval,getIndex
+. --context-ratio --limit=8
+. --dead-code=src
+. --deps
+. --dmm
+. --dmm=HEAD
+. --dmm=HEAD~3..HEAD
+. --doc-drift
+. --doc-drift --gateability
+. --doc-drift --with-history
+. --doctor
+. --doctor --agent=claude
+. --doctor --agent=nosuch
+. --ensemble --limit=8
+. --eval
+. --eval-retrieval
+. --eval-stray=$RIPWIRE_CAPSWEEP_TMP
+. --exclude=present --exclude=bench --top-k=5
+. --exemplar="format byte sizes for humans"
+. --exercises=test/regression.sh
+. --expand=compressBody --top-k=0 --compress
+. --expand=rankGraphTeleport --top-k=0
+. --expand=rankGraphTeleport:1-12 --top-k=0
+. --expand=readAckRecords --top-k=0 --no-redact
+. --export=cc.json:$RIPWIRE_CAPSWEEP_TMP
+. --external-surface
+. --external-surface --include-builtins
+. --field-affinity
+. --field-affinity=Symbol
+. --flags
+. --flags --flip=RIPWIRE_ASA
+. --flags --flip=RIPWIRE_ASAN
+. --for="cache invalidation" --format=candidates --top-k=5
+. --for="incremental cache invalidation when a file content hash changes"
+. --for="pagerank power iteration" --detail=2
+. --for="pagerank power iteration" --with-graph
+. --for="quality delta acks ledger rubber stamp"
+. --for="quality delta acks ledger rubber stamp" --no-doc-mention
+. --for="rankGraphTeleport"
+. --for="rankGraphTeleport" --no-route
+. --for="rankGraphTeleport" --signatures-only
+. --for="tree-sitter parse of a source file" --adaptive
+. --for="tree-sitter parse of a source file" --auto-bodies
+. --for="tree-sitter parse of a source file" --legend=compact
+. --for="why does src/lexical.h chooseForRanker pick name-exact BM25"
+. --for="why does src/lexical.h chooseForRanker pick name-exact BM25" --no-mention-b
+. --from-trace=-
+. --graph-query='and(callers(name("rankGraphTeleport"),2),kind(all,fn))'
+. --grep=DEGRADED_PATH_ALERT
+. --grep=DEGRADED_PATH_ALERT --and=cache
+. --grep=DEGRADED_PATH_ALERT --grep-before=1 --grep-after=2 --limit=3
+. --grep=DEGRADED_PATH_ALERT --grep-context=1
+. --grep=DEGRADED_PATH_ALERT --grep-in=any
+. --grep=DEGRADED_PATH_ALERT --grep=cache
+. --grep=DEGRADED_PATH_ALERT --handles
+. --grep=DEGRADED_PATH_ALERT --legend=compact
+. --grep=DEGRADED_PATH_ALERT --not=test --grep-scope=file
+. --grep=deterministic
+. --handoff
+. --handoff --token-budget=1200
+. --help-task="calls(runDefaultMap, rankGraphTeleport)"
+. --help-task="write a cheerful release announcement"
+. --hotspots
+. --hotspots --json
+. --hotspots --limit=3 --offset=3
+. --hotspots --since="2 weeks ago"
+. --html=$RIPWIRE_CAPSWEEP_TMP/
+. --ignore-tests --top-k=5
+. --impact=rankGraphTeleport
+. --layout=Lang
+. --layout=Symbol
+. --lego=Vehicle
+. --lint
+. --lint --lint-ignore=naming-,cache-
+. --lint --lint-select=cach-
+. --lint --lint-select=cache-
+. --lint --lint-select=nosuchfamily
+. --lint --naming-locals
+. --lint --sarif
+. --lint --sarif --limit=5
+. --lint-catalog
+. --lint-rules=test/lintrulesfix/rules
+. --map-diff --top-k=5
+. --match='(if_statement) @i'
+. --match='(if_statement)'
+. --max-file-size=8K --top-k=3
+. --max-tokens=1500
+. --mentions=rankGraphTeleport
+. --merge-scout=HEAD~2,HEAD~1
+. --mermaid
+. --metrics --top-k=10
+. --naming-calibration
+. --naming-consistency --limit=8
+. --no-cache --top-k=3
+. --no-ignore --top-k=3
+. --no-stable --top-k=3
+. --nonlocal-state --limit=8
+. --notes
+. --order=stable --top-k=5
+. --outline=rankGraphTeleport --top-k=0
+. --outline=rankGraphTeleport:1-10 --top-k=0
+. --owners
+. --pack-signatures --top-k=10
+. --pack-task="add a new output format flag to the CLI"
+. --pack-task="add a new output format flag to the CLI" --partition=3
+. --pack-top-n=3 --top-k=0
+. --path=main,rankGraphTeleport
+. --pattern='DEGRADED_PATH_ALERT(...)'
+. --pattern='rankGraphTeleport($A, $B, $C)'
+. --pattern='x'
+. --plan-lanes --brief=$RIPWIRE_CAPSWEEP_TMP
+. --plan-lanes=3 --task="add a --since filter to the doc-drift verb and cover it wit
+. --plan-lanes=99 --task=x
+. --plan-lint=test/planlintfix/wave.md
+. --plan-lint=test/planlintfix/wave_ledger.md
+. --pr-context
+. --pr-context=HEAD~1
+. --quality-delta
+. --quality-panel
+. --query="teleport pagerank" --top-k=5
+. --rank-by=bogus --top-k=5
+. --rank-by=churn --top-k=5
+. --readability --limit=8
+. --recall="quality delta gating exit codes"
+. --regex='fnv1a\w+'
+. --report
+. --run-timeout=5
+. --run-trace="cat $RIPWIRE_CAPSWEEP_TMP
+. --run-trace="sleep 30" --run-timeout=2
+. --run-trace="true"
+. --safe-delete=DoesNotExist
+. --safe-delete=rankGraphTeleport
+. --scip=does_not_exist.scip --callers=rankGraphTeleport
+. --seams
+. --situ
+. --skipped
+. --slice-depth=3
+. --slice=rankGraphTeleport
+. --slice=rankGraphTeleport:nosuchvar
+. --slice=rankGraphTeleport:teleport
+. --slice=rankGraphTeleport:teleport --legend=compact
+. --slice=rankGraphTeleport:teleport --slice-flow=back --slice-depth=3
+. --slice=rankGraphTeleport:teleport --slice-flow=fwd
+. --stray-content=lane
+. --stray-content=lane --abi
+. --stray-content=lane/ --plan
+. --stray-content=worktree-agent-
+. --stray-content=zzzz-no-such-ref --plan
+. --test-gate
+. --token-budget=100
+. --top-k=0
+. --top-k=0 --expand=rankGraphTeleport
+. --top-k=5
+. --tree
+. --uses=rankGraphTeleport
+. --verify="calls(runDefaultMap, rankGraphTeleport)"
+. --verify="contains(src/graph.h, \"no such literal anywhere\")"
+. --verify="frobnicate(x)"
+. --verify="unused(rankGraphTeleport)"
+. --whereis=computeOnePairOverlap --with-history
+. --whereis=rankGraphTeleport
+. --zoom
+. --zoom --zoom-levels=3
+$RIPWIRE_CAPSWEEP_TMP/aux/kbcor
+skills --eval-skills=$RIPWIRE_CAPSWEEP_TMP
+src test --top-k=5
+wrap claude

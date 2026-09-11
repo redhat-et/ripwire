@@ -1000,7 +1000,10 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "connect",                  "path paths symbols radius legend" },
     { "explore",                  "path paths task budget_tokens partition legend" },
     { "from_trace",               "path paths trace budget_tokens legend" },
-    { "edit_check",               "path paths symbol new_body legend" },
+    // 2026-09-10: limit/offset are DECLARED here because the verb now HONORS them (mcpPageArgs -> the
+    // unflagged-row window in editcheck.h), the same rule the `impact`/`uses` rows above state. They
+    // page the CONTEXT rows only; the flagged callers this verb exists to name are never windowed.
+    { "edit_check",               "path paths symbol new_body limit offset legend" },
     { "whereis",                  "path symbol kind limit offset legend" },
     { "stray_content",            "path kind limit offset legend" },
     { "flags",                    "path kind symbol legend" },
@@ -1199,8 +1202,16 @@ static_assert( mcpRuleVerbsAreKnown( kMcpGitOnlyVerbs, kMcpGitOnlyCount ),
 //        they read the same bytes.
 //
 // `required` is the Required-rule rows of kMcpRequiredFields — which reproduces all 30 hand-written
-// `required` arrays exactly, verified by the gate. AnyOf rows render as JSON Schema `anyOf` (exemplar's
-// kind-or-task, M4's second half: expressible, and never expressed).
+// `required` arrays exactly, verified by the gate; when that list comes out EMPTY the key is omitted
+// rather than emitted as `[]` (identical meaning from draft-06 on, and the shape strict validators and
+// the reference SDK expect).
+//
+// AnyOf rows used to render as a top-level JSON Schema `anyOf` (exemplar's kind-or-task, M4's second
+// half: expressible, and never expressed). ISSUE #48 took that keyword away — the Anthropic tool-schema
+// validator refuses oneOf/allOf/anyOf at the top level of a tool input schema, so the one stanza that
+// used it made ripwire unregisterable in opencode and any other strict client. The rows still exist and
+// still mean the same thing; what changed is WHERE the meaning is written. See anyOfDescriptionPrefix()
+// below for the reasoning, and test/mcpstrictschemacheck.sh for the gate that holds both halves.
 
 // A field's rendered `{"type":…}` fragment, from the McpValueSpec column.
 inline std::string jsonTypeFragmentFor( std::string_view field )
@@ -1267,11 +1278,69 @@ inline std::string_view fieldDescriptionFor( std::string_view verb, std::string_
 // is deliberately free of project includes beyond jsonesc.h, which owns the canonical escaper.
 inline std::string schemaEscape( std::string_view s ) { return jsonesc::escapeMcp( s ); }
 
+// The AnyOf group of an ALREADY-RESOLVED verb, in TABLE order — empty for the 30 verbs that have none.
+// Table order is load bearing twice: the group's FIRST member is the one the dispatch prefers when several
+// are sent (mcpverbs.h: `const std::string arg = !kind.empty() ? kind : task;`), and the description below
+// states that precedence, so test/mcpstrictschemacheck.sh (D4) checks the claim against the two payloads
+// rather than against this comment.
+inline std::vector<std::string_view> anyOfGroupFor( std::string_view resolved )
+{
+    std::vector<std::string_view> group;
+    for( const McpFieldSpec& row : kMcpRequiredFields )
+    {
+        if( resolved == std::string_view( row.verb ) && row.rule == FieldRule::AnyOf )
+        {
+            group.push_back( row.field );
+        }
+    }
+    return group;
+}
+
+// ISSUE #48 — the requiredness a top-level JSON Schema `anyOf` used to carry, rendered as a DESCRIPTION
+// prefix on each member of the group instead.
+//
+// The keyword was correct JSON Schema and is unusable: the Anthropic tool-schema validator refuses
+// `oneOf`/`allOf`/`anyOf` at the top level of a tool input schema ("input_schema does not support oneOf,
+// allOf, or anyOf at the top level"), so every strict MCP client — opencode over @ai-sdk/anthropic, and
+// anything openclaw normalises into one — rejected the whole `exemplar` stanza rather than the keyword.
+//
+// The honest flatten is NOT "make both optional and say nothing": that would leave the schema silent about
+// a requirement the server still enforces, which is the overclaim-by-omission this project's output rules
+// forbid. It is to move the fact to the two places a strict client can still read it — the member's own
+// `description`, which arm (A/M12) of mcpcontractcheck already obliges every declared property to carry,
+// and the runtime refusal in missingFieldRefusal(), which was always the ACTUAL enforcement (the keyword
+// only ever duplicated it client-side). What is genuinely lost is pre-flight machine validation; what is
+// kept is every word of the contract, in the surface a human or a model reads before calling.
+inline std::string anyOfDescriptionPrefix( const std::vector<std::string_view>& group, std::string_view field )
+{
+    std::string others;
+    for( const std::string_view g : group )
+    {
+        if( g == field )
+        {
+            continue;
+        }
+        if( !others.empty() )
+        {
+            others += " or ";
+        }
+        others += std::string( g );
+    }
+    return "REQUIRED unless " + others + " is given; " + std::string( group.front() ) + " wins — ";
+}
+
 // The whole `"inputSchema":{...}` value for one verb. `pathIsRequired` comes from the live server's policy:
 // true only when the server carries no startup/pinned root, i.e. when the caller really must send one.
 inline std::string inputSchemaFor( std::string_view verb, bool pathIsRequired )
 {
     const std::vector<std::string_view> fields = declaredFieldsFor( verb );
+
+    std::string_view resolved = verb;
+    for( const McpVerbAlias& alias : kMcpVerbAliases )
+    {
+        if( resolved == alias.alias ) { resolved = alias.target; break; }
+    }
+    const std::vector<std::string_view> anyOf = anyOfGroupFor( resolved );
 
     std::string out   = "{\"type\":\"object\",\"properties\":{";
     bool        first = true;
@@ -1283,66 +1352,50 @@ inline std::string inputSchemaFor( std::string_view verb, bool pathIsRequired )
         }
         first = false;
         out += "\"" + std::string( field ) + "\":{" + jsonTypeFragmentFor( field );
-        const std::string_view desc = fieldDescriptionFor( verb, field );
+        std::string desc( fieldDescriptionFor( verb, field ) );
+        // A one-member "group" cannot be an either/or, and the prefix's wording would be nonsense for one;
+        // such a row belongs in `required` and the schema says nothing extra.
+        if( anyOf.size() > 1 && std::find( anyOf.begin(), anyOf.end(), field ) != anyOf.end() )
+        {
+            desc = anyOfDescriptionPrefix( anyOf, field ) + desc;
+        }
         if( !desc.empty() )
         {
             out += ",\"description\":\"" + schemaEscape( desc ) + "\"";
         }
         out += "}";
     }
-    out += "},\"required\":[";
+    out += "}";
 
-    bool firstReq = true;
-    const auto req = [ & ]( std::string_view f )
-    {
-        if( !firstReq )
-        {
-            out += ",";
-        }
-        firstReq = false;
-        out += "\"" + std::string( f ) + "\"";
-    };
     // M4: `path` first when this server cannot supply one itself.
+    std::vector<std::string_view> required;
     if( pathIsRequired )
     {
-        req( "path" );
+        required.push_back( "path" );
     }
-
-    std::string_view resolved = verb;
-    for( const McpVerbAlias& alias : kMcpVerbAliases )
-    {
-        if( resolved == alias.alias ) { resolved = alias.target; break; }
-    }
-
-    std::vector<std::string_view> anyOf;
     for( const McpFieldSpec& row : kMcpRequiredFields )
     {
-        if( resolved != std::string_view( row.verb ) )
+        if( resolved == std::string_view( row.verb ) && row.rule == FieldRule::Required )
         {
-            continue;
-        }
-        if( row.rule == FieldRule::Required )
-        {
-            req( row.field );
-        }
-        else if( row.rule == FieldRule::AnyOf )
-        {
-            anyOf.push_back( row.field );
+            required.push_back( row.field );
         }
     }
-    out += "]";
 
-    // M4's second half: exemplar's kind-or-task IS expressible, and was not expressed.
-    if( !anyOf.empty() )
+    // Nine verbs on a rooted server require nothing at all. `"required":[]` and an ABSENT `required` mean
+    // the same thing in every draft from 06 on, but draft-04-strict validators reject the empty array
+    // outright, and it is the shape the reference MCP SDK omits — so the empty case emits no key. This is
+    // also what pays for the description bytes above: −126 B here against +90 B there, so the fix lands
+    // NET NEGATIVE against test/mcpmanifestcheck.sh's 41,000 B ceiling and does not move it.
+    if( !required.empty() )
     {
-        out += ",\"anyOf\":[";
-        for( std::size_t i = 0; i < anyOf.size(); ++i )
+        out += ",\"required\":[";
+        for( std::size_t i = 0; i < required.size(); ++i )
         {
             if( i )
             {
                 out += ",";
             }
-            out += "{\"required\":[\"" + std::string( anyOf[i] ) + "\"]}";
+            out += "\"" + std::string( required[i] ) + "\"";
         }
         out += "]";
     }

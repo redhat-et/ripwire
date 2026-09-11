@@ -10,9 +10,18 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 [ -x "$BIN" ] || { echo "codexwrapcheck: no binary at $BIN — build first"; exit 2; }
 "$BIN" wrap codex --force >"$TMP/out" 2>"$TMP/err"
 
+# CLI-FIRST, asserted as the header has always claimed. Until 2026-09-08 this line asserted the
+# first actionable line was "[mcp_servers.ripwire]" -- the MCP table -- which contradicted this
+# gate's own title. It passed only because the codex recipe emitted no CLI line at all, so the TOML
+# stanza was the only actionable line there was: a proxy that had quietly stopped measuring the
+# thing it named. The recipe now leads with the CLI, so the assertion says so.
 first_command="$( grep -v '^#' "$TMP/out" | sed '/^[[:space:]]*$/d' | head -1 )"
-[ "$first_command" = "[mcp_servers.ripwire]" ] || {
-    echo "codexwrapcheck: first actionable line is not the restricted MCP table: $first_command"
+case "$first_command" in
+    *" . --for="*) ;;
+    *) echo "codexwrapcheck: first actionable line is not the CLI invocation: $first_command"; exit 1 ;;
+esac
+grep -v '^#' "$TMP/out" | grep -q '^\[mcp_servers\.ripwire\]$' || {
+    echo "codexwrapcheck: the TOML alternative is gone -- it is still Codex's documented MCP form"
     exit 1
 }
 grep -q '^\[mcp_servers\.ripwire\]$' "$TMP/out" || { echo "codexwrapcheck: TOML fallback missing"; exit 1; }

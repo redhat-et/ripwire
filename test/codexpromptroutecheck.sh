@@ -14,7 +14,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 command -v jq >/dev/null 2>&1 || { echo "jq required"; exit 2; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
-"$BIN" --help 2>&1 | grep -q -- '--help-task=' \
+"$BIN" --help=all 2>&1 | grep -q -- '--help-task=' \
     || { echo "codexpromptroutecheck: supplied binary does not expose --help-task"; exit 1; }
 
 mkdir -p "$TMP/bin" "$TMP/repo/.git" "$TMP/home"

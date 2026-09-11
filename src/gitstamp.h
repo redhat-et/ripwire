@@ -40,6 +40,17 @@ namespace rw { namespace gitstamp
 
 // The stamp value itself: "<9-hex-char sha>[+dirty]", or "" when `root` is not a git repo with a resolvable
 // HEAD (the caller's job is to omit the attribute on empty, never to print a placeholder).
+// 2026-09-06 stranger audit: a `--depth=1` clone (actions/checkout's default, and how many people clone a
+// repo they only want to read) has ONE commit of history. Every churn= was 1, --hotspots ranked on
+// complexity alone under a "12mo@HEAD" window label, --doctor said history="1", and the --html page said
+// CHURN_OK = 1 — nothing anywhere said the history was truncated, so a reader took a shallow clone's
+// churn for the repository's churn. The stamp is the one anchor every repo-reading verb already carries,
+// so the disclosure rides it: at="<sha>[+dirty][+shallow]". One extra `git rev-parse` per stamped verb.
+inline bool isShallow( const std::string& root )
+{
+    return quality::gitOneLine( root, "rev-parse --is-shallow-repository 2>/dev/null" ) == "true";
+}
+
 inline std::string stampAt( const std::string& root )
 {
     // NO SUBPROCESS ON A NON-GIT ROOT (M10 follow-up, lane L9, capture-audit-2026-09-04). The COST note above
@@ -60,7 +71,7 @@ inline std::string stampAt( const std::string& root )
         return {}; // not a git repo / no HEAD
     }
     const bool dirty = !quality::gitOneLine( root, "status --porcelain 2>/dev/null" ).empty();
-    return sha.substr( 0, 9 ) + ( dirty ? "+dirty" : "" );
+    return sha.substr( 0, 9 ) + ( dirty ? "+dirty" : "" ) + ( isShallow( root ) ? "+shallow" : "" );
 }
 
 // Formats a ready-to-splice ` at="VALUE"` (leading space included) — or "" when `root` isn't a git repo, so

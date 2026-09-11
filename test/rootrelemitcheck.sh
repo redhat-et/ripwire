@@ -189,6 +189,12 @@ data = re.sub(r"\b(file|bundle) \d+B\b", r"\1 @N@B", data)          # --expand r
 data = re.sub(r"\[index: [^\]]*\]", "[index: @IDX@]", data)
 data = re.sub(r"relevance \d+\.\d+", "relevance @S@", data)
 data = re.sub(r"(n0\[\")[^\"]*(<br/>)", r"\1@R@\2", data)            # --mermaid root NODE LABEL renders the anchor          # see the RANKING RESIDUAL note below
+# 2026-09-06: the --html page carries the root'"'"'s LAST SEGMENT as its name (title, h1, const ROOT_NAME) — the two
+# fixtures here are named "a" and "d", so that is identity, not depth. Neutralise the name, never the path: the
+# path envelope (const ROOT) is still held to exactly one anchor by ARM5.
+data = re.sub(r"const ROOT_NAME = \"[^\"]*\"", "const ROOT_NAME = \"@NAME@\"", data)
+data = re.sub(r"const ROOT = \"[^\"]*\"", "const ROOT = \"@NAME@\"", data)          # since 2026-09-06 a two-segment label ('…/parent/name'), never the path
+data = re.sub(r"(<title>|<h1>)ripwire — [^<]*", r"\1ripwire — @NAME@", data)
 sys.stdout.write(data)
 ' "$1"; }
 

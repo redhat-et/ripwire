@@ -45,7 +45,10 @@ for i in 1 2 3; do
            "$i" "$i" "$i" "$i" "$i" "$i" "$i" > "$FIX/src/mod$i.cpp"
 done
 ( cd "$FIX" && git add -A >/dev/null && git commit -qm change )
-ROOT="$FIX"
+# Every crawl below targets $FIX -- the scratch repo -- and never this checkout. (It used to be rebound
+# as ROOT="$FIX" right here, and two readers in a row took the appends to "$ROOT/src/mod4.cpp" below for
+# writes into the real src/; issue #71 named this gate for a flake gateexitcheck caused. Spelling the
+# scratch root as what it is leaves `grep '"$ROOT/src' test/prbudgetcheck.sh` nothing to misread.)
 BASE=HEAD~1
 
 # helper: pull an attribute value out of the <pr-context …> open tag
@@ -57,7 +60,7 @@ filecount(){ grep -o '<file ' "$1" | wc -l | tr -d ' '; }
 #    below it would pass (or SKIP) vacuously. Require the real success shape first: exit 0 and a
 #    well-formed <pr-context> root tag (binoverridecheck.sh wave-4 item #10).
 UNC_RC=0
-"$BIN" "$ROOT" --pr-context="$BASE" --no-cache >"$TMP/unc" 2>"$TMP/unc.err" || UNC_RC=$?
+"$BIN" "$FIX" --pr-context="$BASE" --no-cache >"$TMP/unc" 2>"$TMP/unc.err" || UNC_RC=$?
 if [ "$UNC_RC" -ne 0 ] || ! grep -q '<pr-context' "$TMP/unc"; then
     no "prbudgetcheck: --pr-context invocation failed or produced no <pr-context> root (rc=$UNC_RC) — $( tail -c 300 "$TMP/unc.err" )"
     exit "$fail"
@@ -77,7 +80,7 @@ UNC_FILES=$( filecount "$TMP/unc" )
 [ "$UNC_FILES" -gt 0 ] || { echo "  SKIP  prbudgetcheck (no changed indexed files vs $BASE)"; exit 0; }
 
 # ── #2: a LARGE budget fits at level 0: truncated="none", est<=budget, files all present ────────────────
-"$BIN" "$ROOT" --pr-context="$BASE" --max-tokens=100000 --no-cache >"$TMP/big" 2>/dev/null
+"$BIN" "$FIX" --pr-context="$BASE" --max-tokens=100000 --no-cache >"$TMP/big" 2>/dev/null
 BE=$( attr "$TMP/big" est_tokens ); BT=$( attr "$TMP/big" truncated ); BF=$( filecount "$TMP/big" )
 ALL_FILES=$( attr "$TMP/big" files )
 { [ -n "$BE" ] && [ "$BE" -le 100000 ] && [ "$BT" = "none" ] && [ "$BF" = "$ALL_FILES" ] && [ -z "$( attr "$TMP/big" budget_default )" ]; } \
@@ -87,7 +90,7 @@ ALL_FILES=$( attr "$TMP/big" files )
 # ── #3: SMALL budgets — est_tokens <= budget AND all files still present structurally ───────────────────
 underok=1; filesok=1
 for T in 20000 8000 4000 2000; do
-    "$BIN" "$ROOT" --pr-context="$BASE" --max-tokens=$T --no-cache >"$TMP/c_$T" 2>/dev/null
+    "$BIN" "$FIX" --pr-context="$BASE" --max-tokens=$T --no-cache >"$TMP/c_$T" 2>/dev/null
     E=$( attr "$TMP/c_$T" est_tokens ); TR=$( attr "$TMP/c_$T" truncated ); FC=$( filecount "$TMP/c_$T" )
     # RE-PINNED (P4, L7): files are windowed ONLY when even the structural floor exceeds the budget, and then the
     # cut is disclosed — shown= (the plain quintet) equals the <file> count and capped="1" + next= ride the root.
@@ -118,8 +121,8 @@ else
 fi
 
 # ── #5: DETERMINISM — a fixed budget is byte-identical run-to-run ───────────────────────────────────────
-"$BIN" "$ROOT" --pr-context="$BASE" --max-tokens=4000 --no-cache >"$TMP/d1" 2>/dev/null
-"$BIN" "$ROOT" --pr-context="$BASE" --max-tokens=4000 --no-cache >"$TMP/d2" 2>/dev/null
+"$BIN" "$FIX" --pr-context="$BASE" --max-tokens=4000 --no-cache >"$TMP/d1" 2>/dev/null
+"$BIN" "$FIX" --pr-context="$BASE" --max-tokens=4000 --no-cache >"$TMP/d2" 2>/dev/null
 diff -q "$TMP/d1" "$TMP/d2" >/dev/null && ok "budgeted --pr-context deterministic (byte-identical twice)" \
     || no "budgeted --pr-context NON-deterministic under a fixed budget"
 
@@ -149,10 +152,10 @@ fi
 # which must not drift on which disclosures they carry" is prRootOpenText's own header sentence; this arm is
 # that sentence made mechanical. Derived, not hardcoded: the required set is the NON-EMPTY working-tree root's
 # own attribute names, minus a DECLARED exemption list of the ones that exist only when there is a cut.
-printf 'int probeEmptyRoot() { return 1; }\n' >> "$ROOT/src/mod4.cpp"
-"$BIN" "$ROOT" --pr-context --no-cache >"$TMP/wt_dirty" 2>/dev/null
-( cd "$ROOT" && git checkout -- src/mod4.cpp )
-"$BIN" "$ROOT" --pr-context --no-cache >"$TMP/wt_clean" 2>/dev/null
+printf 'int probeEmptyRoot() { return 1; }\n' >> "$FIX/src/mod4.cpp"
+"$BIN" "$FIX" --pr-context --no-cache >"$TMP/wt_dirty" 2>/dev/null
+( cd "$FIX" && git checkout -- src/mod4.cpp )
+"$BIN" "$FIX" --pr-context --no-cache >"$TMP/wt_clean" 2>/dev/null
 
 rootattrs(){ grep -oE '<pr-context [^>]*>' "$1" | head -1 | grep -oE '[a-z_]+="' | sed 's/="$//' | LC_ALL=C sort -u; }
 EXEMPT='^(shown|capped|total|has_more|next_offset|offset|limit|next)$'   # the page window: only when a cut happened
@@ -257,7 +260,7 @@ sweep_root(){   # $1 label, $2... argv after the binary and root
     local label="$1"; shift
     local T E B TR
     for T in 100 500 1000 2000 2500 3000 8000 20000; do
-        "$BIN" "$ROOT" "$@" --max-tokens=$T --no-cache >"$TMP/s_$T" 2>/dev/null
+        "$BIN" "$FIX" "$@" --max-tokens=$T --no-cache >"$TMP/s_$T" 2>/dev/null
         E=$( attr "$TMP/s_$T" est_tokens ); B=$( attr "$TMP/s_$T" budget_tokens ); TR=$( attr "$TMP/s_$T" truncated )
         rungs=$(( rungs + 1 ))
         if [ -z "$E" ] || [ -z "$B" ]; then
@@ -275,9 +278,9 @@ sweep_root(){   # $1 label, $2... argv after the binary and root
         fi
     done
 }
-printf 'int probeSweepRoot() { return 1; }\n' >> "$ROOT/src/mod4.cpp"
+printf 'int probeSweepRoot() { return 1; }\n' >> "$FIX/src/mod4.cpp"
 sweep_root "working-tree root (non-empty)" --pr-context
-( cd "$ROOT" && git checkout -- src/mod4.cpp )
+( cd "$FIX" && git checkout -- src/mod4.cpp )
 sweep_root "empty-diff root (clean tree)"  --pr-context
 sweep_root "base root (=$BASE)"            --pr-context="$BASE"
 [ "$over_seen" = 1 ] && [ "$under_seen" = 1 ] \
@@ -290,7 +293,7 @@ sweep_root "base root (=$BASE)"            --pr-context="$BASE"
     && ok "(#10) no root claims budget-floor-exceeded while it is inside its budget" \
     || no "(#10) a --pr-context root claimed budget-floor-exceeded on a document that fits its budget"
 # and the legend must DEFINE the label on the root that now carries it, or the attribute is undefined prose
-"$BIN" "$ROOT" --pr-context --max-tokens=500 --no-cache >"$TMP/s_lbl" 2>/dev/null
+"$BIN" "$FIX" --pr-context --max-tokens=500 --no-cache >"$TMP/s_lbl" 2>/dev/null
 if grep -q 'budget-floor-exceeded' "$TMP/s_lbl"; then
     grep -q 'budget-floor-exceeded' "$TMP/s_lbl" && grep -q 'structural floor of every changed file exceeds it' "$TMP/s_lbl" \
         && ok "(#10) the labelled empty-diff root ships the legend clause that defines budget-floor-exceeded" \

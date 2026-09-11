@@ -47,6 +47,7 @@
 // Node-kind and field-name strings below are VERIFIED against the vendored parsers (third_party/deps/
 // */src/parser.c), not assumed from upstream docs.
 
+#include "preprocdead.h"   // #62: the ONE literal `#if 0`/`#if 1` rule, shared with the ingest call-ref pass
 #include "infra/sortutil.h"
 #include "model.h"
 #include "ingest.h"        // sliceGrammarForFile — path → grammar, ingest's one table
@@ -287,9 +288,11 @@ inline std::uint32_t sliceBindingLine( const SliceScan& scan, std::uint32_t bind
 }
 
 // tree-sitter micro-helpers, in the house spelling
+// #62: forwards to the shared spelling in preprocdead.h rather than holding a second copy of the same
+// strcmp — ripwire's own --clones lens flagged the pair the moment the shared header appeared.
 inline bool sliceKindIs( TSNode n, const char* kind ) noexcept
 {
-    return std::strcmp( ts_node_type( n ), kind ) == 0;
+    return rw::preprocNodeKindIs( n, kind );
 }
 
 // ── preprocessor-conditional regions (C-family only) ─────────────────────────────────────────────────
@@ -334,13 +337,14 @@ inline std::pair<SlicePp, SlicePp> slicePreprocBranchStates( TSNode n, std::stri
     }
     else if( sliceKindIs( n, "preproc_if" ) || sliceKindIs( n, "preproc_elif" ) )
     {
-        const TSNode cond = ts_node_child_by_field_name( n, "condition", 9 );
-        if( !ts_node_is_null( cond ) && sliceKindIs( cond, "number_literal" ) )
+        // #62: the literal-condition rule moved to src/preprocdead.h so the CALL GRAPH decides `#if 0` the
+        // same way this slicer does. Behaviour here is unchanged — the mapping below is the old two-line
+        // body, one for one — but there is now exactly one place that reads the literal.
+        switch( preprocLiteralBranch( n, src ) )
         {
-            const std::uint32_t a = ts_node_start_byte( cond ), b = ts_node_end_byte( cond );
-            const std::string_view text = ( b > a && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view();
-            if( text == "0" )      { body = SlicePp::Dead;  alt = SlicePp::Live; }
-            else if( text == "1" ) { body = SlicePp::Live;  alt = SlicePp::Dead; }
+            case PreprocLiteral::BodyDead: body = SlicePp::Dead;  alt = SlicePp::Live;  break;
+            case PreprocLiteral::BodyLive: body = SlicePp::Live;  alt = SlicePp::Dead;  break;
+            case PreprocLiteral::Undecided:                                             break;
         }
     }
     const auto fold = []( SlicePp outer, SlicePp inner ) noexcept { return std::uint8_t( outer ) > std::uint8_t( inner ) ? outer : inner; };
@@ -1197,6 +1201,7 @@ inline const char* sliceReachName( std::uint8_t rule ) noexcept
 
 // the fixpoint bound — a loop's header state is monotone so it converges in at most (defs of its bindings + 1)
 // rounds; the bound only guards a broken lattice, and hitting it is a degrade (the state is used as is)
+// (2026-09-10: 4,528 fixpoints over 3,026 symbols, max iteration count 1; bound inert, no disclosure attribute)
 inline constexpr std::uint32_t kSliceRdMaxIter = 64;
 
 // the dataflow state at one program point: per SLOT (a binding, or an unbound name) the sorted all-indices

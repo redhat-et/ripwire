@@ -132,6 +132,14 @@ fi
 # with its own — a duplicated list is the bug both arms keep being widened to fix. A file that does
 # not exist is skipped; a file that exists and states NO count fails, because "no wrong count" is
 # vacuously true of a document that stopped making the claim, and a claim deleted is a claim drifted.
+# RECONCILED 2026-09-10 with docs/gatecount_build.py. The number is no longer hand-written anywhere:
+# the generator derives it from the same loop and REWRITES all eight marked sites, and
+# test/gatecountcheck.sh gates that. Every arm below is KEPT, deliberately, and none was weakened —
+# the generator is how the sites are WRITTEN, these arms are what notice if one was written some other
+# way (an unmarked site the generator never saw, a hand edit between generator runs, a merge that took
+# one side of a site file). Two independent derivations of the same number from the same loop is the
+# cheap redundancy; the expensive failure was having neither. The site list below and the generator's
+# SITES tuple must name the same files; test/gatecountcheck.sh arm (F) asserts exactly that, so widen both.
 gateCountSites=( "docs/EVALS.md" "README.md" "present/deck5_ripwire_build.js" )
 
 scanGateCounts() {                   # $1 = file → prints "line:number" per claim, BOTH spellings

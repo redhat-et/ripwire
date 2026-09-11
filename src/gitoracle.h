@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // gitoracle.h — the NAME-HISTORY ORACLE: "was this name ever in this repo, and when did it leave?"
 //
@@ -209,10 +212,13 @@ inline void forEachIdentifier( std::string_view line, OnName onName )
 // A prose path contributes weaker evidence than a code path: a name deleted from a DOC only proves the doc
 // changed. The probe records both, preferring a code site, so a "removed" row cites the code deletion when
 // one exists (see recordRemoval below).
+// Widened 2026-09-09 from a private `.md/.markdown/.txt/.rst` list to the shared vocabulary: a name
+// deleted from an AsciiDoc note, an Org roadmap, an exported HTML report or a notebook proves exactly as
+// little as one deleted from a markdown file, and the four lists that used to answer this question all
+// disagreed about which formats those were (docparse.h's vocabulary note).
 inline bool isProsePath( std::string_view path )
 {
-    const std::string ext = docparse::lowerExtOf( path );   // the shared extension step, not a third copy
-    return ext == ".md" || ext == ".markdown" || ext == ".txt" || ext == ".rst";
+    return docparse::isProseExtension( docparse::lowerExtOf( path ) );
 }
 
 // ── the cache blob (per repo, per HEAD sha) ──────────────────────────────────────────────────────────────
@@ -696,11 +702,11 @@ inline void writeHistoryProbe( std::FILE* out, const HistoryIndex& idx, Escape e
 {
     if( !idx.ok )
     {
-        std::fprintf( out, "<history probed=\"0\" r=\"%s\"/>",
+        rw::emitTo( out, "<history probed=\"0\" r=\"{}\"/>",
                       idx.nonGitRoot ? "not-a-git-repo" : "probe-failed" );
         return;
     }
-    std::fprintf( out, "<history probed=\"1\" head=\"%.9s\" commits=\"%u\" removed-names=\"%zu\"%s/>",
+    rw::emitTo( out, "<history probed=\"1\" head=\"{:.9}\" commits=\"{}\" removed-names=\"{}\"{}/>",
                   idx.headSha.c_str(), idx.commitsWalked, idx.removed.size(),
                   idx.truncated ? " truncated=\"1\"" : "" );
     (void)escape;
@@ -714,13 +720,13 @@ inline void writeNameFate( std::FILE* out, const std::string& name, const NameFa
     // no sha would print `commit=""` and read as evidence while carrying none.
     VERIFY( f.fate != Fate::Removed || !f.commit.empty() );
 
-    std::fprintf( out, "<fate sym=\"%s\" v=\"%s\"", escape( name ).c_str(), fateTag( f.fate ) );
+    rw::emitTo( out, "<fate sym=\"{}\" v=\"{}\"", escape( name ).c_str(), fateTag( f.fate ) );
     if( f.fate == Fate::Removed )
     {
-        std::fprintf( out, " commit=\"%.9s\" date=\"%s\" p=\"%s\"",
+        rw::emitTo( out, " commit=\"{:.9}\" date=\"{}\" p=\"{}\"",
                       f.commit.c_str(), escape( f.date ).c_str(), escape( f.path ).c_str() );
     }
-    std::fprintf( out, " note=\"%s\"/>", escape( kFateTable[ std::size_t( f.fate ) ].note ).c_str() );
+    rw::emitTo( out, " note=\"{}\"/>", escape( kFateTable[ std::size_t( f.fate ) ].note ).c_str() );
 }
 
 }}   // namespace rw::gitoracle

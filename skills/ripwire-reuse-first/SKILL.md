@@ -1,16 +1,10 @@
 ---
 name: ripwire-reuse-first
 description: >
-  About to write ONE symbol — a single function, class, helper, or utility — reuse before you reinvent. Use
-  the moment you're about to author any named thing (even a "quick" one-liner: duplicates are born on tasks
-  that feel too small to tool up for), and before adding a dependency. ripwire finds the existing building
-  block, the repo's best-in-class exemplar to imitate (by ROLE, not text similarity), the duplicate you are
-  about to recreate, and whether the dependency is already in the tree, so you compose instead of reinvent.
-  The least code is the least complexity, the fewest bugs, the smallest review, and the most cache-friendly
-  diff. For a whole multi-symbol FEATURE (plan/interface/sizing) → ripwire-before-you-build. One
-  --exemplar (or --grep) call at most — and if the fix is a one-line edit to an existing symbol, or the
-  ranked output already showed the building block, skip this skill (and this file) and just write it.
-  Backed by ripwire (deterministic, on PATH).
+  About to write ONE symbol (even a 'quick' one-liner) or add a dependency: reuse before you reinvent.
+  Finds the building block that already exists, the house pattern to imitate, the duplicate you'd
+  recreate, a vendored dependency. An interface or whole feature → before-you-build. One --exemplar or --grep call
+  at most.
 allowed-tools: Bash, Read
 ---
 
@@ -18,7 +12,7 @@ allowed-tools: Bash, Read
 
 > Routing — pick the right door:
 > • Starting a whole FEATURE (multi-symbol, needs a plan / interface / sizing) → **ripwire-before-you-build**.
-> • The cross-cutting *map-before-you-read* token discipline for any read → **ripwire-efficient**.
+> • The cross-cutting *map-before-you-read* token discipline for any read → **ripwire-orient** (`map-before-you-read.md`).
 > • Judging whether what you wrote got better or worse before "done" → **ripwire-quality-bar**.
 > • Not sure which skill? → **ripwire-router**.
 

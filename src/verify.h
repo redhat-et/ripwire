@@ -224,6 +224,8 @@ inline constexpr const char* kVerifyLegend =
     "so a refuted defines means the name token never occurs in that file's indexed bytes. "
     "reaches' direction: some symbol defined in the named file or layer transitively CALLS the target. "
     "Evidence rows are a bounded sample when capped (disclosed on the root); every total lives in the attributes. "
+    "A <hit>'s <m> is the matched line; line_bytes= rides only a row whose line was too long to print whole and names that WHOLE "
+    "line's byte length, so its ABSENCE means the printed <m> is the entire line. "
     // M12: a uses()/unused() <u> row's in_id= — the same attribute --uses itself defines (kUsesLegendOpen), stated
     // again here because this element's legend is its own leading comment run, not --uses'.
     "A uses()/unused() <u> row's in_id= is the canonical id (root-relative path::scope::name) of the enclosing "

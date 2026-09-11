@@ -1,3 +1,6 @@
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 // main.cpp — ripwire entry point: parse args → ingest → graph → PageRank → minified XML,
 // plus --map-diff (teleport toward git-changed files) and --pack-top-n (append source).
 // ingest() comes from ingest.cpp (real, tree-sitter) or stub_ingest.cpp (test).
@@ -60,7 +63,8 @@ static_assert( rw::kTestGateCcxBarMirror == rw::quality::kCcxBar, "situ.h kTestG
 #include "taskroute.h"             // --help-task: deterministic task -> one safe CLI recommendation or abstention
 #include "quality.h"
 #include "cloneidiom.h"          // idiom-class demotion for clone findings — the closed 3-idiom shape classifier both --clones and the quality-delta duplication kind annotate rows with
-#include "gitstamp.h"              // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor, shared by
+#include "gitstamp.h"
+#include "githarden.h"      // harvest 2026-09-09: the git-config trust boundary — one call in main(), before any thread              // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor, shared by
                                    // --hotspots / --quality-delta / --doctor below (each verb's own file pulls it too)
 #include "binstale.h"              // --doctor's tracked-binary-staleness check (git-order, not mtime)
 #include "codexdoctor.h"           // --doctor --agent=codex: live binary/skills/hooks/MCP surface parity
@@ -196,7 +200,7 @@ std::string defaultCachePath( const std::string& root, bool captureValueUses )
     std::uint64_t h = 1469598103934665603ull;
     for( const char* c = abs; *c; ++c ) { h ^= static_cast<unsigned char>( *c ); h = rw::hashutil::fnv1aMultiply( h ); }
     char tail[ 48 ];
-    std::snprintf( tail, sizeof( tail ), "ripwire-%016llx-%s.bin",
+    rw::formatTo( tail, sizeof( tail ), "ripwire-{:016x}-{}.bin",
                    static_cast<unsigned long long>( h ), captureValueUses ? "rich" : "lean" );
     return resolveCacheBlobPath( cacheDirLadder(), tail );
 }
@@ -356,8 +360,8 @@ inline ExpandToken parseExpandToken( const std::string& token, const char* verb 
         // the reader to ignore a warning that fires on the happy path.
         if( token.find( "::" ) != std::string::npos ) { out.selector = token;  return out; }
 
-        std::fprintf( stderr, "ripwire: %s=%s: malformed range '%.*s' (want START-END, e.g. 5-10) — emitting the whole body\n",
-                      verb, token.c_str(), int( rangeStr.size() ), rangeStr.data() );
+        rw::emitTo( stderr, "ripwire: {}={}: malformed range '{}' (want START-END, e.g. 5-10) — emitting the whole body\n",
+                      verb, token.c_str(), std::string_view( rangeStr.data(), rangeStr.size() ) );
         return out;   // degrade: selector only, hasRange stays false
     }
     out.range.startLine = startLine;
@@ -399,7 +403,7 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
         h = rw::hashutil::fnv1aAbsorb( h, c );
     }
     char tail[ 48 ];
-    std::snprintf( tail, sizeof( tail ), "/ripwire-remote-%016llx", static_cast<unsigned long long>( h ) );
+    rw::formatTo( tail, sizeof( tail ), "/ripwire-remote-{:016x}", static_cast<unsigned long long>( h ) );
     const std::string cacheDir = cacheDirLadder() + tail;
 
     namespace fs = std::filesystem;
@@ -407,7 +411,7 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     if( !refetch && fs::exists( fs::path( cacheDir ) / ".git", ec ) && !ec )
     {
         const long ageDays = cloneAgeDays( cacheDir );
-        std::fprintf( stderr, "ripwire: reusing cached clone of %s (%ld day%s old); pass --refetch to update\n",
+        rw::emitTo( stderr, "ripwire: reusing cached clone of {} ({} day{} old); pass --refetch to update\n",
                       urlOrPath.c_str(), ageDays, ageDays == 1 ? "" : "s" );
         return { cacheDir, true };
     }
@@ -424,22 +428,22 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     const std::string cmd = "git -c protocol.ext.allow=never -c protocol.file.allow=user -c core.quotepath=false "
                              "clone --depth=1 -q -- " + rw::shSingleQuote( urlOrPath )
                           + " " + rw::shSingleQuote( cacheDir ) + " 2>&1";
-    std::fprintf( stderr, "ripwire: cloning %s → %s\n", urlOrPath.c_str(), cacheDir.c_str() );
+    rw::emitTo( stderr, "ripwire: cloning {} → {}\n", urlOrPath.c_str(), cacheDir.c_str() );
     std::FILE* pipe = popen( cmd.c_str(), "r" );
     if( !pipe )
     {
-        std::fprintf( stderr, "ripwire: could not launch git clone (is git on PATH?)\n" );
+        rw::emitRaw( stderr, "ripwire: could not launch git clone (is git on PATH?)\n" );
         return { std::string(), false };
     }
     char line[ 4096 ];
     while( std::fgets( line, sizeof( line ), pipe ) )
     {
-        std::fprintf( stderr, "  %s", line ); // surface git's own diagnostics
+        rw::emitTo( stderr, "  {}", rw::cstr( line ) ); // surface git's own diagnostics
     }
     const int rc = pclose( pipe );
     if( rc != 0 || !( fs::exists( fs::path( cacheDir ) / ".git", ec ) && !ec ) )
     {
-        std::fprintf( stderr, "ripwire: git clone failed for %s\n", urlOrPath.c_str() );
+        rw::emitTo( stderr, "ripwire: git clone failed for {}\n", urlOrPath.c_str() );
         fs::remove_all( fs::path( cacheDir ), ec );
         return { std::string(), false };
     }
@@ -486,20 +490,19 @@ std::optional<int> runEditPreviewGuard( const rw::Config& c )
     }
     if( !c.editPayload.empty() && c.editPlanApply )
     {
-        std::fprintf( stderr, "ripwire: --edit-check --edit-payload is a PREVIEW and never writes — pass --dry-run, or apply the "
-                              "payload with --replace-symbol-body=%.*s --edit-payload=%.*s\n",
-                      int( c.editCheckSym.size() ), c.editCheckSym.data(), int( c.editPayload.size() ), c.editPayload.data() );
+        rw::emitTo( stderr, "ripwire: --edit-check --edit-payload is a PREVIEW and never writes — pass --dry-run, or apply the "
+                              "payload with --replace-symbol-body={} --edit-payload={}\n", std::string_view( c.editCheckSym.data(), c.editCheckSym.size() ), std::string_view( c.editPayload.data(), c.editPayload.size() ) );
         return 1;
     }
     if( !c.editPayload.empty() && !c.editPlanDryRun )
     {
-        std::fprintf( stderr, "ripwire: --edit-check --edit-payload previews an unwritten payload and requires --dry-run "
+        rw::emitRaw( stderr, "ripwire: --edit-check --edit-payload previews an unwritten payload and requires --dry-run "
                               "(add --dry-run to preview; use --replace-symbol-body to actually write it)\n" );
         return 1;
     }
     if( c.editPayload.empty() && c.editPlanDryRun )
     {
-        std::fprintf( stderr, "ripwire: --edit-check --dry-run needs the bytes to preview — pass --edit-payload=FILE "
+        rw::emitRaw( stderr, "ripwire: --edit-check --dry-run needs the bytes to preview — pass --edit-payload=FILE "
                               "(or --edit-payload=- for stdin)\n" );
         return 1;
     }
@@ -638,7 +641,7 @@ NoteTargetResolution resolveNoteAddTarget( const MainDispatch& d, const std::str
         const std::string canon = canonicalId( relForHash( ing.files[ s.fileId ], d.root ), s.scope, s.name );
         if( canon != normalized )
         {
-            std::fprintf( stderr, "ripwire: --note-add: target '%s' canonicalised to '%s' — that is the id --for/--expand key notes by\n",
+            rw::emitTo( stderr, "ripwire: --note-add: target '{}' canonicalised to '{}' — that is the id --for/--expand key notes by\n",
                           rawTarget.c_str(), canon.c_str() );
         }
         return { canon, false };
@@ -661,7 +664,7 @@ NoteTargetResolution resolveNoteAddTarget( const MainDispatch& d, const std::str
             msg += " (+" + std::to_string( groups.size() - shownCount ) + " more contracts)";
         }
         msg += " — e.g. --note-add=\"" + groups[0].spelling + ": <your note>\"";
-        std::fprintf( stderr, "%s\n", msg.c_str() );
+        rw::emitTo( stderr, "{}\n", msg.c_str() );
         return { std::string{}, true };
     }
 
@@ -674,7 +677,7 @@ NoteTargetResolution resolveNoteAddTarget( const MainDispatch& d, const std::str
     }();
     if( !notes::noteTargetIsPathShaped( normalized ) && !onDisk )
     {
-        std::fprintf( stderr, "%s\n",
+        rw::emitTo( stderr, "{}\n",
                       ( selectorNotFoundMessage( ing, "ripwire: --note-add: target not found: ", rawTarget, "--note-add=" )
                         + " — a note keys the canonical id a read verb resolves; to note a FILE instead, pass a path "
                           "(one with a '/' or an extension), which may name a file that does not exist yet" ).c_str() );
@@ -687,7 +690,7 @@ NoteTargetResolution resolveNoteAddTarget( const MainDispatch& d, const std::str
     {
         // LOUD, but not a refusal: a forward-looking note on a file about to be created is the case this
         // path exists for. The honesty is in saying, at write time, exactly what --notes will report later.
-        std::fprintf( stderr, "ripwire: --note-add: WARNING: target '%s' matches no indexed file or symbol — the note is stored DANGLING\n"
+        rw::emitTo( stderr, "ripwire: --note-add: WARNING: target '{}' matches no indexed file or symbol — the note is stored DANGLING\n"
                               "  (--notes lists it, nothing surfaces it) until that path is indexed; run --notes to prune it if it was a typo\n",
                       normalized.c_str() );
     }
@@ -719,7 +722,7 @@ std::optional<int> runNotes( const MainDispatch& d )
         const std::size_t sep = spec.find( ": " );
         if( sep == std::string::npos )
         {
-            std::fprintf( stderr, "ripwire: --note-add: want \"TARGET: text\" (a canonical id path::scope::name or a file path, then ': ', then the note) — got '%s'\n", spec.c_str() );
+            rw::emitTo( stderr, "ripwire: --note-add: want \"TARGET: text\" (a canonical id path::scope::name or a file path, then ': ', then the note) — got '{}'\n", spec.c_str() );
             return 1;
         }
         // §S3 — sanitizeNoteField sanitizes AND decides (notes.h's header has the full finding): the old
@@ -754,7 +757,7 @@ std::optional<int> runNotes( const MainDispatch& d )
                      + ( blankCodePointCount == 1 ? " invisible code point: " : " invisible code points: " )
                      + blankSpelling;
             };
-            std::fprintf( stderr, "ripwire: --note-add: both a target and a note text are required (got target=%s text=%s)\n",
+            rw::emitTo( stderr, "ripwire: --note-add: both a target and a note text are required (got target={} text={})\n",
                           describeField( targetField ).c_str(), describeField( textField ).c_str() );
             return 1;
         }
@@ -765,7 +768,7 @@ std::optional<int> runNotes( const MainDispatch& d )
         // --for/--expand/default-map XML emission (notescheck.sh's det-gate covers this).
         if( !notes::isDecisionShaped( text ) )
         {
-            std::fprintf( stderr, "ripwire: --note-add: tip: notes that say \"chose X over Y because Z\" surface better — consider adding the why\n" );
+            rw::emitRaw( stderr, "ripwire: --note-add: tip: notes that say \"chose X over Y because Z\" surface better — consider adding the why\n" );
         }
         // D5: canonicalize the target's path component to ROOT-RELATIVE before it ever touches disk — the
         // portable-notes contract (.ripwire_notes is committed and must resolve on any other checkout). An
@@ -775,7 +778,7 @@ std::optional<int> runNotes( const MainDispatch& d )
         std::string normalizedTarget = notes::normalizeNoteTarget( rawTarget, d.root, outsideRoot );
         if( outsideRoot )
         {
-            std::fprintf( stderr, "ripwire: --note-add: target '%s' resolves outside the root '%s' — refusing (notes must stay root-relative/portable)\n", rawTarget.c_str(), d.root.c_str() );
+            rw::emitTo( stderr, "ripwire: --note-add: target '{}' resolves outside the root '{}' — refusing (notes must stay root-relative/portable)\n", rawTarget.c_str(), d.root.c_str() );
             return 1;
         }
         // H1: the target is a SELECTOR — resolve it the way every read verb does before anything is stored.
@@ -788,8 +791,11 @@ std::optional<int> runNotes( const MainDispatch& d )
         std::string date = rw::quality::gitCommitterDateIso( d.root );
         if( date.empty() )
         {
-            DEGRADED_PATH_ALERT( "notes: non-git root — dating the note at the fixed epoch 1970-01-01 for determinism" );
-            date = "1970-01-01";
+            // 2026-09-06 stranger audit: this used to store 1970-01-01 — an epoch nobody explained, read as a
+            // real date by every consumer. "undated" is the honest value: there is no committer date to anchor to.
+            DEGRADED_PATH_ALERT( "notes: non-git root — the note is stored undated" );
+            date = "undated";
+            rw::emitTo( stderr, "ripwire: --note-add: {} is not a git checkout — the note is stored undated (d=\"undated\"; a git checkout stamps the committer date)\n", d.root.c_str() );
         }
         // provenance stamp (the day's costliest lesson): anchor the note to the commit it was written under.
         // gitHeadSha resolves empty exactly when date's own gitCommitterDateIso lookup would have (same
@@ -803,7 +809,7 @@ std::optional<int> runNotes( const MainDispatch& d )
         const std::string line = notes::addNote( path, target, date, text, sha, branch );
         if( line.empty() )
         {
-            std::fprintf( stderr, "ripwire: --note-add: could not write %s\n", path.c_str() );
+            rw::emitTo( stderr, "ripwire: --note-add: could not write {}\n", path.c_str() );
             return 1;
         }
         std::fwrite( line.data(), 1, line.size(), stdout );
@@ -859,9 +865,9 @@ std::optional<int> runNotes( const MainDispatch& d )
             // legend (legendcoveragecheck arm A): d= ISO date, sha=/branch= the provenance stamp, whose
             // omitted-not-empty contract is appendOneNote's (serialize.h). NB: no `--` inside an XML comment.
             char hdr[ 512 ];
-            std::snprintf( hdr, sizeof( hdr ),
-                           "<ctx><!-- ripwire field notes: notes=%zu targets=%zu dangling=%zu (a target with no matching indexed symbol/file — legal: listed here, surfaced nowhere)."
-                           " Each note row: d= is the ISO date it was recorded; sha= the abbreviated commit and branch= the branch checked out at record time,"
+            rw::formatTo( hdr, sizeof( hdr ),
+                           "<ctx><!-- ripwire field notes: notes={} targets={} dangling={} (a target with no matching indexed symbol/file — legal: listed here, surfaced nowhere)."
+                           " Each note row: d= is the ISO date it was recorded (\"undated\" when the root was not a git checkout at record time); sha= the abbreviated commit and branch= the branch checked out at record time,"
                            " both omitted entirely on a note stored before provenance stamping (absent means none recorded, never empty) -->",
                            all.size(), targetCount, danglingCount );
             w.write( hdr );
@@ -945,16 +951,16 @@ inline std::optional<int> finishTokenBudgetGate( TokenBudgetBuffer& tb, std::FIL
         // renamed the identical semantic for exactly that reason (recall.h's emitRecallBudgeted, N3) and this
         // sibling — inside the same round's own fix — kept the old spelling. Same vocabulary now, all three
         // channels (XML record, JSON record, stderr), so a script can key on one name.
-        std::fprintf( stderr, "ripwire: --token-budget exceeded: withheld_est_tokens=%zu > budget=%zu\n", mapEstTokens, tokenBudget );
+        rw::emitTo( stderr, "ripwire: --token-budget exceeded: withheld_est_tokens={} > budget={}\n", mapEstTokens, tokenBudget );
         if( tb.buf )
         {
             if( asJson )
             {
-                std::fprintf( real, "{\"withheld_est_tokens\":%zu,\"budget\":%zu,\"withheld\":true}", mapEstTokens, tokenBudget );
+                rw::emitTo( real, "{{\"withheld_est_tokens\":{},\"budget\":{},\"withheld\":true}}", mapEstTokens, tokenBudget );
             }
             else
             {
-                std::fprintf( real, "<r withheld_est_tokens=\"%zu\" budget=\"%zu\" withheld=\"1\"/>", mapEstTokens, tokenBudget );
+                rw::emitTo( real, "<r withheld_est_tokens=\"{}\" budget=\"{}\" withheld=\"1\"/>", mapEstTokens, tokenBudget );
             }
         }
         std::free( tb.buf );
@@ -985,7 +991,15 @@ inline std::optional<int> finishTokenBudgetGate( TokenBudgetBuffer& tb, std::FIL
 // makes stderr its ONLY disclosure — another reason for the note to live on this side of the return.
 // W2-F: `pr` rides along because churn ranking IS a PageRank run — a teleport variant, not a separate
 // method — so the map it produces owes the same pr_iters= / pr_converged= disclosure a uniform one does.
-struct ChurnRanking { std::vector<float> rank; std::string window; rw::RankDisclosure pr; };
+struct ChurnRanking
+{
+    std::vector<float>          rank;
+    std::string                 window;
+    rw::RankDisclosure          pr;
+    std::vector<rw::RecentFile> recent;       // F3: churn-decay, single-root only — the map's <recent> rows
+    std::size_t                 recentOf = 0; // files any mined commit touched (the of= the rows were cut from)
+};
+inline constexpr std::size_t kRecentRows = 40;   // F3: ~45 B a row; the file-level answer, not the file list
 
 // P0-4: the DEFAULT window label of each churn ranker, which is also the difference between them that a
 // reader has to see. Plain churn mines a bounded 18-month wall-clock window; churn-decay mines the whole
@@ -1013,8 +1027,8 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
         {
             return;
         }
-        std::fprintf( stderr, "ripwire: %s found no commits in its window; using uniform (structural) ranking — this map is "
-                              "byte-identical to --rank-by=pagerank (header: window=\"%s\")\n", verbLabel, windowStamp.c_str() );
+        rw::emitTo( stderr, "ripwire: {} found no commits in its window; using uniform (structural) ranking — this map is "
+                              "byte-identical to --rank-by=pagerank (header: window=\"{}\")\n", verbLabel, windowStamp.c_str() );
     };
 
     if( d.multiRoot )
@@ -1035,11 +1049,18 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
     const bool       isScoped   = !d.cfg.since.empty() && sinceScope.active;   // the §P9 N7 rule, one verb over
     if( isDecay )
     {
-        rw::RankedGraph    ranked = rankGraphTeleport( d.g, churnDecayTeleport( d.root, d.ing, d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
+        // F3: ONE mining pass feeds both the teleport prior (churnPriorFromDecayed, exactly what churnDecayTeleport
+        // builds) and the map's file-level <recent> rows — so the file-level answer costs no second git walk.
+        const std::string       windowArgs = isScoped ? sinceLogArgs( sinceScope, "" ) : std::string{};
+        const DecayedChurnMined mined      = gitLogDecayedFileMining( d.root, d.ing, windowArgs, 100 );   // same merge-bomb cap as churnTeleport
+        hasChurnEvidence                   = mined.anyHistory;
+        rw::RankedGraph    ranked = rankGraphTeleport( d.g, churnPriorFromDecayed( d.ing, mined.weights, mined.anyHistory ) );
         std::string        window = churnWindowStamp( churnDecayWindowLabel( isScoped ? std::string_view( d.cfg.since ) : std::string_view( "all-history" ) ),
                                                       hasChurnEvidence );
         discloseEmptyChurn( window );
-        return { std::move( ranked.rank ), std::move( window ), { ranked.iterationCount, ranked.hasConverged, true } };
+        ChurnRanking cr{ std::move( ranked.rank ), std::move( window ), { ranked.iterationCount, ranked.hasConverged, true } };
+        cr.recent = recentRowsFromDecayed( d.root, d.ing, mined, kRecentRows, &cr.recentOf );
+        return cr;
     }
     rw::RankedGraph    ranked = rankGraphTeleport( d.g, churnTeleport( d.root, d.ing, "18 months ago", d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
     // F1: the DEFAULT window's stamp names the anchor that produced it ("18mo@HEAD"); an ACTIVE --since is
@@ -1096,23 +1117,23 @@ inline ExpandServeChoice chooseExpandServe( std::size_t bundleBytes, const rw::W
     ExpandServeChoice c;
     if( wf.complete && wf.rawBytes > budgetBytes )
     {
-        std::snprintf( open, sizeof( open ), "<ctx mode=\"bundle\" reason=\"whole-file %zuB over pack-budget %zuB\">",
+        rw::formatTo( open, sizeof( open ), "<ctx mode=\"bundle\" reason=\"whole-file {}B over pack-budget {}B\">",
                        wf.rawBytes, budgetBytes );
     }
     else if( wf.complete && wf.rawBytes < bundleBytes )
     {
         c.serveWholeFile = true;
-        std::snprintf( open, sizeof( open ), "<ctx mode=\"whole-file\" reason=\"file %zuB &lt; bundle %zuB\">",
+        rw::formatTo( open, sizeof( open ), "<ctx mode=\"whole-file\" reason=\"file {}B &lt; bundle {}B\">",
                        wf.rawBytes, bundleBytes );
     }
     else if( wf.complete )
     {
-        std::snprintf( open, sizeof( open ), "<ctx mode=\"bundle\" reason=\"bundle %zuB &lt;= file %zuB\">",
+        rw::formatTo( open, sizeof( open ), "<ctx mode=\"bundle\" reason=\"bundle {}B &lt;= file {}B\">",
                        bundleBytes, wf.rawBytes );
     }
     else
     {
-        std::snprintf( open, sizeof( open ), "<ctx mode=\"bundle\" reason=\"whole-file unavailable (file unreadable)\">" );
+        rw::formatTo( open, sizeof( open ), "<ctx mode=\"bundle\" reason=\"whole-file unavailable (file unreadable)\">" );
     }
     c.ctxOpen = open;
     return c;
@@ -1149,6 +1170,8 @@ int runDefaultMap( const MainDispatch& d )
     std::string        queryRouteNote;   // leading routed comment for --query (empty under --no-route)
     std::size_t        mapDiffChanged = 0;      // D6: teleport-seed file count, only meaningful when mapDiffActive
     bool               mapDiffActive  = false;  // true only under --map-diff — gates the header's changed= attribute
+    std::vector<rw::RecentFile> recentFiles;   // F3: rank-by=churn-decay's file-level <recent> rows (empty = absent, byte-free)
+    std::size_t                 recentOf = 0;
     std::string        churnWindowLabel = rw::defaultWindowLabel( root, "18mo" );   // §A9.6: churn's window label (F1: "@HEAD" when anchored); an ACTIVE --since overrides it below
     if( !cfg.query.empty() )
     {
@@ -1219,7 +1242,7 @@ int runDefaultMap( const MainDispatch& d )
         }
         else
         {
-            std::fprintf( stderr, "ripwire: --map-diff requires git in PATH; using uniform ranking\n" );
+            rw::emitRaw( stderr, "ripwire: --map-diff requires git in PATH; using uniform ranking\n" );
             rank = rw::takeRank( rankGraph( g ), rankDisclosure );
         }
     }
@@ -1229,6 +1252,8 @@ int runDefaultMap( const MainDispatch& d )
         rank             = std::move( cr.rank );
         rankDisclosure   = cr.pr;                    // W2-F: churn is a PageRank TELEPORT variant — it runs the power iteration too
         churnWindowLabel = std::move( cr.window );   // §B2.2: already carries "(no churn evidence)" when the window mined nothing
+        recentFiles      = std::move( cr.recent );   // F3: the <recent> rows (churn-decay, single-root; empty otherwise)
+        recentOf         = cr.recentOf;
     }
     else
     {
@@ -1317,7 +1342,9 @@ int runDefaultMap( const MainDispatch& d )
                                       cfg.rankBy == RankBy::ChurnDecay ? "churn-decay" : "churn",   // P0-4
                                       cfg.maxTokens > 0 ? &maxTokensFit : nullptr,   // §B13.4
                                       rankByLabel,                                   // §B2.1
-                                      rankDisclosure };                              // W2-F: pr_iters= / pr_converged=
+                                      rankDisclosure,                                // W2-F: pr_iters= / pr_converged=
+                                      recentFiles.empty() ? nullptr : &recentFiles,  // F3: <recent> rows, churn-decay single-root only
+                                      recentOf };
     // T3's auto-flip changes the order= spelling ("important-last(auto:fill)" is 11 bytes longer than
     // "important-first"), so it is a BYTE fact, not only an ordering one — the comment that used to sit here
     // claimed the search was "unaffected by emit order", and at N=20000 on src/ the flip fires. One value,
@@ -1445,22 +1472,22 @@ int runDefaultMap( const MainDispatch& d )
         char nb[ 208 ];
         if( !ac.hitCeiling && ac.cliffRank < ac.kept )
         {
-            std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - sharp cliff at rank %zu (%d%% drop), clamped up to the floor of %zu -->",
+            rw::formatTo( nb, sizeof( nb ), "<!-- adaptive: kept {} of {} - sharp cliff at rank {} ({}% drop), clamped up to the floor of {} -->",
                            ac.kept, mapTopK, ac.cliffRank, ac.dropPct, ac.kept );
         }
         else if( !ac.hitCeiling )
         {
-            std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - cliff at rank %zu, %d%% drop -->",
+            rw::formatTo( nb, sizeof( nb ), "<!-- adaptive: kept {} of {} - cliff at rank {}, {}% drop -->",
                            ac.kept, mapTopK, ac.cliffRank, ac.dropPct );
         }
         else if( ac.positiveHits <= ac.kept )
         {
-            std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - only %zu symbols matched this query (sharp query, short tail) -->",
+            rw::formatTo( nb, sizeof( nb ), "<!-- adaptive: kept {} of {} - only {} symbols matched this query (sharp query, short tail) -->",
                            ac.kept, mapTopK, ac.positiveHits );
         }
         else
         {
-            std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - no relevance cliff (broad query saturates the score); capped at the ceiling -->",
+            rw::formatTo( nb, sizeof( nb ), "<!-- adaptive: kept {} of {} - no relevance cliff (broad query saturates the score); capped at the ceiling -->",
                            ac.kept, mapTopK );
         }
         std::fputs( nb, stdout );
@@ -1503,12 +1530,18 @@ int runDefaultMap( const MainDispatch& d )
             if( !htmlOut )
             {
                 DEGRADED_PATH_ALERT( "writeHtml: could not open output file" );
-                std::fprintf( stderr, "ripwire: --html=%s: cannot open file for writing\n", htmlPath.c_str() );
+                rw::emitTo( stderr, "ripwire: --html={}: cannot open file for writing\n", htmlPath.c_str() );
                 return 1;
             }
         }
-        writeHtml( htmlOut, ing, rank, g, mapTopK,
-                   HtmlColorExtras{ testedPtr, &htmlChurn, htmlChurnOk, cfg.colorBy, kHtmlChurnWindow, cfg.rankBy }, mapRootArg );   // R-R
+        // 2026-09-06 stranger audit: the page names what it maps (last path segment only — the path itself never
+        // reaches the page), anchors to the commit like every XML root does, and says which binary drew it.
+        HtmlColorExtras       htmlColor{ testedPtr, &htmlChurn, htmlChurnOk, cfg.colorBy, kHtmlChurnWindow, cfg.rankBy };
+        const HtmlProvenance  htmlProv = htmlProvenanceFor( root, multiRoot );
+        htmlColor.atStamp  = htmlProv.atStamp;
+        htmlColor.rootName = htmlProv.rootName;
+        htmlColor.version  = kRipwireVersion;
+        writeHtml( htmlOut, ing, rank, g, mapTopK, htmlColor, mapRootArg );   // R-R
         if( htmlOut != stdout )
         {
             std::fclose( htmlOut );
@@ -1553,12 +1586,12 @@ int runDefaultMap( const MainDispatch& d )
                 // the path half. selectorFaultClause does the split (and states when the path itself is
                 // unindexed); this arm keeps its own flag-first sentence byte-for-byte ahead of it.
                 expandMissed = true;
-                std::fprintf( stderr, "ripwire: --expand=%s matched no symbol%s\n", et.selector.c_str(),
+                rw::emitTo( stderr, "ripwire: --expand={} matched no symbol{}\n", et.selector.c_str(),
                               rw::selectorFaultClause( ing, et.selector, "--expand=" ).c_str() );
             }
             else if( matches.size() > 8 )
             { // final-segment names (reset/size/update) collide widely
-                std::fprintf( stderr, "ripwire: --expand=%s matches %zu symbols; emitting all up to --pack-budget-bytes (qualify with file:name to narrow)\n",
+                rw::emitTo( stderr, "ripwire: --expand={} matches {} symbols; emitting all up to --pack-budget-bytes (qualify with file:name to narrow)\n",
                               et.selector.c_str(), matches.size() );
             }
             for( NodeId id : matches )
@@ -1612,8 +1645,8 @@ int runDefaultMap( const MainDispatch& d )
             const std::string nm = ot.range.hasRange ? ot.selector : rawNm;
             if( ot.range.hasRange )
             {
-                std::fprintf( stderr, "ripwire: --outline=%s: --outline has no line-range form — outlining the whole symbol "
-                                      "(use --expand=%s:%u-%u for a body slice)\n",
+                rw::emitTo( stderr, "ripwire: --outline={}: --outline has no line-range form — outlining the whole symbol "
+                                      "(use --expand={}:{}-{} for a body slice)\n",
                               rawNm.c_str(), ot.selector.c_str(), ot.range.startLine, ot.range.endLine );
             }
 
@@ -1622,7 +1655,7 @@ int runDefaultMap( const MainDispatch& d )
             {
                 // §M7 (W3FIX): same grammar, same shared refusal as --expand above.
                 outlineMissed = true;
-                std::fprintf( stderr, "ripwire: --outline=%s matched no symbol%s\n", nm.c_str(),
+                rw::emitTo( stderr, "ripwire: --outline={} matched no symbol{}\n", nm.c_str(),
                               rw::selectorFaultClause( ing, nm, "--outline=" ).c_str() );
             }
             for( NodeId id : matches )
@@ -1783,7 +1816,7 @@ int runDefaultMap( const MainDispatch& d )
     if( !cfg.topKExplicit && ( !cfg.expand.empty() || !cfg.outline.empty() ) && !cfg.json
         && !serveWholeFile && mapTopK > 0 )
     {
-        std::fprintf( stderr, "ripwire: note — the ranked top-%d map rides along with your requested bodies; add --top-k=0 for the bodies alone (or --top-k=1 for a minimal map)\n", mapTopK );
+        rw::emitTo( stderr, "ripwire: note — the ranked top-{} map rides along with your requested bodies; add --top-k=0 for the bodies alone (or --top-k=1 for a minimal map)\n", mapTopK );
     }
 
     // §F5 — THE CEILING VERDICT, taken here because this is the first point where every input to the map's own
@@ -1916,7 +1949,7 @@ int runDefaultMap( const MainDispatch& d )
 
     if( hasExtension && !serveWholeFile )   // M6: the whole-file branch closed its own root
     {
-        std::fprintf( out, "</ctx>" );
+        rw::emitRaw( out, "</ctx>" );
     }
 
     reportRedactions( stderr, redactCounts );
@@ -1934,7 +1967,7 @@ int runDefaultMap( const MainDispatch& d )
     // fail loudly instead of exiting 0 with a silently-truncated map (CI gates trust the exit code)
     if( std::fflush( stdout ) != 0 || std::ferror( stdout ) )
     {
-        std::fprintf( stderr, "ripwire: write error — output truncated\n" );
+        rw::emitRaw( stderr, "ripwire: write error — output truncated\n" );
         return 1;
     }
 
@@ -2134,7 +2167,7 @@ void warnReportVerbPrecedence( const VerbPrecedence& prec )
         return; // 0 or 1 verb — nothing was dropped, so nothing is said
     }
 
-    std::fprintf( stderr, "ripwire: %s takes precedence when several verbs are given — IGNORED this run: %s. "
+    rw::emitTo( stderr, "ripwire: {} takes precedence when several verbs are given — IGNORED this run: {}. "
                           "The winner is fixed by ripwire's dispatch order, NOT by the order you typed them; "
                           "pass one verb per run.\n", prec.winner, prec.ignored.c_str() );
 }
@@ -2212,7 +2245,7 @@ void warnMapModifierDiscarded( const rw::Config& c, const VerbPrecedence& prec )
         return;
     }
 
-    std::fprintf( stderr, "ripwire: %s answered, so the default map never rendered — DISCARDED this run: %s. "
+    rw::emitTo( stderr, "ripwire: {} answered, so the default map never rendered — DISCARDED this run: {}. "
                           "Those flags shape the map only; pass them with --query=TERMS or with no verb at all.\n",
                   prec.winner, discarded.c_str() );
 }
@@ -2371,21 +2404,20 @@ std::optional<int> refuseInertMainModifiers( const rw::Config& cfg )
     {
         // The pointer is phrased so it reads correctly for a verb with no symbol (--lint, --export) as well as
         // for one with (--around=SYM): it names the page's own route rather than assuming the argv had a name.
-        std::fprintf( stderr, "ripwire: --html renders the DEFAULT map as a self-contained graph page, and %.*s answers instead — nothing was written. "
+        rw::emitTo( stderr, "ripwire: --html renders the DEFAULT map as a self-contained graph page, and {} answers instead — nothing was written. "
                               "Pass --html on its own (e.g. ripwire <dir> --html=g.html); a single symbol's neighbourhood is a ROUTE INTO that page, "
-                              "g.html#node/SYM/2, not a second verb beside it\n",
-                      int( verb.size() ), verb.data() );
+                              "g.html#node/SYM/2, not a second verb beside it\n", std::string_view( verb.data(), verb.size() ) );
         return 1;
     }
     if( cfg.noRedact && isBareMapRun( cfg ) )
     {
-        std::fprintf( stderr, "ripwire: --no-redact serves bodies VERBATIM and the default map carries no bodies (identifiers and signatures are never "
+        rw::emitRaw( stderr, "ripwire: --no-redact serves bodies VERBATIM and the default map carries no bodies (identifiers and signatures are never "
                               "redacted) — pass a body-serving verb (e.g. ripwire <dir> --expand=SYM --no-redact, or --for=TASK --no-redact)\n" );
         return 1;
     }
     if( cfg.refetch && std::ranges::none_of( cfg.roots, []( std::string_view r ) { return isGitUrl( r ); } ) )
     {
-        std::fprintf( stderr, "ripwire: --refetch re-clones a git-URL root (https://, http://, git@, ssh://) and this root is a local path — "
+        rw::emitRaw( stderr, "ripwire: --refetch re-clones a git-URL root (https://, http://, git@, ssh://) and this root is a local path — "
                               "pass a URL (e.g. ripwire https://github.com/OWNER/REPO --refetch)\n" );
         return 1;
     }
@@ -2507,24 +2539,24 @@ std::optional<int> runCliEditPlan( const rw::Config& cfg )
     }
     if( cfg.editPlan.empty() )
     {
-        std::fprintf( stderr, "ripwire: --dry-run/--apply requires --edit-plan=FILE\n" );
+        rw::emitRaw( stderr, "ripwire: --dry-run/--apply requires --edit-plan=FILE\n" );
         return 1;
     }
     if( cfg.editPlanDryRun == cfg.editPlanApply )
     {
-        std::fprintf( stderr, "ripwire: --edit-plan requires exactly one of --dry-run or --apply\n" );
+        rw::emitRaw( stderr, "ripwire: --edit-plan requires exactly one of --dry-run or --apply\n" );
         return 1;
     }
     if( cfg.roots.size() != 1 )
     {
-        std::fprintf( stderr, "ripwire: --edit-plan is single-root only; pass one <dir>\n" );
+        rw::emitRaw( stderr, "ripwire: --edit-plan is single-root only; pass one <dir>\n" );
         return 1;
     }
     const rw::editplan::Outcome outcome = rw::editplan::run( std::string( cfg.rootPath ), std::string( cfg.editPlan ),
                                                              cfg.editPlanApply, cfg.maxFileBytes );
     if( !outcome.ok )
     {
-        std::fprintf( stderr, "ripwire edit-plan: %s\n", outcome.message.c_str() );
+        rw::emitTo( stderr, "ripwire edit-plan: {}\n", outcome.message.c_str() );
         return 1;
     }
     std::puts( outcome.receipt.c_str() );
@@ -2556,18 +2588,18 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     }
     if( editCount == 0 )
     {
-        std::fprintf( stderr, "ripwire: --edit-payload/--edit-target-file requires one of --replace-symbol-body, "
+        rw::emitRaw( stderr, "ripwire: --edit-payload/--edit-target-file requires one of --replace-symbol-body, "
                               "--insert-before-symbol or --insert-after-symbol\n" );
         return 1;
     }
     if( editCount != 1 )
     {
-        std::fprintf( stderr, "ripwire: pass exactly one CLI edit verb per invocation\n" );
+        rw::emitRaw( stderr, "ripwire: pass exactly one CLI edit verb per invocation\n" );
         return 1;
     }
     if( cfg.roots.size() != 1 )
     {
-        std::fprintf( stderr, "ripwire: CLI edit verbs are single-root only; pass one <dir>\n" );
+        rw::emitRaw( stderr, "ripwire: CLI edit verbs are single-root only; pass one <dir>\n" );
         return 1;
     }
     if( cfg.editPayload.empty() )
@@ -2575,8 +2607,8 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
         // capture-audit 2026-09-04 (L1, the modifier-pairing dialect): name the verb the caller TYPED, not "a CLI
         // edit" — every sibling pairing refusal names both flags and shows the composed call.
         const char* const editVerb = cliEditVerbSpelling( cfg );
-        std::fprintf( stderr, "ripwire: %s=SYM is a CLI edit and needs --edit-payload=FILE (or --edit-payload=- for stdin) — pass both "
-                              "(e.g. ripwire <dir> %s=SYM --edit-payload=new_body.cpp); an absent payload never means delete\n", editVerb, editVerb );
+        rw::emitTo( stderr, "ripwire: {}=SYM is a CLI edit and needs --edit-payload=FILE (or --edit-payload=- for stdin) — pass both "
+                              "(e.g. ripwire <dir> {}=SYM --edit-payload=new_body.cpp); an absent payload never means delete\n", editVerb, editVerb );
         return 1;
     }
 
@@ -2587,7 +2619,7 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     std::string payload, payloadErr;
     if( !rw::editpreview::readPayload( cfg.editPayload, cfg.maxFileBytes, payload, payloadErr ) )
     {
-        std::fprintf( stderr, "ripwire: %s\n", payloadErr.c_str() );
+        rw::emitTo( stderr, "ripwire: {}\n", payloadErr.c_str() );
         return 1;
     }
 
@@ -2605,7 +2637,7 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
         // every other refusal in this binary does.
         const char* const editFlag = !cfg.replaceSymbolBody.empty() ? "--replace-symbol-body"
                                        : !cfg.insertBeforeSymbol.empty() ? "--insert-before-symbol" : "--insert-after-symbol";
-        std::fprintf( stderr, "ripwire: %s: %s\n", editFlag, outcome.message.c_str() );
+        rw::emitTo( stderr, "ripwire: {}: {}\n", editFlag, outcome.message.c_str() );
         return 1;
     }
 
@@ -2623,7 +2655,7 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     // region and blob_sha always, plus edit_check/tests_to_run unless --no-post-check — so this line names what is
     // in hand and the single call that follows; never a second command. test/receiptpostcheck.sh (12) and
     // test/edithandlehintcheck.sh assert the printed next is the receipt's and RUNS.
-    std::fprintf( stderr, "ripwire edit: applied atomically; receipt carries region, blob_sha%s; next: %s\n",
+    rw::emitTo( stderr, "ripwire edit: applied atomically; receipt carries region, blob_sha{}; next: {}\n",
                   cfg.noPostCheck ? " (post-check skipped)" : ", edit_check, tests_to_run", outcome.next.c_str() );
     return 0;
 }
@@ -2638,6 +2670,42 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
 // payload byte untouched), and written to the real stdout. Exit codes pass through unchanged. A run that
 // produced no XML root (a refusal already happened, or a text verb slipped past validateLegendModifier's
 // list) is refused here naming the flag — never served as if the posture had applied.
+// 2026-09-06 stranger audit: a root that exists but cannot be opened (chmod 000, another user's checkout) came
+// back as an EMPTY map at exit 0 — indistinguishable from "no source here". Probe the directory the way the
+// crawl will; refuse with the reason instead of serving nothing. A non-directory root is left to the crawl.
+static bool rootIsReadable( const std::string& resolvedRoot )
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if( !fs::is_directory( fs::path( resolvedRoot ), ec ) || ec )
+    {
+        return true;
+    }
+    fs::directory_iterator probe( fs::path( resolvedRoot ), ec );
+    if( !ec )
+    {
+        return true;
+    }
+    rw::emitTo( stderr, "ripwire: root path cannot be read: {} ({}) — fix its permissions, or point at a directory you can open\n",
+                  resolvedRoot.c_str(), ec.message().c_str() );
+    return false;
+}
+
+// 2026-09-06 stranger audit: --cache=<a directory> read as "corrupt", wrote nothing, and served a byte-identical
+// map at exit 0 — the fixed --cache=<nonexistent dir> bug's twin. The flag names a FILE; say so, with the form.
+static bool cachePathIsDirectory( const std::string& cachePath )
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if( !fs::is_directory( fs::path( cachePath ), ec ) || ec )
+    {
+        return false;
+    }
+    rw::emitTo( stderr, "ripwire: --cache={}: that is a directory; --cache names the blob FILE to read and write, e.g. --cache={}/ripwire.bin\n",
+                  cachePath.c_str(), cachePath.c_str() );
+    return true;
+}
+
 static int dispatchMain( const rw::Config& cfg, char** argv );
 
 // the key for a SHARED root (`r` = the map family, `ctx` = the bundle family), from the flags that shaped it
@@ -2723,9 +2791,8 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
             break;
     }
     const rw::CompactRootInfo root = rw::findCompactRoot( doc );
-    std::fprintf( stderr, "ripwire: --legend=compact has no compact legend for this verb's root element <%.*s> yet — rerun without "
-                          "--legend (the full legend is the documented form; add the root to kCompactLegendSpecs to extend the dialect)\n",
-                  int( root.tag.size() ), root.tag.data() );
+    rw::emitTo( stderr, "ripwire: --legend=compact has no compact legend for this verb's root element <{}> yet — rerun without "
+                          "--legend (the full legend is the documented form; add the root to kCompactLegendSpecs to extend the dialect)\n", std::string_view( root.tag.data(), root.tag.size() ) );
     return 1;
 }
 
@@ -2743,6 +2810,10 @@ int main( int argc, char** argv )
     {
         return 1;
     }
+    // harvest 2026-09-09: a hook-form core.fsmonitor in a crawl root's own .git/config is a command git would run on
+    // every read-only call this process makes; neutralise it HERE — one site, before any thread or git child — and
+    // disclose it (stderr + --doctor). githarden.h holds the measurement and the reasoning.
+    githarden::hardenForRoots( cfg.roots );
     return runWithCompactLegend( cfg, argv );
 }
 
@@ -2767,9 +2838,8 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         {
             if( isJsonShapeModifier( unsupported ) )
             {
-                std::fprintf( stderr, "ripwire: --json and %.*s are two output SHAPES for the same rows — pass one, not both "
-                              "(e.g. ripwire <dir> --callers=SYM --json, or ripwire <dir> --callers=SYM %.*s)\n",
-                              int( unsupported.size() ), unsupported.data(), int( unsupported.size() ), unsupported.data() );
+                rw::emitTo( stderr, "ripwire: --json and {} are two output SHAPES for the same rows — pass one, not both "
+                              "(e.g. ripwire <dir> --callers=SYM --json, or ripwire <dir> --callers=SYM {})\n", std::string_view( unsupported.data(), unsupported.size() ), std::string_view( unsupported.data(), unsupported.size() ) );
             }
             else
             {
@@ -2777,9 +2847,9 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
                 // had a full JSON twin (row keys amp/cbo/ccx/cx/in/loc/nest/out/params/role/tested) — so a
                 // caller obeying THIS refusal never learned the one flag it was actually looking for existed.
                 // The sentence is the allow-list (kJsonVerbs) spelled out; keep the two in step.
-                std::fprintf( stderr, "ripwire: --json is not yet supported for %.*s — supported: the default map, "
+                rw::emitTo( stderr, "ripwire: --json is not yet supported for {} — supported: the default map, "
                               "--for, --pack-task, --callers/--callees, --impact, --quality-delta, --test-gate, "
-                              "--metrics, and --plan-lanes which is JSON-native (e.g. ripwire <dir> --callers=SYM --json)\n", int( unsupported.size() ), unsupported.data() );
+                              "--metrics, and --plan-lanes which is JSON-native (e.g. ripwire <dir> --callers=SYM --json)\n", std::string_view( unsupported.data(), unsupported.size() ) );
             }
             return 1;
         }
@@ -2813,15 +2883,15 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     // a confident lie of exactly the kind this whole section exists to delete.
     if( verbPrec.winnerIsQueryFamily && !cfg.forTask.empty() && ( !cfg.query.empty() || cfg.packTaskFlag ) )
     {
-        std::fprintf( stderr, "ripwire: --for takes precedence over --query/--pack-task when both are given (the others are ignored)\n" );
+        rw::emitRaw( stderr, "ripwire: --for takes precedence over --query/--pack-task when both are given (the others are ignored)\n" );
     }
     else if( verbPrec.winnerIsQueryFamily && cfg.packTaskFlag && !cfg.query.empty() )
     {
-        std::fprintf( stderr, "ripwire: --pack-task takes precedence over --query when both are given (--query is ignored)\n" );
+        rw::emitRaw( stderr, "ripwire: --pack-task takes precedence over --query when both are given (--query is ignored)\n" );
     }
     if( cfg.stable && cfg.mostImportantLast )
     {
-        std::fprintf( stderr, "ripwire: --stable takes precedence over --most-important-last when both are given (emit order stays path/id order)\n" );
+        rw::emitRaw( stderr, "ripwire: --stable takes precedence over --most-important-last when both are given (emit order stays path/id order)\n" );
     }
 
     // §B11.4 (CA4) — the SAME hazard X9(c) discloses for three flags, on the ~50 report verbs it never
@@ -2860,7 +2930,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     // Deliberately not a refusal, and deliberately not silence.
     if( cfg.json && cfg.planLanesFlag )
     {
-        std::fprintf( stderr, "ripwire: --plan-lanes always emits JSON — --json is redundant here and changes nothing\n" );
+        rw::emitRaw( stderr, "ripwire: --plan-lanes always emits JSON — --json is redundant here and changes nothing\n" );
     }
 
     if( cfg.mcp )
@@ -2908,7 +2978,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     {
         const auto refuse = [ & ]( const char* what, const char* why ) -> int
         {
-            std::fprintf( stderr, "ripwire: %s is single-root only in a multi-root workspace — %s\n", what, why );
+            rw::emitTo( stderr, "ripwire: {} is single-root only in a multi-root workspace — {}\n", what, why );
             return 1;
         };
         if( cfg.qualityDelta || cfg.qualityBaseline )
@@ -3019,7 +3089,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         const SkillFileReadResult result = scanSkillFileChecked( path );
         if( !result.readable )
         {
-            std::fprintf( stderr, "ripwire: --scan-skill: cannot read '%s' — no scan performed\n", path.c_str() );
+            rw::emitTo( stderr, "ripwire: --scan-skill: cannot read '{}' — no scan performed\n", path.c_str() );
             return 3;
         }
         std::vector<SkillScanRow> rows;
@@ -3029,7 +3099,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             rows.push_back( { path, f } );
         }
         printSkillScanArtifact( stdout, rows, /*filesScanned=*/1 );
-        std::fprintf( stderr, "ripwire scan: %d finding(s) in %s\n", int( result.findings.size() ), path.c_str() );
+        rw::emitTo( stderr, "ripwire scan: {} finding(s) in {}\n", int( result.findings.size() ), path.c_str() );
         return skillScanExitCode( result.findings );
     }
 
@@ -3048,8 +3118,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             const bool isDir = exists && fs::is_directory( cfg.scanSkillsDir, ec ) && !ec;
             if( !exists || !isDir )
             {
-                std::fprintf( stderr, "ripwire: --scan-skills: cannot read '%.*s' — no scan performed\n",
-                              int( cfg.scanSkillsDir.size() ), cfg.scanSkillsDir.data() );
+                rw::emitTo( stderr, "ripwire: --scan-skills: cannot read '{}' — no scan performed\n", std::string_view( cfg.scanSkillsDir.data(), cfg.scanSkillsDir.size() ) );
                 return 3;
             }
         }
@@ -3071,8 +3140,13 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         else
         {
             addDir( ".agents/skills" );
-            const char* homeEnv = std::getenv( "HOME" );
-            if( homeEnv && *homeEnv )
+            const char* homeEnv        = std::getenv( "HOME" );
+            const char* claudeConfigEnv = std::getenv( "CLAUDE_CONFIG_DIR" );
+            if( claudeConfigEnv && *claudeConfigEnv )
+            {
+                addDir( std::string( claudeConfigEnv ) + "/skills" );
+            }
+            else if( homeEnv && *homeEnv )
             {
                 addDir( std::string( homeEnv ) + "/.claude/skills" );
             }
@@ -3203,7 +3277,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         // 0 skill files" (an empty/unpopulated dir — a real measurement) legible on its own, distinct from
         // this same verb's exit-3 refusal above (which never gets here). §B13.3 adds the other half of the
         // population to the same line: what the walk saw and could not scan, and what it did not descend.
-        std::fprintf( stderr, "ripwire scan: %d finding(s) total (%d skill file(s) scanned, %d unscannable file(s) skipped, %d denylisted subtree(s) not descended)\n",
+        rw::emitTo( stderr, "ripwire scan: {} finding(s) total ({} skill file(s) scanned, {} unscannable file(s) skipped, {} denylisted subtree(s) not descended)\n",
                       totalFindings, filesScanned, filesSkipped, prunedDirs );
         return maxSev;
     }
@@ -3231,7 +3305,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         {
             const std::string bf( cfg.batchFile );
             std::FILE* f = std::fopen( bf.c_str(), "rb" );
-            if( !f ) { std::fprintf( stderr, "ripwire: --batch: cannot open '%s'\n", bf.c_str() ); return 1; }
+            if( !f ) { rw::emitTo( stderr, "ripwire: --batch: cannot open '{}'\n", bf.c_str() ); return 1; }
             char buf[ 4096 ]; std::size_t n;
             while( ( n = std::fread( buf, 1, sizeof buf, f ) ) > 0 )
             {
@@ -3322,14 +3396,18 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
                 {
                     const auto eqPos = resolvedRoot.find( '=' );
                     const std::string flagName = resolvedRoot.substr( 0, eqPos );
-                    std::fprintf( stderr, "ripwire: root path does not exist: %s\n", resolvedRoot.c_str() );
-                    std::fprintf( stderr, "ripwire: did you mean --%s=%s ?\n", flagName.c_str(), resolvedRoot.substr( eqPos + 1 ).c_str() );
+                    rw::emitTo( stderr, "ripwire: root path does not exist: {}\n", resolvedRoot.c_str() );
+                    rw::emitTo( stderr, "ripwire: did you mean --{}={} ?\n", flagName.c_str(), resolvedRoot.substr( eqPos + 1 ).c_str() );
                 }
                 else
                 {
-                    std::fprintf( stderr, "ripwire: root path does not exist: %s\n", resolvedRoot.c_str() );
+                    rw::emitTo( stderr, "ripwire: root path does not exist: {}\n", resolvedRoot.c_str() );
                 }
                 return 1;
+            }
+            if( !rootIsReadable( resolvedRoot ) )
+            {
+                return 1;   // the refusal is on stderr (rootIsReadable)
             }
         }
         resolvedRoots.push_back( resolvedRoot );
@@ -3367,7 +3445,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         std::FILE*        probe = std::fopen( scipPath.c_str(), "rb" );
         if( probe == nullptr )
         {
-            std::fprintf( stderr, "ripwire: --scip=%s: cannot open the index — refusing rather than serving the name-based map "
+            rw::emitTo( stderr, "ripwire: --scip={}: cannot open the index — refusing rather than serving the name-based map "
                                   "you named a precision index to improve on (generate one with scip-clang/scip-python, or drop --scip)\n",
                           scipPath.c_str() );
             return 1;
@@ -3402,7 +3480,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         }
         if( !sinceResolvesSomewhere )
         {
-            std::fprintf( stderr, "%s\n", sinceUnresolvedRefusal( cfg.since ).c_str() );
+            rw::emitTo( stderr, "{}\n", sinceUnresolvedRefusal( cfg.since ).c_str() );
             return 1;
         }
         // N4 (capture-audit verify-wave1 2026-09-04): the SECOND half of the one policy. A value that resolves as a
@@ -3417,7 +3495,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         const bool sinceHostNeedsBaseline = activeSinceHostNeedsBaseline( cfg );
         if( sinceHostNeedsBaseline && !sinceHasBaseline && gitRepoHasHistory( multiRoot ? ws[0].arg : root ) )
         {
-            std::fprintf( stderr, "%s\n", sinceNoBaselineRefusal( cfg.since, multiRoot ? ws[0].arg : root ).c_str() );
+            rw::emitTo( stderr, "{}\n", sinceNoBaselineRefusal( cfg.since, multiRoot ? ws[0].arg : root ).c_str() );
             return 1;
         }
     }
@@ -3429,9 +3507,13 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         // The file need not EXIST — a cold first run is the normal case — but the directory that would hold
         // it must, or the write at the end of the run silently does nothing.
         const fs::path    cacheDir = fs::path( cachePath ).parent_path();
+        if( cachePathIsDirectory( cachePath ) )
+        {
+            return 1;   // the refusal is on stderr (cachePathIsDirectory)
+        }
         if( !cacheDir.empty() && !fs::is_directory( cacheDir, cacheEc ) )
         {
-            std::fprintf( stderr, "ripwire: --cache=%s: the directory '%s' does not exist, so nothing could ever be written there "
+            rw::emitTo( stderr, "ripwire: --cache={}: the directory '{}' does not exist, so nothing could ever be written there "
                                   "(the map would be served and the cache silently lost); create it, or pass a path under an existing directory\n",
                           cachePath.c_str(), cacheDir.string().c_str() );
             return 1;
@@ -3486,12 +3568,12 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             const std::uintmax_t  sz = std::filesystem::file_size( std::filesystem::path( path ), ec );
             if( ec || sz == 0 )
             {
-                std::fprintf( stderr, "ripwire: --index-out: failed to write %s\n", path.c_str() );
+                rw::emitTo( stderr, "ripwire: --index-out: failed to write {}\n", path.c_str() );
                 rc = 1;
             }
             else
             {
-                std::fprintf( stderr, "ripwire: --index-out wrote %s (%llu bytes, %s family)\n",
+                rw::emitTo( stderr, "ripwire: --index-out wrote {} ({} bytes, {} family)\n",
                               path.c_str(), static_cast<unsigned long long>( sz ), fam.rich ? "rich" : "lean" );
             }
         }
@@ -3574,12 +3656,12 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         }
         const std::size_t total  = ing.files.size() + ing.symbols.size() + ing.references.size() + ing.includes.size();
         const std::size_t bytes  = pathB + nameB + calleeB + incB;
-        std::fprintf( stderr,
-            "[stats] stored std::strings = %zu  (%zu bytes of char data)\n"
-            "        files/paths       = %zu (%zu B)\n"
-            "        symbols/names      = %zu (%zu B)\n"
-            "        references/callees = %zu (%zu B)\n"
-            "        includes/targets   = %zu (%zu B)\n",
+        rw::emitTo( stderr,
+            "[stats] stored std::strings = {}  ({} bytes of char data)\n"
+            "        files/paths       = {} ({} B)\n"
+            "        symbols/names      = {} ({} B)\n"
+            "        references/callees = {} ({} B)\n"
+            "        includes/targets   = {} ({} B)\n",
             total, bytes, ing.files.size(), pathB, ing.symbols.size(), nameB, ing.references.size(), calleeB, ing.includes.size(), incB );
     }
     // SCIP precision overlay: parse the index (if --scip given) → map to ripwire ids → hand to
@@ -3612,7 +3694,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         const bool        oneRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
         if( !writePinCensus( censusPath.c_str(), g.pinCensus, ing, oneRoot ? cfg.roots[0] : std::string_view() ) )
         {
-            std::fprintf( stderr, "ripwire: --pin-census could not write '%s'\n", censusPath.c_str() );
+            rw::emitTo( stderr, "ripwire: --pin-census could not write '{}'\n", censusPath.c_str() );
         }
     }
 

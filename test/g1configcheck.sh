@@ -69,27 +69,57 @@ scannerUnsignedSectionCount="$( occurrences '\[unsigned-integer-overflow\]' )"
 # basic_string.tcc:689 (the find/rfind twin) — N1. libc++ has no such wrap, so macOS never saw any of them.
 #
 # This arm used to ban `src:` outright, because a file-scoped rule is the easy way to smuggle a whole
-# directory out of the sanitizer. The ban is kept in spirit and tightened in practice: `src:` may appear
-# EXACTLY three times, and those three must be exactly these headers. A fourth `src:` entry, or a different
-# path in any of them, reds this gate — which is the whole point of an audited list.
+# directory out of the sanitizer. The ban is kept in spirit and tightened in practice: every `src:` entry is
+# enumerated here by exact path and count, and an entry added, dropped or re-pathed reds this gate — which is
+# the whole point of an audited list. The audited set, 2026-09-08 (the std::print floor):
+#   the 3 libstdc++ STRING seams above, under [unsigned-integer-overflow] — unchanged; plus
+#   the 2 libstdc++ FORMATTING seams, <format> and <print> (spelled c\+\+: LLVM before 18 reads the list as
+#   a regex), each under FOUR checks — [unsigned-integer-overflow], [implicit-integer-sign-change],
+#   [implicit-signed-integer-truncation], [implicit-unsigned-integer-truncation] — 8 rules. The first
+#   std::print CI run died in format:3903 (libstdc++ 14's formatting scanner spelling npos as int -1 ->
+#   size_t) under [implicit-integer-sign-change]; the emitter (src/infra/emit.h) routes every formatted
+#   write through these two headers, so the exemption is what keeps the complete G1 stack running.
+# Section counts move with it: [implicit-integer-sign-change] and [implicit-unsigned-integer-truncation]
+# each open a second list (Swift/tree-sitter before, libstdc++ now); [implicit-signed-integer-truncation]
+# opens its first. 3 + 8 = 11 `src:` occurrences, no more.
 stringViewRuleCount="$( occurrences 'src:\*/bits/string_view\.tcc' )"
 basicStringHeaderRuleCount="$( occurrences 'src:\*/bits/basic_string\.h' )"
 basicStringTccRuleCount="$( occurrences 'src:\*/bits/basic_string\.tcc' )"
 libstdcxxHeaderRuleCount="$(( stringViewRuleCount + basicStringHeaderRuleCount + basicStringTccRuleCount ))"
+formatRuleCount="$( occurrences 'src:\*/include/c\\\\+\\\\+/\*/format' )"
+printRuleCount="$( occurrences 'src:\*/include/c\\\\+\\\\+/\*/print' )"
+formatPrintRuleCount="$(( formatRuleCount + printRuleCount ))"
+signedTruncationSectionCount="$( occurrences '\[implicit-signed-integer-truncation\]' )"
 srcScopedRuleCount="$( occurrences 'src:' )"
-if [ "$unsignedTruncationSectionCount" = 1 ] && [ "$balanceCount" = 1 ] \
+if [ "$unsignedTruncationSectionCount" = 2 ] && [ "$balanceCount" = 1 ] \
     && [ "$functionSectionCount" = 1 ] && [ "$scannerCreateCount" = 1 ] \
     && [ "$unsignedDisableCount" = 2 ] && [ "$signedTruncationDisableCount" = 2 ] \
     && [ "$signChangeDisableCount" = 2 ] \
-    && [ "$swiftSignSectionCount" = 1 ] && [ "$swiftWhitespaceCount" = 1 ] \
+    && [ "$swiftSignSectionCount" = 2 ] && [ "$swiftWhitespaceCount" = 1 ] \
     && [ "$scannerUnsignedSectionCount" = 2 ] && [ "$bashScanCount" = 1 ] \
+    && [ "$signedTruncationSectionCount" = 1 ] \
     && [ "$stringViewRuleCount" = 1 ] && [ "$basicStringHeaderRuleCount" = 1 ] && [ "$basicStringTccRuleCount" = 1 ] \
-    && [ "$libstdcxxHeaderRuleCount" = 3 ] && [ "$srcScopedRuleCount" = 3 ] \
+    && [ "$libstdcxxHeaderRuleCount" = 3 ] \
+    && [ "$formatRuleCount" = 4 ] && [ "$printRuleCount" = 4 ] && [ "$formatPrintRuleCount" = 8 ] \
+    && [ "$srcScopedRuleCount" = 11 ] \
     && ! grep -Eq 'fun:\*' "$CMAKE"; then
-    ok "dependency policy is limited to audited Tree-sitter core, Swift/bash scanner and the 3 libstdc++ string seams"
+    ok "dependency policy is limited to audited Tree-sitter core, Swift/bash scanner, the 3 libstdc++ string seams and the 2 formatting seams (<format>/<print>, 4 checks each)"
 else
-    no "sanitizer exemption policy differs from the audited list (sections uint=$scannerUnsignedSectionCount, src:-scoped=$srcScopedRuleCount of which string_view.tcc=$stringViewRuleCount basic_string.h=$basicStringHeaderRuleCount basic_string.tcc=$basicStringTccRuleCount)"
+    no "sanitizer exemption policy differs from the audited list (sections uint=$scannerUnsignedSectionCount, src:-scoped=$srcScopedRuleCount of which string_view.tcc=$stringViewRuleCount basic_string.h=$basicStringHeaderRuleCount basic_string.tcc=$basicStringTccRuleCount format=$formatRuleCount print=$printRuleCount; sections sign-change=$swiftSignSectionCount signed-trunc=$signedTruncationSectionCount unsigned-trunc=$unsignedTruncationSectionCount)"
 fi
+# MUTATION CONTROL (live, not the historical note above): plant a twelfth `src:` entry in a COPY of the file
+# and re-run the identical occurrence extraction over it — the audited count must move. A control over an
+# unmutated copy would pass and prove nothing, so the copy is asserted to differ first.
+mutCmake="$( mktemp -t g1config_mut.XXXXXX )"
+awk '{ print } /src:\*\/bits\/basic_string\.tcc/ { print "  \"src:*/bits/planted_seam.h\\n\"" }' "$CMAKE" > "$mutCmake"
+if cmp -s "$CMAKE" "$mutCmake"; then
+    no "audited-list mutation control did not take — the planted src: entry is absent from the copy"
+elif [ "$( grep -o -- 'src:' "$mutCmake" | wc -l | tr -d ' ' )" = "$srcScopedRuleCount" ]; then
+    no "audited-list mutation control is inert — a planted src: entry left the occurrence count at $srcScopedRuleCount"
+else
+    ok "audited-list mutation control — a planted src: entry moves the count ($srcScopedRuleCount -> $( grep -o -- 'src:' "$mutCmake" | wc -l | tr -d ' ' ))"
+fi
+rm -f "$mutCmake"
 
 grep -q 'set(_ripwire_asan_options "detect_leaks=0' "$CMAKE" \
     && grep -q 'set(_ripwire_asan_options "detect_leaks=1' "$CMAKE" \
@@ -101,8 +131,35 @@ grep -q 'check_cxx_source_compiles' "$CMAKE" && grep -q 'LLVMFuzzerTestOneInput'
     && grep -q 'same upstream LLVM installation' "$CMAKE" \
     && ok "libFuzzer availability uses a real link probe with remediation" || no "libFuzzer link probe/remediation missing"
 
-fuzzTargetCount="$( grep -c '^  add_ripwire_fuzzer(' "$CMAKE" )"
-[ "$fuzzTargetCount" = 19 ] && ok "19 grammar fuzz targets declared" || no "expected 19 grammar fuzz targets, found $fuzzTargetCount"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+mkdir -p "$TMP/build/.cmake/api/v1/query"
+touch "$TMP/build/.cmake/api/v1/query/codemodel-v2"
+if cmake -S "$ROOT" -B "$TMP/build" -DRIPWIRE_FUZZ=ON >"$TMP/configure.log" 2>&1; then
+    if python3 - "$TMP/build/.cmake/api/v1/reply" <<'PY'
+import json, pathlib, sys
+reply = pathlib.Path(sys.argv[1])
+index = json.loads(next(reply.glob('index-*.json')).read_text())
+model = json.loads((reply / index['reply']['codemodel-v2']['jsonFile']).read_text())
+expected = {'ripwire_fuzz_' + name for name in
+            'cpp python go rust typescript tsx swift objc javascript bash java ruby json toml yaml csharp c php elixir lua'.split()}
+assert model['configurations']
+for config in model['configurations']:
+    targets = [json.loads((reply / t['jsonFile']).read_text()) for t in config['targets']]
+    actual = {t['name'] for t in targets if t['type'] == 'EXECUTABLE' and t['name'].startswith('ripwire_fuzz_')}
+    assert actual == expected, (actual, expected)
+PY
+    then
+        ok "configured model contains all 20 grammar fuzz executables"
+    else
+        no "configured grammar fuzz executable set differs"
+    fi
+elif grep -Eq 'RIPWIRE_FUZZ requires (Clang|a Clang toolchain)' "$TMP/configure.log"; then
+    printf '  SKIP  configured fuzz targets require a Clang toolchain with libFuzzer\n'
+else
+    cat "$TMP/configure.log"
+    no "fuzzer CMake configuration failed"
+fi
 grep -q 'EXCLUDE_FROM_ALL' "$CMAKE" && ok "fuzz targets excluded from normal builds" || no "fuzz targets can enter normal builds"
 
 grep -q 'LLVMFuzzerTestOneInput' "$HARNESS" && grep -q 'ts_parser_parse_string' "$HARNESS" \
@@ -113,7 +170,7 @@ grep -q 'max_total_time=' "$RUNNER" && grep -q 'max_len=65536' "$RUNNER" && grep
     && ok "fuzz runner is time-, input-, and concurrency-bounded" || no "bounded fuzz runner contract missing"
 
 seedCount="$( find "$ROOT/test/fuzz/seeds" -mindepth 2 -maxdepth 2 -name valid | wc -l | tr -d ' ' )"
-[ "$seedCount" = 19 ] && ok "all 19 grammars have valid seeds" || no "expected 19 grammar seeds, found $seedCount"
+[ "$seedCount" = 21 ] && ok "all 21 grammars have valid seeds" || no "expected 21 grammar seeds, found $seedCount"
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"

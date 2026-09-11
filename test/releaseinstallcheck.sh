@@ -11,6 +11,8 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# Detection and activation must use only the per-invocation homes below.
+unset CODEX_HOME AGENTS_HOME HERMES_HOME RIPWIRE_NO_ACTIVATE
 FAKE="$TMP/fake"; mkdir -p "$FAKE" "$TMP/assets/ripwire-0.3.6-macos-arm64/skills/ripwire-router" "$TMP/assets/ripwire-0.3.6-macos-arm64/hooks"
 
 printf '#!/bin/sh\necho "ripwire 0.3.6 (Release, Test)"\n' >"$TMP/assets/ripwire-0.3.6-macos-arm64/ripwire"
@@ -122,11 +124,19 @@ run_install()
 {
     # run_install HOMEDIR PREFIXDIR [extra env assignments...] -> stdout in $TMP/e.out, rc in $E_RC
     _h="$1"; _p="$2"; shift 2
-    env "$@" HOME="$_h" PATH="$FAKE:$PATH" RELEASE_FIXTURE="$TMP/release.json" \
+    # HERMES_HOME= comes FIRST so an explicit HERMES_HOME from "$@" (as E7 passes) wins; env applies
+    # assignments left to right, and a trailing default would silently clobber the override — leaving
+    # E7 green via the $HOME/.hermes fallback instead of the override it claims to test.
+    env HERMES_HOME= "$@" HOME="$_h" PATH="$FAKE:$PATH" RELEASE_FIXTURE="$TMP/release.json" \
         ASSET_FIXTURE="$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" \
         RIPWIRE_REPO=redhat-et/ripwire RIPWIRE_VERSION=v0.3.6 RIPWIRE_INSTALL_PREFIX="$_p" RIPWIRE_INSTALL_YES=1 \
         bash "$INSTALL" >"$TMP/e.out" 2>"$TMP/e.err"; E_RC=$?
 }
+# NOTE: run_install defaults HERMES_HOME to EMPTY so a leaked real HERMES_HOME in the calling
+# environment can never make scripts/install.sh's Hermes-activation block target the operator's live
+# ~/.hermes/skills with the fixture's temp-bundled skills/install.sh (those temp src dirs are rm -rf'd
+# at EXIT, leaving dangling links in a real Hermes home). Arms that want Hermes set it explicitly, as
+# (E7) does, with a temp value.
 
 # (E1) Claude Code present -> its skills are ACTIVE, and the run says so.
 EH1="$TMP/home-claude"; mkdir -p "$EH1/.claude"
@@ -178,5 +188,94 @@ run_install "$EH1" "$TMP/prefix-e1"
 { [ "$E_RC" -eq 0 ] && [ -e "$EH1/.claude/skills/ripwire-router" ]; } \
     && ok "(E6) a second run is clean and leaves the activation in place" \
     || no "(E6) re-running the installer broke the activation (rc=$E_RC)"
+
+# (E7) Hermes present -> its skills are ACTIVE via $HERMES_HOME (the install block's detection signal).
+# Mirrors (E1)/(E2): Hermes home created in an isolated HOME, the release installer must activate the
+# ripwire skills there, and must NOT invent a Claude dir for an agent that is not installed.
+# The Hermes home is deliberately NOT $HOME/.hermes: that split proves run_install's explicit
+# HERMES_HOME override reaches the installer, rather than the arm passing via the $HOME fallback.
+EH7="$TMP/home-hermes"; EH7H="$EH7/custom-hermes"; mkdir -p "$EH7H"
+run_install "$EH7" "$TMP/prefix-e7" HERMES_HOME="$EH7H"
+[ "$E_RC" -eq 0 ] && ok "(E7) install succeeds with Hermes present (HERMES_HOME=$EH7H)" \
+    || no "(E7) install failed with Hermes present: $( tail -1 "$TMP/e.err" )"
+[ -e "$EH7H/skills/ripwire-router" ] \
+    && ok "(E7) Hermes skills are ACTIVE after the one-liner, not merely staged" \
+    || no "(E7) Hermes was detected but its skills were left staged"
+[ ! -e "$EH7/.hermes" ] \
+    && ok "(E7) the installer honoured HERMES_HOME instead of inventing $HOME/.hermes" \
+    || no "(E7) the installer fell back to $HOME/.hermes — the explicit HERMES_HOME never arrived"
+grep -qi 'Hermes' "$TMP/e.out" \
+    && ok "(E7) the run reports the Hermes activation on the receipt line" \
+    || no "(E7) the run did not print a Hermes activation receipt"
+[ ! -d "$EH7/.claude/skills" ] \
+    && ok "(E7) an agent that is NOT installed is not given a Claude skills directory" \
+    || no "(E7) the installer created ~/.claude/skills for an agent that is not installed"
+
+# ── (F) THE UPGRADE PATH LEAVES A BINARY THAT RUNS ──────────────────────────────────────────────────
+# (E6) above re-ran the installer over an existing prefix and called it "clean" on the strength of an
+# exit code and a symlink. On 2026-09-06 that exact upgrade -- 0.3.8 to 0.4.0 into /opt/homebrew/bin on
+# macOS 15 -- left a binary the kernel SIGKILLed on sight (exit 137, no output), and every one of
+# (E6)'s assertions still passed: rc was 0 because the installer's own post-install version check was
+# wrapped in `|| echo "version check failed"`, so it printed that phrase INSIDE a line that also said
+# "installed", and exited 0. The arm fired, was true, and proved less than its name.
+#
+# The two properties that were missing are gated here. Note what these arms can and cannot see: the
+# fixture's "binary" is a shell script, which has no Mach-O image and cannot reproduce the kill itself.
+# So (F1) gates the REPORTING contract (a broken install must be a non-zero exit, not a cheerful line)
+# and (F2)/(F3) gate the MECHANISM that replaced the overwrite. The kill itself was reproduced only on
+# the real path, and the source comment records that its kernel-level cause is NOT established.
+
+# (F1) A post-install binary that cannot report its version is an INSTALL FAILURE, not a footnote.
+# The fixture binary succeeds the first time it is run (the pre-install version check at install.sh's
+# archive step) and fails every time after, so the archive check passes and the POST-install check is
+# the one under test. Without this arm, the installer can prove an install is broken and still exit 0.
+F1DIR="$TMP/assets/ripwire-0.3.6-macos-arm64"
+cp "$F1DIR/ripwire" "$TMP/ripwire.fixture.bak"
+# The marker is an ABSOLUTE path, not "$0.ran": the installed copy lives at a DIFFERENT path from the
+# extracted one, so a $0-relative marker makes every copy think it is running for the first time and the
+# post-install call succeeds. That is how the first version of this fixture reported a false green.
+cat >"$F1DIR/ripwire" <<BROKEN
+#!/bin/sh
+# succeeds once (the pre-install archive check), then fails (the post-install check)
+if [ -e "$TMP/f1.ran" ]; then exit 3; fi
+: >"$TMP/f1.ran"
+echo "ripwire 0.3.6 (Release, Test)"
+BROKEN
+chmod +x "$F1DIR/ripwire"
+tar -C "$TMP/assets" -czf "$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" ripwire-0.3.6-macos-arm64
+( cd "$TMP/assets" && shasum -a 256 ripwire-0.3.6-macos-arm64.tar.gz >ripwire-0.3.6-macos-arm64.tar.gz.sha256 )
+EHF="$TMP/home-f1"; mkdir -p "$EHF/.claude"
+run_install "$EHF" "$TMP/prefix-f1"
+if [ "$E_RC" -ne 0 ]; then
+    ok "(F1) an installed binary that cannot state its version fails the install (rc=$E_RC)"
+else
+    no "(F1) the installer exited 0 for a binary it had just proved unrunnable — the check is cosmetic"
+fi
+# restore the good fixture so nothing downstream inherits the broken one
+cp "$TMP/ripwire.fixture.bak" "$F1DIR/ripwire"; chmod +x "$F1DIR/ripwire"; rm -f "$TMP/f1.ran"
+tar -C "$TMP/assets" -czf "$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" ripwire-0.3.6-macos-arm64
+( cd "$TMP/assets" && shasum -a 256 ripwire-0.3.6-macos-arm64.tar.gz >ripwire-0.3.6-macos-arm64.tar.gz.sha256 )
+
+# (F2) THE BINARY REACHES ITS FINAL PATH BY RENAME. `cp` onto the destination rewrites the existing
+# inode; `mv` within the directory replaces it atomically. This is the fix, so it is asserted directly
+# rather than inferred from an outcome the fixture cannot produce.
+if grep -qE '^mv -f "\$installTmp" "\$binDir/ripwire"' "$INSTALL"; then
+    ok "(F2) the installer moves the binary into place atomically (mv, not cp-over)"
+else
+    no "(F2) the installer no longer installs by rename — an in-place overwrite is back"
+fi
+
+# (F3) MUTATION CONTROL for (F2), and the arm that would have caught the original bug: NO `cp` may name
+# the destination path. (F2) alone passes if someone adds a cp-over BESIDE the mv.
+if grep -qE 'cp[^|;]*"\$binDir/ripwire"' "$INSTALL"; then
+    no "(F3) something still cp's directly onto \$binDir/ripwire — the overwrite path is reachable"
+else
+    ok "(F3) nothing cp's onto the destination path; the temp file is the only thing copied"
+fi
+
+if [ "${1:-}" != "--isolation-child" ]; then
+    python3 "$ROOT/test/installer_isolation.py" "${RIPWIRE_BIN:-$ROOT/build/ripwire}" \
+        || no "installer gates escaped their fixture homes or failed with inherited overrides"
+fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

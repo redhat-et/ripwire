@@ -77,6 +77,14 @@ run env RIPWIRE_BASENAME_W=0 "$BIN" "$REPO" --for="$Q_B" --format=candidates > "
 [ "$(top3 "$TMP/b_off.xml" cache_store)" -eq 0 ] \
     && ok "(b-ctl) BASENAME_W=0: control stays absent (lever did the work)" \
     || no "(b-ctl) control already surfaces cache_store.js — fixture no longer proves the lever"
+# (b-junk) a knob that does not parse IN FULL is refused, not read as its numeric prefix: atoi took "3x" as 3 and
+# armed the lever. Refused means the default ranking — compared against an UNSET run, not against =0 — plus a
+# stderr line naming the variable, so a sweep cannot run on the default while believing it set something.
+run "$BIN" "$REPO" --for="$Q_B" --format=candidates > "$TMP/b_unset.xml" 2>/dev/null
+run env RIPWIRE_BASENAME_W=3x "$BIN" "$REPO" --for="$Q_B" --format=candidates > "$TMP/b_junk.xml" 2>"$TMP/b_junk.err"
+{ cmp -s "$TMP/b_junk.xml" "$TMP/b_unset.xml" && grep -qF 'RIPWIRE_BASENAME_W="3x"' "$TMP/b_junk.err"; } \
+    && ok "(b-junk) BASENAME_W=3x is refused (default ranking, stderr names it), not read as 3" \
+    || no "(b-junk) BASENAME_W=3x was read as its numeric prefix, or ignored silently"
 
 # ── (c) postings parity with both levers armed: cached (persisted-stats) vs --no-cache (scan) ───
 run env RIPWIRE_QSTEM=1 RIPWIRE_BASENAME_W=3 "$BIN" "$REPO" --for="$Q_A" > "$TMP/c_warm.xml" 2>/dev/null

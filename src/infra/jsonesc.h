@@ -1,4 +1,6 @@
 #pragma once
+#include "emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // jsonesc.h — A4-F27: the ONE canonical JSON string-escaping core, unifying three near-clone
 // escapers (mcp.h's mcpdetail::jsonEscape, ccjson.h's ccJsonEscape, htmlexport.h's jsonEscape;
@@ -147,7 +149,7 @@ inline void escapeInto( std::string_view s, std::string& out,
                 default: break;
             }
             if( c < 0x20 )
-            { char b[ 8 ]; std::snprintf( b, sizeof( b ), "\\u%04x", unsigned( c ) ); out += b; }
+            { char b[ 8 ]; rw::formatTo( b, sizeof( b ), "\\u{:04x}", unsigned( c ) ); out += b; }
             else
             {
                 out += char( c );

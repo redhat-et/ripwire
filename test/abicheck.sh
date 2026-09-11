@@ -459,11 +459,11 @@ printf '%s' "$S" | grep -q 'it ALSO lands in quiet=' \
     || no "abi: legend does not explain that unrelated= refs also land in quiet="
 
 # ── 10) --detail is the documented escape hatch, and --help says so ────────────────────────────────────
-"$BIN" --help 2>&1 | grep -q 'kind="rename"' \
+"$BIN" --help=all 2>&1 | grep -q 'kind="rename"' \
     && ok "--help documents kind=\"rename\"" || no "--help does not mention kind=\"rename\""
-"$BIN" --help 2>&1 | grep -q 'EXCLUDED by default' \
+"$BIN" --help=all 2>&1 | grep -q 'EXCLUDED by default' \
     && ok "--help names what --abi excludes by default" || no "--help does not name the default exclusions"
-"$BIN" --help 2>&1 | grep -q 'head-moved' \
+"$BIN" --help=all 2>&1 | grep -q 'head-moved' \
     && ok "--help documents kind=\"head-moved\"" || no "--help does not mention kind=\"head-moved\""
 
 [ $fail -eq 0 ] && echo "abicheck: ALL PASS" || echo "abicheck: FAILURES"

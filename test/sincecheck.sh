@@ -41,6 +41,13 @@
 #                                  so nothing says so.
 #   - determinism:                 --since=HEAD~3 (REV form) is byte-identical run-to-run
 #   - shell safety:                a --since value with shell metacharacters executes nothing
+#   - the git SINK (2026-09-10):   git is handed the RESOLVED commit, never the caller's --since string, and a
+#                                  value beginning with '-' reaches no git argv at all. shSingleQuote stops the
+#                                  shell, not git: a leading '-' is an OPTION to git whatever the quoting. Arms
+#                                  S0-S4 at the bottom, with what the pre-fix binary did.
+#   - rows that can FAIL:          the N4b rows ran inside `printf | while` — a subshell — so a FAIL row set
+#                                  fail=1 where the exit code never saw it, and the gate exited 0 under it
+#                                  (CONTRIBUTING §2 shape 6). Every table-driven loop reads its rows on fd 3 now.
 # Usage:  test/sincecheck.sh   |   RIPWIRE_BIN=asan/ripwire test/sincecheck.sh
 # Exits non-zero on any failure. Does NOT edit test/regression.sh. Needs git.
 set -u
@@ -50,7 +57,8 @@ fail=0
 ok(){ echo "  PASS  $1"; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
-REPO="$(mktemp -d)"; trap 'rm -rf "$REPO"' EXIT
+REPO="$(mktemp -d)"; SHIMDIR="$(mktemp -d)"; trap 'rm -rf "$REPO" "$SHIMDIR"' EXIT
+# SHIMDIR holds S2/S3's git PATH shim OUTSIDE the fixture: a file inside $REPO is crawled and would move the bytes S1 compares
 SRCDIR="$( cd "$( dirname "$0" )/.." && pwd )/src"   # N4 source arm reads src/; resolve it before leaving this dir
 cd "$REPO" || exit 1
 git init -q; git config user.email x@y; git config user.name x
@@ -156,6 +164,8 @@ for line in m.group( 1 ).splitlines():
         print( "%s %s" % ( g.group( 1 ), g.group( 2 ) ) )
 N4_EOF
 )"
+# the argv that SELECTS a kSinceHosts row (the table names the flag; a value-taking flag needs one) — N4b and S1-S4 share it
+sinceHostArgv(){ case "$1" in --slice) printf '%s' "--slice=a:x" ;; *) printf '%s' "$1" ;; esac; }
 case "$SINCE_ROWS" in
   *__NOTABLE__*|"") no "N4b: kSinceHosts is unreadable in src/cli.h — fix this gate's parser before trusting any arm below" ;;
   *)
@@ -163,14 +173,11 @@ case "$SINCE_ROWS" in
     [ "$nRows" -ge 5 ] \
       && ok "N4b: read $nRows --since host rows off cli.h's kSinceHosts table" \
       || no "N4b: only $nRows host row(s) parsed — the table shrank or the parser drifted"
-    printf '%s\n' "$SINCE_ROWS" | while read -r flag needsBaseline; do
+    # rows on fd 3, in THIS shell. This loop used to be `printf | while` — a subshell — so its fail=1 never reached
+    # the exit code: every row below could print FAIL into a gate that still exited 0.
+    while read -r flag needsBaseline <&3; do
       [ -z "$flag" ] && continue
-      # the argv that SELECTS this host (the table names the flag; a value-taking flag needs one)
-      case "$flag" in
-        --slice)     argv="--slice=a:x" ;;
-        --cochange)  argv="--cochange" ;;
-        *)           argv="$flag" ;;
-      esac
+      argv="$( sinceHostArgv "$flag" )"
       # (i) a REACHABLE value: every host, both classes, answers
       "$BIN" "$REPO" $argv --since=HEAD~1 --no-cache >/dev/null 2>&1 \
         && ok "N4b $flag --since=HEAD~1 (reachable): answers, whatever its class" \
@@ -196,7 +203,7 @@ case "$SINCE_ROWS" in
           || no "N4b $flag is declared needsBaseline=false but --since=1999-01-01 gave exit $rc, window=$( printf '%s' "$out" | grep -o 'window=\"[^\"]*\"' | head -1 ) — declared class and behaviour disagree"
       fi
       rm -f "$err"
-    done
+    done 3<<< "$SINCE_ROWS"
     ;;
 esac
 # SOURCE: the host list is spelled ONCE. main.cpp used to carry its own copy (`!cfg.sliceSpec.empty()`), which
@@ -230,5 +237,104 @@ r2="$("$BIN" "$REPO" --hotspots --since=HEAD~3 --no-cache 2>/dev/null)"
 rm -f "$REPO/PWNED"
 "$BIN" "$REPO" --hotspots --since='HEAD~3; touch '"$REPO"'/PWNED' --no-cache >/dev/null 2>&1
 [ ! -f "$REPO/PWNED" ] && ok "shell-metacharacter --since executes nothing (quoted safely)" || no "shell injection via --since!"
+
+# ── the git SINK (2026-09-10): git is handed the RESOLVED commit, never the caller's --since string ────────────
+# resolveSinceScope proved a revision with `rev-parse --verify --quiet '<val>^{commit}'`, kept the RAW value, and
+# sinceLogArgs spliced it into `git log '<val>..'` as its own argv entry. shSingleQuote stops the SHELL, not git:
+# git reads a leading '-' as an OPTION (prrefsafecheck.sh's --pr-context=--output=FILE is the shipped instance of
+# the class). Nothing in ripwire refused one; git's rev-parse happened to. The house rule is gitResolveCommitSha's:
+# refuse a leading '-', trust only a bare-sha answer, hand git THAT. Measured on the pre-fix binary (b3b70d7a):
+#   --since='-17 days ago'   passed looksLikeDate; git got `--before=-17 days ago` and `--since=-17 days ago`; exit 0
+#   --since='^HEAD~3'        rev-parse --verify answers '^<sha>' at rc 0; stamped window="^HEAD~3" commits="0", exit 0
+#   --since=<branch>         git log got '<branch>..': the caller's string, not the sha rev-parse had just resolved
+# S0 fixture presence. S1 a branch and an annotated tag give bytes identical to the same run given the sha, on every
+# kSinceHosts row, once the echoed value (window=, <since rev=>) is normalised; the names are sha-length, so
+# est_tokens= cannot move with the spelling. S2 through a PATH shim, every WINDOW host's git log range is '<sha>..',
+# never '<ref>..'. S3 a value beginning with '-' refuses on every host AND reaches no git argv. S4 '^HEAD~3' refuses
+# on every host: a rev-parse answer that is not a bare object name is not a revision.
+SHA3="$( git -C "$REPO" rev-parse HEAD~3 )"
+padToSha(){ s="$1"; while [ "${#s}" -lt "${#SHA3}" ]; do s="${s}x"; done; printf '%s' "$s"; }
+BR="$( padToSha sinceprobe-branch- )"; TG="$( padToSha sinceprobe-tag- )"
+git -C "$REPO" branch "$BR" HEAD~3; git -C "$REPO" tag -a "$TG" -m probe HEAD~3
+{ [ "$( git -C "$REPO" rev-parse "$BR^{commit}" )" = "$SHA3" ] && [ "$( git -C "$REPO" rev-parse "$TG^{commit}" )" = "$SHA3" ] \
+  && [ "$( git -C "$REPO" cat-file -t "$TG" )" = "tag" ] && [ "${#BR}" -eq "${#SHA3}" ] && [ "${#TG}" -eq "${#SHA3}" ]; } \
+  && ok "S0 fixture: a branch and an annotated TAG OBJECT both peel to HEAD~3; both names are ${#SHA3} bytes, like the sha" \
+  || no "S0 fixture: the probe refs do not peel to HEAD~3 or are not sha-length — S1-S4 cannot conclude"
+
+normSince(){ sed -e "s/$BR/@SINCE/g" -e "s/$TG/@SINCE/g" -e "s/$SHA3/@SINCE/g"; }
+s1Rows=0
+while read -r flag needsBaseline <&3; do
+  [ -z "$flag" ] && continue
+  argv="$( sinceHostArgv "$flag" )"
+  outSha="$( "$BIN" "$REPO" $argv --since="$SHA3" --no-cache 2>/dev/null </dev/null )"; rcSha=$?
+  for ref in "$BR" "$TG"; do
+    outRef="$( "$BIN" "$REPO" $argv --since="$ref" --no-cache 2>/dev/null </dev/null )"; rcRef=$?
+    # presence: both runs answered, and the ref run really ECHOES the ref — the one difference normSince removes
+    if [ "$rcSha" -eq 0 ] && [ "$rcRef" -eq 0 ] && [ -n "$outSha" ] && printf '%s' "$outRef" | grep -qF -- "$ref" \
+       && [ "$( printf '%s' "$outRef" | normSince )" = "$( printf '%s' "$outSha" | normSince )" ]; then
+      ok "S1 $flag --since=${ref%%x*}…: byte-identical to --since=<sha> apart from the echoed value"
+    else
+      no "S1 $flag --since=$ref vs --since=$SHA3: exit $rcRef/$rcSha, diff: $( diff <( printf '%s' "$outRef" | normSince ) <( printf '%s' "$outSha" | normSince ) | head -3 | tr '\n' ' ' | head -c 240 )"
+    fi
+  done
+  s1Rows=$(( s1Rows + 1 ))
+done 3<<< "$SINCE_ROWS"
+[ "$s1Rows" -ge 5 ] && ok "S1 covered $s1Rows kSinceHosts rows" || no "S1 covered only $s1Rows host row(s) — the table enumeration did not run"
+
+REALGIT="$( command -v git )"
+SHIMLOG="$SHIMDIR/argv.log"
+cat > "$SHIMDIR/git" <<EOF
+#!/bin/bash
+{ printf 'CALL\n'; for a in "\$@"; do printf 'ARG %s\n' "\$a"; done; } >> "$SHIMLOG"
+exec "$REALGIT" "\$@"
+EOF
+chmod +x "$SHIMDIR/git"
+shimSawRef=0
+while read -r flag needsBaseline <&3; do
+  [ "$needsBaseline" = "false" ] || continue            # --slice compares against baselineSha itself; it builds no log range
+  argv="$( sinceHostArgv "$flag" )"
+  rm -f "$SHIMLOG"
+  PATH="$SHIMDIR:$PATH" "$BIN" "$REPO" $argv --since="$BR" --no-cache >/dev/null 2>&1 </dev/null; rc=$?
+  grep -qxF "ARG $BR^{commit}" "$SHIMLOG" 2>/dev/null && shimSawRef=1   # the resolve probe carried the ref: the shim is live
+  if [ "$rc" -eq 0 ] && grep -qxF "ARG $SHA3.." "$SHIMLOG" 2>/dev/null && ! grep -qF "ARG $BR.." "$SHIMLOG"; then
+    ok "S2 $flag --since=<branch>: git log's range is '<sha>..' (the resolved commit), never '<branch>..'"
+  else
+    no "S2 $flag --since=<branch>: exit $rc; git saw $( grep -F -e "$BR" -e "$SHA3" "$SHIMLOG" 2>/dev/null | sort -u | tr '\n' ' ' | head -c 240 )"
+  fi
+done 3<<< "$SINCE_ROWS"
+[ "$shimSawRef" -eq 1 ] \
+  && ok "S2 control: the shim logged the ref in git's resolve probe, so an ABSENCE in S3 is evidence, not a dead shim" \
+  || no "S2 control: the shim never logged the ref — PATH did not reach git, and S3's absence arm cannot conclude"
+
+for val in "-17 days ago" "--output=$SHIMDIR/PWNED"; do
+  label="${val%%=*}"
+  while read -r flag needsBaseline <&3; do
+    [ -z "$flag" ] && continue
+    argv="$( sinceHostArgv "$flag" )"
+    rm -f "$SHIMLOG" "$SHIMDIR/PWNED"; err="$( mktemp )"
+    out="$( PATH="$SHIMDIR:$PATH" "$BIN" "$REPO" $argv --since="$val" --no-cache 2>"$err" </dev/null )"; rc=$?
+    if [ "$rc" -eq 1 ] && [ -z "$out" ] && grep -qF -- "$val" "$err" && ! grep -qF -- "$val" "$SHIMLOG" 2>/dev/null && [ ! -e "$SHIMDIR/PWNED" ]; then
+      ok "S3 $flag --since='$label': refused before git (exit 1, empty stdout, value named, in no git argv)"
+    else
+      no "S3 $flag --since='$label': exit $rc, stdout $( printf '%s' "$out" | grep -o 'window="[^"]*"' | head -1 ), git saw: $( grep -F -- "$val" "$SHIMLOG" 2>/dev/null | sort -u | tr '\n' ' ' | head -c 200 )"
+    fi
+    rm -f "$err"
+  done 3<<< "$SINCE_ROWS"
+done
+
+caret="$( git -C "$REPO" rev-parse --verify --quiet '^HEAD~3^{commit}' 2>/dev/null )"; crc=$?
+{ [ "$crc" -eq 0 ] && [ "$caret" = "^$SHA3" ]; } \
+  && ok "S4 presence: git itself answers '^HEAD~3^{commit}' with '^<sha>' at rc 0 — a non-sha answer ripwire must distrust" \
+  || no "S4 presence: git answered '^HEAD~3^{commit}' with '$caret' (rc $crc) — the rows below cannot tell ripwire's check from git's"
+while read -r flag needsBaseline <&3; do
+  [ -z "$flag" ] && continue
+  argv="$( sinceHostArgv "$flag" )"
+  err="$( mktemp )"
+  out="$( "$BIN" "$REPO" $argv --since='^HEAD~3' --no-cache 2>"$err" </dev/null )"; rc=$?
+  { [ "$rc" -eq 1 ] && [ -z "$out" ] && grep -qF -- "'^HEAD~3'" "$err"; } \
+    && ok "S4 $flag --since='^HEAD~3': refused — '^<sha>' is not a bare object name, so not a revision" \
+    || no "S4 $flag --since='^HEAD~3': exit $rc, $( printf '%s' "$out" | grep -o 'window="[^"]*"\|commits="[^"]*"' | head -2 | tr '\n' ' ' )— a non-sha rev-parse answer was trusted as a revision"
+  rm -f "$err"
+done 3<<< "$SINCE_ROWS"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

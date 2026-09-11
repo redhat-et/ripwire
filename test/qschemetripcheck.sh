@@ -34,6 +34,131 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-10, DART (test/dartcheck.sh): kParserVer 87 -> 88 and kIngestParserVerMirror -> 88. A 23rd
+#   grammar joins kLangTable, so the CRAWL ADMITS FILES IT PREVIOUSLY REFUSED: a v87 blob's file list has
+#   no record for the `.dart` it never saw, the file is ABSENT rather than stale, and only the header
+#   version can reject the blob — the same class as the plain-text prose tier below. The commit also
+#   extends the definition SPAN for Dart only (dartFollowingBody, adopted in ingest_sidecap.h) and adds
+#   formal_parameter_list to cc_isParamList; both are extraction identity, which is exactly what parserVer
+#   covers, and every other language is byte-identical (verified against the pre-change binary on src/ and
+#   on a 1 406-file multi-language corpus). Record SHAPES are unchanged, so kCacheVersion stays 18. No
+#   Snapshot-side function changed and kQSnapCacheScheme stays 8: what a cached Snapshot MEANS is
+#   untouched — the corpus it is computed over is what grew. RE-ANSWERED TWICE on the landing rebase: the
+#   branch was written against 81 -> 82, and 87 (below) was taken by the markdown-saturation lane while
+#   this PR was open — the kParserVer DECLARATION auto-merged clean at that same wrong 87 and only the
+#   comment conflicted, which is why the number is re-derived from main rather than carried.
+# 2026-09-10, MARKDOWN COUNTER SATURATION (test/vendorpatchcheck.sh arm I,
+#   third_party/patches/markdown/002-counter-saturate): kParserVer 86 -> 87 and
+#   kIngestParserVerMirror -> 87. A uint8_t counter in four vendored external scanners overflowed past 255 —
+#   a hard abort under G1's -fno-sanitize-recover=all (rc=134), found on rails/guides/source/
+#   getting_started.md, a pipe-table row padded to 301 columns; 64 tabs also suffice, since advance()
+#   charges a tab at tab stop 4. Only ONE of the two remedies in that lane moves extraction. markdown's
+#   indentation counters AND its fence `level` SATURATE, because both are read by ordering tests against a
+#   FIXED threshold (`>= 4` indented chunk, `< 4` thematic break, `< list_item_indentation` max 17; `>= 3`
+#   before a fence may open) and 255 answers each exactly as any larger true value would. Wrapping inverted
+#   those predicates inside a narrow window: measured N=255 correct, N=256/257 WRONG at exit 0, N=300 correct
+#   again by luck — at 256 an indented code block parsed as a heading and a fence never opened, leaking its
+#   body out as live markdown, both minting phantom symbols. The rust/lua/csharp siblings take an explicit
+#   CAST instead: those counters close a token by matching the opening count, saturation is not more correct
+#   there, and measurement found no extraction difference at any width (255/256/257/300), so the cast half
+#   contributes NOTHING to this bump. Measured both ways rather than assumed: map output is byte-identical
+#   over 3 538 real files, and a constructed 256-column ATX line changes from n="BuriedHeading" emitted to
+#   absent. Record shapes unchanged, kCacheVersion stays 18. No Snapshot-side function changed and
+#   kQSnapCacheScheme stays 8: what a cached Snapshot MEANS is untouched.
+#   RE-DERIVED OVER main's OWN RE-PIN, not carried over: this lane landed on top of the printf-family
+#   -> std::print conversion, which had itself re-pinned this hash for a source-text move in
+#   bodyHashesBySym. Both sides of that conflict were stale — main's value predates kParserVer 87 and
+#   this lane's predates the conversion — so the correct hash exists only on the MERGED tree and was
+#   regenerated there with UPDATE_GOLDEN=1. Taking either side would have pinned a hash no tree has.
+# 2026-09-09, REBASED onto main c38d3eea (parser 85, text-docs tier): the entry below is RE-ANSWERED
+#   against THAT tree rather than carried over — --quality-baseline written by main's own binary and by
+#   this lane's, on the same corpus, is BYTE-IDENTICAL at 930,546 B. So the conversion is still the
+#   refactor-only arm on the new base and kQSnapCacheScheme still stays 8.
+# 2026-09-09, PRINTF-FAMILY -> std::print (lane/stdprint-conversion): RE-PIN ONLY, kQSnapCacheScheme STAYS 8.
+#   One manifest function's SOURCE moved: bodyHashesBySym's hex fold went
+#     std::snprintf( b, sizeof( b ), "%016llx", ... )  ->  rw::formatTo( b, sizeof( b ), "{:016x}", ... )
+#   That string is concatenated into `joined` and fed to fnv1a64, so it IS the body hash a snapshot stores,
+#   and a byte moving there would silently repartition clone groups and the dead set. It does not move:
+#   %016llx and {:016x} were proven byte-identical over 0, 1, 255, 4886718345 and UINT64_MAX before the
+#   conversion, and the END-TO-END check is what settles it — --quality-baseline written by the
+#   pre-conversion binary and by this one, on the same corpus, is BYTE-IDENTICAL: 2,388 B on test/fixture
+#   and 924,402 B on the real src/ tree. Nothing a Snapshot means has changed, so this is the
+#   refactor-only arm of this gate's own instructions: re-pin, do not bump the scheme.
+#   RE-PINNED AGAIN in the same lane (the whitespace pass): the converter had left a double space before
+#   the closing paren, and collapsing it touched bodyHashesBySym's line a second time. Same answer, re-run
+#   rather than assumed — the --quality-baseline blobs are byte-identical again (924,394 B on src/), so it
+#   is still the refactor-only arm and the scheme still stays 8. Lesson for the next conversion: re-pin a
+#   source-text tripwire ONCE, at the end of the lane, after formatting has settled.
+#   (Note for the next reader: the manifest is TWELVE functions, not the six the family is often described
+#   by — topLevelCalleeNameHashes, bodyHashesBySym, readRegisterMacrosConfig, registeredMacroNames,
+#   startsWithRegisteredMacro and registeredMacroSymbolIds are in it too, and bodyHashesBySym is the one a
+#   formatting change can reach.)
+# 2026-09-09, PLAIN-TEXT PROSE TIER (test/textdocscheck.sh): kParserVer 84 -> 85 and
+#   kIngestParserVerMirror -> 85. `.rst`/`.adoc`/`.org`/`.mdx` join kLangTable on Lang::Markdown and the
+#   markdown BLOCK grammar, so the CRAWL ADMITS FILES IT PREVIOUSLY REFUSED. That is the one class of
+#   extraction change a per-file stat gate cannot self-heal — a v84 blob's file list has no record for the
+#   `.rst` it never saw, so the file is ABSENT rather than stale and only the header version can reject the
+#   blob. Record shapes are unchanged (a markdown file's records already existed), so kCacheVersion stays
+#   18. No Snapshot-side function changed and kQSnapCacheScheme stays 8: what a cached Snapshot MEANS is
+#   untouched — the corpus it is computed over is what grew.
+# 2026-09-07, ES DEFAULT IMPORTS (test/lib/jsdefaultimport.sh): kParserVer and its quality mirror
+#   move 81 -> 82 for default import/export facts. Record layouts and Snapshot-side functions are
+#   unchanged: kCacheVersion stays 16 and kQSnapCacheScheme stays 8.
+# 2026-09-07, FOUR-LANGUAGE IMPORTS (test/bashsourcecheck.sh, test/luarequirecheck.sh,
+#   test/rubyrequirecheck.sh, test/eliximportcheck.sh, test/deplangscheck.sh): kParserVer 80 -> 81 and
+#   kIngestParserVerMirror -> 81. Bash `source`/`.`, Lua `require`, Ruby `require`/`require_relative`/
+#   `load` and Elixir `alias`/`import`/`require`/`use` become Include records — four languages that
+#   emitted NO Include record on ANY tree now emit one per directive, so a v80 blob on a tree holding any
+#   of them carries an EMPTY include list where a real one exists and must be rejected. Include's RECORD
+#   SHAPE is unchanged (same four fields), so kCacheVersion stays 16 — the 38/39 precedent, where the
+#   extracted SET grew and only parserVer moved. No Snapshot-side function changed, kQSnapCacheScheme
+#   stays 8. The same commit flips lintrules.h::dependencyCapable for those four languages, which moves
+#   dep_files=/ccd/acd/nccd and --arch's propagation_cost on any corpus holding them; that is disclosed in
+#   the output itself as <health dep_langs=> rather than only here.
+# 2026-09-09, RUBY RECEIVER DEDUPE + DEEP CHAIN (test/rubyrecvcheck.sh): kParserVer 85 -> 86 and
+#   kIngestParserVerMirror -> 86. A receiver's lazy bit is now the AND over its occurrences (a method-body site
+#   above a class-body site used to leave the directive lazy, and the structure lost the load-time edge), and
+#   the constant-chain check is a loop (a 5000-segment chain overflowed a worker stack). Record shape and
+#   kCacheVersion (18) unchanged — cached Ruby files re-parse; no serialize/deserialize/computeSnapshot change.
+#   RE-BUMPED from 85 on landing: main had already spent 85 on the plain-text prose tier (test/textdocscheck.sh),
+#   per the collision rule in ingest_cache.h's kParserVer note.
+# 2026-09-08, RUBY CONSTANT RECEIVERS (test/rubyrecvcheck.sh): kParserVer 82 -> 83 and kIngestParserVerMirror
+#   -> 83. A constant RECEIVER (`User.find`, `App::Mailer.deliver`) is a symbolic Include, one per (file,
+#   innermost open, written name), lazy inside a closure; the Ruby walk descends every node. The record shape
+#   and kCacheVersion (17) are unchanged — only the extraction identity moved, so cached Ruby files re-parse.
+#   No serialize/deserialize/computeSnapshot function changed.
+# 2026-09-07, RUBY SCOPE + SETTERS (PR #47 rebased onto the langs integration branch,
+#   test/rubyscopecheck.sh, test/rubysettercheck.sh): kParserVer 79 -> 80 and kIngestParserVerMirror -> 80,
+#   landing ON TOP of the Elixir (78) and ES-import (79) bumps above. Two Ruby extraction FACTS moved:
+#   (a) every Ruby def now records its enclosing class/module as `scope` (rubyEnclosingScopeOf), so Ruby
+#   rows gain id= and same-named methods in different classes stop folding into one overloads= row;
+#   (b) queries/ruby/tags.scm accepts the (setter) node, so `def name=` is indexed, and a call captured as
+#   the `left:` of an (assignment) is renamed `name=` so a WRITE stops edging the getter. The fork branch
+#   carried 79 with the usual "skip the rich family" rationale refuted above; on the merged tree 79 was
+#   already taken by the ES-import bump, so the next free number over the tip is 80 — the RE-BUMP rule in
+#   ingest_cache.h's kParserVer note, applied for the third time this day. Record shapes unchanged, so
+#   kCacheVersion stays 16; no Snapshot-side function changed, kQSnapCacheScheme stays 8.
+# 2026-09-07, ELIXIR (test/elixircheck.sh): kParserVer 77 -> 78 and kIngestParserVerMirror -> 78 for the
+#   new grammar (.ex/.exs), its definition/call capture filters and its metrics. The fork proposed 83,
+#   reasoning that 78 must be skipped as "77's rich value"; it must not be. parserVerFor() derives the rich
+#   family as kParserVer+1, but the two families live in SEPARATE cache FILES (main.cpp A4-P4 suffixes the
+#   blob name with the class), so a lean-78 blob can never be served to a rich-77 reader. The project's own
+#   history is the proof: 74 -> 75 -> 76 -> 77 are four consecutive +1 bumps, each logged below. Rebasing a
+#   fork's parser version onto main means RE-BUMPING to the next free number over main's (the rule in
+#   ingest_cache.h's kParserVer note), which is 78 — never keeping the fork's development value.
+#   Extraction identity invalidates snapshots; no Snapshot-side semantics changed, scheme stays 8.
+# 2026-09-07, ES NAMED IMPORTS (PR #45 + its review fixes, test/lib/jsimportalias.sh, test/lib/jsimportfacts.sh):
+#   kParserVer 78 -> 79 and kCacheVersion 15 -> 16, landing ON TOP of the Elixir bump above. The change adds
+#   three JS/TS ingest FACTS — a named ES import records local name + module + exported name
+#   (LocalBindKind::JsImport, RawBind gains `importedName`, so the cache RECORD FORMAT moved and
+#   kCacheVersion had to move with it), a direct exported declaration records JsExport, and a declaration
+#   shadowing an import records JsShadow — and widens JsExport to the CLAUSE forms `export { f }` /
+#   `export { f as g }` (JsExport's `importedName` carries the local name the exported spelling binds);
+#   re-export and default clauses are deliberately still not recorded. The fork branch carried 79 -> 80 with
+#   the same "skip the rich family" rationale refuted above; on the merged tree the next free number over
+#   Elixir's 78 is 79, so that is what landed. quality.h's kIngestCacheVersionMirror / kIngestParserVerMirror
+#   were bumped to 16 / 79 in the same diff (qextractionkeycheck), no Snapshot-side function changed,
+#   kQSnapCacheScheme stays 8.
 # 2026-09-03, PHASE 5 — the external-name veto + the receiver MRO walk (test/externalvetocheck.sh, test/mrowalkcheck.sh,
 #   docs/EVALS.md "Phase 5"): kParserVer 76 -> 77 — three Python ingest FACTS moved: a `super()` call receiver
 #   classifies the new RecvKind::SuperObj (appended) instead of None; every import statement records the NAMES it

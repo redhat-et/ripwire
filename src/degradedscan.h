@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // degradedscan.h — THE ONE degraded-parse text scan behind every "that name resolved to nothing" refusal.
 //
@@ -78,7 +80,7 @@ inline DegradedTextHit degradedTextHit( const IngestResult& ing, std::string_vie
                 DegradedTextHit hit;
                 hit.found     = true;
                 hit.fileIndex = fileIndex;
-                std::snprintf( hit.errRatio, sizeof( hit.errRatio ), "%.3f", double( h.errBytes ) / double( h.fileBytes ) );
+                rw::formatTo( hit.errRatio, sizeof( hit.errRatio ), "{:.3f}", double( h.errBytes ) / double( h.fileBytes ) );
                 return hit;
             }
         }

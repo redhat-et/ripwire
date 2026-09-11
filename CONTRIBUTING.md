@@ -138,6 +138,13 @@ in the same commit that adds the gate**.
 Run your gates in the foreground. A suite left running in the background at the end of a work
 session is a suite nobody read.
 
+Gates share one checkout. **Never write into it**, not even for a moment: every stamped verb reads
+`git status --porcelain` from any crawl root inside the checkout for its `at="…+dirty"` bit, so a
+transient untracked file flips every determinism arm running beside you under `-j N`. Work in a
+`mktemp` dir; if a copy genuinely has to sit beside a real gate, give it a name `.gitignore` hides
+(`.gateprobe.*`). `test/pargates.py` samples that command while the suite runs and fails the run
+naming the gate in flight. It is a sampler, so a clean run there is "none found", never "none exists".
+
 ### The formatting gate — and the rule for when it disagrees with you
 
 ```bash
@@ -243,6 +250,11 @@ already knew about the others, several while fixing one. So the rule is mechanic
    is not the thing that runs.
 4. **Prefer an arm that has been observed RED.** An arm that has only ever been green has not been
    shown to have a failing state at all.
+5. **When you fix an instance, remove the shape that produced it.** `test/prbudgetcheck.sh`'s Wave-45
+   fix moved its diff into a scratch repo and left `ROOT` rebound to that fixture, so a line reading
+   `( cd "$ROOT" && git checkout -- src/mod4.cpp )` stayed correct while looking exactly like the one
+   that would revert a developer's working tree; two readers later took it for a writer (issue #71).
+   A fix that leaves the shape leaves the next instance free.
 
 ---
 
@@ -316,6 +328,80 @@ already knew about the others, several while fixing one. So the rule is mechanic
   a caller-owned arena.
 - **Symmetric bare scopes** for deterministic RAII teardown.
 
+### Output: `std::print`, feature-tested and disclosed — never a new printf-family site
+
+- **Pick the primitive by what you actually have.** All three live in `src/infra/emit.h`; a same-shaped
+  wrapper such as `lintPrintOut` / `lintPrintErr` in `src/verbs_lint.h` is fine too.
+
+  | You have | Use |
+  | --- | --- |
+  | A format string **with arguments**, going to a stream | `rw::emitTo( stream, "…{}…", args )` |
+  | **Literal text, no arguments** | `rw::emitRaw( stream, "…" )` |
+  | A **caller-owned char buffer** | `rw::formatTo( buf, cap, "…{}…", args )` |
+
+  `emitRaw` is not a stylistic alternative to `emitTo`: `std::format_string` is **consteval**, so literal
+  text routed through `emitTo` pays compile-time format parsing for formatting that never happens — and
+  the `--help` table, one 114,985-character literal, does not compile at all that way ("call to consteval
+  function … is not a constant expression"). 353 sites in this tree pass a string and no arguments.
+  `formatTo` exists for the same reason in the other direction: `std::format` into a `std::string` puts an
+  allocation on `serialize.h`'s per-symbol path, which is a G2 regression, so buffer-targeted sites keep
+  their stack buffer via `std::format_to_n`.
+- **`rw::formatTo` reproduces `snprintf`'s contract exactly — do not hand-roll it with `format_to_n`.**
+  `snprintf( p, S, … )` writes at most `S-1` characters **plus a NUL**; `std::format_to_n( p, S, … )` writes
+  up to `S` and terminates nothing. Substituting one for the other buys a byte of buffer and drops the
+  terminator. Measured 2026-09-09: that substitution made a symbol row emit `amp="1"` where every previous
+  build truncated it away, with the whole parity fence green — the fixture never reaches the buffer.
+- **Emit through `rw::emitTo` (`src/infra/emit.h`)**, or a same-shaped wrapper such as `lintPrintOut` /
+  `lintPrintErr` in `src/verbs_lint.h`. That header is the ONE place the emitter is chosen: `std::print`
+  where the standard library defines `__cpp_lib_print`, `std::format` rendered and written with
+  `std::fputs` where it does not. The tree is printf-family by history, not by preference — ~1,500
+  `fprintf`/`printf`/`snprintf` sites, 0 `std::cout` — and it is being converted; **no new printf-family
+  call site** (rule landed 2026-09-08). Do not vendor `fmt`: the standard library has the feature, so a
+  vendored copy is a G3 regression.
+- **Why a feature test and not a bare `#include <print>`.** `<print>` is libstdc++ 14+; on libc++ it exists
+  only at a macOS 14+ deployment target, and libc++ defines the feature macro only when the target admits
+  it (measured 2026-09-08). Testing the macro means every toolchain BUILDS — which is why the choice is
+  DISCLOSED: `--version` prints `emit=std::print` or `emit=std::format+fputs` (`test/versioncheck.sh` #6),
+  every CI and release leg asserts `std::print` (gcc-14 on the ubuntu legs, gcc-toolset-14 on RHEL and the
+  manylinux containers, Xcode 16.2 on macOS), and the `fallback-emitter` job builds the fallback arm with
+  the stock ubuntu g++ 13 on purpose and proves it emits the same bytes. A silent fallback is the failure
+  this whole arrangement exists to make impossible.
+- **A conversion is byte-parity-fenced, not reviewed by eye.** `test/printffmtparitycheck.sh` hashes
+  stdout and stderr per verb against `test/printf_parity.manifest`; a moved byte is a FAIL naming the verb
+  and the stream. The trap it exists for is float rendering — `%g` prints six significant digits, `{}`
+  prints the shortest round-trip (`0.3` versus `0.30000000000000004`) — so a per-specifier swap is never
+  mechanical. Every emitted byte feeds G4, the determinism gate, and the stored captures.
+- **The specifier mapping is measured. Use the measured one; do not extend it from memory.** 218 checks
+  against printf on this toolchain found exactly ONE unsafe mapping, the bare `%g`/`%f` above:
+
+  ```
+  %s %u %d %zu %zd %lu %ld %llu %lld %i  ->  {}          %10s -> {:>10}   %-11s -> {:<11}
+  %.*s (precision, pointer)              ->  {} with std::string_view( ptr, len )
+  %016llx -> {:016x}   %llx -> {:x}   %llX -> {:X}   %o -> {:o}   %.9s -> {:.9}
+  %.3f -> {:.3f}       %6.1f -> {:6.1f}   %.6g -> {:.6g}          (explicit precision ONLY)
+  ```
+- **A green fence is not coverage, and the fence cannot cover everything.** Two facts to hold together.
+  First: `printffmtparitycheck` proves nothing about a verb it has no label for — add the label and pin it
+  BEFORE converting, and note that pinning refuses any verb whose output embeds the git stamp (`at="<sha>"`),
+  because such a verb's bytes move on the very commit that carries the pin. Second: even a covered verb
+  reaches only the branches the fixture reaches — a coverage build measured 25% of one batch's call sites
+  ever executed. For anything unfenceable or under-covered, **differential-test**: build the base commit
+  into a scratch worktree and diff both binaries' bytes over `src/`, `test/`, `docs/` and the repo root,
+  normalising only the stamp. A toy fixture cannot reach a truncation branch; a real tree does it by
+  accident, which is how the `format_to_n` byte above was caught.
+- **`std::print` throws on a failed write where `fputs` returns EOF.** `emitTo` catches that one
+  `std::system_error` so both arms keep the contract every emitting site always had — a failed write is
+  silent — rather than a `std::terminate` the fallback arm could never produce (§3 "Self-check, don't
+  throw": a recoverable runtime error is a degrade, never a throw that escapes).
+- **`%%` and braces invert in OPPOSITE directions when you convert.** A printf format spells a literal
+  percent `%%`; text handed to `emitRaw` is no longer a format, so `%%` there prints TWO characters and must
+  collapse to one `%`. Braces are the mirror image: `emitTo` needs `{{`/`}}` for a literal brace where
+  `emitRaw` needs a bare `{`/`}`. JSON emitters are where the brace half bites.
+- **Until a string is converted it is a printf FORMAT, not text.** The `--help` table in `src/cli.h` is one:
+  a literal `%` in a help line is a conversion (`% /`, `% o` and `% c` all parse), and the generated
+  `docs/COMMANDS.md` then carries garbage where the number was. Write `%%` there, and treat the regeneration
+  arm (`test/docscommandscheck.sh` arm G) as the fence for that surface.
+
 ### Tests
 
 - **Float comparisons assert a tolerance band, never bit-exactness.** Fast-math and threaded
@@ -384,9 +470,25 @@ Release CI job covered it.
 2. Build both flavours locally; run `python3 test/pargates.py . ./build/ripwire -j 6` green.
 3. Run the sanitizer build clean, and the determinism gate three times.
 4. Add any new `test/*check.sh` to `test/regression.sh` in the same commit.
-5. If your change alters emitted output, regenerate the goldens as their **own** commit with the
+5. **Never edit the published gate count by hand.** After adding a gate — and again after any rebase
+   or merge that moved the `for _g in …; do` loop — run `python3 docs/gatecount_build.py`. See below.
+6. If your change alters emitted output, regenerate the goldens as their **own** commit with the
    diff reviewed by eye — never bundled with logic.
-6. Keep formatting churn out of logic commits.
+7. Keep formatting churn out of logic commits.
+
+**The gate count is a build product.** It is stated in `README.md`, `docs/EVALS.md` and
+`present/deck5_ripwire_build.js` — eight sites — and every one of them is written by
+`docs/gatecount_build.py` from the single absorb loop in `test/regression.sh`, then gated by
+`test/gatecountcheck.sh`. Hand-writing it is not a style preference: two lanes that each add one gate
+both write N+1, git auto-merges the **identical** text clean, and the tree publishes N+1 against a loop
+of N+2 with every existing check green (each branch's count matches its own loop, and the merged loop
+matches main's — the member *sets* differ at the same number). That collided seven times in one night
+on 2026-09-10. The merge recipe is therefore: **union the `for _g in …` sets, run the generator, done.**
+
+Each published site carries a marker comment the generator owns — `<!-- gatecount -->` in markdown and
+HTML (invisible when rendered), `// gatecount` in the deck's JavaScript. A count claim on a line
+*without* that marker is a hand-written count, and the generator refuses the tree instead of leaving it
+behind. Do not spell the marker inside a site file except at a real site.
 
 Scope each commit. A commit that touches one concern is a commit a reviewer can actually check.
 

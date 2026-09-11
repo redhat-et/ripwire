@@ -61,7 +61,9 @@ ok( "read the tables from source: %d exact-match rows, %d + %d prefix-match rows
 # The anchor is the braced Allman form (the always-braces style landed 2026-08-03): the `continue` sits on
 # its own line below, so the bare condition line is the stable, unique marker for where the table scan ends.
 start = next( k for k, l in enumerate( L ) if l.strip() == "if( isTableFlag )" )
-end   = next( k for k, l in enumerate( L ) if "unknown flag '%.*s'" in l )
+# The landmark is the generic unknown-flag arm. Its spelling moved with the std::print conversion
+# (printf's "'%.*s'" became std::format's "'{}'"); both are accepted so this gate reads either era.
+end   = next( k for k, l in enumerate( L ) if ( "unknown flag '%.*s'" in l or "unknown flag '{}'" in l ) )
 hand  = []
 for l in L[ start : end + 1 ]:
     m = re.match( r'^\s*(?:else )?if\(\s*(?:a == "(--[^"]*)"|startsWith\( a, "(--[^"]*)" \))', l )

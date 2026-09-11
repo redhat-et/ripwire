@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 # The version string lives in exactly ONE place — this project() call. --version (main.cpp)
 # reads it via the generated version.h below; test/versioncheck.sh asserts the two never drift.
-project(ripwire VERSION 0.4.0 LANGUAGES C CXX)
+project(ripwire VERSION 0.5.0 LANGUAGES C CXX)
 
 # ---- language standards (C++23 for our own code / C11 for the vendored C dependencies) ----
 set(CMAKE_CXX_STANDARD 23)
@@ -69,12 +69,14 @@ endif()
 # ---- link-time optimization: -DRIPWIRE_LTO=ON ----
 # The one change the optimization-remarks pass actually justified (docs/OPTREMARKS.md, finding F1).
 #
-# WHAT THE REMARKS SAID. In src/ingest.cpp — where the profiler puts ~26% of a cold run, in
-# `captureTagsFacts` — 397 of 636 distinct `inline/NoDefinition` remarks name a tree-sitter C entry
-# point (ts_node_start_byte, ts_node_end_byte, ts_node_type, ts_query_capture_name_for_id, …). Those
-# are three-line accessors, but they live in separately compiled C objects, so each one is an opaque
-# call that also acts as a memory barrier: 5448 `gvn/LoadClobbered … clobbered by call` remarks in
-# that same TU are the downstream damage. No source edit reaches this — the definitions are in another
+# WHAT THE REMARKS SAID. In the ingest translation unit — where the profiler puts ~24% of a cold run,
+# in `captureTagsFacts` (src/ingest_sidecap.h since the split) — 831 of 1437 distinct
+# `inline/NoDefinition` remarks name a tree-sitter C entry point (ts_node_child_by_field_name,
+# ts_node_is_null, ts_node_type, ts_node_start_byte, …). Those are three-line accessors, but they live
+# in separately compiled C objects, so each one is an opaque call that also acts as a memory barrier:
+# 7683 `gvn/LoadClobbered … clobbered by call` remarks in that same TU are the downstream damage.
+# (Counts re-derived 2026-09-10 over the whole TU; the original 397/636 and 5448 were measured against
+# src/ingest.cpp alone, which after the split is 0.2% of it — docs/OPTREMARKS.md §8.) No source edit reaches this — the definitions are in another
 # translation unit, which is precisely what LTO fixes.
 #
 # WHAT IT MEASURED (this repo as corpus, 937 files, Apple Silicon; FOUR independent interleaved A/Bs,
@@ -130,7 +132,7 @@ if(RIPWIRE_LTO)
   # The VARIABLE, set HERE — before the first add_executable/add_library and before FetchContent pulls
   # the vendored tree-sitter subproject in. CMAKE_INTERPROCEDURAL_OPTIMIZATION seeds the property on
   # targets created AFTER it, so this placement (and only this placement) reaches all three groups that
-  # matter: our C++, the twenty-one C grammar objects, and the tree-sitter core in its own subdirectory.
+  # matter: our C++, the twenty-two C grammar objects, and the tree-sitter core in its own subdirectory.
   # Cross-language is the point — the accessors we want inlined are C, the loop calling them is C++.
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
   message(STATUS "RIPWIRE_LTO: ON — link-time optimization across our code and the vendored C (slower link, see docs/OPTREMARKS.md F1)")
@@ -246,6 +248,8 @@ set(_ripwire_query_names
   c
   cpp
   csharp
+  dart
+  elixir
   go
   java
   javascript
@@ -452,6 +456,8 @@ add_ts_grammar(c      https://github.com/tree-sitter/tree-sitter-c.git          
 # LANGUAGE_VERSION]=[13,15] for core v0.26.9. Ships a scanner.c (inherited from cpp: raw strings)
 # which the macro picks up. The tag is lightweight, so the SHA below IS the tagged commit.
 add_ts_grammar(cuda   https://github.com/tree-sitter-grammars/tree-sitter-cuda.git 48b066f334f4cf2174e05a50218ce2ed98b6fd01)  # v0.21.1
+add_ts_grammar(dart   https://github.com/UserNobody14/tree-sitter-dart.git be07cf7118d3dba06236a3f19541685a68209934)  # ABI 15
+add_ts_grammar(elixir https://github.com/elixir-lang/tree-sitter-elixir.git 4b0c7118760af58a2e7081bbc8396e136f820b37)  # ABI 14
 # Lua (.lua): tree-sitter-grammars/tree-sitter-lua — there is no first-party Lua grammar under
 # tree-sitter/. v0.5.0 → ABI 15, in [MIN_COMPATIBLE, LANGUAGE_VERSION]=[13,15] for core v0.26.9.
 # Ships a scanner.c (long-bracket `[[ … ]]` strings and `--[[ … ]]` block comments, whose level count
@@ -524,6 +530,8 @@ set(RIPWIRE_TS_OBJECTS
   $<TARGET_OBJECTS:ts_ruby>
   $<TARGET_OBJECTS:ts_json>
   $<TARGET_OBJECTS:ts_lua>
+  $<TARGET_OBJECTS:ts_dart>
+  $<TARGET_OBJECTS:ts_elixir>
   $<TARGET_OBJECTS:ts_php>
   $<TARGET_OBJECTS:ts_toml>
   $<TARGET_OBJECTS:ts_yaml>
@@ -740,7 +748,7 @@ endif()
 set(RIPWIRE_GRAMMAR_TARGETS
   ts_cpp ts_python ts_go ts_rust ts_tsts ts_tstsx ts_swift ts_objc
   ts_javascript ts_bash ts_java ts_ruby ts_json ts_toml ts_yaml ts_csharp ts_c ts_cuda ts_markdown
-  ts_php ts_lua)
+  ts_php ts_lua ts_elixir ts_dart)
 set(RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_probe ripwire tree-sitter ${RIPWIRE_GRAMMAR_TARGETS})
 set(RIPWIRE_RUNTIME_LINK_TARGETS ripwire_probe ripwire)
 # The C++ subset of the compile list — the only targets that include a C++ standard library at all, and so
@@ -829,10 +837,29 @@ file(WRITE "${_ripwire_bash_ignorelist}"
 # both are absent on libc++, which is why the Apple leg never saw them and why these entries are inert
 # (but must still parse) on macOS. With the three entries in place the Linux ASan self-run exits 0 with
 # empty stderr and cachefuzzcheck's 13 UBSan arms go green.
+# <format> / <print> (libstdc++ 14): the formatting scanner spells "npos" as an int -1 converted to size_t
+# (c++/14/format:3903 under GCC 14.2, reached from std::print via vprint_nonunicode) — a DEFINED conversion the
+# Clang-only integer group flags as suspicious, in library code this tree does not own; exempted the way
+# basic_string's wrap idiom is below, for the group's four conversion/overflow checks. Found by the first
+# std::print CI run (34284272539, asan ubuntu-24.04: `ripwire --version` aborted, exit 134) — the emitter
+# (src/infra/emit.h) routes every formatted write through these headers, so the exemption is what lets the
+# complete G1 stack keep running on the clang leg now that --version itself exercises std::format.
+# Spelled c\+\+, not c++: LLVM before 18 (Xcode 16.2's Apple clang 16 among them) parses this list as REGEX
+# with * expanded to .*, and a bare c++ is a malformed regex — the macOS asan leg's BUILD failed on it
+# (run 34288200871, "malformed sanitizer ignorelist"). The escape is a literal + under both the regex and
+# the glob (LLVM 18+) readers; proved both ways locally by forcing v1 with #!special-case-list-v1.
 file(WRITE "${_ripwire_libstdcxx_ignorelist}"
   "[unsigned-integer-overflow]\nsrc:*/bits/string_view.tcc\n"
   "src:*/bits/basic_string.h\n"
-  "src:*/bits/basic_string.tcc\n")
+  "src:*/bits/basic_string.tcc\n"
+  "src:*/include/c\\+\\+/*/format\n"
+  "src:*/include/c\\+\\+/*/print\n"
+  "[implicit-integer-sign-change]\nsrc:*/include/c\\+\\+/*/format\n"
+  "src:*/include/c\\+\\+/*/print\n"
+  "[implicit-signed-integer-truncation]\nsrc:*/include/c\\+\\+/*/format\n"
+  "src:*/include/c\\+\\+/*/print\n"
+  "[implicit-unsigned-integer-truncation]\nsrc:*/include/c\\+\\+/*/format\n"
+  "src:*/include/c\\+\\+/*/print\n")
 
 if(RIPWIRE_ASAN)
   foreach(_t IN LISTS RIPWIRE_RUNTIME_COMPILE_TARGETS)
@@ -959,6 +986,8 @@ if(RIPWIRE_FUZZ)
   add_ripwire_fuzzer(csharp     tree_sitter_c_sharp    csharp)
   add_ripwire_fuzzer(c          tree_sitter_c          c)
   add_ripwire_fuzzer(php        tree_sitter_php        php)
+  add_ripwire_fuzzer(dart       tree_sitter_dart       dart)
+  add_ripwire_fuzzer(elixir     tree_sitter_elixir     elixir)
   add_ripwire_fuzzer(lua        tree_sitter_lua        lua)
   add_custom_target(ripwire_fuzzers DEPENDS ${RIPWIRE_FUZZ_TARGETS})
 endif()

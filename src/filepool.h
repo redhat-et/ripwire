@@ -31,6 +31,9 @@ inline constexpr std::size_t kPoolLiftFiles  = 10;   // FIXED, not a grid axis: 
 
 // parse "<topK>,<blendPercent>" — returns (0,0) = off for anything malformed or out of range.
 // blend==0 is LEGAL and is the identity control the PREREG requires: it must reproduce baseline exactly.
+// The grammar itself is mention.h's parseCappedCsvPair (2026-09-10 lift-disclosure round: this function's
+// old inline loop was one of three near-identical copies — siblift.h/expand.h are the other two — folded
+// into one shared parser after --quality-delta's duplication kind flagged them as a clone).
 inline std::pair<std::size_t, std::size_t> filePoolParams()
 {
     const char* env = std::getenv( "RIPWIRE_POOL" );
@@ -38,25 +41,7 @@ inline std::pair<std::size_t, std::size_t> filePoolParams()
     {
         return { 0, 0 };
     }
-    const std::string_view s( env );
-    const std::size_t comma = s.find( ',' );
-    if( comma == std::string_view::npos || comma == 0 || comma + 1 >= s.size() )
-    {
-        return { 0, 0 };
-    }
-    std::size_t topK = 0, blend = 0;
-    for( const char c : s.substr( 0, comma ) )
-    {
-        if( c < '0' || c > '9' ) { return { 0, 0 }; }
-        topK = topK * 10 + std::size_t( c - '0' );
-        if( topK > kPoolMaxTopK ) { return { 0, 0 }; }
-    }
-    for( const char c : s.substr( comma + 1 ) )
-    {
-        if( c < '0' || c > '9' ) { return { 0, 0 }; }
-        blend = blend * 10 + std::size_t( c - '0' );
-        if( blend > 100 ) { return { 0, 0 }; }
-    }
+    const auto [ topK, blend ] = parseCappedCsvPair( std::string_view( env ), kPoolMaxTopK, 100 );
     if( topK == 0 ) { return { 0, 0 }; }
     return { topK, blend };
 }

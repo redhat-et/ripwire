@@ -1,0 +1,172 @@
+diff --git a/third_party/deps/markdown/src/scanner.c b/third_party/deps/markdown/src/scanner.c
+index dd4e5e2f..10946aea 100644
+--- a/third_party/deps/markdown/src/scanner.c
++++ b/third_party/deps/markdown/src/scanner.c
+@@ -338,6 +338,50 @@ static size_t advance(Scanner *s, TSLexer *lexer) {
+     return size;
+ }
+ 
++// RIPWIRE_VENDOR_PATCH(markdown/002-counter-saturate): every counter this scanner accumulates into
++// is a uint8_t — serialize() writes each as a single byte — and upstream feeds them with a bare
++// `+=` from advance()'s size_t. Past 255 that is an implicit truncating conversion, and G1 is
++// -fno-sanitize-recover=all, so it aborts the run rather than warning. Trigger in the wild:
++// rails/guides/source/getting_started.md, a pipe-table row padded to 301 columns. Tabs reach it
++// far sooner than spaces do — advance() charges a tab at tab stop 4, so 64 tabs is enough.
++//
++// SATURATE, do not cast. Both counters are read by ORDERING tests against a FIXED threshold:
++// indentation by `>= 4` (indented chunk), `< 4` (thematic break) and `< list_item_indentation(
++// block )` (max 17); the fence `level` by `>= 3` before a fence may open at all. 255 answers every
++// one of those exactly as any larger true value would, so saturating is not an approximation here.
++// Wrapping is: it does not blur those predicates, it INVERTS them, and only inside a narrow window
++// that makes the bug easy to miss. Measured, `# Buried` under N columns and a fence of N marks:
++//
++//   N=255  parses correctly    N=256/257  WRONG, at exit 0    N=300  correct again, by luck
++//
++// because 300 - 256 = 44 is still >= 4 and >= 3. The damage window is N mod 256 in 0..3, which is
++// why a 300-wide fixture reproduces the sanitizer abort while asserting nothing about the parse.
++// At 256 an indented code block came back as a heading, and a fence never opened so its contents
++// leaked out as live markdown — ripwire emitted phantom symbols for both, at exit 0.
++//
++// counter_saturating_add is the implementation from the parallel lane on
++// claude/amazing-wescoff-181432, which found this semantics argument and the fixture-width trap;
++// renamed from their indent_saturating_add only because it now also serves the fence counter.
++// <stdint.h> arrives via src/tree_sitter/parser.h, so no new include.
++//
++// FOUR SITES ARE DELIBERATELY LEFT BARE, because wrapping is unreachable at each and a smaller
++// diff re-applies more cleanly across an upstream bump:
++//   * match()/INDENTED_CODE_BLOCK — loop guard `while( s->indentation < 4 )`, advance() returns at
++//     most 4, so the counter cannot exceed 7.
++//   * match()/LIST_ITEM..LIST_ITEM_MAX_INDENTATION — guard `< list_item_indentation( block )`,
++//     itself at most 17, so at most ~21.
++//   * match()/BLOCK_QUOTE and parse_block_quote() — a single `advance( … ) - 1` onto a counter the
++//     line above sets to 0, so at most 3.
++// The sibling patches rust/001, lua/001 and csharp/001 keep an explicit CAST instead: their
++// counters close a token by matching the opening count, saturation is not more correct there, and
++// measurement found no extraction difference at any width (255/256/257/300 all recover the symbols
++// after the token), so those three contribute nothing to kParserVer.
++static uint8_t counter_saturating_add(uint8_t counter, size_t width) {
++    return (size_t)counter + width > UINT8_MAX
++               ? (uint8_t)UINT8_MAX
++               : (uint8_t)(counter + width);
++}
++
+ // Try to match the given block, i.e. consume all tokens that belong to the
+ // block. These are
+ // 1. indentation for list items and indented code blocks
+@@ -393,7 +437,7 @@ static bool match(Scanner *s, TSLexer *lexer, Block block) {
+             break;
+         case BLOCK_QUOTE:
+             while (lexer->lookahead == ' ' || lexer->lookahead == '\t') {
+-                s->indentation += advance(s, lexer);
++                s->indentation = counter_saturating_add( s->indentation, advance(s, lexer) );  /* RIPWIRE_VENDOR_PATCH(markdown/002-counter-saturate) */
+             }
+             if (lexer->lookahead == '>') {
+                 advance(s, lexer);
+@@ -417,7 +461,7 @@ static bool parse_fenced_code_block(Scanner *s, const char delimiter,
+     uint8_t level = 0;
+     while (lexer->lookahead == delimiter) {
+         advance(s, lexer);
+-        level++;
++        level = counter_saturating_add( level, 1 );  /* RIPWIRE_VENDOR_PATCH(markdown/002-counter-saturate) */
+     }
+     mark_end(s, lexer);
+     // If this is able to close a fenced code block then that is the only valid
+@@ -493,7 +537,7 @@ static bool parse_star(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
+             advance(s, lexer);
+         } else if (lexer->lookahead == ' ' || lexer->lookahead == '\t') {
+             if (star_count == 1) {
+-                extra_indentation += advance(s, lexer);
++                extra_indentation = counter_saturating_add( extra_indentation, advance(s, lexer) );  /* RIPWIRE_VENDOR_PATCH(markdown/002-counter-saturate) */
+             } else {
+                 advance(s, lexer);
+             }
+@@ -536,7 +580,7 @@ static bool parse_star(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
+             // If not then calculate the indentation level of the list item
+             // content as indentation of list marker + indentation after list
+             // marker - 1
+-            extra_indentation += s->indentation;
++            extra_indentation = counter_saturating_add( extra_indentation, s->indentation );  /* RIPWIRE_VENDOR_PATCH(markdown/002-counter-saturate) */
+             s->indentation = 0;
+         } else {
+             // Otherwise the indentation level is just the indentation of the
+@@ -706,7 +750,7 @@ static bool parse_plus(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
+         } else {
+             uint8_t extra_indentation = 0;
+             while (lexer->lookahead == ' ' || lexer->lookahead == '\t') {
+-                extra_indentation += advance(s, lexer);
++                extra_indentation = counter_saturating_add( extra_indentation, advance(s, lexer) );  /* RIPWIRE_VENDOR_PATCH(markdown/002-counter-saturate) */
+             }
+             bool dont_interrupt = false;
+             if (lexer->lookahead == '\r' || lexer->lookahead == '\n') {
+@@ -723,7 +767,7 @@ static bool parse_plus(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
+                                            : LIST_MARKER_PLUS;
+                 extra_indentation--;
+                 if (extra_indentation <= 3) {
+-                    extra_indentation += s->indentation;
++                    extra_indentation = counter_saturating_add( extra_indentation, s->indentation );  /* RIPWIRE_VENDOR_PATCH(markdown/002-counter-saturate) */
+                     s->indentation = 0;
+                 } else {
+                     uint8_t temp = s->indentation;
+@@ -767,7 +811,7 @@ static bool parse_ordered_list_marker(Scanner *s, TSLexer *lexer,
+             if (dot || parenthesis) {
+                 uint8_t extra_indentation = 0;
+                 while (lexer->lookahead == ' ' || lexer->lookahead == '\t') {
+-                    extra_indentation += advance(s, lexer);
++                    extra_indentation = counter_saturating_add( extra_indentation, advance(s, lexer) );  /* RIPWIRE_VENDOR_PATCH(markdown/002-counter-saturate) */
+                 }
+                 bool line_end =
+                     lexer->lookahead == '\n' || lexer->lookahead == '\r';
+@@ -789,7 +833,7 @@ static bool parse_ordered_list_marker(Scanner *s, TSLexer *lexer,
+                         dot ? LIST_MARKER_DOT : LIST_MARKER_PARENTHESIS;
+                     extra_indentation--;
+                     if (extra_indentation <= 3) {
+-                        extra_indentation += s->indentation;
++                        extra_indentation = counter_saturating_add( extra_indentation, s->indentation );  /* RIPWIRE_VENDOR_PATCH(markdown/002-counter-saturate) */
+                         s->indentation = 0;
+                     } else {
+                         uint8_t temp = s->indentation;
+@@ -829,7 +873,7 @@ static bool parse_minus(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
+                 minus_after_whitespace = whitespace_after_minus;
+             } else if (lexer->lookahead == ' ' || lexer->lookahead == '\t') {
+                 if (minus_count == 1) {
+-                    extra_indentation += advance(s, lexer);
++                    extra_indentation = counter_saturating_add( extra_indentation, advance(s, lexer) );  /* RIPWIRE_VENDOR_PATCH(markdown/002-counter-saturate) */
+                 } else {
+                     advance(s, lexer);
+                 }
+@@ -874,7 +918,7 @@ static bool parse_minus(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
+             }
+             extra_indentation--;
+             if (extra_indentation <= 3) {
+-                extra_indentation += s->indentation;
++                extra_indentation = counter_saturating_add( extra_indentation, s->indentation );  /* RIPWIRE_VENDOR_PATCH(markdown/002-counter-saturate) */
+                 s->indentation = 0;
+             } else {
+                 uint8_t temp = s->indentation;
+@@ -1249,7 +1293,7 @@ static bool parse_pipe_table(Scanner *s, TSLexer *lexer,
+     s->column = 0;
+     for (;;) {
+         if (lexer->lookahead == ' ' || lexer->lookahead == '\t') {
+-            s->indentation += advance(s, lexer);
++            s->indentation = counter_saturating_add( s->indentation, advance(s, lexer) );  /* RIPWIRE_VENDOR_PATCH(markdown/002-counter-saturate) */
+         } else {
+             break;
+         }
+@@ -1359,7 +1403,7 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
+         // lot of parsing quite a bit easier.
+         for (;;) {
+             if (lexer->lookahead == ' ' || lexer->lookahead == '\t') {
+-                s->indentation += advance(s, lexer);
++                s->indentation = counter_saturating_add( s->indentation, advance(s, lexer) );  /* RIPWIRE_VENDOR_PATCH(markdown/002-counter-saturate) */
+             } else {
+                 break;
+             }
+@@ -1498,7 +1542,7 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
+             lexer->mark_end(lexer);
+             for (;;) {
+                 if (lexer->lookahead == ' ' || lexer->lookahead == '\t') {
+-                    s->indentation += advance(s, lexer);
++                    s->indentation = counter_saturating_add( s->indentation, advance(s, lexer) );  /* RIPWIRE_VENDOR_PATCH(markdown/002-counter-saturate) */
+                 } else {
+                     break;
+                 }

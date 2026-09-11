@@ -128,7 +128,12 @@ for m in re.finditer(r'<f p="([^"]*)" why="unsupported-ext" bytes="(\d+)"', text
     path, nbytes = m.group(1), int(m.group(2))
     if nbytes > maxbytes:
         continue
-    fp = path if path.startswith('/') else root + '/' + path.lstrip('./')
+    # NOT path.lstrip('./'): lstrip strips a CHARACTER SET, so it also ate the leading dot of a dot-directory
+    # (.github/x.txt -> github/x.txt), the open failed, and the row was silently dropped from the recount --
+    # found 2026-09-07 the first time a tracked unsupported-ext file lived under a dot-dir (issue: an
+    # off-by-one 2b that no filter explained). Strip exactly one './' prefix.
+    rel = path[2:] if path.startswith('./') else path
+    fp = path if path.startswith('/') else root + '/' + rel
     try:
         with open(fp, 'rb') as fh:
             head = fh.read(4096)

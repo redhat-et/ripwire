@@ -3,6 +3,9 @@
 #error "ingest_cache.h is a SECTION of src/ingest.cpp's translation unit - include it only from ingest.cpp (see the ingest-family split note there)"
 #endif
 
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 // ingest_cache.h — the raw-facts model + incremental cache, moved VERBATIM from ingest.cpp in the
 // 2026-08-29 split: RawDef (the pre-id-assignment definition record), the extraction identity
 // (kCacheVersion + kParserVer + parserVerFor), content/blob hashing, FileFacts, the ByteW/ByteR
@@ -82,6 +85,7 @@ struct RawBind
     std::uint32_t spanStart = 0;   // kind==VarDecl only: the declaring BLOCK's byte span (shadow scope);
     std::uint32_t spanEnd   = 0;   //   {0,0} on every other kind — see model.h Binding
     std::string   var;             // the declared variable identifier (`x`)
+    std::string   importedName;    // JsImport only; persisted beside the local name and module target.
     std::string   typeName;        // kind==Type: the written type's final segment (`Foo`);
                                    // kind==FnDecl/FnAssign: the bound function name (or an L3 sentinel)
 };
@@ -115,7 +119,19 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 //   all match) rather than silently re-absolutizing a key that was never root-relative to begin
 //   with — a v2 cache simply misses on every lookup that survives the guard, which is exactly the
 //   self-healing full-reparse path already used for any other corrupt/stale cache.
-constexpr std::uint32_t kCacheVersion = 15;           // 15 (offset-table blob): the blob gains a RECORD OFFSET
+constexpr std::uint32_t kCacheVersion = 18;           // 18: #62 — call refs inside a preprocessor-DECIDED-dead region
+                                                      //    (`#if 0`, the `#else` of `#if 1`) are no longer captured. The
+                                                      //    record SHAPE is unchanged, but a v17 blob holds refs this build
+                                                      //    would not produce, and replaying them warm would resurrect the
+                                                      //    over-count on exactly the corpora most likely to be cached →
+                                                      //    reject v17 blobs. (A CONTENT-only bump, the 38/39 precedent's
+                                                      //    mirror image: shape-stable but semantically stale.)
+                                                      // 17: Include gains `bool isSymbolic` + `u32 byte` (Ruby constant
+                                                      //    directives, parser version 82) and the per-file record gains a
+                                                      //    ConstOpen family (Ruby class/module opens, model.h) after
+                                                      //    routeUses — a FORMAT change → reject v16 blobs.
+                                                      // 16: RawBind gains importedName for ES named imports.
+                                                      // 15 (offset-table blob): the blob gains a RECORD OFFSET
                                                       //    TABLE and a 24-byte trailer, so a run deserialises only
                                                       //    the records for the files it actually crawled, and a
                                                       //    save CARRIES OVER — byte for byte — the records for
@@ -190,7 +206,155 @@ constexpr std::uint32_t kCacheVersion = 15;           // 15 (offset-table blob):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 77;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 88;           // bump on any grammar/.scm/extraction change
+                                                      // 88 = 2026-09-10 (Dart, test/dartcheck.sh): a 23rd grammar joins
+                                                      //    kLangTable, so the CRAWL ADMITS FILES IT PREVIOUSLY REFUSED —
+                                                      //    a v87 blob has no record for the `.dart` it never saw, so the
+                                                      //    file is ABSENT rather than stale and only the header version
+                                                      //    can reject it. The definition SPAN is also extended for Dart
+                                                      //    only (dartFollowingBody, adopted in ingest_sidecap.h) and
+                                                      //    formal_parameter_list joins cc_isParamList; both are
+                                                      //    extraction identity, which is what parserVer covers, and every
+                                                      //    other language is byte-identical (verified against the
+                                                      //    pre-change binary on src/ and a 1 406-file multi-language
+                                                      //    corpus). Record shapes unchanged, so kCacheVersion stays 18.
+                                                      //    RE-BUMPED from 87 on landing: main spent 82..87 while PR #75
+                                                      //    was open, and 87 collided EXACTLY — the declaration line
+                                                      //    auto-merged clean at the same wrong number while only the
+                                                      //    comment conflicted. quality.h's kIngestParserVerMirror bumped
+                                                      //    in the SAME commit.
+                                                      // 87 = 2026-09-10 (test/vendorpatchcheck.sh arm I,
+                                                      //    third_party/patches/markdown/002-counter-saturate):
+                                                      //    the vendored markdown scanner accumulated consumed
+                                                      //    whitespace, and its fence delimiter count, into
+                                                      //    uint8_t counters with a bare `+=` and WRAPPED. Both
+                                                      //    are read by ordering tests against a FIXED threshold
+                                                      //    (`>= 4` indented chunk; `>= 3` before a fence may
+                                                      //    open), so wrapping did not blur them, it INVERTED
+                                                      //    them — and only inside a narrow window. MEASURED:
+                                                      //    N=255 correct, N=256/257 WRONG at exit 0, N=300
+                                                      //    correct again by luck (300-256=44, still over both
+                                                      //    thresholds). At 256 an indented code block came back
+                                                      //    as a heading, and a fence never opened so its body
+                                                      //    leaked out as live markdown; ripwire minted phantom
+                                                      //    symbols for both. Counters now saturate at 255, which
+                                                      //    is exact for every threshold in that file.
+                                                      //    Map output is byte-identical over 3 538 real files —
+                                                      //    no corpus file reaches 256 columns of indent — but a
+                                                      //    constructed 256-column line does move, so a v86 blob
+                                                      //    can hold a phantom heading and the extraction
+                                                      //    identity must move with it.
+                                                      //    The sibling patches rust|lua|csharp/001-delimiter-
+                                                      //    count-cast take an explicit CAST, not saturation:
+                                                      //    those counters close a token by matching the opening
+                                                      //    count, and measurement found NO extraction difference
+                                                      //    at any width (255/256/257/300), so they contribute
+                                                      //    nothing to this bump.
+                                                      //    Record shapes unchanged, so kCacheVersion stays 18.
+                                                      //    quality.h's kIngestParserVerMirror bumped in the
+                                                      //    SAME commit.
+                                                      // 86 = 2026-09-09 (test/rubyrecvcheck.sh): a Ruby constant
+                                                      //    RECEIVER's lazy bit is the AND over its occurrences —
+                                                      //    a later load-time site clears the bit the first,
+                                                      //    closure-written site set, so the answer no longer
+                                                      //    depends on statement order; and rubyIsConstantChain
+                                                      //    walks the left-nested scope_resolution ITERATIVELY
+                                                      //    (a 5 000-segment chain overflowed a parse worker's
+                                                      //    stack). A cached v85 blob can hold a lazy bit this
+                                                      //    binary would compute as load-time, so the extraction
+                                                      //    identity moves. Record shapes unchanged (Include's
+                                                      //    four fields), so kCacheVersion stays 18. RE-BUMPED
+                                                      //    from 85 on landing: main had already spent 85 on the
+                                                      //    plain-text prose tier below, per the collision rule.
+                                                      //    quality.h's kIngestParserVerMirror bumped in the
+                                                      //    SAME commit.
+                                                      // 85 = 2026-09-09 (test/textdocscheck.sh): the plain-text
+                                                      //    prose tier — .rst/.adoc/.org/.mdx join kLangTable on
+                                                      //    Lang::Markdown and the markdown block grammar. The
+                                                      //    CRAWL ADMITS FILES IT PREVIOUSLY REFUSED, so a v84
+                                                      //    blob describes a strictly smaller corpus: its file
+                                                      //    list has no record for the .rst it never saw, and a
+                                                      //    warm run over it would answer a document query with
+                                                      //    the pre-lane silence. That is the one class of change
+                                                      //    a per-file stat gate cannot self-heal — the file is
+                                                      //    not stale, it is ABSENT — so the header version is
+                                                      //    the only guard. Record shapes are unchanged (a
+                                                      //    markdown file's records already existed), so
+                                                      //    kCacheVersion stays 18. quality.h's
+                                                      //    kIngestParserVerMirror bumped in the SAME commit.
+                                                      // 84 = 2026-09-08 (test/rubyrecvcheck.sh): a Ruby constant
+                                                      //    RECEIVER (`User.find`, `App::Mailer.deliver`) is a
+                                                      //    symbolic directive, one per (file, innermost open,
+                                                      //    written name), lazy inside a closure; the Ruby walk
+                                                      //    descends every node. Record shape unchanged (format 17).
+                                                      //    Renumbered from 83 on merge: main had already spent 83
+                                                      //    on the JS/TS default-import facts below.
+                                                      // 83 = 2026-09-08 (test/tsimportprecisecheck.sh): JS/TS
+                                                      //    DEFAULT imports and local default-export facts —
+                                                      //    `import save from './storage.js'` now resolves by the
+                                                      //    module's exported identity, not by the importer's
+                                                      //    chosen local name, so an unrelated same-spelled
+                                                      //    function is no longer evidence of that edge. New
+                                                      //    extraction facts on an unchanged record shape, so
+                                                      //    kCacheVersion is untouched. Renumbered from 82 on
+                                                      //    merge: main had already spent 82 on Ruby constants.
+                                                      // 82 = 2026-09-07 (test/rubyconstcheck.sh): Ruby constant
+                                                      //    references are dependencies — superclass, include/
+                                                      //    extend/prepend, `autoload :Name` (constant) and
+                                                      //    `autoload :Name, "path"` (path) — resolved through the
+                                                      //    corpus's own class/module index by Ruby's lexical rule;
+                                                      //    class/module opens carry namespaceOnly.
+                                                      // 81 = 2026-09-07 (four-language imports:
+                                                      //    test/bashsourcecheck.sh, test/luarequirecheck.sh,
+                                                      //    test/rubyrequirecheck.sh, test/eliximportcheck.sh,
+                                                      //    test/deplangscheck.sh): Bash `source`/`.`, Lua
+                                                      //    `require`, Ruby `require`/`require_relative`/`load` and
+                                                      //    Elixir `alias`/`import`/`require`/`use` become Include
+                                                      //    records, each with a container table and a resolve.h
+                                                      //    Step-A. Four languages that emitted NO Include record on
+                                                      //    any tree now emit one per directive, so a v80 blob on a
+                                                      //    tree holding any of them carries an EMPTY include list
+                                                      //    where a real one exists → reject. Record shapes are
+                                                      //    unchanged (Include is the same four fields), so
+                                                      //    kCacheVersion stays 16 — the 38/39 precedent exactly.
+                                                      //    quality.h's kIngestParserVerMirror bumped in the SAME
+                                                      //    commit.
+                                                      // 78 = 2026-09-07 (Elixir, test/elixircheck.sh): a
+                                                      //    twenty-second grammar (.ex/.exs) whose defs and call
+                                                      //    edges are extracted through the keyword/head filters in
+                                                      //    ingest_elixir.h. The extracted SET grows on any tree
+                                                      //    holding Elixir, so v77 blobs must be rejected.
+                                                      //    Landed at 78 (not the 83 the fork carried) per the
+                                                      //    collision rule below: RE-BUMP to the next free number
+                                                      //    over main's, never keep a fork's value.
+                                                      // 79 = 2026-09-07 (ES import facts, test/lib/jsimportfacts.sh):
+                                                      //    named import aliases bind through the export table, and
+                                                      //    `export { f }` / `export { f as g }` CLAUSE exports join it
+                                                      //    (JsExport gains importedName = the local name); re-export
+                                                      //    and default clauses stay deliberately absent. quality.h's
+                                                      //    kIngestParserVerMirror bumped in the SAME commit.
+                                                      //    NOTE: both fork branches carried a "skip N, it is the rich
+                                                      //    family of N-1" rationale. That is WRONG and is not repeated
+                                                      //    here: parserVerFor() derives rich as kParserVer+1, but
+                                                      //    main.cpp's A4-P4 split gives lean and rich SEPARATE cache
+                                                      //    FILES, so a lean-79 blob can never reach a rich-78 reader.
+                                                      //    main's own history is 74->75->76->77, four consecutive +1.
+                                                      // 80 = 2026-09-07 (Ruby scope + setters, PR #47 rebased,
+                                                      //    test/rubyscopecheck.sh, test/rubysettercheck.sh): two Ruby
+                                                      //    extraction FACTS moved. (a) every Ruby def records its
+                                                      //    enclosing class/module as `scope` (rubyEnclosingScopeOf),
+                                                      //    so Ruby rows gain id= and same-named methods in different
+                                                      //    classes stop folding into one overloads= row; (b) the
+                                                      //    (setter) node is accepted by queries/ruby/tags.scm, so
+                                                      //    `def name=` is indexed, and a call captured as the `left:`
+                                                      //    of an (assignment) is renamed `name=` so a WRITE stops
+                                                      //    edging the getter. Record shapes unchanged, kCacheVersion
+                                                      //    stays 16; the def and ref FACTS changed for every Ruby
+                                                      //    file → parserVer moves. The fork carried 79, which the
+                                                      //    Elixir + ES-import bumps had already taken: RE-BUMPED to
+                                                      //    the next free number over the merged tip, per the rule
+                                                      //    above. quality.h's kIngestParserVerMirror moved in the
+                                                      //    SAME commit.
                                                       // 77 = 2026-09-03 (Phase 5, docs/EVALS.md): two Python
                                                       //    ingest FACTS — (a) a `super()` call receiver classifies
                                                       //    RecvKind::SuperObj (appended) instead of None, so
@@ -1156,7 +1320,7 @@ inline std::pair<std::size_t, std::size_t> cacheEntryRange( const std::vector<Ca
 // not racy. ctimeNs is the one an unprivileged writer cannot restore (see ingest_crawl.h statSizeTimes),
 // so it is what makes a same-(mtime,size) edit visible for free. -1 ⇒ unknown (the file was unstatable at
 // hash time) → the gate always re-hashes, which is the safe direction.
-struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; long long ctimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; };
+struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; long long ctimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; std::vector<ConstOpen> constOpens; };
 
 // tiny native-endian binary (de)serializer (the cache is host-local, never shipped)
 struct ByteW
@@ -1227,6 +1391,7 @@ inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileD
         // specialized fill loops per width — no per-byte push_back on this multi-million-pair seam.
         const std::size_t count = d.lex.tokenTfs.size();
         char*             p     = w.extend( count * ( idxWidth + tfWidth ) );
+        VERIFY( count == 0 || rowDictIndex != nullptr );   // null only with an empty row: verifyCacheRecordMinimaTripwire's probe
         if( idxWidth == 1 )
         {
             for( std::size_t k = 0; k < count; ++k )
@@ -1415,8 +1580,8 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
     return d;
 }
 inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = Lang( r.u8() ); x.name = r.str(); x.isInherit = r.u8() != 0; x.isDocLink = r.u8() != 0; x.qualifier = r.str(); x.recv = RecvKind( r.u8() ); x.recvVar = r.str(); x.isCompose = r.u8() != 0; x.fieldName = r.str(); x.composeRel = r.str(); x.role = RefRole( r.u8() ); x.line = r.u32(); x.argCount = std::uint16_t( r.u32() ); x.argCountKnown = r.u8() != 0; return x; }
-inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.u32( b.spanStart ); w.u32( b.spanEnd ); w.str( b.var ); w.str( b.typeName ); }
-inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = Lang( r.u8() ); b.kind = LocalBindKind( r.u8() ); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.str(); b.typeName = r.str(); return b; }
+inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.u32( b.spanStart ); w.u32( b.spanEnd ); w.str( b.var ); w.str( b.typeName ); w.str( b.importedName ); }
+inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = Lang( r.u8() ); b.kind = LocalBindKind( r.u8() ); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.str(); b.typeName = r.str(); b.importedName = r.str(); return b; }
 inline void   writeFfi( ByteW& w, const BindingAlias& a ) { w.u8( std::uint8_t( a.kind ) ); w.u8( a.lowConf ? 1 : 0 ); w.str( a.aliasName ); w.str( a.targetName ); w.str( a.targetScope ); }
 inline BindingAlias readFfi( ByteR& r ) { BindingAlias a; a.kind = BindKind( r.u8() ); a.lowConf = r.u8() != 0; a.aliasName = r.str(); a.targetName = r.str(); a.targetScope = r.str(); return a; }
 // B6.3: RouteDef needs no startByte (its handler is resolved by NAME in buildGraph); RawRouteUse mirrors
@@ -1465,11 +1630,12 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     // (B0.2) a RICH def record additionally carries at least dlWeighted + tokenCount (2×u32) — the pair
     // arrays themselves are bounded per record inside readDef.
     const std::size_t     kMinDefRecordBytes      = minDefRecordBytes( captureValueUses );   // F8: named + tripwire-pinned above
-    constexpr std::size_t kMinIncRecordBytes      =  6;   // 2×u8 (isAngle,isLazy) + 1×str(len u32, empty)
-    constexpr std::size_t kMinBindRecordBytes     = 13;   // 1×u32 + 1×u8 + 2×str(len u32, empty)
+    constexpr std::size_t kMinIncRecordBytes      = 11;   // 3×u8 (isAngle,isLazy,isSymbolic) + 1×u32 (byte) + 1×str(len u32, empty)
+    constexpr std::size_t kMinBindRecordBytes     = 26;   // 3×u32 + 2×u8 + 3×str(len u32, empty)
     constexpr std::size_t kMinFfiRecordBytes      = 14;   // 2×u8 (kind,lowConf) + 3×str(len u32, empty)
     constexpr std::size_t kMinRouteDefRecordBytes = 13;   // B6.3: 1×u32 (line) + 1×u8 (method) + 2×str(len u32, empty)
     constexpr std::size_t kMinRouteUseRecordBytes = 13;   // B6.3: 2×u32 (startByte,line) + 1×u8 (method) + 1×str(len u32, empty)
+    constexpr std::size_t kMinConstOpenRecordBytes = 13;  // parser version 82: 2×u32 (startByte,endByte) + 1×u8 (namespaceOnly) + 1×str(len u32, empty)
     const auto countFits = [ &r ]( std::uint32_t recordCount, std::size_t minRecordBytes ) noexcept
     {
         if( recordCount <= std::size_t( r.end - r.p ) / minRecordBytes )
@@ -1546,9 +1712,11 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     ffOut.incs.reserve( ni );
     for( std::uint32_t j = 0; j < ni && r.ok; ++j )
     {
-        const bool isAngle = r.u8() != 0;
-        const bool isLazy  = r.u8() != 0;   // kParserVer 72: TS/JS function-body require/import marker
-        ffOut.incs.push_back( Include { 0, isAngle, isLazy, r.str() } );
+        const bool          isAngle    = r.u8() != 0;
+        const bool          isLazy     = r.u8() != 0;   // kParserVer 72: TS/JS function-body require/import marker; parser version 82: Ruby autoload
+        const bool          isSymbolic = r.u8() != 0;   // parser version 82: a Ruby constant target, resolved by index, never by path
+        const std::uint32_t byte       = r.u32();       // parser version 82: the directive's start byte (lexical nesting recovery)
+        ffOut.incs.push_back( Include { 0, isAngle, isLazy, isSymbolic, byte, r.str() } );
     }
     const std::uint32_t nb = r.u32();
     if( !countFits( nb, kMinBindRecordBytes ) )
@@ -1589,6 +1757,21 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     for( std::uint32_t j = 0; j < nru && r.ok; ++j )
     {
         ffOut.routeUses.push_back( readRouteUse( r ) ); // B6.3
+    }
+    const std::uint32_t nco = r.u32();
+    if( !countFits( nco, kMinConstOpenRecordBytes ) )
+    {
+        return false;
+    }
+    ffOut.constOpens.reserve( nco );
+    for( std::uint32_t j = 0; j < nco && r.ok; ++j )
+    {
+        ConstOpen co;                                   // parser version 82 (fileId re-labelled by the caller)
+        co.startByte     = r.u32();
+        co.endByte       = r.u32();
+        co.namespaceOnly = r.u8() != 0;
+        co.written       = r.str();
+        ffOut.constOpens.push_back( std::move( co ) );
     }
     return r.ok;
 }
@@ -1633,6 +1816,15 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
     const CacheFrame frame = openCacheFrame( path, captureValueUses );
     if( !frame.ok )
     {
+        // 2026-09-06 stranger audit: every reject here self-healed to a full reparse with NO signal a Release
+        // binary keeps (the debug-only alert compiles out under NDEBUG) — a torn blob, an older binary's blob, a
+        // directory passed as --cache: all byte-identical to a healthy run, just slower, every time. The
+        // ordinary cold-start miss (absent) stays silent; anything else says what it found, once per run.
+        if( frame.reason != CacheReject::Absent )
+        {
+            rw::emitTo( stderr, "ripwire: cache {}: {} — not used; this run parses from source and rewrites it\n",
+                          path.c_str(), cacheRejectName( frame.reason ) );
+        }
         return out;
     }
     stats.blobWriteNs = frame.mtimeNs;
@@ -1750,14 +1942,15 @@ struct CacheFileIndexes
 {
     std::vector<rw::SmallVec<std::uint32_t, 8>> defIndex;
     std::vector<std::vector<std::uint32_t>>     refIndex, bindIndex;
-    std::vector<rw::SmallVec<std::uint32_t, 2>> incIndex, ffiIndex, routeDefIndex, routeUseIndex;
+    std::vector<rw::SmallVec<std::uint32_t, 2>> incIndex, ffiIndex, routeDefIndex, routeUseIndex, constOpenIndex;
 };
 
 inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
                                                const std::vector<RawDef>& defs, const std::vector<RawRef>& refs,
                                                const std::vector<Include>& incs, const std::vector<RawBind>& binds,
                                                const std::vector<BindingAlias>& ffis,
-                                               const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses )
+                                               const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses,
+                                               const std::vector<ConstOpen>& constOpens )
 {
     CacheFileIndexes ix;
     ix.defIndex.resize( fileCount );
@@ -1767,6 +1960,7 @@ inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
     ix.ffiIndex.resize( fileCount );
     ix.routeDefIndex.resize( fileCount );
     ix.routeUseIndex.resize( fileCount );
+    ix.constOpenIndex.resize( fileCount );
 
     // One generic grouping pass per family — an out-of-range fileId is DROPPED, never clamped, exactly as
     // the seven hand-written loops this replaces did.
@@ -1787,6 +1981,7 @@ inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
     group( ffis,      ix.ffiIndex );
     group( routeDefs, ix.routeDefIndex );   // B6.3
     group( routeUses, ix.routeUseIndex );   // B6.3
+    group( constOpens, ix.constOpenIndex ); // parser version 82
     return ix;
 }
 
@@ -1936,6 +2131,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                        const std::vector<RawDef>& defs, const std::vector<RawRef>& refs, const std::vector<Include>& incs,
                        const std::vector<RawBind>& binds, const std::vector<BindingAlias>& ffis,
                        const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses,   // B6.3
+                       const std::vector<ConstOpen>& constOpens,                                             // parser version 82
                        bool captureValueUses )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest: saveCache (serialize + write)" );
@@ -1949,7 +2145,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     }
 
     const std::size_t      F  = files.size();
-    const CacheFileIndexes ix = buildCacheFileIndexes( F, defs, refs, incs, binds, ffis, routeDefs, routeUses );
+    const CacheFileIndexes ix = buildCacheFileIndexes( F, defs, refs, incs, binds, ffis, routeDefs, routeUses, constOpens );
 
     // This header field is no longer the racy-rule reference — loadCache now derives that from
     // a fresh stat() of the cache file itself (same clock+granularity domain as the per-file mtimes it's
@@ -2108,8 +2304,10 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
             w.u32( std::uint32_t( ix.incIndex[f].size() ) );
             for( std::uint32_t i : ix.incIndex[f] )
             {
-                w.u8( incs[i].isAngle ? 1 : 0 );
-                w.u8( incs[i].isLazy  ? 1 : 0 );
+                w.u8( incs[i].isAngle    ? 1 : 0 );
+                w.u8( incs[i].isLazy     ? 1 : 0 );
+                w.u8( incs[i].isSymbolic ? 1 : 0 );
+                w.u32( incs[i].byte );
                 w.str( incs[i].target );
             }
             w.u32( std::uint32_t( ix.bindIndex[f].size() ) );
@@ -2131,6 +2329,14 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
             for( std::uint32_t i : ix.routeUseIndex[f] )
             {
                 writeRouteUse( w, routeUses[i] ); // B6.3
+            }
+            w.u32( std::uint32_t( ix.constOpenIndex[f].size() ) );
+            for( std::uint32_t i : ix.constOpenIndex[f] )
+            {                                        // parser version 82: span + own-body bit + written name (fileId is the record's)
+                w.u32( constOpens[i].startByte );
+                w.u32( constOpens[i].endByte );
+                w.u8( constOpens[i].namespaceOnly ? 1 : 0 );
+                w.str( constOpens[i].written );
             }
             table.push_back( CacheEntry{ row.pathHash, std::uint64_t( recOffset ),
                                          f < fileHash.size() ? fileHash[f] : 0,
@@ -2161,6 +2367,8 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     if( !fp )
     {
         DEGRADED_PATH_ALERT( "ingest: saveCache could not open temp file for write — cache left unchanged" );
+        rw::emitTo( stderr, "ripwire: cache {}: cannot write ({}) — every run parses from source until this is fixed\n",
+                      path.c_str(), std::strerror( errno )  );   // 2026-09-06: Release kept no signal for this
         return;
     }
     const std::size_t wrote = std::fwrite( w.b.data(), 1, w.b.size(), fp );
@@ -2169,6 +2377,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     {
         std::remove( tmp.c_str() );   // never rename a short/torn write over a good cache
         DEGRADED_PATH_ALERT( "ingest: saveCache write failed (short write or fclose error) — old cache preserved" );
+        rw::emitTo( stderr, "ripwire: cache {}: write failed (short write; disk full?) — old cache kept, this run was parsed from source\n", path.c_str() );
         return;
     }
 #if defined(_WIN32)
@@ -2183,6 +2392,8 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     {
         std::remove( tmp.c_str() );   // clean up on failure
         DEGRADED_PATH_ALERT( "ingest: saveCache rename(tmp -> cache) failed — old cache preserved" );
+        rw::emitTo( stderr, "ripwire: cache {}: cannot replace ({}) — old cache kept, this run was parsed from source\n",
+                      path.c_str(), std::strerror( errno ) );
         return;
     }
 #endif
@@ -2197,3 +2408,5 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
 }   // namespace — ingest_cache.h section of ingest.cpp
 
 }   // namespace rw
+#include <cerrno>    // errno — the cache save-failure notices (2026-09-06)
+#include <cstring>   // std::strerror — same

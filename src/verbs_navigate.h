@@ -3,6 +3,9 @@
 #error "verbs_navigate.h is a SECTION of src/main.cpp's translation unit - include it only from main.cpp (see the verb-family split note there)"
 #endif
 
+#include "infra/emit.h" // rw::emitTo — THE emitter (std::print, or std::format+fputs where <print> is absent)
+#include <string_view>       // std::string_view — the %.*s (precision, pointer) pair collapses to one view
+
 // verbs_navigate.h — the navigate family, moved VERBATIM from main.cpp in the 2026-08-29 split:
 // printJsonSymbolRows (the JSON row array --callers/--callees/--impact share), the nine navigate verb
 // handlers (--callers/--callees, --graph-query, --uses, --safe-delete, --slice, --verify,
@@ -32,7 +35,7 @@ inline void printJsonSymbolRows( const rw::IngestResult& ing, const std::vector<
         const rw::Symbol&      s = ing.symbols[ ids[i] ];
         const std::string_view p = rootPrefix.empty() ? std::string_view( ing.files[ s.fileId ] )
                                                        : rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix );
-        std::printf( "%s{\"t\":\"%s\",\"n\":\"%s\",\"p\":\"%s:%u\"%s}", i == begin ? "" : ",",
+        rw::emitTo( stdout, "{}{{\"t\":\"{}\",\"n\":\"{}\",\"p\":\"{}:{}\"{}}}", i == begin ? "" : ",",
                      rw::symTag( s.kind ), rw::jsonStr( s.name ).c_str(), rw::jsonStr( p ).c_str(), s.line,
                      ( testReach && rw::isTestedByReach( ing, *testReach, ids[i] ) ) ? ",\"tested\":true" : "" );
     }
@@ -87,7 +90,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         if( matches.empty() )
         {
             const std::string verb = std::string( wantCallers ? "--callers" : "--callees" );   // one arm, two spellings
-            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: " + verb + " symbol not found: ",
+            rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: " + verb + " symbol not found: ",
                                                                    sym, verb + "=" ).c_str() );   // §B4.2 shared refusal
             return 1;
         }
@@ -135,10 +138,10 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         {
             // M12: under multi-root this verb carries no root= at all (correctly — no single root exists)
             // and, before this, disclosed nothing about the `<label>/` prefix every p= below carries.
-            std::printf( "%s%s%s-->%s%s", rw::callHierarchyLegendOpen( wantCallers ).c_str(),
+            rw::emitTo( stdout, "{}{}{}-->{}{}", rw::callHierarchyLegendOpen( wantCallers ).c_str(),
                          rw::capLegendClause( rw::computePageDisclosure( pw.end - pw.begin, result.size(), pw.end,
                                                                         cfg.pageLimit, cfg.pageOffset, chDiscloseCap ).active ),
-                         rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( chSingleRoot ),
+                         rw::graphCountDisclosure( g.unindexedFiles > 0 ).c_str(), rw::rootRelPathsLegend( chSingleRoot ),
                          rw::multiRootTableLegend( ing.rootLabels.size() >= 2 ) );
         }
 
@@ -178,32 +181,32 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // for the same reason: these two verbs have no display cap of their own, so un-paged discloses nothing).
         if( cfg.json )
         {
-            std::printf( "{\"of\":\"%s\",\"defs\":%zu,\"count\":%zu", jsonStr( sym ).c_str(), matches.size(), result.size() );
+            rw::emitTo( stdout, "{{\"of\":\"{}\",\"defs\":{},\"count\":{}", jsonStr( sym ).c_str(), matches.size(), result.size() );
             if( !wantCallers && bodylessDefsCount > 0 )
             {
-                std::printf( ",\"bodyless_defs\":%zu", bodylessDefsCount );
+                rw::emitTo( stdout, ",\"bodyless_defs\":{}", bodylessDefsCount );
             }
             // R-E: the JSON twin of the XML root= below — right after the leading identifying fields.
-            if( chSingleRoot ) { std::printf( ",\"root\":\"%s\"", jsonStr( cfg.roots[0] ).c_str() ); }
-            std::printf( ",\"hop_tested\":%zu,\"hop_untested\":%zu", chTested.tested, chTested.untested );   // A6
-            std::printf( "%s%s", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
+            if( chSingleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( cfg.roots[0] ).c_str() ); }
+            rw::emitTo( stdout, ",\"hop_tested\":{},\"hop_untested\":{}", chTested.tested, chTested.untested );   // A6
+            rw::emitTo( stdout, "{}{}", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                         cfg.pageLimit, cfg.pageOffset, chDiscloseCap, kJsonPageSyntax ),
                          rw::graphCountFloorAttrJson( g ).c_str() );   // §H4 §3.4 — the JSON dialect's spelling of the same marker
-            std::printf( ",\"%s\":[", tag );
+            rw::emitTo( stdout, ",\"{}\":[", tag );
             printJsonSymbolRows( ing, result, pw.begin, pw.end, chRootPrefix, &chTested.testReach );
-            std::printf( "]}" );
+            rw::emitTo( stdout, "]}}" );
             return 0;
         }
 
         // §P10.6: defs= = resolved definitions this name matched (matches.size()) — the rows below UNION the
         // neighbors of every def, which --uses/--impact already disclose and these two verbs silently hid.
-        std::printf( "<%s of=\"%s\" defs=\"%zu\" count=\"%zu\"%s", tag, ex( sym ).c_str(), matches.size(), result.size(), chRootAttr.c_str() );
+        rw::emitTo( stdout, "<{} of=\"{}\" defs=\"{}\" count=\"{}\"{}", tag, ex( sym ).c_str(), matches.size(), result.size(), chRootAttr.c_str() );
         if( !wantCallers && bodylessDefsCount > 0 )
         {
-            std::printf( " bodyless_defs=\"%zu\"", bodylessDefsCount );
+            rw::emitTo( stdout, " bodyless_defs=\"{}\"", bodylessDefsCount );
         }
-        std::printf( "%s", chTested.xmlAttr.c_str() );   // A6: hop_tested=/hop_untested=
-        std::printf( "%s%s%s>", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
+        rw::emitTo( stdout, "{}", chTested.xmlAttr.c_str() );   // A6: hop_tested=/hop_untested=
+        rw::emitTo( stdout, "{}{}{}>", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                     cfg.pageLimit, cfg.pageOffset, chDiscloseCap ),
                      rw::graphCountFloorAttrXml( g ).c_str(),
                      chNextAttr.c_str() );   // P3 (L7): callers → the SITES (--uses=SELECTOR, spelling mirrored); callees → the body (--expand=SYM)
@@ -214,10 +217,10 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             const std::string_view  rp = chSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], chRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
             // A6: tested="1" only (never a literal 0) — the same absence-meaningful convention tested=
             // already follows everywhere else (serialize.h/verbs_for.h), so an untested row costs 0 bytes.
-            std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"%s%s/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line,
+            rw::emitTo( stdout, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line,
                          macroRoleAttr( s.kind ), rw::isTestedByReach( ing, chTested.testReach, result[i] ) ? " tested=\"1\"" : "" );
         }
-        std::printf( "</%s>", tag );
+        rw::emitTo( stdout, "</{}>", tag );
         return 0;
     }
     return std::nullopt;
@@ -243,7 +246,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         std::vector<NodeId> result = ev.run();
         if( !ev.ok )
         {
-            std::fprintf( stderr, "ripwire: --graph-query: %s\n", ev.err.c_str() );
+            rw::emitTo( stderr, "ripwire: --graph-query: {}\n", ev.err.c_str() );
             return 1;
         }
         // §P0.5b: a name() literal matching NO indexed symbol is a typo — refuse it the way the eleven other
@@ -252,7 +255,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         if( !ev.unresolvedNames.empty() )
         {
             const std::string& missingName = ev.unresolvedNames.front();
-            std::fprintf( stderr, "%s\n", withDidYouMean( ing, missingName,
+            rw::emitTo( stderr, "{}\n", withDidYouMean( ing, missingName,
                           "ripwire: --graph-query: name(\"" + missingName + "\") matches no symbol in the indexed tree" ).c_str() );
             return 1;
         }
@@ -282,17 +285,17 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         // `callers(name("X"),1)` reports the identical number --callers does — and it shipped the marker on
         // neither. That is the §B4 echo-site shape src/graphlegend.h's own header indicts, so the shared
         // constants land here too rather than a sixth wording.
-        std::printf( "<!-- ripwire graph-query: a fixed-operator node-set query over the call graph (sources "
+        rw::emitTo( stdout, "<!-- ripwire graph-query: a fixed-operator node-set query over the call graph (sources "
                      "name/all; filters kind/cx/fanin/file/layer; bounded closure callers/callees; joins and/or/not), "
                      "ranked by importance + capped at the top-k limit (default 200); narrow the query or raise top-k for more. NOT Datalog. "
-                     "%s%s-->", rw::graphCountDisclosure().c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
+                     "{}{}-->", rw::graphCountDisclosure( g.unindexedFiles > 0 ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY): count= is the true total and
         // shown= the --top-k slice, but capped= was missing — so a caller reading a 200-row answer had to
         // know the default top-k to tell a complete result from a truncated one. Rule 3: the bit is always
         // emitted alongside shown=, so "no capped attribute" is never something a parser must interpret.
         char gqAb[ kPageDisclosureCap ];
         const std::string gqRootAttr = gqSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
-        std::printf( "<query expr=\"%s\" count=\"%zu\"%s%s%s%s>",
+        rw::emitTo( stdout, "<query expr=\"{}\" count=\"{}\"{}{}{}{}>",
                      ex( cfg.graphQuery ).c_str(), total,
                      pageDisclosure( gqAb, sizeof( gqAb ), keep, total, gqPw.end, cfg.pageLimit, cfg.pageOffset, true ),
                      rw::graphCountFloorAttrXml( g ).c_str(), gqRootAttr.c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ).c_str() );
@@ -301,10 +304,10 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
             const NodeId            c  = result[ ri ];
             const Symbol&           s  = ing.symbols[c];
             const std::string_view  rp = gqSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], gqRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
-            std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>",
+            rw::emitTo( stdout, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"/>",
                          symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
         }
-        std::printf( "</query>" );
+        rw::emitTo( stdout, "</query>" );
         return 0;
     }
     return std::nullopt;
@@ -471,7 +474,7 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
 // cap with an explicit remainder is the one addition, shared by all six arms).
 inline int refuseUsesFileQualifier( const rw::IngestResult& ing, std::string_view sym, const UsesSelector& )
 {
-    std::fprintf( stderr, "%s\n", rw::selectorNotFoundMessage( ing, "ripwire: --uses symbol not found: ",
+    rw::emitTo( stderr, "{}\n", rw::selectorNotFoundMessage( ing, "ripwire: --uses symbol not found: ",
                                                                 sym, "--uses=" ).c_str() );
     return 1;
 }
@@ -515,7 +518,7 @@ std::optional<int> runUses( const MainDispatch& d )
         // spellings; a member selector on an unserved language refuses by language name. One arm, one branch.
         if( const std::optional<int> memberExit = memberUsesArm( ing, g, defs, sym, usSingleRoot, cfg.roots[ 0 ], cfg.pageLimit, cfg.pageOffset ); memberExit )
         {
-            return *memberExit;
+            return memberExit;
         }
 
         // §A6b(iii): external="1" is the claim "this name has NO definition in the indexed tree" — it may only
@@ -547,7 +550,7 @@ std::optional<int> runUses( const MainDispatch& d )
         // made defs wrongly empty for a selector that DID resolve).
         if( defs.empty() && sites.empty() )
         {
-            std::fprintf( stderr, "%s\n", withDidYouMean( ing, sel.suggestName,
+            rw::emitTo( stderr, "{}\n", withDidYouMean( ing, sel.suggestName,
                           "ripwire: --uses selector matched no indexed definition: " + std::string( sym ) ).c_str() );
             return 1;
         }
@@ -571,7 +574,7 @@ std::optional<int> runUses( const MainDispatch& d )
         // §H4 §3.4 item 2: the opener is shared with the MCP twin (src/graphlegend.h) — the two were
         // byte-identical copies of a sentence that promised "every use-site of SYM", which the qualified-call
         // round proved false and which a name-based static reference index cannot make true.
-        std::printf( "%s"
+        rw::emitTo( stdout, "{}"
                      "Reference-name-based (same heuristic level as call edges) — verify in source if a name is overloaded. "
                      "external=\"1\" ⇒ SYM has no definition in the indexed tree under ANY spelling (stdlib/third-party) — "
                      "never merely none in the file you qualified with (that spelling refuses instead). "
@@ -579,10 +582,10 @@ std::optional<int> runUses( const MainDispatch& d )
                      "chosen def (the callers verb's own narrowing, read the other way, so the two agree); read/write/import/extends carry no "
                      "resolution and stay name-matched across every def sharing the name. narrowed_roles= names what narrowed, and "
                      "defs_of_name=/call_sites_of_name= (file: qualifier only) are the un-narrowed totals. "
-                     "%s%s-->%s%s", rw::kUsesLegendOpen,
+                     "{}{}-->{}{}", rw::kUsesLegendOpen,
                      rw::capLegendClause( rw::computePageDisclosure( pageRows, sites.size(), upw.end,
                                                                     cfg.pageLimit, cfg.pageOffset, usDiscloseCap ).active ),
-                     rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( usSingleRoot ),
+                     rw::graphCountDisclosure( g.unindexedFiles > 0 ).c_str(), rw::rootRelPathsLegend( usSingleRoot ),
                      // M12: same multi-root roots-table disclosure --callers/--callees gained.
                      rw::multiRootTableLegend( ing.rootLabels.size() >= 2 ) );
         char              upab[ kPageDisclosureCap ];
@@ -607,7 +610,7 @@ std::optional<int> runUses( const MainDispatch& d )
             return 0;
         }
 
-        std::printf( "<uses of=\"%s\" defs=\"%zu\" external=\"%d\" count=\"%zu\"%s%s%s%s>",
+        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}>",
                      ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(), selectorAttrs.c_str(), usRootAttr.c_str(), upage,
                      rw::graphCountFloorAttrXml( g ).c_str() );
         rw::writeMultiRootTable( stdout, ing );   // M12: the roots list this element's own root= cannot carry
@@ -615,18 +618,18 @@ std::optional<int> runUses( const MainDispatch& d )
         {
             const UseSite&          u  = sites[ siteIndex ];
             const std::string_view  rp = usSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ u.fileId ], usRootPrefix ) : std::string_view( ing.files[ u.fileId ] );
-            std::printf( "<u role=\"%s\" p=\"%s:%u\"", refRoleTag( u.role ), ex( rp ).c_str(), u.line );
+            rw::emitTo( stdout, "<u role=\"{}\" p=\"{}:{}\"", refRoleTag( u.role ), ex( rp ).c_str(), u.line );
             // §P8 collision: `in=` means three things tool-wide — enclosing NAME (--grep/--match/--lint),
             // fan-in COUNT (--for/--pack-task/--exemplar), and here the enclosing symbol's canonical ID. The
             // first two are load-bearing and stay; this one had ZERO consumers, so it is the one that moves.
             // `in_id=` keeps the "enclosing" sense while saying it is an ID, per the index-vs-count rule.
             if( !u.in.empty() )
             {
-                std::printf( " in_id=\"%s\"", ex( u.in ).c_str() );
+                rw::emitTo( stdout, " in_id=\"{}\"", ex( u.in ).c_str() );
             }
-            std::printf( "/>" );
+            rw::emitTo( stdout, "/>" );
         }
-        std::printf( "</uses>" );
+        rw::emitTo( stdout, "</uses>" );
         return 0;
     }
     return std::nullopt;
@@ -661,9 +664,9 @@ std::optional<int> runUses( const MainDispatch& d )
 // §G4: an XML comment may never contain the literal byte pair "--", so every sibling-verb mention below is
 // spelled WITHOUT its leading flag dashes (impact/uses/callers/dead-code) — the one departure from how this
 // file's prose comments spell them elsewhere.
-inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t ambiguousCallers, std::string_view risk, bool singleRoot )
+inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t ambiguousCallers, std::string_view risk, bool singleRoot, bool hasUnindexed )
 {
-    std::printf( "<!-- ripwire safe-delete: composes signals the tool already computes into one \"can I delete this?\" READ "
+    rw::emitTo( stdout, "<!-- ripwire safe-delete: composes signals the tool already computes into one \"can I delete this?\" READ "
                 "— never a verdict. defs= is resolveAllByNameQualified's match count, exactly as the impact/uses/callers "
                 "verbs already disclose it. callers= is the 1-hop caller count (the callers verb's own walk over defs' "
                 "in-edges); impact_reaches= is the FULL transitive blast radius (the impact verb's own walk); uses= is every "
@@ -678,8 +681,8 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t ambiguousCal
                 "zero direct callers); a 0 never means \"in use\", only that this narrow detector's preconditions do not "
                 "hold here — run the dead-code verb for the full-corpus scan. ambiguous_callers= counts callers whose OWN "
                 "outgoing calls include at least one that resolved to more than one candidate definition (g.ambOut, the "
-                "same counter a ranked row's amb= reads). %s%srisk= NAMES what was found, never a go/no-go verdict, and "
-                "this run reports %s%s-->%s",
+                "same counter a ranked row's amb= reads). {}{}risk= NAMES what was found, never a go/no-go verdict, and "
+                "this run reports {}{}-->{}",
                 // The union caveat, only when there is a union to caveat.
                 defCount > 1
                     ? "defs= is above 1 here, so EVERY count in this element UNIONS more than one physical definition "
@@ -699,7 +702,7 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t ambiguousCal
                   : risk == "untested-radius"
                       ? "untested-radius: callers or uses exist, and NONE of the transitive blast radius is test-covered. "
                       : "uses-exist: callers or uses exist, and at least part of the radius is test-covered. ",
-                rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( singleRoot ) );
+                rw::graphCountDisclosure( hasUnindexed ).c_str(), rw::rootRelPathsLegend( singleRoot ) );
 }
 
 // risk= NAMES what was found, never a go/no-go verdict: "none-found" (zero 1-hop callers AND zero use
@@ -724,7 +727,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     if( defs.empty() )
     {
         // §B4.2: the shared did-you-mean refusal every SYM-taking verb speaks (selectorrefuse.h).
-        std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --safe-delete symbol not found: ",
+        rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: --safe-delete symbol not found: ",
                                                                cfg.safeDeleteSym, "--safe-delete=" ).c_str() );
         return 1;
     }
@@ -862,7 +865,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     // shared graphCountDisclosure() tail is untouched, byte for byte: test/floormarkcheck.sh pins it across
     // seven other verbs and a private shorter copy here would be exactly the dialect divergence it exists
     // to catch.
-    emitSafeDeleteLegend( defs.size(), ambiguousCallers, risk, sdSingleRoot );
+    emitSafeDeleteLegend( defs.size(), ambiguousCallers, risk, sdSingleRoot, g.unindexedFiles > 0 );
 
     const Symbol&      lead = ing.symbols[ defs[0] ];   // resolveAllByNameQualified walks ascending id — defs[0] is the
                                                         // lowest, same convention --impact/--uses/--callers's of=/defs=
@@ -870,9 +873,9 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     const PageWindow   cw   = pageWindow( callerIds.size(), effectiveRowCap( cfg.pageLimit, 40 ), cfg.pageOffset );
     char               cab[ kPageDisclosureCap ];
     const std::string  sdRootAttr = sdSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
-    std::printf( "<safe-delete sym=\"%s\" t=\"%s\" p=\"%s:%u\" defs=\"%zu\" callers=\"%zu\" ambiguous_callers=\"%zu\" "
-                "impact_reaches=\"%zu\" uses=\"%zu\" tested_self=\"%d\" radius_tested=\"%zu\" radius_untested=\"%zu\" "
-                "dead_code_candidate=\"%d\" risk=\"%s\"%s%s%s>",
+    rw::emitTo( stdout, "<safe-delete sym=\"{}\" t=\"{}\" p=\"{}:{}\" defs=\"{}\" callers=\"{}\" ambiguous_callers=\"{}\" "
+                "impact_reaches=\"{}\" uses=\"{}\" tested_self=\"{}\" radius_tested=\"{}\" radius_untested=\"{}\" "
+                "dead_code_candidate=\"{}\" risk=\"{}\"{}{}{}>",
                 ex( cfg.safeDeleteSym ).c_str(), symTag( lead.kind ), ex( sdPathRel( lead.fileId ) ).c_str(), lead.line,
                 defs.size(), callerIds.size(), ambiguousCallers, reach.size(), sites.size(), testedSelf ? 1 : 0,
                 radiusTested, radiusUntested, deadCodeCandidate ? 1 : 0, risk,
@@ -882,14 +885,14 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     {
         const NodeId  callerId = callerIds[i];
         const Symbol& cs       = ing.symbols[ callerId ];
-        std::printf( "<c n=\"%s\" p=\"%s:%u\"", ex( cs.name ).c_str(), ex( sdPathRel( cs.fileId ) ).c_str(), cs.line );
+        rw::emitTo( stdout, "<c n=\"{}\" p=\"{}:{}\"", ex( cs.name ).c_str(), ex( sdPathRel( cs.fileId ) ).c_str(), cs.line );
         if( callerId < g.ambOut.size() && g.ambOut[ callerId ] > 0 )
         {
-            std::printf( " amb=\"%u\"", g.ambOut[ callerId ] );   // M15: the same COUNT a map row's amb= prints — one meaning, one unit
+            rw::emitTo( stdout, " amb=\"{}\"", g.ambOut[ callerId ] );   // M15: the same COUNT a map row's amb= prints — one meaning, one unit
         }
-        std::printf( "/>" );
+        rw::emitTo( stdout, "/>" );
     }
-    std::printf( "</safe-delete>" );
+    rw::emitTo( stdout, "</safe-delete>" );
     return 0;
 }
 
@@ -930,7 +933,7 @@ std::optional<int> runAt( const MainDispatch& d )
     const AtSeed seed = resolveAtSeed( ing, cfg.atSpec );
     if( seed.fault != AtFault::None )
     {
-        std::fprintf( stderr, "ripwire: the at flag's seed '%s' named no location%s\n",
+        rw::emitTo( stderr, "ripwire: the at flag's seed '{}' named no location{}\n",
                       std::string( cfg.atSpec ).c_str(), atSeedFaultClause( ing, seed ).c_str() );
         return 1;
     }
@@ -949,7 +952,7 @@ std::optional<int> runAt( const MainDispatch& d )
         return std::uint32_t( it - seed.lineStarts.begin() );
     };
 
-    std::printf( "<!-- ripwire at: the ENCLOSING-DEFINITION CHAIN at one FILE:LINE seed. p= the resolved file, "
+    rw::emitTo( stdout, "<!-- ripwire at: the ENCLOSING-DEFINITION CHAIN at one FILE:LINE seed. p= the resolved file, "
                  "l= the 1-based seed line, sym= the innermost enclosing definition's name (what the same seed "
                  "resolves to in a selector position), chain= the row count. Rows are INDEXED definitions only, "
                  "outermost first, innermost last: n= the definition's name, t= its kind tag, l= its own start "
@@ -958,21 +961,21 @@ std::optional<int> runAt( const MainDispatch& d )
                  "indexed definition is refused, never served as an empty chain. The same seed composes into any "
                  "SYM selector as @FILE:LINE (callers, callees, impact, around, expand, uses, edit-check, slice, "
                  "safe-delete, path, connect) and resolves to the innermost row. -->"
-                 "%s", rootRelPathsLegend( atSingleRoot ) );
-    std::printf( "<at p=\"%s\" l=\"%u\" sym=\"%s\" chain=\"%zu\"",
+                 "{}", rootRelPathsLegend( atSingleRoot ) );
+    rw::emitTo( stdout, "<at p=\"{}\" l=\"{}\" sym=\"{}\" chain=\"{}\"",
                  ex( seedPath ).c_str(), seed.line, ex( ing.symbols[ seed.chain.back() ].name ).c_str(), seed.chain.size() );
     if( atSingleRoot )
     {
-        std::printf( " root=\"%s\"", ex( cfg.roots[0] ).c_str() );
+        rw::emitTo( stdout, " root=\"{}\"", ex( cfg.roots[0] ).c_str() );
     }
-    std::printf( ">" );
+    rw::emitTo( stdout, ">" );
     for( const NodeId id : seed.chain )
     {
         const Symbol& s = ing.symbols[ id ];
-        std::printf( "<s n=\"%s\" t=\"%s\" l=\"%u\" el=\"%u\"/>",
+        rw::emitTo( stdout, "<s n=\"{}\" t=\"{}\" l=\"{}\" el=\"{}\"/>",
                      ex( s.name ).c_str(), symTag( s.kind ), s.line, lineOfByte( s.endByte > 0 ? s.endByte - 1 : 0 ) );
     }
-    std::printf( "</at>\n" );
+    rw::emitTo( stdout, "</at>\n" );
     return 0;
 }
 
@@ -994,7 +997,7 @@ inline std::optional<int> sliceApplyAtSeed( const rw::IngestResult& ing, const r
 
     if( seed.fault != AtFault::None )
     {
-        std::fprintf( stderr, "ripwire: --slice: the at seed '%s' named no location%s\n",
+        rw::emitTo( stderr, "ripwire: --slice: the at seed '{}' named no location{}\n",
                       std::string( cfg.atSpec ).c_str(), atSeedFaultClause( ing, seed ).c_str() );
         return 1;
     }
@@ -1020,8 +1023,8 @@ inline std::optional<int> sliceApplyAtSeed( const rw::IngestResult& ing, const r
         if( narrowed == kNoNode )
         {
             const Symbol& innermost = ing.symbols[ seed.chain.back() ];
-            std::fprintf( stderr, "ripwire: --slice: the --at seed %s is inside '%s' (%s:%u), which is not among the %zu "
-                                  "definition(s) '--slice=%s' matches — the seed and the spec disagree; drop one of them\n",
+            rw::emitTo( stderr, "ripwire: --slice: the --at seed {} is inside '{}' ({}:{}), which is not among the {} "
+                                  "definition(s) '--slice={}' matches — the seed and the spec disagree; drop one of them\n",
                           std::string( cfg.atSpec ).c_str(), innermost.name.c_str(), ing.files[ innermost.fileId ].c_str(),
                           innermost.line, matches.size(), std::string( cfg.sliceSpec ).c_str() );
             return 1;
@@ -1052,12 +1055,10 @@ inline std::optional<int> sliceSincePrepare( const MainDispatch& d, std::string_
     // ruling that a flag doing nothing on a run is a bug, not a no-op.
     if( varName.empty() )
     {
-        std::fprintf( stderr, "ripwire: --since=%.*s beside --slice diffs ONE variable's def-use slice, and --slice=%s named no "
-                              "variable — bare --slice=%s lists the sliceable locals; pick one and re-run as --slice=%s:VAR "
-                              "--since=%.*s\n",
-                      int( cfg.since.size() ), cfg.since.data(), std::string( selector ).c_str(),
-                      std::string( selector ).c_str(), std::string( selector ).c_str(),
-                      int( cfg.since.size() ), cfg.since.data() );
+        rw::emitTo( stderr, "ripwire: --since={} beside --slice diffs ONE variable's def-use slice, and --slice={} named no "
+                              "variable — bare --slice={} lists the sliceable locals; pick one and re-run as --slice={}:VAR "
+                              "--since={}\n", std::string_view( cfg.since.data(), cfg.since.size() ), std::string( selector ).c_str(),
+                      std::string( selector ).c_str(), std::string( selector ).c_str(), std::string_view( cfg.since.data(), cfg.since.size() ) );
         return 1;
     }
     const std::string relPath = std::string( rw::sarif::rootRelativeUri( path, rw::sarif::rootPrefixOf( d.root ) ) );
@@ -1066,7 +1067,7 @@ inline std::optional<int> sliceSincePrepare( const MainDispatch& d, std::string_
                                                     emit.compactLegend );
     if( !sd.ok )
     {
-        std::fprintf( stderr, "%s\n", sd.err.c_str() );
+        rw::emitTo( stderr, "{}\n", sd.err.c_str() );
         return 1;
     }
     legendOut       = std::move( sd.legend );
@@ -1088,7 +1089,7 @@ std::optional<int> runSlice( const MainDispatch& d )
     }
     if( d.multiRoot )
     {
-        std::fprintf( stderr, "ripwire: --slice is single-root only (it re-parses the definition's on-disk file, which a merged "
+        rw::emitTo( stderr, "ripwire: --slice is single-root only (it re-parses the definition's on-disk file, which a merged "
                               "multi-root graph cannot address unambiguously) — run it per root\n" );
         return 1;
     }
@@ -1117,7 +1118,7 @@ std::optional<int> runSlice( const MainDispatch& d )
     const bool atSeeded      = !cfg.atSpec.empty();
     if( atSeeded && selectorAtLed )
     {
-        std::fprintf( stderr, "ripwire: --slice=%s already carries an @FILE:LINE seed — one seed per run: drop --at=%s or "
+        rw::emitTo( stderr, "ripwire: --slice={} already carries an @FILE:LINE seed — one seed per run: drop --at={} or "
                               "spell the seed once\n",
                       std::string( cfg.sliceSpec ).c_str(), std::string( cfg.atSpec ).c_str() );
         return 1;
@@ -1129,7 +1130,7 @@ std::optional<int> runSlice( const MainDispatch& d )
         seed = resolveAtSeed( ing, cfg.atSpec );
         if( std::optional<int> refused = sliceApplyAtSeed( ing, cfg, seed, matches, selector, varName ) )
         {
-            return *refused;
+            return refused;
         }
     }
 
@@ -1137,7 +1138,7 @@ std::optional<int> runSlice( const MainDispatch& d )
     {
         // both readings missed — refuse in the --expand compose shape, naming the grammar so the caller
         // knows the VAR half was tried too (the shared clause diagnoses the selector's own fault line)
-        std::fprintf( stderr, "ripwire: --slice=%s matched no symbol (tried the whole spec as a selector, then HEAD:VAR)%s\n",
+        rw::emitTo( stderr, "ripwire: --slice={} matched no symbol (tried the whole spec as a selector, then HEAD:VAR){}\n",
                       std::string( cfg.sliceSpec ).c_str(), rw::selectorFaultClause( ing, selector, "--slice=" ).c_str() );
         return 1;
     }
@@ -1157,8 +1158,8 @@ std::optional<int> runSlice( const MainDispatch& d )
             spellings += " (+" + std::to_string( groups.size() - shownCount ) + " more)";
         }
         const std::string varSuffix = varName.empty() ? std::string() : ( ":" + std::string( varName ) );
-        std::fprintf( stderr, "ripwire: --slice: '%s' matches %zu definitions — a slice reads exactly ONE body, so an ambiguous "
-                              "selector is refused, never silently narrowed. Qualify one: %s — e.g. --slice=%s%s%s\n",
+        rw::emitTo( stderr, "ripwire: --slice: '{}' matches {} definitions — a slice reads exactly ONE body, so an ambiguous "
+                              "selector is refused, never silently narrowed. Qualify one: {} — e.g. --slice={}{}{}\n",
                       std::string( selector ).c_str(), matches.size(), spellings.c_str(), groups[0].spelling.c_str(), varSuffix.c_str(),
                       groups.size() == 1 ? " (same-spelling overloads cannot be separated yet)" : "" );
         return 1;
@@ -1171,8 +1172,8 @@ std::optional<int> runSlice( const MainDispatch& d )
     const slicev::SliceFam fam = slicev::sliceFamilyOf( sym.lang );
     if( fam == slicev::SliceFam::None )
     {
-        std::fprintf( stderr, "ripwire: --slice: slice not served for %s yet (served: %s) — the def-use classification is a "
-                              "verified per-grammar parent-kind read, and %s's has not been built\n",
+        rw::emitTo( stderr, "ripwire: --slice: slice not served for {} yet (served: {}) — the def-use classification is a "
+                              "verified per-grammar parent-kind read, and {}'s has not been built\n",
                       langTag( sym.lang ), slicev::kSliceServedList, langTag( sym.lang ) );
         return 1;
     }
@@ -1193,7 +1194,7 @@ std::optional<int> runSlice( const MainDispatch& d )
     else
     {
         DEGRADED_PATH_ALERT( "slice: definition file unreadable" );
-        std::fprintf( stderr, "ripwire: --slice: cannot read %s — the slice re-parses the definition's file and has nothing to walk\n", path.c_str() );
+        rw::emitTo( stderr, "ripwire: --slice: cannot read {} — the slice re-parses the definition's file and has nothing to walk\n", path.c_str() );
         return 1;
     }
 
@@ -1202,7 +1203,7 @@ std::optional<int> runSlice( const MainDispatch& d )
     if( !scan.parseOk )
     {
         DEGRADED_PATH_ALERT( "slice: definition re-parse failed" );
-        std::fprintf( stderr, "ripwire: --slice: could not re-parse %s (grammar missing, or the indexed span no longer fits the "
+        rw::emitTo( stderr, "ripwire: --slice: could not re-parse {} (grammar missing, or the indexed span no longer fits the "
                               "file — a stale index; re-run without --no-reindex or check --doctor)\n", path.c_str() );
         return 1;
     }
@@ -1218,7 +1219,7 @@ std::optional<int> runSlice( const MainDispatch& d )
         {
             locals += ( localIndex ? ", " : "" ) + ordered[ localIndex ].name;
         }
-        std::fprintf( stderr, "ripwire: --slice: no occurrence of '%s' in %s — sliceable locals: %s (bare --slice=%s lists them "
+        rw::emitTo( stderr, "ripwire: --slice: no occurrence of '{}' in {} — sliceable locals: {} (bare --slice={} lists them "
                               "with first-def lines)\n",
                       std::string( varName ).c_str(), sym.name.c_str(), locals.empty() ? "(none found)" : locals.c_str(),
                       std::string( selector ).c_str() );
@@ -1269,8 +1270,8 @@ std::optional<int> runSlice( const MainDispatch& d )
     const bool flowActive = !cfg.sliceFlow.empty();
     if( flowActive && varName.empty() )
     {
-        std::fprintf( stderr, "ripwire: --slice-flow needs a seed variable — bare --slice=%s lists the sliceable locals; pick one "
-                              "and re-run as --slice=%s:VAR --slice-flow=%s\n",
+        rw::emitTo( stderr, "ripwire: --slice-flow needs a seed variable — bare --slice={} lists the sliceable locals; pick one "
+                              "and re-run as --slice={}:VAR --slice-flow={}\n",
                       std::string( selector ).c_str(), std::string( selector ).c_str(), std::string( cfg.sliceFlow ).c_str() );
         return 1;
     }
@@ -1296,7 +1297,7 @@ std::optional<int> runSlice( const MainDispatch& d )
     if( std::optional<int> refused = sliceSincePrepare( d, selector, varName, path, sym, fam, grammar, scan, src,
                                                         sinceLegend, sinceBody, emit ) )
     {
-        return *refused;
+        return refused;
     }
     const std::string xml = slicev::sliceBundleText( ing, d.root, focus, varName, scan, src, d.redactPtr, emit );
     std::fwrite( xml.data(), 1, xml.size(), stdout );
@@ -1329,7 +1330,7 @@ std::optional<int> runVerify( const MainDispatch& d )
     const verify::Claim claim = verify::parseClaim( cfg.verifyClaim );
     if( !claim.ok )
     {
-        std::fprintf( stderr, "%s\n", claim.err.c_str() );
+        rw::emitTo( stderr, "{}\n", claim.err.c_str() );
         return 1;
     }
 
@@ -1356,7 +1357,7 @@ std::optional<int> runVerify( const MainDispatch& d )
     const auto emitSymRow = [ & ]( NodeId n )
     {
         const Symbol& s = ing.symbols[n];
-        std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( verPathRel( s.fileId ) ).c_str(), s.line );
+        rw::emitTo( stdout, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( verPathRel( s.fileId ) ).c_str(), s.line );
     };
 
     // the FILE argument: a path substring over the indexed tree (filePathContains — the file: qualifier's
@@ -1379,9 +1380,8 @@ std::optional<int> runVerify( const MainDispatch& d )
     };
     const auto refuseFile = [ & ]( std::string_view filePat ) -> int
     {
-        std::fprintf( stderr, "ripwire: --verify file matched nothing indexed: %.*s — FILE is a path substring over the indexed tree; "
-                              "files the ingest skipped are not searchable (the --skipped verb lists exactly which, with reasons)\n",
-                      int( filePat.size() ), filePat.data() );
+        rw::emitTo( stderr, "ripwire: --verify file matched nothing indexed: {} — FILE is a path substring over the indexed tree; "
+                              "files the ingest skipped are not searchable (the --skipped verb lists exactly which, with reasons)\n", std::string_view( filePat.data(), filePat.size() ) );
         return 1;
     };
 
@@ -1391,15 +1391,15 @@ std::optional<int> runVerify( const MainDispatch& d )
     const auto openRoot = [ & ]( const char* verdict, const std::string& facts, const char* limit, const char* honesty, const char* pageTail )
     {
         VERIFY( std::size_t( claim.shape ) < std::size( verify::kShapeTags ) );   // the parser is the only producer, every value in range
-        std::printf( "%s%s<verify claim=\"%s\" shape=\"%s\" verdict=\"%s\"%s%s", verify::kVerifyLegend,
+        rw::emitTo( stdout, "{}{}<verify claim=\"{}\" shape=\"{}\" verdict=\"{}\"{}{}", verify::kVerifyLegend,
                      rw::rootRelPathsLegend( verSingleRoot ),
                      ex( cfg.verifyClaim ).c_str(), verify::kShapeTags[ std::size_t( claim.shape ) ], verdict, facts.c_str(),
                      verRootAttr.c_str() );
         if( limit[0] != '\0' )
         {
-            std::printf( " limit=\"%s\"", limit );
+            rw::emitTo( stdout, " limit=\"{}\"", limit );
         }
-        std::printf( "%s%s>", honesty, pageTail );
+        rw::emitTo( stdout, "{}{}>", honesty, pageTail );
     };
 
     char              pab[ kPageDisclosureCap ];
@@ -1414,7 +1414,7 @@ std::optional<int> runVerify( const MainDispatch& d )
         if( srcDefs.empty() || dstDefs.empty() )
         {
             const std::string_view missing = srcDefs.empty() ? claim.arg1 : claim.arg2;
-            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --verify symbol not found: ", missing, "--verify=" ).c_str() );
+            rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: --verify symbol not found: ", missing, "--verify=" ).c_str() );
             return 1;
         }
         const std::vector<NodeId> path = rw::shortestPathAny( g, srcDefs, dstDefs );
@@ -1432,7 +1432,7 @@ std::optional<int> runVerify( const MainDispatch& d )
         {
             openRoot( "not-established", facts, verify::kLimitCallGraphFloor, vfFloor.c_str(), pageTailOf( 0, 0, 0 ) );
         }
-        std::printf( "</verify>" );
+        rw::emitTo( stdout, "</verify>" );
         return 0;
     }
 
@@ -1448,7 +1448,7 @@ std::optional<int> runVerify( const MainDispatch& d )
         (void) callSitesOfName;
         if( defs.empty() && sites.empty() )
         {
-            std::fprintf( stderr, "%s\n", withDidYouMean( ing, sel.suggestName,
+            rw::emitTo( stderr, "{}\n", withDidYouMean( ing, sel.suggestName,
                           "ripwire: --verify symbol not found: " + std::string( sym ) ).c_str() );
             return 1;
         }
@@ -1465,14 +1465,14 @@ std::optional<int> runVerify( const MainDispatch& d )
         for( std::size_t siteIndex = w.begin; siteIndex < w.end; ++siteIndex )
         {
             const UseSite& u = sites[ siteIndex ];
-            std::printf( "<u role=\"%s\" p=\"%s:%u\"", refRoleTag( u.role ), ex( verPathRel( u.fileId ) ).c_str(), u.line );
+            rw::emitTo( stdout, "<u role=\"{}\" p=\"{}:{}\"", refRoleTag( u.role ), ex( verPathRel( u.fileId ) ).c_str(), u.line );
             if( !u.in.empty() )
             {
-                std::printf( " in_id=\"%s\"", ex( u.in ).c_str() );
+                rw::emitTo( stdout, " in_id=\"{}\"", ex( u.in ).c_str() );
             }
-            std::printf( "/>" );
+            rw::emitTo( stdout, "/>" );
         }
-        std::printf( "</verify>" );
+        rw::emitTo( stdout, "</verify>" );
         return 0;
     }
 
@@ -1504,13 +1504,18 @@ std::optional<int> runVerify( const MainDispatch& d )
         const std::vector<GrepHit> hits = grepEnrich( ing, std::span<const GrepRawHit>( inFile ).subspan( w.begin, w.end - w.begin ) );
         for( const GrepHit& h : hits )
         {
-            std::printf( "<hit p=\"%s:%u\" in=\"%s\"><m><![CDATA[", ex( verPathRel( h.fileId ) ).c_str(), h.line, ex( h.enclosing ).c_str() );
+            rw::emitTo( stdout, "<hit p=\"{}:{}\" in=\"{}\"", ex( verPathRel( h.fileId ) ).c_str(), h.line, ex( h.enclosing ).c_str() );
+            if( h.lineBytes != 0 )   // the 512 B matched-line cut, disclosed here as on the grep row
+            {
+                rw::emitTo( stdout, " line_bytes=\"{}\"", h.lineBytes );
+            }
+            rw::emitRaw( stdout, "><m><![CDATA[" );
             std::string safe;
             appendCdataSafe( h.text, safe );
             std::fwrite( safe.data(), 1, safe.size(), stdout );
-            std::printf( "]]></m></hit>" );
+            rw::emitTo( stdout, "]]></m></hit>" );
         }
-        std::printf( "</verify>" );
+        rw::emitTo( stdout, "</verify>" );
         return 0;
     }
 
@@ -1541,7 +1546,7 @@ std::optional<int> runVerify( const MainDispatch& d )
             {
                 emitSymRow( defsInFile[ defIndex ] );
             }
-            std::printf( "</verify>" );
+            rw::emitTo( stdout, "</verify>" );
             return 0;
         }
         // no extracted definition — the literal check: does the name token occur in the file's bytes at
@@ -1567,11 +1572,16 @@ std::optional<int> runVerify( const MainDispatch& d )
             const std::vector<GrepHit> hits = grepEnrich( ing, std::span<const GrepRawHit>( inFile ).subspan( w.begin, w.end - w.begin ) );
             for( const GrepHit& h : hits )
             {
-                std::printf( "<hit p=\"%s:%u\" in=\"%s\"><m><![CDATA[", ex( verPathRel( h.fileId ) ).c_str(), h.line, ex( h.enclosing ).c_str() );
+                rw::emitTo( stdout, "<hit p=\"{}:{}\" in=\"{}\"", ex( verPathRel( h.fileId ) ).c_str(), h.line, ex( h.enclosing ).c_str() );
+            if( h.lineBytes != 0 )   // the 512 B matched-line cut, disclosed here as on the grep row
+            {
+                rw::emitTo( stdout, " line_bytes=\"{}\"", h.lineBytes );
+            }
+            rw::emitRaw( stdout, "><m><![CDATA[" );
                 std::string safe;
                 appendCdataSafe( h.text, safe );
                 std::fwrite( safe.data(), 1, safe.size(), stdout );
-                std::printf( "]]></m></hit>" );
+                rw::emitTo( stdout, "]]></m></hit>" );
             }
         }
         else if( clean )
@@ -1583,7 +1593,7 @@ std::optional<int> runVerify( const MainDispatch& d )
             openRoot( "not-established", facts, found.isBudgetReached ? verify::kLimitCollectionCeiling : verify::kLimitScanDegraded,
                       vfFloor.c_str(), pageTailOf( 0, 0, 0 ) );
         }
-        std::printf( "</verify>" );
+        rw::emitTo( stdout, "</verify>" );
         return 0;
     }
 
@@ -1592,7 +1602,7 @@ std::optional<int> runVerify( const MainDispatch& d )
     const std::vector<NodeId> targetDefs = resolveAllByNameQualified( ing, claim.arg1 );
     if( targetDefs.empty() )
     {
-        std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --verify symbol not found: ", claim.arg1, "--verify=" ).c_str() );
+        rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: --verify symbol not found: ", claim.arg1, "--verify=" ).c_str() );
         return 1;
     }
     if( claim.arg2Quoted )
@@ -1604,10 +1614,7 @@ std::optional<int> runVerify( const MainDispatch& d )
     }
     else if( !query::isKnownLayerWord( claim.arg2 ) )
     {
-        std::fprintf( stderr, "ripwire: --verify reaches: '%.*s' is not a built-in layer (%.*s) — quote it (\"%.*s\") to mean a FILE path substring\n",
-                      int( claim.arg2.size() ), claim.arg2.data(),
-                      int( std::string_view( query::kLayerVocabulary ).size() ), std::string_view( query::kLayerVocabulary ).data(),
-                      int( claim.arg2.size() ), claim.arg2.data() );
+        rw::emitTo( stderr, "ripwire: --verify reaches: '{}' is not a built-in layer ({}) — quote it (\"{}\") to mean a FILE path substring\n", std::string_view( claim.arg2.data(), claim.arg2.size() ), query::kLayerVocabulary, std::string_view( claim.arg2.data(), claim.arg2.size() ) );
         return 1;
     }
     const std::vector<NodeId> reach = rw::transitiveCallers( g, targetDefs );
@@ -1635,7 +1642,7 @@ std::optional<int> runVerify( const MainDispatch& d )
     {
         openRoot( "not-established", facts, verify::kLimitCallGraphFloor, vfFloor.c_str(), pageTailOf( 0, 0, 0 ) );
     }
-    std::printf( "</verify>" );
+    rw::emitTo( stdout, "</verify>" );
     return 0;
 }
 
@@ -1643,10 +1650,10 @@ std::optional<int> runVerify( const MainDispatch& d )
 // per-REFERENCING-LANGUAGE bookkeeping (a name called from several languages, e.g. `printf` — C's stdio
 // call AND Bash's builtin, used to merge into one row, summing unrelated surfaces and burying the smaller
 // one) lands as a function CALL in the verb body, not another decision point inside it. Slot array indexed
-// by the Lang enum (model.h; 16 values, small and POD) rather than a hashable composite key or nested map.
+// by the Lang enum (model.h; small and POD) rather than a hashable composite key or nested map.
 struct ExtSurfaceAcc  { std::uint32_t refs = 0; std::uint32_t calls = 0; };
 struct ExtSurfaceName { std::string name; rw::Lang lang; std::uint32_t refs; std::uint32_t calls; };
-constexpr std::size_t kExtSurfaceLangSlots = 16;   // cardinality of enum class rw::Lang (model.h)
+constexpr std::size_t kExtSurfaceLangSlots = rw::kLangCount;   // cardinality of enum class rw::Lang (model.h)
 
 inline rw::HashMap<std::string, std::array<ExtSurfaceAcc, kExtSurfaceLangSlots>>
 accumulateExternalSurface( const rw::IngestResult& ing, const rw::HashMap<std::string, char>& defined )
@@ -1764,7 +1771,7 @@ std::optional<int> runExternalSurface( const MainDispatch& d )
         const PageWindow  extPw   = pageWindow( names.size(), effectiveRowCap( cfg.pageLimit, histCap ), cfg.pageOffset );
         std::vector<char> esc;
         const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
-        std::printf( "<!-- ripwire external-surface: names CALLED/IMPORTED/EXTENDED but never defined in the indexed "
+        rw::emitTo( stdout, "<!-- ripwire external-surface: names CALLED/IMPORTED/EXTENDED but never defined in the indexed "
                      "tree = the stdlib/third-party surface the code depends on (refs=use-sites, calls=of-which-calls). "
                      // P4 (L7): the two defaults, defined where the reader meets them
                      "builtins_excluded= counts the sh BUILTIN rows (echo printf cd exit test …) dropped from names= by default — the interpreter, "
@@ -1776,16 +1783,16 @@ std::optional<int> runExternalSurface( const MainDispatch& d )
         const std::string extNext  = extCut ? rw::nextAttrXml( "--external-surface --offset=" + std::to_string( extPw.end ) ) : std::string();
         const std::string extBuiltinsAttr = builtinsExcluded > 0 ? " builtins_excluded=\"" + std::to_string( builtinsExcluded ) + "\"" : std::string();
         char              extAb[ kPageDisclosureCap ];
-        std::printf( "<external-surface names=\"%zu\"%s%s%s>", names.size(), extBuiltinsAttr.c_str(),
+        rw::emitTo( stdout, "<external-surface names=\"{}\"{}{}{}>", names.size(), extBuiltinsAttr.c_str(),
                      pageDisclosure( extAb, sizeof( extAb ), extShown, names.size(), extPw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
                      extNext.c_str() );
         for( std::size_t i = extPw.begin; i < extPw.end; ++i )
         {
-            std::printf( "<x n=\"%s\" lang=\"%s\" refs=\"%u\" calls=\"%u\"/>",
+            rw::emitTo( stdout, "<x n=\"{}\" lang=\"{}\" refs=\"{}\" calls=\"{}\"/>",
                          ex( names[i].name ).c_str(), langTag( names[i].lang ), names[i].refs, names[i].calls );
         }
-        std::printf( "</external-surface>" );
+        rw::emitTo( stdout, "</external-surface>" );
         return 0;
     }
     return std::nullopt;
@@ -1819,7 +1826,7 @@ std::optional<int> runPath( const MainDispatch& d )
         // 'A'?)"). An empty item is not a selector; say which one is empty before anything is resolved.
         if( srcN.empty() || dstN.empty() )
         {
-            std::fprintf( stderr, "%s\n", rw::emptyListItemMessage( "--path", srcN.empty() ? 1 : 2, "--path=main,rankGraph" ).c_str() );
+            rw::emitTo( stderr, "{}\n", rw::emptyListItemMessage( "--path", srcN.empty() ? 1 : 2, "--path=main,rankGraph" ).c_str() );
             return 1;
         }
 
@@ -1838,7 +1845,7 @@ std::optional<int> runPath( const MainDispatch& d )
             // grammar, so the endpoint that missed gets the shared diagnosis (unindexed path vs wrong file half
             // vs unknown name) instead of a near-miss on the name half alone.
             const std::string_view missing = srcDefs.empty() ? srcN : dstN;
-            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --path endpoint not found: ",
+            rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: --path endpoint not found: ",
                                                                   missing, "--path=" ).c_str() );
             return 1;
         }
@@ -1862,9 +1869,9 @@ std::optional<int> runPath( const MainDispatch& d )
         // H5 (capture-audit 2026-09-04): reachable="0" hops="0" is a zero read off the name-based graph — the
         // same question --verify=calls(A,B) answers `not-established` + counts_floor="1" for. Same marker,
         // same brief sentence, on both transports (mcpverbs.h path_between mirrors this line).
-        std::printf( "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
-                     "graph holds none. %s-->%s", rw::kGraphCountFloorBriefLegend, rw::rootRelPathsLegend( pthSingleRoot ) );
-        std::printf( "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"%s%s",
+        rw::emitTo( stdout, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
+                     "graph holds none. {}-->{}", rw::graphCountFloorBrief( g.unindexedFiles > 0 ).c_str(), rw::rootRelPathsLegend( pthSingleRoot ) );
+        rw::emitTo( stdout, "<path from=\"{}\" to=\"{}\" from_p=\"{}\" to_p=\"{}\" from_defs=\"{}\" to_defs=\"{}\" reachable=\"{}\" hops=\"{}\"{}{}",
                      ex( srcN ).c_str(), ex( dstN ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
                      srcDefs.size(), dstDefs.size(),
                      path.empty() ? 0 : 1, path.empty() ? std::size_t( 0 ) : path.size() - 1, pthRootAttr.c_str(),
@@ -1873,18 +1880,18 @@ std::optional<int> runPath( const MainDispatch& d )
         // undirected and finds the shared-caller join a directed walk can never see.
         if( path.empty() )
         {
-            std::printf( " hint=\"no directed call path — try --connect=%s,%s (undirected: finds a shared caller), or --uses/--impact for non-call references%s\"",
+            rw::emitTo( stdout, " hint=\"no directed call path — try --connect={},{} (undirected: finds a shared caller), or --uses/--impact for non-call references{}\"",
                          ex( srcN ).c_str(), ex( dstN ).c_str(),
                          ( srcDefs.size() > 1 || dstDefs.size() > 1 ) ? "; several defs share these names — qualify as file:name to pick one" : "" );
         }
-        std::printf( ">" );
+        rw::emitTo( stdout, ">" );
         for( NodeId n : path )
         {
             const Symbol&           s  = ing.symbols[n];
             const std::string_view  rp = pthSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], pthRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
-            std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
+            rw::emitTo( stdout, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
         }
-        std::printf( "</path>" );
+        rw::emitTo( stdout, "</path>" );
         return 0;
     }
     return std::nullopt;
@@ -1918,7 +1925,7 @@ std::optional<int> runConnect( const MainDispatch& d )
                 // the question. Same ruling and same sentence as --path's empty endpoint.
                 if( tok.empty() )
                 {
-                    std::fprintf( stderr, "%s\n",
+                    rw::emitTo( stderr, "{}\n",
                                   rw::emptyListItemMessage( "--connect", position, "--connect=parseArgs,serialize,rankGraph" ).c_str() );
                     return 1;
                 }
@@ -1932,7 +1939,7 @@ std::optional<int> runConnect( const MainDispatch& d )
         }
         if( specs.size() < 2 || specs.size() > rw::connectcfg::kMaxTerminals )
         {
-            std::fprintf( stderr, "ripwire: --connect needs 2..%zu comma-separated symbols (got %zu) — for a broader ranked set use --for\n",
+            rw::emitTo( stderr, "ripwire: --connect needs 2..{} comma-separated symbols (got {}) — for a broader ranked set use --for\n",
                           rw::connectcfg::kMaxTerminals, specs.size() );
             return 1;
         }
@@ -1944,7 +1951,7 @@ std::optional<int> runConnect( const MainDispatch& d )
             {
                 // §M7 (W3FIX): resolveFocus is the SAME file:name resolver --around/--lego use, so this arm
                 // gets the same shared diagnosis rather than a bare near-miss about the name half.
-                std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --connect symbol not found: ",
+                rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: --connect symbol not found: ",
                                                                        spec, "--connect=" ).c_str() );
                 return 1;
             }
@@ -2049,20 +2056,20 @@ int emitImpactJson( const ImpactView& v )
     using namespace rw;
     char ipab[ kPageDisclosureCap ];
     const std::size_t shownRows = v.page.end - v.page.begin;
-    std::printf( "{\"of\":\"%s\",\"defs\":%zu,\"reaches\":%zu", jsonStr( v.sym ).c_str(), v.defs, v.reaches );
-    std::printf( ",\"importers\":%zu,\"shown_importers\":%zu,\"importers_capped\":%s",
+    rw::emitTo( stdout, "{{\"of\":\"{}\",\"defs\":{},\"reaches\":{}", jsonStr( v.sym ).c_str(), v.defs, v.reaches );
+    rw::emitTo( stdout, ",\"importers\":{},\"shown_importers\":{},\"importers_capped\":{}",
                  v.imports.files.size(), v.imports.shown, v.imports.capped ? "true" : "false" );
-    std::printf( ",\"radius_tested\":%zu,\"radius_untested\":%zu", v.radiusTested, v.radiusUntested );   // A6
-    if( v.singleRoot ) { std::printf( ",\"root\":\"%s\"", jsonStr( v.rootRaw ).c_str() ); }   // R-E
-    std::printf( "%s%s%s,\"impact\":[",
+    rw::emitTo( stdout, ",\"radius_tested\":{},\"radius_untested\":{}", v.radiusTested, v.radiusUntested );   // A6
+    if( v.singleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( v.rootRaw ).c_str() ); }   // R-E
+    rw::emitTo( stdout, "{}{}{},\"impact\":[",
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                  v.pageLimit, v.pageOffset, true, kJsonPageSyntax ),
                  rw::graphCountFloorAttrJson( v.g ).c_str(),                                                // §H4 §3.4
                  rw::renderDisclosure( v.prD, rw::DiscloseAs::JsonKeys ).c_str() );           // W2-F: ONE keyset
     printJsonSymbolRows( v.ing, v.show, v.page.begin, v.page.end, v.rootPrefix, v.testReach );
-    std::printf( "],\"import_reach\":[" );
+    rw::emitTo( stdout, "],\"import_reach\":[" );
     rw::emitImportRowsJson( stdout, v.ing, v.importPage, v.rootPrefix, v.importLazyPage );
-    std::printf( "]}" );
+    rw::emitTo( stdout, "]}}" );
     return 0;
 }
 
@@ -2077,7 +2084,7 @@ int emitImpactXml( const ImpactView& v )
     const auto        ex        = [ & ]( std::string_view t ) -> std::string { return std::string( escapeXml( t, esc ) ); };
     char              ipab[ kPageDisclosureCap ];
     const std::size_t shownRows = v.page.end - v.page.begin;
-    std::printf( "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s radius_tested=\"%zu\" radius_untested=\"%zu\"%s%s%s%s%s>",
+    rw::emitTo( stdout, "<impact of=\"{}\" defs=\"{}\" reaches=\"{}\"{} radius_tested=\"{}\" radius_untested=\"{}\"{}{}{}{}{}>",
                  ex( v.sym ).c_str(), v.defs, v.reaches, v.imports.xmlAttrs.c_str(), v.radiusTested, v.radiusUntested,
                  std::string( v.rootAttr ).c_str(),
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
@@ -2090,11 +2097,11 @@ int emitImpactXml( const ImpactView& v )
         const std::string_view rp = v.singleRoot ? rw::sarif::rootRelativeUri( v.ing.files[ s.fileId ], v.rootPrefix )
                                                  : std::string_view( v.ing.files[ s.fileId ] );
         // A6: tested="1" only (never a literal 0) — see kTestedRowLegend.
-        std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"%s/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line,
+        rw::emitTo( stdout, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line,
                      rw::isTestedByReach( v.ing, *v.testReach, v.show[i] ) ? " tested=\"1\"" : "" );
     }
     rw::emitImportRowsXml( stdout, v.ing, v.importPage, v.rootPrefix, v.importLazyPage );
-    std::printf( "</impact>" );
+    rw::emitTo( stdout, "</impact>" );
     return 0;
 }
 
@@ -2117,7 +2124,7 @@ std::optional<int> runImpact( const MainDispatch& d )
         const std::vector<NodeId> seeds = resolveAllByNameQualified( ing, cfg.impactSym );
         if( seeds.empty() )
         {
-            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --impact symbol not found: ",
+            rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: --impact symbol not found: ",
                                                                    cfg.impactSym, "--impact=" ).c_str() );   // §B4.2
             return 1;
         }
@@ -2150,11 +2157,11 @@ std::optional<int> runImpact( const MainDispatch& d )
             // twin cannot drift from this wording (the §B4 echo-site class).
             // LB-H: the import-tier clause is the columnar variant under --format=columnar, because that
             // form carries the count without the rows and a reader must be told which shape they hold.
-            std::printf( "%s%s. %s%s%s%s%s%s-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
+            rw::emitTo( stdout, "{}{}. {}{}{}{}{}{}-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
                          cfg.columnar ? rw::kImpactImportTierColumnarLegend : rw::kImpactImportTierLegend,
                          rw::kTestedRowLegend, rw::kImpactTestedPartitionLegend,   // A6
                          rw::kTestedLensBlindSpotLegend,                           // F-02: rides with the partition
-                         rw::graphCountDisclosure().c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
+                         rw::graphCountDisclosure( g.unindexedFiles > 0 ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         }
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note
         // above runImpact; pageDisclosure emits the ` shown= capped=` bytes this verb used to hand-roll
@@ -2200,7 +2207,7 @@ std::optional<int> runMentions( const MainDispatch& d )
         const std::vector<NodeId> defs = resolveAllByNameQualified( ing, cfg.mentionsSym );
         if( defs.empty() )
         {
-            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --mentions symbol not found: ",
+            rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: --mentions symbol not found: ",
                                                                    cfg.mentionsSym, "--mentions=" ).c_str() );
             return 1;
         }
@@ -2221,11 +2228,11 @@ std::optional<int> runMentions( const MainDispatch& d )
 
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
-        std::printf( "<!-- ripwire mentions: markdown FILES that name this symbol in a `backtick` (doc<->code; NOT a call edge). "
+        rw::emitTo( stdout, "<!-- ripwire mentions: markdown FILES that name this symbol in a `backtick` (doc<->code; NOT a call edge). "
                      "docs= is the row count (distinct files); sections= counts the underlying markdown-section mentions "
                      "before file-collapse (docs <= sections). Each row's mentions= is its own section-mention count. "
                      "An @FILE:LINE seed rebinds to the innermost definition enclosing that line — sym= names it, of= echoes the seed as typed. "
-                     "No line locator: the doc edge is stored at file granularity — a fabricated always-1 l= was removed; absent beats fake -->%s", rw::rootRelPathsLegend( mnSingleRoot ) );
+                     "No line locator: the doc edge is stored at file granularity — a fabricated always-1 l= was removed; absent beats fake -->{}", rw::rootRelPathsLegend( mnSingleRoot ) );
         // §P15/§P16: fileRows is deterministic (file path order) and printed unconditionally, no historic
         // display cap — pageWindow directly on cfg.pageLimit/cfg.pageOffset, discloseCap=false so the
         // un-paginated tag stays byte-identical.
@@ -2237,7 +2244,7 @@ std::optional<int> runMentions( const MainDispatch& d )
         const std::string mnSymAttr  = ( !cfg.mentionsSym.empty() && cfg.mentionsSym.front() == '@' )
                                      ? " sym=\"" + ex( ing.symbols[ defs[0] ].name ) + "\""
                                      : std::string();
-        std::printf( "<mentions of=\"%s\"%s defs=\"%zu\" docs=\"%zu\" sections=\"%zu\"%s%s>", ex( cfg.mentionsSym ).c_str(), mnSymAttr.c_str(), defs.size(),
+        rw::emitTo( stdout, "<mentions of=\"{}\"{} defs=\"{}\" docs=\"{}\" sections=\"{}\"{}{}>", ex( cfg.mentionsSym ).c_str(), mnSymAttr.c_str(), defs.size(),
                      fileRows.size(), sectionCount,
                      pageDisclosure( mentionsAb, sizeof( mentionsAb ), mentionsPw.end - mentionsPw.begin, fileRows.size(), mentionsPw.end,
                                      cfg.pageLimit, cfg.pageOffset, false ),
@@ -2246,9 +2253,9 @@ std::optional<int> runMentions( const MainDispatch& d )
         {
             const MentionFileRow&  row = fileRows[ rowIndex ];
             const std::string_view rp  = mnSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ row.fileId ], mnRootPrefix ) : std::string_view( ing.files[ row.fileId ] );
-            std::printf( "<doc p=\"%s\" mentions=\"%zu\"/>", ex( rp ).c_str(), row.mentions );
+            rw::emitTo( stdout, "<doc p=\"{}\" mentions=\"{}\"/>", ex( rp ).c_str(), row.mentions );
         }
-        std::printf( "</mentions>" );
+        rw::emitTo( stdout, "</mentions>" );
         return 0;
     }
     return std::nullopt;
@@ -2276,7 +2283,7 @@ std::optional<int> runAround( const MainDispatch& d )
         const NodeId focus = resolveFocus( ing, cfg.around );
         if( focus == kNoNode )
         {
-            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --around symbol not found: ",
+            rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: --around symbol not found: ",
                                                                    cfg.around, "--around=" ).c_str() );   // §B4.2
             return 1;
         }

@@ -290,7 +290,10 @@ fi
 read -r P10_PART P10_SINGLE P10_INNER <<EOF2
 $( python3 - "$TMP/p10.part" "$TMP/p10.single" <<'PY'
 import re, sys
-def comments( p ): return re.findall( r"<!--.*?-->", open( p, encoding = "utf-8", errors = "replace" ).read(), re.S )
+# H2H-Graft round (2026-09-07): a comment INSIDE a CDATA body is source text the bundle inlined (the corpus shift
+# from that round's commits ranked partition.h's own kPartitionLegend literal into a body: 909 B of "legend" that
+# is not a legend), so the prose count strips CDATA first. The contract is unchanged: legends the READER meets.
+def comments( p ): return re.findall( r"<!--.*?-->", re.sub( r"<!\[CDATA\[.*?\]\]>", "", open( p, encoding = "utf-8", errors = "replace" ).read(), flags = re.S ), re.S )
 def prose( cs ): return sum( len( c ) for c in cs if not ( c.startswith( "<!-- body omitted" ) or c.startswith( "<!-- slice " ) or c == "<!-- truncated -->" ) )
 part, single = comments( sys.argv[1] ), comments( sys.argv[2] )
 inner = sum( 1 for c in part if c.startswith( "<!-- ripwire task bundle for" ) )

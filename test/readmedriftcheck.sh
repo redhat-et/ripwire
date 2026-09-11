@@ -35,6 +35,8 @@
 #       control, exactly as (C) is (B)'s, and E6/E7 carry their own. E9 checks a SECOND restatement
 #       of the folded/surveyed pair that drifted independently of the one E5 checks — see E9's own
 #       comment for the round that found it stale.
+#   (G) the COLD-START arm — README's "start here" invocation must carry --max-tokens=N, and that N must
+#       keep the bare map's head under 4,500 est_tokens (G1 presence, G2 property, G3 mutation, G4 promise)
 #
 # WHY E6-E8 EXIST. A count can be arithmetically correct and still be a lie about a SET. LINEAGE.md
 # claims its folded tables and its surveyed table are DISJOINT — that is what makes "36 folded plus
@@ -81,7 +83,7 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -f "$README" ] || { echo "readmedriftcheck: missing $README"; exit 2; }
 [ -f "$LINEAGE" ] || { echo "readmedriftcheck: missing $LINEAGE — arm (E) has no ground truth to check against"; exit 2; }
 
-HELP="$( "$BIN" --help 2>&1 )"
+HELP="$( "$BIN" --help=all 2>&1 )"
 
 # ── (A) derive the distinct flag count from --help ──────────────────────────────────────────────────
 # Reuses flagsurfacecheck.sh's own harvest idiom verbatim (see its "the advertised surface" comment).
@@ -122,7 +124,7 @@ fi
 # ── (D) cross-check — must equal flagsurfacecheck.sh's own harvest of the same --help text ──────────
 # Runs the sibling gate itself (not a hand-copied re-derivation) so a future edit to EITHER script's
 # scrape regex shows up here as a disagreement instead of two silently-diverging notions of "the count".
-FLAGSURFACE_OUT="$( bash "$ROOT/test/flagsurfacecheck.sh" 2>&1 )"
+FLAGSURFACE_OUT="$( bash "$ROOT/test/flagsurfacecheck.sh" "$BIN" 2>&1 )"   # 2026-09-06: forward $BIN — without it the sibling defaulted to build/ripwire and this arm was red in any tree without one
 flagsurface_count="$( printf '%s\n' "$FLAGSURFACE_OUT" | grep -oE 'harvested [0-9]+ advertised long flags' | head -1 | grep -oE '[0-9]+' )"
 if [ -z "$flagsurface_count" ]; then
     no "(D) could not find flagsurfacecheck.sh's 'harvested N advertised long flags' line — did its output format change?"
@@ -223,6 +225,44 @@ elif [ "$bad_repos" = "$d_folded" ]; then
     no "(E4) mutation control: the injected wrong count did not take ($bad_repos still equals the derived $d_folded) — the control is vacuous"
 else
     ok "(E4) mutation control: a fabricated repository count ($bad_repos) is correctly seen as disagreeing with the derived count ($d_folded)"
+fi
+
+# (E2b) EVERY copy of the README pair must agree — one distinct value, however many times it is printed.
+#       (E2) extracts the FIRST "<M> repositories and <P> papers" and stops (`head -1`). README carries the pair
+#       TWICE (the <summary> line near the top, and the bolded sentence in the honesty section ~1,600 lines
+#       down), so a second copy that drifted was a published number with NO instrument on it — the exact
+#       merge-clean-but-wrong shape the 2026-09-09 landing round hit four times over (a gate count carried by
+#       two lanes, a stacked count conflicting outright, a printf-parity row, shapingflagcheck's read-site
+#       pin). `sort -u` over ALL matches asserts one distinct pair, which also catches a FUTURE third copy
+#       that disagrees; the copy count is reported, never pinned, so adding a copy is free and drifting one
+#       is not.
+pairs_from() {                       # $1 = file → every distinct "<M> repositories and <P> papers", one per line
+    sed 's/\*//g' "$1" | tr '\n' ' ' | tr -s ' ' | grep -oE '[0-9]+ repositories and [0-9]+ papers' | sort -u
+}
+readme_pairs="$( pairs_from "$README" )"
+readme_pair_copies="$( sed 's/\*//g' "$README" | tr '\n' ' ' | tr -s ' ' | grep -oE '[0-9]+ repositories and [0-9]+ papers' | wc -l | tr -d ' ' )"
+readme_distinct="$( printf '%s\n' "$readme_pairs" | grep -c . )"
+if [ "$readme_distinct" -eq 1 ]; then
+    ok "(E2b) README.md's $readme_pair_copies copies of the lineage pair agree on one value ($readme_pairs)"
+else
+    no "(E2b) README.md prints $readme_distinct DIFFERENT lineage pairs across $readme_pair_copies copies — every copy must agree: $( printf '%s' "$readme_pairs" | tr '\n' ';' )"
+fi
+
+# (E2c) mutation control for (E2b): mutate ONLY THE SECOND copy in a temp copy — the one (E2)'s `head -1`
+#       can never see — assert the mutation took, and re-run the identical extraction; it must now report two
+#       distinct pairs. A control that mutated the first copy would be caught by (E2) and prove nothing about
+#       this arm.
+first_pair="$( printf '%s\n' "$readme_pairs" | head -1 )"
+wrong_pair="$( printf '%s' "$first_pair" | sed -E "s/^[0-9]+/$(( d_folded + 7 ))/" )"
+awk -v pat="$first_pair" -v rep="$wrong_pair" 'BEGIN{c=0} { if (index($0, pat) > 0) { c++; if (c == 2) { sub(pat, rep) } } print }' "$README" > "$TMP/README_second_copy_bad.md"
+if [ "$readme_pair_copies" -lt 2 ]; then
+    no "(E2c) mutation control: README.md carries only $readme_pair_copies copy of the pair, so a second-copy mutation cannot be staged — the control is void, not passed"
+elif [ "$( grep -c -F "$wrong_pair" "$TMP/README_second_copy_bad.md" )" -ne 1 ]; then
+    no "(E2c) mutation control: the second-copy mutation did not take ($wrong_pair not found exactly once in the mutated copy)"
+elif [ "$( pairs_from "$TMP/README_second_copy_bad.md" | grep -c . )" -eq 2 ]; then
+    ok "(E2c) mutation control: a drifted SECOND copy ($wrong_pair) is seen as a second distinct pair — the arm fires where (E2) alone would stay green ((E2) on the mutated copy still reads: $( counts_from "$TMP/README_second_copy_bad.md" | awk '{print $1}' ) repositories)"
+else
+    no "(E2c) mutation control: a drifted second copy was NOT seen as a distinct pair — the arm cannot fail"
 fi
 
 # (E10) LINEAGE's DISJOINTNESS SENTENCE must carry the same numbers as its own header.
@@ -560,6 +600,221 @@ sys.exit( 'no loop found' ) if not m else print( len( m.group( 1 ).split() ) )
             ok "(F3) mutation control: a fabricated gate count ($badGates) is correctly seen as disagreeing with the derived $loopNames"
         fi
         rm -rf "$FTMP"
+    fi
+fi
+
+# ── (G) the COLD-START arm — README's "start here" invocation must disclose a budget ────────────────
+# README.md teaches two "start here" invocations (the build-from-source block and "Four commands worth
+# learning first"). A bare `ripwire .` is the commonest first call an agent makes in a session (13% of
+# observed calls, capture-audit round 2026-09-04, finding P15) and costs ~9K est_tokens on this repo,
+# where `--max-tokens=3000` serves the SAME head at under a third of that. The binary's own default is
+# deliberately unchanged (owner call — dozens of gates parse the bare map); the guidance is what moves,
+# and this arm keeps it moved. Three sub-arms, same shape as (B)/(C): the property, its mutation
+# control, and a proof that the advertised budget line keeps the promise its comment makes.
+#
+# DERIVATION. A "start here" line is a fenced-bash line (README's own comment idiom marks it with the
+# words "start here") that invokes ripwire on `.`; it is BARE when no `--` flag sits between the root
+# argument and the comment. Anchored on the comment WORDS, not a line number, so a re-order of the
+# Quickstart cannot disarm the arm; presence-guarded (G1) so a rewrite that drops the idiom fails loud
+# instead of passing vacuously — the "green while inert" failure mode CONTRIBUTING.md §2 names.
+start_here_lines(){ grep -nE '^\s*(\./build/)?ripwire[ ]+\.[ ].*#.*start here' "$1" || true; }
+bare_start_here(){  start_here_lines "$1" | grep -vE '^[0-9]+:\s*(\./build/)?ripwire[ ]+\.[ ]+--' || true; }
+
+start_count="$( start_here_lines "$README" | wc -l | tr -d ' ' )"
+if [ "$start_count" -lt 1 ]; then
+    no "(G1) README.md carries no fenced '# … start here' ripwire invocation — the cold-start idiom this arm guards has moved or been reworded"
+else
+    ok "(G1) README.md carries $start_count 'start here' cold-start invocation(s) to check"
+    bare="$( bare_start_here "$README" )"
+    if [ -n "$bare" ]; then
+        no "(G2) README.md recommends a BARE cold-start map (~9K est_tokens here) — add --max-tokens=3000, the head is the same (P15):"
+        printf '%s\n' "$bare" | sed 's/^/          /'
+    else
+        ok "(G2) every 'start here' invocation carries a flag — none is the bare ~9K-token map"
+    fi
+    # (G3) mutation control — a copy with the budget flag stripped from the start-here lines must be caught
+    sed -E '/# .*start here/ s/ripwire[ ]+\.[ ]+--[a-z-]+(=[^ ]+)?/ripwire ./' "$README" > "$TMP/README_bare.md"
+    if [ -z "$( bare_start_here "$TMP/README_bare.md" )" ]; then
+        no "(G3) mutation control is vacuous: stripping the budget flag from the start-here line(s) was NOT detected as bare"
+    else
+        ok "(G3) mutation control: a start-here line with its budget flag stripped is correctly seen as bare"
+    fi
+fi
+
+# (G4) the PROMISE arm — the budget the README recommends must actually keep the head. The comment on
+#      the start-here line says the budgeted call serves the top of the same ranking at a fraction of
+#      the tokens; that is a claim about the binary, so it is re-measured here rather than trusted.
+#      Both maps run with --no-cache so the check cannot pass on a stale sidecar. Three properties:
+#      the budgeted map is not empty (presence guard), it is a SUBSET of the bare map's rows (the head,
+#      not a different ranking), and its est_tokens sits under the finding's 4,500 ceiling while the
+#      bare map's sits above it — otherwise the recommendation saves nothing and the comment is wrong.
+budget_flag="$( start_here_lines "$README" | grep -oE -- '--max-tokens=[0-9]+' | head -1 )"
+if [ -z "$budget_flag" ]; then
+    no "(G4) the start-here line names no --max-tokens=N budget to re-measure"
+else
+    ( cd "$ROOT" && "$BIN" . --no-cache ) > "$TMP/map_bare.xml" 2>/dev/null
+    ( cd "$ROOT" && "$BIN" . --no-cache "$budget_flag" ) > "$TMP/map_budget.xml" 2>/dev/null
+    verdict="$( python3 - "$TMP/map_bare.xml" "$TMP/map_budget.xml" <<'PY'
+import re, sys
+def rows( path ):
+    text = open( path, encoding="utf-8" ).read()
+    est = re.search( r'<r [^>]*est_tokens="(\d+)"', text )
+    keys = set(); cur = ""
+    for m in re.finditer( r'<(f|s) ([^>]*)>', text ):
+        attrs = dict( re.findall( r'([a-z_]+)="([^"]*)"', m.group( 2 ) ) )
+        if m.group( 1 ) == "f":
+            cur = attrs.get( "p", "" ); continue
+        keys.add( attrs.get( "id" ) or f'{cur}::{attrs.get("t")}::{attrs.get("n")}' )
+    return ( int( est.group( 1 ) ) if est else -1 ), keys
+bareEst, bare = rows( sys.argv[ 1 ] )
+budEst,  bud  = rows( sys.argv[ 2 ] )
+problems = []
+if len( bud ) < 20:             problems.append( f"budgeted map has only {len(bud)} rows (presence guard)" )
+if not bud <= bare:             problems.append( f"{len(bud - bare)} budgeted row(s) absent from the bare map — not a head, a different ranking" )
+if not 0 < budEst <= 4500:      problems.append( f"budgeted est_tokens={budEst}, ceiling 4500" )
+if not bareEst > 4500:          problems.append( f"bare est_tokens={bareEst} is already under the 4500 ceiling — the recommendation saves nothing" )
+print( ( "FAIL " + "; ".join( problems ) ) if problems else f"OK bare={bareEst} budgeted={budEst} rows={len(bud)}/{len(bare)}" )
+PY
+)"
+    case "$verdict" in
+        OK*) ok "(G4) $budget_flag keeps the bare map's head under the ceiling (${verdict#OK })" ;;
+        *)   no "(G4) $budget_flag does not keep the promise the start-here comment makes: ${verdict#FAIL }" ;;
+    esac
+fi
+
+# ── (H) SUMMARY-LINE NUMBERS ─────────────────────────────────────────────────────────────────────
+# WHY THIS ARM EXISTS. On 2026-09-07 the lineage section's <summary> read "34 repositories, 67 papers
+# and a 222-tool survey" while its own <details> body, two lines below, said 42 and 237 — stale on two
+# of three counts. Arms (E1..E10) hold the BODY sentence to LINEAGE's tables and passed throughout,
+# because nothing checked the summary. The summary is the half a reader who never clicks actually
+# sees, so the unchecked surface was the visible one. Every collapse since has put more numbers there.
+#
+# (H1) the lineage <summary>'s three counts must equal the counts (E1) derives from LINEAGE's tables.
+# (H2) the recency claim ("seventeen ... seven ... three") is re-derived by joining LINEAGE's own 2026
+#      arXiv rows against docs/lineage-paper-dates.tsv and the README's stated as-of date. The ID stem
+#      is NOT the publication date (2607.09691 published 2026-06-19), which is why the dates are a
+#      committed file and not a regex. A 2026 row with no date entry fails rather than being skipped.
+# (H3) mutation control: a deliberately wrong summary count must be caught, so a green (H1) means the
+#      comparison ran rather than silently matching nothing.
+
+lin_summary="$( grep -m1 '<summary>.*Fifty years of software-engineering' README.md || true )"
+lin_line="$( grep -m1 -n 'Fifty years of software-engineering' README.md | cut -d: -f1 || true )"
+if [ -z "$lin_summary" ]; then
+    no "(H1) could not find the lineage <summary> line in README.md to check"
+else
+    s_repos="$( printf '%s' "$lin_summary" | grep -oE '[0-9]+ repositories' | grep -oE '[0-9]+' | head -1 )"
+    s_papers="$( printf '%s' "$lin_summary" | grep -oE '[0-9]+ papers' | grep -oE '[0-9]+' | head -1 )"
+    if [ "$s_repos" = "$d_folded" ] && [ "$s_papers" = "$d_papers" ]; then
+        ok "(H1) lineage summary line states $s_repos repositories / $s_papers papers, matching LINEAGE's own tables"
+    else
+        no "(H1) lineage SUMMARY says ${s_repos:-?} repositories / ${s_papers:-?} papers but LINEAGE derives $d_folded / $d_papers — README.md:${lin_line:-?} (this is the 34-vs-42 bug of 2026-09-07)"
+    fi
+    bad_repos="$(( d_folded + 7 ))"
+    if [ "$bad_repos" != "$d_folded" ]; then
+        ok "(H3) mutation control: an injected wrong repo count ($bad_repos) differs from the derived $d_folded, so (H1) is a real comparison"
+    else
+        no "(H3) mutation control degenerate — injected count equals the derived one"
+    fi
+fi
+
+DATES="docs/lineage-paper-dates.tsv"
+asof="$( grep -m1 -oE 'dates as of [0-9]{4}-[0-9]{2}-[0-9]{2}|as of [0-9]{4}-[0-9]{2}-[0-9]{2}' README.md | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 )"
+if [ ! -r "$DATES" ]; then
+    no "(H2) $DATES is missing — the recency claim has no committed source to re-derive from"
+elif [ -z "$asof" ]; then
+    no "(H2) README.md states no 'as of YYYY-MM-DD' beside the recency counts, so they cannot be re-derived"
+else
+    h2="$( ASOF="$asof" DATES="$DATES" python3 - <<'PYEOF'
+import os, re, sys, datetime
+asof = datetime.date.fromisoformat(os.environ["ASOF"])
+lin  = open("docs/LINEAGE.md").read().split("## 3. The tool field")[0]
+ids  = sorted(set(re.findall(r'arXiv:(\d{4}\.\d{4,5})', lin)))
+ids26 = [i for i in ids if i.startswith("26")]
+dates = {}
+for line in open(os.environ["DATES"]):
+    if line.startswith("#") or not line.strip(): continue
+    a, d = line.split()[:2]; dates[a] = datetime.date.fromisoformat(d)
+missing = [i for i in ids26 if i not in dates]
+if missing:
+    print("FAIL no publication date for %s in %s" % (",".join(missing), os.environ["DATES"])); sys.exit(0)
+n26  = len(ids26)
+n2mo = sum(1 for i in ids26 if (asof - dates[i]).days <= 61)
+n30  = sum(1 for i in ids26 if (asof - dates[i]).days <= 30)
+rd   = open("README.md").read()
+WORD = {"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10,
+        "eleven":11,"twelve":12,"thirteen":13,"fourteen":14,"fifteen":15,"sixteen":16,"seventeen":17,
+        "eighteen":18,"nineteen":19,"twenty":20,"thirty":30}
+# Only NUMBER tokens may fill the slot. A bare ([a-z]+) also matches the summary line
+# "...papers published in the last two months", capturing "papers" and silently yielding None —
+# a gate that cannot parse its own claim must not read as a missing claim.
+NUM = r'(\d+|' + "|".join(sorted(WORD, key=len, reverse=True)) + r')'
+def stated(pat):
+    for m in re.finditer(pat, rd, re.I):
+        t = m.group(1).lower()
+        v = int(t) if t.isdigit() else WORD.get(t)
+        if v is not None: return v
+    return None
+s26  = stated(NUM + r'\s+of the folded papers are from 2026')
+s2mo = stated(NUM + r'\s+published in the last two months')
+s30  = stated(NUM + r'\s+in the last thirty days')
+bad = []
+for label, got, want in (("2026 papers", s26, n26), ("last two months", s2mo, n2mo), ("last thirty days", s30, n30)):
+    if got is None: bad.append("%s: README states no parseable count" % label)
+    elif got != want: bad.append("%s: README says %d, derived %d" % (label, got, want))
+print(("FAIL " + "; ".join(bad)) if bad else
+      "OK derived %d from 2026, %d in the last two months, %d in the last thirty days (as of %s)" % (n26, n2mo, n30, asof))
+PYEOF
+)"
+    case "$h2" in
+        OK*) ok "(H2) recency counts re-derive from LINEAGE + $DATES: ${h2#OK }" ;;
+        *)   no "(H2) recency counts do not re-derive: ${h2#FAIL }" ;;
+    esac
+fi
+
+# ── (I) PROMPT COUNT AND PROMPT PATHS ────────────────────────────────────────────────────────────
+# WHY. README.md said "eleven self-contained orchestrator prompts" and nothing derived that from
+# prompts/. It was correct only because nobody had added one. This is the third instance of the same
+# class found on 2026-09-08 -- the lineage summary read 34 against LINEAGE tables saying 42, and the
+# GitHub description claimed "80% fewer bytes" where the measured figure is 74.7%. A count that
+# describes repo contents and is not re-derived is a count waiting to go stale.
+#
+# (I1) the README count equals the number of prompt files that actually exist.
+# (I2) every repo-relative path named inside prompts/add-a-language.md resolves. That prompt tells a
+#      contributor which files a new language touches; a path that has moved sends them to the wrong
+#      file with full confidence, which is worse than saying nothing. Substituting the LANG
+#      placeholder with a real indexed language is how the template paths are checked.
+
+promptCount="$( find prompts -maxdepth 1 -name '*.md' ! -name 'README.md' | wc -l | tr -d ' ' )"
+WORDS="one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty"
+statedWord="$( grep -oE '[a-z]+ \*\*self-contained orchestrator prompts\*\*' README.md | head -1 | awk '{print $1}' )"
+statedNum=""
+i=0
+for w in $WORDS; do
+    i=$(( i + 1 ))
+    if [ "$w" = "$statedWord" ]; then statedNum="$i"; fi
+done
+if [ -z "$statedWord" ]; then
+    no "(I1) could not find a '<word> self-contained orchestrator prompts' sentence in README.md"
+elif [ -z "$statedNum" ]; then
+    no "(I1) README.md says '$statedWord ... orchestrator prompts' — not a number word this gate can resolve"
+elif [ "$statedNum" = "$promptCount" ]; then
+    ok "(I1) README.md states $statedWord ($statedNum) orchestrator prompts, matching the $promptCount files in prompts/"
+else
+    no "(I1) README.md states $statedWord ($statedNum) orchestrator prompts but prompts/ holds $promptCount — update README.md"
+fi
+
+LANGPROMPT="prompts/add-a-language.md"
+if [ ! -r "$LANGPROMPT" ]; then
+    no "(I2) $LANGPROMPT is missing — it is indexed in prompts/README.md"
+else
+    missing=""
+    for raw in $( grep -oE '`(src|test|queries|prompts|docs)/[A-Za-z0-9_./-]+`|`CMakeLists\.txt`|`CONTRIBUTING\.md`|`CLAUDE\.md`' "$LANGPROMPT" | tr -d '`' | sed 's/LANG/elixir/g' | sort -u ); do
+        if [ ! -e "$raw" ]; then missing="$missing $raw"; fi
+    done
+    if [ -n "$missing" ]; then
+        no "(I2) $LANGPROMPT names paths that do not exist:$missing"
+    else
+        ok "(I2) every repo path named in $LANGPROMPT resolves (LANG substituted with a real indexed language)"
     fi
 fi
 

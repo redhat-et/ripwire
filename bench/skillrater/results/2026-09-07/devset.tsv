@@ -1,0 +1,145 @@
+# prompts.tsv — labelled corpus for --eval-skills (skill-ROUTING eval).
+# One row per line: prompt<TAB>expected<TAB>provenance<TAB>split
+#   expected   = comma-separated skill dir names (a PERMITTED SET — several moments legitimately map to
+#                2 skills), or `none` (no ripwire skill should fire).
+#   provenance = router  — wording adapted from a skills/ripwire-router/SKILL.md moment row; the label is
+#                          that row's mapped skill (ground truth = the router's own moment map).
+#                desc    — wording taken from a trigger phrase the target skill's OWN description quotes;
+#                          the label is that skill (ground truth = the skill's stated trigger).
+#                judged  — hand-written paraphrase (author-judged wording, 2026-07-24); the LABEL still
+#                          follows the router's moment map, only the words are new. These are the hard set:
+#                          they share no vocabulary with the descriptions by construction.
+#                neg     — hand-written prompt where NO ripwire skill should fire (author-judged).
+#   split      = test | dev — FROZEN HELD-OUT SPLIT (added 2026-07-25, round r26). The n=128 `test` rows
+#                (43 of them `judged` — the hard, vocabulary-free paraphrase set that first made
+#                bm25-desc's win/loss margin measurable, 24/43) are the committed benchmark and are FROZEN:
+#                do NOT edit a description and re-measure against these SAME rows next round — that is
+#                train-on-test with extra steps. Rows meant for iterating on a description change belong in
+#                a NEW row with split=dev instead. 2026-08-08 (audit H1 follow-up): the dev split gained its
+#                first n=20 rows (16 positive + 4 negative), covering the 2026-08-05..08 routing moments
+#                (nest-profile/essential-complexity trust, cache-lint pack, --skipped-vs---doctor,
+#                opt-remarks triage + its hard negatives) — free to grow or be replaced round to round,
+#                unlike the rows above this comment. --eval-skills enforces this split (parses the column,
+#                refuses an unrecognized value, reports test/dev metrics SEPARATELY with their sizes) —
+#                this paragraph is documentation of that behavior, not the enforcement itself. A row with no
+#                4th column defaults to split=test (back-compat for hand-built ad-hoc TSVs in other gates),
+#                but every row actually in this file states it explicitly so the freeze is visible on read,
+#                not inferred.
+# ripwire-router itself is never a legal label: it is the fallback map, not a routing destination.
+# Keep this file ASCII; the harness truncates prompts at a byte boundary when reporting misses.
+#
+# RELABEL log (2026-08-11, consensus content-gaps round): three rows relabeled on the S1
+# ceiling check's two-rater consensus (blind protocol, sealed key; both raters independently
+# contradicted the stored label — the only 3 such rows of 63 audited misses; record: EVALS.md
+# "consensus content gaps" registration). Labels changed; prompts, provenance, split untouched;
+# no rows added. Pre-relabel corpus lines (the sealed answer_key numbering — this comment block
+# shifts later lines by +14):
+#   line 180 (ceiling id M043) ripwire-orient       -> ripwire-mcp       (setup-health / "is my
+#            ripwire setup broken" is the mcp skill's staleness/health surface, per the owner's
+#            2026-08-11 tool-diagnostics fold-in decision)
+#   line 225 (ceiling id M062) ripwire-change-check -> ripwire-find-bug  (a named failing CI test
+#            with no known cause is a symptom-first localization moment, not a diff review)
+#   line 233 (ceiling id M040) ripwire-fresh-eyes   -> ripwire-find-bug  (feature invisible at
+#            runtime is a wrong-output symptom hunt, not a maintenance-risk pass)
+#
+# ── positives: router-map provenance ────────────────────────────────────────────────────────────────
+# ── positives: skill-description provenance ─────────────────────────────────────────────────────────
+# ── positives: judged paraphrases (author-written wording; labels follow the router map) ────────────
+# ── positives: judged paraphrases, growth pass 2026-07-25 (S5.7.2 follow-up) ─────────────────────────
+# n=16 judged rows resolves +-6pp; grown past 40 so before/after description-rewrite comparisons stop
+# hiding real movement in noise. Same discipline as the rows above: each label follows the ROUTER's own
+# moment-map row (skills/ripwire-router/SKILL.md), the wording is new, and NOTHING here was checked
+# against what the current skill descriptions happen to match (train-on-test would defeat the point).
+# ── negatives: no ripwire skill should fire (author-judged) ─────────────────────────────────────────
+# ── negatives: growth pass 2026-07-25, kept proportional to the judged growth above. General
+# off-topic prompts plus hard negatives that reuse a skill-name WORD in an unrelated everyday sense
+# (orient/navigate/layers/merge/review/quality/efficient/graph/security/reuse/build/perf/test/fresh) -
+# the same discipline as the original 4 hard negatives (talk-abstract review, commit/rebase wording).
+# ── split=dev: tuning rows for the 2026-08-05..08-08 moments (nest-profile/essential-complexity/cache-lint/
+# --skipped/opt-remarks). Per the header discipline above: NOT scored against the frozen split=test floor,
+# reported separately, safe to iterate on next round without touching a single row above this line.
+This function keeps sprouting branches and I cannot tell if it is one tangled mess or just a long plain sequence - what shape is it actually?	ripwire-fresh-eyes	judged	dev
+I already have the humps and deep numbers for this function from a subsystem review - which refactor does that shape actually call for?	ripwire-quality-bar	router	dev
+The profiler says we are memory-bound in this struct-heavy loop - which fields are actually read together versus how the struct is laid out?	ripwire-perf-target	judged	dev
+Before I reach for a heavier profiler pass, are there any obvious bad data-layout patterns a plain lint run would already catch?	ripwire-perf-target	judged	dev
+The map that came back looks short - did some files just get dropped for being too big to index?	ripwire-orient	judged	dev
+I expected this function to show up in the ranked output and it is just not there at all - is my ripwire setup broken?	ripwire-mcp	judged	dev
+I am wrapping up for the day and want to leave a clean summary of this subsystem for whoever picks it up tomorrow.	ripwire-handoff	judged	dev
+Write up the entry points and the design rationale here so a teammate does not have to re-read the whole module cold.	ripwire-handoff	judged	dev
+I have a dozen old feature branches and no idea which ones still hold work that never made it to main.	ripwire-change-check	judged	dev
+Which ref actually still defines this function - I keep finding stale references to it across branches.	ripwire-change-check	judged	dev
+This function's complexity score looks huge, but half of it sits inside an #ifdef for a platform we do not even build - can I trust the number as reported?	ripwire-fresh-eyes	judged	dev
+The complexity number on this function is high, but I cannot tell if it is a genuine tangle or just a long simple sequence I could split by hand - how risky would splitting it actually be?	ripwire-quality-bar	judged	dev
+The compiler just printed "loop not vectorized" for a function I am editing in ripwire's own source - is that actually worth chasing with a code change?	ripwire-opt-remarks	judged	dev
+I am working on ripwire's C++ and clang keeps telling me a call "will not be inlined" - should I change the source or just move on?	ripwire-opt-remarks	judged	dev
+I have a huge pile of optimization-record YAML from a remarks build of this repo - how do I actually triage it instead of reading a gigabyte of output?	ripwire-opt-remarks	judged	dev
+Before I chase this LICM-failed-to-hoist remark with a source change, is a build flag more likely to be the real fix here?	ripwire-opt-remarks	judged	dev
+Our deploy pipeline is slow and the whole team is annoyed about it - where do we even start looking?	none	neg	dev
+This service feels sluggish under load - any general tips for speeding it up?	none	neg	dev
+My teammate left a bunch of code review remarks I still need to address before this merges.	none	neg	dev
+Can you optimize this paragraph so it reads faster for a non-technical audience?	none	neg	dev
+# -- 2026-08-11 growth pass (S1 round): judged rows grown to >=150; split assigned by sha256(prompt) parity
+#    at collection time (deterministic, collector-blind); provenance discipline unchanged (judged/neg only).
+I got compacted mid-task and lost my reasoning - rebuild what I knew about the migration work.	ripwire-orient	judged	dev
+Track down every write to the retryBudget field before I change its type.	ripwire-navigate	judged	dev
+Show me the chain from handleUpload to the S3 client - the actual route the data takes.	ripwire-navigate	judged	dev
+If I rename applyPatch, what breaks downstream?	ripwire-navigate	judged	dev
+Read out flushQueue in full with whatever it calls - I need its contract before touching it.	ripwire-navigate	judged	dev
+Scope this for me: adding rate limiting across the gateway - how big does that change get?	ripwire-before-you-build	judged	dev
+Sketch the boundary for the new caching layer - what should its API expose?	ripwire-before-you-build	judged	dev
+Need a function that slugifies titles - surely something like it exists here already?	ripwire-reuse-first	judged	dev
+Adding a dependency for CSV parsing - is that already vendored somewhere in here?	ripwire-reuse-first	judged	dev
+Give me the house pattern for a visitor class before I author mine.	ripwire-reuse-first	judged	dev
+One-liner to clamp values - just gonna type it out.	ripwire-reuse-first	judged	dev
+I keep pasting whole files into context and the budget is bleeding - better way?	ripwire-efficient	judged	dev
+Wrapping up - run the last-mile debt check before I tell them it is done.	ripwire-quality-bar	judged	dev
+The function I measured has one deep tangle in the middle - which restructuring actually fits that shape?	ripwire-quality-bar	judged	dev
+Before opening the PR, check whether my new code added duplication or dead branches.	ripwire-quality-bar	judged	dev
+Inheriting the billing module from a departed teammate - how rotten is it really?	ripwire-fresh-eyes	judged	dev
+This class smells like it does everything - confirm it is a god object and show the seams.	ripwire-fresh-eyes	judged	dev
+Why is feature X invisible at runtime - is it compiled out behind a flag?	ripwire-find-bug	judged	dev
+Users report the export silently produces an empty archive - zero leads on where it happens.	ripwire-find-bug	judged	dev
+Pasting the sanitizer output here - point me at the guilty frame.	ripwire-find-bug	judged	dev
+It worked on Friday and the demo just crashed - what changed underneath?	ripwire-find-bug	judged	dev
+My last edit broke the pipeline somewhere - work backwards from my working diff.	ripwire-find-bug	judged	dev
+Exception says KeyError: locale but grepping locale gives 400 hits - find the real site.	ripwire-find-bug	judged	dev
+Which handlers in src/api have more than ten callers?	ripwire-graph-query	judged	dev
+Find the classes in the storage file with fan-in over five.	ripwire-graph-query	judged	dev
+Which untested symbols sit within one hop of main?	ripwire-graph-query	judged	dev
+I need functions matching: in the parser dir AND complexity over 15 AND called from outside it.	ripwire-graph-query	judged	dev
+Does anything in the UI reach directly into the database code? It should not.	ripwire-layers	judged	dev
+How tangled are our module boundaries - any cycles I should lose sleep over?	ripwire-layers	judged	dev
+Enforce that utils never imports from app - and make CI hold the line.	ripwire-layers	judged	dev
+If someone touches common.h, how far does the ripple spread through the build?	ripwire-layers	judged	dev
+Which file is the godfile gluing everything together and what would unpicking it cost?	ripwire-layers	judged	dev
+Set this up inside Cursor so the model can query the index without shelling out.	ripwire-mcp	judged	dev
+Which server verbs should the agent lean on during a task instead of the CLI flags?	ripwire-mcp	judged	dev
+The index the agent sees feels stale after my rebase - how does the server refresh?	ripwire-mcp	judged	dev
+The build spewed will-not-inline: cost exceeds threshold on the hot comparator - do I care?	ripwire-opt-remarks	judged	dev
+Run the remarks harness and tell me which missed optimizations sit in hot code.	ripwire-opt-remarks	judged	dev
+-Rpass-missed is noisy on ingest.cpp - triage which remarks deserve a diff.	ripwire-opt-remarks	judged	dev
+Our p99 doubled and the flame profile points at JSON encode - investigate.	ripwire-perf-target	judged	dev
+Counters put the row scanner memory-bound - which fields fight over cache lines?	ripwire-perf-target	judged	dev
+Perf sample attached: most time under lockContention in the pool - map that call surface.	ripwire-perf-target	judged	dev
+Audit the deserializer path - it eats bytes arriving from the network unchecked.	ripwire-security-scan	judged	dev
+A new MCP server config landed in the repo - inspect its shell blocks before I enable it.	ripwire-security-scan	judged	dev
+This endpoint execs user-supplied templates - how exposed are we?	ripwire-security-scan	judged	dev
+The parser package has zero tests - give me a starting point so the effort counts.	ripwire-write-tests	judged	dev
+Add a safety net around applyDiscount before we refactor it - what is its outside contract?	ripwire-write-tests	judged	dev
+Legacy util file, no tests, heavily called - close the gap.	ripwire-write-tests	judged	dev
+Brief the incoming agent on the ingest area - what it does, why, and where it bites.	ripwire-handoff	judged	dev
+I rotate off this codebase Friday - package what my successor needs about the sync engine.	ripwire-handoff	judged	dev
+Prepare a pasteable summary of the auth subsystem for the contractor starting Monday.	ripwire-handoff	judged	dev
+Another team inherits the exporter next sprint - produce the orientation doc.	ripwire-handoff	judged	dev
+Capture the state of the migration tooling so a fresh session continues without me.	ripwire-handoff	judged	dev
+Bump the package version and tag the release.	none	neg	dev
+Write a friendly README intro paragraph for the project.	none	neg	dev
+Convert this YAML config to JSON for me.	none	neg	dev
+Add MIT license headers to the new files.	none	neg	dev
+Rotate the staging API keys and update the secrets store.	none	neg	dev
+Why does my Docker build keep missing the layer cache?	none	neg	dev
+Upgrade the CI runners to the larger instance size.	none	neg	dev
+Spell-check the documentation folder.	none	neg	dev
+Write a SQL query listing users who signed up this month.	none	neg	dev
+Convert the images in assets to WebP.	none	neg	dev
+Pin the GitHub Action to a commit SHA instead of a tag.	none	neg	dev

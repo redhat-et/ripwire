@@ -1335,18 +1335,47 @@ if [ -s "$PRIVPAGE" ]; then
     fi
 fi
 
-# (Y4) AND IT DOES NOT OVER-REACH. The counterpart control: a root with no home pair must survive
-# VERBATIM, leading separator and all. Without this, "strip the home pair" and "mangle every absolute
-# path" pass the same three arms, and the page would lose the one piece of context the label is for.
+# (Y4) AND IT DOES NOT OVER-REACH. The counterpart control: a root with no home pair must keep its
+# identity — its last two segments, with an ellipsis for what was cut. (Until 2026-09-06 this arm demanded
+# the path VERBATIM, which is the leak by another route: a checkout under /Volumes, /srv or /work shipped its
+# whole absolute path into a page whose only use of ROOT is this two-segment label.) Without this arm,
+# "strip the home pair" and "blank every root" pass the same three arms above.
 NOHOME="$TMP/proj"
 mkdir -p "$NOHOME"
 cp "$CORPUS"/* "$NOHOME"/ 2>/dev/null || true
 "$BIN" "$NOHOME" --html --no-cache >"$TMP/nohome.html" 2>/dev/null
 nohomeRoot="$( grep -m1 '^const ROOT = ' "$TMP/nohome.html" 2>/dev/null | sed -E 's/^const ROOT = "(.*)";$/\1/' )"
 case "$nohomeRoot" in
-    */proj) ok "(Y4) a root with no home pair is emitted verbatim ('…${nohomeRoot#${nohomeRoot%/*/*}}') — the strip is scoped to the leaking shape" ;;
-    *)      no "(Y4) a root with no home pair came back as '$nohomeRoot' — the strip is rewriting paths it was not meant to touch" ;;
+    "…/$( basename "$TMP" )/proj") ok "(Y4) a root with no home pair keeps its last two segments ('$nohomeRoot') and nothing above them" ;;
+    */proj) no "(Y4) a root with no home pair came back as '$nohomeRoot' — expected exactly '…/$( basename "$TMP" )/proj' (two segments, ellipsis)" ;;
+    *)      no "(Y4) a root with no home pair came back as '$nohomeRoot' — the strip lost the root's identity" ;;
 esac
+
+# ── (N) the page names what it maps and when (2026-09-06 stranger audit). It was titled "ripwire wiki" whatever
+#     it mapped, captioned its root "~" for "." (a tilde reads as the home directory), and carried no commit or
+#     version — a page handed to a colleague was a map of unknown code as of who knows when. The name is the
+#     root's LAST path segment only; (P1)/(P2) above still hold the path itself out of the page. ──
+NPAGE="$TMP/named.html"
+( cd "$CORPUS" && "$BIN" . --html --no-cache >"$NPAGE" 2>/dev/null )
+NNAME="$( basename "$CORPUS" )"
+grep -q "<title>ripwire — $NNAME</title>" "$NPAGE" \
+    && ok "(N1) <title> names the mapped root: ripwire — $NNAME" \
+    || no "(N1) <title> does not name the root: $( grep -o '<title>[^<]*</title>' "$NPAGE" )"
+grep -q "const ROOT_NAME = \"$NNAME\";" "$NPAGE" \
+    && ok "(N2) const ROOT_NAME carries the root's last segment" \
+    || no "(N2) const ROOT_NAME missing or wrong: $( grep -o 'const ROOT_NAME = "[^"]*"' "$NPAGE" )"
+grep -q 'const VERSION = "[0-9]' "$NPAGE" \
+    && ok "(N3) const VERSION carries the binary version" \
+    || no "(N3) const VERSION missing: $( grep -o 'const VERSION = "[^"]*"' "$NPAGE" )"
+grep -q 'const AT = "' "$NPAGE" \
+    && ok "(N4) const AT (the at= stamp) is emitted" \
+    || no "(N4) const AT missing"
+grep -q 'ripwire wiki' "$NPAGE" \
+    && no "(N5) the page still says 'ripwire wiki' somewhere" \
+    || ok "(N5) 'ripwire wiki' is gone"
+grep -q "return '~'" "$NPAGE" \
+    && no "(N6) rootShort can still render a bare '~' (reads as the home directory)" \
+    || ok "(N6) rootShort never renders a bare '~'"
 
 echo
 echo "  ($mutants mutation controls ran and went red on their mutants)"

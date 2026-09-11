@@ -403,7 +403,7 @@ fi
 # it unattributed reads as a rename of a published metric. This arm pins the credit where the READER meets
 # it — the legend — and pins that the novelty claim stays narrow.
 legend="$( "$BIN" "$FIXTURE" --context-ratio --no-cache 2>/dev/null | head -c 6000 )"
-help="$( "$BIN" --help 2>&1 )"
+help="$( "$BIN" --help=all 2>&1 )"
 # `grep -c` and not `grep -q`: the short-circuiting form closes the pipe under the writer and the SIGPIPE
 # noise lands in the middle of this gate's own output (seen under the sanitizer build, where the writer is
 # slow enough to still be writing). Counting reads the whole input and says nothing.

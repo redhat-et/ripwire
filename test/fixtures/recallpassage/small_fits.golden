@@ -1,0 +1,10 @@
+ripwire recall — "widget cache eviction policy" — 1 relevant of 1 document files, best-first — total=1 shown=1 capped=0 max_tokens=8000 est_tokens=168
+
+━━ small_fits.md  (relevance 0.809) ━━  [sections: 2 of 3, section-granular; whole doc 261 B; lines="1-2,3-6"]
+# Widget cache notes
+
+## Cache eviction policy
+
+The widget cache uses an LRU eviction policy with a TTL fallback for stale widget cache entries.
+
+

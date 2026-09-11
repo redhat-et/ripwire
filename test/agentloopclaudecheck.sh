@@ -74,7 +74,7 @@ else:
 # The four contaminants that live under that directory. Absence of the DIRECTORY is our promise;
 # the flags below are Claude Code's. Belt as well as braces, same posture as the opencode canary.
 for name, what in ( ( "CLAUDE.md", "the global ripwire use-when protocol" ),
-                    ( "skills", "the 18 installed ripwire skills" ),
+                    ( "skills", "the 17 installed ripwire skills" ),
                     ( "projects", "the per-project auto-memory index" ),
                     ( "settings.json", "the SessionStart primer + PreToolUse nudge hooks" ) ):
     if not ( pathlib.Path( cfg ) / name ).exists():

@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // graphlegend.h — the ONE floor marker and the ONE shared legend wording for the five GRAPH-COUNT verbs
 // (--uses, --callers, --callees, --impact, --edit-check).
@@ -33,6 +35,7 @@
 // Gate: test/floormarkcheck.sh (all five verbs, CLI ≡ MCP wording, and the retired absolutism absent).
 
 #include <cstdint>
+#include <utility>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -47,22 +50,53 @@ namespace rw
 // graph.h ambOut) and graph_unresolved= (calls to an in-repo name whose every def was language-filtered,
 // unresolvedOut) — computed by the ONE fold the map header uses, so the pair can never be a second
 // derivation. Gate: test/floormarkcheck.sh arm (11) (value-equal to the map header on the same corpus).
-inline std::string graphGaugeAttrXml( const std::vector<std::uint32_t>& ambOut, const std::vector<std::uint32_t>& unresolvedOut )
+//
+// #66 THIRD GAUGE (2026-09-08, @snrmwg). `graph_unindexed=` joins the pair: the files the crawl could not
+// read AT ALL (the map header's `unindexed=` roll-up, summed to files). It answers the question the other
+// two cannot — a call FROM a file that was never parsed produces no reference, so it can raise neither
+// ambOut nor unresolvedOut, and the reporter's corpus showed both sitting at 0 beside a count="0" whose
+// real cause was 154 unread .astro files. OMITTED AT ZERO, unlike the pair: absence is the confident case
+// ("no file in this corpus went unread"), and a marker printed on every root of every clean corpus is one
+// ONE fold for both dialects: the XML and JSON emitters each summed these inline, which made them a
+// clone pair the moment a third gauge widened both (--quality-delta, 2026-09-08).
+inline std::pair<std::size_t, std::size_t> graphGaugeTotals( const std::vector<std::uint32_t>& ambOut,
+                                                             const std::vector<std::uint32_t>& unresolvedOut ) noexcept
 {
     std::size_t amb = 0, unresolved = 0;
     for( std::uint32_t k : ambOut ) { amb += k; }
     for( std::uint32_t k : unresolvedOut ) { unresolved += k; }
-    char buf[96];
-    std::snprintf( buf, sizeof( buf ), " graph_ambiguous=\"%zu\" graph_unresolved=\"%zu\"", amb, unresolved );
+    return { amb, unresolved };
+}
+
+// an agent correctly learns to skip. Gate: test/blindspotcheck.sh arms (A) value-equality and (B) absence.
+inline std::string graphGaugeAttrXml( const std::vector<std::uint32_t>& ambOut, const std::vector<std::uint32_t>& unresolvedOut,
+                                      std::size_t unindexedFiles = 0 )
+{
+    const auto [amb, unresolved] = graphGaugeTotals( ambOut, unresolvedOut );
+    char buf[160];
+    if( unindexedFiles > 0 )
+    {
+        rw::formatTo( buf, sizeof( buf ), " graph_ambiguous=\"{}\" graph_unresolved=\"{}\" graph_unindexed=\"{}\"", amb, unresolved, unindexedFiles );
+    }
+    else
+    {
+        rw::formatTo( buf, sizeof( buf ), " graph_ambiguous=\"{}\" graph_unresolved=\"{}\"", amb, unresolved );
+    }
     return buf;
 }
-inline std::string graphGaugeAttrJson( const std::vector<std::uint32_t>& ambOut, const std::vector<std::uint32_t>& unresolvedOut )
+inline std::string graphGaugeAttrJson( const std::vector<std::uint32_t>& ambOut, const std::vector<std::uint32_t>& unresolvedOut,
+                                       std::size_t unindexedFiles = 0 )
 {
-    std::size_t amb = 0, unresolved = 0;
-    for( std::uint32_t k : ambOut ) { amb += k; }
-    for( std::uint32_t k : unresolvedOut ) { unresolved += k; }
-    char buf[96];
-    std::snprintf( buf, sizeof( buf ), ",\"graph_ambiguous\":%zu,\"graph_unresolved\":%zu", amb, unresolved );
+    const auto [amb, unresolved] = graphGaugeTotals( ambOut, unresolvedOut );
+    char buf[160];
+    if( unindexedFiles > 0 )
+    {
+        rw::formatTo( buf, sizeof( buf ), ",\"graph_ambiguous\":{},\"graph_unresolved\":{},\"graph_unindexed\":{}", amb, unresolved, unindexedFiles );
+    }
+    else
+    {
+        rw::formatTo( buf, sizeof( buf ), ",\"graph_ambiguous\":{},\"graph_unresolved\":{}", amb, unresolved );
+    }
     return buf;
 }
 
@@ -70,8 +104,7 @@ inline std::string graphGaugeAttrJson( const std::vector<std::uint32_t>& ambOut,
 // test-gate legends, which carry their own floor sentence). Short on purpose: the shared floor essay sits
 // inside test/graphlegendbudgetcheck.sh's byte budget.
 inline constexpr const char* kGraphGaugeLegend =
-    "graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls "
-    "whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=. ";
+    "graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=. ";
 
 // The floor sentence. Shared verbatim by all five verbs on every surface that can carry prose. Written with
 // NO "--" digraph anywhere: this string is spliced into an XML comment, where "--" is a well-formedness
@@ -82,16 +115,26 @@ inline constexpr const char* kGraphGaugeLegend =
 // test/floormarkcheck.sh's exact-phrase anchors ('is a FLOOR, never a total', 'most-vexing-parse'), both of
 // which this string must keep matching verbatim. docs/EVALS.md §5 has the measured before/after byte table.
 inline constexpr const char* kGraphCountFloorLegend =
-    "counts_floor=\"1\" means every count here is a FLOOR, never a total: edges are extracted from source TEXT "
-    "by NAME. Missing: dynamic dispatch (virtual/interface/duck-typed), a most-vexing-parse declaration with no "
-    "call expression, a function-pointer/callback bound to more than one function in scope (reassigned, "
-    "table-indexed, lambda-bound, or address-taken/reference-bound), and a plain-name binding (fp=handler) "
-    "whose variable type is not PROVABLY a function pointer (a same-file typedef/declarator; a HEADER typedef "
-    "is missed; auto/template types are read as unpinned, so KEPT). A macro-generated call site is "
-    "role=\"macro\" only when its name uniquely names an indexed function-like #define (C-family, t=\"macro\"); "
-    "a shared name stays a plain call, an unindexed macro is no edge. Read a zero as \"none found\", never as "
-    "\"none exists\". graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over "
-    "several defs / calls whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=. ";
+    "counts_floor=\"1\" means every count here is a FLOOR, never a total: edges are extracted from source TEXT by NAME. Missing: dynamic dispatch (virtual/interface/duck-typed), a most-vexing-parse declaration with no call expression, a function-pointer/callback bound to more than one function in scope (reassigned, table-indexed, lambda-bound, or address-taken/reference-bound), and a plain-name binding (fp=handler) whose variable type is not PROVABLY a function pointer (a same-file typedef/declarator; a HEADER typedef is missed; auto/template types are read as unpinned, so KEPT). A macro-generated call site is role=\"macro\" only when its name uniquely names an indexed function-like #define (C-family, t=\"macro\"); a shared name stays a plain call, an unindexed macro is no edge. Read a zero as \"none found\", never as \"none exists\". graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=. ";
+
+// ── the #66 third gauge's clause, emitted exactly when graph_unindexed= is ────────────────────────────
+// ONE wording, one emission rule, every dialect. `on` is the emitter's own attribute-present condition
+// (g.unindexedFiles > 0), never a re-derivation of it — the same contract rootRelPathsLegend( bool ) has.
+inline constexpr const char* kGraphUnindexedLegend =
+    "graph_unindexed=N is a third gauge: files no grammar could read (the map header's unindexed=), whose calls "
+    "raise neither gauge above; absent when zero, and so is this sentence. ";
+inline const char* graphUnindexedLegend( bool on ) noexcept { return on ? kGraphUnindexedLegend : ""; }
+
+// The same sentence as its OWN XML comment, for the legends that are one closed <!-- ... --> literal rather
+// than a %s inside one (--connect). Wrapped, never re-spelled: a second copy of this sentence is the drift
+// this header exists to stop, and splicing the bare clause after a closing "-->" is not a wording bug but a
+// WELL-FORMEDNESS one (test/floormarkcheck.sh arm (9) caught exactly that during this change).
+// legendcoveragecheck reads the whole LEADING RUN of comments as the legend, so an adjacent comment IS the
+// legend -- the rule kRootRelPathsLegend already relies on.
+inline std::string graphUnindexedLegendComment( bool on )
+{
+    return on ? std::string( "<!-- " ) + kGraphUnindexedLegend + "-->" : std::string();
+}
 
 // H5 (capture-audit 2026-09-04, lens 7 F-FLOOR-1) — the BRIEF floor clause for the graph-count verbs that
 // are not one of the five above: --path / --connect / --affected / --exercises / --seams / --dead-code /
@@ -101,31 +144,42 @@ inline constexpr const char* kGraphCountFloorLegend =
 // gate matches verbatim ('is a FLOOR, never a total', 'none found') and drops the taxonomy of misses, which
 // the reader can get from any of the five. No "--" digraph (it lands inside XML comments).
 inline constexpr const char* kGraphCountFloorBriefLegend =
-    "counts_floor=\"1\": every graph-derived count here is a FLOOR, never a total. Call edges are extracted from "
-    "source text by NAME, so dynamic dispatch, callbacks, macros and cross-language calls can be missing; read a "
-    "zero as \"none found\", never as \"none exists\". graph_ambiguous=/graph_unresolved= are the whole graph's resolver "
-    "gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header's "
-    "ambiguous=/unresolved=. ";
+    "counts_floor=\"1\": every graph-derived count here is a FLOOR, never a total. Call edges are extracted from source text by NAME, so dynamic dispatch, callbacks, macros and cross-language calls can be missing; read a zero as \"none found\", never as \"none exists\". graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=. ";
+
+// The BRIEF floor legend with the same conditional clause, as ONE string. Returned rather than exposed as a
+// second printf argument so the nine emitters that splice the brief legend keep their format strings exactly
+// as they were - a new %s at nine call sites is nine chances to land the B4 partial fix, and
+// test/printffmtparitycheck.sh would only catch the ones that change bytes.
+inline std::string graphCountFloorBrief( bool hasUnindexed )
+{
+    return std::string( kGraphCountFloorBriefLegend ) + graphUnindexedLegend( hasUnindexed );
+}
 
 // The same two facts as PROSE, for the one graph-count report that is text (--situ's [1] blast radius).
+// The trailing %s is the #66 gauge's prose clause — EMPTY when nothing went unindexed, so this dialect
+// keeps the same omit-at-zero reading as the XML/JSON attribute rather than printing a bare "0" the other
+// two dialects never print. Rendered through graphUnindexedTextClause() below, never spelled at the site.
 inline constexpr const char* kGraphCountFloorTextLine =
-    "        counts_floor=1: every count above is a FLOOR, never a total (call edges are name-based; dynamic dispatch, "
-    "callbacks and macros can be missing) — read a zero as \"none found\", never as \"none exists\"; graph_ambiguous=%zu "
-    "graph_unresolved=%zu is the whole graph's resolver gauge (calls split over several defs / calls whose in-repo defs "
-    "were all language-filtered), the map header's ambiguous=/unresolved=\n"; // printf FORMAT: the two gauge totals
+    "        counts_floor=1: every count above is a FLOOR, never a total (call edges are name-based; dynamic dispatch, callbacks and macros can be missing) — read a zero as \"none found\", never as \"none exists\"; graph_ambiguous={} graph_unresolved={} is the whole graph's resolver gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved={}\n"; // std::format FORMAT: two gauge totals + the clause
+
+// The #66 clause for the prose dialect. "" at zero — the absence IS the confident case, same as the attribute.
+inline std::string graphUnindexedTextClause( std::size_t unindexedFiles )
+{
+    if( unindexedFiles == 0 )
+    {
+        return {};
+    }
+    char buf[256]; // literal ~180 B + one %zu at 20 digits = ~198 B worst case; snprintf truncates regardless
+    rw::formatTo( buf, sizeof( buf ),
+                  "; graph_unindexed={} is a third gauge — files no grammar in this build could read at all (the map header's unindexed=), whose calls produce no reference and so raise neither gauge above",
+                  unindexedFiles );
+    return buf;
+}
 
 // --lego shipped with NO legend at all (a bare <ctx root=><lego>…); one literal for the CLI verb and its MCP
 // twin, so the two dialects cannot describe implementors= differently.
 inline constexpr const char* kLegoLegend =
-    "<!-- ripwire lego: ONE interface/base type — its method contract (<m>, where the language captures it soundly) and every "
-    "implementor (<impl>) the extends/implements edges reach, own-language only; implementors= counts them. "
-    "counts_floor=\"1\": every graph-derived count here is a FLOOR, never a total. Call edges are extracted from "
-    "source text by NAME, so dynamic dispatch, callbacks, macros and cross-language calls can be missing; read a "
-    "zero as \"none found\", never as \"none exists\". graph_ambiguous=/graph_unresolved= are the whole graph's resolver "
-    "gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header's "
-    "ambiguous=/unresolved=. On a NAMED target only, methods=\"0\" caveat=\"not-extracted-for-lang\" means the method "
-    "contract itself is not read soundly for this interface's language (currently C++/ObjC only) — implementors= "
-    "still stands, this caveat is about <m> rows alone. -->";
+    "<!-- ripwire lego: ONE interface/base type — its method contract (<m>, where the language captures it soundly) and every implementor (<impl>) the extends/implements edges reach, own-language only; implementors= counts them. counts_floor=\"1\": every graph-derived count here is a FLOOR, never a total. Call edges are extracted from source text by NAME, so dynamic dispatch, callbacks, macros and cross-language calls can be missing; read a zero as \"none found\", never as \"none exists\". graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=. On a NAMED target only, methods=\"0\" caveat=\"not-extracted-for-lang\" means the method contract itself is not read soundly for this interface's language (currently C++/ObjC only) — implementors= still stands, this caveat is about <m> rows alone. -->";
 
 // The COUNTING-UNIT clause (the L-CS routing item).
 //
@@ -151,20 +205,14 @@ inline constexpr const char* kLegoLegend =
 // is exactly the reader this clause exists for — but the sentence now says outright that the map carries
 // neither this marker nor this clause, so no one can read the disclosure as covering that document.
 inline constexpr const char* kCallCountUnitLegend =
-    "COUNTING UNIT differs by verb: callers, callees, edit-check, graph-query and pr-context counts are "
-    "DISTINCT SYMBOLS (repeated calls from one caller, and calls to two overloads, collapse into ONE row; "
-    "multiplicity survives only in the call graph's edge weight). The reach counts (impact's reaches=, "
-    "pr-context's dependents=) are the size of a transitive reach SET, each symbol counted once. The uses verb "
-    "counts call SITES, one row per occurrence — a larger count there for the same symbol is these units "
-    "agreeing, not disagreeing. The map header's edges= is a unit again different — distinct (caller,callee) "
-    "PAIRS — and that document carries neither this marker nor this clause. ";
+    "COUNTING UNIT differs by verb: callers, callees, edit-check, graph-query and pr-context counts are DISTINCT SYMBOLS (repeated calls from one caller, and calls to two overloads, collapse into ONE row; multiplicity survives only in the call graph's edge weight). The reach counts (impact's reaches=, pr-context's dependents=) are the size of a transitive reach SET, each symbol counted once. The uses verb counts call SITES, one row per occurrence — a larger count there for the same symbol is these units agreeing, not disagreeing. The map header's edges= is a unit again different — distinct (caller,callee) PAIRS — and that document carries neither this marker nor this clause. ";
 
 // The two clauses in the order every legend prints them, so a caller that just wants "the shared tail" cannot
 // get the order wrong. Returned by value (std::string) because the two constants cannot be concatenated at
 // compile time through `const char*`; every call site splices it once, into a legend built at most once per run.
-inline std::string graphCountDisclosure()
+inline std::string graphCountDisclosure( bool hasUnindexed )
 {
-    return std::string( kGraphCountFloorLegend ) + kCallCountUnitLegend;
+    return std::string( kGraphCountFloorLegend ) + graphUnindexedLegend( hasUnindexed ) + kCallCountUnitLegend;
 }
 
 // The root-element attribute, one spelling per dialect. Appended LAST (after the page disclosure and after
@@ -185,8 +233,7 @@ inline constexpr const char* kGraphCountFloorAttrJson = ",\"counts_floor\":true"
 // eighteen hand-edited tails can. Emit it through rootRelPathsLegend( bool ) so the text appears exactly when
 // root= does — a legend that defines an attribute the document did not emit is the mirror-image false claim.
 inline constexpr const char* kRootRelPathsLegend =
-    "<!-- root= on this element is the crawl root every p= below is RELATIVE to (single-root runs only; "
-    "absent => p= is the path ingest itself used, unchanged). -->";
+    "<!-- root= on this element is the crawl root every p= below is RELATIVE to (single-root runs only; absent => p= is the path ingest itself used, unchanged). -->";
 
 // `on` is the emitter's own root=-present condition, never a re-derivation of it.
 inline const char* rootRelPathsLegend( bool on ) noexcept { return on ? kRootRelPathsLegend : ""; }
@@ -202,8 +249,7 @@ inline const char* rootRelPathsLegend( bool on ) noexcept { return on ? kRootRel
 // legends) rather than a third-per-verb drift: both --for dialects share this exact string, the same way
 // they already share every other opener in this file.
 inline constexpr const char* kForRootRelPathsLegendShort =
-    "<!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's "
-    "own path, unchanged). -->";
+    "<!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged). -->";
 
 // M10: the SAME clause, plus an at= mention, for the CLI --for path that also stamps at= (single-root AND
 // a git repo — a single-root run over a non-git directory gets root= alone, kForRootRelPathsLegendShort
@@ -213,8 +259,7 @@ inline constexpr const char* kForRootRelPathsLegendShort =
 // kAtStampLegend sentence every other stamped verb affords is not affordable here; see the comment above
 // kForRootRelPathsLegendShort for the same trade-off's original measurement.
 inline constexpr const char* kForRootRelAtLegendShort =
-    "<!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's "
-    "own path, unchanged); at=this commit(+dirty). -->";
+    "<!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged); at=this commit(+dirty). -->";
 
 // `rootOn` is the emitter's own root=-present condition; `atOn` is its at=-present condition (gitAtAttr
 // non-empty) — never re-derived from each other, since a non-git single-root run has rootOn without atOn.
@@ -238,41 +283,19 @@ inline const char* forRootRelPathsLegendShort( bool rootOn, bool atOn = false ) 
 // widening round proved false and which no extractor can make true — the sentence promised exhaustiveness
 // over a name-based, statically-extracted reference index. Restated as what IS true.
 inline constexpr const char* kUsesLegendOpen =
-    "<!-- ripwire uses: STATICALLY RESOLVABLE use-sites of SYM (role=call|macro|read|write|import|extends|type; "
-    "p=file:line) — a floor, see counts_floor below; that role list is the whole vocabulary. role=\"type\" is a bare "
-    "TYPE mention (a signature, declaration or template argument) with NO call edge — real but not an invocation, so "
-    "it never reaches the call graph, PageRank or the ranked map; captured C/C++/ObjC only, and only a plain leaf "
-    "spelling (a qualified or aliased spelling contributes no row). A base clause is role=\"extends\", never "
-    "role=\"type\"; a type's own DEFINITION is never a use of itself. role=\"macro\" is the call-shaped invocation of "
-    "a name uniquely naming an indexed function-like #define — never role=\"call\" (an expansion is not a plain "
-    "call); a name shared with a non-macro definition stays role=\"call\". Rows are ordered SOURCE first, then "
-    "test/bench, then docs, by path within a tier. A MEMBER selector (Owner.field) is resolved per site instead of "
-    "name-matched — that run's legend says how. "
+    "<!-- ripwire uses: STATICALLY RESOLVABLE use-sites of SYM (role=call|macro|read|write|import|extends|type; p=file:line) — a floor, see counts_floor below; that role list is the whole vocabulary. role=\"type\" is a bare TYPE mention (a signature, declaration or template argument) with NO call edge — real but not an invocation, so it never reaches the call graph, PageRank or the ranked map; captured C/C++/ObjC only, and only a plain leaf spelling (a qualified or aliased spelling contributes no row). A base clause is role=\"extends\", never role=\"type\"; a type's own DEFINITION is never a use of itself. role=\"macro\" is the call-shaped invocation of a name uniquely naming an indexed function-like #define — never role=\"call\" (an expansion is not a plain call); a name shared with a non-macro definition stays role=\"call\". Rows are ordered SOURCE first, then test/bench, then docs, by path within a tier. A MEMBER selector (Owner.field) is resolved per site instead of name-matched — that run's legend says how. "
     // M12: in_id= was emitted (here and on --verify's uses()/unused() <u> rows) with no clause anywhere
     // defining it — a reader had to guess it was the CALLER's canonical id from shape alone. Written to the
     // shortest honest form, deliberately: test/graphlegendbudgetcheck.sh's ratchet exists to stop the shared
     // prose essay re-inflating, and a missing honesty fact is not a licence to spend 370 B stating it.
-    "in_id=canonical id (root-relative path::scope::name) of the symbol the site sits INSIDE; a scope-less "
-    "enclosing symbol degrades to its bare name; absent at file scope. "; // LB-G
+    "in_id=canonical id (root-relative path::scope::name) of the symbol the site sits INSIDE; a scope-less enclosing symbol degrades to its bare name; absent at file scope. "; // LB-G
 
 // The member-variable round (card A3): the clause the `Owner.field` answer appends to the opener above — ONLY
 // on that answer, so the name-matched --uses legend keeps its byte budget (test/graphlegendbudgetcheck.sh) and
 // every attribute the member form emits is defined where the reader meets it (test/legendcoveragecheck.sh's
 // rule). Shared by both surfaces through fielduses.h.
 inline constexpr const char* kUsesFieldLegend =
-    "MEMBER FORM: member=Owner.field is the ONE field this selector resolved to and every row is a use of THAT field, "
-    "resolved per site (never the union of every name-alike): this->f, self.f and a bare f inside the owner's own "
-    "methods pin to the owner; v.f/v->f pins through v's recorded declared type (a typed local or parameter, or a "
-    "member of the enclosing class); otherwise EVERY owner declaring f is a candidate and the row carries owner_candidates=K "
-    "(K candidate owners) — never a silent pin, and no locality tie-break. A chained or unclassifiable receiver "
-    "(a.b.f, g().f) is always ambiguous. pinned=rows resolved to exactly one owner amb_sites=rows carrying owner_candidates= "
-    "owners_of_name=fields sharing this name corpus-wide. role=write is an assignment target, compound assignment "
-    "or an increment/decrement; pass-by-non-const-reference and address-of are NOT claimed as writes. NOT SEEN (each a disclosed "
-    "miss, never a widened definition): a field reached through a copied pointer or reference (no alias analysis), "
-    "a C macro whose expansion is a member access, an inherited field named bare in a derived class's method, a "
-    "field named inside a lambda tree-sitter scopes outside the method, `.c` bodies (the value-use pass is "
-    "C++/ObjC/Python; C struct fields are symbols but their .c use-sites are not indexed), static data members "
-    "(not fields). Served for C, C++ and Python fields; a member selector on any other language refuses by name. ";
+    "MEMBER FORM: member=Owner.field is the ONE field this selector resolved to and every row is a use of THAT field, resolved per site (never the union of every name-alike): this->f, self.f and a bare f inside the owner's own methods pin to the owner; v.f/v->f pins through v's recorded declared type (a typed local or parameter, or a member of the enclosing class); otherwise EVERY owner declaring f is a candidate and the row carries owner_candidates=K (K candidate owners) — never a silent pin, and no locality tie-break. A chained or unclassifiable receiver (a.b.f, g().f) is always ambiguous. pinned=rows resolved to exactly one owner amb_sites=rows carrying owner_candidates= owners_of_name=fields sharing this name corpus-wide. role=write is an assignment target, compound assignment or an increment/decrement; pass-by-non-const-reference and address-of are NOT claimed as writes. NOT SEEN (each a disclosed miss, never a widened definition): a field reached through a copied pointer or reference (no alias analysis), a C macro whose expansion is a member access, an inherited field named bare in a derived class's method, a field named inside a lambda tree-sitter scopes outside the method, `.c` bodies (the value-use pass is C++/ObjC/Python; C struct fields are symbols but their .c use-sites are not indexed), static data members (not fields). Served for C, C++ and Python fields; a member selector on any other language refuses by name. ";
 
 // --impact's opener, identical on both surfaces before this header.
 inline constexpr const char* kImpactLegendOpen =
@@ -299,19 +322,13 @@ inline constexpr const char* kImpactLegendOpen =
 // INSIDE A FUNCTION BODY is still a real dependency — the importer tier must still name the file — but a
 // WEAKER one than a top-level require: it only fires if and when that function actually runs (webpack's
 // own lib/index.js lazy-getter barrel, `get ChunkGraph() { return require("./ChunkGraph"); }`, is the
-// shape that motivated capturing it at all). lazy="1" on a row means EVERY edge from that importer into
-// SYM's def file(s) is one of these function-body calls; lazy="0" means at least one is an ordinary
-// top-level (unconditional) require/import, so the dependency also holds at module-load time.
+// shape that motivated capturing it at all). Ruby joined the lane at parser version 82 (`autoload`, lazy by
+// definition) and 83 (a constant receiver inside a method/lambda/block), so the legend names the closure,
+// not a language. lazy="1" on a row means EVERY edge from that importer into SYM's def file(s) is one of
+// these closure-written directives; lazy="0" means at least one is load-time (an ordinary top-level
+// require/import, a class-body or file-level receiver), so the dependency also holds at load.
 inline constexpr const char* kImpactImportTierLegend =
-    "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM, as "
-    "<f via=\"import\" p=\"…\" lazy=\"0|1\"/> rows after the symbol rows — not call reach, never added to reaches= "
-    "(different units, files vs symbols; an importer may use a different symbol from that file, or none at all). "
-    "DIRECT (one hop), "
-    "never the transitive include cone. lazy=\"1\" (TS/JS only) means every one of that importer's edges into SYM's "
-    "file is a require()/import() written INSIDE A FUNCTION BODY, firing only if and when that function runs; "
-    "lazy=\"0\" means at least one edge is an ordinary top-level require/import (module-load time too). "
-    "shown_importers=/importers_capped= disclose that listing's own truncation (importers= stays the full count); "
-    "limit=/offset= window the symbol rows only. ";
+    "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM, as <f via=\"import\" p=\"…\" lazy=\"0|1\"/> rows after the symbol rows — not call reach, never added to reaches= (different units, files vs symbols; an importer may use a different symbol from that file, or none at all). DIRECT (one hop), never the transitive include cone. lazy=\"1\" means every one of that importer's edges into SYM's file is written INSIDE A CLOSURE (a TS/JS require()/import() in a function body, a Ruby constant receiver in a method/lambda/block, a Ruby autoload), firing only if and when it runs; lazy=\"0\" means at least one edge is load-time. shown_importers=/importers_capped= disclose that listing's own truncation (importers= stays the full count); limit=/offset= window the symbol rows only. ";
 
 // The columnar form re-serializes the SYMBOL rows as parallel arrays and has no row shape for a second
 // listing, so it carries importers= alone. Said in band rather than left as a shape difference a reader
@@ -321,10 +338,7 @@ inline constexpr const char* kImpactImportTierLegend =
 // sibling dialect as "--json" put one there and xmllint caught it on the first run — the flag spelling is
 // written without its dashes here for that reason, not by oversight.
 inline constexpr const char* kImpactImportTierColumnarLegend =
-    "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM. It is not "
-    "call reach and is never added to reaches=. Under format=columnar the import-tier rows are not emitted in this "
-    "form (it re-serializes the symbol rows only) — the count is the whole of it here; the default XML form and the "
-    "json dialect carry the per-file rows. ";
+    "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM. It is not call reach and is never added to reaches=. Under format=columnar the import-tier rows are not emitted in this form (it re-serializes the symbol rows only) — the count is the whole of it here; the default XML form and the json dialect carry the per-file rows. ";
 
 // A6: the same testSymbolForwardReach lens as --safe-delete's radius_tested=/radius_untested= (README:1025),
 // applied here over reaches= instead of safe-delete's impact_reaches= — same measurement, same names, one
@@ -351,9 +365,7 @@ inline constexpr const char* kImpactTestedPartitionLegend =
 // G4: this sits inside an XML comment, so no double hyphen may appear — flag names are written without their
 // dashes here for the same reason kImpactImportTierColumnarLegend states, not by oversight.
 inline constexpr const char* kTestedLensBlindSpotLegend =
-    "BLIND SPOT the test-gate legend also names: only a CALL EDGE from an INDEXED test symbol counts here, so a "
-    "shell or CLI-level test running a built binary as a SUBPROCESS is invisible to it and a repo tested that "
-    "way reads all-untested. Read untested= as no in-process test reaches it, not as no test covers it. ";
+    "BLIND SPOT the test-gate legend also names: only a CALL EDGE from an INDEXED test symbol counts here, so a shell or CLI-level test running a built binary as a SUBPROCESS is invisible to it and a repo tested that way reads all-untested. Read untested= as no in-process test reaches it, not as no test covers it. ";
 
 // A6 (survey card A6, agent-lsp): the tested/untested partition --impact/--callers/--callees rows now carry
 // — ONE definition for the per-row half, shared verbatim across every verb it appears on (a second copy of
@@ -368,14 +380,7 @@ inline constexpr const char* kTestedRowLegend =
 // code path with the edge direction flipped, and giving them two descriptions is precisely the per-verb
 // vocabulary §3.4 forbids.
 inline constexpr const char* kCallHierarchyLegendOpen =
-    "<!-- ripwire callers/callees: the 1-hop call hierarchy read off the call graph — the callers form lists "
-    "symbols that CALL of=; the callees form lists symbols of= itself calls. of= is the selector you passed, "
-    "defs= how many DEFINITIONS it resolved to (rows UNION every def's neighbours), count= the DISTINCT "
-    "neighbour symbols (a floor, per counts_floor=), windowed by limit= and offset=. A neighbour that is an "
-    "indexed function-like #define is a macro row (t=\"macro\", role=\"macro\" on the XML row): the edge "
-    "crosses a macro expansion, not a plain call — rows carry no role= otherwise. Rows are ordered SOURCE "
-    "first, then test/bench, then docs, by path within a tier. hop_tested=/hop_untested= partition "
-    "count= by the tested= lens below (1-hop, never transitive). "; // LB-G
+    "<!-- ripwire callers/callees: the 1-hop call hierarchy read off the call graph — the callers form lists symbols that CALL of=; the callees form lists symbols of= itself calls. of= is the selector you passed, defs= how many DEFINITIONS it resolved to (rows UNION every def's neighbours), count= the DISTINCT neighbour symbols (a floor, per counts_floor=), windowed by limit= and offset=. A neighbour that is an indexed function-like #define is a macro row (t=\"macro\", role=\"macro\" on the XML row): the edge crosses a macro expansion, not a plain call — rows carry no role= otherwise. Rows are ordered SOURCE first, then test/bench, then docs, by path within a tier. hop_tested=/hop_untested= partition count= by the tested= lens below (1-hop, never transitive). "; // LB-G
 
 // V1 fix (verifier finding 3, 2026-08-15): bodyless_defs= is a CALLEES-only attribute — main.cpp's emitter
 // gates it behind `!wantCallers`, so a --callers document can never carry it. It used to sit inside
@@ -384,8 +389,7 @@ inline constexpr const char* kCallHierarchyLegendOpen =
 // still appears verbatim wherever the attribute CAN appear — legendcoveragecheck's callees-side coverage is
 // unaffected; only the callers-side dead weight is gone.
 inline constexpr const char* kCallHierarchyLegendCalleesOnly =
-    "callees-only: bodyless_defs= (when present) counts defs= that are bodyless declarations (header-only or "
-    "forward-declared); zero callees may mean no body to read callees from, not truly no dependencies. ";
+    "callees-only: bodyless_defs= (when present) counts defs= that are bodyless declarations (header-only or forward-declared); zero callees may mean no body to read callees from, not truly no dependencies. ";
 
 // The composed opener, one call for the caller — keeps the wantCallers/callees branch out of
 // runCallHierarchy (already this file's largest dispatcher) rather than adding a ternary at the call site.
@@ -413,11 +417,7 @@ inline std::string callHierarchyLegendOpen( bool wantCallers )
 // --skill-scan, which emits the shown=/capped= pair only on a capped scan. Same rule the callees-only
 // clause above already follows: a call never pays for vocabulary it cannot emit.
 inline constexpr const char* kNeighbourCapLegend =
-    "shown= is how many rows this answer PRINTED and capped=\"1\" says a default display cap dropped some; "
-    "count= above stays the true total, never the page's length. A cut answer also carries total=/has_more=/"
-    "next_offset= so a paging loop can continue from it: raise the default cap with limit=N (offset=M pages); "
-    "on the root, limit=\"0\" means no explicit limit was given and the verb's own default page size shaped "
-    "the window — never a zero-row page. ";
+    "shown= is how many rows this answer PRINTED and capped=\"1\" says a default display cap dropped some; count= above stays the true total, never the page's length. A cut answer also carries total=/has_more=/next_offset= so a paging loop can continue from it: raise the default cap with limit=N (offset=M pages); on the root, limit=\"0\" means no explicit limit was given and the verb's own default page size shaped the window — never a zero-row page. ";
 
 // `active` is pageDisclosure()'s own activity decision, passed in rather than re-derived, so the clause and
 // the attributes it defines can never disagree about whether they are present.

@@ -86,8 +86,18 @@ the *pre-fix diagnosis*; the query-compile column is then cut by the optimizatio
 
 Everything else in this document profiles the **default build**. A clang optimization-remarks pass
 over `src/` (`-DRIPWIRE_OPT_REMARKS=ON`) found the hot phases above are call-bound across a
-translation-unit boundary into tree-sitter's C API — 397 of 636 distinct `inline/NoDefinition`
-remarks in `src/ingest.cpp` name a `ts_*` accessor. Two build options answer that:
+translation-unit boundary into tree-sitter's C API — **831 of 1,437 distinct `inline/NoDefinition`
+sites in the ingest translation unit name a `ts_*` accessor**. Two build options answer that:
+
+> **Corrected 2026-09-10, and the correction matters more than the number.** This paragraph read
+> "397 of 636 … in `src/ingest.cpp`" until today. That pass ran with a `scripts/optremarks.py`
+> `HOT_FILES` list that had gone stale at the ingest split: it named `src/ingest.cpp` and none of the
+> fifteen `src/ingest_*.h` sections the hot phases had moved into. `--hot` was reading **69 of the
+> translation unit's 33,957 first-party remarks — 0.2%** — so *any* ingest conclusion drawn from
+> `--hot` between the split and this date was drawn from a 0.2% sample and should be treated as
+> unverified until re-run. This one was re-run: over the whole TU the finding does not just survive,
+> it grows (831/1,437 sites, up from 397/636), so the LTO and PGO rows below stand — on the re-run,
+> not on the original sample. `test/optremarkshotcheck.sh` now gates the list against the tree.
 
 | build | cold | warm | cost |
 |---|---|---|---|
@@ -1077,3 +1087,583 @@ done
 
 Name the subtree `ext/`, not `vendor/` — the crawl's taxonomy filter skips a directory called `vendor`
 outright, so a corpus built under that name silently measures 1,000 files in both arms.
+
+## 2026-09-09 — the super-linear warm `--grep` floor: one stage, one operation, 143 s of 154 s on llvm-project
+
+LEDGER row, never a gate (the no-perf-budget rule). The correctness gate this round landed is
+`test/chaconecheck.sh`; it asserts sets, never seconds. The question came from the tgrep head-to-head
+(docs/EVALS.md, "Head-to-head vs tgrep"): warm `--grep` cost 40 µs/file at 2,240 and 15,865 files and
+938 µs/file at 182,555, and the decisive experiment named there was "stub the graph build, re-time".
+
+### Instrument and argv
+
+One binary, `cmake -S . -B build_prof -DRIPWIRE_PROFILE=ON` (plain flags otherwise — never Release, `NDEBUG`
+compiles `DEGRADED_PATH_ALERT` and the profiler out). This round first added the scopes the ingest path
+lacked at the grep path's granularity: `buildGraph/3..8` (the resolve loop and the five passes after it),
+the parse pool's worker join and per-thread merge, and the two corpus-wide model post-passes. The
+per-reference split inside the loop (six span timers + volume counters) was a scratch patch, not landed.
+
+Corpora by `rg --files`: `golang/go` `49c3ea64` 15,865 files; `llvm/llvm-project` `2061c237` (shallow)
+182,555 files, 2.9 GB — the same checkouts the head-to-head used. Warm = a dedicated `TMPDIR` per corpus,
+primed once (llvm cold prime: 231 s wall, 367 s user on 18 cores, peak RSS 6.49 GB). Arms interleaved
+`grep, help, callers` × 2 reps; `/usr/bin/time -l` for wall + RSS. 18-core Apple Silicon, 48 GB, shared:
+the 1-minute load ranged 2.3–26 across the session, so read the ratios, not the third digit.
+
+```
+TMPDIR=<per-corpus> build_prof/ripwire <root> --grep=zzqxvnotpresentzz   # the absent literal (full scan)
+TMPDIR=<per-corpus> build_prof/ripwire <root> --callers=main             # same graph, NO text scan
+TMPDIR=<per-corpus> build_prof/ripwire <root> --help-task=zzqxvnotpresentzz   # crawl + cache + model, NO graph
+```
+
+`--help-task` returns before `buildGraph` and uses the same lean cache blob as `--grep`, so it IS the
+"graph stubbed out" arm the head-to-head asked for, with no code change.
+
+### Result — the decisive experiment, then the profile, then the operation
+
+| llvm-project, warm, wall | pre-fix (2 reps) | **post-fix (2 reps)** |
+| --- | --- | --- |
+| `--grep=<absent>` | 159.7 s, 153.9 s | **9.2 s, 9.0 s** |
+| `--callers=main` | 152.9 s, 151.8 s | **8.6 s, 8.7 s** |
+| `--help-task` (no graph) | 3.8 s, 3.4 s | 3.7 s, 3.4 s |
+| default map, `--top-k=100000` | 248 s | **10 s** |
+| peak RSS, any arm | 5.9–6.2 GB | 5.8–5.9 GB |
+
+**The floor is the graph, and only the graph.** The arm that runs the identical crawl, cache load,
+validation and model build but never builds the graph took 3.8 s at the same 5.9 GB RSS. The cache load
+plus per-file validation is 16 µs/file on llvm against 28 µs/file on go — linear, if anything sub-linear.
+The memory-cliff hypothesis is refuted by the same row: RSS is the ingest's reference tables, present with
+and without the graph, and wall did not move with it.
+
+Profile scopes, llvm warm `--grep`, pre-fix (rep 1, 159.7 s wall): `buildGraph` 154.6 s, of which the
+per-reference resolve loop 153.2 s; `ingest: total` 4.7 s (crawl 1.8 incl. the git ignore probe 1.3,
+model 1.2, parse pool 1.2, loadCache 0.4); `grep/1 grepCollect scan` 1.07 s on its own thread. The 2.9 GB
+text scan is 1 s; the answer waited 153 s for the graph.
+
+Inside the loop, `--callers=main` warm, six spans over the SAME 4,546,850 references:
+
+| span (per reference) | calls | total | mean |
+| --- | ---: | ---: | ---: |
+| a: role filter + byName + SCIP/binding tiers | 5,162,745 | 0.11 s | 0.02 µs |
+| b: canonical + L3 + ES import + rules 1/2/2b/2c/3 | 4,546,850 | 1.09 s | 0.24 µs |
+| c: external veto + candidate spray + namespace gate | 4,517,099 | 2.18 s | 0.48 µs |
+| d: tier ladder (same file / same dir / unique) | 4,137,640 | 1.07 s | 0.26 µs |
+| **e: CHA-lite cone + arity + locality** | 2,213,632 | **145.1 s** | **65.5 µs** (max 41.7 ms) |
+| f: amb + confidence + edge emission | 2,213,632 | 0.31 s | 0.14 µs |
+
+The obvious suspect was innocent: the five linear passes over the same-name candidate list visited
+1,226,680,236 candidates (`test` 502 M of them, 7,405 defs; `S` 291 M; `foo` 76 M) and cost 3.3 s in
+total — ~3 ns a visit, sequential ids, the prefetcher's happy case. Splitting span e once more: arity
+0.015 s, the S6-C locality tie-break 0.27 s, **the CHA-lite cone ≈ 143 s.**
+
+**The operation.** For every still-ambiguous call with a known receiver static type, the loop rebuilt the
+type's inheritance cone — two BFS walks over the class-NAME graph, `std::vector<std::string>` with an
+O(n²) `std::find` dedup, capped at 4,096 per walk — and tested each tier candidate by another linear
+`std::find`. Counters: **86,667 cones for 2,984 distinct receiver types** (each rebuilt ~29×), mean cone
+1,075 names (Σ 93,185,627), 1.65 ms a cone. On go the same span is 1.1 ms total — zero cones, because the
+model has no class-inheritance edges there — which is why the floor looked flat until the corpus had deep
+hierarchies. That is the super-linearity: Σ over calls of (cone size)², where both factors grow with the
+tree.
+
+**The fix** (`src/graph.h`, `ChaConeMemo`): one cone per receiver type, computed on first use over class
+names interned to dense ids in byte-sorted order, the walk verbatim (same seed, discovery order and the
+outer-loop-only cap), membership by binary search. Post-fix the loop is 4.5 s; span c's 2.2 s of
+candidate spray is now the largest remaining item and is a different, linear-per-candidate fix. Default
+maps are **byte-identical** pre/post on both corpora (go 10,415,057 B; llvm 21,802,319 B) and the six
+resolver gates plus 18 more pass unchanged. Per file, the warm `--grep` floor is now 50 µs at 182,555
+files against 33 µs at 15,865 — the 24× per-file regression is 1.5×.
+
+### Reproduce
+
+```
+cmake -S . -B build_prof -DRIPWIRE_PROFILE=ON && cmake --build build_prof -j
+git clone --depth 1 https://github.com/llvm/llvm-project <scratch>/llvm-project    # ~2.9 GB, ~182,555 files
+export TMPDIR=<scratch>/tmp-llvm; mkdir -p "$TMPDIR"
+build_prof/ripwire <scratch>/llvm-project --grep=zzqxvnotpresentzz >/dev/null 2>prime.err   # cold prime
+for rep in 1 2; do for arm in --grep=zzqxvnotpresentzz --help-task=zzq --callers=main; do
+  /usr/bin/time -l build_prof/ripwire <scratch>/llvm-project "$arm" >/dev/null 2>"$arm.$rep.err"; done; done
+# the stderr report's "hottest scopes" table is the phase split; buildGraph/3 is the resolve loop
+```
+
+---
+
+## 2026-09-09 — the loop-hoist sweep: going looking for the CHA-cone bug's siblings
+
+LEDGER rows, never a gate (the no-perf-budget rule). The correctness gate this round landed is
+`test/rustanccheck.sh`; it asserts sets, never seconds. The question came from the CHA-lite cone round
+earlier the same day (the section above): **work inside a loop that should not be in there has bitten this
+project several times, so go looking rather than wait for the next one.**
+
+### The method, and why the phase table came first
+
+The cone bug was not found by reading code. It was found by a CONTROL — `--help-task`, which runs the same
+crawl, cache and model work with **no graph build**, at 3.8 s against `--grep`'s 159.7 s on llvm-project.
+This round's equivalent was the phase table itself: `PROFILE_SCOPE` covered 12 of `src/graph.h`'s 259 loops
+and **none of `src/resolve.h`'s 69**, so 35% of `buildGraph`'s warm wall on `go` — 61 ms of 172 — was
+attributed to nothing at all. Instrumenting the gap (`buildGraph/1a..1i` for the prologue, `2a..2i` for the
+side tables, plus the crawl's directory walk and the shadow post-pass's two halves) is what turned the two
+findings below from invisible into obvious. `git diff -w` for that commit is 40 added lines.
+
+The second half of the method was **corpus diversity**, and it mattered more than the instrumentation.
+Every corpus in this file before today was C++, Go, Python or this repository. Adding
+`rust-lang/rust-analyzer` and `rails/rails` moved a phase from 3% of the run to 41% and 26% respectively —
+both findings below live on paths that no previously-measured corpus exercises at all.
+
+### Phase table — warm `--callers=main`, min of 4-5 interleaved runs, `-DRIPWIRE_PROFILE=ON`, AFTER this round
+
+18-core Apple Silicon, 48 GB, shared (1-minute load 3.5-4.5 across the session): read the ratios, not the
+third digit. Corpora by `rg --files`: `golang/go` 15,865; `django/django` 7,036; `rails/rails` 4,923;
+`rust-lang/rust-analyzer` 2,303; this repository 2,263; a private C++ tree 3,248.
+
+| phase (ms) | go | django | rails | rust-analyzer | this repo | private C++ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| **ingest: total** | 252.3 | 154.5 | 102.9 | 52.0 | 61.3 | 103.2 |
+| — crawl (collectSources) | 83.3 | 99.5 | 47.8 | 21.5 | 25.9 | 27.3 |
+| — — git ignore probe (one `git ls-files` fork) | 41.5 | 54.9 | 27.0 | 14.4 | 18.0 | 18.8 |
+| — — directory walk (stat + classify) | 40.8 | 44.0 | 20.4 | 6.7 | 7.7 | — |
+| — build model | 83.3 | 24.1 | 19.0 | 14.2 | 14.5 | 36.3 |
+| — — shadow suppression (r9 post-pass) | 21.7 | 6.2 | — | 3.8 | 3.4 | 9.6 |
+| — loadCache (read + deserialize) | 39.0 | 14.3 | 17.6 | 8.7 | 7.8 | 15.9 |
+| — parse pool (tree-sitter, parallel) | 21.7 | 6.3 | 8.3 | 4.0 | 3.7 | — |
+| **buildGraph: resolve refs + build CSR** | 147.2 | 69.6 | 191.8 | 46.1 | 15.0 | 40.2 |
+| — /3 resolve loop (per reference) | 80.4 | 26.4 | 54.8 | 31.5 | 6.9 | 17.0 |
+| — /2b transitive include closure (resolve.h) | — | — | **61.9** | — | — | — |
+| — /2a precise include adjacency (resolve.h) | 2.6 | 6.5 | **52.8** | 2.1 | 0.6 | 1.8 |
+| — /1a canonId + localityKey (per symbol) | 20.2 | — | 5.0 | 2.6 | 1.2 | 3.9 |
+| — /2e Phase-5 external-veto tables | 3.5 | 10.2 | — | 0.6 | 0.8 | 1.4 |
+
+**The headline shape: after the cone fix there is no single dominant phase left on any corpus — but which
+phase is largest changes completely with the corpus's LANGUAGE.** On `go` it is the resolve loop and the
+crawl; on `rails` it is the two include-resolution functions in `resolve.h` that had no instrumentation at
+all before today; on `rust-analyzer` the resolve loop was 41% of the whole run at one seventh of `go`'s file
+count. A phase table taken on one corpus family is a phase table for that family only.
+
+### F1 — the Rust qualified-call ancestor closure: the same bug, in the function next door
+
+`keepRustQualifiedCandidates` (`src/graph.h`) admits a candidate for `Qual::name()` when the candidate's
+enclosing scope reaches `Qual` through the CHA-lite base-name graph. It answered that with a fresh
+transitive BFS **per candidate per reference** — `std::vector<std::string>` frontier, a full `std::string`
+COPY per queue element, an `O(n²)` `std::find` dedup, capped at 4,096. The cone bug's four properties, all
+four, thirty lines from the memo that fixed them.
+
+It was invisible because no corpus in this file had Rust in it. On `rust-analyzer`, warm: **7,539 active
+calls, 23.9 ms, 47% of the resolve loop and 17% of the whole run.**
+
+The fix computes each scope's capped base closure once, inside `ChaConeMemo` (same interning, same walk,
+same seed and discovery order, same outer-loop-only cap), answered by binary search.
+
+| rust-analyzer, warm, interleaved A,B | before | after |
+| --- | --- | --- |
+| `buildGraph/3` resolve loop (5 reps) | 49.4 48.0 49.8 49.4 48.4 ms | **33.0 32.1 32.2 32.2 32.1 ms** (−34%) |
+| `buildGraph` (5 reps) | 66.0 64.0 66.0 64.9 64.1 ms | **49.6 48.0 47.7 48.2 47.8 ms** (−26%) |
+| `--callers=main` wall, n=21, twice | — | **−13.2% / −13.2% median, −12.7% / −13.4% min** |
+| default map wall, n=21, twice | — | **−10.4% / −11.4% median, −9.5% / −10.3% min** |
+
+Controls (n=15 each): `go` +0.2%, this repository +0.4%, the private C++ tree −0.0% — the guard's active arm
+is Rust-only, so a non-Rust corpus must not move, and does not. Byte-identical on six corpora.
+
+### F2 — `lexicalNormalize` allocated a segment vector before it allocated its answer
+
+`probeUpward` walks from the includer's directory to the tree root; for a non-relative Ruby `require` it
+does that once per load root, and there are five. Each level calls `joinNormalizeLookup` → `lexicalNormalize`,
+which allocated a `std::vector<std::string_view>` (a `reserve( 8 )` heap block) **before** the string it
+returns. On `rails`: 28,555 includes, ~25 probes each, **714,000 calls paying two allocations where one is
+the answer** — 87 ms of a 330 ms warm run, 3.05 µs per include.
+
+Segments now append straight into the returned string; a `..` truncates back to the previous `/`; `rootLen`
+(1 absolute, 0 relative) makes the two degrade rules one comparison; the vector's `segs.back() != ".."`
+guard was invariant-true (only real segments were ever pushed) and went with it.
+
+| corpus, warm | median | min |
+| --- | ---: | ---: |
+| `rails` `buildGraph/2a`, 5 interleaved reps | 74.3-76.0 → **52.6-54.8 ms** | −28%, no rep the other way |
+| `rails --callers=main`, n=21, twice | **−6.0% / −6.2%** | −6.8% / −6.1% |
+| `rails` default map, n=15 | −4.8% | −4.4% |
+| `django --callers=main`, n=15 | −3.0% | −2.0% |
+| `go` / this repo / `rust-analyzer` / private C++, n=15 each | −0.5% −0.5% −0.6% −0.7% | — |
+
+Twelve of twelve run-level statistics favour it and none flips. Equivalence: a differential harness ran the
+old body and the new one over **4,000,000 generated paths**, 0 mismatches, with two mutation controls that
+produce 411,633 and 1,518,327 mismatches. Byte-identical on seven corpora.
+
+### F3 — the shadow-suppression predicate asked its LEAST selective guard first
+
+`suppressShadowedReferences`' per-reference predicate ANDs four pure guards, so their order is a cost
+decision and nothing else. `defNames.find( calleeName )` hits whenever ANY indexed symbol carries the name —
+for a call site, nearly always. `varSpans.find( "<caller>#<name>" )` hits only when THIS caller declares a
+local of exactly that name — rare. The common one ran first, so every reference in the corpus paid a full
+string hash to learn nothing. Swapped: same verdict by construction, byte-identical on four corpora.
+
+`go`, warm, 5 interleaved reps: **30.2 30.1 31.5 31.2 31.5 ms → 22.3 22.8 22.8 28.7 22.6 ms** (≈ −26%, never
+the other way). Whole run, two independent n=21 A/Bs: `--callers=main` −0.8% / −0.1% median, −2.7% / −1.4%
+min; default map −1.0% / −0.5% median. Under ~3,000 files the phase is small enough that the run-level
+number is inside the noise band and both directions appear — **the honest claim is the phase number plus
+"about 1% of a warm run on go"**, not a run-level headline.
+
+### R1 — REFUTED: memoising the bare-name candidate spray. Volume is not cost.
+
+The resolve loop's spray — `for( NodeId c : byName[ name ] )` keeping the language- and role-compatible
+defs — is a pure function of (name, `r.lang`, `r.role`) on a single-root run, recomputed once per
+REFERENCE. Scratch volume counters, warm:
+
+| corpus | refs | name hits | spray visits | namespace gate | tier-1 scan | tier-2 scan |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `go` | 671,200 | 655,306 | 16,401,717 | 16,349,433 | 16,349,433 | 12,850,696 |
+| private C++ | 122,119 | 63,969 | 388,265 | 426,743 | 426,743 | 325,883 |
+| this repo | 58,176 | 20,528 | 469,672 | 449,290 | 449,270 | 60,609 |
+
+The spray plus the gate is **53% of the loop's whole scan volume** on `go`. A memo keyed on
+(byName index, lang, role) into one contiguous arena removes both passes; it was built, gated
+(fill / different key / hit-after-growth, with three mutation controls each reddening exactly its own arm),
+proved byte-identical on four corpora and sanitizer-clean.
+
+**It measured nothing.** Interleaved phase A/B on `go`, `buildGraph/3`: A median 80.3 ms, B median 81.5 ms —
+the memo is *slightly slower*. Whole run, two n=21 A/Bs: −0.8% then −0.1% median, and the min flipped
+positive on the repeat. Suspecting the corpus rather than the fix, a purpose-built **8×-multiplicity tree**
+(14,072 files, eight copies of this repo's source in ONE root, so every name is defined eight times — the
+llvm `test`-defined-7,405-times shape) was measured too: A median 121.3 ms, B median 121.8 ms, whole run
++0.3%. **Reverted.**
+
+Why it cannot win is the same arithmetic the cone round already published for these five passes: ~3 ns a
+visit over sequential ids, the prefetcher's happy case, and most `byName` lists are 1-2 entries held inline
+by `rw::SmallVec<NodeId,2>`. The memo trades that for a 64-bit hash lookup per name hit plus a vector
+assign, which costs about what it saves. **Scan VOLUME is not a proxy for scan COST** — this is D2's lesson
+(docs/OPTREMARKS.md §6) arriving from the profile side instead of the compiler side.
+
+### R2 — REFUTED: the duplicate `canonId` / `localityKey` string, and the opaque call in a loop condition
+
+`buildGraph/1a` computes `canonicalId(...)` and `localityKeyOf(...)` per symbol, and for a SCOPED symbol
+those are the same string built twice (`localityKeyOf`'s own comment says so). Ablation — interleaved, the
+second string simply not written for scoped symbols — gives a real phase win and an irrelevant absolute one:
+this repo 1.28 → 1.05 ms, private C++ 4.20 → 2.94 ms, the 8× tree 6.34 → 4.90 ms, and **`go` 21.5 → 22.7 ms
+(nothing, because Go symbols carry no scope)**. The best case is 1.3 ms of a 160 ms run. Dismissed on the
+arithmetic, exactly as D1 dismisses PageRank: there is no version of this work that shows up in a wall-clock
+number, and the sentinel it would need makes the code read worse.
+
+Same verdict for `for( i = 0; i < ts_node_named_child_count( node ); ++i )` — an opaque C call re-evaluated
+every iteration, which is precisely the class this round hunted. There are **7 such sites** (`ingest_elixir.h`
+×5, `ingest_relations.h` ×2); every one is on an Elixir/Lua/Ruby literal-node path, and every one iterates
+the children of a string or tuple node — one to three of them. Hoisting is correct and unmeasurable.
+
+### Open, with numbers — what this round did NOT fix
+
+1. **`buildGraph/2b` transitive include closure, 61.9 ms on `rails`** — now the single largest phase there.
+   It is an all-pairs reachability: Σ|closure| = **3,994,331** ids over 3,916 files, max closure 1,420, and
+   **38.7 ms of it is `std::sort`** on 3,916 runs averaging 1,020 elements. The `std::unique` after that sort
+   removed **0 duplicates in 3,916 calls** (the epoch stamp already guarantees uniqueness) at 0.98 ms — real,
+   provable, and too small to be worth the churn on its own. The sort exists only to make membership a
+   `binary_search`; at 26% density a bitset would remove it, but the materialisation scan is Θ(F/64) per
+   source and that trade could not be tested at llvm scale this round, so it was not attempted.
+2. **`buildGraph/2a`, still 52.8 ms on `rails` after F2** — the remaining cost is the two allocations
+   `joinNormalizeLookup` still pays per probe (`joined`, then the normalized copy) times ~25 probes per
+   include. Threading a caller-owned scratch buffer through `probeUpward`/`joinNormalizeLookup` is the
+   in-house shape (`Narrower::keyScope` and friends) and is the next thing to try.
+3. **`ingest: crawl (git ignore probe)`, 41.5 ms on `go` and 54.9 ms on `django`** — one `git ls-files` fork,
+   10-20% of a warm run, already documented 2026-09-03. Not loop work; listed because the phase table now
+   makes it the second-largest ingest item on two corpora.
+4. **`ingest/loadCache: deserialize file records`, 37.9 ms on `go`** — allocation-bound (`FileFacts` carries
+   several `std::string`s), not loop-invariant work. Read, dismissed for this round.
+
+### Reproduce
+
+```
+cmake -S . -B build_prof -DRIPWIRE_PROFILE=ON && cmake --build build_prof -j
+git clone --depth 1 https://github.com/rails/rails               <scratch>/rails
+git clone --depth 1 https://github.com/rust-lang/rust-analyzer   <scratch>/rust-analyzer
+export TMPDIR=<scratch>/tmp-rails; mkdir -p "$TMPDIR"
+build_prof/ripwire <scratch>/rails --callers=main >/dev/null 2>prime.err   # warm prime, then re-run
+# the stderr report's "hottest scopes" table is the phase split; take the MIN over >=4 runs, not one run —
+# a single run on this shared box read buildGraph/3 at 111 ms and 80 ms an hour apart, and the difference
+# was the machine, not the code. Every A/B in this section is interleaved A,B,A,B for the same reason.
+```
+
+**llvm-project could not be re-measured this round.** A `--depth 1` clone ran at ~4 MB/min against a 2.9 GB
+pack — about 12 hours — and was abandoned. Every number above is from a corpus that fits the link. The
+consequence is stated rather than buried: R1's refutation is proved up to 15,868 files and an 8×-multiplicity
+14,072-file tree, and not beyond.
+
+## 2026-09-09 — the 2b closure sort goes radix: one site converted, three refused, and the crossover that does not transfer
+
+LEDGER rows, never a gate (the no-perf-budget rule). The correctness gate this round landed is four new
+arms in `test/includeprecisecheck.sh`; they assert sets and invariants, never seconds.
+
+This picks up open item 1 from the loop-hoist sweep above: **`buildGraph/2b` at 61.9 ms on `rails`, of
+which 38.7 ms is `std::sort`**, over 3,916 closures averaging 1,020 ids, with a `std::unique` that removed
+0 duplicates. The owner's read was that those sorts should be radix. They should — at exactly one of the
+four sites that looked like candidates, and the three refusals are the more useful half of the result.
+
+### The recorded crossover is 2048, and honouring it literally would have forfeited the entire win
+
+`src/infra/sortutil.h` already carries a measured threshold — `kRadixThreshold = 2048` — on both
+`radixSortByFromTo` and `radixSortByScoreDescId`. The 2b closures top out at **n = 1,420**. Routed through
+that number, every single one takes the `std::sort` branch and the change does nothing.
+
+That 2048 is not wrong; it describes **different work**. `radixSortByFromTo` moves 12-byte `Edge` RECORDS
+through two full key passes. `radixSortByScoreDescId` pays a `scores[id]` GATHER, up to two `sortKeySmall`
+calls and three O(n) prechecks. 2b sorts a `std::vector<NodeId>` — one 4-byte item, one direct key — and
+because file ids span 12 bits on `rails`, the no-op pass skip in `sortKeySmall` collapses it to **two
+passes, not four**. Re-measured for that shape (`-O2 -mcpu=apple-m1 -ffast-math`, medians of 15 interleaved
+reps, random keys, ratio = radix / std::sort, <1 means radix faster):
+
+| key range | n=32 | n=64 | n=128 | n=256 | n=1024 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 12-bit (`rails`, F=3,916) | 2.31x | 0.86x | 0.47x | 0.21x | 0.18x |
+| 14-bit (`go`, F=15,868) | 1.71x | 0.85x | 0.46x | 0.31x | 0.17x |
+| 16-bit | 1.79x | 0.85x | 0.47x | 0.26x | 0.18x |
+| 20-bit | 2.46x | 1.22x | 0.64x | 0.40x | 0.23x |
+| 32-bit (full) | 4.16x | 1.50x | 0.73x | 0.45x | 0.25x |
+
+The crossover for this shape is **64 for narrow keys and 128 for a full 32-bit range**. The new entry point
+`rw::sortutil::radixSortIdsAscending` takes **128** — the crossover of the widest range measured, so the
+door holds whichever way the id range turns out — and its comment says at length why it is not 2048, so
+nobody unifies the two numbers later.
+
+### The threshold is what makes the change safe, not a nicety
+
+Replaying the REAL captured closures (every `trans[s]` written to disk, replayed against both sorts,
+medians of 15 interleaved reps). "radix always" is the unthresholded conversion:
+
+| corpus | Σ closure | max n | std::sort | radix T=128 | radix ALWAYS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `rails` | 3,994,331 | 1,420 | 42.01 ms | **11.44 ms (0.272x)** | 11.50 ms |
+| private C++ (3,248 files) | 12,066 | 149 | 0.048 ms | 0.042 ms (0.865x) | 0.372 ms (**7.7x worse**) |
+| this repo | 4,182 | 137 | 0.018 ms | 0.017 ms (0.960x) | 0.052 ms (**2.9x worse**) |
+| `django` | 1,578 | 19 | 0.010 ms | 0.010 ms (0.958x) | 0.079 ms (**7.9x worse**) |
+| `rust-analyzer` | 640 | 43 | 0.0045 ms | 0.0044 ms (0.991x) | 0.021 ms (**4.7x worse**) |
+| `go` | 26 | 2 | 0.021 ms | 0.021 ms (1.000x) | 0.021 ms |
+
+An unconditional conversion regresses four of six corpora by 3–8x. With the threshold, no corpus regresses
+and `rails` gains 3.7x. **`rails` is the only corpus where this phase is large at all** — Σ|closure| there is
+331x the next-biggest — which is the loop-hoist round's own lesson repeating: this is a Ruby `require`-graph
+shape, and a C++/Go/Python corpus cannot see it.
+
+### In situ — `buildGraph/2b`, warm, interleaved A,B
+
+| corpus | base | radix | ratio |
+| --- | ---: | ---: | ---: |
+| `rails` (n=7) | min 64.97 med 65.21 ms | **min 34.73 med 35.01 ms** | **0.537** |
+| `go` (n=5) | 0.029 ms | 0.026 ms | (sub-ms, jitter) |
+| `django` (n=5) | 0.048 ms | 0.047 ms | (sub-ms, jitter) |
+| `rust-analyzer` (n=5) | 0.022 ms | 0.023 ms | (sub-ms, jitter) |
+| private C++ (n=5) | 0.289 ms | 0.300 ms | (sub-ms, jitter) |
+| this repo (n=5) | 0.097 ms | 0.101 ms | (sub-ms, jitter) |
+
+The `rails` reps do not overlap: base 65.0 65.0 65.1 65.2 65.3 65.4 65.5, radix 34.7 34.8 34.9 35.0 35.0
+35.2 35.7. `buildGraph` total on `rails`: 223.0 → 186.7 ms median (−16%); `go` 1.000x, private C++ 0.995x.
+
+Whole run, two independent n=21 interleaved A/Bs each:
+
+| run | median | min |
+| --- | ---: | ---: |
+| `rails --callers=main` | **−7.8% / −8.5%** | −8.8% / −9.1% |
+| `rails` default map | **−7.6% / −7.3%** | −8.2% / −7.6% |
+| `go` / `django` / `rust-analyzer` / private C++ / this repo (n=15 each) | −0.6% / −0.5% / −0.8% / +0.1% / +0.5% | all within ±1.7% |
+
+Byte-identical on six corpora × three verbs (default map, `--callers=main`, `--impact=main`): 18
+comparisons, 18 distinct output sizes proving the corpus argument took effect in every one.
+
+### The `std::unique` was dead, and it is dead by construction rather than by luck
+
+`w` is appended to `trans[s]` inside the same branch that stamps `seenEpoch[w] = epoch`, and nothing clears
+that stamp before `++epoch`. A file therefore reaches `trans[s]` **at most once per source** — the set is
+duplicate-free by construction, not by coincidence. Measured: **0 duplicates removed in 24,216 calls across
+six corpora**, costing **0.992 ms on `rails`** (independently reproducing the 0.98 ms recorded above).
+
+It is removed. The sibling `ancestorsReach` in `graph.h` has always relied on this same epoch stamp with no
+dedup, so this makes two walks agree rather than introducing a new assumption. It is NOT replaced by a
+`VERIFY`: in a release build `VERIFY_TEXT` still evaluates its expression before `__builtin_unreachable`, so
+an O(n) uniqueness scan there would reintroduce exactly the cost being removed. The invariant is asserted by
+a gate instead (below), which costs nothing at runtime.
+
+**The sort itself stays, and the reason is non-negotiable #2.** It is not merely making membership a
+`binary_search` — the walk's discovery order is deterministic but is NOT id order, so the sort is what makes
+`trans` a pure function of `adj`, exactly as this function's header comment claims. Radix only changes how
+it is paid for. Attribution of the 30.2 ms: ~30.6 ms is the sort, 0.99 ms is the dedup.
+
+### Three sites REFUSED — and the mechanism is presortedness, not size
+
+`g.implementors[]`, `g.mentions[]` (`graph.h`) and the CHA cone/ancestor closures were the other candidates.
+Measured on captured real data, thresholded exactly as 2b is:
+
+| site | corpus | Σ | max n | duplicates | radix T=128 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `implementors` | `django` | 646,700 | 2,401 | 0 | **2.87x WORSE** |
+| `implementors` | `rails` | 7 | 3 | 0 | 1.00x |
+| `mentions` | `rails` | 73,948 | 79 | 18,732 | 0.89x |
+| `mentions` | private C++ | 51,188 | 116 | 8,622 | 0.93x |
+| `chacone` | `django` | 2,195 | 335 | 100 | 0.83x (of 0.008 ms) |
+| `chaanc` | `rust-analyzer` | 3,326 | 27 | 0 | 0.98x |
+
+`django`'s `implementors` is the interesting refusal: Σ = 646,700 with a max of 2,401 looks like the ideal
+radix case and loses badly. The reason is that **100.0% of its 47,830 records arrive already sorted, with
+zero adjacent descents** — they are built by `push_back` while iterating references in ascending id order.
+`std::sort` detects that in O(n); radix cannot exploit it and pays both passes regardless. `rails`'
+`mentions` is 100.0% presorted for the same reason. 2b is the odd one out at **1.6% presorted** (0.18
+adjacent descents per element) because a graph walk emits in discovery order.
+
+So the rule that decided all four sites is not "how big is n" but **"was this set built by appending in id
+order, or by a scattered walk?"** — and it is now written into `radixSortIdsAscending`'s comment, because it
+is the thing a future caller will get wrong. The remaining sites' absolute costs (0.008–0.6 ms) would not
+have justified the churn even had they won.
+
+**Also noted, not attempted: the two `std::vector<std::string>` sorts** at `graph.h:1886-1887` (the
+`chaUp` / `chaDown` dedup). A string radix is a materially bigger change than an id radix — variable-length
+keys, no fixed pass count, and the whole `sortKeySmall` contract assumes a scalar key — so it was scoped
+out rather than rushed. The number that says it can wait: those two lines live inside `buildGraph/2h`, and
+that WHOLE phase (name-graph construction, interning and both sorts together) measures **0.70 ms on `rails`,
+3.69 ms on `django`, 1.93 ms on `go`, 0.90 ms on `rust-analyzer`, 0.50 ms on a private C++ tree** — a 4.5%
+ceiling on `django`'s `buildGraph` and under 1.2% everywhere else, with the sorts themselves only a fraction
+of it. It never appeared in the loop-hoist phase table because it never cleared the reporting threshold.
+
+### The gate, and the arm that proved the fixture could not see the defect
+
+`test/includeprecisecheck.sh` gained: a postcondition sweep asserting every `trans[f]` is sorted AND
+duplicate-free; a **diamond** fixture (`diamond/top.h` → `left.h`+`right.h` → both → `shared.h`) asserting
+`shared.h` appears exactly once despite two distinct paths; a **cycle** fixture (`cyc/p.h` ↔ `cyc/q.h`); and
+a **400-node synthetic** arm checked element-for-element against an independent mark-and-sweep oracle.
+
+The synthetic arm is not decoration. Two mutation controls were run:
+
+| mutation | fixture arms | large-N arm |
+| --- | --- | --- |
+| delete the sort | **all PASS** | FAIL (sorted + oracle) |
+| append without the epoch guard | uniqueness + diamond FAIL | FAIL (unique + oracle) |
+
+**With the sort deleted entirely, every fixture-based arm stayed green** — the fixture's closures are all
+under ten elements and its discovery order happens to be ascending, so it is a population that cannot
+contain the defect (CONTRIBUTING.md §2, shape 1). Only the scrambled 400-node graph, whose closures exceed
+the 128 threshold and whose discovery order is nowhere near sorted, can fail. It also carries an explicit
+non-vacuity assertion that at least one synthetic closure exceeds the radix threshold, so the radix branch
+cannot silently stop being exercised.
+
+### Reproduce
+
+```
+cmake -S . -B build_prof -DRIPWIRE_PROFILE=ON && cmake --build build_prof -j
+export TMPDIR=<scratch>/tmp-rails; mkdir -p "$TMPDIR"
+build_prof/ripwire <scratch>/rails --callers=main >/dev/null 2>prime.err   # warm prime, then re-run
+# the stderr "hottest scopes" table is the phase split; buildGraph/2b is the closure.
+# Take the MIN over >=5 interleaved A,B reps — this box ran 1-minute loads of 5-19 across the session.
+```
+
+## 2026-09-10 — timsort as a third algorithm: REFUTED on every sort shape here, and vendored anyway as an unrouted tool
+
+LEDGER rows, never a gate (the no-perf-budget rule). No call site changes in this round. The two edits it
+produced are a comment correction in `src/infra/radixSort.h` and, after the measurement was over, a
+deliberate override of its own recommendation — `src/infra/timsort.hpp` is now vendored and named as the
+third entry in `src/infra/fastSort.h`, with **no caller routed to it**. The measurement below is why that
+entry carries the warning it does; read it before you reach for the third algorithm.
+
+Radix cannot exploit existing order, so it loses where the input is already ascending: on `django`'s
+100%-pre-sorted `implementors` it is 3.27x `std::sort`. The obvious follow-up is that a **mostly-sorted
+specialist** should win exactly there. timsort is that specialist, it is header-only and MIT, and it was a
+plausible vendoring candidate on the merits. Measured on the real captured id sets of all three candidate
+sites across seven corpora, it **never won anywhere**.
+
+### Method
+
+Every pre-sort id set at the three candidate sites — `buildGraph/2b`'s `trans[s]` (`resolve.h`),
+`g.implementors[]` and `g.mentions[]` (`graph.h`) — was dumped to disk from an instrumented build
+(`-DRIPWIRE_SORTCAP`, a measurement-only define no shipped build sets; the instrumentation was reverted
+and is not in the tree). The replay harness sorts the REAL captured sets, six arms, **interleaved within
+each rep** so machine load hits every arm equally, medians of 21 reps, `-O2 -mcpu=apple-m1 -ffast-math`.
+Every arm's output is compared against an independently sorted reference on every rep — a wrong answer
+aborts the run, so no timing below belongs to an arm that did not actually sort. The census reproduces the
+radix round's numbers exactly (`django` Σ 646,700 over 47,830 records; `rails` 2b Σ 3,994,331 over 3,916),
+which is what says the two rounds measured the same population.
+
+Records of fewer than two elements are skipped by every arm identically. That matters: `go`'s
+`implementors` has 310,733 records and **not one element to sort**, and an earlier pass that did not skip
+them was reporting 0.40 ms of pure loop-and-call overhead as if it were sorting.
+
+### The table — ratio vs `std::sort`, <1 is faster; rows with Σ ≥ 3,000 only
+
+| site | corpus | Σ | maxN | sorted | desc/el | `std::sort` | radix | **timsort** | pdqsort | `is_sorted`+ | `stable_sort` |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| closure2b | `rails` | 3,994,257 | 1420 | 3.9% | 0.181 | 39.015 ms | **0.28x** | 1.71x | 1.01x | 1.00x | 0.28x |
+| closure2b | `llvm` | 15,806 | 84 | 44.8% | 0.225 | 0.054 ms | 0.90x | 2.00x | 1.09x | 0.93x | 1.01x |
+| closure2b | private C++ tree | 11,838 | 149 | 31.7% | 0.313 | 0.031 ms | 0.99x | 3.27x | 1.29x | 1.05x | 1.63x |
+| closure2b | this repo | 4,000 | 136 | 55.3% | 0.257 | 0.011 ms | 1.00x | 3.42x | 1.05x | 1.05x | 1.35x |
+| implementors | `django` | 645,991 | 2401 | 100.0% | 0.000 | 0.488 ms | 3.27x | 0.58x | 0.73x | **0.35x** | 2.31x |
+| implementors | `llvm` | 16,493 | 383 | 100.0% | 0.000 | 0.016 ms | 1.72x | 0.74x | 0.80x | **0.51x** | 0.92x |
+| implementors | `rust-analyzer` | 3,939 | 437 | 63.7% | 0.180 | 0.013 ms | 1.00x | 2.09x | 0.96x | 1.01x | 1.25x |
+| mentions | `rails` | 71,896 | 79 | 100.0% | 0.000 | 0.096 ms | 0.97x | 0.74x | 0.85x | **0.54x** | 0.65x |
+| mentions | private C++ tree | 49,256 | 116 | 100.0% | 0.000 | 0.054 ms | 1.00x | 0.70x | 0.86x | **0.51x** | 0.65x |
+| mentions | this repo | 5,776 | 43 | 100.0% | 0.000 | 0.005 ms | 1.00x | 0.68x | 0.78x | **0.48x** | 0.72x |
+| mentions | `rust-analyzer` | 5,772 | 30 | 100.0% | 0.000 | 0.005 ms | 0.96x | 0.69x | 0.92x | **0.53x** | 0.86x |
+
+`is_sorted`+ is three lines and no dependency: `if( !std::is_sorted( a, b ) ) { std::sort( a, b ); }`.
+
+**The covariate that decides every row is `desc/el` — adjacent descents per element — not Σ and not maxN.**
+Every row where timsort wins has `desc/el` 0.000; every row where it is the worst arm has `desc/el` ≥ 0.18.
+`rails` 2b at Σ 3,994,257 and this repo's closure at Σ 4,000 are three orders of magnitude apart in size and
+sit within 2x of each other in timsort's ratio column. Size is not the question to ask.
+
+### Why timsort is refused for every existing call site
+
+1. **It is never the best arm on any row.** On the pre-sorted sites it does beat `std::sort` (0.58–0.74x)
+   and it beats radix by up to 5.6x — the prediction was right about the *direction*. But the thing that
+   makes it win there is O(n) run detection, and a bare `std::is_sorted` guard does the same detection in
+   a tighter, vectorisable loop with no run stack and no merge bookkeeping: **0.35x vs timsort's 0.58x on
+   `django`, 0.48–0.54x vs 0.68–0.74x on every `mentions` row.** The three-line guard is ~1.5x faster than
+   the 770-line dependency at the one thing the dependency was wanted for.
+2. **On scattered input it is the worst arm measured** — 1.71x on `rails` 2b, and 2.00–3.42x on the four
+   smaller closure rows. It does not change the radix verdict for `buildGraph/2b`; it **confirms** it.
+   Against radix specifically on that site it is 6.0x slower (64.8 ms vs 10.8 ms).
+3. **Magnitude.** Outside `rails` 2b — the one site radix is wanted for — every site in the table costs **at
+   most 0.5 ms per run**, and `llvm`, the scale rung, is the *smallest* `implementors` of the three big
+   corpora at Σ 16,493 against `django`'s 645,991. The pre-sorted sites are not a place where any algorithm
+   choice is worth a dependency; the whole `is_sorted`+ win on `django` is 0.32 ms of a ~750 ms run.
+
+### The `stable_sort` control, and what it says about the radix win
+
+`std::stable_sort` was added as a control to test whether timsort's loss on scattered input was its
+allocation. It is not — and the control found something worth recording: on `rails` 2b `std::stable_sort`
+is **0.28x, statistically indistinguishable from radix's 0.28x** (11.31 ms vs 11.09 ms). On a synthetic
+control of the same record shape filled with pure random keys the ratio is 0.205x, so this is a property
+of the platform's `std::sort` on ~1,300-element `uint32` arrays and **not** of the closure data; note that
+`pdqsort_branchless` lands at 1.01x, i.e. with `std::sort`, so both quicksort-family arms are on one side
+of a 4x gap and both merge/radix-family arms on the other.
+
+The consequence is not that a radix conversion of that site would be wrong — it is 2% faster than
+`std::stable_sort` and, decisively, it sorts through **caller-owned scratch with no per-call allocation**,
+where `std::stable_sort` heap-allocates on each of the 3,087 calls (G2). But the honest framing of that win
+is *"leaving the quicksort family"*, not *"radix specifically"*, and a future reader comparing only against
+`std::sort` would over-attribute it.
+
+### The vendoring decision, and the version question it forced
+
+The measurement above recommended vendoring nothing. **That recommendation was overridden deliberately, on
+toolbox-parity grounds and not on performance:** the same `fastSort.h` layer is maintained in a private C++
+tree where it documents three algorithms, and the third should be available here rather than absent with no
+explanation. So it is vendored, it is named in the facade, and **every number above is quoted at the point
+of use** — the facade entry, not a document a reader has to go find. Nothing is routed to it.
+
+Vendoring forced a version question the refusal had been able to leave alone, and the answer was not what
+either side of it assumed. Two claims were on the table: that upstream has no caller-owned workspace (so
+vendoring buys nothing for G2), and that the copy in the private tree — whose header reads
+`GFX_TIMSORT_VERSION_MAJOR 3 / MINOR 0 / PATCH 0` — does have one. Both are true, and neither implies what
+it looks like:
+
+- **No upstream release has a workspace.** `timsort_workspace` appears in **none** of the 13 tags at
+  `github.com/timsort/cpp-TimSort`, nor on its default branch. `v3.0.0` and `v3.0.1` both allocate a
+  `TimSort` object, with its `tmp_` and `pending_` vectors, per call.
+- **The version macro is not a version.** Upstream shipped `v3.0.1` **without bumping
+  `GFX_TIMSORT_VERSION_PATCH`** — it still reads `0` at that tag. So a header saying `3 / 0 / 0` is
+  evidence of nothing, and reading it as "this is v3.0.0" is how the two claims came to look contradictory.
+  Content settles it: the private tree's copy carries v3.0.1's single-template-parameter `TimSort`, its
+  `std::iter_difference_t` alias and its fourth `rotateRight` call site. It is **v3.0.1 plus a local
+  patch**, not v3.0.0.
+
+What is vendored here is therefore upstream **v3.0.1 verbatim, plus that same local patch re-derived
+against it**: a `gfx::timsort_workspace<Iterator>` holding the `tmp_` and `pending_` vectors, `TimSort`
+binding references to either the workspace's vectors or its own, and workspace overloads of `gfx::timsort`
+/ `gfx::timmerge`. It is the only reason to prefer this copy over the release, so it is the property
+`test/timsortcheck.sh` gates: after one `reserve_for`, arm E requires **zero** heap allocations across 200
+sorts, and arm F requires the unpatched entry point to allocate on the same input, so the counter cannot
+pass by being dead. A re-vendor from upstream would delete the patch, and E and F both go red.
+
+### One correction this round owes
+
+`src/infra/radixSort.h` carried "the current paths already beat timsort 3-6x on random float keys" — a
+claim that could not be re-measured in this repo, because the routine it named was not vendored here at the
+time. It is now replaced with the two-sided, reproducible statement the table above supports.

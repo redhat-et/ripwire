@@ -44,6 +44,17 @@
 #      OOB write's whole DEFECT CLASS (a per-iteration guard narrower than the widest write in its
 #      loop), caught statically for the next grammar too. The live runtime tripwire for the yaml
 #      patch itself is yamllangcheck's deep-indent arm.
+#   I  narrow-counter family — test/vendorwrapfix, one fixture file per grammar so a reverted patch
+#      turns exactly one file red. TWO independent halves, because the two damage windows differ.
+#      The exit code is the sanitizer tripwire (asan only) and fires at every width >= 256. The
+#      SEMANTIC assertions are what hold on the plain build, where a revert is an exit-0 wrong
+#      answer rather than a crash: four ATX lines that must NOT be minted as headings — buried under
+#      256 spaces, under 64 tabs (advance() charges a tab at tab stop 4), and inside a 256-tilde
+#      fence; the list-continuation line drives the soft-line-ending site for the ABORT arm only,
+#      because it mints no phantom either way. Widths are pinned at
+#      EXACTLY 256 and gated as ==, because the wrong parse only fires while the wrapped value lands
+#      under the threshold tested (N mod 256 in 0..3) — at a round 300 the parse is accidentally
+#      correct and every plain-build assertion here would go inert while asan stayed green.
 #
 # Usage:
 #   test/vendorpatchcheck.sh
@@ -58,6 +69,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 PATCH_DIR="$ROOT/third_party/patches"
 DEPS_DIR="$ROOT/third_party/deps"
 FIX="$ROOT/test/vendorpatchfix"
+WRAPFIX="$ROOT/test/vendorwrapfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
@@ -275,6 +287,87 @@ if [ "$serCount" -ge 5 ]; then
     ok "H: presence — $serCount vendored scanners reference the serialization buffer (sweep is not inert)"
 else
     no "H: presence — only $serCount scanner(s) matched; the family sweep found too little to audit (extraction rot?)"
+fi
+
+# ── I: the narrow-counter family parses (asan flavour: the live tripwire for the four ───────────
+#      markdown/002-counter-saturate + rust|lua|csharp/001-delimiter-count-cast) ────────────────
+# markdown/002 + rust/001 + lua/001 + csharp/001 all fix ONE defect shape: a uint8_t counter in a
+# vendored external scanner incremented past 255, which under G1's -fno-sanitize-recover=all is a
+# hard abort, not a warning. Found 2026-09-09 on rails/guides/source/getting_started.md (a
+# pipe-table row padded to 301 columns); the family sweep that followed found three more grammars
+# carrying it. One fixture file per grammar, so a single reverted patch turns exactly one file red
+# rather than hiding behind a neighbour. Presence first: a fixture whose wide run got reflowed by
+# an editor would let this arm pass while inert, which is the failure mode arms F and G guard the
+# same way.
+# BSD grep caps interval repetition at 255 ("maximum repetition exceeds 255"), so `{256,}` is a
+# hard error on the macOS leg while working fine under GNU grep — measure the runs in awk instead.
+# WIDTHS ARE PINNED AT EXACTLY 256, NOT ">= 256", and that is the whole point of this block. The
+# sanitizer aborts at every value >= 256, but the WRONG PARSE only fires while the wrapped value
+# lands under the threshold the parser tests — N mod 256 in 0..3. Measured on the pre-fix binary:
+#   indent/fence N=255 correct · N=256,257 WRONG at exit 0 · N=300 correct again, by luck
+# So a fixture widened to a round 300 still reddens the asan arm and silently stops asserting
+# anything on the plain build, where it would survive a FULL REVERT of the fix. A `>=` guard would
+# not notice that edit; `==` does.
+wrapPresence=0
+wrapExact(){    # label  file  awk-expression-yielding-the-measured-width  expected
+    got="$( awk "$3" "$WRAPFIX/$2" 2>/dev/null )"
+    if [ -f "$WRAPFIX/$2" ] && [ "${got:-0}" = "$4" ]; then
+        ok "I: presence — $2 $1 is EXACTLY $4 (the wrong-parse window, not merely over the abort threshold)"
+        wrapPresence=$(( wrapPresence + 1 ))
+    else
+        no "I: presence — $2 $1 measured ${got:-none}, expected exactly $4 — widen it and the plain-build assertions below go inert while the asan arm stays green"
+    fi
+}
+wrapExact "buried-heading indent"  widecounters.md '/buriedByTwoFiftySixColumns/ { match( $0, /^ */ ); print RLENGTH; exit }'   256
+wrapExact "tab-buried indent"      widecounters.md '/buriedBySixtyFourTabs/ { n = gsub( /\t/, "" ); print n; exit }'            64
+wrapExact "list-continuation"      widecounters.md '/buriedInListContinuation/ { match( $0, /^ */ ); print RLENGTH; exit }'     256
+wrapExact "tilde fence"            widecounters.md '/^~+$/ { print length( $0 ); exit }'                                        256
+wrapExact "rust raw-string hashes" widehash.rs     '{ while( match( $0, /#+/ ) ) { if( RLENGTH > mx ) { mx = RLENGTH } $0 = substr( $0, RSTART + RLENGTH ) } } END { print mx + 0 }' 256
+wrapExact "lua long-bracket eqs"   widebracket.lua '{ while( match( $0, /=+/ ) ) { if( RLENGTH > mx ) { mx = RLENGTH } $0 = substr( $0, RSTART + RLENGTH ) } } END { print mx + 0 }' 256
+wrapExact "csharp dollar run"      widedollar.cs   '{ while( match( $0, /[$]+/ ) ) { if( RLENGTH > mx ) { mx = RLENGTH } $0 = substr( $0, RSTART + RLENGTH ) } } END { print mx + 0 }' 256
+if [ "$wrapPresence" -eq 7 ]; then
+    ok "I: presence — all 7 widths pinned at exactly 256 across 4 grammars"
+else
+    no "I: presence — only $wrapPresence of 7 widths pinned at exactly 256"
+fi
+if "$BIN" "$WRAPFIX" --no-cache > "$TMP/wrap.xml" 2> "$TMP/wrap.err"; then
+    if ! xmllint --noout "$TMP/wrap.xml" 2>/dev/null; then
+        no "I: narrow-counter fixture ran but produced malformed output"
+    else
+        wrapMissing=""
+        for sym in narrowCounterWrapMarkdown narrow_counter_wrap_rust narrowCounterWrapLua NarrowCounterWrapCsharp; do
+            grep -q "\"$sym\"" "$TMP/wrap.xml" || wrapMissing="$wrapMissing $sym"
+        done
+        if [ -z "$wrapMissing" ]; then
+            ok "I: markdown/rust/lua/csharp wide-counter fixtures parse clean, well-formed, all 4 symbols extracted"
+        else
+            no "I: fixture parsed but these symbols were NOT extracted —$wrapMissing (the parse degraded, not just survived)"
+        fi
+        # THE SEMANTIC HALF, live under BOTH flavours and the only half that survives on the plain
+        # build. Reverting the saturation there is an exit-0 WRONG ANSWER, not a crash, so an
+        # exit-code-only arm goes green straight through a full revert. Each name below is text the
+        # scanner must NOT mint a heading for: three buried under 256 columns (spaces, 64 tabs, and a
+        # and one inside a 256-tilde fence, which upstream never opened because `level` wrapped to 0
+        # and `level >= 3` then failed, leaking the fence body out as live markdown. VERIFIED
+        # NON-VACUOUS: on a fully reverted binary this list is exactly what comes back red.
+        # The fixture's list-continuation line is deliberately NOT in this list. It drives the
+        # soft-line-ending lookahead site (scanner.c:1501), which the leading-indent case never
+        # reaches, but it mints no phantom heading either way — measured absent on the reverted
+        # binary too — so asserting its absence would be a vacuous assertion dressed as coverage.
+        # It earns its place on the ABORT arm above and is claimed for nothing more.
+        wrapPhantom=""
+        for sym in buriedByTwoFiftySixColumns buriedBySixtyFourTabs buriedInsideFence; do
+            grep -q "\"$sym\"" "$TMP/wrap.xml" && wrapPhantom="$wrapPhantom $sym"
+        done
+        if [ -z "$wrapPhantom" ]; then
+            ok "I: no phantom heading — all 3 phantom-capable ATX lines are correctly ABSENT from the map (the counters saturate)"
+        else
+            no "I: PHANTOM HEADINGS extracted —$wrapPhantom. A uint8_t counter wrapped 256 to 0, so an indented code block parsed as a heading and/or a fence never opened (markdown/002-counter-saturate is not in effect). This is an exit-0 wrong answer: the asan arm above cannot see it."
+        fi
+    fi
+else
+    no "I: ripwire ABORTED on the narrow-counter fixture (rc=$?) — markdown/002-counter-saturate or a rust|lua|csharp/001-delimiter-count-cast patch is not in effect"
+    head -3 "$TMP/wrap.err" | sed 's/^/        /'
 fi
 
 # ── verdict ─────────────────────────────────────────────────────────────────────────────────────

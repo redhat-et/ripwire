@@ -163,6 +163,49 @@ inline void radixSortByScoreDescId( std::vector<std::uint32_t>& order, const std
     radixSortByScoreDescId( order, scores, scratch );
 }
 
+// Ascending sort for a dense set of 32-bit ids held in a plain vector, radix above a size
+// threshold and std::sort below it. `scratch` is caller-owned so a loop over many sets pays one growth
+// instead of one allocation per set.
+//
+// THE THRESHOLD IS 128 AND NOT THE 2048 THE TWO ENTRY POINTS BELOW USE. That is deliberate, and the two
+// numbers must not be unified — they describe different work. Measured 2026-09-09 on Apple Silicon,
+// `-O2 -mcpu=apple-m1 -ffast-math`, medians of 15 interleaved reps over random keys, ratio = radix/std
+// (<1 means radix is faster):
+//
+//     key range        n=32    n=64    n=128   n=256   n=1024
+//     12-bit           2.31x   0.86x   0.47x   0.21x   0.18x
+//     16-bit           1.79x   0.85x   0.47x   0.26x   0.18x
+//     32-bit           4.16x   1.50x   0.73x   0.45x   0.25x
+//
+// 2048 is honest for what it guards: `radixSortByFromTo` moves 12-byte Edge RECORDS through two full key
+// passes, and `radixSortByScoreDescId` pays a `scores[id]` GATHER plus up to two sortKeySmall calls and
+// three O(n) prechecks before it sorts anything. This entry point does none of that — one 4-byte item,
+// one direct key, and a narrow id range lets the no-op pass skip collapse it to two passes — so its
+// crossover sits two powers of two lower. 128 is the crossover of the WIDEST key range measured, so the
+// door holds whichever way the id range turns out.
+//
+// ONE CALLER-SHAPE CAVEAT, and it decided two of this round's four candidate sites: radix cannot exploit
+// a pre-sorted input and std::sort can. A set built by appending in ascending-id order arrives ~100%
+// sorted, where std::sort is O(n) and radix still pays both passes — such a caller belongs on the
+// std::sort side of this door at ANY n. Only a set built in scattered discovery order (a graph walk)
+// should come here. bench/PROFILE.md carries the per-site measurements.
+inline void radixSortIdsAscending( std::vector<std::uint32_t>& values, std::vector<std::uint32_t>& scratch )
+{
+    constexpr std::size_t kRadixThreshold = 128;
+    const std::size_t count = values.size();
+    if( count < kRadixThreshold )
+    {
+        std::sort( values.begin(), values.end() );
+        return;
+    }
+
+    if( scratch.size() < count )
+    {
+        scratch.resize( count );
+    }
+    radix::sortKeySmall( values.data(), scratch.data(), count, []( std::uint32_t id ) noexcept { return id; } );
+}
+
 template<class Edge>
 inline bool lessByFromTo( const Edge& a, const Edge& b ) noexcept
 {

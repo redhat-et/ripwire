@@ -96,6 +96,11 @@ QUERY="frobnicate widget cache"
 # --from-trace / --handoff put theirs, M11) and the legend gained the 41-byte clause defining it; over_ceiling="1"
 # rides the root on the ladder's last rung (absent here: no --token-budget). Verified before re-pinning: with
 # est_tokens= and that one clause normalized out, old and new documents are byte-identical (gate: estchargecheck #15 d).
+# RE-PIN 2026-09-07 (head-to-head vs Graft, lane 2): +33 B, the tail legend clause only. The file-grain tail now
+# excludes the files of the sigs rows actually SHOWN instead of the whole 40-candidate surface (a row the byte
+# ladder trimmed used to appear in neither section), and the clause defining the tail says so. Verified before
+# re-pinning: with every comment and est_tokens= normalized out, old and new documents are byte-identical —
+# this fixture's head covers every file, so its tail is unchanged and every ranking byte is unmoved.
 "$BIN" anchorfix --no-cache --for="$QUERY" --no-route >"$TMP/plain_full.xml" 2>/dev/null
 diff -q "$TMP/plain_full.xml" "$ROOT/test/anchorfix/golden_for.xml" >/dev/null \
     && ok "golden-neutral: plain --for --no-route byte-identical to the pre---anchor golden" \

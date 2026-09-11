@@ -16,7 +16,12 @@
 #   (D) name agreement — the document's title names the binary it was generated from, so a renamed
 #       binary with a stale document is red rather than quietly wrong
 #   (E) public-export scrub — EVERY scrub class the generator implements, run over docs/COMMANDS.md
-#       AND every docs/captures/*.md, using the generator's OWN predicates (imported, not restated)
+#       AND every docs/captures/*.md, using the generator's OWN predicates (imported, not restated).
+#       The scanned count is asserted against the tree, so a sweep narrowed to the newest capture is
+#       red rather than vacuously green: this is the ONLY arm in the suite that reads an OLD
+#       capture, and a leak in one is otherwise invisible to everything. A generator predicate that
+#       is not listed here is enforced only when the generator WRITES (assert_scrubbed) — never
+#       against the captures already on disk, which is where the shipped leak actually lived
 #   (F) MUTATION CONTROL for (E) — each class must fire on a synthetic offender, and real output that
 #       merely LOOKS like a leak (--hotspots `top=`, community `sym@file.ext` labels, --layout
 #       `owner=`) must survive untouched: an over-broad scrub corrupts output, which is worse than
@@ -31,6 +36,9 @@
 #       once (both derive from parse_help), so the sets stay equal and (B) stays green while the flag
 #       is absent from the shipped document. This arm imports parse_help and judges it directly,
 #       against a pinned ledger of the losses that already exist plus synthetic seam fixtures
+#   (I) SMELL-NAME FINDABILITY — the help entries that measure Fowler's Shotgun Surgery must NAME it,
+#       because COMMANDS.md is generated from --help and a hand-edit of the document alone is undone
+#       by the next regen; a control strips the name from a copy of the same text and must go red
 #
 # Usage:  bash test/docscommandscheck.sh      [RIPWIRE_BIN=path/to/binary]
 # Exit:   0 = clean · 1 = at least one arm failed · 2 = usage / missing prerequisite
@@ -131,6 +139,7 @@ CLASSES = (
     ( 'temp/scratch path',         lambda ln: gen.TMP_PATH.search( ln ) ),
     ( 'internal coordinate shape', lambda ln: gen.COORD.search( ln ) ),
     ( 'internal document name',    lambda ln: gen.INTERNAL_DOC.search( ln ) ),
+    ( 'internal document heading', lambda ln: gen.unredacted_internal_row( ln ) ),
     ( 'email address',             lambda ln: gen.find_address( ln ) ),
 )
 
@@ -147,15 +156,22 @@ for path in targets:
 PY
 python3 "$TMP/scrubarm.py" "$ROOT" > "$TMP/scrub" 2>&1
 scannedCount="$( grep '^SCANNED ' "$TMP/scrub" | awk '{print $2}' )"
+# The count is checked against the TREE, not against a floor. `showcasecapturecheck.sh` and
+# `argvdiffcheck.sh` both scope themselves to the NEWEST capture deliberately (they judge the
+# current capture's coverage against the current --help), which leaves this the only arm that reads
+# an old capture at all — so "at least two documents" was the wrong assertion: it stays green for a
+# sweep narrowed to the newest, which is exactly how a leak survives in an old, untouched file.
+captureCount="$( ls -1 "$ROOT"/docs/captures/*.md 2>/dev/null | wc -l | tr -d ' ' )"
+expectedScan="$(( captureCount + 1 ))"
 if grep -q '^IMPORT_FAIL' "$TMP/scrub"; then
     no "(E) could not import the scrub predicates from docs/docs_commands_build.py — the arm cannot run: $( grep '^IMPORT_FAIL' "$TMP/scrub" )"
-elif [ "${scannedCount:-0}" -lt 2 ]; then
-    no "(E) scanned only ${scannedCount:-0} document(s) — COMMANDS.md plus at least one docs/captures/*.md is expected; a near-empty scan passes vacuously"
+elif [ "${scannedCount:-0}" -ne "$expectedScan" ]; then
+    no "(E) scanned ${scannedCount:-0} document(s) but $expectedScan exist (docs/COMMANDS.md + $captureCount docs/captures/*.md) — the sweep must cover EVERY capture, not just the newest"
 elif grep -q '^HIT ' "$TMP/scrub"; then
     no "(E) shipped document(s) trip the public-export scrub in $( grep -c '^HIT ' "$TMP/scrub" ) place(s):"
     grep '^HIT ' "$TMP/scrub" | sed 's/^HIT /          /'
 else
-    ok "(E) all $scannedCount shipped document(s) clean on every scrub class (home path, temp path, coordinate, internal doc name, address)"
+    ok "(E) all $scannedCount shipped document(s) — docs/COMMANDS.md + every one of $captureCount capture(s) — clean on every scrub class (home path, temp path, coordinate, internal doc name, internal doc heading, address)"
 fi
 
 # ── (F) mutation control for (E) — prove the scrub arm can still see a leak ────────────────────────
@@ -175,6 +191,8 @@ PROBES = (
     ( 'temp/scratch path',         '/private/tmp/ripwire_showcase_ab12/aux', lambda ln: gen.TMP_PATH.search( ln ) ),
     ( 'internal coordinate shape', 'see ' + '§' + 'B12.9 of the round plan',  lambda ln: gen.COORD.search( ln ) ),
     ( 'internal document name',    'PLAN' + '_something.md',                lambda ln: gen.INTERNAL_DOC.search( ln ) ),
+    ( 'internal document heading', '<sym p="NOTES.md" id="9.2 Correction tiers"/>',
+                                                                            lambda ln: gen.unredacted_internal_row( ln ) ),
     ( 'email address',             'top="someone@example.com"',             lambda ln: gen.find_address( ln ) ),
 )
 # and the NEGATIVE controls: real output the scrub must NOT claim as a leak (the over-scrub failure).
@@ -182,24 +200,41 @@ NEGATIVES = (
     ( 'hotspots symbol name',  '<f p="./src/main.cpp" churn="5" ccx="3311" top="main" top_ccx="376"/>' ),
     ( 'community label',       '<community id="952" label="./src::str@ingest.cpp:887:55947"/>' ),
     ( 'layout field owner',    '<field name="id" type="uint32_t" owner="Symbol" rel="0"/>' ),
+    # `id=`/`n=` are REAL symbol names on every row that is not about an internal document: a
+    # heading scrub that stopped gating on p= would rename the tool's own output to a placeholder.
+    ( 'code symbol id',        '<sym p="./src/ingest.cpp" id="ingestOneFile" k="fn" cx="41"/>' ),
+    ( 'public doc heading',    '<sym p="./README.md" id="Install" k="section"/>' ),
+    ( 'name attr elsewhere',   '<f p="./src/main.cpp" n="ingest" churn="5" ccx="3311"/>' ),
+    # the real near-miss in THIS tree: a tracked public fixture under test/ whose basename collides
+    # with the anonymised name, and whose rows this very capture records verbatim. A p= match
+    # anchored on the basename rather than the whole attribute value would rewrite them — correct
+    # output, corrupted by an over-broad scrub, which ships as if it were the tool's answer.
+    ( 'tracked fixture path',  '<doc p="test/docdriftfix/NOTES.md" anchors="26" id="stableHelper"/>' ),
+    # and the placeholder must be a fixed point, or a re-scrub churns the file on every run
+    ( 'already-redacted row',  '<sym p="NOTES.md" id="<internal>"/>' ),
 )
 bad = 0
 for label, probe, hit in PROBES:
     if not hit( probe ):
         print( 'DEAD %s: predicate did not fire on a synthetic offender' % label ); bad += 1
 for label, line in NEGATIVES:
-    scrubbed = gen.scrub_emails( gen.scrub_author_attrs( line ) )
+    scrubbed = gen.scrub_internal_rows( gen.scrub_emails( gen.scrub_author_attrs( line ) ) )
     if scrubbed != line:
         print( 'OVERSCRUB %s: real output was rewritten: %s -> %s' % ( label, line, scrubbed ) ); bad += 1
+    if gen.unredacted_internal_row( line ) is not None:
+        print( 'OVERSCRUB %s: the leak predicate claimed real output: %s' % ( label, line ) ); bad += 1
 # and the one that MUST be rewritten, so the gate is not merely proving the scrub is a no-op
 ownerRow = '<f p="./SECURITY.md" authors="2" bf="0" top="someone@example.com" share="0.50"/>'
 if 'someone@example.com' in gen.scrub_emails( gen.scrub_author_attrs( ownerRow ) ):
     print( 'DEAD ownership row: an address on a share= row survived the scrub' ); bad += 1
+headingRow = '<sym p="NOTES.md" id="8c. Local reasoning — commercial tool survey"/>'
+if 'commercial tool survey' in gen.scrub_internal_rows( headingRow ):
+    print( 'DEAD heading row: an internal heading on an anonymised row survived the scrub' ); bad += 1
 print( 'MUTATE %d' % bad )
 PY
 mutateOut="$( python3 "$TMP/scrubmutate.py" "$ROOT" 2>&1 )"
 if printf '%s' "$mutateOut" | grep -q '^MUTATE 0$'; then
-    ok "(F) mutation control — every scrub class fires on a synthetic leak, and real output (hotspots top=, community labels, layout owner=) survives untouched"
+    ok "(F) mutation control — every scrub class fires on a synthetic leak, and real output (hotspots top=, community labels, layout owner=, code/public-doc id=, n=, a colliding fixture path) survives untouched"
 else
     no "(F) mutation control failed — the scrub is inert or over-broad:"
     printf '%s\n' "$mutateOut" | sed 's/^/          /'
@@ -294,7 +329,7 @@ def lost_flags( helpText ):
     return out
 
 # ── (H1) the ledger, against the real binary ──────────────────────────────────────────────────────
-helpText = subprocess.run( [ BIN, '--help' ], capture_output = True, text = True, timeout = 120 ).stdout
+helpText = subprocess.run( [ BIN, '--help=all' ], capture_output = True, text = True, timeout = 120 ).stdout
 live = sorted( lost_flags( helpText ) )
 pinned = sorted( LEDGER )
 newLoss = [ f for f in live if f not in pinned ]
@@ -379,6 +414,49 @@ else:
 sys.exit( bad )
 PY
 if python3 "$TMP/entryarm.py" "$ROOT" "$BIN" 2>&1; then :; else fail=1; fi
+
+# ── (I) SMELL-NAME FINDABILITY — the help text must name the smell it measures ─────────────────────
+# WHY. For a year this tool shipped the measurable form of Fowler's SHOTGUN SURGERY — the co-change
+# miner behind --cochange and the "usual partners missing from this diff" section of --situ — while the
+# word appeared nowhere in the tree: on 2026-09-08 `grep -ril shotgun docs src README.md` was empty, so
+# a reader who knew the smell's name could not find the verb that answers it. docs/COMMANDS.md is
+# generated from --help, so the help entry is the ONE place the name has to live for every downstream
+# surface to inherit it; a hand-edit of the document alone is undone by the next regen (arm G). The
+# arm reads the binary's own --help, attributes each line to the entry it belongs to (continuation
+# lines carry no flag token), and requires BOTH entries that answer the smell to name it. Its control
+# strips the name from a copy of that same help text and requires the identical extraction to go red.
+smellEntries() {   # $1 = help text → the entries whose own lines name the smell, one per line, sorted
+    printf '%s\n' "$1" | awk '
+        /^    --[a-z]/ { cur = $1 }
+        cur != "" && tolower($0) ~ /shotgun surgery/ { hit[cur] = 1 }
+        END { for( k in hit ) { print k } }' | LC_ALL=C sort
+}
+helpText="$( "$BIN" --help=all 2>/dev/null )"
+smellWant=$'--cochange[=FILE]\n--situ[=F1,F2]'
+# presence guard first: the two entries must exist at all, or the extraction below searches an empty target
+while IFS= read -r spec; do
+    if printf '%s\n' "$helpText" | grep -qF "    $spec"; then :
+    else no "(I) --help has no entry '$spec' — the smell-name arm has no target (entry renamed? update smellWant)"; fi
+done < <( printf '%s\n' "$smellWant" )
+smellGot="$( smellEntries "$helpText" )"
+smellMissing="$( LC_ALL=C comm -23 <( printf '%s\n' "$smellWant" ) <( printf '%s\n' "$smellGot" ) )"
+if [ -z "$smellMissing" ]; then
+    ok "(I) --help names Shotgun Surgery on both entries that measure it: $( printf '%s' "$smellGot" | tr '\n' ' ' )"
+else
+    no "(I) --help does not name Shotgun Surgery on: $( printf '%s' "$smellMissing" | tr '\n' ' ' )— the smell is unfindable by name again (src/cli.h help text)"
+fi
+# mutation control: strip the name from a copy of the SAME text; the identical extraction must lose both entries
+# case-insensitive by character class, not by a GNU-only `I` flag: the help spells it SHOTGUN SURGERY and
+# the extraction above lowercases, so a title-case-only strip left the copy unchanged (caught by the
+# did-not-take guard on first run — the guard is why that shape cannot ship green)
+smellMut="$( printf '%s\n' "$helpText" | sed -E 's/[Ss][Hh][Oo][Tt][Gg][Uu][Nn] [Ss][Uu][Rr][Gg][Ee][Rr][Yy]/xxxxxxx xxxxxxx/g' )"
+if [ "$smellMut" = "$helpText" ]; then
+    no "(I) mutation control did not take — --help holds nothing to strip, so the arm above cannot have seen the name"
+elif [ -n "$( smellEntries "$smellMut" )" ]; then
+    no "(I) mutation control is inert — the name was stripped and the extraction still reports: $( smellEntries "$smellMut" | tr '\n' ' ' )"
+else
+    ok "(I) mutation control — stripping the name from a copy of --help loses both entries (the arm can fail)"
+fi
 
 if [ "$fail" = 0 ]; then printf 'ALL PASS\n'; else printf 'FAILURES ABOVE\n'; fi
 exit "$fail"

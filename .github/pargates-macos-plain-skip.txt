@@ -1,0 +1,9 @@
+# Gates the macOS PLAIN release leg does not run (test/pargates.py --exclude-list). Every gate here still
+# runs on the macOS Release leg and on all four Linux legs; each asserts nothing platform-specific. The leg
+# is an -O0 binary on a 3-core runner and was the workflow's critical path (33-37 min, run 34155361413);
+# these four were its slowest gates (545 / 391 / 383 / 349 s there). Measured, not assumed -- re-measure
+# before adding to this list, and remove an entry the moment the gate grows an OS-specific arm.
+binoverridecheck.sh     # meta-gate: re-runs the suite against a stub binary to prove every gate honours RIPWIRE_BIN
+knownitemcheck.sh       # --eval-retrieval known-item recall over a fixed corpus; ranker math, no platform surface
+ripwirepubliccheck.sh   # sweeps tracked files for identifiers/dangling refs; reads the repo, not the binary's OS
+xmlwellformed.sh        # G4 well-formedness sweep of the map; the leg's own det-gate/G4 steps still xmllint its output

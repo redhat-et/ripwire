@@ -3,6 +3,8 @@
 #error "ingest_sidecap.h is a SECTION of src/ingest.cpp's translation unit - include it only from ingest.cpp (see the ingest-family split note there)"
 #endif
 
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 // ingest_sidecap.h — parse infrastructure + the fused side-capture passes, moved VERBATIM from
 // ingest.cpp in the 2026-08-29 split: ParserGuard/grammarAbiOk (the block that sat between the
 // metrics and relations families; its only users are here and downstream, so it travels with its
@@ -107,10 +109,10 @@ void ffiVisitNode( FfiCtx& cx, TSNode n, const char* t )
     const auto nodeSrc = [ & ]( TSNode nn ) noexcept -> std::string_view { return nodeTextOf( nn, src ); };
 
         // pybind11:  m.def("alias", &target)  /  cls.def("alias", &Scope::method)  /  .def_static(...)
-        if( hasPybind && std::strcmp( t, "call_expression" ) == 0 )
+        if( hasPybind && kindIs( t, "call_expression" ) )
         {
             const TSNode fn = ts_node_child_by_field_name( n, "function", 8 );
-            if( !ts_node_is_null( fn ) && std::strcmp( ts_node_type( fn ), "field_expression" ) == 0 )
+            if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "field_expression" ) )
             {
                 const std::string_view meth = nodeSrc( ts_node_child_by_field_name( fn, "field", 5 ) );
                 if( meth == "def" || meth == "def_static" )
@@ -156,7 +158,7 @@ void ffiVisitNode( FfiCtx& cx, TSNode n, const char* t )
             }
         }
         // extern "C": every function DECLARED inside becomes reachable from ctypes/cffi/cgo by its bare name.
-        else if( cish && std::strcmp( t, "linkage_specification" ) == 0 )
+        else if( cish && kindIs( t, "linkage_specification" ) )
         {
             // confirm the linkage string is "C" (not "C++") before harvesting.
             bool isC = false;
@@ -164,7 +166,7 @@ void ffiVisitNode( FfiCtx& cx, TSNode n, const char* t )
             for( std::uint32_t i = 0; i < lc; ++i )
             {
                 const TSNode c = ts_node_child( n, i );
-                if( std::strcmp( ts_node_type( c ), "string_literal" ) == 0 ) { isC = ( ffiUnquote( nodeSrc( c ) ) == "C" ); break; }
+                if( kindIs( ts_node_type( c ), "string_literal" ) ) { isC = ( ffiUnquote( nodeSrc( c ) ) == "C" ); break; }
             }
             if( isC )
             {
@@ -175,13 +177,13 @@ void ffiVisitNode( FfiCtx& cx, TSNode n, const char* t )
                 {
                     const TSNode m = inner.back();
                     inner.pop_back();
-                    if( std::strcmp( ts_node_type( m ), "function_declarator" ) == 0 )
+                    if( kindIs( ts_node_type( m ), "function_declarator" ) )
                     {
                         const TSNode decl = ts_node_child_by_field_name( m, "declarator", 10 );
                         if( !ts_node_is_null( decl ) )
                         {
                             const char* dt = ts_node_type( decl );
-                            if( std::strcmp( dt, "identifier" ) == 0 || std::strcmp( dt, "field_identifier" ) == 0 )
+                            if( kindIs( dt, "identifier" ) || kindIs( dt, "field_identifier" ) )
                             {
                                 std::string nm = finalSegment( nodeSrc( decl ) );
                                 if( !nm.empty() )
@@ -200,12 +202,12 @@ void ffiVisitNode( FfiCtx& cx, TSNode n, const char* t )
             }
         }
         // Python ctypes handle:  lib = CDLL(...)  /  lib = ctypes.CDLL(...)  /  lib = cdll.LoadLibrary(...)
-        else if( py && std::strcmp( t, "assignment" ) == 0 )
+        else if( py && kindIs( t, "assignment" ) )
         {
             const TSNode lhs = ts_node_child_by_field_name( n, "left",  4 );
             const TSNode rhs = ts_node_child_by_field_name( n, "right", 5 );
-            if( !ts_node_is_null( lhs ) && std::strcmp( ts_node_type( lhs ), "identifier" ) == 0
-                && !ts_node_is_null( rhs ) && std::strcmp( ts_node_type( rhs ), "call" ) == 0 )
+            if( !ts_node_is_null( lhs ) && kindIs( ts_node_type( lhs ), "identifier" )
+                && !ts_node_is_null( rhs ) && kindIs( ts_node_type( rhs ), "call" ) )
             {
                 const std::string_view ftext = nodeSrc( ts_node_child_by_field_name( rhs, "function", 8 ) );
                 const std::string      seg   = finalSegment( ftext.substr( 0, ftext.find( '(' ) ) );   // final `.`/`::` segment
@@ -244,7 +246,7 @@ inline std::string firstPathStringArg( TSNode argsNode, std::string_view src )
         return {};
     }
     const TSNode first = ts_node_named_child( argsNode, 0 );
-    if( std::strcmp( ts_node_type( first ), "string" ) != 0 )
+    if( !kindIs( ts_node_type( first ), "string" ) )
     {
         return {}; // template_string/f-string/identifier → skip
     }
@@ -282,11 +284,11 @@ inline std::string lastArgHandlerName( TSNode argsNode, std::string_view src )
         const std::uint32_t a = ts_node_start_byte( nn ), b = ts_node_end_byte( nn );
         return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
     };
-    if( std::strcmp( lt, "identifier" ) == 0 )
+    if( kindIs( lt, "identifier" ) )
     {
         return finalSegment( text( last ) );
     }
-    if( std::strcmp( lt, "member_expression" ) == 0 )
+    if( kindIs( lt, "member_expression" ) )
     {
         const TSNode prop = ts_node_child_by_field_name( last, "property", 8 );
         if( !ts_node_is_null( prop ) )
@@ -304,7 +306,7 @@ inline std::string lastArgHandlerName( TSNode argsNode, std::string_view src )
 // a plain string literal (never guess).
 inline HttpMethod stringNodeToMethod( TSNode strNode, std::string_view src )
 {
-    if( ts_node_is_null( strNode ) || std::strcmp( ts_node_type( strNode ), "string" ) != 0 )
+    if( ts_node_is_null( strNode ) || !kindIs( ts_node_type( strNode ), "string" ) )
     {
         return HttpMethod::Unknown;
     }
@@ -332,7 +334,7 @@ inline HttpMethod pyMethodsKeyword( TSNode argsNode, std::string_view src, bool&
     for( std::uint32_t i = 0; i < nc; ++i )
     {
         const TSNode c = ts_node_named_child( argsNode, i );
-        if( std::strcmp( ts_node_type( c ), "keyword_argument" ) != 0 )
+        if( !kindIs( ts_node_type( c ), "keyword_argument" ) )
         {
             continue;
         }
@@ -348,7 +350,7 @@ inline HttpMethod pyMethodsKeyword( TSNode argsNode, std::string_view src, bool&
         }
         hasKeyword = true;
         const TSNode valueN = ts_node_child_by_field_name( c, "value", 5 );
-        if( ts_node_is_null( valueN ) || std::strcmp( ts_node_type( valueN ), "list" ) != 0 )
+        if( ts_node_is_null( valueN ) || !kindIs( ts_node_type( valueN ), "list" ) )
         {
             return HttpMethod::Unknown;
         }
@@ -366,7 +368,7 @@ inline HttpMethod pyMethodsKeyword( TSNode argsNode, std::string_view src, bool&
 // method per routematch::methodsCompatible in graph.h).
 inline HttpMethod jsMethodProperty( TSNode objNode, std::string_view src )
 {
-    if( ts_node_is_null( objNode ) || std::strcmp( ts_node_type( objNode ), "object" ) != 0 )
+    if( ts_node_is_null( objNode ) || !kindIs( ts_node_type( objNode ), "object" ) )
     {
         return HttpMethod::Unknown;
     }
@@ -374,7 +376,7 @@ inline HttpMethod jsMethodProperty( TSNode objNode, std::string_view src )
     for( std::uint32_t i = 0; i < nc; ++i )
     {
         const TSNode c = ts_node_named_child( objNode, i );
-        if( std::strcmp( ts_node_type( c ), "pair" ) != 0 )
+        if( !kindIs( ts_node_type( c ), "pair" ) )
         {
             continue;
         }
@@ -390,11 +392,11 @@ inline HttpMethod jsMethodProperty( TSNode objNode, std::string_view src )
             continue;
         }
         std::string key;
-        if( std::strcmp( kt, "property_identifier" ) == 0 )
+        if( kindIs( kt, "property_identifier" ) )
         {
             key = std::string( src.substr( ka, kb - ka ) );
         }
-        else if( std::strcmp( kt, "string" ) == 0 )
+        else if( kindIs( kt, "string" ) )
         {
             key = ffiUnquote( src.substr( ka, kb - ka ) );
         }
@@ -457,11 +459,11 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
     const auto nodeSrc = [ & ]( TSNode nn ) noexcept -> std::string_view { return nodeTextOf( nn, src ); };
 
         // Python server: @app.get("/path") / @app.route("/path", methods=[...]) directly above a def.
-        if( pyServerGated && std::strcmp( t, "decorated_definition" ) == 0 )
+        if( pyServerGated && kindIs( t, "decorated_definition" ) )
         {
             const TSNode defNode = ts_node_child_by_field_name( n, "definition", 10 );
             std::string  handlerName;
-            if( !ts_node_is_null( defNode ) && std::strcmp( ts_node_type( defNode ), "function_definition" ) == 0 )
+            if( !ts_node_is_null( defNode ) && kindIs( ts_node_type( defNode ), "function_definition" ) )
             {
                 const TSNode nameNode = ts_node_child_by_field_name( defNode, "name", 4 );
                 if( !ts_node_is_null( nameNode ) )
@@ -473,17 +475,17 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
             for( std::uint32_t i = 0; i < cc; ++i )
             {
                 const TSNode dec = ts_node_child( n, i );
-                if( std::strcmp( ts_node_type( dec ), "decorator" ) != 0 )
+                if( !kindIs( ts_node_type( dec ), "decorator" ) )
                 {
                     continue;
                 }
                 const TSNode expr = ts_node_named_child( dec, 0 );
-                if( ts_node_is_null( expr ) || std::strcmp( ts_node_type( expr ), "call" ) != 0 )
+                if( ts_node_is_null( expr ) || !kindIs( ts_node_type( expr ), "call" ) )
                 {
                     continue;
                 }
                 const TSNode fn = ts_node_child_by_field_name( expr, "function", 8 );
-                if( ts_node_is_null( fn ) || std::strcmp( ts_node_type( fn ), "attribute" ) != 0 )
+                if( ts_node_is_null( fn ) || !kindIs( ts_node_type( fn ), "attribute" ) )
                 {
                     continue;
                 }
@@ -520,12 +522,12 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
         // fixes the structural trap an `if/else if` split on `jsServerGated` vs `js` would fall into: once
         // the (possibly file-gated) branch claims a call_expression, an else-if chain never lets the OTHER
         // shape see that same node.
-        else if( js && std::strcmp( t, "call_expression" ) == 0 )
+        else if( js && kindIs( t, "call_expression" ) )
         {
             const TSNode fn = ts_node_child_by_field_name( n, "function", 8 );
             bool handled = false;
 
-            if( !ts_node_is_null( fn ) && std::strcmp( ts_node_type( fn ), "identifier" ) == 0 && nodeSrc( fn ) == "fetch" )
+            if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "identifier" ) && nodeSrc( fn ) == "fetch" )
             {
                 const TSNode argsNode = ts_node_child_by_field_name( n, "arguments", 9 );
                 const std::string path = firstPathStringArg( argsNode, src );
@@ -540,10 +542,10 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
                 }
                 handled = true;   // "fetch(...)" is never ALSO a server registrar shape
             }
-            else if( !ts_node_is_null( fn ) && std::strcmp( ts_node_type( fn ), "member_expression" ) == 0 )
+            else if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "member_expression" ) )
             {
                 const TSNode objN = ts_node_child_by_field_name( fn, "object", 6 );
-                if( !ts_node_is_null( objN ) && std::strcmp( ts_node_type( objN ), "identifier" ) == 0 && nodeSrc( objN ) == "axios" )
+                if( !ts_node_is_null( objN ) && kindIs( ts_node_type( objN ), "identifier" ) && nodeSrc( objN ) == "axios" )
                 {
                     const TSNode propN     = ts_node_child_by_field_name( fn, "property", 8 );
                     const HttpMethod method = httpMethodFromName( nodeSrc( propN ) );
@@ -563,7 +565,7 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
             // JS/TS server FALLBACK: app.get('/path', handler) / router.post('/path', mw, handler) — last
             // arg = handler. Only tried when the callee wasn't already claimed by a client shape above, and
             // only on a file-level framework signal (captureFfi's pybind-gate posture).
-            if( !handled && jsServerGated && !ts_node_is_null( fn ) && std::strcmp( ts_node_type( fn ), "member_expression" ) == 0 )
+            if( !handled && jsServerGated && !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "member_expression" ) )
             {
                 const TSNode propN     = ts_node_child_by_field_name( fn, "property", 8 );
                 const HttpMethod method = httpMethodFromName( nodeSrc( propN ) );
@@ -580,13 +582,13 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
             }
         }
         // Python client: requests.get('/path') / requests.post('/path', json=...)
-        else if( py && std::strcmp( t, "call" ) == 0 )
+        else if( py && kindIs( t, "call" ) )
         {
             const TSNode fn = ts_node_child_by_field_name( n, "function", 8 );
-            if( !ts_node_is_null( fn ) && std::strcmp( ts_node_type( fn ), "attribute" ) == 0 )
+            if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "attribute" ) )
             {
                 const TSNode objN = ts_node_child_by_field_name( fn, "object", 6 );
-                if( !ts_node_is_null( objN ) && std::strcmp( ts_node_type( objN ), "identifier" ) == 0 && nodeSrc( objN ) == "requests" )
+                if( !ts_node_is_null( objN ) && kindIs( ts_node_type( objN ), "identifier" ) && nodeSrc( objN ) == "requests" )
                 {
                     const TSNode attrN     = ts_node_child_by_field_name( fn, "attribute", 9 );
                     const HttpMethod method = httpMethodFromName( nodeSrc( attrN ) );
@@ -649,15 +651,15 @@ inline bool isUpdateOrAssignmentTarget( TSNode node ) noexcept
     const char* pt = ts_node_type( parent );
 
     // C++ `x++` / `--x` and Python aug targets handled via update_expression (the operand is the target).
-    if( std::strcmp( pt, "update_expression" ) == 0 )
+    if( kindIs( pt, "update_expression" ) )
     {
         return true;
     }
 
     // direct LHS of an assignment: parent is the assignment node and `node` sits in its `left` field.
-    const bool isAssign =    std::strcmp( pt, "assignment_expression" ) == 0       // C++ `=` `+=` `-=` …
-                          || std::strcmp( pt, "assignment" ) == 0                  // Python `=`
-                          || std::strcmp( pt, "augmented_assignment" ) == 0;       // Python `+=` …
+    const bool isAssign =    kindIs( pt, "assignment_expression" )       // C++ `=` `+=` `-=` …
+                          || kindIs( pt, "assignment" )                  // Python `=`
+                          || kindIs( pt, "augmented_assignment" );       // Python `+=` …
     if( isAssign )
     {
         const TSNode lhs = ts_node_child_by_field_name( parent, "left", 4 );
@@ -675,8 +677,8 @@ inline TSNode outermostBaseOf( TSNode node, bool throughMemberAccess ) noexcept
     for( TSNode up = ts_node_parent( node ); !ts_node_is_null( up ); up = ts_node_parent( node ) )
     {
         const char* ut = ts_node_type( up );
-        const bool isSubscript = std::strcmp( ut, "subscript_expression" ) == 0 || std::strcmp( ut, "subscript" ) == 0;   // C/C++ · Python `a[i]`
-        const bool isMember    = std::strcmp( ut, "field_expression" ) == 0 || std::strcmp( ut, "attribute" ) == 0;       // C/C++ `p->f`,`a.b` · Python `a.b`
+        const bool isSubscript = kindIs( ut, "subscript_expression" ) || kindIs( ut, "subscript" );   // C/C++ · Python `a[i]`
+        const bool isMember    = kindIs( ut, "field_expression" ) || kindIs( ut, "attribute" );       // C/C++ `p->f`,`a.b` · Python `a.b`
         const bool climbs      = isSubscript || ( throughMemberAccess && isMember );
         if( !( climbs && ts_node_start_byte( up ) == ts_node_start_byte( node ) ) )
         {
@@ -703,14 +705,14 @@ inline bool isCallCallee( TSNode id ) noexcept
     const char* pt = ts_node_type( parent );
 
     // bare call `foo()` — the function field is the identifier itself.
-    if( std::strcmp( pt, "call_expression" ) == 0 || std::strcmp( pt, "call" ) == 0 )
+    if( kindIs( pt, "call_expression" ) || kindIs( pt, "call" ) )
     {
         const TSNode fn = ts_node_child_by_field_name( parent, "function", 8 );
         return !ts_node_is_null( fn ) && sameSpan( fn, id );
     }
     // member call `x.m()` / `x->m()` — `id` is the field of a field_expression/attribute that is the
     // function of a call. (The receiver `x` is NOT the callee → still captured as a read below.)
-    if( std::strcmp( pt, "field_expression" ) == 0 || std::strcmp( pt, "attribute" ) == 0 )
+    if( kindIs( pt, "field_expression" ) || kindIs( pt, "attribute" ) )
     {
         const TSNode fieldNode = ts_node_child_by_field_name( parent, "field", 5 );
         const TSNode attrNode  = ts_node_child_by_field_name( parent, "attribute", 9 );
@@ -726,7 +728,7 @@ inline bool isCallCallee( TSNode id ) noexcept
             return false;
         }
         const char* gt = ts_node_type( gp );
-        if( std::strcmp( gt, "call_expression" ) != 0 && std::strcmp( gt, "call" ) != 0 )
+        if( !kindIs( gt, "call_expression" ) && !kindIs( gt, "call" ) )
         {
             return false;
         }
@@ -756,30 +758,30 @@ inline bool isCallCallee( TSNode id ) noexcept
 // declaration line along with the rest of the block; declaration-point spans stop covering it.
 inline bool isDeclSiteName( TSNode id, TSNode parent, const char* pt ) noexcept
 {
-    if( std::strcmp( pt, "reference_declarator" ) == 0 || std::strcmp( pt, "structured_binding_declarator" ) == 0
-        || std::strcmp( pt, "variadic_declarator" ) == 0 || std::strcmp( pt, "attributed_declarator" ) == 0 )
+    if( kindIs( pt, "reference_declarator" ) || kindIs( pt, "structured_binding_declarator" )
+        || kindIs( pt, "variadic_declarator" ) || kindIs( pt, "attributed_declarator" ) )
     {
         return true;
     }
-    if( std::strcmp( pt, "declaration" ) == 0 )
+    if( kindIs( pt, "declaration" ) )
     {
         const std::uint32_t cc = ts_node_child_count( parent );
         for( std::uint32_t i = 0; i < cc; ++i )
         {
             const char* fieldName = ts_node_field_name_for_child( parent, i );
-            if( fieldName != nullptr && std::strcmp( fieldName, "declarator" ) == 0 && sameSpan( ts_node_child( parent, i ), id ) )
+            if( fieldName != nullptr && kindIs( fieldName, "declarator" ) && sameSpan( ts_node_child( parent, i ), id ) )
             {
                 return true;
             }
         }
         return false;
     }
-    if( std::strcmp( pt, "for_range_loop" ) == 0 )
+    if( kindIs( pt, "for_range_loop" ) )
     {
         const TSNode decl = ts_node_child_by_field_name( parent, "declarator", 10 );
         return !ts_node_is_null( decl ) && sameSpan( decl, id );
     }
-    if( std::strcmp( pt, "lambda_capture_initializer" ) == 0 )
+    if( kindIs( pt, "lambda_capture_initializer" ) )
     {
         return ts_node_named_child_count( parent ) > 0 && sameSpan( ts_node_named_child( parent, 0 ), id );
     }
@@ -802,7 +804,7 @@ inline bool isNonValueContext( TSNode id ) noexcept
     // (1) part of a qualified / scoped NAME (`A::process` def name, `A::b()` qualified call name, `ns::T`
     //     type, `A::kConst` qualified value): the segment is not a plain value identifier. Calls/defs of
     //     this shape are captured by the tags query; qualified value reads are intentionally out of scope.
-    if( std::strcmp( pt, "qualified_identifier" ) == 0 || std::strcmp( pt, "scoped_identifier" ) == 0 || std::strcmp( pt, "scoped_type_identifier" ) == 0 || std::strcmp( pt, "qualified_type_identifier" ) == 0 || std::strcmp( pt, "template_function" ) == 0 || std::strcmp( pt, "template_type" ) == 0 )
+    if( kindIs( pt, "qualified_identifier" ) || kindIs( pt, "scoped_identifier" ) || kindIs( pt, "scoped_type_identifier" ) || kindIs( pt, "qualified_type_identifier" ) || kindIs( pt, "template_function" ) || kindIs( pt, "template_type" ) )
     {
         return true;
     }
@@ -811,10 +813,10 @@ inline bool isNonValueContext( TSNode id ) noexcept
     // `optional_parameter_declaration` is `parameter_declaration`'s DEFAULTED sibling (`int x = 0`) and
     // carries the same `declarator` field — probing the field, not the node type, is what keeps a default
     // VALUE that names a symbol (`int v = probe()`, a different field) a genuine use.
-    if(    std::strcmp( pt, "function_declarator" ) == 0 || std::strcmp( pt, "init_declarator" ) == 0
-        || std::strcmp( pt, "parameter_declaration" ) == 0 || std::strcmp( pt, "pointer_declarator" ) == 0
-        || std::strcmp( pt, "reference_declarator" ) == 0  || std::strcmp( pt, "array_declarator" ) == 0
-        || std::strcmp( pt, "optional_parameter_declaration" ) == 0 )
+    if(    kindIs( pt, "function_declarator" ) || kindIs( pt, "init_declarator" )
+        || kindIs( pt, "parameter_declaration" ) || kindIs( pt, "pointer_declarator" )
+        || kindIs( pt, "reference_declarator" )  || kindIs( pt, "array_declarator" )
+        || kindIs( pt, "optional_parameter_declaration" ) )
     {
         const TSNode decl = ts_node_child_by_field_name( parent, "declarator", 10 );
         if( !ts_node_is_null( decl ) && sameSpan( decl, id ) )
@@ -828,12 +830,12 @@ inline bool isNonValueContext( TSNode id ) noexcept
         return true;
     }
     // (3) Python function / parameter NAME field (a DEF/param, not a use).
-    if( std::strcmp( pt, "function_definition" ) == 0 || std::strcmp( pt, "parameters" ) == 0
-        || std::strcmp( pt, "typed_parameter" ) == 0 || std::strcmp( pt, "default_parameter" ) == 0
-        || std::strcmp( pt, "lambda_parameters" ) == 0 )
+    if( kindIs( pt, "function_definition" ) || kindIs( pt, "parameters" )
+        || kindIs( pt, "typed_parameter" ) || kindIs( pt, "default_parameter" )
+        || kindIs( pt, "lambda_parameters" ) )
     {
         const TSNode nm = ts_node_child_by_field_name( parent, "name", 4 );
-        if( ( !ts_node_is_null( nm ) && sameSpan( nm, id ) ) || std::strcmp( pt, "parameters" ) == 0 || std::strcmp( pt, "lambda_parameters" ) == 0 )
+        if( ( !ts_node_is_null( nm ) && sameSpan( nm, id ) ) || kindIs( pt, "parameters" ) || kindIs( pt, "lambda_parameters" ) )
         {
             return true;   // every direct child of a parameter list is a param NAME, not a use
         }
@@ -899,14 +901,14 @@ inline bool isTypeDeclarationSite( TSNode id ) noexcept
     const char* pt = ts_node_type( parent );
 
     // (b) base clause — RefRole::Extends owns this position.
-    if( std::strcmp( pt, "base_class_clause" ) == 0 )
+    if( kindIs( pt, "base_class_clause" ) )
     {
         return true;
     }
 
     // (c) a type parameter DECLARES its name.
-    if(    std::strcmp( pt, "type_parameter_declaration" ) == 0 || std::strcmp( pt, "variadic_type_parameter_declaration" ) == 0
-        || std::strcmp( pt, "optional_type_parameter_declaration" ) == 0 )
+    if(    kindIs( pt, "type_parameter_declaration" ) || kindIs( pt, "variadic_type_parameter_declaration" )
+        || kindIs( pt, "optional_type_parameter_declaration" ) )
     {
         return true;
     }
@@ -928,7 +930,7 @@ inline bool isTypeDeclarationSite( TSNode id ) noexcept
         }
     }
     // `typedef struct X Y;` — Y is the DECLARATOR field and is the new name; X keeps its mention.
-    if( std::strcmp( pt, "type_definition" ) == 0 )
+    if( kindIs( pt, "type_definition" ) )
     {
         const TSNode dc = ts_node_child_by_field_name( parent, "declarator", 10 );
         if( !ts_node_is_null( dc ) && sameSpan( dc, id ) )
@@ -977,8 +979,8 @@ inline UseSiteShape classifyUseSite( TSNode n, const char* t, Lang lang ) noexce
 {
     UseSiteShape shape;
     shape.typeMention = isTypeMentionNode( t );
-    const bool isFieldIdent = std::strcmp( t, "field_identifier" ) == 0;
-    if( !shape.typeMention && !isFieldIdent && std::strcmp( t, "identifier" ) != 0 )
+    const bool isFieldIdent = kindIs( t, "field_identifier" );
+    if( !shape.typeMention && !isFieldIdent && !kindIs( t, "identifier" ) )
     {
         return shape;
     }
@@ -1054,7 +1056,7 @@ bool prepareParserFor( TSParser* parser, const LangEntry& le )
     if( !ts_parser_set_language( parser, lang ) || !grammarAbiOk( lang ) )
     {
         // never emit a silently-empty tree — say which language we dropped.
-        std::fprintf( stderr, "[ripwire] grammar ABI mismatch or set_language failed for %s — skipping language\n",
+        rw::emitTo( stderr, "[ripwire] grammar ABI mismatch or set_language failed for {} — skipping language\n",
                       std::string( le.querySub ).c_str() );
         return false;
     }
@@ -1222,7 +1224,7 @@ void streamSideCaptures( TSNode root, const SideArms& arms )
 void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawRef>& refs, std::vector<Include>& incs, std::vector<RawBind>& binds,
                        std::vector<BindingAlias>& ffis, std::vector<RouteDef>& routeDefs,
-                       std::vector<RawRouteUse>& routeUses, bool captureValueUses )
+                       std::vector<RawRouteUse>& routeUses, std::vector<ConstOpen>& constOpens, bool captureValueUses )
 {
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: side captures" );
@@ -1235,7 +1237,8 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
         }
 #endif
 
-        captureIncludes( root, le.lang, fileId, src, incs, refs, binds );   // physical deps + ABS-3 import-role use-sites + Phase 5 import bindings
+        captureIncludes( root, le.lang, fileId, src, incs, refs, binds, constOpens );   // physical deps + ABS-3 import-role use-sites + Phase 5 import bindings + Ruby class/module opens
+        captureJsImportFacts( root, le.lang, fileId, src, binds );
 
         // A4-R5: cross-language FFI binding declarations (pybind11 / extern "C" / ctypes handle). Inert on a
         // binding-free file (pybind gated on a file signal; extern-C/ctypes only fire on their exact shapes).
@@ -1360,6 +1363,29 @@ inline void foldFieldDefs( std::vector<RawDef>& defs, std::size_t first, Lang la
     defs.resize( write );
 }
 
+/// Append definitions and references captured by the language query, with language-specific filtering.
+/// Captured spans refer to src and root; a null cursor appends nothing. Existing output rows are retained.
+// #62 (2026-09-08, @mariadb-KyleHutchinson): the byte ranges this file's preprocessor DECIDES are dead
+// (src/preprocdead.h — the same literal `#if 0` rule --slice has always used). Computed ONCE per file,
+// C-family only, and the helper's own `#if` text gate makes it a single find() on the overwhelming
+// majority of files. A call site inside one of these ranges cannot compile, so admitting it as an edge
+// makes count= larger than the truth — which breaks counts_floor="1"'s promise (true >= reported)
+// rather than merely adding noise. That is why the site is DROPPED here at capture rather than flagged
+// downstream: a flagged row still counts. Cached per file like every other captured fact, so a warm
+// run replays the filtered set (kCacheVersion bumped with this change).
+//
+// #62: the C-family gate for preprocdead.h's ranges. A free function rather than four more lines inside
+// captureTagsFacts, which --quality-delta already scores at cx 258 - this change adds one line to it.
+// Non-C-family languages have no preproc_if nodes at all, so the empty return is the whole rule.
+inline std::vector<PreprocDeadRange> preprocDeadRangesFor( const LangEntry& le, TSNode root, std::string_view src )
+{
+    if( le.lang != Lang::Cpp && le.lang != Lang::C && le.lang != Lang::ObjC )
+    {
+        return {};
+    }
+    return collectPreprocDeadRanges( root, src );
+}
+
 void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawDef>& defs, std::vector<RawRef>& refs )
 {
@@ -1375,6 +1401,9 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     }
 
     const std::size_t firstDefOfFile = defs.size();   // member-variable round: foldFieldDefs' window (below)
+
+    // #62: byte ranges this file's preprocessor decides are dead; see preprocDeadRangesFor above.
+    const std::vector<PreprocDeadRange> ppDead = preprocDeadRangesFor( le, root, src );
 
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: tags query exec+captures" );
@@ -1439,7 +1468,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                         // the `type` field so the symbol name is `operator bool` / `operator MyType`, not the
                         // param list. Symbolic ops (operator==/[]/()) go through operator_name and are untouched —
                         // trimming at `(` there would wrongly cut `operator()`, so this is operator_cast-only.
-                        if( std::strcmp( ts_node_type( cap.node ), "operator_cast" ) == 0 )
+                        if( kindIs( ts_node_type( cap.node ), "operator_cast" ) )
                         {
                             const TSNode typeNode = ts_node_child_by_field_name( cap.node, "type", 4 );
                             if( !ts_node_is_null( typeNode ) )
@@ -1506,6 +1535,11 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 continue;
             }
 
+            if( le.lang == Lang::Elixir && !elixirKeepCapture( roleNode, nameNode, isDef, kind, src ) )
+            {
+                continue;
+            }
+
             if( isDef )
             {
                 RawDef d;
@@ -1521,7 +1555,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // defBodyNodeOf = the `body:` field, PLUS the macro-edges round's one addition: a #define's
             // replacement text (`value:` field) is adopted as a macro symbol's body, set before the climb
             // below so the climb is skipped for macros.
-            TSNode body    = defBodyNodeOf( roleNode, kind );
+            TSNode body    = le.lang == Lang::Elixir ? elixirBody( roleNode, src ) : defBodyNodeOf( roleNode, kind );
             // LB-E testmacroblock: the def is TWO SIBLING nodes (see testMacroBlockPartsOf) — adopt the
             // sibling compound_statement as the body and the title literal as the name BEFORE the shared
             // span/complexity code below. The span's endByte and the loc row window are extended past
@@ -1548,7 +1582,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // No-op for every pre-existing Var capture (Swift/C#/Go/Python parents hit a scope-stop or the
             // file root before any "body"-owning ancestor — verified byte-identical on the gate corpora).
             // A Field's span is its own field_declaration / defining assignment — the Var rule, same reason.
-            if( ts_node_is_null( body ) && kind != SymKind::Var && kind != SymKind::Field )
+            if( ts_node_is_null( body ) && kind != SymKind::Var && kind != SymKind::Field && le.lang != Lang::Elixir )
             {
                 TSNode child = roleNode;
                 TSNode p     = ts_node_parent( roleNode );
@@ -1559,15 +1593,15 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     // these, so reaching here means roleNode is a prototype/declaration with no body.
                     // (Without this, an in-class method declaration would climb into class_specifier and
                     // wrongly grab the whole CLASS body as its span — corrupting spans + ref attribution.)
-                    const bool scope =    std::strcmp( pt, "class_specifier" ) == 0        || std::strcmp( pt, "struct_specifier" ) == 0
-                                       || std::strcmp( pt, "field_declaration_list" ) == 0 || std::strcmp( pt, "declaration_list" ) == 0
-                                       || std::strcmp( pt, "namespace_definition" ) == 0   || std::strcmp( pt, "enum_specifier" ) == 0
-                                       || std::strcmp( pt, "translation_unit" ) == 0       || std::strcmp( pt, "source_file" ) == 0       // Swift top
-                                       || std::strcmp( pt, "class_body" ) == 0             || std::strcmp( pt, "protocol_body" ) == 0     // Swift type bodies
-                                       || std::strcmp( pt, "enum_class_body" ) == 0
-                                       || std::strcmp( pt, "class_interface" ) == 0        || std::strcmp( pt, "class_implementation" ) == 0   // ObjC
-                                       || std::strcmp( pt, "implementation_definition" ) == 0 || std::strcmp( pt, "protocol_declaration" ) == 0
-                                       || std::strcmp( pt, "compound_statement" ) == 0     || std::strcmp( pt, "block" ) == 0;   // a function BODY: a block-scope
+                    const bool scope =    kindIs( pt, "class_specifier" )        || kindIs( pt, "struct_specifier" )
+                                       || kindIs( pt, "field_declaration_list" ) || kindIs( pt, "declaration_list" )
+                                       || kindIs( pt, "namespace_definition" )   || kindIs( pt, "enum_specifier" )
+                                       || kindIs( pt, "translation_unit" )       || kindIs( pt, "source_file" )       // Swift top
+                                       || kindIs( pt, "class_body" )             || kindIs( pt, "protocol_body" )     // Swift type bodies
+                                       || kindIs( pt, "enum_class_body" )
+                                       || kindIs( pt, "class_interface" )        || kindIs( pt, "class_implementation" )   // ObjC
+                                       || kindIs( pt, "implementation_definition" ) || kindIs( pt, "protocol_declaration" )
+                                       || kindIs( pt, "compound_statement" )     || kindIs( pt, "block" );   // a function BODY: a block-scope
                     // `Type v(args);` (most-vexing-parse) must not climb up and steal its enclosing function's span. A real
                     // function definition's declarator parents directly to function_definition (found at hop 1, above), so this never fires for it.
                     if( scope )
@@ -1575,7 +1609,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                         // prototype/declaration: use the member/decl wrapper as the span so the RETURN
                         // TYPE is included (not just the declarator), WITHOUT grabbing the class body.
                         const char* ct = ts_node_type( child );
-                        if( std::strcmp( ct, "field_declaration" ) == 0 || std::strcmp( ct, "declaration" ) == 0 )
+                        if( kindIs( ct, "field_declaration" ) || kindIs( ct, "declaration" ) )
                         {
                             defNode = child;
                         }
@@ -1624,20 +1658,33 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 {
                     const TSNode ch = ts_node_child( defNode, ci );
                     const char*  ct = ts_node_type( ch );
-                    if( std::strcmp( ct, "compound_statement" ) == 0     || std::strcmp( ct, "function_body" ) == 0
-                        || std::strcmp( ct, "block" ) == 0               || std::strcmp( ct, "implementation_definition" ) == 0 )
+                    if( kindIs( ct, "compound_statement" )     || kindIs( ct, "function_body" )
+                        || kindIs( ct, "block" )               || kindIs( ct, "implementation_definition" ) )
                     { body = ch; break; }
                 }
             }
 
+            // Dart's body is a SIBLING of the signature, so neither defBodyNodeOf nor the climb above can
+            // find it and the span would stop at the signature — see dartFollowingBody (ingest_relations.h)
+            // for the measurement and for why an abstract member still comes back null.
+            bool dartSiblingBody = false;
+            if( ts_node_is_null( body ) && le.lang == Lang::Dart )
+            {
+                body            = dartFollowingBody( defNode );
+                dartSiblingBody = !ts_node_is_null( body );
+            }
+            // Both flags mean the same thing to the three span consumers below: the code this symbol
+            // owns lives in a SIBLING node, so byte/row extents and complexity must run through it.
+            const bool spanThroughBody = isTestMacroBlock || dartSiblingBody;
+
             d.startByte = ts_node_start_byte( defNode );
-            d.endByte   = isTestMacroBlock ? ts_node_end_byte( body ) : ts_node_end_byte( defNode );   // LB-E: the span runs THROUGH the sibling block
+            d.endByte   = spanThroughBody ? ts_node_end_byte( body ) : ts_node_end_byte( defNode );   // LB-E: the span runs THROUGH the sibling block
             d.nameByte  = nameByte;
             d.bodyByte  = ts_node_is_null( body ) ? 0u : ts_node_start_byte( body );
             const bool  fnOrMethod = ( kind == SymKind::Function || kind == SymKind::Method );
             // LB-E: for a testmacroblock the body SIBLING is where the code lives — complexityOf walks
             // INSIDE its root node, so handing it defNode (the bare macro statement) would count nothing.
-            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal ] = fnOrMethod ? complexityOf( isTestMacroBlock ? body : defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {} };
+            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal ] = fnOrMethod ? complexityOf( spanThroughBody ? body : defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {} };
             d.cx        = cxVal;
             d.ccx       = ccxVal;
             d.locals    = localsVal;   // Phase 1: floor count, C/C++ only (model.h localsCountedLang) — 0 elsewhere, never emitted there
@@ -1649,10 +1696,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // param count + max nesting for functions/methods only (0 otherwise, absent in emit). All descriptive.
             {
                 const std::uint32_t startRow = ts_node_start_point( defNode ).row;
-                const std::uint32_t endRow   = ts_node_end_point( isTestMacroBlock ? body : defNode ).row;   // LB-E: rows through the sibling block
+                const std::uint32_t endRow   = ts_node_end_point( spanThroughBody ? body : defNode ).row;   // LB-E: rows through the sibling block
                 d.loc = ( endRow >= startRow ) ? ( endRow - startRow + 1u ) : 1u;
             }
-            d.params    = fnOrMethod ? countParams( defNode ) : std::uint16_t( 0 );
+            d.params    = fnOrMethod ? ( le.lang == Lang::Elixir ? elixirParams( defNode ) : countParams( defNode ) ) : std::uint16_t( 0 );
             // LB-E: a testmacroblock's parameter surface is the MACRO's business, not visible here — claim
             // inexact so the resolver's arity narrowing never trusts params=0 on a test-title symbol.
             d.arityExact = ( fnOrMethod && !isTestMacroBlock ) ? std::uint8_t( cc_paramArityExact( defNode, le.lang, kind ) ? 1 : 0 ) : std::uint8_t( 0 );   // B2.2
@@ -1673,6 +1720,18 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.kind      = kind;
             d.lang      = le.lang;
             d.name      = isTestMacroBlock ? std::string( nameTxt ) : defNameFromCapture( le.lang, nameTxt );   // LB-E: a title is a display string — see testMacroTitleOf
+            if( le.lang == Lang::Elixir && elixirTarget( roleNode, src ) == "test" )
+            {
+                // Static ExUnit title; interpolation was rejected by elixirKeepCapture.
+                d.name = "test " + std::string( nameTxt.substr( 1, nameTxt.size() - 2 ) );
+                d.testScope = 1;
+            }
+            else if( le.lang == Lang::Elixir && !elixirImplName( roleNode, src ).empty() )
+            {
+                // `defimpl P, for: T` — the @name capture is just the protocol alias, but the module Elixir
+                // generates is `P.T`, which is what the impl's own defs carry as their scope.
+                d.name = elixirImplName( roleNode, src );
+            }
             if( le.lang == Lang::Cpp )                              // canonical scope (E#4): out-of-line `A::b` → "A", else enclosing class/namespace
             {
                 d.scope = qualifierOf( nameNode, src );
@@ -1688,6 +1747,15 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             else if( le.lang == Lang::Rust )
             { // H4: `impl Widget { fn new() }` → "Widget" — see rustEnclosingScopeOf
                 d.scope = rustEnclosingScopeOf( nameNode, src, /*includeModules=*/true );
+            }
+            else if( le.lang == Lang::Elixir )
+            {
+                // A defimpl row's own name is already absolute (`P.For`), so no enclosing module scopes it.
+                d.scope = elixirImplName( roleNode, src ).empty() ? elixirScope( roleNode, src ) : std::string{};
+            }
+            else if( le.lang == Lang::Ruby )
+            { // enclosing class/module → id= addressability, per-class overload sets, editCheckImplicitReceiver
+                d.scope = rubyEnclosingScopeOf( nameNode, src );   // (test/rubyscopecheck.sh)
             }
             defs.push_back( std::move( d ) );
             if( kind == SymKind::Class || kind == SymKind::Struct || kind == SymKind::Interface )
@@ -1726,6 +1794,23 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 r.lang      = le.lang;
                 r.role      = isImportRef ? RefRole::Import : RefRole::Call;   // ABS-3: @reference.call is a call use-site; @reference.import a using-decl re-export
                 r.name      = finalSegment( nameTxt );
+                if( le.lang == Lang::Elixir )
+                {
+                    r.qualifier = elixirScope( roleNode, src );
+                    const TSNode target = ts_node_child_by_field_name( roleNode, "target", 6 );
+                    if( !ts_node_is_null( target ) && kindIs( ts_node_type( target ), "dot" ) )
+                    {
+                        const TSNode receiver = ts_node_child_by_field_name( target, "left", 4 );
+                        if( !ts_node_is_null( receiver ) && kindIs( ts_node_type( receiver ), "alias" ) )
+                        {
+                            r.qualifier = std::string( nodeTextOf( receiver, src ) );
+                        }
+                    }
+                }
+                else if( le.lang == Lang::Ruby && rubyCallIsAssignmentTarget( nameNode ) )
+                {
+                    r.name.push_back( '=' );   // `obj.name = v` calls `name=`, never the getter `name` (test/rubysettercheck.sh)
+                }
                 if( le.lang == Lang::Cpp )
                 {
                     r.qualifier = qualifierOf( nameNode, src ); // `A::b()` → "A" (E#4 canonical resolve)
@@ -1776,6 +1861,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     r.fieldName = std::move( rs.field );                                 //   depth-2 intermediate field; "" otherwise
                     auto [ ac, ak ] = callArity( nameNode, le.lang, src );               // B2.2: call-site positional arg count
                     r.argCount = ac;  r.argCountKnown = ak;                              //   → arity filter in graph.h
+                }
+                if( !ppDead.empty() && inPreprocDead( ppDead, r.startByte ) )
+                {
+                    continue;   // #62: inside `#if 0` — never compiled, so never a call edge
                 }
                 refs.push_back( std::move( r ) );
             }

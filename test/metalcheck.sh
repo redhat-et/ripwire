@@ -139,7 +139,7 @@ fi
 [ "$( grep -c '' "$TMP/a" )" -le 1 ] && ok "output is minified (no stray newlines)" || no "newlines outside CDATA"
 
 # ── 11) the user-visible language list names Metal (doc/binary agreement) ─────────────────────────────
-"$BIN" --help 2>&1 | grep -qi 'Metal' \
+"$BIN" --help=all 2>&1 | grep -qi 'Metal' \
     && ok "--help advertises Metal" || no "--help does not mention Metal"
 grep -qi 'Metal' "$ROOT/README.md" \
     && ok "README advertises Metal" || no "README does not mention Metal"

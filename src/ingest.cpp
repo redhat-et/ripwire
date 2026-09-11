@@ -12,14 +12,18 @@
 #include "arch.h"              // T5: relForHash — root-relative path key, reused for cache portability
 #include "quality.h"           // A5: cacheDirLadder + sweepStaleCacheBlobsOnce — the cache-dir hygiene hook (saveCache)
 #include "embedded_queries.h"  // configure-generated constexpr tags.scm table; no runtime source-tree dependency
+#include "infra/nodekind.h"    // rw::kindIs - the inline node-kind compare the per-AST-node dispatch chains run on (OPTREMARKS F3)
 #include "infra/hashutil.h"    // sanitizer-clean modulo-2^64 FNV multiplication
 #include "infra/namesplit.h"   // H4: stripTemplateArgs for the C++ qualified-call re-split (shared with tracelocus.h)
 #include "infra/jsonesc.h"     // rw::shSingleQuote - the git ignore probe quotes its root the same way every other git popen does
 #include "infra/fixedStr.h"    // rw::findByte — the NEON/SSE2 byte scan buildNewlineOffsets rides
 #include "lexindex.h"          // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
 #include "didyoumean.h"        // octocode F3: boundedEditDistance/nearestNameByEditDistance — the ONE near-miss
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
                                 // primitive, reused for a --match query's node-kind tokens (see nearestNodeKindHint)
 #include "pattern.h"           // R2: the pattern surface's compiler + matcher — AstWalk::Pattern rides the shared file walk
+#include "preprocdead.h"       // #62: the ONE literal `#if 0` rule (shared with slice.h) — dead call sites never become edges
 
 #include "infra/Diagnostics.h"
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
@@ -94,27 +98,27 @@ struct Dump
         {
             calls += gNodes[ p ].load();
         }
-        std::fprintf( stderr, "\n[fuseprobe] files_with_a_parsed_tree=%llu\n", (unsigned long long) files );
-        std::fprintf( stderr, "[fuseprobe] %-18s %13s %10s %8s\n", "pass", "visitor_calls", "files", "%files" );
+        rw::emitTo( stderr, "\n[fuseprobe] files_with_a_parsed_tree={}\n", (unsigned long long) files );
+        rw::emitTo( stderr, "[fuseprobe] {:<18} {:>13} {:>10} {:>8}\n", "pass", "visitor_calls", "files", "%files" );
         for( int p = 0; p < kPassCount; ++p )
         {
             const std::uint64_t f = gFiles[ p ].load();
-            std::fprintf( stderr, "[fuseprobe] %-18s %13llu %10llu %7.1f%%\n", kPassName[ p ], (unsigned long long) gNodes[ p ].load(),
+            rw::emitTo( stderr, "[fuseprobe] {:<18} {:>13} {:>10} {:7.1f}%\n", kPassName[ p ], (unsigned long long) gNodes[ p ].load(),
                           (unsigned long long) f, files ? 100.0 * double( f ) / double( files ) : 0.0 );
         }
         const std::uint64_t astProxy = gNodesMaxPass.load();
         const std::uint64_t pops     = gStreamPops.load();
-        std::fprintf( stderr, "[fuseprobe] visitor_calls=%llu  ast_size_proxy(sum of per-file max pass)=%llu\n",
+        rw::emitTo( stderr, "[fuseprobe] visitor_calls={}  ast_size_proxy(sum of per-file max pass)={}\n",
                       (unsigned long long) calls, (unsigned long long) astProxy );
-        std::fprintf( stderr, "[fuseprobe] STREAM_POPS=%llu  streams_per_node=%.2fx  <-- the number fusion moves\n",
+        rw::emitTo( stderr, "[fuseprobe] STREAM_POPS={}  streams_per_node={:.2f}x  <-- the number fusion moves\n",
                       (unsigned long long) pops, astProxy ? double( pops ) / double( astProxy ) : 0.0 );
-        std::fprintf( stderr, "[fuseprobe] files by number of passes that SAW a node:\n" );
+        rw::emitRaw( stderr, "[fuseprobe] files by number of passes that SAW a node:\n" );
         for( int k = 0; k <= kPassCount; ++k )
         {
             const std::uint64_t f = gHist[ k ].load();
             if( f != 0 )
             {
-                std::fprintf( stderr, "[fuseprobe]   %d pass%s : %10llu files (%5.1f%%)\n", k, k == 1 ? " " : "es", (unsigned long long) f,
+                rw::emitTo( stderr, "[fuseprobe]   {} pass{} : {:>10} files ({:5.1f}%)\n", k, k == 1 ? " " : "es", (unsigned long long) f,
                               files ? 100.0 * double( f ) / double( files ) : 0.0 );
             }
         }
@@ -154,6 +158,8 @@ extern "C"
     const TSLanguage* tree_sitter_markdown( void );
     const TSLanguage* tree_sitter_php( void );
     const TSLanguage* tree_sitter_lua( void );
+    const TSLanguage* tree_sitter_elixir( void );
+    const TSLanguage* tree_sitter_dart( void );
 }
 
 // ── the ingest-family sections (2026-08-29 split; ingest() phases followed 2026-08-30) ──────────────
@@ -173,9 +179,11 @@ extern "C"
 #include "ingest_cache.h"
 #include "ingest_metrics.h"
 #include "ingest_relations.h"
+#include "ingest_jsimports.h"
 #include "ingest_docs.h"
 #include "ingest_names.h"
 #include "ingest_binds.h"
+#include "ingest_elixir.h"
 #include "ingest_sidecap.h"
 #include "ingest_prewarm.h"
 #include "ingest_parsepool.h"
@@ -324,6 +332,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     std::vector<RawBind>().swap( raw.binds );
 
     result.includes = std::move( raw.incs );   // physical dependencies (#include / import), for --deps
+    result.constOpens = std::move( raw.constOpens );   // parser version 82: Ruby class/module opens → resolve.h's constant index
 
     emitBindingAliases( result, raw.ffis );
     emitRouteDefs( result, raw.routeDefs );
@@ -337,7 +346,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // macro-edges round: the corpus-wide role="macro" retag (model.h). AFTER the model is assembled and
     // AFTER saveCache (which stores the per-file truth, role=Call) — a #define added in one file must
     // re-judge every OTHER file's cached call sites on the next run, so the retag can never be persisted.
-    retagMacroCallReferences( result );
+    {
+        PROFILE_SCOPE_DESCRIBE( "ingest/build-model: macro retag (corpus-wide post-pass)" );
+        retagMacroCallReferences( result );
+    }
 
     // r9 shadow suppression (model.h): a reference inside a function whose LOCAL declarations bind the same
     // name as a variable belongs to the local, not to any same-named indexed symbol — erase it here, the one
@@ -346,7 +358,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // macro retag (role="macro" is preprocessor evidence and stays) and AFTER saveCache (per-file truth is
     // persisted unsuppressed; the collision gate depends on the whole corpus' symbols, so the judgment can
     // never be cached per-file — same reasoning as the retag above).
-    suppressShadowedReferences( result );
+    {
+        PROFILE_SCOPE_DESCRIBE( "ingest/build-model: shadow suppression (r9 post-pass)" );
+        suppressShadowedReferences( result );
+    }
 
     return result;
 }

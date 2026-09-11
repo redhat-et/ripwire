@@ -1,0 +1,200 @@
+# prompts.tsv — labelled corpus for --eval-skills (skill-ROUTING eval).
+# One row per line: prompt<TAB>expected<TAB>provenance<TAB>split
+#   expected   = comma-separated skill dir names (a PERMITTED SET — several moments legitimately map to
+#                2 skills), or `none` (no ripwire skill should fire).
+#   provenance = router  — wording adapted from a skills/ripwire-router/SKILL.md moment row; the label is
+#                          that row's mapped skill (ground truth = the router's own moment map).
+#                desc    — wording taken from a trigger phrase the target skill's OWN description quotes;
+#                          the label is that skill (ground truth = the skill's stated trigger).
+#                judged  — hand-written paraphrase (author-judged wording, 2026-07-24); the LABEL still
+#                          follows the router's moment map, only the words are new. These are the hard set:
+#                          they share no vocabulary with the descriptions by construction.
+#                neg     — hand-written prompt where NO ripwire skill should fire (author-judged).
+#   split      = test | dev — FROZEN HELD-OUT SPLIT (added 2026-07-25, round r26). The n=128 `test` rows
+#                (43 of them `judged` — the hard, vocabulary-free paraphrase set that first made
+#                bm25-desc's win/loss margin measurable, 24/43) are the committed benchmark and are FROZEN:
+#                do NOT edit a description and re-measure against these SAME rows next round — that is
+#                train-on-test with extra steps. Rows meant for iterating on a description change belong in
+#                a NEW row with split=dev instead. 2026-08-08 (audit H1 follow-up): the dev split gained its
+#                first n=20 rows (16 positive + 4 negative), covering the 2026-08-05..08 routing moments
+#                (nest-profile/essential-complexity trust, cache-lint pack, --skipped-vs---doctor,
+#                opt-remarks triage + its hard negatives) — free to grow or be replaced round to round,
+#                unlike the rows above this comment. --eval-skills enforces this split (parses the column,
+#                refuses an unrecognized value, reports test/dev metrics SEPARATELY with their sizes) —
+#                this paragraph is documentation of that behavior, not the enforcement itself. A row with no
+#                4th column defaults to split=test (back-compat for hand-built ad-hoc TSVs in other gates),
+#                but every row actually in this file states it explicitly so the freeze is visible on read,
+#                not inferred.
+# ripwire-router itself is never a legal label: it is the fallback map, not a routing destination.
+# Keep this file ASCII; the harness truncates prompts at a byte boundary when reporting misses.
+#
+# RELABEL log (2026-08-11, consensus content-gaps round): three rows relabeled on the S1
+# ceiling check's two-rater consensus (blind protocol, sealed key; both raters independently
+# contradicted the stored label — the only 3 such rows of 63 audited misses; record: EVALS.md
+# "consensus content gaps" registration). Labels changed; prompts, provenance, split untouched;
+# no rows added. Pre-relabel corpus lines (the sealed answer_key numbering — this comment block
+# shifts later lines by +14):
+#   line 180 (ceiling id M043) ripwire-orient       -> ripwire-mcp       (setup-health / "is my
+#            ripwire setup broken" is the mcp skill's staleness/health surface, per the owner's
+#            2026-08-11 tool-diagnostics fold-in decision)
+#   line 225 (ceiling id M062) ripwire-change-check -> ripwire-find-bug  (a named failing CI test
+#            with no known cause is a symptom-first localization moment, not a diff review)
+#   line 233 (ceiling id M040) ripwire-fresh-eyes   -> ripwire-find-bug  (feature invisible at
+#            runtime is a wrong-output symptom hunt, not a maintenance-risk pass)
+#
+# ── positives: router-map provenance ────────────────────────────────────────────────────────────────
+# ── positives: skill-description provenance ─────────────────────────────────────────────────────────
+# ── positives: judged paraphrases (author-written wording; labels follow the router map) ────────────
+New on this team as of Monday; give me the lay of the land before I pick up a ticket.	ripwire-orient	judged	test
+Where does input validation actually happen in this service?	ripwire-orient	judged	test
+If I rename the third parameter of buildIndex, what downstream code breaks?	ripwire-navigate	judged	test
+Rough out the work to support incremental compilation - what order, what surface, how much effort?	ripwire-before-you-build	judged	test
+I need a tiny timestamp-formatting utility; do not let me reinvent one we already have.	ripwire-reuse-first	judged	test
+Stop me from reading the whole repo - what is the minimal context to fix the pager?	ripwire-orient	judged	test
+Double-check my working tree before I open the pull request.	ripwire-change-check,ripwire-quality-bar	judged	test
+The nightly job started throwing a null-pointer exception somewhere after Tuesday's deploy.	ripwire-find-bug	judged	test
+Merge my three feature branches with the least pain.	ripwire-change-check	judged	test
+Summarize the storage engine for the teammate taking it over next sprint.	ripwire-handoff	judged	test
+Our imports have become a circular tangle - how bad is it and how do we stop the bleeding?	ripwire-layers	judged	test
+This function parses packets straight off the wire - look it over for danger before I ship.	ripwire-security-scan	judged	test
+The flame graph blames string splitting - dig into that code.	ripwire-perf-target	judged	test
+Which parts of the checkout flow have no safety net at all if I refactor them?	ripwire-write-tests	judged	test
+I fixed the bug; tell me whether my patch made the codebase worse.	ripwire-quality-bar	judged	test
+List every function above complexity twenty that can eventually reach the database layer.	ripwire-graph-query	judged	test
+# ── positives: judged paraphrases, growth pass 2026-07-25 (S5.7.2 follow-up) ─────────────────────────
+# n=16 judged rows resolves +-6pp; grown past 40 so before/after description-rewrite comparisons stop
+# hiding real movement in noise. Same discipline as the rows above: each label follows the ROUTER's own
+# moment-map row (skills/ripwire-router/SKILL.md), the wording is new, and NOTHING here was checked
+# against what the current skill descriptions happen to match (train-on-test would defeat the point).
+We are taking over a service nobody on the team has touched in a year - what should worry us before we start editing it?	ripwire-fresh-eyes	judged	test
+This class has ballooned to two thousand lines and everyone is scared of it - where would a split actually help?	ripwire-fresh-eyes	judged	test
+If the one person who understands this subsystem left tomorrow, how exposed would we be?	ripwire-fresh-eyes	judged	test
+How do I hook this tool up as an MCP server so my coding agent can call it directly?	ripwire-mcp	judged	test
+I am mid-task in my agent with a dozen MCP tools available - which one actually answers what I need right now?	ripwire-mcp	judged	test
+This ticket touches the cache layer, the eviction policy, and the metrics exporter - how do those three actually tie together?	ripwire-navigate	judged	test
+Before I touch this shared utility function, I need to know everything that currently calls it.	ripwire-navigate	judged	test
+I need to find every place we retry a network call the old way, not just grep the word retry.	ripwire-navigate	judged	test
+I need to add a new backend that implements the StorageDriver interface - what does an existing one look like so I do not guess the shape?	ripwire-before-you-build	judged	test
+Before we commit a sprint to this, is the approach even workable given how the code is actually structured?	ripwire-before-you-build	judged	test
+We just lost an hour to a stale lockfile causing a flaky build - I want that written down somewhere it will resurface next time this file comes up.	ripwire-orient	judged	test
+Draw me the shape of this codebase - the modules and how they are organized, not a file listing.	ripwire-orient	judged	test
+I just changed the signature on this helper function - does anything downstream actually depend on the old shape?	ripwire-change-check	judged	test
+Three people have feature branches off the same module and we need to land them this week without a mess - what order should they go in?	ripwire-change-check	judged	test
+We have a graveyard of old branches nobody remembers the status of - is any of that actually still unmerged and worth rescuing?	ripwire-change-check	judged	test
+Give me everything I would need for this ticket in one shot - ranking, the actual code, who calls it, what to test - I do not want to run five separate commands.	ripwire-orient	judged	test
+I keep tab-hopping between a dozen files trying to understand one code path - there has to be a faster way to see the shape of this.	ripwire-orient	judged	test
+Before I pull in a new library for retry-with-backoff, is there already something like that in this codebase?	ripwire-reuse-first	judged	test
+Nobody has ever written a single test for this billing module - I want to close that gap, not just poke at it randomly.	ripwire-write-tests	judged	test
+I need every function that is both high-complexity and eventually reaches the billing code - a simple caller list cannot express that.	ripwire-graph-query	judged	test
+Our benchmark says one call is eating most of the frame time - help me actually look at that code and what feeds into it.	ripwire-perf-target	judged	test
+A teammate sent me an mcp config file from another project - I want it checked over before I let it anywhere near my machine.	ripwire-security-scan	judged	test
+This parser reads whatever a client sends over the socket before we have validated any of it - I want eyes on that before it ships.	ripwire-security-scan	judged	test
+I am rotating off this project on Friday - put together something the next person can actually read instead of skimming the whole repo.	ripwire-handoff	judged	test
+We keep saying the UI layer should not import the database layer but nothing actually stops it - can we make that a real rule in CI?	ripwire-layers	judged	test
+Before I open this PR I just want to know what got worse, not a whole style lecture.	ripwire-quality-bar	judged	test
+Here is the crash log with the full stack trace - I would rather not manually walk every frame by hand.	ripwire-find-bug	judged	test
+# ── negatives: no ripwire skill should fire (author-judged) ─────────────────────────────────────────
+How do I vertically center a div inside a flex container?	none	neg	test
+What does git rebase --onto actually do?	none	neg	test
+Undo my last three commits but keep the changes staged.	none	neg	test
+Why does npm install fail with EACCES on my machine?	none	neg	test
+Write a limerick about compilers.	none	neg	test
+Convert this JSON blob to YAML for me.	none	neg	test
+What is the difference between TCP and UDP?	none	neg	test
+My Kubernetes pod is stuck in CrashLoopBackOff - what are the common causes?	none	neg	test
+Set up a Python virtualenv pinned to an older interpreter.	none	neg	test
+Rename a file in git while preserving its history.	none	neg	test
+What is a good commit message format for a small team?	none	neg	test
+Increase the terminal font size in VS Code.	none	neg	test
+Proofread and review my conference talk abstract.	none	neg	test
+Draft a standup update from what I did yesterday.	none	neg	test
+Book a meeting room for the design review tomorrow.	none	neg	test
+# ── negatives: growth pass 2026-07-25, kept proportional to the judged growth above. General
+# off-topic prompts plus hard negatives that reuse a skill-name WORD in an unrelated everyday sense
+# (orient/navigate/layers/merge/review/quality/efficient/graph/security/reuse/build/perf/test/fresh) -
+# the same discipline as the original 4 hard negatives (talk-abstract review, commit/rebase wording).
+What is a good stretch routine for lower back pain from sitting all day?	none	neg	test
+Recommend a wine pairing for grilled salmon.	none	neg	test
+How do I turn on dark mode in my terminal emulator?	none	neg	test
+What is the plural of octopus - octopi or octopuses?	none	neg	test
+Explain the offside rule in soccer to someone who has never watched a match.	none	neg	test
+Write a haiku about autumn leaves.	none	neg	test
+How long should I marinate chicken thighs before grilling?	none	neg	test
+What is the best way to learn a new language as an adult?	none	neg	test
+My cat will not stop scratching the couch - any tips?	none	neg	test
+Convert 75 degrees Fahrenheit to Celsius.	none	neg	test
+Which way is magnetic north from here, and how do I use a compass properly?	none	neg	test
+What is the fastest driving route to the airport that avoids tolls?	none	neg	test
+How many layers should a good lasagna have, and in what order?	none	neg	test
+Explain the rules for a handoff in a 4x100 relay race.	none	neg	test
+What is the etiquette for merging onto a busy highway?	none	neg	test
+Can you review this restaurant for me based on the menu photos?	none	neg	test
+What separates a good espresso bean from a mediocre one?	none	neg	test
+What is a fuel-efficient way to drive on the highway?	none	neg	test
+How do I make a pie chart in Excel from this spreadsheet?	none	neg	test
+What is a good deadbolt brand for a front door?	none	neg	test
+What plastics are actually accepted for curbside recycling?	none	neg	test
+What permits do I need before building a backyard shed?	none	neg	test
+How do I improve my 5K running pace?	none	neg	test
+What is a good practice test format for a driver's license exam?	none	neg	test
+I need a fresh pair of reading glasses - what prescription strength ranges are common?	none	neg	test
+# ── split=dev: tuning rows for the 2026-08-05..08-08 moments (nest-profile/essential-complexity/cache-lint/
+# --skipped/opt-remarks). Per the header discipline above: NOT scored against the frozen split=test floor,
+# reported separately, safe to iterate on next round without touching a single row above this line.
+# -- 2026-08-11 growth pass (S1 round): judged rows grown to >=150; split assigned by sha256(prompt) parity
+#    at collection time (deterministic, collector-blind); provenance discipline unchanged (judged/neg only).
+New to this service as of today - what are the moving parts and where does execution start?	ripwire-orient	judged	test
+Jot this down for future sessions: the fixture loader silently caches across tests.	ripwire-orient	judged	test
+The ticket names three structs - ledger, journal, snapshot - and I cannot see how they meet.	ripwire-navigate	judged	test
+I want a build order for the export feature before writing any code.	ripwire-before-you-build	judged	test
+Is streaming decode even viable here or am I fighting the architecture?	ripwire-before-you-build	judged	test
+My new backend must plug into StorageDriver - what has to exist and who implements it today?	ripwire-before-you-build	judged	test
+Before the sprint starts I want an implementation sequence for the notifications feature grounded in real code.	ripwire-before-you-build	judged	test
+About to add a tiny date-formatting util - two minutes tops.	ripwire-reuse-first	judged	test
+Let me write a quick retry wrapper around the fetch call.	ripwire-reuse-first	judged	test
+I am going to write a small helper that dedupes the config list.	ripwire-reuse-first	judged	test
+Let me skim a handful of files to get context on the session store first.	ripwire-orient	judged	test
+Hand me the whole task briefing at once, capped around six thousand tokens.	ripwire-orient	judged	test
+Spinning up four subagents for this refactor - carve the repo so their briefs do not overlap.	ripwire-orient	judged	test
+Before answering I will skim src end to end.	ripwire-orient	judged	test
+My context window is filling with file dumps again - keep this cheap.	ripwire-orient	judged	test
+Two worktrees touched the tokenizer - which lands first and where do they collide?	ripwire-change-check	judged	test
+A test named test_manifest_roundtrip failed on CI - I have its name and no clue what it exercises.	ripwire-find-bug	judged	test
+I think the patch is finished - what did I just make worse?	ripwire-quality-bar	judged	test
+My fix landed but prove the cleanup stuck and nothing regressed.	ripwire-quality-bar	judged	test
+Planning to break up the parser package - what is entangled with what before I start?	ripwire-fresh-eyes	judged	test
+I suspect the scheduler subsystem for these stuck jobs - narrow it down.	ripwire-find-bug	judged	test
+Throwing this compiler error at you - which of our symbols does it actually implicate?	ripwire-find-bug	judged	test
+Show me functions with complexity above twenty from which the allocator is reachable.	ripwire-graph-query	judged	test
+Give me the two-hop callee closure of dispatch but only inside the network cluster.	ripwire-graph-query	judged	test
+Cross complexity with fan-in and show me symbols where both are high, scoped to core/.	ripwire-graph-query	judged	test
+Rate the health of our layering after the merge - worse or better?	ripwire-layers	judged	test
+New architecture rule: adapters may not call services directly - wire up a violation gate.	ripwire-layers	judged	test
+Hook the code map into Claude Code as a tool server for this repo.	ripwire-mcp	judged	test
+Windsurf integration: which config block do I add, and what safety do the editing verbs promise?	ripwire-mcp	judged	test
+Is calling fetch_body from the agent cheaper than pulling entire files into context?	ripwire-mcp	judged	test
+Getting my aider setup to use the graph tools - walk me through the wiring.	ripwire-mcp	judged	test
+Clang complains it could not vectorize the radix loop because no reduction was identified - worth chasing?	ripwire-opt-remarks	judged	test
+I got a vectorization remark on the scoring kernel while editing - decide whether a diff pays.	ripwire-opt-remarks	judged	test
+The profiler pins 40 percent of samples in normalizeKeys - dig in from there.	ripwire-perf-target	judged	test
+Benchmark shows the cold path regressed 2x - I have the numbers, now what in the code?	ripwire-perf-target	judged	test
+Someone sent me a SKILL.md to install - screen it before it touches my agent.	ripwire-security-scan	judged	test
+Reviewing the auth handler for injection risk - assemble the evidence.	ripwire-security-scan	judged	test
+Periodic sweep: anything sketchy in the skills directory we installed last month?	ripwire-security-scan	judged	test
+Which seams in this module does nothing exercise end to end?	ripwire-write-tests	judged	test
+Management wants the billing core covered - rank what deserves a test first.	ripwire-write-tests	judged	test
+I wrote a test for the queue - verify it actually reaches the code I meant.	ripwire-write-tests	judged	test
+Nothing covers the ledger rollover path - write the missing test and prove it registers.	ripwire-write-tests	judged	test
+Which HTTP verbs are idempotent according to the spec?	none	neg	test
+Move the nightly cron to 3am UTC instead of midnight.	none	neg	test
+Translate these error strings into German for the locale file.	none	neg	test
+Center the logo on the landing page and darken the footer.	none	neg	test
+Draft the changelog entry for this week's release.	none	neg	test
+Squash my last four commits into one - the history is messy.	none	neg	test
+Set up prettier so the frontend formats on save.	none	neg	test
+Regenerate the protobuf stubs with the new compiler version.	none	neg	test
+Mute the flaky Slack webhook alert until Monday.	none	neg	test
+What does HTTP status 451 mean?	none	neg	test
+Rename the default branch across our repositories.	none	neg	test
+Fill in the sprint retro doc with what shipped.	none	neg	test
+Explain Python's walrus operator.	none	neg	test

@@ -6,6 +6,7 @@ exceeds the agent harness time ceiling. This runs the same scripts concurrently 
 full verification fits in one window. It does NOT modify regression.sh.
 
 usage: pargates.py <repo-root> <ripwire-bin> [-j N] [--only substr] [--json out.json]
+                   [--shard K/N] [--shard-plan] [--budget-scale F] [--exclude-list FILE]
 """
 import concurrent.futures as cf
 import hashlib
@@ -15,6 +16,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 root = os.path.abspath(sys.argv[1])
@@ -22,6 +24,10 @@ binp = os.path.abspath(sys.argv[2])
 jobs = 6
 only = None
 jsonout = None
+shard = None          # (k, n): run only the k-th of n deterministic slices of the gate list
+shard_plan = False    # print every slice's membership and predicted weight, run nothing
+budget_scale = 1.0    # scales the DEFAULT budget; a declared override acts as a FLOOR under it -- CI passes >1
+exclude_list = None   # a committed file naming gates this leg does not run (one per line, # comments)
 args = sys.argv[3:]
 for i, a in enumerate(args):
     if a == "-j":
@@ -30,6 +36,19 @@ for i, a in enumerate(args):
         only = args[i + 1]
     elif a == "--json":
         jsonout = args[i + 1]
+    elif a == "--shard":
+        k, n = args[i + 1].split("/")
+        shard = (int(k), int(n))
+        if not (1 <= shard[0] <= shard[1]):
+            sys.exit(f"--shard K/N needs 1 <= K <= N, got {args[i + 1]}")
+    elif a == "--shard-plan":
+        shard_plan = True
+    elif a == "--exclude-list":
+        exclude_list = args[i + 1]
+    elif a == "--budget-scale":
+        budget_scale = float(args[i + 1])
+        if budget_scale <= 0:
+            sys.exit(f"--budget-scale needs a positive factor, got {args[i + 1]}")
 
 testdir = os.path.join(root, "test")
 # item 7 (§B12 polish round): os.listdir returns dotfiles too (unlike a shell glob without dotglob), so a
@@ -41,6 +60,26 @@ skip = {"regression.sh"}
 gates = [g for g in gates if g not in skip]
 if only:
     gates = [g for g in gates if only in g]
+
+# --exclude-list: a leg may decline a NAMED set of gates, and only by pointing at a committed file whose
+# every line says which gate and why. The use it exists for (2026-09-07): the macOS plain leg -- an -O0
+# binary on a 3-core runner -- was the critical path of the whole workflow at 33-37 min, and its four
+# slowest gates (binoverridecheck, knownitemcheck, ripwirepubliccheck, xmlwellformed) assert nothing
+# platform-specific and run unchanged on the macOS Release leg and all four Linux legs. Applied BEFORE the
+# shard split so the remaining gates rebalance; the count is printed so a log reader sees the omission
+# instead of inferring it from a shorter gate total. A name in the file that matches no gate is an error:
+# a stale exclusion silently excluding nothing is how a list like this rots.
+excluded = []
+if exclude_list:
+    with open(os.path.join(root, exclude_list)) as fh:
+        wanted = [ln.split("#", 1)[0].strip() for ln in fh]
+    wanted = [w for w in wanted if w]
+    unknown = [w for w in wanted if w not in gates and not (only and only not in w)]
+    if unknown and not only:
+        sys.exit(f"--exclude-list {exclude_list} names gates that do not exist: {' '.join(unknown)}")
+    excluded = [g for g in gates if g in wanted]
+    gates = [g for g in gates if g not in wanted]
+    print(f"exclude-list {exclude_list}: {len(excluded)} gate(s) not run on this leg: {' '.join(excluded)}")
 
 # --- longest-first (LPT) scheduling -----------------------------------------------------------
 # A greedy scheduler minimizes wall time by handing the slowest jobs to workers FIRST -- a long
@@ -76,6 +115,54 @@ def _load_timings(path):
 
 prior_timings = _load_timings(_timings_path())
 
+# --- sharding: one deterministic slice of the suite per CI job -------------------------------------
+# CI runs this suite on every release leg; at 560+ gates that is ~150 CPU-minutes, i.e. ~60 min wall at
+# -j 3 on a 4-vCPU runner, and the wall clock of the whole workflow IS one leg's suite. Splitting the
+# list across N runner jobs divides that. The split has to be (a) deterministic -- every job computes
+# the same partition from the same inputs, no shared state -- and (b) balanced by cost, or the shard
+# that draws binoverridecheck + pagingsweepcheck + knownitemcheck finishes last and nothing was gained.
+# So the weights come from a COMMITTED table (.github/pargates-shard-weights.json: median measured
+# seconds per gate, regenerated from the local timings file when the suite's shape moves), not from
+# the per-machine scratch timings above, and the assignment is longest-processing-time-first: gates
+# sorted by weight descending (name ascending on ties), each handed to the currently lightest shard.
+# A gate missing from the table gets the table's median -- unknown is not free, and it is not the
+# slowest thing in the batch either when the question is which shard, not which worker. The scheduler
+# below still orders the shard's own gates by the local scratch timings, exactly as before.
+def _shard_weights():
+    path = os.path.join(root, ".github", "pargates-shard-weights.json")
+    w = _load_timings(path) if os.path.isfile(path) else {}
+    if not w:
+        return {}, 1.0
+    med = sorted(w.values())[len(w) // 2]
+    return w, med
+
+
+def shard_plan_for(gate_names, n):
+    weights, median = _shard_weights()
+    order = sorted(gate_names, key=lambda g: (-weights.get(g, median), g))
+    buckets = [[] for _ in range(n)]
+    load = [0.0] * n
+    for g in order:
+        i = min(range(n), key=lambda j: (load[j], j))
+        buckets[i].append(g)
+        load[i] += weights.get(g, median)
+    return buckets, load
+
+
+if shard_plan:
+    n = shard[1] if shard else 4
+    buckets, load = shard_plan_for(gates, n)
+    for i, (b, w) in enumerate(zip(buckets, load), 1):
+        print(f"shard {i}/{n}: {len(b)} gates, predicted {w:.0f}s")
+    print(f"total {len(gates)} gates, predicted {sum(load):.0f}s; largest shard {max(load):.0f}s")
+    sys.exit(0)
+
+if shard:
+    buckets, load = shard_plan_for(gates, shard[1])
+    gates = buckets[shard[0] - 1]
+    print(f"shard {shard[0]}/{shard[1]}: {len(gates)} gates, predicted {load[shard[0] - 1]:.0f}s "
+          f"(largest shard {max(load):.0f}s)")
+
 # Sort longest-first using recorded durations. A gate with NO recorded duration is unknown, not
 # fast -- treat it as potentially the slowest thing in the batch (float('inf')) so it schedules
 # EARLY, alongside the known-long gates, rather than drifting to the tail of the run where an
@@ -104,6 +191,11 @@ exclusive = {"editcheckcheck.sh"}
 # for them -- it is shorter than the work. Measured: rc=124 at 300.1 s on ALL FOUR Linux legs of CI run
 # 31182301976, green on macOS where the same build fits in ~60 s. headbinlib.sh's own waiter budget
 # must stay well under 900 -- its comment explains the coupling.
+# Since 2026-09-10 CI no longer builds that binary inside any gate: ci.yml builds it in its own step BEFORE this
+# harness starts and exports RIPWIRE_HEADBIN, and headbinlib's STAGED mode then never builds and never waits
+# (test/headbinstagecheck.sh). No timeout could have fixed it -- the build is super-linear in the -j contention
+# these budgets run under, so a slow draw outgrew 900 s and then 1200 s. The six numbers stay as declared because
+# the unstaged path (a local run with RIPWIRE_HEADBIN unset) still builds inside the first gate and still waits.
 #
 # cppbenchcheck / regexbombcheck: legitimate ASan-on-a-cold-cache work, not a hang -- ~856 s and ~804 s
 # measured respectively -- so the old flat 300 s cap read a healthy run as a timeout. 1200 s leaves
@@ -120,6 +212,24 @@ exclusive = {"editcheckcheck.sh"}
 # multiplier on these, putting the honest CI numbers well past 300 s and under 900 s; 900 matches what the
 # six *importprecisecheck/*condcheck entries above already use for the same reason. Per the house rule
 # that build and CI cost never gate on wall clock, a budget here is a hang tripwire, not a perf bar.
+# --budget-scale (2026-09-07, first sharded CI runs): the flat default is a HANG tripwire calibrated on an idle
+# dev machine, and a 4-vCPU runner at -j 3 is a 3-8x multiplier on any gate's wall time (mcpframehonestycheck
+# 151 s local -> rc=124 at 300.1 s; paginationcheck 53 s local -> rc=124 at 300.0 s). Sixty-four uncapped gates
+# sit inside that multiplier of the cap, so per-gate entries would be the wrong shape -- and raising the constant
+# itself would blunt the tripwire on the machines it was measured on. So CI passes a scale factor that applies
+# to the DEFAULT, and a declared entry below acts as a FLOOR under it rather than a ceiling over it. The
+# TIMEOUT message names the effective budget and the scale, so a red still names its own limit.
+#
+# The floor (2026-09-10) repairs an inversion the first shape had. Skipping the scale for declared entries
+# meant that under CI's --budget-scale 4 the gates this table calls out as HEAVY were the only gates in the
+# job running on LESS time than an ordinary one: crossdirincludecheck, which builds a whole second ripwire
+# from git HEAD, got 900 s while xmlwellformed -- which pipes one map through xmllint -- got 300 x 4 = 1200.
+# Measured on a CI run of main (34479806177, macos-14 Release shard 2/2): crossdirincludecheck rc=124 at
+# 900.1 s in a shard whose wall was 3588.6 s, with xmlwellformed at 585.8 s and rootrelcheck at 345.9 s in
+# the same job -- every gate on that runner ran 6-10x its idle-local wall, and only the UNDECLARED ones had
+# a budget that had moved with it. max(declared, default x scale) keeps each declared number meaningful on
+# the machine it was measured on (at scale 1.0 the declared value still wins, unchanged) and stops the table
+# from buying a gate less time than saying nothing would have. It never loosens a tripwire below today.
 DEFAULT_TIMEOUT_SEC = 300
 GATE_BUDGET_SEC = {
     "crossdirincludecheck.sh":    900,
@@ -137,6 +247,9 @@ GATE_BUDGET_SEC = {
     "estchargecheck.sh":          900,   # ~26 s idle local; rc=124 at the flat cap on all ubuntu legs.
     "pagingsweepcheck.sh":        900,   # ~34 s idle local; rc=124 at the flat cap on all ubuntu legs.
     "slicediffcheck.sh":          900,   # replays 57 labelled commits (checkout + --slice --since each); ~80 s local
+    "mcpframehonestycheck.sh":    900,   # 2026-09-07 (first sharded CI run 34145918269): rc=124 at 300.1 s on three of
+                                         # four Linux legs' shard 2 -- "exactly the cap" again. ~150 s local; a shard
+                                         # job hands it fewer neighbours to hide behind than the whole suite did.
     "knownitemcheck.sh":          900,   # 2026-09-05: --eval-retrieval stopped sampling 150 symbols in PATH order and
                                          # now grades its whole population exhaustively (the sampler measured the corpus,
                                          # not the ranker -- docs/EVALS.md section 7). The gate runs it twice on src/ for
@@ -279,9 +392,26 @@ def failure_report(out, logpath):
 
 
 def run(g):
-    env = dict(os.environ, RIPWIRE_BIN=binp)
-    limit = GATE_BUDGET_SEC.get(g, DEFAULT_TIMEOUT_SEC)
+    # PYTHONDONTWRITEBYTECODE: a gate that imports a module straight out of the checkout (agentlooplockcheck:
+    # bench/agentloop/; aiderbytescheck: bench/headtohead/r4-2026-08-06/) would otherwise have Python drop a
+    # __pycache__/ beside it. That directory is gitignored, so the tree tripwire below cannot see it, and its
+    # name is on the crawl's built-in denylist, so every crawl of the live repo still counts it
+    # (corpus_pruned_dirs=). Created between the two re-crawls of pagingsweepcheck's cold grep (G) pair, it
+    # made that pair disagree on main twice (CI runs 34534320580, 34536435376). pargatescheck.sh pins it.
+    env = dict(os.environ, RIPWIRE_BIN=binp, PYTHONDONTWRITEBYTECODE="1")
+    scaled_default = int( round( DEFAULT_TIMEOUT_SEC * budget_scale ) )
+    if g in GATE_BUDGET_SEC:
+        # A declared entry is a FLOOR, not a ceiling: it is the number below which this gate would be a
+        # hang even on an idle machine. It must never buy the gate LESS time than an undeclared one gets.
+        declared = GATE_BUDGET_SEC[g]
+        limit = max( declared, scaled_default )
+        scaled = "" if limit == declared else f", declared {declared}s raised to the scaled default {DEFAULT_TIMEOUT_SEC}s x --budget-scale {budget_scale:g}"
+    else:
+        limit = scaled_default
+        scaled = "" if budget_scale == 1.0 else f", default {DEFAULT_TIMEOUT_SEC}s x --budget-scale {budget_scale:g}"
     t0 = time.time()
+    with running_lock:
+        running.add(g)          # the tree tripwire names whoever is in flight when it sees new dirt
     try:
         p = subprocess.run(
             ["bash", os.path.join(testdir, g)],
@@ -294,7 +424,10 @@ def run(g):
         # the budget expired is kept ahead of it: a gate killed at 300 s that had already announced a
         # failing arm used to report ONLY the word TIMEOUT.
         partial = (e.stdout or b"").decode("utf-8", "replace") if isinstance(e.stdout, (bytes, bytearray)) else (e.stdout or "")
-        rc, out = 124, partial + f"\nTIMEOUT after {limit}s (declared budget={limit}s)"
+        rc, out = 124, partial + f"\nTIMEOUT after {limit}s (declared budget={limit}s{scaled})"
+    finally:
+        with running_lock:
+            running.discard(g)
     # A gate that SKIPS is not a gate that PASSED. argvdiffcheck skips without a RIPWIRE_BASE
     # reference binary, and reporting that as a pass is exactly the green-while-inert failure this
     # suite exists to catch elsewhere (the CI/NDEBUG blindness is the same family).
@@ -334,9 +467,83 @@ def _bin_fingerprint():
         return None
 
 
+# --- shared-tree tripwire ----------------------------------------------------------------------
+# The sibling of the binary tripwire above, for the OTHER thing every gate shares: the checkout. A
+# gate that writes a transient file anywhere under the repo root -- a probe copy beside the script
+# it copies, an appended function it then `git checkout`s away -- makes `git status --porcelain`
+# non-empty for as long as the file exists, and every stamped verb (--for, --pr-context,
+# --edit-check, --slice, --situ, --hotspots, --doctor, ...) reads exactly that command, from ANY
+# crawl root inside the checkout, for the `+dirty` half of its at="<sha>[+dirty]" anchor
+# (src/gitstamp.h stampAt). CI run 34298150602, macOS plain shard 2/2: tokenbudgetcheck's `--for`
+# determinism arm got est_tokens 3949 then 3947 -- the six bytes of "+dirty" at 2.5 B/tok -- while
+# gateexitcheck, three worker slots away, had test/gateexitfix/.gateprobe.*.sh on disk. The red
+# named an innocent gate on an innocent tree, and the issue thread named a third gate that had
+# never written outside its own mktemp at all.
+#
+# So: baseline `git status` before the run, sample it while the run is in flight, and report every
+# NEW line together with the gates that were running when it was seen. This is a SAMPLER (every
+# PARGATES_DIRT_POLL_SEC, default 0.25 s): a window shorter than the interval can be missed, so a
+# clean report is "none found", never "none exists" -- the floor rule the binary applies to its own
+# counts. A hit FAILS the run: a writer is a defect whether or not a determinism arm happened to be
+# reading in that window, and the same suite would only flake somewhere else next time.
+# `--no-optional-locks` keeps the sampler from ever taking the index lock a gate might need.
+#
+# Its blind spot is a write git ignores. That is usually harmless, because the crawl skips gitignored paths
+# too -- EXCEPT a directory whose NAME is on the crawl's own denylist (build, __pycache__, node_modules, ...):
+# a crawl of the live repo still counts it in corpus_pruned_dirs= while `git status` stays empty. Python's
+# bytecode cache was one such writer (see run()'s PYTHONDONTWRITEBYTECODE); a clean report stays "none found".
+DIRT_POLL_SEC = float(os.environ.get("PARGATES_DIRT_POLL_SEC", "0.25"))
+
+
+def _tree_dirt():
+    """The set of `git status --porcelain` lines for the shared checkout, or None when git cannot
+    answer (no git, not a repository, a lock held elsewhere) -- a skipped sample, never a false clean."""
+    try:
+        p = subprocess.run(["git", "--no-optional-locks", "-C", root, "status", "--porcelain", "--untracked-files=all"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if p.returncode != 0:
+        return None
+    return set(p.stdout.decode("utf-8", "replace").splitlines())
+
+
+running = set()                 # gates in flight right now; run() keeps it under running_lock
+running_lock = threading.Lock()
+dirt_baseline = _tree_dirt()    # None: git cannot see this root -- the tripwire is disarmed, and says so
+dirt_seen = {}                  # status line -> [first_t, last_t, samples, gates running when seen]
+dirt_stop = threading.Event()
+
+
+def _dirt_sample():
+    now = _tree_dirt()
+    if now is None:
+        return
+    new = now - dirt_baseline
+    if not new:
+        return
+    with running_lock:
+        snap = sorted(running)
+    t = round(time.time() - t0, 1)
+    for ln in new:
+        e = dirt_seen.setdefault(ln, [t, t, 0, set()])
+        e[1] = t
+        e[2] += 1
+        e[3].update(snap)
+
+
+def _dirt_watch():
+    while not dirt_stop.wait(DIRT_POLL_SEC):
+        _dirt_sample()
+
+
 bin_before = _bin_fingerprint()
 
 t0 = time.time()
+dirt_thread = None
+if dirt_baseline is not None:
+    dirt_thread = threading.Thread(target=_dirt_watch, name="tree-dirt-tripwire", daemon=True)
+    dirt_thread.start()
 results = []
 with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
     for r in ex.map(run, parallel_gates):
@@ -349,6 +556,10 @@ for g in exclusive_gates:
     sys.stderr.write("s" if r[4] else ("." if r[1] == 0 else "X"))
     sys.stderr.flush()
 sys.stderr.write("\n")
+if dirt_thread is not None:
+    dirt_stop.set()
+    dirt_thread.join()
+    _dirt_sample()          # one last look: a file a gate LEFT BEHIND is a hit with no gate in flight
 
 bin_after = _bin_fingerprint()
 bin_moved = bin_before != bin_after
@@ -385,13 +596,26 @@ for g, rc, dt, _out, _sk in results:
         tripwire.append((g, prev, dt))
 
 print(f"gates={len(results)} pass={len(results)-len(fails)-len(skips)} "
-      f"skip={len(skips)} fail={len(fails)} wall={round(time.time()-t0,1)}s jobs={jobs}")
+      f"skip={len(skips)} fail={len(fails)} wall={round(time.time()-t0,1)}s jobs={jobs}"
+      + (f" tree_writes={len(dirt_seen)}" if dirt_baseline is not None else " tree_writes=unwatched"))
 if bin_moved:
     print(f"\n*** THE BINARY UNDER TEST CHANGED WHILE THE SUITE RAN: {binp}")
     print(f"***   before={bin_before}  after={bin_after}")
     print("***   Some gate rebuilt it in place. Every gate that ran concurrently saw it missing")
     print("***   (rc=2) or busy (exit 126 / 'Permission denied'), so THOSE FAILURES ARE NOT REAL.")
     print("***   Find the gate that writes to the shared build tree and fix that first.")
+if dirt_baseline is None:
+    print("\ntree tripwire: DISARMED -- git cannot report status for this root, so a gate writing into the shared checkout goes unseen here")
+if dirt_seen:
+    print(f"\n*** A GATE WROTE INTO THE SHARED CHECKOUT WHILE THE SUITE RAN: {root}")
+    print(f"***   sampled every {DIRT_POLL_SEC:g}s -- a shorter window can be missed, so this list is a floor, not a total:")
+    for ln, (t_first, t_last, n, gs) in sorted(dirt_seen.items(), key=lambda kv: kv[1][0]):
+        who = ", ".join(sorted(gs)) if gs else "(no gate in flight -- left behind after the run)"
+        print(f"***   {ln}  seen {n}x, T+{t_first}s..T+{t_last}s; running then: {who}")
+    print("***   Every stamped verb reads `git status --porcelain` for its at=\"...+dirty\" bit from ANY crawl root")
+    print("***   inside this checkout, so a determinism arm that ran in that window can red with the tree innocent.")
+    print("***   Fix the writer first (work on a copy, or a gitignored name that is not a crawl-pruned directory")
+    print("***   name -- never build/, __pycache__/ or node_modules/); only then triage the arms above.")
 if skips:
     print("\nSKIPPED (ran, but proved nothing — not counted as passing):")
     for g, rc, dt, out, _ in skips:
@@ -410,10 +634,12 @@ if fails:
     for g, rc, dt, report, _sk in fails:
         print(f"\n=== {g} (rc={rc}, {dt}s) ===")
         print("\n".join("    " + ln for ln in report.splitlines()))
+elif dirt_seen:
+    print("\nNO GATE FAILED, BUT THE SUITE IS NOT CLEAN -- a gate wrote into the shared checkout (see the tree tripwire above)")
 else:
     print("\nALL PASS")
 
 if jsonout:
     with open(jsonout, "w") as fh:
         json.dump({g: {"rc": rc, "sec": dt, "skipped": sk} for g, rc, dt, _, sk in results}, fh, indent=1)
-sys.exit(1 if fails else 0)
+sys.exit(1 if fails or dirt_seen else 0)

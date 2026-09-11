@@ -26,12 +26,26 @@ OUTPUT="$( "$BIN" "$FIXTURE" --pack-signatures 2>&1 )"
 
 # Normalise whitespace: replace "> followed by <" with newline so each
 # element boundary is its own line — makes single-element grep reliable.
+#
+# FLAKE, 2026-09-08 (CI 34168787988, ubuntu Release+clang shard 1/4, rc=1 in 0.3s): assertion 1
+# reported pure="1" "missing from output entirely" while assertions 2 and 3 -- reading the SAME
+# $OUTPUT, and whose python helper exits 1 rather than falling through -- both found it on value()
+# and doubled(). Assertion 6 confirmed the fixture parsed and assertion 7 confirmed two runs were
+# byte-identical. One run cannot both have and not have the attribute, so the product was never
+# wrong: the three-process `echo | tr | sed` pipeline captured in $( ) came back short under -j 3
+# load, and a truncated LINES greps exactly like an absent attribute. A rerun of the same job on the
+# same commit passed. Two changes keep a transient pipeline from ever reading as a product failure:
+# assertion 1 now greps $OUTPUT directly (the same bytes the python assertions read), and LINES is
+# guarded below so a truncation fails LOUDLY as itself instead of masquerading as a missing flag.
 LINES="$( echo "$OUTPUT" | tr -d '\n' | sed 's/></>\n</g' )"
+if [ -z "$LINES" ] || [ "${#LINES}" -lt "$(( ${#OUTPUT} / 2 ))" ]; then
+    fail "normalisation pipeline truncated: OUTPUT ${#OUTPUT} bytes -> LINES ${#LINES} bytes (a gate fault, not a product one)"
+fi
 
 # ---- assertions ----
 
 # 1. pure="1" attribute appears somewhere in the output at all.
-if echo "$LINES" | grep -qF 'pure="1"'; then
+if printf '%s' "$OUTPUT" | grep -qF 'pure="1"'; then
     pass 'pure="1" attribute is present in output'
 else
     fail 'pure="1" attribute is missing from output entirely'

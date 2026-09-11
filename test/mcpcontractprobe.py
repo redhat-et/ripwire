@@ -44,7 +44,7 @@ comparison, and the only rows worth reading are the two flagged DIVERGES.
   insert_before_symbol     | path,paths,symbol,file,text             | path,symbol,text     | answers | n/a
   insert_after_symbol      | path,paths,symbol,file,text             | path,symbol,text     | answers | n/a
   fetch_body               | path,handle,start_line,end_line,paths   | path,handle| answers    | answers
-  exemplar                 | path,paths,kind,task                    | path +anyOf(kind|task) | answers | answers
+  exemplar                 | path,paths,kind,task                    | path +anyOf(kind|task) [1] | answers | answers
   quality_delta            | path,paths                              | path       | REFUSE     | REFUSE
   quality_baseline         | path,paths                              | path       | REFUSE     | REFUSE
   impact                   | path,paths,symbol,limit,offset          | path,symbol| answers    | answers
@@ -59,6 +59,14 @@ comparison, and the only rows worth reading are the two flagged DIVERGES.
   flags                    | path,kind,symbol,paths                  | path       | answers    | answers
   doc_drift                | path,kind,paths                         | path       | answers    | answers
   batch                    | path,queries,paths                      | path,queries| answers   | n/a (CLI --batch=FILE REFUSES)
+
+[1] AS RECORDED 2026-07-30, and no longer the shape the binary emits. Issue #48 (2026-09-07): the
+    Anthropic tool-schema validator refuses oneOf/allOf/anyOf at the top level of a tool input schema,
+    so exemplar's top-level `anyOf` is gone and the kind-or-task requirement is stated in the two
+    members' property descriptions plus the runtime refusal. The row is left as measured — this table
+    is a dated measurement, not a live expectation — with the change named here.
+    Also since: the nine verbs whose required list is empty now OMIT the key rather than emitting `[]`.
+    test/mcpstrictschemacheck.sh is the live pin for both.
 
 `required` is shown for a ROOTLESS server; a server started as `ripwire <root> --mcp` drops `path` from
 every row, which is the point of rendering it from the policy rather than hardcoding it.

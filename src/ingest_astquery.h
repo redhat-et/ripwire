@@ -3,6 +3,9 @@
 #error "ingest_astquery.h is a SECTION of src/ingest.cpp's translation unit - include it only from ingest.cpp (see the ingest-family split note there)"
 #endif
 
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 // ingest_astquery.h — the narrow-parse query services, moved VERBATIM from ingest.cpp in the
 // 2026-08-29 split: the --match/--lint shared AST-query pass (capture text + predicate evaluation,
 // the per-file newline-offset index, grouped query compilation, the did-you-mean node-kind hints,
@@ -717,7 +720,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                 }
                 if( !any )
                 {
-                    std::fprintf( stderr, "ripwire: AST query did not compile for any grammar: %.*s\n", int( spec.query.size() ), spec.query.data() );
+                    rw::emitTo( stderr, "ripwire: AST query did not compile for any grammar: {}\n", std::string_view( spec.query.data(), spec.query.size() ) );
                     if( groups[groupIndex].uncompiledOut )
                     {
                         groups[groupIndex].uncompiledOut->push_back( spec.query );
@@ -1409,7 +1412,7 @@ inline void spanTierMemoStore( const std::string& diskPath, const StatInfo& now,
     const std::string                 blobPath = spanTierMemoPath( diskPath );
     char                              suffix[ 64 ];
     // 4 B literal + %d at 11 + 1 B + %llu at 20 = 36 B worst case into 64 — see test/fixedbufsweep.sh's census
-    std::snprintf( suffix, sizeof( suffix ), ".tmp%d-%llu", int( ::getpid() ), static_cast<unsigned long long>( tempSeq.fetch_add( 1, std::memory_order_relaxed ) ) );
+    rw::formatTo( suffix, sizeof( suffix ), ".tmp{}-{}", int( ::getpid() ), static_cast<unsigned long long>( tempSeq.fetch_add( 1, std::memory_order_relaxed ) ) );
     const std::string tempPath = blobPath + suffix;
     {
         std::ofstream out( tempPath, std::ios::binary | std::ios::trunc );

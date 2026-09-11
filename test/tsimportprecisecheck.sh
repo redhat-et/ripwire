@@ -95,7 +95,7 @@ monotonic_check()
     # HEAD sha, then reused by all four monotonicity gates and every rerun until HEAD moves.
     local OLDBIN
     OLDBIN="$( ripwire_head_binary "$ROOT" "$TMP" )" \
-        || { skip "monotonicity: pre-change build failed"; return; }
+        || { headbin_refusal $? "monotonicity"; return; }
 
     local ao an
     ao="$( "$OLDBIN" "$FIX" --no-cache 2>/dev/null | grep -oE 'ambiguous=[0-9]+' | head -1 | grep -oE '[0-9]+' )"
@@ -107,5 +107,9 @@ monotonic_check()
     fi
 }
 monotonic_check
+
+bash "$ROOT/test/lib/jsimportalias.sh" "$BIN" || fail=1
+bash "$ROOT/test/lib/jsimportfacts.sh" "$BIN" || fail=1
+bash "$ROOT/test/lib/jsdefaultimport.sh" "$BIN" || fail=1
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

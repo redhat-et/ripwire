@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // mcpindex.h — the warm in-memory index for --mcp: parse-once/reuse-across-calls
 // {ingest, graph, rank} keyed by root, its staleness machinery (mtime+size stat sweep, the
@@ -424,7 +427,7 @@ namespace mcpdetail
     {
         const std::uint64_t idHash = str64( stableHandleId( canonId, path, name ) );
         char buf[ 64 ];
-        std::snprintf( buf, sizeof( buf ), "sym#%016llx@%016llx",
+        rw::formatTo( buf, sizeof( buf ), "sym#{:016x}@{:016x}",
                        (unsigned long long)idHash, (unsigned long long)contentHash );
         return buf;
     }
@@ -586,7 +589,7 @@ inline std::string mcpCachePath( const std::string& root )
     std::uint64_t h = 1469598103934665603ULL;     // FNV-1a of the root → a stable per-root cache name
     for( char c : root ) { h ^= static_cast<unsigned char>( c ); h = hashutil::fnv1aMultiply( h ); }
     char name[ 64 ];
-    std::snprintf( name, sizeof( name ), "ripwire-mcp-%016llx.cache", (unsigned long long)h );
+    rw::formatTo( name, sizeof( name ), "ripwire-mcp-{:016x}.cache", (unsigned long long)h );
 
     return quality::resolveCacheBlobPath( quality::cacheDirLadder(), name );
 }
@@ -1085,7 +1088,7 @@ inline void maybePrefetchHeadSnapshot( const std::string& root, std::size_t file
     mcpPrefetchSpawnCount().fetch_add( 1, std::memory_order_relaxed );
 
     const bool timingsOn = std::getenv( "RIPWIRE_MCP_TIMINGS" ) != nullptr;
-    if( timingsOn ) { std::fprintf( stderr, "ripwire-prefetch spawn root=%s\n", root.c_str() ); std::fflush( stderr ); }
+    if( timingsOn ) { rw::emitTo( stderr, "ripwire-prefetch spawn root={}\n", root.c_str() ); std::fflush( stderr ); }
 
     // DETACHED worker: copies `root` by value (no dangling), runs the SAME computeHeadSnapshot the lazy
     // quality_delta uses with the SAME default args (so it warms the IDENTICAL qsnap key), then clears the
@@ -1096,7 +1099,7 @@ inline void maybePrefetchHeadSnapshot( const std::string& root, std::size_t file
         struct FlagGuard { ~FlagGuard(){ mcpPrefetchInFlight().store( false, std::memory_order_release ); } } guard;
         try   { (void)rw::quality::computeHeadSnapshot( root ); }      // side effect: warm the sha-keyed qsnap (atomic publish)
         catch( ... ) { /* optional work — drop silently (§2b rule 3) */ }
-        if( timingsOn ) { std::fprintf( stderr, "ripwire-prefetch done root=%s\n", root.c_str() ); std::fflush( stderr ); }
+        if( timingsOn ) { rw::emitTo( stderr, "ripwire-prefetch done root={}\n", root.c_str() ); std::fflush( stderr ); }
     } ).detach();
 }
 

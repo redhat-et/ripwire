@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // commentcoherence.h — `--comment-coherence`: two published, deterministic measures of what a doc
 // comment SAYS, per function/method — not whether it is stale (that is --doc-drift's job; see the note
@@ -333,12 +336,12 @@ inline int writeCommentCoherenceReport( const IngestResult& ing, int pageLimit, 
     pageDisclosure( disclosure, sizeof disclosure, shown, total, page.end, pageLimit, pageOffset, true );
 
     std::fputs( kCommentCoherenceLegend, stdout );
-    std::printf( "<comment_coherence documented=\"%zu\" no_comment=\"%u\"%s", total, scan.noCommentCount, disclosure );
+    rw::emitTo( stdout, "<comment_coherence documented=\"{}\" no_comment=\"{}\"{}", total, scan.noCommentCount, rw::cstr( disclosure ) );
     if( scan.unreadableFileCount != 0 )
     {
-        std::printf( " unreadable_files=\"%u\"", scan.unreadableFileCount );
+        rw::emitTo( stdout, " unreadable_files=\"{}\"", scan.unreadableFileCount );
     }
-    std::printf( "%s>", rootAttr.c_str() );
+    rw::emitTo( stdout, "{}>", rootAttr.c_str() );
 
     std::vector<char> escPath;
     std::vector<char> escName;
@@ -349,13 +352,13 @@ inline int writeCommentCoherenceReport( const IngestResult& ing, int pageLimit, 
         const std::string_view      rel  = rootPrefix.empty() ? std::string_view( ing.files[s.fileId] ) : rw::sarif::rootRelativeUri( ing.files[s.fileId], rootPrefix );
         const std::string           path( escapeXml( rel, escPath ) );
         const std::string           name( escapeXml( s.name, escName ) );
-        std::printf( "<fn p=\"%s:%u\" n=\"%s\" c_coeff=\"%.3f\" words=\"%u\" restate=\"%u\" "
-                     "cic=\"%.3f\" c_terms=\"%u\" i_terms=\"%u\" shared=\"%u\"/>",
+        rw::emitTo( stdout, "<fn p=\"{}:{}\" n=\"{}\" c_coeff=\"{:.3f}\" words=\"{}\" restate=\"{}\" "
+                     "cic=\"{:.3f}\" c_terms=\"{}\" i_terms=\"{}\" shared=\"{}\"/>",
                      path.c_str(), s.line, name.c_str(),
                      row.cCoeff, row.commentWordCount, row.restatingWordCount,
                      row.cic, row.commentTermCount, row.idTermCount, row.sharedTermCount );
     }
-    std::printf( "</comment_coherence>" );
+    rw::emitRaw( stdout, "</comment_coherence>" );
     return 0;
 }
 

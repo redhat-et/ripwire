@@ -3,6 +3,8 @@
 #error "ingest_parsepool.h is a SECTION of src/ingest.cpp's translation unit - include it only from ingest.cpp (see the ingest-family split note there)"
 #endif
 
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 // ingest_parsepool.h — the parallel parse pool, moved VERBATIM out of ingest() in the 2026-08-30
 // decomposition: the per-thread raw-fact accumulators (one RawFacts each), the cold-path reserve
 // calibration, the lock-free work-stealing worker (cache-hit reuse, hostile-input guards, the
@@ -123,6 +125,7 @@ struct RawFacts
     std::vector<BindingAlias> ffis;        // A4-R5: cross-language FFI binding declarations
     std::vector<RouteDef>     routeDefs;   // B6.3: HTTP server-side route registrations
     std::vector<RawRouteUse>  routeUses;   // B6.3: HTTP client-side calls (pre fromSymbol attribution)
+    std::vector<ConstOpen>    constOpens;  // parser version 82: Ruby class/module opens (model.h ConstOpen)
 };
 
 // A parsed-but-unqueried file waiting for the tags-query gate: owns its bytes and its TSTree until
@@ -209,6 +212,11 @@ inline void appendCacheHitFacts( FileFacts& hit, std::uint32_t fileId, IngestFil
     {
         ru.fileId = fileId;
         out.routeUses.push_back( std::move( ru ) );
+    }
+    for( ConstOpen& co : hit.constOpens )      // parser version 82
+    {
+        co.fileId = fileId;
+        out.constOpens.push_back( std::move( co ) );
     }
 }
 
@@ -418,7 +426,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
             // the skip is a degrade with a one-line stderr note, matching the house skip style.
             if( le->lang == Lang::Json && jsonNestsTooDeep( bytes ) )
             {
-                std::fprintf( stderr, "[ripwire] %s: json nesting > %u levels — treated as data, not config (skipped)\n",
+                rw::emitTo( stderr, "[ripwire] {}: json nesting > {} levels — treated as data, not config (skipped)\n",
                               path.c_str(), kMaxJsonNestDepth );
                 continue;
             }
@@ -430,7 +438,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
             // Same house skip style as the JSON guard above: refuse BEFORE the parse, one stderr line.
             if( le->lang == Lang::Yaml && yamlNestsTooDeep( bytes ) )
             {
-                std::fprintf( stderr, "[ripwire] %s: yaml nesting > %u levels — treated as data, not config (skipped)\n",
+                rw::emitTo( stderr, "[ripwire] {}: yaml nesting > {} levels — treated as data, not config (skipped)\n",
                               path.c_str(), kMaxYamlNestDepth );
                 continue;
             }
@@ -444,7 +452,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 // third_party/patches/markdown/, so this is the FIRST of two independent layers.
                 if( mdNestsTooDeep( bytes ) )
                 {
-                    std::fprintf( stderr, "[ripwire] %s: markdown blockquote/list nesting > %u levels — treated as data, not a doc (skipped)\n",
+                    rw::emitTo( stderr, "[ripwire] {}: markdown blockquote/list nesting > {} levels — treated as data, not a doc (skipped)\n",
                                   path.c_str(), kMaxMdBlockDepth );
                     continue;
                 }
@@ -478,7 +486,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
 
                 const TSNode root = ts_tree_root_node( tree.get() );
                 scan.health[ fileId ] = measureFileHealth( root, bytes );   // §L1 — before `bytes` can be moved below
-                captureSideFacts( *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.refs, out.incs, out.binds, out.ffis, out.routeDefs, out.routeUses, sh.captureValueUses );
+                captureSideFacts( *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.refs, out.incs, out.binds, out.ffis, out.routeDefs, out.routeUses, out.constOpens, sh.captureValueUses );
 
                 const bool canQueueParsed = !sh.prewarm.ready.load( std::memory_order_acquire )
                                          && pendingParsed.size() < kMaxPendingParsedFiles
@@ -512,8 +520,9 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
 // re-sorted by the model-build tail), reserving each family's exact total first.
 inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
 {
+    PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: merge per-thread facts" );
     RawFacts raw;
-    std::size_t totDefs = 0, totRefs = 0, totIncs = 0, totBinds = 0, totFfis = 0, totRouteDefs = 0, totRouteUses = 0;
+    std::size_t totDefs = 0, totRefs = 0, totIncs = 0, totBinds = 0, totFfis = 0, totRouteDefs = 0, totRouteUses = 0, totConstOpens = 0;
     for( const RawFacts& tf : tFacts )
     {
         totDefs  += tf.defs.size();
@@ -523,6 +532,7 @@ inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
         totFfis  += tf.ffis.size();
         totRouteDefs += tf.routeDefs.size();
         totRouteUses += tf.routeUses.size();
+        totConstOpens += tf.constOpens.size();
     }
     raw.defs.reserve( totDefs );
     raw.refs.reserve( totRefs );
@@ -531,6 +541,7 @@ inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
     raw.ffis.reserve( totFfis );
     raw.routeDefs.reserve( totRouteDefs );
     raw.routeUses.reserve( totRouteUses );
+    raw.constOpens.reserve( totConstOpens );
     for( RawFacts& tf : tFacts )
     {
         for( RawDef& d : tf.defs )
@@ -560,6 +571,10 @@ inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
         for( RawRouteUse& ru : tf.routeUses )
         {
             raw.routeUses.push_back( std::move( ru ) );
+        }
+        for( ConstOpen& co : tf.constOpens )
+        {
+            raw.constOpens.push_back( std::move( co ) );
         }
     }
     return raw;
@@ -743,9 +758,12 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
 
         installCompiledQueriesAndOpenGate( prewarm );   // join async compiles, publish, open the gate (ingest_prewarm.h)
 
+        {
+            PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: workers run + join" );
         for( std::thread& th : pool )
         {
             th.join();
+        }
         }
 
         raw = mergeThreadFacts( tFacts );
@@ -771,7 +789,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         if( std::getenv( "RIPWIRE_CACHE_STATS" ) != nullptr )
         {
             const std::size_t reparsed = reparsedCount.load( std::memory_order_relaxed );
-            std::fprintf( stderr, "ripwire: cache-stats reparsed=%zu reused=%zu files=%zu cached_records=%zu blob_entries=%zu\n",
+            rw::emitTo( stderr, "ripwire: cache-stats reparsed={} reused={} files={} cached_records={} blob_entries={}\n",
                           reparsed, ( nfiles >= reparsed ? nfiles - reparsed : std::size_t( 0 ) ), nfiles,
                           cacheStats.recordsRead, cacheStats.blobEntries );
         }
@@ -780,7 +798,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         // Skips the ~11ms / 7 MB serialization+write on a no-change warm run.
         if( !cacheFile.empty() && dirty.load() )
         {
-            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, captureValueUses );
+            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, raw.constOpens, captureValueUses );
         }
     }
     return raw;

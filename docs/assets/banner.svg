@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="880" height="176" viewBox="0 0 880 176" role="img" aria-label="ripwire — the ripgrep of AI context">
-  <!-- ripwire wordmark banner: dark terminal card, two-tone identity (cyan = ripgrep speed, amber = tripwire honesty) -->
+  <!-- ripwire wordmark banner: dark terminal card, two-tone identity (cyan = ripgrep speed, amber = the wire: the graph it draws, and the guesses it discloses) -->
   <defs>
     <clipPath id="r"><rect width="880" height="176" rx="14"/></clipPath>
   </defs>
@@ -15,14 +15,16 @@
       <tspan fill="#56D6E8">rip</tspan><tspan fill="#F2B84B">wire</tspan>
     </text>
     <text x="42" y="132" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="19" fill="#E6EDF3" font-weight="600">The ripgrep of AI context.</text>
+    <text x="42" y="157" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="16" fill="#56D6E8" font-style="italic">Paddle out with a map.</text>
     <!-- right column: the two halves -->
-    <text x="470" y="66" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14">
+    <text x="400" y="46" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14">
       <tspan fill="#56D6E8" font-weight="700">rip</tspan><tspan fill="#8B95A5">  structural answers in tens of milliseconds,</tspan>
     </text>
-    <text x="470" y="86" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#8B95A5">     from a call graph it built itself</text>
-    <text x="470" y="118" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14">
-      <tspan fill="#F2B84B" font-weight="700">wire</tspan><tspan fill="#8B95A5"> every count it cannot prove is a total</tspan>
+    <text x="400" y="66" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#8B95A5">     from a call graph it built itself</text>
+    <text x="400" y="98" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14">
+      <tspan fill="#F2B84B" font-weight="700">wire</tspan><tspan fill="#8B95A5"> shaped in '76, finned last month,</tspan>
     </text>
-    <text x="470" y="138" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#8B95A5">     ships labelled as a floor</text>
+    <text x="400" y="118" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#8B95A5">     every guess says how many it chose from,</text>
+    <text x="400" y="138" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#8B95A5">     see the rip before you're in it</text>
   </g>
 </svg>

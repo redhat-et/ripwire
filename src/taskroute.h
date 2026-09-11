@@ -554,7 +554,7 @@ inline std::optional<RouteChoice> instrumentedTaskChoice( std::string_view task,
     }
     if( has( lower, "compact legend" ) || ( has( lower, "legend" ) && has( lower, "compact" ) ) )
     {
-        return RouteChoice{ "compact-legend", "ripwire-efficient", "compact-legend wording; the posture applies to --for and --grep",
+        return RouteChoice{ "compact-legend", "ripwire-orient", "compact-legend wording; the posture applies to --for and --grep",
                             commandWithValue( root, "--for=", task ) + " --legend=compact", 100, 87 };
     }
     if( has( lower, "codex" )

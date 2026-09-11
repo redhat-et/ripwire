@@ -28,6 +28,7 @@
 #include "infra/namesplit.h" // namesplit::isIdentChar — the canonical ASCII identifier-byte predicate
 
 #include <algorithm>
+#include <cstdio>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -163,30 +164,243 @@ inline AffectedSeeds resolveAffectedSeeds( const IngestResult& ing, std::string_
 //              found as callers, which is why the answer is unchanged for every argument that matches no test.
 //   matched  — a matched TEST file is in the answer on its own evidence: the argument named it, so it changed,
 //              so run it. isSeedTestFile marks those rows, which the emitter labels seed_kind="test".
+// ── H2H-Graft F1 (2026-09-07) — a tests-to-run row says WHY it is one, and rows come in EVIDENCE order ──
+// Head-to-head vs Graft on rocksdb (bench/graft-h2h): asked "which tests cover cache/tiered_secondary_cache.cc",
+// --affected named two tests the graph reaches and never the file's own cache/tiered_secondary_cache_test.cc,
+// which builds the object through NewTieredCache() — a factory edge the name-based walk cannot see; Graft's
+// plain lexical `ask` named it in 167 B. Asked about db/write_batch.cc, --affected DID name
+// db/write_batch_test.cc — at row ~60 of 127, because rows were path-sorted. Three kinds of evidence now
+// travel on the row, each a fact:
+//   changed=1  the test file is IN the change set: you edited it, run it (Graft's blast verb calls this
+//              state "changed"; before this the file was silently ABSENT — its symbols were skipped as
+//              "the change, not its radius", and a diff of {src, its test} exited 0 with no obligations)
+//   partner=1  the test is NAMED after a changed file by convention — <stem>_test.cc, test_<stem>.py,
+//              <stem>.test.ts / .spec.ts, <stem>_spec.rb, <Stem>Test.java, <stem>_unittest — listed on that
+//              evidence even when the graph never reaches it; such a row carries NO hops= (0 would claim an edge)
+//   hops=N     the caller-walk depth at which the test first reaches a changed symbol (1 = a direct call)
+// Order: changed, then partner, then hops ascending, then path. The graph-reached rows are Graft's "stale":
+// tests that reach the changed area and the diff did not touch.
+struct TestRow
+{
+    std::uint32_t fileId  = 0;
+    std::uint32_t hops    = 0;   // 0 = not reached by the caller walk; never printed as a value
+    bool          partner = false;
+    bool          changed = false;
+};
+
+inline bool isTestPartnerOf( std::string_view testPath, std::string_view srcPath ) noexcept
+{
+    const auto base = []( std::string_view p ) noexcept -> std::string_view
+    {
+        const std::size_t sl = p.rfind( '/' );
+        return sl == std::string_view::npos ? p : p.substr( sl + 1 );
+    };
+    const auto stem = []( std::string_view fn ) noexcept -> std::string_view
+    {
+        const std::size_t dot = fn.rfind( '.' );
+        return dot == std::string_view::npos ? fn : fn.substr( 0, dot );
+    };
+    const std::string_view s = stem( base( srcPath ) );
+    const std::string_view t = stem( base( testPath ) );
+    if( s.empty() || t.size() <= s.size() )
+    {
+        return false;
+    }
+    if( t.substr( 0, s.size() ) == s )
+    {
+        const std::string_view suffix = t.substr( s.size() );
+        for( std::string_view k : { std::string_view( "_test" ), std::string_view( "_unittest" ), std::string_view( "_spec" ),
+                                    std::string_view( "Test" ), std::string_view( "Tests" ), std::string_view( ".test" ), std::string_view( ".spec" ) } )
+        {
+            if( suffix == k )
+            {
+                return true;
+            }
+        }
+    }
+    return t.size() > 5 && t.substr( 0, 5 ) == "test_" && t.substr( 5 ) == s;
+}
+
+// `reach`/`depth` are transitiveCallersDepth's outputs; `skipSym` (optional) drops nodes that are the change
+// itself rather than its radius (--test-gate's per-symbol claims); `partnerOf` are the changed SOURCE files a
+// test may be named after; `changedTests` are test files in the change set (rows on their own evidence).
+inline std::vector<TestRow> rankTestRows( const IngestResult& ing, std::span<const NodeId> reach, const std::vector<std::uint32_t>& depth,
+                                          const std::vector<char>* skipSym, std::span<const std::uint32_t> partnerOf,
+                                          std::span<const std::uint32_t> changedTests )
+{
+    const std::uint32_t        F = std::uint32_t( ing.files.size() );
+    std::vector<std::uint32_t> minHops( F, 0 );
+    std::vector<char>          isPartner( F, 0 ), isChanged( F, 0 );
+    for( NodeId n : reach )
+    {
+        if( n >= ing.symbols.size() || ( skipSym && n < skipSym->size() && ( *skipSym )[n] ) )
+        {
+            continue;
+        }
+        const std::uint32_t f = ing.symbols[n].fileId;
+        if( f < F && isTestPath( ing.files[f] ) && ( minHops[f] == 0 || depth[n] < minHops[f] ) )
+        {
+            minHops[f] = depth[n];
+        }
+    }
+    if( !partnerOf.empty() )
+    {
+        std::vector<std::uint32_t> testFiles;
+        for( std::uint32_t f = 0; f < F; ++f )
+        {
+            if( isTestPath( ing.files[f] ) )
+            {
+                testFiles.push_back( f );
+            }
+        }
+        for( std::uint32_t src : partnerOf )
+        {
+            for( std::uint32_t t : testFiles )
+            {
+                if( src < F && t != src && !isPartner[t] && isTestPartnerOf( ing.files[t], ing.files[src] ) )
+                {
+                    isPartner[t] = 1;
+                }
+            }
+        }
+    }
+    for( std::uint32_t f : changedTests )
+    {
+        if( f < F )
+        {
+            isChanged[f] = 1;
+        }
+    }
+    std::vector<TestRow> rows;
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        if( minHops[f] || isPartner[f] || isChanged[f] )
+        {
+            rows.push_back( TestRow{ f, minHops[f], isPartner[f] != 0, isChanged[f] != 0 } );
+        }
+    }
+    std::sort( rows.begin(), rows.end(), [ & ]( const TestRow& a, const TestRow& b )
+               {
+                   if( a.changed != b.changed ) { return a.changed; }
+                   if( a.partner != b.partner ) { return a.partner; }
+                   const std::uint32_t ha = a.hops ? a.hops : UINT32_MAX, hb = b.hops ? b.hops : UINT32_MAX;
+                   if( ha != hb ) { return ha < hb; }
+                   return ing.files[a.fileId] < ing.files[b.fileId];
+               } );
+    return rows;
+}
+
+// The evidence attributes, ONE builder for every emitter of a tests-to-run row: the XML row, its JSON twin,
+// and --situ's text line — so the three dialects cannot drift on which facts a row carries.
+enum class EvDialect : std::uint8_t { Xml, Json, Text };
+inline std::string testRowEvidence( const TestRow& r, EvDialect d )
+{
+    // The dialect tables were arrays of printf FORMATS indexed at runtime, which std::format_string —
+    // consteval — cannot hold. Switching on the dialect instead keeps every format a literal at its own
+    // call site, so each one is compile-time checked; the three spellings are unchanged.
+    std::string s;
+    char        buf[ 48 ];
+    const auto  flagOf = [ & ]( const char* name )
+    {
+        switch( d )
+        {
+            case EvDialect::Xml:  rw::formatTo( buf, sizeof buf, " {}=\"1\"", name );   break;
+            case EvDialect::Json: rw::formatTo( buf, sizeof buf, ",\"{}\":true", name ); break;
+            case EvDialect::Text: rw::formatTo( buf, sizeof buf, " [{}]", name );       break;
+        }
+    };
+    for( const auto& [ name, on ] : { std::pair{ "changed", r.changed }, std::pair{ "partner", r.partner } } )
+    {
+        if( on )
+        {
+            flagOf( name );
+            s += buf;
+        }
+    }
+    if( r.hops )
+    {
+        switch( d )
+        {
+            case EvDialect::Xml:  rw::formatTo( buf, sizeof buf, " hops=\"{}\"", unsigned( r.hops ) );   break;
+            case EvDialect::Json: rw::formatTo( buf, sizeof buf, ",\"hops\":{}", unsigned( r.hops ) );   break;
+            case EvDialect::Text: rw::formatTo( buf, sizeof buf, " [hops={}]", unsigned( r.hops ) );     break;
+        }
+        s += buf;
+    }
+    return s;
+}
+// The change set split into the files a partner test may be named after (source) and the test files that
+// are obligations on their own evidence — ONE rule for the file-mask callers (--situ's two reports) and the
+// symbol-set caller (--test-gate's per-symbol claims).
+struct ChangedFileSplit
+{
+    std::vector<std::uint32_t> src, tests;
+};
+inline ChangedFileSplit splitChangedFiles( const IngestResult& ing, const std::vector<char>& changedFile )
+{
+    ChangedFileSplit out;
+    for( std::uint32_t f = 0; f < std::uint32_t( ing.files.size() ) && f < changedFile.size(); ++f )
+    {
+        if( changedFile[f] )
+        {
+            ( isTestPath( ing.files[f] ) ? out.tests : out.src ).push_back( f );
+        }
+    }
+    return out;
+}
+inline ChangedFileSplit splitChangedFilesOfSymbols( const IngestResult& ing, std::span<const NodeId> changedSyms )
+{
+    std::vector<char> changedFile( ing.files.size(), 0 );
+    for( NodeId s : changedSyms )
+    {
+        if( s < ing.symbols.size() && ing.symbols[s].fileId < changedFile.size() )
+        {
+            changedFile[ing.symbols[s].fileId] = 1;
+        }
+    }
+    return splitChangedFiles( ing, changedFile );
+}
+inline std::size_t testRowPartnerCount( const std::vector<TestRow>& rows )
+{
+    std::size_t n = 0;
+    for( const TestRow& r : rows )
+    {
+        n += r.partner ? 1 : 0;
+    }
+    return n;
+}
+// The legend clause every emitter splices next to its rows — one wording, so the four verbs cannot drift.
+// Written long, measured (477 B), cut to the shortest honest form — test/testgatelegendbudgetcheck.sh's ratchet.
+inline constexpr std::string_view kTestRowEvidenceLegend =
+    "rows in EVIDENCE order: changed=1 (the test file is in the change set: run it), partner=1 (named after a changed "
+    "file — <stem>_test, test_<stem>, <Stem>Test — listed by convention, no hops=), then hops= ascending (caller-walk "
+    "depth to a changed symbol; 1 = direct), then path. ";
+
 struct AffectedAnswer
 {
     std::vector<NodeId>        reach;           // symbols the caller walk found (the seeds are not in it)
-    std::vector<std::uint32_t> testFiles;       // the answer rows, path ascending
+    std::vector<TestRow>       rows;            // the answer rows, EVIDENCE order (rankTestRows)
+    std::vector<std::uint32_t> testFiles;       // the same rows as file ids, same order — the pre-F1 consumers' view
     std::vector<char>          isSeedTestFile;  // per file: matched by the argument AND a test path
 };
 
 inline AffectedAnswer affectedAnswer( const IngestResult& ing, const Graph& g, const AffectedSeeds& sel )
 {
-    AffectedAnswer    out;
-    std::vector<char> seen( ing.files.size(), 0 );
+    AffectedAnswer             out;
+    std::vector<std::uint32_t> depth;
     out.isSeedTestFile.assign( ing.files.size(), 0 );
-    out.reach = transitiveCallers( g, sel.walkSeeds );
-    for( NodeId n : out.reach )
-    {
-        const std::uint32_t fileId = ing.symbols[n].fileId;
-        if( !seen[fileId] && isTestPath( ing.files[fileId] ) ) { seen[fileId] = 1;  out.testFiles.push_back( fileId ); }
-    }
+    out.reach = transitiveCallersDepth( g, sel.walkSeeds, &depth );
     for( std::uint32_t fileId : sel.seedTestFiles )
     {
         out.isSeedTestFile[fileId] = 1;
-        if( !seen[fileId] ) { seen[fileId] = 1;  out.testFiles.push_back( fileId ); }
     }
-    std::sort( out.testFiles.begin(), out.testFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
+    // partners are named after the files the walk seeds live in (both argument readings); a matched TEST file
+    // is a row on its own evidence, exactly as it was before F1
+    out.rows = rankTestRows( ing, out.reach, depth, nullptr, splitChangedFilesOfSymbols( ing, sel.walkSeeds ).src, sel.seedTestFiles );
+    for( const TestRow& r : out.rows )
+    {
+        out.testFiles.push_back( r.fileId );
+    }
     return out;
 }
 
@@ -463,36 +677,46 @@ inline constexpr std::string_view kRunHintLegendClause =
     "run= is the command that discharges a test row; run_unknown=\"1\" means none is derivable for that "
     "harness (a guess would be worse than none) — a row carries one or the other, never neither. ";
 
-// ── P9 (capture-audit 2026-09-04) — the tests_to_run FILE SET for ONE changed file ────────────────────
-// The seeds are that file's own symbols, the walk is transitiveCallers, the partition is isTestPath, and
-// the sort is path-ascending: BYTE FOR BYTE what verbs_change.h's runAffected does after
-// resolveAffectedSeeds took its file reading, lifted here so the edit receipt cannot answer a different
-// question from the verb its own stderr hint used to point at. Seeding from the fileId directly (rather
-// than re-running the path-PATTERN match) is deliberate: --affected=geo.py is a substring pattern that also
-// matches test/check_geo.py, and a receipt knows exactly which file it wrote.
-inline std::vector<std::uint32_t> testsReachingFile( const IngestResult& ing, const Graph& g, std::uint32_t fileId )
+// ── P9 (capture-audit 2026-09-04) — the tests_to_run row set for ONE changed file ────────────────────
+// The FILE reading of --affected, seeded by file id rather than by a path pattern, for callers that already
+// hold the file (the MCP edit receipt wrote it and knows which). It routes through the SAME affectedAnswer
+// the verb uses, so the two cannot answer differently. Seeding from the fileId rather than re-running the
+// path-PATTERN match is the one deliberate difference and it is preserved: `--affected=geo.py` is a
+// substring pattern that also matches test/check_geo.py, and a receipt knows exactly which file it wrote.
+//
+// WHY THIS IS NOT A PRIVATE WALK ANY MORE. It was one, with the comment "BYTE FOR BYTE what runAffected
+// does" — TRUE when written (050a6b07, 2026-09-04): --affected was then the same bare
+// transitiveCallers/isTestPath walk. Two commits orphaned it within days, both touching neither mcpedit.h
+// nor packtask.h: 015e5a0f (2026-09-05) made a test that IS the edit target list itself (seed_kind="test"),
+// and 7dae6522 (2026-09-07) added the partner tier. A bare walk can produce NEITHER — transitiveCallers
+// returns reached MINUS seeds, so the edit target can never appear, and nothing knew about partners. The
+// receipt therefore answered "tests":0 for 100% of test-file edits, under a --help promising the rows
+// --affected gives. One seam now, so a third tier cannot land at one site and not the other.
+inline AffectedAnswer affectedAnswerForFile( const IngestResult& ing, const Graph& g, std::uint32_t fileId )
 {
-    std::vector<NodeId> seeds;
+    AffectedSeeds sel;
+    sel.sawFileItem = true;
     for( NodeId i = 0; i < NodeId( ing.symbols.size() ); ++i )
     {
         if( ing.symbols[i].fileId == fileId )
         {
-            seeds.push_back( i );
+            sel.seeds.push_back( i );
         }
     }
-    std::vector<char>          seen( ing.files.size(), 0 );
-    std::vector<std::uint32_t> testFiles;
-    for( NodeId n : transitiveCallers( g, seeds ) )
-    {
-        if( const std::uint32_t f = ing.symbols[n].fileId; !seen[f] && isTestPath( ing.files[f] ) )
-        {
-            seen[f] = 1;
-            testFiles.push_back( f );
-        }
-    }
-    std::sort( testFiles.begin(), testFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
-    return testFiles;
+    partitionAffectedSeedsByTestPath( ing, sel );
+    return affectedAnswer( ing, g, sel );
 }
+
+// The FIRST test row for a file, in EVIDENCE order, or rw::kNoFile when there is none — the receipt's
+// next= hint suggests ONE command, so it needs one row, not the list. Evidence order is what makes that
+// the changed or partner test rather than a deeper graph hop. Reuses resolve.h's kNoFile sentinel: a
+// second constant of the same value and meaning is the kind of near-duplicate this tree lints for.
+inline std::uint32_t firstTestFileForFile( const IngestResult& ing, const Graph& g, std::uint32_t fileId )
+{
+    const AffectedAnswer ans = affectedAnswerForFile( ing, g, fileId );
+    return ans.rows.empty() ? rw::kNoFile : ans.rows.front().fileId;
+}
+
 
 // ── §P9 N5 / §B7.3 — the blindness this whole map shares, counted ONCE ────────────────────────────────
 // Every verb built on the call-graph walk (--affected, --test-gate, --situ) is blind to the same thing: a

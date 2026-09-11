@@ -163,5 +163,31 @@ else
     no "arm 5: shifted copy ranks DIFFERENTLY (recent: '$ord_recent' vs shifted: '$ord_shifted') — the decay is reading the system clock"
 fi
 
+# ── arm 6: H2H-Graft F3 — the file-level answer comes FIRST ──────────────────────────────────────────
+# "What changed recently in <dir>?" is a question about FILES; the verb answered it with a 200-symbol map
+# (35 KB on rocksdb) and no file-level row at all. <recent> lists the n= files with the largest decayed weight
+# — new.py (2 commits at HEAD's day, weight ≈ 2.0) before old.py (6 commits 400 days back, ≈ 0.28) — with
+# age_d= on HEAD's clock and the weight the ranker used, and it precedes every <f> group.
+R6="$( perl -e 'alarm 20; exec @ARGV' "$BIN" "$WORK/recent" --rank-by=churn-decay --no-cache 2>/dev/null )"
+printf '%s' "$R6" | grep -q '<recent n="2" of="2">' \
+    && ok "arm 6a: <recent n=\"2\" of=\"2\"> is emitted" || no "arm 6a: no <recent n=\"2\" of=\"2\"> element"
+r6_first="$( printf '%s' "$R6" | grep -oE '<rc p="[^"]*"' | head -1 )"
+[ "$r6_first" = '<rc p="new.py"' ] && ok "arm 6b: the file with the newest decayed weight leads (new.py)" \
+                                    || no "arm 6b: first <rc> is '$r6_first', expected new.py"
+printf '%s' "$R6" | grep -qE '<rc p="new.py" age_d="0" w="[0-9.]+"/>' && printf '%s' "$R6" | grep -qE '<rc p="old.py" age_d="(399|400)" w="[0-9.]+"/>' \
+    && ok "arm 6c: age_d= is days since the file's newest commit at HEAD's clock (new 0, old ~400)" \
+    || no "arm 6c: age_d= wrong: $( printf '%s' "$R6" | grep -oE '<rc [^>]*>' | tr '\n' ' ' )"
+r6_recent_pos="$( printf '%s' "$R6" | grep -bo '<recent ' | head -1 | cut -d: -f1 )"
+r6_f_pos="$( printf '%s' "$R6" | grep -bo '<f p=' | head -1 | cut -d: -f1 )"
+[ -n "$r6_recent_pos" ] && [ -n "$r6_f_pos" ] && [ "$r6_recent_pos" -lt "$r6_f_pos" ] \
+    && ok "arm 6d: <recent> precedes the first <f> group (the answer before the map)" \
+    || no "arm 6d: <recent> at byte '$r6_recent_pos' is not before the first <f> at '$r6_f_pos'"
+printf '%s' "$R6" | grep -q 'recent: the file-level answer' && ok "arm 6e: the legend defines recent/rc/age_d/w" \
+                                                            || no "arm 6e: legend does not define the recent element"
+# negative: plain churn and pagerank carry NO <recent> (byte-free elsewhere)
+R6p="$( perl -e 'alarm 20; exec @ARGV' "$BIN" "$WORK/recent" --rank-by=churn --no-cache 2>/dev/null )"
+printf '%s' "$R6p" | grep -q '<recent ' && no "arm 6f: --rank-by=churn must not emit <recent> (churn-decay only)" \
+                                        || ok "arm 6f: plain churn carries no <recent>"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

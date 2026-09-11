@@ -110,3 +110,17 @@ standalone skill `ripwire-write-tests`: ranks candidates by `--seams` (untested 
 `--affected`. No skill was merged or deleted for this one — it's a genuinely new moment.
 
 Net: 17 skills (write-tests added, no other change).
+
+## 2026-09-07 — the efficient skill folded into ripwire-orient (18 → 17 dirs; 16 routable + router)
+
+The description-budget round (issue #49; `docs/EVALS.md` "Skill descriptions under a client budget") put
+every description in front of three blind LLM raters — full text, head-cut at 350, and the rewrite. The one
+loss that survived in every model and every arm was the efficient skill's rows routing to `ripwire-orient`:
+raters could not see the boundary even from the full 977-character description, because "about to open
+several files to answer one question" is the same moment as "understand this fast". The fold arm had zero
+such misses. So the directory is gone: its `SKILL.md` became `skills/ripwire-orient/map-before-you-read.md`
+(the discipline, verbatim), `compress-ladder.md` moved beside it, orient's description claims the moment, the
+router's four rows point at orient, the corpus's 12 rows carry the mechanical relabel, and `--help-task`'s
+`compact-legend` intent names orient.
+
+Net: 17 skill directories (16 routable + the router; `ripwire-opt-remarks` stays contributor-gated at install).

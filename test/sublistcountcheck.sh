@@ -225,7 +225,12 @@ r = json.load( sys.stdin )
 print( "__ERROR__:" + r["error"].get( "message", "" ) if "error" in r else r["result"]["content"][0]["text"] )
 '
 }
-mcp_grep '{"path":"'"$ROOT"'","pattern":"DEGRADED_PATH_ALERT","limit":3}' >"$TMP/m3.json"
+# 2026-09-06: the probe moved from THIS repository (pattern DEGRADED_PATH_ALERT) to the hermetic sandbox (3c)
+# built above. The 1,500 B budget is a claim about the payload's SHAPE for a 3-row answer; probing the live
+# tree made it a claim about which three source lines happen to match first — removing one alert site in
+# arch.h (the stranger-audit refusal fix) promoted a hit with a 30-char-longer enclosing name and pushed
+# the same shape to 1,562 B. The sandbox holds one indexed hit and 400 unindexed ones, forever.
+mcp_grep '{"path":"'"$SB"'","pattern":"SUBLISTTOKEN_hit","limit":3}' >"$TMP/m3.json"
 python3 - "$TMP/m3.json" <<'PY' >"$TMP/m3.res" 2>&1
 import sys, json
 raw = open( sys.argv[1] ).read()

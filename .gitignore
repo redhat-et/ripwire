@@ -30,6 +30,15 @@ prof*/
 # present/: the deck generator's npm tree (rebuild with `npm install` in present/)
 /present/node_modules/
 
+# test/gateexitcheck.sh's in-place probe copies (arm E). A probe of a REAL gate must sit beside the
+# script it copies -- a gate finds its repo root from $0 -- but every stamped verb reads
+# `git status --porcelain` from ANY crawl root inside this checkout for the `+dirty` half of its
+# at="<sha>[+dirty]" anchor (src/gitstamp.h), so an untracked probe flips every determinism arm running
+# beside it (CI run 34298150602, macOS plain shard 2/2: tokenbudgetcheck --for, est_tokens 3949 vs 3947).
+# Ignored, the copy is invisible to that command; gateexitcheck arm (F) asserts this holds, and
+# test/pargates.py's tree tripwire watches for the next writer.
+.gateprobe.*
+
 # macOS
 .DS_Store
 

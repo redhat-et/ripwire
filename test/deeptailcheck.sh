@@ -145,6 +145,39 @@ case "$Z" in
     *) no "zero-tail bundle wrong/missing: '$Z'" ;;
 esac
 
+# ── 9) H2H-Graft lane 2 (2026-09-07): a row the byte ladder TRIMS lands in the tail, never nowhere ─────
+# The tail used to exclude every file of the 40-candidate SURFACE, so a sigs row cut by the budget (rank 5..40)
+# appeared in neither section. On rocksdb three single-file answers at candidate rank 5/10/5 were served nowhere.
+# Contract: tail total = files with a positive score MINUS the files of the sigs rows actually shown; the trimmed
+# rows' files come first, in rank order; the JSON twin agrees file-for-file at the same budget.
+T9="$( "$BIN" "$CORPUS" --no-cache --for="$Q" --token-budget=900 2>/dev/null )"
+T9_SIGS="$( printf '%s' "$T9" | grep -o '<sigs [^>]*>' | head -1 )"
+T9_SHOWN_FILES="$( printf '%s' "$T9" | grep -o '<d [^>]*p="[^"]*"' | grep -o 'p="[^"]*"' | sed 's/p="//;s/"//' | sort -u )"
+T9_NSHOWN="$( printf '%s\n' "$T9_SHOWN_FILES" | grep -c . )"
+T9_TAG="$( printf '%s' "$T9" | grep -o '<tail [^>]*>' | head -1 )"
+T9_TOTAL="$( printf '%s' "$T9_TAG" | grep -oE 'total="[0-9]+"' | grep -oE '[0-9]+' )"
+case "$T9_SIGS" in *'capped="1"'*) ok "(9) fixture guard: the 900-token budget trims sigs rows ($T9_SIGS; $T9_NSHOWN file(s) shown)" ;;
+                   *) no "(9) fixture guard: expected the ladder to trim at --token-budget=900, got '$T9_SIGS'" ;; esac
+[ "$T9_TOTAL" = "$(( 12 - T9_NSHOWN ))" ] \
+    && ok "(9a) tail total=$T9_TOTAL = 12 files minus the $T9_NSHOWN shown (trimmed surface rows are IN the tail)" \
+    || no "(9a) tail total=$T9_TOTAL but $T9_NSHOWN file(s) are shown — $(( 12 - T9_NSHOWN - ${T9_TOTAL:-0} )) ranked file(s) served nowhere ($T9_TAG)"
+T9_EXPECT_FIRST="$( for i in 01 02 03 04 05 06 07 08 09 10 11 12; do printf '%s\n' "w$i.py"; done | grep -vxF -f <( printf '%s\n' "$T9_SHOWN_FILES" ) | head -1 )"
+T9_FIRST="$( printf '%s' "$T9" | grep -o '<t p="[^"]*"' | head -1 | sed 's/<t p="//;s/"//' )"
+if [ -n "$T9_FIRST" ]; then
+    [ "$T9_FIRST" = "$T9_EXPECT_FIRST" ] && ok "(9b) first tail row is the best trimmed file ($T9_FIRST)" \
+                                          || no "(9b) first tail row '$T9_FIRST', expected the best trimmed file '$T9_EXPECT_FIRST'"
+else
+    printf '  SKIP  (9b) the 900-token budget left the tail no rows (total disclosed above)\n'
+fi
+# The JSON twin runs its OWN ladder (its rows cost different bytes), so it may trim one row more or less at the
+# same budget; the contract is per dialect — its tail total = 12 minus the files ITS sigs rows show.
+T9J="$( "$BIN" "$CORPUS" --no-cache --for="$Q" --token-budget=900 --json 2>/dev/null )"
+T9J_TOTAL="$( printf '%s' "$T9J" | grep -o '"tail":{"total":[0-9]*' | grep -oE '[0-9]+$' )"
+T9J_NSHOWN="$( printf '%s' "$T9J" | grep -o '"p":"w[0-9]*\.py"' | sort -u | grep -c . )"   # sigs rows carry "p":; the tail carries "files":[]
+[ -n "$T9J_TOTAL" ] && [ "$T9J_TOTAL" = "$(( 12 - T9J_NSHOWN ))" ] \
+    && ok "(9c) JSON twin: tail total=$T9J_TOTAL = 12 minus its own $T9J_NSHOWN shown file(s)" \
+    || no "(9c) JSON twin: tail total='$T9J_TOTAL' but its sigs show $T9J_NSHOWN file(s)"
+
 # ── 8) the legend defines both new surfaces where the reader meets them ────────────────────────────────
 HDR="$( printf '%s' "$XML" | sed 's/-->.*//' )"
 printf '%s' "$HDR" | grep -q 'tail: file-grain tail' && ok "legend defines the tail (file-grain, weaker evidence)" || no "legend does not define the tail"

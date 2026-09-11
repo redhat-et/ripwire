@@ -1,15 +1,10 @@
 ---
 name: ripwire-perf-target
 description: >
-  Investigate a measured performance problem. Start from a representative benchmark, a flame graph, or a
-  profiler sample. Pin the workload first, then use ripwire to locate the hot symbol the profile names,
-  map callers/callees, and inspect
-  structural hypotheses such as complexity, churn, coupling, nesting, and — when the counters implicate
-  MEMORY rather than compute — cache-line data layout via `--field-affinity` (which fields are read together
-  but declared far apart), including the boundary of what that lens cannot see. Static graph metrics are
-  maintenance/change-risk signals, not runtime heat or call frequency. Inspect only the symbols the
-  profile names — no repo-wide hotspot sweeps for a localized measurement. Backed by ripwire
-  (deterministic, on PATH).
+  A MEASURED performance problem: start from a benchmark, flame graph, perf sample or profiler run,
+  locate the hot symbol the profile names, test structural hypotheses (memory-bound → cache-line data
+  layout). Static metrics are change-risk signals, not runtime heat. Inspect only the symbols the
+  profile names.
 allowed-tools: Bash, Read
 ---
 

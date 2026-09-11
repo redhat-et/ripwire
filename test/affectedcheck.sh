@@ -54,6 +54,18 @@ printf 'void test_two() { quux(); }\n'                              > "$R/test/t
 # collision is unavoidable, and so no OTHER arm's pattern can reach these two files.
 printf 'double deg2rad(double d) { return d; }\ndouble haversine(double a) { return deg2rad(a); }\n' > "$R/src/geo.cpp"
 printf 'void spec_hav() { haversine(1); }\nvoid spec_deg() { deg2rad(2); }\n'                        > "$R/test/check_geo.cpp"
+# H2H-Graft F1 (2026-09-07) — the EVIDENCE-ORDER half of the fixture. Rows used to be path-sorted, so on a
+# corpus with 127 reaching tests the one test named after the changed file sat at row ~60 (rocksdb
+# db/write_batch.cc -> db/write_batch_test.cc), and a sibling test the graph never reaches at all
+# (cache/tiered_secondary_cache.cc -> cache/tiered_secondary_cache_test.cc, which builds the object through a
+# factory) was absent. Named so that PATH order is the REVERSE of evidence order: test_afar.cpp sorts before
+# test_zdirect.cpp, yet reaches deep() only through via() (hops=2) where test_zdirect calls it directly (hops=1);
+# deep_test.cpp is the stem partner of src/deep.cpp and calls nothing in it.
+printf 'int deep() { return 3; }\n'                                > "$R/src/deep.cpp"
+printf 'int via() { return deep(); }\n'                            > "$R/src/via.cpp"
+printf 'void zd() { deep(); }\n'                                   > "$R/test/test_zdirect.cpp"
+printf 'void af() { via(); }\n'                                    > "$R/test/test_afar.cpp"
+printf 'void unrelated_helper() { }\n'                             > "$R/test/deep_test.cpp"
 
 run(){ perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" "$@" --no-cache 2>/dev/null; }
 runec(){ perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" "$@" --no-cache >/dev/null 2>"$TMP/err.txt"; }
@@ -253,6 +265,28 @@ for a in seed_test_files seed_kind; do
         && ok "(F3 legend) the first-screen legend defines $a=" \
         || no "(F3 legend) $a= is emitted but undefined in the legend a reader meets first"
 done
+
+# ── 7) H2H-Graft F1: rows in EVIDENCE order, stem partner first, hops= disclosed ──────────────────────
+# Ordered basenames (NOT sorted — the order IS the claim).
+tord(){ printf '%s' "$1" | grep -oE '<test p="[^"]*"' | grep -oE '[^/"]*"$' | sed 's/"$//' | tr '\n' ','; }
+D="$( run --affected=src/deep.cpp )"
+[ "$( tord "$D" )" = "deep_test.cpp,test_zdirect.cpp,test_afar.cpp," ] && [ "$( cnt "$D" )" = 3 ] \
+    && ok "(7a) --affected=src/deep.cpp: partner first, then hops asc — deep_test, test_zdirect(1), test_afar(2); tests=3" \
+    || no "(7a) evidence order wrong (tests=$( cnt "$D" ) order=$( tord "$D" ))"
+printf '%s' "$D" | grep -q '<test p="test/deep_test.cpp" partner="1"' \
+    && ok "(7b) the stem partner row carries partner=\"1\"" || no "(7b) deep_test.cpp row lacks partner=\"1\""
+printf '%s' "$D" | grep -qE '<test p="test/deep_test.cpp" partner="1"[^>]*hops=' \
+    && no "(7c) a partner the graph never reaches must carry NO hops= (a zero would be a fake edge)" \
+    || ok "(7c) unreached partner carries no hops="
+printf '%s' "$D" | grep -q '<test p="test/test_zdirect.cpp" hops="1"' && printf '%s' "$D" | grep -q '<test p="test/test_afar.cpp" hops="2"' \
+    && ok "(7d) hops= is the caller-walk depth: zdirect 1, afar 2" || no "(7d) hops= values wrong"
+printf '%s' "$D" | grep -q '<affected [^>]*order="evidence"' && printf '%s' "$D" | grep -q '<affected [^>]*partners="1"' \
+    && ok "(7e) root says order=\"evidence\" partners=\"1\"" || no "(7e) root lacks order=/partners="
+# negative: no stem partner exists for core.cpp, so no row may claim one
+printf '%s' "$A" | grep -q 'partner="1"' && no "(7f) core.cpp has no *_test partner yet a row claims partner=\"1\"" \
+    || ok "(7f) partner= never fires without a stem match"
+printf '%s' "$A" | grep -q '<test p="test/test_leaf.cpp" hops="1"' && ok "(7g) core.cpp's direct test row carries hops=\"1\"" \
+    || no "(7g) core.cpp rows lack hops="
 
 # ── 6) xml well-formed ───────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then

@@ -120,7 +120,7 @@ case "$EMPTY" in *'n="0"'*) ok "an out-of-range page really does emit n=\"0\" (t
                  *)         no "an out-of-range page does not emit n=\"0\": $( printf '%s' "$EMPTY" | tail -c 200 )" ;; esac
 
 # ── --help's --format one-liner must name --uses' REAL columns ───────────────────────────────────────────
-HELP="$( "$BIN" --help 2>&1 )"
+HELP="$( "$BIN" --help=all 2>&1 )"
 [ -n "$HELP" ] || { no "--help produced nothing"; echo "FAILURES ABOVE"; exit 1; }
 FMTLINE="$( printf '%s\n' "$HELP" | grep -A 6 -- '--format=xml|columnar' )"
 [ -n "$FMTLINE" ] || { no "could not locate the --format one-liner in --help"; echo "FAILURES ABOVE"; exit 1; }

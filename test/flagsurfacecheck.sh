@@ -35,7 +35,7 @@ NOROOT="$TMP/definitely-not-a-root"
 # NOTE the scrape must accept bracketed/parenthesised forms too — --help writes optional knobs as
 # "[--around-depth=N]" and alternatives as "(--regex)"; anchoring on whitespace alone silently misses them
 # and then reports a documented flag as undocumented.
-"$BIN" --help 2>&1 | grep -oE '\-\-[a-z][a-z0-9-]+' | sort -u > "$TMP/flags.txt"
+"$BIN" --help=all 2>&1 | grep -oE '\-\-[a-z][a-z0-9-]+' | sort -u > "$TMP/flags.txt"
 COUNT="$( wc -l < "$TMP/flags.txt" | tr -d ' ' )"
 [ "$COUNT" -ge 80 ] && ok "harvested $COUNT advertised long flags from --help" \
                     || { no "only $COUNT flags harvested — the --help scrape broke, not the parser"; echo "ALL FAIL"; exit 1; }

@@ -1,29 +1,24 @@
 #pragma once
 
 #include <algorithm>   // std::any_of (H8: findings_capped over the emitted rules)
-#include <format>      // std::format — the printf-family pilot conversion (see test/printffmtparitycheck.sh)
-#include <cstdio>     // std::fputs — the pilot emits through fputs(format(...)) so it needs only libstdc++ 13
-                       // (std::format alone needs only 13): confirmed present on every CI leg as of this commit —
-                       // RHEL/UBI9 CI run 33981920823 ("rhel (ubi9, plain)") and the manylinux_2_28 release leg
-                       // (DEVTOOLSET_ROOTPATH=/opt/rh/gcc-toolset-14/root) CI run 31665948282 ("build (linux-x64)")
-                       // both resolve to gcc-toolset-14; Apple clang 21.0.0 on macOS compiles and runs both. The
-                       // RHEL leg's gcc-toolset probe (.github/workflows/ci.yml) is pinned to this floor (>=14),
-                       // not merely "whichever toolset exists" — see that file's comment for why the distinction
-                       // matters. fmt is NOT vendored: this floor makes the standard library sufficient (G3).
+#include <cstdio>      // stdout / stderr — the two streams the shims below name
+#include <format>      // std::format_string — the shims' format contract (see test/printffmtparitycheck.sh)
+#include "infra/emit.h" // rw::emitTo — THE emitter: std::print where the library has <print>, std::format+fputs
+                       // where it does not, chosen by feature test and DISCLOSED as emit= on --version. The
+                       // pilot conversion used to spell the fallback here; the choice now lives in one header.
 #if !defined( RIPWIRE_MAIN_TU )
 #error "verbs_lint.h is a SECTION of src/main.cpp's translation unit - include it only from main.cpp (see the verb-family split note there)"
 #endif
 
-// The printf-family pilot emits through these two shims rather than std::print: <print> is libstdc++ 14+,
-// and the ubuntu-24.04 gcc legs run gcc 13, which has <format> but not <print>. Same call shape, same
-// bytes (std::format renders the string; fputs writes it unchanged), one version floor lower.
+// The printf-family pilot's two shims, kept by name for the call sites below; the body is the house
+// emitter (infra/emit.h), so which of std::print / std::format+fputs actually runs is decided ONCE, there.
 template<class... A> inline void lintPrintOut( std::format_string<A...> f, A&&... a )
 {
-    std::fputs( std::format( f, std::forward<A>( a )... ).c_str(), stdout );
+    rw::emitTo( stdout, f, std::forward<A>( a )... );
 }
 template<class... A> inline void lintPrintErr( std::format_string<A...> f, A&&... a )
 {
-    std::fputs( std::format( f, std::forward<A>( a )... ).c_str(), stderr );
+    rw::emitTo( stderr, f, std::forward<A>( a )... );
 }
 
 

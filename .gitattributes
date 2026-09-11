@@ -1,0 +1,17 @@
+# Language classification: the SHIPPED ARTIFACT is a C++23 binary. test/*.sh is the CLI-contract layer —
+# hundreds of integration gates that run the binary, drive installers, manipulate HOME, and diff two runs
+# byte-for-byte. Shell is the right tool for that and they are not going anywhere; unit-level testing is
+# already C++ (doctest, inline in src/cli.h, src/graphlegend.h and others).
+#
+# Excluded from language statistics because those statistics answer "what is this project written in",
+# and the answer is C++. This is NOT a claim that the gates are unimportant, vendored, or generated —
+# they are none of those, which is exactly why linguist-vendored and linguist-generated would both be
+# false statements and linguist-detectable=false is the honest attribute.
+#
+# Measured 2026-09-08: C++ 9,398,027 bytes vs Shell 8,921,478 — a 5% margin, roughly 30-90 more gates
+# before the primary language would have flipped to Shell purely as a side effect of adding tests.
+# 38.7% of that shell is comments (the "WHY THIS GATE EXISTS" headers); excluding them, shell code is
+# 4.7 MB against C++'s 9.4 MB. The classification was only ever marginal because the gates are documented
+# unusually well, and shrinking those headers to win a byte count would destroy the most useful thing in
+# the files.
+test/*.sh linguist-detectable=false

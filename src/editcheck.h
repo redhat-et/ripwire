@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // editcheck.h — the shared contract-comparison core behind --edit-check=SYM (CLI, B11/L5) and the MCP
 // edit_check verb (L4). "Did MY edit change a contract someone depends on", at
@@ -20,6 +23,7 @@
 #include "arch.h"           // fnv1a64
 #include "gitstamp.h"       // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor
 #include "graphlegend.h"    // §H4 §3.4: the shared counts_floor= marker + floor/counting-unit legend tail
+#include "pageview.h"       // LB-G: pageWindow / effectiveRowCap / pagingDisclosure — the ONE paging vocabulary
 
 #include <algorithm>
 #include <cstdint>
@@ -239,13 +243,18 @@ inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const
 
     // HEAD baseline — the warm path MUST hit computeHeadSnapshot's own qsnap cache (the ≤100ms budget).
     auto [ base, baselineOk ] = quality::computeHeadSnapshot( root, nullptr, maxFileBytes, excludes );
-    if( !baselineOk || base.locBySym.find( key ) == base.locBySym.end() )
+    if( !baselineOk )
+    {
+        // 2026-09-06 stranger audit: a tarball, an export, any non-git tree used to answer "new-symbol" for a
+        // symbol that plainly exists — a false contract claim whose only tell was a missing at=. No HEAD means
+        // no comparison: say so, claim nothing.
+        res.status = "no-baseline";
+        DEGRADED_PATH_ALERT( "edit-check: no git HEAD baseline — status no-baseline" );
+        return res;
+    }
+    if( base.locBySym.find( key ) == base.locBySym.end() )
     {
         res.status = "new-symbol";
-        if( !baselineOk )
-        {
-            DEGRADED_PATH_ALERT( "edit-check: no git HEAD baseline available — treating SYM as new-symbol" );
-        }
         return res;
     }
 
@@ -313,7 +322,7 @@ inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const
 // the max while the count stays (a 1-arg replaced by another 1-arg) moves nothing here either.
 struct EditCheckVerdict
 {
-    const char* status;   // unchanged / new-symbol / contract-change — the DOCUMENT's headline
+    const char* status;   // unchanged / new-symbol / contract-change / no-baseline — the DOCUMENT's headline
     std::string change;   // the evidence list, non-empty exactly when status == "contract-change"
 };
 
@@ -321,9 +330,9 @@ inline EditCheckVerdict editCheckVerdict( const EditCheckContract& contract, std
 {
     // new-symbol is not reassurance ABOUT A CONTRACT — there was none to compare against — so it is never
     // escalated and carries no change list. Its callers can still be flagged; that is the payload's job.
-    if( std::string_view( contract.status ) == "new-symbol" )
+    if( std::string_view( contract.status ) == "new-symbol" || std::string_view( contract.status ) == "no-baseline" )
     {
-        return EditCheckVerdict { contract.status, std::string {} };
+        return EditCheckVerdict { contract.status, std::string {} };   // nothing to compare against: no evidence list
     }
 
     std::string change;
@@ -365,8 +374,21 @@ inline EditCheckVerdict editCheckVerdict( const EditCheckContract& contract, std
 // counted 1 param).
 //
 // Recognised instead from the structural fact ingest DOES record: Python/Ruby capture the enclosing class as
-// the definition's `scope` (P2-D Rule 1), so a non-empty scope in one of those languages means an implicit
-// `self`/`cls`. The test is deliberately made HERE rather than on `arityExact`, which is also graph.h's
+// the definition's `scope` (P2-D Rule 1 for Python; rubyEnclosingScopeOf for Ruby, 2026-09-07 — before that
+// arm no Ruby def carried a scope at all), so a non-empty scope in one of those languages means an implicit
+// `self`/`cls`.
+//
+// The Ruby half of that predicate is BELT AND BRACES, not a live exemption, and saying so here is the point:
+// Ruby's `def m(a)` has NO implicit receiver parameter — `params` and the call site's argument count already
+// agree — so there is nothing to exempt, and in any case Ruby never reaches this disjunct. The caller test
+// below short-circuits on `os.arityExact == 0` first, and `cc_paramArityExact`'s language gate
+// (src/ingest_metrics.h) does not list Ruby, so every Ruby definition carries arityExact 0 and no Ruby caller
+// is arity-flaggable at all. MEASURED both ways on a two-file Ruby repo whose method gained a parameter:
+// `incompatible="0"` for a SCOPED method and for a top-level one alike, before and after the scope arm. What
+// the scope arm actually bought --edit-check is the SELECTOR: `--edit-check=Widget::resize` answered
+// "symbol not found" before it and returns a full contract verdict after.
+//
+// The test is deliberately made HERE rather than on `arityExact`, which is also graph.h's
 // call-resolution arity filter — moving it there would move edge counts corpus-wide, which is the qualified-
 // call round's agenda and not this one's. graph.h needs no equivalent change: its filter drops a candidate
 // only when `argCount > params`, and the implicit receiver errs the other way (0 args vs 1 param), so that
@@ -512,6 +534,138 @@ editCheckCallers( const IngestResult& ing, const Graph& g, std::span<const NodeI
     return { std::move( callerIds ), std::move( callerIncompatible ) };
 }
 
+// ── THE ANSWER-SAFE WINDOW (2026-09-10) ──────────────────────────────────────────────────────────────────
+// --edit-check emitted every caller row through a bare unwindowed loop, so a widely-shared name answered
+// with the whole in-edge set — MEASURED here at 485 caller rows / 29,743 B for `push_back`, and far past
+// that on a large tree (the case that started this: ~99,000 tokens for ONE symbol). Its four LB-G siblings
+// (callers/callees/impact/uses) have windowed at kCallHierarchyRowCap for a round already.
+//
+// The reason this verb could not simply adopt pageWindow() over its row list is that ITS ROWS ARE NOT ALL
+// CONTEXT. The rows flagged incompatible="1", and the sites_l= line list on each, ARE the answer; the
+// verdict on the root is read against them. Windowing the row list would drop a flagged caller for no
+// better reason than where its file sorts, and the document would then say "one incompatible caller"
+// while naming none of them — or, with the count taken from the page instead of the set, say none exists.
+// A wrong answer carrying capped="1" is still a wrong answer, so the split below is the whole design:
+//
+//   * the VERDICT (status=, defs=, callers=, incompatible=, the was/now group, change=) is computed from
+//     the FULL caller set, before any window exists — removing the window cannot move it;
+//   * FLAGGED rows and their complete sites_l= ride EVERY page, uncut, the way --test-gate's <t> rows do;
+//   * the <def> overload census is the set behind defs= and is never windowed either;
+//   * ONLY the unflagged context rows page, and they page under the family's own vocabulary.
+//
+// `total` here is therefore the UNFLAGGED count, not callers= — pageview.h's rule 6 ("the paging half always
+// describes the report's PRIMARY, --limit/--offset-windowed listing"), the same shape --communities already
+// ships (modules="1146" … total="1146" beside a larger bridges="1613"). The pair beside it is rule 1's
+// noun-prefixed form, shown_unflagged=/unflagged_capped=, because a BARE shown= would have to mean "rows
+// printed" and the flagged rows print outside the window.
+//
+// "unflagged", not "compatible": a row without incompatible="1" is a caller this run did not PROVE
+// incompatible (the arity test is one-sided and skips a call site whose argument count could not be
+// counted). Naming those rows compatible would be a claim the tool cannot make.
+struct EditCheckRowWindow
+{
+    PageWindow  window;          // over the UNFLAGGED rows only, in document order
+    std::size_t unflaggedTotal;  // callers - incompatible: the population the window is taken from
+    std::size_t unflaggedShown;  // window.end - window.begin
+    bool        active;          // emit the disclosure (and its legend clause) at all
+
+    // THE ONE row-membership test, so the emitter's loop carries no window arithmetic of its own: a
+    // condition spelled at the call site is a condition the next edit can spell differently.
+    bool holds( std::size_t unflaggedIndex ) const noexcept
+    {
+        return unflaggedIndex >= window.begin && unflaggedIndex < window.end;
+    }
+    bool cut() const noexcept { return unflaggedShown < unflaggedTotal; }
+};
+
+inline EditCheckRowWindow editCheckRowWindow( std::size_t callerCount, std::size_t incompatibleCount,
+                                              int pageLimit, int pageOffset ) noexcept
+{
+    const std::size_t unflaggedTotal = callerCount - std::min( incompatibleCount, callerCount );
+    const PageWindow  window         = pageWindow( unflaggedTotal, effectiveRowCap( pageLimit, kCallHierarchyRowCap ), pageOffset );
+    const std::size_t shown          = window.end - window.begin;
+    // The family's own activity decision (computePageDisclosure), passed the UNFLAGGED counts: silent when
+    // nothing was cut and no window was spelled, so an answer that fits is byte-identical to what it was.
+    const bool        active         = computePageDisclosure( shown, unflaggedTotal, window.end, pageLimit, pageOffset,
+                                                              /*discloseCap=*/shown < unflaggedTotal ).active;
+    return { window, unflaggedTotal, shown, active };
+}
+
+// The clause that DEFINES the four attributes above where the reader meets them (legendcoveragecheck's
+// rule), and states the split in band — an agent that reads "capped" has to be able to read, on the same
+// screen, that what was capped is not the answer. Emitted only when the window is active, for the reason
+// graphlegend.h's kNeighbourCapLegend is: a call never pays for vocabulary it cannot emit. No double hyphen
+// anywhere in it — it rides inside an XML comment (G4).
+inline constexpr const char* kEditCheckWindowLegend =
+    "THE ANSWER IS NEVER WINDOWED: every caller flagged incompatible=\"1\", the complete sites_l= line list on each, and every "
+    "def row behind defs= ride EVERY page in full — they are never paged and never cut — and status=, defs=, callers= and "
+    "incompatible= are computed over the FULL caller set before any window is taken, so raising or removing the window cannot "
+    "move them. What pages is the UNFLAGGED context rows (callers this run did not flag, which is not a proof they are "
+    "compatible — the arity test above is one-sided): shown_unflagged= is how many of them this page printed, "
+    "unflagged_capped=\"1\" says rows were dropped, and total=/has_more=/next_offset=/offset=/limit= window THAT listing alone, "
+    "so total= is the unflagged count (callers= minus incompatible=), never the caller total. Raise the default cap with "
+    "limit=N (offset=M pages, and a page past the end reads shown_unflagged=\"0\" with has_more=\"0\"); on the root, limit=\"0\" "
+    "means no explicit limit was given and the verb's own default page size shaped the window — never a zero-row page. ";
+
+// The root attributes that clause defines: rule 1's noun-prefixed pair plus rule 6's paging half, composed
+// in ONE place so the pair and the half cannot come apart. Empty when the window is inactive, which is what
+// keeps an answer that fits byte-identical to what it was.
+inline std::string editCheckWindowAttrs( const EditCheckRowWindow& rowWindow, int pageLimit, int pageOffset )
+{
+    if( !rowWindow.active )
+    {
+        return {};
+    }
+    // §B14 — composed on std::string, not a fixed char[]: the same rule the assembler below follows. Nothing
+    // here is corpus text (both values are counts), so the buffer would in fact have been safe — which is
+    // exactly why it is not worth having, since a reader of test/fixedbufsweep.sh's table would have to
+    // re-derive that. The paging half keeps the family's own char[kPageDisclosureCap], which pagingDisclosure
+    // owns the sizing rule for.
+    std::string attrs = " shown_unflagged=\"" + std::to_string( rowWindow.unflaggedShown )
+                      + "\" unflagged_capped=\"" + ( rowWindow.cut() ? "1" : "0" ) + "\"";
+    char        pab[ kPageDisclosureCap ];
+    attrs += pagingDisclosure( pab, sizeof( pab ), rowWindow.unflaggedTotal, rowWindow.window.end, pageLimit, pageOffset );
+    return attrs;
+}
+
+// est_tokens= is UNCONDITIONAL, matching the per-symbol bundle sibling this verb is read beside (--expand,
+// which prices every answer however small) rather than the neighbour verbs' conditional cap pair: the whole
+// point of the number is to be there BEFORE a caller has to guess whether the next call is affordable.
+//
+// THE ONE pricing step, and it is idempotent by construction: it strips any est_tokens= already on the root
+// and re-splices the converged attribute at the root's closing '>'. That is not defensive coding — the
+// pre-apply preview appends its <overwrite> child AFTER this assembler returns, so the document it hands
+// back is bigger than the one that was priced, and a price that did not cover it would be the exact
+// under-reporting §H7/M11 exist to prevent. editpreview.h re-prices through THIS function; there is no
+// second estimator and no second formula (serialize.h's pricedRootAttr does the conversion and the digit
+// convergence).
+inline void editCheckPriceRoot( std::string& doc )
+{
+    const std::size_t open = doc.find( "<edit-check " );
+    if( open == std::string::npos )
+    {
+        return;
+    }
+    std::size_t close = doc.find( '>', open );
+    if( close == std::string::npos )
+    {
+        return;
+    }
+    constexpr std::string_view kAttrOpen = " est_tokens=\"";
+    if( const std::size_t had = doc.rfind( kAttrOpen, close ); had != std::string::npos && had > open )
+    {
+        if( const std::size_t endq = doc.find( '"', had + kAttrOpen.size() ); endq != std::string::npos && endq < close )
+        {
+            doc.erase( had, endq + 1 - had );
+            close = doc.find( '>', open );
+            if( close == std::string::npos ) { return; }
+        }
+    }
+    std::size_t       estTokens = 0;
+    const std::string priced    = pricedRootAttr( doc.size(), kBytesPerTokenDefault, /*bodyBytes=*/0, &estTokens );
+    doc.insert( close, priced );
+}
+
 // THE bundle assembler for an ALREADY-RESOLVED `focus` symbol: builds the <edit-check>…</edit-check> XML
 // (status + was/now on contract-change + the flagged 1-hop callers) and returns it as a string — never
 // touches stdout. `root`/`maxFileBytes`/`excludes` feed the HEAD-baseline comparison (see
@@ -527,9 +681,15 @@ editCheckCallers( const IngestResult& ing, const Graph& g, std::span<const NodeI
 // It is a FLAG ON THE ONE ASSEMBLER rather than a second emitter on purpose: a preview that could drift from
 // the post-hoc answer would be worth nothing, and test/editpreviewcheck.sh compares the two documents
 // byte-for-byte (modulo the legend, at= and this flag's own attribute).
+//
+// `pageLimit`/`pageOffset` (2026-09-10) are --limit/--offset, and they window the UNFLAGGED context rows and
+// nothing else — see editCheckRowWindow above for why this verb cannot take the family's plain row window.
+// Both default to 0, which is "no explicit window": the verb's own default cap then shapes the page, the
+// same posture the four neighbour verbs took when they adopted kCallHierarchyRowCap.
 inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g, const std::string& root,
                                         std::size_t maxFileBytes, const std::vector<std::string>& excludes, NodeId focus,
-                                        const notes::NoteIndex* ni = nullptr, bool preview = false )
+                                        const notes::NoteIndex* ni = nullptr, bool preview = false,
+                                        int pageLimit = 0, int pageOffset = 0 )
 {
     const Symbol& fsym = ing.symbols[ focus ];
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — the ONE
@@ -557,6 +717,9 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
         }
     }
     const EditCheckVerdict verdict = editCheckVerdict( contract, incompatibleCount );
+    // THE WINDOW, taken AFTER every verdict number above is already fixed and over the UNFLAGGED rows only.
+    // Its position in this function is the guarantee: there is no path by which a window can reach a count.
+    const EditCheckRowWindow rowWindow = editCheckRowWindow( callerIds.size(), incompatibleCount, pageLimit, pageOffset );
     // P3/M21: the call-site lines for the flagged rows. Paid for only when a row will carry them — an
     // unchanged contract with no flagged caller does not scan the reference table at all.
     const std::vector<std::pair<NodeId, std::uint32_t>> callSites =
@@ -586,7 +749,9 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
                "preview then apply needs no read of the region first. ";
     }
     out += "SYM's contract (param count + publicness) NOW vs git HEAD — unchanged/new-symbol/"
-                       "contract-change — plus its 1-hop callers. A caller is flagged incompatible=\"1\" when its argument count "
+                       "contract-change, or no-baseline when the root has no git HEAD to compare against (not a repository, or "
+                       "no commit yet): then NOTHING is claimed about the contract, and a symbol is never called new for want "
+                       "of a baseline — plus its 1-hop callers. A caller is flagged incompatible=\"1\" when its argument count "
                        "was reliably counted and NO definition in the folded set could accept it: every one has a FIXED arity that "
                        "disagrees. A variadic, defaulted or implicit-receiver definition (a Python/Ruby method, whose params counts "
                        "the self/cls the call site never writes) has no fixed arity and is never flagged. That makes the ARITY half "
@@ -634,12 +799,20 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
                        "is that definition, and params_now is its parameter count. "
                        // P3 (L7): next= defined where the reader meets it
                        "next= is the one pasteable follow-up: on a contract-change the uses verb on SYM (the call sites), "
-                       "otherwise the test gate on the definition's file. ";
+                       "otherwise the test gate on the definition's file. "
+                       // M11/§H7: the priced root, defined where it is met. Unconditional, like the attribute.
+                       "est_tokens= prices THIS document, through the tool's ONE emitted-bytes estimator. ";
+    // 2026-09-10: the window clause, emitted only when a window is actually active — see kEditCheckWindowLegend
+    // for why the answer half of the document is exempt from it, and editCheckRowWindow for where that is enforced.
+    if( rowWindow.active )
+    {
+        out += kEditCheckWindowLegend;
+    }
     // §H4 §3.4: the shared floor + counting-unit tail, appended from the ONE constant every graph-count verb
     // splices. It is load-bearing HERE more than anywhere: callers="1" on a symbol with an unmodelled second
     // caller is the exact shape §H4 measured, and this legend's own "the tree as it stands" paragraph reads
     // as if the caller SET were complete.
-    out += graphCountDisclosure();
+    out += graphCountDisclosure( g.unindexedFiles > 0 );
     out += "-->";
     // §B14 — composed on std::string, NOT snprintf'd into a fixed buffer. `ex()` has already escaped the name
     // and the path, so a truncating snprintf here would cut the ESCAPED form: mid-entity, mid-attribute-name or
@@ -658,12 +831,12 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // map's `overloads=` convention) precisely because the sibling it is read against, --callers, always emits
     // it — an attribute a reader has never seen present cannot warn them.
     char defsAttr[ 32 ];
-    std::snprintf( defsAttr, sizeof( defsAttr ), " defs=\"%zu\"", overloadNodes.size() );
+    rw::formatTo( defsAttr, sizeof( defsAttr ), " defs=\"{}\"", overloadNodes.size() );
     out += defsAttr;
     if( std::string_view( verdict.status ) == "contract-change" )
     {
         char cc[ 192 ];
-        std::snprintf( cc, sizeof( cc ), " params_was=\"%u\" params_now=\"%u\" public_was=\"%d\" public_now=\"%d\" defs_was=\"%u\" defs_now=\"%u\"",
+        rw::formatTo( cc, sizeof( cc ), " params_was=\"{}\" params_now=\"{}\" public_was=\"{}\" public_now=\"{}\" defs_was=\"{}\" defs_now=\"{}\"",
                        contract.wasParams, contract.nowParams, contract.wasPublic ? 1 : 0, contract.nowPublic ? 1 : 0,
                        contract.wasDefs, contract.nowDefs );
         out += cc;
@@ -676,7 +849,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // additive-overload shape the legend names, and "zero rows carry incompatible=" was previously an ABSENCE
     // the reader had to notice rather than a number they could read. (Counted above — the headline needs it.)
     char callersOpen[ 64 ];
-    std::snprintf( callersOpen, sizeof( callersOpen ), " callers=\"%zu\" incompatible=\"%zu\"", callerIds.size(), incompatibleCount );
+    rw::formatTo( callersOpen, sizeof( callersOpen ), " callers=\"{}\" incompatible=\"{}\"", callerIds.size(), incompatibleCount );
     out += callersOpen;
     // r26-stamp Task A: the HEAD baseline this contract compares against is only meaningful pinned to a
     // commit (+dirty state) — omitted entirely on a non-git root. Appended LAST (after every pre-existing
@@ -698,6 +871,10 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // tests that reach the definition's file (--test-gate=FILE).
     out += nextAttrXml( std::string_view( verdict.status ) == "contract-change" ? nextFlag( "--uses=", fsym.name )
                                                                                 : nextFlag( "--test-gate=", ecPathRel( fsym.fileId ) ) );
+    // 2026-09-10 — the CONTEXT listing's disclosure, appended past the end of every pre-existing attribute
+    // group for the placement reason stated at root=/preview= above. Rule 1's noun-prefixed pair plus rule 6's
+    // paging half (pageview.h), describing the UNFLAGGED rows and only those. Silent on an answer that fits.
+    out += editCheckWindowAttrs( rowWindow, pageLimit, pageOffset );
     out += ">";
     // L3/D5 note surfacing (paper-noteedit): a note targeting THIS symbol (its canonical id) or the FILE it
     // is defined in rides as a <note> child of <edit-check>, same shape/order/escaping renderNoteChildren
@@ -723,8 +900,18 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
             out += "\"/>";
         }
     }
+    // THE PARTITION-PRESERVING WINDOW. Document ORDER is untouched — the rows still come out in the
+    // (file, line, name) order editCheckCallers sorted them into — because the window advances on UNFLAGGED
+    // rows only: a flagged row is emitted wherever it sorts, on every page, and never counts against the
+    // page. Hoisting the flagged rows to the front would have windowed just as safely and reordered a
+    // document other gates read positionally; this way an uncapped answer is byte-identical to what it was.
+    std::size_t unflaggedIndex = 0;
     for( NodeId c : callerIds )
     {
+        if( !callerIncompatible[c] && !rowWindow.holds( unflaggedIndex++ ) )
+        {
+            continue;
+        }
         const Symbol& cs = ing.symbols[c];
         out += "<c n=\"";   out += ex( cs.name );                        // §B14 — std::string, not char[512]
         out += "\" p=\"";   out += ex( ecPathRel( cs.fileId ) );
@@ -742,6 +929,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
         out += "/>";
     }
     out += "</edit-check>";
+    editCheckPriceRoot( out );   // M11: the priced root, LAST — the price covers every byte above it
     return out;
 }
 

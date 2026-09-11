@@ -215,7 +215,7 @@ grep -q '"pr_iters":2,"pr_converged":false' "$TMP/f2.json" \
     || no "(F) the truncated JSON run does not carry \"pr_iters\":2,\"pr_converged\":false"
 
 # ── (G) the hook is not a flag (G5) ───────────────────────────────────────────────────────────────
-if "$BIN" --help 2>&1 | grep -q 'RIPWIRE_TEST_PR_MAXITERS'; then
+if "$BIN" --help=all 2>&1 | grep -q 'RIPWIRE_TEST_PR_MAXITERS'; then
     no "(G) RIPWIRE_TEST_PR_MAXITERS is advertised in --help — it is a gate's arming hook, not a user surface"
 else
     ok "(G) RIPWIRE_TEST_PR_MAXITERS appears in no --help text (G5)"

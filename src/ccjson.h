@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // ccjson.h — Wave-4 feature: --export=cc.json[:FILE]. Map the per-file metrics ripwire already
 // computes (LOC, symbol count, cyclomatic cx, cognitive cx, file-level fan-in/fan-out, git churn)
@@ -237,8 +239,8 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
     std::string esc;   // reused escape scratch
     const auto emitAttrs = [ & ]( const CcFileMetrics& e )
     {
-        std::fprintf( out,
-            "\"attributes\":{\"loc\":%u,\"symbols\":%u,\"cx\":%u,\"cognitive_cx\":%u,\"fan_in\":%u,\"fan_out\":%u,\"churn\":%u}",
+        rw::emitTo( out,
+            "\"attributes\":{{\"loc\":{},\"symbols\":{},\"cx\":{},\"cognitive_cx\":{},\"fan_in\":{},\"fan_out\":{},\"churn\":{}}}",
             e.loc, e.symbols, e.cx, e.ccx, e.fanIn, e.fanOut, e.churn );
     };
 
@@ -247,28 +249,28 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
     {
         const CcNode& n = pool[ id ];
         esc.clear();  ccJsonEscape( n.name, esc );
-        std::fprintf( out, "{\"name\":\"%s\",", esc.c_str() );
+        rw::emitTo( out, "{{\"name\":\"{}\",", esc.c_str() );
 
         if( n.fileId >= 0 )   // File leaf
         {
-            std::fprintf( out, "\"type\":\"File\"," );
+            rw::emitRaw( out, "\"type\":\"File\"," );
             emitAttrs( metrics[ std::uint32_t( n.fileId ) ] );
-            std::fprintf( out, "}" );
+            rw::emitRaw( out, "}" );
             return;
         }
 
         // Folder: attributes are the aggregate of descendant files? CodeCharta computes folder rollups
         // itself on import, so we emit an empty folder attributes object (import-compatible) + children.
-        std::fprintf( out, "\"type\":\"Folder\",\"attributes\":{},\"children\":[" );
+        rw::emitRaw( out, "\"type\":\"Folder\",\"attributes\":{},\"children\":[" );
         for( std::size_t i = 0; i < n.children.size(); ++i )
         {
             if( i )
             {
-                std::fprintf( out, "," );
+                rw::emitRaw( out, "," );
             }
             self( self, n.children[i] );
         }
-        std::fprintf( out, "]}" );
+        rw::emitRaw( out, "]}" );
     };
 
     // attributeDescriptors: cheap, static, and makes the CodeCharta UI show friendly axis labels.
@@ -276,8 +278,8 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
     // loc/symbols are neutral, left at -1 per CodeCharta's convention for size-ish metrics). Optional per
     // the spec — included because it is one constexpr-ish blob.
     esc.clear();  ccJsonEscape( projectName, esc );
-    std::fprintf( out, "{\"projectName\":\"%s\",\"apiVersion\":\"1.3\",", esc.c_str() );
-    std::fprintf( out,
+    rw::emitTo( out, "{{\"projectName\":\"{}\",\"apiVersion\":\"1.3\",", esc.c_str() );
+    rw::emitRaw( out,
         "\"attributeDescriptors\":{"
         "\"loc\":{\"title\":\"Lines of Code\",\"description\":\"Physical line count\",\"direction\":-1},"
         "\"symbols\":{\"title\":\"Symbols\",\"description\":\"Definitions in the file\",\"direction\":-1},"
@@ -287,9 +289,9 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
         "\"fan_out\":{\"title\":\"Fan Out\",\"description\":\"In-corpus files this file depends on\",\"direction\":-1},"
         "\"churn\":{\"title\":\"Churn\",\"description\":\"Commits touching this file in the recent window\",\"direction\":-1}"
         "}," );
-    std::fprintf( out, "\"nodes\":[" );
+    rw::emitRaw( out, "\"nodes\":[" );
     emitNode( emitNode, 0 );
-    std::fprintf( out, "]}\n" );
+    rw::emitRaw( out, "]}\n" );
 }
 
 }   // namespace rw

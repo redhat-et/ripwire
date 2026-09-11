@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // quality.h — --quality-baseline / --quality-delta: the deterministic oracle for a code-quality CONVERGENCE
 // LOOP. Snapshot the current per-symbol cognitive complexity, the duplicate-clone groups, and the dead-symbol
@@ -790,7 +793,7 @@ inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const Inges
     {
         std::sort( hs.begin(), hs.end() );                                    // order-independent overload fold
         std::string joined;
-        for( std::uint64_t h : hs ) { char b[ 17 ]; std::snprintf( b, sizeof( b ), "%016llx", static_cast<unsigned long long>( h ) ); joined += b; }
+        for( std::uint64_t h : hs ) { char b[ 17 ]; rw::formatTo( b, sizeof( b ), "{:016x}", static_cast<unsigned long long>( h ) ); joined += b; }
         out[ key ] = fnv1a64( joined );
     }
     return out;
@@ -1123,6 +1126,13 @@ inline std::string cacheDirLadder()
 // still spell quality::popenTrimmed, which this using-declaration resolves. Not a wrapper: one definition.
 using rw::popenTrimmed;
 
+// isBareCommitSha (THE object-name gate) and gitResolveCommitSha (THE commit resolver) live in gitmine.h too —
+// moved down 2026-09-10 when resolveSinceScope needed them, so --since hands git a resolved sha instead of the
+// caller's string. gitIsAncestor / materializeCommitTree below and crossref.h still spell them quality::…,
+// which these using-declarations resolve. One definition each.
+using rw::isBareCommitSha;
+using rw::gitResolveCommitSha;
+
 // Run one short git query against `root` and return its whitespace-trimmed output (expected single-line), or
 // "" on any failure. The shared shape behind gitHeadSha / gitWindowRefSha — `tail` is everything after
 // `git -C <root>` INCLUDING redirects; callers must use git's own limiting flags so the command is portable.
@@ -1302,7 +1312,7 @@ inline std::string gitHeadSha( const std::string& root )
 // dashes at 4 and 7) — the caller degrades to a fixed epoch date. Read-only: `git log` never mutates the repo.
 inline std::string gitCommitterDateIso( const std::string& root )
 {
-    const std::string out = gitOneLine( root, "log -1 --format=%cs HEAD 2>/dev/null" );
+    std::string out = gitOneLine( root, "log -1 --format=%cs HEAD 2>/dev/null" );   // not const: a const local cannot be moved out on return
     if( out.size() != 10 || out[4] != '-' || out[7] != '-' )
     {
         return {};
@@ -1321,54 +1331,6 @@ inline std::string gitCommitterDateIso( const std::string& root )
 // the CLI while the MCP arm honestly reported zero); `selectBaseline` now decides staleness by STRICT sha
 // equality and never calls this. The remaining caller is `binstale.h`'s "is the built binary older than the
 // sources?" check, which is a genuine reachability question — do not delete this.
-// ─── r27 (Lane C routing) — the OBJECT-NAME gate on every token that reaches a git argv ────────────────
-//
-// `shSingleQuote` stops SHELL injection, but the token still arrives as its own argv ENTRY, and git reads a
-// leading `-` as an OPTION. Lane C's P0.1 defect is the proof this matters: `--pr-context=--output=FILE`
-// reached `git diff` as an option and TRUNCATED a file outside the repo, exit 0. The durable defense is not
-// quoting — it is refusing anything that is not a bare object name.
-//
-// A commit sha is 40 (SHA-1) or 64 (SHA-256) lowercase hex and NOTHING else: it cannot begin with `-`, cannot
-// contain a path separator, and cannot spell an option. Checking that SHAPE is a complete defense on its own
-// and needs no subprocess, so it is applied at both ends — at the trust boundary where an untrusted value is
-// READ (readBaselineHeadSha, whose input is a COMMITTED, therefore clone-attacker-influenceable sidecar) and
-// again at the SINK, here, because a future caller will not remember the boundary.
-//
-// KNOWN DUPLICATE, flagged by our own --quality-delta and left deliberately: `crossref::isBlobSha`
-// (crossref.h) is the same predicate for git BLOB shas. It cannot be reused from here — crossref.h INCLUDES
-// quality.h, so the dependency only runs one way. The consolidation is a one-line change in crossref.h
-// (`isBlobSha` delegating to this), which is outside this lane's file boundary; it is written up in the lane
-// report rather than done silently across a file this lane does not own.
-inline bool isBareCommitSha( std::string_view s ) noexcept
-{
-    if( s.size() != 40 && s.size() != 64 )
-    {
-        return false;
-    }
-    for( char c : s )
-    {
-        if( !std::isxdigit( static_cast<unsigned char>( c ) ) )
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-// Resolve `ref` to a concrete commit sha, or "" if it does not resolve to one. Belt AND braces: the ref is
-// refused outright if it could be read as an option, and the ANSWER must itself be a bare object name — a
-// `rev-parse` that echoes something else (a path, an error, a multi-line answer) is not trusted. Callers that
-// hand a token to git should hand THIS result, never the caller's own string.
-inline std::string gitResolveCommitSha( const std::string& root, const std::string& ref )
-{
-    if( ref.empty() || ref[0] == '-' )
-    {
-        return {};
-    }
-    const std::string out = gitOneLine( root, "rev-parse --verify --quiet " + shSingleQuote( ref + "^{commit}" ) + " 2>/dev/null" );
-    return isBareCommitSha( out ) ? out : std::string{};
-}
-
 inline bool gitIsAncestor( const std::string& root, const std::string& ancestor, const std::string& descendant )
 {
     if( ancestor.empty() || descendant.empty() )
@@ -1411,7 +1373,7 @@ inline std::string gitWindowRefSha( const std::string& root, std::uint32_t days 
     // newest commit at-or-before the window floor (rev-list --min-age filters on committer time ≤ the bound;
     // cutoff−1 keeps a commit landing exactly ON the floor inside the window, matching gitmine's inclusive floor).
     const std::int64_t cutoff = headEpoch - std::int64_t( days ) * 86400;
-    const std::string  preWindow = gitOneLine( root, "rev-list --max-count=1 --min-age=" + std::to_string( cutoff - 1 ) + " HEAD 2>/dev/null" );
+    std::string        preWindow = gitOneLine( root, "rev-list --max-count=1 --min-age=" + std::to_string( cutoff - 1 ) + " HEAD 2>/dev/null" );   // not const: moved out on return
     if( !preWindow.empty() )
     {
         return preWindow;
@@ -1481,7 +1443,7 @@ inline std::string headSnapRepoHex( const std::string& root )
         std::free( rp );
     }
     char hex[ 20 ];
-    std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( fnv1a64( absRoot ) ) );
+    rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( fnv1a64( absRoot ) ) );
     return std::string( hex );
 }
 
@@ -1513,8 +1475,15 @@ inline std::string headSnapRepoHex( const std::string& root )
 // lines too. Bumping kParserVer without updating these two lines is a hard gate failure, not a silent miss.
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
-constexpr std::uint32_t kIngestCacheVersionMirror = 15;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 77;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestCacheVersionMirror   = 18;   // MUST equal ingest.cpp's kCacheVersion (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 88;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 78 = 2026-09-07 (Elixir): a twenty-second grammar and its
+                                                          //    definition/call filters.
+                                                          // 79 = 2026-09-07 (ES import facts): named import aliases and
+                                                          //    `export { f }` clause exports. See ingest_cache.h's note.
+                                                          // 80 = 2026-09-07 (Ruby scope + setters): every Ruby def carries
+                                                          //    its enclosing class/module as scope, and `def name=` is
+                                                          //    indexed with `obj.name = v` renamed to it.
                                                           // 77 = 2026-09-03 (Phase 5): Python super() receiver kind +
                                                           // import-name bindings. See ingest_cache.h's kParserVer note.
                                                           // 74 = 2026-08-30 (objc-sniff lane): looksObjC masks comments
@@ -1678,7 +1647,7 @@ inline std::string exclConfigHex( const std::vector<std::string>& excludes, cons
     keyMat.push_back( '\x1f' );
     keyMat += std::to_string( maxFileBytes );          // P0.2: the file-size ceiling changes the extracted SET
     char hex[ 20 ];
-    std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( fnv1a64( keyMat ) ) );
+    rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( fnv1a64( keyMat ) ) );
     return std::string( hex );
 }
 
@@ -1705,14 +1674,14 @@ inline std::string headSnapExclHex( const std::vector<std::string>& excludes, st
 inline std::string blobShardHex( std::string_view filename )
 {
     char hex[ 3 ];
-    std::snprintf( hex, sizeof( hex ), "%02x", static_cast<unsigned>( fnv1a64( filename ) & 0xff ) );
+    rw::formatTo( hex, sizeof( hex ), "{:02x}", static_cast<unsigned>( fnv1a64( filename ) & 0xff ) );
     return std::string( hex );
 }
 
 inline std::string resolveCacheBlobPath( const std::string& dir, const std::string& filename )
 {
     namespace fs = std::filesystem;
-    const std::string flatPath = dir + "/" + filename;
+    std::string       flatPath = dir + "/" + filename;   // not const: moved out on either early return
     std::error_code   existsEc;
     if( fs::exists( fs::path( flatPath ), existsEc ) && !existsEc )
     {
@@ -1738,7 +1707,7 @@ inline std::string shaKeyedCachePath( const char* family, const std::string& rep
 {
     const std::uint64_t shaKey = fnv1a64( sha );
     char tail[ 96 ];
-    std::snprintf( tail, sizeof( tail ), "ripwire-%s-%s-%s-%016llx.bin",
+    rw::formatTo( tail, sizeof( tail ), "ripwire-{}-{}-{}-{:016x}.bin",
                    family, repoHex.c_str(), exclHex.c_str(), static_cast<unsigned long long>( shaKey ) );
     return resolveCacheBlobPath( cacheDirLadder(), tail );
 }
@@ -1957,6 +1926,57 @@ constexpr double         kMaxCacheBlobAgeDays = 30.0;
 constexpr std::uintmax_t kMaxCacheDirBytes    = 2ull * 1024 * 1024 * 1024;   // 2 GB
 constexpr std::size_t    kMaxCacheBlobCount   = 4096;                         // bound every future hygiene scan
 
+// 2026-09-06 stranger audit: the advisory edit locks (mcpedit.h editLockPath — <cacheDir>/locks/<xx>/ripwire-edit-
+// <hash>.lock, one per distinct target path ever edited) are deliberately never unlinked by their holder, and the
+// blob sweep above deliberately never enters locks/. Nothing else did either: one machine had 45,765 of them.
+// A lock file is reclaimable when nobody holds it — flock(LOCK_EX|LOCK_NB) succeeding IS that test — and it
+// is old enough that a fresh open is unlikely to be racing us; the age bound keeps a lock created seconds ago
+// by a peer that has not yet flock'd it out of reach. The residual (a peer opens the path between our unlink
+// and our close, and a third process then opens a new inode) is the same window mcpedit.h already documents
+// as covered by its re-check-before-rename; the lock is the fast path, never the correctness floor.
+constexpr double kMaxEditLockAgeDays = 1.0;
+
+inline std::vector<std::string> staleEditLockPaths( const std::string& dir )
+{
+    namespace fs = std::filesystem;
+    std::vector<std::string> stale;
+    std::error_code          ec;
+    const auto               now = fs::file_time_type::clock::now();
+    fs::recursive_directory_iterator it( fs::path( dir ) / "locks", fs::directory_options::skip_permission_denied, ec ), end;
+    for( ; !ec && it != end; it.increment( ec ) )
+    {
+        std::error_code   sec;
+        const std::string name = it->path().filename().string();
+        if( name.rfind( "ripwire-edit-", 0 ) != 0 || !it->is_regular_file( sec ) || sec )
+        {
+            continue;
+        }
+        const auto mt = fs::last_write_time( it->path(), sec );
+        if( !sec && std::chrono::duration<double>( now - mt ).count() / 86400.0 >= kMaxEditLockAgeDays )
+        {
+            stale.push_back( it->path().string() );
+        }
+    }
+    return stale;
+}
+
+inline void sweepStaleEditLocks( const std::string& dir )
+{
+    for( const std::string& path : staleEditLockPaths( dir ) )
+    {
+        const int fd = ::open( path.c_str(), O_RDWR );
+        if( fd < 0 )
+        {
+            continue;
+        }
+        if( ::flock( fd, LOCK_EX | LOCK_NB ) == 0 )
+        {
+            ::unlink( path.c_str() );   // unheld and old: reclaim; a later editor recreates it on demand
+        }
+        ::close( fd );
+    }
+}
+
 inline void sweepStaleCacheBlobsOnce( const std::string& dir, const std::string& keepPath )
 {
     static std::atomic<bool> swept{ false };
@@ -1967,6 +1987,7 @@ inline void sweepStaleCacheBlobsOnce( const std::string& dir, const std::string&
     }
 
     evictOldCacheFamily( dir, "ripwire-", keepPath, kMaxCacheBlobCount, kMaxCacheBlobAgeDays, kMaxCacheDirBytes );
+    sweepStaleEditLocks( dir );
 }
 
 // The HEAD-snapshot INGEST cache family (ripwire-qheadsnap-<repoHex>-<exclHex>-<sha>.bin), capped per (repo,excl).
@@ -2425,7 +2446,7 @@ inline std::string materializeCommitTree( const std::string& root, const std::st
     { DEGRADED_PATH_ALERT( "quality: commit-tree revision does not resolve to a commit — refusing to archive" ); return {}; }
 
     std::error_code ec;
-    const std::string tmpRoot = cacheDirLadder() + "/ripwire-" + tag + "-" + std::to_string( ::getpid() );
+    std::string tmpRoot = cacheDirLadder() + "/ripwire-" + tag + "-" + std::to_string( ::getpid() );   // not const: moved out on return
     fs::remove_all( fs::path( tmpRoot ), ec );                 // stale leftover from a crashed prior run
     if( !fs::create_directories( fs::path( tmpRoot ), ec ) && ec )
     { DEGRADED_PATH_ALERT( "quality: cannot create commit-tree temp dir" ); return {}; }
@@ -2596,7 +2617,7 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
         {
             // the fprintf is the visible line in ALL build types (test/qsnapcachecheck.sh (e) gates on it);
             // DEGRADED_PATH_ALERT compiles out under NDEBUG.
-            std::fprintf( stderr, "ripwire: quality: HEAD Snapshot cache corrupt — recomputing\n" );
+            rw::emitRaw( stderr, "ripwire: quality: HEAD Snapshot cache corrupt — recomputing\n" );
             DEGRADED_PATH_ALERT( "quality: HEAD Snapshot cache corrupt — recomputing" );
         }
     }
@@ -2769,7 +2790,7 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
         }
         if( hit == -1 )
         {
-            std::fprintf( stderr, "ripwire: quality: window-ref body cache corrupt — recomputing\n" );
+            rw::emitRaw( stderr, "ripwire: quality: window-ref body cache corrupt — recomputing\n" );
             DEGRADED_PATH_ALERT( "quality: window-ref body cache corrupt — recomputing" );
         }
     }
@@ -3154,13 +3175,27 @@ inline bool baselineHeaderIsForeign( const std::string& line ) noexcept
     return line.rfind( "# ripwire quality baseline v", 0 ) == 0 && line.find( " v4 " ) == std::string::npos;
 }
 
-inline bool readBaseline( const std::string& path, Snapshot& out )
+// 2026-09-06 stranger audit: the sidecar readers dropped what they could not parse with no trace a Release
+// binary keeps. These files are COMMITTED and MERGED, so a bad line is ordinary; what the reader did about it
+// has to reach the document (baseline_bad_lines=, acks_bad_lines=) and the marker has to distinguish "no
+// sidecar" from "a sidecar I could not read".
+struct BaselineReadStats
 {
+    bool        present        = false;   // the file opened
+    bool        unrecognizable = false;   // opened, but no line of the format's structure in it
+    bool        preQ1          = false;   // structure, but no per-symbol loc records: origin cannot be classified
+    std::size_t badLines       = 0;       // lines of a known kind whose payload did not parse — skipped
+};
+
+inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadStats& stats )
+{
+    stats = BaselineReadStats{};
     std::ifstream f( path );
     if( !f )
     {
         return false;
     }
+    stats.present = true;
     std::size_t recognizedLineCount = 0;
     std::string line;
     while( std::getline( f, line ) )
@@ -3174,7 +3209,7 @@ inline bool readBaseline( const std::string& path, Snapshot& out )
             // The refusal is a USER-FACING disclosure, so it must survive NDEBUG: behind only a
             // DEGRADED_PATH_ALERT a Release binary refuses SILENTLY and the caller reads "no baseline
             // found" — a refusal that hides its reason misleads exactly like the misread it prevents.
-            std::fprintf( stderr, "ripwire: quality: baseline sidecar predates the pathQualifiedKey scheme — refused, re-pin with --quality-baseline\n" );
+            rw::emitRaw( stderr, "ripwire: quality: baseline sidecar predates the pathQualifiedKey scheme — refused, re-pin with --quality-baseline\n" );
             out = Snapshot{};
             return false;
         }
@@ -3187,14 +3222,14 @@ inline bool readBaseline( const std::string& path, Snapshot& out )
         // gracefully so forward/backward baseline versions never crash.
         const auto readValMap = [ & ]( gtl::btree_map<std::uint64_t, std::uint32_t>& m, const char* what )
         { std::uint64_t h = 0; std::uint32_t v = 0; is >> std::hex >> h >> std::dec >> v;
-          if( is.fail() ) { DEGRADED_PATH_ALERT( what ); return; } m[h] = v; };
+          if( is.fail() ) { DEGRADED_PATH_ALERT( what ); ++stats.badLines; return; } m[h] = v; };
         const auto readSet = [ & ]( std::vector<std::uint64_t>& v, const char* what )
         { std::uint64_t h = 0; is >> std::hex >> h;
-          if( is.fail() ) { DEGRADED_PATH_ALERT( what ); return; } v.push_back( h ); };
+          if( is.fail() ) { DEGRADED_PATH_ALERT( what ); ++stats.badLines; return; } v.push_back( h ); };
         // "<kind> <hexkey> <hexval>" — both 64-bit hex (the raw-body-hash map). Malformed → degrade + skip.
         const auto readHashMap = [ & ]( gtl::btree_map<std::uint64_t, std::uint64_t>& m, const char* what )
         { std::uint64_t h = 0, v = 0; is >> std::hex >> h >> v;
-          if( is.fail() ) { DEGRADED_PATH_ALERT( what ); return; } m[h] = v; };
+          if( is.fail() ) { DEGRADED_PATH_ALERT( what ); ++stats.badLines; return; } m[h] = v; };
 
         if( kind == "ccx" || kind == "loc" || kind == "nest" || kind == "params" || kind == "mask" || kind == "body" || kind == "clone" || kind == "dead" || kind == "api" || kind == "head" || kind == "defs" )
         {
@@ -3246,6 +3281,18 @@ inline bool readBaseline( const std::string& path, Snapshot& out )
     if( recognizedLineCount == 0 )
     {
         DEGRADED_PATH_ALERT( "quality: baseline file is empty/unrecognizable — treating it as absent" );
+        stats.unrecognizable = true;
+        out = Snapshot{};
+        return false;
+    }
+    // A pre-Q1 sidecar has per-symbol records but no `loc` rows, so no finding's ORIGIN can be classified
+    // (computeDelta would gate every one and name phantom findings). Refuse it the way the foreign-header
+    // sidecar above is refused: loudly, with the re-pin, instead of comparing against a floor it cannot read.
+    const bool whollyEmpty = out.locBySym.empty() && out.ccxBySym.empty() && out.nestBySym.empty() && out.paramsBySym.empty()
+                          && out.maskBySym.empty() && out.bodyHashBySym.empty() && out.cloneGroups.empty() && out.dead.empty() && out.publicApi.empty();
+    if( out.locBySym.empty() && !whollyEmpty )
+    {
+        stats.preQ1 = true;
         out = Snapshot{};
         return false;
     }
@@ -3379,6 +3426,8 @@ struct BaselineSelection
     BaselineSource source = BaselineSource::Absent;
     const char*    marker = "git-HEAD";                        // static storage; safe to hold as a bare pointer
     bool           staleFileRemoved = false;                   // Stale only: the unlink LANDED (file gone from disk)
+    bool           sidecarUnreadable = false;                  // a sidecar EXISTS but could not be read (unrecognizable or pre-Q1): ignored, named
+    std::size_t    sidecarBadLines   = 0;                      // honored sidecar: lines skipped as unparseable
 
     bool isSidecarHonored() const noexcept { return source == BaselineSource::Sidecar; }
     bool isSidecarStale()   const noexcept { return source == BaselineSource::Stale; }
@@ -3401,13 +3450,20 @@ inline BaselineSelection selectBaseline( const std::string& root, const std::str
     VERIFY( !sidecarPath.empty() );
 
     BaselineSelection sel;
-    if( !readBaseline( sidecarPath, sel.snapshot ) )
+    BaselineReadStats readStats;
+    if( !readBaseline( sidecarPath, sel.snapshot, readStats ) )
     {
         sel.snapshot = Snapshot{};                             // readBaseline already clears on the unrecognizable path; belt and braces
         sel.source   = BaselineSource::Absent;
         sel.marker   = "git-HEAD";
+        if( readStats.present && ( readStats.unrecognizable || readStats.preQ1 ) )
+        {
+            sel.sidecarUnreadable = true;                      // 2026-09-06: never "no sidecar existed" about a file that is right there
+            sel.marker            = "git-HEAD (sidecar unreadable)";
+        }
         return sel;
     }
+    sel.sidecarBadLines = readStats.badLines;
 
     // R3: STRICT equality, no reachability hop. Note the ordering — gitHeadSha's ~15 ms popen is paid only
     // when a sidecar actually exists, exactly as before.
@@ -3986,7 +4042,7 @@ struct AckRecord
 inline std::string ackMapKey( const std::string& kind, std::uint64_t key )
 {
     char hex[ 20 ];
-    std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( key ) );
+    rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( key ) );
     return kind + " " + hex;
 }
 
@@ -4204,8 +4260,17 @@ inline void mergeDuplicateAckRecord( AckRecord& row, AckRecord&& incoming )
     row.reason = folded;
 }
 
+inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string& path, std::size_t& badLines );
+
 inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string& path )
 {
+    std::size_t ignored = 0;
+    return readAckRecords( path, ignored );
+}
+
+inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string& path, std::size_t& badLines )
+{
+    badLines = 0;
     gtl::btree_map<std::string, AckRecord> out;
     std::ifstream f( path );
     if( !f )
@@ -4228,7 +4293,7 @@ inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string&
         std::uint64_t key = 0;
         std::uint32_t ackNow = 0;
         is >> tag >> kind >> std::hex >> key >> std::dec >> ackNow;
-        if( tag != "ack" || is.fail() ) { DEGRADED_PATH_ALERT( "quality: malformed ack line skipped" ); continue; }
+        if( tag != "ack" || is.fail() ) { DEGRADED_PATH_ALERT( "quality: malformed ack line skipped" ); ++badLines; continue; }
         kind = normalizeLegacyAckKind( kind, ackNow );               // P0.3 migration — see the note at ackKindToken
         std::string reason;
         std::getline( is, reason );
@@ -4312,7 +4377,7 @@ struct SidecarWriteLock
         const std::string identity = canonEc ? sidecarPath : canon.string();
 
         char name[ 64 ];
-        std::snprintf( name, sizeof( name ), "ripwire-sidecar-%016llx.lock",
+        rw::formatTo( name, sizeof( name ), "ripwire-sidecar-{:016x}.lock",
                        static_cast<unsigned long long>( fnv1a64( identity ) ) );
         const std::string lockDir = cacheDirLadder() + "/locks";
         ::mkdir( lockDir.c_str(), 0700 );
@@ -4369,7 +4434,7 @@ inline std::string renderAckRecords( const gtl::btree_map<std::string, AckRecord
     for( const auto& [ mapKey, r ] : acks )                       // btree order → byte-stable, always-sorted file (the merge-friendly guarantee)
     {
         char hex[ 20 ];
-        std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( r.key ) );
+        rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( r.key ) );
         f << "ack " << r.kind << ' ' << hex << ' ' << r.ackNow << ' ';
         // R1: cid= is OMITTED entirely when unavailable rather than written as a zero — a row that never had
         // a content identity must not be indistinguishable from one whose body hashed to 0, and a repo that
@@ -4377,7 +4442,7 @@ inline std::string renderAckRecords( const gtl::btree_map<std::string, AckRecord
         if( r.cid != 0 )
         {
             char cidHex[ 20 ];
-            std::snprintf( cidHex, sizeof( cidHex ), "%016llx", static_cast<unsigned long long>( r.cid ) );
+            rw::formatTo( cidHex, sizeof( cidHex ), "{:016x}", static_cast<unsigned long long>( r.cid ) );
             f << "cid=" << cidHex << ' ';
         }
         // P1.4: same OMIT-when-unavailable rule cid= follows, and for the same reason — a repo whose sessions
@@ -5255,7 +5320,7 @@ inline std::string staleAcksXml( const std::vector<StaleAck>& staleAcks, EscapeF
     for( const StaleAck& sa : staleAcks )
     {
         char hex[ 20 ];
-        std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( sa.key ) );
+        rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( sa.key ) );
         out += "<sa kind=\"";
         out += sa.kind;
         out += "\" key=\"";
@@ -5301,7 +5366,7 @@ inline std::string staleAcksJsonArray( const std::vector<StaleAck>& staleAcks ) 
         }
         first = false;
         char hex[ 20 ];
-        std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( sa.key ) );
+        rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( sa.key ) );
         out += "{\"kind\":\"";
         out += rw::jsonesc::escapeMcp( sa.kind );
         out += "\",\"key\":\"";

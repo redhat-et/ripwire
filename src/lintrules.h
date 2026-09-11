@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // lintrules.h — user-extensible lint rules, ast-grep style (Wave 4 #2). Load a directory of YAML
 // rule files; each rule is a tree-sitter s-expression run through the EXISTING astQuery engine over
@@ -74,10 +76,11 @@ inline bool isValidSeverity( std::string_view s ) noexcept
 
 // language token (as written in `language:`) → Lang enum. Declarative table, not an if-chain. Only the
 // grammar-bearing languages are accepted (Markdown has no tree-sitter grammar → no AST rules).
+/// Parse a supported language token; assign out only on success and otherwise return false.
 inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
 {
     struct Row { std::string_view name; Lang lang; };
-    static constexpr std::array<Row, 15> kMap = { {
+    static constexpr std::array<Row, 17> kMap = { {
         { "cpp",        Lang::Cpp        },
         { "python",     Lang::Python     },
         { "typescript", Lang::TypeScript },
@@ -93,6 +96,8 @@ inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
         { "c",          Lang::C          },
         { "php",        Lang::Php        },
         { "lua",        Lang::Lua        },
+        { "elixir",     Lang::Elixir     },
+        { "dart",       Lang::Dart       },
     } };
     for( const Row& r : kMap )
     {
@@ -110,6 +115,7 @@ inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
 // a header (.h) is treated as Cpp here (the same conservative choice ingest.cpp's kLangTable makes —
 // `.h` ownership is inherently ambiguous, see model.h's Lang-enum comment) — documented degrade: an
 // ObjC .h rule may not match, prefer .m/.mm fixtures for ObjC. `.c` (L3) is its OWN language, NOT Cpp.
+/// Classify a path by its supported extension, returning Unknown when no extension matches.
 inline Lang langOfPath( std::string_view path ) noexcept
 {
     const std::size_t dot = path.rfind( '.' );
@@ -124,7 +130,7 @@ inline Lang langOfPath( std::string_view path ) noexcept
     }
 
     struct Row { std::string_view ext; Lang lang; };
-    static const std::array<Row, 30> kExt = { {
+    static const std::array<Row, 33> kExt = { {
         { ".cpp", Lang::Cpp }, { ".cc", Lang::Cpp }, { ".cxx", Lang::Cpp },
         { ".h", Lang::Cpp }, { ".hpp", Lang::Cpp }, { ".hh", Lang::Cpp }, { ".hxx", Lang::Cpp }, { ".c", Lang::C },
         { ".py", Lang::Python },
@@ -140,6 +146,8 @@ inline Lang langOfPath( std::string_view path ) noexcept
         { ".cs", Lang::CSharp },
         { ".php", Lang::Php },
         { ".lua", Lang::Lua },
+        { ".ex", Lang::Elixir }, { ".exs", Lang::Elixir },
+        { ".dart", Lang::Dart },
     } };
     for( const Row& r : kExt )
     {
@@ -161,15 +169,40 @@ inline Lang langOfPath( std::string_view path ) noexcept
 // preproc_include/#import, Python/TS/JS's import_statement(_from), Rust's use_declaration/mod_item,
 // Go/Swift/Java's import_declaration — Java shares that node-type SPELLING with Go/Swift so it is
 // captured too, even though only best-effort resolved — and C#'s using_directive; PHP's
-// namespace_use_declaration joined them in the PHP/Lua port round). Bash/Ruby/Lua/Json/Toml/Yaml/
-// Markdown/Unknown have no branch there and never produce an Include record (confirmed empirically: a
-// require/source/JSON-only fixture emits `<deps files="0">`). LUA is worth a word for the same reason
-// Ruby is: `require "mod"` LOOKS like an import and is not one — it is an ordinary call to an ordinary
-// global function, captured as a call reference by queries/lua/tags.scm, so a Lua file is never a node
-// in this graph. TOML is worth a word because it LOOKS like a
-// counterexample: a Cargo.toml [dependencies] table names real dependencies. They are PACKAGE deps, not the
-// physical file-include edges this graph is built from, and inventing a node for one would put a name with
-// no in-repo file behind it into a denominator that propagation_cost divides by.
+// namespace_use_declaration joined them in the PHP/Lua port round).
+//
+// kParserVer 81 (the four-language import round) ADDED Bash/Ruby/Lua/Elixir. Each now has its own
+// branch in directiveTargetOf and its own Step-A in resolve.h, so each is a real node in this graph:
+//   Bash    `source FILE` / `. FILE`   — a LITERAL path (no name→path convention to model at all)
+//   Lua     `require "a.b"`            — package.path's dotted convention (`a.b` → `a/b.lua`)
+//   Ruby    `require_relative` / `require` — path-relative, and a bounded load-path probe; parser version 82
+//           adds the CONSTANT spellings a Rails codebase actually depends through — `class X < Base`,
+//           include/extend/prepend, `autoload :Name` — resolved through the corpus's own class/module
+//           index (resolve.h::RubyConstantIndex), never by a name→path convention; parser version 83 adds
+//           the constant RECEIVER (`User.find`), one directive per (file, nesting, spelling)
+//   Elixir  `alias`/`import`/`require`/`use` — resolved through the corpus's OWN defmodule index
+// The paragraph this replaced said the opposite ("`require "mod"` LOOKS like an import and is not one")
+// and was TRUE of the extractor, never of the language: a Lua `require` is dispatched through
+// package.loaders onto a FILE, and reading it as an ordinary global call is what made a 695-file Lua or
+// Ruby tree report `<deps files="0">` — the same shape, and the same wrong conclusion, as webpack's
+// CommonJS `require` before kParserVer 71. THIS COMMENT IS THE DENOMINATOR'S DOCUMENTATION: every number
+// derived from it (ccd/acd/nccd, propagation_cost, dep_files=) MOVES on a corpus holding these four
+// languages, in the direction of counting files that were always structurally able to carry an edge.
+//
+// MARKDOWN stays FALSE, and its exclusion is now explicit rather than a side effect of having no
+// extractor. Markdown DOES mint doc→doc edges (`[B](b.md)` is captured, and shows up as a `<c>` in the
+// map), so "no import syntax" is simply not the reason. The reason is that `--deps`/`--arch` measure
+// PROPAGATION COST — "how far does a change to this file travel" — and a README that links twelve design
+// docs is not twelve files' worth of change amplification: docs are read, not compiled, and a doc link
+// obliges no rebuild, no re-test and no re-review of the target. Counting them would put a hub with
+// ~O(all docs) fan-out into the same N² closure as a header, which is exactly the denominator distortion
+// the §P9.4 restriction exists to prevent. The doc→doc edges remain in the MAP (where they answer "what
+// does this document reference"); they are excluded from the DEPENDENCY verbs on purpose.
+// JSON/TOML/YAML stay FALSE for the original reason, unchanged: TOML LOOKS like a counterexample because
+// a Cargo.toml [dependencies] table names real dependencies. They are PACKAGE deps, not the physical
+// file-include edges this graph is built from, and inventing a node for one would put a name with no
+// in-repo file behind it into a denominator that propagation_cost divides by.
+/// Return whether this language has syntax-backed dependency extraction for dependency rules.
 inline bool dependencyCapable( Lang lang ) noexcept
 {
     switch( lang )
@@ -178,11 +211,85 @@ inline bool dependencyCapable( Lang lang ) noexcept
         case Lang::Python: case Lang::TypeScript: case Lang::JavaScript:
         case Lang::Rust: case Lang::Go: case Lang::Swift:
         case Lang::Java: case Lang::CSharp: case Lang::Php:
+        case Lang::Bash: case Lang::Ruby: case Lang::Lua: case Lang::Elixir:
             return true;
-        case Lang::Bash: case Lang::Ruby: case Lang::Lua: case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Markdown: case Lang::Unknown:
+        case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Markdown: case Lang::Unknown:
         default:
             return false;
     }
+}
+
+// The DEPENDENCY DIALECT a language's imports resolve in — the answer to "could an include edge from a
+// file of language A to a file of language B exist AT ALL". Per-file capability is not enough to answer
+// that: a Bash gate and the C++ translation unit it exercises are BOTH dependency-capable as of
+// kParserVer 81, and no `source` can ever name a .cpp. Anything that asks "is the ABSENCE of a static
+// dependency between these two informative?" (gitmine.h's `surprising=`) needs the pair form, or it
+// re-manufactures exactly the §A9.3 false positive — measured here, on this repo, before the change
+// landed: of 153 `dep_capable="0"` co-change rows in the top 400, a per-file-only flip would have turned
+// 88 capable, and 75 of those 88 are cross-dialect (.h↔.sh, .cpp↔.sh, .py↔.sh, .js↔.sh) and would have
+// rendered as "hidden architectural debt" that no include edge could ever have explained.
+//
+// One group per resolvable dialect; C-family is one group because a .c/.h/.cpp/.mm genuinely include one
+// another, and TS+JS is one group because their specifiers resolve against one shared extension ladder
+// (resolve.h::resolveTsImport). Every other language resolves only onto its own files (resolve.h's
+// Step-A candidate lists are extension-closed), so each is its own group. Java/Go/Swift/C#/PHP keep a
+// group despite being DEFERRED in the resolver: capability is about the language, not about how far this
+// tool currently resolves it, and a deferred pair is honestly "could carry one, we found none".
+enum class DepDialect : std::uint8_t { None = 0, CFamily, Web, Python, Rust, Go, Swift, Java, CSharp, Php, Bash, Ruby, Lua, Elixir };
+
+/// Return the dependency dialect of a language, or DepDialect::None when it carries no file dependency.
+inline DepDialect dependencyDialect( Lang lang ) noexcept
+{
+    switch( lang )
+    {
+        case Lang::Cpp: case Lang::C: case Lang::ObjC:  return DepDialect::CFamily;
+        case Lang::TypeScript: case Lang::JavaScript:   return DepDialect::Web;
+        case Lang::Python:                              return DepDialect::Python;
+        case Lang::Rust:                                return DepDialect::Rust;
+        case Lang::Go:                                  return DepDialect::Go;
+        case Lang::Swift:                               return DepDialect::Swift;
+        case Lang::Java:                                return DepDialect::Java;
+        case Lang::CSharp:                              return DepDialect::CSharp;
+        case Lang::Php:                                 return DepDialect::Php;
+        case Lang::Bash:                                return DepDialect::Bash;
+        case Lang::Ruby:                                return DepDialect::Ruby;
+        case Lang::Lua:                                 return DepDialect::Lua;
+        case Lang::Elixir:                              return DepDialect::Elixir;
+        case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Markdown: case Lang::Unknown:
+        default:                                        return DepDialect::None;
+    }
+}
+
+// Could a physical dependency edge exist between a file of language `a` and one of language `b`, in
+// EITHER direction? Both sides must be dependency-capable AND share a dialect. Bash is the one language
+// whose resolver probes a written path with no extension ladder (`source ./config`), so it CAN in
+// principle land on a file this predicate calls a different dialect; that direction under-claims (the
+// pair reads "not defined" instead of "not surprising"), which is the safe way to be wrong here — the
+// alternative over-claims hidden coupling, which is the finding §A9.3 removed.
+inline bool dependencyPairCapable( Lang a, Lang b ) noexcept
+{
+    const DepDialect da = dependencyDialect( a );
+    return da != DepDialect::None && da == dependencyDialect( b );
+}
+
+// The capable SET, as the terse output labels, comma-joined in Lang-enum order — derived from
+// dependencyCapable() and langTag() so it can never drift from the predicate it documents. `--deps
+// <health dep_langs=>` publishes it: a `dep_files=` denominator that changed between two releases is
+// otherwise an unexplained number, and this makes the set that produced it readable off the same line.
+inline std::string dependencyCapableLangTags()
+{
+    std::string out;
+    for( std::size_t i = 0; i < kLangCount; ++i )
+    {
+        const Lang l = Lang( i );
+        if( l == Lang::Unknown || !dependencyCapable( l ) )
+        {
+            continue;
+        }
+        if( !out.empty() ) { out.push_back( ',' ); }
+        out.append( langTag( l ) );
+    }
+    return out;
 }
 
 // One mask, built once, shared by --deps <health> (graph.h::dependencyHealth) and --arch's
@@ -274,7 +381,7 @@ inline bool parseLintRuleFile( const std::string& path, std::string_view src, st
 
     const auto badLine = [ & ]( std::size_t lineNo, const char* why ) -> bool
     {
-        std::fprintf( stderr, "ripwire: lint-rules: %s:%zu: %s — file skipped\n", path.c_str(), lineNo + 1, why );
+        rw::emitTo( stderr, "ripwire: lint-rules: {}:{}: {} — file skipped\n", path.c_str(), lineNo + 1, why );
         DEGRADED_PATH_ALERT( "lint-rules: malformed rule file skipped" );
         return false;
     };
@@ -518,7 +625,7 @@ inline std::vector<LintRule> loadLintRules( const std::string& dir )
         // No DEGRADED_PATH_ALERT (M7/F20): the caller REFUSES on an empty rule list, so the alert stamped a
         // "this run continued in a reduced mode" notice on stderr in front of a refusal that continued
         // nothing. The user-facing sentence is the whole message.
-        std::fprintf( stderr, "ripwire: --lint-rules: not a directory: %s\n", dir.c_str() );
+        rw::emitTo( stderr, "ripwire: --lint-rules: not a directory: {}\n", dir.c_str() );
         return rules;
     }
 
@@ -550,7 +657,7 @@ inline std::vector<LintRule> loadLintRules( const std::string& dir )
     {
         // read the file
         std::FILE* fp = std::fopen( path.c_str(), "rb" );
-        if( fp == nullptr ) { std::fprintf( stderr, "ripwire: --lint-rules: cannot read %s — skipped\n", path.c_str() ); DEGRADED_PATH_ALERT( "lint-rules: unreadable file" ); continue; }
+        if( fp == nullptr ) { rw::emitTo( stderr, "ripwire: --lint-rules: cannot read {} — skipped\n", path.c_str() ); DEGRADED_PATH_ALERT( "lint-rules: unreadable file" ); continue; }
         std::string buf;
         {
             std::fseek( fp, 0, SEEK_END );

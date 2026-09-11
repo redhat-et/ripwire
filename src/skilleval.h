@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // skilleval.h — deterministic, LLM-free skill-ROUTING eval (--eval-skills=FILE): given a realistic
 // developer/agent prompt, does the right skill under ROOT (a skills/ directory, one SKILL.md per subdir)
@@ -246,7 +249,7 @@ inline bool parseCorpus( const std::string& path, const std::vector<SkillDoc>& c
                          std::vector<PromptRow>& rows )
 {
     std::ifstream in( path );
-    if( !in ) { std::fprintf( stderr, "ripwire --eval-skills: cannot open '%s'\n", path.c_str() ); return false; }
+    if( !in ) { rw::emitTo( stderr, "ripwire --eval-skills: cannot open '{}'\n", path.c_str() ); return false; }
 
     HashMap<std::string, std::uint32_t> indexOfSkill;
     for( std::uint32_t c = 0; c < candidates.size(); ++c )
@@ -258,7 +261,7 @@ inline bool parseCorpus( const std::string& path, const std::vector<SkillDoc>& c
     std::string line;
     int         lineNumber = 0;
     const auto  bad = [ & ]( const char* why )
-    { std::fprintf( stderr, "ripwire --eval-skills: %s:%d: %s\n", path.c_str(), lineNumber, why ); ok = false; };
+    { rw::emitTo( stderr, "ripwire --eval-skills: {}:{}: {}\n", path.c_str(), lineNumber, why ); ok = false; };
 
     while( std::getline( in, line ) )
     {
@@ -508,8 +511,8 @@ inline void reportSplit( const std::vector<PromptRow>& rows, const std::vector<R
             ( r.permitted.empty() ? sNeg : sPos )++;
         }
     }
-    std::printf( "  split=%s (N=%zu: %zu positive + %zu negative):\n", label, sPos + sNeg, sPos, sNeg );
-    if( sPos == 0 ) { std::printf( "    split=%s (no positive rows in this split yet)\n", label ); return; }
+    rw::emitTo( stdout, "  split={} (N={}: {} positive + {} negative):\n", label, sPos + sNeg, sPos, sNeg );
+    if( sPos == 0 ) { rw::emitTo( stdout, "    split={} (no positive rows in this split yet)\n", label ); return; }
 
     // Per arm: hit@1 / hit@2 / MRR over this split's positives, plus fire-abstain AUC when it has negatives.
     for( std::size_t a = 0; a < kArmCount; ++a )
@@ -536,12 +539,12 @@ inline void reportSplit( const std::vector<PromptRow>& rows, const std::vector<R
         const double P = double( sPos );
         if( sNeg > 0 )
         {
-            std::printf( "    split=%-5s %-11s %6.1f%% %6.1f%%   %5.3f     %5.3f\n", label, kArmName[a],
+            rw::emitTo( stdout, "    split={:<5} {:<11} {:6.1f}% {:6.1f}%   {:5.3f}     {:5.3f}\n", label, kArmName[a],
                          100.0 * hit1 / P, 100.0 * hit2 / P, mrr / P, separationAuc( posTop, negTop ) );
         }
         else
         {
-            std::printf( "    split=%-5s %-11s %6.1f%% %6.1f%%   %5.3f       n/a (no negative rows in this split)\n",
+            rw::emitTo( stdout, "    split={:<5} {:<11} {:6.1f}% {:6.1f}%   {:5.3f}       n/a (no negative rows in this split)\n",
                          label, kArmName[a], 100.0 * hit1 / P, 100.0 * hit2 / P, mrr / P );
         }
     }
@@ -552,7 +555,7 @@ inline void reportSplit( const std::vector<PromptRow>& rows, const std::vector<R
 inline void reportMisses( const std::vector<PromptRow>& rows, const std::vector<RowOutcome>& outcomes,
                           const std::vector<SkillDoc>& candidates, std::size_t arm )
 {
-    std::printf( "  misses (%s):\n", kArmName[arm] );
+    rw::emitTo( stdout, "  misses ({}):\n", kArmName[arm] );
     std::size_t missCount = 0;
     for( std::size_t i = 0; i < rows.size(); ++i )
     {
@@ -575,12 +578,12 @@ inline void reportMisses( const std::vector<PromptRow>& rows, const std::vector<
         {
             clipped += "...";
         }
-        std::printf( "    line %-3d want=%s got=%s \"%s\"\n", rows[i].lineNumber, want.c_str(),
+        rw::emitTo( stdout, "    line {:<3} want={} got={} \"{}\"\n", rows[i].lineNumber, want.c_str(),
                      candidates[ outcomes[i].top1Index ].dirName.c_str(), clipped.c_str() );
     }
     if( missCount == 0 )
     {
-        std::printf( "    (none)\n" );
+        rw::emitRaw( stdout, "    (none)\n" );
     }
 }
 
@@ -654,7 +657,7 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
     const std::size_t skillCount = set.candidates.size();
     if( skillCount < 2 )
     {
-        std::fprintf( stderr, "ripwire --eval-skills: found %zu skill dir(s) under '%s' — ROOT must be a skills directory "
+        rw::emitTo( stderr, "ripwire --eval-skills: found {} skill dir(s) under '{}' — ROOT must be a skills directory "
                               "(one SKILL.md per subdir), e.g. `ripwire skills --eval-skills=test/skillevalfix/prompts.tsv`\n",
                       skillCount, root.c_str() );
         return 1;
@@ -663,7 +666,7 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
     {
         if( s.descText.empty() )
         {
-            std::fprintf( stderr, "ripwire --eval-skills: note: %s has an empty description: block\n", s.dirName.c_str() );
+            rw::emitTo( stderr, "ripwire --eval-skills: note: {} has an empty description: block\n", s.dirName.c_str() );
         }
     }
 
@@ -678,7 +681,7 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
         ( r.permitted.empty() ? negCount : posCount )++;
     }
     if( posCount == 0 )
-    { std::fprintf( stderr, "ripwire --eval-skills: no positive rows in '%s'\n", labelsPath.c_str() ); return 1; }
+    { rw::emitTo( stderr, "ripwire --eval-skills: no positive rows in '{}'\n", labelsPath.c_str() ); return 1; }
     std::size_t testSplitCount = 0, devSplitCount = 0;
     for( const PromptRow& r : rows )
     {
@@ -777,10 +780,10 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
     }
 
     // ---- report ----
-    std::printf( "ripwire --eval-skills  (skill routing over K=%zu candidate skills [ripwire-router excluded]; "
-                 "%zu positive + %zu negative prompts; corpus '%s'; split test=%zu dev=%zu)\n",
+    rw::emitTo( stdout, "ripwire --eval-skills  (skill routing over K={} candidate skills [ripwire-router excluded]; "
+                 "{} positive + {} negative prompts; corpus '{}'; split test={} dev={})\n",
                  skillCount, posCount, negCount, labelsPath.c_str(), testSplitCount, devSplitCount );
-    std::printf( "  %-11s %7s %7s %7s   %7s   %s\n", "arm", "hit@1", "hit@2", "mrr", "sep-auc", "fire/abstain@ORACLE-th (upper bound)" );
+    rw::emitTo( stdout, "  {:<11} {:>7} {:>7} {:>7}   {:>7}   {}\n", "arm", "hit@1", "hit@2", "mrr", "sep-auc", "fire/abstain@ORACLE-th (upper bound)" );
 
     for( std::size_t a = 0; a < kArmCount; ++a )
     {
@@ -803,12 +806,12 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
         const OraclePoint oracle = oracleFireAbstain( outcomes[a], rows );
         if( negCount > 0 )
         {
-            std::printf( "  %-11s %6.1f%% %6.1f%%   %5.3f     %5.3f   %5.1f%% (th=%.3f)\n",
+            rw::emitTo( stdout, "  {:<11} {:6.1f}% {:6.1f}%   {:5.3f}     {:5.3f}   {:5.1f}% (th={:.3f})\n",
                          kArmName[a], 100.0 * hit1 / P, 100.0 * hit2 / P, mrr / P, auc, 100.0 * oracle.acc, oracle.th );
         }
         else
         {
-            std::printf( "  %-11s %6.1f%% %6.1f%%   %5.3f       n/a   n/a (no negative rows)\n",
+            rw::emitTo( stdout, "  {:<11} {:6.1f}% {:6.1f}%   {:5.3f}       n/a   n/a (no negative rows)\n",
                          kArmName[a], 100.0 * hit1 / P, 100.0 * hit2 / P, mrr / P );
         }
     }
@@ -831,7 +834,7 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
             }
         }
         const double P = double( posCount );
-        std::printf( "  %-11s %6.1f%% %6.1f%%   %5.3f     0.500   <- floor (uniform-random ranking; auc 0.5 by definition)\n",
+        rw::emitTo( stdout, "  {:<11} {:6.1f}% {:6.1f}%   {:5.3f}     0.500   <- floor (uniform-random ranking; auc 0.5 by definition)\n",
                      "random", 100.0 * hit1 / P, 100.0 * hit2 / P, mrr / P );
     }
 
@@ -850,7 +853,7 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
             ++provN[p];
             provHit[p] += outcomes[kDiagArm][i].hit1 ? 1 : 0;
         }
-        std::printf( "  provenance hit@1 (%s): router %zu/%zu, desc %zu/%zu, judged %zu/%zu "
+        rw::emitTo( stdout, "  provenance hit@1 ({}): router {}/{}, desc {}/{}, judged {}/{} "
                      "(desc rows quote the descriptions - expect them easiest; judged is the honest number)\n",
                      kArmName[kDiagArm], provHit[0], provN[0], provHit[1], provN[1], provHit[2], provN[2] );
 
@@ -858,7 +861,7 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
         // description vocabulary by construction) — the echo-free number every arm must be judged on.
         if( provN[2] > 0 )
         {
-            std::printf( "  judged-only hit@1 per arm:" );
+            rw::emitRaw( stdout, "  judged-only hit@1 per arm:" );
             for( std::size_t a = 0; a < kArmCount; ++a )
             {
                 std::size_t judgedHit = 0;
@@ -869,16 +872,16 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
                         ++judgedHit;
                     }
                 }
-                std::printf( "%s %s %zu/%zu", a ? "," : "", kArmName[a], judgedHit, provN[2] );
+                rw::emitTo( stdout, "{} {} {}/{}", a ? "," : "", kArmName[a], judgedHit, provN[2] );
             }
-            std::printf( "\n" );
+            rw::emitRaw( stdout, "\n" );
         }
     }
 
     if( set.hasRouter )
     {
-        std::printf( "  router-magnet: with ripwire-router ADMITTED as a candidate it takes top-1 on %zu/%zu positive prompts "
-                     "(%s arm) - why it is excluded above\n", routerMagnetWins, posCount, kArmName[kDiagArm] );
+        rw::emitTo( stdout, "  router-magnet: with ripwire-router ADMITTED as a candidate it takes top-1 on {}/{} positive prompts "
+                     "({} arm) - why it is excluded above\n", routerMagnetWins, posCount, kArmName[kDiagArm] );
     }
 
     // per-skill table (diagnostics arm): which skills never win when permitted (mis-described), which
@@ -905,10 +908,10 @@ inline int runEvalSkills( const std::string& root, const IngestResult& ing, cons
                 }
             }
         }
-        std::printf( "  per-skill (%s): name / permitted-rows / won / pos-fires / false-fires / neg-fires\n", kArmName[kDiagArm] );
+        rw::emitTo( stdout, "  per-skill ({}): name / permitted-rows / won / pos-fires / false-fires / neg-fires\n", kArmName[kDiagArm] );
         for( std::size_t c = 0; c < skillCount; ++c )
         {
-            std::printf( "    %-26s %3zu %5zu %5zu %5zu %5zu%s\n", set.candidates[c].dirName.c_str(),
+            rw::emitTo( stdout, "    {:<26} {:>3} {:>5} {:>5} {:>5} {:>5}{}\n", set.candidates[c].dirName.c_str(),
                          tally[c].permittedRows, tally[c].won, tally[c].posFires, tally[c].falseFires, tally[c].negFires,
                          ( tally[c].permittedRows >= 2 && tally[c].won == 0 ) ? "   <- never wins its own rows (mis-described?)" : "" );
         }

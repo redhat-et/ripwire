@@ -77,6 +77,31 @@ MALFORMED_EC=$?
     && ok "(3) a malformed RIPWIRE_BM25_K1/RIPWIRE_BM25_B does not crash (exit 0, output produced)" \
     || no "(3) malformed BM25 env crashed or produced no output (exit=$MALFORMED_EC)"
 
+# ── (3b) MALFORMED IS REFUSED, NOT GUESSED — a value that does not parse IN FULL as a finite number is ignored and
+#    the default applies. atof read "nan" as NaN (std::clamp passes NaN straight through, into every score), "8x" as
+#    8, and "notanumber" as 0 clamped to 0.1: three rankings nobody configured, each at exit 0. (1) proves 8 / 0.1
+#    move the output, so "8x" / "0.1x" landing on the default is the parse refusing, not a dead knob. ────────────
+# qe is q with stderr KEPT: these three refusals are what (3c) reads, and q sends stderr to /dev/null.
+qe(){ perl -e 'alarm 15; exec @ARGV' "$BIN" "$FIX" --no-cache --query="$1" 2>>"$TMP/refused.err"; }
+NAN_Q="$(  RIPWIRE_BM25_K1=nan        RIPWIRE_BM25_B=nan            qe "frobnicate widget" )"
+TAIL_Q="$( RIPWIRE_BM25_K1=8x         RIPWIRE_BM25_B=0.1x           qe "frobnicate widget" )"
+JUNK_Q="$( RIPWIRE_BM25_K1=notanumber RIPWIRE_BM25_B=alsonotanumber qe "frobnicate widget" )"
+same(){ [ "$1" = "$BASE_Q" ] && echo same || echo DIFFERS; }
+{ [ "$NAN_Q" = "$BASE_Q" ] && [ "$TAIL_Q" = "$BASE_Q" ] && [ "$JUNK_Q" = "$BASE_Q" ]; } \
+    && ok "(3b) nan / trailing garbage / non-numeric RIPWIRE_BM25_K1/B are ignored: output byte-identical to the default" \
+    || no "(3b) a malformed RIPWIRE_BM25_K1/B still moved the ranking (nan: $( same "$NAN_Q" ), 8x: $( same "$TAIL_Q" ), notanumber: $( same "$JUNK_Q" ))"
+# ...and ignored OUT LOUD: a calibration sweep must not run on the default while believing it set something. One value
+# per refusal branch in envKnob: "notanumber" does not parse at all, "8x" / "0.1x" parse short of the end, "nan" parses
+# to a value that is not finite.
+disclosed=1
+for name_value in 'RIPWIRE_BM25_K1="notanumber"' 'RIPWIRE_BM25_B="alsonotanumber"' 'RIPWIRE_BM25_K1="8x"' 'RIPWIRE_BM25_B="0.1x"' \
+                  'RIPWIRE_BM25_K1="nan"' 'RIPWIRE_BM25_B="nan"'; do
+    grep -qF "$name_value" "$TMP/refused.err" 2>/dev/null || { disclosed=0; missing="$name_value"; break; }
+done
+[ "$disclosed" = 1 ] \
+    && ok "(3c) every refusal branch is disclosed: stderr names each ignored variable with its value (no parse, partial parse, non-finite)" \
+    || no "(3c) a malformed RIPWIRE_BM25_K1/B was ignored silently — stderr never named $missing"
+
 # ── prime a warm rich cache over src/ once — every remaining check re-scores against it (env vars affect
 #    QUERY-TIME scoring only, never the persisted ingest/postings, so this is safe and ~10x faster) ──────
 SRC_Q="symbol score"                    # broad enough to match thousands of src/ symbols (checked below)

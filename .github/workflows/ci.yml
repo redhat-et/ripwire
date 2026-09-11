@@ -5,7 +5,9 @@ name: CI
 #                    + build + the full gate suite (170+ gates incl. determinism/G4/quality) on SIX legs:
 #                    build-flavour (Release / plain) x front end (macOS AppleClang, Linux gcc, Linux
 #                    clang) — see the job comment for why each axis exists — run in parallel via
-#                    test/pargates.py -j 3 (same authoritative list as regression.sh).
+#                    test/pargates.py -j 3 (same authoritative list as regression.sh), each leg's suite
+#                    SHARDED across 4 runner jobs on every leg (--shard K/N, cost-balanced by
+#                    .github/pargates-shard-weights.json) so the workflow's wall clock is one shard, not one suite.
 #                    ubuntu-24.04 here is also the FIRST real proof of L1's portability fix: real x86-64
 #                    Linux hardware, not the local RIPWIRE_PRETEND_LINUX proxy test/portablebuildcheck.sh
 #                    uses on the (Apple Silicon) dev machines this repo is normally built on.
@@ -36,7 +38,11 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel a superseded run on a PULL REQUEST only. On main every push is a distinct commit that deserves its
+  # own verdict: on 2026-09-07 three consecutive main runs were cancelled by unrelated pushes inside the
+  # ~26-min window, with zero failures among the 45 jobs that had completed — the signal was thrown away, not
+  # superseded. A queued main run costs runner minutes; a cancelled one costs the answer.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -67,7 +73,11 @@ jobs:
   # C arrays, 32-bit handles, VERIFY instead of exceptions), so the config is curated down to bugprone-* /
   # clang-analyzer-* / performance-* / misc-dangling-* and even those only report. Baseline at the commit
   # that added it: 312 unique sites, of which 126 are bugprone-easily-swappable-parameters and 85 are
-  # bugprone-exception-escape. Read it as a to-triage list, not a queue of defects.
+  # bugprone-exception-escape. Re-measured 2026-09-10 at d90acb2c, unique file:line:check: 358 while main.cpp's
+  # TU failed to parse (see the configure step below), 396 once it parsed, 359 after triage — 204 of them
+  # bugprone-easily-swappable-parameters and 30 bugprone-exception-escape. Every remaining class was read and
+  # refused with evidence; the record is in the commit that wrote these numbers. Read it as a to-triage list,
+  # not a queue of defects.
   style:
     name: style (clang-format gate + advisory clang-tidy)
     runs-on: ubuntu-24.04
@@ -85,6 +95,18 @@ jobs:
 
       - name: Install clang-format / clang-tidy (PINNED major — see the job comment)
         run: |
+          # Third-party apt sources ship in the runner image and are outside our control. TWICE now
+          # one has been mid-publish when a job ran and taken every Linux job on every branch down
+          # with it: `apt-get update` exits 100 and the leg dies in setup, before a single gate runs,
+          # with a failure that looks nothing like a package problem. google-chrome on 2026-09-09
+          # ("Hash Sum mismatch"; deb822 .sources on 24.04, not .list) and packages.microsoft.com on
+          # 2026-09-10 ("403 Forbidden ... is no longer signed"). Naming vendors one at a time only
+          # ever fixes the last outage, so: we install ubuntu-archive packages ONLY, and every
+          # non-ubuntu source goes. -print names what went, so a future reader can tell whether a
+          # missing package traces back to here.
+          ls /etc/apt/sources.list.d/ || true
+          sudo find /etc/apt/sources.list.d -type f \( -name '*.list' -o -name '*.sources' \) \
+               ! -name 'ubuntu*' -print -delete || true
           wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh "$CLANG_VERSION" all
@@ -102,10 +124,15 @@ jobs:
       - name: clang-format — advisory report over the whole first-party set (non-gating)
         run: CLANG_FORMAT=clang-format-"$CLANG_VERSION" bash scripts/formatcheck.sh --advisory
 
-      # embedded_queries.h and version.h are written at CONFIGURE time, not build time, so a configure
-      # is the whole provisioning story for a compile database — no compile needed to lint.
+      # embedded_queries.h is written at CONFIGURE time (file(WRITE) in CMakeLists.txt). version.h is NOT: it is
+      # the BYPRODUCT of the ripwire_version_stamp custom target, which only runs at build time. src/cli.h
+      # includes it, so a configure-only database handed clang-tidy a fatal "'version.h' file not found" in
+      # every TU and the report was taken over a broken parse. Building that one target runs a cmake -P script,
+      # not the compiler, so there is still no compile needed to lint.
       - name: Configure a compile database for clang-tidy
-        run: cmake -S . -B build-tidy -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+        run: |
+          cmake -S . -B build-tidy -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build build-tidy --target ripwire_version_stamp
 
       - name: clang-tidy — ADVISORY, never gates
         continue-on-error: true
@@ -132,21 +159,52 @@ jobs:
     # cannot be expressed and can only skip. macOS covers Clang but not Linux's libc, headers or linker.
     # Six legs = {macos-14 AppleClang, ubuntu gcc, ubuntu clang} x {Release, plain}: every guardrail is
     # observed by at least one leg on the OS it matters for, and no leg has to assert the impossible.
-    name: release (${{ matrix.os }}, ${{ matrix.flavor }}, ${{ matrix.cc }})
+    name: release (${{ matrix.os }}, ${{ matrix.flavor }}, ${{ matrix.cc }}, shard ${{ matrix.shard }}/${{ matrix.shards }})
     strategy:
       fail-fast: false
       # Explicit include list rather than three crossed axes: there is no gcc on the macOS runners (`g++`
       # there is an AppleClang shim, so a `cc: gcc` macOS leg would silently be a second AppleClang leg
       # claiming to be gcc), and a leg that lies about its toolchain is worse than a leg that is missing.
+      # Each leg's gate suite is SHARDED across runner jobs (2026-09-07): at 560+ gates the suite is ~150
+      # CPU-minutes, ~60 min wall at -j 3 on a 4-vCPU runner, and that one number was the wall clock of the
+      # whole workflow. test/pargates.py --shard K/N cuts the list into N cost-balanced, deterministic slices
+      # (weights in .github/pargates-shard-weights.json); every shard job builds its own binary (~3 min), stages the
+      # HEAD comparison binary in its own step (a second build, outside every gate budget -- see that step), and
+      # runs its slice. Every leg takes 4 shards. macOS took 2 until PR #110, on the grounds that GitHub caps
+      # concurrent macOS jobs far lower than Linux; 2 put ~300 gates in each macOS job, doubling the -j 3 contention
+      # every gate there ran under. The cost of 4 is stated rather than hidden: when the eight macOS shard jobs
+      # (plus asan's) exceed the account's concurrent macOS cap, the excess waits for a free runner.
       matrix:
         include:
-          - { os: macos-14,     flavor: Release, cc: appleclang }
-          - { os: macos-14,     flavor: plain,   cc: appleclang }
-          - { os: ubuntu-24.04, flavor: Release, cc: gcc }
-          - { os: ubuntu-24.04, flavor: plain,   cc: gcc }
-          - { os: ubuntu-24.04, flavor: Release, cc: clang }
-          - { os: ubuntu-24.04, flavor: plain,   cc: clang }
+          - { os: macos-14,     flavor: Release, cc: appleclang, shard: 1, shards: 4 }
+          - { os: macos-14,     flavor: Release, cc: appleclang, shard: 2, shards: 4 }
+          - { os: macos-14,     flavor: Release, cc: appleclang, shard: 3, shards: 4 }
+          - { os: macos-14,     flavor: Release, cc: appleclang, shard: 4, shards: 4 }
+          - { os: macos-14,     flavor: plain,   cc: appleclang, shard: 1, shards: 4, skiplist: .github/pargates-macos-plain-skip.txt }
+          - { os: macos-14,     flavor: plain,   cc: appleclang, shard: 2, shards: 4, skiplist: .github/pargates-macos-plain-skip.txt }
+          - { os: macos-14,     flavor: plain,   cc: appleclang, shard: 3, shards: 4, skiplist: .github/pargates-macos-plain-skip.txt }
+          - { os: macos-14,     flavor: plain,   cc: appleclang, shard: 4, shards: 4, skiplist: .github/pargates-macos-plain-skip.txt }
+          - { os: ubuntu-24.04, flavor: Release, cc: gcc,   shard: 1, shards: 4 }
+          - { os: ubuntu-24.04, flavor: Release, cc: gcc,   shard: 2, shards: 4 }
+          - { os: ubuntu-24.04, flavor: Release, cc: gcc,   shard: 3, shards: 4 }
+          - { os: ubuntu-24.04, flavor: Release, cc: gcc,   shard: 4, shards: 4 }
+          - { os: ubuntu-24.04, flavor: plain,   cc: gcc,   shard: 1, shards: 4 }
+          - { os: ubuntu-24.04, flavor: plain,   cc: gcc,   shard: 2, shards: 4 }
+          - { os: ubuntu-24.04, flavor: plain,   cc: gcc,   shard: 3, shards: 4 }
+          - { os: ubuntu-24.04, flavor: plain,   cc: gcc,   shard: 4, shards: 4 }
+          - { os: ubuntu-24.04, flavor: Release, cc: clang, shard: 1, shards: 4 }
+          - { os: ubuntu-24.04, flavor: Release, cc: clang, shard: 2, shards: 4 }
+          - { os: ubuntu-24.04, flavor: Release, cc: clang, shard: 3, shards: 4 }
+          - { os: ubuntu-24.04, flavor: Release, cc: clang, shard: 4, shards: 4 }
+          - { os: ubuntu-24.04, flavor: plain,   cc: clang, shard: 1, shards: 4 }
+          - { os: ubuntu-24.04, flavor: plain,   cc: clang, shard: 2, shards: 4 }
+          - { os: ubuntu-24.04, flavor: plain,   cc: clang, shard: 3, shards: 4 }
+          - { os: ubuntu-24.04, flavor: plain,   cc: clang, shard: 4, shards: 4 }
     runs-on: ${{ matrix.os }}
+    # Xcode 16.2 on the macOS legs (the image default is 15.4): its libc++ carries <print> at a macOS 14
+    # deployment target, the default's does not. An empty DEVELOPER_DIR on the Linux legs is inert.
+    env:
+      DEVELOPER_DIR: ${{ matrix.os == 'macos-14' && '/Applications/Xcode_16.2.app/Contents/Developer' || '' }}
     steps:
       # L4 (Linux probe): checkout@v4 defaults to a --depth 1 clone, which leaves ONE commit of history
       # in the tree. The churn / co-change / ownership gates (churnjoincheck, hotspots, --owners, the
@@ -165,6 +223,18 @@ jobs:
       - name: Install tooling (Linux)
         if: runner.os == 'Linux'
         run: |
+          # Third-party apt sources ship in the runner image and are outside our control. TWICE now
+          # one has been mid-publish when a job ran and taken every Linux job on every branch down
+          # with it: `apt-get update` exits 100 and the leg dies in setup, before a single gate runs,
+          # with a failure that looks nothing like a package problem. google-chrome on 2026-09-09
+          # ("Hash Sum mismatch"; deb822 .sources on 24.04, not .list) and packages.microsoft.com on
+          # 2026-09-10 ("403 Forbidden ... is no longer signed"). Naming vendors one at a time only
+          # ever fixes the last outage, so: we install ubuntu-archive packages ONLY, and every
+          # non-ubuntu source goes. -print names what went, so a future reader can tell whether a
+          # missing package traces back to here.
+          ls /etc/apt/sources.list.d/ || true
+          sudo find /etc/apt/sources.list.d -type f \( -name '*.list' -o -name '*.sources' \) \
+               ! -name 'ubuntu*' -print -delete || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc clang
 
@@ -172,12 +242,16 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ripgrep
 
-      # CC/CXX are set for the clang leg ONLY. Leaving them unset elsewhere is deliberate: the gcc leg and
-      # the macOS leg must each get their platform's own default, which is what a stranger's clone gets.
+      # CC/CXX: the clang leg names clang; the gcc leg names gcc-14 (the std::print floor, 2026-09-08 — the
+      # ubuntu-24.04 image ships GNU C++ 12.4 / 13.3 / 14.2, and the SYSTEM default `g++` is 13.3, whose
+      # libstdc++ has <format> but not <print>); the macOS leg is left to its platform default under the
+      # DEVELOPER_DIR pinned at the job level. The stranger's-clone question this used to answer — does
+      # the stock ubuntu g++ 13 still build? — is answered by the `fallback-emitter` job below instead,
+      # which builds with g++-13 on purpose and proves the fallback path emits the same bytes.
       - name: Configure (portable — no RIPWIRE_NATIVE; empty build type = the plain flavour)
         env:
-          CC:  ${{ matrix.cc == 'clang' && 'clang'   || '' }}
-          CXX: ${{ matrix.cc == 'clang' && 'clang++' || '' }}
+          CC:  ${{ matrix.cc == 'clang' && 'clang'   || matrix.cc == 'gcc' && 'gcc-14' || '' }}
+          CXX: ${{ matrix.cc == 'clang' && 'clang++' || matrix.cc == 'gcc' && 'g++-14' || '' }}
         run: cmake -S . -B build ${{ matrix.flavor == 'Release' && '-DCMAKE_BUILD_TYPE=Release' || '' }}
 
       # The front end is recorded per leg so a log reader never has to infer it from the job name alone —
@@ -189,14 +263,49 @@ jobs:
       - name: Build
         run: cmake --build build -j
 
+      # The floor this matrix exists to hold, read off the BINARY rather than inferred from the compiler
+      # version: emit= names the emitter that compiled in (src/infra/emit.h). A leg whose standard library
+      # lacks <print> still builds — the emitter falls back to std::format+fputs by feature test — so
+      # without this line such a leg would build green and read as "the std::print floor holds".
+      - name: The emitter this leg compiled in is std::print
+        run: |
+          ./build/ripwire --version
+          ./build/ripwire --version | grep -q 'emit=std::print'
+
+      # The HEAD comparison binary, built ONCE per job in its own step: before the suite, outside every gate budget.
+      # Six gates (crossdirinclude, nestedimport, preproccond, py/rust/tsimportprecise; binoverridecheck re-runs them)
+      # compare this tree's binary against a second ripwire built from git HEAD. test/lib/headbinlib.sh used to build
+      # it INSIDE whichever of them ran first: a parallel cmake build inside a wall-clock budget, beside -j 3
+      # neighbours, whose cost is super-linear in that contention. On macos-14 Release shard 2/2 the xmlwellformed
+      # runner-speed probe moved 4.6x across five draws while crossdirincludecheck moved more than 15x, and it was
+      # killed at 900 s and then at 1200 s with the budget floor applied (runs 34479806177, 34495265793; again in
+      # 34514091873). No budget survives the next slow draw, so the build moved here, where it gets the idle runner
+      # the Build step above gets. RIPWIRE_HEADBIN puts headbinlib.sh in STAGED mode for every gate in this job: it
+      # never builds and never waits, and a missing or wrong binary FAILS the gate instead of rebuilding inside its
+      # budget. test/headbinstagecheck.sh gates that this step exists, precedes the suite, verifies and exports.
+      - name: Stage the HEAD comparison binary (once per job, before the suite, outside every gate budget)
+        run: |
+          export RIPWIRE_HEADBIN_BUILD_LOG="$RUNNER_TEMP/headbin-build.log"
+          . test/lib/headbinlib.sh
+          hb="$( ripwire_head_binary "$PWD" "$RUNNER_TEMP" )" || { echo "HEAD binary build failed; last 80 lines of its log:"; tail -n 80 "$RIPWIRE_HEADBIN_BUILD_LOG"; exit 1; }
+          ripwire_headbin_verify "$hb" "$( git rev-parse HEAD )"
+          "$hb" --version
+          echo "RIPWIRE_HEADBIN=$hb" >> "$GITHUB_ENV"
+
       # test/pargates.py runs the SAME authoritative gate list regression.sh holds (manifestcheck.sh
       # keeps that list honest) in parallel, with the timing-sensitive edit-check budget isolated via
       # its `exclusive` group — the exact runner CLAUDE.md prescribes locally. Sequential regression.sh
-      # cost ~26 min per suite pass; parallel at -j 3 measures ~15-18 min (the 4-vCPU runners saturate —
-      # many gates are internally multi-threaded), and the flavour matrix keeps the two passes off each
-      # other's critical path.
-      - name: "gate suite, parallel (170+ gates: determinism, cache transparency, G4 XML, quality, …)"
-        run: python3 test/pargates.py . build/ripwire -j 3
+      # cost ~26 min per suite pass at 170 gates; at 560+ gates the whole suite measured ~62 min wall per
+      # leg at -j 3 (run 34109497781, 2026-09-07), so each job now runs ONE shard of it — see the matrix
+      # comment. The shard's own gates are still LPT-ordered by the scratch timings; -j 3 stays because
+      # the 4-vCPU runners saturate (many gates are internally multi-threaded).
+      - name: "gate suite, parallel, this job's shard (560+ gates: determinism, cache transparency, G4 XML, quality, …)"
+        # --budget-scale 4: the harness's flat 300 s default is a hang tripwire calibrated on an idle dev machine;
+        # here -j 3 on a 4-vCPU runner is a 3-8x multiplier (two gates hit rc=124 at exactly 300 s in the first
+        # sharded runs). The scale applies to the default only; GATE_BUDGET_SEC's explicit entries stay as declared.
+        # `skiplist` (macOS plain only): a committed list of platform-independent gates this leg does not run —
+        # see .github/pargates-macos-plain-skip.txt for the measurement and the per-gate reason.
+        run: python3 test/pargates.py . build/ripwire -j 3 --shard ${{ matrix.shard }}/${{ matrix.shards }} --budget-scale 4 ${{ matrix.skiplist && format('--exclude-list {0}', matrix.skiplist) || '' }}
 
       - name: det-gate — 2-run byte-identical diff
         run: |
@@ -206,6 +315,60 @@ jobs:
 
       - name: G4 — xmllint --noout
         run: ./build/ripwire test/fixture --no-cache | xmllint --noout -
+
+  # ─── fallback-emitter: the stock ubuntu compiler still builds, and emits the SAME bytes ───────────────
+  #
+  # Every leg above pins a toolchain with <print>. A stranger's `apt install g++` on ubuntu-24.04 is still
+  # 13.3, whose libstdc++ has no <print>; src/infra/emit.h then compiles the std::format+fputs arm. This job
+  # builds that arm ON PURPOSE (CC/CXX = gcc-13/g++-13, both on the image), asserts the binary discloses it,
+  # and runs the printf-family parity fence against the manifest the std::print legs pinned — so the two
+  # arms are proven byte-identical on every CI run, not assumed. Without this job the fallback would rot
+  # unobserved until the next stranger hit it.
+  fallback-emitter:
+    name: fallback-emitter (ubuntu gcc-13, std::format+fputs)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install tooling
+        run: |
+          # Third-party apt sources ship in the runner image and are outside our control. TWICE now
+          # one has been mid-publish when a job ran and taken every Linux job on every branch down
+          # with it: `apt-get update` exits 100 and the leg dies in setup, before a single gate runs,
+          # with a failure that looks nothing like a package problem. google-chrome on 2026-09-09
+          # ("Hash Sum mismatch"; deb822 .sources on 24.04, not .list) and packages.microsoft.com on
+          # 2026-09-10 ("403 Forbidden ... is no longer signed"). Naming vendors one at a time only
+          # ever fixes the last outage, so: we install ubuntu-archive packages ONLY, and every
+          # non-ubuntu source goes. -print names what went, so a future reader can tell whether a
+          # missing package traces back to here.
+          ls /etc/apt/sources.list.d/ || true
+          sudo find /etc/apt/sources.list.d -type f \( -name '*.list' -o -name '*.sources' \) \
+               ! -name 'ubuntu*' -print -delete || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc
+      - name: Configure with the image's stock gcc 13 (plain flavour)
+        env:
+          CC:  gcc-13
+          CXX: g++-13
+        run: cmake -S . -B build
+      - name: Confirm the front end this leg actually configured with
+        run: grep -h 'CMAKE_CXX_COMPILER_ID\|CMAKE_CXX_COMPILER_VERSION' build/CMakeFiles/*/CMakeCXXCompiler.cmake
+      - name: Build
+        run: cmake --build build -j
+      - name: The emitter this leg compiled in is the fallback, and says so
+        run: |
+          ./build/ripwire --version
+          ./build/ripwire --version | grep -q 'emit=std::format+fputs'
+      - name: Byte parity — the fallback arm reproduces the manifest the std::print legs pinned
+        run: bash test/printffmtparitycheck.sh
+      - name: versioncheck — the disclosure arm on this arm
+        run: bash test/versioncheck.sh
+      - name: det-gate — 2-run byte-identical diff
+        run: |
+          ./build/ripwire test/fixture --no-cache >/tmp/run_a.xml
+          ./build/ripwire test/fixture --no-cache >/tmp/run_b.xml
+          diff -q /tmp/run_a.xml /tmp/run_b.xml
 
   # ─── rhel: the platform this project actually ships a prebuilt for, checked at PR time ───────────────
   #
@@ -246,23 +409,23 @@ jobs:
       # Whichever is found is ECHOED, so the log always records which compiler actually built this leg rather
       # than leaving it to be inferred.
       #
-      # Floor is 13, not merely "whichever toolset exists": src/verbs_lint.h's printf-family pilot calls
-      # std::format (<format>), which libstdc++ implements starting at GCC 13 — see that file's shim comment
-      # for the evidence (CI run IDs). A
-      # probe that accepted 12/13 here would report "toolset found, leg is fine" right up to the AppStream
-      # refresh that makes it false; raise this floor again if a later conversion needs a newer libstdc++.
+      # Floor is 14, not merely "whichever toolset exists": the house emitter (src/infra/emit.h) is
+      # std::print, which libstdc++ implements starting at GCC 14 (<format> arrived at 13, <print> at 14).
+      # A lower toolset still BUILDS — the emitter falls back by feature test — which is exactly why the
+      # probe must not accept one: the leg would report "toolset found, leg is fine" while the binary it
+      # built took the fallback. The assertion step after Build reads the truth off the binary.
       - name: Install the RHEL build toolchain
         run: |
           set -eu
           dnf install -y cmake git libxml2 python3 make diffutils findutils
           found=""
-          for v in $( seq 20 -1 13 ); do
+          for v in $( seq 20 -1 14 ); do
             if dnf install -y "gcc-toolset-$v-gcc-c++"; then
               found="$v"
               break
             fi
           done
-          [ -n "$found" ] || { echo "no gcc-toolset-N (N>=13) in this UBI9 AppStream — this tree's C++23 <format> needs libstdc++ 13+; gcc-toolset-12 and older cannot build it"; exit 1; }
+          [ -n "$found" ] || { echo "no gcc-toolset-N (N>=14) in this UBI9 AppStream — the house emitter is std::print, which needs libstdc++ 14+ (<print>); gcc-toolset-13 and older would silently take the std::format+fputs fallback"; exit 1; }
           echo "TOOLSET=$found" >> "$GITHUB_ENV"
 
       - name: Record the toolchain this leg is using
@@ -282,6 +445,11 @@ jobs:
 
       - name: Build
         run: cmake --build build -j
+
+      - name: The emitter this leg compiled in is std::print (gcc-toolset-14's libstdc++ has <print>)
+        run: |
+          ./build/ripwire --version
+          ./build/ripwire --version | grep -q 'emit=std::print'
 
       - name: Self-run on the fixture (it parses and ranks under RHEL userland)
         run: ./build/ripwire test/fixture --no-cache | head -c 400; echo
@@ -347,6 +515,9 @@ jobs:
       ASAN_OPTIONS: ${{ matrix.os == 'macos-14' && 'detect_leaks=0:halt_on_error=1:abort_on_error=1:log_path=/tmp/asanlog' || 'detect_leaks=1:halt_on_error=1:abort_on_error=1:log_path=/tmp/asanlog' }}
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1:log_path=/tmp/asanlog
       LSAN_OPTIONS: suppressions=${{ github.workspace }}/lsan_suppressions.txt
+      # Xcode 16.2 on the macOS leg (image default 15.4): its libc++ carries <print> at a macOS 14 deployment
+      # target, the default's does not — the std::print floor the build matrix holds. Inert (empty) on Linux.
+      DEVELOPER_DIR: ${{ matrix.os == 'macos-14' && '/Applications/Xcode_16.2.app/Contents/Developer' || '' }}
     steps:
       # L4 (Linux probe): checkout@v4 defaults to a --depth 1 clone, which leaves ONE commit of history
       # in the tree. The churn / co-change / ownership gates (churnjoincheck, hotspots, --owners, the
@@ -360,6 +531,18 @@ jobs:
       - name: Install tooling (Linux)
         if: runner.os == 'Linux'
         run: |
+          # Third-party apt sources ship in the runner image and are outside our control. TWICE now
+          # one has been mid-publish when a job ran and taken every Linux job on every branch down
+          # with it: `apt-get update` exits 100 and the leg dies in setup, before a single gate runs,
+          # with a failure that looks nothing like a package problem. google-chrome on 2026-09-09
+          # ("Hash Sum mismatch"; deb822 .sources on 24.04, not .list) and packages.microsoft.com on
+          # 2026-09-10 ("403 Forbidden ... is no longer signed"). Naming vendors one at a time only
+          # ever fixes the last outage, so: we install ubuntu-archive packages ONLY, and every
+          # non-ubuntu source goes. -print names what went, so a future reader can tell whether a
+          # missing package traces back to here.
+          ls /etc/apt/sources.list.d/ || true
+          sudo find /etc/apt/sources.list.d -type f \( -name '*.list' -o -name '*.sources' \) \
+               ! -name 'ubuntu*' -print -delete || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc clang
 
@@ -389,6 +572,11 @@ jobs:
 
       - name: Build
         run: cmake --build asan -j
+
+      - name: The emitter this leg compiled in is std::print
+        run: |
+          ./asan/ripwire --version
+          ./asan/ripwire --version | grep -q 'emit=std::print'
 
       - name: G1 fixture self-run (ripwire_asan_fixture)
         run: cmake --build asan --target ripwire_asan_fixture

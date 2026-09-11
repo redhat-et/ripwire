@@ -25,6 +25,13 @@
 #                4th column defaults to split=test (back-compat for hand-built ad-hoc TSVs in other gates),
 #                but every row actually in this file states it explicitly so the freeze is visible on read,
 #                not inferred.
+#
+# RELABEL log (2026-09-07, description-budget round, docs/EVALS.md "Skill descriptions under a client
+# budget"): the efficient skill folded into ripwire-orient on the owner's decision after three blind rater
+# models (Opus, Sonnet, Fable) routed its rows to orient from the FULL descriptions (6/5/5 of the 8/7/7
+# misses in arms A/B/C1). Every permitted-set member `ripwire-efficient` became `ripwire-orient` by the
+# mechanical map (bench/skilldesc_arms.py --label-map) — 12 rows; prompts, provenance, split untouched;
+# no rows added. The directory is gone; its body is skills/ripwire-orient/map-before-you-read.md.
 # ripwire-router itself is never a legal label: it is the fallback map, not a routing destination.
 # Keep this file ASCII; the harness truncates prompts at a byte boundary when reporting misses.
 #
@@ -50,7 +57,7 @@ My task touches the scheduler, the allocator and the job queue - how do those th
 I am starting a multi-symbol feature and need an ordered implementation plan and a size estimate first.	ripwire-before-you-build	router	test
 I have to write a class that must satisfy the Codec interface - what is the contract and which implementors exist?	ripwire-before-you-build	router	test
 About to write a quick helper function to normalize paths - should take two minutes.	ripwire-reuse-first	router	test
-I am about to open several files just to learn how one thing works.	ripwire-efficient	router	test
+I am about to open several files just to learn how one thing works.	ripwire-orient	router	test
 Reviewing my own diff now - am I ready to push and is this safe to merge?	ripwire-change-check,ripwire-quality-bar	router	test
 Which tests should I run for this change, and did I run the right ones?	ripwire-change-check	router	test
 I need to write tests for existing code that has none.	ripwire-write-tests	router	test
@@ -60,7 +67,7 @@ I have a sanitizer report with a full stack trace - do not make me hand-translat
 I just edited one symbol - did I change a contract someone depends on?	ripwire-change-check	router	test
 I am landing several parallel agent worktrees - who conflicts and in what order should they land?	ripwire-change-check	router	test
 That flake was caused by a stale cache file - worth remembering for the next session, tied to that symbol.	ripwire-orient	router	test
-Give me one-call orientation for this task under a token budget - ranking, bodies, callers, tests at once.	ripwire-efficient	router	test
+Give me one-call orientation for this task under a token budget - ranking, bodies, callers, tests at once.	ripwire-orient	router	test
 Planning a refactor of a suspected god object - where are the seams and the blast radius?	ripwire-fresh-eyes	router	test
 A profiler sample identifies one slow symbol - investigate the measured surface.	ripwire-perf-target	router	test
 I received a skill file from an external source and want to audit it before activating.	ripwire-security-scan	router	test
@@ -85,7 +92,7 @@ I have a symptom: a crash, wrong output, a failing test, an error string.	ripwir
 Before adding a dependency - is the capability already in the tree?	ripwire-reuse-first	desc	test
 I received an .mcp.json server config from an external source - vet it before I install it.	ripwire-security-scan	desc	test
 Sizing up an unfamiliar module before editing it.	ripwire-fresh-eyes,ripwire-orient	desc	test
-I caught myself about to open more than two files to figure something out.	ripwire-efficient	desc	test
+I caught myself about to open more than two files to figure something out.	ripwire-orient	desc	test
 Right before I open the PR: report only what my change made worse.	ripwire-quality-bar	desc	test
 I changed X and it broke - trace the regression.	ripwire-find-bug	desc	test
 Investigate a measured performance problem starting from a profiler sample.	ripwire-perf-target	desc	test
@@ -95,7 +102,7 @@ Where does input validation actually happen in this service?	ripwire-orient	judg
 If I rename the third parameter of buildIndex, what downstream code breaks?	ripwire-navigate	judged	test
 Rough out the work to support incremental compilation - what order, what surface, how much effort?	ripwire-before-you-build	judged	test
 I need a tiny timestamp-formatting utility; do not let me reinvent one we already have.	ripwire-reuse-first	judged	test
-Stop me from reading the whole repo - what is the minimal context to fix the pager?	ripwire-efficient	judged	test
+Stop me from reading the whole repo - what is the minimal context to fix the pager?	ripwire-orient	judged	test
 Double-check my working tree before I open the pull request.	ripwire-change-check,ripwire-quality-bar	judged	test
 The nightly job started throwing a null-pointer exception somewhere after Tuesday's deploy.	ripwire-find-bug	judged	test
 Merge my three feature branches with the least pain.	ripwire-change-check	judged	test
@@ -126,8 +133,8 @@ Draw me the shape of this codebase - the modules and how they are organized, not
 I just changed the signature on this helper function - does anything downstream actually depend on the old shape?	ripwire-change-check	judged	test
 Three people have feature branches off the same module and we need to land them this week without a mess - what order should they go in?	ripwire-change-check	judged	test
 We have a graveyard of old branches nobody remembers the status of - is any of that actually still unmerged and worth rescuing?	ripwire-change-check	judged	test
-Give me everything I would need for this ticket in one shot - ranking, the actual code, who calls it, what to test - I do not want to run five separate commands.	ripwire-efficient	judged	test
-I keep tab-hopping between a dozen files trying to understand one code path - there has to be a faster way to see the shape of this.	ripwire-efficient	judged	test
+Give me everything I would need for this ticket in one shot - ranking, the actual code, who calls it, what to test - I do not want to run five separate commands.	ripwire-orient	judged	test
+I keep tab-hopping between a dozen files trying to understand one code path - there has to be a faster way to see the shape of this.	ripwire-orient	judged	test
 Before I pull in a new library for retry-with-backoff, is there already something like that in this codebase?	ripwire-reuse-first	judged	test
 Nobody has ever written a single test for this billing module - I want to close that gap, not just poke at it randomly.	ripwire-write-tests	judged	test
 I need every function that is both high-complexity and eventually reaches the billing code - a simple caller list cannot express that.	ripwire-graph-query	judged	test
@@ -229,12 +236,12 @@ Adding a dependency for CSV parsing - is that already vendored somewhere in here
 I am going to write a small helper that dedupes the config list.	ripwire-reuse-first	judged	test
 Give me the house pattern for a visitor class before I author mine.	ripwire-reuse-first	judged	dev
 One-liner to clamp values - just gonna type it out.	ripwire-reuse-first	judged	dev
-Let me skim a handful of files to get context on the session store first.	ripwire-efficient	judged	test
-I keep pasting whole files into context and the budget is bleeding - better way?	ripwire-efficient	judged	dev
-Hand me the whole task briefing at once, capped around six thousand tokens.	ripwire-efficient	judged	test
-Spinning up four subagents for this refactor - carve the repo so their briefs do not overlap.	ripwire-efficient	judged	test
-Before answering I will skim src end to end.	ripwire-efficient	judged	test
-My context window is filling with file dumps again - keep this cheap.	ripwire-efficient	judged	test
+Let me skim a handful of files to get context on the session store first.	ripwire-orient	judged	test
+I keep pasting whole files into context and the budget is bleeding - better way?	ripwire-orient	judged	dev
+Hand me the whole task briefing at once, capped around six thousand tokens.	ripwire-orient	judged	test
+Spinning up four subagents for this refactor - carve the repo so their briefs do not overlap.	ripwire-orient	judged	test
+Before answering I will skim src end to end.	ripwire-orient	judged	test
+My context window is filling with file dumps again - keep this cheap.	ripwire-orient	judged	test
 Two worktrees touched the tokenizer - which lands first and where do they collide?	ripwire-change-check	judged	test
 A test named test_manifest_roundtrip failed on CI - I have its name and no clue what it exercises.	ripwire-find-bug	judged	test
 I think the patch is finished - what did I just make worse?	ripwire-quality-bar	judged	test

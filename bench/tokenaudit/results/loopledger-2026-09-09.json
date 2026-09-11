@@ -1,0 +1,33 @@
+{
+ "mean_tokens_per_native_call": 5700.5,
+ "mean_tokens_per_ripwire_call": 406.7,
+ "median_tokens_per_native_call": 716.7,
+ "median_tokens_per_ripwire_call": 333.0,
+ "nonterminal_ripwire_calls": 1666,
+ "nonterminality_rate": 0.4821,
+ "provider_usage_tokens": {
+  "cache_creation_input_tokens": 221210191,
+  "cache_read_input_tokens": 12846299888,
+  "input_tokens": 286905,
+  "output_tokens": 43186745
+ },
+ "ripwire_calls": 3456,
+ "ripwire_share_of_retrieval_calls": 0.422,
+ "ripwire_share_of_retrieval_tokens": 0.0426,
+ "schema": "ripwire.loopledger/v1",
+ "sessions": 78,
+ "sessions_with_a_ripwire_call": 67,
+ "sweep_lookahead": 3,
+ "tokenizer": "o200k_base",
+ "tool_calls": {
+  "native": 4733,
+  "other": 8921,
+  "ripwire": 3456
+ },
+ "tool_result_share_of_billed_tokens": 0.0025,
+ "tool_result_tokens": {
+  "native": 26083509,
+  "other": 5095267,
+  "ripwire": 1159938
+ }
+}

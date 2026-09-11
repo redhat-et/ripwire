@@ -63,7 +63,9 @@ inline std::uint32_t triAt( const std::string& s, std::size_t i ) noexcept
 // outside every indexed symbol. The emitters attach that symbol's 1-hop caller count straight off the
 // in-edge CSR, which needs the id, not just the breadcrumb name. Trailing with a default member
 // initializer, so the pre-field aggregate initializers keep their meaning unchanged.
-struct GrepHit { std::uint32_t fileId; std::uint32_t line; std::string enclosing; std::string text; std::string before; std::string after; NodeId enclosingId = kNoNode; };
+// `lineBytes` = the WHOLE matched line's byte length, set ONLY when kGrepMatchedLineMaxBytes cut `text`;
+// 0 means "not truncated" and costs the emitters nothing (the pr_converged shape — presence is the fact).
+struct GrepHit { std::uint32_t fileId; std::uint32_t line; std::string enclosing; std::string text; std::string before; std::string after; NodeId enclosingId = kNoNode; std::uint32_t lineBytes = 0; };
 
 // ─── Russ Cox regex→trigram prefilter ─────────────────────────────────────────────────────────────
 //
@@ -940,7 +942,22 @@ inline constexpr std::size_t kGrepMatchedLineMaxBytes = 512;
 
 // The MATCHED line itself (P5): the text the agent actually searched for, which neither the bare hit nor
 // the before/after blocks ever showed. Empty when the hit line is out of range (degrade, never OOB).
-inline std::string grepMatchedLine( const std::string& s, const std::vector<std::size_t>& lineStarts, std::uint32_t line )
+//
+// THE CUT IS DISCLOSED, not silent. `fullBytesOut` (optional) is set to the WHOLE line's byte length when
+// — and only when — the cap fired, and left alone otherwise, so a caller's 0 means "not truncated". This
+// is the ONE piece of content a grep answer carries, and a 512-byte source line and a truncated 50 KB
+// minified line used to print byte-identical payloads with nothing on the row telling them apart
+// (METHODOLOGY §9 #3/#4: never cut silently, and the honesty lives in an attribute). The number is the
+// TRUE size rather than a bare capped="1" because it is what decides the reader's next move — the row
+// already carries the deterministic follow-up (p=/l= and the root's next=), and how much was dropped is
+// what says whether following it is worth a read.
+//
+// No ellipsis here, deliberately, and this is where this cut differs from cleanSig's: a grep payload is
+// RAW FILE BYTES by contract — the boolean --and/--not filter reads the same line (grepWholeLine below),
+// and the --at= follow-up on the row is expected to reproduce it — so a character that is not in the file
+// must not be spliced into it. The attribute carries the fact instead.
+inline std::string grepMatchedLine( const std::string& s, const std::vector<std::size_t>& lineStarts, std::uint32_t line,
+                                    std::uint32_t* fullBytesOut = nullptr )
 {
     const std::uint32_t lineCount = grepRealLineCount( s, lineStarts );
     if( line < 1 || line > lineCount )
@@ -950,6 +967,10 @@ inline std::string grepMatchedLine( const std::string& s, const std::vector<std:
     std::string text = grepLineRangeText( s, lineStarts, lineCount, line, line );
     if( text.size() > kGrepMatchedLineMaxBytes )
     {
+        if( fullBytesOut != nullptr )
+        {
+            *fullBytesOut = std::uint32_t( text.size() );
+        }
         std::size_t cut = kGrepMatchedLineMaxBytes;
         while( cut > 0 && ( static_cast<unsigned char>( text[cut] ) & 0xC0 ) == 0x80 )
         {
@@ -1022,27 +1043,74 @@ inline void grepScanText( const std::string& text, const std::string& pat,
 
     if( re != nullptr )
     {
-        // std::sregex_iterator can throw regex_error (error_complexity/error_space) mid-scan on a
-        // catastrophic-backtracking pattern over a pathological file — construction succeeded (the pattern
+        // LINE-ORIENTED MATCHING (2026-09-09) — each line is its own search range, which is what makes
+        // `^` and `$` LINE anchors without asking the standard library for `std::regex::multiline`.
+        //
+        // Two things forced this shape, and both are load-bearing:
+        //
+        //  1. THE SEMANTICS. Handing the whole file to one iterator made ECMAScript's `^` match only at
+        //     offset 0 and `$` only at end-of-file, in a verb whose every answer is a LINE (`l=`, one line
+        //     of CDATA). `--regex='^#include'` reported 1 hit on src/ where rg reported 1648. grep, rg,
+        //     tgrep and every editor's find box read those anchors per line; so does this now.
+        //  2. WHY NOT std::regex::multiline. It is the obvious fix and it is not usable. Apple libc++'s
+        //     `__l_anchor_multiline<char>::__exec` reads `*std::prev(__s.__current_)` before testing
+        //     whether the match position IS the first character, so at offset 0 it reads one byte BEFORE
+        //     the buffer. Measured 2026-09-09 on this tree: a 40-line standalone with no ripwire code —
+        //     default-constructed regex, assigned, `sregex_iterator` per file — faults on 74 of ~130 of
+        //     this repository's own headers, single-threaded, and `--regex='^'` over src/ crashed 8 of 10
+        //     runs (EXC_BAD_ACCESS in that frame, address one byte low; SIGBUS when the string's buffer
+        //     starts a page). Content-dependent, because a byte before a heap buffer is usually readable.
+        //     A gate cannot defend against a standard-library out-of-bounds read; not using the node can.
+        //
+        // Consequence, stated because it is a real narrowing: a match may no longer SPAN lines. `.` never
+        // could (ECMAScript's dot excludes line terminators), but `[\s\S]*` could and now cannot — the
+        // same line-oriented contract grep and rg have, where crossing lines is an opt-in mode neither
+        // this verb nor rg's default offers. A trailing `\r` is outside every line's range, so `$` behaves
+        // on CRLF input the way rg's `--crlf` does rather than never matching.
+        //
+        // std::regex_iterator can throw regex_error (error_complexity/error_space) mid-scan on a
+        // catastrophic-backtracking pattern over a pathological line — construction succeeded (the pattern
         // itself compiled fine), the blowup happens during matching. Only construction was guarded before
         // this (A4-F10); an uncaught throw here reached std::terminate and killed the whole run over one
         // bad file. Degrade: keep this file's hits so far and move on to the next file.
         try
         {
-            for( auto it = std::sregex_iterator( text.begin(), text.end(), *re ); it != std::sregex_iterator(); ++it )
+            // A trailing newline TERMINATES the last line, it does not begin an empty one, and an empty
+            // file has no lines at all: grep reports one match of `^` per real line and none in an empty
+            // file. Without both guards a zero-width pattern gains one phantom hit per file, on a line
+            // number no reader could open — the two conditions below are those two rules.
+            const char*   base      = text.data();
+            std::size_t   lineBegin = 0;
+            bool          capped    = false;
+            while( !capped && !text.empty() )
             {
-                const std::size_t pos = std::size_t( it->position() );
-                out.push_back( { lineAt( pos ), std::uint32_t( pos ) } );
-                if( out.size() >= hitCapCount )
+                const std::size_t nl       = text.find( '\n', lineBegin );
+                const std::size_t lineEnd  = ( nl == std::string::npos ) ? text.size() : nl;
+                std::size_t       matchEnd = lineEnd;
+                if( matchEnd > lineBegin && text[ matchEnd - 1 ] == '\r' ) { --matchEnd; }
+
+                for( auto it = std::cregex_iterator( base + lineBegin, base + matchEnd, *re ); it != std::cregex_iterator(); ++it )
                 {
-                    break;
+                    out.push_back( { line, std::uint32_t( lineBegin + std::size_t( it->position() ) ) } );
+                    if( out.size() >= hitCapCount )
+                    {
+                        capped = true;
+                        break;
+                    }
                 }
+                if( nl == std::string::npos || nl + 1 >= text.size() )
+                {
+                    break;   // last line, or the newline that terminated it was the final byte
+                }
+                lineBegin = nl + 1;
+                ++line;
             }
         }
         catch( const std::regex_error& )
         {
             DEGRADED_PATH_ALERT( "grep: regex match blew up (catastrophic backtracking?) — file skipped" );
         }
+        scanned = text.size();   // the literal branch's cursor is not shared with this one; keep it honest
     }
     else
     {
@@ -1308,6 +1376,24 @@ inline std::optional<std::string> catastrophicRegexConstruct( const std::string&
     return std::nullopt;
 }
 
+// ── THE syntax option set every --regex construction uses ─────────────────────────────────────────────
+//
+// One constant, three construction sites (the compile probe below, the indexed-file worker, and the
+// unindexed-aux scan). A pattern that COMPILES under one flag set and MATCHES under another is a defect
+// with no symptom, and this file spelled the literal out three times.
+//
+// NOTE WHAT IS **NOT** HERE: `std::regex::multiline`. Line anchors are what this verb owes its reader,
+// but that flag is how you do NOT get them on this platform — Apple libc++'s `__l_anchor_multiline`
+// reads one byte before the buffer at offset 0 and faults on real source text (the measurement is in
+// grepScanText's header, where the replacement lives). `^` and `$` are line anchors because
+// grepScanText searches ONE LINE AT A TIME, not because of a syntax option. Leave this set alone: the
+// prefilter's compile probe and both scanners must agree about what compiles, and adding `multiline`
+// here would reintroduce a standard-library out-of-bounds read that no gate in this tree can catch.
+// The trigram prefilter is unaffected either way — Cox treats an anchor as ε (riAnchor above), which is
+// sound under both readings, so no candidate set narrows on one.
+// Gated by test/grepanchorcheck.sh.
+constexpr auto kGrepRegexSyntax = std::regex::ECMAScript | std::regex::optimize;
+
 inline std::optional<std::string> regexCompileError( const std::string& pat )
 {
     if( std::optional<std::string> portability = nonPortableRegexEscape( pat ) )
@@ -1319,7 +1405,7 @@ inline std::optional<std::string> regexCompileError( const std::string& pat )
         return bomb; // M2: likewise — decided from the text, before any engine sees it
     }
 
-    try                                { const std::regex probe( pat, std::regex::ECMAScript | std::regex::optimize ); (void)probe; }
+    try                                { const std::regex probe( pat, kGrepRegexSyntax ); (void)probe; }
     catch( const std::regex_error& e ) { return std::string( e.what() ); }
     catch( ... )                       { return std::string( "invalid regular expression" ); }
     return std::nullopt;
@@ -1411,7 +1497,7 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
     const auto                              fileWorker = [ & ]
     {
         std::regex reLocal;
-        if( regex ) { try { reLocal = std::regex( pat, std::regex::ECMAScript | std::regex::optimize ); } catch( ... ) { workerDegraded.store( true, std::memory_order_relaxed ); return; } }
+        if( regex ) { try { reLocal = std::regex( pat, kGrepRegexSyntax ); } catch( ... ) { workerDegraded.store( true, std::memory_order_relaxed ); return; } }
         std::string text;
         try
         {
@@ -1562,6 +1648,7 @@ struct GrepAuxHit
     std::string   path;
     std::uint32_t line;
     std::string   text;   // matched line, same kGrepMatchedLineMaxBytes cap as an indexed hit
+    std::uint32_t lineBytes = 0;   // ... and the same disclosure: the WHOLE line's size when that cap cut it, else 0
 };
 
 // What grepCollectAux scanned, and exactly why any candidate was excluded — every one of these is a COUNT
@@ -1597,7 +1684,7 @@ inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::str
     std::regex re;
     if( regex )
     {
-        try { re = std::regex( pat, std::regex::ECMAScript | std::regex::optimize ); }
+        try { re = std::regex( pat, kGrepRegexSyntax ); }
         catch( ... ) { out.degraded = true; return out; }   // T1: nothing scanned — a caller may not read this empty set as a complete zero
     }
 
@@ -1639,7 +1726,9 @@ inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::str
         }
         for( const GrepMatchSite& s : sites )
         {
-            out.hits.push_back( GrepAuxHit{ row.path, s.line, grepMatchedLine( text, lineStarts, s.line ) } );
+            std::uint32_t auxLineBytes = 0;
+            std::string   auxText        = grepMatchedLine( text, lineStarts, s.line, &auxLineBytes );
+            out.hits.push_back( GrepAuxHit{ row.path, s.line, std::move( auxText ), auxLineBytes } );
         }
     }
     return out;
@@ -1737,9 +1826,9 @@ inline std::vector<GrepHit> grepEnrich( const IngestResult& ing, std::span<const
         {
             chain = e->scope.empty() ? e->name : ( e->scope + "::" + e->name );
         }
-        GrepHit h{ r.fileId, r.line, std::move( chain ), {}, {}, {}, e ? e->id : kNoNode };
+        GrepHit h{ r.fileId, r.line, std::move( chain ), {}, {}, {}, e ? e->id : kNoNode, 0 };
         ensureFileLoaded( r.fileId );
-        h.text = grepMatchedLine( fileText, lineStarts, r.line );
+        h.text = grepMatchedLine( fileText, lineStarts, r.line, &h.lineBytes );
         if( ctxBefore > 0 )
         {
             h.before = grepContextSlice( fileText, lineStarts, r.line, ctxBefore, /*before=*/true );
@@ -1825,7 +1914,11 @@ inline std::vector<GrepFileGroup> grepGroupByFile( std::span<const GrepHit> hits
             bool folded = false;
             for( GrepCollapsedHit& c : group.hits )
             {
-                if( c.hit.text == h.text )
+                // lineBytes joins the fold key: two >512 B lines can share a byte-identical 512 B PREFIX
+                // and differ in true length, and folding those under one row would print one line_bytes=
+                // for sites it does not describe. Untruncated rows all carry 0, so this is byte-identical
+                // to the old key everywhere the cap did not fire.
+                if( c.hit.text == h.text && c.hit.lineBytes == h.lineBytes )
                 {
                     c.more.push_back( GrepHitSite{ h.line, h.enclosing, h.enclosingId } );
                     folded = true;

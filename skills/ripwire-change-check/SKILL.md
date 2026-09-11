@@ -1,23 +1,10 @@
 ---
 name: ripwire-change-check
 description: >
-  The merge-SAFETY check for a diff that already EXISTS — your own working changes before you submit, or an
-  incoming PR you're reviewing — beyond the line-by-line view. Use at "am I ready to push?" / "is this safe
-  to merge?" / "what does this PR actually touch?" / "which tests should I run for this change?". Also covers
-  three narrower moments: just edited a symbol and need to know — did I change a contract someone depends on
-  (a fast per-symbol contract check, --edit-check, no full diff needed); landing several branches or
-  parallel agent worktrees and need to know who conflicts and in what order they should land (--merge-scout);
-  and cross-ref content archaeology — "I have 30 branches and do not know what is stranded on them" — which
-  ref still holds divergent work, is it genuinely unmerged or already superseded (--stray-content), and which
-  ref defines or mentions a symbol (--whereis). Maps changed symbols to their transitive blast radius,
-  surfaces tests to run (--affected/--situ), flags lint smells and hotspot risk in touched files, interprets
-  --metrics coupling/cohesion/size on what you touched, and shows the diff's footprint via --map-diff. For
-  code QUALITY (better or worse) → **ripwire-quality-bar** instead — this skill judges merge safety, not
-  quality. Backed by ripwire (deterministic, on PATH). A one-line leaf fix is not a merge audit — run the
-  focused test, but still run `--edit-check=SYM` first (~ms warm, cheaper than deciding by eye whether the
-  edit touched a contract): a clean `unchanged` result is what actually earns the right to skip the rest of
-  this skill (and this file). Sizing work not yet written → ripwire-before-you-build.
-  Risk in a subsystem you did NOT write → ripwire-fresh-eyes.
+  Merge-SAFETY of an existing diff — yours before you push, or a PR you review: blast radius, tests to
+  run, a broken contract (--edit-check=SYM), branch conflicts and landing order, unmerged work
+  stranded on old branches, which ref defines it. Code QUALITY → quality-bar. Even a one-line leaf fix
+  runs --edit-check.
 allowed-tools: Bash, Read
 ---
 
@@ -84,7 +71,7 @@ emits a flat `<cand r= s= n= id= k= p= l=>` top-K — identity + score + signatu
      `--affected=SYM` (or `--affected=file:NAME` when a path shares the name) instead of widening it to the
      whole file, and invert it with `--exercises=test/<harness>` to see what a given test actually covers.
    - **co-change partners NOT in the diff** — files that historically move together (should they be in this
-     change too?)
+     change too? — the Shotgun Surgery check: one change that has to land in many places, and did not)
 
 2. **Hotspot risk** — `ripwire <dir> --hotspots`
    `<hotspots>` ranked by `score = churn × ccx`. Does any changed file appear in the top-10? A change that

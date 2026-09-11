@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // lexical.h — subtoken (camelCase / snake_case) BM25 over symbols, for `--query` / `--for` retrieval.
 // The eval-at-scale showed lexical name-overlap beats pure graph structure for "find related code", so the
@@ -14,20 +16,24 @@
                                  // over model.h despite the header's name: no cycle.
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "infra/sortutil.h"      // deterministic sanitizer-clean score sorting for adaptive cuts
+#include "infra/charconvcompat.h" // rw::parseFloating — envKnob's full-token finite parse of a RIPWIRE_* knob
 
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 namespace rw
@@ -114,16 +120,54 @@ struct Bm25Params
 
 inline constexpr Bm25Params kBm25Default{ 1.5, 0.75 };
 
+// A RIPWIRE_* calibration knob. Unset, or set empty, is the caller's default. A set value must parse IN FULL as a
+// finite number, or it is refused back to that default with one stderr line naming it, so a sweep cannot run on the
+// default while believing it set something. atof/atoi were unchecked: "nan" read as NaN, which std::clamp passes
+// straight through into every BM25 score; "8x" as 8; "abc" as 0, then clamped to the floor — three rankings nobody
+// configured (test/bm25boundcheck.sh (3b)/(3c), test/lb3namecheck.sh (b-junk)).
+template<class T> requires std::is_arithmetic_v<T>
+inline std::optional<T> envKnob( const char* name ) noexcept
+{
+    const char* const text = std::getenv( name );
+    if( text == nullptr || *text == '\0' )
+    {
+        return std::nullopt;
+    }
+    const char* const      end   = text + std::strlen( text );
+    T                      value = T{};
+    std::from_chars_result parsed{};
+    if constexpr( std::is_floating_point_v<T> )
+    {
+        parsed = rw::parseFloating( text, end, value );
+    }
+    else
+    {
+        parsed = std::from_chars( text, end, value );
+    }
+    if( parsed.ec == std::errc{} && parsed.ptr == end && std::isfinite( double( value ) ) )
+    {
+        return value;
+    }
+    // emitRaw, not emitTo: nothing here needs formatting, and every caller is a noexcept scoring path
+    rw::emitRaw( stderr, "ripwire: ignoring " );
+    rw::emitRaw( stderr, name );
+    rw::emitRaw( stderr, "=\"" );
+    rw::emitRaw( stderr, text );
+    rw::emitRaw( stderr, std::is_floating_point_v<T> ? "\" (not a finite number) — the default applies\n"
+                                                    : "\" (not a whole number in int range) — the default applies\n" );
+    return std::nullopt;
+}
+
 inline Bm25Params resolveBm25Params() noexcept
 {
     Bm25Params p = kBm25Default;
-    if( const char* k1Env = std::getenv( "RIPWIRE_BM25_K1" ) )
+    if( const std::optional<double> k1 = envKnob<double>( "RIPWIRE_BM25_K1" ) )
     {
-        p.k1 = std::clamp( std::atof( k1Env ), 0.1, 10.0 );
+        p.k1 = std::clamp( *k1, 0.1, 10.0 );
     }
-    if( const char* bEnv = std::getenv( "RIPWIRE_BM25_B" ) )
+    if( const std::optional<double> b = envKnob<double>( "RIPWIRE_BM25_B" ) )
     {
-        p.b = std::clamp( std::atof( bEnv ), 0.0, 1.0 );
+        p.b = std::clamp( *b, 0.0, 1.0 );
     }
     return p;
 }
@@ -398,8 +442,8 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         {
             return 0;
         }
-        const char* bitsEnv = std::getenv( "RIPWIRE_TERMMARGIN_BITS" );
-        return bitsEnv != nullptr ? std::clamp( std::atoi( bitsEnv ), 1, 8 ) : 1;
+        const std::optional<int> bits = envKnob<int>( "RIPWIRE_TERMMARGIN_BITS" );
+        return bits ? std::clamp( *bits, 1, 8 ) : 1;
     }();
     const bool marginArmed = marginBits > 0;
 
@@ -457,9 +501,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // ing.files already hold "<label>/<root-relative>".
     {
         int kwPath = pathFieldDefaultW;
-        if( const char* pathTokEnv = std::getenv( "RIPWIRE_PATHTOK_W" ) )
+        if( const std::optional<int> pathTokW = envKnob<int>( "RIPWIRE_PATHTOK_W" ) )
         {
-            kwPath = std::clamp( std::atoi( pathTokEnv ), 0, 8 );
+            kwPath = std::clamp( *pathTokW, 0, 8 );
         }
         if( kwPath > 0 )
         {
@@ -487,9 +531,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // the other already agreeing rather than discovering half the path tokenization was still absolute.
     {
         int kwBase = basenameFieldDefaultW;
-        if( const char* baseEnv = std::getenv( "RIPWIRE_BASENAME_W" ) )
+        if( const std::optional<int> baseW = envKnob<int>( "RIPWIRE_BASENAME_W" ) )
         {
-            kwBase = std::clamp( std::atoi( baseEnv ), 0, 8 );
+            kwBase = std::clamp( *baseW, 0, 8 );
         }
         if( kwBase > 0 )
         {
@@ -731,7 +775,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             }
             catch( ... )   // a throw escaping a worker thread is std::terminate — degrade to partial counts instead
             {
-                std::fprintf( stderr, "ripwire: lexical scan worker degraded (exception swallowed)\n" );
+                rw::emitRaw( stderr, "ripwire: lexical scan worker degraded (exception swallowed)\n" );
             }
         };
         const std::size_t hwThreadCount = std::thread::hardware_concurrency();
@@ -779,7 +823,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         {
             for( std::size_t v = 0; v < variantCount; ++v )
             {
-                std::fprintf( stderr, "qstem-guard: \"%s\" df=%u cap=%u %s\n",
+                rw::emitTo( stderr, "qstem-guard: \"{}\" df={} cap={} {}\n",
                               matchToks[ uniqueCount + v ].tok.c_str(), dfVariant[v], variantCap,
                               dfVariant[v] <= variantCap ? "admitted" : "rejected" );
             }
@@ -909,10 +953,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                         verdict = "kept (name-separates)";
                     }
                 }
-                std::fprintf( stderr, "term-margin: \"%s\" df=%d/%zu nameDf=%d bits=%d %s\n",
+                rw::emitTo( stderr, "term-margin: \"{}\" df={}/{} nameDf={} bits={} {}\n",
                               uniqueToks[u].c_str(), dfMargin[u], S, nameDf[u], marginBits, verdict );
             }
-            std::fprintf( stderr, "term-margin: %zu present, %zu survive, suppression %s\n",
+            rw::emitTo( stderr, "term-margin: {} present, {} survive, suppression {}\n",
                           presentCount, survivorCount, applySuppression ? "applied" : "withheld (sole-anchor)" );
         }
     }
@@ -1459,7 +1503,7 @@ inline std::vector<float> lexicalScoresNameExactRanked( const IngestResult& ing,
 //      (A single generic word that happens to equal a symbol name — "map" — still routes to name-exact, which
 //      is correct: a one-word query whose only word IS a symbol name is an identifier lookup, and name-exact
 //      is the measured winner on that shape; the crater was multi-word phrases, not single-word lookups.)
-enum class LexMode { SubtokenBody, NameExact };
+enum class LexMode : std::uint8_t { SubtokenBody, NameExact };
 
 // ONE anchoring word's resolved DEFINITION — the same (name, defining file) pair the `anchors:` clause
 // below prints, in the form a consumer can compare a symbol against. Only words that actually name a
@@ -2041,7 +2085,6 @@ inline AdaptiveCut adaptiveCut( const std::vector<float>& scores, std::size_t fl
     // cut, only the honesty flag (A4-F4: previously the single global-max drop was used for BOTH roles, so a
     // routine 90%+ tail drop beyond hardCeil silently starved the in-cap material cliff of ever being chosen —
     // the mode was inert on exactly the sharp queries it exists for).
-    std::size_t bestCutKept    = 0;
     double      bestDrop       = 0.0;
     std::size_t bestCapCutKept = 0;
     double      bestCapDrop    = 0.0;
@@ -2050,7 +2093,7 @@ inline AdaptiveCut adaptiveCut( const std::vector<float>& scores, std::size_t fl
         const double prev = double( pos[ i - 1 ] );
         const double here = double( pos[ i ] );
         const double drop = prev > 0.0 ? ( prev - here ) / prev : 0.0;
-        if( drop > bestDrop ) { bestDrop = drop; bestCutKept = i; }               // cut BEFORE rank i+1 ⇒ keep i
+        if( drop > bestDrop ) { bestDrop = drop; }                                // the GLOBAL cliff: only its magnitude is read
         if( i < hardCeil && drop > bestCapDrop ) { bestCapDrop = drop; bestCapCutKept = i; }
     }
 
@@ -2097,7 +2140,7 @@ inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int served
     out.level     = ( !cut.hitCeiling || servedComplete ) ? "high" : "low";
     out.marginPct = cut.hitCeiling ? 0 : cut.dropPct;
     char attrBuf[ 48 ];
-    std::snprintf( attrBuf, sizeof( attrBuf ), " confidence=\"%s\" margin_pct=\"%d\"", out.level, out.marginPct );
+    rw::formatTo( attrBuf, sizeof( attrBuf ), " confidence=\"{}\" margin_pct=\"{}\"", out.level, out.marginPct );
     out.attrs = attrBuf;
     // no "--" anywhere (rides inside an XML comment, where "--" is ill-formed — G4). TERSE on purpose:
     // this rides EVERY --for header and its bytes are charged under an explicit budget, so each word

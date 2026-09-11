@@ -48,6 +48,8 @@
 #include "model.h"
 #include "arch.h"        // §B1.3: relForHash — the root-relative path segment canonicalIdRelTo keys on
 #include "smallvec.h"
+#include "infra/sortutil.h"      // radixSortIdsAscending — the id-set sort buildGraph/2b below runs F times
+#include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 
 #include <algorithm>
 #include <cstddef>
@@ -83,9 +85,23 @@ inline constexpr std::uint32_t kNoFile = 0xFFFFFFFFu;   // "no repo file" sentin
 // a trailing '/' is dropped. Empty segments (from `//` or a leading '/') and `.` segments are elided.
 inline std::string lexicalNormalize( std::string_view path )
 {
-    const bool                     isAbsolute = ( !path.empty() && path.front() == '/' );
-    std::vector<std::string_view>  segs;                 // the surviving path components, in order
-    segs.reserve( 8 );
+    // ONE allocation, the returned string, and it is reserved: the segment list this used to build
+    // (`std::vector<std::string_view> segs; segs.reserve( 8 );`) was a second heap block on a function
+    // probeUpward calls ~25 times PER INCLUDE — 714,000 times on a 4,923-file Ruby tree, where the include
+    // adjacency was 87 ms of a 330 ms warm run (bench/PROFILE.md). Segments are appended to `out` directly
+    // and a `..` truncates it back to the previous '/', which is the same pop the vector did: `segs` could
+    // only ever hold real segments (`.`, `..` and empties take the other branches), so its
+    // `segs.back() != ".."` guard was invariant-true and is gone with it. `rootLen` is the prefix a `..`
+    // may never eat — 1 for an absolute path, 0 for a relative one — which is what makes the two degrade
+    // rules ("no-op at the filesystem root" vs "escaping above the base is unsound") one comparison.
+    const bool  isAbsolute = ( !path.empty() && path.front() == '/' );
+    std::string out;
+    out.reserve( path.size() );
+    if( isAbsolute )
+    {
+        out.push_back( '/' );
+    }
+    const std::size_t rootLen = out.size();
 
     std::size_t i = 0;
     while( i < path.size() )
@@ -104,9 +120,10 @@ inline std::string lexicalNormalize( std::string_view path )
         }
         else if( seg == ".." )
         {
-            if( !segs.empty() && segs.back() != ".." )
+            if( out.size() > rootLen )
             {
-                segs.pop_back(); // pop the previous real segment
+                const std::size_t cut = out.rfind( '/' );                       // pop the previous real segment
+                out.resize( ( cut == std::string::npos || cut < rootLen ) ? rootLen : cut );
             }
             else if( isAbsolute )                       { /* `..` at the filesystem root is a no-op */ }
             else
@@ -116,25 +133,14 @@ inline std::string lexicalNormalize( std::string_view path )
         }
         else
         {
-            segs.push_back( seg );
+            if( out.size() > rootLen )
+            {
+                out.push_back( '/' );
+            }
+            out.append( seg );
         }
 
         i = ( j < path.size() ) ? j + 1 : j;             // skip the '/'
-    }
-
-    // reassemble
-    std::string out;
-    if( isAbsolute )
-    {
-        out.push_back( '/' );
-    }
-    for( std::size_t k = 0; k < segs.size(); ++k )
-    {
-        if( k )
-        {
-            out.push_back( '/' );
-        }
-        out.append( segs[k] );
     }
     return out;
 }
@@ -152,8 +158,9 @@ inline std::string lexicalNormalize( std::string_view path )
 // (needs go.mod module-root) and Swift (whole-module, no path) are DEFERRED — their imports stay unresolved.
 
 // The import dialect a file's imports resolve in, keyed off its extension. C-family covers the quote
-// `#include`; Other (Go/Swift/Markdown/…) never precise-resolves (deferred / no path in import).
-enum class IncludeLang : std::uint8_t { CFamily, Python, Ts, Rust, Go, Other };
+// `#include`; Other (Swift/Java/C#/PHP/Markdown/…) never precise-resolves (deferred / no path in import).
+// Bash/Ruby/Lua/Elixir joined at kParserVer 81 — see their Step-As below.
+enum class IncludeLang : std::uint8_t { CFamily, Python, Ts, Rust, Go, Bash, Ruby, Lua, Elixir, Other };
 
 // extension → dialect, a declarative constexpr table (NOT a scattered if-chain). Extension includes the
 // leading dot; the classifier lowercases nothing (source extensions are lowercase by convention here).
@@ -172,6 +179,13 @@ inline IncludeLang includeLangOf( std::string_view path ) noexcept
         { ".mjs", IncludeLang::Ts },      { ".cjs", IncludeLang::Ts },
         { ".rs",  IncludeLang::Rust },
         { ".go",  IncludeLang::Go },       // Go: single-root DEFERRED (kNoFile); cross-root via go.mod `replace` (§3.2)
+        // kParserVer 81 — the four-language import round. Each has a SOUND Step-A below (unique-or-degrade,
+        // never a basename fallback); none is deferred, because unlike a Go package path or a C# namespace,
+        // each of these four names a FILE by a rule this tool can evaluate without a build system.
+        { ".sh",  IncludeLang::Bash },    { ".bash", IncludeLang::Bash },  { ".zsh", IncludeLang::Bash },
+        { ".rb",  IncludeLang::Ruby },
+        { ".lua", IncludeLang::Lua },
+        { ".ex",  IncludeLang::Elixir },  { ".exs", IncludeLang::Elixir },
         // B6.2: `.cs` has NO entry here — it falls through to IncludeLang::Other below, DEFERRED like
         // Java (also absent) and Swift/Go-single-root: a C# namespace does not map 1:1 onto a file (one
         // namespace spans many files, one file can hold several namespaces), so there is no sound
@@ -975,19 +989,605 @@ inline std::uint32_t resolveGoImport( std::string_view target, const WsIncludeCt
     return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;
 }
 
+// ─── kParserVer 81 Step-As: Bash / Ruby / Lua / Elixir ───────────────────────────────────────────────
+//
+// One shared shape, the same one Python and TS already use: build a small FIXED list of candidate
+// relative paths, probe each through joinNormalizeLookup, and resolve IFF exactly ONE distinct fileId
+// comes back. Two or more ⇒ kNoFile (degrade, no guess); zero ⇒ kNoFile. Nothing here ever falls back to
+// a basename or a path SUFFIX match, which is the one shortcut that would make all four of these look
+// far better on a benchmark and be wrong in a way no user could see.
+
+// The unique-or-degrade accumulator every Step-A below shares — `hit` holds the single fileId found so
+// far, `kNoFile - 1` is the "a second, different file also answered" tombstone (≠ any real id), and the
+// caller reads the result through `result()`.
+struct UniqueProbe
+{
+    std::uint32_t hit = kNoFile;
+
+    void consider( std::uint32_t f ) noexcept
+    {
+        if( f == kNoFile )      { return; }
+        if( hit == kNoFile )    { hit = f; }
+        else if( f != hit )     { hit = kNoFile - 1; }
+    }
+    [[nodiscard]] std::uint32_t result() const noexcept { return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit; }
+};
+
+// Probe `rel` against the includer's own directory AND every ANCESTOR of it, unique-or-degrade.
+//
+// This is the answer to "the anchor is not knowable, so which base do I join against?" — the question a
+// `. "$ROOT/scripts/x.sh"`, a Lua `require "pkg.mod"` and a Ruby load-path `require "lib/x"` all ask, and
+// the three earlier Step-As (Python/TS/Rust) never had to, because their anchors are stated in the
+// specifier. The first implementation of this probed the includer's dir plus an EMPTY base, on the
+// reasoning that an empty base is "the crawl root". IT IS NOT, and the bug that exposed it is worth
+// recording: `ing.files` carry the crawl root exactly as it was WRITTEN on the command line, so
+// `ripwire .` stores `test/foo.sh` (empty base == the root, probe works) while `ripwire /abs/repo` stores
+// `/abs/repo/test/foo.sh` (empty base matches nothing, probe silently inert). Measured on this repo:
+// `ripwire .` resolved 26 of 29 `source` directives and `ripwire "$PWD"` resolved 13 — the SAME tree,
+// the same files, a different spelling of the root. An MCP server always passes an absolute path, so the
+// inert half would have been the half real users got.
+//
+// Walking ancestors fixes it without adding a crawl-root parameter and without moving any other language:
+// the ancestor chain of an absolute includer reaches the absolute crawl root, the chain of a relative one
+// reaches the empty base, and in both cases it stops finding matches exactly at the root because no
+// fileIndex key lives above it. It is also the more honest rule on its own terms — an unknown `$VAR` is
+// SOME directory, and the directories there is evidence for are the ones the file actually sits under.
+// The depth cap is a hostile-input bound (a path cannot have 64 meaningful ancestors); exceeding it
+// simply stops probing, which can only lose an edge, never invent one.
+inline void probeUpward( std::string_view baseDir, std::string_view rel, UniqueProbe& p,
+                         const HashMap<std::string, std::uint32_t>& fileIndex,
+                         const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    std::string_view dir = baseDir;
+    for( int guard = 0; guard < 64; ++guard )
+    {
+        p.consider( joinNormalizeLookup( dir, rel, fileIndex, ws, includerFileId ) );
+        if( dir.empty() )
+        {
+            return;
+        }
+        const std::size_t slash = dir.rfind( '/' );
+        dir = ( slash == std::string_view::npos ) ? std::string_view{} : dir.substr( 0, slash );
+    }
+}
+
+// How far into `spec` the shell expansion that starts at `spec[i]` runs, or i when nothing starts there.
+// Handles `$(cmd)` (paren-balanced, so `$(dirname "$0")` closes correctly), backtick substitution,
+// `${VAR…}` (brace-balanced), and a bare `$NAME` / `$1` / `$@`. Pure, bounds-checked, no allocation.
+inline std::size_t shellExpansionEnd( std::string_view spec, std::size_t i ) noexcept
+{
+    if( i >= spec.size() )
+    {
+        return i;
+    }
+    if( spec[i] == '`' )
+    {
+        const std::size_t close = spec.find( '`', i + 1 );
+        return ( close == std::string_view::npos ) ? spec.size() : close + 1;
+    }
+    if( spec[i] != '$' || i + 1 >= spec.size() )
+    {
+        return i;
+    }
+    const char c = spec[ i + 1 ];
+    if( c == '(' || c == '{' )
+    {
+        const char open = c, close = ( c == '(' ) ? ')' : '}';
+        int depth = 0;
+        for( std::size_t k = i + 1; k < spec.size(); ++k )
+        {
+            if( spec[k] == open )       { ++depth; }
+            else if( spec[k] == close ) { if( --depth == 0 ) { return k + 1; } }
+        }
+        return spec.size();   // unterminated → the whole rest is expansion, so no literal tail survives
+    }
+    std::size_t k = i + 1;
+    if( ( c >= 'A' && c <= 'Z' ) || ( c >= 'a' && c <= 'z' ) || c == '_' )
+    {
+        while( k < spec.size() && ( ( spec[k] >= 'A' && spec[k] <= 'Z' ) || ( spec[k] >= 'a' && spec[k] <= 'z' )
+                                    || ( spec[k] >= '0' && spec[k] <= '9' ) || spec[k] == '_' ) )
+        {
+            ++k;
+        }
+        return k;
+    }
+    return k + 1;   // `$1`, `$@`, `$*`, `$?`, `$$` — one character
+}
+
+// ── Bash Step-A — SOUND, with an explicitly FLOORED case. `source FILE` / `. FILE`.
+// The specifier is a written path, so there is no name→path convention at all; the whole difficulty is
+// that the path is usually built out of a variable (`. "$ROOT/scripts/cxxstd.sh"` — 29 of 29 source lines
+// in this repo's own test/ take that shape, so the expansion case IS the ordinary case).
+//
+// The rule: reduce the specifier to the LITERAL TAIL after its last expansion. If that tail begins with
+// `/`, everything variable is confined to the DIRECTORY part and the remainder is a real relative path —
+// probe it, both relative-to-includer and relative-to-crawl-root, unique-or-degrade. If it does not
+// (`"$1"`, `"$dir/$name.sh"`, `"${p}.sh"`), the FILENAME itself is variable and nothing is knowable:
+// return kNoFile. That is a FLOOR, not a zero — the directive is still captured and still shows in
+// `--deps` as `<inc t="$1"/>` with no edge, the same disclosure an unresolvable `#include <vector>` gets.
+// An absolute or `~`-rooted literal is outside the crawl by construction and also floors.
+//
+// Probing root-relative for a variable-anchored path is the same move Python's ABSOLUTE-import probe
+// makes, and it is what makes `$ROOT/scripts/cxxstd.sh` land on `scripts/cxxstd.sh`: `$ROOT` is unknown,
+// but the crawl root is the only anchor in evidence and unique-or-degrade catches it being the wrong one.
+inline std::uint32_t resolveBashSource( std::string_view includerPath, std::string_view target,
+                                        const HashMap<std::string, std::uint32_t>& fileIndex,
+                                        const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
+{
+    if( target.empty() || target.front() == '~' )
+    {
+        return kNoFile;
+    }
+    std::size_t lastEnd = 0;
+    for( std::size_t i = 0; i < target.size(); )
+    {
+        const std::size_t e = shellExpansionEnd( target, i );
+        if( e > i ) { lastEnd = e;  i = e; }
+        else        { ++i; }
+    }
+    std::string_view rel        = target;
+    const bool       anchorKnown = ( lastEnd == 0 );
+    if( !anchorKnown )
+    {
+        rel = target.substr( lastEnd );
+        if( rel.empty() || rel.front() != '/' )
+        {
+            return kNoFile;   // the FILENAME is variable — floored, disclosed at the site
+        }
+        rel.remove_prefix( 1 );
+    }
+    if( rel.empty() || rel.front() == '/' )
+    {
+        return kNoFile;       // absolute literal → outside the crawl
+    }
+
+    UniqueProbe p;
+    if( anchorKnown && rel.front() == '.' )
+    {
+        // `./x.sh` / `../x.sh` — the anchor IS stated, relative to the sourcing file. One probe, no walk.
+        p.consider( joinNormalizeLookup( includerDir( includerPath ), rel, fileIndex, ws, includerFileId ) );
+        return p.result();
+    }
+    probeUpward( includerDir( includerPath ), rel, p, fileIndex, ws, includerFileId );
+    return p.result();
+}
+
+// ── Lua Step-A — SOUND. `require "a.b"` → package.path's dotted convention: dots become directory
+// separators and the module is either `a/b.lua` or the package form `a/b/init.lua`. Probed relative to
+// the requiring file AND against a small fixed list of source roots — "" (the crawl root), `src/` and
+// `lua/`, the last because a Neovim plugin's `require("plug.mod")` lives at `lua/plug/mod.lua` and that
+// is a large fraction of the Lua in the world. Unique-or-degrade across every probe, so a tree that
+// answers one specifier from two roots resolves to NEITHER rather than to whichever was probed first.
+// A specifier that names nothing in the tree (`require "socket"`, a C rock) is simply unresolved: no
+// edge, and the directive is still visible in `--deps` as its own `<inc t="socket"/>` row.
+inline std::uint32_t resolveLuaRequire( std::string_view includerPath, std::string_view target,
+                                        const HashMap<std::string, std::uint32_t>& fileIndex,
+                                        const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
+{
+    if( target.empty() )
+    {
+        return kNoFile;
+    }
+    std::string modPath;
+    modPath.reserve( target.size() );
+    for( const char c : target )
+    {
+        modPath.push_back( c == '.' ? '/' : c );
+    }
+    if( modPath.empty() || modPath.front() == '/' )
+    {
+        return kNoFile;
+    }
+    const std::string cand[ 2 ] = { modPath + ".lua", modPath + "/init.lua" };
+    static constexpr std::string_view kRoots[] = { "", "src/", "lua/" };
+
+    UniqueProbe p;
+    const std::string_view dir = includerDir( includerPath );
+    for( const std::string& c : cand )
+    {
+        for( const std::string_view r : kRoots )
+        {
+            probeUpward( dir, std::string( r ) + c, p, fileIndex, ws, includerFileId );
+        }
+    }
+    return p.result();
+}
+
+// ── Ruby Step-A — SOUND. Two rules behind one spelling, told apart by a LEADING DOT (the extractor
+// normalizes `require_relative "x"` to `./x`; see ingest_relations.h::rubyRequireTarget):
+//   * a dotted specifier is relative to the requiring FILE — the exact analogue of a C quote-include;
+//   * a bare specifier is searched on $LOAD_PATH, which this tool does not have. It probes the crawl root
+//     plus the four directories that are on it in practice (`lib/` for every gem by RubyGems convention,
+//     `app/`, `test/`, `spec/`), unique-or-degrade.
+// `.rb` is appended when the specifier does not already carry it, and the verbatim spelling is probed
+// first for the `require "x.rb"` form.
+//
+// A bare specifier that resolves to nothing — `require "json"`, `require "rails"` — is EXTERNAL, not
+// unresolved: it names a gem outside the indexed tree, exactly as a bare TS specifier names a node_modules
+// package. Both produce the same thing here (no edge), and the distinction is stated rather than encoded
+// because this layer emits FILE edges only; the name-level census that spends `external=` vs `unresolved=`
+// is graph.h's, and it is not fed by Ruby requires this round (see the ROUND FLOOR note in
+// buildPreciseIncludeAdjWithContext).
+inline std::uint32_t resolveRubyRequire( std::string_view includerPath, std::string_view target,
+                                         const HashMap<std::string, std::uint32_t>& fileIndex,
+                                         const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
+{
+    if( target.empty() )
+    {
+        return kNoFile;
+    }
+    const bool  hasRb = ( target.size() > 3 && target.substr( target.size() - 3 ) == ".rb" );
+    std::string withRb( target );
+    if( !hasRb ) { withRb += ".rb"; }
+
+    UniqueProbe p;
+    if( target.front() == '.' )                       // require_relative (and a dotted `require`) — file-relative
+    {
+        const std::string_view dir = includerDir( includerPath );
+        p.consider( joinNormalizeLookup( dir, withRb, fileIndex, ws, includerFileId ) );
+        if( hasRb )
+        {
+            p.consider( joinNormalizeLookup( dir, target, fileIndex, ws, includerFileId ) );
+        }
+        return p.result();
+    }
+    static constexpr std::string_view kLoadRoots[] = { "", "lib/", "app/", "test/", "spec/" };
+    for( const std::string_view r : kLoadRoots )
+    {
+        probeUpward( includerDir( includerPath ), std::string( r ) + withRb, p, fileIndex, ws, includerFileId );
+    }
+    return p.result();
+}
+
+// ── Elixir Step-A — SOUND, and the only one of the four that uses EVIDENCE instead of a convention.
+// `MyApp.Foo` conventionally lives at `lib/my_app/foo.ex`, and a path rule could be written for it
+// (CamelCase → snake_case, `lib/` prefix). It is not written, because the corpus already STATES where
+// each module lives: every Elixir file carries a `defmodule MyApp.Foo` whose captured symbol name is the
+// full dotted module. The index built from those definitions resolves umbrella apps, `test/support/`,
+// generated paths and any other layout the convention would have missed — and it can never invent a
+// module that does not exist. Two files defining one module ⇒ ambiguous ⇒ kNoFile (the index stores the
+// same `kNoFile - 1` tombstone every other Step-A uses).
+// A module the index does not hold (`Logger`, `Ecto.Query`, `GenServer`) is outside the tree: no edge.
+inline std::uint32_t resolveElixirModule( std::string_view target, const HashMap<std::string, std::uint32_t>* moduleIndex )
+{
+    if( target.empty() || moduleIndex == nullptr )
+    {
+        return kNoFile;
+    }
+    const auto it = moduleIndex->find( std::string( target ) );
+    if( it == moduleIndex->end() || it->second == kNoFile - 1 )
+    {
+        return kNoFile;
+    }
+    return it->second;
+}
+
+// The Elixir module index (kParserVer 81): `defmodule MyApp.Foo` → the file that holds it. Built from the
+// corpus's OWN definitions, never from a name→path convention — see resolveElixirModule for why. A module
+// two files define is tombstoned `kNoFile - 1` (ambiguous ⇒ no edge), the same unique-or-degrade rule every
+// other Step-A applies, applied at index-build time instead of probe time.
+//
+// Built ONLY when the corpus actually holds an Elixir directive, and EMPTY otherwise: on a tree with no
+// `.ex`/`.exs` includer this is one pass over `ing.includes` that finds nothing and allocates nothing, so
+// every other language's cost is unchanged. An empty result is the caller's signal to pass nullptr.
+//
+// ROUND FLOOR, stated once. This layer resolves the FILE edge for all four languages added at parser
+// version 81. It does NOT feed the name-level resolver: an Elixir `alias A.B.C` also binds the local name
+// `C`, a Ruby `require` makes a constant autoloadable, and neither narrows a later call the way a Python
+// import now does through Phase 5's binding table. `--deps`/`--arch`/`--impact`/`--cochange` see these
+// edges; `--callers`/`--callees` still resolve those languages' calls by the global name ladder alone.
+inline HashMap<std::string, std::uint32_t> buildElixirModuleIndex( const IngestResult& ing )
+{
+    PROFILE_SCOPE_DESCRIBE( "resolve/elixir: module index" );
+    HashMap<std::string, std::uint32_t> modules;
+    const std::uint32_t F = std::uint32_t( ing.files.size() );
+    bool anyElixirDirective = false;
+    for( const Include& inc : ing.includes )
+    {
+        if( inc.fileId < F && includeLangOf( ing.files[ inc.fileId ] ) == IncludeLang::Elixir )
+        {
+            anyElixirDirective = true;
+            break;
+        }
+    }
+    if( !anyElixirDirective )
+    {
+        return modules;
+    }
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.lang != Lang::Elixir || s.kind != SymKind::Other || s.name.empty() || s.fileId >= F )
+        {
+            continue;   // queries/elixir/tags.scm's @definition.module is the ONLY Elixir SymKind::Other
+        }
+        const auto [ it, inserted ] = modules.try_emplace( s.name, s.fileId );
+        if( !inserted && it->second != s.fileId )
+        {
+            it->second = kNoFile - 1;   // two files define this module → ambiguous, never choose one
+        }
+    }
+    return modules;
+}
+
+// ─── Ruby constant index (parser version 82) ─────────────────────────────────────────────────────────────
+// The Ruby twin of the Elixir defmodule index, for the spellings a Rails codebase actually depends through:
+// `class X < Base`, `include M` / `extend M` / `prepend M`, and the path-less `autoload :Name` — captured
+// as Include records with isSymbolic set (ingest_relations.h) and resolved HERE, never by a path probe.
+// Two rules, both Ruby's own:
+//   * DEFINERS. Every class/module OPEN the corpus holds (ing.constOpens, model.h) is given its fully-
+//     qualified constant: an open's nesting is its enclosing opens by BYTE-SPAN containment (the same
+//     containment that attributes a Reference to its def), `::X` is absolute, and a compact `class A::B`
+//     nested in `module X` names X::A::B when the tree opens X::A anywhere, else ::A::B — Module.nesting
+//     first, then Object, which is what Ruby does. An open whose body holds nothing but nested opens
+//     (`namespaceOnly`) is a NAMESPACE WRAPPER: it nests, but it defines nothing and is not a definer.
+//     A constant is then indexed to the SORTED set of files that give it a body. One file — the common
+//     case, 2628 of 2633 constants on a 3532-file Rails app. Several — a genuine reopening (a monkey patch,
+//     a decorator, a core_ext) — and a reference edges to EVERY one of them: change any and the constant
+//     changes, which is what --deps measures. That is MULTIPLICITY (every answer is right), deliberately
+//     distinct from the specifier AMBIGUITY every other Step-A degrades on (`require "shared"` answered by
+//     two files: exactly one is right and this tool cannot tell which). Only the latter resolves to nothing.
+//   * REFERENCES. A written constant `Name::Sub` at a site whose lexical nesting is [A, A::B] is looked
+//     up as A::B::Name::Sub, then A::Name::Sub, then Name::Sub — innermost first, first hit wins. `::Name`
+//     skips the nesting. The site's nesting comes from Include::byte by containment; a superclass carries
+//     its CLASS's own start byte, which containment reads as outside that class — the superclass expression
+//     is evaluated in the enclosing scope, exactly as Ruby does.
+// FLOORS (test/rubyconstcheck.sh pins each): the ancestor half of Ruby lookup (a constant inherited from a
+// superclass or an included module) is not walked; `Point = Struct.new(…)` aliases are not opens and are
+// not indexed; `const_get` / string-built constants are never read.
+// Built ONLY when the corpus holds a symbolic directive, EMPTY otherwise: on any non-Ruby tree this is one
+// pass over ing.includes that finds nothing and allocates nothing.
+struct RubyOpenRec
+{
+    std::uint32_t startByte     = 0;
+    std::uint32_t endByte       = 0;
+    std::uint32_t parent        = kNoFile;   // index into the same file's opens; kNoFile at top level
+    bool          namespaceOnly = false;
+    std::string   written;
+    std::string   fqn;                       // the resolved fully-qualified constant
+};
+
+struct RubyConstantIndex
+{
+    std::vector<std::vector<RubyOpenRec>>                          opensByFile;   // per file, sorted by (startByte asc, endByte desc)
+    HashMap<std::string, std::pair<std::uint32_t, std::uint32_t>>  spans;         // FQN → (offset, count) into `files` — SoA, one flat table
+    std::vector<std::uint32_t>                                     files;         // definer fileIds, sorted inside each span
+    bool empty() const noexcept { return spans.empty(); }
+};
+
+inline bool rubyConstIsAbsolute( std::string_view w ) noexcept
+{
+    return w.size() > 2 && w[0] == ':' && w[1] == ':';
+}
+
+// The innermost open of `opens` whose span contains `byte` STRICTLY after its start (kNoFile when none). The
+// last open that starts at or before `byte` is found by binary search; when it has already closed, the
+// containing open is on its parent chain (opens are properly nested), so the walk is ancestors only.
+inline std::uint32_t rubyInnermostOpen( const std::vector<RubyOpenRec>& opens, std::uint32_t byte ) noexcept
+{
+    const auto it = std::upper_bound( opens.begin(), opens.end(), byte,
+                                      []( std::uint32_t b, const RubyOpenRec& o ) noexcept { return b < o.startByte; } );
+    if( it == opens.begin() )
+    {
+        return kNoFile;
+    }
+    std::uint32_t i = std::uint32_t( it - opens.begin() ) - 1u;
+    while( i != kNoFile && !( opens[ i ].startByte < byte && byte < opens[ i ].endByte ) )
+    {
+        i = opens[ i ].parent;
+    }
+    return i;
+}
+
+inline RubyConstantIndex buildRubyConstantIndex( const IngestResult& ing )
+{
+    PROFILE_SCOPE_DESCRIBE( "resolve/ruby: constant index" );
+    RubyConstantIndex ix;
+    bool anySymbolic = false;
+    for( const Include& inc : ing.includes )
+    {
+        if( inc.isSymbolic )
+        {
+            anySymbolic = true;
+            break;
+        }
+    }
+    if( !anySymbolic || ing.constOpens.empty() )
+    {
+        return ix;
+    }
+    const std::uint32_t F = std::uint32_t( ing.files.size() );
+    ix.opensByFile.resize( F );
+    for( const ConstOpen& co : ing.constOpens )
+    {
+        if( co.fileId < F )
+        {
+            ix.opensByFile[ co.fileId ].push_back( RubyOpenRec{ co.startByte, co.endByte, kNoFile, co.namespaceOnly, co.written, {} } );
+        }
+    }
+
+    // Pass 1 — per file: canonical order, parent links by containment, and the NAIVE constant of every open
+    // (nesting joined as written). The naive set is the existence oracle pass 2 consults.
+    HashMap<std::string, char> naive;
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        std::vector<RubyOpenRec>& opens = ix.opensByFile[ f ];
+        std::sort( opens.begin(), opens.end(), []( const RubyOpenRec& a, const RubyOpenRec& b ) noexcept
+                   { return a.startByte != b.startByte ? a.startByte < b.startByte : a.endByte > b.endByte; } );
+        std::vector<std::uint32_t> stack;
+        for( std::uint32_t i = 0; i < opens.size(); ++i )
+        {
+            while( !stack.empty() && opens[ stack.back() ].endByte <= opens[ i ].startByte )
+            {
+                stack.pop_back();
+            }
+            opens[ i ].parent = stack.empty() ? kNoFile : stack.back();
+            const std::string_view w = opens[ i ].written;
+            if( rubyConstIsAbsolute( w ) )
+            {
+                opens[ i ].fqn.assign( w.substr( 2 ) );
+            }
+            else if( opens[ i ].parent == kNoFile )
+            {
+                opens[ i ].fqn.assign( w );
+            }
+            else
+            {
+                opens[ i ].fqn = opens[ opens[ i ].parent ].fqn; opens[ i ].fqn += "::"; opens[ i ].fqn += w;
+            }
+            naive.try_emplace( opens[ i ].fqn, 1 );
+            stack.push_back( i );
+        }
+    }
+
+    // Pass 2 — the FINAL constant, top-down (a parent precedes its children in start-byte order, so every
+    // parent's fqn is final when a child reads it). Only a compact name nested in an open (`class A::B`
+    // inside `module X`) differs from its naive form: its head `A` is looked up Module.nesting-first against
+    // the naive set, then falls to Object (top level) — which is where Ruby's own lookup ends up.
+    std::vector<std::pair<std::string, std::uint32_t>> definers;
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        std::vector<RubyOpenRec>& opens = ix.opensByFile[ f ];
+        for( std::uint32_t i = 0; i < opens.size(); ++i )
+        {
+            RubyOpenRec&           o = opens[ i ];
+            const std::string_view w = o.written;
+            if( rubyConstIsAbsolute( w ) )
+            {
+                o.fqn.assign( w.substr( 2 ) );
+            }
+            else if( o.parent == kNoFile )
+            {
+                o.fqn.assign( w );
+            }
+            else if( const std::size_t sep = w.find( "::" ); sep == std::string_view::npos )
+            {
+                o.fqn = opens[ o.parent ].fqn; o.fqn += "::"; o.fqn += w;
+            }
+            else
+            {
+                const std::string_view head = w.substr( 0, sep );
+                std::string            probe;
+                bool                   found = false;
+                for( std::uint32_t k = o.parent; k != kNoFile; k = opens[ k ].parent )
+                {
+                    probe = opens[ k ].fqn; probe += "::"; probe += head;
+                    if( naive.find( probe ) != naive.end() )
+                    {
+                        o.fqn = opens[ k ].fqn; o.fqn += "::"; o.fqn += w;
+                        found = true;
+                        break;
+                    }
+                }
+                if( !found )
+                {
+                    o.fqn.assign( w );   // Object-level: the tree opens no X::A on the chain, so `A::B` is ::A::B
+                }
+            }
+            if( !o.namespaceOnly )
+            {
+                definers.emplace_back( o.fqn, f );
+            }
+        }
+    }
+
+    // The SoA span table: one flat, sorted list of definer fileIds; each constant owns a contiguous run.
+    std::sort( definers.begin(), definers.end() );
+    definers.erase( std::unique( definers.begin(), definers.end() ), definers.end() );
+    ix.files.reserve( definers.size() );
+    for( std::size_t i = 0; i < definers.size(); )
+    {
+        std::size_t j = i;
+        while( j < definers.size() && definers[ j ].first == definers[ i ].first )
+        {
+            ix.files.push_back( definers[ j ].second );
+            ++j;
+        }
+        ix.spans.emplace( definers[ i ].first, std::pair<std::uint32_t, std::uint32_t>{ std::uint32_t( i ), std::uint32_t( j - i ) } );
+        i = j;
+    }
+    return ix;
+}
+
+// Resolve one symbolic Ruby directive to its (offset, count) run in `ix.files` — {0,0} when nothing in the
+// tree defines it. `memo` is keyed by (the WHOLE nesting chain, written target): two sites with the same
+// Module.nesting and spelling — the whole of a Rails controller's `include`s, every model's `< ApplicationRecord`
+// — resolve once. The key must be the chain, not its innermost open: `module A; module B` and the compact
+// `module A::B` share the innermost FQN A::B but look `Name` up along different chains (A::B::Name, A::Name,
+// Name vs A::B::Name, Name), so keying on the innermost open alone let whichever site came first fix the other's
+// answer — and cold and warm caches visit the sites in different orders (test/rubyconstcheck.sh pins both).
+// Deterministic: a pure function of the index and the site.
+inline std::pair<std::uint32_t, std::uint32_t> resolveRubyConstant( const RubyConstantIndex& ix,
+                                                                    HashMap<std::string, std::pair<std::uint32_t, std::uint32_t>>& memo,
+                                                                    std::uint32_t fileId, std::uint32_t byte, std::string_view written )
+{
+    static constexpr std::pair<std::uint32_t, std::uint32_t> kNone{ 0u, 0u };
+    if( written.empty() || ix.empty() || fileId >= ix.opensByFile.size() )
+    {
+        return kNone;
+    }
+    const std::vector<RubyOpenRec>& opens = ix.opensByFile[ fileId ];
+    const std::uint32_t             inner = rubyInnermostOpen( opens, byte );
+    std::string key;
+    for( std::uint32_t k = inner; k != kNoFile; k = opens[ k ].parent )
+    {
+        key += opens[ k ].fqn;
+        key += '\x1e'; // one segment per open on the chain — the whole Module.nesting, innermost first
+    }
+    key += '\x1f';
+    key += written;
+    if( const auto hit = memo.find( key ); hit != memo.end() )
+    {
+        return hit->second;
+    }
+    std::pair<std::uint32_t, std::uint32_t> result = kNone;
+    const auto lookup = [ &ix, &result ]( const std::string& fqn ) noexcept
+    {
+        const auto it = ix.spans.find( fqn );
+        if( it == ix.spans.end() )
+        {
+            return false;
+        }
+        result = it->second;
+        return true;
+    };
+    if( rubyConstIsAbsolute( written ) )
+    {
+        lookup( std::string( written.substr( 2 ) ) );
+    }
+    else
+    {
+        std::string cand;
+        bool        found = false;
+        for( std::uint32_t k = inner; k != kNoFile && !found; k = opens[ k ].parent )
+        {
+            cand = opens[ k ].fqn; cand += "::"; cand += written;
+            found = lookup( cand );
+        }
+        if( !found )
+        {
+            lookup( std::string( written ) );
+        }
+    }
+    memo.emplace( std::move( key ), result );
+    return result;
+}
+
 // Resolve ONE #include / import target to a concrete repo fileId by LEXICAL path semantics, dispatched on
 // the INCLUDER's language (its file extension). `fileIndex` maps each canonical `ing.files` path → its
-// fileId. `crateRootDir`/`hasCrateRoot` carry the Rust crate root (empty/false for non-Rust). Returns the
+// fileId. `crateRootDir`/`hasCrateRoot` carry the Rust crate root (empty/false for non-Rust);
+// `moduleIndex` carries the Elixir defmodule index (nullptr for every other language and for callers that
+// do not build one — an Elixir target then simply stays unresolved, never guessed). Returns the
 // fileId on a UNIQUE precise hit, else kNoFile (unresolved → contributes nothing; NEVER a basename
 // fallback, NEVER a guess).
 //   * C-family quote `"x.h"` (isAngle==false): resolve relative-to-includer, collapse `.`/`..`, exact hit.
 //   * C-family angle `<x.h>` (isAngle==true): external without a build system ⇒ kNoFile (never matched).
-//   * Python / TS / Rust: their per-language Step-A above (unique-or-degrade).
+//   * Python / TS / Rust / Bash / Ruby / Lua / Elixir: their per-language Step-A above (unique-or-degrade).
 //   * Go / Swift / Other: DEFERRED / no path ⇒ kNoFile (contributes nothing — honest).
 inline std::uint32_t resolvePreciseInclude( std::string_view includerPath, std::string_view target, bool isAngle,
                                             const HashMap<std::string, std::uint32_t>& fileIndex,
                                             std::string_view crateRootDir = {}, bool hasCrateRoot = false,
-                                            const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
+                                            const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile,
+                                            const HashMap<std::string, std::uint32_t>* moduleIndex = nullptr )
 {
     if( target.empty() )
     {
@@ -1052,6 +1652,10 @@ inline std::uint32_t resolvePreciseInclude( std::string_view includerPath, std::
         case IncludeLang::Ts:     return resolveTsImport( includerPath, target, fileIndex, ws, includerFileId );
         case IncludeLang::Rust:   return resolveRustImport( includerPath, target, fileIndex, crateRootDir, hasCrateRoot, ws, includerFileId );
         case IncludeLang::Go:     return resolveGoImport( target, ws, includerFileId );   // single-root deferred; cross-root via go.mod replace (§3.2)
+        case IncludeLang::Bash:   return resolveBashSource(  includerPath, target, fileIndex, ws, includerFileId );
+        case IncludeLang::Ruby:   return resolveRubyRequire( includerPath, target, fileIndex, ws, includerFileId );
+        case IncludeLang::Lua:    return resolveLuaRequire(  includerPath, target, fileIndex, ws, includerFileId );
+        case IncludeLang::Elixir: return resolveElixirModule( target, moduleIndex );
         case IncludeLang::Other:  return kNoFile;        // Swift (no path in import) → deferred
     }
     return kNoFile;
@@ -1091,14 +1695,15 @@ inline void recordLazyPair( HashMap<std::uint64_t, char>& lazyPairs, std::uint32
 // Include occurrence resolving to this edge so far was lazy" (Include::isLazy) — see recordLazyPair above.
 // Independent of `dedup`: keyed by file-id PAIR, not by adj's post-sort indices, so it stays correct
 // whichever adjacency shape the caller asked for.
-inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const IngestResult& ing, bool dedup = true,
+inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPreciseIncludeAdjWithContext( const IngestResult& ing, bool dedup = true,
                                                                        HashMap<std::uint64_t, char>* lazyPairsOut = nullptr )
 {
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/2a: precise include adjacency (resolve.h)" );
     const std::uint32_t F = std::uint32_t( ing.files.size() );
     std::vector<std::vector<std::uint32_t>> adj( F );
     if( ing.includes.empty() )
     {
-        return adj;
+        return { std::move( adj ), {} };
     }
 
     // path → fileId over the canonical (sorted) file list. The KEY is the LEXICALLY-NORMALIZED file path,
@@ -1192,6 +1797,11 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
         else if( !hasCrateRoot ) { crateRootDir = includerDir( p ); hasCrateRoot = true; }
     }
 
+    const HashMap<std::string, std::uint32_t> elixirModules = buildElixirModuleIndex( ing );
+    const HashMap<std::string, std::uint32_t>* moduleIndex = elixirModules.empty() ? nullptr : &elixirModules;
+    const RubyConstantIndex                   rubyConsts    = buildRubyConstantIndex( ing );   // parser version 82; empty unless a symbolic directive exists
+    HashMap<std::string, std::pair<std::uint32_t, std::uint32_t>> rubyMemo;
+
     std::vector<std::uint32_t> includeCountByFile( F, 0 );
     for( const Include& inc : ing.includes )
     {
@@ -1211,6 +1821,26 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
         {
             continue;
         }
+        if( inc.isSymbolic )
+        {
+            // A Ruby constant: index + lexical rule, and an edge to EVERY definer (multiplicity — see the
+            // RubyConstantIndex note). Self-includes are dropped exactly as on the path branch below.
+            const auto [ off, cnt ] = resolveRubyConstant( rubyConsts, rubyMemo, inc.fileId, inc.byte, inc.target );
+            for( std::uint32_t k = 0; k < cnt; ++k )
+            {
+                const std::uint32_t to = rubyConsts.files[ off + k ];
+                if( to == inc.fileId )
+                {
+                    continue;
+                }
+                adj[ inc.fileId ].push_back( to );
+                if( lazyPairsOut != nullptr )
+                {
+                    recordLazyPair( *lazyPairsOut, inc.fileId, to, inc.isLazy );
+                }
+            }
+            continue;
+        }
         std::string_view crd    = crateRootDir;
         bool             hasCrd = hasCrateRoot;
         if( isWorkspace )
@@ -1220,7 +1850,7 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
             hasCrd = hasCrateByRoot[ r ] != 0;
         }
         const std::uint32_t to = resolvePreciseInclude( ing.files[ inc.fileId ], inc.target, inc.isAngle,
-                                                         fileIndex, crd, hasCrd, ws, inc.fileId );
+                                                         fileIndex, crd, hasCrd, ws, inc.fileId, moduleIndex );
         if( to == kNoFile || to == inc.fileId )
         {
             continue; // unresolved or self-include → contributes nothing
@@ -1239,7 +1869,13 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
             v.erase( std::unique( v.begin(), v.end() ), v.end() );
         }
     }
-    return adj;
+    return { std::move( adj ), std::move( wsCtx ) };
+}
+
+inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const IngestResult& ing, bool dedup = true,
+                                                                       HashMap<std::uint64_t, char>* lazyPairsOut = nullptr )
+{
+    return buildPreciseIncludeAdjWithContext( ing, dedup, lazyPairsOut ).first;
 }
 
 // Transitive include-set per file: for each file f, the sorted, deduped set of fileIds reachable from
@@ -1249,10 +1885,12 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
 // set is re-sorted+deduped, so it is a pure function of the adjacency regardless of visit order.
 inline std::vector<std::vector<NodeId>> transitiveIncludeSet( const std::vector<std::vector<std::uint32_t>>& adj )
 {
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/2b: transitive include closure (resolve.h)" );
     const std::uint32_t          F = std::uint32_t( adj.size() );
     std::vector<std::vector<NodeId>> trans( F );
     std::vector<std::uint32_t>   seenEpoch( F, 0 );
     std::vector<std::uint32_t>   stack;
+    std::vector<NodeId>          sortScratch;   // radix ping-pong buffer, reused across all F closures
     stack.reserve( F );
     std::uint32_t                epoch = 1;
     for( std::uint32_t s = 0; s < F; ++s )
@@ -1271,9 +1909,21 @@ inline std::vector<std::vector<NodeId>> transitiveIncludeSet( const std::vector<
                 }
             }
         }
-        // …trans[s] already excludes s (never pushed as a reachable target). Sort+dedup for binary search.
-        std::sort( trans[s].begin(), trans[s].end() );
-        trans[s].erase( std::unique( trans[s].begin(), trans[s].end() ), trans[s].end() );
+        // …trans[s] already excludes s (never pushed as a reachable target). Sorted for the binary_search
+        // in rule3IncludeFile, and for the determinism contract in this function's header comment — the
+        // walk's discovery order is deterministic but is NOT id order, so the sort is what makes the
+        // result a pure function of `adj`. It stays; only its implementation changes.
+        //
+        // NO DEDUP PASS. `w` is appended in the same branch that stamps `seenEpoch[w] = epoch`, and
+        // nothing clears that stamp before `++epoch` below, so a file can be appended to trans[s] at most
+        // once per source — the set is duplicate-free BY CONSTRUCTION. The `std::unique` that used to sit
+        // here removed 0 elements in 24,216 calls across six corpora (rails, go, django, rust-analyzer, a
+        // private C++ tree, this repo) at a measured 0.99 ms on rails. Its sibling `ancestorsReach` in
+        // graph.h has always relied on this same stamp without a dedup. The invariant is now asserted by
+        // test/includeprecisecheck.sh — a diamond fixture (two distinct paths to one file) plus a 400-node
+        // scrambled synthetic graph checked against an independent mark-sweep oracle — rather than paid
+        // for on every call.
+        rw::sortutil::radixSortIdsAscending( trans[s], sortScratch );
         ++epoch;
     }
     return trans;
@@ -1462,8 +2112,11 @@ struct Narrower
         }
 
         const bool isThisSelf = ( r.recv == RecvKind::ThisObj );
-        const bool isCish      = ( r.lang == Lang::Cpp || r.lang == Lang::ObjC );
-        const bool bareCish    = isCish && ( r.recv == RecvKind::None );   // C++ unqualified member-or-namespace lookup
+        // Ruby rides the bare arm too: a receiver-less `m(args)` inside a method is an implicit-self send —
+        // the language has no other reading of it (a bare `m` with neither receiver nor parens is a local
+        // read and is never captured; queries/ruby/tags.scm). test/rubyscopecheck.sh, Rule 1 arms.
+        const bool isCish      = ( r.lang == Lang::Cpp || r.lang == Lang::ObjC || r.lang == Lang::Ruby );
+        const bool bareCish    = isCish && ( r.recv == RecvKind::None );   // C++ unqualified member-or-namespace lookup; Ruby implicit self
         if( !isThisSelf && !bareCish )
         {
             return nullptr; // `x.m()` (NamedVar) is Rule 2 territory (deferred) → §2a
@@ -1722,7 +2375,7 @@ struct Narrower
         }
         const bool isSuper    = ( r.recv == RecvKind::SuperObj );
         const bool isThisSelf = ( r.recv == RecvKind::ThisObj );
-        const bool bareCish   = ( r.recv == RecvKind::None ) && ( r.lang == Lang::Cpp || r.lang == Lang::ObjC );
+        const bool bareCish   = ( r.recv == RecvKind::None ) && ( r.lang == Lang::Cpp || r.lang == Lang::ObjC || r.lang == Lang::Ruby );   // Ruby: implicit self (see rule1ClassMember)
         if( !isSuper && !isThisSelf && !bareCish )
         {
             return nullptr;

@@ -18,15 +18,41 @@ no(){ echo "  FAIL  $1"; fail=1; }
 [ -f "$SK/install.sh" ] || { echo "no skills/install.sh"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# Each invocation below owns its HOME; inherited agent overrides must not escape it.
+unset CODEX_HOME AGENTS_HOME HERMES_HOME
 DST="$TMP/skills"
 
-# ---- 1) install.sh deploys EVERY shipped skill (the deployment-drift catch) ----
-shipped=$( ls -d "$SK"/ripwire-*/ 2>/dev/null | wc -l | tr -d ' ' )
+# ---- 1) install.sh deploys EVERY user-facing shipped skill (the deployment-drift catch) ----
+# 2026-09-06 (stranger audit): a skill whose SKILL.md front matter says `audience: contributor` is about
+# working ON ripwire and is shipped but NOT activated for a user of the tool (the release installer runs
+# this script on every stranger's machine). `shipped` below is therefore the USER-FACING set; the
+# contributor set is asserted separately in (1b)/(1c): absent by default, present with --contributor.
+shippedAll=$( ls -d "$SK"/ripwire-*/ 2>/dev/null | wc -l | tr -d ' ' )
+contributorSkills=$( grep -l '^audience: contributor' "$SK"/ripwire-*/SKILL.md 2>/dev/null | wc -l | tr -d ' ' )
+shipped=$(( shippedAll - contributorSkills ))
 bash "$SK/install.sh" "$DST" >/dev/null 2>&1
 live=0; for l in "$DST"/ripwire-*; do [ -e "$l" ] && live=$(( live + 1 )); done
 { [ "$shipped" -gt 0 ] && [ "$live" -eq "$shipped" ]; } \
-    && ok "install.sh deploys all $shipped shipped skills (live=$live)" \
-    || no "install.sh deployed $live of $shipped shipped skills (drift: shipped but not installed)"
+    && ok "install.sh deploys all $shipped user-facing shipped skills (live=$live; $contributorSkills contributor-only held back)" \
+    || no "install.sh deployed $live of $shipped user-facing shipped skills (drift: shipped but not installed)"
+[ "$contributorSkills" -ge 1 ] \
+    && ok "(1b) at least one shipped skill is marked audience: contributor (ripwire-opt-remarks) — the arm below measures something" \
+    || no "(1b) no shipped skill carries audience: contributor — the contributor arms measure nothing"
+[ ! -e "$DST/ripwire-opt-remarks" ] && [ ! -L "$DST/ripwire-opt-remarks" ] \
+    && ok "(1b) the contributor-only skill is NOT activated by default" \
+    || no "(1b) ripwire-opt-remarks was activated for a plain user install"
+grep -q 'skill=ripwire-opt-remarks' "$DST/.ripwire-manifest-v1" 2>/dev/null \
+    && no "(1b) the manifest declares the contributor-only skill that was not linked (manifest parity broken)" \
+    || ok "(1b) the manifest declares exactly the linked set (no contributor-only entry)"
+CONTRIB="$TMP/skills-contrib"
+bash "$SK/install.sh" --contributor "$CONTRIB" >/dev/null 2>&1
+[ -e "$CONTRIB/ripwire-opt-remarks" ] \
+    && ok "(1c) --contributor activates the contributor-only skill too ($shippedAll linked)" \
+    || no "(1c) --contributor did not activate ripwire-opt-remarks"
+bash "$SK/install.sh" "$CONTRIB" >/dev/null 2>&1
+[ ! -e "$CONTRIB/ripwire-opt-remarks" ] && [ ! -L "$CONTRIB/ripwire-opt-remarks" ] \
+    && ok "(1c) a re-run without --contributor prunes the contributor-only link (a setup that stops being one does not keep it)" \
+    || no "(1c) the contributor-only link survived a re-run without --contributor"
 
 # ---- 2) PRUNE removes a stale/dangling skill (the deleted-skill catch) ----
 ln -sfn "$SK/ripwire-does-not-exist/" "$DST/ripwire-ghost"     # a dangling symlink (deleted skill)
@@ -170,7 +196,7 @@ else
         fi
         echo "     unhomed flag -> $flg (not in any SKILL.md, not in the UNROUTED allowlist)"
         unhomed=$(( unhomed + 1 ))
-    done < <( "$BIN" --help 2>&1 | grep -oE -- '--[a-z][a-z-]*' | sort -u )
+    done < <( "$BIN" --help=all 2>&1 | grep -oE -- '--[a-z][a-z-]*' | sort -u )
     [ "$unhomed" -eq 0 ] && ok "every --help flag names a skill home or is explicitly UNROUTED" \
                          || no "$unhomed --help flag(s) have no skill home and aren't in the UNROUTED allowlist"
 fi
@@ -249,5 +275,21 @@ done
 jq -e --arg m "$hookMatcherExpected" 'any((.hooks.PreToolUse // [])[]?; (any(.hooks[]?; .command | test("ripwire-nudge[.]sh"))) and .matcher == $m)' "$DUPSET" >/dev/null 2>&1 \
     && ok "(D) the surviving PreToolUse entry carries the CURRENT matcher, not the stale one it was found with" \
     || no "(D) the surviving PreToolUse entry kept a stale matcher: $( jq -c '[ (.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher ]' "$DUPSET" 2>/dev/null )"
+
+# ── (E) --openclaw --hook is refused: openclaw's before_tool_call is a plugin API, not a shell hook slot ──
+# Without the refusal arm the installer links the skills and silently drops --hook, and the operator
+# walks away believing a hook is armed. Temp HOME: the refusal fires after linking, so this must never
+# run against the real ~/.agents.
+OC_HOME="$TMP/openclaw-hook-home"; mkdir -p "$OC_HOME"
+HOME="$OC_HOME" bash "$SK/install.sh" --openclaw --hook >/dev/null 2>&1
+OC_HOOK_STATUS=$?
+{ [ "$OC_HOOK_STATUS" -eq 2 ]; } \
+    && ok "(E) --openclaw --hook fails with exit status 2 (no shell hook slot for the openclaw target)" \
+    || no "(E) --openclaw --hook exited $OC_HOOK_STATUS, expected 2 — or it succeeded, which is wrong"
+# The refusal fires after linking, so the links must have landed in the temp HOME — if a future edit
+# drops the HOME= containment, this fails (temp home empty) instead of silently writing ~/.agents.
+{ [ -e "$OC_HOME/.agents/skills/ripwire-router" ]; } \
+    && ok "(E) the refused run contained its skill links to the temp HOME" \
+    || no "(E) the refused run linked nowhere visible — HOME= containment may be broken"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

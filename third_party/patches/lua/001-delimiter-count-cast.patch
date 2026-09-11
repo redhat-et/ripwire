@@ -1,0 +1,20 @@
+diff --git a/third_party/deps/lua/src/scanner.c b/third_party/deps/lua/src/scanner.c
+index e257c2dc..03844245 100644
+--- a/third_party/deps/lua/src/scanner.c
++++ b/third_party/deps/lua/src/scanner.c
+@@ -27,9 +27,14 @@ static inline bool consume_char(char c, TSLexer *lexer) {
+ }
+ 
+ static inline uint8_t consume_and_count_char(char c, TSLexer *lexer) {
++  // RIPWIRE_VENDOR_PATCH(lua/001-delimiter-count-cast): count is a uint8_t and `++`
++  // promotes to int before storing back — an IMPLICIT truncating conversion on a long-bracket
++  // string opened with 256 or more '=' (`[===…===[ … ]===…===]`). Aborts the G1
++  // -fno-sanitize-recover=all stack at scanner.c:32. Explicit cast keeps the wrapped value
++  // upstream production builds compute. Sibling of rust/001 and csharp/001. A CAST and not saturation, unlike markdown/002-counter-saturate: a >255-delimiter token is not parseable with a uint8_t counter under any of the three behaviours, and measurement found no extraction difference at any width (255/256/257/300). Contributes nothing to kParserVer.
+   uint8_t count = 0;
+   while (lexer->lookahead == c) {
+-    ++count;
++    count = (uint8_t)(count + 1);  /* RIPWIRE_VENDOR_PATCH(lua/001-delimiter-count-cast) */
+     consume(lexer);
+   }
+   return count;

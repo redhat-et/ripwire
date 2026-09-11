@@ -46,12 +46,15 @@ runs. The parse itself runs one tree-sitter parser per worker thread and merges 
 lists afterwards, which is safe precisely because the definitions and references are re-sorted before
 they are used — collection order never reaches the output.
 
-**`.gitignore` is not consulted.** Skipping is a fixed, committed denylist (`kCrawlSkipDirs[]` in
-`src/ingest.h`, shared with the CMake walk in `darkflags.h` so the two crawlers cannot disagree about
-what counts as source), not a per-repository ignore file. That is a real difference from a
-`.gitignore`-aware tool in both directions: a build directory this repository happens not to ignore is
-still pruned, and a directory a project ignores but that is not on the list is still indexed. What is
-skipped:
+**`.gitignore` is consulted, after the denylist.** Skipping starts from a fixed, committed denylist
+(`kCrawlSkipDirs[]` in `src/ingest.h`, shared with the CMake walk in `darkflags.h` so the two crawlers
+cannot disagree about what counts as source). In a git work tree the crawl then also honours git's own
+ignore verdict — one `git ls-files --others --ignored --exclude-standard --directory` fork per root, so
+the answer is git's and never a re-implemented matcher — and `--no-ignore` turns that half off. The
+denylist still prunes a build directory the repository happens not to ignore; what the repository
+ignores leaves the map and is disclosed as `ignored_files=` / `ignored_dirs=`, and the `--grep`
+unindexed scan reads none of it either (a gitignored file of an unindexed extension is in no class at
+all, the same treatment an `--exclude`'d one gets). What the denylist skips:
 
 - **directories by NAME:** `.git`, `.claude`, `.hg`, `.svn`, `node_modules`, `vendor`, `third_party`,
   `.cache`, `build`, `dist`, `out`, `target`, `.venv`, `venv`, `__pycache__`, `.idea`, `.vscode`,
@@ -112,11 +115,7 @@ loop that survives them.
 Concurrency: one tree-sitter parser per worker thread (parsers are not thread-safe), files
 dispatched as work items.
 
-Languages: C++, C, Objective-C/Objective-C++, Metal (parsed with the C++ grammar), CUDA (parsed
-with the vendored tree-sitter-cuda grammar, a generated superset of tree-sitter-cpp), Python,
-TypeScript, JavaScript, Java, Ruby, PHP (the `php/` sub-grammar, so a `.php`/`.phtml` file whose
-first byte is markup still indexes), Lua, Bash, Go, Rust, Swift, C#, plus JSON, TOML and YAML
-configuration keys.
+Supported languages and formats are listed in [README.md](../README.md#languages).
 
 Two of those carry a stated floor rather than a silence. **PHP**: dynamic dispatch — `$fn()`,
 `$obj->$name()`, `call_user_func`, `__call` magic, `new $class` — names its callee at run time, so
@@ -127,6 +126,40 @@ over an ordinary table, so a Lua corpus correctly reports no inheritance edges a
 is a plain function call rather than an import directive (as in Ruby), so a `.lua` file is never a
 node in the `--deps`/`--arch` graph. Both floors are asserted from the outside by
 `test/phpcheck.sh` and `test/luacheck.sh` so they stay decisions rather than drift.
+
+<a id="elixir-extraction"></a>
+
+Elixir's grammar models definitions as calls. Its tags query selects candidate shapes; the small
+`ingest_elixir.h` capture filter checks definition keywords, excludes declaration-head/pattern references, module attributes and
+quoted AST, and locates block/keyword bodies. `defimpl P, for: T` is indexed as the module Elixir itself
+generates — `P.T`, an ABSOLUTE name that nesting inside a `defmodule` does not qualify — so an implementation
+clause that shares a name with the enclosing module's function is a second row with its own canonical id,
+not a dropped definition. Macros, guards and literal ExUnit tests are parsed `fn` symbols. Local and
+remote calls, executable default expressions and pipes produce references; module scope qualifies definitions.
+Default-expression edges are syntactic possibilities; they are not narrowed by which arguments a caller supplies. Alias/import/use
+resolution, macro expansion, dynamic dispatch and protocol implementation DISPATCH remain outside this
+initial port: implementations are indexed, but a call through a protocol is not narrowed to them. Bare identifiers outside pipes are omitted because they may be variables or
+zero-arity calls. Metrics count syntactic controls, clause arms and boolean joins, not expanded macros;
+arity narrowing is deliberately disabled (default arguments and pipes change call arity).
+`test/elixircheck.sh` covers extraction, call-site mutation, metrics and cold/warm determinism.
+
+<a id="dart-extraction"></a>
+**Dart extraction.** tree-sitter-dart makes `function_body` a SIBLING of `function_signature` /
+`method_signature`, never a `body` field and never a child. The shared ancestor walk in
+`ingest_sidecap.h` therefore finds no body, the definition's span stops at the signature, and every
+call inside the body attributes to the nearest ENCLOSING symbol instead — measured on
+`test/dartfix` before the fix: `square` landed on the class `Calculator` rather than the method
+`accumulate`, and the three top-level edges were lost entirely (5 edges where 8 were expected). A
+`Lang::Dart` arm adopts the immediately-following `function_body` sibling and runs the span, the
+row extent and `complexityOf` through it — the same shape LB-E already uses for a test-macro
+block. An abstract member (`void f();`) has no such sibling, so it stays a declaration. Every
+other language is byte-identical across the change (verified against the pre-change binary on
+`src/` and on the multi-language `test/` fixture corpus). `test/dartcheck.sh` covers extraction,
+cascades, the constructor floor, call-site mutation, metrics and cold/warm determinism.
+
+Elixir extraction landed at revision 78 (rich 79) — `kParserVer` in `src/ingest_cache.h`, mirrored by
+`kIngestParserVerMirror` in `src/quality.h`. The required `qschemetrip` source-change pin is refreshed
+for this extraction change; snapshot scheme 8 is unchanged.
 
 The three config lanes are *data*, not code: they emit `t="sec"` symbols and **zero call edges**, and
 `langCompatible` keeps a config key from ever resolving a same-spelled code symbol. They differ in

@@ -93,7 +93,7 @@ monotonic_check()
     # still needed as the held-constant INPUT corpus (HEAD's src/), but no longer as a build tree.
     local OLDBIN
     OLDBIN="$( ripwire_head_binary "$ROOT" "$TMP" )" \
-        || { skip "monotonicity: pre-change build failed"; return; }
+        || { headbin_refusal $? "monotonicity"; return; }
 
     # SAME input (HEAD's src/) for both binaries → isolates the resolver change from any working-tree edits.
     local IN="$WT/src"

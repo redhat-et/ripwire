@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // qualitypanel.h — `--quality-panel[=strict|default|lenient]`: THE SINGLE COMMAND.
 //
@@ -634,7 +637,7 @@ inline int writePanelReport( const IngestResult& ing, const Graph& g, const std:
     std::fputs( kPanelLegend, stdout );
     std::fputs( rw::kAtStampLegend, stdout );
     std::fputs( rw::rootRelPathsLegend( qpSingleRoot ), stdout );
-    std::printf( "<quality_panel preset=\"%s\" families=\"%u\" enabled=\"%s\" enabled_n=\"%u\" cut=\"%u\" cut_reachable=\"%s\"",
+    rw::emitTo( stdout, "<quality_panel preset=\"{}\" families=\"{}\" enabled=\"{}\" enabled_n=\"{}\" cut=\"{}\" cut_reachable=\"{}\"",
                  sel.name, unsigned( kPanelFamilyCount ), familyList( sel.enabled ).c_str(),
                  unsigned( std::popcount( sel.enabled ) ), unsigned( sel.cut ),
                  unsigned( sel.cut ) <= evaluable ? "1" : "0" );
@@ -647,35 +650,35 @@ inline int writePanelReport( const IngestResult& ing, const Graph& g, const std:
     const std::string unavailWhyStr   = detail::unavailWhyList( scan );
     const std::string unavailableAttr    = unavailNamesStr.empty() ? std::string() : ( " unavailable=\"" + unavailNamesStr + "\"" );
     const std::string unavailableWhyAttr = unavailWhyStr.empty()   ? std::string() : ( " unavailable_why=\"" + std::string( escapeXml( unavailWhyStr, escUnavail ) ) + "\"" );
-    std::printf( " eligible=\"%zu\" ranked=\"%zu\" below_cut=\"%zu\" no_family=\"%zu\"%s%s",
+    rw::emitTo( stdout, " eligible=\"{}\" ranked=\"{}\" below_cut=\"{}\" no_family=\"{}\"{}{}",
                  scan.eligibleCount, total, scan.belowCutCount, scan.noFamilyCount,
                  unavailableAttr.c_str(), unavailableWhyAttr.c_str() );
-    std::printf( " bar_ccx=\"%u\" bar_loc=\"%u\" bar_nest=\"%u\" bar_params=\"%u\"",
+    rw::emitTo( stdout, " bar_ccx=\"{}\" bar_loc=\"{}\" bar_nest=\"{}\" bar_params=\"{}\"",
                  quality::kCcxBar, quality::kLocBar, quality::kNestBar, quality::kParamBar );
-    std::printf( " rcut=\"%zu\" rmeasured=\"%zu\" hcut=\"%zu\" hranked=\"%zu\" window=\"%s\" ccut=\"%zu\" cranked=\"%zu\"",
+    rw::emitTo( stdout, " rcut=\"{}\" rmeasured=\"{}\" hcut=\"{}\" hranked=\"{}\" window=\"{}\" ccut=\"{}\" cranked=\"{}\"",
                  scan.readabilityCut, scan.readabilityMeasured, scan.churnCut, scan.churnRanked,
                  ensemble::kEnsembleWindowLabel, scan.colocCut, scan.colocRanked );
     // The LANGUAGE-COVERAGE denominators — what each availability verdict was computed FROM, so a reader can
-    std::printf( " cfiles=\"%zu\" cscope=\"%zu\" lscope=\"%zu\" sfiles=\"%zu\" sscope=\"%zu\" cells=\"%zu\"",
+    rw::emitTo( stdout, " cfiles=\"{}\" cscope=\"{}\" lscope=\"{}\" sfiles=\"{}\" sscope=\"{}\" cells=\"{}\"",
                  scan.confusionFiles, scan.confusionScope, scan.lexicalScope,   // check each verdict instead of
-                 scan.stateFiles, scan.stateScope, scan.stateCells );           // taking it on trust.
+                 scan.stateFiles, scan.stateScope, scan.stateCells  );           // taking it on trust.
     // The join's own two numbers, on the root for the same reason every other denominator is: tested_scope=0
     // is what a reader needs to know before reading a missing annotation as a clean bill of coverage.
-    std::printf( " tested_scope=\"%zu\" deep_untested=\"%zu\"", scan.testedScope, scan.deepUntestedCount );
+    rw::emitTo( stdout, " tested_scope=\"{}\" deep_untested=\"{}\"", scan.testedScope, scan.deepUntestedCount );
     if( scan.unreadableFileCount != 0 )
     {
-        std::printf( " unreadable_files=\"%u\"", scan.unreadableFileCount );
+        rw::emitTo( stdout, " unreadable_files=\"{}\"", scan.unreadableFileCount );
     }
     if( scan.stateFloor )
     {
-        std::printf( " state_floor=\"1\"" );
+        rw::emitRaw( stdout, " state_floor=\"1\"" );
     }
     if( !floorRules.empty() )
     {
-        std::printf( " findings_capped=\"1\" floor_rules=\"%s\"%s", std::string( escapeXml( std::string_view( floorRules ), escFloor ) ).c_str(),
-                     kGraphCountFloorAttrXml );   // H8: a floored family floors the root's counts
+        rw::emitTo( stdout, " findings_capped=\"1\" floor_rules=\"{}\"{}", std::string( escapeXml( std::string_view( floorRules ), escFloor ) ).c_str(),
+                     kGraphCountFloorAttrXml  );   // H8: a floored family floors the root's counts
     }
-    std::printf( " shown=\"%zu\" capped=\"%s\"%s%s%s>", shown, shown < total ? "1" : "0", paging,
+    rw::emitTo( stdout, " shown=\"{}\" capped=\"{}\"{}{}{}>", shown, shown < total ? "1" : "0", rw::cstr( paging ),
                  qpRootAttr.c_str(), gitstamp::atAttr( root ).c_str() );
 
     // TWO scratch buffers, not one reused twice in the same call: escapeXml returns a VIEW into its `out`, so a
@@ -698,7 +701,7 @@ inline int writePanelReport( const IngestResult& ing, const Graph& g, const std:
         const std::string uncountedStr  = familyList( std::uint8_t( row.firedMask & ~row.countedMask ) );
         const std::string uncountedAttr = uncountedStr.empty() ? std::string() : ( " uncounted=\"" + uncountedStr + "\"" );
         const std::string unavailAttr   = unavailNames.empty() ? std::string() : ( " unavail=\"" + unavailNames + "\"" );
-        std::printf( "<s p=\"%s:%u\" n=\"%s\" fam=\"%u\" of=\"%u\" fired=\"%s\"%s%s%s>",
+        rw::emitTo( stdout, "<s p=\"{}:{}\" n=\"{}\" fam=\"{}\" of=\"{}\" fired=\"{}\"{}{}{}>",
                      path.c_str(), s.line, name.c_str(), unsigned( row.firedCount ), evaluable,
                      familyList( row.countedMask ).c_str(),
                      uncountedAttr.c_str(), unavailAttr.c_str(),
@@ -710,13 +713,13 @@ inline int writePanelReport( const IngestResult& ing, const Graph& g, const std:
                 continue;
             }
             std::vector<char> escWhy;
-            std::printf( "<e f=\"%s\" counted=\"%s\" why=\"%s\"/>", familyName( family ),
+            rw::emitTo( stdout, "<e f=\"{}\" counted=\"{}\" why=\"{}\"/>", familyName( family ),
                          ( ( row.countedMask >> family ) & 1u ) != 0 ? "1" : "0",
                          std::string( escapeXml( row.why[family], escWhy ) ).c_str() );
         }
-        std::printf( "</s>" );
+        rw::emitRaw( stdout, "</s>" );
     }
-    std::printf( "</quality_panel>" );
+    rw::emitRaw( stdout, "</quality_panel>" );
     return 0;
 }
 

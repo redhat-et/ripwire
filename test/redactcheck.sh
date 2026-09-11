@@ -81,10 +81,29 @@ grep -q 'ripwire: redacted .* from emitted context (' "$TMP/pack.err" && ok "std
 grep -qF "AKIAIOSFODNN7EXAMPLE" "$TMP/exp.xml" && no "LEAK in --expand: AWS key not redacted" || ok "--expand redacts the def body"
 
 # ── 4) --recall doc-body seam: redacts secrets in the recalled markdown, keeps the prose SHA ─────────
-"$BIN" "$CORPUS" --recall="deployment credentials aws github anthropic rotation" --no-cache >"$TMP/recall.out" 2>"$TMP/recall.err"
+#
+# THE QUERY IS LOAD-BEARING, and this comment is why it may not be trimmed. --recall serves a heading
+# document SECTION BY SECTION, most specific first, so a section the query does not match is never
+# emitted — and an absence arm over a section that was never served passes while proving nothing
+# (CONTRIBUTING §2, shape 1: a population that cannot contain the defect). Every term below is here to
+# surface one section of test/redactfix/deploy_notes.md: rotation/credentials the preamble, aws/github/
+# anthropic their namesake sections, release+summarizer the token and key lines, rollback the
+# not-a-secret SHA section. The PRESENCE GUARD immediately after asserts each section actually arrived,
+# so if a future ranking change stops surfacing one, this gate fails LOUDLY instead of going quiet.
+"$BIN" "$CORPUS" --recall="deployment credentials aws github anthropic rotation rollback release summarizer" --no-cache >"$TMP/recall.out" 2>"$TMP/recall.err"
+while IFS='|' read -r probe label; do
+  grep -qF "$probe" "$TMP/recall.out" \
+    && ok "--recall surfaced the $label section (absence arms below are live)" \
+    || no "--recall did NOT surface the $label section — the redaction arm over it would prove nothing"
+done <<'PROBES'
+Set the deploy access key id|AWS
+Personal access token for the release bot|GitHub
+API key for the summarizer|Anthropic
+The rollback target is git commit|not-a-secret
+PROBES
 grep -qF "AKIAIOSFODNN7EXAMPLE" "$TMP/recall.out" && no "LEAK in --recall: AWS key not redacted in doc body" || ok "--recall redacts doc-body secrets"
 grep -qF "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" "$TMP/recall.out" && no "LEAK in --recall: GitHub token not redacted" || ok "--recall redacts GitHub token"
-grep -qF "da39a3ee5e6b4b0d3255bfef95601890afd80709" "$TMP/recall.out" && ok "--recall keeps the prose git SHA intact" || no "FALSE REDACTION in --recall: prose git SHA was altered (or doc not surfaced)"
+grep -qF "da39a3ee5e6b4b0d3255bfef95601890afd80709" "$TMP/recall.out" && ok "--recall keeps the prose git SHA intact" || no "FALSE REDACTION in --recall: prose git SHA was altered"
 grep -q 'redacted .* secret' "$TMP/recall.err" && ok "--recall emits the stderr summary" || no "--recall missing stderr summary"
 
 # ── 5) --no-redact restores originals verbatim, NO stderr summary ───────────────────────────────────

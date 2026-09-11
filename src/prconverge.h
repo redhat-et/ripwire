@@ -57,7 +57,7 @@ struct RankDisclosure
 
 // Which spelling the caller's host document accepts. Picking the wrong one is picking the wrong DOCUMENT,
 // which is a decision worth naming at the call site rather than hiding in a function name.
-enum class DiscloseAs
+enum class DiscloseAs : std::uint8_t
 {
     XmlAttrs,       // ` pr_iters="N"` [+ ` pr_converged="0"`] — appended to a root element's attributes
     JsonKeys,       // `,"pr_iters":N` [+ `,"pr_converged":false`] — appended to a JSON header's keys

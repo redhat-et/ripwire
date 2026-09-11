@@ -3,6 +3,8 @@
 #error "ingest_docpass.h is a SECTION of src/ingest.cpp's translation unit - include it only from ingest.cpp (see the ingest-family split note there)"
 #endif
 
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 // ingest_docpass.h — the P1-B doc post-pass, moved VERBATIM out of ingest() in the 2026-08-30
 // decomposition: the markitdown-bridge byte cache and the parallel extract + deterministic merge
 // that turns every collected document file (notebook/html/csv/…) into a docText override plus one
@@ -38,7 +40,7 @@ inline std::string docTextViaBridgeCache( const std::string& path, const std::st
         if( docparse::detail::readWholeFile( path, docBytes ) )
         {
             char blobName[ 64 ];
-            std::snprintf( blobName, sizeof( blobName ), "ripwire-docmd-%016llx.bin",
+            rw::formatTo( blobName, sizeof( blobName ), "ripwire-docmd-{:016x}.bin",
                            static_cast<unsigned long long>( fnv1a64( docBytes ) ) );
             bridgeBlobPath = quality::resolveCacheBlobPath( quality::cacheDirLadder(), blobName );
             docparse::detail::readWholeFile( bridgeBlobPath, text );   // miss ⇒ text stays empty

@@ -1,0 +1,52 @@
+# capsweep sweep — columns: cap / value / probe / site / default_bytes / probe_bytes / invocation — measured_at=2a444edbedfa70ab7c6208b3eeca06213be5e8d7 — TSV not json: ripwire indexes .json as config keys (src/ingest_crawl.h) while .tsv is unindexed prose (src/docparse.h kUnindexedProseExts) — a harness must not enter the index it measures
+kBatchCap	16	128	src/mcpverbs.h:4163	408	409	. --batch=$RIPWIRE_CAPSWEEP_TMP
+kCallHierarchyRowCap	40	320	src/pageview.h:164	7860	8975	. --impact=rankGraphTeleport
+kCellsPerRowCap	12	96	src/nonlocalstate.h:116	10220	10394	. --nonlocal-state --limit=8
+kCommonNameDefThreshold	5	40	src/graph.h:244	17385	17378	. --communities
+kCommonNameDefThreshold	5	40	src/graph.h:244	11779	11750	. --tree
+kCommonNameDefThreshold	5	40	src/graph.h:244	8409	8457	. --zoom
+kCommonNameDefThreshold	5	40	src/graph.h:244	12518	12590	. --zoom --zoom-levels=3
+kDefsPerNameCap	8	64	src/contextratio.h:94	13312	13708	. --context-ratio --limit=8
+kEnsembleFileRowCap	20	160	src/ensemble.h:108	10616	27723	. --ensemble --limit=8
+kExternalSurfaceRowCap	100	800	src/pageview.h:186	5593	38690	. --external-surface
+kExternalSurfaceRowCap	100	800	src/pageview.h:186	5547	38643	. --external-surface --include-builtins
+kFileRowCap	40	320	src/contextratio.h:89	13312	64424	. --context-ratio --limit=8
+kForAutoBodyBudgetBytes	6000	48000	src/serialize.h:759	15836	22117	. --for="rankGraphTeleport" --no-route
+kForFileTailShownCap	24	192	src/serialize.h:814	15836	21403	. --for="rankGraphTeleport" --no-route
+kForLensDefaultTopN	40	320	src/serialize.h:739	2128	2130	. --for="rankGraphTeleport"
+kForLensDefaultTopN	40	320	src/serialize.h:739	15836	15628	. --for="rankGraphTeleport" --no-route
+kForLensDefaultTopN	40	320	src/serialize.h:739	1523	1525	. --for="rankGraphTeleport" --signatures-only
+kForPayloadBudgetBytes	7500	60000	src/serialize.h:725	15836	29649	. --for="rankGraphTeleport" --no-route
+kGrepMatchedLineMaxBytes	512	4096	src/search.h:939	44342	63729	. --grep=deterministic
+kLintMaxPerRule	5000	40000	src/lintrules.h:819	70938	70885	. --lint
+kLintMaxPerRule	5000	40000	src/lintrules.h:819	66898	66845	. --lint --lint-ignore=naming-,cache-
+kLintMaxPerRule	5000	40000	src/lintrules.h:819	73640	73587	. --lint --naming-locals
+kLintMaxPerRule	5000	40000	src/lintrules.h:819	1137832	1645970	. --lint --sarif
+kMaxExpandIncludes	24	192	src/serialize.h:4543	11317	11632	. --expand=readAckRecords --top-k=0 --no-redact
+kMaxExpandSibs	100	800	src/serialize.h:4534	8077	9675	. --expand=compressBody --top-k=0 --compress
+kMaxExpandSibs	100	800	src/serialize.h:4534	4936	6010	. --expand=rankGraphTeleport --top-k=0
+kMaxExpandSibs	100	800	src/serialize.h:4534	4324	5398	. --expand=rankGraphTeleport:1-12 --top-k=0
+kMaxExpandSibs	100	800	src/serialize.h:4534	11317	16612	. --expand=readAckRecords --top-k=0 --no-redact
+kMaxExpandSibs	100	800	src/serialize.h:4534	4936	6010	. --top-k=0 --expand=rankGraphTeleport
+kOrdinalWindowCap	40	320	src/ensemble.h:112	10616	10647	. --ensemble --limit=8
+kOrdinalWindowCap	40	320	src/ensemble.h:112	15876	15974	. --quality-panel
+kPanelRowCap	40	320	src/qualitypanel.h:145	15876	63771	. --quality-panel
+kSliceFlowDefaultDepth	8	64	src/slice.h:2093	7203	7204	. --slice=rankGraphTeleport:teleport --slice-flow=fwd
+kSpecificMinLen	8	64	src/graph.h:250	24432	24403	.
+kSpecificMinLen	8	64	src/graph.h:250	17385	17597	. --communities
+kSpecificMinLen	8	64	src/graph.h:250	2028	2036	. --ignore-tests --top-k=5
+kSpecificMinLen	8	64	src/graph.h:250	7860	7823	. --impact=rankGraphTeleport
+kSpecificMinLen	8	64	src/graph.h:250	1920	1825	. --no-cache --top-k=3
+kSpecificMinLen	8	64	src/graph.h:250	1920	1825	. --no-ignore --top-k=3
+kSpecificMinLen	8	64	src/graph.h:250	1920	1825	. --no-stable --top-k=3
+kSpecificMinLen	8	64	src/graph.h:250	12175	12179	. --pack-signatures --top-k=10
+kSpecificMinLen	8	64	src/graph.h:250	65670	65729	. --pack-top-n=3 --top-k=0
+kSpecificMinLen	8	64	src/graph.h:250	3546	3543	. --report
+kSpecificMinLen	8	64	src/graph.h:250	12969	12992	. --seams
+kSpecificMinLen	8	64	src/graph.h:250	11779	11858	. --tree
+kSpecificMinLen	8	64	src/graph.h:250	8409	8523	. --zoom
+kSpecificMinLen	8	64	src/graph.h:250	12518	12689	. --zoom --zoom-levels=3
+kSymbolRowCap	40	320	src/contextratio.h:88	15876	18013	. --quality-panel
+kTreeRowCap	80	640	src/pageview.h:184	11779	93405	. --tree
+kZoomTopModuleCap	40	320	src/pageview.h:185	8409	49550	. --zoom
+kZoomTopModuleCap	40	320	src/pageview.h:185	12518	72408	. --zoom --zoom-levels=3

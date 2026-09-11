@@ -194,11 +194,30 @@ LOCKDIR="$CACHEDIR2/locks"; mkdir -p "$LOCKDIR"
 # real editLockPath() shape: "ripwire-edit-<16 hex>.lock" — same "ripwire-" prefix the family sweep
 # matches on everywhere else, so if the locks/ protection ever weakened this is exactly what would go.
 OLDLOCK="$LOCKDIR/ripwire-edit-00000000deadbeef.lock"
+# 2026-09-06 (stranger audit): the contract CHANGED. locks/ was "never reached" and one machine accumulated
+# 45,765 lock files (one per path ever edited via the MCP edit verbs; the holder deliberately never unlinks).
+# quality.h sweepStaleEditLocks now reclaims a lock that is (1) older than a day AND (2) not held — the
+# flock(LOCK_EX|LOCK_NB) probe IS the liveness test. So the three cases below are the contract now: an
+# ancient unheld lock goes; an ancient HELD lock stays (a peer's flock, held from a background python for
+# the duration of the run); a fresh lock stays whatever its state.
+HELDLOCK="$LOCKDIR/ripwire-edit-0000000000c0ffee.lock"
+FRESHLOCK="$LOCKDIR/ripwire-edit-00000000f0e5f0e5.lock"
 
 printf 'stale-old-cache-blob-dotcache' > "$OLDCACHE"
 touch -t 202001010000 "$OLDCACHE"
-printf 'ancient-advisory-lock-should-never-be-touched' > "$OLDLOCK"
+printf 'ancient-advisory-lock-unheld' > "$OLDLOCK"
 touch -t 202001010000 "$OLDLOCK"
+printf 'ancient-advisory-lock-HELD' > "$HELDLOCK"
+touch -t 202001010000 "$HELDLOCK"
+printf 'fresh-advisory-lock' > "$FRESHLOCK"
+python3 - "$HELDLOCK" <<'PYHOLD' &
+import fcntl, sys, time
+f = open( sys.argv[1], "r+" )
+fcntl.flock( f, fcntl.LOCK_EX )
+time.sleep( 120 )
+PYHOLD
+HOLDER=$!
+sleep 1   # let the holder take the flock before the run's sweep probes it
 sleep 1
 printf 'fresh-small-cache-blob-dotcache' > "$FRESHCACHE"
 
@@ -211,8 +230,13 @@ grep -q 'n="tiny3"' "$TMP2/run.xml" 2>/dev/null && ok "Y5: run output correct (t
                        || no "(a) old .cache blob survived — the .cache arm of matches() is not being swept"
 [ -e "$FRESHCACHE" ]  && ok "(b) a fresh .cache file is NOT evicted" \
                        || no "(b) fresh .cache blob was wrongly swept"
-[ -e "$OLDLOCK" ]     && ok "(c) an ancient file under locks/ is NEVER removed by eviction (locks subtree unreached)" \
-                       || no "(c) ancient file under locks/ was REMOVED — eviction reached the advisory-lock subtree"
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+[ ! -e "$OLDLOCK" ]   && ok "(c1) an ancient UNHELD lock under locks/ is reclaimed by the sweep (2026-09-06 contract)" \
+                       || no "(c1) ancient unheld lock survived — sweepStaleEditLocks did not reach locks/"
+[ -e "$HELDLOCK" ]    && ok "(c2) an ancient HELD lock survives the sweep (flock probe is the liveness test)" \
+                       || no "(c2) a HELD lock was removed — the sweep unlinked a live advisory lock"
+[ -e "$FRESHLOCK" ]   && ok "(c3) a fresh lock survives the sweep (age bound)" \
+                       || no "(c3) a fresh lock was removed — the age bound is not binding"
 # (d) .bin behavior unchanged: already covered above by the pre-existing OLD/FILLER/FRESH .bin arms (both
 # flat and sharded layouts), which this section's separate TMPDIR/CACHEDIR does not touch or interact with.
 

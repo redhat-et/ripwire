@@ -1,27 +1,10 @@
 ---
 name: ripwire-quality-bar
 description: >
-  The code-QUALITY bar for what you just wrote — not merge-safety. Needs NO setup: right before you commit /
-  open a PR / tell the user it's finished, run `ripwire <dir> --quality-delta` — reports ONLY what you made
-  WORSE across 10 measured kinds (complexity, verbosity, nesting, params, duplication, dead-code,
-  API-surface, error-masking, short-horizon-churn, new-clone-of-reused-helper — the measured agent-code
-  failure modes), exiting non-zero on new debt. Want the wider six-family "does this still look rotten" read
-  alongside the delta? `--quality-panel` is THE SINGLE COMMAND for that — the headline wide-angle pass below.
-  Also carries the two things a measurement alone doesn't give you: the **shape → refactor playbook** (a
-  measured shape mapped to its named fix AND that fix's precondition, so you don't guard-clause a numeric
-  kernel or refactor an untested hub) and the **closed fix loop** that proves the fix landed
-  (`--quality-delta` → `--edit-check` → `--affected`). Fix the real regressions, re-run, converge. Reach for this at
-  every "I think this is done" moment on non-trivial work. The check itself is cheap (well under a second
-  warm) — run it even on a fix that looks trivial, because "trivial" is exactly the judgment this pass exists
-  to catch you being wrong about; what a single-line leaf fix with no new branch/symbol/signature can skip is
-  the CONVERGENCE LOOP around it (re-reading the drill-down table, acking, chasing `--dmm`) — read this file
-  only if the one-shot delta actually reports something. For
-  merge-safety / blast-radius / tests-to-run →
-  **ripwire-change-check** instead (this skill judges the code, not whether it's safe to merge). Boundary
-  with ripwire-fresh-eyes in one line: quality-bar NAMES THE FIX — which restructuring a measured shape
-  calls for and how risky applying it is — and judges what YOU just wrote; diagnosing the shape of
-  unfamiliar code in the first place is ripwire-fresh-eyes. Backed by
-  ripwire (deterministic, on PATH).
+  Code QUALITY of what YOU just wrote, before you commit or say 'done', or verifying a cleanup:
+  --quality-delta lists what got WORSE in 10 kinds and exits 2 only when pre-existing code got
+  materially worse; which restructuring a measured shape (humps/deep, a tangle) calls for. Merge
+  safety → change-check. Even a single-line leaf fix runs it.
 allowed-tools: Bash, Read
 ---
 

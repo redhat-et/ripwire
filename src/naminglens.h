@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 // naminglens.h — identifier-naming quality lens v1: the naming-* built-in --lint rules.
 //
 // Deterministic, dictionary-free, ML-free. Every rule is a
@@ -871,7 +874,7 @@ inline void checkNameInformativeness( const Symbol& s, const std::vector<std::st
         return;
     }
     char idfBuf[32];
-    std::snprintf( idfBuf, sizeof( idfBuf ), "%.2f", maxIdf );
+    rw::formatTo( idfBuf, sizeof( idfBuf ), "{:.2f}", maxIdf );
     sink.add( "naming-uninformative", s, s.line,
               s.name + " (" + std::to_string( bodyLines ) + "-line body; every name subtoken is corpus-ubiquitous, max idf=" + idfBuf + ")" );
 }

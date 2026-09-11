@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // mcp.h — --mcp: expose ripwire as an MCP tool over stdio. Newline-delimited
 // JSON-RPC 2.0; three methods (initialize / tools/list / tools/call). Hand-rolled minimal
@@ -43,7 +46,7 @@ namespace rw
 // order, and update kMcpVerbCount. test/wrapverbscheck.sh enforces this at test time by diffing
 // a live tools/list call against `ripwire wrap claude`'s output — it fails loudly on drift even
 // if this comment is ignored.
-enum class McpVerbGroup { Read, FlagshipReflex, Edit };
+enum class McpVerbGroup : std::uint8_t { Read, FlagshipReflex, Edit };
 
 struct McpVerbInfo
 {
@@ -238,7 +241,13 @@ inline constexpr std::string_view kMcpServerInstructions =
     "Map before reading files. Start a new task with explore; use from_trace for an error; use impact plus "
     "uses before changing a symbol; run edit_check after an edit and quality_delta before declaring work "
     "done. Use batch for several independent read queries in one turn. Fetch bodies only after ranked "
-    "retrieval. Counts marked as floors are not totals; zero means none found, not none exists.";
+    "retrieval. Counts marked as floors are not totals; zero means none found, not none exists. "
+    // H2H-Graft (2026-09-07, taken from Graft's src/mcp/instructions.ts): a host that DEFERS tool schemas
+    // hands the agent bare names and withholds descriptions, but this `instructions` string survives on its
+    // own track — so it is the one channel that can tell the agent to load the verbs in ONE lookup instead of
+    // paying a round trip per verb (31 verbs here; the deferral tax is the larger cost).
+    "If these tools arrive deferred (names shown, schemas withheld), load them all in ONE lookup rather than "
+    "one at a time.";
 inline constexpr std::string_view kMcpProtocolVersions[] =
 {
     kMcpLatestProtocolVersion,
@@ -333,7 +342,7 @@ inline std::string mcpResolveAssumedRoot()
     {
         return {};
     }
-    const std::string launchCwd = mcpCanonRoot( cwdBuf );
+    std::string       launchCwd = mcpCanonRoot( cwdBuf );   // not const: returned, and a const local cannot be moved out
     const char* const homeEnv   = std::getenv( "HOME" );
     const std::string homeCanon = homeEnv ? mcpCanonRoot( homeEnv ) : std::string{};
     if( launchCwd == "/" || ( !homeCanon.empty() && launchCwd == homeCanon ) )
@@ -704,14 +713,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // MCP twin disclosed capped:true at 100 hits with no knob to raise or walk past it.
                    "{\"name\":\"grep\",\"description\":\"Trigram literal search; each hit annotated with its enclosing symbol (which function/class it is in). pattern = the literal; in=any lifts the span tiering (by default the tightest non-empty tier is served and what was held back rides as suppressed_comment/suppressed_string); limit/offset page the hits (first 100, has_more/next_offset end the loop). total/shown/capped/hits_capped and complete= are defined in the answer's own legend.\","
                    + mcprefuse::toolMetadataFor( "grep", pathIsRequired ) + "},"
-                   "{\"name\":\"cochange\",\"description\":\"Files that historically change together with this file — the co-edit partners. dep_capable=false means neither side could carry one (sh/md/json/binary), so surprising is undefined rather than informative. file = the file (a path SUFFIX is enough); limit/offset page the partners; the root names the mined window and its sub-window denominator.\","
+                   "{\"name\":\"cochange\",\"description\":\"Files that historically change together with this file — the co-edit partners. Fowler's Shotgun Surgery as change coupling. dep_capable=false means neither side could carry one (sh/md/json/binary), so surprising is undefined rather than informative. file = the file (a path SUFFIX is enough); limit/offset page the partners; the root names the mined window and its sub-window denominator.\","
                    + mcprefuse::toolMetadataFor( "cochange", pathIsRequired ) + "},"
                    // §B6 M15 / verifier N5: top_k is the budget knob this verb's own est_tokens disclosure implies. It
                    // was hardcoded to 8 with no way to ask for less, on the one MCP verb that can return ~180 KB,
                    // while the CLI --recall began honoring --top-k in this round's Wave 1.
                    "{\"name\":\"memory_recall\",\"description\":\"Most relevant memory notes / docs for a task, full text — the few that matter, not the whole corpus. path = docs/memory dir; task = what you're working on; top_k = docs to return, 1..1000 (default 8), refused outside that band, never clamped; budget_tokens = the body ceiling in tokens (default 8000) — it SHAPES to fit, the CLI --recall's --max-tokens, not --token-budget's refuse-if-over GATE, and the header discloses max_tokens= and every cut.\","
                    + mcprefuse::toolMetadataFor( "memory_recall", pathIsRequired ) + "},"
-                   "{\"name\":\"situational_awareness\",\"description\":\"The 5 things to know about a diff, as JSON: blast_radius, tests_to_run, forgotten (usual co-change partners missing from this diff), hotspot_alert, modules_touched. diff/files optional — defaults to 'git diff HEAD'. files is a STRING of comma-separated paths (files=\\\"src/a.cpp,src/b.h\\\"), not an array; an array is refused rather than read as absent, which would answer about the working tree instead of the files you named.\","
+                   "{\"name\":\"situational_awareness\",\"description\":\"The 5 things to know about a diff, as JSON: blast_radius, tests_to_run, forgotten (usual co-change partners missing from this diff), hotspot_alert, modules_touched. forgotten = the Shotgun Surgery check. diff/files optional — defaults to 'git diff HEAD'. files is a STRING of comma-separated paths (files=\\\"src/a.cpp,src/b.h\\\"), not an array; an array is refused rather than read as absent, which would answer about the working tree instead of the files you named.\","
                    + mcprefuse::toolMetadataFor( "situational_awareness", pathIsRequired ) + "},"
                    "{\"name\":\"mentions\",\"description\":\"Docs (markdown plans/designs) that name a code symbol in a backtick. symbol = the code symbol name; limit/offset page the files. " + std::string( kAtSeedRebindClause ) + "\","
                    + mcprefuse::toolMetadataFor( "mentions", pathIsRequired ) + "},"
@@ -759,7 +768,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    + mcprefuse::toolMetadataFor( "explore", pathIsRequired ) + "},"
                    "{\"name\":\"from_trace\",\"description\":\"Paste a stack trace / sanitizer report / compiler error and get it mapped onto indexed symbols, ranked INNERMOST-first: the parsed <trace> frame map, the ranked suspects' signatures, and the innermost in-corpus symbol's FULL body. Out-of-corpus frames are listed and counted, never ranked, and the counters CLOSE (in_corpus = suspects + merged + unresolved). Each frame binds by its own NAME first, falling back to the def enclosing its line only when that name is absent or ambiguous — resolved_by= and any name-vs-line disagreement are disclosed, never silently rebound. Same handler as the CLI --from-trace. A failing-test trace also gets a test_hop block reaching the source symbols behind the assertion, labelled heuristic. trace = the raw trace TEXT (paste it, don't hand-translate it into a query); budget_tokens optional.\","
                    + mcprefuse::toolMetadataFor( "from_trace", pathIsRequired ) + "},"
-                   "{\"name\":\"edit_check\",\"description\":\"Just edited a symbol? Did its CONTRACT (param count + publicness) change vs git HEAD, and which 1-hop callers are NOW INCOMPATIBLE with the new arity by fixed-arity evidence (not a guess — every folded definition disagrees)? This is call sites worth OPENING, not a proof: call edges are matched by NAME, so a same-named callee this tool does not index can flag a caller that never touches the edited symbol at all, and a clean tree can carry a nonzero incompatible= with nothing edited. status is one of unchanged / new-symbol / contract-change, and callers= is itself a FLOOR — 'no incompatible caller' is not proof of safety either. Fast and targeted; for the same question over a WHOLE diff use quality_delta. symbol = the def name (file:name to disambiguate); at= names the commit compared against. " + std::string( kAtSeedShortClause ) + " PRE-APPLY PREVIEW: pass new_body to ask the same question about a replacement that has NOT been written — it is spliced in memory, re-parsed, and the answer carries preview=1. Nothing is written; a payload that does not parse, or does not define the symbol, is refused.\","
+                   "{\"name\":\"edit_check\",\"description\":\"Just edited a symbol? Did its CONTRACT (param count + publicness) change vs git HEAD, and which 1-hop callers are NOW INCOMPATIBLE with the new arity by fixed-arity evidence (not a guess — every folded definition disagrees)? This is call sites worth OPENING, not a proof: call edges are matched by NAME, so a same-named callee this tool does not index can flag a caller that never touches the edited symbol at all, and a clean tree can carry a nonzero incompatible= with nothing edited. status is one of unchanged / new-symbol / contract-change, and callers= is itself a FLOOR — 'no incompatible caller' is not proof of safety either. Fast and targeted; for the same question over a WHOLE diff use quality_delta. symbol = the def name (file:name to disambiguate); at= names the commit compared against. " + std::string( kAtSeedShortClause ) + " limit/offset page the unflagged caller rows only. PRE-APPLY PREVIEW: pass new_body to ask the same question about a replacement that has NOT been written — it is spliced in memory, re-parsed, and the answer carries preview=1. Nothing is written; a payload that does not parse, or does not define the symbol, is refused.\","
                    + mcprefuse::toolMetadataFor( "edit_check", pathIsRequired ) + "},"
                    // The cross-branch + dark-content verbs. Read-only git plumbing, no index
                    // coupling for the first two (they read OTHER refs' blobs, which the index never ingested).
@@ -970,7 +979,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             {
                 const McpIndex& mix = getIndex( root );
                 char buf[ 96 ];
-                std::snprintf( buf, sizeof( buf ), "[index: files=%zu symbols=%zu hash=%08x]",
+                rw::formatTo( buf, sizeof( buf ), "[index: files={} symbols={} hash={:08x}]",
                                 mix.ing.files.size(), mix.ing.symbols.size(),
                                 (unsigned)( mix.contentHash & 0xFFFFFFFFu ) );
                 return buf;
@@ -1684,8 +1693,15 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // §A6a: the verb now words its own refusal (symbol-not-found, or the ambiguity refusal —
                     // a symbol matching several definition SITES has several contracts, and this verb answers
                     // about one), so this stays the same single payload-or-refusal branch it always was.
-                    const EditCheckReply r = editCheckText( path, symbol, newBody );   // card A1: new_body ⇒ PREVIEW, never a write
-                    resp = r.payload.empty() ? errResultMsg( -32602, r.refusal ) : textResult( r.payload );
+                    // 2026-09-10: limit/offset are read by the SAME mcpPageArgs every paging verb uses. They
+                    // window the UNFLAGGED context rows only — the flagged callers, their sites_l= and the def
+                    // census ride every page in full (editcheck.h, editCheckRowWindow), so paging this verb
+                    // cannot page away its own verdict.
+                    resp = pagedResult( [ & ]( McpPageArgs pg )
+                    {
+                        const EditCheckReply r = editCheckText( path, symbol, newBody, pg );   // card A1: new_body ⇒ PREVIEW, never a write
+                        return r.payload.empty() ? errResultMsg( -32602, r.refusal ) : textResult( r.payload );
+                    } );
                 }
                 // lane/tc-sliceat: the ARISE def-use slice — sliceText owns the whole contract (resolution,
                 // the @FILE:LINE seed, flow/depth pairing, every refusal), mirroring the CLI runSlice.
@@ -1983,7 +1999,7 @@ inline int runMcp( int topK, bool stable = false, bool noRedact = false,
             const double wallMs = std::chrono::duration< double, std::milli >(
                                       std::chrono::steady_clock::now() - t0 ).count();
             const unsigned rebuilt = ( mcpRebuildCounter().load( std::memory_order_relaxed ) != rebuildAtStart ) ? 1u : 0u;
-            std::fprintf( stderr, "ripwire-timing verb=%s wall_ms=%.3f rebuilt=%u\n",
+            rw::emitTo( stderr, "ripwire-timing verb={} wall_ms={:.3f} rebuilt={}\n",
                           r.timingVerb.c_str(), wallMs, rebuilt );
             std::fflush( stderr );
         }

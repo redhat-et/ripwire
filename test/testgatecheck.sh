@@ -152,5 +152,25 @@ done
 [ "$u_ok" = 1 ] && ok "(g) the untested= family ($UNIT_FAM) all disclose their unit" \
                 || no "(g) at least one untested= emitter is silent about its unit"
 
+# ── (h) H2H-Graft F1 (2026-09-07): a <t> row says WHY it is an obligation ────────────────────────────
+# hops= is the caller-walk depth at which the test reaches the change (1 = it calls a changed symbol
+# directly); a test file that is ITSELF in the change set is an obligation on its own evidence — you edited
+# it, run it — and its row says changed="1" (Graft's blast verb calls this state "changed"; the graph-reached
+# rows are its "stale": tests that reach the area and the diff did not touch). Before this, a changed test
+# file was silently ABSENT from tests_to_run: its symbols were skipped as "the change, not its radius".
+H="$( perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" --test-gate=src/covered.cpp --no-cache 2>/dev/null )"
+printf '%s' "$H" | grep -qE '<t p="test/test_covered.cpp"[^>]* hops="1"' \
+    && ok "(h1) --test-gate=src/covered.cpp: the covering test's row carries hops=\"1\"" \
+    || no "(h1) test_covered.cpp row lacks hops=\"1\""
+perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" --test-gate=src/covered.cpp,test/test_covered.cpp --no-cache >"$TMP/h2.txt" 2>/dev/null; hrc=$?
+grep -q '<t p="test/test_covered.cpp"[^>]*changed="1"' "$TMP/h2.txt" \
+    && ok "(h2) a test file IN the change set is a tests_to_run row with changed=\"1\"" \
+    || no "(h2) changed test file absent from tests_to_run, or lacks changed=\"1\""
+[ "$hrc" = 4 ] && ok "(h3) that run still exits 4 (an obligation exists: run the test you edited)" \
+               || no "(h3) exit $hrc, expected 4"
+perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" --test-gate=src/covered.cpp,test/test_covered.cpp --no-cache --json 2>/dev/null \
+    | grep -q '"p":"test/test_covered.cpp"[^}]*"changed":true' \
+    && ok "(h4) the JSON twin carries \"changed\":true on the same row" || no "(h4) JSON twin lacks \"changed\":true"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

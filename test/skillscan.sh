@@ -73,8 +73,10 @@ if [ "$rc" = "2" ]; then ok "evade_fenced.md exits 2 (bare-fence evasion caught)
 #    path as a clean scan — the check silently asserted nothing for a round. Now: sweep every shipped
 #    skill, assert rc == 0 EXPLICITLY (readable AND clean — rc=3 "cannot read" fails loudly), and an
 #    empty glob is itself a failure (trap ledger #7: an input that can go missing must FAIL, not skip).
+#    The second glob pattern covers namespaced skills (skills/hermes/*/SKILL.md), so a Hermes-format
+#    skill added under an agent-name directory is swept like the flat set — not silently skipped.
 own_skill_count=0
-for own_skill in "$ROOT"/skills/*/SKILL.md; do
+for own_skill in "$ROOT"/skills/*/SKILL.md "$ROOT"/skills/*/*/SKILL.md; do
     [ -f "$own_skill" ] || continue
     own_skill_count=$(( own_skill_count + 1 ))
     rc="$( scan_exit "--scan-skill=$own_skill" )"

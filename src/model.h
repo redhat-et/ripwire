@@ -8,6 +8,7 @@
 //        → rank:  personalized PageRank over the CSR
 //        → serialize: top-K symbols (by rank) → minified XML, grouped by file.
 
+#include "infra/profileScope.h"
 #include "smallvec.h"   // rw::SmallVec — THE ONE ALIAS; the per-key span lists and per-file id buckets below
 
 #include <algorithm>   // std::sort — symbolsByFile below
@@ -97,11 +98,19 @@ inline const char* symTag( SymKind k ) noexcept
 // clamp into the identical Unknown-bucket headroom in serialize.h, zero renumbering of Cpp..Yaml.
 // UNLIKE Json/Toml/Yaml these two are CODE languages with real call graphs — they are simply the next
 // two free indexes, and APPENDING (never inserting) is what keeps every on-disk cache key stable.
-enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml, Php, Lua };
+enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml, Php, Lua, Elixir, Dart };
+// The number of Lang enumerators. MUST stay ( last enumerator + 1 ): any per-language array sized by
+// a LITERAL silently drops the tail when a language is appended, and the drop is invisible because
+// the affected code paths just see a zero. That happened: nonlocalstate.h's filesByLang was a
+// hardcoded 16 while Php(18), Lua(19) and Elixir(20) existed, so --nonlocal-state never disclosed
+// those three as unanalyzed even though kUnanalyzedLangs listed Php and Lua. Size per-language
+// arrays with this, never with a number.
+inline constexpr std::size_t kLangCount = static_cast<std::size_t>( Lang::Dart ) + 1;
 
-// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua").
+// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua|ex|dart").
 // The canonical home for this switch: previously duplicated privately in htmlexport.h, moved here so a THIRD
 // caller (naming-consistency's per-language vote groups) reuses it instead of growing a second copy.
+/// Return the stable short output label for a language, or "?" for an unknown value.
 inline const char* langTag( Lang l ) noexcept
 {
     switch( l )
@@ -125,6 +134,8 @@ inline const char* langTag( Lang l ) noexcept
         case Lang::Yaml:       return "yaml";
         case Lang::Php:        return "php";
         case Lang::Lua:        return "lua";
+        case Lang::Elixir:     return "ex";
+        case Lang::Dart:       return "dart";
         default:               return "?";
     }
 }
@@ -469,13 +480,56 @@ struct Include
                                     //   relative-to-includer) OR a non-C import. Path-precise resolution
                                     //   (resolve.h::resolvePreciseInclude) uses this to leave angle
                                     //   includes UNRESOLVED rather than basename-matching them.
-    bool          isLazy   = false; // TS/JS only: true ⇒ this `require("./x")` / `import("./x")` call sits
+    bool          isLazy   = false; // TS/JS: true ⇒ this `require("./x")` / `import("./x")` call sits
                                     //   inside a FUNCTION BODY (kJsFunctionContainers), not at module load
                                     //   time — the dependency is real (--impact's importer tier must still
                                     //   name the file) but semantically WEAKER: it fires only if and when
-                                    //   that function runs. false for every other directive kind and for a
-                                    //   top-level TS/JS require/import. See ingest.cpp::captureIncludes.
-    std::string   target;           // raw include path ("foo.h", <vector>) or module name
+                                    //   that function runs. Ruby (parser version 82): true for every `autoload`,
+                                    //   which is lazy by definition (the file loads on the constant's first
+                                    //   use); Ruby (parser version 83): true for a constant receiver inside a
+                                    //   method/lambda/block, and (parser version 86) only when EVERY
+                                    //   occurrence of that (file, open, name) is inside one. false for every
+                                    //   other directive kind and for a top-level TS/JS require/import. See
+                                    //   ingest.cpp::captureIncludes.
+    bool          isSymbolic = false; // parser version 82: true ⇒ `target` names a language-level SYMBOL (a Ruby
+                                    //   constant: superclass, include/extend/prepend argument, path-less
+                                    //   `autoload :Name`), resolved through the corpus's OWN definition index
+                                    //   (resolve.h::RubyConstantIndex) and NEVER probed as a path. Spelling
+                                    //   cannot carry this bit: `require "Foo"` is legal Ruby and `Foo.rb` a
+                                    //   legal file, and on a case-insensitive filesystem a path probe for a
+                                    //   constant lands on the wrong file (test/rubyconstcheck.sh, decoy arm).
+    std::uint32_t byte     = 0;     // parser version 82: the directive's start byte in its file. A symbolic target
+                                    //   is resolved by Ruby's LEXICAL rule, and the lexical nesting at the
+                                    //   site is recovered from this byte by span containment against the
+                                    //   file's class/module symbols — the same containment that attributes a
+                                    //   Reference to its enclosing def, so the two sides cannot disagree.
+    std::string   target;           // raw include path ("foo.h", <vector>), module name, or (isSymbolic)
+                                    //   the constant AS WRITTEN (`Base`, `::App::User`, `ActiveRecord::Base`)
+};
+
+// A Ruby class/module OPEN (parser version 82): `class X < Y … end` / `module M … end`, one record per open, with
+// the name AS WRITTEN (`Base`, `App::Audited`, `::Top`). The Symbol model deliberately keeps only the
+// IMMEDIATE scope (`scope` — see ingest_sidecap.h), so a compact `class Api::V1::UsersController` cannot be
+// rebuilt into its full constant from symbols; this table is the carrier for what resolve.h's
+// RubyConstantIndex needs and nothing else: the open's byte span (nesting is recovered by containment, the
+// same way a Reference finds its enclosing def), whether the open has a body of its own, and the written
+// name. The fully-qualified constant is computed in resolve.h by Ruby's own lexical rule, where the whole
+// corpus is visible — a compact `class A::B` inside `module X` names X::A::B if the tree defines X::A, else
+// ::A::B — never here, where only one file is.
+//   namespaceOnly: the body holds nested class/module opens and NOTHING else (comments aside) — `module App
+//   … end` as every file under lib/app/ writes it. Such an open defines nothing of its constant and is not a
+//   DEFINER in the index (it still nests). An EMPTY open (`class Base; end`) is a definer, not a wrapper. Measured on a 3532-file Rails app: 124 constants were "defined
+//   in many files" by opens, 5 by bodies. A reopening WITH a body (a monkey patch) is a real second
+//   definer, and a reference then edges to every definer (test/rubyconstcheck.sh).
+// Ruby-only this round; the shape (span + written name + own-body bit) fits any language whose namespaces
+// reopen across files. Serialized in the cache (ingest_cache.h, kCacheVersion 17).
+struct ConstOpen
+{
+    std::uint32_t fileId        = 0;
+    std::uint32_t startByte     = 0;      // span of the class/module node
+    std::uint32_t endByte       = 0;
+    bool          namespaceOnly = false;
+    std::string   written;                // the name as written: `Base`, `App::Audited`, `::Top`
 };
 
 // P2-D Rule 2 LOCAL-VARIABLE TYPE BINDING (`var : typeName`) captured at ingest. One record per
@@ -523,6 +577,14 @@ enum class LocalBindKind : std::uint8_t
                //     bound name's module is inside the indexed tree. Rule 2 (kind == Type), the L3 fn tables
                //     and shadow suppression all skip it by kind. Python captures these; a `from m import *`
                //     records nothing (no name is bound). APPENDED for the same cache reason as VarDecl.
+    JsImport,  // named ES import: var=local name, typeName=module, importedName=export (empty for type-only).
+    JsExport,  // ES export: var=EXPORTED name; importedName=the LOCAL name it binds (empty on the declaration
+               //     form, where the two are the same word). spanStart/spanEnd is the region a definition must
+               //     sit inside to BE this export — the declaration itself for `export function f(){}`, the
+               //     whole program for a `export { f as g }` clause, whose target may be declared anywhere in
+               //     the file. Re-export (`export { f } from ...`) and default exports record nothing: see
+               //     ingest_jsimports.h for why an absent name must degrade rather than refuse.
+    JsShadow,  // lexical declaration hiding an ES import; spanStart/spanEnd cover the declaring scope.
 };
 
 inline constexpr const char* kFnBindLambdaTarget  = "(lambda)";    // parens are illegal in identifiers, so
@@ -540,6 +602,9 @@ struct Binding
                                           //   declarations) from its scope's start. See suppressShadowedReferences.
                                           //   {0,0} on every other kind and on a scope-less capture (contains nothing).
     std::string   var;                    // the declared variable identifier (`x`)
+    std::string   importedName;           // JsImport: the requested export name; never a global-name fallback.
+                                          //   JsExport: the LOCAL name the exported spelling binds (empty when
+                                          //   the two are identical). Empty on every other kind.
     std::string   typeName;               // kind==Type: the written type's final segment (`Foo`), resolved to a
                                           //   class in buildGraph. kind==FnDecl/FnAssign: the bound FUNCTION
                                           //   name as written minus `&` (`alpha`, `ns::alpha`), or a sentinel.
@@ -761,7 +826,10 @@ struct CrawlSkips
     // extension classification, the --exclude match and the built-in denylist, so every existing counter
     // keeps exactly the meaning it had: ignoredFiles counts files that would OTHERWISE HAVE BEEN INDEXED
     // (which is what makes it the number the header's accounting invariant can carry), and ignoredDirs
-    // counts only the subtrees no other rule had already pruned.
+    // counts only the subtrees no other rule had already pruned. The one class that consults the verdict
+    // EARLIER is `unsupported` above: grep serves that population, so a gitignored file of an unindexed
+    // extension is not rowed there either — it is in no class at all, exactly as an --exclude'd one
+    // already was (ingest_crawl.h recordPreSizeDrop's header).
     std::vector<SkippedFile>  ignored;              // capped rows, path-sorted — the individual ignored files
     std::vector<SkippedFile>  ignoredDirRows;       // capped rows, path-sorted — the pruned subtrees (bytes 0, ext "")
     std::uint64_t             ignoredFiles    = 0;  // EXACT count (rows may be fewer)
@@ -820,6 +888,7 @@ struct IngestResult
                                            // startByte)); reachable only through graph.h's resolveFieldSelector.
     std::vector<Reference>   references;   // unresolved calls
     std::vector<Include>     includes;     // #include / import directives (physical dependencies)
+    std::vector<ConstOpen>   constOpens;   // parser version 82: Ruby class/module opens, for the constant index (resolve.h)
     std::vector<Binding>     bindings;     // P2-D Rule 2: local var→type bindings (`Foo x;`), for receiver-var narrowing
     std::vector<BindingAlias> bindingAliases;  // R5: cross-language FFI binding declarations (pybind/extern-C/ctypes)
     std::vector<RouteDef>    routeDefs;     // B6.3: HTTP server-side route registrations (unresolved handler names)
@@ -1093,15 +1162,21 @@ inline bool shadowSuppressedSite( const Reference& r, const ShadowEvidence& ev, 
     {
         return false;   // a receiver- or scope-qualified name can never resolve to a plain local
     }
-    if( ev.defNames.find( r.calleeName ) == ev.defNames.end() )
-    {
-        return false;   // no indexed symbol carries the name — nothing to falsely attribute to
-    }
+    // ORDER IS A COST DECISION, not a semantic one: all four guards are pure predicates ANDed together, so
+    // any order gives the same verdict — but they are not equally selective. `varSpans` is keyed on
+    // "<callingSymbol>#<name>" and hits only when THIS caller declares a local of exactly this name (rare);
+    // `defNames` hits whenever ANY indexed symbol anywhere carries the name (common). Testing the common one
+    // first spent a second string hash on nearly every reference in the corpus to learn nothing. The
+    // selective test now runs first, and the name-collision gate is asked only of the sites that got past it.
     buildShadowKey( key, r.fromSymbol, r.calleeName );
     const auto it = ev.varSpans.find( key );
     if( it == ev.varSpans.end() || ev.fnBindKeys.find( key ) != ev.fnBindKeys.end() )
     {
         return false;   // no declared local — or a fn-binding var, whose references must survive
+    }
+    if( ev.defNames.find( r.calleeName ) == ev.defNames.end() )
+    {
+        return false;   // no indexed symbol carries the name — nothing to falsely attribute to
     }
     for( const auto& [ spanStart, spanEnd ] : it->second )   // VarSpan is an aggregate — the binding reads as before
     {
@@ -1115,6 +1190,7 @@ inline bool shadowSuppressedSite( const Reference& r, const ShadowEvidence& ev, 
 
 inline void suppressShadowedReferences( IngestResult& ing )
 {
+    PROFILE_SCOPE_DESCRIBE( "model/shadow: total" );
     ShadowEvidence ev;
     std::string    key;
     for( const Binding& b : ing.bindings )
@@ -1145,11 +1221,17 @@ inline void suppressShadowedReferences( IngestResult& ing )
     {
         return;   // VarDecl-free corpus (no captured C++/ObjC local declarations): byte-identical output
     }
-    for( const Symbol& s : ing.symbols )   // the collision gate: some indexed symbol must carry the name
     {
-        ev.defNames.try_emplace( s.name, 1 );
+        PROFILE_SCOPE_DESCRIBE( "model/shadow: defNames set (one hash insert per symbol)" );
+        for( const Symbol& s : ing.symbols )   // the collision gate: some indexed symbol must carry the name
+        {
+            ev.defNames.try_emplace( s.name, 1 );
+        }
     }
-    std::erase_if( ing.references, [ & ]( const Reference& r ) { return shadowSuppressedSite( r, ev, key ); } );
+    {
+        PROFILE_SCOPE_DESCRIBE( "model/shadow: erase_if over references" );
+        std::erase_if( ing.references, [ & ]( const Reference& r ) { return shadowSuppressedSite( r, ev, key ); } );
+    }
 }
 
 // ONE file's symbol-id bucket, and the whole index. Named so the ten independent reimplementations of this

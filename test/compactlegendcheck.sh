@@ -23,7 +23,7 @@
 # UNIVERSE arm (U): the verb set is DERIVED from src/cli.h (test/flaguniverse.py) — the same derivation
 # jsoncheck #8b and shapingflagcheck (F) use — so a verb added tomorrow is probed tomorrow. Each flag runs at
 # defaults on a tmp git fixture; whatever answers with an XML root is an XML verb and must honor compact,
-# everything else must refuse it. LOOP arm (L): the ten-verb loop's compact legend bill ≤ 4,000 B (was 29,824
+# everything else must refuse it. LOOP arm (L): the ten-verb loop's compact legend bill ≤ 4,100 B (was 29,824
 # on the ripwire tree). MCP arm (M): edit_check with legend:"compact" answers in ≤ 900 B on a clean tree.
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/compactlegendcheck.sh
@@ -380,7 +380,15 @@ for v in --callers=distance --edit-check=total_area --quality-delta --impact=dis
 done
 
 echo
-echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 4,000 B (29,824 B in full on the ripwire tree) ==="
+# RE-ANCHORED 2026-09-10 (--edit-check answer-safe window): 4,000 → 4,100 B, measured 4,056 (from 4,000-56).
+# ONE term, on ONE verb: --edit-check now carries est_tokens= on its root (M11's priced-root rule — the whole
+# point of the number is that a caller sees what an answer cost BEFORE guessing whether to page it), so its
+# compact legend gains the 62-B est_tokens definition the term table already holds for every other priced
+# verb. Attributed against a build of the parent commit: edit-check's compact legend 364 → 426 B, nothing
+# else in the loop moved. Same rule the SIZE ceilings in test/mcpmanifestcheck.sh follow — a ceiling moves up
+# only for a DECLARED attribute the contract obliges to define, in the commit that lands it, with its bytes
+# attributed here, never for prose.
+echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 4,100 B (29,824 B in full on the ripwire tree) ==="
 loopBytes=0; fullBytes=0
 for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--uses=distance" "--edit-check=total_area" \
          "--quality-delta" "--test-gate=geometry.cpp" "--affected=geometry.cpp" "--safe-delete=total_area" "--slice=total_area"; do
@@ -389,8 +397,8 @@ for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--u
     b="$( leg bytes "$TMP/l.c" )"; f="$( leg bytes "$TMP/l.f" )"
     loopBytes=$(( loopBytes + b )); fullBytes=$(( fullBytes + f ))
 done
-[ "$loopBytes" -le 4000 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
-                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 4,000 B; full: $fullBytes B)"
+[ "$loopBytes" -le 4100 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
+                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 4,100 B; full: $fullBytes B)"
 
 echo
 echo "=== (M) MCP: legend:\"compact\" on edit_check answers in ≤ 900 B on a clean tree; every XML verb takes the argument ==="

@@ -100,7 +100,7 @@ else:
 cmd = entry.get( "command" )
 if not isinstance( cmd, list ) or not all( isinstance( x, str ) for x in cmd ):
     print( "FAIL command must be an ARRAY of strings (not a command/args pair), got %r" % ( cmd, ) )
-elif cmd[ :1 ] != [ "ripwire" ] or "--mcp" not in cmd:
+elif not ( cmd[ :1 ] == [ "ripwire" ] or ( cmd[ :1 ] and cmd[ 0 ].endswith( "/ripwire" ) ) ) or "--mcp" not in cmd:   # 2026-09-06: absolute path when nothing on PATH is ripwire
     print( "FAIL command %r does not invoke ripwire --mcp" % ( cmd, ) )
 else:
     print( "PASS command is a string array invoking ripwire --mcp" )

@@ -47,6 +47,18 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "bodydialectcheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+
+# 2026-09-07: WARM, PRIVATE CACHE. Arm (A) alone is 6 tasks x 5 budgets x 2 dialects = 60 --pack-task runs over
+# the whole repository, and every invocation here used to pass --no-cache: 60+ COLD parses of ~1,600 files.
+# On the macos-14 Release CI leg, with three gates sharing the runner, that reached the 900 s budget (run
+# 34096189371) while the same script takes 30 s on a dev machine. Nothing this gate proves needs a cold
+# parse: it compares two output DIALECTS of the same index, and cold-vs-warm byte identity is
+# determinismcheck's contract, gated there. So the gate owns a private cache root (the per-user ladder
+# starts at $TMPDIR/ripwire — the same isolation doctorcheck uses), the first run warms it, and the
+# other ~70 are warm. The one cost is honesty about what (F) below now measures: run-to-run determinism of
+# the emit path over a warm index, which is the half this gate is about.
+export TMPDIR="$TMP/cachehome"
+mkdir -p "$TMPDIR"
 command -v python3 >/dev/null 2>&1 || { echo "bodydialectcheck: python3 is required"; exit 2; }
 
 echo "bodydialectcheck: BIN=$BIN"
@@ -63,7 +75,7 @@ TASKS = ["redact secrets from emitted text", "serializeJson runDefaultMap", "def
 BUDGETS = [4000, 5000, 6500, 8000, 12000]
 
 def run(args):
-    return subprocess.run([BIN, ROOT] + args + ["--no-cache"], capture_output=True)
+    return subprocess.run([BIN, ROOT] + args, capture_output=True)   # warm private cache — see the TMPDIR note above
 
 bad, shapes, truncSeen, omitSeen = [], 0, 0, 0
 for task in TASKS:
@@ -127,7 +139,7 @@ PY
 # whole. The assertion is not "JSON == XML bytes" (the encodings differ) but "JSON is under the ceiling the
 # bundle itself states", which the pre-fix 42 KB document was not.
 for BUD in 5000 8000 12000; do
-    "$BIN" "$ROOT" --pack-task="serializeJson runDefaultMap" --token-budget=$BUD --json --no-cache >"$TMP/big.json" 2>/dev/null
+    "$BIN" "$ROOT" --pack-task="serializeJson runDefaultMap" --token-budget=$BUD --json >"$TMP/big.json" 2>/dev/null
     JB="$( wc -c < "$TMP/big.json" | tr -d ' ' )"
     CEIL="$( python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["budget_ceiling_bytes"])' "$TMP/big.json" 2>/dev/null )"
     if [ -z "$CEIL" ]; then
@@ -143,7 +155,7 @@ done
 # This is the sweep-widening the finding asks for: truncvocabcheck's universal arm keys on shown=, so an
 # element that emits NO shown= is invisible to it. Here the roster is named, so a section that drops the
 # triple is a FAILURE rather than an absence.
-"$BIN" "$ROOT/src" --pack-task="rank symbols by pagerank" --no-cache >"$TMP/sec.xml" 2>/dev/null
+"$BIN" "$ROOT/src" --pack-task="rank symbols by pagerank" >"$TMP/sec.xml" 2>/dev/null
 python3 - "$TMP/sec.xml" <<'PY'
 import sys, xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
@@ -203,7 +215,7 @@ PROBE_EOF
 RTASK="probeSecretLoader deployment credential loader"
 tally_and_markers(){ # <label> <extra args...>
     local label="$1"; shift
-    "$BIN" "$CORP" --pack-task="$RTASK" "$@" --no-cache >"$TMP/r.out" 2>"$TMP/r.err"
+    "$BIN" "$CORP" --pack-task="$RTASK" "$@" >"$TMP/r.out" 2>"$TMP/r.err"
     local claimed marks
     claimed="$( sed -n 's/.*redacted \([0-9][0-9]*\) secret.*/\1/p' "$TMP/r.err" | head -1 )"
     marks="$( grep -o 'REDACTED:' "$TMP/r.out" | wc -l | tr -d ' ' )"
@@ -217,7 +229,7 @@ else
     no "(D) §B10.2: redaction tally is dialect-dependent or over-counts — xml claimed=$XML_CLAIM markers=$XML_MARK, json claimed=$JSN_CLAIM markers=$JSN_MARK"
 fi
 # the control: --for renders ONCE, so it never had the double-charge. If it moves, the fix reached too far.
-"$BIN" "$CORP" --for=probeSecretLoader --json --no-cache >"$TMP/rf.out" 2>"$TMP/rf.err"
+"$BIN" "$CORP" --for=probeSecretLoader --json >"$TMP/rf.out" 2>"$TMP/rf.err"
 FOR_CLAIM="$( sed -n 's/.*redacted \([0-9][0-9]*\) secret.*/\1/p' "$TMP/rf.err" | head -1 )"
 FOR_MARK="$( grep -o 'REDACTED:' "$TMP/rf.out" | wc -l | tr -d ' ' )"
 [ -n "$FOR_CLAIM" ] && [ "$FOR_CLAIM" = "$FOR_MARK" ] \
@@ -229,7 +241,7 @@ grep -qF 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789' "$TMP/r.out" \
     || ok "(D) --pack-task --json still redacts (raw token absent)"
 
 # ── (E) §C4 — the --max-tokens fit discloses itself in the JSON dialect too ────────────────────────────────
-"$BIN" "$ROOT/src" --max-tokens=1200 --json --no-cache >"$TMP/mt.json" 2>/dev/null
+"$BIN" "$ROOT/src" --max-tokens=1200 --json >"$TMP/mt.json" 2>/dev/null
 python3 - "$TMP/mt.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -244,7 +256,7 @@ PY
 [ $? = 0 ] && ok "(E) §C4: --max-tokens --json carries max_tokens/fit_bytes/fit_measured_in" \
            || no "(E) §C4 disclosure keys missing (listed above)"
 # a plain map (no --max-tokens) must stay byte-identical — the keys are absent-unless-produced
-"$BIN" "$ROOT/src" --json --top-k=5 --no-cache 2>/dev/null | grep -q 'max_tokens' \
+"$BIN" "$ROOT/src" --json --top-k=5 2>/dev/null | grep -q 'max_tokens' \
     && no "(E) a map with no --max-tokens leaked a max_tokens key (must be absent-unless-produced)" \
     || ok "(E) a map with no --max-tokens carries no fit keys (absent-unless-produced)"
 # over_ceiling: each dialect must label its OWN document truthfully — a BICONDITIONAL, not an agreement.
@@ -259,10 +271,10 @@ PY
 # silently exceeding without labelling (the original §H5/§C4 defect) AND it catches a dialect crying wolf.
 for MODE in xml json; do
     if [ "$MODE" = xml ]; then
-        "$BIN" "$ROOT/src" --max-tokens=400 --no-cache >"$TMP/oc.out" 2>/dev/null
+        "$BIN" "$ROOT/src" --max-tokens=400 >"$TMP/oc.out" 2>/dev/null
         LABEL="$( grep -c 'over_ceiling=1' "$TMP/oc.out" )"
     else
-        "$BIN" "$ROOT/src" --max-tokens=400 --json --no-cache >"$TMP/oc.out" 2>/dev/null
+        "$BIN" "$ROOT/src" --max-tokens=400 --json >"$TMP/oc.out" 2>/dev/null
         LABEL="$( grep -c '"over_ceiling":true' "$TMP/oc.out" )"
     fi
     OC_B="$( wc -c <"$TMP/oc.out" | tr -d ' ' )"
@@ -278,8 +290,8 @@ done
 
 # ── (F) determinism, both dialects ────────────────────────────────────────────────────────────────────────
 for D in "" "--json"; do
-    "$BIN" "$ROOT/src" --pack-task="rank symbols by pagerank" $D --no-cache >"$TMP/det1" 2>/dev/null
-    "$BIN" "$ROOT/src" --pack-task="rank symbols by pagerank" $D --no-cache >"$TMP/det2" 2>/dev/null
+    "$BIN" "$ROOT/src" --pack-task="rank symbols by pagerank" $D >"$TMP/det1" 2>/dev/null
+    "$BIN" "$ROOT/src" --pack-task="rank symbols by pagerank" $D >"$TMP/det2" 2>/dev/null
     cmp -s "$TMP/det1" "$TMP/det2" && ok "(F) --pack-task ${D:-xml} is byte-deterministic across runs" \
                                    || no "(F) --pack-task ${D:-xml} differs between two runs"
 done
@@ -319,8 +331,8 @@ CEOF
 printf 'int scrubProbe( int a, int b )\n{\n    // \033 caf\351 marker\n    if( a < b ) return a & b;\n    return a;\n}\n' > "$BD/dirty/d.cpp"
 
 bd_probe(){    # $1 = corpus dir -> prints "<xmlbytes> <jsonbytes> <xmlflag> <jsonflag>"
-    "$BIN" "$1" --pack-task="scrubProbe marker" --no-cache        >"$TMP/bd.xml"  2>/dev/null
-    "$BIN" "$1" --pack-task="scrubProbe marker" --json --no-cache >"$TMP/bd.json" 2>/dev/null
+    "$BIN" "$1" --pack-task="scrubProbe marker"        >"$TMP/bd.xml"  2>/dev/null
+    "$BIN" "$1" --pack-task="scrubProbe marker" --json >"$TMP/bd.json" 2>/dev/null
     python3 - "$TMP/bd.xml" "$TMP/bd.json" <<'PY'
 import json, sys, xml.etree.ElementTree as ET
 x = ET.parse( sys.argv[1] ).getroot()
@@ -390,9 +402,9 @@ printf 'int alphaWidget( int a ) { return a; }\nint betaCaller( void ) { return 
 
 # scrub_probe VERB TASK -> "<xml-markers> <json-markers>", each a sorted comma list or `none`.
 scrub_probe(){
-    _x="$( "$BIN" "$HB" "$1=$2" --top-k=1 --no-cache 2>/dev/null | head -c 600 \
+    _x="$( "$BIN" "$HB" "$1=$2" --top-k=1 2>/dev/null | head -c 600 \
            | grep -oE '(task|route)_scrubbed="1"' | sed 's/_scrubbed="1"//' | sort | tr '\n' ',' )"
-    _j="$( "$BIN" "$HB" "$1=$2" --top-k=1 --json --no-cache 2>/dev/null | head -c 900 \
+    _j="$( "$BIN" "$HB" "$1=$2" --top-k=1 --json 2>/dev/null | head -c 900 \
            | grep -oE '"(task|route)_xml_scrubbed":true' | sed 's/"//g; s/_xml_scrubbed:true//' | sort | tr '\n' ',' )"
     printf '%s %s\n' "${_x:-none}" "${_j:-none}"
 }
@@ -451,7 +463,7 @@ done
 # The third marker, both verbs: <b scrubbed="1"> is emitted by --for --detail as well as --pack-task, and
 # only ONE of those has a JSON dialect at all (--for --detail --json refuses). Pinned so that if --detail
 # ever gains --json, this arm names the twin it will need instead of silently not covering it.
-"$BIN" "$HB" --for=alphaWidget --detail=1 --json --no-cache >/dev/null 2>&1 \
+"$BIN" "$HB" --for=alphaWidget --detail=1 --json >/dev/null 2>&1 \
     && no "(H) --for --detail --json now answers — its body objects need the xml_scrubbed twin; extend this arm" \
     || ok "(H) --for --detail has no JSON dialect, so <b scrubbed=\"1\"> has exactly one twin to keep in step"
 

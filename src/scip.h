@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // scip.h — the SCIP precision overlay (Wave 4 #15): consume a Sourcegraph
 // SCIP index (`--scip=index.scip`) as an OPTIONAL, zero-dependency precision layer over the name-based
@@ -676,7 +679,7 @@ inline ScipOverlay loadScipOverlay( std::string_view path, const IngestResult& i
     if( bytes.empty() )
     {
         DEGRADED_PATH_ALERT( "--scip: index missing or unreadable — proceeding name-based" );
-        std::fprintf( stderr, "ripwire --scip: cannot read index '%s' — proceeding name-based\n", p.c_str() );
+        rw::emitTo( stderr, "ripwire --scip: cannot read index '{}' — proceeding name-based\n", p.c_str() );
         return {};
     }
 
@@ -684,7 +687,7 @@ inline ScipOverlay loadScipOverlay( std::string_view path, const IngestResult& i
     if( !scipDecodeIndex( bytes.data(), bytes.size(), docs ) )
     {
         DEGRADED_PATH_ALERT( "--scip: corrupt/truncated index — proceeding name-based" );
-        std::fprintf( stderr, "ripwire --scip: corrupt or truncated index '%s' — proceeding name-based\n", p.c_str() );
+        rw::emitTo( stderr, "ripwire --scip: corrupt or truncated index '{}' — proceeding name-based\n", p.c_str() );
         return {};
     }
 
@@ -702,7 +705,7 @@ inline ScipOverlay loadScipOverlay( std::string_view path, const IngestResult& i
         // decoded fine, but nothing mapped AND no occurrence was even examined: the index describes a
         // DIFFERENT tree than the one ripwire parsed (wrong index / wrong root). Say so, proceed name-based.
         DEGRADED_PATH_ALERT( "--scip: index covers no parsed file/line — proceeding name-based" );
-        std::fprintf( stderr, "ripwire --scip: index '%s' matched no parsed (file,line) — proceeding name-based\n", p.c_str() );
+        rw::emitTo( stderr, "ripwire --scip: index '{}' matched no parsed (file,line) — proceeding name-based\n", p.c_str() );
     }
     else if( sawOccurrences )
     {
@@ -729,8 +732,8 @@ inline ScipOverlay loadScipOverlay( std::string_view path, const IngestResult& i
         // append the older-commit hint ONLY when a staleness signal is present: refs were dropped (matched <
         // internal occurrences seen) or defs did not map. At a clean 100%/0-unmatched the hint would be misleading.
         const bool        stale = matchedOccurrencesPreDedup < internalOccurrences || ov.defsUnmatched > 0;
-        std::fprintf( stderr,
-            "ripwire: SCIP matched %d%% of occurrences (%zu/%zu), %zu defs unmatched, %zu external (unmatchable) occurrences skipped%s\n",
+        rw::emitTo( stderr,
+            "ripwire: SCIP matched {}% of occurrences ({}/{}), {} defs unmatched, {} external (unmatchable) occurrences skipped{}\n",
             pct, matchedOccurrencesPreDedup, internalOccurrences, ov.defsUnmatched, externalOccurrences,
             stale ? " — index may be from an older commit" : "" );
     }

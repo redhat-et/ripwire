@@ -138,7 +138,13 @@ constexpr std::size_t   kMinifiedMinBytes      = 256;
 // Extensions that are NOT source or text, so their absence from the index is not a disclosure the reader
 // needs: an unindexed .png is a picture, not a language ripwire failed to read. This is the rule the
 // `unindexed=` header and the unsupported-extension rows apply, stated once here and named in the legend
-// so a reader can see exactly what was withheld. A file with NO extension is likewise not counted (the
+// so a reader can see exactly what was withheld. `.cache` is on the list for the same reason and one more:
+// it is ripwire's OWN blob (`--cache=PATH`, and the `.cache` directory name already on kCrawlSkipDirs), so a
+// run that writes its cache inside the crawl root was reporting its own artifact as a language it failed to
+// read — and once #66 put that roll-up on every graph verb's root as graph_unindexed=, that self-reference
+// made the SAME query answer differently cold and warm (test/lib/jsimportalias.sh's cold/warm arm caught it).
+// A gauge an agent is asked to trust must not move because the tool wrote a file.
+// A file with NO extension is likewise not counted (the
 // class is "extensions this build has no grammar for" — an extensionless LICENSE/Makefile has no
 // extension to report, and inventing one would be a guess).
 // SORT ORDER IS LOAD-BEARING: isNonTextExtension binary-searches this table, so the entries are byte-sorted,
@@ -147,7 +153,7 @@ constexpr std::size_t   kMinifiedMinBytes      = 256;
 // is one asset extension quietly appearing in `unindexed=`.
 constexpr std::string_view kNonTextExts[] = {
     ".7z", ".a", ".apk", ".avi", ".avif", ".avro", ".bcsymbolmap",
-    ".bin", ".bmp", ".bz2", ".car", ".class", ".d", ".dat",
+    ".bin", ".bmp", ".bz2", ".cache", ".car", ".class", ".d", ".dat",
     ".db", ".deb", ".dll", ".dmg", ".doc", ".docx", ".ds_store",
     ".dylib", ".eot", ".exe", ".flac", ".gif", ".gz", ".icns",
     ".ico", ".idx", ".ipa", ".jar", ".jpeg", ".jpg", ".jpg_large",

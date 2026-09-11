@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // readability.h — `--readability`: the Posnett/Hindle/Devanbu (MSR 2011) readability lens, per function.
 //
@@ -260,12 +263,12 @@ inline int writeReadabilityReport( const IngestResult& ing, int pageLimit, int p
     std::fputs( kReadabilityLegend, stdout );
     // R-E fix (2026-08-19): the shared root-relative clause, emitted exactly when root= is (graphlegend.h).
     std::fputs( rw::rootRelPathsLegend( !rootAttr.empty() ), stdout );
-    std::printf( "<readability functions=\"%zu\"%s", total, disclosure );
+    rw::emitTo( stdout, "<readability functions=\"{}\"{}", total, rw::cstr( disclosure ) );
     if( scan.unreadableFileCount != 0 )
     {
-        std::printf( " unreadable_files=\"%u\"", scan.unreadableFileCount );
+        rw::emitTo( stdout, " unreadable_files=\"{}\"", scan.unreadableFileCount );
     }
-    std::printf( "%s>", rootAttr.c_str() );
+    rw::emitTo( stdout, "{}>", rootAttr.c_str() );
 
     // TWO scratch buffers, not one reused twice in the same call: escapeXml returns a VIEW into its `out`,
     // so a second call with the same buffer invalidates the first view — and argument evaluation order is
@@ -279,12 +282,12 @@ inline int writeReadabilityReport( const IngestResult& ing, int pageLimit, int p
         const std::string_view rel  = rootPrefix.empty() ? std::string_view( ing.files[s.fileId] ) : rw::sarif::rootRelativeUri( ing.files[s.fileId], rootPrefix );
         const std::string      path( escapeXml( rel, escPath ) );
         const std::string     name( escapeXml( s.name, escName ) );
-        std::printf( "<fn p=\"%s:%u\" n=\"%s\" lines=\"%u\" toks=\"%u\" ops=\"%u\" vocab=\"%u\" vol=\"%.1f\" ent=\"%.2f\" posnett=\"%.3f\"/>",
+        rw::emitTo( stdout, "<fn p=\"{}:{}\" n=\"{}\" lines=\"{}\" toks=\"{}\" ops=\"{}\" vocab=\"{}\" vol=\"{:.1f}\" ent=\"{:.2f}\" posnett=\"{:.3f}\"/>",
                      path.c_str(), s.line, name.c_str(),
                      row.lineCount, row.tokenCount, row.operatorCount, row.vocabularyCount,
                      row.volume, row.entropy, row.posnett );
     }
-    std::printf( "</readability>" );
+    rw::emitRaw( stdout, "</readability>" );
     return 0;
 }
 

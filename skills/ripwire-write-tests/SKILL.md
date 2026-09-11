@@ -1,14 +1,10 @@
 ---
 name: ripwire-write-tests
 description: >
-  Write tests for EXISTING code that has none — "this is untested, add coverage" / "what's missing a test
-  here?". Different moment from judging your own diff (ripwire-change-check) or your own code's quality
-  (ripwire-quality-bar): this is about FINDING what lacks a safety net and writing the test that closes the
-  gap — what no test reaches, and which integration seams nothing covers. Ranks candidates by `--seams`
-  (untested cross-module call
-  edges) and the `tested=1` coverage lens, gives you the symbol's outside contract via `--callers`, then verifies the
-  new test actually registers with `--affected`. For one target one --seams or --callers pass suffices —
-  don't audit repo-wide coverage to write a single test. Backed by ripwire (deterministic, on PATH).
+  Write tests for EXISTING code that has none — 'this is untested, add coverage', 'add a safety
+  net first'; also verify a new test reaches its intended code. Finds what no test reaches: --seams
+  ranks untested cross-module edges, --callers gives the outside contract. Diff test selection →
+  change-check. For one target one --seams or --callers pass suffices.
 allowed-tools: Bash, Read
 ---
 

@@ -357,5 +357,36 @@ for flags in "--doctor" "--doc-drift" "--hotspots" "--quality-delta" "--pr-conte
     printf '%s' "$a" | xmllint --noout - >/dev/null 2>&1 && ok "xmllint ($flags)" || no "xmllint ($flags) FAILED"
 done
 
+# ── (S) shallow clone: at= carries +shallow, --doctor's git row carries shallow="1" (2026-09-06 stranger audit).
+#     A `--depth=1` clone (actions/checkout's default, and how most people clone a repo they only read) has
+#     ONE commit of history: every churn= was 1, --hotspots ranked on complexity alone under a 12-month window
+#     label, --doctor said history="1", and nothing anywhere said the history was truncated. The stamp every
+#     repo-reading verb already carries is where the disclosure rides. Control: a full clone of the same
+#     repository carries neither. `git clone --depth` over a local path needs the file:// transport. ──
+FULLSRC="$TMP/fullsrc"
+git clone -q "file://$R" "$FULLSRC" >/dev/null 2>&1
+git -C "$FULLSRC" config commit.gpgsign false
+printf '\nint second( int b ) { return b + 1; }\n' >>"$FULLSRC/src/code.h"
+git -C "$FULLSRC" add -A && git -C "$FULLSRC" commit -q -m "second" >/dev/null 2>&1
+FULL="$TMP/fullclone"; SHALLOW="$TMP/shallowclone"
+git clone -q "file://$FULLSRC" "$FULL" >/dev/null 2>&1
+git clone -q --depth=1 "file://$FULLSRC" "$SHALLOW" >/dev/null 2>&1
+if [ "$( git -C "$SHALLOW" rev-parse --is-shallow-repository 2>/dev/null )" = "true" ]; then
+    SH_HOT="$( "$BIN" "$SHALLOW" --hotspots --no-cache 2>/dev/null | grep -oE '<hotspots[^>]*>' )"
+    SH_DOC="$( "$BIN" "$SHALLOW" --doctor   --no-cache 2>/dev/null | grep -oE '<c n="git"[^>]*/>' )"
+    FU_HOT="$( "$BIN" "$FULL"    --hotspots --no-cache 2>/dev/null | grep -oE '<hotspots[^>]*>' )"
+    FU_DOC="$( "$BIN" "$FULL"    --doctor   --no-cache 2>/dev/null | grep -oE '<c n="git"[^>]*/>' )"
+    case "$SH_HOT" in *'+shallow"'*) ok "(S1) shallow clone: --hotspots at= carries +shallow" ;;
+                       *) no "(S1) shallow clone: --hotspots at= has no +shallow: $SH_HOT" ;; esac
+    case "$SH_DOC" in *'shallow="1"'*) ok "(S2) shallow clone: --doctor git row carries shallow=\"1\"" ;;
+                       *) no "(S2) shallow clone: --doctor git row has no shallow=\"1\": $SH_DOC" ;; esac
+    case "$FU_HOT" in *'+shallow'*) no "(S3) control: FULL clone's --hotspots at= wrongly carries +shallow: $FU_HOT" ;;
+                       *) ok "(S3) control: full clone's --hotspots at= carries no +shallow" ;; esac
+    case "$FU_DOC" in *'shallow='*) no "(S4) control: FULL clone's --doctor git row wrongly carries shallow=: $FU_DOC" ;;
+                       *) ok "(S4) control: full clone's --doctor git row carries no shallow=" ;; esac
+else
+    no "(S0) could not produce a shallow clone over file:// — git too old for --depth on local transport?"
+fi
+
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fi
 exit "$fail"

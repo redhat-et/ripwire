@@ -15,6 +15,500 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Fixed — the super-linear warm floor under every graph-building verb (`--grep`, `--callers`, the map)
+
+On llvm-project (182,555 files, warm cache) a `--grep` for an absent literal took ~157 s, `--callers=main`
+~152 s and the default map 248 s, while the same crawl + cache load + model build without the graph took
+3.8 s. Profiled to one operation: the resolver rebuilt a receiver type's inheritance cone (two BFS walks
+with quadratic dedup) on every still-ambiguous receiver-typed call — 86,667 rebuilds for 2,984 distinct
+types, 143 s of the 154 s run. `ChaConeMemo` (`src/graph.h`) computes each cone once with the identical
+walk and cap; warm `--grep` is now 9 s, `--callers` 8.6 s, the map 10 s, and default maps are byte-identical
+before and after on go and llvm. Gate `test/chaconecheck.sh`; the phase tables are in `bench/PROFILE.md`
+and the evidence chain in `docs/EVALS.md` (2026-09-09).
+### Fixed — a Ruby receiver's lazy bit is order-blind, and a deep constant chain no longer overflows the stack (parser version 86)
+
+Two defects in the receiver round (parser version 83 above, 84 on main after the renumber), both found by
+review after the merge and both reproduced before they were fixed.
+
+**A load-time site below a lazy one was lost.** The receiver dedupe keeps one `Include` per (file, innermost
+open, written name), and the first occurrence in source order carried the lazy bit. A `Helper.fmt` inside a
+method written *above* the same `Helper.fmt` at class-body level therefore left the directive lazy; resolve.h's
+pair rule — one load-time directive makes the pair load-time — never saw the load-time site, and the
+structure dropped a real dependency. Two files that differ only in the order of those two lines read `ccd="3"
+shape="vertical"` with a god file one way and `ccd="2" shape="horizontal" lazy_edges="1"` the other. The lazy
+bit is now the AND over every occurrence: the first site still carries the byte, and a later load-time site
+clears the bit on the retained record (`captureIncludes`, `seenReceivers` now maps to the record's index).
+
+**A 5000-segment chain killed the run.** `rubyIsConstantChain` recursed once per segment of a left-nested
+`scope_resolution`, and the depth bound in `captureIncludes` sits *after* `directiveTargetOf`, so a generated
+`A::A::…::A.call` of 5 000 segments overflowed a parse worker's stack — SIGBUS, exit 138, no output, measured
+on macOS; 2 000 survived. The check is a loop now. Nothing else on the path recurses per segment: the walk is
+an explicit stack, the resolver splits the text.
+
+**`--help` said `lazy="1"` was TS/JS only.** It has read Ruby closures and autoloads since parser version 83;
+the `--impact` line now says so, and `docs/COMMANDS.md` is regenerated from it.
+
+Measured (`--deps --limit=100000`, parser version 83 → 86, the same four corpora as the receiver round; the
+gems are Rails 7.2.3.2, the apps are the same two):
+
+| corpus | ccd | nccd | shape | lazy_edges | bytes |
+| --- | --- | --- | --- | --- | --- |
+| activesupport `lib/` (282) | 15 299 → 15 299 | 7.59 → 7.59 | tangled | 945 → 935 | 75 970 → 75 988 |
+| activerecord `lib/` (395) | 4 088 → 4 325 | 1.36 → 1.44 | vertical | 1 026 → 1 023 | 114 745 → 114 763 |
+| a Rails app, 4683 files / 3532 `.rb` | 13 170 → 13 172 | 0.32 → 0.32 | horizontal | 5 632 → 5 630 | 750 913 → 750 915 |
+| a second Rails app, 1967 / 1895 `.rb` | 6 382 → 6 382 | 0.34 → 0.34 | horizontal | 1 830 → 1 830 | 363 733 → 363 750 |
+
+Read together: the pairs that flip are the ones written lazy-first and load-time-second in one body — ten on
+activesupport, three on activerecord, two on the first app, none on the second — and on activerecord three of
+them sit on a spine (ccd +237). No shape moves. Wall time unchanged. Cold == warm on activerecord and the
+first app; two `--no-cache` runs identical on all four.
+
+**Record shape unchanged**, so cache format 18 holds; the extraction identity moved (a cached lazy bit could be
+wrong), so cached Ruby files re-parse once. `kIngestParserVerMirror` moves in the same diff. The version is 86,
+not 85: main spent 85 on the plain-text prose tier before this landed, and a collision is resolved by
+re-bumping over the tip, never by keeping the fork's value.
+
+Gate: `test/rubyrecvcheck.sh` gains `lib/app/eager_after_lazy.rb` (18 fixture files; ccd 20 → 22, helper.rb
+afferent 2 → 3, a row arm with no `lazy_edges=`, the `--impact=Helper` importer tier) and a deep-chain arm that
+generates a 150 000-segment receiver at gate time and expects one directive and exit 0. Written red first: six
+arms fail against the pre-fix binary — the eager-after-lazy importer reads `lazy="1"`, health reads
+`ccd="21" lazy_edges="10"`, the deep chain exits 138. ASan/UBSan clean on both fixtures, the deep chain, and
+the cache round-trip. Re-pins with reasons in-file: `qschemetrip.hash` (parser mirror), `printf_parity.manifest`
+(`help` and `impact` bytes — the `--impact` import-tier legend moved with the `--help` line).
+
+### Added — a Ruby constant receiver is a dependency (parser version 83)
+
+Round two of the Ruby constant work. Parser version 82 gave the declarative spellings — `class X < Base`,
+include/extend/prepend, `autoload :Name`. This round adds the one a Zeitwerk application actually depends
+through: a **constant receiver** — `User.find`, `App::Mailer.deliver`, `Struct.new`. The autoloader loads
+lib/app/user.rb on that first reference, and nothing else in the file says so.
+
+Four decisions, each stated in `test/rubyrecvcheck.sh`'s header rather than asked:
+
+1. **What counts.** A `call` whose receiver is a constant or a constant chain (`A::B::C`, `::A::B`), spelled
+   as written. A chain whose head is not a constant — `repo::Finder`, `self.class`, an identifier, an ivar —
+   is nothing (`rubyIsConstantChain`; the round-one reader accepts any scope-resolution text and is right
+   for the positions the grammar already restricts to constants, a receiver is not one). A constant used as an
+   **argument** (`raise Errors::Boom`, `validates_with Foo`) or as a rescue class is **not** a receiver: a
+   disclosed floor of this round.
+2. **Dedupe at extraction**, per (file, innermost class/module open, written name). Zeitwerk loads a
+   constant once per process, on its first reference; the second `User.find` in the same body is not a new
+   dependency. The first occurrence in source order carries the byte and therefore the lazy bit. The nesting
+   is in the key: `User` under `module Admin` and `User` under the enclosing module may be two constants, and
+   the fixture has that file. `Time` and `::Time` are two spellings, two directives. The declarative shapes
+   stay one directive per occurrence — each is a statement. Measured with the Prism prototype: distinct
+   (file, nesting, name) is 61 % of raw receiver sites on activesupport, 67 % on activerecord, 56 % and 53 %
+   on the two Rails apps.
+3. **Lazy inside a closure.** A receiver inside a `method`, `singleton_method`, `lambda`, `block` or `do_block`
+   is `lazy="1"` — it runs when and if that closure runs, the parser-72 TS/JS function-body rule on Ruby's
+   own closure kinds (`kRubyClosureContainers`). A receiver at class-body or file level runs at load. A
+   `do`-block passed to a class-level macro (`included do`, `after_commit do`) is lazy under this rule even
+   when the callee runs it at load: the tool cannot see the callee, and a block is a closure it may or may
+   not run. `--impact`'s importer tier says `lazy="1"` only when every edge from that importer is lazy.
+4. **Resolution is round one's, unchanged.** Module.nesting innermost-first then Object, `::` absolute,
+   wrapper opens define nothing, genuine reopenings fan out, a same-file reference is shown and dropped as a
+   self-include. An out-of-tree receiver (`Time`, `Struct`, `Object`) is a shown `<inc t=>` row with no edge —
+   the posture every Python `import os` row already has.
+
+**The Ruby walk now descends every node.** A receiver is an expression — under an assignment, an argument
+list, a lambda, a binary, a string interpolation — so the statement-level container allowlist Ruby had through
+parser version 82 (19 kinds) would have needed ~40 and every kind it missed would have been a receiver
+silently dropped, a floor the tool could not disclose because it could not see it. The full descent is the
+cost the reference pass already pays once per Ruby file. The depth bound (256) still degrades loudly.
+`--deps --limit=100000 --no-cache` wall time on a 4683-file Rails app: 1.04 s → 0.92 s (noise); on
+activerecord `lib/` 0.21 s → 0.18 s.
+
+**Structure versus use — the decision this round adds, and it reaches TS/JS too.** With receivers counted
+like every other edge, a Ruby codebase is one strongly-connected core at the file level: models name each
+other, base classes name their subclasses through registries, and the cone of a controller is most of the
+application. Measured before the cut, `--deps --limit=100000` on a 4683-file Rails app went ccd
+12 740 → 1 407 232, nccd 0.31 → 33.74, and every Ruby corpus read `shape="tangled"`. That is a true fact
+about runtime references and a useless one for a lens: a reading that is the same everywhere is not a
+reading. So a **lazy edge** — a (from, to) pair every one of whose directives is written inside a closure
+(a Ruby method/lambda/block, a TS/JS function body) or is a Ruby `autoload` — is a **use**, not a load-time
+dependency, and the two views now say different things on purpose:
+
+- **Use** — `--impact`'s importer tier (`lazy="1"`), the file's own `<inc t=>` rows, call-resolution
+  narrowing, `--expand`'s siblings and `--cochange`'s static-coupling test all keep every edge. "Who uses
+  `User`?" is answered by all 197 files that call it.
+- **Structure** — `--deps`, `--arch` and `--report` measure the load-time graph: `afferent=`, `instab=`,
+  `transitive=`, godfiles, stabledeps, cycles, ccd/acd/nccd and `shape=` leave lazy pairs out
+  (`graph.h::resolveStructuralIncludeAdj`; one load-time directive makes the whole pair load-time, the
+  parser-72 `recordLazyPair` rule). The cut is disclosed where it is made: `<health lazy_edges=N>` counts the
+  distinct pairs left out and a file row carries `lazy_edges=N` for its own, both absent when 0 — so a corpus
+  with no lazy directive is byte-identical to before. A lazy edge is not an unresolved one: the unresolved
+  row has neither `lazy_edges=` nor an importer; the lazy row has both.
+
+This changes one TS/JS number: a `require()` inside a function body (parser version 72) was already
+`lazy="1"` in the importer tier and is now also out of `--deps`' structure. On this repo's own fixtures no
+gate pinned it inside the cone. `--deps --limit=100000`, parser version 82 → 83 (`files=` is the listing's
+own denominator: files with a row; `<godfiles total=>` the uncapped load-time importee count):
+
+| corpus | files= | ccd | acd | nccd | shape | importees | lazy_edges | `--deps` bytes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| activesupport 7.2.3.2 `lib/` (282) | 206 → 241 | 10 450 → 15 299 | 37.2 → 54.4 | 5.19 → 7.59 | tangled → tangled | 241 → 201 | 945 | 55 483 → 75 970 |
+| activerecord 7.2.3.2 `lib/` (395) | 300 → 368 | 2 714 → 4 088 | 6.9 → 10.4 | 0.90 → 1.36 | horizontal → vertical | 385 → 310 | 1 026 | 71 474 → 114 745 |
+| a Rails app, 4683 files / 3532 `.rb` | 2 296 → 3 245 | 12 740 → 13 170 | 3.3 → 3.4 | 0.31 → 0.32 | horizontal → horizontal | 385 → 414 | 5 632 | 378 473 → 750 913 |
+| a second Rails app, 1957 files / 1895 `.rb` | 1 072 → 1 455 | 6 289 → 6 382 | 3.3 → 3.4 | 0.33 → 0.34 | horizontal → horizontal | 189 → 197 | 1 830 | 173 606 → 363 733 |
+
+Read the two halves together: on the Rails apps the structure barely moves (class-body receivers are few)
+while `lazy_edges` says how large the runtime layer the structure leaves out is — 5 632 pairs on the first
+app, where the importer tier now names them all. On the gems the structure grows because a gem does depend at
+load time through class-body receivers (`ActiveSupport.on_load`, `Concern`), and importees FALL (241 → 201,
+385 → 310): a file whose only importers call it from inside methods is no longer a god file, it is a file
+`--impact` lists. The uncapped `<inc t=>` listing on activerecord carries 2 228 rows over 1 188 distinct
+targets, the most frequent being `ActiveSupport::Concern` (57, out of tree, shown, no edge).
+
+**Default map.** Byte-identical on a Ruby-free corpus (this repo's `src/`, modulo version stamps). On Ruby
+corpora the ranking moves a little (activesupport `est_tokens` 15 745 → 15 688, `pr_iters` 56 → 54) because
+include edges narrow ambiguous call resolution and there are more of them; no `id=` row moves — `scope` is
+still the immediate enclosing name.
+
+**Record shape unchanged.** A receiver is an `Include` with `isSymbolic` and `byte` (both parser version 82),
+so cache format 17 holds and only the extraction identity moved: cached Ruby files re-parse once. Cold and
+warm caches agree on activerecord and the 4683-file app (gated on the fixture).
+
+**Round one's gate moved two arms, honestly.** `test/rubyconstfix`'s `dynamic.rb` (`include
+Object.const_get(:Trackable)`) now has a row — the `Object` receiver, not the include, and the arm asserts
+exactly that; `point.rb` (`Point = Struct.new`) has a `Struct` row with `afferent="0"` — the alias is still
+not indexed, the floor note stands.
+
+Gate: `test/rubyrecvcheck.sh` + `test/rubyrecvfix/` (17 files — dedupe across seven receiver sites, two
+nestings of one name in one file, four laziness levels, lexical versus absolute, the Object-level fallback
+for a module-less script, a self-include, five non-constant receiver shapes, the Struct alias floor, the
+argument/rescue floor, a same-basename decoy, the structure-versus-use cut — ccd 20 over 17 files with
+`lazy_edges="9"`, App::User with four lazy importers and no `--deps` row, a lazy row told from an unresolved
+one — root-spelling parity, determinism, warm == cold, well-formedness). Written red first: 14 arms fail
+against the parser-version-82 binary and 7 more against the receiver build before the cut; every mutation
+control and floor arm passes there. 558 → 559 gate scripts.
+
+### Added — Ruby constant references are dependencies (parser version 82, cache format 17)
+
+A Zeitwerk application spells almost none of its dependencies with `require`: a controller depends on a
+model by **naming the constant**, and a Rails gem declares half its structure with `autoload :Name`. Parser
+version 81 gave Ruby `require`/`require_relative`/`load`; this round adds the constant spellings, so the
+file graph `--deps`/`--arch`/`--impact`/`--cochange` see is the one Ruby actually has:
+
+| Spelling | Directive | Resolution |
+| --- | --- | --- |
+| `class X < Base` | the superclass constant | index, lexical rule (below) |
+| `include M` / `extend M` / `prepend M` | one directive per constant argument | index, lexical rule |
+| `autoload :Name` (ActiveSupport::Autoload) | the constant | index, lexical rule; `isLazy` |
+| `autoload :Name, "path"` (Kernel#autoload) | the **path**, as one directive — never the constant beside it | the load-path rule, as a `require`; `isLazy` |
+
+**The rule is Ruby's own, not a convention.** Every `class`/`module` open in the corpus is recorded with its
+name as written (`Base`, `App::Audited`, `::Top`) and its byte span (`ConstOpen`, `src/model.h`). An open's
+nesting is its enclosing opens by span containment — the same containment that attributes a call to its
+def — and its fully-qualified constant follows: `::X` is absolute; a compact `class A::B` inside `module X`
+names `X::A::B` when the tree opens `X::A` anywhere, else `::A::B` (Module.nesting first, then Object). A
+reference `Name::Sub` at nesting `[A, A::B]` is looked up as `A::B::Name::Sub`, `A::Name::Sub`,
+`Name::Sub`; first hit wins. A superclass carries its class's own start byte, so it resolves in the
+**enclosing** scope, exactly as Ruby evaluates it. Constant targets are never probed as paths
+(`Include::isSymbolic`): `require "Foo"` is legal Ruby, and on a case-insensitive filesystem a path probe for
+`Trackable` lands on `lib/trackable.rb` — the fixture's decoy pins it.
+
+**Two kinds of "defined in many files", told apart structurally.** `module App` is opened by every file under
+`lib/app/`. An open whose body holds nested opens and **nothing else** is a *namespace wrapper*: it nests,
+but it defines nothing of `App` and is not a definer in the index (`ConstOpen::namespaceOnly`, read off the
+body's children — comments are extras and are skipped; an EMPTY open defines). A reopening **with** a body — a
+monkey patch, a decorator, a `core_ext` — is a real second definer, and a reference then edges to **every**
+definer: change any of them and the constant changes, which is what `--deps` measures. That is multiplicity
+(every answer is right), deliberately distinct from the specifier ambiguity every other Step-A degrades on
+(`require "shared"` answered by two files: exactly one is right, and this tool cannot tell which). Only the
+latter resolves to nothing. Measured with a Prism prototype of the same lexical rule on a 3532-file Rails
+app: 124 constants were "multiply defined" by opens, **5** by bodies, and treating wrappers as definers was
+what made 246 superclass references ambiguous there (0 after).
+
+**Measured** (`--deps --limit=100000 --no-cache`, both binaries from this tree; `importees` is the
+uncapped `<godfiles total=>` — files with at least one incoming edge — and `edge-bearing` is `<deps files=>`):
+
+| corpus | ccd | acd | nccd | shape | importees | edge-bearing files |
+| --- | --- | --- | --- | --- | --- | --- |
+| activesupport 7.2.3.2 `lib/` (282 files) | 3658 → 10450 | 13.0 → 37.2 | 1.82 → 5.19 | vertical → tangled | 194 → 241 | 194 → 206 |
+| activerecord 7.2.3.2 `lib/` (395) | 947 → 2714 | 2.4 → 6.9 | 0.31 → 0.90 | horizontal | 214 → 385 | 108 → 300 |
+| a Rails app, 4683 files / 3532 `.rb` | 5638 → 12740 | 1.5 → 3.3 | 0.14 → 0.31 | horizontal | 103 → 385 | 1154 → 2296 |
+| a second Rails app, 1957 / 1895 `.rb` | 5483 → 6258 | 2.9 → 3.3 | 0.29 → 0.33 | horizontal | 80 → 189 | 619 → 1066 |
+
+ActiveSupport turning `tangled` is `core_ext`: `String` is reopened with a body in 15 files, so every
+`< String` and `include`-of-a-patched-module depends on all of them — true, and the point of `core_ext`.
+The **default map** is byte-identical to the pre-change binary on four Ruby-free corpora (this repository
+and three others) and moves on Ruby ones only through the call graph's same-include tier: ActiveSupport
+`edges=` 3729 → 3715, `ambiguous=` 409 → 406; ActiveRecord 8397 → 8298, 1284 → 1105.
+
+**Floors, each pinned by an arm of `test/rubyconstcheck.sh`.** The ancestor half of Ruby's lookup (a
+constant inherited from a superclass or an included module) is not walked. `Point = Struct.new(…)` is an
+alias, not an open — `queries/ruby/tags.scm` skips CamelCase assignments and so does the index. `include
+Object.const_get(:X)`, `autoload :X, some_path`, `require some_variable` capture nothing. Constant
+**receivers** (`User.find`) are not this round: they are the bulk of a Zeitwerk app's edges and move every
+Ruby denominator again, so they land as their own change with their own table.
+
+**Record shape.** `Include` gains `isSymbolic` and `byte`; the per-file cache record gains the `ConstOpen`
+family after `routeUses` — `kCacheVersion` 16 → 17 (a format change; the parser-version bump re-ingests
+every cache anyway, so no extra cost). `Symbol::scope` stays the *immediate* enclosing name by design; the
+fully-qualified constant lives only where it is needed. `--impact`'s importer tier reports `lazy="1"` for
+an `autoload`, as it does for a function-body `require()`.
+
+**Expired floor.** `test/rubyrequirecheck.sh` arm 3(c) pinned "`autoload :Late, "lib/helper"` is not
+captured" since parser version 81. It now is (12 directives on that fixture, not 11; `lib/helper.rb`
+afferent 2 → 3), and the arm was inverted rather than deleted so the expiry is on the record.
+
+Gate: `test/rubyconstcheck.sh` + `test/rubyconstfix/` (30 files — nesting, compact and absolute names,
+lexical shadowing, the three mixin verbs, `autoload` plain / in `eager_autoload do` / in `autoload_under
+do` / with a path, a monkey-patched in-tree class, a patched core class, a namespace with 23 wrapper opens
+and one real body, a wrapper-only reopen, out-of-tree constants, a same-basename decoy, a same-file
+reference, two sites sharing an innermost open but not a nesting chain — `module A; module B` versus the
+compact `module A::B`, where only the first can see `A::Helper` — root-spelling parity, determinism,
+warm == cold, well-formedness). The chain pair was added after review: the resolver's memo was keyed on
+the innermost open alone, so whichever site was visited first fixed the other's answer, and cold and warm
+caches visit the sites in different orders — the fixture gave the helper two importers cold and none warm.
+The memo is now keyed on the whole chain. Written red first: 24 arms
+fail against the parser-version-81 binary, every mutation-control and floor arm passes there. 557 → 558
+gate scripts.
+
+## [0.5.0] — 2026-09-07
+
+**The first release carrying outside contributions.** Three people who do not work on this project
+wrote fixes that are in this binary — Michael Freeman, PollyBot13 and Andriy Tyurnikov — and three
+more found things it got wrong: Cort Fritz, stalep and Jan Mangs. All six are named below, beside
+what they found. That is what this number is for.
+
+### Added — Elixir, as a first-class indexed language
+
+A vendored tree-sitter grammar and call-graph extraction, with protocol implementations indexed as
+their own definitions. Contributed by **Michael Freeman**
+([#43](https://github.com/redhat-et/ripwire/pull/43)), rebased onto main's tip — the extraction
+identity is 78, not the 83 the fork carried — and extended with two gaps the fork could not see from
+where it sat. The import edges are described in their own section below.
+
+### Added — `<recent>` answers "what changed", not "what churns"
+
+`--rank-by=churn-decay` emits a file-level `<recent>` block ordered by newest commit first rather
+than by heaviest weight. A question about what changed recently was being answered with what changes
+most often, which is a different question. The MCP instructions carry the deferral hint.
+
+### Added — tests-to-run rows in evidence order
+
+A changed test file comes first, then its stem partner, then graph hops, and each row says *why* it
+is there. A test file that is itself in the diff is an obligation on its own evidence. The silent
+zero on that surface is fixed: an empty result now says so.
+
+### Fixed — named JavaScript and TypeScript import aliases
+
+`import { a as b }` resolved to the wrong symbol, and the refusal path deleted edges that were
+correct. Contributed by **PollyBot13**
+([#45](https://github.com/redhat-et/ripwire/pull/45)). The refusal now reports which of the three
+things it knew rather than collapsing them into one message.
+
+### Fixed — five languages were invisible to the unanalyzed-language disclosure
+
+`filesByLang` was sized with a hardcoded `16` while the `Lang` enum had grown to 21, so TOML, YAML,
+PHP, Lua and Elixir were dropped from the count silently — and two of them were named in
+`kUnanalyzedLangs`, meaning the lens promised to declare them and could not. Found by **Cort Fritz**
+on his own fork. The array is now sized by `kLangCount`, with a `static_assert` that fails the build
+if the enum outgrows it again. **A disclosure surface that under-reports is worse than one that is
+absent**, which is why this is the fix in this release that mattered most.
+
+### Fixed — the MCP tool schema a strict client refuses
+
+One tool declared a union type that stricter MCP clients reject outright, taking the whole server
+down with it ([#48](https://github.com/redhat-et/ripwire/issues/48), reported by **stalep** against
+opencode with `@ai-sdk/google-vertex`). Gated by `test/mcpstrictschemacheck.sh`, written red against
+the binary that had the bug.
+
+### Fixed — twenty first-run defects a stranger hits and a maintainer never does
+
+`PATH` not printed on install, a borrowed query in the quickstart, shallow clones mishandled, two
+inverted `--doctor` verdicts, lock-file litter, sidecars that did not say what they dropped, an empty
+map that read as an answer, and an upgrade path that left a binary which could not run and reported
+success. Found by auditing the install as somebody who had never run it.
+
+### Changed — the README leads with the proof
+
+The ten-moments token table and the graphs now sit under the install block: **300 words to the first
+piece of evidence instead of 1,009**. Twenty-six prose blocks moved behind `<details>`, each with a
+summary carrying its own number, so the page makes the same case whether or not anything is clicked.
+Nothing was removed — the full read is longer than before, because the summaries are additive.
+
+### Changed — Graft folded into the lineage ledger as the 42nd repository
+
+A registered head-to-head against Graft 0.17.0 ran, its losses were converted into code, and it was
+re-run: 14 of 30, with the placebo arm at 13-12-5. **The stop condition fired, so no ranking claim is
+published from that round.** What shipped is the two fixes it produced — tests-to-run in evidence
+order, and `<recent>`.
+
+### Changed — CI shards its gate suite across runners
+
+Each release leg's gates split across runner jobs, so the workflow's wall clock is one shard rather
+than one suite. Main runs are no longer cancelled by the next push.
+
+
+### Changed — every skill description rewritten under the client budget, and one skill folded away
+
+Reported and **measured** by [@jmangs](https://github.com/jmangs) in #49: Codex silently shortens skill
+descriptions to fit its context budget, keeping the first ~350 characters of each. All eighteen ripwire
+descriptions were over that budget — **18,455 characters authored, 6,300 retained, 12,155 discarded**,
+fifteen of them cut mid-token. What the truncation removed was the routing boundaries: the "NOT for X,
+that's skill Y" clauses, the secondary triggers, the misuse warnings. His diagnosis is the one this round
+acted on, and it is worth quoting: the shortened descriptions "do not become literally identical — the
+problem is semantic: related skills lose the clauses that distinguish them."
+
+That reframed the task. Eighteen skills whose boundaries need a thousand characters each to explain are
+eighteen skills whose boundaries are not carrying their own weight; the budget did not create the routing
+problem, it exposed it by deleting the prose that was compensating. So the round asked what set of skills
+has boundaries an agent can tell apart *in* 350 characters, rather than how to compress the existing ones.
+
+Pre-registered before any description was touched (`docs/EVALS.md`), with a truncation-aware A/B whose
+baseline was today's descriptions **truncated** — the thing users actually have — not today's full text.
+The registered set-total ceiling was amended 4,800 → 5,400 and a third blind rater added, both **before**
+measurement rather than after. Three LLM raters, sealed held-out set. The result was a **REJECT on the
+registered band**, published as such; the parts that stood were kept, including folding
+`ripwire-efficient` into `ripwire-orient` — the one boundary all three raters independently could not
+distinguish. `test/skilldescbudgetcheck.sh` now pins every description under the budget, with a
+binary-backed arm reading the binary's own skill discovery, so this cannot drift back silently.
+
+### Added — Bash, Lua, Ruby and Elixir get import/dependency edges (parser version 81)
+
+Four languages that emitted **no dependency record on any tree** now emit one per directive. Each spells a
+real file dependency, and each spells it as an ordinary CALL rather than a reserved statement — which is
+why `directiveTargetOf` had no branch for any of them, and why `lintrules.h::dependencyCapable` called all
+four incapable. That was a true statement about this extractor and a false one about the languages.
+
+| Language | Directives captured | Resolution rule |
+| --- | --- | --- |
+| Bash | `source FILE`, `. FILE` | the argument IS the path — no convention to model. A `$VAR`/`$( … )` anchor is reduced to its literal tail and probed against the includer's directory and every ancestor, unique-or-degrade |
+| Lua | `require "a.b"` | package.path's dotted convention (`a.b` → `a/b.lua`, or the package form `a/b/init.lua`), probed from the requiring file upward and under the `src/` and `lua/` source roots |
+| Ruby | `require_relative`, `require`, `load` | a leading dot means file-relative (the extractor normalizes `require_relative "x"` to `./x`); a bare specifier is searched against the crawl root plus `lib/`, `app/`, `test/`, `spec/` |
+| Elixir | `alias`, `import`, `require`, `use` | the corpus's OWN `defmodule` index, not a `MyApp.Foo` → `lib/my_app/foo.ex` path convention — so umbrella layouts and generated paths resolve, and a module two files define resolves to neither |
+
+Every rule is unique-or-degrade: two candidate files answering one specifier resolve to **neither**. There
+is no basename fallback anywhere in this, which is the one shortcut that would have made all four look
+better on a benchmark and been wrong invisibly.
+
+**Measured on this repository** (`ripwire . --deps`): 29 `source` directives across 28 gate scripts, 26 of
+them resolved. The 3 that do not are `. /dev/stdin <<EOF`, an absolute path outside the crawl — shown as a
+target row with no edge, never dropped. All 29 specifiers in this tree are `$ROOT/…`, so a literal-only
+resolver would have resolved zero of them.
+
+**Disclosed floors.** A shell specifier whose FILENAME is variable (`"$1"`, `"$d/$n.sh"`) cannot be
+resolved by anything short of running the script: it is captured, displayed, and produces no edge. Ruby's
+`autoload :Foo, "path"` is not captured (its path is argument two). An Elixir `alias A.B.C` also binds the
+local name `C`, so a later `C.f()` means `A.B.C.f` — the FILE edge lands, the NAME alias does **not** narrow
+call resolution, because the call's receiver is not kept by `queries/elixir/tags.scm`. Quoted Elixir AST
+(`quote do … end`) is descended into, so an `alias` inside a macro template is captured: the same
+union-over-arms posture the preprocessor tables take, a spurious edge rather than a missing one.
+
+### Changed — the dependency denominator moved, and now says so
+
+Making four languages dependency-capable changes **five denominators and one predicate**: `--deps`'s
+`dep_files=`/`ccd`/`acd`/`nccd`, `--arch`'s `propagation_cost`, and `--cochange`'s pair filter. Any number
+recorded against an older build on a corpus holding Bash, Ruby, Lua or Elixir has moved. On this repository
+`dep_files` went 758 → 1392 and `nccd` 0.68 → 0.39.
+
+`--deps` therefore publishes **`<health dep_langs=>`** — the capable language set, derived from the
+predicate itself so it cannot drift from what it documents. A `dep_files=` number is only comparable across
+builds when `dep_langs=` matches, and until now the set behind it existed only in a source comment.
+
+**`--cochange`'s `surprising=` is now a PAIR question.** It was "both sides dependency-capable", which
+agreed with the truth only while `.sh` was incapable. The moment a shell script became capable, that form
+would have declared `test/foo.sh` ↔ `src/bar.h` a pair whose missing static dependency is *evidence* — and
+no `source` can name a header. Measured before the change: of 153 `dep_capable="0"` rows in this repo's top
+400, the per-file form would have turned 88 capable and **75 of those are cross-dialect** pairs that would
+have read as hidden architectural debt. The predicate now also requires a shared dependency dialect, which
+additionally fixes 22 pre-existing over-claims of the same shape (`.js`↔`.h`, `.py`↔`.h`, `.py`↔`.cpp`).
+
+**Markdown stays excluded, now on the record.** Markdown *does* mint doc→doc link edges — `[B](b.md)` is a
+real edge and the map shows it — so "no import syntax" was never the reason. It is excluded because `--deps`
+and `--arch` measure change amplification, and a README linking twelve design docs is not twelve files of
+it: docs are read, not compiled. JSON/TOML/YAML have no file-level import at all.
+
+**Fixed while building this:** the root-relative probe every unknown-anchor rule needs was anchored at an
+empty base, which is the crawl root only when the root was written as `.`. The same tree scanned as
+`ripwire /abs/path` resolved 13 of 29 `source` directives where `ripwire .` resolved 26. Probing the
+includer's ancestor chain instead is root-spelling independent, and each new gate asserts the two spellings
+produce identical edges.
+
+Five new gates: `test/bashsourcecheck.sh`, `test/luarequirecheck.sh`, `test/rubyrequirecheck.sh`,
+`test/eliximportcheck.sh`, `test/deplangscheck.sh` (550 → 555). `test/luacheck.sh` §2 was **inverted** — it
+used to assert `<deps files="0">` on a Lua corpus, which is the assertion that would have kept this defect.
+
+### Fixed — Ruby: definitions carry their enclosing class/module, and `def name=` is indexed and called
+
+Landed from PR #47 (Andriy Tyurnikov), rebased onto the Elixir and ES-import work. Two Ruby extraction
+defects, plus one resolver defect that turned out not to be Ruby's at all.
+
+**A Ruby `def` had no scope.** `src/ingest_sidecap.h` set a definition's `scope` for C++, Python and Rust
+only, so no Ruby row ever carried an `id=`: a `Scope::name` selector (`--expand=B::initialize`,
+`--callers=A::helper`) could not address a Ruby method, same-named methods in different classes of one file
+folded into a single `overloads=N` row, and `--edit-check=Widget::resize` answered "symbol not found".
+(PR #47 also listed `editcheck.h`'s implicit-receiver exemption as a dead branch the scope revives. It does
+revive it, and it is still inert: Ruby has no implicit receiver parameter to exempt, and the caller test
+short-circuits on `arityExact == 0` — which `cc_paramArityExact` gives every Ruby definition, since its
+language gate does not list Ruby. Measured `incompatible="0"` scoped and unscoped, before and after. The
+comment there now says so rather than implying a recovered signal.) `rubyEnclosingScopeOf` (`src/ingest_names.h`) records
+the nearest enclosing `class`/`module`: it walks THROUGH `class << self`, skips the definition's own node
+(a `class Widget` inside `module Outer` scopes to `Outer`, never to itself) and takes the last segment of a
+`class Foo::Bar` name, matching the contract C++'s `qualifierOf` already keeps. A top-level `def` still has
+no scope and no `id=` — a file is not a scope.
+
+**`def name=(v)` was never indexed, and `obj.name = v` called the getter.** tree-sitter-ruby names a setter
+with a `(setter)` node, which `queries/ruby/tags.scm`'s method pattern did not accept. And `obj.name = v`
+parses as `(assignment left: (call method: (identifier)))` — the same `(call)` shape as the read
+`obj.name` — so the call rule captured a reference to `name` and the resolver handed a WRITE to the getter:
+a false edge, not a floor. The setter is now named `name=` on both sides: the definition from the
+`(setter)` node's own text, the call site by reading the assignment parent (`rubyCallIsAssignmentTarget`).
+`self.name = v` inside the class pins to `Class::name=` through Rule 1, and `--callers=name=` answers.
+
+Three resolver-side changes ride along so the new scope adds precision without losing edges: Ruby call
+receivers are classified (`src/ingest_binds.h` — `self.m` is `ThisObj`, `x.m` is `NamedVar`, a receiver-less
+`m(args)` stays bare); Rule 1 (`src/resolve.h`) treats a bare Ruby paren call as the implicit-self send it
+is, so `helper(2)` inside `class A` pins to `A::helper` as a FACT rather than as a disclosed locality guess
+(`lpin=`); and the S6-C locality tie-break (`src/graph.h`) no longer lets the caller's own definition win.
+
+**The tie-break fix is not Ruby's, and is disclosed as such.** A candidate that IS the caller matched itself
+on every locality segment, won alone, and was then dropped at emission as a self-loop — the site produced no
+edge at all, silently. Ruby's facade idiom surfaced it, but the shape is language-agnostic: the same fixture
+in PYTHON goes from `edges=0` to an honest 2-way split with `amb="1"` (`test/lpincheck.sh` arm (I), the
+language-agnostic pin — revert that one line and it goes red before any Ruby gate does). Measured across
+eight Ruby-FREE corpora (rocksdb, duckdb, ugrep, django, ccxt, mlflow, cpython and one large
+ObjC++ tree —
+`--no-cache --top-k=100000`, every row and every edge compared): the change is **edge-ADDITIVE, 0 edges lost
+anywhere**, `symbols=`, `unresolved=` and `external=` unchanged, `edges=` +0.02% (ccxt) to +0.33% (rocksdb),
+and `locality_pinned=` up where an edge that used to vanish is now emitted as a disclosed guess (rocksdb
+141 → 587, duckdb 171 → 575, cpython 556 → 709, the ObjC++ tree 100 → 237). A control binary carrying
+other change with only that line reverted is BYTE-IDENTICAL to the pre-merge tip on all eleven Ruby-free
+corpora — so nothing else in this change moves any other language.
+
+Measured on Ruby 2.6's own stdlib (833 `.rb` files, `--no-cache --top-k=100000`, byte-identical across runs,
+`xmllint --noout` clean): `symbols=` 14220 → 14476 (250 setter rows, 253 definitions, where none were
+indexed before); rows carrying `id=` 97 → 13191; rows carrying `overloads=` 649 → 194; call edges naming a
+setter 0 → 534; `ambiguous=` 5872 → 5544; `edges=` 29077 → 28840 — a NET DROP, because a write against a
+setter the tree does not define no longer invents an edge to the getter. **The `id=` attribute is what a
+scoped row costs**: the full map's `est_tokens` rose 504107 → 816226 on that corpus and the default 200-row
+map's 8796 → 12313 (+40%), the same price Python already pays. Non-Ruby corpora pay ~1% (rocksdb 14652 →
+14826).
+
+**Stated floors, each pinned by a gate arm so it stays a decision.** `rubyCallIsAssignmentTarget` reads a
+plain `(assignment)` only, so a compound `w.count += 1` and a conditional `w.count ||= 1` (both
+`operator_assignment`: they read AND write, and one capture carries one name) and a multiple assignment
+`a.count, b.count = 1, 2` (a `left_assignment_list`, one level deeper) all keep the getter edge only.
+`attr_accessor` / `attr_writer` / `attr_reader` generate their methods at load time and define nothing in
+the source text, so they are not symbols and a write against one resolves to an honest NOTHING — unchanged
+by this work, and now asserted. And the tie-break fix is the tie-break only: one layer up, tier 1 admits
+same-FILE candidates and stops if any exist, so a caller that is the only same-file candidate is still
+selected alone and still dropped to nothing (`def prerelease=; set.prerelease = v; end` in one file with the
+real `prerelease=` in another). Widening tier 1 past the caller would mint a cross-file edge the same-file
+tier already outranked, so the honest nothing stands.
+
+`kParserVer` 79 → 80 with `quality.h`'s `kIngestParserVerMirror` in the same commit (the fork carried 79,
+which the Elixir and ES-import bumps had already taken — re-bumped to the next free number over the merged
+tip, per the rule in `src/ingest_cache.h`); `kCacheVersion` stays 16, no record shape moved. Gates:
+`test/rubyscopecheck.sh` (scope shapes, the `Scope::name` selector, the overload split, facade delegation,
+Rule 1 pins, a hoist mutation, determinism), `test/rubysettercheck.sh` (definitions, write vs read edges,
+the explicit `w.name=(4)` and chained `w.inner.name = 5` spellings, four stated floors, `--callers` on both
+names, a write-to-read mutation, determinism) and `test/lpincheck.sh` arm (I). Both new gates were run
+against the PRE-fix binary and fail there (18 and 12 failing assertions), which is what makes them evidence.
+
+
 ## [0.4.0] — 2026-09-06
 
 **This section spans everything since 0.2.2, not since the last tag.** v0.3.0 through v0.3.8 were cut

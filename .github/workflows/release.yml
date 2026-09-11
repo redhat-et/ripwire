@@ -62,6 +62,10 @@ jobs:
             asset_os: linux
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container || '' }}
+    # Xcode 16.2 on the macOS legs (image default 15.4): its libc++ carries <print> at a macOS 14 deployment
+    # target — the std::print floor ci.yml holds. Empty on the container legs (gcc-toolset-14 already has it).
+    env:
+      DEVELOPER_DIR: ${{ matrix.os == 'macos-14' && '/Applications/Xcode_16.2.app/Contents/Developer' || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -108,6 +112,13 @@ jobs:
           ./build/ripwire test/fixture --no-cache > a.xml
           ./build/ripwire test/fixture --no-cache > b.xml
           diff a.xml b.xml
+
+      # The shipped binary must be the std::print arm on every leg (src/infra/emit.h): read off the binary,
+      # after PGO staging on the macOS legs, so a fallback could never ship unnoticed.
+      - name: The emitter the shipped binary compiled in is std::print
+        run: |
+          ./build/ripwire --version
+          ./build/ripwire --version | grep -q 'emit=std::print'
 
       - name: Smoke-test the freshly built binary
         run: |
@@ -201,6 +212,8 @@ jobs:
     needs: [build, smoke-rhel]
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -209,9 +222,30 @@ jobs:
       - name: List staged release assets
         run: ls -la dist
 
+      # 2026-09-06 (stranger audit): v0.4.0 — the first release in 1,051 commits — went out with a body of one
+      # compare link, while CHANGELOG.md carried a full section for it. The release page is the one page the
+      # README's Release badge links to; it carries that section now, and the auto-generated notes ride
+      # below it. A tag with no CHANGELOG section fails the job rather than publishing an empty page again.
+      - name: Release notes from CHANGELOG.md
+        run: |
+          set -eu
+          tag="${{ inputs.tag || github.ref_name }}"
+          ver="${tag#v}"
+          awk -v ver="$ver" '
+            $0 ~ "^## \\[" ver "\\]" { on = 1; print; next }
+            on && /^## \[/            { exit }
+            on                         { print }
+          ' CHANGELOG.md > dist/RELEASE_NOTES.md
+          if [ ! -s dist/RELEASE_NOTES.md ]; then
+            echo "CHANGELOG.md has no '## [$ver]' section — write it before tagging $tag" >&2
+            exit 1
+          fi
+          wc -l dist/RELEASE_NOTES.md
+
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
+          body_path: dist/RELEASE_NOTES.md
           files: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256

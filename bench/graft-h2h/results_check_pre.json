@@ -1,0 +1,331 @@
+{
+ "setup": {
+  "graft_build_ms": 9070
+ },
+ "rows": [
+  {
+   "qid": 7,
+   "arm": "ripwire-test-gate",
+   "ttca_bytes": 3719,
+   "emitted_bytes": 12514,
+   "complete": true,
+   "hits": 1,
+   "n_gold": 1,
+   "files_named_before_ttca": 14,
+   "total_files_named": 149,
+   "last_gold_rank": 14,
+   "wall_ms": 837.7,
+   "rc": 4,
+   "argv": [
+    "ripwire-test-gate",
+    "wt@11f21cf86~1+src-diff"
+   ]
+  },
+  {
+   "qid": 7,
+   "arm": "ripwire-situ",
+   "ttca_bytes": 3870,
+   "emitted_bytes": 4160,
+   "complete": true,
+   "hits": 1,
+   "n_gold": 1,
+   "files_named_before_ttca": 33,
+   "total_files_named": 36,
+   "last_gold_rank": 33,
+   "wall_ms": 910.1,
+   "rc": 0,
+   "argv": [
+    "ripwire-situ",
+    "wt@11f21cf86~1+src-diff"
+   ]
+  },
+  {
+   "qid": 7,
+   "arm": "graft-blast",
+   "ttca_bytes": 766,
+   "emitted_bytes": 766,
+   "complete": false,
+   "hits": 0,
+   "n_gold": 1,
+   "files_named_before_ttca": 0,
+   "total_files_named": 0,
+   "last_gold_rank": null,
+   "wall_ms": 431.9,
+   "rc": 0,
+   "argv": [
+    "graft-blast",
+    "wt@11f21cf86~1+src-diff"
+   ]
+  },
+  {
+   "qid": 8,
+   "arm": "graft-blast",
+   "ttca_bytes": 594,
+   "emitted_bytes": 594,
+   "complete": false,
+   "hits": 0,
+   "n_gold": 1,
+   "files_named_before_ttca": 0,
+   "total_files_named": 0,
+   "last_gold_rank": null,
+   "wall_ms": 5051.8,
+   "rc": 0,
+   "argv": [
+    "graft-blast",
+    "wt@0ae3d9f98~1+src-diff"
+   ]
+  },
+  {
+   "qid": 8,
+   "arm": "ripwire-situ",
+   "ttca_bytes": 3310,
+   "emitted_bytes": 3310,
+   "complete": false,
+   "hits": 0,
+   "n_gold": 1,
+   "files_named_before_ttca": 29,
+   "total_files_named": 29,
+   "last_gold_rank": null,
+   "wall_ms": 888.4,
+   "rc": 0,
+   "argv": [
+    "ripwire-situ",
+    "wt@0ae3d9f98~1+src-diff"
+   ]
+  },
+  {
+   "qid": 8,
+   "arm": "ripwire-test-gate",
+   "ttca_bytes": 12728,
+   "emitted_bytes": 12728,
+   "complete": false,
+   "hits": 0,
+   "n_gold": 1,
+   "files_named_before_ttca": 151,
+   "total_files_named": 151,
+   "last_gold_rank": null,
+   "wall_ms": 865.4,
+   "rc": 4,
+   "argv": [
+    "ripwire-test-gate",
+    "wt@0ae3d9f98~1+src-diff"
+   ]
+  },
+  {
+   "qid": 9,
+   "arm": "ripwire-test-gate",
+   "ttca_bytes": 8880,
+   "emitted_bytes": 13641,
+   "complete": true,
+   "hits": 5,
+   "n_gold": 5,
+   "files_named_before_ttca": 114,
+   "total_files_named": 164,
+   "last_gold_rank": 114,
+   "wall_ms": 1071.1,
+   "rc": 4,
+   "argv": [
+    "ripwire-test-gate",
+    "wt@f2546b662~1+src-diff"
+   ]
+  },
+  {
+   "qid": 9,
+   "arm": "ripwire-situ",
+   "ttca_bytes": 4178,
+   "emitted_bytes": 4178,
+   "complete": false,
+   "hits": 2,
+   "n_gold": 5,
+   "files_named_before_ttca": 37,
+   "total_files_named": 37,
+   "last_gold_rank": null,
+   "wall_ms": 1014.0,
+   "rc": 0,
+   "argv": [
+    "ripwire-situ",
+    "wt@f2546b662~1+src-diff"
+   ]
+  },
+  {
+   "qid": 9,
+   "arm": "graft-blast",
+   "ttca_bytes": 24860,
+   "emitted_bytes": 24860,
+   "complete": false,
+   "hits": 3,
+   "n_gold": 5,
+   "files_named_before_ttca": 244,
+   "total_files_named": 244,
+   "last_gold_rank": null,
+   "wall_ms": 5993.8,
+   "rc": 0,
+   "argv": [
+    "graft-blast",
+    "wt@f2546b662~1+src-diff"
+   ]
+  },
+  {
+   "qid": 10,
+   "arm": "graft-blast",
+   "ttca_bytes": 547,
+   "emitted_bytes": 547,
+   "complete": false,
+   "hits": 0,
+   "n_gold": 1,
+   "files_named_before_ttca": 0,
+   "total_files_named": 0,
+   "last_gold_rank": null,
+   "wall_ms": 7119.5,
+   "rc": 0,
+   "argv": [
+    "graft-blast",
+    "wt@c1b84d043~1+src-diff"
+   ]
+  },
+  {
+   "qid": 10,
+   "arm": "ripwire-situ",
+   "ttca_bytes": 2366,
+   "emitted_bytes": 2366,
+   "complete": false,
+   "hits": 0,
+   "n_gold": 1,
+   "files_named_before_ttca": 11,
+   "total_files_named": 11,
+   "last_gold_rank": null,
+   "wall_ms": 977.6,
+   "rc": 0,
+   "argv": [
+    "ripwire-situ",
+    "wt@c1b84d043~1+src-diff"
+   ]
+  },
+  {
+   "qid": 10,
+   "arm": "ripwire-test-gate",
+   "ttca_bytes": 4726,
+   "emitted_bytes": 4726,
+   "complete": false,
+   "hits": 0,
+   "n_gold": 1,
+   "files_named_before_ttca": 17,
+   "total_files_named": 17,
+   "last_gold_rank": null,
+   "wall_ms": 783.7,
+   "rc": 4,
+   "argv": [
+    "ripwire-test-gate",
+    "wt@c1b84d043~1+src-diff"
+   ]
+  },
+  {
+   "qid": 11,
+   "arm": "ripwire-test-gate",
+   "ttca_bytes": 7455,
+   "emitted_bytes": 13698,
+   "complete": true,
+   "hits": 2,
+   "n_gold": 2,
+   "files_named_before_ttca": 88,
+   "total_files_named": 173,
+   "last_gold_rank": 88,
+   "wall_ms": 804.0,
+   "rc": 4,
+   "argv": [
+    "ripwire-test-gate",
+    "wt@f2b623bcc~1+src-diff"
+   ]
+  },
+  {
+   "qid": 11,
+   "arm": "ripwire-situ",
+   "ttca_bytes": 4157,
+   "emitted_bytes": 4157,
+   "complete": false,
+   "hits": 1,
+   "n_gold": 2,
+   "files_named_before_ttca": 38,
+   "total_files_named": 38,
+   "last_gold_rank": null,
+   "wall_ms": 880.7,
+   "rc": 0,
+   "argv": [
+    "ripwire-situ",
+    "wt@f2b623bcc~1+src-diff"
+   ]
+  },
+  {
+   "qid": 11,
+   "arm": "graft-blast",
+   "ttca_bytes": 2025,
+   "emitted_bytes": 2025,
+   "complete": false,
+   "hits": 0,
+   "n_gold": 2,
+   "files_named_before_ttca": 12,
+   "total_files_named": 12,
+   "last_gold_rank": null,
+   "wall_ms": 5777.8,
+   "rc": 0,
+   "argv": [
+    "graft-blast",
+    "wt@f2b623bcc~1+src-diff"
+   ]
+  },
+  {
+   "qid": 12,
+   "arm": "graft-blast",
+   "ttca_bytes": 479,
+   "emitted_bytes": 479,
+   "complete": false,
+   "hits": 0,
+   "n_gold": 1,
+   "files_named_before_ttca": 0,
+   "total_files_named": 0,
+   "last_gold_rank": null,
+   "wall_ms": 5393.2,
+   "rc": 0,
+   "argv": [
+    "graft-blast",
+    "wt@3e7fc8816~1+src-diff"
+   ]
+  },
+  {
+   "qid": 12,
+   "arm": "ripwire-situ",
+   "ttca_bytes": 3759,
+   "emitted_bytes": 3989,
+   "complete": true,
+   "hits": 1,
+   "n_gold": 1,
+   "files_named_before_ttca": 33,
+   "total_files_named": 35,
+   "last_gold_rank": 33,
+   "wall_ms": 962.5,
+   "rc": 0,
+   "argv": [
+    "ripwire-situ",
+    "wt@3e7fc8816~1+src-diff"
+   ]
+  },
+  {
+   "qid": 12,
+   "arm": "ripwire-test-gate",
+   "ttca_bytes": 7175,
+   "emitted_bytes": 11920,
+   "complete": true,
+   "hits": 1,
+   "n_gold": 1,
+   "files_named_before_ttca": 83,
+   "total_files_named": 137,
+   "last_gold_rank": 83,
+   "wall_ms": 800.8,
+   "rc": 4,
+   "argv": [
+    "ripwire-test-gate",
+    "wt@3e7fc8816~1+src-diff"
+   ]
+  }
+ ]
+}

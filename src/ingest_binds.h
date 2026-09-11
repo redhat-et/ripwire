@@ -24,23 +24,30 @@ namespace
 // The two shapes whose receiver we inspect: C++/ObjC `field_expression` (`.argument` / `.field`) and
 // Python `attribute` (`.object` / `.attribute`). Named here rather than re-spelled per call site because
 // the depth-2 chain walk below applies exactly the same three questions twice, one level apart.
+// Ruby: tree-sitter-ruby has no member-access node of its own — `recv.m(args)` IS the `call` node, with
+// `receiver:` / `method:` fields, and a receiver-less `m(args)` is the same node kind with no `receiver:`
+// field. So `call` is the member-access node for Ruby and a null receiver is the bare shape — receiverOf's
+// existing null-receiver return already reads that as RecvKind::None (test/rubyscopecheck.sh, Rule 1 arms).
 inline bool isMemberAccessNode( const char* t, Lang lang ) noexcept
 {
-    if( lang == Lang::Cpp || lang == Lang::ObjC ) { return std::strcmp( t, "field_expression" ) == 0; }
-    if( lang == Lang::Python )                    { return std::strcmp( t, "attribute" ) == 0; }
+    if( lang == Lang::Cpp || lang == Lang::ObjC ) { return kindIs( t, "field_expression" ); }
+    if( lang == Lang::Python )                    { return kindIs( t, "attribute" ); }
+    if( lang == Lang::Ruby )                      { return kindIs( t, "call" ); }
     return false;
 }
 
 inline TSNode memberAccessReceiver( TSNode access, Lang lang ) noexcept
 {
-    return ( lang == Lang::Python ) ? ts_node_child_by_field_name( access, "object",   6 )
-                                    : ts_node_child_by_field_name( access, "argument", 8 );
+    if( lang == Lang::Python ) { return ts_node_child_by_field_name( access, "object",   6 ); }
+    if( lang == Lang::Ruby )   { return ts_node_child_by_field_name( access, "receiver", 8 ); }
+    return ts_node_child_by_field_name( access, "argument", 8 );
 }
 
 inline TSNode memberAccessField( TSNode access, Lang lang ) noexcept
 {
-    return ( lang == Lang::Python ) ? ts_node_child_by_field_name( access, "attribute", 9 )
-                                    : ts_node_child_by_field_name( access, "field",     5 );
+    if( lang == Lang::Python ) { return ts_node_child_by_field_name( access, "attribute", 9 ); }
+    if( lang == Lang::Ruby )   { return ts_node_child_by_field_name( access, "method",    6 ); }
+    return ts_node_child_by_field_name( access, "field", 5 );
 }
 
 // The classified receiver of one call site. `var` is set for NamedVar / FieldOfVar, `field` for
@@ -60,11 +67,15 @@ struct RecvShape
 inline RecvShape classifyReceiver( TSNode node, Lang lang, std::string_view src, bool allowChain )
 {
     const char* rt = ts_node_type( node );
-    if( std::strcmp( rt, "this" ) == 0 )
+    if( kindIs( rt, "this" ) )
     {
         return { RecvKind::ThisObj, {}, {} }; // C++ `this`
     }
-    if( std::strcmp( rt, "identifier" ) == 0 )
+    if( lang == Lang::Ruby && kindIs( rt, "self" ) )
+    {
+        return { RecvKind::ThisObj, {}, {} }; // Ruby `self` — its own node kind, not an identifier
+    }
+    if( kindIs( rt, "identifier" ) )
     {
         const std::string_view v = pattern::nodeText( node, src );
         if( v.empty() )
@@ -77,10 +88,10 @@ inline RecvShape classifyReceiver( TSNode node, Lang lang, std::string_view src,
         }
         return { RecvKind::NamedVar, std::string( v ), {} };                          // `x` — Rule 2 fuel
     }
-    if( lang == Lang::Python && std::strcmp( rt, "call" ) == 0 )
+    if( lang == Lang::Python && kindIs( rt, "call" ) )
     { // Phase 5: `super().m()` / `super(C, self).m()` — the receiver is a CALL of the identifier `super`
         const TSNode fn = ts_node_child_by_field_name( node, "function", 8 );
-        if( !ts_node_is_null( fn ) && std::strcmp( ts_node_type( fn ), "identifier" ) == 0 && pattern::nodeText( fn, src ) == "super" )
+        if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "identifier" ) && pattern::nodeText( fn, src ) == "super" )
         {
             return { RecvKind::SuperObj, {}, {} };
         }
@@ -96,7 +107,7 @@ inline RecvShape classifyReceiver( TSNode node, Lang lang, std::string_view src,
         }
         // the intermediate must be a plain NAME — a template/computed/parenthesized form is not a field
         const char* ift = ts_node_type( innerField );
-        if( std::strcmp( ift, "field_identifier" ) != 0 && std::strcmp( ift, "identifier" ) != 0 )
+        if( !kindIs( ift, "field_identifier" ) && !kindIs( ift, "identifier" ) )
         {
             return {};
         }
@@ -190,7 +201,7 @@ inline std::string_view declaratorVarName( TSNode decl, std::string_view src )
     for( int guard = 0; guard < 8 && !ts_node_is_null( decl ); ++guard )
     {
         const char* dt = ts_node_type( decl );
-        if( std::strcmp( dt, "identifier" ) == 0 )
+        if( kindIs( dt, "identifier" ) )
         {
             const std::uint32_t a = ts_node_start_byte( decl ), b = ts_node_end_byte( decl );
             return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
@@ -213,7 +224,7 @@ inline std::string_view declaratorVarName( TSNode decl, std::string_view src )
 // records for `Foo& x = …` locals too and move call edges outside this round's gate.
 inline std::string_view paramDeclaratorVarName( TSNode decl, std::string_view src )
 {
-    if( !ts_node_is_null( decl ) && std::strcmp( ts_node_type( decl ), "reference_declarator" ) == 0
+    if( !ts_node_is_null( decl ) && kindIs( ts_node_type( decl ), "reference_declarator" )
         && ts_node_is_null( ts_node_child_by_field_name( decl, "declarator", 10 ) ) && ts_node_named_child_count( decl ) > 0 )
     {
         decl = ts_node_named_child( decl, 0 );
@@ -233,11 +244,11 @@ inline std::string ctorTypeOf( TSNode value, std::string_view src )
     }
     const char* vt = ts_node_type( value );
     TSNode      idn {};
-    if( std::strcmp( vt, "call_expression" ) == 0 )
+    if( kindIs( vt, "call_expression" ) )
     { // C++/TS `Foo()`
         idn = ts_node_child_by_field_name( value, "function", 8 );
     }
-    else if( std::strcmp( vt, "new_expression" ) == 0 )
+    else if( kindIs( vt, "new_expression" ) )
     { // C++/TS `new Foo()`
         idn = ts_node_child_by_field_name( value, "constructor", 11 );
     }
@@ -246,7 +257,7 @@ inline std::string ctorTypeOf( TSNode value, std::string_view src )
         return {};
     }
     const char* it = ts_node_type( idn );
-    if( std::strcmp( it, "identifier" ) != 0 && std::strcmp( it, "type_identifier" ) != 0 && std::strcmp( it, "qualified_identifier" ) != 0 && std::strcmp( it, "scoped_identifier" ) != 0 )
+    if( !kindIs( it, "identifier" ) && !kindIs( it, "type_identifier" ) && !kindIs( it, "qualified_identifier" ) && !kindIs( it, "scoped_identifier" ) )
     {
         return {};
     }
@@ -263,8 +274,8 @@ inline std::string writtenTypeOf( TSNode typeNode, std::string_view src )
         return {};
     }
     const char* tt = ts_node_type( typeNode );
-    if( std::strcmp( tt, "type_identifier" ) == 0 || std::strcmp( tt, "qualified_identifier" ) == 0
-        || std::strcmp( tt, "scoped_type_identifier" ) == 0 )
+    if( kindIs( tt, "type_identifier" ) || kindIs( tt, "qualified_identifier" )
+        || kindIs( tt, "scoped_type_identifier" ) )
     {
         const std::uint32_t a = ts_node_start_byte( typeNode ), b = ts_node_end_byte( typeNode );
         return ( a <= b && b <= src.size() ) ? finalSegment( src.substr( a, b - a ) ) : std::string{};
@@ -288,17 +299,17 @@ inline std::string fnBindTargetOf( TSNode value, std::string_view src, bool& was
         return {};
     }
     const char* vt = ts_node_type( value );
-    if( std::strcmp( vt, "lambda_expression" ) == 0 )
+    if( kindIs( vt, "lambda_expression" ) )
     {
         return std::string( kFnBindLambdaTarget );
     }
     TSNode idn       = value;
     bool   addressOf = false;
-    if( std::strcmp( vt, "pointer_expression" ) == 0 )
+    if( kindIs( vt, "pointer_expression" ) )
     {
         // only the ADDRESS-OF form — `*p` is also a pointer_expression, and a dereference names no function.
         const TSNode op = ts_node_child( value, 0 );
-        if( ts_node_is_null( op ) || std::strcmp( ts_node_type( op ), "&" ) != 0 )
+        if( ts_node_is_null( op ) || !kindIs( ts_node_type( op ), "&" ) )
         {
             return {};
         }
@@ -310,7 +321,7 @@ inline std::string fnBindTargetOf( TSNode value, std::string_view src, bool& was
         addressOf = true;
     }
     const char* it = ts_node_type( idn );
-    if( std::strcmp( it, "identifier" ) != 0 && std::strcmp( it, "qualified_identifier" ) != 0 )
+    if( !kindIs( it, "identifier" ) && !kindIs( it, "qualified_identifier" ) )
     {
         return {};
     }
@@ -319,7 +330,7 @@ inline std::string fnBindTargetOf( TSNode value, std::string_view src, bool& was
     {
         return {};
     }
-    wasBareIdent = !addressOf && std::strcmp( it, "identifier" ) == 0;
+    wasBareIdent = !addressOf && kindIs( it, "identifier" );
     return std::string( src.substr( a, b - a ) );
 }
 
@@ -348,22 +359,22 @@ inline FnBindDeclShape fnDeclaratorShape( TSNode decl, std::string_view src )
     for( int guard = 0; guard < 10 && !ts_node_is_null( decl ); ++guard )
     {
         const char* dt = ts_node_type( decl );
-        if( std::strcmp( dt, "identifier" ) == 0 )
+        if( kindIs( dt, "identifier" ) )
         {
             const std::uint32_t a = ts_node_start_byte( decl ), b = ts_node_end_byte( decl );
             shape.name = ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
             return shape;
         }
-        if( std::strcmp( dt, "array_declarator" ) == 0 )
+        if( kindIs( dt, "array_declarator" ) )
         {
             return shape;
         }
-        const bool isRef = ( std::strcmp( dt, "reference_declarator" ) == 0 );
-        shape.sawFn  = shape.sawFn  || std::strcmp( dt, "function_declarator" ) == 0;
-        shape.sawPtr = shape.sawPtr || std::strcmp( dt, "pointer_declarator" ) == 0;
+        const bool isRef = ( kindIs( dt, "reference_declarator" ) );
+        shape.sawFn  = shape.sawFn  || kindIs( dt, "function_declarator" );
+        shape.sawPtr = shape.sawPtr || kindIs( dt, "pointer_declarator" );
         shape.sawRef = shape.sawRef || isRef;
         TSNode inner = ts_node_child_by_field_name( decl, "declarator", 10 );
-        if( ts_node_is_null( inner ) && ( isRef || std::strcmp( dt, "parenthesized_declarator" ) == 0 ) )
+        if( ts_node_is_null( inner ) && ( isRef || kindIs( dt, "parenthesized_declarator" ) ) )
         {
             // the parenthesized/reference inner declarator is an UNNAMED child — take the first named one
             if( ts_node_named_child_count( decl ) > 0 )
@@ -390,17 +401,17 @@ inline FnBindDeclShape fnDeclaratorShape( TSNode decl, std::string_view src )
 // `foo(*p)() = x;` assigning through a call result) stays undecoded — conservative, no false binding.
 inline std::string_view misparsedFnPtrDeclVar( TSNode lhs, std::string_view src )
 {
-    if( ts_node_is_null( lhs ) || std::strcmp( ts_node_type( lhs ), "call_expression" ) != 0 )
+    if( ts_node_is_null( lhs ) || !kindIs( ts_node_type( lhs ), "call_expression" ) )
     {
         return {};
     }
     const TSNode inner = ts_node_child_by_field_name( lhs, "function", 8 );
-    if( ts_node_is_null( inner ) || std::strcmp( ts_node_type( inner ), "call_expression" ) != 0 )
+    if( ts_node_is_null( inner ) || !kindIs( ts_node_type( inner ), "call_expression" ) )
     {
         return {};
     }
     const TSNode ty = ts_node_child_by_field_name( inner, "function", 8 );
-    if( ts_node_is_null( ty ) || std::strcmp( ts_node_type( ty ), "primitive_type" ) != 0 )
+    if( ts_node_is_null( ty ) || !kindIs( ts_node_type( ty ), "primitive_type" ) )
     {
         return {};
     }
@@ -410,17 +421,17 @@ inline std::string_view misparsedFnPtrDeclVar( TSNode lhs, std::string_view src 
         return {};
     }
     const TSNode pe = ts_node_named_child( args, 0 );
-    if( std::strcmp( ts_node_type( pe ), "pointer_expression" ) != 0 )
+    if( !kindIs( ts_node_type( pe ), "pointer_expression" ) )
     {
         return {};
     }
     const TSNode op = ts_node_child( pe, 0 );
-    if( ts_node_is_null( op ) || std::strcmp( ts_node_type( op ), "*" ) != 0 )
+    if( ts_node_is_null( op ) || !kindIs( ts_node_type( op ), "*" ) )
     {
         return {};
     }
     const TSNode idn = ts_node_child_by_field_name( pe, "argument", 8 );
-    if( ts_node_is_null( idn ) || std::strcmp( ts_node_type( idn ), "identifier" ) != 0 )
+    if( ts_node_is_null( idn ) || !kindIs( ts_node_type( idn ), "identifier" ) )
     {
         return {};
     }
@@ -519,14 +530,14 @@ inline bool concreteWrittenType( TSNode typeNode, std::string_view src, std::str
         return false;
     }
     const char* tt = ts_node_type( typeNode );
-    if( std::strcmp( tt, "primitive_type" ) == 0 || std::strcmp( tt, "sized_type_specifier" ) == 0
-        || std::strcmp( tt, "struct_specifier" ) == 0 || std::strcmp( tt, "class_specifier" ) == 0
-        || std::strcmp( tt, "union_specifier" ) == 0 || std::strcmp( tt, "enum_specifier" ) == 0 )
+    if( kindIs( tt, "primitive_type" ) || kindIs( tt, "sized_type_specifier" )
+        || kindIs( tt, "struct_specifier" ) || kindIs( tt, "class_specifier" )
+        || kindIs( tt, "union_specifier" ) || kindIs( tt, "enum_specifier" ) )
     {
         return true;
     }
-    if( std::strcmp( tt, "type_identifier" ) != 0 && std::strcmp( tt, "qualified_identifier" ) != 0
-        && std::strcmp( tt, "scoped_type_identifier" ) != 0 )
+    if( !kindIs( tt, "type_identifier" ) && !kindIs( tt, "qualified_identifier" )
+        && !kindIs( tt, "scoped_type_identifier" ) )
     {
         return false;
     }
@@ -546,7 +557,7 @@ inline bool concreteWrittenType( TSNode typeNode, std::string_view src, std::str
 // is invisible to a per-file parse, so a variable of that type stays UNKNOWN — and unknown still mints.
 inline std::string_view fnPtrAliasName( TSNode n, const char* t, std::string_view src )
 {
-    if( std::strcmp( t, "alias_declaration" ) == 0 )
+    if( kindIs( t, "alias_declaration" ) )
     {
         const TSNode desc = ts_node_child_by_field_name( n, "type", 4 );
         if( ts_node_is_null( desc ) )
@@ -554,14 +565,14 @@ inline std::string_view fnPtrAliasName( TSNode n, const char* t, std::string_vie
             return {};
         }
         const TSNode abst = ts_node_child_by_field_name( desc, "declarator", 10 );
-        if( ts_node_is_null( abst ) || std::strcmp( ts_node_type( abst ), "abstract_function_declarator" ) != 0 )
+        if( ts_node_is_null( abst ) || !kindIs( ts_node_type( abst ), "abstract_function_declarator" ) )
         {
             return {};
         }
         const TSNode nm = ts_node_child_by_field_name( n, "name", 4 );
         return ts_node_is_null( nm ) ? std::string_view{} : nodeTextOf( nm, src );
     }
-    if( std::strcmp( t, "type_definition" ) != 0 )
+    if( !kindIs( t, "type_definition" ) )
     {
         return {};
     }
@@ -569,7 +580,7 @@ inline std::string_view fnPtrAliasName( TSNode n, const char* t, std::string_vie
     for( std::uint32_t i = 0; i < cc; ++i )
     {
         const char* fname = ts_node_field_name_for_child( n, i );
-        if( fname == nullptr || std::strcmp( fname, "declarator" ) != 0 )
+        if( fname == nullptr || !kindIs( fname, "declarator" ) )
         {
             continue;
         }
@@ -578,11 +589,11 @@ inline std::string_view fnPtrAliasName( TSNode n, const char* t, std::string_vie
         for( int guard = 0; guard < 10 && !ts_node_is_null( d ); ++guard )
         {
             const char* dt = ts_node_type( d );
-            if( std::strcmp( dt, "type_identifier" ) == 0 )
+            if( kindIs( dt, "type_identifier" ) )
             {
                 return crossed ? nodeTextOf( d, src ) : std::string_view{};
             }
-            if( std::strcmp( dt, "function_declarator" ) == 0 )
+            if( kindIs( dt, "function_declarator" ) )
             {
                 crossed = true;
             }
@@ -606,7 +617,7 @@ inline std::pair<std::uint32_t, std::uint32_t> enclosingDefSpan( TSNode n )
     for( int guard = 0; guard < 128 && !ts_node_is_null( p ); ++guard )
     {
         const char* pt = ts_node_type( p );
-        if( std::strcmp( pt, "function_definition" ) == 0 || std::strcmp( pt, "lambda_expression" ) == 0 )
+        if( kindIs( pt, "function_definition" ) || kindIs( pt, "lambda_expression" ) )
         {
             return { ts_node_start_byte( p ), ts_node_end_byte( p ) };
         }
@@ -620,8 +631,8 @@ inline std::pair<std::uint32_t, std::uint32_t> enclosingDefSpan( TSNode n )
 // (a value parameter reassigned from another parameter is the same copy), and a `field_declaration`.
 inline void collectFnBindTypeFacts( TSNode n, const char* t, std::string_view src, std::vector<FnBindVarTypeFact>& facts )
 {
-    if( std::strcmp( t, "declaration" ) != 0 && std::strcmp( t, "parameter_declaration" ) != 0
-        && std::strcmp( t, "optional_parameter_declaration" ) != 0 && std::strcmp( t, "field_declaration" ) != 0 )
+    if( !kindIs( t, "declaration" ) && !kindIs( t, "parameter_declaration" )
+        && !kindIs( t, "optional_parameter_declaration" ) && !kindIs( t, "field_declaration" ) )
     {
         return;
     }
@@ -632,12 +643,12 @@ inline void collectFnBindTypeFacts( TSNode n, const char* t, std::string_view sr
     for( std::uint32_t i = 0; i < cc; ++i )
     {
         const char* fname = ts_node_field_name_for_child( n, i );
-        if( fname == nullptr || std::strcmp( fname, "declarator" ) != 0 )
+        if( fname == nullptr || !kindIs( fname, "declarator" ) )
         {
             continue;
         }
         TSNode d = ts_node_child( n, i );
-        if( std::strcmp( ts_node_type( d ), "init_declarator" ) == 0 )
+        if( kindIs( ts_node_type( d ), "init_declarator" ) )
         {
             d = ts_node_child_by_field_name( d, "declarator", 10 );
         }
@@ -762,13 +773,13 @@ inline ShadowScope enclosingShadowScope( TSNode n )
     for( int guard = 0; guard < 128 && !ts_node_is_null( p ); ++guard )
     {
         const char* pt = ts_node_type( p );
-        if( std::strcmp( pt, "compound_statement" ) == 0 )
+        if( kindIs( pt, "compound_statement" ) )
         {
             return { ts_node_start_byte( p ), ts_node_end_byte( p ), true };
         }
-        if(    std::strcmp( pt, "for_statement" ) == 0 || std::strcmp( pt, "for_range_loop" ) == 0
-            || std::strcmp( pt, "if_statement" ) == 0  || std::strcmp( pt, "while_statement" ) == 0
-            || std::strcmp( pt, "switch_statement" ) == 0 )
+        if(    kindIs( pt, "for_statement" ) || kindIs( pt, "for_range_loop" )
+            || kindIs( pt, "if_statement" )  || kindIs( pt, "while_statement" )
+            || kindIs( pt, "switch_statement" ) )
         {
             return { ts_node_start_byte( p ), ts_node_end_byte( p ), false };
         }
@@ -823,18 +834,18 @@ inline void emitShadowVarDecls( std::uint32_t fileId, Lang lang, TSNode decl, st
     for( int guard = 0; guard < 8 && !ts_node_is_null( decl ); ++guard )
     {
         const char* dt = ts_node_type( decl );
-        if( std::strcmp( dt, "identifier" ) == 0 )
+        if( kindIs( dt, "identifier" ) )
         {
             pushRawBind( fileId, lang, nodeTextOf( decl, src ), std::string{}, site, LocalBindKind::VarDecl, binds );
             return;
         }
-        if( std::strcmp( dt, "structured_binding_declarator" ) == 0 )
+        if( kindIs( dt, "structured_binding_declarator" ) )
         {
             const std::uint32_t cc = ts_node_named_child_count( decl );
             for( std::uint32_t i = 0; i < cc; ++i )
             {
                 const TSNode c = ts_node_named_child( decl, i );
-                if( std::strcmp( ts_node_type( c ), "identifier" ) == 0 )
+                if( kindIs( ts_node_type( c ), "identifier" ) )
                 {
                     pushRawBind( fileId, lang, nodeTextOf( c, src ), std::string{}, site, LocalBindKind::VarDecl, binds );
                 }
@@ -843,7 +854,7 @@ inline void emitShadowVarDecls( std::uint32_t fileId, Lang lang, TSNode decl, st
         }
         TSNode inner = ts_node_child_by_field_name( decl, "declarator", 10 );
         if( ts_node_is_null( inner )
-            && ( std::strcmp( dt, "reference_declarator" ) == 0 || std::strcmp( dt, "parenthesized_declarator" ) == 0 )
+            && ( kindIs( dt, "reference_declarator" ) || kindIs( dt, "parenthesized_declarator" ) )
             && ts_node_named_child_count( decl ) > 0 )
         {
             inner = ts_node_named_child( decl, 0 );   // the inner declarator is an UNNAMED child here
@@ -852,7 +863,7 @@ inline void emitShadowVarDecls( std::uint32_t fileId, Lang lang, TSNode decl, st
         {
             return;
         }
-        if( std::strcmp( dt, "function_declarator" ) == 0 && std::strcmp( ts_node_type( inner ), "parenthesized_declarator" ) != 0 )
+        if( kindIs( dt, "function_declarator" ) && !kindIs( ts_node_type( inner ), "parenthesized_declarator" ) )
         {
             return;   // a FUNCTION's name, not a variable's
         }
@@ -893,7 +904,7 @@ inline void emitShadowParamDecls( TSNode params, std::uint32_t fileId, Lang lang
     {
         const TSNode p  = ts_node_child( params, i );
         const char*  pt = ts_node_type( p );
-        if( std::strcmp( pt, "parameter_declaration" ) != 0 && std::strcmp( pt, "optional_parameter_declaration" ) != 0 )
+        if( !kindIs( pt, "parameter_declaration" ) && !kindIs( pt, "optional_parameter_declaration" ) )
         {
             continue;   // commas, `...`, attribute nodes — nothing declared
         }
@@ -933,14 +944,14 @@ inline void captureLambdaShadowDecls( TSNode n, std::uint32_t fileId, Lang lang,
         const TSNode c  = ts_node_named_child( caps, i );
         const char*  ct = ts_node_type( c );
         TSNode ident {};
-        if( std::strcmp( ct, "identifier" ) == 0 )
+        if( kindIs( ct, "identifier" ) )
         {
             ident = c;   // simple capture `[run]` / `[&run]` (the `&` is an anonymous sibling)
         }
-        else if( std::strcmp( ct, "lambda_capture_initializer" ) == 0 && ts_node_named_child_count( c ) > 0 )
+        else if( kindIs( ct, "lambda_capture_initializer" ) && ts_node_named_child_count( c ) > 0 )
         {
             const TSNode nm = ts_node_named_child( c, 0 );   // `[trim = expr]` — the FIRST named child is the introduced name
-            if( std::strcmp( ts_node_type( nm ), "identifier" ) == 0 )
+            if( kindIs( ts_node_type( nm ), "identifier" ) )
             {
                 ident = nm;
             }
@@ -960,11 +971,11 @@ inline void captureLambdaShadowDecls( TSNode n, std::uint32_t fileId, Lang lang,
 inline TSNode fnDefParameterList( TSNode fnDef )
 {
     TSNode decl = ts_node_child_by_field_name( fnDef, "declarator", 10 );
-    for( int guard = 0; guard < 8 && !ts_node_is_null( decl ) && std::strcmp( ts_node_type( decl ), "function_declarator" ) != 0; ++guard )
+    for( int guard = 0; guard < 8 && !ts_node_is_null( decl ) && !kindIs( ts_node_type( decl ), "function_declarator" ); ++guard )
     {
         decl = ts_node_child_by_field_name( decl, "declarator", 10 );
     }
-    if( ts_node_is_null( decl ) || std::strcmp( ts_node_type( decl ), "function_declarator" ) != 0 )
+    if( ts_node_is_null( decl ) || !kindIs( ts_node_type( decl ), "function_declarator" ) )
     {
         return TSNode{};
     }
@@ -1004,19 +1015,19 @@ inline void capturePythonParamShadowDecls( TSNode n, std::uint32_t fileId, Lang 
         const TSNode p  = ts_node_child( params, i );
         const char*  pt = ts_node_type( p );
         TSNode       ident{};
-        if( std::strcmp( pt, "identifier" ) == 0 )
+        if( kindIs( pt, "identifier" ) )
         {
             ident = p;
         }
-        else if( std::strcmp( pt, "default_parameter" ) == 0 || std::strcmp( pt, "typed_default_parameter" ) == 0 )
+        else if( kindIs( pt, "default_parameter" ) || kindIs( pt, "typed_default_parameter" ) )
         {
             ident = ts_node_child_by_field_name( p, "name", 4 );
         }
-        else if( std::strcmp( pt, "typed_parameter" ) == 0 || std::strcmp( pt, "list_splat_pattern" ) == 0 || std::strcmp( pt, "dictionary_splat_pattern" ) == 0 )
+        else if( kindIs( pt, "typed_parameter" ) || kindIs( pt, "list_splat_pattern" ) || kindIs( pt, "dictionary_splat_pattern" ) )
         {
             ident = ts_node_named_child( p, 0 );
         }
-        if( ts_node_is_null( ident ) || std::strcmp( ts_node_type( ident ), "identifier" ) != 0 )
+        if( ts_node_is_null( ident ) || !kindIs( ts_node_type( ident ), "identifier" ) )
         {
             continue;   // commas, separators, tuple patterns — nothing this veto can name
         }
@@ -1028,7 +1039,7 @@ inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t file
 {
     if( lang == Lang::Python )
     {
-        if( std::strcmp( t, "function_definition" ) == 0 )
+        if( kindIs( t, "function_definition" ) )
         {
             capturePythonParamShadowDecls( n, fileId, lang, src, binds );   // Phase 4b: veto evidence only (empty span)
         }
@@ -1038,10 +1049,10 @@ inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t file
     {
         return;
     }
-    const bool isRangeFor = std::strcmp( t, "for_range_loop" ) == 0;
-    const bool isLambda   = !isRangeFor && std::strcmp( t, "lambda_expression" ) == 0;
-    const bool isCatch    = !isRangeFor && !isLambda && std::strcmp( t, "catch_clause" ) == 0;
-    const bool isFnDef    = !isRangeFor && !isLambda && !isCatch && std::strcmp( t, "function_definition" ) == 0;
+    const bool isRangeFor = kindIs( t, "for_range_loop" );
+    const bool isLambda   = !isRangeFor && kindIs( t, "lambda_expression" );
+    const bool isCatch    = !isRangeFor && !isLambda && kindIs( t, "catch_clause" );
+    const bool isFnDef    = !isRangeFor && !isLambda && !isCatch && kindIs( t, "function_definition" );
     if( !isRangeFor && !isLambda && !isCatch && !isFnDef )
     {
         return;   // every other node type declares nothing this capture owns
@@ -1111,12 +1122,12 @@ inline void captureFnBindDecl( TSNode n, std::uint32_t fileId, Lang lang, std::s
     for( std::uint32_t i = 0; i < cc; ++i )
     {
         const char* fname = ts_node_field_name_for_child( n, i );
-        if( fname == nullptr || std::strcmp( fname, "declarator" ) != 0 )
+        if( fname == nullptr || !kindIs( fname, "declarator" ) )
         {
             continue;
         }
         const TSNode c = ts_node_child( n, i );
-        if( std::strcmp( ts_node_type( c ), "init_declarator" ) != 0 )
+        if( !kindIs( ts_node_type( c ), "init_declarator" ) )
         {
             continue;   // no initializer → no binding fact here (a later assignment carries its own)
         }
@@ -1127,7 +1138,7 @@ inline void captureFnBindDecl( TSNode n, std::uint32_t fileId, Lang lang, std::s
             // A5 escape guard: `H& r = fn;` / `auto& r = fn;` ALIASES fn — a write through r retargets fn
             // invisibly, so the bound-to variable is clobbered (toward tombstone, never toward resolve) and
             // the alias itself gets NO positive (its target can change under it the same way).
-            if( !ts_node_is_null( valueNode ) && std::strcmp( ts_node_type( valueNode ), "identifier" ) == 0 )
+            if( !ts_node_is_null( valueNode ) && kindIs( ts_node_type( valueNode ), "identifier" ) )
             {
                 const std::string_view aliased = nodeTextOf( valueNode, src );
                 if( !aliased.empty() )
@@ -1160,12 +1171,12 @@ inline void captureFnBindDecl( TSNode n, std::uint32_t fileId, Lang lang, std::s
 inline void captureFnBindEscape( TSNode n, std::string_view src, std::vector<FnBindClobber>& fnUnk )
 {
     const TSNode op = ts_node_child( n, 0 );
-    if( ts_node_is_null( op ) || std::strcmp( ts_node_type( op ), "&" ) != 0 )
+    if( ts_node_is_null( op ) || !kindIs( ts_node_type( op ), "&" ) )
     {
         return;
     }
     const TSNode idn = ts_node_child_by_field_name( n, "argument", 8 );
-    if( ts_node_is_null( idn ) || std::strcmp( ts_node_type( idn ), "identifier" ) != 0 )
+    if( ts_node_is_null( idn ) || !kindIs( ts_node_type( idn ), "identifier" ) )
     {
         return;
     }
@@ -1191,7 +1202,7 @@ inline void captureFnBindAssign( TSNode n, std::uint32_t fileId, Lang lang, std:
 {
     const TSNode lhs = ts_node_child_by_field_name( n, "left",  4 );
     const TSNode rhs = ts_node_child_by_field_name( n, "right", 5 );
-    if( !ts_node_is_null( lhs ) && std::strcmp( ts_node_type( lhs ), "identifier" ) == 0 )
+    if( !ts_node_is_null( lhs ) && kindIs( ts_node_type( lhs ), "identifier" ) )
     {
         const std::uint32_t a = ts_node_start_byte( lhs ), b = ts_node_end_byte( lhs );
         if( a <= b && b <= src.size() )
@@ -1316,7 +1327,7 @@ void bindsVisitNode( BindCtx& cx, TSNode n, const char* t )
     const bool                  cFamilyFn = cx.cFamilyFn;
 
     // C++/ObjC: `Foo x;` · `Foo* x;` · `Foo x = Foo();` · `auto x = Foo();`
-    if( ( lang == Lang::Cpp || lang == Lang::ObjC ) && std::strcmp( t, "declaration" ) == 0 )
+    if( ( lang == Lang::Cpp || lang == Lang::ObjC ) && kindIs( t, "declaration" ) )
     {
         const TSNode typeNode = ts_node_child_by_field_name( n, "type", 4 );
         std::string  written  = writtenTypeOf( typeNode, src );
@@ -1334,7 +1345,7 @@ void bindsVisitNode( BindCtx& cx, TSNode n, const char* t )
             {
                 continue;
             }
-            if( std::strcmp( ts_node_field_name_for_child( n, i ), "declarator" ) != 0 )
+            if( !kindIs( ts_node_field_name_for_child( n, i ), "declarator" ) )
             {
                 continue;
             }
@@ -1343,7 +1354,7 @@ void bindsVisitNode( BindCtx& cx, TSNode n, const char* t )
             // emitDeclBinds also records the r9 VarDecl shadow fact for the declared NAME regardless of type
             // resolvability (`int run = 0;` binds no type — writtenTypeOf refuses primitives — yet the local
             // exists and shadows).
-            if( std::strcmp( ct, "init_declarator" ) == 0 )
+            if( kindIs( ct, "init_declarator" ) )
             {
                 const TSNode declarator = ts_node_child_by_field_name( c, "declarator", 10 );
                 std::string  type       = written.empty() ? ctorTypeOf( ts_node_child_by_field_name( c, "value", 5 ), src ) : written;
@@ -1358,11 +1369,11 @@ void bindsVisitNode( BindCtx& cx, TSNode n, const char* t )
         }
     }
     // C++ `x = Foo();` (re-assignment to a constructor) — assignment_expression inside an expression_statement.
-    else if( ( lang == Lang::Cpp || lang == Lang::ObjC ) && std::strcmp( t, "assignment_expression" ) == 0 )
+    else if( ( lang == Lang::Cpp || lang == Lang::ObjC ) && kindIs( t, "assignment_expression" ) )
     {
         const TSNode lhs = ts_node_child_by_field_name( n, "left",  4 );
         const TSNode rhs = ts_node_child_by_field_name( n, "right", 5 );
-        if( !ts_node_is_null( lhs ) && std::strcmp( ts_node_type( lhs ), "identifier" ) == 0 )
+        if( !ts_node_is_null( lhs ) && kindIs( ts_node_type( lhs ), "identifier" ) )
         {
             const std::uint32_t a = ts_node_start_byte( lhs ), b = ts_node_end_byte( lhs );
             if( a <= b && b <= src.size() )
@@ -1372,21 +1383,21 @@ void bindsVisitNode( BindCtx& cx, TSNode n, const char* t )
         }
     }
     // Python `x = Foo()` — assignment with a bare-identifier LHS and a constructor-call RHS.
-    else if( lang == Lang::Python && std::strcmp( t, "assignment" ) == 0 )
+    else if( lang == Lang::Python && kindIs( t, "assignment" ) )
     {
         const TSNode lhs = ts_node_child_by_field_name( n, "left",  4 );
         const TSNode rhs = ts_node_child_by_field_name( n, "right", 5 );
-        if( !ts_node_is_null( lhs ) && std::strcmp( ts_node_type( lhs ), "identifier" ) == 0 )
+        if( !ts_node_is_null( lhs ) && kindIs( ts_node_type( lhs ), "identifier" ) )
         {
             const std::uint32_t a = ts_node_start_byte( lhs ), b = ts_node_end_byte( lhs );
             if( a <= b && b <= src.size() )
             {
                 // Python RHS constructor is a `call` node (not `call_expression`); reuse finalSegment on its callee.
                 std::string type;
-                if( !ts_node_is_null( rhs ) && std::strcmp( ts_node_type( rhs ), "call" ) == 0 )
+                if( !ts_node_is_null( rhs ) && kindIs( ts_node_type( rhs ), "call" ) )
                 {
                     const TSNode fn = ts_node_child_by_field_name( rhs, "function", 8 );
-                    if( !ts_node_is_null( fn ) && std::strcmp( ts_node_type( fn ), "identifier" ) == 0 )
+                    if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "identifier" ) )
                     {
                         const std::uint32_t fa = ts_node_start_byte( fn ), fb = ts_node_end_byte( fn );
                         if( fa <= fb && fb <= src.size() )
@@ -1400,10 +1411,10 @@ void bindsVisitNode( BindCtx& cx, TSNode n, const char* t )
         }
     }
     // TypeScript `const x = new Foo();` · `let y: Bar = ...;` — variable_declarator.
-    else if( lang == Lang::TypeScript && std::strcmp( t, "variable_declarator" ) == 0 )
+    else if( lang == Lang::TypeScript && kindIs( t, "variable_declarator" ) )
     {
         const TSNode nameNode = ts_node_child_by_field_name( n, "name", 4 );
-        if( !ts_node_is_null( nameNode ) && std::strcmp( ts_node_type( nameNode ), "identifier" ) == 0 )
+        if( !ts_node_is_null( nameNode ) && kindIs( ts_node_type( nameNode ), "identifier" ) )
         {
             const std::uint32_t a = ts_node_start_byte( nameNode ), b = ts_node_end_byte( nameNode );
             if( a <= b && b <= src.size() )
@@ -1417,7 +1428,7 @@ void bindsVisitNode( BindCtx& cx, TSNode n, const char* t )
                     for( std::uint32_t i = 0; i < cc; ++i )
                     {
                         const TSNode c = ts_node_child( ann, i );
-                        if( std::strcmp( ts_node_type( c ), "type_identifier" ) == 0 )
+                        if( kindIs( ts_node_type( c ), "type_identifier" ) )
                         { const std::uint32_t ta = ts_node_start_byte( c ), tb = ts_node_end_byte( c );
                           if( ta <= tb && tb <= src.size() ) { type = finalSegment( src.substr( ta, tb - ta ) ); } break; }
                     }
@@ -1439,15 +1450,15 @@ void bindsVisitNode( BindCtx& cx, TSNode n, const char* t )
     // ── L3 fn-pointer/callback capture (C/C++/ObjC) — a SEPARATE if (not part of the Rule-2 chain above):
     // the same `declaration` node can carry BOTH a Rule-2 var→type fact and a var→function fact
     // (`H fnPtr = beta;` emits fnPtr:H for receiver narrowing AND fnPtr→beta for call resolution). ──
-    if( cFamilyFn && std::strcmp( t, "declaration" ) == 0 )
+    if( cFamilyFn && kindIs( t, "declaration" ) )
     {
         captureFnBindDecl( n, fileId, lang, src, fnPos, fnUnk, fnGate.pendingDecl );
     }
-    else if( cFamilyFn && std::strcmp( t, "assignment_expression" ) == 0 )
+    else if( cFamilyFn && kindIs( t, "assignment_expression" ) )
     {
         captureFnBindAssign( n, fileId, lang, src, fnPos, fnUnk, fnGate.pending );
     }
-    else if( cFamilyFn && std::strcmp( t, "pointer_expression" ) == 0 )
+    else if( cFamilyFn && kindIs( t, "pointer_expression" ) )
     {
         captureFnBindEscape( n, src, fnUnk );   // A5: `&fn` anywhere clobbers the variable (escape guard)
     }

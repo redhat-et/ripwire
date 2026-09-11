@@ -347,7 +347,9 @@ tools = json.load( open( sys.argv[1] ) )["result"]["tools"]
 for t in tools:
     schema = t.get( "inputSchema", {} )
     req    = list( schema.get( "required", [] ) )
-    # exemplar's kind-or-task is an anyOf in practice: give it `kind` so the call is complete.
+    # exemplar's kind-or-task is an either/or its `required` cannot express (issue #48 removed the
+    # top-level anyOf that used to; it lives in the two members' descriptions now, and in the runtime
+    # refusal). Give it `kind` so the call is complete.
     if t["name"] == "exemplar" and not req: req = [ "kind" ]
     parts = [ '"%s":%s' % ( f, need[f] ) for f in req if f in need ]
     print( "%s\t{%s}" % ( t["name"], ",".join( parts ) ) )

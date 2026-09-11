@@ -1,16 +1,9 @@
 ---
 name: ripwire-mcp
 description: >
-  Wire ripwire into a coding agent as an MCP server — "ripwire wrap AGENT". Covers the 31 MCP verbs (16
-  read incl. fetch_body/flags/slice + 12 flagship-reflex verbs incl. connect/explore/from_trace/edit_check and the
-  cross-branch pair whereis/stray_content + 3 edit verbs) and when the persistent server beats the preferred CLI form, the lazy-body handle posture, the shared edit
-  safety contract, and the server's staleness/rebuild behavior. Use when setting up ripwire for
-  Claude Code / Cursor / Codex / Windsurf / Gemini / opencode / aider, when deciding which ripwire MCP verb to call
-  mid-task, or when wondering whether the server's index is stale. Also the tool-health moment: a symbol
-  you EXPECTED is missing from the ranked output, results look stale or wrong, "is my ripwire setup
-  broken?" — the index-staleness / server-health / rebuild surface answers whether the tool's answer is
-  trustworthy right now. Backed by ripwire (deterministic, on
-  PATH).
+  Wire ripwire into an agent as an MCP server — `ripwire wrap AGENT` (Claude Code, Cursor, Codex,
+  Gemini…) — and choose the server verb mid-task. Also tool HEALTH: a symbol you expected is missing
+  from the ranked output, the index feels stale after a rebase, 'is my ripwire setup broken?'
 allowed-tools: Bash, Read
 ---
 
@@ -41,6 +34,10 @@ edit verbs (`replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol`
 `find_referencing_symbols` attach a stable `handle=` instead of the body (fetch it only when you need it,
 via `fetch_body`); the edit verbs enforce a safety contract (staleness refusal, ambiguity refusal, atomic
 writes) detailed below and in full in [`mcp-reference.md`](mcp-reference.md).
+
+The server exposes **31 MCP verbs**: 16 read verbs (incl. `fetch_body`/`flags`/`slice`), 12 flagship-reflex
+verbs (`connect`/`explore`/`from_trace`/`edit_check` and the cross-branch pair `whereis`/`stray_content`) and
+3 edit verbs — `ripwire wrap codex --force` prints the live count.
 
 ## Wiring — `ripwire wrap <agent>` prints the recipe
 
@@ -99,7 +96,7 @@ enclosing-chain report) and `@FILE:LINE` in any SYM selector; contract gate: `te
 | `grep` (`pattern`) | `--grep=STR` | parallel literal scan + enclosing symbol + matched line |
 | `cochange` (`file`) | `--cochange=FILE` | the lockstep git partners of one file |
 | `memory_recall` (`task`, `top_k` + `budget_tokens` optional) | `--recall=TASK [--top-k=N] [--max-tokens=N]` | full bodies of the few relevant docs/memory notes, bounded by the SAME default 8000-token body ceiling as the CLI (the header discloses `max_tokens=` and every cut). `budget_tokens` raises the ceiling explicitly when you want everything; `top_k` (default 8) shapes how many docs |
-| `situational_awareness` (`diff`/`files` optional) | `--situ` | blast radius, tests_to_run, forgotten co-change partners, hotspot alert — as JSON; defaults to `git diff HEAD` |
+| `situational_awareness` (`diff`/`files` optional) | `--situ` | blast radius, tests_to_run, forgotten co-change partners (the Shotgun Surgery check), hotspot alert — as JSON; defaults to `git diff HEAD` |
 | `mentions` (`symbol`) | `--mentions=SYM` | which markdown plans/designs discuss a symbol |
 | `owners` (`symbol` optional) | `--owners[=SYM]` | bus-factor: recency-weighted author ownership |
 | `lego` (`type`) | `--lego=TYPE` | an interface's method contract + every implementor (own-language) |

@@ -191,6 +191,11 @@ bool tree_sitter_c_sharp_external_scanner_scan(void *payload, TSLexer *lexer, co
             skip(lexer);
         }
 
+        // RIPWIRE_VENDOR_PATCH(csharp/001-delimiter-count-cast): dollar_advanced is a
+        // uint8_t and `++` promotes to int before storing back — an IMPLICIT truncating
+        // conversion on 256 or more leading '$' before an interpolated string. Aborts the G1
+        // -fno-sanitize-recover=all stack at scanner.c:205. Explicit cast keeps the wrapped value
+        // upstream production builds compute. Sibling of rust/001 and lua/001. A CAST and not saturation, unlike markdown/002-counter-saturate: a >255-delimiter token is not parseable with a uint8_t counter under any of the three behaviours, and measurement found no extraction difference at any width (255/256/257/300). Contributes nothing to kParserVer.
         uint8_t dollar_advanced = 0;
 
         bool is_verbatim = false;
@@ -202,7 +207,7 @@ bool tree_sitter_c_sharp_external_scanner_scan(void *payload, TSLexer *lexer, co
 
         while (lexer->lookahead == '$' && quote_count == 0) {
             advance(lexer);
-            dollar_advanced++;
+            dollar_advanced = (uint8_t)(dollar_advanced + 1);  /* RIPWIRE_VENDOR_PATCH(csharp/001-delimiter-count-cast) */
         }
 
         if (dollar_advanced > 0 && (lexer->lookahead == '"' || lexer->lookahead == '@')) {

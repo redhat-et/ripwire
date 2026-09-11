@@ -163,16 +163,34 @@ echo "$CR" | grep -q 'n="shout"' && ok "--callers=trim lists shout" || no "--cal
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
-echo "=== 2. IMPORTS: Lua has none, and that is a POSITIVE assertion ==="
+echo "=== 2. IMPORTS: Lua HAS them, as of kParserVer 81 ==="
 # ═══════════════════════════════════════════════════════════════════════════
-# `require "mod"` is an ordinary global function call, not an import directive — so Lua is absent from
-# lintrules.h's dependencyCapable set and a .lua file is never a node in the dependency graph. The
-# fixture spells three requires (guarded in §0), so a `<deps files="0">` here is a real measurement.
+# THIS SECTION WAS INVERTED (2026-09-07, four-language import round). It used to assert `<deps files="0">`
+# on the reasoning that "`require "mod"` is an ordinary global function call, not an import directive".
+# The first half was true of the GRAMMAR and the conclusion was false of the LANGUAGE: Lua's require is
+# dispatched through package.loaders onto a FILE, and reading it as an ordinary call is what made a whole
+# Lua tree report a horizontal, edge-free architecture. That is the same mistake, with the same symptom,
+# that CommonJS `require` produced before kParserVer 71 — and the old assertion here was the gate that
+# would have KEPT it. It is now the positive assertion in the other direction.
+#
+# The fixture spells two cross-file requires (main -> greeter, greeter -> util; guarded in §0), so these
+# are real measurements and not a tautology: `<deps files="2">` names the two files that HAVE a directive.
 DEPS="$( "$BIN" "$FIX" --deps --no-cache 2>/dev/null )"
-echo "$DEPS" | grep -q '<deps files="0"' && ok '--deps: files="0" — require() is a call, never an Include record' \
-    || no "--deps: expected files=0 on a Lua corpus: $( echo "$DEPS" | grep -o '<deps [^>]*>' )"
-echo "$DEPS" | grep -q 'dep_files="0"' && ok '--deps health: dep_files="0" — Lua is not dependency-capable' \
-    || no "--deps health: expected dep_files=0: $( echo "$DEPS" | grep -o '<health [^/]*/>' )"
+echo "$DEPS" | grep -q '<deps files="2"' && ok '--deps: files="2" — require("greeter")/require("util") are Include records' \
+    || no "--deps: expected files=2 on the Lua fixture: $( echo "$DEPS" | grep -o '<deps [^>]*>' )"
+echo "$DEPS" | grep -q 'dep_files="3"' && ok '--deps health: dep_files="3" — Lua IS dependency-capable (all 3 fixture files count)' \
+    || no "--deps health: expected dep_files=3: $( echo "$DEPS" | grep -o '<health [^/]*/>' )"
+echo "$DEPS" | grep -q '<inc t="greeter"/>' && ok '--deps: main.lua carries the clean specifier t="greeter" (no quotes, no parens)' \
+    || no "--deps: main.lua specifier not captured cleanly: $( echo "$DEPS" | grep -oE '<inc t="[^"]*"' | sort -u | tr '\n' ' ' )"
+# MUTATION CONTROL for the two assertions above: the directive must resolve to a real FILE, not merely be
+# counted. greeter.lua is the only file main.lua reaches, so its afferent count is exactly 1 — a capture
+# that produced Include records but resolved none would still show files="2" and dep_files="3" here.
+echo "$DEPS" | grep -q '<f p="greeter.lua" afferent="1"/>' \
+    && ok '--deps: the require RESOLVED — greeter.lua has afferent="1" (an unresolved capture would show none)' \
+    || no "--deps: require did not resolve to greeter.lua: $( echo "$DEPS" | grep -oE '<f p="[^"]*" afferent="[0-9]*"/>' | tr '\n' ' ' )"
+echo "$DEPS" | grep -q 'dep_langs="[^"]*,lua[,"]' \
+    && ok '--deps health: dep_langs= names lua in the disclosed capable set' \
+    || no "--deps health: dep_langs= does not list lua: $( echo "$DEPS" | grep -o 'dep_langs="[^"]*"' )"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

@@ -1,10 +1,26 @@
 # Improve ripwire for my language
 
-You have been using ripwire on this codebase for a while. The language it is written in is the
-subject of this round — call it **LANGUAGE** below and substitute the real one everywhere.
+You have been using ripwire on this codebase — for one session or for months. **Both count, and
+the first session counts most.** A returning user's transcript shows where the tool wears thin; a
+newcomer's transcript is the only place the first five minutes are ever recorded — the install,
+the first command, the first output nobody explained — and that friction is invisible from inside
+the project. If this is your first session, the moments *before* your first useful answer are the
+evidence, not noise to skip past.
+
+The language this codebase is written in is the subject of this round — call it **LANGUAGE**
+below and substitute the real one everywhere. Which binary you have does not matter: `ripwire` on
+`PATH` (the installer's) or `./build/ripwire` (a checkout's) — the commands below say `ripwire`;
+use whichever you ran.
 
 Your evidence is **this session's own transcript**, not your impressions of the tool. Go back
-through it before you write anything.
+through it before you write anything. The transcript already exists, so this costs nothing but the
+reading.
+
+**Where the result goes:** open an issue at <https://github.com/redhat-et/ripwire/issues> with the
+Step 3 report as its body, titled `LANGUAGE: <the one-line finding you rank first>`. That issue is
+the destination even if you do not intend to fix anything yourself — a report with its provenance
+attached is the form the project runs on, and the maintainers cannot see your code. If you have no
+GitHub account, hand the report to whoever pointed you at this file.
 
 ## Step 1 — harvest the evidence (transcript only)
 
@@ -20,6 +36,11 @@ what came back.
 3. **Where the output was right but unreadable or untrusted.** A count you could not interpret, a
    legend you had to guess at, a refusal you could not act on, a rank you did not believe.
 
+**If this was your first session, add a fourth list — the first five minutes.** The install line
+and what it printed; the first command you ran and whether it was the README's or your own; the
+first output and the first thing in it you did not understand; anything the tool asked you to know
+that no page had told you. These are the findings a returning user can no longer see.
+
 If the transcript does not support a claim, drop the claim. No remembered grievances.
 
 ## Step 2 — localise it to LANGUAGE
@@ -27,32 +48,44 @@ If the transcript does not support a claim, drop the claim. No remembered grieva
 For every gap in list 2 and 3, decide which of these it is, and prove it against this tree:
 
 - **Grammar coverage** — a construct in LANGUAGE that produces no symbol. Confirm with
-  `./build/ripwire <dir> --grep=<the construct's text>` returning the line but no enclosing symbol,
-  or the symbol missing from the map entirely. Name the tree-sitter node kind.
+  `ripwire <dir> --grep=<the construct's text>` returning the line but no enclosing symbol,
+  or the symbol missing from the map entirely. Name the tree-sitter node kind if you can; quote the
+  construct verbatim either way.
 - **Symbol kinds** — the construct parses but lands under the wrong kind, or a kind LANGUAGE needs
   does not exist. Check what the map actually emits before you claim it.
 - **Call-form resolution** — LANGUAGE's qualified/method/associated call forms producing no edge.
   Check `ambiguous=` and `unresolved=` in the header on a LANGUAGE-heavy directory; a high number
   there is the symptom.
 - **Ranking** — the right symbol exists and is reachable but ranks low for a natural task phrasing.
-  This one is only real if you can write it as a labeled case (see below).
+  This one is only real if you can write it as a labeled case: the exact `--for` query, the symbol
+  that should have led, and what led instead. That triple is the fix's test; without it the finding
+  is an opinion.
 - **Legends and disclosure** — the output is correct but does not say what it means for LANGUAGE.
+- **First-run friction** (list 4) — not a LANGUAGE gap; keep it as its own section, unlocalised.
 
-Read `docs/ARCHITECTURE.md` §1 (`ingest → graph → rank`) before you assign any of these, so the fix
-lands in the right stage of the pipeline.
+The pipeline is `ingest → graph → rank`
+([`docs/ARCHITECTURE.md`](https://github.com/redhat-et/ripwire/blob/main/docs/ARCHITECTURE.md) §1);
+say which stage each finding belongs to, so the fix lands in the right one.
 
-## Step 3 — write the plan
+## Step 3 — write the report and send it
 
-Ordered by (evidence strength × user impact), not by how interesting the fix is. Each item carries:
+Ordered by (evidence strength × user impact), not by how interesting the gap is. Open with a header
+the maintainers can reproduce from: `ripwire --version`, the `<doctor …>` line from
+`ripwire <dir> --doctor`, LANGUAGE, and the corpus size as the map's own header states it. Then, per
+finding:
 
-- **Finding** — one sentence, with the transcript moment.
+- **Finding** — one sentence, with the transcript moment: what you asked, the exact command, what
+  came back (paste the relevant output, not a paraphrase).
 - **Severity** — HIGH (wrong output a user would act on) / MEDIUM (missing capability) / LOW (polish).
-- **Decided fix shape** — the actual change, named down to the file. Not "improve LANGUAGE support".
-- **The gate** — the check that fails today and passes after, by name, in `test/`. A ranking claim's
-  gate is a **held-out labeled case in `bench/recalleval/`**, never a hand-inspected top-10.
-- **Siblings** — LANGUAGE is one member of a family. Which other languages have the same gap? A
-  fix that lands on one and not its siblings is the dominant defect class here; see
-  `docs/METHODOLOGY.md` §3. Write the gate over the family.
+- **Class** — one of the Step 2 kinds, or *discoverability*, or *first-run*.
+- **A reproduction the maintainers can run** without your repository: the smallest LANGUAGE snippet
+  that shows it, or a public repository and the command. A ranking finding's reproduction is the
+  labeled triple above.
+- **Siblings** — LANGUAGE is one member of a family. If you know another language has the same
+  construct, name it; a fix that lands on one and not its siblings is the dominant defect class here.
+
+Then open the issue (see the top of this file). Paste the report as-is; do not summarise it into an
+impression.
 
 ## Honesty rules
 
@@ -63,7 +96,18 @@ Ordered by (evidence strength × user impact), not by how interesting the fix is
 - **Never publish a number without an instrument that pins it.** "Better for LANGUAGE" is not a
   result; a held-out delta on labeled cases is.
 
-## Process
+## Maintainers only — turning the report into a plan
+
+Everything below assumes a checkout of ripwire itself with `./build/ripwire` built. If that is not
+you, you are done at Step 3.
+
+Each report item becomes a plan item carrying:
+
+- **Decided fix shape** — the actual change, named down to the file. Not "improve LANGUAGE support".
+- **The gate** — the check that fails today and passes after, by name, in `test/`. A ranking claim's
+  gate is a **held-out labeled case in `bench/recalleval/`**, never a hand-inspected top-10.
+- **Siblings** — write the gate over the family, not the one language the report came from; see
+  `docs/METHODOLOGY.md` §3.
 
 Then run the plan as an **orchestrator**, matching task to model: cheap models for mechanical
 enumeration and fixture writing, your strongest for resolver and ranking work.

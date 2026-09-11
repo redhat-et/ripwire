@@ -100,12 +100,19 @@ gnarly >> "$S/inc/api.h"
 NOSIDE="$( cd "$S" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"; rcn=$?
 : > "$S/.ripwire_quality_baseline"
 ZERO="$( cd "$S" && "$BIN" . --quality-delta --no-cache 2>"$WORK/s_err" )"; rcz=$?
-{ [ "$ZERO" = "$NOSIDE" ] && [ "$rcz" -eq "$rcn" ]; } \
-    && ok "a 0-byte sidecar gives the SAME answer as no sidecar (treated as absent, exit $rcz)" \
+# 2026-09-06 (stranger audit): a 0-byte sidecar is a file that EXISTS and cannot be read as a baseline. The
+# ROWS and the exit are the no-sidecar answer (nothing was compared against it); the root marker and stderr now
+# say so — the old message "no <file>" about a file sitting on disk was the audit's finding.
+rows_of(){ printf '%s' "$1" | tr '<' '\n' | grep '^r ' ; }
+{ [ "$( rows_of "$ZERO" )" = "$( rows_of "$NOSIDE" )" ] && [ "$rcz" -eq "$rcn" ]; } \
+    && ok "a 0-byte sidecar gives the SAME rows and exit as no sidecar (nothing compared against it, exit $rcz)" \
     || { no "0-byte sidecar changed the answer (exit no-sidecar=$rcn zero=$rcz)"; printf '%s' "$ZERO" | tr '<' '\n' | grep '^quality-delta'; }
-grep -q 'auto-comparing the working tree vs git HEAD' "$WORK/s_err" \
-    && ok "the 0-byte sidecar falls back to the git-HEAD auto-baseline (stated on stderr)" \
-    || { no "no git-HEAD fallback message for the 0-byte sidecar"; head -3 "$WORK/s_err"; }
+printf '%s' "$ZERO" | grep -q 'baseline="git-HEAD (sidecar unreadable)"' \
+    && ok "the 0-byte sidecar is named on the root: baseline=\"git-HEAD (sidecar unreadable)\" (never \"no sidecar existed\")" \
+    || { no "0-byte sidecar: root does not carry the unreadable marker"; printf '%s' "$ZERO" | tr '<' '\n' | grep '^quality-delta'; }
+grep -q 'exists but is not a readable baseline' "$WORK/s_err" && grep -q 'auto-comparing the working tree vs git HEAD' "$WORK/s_err" \
+    && ok "stderr names the unreadable sidecar and the git-HEAD fallback (with the re-pin)" \
+    || { no "no unreadable-sidecar message for the 0-byte sidecar"; head -3 "$WORK/s_err"; }
 
 # ── (c) a genuine pre-Q1 sidecar still fails CLOSED, for every kind ────────────────────────────────────────
 ( cd "$S" && git checkout -q -- . ) ; rm -f "$S/.ripwire_quality_baseline"
@@ -117,10 +124,18 @@ int copyA( int a ) { int q = 0; for( int i = 0; i < a; ++i ) { q += i * 7; } ret
 int copyB( int a ) { int q = 0; for( int i = 0; i < a; ++i ) { q += i * 7; } return q; }
 EOF
 PQ="$( cd "$S" && "$BIN" . --quality-delta --no-cache 2>"$WORK/pq_err" )"; rcp=$?
-PQNEW="$( printf '%s' "$PQ" | tr '<' '\n' | grep '^r kind=' | grep -c 'origin="new-symbol"' )"
-{ [ "$PQNEW" -eq 0 ] && [ "$rcp" -eq 2 ]; } \
-    && ok "pre-Q1 sidecar: NO row of any kind (clone kinds included) claims origin=\"new-symbol\" — fail-closed, exit 2" \
-    || { no "pre-Q1 sidecar leaked $PQNEW new-symbol row(s) (exit=$rcp) — a kind disarmed the gate"; printf '%s' "$PQ" | tr '<' '\n' | grep 'origin="new-symbol"' | head -3; }
+# 2026-09-06 (stranger audit): a pre-Q1 sidecar used to be HONORED with every finding gated fail-closed, and
+# the report named phantom findings — `api-surface <sym> (was=0 now=0)` — instead of saying the sidecar could
+# not be read. It is REFUSED now, like the foreign-header sidecar: the root says so, stderr names the re-pin,
+# and the tree is compared against git HEAD. The two copies below ARE new against HEAD, so new-symbol rows
+# are the truth here, not a disarmed gate; what must never appear is a was=0 now=0 phantom.
+PQPHANTOM="$( printf '%s' "$PQ" | tr '<' '\n' | grep '^r kind=' | grep -c 'was="0" now="0"' )"
+{ [ "$PQPHANTOM" -eq 0 ] && printf '%s' "$PQ" | grep -q 'baseline="git-HEAD (sidecar unreadable)"'; } \
+    && ok "pre-Q1 sidecar: refused and named on the root (sidecar unreadable), no was=0 now=0 phantom row (exit $rcp)" \
+    || { no "pre-Q1 sidecar: $PQPHANTOM phantom row(s), root marker: $( printf '%s' "$PQ" | grep -o 'baseline="[^"]*"' )"; printf '%s' "$PQ" | tr '<' '\n' | grep 'was="0" now="0"' | head -3; }
+grep -q 'pre-Q1' "$WORK/pq_err" && grep -q 'quality-baseline' "$WORK/pq_err" \
+    && ok "pre-Q1 sidecar: stderr names the format and the re-pin (Release-visible, not only the debug alert)" \
+    || { no "pre-Q1 sidecar: stderr does not name pre-Q1 + the re-pin"; head -3 "$WORK/pq_err"; }
 if "$BIN" --version 2>/dev/null >/dev/null && grep -q 'pre-Q1' "$WORK/pq_err"; then
     ok "pre-Q1 sidecar emits the degrade alert"
 else

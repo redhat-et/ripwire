@@ -39,6 +39,13 @@
 #       that found all three defects. (B) is its cheap standing approximation, and the one thing (B)
 #       cannot see is an accumulator lost in a subshell before it ever reaches the terminal — run (E)
 #       when auditing this file, or after any change to how a gate records failures.
+#   (F) THE PROBE COPY IS INVISIBLE TO `git status --porcelain` — (A)'s copies live in a mktemp dir
+#       outside the checkout; (E)'s must sit beside the gate they copy (a gate finds its root from $0),
+#       so they are named .gateprobe.*, which .gitignore hides. Every stamped verb reads that exact
+#       command, from ANY crawl root inside the checkout, for its at="<sha>+dirty" bit — an untracked
+#       probe flips every determinism arm running beside this gate under pargates -j N (CI run
+#       34298150602: tokenbudgetcheck --for, est_tokens 3949 vs 3947, blamed on prbudgetcheck).
+#       Asserted with a mutation control on the checkout's own .gitignore text, and per probe in (E).
 #
 # Own exit path: the canonical `exit "$fail"`, and this file is swept by its own arm (B) like any other.
 set -u
@@ -49,13 +56,58 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 command -v python3 >/dev/null 2>&1 || { no "python3 is required by gateexitcheck"; echo "FAILURES ABOVE"; exit "$fail"; }
 
+# ── (F) the probe copy is INVISIBLE to `git status --porcelain` ──────────────────────────────────────
+# (E) writes its probe copy BESIDE the gate it copies (a real gate finds its repo root from $0), which
+# puts an untracked file inside the shared checkout for as long as the probe runs. Every stamped verb
+# (--for, --pr-context, --edit-check, --slice, --situ, --hotspots, --doctor, ...) reads
+# `git status --porcelain` from ANY crawl root inside this checkout for the `+dirty` half of its
+# at="<sha>[+dirty]" anchor (src/gitstamp.h stampAt), so that file flips every determinism arm running
+# beside this gate. CI run 34298150602, macOS plain shard 2/2: tokenbudgetcheck's `--for` arm got
+# est_tokens 3949 then 3947 -- "+dirty" is six bytes, two tokens at 2.5 B/tok -- while (A)'s
+# .gateprobe.*.sh sat in test/gateexitfix/ three worker slots away; issue #71 blamed prbudgetcheck,
+# which has never written outside its own mktemp. (A) now writes its copies to a mktemp dir (the
+# fixtures never read $0). (E) cannot, so .gitignore names `.gateprobe.*`, and this arm asserts the
+# hiding holds -- with a mutation control per CONTRIBUTING §2: the checkout's OWN .gitignore text is
+# seeded into a scratch repo (real input), the identical extraction runs over it (git status
+# --porcelain), and a twin file the pattern must NOT hide proves the extraction sees untracked files at
+# all. Nothing is written into the real checkout to prove it; the in-situ answer is git's own
+# check-ignore for the two paths (E) would write. test/pargates.py's tree tripwire is the runner-side
+# half: it samples the same command while the suite runs and names whoever is in flight.
+if command -v git >/dev/null 2>&1 && git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    CTRL="$( mktemp -d )"
+    ( cd "$CTRL" && git init -q . && cp "$ROOT/.gitignore" .gitignore && mkdir -p test/gateexitfix \
+      && : > test/.gateprobe.control.sh && : > test/gateexitfix/.gateprobe.control.sh && : > test/gateprobe.twin.sh ) \
+      || no "(F control) could not seed a scratch repo with this checkout's .gitignore"
+    SEEN="$( git -C "$CTRL" status --porcelain --untracked-files=all 2>/dev/null | sed -E 's/^\?\? //' | LC_ALL=C sort | tr '\n' ' ' )"
+    rm -rf "$CTRL"
+    case " $SEEN " in
+        *" test/gateprobe.twin.sh "*) ok "(F control) git status lists the un-ignored twin in the seeded repo -- the extraction sees untracked files";;
+        *)                            no "(F control) git status did not list the un-ignored twin (saw: '$SEEN') -- the extraction is blind, and the arm below proves nothing";;
+    esac
+    case " $SEEN " in
+        *".gateprobe."*) no "(F) this checkout's .gitignore does NOT hide .gateprobe.* -- git status listed: $SEEN";;
+        *)               ok "(F) this checkout's .gitignore hides .gateprobe.* in test/ and test/gateexitfix/ (the same text, the same command stampAt runs)";;
+    esac
+    for p in test/.gateprobe.control.sh test/gateexitfix/.gateprobe.control.sh; do
+        git -C "$ROOT" check-ignore -q "$p" && ok "(F) git check-ignore: $p is ignored in this checkout" \
+            || no "(F) git check-ignore: $p is NOT ignored in this checkout -- an (E) probe there would read as +dirty"
+    done
+else
+    ok "(F) no git repository around this checkout -- nothing reads +dirty here, so no probe can flip it"
+fi
+
 python3 - "$ROOT" <<'PY' || fail=1
-import os, re, subprocess, sys, tempfile
+import atexit, os, re, shutil, subprocess, sys, tempfile
 
 ROOT = sys.argv[1]
 T    = os.path.join( ROOT, "test" )
 FIX  = os.path.join( T, "gateexitfix" )
 FULL = os.environ.get( "GATEEXIT_FULL", "" ) == "1"
+# (F) arm (A)'s probe copies live OUTSIDE the checkout: the fixtures never read $0, so nothing of theirs
+# has to sit beside the original, and a file that is not inside the repository cannot read as +dirty to
+# anyone. Only (E) writes beside a real gate -- see inject_and_run.
+PROBEDIR = tempfile.mkdtemp( prefix="gateexit-probes-" )
+atexit.register( shutil.rmtree, PROBEDIR, True )
 
 bad = 0
 def ok( m ): print( "  PASS  %s" % m )
@@ -165,16 +217,38 @@ FIXTURES = [
     ( "skip_honest.sh",          "NOACC",  None ),
 ]
 
-def inject_and_run( path, acc ):
+def probe_is_invisible( d ):
+    """(F) The in-place probe must not show in `git status --porcelain` -- the command every stamped verb
+    runs, from ANY crawl root inside this checkout, for the `+dirty` half of its at= anchor. Asked of git
+    about the REAL file just written, never inferred from the pattern text. Returns ( ok, detail )."""
+    try:
+        seen = subprocess.run( [ "git", "--no-optional-locks", "-C", ROOT, "status", "--porcelain", "--untracked-files=all", "--", d ],
+                               capture_output=True, text=True, errors="replace", timeout=60 )
+    except ( OSError, subprocess.TimeoutExpired ) as e:
+        return True, "git unavailable (%s) -- nothing here reads +dirty either" % e
+    if seen.returncode != 0:
+        return True, "not a git checkout (rc=%s) -- nothing here reads +dirty either" % seen.returncode
+    return not seen.stdout.strip(), seen.stdout.strip()
+
+def inject_and_run( path, acc, probe_dir=None ):
     """The (E) machinery, used here on the fixtures: put a forced failure immediately before the
-    terminal region and RUN the script for real."""
+    terminal region and RUN the script for real.
+    probe_dir: where the probe copy is written. (A) passes PROBEDIR, a mktemp dir outside the checkout.
+    (E) passes None -- a REAL gate derives its repo root from $0, so its copy must sit beside it -- and
+    the copy is then named .gateprobe.*, which .gitignore hides from `git status --porcelain`; that
+    hiding is asserted on the real file, before the probe runs (arm F)."""
     lines = open( path, encoding="utf-8", errors="surrogateescape" ).read().split( "\n" )
     tail  = terminal_region( lines, acc )
     at    = len( lines ) - len( tail ) if tail else len( lines )
     out   = lines[ :at ] + [ 'printf "  FAIL  GATEPROBE forced failure (synthetic)\\n"', '%s=1' % acc ] + lines[ at: ]
-    d     = os.path.join( os.path.dirname( path ), ".gateprobe." + os.path.basename( path ) )
+    d     = os.path.join( probe_dir if probe_dir else os.path.dirname( path ), ".gateprobe." + os.path.basename( path ) )
     open( d, "w", encoding="utf-8", errors="surrogateescape" ).write( "\n".join( out ) )
     try:
+        if probe_dir is None:
+            hidden, detail = probe_is_invisible( d )
+            if not hidden:
+                no( "(F) the in-place probe %s is VISIBLE to `git status --porcelain` (%s) -- every stamped verb running beside this gate reads a dirty tree while it exists"
+                    % ( os.path.relpath( d, ROOT ), detail ) )
         r = subprocess.run( [ "bash", d ], cwd=ROOT, capture_output=True, timeout=420, text=True, errors="replace" )
         return r.returncode, r.stdout + r.stderr
     except subprocess.TimeoutExpired:
@@ -200,7 +274,7 @@ for name, want, forced_rc in FIXTURES:
         ok( "(A) %-24s %-6s (no accumulator to force; unforced exit 0)" % ( name, got ) )
         continue
     acc, _ = recorder_var( open( p, encoding="utf-8" ).read().split( "\n" ) )
-    rc, _txt = inject_and_run( p, acc )
+    rc, _txt = inject_and_run( p, acc, PROBEDIR )
     agree = ( rc == 0 ) == ( forced_rc == 0 )
     if not agree:
         no( "(A) fixture %s: forced-failure run exited %s, the fixture declares %s — classifier and behaviour disagree" % ( name, rc, forced_rc ) )
@@ -218,6 +292,8 @@ if seen == len( FIXTURES ):
 # is "a number that is printed but not checked". If you add a row, force the gate to fail and read the
 # status; do not infer it from the `exit` literal you can see, because the one that fires may be another.
 FAILFAST = {
+    "dartcheck.sh":            ( "set -e and Python assertions; pre-Dart HEAD binary probed to exit 1", 1 ),
+    "elixircheck.sh":          ( "set -e and Python assertions; pre-Elixir HEAD binary probed to exit 1", 1 ),
     "agentloopcodexcheck.sh":  ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
     "clonebandcheck.sh":        ( "every check is `echo FAIL; exit 2` at the site",                      2 ),
     "clonelexcheck.sh":         ( "single terminal if/else on the harness binary, `exit 2` on failure",  2 ),

@@ -1,23 +1,10 @@
 ---
 name: ripwire-fresh-eyes
 description: >
-  Assess maintenance risk in code you did NOT write — an already identified subsystem: "what's gnarly
-  here / where's the rot / is this area safe to touch?". Use it when PLANNING A REFACTOR or investigating
-  a suspected god object — find the high-complexity cluster, its blast radius, and its co-change
-  seams. One structured pass over maintenance hotspots, dead code, duplicate bodies, AST smells, ownership
-  / bus-factor risk, and hidden (co-change) coupling — scope any pass to a subsystem with a DIR argument.
-  Use when taking ownership of an existing module, planning a refactor, hunting consolidation, deciding who
-  should review, or producing a health snapshot. Reads a function's nesting PROFILE (`humps=`/`deep=`/
-  `locals=`), not `nest=` alone, so a tangle and a long blocked-sequential body stop looking identical — then
-  routes to ripwire-quality-bar for which refactor that shape calls for. Boundary in one line: fresh-eyes
-  DIAGNOSES the shape of code you didn't write — "what shape is this function actually, and can I trust
-  the reported number?"; naming the FIX for an already-measured shape, or judging what YOU just wrote, is
-  ripwire-quality-bar.
-  Everything emits FACTS, not verdicts — you judge. Backed
-  by ripwire (deterministic, on PATH). This is for an explicit risk/rot/refactor question after the target
-  area is identified; cold structure mapping belongs to ripwire-orient. For any DIFF — yours or an incoming
-  PR — use ripwire-change-check; this skill is whole subsystems, not diffs. A single-lens question is a
-  single call — run only the lenses the question names, not the whole battery.
+  Maintenance risk in code you did NOT write — inheriting a module, planning a refactor, a suspected
+  god object, 'what's gnarly / where's the rot / safe to touch?': hotspots, dead or inactive code,
+  switches/defaults (--flags), clones, a function's real shape, bus factor, co-change. Naming the fix
+  or judging YOUR new code → quality-bar. A single-lens question is a single call.
 allowed-tools: Bash, Read
 ---
 
@@ -396,7 +383,7 @@ sections your question needs.
    quality. Different question from `--doc-drift` above: doc-drift asks whether a *markdown* claim is still
    *true*; this asks whether a *source doc-comment* carries *information* — neither checks the other's axis.
 
-## Hidden-coupling pass — "a change here keeps breaking unrelated files"
+## Hidden-coupling pass — "a change here keeps breaking unrelated files" (Fowler's Shotgun Surgery, in its measurable form: change coupling)
 
 6. **Behavioural coupling** — `ripwire <dir> --cochange`
    Bare `--cochange` emits ONLY the *surprising* pairs — files that change together in git but share **no

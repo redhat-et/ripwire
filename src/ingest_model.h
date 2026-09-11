@@ -637,7 +637,8 @@ inline void emitBindings( IngestResult& result, std::vector<RawBind>& rawBinds, 
                    {
                        return a.kind < b.kind;
                    }
-                   return a.typeName < b.typeName;
+                   if( a.typeName != b.typeName ) { return a.typeName < b.typeName; }
+                   return a.importedName < b.importedName;
                } );
     result.bindings.resize( rawBinds.size() );
     DefSweep bindSweep{ spanIndex.spans, spanIndex.fileSpanStart };
@@ -651,6 +652,7 @@ inline void emitBindings( IngestResult& result, std::vector<RawBind>& rawBinds, 
         b.spanEnd    = rb.spanEnd;
         b.var        = std::move( rb.var );
         b.typeName   = std::move( rb.typeName );
+        b.importedName = std::move( rb.importedName );
         b.fromSymbol = bindSweep.find( rb.fileId, rb.startByte );
     }
 }

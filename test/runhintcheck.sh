@@ -46,7 +46,8 @@ printf 'void drive_orphan() { leaf(); }\n'                        > "$R/test/orp
 
 run(){ perl -e 'alarm 20; exec @ARGV' "$BIN" "$R" "$@" --no-cache 2>/dev/null; }
 # the run= value carried by the row whose p= ends in $1 ("" when the row has no run=)
-runof(){ printf '%s' "$2" | grep -oE "<[a-z]+ p=\"[^\"]*$1\"( run=\"[^\"]*\")?/>" | head -1 | grep -oE 'run="[^"]*"' | sed 's/run="//;s/"//'; }
+# F1 (H2H-Graft 2026-09-07): a row may carry seed_kind=/changed=/partner=/hops= between p= and run=.
+runof(){ printf '%s' "$2" | grep -oE "<[a-z]+ p=\"[^\"]*$1\"( (seed_kind|changed|partner|hops)=\"[^\"]*\")*( run=\"[^\"]*\")?/>" | head -1 | grep -oE 'run="[^"]*"' | sed 's/run="//;s/"//'; }
 
 A="$( run --affected=src/core.cpp )"
 

@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // handoff.h — `--handoff`: the deterministic continuation packet for the NEXT agent session.
 //
@@ -26,6 +28,7 @@
 #include "gitmine.h"     // gitCommandLines — byte-safe git pipe reader
 #include "serialize.h"   // escapeXml + kMinBytesPerToken
 #include "infra/jsonesc.h"     // shSingleQuote
+#include "docparse.h"          // isIndexedDocExtension / lowerExtOf — the shared prose vocabulary
 #include <algorithm>
 #include <cstdio>
 #include <string>
@@ -38,7 +41,13 @@ namespace rw
 inline constexpr std::size_t kHandoffDocRows      = 4;   // heuristic doc pointers shown
 inline constexpr std::size_t kHandoffNoteRows     = 8;   // heuristic note rows shown
 inline constexpr std::size_t kHandoffCochangeRows = 8;   // heuristic co-change rows shown
-inline constexpr std::size_t kHandoffSymbolsPerFile = 6; // verified symbols listed per changed file
+// verified symbols listed per changed file. This one cuts the DISK-TRUTH half of the packet — the section whose
+// whole contract is "this is what the change set is" — and it fires on the TYPICAL case, not a tail: the
+// 2026-09-10 cap round measured an ordinary two-file source diff listing 12 symbols out of 44 (73% withheld)
+// beside no marker at all. The <f> row it cuts now carries syms_total= and syms_capped="1"; an <f> under the
+// cap carries neither, so an uncut packet is byte-identical. The VALUE is unchanged — disclosing a cut and
+// raising it are separate deliverables with separate evidence.
+inline constexpr std::size_t kHandoffSymbolsPerFile = 6;
 
 namespace handoff_detail
 {
@@ -49,9 +58,62 @@ inline std::string gitOneLine( const std::string& root, const char* args )
     return ( r.isStarted && r.status == 0 && !r.lines.empty() ) ? r.lines[0] : std::string();
 }
 
-inline bool isMarkdownPath( std::string_view p ) noexcept
+// The DESIGN DOCUMENTS a brief may cite. Any file the index carries as a document qualifies — the brief's
+// job is to hand a successor the doc that says WHY, and an ADR does not stop being one for being written
+// in reStructuredText. Was a private `.md`/`.markdown` suffix test until 2026-09-09; docparse.h's
+// vocabulary is now the single answer, so a format the crawl learns reaches the brief on the same day.
+inline bool isIndexedDocPath( std::string_view p ) noexcept
 {
-    return p.size() > 3 && ( p.ends_with( ".md" ) || p.ends_with( ".markdown" ) );
+    return docparse::isIndexedDocExtension( docparse::lowerExtOf( p ) );
+}
+
+// ONE changed file's <f> row, and whether kHandoffSymbolsPerFile cut it.
+//
+// Counting and emitting share the SINGLE pass the row loop always made: the old loop stopped AT the cap, so
+// it could not say how many symbols it had not reached, and the packet's disk-truth half showed six names
+// beside nothing at all. The row is assembled into a string rather than appended in place because
+// syms_total= belongs on the OPENING tag and is only known once the whole file has been walked — the same
+// build-then-splice renderTestHopBlock uses for the same reason. `esc` is the caller's escapeXml scratch;
+// every view it returns is consumed before the next call reuses the buffer.
+struct VerifiedFileRow
+{
+    std::string xml;
+    bool        isCapped = false;
+};
+
+inline VerifiedFileRow verifiedFileRow( const IngestResult& ing, std::uint32_t fileId, std::string_view pathRel,
+                                        std::vector<char>& esc )
+{
+    std::string   shownRows;
+    std::uint32_t total = 0;
+    for( const Symbol& sym : ing.symbols )
+    {
+        if( sym.fileId != fileId )
+        {
+            continue;
+        }
+        ++total;
+        if( total > kHandoffSymbolsPerFile )
+        {
+            continue;                                   // counted, not shown — that gap is what syms_total= names
+        }
+        shownRows += "<s n=\"";
+        shownRows += escapeXml( sym.name, esc );
+        shownRows += "\"/>";
+    }
+
+    // serialize.h's ONE economy-of-attributes idiom: empty when the file's whole symbol set fits, so an uncut
+    // <f> stays byte-identical to the pre-disclosure packet.
+    const std::string capAttr = countFieldIfAbove( total, std::uint32_t( kHandoffSymbolsPerFile ),
+                                                   " syms_total=\"", "\" syms_capped=\"1\"" );
+    std::string row = "<f p=\"";
+    row += escapeXml( pathRel, esc );
+    row += "\"";
+    row += capAttr;
+    row += ">";
+    row += shownRows;
+    row += "</f>";
+    return { std::move( row ), !capAttr.empty() };
 }
 
 } // namespace handoff_detail
@@ -64,6 +126,13 @@ inline constexpr const char* kHandoffLegendHead =
     "<!-- ripwire handoff: the continuation packet for the NEXT session. <verified> is disk truth "
     "(branch=/at=<sha>[+dirty]/subject=<commit subject text>, changed files+symbols via git numstat, "
     "blast_files=transitive dependent files, tests-to-run); ";
+// Spliced between the two halves ONLY when an <f> row was actually cut — tracelocus.h's hopLegendOf seam, so a
+// packet whose every changed file fits under kHandoffSymbolsPerFile stays byte-identical to the pre-disclosure
+// one. Angle brackets are entity-escaped because this text rides inside an XML comment, like the tail below.
+inline constexpr const char* kHandoffSymsCapClause =
+    "&lt;f&gt; lists at most 6 of a changed file's symbols; syms_total= is how many that file actually defines and "
+    "syms_capped=\"1\" says the list was cut to the first 6 the index holds - both absent on the files that fit, "
+    "so an &lt;f&gt; without them is the WHOLE set and not a floor. ";
 inline constexpr const char* kHandoffLegendTail =
     "<heuristic> is labeled non-verified suggestion (cochange=usually-edited-together deg=degree, note=committed "
     ".ripwire_notes row, doc=plan/design pointer s=lexical score for the branch+commit-subject query). "
@@ -142,26 +211,15 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
     const SituationFacts facts = computeSituationFacts( root, ing, g, changedMask );
 
     // ── verified core (never budget-dropped) ─────────────────────────────────────────────────────────
+    bool        anySymsCapped = false;
     std::string v;
     v += "<verified changed=\"" + std::to_string( facts.changed.size() )
        + "\" blast_files=\"" + std::to_string( facts.blastRadius.size() ) + "\">";
     for( const std::uint32_t f : facts.changed )
     {
-        v += "<f p=\"";
-        v += escapeXml( hoPathRel( f ), esc );
-        v += "\">";
-        std::size_t shown = 0;
-        for( std::size_t i = 0; i < ing.symbols.size() && shown < kHandoffSymbolsPerFile; ++i )
-        {
-            if( ing.symbols[i].fileId == f )
-            {
-                v += "<s n=\"";
-                v += escapeXml( ing.symbols[i].name, esc );
-                v += "\"/>";
-                ++shown;
-            }
-        }
-        v += "</f>";
+        const auto [ rowXml, rowCapped ] = verifiedFileRow( ing, f, hoPathRel( f ), esc );
+        anySymsCapped                    = anySymsCapped || rowCapped;
+        v += rowXml;
     }
     v += "<tests n=\"" + std::to_string( facts.tests.size() ) + "\">";
     // M4(b) (lane L2) + M21(b) (lane L8), merged 2026-09-04: the SAME run= hint --situ / --test-gate /
@@ -200,7 +258,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
             continue;
         }
         char degBuf[32];
-        std::snprintf( degBuf, sizeof degBuf, "%.2f", deg );
+        rw::formatTo( degBuf, sizeof degBuf, "{:.2f}", deg );
         std::string r = "<cochange p=\"";
         r += escapeXml( hoPathRel( f ), esc );
         r += "\" deg=\"";
@@ -249,7 +307,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
     if( !recallQuery.empty() && recallQuery != " " )
     {
         const std::vector<float> score = lexicalScores( ing, g.outOff, g.outTargets, recallQuery );
-        std::vector<std::pair<float, std::uint32_t>> best;   // (max symbol score, fileId) per markdown file
+        std::vector<std::pair<float, std::uint32_t>> best;   // (max symbol score, fileId) per document file
         std::vector<float> fileBest( ing.files.size(), 0.f );
         for( std::size_t i = 0; i < ing.symbols.size(); ++i )
         {
@@ -258,7 +316,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
         }
         for( std::uint32_t f = 0; f < ing.files.size(); ++f )
         {
-            if( fileBest[f] > 0.f && isMarkdownPath( ing.files[f] ) )
+            if( fileBest[f] > 0.f && isIndexedDocPath( ing.files[f] ) )
             {
                 best.emplace_back( fileBest[f], f );
             }
@@ -269,7 +327,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
         for( std::size_t i = 0; i < best.size() && i < kHandoffDocRows; ++i )
         {
             char sBuf[32];
-            std::snprintf( sBuf, sizeof sBuf, "%.3f", double( best[i].first ) );
+            rw::formatTo( sBuf, sizeof sBuf, "{:.3f}", double( best[i].first ) );
             std::string r = "<doc p=\"";
             r += escapeXml( hoPathRel( best[i].second ), esc );
             r += "\" s=\"";
@@ -284,6 +342,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
     {
         std::string doc = kHandoffLegendHead;
         doc += rw::kRunHintLegendClause;   // M21(b): the ONE wording, spliced — never a seventh paraphrase
+        if( anySymsCapped ) { doc += kHandoffSymsCapClause; }   // empty unless an <f> row was cut
         doc += kHandoffLegendTail;
         doc += "<handoff";
         doc += at;

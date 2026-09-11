@@ -124,7 +124,10 @@ def rg_floor(q, max_reads=200):
     because an uncapped incomplete run would score MORE emitted bytes."""
     lit = rg_literal(q)
     t0 = time.perf_counter()
-    p = subprocess.run([RG, "-l", "--fixed-strings", "--", lit, CORPUS],
+    # --sort path: the README of this harness records that without it the floor's score is nondeterministic
+    # (x276 across five identical runs in Round C), yet the committed argv lacked it — found on 2026-09-07 when
+    # two otherwise byte-identical runs of the Graft head-to-head moved this arm on 4 of 30 rows.
+    p = subprocess.run([RG, "-l", "--sort", "path", "--fixed-strings", "--", lit, CORPUS],
                        capture_output=True, timeout=TIMEOUT)
     out = bytearray(p.stdout)
     files = [l for l in p.stdout.decode(errors="replace").split("\n") if l.strip()]
@@ -135,7 +138,7 @@ def rg_floor(q, max_reads=200):
         except OSError:
             pass
     return (bytes(out), (time.perf_counter() - t0) * 1000.0, p.returncode,
-            scrub([RG, "-l", "--fixed-strings", "--", lit, CORPUS,
+            scrub([RG, "-l", "--sort", "path", "--fixed-strings", "--", lit, CORPUS,
                    f"+whole-file-reads(n<={max_reads})"]))
 
 

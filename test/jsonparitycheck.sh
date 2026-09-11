@@ -258,7 +258,7 @@ done
 "$BIN" "$A" --callers=clampIndex --format=columnar --no-cache 2>/dev/null | grep -q 'format="columnar"' \
     && ok "§A5b: --callers --format=columnar still emits the columnar form (the refusal is scoped)" \
     || no "§A5b: the guard broke a SUPPORTED columnar verb"
-HELPCOL="$( "$BIN" --help 2>&1 | grep -A1 -- '--format=xml|columnar|rows' | head -2 )"
+HELPCOL="$( "$BIN" --help=all 2>&1 | grep -A1 -- '--format=xml|columnar|rows' | head -2 )"
 printf '%s' "$HELPCOL" | grep -q -- '--pr-context' \
     && no "§A5c: --help still advertises --pr-context in the columnar list: $HELPCOL" \
     || ok "§A5c: --help's columnar list no longer claims --pr-context"

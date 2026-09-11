@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // darkflags.h — `--flags`, the DARK-CONTENT DASHBOARD.
 // Evidence: twice in one day an owner asked "why don't I see X?" and the answer both times was that X ships
@@ -453,7 +456,7 @@ inline LineSyntax lineSyntaxFor( std::string_view path )
             return syn;
         }
     }
-    if( ext == ".md" || ext == ".markdown" || ext == ".rst" || ext == ".txt" || docparse::isDocExtension( ext ) )
+    if( docparse::isProseExtension( ext ) )   // the shared prose vocabulary, not a fifth private list
     {
         syn.isProse = true;
     }
@@ -1057,20 +1060,20 @@ using XmlEscaper = std::function<std::string( std::string_view )>;
 
 inline void writeGate( std::FILE* out, const Gate& g, const XmlEscaper& ex, std::size_t maxSites )
 {
-    std::fprintf( out, "<gate name=\"%s\" kind=\"%s\" default=\"%s\" dark=\"%d\" regions=\"%u\" loc=\"%u\" reads=\"%zu\" p=\"%s\" l=\"%u\">",
+    rw::emitTo( out, "<gate name=\"{}\" kind=\"{}\" default=\"{}\" dark=\"{}\" regions=\"{}\" loc=\"{}\" reads=\"{}\" p=\"{}\" l=\"{}\">",
                   ex( g.name ).c_str(), gateKindTag( g.kind ), ex( g.def ).c_str(), isDarkDefault( g.def ) ? 1 : 0,
                   g.regions, g.guardedLines, g.reads.size(), ex( g.defSite.path ).c_str(), g.defSite.line );
     if( !g.aliasOf.empty() )
     {
-        std::fprintf( out, "<alias-of name=\"%s\"/>", ex( g.aliasOf ).c_str() );
+        rw::emitTo( out, "<alias-of name=\"{}\"/>", ex( g.aliasOf ).c_str() );
     }
     if( g.aliasCount )
     {
-        std::fprintf( out, "<aliases n=\"%u\" regions=\"%u\" loc=\"%u\"/>", g.aliasCount, g.aliasRegions, g.aliasLines );
+        rw::emitTo( out, "<aliases n=\"{}\" regions=\"{}\" loc=\"{}\"/>", g.aliasCount, g.aliasRegions, g.aliasLines );
     }
     if( g.hasAlso )
     {
-        std::fprintf( out, "<also kind=\"%s\" default=\"%s\" p=\"%s\" l=\"%u\"/>",
+        rw::emitTo( out, "<also kind=\"{}\" default=\"{}\" p=\"{}\" l=\"{}\"/>",
                       gateKindTag( g.alsoKind ), ex( g.alsoDef ).c_str(), ex( g.alsoSite.path ).c_str(), g.alsoSite.line );
     }
     // "Nothing is dropped without a number": shownCount is what the loop will PRINT, so the <more/> remainder
@@ -1080,13 +1083,13 @@ inline void writeGate( std::FILE* out, const Gate& g, const XmlEscaper& ex, std:
     const std::size_t shownCount = std::min( g.reads.size(), maxSites );
     for( std::size_t readIndex = 0; readIndex < shownCount; ++readIndex )
     {
-        std::fprintf( out, "<read p=\"%s\" l=\"%u\"/>", ex( g.reads[ readIndex ].path ).c_str(), g.reads[ readIndex ].line );
+        rw::emitTo( out, "<read p=\"{}\" l=\"{}\"/>", ex( g.reads[ readIndex ].path ).c_str(), g.reads[ readIndex ].line );
     }
     if( g.reads.size() > shownCount )
     {
-        std::fprintf( out, "<more reads=\"%zu\"/>", g.reads.size() - shownCount );
+        rw::emitTo( out, "<more reads=\"{}\"/>", g.reads.size() - shownCount );
     }
-    std::fprintf( out, "</gate>" );
+    rw::emitRaw( out, "</gate>" );
 }
 
 inline void writeFlags( std::FILE* out, const FlagsResult& res, std::size_t maxSites )
@@ -1094,7 +1097,7 @@ inline void writeFlags( std::FILE* out, const FlagsResult& res, std::size_t maxS
     std::vector<char> esc;
     const XmlEscaper  ex = [ & ]( std::string_view s ) { return std::string( escapeXml( s, esc ) ); };
 
-    std::fprintf( out, "<!-- ripwire flags: what is BUILT but DARK here. Three gate patterns in one report: ifndef/define "
+    rw::emitRaw( out, "<!-- ripwire flags: what is BUILT but DARK here. Three gate patterns in one report: ifndef/define "
                        "header gates (kind=\"compile\"), CMake option() switches (kind=\"cmake\"), and getenv reads "
                        "(kind=\"env\", default unset). dark=\"1\" means the default keeps the guarded code out of the build; "
                        "regions/loc size what it turns off. When one name is BOTH a header gate and a CMake option the CMake "
@@ -1111,14 +1114,14 @@ inline void writeFlags( std::FILE* out, const FlagsResult& res, std::size_t maxS
     std::vector<char> fgEsc;
     const std::string fgFilterAttr = res.filter.empty() ? std::string()
                                                         : ( " filter=\"" + std::string( rw::escapeXml( res.filter, fgEsc ) ) + "\"" );
-    std::fprintf( out, "<flags gates=\"%zu\" dark_gates=\"%u\" compile=\"%u\" cmake=\"%u\" env=\"%u\" files=\"%zu\"%s>",
+    rw::emitTo( out, "<flags gates=\"{}\" dark_gates=\"{}\" compile=\"{}\" cmake=\"{}\" env=\"{}\" files=\"{}\"{}>",
                   res.gates.size(), res.dark, res.compileCount, res.cmakeCount, res.envCount, res.filesScanned,
                   fgFilterAttr.c_str() );
     for( const Gate& g : res.gates )
     {
         writeGate( out, g, ex, maxSites );
     }
-    std::fprintf( out, "</flags>" );
+    rw::emitRaw( out, "</flags>" );
 }
 
 }}   // namespace rw::darkflags

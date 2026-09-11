@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // layout.h — `--layout=STRUCT`, the CPU/GPU CONTRACT verb.
 // Evidence: dual-compile uniform structs (AudioUniforms 24 B, MusicPulseUniforms 192→208 B in one day)
@@ -2457,65 +2460,65 @@ using XmlEscaper = std::function<std::string( std::string_view )>;
 inline void writeLayoutDef( std::FILE* out, const LayoutDef& def, const XmlEscaper& ex, std::string_view rootPrefix = {} )
 {
     const std::string_view rp = rootPrefix.empty() ? std::string_view( def.path ) : rw::sarif::rootRelativeUri( def.path, rootPrefix );
-    std::fprintf( out, "<def p=\"%s\" l=\"%u\" agg=\"%s\" modeled=\"%d\" fields=\"%zu\"",
+    rw::emitTo( out, "<def p=\"{}\" l=\"{}\" agg=\"{}\" modeled=\"{}\" fields=\"{}\"",
                   ex( rp ).c_str(), def.line, def.aggregate, def.modeled ? 1 : 0, def.fields.size() );
     if( def.modeled )
     {
-        std::fprintf( out, " size=\"%u\" align=\"%u\" tail_pad=\"%u\"", def.size, def.align, def.tailPad );
+        rw::emitTo( out, " size=\"{}\" align=\"{}\" tail_pad=\"{}\"", def.size, def.align, def.tailPad );
     }
     if( def.declaredAlign )
     {
-        std::fprintf( out, " alignas=\"%u\"", def.declaredAlign );
+        rw::emitTo( out, " alignas=\"{}\"", def.declaredAlign );
     }
     if( def.packedAttr )
     {
-        std::fprintf( out, " packed=\"1\"" );
+        rw::emitRaw( out, " packed=\"1\"" );
     }
-    std::fprintf( out, ">" );
+    rw::emitRaw( out, ">" );
 
     for( const FieldRow& f : def.fields )
     {
         if( f.padBefore )
         {
-            std::fprintf( out, "<pad bytes=\"%u\"/>", f.padBefore );
+            rw::emitTo( out, "<pad bytes=\"{}\"/>", f.padBefore );
         }
-        std::fprintf( out, "<f n=\"%s\" ty=\"%s\"", ex( f.name ).c_str(), ex( f.type ).c_str() );
+        rw::emitTo( out, "<f n=\"{}\" ty=\"{}\"", ex( f.name ).c_str(), ex( f.type ).c_str() );
         if( !f.resolved.empty() )
         {
-            std::fprintf( out, " as=\"%s\"", ex( f.resolved ).c_str() );
+            rw::emitTo( out, " as=\"{}\"", ex( f.resolved ).c_str() );
         }
         if( f.elems != 1 )
         {
-            std::fprintf( out, " x=\"%u\"", f.elems );
+            rw::emitTo( out, " x=\"{}\"", f.elems );
         }
         if( f.sized )
         {
-            std::fprintf( out, " sz=\"%u\" al=\"%u\"", f.size, f.align );
+            rw::emitTo( out, " sz=\"{}\" al=\"{}\"", f.size, f.align );
         }
         else
         {
-            std::fprintf( out, " sized=\"0\"" );
+            rw::emitRaw( out, " sized=\"0\"" );
         }
         if( f.placed )
         {
-            std::fprintf( out, " off=\"%u\"", f.offset );
+            rw::emitTo( out, " off=\"{}\"", f.offset );
         }
-        std::fprintf( out, "/>" );
+        rw::emitRaw( out, "/>" );
     }
     if( def.modeled && def.tailPad )
     {
-        std::fprintf( out, "<pad tail=\"%u\"/>", def.tailPad );
+        rw::emitTo( out, "<pad tail=\"{}\"/>", def.tailPad );
     }
     for( const Caveat& c : def.caveats )
     {
-        std::fprintf( out, "<caveat k=\"%s\" d=\"%s\"", ex( c.kind ).c_str(), ex( c.detail ).c_str() );
+        rw::emitTo( out, "<caveat k=\"{}\" d=\"{}\"", ex( c.kind ).c_str(), ex( c.detail ).c_str() );
         if( c.count > 1 )
         {
-            std::fprintf( out, " count=\"%u\"", c.count ); // §P6.12: how many sites this ONE row stands for
+            rw::emitTo( out, " count=\"{}\"", c.count ); // §P6.12: how many sites this ONE row stands for
         }
-        std::fprintf( out, "/>" );
+        rw::emitRaw( out, "/>" );
     }
-    std::fprintf( out, "</def>" );
+    rw::emitRaw( out, "</def>" );
 }
 
 // `rootArg` — R-E (2026-08-17 harvest), same single-root-only root argument serialize() takes.
@@ -2560,7 +2563,7 @@ inline void writeLayout( std::FILE* out, const LayoutResult& res, std::string_vi
 
     // G4: an XML comment may not contain a double hyphen, so this text names flags WITHOUT their leading
     // dashes. Keep it that way when editing.
-    std::fprintf( out, "<!-- ripwire layout: field offsets COMPUTED from the source text under standard-layout "
+    rw::emitTo( out, "<!-- ripwire layout: field offsets COMPUTED from the source text under standard-layout "
                        "assumptions on a 64-bit Apple/LP64 target (natural alignment, interior padding, trailing pad to "
                        "the aggregate's own alignment). NOT the ABI: pragma pack, bitfields, virtuals, base classes, "
                        "nested aggregates, preprocessor-conditional members and unsized field types are DETECTED and set "
@@ -2570,10 +2573,10 @@ inline void writeLayout( std::FILE* out, const LayoutResult& res, std::string_vi
                        "exits non-zero); kind=\"stub\" is an empty placeholder aggregate and kind=\"spelling\" is the two "
                        "arms of one ifdef block naming the same bytes differently (simd::float4 vs float4) — both reported, "
                        "neither a break. agree=\"0\" on an assert row means a sizeof tripwire contradicts the computed size. "
-                       "Definitions and asserts come from the INDEXED files. -->%s",
-                 rw::rootRelPathsLegend( !rootArg.empty() ) );   // R-E fix (2026-08-19): defines root= (graphlegend.h)
+                       "Definitions and asserts come from the INDEXED files. -->{}",
+                 rw::rootRelPathsLegend( !rootArg.empty() )  );   // R-E fix (2026-08-19): defines root= (graphlegend.h)
     const std::string layoutRootAttr = rootArg.empty() ? std::string() : ( " root=\"" + ex( rootArg ) + "\"" );
-    std::fprintf( out, "<layout sym=\"%s\" found=\"%d\" defs=\"%zu\" mirror=\"%s\" asserts=\"%zu\" conflicts=\"%u\" scanned=\"%zu\"%s>",
+    rw::emitTo( out, "<layout sym=\"{}\" found=\"{}\" defs=\"{}\" mirror=\"{}\" asserts=\"{}\" conflicts=\"{}\" scanned=\"{}\"{}>",
                   ex( res.sym ).c_str(), res.found ? 1 : 0, res.defsFound, mirror, res.asserts.size(),
                   res.assertConflicts, res.filesScanned, layoutRootAttr.c_str() );
 
@@ -2583,36 +2586,36 @@ inline void writeLayout( std::FILE* out, const LayoutResult& res, std::string_vi
     }
     if( res.defsFound > res.defs.size() )
     {
-        std::fprintf( out, "<more defs=\"%zu\"/>", res.defsFound - res.defs.size() );
+        rw::emitTo( out, "<more defs=\"{}\"/>", res.defsFound - res.defs.size() );
     }
 
     for( const MirrorDiff& m : res.mirrors )
     {
-        std::fprintf( out, "<mismatch kind=\"%s\" a=\"%s\" b=\"%s\" size_a=\"%u\" size_b=\"%u\" size_differs=\"%d\" diffs=\"%zu\">",
+        rw::emitTo( out, "<mismatch kind=\"{}\" a=\"{}\" b=\"{}\" size_a=\"{}\" size_b=\"{}\" size_differs=\"{}\" diffs=\"{}\">",
                       m.kind, ex( relPathLine( m.a ) ).c_str(), ex( relPathLine( m.b ) ).c_str(),
                       m.sizeA, m.sizeB, m.sizeDiffers ? 1 : 0, m.fields.size() );
         for( const FieldDiff& f : m.fields )
         {
-            std::fprintf( out, "<d n=\"%s\" a=\"%s\" b=\"%s\"/>", ex( f.name ).c_str(), ex( f.inA ).c_str(), ex( f.inB ).c_str() );
+            rw::emitTo( out, "<d n=\"{}\" a=\"{}\" b=\"{}\"/>", ex( f.name ).c_str(), ex( f.inA ).c_str(), ex( f.inB ).c_str() );
         }
-        std::fprintf( out, "</mismatch>" );
+        rw::emitRaw( out, "</mismatch>" );
     }
 
     for( const AssertRow& a : res.asserts )
     {
         const std::string_view arp = rootPrefix.empty() ? std::string_view( a.path ) : rw::sarif::rootRelativeUri( a.path, rootPrefix );
-        std::fprintf( out, "<assert p=\"%s\" l=\"%u\" kind=\"%s\"", ex( arp ).c_str(), a.line, a.kind );
+        rw::emitTo( out, "<assert p=\"{}\" l=\"{}\" kind=\"{}\"", ex( arp ).c_str(), a.line, a.kind );
         if( a.hasWant )
         {
-            std::fprintf( out, " want=\"%u\"", a.want );
+            rw::emitTo( out, " want=\"{}\"", a.want );
         }
         if( a.compared )
         {
-            std::fprintf( out, " got=\"%u\" agree=\"%d\"", a.got, a.agree ? 1 : 0 );
+            rw::emitTo( out, " got=\"{}\" agree=\"{}\"", a.got, a.agree ? 1 : 0 );
         }
-        std::fprintf( out, " t=\"%s\"/>", ex( a.text ).c_str() );
+        rw::emitTo( out, " t=\"{}\"/>", ex( a.text ).c_str() );
     }
-    std::fprintf( out, "</layout>" );
+    rw::emitRaw( out, "</layout>" );
 }
 
 }}   // namespace rw::layout

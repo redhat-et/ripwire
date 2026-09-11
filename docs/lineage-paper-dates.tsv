@@ -1,0 +1,25 @@
+# docs/lineage-paper-dates.tsv — arXiv id -> publication date, for the README's recency claim.
+# WHY THIS FILE EXISTS: the arXiv ID stem does NOT track publication date (2607.09691 was
+# published 2026-06-19), so counting IDs overstates recency. readmedriftcheck.sh arm (H)
+# joins this against docs/LINEAGE.md's own 2026 rows and re-derives the README's counts.
+# Adding a 2026 paper to LINEAGE without adding its date here FAILS arm (H2) by design.
+# Dates from the arXiv API <published> field, fetched 2026-09-08.
+#
+#arxiv_id	published
+2602.23368	2025-12-19
+2603.03306	2026-02-08
+2604.17512	2026-04-19
+2605.02741	2026-05-04
+2605.03117	2026-05-04
+2605.16352	2026-05-08
+2606.07297	2026-06-05
+2606.13174	2026-06-11
+2606.21804	2026-06-19
+2607.09691	2026-06-19
+2607.24882	2026-07-27
+2608.01507	2026-08-02
+2608.02967	2026-08-04
+2608.05141	2026-08-05
+2608.16370	2026-08-17
+2608.22063	2026-08-22
+2609.00854	2026-09-01

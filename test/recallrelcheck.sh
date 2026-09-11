@@ -112,7 +112,7 @@ DRIFT_N="$( printf '%s' "$DD" | grep -oE '<doc-drift docs="[0-9]+"' | grep -oE '
 printf '%s' "$K" | grep -qE '[0-9]+ relevant of [0-9]+ document files' \
     && ok "§B9.2: --recall names its OWN population (\"document files\"), not --doc-drift's word (\"docs\")" \
     || no "§B9.2: --recall still reports its denominator as \"docs\" — the two predicates share a noun again"
-HELP_DEN="$( "$BIN" --help 2>&1 | tr '\n' ' ' )"
+HELP_DEN="$( "$BIN" --help=all 2>&1 | tr '\n' ' ' )"
 printf '%s' "$HELP_DEN" | grep -q 'SUPERSET of --doc-drift' \
     && ok "§B9.2: --help states the superset relationship between the two populations" \
     || no "§B9.2: --help does not state how recall's denominator relates to --doc-drift's docs="

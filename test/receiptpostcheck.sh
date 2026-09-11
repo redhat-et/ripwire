@@ -162,7 +162,7 @@ import sys, json, re
 rows = json.load(open(sys.argv[1]))["tests_to_run"]
 aff  = sys.argv[2]
 want = []
-for m in re.finditer(r'<test p="([^"]*)"(?: run="([^"]*)")?(?: run_unknown="1")?/>', aff):
+for m in re.finditer(r'<test p="([^"]*)"(?: (?:seed_kind|changed|partner|hops)="[^"]*")*(?: run="([^"]*)")?(?: run_unknown="1")?/>', aff):   # F1: evidence attrs ride between p= and run=
     want.append((m.group(1), m.group(2)))
 got = [ (t["p"], t.get("run")) for t in rows ]
 assert got == want, "receipt tests_to_run %r != --affected rows %r" % (got, want)
@@ -173,6 +173,97 @@ PY
         && ok "(3) receipt tests_to_run == --affected=<the receipt's own file>, path and run recipe" \
         || no "(3) the receipt's tests_to_run disagrees with the verb it replaces"
 fi
+
+# ── ARM 3c / 3d — the two shapes the geo.py sandbox above CANNOT tell apart ────────────────────────────
+#
+# WHY A SECOND SANDBOX. ARM 3's fixture has exactly one test, area_spec.py, which calls the edit target
+# from a NAMED function — so the caller walk reaches it and the receipt's own walk reaches it too. The two
+# sides agree for a reason unrelated to their being the same answer: CONTRIBUTING §2 shape 1, an assertion
+# that cannot fail. It stayed green through both commits that broke the receipt:
+#   015e5a0f (2026-09-05) made --affected=<a test file> list that test on its own evidence
+#                         (seed_kind="test"). The receipt's walk is transitiveCallers MINUS seeds, so a
+#                         test that IS the edit target can never appear -> "tests":0. A false ZERO.
+#   7dae6522 (2026-09-07) added the partner tier: a test NAMED after a changed file, listed even when the
+#                         graph never reaches it. The receipt has no partner tier.
+# Neither touched mcpedit.h. This sandbox adds exactly the two shapes that separate the answers.
+#
+# IT IS TYPESCRIPT, AND THAT IS LOAD-BEARING. Python's partner convention is test_<stem>.py, and
+# `--affected=geo.py` PATH-MATCHES test/test_geo.py by substring — so the partner row arrives carrying
+# seed_kind= and hops= as well, and the arm cannot tell the partner tier from the seed tier. The TS
+# convention <stem>.test.ts does not contain "<stem>.ts" as a substring, so `--affected=src/bounded.ts`
+# isolates the partner row: `<test p="test/bounded.test.ts" partner="1"/>`, no hops, no seed_kind.
+SB2="$TMP/sandbox2"
+mkdir -p "$SB2/src" "$SB2/test"
+cat > "$SB2/src/bounded.ts" <<'S2A'
+export function bounded(t: string): string { return t.slice(0, 8); }
+S2A
+# partner-named, and reached by NO call edge: the call is at module scope, which ingest attributes to no
+# enclosing symbol, so the caller walk has nothing to follow. `probe` gives ARM 3d a symbol to edit.
+cat > "$SB2/test/bounded.test.ts" <<'S2B'
+import { bounded } from "../src/bounded.ts";
+
+export function probe(): string { return "x"; }
+const _v = bounded("y");
+S2B
+# a SECOND test, reached by a NAMED function, so one answer carries TWO rows on DIFFERENT tiers
+# (partner with no hops, and hops=1) — without it every fixture answer is one row and the ORDER the prior
+# design review called required would be asserted by nothing.
+cat > "$SB2/test/reach.test.ts" <<'S2G'
+import { bounded } from "../src/bounded.ts";
+
+export function checkBounded(): string { return bounded("q"); }
+S2G
+( cd "$SB2" && git init -q && git config user.email t@example.com && git config user.name t \
+  && git add -A && git commit -qm init >/dev/null 2>&1 )
+printf 'export function bounded(t: string): string { return t.slice(0, 9); }\n' > "$TMP/payload2.ts"
+printf 'export function probe(): string { return "y"; }\n'                      > "$TMP/payload3.ts"
+
+# The ONE comparison both arms share: the receipt's rows must equal --affected's rows on the same file,
+# INCLUDING the evidence attributes. ARM 3's regex deliberately skips those; here they are the point,
+# because a row that arrives without its evidence is an advisory row wearing an obligation's clothes.
+cmp_receipt_to_affected(){   # $1=receipt json  $2=--affected xml  $3=label
+    python3 - "$1" "$2" "$3" <<'S2F'
+import sys, json, re
+KEYS = ( "seed_kind", "changed", "partner", "hops", "imports" )
+rows = json.load( open( sys.argv[1] ) ).get( "tests_to_run", None )
+aff, label = sys.argv[2], sys.argv[3]
+if rows is None:
+    print( "%s: the receipt carries no tests_to_run at all" % label ); sys.exit( 1 )
+# `[^/]*` cannot match a run= that CONTAINS a slash ("bash test/x.sh"), which is most real recipes; the
+# attribute run is non-greedy up to the self-closing "/>" instead. Values, not just key presence: a row
+# whose hops= differs, or whose run recipe differs, is a different answer.
+want = []
+for m in re.finditer( r'<test ((?:[a-z_]+="[^"]*"\s*)+)/>', aff ):
+    at = dict( re.findall( r'([a-z_]+)="([^"]*)"', m.group( 1 ) ) )
+    ev = tuple( sorted( ( k, at[k] ) for k in KEYS if k in at ) )
+    want.append( ( at.get( "p" ), ev, at.get( "run" ), "run_unknown" in at ) )
+def norm( v ):
+    return "1" if v is True else str( v )
+got = [ ( t.get( "p" ), tuple( sorted( ( k, norm( t[k] ) ) for k in KEYS if k in t ) ),
+          t.get( "run" ), bool( t.get( "run_unknown" ) ) ) for t in rows ]
+if not want:
+    print( "%s: --affected named no test, so the comparison would be vacuous" % label ); sys.exit( 1 )
+if got != want:
+    print( "%s: receipt %r != --affected %r" % ( label, got, want ) ); sys.exit( 1 )
+print( "OK" )
+S2F
+}
+
+# 3c — the PARTNER shape: edit src/bounded.ts, whose partner test the graph cannot reach.
+rm -rf "$TMP/w2"; git clone --local -q "$SB2" "$TMP/w2" 2>/dev/null
+( cd "$TMP/w2" && "$BIN" . --replace-symbol-body=bounded --edit-payload="$TMP/payload2.ts" 2>/dev/null ) > "$TMP/r3c.json"
+AFF3C="$( cd "$TMP/w2" && "$BIN" . --affected=src/bounded.ts 2>/dev/null )"
+OUT3C="$( cmp_receipt_to_affected "$TMP/r3c.json" "$AFF3C" "(3c) partner-named test" )"
+[ "$OUT3C" = "OK" ] && ok "(3c) the receipt names the partner test --affected names, with its evidence" \
+                    || no "${OUT3C:-(3c) comparison produced no output}"
+
+# 3d — the F3 shape: the edit TARGET is itself a test file.
+rm -rf "$TMP/w3"; git clone --local -q "$SB2" "$TMP/w3" 2>/dev/null
+( cd "$TMP/w3" && "$BIN" . --replace-symbol-body=probe --edit-payload="$TMP/payload3.ts" 2>/dev/null ) > "$TMP/r3d.json"
+AFF3D="$( cd "$TMP/w3" && "$BIN" . --affected=test/bounded.test.ts 2>/dev/null )"
+OUT3D="$( cmp_receipt_to_affected "$TMP/r3d.json" "$AFF3D" "(3d) the edit target IS a test" )"
+[ "$OUT3D" = "OK" ] && ok "(3d) editing a test file names that test — not a false zero" \
+                    || no "${OUT3D:-(3d) comparison produced no output}"
 
 # ── ARM 3b — the FOLD carries the COMPLETENESS KEYS its standalone twin carries (verify-wave2 F3) ──────
 # Arms 2 and 3 compare the fields the fold COPIES, and that is exactly where the gap was: the standalone

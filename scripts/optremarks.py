@@ -34,9 +34,27 @@ import re
 import sys
 
 # ---- the hot set: where a remark is worth a bench run (G2 — the cache-locality guardrail) ----------
-# Everything else in the tree is CLI plumbing, serialization, and one-shot setup, where a vectorization
-# or inlining remark cannot move a measured number. Kept as a literal list rather than a heuristic so
-# the report's notion of "hot" is reviewable and stays honest when files are added.
+# MEMBERSHIP RULE. A file is hot when its code runs per FILE, per SYMBOL or per AST NODE on the default
+# `ripwire <dir>` path — the path every verb pays for — and the profiler attributes measurable time to
+# it. Everything else is CLI plumbing, serialization, one-shot per-run setup, or code gated behind a
+# verb or a single language, where a vectorization or inlining remark cannot move a measured number.
+# Kept as a literal list rather than a heuristic so the report's notion of "hot" is reviewable.
+#
+# A LITERAL LIST DOES NOT STAY HONEST ON ITS OWN — this one went stale silently, once, and stayed that
+# way for as long as the ingest split has existed. The split moved ~18,000 lines out of src/ingest.cpp
+# into fifteen src/ingest_*.h sections of the SAME translation unit. Every listed path still existed,
+# so nothing failed and no gate fired; the remarks simply began naming the section headers instead.
+# --hot went from covering the ingest family to covering 69 of its 33,957 first-party remarks — 0.2% —
+# and the two hottest own-code phases in the tool were invisible to the triage the whole time.
+#
+# So the list is now gated against the tree by test/optremarkshotcheck.sh: every file the tree groups
+# with a hot one must appear here, or in COLD_FILES with a reason. Adding a section and saying nothing
+# is no longer possible. Growing this list without limit is also no longer possible — a hot set that is
+# the whole tree narrows nothing, and the gate has a ceiling arm that says so.
+#
+# The shares below are from -DRIPWIRE_PROFILE=ON over this repository as its own corpus (~1,800 files,
+# 19 threads); "cold" is --no-cache, "warm" is the steady state of repeated runs, NOT the first one.
+# Re-derive them if you touch the pipeline — docs/OPTREMARKS.md §3 has the command.
 HOT_FILES = (
     "src/pagerank.cpp",           # the power-iteration loop — G2's no-allocation scope
     "src/infra/radixSort.h",      # LSD radix entry points
@@ -48,9 +66,68 @@ HOT_FILES = (
     "src/infra/sortutil.h",
     "src/clones.h",               # token-shingle scan over every file
     "src/lexical.h",              # tokenizer
-    "src/ingest.cpp",             # crawl + parse + symbol extraction
+
+    # ── the ingest translation unit ──────────────────────────────────────────────────────────────
+    # One TU, seventeen files since the split. It is the overwhelming majority of both a cold and a
+    # warm run, so most of its sections are hot — that is a fact about where this tool spends its
+    # time, not a lapsed rule. The six that are NOT hot are in COLD_FILES, each with its number.
+    "src/ingest.cpp",             # the TU anchor: the ingest() driver and its phase calls. Its own body is small now — the phases live in the sections below
+    "src/ingest.h",               # isSkippedCrawlDir / looksBinary / isNonTextExtension — inline predicates run for EVERY crawled path
+    "src/ingest_crawl.h",         # the crawl and its git-ignore probe (~26% warm), plus readFile's fopen+read (~4% cold) — both per path
+    "src/ingest_parsepool.h",     # the parallel per-file parse pool; its pending-tag flush alone is 10.2% of a cold run
+    "src/ingest_sidecap.h",       # captureTagsFacts + captureSideFacts, per query capture and per node — 23.7% + 5.6% cold, the hottest own code in the tool
+    "src/ingest_names.h",         # the per-definition name / kind / gating decision, called from the capture loop above
+    "src/ingest_binds.h",         # per-node binding and alias capture — 182 distinct ts_* NoDefinition sites, more than any other file
+    "src/ingest_relations.h",     # captureIncludes and the relation captures — the densest LoadClobbered cluster in the family (1,120 in one function)
+    "src/ingest_metrics.h",       # cc_walk / complexityOf — a per-symbol AST walk for the quality metrics
+    "src/ingest_cache.h",         # loadCache / saveCache / readFileRecord, per file record — ~10% of a WARM run, which is the run an agent actually pays for
+    "src/ingest_model.h",         # build-model: dedup, symbol-id assignment, the def-span index, the ref radix sort — per symbol and per reference, ~18% warm
+
     "src/resolve.h",              # reference resolution into the call graph
     "src/graph.h",
+)
+
+# ---- the deliberate exclusions --------------------------------------------------------------------
+# NOT "everything that is not hot" — that is 137 files and would say nothing. These are the files the
+# grouping relations in test/optremarkshotcheck.sh would otherwise flag as undecided: the rest of a
+# translation unit that has hot members, the name-family siblings of a hot file, and every TU in src/.
+# Each states why it is out, because an exclusion nobody can argue with is an exclusion nobody
+# reviewed. Argue with these — that is what they are for.
+COLD_FILES = (
+    # ── ingest sections that are not on the per-file / per-symbol default path ────────────────────
+    ( "src/ingest_astquery.h",
+      "the --match / --lint AST-query engine. It does not run at all on a plain `ripwire <dir>`, so a remark here cannot move the number every other verb pays." ),
+    ( "src/ingest_prewarm.h",
+      "grammar classification and tags.scm compile: ONE-SHOT per run, not per file, and already the subject of two landed optimizations. ~1.9% cold, ~1.1% warm; "
+      "what remains is ts_query_new inside tree-sitter, which is third_party and dropped at triage by the same rule." ),
+    ( "src/ingest_docs.h",
+      "markdown / notebook / html / csv extraction, per doc file. 4.8 ms of an ~88 ms warm run and 0.07% cold — the same order as the build-model sorts D1 dismisses "
+      "on arithmetic. The LoadClobbered cluster in extractMarkdown (447) is real, just cheap. Revisit if the doc pass grows." ),
+    ( "src/ingest_docpass.h",
+      "the driver of the doc extraction above, dismissed on the same measurement. Beware its FIRST warm run after a cold one, which costs ~30 ms rather than ~5: "
+      "that is first-touch, not steady state, and it takes three repeats to see. A single run would have put this file in the hot set." ),
+    ( "src/ingest_jsimports.h",
+      "JS/TS import resolution. Per file, but for one language family, so a remark here cannot be validated against a general corpus. The same code SHAPE — a "
+      "per-node tree-sitter walk — is covered by ingest_binds.h and ingest_relations.h, which run for every grammar." ),
+    ( "src/ingest_elixir.h",
+      "Elixir-specific capture helpers: per node, but for one grammar with a small corpus share. Same argument as ingest_jsimports.h above." ),
+
+    # ── the other translation units under src/ ────────────────────────────────────────────────────
+    ( "src/main.cpp",
+      "argument parsing and verb dispatch: one-shot per run. It is also the largest opt-record in the tree by an order of magnitude (1.5 GB even narrowed) precisely "
+      "BECAUSE it is thousands of cold functions — volume here measures function count, not heat. Its verbs_*.h sections are cold for the same reason." ),
+    ( "src/tsprobe.cpp",
+      "the ripwire_probe binary. Not linked into ripwire at all, so nothing in it runs when the tool runs." ),
+    ( "src/alloccount.cpp",
+      "the RIPWIRE_ALLOC_COUNT operator new/delete replacement: absent from every shipped build and from every gate by construction — see the honesty note at the "
+      "top of the file." ),
+    ( "src/infra/diagnostics.cpp",
+      "the VERIFY / DEGRADED_PATH_ALERT handlers. They run on a degrade path: once, after something has already gone wrong." ),
+
+    # ── name-family siblings of a hot file ────────────────────────────────────────────────────────
+    ( "src/pagerank.h",
+      "42 lines of PageRankConfig and the result struct — declarations, no loop. The power iteration is src/pagerank.cpp, which IS listed, and whose own remarks D1 "
+      "dismisses on the profile: 2.2 ms of a 7.3 s cold run." ),
 )
 
 FOREIGN_MARKERS = ( "third_party/", "/usr/include", "/usr/lib", ".sdk/", "/Applications/Xcode",

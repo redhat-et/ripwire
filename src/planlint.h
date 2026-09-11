@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // planlint.h — `--plan-lint=FILE`, the house PLAN format's STRUCTURE check.
 //
@@ -761,57 +764,57 @@ inline void writePlanLint( std::FILE* out, const LintResult& res )
 
     const std::uint32_t gating = gatingCount( res );
 
-    std::fprintf( out, "<plan-lint file=\"%s\" dialect=\"%d\" cards=\"%zu\" ledger=\"%d\"",
+    rw::emitTo( out, "<plan-lint file=\"{}\" dialect=\"{}\" cards=\"{}\" ledger=\"{}\"",
                   ex( res.file ).c_str(), res.dialectDetected ? 1 : 0, res.cards.size(), res.hasLedger ? 1 : 0 );
     if( res.hasLedger )
     {
-        std::fprintf( out, " ledger_line=\"%u\"", res.ledgerLine );
+        rw::emitTo( out, " ledger_line=\"{}\"", res.ledgerLine );
     }
     if( !res.atStamp.empty() )
     {
-        std::fprintf( out, " at=\"%s\"", res.atStamp.c_str() );
+        rw::emitTo( out, " at=\"{}\"", res.atStamp.c_str() );
     }
-    std::fprintf( out, " git=\"%d\" stale_commits=\"%u\" gating=\"%u\">",
+    rw::emitTo( out, " git=\"{}\" stale_commits=\"{}\" gating=\"{}\">",
                   res.gitAvailable ? 1 : 0, kStaleCommits, gating );
 
     for( const CardRow& c : res.cards )
     {
-        std::fprintf( out, "<card id=\"%s\" line=\"%u\" status=\"%s\"", ex( c.id ).c_str(), c.line, glyphName( c.terminal ) );
+        rw::emitTo( out, "<card id=\"{}\" line=\"{}\" status=\"{}\"", ex( c.id ).c_str(), c.line, glyphName( c.terminal ) );
         if( c.terminalLine != 0 )
         {
-            std::fprintf( out, " tline=\"%u\"", c.terminalLine );
+            rw::emitTo( out, " tline=\"{}\"", c.terminalLine );
         }
         if( c.fromLedger )
         {
-            std::fprintf( out, " src=\"ledger\"" );
+            rw::emitRaw( out, " src=\"ledger\"" );
         }
         if( c.terminal == Glyph::None )
         {
-            std::fprintf( out, " why=\"%s\"", missingWhy( c, res.hasLedger ) );
+            rw::emitTo( out, " why=\"{}\"", missingWhy( c, res.hasLedger ) );
         }
         if( c.staleComputed )
         {
-            std::fprintf( out, " since=\"%u\"", c.commitsSince );
+            rw::emitTo( out, " since=\"{}\"", c.commitsSince );
         }
         if( cardIsStale( c ) )
         {
-            std::fprintf( out, " stale=\"1\"" );
+            rw::emitRaw( out, " stale=\"1\"" );
         }
         if( cardIsGating( c ) )
         {
-            std::fprintf( out, " gating=\"1\"" );
+            rw::emitRaw( out, " gating=\"1\"" );
         }
-        std::fprintf( out, "/>" );
+        rw::emitRaw( out, "/>" );
     }
 
     for( const LedgerOrphan& lo : res.ledgerOrphans )
     {
-        std::fprintf( out, "<ledger-orphan id=\"%s\" line=\"%u\" gating=\"1\"/>", ex( lo.id ).c_str(), lo.line );
+        rw::emitTo( out, "<ledger-orphan id=\"{}\" line=\"{}\" gating=\"1\"/>", ex( lo.id ).c_str(), lo.line );
     }
 
     for( const OwedRow& o : res.owed )
     {
-        std::fprintf( out, "<owed line=\"%u\"%s>", o.line, o.discharged ? "" : " gating=\"1\"" );
+        rw::emitTo( out, "<owed line=\"{}\"{}>", o.line, o.discharged ? "" : " gating=\"1\"" );
         std::string safe;
         appendCdataSafe( o.text, safe );
         std::fputs( "<![CDATA[", out );

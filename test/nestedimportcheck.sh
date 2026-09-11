@@ -337,7 +337,7 @@ monotonicity_check()
     trap '( cd "$ROOT" && git worktree remove --force "'"$WT"'" >/dev/null 2>&1 ); rm -rf "$TMP"' EXIT
 
     local OLDBIN
-    OLDBIN="$( ripwire_head_binary "$ROOT" "$TMP" )" || { skip "monotonicity: pre-change build failed"; return; }
+    OLDBIN="$( ripwire_head_binary "$ROOT" "$TMP" )" || { headbin_refusal $? "monotonicity"; return; }
 
     local IN="$WT/src"
     # (a) captured includes — compare the PER-FILE COUNT, never the emitted <inc> rows. serialize.h caps

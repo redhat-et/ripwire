@@ -104,12 +104,14 @@ inline bool isTestSymbol( const IngestResult& ing, std::size_t symbolIndex ) noe
 enum class PathTier : std::uint8_t { Source = 0, TestOrBench = 1, Doc = 2 };
 
 // Extension decides DOC first (a `.md` under `test/` is prose, not a test), then the directory convention
-// decides TEST/BENCH, and everything left is source. Markdown is spelled out because docparse::docKindOf
-// deliberately excludes it — `.md` is ingested as a first-class document, not through an extractor.
+// decides TEST/BENCH, and everything left is source. The question here is the READER's — is this file
+// prose? — so it asks docparse::isProseExtension, which answers for the unindexed prose (`.txt`, `.tsv`)
+// as well as for everything the index carries. This used to spell its own `.md`/`.markdown`/`.rst`/`.txt`
+// list beside the extractor test; four other headers spelled four different ones (see docparse.h's
+// vocabulary note), which is how `.adoc` and `.org` ended up prose to nobody.
 inline PathTier pathTierOf( std::string_view p ) noexcept
 {
-    const std::string ext = docparse::lowerExtOf( p );
-    if( ext == ".md" || ext == ".markdown" || ext == ".rst" || ext == ".txt" || docparse::isDocExtension( ext ) )
+    if( docparse::isProseExtension( docparse::lowerExtOf( p ) ) )
     {
         return PathTier::Doc;
     }

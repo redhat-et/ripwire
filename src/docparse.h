@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // docparse.h — P1-B document ingest. Turns non-code documents that live IN a repo
 // (Jupyter notebooks, HTML, CSV — and, via a bridge, PDF/DOCX/PPTX/XLSX) into plain text so `--recall` /
@@ -18,6 +20,10 @@
 #include "infra/jsonesc.h"   // A4-F27 residual: rw::shSingleQuote — canonical shell single-quote, forwarded
                         // to below instead of carrying a local copy; STL-only, no coupling cost here.
 
+#include "infra/sortutil.h"  // svLess — the memcmp-then-length string_view order the sorted tables below use
+
+#include <algorithm>   // std::binary_search — the membership test, instead of a hand-rolled scan loop
+#include <iterator>
 #include <array>
 #include <cctype>
 #include <cstdio>
@@ -49,8 +55,14 @@ inline DocKind docKindOf( std::string_view extLower ) noexcept
     {
         return DocKind::Csv;
     }
-    // binary formats — handled by the markitdown bridge (NOTE: not collected in v1; the crawl's binary
-    // sniff excludes them. The bridge is reachable once binary-doc collection lands — see §P1-B.)
+    // Binary formats — the markitdown bridge. MEASURED 2026-09-09, correcting the note that stood here: a
+    // .pdf IS collected (recordPreSizeDrop admits any isDocExtension, and the NUL sniff only ever runs on a
+    // file the PARSE POOL reads, which a doc file never enters), so the bridge runs on every invocation.
+    // What it produces without markitdown on PATH is "" — and an empty extraction contributes no Section
+    // node, so the file is counted in files= and is a SILENT ZERO in every doc lens. Closing that is the
+    // extractor-provenance design in LANE_C_REPORT.md §2 (prov="markitdown:<ver>" + a named unindexed
+    // reason), and it is deliberately not turned on here: the owner's 2026-09-08 scope ruling is
+    // text/markdown, not bloated document formats.
     if( extLower == ".pdf" || extLower == ".docx" || extLower == ".pptx" || extLower == ".xlsx" )
     {
         return DocKind::Markitdown;
@@ -81,6 +93,82 @@ inline std::string lowerExtOf( std::string_view path )
 inline bool isDocExtension( std::string_view extLower ) noexcept
 {
     return docKindOf( extLower ) != DocKind::None;
+}
+
+// ── the prose vocabulary — ONE place, two questions ─────────────────────────────────────────────────
+//
+// Every extension test in this tree asks one of exactly two things, and conflating them is what let the
+// defect below ship. THE INDEX'S question is "does this build carry the file as a DOCUMENT?"
+// (isIndexedDocExtension). THE READER'S question is "is this file prose?" (isProseExtension) — an
+// ordering key, a comment-syntax verdict, how much a name deleted here proves. The second is a strict
+// SUPERSET of the first, and both live here so a format added to one is visible to the other.
+//
+// THREE TIERS, separated by WHICH MACHINERY reads the file — not by how a reader thinks about it:
+//
+//   • MARKDOWN-GRAMMAR tier (kMarkdownGrammarExts). ingest_crawl.h's kLangTable maps these to
+//     Lang::Markdown and the vendored markdown BLOCK grammar, so they reach the section tier, --recall's
+//     section-granular serving and doc→code mentions with no extractor and no extracted-text copy at
+//     all. Deliberately NOT a DocKind: docKindOf answers "which EXTRACTOR", and these need none. A
+//     compile-time guard in ingest_crawl.h asserts every name here really has a grammar row.
+//   • EXTRACTOR tier (docKindOf). A notebook / exported HTML / CSV is turned into plain text by a parser
+//     below, or by the markitdown bridge, and contributes one whole-file section.
+//   • PROSE THIS BUILD DOES NOT INDEX (kUnindexedProseExts). Prose to a reader, absent from the index —
+//     so every reader-facing lens must still answer "prose", and `unindexed=` must still disclose it.
+//
+// WHY THE THREE LIVE IN ONE HEADER (METHODOLOGY §3, sibling completeness). Five headers spelled their own
+// prose list — filter.h's PathTier, darkflags.h's lineSyntaxFor, gitoracle.h's isProsePath,
+// flipimpact.h's kProseExtTable, docdrift.h's isIndexedDocPath — and no two agreed. `.rst` and `.txt`
+// counted as prose for ORDERING while the crawl indexed neither; `.adoc` counted for one lens and not the
+// next; `.org` for none. Measured 2026-09-09: eight files holding the same ADR text and differing only in
+// extension produced `unindexed="adoc:1,log:1,mdx:1,org:1,rst:1,txt:1"`, so a repository whose decision
+// history lives in `docs/adr/*.rst` got "0 relevant of 0 document files" out of --recall.
+//
+// WHY `.txt` IS PROSE BUT NOT INDEXED — a census, not a taste. `.txt` is the universal "arbitrary bytes"
+// extension. In this repository 69 of 69 crawled `.txt` files are build manifests, gate fixtures or
+// captured output (571,706 B; the largest is 69,729 B = 7.5x the corpus median document) and NONE is prose;
+// across three checkouts on the development machine the commonest `.txt` basenames are requirements.txt
+// (111), meson_options.txt (67) and CMakeLists.txt (50) against README.txt (71) and index.txt (32).
+// Admitting it would hand BM25 half a megabyte of gate dumps that the generated-document demotion does
+// NOT catch — those carry no marker and no ``` fences, the limit classifyGeneratedDoc states itself. So
+// `.txt` stays a reader's prose and an unindexed extension, DISCLOSED in `unindexed=` rather than silently
+// absent. `.tsv` is the same shape one tier further out: a table a reader reads, no extractor for it here.
+// Gate: test/textdocscheck.sh pins both halves — the four admitted formats and the four refused ones.
+// SORT ORDER IS LOAD-BEARING on both tables — they are binary-searched, and an out-of-order entry does not
+// fail to compile on its own, it silently stops matching. The static_asserts are the guard, exactly as
+// ingest.h's kNonTextExts carries one. Two earlier spellings were tried and rejected by measurement rather
+// than taste: a hand-rolled `for( x : table ) if( x == v )` loop is the five-instance clone shape
+// isNonTextExtension's note already records (ripwire's own --quality-delta called the first draft six more
+// instances of it), and a std::find one-liner then cloned abicheck.h's KindCounts::total. The sorted-table
+// + binary_search + is_sorted trio is the shape externalnames.h::isShellBuiltinName settled on for the
+// identical collision, and it is the one this file now carries too.
+inline constexpr std::string_view kMarkdownGrammarExts[] = { ".adoc", ".markdown", ".md", ".mdx", ".org", ".rst" };
+
+static_assert( std::is_sorted( std::begin( kMarkdownGrammarExts ), std::end( kMarkdownGrammarExts ), rw::sortutil::svLess ),
+               "kMarkdownGrammarExts must stay byte-sorted — isMarkdownGrammarExtension binary-searches it" );
+
+inline constexpr std::string_view kUnindexedProseExts[] = { ".tsv", ".txt" };
+
+static_assert( std::is_sorted( std::begin( kUnindexedProseExts ), std::end( kUnindexedProseExts ), rw::sortutil::svLess ),
+               "kUnindexedProseExts must stay byte-sorted — isProseExtension binary-searches it" );
+
+inline bool isMarkdownGrammarExtension( std::string_view extLower ) noexcept
+{
+    return std::binary_search( std::begin( kMarkdownGrammarExts ), std::end( kMarkdownGrammarExts ), extLower, rw::sortutil::svLess );
+}
+
+// THE INDEX'S question: this build carries the file as a document — a markdown-grammar file or an
+// extracted one. Everything that must not treat an indexed document as CODE asks this.
+inline bool isIndexedDocExtension( std::string_view extLower ) noexcept
+{
+    return isMarkdownGrammarExtension( extLower ) || isDocExtension( extLower );
+}
+
+// THE READER'S question: prose, whether or not this build indexes it. Ordering keys, comment-syntax
+// verdicts and evidence weight ask this — they are about the file, not about the index.
+inline bool isProseExtension( std::string_view extLower ) noexcept
+{
+    return isIndexedDocExtension( extLower )
+        || std::binary_search( std::begin( kUnindexedProseExts ), std::end( kUnindexedProseExts ), extLower, rw::sortutil::svLess );
 }
 
 // ── .ipynb (Jupyter) — pull every "source" cell's text out of the JSON ──────────────────────────────
@@ -116,7 +204,10 @@ inline bool readWholeFile( const std::string& path, std::string& out )
     out.resize( std::size_t( len ) );
     const std::size_t want = out.size();
     const std::size_t got  = want == 0 ? 0 : std::fread( out.data(), 1, want, fp );
-    const bool ok = ( got == want ) && ( std::fclose( fp ) == 0 );
+    // fclose unconditionally: `( got == want ) && ( std::fclose( fp ) == 0 )` short-circuited past it and leaked the
+    // FILE on every short read (clang-analyzer-unix.Stream) — githarden's git-config probe and the notebook reader share this.
+    const bool closedOk = std::fclose( fp ) == 0;
+    const bool ok       = got == want && closedOk;
     if( !ok )
     {
         out.clear();
@@ -489,6 +580,7 @@ inline std::string parseDocFile( const std::string& path, std::string_view extLo
             if( !detail::readWholeFile( path, bytes ) )
             {
                 DEGRADED_PATH_ALERT( "docparse: cannot read document file" );
+                rw::emitTo( stderr, "ripwire: doc {}: cannot read — omitted from the index (the skipped verb counts it as unmeasured)\n", path.c_str() );   // 2026-09-06
                 return {};
             }
             switch( docKindOf( extLower ) )

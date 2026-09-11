@@ -1,0 +1,43 @@
+# limits_classes.tsv — cap name -> INDEXING | OUTPUT.  One row per cap, tab-separated, sorted by name.
+#
+# INDEXING caps bound what can EVER be found. A silent one is unrecoverable by the caller: no flag, no
+# budget, no follow-up call gets the answer back, and the output reads as "none exists".
+# OUTPUT caps bound what is SHOWN from what was found. A silent one is still a defect, but a --detail,
+# a page or a second call can recover the answer.
+#
+# WHY A SIDECAR AND NOT A TAG IN src/. This file is a stopgap with a known expiry. The classification
+# belongs beside the declaration — a trailing `// INDEXING` on the constant itself, read by
+# limits_build.py the same way it already reads the note — because a sidecar keyed by name can go stale
+# in a way an inline tag cannot. It is a sidecar today only because the round that produced the
+# taxonomy was not the round that could touch src/. Migrate it inline and delete this file; the gate
+# arm that requires every row here to name a LIVE cap is what keeps it honest until then.
+#
+# COVERAGE IS PARTIAL AND THE DOCUMENT SAYS SO. Only caps with a sourced classification are listed.
+# Everything else renders as an em dash, which reads as "not yet classified" — never as "neither".
+# Adding a row is a claim about what the cap bounds; make it by reading the call site, not the name.
+kCoBoostMaxFilesPerCommit	INDEXING
+kCoBoostMaxPartnerFiles	INDEXING
+kCoBoostMaxSymbolsPerFile	INDEXING
+kDocMentionMaxAnchors	INDEXING
+kDocMentionMaxDocsPerAnchor	INDEXING
+kDocMentionMaxDocsTotal	INDEXING
+kExpandMaxPer	OUTPUT
+kExpandMaxSeeds	OUTPUT
+kHandoffCochangeRows	OUTPUT
+kHandoffDocRows	OUTPUT
+kHandoffNoteRows	OUTPUT
+kMaxPartitions	OUTPUT
+kMeasuredDigitsPricedWidth	OUTPUT
+kMentionMaxDirectSymbols	INDEXING
+kMentionMaxFiles	INDEXING
+kMentionMaxRawTokens	INDEXING
+kMentionMaxSymbolsPerFile	INDEXING
+kNameCandidateCap	OUTPUT
+kSibliftMaxSeed	OUTPUT
+kSibliftMaxSib	OUTPUT
+kSliceRdMaxIter	OUTPUT
+kTestHopBasenameRowCap	OUTPUT
+kTestHopCalleeRowCap	OUTPUT
+kUnitComplexityLowRiskMax	OUTPUT
+kUnitInterfacingLowRiskMax	OUTPUT
+kUnitSizeLowRiskMax	OUTPUT

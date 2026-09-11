@@ -81,13 +81,18 @@ BASE="$WORK/base"; mkcorpus "$BASE"
 mkdir -p "$WORK/gen"
 printf 'int trim( int a, int b )\n{\n    return \000 a;\n}\n' > "$WORK/gen/nul.txt"
 
-# the FOUR normalisations, and nothing else. The document is minified XML on ONE line, so the greedy
+# the FIVE normalisations, and nothing else. The document is minified XML on ONE line, so the greedy
 # comment strip removes exactly the single leading legend. The fourth (E3, terminality round A 2026-09-05):
 # the preview-only <overwrite> child — the CURRENT span an apply would replace, which the post-hoc document
 # cannot carry because after the apply that span no longer exists — is dropped before the comparison.
 # (perl -0 slurps the whole document: the overwrite CDATA carries the span's own newlines, which a per-line sed
 # could never match across.)
-norm(){ printf '%s' "$1" | perl -0pe 's/<overwrite [^>]*><!\[CDATA\[.*?\]\]><\/overwrite>//s' | sed -e 's/<!--.*-->//' -e 's/ at="[^"]*"//g' -e 's/ preview="1"//g'; }
+# The FIFTH (2026-09-10): est_tokens=, which prices THIS document in bytes. The preview document is bigger
+# than the applied one BY CONSTRUCTION — it carries the preview sentence in its legend and the <overwrite>
+# child, both of which the three normalisations above then remove — so the two prices differ, and a price
+# that did NOT differ would be the bug (it would mean est_tokens stopped covering the whole document).
+# Stripped, therefore, exactly like at=: a per-document fact this comparison is not about.
+norm(){ printf '%s' "$1" | perl -0pe 's/<overwrite [^>]*><!\[CDATA\[.*?\]\]><\/overwrite>//s' | sed -e 's/<!--.*-->//' -e 's/ at="[^"]*"//g' -e 's/ preview="1"//g' -e 's/ est_tokens="[0-9]*"//g'; }
 statusOf(){ printf '%s' "$1" | sed -e 's/<!--.*-->//' | grep -oE 'status="[a-z-]+"' | head -1; }
 
 preview(){ # $1 selector  $2 payload-path

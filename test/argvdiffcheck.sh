@@ -22,11 +22,24 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 BASE="${RIPWIRE_BASE:-}"
 [ -n "$BASE" ] && [ "${BASE#/}" = "$BASE" ] && BASE="$ROOT/$BASE"
-TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+TMP="$( mktemp -d )"
+# The argv matrix is word-split on purpose (a vector IS an argv line), and vectors now embed a scratch
+# path, so a $TMPDIR with whitespace would silently re-split them into different arguments. Refuse instead.
+case "$TMP" in *[[:space:]]*) echo "argvdiffcheck: refusing — TMPDIR contains whitespace ($TMP), the argv matrix is word-split"; exit 2 ;; esac
+# The scratch destination every PATH-valued vector is pointed at (see the value-typing block below), and
+# the one file the mutation CONTROL creates in the tree on purpose. The trap owns BOTH, so a killed run
+# cannot leave behind the very stray the last arm exists to catch.
+ARGVOUT="$TMP/argvout"
+CTRL="$ROOT/argvdiffcheck_mutation_control"
+trap 'rm -rf "$TMP"; rm -f "$CTRL"' EXIT
 cd "$ROOT"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+# SORTED, and that is load-bearing: the mutation arm at the bottom diffs two snapshots with comm, and comm
+# on unsorted input drops lines without saying so. git prints staged entries BEFORE untracked ones, so a
+# real tree can emit "M  zoo.c" ahead of "?? a.txt" — out of byte order, and a stray hides in the disorder.
+treestatus(){ git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' | sort; }
 # The sanctioned skip is decided BEFORE the binary guard: with no RIPWIRE_BASE the gate cannot run at all,
 # so a missing build/ripwire in that state is irrelevant — exit 2 there turned the skip into a failure in
 # any tree without a build dir (gateexitcheck arm D asserts this skip is exit 0).
@@ -38,7 +51,7 @@ fi
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN"; exit 2; }
 echo "argvdiffcheck: BASE=$BASE"
 echo "argvdiffcheck: BIN =$BIN"
-git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' > "$TMP/status.before"
+treestatus > "$TMP/status.before"
 
 CORPUS="test/fixture"
 
@@ -46,8 +59,10 @@ CORPUS="test/fixture"
 # Four independent sources, so a vector set that drifts in one place is still covered by the others.
 VEC="$TMP/vectors.txt"; : > "$VEC"
 
-# (1) every long flag --help advertises, alone (bare and =1), against a real corpus.
-#     Server entry points are excluded: --mcp reads stdin to EOF and --listen binds a socket.
+# (1) every long flag --help advertises, alone (bare and with a synthesized value), against a real corpus.
+#     Server entry points are excluded: --mcp reads stdin to EOF and --listen binds a socket. The value is
+#     TYPED from the flag's own --help placeholder — see the block above the loop for why `=1` is not safe
+#     for every flag.
 #
 # The matrix is the INTERSECTION of both binaries' advertised surfaces, and that is not a convenience: this
 # gate's question is "did anything PRE-EXISTING change?". A flag the new binary added does not exist in the
@@ -55,8 +70,8 @@ VEC="$TMP/vectors.txt"; : > "$VEC"
 # ADDITIVE change — the exact result that makes a differential gate get ignored. New flags are counted and
 # NAMED below (never silently dropped) and are covered by their own dedicated gate; the pre-existing surface
 # is what must stay byte-identical, and every one of it is still probed.
-"$BIN"  --help 2>&1 | grep -oE '\-\-[a-z][a-z0-9-]+' | sort -u > "$TMP/flags.new.txt"
-"$BASE" --help 2>&1 | grep -oE '\-\-[a-z][a-z0-9-]+' | sort -u > "$TMP/flags.base.txt"
+"$BIN"  --help=all 2>&1 | grep -oE '\-\-[a-z][a-z0-9-]+' | sort -u > "$TMP/flags.new.txt"
+"$BASE" --help=all 2>&1 | grep -oE '\-\-[a-z][a-z0-9-]+' | sort -u > "$TMP/flags.base.txt"
 comm -12 "$TMP/flags.new.txt" "$TMP/flags.base.txt" > "$TMP/flags.txt"
 comm -23 "$TMP/flags.new.txt" "$TMP/flags.base.txt" > "$TMP/flags.added.txt"
 if [ -s "$TMP/flags.added.txt" ]; then
@@ -80,11 +95,45 @@ comm -13 "$TMP/flags.new.txt" "$TMP/flags.base.txt" > "$TMP/flags.removed.txt"
 # test/fixture/.ripwire_quality_acks behind.) The verbs are covered by their own dedicated gates.
 SKIP=" --mcp --listen --mcp-token --allow-remote-edits --refetch --doctor \
        --index-out --html --export --note-add --quality-ack --quality-baseline --baseline --baseline-update --scan-skills --cache "
+# The synthesized VALUE has to fit the flag's advertised TYPE. `1` is the right shape for a count, a name,
+# a symbol or a mode, and the wrong shape for the two families where a value is not merely READ:
+#
+#   PATH-valued (--help spells the placeholder FILE / DIR / PATH / BASE / TESTFILE) — `--pin-census=1` made
+#     the binary write its census to a file literally named `1` in the CWD, which is the REPO ROOT. The
+#     mutation arm at the bottom caught the damage ("harness MUTATED the tree: ?? 1") but nothing prevented
+#     it, and CI never saw it because CI sets no RIPWIRE_BASE and this gate skips. These now get a path
+#     inside the scratch dir, so a writer writes THERE — and the write path is still exercised, which
+#     `--flag=1` only ever did by accident, in the wrong place.
+#   CMD-valued (placeholder CMD) — --run-trace EXECUTES its value under `sh -c`, so the generator was
+#     handing a synthesized string to a shell, and reports a MEASURED duration_ms that its own legend calls
+#     "not deterministic". Two byte-identical binaries DIFF on it (observed: 26 ms vs 25 ms), which fails
+#     this gate's headline assertion for no reason. It is excluded on exactly the grounds --doctor is:
+#     env-dependent BY DESIGN, not by accident. test/runtracecheck.sh is its dedicated gate. Only the VALUE
+#     form is dropped — bare `--run-trace` (unknown flag) and `--run-trace=` (the §B5 empty-value refusal
+#     below) are deterministic, and both stay in the matrix.
+#
+# Both sets are read out of --help rather than hand-listed, so a flag added later is classified by the row
+# deckcheck.sh already forces its author to write in the same commit. The UNION of the two binaries'
+# answers is used, because the two error directions are not symmetric: over-classifying only swaps one
+# nonsense value for another, under-classifying puts a file back in the repo root.
+placeholders(){ "$1" --help=all 2>&1 | grep -oE '^ +--[a-z][a-z0-9-]*\[?="?[A-Za-z][^ ]*' | sed 's/^ *//;s/"//g' | sed -E 's/\[?=/ /'; }
+{ placeholders "$BIN"; placeholders "$BASE"; } > "$TMP/placeholders.txt"
+PATHFLAGS=" $( awk '$2 ~ /^(FILE|DIR|PATH|BASE|TESTFILE|FILE\|-)\]?$/ {print $1}' "$TMP/placeholders.txt" | sort -u | tr '\n' ' ' )"
+CMDFLAGS=" $(  awk '$2 ~ /^CMD\]?$/                                  {print $1}' "$TMP/placeholders.txt" | sort -u | tr '\n' ' ' )"
+mkdir -p "$ARGVOUT"
+npath=0; ncmd=0
 while read -r f; do
     case "$SKIP" in *" $f "*) continue ;; esac
     printf '%s %s\n'    "$CORPUS" "$f"    >> "$VEC"
-    printf '%s %s=1\n'  "$CORPUS" "$f"    >> "$VEC"
+    case "$CMDFLAGS"  in *" $f "*) ncmd=$(( ncmd + 1 )); continue ;; esac
+    case "$PATHFLAGS" in
+        *" $f "*) npath=$(( npath + 1 )); printf '%s %s=%s\n' "$CORPUS" "$f" "$ARGVOUT/out" >> "$VEC" ;;
+        *)                               printf '%s %s=1\n'   "$CORPUS" "$f"                >> "$VEC" ;;
+    esac
 done < "$TMP/flags.txt"
+[ "$npath" -gt 0 ] \
+    && ok "values typed from --help: $npath path-valued flag(s) aimed at the scratch dir, $ncmd cmd-valued value-form(s) dropped" \
+    || no "values typed from --help: ZERO path-valued flags found — the --help row format drifted, fix the placeholder regex"
 
 # (1b) §B5 (capture-audit-4): the EMPTY value, `--flag=`, for every shared advertised flag.
 #
@@ -187,17 +236,43 @@ SHOWCASE="$( ls docs/captures/COMMANDS_showcase_*.md 2>/dev/null | sort | tail -
 if [ -z "$SHOWCASE" ]; then
     no "harvest source missing: no docs/captures/COMMANDS_showcase_*.md — the real-shape vectors are gone"
 else
-    harvested="$( grep -oE '^## `\./build/ripwire [^`]*' "$SHOWCASE" 2>/dev/null \
+    # The harvest inherits source (1)'s bug in a different shape. These are REAL command lines, so their
+    # values are REAL paths, and a harvested line that writes lands in the repo root exactly the way
+    # `--pin-census=1` did. The hand-written exclusion list below is the historical filter — server entry
+    # points, `wrap `, and the verbs that write sidecars into the corpus — and it is kept, because it also
+    # covers spellings the placeholder types cannot see (`--scip=index.scip`). It is not SUFFICIENT: it misses
+    # `--with-profile=`, `--pin-census=`, `--plan-lint=` and `--edit-payload=`, every one of which the
+    # current capture contains. So a second, DERIVED stage drops any line carrying a path-valued or
+    # cmd-valued flag in its VALUE form — reusing the same --help typing the vector generator uses above —
+    # plus the verbs that write into the CORPUS rather than into a flag-given path (the symbol edits, and
+    # --edit-plan --apply, which commits them).
+    #
+    # What makes this urgent rather than theoretical: `. --lint --with-profile=report.txt` sits at position
+    # 62 of the filtered list and the cap is `head -60`. TWO lines of margin are the only thing that has
+    # ever kept report.txt out of the repo root — and the ordering is decided by a GENERATED file that is
+    # regenerated every round. Dropping unsafe lines BEFORE the cap costs no coverage: the survivors below
+    # shift up into the 60, so the count holds and only the shape changes.
+    UNSAFE_RE="$( { printf '%s\n' $PATHFLAGS $CMDFLAGS | sed 's/^--/\\-\\-/; s/$/=/'
+                    printf '\\-\\-%s\n' replace-symbol-body insert-after-symbol insert-before-symbol edit-plan apply
+                  } | grep . | sort -u | tr '\n' '|' | sed 's/|$//' )"
+    raw="$( grep -oE '^## `\./build/ripwire [^`]*' "$SHOWCASE" 2>/dev/null \
         | sed 's|^## `\./build/ripwire ||' \
-        | grep -vE '\-\-mcp|\-\-listen|\-\-note-add|\-\-quality-ack|\-\-quality-baseline|\-\-baseline|\-\-index-out|\-\-html|\-\-export|\-\-cache=|\-\-eval-skills=|\-\-eval-stray=|\-\-from-trace=|\-\-batch=|\-\-scan-skill|\-\-arch=|\-\-lint-rules=|\-\-scip=|wrap ' \
-        | head -60 )"
+        | grep -vE '\-\-mcp|\-\-listen|\-\-run-trace|\-\-note-add|\-\-quality-ack|\-\-quality-baseline|\-\-baseline|\-\-index-out|\-\-html|\-\-export|\-\-cache=|\-\-eval-skills=|\-\-eval-stray=|\-\-from-trace=|\-\-batch=|\-\-scan-skill|\-\-arch=|\-\-lint-rules=|\-\-scip=|wrap ' )"
+    safe="$( printf '%s\n' "$raw" | grep -vE "$UNSAFE_RE" )"
+    ndropped=$(( $( printf '%s\n' "$raw" | grep -c . ) - $( printf '%s\n' "$safe" | grep -c . ) ))
+    harvested="$( printf '%s\n' "$safe" | head -60 )"
     hcount="$( printf '%s\n' "$harvested" | grep -c . )"
     if [ "$hcount" -ge 20 ]; then
         printf '%s\n' "$harvested" >> "$VEC"
-        ok "harvested $hcount real-shape vectors from $SHOWCASE"
+        ok "harvested $hcount real-shape vectors from $SHOWCASE ($ndropped tree-writing shape(s) dropped before the cap)"
     else
         no "harvest produced only $hcount vector(s) from $SHOWCASE (want >=20) — format drift, fix the regex"
     fi
+    # ...and the control, because a filter that drops nothing looks exactly like a filter that works. The
+    # probe is not synthetic: this line IS in the capture today, at the position the cap only just excludes.
+    printf '%s\n' '. --lint --with-profile=report.txt' | grep -qE "$UNSAFE_RE" \
+        && ok "control: the harvest's unsafe-shape stage drops a known tree-writing line (--with-profile=report.txt)" \
+        || no "control: the harvest did NOT drop '. --lint --with-profile=report.txt' — the unsafe-shape stage is inert"
 fi
 
 # (4) verb pairs on the navigate/quality dispatch paths that a handler split could reorder.
@@ -233,15 +308,39 @@ EOF
 # --help is the ONE pre-existing vector an additive flag is REQUIRED to change: deckcheck.sh fails unless a
 # new flag's rows land in --help in the same commit. So when BIN advertises a flag BASE does not, the two help
 # texts must differ, and byte-identity there would mean the rows were never written. It is replaced by a
-# STRICTER assertion for that case — BASE's help must survive VERBATIM inside BIN's, line for line — which
-# catches a reworded or deleted row that byte-identity would have caught and a plain skip would not.
+# stricter assertion for that case: every flag BASE DOCUMENTS must still have a row in BIN's catalog.
+#
+# TWO THINGS CHANGED HERE ON 2026-09-09, and both are worth stating rather than discovering later.
+#
+# (1) THE SPELLING IS ASYMMETRIC ON PURPOSE. BASE is a PREVIOUS RELEASE, and `--help=all` did not exist
+#     before the two-tier split — asking an old binary for it yields an unknown-flag refusal and an EMPTY
+#     capture, which this arm would then read as "nothing missing" and pass. That is the empty-equals-
+#     agreement shape (CONTRIBUTING §2, row 3): the arm would stay in the file and leave the conjunction.
+#     So BASE is asked with `--help` (its full catalog) and BIN with `--help=all` (its full catalog), and
+#     the presence guard below makes an empty BASE capture a FAILURE rather than a pass.
+#
+# (2) THE ASSERTION IS NOW ABOUT ROWS, NOT LINES. It used to require BASE's help to survive VERBATIM inside
+#     BIN's, line for line. The two-tier split deliberately reworded 133 opening lines and moved the old
+#     prose down one row, so line-verbatim now fails on a change that deleted nothing — and it would have
+#     failed the same way on any honest rewording, which this project does routinely. Rows are the property
+#     the arm was really protecting: a flag whose documentation silently DISAPPEARS between releases. A
+#     reworded row still has to be there. test/helpbudgetcheck.sh holds the within-release half of this
+#     (every row advertised in tier 1 is retrievable from tier 2).
 if [ -s "$TMP/flags.added.txt" ]; then
     grep -vE '(^|[[:space:]])(--help|-h)([[:space:]]|$)' "$VEC" > "$TMP/vec.trimmed" && mv "$TMP/vec.trimmed" "$VEC"
-    "$BASE" --help 2>&1 > "$TMP/help.base"
-    "$BIN"  --help 2>&1 > "$TMP/help.new"
-    missing="$( grep -Fxv -f "$TMP/help.new" "$TMP/help.base" | head -3 )"
-    [ -z "$missing" ] && ok "help is ADDITIVE: every line of BASE's --help survives verbatim in BIN's" \
-                      || { no "BASE --help line(s) reworded or removed — not additive:"; printf '%s\n' "$missing" | sed 's/^/        /'; }
+    "$BASE" --help     >"$TMP/help.base" 2>/dev/null
+    "$BIN"  --help=all >"$TMP/help.new"  2>/dev/null
+    helprows(){ grep -E '^    (--[^ ]+|[^ ]+  +[^ ])' "$1" | sed -E 's/^    ([^ ]+) .*/\1/' | sort -u; }
+    helprows "$TMP/help.base" >"$TMP/rows.base"
+    helprows "$TMP/help.new"  >"$TMP/rows.new"
+    nbase="$( grep -c . "$TMP/rows.base" )"
+    if [ "$nbase" -lt 50 ]; then
+        no "only $nbase rows read out of BASE's --help — the capture broke, so the additive check proves nothing"
+    else
+        missing="$( comm -23 "$TMP/rows.base" "$TMP/rows.new" | head -3 )"
+        [ -z "$missing" ] && ok "help is ADDITIVE: all $nbase rows BASE documents still have a row in BIN's catalog" \
+                          || { no "row(s) BASE documents are gone from BIN's --help — not additive:"; printf '%s\n' "$missing" | sed 's/^/        /'; }
+    fi
 fi
 
 TOTAL="$( grep -c . "$VEC" )"
@@ -254,8 +353,13 @@ while IFS= read -r v; do
     [ -n "$v" ] || continue
     ran=$(( ran + 1 ))
     # word-split deliberately: the vector IS an argv line
+    # A PATH-valued vector WRITES into $ARGVOUT, so both binaries have to start from the same empty dir:
+    # a writer that found its own output already there from the BASE run could refuse, and diff for that
+    # alone. Reset between the two runs, not once per vector.
+    rm -rf "$ARGVOUT"; mkdir -p "$ARGVOUT"
     # shellcheck disable=SC2086
     "$BASE" $v >"$TMP/o.base" 2>"$TMP/e.base" </dev/null; rcb=$?
+    rm -rf "$ARGVOUT"; mkdir -p "$ARGVOUT"
     # shellcheck disable=SC2086
     "$BIN"  $v >"$TMP/o.new"  2>"$TMP/e.new"  </dev/null; rcn=$?
     # DEGRADED_PATH_ALERT prints __LINE__, so ANY refactor that moves code shifts every alert below it
@@ -302,10 +406,28 @@ fi
 # Compared against the status captured BEFORE the run, not against a clean tree: this gate is normally run
 # mid-change with the working tree already dirty (that IS the moment a differential proof is wanted), and a
 # check that only passes on a pristine checkout would be turned off rather than obeyed.
-git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' > "$TMP/status.after"
+treestatus > "$TMP/status.after"
 STRAY="$( comm -13 "$TMP/status.before" "$TMP/status.after" 2>/dev/null | head -5 )"
 if [ -z "$STRAY" ]; then ok "harness left the tree unmodified (no new changes vs the pre-run status)"
 else no "harness MUTATED the tree:"; printf '%s\n' "$STRAY" | sed 's/^/        /'; fi
+
+# ...and a CONTROL for that arm, on the same argument as the differ's control above: an assertion nobody
+# has ever seen fail is indistinguishable from one that cannot fail. This arm is what caught --pin-census=1
+# writing a file named `1` into the repo root, and now that the value-typing block prevents that class it is
+# the ONLY thing standing between a future path-valued flag and the same stray — so it has to be exercised,
+# not merely present. Create one stray on purpose, run the SAME comparison, require it to be SEEN, then
+# remove it and require the tree to be clean again: a control that leaves its own litter behind is not one.
+: > "$CTRL"
+treestatus > "$TMP/status.ctrl"
+seen="$( comm -13 "$TMP/status.after" "$TMP/status.ctrl" 2>/dev/null )"
+rm -f "$CTRL"
+treestatus > "$TMP/status.restored"
+case "$seen" in
+    *"argvdiffcheck_mutation_control"*) ok "control: the tree-mutation arm does detect a deliberate stray file" ;;
+    *) no "control: a deliberate stray file went UNDETECTED — the tree-mutation arm above proves nothing" ;;
+esac
+cmp -s "$TMP/status.after" "$TMP/status.restored" \
+    || no "control: the deliberate stray outlived its own removal — the control littered the tree"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

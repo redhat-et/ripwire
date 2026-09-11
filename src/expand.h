@@ -25,6 +25,7 @@
 #include "model.h"
 #include "resolve.h"   // buildPreciseIncludeAdj — resolved file->file edges, not basename guesses
 #include "mention.h"   // kMentionTopGapStep / kMentionMaxSymbolsPerFile — the ONE slot-ladder vocabulary
+#include "infra/emit.h"          // rw::emitTo — a malformed/out-of-range RIPWIRE_EXPAND is REPORTED on stderr in every build flavour: a rejected user value is config feedback, not a degrade path (DEGRADED_PATH_ALERT compiles out under NDEBUG, so a Release binary would have gone silent again)
 #include <algorithm>
 #include <cstdlib>
 #include <vector>
@@ -35,7 +36,22 @@ namespace rw
 inline constexpr std::size_t kExpandMaxSeeds = 8;   // out-of-range env means OFF, never a clamp-and-guess
 inline constexpr std::size_t kExpandMaxPer   = 8;
 
-// parse "<seedFiles>,<neighboursPerSeed>" — (0,0) = off for anything malformed or out of range.
+// The parse, unchanged in every numeric outcome — split out so expandParams() (below) can tell "env unset"
+// (silent — this feature has no default) apart from "env SET but rejected" (a config problem, disclosed).
+// The grammar itself is mention.h's parseCappedCsvPair, shared with siblift.h/filepool.h.
+inline std::pair<std::size_t, std::size_t> expandParamsParse( std::string_view s )
+{
+    const auto [ seeds, per ] = parseCappedCsvPair( s, kExpandMaxSeeds, kExpandMaxPer );
+    if( seeds == 0 || per == 0 ) { return { 0, 0 }; }
+    return { seeds, per };
+}
+
+// parse "<seedFiles>,<neighboursPerSeed>" — (0,0) = off for anything malformed or out of range. The
+// defect this closes: an env value that fails to parse used to return (0,0) exactly like the env being
+// unset, so a typo'd RIPWIRE_EXPAND silently ran the tool with NO expansion and no way to tell that apart
+// from "expansion was never asked for". Env SET + rejected is a recoverable config problem (CONTRIBUTING
+// §3's degrade shape: clamp/fall back and say so), not the unset case, which stays wordless on purpose —
+// this experiment has no on-by-default behavior to be silent ABOUT.
 inline std::pair<std::size_t, std::size_t> expandParams()
 {
     const char* env = std::getenv( "RIPWIRE_EXPAND" );
@@ -43,32 +59,28 @@ inline std::pair<std::size_t, std::size_t> expandParams()
     {
         return { 0, 0 };
     }
-    const std::string_view s( env );
-    const std::size_t comma = s.find( ',' );
-    if( comma == std::string_view::npos || comma == 0 || comma + 1 >= s.size() )
+    const auto [ seeds, per ] = expandParamsParse( std::string_view( env ) );
+    if( seeds == 0 || per == 0 )
     {
-        return { 0, 0 };
+        rw::emitTo( stderr, "ripwire: RIPWIRE_EXPAND is set but malformed or out of range (want \"<seedFiles 1-8>,<perSeed 1-8>\") — structural expansion OFF\n" );
     }
-    std::size_t seeds = 0, per = 0;
-    for( const char c : s.substr( 0, comma ) )
-    {
-        if( c < '0' || c > '9' ) { return { 0, 0 }; }
-        seeds = seeds * 10 + std::size_t( c - '0' );
-        if( seeds > kExpandMaxSeeds ) { return { 0, 0 }; }
-    }
-    for( const char c : s.substr( comma + 1 ) )
-    {
-        if( c < '0' || c > '9' ) { return { 0, 0 }; }
-        per = per * 10 + std::size_t( c - '0' );
-        if( per > kExpandMaxPer ) { return { 0, 0 }; }
-    }
-    if( seeds == 0 || per == 0 ) { return { 0, 0 }; }
     return { seeds, per };
 }
 
-// Apply structural expansion to lensRank (size == ing.symbols.size()). Returns true if anything moved.
+// What a successful lift actually moved — populated only when applyStructuralExpansion returns true, so a
+// caller can disclose the fact (never a total equal to the shown count; absence means the lift was never
+// asked for, or asked for and moved nothing).
+struct ExpandLiftInfo
+{
+    std::uint32_t fileCount   = 0;   // neighbour files with at least one symbol actually promoted
+    std::uint32_t symbolCount = 0;   // symbols whose score actually rose
+};
+
+// Apply structural expansion to lensRank (size == ing.symbols.size()). Returns true if anything moved;
+// `info`, when non-null, is populated with what moved so the caller can disclose it (absent unless the
+// lift actually promoted something — a lift that fired but changed nothing costs zero disclosure bytes).
 inline bool applyStructuralExpansion( const IngestResult& ing, std::vector<float>& lensRank,
-                                      std::size_t seedFiles, std::size_t perSeed )
+                                      std::size_t seedFiles, std::size_t perSeed, ExpandLiftInfo* info = nullptr )
 {
     if( seedFiles == 0 || perSeed == 0 || lensRank.size() != ing.symbols.size() || lensRank.empty() )
     {
@@ -166,22 +178,14 @@ inline bool applyStructuralExpansion( const IngestResult& ing, std::vector<float
         {
             break;
         }
-        std::vector<std::pair<float, NodeId>> symbols;
-        for( std::size_t k = 0; k < ing.symbols.size(); ++k )
+        const std::uint32_t promoted = promoteFileSymbolsToSlot( ing, lensRank, lifted[i], slot );
+        if( promoted > 0 )
         {
-            if( ing.symbols[k].fileId == lifted[i] && lensRank[k] > 0.f )
+            moved = true;
+            if( info )
             {
-                symbols.emplace_back( lensRank[k], NodeId( k ) );
-            }
-        }
-        std::sort( symbols.begin(), symbols.end(), []( const auto& a, const auto& b )
-                   { return a.first != b.first ? a.first > b.first : a.second < b.second; } );
-        for( std::size_t k = 0; k < symbols.size() && k < kMentionMaxSymbolsPerFile; ++k )
-        {
-            if( slot > lensRank[ symbols[k].second ] )
-            {
-                lensRank[ symbols[k].second ] = slot;
-                moved = true;
+                info->symbolCount += promoted;
+                ++info->fileCount;
             }
         }
     }

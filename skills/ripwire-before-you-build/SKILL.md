@@ -1,18 +1,10 @@
 ---
 name: ripwire-before-you-build
 description: >
-  About to start a whole FEATURE — multi-symbol work that needs a plan, an interface, or a size estimate
-  before you write it — do the homework from the codebase's actual structure instead of assumptions. Use
-  when starting a feature and you need any of: is this approach even viable (spike)? what's the ordered
-  implementation plan? what should the boundary/API look like (interface)? how big is this change
-  (scope/effort)? Each takes ~30s and often surfaces an existing implementation to reuse. Building
-  against an EXISTING interface — "my new backend must plug into StorageDriver: what has to exist, and
-  who implements it today?" — is this moment too: `--lego=Interface` lists the method contract plus every
-  current implementor to copy as the template. For a SINGLE
-  function/class/helper you're about to write → ripwire-reuse-first. NOT for reviewing an already-written
-  diff — that's ripwire-change-check. NOT for restructuring EXISTING code — that's ripwire-fresh-eyes; this
-  skill is for NEW work. Run only the homework the task actually lacks — a small feature with an obvious
-  home needs none of this: skip the skill and build. Backed by ripwire (deterministic, on PATH).
+  Starting a FEATURE (multi-symbol work): the plan, the API boundary, the scope — how big does
+  this change get — from the codebase's real structure. Implementing an EXISTING interface?
+  --lego=Iface lists its contract and current implementors. ONE standalone symbol → reuse-first.
+  A small feature with an obvious home needs none of this.
 allowed-tools: Bash, Read
 ---
 

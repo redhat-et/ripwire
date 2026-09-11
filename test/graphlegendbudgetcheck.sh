@@ -79,9 +79,24 @@ budgetFor(){
         # defining next= (68 B: the safe-delete read of SYM — the one pasteable follow-up every impact root now
         # carries). Measured 3674 B against 3650; 3720 leaves 46 B, the posture the previous pin held. callers'
         # own next= sentence (87 B) fits its 3250 unchanged.
-        callers) echo 3250 ;;
-        impact)  echo 3720 ;;
-        uses)    echo 3800 ;;
+        # RE-PINNED +179 on all three (2026-09-08, issue #66): the shared essay gained ONE sentence defining
+        # graph_unindexed=, the THIRD gauge — files no grammar could read, the blind spot that made
+        # `count="0"` indistinguishable from "none exists" on @snrmwg's .astro tree. Same shape as the M15
+        # re-pin above: new content on every first screen, not the essay re-inflating, and each verb keeps
+        # exactly the headroom it had (callers 107 B, impact 48 B, uses 25 B).
+        #
+        # READ THIS BEFORE ASSUMING THE ESSAY GREW ON EVERY CORPUS: the sentence is CONDITIONAL
+        # (graphlegend.h graphUnindexedLegend( bool ) — it is emitted exactly when the attribute is, which is
+        # this header's own rootRelPathsLegend rule: "a legend that defines an attribute the document did not
+        # emit is the mirror-image false claim"). These budgets are measured on THIS repository, whose tree
+        # does contain unindexed extensions, so they see the sentence. A corpus with nothing unindexed pays
+        # 0 B — which is what keeps test/defaultceilingcheck.sh's 120-file --pr-context fixture (about three
+        # tokens of slack under its 8000-token default budget) from going over a ceiling it would then have
+        # had to disclose. Two earlier drafts that were UNCONDITIONAL, at 135 B and at 57 B folded into the
+        # gauge sentence, both broke that fixture; the conditional form is why this one does not.
+        callers) echo 3429 ;;
+        impact)  echo 3899 ;;
+        uses)    echo 3979 ;;
     esac
 }
 VERBS="callers impact uses"

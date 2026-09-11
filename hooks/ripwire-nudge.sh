@@ -1299,7 +1299,7 @@ mdetail="$f3_detail"
 # §CEDE — DO NOT NAG ABOUT A COMPARISON THE TOOL LOSES (P4.2, 2026-08-29)
 #
 # THE PROBLEM, STATED PLAINLY. Agents correctly drop to `rg`/`grep` for a known-literal hunt — our own
-# docs concede the case (the ripwire-efficient/ripwire-orient/ripwire-navigate skills: "for a broad
+# docs concede the case (the ripwire-orient (map-before-you-read)/ripwire-navigate skills: "for a broad
 # common-word question, plain `rg` + one read can still win"), and until the `--grep` fast path lands
 # (P4 fix 1, a separate change — not this file) a plain `rg "exact string"` genuinely beats `ripwire
 # --grep` on wall clock. The BASE (one-time) nudge fired on the FIRST eligible grep of a session
