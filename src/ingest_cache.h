@@ -206,7 +206,7 @@ constexpr std::uint32_t kCacheVersion = 18;           // 18: #62 — call refs i
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 88;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 89;           // bump on any grammar/.scm/extraction or cache-key normalization change
                                                       // 88 = 2026-09-10 (Dart, test/dartcheck.sh): a 23rd grammar joins
                                                       //    kLangTable, so the CRAWL ADMITS FILES IT PREVIOUSLY REFUSED —
                                                       //    a v87 blob has no record for the `.dart` it never saw, so the
@@ -1598,7 +1598,12 @@ inline RawRouteUse readRouteUse( ByteR& r ) { RawRouteUse u; u.startByte = r.u32
 inline std::string reAbsolutize( std::string_view rel, std::string_view root )
 {
     std::string_view rootTrim = root;
-    while( rootTrim.size() > 1 && rootTrim.back() == '/' )
+#if defined( _WIN32 )
+    constexpr char separator = '\\';
+#else
+    constexpr char separator = '/';
+#endif
+    while( rootTrim.size() > 1 && ( rootTrim.back() == '/' || rootTrim.back() == '\\' ) )
     {
         rootTrim.remove_suffix( 1 );
     }
@@ -1609,8 +1614,15 @@ inline std::string reAbsolutize( std::string_view rel, std::string_view root )
     std::string out;
     out.reserve( rootTrim.size() + 1 + rel.size() );
     out.append( rootTrim );
-    out.push_back( '/' );
-    out.append( rel );
+    out.push_back( separator );
+    while( !rel.empty() && ( rel.front() == '/' || rel.front() == '\\' ) )
+    {
+        rel.remove_prefix( 1 );
+    }
+    for( const char c : rel )
+    {
+        out.push_back( c == '/' || c == '\\' ? separator : c );
+    }
     return out;
 }
 
