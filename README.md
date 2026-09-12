@@ -2443,7 +2443,7 @@ file, and one row in the extension table.
 | Kotlin | `.kt` | Shares one call graph with Java. A file with string templates past 128 levels is refused and listed by `--skipped`. |
 | Ruby | `.rb` | Superclasses, mixins, `autoload`, and constant receivers are read. |
 | PHP | `.php`, `.phtml` | Dynamic dispatch is a stated floor. |
-| Lua | `.lua` | Metatable inheritance produces no inheritance edge. `require` is a function call, not an import directive. |
+| Lua | `.lua` | Metatable inheritance produces no inheritance edge. `require` is a function call. A string-literal `require` that names exactly one file in the tree adds a dependency edge. |
 | Dart | `.dart` | A function body is a sibling of the signature. The capture extends the span through the body. |
 | Elixir | `.ex`, `.exs` | Modules, protocols, implementations, functions, macros, guards, and delegates are indexed. |
 | Swift | `.swift` | |
