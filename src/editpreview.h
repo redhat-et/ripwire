@@ -66,6 +66,7 @@ inline Outcome refuse( std::string message )
 // kBinaryPayloadRefusal makes is exactly the condition that would drop the file from the index.
 inline bool readPayload( std::string_view spec, std::size_t maxFileBytes, std::string& out, std::string& err )
 {
+    VERIFY_NO_ALIAS( out, err );
     out.clear();
     if( spec == "-" )
     {

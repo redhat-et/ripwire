@@ -292,6 +292,7 @@ inline Facts collectFacts( const IngestResult& ing, const NameDefs& byName,
 {
     // name interning, so a "distinct NAME" fact is a u32 and the ext=/amb= folds are the same sort as the
     // entity fold. Same rule as byName: lookup only, never iterated.
+    VERIFY_NO_ALIAS( symRows, fileRows );
     HashMap<std::string_view, std::uint32_t> nameIndex;
     nameIndex.reserve( byName.size() );
 

@@ -891,6 +891,7 @@ inline bool dependenciesMapCorpus( const IngestResult& ing, const std::vector<st
 // The word list of every `for <var> in <members…>; do` in the token stream, one token of lookahead state.
 inline void appendForListStems( const std::vector<std::string>& tokens, std::vector<std::string>& stems )
 {
+    VERIFY_NO_ALIAS( tokens, stems );
     enum class Loop : std::uint8_t { Scan, Var, ExpectIn, List };
     Loop state = Loop::Scan;
     for( const std::string& token : tokens )

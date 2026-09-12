@@ -2157,6 +2157,7 @@ inline std::vector<CacheWriteRow> buildCacheWritePlan( const std::vector<std::ui
                                                        const std::vector<CacheEntry>&    prevEntries,
                                                        std::vector<CacheEntry>&          carryOut )
 {
+    VERIFY_NO_ALIAS( prevEntries, carryOut );
     carryOut.clear();
     carryOut.reserve( prevEntries.size() );
     {
