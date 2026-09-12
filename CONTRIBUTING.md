@@ -460,6 +460,61 @@ behind. Do not spell the marker inside a site file except at a real site.
 
 Scope each commit. A commit that touches one concern is a commit a reviewer can actually check.
 
+## 7. How we write
+
+This applies to commit subjects, PR descriptions, issues, gate comments, `README.md` and the docs. It is
+here because tone drifts every time someone rewrites a page, and drift in either direction costs us
+contributors: too warm and vague reads as not competent, too cold and dense reads as a project nobody
+wants to spend a Saturday on.
+
+**Competence carries the fun.** The humour in this repo is not decoration laid on top of the engineering —
+it comes from being unusually exact about something and then being light about it. Get the precision right
+and the tone follows.
+
+The reference for the voice is the commit log, not the front page:
+
+> ``#if 0`` stopped serving calls and went on serving every other role
+> twelve flag rows sat one indent too deep, so `--help` did not list every row
+> `graph_unindexed=` shipped a number the document never defined
+
+**Commit subjects say what was WRONG, not what you did.** "fix(help): twelve flag rows sat one indent too
+deep" tells a reader in the log five months from now what the world was like before the commit.
+"fix(help): change indentation" tells them nothing they cannot get from the diff.
+
+**Let the number be the punchline.** `182,555 files. 194 s → 156 s.` An adjective on a strong number makes
+it weaker — "blazingly fast" reads as though the writer does not trust the measurement. Declining to
+embellish *is* the confidence.
+
+**Deadpan the failures, especially ours.** "The gate that guards H2 reports PASS on H2." That sentence is
+funny and damning at once, and it signals more competence than any claim of quality could: a project that
+roasts its own bugs precisely is obviously run by people who find them. Never write a defect up as though
+it were someone else's fault or a surprise.
+
+**Rhythm, not exclamation marks.** Long sentence, then a short one. "Declined calls, derailed parses and
+cut answers now say so. A zero means none found." The energy is in the cut.
+
+**Attitude in the names, precision in the bodies.** "Rip'n Fast. Fewer Tokens. Better Code." earns its
+swagger because every claim underneath it is measured and linked. Swagger plus receipts is fun; swagger
+alone is marketing, receipts alone is a paper.
+
+**Respect the reader rather than welcoming them.** "The research is done, the pointers are in the prompt,
+and the prompt writes a plan and stops" recruits better than "we'd love your help!" — it says *your time is
+worth something and we spent ours first*. Warmth that costs the writer nothing reads as filler; warmth that
+shows up as prepared work reads as real.
+
+Cut on sight: hedges (`we think maybe`, `a bit`, `somewhat`, `basically`), mission statements
+("on a mission to revolutionize…"), exclamation marks after a claim, emoji standing in for a point of view,
+and apologising for the age of the project. "Twelve weeks old and there is a lot worth doing" is confident;
+"it's still early days, sorry!" is the same fact, badly told.
+
+**The test.** Read a paragraph as two people: a skeptical staff engineer scanning for overclaim, and a
+curious newcomer deciding whether this looks like a good weekend. Warm-and-vague loses the first;
+cold-and-dense loses the second. A line like *"a zero means none found, never none exists"* wins both — it
+is a precise contract and it has a point of view.
+
+None of this licenses inaccuracy. Where this section and §2's honesty rules could ever disagree, the
+honesty rules win and the sentence gets rewritten until it is both.
+
 By contributing you agree that your contributions are licensed under the project's `LICENSE`, and
 that you will follow `CODE_OF_CONDUCT.md`. Security issues go through `SECURITY.md`, not the public
 issue tracker.

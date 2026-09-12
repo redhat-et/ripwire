@@ -27,7 +27,7 @@ export HERMES_HOME="$TMP/hermes-home"; rm -rf "$HERMES_HOME"; mkdir -p "$HERMES_
 # set under skills/hermes/ (both deploy via --hermes; a flat dir of the same name wins and the native
 # one is skipped, mirroring install.sh). $1 selects the set: user (activated by default) or contributor.
 skill_names() {
-    for d in "$SK"/ripwire-*/ "$SK"/hermes/*/; do
+    for d in "$SK"/ripwire-*/ "$SK"/hermes/ripwire-*/; do    # both globs are the installer's own (arm 7)
         [ -d "$d" ] || continue
         name="$( basename "$d" )"
         [ -f "$d/SKILL.md" ] || continue
@@ -144,5 +144,45 @@ else
             || no "wrap hermes prints a '--hermes --hook' install line, but the installer refuses it with exit 2"
     fi
 fi
+
+
+# ---- 7) the Hermes-native loops are constrained to ripwire-*, like every other loop in the installer ----
+# Three loops decide what --hermes links and unlinks. Two of them are name-scoped — the flat install loop
+# globs "$src"/ripwire-*/ and the prune loop globs "$dst"/ripwire-* — and the Hermes-native pair (install
+# and manifest) globbed "$src"/hermes/*/ instead. Today skills/hermes/ holds exactly one entry and it is
+# ripwire-repo-map, so nothing is broken; the asymmetry is what is broken. A future non-ripwire-prefixed
+# entry there would be `ln -sfn`'d into the user's skill home under ITS OWN name, and `ln -sfn` unlinks an
+# existing regular file before creating the link — so a user skill of the same name is DELETED, and the
+# prune loop, which only ever looks at ripwire-*, could never take the link back out again.
+#
+# Asserted as BEHAVIOUR, not as a grep for the glob: a decoy pair is planted in a COPY of skills/ (install.sh
+# derives $src from its own location, so a copy is a complete, isolated installer) and the installer is run
+# against a throwaway Hermes home. The live skills/ tree is never written to — other gates crawl it in
+# parallel under pargates, and a probe copy dropped into the measured tree is its own known trap.
+H7_SK="$TMP/skcopy"; rm -rf "$H7_SK"; cp -R "$SK" "$H7_SK"
+mkdir -p "$H7_SK/hermes/notes" "$H7_SK/hermes/ripwire-decoy-map"
+printf -- '---\nname: notes\ndescription: a user-authored skill that happens to share this name\n---\n'   >"$H7_SK/hermes/notes/SKILL.md"
+printf -- '---\nname: ripwire-decoy-map\ndescription: a Hermes-native ripwire skill\n---\n'                >"$H7_SK/hermes/ripwire-decoy-map/SKILL.md"
+H7_HOME="$TMP/hermes-home-7"; rm -rf "$H7_HOME"; mkdir -p "$H7_HOME/skills"
+# the user's OWN skill, a regular file (what `ln -sfn` silently removes), with a sentinel to read back.
+printf 'USER SKILL — must survive a ripwire install\n' >"$H7_HOME/skills/notes"
+HERMES_HOME="$H7_HOME" bash "$H7_SK/install.sh" --hermes >"$TMP/h7.out" 2>&1
+# (a) mutation took: the decoy loop really ran, and really links a ripwire-prefixed Hermes-native skill.
+#     Without this the arm is CONTRIBUTING §2 shape 1 — "nothing was installed" would read as a pass.
+{ [ -L "$H7_HOME/skills/ripwire-decoy-map" ] && [ -f "$H7_HOME/skills/ripwire-decoy-map/SKILL.md" ]; } \
+    && ok "the Hermes-native loop linked the planted ripwire-decoy-map (the arm's negative results are not an empty loop)" \
+    || no "the Hermes-native loop did not link the planted ripwire-decoy-map — this arm is measuring a loop that never ran"
+# (b) the property: a non-ripwire-* entry under skills/hermes/ is NOT linked, and the user's file survives.
+{ [ ! -L "$H7_HOME/skills/notes" ] && [ -f "$H7_HOME/skills/notes" ] \
+      && grep -q 'USER SKILL' "$H7_HOME/skills/notes"; } \
+    && ok "a non-ripwire-* entry under skills/hermes/ is skipped — the user's own 'notes' skill is untouched" \
+    || no "the Hermes-native loop linked 'notes' over the user's own file (ln -sfn removed it), and the ripwire-* prune loop can never take it back out"
+# (c) and it is not claimed in the manifest either — the manifest loop globs the same set as the install loop.
+{ ! grep -qx 'skill=notes' "$H7_HOME/skills/.ripwire-manifest-v1" 2>/dev/null; } \
+    && ok "the --hermes manifest does not claim the non-ripwire-* 'notes' entry" \
+    || no "the --hermes manifest claims 'skill=notes', a name this installer does not own"
+{ grep -qx 'skill=ripwire-decoy-map' "$H7_HOME/skills/.ripwire-manifest-v1" 2>/dev/null; } \
+    && ok "the --hermes manifest claims the ripwire-* Hermes-native skill it linked" \
+    || no "the --hermes manifest omits ripwire-decoy-map, which it linked"
 
 [ "$fail" -eq 0 ] && echo "hermesinstallcheck: ALL PASS" || { echo "hermesinstallcheck: FAILURES"; exit 1; }

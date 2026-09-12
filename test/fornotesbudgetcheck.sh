@@ -58,6 +58,31 @@
 # (est_tokens 815 > 800), which is the re-anchor earning its keep rather than an argument against it.
 # The corpus is a generated temp fixture, not the live tree, so the number does NOT move with repo growth.
 #
+# ── RE-ANCHORED 2026-09-11 (0.6.1, the L1 lane): the TIGHT rung 950 → 1100. ──
+# The instruction the 2026-09-05 block below left ("The next change that adds a byte to --for's floor at 950 must
+# re-anchor that rung with its own arithmetic") is now due, and this is that arithmetic. The ceiling ladder's
+# RUNG ZERO — the one that drops the confidence=/margin_pct=/budget_tokens= clause and the r=/tail clause to buy
+# the header back under the allowance — used to do it in SILENCE: the attributes stayed on the root with nothing
+# defining them and no word that a definition had been removed. It now splices a 181 B sentence naming exactly
+# those attributes (verbs_for.h kForLegendDroppedNote). 181 B is 73 tokens at the conservative rate, against the
+# TWO tokens of headroom the rung had left. The note is not shortened to fit the rung; the rung moves.
+#
+# MEASURED, both binaries, this corpus in a mktemp dir, --token-budget swept 950..3000:
+#   · 950  post-fix: NOTHING the ladder can build fits the 950 × 2.36 × 1.15 = 2 578 B allowance, so it lands on
+#     its last rung — the emitted document is 2 756 B, est_tokens=1102. An honest overshoot, labelled
+#     over_ceiling="1", which is the rung earning its move rather than an argument against the disclosure.
+#   · 1000 post-fix: 2 624 B fits the 2 714 B allowance, but est_tokens=1050 is 50 over the TOKEN ceiling (the
+#     70 B of over_ceiling="1" and its legend clause are the difference between this row and the next).
+#   · 1050 / 1100 / 1150 post-fix: est_tokens=1022 at all three, 2 554 B — the serving shape is FLAT across that
+#     band (no additional row fits anywhere in it), so the rung buys headroom rather than a different selection.
+# 1100 sits mid-plateau with 78 tokens of headroom, one step clear of the short edge (1000) and of the upper edge
+# where the next row would land. The pre-fix binary reads est_tokens=949 at 1100, so the history is green at every
+# step. The other two rungs did not move: 1640 reads 1620 and 3000 reads 2802 on BOTH binaries — rung zero never
+# fires there, which is the whole reason only the tight rung moved.
+# (Re-measured 2026-09-12 when the note's closing clause was corrected: it had pointed the reader at a help text
+# that defines two of the four attributes it names. The replacement is 181 B against 182 B, so every number in
+# this block moved by at most one byte — the figures above are the re-measured ones, not the originals.)
+#
 # ── RE-ANCHORED 2026-09-05 (terminality round A, lane R, P7 rank order): the MIDDLE rung 1600 → 1640. ──
 # The lens <sigs> is FLAT now: rows in rank order, each carrying p="src/modN.py" (16 B), no <f p=> wrapper (24 B
 # each). At this fixture's 7-row state that is 7 × 16 − 2 × 24 = +64 B = +26 tokens at the conservative rate.
@@ -192,8 +217,8 @@ jsonRows(){ "$BIN" "$CORPUS" --for="$TASK" --token-budget="$1" --json 2>/dev/nul
             | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d["sigs"]))' 2>/dev/null; }   # P7: flat sigs array
 
 # ── arm 1: est_tokens must fit the ceiling the user asked for, in BOTH dialects ────────────────────
-# (tight budget 950, re-anchored 2026-08-28 — see the CEILING MARGIN block above for the arithmetic)
-for tb in 950 1640 3000; do
+# (tight budget 1100, re-anchored 2026-09-11 — see the CEILING MARGIN block above for the arithmetic)
+for tb in 1100 1640 3000; do
   xe="$( xmlEst "$tb" )"; je="$( jsonEst "$tb" )"
   if [ -z "$xe" ] || [ -z "$je" ]; then no "budget=$tb: could not read est_tokens from one of the dialects (xml='$xe' json='$je')"; continue; fi
   if [ "$xe" -le "$tb" ]; then ok "budget=$tb: XML est_tokens=$xe fits the ceiling"
@@ -204,7 +229,7 @@ done
 
 # ── arm 2: the two dialects select COMPARABLE row counts (they need not be equal) ──────────────────
 # Before the fix the XML lens bought 2-2.4x the rows with the same budget, because notes were free.
-for tb in 950 1640 3000; do
+for tb in 1100 1640 3000; do
   xr="$( xmlRows "$tb" )"; jr="$( jsonRows "$tb" )"
   if [ -z "$jr" ] || [ "$jr" -eq 0 ]; then no "budget=$tb: JSON selected no rows — the comparison has no denominator"; continue; fi
   if [ "$xr" -le $(( jr * 13 / 10 + 1 )) ] && [ "$xr" -ge $(( jr * 7 / 10 )) ]; then

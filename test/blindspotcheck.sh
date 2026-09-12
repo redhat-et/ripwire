@@ -27,6 +27,26 @@
 #       the live call to the same callee in the same file still is. Both halves, because an arm that only
 #       checks the dead one passes just as well on a build that returns nothing at all.
 #   (E) MUTATION — every assertion SHAPE above is shown to be able to fail, against hand-built inputs.
+#   (F) #66 CLAUSE PARITY — wherever graph_unindexed= is EMITTED, a legend clause DEFINING it is emitted
+#       too, on every XML surface that can carry the attribute and in BOTH legend dialects (the default
+#       full one and --legend=compact), CLI and MCP alike. Arms (A)/(B) gate the attribute and its value;
+#       they never read the legend, and that gap is how v0.6.0 shipped `graph_unindexed="1"` on --lego,
+#       --verify, --nonlocal-state and on every verb under --legend=compact with zero clauses defining
+#       it anywhere in the document. G4's contract is that a reader learns the schema FROM THE OUTPUT:
+#       an attribute nothing defines is a number an agent has to guess at, which is the same
+#       reader-facing failure #66 itself reported one level up.
+#   (G) #66 CLAUSE PARITY, the negative half — on a corpus with nothing unindexed, neither the attribute
+#       NOR a clause defining it appears on any of those surfaces, CLI and MCP alike. The mirror-image
+#       false claim graphlegend.h's rootRelPathsLegend rule already names: a legend that defines an
+#       attribute the document did not emit. (F) and (G) walk the SAME surface list and, for MCP, the same
+#       posture list through the same args builder — a half that probed fewer surfaces than its twin is a
+#       hole shaped exactly like the one #66 came through, and the MCP postures were that hole until
+#       2026-09-11.
+#
+# WHAT (F)/(G) DO NOT COVER, said here rather than discovered later. They read XML COMMENTS, so they judge
+# the XML dialects only. --situ's blast-radius report is prose, not XML, and carries the same fact through
+# graphlegend.h graphUnindexedTextClause(); the --json dialect carries no legend of any kind by design
+# (--help: "keys mirror the XML attribute names one to one"), so there is no clause there to be missing.
 #
 # VACUITY — the failure mode this gate was written against. Three arms in this tree in the week of
 # 2026-09-08 turned out to be unable to fail: the sharpest compared two EMPTY files, because G4 minifies a
@@ -73,10 +93,57 @@ sys.stdout.write(m.group(1) if m else "")' "$1" "$2"; }
 # Assert a capture is non-empty BEFORE anything is concluded from it. Every arm routes through this.
 nonempty(){ [ -n "$2" ] && return 0; no "$1 (empty capture — the arm reading it would have been vacuous)"; return 1; }
 
+# Does this document DEFINE graph_unindexed=, in a legend the reader meets? Exit 0 = yes.
+#
+# Two decisions, both load-bearing. (1) It reads only XML COMMENTS, split as SPANS and with CDATA skipped
+# — the payload attribute `graph_unindexed="1"` is the thing being defined, never the definition, so a
+# whole-document grep would call every gap a pass. (Line-wise comment stripping is the VACUITY bug this
+# file's header records: G4 minifies a document to ONE line.) (2) The predicate is legendcoveragecheck's
+# own DEFINITIONAL shape — the attribute name immediately followed by `=` — not a bare word search, so a
+# legend that merely alludes to unindexed files does not count as defining the attribute.
+clauseDefines(){ python3 -c '
+import re,sys
+d=open(sys.argv[1],encoding="utf-8",errors="replace").read()
+comments=[]
+i,n=0,len(d)
+while i<n:
+    if d.startswith("<![CDATA[",i):
+        j=d.find("]]>",i);  i=n if j<0 else j+3
+    elif d.startswith("<!--",i):
+        j=d.find("-->",i);  e=n if j<0 else j+3;  comments.append(d[i:e]);  i=e
+    else:
+        j=d.find("<",i+1);  i=n if j<0 else j
+sys.exit(0 if any(re.search(r"(?<![\w:.-])graph_unindexed\s*=",c) for c in comments) else 1)' "$1"; }
+
+# One MCP tools/call round trip, answering with the verb's text payload (or __ERROR__… so an arm reading
+# it fails loudly rather than on an empty string).
+mcp_text(){ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+                          "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}" \
+    | "$BIN" --mcp 2>/dev/null | tail -1 | python3 -c '
+import sys,json
+try:    d=json.loads(sys.stdin.read() or "{}")
+except Exception as e: sys.stdout.write("__ERROR__ unparseable: %s"%e);  raise SystemExit
+if "error" in d: sys.stdout.write("__ERROR__ %s"%d["error"].get("message",""));  raise SystemExit
+sys.stdout.write(d.get("result",{}).get("content",[{}])[0].get("text",""))'; }
+
+# The MCP lego postures, and the one args builder, that arms (F) and (G) SHARE. One enumeration and one args
+# shape on purpose. (F) probed the MCP surface and (G) probed CLI surfaces only, so an MCP answer could have
+# carried graph_unindexed= — or a clause defining it — on the corpus with nothing unindexed and no arm would
+# have read it. Both halves now iterate this list with the same extraction and the same rejections; a posture
+# added here is probed on BOTH corpora or on neither, which is the drift the shared list exists to stop.
+# An unknown posture yields EMPTY args, so the round trip fails loudly rather than silently falling back to
+# `default` and reporting a posture it never probed.
+MCP_LEGO_POSTURES="default full"
+mcpLegoArgs(){ case "$2" in
+        default) printf '{"path":"%s","type":"CloudStorage"}' "$1" ;;
+        full)    printf '{"path":"%s","type":"CloudStorage","legend":"full"}' "$1" ;;
+        *)       printf '' ;;
+    esac; }
+
 # ── corpora ───────────────────────────────────────────────────────────────────────────────────────────
 # Built here, not committed: each is the reporter's own minimal repro, and a committed .astro/.h fixture
 # would also join every OTHER gate's view of test/.
-mkdir -p "$TMP/unind/src" "$TMP/clean/src" "$TMP/hdr" "$TMP/if0"
+mkdir -p "$TMP/unind/src" "$TMP/clean/src" "$TMP/hdr" "$TMP/if0" "$TMP/cxx" "$TMP/cxxclean"
 
 # (A)/(B): #66 — the caller differs from the contrast arm ONLY in file extension.
 cat > "$TMP/unind/src/util.ts" <<'EOF'
@@ -143,6 +210,51 @@ int deadCaller(int x)
     return target(x);
 #endif
 }
+EOF
+
+# (F)/(G): the CLAUSE-PARITY pair. ONE C++ corpus that reaches every surface the attribute can ride —
+# an interface with an implementor (--lego), a call chain (--verify calls(), --path, --connect), a mutable
+# global a function writes (--nonlocal-state), an uncalled function (--dead-code, --safe-delete) — and its
+# TWIN, identical but for the one file no grammar in this build can read. C++ rather than the TypeScript
+# corpus above because --nonlocal-state analyses C/C++/ObjC/Python only and --lego is own-language.
+cat > "$TMP/cxx/iface.h" <<'EOF'
+#pragma once
+class CloudStorage
+{
+public:
+    virtual int putObject(const char* key) = 0;
+};
+class S3Storage : public CloudStorage
+{
+public:
+    int putObject(const char* key) override;
+};
+EOF
+cat > "$TMP/cxx/s3.cpp" <<'EOF'
+#include "iface.h"
+int gUploadCount = 0;
+int S3Storage::putObject(const char* key)
+{
+    gUploadCount = gUploadCount + 1;
+    return key ? 1 : 0;
+}
+int driveIt(S3Storage& s)
+{
+    return s.putObject("k");
+}
+int neverCalled(S3Storage& s)
+{
+    return driveIt(s);
+}
+EOF
+cp "$TMP/cxx/iface.h" "$TMP/cxxclean/iface.h"
+cp "$TMP/cxx/s3.cpp"  "$TMP/cxxclean/s3.cpp"
+# the ONE difference: a file with an extension the crawl walks and no grammar reads
+cat > "$TMP/cxx/page.astro" <<'EOF'
+---
+const x = 1;
+---
+<p>{x}</p>
 EOF
 
 echo
@@ -282,6 +394,135 @@ fi
 [ -z "$( rootEl "$TMP/m_d.xml" callers )" ] \
     && ok "(E) rootEl: returns empty for an element the document does not contain" \
     || no "(E) rootEl matched a <callers> element in a document that has none"
+# (F)/(G) shape: clauseDefines() must say NO on the exact document the defect produces — the attribute on
+# the root, a legend present and plausible, and no clause about it anywhere.
+printf '%s' '<ctx><!-- ripwire lego: ONE interface/base type. counts_floor="1": every graph-derived count here is a FLOOR, never a total. --><lego graph_ambiguous="0" graph_unindexed="1" counts_floor="1"/></ctx>' >"$TMP/m_f0.xml"
+clauseDefines "$TMP/m_f0.xml" \
+    && no "(E) clauseDefines() claims a clause on the v0.6.0 defect document itself — the (F) arm is inert" \
+    || ok "(E) F-shape: a legend that never mentions graph_unindexed IS seen as undefined"
+# and YES on the same document with the clause present — a predicate that only ever says NO fails (F) forever
+printf '%s' '<ctx><!-- ripwire lego: ONE interface/base type. --><!-- graph_unindexed=N is a third gauge. --><lego graph_unindexed="1"/></ctx>' >"$TMP/m_f1.xml"
+clauseDefines "$TMP/m_f1.xml" \
+    && ok "(E) F-shape: a clause spelling graph_unindexed= IS credited" \
+    || no "(E) clauseDefines() cannot see a clause that is present — the (F) arm could never go green"
+# the payload attribute is NOT a definition: a document with the attribute and no comment at all must be NO
+printf '%s' '<lego graph_unindexed="1" counts_floor="1"/>' >"$TMP/m_f2.xml"
+clauseDefines "$TMP/m_f2.xml" \
+    && no "(E) clauseDefines() read the PAYLOAD attribute as its own definition — every gap would pass" \
+    || ok "(E) F-shape: the payload attribute alone is not read as a definition"
+# and CDATA is not a legend: the same bytes inside a body must not count
+printf '%s' '<ctx><b><![CDATA[<!-- graph_unindexed=N is a third gauge. -->]]></b><lego graph_unindexed="1"/></ctx>' >"$TMP/m_f3.xml"
+clauseDefines "$TMP/m_f3.xml" \
+    && no "(E) clauseDefines() credited a comment that is CDATA body text, not a legend" \
+    || ok "(E) F-shape: a clause-shaped string inside CDATA is not credited"
+
+echo
+echo "=== (F) #66 — wherever graph_unindexed= is EMITTED, a legend clause DEFINES it ==="
+# One row per (surface, dialect). The premise — the attribute is actually on this answer — is asserted by
+# its own FAIL rather than a skip: a surface that stops emitting the attribute must be noticed, not
+# silently dropped from the conjunction.
+SURFACES="lego:--lego=CloudStorage
+verify:--verify=calls(driveIt,putObject)
+nonlocal-state:--nonlocal-state
+callers:--callers=putObject
+callees:--callees=driveIt
+uses:--uses=putObject
+impact:--impact=putObject
+path:--path=neverCalled,putObject
+connect:--connect=neverCalled,driveIt,putObject
+dead-code:--dead-code
+safe-delete:--safe-delete=driveIt
+communities:--communities
+seams:--seams"
+while IFS= read -r spec; do
+    [ -n "$spec" ] || continue
+    lbl="${spec%%:*}"; flag="${spec#*:}"
+    for dialect in full compact; do
+        if [ "$dialect" = compact ]; then
+            "$BIN" "$TMP/cxx" --no-cache "$flag" --legend=compact >"$TMP/f.xml" 2>/dev/null
+        else
+            "$BIN" "$TMP/cxx" --no-cache "$flag" >"$TMP/f.xml" 2>/dev/null
+        fi
+        if ! grep -q 'graph_unindexed="' "$TMP/f.xml"; then
+            no "(F) $lbl [$dialect]: premise broken — this answer carries NO graph_unindexed=, so the clause arm would be vacuous"
+        elif clauseDefines "$TMP/f.xml"; then
+            ok "(F) $lbl [$dialect]: graph_unindexed= emitted AND defined in the legend"
+        else
+            no "(F) $lbl [$dialect]: graph_unindexed= emitted with NO clause defining it — a number the output cannot teach (#66/G4)"
+        fi
+    done
+done <<EOF
+$SURFACES
+EOF
+
+# the MCP twin of the worst case: the CLI --lego legend and its MCP copy are one literal, and the MCP
+# surface defaults to the compact posture, so both dialects are probed there too.
+for posture in $MCP_LEGO_POSTURES; do
+    mcp_text lego "$( mcpLegoArgs "$TMP/cxx" "$posture" )" >"$TMP/f_mcp.xml"
+    MT="$( cat "$TMP/f_mcp.xml" )"
+    case "$MT" in
+        __ERROR__*) no "(F) MCP lego [$posture]: the verb refused — $MT" ;;
+        "")         no "(F) MCP lego [$posture]: empty payload (the arm reading it would have been vacuous)" ;;
+        *)
+            if ! grep -q 'graph_unindexed="' "$TMP/f_mcp.xml"; then
+                no "(F) MCP lego [$posture]: premise broken — no graph_unindexed= on the MCP answer"
+            elif clauseDefines "$TMP/f_mcp.xml"; then
+                ok "(F) MCP lego [$posture]: graph_unindexed= emitted AND defined in the legend"
+            else
+                no "(F) MCP lego [$posture]: graph_unindexed= emitted with NO clause defining it (#66/G4)"
+            fi ;;
+    esac
+done
+
+echo
+echo "=== (G) #66 — on a corpus with nothing unindexed, neither the attribute nor a clause appears ==="
+# The mirror-image false claim: a legend that defines an attribute the document did not emit. The corpus is
+# the (F) corpus MINUS the one unreadable file, so any difference found here is that file and nothing else.
+while IFS= read -r spec; do
+    [ -n "$spec" ] || continue
+    lbl="${spec%%:*}"; flag="${spec#*:}"
+    for dialect in full compact; do
+        if [ "$dialect" = compact ]; then
+            "$BIN" "$TMP/cxxclean" --no-cache "$flag" --legend=compact >"$TMP/g.xml" 2>/dev/null
+        else
+            "$BIN" "$TMP/cxxclean" --no-cache "$flag" >"$TMP/g.xml" 2>/dev/null
+        fi
+        if [ ! -s "$TMP/g.xml" ]; then
+            no "(G) $lbl [$dialect]: the clean corpus produced NO answer — the absence arms would be vacuous"
+        elif grep -q 'graph_unindexed="' "$TMP/g.xml"; then
+            no "(G) $lbl [$dialect]: graph_unindexed= present on a corpus with nothing unindexed"
+        elif clauseDefines "$TMP/g.xml"; then
+            no "(G) $lbl [$dialect]: a clause DEFINES graph_unindexed= on an answer that never emits it — the mirror-image false claim"
+        else
+            ok "(G) $lbl [$dialect]: attribute absent, and no clause claims it"
+        fi
+    done
+done <<EOF
+$SURFACES
+EOF
+
+# The MCP half of the mirror. (F) probes the MCP lego verb in both legend postures and (G) probed CLI
+# surfaces only, so an MCP response was free to carry graph_unindexed= — or a clause defining it — on the
+# clean corpus with nothing reading it. Same posture list, same args builder, same extraction and the same
+# four rejections as (F)'s MCP loop (refusal, empty payload, the attribute, a clause defining it); the ONLY
+# difference between the two loops is the corpus, which is what makes them a matched pair rather than two
+# checks that happen to be nearby.
+for posture in $MCP_LEGO_POSTURES; do
+    mcp_text lego "$( mcpLegoArgs "$TMP/cxxclean" "$posture" )" >"$TMP/g_mcp.xml"
+    GT="$( cat "$TMP/g_mcp.xml" )"
+    case "$GT" in
+        __ERROR__*) no "(G) MCP lego [$posture]: the verb refused — $GT" ;;
+        "")         no "(G) MCP lego [$posture]: empty payload (the absence arms reading it would have been vacuous)" ;;
+        *)
+            if grep -q 'graph_unindexed="' "$TMP/g_mcp.xml"; then
+                no "(G) MCP lego [$posture]: graph_unindexed= present on a corpus with nothing unindexed"
+            elif clauseDefines "$TMP/g_mcp.xml"; then
+                no "(G) MCP lego [$posture]: a clause DEFINES graph_unindexed= on an answer that never emits it — the mirror-image false claim"
+            else
+                ok "(G) MCP lego [$posture]: attribute absent, and no clause claims it"
+            fi ;;
+    esac
+done
 
 echo
 [ "$fail" -eq 0 ] && { echo "blindspotcheck: ALL PASS"; exit 0; }

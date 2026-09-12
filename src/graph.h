@@ -1868,7 +1868,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // resolver degrades to the name-based fallback ladder + honest amb=. The caller's OWN file is excluded (f ∉ trans[f]).
     // Deterministic: a pure function of the sorted ing.files + ing.includes; each set is sorted+deduped
     // so rule3IncludeFile's binary-search membership is valid and order-stable (warm == cold).
-    auto [ includeAdj, includeContext ] = buildPreciseIncludeAdjWithContext( ing );
+    // `forCallNarrow`: a Ruby constant read off a VALUE position (an argument, a rescue class — parser version 93)
+    // is a dependency of the file but not import evidence for a bare call, so it never enters this set. --deps,
+    // --impact's importer tier and the lazy-pair count read the same records through the default path and keep it.
+    auto [ includeAdj, includeContext ] = buildPreciseIncludeAdjWithContext( ing, /*dedup=*/true, /*lazyPairsOut=*/nullptr, /*forCallNarrow=*/true );
     std::vector<std::vector<NodeId>> fileIncludes = transitiveIncludeSet( includeAdj );
     const JsImportTables jsImports = buildJsImportTables( ing, includeContext.fileRoot ? &includeContext : nullptr );
     // per-symbol fileId view for Rule 3 (group a candidate def by its file without passing the whole IngestResult).
@@ -4086,6 +4089,148 @@ inline std::size_t definitionCountOfName( const IngestResult& ing, NodeId focus 
     return focus == kNoNode ? 0 : resolveAllByName( ing, ing.symbols[ focus ].name ).size();
 }
 
+// H1 (2026-09-11) — THE POSITIVE PROOF declToDefFollowThrough below was missing, as its own function.
+//
+// `Symbol::scope` is the IMMEDIATELY ENCLOSING class/namespace name only — namespaces are dropped (model.h;
+// the varType table ~3000 lines up says the same thing about its own key: "Symbol scopes drop namespaces, so
+// two same-NAMED classes collapse onto one key here"). So `s.scope == d.scope` is NOT "the same scope": it is
+// the same BARE class name, and for a FREE function, whose scope is "", it is nothing at all — the widening
+// then degenerates to name alone, which is exactly what the contract note below forbids in writing. Both
+// shapes shipped in 0.6.0 and both answered a count that was too HIGH: `a/Store.h:putObject` served
+// `b::Store::putObject`'s caller, and `api.h:helper` served every anonymous-namespace `helper` in the tree.
+// A count carrying counts_floor="1" may be UNDER the truth; over it is not a floor at all, it is a wrong
+// answer wearing an honesty marker.
+//
+// So a candidate definition is kept only with EVIDENCE that it belongs to the declaration's file:
+//   1. it IS in one of the declaration files — a guard, not the live path: the early return below already
+//      fires when the file-tier selection holds a bodied def, and a same-file def is ALWAYS in that
+//      selection (both sides match the same `file` substring), so this clause exists to make the proof sound
+//      on its own terms rather than on that invariant holding forever;
+//   2. its file #includes one of the declaration files, resolved PATH-precisely through
+//      resolve.h::resolvePreciseInclude — the same entry point buildPreciseIncludeAdj resolves every corpus
+//      include with, so quote-vs-angle and relative-to-includer handling stay in ONE place — and NEVER by
+//      basename: the two `Store.h` of the H1 repro differ only by path.
+// Anything else is DROPPED, which leaves the count under the truth (the floor's safe direction), and the
+// caller reports how many were dropped so the answer is not a bare zero.
+//
+// COST — why this does not call buildPreciseIncludeAdj. That builds a whole-corpus path index and resolves
+// EVERY include in the tree; on a 182,555-file corpus it is far too much for a path that runs per selector.
+// It is also not needed: only the declaration files matter, so the index handed to the resolver holds ONLY
+// those, and a hit is by construction a hit on one of them (re-checked against `isDecl` anyway, so the
+// function is sound without trusting each language's internals). The pass is O(ing.includes) byte lookups
+// for the candidate-file filter, plus one resolve per include OF a candidate file.
+//
+// WHAT DOES NOT PROVE — all of it in the under-count direction, and none of it silent, because the caller's
+// residue count covers every drop: a Rust `use crate::…` (no crate root is mined here — resolvePreciseInclude's
+// own documented default), an Elixir module reference (no module index — likewise), a Ruby symbolic require,
+// a TRANSITIVE include (`impl.cpp` → `pch.h` → the declaring header), and, in a merged workspace, a cross-root
+// include that escapes its own root on disk or resolves through a tsconfig/go.mod alias. Each of those needs
+// a whole-corpus pass this seam deliberately does not take.
+//
+// RULE 2, the scan, split out of the proof below so the bolted-on resolver call does not inflate its
+// complexity (the same reason #63 split declToDefFollowThrough out of resolveAllByNameQualified). Marks
+// every still-unproven `isCand` file whose own #include directives resolve to an `isDecl` file. All three
+// arrays are indexed BY FILE ID; `proven` is read as well as written, so an already-proven file costs no
+// resolve.
+inline void markCandidateFilesIncludingDecl( const IngestResult& ing, const std::vector<char>& isDecl,
+                                             const std::vector<char>& isCand, std::vector<char>& proven )
+{
+    // The index: ONE entry per DECLARATION file, keyed the way buildPreciseIncludeAdj keys its own
+    // (lexicalNormalize on BOTH sides, so a `.`-rooted crawl's `./a/x.h` and a resolved `a/x.h` agree).
+    HashMap<std::string, std::uint32_t> declIndex;
+    for( std::uint32_t f = 0; f < isDecl.size(); ++f )
+    {
+        if( isDecl[ f ] != 0 )
+        {
+            declIndex.emplace( lexicalNormalize( ing.files[ f ] ), f );
+        }
+    }
+    // Multi-root: fileRoot/rootLabels/rootAbs reproduce the same-root soundness gate and the root-relative
+    // anchor exactly, so a workspace resolves intra-root includes as it does today; absIndex is left EMPTY on
+    // purpose — the §3.1a disk-shape escape probe then simply misses, which costs a cross-root proof and can
+    // never invent one. Single root: ws stays nullptr and every call is byte-identical to the single-root
+    // path buildPreciseIncludeAdj takes.
+    WsIncludeCtx        wsCtx;
+    const WsIncludeCtx* ws = nullptr;
+    if( !ing.fileRoot.empty() && !ing.rootLabels.empty() )
+    {
+        wsCtx.fileRoot   = &ing.fileRoot;
+        wsCtx.rootAbs    = ing.rootReals;
+        wsCtx.rootLabels = ing.rootLabels;
+        ws               = &wsCtx;
+    }
+
+    for( const Include& inc : ing.includes )
+    {
+        // Skipped: a symbolic Ruby constant (it resolves through its own corpus-wide definition index, never
+        // as a path), an include from a file that holds no candidate, and one whose file is already proven.
+        const bool worthResolving = !inc.isSymbolic && inc.fileId < isCand.size()
+                                 && isCand[ inc.fileId ] != 0 && proven[ inc.fileId ] == 0;
+        if( !worthResolving )
+        {
+            continue;
+        }
+        const std::uint32_t to = resolvePreciseInclude( ing.files[ inc.fileId ], inc.target, inc.isAngle, declIndex,
+                                                        {}, false, ws, inc.fileId, nullptr );
+        if( to != kNoFile && to < isDecl.size() && isDecl[ to ] != 0 )
+        {
+            proven[ inc.fileId ] = char( 1 );
+        }
+    }
+}
+
+// Returns one flag PER FILE: 1 = a definition in that file is proven to belong to one of the declaration
+// files, by rule 1 or rule 2. Per-file byte arrays rather than sorted id sets and a binary search per
+// candidate: the widening runs once per selector, so O(files) bytes from one memset is the cheaper and much
+// plainer shape — and it is the one buildGraph's own per-file marks already use.
+inline std::vector<char> includeProofOfDeclFiles( const IngestResult& ing, const std::vector<NodeId>& decls,
+                                                  const std::vector<NodeId>& cands )
+{
+    const std::size_t F = ing.files.size();
+    std::vector<char> isDecl( F, 0 );
+    std::vector<char> proven( F, 0 );
+    for( NodeId id : decls )
+    {
+        isDecl[ ing.symbols[ id ].fileId ] = char( 1 );
+        proven[ ing.symbols[ id ].fileId ] = char( 1 );   // rule 1 — see clause 1 of the note above
+    }
+    std::vector<char> isCand( F, 0 );
+    std::size_t       openCount = 0;   // distinct candidate files still needing evidence
+    for( NodeId id : cands )
+    {
+        const std::uint32_t f = ing.symbols[ id ].fileId;
+        openCount += ( isCand[ f ] == 0 && proven[ f ] == 0 ) ? 1u : 0u;
+        isCand[ f ] = char( 1 );
+    }
+    if( openCount != 0 && !ing.includes.empty() )
+    {
+        markCandidateFilesIncludingDecl( ing, isDecl, isCand, proven );   // rule 2
+    }
+    return proven;
+}
+
+// The (scope, name) CANDIDATE gather — only a gather: what KEEPS a candidate is includeProofOfDeclFiles
+// above. Deduped, and in ascending NodeId because ing.symbols is walked in id order. `isDefinitionNotDeclaration`
+// is the decl/def collapse's own predicate, on purpose: a bodyless Kotlin class/interface counts as a
+// definition here too, not a declaration to widen past.
+inline std::vector<NodeId> declToDefCandidates( const IngestResult& ing, std::string_view name, const std::vector<NodeId>& sel )
+{
+    std::vector<NodeId> cands;
+    for( NodeId declId : sel )
+    {
+        const Symbol& d = ing.symbols[ declId ];
+        for( const Symbol& s : ing.symbols )
+        {
+            const bool sameContract = s.name == name && s.scope == d.scope && isDefinitionNotDeclaration( s );
+            if( sameContract && langCompatible( s.lang, d.lang ) && std::find( cands.begin(), cands.end(), s.id ) == cands.end() )
+            {
+                cands.push_back( s.id );
+            }
+        }
+    }
+    return cands;
+}
+
 // X9(b): qualified "file:name" variant of resolveAllByName, for --callers/--callees/--impact — a same-
 // named symbol living in more than one file (a common overload/shadow shape) previously had no way to
 // disambiguate on these verbs even though --around/--lego/--edit-check already could (resolveFocus). Uses
@@ -4115,6 +4260,11 @@ inline std::size_t definitionCountOfName( const IngestResult& ing, NodeId focus 
 //     every free `size` in the repository — an over-count inside an honesty fix, which is strictly worse
 //     than the silence it replaces. A method's scope is its class, so this is exactly as specific as the
 //     `Scope::name` tier the reporter showed already working.
+//     H1 AMENDMENT (2026-09-11): (scope, name) is NOT specific enough, and for a free function it IS name
+//     alone — `Symbol::scope` drops namespaces and is "" for a free function, so both over-counts the clause
+//     forbids shipped anyway. The match above is now only how CANDIDATES are gathered; what KEEPS one is the
+//     positive file proof in includeProofOfDeclFiles just above (same file, or that file's precise #include),
+//     and everything unproven is dropped and counted out through `unprovenDefCountOut`.
 //   * Bodied only, via the predicate the decl/def collapse reads (model.h isDefinitionNotDeclaration: the
 //     span test, and a Kotlin type), and langCompatible with the declaration, so a
 //     Python `putObject` never answers for a C++ header.
@@ -4131,9 +4281,20 @@ inline std::size_t definitionCountOfName( const IngestResult& ing, NodeId focus 
 // nesting 2 -> 5 (ripwire's own --quality-delta said so), for a rule that is one self-contained question.
 // `sel` is the file-tier selection, widened IN PLACE; empty `file` or a selection that already holds a
 // definition leaves it byte-identical. See the contract note at the call site.
+//
+// `unprovenDefCountOut` (H1, optional — every existing call site is unaffected) is THE RESIDUE: how many
+// same-named candidate definitions were found and then dropped for want of the file proof. It is the one
+// number that separates "this declaration has no definition in the corpus" from "definitions exist and none
+// of them provably belongs to the file you named" — without it, a dropped candidate reaches the reader as a
+// bare zero, which is the shape #63 exists to kill. Always written when the pointer is non-null (0 when the
+// widening never runs), never left stale.
 inline void declToDefFollowThrough( const IngestResult& ing, std::string_view file, std::string_view name,
-                                    std::vector<NodeId>& sel )
+                                    std::vector<NodeId>& sel, std::size_t* unprovenDefCountOut = nullptr )
 {
+    if( unprovenDefCountOut != nullptr )
+    {
+        *unprovenDefCountOut = 0;
+    }
     if( file.empty() || sel.empty() )
     {
         return;
@@ -4150,28 +4311,48 @@ inline void declToDefFollowThrough( const IngestResult& ing, std::string_view fi
         }
     }
 
-    std::vector<NodeId> defs;
-    for( NodeId declId : sel )
+    // CANDIDATES, by the (scope, name) match — which the H1 amendment on the call site's note explains is a
+    // gathering rule, never a keeping one: `scope` drops namespaces and is "" for a free function.
+    const std::vector<NodeId> cands = declToDefCandidates( ing, name, sel );
+    if( cands.empty() )
     {
-        const Symbol& d = ing.symbols[ declId ];
-        for( const Symbol& s : ing.symbols )
+        return;
+    }
+
+    // A candidate is proven against ANY declaration in the selection, not only the one whose scope matched
+    // it: every member of `sel` is a declaration the caller's own selector named, so a definition tied to one
+    // of them is tied to the answer.
+    const std::vector<char> proven = includeProofOfDeclFiles( ing, sel, cands );
+
+    std::size_t unprovenCount = 0;
+    for( NodeId id : cands )
+    {
+        if( proven[ ing.symbols[ id ].fileId ] != 0 )
         {
-            const bool sameContract = s.name == name && s.scope == d.scope && hasBody( s.id );
-            if( sameContract && langCompatible( s.lang, d.lang ) && std::find( defs.begin(), defs.end(), s.id ) == defs.end() )
-            {
-                defs.push_back( s.id );
-            }
+            sel.push_back( id );   // KEEP the decls - see the fifth clause of the call site's note
+        }
+        else
+        {
+            ++unprovenCount;       // found, not provable: dropped, and DISCLOSED rather than served
         }
     }
-    for( NodeId id : defs )
+    if( unprovenDefCountOut != nullptr )
     {
-        sel.push_back( id );   // KEEP the decls - see the fifth clause of the call site's note
+        *unprovenDefCountOut = unprovenCount;
     }
     std::sort( sel.begin(), sel.end() );   // NodeId order - the contract every caller of this already relies on
 }
 
-inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, std::string_view spec )
+// `unprovenDefCountOut` (H1, optional): the residue declToDefFollowThrough dropped — see its contract. Zero
+// on every path that never reaches the widening (an @FILE:LINE seed, a canonical id, a Scope::name tier, a
+// bare name), so a reader never has to ask whether the number is stale.
+inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, std::string_view spec,
+                                                      std::size_t* unprovenDefCountOut = nullptr )
 {
+    if( unprovenDefCountOut != nullptr )
+    {
+        *unprovenDefCountOut = 0;
+    }
     if( !spec.empty() && spec.front() == '@' )
     { // @FILE:LINE line seed — the innermost covering definition (exactly one: a line names one place), or
       // empty; a verb's own retry logic (--slice's HEAD:VAR split) and the shared refusal clause both rely
@@ -4214,7 +4395,7 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
 
     // #63: a header-qualified selector resolves to DECLARATIONS, which carry no call-graph edges.
     // Widen to the definitions they stand for. Full contract and its limits: declToDefFollowThrough above.
-    declToDefFollowThrough( ing, file, name, out );
+    declToDefFollowThrough( ing, file, name, out, unprovenDefCountOut );
     return out;
 }
 
@@ -5036,27 +5217,32 @@ inline StructuralIncludeAdj resolveStructuralIncludeAdj( const IngestResult& ing
     {
         return out;   // no lazy directive anywhere: the structure IS the full graph, byte-identical to before
     }
+    // `dropped` collects the ids the cut removes from one file's row so the PAIR count is over DISTINCT ids. The
+    // un-deduped adjacency is in DIRECTIVE order, not sorted (buildPreciseIncludeAdj sorts only when dedup=true), so
+    // the earlier "equal ids are adjacent" shortcut counted a pair once per RUN of equal ids: `Errors::Boom`,
+    // `User`, `Errors::Bust` in one method resolve to errors.rb, user.rb, errors.rb and read as lazy_edges=3 for
+    // two pairs (parser version 93, test/rubyargcheck.sh service.rb, where three spellings of one file's classes
+    // are interleaved with two other files). One scratch vector, reused across files; sort + unique is the count.
+    std::vector<std::uint32_t> dropped;
     for( std::uint32_t f = 0; f < out.adj.size(); ++f )
     {
         std::vector<std::uint32_t>& outs = out.adj[f];
         std::uint32_t               kept = 0;
-        std::uint32_t               lastDropped = std::numeric_limits<std::uint32_t>::max();
+        dropped.clear();
         for( std::uint32_t j = 0; j < outs.size(); ++j )
         {
             const std::uint32_t to  = outs[j];
             const auto          it  = lazyPairs.find( ( std::uint64_t( f ) << 32 ) | std::uint64_t( to ) );
             if( it != lazyPairs.end() && it->second != 0 )
             {
-                if( to != lastDropped )   // outs is sorted (buildPreciseIncludeAdj), so equal ids are adjacent: count the PAIR once
-                {
-                    ++out.lazyEdgesByFile[f];
-                    lastDropped = to;
-                }
+                dropped.push_back( to );
                 continue;
             }
             outs[kept++] = to;
         }
         outs.resize( kept );
+        std::sort( dropped.begin(), dropped.end() );
+        out.lazyEdgesByFile[f] = static_cast<std::uint32_t>( std::unique( dropped.begin(), dropped.end() ) - dropped.begin() );
         out.lazyEdges += out.lazyEdgesByFile[f];
     }
     return out;

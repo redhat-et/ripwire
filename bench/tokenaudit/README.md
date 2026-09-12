@@ -23,6 +23,27 @@ The corpus **labels** are what the results JSON records — never a path, never 
 `test/ripwirepubliccheck.sh` caught all three leak classes in this directory's first committed results
 file; `sweep.py` now writes labels by construction so the gate has nothing to catch.
 
+### Re-pin log — and why a regenerated manifest needs one
+
+`pin.py` rewrites **every** row. A commit that re-pins because one verb's bytes moved therefore also
+refreshes any row that had silently drifted since the last regeneration, and its message will, in all good
+faith, describe those rows with the reason it had for the one. That has already happened once, so the rows
+say it themselves from here on.
+
+| Date | Commit | Rows that moved | Why |
+| --- | --- | --- | --- |
+| 2026-09-09 | `91fce8ea` | all | first pin (`--expand` at `543 544 454`) |
+| 2026-09-11 | `64fa0c2b` | `for-budgeted` 374→420, `expand` 543→541 | for-budgeted: the rung-zero note added 182 B to the budgeted `--for` document. **expand: unrelated — that row had simply been stale since `91fce8ea`.** |
+| 2026-09-12 | this branch | `for-budgeted` 420→419 | the rung-zero note's closing clause corrected, one byte shorter |
+
+**The correction on record.** `64fa0c2b`'s message says the re-pin happened because "the pinned tokenizer
+counts predated the rung-zero note". True of `for-budgeted`; **false of `expand`**, which moved in the same
+commit for an unrelated reason. Measured: `--expand=billableTotal` on `test/estcalibfix` is BYTE-IDENTICAL
+between `5b3c0b98` (the commit this branch forked from) and this branch's head — 1 836 B either way,
+`est_tokens="455"` on both — and nothing on this branch touches that path. The real counts were 541/542/455
+against a pinned 543/544/454, i.e. the row had been stale for 188 `src/` commits. The message is not
+amended; history here is fixed forward.
+
 ```bash
 python3 -m venv /tmp/tokvenv && /tmp/tokvenv/bin/pip install tiktoken
 /tmp/tokvenv/bin/python bench/tokenaudit/sweep.py --bin build/ripwire \

@@ -652,16 +652,29 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     // §P10.6 / A6, in the CLI's own key names: defs= = definitions the name resolved to (the rows below are
     // the UNION of all of their neighbours), count= = the un-windowed row total, hop_tested/hop_untested =
     // the partition over that full set.
+    const auto [ chNextSelector, chNextIsBare ] = callHierarchyNextSelector( ing, chRows, name, referencingOnly );
     out += ",\"defs\":" + std::to_string( chRows.matches.size() )
          + ",\"count\":" + std::to_string( rowTotal )
          + ",\"hop_tested\":" + std::to_string( chTested.tested )
          + ",\"hop_untested\":" + std::to_string( chTested.untested )
          + declinedCallsKeyJson( chRows.declinedCalls )   // the CLI root's declined_calls=, for the direction count= describes
-         + nextFieldJson( nextFlag( referencingOnly ? "--uses=" : "--expand=", name ) );   // P3 (L7): the CLI root's next= (mcpattrparitycheck)
+         + nextFieldJson( nextFlag( referencingOnly ? "--uses=" : "--expand=", chNextSelector ) );   // P3 (L7): the CLI root's next= (mcpattrparitycheck)
     if( !referencingOnly && chRows.bodylessDefs > 0 )
     {
         out += ",\"bodyless_defs\":" + std::to_string( chRows.bodylessDefs );
     }
+    // H1: the decl→def widening's residue, the CLI root's unproven_defs=. These two verbs take the SAME
+    // `file:name` selectors through the SAME resolver, so an MCP client asking about `api.h:helper` met the
+    // identical silent zero the CLI did. Absent at zero, both directions, through the same spelling helper
+    // the CLI root uses, so the two surfaces cannot disagree about the number.
+    //
+    // NOT named in the tools/list key lists, and that is a decision, not an omission: a draft that added it
+    // to find_symbol's and find_referencing_symbols's descriptions took the manifest to 42,433 B against
+    // mcpmanifestcheck's 42,200 B per-session ceiling, and that gate's standing rule is that the ceiling
+    // moves for a DECLARED argument's obliged bytes and never for prose (it has a recorded precedent of
+    // deleting a 43 B clause rather than re-anchoring around it). The key travels self-named in the payload,
+    // which is where the disclosure has to be — the same posture bodyless_defs= already holds here.
+    out += unprovenDefsKeyJson( chRows.unprovenDefs );
     out += pageDisclosure( pab, sizeof( pab ), pwPrimary.end - pwPrimary.begin, rowTotal, pwPrimary.end,
                            page.limit, page.offset, discloseCap, kJsonPageSyntax );
     out += ",\"calledBy\":" + rowArray( calledBy, referencingOnly ? pwPrimary : pwSecond );
@@ -1962,7 +1975,9 @@ inline std::string legoText( const std::string& root, const std::string& type, R
 
     return captureXml( [ & ]( std::FILE* mem )
     {
-        rw::emitTo( mem, "<ctx>{}", kLegoLegend );   // H5: the same legend the CLI --lego prints (graphlegend.h)
+        // H5: the same legend the CLI --lego prints, and (issue #66) the same adjacent clause defining the
+        // graph_unindexed= the root below carries — CLI and MCP are one wording by construction.
+        rw::emitTo( mem, "<ctx>{}{}", kLegoLegend, graphUnindexedLegendComment( ix.g.unindexedFiles > 0 ).c_str() );
         packLego( mem, ing, ix.g.implementors, flat, 1, redact, &impure, focus, /*withPaths=*/true,
                   ing.realPaths.empty() ? std::string_view( root ) : std::string_view(),    // R-R: root-relative <iface p=>
                   graphCountFloorAttrXml( ix.g ) );                                           // M15: gauge + marker
@@ -2214,7 +2229,10 @@ inline std::string impactText( const std::string& root, const std::string& symbo
 
     // resolveAllByNameQualified — the SAME resolver the CLI --impact uses (byte-identical on a bare
     // name/canonical id), so this twin finally accepts file:name AND the @FILE:LINE line-seed too.
-    const std::vector<NodeId> seeds = resolveAllByNameQualified( ing, symbol );
+    // H1: the decl→def residue, the CLI --impact's unproven_defs= — same resolver, same helpers, so the two surfaces
+    // cannot disagree about the number.
+    std::size_t               unprovenDefs = 0;
+    const std::vector<NodeId> seeds        = resolveAllByNameQualified( ing, symbol, &unprovenDefs );
     if( seeds.empty() )
     {
         return {}; // symbol not found → caller reports not-found
@@ -2253,9 +2271,10 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     // exactly the §B4 echo-site divergence the shared-constant rule exists to stop.
     // LB-H: the import tier's clause rides here too — the CLI legend and this one are byte-identical by
     // rule, and an attribute the MCP root now carries has to be defined where the caller meets it.
-    rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause, kImpactImportTierLegend,
+    rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause, kImpactImportTierLegend,
                   kTestedRowLegend, kImpactTestedPartitionLegend,   // A6
                   kTestedLensBlindSpotLegend,                       // F-02: rides with the partition, byte-identical to the CLI twin
+                  unprovenDefsVerbLegend( UnprovenDefsVerb::Impact, unprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=, as on the CLI
                   declinedCallsLegend( declinedCalls > 0 ),         // exactly when the root carries declined_calls=, as on the CLI
                   graphCountDisclosure( g.unindexedFiles > 0 ).c_str(), renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to
@@ -2275,8 +2294,8 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     // LB-H: ONE derivation, shared with the CLI arm (graph.h::impactImportTier) — mcpclidiffcheck compares
     // the two surfaces' attribute sets, and an honesty marker that lands on one of them is the §B4 class.
     const ImportTier imports = impactImportTier( ing, seeds );
-    rw::emitTo( mem, "<impact of=\"{}\" defs=\"{}\" reaches=\"{}\"{} radius_tested=\"{}\" radius_untested=\"{}\"{}{}{}{}{}{}>",
-                  ex( symbol ).c_str(), seeds.size(), reach.size(),
+    rw::emitTo( mem, "<impact of=\"{}\" defs=\"{}\" reaches=\"{}\"{}{} radius_tested=\"{}\" radius_untested=\"{}\"{}{}{}{}{}{}>",
+                  ex( symbol ).c_str(), seeds.size(), reach.size(), unprovenDefsAttrXml( unprovenDefs ).c_str(),   // H1: where the CLI root carries it
                   imports.xmlAttrs.c_str(), radiusTested, radiusUntested, declinedCallsAttrXml( declinedCalls ).c_str(), imRootAttr.c_str(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
                   graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str(),   // M15: gauge + marker
@@ -2564,8 +2583,12 @@ inline std::string pathText( const std::string& root, const std::string& from, c
     // r27-emitters §P2.10: resolve EVERY def of each endpoint and run ONE multi-source BFS (shortestPathAny),
     // exactly as the CLI --path now does. Binding `from` to the lowest-NodeId def reported reachable="0" for
     // paths that plainly exist, and the answer never said which def it had picked.
-    const std::vector<NodeId> srcDefs = resolveAllByNameQualified( ing, from );
-    const std::vector<NodeId> dstDefs = resolveAllByNameQualified( ing, to );
+    // H1: each endpoint's decl→def residue, summed onto the root exactly as the CLI --path sums it.
+    std::size_t               srcUnprovenDefs = 0;
+    std::size_t               dstUnprovenDefs = 0;
+    const std::vector<NodeId> srcDefs         = resolveAllByNameQualified( ing, from, &srcUnprovenDefs );
+    const std::vector<NodeId> dstDefs         = resolveAllByNameQualified( ing, to, &dstUnprovenDefs );
+    const std::size_t         unprovenDefs    = srcUnprovenDefs + dstUnprovenDefs;
     if( srcDefs.empty() || dstDefs.empty() )
     {
         return {}; // an endpoint not found → caller reports not-found
@@ -2598,10 +2621,11 @@ inline std::string pathText( const std::string& root, const std::string& from, c
     // verb has no legend of its own either, and the two dialects must not differ on what they explain.
     // H5: the same brief floor legend + marker the CLI --path prints (verbs_navigate.h) — one wording, two transports.
     rw::emitTo( mem, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
-                       "graph holds none. {}-->{}", graphCountFloorBrief( g.unindexedFiles > 0 ).c_str(), rootRelPathsLegend( ptSingleRoot ) );
-    rw::emitTo( mem, "<path from=\"{}\" to=\"{}\" from_p=\"{}\" to_p=\"{}\" from_defs=\"{}\" to_defs=\"{}\" reachable=\"{}\" hops=\"{}\"{}{}",
+                       "graph holds none. {}{}-->{}", unprovenDefsVerbLegend( UnprovenDefsVerb::Path, unprovenDefs > 0 ).c_str(),
+                  graphCountFloorBrief( g.unindexedFiles > 0 ).c_str(), rootRelPathsLegend( ptSingleRoot ) );
+    rw::emitTo( mem, "<path from=\"{}\" to=\"{}\" from_p=\"{}\" to_p=\"{}\" from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
                   ex( from ).c_str(), ex( to ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
-                  srcDefs.size(), dstDefs.size(),
+                  srcDefs.size(), dstDefs.size(), unprovenDefsAttrXml( unprovenDefs ).c_str(),   // H1: as the CLI root carries it
                   pth.empty() ? 0 : 1, pth.empty() ? std::size_t( 0 ) : pth.size() - 1, ptRootAttr.c_str(),
                   graphCountFloorAttrXml( g ).c_str()  );   // M15: gauge + marker
     if( pth.empty() )
@@ -2855,7 +2879,18 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     // this verb budgets, so they are charged to BOTH the trim-loop fit check and the printed est_tokens. Built
     // once here because connectEstTokens must be called with the same value in both places.
     const std::string  connectRootAttr = rootArg.empty() ? std::string() : ( " root=\"" + ex( rootArg ) + "\"" );
-    const std::size_t  connectExtraBytes = connectRootAttr.size() + std::strlen( rootRelPathsLegend( !rootArg.empty() ) );
+    // 0.6.1 M2 — the THIRD thing this verb emits ahead of its payload, and the one the estimator did not
+    // charge. PR #72 (issue #66, 382e66e6) added the graph_unindexed legend comment (185 B) beside the
+    // graph_unindexed= attribute and raised kConnectRootBytes 260 -> 285 for the ATTRIBUTE only. A corpus
+    // with one unindexed file therefore grew
+    // the delivered document by 205 B while est_tokens did not move a token: 2503 B / 1049 (conservative by
+    // 119 B) became 2708 B / 1049 — OPTIMISTIC by 86 B, the direction both constants above say this estimate
+    // may never take. Held in a NAMED string rather than charged from one call and emitted from another: the
+    // bytes counted here and the bytes written below are now the same object, so the two cannot drift again
+    // (same reason connectExtraBytes itself is built once). Gate: estchargecheck #17.
+    const std::string  connectUnindexedLegend = graphUnindexedLegendComment( g.unindexedFiles > 0 );
+    const std::size_t  connectExtraBytes = connectRootAttr.size() + std::strlen( rootRelPathsLegend( !rootArg.empty() ) )
+                                         + connectUnindexedLegend.size();
 
     // §2.4a: the derived hub threshold every Steiner row's connects= is read against, computed ONCE (it is a
     // property of the graph, not of a row) and named on the root so the label is never a bare assertion.
@@ -3066,7 +3101,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     {
         estTokens = connectEstTokens( payload.size(), connectExtraBytes + std::strlen( connectOverAttr ) );
     }
-    rw::emitTo( out, "{}{}{}", rw::cstr( kConnectHeader ), graphUnindexedLegendComment( g.unindexedFiles > 0 ).c_str(), rootRelPathsLegend( !rootArg.empty() ) );
+    rw::emitTo( out, "{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), rootRelPathsLegend( !rootArg.empty() ) );
     rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\" est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups, estTokens, hubFloor,
                   rw::cstr( connectCeiling ), connectOverAttr,
@@ -3189,6 +3224,13 @@ inline const char* mcpBaselineMarker( const rw::quality::BaselineSelection& sele
     {
         return selection.marker;
     }
+    // Round 3 (pathguard.h): a refused link is decided by the refused open itself. The probe below FOLLOWS a link
+    // (std::filesystem::exists is a stat, not an lstat), so asking it would call a refusal "unreadable" whenever
+    // the link's target exists and "no sidecar" whenever it does not — an answer about some other file entirely.
+    if( selection.sidecarSymlinkRefused )
+    {
+        return selection.marker;
+    }
 
     std::error_code sidecarEc;
     if( std::filesystem::exists( std::filesystem::path( sidecarPath ), sidecarEc ) && !sidecarEc )
@@ -3233,7 +3275,11 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
             // (baseSel.isStaleFileOnDisk() is true whenever isSidecarStale() is) — "delete it" is therefore
             // always the true instruction and the wording needs no removed-vs-ignored split. The CLI twin,
             // which unlinks, does branch on isStaleFileOnDisk().
-            oc.errMsg = baseSel.isSidecarStale()
+            // Round 3 (pathguard.h): a refused link gets the CLI twin's refused-link wording, per-arm verb aside —
+            // "no <file>" is false while the link is sitting at the name.
+            oc.errMsg = baseSel.sidecarSymlinkRefused
+                ? std::string( rw::quality::kBaselineFile ) + " is a symlink, which is refused on read exactly as on write (it was not opened), and there is no git HEAD to auto-compare against — replace the link with a regular copy of its target, or remove it and run the quality_baseline verb"
+                : baseSel.isSidecarStale()
                 ? std::string( rw::quality::kBaselineFile ) + " is STALE (pinned at a different HEAD) and there is no current HEAD tree to fall back to — delete it or re-run the quality_baseline verb"
                 : std::string( "no " ) + rw::quality::kBaselineFile + " and no git HEAD to auto-compare against — run the quality_baseline verb BEFORE the change you want to measure";
             return oc;
@@ -3405,7 +3451,12 @@ inline std::pair<std::string, std::string> qualityBaselineJson( const std::strin
                                                     sidecar, headSha );
     if( !wrote )
     {
-        return { std::string(), std::string( "could not write " ) + sidecar + " (unwritable directory?)" };
+        // The parenthetical names BOTH causes since the CWE-59 guard landed. writeBaseline now also returns
+        // false when the destination is a symlink it refused to follow, and a JSON error that says only
+        // "unwritable directory?" would be a guess that is sometimes simply wrong — the honest reason is on
+        // stderr (rw::pathguard::openNoFollowTruncate), which the MCP protocol channel on stdout never carries.
+        return { std::string(), std::string( "could not write " ) + sidecar
+                                + " (unwritable directory, or the path is a symlink and was refused — see stderr)" };
     }
     std::string json = std::string( "{\"wrote\":\"" ) + mcpdetail::jsonEscape( sidecar )
                      + "\",\"symbols\":" + std::to_string( ing.symbols.size() )

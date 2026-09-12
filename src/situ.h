@@ -561,10 +561,13 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     // F3: the decl/def partner FIRST — it is the answer to "what else has to change with this file" that the
     // dependent-symbol ranking below can never produce, because a header does not depend on its own source.
     writeSituDeclDefRows( out, declDefPartners( ing, changedFile ), situPathRel );
-    {   // H5/M15: the same floor + gauge the XML graph verbs mark, in this report's prose (one fold: graphGaugeAttrXml's)
-        std::size_t gaugeAmb = 0, gaugeUnresolved = 0;
-        for( std::uint32_t k : g.ambOut )        { gaugeAmb        += k; }
-        for( std::uint32_t k : g.unresolvedOut ) { gaugeUnresolved += k; }
+    {   // H5/M15: the same floor + gauge the XML graph verbs mark, in this report's prose — through the SAME
+        // fold, graphGaugeTotals, that graphGaugeAttrXml and graphGaugeAttrJson go through. PR #72 (382e66e6)
+        // introduced that fold in the same commit that widened the gauge to three, precisely to stop the two
+        // dialects being a clone pair — and this third copy was left hand-written three lines above the call
+        // that consumes it. A fold honoured in two places out of three is the shape #72 was fixing, not an
+        // exception to it.
+        const auto [gaugeAmb, gaugeUnresolved] = graphGaugeTotals( g.ambOut, g.unresolvedOut );
         rw::emitTo( out, kGraphCountFloorTextLine, gaugeAmb, gaugeUnresolved, graphUnindexedTextClause( g.unindexedFiles ).c_str() );
     }
     for( std::size_t i = blastPage.begin; i < blastPage.end; ++i )

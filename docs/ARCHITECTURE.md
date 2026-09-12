@@ -122,10 +122,15 @@ Two of those carry a stated floor rather than a silence. **PHP**: dynamic dispat
 those sites produce no edge; a `use` directive is captured for `--uses`/`--deps` but never narrows a
 call, because PSR-4 maps a namespace onto a directory through a `composer.json` block this tool does
 not read. **Lua**: inheritance *is* `setmetatable( D, { __index = B } )`, an ordinary runtime call
-over an ordinary table, so a Lua corpus correctly reports no inheritance edges at all, and `require`
-is a plain function call rather than an import directive (as in Ruby), so a `.lua` file is never a
-node in the `--deps`/`--arch` graph. Both floors are asserted from the outside by
-`test/phpcheck.sh` and `test/luacheck.sh` so they stay decisions rather than drift.
+over an ordinary table, so a Lua corpus correctly reports no inheritance edges at all. A bare `require`
+call is read the way `package.path` reads it: a string-literal argument that resolves to exactly one
+file adds a dependency edge. Dots become directory separators (`require "a.b"` finds `a/b.lua`), a
+package also resolves through its `init.lua` (`require "pkg"` finds `pkg/init.lua`), and the file is
+looked for from the requiring file's directory up to the crawl root, directly and under `src/` and
+`lua/`. A qualified call (`loader.require "x"` is somebody's own function, not the loader), a dynamic or
+concatenated argument, an external module, or a name that more than one file answers adds no edge. Both
+floors are asserted from the outside by `test/phpcheck.sh`, `test/luacheck.sh` and
+`test/luarequirecheck.sh` so they stay decisions rather than drift.
 
 <a id="elixir-extraction"></a>
 

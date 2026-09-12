@@ -233,3 +233,48 @@ for-auto | d@next
 # vocabulary; pure= in the map legend), same un-charged-header reason as the for-auto line above.
 for | d@next
 for | d@pure
+# L1 (0.6.1): the for-budgeted row is NEW WINDOW, not new debt — the roster had no budgeted --for at all, so no
+# run in it ever climbed a rung of the ceiling ladder, which is where --for legend clauses get dropped. The ten
+# lines below are the same gaps the two unbudgeted --for rows already record (route=/task=/field@*/d@next/d@pure
+# above), plus TWO that exist only under a budget and are NOT rung zero's doing:
+#   ctx@bodies, ctx@reason — defined by the bundle=auto / bundle=compact legend, which the enrichment's
+#   `legendOff` path drops on an exhausted explicit ceiling. That drop is silent in exactly the way rung zero's
+#   was before this commit (verbs_for.h buildForEnrichment keeps the ATTRIBUTE and sheds the sentence), and it is
+#   a SEPARATE finding from the one this commit closes — recorded here rather than papered over.
+# What is deliberately NOT below: confidence=, margin_pct=, budget_tokens=, d@r and the <tail> counts. Those are
+# rung zero's, and kForLegendDroppedNote names every one of them where the reader meets it.
+# THE SIGS TRIO, measured rather than reasoned about, because the first draft of this block got it wrong. The
+# note's `(total= shown= capped=)` is written about <tail>, and the document carries the same three names on
+# <sigs>, whose own clause legendOff dropped — so the note closes six keys while describing three, and the
+# `defined` predicate cannot tell them apart (the gate header's ELEMENT-BLINDNESS block). What that did NOT do is
+# bury three gaps that were otherwise visible. On the BASE binary: unbudgeted, the bundle legend defines the trio;
+# at --token-budget=2000, the bundle legend is gone but the tail legend defines it; only inside the rung-zero band
+# (~<=1400) are both clauses gone, and that band had no roster row at all before this one. So the pair has never
+# been separately observable here, and a baseline LINE for it would be unstable in the worst direction — the note
+# does spell `total=`, so arm (B1) would immediately report the line as closed and tell the next agent to delete
+# recorded debt, which is the exact failure the two-predicate design exists to prevent. It is pinned instead in
+# the gate's own arm (F) census, which prints both elements' keys on every run and reds when a new one appears.
+for-budgeted | ctx@bodies
+for-budgeted | ctx@reason
+for-budgeted | ctx@route
+for-budgeted | ctx@task
+for-budgeted | d@next
+for-budgeted | d@pure
+for-budgeted | field@name
+for-budgeted | field@owner
+for-budgeted | field@rel
+for-budgeted | field@type
+# L1 (0.6.1), the COMPACT dialect at the same rung. The roster had no --legend=compact row of any kind, so every
+# string in that dialect's legend inventory was outside the ratchet. Seven lines, and six of them are the same
+# gaps the default-dialect --for rows already record (d@next / d@pure / field@* above, same reasons). The new one:
+#   ctx@schema — `schema="ripwire.for/v1"`, emitted ONLY by the compact dialect (rootOpenWithSchema) and named
+#   nowhere in its legend. The compact legend opens with the schema string itself ("ripwire for ripwire.for/v1:")
+#   so a reader does meet the value, but `schema=` is never spelled — grey by intent, recorded as debt, not
+#   closed by pretending the opening words are a definition.
+for-budgeted-compact | ctx@schema
+for-budgeted-compact | d@next
+for-budgeted-compact | d@pure
+for-budgeted-compact | field@name
+for-budgeted-compact | field@owner
+for-budgeted-compact | field@rel
+for-budgeted-compact | field@type

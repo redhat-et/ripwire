@@ -1125,5 +1125,89 @@ else
     fi
 fi
 
+# ── #17 (0.6.1, M2): --connect must charge its CONDITIONAL legend comment, and stay CONSERVATIVE ────────
+# packConnect emits THREE things ahead of its payload — kConnectHeader, the #66 graph_unindexed legend
+# comment (emitted exactly when graph_unindexed= rides the root), and the shared root-relative legend — and
+# connectExtraBytes charged only two of them. PR #72 (issue #66, 382e66e6) raised kConnectRootBytes 260 -> 285 for the
+# ATTRIBUTE and missed the 185 B COMMENT beside it, so on the two corpora below — identical but for one file
+# no grammar can read — the delivered document grew 205 B (185 B comment + the 20 B attribute) while
+# est_tokens did not move by a single token:
+#     0 unindexed files  2503 B   est_tokens=1049   modelled 2622 B   -119 B  (conservative)
+#     1 unindexed file   2708 B   est_tokens=1049   modelled 2622 B    +86 B  (OPTIMISTIC — the defect)
+# The printed est_tokens, the --max-tokens fit check and the over_ceiling="1" verdict then all measure a
+# smaller document than the caller receives, which is precisely what connectEstTokens' own header and
+# kConnectRootBytes' ("short is the ONE direction this constant may not be") say must never happen.
+#
+# WHY THIS IS NOT ALREADY COVERED by #1/#15's band arms: 2503/1049 = 2.38 B/tok and 2708/1049 = 2.58 B/tok
+# sit comfortably INSIDE the 2.00-3.20 markup band, so a band arm is green on both sides of the defect. The
+# separating property is the DIRECTION, not the magnitude — the delivered document must fit inside
+# est_tokens x kBytesPerTokenDefault (2.50) — and it must be asserted on a corpus that HAS an unindexed
+# file, because that is the only arm the uncharged comment reaches. Both corpora are asserted so the arm
+# cannot pass by measuring the side that was never broken.
+#
+# THE FIXTURE NAMES ARE THE SAME LENGTH ON PURPOSE, and that is not cosmetic. The first spelling of this
+# arm used "clean" and "unindexed": four extra path bytes land inside root="...", connectExtraBytes DOES
+# charge root=, and the estimate therefore moved 1047 -> 1048 across the mutation (observed, on the binary
+# this arm was written red against). The monotone arm (c)
+# passed on that ONE token while the defect it names was fully present — CONTRIBUTING §2 shape 5, a control
+# whose two arms differ in something other than the thing under test. Equal-length names make the legend
+# comment the only byte source that can move the estimate.
+C17="$TMP/c17"
+mkdir -p "$C17/unindexed_0/src" "$C17/unindexed_1/src"
+for d in unindexed_0 unindexed_1; do
+    printf 'export function greet( name: string ): string\n{\n    return `hello ${name}`;\n}\n'                        >"$C17/$d/src/util.ts"
+    printf 'import { greet } from "./util.ts";\nexport function render(): string\n{\n    return greet( "world" );\n}\n' >"$C17/$d/src/consumer.ts"
+done
+# THE ONE DIFFERENCE between the two corpora: a file no grammar in this build can read (real input, really
+# mutated — the identical extraction runs over both).
+printf -- '---\nconst x = 1;\n---\n<p>{x}</p>\n' >"$C17/unindexed_1/src/page.astro"
+for d in unindexed_0 unindexed_1; do
+    "$BIN" "$C17/$d" --connect=render,greet --no-cache >"$TMP/c17_$d.xml" 2>/dev/null
+done
+C17_LEGEND='graph_unindexed=N is a third gauge'
+# (a) presence guards — assert the mutation TOOK before trusting any number derived from it. Without these
+#     the arm is the "wrong population" shape: if .astro ever became indexable, or the legend moved, the two
+#     corpora would be identical and the comparison below would prove nothing while staying green.
+C17_CLEAN_U="$(  root_attr "$TMP/c17_unindexed_0.xml" connect graph_unindexed )"
+C17_UNIDX_U="$(  root_attr "$TMP/c17_unindexed_1.xml" connect graph_unindexed )"
+{ [ -z "$C17_CLEAN_U" ] && [ "$C17_UNIDX_U" = "1" ]; } \
+    && ok "#17 mutation took: the clean corpus carries no graph_unindexed= and the mutated one carries graph_unindexed=\"1\"" \
+    || no "#17 mutation did NOT take: graph_unindexed= is '${C17_CLEAN_U:-<absent>}' clean vs '${C17_UNIDX_U:-<absent>}' mutated — the arm is measuring two identical corpora"
+{ ! grep -q "$C17_LEGEND" "$TMP/c17_unindexed_0.xml" && grep -q "$C17_LEGEND" "$TMP/c17_unindexed_1.xml"; } \
+    && ok "#17 the #66 legend comment is emitted on the mutated corpus and absent on the clean one (the uncharged bytes are really there)" \
+    || no "#17 the #66 legend comment is not where this arm needs it — present on clean, or missing from the mutated corpus"
+C17_BC="$( bytes_of "$TMP/c17_unindexed_0.xml" )"; C17_EC="$( root_est "$TMP/c17_unindexed_0.xml" connect )"
+C17_BU="$( bytes_of "$TMP/c17_unindexed_1.xml" )"; C17_EU="$( root_est "$TMP/c17_unindexed_1.xml" connect )"
+{ [ -n "$C17_EC" ] && [ -n "$C17_EU" ] && [ "$C17_EC" -gt 0 ] && [ "$C17_EU" -gt 0 ]; } 2>/dev/null \
+    || no "#17 a <connect> root carries no positive est_tokens= (clean '$C17_EC', mutated '$C17_EU')"
+[ "$C17_BU" -gt "$C17_BC" ] 2>/dev/null \
+    && ok "#17 the mutated document is $(( C17_BU - C17_BC )) B larger than the clean one ($C17_BC -> $C17_BU B)" \
+    || no "#17 the mutated document did not grow ($C17_BC -> $C17_BU B) — there is nothing for est_tokens to have missed"
+# (b) THE PROPERTY, on both corpora: the WHOLE delivered document fits inside est_tokens x 2.50 B/tok.
+#     Integer math, no tolerance added: kConnectRootBytes deliberately OVER-covers the start tag, so a
+#     correctly charged document sits ~100 B clear of this line and only an uncharged section crosses it.
+#     The 2.50 is serialize.h's kBytesPerTokenDefault, the rate connectEstTokens divides by — if that
+#     constant ever moves, this arm's 25/10 moves with it, the same hand-pinned coupling #1's bands carry.
+for entry in "0 unindexed files:$C17_BC:$C17_EC" "1 unindexed file:$C17_BU:$C17_EU"; do
+    lab="${entry%%:*}"; rest="${entry#*:}"; b="${rest%%:*}"; e="${rest#*:}"
+    [ -n "$e" ] && [ "$e" -gt 0 ] 2>/dev/null || continue
+    m=$(( e * 25 / 10 ))
+    [ $(( b * 10 )) -le $(( e * 25 )) ] \
+        && ok "#17 --connect ($lab): $b B delivered against est_tokens=$e x 2.50 = $m B modelled — CONSERVATIVE by $(( m - b )) B" \
+        || no "#17 --connect ($lab): $b B delivered against est_tokens=$e x 2.50 = $m B modelled — OPTIMISTIC by $(( b - m )) B; a section of the document is not charged to est_tokens"
+done
+# (c) MONOTONE, the same property #2/#11 assert elsewhere: the two corpora share a payload byte for byte, so
+#     the ONLY thing that moved is the legend comment — and an estimate that does not move when the document
+#     does is the signature of the defect (est_tokens=1049 on both sides of a 205 B growth).
+{ [ -n "$C17_EU" ] && [ -n "$C17_EC" ] && [ "$C17_EU" -gt "$C17_EC" ]; } 2>/dev/null \
+    && ok "#17 --connect: est_tokens rose $C17_EC -> $C17_EU when the document grew (the conditional legend is charged)" \
+    || no "#17 --connect: est_tokens stayed at '$C17_EC' -> '$C17_EU' across a $(( C17_BU - C17_BC )) B growth — the conditional legend comment is uncharged"
+# (d) G4 — the two captures stay well-formed (this arm reads bytes, so it must not be reading a broken doc)
+if command -v xmllint >/dev/null 2>&1; then
+    for f in c17_unindexed_0 c17_unindexed_1; do
+        if xmllint --noout "$TMP/$f.xml" 2>/dev/null; then ok "#17 $f.xml is well-formed"; else no "#17 $f.xml FAILED xmllint"; fi
+    done
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

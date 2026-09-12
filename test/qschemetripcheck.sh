@@ -34,6 +34,20 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-12, `#if 0` ALL ROLES + DEFINITIONS (fix/ppdead-all-roles, PR #172; test/ppdeadrolescheck.sh): RE-PIN ONLY, kQSnapCacheScheme STAYS 10.
+#   kParserVer 93 -> 94 and kIngestParserVerMirror -> 94; kCacheVersion STAYS #139's 21. The decided-dead filter now
+#   drops every fact a C-family file captures inside a decided-dead range (every --uses role, the Include record, and a
+#   definition sited at its name), so the extracted SET shrinks and only the parser version can reject a v93 blob; no
+#   record gains or loses a field. The branch was written as 92 -> 93 over cache 20 and RENUMBERED on the merge with
+#   main 558a2e03, where #139 had already spent 93: its pre-merge pin hashed 93 over 20 and main's hashed 93 over 21, so
+#   neither side hashed the merged 94/21 declaration lines. This lane changes no Snapshot-side function.
+# 2026-09-11, RUBY ARGUMENT + RESCUE CONSTANTS (feat/ruby-argument-rescue-constants, PR #139): RE-PIN ONLY, kQSnapCacheScheme STAYS 10.
+#   Both extraction-identity lines moved: kParserVer 92 -> 93 (a constant argument of a call/super/yield and a rescue
+#   class are symbolic Include records; an older blob lacks them, so the parser version is what rejects it) and
+#   kCacheVersion 20 -> 21 (Include gains `bool isValueUse`, a fourth u8 in the record — the origin bit the call
+#   narrow skips; a FORMAT change). kIngestParserVerMirror 93 and kIngestCacheVersionMirror 21 in the same diff,
+#   test/qextractionkeycheck.sh green. RE-DERIVED ON THE MERGE with main 40a1895b (the branch's pre-merge pin
+#   hashed 89 over 18). The twelve manifest functions are byte-identical; no snapshot field changed shape.
 # 2026-09-11, YAML UNSIGNED CHAR (fix/yaml-scanner-unsigned-char-2026-09-11, PR #140; test/vendorpatchcheck.sh arm K):
 #   kParserVer 91 -> 92 and kIngestParserVerMirror -> 92, kCacheVersion STAYS 20 and kQSnapCacheScheme STAYS 10.
 #   EXTRACTION identity, and the only kind this repo cannot see from its own CI: vendor patch

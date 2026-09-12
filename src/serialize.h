@@ -692,31 +692,71 @@ struct CeilingLadderNotes { std::string_view echoDropped, echoAndRouteDropped, o
 // exceeds budget_tokens. Those bytes change with the shape, so no fixed payload can stand in for them, and pricing
 // the BUILT header let a bundle ship 70 B past the allowance with no rung fired (PR #135, estchargecheck #11 A7).
 // climbCeilingLadderBy climbs the same rungs against `fits( candidateHeader )`. climbCeilingLadder is its
-// fixed-payload form, so the two cannot climb different ladders.
+// fixed-payload form, so the two cannot climb different ladders — and it returns the same CeilingLadderChoice,
+// because a caller that needs the rung must not have to go looking for it in the string (see below).
+//
+// M3 — THE RUNG IS RETURNED, NOT LEFT TO BE GUESSED. A caller needs the verdict (--for puts over_ceiling="1" on
+// its root when the last rung fires) and the only other place to read it from is the finished document, by
+// searching it for the rung's own note. That is FORGEABLE: the header carries the caller's task echoed verbatim
+// by contract (routeoncecheck), so a task containing the note text is indistinguishable from a rung that really
+// fired — --for shipped `budget_tokens="100000" est_tokens="3932" over_ceiling="1"` on a 9.8 KB document for
+// exactly that reason, a root contradicting itself in one unit, and --pack-task shipped the same label off the
+// 13-character substring `over_ceiling:` typed into a task. The branch that BUILDS a candidate is the branch
+// that knows its rung, so carrying that value OUT is what makes the forgery impossible rather than merely
+// unlikely. Gate: test/ceilingverdictcheck.sh, both lenses.
+//
+// `fits` is NOT told the rung, and the first version of M3 was wrong to pass it one. The terminal rung (d) is
+// the branch that never asks — it is what the ladder lands on when nothing fit — so `fits` can only ever be
+// called with (a), (b) or (c), and a predicate that tested for (d) was testing a value it could not receive.
+// --for had one, pricing over_ceiling="1"'s 70 B "onto the candidate that will actually carry them": invariantly
+// false, and harmless only because the caller's real predicate (est_tokens > budget_tokens) prices those bytes
+// on every candidate anyway. A branch that cannot fire is deleted here rather than documented.
+enum class CeilingRung : std::uint8_t
+{
+    AsBuilt = 0,           // (a) it already fitted — the overwhelmingly common case
+    EchoDropped,           // (b) the comment's task echo dropped — a byte-for-byte duplicate of task=
+    EchoAndRouteDropped,   // (c) that plus the verbatim route= attribute — the first unique-information loss
+    OverCeiling            // (d) nothing reached the allowance: the complete bundle, honestly labelled
+};
+
+struct CeilingLadderChoice
+{
+    std::string header;
+    CeilingRung rung = CeilingRung::AsBuilt;
+};
+
 template<typename BuildFn, typename FitsFn>
-inline std::string climbCeilingLadderBy( BuildFn&& build, std::string_view builtHeader, FitsFn&& fits, bool hasRouteAttr,
-                                         const CeilingLadderNotes& notes )
+inline CeilingLadderChoice climbCeilingLadderBy( BuildFn&& build, std::string_view builtHeader, FitsFn&& fits, bool hasRouteAttr,
+                                                 const CeilingLadderNotes& notes )
 {
     if( fits( builtHeader ) )
     {
-        return std::string( builtHeader );
+        return { std::string( builtHeader ), CeilingRung::AsBuilt };
     }
 
-    std::string candidate = build( /*withRouteAttr=*/true, /*withTaskEcho=*/false, notes.echoDropped );
-    if( !fits( std::string_view( candidate ) ) && hasRouteAttr )
+    // ONE fit test per candidate. The rung-(b) shape used to be priced twice — harmless when `fits` is the
+    // fixed-payload comparison below, but --for's predicate rebuilds and re-prices a whole header through
+    // finishForLensHeader, so the second call was a duplicated fixpoint on every budgeted run.
+    CeilingLadderChoice choice{ build( /*withRouteAttr=*/true, /*withTaskEcho=*/false, notes.echoDropped ), CeilingRung::EchoDropped };
+    bool                candidateFits = fits( std::string_view( choice.header ) );
+    if( !candidateFits && hasRouteAttr )
     {
-        candidate = build( /*withRouteAttr=*/false, /*withTaskEcho=*/false, notes.echoAndRouteDropped );
+        choice        = { build( /*withRouteAttr=*/false, /*withTaskEcho=*/false, notes.echoAndRouteDropped ), CeilingRung::EchoAndRouteDropped };
+        candidateFits = fits( std::string_view( choice.header ) );
     }
-    if( !fits( std::string_view( candidate ) ) )
+    if( !candidateFits )
     {
-        candidate = build( /*withRouteAttr=*/true, /*withTaskEcho=*/true, notes.overCeiling );
+        choice = { build( /*withRouteAttr=*/true, /*withTaskEcho=*/true, notes.overCeiling ), CeilingRung::OverCeiling };
     }
-    return candidate;
+    return choice;
 }
 
+// The fixed-payload form — same rungs, same return. It hands back the CHOICE and not the header alone because
+// both of its callers need the rung: --pack-task labels its root from it, and reading that label back out of
+// the chosen string is the forgery above (`chosen.find( "over_ceiling:" )`, live until 0.6.1).
 template<typename BuildFn>
-inline std::string climbCeilingLadder( BuildFn&& build, std::string_view builtHeader, std::size_t payloadBytes,
-                                       std::size_t byteCeiling, bool hasRouteAttr, const CeilingLadderNotes& notes )
+inline CeilingLadderChoice climbCeilingLadder( BuildFn&& build, std::string_view builtHeader, std::size_t payloadBytes,
+                                               std::size_t byteCeiling, bool hasRouteAttr, const CeilingLadderNotes& notes )
 {
     return climbCeilingLadderBy( build, builtHeader,
                                  [ & ]( std::string_view header ) { return header.size() + payloadBytes <= byteCeiling; },
@@ -1951,6 +1991,19 @@ inline std::string buildIgnoredAttr( const CrawlSkips& skips )
     return attr;
 }
 
+// §SEC1 — how many files the crawl REFUSED because a symlink took them out of the root (ingest.h carries the
+// rule). On the DEFAULT map, not only on --skipped, because the default map is the surface an agent actually
+// reads and a corpus that quietly shrank is precisely what the honesty contract forbids: files= would
+// otherwise present the survivors as the tree. Same absent-when-zero rule as skipped_oversize= / ignored_files=
+// — a repository with no escaping symlink (every repository, until one is hostile) keeps a byte-identical map,
+// which is what test/golden.xml and every argvdiff vector ride on. The DEFINITION lives in the --skipped
+// legend and --help, not here, for the reason buildUnindexedAttr's note measured: the map's fixed floor has
+// seven bytes of headroom at the smallest --max-tokens budgets, and no clause of any wording fits.
+inline std::string buildEscapedRootAttr( const CrawlSkips& skips )
+{
+    return skips.escapedFiles == 0 ? std::string() : " escaped_root=" + std::to_string( skips.escapedFiles );
+}
+
 // The per-symbol honesty counters (graph.h ambOut / unresolvedOut / locPinOut) reach both map dialects as
 // NULLABLE vectors — nullptr ⇒ never measured (a pure sizing pass). These two are the only ways the emitters
 // read them, so "an absent counter reads as zero" is stated once instead of in six hand-rolled chains.
@@ -2252,6 +2305,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // §L1: the LANGUAGES this build could not read at all — buildUnindexedAttr carries the whole rule.
     const std::string unindexedAttr = buildUnindexedAttr( ing.crawlSkips );
     const std::string ignoredAttr   = buildIgnoredAttr( ing.crawlSkips );   // §N6-C, empty unless the ignore rules cut something
+    const std::string escapedAttr   = buildEscapedRootAttr( ing.crawlSkips ); // §SEC1, empty unless a symlink left the root
     // §B13.4: --max-tokens=N asked for a TOKEN count and got a BYTE ceiling. Both numbers, on the map that
     // was shaped by them, so the ~10% the headroom leaves unused is a disclosed fact rather than a silent
     // one. Emitted ONLY under --max-tokens (nullptr for every other caller ⇒ byte-identical default map).
@@ -2318,7 +2372,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             stats += " macro_blanked_files=";  stats += std::to_string( macroBlankedFiles );
         }
         stats += precAttr;  stats += rootsAttr;  stats += changedAttr;  stats += skippedAttr;  stats += unindexedAttr;
-        stats += ignoredAttr;  stats += fitAttr;
+        stats += ignoredAttr;  stats += escapedAttr;  stats += fitAttr;
         stats += " order=";      stats += orderAttr;
         stats += " -->";
         return stats;
@@ -6300,7 +6354,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
              "version 81. a per-file target row (inc t=) with no edge behind it is a directive that did not resolve to an indexed file "
              "(external package, or a specifier this tool declines to guess at, e.g. a shell path built from a variable) "
              "— it is shown, never silently dropped. a LAZY edge — a pair every one of whose directives is written inside a "
-             "closure (a Ruby method/lambda/block, a TS/JS function body) or is a Ruby autoload — is a USE, not a load-time "
+             "closure (a Ruby method/lambda/block, a TS/JS function body) or is a Ruby autoload or rescue class — is a USE, not a load-time "
              "dependency: it is in the impact verb's importer tier (lazy=1) and in this row's inc t= list, and it is NOT in "
              "afferent=/instab=/transitive=/godfiles/stabledeps/cycles/ccd/acd/nccd/shape=; health lazy_edges= counts the "
              "pairs left out and a row's lazy_edges= its own — both absent when 0. "
@@ -6877,6 +6931,15 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     if( !h.ing.skippedOversize.empty() )
     {
         rw::formatTo( hdr, sizeof( hdr ), "\"skipped_oversize\":{},", h.ing.skippedOversize.size() );
+        w.write( hdr );
+    }
+
+    // §SEC1, JSON lane: the crawl-boundary refusal must reach --json/MCP consumers too, by the same argument
+    // skipped_oversize= makes one paragraph up — the audience most likely to be a model is the one least able
+    // to notice a corpus that shrank. Same absent-when-zero rule as the XML side.
+    if( h.ing.crawlSkips.escapedFiles > 0 )
+    {
+        rw::formatTo( hdr, sizeof( hdr ), "\"escaped_root\":{},", ( unsigned long long ) h.ing.crawlSkips.escapedFiles );
         w.write( hdr );
     }
 

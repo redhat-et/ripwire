@@ -1129,6 +1129,21 @@ void recordCrawlDrop( std::vector<SkippedFile>& rows, std::uint64_t& exactCount,
     rows.push_back( { path, ec ? 0ull : std::uint64_t( sz ), std::string( ext ) } );
 }
 
+// §SEC1 — a file the crawl REFUSED because its link left the root. Its own recorder rather than
+// recordCrawlDrop, and the difference is the point: recordCrawlDrop pays `entry.file_size()`, which FOLLOWS
+// the link and would therefore measure the very out-of-root file the refusal exists to leave unread. bytes=0
+// here is the NOT-MEASURED sentinel, not a claim of an empty file (see CrawlSkips::escaped in model.h).
+// The count is EXACT and always incremented; only the row is capped, exactly like every sibling class.
+void recordRootEscape( CrawlSkips& skips, const std::string& path, std::string_view ext )
+{
+    ++skips.escapedFiles;
+    if( skips.escaped.size() < kMaxSkipRowsPerClass )
+    {
+        skips.escaped.push_back( { path, 0ull, std::string( ext ) } );
+    }
+    DEGRADED_PATH_ALERT( "ingest: a symlink's target leaves the crawl root — file refused (see --skipped why=escaped-root)" );
+}
+
 // §L1: the crawl's two NON-SIZE drop tests, together, because they are one decision with one ordering
 // contract — is this file a crawl candidate at all, and if not, is its absence something the reader needs
 // told about? Returns true when the caller must skip the file (the drop, if reportable, is already
@@ -1386,6 +1401,7 @@ void finalizeCrawlSkips( CrawlSkips& skips, const HashMap<std::string, std::uint
     std::sort( skips.unsupported.begin(), skips.unsupported.end(), byPath );
     std::sort( skips.ignored.begin(), skips.ignored.end(), byPath );               // §N6-C, same contract
     std::sort( skips.ignoredDirRows.begin(), skips.ignoredDirRows.end(), byPath ); // §N6-C, same contract
+    std::sort( skips.escaped.begin(), skips.escaped.end(), byPath );               // §SEC1, same contract
     skips.unindexedExts.reserve( extTally.size() );
     for( const auto& [ ext, count ] : extTally )
     {
@@ -1419,6 +1435,11 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
 
     std::error_code ec;
     fs::path root = fs::path( rootDir );
+
+    // §SEC1 — the boundary, canonicalized ONCE for the whole walk (ingest.h carries the rule and the reasons).
+    // Computed before the single-file branch because that branch is its own boundary: a user who names a file
+    // directly has selected it, and realpath'ing the root makes the file trivially inside itself.
+    const std::string rootReal = canonicalCrawlRoot( rootDir == nullptr ? std::string_view{} : std::string_view( rootDir ) );
 
     // If the root is a regular file, index just that one file instead of refusing.
     if( fs::is_regular_file( root, ec ) && !ec )
@@ -1548,6 +1569,24 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
             const std::string name = p.filename().string();
             if( isDenylistedName( name ) )
             {
+                continue;
+            }
+
+            // §SEC1 — THE CRAWL BOUNDARY, and it is tested BEFORE the extension is classified. Order is the
+            // contract here exactly as it is for the two drops below, but for a different reason: the
+            // unsupported-ext class is READ AND SERVED by grep's aux scan (search.h grepCollectAux), so a
+            // boundary test placed after the classification leaves a `.txt` link to an out-of-root file
+            // serving its bytes through --grep with every other arm of the fix green. Measured; it is arm 5
+            // of test/crawlescapecheck.sh. After isDenylistedName for the mirror reason the other tests sit
+            // where they do: this class then holds only files that would OTHERWISE HAVE BEEN READ.
+            //
+            // `is_symlink()` reads the cached readdir type, so the cost of this line on a symlink-free tree
+            // is a branch; only a symlink pays the realpath inside crawlPathStaysInRoot.
+            const bool isLink = it->is_symlink( ec );
+            ec.clear();
+            if( isLink && !crawlPathStaysInRoot( fullPath(), rootReal ) )
+            {
+                recordRootEscape( skips, fullPath(), lowerExtensionOf( name ) );
                 continue;
             }
 

@@ -1172,14 +1172,14 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
             return attrs;
         };
         const std::size_t rootAttrsBound = rootAttrsFor( whole, /*widestSpelling=*/true ).size();
-        const std::string chosen = climbCeilingLadder( [ & ]( bool, bool withSrcEcho, std::string_view extra )
-                                                       { return buildTraceHeader( withSrcEcho, extra ); },
-                                                       headerStr, pricedBytesOf( whole.size() ) - headerStr.size() + rootAttrsBound,
-                                                       ceilingAllowanceFromBudgetBytes( bundleBudget ),
-                                                       /*hasRouteAttr=*/false, kNotes );
-        if( chosen != headerStr )
+        const CeilingLadderChoice chosen = climbCeilingLadder( [ & ]( bool, bool withSrcEcho, std::string_view extra )
+                                                               { return buildTraceHeader( withSrcEcho, extra ); },
+                                                               headerStr, pricedBytesOf( whole.size() ) - headerStr.size() + rootAttrsBound,
+                                                               ceilingAllowanceFromBudgetBytes( bundleBudget ),
+                                                               /*hasRouteAttr=*/false, kNotes );
+        if( chosen.header != headerStr )
         {
-            whole.replace( 0, headerStr.size(), chosen );
+            whole.replace( 0, headerStr.size(), chosen.header );
         }
         // F5: no marker sniff any more — the decision is the property above, read off the number the root
         // will print. (The ladder's last rung implies it whenever --token-budget set the bundle budget:

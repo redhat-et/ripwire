@@ -605,7 +605,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // --baseline-update: merge current violations into an existing (or new) sidecar; exit 0.
         if( cfg.baselineUpdate )
         {
-            std::unordered_set<std::uint64_t> hashes = archReadBaseline( sidecarPath );
+            std::unordered_set<std::uint64_t> hashes = archReadBaseline( sidecarPath ).hashes;
             for( const Viol& v : viols )
             {
                 hashes.insert( v.hash );
@@ -629,14 +629,12 @@ std::optional<int> runArchViews( const MainDispatch& d )
             return 0;
         }
 
-        // Normal run: load baseline (if present) and split violations into baselined vs new.
-        const std::unordered_set<std::uint64_t> baseline    = archReadBaseline( sidecarPath );
-        const bool                              hasBaseline  = !baseline.empty() || [ &sidecarPath ]()
-        {
-            // detect sidecar presence even if it contains only comments (0 hashes)
-            std::ifstream probe( sidecarPath );
-            return probe.good();
-        }();
+        // Normal run: load baseline (if present) and split violations into baselined vs new. Presence is the READ's
+        // own answer (a comment-only sidecar is present with 0 hashes). It used to be a second, bare open of the
+        // same path, which followed a link and read nothing — see ArchBaselineRead.
+        const ArchBaselineRead                   baselineRead = archReadBaseline( sidecarPath );
+        const std::unordered_set<std::uint64_t>& baseline     = baselineRead.hashes;
+        const bool                               hasBaseline  = baselineRead.present;
 
         std::vector<const Viol*> newViols, basedViols;
         for( const Viol& v : viols )
@@ -1725,6 +1723,25 @@ constexpr const char* kSkippedLegend =
                  " list hit its 500-row ceiling, so the rows are a SAMPLE of the count beside them; every count stays exact. A zero means"
                  " none found. -->";
 
+// §SEC1 — the crawl-boundary clause, written ONLY into a document that carries escaped-root rows, on the same
+// absent-means-nothing-happened rule as the nest-refused clause below, so every other --skipped document stays
+// byte-identical. This is the class's DEFINITION: the map header carries escaped_root= with no in-band clause
+// of its own (buildUnindexedAttr's note records the seven-byte floor headroom that forbids one there).
+void writeEscapedRootLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
+{
+    if( cs.escapedFiles == 0 )
+    {
+        return;
+    }
+    w.write( "<!-- escaped_root= counts files the crawl REFUSED TO READ because a symlink inside the root resolved to a target OUTSIDE it."
+             " Each is one f why=\"escaped-root\" row naming the IN-ROOT LINK — never its target, since a refusal that printed the path it"
+             " declined to open would hand back part of what it withheld — with bytes=\"0\" as NOT MEASURED for the same reason (sizing the"
+             " file means following the link). Tested FIRST, before the extension is classified, because the unsupported-ext population is"
+             " read and served by the grep verb's unindexed scan. A symlink whose target stays inside the root is ordinary and is indexed"
+             " normally; this counts only the ones that left. These files are in NO other count here and were never opened. Hard links"
+             " cannot be detected this way and are not covered. -->" );
+}
+
 // The nest-refused clause of the legend, written ONLY into a document that carries nest-refused rows — the same
 // absent-means-nothing-happened rule nest_refused= itself follows — so every other --skipped document stays byte-identical.
 void writeNestRefusedLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
@@ -2063,17 +2080,23 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
     const std::size_t effectiveMax = maxFileBytes == 0 ? kDefaultMaxFileBytes : maxFileBytes;
     const bool        rowsCapped   = cs.excluded.size() < cs.excludedFiles || cs.unsupported.size() < cs.unsupportedFiles
                                   || cs.ignored.size() < cs.ignoredFiles || cs.ignoredDirRows.size() < cs.ignoredDirs   // §N6-C
-                                  || cs.nestRefused.size() < cs.nestRefusedFiles;
+                                  || cs.nestRefused.size() < cs.nestRefusedFiles
+                                  || cs.escaped.size() < cs.escapedFiles;                                               // §SEC1
     char nestAttr[ 48 ] = "";   // absent when zero, like every attribute that only a rare corpus can make non-zero
     if( cs.nestRefusedFiles > 0 )
     {
         rw::formatTo( nestAttr, sizeof( nestAttr ), " nest_refused=\"{}\"", ( unsigned long long ) cs.nestRefusedFiles );
     }
+    char escAttr[ 48 ] = "";    // §SEC1 — same absent-when-zero rule: only a tree carrying an escaping symlink pays a byte
+    if( cs.escapedFiles > 0 )
+    {
+        rw::formatTo( escAttr, sizeof( escAttr ), " escaped_root=\"{}\"", ( unsigned long long ) cs.escapedFiles );
+    }
     rw::formatTo( hdr, sizeof( hdr ),
                    "<skipped indexed=\"{}\" oversize=\"{}\" excluded=\"{}\" unsupported_ext=\"{}\" excluded_dirs=\"{}\""
                    " pruned_dirs=\"{}\" ignored=\"{}\" ignored_dirs=\"{}\" ignore_mode=\"{}\""
                    " degraded_parse=\"{}\" minified_suspect=\"{}\"{} unmeasured=\"{}\" max_file_size=\"{}\" json_ceiling=\"{}\""
-                   " yaml_ceiling=\"{}\"{}{}",
+                   " yaml_ceiling=\"{}\"{}{}{}",
                    ing.files.size(), ing.skippedOversize.size(),
                    ( unsigned long long ) cs.excludedFiles, ( unsigned long long ) cs.unsupportedFiles,
                    ( unsigned long long ) cs.excludedDirs, ( unsigned long long ) cs.prunedDirs,
@@ -2082,7 +2105,7 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
                    skippedHealthRootAttrs( health ),   // extent_suspect_files= then macro_blanked_files=, each absent at 0
                    health.unmeasured,
                    effectiveMax, kMaxJsonConfigBytes, kMaxYamlConfigBytes,
-                   std::string_view( nestAttr ), rowsCapped ? " rows_capped=\"1\"" : "" );
+                   std::string_view( nestAttr ), std::string_view( escAttr ), rowsCapped ? " rows_capped=\"1\"" : "" );
     w.write( hdr );
 }
 
@@ -2132,6 +2155,7 @@ std::optional<int> runSkipped( const MainDispatch& d )
         w.write( kSkippedLegend );
         writeSkippedHealthLegends( w, health );
         const CrawlSkips& cs = ing.crawlSkips;
+        writeEscapedRootLegend( w, cs );                            // §SEC1 — only into a document that has escaped-root rows
         writeNestRefusedLegend( w, cs );                            // only into a document that has nest-refused rows
         writeSkippedHeader( w, ing, health, cfg.maxFileBytes );    // the <skipped …> counters, up to root=
         // R-E: root= is unbounded (a deep absolute path), so it is NOT folded into the fixed `hdr` buffer
@@ -2143,6 +2167,7 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeOversizeRows( w, esc, ing.skippedOversize, skRootPrefix );
         writeDropRows( w, esc, cs.excluded,    "excluded", skRootPrefix );
         writeDropRows( w, esc, cs.unsupported, "unsupported-ext", skRootPrefix );
+        writeDropRows( w, esc, cs.escaped,        "escaped-root", skRootPrefix );  // §SEC1: links whose target left the root
         writeDropRows( w, esc, cs.ignored,        "ignored",     skRootPrefix );   // §N6-C: the files git's rules covered
         writeDropRows( w, esc, cs.ignoredDirRows, "ignored-dir", skRootPrefix );   // §N6-C: the subtrees they pruned
         writeDropRows( w, esc, cs.nestRefused,    "nest-refused", skRootPrefix );  // indexed, then refused by the Kotlin nesting guard

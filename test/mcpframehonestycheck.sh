@@ -528,62 +528,111 @@ echo "=== (I) the HTTP transport returns BYTE-IDENTICAL bodies for the same byte
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 # The framing gate lives in dispatchMcpLine, which both transports route through — so this arm asserts EQUALITY
 # with the stdio answers above rather than re-listing the expectations (a second list is a second thing to drift).
-# WAIT ON THE CONDITION, not on a guess: poll until the listener ACCEPTS a TCP connection on $PORT (20 ms
-# interval, 30 s ceiling), abandoning the wait the moment the child dies. Exit 1 covers both give-up reasons,
-# which the caller then tells apart — a dead child and a live-but-unreachable one are different faults and
-# get different sentences. Either way the arm FAILS loudly; it never probes a server that is not there.
-wait_listening(){ python3 - "$1" "$2" <<'PY'
-import os, socket, sys, time
-port, pid = int( sys.argv[1] ), int( sys.argv[2] )
-deadline = time.time() + 30.0
-while time.time() < deadline:
-    try:               os.kill( pid, 0 )              # the child is gone — stop waiting on a dead port
-    except OSError:    sys.exit( 1 )
-    try:
-        socket.create_connection( ( "127.0.0.1", port ), 0.25 ).close()
-        sys.exit( 0 )
-    except OSError:    time.sleep( 0.02 )
-sys.exit( 1 )
+# ONE HTTP CLIENT, shared with (K2) below and with mcpcontractcheck (E) and mcptoolprunecheck: test/lib/gatehttp.sh
+# carries it and its reasons. READY MEANS ANSWERED: a port that accepts may still be warming its index, and polling
+# for an accept handed that warm-up to the FIRST frame's 5 s recv timeout, which is why only the first frame failed.
+# A request that gets NO ANSWER is its own FAIL with the sentence that names it, never a body to compare: an uncaught
+# timeout used to leave an empty string that was compared with the stdio body and reported as "transports DIFFER …
+# http=", which is how one slow CI runner read on 2026-09-12 (release macos-14, shard 2/4, first frame only).
+. "$ROOT/test/lib/gatehttp.sh"
+GATEHTTP="$( gatehttp_install "$TMP" )" || no "(I) could not write the shared HTTP client into $TMP"
+
+# (I0) CONTROL, so the no-answer path is observed live rather than asserted in prose: a socket that listen()s and
+# never accept()s — what a warming or starved listener looks like from outside — goes through the SAME `post`
+# command the loop below runs (a 0.5 s timeout keeps it cheap) and must come back as exit 3 + a named timeout.
+silent_listener_post(){ python3 - "$GATEHTTP" <<'PY'
+import socket, subprocess, sys
+silent = socket.socket(); silent.bind( ( "127.0.0.1", 0 ) ); silent.listen( 1 )
+r = subprocess.run( [ sys.executable, sys.argv[1], "post", str( silent.getsockname()[1] ), "{}", "0.5" ], stdout = subprocess.PIPE )
+sys.stdout.write( "%d|%s" % ( r.returncode, r.stdout.decode( "utf-8", "replace" ) ) )
 PY
 }
+CTRL="$( silent_listener_post )"
+case "$CTRL" in
+    "3|HTTP request timed out after 0.5 s"*) ok "(I0) control: a listener that accepts and never answers is a NAMED no-answer, not an empty body";;
+    *) no "(I0) control: a silent listener did not come back as a named no-answer (exit|stdout): $CTRL";;
+esac
+
+# (I0) CONTROL, the listener that DOES send: a head declaring a Content-Length it never delivers, then one body byte
+# every 0.5 s. A timeout set on each recv never fires on that, because every byte restarts it, so the request lived as
+# long as the trickle did (review of PR #188). The 2 s deadline is the whole request's: the stand-in times its
+# connection from accept to the client's hang-up, so the bound is read off the wire rather than off the client's own
+# sentence, and a 10 s kill turns a client that no longer keeps its deadline into this row's FAIL instead of a hang.
+trickle_listener_post(){ python3 - "$GATEHTTP" <<'PY'
+import select, socket, subprocess, sys, threading, time
+TIMEOUT_SEC, MARGIN_SEC, KILL_SEC = 2.0, 1.0, 10.0
+stand = socket.socket(); stand.bind( ( "127.0.0.1", 0 ) ); stand.listen( 1 ); stand.settimeout( KILL_SEC )
+lived = []                                      # accept -> the client's hang-up, as the stand-in saw it
+def trickle():
+    try:
+        conn, _ = stand.accept()
+    except OSError:
+        return
+    accepted = time.monotonic()
+    try:
+        conn.sendall( b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000000\r\n\r\n{" )
+        while time.monotonic() - accepted < KILL_SEC + 5:
+            if select.select( [ conn ], [], [], 0.5 )[ 0 ]:
+                if not conn.recv( 65536 ):      # EOF is the hang-up; the request's own bytes are drained unread
+                    break
+            else:
+                conn.sendall( b" " )
+    except OSError:                             # a reset or a broken pipe is the hang-up too
+        pass
+    lived.append( time.monotonic() - accepted )
+    conn.close()
+server = threading.Thread( target = trickle ); server.start()
+try:
+    r = subprocess.run( [ sys.executable, sys.argv[1], "post", str( stand.getsockname()[1] ), "{}", "%g" % TIMEOUT_SEC ],
+                        stdout = subprocess.PIPE, timeout = KILL_SEC )
+    rc, said = r.returncode, r.stdout.decode( "utf-8", "replace" )
+except subprocess.TimeoutExpired:
+    rc, said = None, ""
+server.join(); stand.close()
+if rc is None:
+    print( "FAIL|the client was still waiting when it was killed %g s in: the trickle kept a %g s request alive"
+           % ( KILL_SEC, TIMEOUT_SEC ) )
+elif rc != 3 or not said.startswith( "HTTP request timed out after %g s" % TIMEOUT_SEC ):
+    print( "FAIL|not a named timeout (exit %d): %s" % ( rc, said[ :200 ] ) )
+elif not lived or lived[ 0 ] > TIMEOUT_SEC + MARGIN_SEC:
+    print( "FAIL|a named timeout, but the connection lived %s against a %g s deadline + %g s margin: %s"
+           % ( "%.2f s" % lived[ 0 ] if lived else "an unmeasured time", TIMEOUT_SEC, MARGIN_SEC, said ) )
+else:
+    print( "PASS|the connection lived %.2f s against a %g s deadline (+ %g s margin): %s"
+           % ( lived[ 0 ], TIMEOUT_SEC, MARGIN_SEC, said ) )
+PY
+}
+TRICKLE="$( trickle_listener_post )"
+case "$TRICKLE" in
+    "PASS|"*) ok "(I0) control: a listener that trickles a body it never finishes is a NAMED no-answer at the request's deadline — ${TRICKLE#PASS|}";;
+    *) no "(I0) control: a trickling listener outlived the request's deadline, or was not a named no-answer — ${TRICKLE#FAIL|}";;
+esac
+
 PORT=$(( 21000 + ( $$ % 9000 ) ))
 "$BIN" "$FIX" --listen=127.0.0.1:"$PORT" >"$TMP/http.log" 2>&1 &
 HTTP_PID=$!
-wait_listening "$PORT" "$HTTP_PID"; LISTENING=$?
+WHY="$( python3 "$GATEHTTP" wait "$PORT" "$HTTP_PID" )"; SERVING=$?
 if ! kill -0 "$HTTP_PID" 2>/dev/null; then
     no "(I) the HTTP listener did not start: $( head -c 200 "$TMP/http.log" )"
-elif [ "$LISTENING" != 0 ]; then
-    no "(I) the HTTP listener never ACCEPTED on 127.0.0.1:$PORT within 30 s: $( head -c 200 "$TMP/http.log" )"
+elif [ "$SERVING" != 0 ]; then
+    no "(I) $WHY: $( head -c 200 "$TMP/http.log" )"
     kill "$HTTP_PID" 2>/dev/null; wait "$HTTP_PID" 2>/dev/null
 else
-    http_body(){ python3 - "$PORT" "$1" <<'PY'
-import socket, sys
-port, body = int( sys.argv[1] ), sys.argv[2].encode()
-req = ( b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
-        b"Accept: application/json, text/event-stream\r\nContent-Length: " + str( len( body ) ).encode()
-        + b"\r\n\r\n" + body )
-s = socket.create_connection( ( "127.0.0.1", port ), 5 ); s.sendall( req )
-chunks = b""
-while True:
-    c = s.recv( 65536 )
-    if not c: break
-    chunks += c
-    head, sep, tail = chunks.partition( b"\r\n\r\n" )
-    if sep and tail.endswith( b"}" ): break
-s.close()
-sys.stdout.write( chunks.partition( b"\r\n\r\n" )[2].decode( "utf-8", "replace" ) )
-PY
-    }
     for frame in '{"jsonrpc":"2.0","id":1,"method":"tools/list"' \
                  '[{"jsonrpc":"2.0","id":1,"method":"tools/list"}]' \
                  '{"jsonrpc":"2.0","id":1,"method":"tools/list"}{"jsonrpc":"2.0","id":2,"method":"initialize"}' \
                  '{"jsonrpc":"2.0","id":1,"method":5}' \
                  '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":5}'; do
+        label="$( printf '%s' "$frame" | cut -c1-46 )…"
         S="$( raw_one "$frame" )"
-        H="$( http_body "$frame" )"
-        [ "$S" = "$H" ] \
-            && ok "(I) stdio == HTTP for $( printf '%s' "$frame" | cut -c1-46 )…" \
-            || no "(I) transports DIFFER for $( printf '%s' "$frame" | cut -c1-46 )…  stdio=$( printf '%s' "$S" | cut -c1-90 )  http=$( printf '%s' "$H" | cut -c1-90 )"
+        H="$( python3 "$GATEHTTP" post "$PORT" "$frame" 2>"$TMP/http_client.err" )"; HRC=$?
+        if [ "$HRC" != 0 ]; then
+            no "(I) no HTTP answer for $label  $H — not a transport difference$( [ -s "$TMP/http_client.err" ] && printf '  client stderr: %s' "$( tail -c 200 "$TMP/http_client.err" | tr '\n' ' ' )" )"
+        elif [ "$S" = "$H" ]; then
+            ok "(I) stdio == HTTP for $label"
+        else
+            no "(I) transports DIFFER for $label  stdio=$( printf '%s' "$S" | cut -c1-90 )  http=$( printf '%s' "$H" | cut -c1-90 )"
+        fi
     done
     kill "$HTTP_PID" 2>/dev/null
     wait "$HTTP_PID" 2>/dev/null
@@ -779,10 +828,12 @@ case $? in
     *) no "(K0) src/infra/blanktext.h kBlankRanges no longer matches test/derive_blankcodepoints.py: $( tail -4 "$TMP/derive.log" | tr '\n' ' ' )";;
 esac
 
-python3 - "$BIN" "$ROOT" <<'PY'
-import hashlib, json, os, re, shutil, socket, subprocess, sys, tempfile, time
+python3 - "$BIN" "$ROOT" "$GATEHTTP" <<'PY'
+import hashlib, json, os, re, shutil, subprocess, sys, tempfile
 
-BIN, ROOT = sys.argv[1], sys.argv[2]
+BIN, ROOT, GATEHTTP = sys.argv[1], sys.argv[2], sys.argv[3]
+sys.path.insert( 0, os.path.dirname( GATEHTTP ) )
+import gatehttp                     # arm (I)'s one HTTP client: a request with no answer raises NoAnswer, never compares
 SRC = ( "// alpha adds one.\nint alpha( int x ) { return x + 1; }\n\n"
         "// beta doubles.\nint beta( int x ) { return x * 2; }\n" )
 SURROGATES  = range( 0xD800, 0xE000 )
@@ -992,68 +1043,57 @@ target = os.path.join( ws, "a.h" )
 http  = subprocess.Popen( [ BIN, ws, "--listen=127.0.0.1:%d" % port, "--allow-remote-edits",
                             "--mcp-token=" + token ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT )
 
-# WAIT ON THE CONDITION: poll until the listener ACCEPTS on `port` (20 ms interval, 30 s ceiling), returning
-# early if the child dies. A timeout FAILS the arm here rather than letting a 96-probe sweep fall through
-# against a socket nobody is listening on. `http.stdout` is only read once the child has EXITED — reading a
-# live child's pipe would block forever, which is the one thing a timeout path must not do.
-def waitListening( port, proc, timeoutSec = 30.0 ):
-    deadline = time.time() + timeoutSec
-    while time.time() < deadline:
-        if proc.poll() is not None: return False
-        try:
-            socket.create_connection( ( "127.0.0.1", port ), 0.25 ).close()
-            return True
-        except OSError:
-            time.sleep( 0.02 )
-    return False
-
-listening = waitListening( port, http )
+# WAIT ON THE CONDITION — the one arm (I)'s client comment names: gatehttp.waitServing polls until the listener
+# ANSWERS a request (30 s ceiling), because a port that accepts may still be warming its index. A give-up FAILS the
+# arm rather than letting the remote sweep fall through against a listener that is not serving. `http.stdout` is
+# only read once the child has EXITED — reading a live child's pipe would block forever, which is the one thing a
+# timeout path must not do.
+whyNotServing = gatehttp.waitServing( port, lambda: http.poll() is None )
 if http.poll() is not None:
     check( False, "(K2) the --allow-remote-edits listener did not start: %s"
                   % http.stdout.read()[ :180 ].decode( "utf-8", "replace" ) )
-elif not listening:
-    check( False, "(K2) the --allow-remote-edits listener never ACCEPTED on 127.0.0.1:%d within 30 s" % port )
+elif whyNotServing:
+    check( False, "(K2) " + whyNotServing )
     http.terminate(); http.wait( 15 )
 else:
-    def post( line ):
-        body = line.encode()
-        req  = ( b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
-                 b"Authorization: Bearer " + token.encode() + b"\r\n"
-                 b"Accept: application/json, text/event-stream\r\nContent-Length: "
-                 + str( len( body ) ).encode() + b"\r\n\r\n" + body )
-        s = socket.create_connection( ( "127.0.0.1", port ), 5 ); s.sendall( req )
-        chunks = b""
-        while True:
-            c = s.recv( 65536 )
-            if not c: break
-            chunks += c
-            head, sep, tail = chunks.partition( b"\r\n\r\n" )
-            if sep and tail.strip().endswith( b"}" ): break
-        s.close()
-        return chunks.partition( b"\r\n\r\n" )[ 2 ].decode( "utf-8", "replace" ).strip()
-
-    stdio  = StdioServer( ws )
-    before = identity( target )
-    differ, remoteApplied = [], []
-    for verb, field in WRITE_VERBS:
-        for cp in inSet[ ::3 ]:
-            line = json.dumps( { "jsonrpc": "2.0", "id": 7, "method": "tools/call",
-                                 "params": { "name": verb,
-                                             "arguments": { "symbol": "alpha", "file": "a.h", field: chr( cp ) } } } )
-            s, h = stdio.sendRaw( line ), post( line )
-            if s != h:                          differ.append( ( verb, cp, s[ :90 ], h[ :90 ] ) )
-            if '"error"' not in h:              remoteApplied.append( ( verb, cp ) )
-    stdio.close()
+    auth   = b"Authorization: Bearer " + token.encode() + b"\r\n"
+    stdio  = None
+    differ, remoteApplied, noAnswer = [], [], []
+    try:                                            # the SETUP is inside too: StdioServer raises if its process will not
+        stdio  = StdioServer( ws )                  # start or initialize, identity() from os.stat or open, and either one
+        before = identity( target )                 # before this `try` skipped the terminate below and orphaned the listener
+        for verb, field in WRITE_VERBS:
+            for cp in inSet[ ::3 ]:
+                line = json.dumps( { "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                                     "params": { "name": verb,
+                                                 "arguments": { "symbol": "alpha", "file": "a.h", field: chr( cp ) } } } )
+                s = stdio.sendRaw( line )
+                try:
+                    h = gatehttp.post( port, line.encode(), auth ).strip()
+                except gatehttp.NoAnswer as e:       # no body is not a DIFFERENT body: name it, never compare it
+                    noAnswer.append( ( verb, cp, str( e ) ) )
+                    continue
+                if s != h:                          differ.append( ( verb, cp, s[ :90 ], h[ :90 ] ) )
+                if '"error"' not in h:              remoteApplied.append( ( verb, cp ) )
+    finally:                                        # a raise anywhere above, setup included, must not orphan the listener:
+        try:                                        # stdio is closed only if it was created, and the listener is
+            if stdio is not None:                   # terminated and reaped even when that close raises
+                stdio.close()
+        finally:
+            http.terminate(); http.wait( 15 )
+    for verb, cp, why in noAnswer[ :5 ]:
+        print( "  FAIL  (K2) %-20s U+%04X no HTTP answer: %s — not a transport difference" % ( verb, cp, why ) )
     for verb, cp, s, h in differ[ :5 ]:
         print( "  FAIL  (K2) %-20s U+%04X transports DIFFER  stdio=%s  http=%s" % ( verb, cp, s, h ) )
     for verb, cp in remoteApplied[ :5 ]:
         print( "  FAIL  (K2) %-20s U+%04X APPLIED over the remote transport" % ( verb, cp ) )
     probes = len( inSet[ ::3 ] ) * len( WRITE_VERBS )
-    check( not differ,        "(K2) %d probes byte-identical stdio vs HTTP (%d differed)" % ( probes, len( differ ) ) )
+    check( not noAnswer,      "(K2) all %d remote probes got an HTTP answer (%d did not)" % ( probes, len( noAnswer ) ) )
+    check( not differ,        "(K2) %d answered probes byte-identical stdio vs HTTP (%d differed)"
+                              % ( probes - len( noAnswer ), len( differ ) ) )
     check( not remoteApplied, "(K2) every remote probe REFUSED (%d applied)" % len( remoteApplied ) )
     check( identity( target ) == before,
            "(K2) the workspace file is byte-identical after %d remote blank-payload writes" % probes )
-    http.terminate(); http.wait( 15 )
 shutil.rmtree( ws, ignore_errors=True )
 
 print( "  INFO  (K) %d ranges x 4 boundaries, 3 write verbs, 2 transports" % len( ranges ) )

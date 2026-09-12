@@ -58,9 +58,13 @@ SRV_PID=""
 cleanup(){ [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null; rm -rf "$TMP"; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
-command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
-command -v curl    >/dev/null 2>&1 || { echo "curl required (present on macOS/Linux)"; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions and the HTTP client"; exit 2; }
 command -v git     >/dev/null 2>&1 || { echo "git required (arm G pins a GIT workspace)"; exit 2; }
+
+# The HTTP client the --listen gates share (test/lib/gatehttp.sh), so a listener that never answers, or a request that
+# gets no answer, is reported as exactly that.
+. "$ROOT/test/lib/gatehttp.sh"
+GATEHTTP="$( gatehttp_install "$TMP" )" || { echo "could not write the shared HTTP client into $TMP"; exit 2; }
 
 echo "mcptoolprunecheck: BIN=$BIN"
 
@@ -114,23 +118,32 @@ git -C "$EMPTYGIT" rev-parse --show-toplevel >/dev/null 2>&1 \
     || { echo "the empty git workspace is not even inside a repo (git init failed?) — arm H is void"; exit 2; }
 
 PORT=$(( 21000 + ( $$ % 4000 ) ))
-ACCEPT='application/json, text/event-stream'
 
+# Ready means ANSWERED: `wait` polls until the listener answers a request (30 s ceiling) and stops the moment the
+# child dies; either give-up leaves its sentence in $TMP/srv.why for the caller's refusal line.
 start_pinned() { # $1 = workspace root
     "$BIN" "$1" --listen=127.0.0.1:"$PORT" >"$TMP/srv.out" 2>"$TMP/srv.err" &
     SRV_PID=$!
-    for _ in $( seq 1 60 ); do
-        curl -s -o /dev/null -m 1 -H "Accept: $ACCEPT" -H 'Content-Type: application/json' \
-             -X POST "http://127.0.0.1:$PORT/mcp" -d '{"jsonrpc":"2.0","id":0,"method":"initialize"}' 2>/dev/null && return 0
-        kill -0 "$SRV_PID" 2>/dev/null || return 1
-        sleep 0.1
-    done
-    return 1
+    python3 "$GATEHTTP" wait "$PORT" "$SRV_PID" >"$TMP/srv.why"
 }
 stop_pinned() { [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null; SRV_PID=""; }
-http_call() {
-    curl -s -H "Accept: $ACCEPT" -H 'Content-Type: application/json' \
-         -X POST "http://127.0.0.1:$PORT/mcp" -d "$1"
+# A request that gets NO ANSWER is its own FAIL, never a body to parse. The curl call this replaced had no timeout and
+# handed an empty reply to the parsers below, which read the silence as a verdict on the catalog ("advertises 0 verbs",
+# "premise BROKEN", "pruned on a REAL git repo"), beside a PASS for "(A) omitted" that nothing had answered. Every
+# later arm would only re-read that silence, so the gate stops at the first one. 30 s is a hang tripwire, not a
+# performance bar: the slowest request here measured 0.14 s (quality_baseline, rebuilt=1; 2026-09-12, M-series).
+REQUEST_TIMEOUT_SEC=30
+http_call() { # $1 = the JSON-RPC line, $2 = the file the response body goes to
+    local body rc
+    body="$( python3 "$GATEHTTP" post "$PORT" "$1" "$REQUEST_TIMEOUT_SEC" 2>"$TMP/client.err" )"; rc=$?
+    if [ "$rc" = 0 ]; then
+        printf '%s' "$body" >"$2"
+        return 0
+    fi
+    no "no HTTP answer for $( printf '%s' "$1" | cut -c1-72 )…: $body$( [ -s "$TMP/client.err" ] && printf '  client stderr: %s' "$( tail -c 200 "$TMP/client.err" | tr '\n' ' ' )" ) — there is no body to check, so the arms that read one cannot run"
+    stop_pinned
+    echo
+    echo "SOME CHECKS FAILED"; exit 1
 }
 stdio_call() { # $1 = workspace root (positional startup root), $2 = the JSON-RPC line
     printf '%s\n%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' "$2" \
@@ -149,9 +162,9 @@ print(" ".join(t["name"] for t in r["result"]["tools"]))
 echo
 echo "=== (A) [red] NON-GIT pinned root: the three git-only verbs are omitted from tools/list ==="
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
-start_pinned "$NOGIT" || { echo "listener on the non-git workspace failed to start: $( head -3 "$TMP/srv.err" )"; exit 1; }
-http_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' > "$TMP/nogit.init"
-http_call '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' > "$TMP/nogit.list"
+start_pinned "$NOGIT" || { echo "listener on the non-git workspace failed to start: $( cat "$TMP/srv.why" ): $( head -3 "$TMP/srv.err" )"; exit 1; }
+http_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' "$TMP/nogit.init"
+http_call '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' "$TMP/nogit.list"
 NOGIT_NAMES="$( python3 -c "$names_py" "$TMP/nogit.list" )"
 [ "$NOGIT_NAMES" = "__ERR__" ] && { no "(A) tools/list on the non-git pinned root returned an error"; NOGIT_NAMES=""; }
 
@@ -233,7 +246,7 @@ PY
 echo
 echo "=== (D) [red] an omitted verb still DISPATCHES — omission is discoverability, not removal ==="
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
-http_call '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"owners","arguments":{}}}' > "$TMP/owners.res"
+http_call '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"owners","arguments":{}}}' "$TMP/owners.res"
 python3 - "$TMP/owners.res" <<'PY' > "$TMP/own.res" 2>&1
 import sys, json
 r = json.load(open(sys.argv[1]))
@@ -260,11 +273,11 @@ done
                   || no "(E) over-pruned — these answer without git but were omitted:$missing"
 
 # and PROVE the premise, so (E) is a measurement rather than a claim: each of the four answers here.
-http_call '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"cochange","arguments":{"file":"core/engine.cpp"}}}' > "$TMP/e.cochange"
-http_call '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"situational_awareness","arguments":{"files":"core/engine.cpp"}}}' > "$TMP/e.situ"
-http_call '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"edit_check","arguments":{"symbol":"engineStepA2"}}}' > "$TMP/e.editcheck"
-http_call '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"quality_baseline","arguments":{}}}' > /dev/null
-http_call '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"quality_delta","arguments":{}}}' > "$TMP/e.qdelta"
+http_call '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"cochange","arguments":{"file":"core/engine.cpp"}}}' "$TMP/e.cochange"
+http_call '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"situational_awareness","arguments":{"files":"core/engine.cpp"}}}' "$TMP/e.situ"
+http_call '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"edit_check","arguments":{"symbol":"engineStepA2"}}}' "$TMP/e.editcheck"
+http_call '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"quality_baseline","arguments":{}}}' /dev/null
+http_call '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"quality_delta","arguments":{}}}' "$TMP/e.qdelta"
 refused=""
 for f in cochange situ editcheck qdelta; do
     python3 -c '
@@ -303,9 +316,9 @@ grep -q QUIET "$TMP/fdisc" && ok "(F) stdio discloses no omission (nothing was o
 echo
 echo "=== (G) a GIT pinned root advertises all 31 and discloses nothing ==="
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
-start_pinned "$GITWS" || { echo "listener on the git workspace failed to start: $( head -3 "$TMP/srv.err" )"; exit 1; }
-http_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' > "$TMP/git.init"
-http_call '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' > "$TMP/git.list"
+start_pinned "$GITWS" || { echo "listener on the git workspace failed to start: $( cat "$TMP/srv.why" ): $( head -3 "$TMP/srv.err" )"; exit 1; }
+http_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' "$TMP/git.init"
+http_call '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' "$TMP/git.list"
 GIT_NAMES="$( python3 -c "$names_py" "$TMP/git.list" )"
 GIT_COUNT="$( printf '%s' "$GIT_NAMES" | wc -w | tr -d ' ' )"
 [ "$GIT_COUNT" = "31" ] && ok "(G) git pinned root advertises all 31 verbs" \
@@ -334,9 +347,9 @@ echo "=== (H) [red] finding #7: an EMPTY git repo (git init, no commit) gets the
 # repository" — FALSE for this workspace, which IS a git repository, it just has no HEAD commit yet. Every
 # git-only verb's OWN per-request refusal already carries the honest qualifier ("not a git repository (or
 # no HEAD commit)"); the disclosure sentence must say the same thing, not a narrower false one.
-start_pinned "$EMPTYGIT" || { echo "listener on the empty-git workspace failed to start: $( head -3 "$TMP/srv.err" )"; exit 1; }
-http_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' > "$TMP/empty.init"
-http_call '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' > "$TMP/empty.list"
+start_pinned "$EMPTYGIT" || { echo "listener on the empty-git workspace failed to start: $( cat "$TMP/srv.why" ): $( head -3 "$TMP/srv.err" )"; exit 1; }
+http_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' "$TMP/empty.init"
+http_call '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' "$TMP/empty.list"
 stop_pinned
 
 EMPTY_NAMES="$( python3 -c "$names_py" "$TMP/empty.list" )"

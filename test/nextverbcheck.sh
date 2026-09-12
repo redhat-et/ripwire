@@ -6,7 +6,7 @@
 # --quality-delta/--test-gate/--safe-delete/--situ handed the agent nothing, so a contract-change took three
 # calls (edit-check → guess --uses → open the file). The contract (src/nextverb.h):
 #   --edit-check   contract-change → --uses=SYM;  otherwise → --test-gate=FILE
-#   --impact       → --safe-delete=SYM                  --callers → --uses=SELECTOR (the @FILE:LINE spelling mirrored)
+#   --impact       → --safe-delete=SYM                  --callers → --uses=SELECTOR (bare NAME only for narrowed declined calls)
 #   --callees      → --expand=SYM                       --quality-delta gating ROW → --expand=FILE:NAME (on the row)
 #   --test-gate    → its first run= command (a shell line, so it is checked against the rows, not run)
 #   --situ         → a `next: --test-gate` line          --from-trace → --slice=@FILE:LINE of the innermost frame

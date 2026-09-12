@@ -32,10 +32,17 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "mcpcontractcheck: BIN=$BIN"
 
-python3 - "$BIN" "$ROOT" "$TMP" <<'PY'
-import hashlib, json, os, re, shutil, socket, subprocess, sys, time
+# Arm (E)'s HTTP client is the one the --listen gates share (test/lib/gatehttp.sh): it waits until the listener
+# ANSWERS, and a request that gets no answer is a FAIL of its own rather than a body to compare.
+. "$ROOT/test/lib/gatehttp.sh"
+GATEHTTP="$( gatehttp_install "$TMP" )" || { echo "could not write the shared HTTP client into $TMP"; exit 2; }
 
-BIN, ROOT, TMP = sys.argv[1], sys.argv[2], sys.argv[3]
+python3 - "$BIN" "$ROOT" "$TMP" "$GATEHTTP" <<'PY'
+import hashlib, json, os, re, shutil, subprocess, sys
+
+BIN, ROOT, TMP, GATEHTTP = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+sys.path.insert( 0, os.path.dirname( GATEHTTP ) )
+import gatehttp                    # waitServing / post / NoAnswer: see test/lib/gatehttp.sh
 fails = 0
 def check( cond, msg ):
     global fails
@@ -266,43 +273,48 @@ check( "result" in unknownVer,
 
 # ═══ (E) stdio == HTTP, byte for byte, on the arms this gate added ═════════════════════════════════════════
 # Wave 1 established that HTTP inherits the shared dispatchMcpLine. That is asserted here, not assumed.
+#
+# READY MEANS ANSWERED, and a request with no answer is not a body. This arm used to sleep a fixed 2 s and then post
+# through its own client, whose 5 s recv timeout nothing caught: a listener still warming its index handed the rest
+# of the warm-up to the first frame, and when that ran out Python died with "TimeoutError: timed out", taking every
+# arm after this one with it and failing the gate for a transport that was fine. gatehttp.waitServing polls until the
+# listener ANSWERS (30 s ceiling); gatehttp.post raises NoAnswer, which is reported per frame and never compared.
+FRAMES = ( '{"jsonrpc":"2.0","id":7,"method":"tools/list"}',
+           '{"jsonrpc":"2.0","id":7,"method":"ping"}',
+           '{"jsonrpc":"2.0","id":true,"method":"ping"}',
+           '{"jsonrpc":"2.0","id":7,"method":"initialize","params":{"protocolVersion":5}}',
+           '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"analyze","arguments":{"kind":"x"}}}' )
 port  = 24000 + ( os.getpid() % 6000 )
 token = "mc-%d" % os.getpid()
 http  = subprocess.Popen( [ BIN, rA, "--listen=127.0.0.1:%d" % port, "--mcp-token=" + token ],
                           stdout = subprocess.PIPE, stderr = subprocess.STDOUT )
-time.sleep( 2.0 )
-if http.poll() is not None:
-    check( False, "(E) the HTTP listener did not start: %s" % http.stdout.read()[ :180 ].decode( "utf-8", "replace" ) )
-else:
-    def post( line ):
-        body = line.encode()
-        req  = ( b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
-                 b"Authorization: Bearer " + token.encode() +
-                 b"\r\nAccept: application/json, text/event-stream\r\nContent-Length: "
-                 + str( len( body ) ).encode() + b"\r\n\r\n" + body )
-        s = socket.create_connection( ( "127.0.0.1", port ), 5 ); s.sendall( req )
-        chunks = b""
-        while True:
-            c = s.recv( 65536 )
-            if not c: break
-            chunks += c
-            head, sep, tail = chunks.partition( b"\r\n\r\n" )
-            if sep and tail.strip().endswith( b"}" ): break
-        s.close()
-        return chunks.partition( b"\r\n\r\n" )[ 2 ].decode( "utf-8", "replace" ).strip()
-
-    stdio  = Stdio( rA )
-    differ = []
-    for line in ( '{"jsonrpc":"2.0","id":7,"method":"tools/list"}',
-                  '{"jsonrpc":"2.0","id":7,"method":"ping"}',
-                  '{"jsonrpc":"2.0","id":true,"method":"ping"}',
-                  '{"jsonrpc":"2.0","id":7,"method":"initialize","params":{"protocolVersion":5}}',
-                  '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"analyze","arguments":{"kind":"x"}}}' ):
-        s, h = stdio.raw( line ), post( line )
-        if s != h: differ.append( ( line[ :60 ], s[ :70 ], h[ :70 ] ) )
-    stdio.close()
-    for l, s, h in differ: print( "  FAIL  (E) %s\n           stdio=%s\n           http =%s" % ( l, s, h ) )
-    check( not differ, "(E) stdio == HTTP byte-for-byte on all 5 contract frames (asserted, not assumed)" )
+try:
+    whyNotServing = gatehttp.waitServing( port, lambda: http.poll() is None )
+    if http.poll() is not None:
+        check( False, "(E) the HTTP listener did not start: %s" % http.stdout.read()[ :180 ].decode( "utf-8", "replace" ) )
+    elif whyNotServing:
+        check( False, "(E) " + whyNotServing )
+    else:
+        auth   = b"Authorization: Bearer " + token.encode() + b"\r\n"
+        stdio  = Stdio( rA )
+        differ, noAnswer = [], []
+        try:
+            for line in FRAMES:
+                s = stdio.raw( line )
+                try:
+                    h = gatehttp.post( port, line.encode(), auth ).strip()
+                except gatehttp.NoAnswer as e:     # no body is not a DIFFERENT body: name it, never compare it
+                    noAnswer.append( ( line[ :60 ], str( e ) ) )
+                    continue
+                if s != h: differ.append( ( line[ :60 ], s[ :70 ], h[ :70 ] ) )
+        finally:
+            stdio.close()
+        for l, why in noAnswer: print( "  FAIL  (E) %s\n           no HTTP answer: %s — not a transport difference" % ( l, why ) )
+        for l, s, h in differ:  print( "  FAIL  (E) %s\n           stdio=%s\n           http =%s" % ( l, s, h ) )
+        check( not noAnswer, "(E) all %d contract frames got an HTTP answer (%d did not)" % ( len( FRAMES ), len( noAnswer ) ) )
+        check( not differ,   "(E) stdio == HTTP byte-for-byte on all %d answered contract frames (asserted, not assumed)"
+                             % ( len( FRAMES ) - len( noAnswer ) ) )
+finally:                                   # every path, an escaping exception included, stops the listener
     http.terminate()
     try:    http.wait( 10 )
     except Exception: http.kill()

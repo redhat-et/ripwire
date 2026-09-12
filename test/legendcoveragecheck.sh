@@ -61,11 +61,31 @@
 # edited DOWNWARD; the one exception on record is the F2 re-derivation above, which widened the WINDOW rather
 # than the debt, and it is annotated in the baseline header.
 #
-# "What would make this pass without the property holding?" (the round's own lens, trap #20). Two things,
+# ELEMENT-BLINDNESS — the limit this gate cannot assert away, named where a reader meets it (CONTRIBUTING §2
+# shape 7: a gate whose NAME promises more than its CODE delivers is fixed by asserting the missing property,
+# or, where that is impossible, by naming the limit). Both predicates take an attribute NAME and a legend
+# STRING. Neither knows which ELEMENT the attribute was on. So a document carrying `total=` on two elements
+# has ONE coverage verdict for both, and a clause written about one of them credits the other. That is live
+# and measured, not hypothetical: `<sigs total= shown= capped=>` is defined by the bundle=auto/compact legend
+# and `<tail total= shown= capped=>` by the tail legend, and on every --for row in this roster — before the
+# 0.6.1 rung-zero lane and independently of it — whichever of those two clauses is present closes BOTH
+# elements' trios. Consequence to hold on to: a baseline line naming one of a SHARED name can be closed by a
+# clause written for the other element, so `sigs@total` has never been separately visible here. Closing that
+# needs an element-aware predicate (the legends would have to name the element, which most do not), which is
+# a change to the contract rather than to this gate. Until then the limit is not merely written down: arm (F)
+# CENSUSES it — every key whose only definition is the rung-zero note under a name the same document carries
+# twice is printed on every run and pinned, so a future clause drop that a shared name papers over reds here
+# instead of arriving as a quieter baseline.
+#
+# "What would make this pass without the property holding?" (the round's own lens, trap #20). Three things,
 # not one — the earlier "Exactly one thing" was wrong, and the cap above was the second. (i) a roster verb
 # that stops producing output has no elements, no attributes and no gaps: arm (C) names every silent verb
 # and fails. (ii) the two predicates drifting apart so that `mentioned` stops being the weaker of the two,
 # which would make (A) fail on something (B) had just called closed: arm (D) asserts they still nest.
+# (iii) a legend that CLOSES ITS OWN GAPS by naming attributes nothing defines — the shape rung zero's
+# dropped-legend note has by construction, since it spells every name it discloses as `name=`: arm (E)
+# re-asks each of those names against the same query at a budget where no clause was dropped, and arm (F)
+# pins which of those closures land on a name the document carries on more than one element.
 #
 #   bash test/legendcoveragecheck.sh                       # build/ripwire
 #   bash test/legendcoveragecheck.sh build_base/ripwire    # or RIPWIRE_BIN=... — both seams honored
@@ -110,6 +130,20 @@ ROSTER = [
     # the exact decay class the chip-trio merge found in forbudgetmonotoncheck/fordisclosurecheck.
     ("for",                [SMALL, "--for=rank symbols by pagerank"]),
     ("for-auto",           [SMALL, "--for=escapeXml"]),
+    # …and a BUDGETED one (0.6.1, the L1 lane). Both rows above run unbudgeted, so no run in this roster
+    # ever climbed a rung of the --for ceiling ladder — and the ladder is where legend clauses get DROPPED.
+    # Rung zero drops the confidence=/margin_pct=/budget_tokens= clause and the r=/tail clause to buy the
+    # bytes back, which is the right trade (METHODOLOGY §9: inside the budget beats over it) and was
+    # entirely silent: the attributes stayed on the root with nothing defining them and nothing saying so.
+    # 1300 sits well inside the measured rung-zero band on this tree (rung zero fires from ~1100 to ~1340),
+    # so the row keeps exercising the rung under ordinary drift; if the band moves off it, the row degrades
+    # into an ordinary budgeted --for and arm (A) still holds — it just stops proving this particular thing.
+    ("for-budgeted",       [SMALL, "--for=rank symbols by pagerank", "--token-budget=1300"]),
+    # …and the same rung in the COMPACT DIALECT, which has its own legend strings for every clause the rung
+    # drops (kForCompactConfidenceClause, kForFileTailLegendCompact) and had no roster row at all. A dialect
+    # with no row is a dialect where the ratchet cannot see a gap, and this one carries `schema=` that the
+    # default dialect does not emit.
+    ("for-budgeted-compact", [SMALL, "--legend=compact", "--for=rank symbols by pagerank", "--token-budget=1300"]),
     ("pack-task",          [SMALL, "--pack-task=rank symbols by pagerank"]),
     ("exemplar",           [SMALL, "--exemplar=rank symbols"]),
     ("hotspots",           [ROOT,  "--hotspots"]),
@@ -282,6 +316,142 @@ if [ -s "$TMP/notnested" ]; then
     sed 's/^/          /' "$TMP/notnested"
 else
     ok "(D) predicates nest (every 'mentioned' gap is also a 'defined' gap) — arm (A) can never fail a line arm (B) just closed"
+fi
+
+# (E) A DROPPED-LEGEND NOTE MAY ONLY NAME ATTRIBUTES ITS OWN DIALECT REALLY DEFINED (0.6.1, the L1 lane).
+#
+# The roster above answers "is this attribute defined here?". It cannot answer the question rung zero
+# introduced, which is the opposite one: the ceiling ladder's rung zero DROPS legend clauses and splices a
+# sentence naming the attributes whose definitions just went (verbs_for.h kForLegendDroppedNote). That
+# sentence is the ONE place a budgeted reader is told where a definition went, and it is self-defeating in
+# two ways the roster is blind to:
+#
+#   (i)  it spells each name as `name=`, which is the roster's own `defined` shape — so the note closes its
+#        own gaps, and arm (A) goes green on the very run where the legend was cut. A note naming an
+#        attribute nothing ever defined would look exactly like a note that told the truth.
+#   (ii) the two dialects do not carry the same clauses. `--legend=compact` never defined budget_tokens= or
+#        max_tokens= at all, so telling a compact reader those were "dropped (ceiling)" is a false statement
+#        about a missing feature — the precise confusion the note exists to prevent.
+#
+# THE ASSERTION, which needs no knowledge of which clause holds which name: run the SAME query in the SAME
+# dialect at a budget wide enough that no rung fires, and require that every `name=` the note spelled is
+# defined there. A definition that comes back when the budget is lifted was dropped by the ceiling; one that
+# does not was never in that dialect, and the note is claiming a cut that never happened. Both guards that
+# keep this from passing emptily are asserted, not assumed: the note must be PRESENT on the tight run (else
+# the probe budget has drifted off the rung) and ABSENT on the wide one (else "wider" proves nothing).
+# (F) …and the census that keeps ELEMENT-BLINDNESS from turning into a silent closure. Rung zero's note spells
+# `total= shown= capped=` about the <tail>, and the budgeted document carries those same three names on <sigs>
+# too, whose own clause (the bundle=auto/compact legend) the enrichment's `legendOff` dropped independently. The
+# predicate cannot tell the two apart, so the note closes six keys while describing three. That is not this
+# note's doing — measured on the base binary, whichever of the two clauses survives closes BOTH elements' trios
+# on every other --for row, so the pair has never been separately visible — but it must not be invisible either.
+# So the exact set is PINNED below, printed on every run, and a key ENTERING it fails: the next time a legend
+# clause is dropped somewhere and a shared name papers over it, the census names the key. A key LEAVING is a
+# shrink candidate, not a failure (arm (B)'s discipline: the budgeted document's shape moves with the corpus).
+python3 - "$BIN" "$ROOT" "$TMP" <<'PY' > "$TMP/noteout" 2>"$TMP/noteerr"
+import subprocess, re, sys, os
+
+BIN, ROOT, TMP = sys.argv[1:4]
+SMALL = os.path.join( ROOT, "src" )
+QUERY = "--for=rank symbols by pagerank"
+TIGHT, WIDE = "--token-budget=1300", "--token-budget=8000"
+CORE = { "p", "n", "t", "id", "l", "k", "c" }
+
+# The (F) floor: keys whose ONLY definition on the budgeted document is the rung-zero note, AND whose attribute
+# name the document carries on more than one element — so the closure cannot be attributed to a clause. Both
+# elements' trios are here because `defined` sees one name: <tail>'s three are what the note is ABOUT, <sigs>'s
+# three are legendOff's and are closed by the same three words. Do not add a line here to make a red go away
+# without saying, in the commit, which clause was dropped and why it is not worth a sentence of its own.
+FLOOR = { "default": { "sigs@capped", "sigs@shown", "sigs@total", "tail@capped", "tail@shown", "tail@total" },
+          "compact": { "sigs@shown", "sigs@total", "tail@shown", "tail@total" } }
+
+LEAD = re.compile( rb'\A(?:\s*<!--.*?-->)+', re.S )
+ATTR = re.compile( rb'<([a-zA-Z][\w-]*)((?:\s+[\w:.-]+="[^"]*")*)\s*/?>' )
+NOTE = re.compile( r'\[legend clauses:[^\]]*\]' )
+NAME = re.compile( r'(?<![\w:.-])([A-Za-z_][\w]*)=' )
+
+def legendOf( doc ):
+    m    = LEAD.match( doc )
+    lead = m.group( 0 ) if m else b""
+    rest = doc[ len( lead ): ]
+    m2   = re.match( rb'\A\s*<ctx\b[^>]*>((?:\s*<!--.*?-->)+)', rest, re.S )
+    if m2: lead += m2.group( 1 )
+    return lead.decode( 'utf-8', 'replace' )
+
+def defined( a, legend ): return re.search( r'(?<![\w:.-])' + re.escape( a ) + r'\s*=', legend ) is not None
+def doc    ( args ):      return subprocess.run( [ BIN ] + args, capture_output = True ).stdout
+
+def attrsOf( d ):
+    seen, order = {}, []
+    for m in ATTR.finditer( d ):
+        tag = m.group( 1 ).decode()
+        if tag in seen: continue
+        seen[ tag ] = [ a.decode() for a in re.findall( rb'\s([\w:.-]+)="', m.group( 2 ) ) ]
+        order.append( tag )
+    return order, seen
+
+bad, checked, entered, left, census = [], 0, [], [], []
+for dialect, extra in ( ( "default", [] ), ( "compact", [ "--legend=compact" ] ) ):
+    dt          = doc( [ SMALL, QUERY, TIGHT ] + extra )
+    tight, wide = legendOf( dt ), legendOf( doc( [ SMALL, QUERY, WIDE ] + extra ) )
+    mt, mw      = NOTE.search( tight ), NOTE.search( wide )
+    if not mt:
+        bad.append( f"{dialect}: the dropped-legend note is ABSENT at {TIGHT} — the probe no longer climbs rung zero, so this arm checks nothing; re-anchor the budget" )
+        continue
+    if mw:
+        bad.append( f"{dialect}: the dropped-legend note is STILL THERE at {WIDE} — 'a wider token-budget' is not wide enough to be the control, so nothing below is evidence" )
+        continue
+    names = sorted( set( NAME.findall( mt.group( 0 ) ) ) )
+    if not names:
+        bad.append( f"{dialect}: the note names no attribute at all ({mt.group(0)[:80]}…) — it cannot tell a reader which definition went" )
+        continue
+    for a in names:
+        checked += 1
+        if not defined( a, wide ):
+            bad.append( f"{dialect}: the note says {a}= was dropped (ceiling), but the same query at {WIDE} does not define {a}= either — that definition is not in this dialect, so the note reports a cut that never happened" )
+    # (F): sole-closure ∩ shared-name, against this dialect's floor.
+    bare        = tight.replace( mt.group( 0 ), "" )
+    order, seen = attrsOf( dt )
+    onElements  = {}
+    for tag in order:
+        for a in seen[ tag ]:
+            onElements.setdefault( a, set() ).add( tag )
+    live = { f"{tag}@{a}" for tag in order for a in seen[ tag ]
+             if a not in CORE and len( onElements[ a ] ) > 1 and defined( a, tight ) and not defined( a, bare ) }
+    census.append( f"{dialect}: {' '.join( sorted( live ) ) if live else '(none)'}" )
+    entered += [ f"{dialect} | {k}" for k in sorted( live - FLOOR[ dialect ] ) ]
+    left    += [ f"{dialect} | {k}" for k in sorted( FLOOR[ dialect ] - live ) ]
+
+def writeLines( path, items ):
+    with open( os.path.join( TMP, path ), "w" ) as f:
+        for it in items: f.write( it + "\n" )
+writeLines( "notegaps", bad )
+writeLines( "censusnew", entered )
+writeLines( "censusgone", left )
+print( f"NOTECOUNTS names_checked={checked} bad={len(bad)}" )
+for line in census: print( f"  SHARED-NAME SOLE CLOSURE  {line}" )
+PY
+
+if [ -s "$TMP/noteerr" ]; then no "(E) the dropped-note sweep itself failed: $( head -c 300 "$TMP/noteerr" )"; fi
+cat "$TMP/noteout"
+if [ ! -s "$TMP/notegaps" ] && ! grep -q 'names_checked=[1-9]' "$TMP/noteout" 2>/dev/null; then
+    no "(E) the dropped-note sweep checked ZERO attribute names — a sweep with an empty population passes for the wrong reason"
+elif [ -s "$TMP/notegaps" ]; then
+    no "(E) $( wc -l < "$TMP/notegaps" | tr -d ' ' ) dropped-legend note problem(s) — the note names a definition its own dialect does not have, or the probe has drifted off the rung:"
+    sed 's/^/          /' "$TMP/notegaps"
+else
+    ok "(E) every attribute the rung-zero note names is defined by the same query at a wider budget, in both dialects (the note reports real cuts, not missing features)"
+fi
+
+if [ -s "$TMP/censusnew" ]; then
+    no "(F) $( wc -l < "$TMP/censusnew" | tr -d ' ' ) key(s) newly closed ONLY by the rung-zero note, under a name the same document carries on another element — which clause really dropped, and does it need a sentence of its own?"
+    sed 's/^/          /' "$TMP/censusnew"
+elif [ -s "$TMP/censusgone" ]; then
+    printf '  ..    (F) %s pinned shared-name closure(s) no longer reproduce (shape-dependent — verify, then shrink the FLOOR in this file):\n' "$( wc -l < "$TMP/censusgone" | tr -d ' ' )"
+    sed 's/^/          /' "$TMP/censusgone"
+    ok "(F) no NEW shared-name sole closure (the census above is the pinned set, minus the lines just listed)"
+else
+    ok "(F) the shared-name sole-closure census is exactly its pinned floor — nothing new hides behind a name this document carries twice"
 fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "legendcoveragecheck: FAILURES ABOVE"

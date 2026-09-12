@@ -63,20 +63,53 @@ inline HopTestedPartition computeHopTestedPartition( const IngestResult& ing, co
 // `declinedCalls` is the tier-3 declines the rows cannot show (graph.h): for callers, declined calls that named a
 // match among their candidates; for callees, declined calls a match made. Counted here with bodylessDefs, so the
 // CLI and MCP twins cannot disagree about the number printed beside count=.
+// `unprovenDefs` (H1) is the decl→def widening's RESIDUE: same-named definitions a `file:name` selector found
+// and could not tie to the file it named, so they are in neither `matches` nor `rows`. It belongs here, beside
+// the two counts that qualify the same answer, for the same reason they do — and it is meaningful in BOTH
+// directions, where bodylessDefs is callees-only.
 struct CallHierarchyRows
 {
     std::vector<NodeId> matches;
     std::vector<NodeId> rows;
     std::size_t         bodylessDefs  = 0;
+    std::size_t         unprovenDefs  = 0;
     std::size_t         declinedCalls = 0;
 };
+
+// The ONE selector derivation for both callers emitters and their legend condition.
+// A declined call names no single definition: widen only a narrowed callers selector to
+// its resolved definitions' shared name. Bare selectors and all non-declined answers keep their bytes.
+inline std::pair<std::string_view, bool> callHierarchyNextSelector( const IngestResult& ing, const CallHierarchyRows& hierarchy,
+                                                                  std::string_view selector, bool wantCallers )
+{
+    if( !wantCallers || hierarchy.declinedCalls == 0 || hierarchy.matches.empty() )
+    {
+        return { selector, false };
+    }
+    const std::string_view name = ing.symbols[ hierarchy.matches.front() ].name;
+    if( name == selector )
+    {
+        return { selector, false };
+    }
+    // resolveAllByNameQualified's tiers share one leaf name; guard that before widening.
+    for( const NodeId id : hierarchy.matches )
+    {
+        if( ing.symbols[id].name != name )
+        {
+            return { selector, false };
+        }
+    }
+    return { name, true };
+}
 
 inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph& g, std::string_view selector, bool wantCallers )
 {
     CallHierarchyRows out;
     // X9(b): "file:name" disambiguates here (the same rule --around/--lego/--edit-check use through
     // resolveFocus) — a same-named symbol living in more than one file must be pickable on either surface.
-    out.matches = resolveAllByNameQualified( ing, selector );
+    // H1: the resolver's residue travels WITH the matches it is the complement of — always written (0 on
+    // every tier that never reaches the widening), so no emitter can read a stale value.
+    out.matches = resolveAllByNameQualified( ing, selector, &out.unprovenDefs );
     if( out.matches.empty() )
     {
         return out;   // the caller owns the refusal: a CLI stderr line, or a JSON-RPC -32602

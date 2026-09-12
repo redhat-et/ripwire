@@ -1776,18 +1776,26 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             if( lastRungFired || ( budgetTokens > 0 && estTokens > budgetTokens ) ) { attrs += " over_ceiling=\"1\""; }
             return attrs;
         };
-        const std::size_t rootAttrsBound = rootAttrsFor( whole, /*lastRungFired=*/true ).size();
-        const std::string chosen = climbCeilingLadder( buildHeader, headerStr,
-                                                       whole.size() - headerStr.size() + in.trailingSectionBytes + rootAttrsBound,
-                                                       rw::ceilingAllowanceBytes( budgetTokens ),
-                                                       /*hasRouteAttr=*/!lr.routeNote.empty(), kNotes );
-        if( chosen != headerStr )
+        const std::size_t             rootAttrsBound = rootAttrsFor( whole, /*lastRungFired=*/true ).size();
+        const rw::CeilingLadderChoice chosen = climbCeilingLadder( buildHeader, headerStr,
+                                                                   whole.size() - headerStr.size() + in.trailingSectionBytes + rootAttrsBound,
+                                                                   rw::ceilingAllowanceBytes( budgetTokens ),
+                                                                   /*hasRouteAttr=*/!lr.routeNote.empty(), kNotes );
+        if( chosen.header != headerStr )
         {
-            whole.replace( 0, headerStr.size(), chosen );
+            whole.replace( 0, headerStr.size(), chosen.header );
         }
-        // the ladder's LAST rung is the only text that spells the marker with a colon (kNotes above); the
-        // legend's own definition of over_ceiling= must never read as the label (bundleidcheck trap #15)
-        rw::spliceRootAttrs( whole, rootAttrsFor( whole, chosen.find( "over_ceiling:" ) != std::string::npos ) );
+        // M3 (0.6.1): the rung ARRIVES, and is never recovered from the chosen text. This read
+        // `chosen.find( "over_ceiling:" ) != npos` — the marker word from kNotes, 13 characters, searched for in
+        // a header that echoes the caller's task VERBATIM by contract. So `--token-budget=100000
+        // --pack-task='why does over_ceiling: fire on this root'` shipped `est_tokens="11329"
+        // budget_tokens="100000" over_ceiling="1"`: a root labelled over a ceiling it states itself to be 9x
+        // inside, decided by the caller's own words. The same task without the colon carried no label, which is
+        // what makes it a forgery rather than a coincidence. --for had this defect and had it fixed; this lens
+        // shared the ladder and kept it, because the fixed-payload wrapper returned only a string. It returns the
+        // rung now (serialize.h CeilingLadderChoice). The token comparison beside it is unchanged and is still
+        // what labels an honest overshoot the ladder did not fire on. Gate: test/ceilingverdictcheck.sh (6)-(8).
+        rw::spliceRootAttrs( whole, rootAttrsFor( whole, chosen.rung == rw::CeilingRung::OverCeiling ) );
     }
 
     // §6 --partition: the bundle's own surface (see the contract above). topRanked already contains bodyIds

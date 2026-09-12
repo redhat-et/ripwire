@@ -355,11 +355,17 @@ for d in "$src"/ripwire-*/; do
     count=$(( count + 1 ))
 done
 
-# Hermes loads the flat Agent-Skills-standard set AND Hermes-native skills (skills/hermes/*, e.g. the
-# ripwire-repo-map skill purpose-built for Hermes) side by side out of one directory — verified live:
+# Hermes loads the flat Agent-Skills-standard set AND Hermes-native skills (skills/hermes/ripwire-*, e.g.
+# the ripwire-repo-map skill purpose-built for Hermes) side by side out of one directory — verified live:
 # both formats index together, so --hermes deploys both and no prefer/fallback logic is needed.
+# The ripwire-* glob is the SAME name scope the flat install loop and the prune loop above use, and it is
+# load-bearing: this loop `ln -sfn`s each entry into the user's skill home under its own name, `ln -sfn`
+# unlinks an existing regular file first, and the prune loop only ever looks at ripwire-*. A hermes/ entry
+# without the prefix would therefore delete a same-named USER skill and then be impossible to prune. Only
+# ripwire-repo-map lives there today, so this is the asymmetry being closed, not a bug being observed.
+# Gate: test/hermesinstallcheck.sh arm 7.
 if [ "$mode" = "hermes" ]; then
-    for nd in "$src"/hermes/*/; do
+    for nd in "$src"/hermes/ripwire-*/; do
         [ -d "$nd" ] || continue                                  # skip the literal glob when nothing matches
         [ -f "$nd/SKILL.md" ] || continue                        # a Hermes-native skill is a dir with SKILL.md
         nname="$( basename "$nd" )"
@@ -385,7 +391,7 @@ manifestTmp="$( mktemp "$dst/.ripwire-manifest-v1.tmp.XXXXXX" )"
         wanted_skill "$d" && echo "skill=$( basename "$d" )"
     done
     if [ "$mode" = "hermes" ]; then
-        for nd in "$src"/hermes/*/; do
+        for nd in "$src"/hermes/ripwire-*/; do        # same name scope as the install loop above
             [ -d "$nd" ] || continue
             [ -f "$nd/SKILL.md" ] || continue
             nname="$( basename "$nd" )"

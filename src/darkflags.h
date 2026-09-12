@@ -762,16 +762,29 @@ inline std::optional<std::string> readWhole( const std::string& path )
     return out;
 }
 
+// §SEC1 — what the CMake walk found, and what it refused. Two fields rather than an out-param because the
+// refusal is not an error the caller can ignore: it has to reach the report.
+struct CMakeScan
+{
+    std::vector<std::string> files;        // sorted
+    std::uint64_t            escaped = 0;  // links whose target left the root — EXACT count
+};
+
 // The CMake files under `root`, sorted. ingest() never collects these (CMake is not one of the indexed
 // grammars), so this is the ONE crawl this module owns; every other file it reads comes from the caller's
-// already-crawled, already-excluded ingest file list.
-inline std::vector<std::string> collectCMakeFiles( const std::string& root, const std::vector<std::string>& excludes )
+// already-crawled, already-excluded ingest file list — which is exactly why this walk needs the crawl
+// boundary applied HERE and not inherited: the reporter who found the ingest-side symlink escape found this
+// second copy of it in the same pass, and a linked CMakeLists.txt outside the root had its option() names and
+// defaults parsed and reported. ingest.h owns the rule (crawlPathStaysInRoot); this is the second caller, for
+// the same reason kCrawlSkipDirs is shared — a boundary two walkers disagreed about is not a boundary.
+inline CMakeScan collectCMakeFiles( const std::string& root, const std::vector<std::string>& excludes )
 {
     namespace fs = std::filesystem;
-    std::vector<std::string> out;
-    std::error_code          ec;
+    CMakeScan       out;
+    std::error_code ec;
     fs::recursive_directory_iterator it( root, fs::directory_options::skip_permission_denied, ec );
     if( ec ) { DEGRADED_PATH_ALERT( "flags: cannot walk root for CMake files — cmake gates omitted" ); return out; }
+    const std::string rootReal = canonicalCrawlRoot( root );
 
     const fs::recursive_directory_iterator end;
     for( ; it != end; it.increment( ec ) )
@@ -803,10 +816,21 @@ inline std::vector<std::string> collectCMakeFiles( const std::string& root, cons
         }
         if( base == "CMakeLists.txt" || ( base.size() > 6 && base.compare( base.size() - 6, 6, ".cmake" ) == 0 ) )
         {
-            out.push_back( p );
+            // §SEC1 — the crawl boundary, tested only once the file is one this walk would actually OPEN, so
+            // escaped= counts refusals and nothing else. is_symlink() reads the cached readdir type; only a
+            // symlink pays the realpath.
+            std::error_code lec;
+            const bool      isLink = it->is_symlink( lec );
+            if( isLink && !rw::crawlPathStaysInRoot( p, rootReal ) )
+            {
+                ++out.escaped;
+                DEGRADED_PATH_ALERT( "flags: a CMake file's symlink target leaves the root — file refused" );
+                continue;
+            }
+            out.files.push_back( p );
         }
     }
-    std::sort( out.begin(), out.end() );
+    std::sort( out.files.begin(), out.files.end() );
     return out;
 }
 
@@ -816,6 +840,12 @@ struct FlagsResult
     std::uint32_t     dark = 0;
     std::uint32_t     compileCount = 0, cmakeCount = 0, envCount = 0;
     std::size_t       filesScanned = 0;
+    // §SEC1 — CMake files this verb's own walk REFUSED to open because a symlink took them out of the root.
+    // Reported (absent when zero, the house rule) rather than dropped in silence: --flags answers "what is
+    // built but dark here", and a switch that vanished because its file was refused is the same shape of lie
+    // as one that was never declared. There is no ROW class here the way --skipped has one — this walk has no
+    // drop taxonomy at all (its --exclude and denylist prunes are silent too) — so the count is the disclosure.
+    std::uint64_t     escapedRoot  = 0;
     std::string       filter;          // H14/M6: the --flags=SUBSTR this harvest was narrowed by ("" = none)
     // H7 (capture-audit 2026-09-04): true when --flags=SUBSTR names no DECLARED gate at all. `gates="0"`
     // beside `files="1550"` reads exactly like the true and interesting fact "this repo has no dark gates",
@@ -948,7 +978,8 @@ inline FlagsResult computeFlags( const IngestResult& ing, const std::string& roo
     {
         scan( f, false );
     }
-    for( const std::string& f : collectCMakeFiles( root, excludes ) )
+    const CMakeScan cmakeScan = collectCMakeFiles( root, excludes );   // §SEC1: .files plus what the boundary refused
+    for( const std::string& f : cmakeScan.files )
     {
         scan( f, true );
     }
@@ -996,6 +1027,7 @@ inline FlagsResult computeFlags( const IngestResult& ing, const std::string& roo
 
     FlagsResult res;
     res.filesScanned = harvest.size();
+    res.escapedRoot  = cmakeScan.escaped;   // §SEC1 — a refusal this verb made is this verb's to disclose
     std::size_t filterNameHits = 0;
     for( auto& [ name, g ] : gates )
     {
@@ -1162,9 +1194,12 @@ inline void writeFlags( std::FILE* out, const FlagsResult& res, std::size_t maxS
     }
     const std::string flagsNext = widestCut == 0 ? std::string()
                                                  : nextAttrXml( "--flags --limit=" + std::to_string( widestCut ) );
-    rw::emitTo( out, "<flags gates=\"{}\" dark_gates=\"{}\" compile=\"{}\" cmake=\"{}\" env=\"{}\" files=\"{}\"{}{}>",
+    // §SEC1 — absent when zero, so every repository without a hostile symlink keeps a byte-identical report.
+    const std::string fgEscapedAttr = res.escapedRoot == 0 ? std::string()
+                                                           : " escaped_root=\"" + std::to_string( res.escapedRoot ) + "\"";
+    rw::emitTo( out, "<flags gates=\"{}\" dark_gates=\"{}\" compile=\"{}\" cmake=\"{}\" env=\"{}\" files=\"{}\"{}{}{}>",
                   res.gates.size(), res.dark, res.compileCount, res.cmakeCount, res.envCount, res.filesScanned,
-                  fgFilterAttr.c_str(), flagsNext.c_str() );
+                  fgEscapedAttr.c_str(), fgFilterAttr.c_str(), flagsNext.c_str() );
     for( const Gate& g : res.gates )
     {
         writeGate( out, g, ex, maxSites, pageOffset );

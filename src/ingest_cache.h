@@ -122,7 +122,11 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 //   all match) rather than silently re-absolutizing a key that was never root-relative to begin
 //   with — a v2 cache simply misses on every lookup that survives the guard, which is exactly the
 //   self-healing full-reparse path already used for any other corrupt/stale cache.
-constexpr std::uint32_t kCacheVersion = 20;           // 20: the member-macro re-parse (test/macroreparsecheck.sh) — each
+constexpr std::uint32_t kCacheVersion = 21;           // 21: Include gains `bool isValueUse` (parser version 93, a fourth
+                                                      //    u8 after isSymbolic) — the constant-argument / rescue-class
+                                                      //    origin bit the call narrow skips. A FORMAT change → reject
+                                                      //    v20 blobs. kParserVer moves with it.
+                                                      // 20: the member-macro re-parse (test/macroreparsecheck.sh) — each
                                                       //    FILE record gains FileHealth::macroBlanked, a fifth health
                                                       //    u32 after wsBytes — a FORMAT change → reject v19 blobs.
                                                       //    kParserVer moves with it.
@@ -216,8 +220,8 @@ constexpr std::uint32_t kCacheVersion = 20;           // 20: the member-macro re
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 93;           // bump on any grammar/.scm/extraction change
-                                                      // 93 = 2026-09-11 (#62/#72 follow-up, all roles + definitions):
+constexpr std::uint32_t kParserVer    = 94;           // bump on any grammar/.scm/extraction change
+                                                      // 94 = 2026-09-11 (#62/#72 follow-up, all roles + definitions):
                                                       //    the decided-dead `#if 0` filter moved from captureTagsFacts'
                                                       //    @reference.call/@reference.import arm to a window post-pass
                                                       //    over every fact family a C-family file produces. FIVE more
@@ -230,10 +234,23 @@ constexpr std::uint32_t kParserVer    = 93;           // bump on any grammar/.sc
                                                       //    split resolution (overloads=/amb=/prov="split"/graph_ambiguous=
                                                       //    against a definition that cannot compile). The extracted SET
                                                       //    SHRINKS on any C-family tree carrying a literal `#if 0`/`#if 1`,
-                                                      //    so a v92 blob replays rows this binary refuses. Record shapes
-                                                      //    are untouched, so kCacheVersion stays #135's 20. quality.h's
+                                                      //    so a v93 blob replays rows this binary refuses. Record shapes
+                                                      //    are untouched, so kCacheVersion stays #139's 21. quality.h's
                                                       //    kIngestParserVerMirror carries the same value (gated). Gate:
                                                       //    test/ppdeadrolescheck.sh, one live/dead pair per --uses role.
+                                                      //    RENUMBERED 93 -> 94 on the merge with main 558a2e03: the
+                                                      //    branch spent 93 while main spent it on #139 (Ruby arguments).
+                                                      // 93 = 2026-09-11 (Ruby argument + rescue constants,
+                                                      //    test/rubyargcheck.sh): a constant chain that is a direct
+                                                      //    argument of a call/super/yield (or a keyword pair's value
+                                                      //    there) and every class in a rescue list are symbolic
+                                                      //    Include records, deduped with receivers per (file, open,
+                                                      //    written); a rescue class is lazy always. An older blob
+                                                      //    holds none of them, so it is stale rather than wrong — the
+                                                      //    header version is what rejects it. RENUMBERED 89 -> 93 on
+                                                      //    the merge with main 40a1895b: the branch spent 89 while main
+                                                      //    spent 89..92 (extent, Kotlin, yaml). quality.h's mirror
+                                                      //    bumped in the SAME commit.
                                                       // 92 = 2026-09-11 (yaml unsigned-char, PR #140): vendor patch
                                                       //    yaml/003-scan-status-enum gives tree-sitter-yaml's scan status
                                                       //    (SCN_SUCC 1, SCN_STOP 0, SCN_FAIL -1) a real `ScanStatus` enum
@@ -1737,7 +1754,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     // (B0.2) a RICH def record additionally carries at least dlWeighted + tokenCount (2×u32) — the pair
     // arrays themselves are bounded per record inside readDef.
     const std::size_t     kMinDefRecordBytes      = minDefRecordBytes( captureValueUses );   // F8: named + tripwire-pinned above
-    constexpr std::size_t kMinIncRecordBytes      = 11;   // 3×u8 (isAngle,isLazy,isSymbolic) + 1×u32 (byte) + 1×str(len u32, empty)
+    constexpr std::size_t kMinIncRecordBytes      = 12;   // 4×u8 (isAngle,isLazy,isSymbolic,isValueUse) + 1×u32 (byte) + 1×str(len u32, empty)
     constexpr std::size_t kMinBindRecordBytes     = 26;   // 3×u32 + 2×u8 + 3×str(len u32, empty)
     constexpr std::size_t kMinFfiRecordBytes      = 14;   // 2×u8 (kind,lowConf) + 3×str(len u32, empty)
     constexpr std::size_t kMinRouteDefRecordBytes = 13;   // B6.3: 1×u32 (line) + 1×u8 (method) + 2×str(len u32, empty)
@@ -1824,7 +1841,8 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         const bool          isLazy     = r.u8() != 0;   // kParserVer 72: TS/JS function-body require/import marker; parser version 82: Ruby autoload
         const bool          isSymbolic = r.u8() != 0;   // parser version 82: a Ruby constant target, resolved by index, never by path
         const std::uint32_t byte       = r.u32();       // parser version 82: the directive's start byte (lexical nesting recovery)
-        ffOut.incs.push_back( Include { 0, isAngle, isLazy, isSymbolic, byte, r.str() } );
+        const bool          isValueUse = r.u8() != 0;   // parser version 93 / format 21: argument or rescue origin — not narrow evidence
+        ffOut.incs.push_back( Include { 0, isAngle, isLazy, isSymbolic, byte, isValueUse, r.str() } );
     }
     const std::uint32_t nb = r.u32();
     if( !countFits( nb, kMinBindRecordBytes ) )
@@ -2416,6 +2434,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 w.u8( incs[i].isLazy     ? 1 : 0 );
                 w.u8( incs[i].isSymbolic ? 1 : 0 );
                 w.u32( incs[i].byte );
+                w.u8( incs[i].isValueUse ? 1 : 0 );
                 w.str( incs[i].target );
             }
             w.u32( std::uint32_t( ix.bindIndex[f].size() ) );

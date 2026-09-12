@@ -1,5 +1,9 @@
 # Help wanted: make the callers answer's `next=` land on a declined call site
 
+> **Solved.** @antoleod fixed this in [#182](https://github.com/redhat-et/ripwire/pull/182), closing
+> [#158](https://github.com/redhat-et/ripwire/issues/158). The prompt stays as a worked example of a kit that landed;
+> the paths, lines and outputs below describe the tree before that fix.
+
 **Good first issue · size S · scheduled after the 0.6.0 release · builds on PR #136 (merged)**
 
 You are fixing **one pointer**. When `--callers` cannot show a call as a row because the resolver

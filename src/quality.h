@@ -25,6 +25,7 @@
 #include "cloneidiom.h"         // idiom-class demotion — the closed 3-idiom shape classifier that turns an idiom-COLLISION clone group into a minor row instead of a gating one
 #include "lintrules.h"          // findErrorMasking — the built-in error-masking rule table (GitClear +47% kind)
 #include "arch.h"               // fnv1a64
+#include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — writeBaseline truncates, so its open must refuse a link atomically
 #include "gitmine.h"            // shSingleQuote + gitFileCommitCountsInDayWindow — short-horizon-churn window mining
 #include "docparse.h"           // docparse::detail::readWholeFile — THE canonical whole-file byte read (commentcoherence.h names it that); reused rather than re-rolled, see forEachSymbolBody
 #include "filter.h"             // B10.1a: isTestPath — the general test-dir convention behind isTestScriptPath
@@ -1792,13 +1793,17 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // lines too. Bumping kParserVer without updating these two lines is a hard gate failure, not a silent miss.
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 20;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 93;   // MUST equal ingest.cpp's kParserVer   (gated)
-                                                          // 93 = 2026-09-11 (#62/#72 follow-up): the decided-dead `#if 0`
+constexpr std::uint32_t kIngestCacheVersionMirror   = 21;   // MUST equal ingest.cpp's kCacheVersion (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 94;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 94 = 2026-09-11 (#62/#72 follow-up): the decided-dead `#if 0`
                                                           //    filter now covers every --uses role, the Include record, and
                                                           //    DEFINITIONS — the extracted set shrinks on any C-family tree
                                                           //    with a literal `#if 0`/`#if 1`. See ingest_cache.h's
-                                                          //    kParserVer note.
+                                                          //    kParserVer note. Renumbered 93 -> 94 on the merge with
+                                                          //    main 558a2e03, where #139 had spent 93.
+                                                          // 93 = 2026-09-11 (Ruby argument + rescue constants): a
+                                                          //    constant argument of a call/super/yield and a rescue
+                                                          //    class are directives. See ingest_cache.h's note.
                                                           // 92 = 2026-09-11 (yaml unsigned-char, PR #140): the yaml scanner's
                                                           //    status type. SCN_FAIL (-1) returned through plain `char` came
                                                           //    back as 255 wherever `char` is unsigned (aarch64 Linux, the
@@ -3599,6 +3604,28 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
     return snap;
 }
 
+// THE ONE PLACE THE QUALITY BASELINE SIDECAR IS OPENED, and the whole of its CWE-59/CWE-367 story.
+//
+// `path` is a fixed name inside a crawled repository and the write TRUNCATES, so a link planted at it turns
+// the tool's own write into an arbitrary-file overwrite. The refusal is the OPEN itself — O_NOFOLLOW, one
+// syscall, nothing between deciding and creating for a replacement to land in. The first fix asked lstat and
+// then opened anyway, which is check-then-open; see src/pathguard.h.
+//
+// It is a named seam rather than four lines inside writeBaseline for a reason a reviewer should be able to
+// check: acquiring a safe descriptor and serializing a snapshot are two jobs, and the security-relevant one
+// should be readable without scrolling through ten record loops. The two alerts are the two failure kinds
+// this site has always had, unchanged, and they stay macros HERE so each keeps its own file/line.
+inline int openBaselineSidecar( const std::string& path )
+{
+    auto [ fd, openErr ] = rw::pathguard::openNoFollowTruncate( "the quality baseline sidecar", path );
+    if( fd < 0 )
+    {
+        if( openErr == ELOOP ) { DEGRADED_PATH_ALERT( "quality: refusing to write the baseline sidecar through a symlink" ); }
+        else                   { DEGRADED_PATH_ALERT( "quality: cannot write baseline file" ); }
+    }
+    return fd;
+}
+
 // `absorbedGating` (H11, capture-audit 2026-09-04) is the number of GATING findings this tree already held
 // against HEAD when the pin was taken. Non-zero only under --allow-dirty — the bare form REFUSES rather
 // than absorb — and it is written as two records the snapshot reader skips as unknown kinds (`dirty 1`,
@@ -3607,8 +3634,14 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
 inline bool writeBaseline( const Snapshot& s, const std::string& path, std::string_view headSha = {},
                            std::size_t absorbedGating = 0 )
 {
-    std::ofstream f( path, std::ios::trunc );
-    if( !f ) { DEGRADED_PATH_ALERT( "quality: cannot write baseline file" ); return false; }
+    const int fd = openBaselineSidecar( path );
+    if( fd < 0 )
+    {
+        return false;
+    }
+    // The record stream is assembled in memory and handed to the descriptor in one write. The bytes below
+    // are unchanged, line for line — only their destination moved off a stream that cannot say O_NOFOLLOW.
+    std::ostringstream f;
     // v2 adds the Q1 kinds (loc/nest/params/api). Format is line-oriented + kind-tagged, so a v1 baseline (no
     // loc/nest/params/api lines) reads fine here — readBaseline skips unknown kinds and treats absent kinds as
     // empty; a v2 baseline read by an OLD binary likewise skips lines it doesn't know. Re-baseline after an
@@ -3683,7 +3716,9 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     {
         f << "api " << std::hex << h << std::dec << '\n';
     }
-    return true;
+    // Was an unconditional `return true`: a stream that failed to flush still reported a written baseline.
+    // The descriptor answers for the bytes, so a full disk is now a failure the caller can report.
+    return rw::pathguard::writeAllAndClose( fd, f.str() );
 }
 
 // Returns true only when `path` is a file that actually LOOKS like a baseline. r27 SUSPICION-A, second half:
@@ -3714,23 +3749,36 @@ inline bool baselineHeaderIsForeign( const std::string& line ) noexcept
 struct BaselineReadStats
 {
     bool        present        = false;   // the file opened
+    bool        symlinkRefused = false;   // a SYMLINK sits at the name: refused unopened (pathguard.h round 3), so `present` stays false
     bool        unrecognizable = false;   // opened, but no line of the format's structure in it
     bool        preQ1          = false;   // structure, but no per-symbol loc records: origin cannot be classified
     std::size_t badLines       = 0;       // lines of a known kind whose payload did not parse — skipped
 };
 
+// THE ONE PLACE THE BASELINE SIDECAR IS READ — shared by readBaseline, readBaselineHeadSha and
+// readBaselineAbsorbed, and openBaselineSidecar's other half with the same answer to a link: O_NOFOLLOW, refused
+// in the open itself. A link here used to be followed on the way in, so the link chose which file was honored as
+// the floor. Why an in-tree link is refused too is round 3 of src/pathguard.h.
+inline rw::pathguard::NoFollowRead readBaselineSidecar( const std::string& path )
+{
+    rw::pathguard::NoFollowRead sidecar = rw::pathguard::openNoFollowRead( "the quality baseline sidecar", path );
+    if( sidecar.refused ) { DEGRADED_PATH_ALERT( "quality: refusing to read the baseline sidecar through a symlink" ); }
+    return sidecar;
+}
+
 inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadStats& stats )
 {
     stats = BaselineReadStats{};
-    std::ifstream f( path );
-    if( !f )
+    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path );
+    if( !sidecar.opened )
     {
+        stats.symlinkRefused = sidecar.refused;   // "no sidecar" and "a sidecar refused unopened" are different answers
         return false;
     }
     stats.present = true;
     std::size_t recognizedLineCount = 0;
     std::string line;
-    while( std::getline( f, line ) )
+    while( sidecar.readLine( line ) )
     {
         if( line.empty() )
         {
@@ -3849,13 +3897,13 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
 // obeyed. `writeBaseline` only ever writes `gitHeadSha`'s output, so no legitimate sidecar is affected.
 inline std::string readBaselineHeadSha( const std::string& path )
 {
-    std::ifstream f( path );
-    if( !f )
+    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path );
+    if( !sidecar.opened )
     {
         return {};
     }
     std::string line;
-    while( std::getline( f, line ) )
+    while( sidecar.readLine( line ) )
     {
         if( line.rfind( "head ", 0 ) == 0 )
         {
@@ -3883,13 +3931,13 @@ inline std::string readBaselineHeadSha( const std::string& path )
 // one the report has something to say about.
 inline std::size_t readBaselineAbsorbed( const std::string& path )
 {
-    std::ifstream f( path );
-    if( !f )
+    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path );
+    if( !sidecar.opened )
     {
         return 0;
     }
     std::string line;
-    while( std::getline( f, line ) )
+    while( sidecar.readLine( line ) )
     {
         if( line.rfind( "absorbed ", 0 ) != 0 )
         {
@@ -3959,6 +4007,7 @@ struct BaselineSelection
     const char*    marker = "git-HEAD";                        // static storage; safe to hold as a bare pointer
     bool           staleFileRemoved = false;                   // Stale only: the unlink LANDED (file gone from disk)
     bool           sidecarUnreadable = false;                  // a sidecar EXISTS but could not be read (unrecognizable or pre-Q1): ignored, named
+    bool           sidecarSymlinkRefused = false;              // a SYMLINK sits at the name and was refused unopened (pathguard.h round 3): ignored, named
     std::size_t    sidecarBadLines   = 0;                      // honored sidecar: lines skipped as unparseable
 
     bool isSidecarHonored() const noexcept { return source == BaselineSource::Sidecar; }
@@ -3988,7 +4037,15 @@ inline BaselineSelection selectBaseline( const std::string& root, const std::str
         sel.snapshot = Snapshot{};                             // readBaseline already clears on the unrecognizable path; belt and braces
         sel.source   = BaselineSource::Absent;
         sel.marker   = "git-HEAD";
-        if( readStats.present && ( readStats.unrecognizable || readStats.preQ1 ) )
+        if( readStats.symlinkRefused )
+        {
+            // Round 3 (pathguard.h): a link at the name is refused on read as on write. Never "no sidecar existed"
+            // (the git-HEAD marker) about an entry that is right there, and never "unreadable" about bytes that
+            // were deliberately not opened.
+            sel.sidecarSymlinkRefused = true;
+            sel.marker                = "git-HEAD (symlinked sidecar refused)";
+        }
+        else if( readStats.present && ( readStats.unrecognizable || readStats.preQ1 ) )
         {
             sel.sidecarUnreadable = true;                      // 2026-09-06: never "no sidecar existed" about a file that is right there
             sel.marker            = "git-HEAD (sidecar unreadable)";

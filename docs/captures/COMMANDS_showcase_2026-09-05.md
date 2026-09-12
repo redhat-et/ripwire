@@ -5247,10 +5247,7 @@ ripwire: --run-timeout=SECONDS modifies --run-trace — pass it too (e.g. ripwir
 <r n="naming-predicate" old="0" new="0" fired="0"/>
 <r n="naming-setter" old="0" new="0" fired="0"/>
 <r n="naming-confusable" scope="group-rule"/>
-<p o="ARM_CTXPACK" n="ARM_RIPWIRE" sup="3" at="./bench/agentloop/analyze.py:31"/>
-<p o="CTXPACK" n="RIPWIRE" sup="12" at="./bench/headtohead/r3-headroom-2026-08-03/harness.py:42"/>
-<p o="CTXPACK_BASH_RE" n="RIPWIRE_BASH_RE" sup="1" at="./bench/mine_traces.py:47"/>
-<p o="CTXPACK_REPO" n="RIPWIRE_REPO" sup="4" at="./bench/headtohead/r2-2026-08-03/worker.py:20"/>
+<!-- 5 rename rows withheld: the project's own rebrand, which names a private pre-release identifier -->
 <p o="advice" n="next" sup="1" at="./bench/bench_svector_diff.cpp:76"/>
 <p o="atomicWriteQSnap" n="atomicWriteFile" sup="5" at="./src/quality.h:2252"/>
 <p o="checkNotSurprising" n="fixNotSurprising" sup="1" at="./test/cochangesurprisecheck.sh:154"/>
@@ -5259,7 +5256,6 @@ ripwire: --run-timeout=SECONDS modifies --run-trace — pass it too (e.g. ripwir
 <p o="control" n="retired" sup="1" at="./test/truncvocabcheck.sh:331"/>
 <p o="copyRange" n="moveRange" sup="2" at="./src/infra/svector.h:130"/>
 <p o="cpuRelax" n="isFiniteFast" sup="1" at="./src/infra/fastmath.h:37"/>
-<p o="ctxpack_context" n="ripwire_context" sup="2" at="./bench/swebench_eval.py:36"/>
 <p o="enclosingBlockSpan" n="enclosingShadowScope" sup="2" at="./src/ingest_binds.h:759"/>
 <p o="fired" n="dedup" sup="1" at="./bench/mine_traces.py:266"/>
 <p o="fixture" n="example" sup="2" at="./bench/scip_match_diag.py:246"/>

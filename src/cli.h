@@ -1065,8 +1065,8 @@ inline constexpr char kHelpHead[] =
         "                               emitted as <f via=\"import\" lazy=\"0|1\"> rows (format=columnar carries the count only). NEVER added to reaches= —\n"
         "                               files and symbols are different units, and an importer may use a different symbol from that file, or none at all.\n"
         "                               lazy=\"1\": every one of that importer's edges is written inside a closure — a TS/JS require()/import()\n"
-        "                               inside a function body, a Ruby constant receiver inside a method/lambda/block, a Ruby autoload —\n"
-        "                               not at load time: still a real dependency, weaker than a top-level one\n"
+        "                               inside a function body, a Ruby constant receiver or argument inside a method/lambda/block, a Ruby\n"
+        "                               autoload or rescue class — not at load time: still a real dependency, weaker than a top-level one\n"
         "    counts_floor=\"1\"           every count on the graph verbs is a FLOOR, never a total; a 0 means none found\n"
         "                               on --callers/--callees/--uses/--impact/--edit-check every count is a FLOOR, never a total: the\n"
         "                               call graph is extracted from source text by name, so dynamic dispatch\n"
@@ -1154,13 +1154,15 @@ inline constexpr char kHelpHead[] =
         "                               For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance).\n"
         "                               --regex is LINE-ORIENTED, like grep/rg: each line is its own search range, so ^ and $\n"
         "                               are LINE anchors and no match may span a newline (a trailing CR sits outside the range).\n"
-        "      --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit\n"
-        "      --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex)\n"
-        "      --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)\n"
-        "      --grep-scope=line|file   modifies --and=/--not=: line (default) requires the SAME matched line; file requires\n"
+        "    --grep-context=N | --grep-before=N / --grep-after=N     ripgrep-style N lines of source around each hit\n"
+        "    --and=STR (repeatable)     modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex)\n"
+        "    --not=STR (repeatable)     modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)\n"
+        "    --grep-scope=line|file     modifies --and=/--not=: must the other term hit the SAME line (default) or anywhere in the file\n"
+        "                               modifies --and=/--not=: line (default) requires the SAME matched line; file requires\n"
         "                               anywhere in the same file. Second occurrence of --grep=/--regex= itself REFUSES\n"
         "                               (naming --and= as the AND spelling) rather than silently overwriting the pattern.\n"
-        "      --grep-in=code|any       SPAN TIERS: which tree-sitter span a hit must sit in to print. code (default) serves the\n"
+        "    --grep-in=code|any         SPAN TIERS: which tree-sitter span a hit must sit in — code (default) or any (exhaustive)\n"
+        "                               SPAN TIERS: which tree-sitter span a hit must sit in to print. code (default) serves the\n"
         "                               CODE tier when any hit is code, and otherwise comment AND string TOGETHER (tier=\n"
         "                               \"comment+string\"), disclosing what it held back (suppressed_comment=/suppressed_string=);\n"
         "                               a pattern living only in prose is still answered, never silently emptied. any turns\n"
@@ -1294,8 +1296,8 @@ inline constexpr char kHelpHead[] =
         "                               acd/nccd number comparable across builds: sh, rb, lua and ex joined it at parser\n"
         "                               version 81 and every one of those numbers moved on a corpus holding them.\n"
         "                               STRUCTURE vs USE (parser version 83): a LAZY edge -- every directive of the pair\n"
-        "                               written inside a closure (Ruby method/lambda/block, TS/JS function body) or a Ruby\n"
-        "                               autoload -- is a use, not a load-time dependency: it is in --impact's importer tier\n"
+        "                               written inside a closure (Ruby method/lambda/block, TS/JS function body), a Ruby\n"
+        "                               autoload or rescue class -- is a use, not a load-time dependency: it is in --impact's importer tier\n"
         "                               (lazy=1) and in the row's inc t= list, NOT in afferent/instab/transitive/godfiles/\n"
         "                               stabledeps/cycles/ccd/acd/nccd/shape. <health lazy_edges=> counts the pairs left out,\n"
         "                               a row's lazy_edges= its own; both absent when 0\n"
@@ -1598,14 +1600,16 @@ inline constexpr char kHelpHead[] =
         "                               accept the current findings into .ripwire_quality_acks (per-finding ratchet): re-runs suppress them honestly (acked=\"N\") until one WORSENS past its acked size.\n"
         "                               =REASON implies the --quality-delta report it acks; the reason-less spelling needs --quality-delta\n"
         "                               beside it (refused alone). An ack with 0 findings to accept writes nothing and says so.\n"
-        "      --ack-only=SUBSTR[,SUBSTR] (with --quality-ack) ack only SOME findings — those whose KIND, canonical id, or\n"
+        "    --ack-only=SUBSTR[,SUBSTR]   (with --quality-ack) ack only SOME findings — those whose KIND, canonical id or FACET matches\n"
+        "                               (with --quality-ack) ack only SOME findings — those whose KIND, canonical id, or\n"
         "                               FACET contains one of these; the pseudo-token 'gating' selects exactly what would\n"
         "                               exit 2. Bare --quality-ack accepts the WHOLE report, so accepting one deliberate\n"
         "                               change silently accepts the rest — how a ratchet turns into a rubber stamp. Prefer\n"
         "                               the facet: --ack-only=contract-change acks the deliberate arity changes WITHOUT the\n"
         "                               never-gating api-surface new-symbol rows. Matching nothing refuses (exit 1) rather\n"
         "                               than falling back to acking everything. Whatever you leave unacked stays visible.\n"
-        "      --scope=GLOB[,GLOB...]   (with --quality-delta/--quality-ack) OWNERSHIP partition for a working tree that has\n"
+        "    --scope=GLOB[,GLOB...]     (with --quality-delta/--quality-ack) file findings by OWNERSHIP when one tree has several writers\n"
+        "                               (with --quality-delta/--quality-ack) OWNERSHIP partition for a working tree that has\n"
         "                               MORE THAN ONE WRITER in it — N agent sessions sharing one checkout. The delta compares\n"
         "                               the working tree against HEAD, so every concurrent writer's uncommitted rows land in\n"
         "                               YOUR report; this files each finding by its p= path. Rows in scope gate as usual; rows\n"
@@ -1675,8 +1679,9 @@ inline constexpr char kHelpHead[] =
         "                               discloses resolved_from_seed, a faulted seed refuses with a specific diagnosis, and\n"
         "                               --edit-target-file may not accompany a seed), or a freshness-pinned sym# handle\n"
         "                               emitted by --grep --handles.\n"
-        "      --edit-payload=FILE|-    required exact byte payload ('-' reads stdin); empty payloads refuse, never imply deletion\n"
-        "      --edit-target-file=PATH  optional file-path substring disambiguating a same-named definition. RELATIVE (matched against\n"
+        "    --edit-payload=FILE|-      required exact byte payload ('-' reads stdin); empty payloads refuse, never imply deletion\n"
+        "    --edit-target-file=PATH    optional file-path substring disambiguating a same-named definition (relative or absolute)\n"
+        "                               optional file-path substring disambiguating a same-named definition. RELATIVE (matched against\n"
         "                               the indexed spelling) or ABSOLUTE (matched against the file's resolved on-disk path), so the\n"
         "                               path a receipt or a trace hands you works verbatim. These three CLI verbs\n"
         "                               reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation\n"
@@ -1698,14 +1703,16 @@ inline constexpr char kHelpHead[] =
         "                               in EVIDENCE order (a changed or partner test outranks a deeper graph hop);\n"
         "                               else --test-gate=FILE; under --no-post-check: --edit-check=FILE:SYM). Edit, see what\n"
         "                               landed, verify and find the tests to run is ONE call.\n"
-        "      --no-post-check          skip that folded verification (the index refresh it needs is the one the next verb call\n"
+        "    --no-post-check            skip that folded verification — pass it when you are about to edit again immediately\n"
+        "                               skip that folded verification (the index refresh it needs is the one the next verb call\n"
         "                               would pay for anyway; pass this when you are about to edit again immediately). The MCP\n"
         "                               spelling is post_check:false. Single-root only.\n"
         "    --edit-plan=FILE           apply several edits as one transaction, described in a versioned JSON file\n"
         "                               versioned JSON multi-edit transaction: {version:1, edits:[{op,target,file?,payload}]};\n"
         "                               op is one of replace_symbol_body, insert_before_symbol, insert_after_symbol\n"
         "                               each target takes the same forms as TARGET above (a name, an @FILE:LINE seed, a handle)\n"
-        "      --dry-run | --apply      the plan's explicit mode: --dry-run preflights and prints the receipt without writing,\n"
+        "    --dry-run | --apply        the plan's mode: --dry-run preflights, --apply commits; exactly one of the two is required\n"
+        "                               the plan's explicit mode: --dry-run preflights and prints the receipt without writing,\n"
         "                               --apply commits; exactly one of the two is required. Payload paths are relative to the\n"
         "                               plan file and CONFINED to its directory: a path resolving outside it (an absolute path,\n"
         "                               a '..' escape, or a symlink pointing out) refuses, naming the path it resolved to, and\n"
@@ -2188,7 +2195,8 @@ inline constexpr char kHelpTail[] =
         "                               eventually but never past its own fair share. Each section truncates rank-adaptively and\n"
         "                               the header reports EVERY truncation (no silent caps). A tiny budget degrades to\n"
         "                               ranking-only WITH the truncation note. Refuses loudly without a task string.\n"
-        "      --partition=N            (with --pack-task, N=2..16) FAN-OUT form: instead of one bundle, emit ONE shared common core\n"
+        "    --partition=N              (with --pack-task, N=2..16) FAN OUT: one shared core plus N per-agent slices, not one bundle\n"
+        "                               (with --pack-task, N=2..16) FAN-OUT form: instead of one bundle, emit ONE shared common core\n"
         "                               plus N per-agent slices, so N parallel agents stop re-deriving the same orientation. The\n"
         "                               task's ranked surface is carved along the call graph's own Louvain communities — a partition\n"
         "                               is a union of WHOLE modules (largest-first packing) so it reads coherently; when there are\n"
@@ -2446,8 +2454,9 @@ inline constexpr char kHelpTail[] =
         "                               cached one (default: reuse forever; stderr notes the cached clone's age)\n"
         "    --scip=index.scip          consume a SCIP index as a precision overlay: exact call edges replace name guesses\n"
         "                               consume a SCIP index as a PRECISION overlay: precise call edges replace\n"
-        "                               name-based guesses (tagged prov=\"scip\"), ambiguous= drops. Missing/corrupt\n"
-        "                               index → degrades to name-based (never fails). Zero deps (hand-rolled reader).\n"
+        "                               name-based guesses (tagged prov=\"scip\"), ambiguous= drops. A path that is missing,\n"
+        "                               empty or not a regular file refuses (exit 1). A corrupt index warns on stderr and\n"
+        "                               degrades to name-based. Zero deps (hand-rolled reader).\n"
         "    --pin-census=FILE          eval only: record which mechanism resolved each call site\n"
         "                               eval-only: write a per-call-site census of WHICH mechanism resolved each call\n"
         "                               (unique/qualified/receiver-rule/cone/arity/locality/split/scip/binding) and the\n"
@@ -2521,7 +2530,19 @@ enum class HelpTier : std::uint8_t
 };
 
 // A line's role in the catalog, decided by indentation alone — the same contract
-// docs/docs_commands_build.py's parse_help() has always parsed this text with.
+// docs/docs_commands_build.py's parse_help() parses this text with.
+//
+// FOUR SPACES IS THE ONLY INDENT THAT MEANS "THIS ROW EXISTS". Anything deeper is prose, however much
+// it looks like a row, and tier 1 drops it. v0.6.0 shipped the counter-example: twelve flag rows were
+// written at SIX spaces to read as sub-flags of the entry above them, this function classified all
+// twelve as Cont, and fifteen real flags — --and --not --grep-in --grep-scope --grep-context
+// --grep-before --grep-after --ack-only --scope --edit-payload --edit-target-file --no-post-check
+// --dry-run --apply --partition — were absent from `--help` while working perfectly. parse_help then
+// accepted 4..6, so docs/COMMANDS.md listed every one of them and the disagreement had no symptom
+// there; the only visible edge was `--help=--and` REFUSING with "`ripwire --help` lists every row",
+// which was a false claim about our own output.
+// Nest a sub-flag by what its summary SAYS, never by moving it right; test/helpbudgetcheck.sh arm (K)
+// fails the moment an accepted flag stops being named on the first screen.
 enum class HelpLine : std::uint8_t
 {
     Section,   // two spaces then text: a family heading

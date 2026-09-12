@@ -283,6 +283,10 @@ struct DriftResult
                                                   //   not a verdict, so it must not move the clean= count.
     std::uint32_t       docsScanned = 0;
     std::uint32_t       docsUnread  = 0;        // 2026-09-06: indexed docs whose read failed at scan time — omitted from docs=, disclosed as docs_unread=
+    // §SEC1: files this verb's OWN walk refused because a symlink left the root. Disclosed as escaped_root=,
+    // absent at zero, on docs_unread='s rule — a presence probe that quietly lost a file answers "missing"
+    // about a file that is there, which is this verb's named cry-wolf failure.
+    std::uint64_t       escapedRoot = 0;
     std::uint32_t       cleanDocs   = 0;
     std::uint32_t       anchors     = 0;
     std::uint32_t       checked     = 0;
@@ -1652,6 +1656,7 @@ struct RepoPaths
     std::vector<std::string>                                 rel;      // root-relative, sorted
     std::vector<std::string>                                 auxFull;  // unparsed-but-textual files, absolute, sorted
     HashMap<std::string, rw::SmallVec<std::uint32_t, 2>>     byBase;   // basename → indices into `rel`
+    std::uint64_t                                            escaped = 0;   // §SEC1 — links whose target left the root
 };
 
 // The AUXILIARY presence corpus: text files the INDEX does not parse but a doc legitimately names symbols
@@ -1696,6 +1701,7 @@ inline RepoPaths collectRepoPaths( const std::string& root, const std::vector<st
     std::error_code ec;
     fs::recursive_directory_iterator it( root, fs::directory_options::skip_permission_denied, ec );
     if( ec ) { DEGRADED_PATH_ALERT( "doc-drift: cannot walk the root — the on-disk existence probe is skipped" ); return out; }
+    const std::string rootReal = canonicalCrawlRoot( root );   // §SEC1 — the crawl boundary, canonicalized once
 
     const fs::recursive_directory_iterator end;
     for( ; it != end; it.increment( ec ) )
@@ -1720,6 +1726,21 @@ inline RepoPaths collectRepoPaths( const std::string& root, const std::vector<st
         }
         if( skip )
         {
+            continue;
+        }
+
+        // §SEC1 — THE CRAWL BOUNDARY, the third walker (ingest.h owns the rule; ingest's own crawl and
+        // darkflags.h's CMake harvest are the other two). This one is not merely an existence probe: every
+        // auxFull path is OPENED and its identifiers harvested, so a symlinked CMakeLists.txt/README pointing
+        // outside the root had its names read and reported UNDER THE IN-ROOT PATH — narrower than the ingest
+        // disclosure (facts, not bytes) and the same defect. The `rel` side needs it too: an existence probe
+        // that answers "present" for a path whose content lives outside the root is answering about the wrong
+        // file. is_symlink() reads the cached readdir type; only a symlink pays the realpath.
+        std::error_code lec;
+        if( it->is_symlink( lec ) && !crawlPathStaysInRoot( full, rootReal ) )
+        {
+            ++out.escaped;
+            DEGRADED_PATH_ALERT( "doc-drift: a file's symlink target leaves the root — file refused" );
             continue;
         }
 
@@ -2380,6 +2401,7 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
     // Hoisted ABOVE the corpus scan (it reads no file contents and depends on nothing the scan produces) so
     // the indexed files and the auxiliary text files form ONE index space the scan can carve into blocks.
     const RepoPaths repo = anchorTotal > 0 ? collectRepoPaths( root, excludes ) : RepoPaths{};
+    res.escapedRoot      = repo.escaped;   // §SEC1 — a refusal this walk made is this verb's to disclose
 
     std::vector<std::uint32_t> lineCounts( ing.files.size(), 0 );
     if( anchorTotal > 0 )
@@ -2785,6 +2807,11 @@ inline void writeDocDriftPage( std::FILE* out, const DriftResult& res, std::size
     if( res.docsUnread > 0 )
     {
         rw::emitTo( out, " docs_unread=\"{}\"", res.docsUnread );   // absent means every indexed doc was read
+    }
+    if( res.escapedRoot > 0 )
+    {
+        // §SEC1 — absent means no symlink under this root pointed out of it (every repository, until one is hostile)
+        rw::emitTo( out, " escaped_root=\"{}\"", ( unsigned long long ) res.escapedRoot );
     }
     if( !res.filter.empty() )
     {

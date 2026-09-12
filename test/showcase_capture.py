@@ -791,6 +791,16 @@ def fmt_block(data):
         out.append(marker)
     return "\n".join(out)
 
+def publish_block(data):
+    """fmt_block, then the project's own rebrand rows withheld (exportscrub.withhold_rebrand_rows).
+
+    AFTER the display cut, deliberately: the window and its `… [N more display lines]` marker still describe
+    the real output, and the disclosure's count is exactly the rows taken out of what this block shows. So
+    rows shown + withheld + past the cut still equals the pairs= the tool reported — the sum
+    test/docscommandscheck.sh arm (E) checks on every capture."""
+    lines, _withheld = exportscrub.withhold_rebrand_rows(fmt_block(data).split("\n"))
+    return "\n".join(lines)
+
 ver = subprocess.run(f"{BIN} --version", shell=True, cwd=REPO, capture_output=True).stdout.decode().strip()
 # §B11.5: the --help line count is DERIVED at generation time — the hardcoded "543 lines" went stale
 # (live was 669) and a meta-claim about the binary must come from the binary.
@@ -841,12 +851,12 @@ for r in results:
         doc.append(r["pre"].rstrip())
         doc.append(FENCE + "\n")
     doc.append(FENCE)
-    doc.append(fmt_block(r["out"]))
+    doc.append(publish_block(r["out"]))
     doc.append(FENCE + "\n")
     if r["err"].strip():
         doc.append("stderr:\n")
         doc.append(FENCE)
-        doc.append(fmt_block(r["err"]))
+        doc.append(publish_block(r["err"]))
         doc.append(FENCE + "\n")
     if r["post"]:
         doc.append(c.get("post_label", "Artifact written:") + "\n")
@@ -879,13 +889,21 @@ published = exportscrub.scrub(published, "ripwire")
 # checked but NOT substituted: an audit COORDINATE has no honest rewrite in a transcript (the
 # generator DROPS such lines from COMMANDS.md samples, which a recorded run cannot do), so a coordinate
 # reaching the output is a human decision about the source it came from, not something to paper over.
+# The same goes for a rebrand rename row that survived publish_block: withholding takes out only a row
+# that is its line's whole content, so one sharing a line with other output stops the write here.
 HOME_RE = re.compile(r"/[Uu]sers/")
-CLASSES = (("absolute home path", HOME_RE.search),
+CLASSES = (("the project's own rebrand rename row", exportscrub.rebrand_rename_row),
+           ("absolute home path", HOME_RE.search),
            ("temp/scratch path", exportscrub.TMP_PATH.search),
            ("internal coordinate shape", exportscrub.COORD.search),
            ("internal document name", exportscrub.INTERNAL_DOC.search),
            ("email address", exportscrub.find_address))
-leaks = [f"{i}: {label}: {line.strip()[:100]}"
+def leak_shown(line):
+    """A line carrying a rebrand row is named by that row's public side, never printed: the refusal would
+    otherwise publish the old spelling in the very log that reports it."""
+    row = exportscrub.rebrand_rename_row(line)
+    return exportscrub.rebrand_row_public_side(row) if row is not None else line.strip()[:100]
+leaks = [f"{i}: {label}: {leak_shown(line)}"
          for i, line in enumerate(published.split("\n"), 1)
          for label, hit in CLASSES if hit(line)]
 if leaks:
