@@ -324,7 +324,7 @@ case ",$strictEnabled," in
     *)              ok "(B) strict excludes historical" ;;
 esac
 case ",$strictEnabled," in
-    *,colocation,*) no "(B) strict COUNTS colocation. §9.9's ladder measured it at 0.732 mean consecutive / 0.222 endpoint Jaccard on the ctxpack ladder — WORSE than historical, and for the same mechanical reason: a fixed-size worst-40 cut over a ranking whose population moves. Assuming a new family inherited the others' stability instead of measuring it is exactly the error that finding exists to prevent." ;;
+    *,colocation,*) no "(B) strict COUNTS colocation. §9.9's ladder measured it at 0.732 mean consecutive / 0.222 endpoint Jaccard on the ripwire-ancestor ladder — WORSE than historical, and for the same mechanical reason: a fixed-size worst-40 cut over a ranking whose population moves. Assuming a new family inherited the others' stability instead of measuring it is exactly the error that finding exists to prevent." ;;
     *)              ok "(B) strict excludes colocation — the second exclusion, and it was found by running the ladder rather than assuming" ;;
 esac
 for p in default lenient; do

@@ -272,7 +272,7 @@ def checkout_local_pin( task, dest_root, local_corpus ):
     """Materialize a questions instance's pinned tree(s) from a LOCAL source repo, via git worktree.
 
     Returns the PARENT directory holding one checkout per repo — never the repo dir itself — because
-    that is the shape every gt_command in the bank is written against (`ctxpack/src/x.h`), and the
+    that is the shape every gt_command in the bank is written against (`otherrepo/src/x.h`), and the
     multi-root row needs two sibling checkouts in one cwd. None on any failure (fail-closed)."""
     dest = pathlib.Path( dest_root ) / task[ "instance_id" ]
     for repo, sha in grade_answers.pin_pairs( dict( repo=task[ "repo" ], pin_ref=task[ "pin_ref" ] ) ):
@@ -318,7 +318,7 @@ def build_question_prompt( task, seed, arm, ripwire_bin, rules_blurb="" ):
 def arm_suffix( arm, ripwire_bin, rules_blurb="" ):
     """The arm contract, shared by both prompt shapes so they cannot drift apart."""
     if arm == "baseline":
-        return ( "\n\nRETRIEVAL ARM — BASELINE: Do not use ripwire or ctxpack. Use the agent's "
+        return ( "\n\nRETRIEVAL ARM — BASELINE: Do not use ripwire. Use the agent's "
                  "ordinary repository search and file-reading tools." )
     # Both ripwire arms get the SAME contract. They differ only in what the environment puts on disk
     # (ripwire_skills adds the skills tree), so any prompt-level difference between them would
@@ -469,7 +469,7 @@ def invokes_ripwire( text ):
 # prepare_opencode_environment) keep the baseline arm from being PRIMED to use ripwire — no CLAUDE.md,
 # no skills, no settings.json hooks. They deliberately do NOT remove "ripwire" from PATH outright:
 # ephemeral_run_home() prepends the logging shim for every arm, including baseline, so that if the
-# agent disobeys the prompt's "Do not use ripwire or ctxpack" instruction anyway, the attempt is
+# agent disobeys the prompt's "Do not use ripwire" instruction anyway, the attempt is
 # evidence (a shim-log line / a transcript-parsed ripwire_calls count) instead of a silent, unrecorded
 # success. What was still missing is the other half: NOTHING converted that evidence into a verdict.
 # A baseline run that quietly used ripwire kept reporting status="ok" and paired normally in
@@ -488,7 +488,7 @@ def baseline_contamination_note( arm, metrics ):
         return None
     commands = metrics.get( "ripwire_commands" ) or []
     return ( f"CONTAMINATED: baseline arm invoked ripwire {calls} time(s) despite the "
-             f"'Do not use ripwire or ctxpack' contract — evidence: {commands[:3]!r}" )
+             f"'Do not use ripwire' contract — evidence: {commands[:3]!r}" )
 
 def parse_codex_jsonl_metrics( stdout, ripwire_bin ):
     """Return token usage plus explicit command/ripwire-CLI evidence from retained Codex JSONL."""

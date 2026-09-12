@@ -11,6 +11,8 @@
 #      NINE rows of the real bank legitimately name `ripwire/src` as a PATH argument to grep/ls, so a
 #      naive "mentions ripwire" refusal would throw away a third of the bank. Both directions are
 #      asserted here; a fix to one that breaks the other is the exact failure this arm catches.
+#      Another command name for the instrument (an older build) comes from AGENTLOOP_TOOL_ALIASES,
+#      never from a tracked literal; section 6 asserts that path in both directions as well.
 #   2. SEALED JUDGEMENT (protocol §3.2). Where the answer key has a judgement half, a human seals it
 #      BEFORE any run. The grader must REFUSE those rows without a key file — never improvise the
 #      judgement, never fall back to "score what I can and call it a pass".
@@ -25,6 +27,9 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 FIX="$ROOT/bench/agentloop/fixtures/grader"
 GRADER="$ROOT/bench/agentloop/grade_answers.py"
+# An operator's exported AGENTLOOP_TOOL_ALIASES must not change what this gate measures, so every run
+# starts without one; section 6 sets it explicitly where the alias path is the thing under test.
+unset AGENTLOOP_TOOL_ALIASES
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
@@ -154,8 +159,29 @@ def no( m ): print( "FAIL " + m )
 ( ok if G.is_circular( "ls x | /opt/homebrew/bin/ripwire --expand=Y" ) else no )( "piped absolute invocation is circular" )
 for legit in ( "grep -rn 'gitChurnCounts' ripwire/src ripwire/test",
                "ls ripwire/src/namesplit.h ripwire/src/naminglens.h",
-               "for R in ctxpack ripwire; do sed -n '/pipeline/,+20p' $R/docs/ARCHITECTURE.md; done" ):
+               "for R in otherrepo ripwire; do sed -n '/pipeline/,+20p' $R/docs/ARCHITECTURE.md; done" ):
     ( no if G.is_circular( legit ) else ok )( "path argument is NOT an invocation: %s" % legit[ :46 ] )
+
+# another command name for the instrument comes from AGENTLOOP_TOOL_ALIASES, never from a tracked
+# literal. The pattern is built at import, so each case runs a fresh interpreter with its own environment.
+import os, subprocess
+def circular_under( aliases, command ):
+    env = { k: v for k, v in os.environ.items() if k != "AGENTLOOP_TOOL_ALIASES" }
+    if aliases is not None:
+        env[ "AGENTLOOP_TOOL_ALIASES" ] = aliases
+    probe = "import sys, grade_answers as G; print( G.is_circular( sys.argv[ 1 ] ), len( G.TOOL_ALIASES ) )"
+    run = subprocess.run( [ sys.executable, "-c", probe, command ], env=env, capture_output=True, text=True,
+                          cwd=str( pathlib.Path( sys.argv[ 1 ] ) / "bench" / "agentloop" ) )
+    return run.stdout.strip() or run.stderr.strip()[ -120: ]
+for aliases, command, want, why in (
+        ( None,             "oldtool . --callers=X",               "False 0", "unset: another command name is not the instrument" ),
+        ( "",               "oldtool . --callers=X",               "False 0", "empty: an empty value adds no alias" ),
+        ( "oldtool, other", "oldtool . --callers=X",               "True 2",  "listed: an alias in command position is circular" ),
+        ( "oldtool other",  "ls x | /opt/bin/other --expand=Y",    "True 2",  "listed: a piped absolute alias invocation is circular" ),
+        ( "oldtool",        "grep -rn X oldtool/src oldtool/test", "False 1", "listed: an alias named as a path argument is NOT an invocation" ),
+        ( "oldtool",        "ripwire . --for=x",                   "True 1",  "listed: ripwire itself stays circular" ) ):
+    got = circular_under( aliases, command )
+    ( ok if got == want else no )( "AGENTLOOP_TOOL_ALIASES %s (got %r)" % ( why, got ) )
 
 # the seal predicate is conservative by design: a V row always, and any judgement half
 ( ok if G.needs_seal( dict( grader="V", accept_rule="anything" ) ) else no )( "every V row needs a seal" )

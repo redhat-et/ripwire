@@ -12,6 +12,8 @@
 #
 # Arms:
 #   1. the private working-copy name, case-insensitive, zero tolerance
+#   1b. the private pre-release name, case-insensitive, matched by hash so this file never spells it
+#      (offenders print as path:line only)
 #   2. absolute /Users/ paths
 #   3. audit-round coordinates (§A, §B<d>, §P<d>, V<d>-<d>, W<d>, r<dd>-) in EMITTED strings and
 #      in shipped markdown — NOT in ordinary source comments
@@ -69,6 +71,146 @@ if [ -n "$hits" ]; then
 else
     ok "arm 1 — no reference to the private development tree"
 fi
+
+# ── arm 1b: the private pre-release name, matched by hash ─────────────────────────────────────────
+# Arm 1 spells what it hunts. This arm cannot: its target is the name the project carried before it was
+# public, and a detector that spells a name publishes it. So it stores the SHA-256 of the lowercase token
+# and the token's length, never the token — the same "never spell what you withhold" rule
+# docs/docs_commands_build.py keeps for the rebrand's rename rows. A hash of a short word keeps it out of
+# grep, search indexes and a casual read of this file; it is not secrecy against someone who sets out to
+# recover it, and nothing here claims otherwise.
+#
+# MATCHING. Every tracked text file is lowercased and split into runs of ASCII letters, and every window
+# of the stored length inside a run is hashed — so the bare word, `NAME_BIN`, `name/src/x.h`, `name@sha`,
+# a CamelCase `NameIndex` and `libnamerc` all match. A token broken by a non-letter (`na-me`) does not.
+# Unlike the grep arms, this one needs no self-exclusion: the script carries no spelling to find.
+#
+# OUTPUT IS path:line ONLY. Printing the offending line would publish the name in the log of every red
+# run, CI logs included — the same call docs_commands_build.py's rebrand_row_public_side makes.
+#
+# EXEMPT BY CONTENT HASH, NOT BY PATH. bench/recalleval/snapshot.mdpack is the recall lane's byte-frozen
+# corpus — every tracked *.md at the commit snapshot.lock pins — so it still carries docs/EVALS.md's old
+# wording, and recallevalcheck's check #0 reds any in-place edit: rewriting it is a recalibration, not a
+# scrub. Its hits are exempt only while its bytes hash to the value pinned below. The next
+# `make_snapshot.py --freeze` changes those bytes, the exemption stops applying, and a pack refrozen from
+# a tree that still carries the name is reported like any other file.
+#
+# The deck binaries are extracted and scanned too — arm 2b's population, for arm 2b's reason: a name
+# rendered into a slide is invisible to every text sweep of the tree.
+PRERELEASE_NAME_SHA256='7 904522dda28c1584057c235feec23321855e1760d01116dfc6bf851411c69c7c'
+PRERELEASE_EXEMPT_SHA256='bench/recalleval/snapshot.mdpack 6f60a279b582356f5e06091069d1c948889b6d3ccbc1b2d4e3b0d31321326717'
+: > "$TMP/arm1b.extra"
+for _bin in present/ripwire-showcase.pdf present/ripwire-showcase.pptx; do
+    [ -f "$ROOT/$_bin" ] || continue
+    _out="$TMP/arm1b.$( basename "$_bin" ).txt"
+    case "$_bin" in
+      *.pdf)  command -v pdftotext >/dev/null 2>&1 && pdftotext "$ROOT/$_bin" "$_out" 2>/dev/null ;;
+      *.pptx) command -v unzip >/dev/null 2>&1 && unzip -p "$ROOT/$_bin" 'ppt/slides/*.xml' 'ppt/notesSlides/*.xml' > "$_out" 2>/dev/null ;;
+    esac
+    if [ -s "$_out" ]; then
+        printf '%s\t%s\n' "$_bin" "$_out" >> "$TMP/arm1b.extra"
+    else
+        printf 'SKIP: arm 1b — %s not extractable here (NOT a pass for that file)\n' "$_bin"
+    fi
+done
+python3 - "$TMP/tracked.z" "$TMP/arm1b.extra" "$PRERELEASE_NAME_SHA256" "$PRERELEASE_EXEMPT_SHA256" \
+    > "$TMP/arm1b" 2> "$TMP/arm1b.err" <<'PY'
+import hashlib, re, sys
+paths = [ p for p in open( sys.argv[ 1 ], 'rb' ).read().split( b'\0' ) if p ]
+extra = [ line.split( '\t', 1 ) for line in open( sys.argv[ 2 ], encoding='utf-8' ).read().splitlines() if line ]
+exempt = dict( line.split() for line in sys.argv[ 4 ].splitlines() if line.strip() )
+targets = {}
+for line in sys.argv[ 3 ].splitlines():
+    if not line.strip():
+        continue
+    length, digest = line.split()
+    if not re.fullmatch( r'[0-9a-f]{64}', digest ) or int( length ) < 1:
+        print( 'REFUSE malformed target row (want "<length> <sha256 hex>")' )
+        sys.exit( 1 )
+    targets.setdefault( int( length ), set() ).add( digest )
+if not targets:
+    print( 'REFUSE no target hashes: the arm would pass while matching nothing' )
+    sys.exit( 1 )
+
+def make_scan( targets ):
+    """data (bytes) -> the 1-based line numbers carrying a target token. Each maximal letter run is hashed
+    once for the whole sweep, so a word that recurs in a thousand files costs one set of hashes."""
+    run_res = { n: re.compile( rb'[a-z]{%d,}' % n ) for n in targets }
+    verdict = {}
+    def scan( data ):
+        low = data.lower()
+        bad = set()
+        for n, run_re in run_res.items():
+            for run in set( run_re.findall( low ) ):
+                key = ( n, run )
+                if key not in verdict:
+                    verdict[ key ] = any( hashlib.sha256( run[ i:i + n ] ).hexdigest() in targets[ n ]
+                                          for i in range( len( run ) - n + 1 ) )
+                if verdict[ key ]:
+                    bad.add( run )
+        if not bad:
+            return []
+        return [ i for i, line in enumerate( low.split( b'\n' ), 1 ) if any( run in line for run in bad ) ]
+    return scan
+
+# CONTROL: the same scanner, built over a planted token's hash, must fire on every shape the comment above
+# promises and stay silent on text without the token — so an empty sweep below can only mean "clean",
+# never "the matcher stopped matching".
+CONTROL = 'qzvkwjx'
+control = make_scan( { len( CONTROL ): { hashlib.sha256( CONTROL.encode() ).hexdigest() } } )
+for shape in ( 'see qzvkwjx here', 'Qzvkwjx', 'QZVKWJX_BIN', 'qzvkwjx/src/x.h', 'qzvkwjx@1234abc', 'QzvkwjxIndex', 'libqzvkwjxrc' ):
+    if control( ( 'first line\n' + shape ).encode() ) != [ 2 ]:
+        print( f'REFUSE control: the scanner did not fire on the planted shape {shape!r}' )
+        sys.exit( 1 )
+if control( b'qzvkwj qzvk-wjx' ):
+    print( 'REFUSE control: the scanner fired on text that does not carry the planted token' )
+    sys.exit( 1 )
+
+scan = make_scan( targets )
+tracked = set()
+for raw in paths:
+    p = raw.decode( 'utf-8', 'surrogateescape' )
+    tracked.add( p )
+    try:
+        data = open( raw, 'rb' ).read()
+    except OSError:
+        continue
+    if b'\0' in data:
+        continue   # binary, skip (mirrors grep -I); the deck binaries are scanned below as extracted text
+    found = scan( data )
+    if not found:
+        continue
+    if p in exempt and hashlib.sha256( data ).hexdigest() == exempt[ p ]:
+        print( f'EXEMPT {len( found )} {p}' )
+        continue
+    for i in found:
+        print( f'HIT {p}:{i}' )
+for label, txt in extra:
+    for i in scan( open( txt, 'rb' ).read() ):
+        print( f'HIT {label} (extracted text):{i}' )
+for p, digest in exempt.items():
+    try:
+        live = hashlib.sha256( open( p, 'rb' ).read() ).hexdigest() if p in tracked else None
+    except OSError:
+        live = None
+    if live != digest:
+        print( f'STALE {p}' )
+PY
+py_status=$?
+_deckn="$( wc -l < "$TMP/arm1b.extra" | tr -d ' ' )"
+if grep -q '^REFUSE' "$TMP/arm1b"; then
+    no "arm 1b — $( grep '^REFUSE' "$TMP/arm1b" | head -1 | cut -c8- )"
+elif [ "$py_status" -ne 0 ]; then
+    no "arm 1b — scanner crashed (python exit $py_status): $( tail -3 "$TMP/arm1b.err" | tr '\n' ' ' )"
+elif grep -q '^HIT ' "$TMP/arm1b"; then
+    no "arm 1b — private pre-release name on $( grep -c '^HIT ' "$TMP/arm1b" | tr -d ' ' ) line(s); locations only, the text is not echoed:"
+    grep '^HIT ' "$TMP/arm1b" | cut -c5- | sed 's/^/          /'
+else
+    ok "arm 1b — no private pre-release name in the committed tree or $_deckn extracted deck file(s)$( awk '/^EXEMPT /{ printf " (%s line(s) in byte-frozen %s exempt by content hash)", $2, $3 }' "$TMP/arm1b" )"
+fi
+sed -n 's/^STALE //p' "$TMP/arm1b" | while IFS= read -r _path; do
+    printf 'NOTE: arm 1b — the content-hash exemption for %s no longer matches its bytes; it exempts nothing and can be deleted\n' "$_path"
+done
 
 # ── arm 2: absolute home-directory paths ──────────────────────────────────────────────────────────
 hits="$( sweep '/Users/' || true )"

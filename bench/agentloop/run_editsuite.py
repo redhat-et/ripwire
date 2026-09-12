@@ -111,8 +111,8 @@ def task_prompt( task ):
 
 def arm_instructions( arm, task, shim, rules_blurb="" ):
     if arm == "native_edit":
-        return ( "\n\nTOOLS: use your own file-editing tool (edit / write / apply_patch / sed). Do not use ripwire or "
-                 "ctxpack. Stop as soon as you are confident the edit is in place." )
+        return ( "\n\nTOOLS: use your own file-editing tool (edit / write / apply_patch / sed). Do not use ripwire. "
+                 "Stop as soon as you are confident the edit is in place." )
     ops = task_ops( task )
     if task["kind"] == "plan":
         edits = ",\n    ".join( json.dumps( { "op": { "replace": "replace_symbol_body", "insert_before": "insert_before_symbol",

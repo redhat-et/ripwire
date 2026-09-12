@@ -251,6 +251,10 @@ Four rules in the grader are load-bearing, and `test/agentloopgradercheck.sh` as
 - **Non-circularity.** No `gt_command` may *invoke* ripwire — a key produced by the instrument under
   test is not a key — and such a row is `REFUSED_CIRCULAR`, never scored. The distinction is precise:
   nine rows of the real bank name `ripwire/src` as a **path argument** to grep/ls, which is fine.
+  A bank whose commands run an older build under another command name lists that name in
+  `AGENTLOOP_TOOL_ALIASES` (comma- or space-separated), and those rows are refused the same way;
+  unset, only `ripwire` is the instrument. The grader's header and `--audit` summary state how many
+  aliases were in force, never the names.
 - **Sealed judgement.** Where a key has a judgement half (every `V` row, and any `E` row whose second
   half is a classification), the grader takes a `--key` file and `REFUSED_NO_KEY`s without it. It
   never improvises the judgement half.

@@ -7,7 +7,7 @@
 # other capped verb in the catalog has a display default (--hotspots 40, --grep 100, --impact 40, …);
 # --lint alone had none, so its own `<lint>` root could grow without bound. The fix (src/main.cpp
 # runLint) gives the DEFAULT (unpaged) run a byte budget (kLintDefaultPayloadBytes=100000, chosen from
-# measurements recorded at its definition site: this repo 367,924 B/3,213 findings, ctxpack (1,033
+# measurements recorded at its definition site: this repo 367,924 B/3,213 findings, its pre-cutover ancestor (1,033
 # tracked files) 254,445 B/2,312 findings, both ~110-115 B/finding, against E6's ~330 B/finding), and
 # reuses src/pageview.h's shared pageDisclosure() so the default run now says shown=/capped= the same
 # way every other capped verb already does — an explicit --limit=N still always beats the default cap

@@ -6899,7 +6899,7 @@ only five are **independent evidence**, and every pooled number below pools exac
 | **rustCLI** | 250 | 6 004 | 6 020 | **4 068** | *(no git)* | Rust 115, md 75, Bash 11, TS 8 |
 | **appleXR** | 320 | 1 860 | 582 | **454** | *(no git)* | json 158, Swift 49, C/C++ hdr 45, ObjC 40, Metal 13 |
 | *ripwire-src* | 95 | 2 795 | 7 929 | *1 958* | `61c6b54` | a **subset of ripwire** — not independent |
-| *ctxpack* | 920 | 7 476 | 8 312 | *4 027* | `b5ac9f2` | ripwire's **pre-cutover ancestor** — shared lineage |
+| *ripwire-ancestor* | 920 | 7 476 | 8 312 | *4 027* | `b5ac9f2` | ripwire's **pre-cutover ancestor** — shared lineage |
 | *gameA-later* | 4 075 | 59 350 | 39 152 | *17 552* | `86a6dbb7` | a later **snapshot of gameA** |
 | *gameA-earlier* | 734 | 15 006 | 17 235 | *8 935* | `dabfaf0` | an earlier **snapshot of gameA** |
 
@@ -6932,7 +6932,7 @@ numbers below should be re-derived on any tree where it is deployed as a gate �
 | rustCLI | 4 068 | 292 · 7.18% | 1 303 · 32.03% | **0 · 0.00%** *(now UNAVAILABLE)* | **UNAVAILABLE** |
 | appleXR | 454 | 45 · 9.91% | 16 · 3.52% | 7 · 1.54% | **UNAVAILABLE** |
 | *ripwire-src* | *1 958* | *482 · 24.62%* | *55 · 2.81%* | *101 · 5.16%* | *558 · 28.50%* |
-| *ctxpack* | *4 027* | *503 · 12.49%* | *825 · 20.49%* | *94 · 2.33%* | *874 · 21.70%* |
+| *ripwire-ancestor* | *4 027* | *503 · 12.49%* | *825 · 20.49%* | *94 · 2.33%* | *874 · 21.70%* |
 | *gameA-later* | *17 552* | *2 257 · 12.86%* | *1 690 · 9.63%* | *629 · 3.58%* | *781 · 4.45%* |
 | *gameA-earlier* | *8 935* | *1 111 · 12.43%* | *929 · 10.40%* | *291 · 3.26%* | *57 · 0.64%* |
 
@@ -7013,7 +7013,7 @@ whose denominator is the 23 367 symbols in the three corpora where git could be 
 
 **Per-corpus maxima by |φ|:** ripwire +0.262 (structural × historical), tree-sitter +0.167
 (structural × confusion), rustCLI −0.166 (structural × lexical), gameA +0.161 (structural
-× confusion), appleXR ≤ 0.024; among the non-independent extras, ctxpack +0.278 — the largest value
+× confusion), appleXR ≤ 0.024; among the non-independent extras, ripwire-ancestor +0.278 — the largest value
 anywhere in the study. **Every pair on every corpus is |φ| < 0.28, most are < 0.17, and the largest
 Jaccard overlap between any two families is 0.119 pooled (0.221 on any single corpus).**
 
@@ -7085,13 +7085,13 @@ trees, so added and deleted code cannot masquerade as instability.
 | Ladder | commits | sampled | span (committer dates) |
 | --- | ---: | ---: | --- |
 | ripwire | 148 first-parent | every ~18 | 2026-07-31 → 2026-08-05 |
-| ctxpack | 792 first-parent | every ~99 | 2026-06-20 → 2026-08-05 |
+| ripwire-ancestor | 792 first-parent | every ~99 | 2026-06-20 → 2026-08-05 |
 | gameA | 1 620 first-parent | every ~202 | 2026-06-03 → 2026-07-21 |
 
 Jaccard of each family's flagged symbol set, consecutive sampled commits (mean) and oldest-vs-newest
 (endpoint):
 
-| Family | ripwire | ctxpack | gameA | consecutive range | endpoint range |
+| Family | ripwire | ripwire-ancestor | gameA | consecutive range | endpoint range |
 | --- | --- | --- | --- | --- | --- |
 | lexical | 1.000 / 0.999 | 1.000 / 1.000 | 1.000 / 0.999 | **1.000** | **0.999 – 1.000** |
 | structural | 0.995 / 0.965 | 0.965 / 0.859 | 0.990 / 0.939 | 0.965 – 0.995 | 0.859 – 0.965 |
@@ -7100,7 +7100,7 @@ Jaccard of each family's flagged symbol set, consecutive sampled commits (mean) 
 
 **`historical` jitters an order of magnitude harder than the other three, on all three histories.**
 Per-symbol flag-flip rate per sampled step: structural 0.06–0.66%, lexical 0.00%, confusion
-0.01–0.45%, **historical 1.21–6.67% (peak 32.99% on one ctxpack step)**. Endpoint to endpoint the
+0.01–0.45%, **historical 1.21–6.67% (peak 32.99% on one ripwire-ancestor step)**. Endpoint to endpoint the
 historical sets overlap by Jaccard 0.426–0.546; on gameA, **161 of the 401 still-present symbols it
 flagged in June (40%) were no longer flagged in July**, on code that did not change between the two
 commits. This is not a bug — churn
@@ -7111,7 +7111,7 @@ something.
 
 **Honest limits of this pass.** All three histories are dense but short in wall-clock (5–50 days), so
 every sampled commit's 12-month churn window contains the whole history; a longer-lived repository
-would show *less* churn-cut movement per commit. The ctxpack endpoint figures are the least reliable
+would show *less* churn-cut movement per commit. The ripwire-ancestor endpoint figures are the least reliable
 row in the table — that tree grew from 208 to 4 027 eligible functions across the window, leaving a
 177-symbol surviving universe at the endpoint. Stability was measured on three repositories, two of
 which share a lineage; it was **not** measured on rustCLI or appleXR, which have no git history
@@ -7211,7 +7211,7 @@ K ≥ 3 — fails C2 outright (0.00% on two of five corpora) and fails the gate 
 output set's endpoint Jaccard is **0.438 – 0.719**. Dropping `historical` instead produces a set that
 is both smaller *and* measurably steadier. Output-set stability, on the same three ladders:
 
-| Preset | ripwire | ctxpack | gameA |
+| Preset | ripwire | ripwire-ancestor | gameA |
 | --- | --- | --- | --- |
 | lenient (all 4, K ≥ 1) | 0.943 / 0.812 | 0.947 / 0.804 | 0.970 / 0.910 |
 | default (all 4, K ≥ 2) | 0.878 / 0.622 | 0.851 / 0.548 | 0.907 / 0.633 |
@@ -7275,7 +7275,7 @@ counts **four** families, not five. That third result is the uncomfortable one a
 was run rather than assumed.
 
 Measured 2026-08-06, binary built at `feat/quality-panel`. Corpora, denominators and the overfitting caveat
-are §9.1's, unchanged — five independent trees, **27 999 eligible functions**, `ctxpack` and `ripwire-src`
+are §9.1's, unchanged — five independent trees, **27 999 eligible functions**, `ripwire-ancestor` and `ripwire-src`
 reported separately and never pooled.
 
 #### 9.9.1 Per-family fire rate, with the two new columns
@@ -7287,7 +7287,7 @@ reported separately and never pooled.
 | gameA | 17 157 | 12.65% | 9.77% | 3.57% | 5.20% | 0.23% | 16.37% |
 | rustCLI | 4 068 | 7.18% | 32.03% | **UNAVAILABLE** | **UNAVAILABLE** | 0.98% | 0.10% |
 | appleXR | 454 | 9.91% | 3.52% | 1.54% | **UNAVAILABLE** | 6.17% | 0.88% |
-| *ctxpack* | *4 027* | *12.49%* | *20.49%* | *2.33%* | *21.70%* | *0.99%* | *2.83%* |
+| *ripwire-ancestor* | *4 027* | *12.49%* | *20.49%* | *2.33%* | *21.70%* | *0.99%* | *2.83%* |
 | *ripwire-src* | *2 013* | *24.89%* | *2.73%* | *5.07%* | *27.77%* | *1.99%* | *0.79%* |
 
 Two properties of the new columns matter more than their levels:
@@ -7316,8 +7316,8 @@ Two properties of the new columns matter more than their levels:
 | **state** | +0.162 | −0.054 | +0.070 | +0.026 | +0.003 | 1.000 |
 
 Largest |φ| on any single corpus: ripwire +0.252, tree-sitter +0.167, gameA +0.190, rustCLI +0.204, appleXR
-+0.126; among the non-independent extras ctxpack **+0.278** and ripwire-src +0.218. **The largest value
-anywhere in the study is still ctxpack's +0.278 `structural × historical` — the same pair, the same number
++0.126; among the non-independent extras ripwire-ancestor **+0.278** and ripwire-src +0.218. **The largest value
+anywhere in the study is still ripwire-ancestor's +0.278 `structural × historical` — the same pair, the same number
 §9.3 reported — and it involves neither new family.** The largest involving a new family anywhere is
 **+0.204** (rustCLI `structural × colocation`); pooled, **+0.162** (`structural × state`).
 
@@ -7369,9 +7369,9 @@ and left the *shape* alone: 38.74% → 7.79% → 1.66% → 0.18%, roughly 5×, 4
 
 Same protocol as §9.5: **one binary, the corpus varied** over a ladder of past commits in a throwaway clone,
 restricted to symbols present in both trees. Ladders: ripwire (138 first-parent commits, every ~17,
-2026-07-31 → 2026-08-05) and ctxpack (792, every ~99, 2026-06-20 → 2026-08-05).
+2026-07-31 → 2026-08-05) and ripwire-ancestor (792, every ~99, 2026-06-20 → 2026-08-05).
 
-| Family | ripwire (mean / endpoint) | ctxpack (mean / endpoint) | worst mean |
+| Family | ripwire (mean / endpoint) | ripwire-ancestor (mean / endpoint) | worst mean |
 | --- | --- | --- | ---: |
 | lexical | 1.000 / 0.999 | 1.000 / 1.000 | **1.000** |
 | state | 0.999 / 0.990 | 1.000 / 1.000 | **0.999** |
@@ -7383,7 +7383,7 @@ restricted to symbols present in both trees. Ladders: ripwire (138 first-parent 
 **`colocation` is the least stable family in the panel, on the ladder where the corpus grew.** Its 0.222
 endpoint Jaccard is the worst number in either study — worse than `historical`'s 0.426–0.546 — while on the
 ripwire ladder it is a perfect 1.000/1.000. That contrast is the whole finding, and the mechanism is the one
-§9.5 already named for churn: **a fixed-size worst-40 cut over a ranking whose population moves.** ctxpack grew
+§9.5 already named for churn: **a fixed-size worst-40 cut over a ranking whose population moves.** ripwire-ancestor grew
 from 208 to 4 027 eligible functions across its window, so the top 40 by outside-reading volume turns over
 completely; ripwire's tree barely changed size in five days, so it does not move at all. A family that is
 steady only while the corpus is not growing cannot carry a gate.
@@ -7428,7 +7428,7 @@ Per corpus, in full:
 **The exclusion is validated by the output the preset actually emits**, not only by the per-family numbers.
 Output-set Jaccard down the same two ladders:
 
-| Preset | ripwire | ctxpack |
+| Preset | ripwire | ripwire-ancestor |
 | --- | --- | --- |
 | lenient (all 6, K ≥ 1) | 0.949 / 0.805 | 0.962 / 0.848 |
 | default (all 6, K ≥ 2) | 0.901 / 0.599 | 0.878 / 0.688 |
@@ -7449,7 +7449,7 @@ of actual defect or maintenance cost, they are not tuned per corpus, and `strict
 `structural + lexical, K ≥ 2` because `confusion` cannot apply there — the verb says so (`unavailable=`,
 `of="2"`) rather than wearing a four-family label silently. One limit is new and belongs here: **the stability
 pass covers two ladders, not three.** §9.5 measured gameA as well; this pass did not, so `colocation`'s
-verdict rests on ctxpack alone for the corpus-growth case. Two ladders were enough to disqualify it — the
+verdict rests on ripwire-ancestor alone for the corpus-growth case. Two ladders were enough to disqualify it — the
 finding is that it *can* move that far, which one counterexample establishes — but a third would say more
 about how often.
 
@@ -9520,7 +9520,7 @@ history — read them as a gauge, never a proportion. The census reports each po
 its own unit, full stop.
 
 **What the existing oracle can and cannot see — the instrumentation verdict, established by reading
-`bench/scip_amb_precision.py`.** The prior census (pre-cutover history-of-record: ctxpack
+`bench/scip_amb_precision.py`.** The prior census (pre-cutover history-of-record: ripwire-ancestor's
 `bench/ANSWERQUALITY.md`, appended 2026-07-11) measured amb-flagged precision **0.378** (loguru,
 300 buckets / 794 edges) and **0.841** (rq, 520 / 622) against a non-ambiguous control of **1.000**
 over 2,077 edges. Its grouping key is whether the callee NAME has >1 in-corpus definition — and a

@@ -66,7 +66,7 @@
 // past commits and found `historical`'s flagged set at mean consecutive Jaccard 0.800-0.862 and endpoint
 // 0.426-0.546 — on gameA, 40% of the symbols it flagged in June were unflagged in July on code that had not
 // changed. §9.9 ran the SAME ladder on the two new families rather than assuming they inherited the others'
-// stability, and that is how the second exclusion was found: on the ctxpack ladder `colocation` comes out at
+// stability, and that is how the second exclusion was found: on the ripwire-ancestor ladder `colocation` comes out at
 // 0.732 mean consecutive and 0.222 endpoint — WORSE than historical, and the worst endpoint anywhere in either
 // study. Measured per family, worst case over the two ladders: lexical 1.000, state 0.999, structural 0.965,
 // confusion 0.920, historical 0.852, colocation 0.732. §9.7's own cut interval, (0.862, 0.920), is unchanged;
@@ -75,7 +75,7 @@
 // THE MECHANISM IS THE SAME IN BOTH CASES, which is why this is a finding and not a coincidence: each is a
 // FIXED-SIZE cut (the worst 40 ranks) over a ranking whose POPULATION moves. Churn is a rolling 12-month
 // window, so a busy week reshuffles the file order; the local-reasoning ranking is by absolute outside-reading
-// volume, so a tree that grew 19x across the ctxpack window reshuffles its top 40 completely. On a repository
+// volume, so a tree that grew 19x across the ripwire-ancestor window reshuffles its top 40 completely. On a repository
 // of stable size the same family is perfectly steady — colocation is 1.000/1.000 on the ripwire ladder. A
 // family that is stable only while the corpus is not growing cannot carry a gate.
 //

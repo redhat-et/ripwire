@@ -12,7 +12,7 @@
 #
 # THE PROXY IS NOISY AND THIS GATE SAYS SO IN ITS OWN OUTPUT. People rename for rebrands, module moves,
 # API changes, type changes and reverts — not only because a name was bad. Measured on this repo the
-# single largest mined family is a whole-project rebrand (ctxpack -> ripwire), which carries no naming
+# single largest mined family is a whole-project rebrand (a private pre-release name -> ripwire), which carries no naming
 # information at all. So a proxy computed over a handful of pairs is noise wearing a decimal point, and
 # the LIVE arm below SKIPS rather than passes when the sample is under its declared floor. A gate that
 # silently passes on three samples is worse than no gate.
