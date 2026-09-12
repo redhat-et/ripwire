@@ -302,10 +302,12 @@ already knew about the others, several while fixing one. So the rule is mechanic
   `#if __STDC_VERSION__ < 199901` / `#define __restrict` (empty), and `__STDC_VERSION__` is
   undefined in C++, so every `__restrict` that follows any libc/libc++ include is silently deleted.
   `__restrict__` is a keyword, not a macro, and survives.
-- **Prefer `VERIFY_NO_ALIAS( a, b )` (objects) or `VERIFY_NO_ALIAS_BUF( a, b )` (containers/spans) in
-  the body over a qualifier on the signature.** For a container or span, the promise has to land on
+- **Prefer `VERIFY_NO_ALIAS( a, b )` (objects) or `VERIFY_NO_ALIAS_BUF( a, b )` (OWNING containers only: `std::vector`, `std::string`, `std::array`) in
+  the body over a qualifier on the signature.** For a container, the promise has to land on
   `.data()` — on the objects themselves it is inert for the loop, because the optimizer reaches the
-  heap buffer through a pointer loaded from the header, not through the header's own address. Place
+  heap buffer through a pointer loaded from the header, not through the header's own address. Never a
+  view: two `std::span` or `std::string_view` objects can look into ONE allocation, and the promise is per
+  allocation, so the macro refuses them at compile time — promise the owners they came from. Place
   the macro at the top of the function, before the first load or store through either argument; if the
   function already has a "nothing to do" early return on empty input, put it after that return, so the
   promise is never made on a null `.data()` (measured: same loop effect, plus only the emptiness test the
