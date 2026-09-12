@@ -2106,7 +2106,8 @@ condition.
 The installer downloads the latest GitHub release, verifies the SHA-256 digest, and installs the
 binary to `~/.local/bin`. The installer also stages the agent skills under
 `~/.local/share/ripwire/skills`. It activates the skills for each agent it finds. It does not edit
-your shell profile. It does not register hooks unless you pass an explicit `--hook` option.
+your shell profile. It does not register hooks. To register hooks, run
+`bash ~/.local/share/ripwire/skills/install.sh --hook`.
 
 #### 3.2 Build from source
 
@@ -2258,7 +2259,7 @@ ripwire . --callers=rankGraphTeleport
 The output has this shape. The line numbers are a capture and can move as the files grow.
 
 ```xml
-<callers of="rankGraphTeleport" defs="1" count="6" root="." counts_floor="1">
+<callers of="rankGraphTeleport" defs="1" count="6" root="." hop_tested="0" hop_untested="6" graph_ambiguous="7601" graph_unresolved="4206" graph_unindexed="218" counts_floor="1" next="--uses=rankGraphTeleport">
 <s t="fn" n="runEval" p="src/eval.h:171"/>
 <s t="fn" n="rankGraph" p="src/graph.h:3398"/>
 <s t="fn" n="anchoredLexicalRank" p="src/graph.h:3948"/>
@@ -2308,7 +2309,7 @@ The output uses these disclosure rules without exception:
   `count="0"`.
 - **An estimate is labelled.** Token estimates are calibrated approximations. They are not exact
   counts for every model.
-- **Counting units are named.** `--callers` counts distinct caller and callee pairs. `--uses` counts
+- **Counting units are named.** `--callers` counts distinct symbols. `--uses` counts
   use sites. The two numbers differ by design.
 
 Use these methods when a disclosure says the answer is incomplete:
@@ -2316,8 +2317,8 @@ Use these methods when a disclosure says the answer is incomplete:
 1. Use `--expand=SYM` to read the body.
 2. Use `--uses=SYM` and `--impact=SYM` to measure the blast radius.
 3. Use `--scip=FILE` to supply a compiler-grade index. A precise index replaces the name-based edges
-   and marks the affected edges with `prov="scip"`. A missing or corrupt index causes a refusal. It
-   does not cause a silent fallback.
+   and marks the affected edges with `prov="scip"`. A missing index causes a refusal. A corrupt index
+   causes a fallback to the name-based edges and a warning on standard error. Neither case is silent.
 
 ### 8. Determinism
 
@@ -2471,7 +2472,7 @@ causes one cold re-parse. A gate asserts that the warm output is byte-identical 
 
 Measured results with their instruments and corpora are in `docs/EVALS.md`. The document also lists
 the counterexamples that this project publishes against itself. For example, one comparison ran
-graphify 0.9.34 with `--code-only --no-cluster`. The measurement is in `docs/EVALS.md`, Section 2.
+graphify 0.9.34 with `--code-only --no-cluster`. The measurement is in `bench/headtohead/r4-2026-08-06/`.
 
 ### 14. Known limits
 
