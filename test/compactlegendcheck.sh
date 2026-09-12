@@ -35,8 +35,9 @@
 # partition=/modules=, --safe-delete's radius_tested=/radius_untested=; in that sweep's last pass: --communities' modules=/
 # shown_bridges=/connected_singletons=/symbols=, --community's shown_bridges=, the <bridge> rows, --safe-delete's t=/defs=/
 # ambiguous_callers=/dead_code_candidate=, --impact's <f lazy=>, every map-header field, the columnar format=/<cols fields=> and
-# lens=; from that sweep's design review: the <s tested=> rows of --callers/--impact) is DEFINED by the compact legend of a
-# document that carries it, and by none that does not. STRUCTURAL arm (S): every
+# lens=; from that sweep's design review: the <s tested=> rows of --callers/--impact; in its follow-up: the <d tested=> rows of
+# --pack-task --metrics and the columnar tested column) is DEFINED by the compact legend of a document that carries it, and by
+# none that does not. STRUCTURAL arm (S): every
 # conditional attribute the graphlegend.h helper family emits, the PageRank disclosure, every conditional hdr: field of
 # the map header, and every absence-marked row field of the map legend, read from source, has a compact reading — so the
 # next one cannot land undefined.
@@ -1145,6 +1146,97 @@ for v in "$TESTED@--callers=run" "$TESTED@--safe-delete=helper" "$REPO@--callers
     fi
 done
 [ "$d32bad" -eq 0 ] && [ "$d32n" -eq 5 ] && ok "(D32) mirror: the tested row reading prints on none of $d32n answers that lack an <s tested=> row (a test-only caller list, --safe-delete's radius, the fixture's --callers/--impact, the plain map)"
+
+# ── THE TESTED LENS ON <d> ROWS AND IN THE COLUMNAR FORM (2026-09-12, the follow-up to (D31)/(D32)) ──────────────────────────────
+# (D31)'s reading is ELEMENT-qualified on <s>, and two more forms print the same lens with no reading. Each was run, and read
+# against its emitter, before any reading landed:
+#   (D33) <d tested="1"> signature rows. serialize.h's two signature-row writers print it from computeQMetrics' tested[] column,
+#         which graph.h isTestedByReach fills: the <s> rows' predicate, an indexed test transitively reaches that symbol and it
+#         is not itself a test. Never a literal 0. main.cpp computes that column only under --metrics, --for or --exemplar, so a
+#         plain --pack-task prints no tested= at all; --pack-task --metrics does, and main.cpp's compactLegendHint checks
+#         metrics before pack-task, so that answer compacts under the pack-signatures schema. Its FULL legend never names
+#         tested= either (a `!` spec). condArm's left-anchored tested= would also be satisfied by (D31)'s <s tested=1> reading
+#         on an answer printing both forms, so the row asserts the <d> reading's own opener too.
+#   (D34) the columnar form's tested column. --callers/--callees/--impact --format=columnar always pass the test-reach lens
+#         (verbs_navigate.h), so fields= names tested and <tested> holds one DENSE value per row (columnar.h
+#         emitColumnarTestedColumn): 1 where isTestedByReach holds, 0 on every other row, a test row included. Unlike the <s>
+#         attribute it prints 0, so the reading rides the COLUMN rather than a 1: over test/fixture, which holds no test,
+#         --callers=distance carries <tested>0,0</tested>, and a reading keyed to a 1 would leave those zeros undefined. The
+#         full legend's only tested sentence is kTestedRowLegend's attribute reading ("never 0"), so no full control is taken.
+# RED on e45bd3ab (plain and ASan alike): all six (D33)/(D34) checks FAILed and nothing else did ((D35) is green by construction),
+# for example
+#   FAIL (D33) --pack-task=helper --metrics over a tree with a test (its <d> rows helper and run are tested): tested="1" is carried but the compact legend never defines it
+#   FAIL (D34) --callers=distance --format=columnar over test/fixture (...): fields="path,name,line,kind,tested" and <tested>0,0</tested> are carried but the compact legend never reads the column
+condPair D33 "--pack-task=helper --metrics over a tree with a test (its <d> rows helper and run are tested)" "$TESTED" "--pack-task=helper --metrics" '!d:tested'
+if [ "$( ca carries "$TMP/d.comp" d:tested )" = 1 ] && [ "$( ca mentions "$TMP/d.comp" "<d tested=1>:" )" = 1 ]; then
+    ok "(D33) --pack-task=helper --metrics: the reading is the <d> row's own ('<d tested=1>:')"
+else
+    no "(D33) --pack-task=helper --metrics: <d tested=> carried=$( ca carries "$TMP/d.comp" d:tested ), but the compact legend does not spell the <d> row reading '<d tested=1>:': $( leg legend "$TMP/d.comp" | head -c 260 )"
+fi
+COLTESTED="<tested> column:"
+namesTested(){ case ",$1," in *,tested,*) return 0 ;; esac; return 1; }
+# colTestedRow ID LABEL DIR "ARGS" — one columnar answer in both postures: the control (fields= names tested in both), then the
+# compact legend must spell the column's reading.
+colTestedRow()
+{
+    local id="$1" label="$2" dir="$3" args="$4" col
+    cdRun "$TMP/d.full" "$dir" $args; cdRun "$TMP/d.comp" "$dir" $args --legend=compact
+    col="$( grep -o '<tested>[^<]*</tested>' "$TMP/d.comp" | head -1 )"
+    if ! namesTested "$( ca value "$TMP/d.full" cols:fields )" || ! namesTested "$( ca value "$TMP/d.comp" cols:fields )"; then
+        no "($id) $label: control broken — <cols fields=> does not name tested in both postures, so its reading row would be vacuous: $( head -c 160 "$TMP/d.comp" )"
+    elif [ "$( ca mentions "$TMP/d.comp" "$COLTESTED" )" != 1 ]; then
+        no "($id) $label: fields=\"$( ca value "$TMP/d.comp" cols:fields )\" and $col are carried but the compact legend never reads the column: $( leg legend "$TMP/d.comp" | head -c 260 )"
+    else
+        ok "($id) $label: fields= names tested ($col), and the compact legend reads the column"
+    fi
+    return 0
+}
+colTestedRow D34 "--callers=helper --format=columnar over a tree with a test" "$TESTED" "--callers=helper --format=columnar"
+colTestedRow D34 "--callees=run --format=columnar over a tree with a test" "$TESTED" "--callees=run --format=columnar"
+colTestedRow D34 "--impact=helper --format=columnar over a tree with a test (test_run, a test row, reads 0)" "$TESTED" "--impact=helper --format=columnar"
+colTestedRow D34 "--callers=distance --format=columnar over test/fixture (no test: the column still rides, every value 0)" "$REPO" "--callers=distance --format=columnar"
+
+# (D35) THE MIRROR, on answers chosen for what they LACK, each lack asserted before it is relied on: --pack-task=helper over the
+# tested corpus prints <d> rows with no tested= (no --metrics, so no column was computed); --pack-task=geometry --metrics over
+# test/fixture prints <d amp=> rows and no tested= (no test reaches them); --uses=helper --format=columnar has a fields= that does
+# not name tested; --callers=helper carries <s tested=> rows and neither a <d> row nor <cols>; --pack-task=helper --metrics carries
+# <d tested=> and no <s tested=> row, which also keeps (D31)'s reading on <s>. The needles are the readings' own openers, as in
+# (D32). Green on the red build by construction, like (D7). Shown able to fail: with each reading spliced into the compact legend
+# of a real answer that lacks its field (the column reading into --uses=helper --format=columnar, the <d> reading into
+# --pack-task=helper, (D31)'s <s> reading into --pack-task=helper --metrics), its check here fired on all three spliced answers
+# and on none of the three unspliced ones. The column check is the one a dropped valueItem trips: without it the fields= term
+# reads every <cols fields=>, --uses' included.
+cdRun "$TMP/d35.pt" "$TESTED" --pack-task=helper --legend=compact
+[ "$( ca carries "$TMP/d35.pt" d:l )" = 1 ] && [ "$( ca carries "$TMP/d35.pt" d:tested )" != 1 ] \
+    || no "(D35) control: --pack-task=helper over the tested corpus no longer prints <d> rows without tested=, so it proves nothing about the <d> reading being present-only"
+cdRun "$TMP/d35.uses" "$TESTED" --uses=helper --format=columnar --legend=compact
+{ [ "$( ca carries "$TMP/d35.uses" cols:fields )" = 1 ] && ! namesTested "$( ca value "$TMP/d35.uses" cols:fields )"; } \
+    || no "(D35) control: --uses=helper --format=columnar no longer carries a fields= without tested, so it proves nothing about the column reading riding the column"
+cdRun "$TMP/d35.ptm" "$TESTED" --pack-task=helper --metrics --legend=compact
+[ "$( ca carries "$TMP/d35.ptm" d:tested )" = 1 ] && [ "$( ca carries "$TMP/d35.ptm" s:tested )" != 1 ] \
+    || no "(D35) control: --pack-task=helper --metrics no longer carries <d tested=> without an <s tested=> row, so it proves nothing about the two row readings reading apart"
+d35bad=0; d35n=0
+for v in "$TESTED@--pack-task=helper" "$REPO@--pack-task=geometry --metrics" "$TESTED@--uses=helper --format=columnar" "$TESTED@--callers=helper" \
+         "$TESTED@--pack-task=helper --metrics"; do
+    dir="${v%%@*}"; args="${v#*@}"
+    cdRun "$TMP/d35.c" "$dir" $args --legend=compact
+    if [ ! -s "$TMP/d35.c" ]; then
+        no "(D35) $args --legend=compact answered nothing — its mirror row would be vacuous"; d35bad=1; continue
+    fi
+    d35n=$(( d35n + 1 ))
+    for pair in "<d tested=1>:@d:tested" "<s tested=1>:@s:tested"; do
+        needle="${pair%%@*}"; spec="${pair#*@}"
+        if [ "$( ca mentions "$TMP/d35.c" "$needle" )" = 1 ] && [ "$( ca carries "$TMP/d35.c" "$spec" )" != 1 ]; then
+            no "(D35) $args: the compact legend spells '$needle' but the document carries no <${spec%%:*} tested=> row — a reading of a field that is not there"
+            d35bad=1
+        fi
+    done
+    if [ "$( ca mentions "$TMP/d35.c" "$COLTESTED" )" = 1 ] && ! namesTested "$( ca value "$TMP/d35.c" cols:fields )"; then
+        no "(D35) $args: the compact legend spells '$COLTESTED' but no <cols fields=> names tested — a reading of a column that is not there"
+        d35bad=1
+    fi
+done
+[ "$d35bad" -eq 0 ] && [ "$d35n" -eq 5 ] && ok "(D35) mirror: neither new tested reading, nor (D31)'s, prints on $d35n answers that lack its field (<d> rows with no column computed, <d> rows over a tree with no test, a columnar fields= without tested, <s tested=> rows alone, <d tested=> rows alone)"
 
 echo
 echo "=== (S) STRUCTURAL: every conditional attribute the graphlegend.h family, the PageRank disclosure, the map header and the map's rows emit has a compact reading ==="

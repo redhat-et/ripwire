@@ -250,6 +250,8 @@ struct CompactCompletenessTerm
     std::string_view onTag     = {};      // read ONLY on this element and never on the head: label= on the multi-root <root>
                                           // rows is not the label= --communities carries on its first child
     MapHeaderRead    mapHeader = MapHeaderRead::No;
+    std::string_view valueItem = {};      // with onTag: read only where that attribute's quoted value LISTS this comma-separated
+                                          // item: <cols fields=> naming tested carries the tested column, not every columnar answer
 };
 
 inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
@@ -377,15 +379,27 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "escaped_root",      "escaped_root=K: K files refused: a symlink led out of the root", false, {}, MapHeaderRead::Only },
     { "precise",           "precise=K: K call edges a SCIP index pinned", false, {}, MapHeaderRead::Only },
     { "fields",            "format=columnar: parallel arrays, not row attributes: <paths> maps I=path, each <cols> array holds n= comma-separated values in one row order, fields= naming them (the path column indexes <paths>; &#44; is a comma)", true, "cols" },
+    // THE TESTED COLUMN (2026-09-12, the follow-up to the <s tested=> row below). --callers/--callees/--impact --format=columnar
+    // always pass the test-reach lens (verbs_navigate.h), so fields= names tested and columnar.h emitColumnarTestedColumn writes one
+    // DENSE value per row: 1 where graph.h isTestedByReach holds, 0 on every other row, a test symbol's row included. A parallel
+    // array cannot omit a false entry, so unlike the <s> attribute this prints 0, and an answer over a tree with no test carries a
+    // column of zeros: the term reads the COLUMN (a <cols fields=> that lists tested), never a 1. compactlegendcheck (D34)/(D35).
+    { "fields",            "<tested> column: 1 = a non-test row an indexed test transitively reaches; 0 = none found, or a test row", true, "cols", MapHeaderRead::No, "tested" },
     { "lens",              "lens=: attributes another form of this answer serves, withheld here" },
     // THE SWEEP'S DESIGN REVIEW (2026-09-12) checked every reading above against its emitter and found one row reading still
     // missing: tested="1" on <s>. --callers/--callees and --impact (verbs_navigate.h), the MCP impact twin (mcpverbs.h) and the
     // map's own rows (serialize.h, whose tested[] column computeQMetrics fills by the same predicate) print it where graph.h
     // isTestedByReach holds: an indexed test transitively reaches that row's symbol and the symbol is not itself a test. Never
     // a literal 0. ELEMENT-qualified on <s>: flipimpact.h's <h tested=> prints 0 as well as 1 and <exemplar tested=> is another
-    // root's attribute; a <d> body row's tested= is not read by this row. No earlier sweep saw it because the gate fixture holds
+    // root's attribute; a <d> signature row's tested= is the next row's. No earlier sweep saw it because the gate fixture holds
     // no test (compactlegendcheck (D31) builds the smallest tree that prints one).
     { "tested",            "<s tested=1>: a non-test row an indexed test transitively reaches (absent otherwise, never 0)", true, "s" },
+    // The same lens on the signature rows (2026-09-12, the follow-up): serialize.h's two <d> row writers print tested="1" from
+    // computeQMetrics' tested[] column, which the same isTestedByReach fills, and never a literal 0. main.cpp computes that column
+    // only under --metrics, --for or --exemplar, so the reading rides the answers that computed it (--pack-task --metrics; --for
+    // keeps its native legend). ELEMENT-qualified on <d>, like the row above: flipimpact.h's <d sym=> and the dead-code <d n=>
+    // rows carry no tested=. compactlegendcheck (D33)/(D35).
+    { "tested",            "<d tested=1>: a non-test row an indexed test transitively reaches (absent otherwise, never 0)", true, "d" },
     { "parse_degraded",    "parse_degraded=1: ERROR nodes in that parse", true },
     { "tier_partial",      "tier_partial=1: tier elected under a partial classification" },
     { "dangling",          "dangling=1: matches nothing indexed", true },
@@ -580,8 +594,35 @@ inline bool isElementNamed( std::string_view tag, std::string_view name ) noexce
     return next == ' ' || next == '/' || next == '>';
 }
 
-// Row-level terms: does ANY tag outside comments/CDATA carry ` <attr>="`? With `onTag`, only a `<onTag …>` element counts.
-inline bool payloadHasAnyAttr( std::string_view doc, std::string_view attr, std::string_view onTag = {} )
+// Does the quoted value that opens `value` (up to its closing quote) list `item` as one whole comma-separated entry? An empty
+// item accepts any value: only a valueItem term asks what the attribute holds rather than whether it is there.
+inline bool quotedValueListsItem( std::string_view value, std::string_view item ) noexcept
+{
+    if( item.empty() )
+    {
+        return true;
+    }
+    const std::string_view list  = value.substr( 0, value.find( '"' ) );
+    std::size_t            begin = 0;
+    while( begin <= list.size() )
+    {
+        std::size_t end = list.find( ',', begin );
+        if( end == std::string_view::npos )
+        {
+            end = list.size();
+        }
+        if( list.substr( begin, end - begin ) == item )
+        {
+            return true;
+        }
+        begin = end + 1;
+    }
+    return false;
+}
+
+// Row-level terms: does ANY tag outside comments/CDATA carry ` <attr>="`? With `onTag`, only a `<onTag …>` element counts; with
+// `valueItem`, only a value that lists that item.
+inline bool payloadHasAnyAttr( std::string_view doc, std::string_view attr, std::string_view onTag = {}, std::string_view valueItem = {} )
 {
     std::string needle;
     needle.reserve( attr.size() + 3 );
@@ -605,7 +646,8 @@ inline bool payloadHasAnyAttr( std::string_view doc, std::string_view attr, std:
         {
             const std::size_t j = doc.find( '>', i );
             const std::string_view tag = doc.substr( i, j == std::string_view::npos ? doc.size() - i : j + 1 - i );
-            if( tag.find( needle ) != std::string_view::npos && isElementNamed( tag, onTag ) ) { return true; }
+            const std::size_t at = tag.find( needle );
+            if( at != std::string_view::npos && isElementNamed( tag, onTag ) && quotedValueListsItem( tag.substr( at + needle.size() ), valueItem ) ) { return true; }
             i = j == std::string_view::npos ? doc.size() : j + 1;
         }
         else
@@ -652,7 +694,7 @@ inline bool isCompletenessTermPresent( const CompactCompletenessTerm& t, std::st
     }
     if( !t.onTag.empty() )
     {
-        return payloadHasAnyAttr( doc, t.attr, t.onTag );
+        return payloadHasAnyAttr( doc, t.attr, t.onTag, t.valueItem );
     }
     return headHasAttr( head, t.attr ) || ( t.wholeDoc && payloadHasAnyAttr( doc, t.attr ) );
 }
