@@ -719,6 +719,7 @@ inline void partitionByEligibility( const std::vector<NodeId>& topRanked, const 
                                     const std::vector<char>& d1Mark,
                                     std::vector<NodeId>& eligibleIds, std::vector<NodeId>& d2plusIds )
 {
+    VERIFY_NO_ALIAS3( topRanked, eligibleIds, d2plusIds );
     for( NodeId id : topRanked )
     {
         ( ( id < d0Mark.size() && d0Mark[id] ) || ( id < d1Mark.size() && d1Mark[id] ) ? eligibleIds : d2plusIds ).push_back( id );

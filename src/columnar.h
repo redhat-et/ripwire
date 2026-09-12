@@ -78,6 +78,7 @@ inline constexpr const char* kColumnarLegend =
 inline void buildPathTable( const std::vector<std::uint32_t>& rowFileIds,
                             std::vector<std::uint32_t>& outUniqueFiles, std::vector<std::uint32_t>& outRowPathIdx )
 {
+    VERIFY_NO_ALIAS3( rowFileIds, outUniqueFiles, outRowPathIdx );
     outUniqueFiles.clear();
     outRowPathIdx.clear();
     outRowPathIdx.reserve( rowFileIds.size() );

@@ -1082,6 +1082,7 @@ inline std::optional<int> sliceSincePrepare( const MainDispatch& d, std::string_
                                              const ::TSLanguage* grammar, const rw::slicev::SliceScan& scan, const std::string& src,
                                              std::string& legendOut, std::string& bodyOut, rw::slicev::SliceEmitOpts& emit )
 {
+    VERIFY_NO_ALIAS( legendOut, bodyOut );
     const rw::Config& cfg = d.cfg;
     if( cfg.since.empty() )
     {
