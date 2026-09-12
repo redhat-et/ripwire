@@ -1341,8 +1341,8 @@ mcp_text explore "{\"path\":\"$TESTED\",\"task\":\"helper\",\"no_route\":true}" 
 { [ "$( ca carries "$TMP/d37.nr" ctx:task )" = 1 ] && [ "$( ca carries "$TMP/d37.nr" ctx:route )" != 1 ]; } \
     || no "(D37) control: MCP explore with no_route no longer prints <ctx task=> without route=, so it proves nothing about the route= reading being present-only"
 d37bad=0; d37n=0
-for v in "--pack-task=helper@d37.pt" "--pack-signatures@d37.ps" "MCP explore no_route@d37.nr"; do
-    label="${v%%@*}"; f="$TMP/${v#*@}"
+for v in "--pack-task=helper|d37.pt" "--pack-signatures|d37.ps" "MCP explore no_route|d37.nr"; do
+    label="${v%%|*}"; f="$TMP/${v#*|}"
     if [ ! -s "$f" ] || grep -q '^__ERROR__' "$f"; then
         no "(D37) $label answered nothing — its mirror row would be vacuous"; d37bad=1; continue
     fi
