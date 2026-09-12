@@ -296,6 +296,31 @@ already knew about the others, several while fixing one. So the rule is mechanic
   a caller-owned arena.
 - **Symmetric bare scopes** for deterministic RAII teardown.
 
+### Aliasing: spelling, placement, contract
+
+- **Spelling: `__restrict__` only, never `__restrict`.** On macOS, `<sys/cdefs.h>` does
+  `#if __STDC_VERSION__ < 199901` / `#define __restrict` (empty), and `__STDC_VERSION__` is
+  undefined in C++, so every `__restrict` that follows any libc/libc++ include is silently deleted.
+  `__restrict__` is a keyword, not a macro, and survives.
+- **Prefer `VERIFY_NO_ALIAS( a, b )` (objects) or `VERIFY_NO_ALIAS_BUF( a, b )` (containers/spans) in
+  the body over a qualifier on the signature.** For a container or span, the promise has to land on
+  `.data()` — on the objects themselves it is inert for the loop, because the optimizer reaches the
+  heap buffer through a pointer loaded from the header, not through the header's own address. Place
+  the macro at the top of the function, before the first load or store through either argument.
+  Three reasons, one each: it is checked in debug and is the same optimizer fact in release
+  (`__builtin_assume_separate_storage`); it does not change the API; `__builtin_assume( &a != &b )`
+  is NOT that fact — alias analysis never reads it.
+- **The contract is different complete allocations, not different addresses.** Verbatim from
+  clang's `LanguageExtensions.rst`: the arguments "are assumed to point into separately allocated
+  storage (either different variable definitions or different dynamic storage allocations) …
+  'storage' here refers to the outermost enclosing allocation of any particular object (so for
+  example, it's never correct to call this function passing the addresses of fields in the same
+  struct, elements of the same array, etc.)". Two elements of one array or two members of one
+  struct are undefined behaviour, not a stricter case of the promise. Locals allocated inside the
+  function are already known-distinct to the optimizer; the macro is for parameters and members —
+  and only for parameters/members of the *same element type*, since different types are already
+  separated by TBAA.
+
 ### Output: `std::print`, feature-tested and disclosed — never a new printf-family site
 
 - **Pick the primitive by what you actually have.** All three live in `src/infra/emit.h`; a same-shaped
