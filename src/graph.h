@@ -1868,7 +1868,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // resolver degrades to the name-based fallback ladder + honest amb=. The caller's OWN file is excluded (f ∉ trans[f]).
     // Deterministic: a pure function of the sorted ing.files + ing.includes; each set is sorted+deduped
     // so rule3IncludeFile's binary-search membership is valid and order-stable (warm == cold).
-    auto [ includeAdj, includeContext ] = buildPreciseIncludeAdjWithContext( ing );
+    // `forCallNarrow`: a Ruby constant read off a VALUE position (an argument, a rescue class — parser version 93)
+    // is a dependency of the file but not import evidence for a bare call, so it never enters this set. --deps,
+    // --impact's importer tier and the lazy-pair count read the same records through the default path and keep it.
+    auto [ includeAdj, includeContext ] = buildPreciseIncludeAdjWithContext( ing, /*dedup=*/true, /*lazyPairsOut=*/nullptr, /*forCallNarrow=*/true );
     std::vector<std::vector<NodeId>> fileIncludes = transitiveIncludeSet( includeAdj );
     const JsImportTables jsImports = buildJsImportTables( ing, includeContext.fileRoot ? &includeContext : nullptr );
     // per-symbol fileId view for Rule 3 (group a candidate def by its file without passing the whole IngestResult).
@@ -5214,27 +5217,32 @@ inline StructuralIncludeAdj resolveStructuralIncludeAdj( const IngestResult& ing
     {
         return out;   // no lazy directive anywhere: the structure IS the full graph, byte-identical to before
     }
+    // `dropped` collects the ids the cut removes from one file's row so the PAIR count is over DISTINCT ids. The
+    // un-deduped adjacency is in DIRECTIVE order, not sorted (buildPreciseIncludeAdj sorts only when dedup=true), so
+    // the earlier "equal ids are adjacent" shortcut counted a pair once per RUN of equal ids: `Errors::Boom`,
+    // `User`, `Errors::Bust` in one method resolve to errors.rb, user.rb, errors.rb and read as lazy_edges=3 for
+    // two pairs (parser version 93, test/rubyargcheck.sh service.rb, where three spellings of one file's classes
+    // are interleaved with two other files). One scratch vector, reused across files; sort + unique is the count.
+    std::vector<std::uint32_t> dropped;
     for( std::uint32_t f = 0; f < out.adj.size(); ++f )
     {
         std::vector<std::uint32_t>& outs = out.adj[f];
         std::uint32_t               kept = 0;
-        std::uint32_t               lastDropped = std::numeric_limits<std::uint32_t>::max();
+        dropped.clear();
         for( std::uint32_t j = 0; j < outs.size(); ++j )
         {
             const std::uint32_t to  = outs[j];
             const auto          it  = lazyPairs.find( ( std::uint64_t( f ) << 32 ) | std::uint64_t( to ) );
             if( it != lazyPairs.end() && it->second != 0 )
             {
-                if( to != lastDropped )   // outs is sorted (buildPreciseIncludeAdj), so equal ids are adjacent: count the PAIR once
-                {
-                    ++out.lazyEdgesByFile[f];
-                    lastDropped = to;
-                }
+                dropped.push_back( to );
                 continue;
             }
             outs[kept++] = to;
         }
         outs.resize( kept );
+        std::sort( dropped.begin(), dropped.end() );
+        out.lazyEdgesByFile[f] = static_cast<std::uint32_t>( std::unique( dropped.begin(), dropped.end() ) - dropped.begin() );
         out.lazyEdges += out.lazyEdgesByFile[f];
     }
     return out;

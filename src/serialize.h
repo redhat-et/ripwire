@@ -6354,7 +6354,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
              "version 81. a per-file target row (inc t=) with no edge behind it is a directive that did not resolve to an indexed file "
              "(external package, or a specifier this tool declines to guess at, e.g. a shell path built from a variable) "
              "— it is shown, never silently dropped. a LAZY edge — a pair every one of whose directives is written inside a "
-             "closure (a Ruby method/lambda/block, a TS/JS function body) or is a Ruby autoload — is a USE, not a load-time "
+             "closure (a Ruby method/lambda/block, a TS/JS function body) or is a Ruby autoload or rescue class — is a USE, not a load-time "
              "dependency: it is in the impact verb's importer tier (lazy=1) and in this row's inc t= list, and it is NOT in "
              "afferent=/instab=/transitive=/godfiles/stabledeps/cycles/ccd/acd/nccd/shape=; health lazy_edges= counts the "
              "pairs left out and a row's lazy_edges= its own — both absent when 0. "
