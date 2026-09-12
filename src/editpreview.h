@@ -406,7 +406,10 @@ inline Outcome run( const IngestResult& ing, const Graph& g, const std::string& 
     const IngestResult merged = previewMerge( ing, fsym.fileId, headOne );
     const Graph        mg     = buildGraph( merged );
 
-    const std::vector<NodeId> matches = resolveAllByNameQualified( merged, selector );
+    // H1: the residue on the MERGED tree — the one this document measures — so the preview discloses what the post-apply
+    // verb would, whether or not the payload changed which definitions the selector can tie to its file.
+    std::size_t               previewUnprovenDefs = 0;
+    const std::vector<NodeId> matches  = resolveAllByNameQualified( merged, selector, &previewUnprovenDefs );
     bool                      inSplice = false;
     for( NodeId m : matches )
     {
@@ -433,7 +436,7 @@ inline Outcome run( const IngestResult& ing, const Graph& g, const std::string& 
     // differently from the answer it predicts would be worth nothing (test/editpreviewcheck.sh compares
     // the two documents).
     oc.xml = editCheckBundleText( merged, mg, root, maxFileBytes, excludes, groups[0].lowestNode, ni, true,
-                                   pageLimit, pageOffset );
+                                   pageLimit, pageOffset, previewUnprovenDefs );
     // E3 (terminality round A, 2026-09-05): the CURRENT span an apply would replace, as the bytes are on disk, so
     // the Read an agent makes before an edit "to see what I am about to overwrite" is already in the preview.
     // Appended as the last child of the preview's own root — the post-hoc document cannot carry it (after the
