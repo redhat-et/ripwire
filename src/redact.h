@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // redact.h — Wave 4 #7: deterministic secret redaction of EMITTED context (Repomix / octocode table
 // stakes). ripwire maps get pasted into cloud LLMs, so any credential that lives in a source body / doc
@@ -611,7 +613,7 @@ inline void reportRedactions( std::FILE* err, const RedactCounts& counts )
         "openai/anthropic-key", "private-key", "keyword-gated-secret", "jwt"
     };
 
-    std::fprintf( err, "ripwire: redacted %u secret%s from emitted context (",
+    rw::emitTo( err, "ripwire: redacted {} secret{} from emitted context (",
                   total, total == 1 ? "" : "s" );
     bool first = true;
     for( std::size_t k = 0; k < std::size_t( SecretKind::kCount ); ++k )
@@ -620,10 +622,10 @@ inline void reportRedactions( std::FILE* err, const RedactCounts& counts )
         {
             continue;
         }
-        std::fprintf( err, "%s%s=%u", first ? "" : " ", kLabel[k], counts.byKind[k] );
+        rw::emitTo( err, "{}{}={}", first ? "" : " ", kLabel[k], counts.byKind[k] );
         first = false;
     }
-    std::fprintf( err, ") — pass --no-redact to disable\n" );
+    rw::emitRaw( err, ") — pass --no-redact to disable\n" );
 }
 
 }   // namespace rw

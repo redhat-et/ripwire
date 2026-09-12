@@ -42,7 +42,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 export LSAN_OPTIONS="suppressions=$ROOT/lsan_suppressions.txt"
 
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -176,9 +176,9 @@ for t in 600 700 900 1000; do
         ok "target $t (${#d}-byte path): exit 0"
     fi
     cc="$( clean_bytes "$TMP/c_${t}_a" )"
-    [ "${cc%% *}" = "0" ] && ok "target $t: zero control bytes" || no "target $t: control bytes leaked: $cc"
-    grep -aqF "$d" "$TMP/c_${t}_a" && ok "target $t: full path emitted" || no "target $t: full path missing/truncated"
-    cmp -s "$TMP/c_${t}_a" "$TMP/c_${t}_b" && ok "target $t: byte-deterministic" || no "target $t: NON-deterministic across two runs"
+    if [ "${cc%% *}" = "0" ]; then ok "target $t: zero control bytes"; else no "target $t: control bytes leaked: $cc"; fi
+    if grep -aqF "$d" "$TMP/c_${t}_a"; then ok "target $t: full path emitted"; else no "target $t: full path missing/truncated"; fi
+    if cmp -s "$TMP/c_${t}_a" "$TMP/c_${t}_b"; then ok "target $t: byte-deterministic"; else no "target $t: NON-deterministic across two runs"; fi
 done
 
 # ─── (d) sibling formatters, each with its own interpoland at width ──────────────────────────────
@@ -207,12 +207,12 @@ PY
 
 # (d1) truncateRecallBody — "[truncated: N of M bytes]" on a doc whose separator holds a 740+ byte path
 recall "$D_ROOT" "$TMP/d1.out" --max-tokens=1200; d1_exit=$?
-[ "$d1_exit" -eq 0 ] && ok "d1 --max-tokens: exit 0" || no "d1 --max-tokens: exit $d1_exit (expected 0)"
+if [ "$d1_exit" -eq 0 ]; then ok "d1 --max-tokens: exit 0"; else no "d1 --max-tokens: exit $d1_exit (expected 0)"; fi
 grep -aqE '\[truncated: [0-9]+ of [0-9]+ bytes' "$TMP/d1.out" \
     && ok "d1 truncateRecallBody: '[truncated: N of M bytes…]' intact" \
     || no "d1 truncateRecallBody: marker missing/garbled: $( grep -aoE '\[trunc.{0,60}' "$TMP/d1.out" | head -1 | cat -v )"
 D1_CTRL="$( clean_bytes "$TMP/d1.out" )"
-[ "${D1_CTRL%% *}" = "0" ] && ok "d1: zero control bytes" || no "d1: control bytes leaked: $D1_CTRL"
+if [ "${D1_CTRL%% *}" = "0" ]; then ok "d1: zero control bytes"; else no "d1: control bytes leaked: $D1_CTRL"; fi
 
 # (d1b) L4 UPDATE (recall.h's protected-range fix, same commit): this arm used to force the cut to land
 # INSIDE the ``` block and assert the ", fence_closed" repair note fired. §L4.2 now protects a fenced block
@@ -242,7 +242,7 @@ with open( os.path.join( d, "kafka.md" ), "w" ) as fh:
     fh.write( "```\n" )
 PY
 recall "$F_ROOT" "$TMP/d1b.out" --max-tokens=1400; d1b_exit=$?
-[ "$d1b_exit" -eq 0 ] && ok "d1b --max-tokens (fenced doc): exit 0" || no "d1b: exit $d1b_exit (expected 0)"
+if [ "$d1b_exit" -eq 0 ]; then ok "d1b --max-tokens (fenced doc): exit 0"; else no "d1b: exit $d1b_exit (expected 0)"; fi
 grep -aqE '\[truncated: [0-9]+ of [0-9]+ bytes' "$TMP/d1b.out" \
     && ok "d1b truncateRecallBody: '[truncated: N of M bytes…]' fired" \
     || no "d1b truncateRecallBody: marker missing: $( grep -aoE '\[trunc.{0,60}' "$TMP/d1b.out" | head -1 | cat -v )"
@@ -251,13 +251,13 @@ D1B_TICKS="$( grep -ao '```' "$TMP/d1b.out" | wc -l | tr -d ' ' )"
     && ok "d1b fence markers balanced (even count: $D1B_TICKS) — whole-or-nothing under the protected-range cut, never torn" \
     || no "d1b fence markers UNBALANCED (odd count: $D1B_TICKS) — the forced cut tore the fenced block"
 D1B_CTRL="$( clean_bytes "$TMP/d1b.out" )"
-[ "${D1B_CTRL%% *}" = "0" ] && ok "d1b: zero control bytes" || no "d1b: control bytes leaked: $D1B_CTRL"
+if [ "${D1B_CTRL%% *}" = "0" ]; then ok "d1b: zero control bytes"; else no "d1b: control bytes leaked: $D1B_CTRL"; fi
 
 # (d2) formatRecallCappedNote — BOTH attribution clauses at once: --top-k trims the relevant set (4→2) AND
 # the byte budget trims what survives (2→1), so `why` is composed at its widest. That is the arm that
 # matters: 161 of this note's 254-byte worst case is `why`, so a one-clause run under-exercises it.
 recall "$D_ROOT" "$TMP/d2.out" --top-k=2 --max-tokens=1200; d2_exit=$?
-[ "$d2_exit" -eq 0 ] && ok "d2 --top-k + --max-tokens: exit 0" || no "d2: exit $d2_exit (expected 0)"
+if [ "$d2_exit" -eq 0 ]; then ok "d2 --top-k + --max-tokens: exit 0"; else no "d2: exit $d2_exit (expected 0)"; fi
 if grep -aqE '\(capped: [0-9]+ of [0-9]+ relevant document files omitted' "$TMP/d2.out"; then
     ok "d2 formatRecallCappedNote: '(capped: N of M … omitted — why)' intact"
 else
@@ -267,16 +267,16 @@ grep -aqE 'raise --top-k \(default 8\) for [0-9]+ more; raise --max-tokens or na
     && ok "d2: BOTH attribution clauses present and intact (widest 'why')" \
     || no "d2: the two-clause 'why' was not produced — $( grep -aoE 'omitted —.{0,160}' "$TMP/d2.out" | head -1 | cat -v )"
 D2_CTRL="$( clean_bytes "$TMP/d2.out" )"
-[ "${D2_CTRL%% *}" = "0" ] && ok "d2: zero control bytes" || no "d2: control bytes leaked: $D2_CTRL"
+if [ "${D2_CTRL%% *}" = "0" ]; then ok "d2: zero control bytes"; else no "d2: control bytes leaked: $D2_CTRL"; fi
 
 # (d3) emitRecallBudgeted — the withheld note (exit 3 is the contract, not a failure)
 recall "$D_ROOT" "$TMP/d3.out" --token-budget=1; d3_exit=$?
-[ "$d3_exit" -eq 3 ] && ok "d3 --token-budget=1: exit 3 (gate personality)" || no "d3: exit $d3_exit (expected 3)"
+if [ "$d3_exit" -eq 3 ]; then ok "d3 --token-budget=1: exit 3 (gate personality)"; else no "d3: exit $d3_exit (expected 3)"; fi
 grep -aqE '\(withheld: withheld_est_tokens=[0-9]+ > budget=1 — [0-9]+ bytes not emitted; re-run with --max-tokens=1 to SHAPE it to fit\)' "$TMP/d3.out" \
     && ok "d3 emitRecallBudgeted: withheld note intact, verbatim" \
     || no "d3 emitRecallBudgeted: note missing/garbled: $( grep -aoE '\(withheld.{0,140}' "$TMP/d3.out" | head -1 | cat -v )"
 D3_CTRL="$( clean_bytes "$TMP/d3.out" )"
-[ "${D3_CTRL%% *}" = "0" ] && ok "d3: zero control bytes" || no "d3: control bytes leaked: $D3_CTRL"
+if [ "${D3_CTRL%% *}" = "0" ]; then ok "d3: zero control bytes"; else no "d3: control bytes leaked: $D3_CTRL"; fi
 
 echo
 [ "$fail" -eq 0 ] && { echo "recallbufcheck: ALL PASS"; exit 0; }

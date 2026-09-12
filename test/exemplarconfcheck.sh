@@ -22,7 +22,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -144,7 +144,7 @@ fi
 # ── 4) determinism (byte-identical run-to-run) + well-formed XML, on the query that now flags degraded ──
 "$BIN" "$ROOT" --no-cache --exemplar="format byte sizes for humans" >"$TMP/w1" 2>/dev/null
 "$BIN" "$ROOT" --no-cache --exemplar="format byte sizes for humans" >"$TMP/w2" 2>/dev/null
-diff -q "$TMP/w1" "$TMP/w2" >/dev/null && ok "determinism (weak-query --exemplar byte-identical run-to-run)" || no "non-deterministic weak-query --exemplar output"
+if diff -q "$TMP/w1" "$TMP/w2" >/dev/null; then ok "determinism (weak-query --exemplar byte-identical run-to-run)"; else no "non-deterministic weak-query --exemplar output"; fi
 command -v xmllint >/dev/null 2>&1 \
     && { printf '%s' "$WEAK" | xmllint --noout - 2>/dev/null && ok "xml well-formed (weak-query --exemplar)" || no "xml malformed (weak-query --exemplar)"; } \
     || ok "xml well-formed (xmllint absent — skipped)"

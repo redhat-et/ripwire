@@ -39,7 +39,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/planlintfix/wave.md"
 FIX2="$ROOT/test/planlintfix/wave_ledger.md"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -53,12 +53,12 @@ echo "planlintcheck: BIN=$BIN  FIX=$FIX"
 OUT="$( cd "$ROOT" && "$BIN" . --plan-lint=test/planlintfix/wave.md --no-cache )"
 RC=$?
 
-[ "$RC" = "2" ] && ok "(1) exit 2 — dialect=\"1\" and gating rows present" || no "(1) exit $RC, expected 2"
+if [ "$RC" = "2" ]; then ok "(1) exit 2 — dialect=\"1\" and gating rows present"; else no "(1) exit $RC, expected 2"; fi
 
 printf '%s' "$OUT" | grep -q 'dialect="1"' && ok "(1) dialect=\"1\" (the H3 task-card + §Status-ledger shape was recognized)" \
                                             || no "(1) dialect=\"1\" missing"
-printf '%s' "$OUT" | grep -q 'cards="3"' && ok "(1) cards=\"3\" (T1, T2, T5)" || no "(1) cards=\"3\" missing"
-printf '%s' "$OUT" | grep -q 'ledger="1"' && ok "(1) ledger=\"1\" (the §Status heading was found)" || no "(1) ledger=\"1\" missing"
+if printf '%s' "$OUT" | grep -q 'cards="3"'; then ok "(1) cards=\"3\" (T1, T2, T5)"; else no "(1) cards=\"3\" missing"; fi
+if printf '%s' "$OUT" | grep -q 'ledger="1"'; then ok "(1) ledger=\"1\" (the §Status heading was found)"; else no "(1) ledger=\"1\" missing"; fi
 
 # THE HEADLINE CATCH — a task card with no terminal status line, the exact failure a wave-closer used to
 # find only by reading the whole plan by eye.
@@ -107,7 +107,7 @@ D3="$( cd "$ROOT" && "$BIN" . --plan-lint=test/planlintfix/wave.md --no-cache )"
 
 # ── (3) well-formed, minified XML (G4) ──────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$OUT" | xmllint --noout - 2>/dev/null && ok "(3) xmllint-clean" || no "(3) not well-formed XML"
+    if printf '%s' "$OUT" | xmllint --noout - 2>/dev/null; then ok "(3) xmllint-clean"; else no "(3) not well-formed XML"; fi
 else
     printf '  SKIP  (3) xmllint (not installed)\n'
 fi
@@ -132,9 +132,9 @@ printf '%s' "$PLAIN_OUT" | grep -q 'gating="0"' && ok "(4) gating=\"0\" on the n
 
 # ── (5) refusal: FILE cannot be opened is exit 1, a usage error, nothing on stdout ──────────────────
 MISSING_OUT="$( "$BIN" "$ROOT" --plan-lint="$TMP/does-not-exist.md" --no-cache 2>"$TMP/stderr" )"; MISSING_RC=$?
-[ "$MISSING_RC" = "1" ] && ok "(5) an unreadable FILE exits 1" || no "(5) exit $MISSING_RC, expected 1"
-[ -z "$MISSING_OUT" ] && ok "(5) nothing printed to stdout on refusal" || no "(5) stdout was non-empty on refusal"
-grep -q -- '--plan-lint' "$TMP/stderr" && ok "(5) stderr names the flag" || no "(5) stderr does not mention --plan-lint"
+if [ "$MISSING_RC" = "1" ]; then ok "(5) an unreadable FILE exits 1"; else no "(5) exit $MISSING_RC, expected 1"; fi
+if [ -z "$MISSING_OUT" ]; then ok "(5) nothing printed to stdout on refusal"; else no "(5) stdout was non-empty on refusal"; fi
+if grep -q -- '--plan-lint' "$TMP/stderr"; then ok "(5) stderr names the flag"; else no "(5) stderr does not mention --plan-lint"; fi
 
 # ── (5b) F-09: a DIRECTORY is refused, not silently linted as an empty clean plan ─────────────────────
 # darkflags::readWhole opens with fopen(path,"rb"); on this platform that open (and the immediate
@@ -142,16 +142,16 @@ grep -q -- '--plan-lint' "$TMP/stderr" && ok "(5) stderr names the flag" || no "
 # dialect="0" at exit 0 — a directory reading as "clean plan" is a usage error, not a finding.
 mkdir -p "$TMP/adir"
 DIR_OUT="$( "$BIN" "$ROOT" --plan-lint="$TMP/adir" --no-cache 2>"$TMP/direrr" )"; DIR_RC=$?
-[ "$DIR_RC" = "1" ] && ok "(5b) a directory argument exits 1" || no "(5b) exit $DIR_RC, expected 1"
-[ -z "$DIR_OUT" ] && ok "(5b) nothing printed to stdout on a directory refusal" || no "(5b) stdout was non-empty: $DIR_OUT"
+if [ "$DIR_RC" = "1" ]; then ok "(5b) a directory argument exits 1"; else no "(5b) exit $DIR_RC, expected 1"; fi
+if [ -z "$DIR_OUT" ]; then ok "(5b) nothing printed to stdout on a directory refusal"; else no "(5b) stdout was non-empty: $DIR_OUT"; fi
 grep -q 'is a directory' "$TMP/direrr" && ok "(5b) stderr names the specific reason (a directory, not a file)" \
                                         || no "(5b) stderr does not name the directory reason: $( cat "$TMP/direrr" )"
 
 # ── (6) --json is not yet supported for this verb, and refuses LOUDLY rather than silently ignoring it
 JSON_OUT="$( "$BIN" "$ROOT" --plan-lint=test/planlintfix/wave.md --json --no-cache 2>"$TMP/jsonerr" )"; JSON_RC=$?
-[ "$JSON_RC" = "1" ] && ok "(6) --plan-lint --json refuses (exit 1)" || no "(6) --plan-lint --json exited $JSON_RC, expected 1"
-[ -z "$JSON_OUT" ] && ok "(6) nothing printed to stdout under the --json refusal" || no "(6) stdout was non-empty under --json"
-grep -q -- '--plan-lint' "$TMP/jsonerr" && ok "(6) the --json refusal names --plan-lint" || no "(6) the --json refusal does not name --plan-lint"
+if [ "$JSON_RC" = "1" ]; then ok "(6) --plan-lint --json refuses (exit 1)"; else no "(6) --plan-lint --json exited $JSON_RC, expected 1"; fi
+if [ -z "$JSON_OUT" ]; then ok "(6) nothing printed to stdout under the --json refusal"; else no "(6) stdout was non-empty under --json"; fi
+if grep -q -- '--plan-lint' "$TMP/jsonerr"; then ok "(6) the --json refusal names --plan-lint"; else no "(6) the --json refusal does not name --plan-lint"; fi
 
 # ── (7) non-git directory: staleness is never claimed, never guessed ───────────────────────────────
 mkdir -p "$TMP/nongit"
@@ -218,7 +218,7 @@ printf '%s' "$STALE_OUT" | grep -qE '<card id="T4"[^/]*stale="1"[^/]*gating="1"'
     && ok "(8) T4 stale=\"1\" gating=\"1\" — 23 commits behind HEAD, past the stale_commits=20 default" \
     || { no "(8) T4 was not reported stale+gating"; printf '%s' "$STALE_OUT" | grep -oE '<card id="T4"[^/]*/>'; }
 
-[ "$STALE_RC" = "2" ] && ok "(8) exit 2 — the stale hourglass card gates the run" || no "(8) exit $STALE_RC, expected 2"
+if [ "$STALE_RC" = "2" ]; then ok "(8) exit 2 — the stale hourglass card gates the run"; else no "(8) exit $STALE_RC, expected 2"; fi
 
 rm -rf "$WORK"
 
@@ -230,7 +230,7 @@ rm -rf "$WORK"
 # bare "T7" — proving the digit-fold does not require an exact spelling match to read as launched.
 LEDGER_OUT="$( cd "$ROOT" && "$BIN" . --plan-lint=test/planlintfix/wave_ledger.md --no-cache )"; LEDGER_RC=$?
 
-printf '%s' "$LEDGER_OUT" | grep -q 'cards="4"' && ok "(9) cards=\"4\" (T1, T2, T5, T7)" || no "(9) cards=\"4\" missing"
+if printf '%s' "$LEDGER_OUT" | grep -q 'cards="4"'; then ok "(9) cards=\"4\" (T1, T2, T5, T7)"; else no "(9) cards=\"4\" missing"; fi
 
 printf '%s' "$LEDGER_OUT" | grep -qE '<card id="T1"[^/]*status="check"[^/]*/>' \
     && ok "(9) T1 still resolves from its OWN body (✅) — the original path is unbroken" \
@@ -264,7 +264,7 @@ printf '%s' "$LEDGER_OUT" | grep -q 'plan-lint file="test/planlintfix/wave_ledge
     && ok "(9) header gating=\"1\" — T5 alone; T1/T2/T7 all resolve clean" \
     || no "(9) header gating= is not 1: $( printf '%s' "$LEDGER_OUT" | grep -oE 'gating="[0-9]+"' | head -1 )"
 
-[ "$LEDGER_RC" = "2" ] && ok "(9) exit 2 — the one unlaunched card gates the run" || no "(9) exit $LEDGER_RC, expected 2"
+if [ "$LEDGER_RC" = "2" ]; then ok "(9) exit 2 — the one unlaunched card gates the run"; else no "(9) exit $LEDGER_RC, expected 2"; fi
 
 [ "$fail" = 0 ] && echo "planlintcheck: ALL PASS" || echo "planlintcheck: FAILURES ABOVE"
 exit "$fail"

@@ -1498,20 +1498,19 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
     {
         std::regex reLocal;
         if( regex ) { try { reLocal = std::regex( pat, kGrepRegexSyntax ); } catch( ... ) { workerDegraded.store( true, std::memory_order_relaxed ); return; } }
-        std::string text;
         try
         {
             for( std::uint32_t f = nextFileId.fetch_add( 1 ); f < fileCount; f = nextFileId.fetch_add( 1 ) )
             {
-                text.clear();
                 // unreadable file ⇒ degrade to empty bytes and keep going (what the index build did too:
                 // it left an empty `contents` entry rather than dropping the file from the corpus) — but
                 // COUNT it (T1): a scan that skipped a file's bytes may not claim completeness.
-                if( !docparse::detail::readWholeFile( diskPath( ing, f ), text ) )
+                std::optional<std::string> fileBytes = docparse::detail::readWholeFile( diskPath( ing, f ) );
+                if( !fileBytes )
                 {
-                    text.clear();
                     unreadableCount.fetch_add( 1, std::memory_order_relaxed );
                 }
+                const std::string text = std::move( fileBytes ).value_or( std::string() );
                 if( regex && !noPrefilter && !triQueryMatchesText( prefilterQuery, text ) )
                 {
                     continue;
@@ -1688,7 +1687,6 @@ inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::str
         catch( ... ) { out.degraded = true; return out; }   // T1: nothing scanned — a caller may not read this empty set as a complete zero
     }
 
-    std::string               text;
     std::vector<GrepMatchSite> sites;
     std::vector<std::size_t>  lineStarts;
     for( const SkippedFile& row : skips.unsupported )
@@ -1698,12 +1696,13 @@ inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::str
             ++out.filesSkippedOversize;
             continue;
         }
-        text.clear();
-        if( !docparse::detail::readWholeFile( row.path, text ) )
+        const std::optional<std::string> fileBytes = docparse::detail::readWholeFile( row.path );
+        if( !fileBytes )
         {
             ++out.filesUnreadable;
             continue;
         }
+        const std::string& text = *fileBytes;
         if( looksBinary( text ) )
         {
             ++out.filesSkippedBinary;
@@ -1800,11 +1799,7 @@ inline std::vector<GrepHit> grepEnrich( const IngestResult& ing, std::span<const
             return;
         }
         loadedFileId = f;
-        fileText.clear();
-        if( !docparse::detail::readWholeFile( diskPath( ing, f ), fileText ) )
-        {
-            fileText.clear(); // degrade: no text, never a crash
-        }
+        fileText     = docparse::detail::readWholeFile( diskPath( ing, f ) ).value_or( std::string() ); // degrade: no text, never a crash
         lineStarts.clear();
         lineStarts.push_back( 0 );
         for( std::size_t i = 0; i < fileText.size(); ++i )
@@ -1999,11 +1994,7 @@ inline GrepCollection grepApplyBooleanTerms( const IngestResult& ing, GrepCollec
             return;
         }
         loadedFileId = f;
-        fileText.clear();
-        if( !docparse::detail::readWholeFile( diskPath( ing, f ), fileText ) )
-        {
-            fileText.clear();   // degrade: an unreadable file satisfies nothing rather than crashing
-        }
+        fileText     = docparse::detail::readWholeFile( diskPath( ing, f ) ).value_or( std::string() );   // degrade: an unreadable file satisfies nothing rather than crashing
         lineStarts.clear();
         lineStarts.push_back( 0 );
         for( std::size_t i = 0; i < fileText.size(); ++i )

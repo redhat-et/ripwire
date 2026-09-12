@@ -13,7 +13,7 @@ set -u
 BIN="${1:-${RIPWIRE_BIN:-./build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 REPO="$(mktemp -d)"; trap 'rm -rf "$REPO"' EXIT
@@ -55,6 +55,6 @@ echo "$edit_out" | grep -q 'kind="api-surface" sym="scale" was="2" now="3" surfa
 # 3) determinism on the clean-tree shape
 git checkout -q -- src/core/math.h src/core/math.cpp
 r1="$("$BIN" "$REPO" --quality-delta --no-cache 2>/dev/null)"; r2="$("$BIN" "$REPO" --quality-delta --no-cache 2>/dev/null)"
-[ "$r1" = "$r2" ] && ok "--quality-delta deterministic run-to-run" || no "--quality-delta non-deterministic"
+if [ "$r1" = "$r2" ]; then ok "--quality-delta deterministic run-to-run"; else no "--quality-delta non-deterministic"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

@@ -47,7 +47,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -96,7 +96,7 @@ PY
 
 "$BIN" "$CORPUS" --expand=redactfix_memo_boundary --no-cache >"$TMP/memo.xml" 2>"$TMP/memo.err"
 rc=$?
-[ $rc -eq 0 ] && ok "--expand on the memo fixture exits 0" || no "--expand on the memo fixture failed (rc=$rc)"
+if [ $rc -eq 0 ]; then ok "--expand on the memo fixture exits 0"; else no "--expand on the memo fixture failed (rc=$rc)"; fi
 
 # survives(RUN, LABEL) — the full run must still be in the output verbatim.
 survives(){
@@ -140,11 +140,11 @@ if grep -qF "$K" "$TMP/eof.xml"; then no "arm6: run at end-of-input (no trailing
 
 # ── 7) determinism ──────────────────────────────────────────────────────────────────────────────────
 "$BIN" "$CORPUS" --expand=redactfix_memo_boundary --no-cache >"$TMP/memo2.xml" 2>"$TMP/memo2.err"
-cmp -s "$TMP/memo.xml" "$TMP/memo2.xml" && ok "stdout byte-identical run to run" || no "stdout differs run to run"
-cmp -s "$TMP/memo.err" "$TMP/memo2.err" && ok "stderr byte-identical run to run" || no "stderr differs run to run"
+if cmp -s "$TMP/memo.xml" "$TMP/memo2.xml"; then ok "stdout byte-identical run to run"; else no "stdout differs run to run"; fi
+if cmp -s "$TMP/memo.err" "$TMP/memo2.err"; then ok "stderr byte-identical run to run"; else no "stderr differs run to run"; fi
 
 # the tally must report the redactions it actually made (7 gated runs: A D F G H J K — K is the other file)
-grep -q 'redacted .* secret' "$TMP/memo.err" && ok "stderr redaction tally emitted" || no "no stderr redaction tally"
+if grep -q 'redacted .* secret' "$TMP/memo.err"; then ok "stderr redaction tally emitted"; else no "no stderr redaction tally"; fi
 
 if [ $fail -eq 0 ]; then
   echo "ALL PASS"

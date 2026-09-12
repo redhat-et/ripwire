@@ -40,7 +40,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -57,9 +57,9 @@ printf 'int keep( void ) { return 1; }\n' > "$TMP/corpus/small.cpp"
 smallBytes="$( wc -c < "$TMP/corpus/small.cpp" | tr -d ' ' )"
 bigBytes="$(   wc -c < "$TMP/corpus/big.cpp"   | tr -d ' ' )"
 jsonBytes="$(  wc -c < "$TMP/corpus/data.json" | tr -d ' ' )"
-[ "$smallBytes" -lt 1024 ]   && ok "(0) small.cpp is under the 1K ceiling ($smallBytes B)"   || no "(0) small.cpp is NOT under 1024 B ($smallBytes B) — fixture broken"
-[ "$bigBytes" -gt 1024 ]     && ok "(0) big.cpp exceeds the 1K ceiling ($bigBytes B)"        || no "(0) big.cpp does NOT exceed 1024 B ($bigBytes B) — fixture broken"
-[ "$jsonBytes" -gt 262144 ]  && ok "(0) data.json exceeds the 256KB json ceiling ($jsonBytes B)" || no "(0) data.json does NOT exceed 262144 B ($jsonBytes B) — fixture broken"
+if [ "$smallBytes" -lt 1024 ]; then ok "(0) small.cpp is under the 1K ceiling ($smallBytes B)"; else no "(0) small.cpp is NOT under 1024 B ($smallBytes B) — fixture broken"; fi
+if [ "$bigBytes" -gt 1024 ]; then ok "(0) big.cpp exceeds the 1K ceiling ($bigBytes B)"; else no "(0) big.cpp does NOT exceed 1024 B ($bigBytes B) — fixture broken"; fi
+if [ "$jsonBytes" -gt 262144 ]; then ok "(0) data.json exceeds the 256KB json ceiling ($jsonBytes B)"; else no "(0) data.json does NOT exceed 262144 B ($jsonBytes B) — fixture broken"; fi
 
 cd "$TMP"   # crawl arg `corpus` → root="corpus" + rows spell the bare relative path, machine-independently
 # RE-PINNED 2026-08-19 (R-E CORRECTION): with the crawl arg `corpus`, p= used to repeat that prefix on
@@ -69,7 +69,7 @@ cd "$TMP"   # crawl arg `corpus` → root="corpus" + rows spell the bare relativ
 # ── (1) generic ceiling: both oversize files listed with limit="1024", exact bytes= ──────────────────────
 "$BIN" corpus --skipped --max-file-size=1K --no-cache > "$TMP/one.xml" 2>/dev/null
 rc=$?
-[ "$rc" -eq 0 ] && ok "(1) --skipped exits 0 (a report, not a gate)" || no "(1) --skipped exited $rc, expected 0"
+if [ "$rc" -eq 0 ]; then ok "(1) --skipped exits 0 (a report, not a gate)"; else no "(1) --skipped exited $rc, expected 0"; fi
 grep -q "<f p=\"big.cpp\" why=\"oversize\" bytes=\"$bigBytes\" limit=\"1024\"/>" "$TMP/one.xml" \
     && ok "(1) big.cpp row carries its exact bytes= and the generic limit=\"1024\"" \
     || { no "(1) big.cpp row missing or wrong (want bytes=\"$bigBytes\" limit=\"1024\")"; head -c 400 "$TMP/one.xml"; echo; }
@@ -91,7 +91,7 @@ grep -q "<f p=\"data.json\" why=\"oversize\" bytes=\"$jsonBytes\" limit=\"262144
 grep -q 'p="big.cpp"' "$TMP/two.xml" \
     && no "(2) big.cpp listed under the default 4MB ceiling it does not exceed" \
     || ok "(2) big.cpp is not listed under the default ceiling"
-grep -q 'oversize="1"' "$TMP/two.xml" && ok "(2) root reports oversize=\"1\"" || no "(2) root does not report oversize=\"1\""
+if grep -q 'oversize="1"' "$TMP/two.xml"; then ok "(2) root reports oversize=\"1\""; else no "(2) root does not report oversize=\"1\""; fi
 
 # ── (3) accounting join: verb count == map header count, and files= + oversize= = population ─────────────
 "$BIN" corpus --max-file-size=1K --no-cache > "$TMP/map.xml" 2>/dev/null
@@ -105,7 +105,7 @@ mapFiles="$(   grep -o 'files=[0-9]*'            "$TMP/map.xml" | head -1 | cut 
 # ── (4) zero means none found ────────────────────────────────────────────────────────────────────────────
 mkdir -p "$TMP/clean"; printf 'int keep( void ) { return 1; }\n' > "$TMP/clean/small.cpp"
 "$BIN" clean --skipped --no-cache > "$TMP/zero.xml" 2>/dev/null
-grep -q 'oversize="0"' "$TMP/zero.xml" && ok "(4) clean corpus reports oversize=\"0\"" || no "(4) clean corpus does not report oversize=\"0\""
+if grep -q 'oversize="0"' "$TMP/zero.xml"; then ok "(4) clean corpus reports oversize=\"0\""; else no "(4) clean corpus does not report oversize=\"0\""; fi
 grep -q '<f p="' "$TMP/zero.xml" && no "(4) zero-count report still emits rows" || ok "(4) zero-count report emits no rows"
 
 # ── (5) purely additive (G5) + default header unchanged (G4) ─────────────────────────────────────────────
@@ -115,11 +115,11 @@ grep -q 'json_ceiling=' "$TMP/map.xml" && no "(5) default map header gained a ne
 
 # ── (6) determinism — same input, byte-identical report ──────────────────────────────────────────────────
 "$BIN" corpus --skipped --max-file-size=1K --no-cache > "$TMP/one2.xml" 2>/dev/null
-cmp -s "$TMP/one.xml" "$TMP/one2.xml" && ok "(6) two runs, byte-identical" || no "(6) two runs differ"
+if cmp -s "$TMP/one.xml" "$TMP/one2.xml"; then ok "(6) two runs, byte-identical"; else no "(6) two runs differ"; fi
 
 # ── (7) well-formedness (G4) ─────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/one.xml" 2>/dev/null && ok "(7) report is well-formed XML" || no "(7) report fails xmllint"
+    if xmllint --noout "$TMP/one.xml" 2>/dev/null; then ok "(7) report is well-formed XML"; else no "(7) report fails xmllint"; fi
 else
     ok "(7) xmllint not available — skipped (regression.sh's own gate covers the toolchain that has it)"
 fi
@@ -134,6 +134,6 @@ printf 'int beta_fn( void ) { return 2; }\n' > "$TMP/beta/lib.cpp"
 grep -q "<f p=\"alpha/big.cpp\" why=\"oversize\" bytes=\"$bigBytes\" limit=\"1024\"/>" "$TMP/multi.xml" \
     && ok "(8) multi-root row carries the labeled <label>/<rel> spelling" \
     || { no "(8) multi-root row missing or unlabeled (want p=\"alpha/big.cpp\")"; head -c 400 "$TMP/multi.xml"; echo; }
-grep -q 'oversize="1"' "$TMP/multi.xml" && ok "(8) multi-root count sums across roots" || no "(8) multi-root count wrong (want oversize=\"1\")"
+if grep -q 'oversize="1"' "$TMP/multi.xml"; then ok "(8) multi-root count sums across roots"; else no "(8) multi-root count wrong (want oversize=\"1\")"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "FAILURES ABOVE"; exit 1; }

@@ -27,7 +27,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "  SKIP  qualityorigincheck (git required for the HEAD-baseline fixtures)"; exit 0; }
@@ -93,8 +93,8 @@ NROWS="$( rowcount "$ON" )"; NNEW="$( newrowcount "$ON" )"
 rowsplit "$ON" | grep 'origin="new-symbol"' | grep -qv 'sev="minor"' \
     && ok "B: a MAJOR new-symbol row exists yet the run exits 0 (origin gates, not sev)" \
     || no "B: no major new-symbol row — the fixture no longer proves origin-not-sev gating"
-[ "$( hattr "$ON" 'preexisting-worse' )" = 0 ] && ok "B: header preexisting-worse=\"0\"" || no "B: header preexisting-worse should be 0"
-[ "$( hattr "$ON" 'gating' )" = 0 ]            && ok "B: header gating=\"0\"" || no "B: header gating should be 0"
+if [ "$( hattr "$ON" 'preexisting-worse' )" = 0 ]; then ok "B: header preexisting-worse=\"0\""; else no "B: header preexisting-worse should be 0"; fi
+if [ "$( hattr "$ON" 'gating' )" = 0 ]; then ok "B: header gating=\"0\""; else no "B: header gating should be 0"; fi
 
 # ═══ C) COUNTERS EXACT ON A KNOWN MIX ═══════════════════════════════════════════════════════════════════
 #   One repo, both halves at once: f() (committed) is pushed over the ccx bar AND a whole new file lands.
@@ -124,10 +124,10 @@ MGATEROWS="$( rowsplit "$OM" | grep -v 'origin="new-symbol"' | grep -cv 'sev="mi
     || no "C: counter sum broken (regressions=$MREG pre=$MPRE new=$MNEWH rows=$MROWS)"
 [ "$MGATE" = "$MGATEROWS" ] && ok "C: header gating=\"$MGATE\" == the preexisting-AND-major row count" \
     || no "C: header gating=$MGATE but $MGATEROWS rows are preexisting+major"
-[ "$EM" = 2 ] && ok "C: a mix containing a preexisting major finding exits 2" || no "C: mixed run should exit 2 (got $EM)"
+if [ "$EM" = 2 ]; then ok "C: a mix containing a preexisting major finding exits 2"; else no "C: mixed run should exit 2 (got $EM)"; fi
 
 # ═══ D) DETERMINISM + WELL-FORMEDNESS ═══════════════════════════════════════════════════════════════════
-[ "$OM" = "$( dq "$M" )" ] && ok "D: byte-identical across two runs on a fixed repo state" || no "D: non-deterministic delta"
+if [ "$OM" = "$( dq "$M" )" ]; then ok "D: byte-identical across two runs on a fixed repo state"; else no "D: non-deterministic delta"; fi
 if command -v xmllint >/dev/null 2>&1; then
     printf '%s' "$OM" | xmllint --noout - 2>/dev/null && printf '%s' "$ON" | xmllint --noout - 2>/dev/null \
         && ok "D: xml well-formed with the new attributes (G4)" || no "D: xml malformed"
@@ -166,7 +166,7 @@ JROWNEW="$( count "$JM" '"origin":"new-symbol"' )"
     && ok "F: --json mirrors the counters + per-row origin (pre=$JPRE new=$JNEW gating=$JGATE rows=$JROWNEW)" \
     || no "F: json parity broken (xml pre=$MPRE new=$MNEWH gating=$MGATE rows=$MNEW | json pre=$JPRE new=$JNEW gating=$JGATE rows=$JROWNEW)"
 JEC="$( cd "$M" && "$BIN" . --quality-delta --json --no-cache >/dev/null 2>&1; echo $? )"
-[ "$JEC" = "$EM" ] && ok "F: --json exit code matches the XML path ($JEC)" || no "F: json exit $JEC != xml exit $EM"
+if [ "$JEC" = "$EM" ]; then ok "F: --json exit code matches the XML path ($JEC)"; else no "F: json exit $JEC != xml exit $EM"; fi
 
 # ═══ G) MUTATION SELF-TEST — the classifier is not a constant ═══════════════════════════════════════════
 #   The SAME shaped finding (a complexity regression far over the bar, major, unacked) gates in corpus A and

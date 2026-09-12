@@ -22,7 +22,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -134,11 +134,11 @@ echo "landingcheck: REPO=$R"
 P="$( cat "$TMP/p1" )"
 
 # ── 3) header counts: 2 unmerged, 1 superseded, 1 merged, both unmerged scouted, none bounded ──────────
-echo "$P" | grep -q '<landing-plan [^>]*unmerged="2"' && ok "header: unmerged=2" || { no "header unmerged!=2"; echo "$P" | grep -o '<landing-plan[^>]*'; }
-echo "$P" | grep -q '<landing-plan [^>]*superseded="1"' && ok "header: superseded=1" || no "header superseded!=1"
-echo "$P" | grep -q '<landing-plan [^>]*merged="1"' && ok "header: merged=1 (feat-merged counted, never listed)" || no "header merged!=1"
-echo "$P" | grep -q '<landing-plan [^>]*scouted="2"' && ok "header: scouted=2 (both unmerged refs fed to merge-scout)" || no "header scouted!=2"
-echo "$P" | grep -q '<landing-plan [^>]*bounded="0"' && ok "header: bounded=0 (under kMaxPlanScout)" || no "header bounded!=0"
+if echo "$P" | grep -q '<landing-plan [^>]*unmerged="2"'; then ok "header: unmerged=2"; else { no "header unmerged!=2"; echo "$P" | grep -o '<landing-plan[^>]*'; }; fi
+if echo "$P" | grep -q '<landing-plan [^>]*superseded="1"'; then ok "header: superseded=1"; else no "header superseded!=1"; fi
+if echo "$P" | grep -q '<landing-plan [^>]*merged="1"'; then ok "header: merged=1 (feat-merged counted, never listed)"; else no "header merged!=1"; fi
+if echo "$P" | grep -q '<landing-plan [^>]*scouted="2"'; then ok "header: scouted=2 (both unmerged refs fed to merge-scout)"; else no "header scouted!=2"; fi
+if echo "$P" | grep -q '<landing-plan [^>]*bounded="0"'; then ok "header: bounded=0 (under kMaxPlanScout)"; else no "header bounded!=0"; fi
 
 # ── 4) the ground-truth inclusion/exclusion contract ────────────────────────────────────────────────────
 echo "$P" | grep -q '<ref name="feat-unmerged" v="unmerged"[^>]*scouted="1"' \
@@ -158,8 +158,8 @@ echo "$P" | grep -q '<ref name="feat-superseded"' \
     || ok "feat-superseded: does not double-appear as a scouted/bounded <ref>"
 
 # ── 5) the merge-scout pass-through actually ran: a real same-symbol conflict + a non-empty landing order ─
-echo "$P" | grep -q '<arm ref="feat-unmerged"[^>]*ok="1"' && ok "arm feat-unmerged present (ok=1)" || no "arm feat-unmerged missing/failed"
-echo "$P" | grep -q '<arm ref="feat-unmerged-2"[^>]*ok="1"' && ok "arm feat-unmerged-2 present (ok=1)" || no "arm feat-unmerged-2 missing/failed"
+if echo "$P" | grep -q '<arm ref="feat-unmerged"[^>]*ok="1"'; then ok "arm feat-unmerged present (ok=1)"; else no "arm feat-unmerged missing/failed"; fi
+if echo "$P" | grep -q '<arm ref="feat-unmerged-2"[^>]*ok="1"'; then ok "arm feat-unmerged-2 present (ok=1)"; else no "arm feat-unmerged-2 missing/failed"; fi
 echo "$P" | grep -q '<pair a="feat-unmerged" b="feat-unmerged-2" conflicts="1"' \
     && ok "pair feat-unmerged/feat-unmerged-2: true same-symbol conflict on reliefFirstContourIndex" \
     || { no "expected a conflicts=1 pair between the two unmerged branches"; echo "$P" | grep -o '<pair a="feat-unmerged"[^/]*'; }
@@ -173,7 +173,7 @@ echo "$P" | grep -qE '<landing order="feat-unmerged,feat-unmerged-2"/>' \
 # ── 7) refusals: non-git root, multi-root ───────────────────────────────────────────────────────────────
 mkdir -p "$TMP/plain"; printf 'int main(){return 0;}\n' > "$TMP/plain/m.cpp"
 "$BIN" "$TMP/plain" --stray-content --plan >/dev/null 2>&1; rc=$?
-[ "$rc" -eq 1 ] && ok "--stray-content --plan on a non-git root refuses loudly (exit 1)" || no "non-git root did not exit 1 (rc=$rc)"
+if [ "$rc" -eq 1 ]; then ok "--stray-content --plan on a non-git root refuses loudly (exit 1)"; else no "non-git root did not exit 1 (rc=$rc)"; fi
 
 # a SECOND, genuinely different repo — two identical paths dedup to one root (a pre-existing, unrelated
 # ripwire behavior), so the multi-root refusal needs two distinct directories to actually exercise it.
@@ -191,11 +191,11 @@ MRERR="$( "$BIN" "$R" "$R3" --stray-content --plan 2>&1 )"; MRRC=$?
 
 # ── 8) xmllint (G4) + minified ──────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    echo "$P" | xmllint --noout - 2>/dev/null && ok "landing-plan XML well-formed" || no "landing-plan XML malformed"
+    if echo "$P" | xmllint --noout - 2>/dev/null; then ok "landing-plan XML well-formed"; else no "landing-plan XML malformed"; fi
 else
     ok "xmllint unavailable — well-formedness skipped"
 fi
-[ "$( grep -c '' "$TMP/p1" )" -le 1 ] && ok "output is minified (no stray newlines)" || no "output contains newlines outside CDATA"
+if [ "$( grep -c '' "$TMP/p1" )" -le 1 ]; then ok "output is minified (no stray newlines)"; else no "output contains newlines outside CDATA"; fi
 
 # ── 9) read-only: current branch + working tree unchanged after every run above ────────────────────────
 POSTBRANCH="$( git -C "$R" symbolic-ref --short HEAD 2>/dev/null )"
@@ -234,10 +234,10 @@ echo "landingcheck: REPO2=$R2 (13 unmerged branches, sizes 1..13 lines)"
 "$BIN" "$R2" --stray-content --plan >"$TMP/b1" 2>/dev/null; brc=$?
 B="$( cat "$TMP/b1" )"
 
-[ "$brc" -eq 0 ] && ok "REPO2: --stray-content --plan ran clean (rc=0)" || { no "REPO2 run failed (rc=$brc)"; echo "$B" | head -c 400; }
-echo "$B" | grep -q '<landing-plan [^>]*unmerged="13"' && ok "REPO2 header: unmerged=13" || { no "REPO2 header unmerged!=13"; echo "$B" | grep -o '<landing-plan[^>]*'; }
-echo "$B" | grep -q '<landing-plan [^>]*scouted="12"' && ok "REPO2 header: scouted=12 (kMaxPlanScout bound)" || { no "REPO2 header scouted!=12"; echo "$B" | grep -o '<landing-plan[^>]*'; }
-echo "$B" | grep -q '<landing-plan [^>]*bounded="1"' && ok "REPO2 header: bounded=1 (the smallest ref, counted honestly)" || { no "REPO2 header bounded!=1"; echo "$B" | grep -o '<landing-plan[^>]*'; }
+if [ "$brc" -eq 0 ]; then ok "REPO2: --stray-content --plan ran clean (rc=0)"; else { no "REPO2 run failed (rc=$brc)"; echo "$B" | head -c 400; }; fi
+if echo "$B" | grep -q '<landing-plan [^>]*unmerged="13"'; then ok "REPO2 header: unmerged=13"; else { no "REPO2 header unmerged!=13"; echo "$B" | grep -o '<landing-plan[^>]*'; }; fi
+if echo "$B" | grep -q '<landing-plan [^>]*scouted="12"'; then ok "REPO2 header: scouted=12 (kMaxPlanScout bound)"; else { no "REPO2 header scouted!=12"; echo "$B" | grep -o '<landing-plan[^>]*'; }; fi
+if echo "$B" | grep -q '<landing-plan [^>]*bounded="1"'; then ok "REPO2 header: bounded=1 (the smallest ref, counted honestly)"; else { no "REPO2 header bounded!=1"; echo "$B" | grep -o '<landing-plan[^>]*'; }; fi
 
 # the SMALLEST branch (size-01, stray=1) must be the one bounded out — top-N BY STRAY SIZE keeps the rest
 echo "$B" | grep -q '<ref name="size-01" v="unmerged" stray="1" [^>]*scouted="0"' \
@@ -258,7 +258,7 @@ echo "$( cat "$TMP/b2" )" | grep -q '<landing-plan [^>]*scouted="13"[^>]*bounded
     || { no "--detail did not lift the bound"; echo "$( cat "$TMP/b2" )" | grep -o '<landing-plan[^>]*'; }
 
 if command -v xmllint >/dev/null 2>&1; then
-    echo "$B" | xmllint --noout - 2>/dev/null && ok "REPO2 landing-plan XML well-formed" || no "REPO2 landing-plan XML malformed"
+    if echo "$B" | xmllint --noout - 2>/dev/null; then ok "REPO2 landing-plan XML well-formed"; else no "REPO2 landing-plan XML malformed"; fi
 fi
 
 [ $fail -eq 0 ] && echo "landingcheck: ALL PASS" || echo "landingcheck: FAILURES"

@@ -51,7 +51,7 @@ fail=0
 
 # ── helpers, ALL defined before the first use (manifestcheck I1: bash resolves functions at run
 #    time, so a call above its definition expands to nothing and its arm passes on empty strings) ──
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 # run --for on the fixture with the arm at $1 (0|1), query $2, stdout to $3 and stderr to $4.
@@ -248,7 +248,7 @@ cmp -s "$TMP/f_warm.xml" "$TMP/f_1.xml" \
 
 # ── (g) G4 — still well-formed XML with the arm on ─────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/a_on.xml" 2>/dev/null && ok "(g) xml well-formed with the arm on" || no "(g) xml malformed with the arm on"
+    if xmllint --noout "$TMP/a_on.xml" 2>/dev/null; then ok "(g) xml well-formed with the arm on"; else no "(g) xml malformed with the arm on"; fi
 else
     printf '  SKIP  (g) xml well-formed (no xmllint)\n'
 fi

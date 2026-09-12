@@ -30,7 +30,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -112,7 +112,7 @@ FOR_MSGS=( "$INIT" '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"nam
 mcp_call "${FOR_MSGS[@]}" >"$TMP/for_a"
 mcp_call "${FOR_MSGS[@]}" >"$TMP/for_b"
 assert_masked "$TMP/for_a" "for(doc comment)" "$KEY_DOC"
-diff -q "$TMP/for_a" "$TMP/for_b" >/dev/null && ok "for: deterministic with redaction active" || no "for: non-deterministic with redaction active"
+if diff -q "$TMP/for_a" "$TMP/for_b" >/dev/null; then ok "for: deterministic with redaction active"; else no "for: non-deterministic with redaction active"; fi
 
 # ─── 2. exemplar — def-body seam ──────────────────────────────────────────────────────────────────
 echo
@@ -146,7 +146,7 @@ else
     mcp_call "${FB_MSGS[@]}" >"$TMP/fb_a"
     mcp_call "${FB_MSGS[@]}" >"$TMP/fb_b"
     assert_masked "$TMP/fb_a" "fetch_body(body)" "$KEY_BODY"
-    diff -q "$TMP/fb_a" "$TMP/fb_b" >/dev/null && ok "fetch_body: deterministic with redaction active" || no "fetch_body: non-deterministic with redaction active"
+    if diff -q "$TMP/fb_a" "$TMP/fb_b" >/dev/null; then ok "fetch_body: deterministic with redaction active"; else no "fetch_body: non-deterministic with redaction active"; fi
 fi
 
 # ─── 5. --no-redact escape hatch — keys arrive VERBATIM ───────────────────────────────────────────
@@ -182,7 +182,7 @@ for f in "$TMP/for_a" "$TMP/ex_a" "$TMP/rc_a" "$TMP/fb_a"; do
         printf '%s' "$line" | python3 -c 'import sys,json;json.load(sys.stdin)' 2>/dev/null || JSONBAD=1
     done <"$f"
 done
-[ "$JSONBAD" -eq 0 ] && ok "all redacted response lines parse as JSON" || no "a redacted response line is NOT valid JSON"
+if [ "$JSONBAD" -eq 0 ]; then ok "all redacted response lines parse as JSON"; else no "a redacted response line is NOT valid JSON"; fi
 
 # ─── Summary ──────────────────────────────────────────────────────────────────────────────────────
 echo

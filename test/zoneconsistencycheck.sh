@@ -24,7 +24,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -78,7 +78,7 @@ echo "=== self-consistency on the existing mixed-zone fixture (test/zonefix) ===
 # ═══════════════════════════════════════════════════════════════════════════
 [ -d test/zonefix ] || { echo "no test/zonefix — fixture missing (expected from Wave-2)"; exit 2; }
 ZF_OUT="$( "$BIN" test/zonefix --arch=test/zonefix/zone.arch --no-cache 2>/dev/null )"
-[ -n "$ZF_OUT" ] && printf '%s' "$ZF_OUT" | grep -q '<metrics' && ok "produced <metrics> block on test/zonefix" || no "no <metrics> block on test/zonefix"
+if [ -n "$ZF_OUT" ] && printf '%s' "$ZF_OUT" | grep -q '<metrics'; then ok "produced <metrics> block on test/zonefix"; else no "no <metrics> block on test/zonefix"; fi
 check_consistency "test/zonefix" "$ZF_OUT"
 # independent sanity: this fixture is KNOWN (from zonecheck.sh) to have exactly 1 pain + 1 useless + 1 ok
 # + 1 n/a out of 4 modules — cross-check the raw numbers too, not just self-consistency, so a bug that
@@ -86,9 +86,9 @@ check_consistency "test/zonefix" "$ZF_OUT"
 # itself) is still caught. §P6.5: `consumer` has zero types, so it reads zone="n/a" (excluded from
 # zone_pain/zone_useless and from the zone="ok" count) rather than the pre-fix accidental "ok" it got from
 # D=0.00 with a forced A=0 — only `balanced` is genuinely zone="ok" now.
-printf '%s' "$ZF_OUT" | grep -q 'modules="4"' && ok "test/zonefix: modules=4 (independent count check)" || no "test/zonefix: modules count wrong: $ZF_OUT"
-printf '%s' "$ZF_OUT" | grep -oE '<m [^>]*zone="ok"' | wc -l | tr -d ' ' | grep -q '^1$' && ok "test/zonefix: exactly 1 module lands zone=\"ok\" (independent count check)" || no "test/zonefix: ok-zone count wrong"
-printf '%s' "$ZF_OUT" | grep -oE '<m [^>]*zone="n/a"' | wc -l | tr -d ' ' | grep -q '^1$' && ok "test/zonefix: exactly 1 module lands zone=\"n/a\" (consumer, zero types)" || no "test/zonefix: n/a-zone count wrong"
+if printf '%s' "$ZF_OUT" | grep -q 'modules="4"'; then ok "test/zonefix: modules=4 (independent count check)"; else no "test/zonefix: modules count wrong: $ZF_OUT"; fi
+if printf '%s' "$ZF_OUT" | grep -oE '<m [^>]*zone="ok"' | wc -l | tr -d ' ' | grep -q '^1$'; then ok "test/zonefix: exactly 1 module lands zone=\"ok\" (independent count check)"; else no "test/zonefix: ok-zone count wrong"; fi
+if printf '%s' "$ZF_OUT" | grep -oE '<m [^>]*zone="n/a"' | wc -l | tr -d ' ' | grep -q '^1$'; then ok "test/zonefix: exactly 1 module lands zone=\"n/a\" (consumer, zero types)"; else no "test/zonefix: n/a-zone count wrong"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -128,21 +128,21 @@ struct BConcrete
 EOF
 : > "$TMP/allok/noop.arch"   # empty rules file — we only want the <metrics> block, no layering violations
 AOK_OUT="$( "$BIN" "$TMP/allok" --arch="$TMP/allok/noop.arch" --no-cache 2>/dev/null )"
-[ -n "$AOK_OUT" ] && printf '%s' "$AOK_OUT" | grep -q '<metrics' && ok "produced <metrics> block on the all-ok fixture" || no "no <metrics> block on the all-ok fixture"
-printf '%s' "$AOK_OUT" | grep -q 'modules="2"' && ok "all-ok fixture: modules=2" || no "all-ok fixture: modules count wrong: $AOK_OUT"
-printf '%s' "$AOK_OUT" | grep -q 'zone_pain="0"' && ok "all-ok fixture: zone_pain=0" || no "all-ok fixture: zone_pain should be 0: $AOK_OUT"
-printf '%s' "$AOK_OUT" | grep -q 'zone_useless="0"' && ok "all-ok fixture: zone_useless=0" || no "all-ok fixture: zone_useless should be 0: $AOK_OUT"
+if [ -n "$AOK_OUT" ] && printf '%s' "$AOK_OUT" | grep -q '<metrics'; then ok "produced <metrics> block on the all-ok fixture"; else no "no <metrics> block on the all-ok fixture"; fi
+if printf '%s' "$AOK_OUT" | grep -q 'modules="2"'; then ok "all-ok fixture: modules=2"; else no "all-ok fixture: modules count wrong: $AOK_OUT"; fi
+if printf '%s' "$AOK_OUT" | grep -q 'zone_pain="0"'; then ok "all-ok fixture: zone_pain=0"; else no "all-ok fixture: zone_pain should be 0: $AOK_OUT"; fi
+if printf '%s' "$AOK_OUT" | grep -q 'zone_useless="0"'; then ok "all-ok fixture: zone_useless=0"; else no "all-ok fixture: zone_useless should be 0: $AOK_OUT"; fi
 # both modules individually tagged zone="ok" (not just the summary happening to read 0/0 by coincidence
 # — e.g. if the summary counter were entirely disconnected from the tags, it could default to 0 always;
 # the earlier self-consistency check on zonefix already rules that out, but pin it here too for belt-and-braces).
-printf '%s' "$AOK_OUT" | grep -oE '<m [^>]*zone="ok"' | wc -l | tr -d ' ' | grep -q '^2$' && ok "all-ok fixture: both modules individually tagged zone=\"ok\"" || no "all-ok fixture: not all modules tagged zone=\"ok\": $AOK_OUT"
+if printf '%s' "$AOK_OUT" | grep -oE '<m [^>]*zone="ok"' | wc -l | tr -d ' ' | grep -q '^2$'; then ok "all-ok fixture: both modules individually tagged zone=\"ok\""; else no "all-ok fixture: not all modules tagged zone=\"ok\": $AOK_OUT"; fi
 check_consistency "all-ok fixture" "$AOK_OUT"
 
 # determinism
 AOK_OUT2="$( "$BIN" "$TMP/allok" --arch="$TMP/allok/noop.arch" --no-cache 2>/dev/null )"
-[ "$AOK_OUT" = "$AOK_OUT2" ] && ok "all-ok fixture: deterministic run-to-run" || no "all-ok fixture: non-deterministic"
+if [ "$AOK_OUT" = "$AOK_OUT2" ]; then ok "all-ok fixture: deterministic run-to-run"; else no "all-ok fixture: non-deterministic"; fi
 
-command -v xmllint >/dev/null 2>&1 && { printf '%s' "$AOK_OUT" | xmllint --noout - 2>/dev/null && ok "xml well-formed (all-ok --arch)" || no "xml malformed (all-ok --arch)"; }
+command -v xmllint >/dev/null 2>&1 && { if printf '%s' "$AOK_OUT" | xmllint --noout - 2>/dev/null; then ok "xml well-formed (all-ok --arch)"; else no "xml malformed (all-ok --arch)"; fi; }
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

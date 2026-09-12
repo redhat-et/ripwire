@@ -40,7 +40,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 BASE="${RIPWIRE_BASE_BIN:-}"
 fail=0
-ok(){   printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 

@@ -30,7 +30,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 cd "$ROOT" || { printf 'ripwirepubliccheck: cannot cd to repo root %s\n' "$ROOT"; exit 2; }
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 # A missing tool must never read as a clean tree — that is the green-while-inert failure this suite
@@ -261,6 +261,16 @@ fi
 #   docs/docs_commands_build.py       — the generator's OWN source, describing its `symbol@basename.ext`
 #                                        placeholder shape in comments (a literal ".ext", not a real TLD,
 #                                        so find_address()'s TLD check does not itself filter it out).
+#   src/infra/timsort.hpp             — the ONE vendored upstream file that deliberately does not live
+#                                        under third_party/. src/infra/ is the portable layer that gets
+#                                        copied wholesale into another tree (test/infraportcheck.sh is
+#                                        the boundary that keeps it copyable), and this sorter is part
+#                                        of what that layer offers, so it travels with it. Its MIT
+#                                        notice names its upstream authors; the licence REQUIRES that
+#                                        notice be kept, so the addresses are not removable and are not
+#                                        ours. Exempted by EXACT PATH, never by directory: src/ at large
+#                                        stays covered, and a second vendored file here would have to
+#                                        earn its own row and say why it is not in third_party/.
 #
 # SYNTHETIC_DOMAINS — the exact set of throwaway domains found in test fixtures across the whole
 # committed tree (`git config user.email …@x.com`/`@t.com`/`@test.com`/`example.com`/
@@ -280,7 +290,7 @@ fi
 # legitimate synthetic-domain hit in this repo lives under test/ or bench/ (measured: 39 files,
 # zero elsewhere) — it is now conjoined with a path check, so the same synthetic address in
 # README/src/docs is treated as a leak, not a fixture.
-PATH_ALLOW='^(third_party/|bench/cppbench/dataset\.lock$|docs/docs_commands_build\.py$)'
+PATH_ALLOW='^(third_party/|bench/cppbench/dataset\.lock$|docs/docs_commands_build\.py$|src/infra/timsort\.hpp$)'
 python3 - "$TMP/tracked.z" "$ROOT" "$PATH_ALLOW" > "$TMP/arm5b" 2> "$TMP/arm5b.err" <<'PY'
 import os, re, sys
 paths = [p.decode('utf-8', 'surrogateescape')
@@ -423,8 +433,8 @@ tracked = set(paths)
 # roots are ENUMERATED, not globbed off disk, so pruning a dependency too far still fails the arm
 # instead of quietly shrinking the search.
 _deps = 'third_party/deps'
-_grammars = ('bash', 'c', 'cpp', 'csharp', 'cuda', 'elixir', 'go', 'java', 'javascript', 'json',
-             'objc', 'python', 'ruby', 'rust', 'swift', 'toml', 'yaml')
+_grammars = ('bash', 'c', 'cpp', 'csharp', 'cuda', 'dart', 'elixir', 'go', 'java', 'javascript', 'json',
+             'kotlin', 'objc', 'python', 'ruby', 'rust', 'swift', 'toml', 'yaml')
 roots = (['src', 'src/infra', 'third_party', '']                        # our targets
          + [f'{_deps}/tree_sitter/lib/include']                         # PUBLIC, given to every target
          + [f'{_deps}/tree_sitter/lib/src', f'{_deps}/tree_sitter/lib/src/wasm']   # tree-sitter PRIVATE

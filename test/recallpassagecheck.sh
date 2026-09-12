@@ -126,6 +126,9 @@
 #                make every section score. The arm is phrased against the ANSWER'S OWN SOURCE LINE, found
 #                by scanning the fixture copy, so it says "both phrasings serve the unit that CONTAINS
 #                the answer" rather than pinning a line number that doc drift would silently move.
+#                CORPUS PINNED 2026-09-11: the document is now ARCHITECTURE.md as of blob P10_CORPUS_BLOB
+#                (c166bb4f, the file at d752d953), not the live file; the ranges above were measured on the
+#                live copy of 2026-09-08. Line drift turned out not to be the only drift — see the P10 corpus note.
 #   P11  FAIL    DEGENERATE-CUT HONESTY — also F1's, also EXPECTED RED until it lands. The one surviving
 #                prefix cut (emitRecallSectionUnits' `admittedCount == 0` branch) recomputes lines= by
 #                counting the '\n' bytes in what survived and adding that to lineLo. A kept prefix that
@@ -153,7 +156,7 @@ BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/fixtures/recallpassage"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -161,7 +164,9 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 for f in large_late_answer.md nested_headings.md small_fits.md degenerate_single.md small_fits.golden; do
     [ -f "$FIX/$f" ] || { echo "missing fixture: $FIX/$f — regenerate test/fixtures/recallpassage/"; exit 2; }
 done
-[ -f "$ROOT/docs/ARCHITECTURE.md" ] || { echo "missing docs/ARCHITECTURE.md — P10's corpus is that document"; exit 2; }
+# P10's corpus: docs/ARCHITECTURE.md as it stood at d752d953, read by BLOB id — see the P10 corpus note below.
+P10_CORPUS_BLOB="c166bb4f5f723face414844539c4e51dbabaff62"
+git -C "$ROOT" cat-file -e "$P10_CORPUS_BLOB^{blob}" 2>/dev/null || { echo "missing git blob $P10_CORPUS_BLOB (docs/ARCHITECTURE.md at commit d752d953) — P10's corpus is that blob; CI checks out full history (fetch-depth: 0), so run this gate from a full clone, not a shallow one or a copy without .git"; exit 2; }
 
 echo "recallpassagecheck: BIN=$BIN"
 
@@ -262,13 +267,23 @@ NEST="$TMP/nest";   mkdir -p "$NEST";  cp "$FIX/nested_headings.md"  "$NEST/"
 SMALL="$TMP/small"; mkdir -p "$SMALL"; cp "$FIX/small_fits.md"       "$SMALL/"
 DEGEN="$TMP/degen"; mkdir -p "$DEGEN"; cp "$FIX/degenerate_single.md" "$DEGEN/"
 
-# P10's corpus is a REAL repo document, copied out so the corpus holds exactly one file — which is what
+# P10's corpus is a REAL repo document, written out so the corpus holds exactly one file — which is what
 # makes "which unit was served" an unambiguous question at a binding budget. It is
 # deliberately not a synthetic fixture: the natural-language regression is a property of a many-sectioned
 # document's scoring, and a hand-built fixture would be tuned until it reproduced, which is circular.
-# The arm carries its own drift guard — if the answer sentence ever leaves ARCHITECTURE.md, the arm says
-# the FIXTURE moved instead of silently passing on a document that no longer contains the answer.
-ARCH="$TMP/arch"; mkdir -p "$ARCH"; cp "$ROOT/docs/ARCHITECTURE.md" "$ARCH/"
+#
+# PINNED, not live: the document is ARCHITECTURE.md as of blob P10_CORPUS_BLOB (c166bb4f, the file at
+# d752d953). Observed 2026-09-11 on PR #126: a 27-line Kotlin paragraph inserted at line 160, unrelated to
+# the answer, moved the document's section statistics, and at --max-tokens=800 the KEYWORD control stopped
+# serving the answer — both phrasings served lines="21-33" ("### ingest — crawl and parse", also about a
+# sorted crawl) while the answer sat on line 405. The same binary on this blob serves 372-387 (keyword)
+# and 372-382 (English), both holding the answer on line 378. The sentinel scan kept the LINE honest
+# across edits; it cannot hold section statistics still, and which of two relevant sections wins one
+# unit's worth of budget is live-document ranking. This arm measures phrasing parity, so the document is
+# held fixed and only the binary is free to move. The answer is still located by content inside the pinned
+# copy, and the drift guard stays for the day the blob is re-pinned — re-pin only with the header's M1
+# run repeated on the new blob, so the control is seen to go red before its green is believed.
+ARCH="$TMP/arch"; mkdir -p "$ARCH"; git -C "$ROOT" cat-file blob "$P10_CORPUS_BLOB" > "$ARCH/ARCHITECTURE.md"
 
 # P11's corpus, GENERATED rather than committed: the generation rule below IS the ground truth this arm
 # checks against (heading on line 3, then 400 two-line paragraphs of a fixed 66-column width), and a
@@ -456,9 +471,13 @@ fi
 #
 # Ground truth is the ANSWER'S SOURCE LINE, located by scanning the fixture copy for a sentence that
 # only the answering section contains — never read back out of ripwire, and never a hard-coded line
-# number, so ordinary edits to ARCHITECTURE.md move the ground truth with the document instead of
-# turning this arm into a tripwire on an unrelated file. If the sentence stops being unique the arm says
-# the FIXTURE drifted, which is a different failure from the one it is here to catch.
+# number. The fixture copy is ARCHITECTURE.md as of blob P10_CORPUS_BLOB, not the live file. The scan was
+# meant to let ordinary edits to ARCHITECTURE.md move the ground truth with the document, and it did move
+# the line — but on 2026-09-11 (PR #126) an unrelated paragraph elsewhere in the live document shifted its
+# section statistics enough that the keyword control stopped serving the answer at 800 tokens: a tripwire
+# on an unrelated file after all. The arm measures phrasing parity, not live-document ranking; see the P10
+# corpus note above. If the sentence stops being unique the arm says the FIXTURE drifted, which is a
+# different failure from the one it is here to catch.
 echo "  ---- P10 natural-language parity (EXPECTED RED until lane F1 lands) ----"
 P10_SENTINEL="assigned in sorted crawl order"
 P10_LINE="$( grep -n "$P10_SENTINEL" "$ARCH/ARCHITECTURE.md" | cut -d: -f1 )"

@@ -65,7 +65,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"      # BOTH seams: positional ar
 FIX="test/rustqualfix"
 LEGO="test/legofix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -281,14 +281,14 @@ fi
 # ── §9 hygiene: determinism, warm==cold, well-formed XML ───────────────────────────────────────────────
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 run "$FIX" --no-cache >"$TMP/d1"; run "$FIX" --no-cache >"$TMP/d2"
-cmp -s "$TMP/d1" "$TMP/d2" && ok "deterministic (two --no-cache runs identical)" || no "non-deterministic"
+if cmp -s "$TMP/d1" "$TMP/d2"; then ok "deterministic (two --no-cache runs identical)"; else no "non-deterministic"; fi
 run "$FIX" --cache="$TMP/c.bin" >"$TMP/cold"; run "$FIX" --cache="$TMP/c.bin" >"$TMP/warm"
-cmp -s "$TMP/cold" "$TMP/warm" && ok "warm == cold (qualifier + scope survive the cache round-trip)" || no "warm != cold"
+if cmp -s "$TMP/cold" "$TMP/warm"; then ok "warm == cold (qualifier + scope survive the cache round-trip)"; else no "warm != cold"; fi
 # V3 H-3: this used to print "PASS xml well-formed (xmllint absent — skipped)" when the tool was missing —
 # a PASS for a check that never ran, which is exactly the false-green class this round exists to remove. G4
 # is a hard guardrail (CLAUDE.md), so a missing xmllint is a BROKEN ENVIRONMENT, not a satisfied assertion.
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/d1" 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if xmllint --noout "$TMP/d1" 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 else
     no "cannot verify G4: xmllint is NOT INSTALLED — this check did not run (install libxml2)"
 fi

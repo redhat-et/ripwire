@@ -223,11 +223,13 @@ inline bool parseEdit( const McpIndex& ix, const std::string& object, const std:
     return true;
 }
 
-inline FileStage* ensureStage( const McpIndex& ix, const Edit& edit, std::vector<FileStage>& files,
-                               const std::string& root, std::string& error )
+// The stage for `edit`'s file — the one already staged, or a fresh one read from disk — as { stage, "" }, or as
+// { nullptr, refusal } when the target is a symlink or its bytes no longer match the index.
+inline std::pair<FileStage*, std::string> ensureStage( const McpIndex& ix, const Edit& edit, std::vector<FileStage>& files,
+                                                       const std::string& root )
 {
     const auto staged = std::find_if( files.begin(), files.end(), [ & ]( const FileStage& file ) { return file.fileId == edit.fileId; } );
-    if( staged != files.end() ) { return &*staged; }
+    if( staged != files.end() ) { return { &*staged, std::string() }; }
     FileStage fresh;
     fresh.fileId = edit.fileId;
     // M12 (capture-audit 2026-09-04, lane L9) applied to the sibling it missed: the single-edit receipt's
@@ -240,15 +242,15 @@ inline FileStage* ensureStage( const McpIndex& ix, const Edit& edit, std::vector
                    : ix.ing.files[edit.fileId];
     fresh.disk = diskPath( ix.ing, edit.fileId );
     struct stat link{};
-    if( ::lstat( fresh.disk.c_str(), &link ) == 0 && S_ISLNK( link.st_mode ) ) { error = "refusing edit plan target symlink '" + fresh.identity + "'"; return nullptr; }
+    if( ::lstat( fresh.disk.c_str(), &link ) == 0 && S_ISLNK( link.st_mode ) ) { return { nullptr, "refusing edit plan target symlink '" + fresh.identity + "'" }; }
     bool readOk = false;
     fresh.original = mcpdetail::readFileBytes( fresh.disk, readOk );
     fresh.baseHash = readOk ? mcpdetail::byteHash( fresh.original.data(), fresh.original.size() ) : 0;
     const std::uint64_t indexedHash = edit.fileId < ix.fileByteHash.size() ? ix.fileByteHash[edit.fileId] : 0;
-    if( !readOk || fresh.baseHash == 0 || fresh.baseHash != indexedHash ) { error = "file '" + fresh.identity + "' changed since index was built"; return nullptr; }
+    if( !readOk || fresh.baseHash == 0 || fresh.baseHash != indexedHash ) { return { nullptr, "file '" + fresh.identity + "' changed since index was built" }; }
     fresh.edited = fresh.original;
     files.push_back( std::move( fresh ) );
-    return &files.back();
+    return { &files.back(), std::string() };
 }
 
 inline bool stageEdits( std::vector<Edit>& edits, std::vector<FileStage>& files, std::string& error )
@@ -295,8 +297,8 @@ inline Outcome prepare( const std::string& root, const std::string& planPath, st
     {
         Edit edit;
         if( !parseEdit( ix, object, planPath, maxBytes, edit, out.message ) ) { return out; }
-        FileStage* file = ensureStage( ix, edit, files, root, out.message );
-        if( file == nullptr ) { return out; }
+        auto [ file, refusal ] = ensureStage( ix, edit, files, root );
+        if( file == nullptr ) { out.message = std::move( refusal ); return out; }
         if( !( edit.a < edit.b && edit.b <= file->original.size() ) ) { out.message = "invalid definition span for '" + edit.target + "'"; return out; }
         // R1 (V3): parseEdit's third payload arm, moved here — the first point that holds the bytes the edit
         // would replace. Same function, same sentence, same denominators as the single verbs. Still preflight:

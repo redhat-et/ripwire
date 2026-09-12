@@ -30,7 +30,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -102,7 +102,7 @@ print("HAS:%d" % ("slice" in tools))
 for probe, tag in [("NAME-BASED","namebased"),("intra-procedural","intraproc"),("Go, Java, Rust","langs"),("@FILE:LINE","atseed"),("back","flowdoc")]:
     print("%s:%d" % (tag, probe in d))
 ' > "$TMP/list.probe"
-grep -q '^HAS:1' "$TMP/list.probe" && ok "(1) tools/list advertises 'slice'" || no "(1) 'slice' missing from tools/list"
+if grep -q '^HAS:1' "$TMP/list.probe"; then ok "(1) tools/list advertises 'slice'"; else no "(1) 'slice' missing from tools/list"; fi
 [ "$( grep '^COUNT:' "$TMP/list.probe" | cut -d: -f2 )" = "31" ] \
     && ok "(1) the catalog advertises 31 tools" \
     || no "(1) expected 31 advertised tools, got $( grep '^COUNT:' "$TMP/list.probe" | cut -d: -f2 )"

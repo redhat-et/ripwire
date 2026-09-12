@@ -50,7 +50,7 @@ FIX="$ROOT/test/yamlfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -68,7 +68,7 @@ echo "=== presence guards: the fixtures really contain what the arms below asser
 # finding nothing on both sides. Assert the probe target exists before asserting the property.
 WF="$FIX/workflow.yml"; MD="$FIX/multidoc.yml"; TK="$FIX/tasks.yaml"
 for f in "$WF" "$MD" "$TK"; do [ -f "$f" ] || { echo "fixture file $f missing"; exit 2; }; done
-guard(){ grep -qF -- "$2" "$1" && ok "fixture contains $3" || no "fixture LOST $3 — every arm below would pass by finding nothing"; }
+guard(){ if grep -qF -- "$2" "$1"; then ok "fixture contains $3"; else no "fixture LOST $3 — every arm below would pass by finding nothing"; fi; }
 guard "$WF" 'pipelinename:'        'a top-level key  pipelinename:'
 guard "$WF" 'branchfilter:'        'a depth-3 key  branchfilter:'
 guard "$WF" 'stepslist:'           'a depth-3 key owning a sequence  stepslist:'
@@ -97,16 +97,16 @@ echo "=== default map: exits 0, well-formed, clean stderr, edges=0 ==="
 MAP_OUT="$TMP/map.xml"
 $BIN "$FIX" --no-cache >"$MAP_OUT" 2>"$TMP/map.err"
 MAP_EXIT=$?
-[ "$MAP_EXIT" -eq 0 ] && ok "default map: exits 0 on YAML fixture" || no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"
+if [ "$MAP_EXIT" -eq 0 ]; then ok "default map: exits 0 on YAML fixture"; else no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"; fi
 
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP_OUT" && ok "default map: passes xmllint --noout" || no "default map: xmllint failed"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP_OUT"; then ok "default map: passes xmllint --noout"; else no "default map: xmllint failed"; fi; }
 
 # no degrade / ABI-mismatch warning must reach stderr on the clean fixtures
 [ -s "$TMP/map.err" ] && no "default map: unexpected stderr (ABI/degrade?): $( cat "$TMP/map.err" )" || ok "default map: clean stderr (no ABI mismatch / degrade)"
 
 # edges=0: YAML is data, no call graph
 EDGES="$( grep -o 'edges=[0-9]*' "$MAP_OUT" | head -1 )"
-[ "$EDGES" = "edges=0" ] && ok "default map: $EDGES (YAML is data — no call edges)" || no "default map: expected edges=0, got $EDGES"
+if [ "$EDGES" = "edges=0" ]; then ok "default map: $EDGES (YAML is data — no call edges)"; else no "default map: expected edges=0, got $EDGES"; fi
 
 # ─── parse per-file symbols once ────────────────────────────────────────────
 python3 - "$MAP_OUT" <<'PYEOF' >"$TMP/parsed.json"
@@ -236,9 +236,9 @@ function main() { return serde(); }
 JSEOF
 XL_OUT="$( $BIN "$XL" --no-cache 2>/dev/null )"
 XL_EDGES="$( echo "$XL_OUT" | grep -o 'edges=[0-9]*' | head -1 )"
-[ "$XL_EDGES" = "edges=1" ] && ok "mixed YAML+JS: $XL_EDGES (only the JS-internal main->serde edge)" || no "mixed YAML+JS: expected edges=1, got $XL_EDGES"
+if [ "$XL_EDGES" = "edges=1" ]; then ok "mixed YAML+JS: $XL_EDGES (only the JS-internal main->serde edge)"; else no "mixed YAML+JS: expected edges=1, got $XL_EDGES"; fi
 # the YAML side must actually be in the map, or the isolation claim is vacuous
-echo "$XL_OUT" | grep -q 'deploy.yml' && ok "mixed YAML+JS: deploy.yml IS indexed (isolation arm is not vacuous)" || no "mixed YAML+JS: deploy.yml absent from the map"
+if echo "$XL_OUT" | grep -q 'deploy.yml'; then ok "mixed YAML+JS: deploy.yml IS indexed (isolation arm is not vacuous)"; else no "mixed YAML+JS: deploy.yml absent from the map"; fi
 XL_CR="$( $BIN "$XL" --callers=serde --no-cache 2>/dev/null )"
 echo "$XL_CR" | grep -q 'count="1"' && echo "$XL_CR" | grep -q 'app.js' \
     && ok "--callers=serde: count=1, from app.js (the YAML \`serde\` key is NOT a caller/target)" \
@@ -247,7 +247,7 @@ echo "$XL_CR" | grep -q 'count="1"' && echo "$XL_CR" | grep -q 'app.js' \
 # mutation: rename the JS call site → the ONLY edge must vanish (non-tautological)
 sed 's/return serde()/return serdeX()/' "$XL/app.js" >"$XL/app.js.tmp" && mv "$XL/app.js.tmp" "$XL/app.js"
 XL_MUT="$( $BIN "$XL" --no-cache 2>/dev/null | grep -o 'edges=[0-9]*' | head -1 )"
-[ "$XL_MUT" = "edges=0" ] && ok "mutation: renamed JS call site → edges=0 (the edge assertion is real)" || no "mutation: expected edges=0 after rename, got $XL_MUT"
+if [ "$XL_MUT" = "edges=0" ]; then ok "mutation: renamed JS call site → edges=0 (the edge assertion is real)"; else no "mutation: expected edges=0 after rename, got $XL_MUT"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -278,7 +278,7 @@ with open(sys.argv[1], "w") as f:
 PYEOF
 $BIN "$DEEP" --no-cache >"$TMP/deep.xml" 2>"$TMP/deep.err"
 DEEP_EXIT=$?
-[ "$DEEP_EXIT" -eq 0 ] && ok "deep-indent: exits 0 (no SIGABRT — guard + patch both live)" || no "deep-indent: exited $DEEP_EXIT (the serialize() cliff?): $( cat "$TMP/deep.err" | head -3 )"
+if [ "$DEEP_EXIT" -eq 0 ]; then ok "deep-indent: exits 0 (no SIGABRT — guard + patch both live)"; else no "deep-indent: exited $DEEP_EXIT (the serialize() cliff?): $( cat "$TMP/deep.err" | head -3 )"; fi
 grep -q "yaml nesting" "$TMP/deep.err" \
     && ok "deep-indent: skipped with the one-line stderr note (house skip style)" \
     || no "deep-indent: no 'yaml nesting' skip note on stderr: $( cat "$TMP/deep.err" | head -3 )"
@@ -299,6 +299,64 @@ $BIN "$NORM" --no-cache >"$TMP/norm.xml" 2>"$TMP/norm.err"
 grep -q 'normalnest0' "$TMP/norm.xml" \
     && ok "guard calibration: a 12-level file is still indexed (its top-level key is a symbol)" \
     || no "guard calibration: a 12-level file was dropped — the depth guard over-fires"
+
+# ═══════════════════════════════════════════════════════════════════════════
+echo
+echo "=== KNOWN GAP (help wanted: prompts/help-wanted/nesting-refusals-visible.md): the refused deep.yml is invisible to --skipped and to warm runs, and --match parses it anyway ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# The depth guard above refuses deep.yml before the parse, and says so ONLY as one stderr line on a COLD run.
+# Measured on main:
+#   - --skipped never rows the file; its only trace is an anonymous unmeasured="1";
+#   - a warm run stat-hits the cache record saveCache wrote for it, so nothing is printed at all;
+#   - --match's structural-query walk (astQueryGrouped) parses the refused file with no prescan, which leaves the
+#     vendored scanner patch as that path's only layer.
+# Each KNOWN GAP arm asserts TODAY's behaviour, so it PASSES now. Flipping them is the acceptance test for the
+# prompt: a refused file is rowed in --skipped on cold AND warm runs, and --match applies the same refusal. A FAIL
+# on a KNOWN GAP arm means the gap moved: rewrite the arm to assert the fixed behaviour, never delete it.
+KGY="$TMP/kgyaml"; mkdir -p "$KGY"
+cp "$DEEP/deep.yml" "$KGY/deep.yml"
+printf 'kgsiblingkey: 1\n' > "$KGY/sibling.yml"
+$BIN "$KGY" --cache="$TMP/kgyaml.cache" >"$TMP/kgy_cold.xml" 2>"$TMP/kgy_cold.err"; KGY_COLD_RC=$?
+$BIN "$KGY" --cache="$TMP/kgyaml.cache" >"$TMP/kgy_warm.xml" 2>"$TMP/kgy_warm.err"; KGY_WARM_RC=$?
+KGY_LIVE=0
+if [ "$KGY_COLD_RC" -eq 0 ] && [ "$KGY_WARM_RC" -eq 0 ] && grep -q 'deep.yml: yaml nesting' "$TMP/kgy_cold.err" \
+   && grep -q 'kgsiblingkey' "$TMP/kgy_warm.xml" && cmp -s "$TMP/kgy_cold.xml" "$TMP/kgy_warm.xml"; then
+    ok "(kg-yaml) presence: the cold run refuses deep.yml on stderr; the warm run serves the same map from the cache, sibling indexed"
+    KGY_LIVE=1
+else
+    no "(kg-yaml) presence: expected rc=0 twice, a cold refusal note for deep.yml and a warm map identical to the cold one (cold rc=$KGY_COLD_RC, warm rc=$KGY_WARM_RC) — the arms below would be vacuous: $( head -2 "$TMP/kgy_cold.err" )"
+fi
+if [ "$KGY_LIVE" -eq 1 ]; then
+    grep -q 'deep.yml' "$TMP/kgy_warm.err" \
+        && no "KNOWN GAP MOVED (prompts/help-wanted/nesting-refusals-visible.md): the warm run now names deep.yml on stderr — rewrite this arm to assert the warm refusal is visible" \
+        || ok "KNOWN GAP (help wanted: prompts/help-wanted/nesting-refusals-visible.md): a WARM run says nothing about the refused deep.yml — flipping this is the acceptance test"
+    for mode in cold warm; do
+        if [ "$mode" = cold ]; then
+            $BIN "$KGY" --no-cache --skipped >"$TMP/kgy_sk_$mode.xml" 2>/dev/null; SK_RC=$?
+        else
+            $BIN "$KGY" --cache="$TMP/kgyaml.cache" --skipped >"$TMP/kgy_sk_$mode.xml" 2>/dev/null; SK_RC=$?
+        fi
+        if [ "$SK_RC" -ne 0 ] || ! grep -q '<skipped indexed="2"' "$TMP/kgy_sk_$mode.xml"; then
+            no "(kg-yaml) $mode --skipped: exit $SK_RC or no <skipped indexed=\"2\"> report — the arm cannot observe the gap"
+        elif grep -qE '<f p="[^"]*deep\.yml"' "$TMP/kgy_sk_$mode.xml"; then
+            no "KNOWN GAP MOVED (prompts/help-wanted/nesting-refusals-visible.md): $mode --skipped now rows deep.yml — rewrite this arm to assert the row, its why=, and its legend clause"
+        else
+            ok "KNOWN GAP (help wanted: prompts/help-wanted/nesting-refusals-visible.md): $mode --skipped has no row for the refused deep.yml (only an anonymous unmeasured= counts it) — flipping this is the acceptance test"
+        fi
+    done
+fi
+# --match: evaluated on a clean exit only. A crashed run prints nothing, and "no hits in an empty document" would pass
+# for the very defect this arm exists to expose.
+$BIN "$KGY" --no-cache --match='(block_mapping_pair)' >"$TMP/kgy_match.xml" 2>"$TMP/kgy_match.err"; KGY_M_RC=$?
+if [ "$KGY_M_RC" -ne 0 ]; then
+    no "(kg-yaml) --match over the refused deep.yml exited $KGY_M_RC — a parse the guard exists to prevent went wrong (the vendored scanner patch is --match's only layer): $( head -2 "$TMP/kgy_match.err" )"
+elif ! grep -q 'deep.yml: yaml nesting' "$TMP/kgy_match.err"; then
+    no "(kg-yaml) --match: the same run's ingest did not refuse deep.yml — the arm cannot show the two paths disagree"
+elif grep -q '<m p="deep\.yml:' "$TMP/kgy_match.xml"; then
+    ok "KNOWN GAP (help wanted: prompts/help-wanted/nesting-refusals-visible.md): --match returns hits INSIDE deep.yml in the same run whose ingest refused it — flipping this is the acceptance test"
+else
+    no "KNOWN GAP MOVED (prompts/help-wanted/nesting-refusals-visible.md): --match no longer returns hits inside the refused deep.yml — rewrite this arm to assert the refusal and its disclosure"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

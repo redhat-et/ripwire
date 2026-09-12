@@ -50,7 +50,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -189,7 +189,7 @@ echo
 echo "── R5 — a PATH target still writes; a dangling one warns loudly ────────────────────────────────"
 D="$( fresh r5 )"
 ( cd "$D" && "$BIN" . --no-cache --note-add="src/a.cpp: the filler block is generated" >/dev/null 2>"$D/e" ); rc=$?
-[ "$rc" -eq 0 ] && ok "R5: an INDEXED path target writes (rc=0)" || no "R5: an indexed path target was refused (rc=$rc): $( cat "$D/e" )"
+if [ "$rc" -eq 0 ]; then ok "R5: an INDEXED path target writes (rc=0)"; else no "R5: an indexed path target was refused (rc=$rc): $( cat "$D/e" )"; fi
 grep -qi 'dangling' "$D/e" \
     && no "R5: an indexed path target warned about dangling: $( cat "$D/e" )" \
     || ok "R5: an indexed path target warns about nothing"
@@ -210,7 +210,7 @@ echo "── R6 — determinism + well-formedness ──────────
 D="$( fresh r6 )"
 ( cd "$D" && "$BIN" . --no-cache --note-add="uniqueOnlyHere: chose the loop over recursion because the depth is unbounded" >/dev/null 2>/dev/null )
 ( cd "$D" && "$BIN" . --no-cache --notes > n1 2>/dev/null; "$BIN" . --no-cache --notes > n2 2>/dev/null )
-cmp -s "$D/n1" "$D/n2" && ok "R6: --notes is byte-identical across runs" || no "R6: --notes is not deterministic"
+if cmp -s "$D/n1" "$D/n2"; then ok "R6: --notes is byte-identical across runs"; else no "R6: --notes is not deterministic"; fi
 if command -v xmllint >/dev/null 2>&1; then
     for V in "--notes" "--expand=uniqueOnlyHere"; do
         if ( cd "$D" && "$BIN" . --no-cache $V 2>/dev/null ) | xmllint --noout - 2>/dev/null; then

@@ -31,7 +31,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -75,7 +75,7 @@ echo "qsnapcachecheck: BIN=$BIN"
 # ── (a) equivalence + reuse (unchanged HEAD == working tree, 0 regressions) ────────────────────────────────
 run --no-cache >"$TMP/a1" 2>/dev/null; rc1=$?
 QF="$( qsnapfiles | head -1 )"
-[ -n "$QF" ] && ok "run 1 creates a qsnap Snapshot cache file" || no "no ripwire-qsnap-*.bin after run 1"
+if [ -n "$QF" ]; then ok "run 1 creates a qsnap Snapshot cache file"; else no "no ripwire-qsnap-*.bin after run 1"; fi
 I1="$( [ -n "$QF" ] && inode_of "$QF" )"
 
 run --no-cache >"$TMP/a2" 2>/dev/null; rc2=$?

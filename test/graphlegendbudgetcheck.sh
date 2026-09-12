@@ -37,7 +37,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 info(){ printf '  INFO  %s\n' "$*"; }
 
@@ -145,10 +145,10 @@ esac
 # ── (c) well-formed + deterministic, unchanged by a prose-only edit. ──────────────────────────────────
 for v in $VERBS; do
     if command -v xmllint >/dev/null 2>&1; then
-        xmllint --noout "$TMP/$v.xml" 2>/dev/null && ok "(c) --$v is well-formed XML" || no "(c) --$v fails xmllint"
+        if xmllint --noout "$TMP/$v.xml" 2>/dev/null; then ok "(c) --$v is well-formed XML"; else no "(c) --$v fails xmllint"; fi
     fi
     "$BIN" "$ROOT" "--$v=rootRelPathsLegend" >"$TMP/$v.2.xml" 2>/dev/null
-    diff -q "$TMP/$v.xml" "$TMP/$v.2.xml" >/dev/null && ok "(c) --$v deterministic (byte-identical twice)" || no "(c) --$v differs across two runs"
+    if diff -q "$TMP/$v.xml" "$TMP/$v.2.xml" >/dev/null; then ok "(c) --$v deterministic (byte-identical twice)"; else no "(c) --$v differs across two runs"; fi
 done
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

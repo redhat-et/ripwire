@@ -25,7 +25,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 # L5: --anchor is dropped from --help and gated behind RIPWIRE_DEV=1 (negative-result
@@ -131,9 +131,9 @@ printf '%s' "$ANCH_SIGS" | grep -q 'frobnicateWidgetCache' \
 # ── 3) determinism + well-formed XML on the anchored bundle ───────────────────────────────────────────
 "$BIN" anchorfix --no-cache --for="$QUERY" --anchor >"$TMP/a1" 2>/dev/null
 "$BIN" anchorfix --no-cache --for="$QUERY" --anchor >"$TMP/a2" 2>/dev/null
-diff -q "$TMP/a1" "$TMP/a2" >/dev/null && ok "determinism (--for --anchor byte-identical run-to-run)" || no "non-deterministic --anchor output"
+if diff -q "$TMP/a1" "$TMP/a2" >/dev/null; then ok "determinism (--for --anchor byte-identical run-to-run)"; else no "non-deterministic --anchor output"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/a1" 2>/dev/null && ok "xml well-formed (--for --anchor)" || no "xml malformed (--for --anchor)"
+    if xmllint --noout "$TMP/a1" 2>/dev/null; then ok "xml well-formed (--for --anchor)"; else no "xml malformed (--for --anchor)"; fi
 else
     ok "xml well-formed (xmllint absent — skipped)"
 fi

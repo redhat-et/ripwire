@@ -21,7 +21,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIXTURE="$ROOT/test/lintdedupfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ]     || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -34,7 +34,7 @@ echo "lintdedupcheck: BIN=$BIN  FIXTURE=$FIXTURE"
 # the shape the reported bug was described in, and keeps this script location-independent.
 ( cd "$FIXTURE" && "$BIN" . --lint --no-cache >"$TMP/fixture_out" 2>"$TMP/fixture_err" )
 FIX_RC=$?
-[ "$FIX_RC" -eq 0 ] && ok "--lint exits 0 on fixture" || no "--lint exited $FIX_RC on fixture"
+if [ "$FIX_RC" -eq 0 ]; then ok "--lint exits 0 on fixture"; else no "--lint exited $FIX_RC on fixture"; fi
 
 # RE-PINNED 2026-08-19 (R-E CORRECTION): with the crawl root spelled ".", p= used to read "./dup.cpp";
 # root-relative p= drops that prefix, so the row is p="dup.cpp:8". Nothing about the dedup moved.

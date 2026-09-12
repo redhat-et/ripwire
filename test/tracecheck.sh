@@ -37,7 +37,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -225,7 +225,7 @@ if command -v xmllint >/dev/null 2>&1; then
     for t in py asan clang node generic overflow; do
         tr_run "$t.txt" | xmllint --noout - 2>/dev/null || { xmlfail=1; echo "     malformed: $t"; }
     done
-    [ "$xmlfail" = 0 ] && ok "xml well-formed (all six bundles)" || no "xml malformed"
+    if [ "$xmlfail" = 0 ]; then ok "xml well-formed (all six bundles)"; else no "xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi
@@ -255,7 +255,7 @@ G_RC="$( cd "$WORK" && "$BIN" . --from-trace="traces/garbage.txt" --no-cache >/d
 
 # ── missing trace file refuses loudly too ──────────────────────────────────────────────────────────────
 M_RC="$( cd "$WORK" && "$BIN" . --from-trace="traces/does_not_exist.txt" --no-cache >/dev/null 2>&1; echo $? )"
-[ "$M_RC" -ne 0 ] && ok "missing trace file refuses (exit $M_RC)" || no "missing trace file should refuse"
+if [ "$M_RC" -ne 0 ]; then ok "missing trace file refuses (exit $M_RC)"; else no "missing trace file should refuse"; fi
 
 # ── composes with --token-budget (still a well-formed, non-empty bundle) ────────────────────────────────
 TB_OUT="$( cd "$WORK" && "$BIN" . --from-trace="traces/py.txt" --token-budget=2000 --no-cache 2>/dev/null )"
@@ -473,7 +473,7 @@ if command -v xmllint >/dev/null 2>&1; then
     for t in stale demangled ambiguous narrowed nameless gap dedup; do
         a2_run "$t.txt" | xmllint --noout - 2>/dev/null || { a2xml=1; echo "     malformed: $t"; }
     done
-    [ "$a2xml" = 0 ] && ok "(A2) all seven §A2 bundles are xmllint-clean (G4)" || no "(A2) a §A2 bundle is malformed XML"
+    if [ "$a2xml" = 0 ]; then ok "(A2) all seven §A2 bundles are xmllint-clean (G4)"; else no "(A2) a §A2 bundle is malformed XML"; fi
 else
     printf '  SKIP  (A2) xmllint (not installed)\n'
 fi

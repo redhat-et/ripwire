@@ -18,7 +18,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN"; exit 2; }
 echo "scoutkeycheck: BIN=$BIN"
@@ -76,7 +76,7 @@ P3="$( pairline . )"
 cd "$R2"
 "$BIN" . --merge-scout=laneA,laneB >"$TMP/s1" 2>/dev/null
 "$BIN" . --merge-scout=laneA,laneB >"$TMP/s2" 2>/dev/null
-cmp -s "$TMP/s1" "$TMP/s2" && ok "merge-scout output byte-identical run-to-run" || no "merge-scout is non-deterministic"
+if cmp -s "$TMP/s1" "$TMP/s2"; then ok "merge-scout output byte-identical run-to-run"; else no "merge-scout is non-deterministic"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

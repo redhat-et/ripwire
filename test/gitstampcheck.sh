@@ -34,7 +34,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -252,9 +252,9 @@ esac
 for flags in "--for=classify --top-k=3" "--situ" "--naming-calibration" "--merge-scout=side" "--stray-content" "--dmm=HEAD~1..HEAD" "--handoff"; do
     a="$( "$BIN" "$R" $flags --no-cache 2>/dev/null )"
     b="$( "$BIN" "$R" $flags --no-cache 2>/dev/null )"
-    [ "$a" = "$b" ] && ok "determinism ($flags)" || no "determinism ($flags): two runs differed"
+    if [ "$a" = "$b" ]; then ok "determinism ($flags)"; else no "determinism ($flags): two runs differed"; fi
     if [ "$flags" != "--situ" ]; then   # --situ is plain text, not XML
-        printf '%s' "$a" | xmllint --noout - >/dev/null 2>&1 && ok "xmllint ($flags)" || no "xmllint ($flags) FAILED"
+        if printf '%s' "$a" | xmllint --noout - >/dev/null 2>&1; then ok "xmllint ($flags)"; else no "xmllint ($flags) FAILED"; fi
     fi
 done
 
@@ -353,8 +353,8 @@ for flags in "--doctor" "--doc-drift" "--hotspots" "--quality-delta" "--pr-conte
         cmp_a="$( stripDoctorVolatile "$TMP/det_a.xml" )"
         cmp_b="$( stripDoctorVolatile "$TMP/det_b.xml" )"
     fi
-    [ "$cmp_a" = "$cmp_b" ] && ok "determinism ($flags)" || no "determinism ($flags): two runs differed"
-    printf '%s' "$a" | xmllint --noout - >/dev/null 2>&1 && ok "xmllint ($flags)" || no "xmllint ($flags) FAILED"
+    if [ "$cmp_a" = "$cmp_b" ]; then ok "determinism ($flags)"; else no "determinism ($flags): two runs differed"; fi
+    if printf '%s' "$a" | xmllint --noout - >/dev/null 2>&1; then ok "xmllint ($flags)"; else no "xmllint ($flags) FAILED"; fi
 done
 
 # ── (S) shallow clone: at= carries +shallow, --doctor's git row carries shallow="1" (2026-09-06 stranger audit).

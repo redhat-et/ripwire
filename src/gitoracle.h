@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // gitoracle.h — the NAME-HISTORY ORACLE: "was this name ever in this repo, and when did it leave?"
 //
@@ -238,7 +241,7 @@ inline std::string oracleExclHex()
 
 inline std::string oracleCachePath( const std::string& root, const std::string& headSha )
 {
-    return quality::shaKeyedCachePath( "qhist", quality::headSnapRepoHex( root ), oracleExclHex(), headSha );
+    return quality::shaKeyedCachePath( "qhist", quality::cacheRootKeyHex( root ), oracleExclHex(), headSha );
 }
 
 // The fixed-width fields go through quality.h's own POD pair — quality::qsnapPut / quality::qsnapGet, the
@@ -694,11 +697,11 @@ inline void writeHistoryProbe( std::FILE* out, const HistoryIndex& idx, Escape e
 {
     if( !idx.ok )
     {
-        std::fprintf( out, "<history probed=\"0\" r=\"%s\"/>",
+        rw::emitTo( out, "<history probed=\"0\" r=\"{}\"/>",
                       idx.nonGitRoot ? "not-a-git-repo" : "probe-failed" );
         return;
     }
-    std::fprintf( out, "<history probed=\"1\" head=\"%.9s\" commits=\"%u\" removed-names=\"%zu\"%s/>",
+    rw::emitTo( out, "<history probed=\"1\" head=\"{:.9}\" commits=\"{}\" removed-names=\"{}\"{}/>",
                   idx.headSha.c_str(), idx.commitsWalked, idx.removed.size(),
                   idx.truncated ? " truncated=\"1\"" : "" );
     (void)escape;
@@ -712,13 +715,13 @@ inline void writeNameFate( std::FILE* out, const std::string& name, const NameFa
     // no sha would print `commit=""` and read as evidence while carrying none.
     VERIFY( f.fate != Fate::Removed || !f.commit.empty() );
 
-    std::fprintf( out, "<fate sym=\"%s\" v=\"%s\"", escape( name ).c_str(), fateTag( f.fate ) );
+    rw::emitTo( out, "<fate sym=\"{}\" v=\"{}\"", escape( name ).c_str(), fateTag( f.fate ) );
     if( f.fate == Fate::Removed )
     {
-        std::fprintf( out, " commit=\"%.9s\" date=\"%s\" p=\"%s\"",
+        rw::emitTo( out, " commit=\"{:.9}\" date=\"{}\" p=\"{}\"",
                       f.commit.c_str(), escape( f.date ).c_str(), escape( f.path ).c_str() );
     }
-    std::fprintf( out, " note=\"%s\"/>", escape( kFateTable[ std::size_t( f.fate ) ].note ).c_str() );
+    rw::emitTo( out, " note=\"{}\"/>", escape( kFateTable[ std::size_t( f.fate ) ].note ).c_str() );
 }
 
 }}   // namespace rw::gitoracle

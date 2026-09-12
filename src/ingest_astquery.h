@@ -3,6 +3,9 @@
 #error "ingest_astquery.h is a SECTION of src/ingest.cpp's translation unit - include it only from ingest.cpp (see the ingest-family split note there)"
 #endif
 
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 // ingest_astquery.h — the narrow-parse query services, moved VERBATIM from ingest.cpp in the
 // 2026-08-29 split: the --match/--lint shared AST-query pass (capture text + predicate evaluation,
 // the per-file newline-offset index, grouped query compilation, the did-you-mean node-kind hints,
@@ -33,9 +36,138 @@ inline bool captureText( const TSQueryMatch& m, std::uint32_t capIndex, std::str
     return false;
 }
 
+// ---- the compiled #match? / #not-match? regexes of ONE query, resolved when the query is ----------
+// One `std::regex` per ( query, string id ), built when the query is compiled instead of once per MATCH.
+//
+// WHY. `passesPredicates` ran `std::regex_search( lhs, std::regex( rhs ) )` per match, per file, and `rhs`
+// is a CONSTANT owned by the TSQuery — `ts_query_string_value_for_id` hands back the same bytes every time.
+// So the most expensive constructor in the standard library was answering a question whose answer never
+// changes. A 1 ms `sample` of `--lint` over the go corpus (44,376 busy leaf samples) put the
+// `std::basic_regex` subtree at 13.52% of busy CPU with 100% of it owned by passesPredicates, and regex
+// CONSTRUCTION — `__parse_ERE_dupl_symbol`, `__parse_atom`, the `__state` vector's growth — at ~46.7% of
+// every malloc leaf in the run. Whole-query regex counts are single digits; the table is tiny.
+//
+// KEYED BY STRING ID, NOT BY TEXT. `value_id` indexes the query's own string table, so
+// `ts_query_string_count` sizes an exact O(1) lookup and no hashing, no comparison and no allocation is
+// left on the per-match path. -1 = this string is not a precompilable regex argument; -2 = it IS one and
+// `std::regex` REFUSED it.
+//
+// THE REFUSAL IS PART OF THE CONTRACT. A malformed pattern used to throw out of the per-match constructor,
+// get caught, and leave `ok = true` — i.e. filter NOTHING. Precompiling moves that throw from the match to
+// the build, so -2 exists to reproduce it exactly; without it a broken rule would silently drop every row
+// instead of silently keeping them. test/astqueryregexcheck.sh arm C4.
+//
+// A CAPTURE-TYPED ARGUMENT IS NEVER IN HERE. `(#match? @a @b)`'s pattern is the matched node's own text —
+// per match by construction — and stays dynamic (arm D).
+//
+// THREADING. Built single-threaded with the query, then SHARED by every worker that evaluates predicates.
+// Concurrent use of `const` standard-library operations is data-race-free ([res.on.data.races]), and
+// `std::regex_search`'s state lives in the algorithm, not in the pattern; arm F is the empirical half.
+struct PredicateRegexTable
+{
+    std::vector<std::int32_t> slotOfStringId;   // per query-string id: -1 not precompiled, -2 refused, >=0 index into res
+    std::vector<std::regex>   res;
+};
+
+// Walk every predicate of every pattern once and compile the constant #match?/#not-match? arguments.
+// Deliberately a mirror of passesPredicates' own step-group loop below — the two must agree about which
+// argument is the pattern, and a second spelling of that rule is how a filter quietly changes meaning.
+inline PredicateRegexTable buildPredicateRegexTable( const TSQuery* q )
+{
+    PredicateRegexTable table;
+    if( q == nullptr )
+    {
+        return table;
+    }
+    table.slotOfStringId.assign( ts_query_string_count( q ), -1 );
+    const std::uint32_t patterns = ts_query_pattern_count( q );
+    for( std::uint32_t patternIndex = 0; patternIndex < patterns; ++patternIndex )
+    {
+        std::uint32_t               pc    = 0;
+        const TSQueryPredicateStep* steps = ts_query_predicates_for_pattern( q, patternIndex, &pc );
+        for( std::uint32_t i = 0; i < pc; )
+        {
+            const std::uint32_t begin = i;
+            for( ; i < pc && steps[i].type != TSQueryPredicateStepTypeDone; ++i )
+            {
+            }
+            const std::uint32_t n = i - begin;
+            ++i;                                                        // skip the Done step
+            if( n < 3 || steps[begin].type != TSQueryPredicateStepTypeString )
+            {
+                continue;
+            }
+            std::uint32_t nl     = 0;                                   // two statements — see the sequencing note in passesPredicates
+            const char*   opText = ts_query_string_value_for_id( q, steps[begin].value_id, &nl );
+            if( opText == nullptr )
+            {
+                continue;
+            }
+            const std::string_view op( opText, nl );
+            if( op != "match?" && op != "not-match?" )
+            {
+                continue;
+            }
+            const TSQueryPredicateStep& arg = steps[ begin + 2 ];
+            if( arg.type != TSQueryPredicateStepTypeString || arg.value_id >= table.slotOfStringId.size()
+                || table.slotOfStringId[ arg.value_id ] != -1 )
+            {
+                continue;                                               // capture-typed, out of range, or already decided
+            }
+            std::uint32_t rl = 0;
+            const char*   rv = ts_query_string_value_for_id( q, arg.value_id, &rl );
+            if( rv == nullptr )
+            {
+                continue;
+            }
+            try
+            {
+                table.res.emplace_back( std::string( rv, rl ) );         // same construction, same default ECMAScript flags
+                table.slotOfStringId[ arg.value_id ] = static_cast<std::int32_t>( table.res.size() - 1 );
+            }
+            catch( ... )
+            {
+                table.slotOfStringId[ arg.value_id ] = -2;               // refused — reproduce the old per-match catch
+            }
+        }
+    }
+    return table;
+}
+
+// ONE #match? / #not-match? predicate, decided. Its own function rather than an inline block because the
+// three states below cost passesPredicates +19 cognitive complexity inline, on a function already well over
+// the ccx bar — and because the states are the whole contract of the precompile and deserve to be read in
+// one place:
+//   * slot >= 0  — a precompiled constant pattern. The common case, and the point of the table.
+//   * slot == -2 — a constant pattern std::regex REFUSED. Filter NOTHING, which is exactly what the old
+//     per-match `catch( ... ) { ok = true; }` did when the same construction threw at the same pattern.
+//   * slot == -1 — no constant to precompile (a Capture-typed argument, whose pattern is per-match text).
+//     Construct it here, per match, as before.
+// `rhs` is only read on the last of the three; it is the caller's already-materialised argument text.
+inline bool evalMatchPredicate( bool negated, const std::string& lhs, const std::string& rhs,
+                                const PredicateRegexTable& rx, const TSQueryPredicateStep& arg )
+{
+    const bool          constant = ( arg.type == TSQueryPredicateStepTypeString && arg.value_id < rx.slotOfStringId.size() );
+    const std::int32_t  slot     = constant ? rx.slotOfStringId[ arg.value_id ] : -1;
+    if( slot == -2 )
+    {
+        return true;                                    // the pattern did not compile ⇒ this predicate filters nothing
+    }
+    try
+    {
+        const bool mm = ( slot >= 0 ) ? std::regex_search( lhs, rx.res[ std::size_t( slot ) ] )
+                                      : std::regex_search( lhs, std::regex( rhs ) );
+        return negated ? !mm : mm;
+    }
+    catch( ... )
+    {
+        return true;                                    // same arm the per-match construction always took
+    }
+}
+
 // evaluate a pattern's query predicates against a match — #eq? / #not-eq? (string/capture equality) and
 // #match? / #not-match? (ECMAScript regex). ts_query never applies these itself; without this, #eq? is a no-op.
-inline bool passesPredicates( const TSQuery* q, const TSQueryMatch& m, std::string_view src )
+inline bool passesPredicates( const TSQuery* q, const PredicateRegexTable& rx, const TSQueryMatch& m, std::string_view src )
 {
     std::uint32_t pc = 0;
     const TSQueryPredicateStep* steps = ts_query_predicates_for_pattern( q, m.pattern_index, &pc );
@@ -97,7 +229,9 @@ inline bool passesPredicates( const TSQuery* q, const TSQueryMatch& m, std::stri
             ok = ( lhs != rhs );
         }
         else if( op == "match?" || op == "not-match?" )
-        { try { const bool mm = std::regex_search( lhs, std::regex( rhs ) ); ok = ( op == "match?" ) ? mm : !mm; } catch( ... ) { ok = true; } }
+        {
+            ok = evalMatchPredicate( op == "not-match?", lhs, rhs, rx, pr[2] );
+        }
         if( !ok )
         {
             return false;
@@ -172,9 +306,10 @@ inline AstMatch makeAstMatch( std::uint32_t fileId, std::string_view bytes, cons
 // a worker executes every query a file's grammar has and files the captures into that query's own bucket.
 struct GroupedQuery
 {
-    TSQuery*      query = nullptr;
-    std::string   tag;
-    std::uint32_t groupIndex = 0;
+    TSQuery*            query = nullptr;
+    std::string         tag;
+    std::uint32_t       groupIndex = 0;
+    PredicateRegexTable rx;            // this query's compiled #match? patterns — built with the query, read per match
 };
 
 // Every query one grammar has to answer, in BOTH shapes. `perSpec` is one compiled query per spec, the
@@ -193,6 +328,7 @@ struct GrammarQueries
 {
     std::vector<GroupedQuery>  perSpec;
     TSQuery*                   combined = nullptr;   // nullptr = degraded to one tree walk per spec
+    PredicateRegexTable        combinedRx;           // the combined query's own compiled #match? patterns
     std::vector<std::uint32_t> patternOwner;         // combined pattern index -> index into perSpec
 };
 
@@ -222,7 +358,7 @@ GrammarQueries compileGrammarQueries( const TSLanguage* g, const std::vector<Ast
             {
                 gqs.patternOwner.push_back( static_cast<std::uint32_t>( gqs.perSpec.size() ) );
             }
-            gqs.perSpec.push_back( { q, spec.tag, static_cast<std::uint32_t>( groupIndex ) } );
+            gqs.perSpec.push_back( { q, spec.tag, static_cast<std::uint32_t>( groupIndex ), buildPredicateRegexTable( q ) } );
             combinedSrc.append( spec.query );
             combinedSrc.push_back( '\n' );   // a spec may end in a `;` line comment; never let it swallow the next
         }
@@ -233,7 +369,8 @@ GrammarQueries compileGrammarQueries( const TSLanguage* g, const std::vector<Ast
         TSQuery*      comb = ts_query_new( g, combinedSrc.data(), static_cast<std::uint32_t>( combinedSrc.size() ), &off, &err );
         if( comb != nullptr && ts_query_pattern_count( comb ) == static_cast<std::uint32_t>( gqs.patternOwner.size() ) )
         {
-            gqs.combined = comb;
+            gqs.combined   = comb;
+            gqs.combinedRx = buildPredicateRegexTable( comb );
         }
         else
         {
@@ -717,7 +854,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                 }
                 if( !any )
                 {
-                    std::fprintf( stderr, "ripwire: AST query did not compile for any grammar: %.*s\n", int( spec.query.size() ), spec.query.data() );
+                    rw::emitTo( stderr, "ripwire: AST query did not compile for any grammar: {}\n", std::string_view( spec.query.data(), spec.query.size() ) );
                     if( groups[groupIndex].uncompiledOut )
                     {
                         groups[groupIndex].uncompiledOut->push_back( spec.query );
@@ -899,7 +1036,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                         TSQueryMatch m;
                         while( ts_query_cursor_next_match( cur, &m ) )
                         {
-                            if( !passesPredicates( q, m, bytes ) )
+                            if( !passesPredicates( q, it->second.combinedRx, m, bytes ) )
                             {
                                 continue; // honour #eq? / #match? etc. — predicates are per PATTERN, so this reads the right ones
                             }
@@ -918,7 +1055,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                             TSQueryMatch m;
                             while( ts_query_cursor_next_match( cur, &m ) )
                             {
-                                if( !passesPredicates( gq.query, m, bytes ) )
+                                if( !passesPredicates( gq.query, gq.rx, m, bytes ) )
                                 {
                                     continue; // honour #eq? / #match? etc.
                                 }
@@ -1197,6 +1334,8 @@ inline SpanTier spanTierOfNodeType( const char* type ) noexcept
 static void collectSpanTiers( TSNode root, std::uint32_t byteCount, SpanTierMap& out )
 {
     std::vector<TSNode> stack;
+    std::vector<TSNode> kids;     // reused across nodes — a warm walk allocates nothing per node
+    ChildCursor         cursor( root );
     stack.push_back( root );
     while( !stack.empty() )
     {
@@ -1217,10 +1356,15 @@ static void collectSpanTiers( TSNode root, std::uint32_t byteCount, SpanTierMap&
         // ALL children, not just the named ones — a comment is an `extra` in most grammars and several
         // spell it as an anonymous node, so a named-only walk silently misses exactly the tier this
         // function exists to find.
-        const std::uint32_t childCount = ts_node_child_count( n );
-        for( std::uint32_t c = childCount; c > 0; --c )
+        // Collected once, then pushed in REVERSE so the stack pops left to right — the same visit order
+        // the indexed loop had, at O(children) instead of O(children²). The width here is the FILE's: this
+        // walk starts at the root, and a comment is an extra spliced straight into the child array, so a
+        // 16 000-comment file made --grep's tier pass 56× the plain map of the same file before this became
+        // a cursor (test/childwalkscalecheck.sh, arm B3; the rule is on src/infra/tschildren.h).
+        collectChildren( n, cursor.cur, kids );
+        for( std::size_t c = kids.size(); c > 0; --c )
         {
-            stack.push_back( ts_node_child( n, c - 1 ) );
+            stack.push_back( kids[ c - 1 ] );
         }
     }
     // The stack walk emits in DFS pop order, which is not byte order once a subtree is skipped; the
@@ -1299,14 +1443,14 @@ constexpr long long     kSpanTierMemoMinBytes = 32ll << 10;
 
 // Composed exactly the way every OTHER blob family is (quality.h): one fixed-width identity hex per key
 // field, then shaKeyedCachePath to assemble and shard the name. Two properties come free and are the reason
-// to reuse rather than hand-roll a fourth name builder — headSnapRepoHex realpath-normalizes before hashing,
+// to reuse rather than hand-roll a fourth name builder — cacheRootKeyHex realpath-normalizes before hashing,
 // so two spellings of one file share a blob; and exclConfigHex folds extractionIdentityTag(), so a
 // kParserVer/kCacheVersion bump renames every memo blob at once, which is the same self-healing invalidation
 // the parse cache already has. (The hand-rolled fixed-buffer name builder this replaces was flagged as a
 // 60-token clone of those very builders by --quality-delta, and the detector was right.)
 inline std::string spanTierMemoPath( const std::string& diskPath )
 {
-    return quality::shaKeyedCachePath( "stier", quality::headSnapRepoHex( diskPath ),
+    return quality::shaKeyedCachePath( "stier", quality::cacheRootKeyHex( diskPath ),
                                        quality::exclConfigHex( {}, "stier" ),
                                        std::to_string( kSpanTierMemoVersion ) );
 }
@@ -1409,7 +1553,7 @@ inline void spanTierMemoStore( const std::string& diskPath, const StatInfo& now,
     const std::string                 blobPath = spanTierMemoPath( diskPath );
     char                              suffix[ 64 ];
     // 4 B literal + %d at 11 + 1 B + %llu at 20 = 36 B worst case into 64 — see test/fixedbufsweep.sh's census
-    std::snprintf( suffix, sizeof( suffix ), ".tmp%d-%llu", int( ::getpid() ), static_cast<unsigned long long>( tempSeq.fetch_add( 1, std::memory_order_relaxed ) ) );
+    rw::formatTo( suffix, sizeof( suffix ), ".tmp{}-{}", int( ::getpid() ), static_cast<unsigned long long>( tempSeq.fetch_add( 1, std::memory_order_relaxed ) ) );
     const std::string tempPath = blobPath + suffix;
     {
         std::ofstream out( tempPath, std::ios::binary | std::ios::trunc );
@@ -1798,11 +1942,9 @@ std::vector<LocalNameFact> collectGatedLocalNames( std::string_view defBytes, st
     const TSNode root = ts_tree_root_node( tree );
     // the def parses as a single top-level function_definition inside a translation_unit — descend into
     // the translation_unit's children (bounded: one file-worth of def text, already size-capped upstream).
-    const std::uint32_t n = ts_node_child_count( root );
-    for( std::uint32_t i = 0; i < n; ++i )
-    {
-        ln_collectLocalDecls( ts_node_child( root, i ), ts_node_child( root, i ), 512, out, defStartLine, defBytes );
-    }
+    ChildCursor cursor( root );
+    forEachChild( root, cursor.cur, [ & ]( TSNode child )
+    { ln_collectLocalDecls( child, child, 512, out, defStartLine, defBytes ); return true; } );
     ts_tree_delete( tree );
     ts_parser_delete( parser );
     return out;

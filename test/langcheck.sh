@@ -59,7 +59,7 @@ FIX="$ROOT/test/langfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -71,9 +71,9 @@ echo "langcheck: BIN=$BIN  FIX=$FIX"
 MAP_OUT="$TMP/map.xml"
 $BIN "$FIX" >"$MAP_OUT" 2>"$TMP/map.err"
 MAP_EXIT=$?
-[ "$MAP_EXIT" -eq 0 ] && ok "default map: exits 0 on TS/Rust/ObjC fixture" || no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"
+if [ "$MAP_EXIT" -eq 0 ]; then ok "default map: exits 0 on TS/Rust/ObjC fixture"; else no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"; fi
 
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP_OUT" && ok "default map: passes xmllint --noout" || no "default map: xmllint failed"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP_OUT"; then ok "default map: passes xmllint --noout"; else no "default map: xmllint failed"; fi; }
 
 # ─── parse the per-file symbol + edge structure once, reuse for all checks ────
 python3 - "$MAP_OUT" <<'PYEOF' >"$TMP/parsed.json"
@@ -119,10 +119,10 @@ if grep -q "SYMS:0" "$TMP/ts_check"; then
 else
     ok "a.ts (TypeScript): extracted $( grep -o 'SYMS:[0-9]*' "$TMP/ts_check" | cut -d: -f2 ) symbol(s)"
 fi
-grep -q "HAS_ADDONE:True" "$TMP/ts_check" && ok "a.ts: addOne symbol present" || no "a.ts: addOne symbol missing"
-grep -q "HAS_ADDTWO:True" "$TMP/ts_check" && ok "a.ts: addTwo symbol present" || no "a.ts: addTwo symbol missing"
-grep -q "ALL_FN:True" "$TMP/ts_check" && ok "a.ts: both symbols tagged t=\"fn\"" || no "a.ts: symbols not tagged t=\"fn\" as expected"
-grep -q "EDGE:True" "$TMP/ts_check" && ok "a.ts: intra-file call edge addTwo -> addOne present" || no "a.ts: call edge addTwo -> addOne MISSING"
+if grep -q "HAS_ADDONE:True" "$TMP/ts_check"; then ok "a.ts: addOne symbol present"; else no "a.ts: addOne symbol missing"; fi
+if grep -q "HAS_ADDTWO:True" "$TMP/ts_check"; then ok "a.ts: addTwo symbol present"; else no "a.ts: addTwo symbol missing"; fi
+if grep -q "ALL_FN:True" "$TMP/ts_check"; then ok "a.ts: both symbols tagged t=\"fn\""; else no "a.ts: symbols not tagged t=\"fn\" as expected"; fi
+if grep -q "EDGE:True" "$TMP/ts_check"; then ok "a.ts: intra-file call edge addTwo -> addOne present"; else no "a.ts: call edge addTwo -> addOne MISSING"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -148,10 +148,10 @@ if grep -q "SYMS:0" "$TMP/rs_check"; then
 else
     ok "b.rs (Rust): extracted $( grep -o 'SYMS:[0-9]*' "$TMP/rs_check" | cut -d: -f2 ) symbol(s)"
 fi
-grep -q "HAS_SQUARE:True" "$TMP/rs_check" && ok "b.rs: square symbol present" || no "b.rs: square symbol missing"
-grep -q "HAS_SOS:True" "$TMP/rs_check" && ok "b.rs: sum_of_squares symbol present" || no "b.rs: sum_of_squares symbol missing"
-grep -q "ALL_FN:True" "$TMP/rs_check" && ok "b.rs: both symbols tagged t=\"fn\"" || no "b.rs: symbols not tagged t=\"fn\" as expected"
-grep -q "EDGE:True" "$TMP/rs_check" && ok "b.rs: intra-file call edge sum_of_squares -> square present" || no "b.rs: call edge sum_of_squares -> square MISSING"
+if grep -q "HAS_SQUARE:True" "$TMP/rs_check"; then ok "b.rs: square symbol present"; else no "b.rs: square symbol missing"; fi
+if grep -q "HAS_SOS:True" "$TMP/rs_check"; then ok "b.rs: sum_of_squares symbol present"; else no "b.rs: sum_of_squares symbol missing"; fi
+if grep -q "ALL_FN:True" "$TMP/rs_check"; then ok "b.rs: both symbols tagged t=\"fn\""; else no "b.rs: symbols not tagged t=\"fn\" as expected"; fi
+if grep -q "EDGE:True" "$TMP/rs_check"; then ok "b.rs: intra-file call edge sum_of_squares -> square present"; else no "b.rs: call edge sum_of_squares -> square MISSING"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

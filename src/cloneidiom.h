@@ -584,7 +584,8 @@ inline std::vector<CloneIdiomVerdict> classifyCloneGroupIdioms( const IngestResu
         if( s.fileId != openFile )
         {
             openFile = s.fileId;
-            readOk   = docparse::detail::readWholeFile( diskPath( ing, s.fileId ), bytes ) && !bytes.empty();
+            bytes    = docparse::detail::readWholeFile( diskPath( ing, s.fileId ) ).value_or( std::string() );
+            readOk   = !bytes.empty();
         }
         if( !readOk || s.endByte <= s.sigEndByte || s.endByte > bytes.size() )
         {

@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // htmlexport.h — self-contained HTML wiki export (P2-A + Wave-4 #13).
 //
@@ -2153,13 +2156,19 @@ inline constexpr const char* kLangColors[] = {
     "#4b8bbe",   // Lua
     "#b07ce8",   // Elixir — the language's conventional violet, lightened away from CSharp's #68217a and
                  // ObjC's #9b59b6 (the two nearest hues) so three purples stay separable on the #111 canvas.
+    "#29b6f6",   // Dart — the language's conventional cyan-blue, pushed lighter/more saturated than Go's
+                 // #00acd7 and Cpp's #4a90d9 so the three blues stay separable on the #111 canvas.
+    "#e0607e",   // Kotlin — deliberately NOT the language's own purple-toned brand mark: CSharp/ObjC/Elixir
+                 // already occupy that hue and a fourth purple is exactly the separability collision the
+                 // Elixir row above exists to avoid. A warm rose, closer to Ruby's #c9455f than to any
+                 // purple but still one step around the wheel from it.
 };
 inline constexpr std::size_t kLangColorCount = sizeof( kLangColors ) / sizeof( kLangColors[0] );
 // NB the bound names the LAST enumerator, so appending one to Lang leaves this assert TRUE and silently
 // unprotecting: Elixir landed with no swatch and compiled clean, and test/htmlrendercheck.sh's (N2) arm —
 // which walks langTag() against the emitted LANG_COLORS — is what actually caught it. Move this bound in
 // the same commit that appends a Lang, and trust (N2), not this line, to notice if you forget.
-static_assert( kLangColorCount == std::size_t( Lang::Elixir ) + 1,
+static_assert( kLangColorCount == kLangCount,
                "kLangColors must carry one hex colour per Lang enumerator, in declaration order — a language with "
                "no swatch renders as an unlabelled grey the legend cannot explain" );
 
@@ -2248,25 +2257,25 @@ inline HtmlProvenance htmlProvenanceFor( const std::string& root, bool multiRoot
 
 inline void writeAppearancePayload( std::FILE* out, const std::vector<std::uint32_t>& fileList, const HtmlColorExtras& color )
 {
-    std::fprintf( out, "const FCHURN = [" );
+    rw::emitRaw( out, "const FCHURN = [" );
     for( std::size_t i = 0; i < fileList.size(); ++i )
     {
         const std::uint32_t fc = ( color.fileChurn && fileList[i] < color.fileChurn->size() ) ? ( *color.fileChurn )[ fileList[i] ] : 0u;
-        std::fprintf( out, "%s%u", i ? "," : "", fc );
+        rw::emitTo( out, "{}{}", i ? "," : "", fc );
     }
-    std::fprintf( out, "];\n" );
+    rw::emitRaw( out, "];\n" );
     // whether git evidence existed — 0 ⇒ churn mode discloses "unavailable" instead of lying zeros
-    std::fprintf( out, "const CHURN_OK = %d;\n", color.churnEvidence ? 1 : 0 );
-    std::fprintf( out, "const AT = \"%s\";\n", jsonEscape( color.atStamp ).c_str() );
-    std::fprintf( out, "const ROOT_NAME = \"%s\";\n", jsonEscape( color.rootName ).c_str() );
-    std::fprintf( out, "const VERSION = \"%s\";\n", jsonEscape( color.version ).c_str() );
+    rw::emitTo( out, "const CHURN_OK = {};\n", color.churnEvidence ? 1 : 0 );
+    rw::emitTo( out, "const AT = \"{}\";\n", jsonEscape( color.atStamp ).c_str() );
+    rw::emitTo( out, "const ROOT_NAME = \"{}\";\n", jsonEscape( color.rootName ).c_str() );
+    rw::emitTo( out, "const VERSION = \"{}\";\n", jsonEscape( color.version ).c_str() );
     // the WINDOW those commit counts were mined over. The legend used to print a bare "0 1-2 3-9 10-29 30+"
     // with no unit and no horizon, so "3-9" could be read as three commits ever; it is three commits inside
     // this window. Passed in by the caller rather than spelled in the JS, because the JS cannot know what
     // main.cpp handed mineChurnPerFile — a hardcoded string here is a claim the page cannot back.
-    std::fprintf( out, "const CHURN_WINDOW = \"%s\";\n", jsonEscape( color.churnWindow ).c_str() );
+    rw::emitTo( out, "const CHURN_WINDOW = \"{}\";\n", jsonEscape( color.churnWindow ).c_str() );
     // the baked initial colour mode (--color-by=MODE); the in-page selector switches live from here
-    std::fprintf( out, "const COLOR_MODE = \"%s\";\n", colorByLabel( color.initialMode ) );
+    rw::emitTo( out, "const COLOR_MODE = \"{}\";\n", colorByLabel( color.initialMode ) );
     // the ranker whose scores the `rank` field carries — the provenance caption's second fact
     // Read from kRankByNames INLINE rather than through an accessor of its own. A second four-line
     // "clamp the enumerator, fall back to entry 0" function beside colorByLabel is a duplicate of it, and
@@ -2275,29 +2284,29 @@ inline void writeAppearancePayload( std::FILE* out, const std::vector<std::uint3
     // has exactly one consumer, so it does not need a function; colorByLabel, which is the shared
     // accessor for a mode the selector also switches, keeps its own.
     const std::size_t rankIdx = std::size_t( color.ranker );
-    std::fprintf( out, "const RANKER = \"%s\";\n", rankIdx < kRankByNameCount ? kRankByNames[ rankIdx ] : kRankByNames[0] );
+    rw::emitTo( out, "const RANKER = \"{}\";\n", rankIdx < kRankByNameCount ? kRankByNames[ rankIdx ] : kRankByNames[0] );
     // the LANG palette the page's swatches AND its legend are both built from: langTag(L) -> hex, in
     // enumerator order. It belongs in this function and not one of its own: this IS the colour payload,
     // and a separate emitter beside it was a fifth copy of the same comma-separated JSON loop.
     // Deterministic by construction — a constexpr array walked in index order.
-    std::fprintf( out, "const LANG_COLORS = {" );
+    rw::emitRaw( out, "const LANG_COLORS = {" );
     for( std::size_t i = 0; i < kLangColorCount; ++i )
     {
-        std::fprintf( out, "%s\"%s\":\"%s\"", i ? "," : "", langTag( Lang( i ) ), kLangColors[i] );
+        rw::emitTo( out, "{}\"{}\":\"{}\"", i ? "," : "", langTag( Lang( i ) ), kLangColors[i] );
     }
-    std::fprintf( out, "};\n" );
+    rw::emitRaw( out, "};\n" );
     // ...and the SHAPE roster the page's node marks AND the caption's shape key are both built from. It
     // rides in this function rather than one of its own for the reason the LANG palette does: this IS
     // the appearance payload, and a separate emitter beside it would be another copy of the same
     // comma-separated JSON loop. Deterministic by construction — a constexpr array walked in index
     // order, keyed by the same symTag the NODES records' `type` field carries, so the JS looks a node's
     // shape up by the string it already has.
-    std::fprintf( out, "const SYM_SHAPES = {" );
+    rw::emitRaw( out, "const SYM_SHAPES = {" );
     for( std::size_t i = 0; i < kSymShapeCount; ++i )
     {
-        std::fprintf( out, "%s\"%s\":\"%s\"", i ? "," : "", symTag( SymKind( i ) ), kSymShapes[i] );
+        rw::emitTo( out, "{}\"{}\":\"{}\"", i ? "," : "", symTag( SymKind( i ) ), kSymShapes[i] );
     }
-    std::fprintf( out, "};\n" );
+    rw::emitRaw( out, "};\n" );
 }
 
 // The EDGE payload: the LINKS records. Its own function for the reason writeAppearancePayload and
@@ -2324,14 +2333,14 @@ inline void writeEdgePayload( std::FILE* out, const std::vector<HtmlEdge>& edges
     //
     // It cannot catch a change to which edges are SELECTED, and it should not: that is meant to change
     // the picture. It catches every REORDERING of the same set, which is not.
-    std::fprintf( out, "const LINKS = [\n" );
+    rw::emitRaw( out, "const LINKS = [\n" );
     for( std::size_t k = 0; k < edges.size(); ++k )
     {
         VERIFY( k == 0 || edges[k - 1].s < edges[k].s || ( edges[k - 1].s == edges[k].s && edges[k - 1].t < edges[k].t ) );
-        std::fprintf( out, "  {\"s\":%u,\"t\":%u%s%s\n", unsigned( edges[k].s ), unsigned( edges[k].t ),
+        rw::emitTo( out, "  {{\"s\":{},\"t\":{}{}{}\n", unsigned( edges[k].s ), unsigned( edges[k].t ),
                       edges[k].amb ? ",\"a\":1}" : "}", ( k + 1 < edges.size() ) ? "," : "" );
     }
-    std::fprintf( out, "];\n" );
+    rw::emitRaw( out, "];\n" );
 }
 
 // The document SHELL — <head>, the whole stylesheet, and the chrome (#bar, #prov, #hits, #crumb,
@@ -2347,76 +2356,76 @@ inline void writeDocumentShell( std::FILE* out, const std::string& pageTitle )
 {
     // emit document head. Three in-file VIEWS share one #bar + one #c canvas; #cards (Overview) and
     // #crumb (breadcrumb trail) are additional DOM regions toggled by the router, not separate pages.
-    std::fprintf( out,
+    rw::emitTo( out,
         "<!DOCTYPE html>\n"
         "<html lang=\"en\">\n"
         "<head>\n"
         "<meta charset=\"utf-8\">\n"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-        "<title>%s</title>\n"
+        "<title>{}</title>\n"
         "<style>\n"
-        "* { margin:0; padding:0; box-sizing:border-box; }\n"
-        "body { background:#111; color:#eee; font:13px/1.4 sans-serif; overflow:hidden; }\n"
-        "#bar { position:fixed; top:0; left:0; right:0; height:36px; background:rgba(0,0,0,.7);\n"
-        "       display:flex; align-items:center; gap:12px; padding:0 12px; z-index:10; }\n"
-        "#bar h1 { font-size:13px; font-weight:600; white-space:nowrap; }\n"
-        "#bar a.nav { color:#7fb2ff; text-decoration:none; font-size:12px; white-space:nowrap; }\n"
-        "#bar a.nav:hover { text-decoration:underline; }\n"
-        "#search { background:#222; border:1px solid #444; color:#eee; padding:3px 8px;\n"
-        "          border-radius:4px; font-size:12px; width:200px; }\n"
-        "#info { font-size:12px; color:#aaa; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n"
-        "#legend { font-size:11px; color:#999; white-space:nowrap; }\n"
-        "#legend span { display:inline-block; width:10px; height:10px; border-radius:50%%; margin-right:3px; }\n"
+        "* {{ margin:0; padding:0; box-sizing:border-box; }}\n"
+        "body {{ background:#111; color:#eee; font:13px/1.4 sans-serif; overflow:hidden; }}\n"
+        "#bar {{ position:fixed; top:0; left:0; right:0; height:36px; background:rgba(0,0,0,.7);\n"
+        "       display:flex; align-items:center; gap:12px; padding:0 12px; z-index:10; }}\n"
+        "#bar h1 {{ font-size:13px; font-weight:600; white-space:nowrap; }}\n"
+        "#bar a.nav {{ color:#7fb2ff; text-decoration:none; font-size:12px; white-space:nowrap; }}\n"
+        "#bar a.nav:hover {{ text-decoration:underline; }}\n"
+        "#search {{ background:#222; border:1px solid #444; color:#eee; padding:3px 8px;\n"
+        "          border-radius:4px; font-size:12px; width:200px; }}\n"
+        "#info {{ font-size:12px; color:#aaa; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}\n"
+        "#legend {{ font-size:11px; color:#999; white-space:nowrap; }}\n"
+        "#legend span {{ display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:3px; }}\n"
         // the metric NAME inside the legend is text, not a swatch — it must escape the circle rule above
-        "#legend span.lg { width:auto; height:auto; border-radius:0; color:#c8ccd2; margin-right:5px; }\n"
+        "#legend span.lg {{ width:auto; height:auto; border-radius:0; color:#c8ccd2; margin-right:5px; }}\n"
         // C1: and the edge-confidence clause is a SENTENCE, for the same reason and with the same escape.
-        "#legend span.ec { display:inline; width:auto; height:auto; border-radius:0; margin:0; color:#7a7f88; }\n"
-        "#colorMode { background:#222; border:1px solid #444; color:#eee; padding:3px 6px;\n"
-        "             border-radius:4px; font-size:12px; }\n"
-        "#depth { font-size:11px; color:#999; display:flex; align-items:center; gap:4px; white-space:nowrap; }\n"
-        "canvas { display:block; }\n"
-        "#crumb { position:fixed; top:36px; left:0; right:0; z-index:9; background:rgba(20,20,20,.85);\n"
-        "         font-size:11px; padding:4px 12px; white-space:nowrap; overflow-x:auto; display:none; }\n"
-        "#crumb a { color:#7fb2ff; text-decoration:none; margin-right:4px; }\n"
-        "#crumb a:hover { text-decoration:underline; }\n"
-        "#crumb .sep { color:#666; margin-right:4px; }\n"
-        "#cards { position:fixed; top:36px; left:0; right:0; bottom:0; overflow:auto; padding:16px;\n"
-        "         display:none; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; align-content:start; }\n"
-        "#cards.show { display:grid; }\n"
-        "#cards.show ~ canvas, #cards.show ~ #crumb { display:none; }\n"
-        ".card { background:#1b1b1e; border:1px solid #333; border-radius:6px; padding:12px; cursor:pointer; }\n"
-        ".card:hover { border-color:#7fb2ff; }\n"
-        ".card h2 { font-size:13px; margin-bottom:6px; word-break:break-all; }\n"
-        ".card .meta { font-size:11px; color:#999; margin-bottom:6px; }\n"
-        ".card ul { list-style:none; font-size:11px; color:#ccc; }\n"
-        ".card li { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n"
+        "#legend span.ec {{ display:inline; width:auto; height:auto; border-radius:0; margin:0; color:#7a7f88; }}\n"
+        "#colorMode {{ background:#222; border:1px solid #444; color:#eee; padding:3px 6px;\n"
+        "             border-radius:4px; font-size:12px; }}\n"
+        "#depth {{ font-size:11px; color:#999; display:flex; align-items:center; gap:4px; white-space:nowrap; }}\n"
+        "canvas {{ display:block; }}\n"
+        "#crumb {{ position:fixed; top:36px; left:0; right:0; z-index:9; background:rgba(20,20,20,.85);\n"
+        "         font-size:11px; padding:4px 12px; white-space:nowrap; overflow-x:auto; display:none; }}\n"
+        "#crumb a {{ color:#7fb2ff; text-decoration:none; margin-right:4px; }}\n"
+        "#crumb a:hover {{ text-decoration:underline; }}\n"
+        "#crumb .sep {{ color:#666; margin-right:4px; }}\n"
+        "#cards {{ position:fixed; top:36px; left:0; right:0; bottom:0; overflow:auto; padding:16px;\n"
+        "         display:none; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; align-content:start; }}\n"
+        "#cards.show {{ display:grid; }}\n"
+        "#cards.show ~ canvas, #cards.show ~ #crumb {{ display:none; }}\n"
+        ".card {{ background:#1b1b1e; border:1px solid #333; border-radius:6px; padding:12px; cursor:pointer; }}\n"
+        ".card:hover {{ border-color:#7fb2ff; }}\n"
+        ".card h2 {{ font-size:13px; margin-bottom:6px; word-break:break-all; }}\n"
+        ".card .meta {{ font-size:11px; color:#999; margin-bottom:6px; }}\n"
+        ".card ul {{ list-style:none; font-size:11px; color:#ccc; }}\n"
+        ".card li {{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}\n"
         // H11: `.module-card { data-module-card:1; }` used to sit here. `data-module-card:1` is not a CSS
         // declaration — the property does not exist, so the whole rule was dropped by every parser that has
         // ever read this page. The ATTRIBUTE the overview router selects on is written by renderOverview
         // (data-module-card="1") and is unaffected; this was dead bytes shaped like a selector.
-        "#prov { position:fixed; left:0; right:0; z-index:8; background:rgba(0,0,0,.55); color:#8f96a0;\n"
+        "#prov {{ position:fixed; left:0; right:0; z-index:8; background:rgba(0,0,0,.55); color:#8f96a0;\n"
         "        font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; padding:3px 12px;\n"
-        "        white-space:nowrap; overflow-x:auto; border-bottom:1px solid #222; }\n"
-        "#prov b { color:#c8ccd2; font-weight:600; }\n"
-        "#prov .k { color:#6f757e; }\n"
+        "        white-space:nowrap; overflow-x:auto; border-bottom:1px solid #222; }}\n"
+        "#prov b {{ color:#c8ccd2; font-weight:600; }}\n"
+        "#prov .k {{ color:#6f757e; }}\n"
         // The METHOD half of the caption, dimmed and ruled off from the FACTS above it. The two are
         // separated visually on the page for the same reason they are separated in the export: one says
         // what this picture is and the other says how to read it, and only the first is stamped into the
         // bitmap. Both stay in #prov so chromeTop() keeps measuring the whole strip in one offsetHeight.
-        "#provmethod { color:#787f88; }\n"
-        "#bar button { background:#222; border:1px solid #444; color:#eee; padding:3px 8px;\n"
-        "              border-radius:4px; font-size:12px; cursor:pointer; }\n"
-        "#bar button:hover { border-color:#7fb2ff; }\n"
-        "#hits { position:fixed; top:36px; left:0; right:0; z-index:9; background:rgba(20,20,20,.92);\n"
-        "        font-size:12px; padding:6px 12px; display:none; max-height:40%%; overflow:auto; }\n"
-        "#hits a { color:#7fb2ff; text-decoration:none; margin-right:14px; display:inline-block; }\n"
-        "#hits a:hover { text-decoration:underline; }\n"
-        "#hits .n { color:#8f96a0; margin-right:10px; }\n"
+        "#provmethod {{ color:#787f88; }}\n"
+        "#bar button {{ background:#222; border:1px solid #444; color:#eee; padding:3px 8px;\n"
+        "              border-radius:4px; font-size:12px; cursor:pointer; }}\n"
+        "#bar button:hover {{ border-color:#7fb2ff; }}\n"
+        "#hits {{ position:fixed; top:36px; left:0; right:0; z-index:9; background:rgba(20,20,20,.92);\n"
+        "        font-size:12px; padding:6px 12px; display:none; max-height:40%; overflow:auto; }}\n"
+        "#hits a {{ color:#7fb2ff; text-decoration:none; margin-right:14px; display:inline-block; }}\n"
+        "#hits a:hover {{ text-decoration:underline; }}\n"
+        "#hits .n {{ color:#8f96a0; margin-right:10px; }}\n"
         "</style>\n"
         "</head>\n"
         "<body>\n"
         "<div id=\"bar\">\n"
-        "  <h1>%s</h1>\n"
+        "  <h1>{}</h1>\n"
         // Two named routes in the bar, in the order the page uses them. "Graph" is the boot view (the
         // whole selected map — see the renderGraph header for why it is the boot view and not the cards);
         // the module overview keeps its route and its link and is simply no longer the landing page. Its
@@ -2461,7 +2470,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     if( S == 0 )
     {
         // empty graph: still emit a valid document
-        std::fprintf( out, "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>ripwire graph</title></head>"
+        rw::emitRaw( out, "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>ripwire graph</title></head>"
                            "<body><p>No symbols found.</p></body></html>\n" );
         return;
     }
@@ -2660,7 +2669,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     // node's community didn't survive the ≥2-member filter (a singleton — still shown, just moduleless).
     // `cx` (cyclomatic) and `ts` (tested 0/1) feed the --color-by cx/tested modes; churn stays out of
     // the per-node record because it is file-granularity — one FCHURN array keyed by `file` instead.
-    std::fprintf( out, "const NODES = [\n" );
+    rw::emitRaw( out, "const NODES = [\n" );
     for( NodeId k = 0; k < cap; ++k )
     {
         const Symbol&  sym  = ing.symbols[ order[k] ];
@@ -2672,25 +2681,25 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         const unsigned ts   = ( color.tested && order[k] < color.tested->size() && ( *color.tested )[ order[k] ] ) ? 1u : 0u;
 
         char rankBuf[ 24 ];
-        std::snprintf( rankBuf, sizeof( rankBuf ), "%.4f", double( r ) );
+        rw::formatTo( rankBuf, sizeof( rankBuf ), "{:.4f}", double( r ) );
 
-        std::fprintf( out, "  {\"id\":%u,\"label\":\"%s\",\"type\":\"%s\",\"lang\":\"%s\",\"rank\":%s,\"file\":%u,\"comm\":%ld,\"cx\":%u,\"ts\":%u}",
+        rw::emitTo( out, "  {{\"id\":{},\"label\":\"{}\",\"type\":\"{}\",\"lang\":\"{}\",\"rank\":{},\"file\":{},\"comm\":{},\"cx\":{},\"ts\":{}}}",
                       unsigned( k ),
                       jsonEscape( sym.name ).c_str(),
                       jsonEscape( tag ).c_str(),
                       jsonEscape( lang ).c_str(),
-                      rankBuf,
+                      rw::cstr( rankBuf ),
                       unsigned( fileIdOf[k] == kNoNode ? 0 : fileIdOf[k] ),
                       comm,
                       unsigned( sym.cx ),
                       ts );
         if( k + 1 < cap )
         {
-            std::fprintf( out, "," );
+            rw::emitRaw( out, "," );
         }
-        std::fprintf( out, "\n" );
+        rw::emitRaw( out, "\n" );
     }
-    std::fprintf( out, "];\n" );
+    rw::emitRaw( out, "];\n" );
 
     // R-R: the corpus root, stated ONCE — the page's own envelope anchor, so a reader can still resolve
     // the relative FILES[] entries below back to a checkout. Empty on a multi-root run, where each path
@@ -2714,23 +2723,23 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     // no-op — its own guard is on a leading `users`/`home`/`root` segment, which is exactly what is
     // gone by then. test/htmlrendercheck.sh (P1) greps the emitted page; (P2) is its mutation control.
     const std::string htmlRootLabel = stripHomePair( htmlRootPrefix );
-    std::fprintf( out, "const ROOT = \"%s\";\n", jsonEscape( htmlRootLabel ).c_str() );
+    rw::emitTo( out, "const ROOT = \"{}\";\n", jsonEscape( htmlRootLabel ).c_str() );
 
     // emit FILES array — one path string per distinct selected-symbol file, first-seen order (R-R: each
     // relative to ROOT above, so the page no longer repeats the checkout prefix once per file)
-    std::fprintf( out, "const FILES = [\n" );
+    rw::emitRaw( out, "const FILES = [\n" );
     for( std::size_t i = 0; i < fileList.size(); ++i )
     {
         const std::string_view hp = rootArg.empty() ? std::string_view( ing.files[ fileList[i] ] )
                                                     : rw::sarif::rootRelativeUri( ing.files[ fileList[i] ], htmlRootPrefix );
-        std::fprintf( out, "  \"%s\"", jsonEscape( std::string( hp ) ).c_str() );
+        rw::emitTo( out, "  \"{}\"", jsonEscape( std::string( hp ) ).c_str() );
         if( i + 1 < fileList.size() )
         {
-            std::fprintf( out, "," );
+            rw::emitRaw( out, "," );
         }
-        std::fprintf( out, "\n" );
+        rw::emitRaw( out, "\n" );
     }
-    std::fprintf( out, "];\n" );
+    rw::emitRaw( out, "];\n" );
 
     // the appearance payload: per-FILES-index churn, its evidence flag, the baked initial colour mode,
     // the language palette, and the SymKind→shape roster
@@ -2744,13 +2753,13 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     // out of 5000 are different claims and the page used to make neither. TOPK is the ceiling that produced
     // the selection (the effective one, after --max-tokens/adaptive have cut it — the number that explains
     // the map you are looking at, not the number that was typed).
-    std::fprintf( out, "const TOPK = %zu;\nconst NODE_TOTAL = %zu;\nconst EDGE_TOTAL = %zu;\nconst SYM_TOTAL = %zu;\n",
+    rw::emitTo( out, "const TOPK = {};\nconst NODE_TOTAL = {};\nconst EDGE_TOTAL = {};\nconst SYM_TOTAL = {};\n",
                   cap, cap, edges.size(), S );
 
     // emit MODULES array — the Overview cards, sorted (member count desc, commId asc). `members` and
     // `top` are selected-array (NODES) indices; `neigh` is the sorted, deduped list of OTHER display
     // module ids this module shares a selected LINKS edge with (Module view's "cross-links").
-    std::fprintf( out, "const MODULES = [\n" );
+    rw::emitRaw( out, "const MODULES = [\n" );
     for( std::size_t disp = 0; disp < modOrder.size(); ++disp )
     {
         const ModuleCard& m = modules[ modOrder[disp] ];
@@ -2774,60 +2783,60 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         std::sort( neigh.begin(), neigh.end() );
         neigh.erase( std::unique( neigh.begin(), neigh.end() ), neigh.end() );
 
-        std::fprintf( out, "  {\"id\":%zu,\"name\":\"%s\",\"symCount\":%zu,\"fileCount\":%zu,\"files\":[",
+        rw::emitTo( out, "  {{\"id\":{},\"name\":\"{}\",\"symCount\":{},\"fileCount\":{},\"files\":[",
                       disp, jsonEscape( m.name ).c_str(), m.members.size(), m.files.size() );
         for( std::size_t i = 0; i < m.files.size(); ++i )
         {
-            std::fprintf( out, "%u", unsigned( m.files[i] ) );
+            rw::emitTo( out, "{}", unsigned( m.files[i] ) );
             if( i + 1 < m.files.size() )
             {
-                std::fprintf( out, "," );
+                rw::emitRaw( out, "," );
             }
         }
-        std::fprintf( out, "],\"members\":[" );
+        rw::emitRaw( out, "],\"members\":[" );
         for( std::size_t i = 0; i < m.members.size(); ++i )
         {
-            std::fprintf( out, "%u", unsigned( m.members[i] ) );
+            rw::emitTo( out, "{}", unsigned( m.members[i] ) );
             if( i + 1 < m.members.size() )
             {
-                std::fprintf( out, "," );
+                rw::emitRaw( out, "," );
             }
         }
-        std::fprintf( out, "],\"top\":[" );
+        rw::emitRaw( out, "],\"top\":[" );
         for( std::size_t i = 0; i < m.top.size(); ++i )
         {
-            std::fprintf( out, "%u", unsigned( m.top[i] ) );
+            rw::emitTo( out, "{}", unsigned( m.top[i] ) );
             if( i + 1 < m.top.size() )
             {
-                std::fprintf( out, "," );
+                rw::emitRaw( out, "," );
             }
         }
-        std::fprintf( out, "],\"inCross\":%u,\"outCross\":%u,\"neigh\":[", m.inCross, m.outCross );
+        rw::emitTo( out, "],\"inCross\":{},\"outCross\":{},\"neigh\":[", m.inCross, m.outCross );
         for( std::size_t i = 0; i < neigh.size(); ++i )
         {
-            std::fprintf( out, "%u", neigh[i] );
+            rw::emitTo( out, "{}", neigh[i] );
             if( i + 1 < neigh.size() )
             {
-                std::fprintf( out, "," );
+                rw::emitRaw( out, "," );
             }
         }
-        std::fprintf( out, "]}" );
+        rw::emitRaw( out, "]}" );
         if( disp + 1 < modOrder.size() )
         {
-            std::fprintf( out, "," );
+            rw::emitRaw( out, "," );
         }
-        std::fprintf( out, "\n" );
+        rw::emitRaw( out, "\n" );
     }
-    std::fprintf( out, "];\n" );
+    rw::emitRaw( out, "];\n" );
 
     // inline the JS sim + wiki router
-    std::fprintf( out, "%s%s%s%s%s%s", kScriptColour, kScriptSim, kScriptMarks, kScriptDraw, kScriptViews, kScriptRouter );
+    rw::emitTo( out, "{}{}{}{}{}{}", kScriptColour, kScriptSim, kScriptMarks, kScriptDraw, kScriptViews, kScriptRouter );
 
-    std::fprintf( out,
+    rw::emitRaw( out,
         "</script>\n"
         "</body>\n"
         "</html>\n"
-    );
+ );
 }
 
 }   // namespace rw

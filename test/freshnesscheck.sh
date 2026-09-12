@@ -57,7 +57,7 @@ FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -128,9 +128,9 @@ warm_for() {
 # assert the three fields under one label. Pass __ABSENT__ for a field that must not be emitted.
 expect() {
     local what="$1" efresh="$2" estale="$3" echanged="$4"
-    [ "$WFRESH"   = "$efresh"   ] && ok "$what: _fresh=$WFRESH"                 || no "$what: _fresh=$WFRESH, expected $efresh"
-    [ "$WSTALE"   = "$estale"   ] && ok "$what: _stale_files=$WSTALE"           || no "$what: _stale_files=$WSTALE, expected $estale"
-    [ "$WCHANGED" = "$echanged" ] && ok "$what: _changed_files=$WCHANGED"       || no "$what: _changed_files=$WCHANGED, expected $echanged"
+    if [ "$WFRESH"   = "$efresh"   ]; then ok "$what: _fresh=$WFRESH"; else no "$what: _fresh=$WFRESH, expected $efresh"; fi
+    if [ "$WSTALE"   = "$estale"   ]; then ok "$what: _stale_files=$WSTALE"; else no "$what: _stale_files=$WSTALE, expected $estale"; fi
+    if [ "$WCHANGED" = "$echanged" ]; then ok "$what: _changed_files=$WCHANGED"; else no "$what: _changed_files=$WCHANGED, expected $echanged"; fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════

@@ -45,7 +45,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -143,8 +143,8 @@ diff -q "$TMP/r1" "$TMP/r2" >/dev/null && ok "determinism (DEFAULT --for byte-id
 
 # ── well-formed XML on the routed bundle (rides the same seam) ────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/ident.xml" 2>/dev/null && ok "xml well-formed (DEFAULT --for)" || no "xml malformed (DEFAULT --for)"
-    xmllint --noout "$TMP/concept_default.xml" 2>/dev/null && ok "xml well-formed (conceptual DEFAULT --for)" || no "xml malformed (conceptual DEFAULT --for)"
+    if xmllint --noout "$TMP/ident.xml" 2>/dev/null; then ok "xml well-formed (DEFAULT --for)"; else no "xml malformed (DEFAULT --for)"; fi
+    if xmllint --noout "$TMP/concept_default.xml" 2>/dev/null; then ok "xml well-formed (conceptual DEFAULT --for)"; else no "xml malformed (conceptual DEFAULT --for)"; fi
 else
     ok "xml well-formed (xmllint absent — skipped)"
 fi
@@ -155,7 +155,7 @@ grep -q 'routed: name-exact' "$TMP/q.xml" \
     && ok "--query='buildGraph' DEFAULTS to name-exact (leading routed comment before the map)" \
     || no "--query identifier did not route to name-exact"
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/q.xml" 2>/dev/null && ok "xml well-formed (DEFAULT --query, routed comment)" || no "xml malformed (DEFAULT --query)"
+    if xmllint --noout "$TMP/q.xml" 2>/dev/null; then ok "xml well-formed (DEFAULT --query, routed comment)"; else no "xml malformed (DEFAULT --query)"; fi
 fi
 
 # ── (e) --no-route without --for/--query refuses loudly ────────────────────────────────────────────────
@@ -334,7 +334,7 @@ diff -q "$TMP/declined.xml" "$TMP/declined2.xml" >/dev/null \
     && ok "(g5) declined route deterministic (two runs byte-identical)" \
     || no "(g5) declined route non-deterministic"
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/declined.xml" 2>/dev/null && ok "(g5) xml well-formed (declined route)" || no "(g5) xml malformed (declined route)"
+    if xmllint --noout "$TMP/declined.xml" 2>/dev/null; then ok "(g5) xml well-formed (declined route)"; else no "(g5) xml malformed (declined route)"; fi
 fi
 
 # (g6) MUTATION arm — the declined-disclosure assertion must FAIL against a --no-route run of the same

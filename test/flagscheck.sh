@@ -23,7 +23,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/flagsfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -32,7 +32,7 @@ echo "flagscheck: BIN=$BIN  CORPUS=$CORPUS"
 
 "$BIN" "$CORPUS" --flags --no-cache >"$TMP/a" 2>/dev/null
 "$BIN" "$CORPUS" --flags --no-cache >"$TMP/b" 2>/dev/null
-cmp -s "$TMP/a" "$TMP/b" && ok "determinism (byte-identical)" || no "--flags is non-deterministic"
+if cmp -s "$TMP/a" "$TMP/b"; then ok "determinism (byte-identical)"; else no "--flags is non-deterministic"; fi
 F="$( cat "$TMP/a" )"
 
 # §A10.5: files= is this verb's OWN harvest scan (source + CMakeLists it read looking for gates), a
@@ -111,11 +111,11 @@ fi
 
 # ── 9) well-formed, minified XML (G4) ─────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/a" 2>/dev/null && ok "XML well-formed" || no "XML malformed"
+    if xmllint --noout "$TMP/a" 2>/dev/null; then ok "XML well-formed"; else no "XML malformed"; fi
 else
     ok "xmllint unavailable — well-formedness skipped"
 fi
-[ "$( grep -c '' "$TMP/a" )" -le 1 ] && ok "output is minified (no stray newlines)" || no "output contains newlines outside CDATA"
+if [ "$( grep -c '' "$TMP/a" )" -le 1 ]; then ok "output is minified (no stray newlines)"; else no "output contains newlines outside CDATA"; fi
 
 # ── 10) an empty / gate-free corpus is a clean empty report, not a crash ──────────────────────────────
 mkdir -p "$TMP/bare"; printf 'int main(){return 0;}\n' > "$TMP/bare/m.cpp"

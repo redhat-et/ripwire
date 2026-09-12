@@ -22,7 +22,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -33,7 +33,7 @@ echo "hotspotsincecheck: BIN=$BIN  ROOT=$ROOT"
 refuseCase(){
     local value="$1"
     "$BIN" "$ROOT" --hotspots --since="$value" >"$TMP/out" 2>"$TMP/err"; local rc=$?
-    [ "$rc" -eq 1 ] && ok "--since='$value': exit 1" || no "--since='$value': exit $rc (expected 1)"
+    if [ "$rc" -eq 1 ]; then ok "--since='$value': exit 1"; else no "--since='$value': exit $rc (expected 1)"; fi
     grep -q -- "$value" "$TMP/err" && ok "--since='$value': refusal names the value" \
         || no "--since='$value': refusal does not name the value: $( head -c 200 "$TMP/err" )"
     grep -q '<hotspots' "$TMP/out" && no "--since='$value': still emitted a <hotspots> element" \
@@ -44,7 +44,7 @@ refuseCase notaref9z          # the digit used to slip past looksLikeDate and be
 
 # ── 2. a VALID window is reported honestly in BOTH places — attribute and header comment (§P9 N7)
 "$BIN" "$ROOT" --hotspots --since="2 weeks ago" >"$TMP/ok" 2>/dev/null; rc=$?
-[ "$rc" -eq 0 ] && ok '--since="2 weeks ago": exit 0' || no "--since=\"2 weeks ago\": exit $rc (expected 0)"
+if [ "$rc" -eq 0 ]; then ok '--since="2 weeks ago": exit 0'; else no "--since=\"2 weeks ago\": exit $rc (expected 0)"; fi
 grep -q '<hotspots window="2 weeks ago"' "$TMP/ok" && ok 'window= says "2 weeks ago"' \
     || no "window= is not \"2 weeks ago\": $( grep -oE '<hotspots [^>]*' "$TMP/ok" | head -c 120 )"
 grep -q '(window=2 weeks ago)' "$TMP/ok" && ok 'header comment says (window=2 weeks ago) — agrees with the attribute' \
@@ -97,13 +97,16 @@ HS="$( "$BIN" "$ROOT" --hotspots 2>/dev/null | grep -oE '<hotspots [^>]*' )"
 hsattr(){ printf '%s' "$HS" | grep -oE " $1=\"[0-9]+\"" | grep -oE '[0-9]+'; }
 HS_FILES="$( hsattr files )"; HS_RANKED="$( hsattr ranked )"
 HS_NOCHURN="$( hsattr unranked_no_churn )"; HS_NOCX="$( hsattr unranked_no_complexity )"
+# extent honesty (test/extentcheck.sh arm G): a FOURTH bucket, absent when 0 — files whose every scorable function
+# failed a containment check. This repo holds two such fixtures (test/extentfix), so the identity needs the term.
+HS_SUSPECT="$( hsattr unranked_extent_suspect )"; HS_SUSPECT="${HS_SUSPECT:-0}"
 if [ -z "$HS_FILES" ] || [ -z "$HS_RANKED" ] || [ -z "$HS_NOCHURN" ] || [ -z "$HS_NOCX" ]; then
     no "--hotspots does not carry the ranked= denominator + both exclusion counts: $HS"
 else
-    SUM=$(( HS_RANKED + HS_NOCHURN + HS_NOCX ))
+    SUM=$(( HS_RANKED + HS_NOCHURN + HS_NOCX + HS_SUSPECT ))
     [ "$SUM" = "$HS_FILES" ] \
-        && ok "--hotspots: ranked($HS_RANKED) + no_churn($HS_NOCHURN) + no_complexity($HS_NOCX) = files($HS_FILES) — the partition is exact" \
-        || no "--hotspots partition does not reconcile: $HS_RANKED + $HS_NOCHURN + $HS_NOCX = $SUM, files=$HS_FILES"
+        && ok "--hotspots: ranked($HS_RANKED) + no_churn($HS_NOCHURN) + no_complexity($HS_NOCX) + extent_suspect($HS_SUSPECT) = files($HS_FILES) — the partition is exact" \
+        || no "--hotspots partition does not reconcile: $HS_RANKED + $HS_NOCHURN + $HS_NOCX + $HS_SUSPECT = $SUM, files=$HS_FILES"
     MAP_FILES="$( "$BIN" "$ROOT" --top-k=1 2>/dev/null | grep -oE 'files=[0-9]+' | head -1 | grep -oE '[0-9]+' )"
     [ -n "$MAP_FILES" ] && [ "$MAP_FILES" = "$HS_FILES" ] \
         && ok "--hotspots files=\"$HS_FILES\" is the same denominator the default map reports" \

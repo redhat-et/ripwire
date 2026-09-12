@@ -27,7 +27,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/jsnestedfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -37,7 +37,7 @@ echo "jsnestedcheck: BIN=$BIN  FIX=$FIX"
 
 "$BIN" "$FIX" --metrics --no-cache >"$TMP/m1" 2>/dev/null
 "$BIN" "$FIX" --metrics --no-cache >"$TMP/m2" 2>/dev/null
-diff -q "$TMP/m1" "$TMP/m2" >/dev/null && ok "determinism (--metrics byte-identical run-to-run)" || no "non-deterministic --metrics output"
+if diff -q "$TMP/m1" "$TMP/m2" >/dev/null; then ok "determinism (--metrics byte-identical run-to-run)"; else no "non-deterministic --metrics output"; fi
 
 # per-file scoping: nested.js and nested.ts carry the SAME symbol names, so every row lookup is
 # constrained to its <f p="...nested.EXT"> section (one <f> element per file, rows never cross it).
@@ -100,7 +100,7 @@ MUT2="$( ok(){ :; }; no(){ echo TRIPPED; }
 
 # well-formed XML (G4)
 command -v xmllint >/dev/null 2>&1 && {
-    xmllint --noout "$TMP/m1" 2>/dev/null && ok "xml well-formed (--metrics on nested JS/TS)" || no "xml malformed (--metrics on nested JS/TS)"
+    if xmllint --noout "$TMP/m1" 2>/dev/null; then ok "xml well-formed (--metrics on nested JS/TS)"; else no "xml malformed (--metrics on nested JS/TS)"; fi
 }
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME CHECKS FAILED"

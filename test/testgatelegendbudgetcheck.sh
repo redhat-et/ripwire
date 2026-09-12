@@ -23,7 +23,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN (build first)"; exit 1; }
@@ -113,10 +113,10 @@ done
 
 # (c) well-formed + deterministic, unchanged by a prose-only edit.
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/tg.xml" 2>/dev/null && ok "(c) well-formed XML" || no "(c) fails xmllint"
+    if xmllint --noout "$TMP/tg.xml" 2>/dev/null; then ok "(c) well-formed XML"; else no "(c) fails xmllint"; fi
 fi
 "$BIN" "$ROOT" --test-gate=src/model.h >"$TMP/tg2.xml" 2>/dev/null
-diff -q "$TMP/tg.xml" "$TMP/tg2.xml" >/dev/null && ok "(c) deterministic (byte-identical twice)" || no "(c) differs across two runs"
+if diff -q "$TMP/tg.xml" "$TMP/tg2.xml" >/dev/null; then ok "(c) deterministic (byte-identical twice)"; else no "(c) differs across two runs"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

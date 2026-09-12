@@ -39,7 +39,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 # trap #15: the pr-context LEGEND text itself contains the literal files="0" (it explains the attribute), so a
@@ -169,10 +169,10 @@ grep -q '<file p="[^"]*[^s]/src/util\.py"' "$TMP/vend.xml" && no "src/util.py mu
 # ── determinism + G4 ──────────────────────────────────────────────────────────────────────────────────
 "$BIN" "$REPO" --pr-context=HEAD~1 >"$TMP/a.xml" 2>/dev/null
 "$BIN" "$REPO" --pr-context=HEAD~1 >"$TMP/b.xml" 2>/dev/null
-cmp -s "$TMP/a.xml" "$TMP/b.xml" && ok "deterministic (byte-identical run-to-run)" || no "deterministic"
+if cmp -s "$TMP/a.xml" "$TMP/b.xml"; then ok "deterministic (byte-identical run-to-run)"; else no "deterministic"; fi
 
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$OUT" >/dev/null 2>&1 && ok "G4: xmllint-clean" || no "G4: xmllint-clean"
+    if xmllint --noout "$OUT" >/dev/null 2>&1; then ok "G4: xmllint-clean"; else no "G4: xmllint-clean"; fi
 else
     ok "G4: xmllint unavailable — skipped"
 fi

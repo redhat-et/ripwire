@@ -10,7 +10,7 @@ HOOK="$ROOT/hooks/ripwire-codex-route.sh"
 ADAPTER="$ROOT/hooks/ripwire-codex-nudge.sh"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 command -v jq >/dev/null 2>&1 || { echo "jq required"; exit 2; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -44,7 +44,7 @@ printf '%s' "$OUT" | jq -e '.hookSpecificOutput.additionalContext | contains("ev
 
 QUIET="$( printf '%s\n' "{\"prompt\":\"please abstain\",\"cwd\":\"$TMP/repo\"}" | \
     PATH="$TMP/bin:$PATH" RIPWIRE_HOME="$TMP/meter" "$HOOK" )"
-[ -z "$QUIET" ] && ok "abstention is silent" || no "abstention emitted context: $QUIET"
+if [ -z "$QUIET" ]; then ok "abstention is silent"; else no "abstention emitted context: $QUIET"; fi
 
 LOG="$TMP/meter/routing.jsonl"
 [ -s "$LOG" ] && [ "$( jq -s '[.[] | select(.event == "UserPromptSubmit")] | length' "$LOG" )" = 2 ] \

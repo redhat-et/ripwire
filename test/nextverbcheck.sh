@@ -6,7 +6,7 @@
 # --quality-delta/--test-gate/--safe-delete/--situ handed the agent nothing, so a contract-change took three
 # calls (edit-check → guess --uses → open the file). The contract (src/nextverb.h):
 #   --edit-check   contract-change → --uses=SYM;  otherwise → --test-gate=FILE
-#   --impact       → --safe-delete=SYM                  --callers → --uses=SELECTOR (the @FILE:LINE spelling mirrored)
+#   --impact       → --safe-delete=SYM                  --callers → --uses=SELECTOR (bare NAME only for narrowed declined calls)
 #   --callees      → --expand=SYM                       --quality-delta gating ROW → --expand=FILE:NAME (on the row)
 #   --test-gate    → its first run= command (a shell line, so it is checked against the rows, not run)
 #   --situ         → a `next: --test-gate` line          --from-trace → --slice=@FILE:LINE of the innermost frame
@@ -25,7 +25,7 @@ BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found"; exit 2; }
@@ -129,7 +129,7 @@ if [ "$gating" -gt 0 ] && [ "$gating" = "$withnext" ]; then ok "quality-delta: $
 else no "quality-delta: $gating gating row(s), $withnext with next= ($( grep -o '<r [^>]*gating="1"[^>]*>' "$TMP/qd" | head -1 | cut -c1-200 ))"; fi
 checkNext "quality-delta gating row" "$TMP/qd" '^--expand=geometry\.cpp:' row
 nongating="$( grep -o '<r [^>]*next=' "$TMP/qd" | grep -vc 'gating="1"' || true )"
-[ "$nongating" = 0 ] && ok "quality-delta: next= rides gating rows only" || no "quality-delta: $nongating non-gating row(s) carry next="
+if [ "$nongating" = 0 ]; then ok "quality-delta: next= rides gating rows only"; else no "quality-delta: $nongating non-gating row(s) carry next="; fi
 
 echo "=== (4) --test-gate → its first run= (or a ripwire invocation when no runner is derivable) ==="
 rrun --test-gate=geometry.cpp >"$TMP/tg"; checkNext "test-gate" "$TMP/tg" '.'
@@ -138,7 +138,7 @@ python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if isins
     && ok "test-gate --json carries the same \"next\" key" || no "test-gate --json lacks \"next\""
 
 echo "=== (5) --situ → next: --test-gate; --from-trace → --slice=@FILE:LINE ==="
-rrun --situ >"$TMP/si"; grep -q '^  next: --test-gate' "$TMP/si" && ok "situ: prose ends with 'next: --test-gate'" || no "situ: no 'next: --test-gate' line"
+if rrun --situ >"$TMP/si"; grep -q '^  next: --test-gate' "$TMP/si"; then ok "situ: prose ends with 'next: --test-gate'"; else no "situ: no 'next: --test-gate' line"; fi
 rrun --from-trace="$TMP/trace.txt" >"$TMP/ft"; checkNext "from-trace" "$TMP/ft" '^--slice=@geometry\.cpp:5$'
 
 echo "=== (6) --grep: top hit → --at=FILE:LINE; capped → next page under --legend=compact; zero hits → --for=PAT ==="
@@ -153,7 +153,7 @@ top="$( grep -o '<d [^>]*r="1"[^>]*>' "$TMP/for" | head -1 )"
 printf '%s' "$top" | grep -q 'next="--expand=' && ok "for: the r=1 row carries next= ($( printf '%s' "$top" | grep -o 'next="[^"]*"' ))" \
                                                 || no "for: the r=1 row has no next= — $( printf '%s' "$top" | cut -c1-160 )"
 others="$( grep -o '<d [^>]*next=' "$TMP/for" | grep -vc 'r="1"' || true )"
-[ "$others" = 0 ] && ok "for: next= rides the top row only" || no "for: $others non-top row(s) carry next="
+if [ "$others" = 0 ]; then ok "for: next= rides the top row only"; else no "for: $others non-top row(s) carry next="; fi
 checkNext "for top row" "$TMP/for" '^--expand=[^ ]+:[A-Za-z_]+$' row
 
 echo "=== (8) well-formed + deterministic with the attribute in place ==="
@@ -161,7 +161,7 @@ if command -v xmllint >/dev/null 2>&1; then
     for f in ec1 ec2 im ca ce qd tg ft g1 g2 g4 for; do xmllint --noout "$TMP/$f" >/dev/null 2>&1 || no "$f is malformed XML with next= in place"; done
     ok "the twelve documents are well-formed"
 fi
-rrun --grep=distance >"$TMP/g1b"; cmp -s "$TMP/g1" "$TMP/g1b" && ok "grep next= is deterministic" || no "grep next= differs between runs"
+if rrun --grep=distance >"$TMP/g1b"; cmp -s "$TMP/g1" "$TMP/g1b"; then ok "grep next= is deterministic"; else no "grep next= differs between runs"; fi
 
 [ "$fail" -eq 0 ] && echo 'ALL PASS' || echo 'FAILURES ABOVE'
 exit "$fail"

@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # qackorigincheck.sh — r27 P0.3 gate: a ZERO-MAGNITUDE ack must never become a permanent blank check.
 #
-# THE BUG THIS PINS. `applyAckRatchet` suppresses a finding when `now <= ackNow`. The api-surface tier-A push
-# emits was=now=0 for BOTH shapes it can produce:
-#   * origin="new-symbol"        — additive surface on brand-new code: sev=minor, NEVER gates;
-#   * surface="contract-change"  — a symbol that already existed became part of the public contract: major, GATES.
+# THE BUG THIS PINS. `applyAckRatchet` suppresses a finding when `now <= ackNow`. A zero-magnitude kind emits
+# was=now=0 for BOTH shapes it can produce:
+#   * origin="new-symbol"        — the finding exists only because the code is new: NEVER gates;
+#   * (no origin attribute)      — preexisting-worse: something that already existed got worse. GATES.
+#
+# THE FIXTURE MOVED, 2026-09-10 (Q-DIAL-4). It used to drive this through `api-surface`, whose tier-A push
+# emitted one row per new export; that row can never gate, so it is a header COUNT (api-new-surface=) now and
+# the kind no longer produces a new-symbol row at all. `dead-code` is the other zero-magnitude kind with both
+# origins — born uncalled vs lost its last caller — and it drives the identical mechanism, so the invariant is
+# pinned there instead of being retired with the fixture that happened to reach it first.
 # Both landed under the SAME (kind, key) ack identity, so `--quality-ack` sweeping up the harmless new-symbol
 # rows (209 of this repo's own 402 committed ack lines were exactly that) meant the later, genuine
 # private -> public flip on the same symbol hit `0 <= 0` and was suppressed FOREVER. `dead-code` (always now=0)
@@ -18,19 +24,19 @@
 # that is what those rows overwhelmingly were, and the rows we cannot distinguish are re-surfaced rather than
 # silently kept, i.e. fail-closed.
 #
-# Fixture mechanics. Tier-A "contract-change" needs a canonId that EXISTS in the baseline's per-symbol maps but
-# is ABSENT from its public set. That is exactly the shape of a baseline written by an older binary with a
-# narrower notion of "public", and it is reproduced deterministically here by stripping the `api ` lines out of
-# a freshly-written .ripwire_quality_baseline sidecar. Nothing about the fix depends on the fixture's route to
-# that state — only on the two rows sharing an identity, which they do.
+# Fixture mechanics. The PREEXISTING shape needs a canonId that EXISTS in the baseline's per-symbol maps but is
+# ABSENT from its dead set — exactly the shape of a baseline written before the symbol lost its last caller,
+# and reproduced deterministically here by stripping the `dead ` lines out of a freshly-written
+# .ripwire_quality_baseline sidecar. Nothing about the fix depends on the fixture's route to that state — only
+# on the two rows sharing an identity, which they do.
 #
 # Checks:
-#   (a) phase 1 — a new public symbol yields origin="new-symbol", sev=minor, and does NOT gate (exit 0).
-#   (b) --quality-ack records it under an ORIGIN-QUALIFIED token (`api-surface:new-symbol`), not a bare kind.
+#   (a) phase 1 — a symbol born uncalled yields origin="new-symbol" and does NOT gate (exit 0).
+#   (b) --quality-ack records it under an ORIGIN-QUALIFIED token (`dead-code:new-symbol`), not a bare kind.
 #   (c) the ack still suppresses its OWN row on a re-run (the ratchet still works for the class it accepted).
-#   (d) THE FIX — with that ack in place, the SAME symbol's contract-change row is still reported and GATES
+#   (d) THE FIX — with that ack in place, the SAME symbol's PREEXISTING row is still reported and GATES
 #       (exit 2). Pre-fix this row was suppressed and the run exited 0.
-#   (e) MIGRATION — a hand-written LEGACY bare `ack api-surface <key> 0` line suppresses the new-symbol row
+#   (e) MIGRATION — a hand-written LEGACY bare `ack dead-code <key> 0` line suppresses the new-symbol row
 #       (it is read as the :new-symbol variant) but does NOT suppress the contract-change row.
 #   (f) a magnitude-bearing ack is untouched: its token stays bare and the ratchet still re-reports on worsening.
 #
@@ -41,7 +47,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -68,73 +74,73 @@ EOF
 git -C "$REPO" init -q; git -C "$REPO" config user.email x@y; git -C "$REPO" config user.name x
 git -C "$REPO" add -A; git -C "$REPO" commit -qm init
 
-# ── (a) phase 1: a brand-new public symbol → origin="new-symbol", minor, does not gate ────────────────────
-cat >> "$REPO/inc/api.h" <<'EOF'
-int freshExport( int a );
+# ── (a) phase 1: a brand-new symbol born uncalled → origin="new-symbol", does not gate ────────────────────
+cat >> "$REPO/src/lib.cpp" <<'EOF'
+int freshOrphan( int a ) { return a * 3; }
 EOF
 run --quality-delta >"$TMP/p1" 2>/dev/null; rc1=$?
-{ [ "$rc1" -eq 0 ] && grep -q 'sym="[^"]*freshExport"[^/]*origin="new-symbol"' "$TMP/p1"; } \
-    && ok "new public symbol reports origin=\"new-symbol\" and does not gate (exit 0)" \
-    || { no "phase 1 unexpected (exit=$rc1)"; tr '<' '\n' < "$TMP/p1" | grep freshExport; }
+{ [ "$rc1" -eq 0 ] && tr '<' '\n' < "$TMP/p1" | grep 'freshOrphan' | grep -q 'origin="new-symbol"'; } \
+    && ok "a symbol born uncalled reports origin=\"new-symbol\" and does not gate (exit 0)" \
+    || { no "phase 1 unexpected (exit=$rc1)"; tr '<' '\n' < "$TMP/p1" | grep freshOrphan; }
 
 # ── (b) --quality-ack writes an ORIGIN-QUALIFIED token ────────────────────────────────────────────────────
 run --quality-delta --quality-ack="fixture: additive surface" >/dev/null 2>&1
-if grep -q '^ack api-surface:new-symbol ' "$ACKS" 2>/dev/null; then
-    ok "--quality-ack records the zero-magnitude row as 'api-surface:new-symbol' (origin-qualified identity)"
+if grep -q '^ack dead-code:new-symbol ' "$ACKS" 2>/dev/null; then
+    ok "--quality-ack records the zero-magnitude row as 'dead-code:new-symbol' (origin-qualified identity)"
 else
-    no "ack file has no origin-qualified api-surface token — zero-magnitude acks still key on the bare kind"
+    no "ack file has no origin-qualified dead-code token — zero-magnitude acks still key on the bare kind"
     cat "$ACKS" 2>/dev/null | head -5
 fi
-AKEY="$( sed -n 's/^ack api-surface:new-symbol \([0-9a-f]*\) .*/\1/p' "$ACKS" | head -1 )"
+AKEY="$( sed -n 's/^ack dead-code:new-symbol \([0-9a-f]*\) .*/\1/p' "$ACKS" | head -1 )"
 [ -n "$AKEY" ] && ok "recovered the acked identity key ($AKEY) for the cross-origin check" \
                 || no "could not recover the acked identity key — later checks are vacuous"
 
 # ── (c) the ack still suppresses its own row ──────────────────────────────────────────────────────────────
 ACKED_FILE="$TMP/acks_qualified"; cp "$ACKS" "$ACKED_FILE"
 run --quality-delta >"$TMP/p1b" 2>/dev/null; rc1b=$?
-{ [ "$rc1b" -eq 0 ] && ! grep -q 'freshExport' "$TMP/p1b" && grep -q 'acked="[1-9]' "$TMP/p1b"; } \
+{ [ "$rc1b" -eq 0 ] && ! grep -q 'freshOrphan' "$TMP/p1b" && grep -q 'acked="[1-9]' "$TMP/p1b"; } \
     && ok "the ack still suppresses its OWN new-symbol row, honestly (acked=N)" \
-    || { no "the ack no longer suppresses the row it was taken against"; tr '<' '\n' < "$TMP/p1b" | grep -E 'quality-delta |freshExport'; }
+    || { no "the ack no longer suppresses the row it was taken against"; tr '<' '\n' < "$TMP/p1b" | grep -E 'quality-delta |freshOrphan'; }
 
 # ── (e1) MIGRATION, keep half: a LEGACY bare zero-magnitude ack still suppresses the class it was recorded
 #         for. Checked HERE, while the tree is still in the phase-1 (new-symbol) shape.
 if [ -n "$AKEY" ]; then
-    printf '# legacy pre-r27 ack file\nack api-surface %s 0 legacy bare token\n' "$AKEY" > "$ACKS"
+    printf '# legacy pre-r27 ack file\nack dead-code %s 0 legacy bare token\n' "$AKEY" > "$ACKS"
     run --quality-delta >"$TMP/p1c" 2>/dev/null
-    grep -q 'freshExport' "$TMP/p1c" \
-        && { no "legacy bare ack stopped suppressing the new-symbol row it was recorded for"; tr '<' '\n' < "$TMP/p1c" | grep freshExport | head -2; } \
+    grep -q 'freshOrphan' "$TMP/p1c" \
+        && { no "legacy bare ack stopped suppressing the new-symbol row it was recorded for"; tr '<' '\n' < "$TMP/p1c" | grep freshOrphan | head -2; } \
         || ok "a LEGACY bare ack still suppresses the new-symbol row it was recorded for (migration preserves meaning)"
 fi
 cp "$ACKED_FILE" "$ACKS"
 
-# ── (d) THE FIX: the same symbol's CONTRACT-CHANGE row is not blank-checked by that ack ────────────────────
-# Commit the header (so freshExport exists at the baseline), pin a sidecar baseline, then strip its `api `
-# records — freshExport is now present in the per-symbol maps but absent from the public set, which is the
-# tier-A contract-change shape. Same canonId ⇒ same identity key as the ack taken in (b).
-git -C "$REPO" add -A; git -C "$REPO" commit -qm "export freshExport" >/dev/null
+# ── (d) THE FIX: the same symbol's PREEXISTING row is not blank-checked by that ack ────────────────────────
+# Commit (so freshOrphan exists at the baseline), pin a sidecar baseline, then strip its `dead ` records —
+# freshOrphan is now present in the per-symbol maps but absent from the dead set, which is the preexisting
+# shape. Same canonId ⇒ same identity key as the ack taken in (b).
+git -C "$REPO" add -A; git -C "$REPO" commit -qm "add freshOrphan" >/dev/null
 run --quality-baseline >/dev/null 2>&1
-[ -s "$BASE" ] && ok "pinned a baseline sidecar for the contract-change phase" || no "no baseline sidecar written"
-grep -v '^api ' "$BASE" > "$TMP/base_noapi" && cp "$TMP/base_noapi" "$BASE"
+if [ -s "$BASE" ]; then ok "pinned a baseline sidecar for the contract-change phase"; else no "no baseline sidecar written"; fi
+grep -v '^dead ' "$BASE" > "$TMP/base_nodead" && cp "$TMP/base_nodead" "$BASE"
 
 run --quality-delta >"$TMP/p2" 2>/dev/null; rc2=$?
-CCROW="$( tr '<' '\n' < "$TMP/p2" | grep 'freshExport' | grep 'contract-change' )"
+CCROW="$( tr '<' '\n' < "$TMP/p2" | grep 'freshOrphan' | grep 'kind="dead-code"' | grep -v 'origin="new-symbol"' )"
 if [ -n "$CCROW" ] && [ "$rc2" -eq 2 ]; then
-    ok "the SAME symbol's contract-change row survives the new-symbol ack and GATES (exit 2)"
+    ok "the SAME symbol's PREEXISTING row survives the new-symbol ack and GATES (exit 2)"
 else
-    no "contract-change row suppressed or non-gating (exit=$rc2) — the zero-magnitude blank check is back"
-    tr '<' '\n' < "$TMP/p2" | grep -E 'quality-delta |freshExport' | head -4
+    no "preexisting row suppressed or non-gating (exit=$rc2) — the zero-magnitude blank check is back"
+    tr '<' '\n' < "$TMP/p2" | grep -E 'quality-delta |freshOrphan' | head -4
 fi
 printf '%s' "$CCROW" | grep -q 'gating="1"' \
-    && ok "the surviving contract-change row is marked gating=\"1\"" \
+    && ok "the surviving preexisting row is marked gating=\"1\"" \
     || no "the gating row carries no gating=\"1\" marker"
 
 # ── (e2) MIGRATION, fail-closed half: the same LEGACY line must NOT reach the contract-change row ─────────
 if [ -n "$AKEY" ]; then
-    printf '# legacy pre-r27 ack file\nack api-surface %s 0 legacy bare token\n' "$AKEY" > "$ACKS"
+    printf '# legacy pre-r27 ack file\nack dead-code %s 0 legacy bare token\n' "$AKEY" > "$ACKS"
     run --quality-delta >"$TMP/p3" 2>/dev/null; rc3=$?
-    { [ "$rc3" -eq 2 ] && tr '<' '\n' < "$TMP/p3" | grep 'freshExport' | grep -q 'contract-change'; } \
-        && ok "a LEGACY bare zero-magnitude ack does NOT suppress the contract-change row (fail-closed migration)" \
-        || { no "legacy bare ack still blank-checks the contract-change row (exit=$rc3)"; tr '<' '\n' < "$TMP/p3" | grep freshExport | head -3; }
+    { [ "$rc3" -eq 2 ] && tr '<' '\n' < "$TMP/p3" | grep 'freshOrphan' | grep 'kind="dead-code"' | grep -qv 'origin="new-symbol"'; } \
+        && ok "a LEGACY bare zero-magnitude ack does NOT suppress the preexisting row (fail-closed migration)" \
+        || { no "legacy bare ack still blank-checks the preexisting row (exit=$rc3)"; tr '<' '\n' < "$TMP/p3" | grep freshOrphan | head -3; }
 fi
 
 # ── (f) magnitude-bearing acks are untouched (bare token, ratchet still re-reports on worsening) ──────────

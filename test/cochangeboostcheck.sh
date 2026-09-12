@@ -24,7 +24,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 # L5: --cochange-boost is dropped from --help and gated behind RIPWIRE_DEV=1 (negative-result
@@ -142,7 +142,7 @@ inertPair "$NOGIT" "non-git tree"
 # ── (iii) scope: --query and --for --no-route are byte-identical even with the env set ──────────────
 "$BIN" "$HIST" --query="$Q" --no-cache >"$TMP/q1.xml" 2>/dev/null
 RIPWIRE_COCHANGE=1 "$BIN" "$HIST" --query="$Q" --no-cache >"$TMP/q2.xml" 2>/dev/null
-cmp -s "$TMP/q1.xml" "$TMP/q2.xml" && ok "--query path untouched by the boost env" || no "--query path affected"
+if cmp -s "$TMP/q1.xml" "$TMP/q2.xml"; then ok "--query path untouched by the boost env"; else no "--query path affected"; fi
 "$BIN" "$HIST" --for="$Q" --no-route --no-cache >"$TMP/nr1.xml" 2>/dev/null
 RIPWIRE_COCHANGE=1 "$BIN" "$HIST" --for="$Q" --no-route --no-cache >"$TMP/nr2.xml" 2>/dev/null
 cmp -s "$TMP/nr1.xml" "$TMP/nr2.xml" && ok "--no-route path keeps its pre-routing bytes (boost does not apply)" \
@@ -155,12 +155,12 @@ cmp -s "$TMP/nr1.xml" "$TMP/nr2.xml" && ok "--no-route path keeps its pre-routin
 cmp -s "$TMP/d1.xml" "$TMP/d2.xml" && cmp -s "$TMP/d2.xml" "$TMP/d3.xml" && ok "determinism x3 (opted-in)" \
     || no "opted-in output not deterministic"
 if command -v xmllint >/dev/null; then
-    xmllint --noout "$TMP/d1.xml" 2>/dev/null && ok "boosted bundle is xmllint-clean (G4)" || no "boosted bundle not well-formed"
+    if xmllint --noout "$TMP/d1.xml" 2>/dev/null; then ok "boosted bundle is xmllint-clean (G4)"; else no "boosted bundle not well-formed"; fi
 else ok "xmllint not present — skipped (G4 covered by xmlwellformed.sh)"; fi
 
 # --cochange-boost without --for refuses loudly (mirrors --anchor/--adaptive/--detail)
 "$BIN" "$HIST" --cochange-boost >/dev/null 2>"$TMP/refuse.err"
-[ $? -ne 0 ] && grep -q 'cochange-boost' "$TMP/refuse.err" && ok "flag alone refuses loudly" || no "flag alone did not refuse"
+if [ $? -ne 0 ] && grep -q 'cochange-boost' "$TMP/refuse.err"; then ok "flag alone refuses loudly"; else no "flag alone did not refuse"; fi
 
 # --cochange-boost WITHOUT RIPWIRE_DEV=1 refuses loudly (the L5 experimental gate)
 env -u RIPWIRE_DEV "$BIN" "$HIST" --for="$Q" --cochange-boost --no-cache >/dev/null 2>"$TMP/deverr"

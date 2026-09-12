@@ -6,7 +6,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 
@@ -26,7 +26,7 @@ CPP
 echo "grephandlecheck: BIN=$BIN"
 "$BIN" "$TMP" --grep='return x' --handles >"$TMP/one" 2>"$TMP/one.err" || no "--grep --handles failed"
 HANDLE="$( sed -n 's/.* h="\(sym#[0-9a-f]*@[0-9a-f]*\)".*/\1/p' "$TMP/one" | head -1 )"
-[ -n "$HANDLE" ] && ok "unique enclosing symbol carries a handle" || no "unique enclosing symbol has no handle"
+if [ -n "$HANDLE" ]; then ok "unique enclosing symbol carries a handle"; else no "unique enclosing symbol has no handle"; fi
 printf '%s' "$HANDLE" | grep -Eq '^sym#[0-9a-f]{16}@[0-9a-f]{16}$' \
     && ok "handle uses the stable content-addressed shape" \
     || no "handle shape is malformed: $HANDLE"

@@ -24,7 +24,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -91,9 +91,9 @@ print("body:%r" % b["body"])
 print("META start=%d end=%d total=%d partial=%s" % (b["start_line"], b["end_line"], b["total_lines"], b["partial"]))
 ' > "$TMP/single_meta"
         cat "$TMP/single_meta"
-        grep -q 'start=3 end=3' "$TMP/single_meta" && ok "single-line range reports start_line=3 end_line=3 (not silently widened)" || no "single-line range start/end wrong: $( cat "$TMP/single_meta" )"
-        grep -q 'partial=True' "$TMP/single_meta" && ok "single-line range reports partial=true (it is a strict sub-range of a 6-line body)" || no "single-line range did not report partial=true"
-        grep -q 'total=6' "$TMP/single_meta" && ok "single-line range reports the correct total_lines=6" || no "single-line range total_lines wrong: $( cat "$TMP/single_meta" )"
+        if grep -q 'start=3 end=3' "$TMP/single_meta"; then ok "single-line range reports start_line=3 end_line=3 (not silently widened)"; else no "single-line range start/end wrong: $( cat "$TMP/single_meta" )"; fi
+        if grep -q 'partial=True' "$TMP/single_meta"; then ok "single-line range reports partial=true (it is a strict sub-range of a 6-line body)"; else no "single-line range did not report partial=true"; fi
+        if grep -q 'total=6' "$TMP/single_meta"; then ok "single-line range reports the correct total_lines=6"; else no "single-line range total_lines wrong: $( cat "$TMP/single_meta" )"; fi
         # byte-match against the real source: body line 3 = file line 6.
         sed -n '6p' "$GEO" > "$TMP/single_truth"
         echo "$SINGLE_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin)["body"],end="")' > "$TMP/single_got"
@@ -122,7 +122,7 @@ import sys, json
 b = json.load(sys.stdin)
 print("PARTIAL_FALSE" if b["partial"] == False else "PARTIAL_TRUE_WRONG")
 ' > "$TMP/fullexplicit_chk"
-       grep -q PARTIAL_FALSE "$TMP/fullexplicit_chk" && ok "explicit 1..6 range (== the whole 6-line body) reports partial=false" || no "explicit full-span range incorrectly reports partial=true"
+       if grep -q PARTIAL_FALSE "$TMP/fullexplicit_chk"; then ok "explicit 1..6 range (== the whole 6-line body) reports partial=false"; else no "explicit full-span range incorrectly reports partial=true"; fi
     ;;
 esac
 # and a range that OVER-REQUESTS past the end but clamps down to exactly the whole body (1..999) is ALSO
@@ -135,7 +135,7 @@ import sys, json
 b = json.load(sys.stdin)
 print("PARTIAL_FALSE" if b["partial"] == False and b["end_line"] == b["total_lines"] else "WRONG:%s/%d/%d" % (b["partial"], b["end_line"], b["total_lines"]))
 ' > "$TMP/fullclamp_chk"
-       grep -q PARTIAL_FALSE "$TMP/fullclamp_chk" && ok "1..999 clamps to the whole body AND reports partial=false" || no "1..999 clamp/partial wrong: $( cat "$TMP/fullclamp_chk" )"
+       if grep -q PARTIAL_FALSE "$TMP/fullclamp_chk"; then ok "1..999 clamps to the whole body AND reports partial=false"; else no "1..999 clamp/partial wrong: $( cat "$TMP/fullclamp_chk" )"; fi
     ;;
 esac
 
@@ -177,7 +177,7 @@ no_repl    = "�" not in body
 no_leak    = ("def greet" not in body) and ("return rocket" not in body)   # neighboring lines excluded
 print("UTF_LINE_OK" if (has_rocket and no_repl and no_leak) else "UTF_LINE_BAD rocket=%s norepl=%s noleak=%s body=%r" % (has_rocket, no_repl, no_leak, body))
 ' > "$TMP/utfline_chk"
-    grep -q UTF_LINE_OK "$TMP/utfline_chk" && ok "range 2..2 over a multibyte-symbol body returns exactly the emoji line, intact, neighbors excluded" || no "multibyte single-line range failed: $( cat "$TMP/utfline_chk" )"
+    if grep -q UTF_LINE_OK "$TMP/utfline_chk"; then ok "range 2..2 over a multibyte-symbol body returns exactly the emoji line, intact, neighbors excluded"; else no "multibyte single-line range failed: $( cat "$TMP/utfline_chk" )"; fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════

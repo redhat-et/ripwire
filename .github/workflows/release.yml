@@ -8,8 +8,8 @@ name: Release
 #
 # Every leg configures WITHOUT -DRIPWIRE_NATIVE=ON on purpose: a release binary must run on any machine of
 # its target arch, not just the exact CPU that happened to build it (see cmake/PortableFlags.cmake — the
-# portable default auto-applies safe generic Apple Silicon tuning on the two macOS-arm64 builders and
-# emits zero host-specific flags everywhere else).
+# portable default keys on the TARGET arch: generic Apple Silicon tuning for macos-arm64, the x86-64-v3
+# floor for both x64 legs, macos-x64's cross build included, and no host-specific flag anywhere).
 
 on:
   push:
@@ -36,16 +36,30 @@ jobs:
             asset_arch: arm64
             asset_os: macos
             pgo: true
+            developer_dir: /Applications/Xcode_16.2.app/Contents/Developer
           - name: macos-x64
-            os: macos-14 # cross-compiled: the macos-13 Intel runner pool is retired — the v0.1.0 and
+            os: macos-26 # cross-compiled: the macos-13 Intel runner pool is retired — the v0.1.0 and
                          # first v0.2.0 runs both left its leg queued until the 24h auto-cancel. Built
-                         # as x86_64 on the arm64 runner; the smoke-test still executes for real via
-                         # Rosetta 2 (installed on GitHub's macos-14 images).
+                         # as x86_64 on the arm64 runner, then EXECUTED there under Rosetta 2: PGO
+                         # training, the determinism diff, --version, the smoke test. The binary is
+                         # x86-64-v3 (cmake/PortableFlags.cmake) and contains AVX2, BMI1/2, FMA, LZCNT
+                         # and MOVBE instructions, so the runner's Rosetta must execute all of them.
+                         # macos-14's cannot (SIGILL at the first vector instruction; test/strkerncheck.sh,
+                         # PR #127 run 4). macOS 15's gained AVX2, but its LZCNT/MOVBE coverage was never
+                         # verified. macOS 26's ran this leg's exact pgobuild, fixture and byte-identity
+                         # checks green with Xcode 26.6. Gated: test/portablebuildcheck.sh #2h.
             asset_arch: x64
             asset_os: macos
             pgo: true # trains under Rosetta 2 — instrumentation counts edges of the same code, so the
                       # profile is valid x86_64 data; it is just slower to collect
             cmake_extra: -DCMAKE_OSX_ARCHITECTURES=x86_64
+            # Xcode 26.6: the image default when this leg moved, and the toolchain it was verified on.
+            # Pinned so an image bump cannot change the compiler under a release.
+            developer_dir: /Applications/Xcode_26.6.app/Contents/Developer
+            # The minimum macOS, PINNED. With no deployment target clang takes the lower of the runner's
+            # macOS and the SDK default: 14.x on macos-14 but 26.0 here, so the runner move alone would
+            # have dropped every macOS 14/15 Intel user. 14.0 is the std::print floor src/infra/emit.h names.
+            deployment_target: "14.0"
           - name: linux-x64
             os: ubuntu-24.04
             # AlmaLinux-8-based manylinux container (glibc 2.28) with Red Hat gcc-toolset: newer
@@ -62,10 +76,11 @@ jobs:
             asset_os: linux
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container || '' }}
-    # Xcode 16.2 on the macOS legs (image default 15.4): its libc++ carries <print> at a macOS 14 deployment
-    # target — the std::print floor ci.yml holds. Empty on the container legs (gcc-toolset-14 already has it).
+    # Each macOS leg names its Xcode (matrix.developer_dir). macos-arm64 keeps Xcode 16.2 (image default
+    # 15.4): its libc++ carries <print> at a macOS 14 deployment target — the std::print floor ci.yml holds.
+    # Empty on the container legs (gcc-toolset-14 already has it).
     env:
-      DEVELOPER_DIR: ${{ matrix.os == 'macos-14' && '/Applications/Xcode_16.2.app/Contents/Developer' || '' }}
+      DEVELOPER_DIR: ${{ matrix.developer_dir || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -80,6 +95,12 @@ jobs:
             sudo apt-get install -y --no-install-recommends libxml2-utils
           fi
 
+      # The leg's pinned minimum macOS (matrix.deployment_target — see the macos-x64 entry), exported so both
+      # configures and every clang invocation see it. A leg without the key never gets the variable at all,
+      # not even as an empty string.
+      - name: Pin the macOS deployment target
+        if: ${{ matrix.deployment_target }}
+        run: echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.deployment_target }}" >> "$GITHUB_ENV"
 
       - name: Configure (portable — no RIPWIRE_NATIVE, this binary ships to other machines)
         if: ${{ !matrix.pgo }}
@@ -119,6 +140,13 @@ jobs:
         run: |
           ./build/ripwire --version
           ./build/ripwire --version | grep -q 'emit=std::print'
+
+      # The deployment-target pin, read off the shipped binary rather than trusted from the environment.
+      - name: The shipped binary's minimum macOS is the pinned one
+        if: ${{ matrix.deployment_target }}
+        run: |
+          otool -l build/ripwire | grep -E '^ *minos '
+          otool -l build/ripwire | grep -qE "^ *minos ${{ matrix.deployment_target }}$"
 
       - name: Smoke-test the freshly built binary
         run: |

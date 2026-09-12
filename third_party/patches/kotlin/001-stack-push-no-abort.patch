@@ -1,0 +1,53 @@
+diff --git a/third_party/deps/kotlin/src/scanner.c b/third_party/deps/kotlin/src/scanner.c
+index b88dcf53..267c8377 100644
+--- a/third_party/deps/kotlin/src/scanner.c
++++ b/third_party/deps/kotlin/src/scanner.c
+@@ -52,14 +52,22 @@ typedef char Delimiter;
+ //   (1 for regular strings and $"...", 2 for $$"...", etc.; max 255).
+ typedef Array(Delimiter) Stack;
+ 
+-static inline void stack_push(Stack *stack, char chr, bool triple, uint8_t prefix_len) {
+-  if (stack->size + 1 >= TREE_SITTER_SERIALIZATION_BUFFER_SIZE) abort();
++// RIPWIRE_VENDOR_PATCH(kotlin/001-stack-push-no-abort): deeply nested interpolated strings can
++// drive the delimiter stack to TREE_SITTER_SERIALIZATION_BUFFER_SIZE. Upstream's abort() is a hard
++// SIGABRT on that input; ripwire's contract is "skip a bad file, never crash the process" (G1). Report
++// failure instead so scan_string_start can propagate it and let tree-sitter recover with an ERROR node.
++static inline bool stack_push(Stack *stack, char chr, bool triple, uint8_t prefix_len) {
++  if (stack->size + 1 >= TREE_SITTER_SERIALIZATION_BUFFER_SIZE) return false;
+   array_push(stack, (Delimiter)(triple ? (chr + 1) : chr));
+   array_push(stack, (Delimiter)prefix_len);
++  return true;
+ }
+ 
++// RIPWIRE_VENDOR_PATCH(kotlin/001-stack-push-no-abort): upstream's abort() here was unreachable (every
++// caller tests size >= 2 first); an empty stack now simply stays empty, so no abort() is left on the
++// string-stack path.
+ static inline void stack_pop(Stack *stack) {
+-  if (stack->size < 2) abort();
++  if (stack->size < 2) return;
+   stack->size -= 2;
+ }
+ 
+@@ -85,14 +93,18 @@ static bool scan_string_start(TSLexer *lexer, Stack *stack) {
+   for (unsigned count = 1; count < DELIMITER_LENGTH; ++count) {
+     if (lexer->lookahead != '"') {
+       // It's not a triple quoted delimiter.
+-      stack_push(stack, '"', false, prefix_len);
+-      return true;
++      // RIPWIRE_VENDOR_PATCH(kotlin/001-stack-push-no-abort): propagate a full stack instead of
++      // letting stack_push abort — a false return here is the standard tree-sitter "no external
++      // token matched" signal (see the identical pattern at the INTERPOLATION_EXPRESSION_START
++      // empty-braces check below), safe because mark_end was only committed up through the quote(s)
++      // already consumed, not past this point.
++      return stack_push(stack, '"', false, prefix_len);
+     }
+     advance(lexer);
+   }
+   lexer->mark_end(lexer);
+-  stack_push(stack, '"', true, prefix_len);
+-  return true;
++  // RIPWIRE_VENDOR_PATCH(kotlin/001-stack-push-no-abort): same propagation for the triple-quote push.
++  return stack_push(stack, '"', true, prefix_len);
+ }
+ 
+ static bool scan_string_content(TSLexer *lexer, Stack *stack,

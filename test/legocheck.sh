@@ -39,7 +39,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/legofix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -183,7 +183,7 @@ fi
 "$BIN" "$CORPUS" --no-cache --lego=Renderer 2>"$TMP/lego_renderer.err" > "$TMP/lego_renderer"
 ECR=$?
 REN="$( cat "$TMP/lego_renderer" )"
-[ "$ECR" = 0 ] && ok "--lego=Renderer (0 implementors): exit 0" || no "--lego=Renderer (0 implementors): should exit 0 (got $ECR)"
+if [ "$ECR" = 0 ]; then ok "--lego=Renderer (0 implementors): exit 0"; else no "--lego=Renderer (0 implementors): should exit 0 (got $ECR)"; fi
 printf '%s' "$REN" | grep -q '<iface n="Renderer"[^>]*implementors="0"' \
     && ok "--lego=Renderer: interface emitted with implementors=\"0\" (not a bare <ctx></ctx>)" \
     || no "--lego=Renderer: expected implementors=\"0\" iface, got: $REN"
@@ -196,7 +196,7 @@ printf '%s' "$REN" | grep -q '<m[^>]*>virtual void present() const = 0</m>' \
 
 "$BIN" "$CORPUS" --no-cache --lego=NoSuchType 2>"$TMP/lego_nf.err" > "$TMP/lego_nf"
 ENF=$?
-[ "$ENF" = 1 ] && ok "--lego=NoSuchType (not found): exit 1" || no "--lego=NoSuchType (not found): should exit 1 (got $ENF)"
+if [ "$ENF" = 1 ]; then ok "--lego=NoSuchType (not found): exit 1"; else no "--lego=NoSuchType (not found): should exit 1 (got $ENF)"; fi
 grep -q 'not found' "$TMP/lego_nf.err" \
     && ok "--lego=NoSuchType: stderr reports not-found" \
     || no "--lego=NoSuchType: expected a not-found message on stderr, got: $( cat "$TMP/lego_nf.err" )"

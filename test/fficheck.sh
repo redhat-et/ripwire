@@ -23,7 +23,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/ffifix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -35,7 +35,7 @@ count_of(){ printf '%s' "$1" | grep -o 'count="[0-9]*"' | grep -o '[0-9]*'; }
 # --- (c) determinism ---------------------------------------------------------------------------------
 "$BIN" "$CORPUS" --no-cache >"$TMP/a" 2>/dev/null
 "$BIN" "$CORPUS" --no-cache >"$TMP/b" 2>/dev/null
-diff -q "$TMP/a" "$TMP/b" >/dev/null && ok "determinism (byte-identical, $(wc -c <"$TMP/a" | tr -d ' ') B)" || no "determinism (non-deterministic output)"
+if diff -q "$TMP/a" "$TMP/b" >/dev/null; then ok "determinism (byte-identical, $(wc -c <"$TMP/a" | tr -d ' ') B)"; else no "determinism (non-deterministic output)"; fi
 MAP="$(cat "$TMP/a")"
 
 # --- (a) pybind: --callers on the C++ target finds the Python call site ------------------------------
@@ -62,13 +62,13 @@ printf '%s' "$MAP" | grep -q 'n="run_pipeline" amb="2"' \
   && ok "provenance: binding edges surface amb=\"2\" on the Python caller (verify-in-source mark)" \
   || { no "provenance: run_pipeline missing amb=\"2\""; }
 AMBIG="$( printf '%s' "$MAP" | grep -o 'ambiguous=[0-9]*' | grep -o '[0-9]*' )"
-[ "${AMBIG:-0}" -ge 1 ] && ok "provenance: header ambiguous=$AMBIG reflects the binding edges" || no "provenance: header ambiguous count not raised"
+if [ "${AMBIG:-0}" -ge 1 ]; then ok "provenance: header ambiguous=$AMBIG reflects the binding edges"; else no "provenance: header ambiguous count not raised"; fi
 
 # --- (b) --impact crosses the language border -------------------------------------------------------
 IMP="$( "$BIN" "$CORPUS" --impact=fast_transform_impl --no-cache 2>/dev/null )"
-printf '%s' "$IMP" | grep -q 'caller.py' && ok "impact: fast_transform_impl blast radius reaches caller.py" || { no "impact: border not crossed"; printf '    %s\n' "$IMP"; }
+if printf '%s' "$IMP" | grep -q 'caller.py'; then ok "impact: fast_transform_impl blast radius reaches caller.py"; else { no "impact: border not crossed"; printf '    %s\n' "$IMP"; }; fi
 IMP="$( "$BIN" "$CORPUS" --impact=clib_scale --no-cache 2>/dev/null )"
-printf '%s' "$IMP" | grep -q 'user.py' && ok "impact: clib_scale blast radius reaches user.py" || { no "impact: extern-C border not crossed"; printf '    %s\n' "$IMP"; }
+if printf '%s' "$IMP" | grep -q 'user.py'; then ok "impact: clib_scale blast radius reaches user.py"; else { no "impact: extern-C border not crossed"; printf '    %s\n' "$IMP"; }; fi
 
 # --- (d) CONTROL: a same-name local Python def wins — NO false binding edge --------------------------
 C="$( callers combine_impl )"
@@ -89,7 +89,7 @@ printf '%s' "$MAP" | grep -q 'n="Java_com_example_Foo_bar"[^>]* bind="com.exampl
   || { no "JNI: bind= attribute missing or wrong value on Java_com_example_Foo_bar"; printf '    %s\n' "$MAP" | grep -o '<s[^>]*Java_com_example_Foo_bar[^>]*>'; }
 
 # --- (e) xmllint-clean --------------------------------------------------------------------------------
-printf '%s' "$MAP" | xmllint --noout - 2>/dev/null && ok "xmllint: default map is well-formed" || no "xmllint: default map malformed"
+if printf '%s' "$MAP" | xmllint --noout - 2>/dev/null; then ok "xmllint: default map is well-formed"; else no "xmllint: default map malformed"; fi
 
 echo
 [ "$fail" = "0" ] && { echo "fficheck: ALL PASS"; exit 0; } || { echo "fficheck: FAILURES"; exit 1; }

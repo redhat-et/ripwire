@@ -50,7 +50,7 @@ FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -159,16 +159,16 @@ PYEOF
 for version in 2025-11-25 2025-06-18 2025-03-26 2024-11-05; do
     reply="$( mcp_call "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"$version\",\"capabilities\":{},\"clientInfo\":{\"name\":\"ripwire-test\",\"version\":\"1.0\"}}}" )"
     got="$( printf '%s' "$reply" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("result",{}).get("protocolVersion",""))' 2>/dev/null )"
-    [ "$got" = "$version" ] && ok "initialize negotiates supported $version" || no "initialize requested $version but returned '$got'"
+    if [ "$got" = "$version" ]; then ok "initialize negotiates supported $version"; else no "initialize requested $version but returned '$got'"; fi
 done
 
 reply="$( mcp_call '{"jsonrpc":"2.0","id":9,"method":"initialize","params":{"protocolVersion":"2099-01-01","capabilities":{},"clientInfo":{"name":"ripwire-test","version":"1.0"}}}' )"
 got="$( printf '%s' "$reply" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("result",{}).get("protocolVersion",""))' 2>/dev/null )"
-[ "$got" = "2025-11-25" ] && ok "unsupported initialize version negotiates latest" || no "unsupported initialize version returned '$got'"
+if [ "$got" = "2025-11-25" ]; then ok "unsupported initialize version negotiates latest"; else no "unsupported initialize version returned '$got'"; fi
 
 reply="$( mcp_call '{"jsonrpc":"2.0","id":10,"method":"initialize"}' )"
 got="$( printf '%s' "$reply" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("result",{}).get("protocolVersion",""))' 2>/dev/null )"
-[ "$got" = "2025-11-25" ] && ok "missing initialize version uses the latest compatibility policy" || no "missing initialize version returned '$got'"
+if [ "$got" = "2025-11-25" ]; then ok "missing initialize version uses the latest compatibility policy"; else no "missing initialize version returned '$got'"; fi
 
 # (d) notifications/initialized — a standalone call MUST produce zero output lines.
 NOTIF_OUT="$( mcp_call "$MSG_D" )"

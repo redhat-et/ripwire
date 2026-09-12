@@ -16,6 +16,12 @@
 # gate's job is to make sure tier 1 stays SHORT while tier 2 stays COMPLETE — the two failure modes are
 # opposite, so both get an arm, and a change that fixes one by breaking the other cannot pass.
 #
+# A THIRD FAILURE MODE, learned the expensive way in v0.6.0: the arms that compare the two tiers read
+# both of them with the EMITTER'S OWN four-space row rule, so a row the emitter misclassifies is missing
+# from both sides and the comparison is green about exactly the rows that were lost. Arm (K) exists
+# because of that: its population is the flag table `parseArgs` actually scans, which shares no code with
+# the help text. A gate whose population comes from the thing it measures is not a fence.
+#
 # WHY A GATE AND NOT A ONE-TIME TIDY: a help text grows one honest sentence at a time. Every disclosure in
 # the 46 000 tokens was added by someone who was right to add it. Without a budget that fails, tier 1 is
 # re-absorbed into tier 2 within a few rounds by exactly the same well-intentioned process that produced the
@@ -38,7 +44,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 case "$BIN" in /*) ;; *) BIN="$ROOT/$BIN" ;; esac
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -57,7 +63,13 @@ BYTES_PER_TOKEN=4          # integer divisor; see UNITS above
 # ── the row extractor, used identically by arms B, C and the control ──────────────────────────────────
 # A ROW is a two-column entry line: four spaces, a label, two-or-more spaces, then its description. That
 # shape covers the flags AND the shared legend rows that live in the same table (counts_floor="1",
-# pr_iters="N", <dir>) — every one of them is a thing a reader looks up, so every one of them is fenced.
+# pr_iters="N", <dir>).
+#
+# WHAT IT CANNOT FENCE, stated here because the earlier wording claimed the opposite. Four spaces is the
+# EMITTER'S OWN rule (src/cli.h classifyHelpLine), so a line the emitter misreads is invisible to this
+# extractor too — it drops out of BOTH sides of arm (B)'s comparison and (B) then reports that nothing
+# was culled. v0.6.0 shipped with twelve six-space flag rows and this extractor called it clean. Arm (K)
+# is the fence that does not share this definition: its population comes from the parse tables.
 rows(){ grep -E '^    (--[^ ]+|[^ ]+  +[^ ])' "$1" | sed -E 's/^    ([^ ]+) .*/\1/'; }
 
 # ── (A) tier 1 fits the published budget ──────────────────────────────────────────────────────────────
@@ -127,6 +139,92 @@ if [ ! -s "$TMP/extra" ]; then
     ok "(E) --help advertises no row that --help=all does not define"
 else
     no "(E) --help advertises rows absent from --help=all: $( tr '\n' ' ' <"$TMP/extra" )"
+fi
+
+# ── (K) every flag the PARSER accepts is NAMED on the first screen ────────────────────────────────────
+# WHY THIS ARM EXISTS, AND WHY IT DOES NOT USE `rows`. Arms (B), (C) and (E) all take their population
+# from the help text through `rows`, which is the EMITTER'S OWN four-space rule. A row the emitter
+# misclassifies is therefore absent from BOTH sides of arm (B)'s comparison, so (B) prints "the split
+# culled nothing" about exactly the rows that were culled. That is what shipped in v0.6.0: twelve flag
+# rows carried a six-space indent, classifyHelpLine() read them as continuation prose, fifteen real flags
+# vanished from tier 1 — and every arm in this file stayed green. A gate that takes its population from
+# the thing it measures cannot catch that thing being wrong (CONTRIBUTING §2, shape 1).
+#
+# So this arm's population comes from the OTHER side of the binary. test/flaguniverse.py reads the parse
+# tables (kBoolFlags / kViewFlags / kIntFlags) and the hand-written parseArgs arms — what the tool
+# ACCEPTS — which lives in a different region of src/cli.h from the help strings and shares no code with
+# the help emitter. Three other gates already derive their flag universe the same way.
+#
+# WHAT IT PROVES, AND THE NARROWER PART (CONTRIBUTING §2, shape 7): it asserts each accepted flag is
+# NAMED somewhere in tier 1, not that each has a ROW of its own. A sub-knob advertised inside its
+# parent's one-line summary — "[--around-depth=N, default 1]" inside --around's row — passes here by
+# design, because that IS how the first screen advertises it. The claim being fenced is the one the
+# --help=<miss> refusal makes out loud: "`ripwire --help` lists every row". A flag the first screen never
+# spells cannot be found by a reader who runs only --help, and saying otherwise is a false claim about
+# the tool's own output — the thing non-negotiable #3 forbids.
+python3 "$ROOT/test/flaguniverse.py" "$ROOT/src/cli.h" 2>/dev/null | cut -f1 | sed -E 's/=$//' | sort -u >"$TMP/universe"
+nuni="$( grep -c . "$TMP/universe" 2>/dev/null )"; [ -n "$nuni" ] || nuni=0
+
+# The DEBT LIST: accepted flags this arm does not require tier 1 to name, each with the reason it is off
+# the list. It is a list, not a rule, and it is committed so the gap is on the record rather than in
+# someone's head — a flag added tomorrow fails this arm instead of joining the gap silently. Shortening
+# it is a documentation change; lengthening it is a decision a reviewer must see and agree with.
+cat >"$TMP/unadvertised" <<'EOF'
+--eval=knownitem        an --eval harness alias (kBoolFlags "alias" row); eval-only, no entry in --help=all either
+--anchor                a --for lens modifier, internal; no entry in --help=all either
+--cochange-boost        a --for lens modifier, internal; no entry in --help=all either
+--no-prefilter          a --grep search-path switch, internal; no entry in --help=all either
+--most-important-last   DEPRECATED spelling, accepted only for back-compat (deprecatedOrderFlag -> --order=important-last)
+--stable                DEPRECATED spelling, accepted only for back-compat (deprecatedOrderFlag -> --order=stable)
+--no-auto-order         DEPRECATED spelling, accepted only for back-compat (deprecatedOrderFlag -> --order=important-first)
+--route                 a back-compat NO-OP: routing is the default now, and --no-route is the spelling tier 1 carries
+--connect-radius        a sub-knob, advertised inside --connect's own tier-2 prose rather than as a row
+--include-builtins      a sub-knob, advertised inside --external-surface's own tier-2 prose rather than as a row
+--zoom-levels           a sub-knob, advertised inside --zoom's own tier-2 prose rather than as a row
+EOF
+
+# The extraction, factored out so the control below re-runs the IDENTICAL one over mutated input.
+unnamedFlags(){
+    python3 - "$1" "$TMP/universe" "$TMP/unadvertised" <<'PY'
+import re, sys
+text   = open( sys.argv[ 1 ], encoding = 'utf-8' ).read()
+uni    = [ l.strip() for l in open( sys.argv[ 2 ], encoding = 'utf-8' ) if l.strip() ]
+exempt = { l.split()[ 0 ] for l in open( sys.argv[ 3 ], encoding = 'utf-8' ) if l.split() }
+for flag in uni:
+    if flag in exempt:
+        continue
+    # a whole-token match: --not must not be satisfied by --notes
+    if not re.search( re.escape( flag ) + r'(?![A-Za-z0-9-])', text ):
+        print( flag )
+PY
+}
+
+if [ "$nuni" -lt 150 ]; then
+    no "(K) presence guard: test/flaguniverse.py yielded only $nuni flags from src/cli.h — the scrape broke, so this arm proves nothing"
+else
+    # a stale debt-list entry would silently widen the exemption, so every name on it must still be a flag
+    stale="$( cut -d' ' -f1 "$TMP/unadvertised" | sort -u | comm -23 - "$TMP/universe" | tr '\n' ' ' )"
+    [ -z "$( printf '%s' "$stale" | tr -d ' ' )" ] || no "(K) the unadvertised debt list names flags parseArgs does not accept: $stale — prune it"
+    unnamedFlags "$TMP/concise" >"$TMP/unnamed"
+    nex="$( grep -c . "$TMP/unadvertised" )"
+    if [ ! -s "$TMP/unnamed" ]; then
+        ok "(K) all $nuni flags parseArgs accepts are named in --help ($nex on the committed unadvertised list)"
+    else
+        no "(K) $( grep -c . "$TMP/unnamed" ) flags parseArgs ACCEPTS are named nowhere in --help — the first screen does not list them, so \`--help\` does not list every row:"
+        tr '\n' ' ' <"$TMP/unnamed" | sed 's/^/          /; s/ *$/\n/'
+    fi
+fi
+
+# ── (L) CONTROL: arm (K)'s extraction can actually FAIL ───────────────────────────────────────────────
+# Same discipline as (H): mutate REAL input, assert the mutation took, re-run the IDENTICAL extraction.
+# --lego is the probe because it is one row, one spelling, and on no exemption list.
+grep -v -- '--lego' "$TMP/concise" >"$TMP/concise.nolego"
+if cmp -s "$TMP/concise" "$TMP/concise.nolego"; then
+    no "(L) control: the mutation did not take — --lego was not found in --help, so the control proves nothing"
+elif unnamedFlags "$TMP/concise.nolego" | grep -q -- '^--lego$'; then
+    ok "(L) control fires: a flag dropped from the first screen is reported by arm (K)'s own extraction"
+else
+    no "(L) control did NOT fire: arm (K)'s extraction cannot detect an unadvertised flag — arm (K) is inert"
 fi
 
 # ── (F) the gate-held homes inside the help text survive the split ────────────────────────────────────

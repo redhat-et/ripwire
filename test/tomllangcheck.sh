@@ -42,7 +42,7 @@ FIX="$ROOT/test/tomlfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -60,7 +60,7 @@ echo "=== presence guards: the fixture really contains what the arms below asser
 # finding nothing on both sides. Assert the probe target exists before asserting the property.
 PY="$FIX/pyproject.toml"
 [ -f "$PY" ] || { echo "fixture file $PY missing"; exit 2; }
-guard(){ grep -qF -- "$1" "$PY" && ok "fixture contains $2" || { no "fixture LOST $2 — every arm below would pass by finding nothing"; }; }
+guard(){ if grep -qF -- "$1" "$PY"; then ok "fixture contains $2"; else { no "fixture LOST $2 — every arm below would pass by finding nothing"; }; fi; }
 guard '[tool.ruff.lint]'          'a depth-3 table header  [tool.ruff.lint]'
 guard '[[tool.mypy.overrides]]'   'an array-of-tables header  [[tool.mypy.overrides]]'
 guard 'dottedkey.subpart ='       'a dotted key  dottedkey.subpart ='
@@ -78,16 +78,16 @@ echo "=== default map: exits 0, well-formed, clean stderr, edges=0 ==="
 MAP_OUT="$TMP/map.xml"
 $BIN "$FIX" --no-cache >"$MAP_OUT" 2>"$TMP/map.err"
 MAP_EXIT=$?
-[ "$MAP_EXIT" -eq 0 ] && ok "default map: exits 0 on TOML fixture" || no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"
+if [ "$MAP_EXIT" -eq 0 ]; then ok "default map: exits 0 on TOML fixture"; else no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"; fi
 
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP_OUT" && ok "default map: passes xmllint --noout" || no "default map: xmllint failed"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP_OUT"; then ok "default map: passes xmllint --noout"; else no "default map: xmllint failed"; fi; }
 
 # no degrade / ABI-mismatch warning must reach stderr on the clean fixture
 [ -s "$TMP/map.err" ] && no "default map: unexpected stderr (ABI/degrade?): $( cat "$TMP/map.err" )" || ok "default map: clean stderr (no ABI mismatch / degrade)"
 
 # edges=0: TOML is data, no call graph
 EDGES="$( grep -o 'edges=[0-9]*' "$MAP_OUT" | head -1 )"
-[ "$EDGES" = "edges=0" ] && ok "default map: $EDGES (TOML is data — no call edges)" || no "default map: expected edges=0, got $EDGES"
+if [ "$EDGES" = "edges=0" ]; then ok "default map: $EDGES (TOML is data — no call edges)"; else no "default map: expected edges=0, got $EDGES"; fi
 
 # ─── parse per-file symbols once ────────────────────────────────────────────
 python3 - "$MAP_OUT" <<'PYEOF' >"$TMP/parsed.json"
@@ -219,9 +219,9 @@ function main() { return serde(); }
 JSEOF
 XL_OUT="$( $BIN "$XL" --no-cache 2>/dev/null )"
 XL_EDGES="$( echo "$XL_OUT" | grep -o 'edges=[0-9]*' | head -1 )"
-[ "$XL_EDGES" = "edges=1" ] && ok "mixed TOML+JS: $XL_EDGES (only the JS-internal main->serde edge)" || no "mixed TOML+JS: expected edges=1, got $XL_EDGES"
+if [ "$XL_EDGES" = "edges=1" ]; then ok "mixed TOML+JS: $XL_EDGES (only the JS-internal main->serde edge)"; else no "mixed TOML+JS: expected edges=1, got $XL_EDGES"; fi
 # the TOML side must actually be in the map, or the isolation claim is vacuous
-echo "$XL_OUT" | grep -q 'Cargo.toml' && ok "mixed TOML+JS: Cargo.toml IS indexed (isolation arm is not vacuous)" || no "mixed TOML+JS: Cargo.toml absent from the map"
+if echo "$XL_OUT" | grep -q 'Cargo.toml'; then ok "mixed TOML+JS: Cargo.toml IS indexed (isolation arm is not vacuous)"; else no "mixed TOML+JS: Cargo.toml absent from the map"; fi
 XL_CR="$( $BIN "$XL" --callers=serde --no-cache 2>/dev/null )"
 echo "$XL_CR" | grep -q 'count="1"' && echo "$XL_CR" | grep -q 'app.js' \
     && ok "--callers=serde: count=1, from app.js (the TOML \`serde\` key is NOT a caller/target)" \
@@ -230,7 +230,7 @@ echo "$XL_CR" | grep -q 'count="1"' && echo "$XL_CR" | grep -q 'app.js' \
 # mutation: rename the JS call site → the ONLY edge must vanish (non-tautological)
 sed 's/return serde()/return serdeX()/' "$XL/app.js" >"$XL/app.js.tmp" && mv "$XL/app.js.tmp" "$XL/app.js"
 XL_MUT="$( $BIN "$XL" --no-cache 2>/dev/null | grep -o 'edges=[0-9]*' | head -1 )"
-[ "$XL_MUT" = "edges=0" ] && ok "mutation: renamed JS call site → edges=0 (the edge assertion is real)" || no "mutation: expected edges=0 after rename, got $XL_MUT"
+if [ "$XL_MUT" = "edges=0" ]; then ok "mutation: renamed JS call site → edges=0 (the edge assertion is real)"; else no "mutation: expected edges=0 after rename, got $XL_MUT"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

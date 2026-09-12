@@ -57,7 +57,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/impactimportfix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -247,17 +247,17 @@ if [ -n "$CAP_N" ] && [ "$CAP_N" -gt 40 ]; then
         && ok "cap: importers=$CAP_N over 40 → shown_importers=40 importers_capped=1 (default, disclosed)" \
         || no "cap: importers=$CAP_N but shown_importers=$CAP_S importers_capped=$CAP_C (expected 40 / 1)"
     ROWS_CAP="$( body "$OUT_CAP" | grep -oE '<f via="import"' | wc -l | tr -d ' ' )"
-    [ "$ROWS_CAP" = 40 ] && ok "cap: exactly 40 import rows printed" || no "cap: printed $ROWS_CAP import rows, expected 40"
+    if [ "$ROWS_CAP" = 40 ]; then ok "cap: exactly 40 import rows printed"; else no "cap: printed $ROWS_CAP import rows, expected 40"; fi
 else
     no "cap arm inert: --impact=IngestResult on this repo reported importers='$CAP_N', so the >40 case was never exercised"
 fi
 
 # ── #10 determinism + well-formedness ─────────────────────────────────────────────────────────────────
 A="$( i Widget )"; B="$( i Widget )"
-[ "$A" = "$B" ] && ok "determinism: --impact=Widget byte-identical run-to-run" || no "non-deterministic --impact output"
+if [ "$A" = "$B" ]; then ok "determinism: --impact=Widget byte-identical run-to-run"; else no "non-deterministic --impact output"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$OUT_W" | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"
-    printf '%s' "$COL"   | xmllint --noout - 2>/dev/null && ok "xml well-formed (columnar)" || no "xml malformed (columnar)"
+    if printf '%s' "$OUT_W" | xmllint --noout - 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
+    if printf '%s' "$COL"   | xmllint --noout - 2>/dev/null; then ok "xml well-formed (columnar)"; else no "xml malformed (columnar)"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

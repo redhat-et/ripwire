@@ -13,6 +13,7 @@
 
 #include "model.h"
 #include "mention.h"   // kMentionTopGapStep / kMentionMaxSymbolsPerFile — the ONE slot-ladder vocabulary
+#include "infra/emit.h"          // rw::emitTo — a malformed/out-of-range RIPWIRE_SIBLIFT is REPORTED on stderr in every build flavour: a rejected user value is config feedback, not a degrade path (DEGRADED_PATH_ALERT compiles out under NDEBUG, so a Release binary would have gone silent again)
 #include <algorithm>
 #include <cstdlib>
 #include <string_view>
@@ -24,7 +25,22 @@ namespace rw
 inline constexpr std::size_t kSibliftMaxSeed = 4;   // env values outside [1, kSibliftMax*] mean OFF, never a clamp-and-guess
 inline constexpr std::size_t kSibliftMaxSib  = 4;
 
-// parse "<seedFiles>,<sibPerSeed>" — returns (0,0) = off for anything malformed or out of range.
+// The parse, unchanged in every numeric outcome — split out so sibliftParams() (below) can tell "env
+// unset" (silent — this feature has no default) apart from "env SET but rejected" (a config problem,
+// disclosed). The grammar itself is mention.h's parseCappedCsvPair, shared with expand.h/filepool.h.
+inline std::pair<std::size_t, std::size_t> sibliftParamsParse( std::string_view s )
+{
+    const auto [ seed, sib ] = parseCappedCsvPair( s, kSibliftMaxSeed, kSibliftMaxSib );
+    if( seed < 1 || sib < 1 ) { return { 0, 0 }; }
+    return { seed, sib };
+}
+
+// parse "<seedFiles>,<sibPerSeed>" — returns (0,0) = off for anything malformed or out of range. The
+// defect this closes: an env value that fails to parse used to return (0,0) exactly like the env being
+// unset, so a typo'd RIPWIRE_SIBLIFT silently ran the tool with NO lift and no way to tell that apart
+// from "the lift was never asked for". Env SET + rejected is a recoverable config problem (CONTRIBUTING
+// §3's degrade shape: clamp/fall back and say so), not the unset case, which stays wordless on purpose —
+// this experiment has no on-by-default behavior to be silent ABOUT.
 inline std::pair<std::size_t, std::size_t> sibliftParams()
 {
     const char* env = std::getenv( "RIPWIRE_SIBLIFT" );
@@ -32,31 +48,22 @@ inline std::pair<std::size_t, std::size_t> sibliftParams()
     {
         return { 0, 0 };
     }
-    const std::string_view s( env );
-    const std::size_t comma = s.find( ',' );
-    if( comma == std::string_view::npos || comma == 0 || comma + 1 >= s.size() )
+    const auto [ seed, sib ] = sibliftParamsParse( std::string_view( env ) );
+    if( seed == 0 || sib == 0 )
     {
-        return { 0, 0 };
-    }
-    std::size_t seed = 0, sib = 0;
-    for( const char c : s.substr( 0, comma ) )
-    {
-        if( c < '0' || c > '9' ) { return { 0, 0 }; }
-        seed = seed * 10 + std::size_t( c - '0' );
-        if( seed > 99 ) { break; }
-    }
-    for( const char c : s.substr( comma + 1 ) )
-    {
-        if( c < '0' || c > '9' ) { return { 0, 0 }; }
-        sib = sib * 10 + std::size_t( c - '0' );
-        if( sib > 99 ) { break; }
-    }
-    if( seed < 1 || seed > kSibliftMaxSeed || sib < 1 || sib > kSibliftMaxSib )
-    {
-        return { 0, 0 };
+        rw::emitTo( stderr, "ripwire: RIPWIRE_SIBLIFT is set but malformed or out of range (want \"<seedFiles 1-4>,<sibPerSeed 1-4>\") — sibling lift OFF\n" );
     }
     return { seed, sib };
 }
+
+// What a successful lift actually moved — populated only when applySiblingLift returns true, so a caller
+// can disclose the fact (never a total equal to the shown count; absence means the lift was never asked
+// for, or asked for and moved nothing).
+struct SibliftLiftInfo
+{
+    std::uint32_t fileCount   = 0;   // sibling files with at least one symbol actually promoted
+    std::uint32_t symbolCount = 0;   // symbols whose score actually rose
+};
 
 namespace siblift_detail
 {
@@ -67,8 +74,11 @@ inline std::string_view dirOf( std::string_view path ) noexcept
 }
 } // namespace siblift_detail
 
-// Apply the lift to lensRank (size == ing.symbols.size()). Returns true if anything moved.
-inline bool applySiblingLift( const IngestResult& ing, std::vector<float>& lensRank, std::size_t seedFiles, std::size_t sibPerSeed )
+// Apply the lift to lensRank (size == ing.symbols.size()). Returns true if anything moved; `info`, when
+// non-null, is populated with what moved so the caller can disclose it (absent unless the lift actually
+// promoted something — a lift that fired but changed nothing costs zero disclosure bytes).
+inline bool applySiblingLift( const IngestResult& ing, std::vector<float>& lensRank, std::size_t seedFiles, std::size_t sibPerSeed,
+                              SibliftLiftInfo* info = nullptr )
 {
     using namespace siblift_detail;
     if( seedFiles == 0 || sibPerSeed == 0 || lensRank.size() != ing.symbols.size() || lensRank.empty() )
@@ -134,23 +144,15 @@ inline bool applySiblingLift( const IngestResult& ing, std::vector<float>& lensR
     bool moved = false;
     for( std::size_t i = 0; i < lifted.size(); ++i )
     {
-        const float slot = topScore * ( 1.0f - kMentionTopGapStep * float( i + 1 ) );
-        std::vector<std::pair<float, NodeId>> symbols;   // (existing score, id) of the sibling's symbols
-        for( std::size_t k = 0; k < ing.symbols.size(); ++k )
+        const float          slot     = topScore * ( 1.0f - kMentionTopGapStep * float( i + 1 ) );
+        const std::uint32_t  promoted = promoteFileSymbolsToSlot( ing, lensRank, lifted[i], slot );
+        if( promoted > 0 )
         {
-            if( ing.symbols[k].fileId == lifted[i] && lensRank[k] > 0.f )
+            moved = true;
+            if( info )
             {
-                symbols.emplace_back( lensRank[k], NodeId( k ) );
-            }
-        }
-        std::sort( symbols.begin(), symbols.end(), []( const auto& a, const auto& b )
-                   { return a.first != b.first ? a.first > b.first : a.second < b.second; } );
-        for( std::size_t k = 0; k < symbols.size() && k < kMentionMaxSymbolsPerFile; ++k )
-        {
-            if( slot > lensRank[ symbols[k].second ] )
-            {
-                lensRank[ symbols[k].second ] = slot;
-                moved = true;
+                info->symbolCount += promoted;
+                ++info->fileCount;
             }
         }
     }

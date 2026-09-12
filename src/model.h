@@ -98,16 +98,22 @@ inline const char* symTag( SymKind k ) noexcept
 // clamp into the identical Unknown-bucket headroom in serialize.h, zero renumbering of Cpp..Yaml.
 // UNLIKE Json/Toml/Yaml these two are CODE languages with real call graphs — they are simply the next
 // two free indexes, and APPENDING (never inserting) is what keeps every on-disk cache key stable.
-enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml, Php, Lua, Elixir };
+// Dart (21) is appended AFTER Elixir for the SAME reason an EIGHTH time (test/dartcheck.sh).
+// Kotlin (22) is appended AFTER Dart for a NINTH time: it clamps into the identical Unknown-bucket
+// headroom in serialize.h, zero renumbering of Cpp..Dart. A CODE language with a real call graph,
+// JVM-bridged to Java via graph.h's langCompatible (mirroring the existing Cpp<->ObjC and Cpp<->C
+// bridges) so a mixed Kotlin+Java module (the Android norm) resolves calls across the language
+// boundary instead of dropping every one of them as unresolved.
+enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml, Php, Lua, Elixir, Dart, Kotlin };
 // The number of Lang enumerators. MUST stay ( last enumerator + 1 ): any per-language array sized by
 // a LITERAL silently drops the tail when a language is appended, and the drop is invisible because
 // the affected code paths just see a zero. That happened: nonlocalstate.h's filesByLang was a
 // hardcoded 16 while Php(18), Lua(19) and Elixir(20) existed, so --nonlocal-state never disclosed
 // those three as unanalyzed even though kUnanalyzedLangs listed Php and Lua. Size per-language
 // arrays with this, never with a number.
-inline constexpr std::size_t kLangCount = static_cast<std::size_t>( Lang::Elixir ) + 1;
+inline constexpr std::size_t kLangCount = static_cast<std::size_t>( Lang::Kotlin ) + 1;
 
-// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua|ex").
+// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua|ex|dart|kt").
 // The canonical home for this switch: previously duplicated privately in htmlexport.h, moved here so a THIRD
 // caller (naming-consistency's per-language vote groups) reuses it instead of growing a second copy.
 /// Return the stable short output label for a language, or "?" for an unknown value.
@@ -135,6 +141,8 @@ inline const char* langTag( Lang l ) noexcept
         case Lang::Php:        return "php";
         case Lang::Lua:        return "lua";
         case Lang::Elixir:     return "ex";
+        case Lang::Dart:       return "dart";
+        case Lang::Kotlin:     return "kt";
         default:               return "?";
     }
 }
@@ -349,6 +357,13 @@ struct Symbol
     // signal is the other half, and filter.h::isTestSymbol is the ONE predicate that ORs them — every
     // symbol-keyed consumer of the test partition must route through it so the two halves cannot drift.
     std::uint8_t  testScope     = 0;
+    // EXTENT HONESTY (src/extentsuspect.h, gate test/extentcheck.sh): the containment rules this def's extent,
+    // scope or recovered kind FAILED, as extent::kSuspect* bits (name/head/scope/error); 0 ⇒ every rule held.
+    // Computed at LOAD from facts the cache already carries (the extents, the name byte, the `recovered`
+    // extraction bit), in ingest_model.h::markExtentSuspects — never persisted itself, so a rule change needs no
+    // parser bump. Rows stay; surfaces DISCLOSE it as extent_suspect="name,head,scope,error" and --hotspots keeps
+    // a flagged def's complexity out of its ranking. Takes the last free pad byte (the static_assert below holds).
+    std::uint8_t  extentSuspect = 0;
     std::string   name;                // final identifier segment
     std::string   scope;               // enclosing class/namespace name (C++), for canonical scope::name resolution; "" if none
 };
@@ -388,6 +403,25 @@ struct Symbol
 static_assert( sizeof( Symbol ) == 64 + 2 * sizeof( std::string ),
                "Symbol size changed — verify the new field uses the smallest type + is grouped (SoA); see model.h" );
 
+// Is this symbol a DEFINITION rather than a forward DECLARATION? The house test is `endByte > sigEndByte` — a span that
+// runs past its signature owns a body — and every consumer that must tell the two apart routes through here: graph.h's
+// decl/def collapse, canonByName and declToDefFollowThrough; lexical.h's def-over-decl tiebreak; situ.h's decl/def
+// partner pass. Kotlin breaks the house test for TYPES, which PR #126 found and fixed in graph.h's collapse (a
+// CodeRabbit review finding): the language has no forward declarations, so `data class User(val name: String)`,
+// `class Token`, `interface Marker` and `object Empty` are complete definitions that simply own no class_body, and read
+// as declarations each was collapsed away whenever a same-named type with a body existed (a Java `User` in another
+// directory included). queries/kotlin/tags.scm tags every Kotlin type @definition.class, so SymKind::Class is the kind
+// that fires today; Struct and Interface are listed so a finer tag cannot quietly reopen the collapse. A bodyless Kotlin
+// FUNCTION stays a declaration: an interface member or an `abstract fun` really is a contract whose body lives in an
+// override. Consumers that MEASURE or SERVE a body (clones, complexity, --readability units, lexical.h's route anchor)
+// keep the plain span test: a class with no body is a definition, but it has no volume. Gate: test/kotlincheck.sh §11
+// (the PR's bodyless interface) and §13.
+inline bool isDefinitionNotDeclaration( const Symbol& s ) noexcept
+{
+    const bool kotlinType = s.lang == Lang::Kotlin && ( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface );
+    return s.endByte > s.sigEndByte || kotlinType;
+}
+
 // local-variable-indexing plan Phase 1 MVP scope (docs/LOCALS_INDEXING.md): C/C++ only — highest
 // locals/function ratio in the survey (5-15/fn vs 3:1 Python, 0.2-0.8 Go/Rust) and `locals` is threaded
 // through ingest.cpp's ALREADY C-family-only large-function/deep-nesting complexity walk, so this extends
@@ -401,19 +435,25 @@ inline bool localsCountedLang( Lang lang ) noexcept
     return lang == Lang::Cpp || lang == Lang::C;
 }
 
-// Essential-complexity coverage: 12 of the 15 CODE languages — every one EXCEPT Bash, PHP and Lua.
-// Bash (the essential-complexity design note, §3.2.8: `break N`/`continue N` take a numeric level count, `exit` and
-// `trap` are process-level, and function boundaries are weak — not worth a wrong number). PHP and Lua are
-// out for the language-port round's own reason and it is a DISCLOSED NON-GOAL, not an oversight: ev's
-// per-construct weights must mirror isDecisionType exactly (the ev <= cx containment below depends on it),
-// and neither language's exit vocabulary was measured in that round — PHP adds `goto`, `exit`/`die` as
-// expression-position process exits and `match` arms; Lua has `repeat … until`, `goto`, and NO `continue`
-// at all. cx/ccx/nest ARE emitted for both (the shared walk covers their node kinds); only ev is withheld,
-// so the reading is "not measured", never "measured zero". Markdown/Json/Toml/
-// Yaml/Unknown never carry a cx row, so listing them here would be vacuous either way. ANY consumer asking
-// whether Symbol::ev/evWhy can be trusted for a def — serialize.h's two emitters, ensemble.h's
-// annotation — MUST route through this ONE predicate, for localsCountedLang's reason: the covered set
-// must never drift between the emitter and any future consumer.
+// Essential-complexity coverage: 12 of the 18 CODE languages — every one EXCEPT Bash, PHP, Lua, Elixir, Dart and
+// Kotlin (Elixir and Dart landed without joining it, so their ev is withheld the same way). Bash (the
+// essential-complexity design note, §3.2.8: `break N`/`continue N` take a numeric
+// level count, `exit` and `trap` are process-level, and function boundaries are weak — not worth a
+// wrong number). PHP and Lua are out for the language-port round's own reason and it is a DISCLOSED
+// NON-GOAL, not an oversight: ev's per-construct weights must mirror isDecisionType exactly (the ev
+// <= cx containment below depends on it), and neither language's exit vocabulary was measured in
+// that round — PHP adds `goto`, `exit`/`die` as expression-position process exits and `match` arms;
+// Lua has `repeat … until`, `goto`, and NO `continue` at all. Kotlin joins them for the SAME reason:
+// its decision vocabulary — `when` (pattern-match, not a switch), the elvis operator `?:`, `!!`
+// non-null assertion as an implicit-throw exit, and `suspend`-function early-return/cancellation
+// shapes — is not yet checked against isDecisionType, so ev would either double-count `when` arms
+// against `if`-chain weights or silently omit the elvis/`!!` exits, either way an unmeasured number
+// presented as measured. cx/ccx/nest ARE emitted for Kotlin (the shared walk covers `when`, `try`,
+// loops); only ev is withheld, so the reading is "not measured", never "measured zero". Markdown/
+// Json/Toml/Yaml/Unknown never carry a cx row, so listing them here would be vacuous either way. ANY
+// consumer asking whether Symbol::ev/evWhy can be trusted for a def — serialize.h's two emitters,
+// ensemble.h's annotation — MUST route through this ONE predicate, for localsCountedLang's reason:
+// the covered set must never drift between the emitter and any future consumer.
 inline bool evCountedLang( Lang lang ) noexcept
 {
     return    lang == Lang::Cpp  || lang == Lang::C     || lang == Lang::ObjC || lang == Lang::Python
@@ -839,6 +879,29 @@ struct CrawlSkips
     std::uint64_t             ignoredFiles    = 0;  // EXACT count (rows may be fewer)
     std::uint64_t             ignoredDirs     = 0;  // subtrees pruned by git's ignore rules: contents NEVER enumerated
     IgnoreMode                ignoreMode      = IgnoreMode::Unavailable;   // NOT-ASKED is the honest default
+
+    // The one PARSE-time class in this taxonomy: files the crawl INDEXED (they keep their fileId and stay inside files=
+    // and unmeasured=) that a pre-parse nesting guard then refused, so they contribute no symbols. Today only the Kotlin
+    // string-template guard rows its refusals (ingest.h kMaxKotlinStringNestDepth); the json/yaml/markdown guards are
+    // counted in unmeasured= alone. Filled after the parse pool, never by the walk, and NOT part of the accounting
+    // invariant's drop classes — a refused file is already inside indexed=.
+    std::vector<SkippedFile>  nestRefused;          // capped rows, path-sorted
+    std::uint64_t             nestRefusedFiles = 0; // EXACT count (rows may be fewer)
+
+    // §SEC1 — files the crawl REFUSED because a symlink took them out of the root they were crawled under
+    // (ingest.h's crawl-boundary rule; darkflags.h's CMake walk applies the same rule to its own harvest).
+    // A class of its own, and tested FIRST, because none of the classes above can carry it honestly: this is
+    // not a language this build cannot read, not something the user asked to hide, and not something the
+    // repository declared uninteresting — it is content this tool declined to disclose. Folding it into
+    // `unsupported` would be actively wrong: grep's aux scan READS that population, which is exactly how the
+    // fifth serving channel stayed open (test/crawlescapecheck.sh arm 5).
+    //
+    // The rows carry bytes=0 as the NOT-MEASURED sentinel the ignored-dir rows already use, deliberately: a
+    // size would have to come from `file_size()` on the link, which follows it, and handing back the size of
+    // a file we just declined to read gives away a piece of what the refusal withheld. The path is the
+    // IN-ROOT link, never the target, for the same reason.
+    std::vector<SkippedFile>  escaped;              // capped rows, path-sorted (bytes 0 = not measured)
+    std::uint64_t             escapedFiles    = 0;  // EXACT count (rows may be fewer)
 };
 
 // §L1 — PARSE HEALTH: a per-indexed-file record of how much of the file the parser actually understood,
@@ -860,10 +923,15 @@ struct CrawlSkips
 // a disclosure that evaporates on the warm run is worse than none.
 struct FileHealth
 {
-    std::uint32_t errNodes  = 0;   // ERROR + MISSING nodes in the file's parse tree
-    std::uint32_t errBytes  = 0;   // bytes covered by the TOP-MOST ERROR nodes (MISSING is zero-width)
+    std::uint32_t errNodes  = 0;   // ERROR + MISSING nodes in the file's parse tree, plus invalid UTF-8
+                                    // sequences found in the leading sample (see measureFileHealth)
+    std::uint32_t errBytes  = 0;   // bytes covered by the TOP-MOST ERROR nodes (MISSING is zero-width);
+                                    // one byte per invalid UTF-8 sequence start, same caveat as errNodes
     std::uint32_t fileBytes = 0;   // the parsed byte length; 0 ⇒ NOT MEASURED (see above)
     std::uint32_t wsBytes   = 0;   // whitespace bytes in the leading min(fileBytes, 4096) sample
+    std::uint32_t macroBlanked = 0;   // member-macro re-parse (src/macroreparse.h): invocations blanked for the ADOPTED
+                                      // parse this file's symbols came from; 0 ⇒ the first parse was kept. errNodes and
+                                      // errBytes above always describe the parse extraction actually read.
 };
 
 // Output of ingestion. Deterministic: files sorted lexicographically, symbol ids assigned
@@ -960,6 +1028,19 @@ inline bool fileParseDegraded( const IngestResult& ing, std::size_t fileIndex ) 
     return fileIndex < ing.fileHealth.size()
         && ing.fileHealth[ fileIndex ].fileBytes > 0
         && ing.fileHealth[ fileIndex ].errNodes  > 0;
+}
+
+// The member-macro re-parse's ONE per-file predicate (src/macroreparse.h): this file's symbols come from a re-parse with
+// member macro invocations blanked. The skipped verb rows it (why=macro-blanked); every count below is of this.
+inline bool isMacroBlankedHealth( const FileHealth& health ) noexcept
+{
+    return health.macroBlanked > 0;
+}
+
+// ...and its corpus count: macro_blanked_files= on the map and --json headers (the skipped verb's root counts the same rows).
+inline std::size_t macroBlankedFileCount( const IngestResult& ing ) noexcept
+{
+    return std::size_t( std::ranges::count_if( ing.fileHealth, isMacroBlankedHealth ) );
 }
 
 // The macro-edges round's honesty post-pass: a call-SHAPED reference (bare name, no receiver, no explicit

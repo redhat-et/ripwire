@@ -24,7 +24,7 @@ command -v python3 >/dev/null 2>&1 || { echo "toolcallroutecheck: python3 is req
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 # ---- sandbox: a `ripwire` on PATH pointing at BIN (the hook shells out to the bare name), and a
@@ -111,7 +111,7 @@ for i in 1 2 3 4; do
 done
 [ -n "${CAPOUT[1]}" ] && [ -n "${CAPOUT[2]}" ] && [ -n "${CAPOUT[3]}" ] \
     && ok "cap: calls 1-3 in a session recommend" || no "cap: an early call in the session did not recommend"
-[ -z "${CAPOUT[4]}" ] && ok "cap: the 4th call in the session injects nothing" || no "cap: the 4th call still injected: ${CAPOUT[4]}"
+if [ -z "${CAPOUT[4]}" ]; then ok "cap: the 4th call in the session injects nothing"; else no "cap: the 4th call still injected: ${CAPOUT[4]}"; fi
 tail -n1 "$LOG" | jq -e '.status == "abstain" and .reason == "cap"' >/dev/null 2>&1 \
     && ok "cap: the 4th call's logged row carries status=abstain reason=cap" \
     || no "cap: 4th row wrong -- $( tail -n1 "$LOG" )"
@@ -125,7 +125,7 @@ tail -n1 "$LOG" | jq -e '.status == "abstain" and .reason == "cap"' >/dev/null 2
 export RIPWIRE_METER_ARM=control
 COUT="$( run_hook Bash "$( jq -cn '{command:"grep -rn controlPattern src/"}' )" "control-session-1" )"
 unset RIPWIRE_METER_ARM
-[ -z "$COUT" ] && ok "control arm: injects nothing" || no "control arm: injected anyway -- $COUT"
+if [ -z "$COUT" ]; then ok "control arm: injects nothing"; else no "control arm: injected anyway -- $COUT"; fi
 tail -n1 "$LOG" | jq -e '.status == "recommend" and .arm == "control" and .recommended == "--grep"' >/dev/null 2>&1 \
     && ok "control arm: still logs the recommend decision (status/arm/recommended all correct)" \
     || no "control arm: logged row wrong -- $( tail -n1 "$LOG" )"

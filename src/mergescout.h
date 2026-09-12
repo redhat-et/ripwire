@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // mergescout.h — L1: --merge-scout=REF[,REF...], the read-only
 // cross-branch overlap oracle. Evidence: a 2026-07-14 round hand-computed a landing order for 5
@@ -154,7 +157,6 @@ struct SymTreeIndex
 // bodyHashesBySym already skipped — no file is ever double-counted between the two lanes.
 inline void injectFileLevelFallback( SymTreeIndex& out, const IngestResult& ing, std::string_view root, const SymbolsByFile& realBodySyms )
 {
-    std::string bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
         if( f < realBodySyms.size() && !realBodySyms[f].empty() )
@@ -166,7 +168,8 @@ inline void injectFileLevelFallback( SymTreeIndex& out, const IngestResult& ing,
         // --quality-delta reported the two as a 320-token clone the moment the quality-side copy was
         // extracted. Unreadable or empty degrades the same way in both: contributes nothing, never crashes,
         // and nothing is hidden because there is no content to hide.
-        if( !docparse::detail::readWholeFile( ing.files[f], bytes ) || bytes.empty() )
+        const std::string bytes = docparse::detail::readWholeFile( ing.files[f] ).value_or( std::string() );
+        if( bytes.empty() )
         {
             continue;
         }
@@ -199,7 +202,7 @@ inline SymTreeIndex buildTreeIndex( const IngestResult& ing, std::string_view ro
 }
 
 // Y1 (P1) — the per-sha committish INGEST cache family. `committish` is always a fully-resolved
-// commit sha by the time it reaches here (resolveCommittish / merge-base already peeled any symbolic
+// commit sha by the time it reaches here (resolveAllRefs / merge-base already peeled any symbolic
 // ref), so its tree is immutable — the SAME per-sha cache convention quality.h uses for its own
 // qheadsnap/qbody families (shaKeyedCachePath + a real cacheFile handed to ingest()), but its OWN "qms"
 // family so a multi-arm scout run's ~2*refCount+1 distinct trees don't thrash quality.h's own 2-slot
@@ -289,14 +292,6 @@ inline std::vector<ChangedSym> diffTreeIndex( const SymTreeIndex& base, const Sy
     return out;   // already key-sorted (built from the sorted `keys` vector)
 }
 
-// Resolve REF to a commit sha via `git rev-parse --verify --quiet REF^{commit}` (the ^{commit} peel
-// rejects anything that isn't a committish — a blob/tree hash, a malformed ref). "" ⇒ unresolvable, the
-// caller's loud-refusal gate. Mirrors gitmine.h's resolveSinceScope rev probe.
-inline std::string resolveCommittish( const std::string& root, std::string_view ref )
-{
-    return quality::gitOneLine( root, "rev-parse --verify --quiet " + shSingleQuote( std::string( ref ) + "^{commit}" ) + " 2>/dev/null" );
-}
-
 // Split "A,B,C" on commas, dropping empty tokens — the same primitive workspace.h's segmentsOf uses for
 // path segments, reused here with ',' instead of hand-rolling a second copy of the same loop.
 inline std::vector<std::string_view> splitRefs( std::string_view csv )
@@ -341,7 +336,7 @@ class TreeIndexMemo
 public:
     TreeIndexMemo( const std::string& root, const std::vector<std::string>& excludes, std::size_t maxFileBytes )
         : root_( root ), excludes_( excludes ), maxFileBytes_( maxFileBytes ),
-          repoHex_( quality::headSnapRepoHex( root ) ), exclHex_( msExclHex( excludes ) ) {}
+          repoHex_( quality::cacheRootKeyHex( root ) ), exclHex_( msExclHex( excludes ) ) {}
 
     // Register one future get(sha) BEFORE the diff loop runs — see the class comment above.
     void reserve( const std::string& sha ) { ++pending_[ sha ]; }
@@ -374,6 +369,12 @@ private:
 
 // Resolve + validate EVERY ref BEFORE any archive work — a bad ref is a loud refusal, never a partial/
 // empty arm silently buried in otherwise-good output. Empty `badRef` (2nd of the pair) on success.
+//
+// Every ref resolves through quality::gitResolveCommitSha, the one resolver a user-supplied revision goes through: a
+// ref beginning with '-' never reaches git, and rev-parse's answer counts only when it is a bare object name. The
+// second half is not hypothetical here — `rev-parse --verify --quiet '^REF^{commit}'` answers `^<sha>` at rc 0, and
+// the raw read this replaced took that as resolved and handed the negation to `git merge-base`, so the verb printed
+// an empty ok="0" arm at exit 0 where this refusal belongs (test/mergescoutcheck.sh, the `nonbare` rows).
 inline std::pair<std::vector<std::string>, std::string> resolveAllRefs( const std::string& root, const std::vector<std::string_view>& refs )
 {
     std::vector<std::string> shas( refs.size() );
@@ -383,7 +384,7 @@ inline std::pair<std::vector<std::string>, std::string> resolveAllRefs( const st
         {
             return { {}, std::string( refs[i] ) }; // reserved — collides with the implicit arm
         }
-        shas[i] = resolveCommittish( root, refs[i] );
+        shas[i] = quality::gitResolveCommitSha( root, std::string( refs[i] ) );
         if( shas[i].empty() )
         {
             return { {}, std::string( refs[i] ) };
@@ -716,11 +717,11 @@ inline void writeSymRows( std::FILE* out, const char* tag, const std::vector<Cha
         // whole-file content diff, not a symbol attribution. Ordinary rows are byte-identical to before.
         if( s.fileLevel )
         {
-            std::fprintf( out, "<%s p=\"%s\" id=\"%s\" anchoring=\"file-level\"/>", tag, ex( s.file ).c_str(), ex( s.id ).c_str() );
+            rw::emitTo( out, "<{} p=\"{}\" id=\"{}\" anchoring=\"file-level\"/>", tag, ex( s.file ).c_str(), ex( s.id ).c_str() );
         }
         else
         {
-            std::fprintf( out, "<%s p=\"%s\" id=\"%s\"/>", tag, ex( s.file ).c_str(), ex( s.id ).c_str() );
+            rw::emitTo( out, "<{} p=\"{}\" id=\"{}\"/>", tag, ex( s.file ).c_str(), ex( s.id ).c_str() );
         }
     }
 }
@@ -730,7 +731,7 @@ inline void writeScoutArm( std::FILE* out, const Arm& arm, const XmlEscaper& ex 
     // §A10.4: base= is display-only here — 9-hex-char width, matching the at=/head= convention
     // (gitstamp.h) every other sha-bearing attribute in the tool uses. arm.baseSha itself stays full-length
     // (it is still used as a TreeIndexMemo key elsewhere); only the printed attribute is truncated.
-    std::fprintf( out, "<arm ref=\"%s\" base=\"%s\" ok=\"%d\" changed=\"%zu\" head_conflicts=\"%zu\">",
+    rw::emitTo( out, "<arm ref=\"{}\" base=\"{}\" ok=\"{}\" changed=\"{}\" head_conflicts=\"{}\">",
                   ex( arm.ref ).c_str(), ex( arm.baseSha.substr( 0, 9 ) ).c_str(), arm.ok ? 1 : 0, arm.changed.size(), arm.headConflicts.size() );
     // §P11.13: a changed="0" arm has no divergent work to LAND — it used to get a landing slot anyway
     // (landingOrder() below drops it now, see there), with nothing on this row saying why it's absent from
@@ -745,28 +746,28 @@ inline void writeScoutArm( std::FILE* out, const Arm& arm, const XmlEscaper& ex 
     // compared; DEGRADED_PATH_ALERT already says so on stderr, but nothing said so in-band before this.
     if( arm.changed.empty() && arm.ok )
     {
-        std::fprintf( out, "<no-work note=\"no divergent work vs merge-base — see --stray-content\"/>" );
+        rw::emitRaw( out, "<no-work note=\"no divergent work vs merge-base — see --stray-content\"/>" );
     }
     writeSymRows( out, "sym", arm.changed, ex );
 
     // r26: the live line changed these too, while this arm sat unmerged — a merge fight no pairwise ARM
     // comparison can see (HEAD is not an arm). Listed after the <sym> rows, never mixed into them.
     writeSymRows( out, "head-conflict", arm.headConflicts, ex );
-    std::fprintf( out, "</arm>" );
+    rw::emitRaw( out, "</arm>" );
 }
 
 inline void writeScoutPair( std::FILE* out, const std::vector<Arm>& arms, const PairOverlap& p, const XmlEscaper& ex )
 {
-    std::fprintf( out, "<pair a=\"%s\" b=\"%s\" conflicts=\"%zu\" risks=\"%zu\"",
+    rw::emitTo( out, "<pair a=\"{}\" b=\"{}\" conflicts=\"{}\" risks=\"{}\"",
                   ex( arms[ p.a ].ref ).c_str(), ex( arms[ p.b ].ref ).c_str(), p.conflicts.size(), p.risks.size() );
-    if( p.conflicts.empty() && p.risks.empty() ) { std::fprintf( out, "/>" ); return; }
-    std::fprintf( out, ">" );
+    if( p.conflicts.empty() && p.risks.empty() ) { rw::emitRaw( out, "/>" ); return; }
+    rw::emitRaw( out, ">" );
     writeSymRows( out, "conflict", p.conflicts, ex );
     for( const RiskPair& r : p.risks )
     {
-        std::fprintf( out, "<risk p=\"%s\" a=\"%s\" b=\"%s\"/>", ex( r.a.file ).c_str(), ex( r.a.id ).c_str(), ex( r.b.id ).c_str() );
+        rw::emitTo( out, "<risk p=\"{}\" a=\"{}\" b=\"{}\"/>", ex( r.a.file ).c_str(), ex( r.a.id ).c_str(), ex( r.b.id ).c_str() );
     }
-    std::fprintf( out, "</pair>" );
+    rw::emitRaw( out, "</pair>" );
 }
 
 inline void writeScoutLanding( std::FILE* out, const std::vector<Arm>& arms, const std::vector<PairOverlap>& pairs, const XmlEscaper& ex )
@@ -785,7 +786,7 @@ inline void writeScoutLanding( std::FILE* out, const std::vector<Arm>& arms, con
         }
         joined += arms[order[idx]].ref;
     }
-    std::fprintf( out, "<landing order=\"%s\"/>", ex( joined ).c_str() );
+    rw::emitTo( out, "<landing order=\"{}\"/>", ex( joined ).c_str() );
 }
 
 inline void writeMergeScout( std::FILE* out, const ScoutResult& result )
@@ -795,7 +796,7 @@ inline void writeMergeScout( std::FILE* out, const ScoutResult& result )
 
     // G4: an XML comment may not contain a double hyphen, so this text names flags and attributes WITHOUT
     // their leading dashes (the same constraint crossref.h's own comments call out). Keep it that way.
-    std::fprintf( out, "<!-- ripwire merge-scout: read-only cross-branch overlap for %zu arm(s) — same-symbol change "
+    rw::emitTo( out, "<!-- ripwire merge-scout: read-only cross-branch overlap for {} arm(s) — same-symbol change "
                        "on two arms = conflict, same-file/different-symbol = textual risk. landing = "
                        "fewest-conflicts-first greedy (ties: ref name asc). Every tree is a git-archive TEMP COPY "
                        "(read-only); the real working tree/refs are never touched. ANCHORING: every arm is diffed "
@@ -816,7 +817,7 @@ inline void writeMergeScout( std::FILE* out, const ScoutResult& result )
     // elsewhere in this family) — at= is the NEW attribute, carrying the +dirty bit this verb already
     // computes (the `dirty` local above) but never disclosed.
     const std::string atAttrStr = result.atStamp.empty() ? std::string() : ( " at=\"" + result.atStamp + "\"" );
-    std::fprintf( out, "<merge-scout arms=\"%zu\" head=\"%.9s\"%s>", result.arms.size(), ex( result.headSha ).c_str(), atAttrStr.c_str() );
+    rw::emitTo( out, "<merge-scout arms=\"{}\" head=\"{:.9}\"{}>", result.arms.size(), ex( result.headSha ).c_str(), atAttrStr.c_str() );
 
     for( const Arm& arm : result.arms )
     {
@@ -831,7 +832,7 @@ inline void writeMergeScout( std::FILE* out, const ScoutResult& result )
 
     writeScoutLanding( out, result.arms, pairs, ex );
 
-    std::fprintf( out, "</merge-scout>" );
+    rw::emitRaw( out, "</merge-scout>" );
 }
 
 }}   // namespace rw::mergescout

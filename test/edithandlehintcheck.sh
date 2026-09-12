@@ -35,7 +35,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 
@@ -105,8 +105,8 @@ case "$NX" in
 esac
 if [ -n "$NX" ]; then
     case "$NX" in
-        --*) "$BIN" "$W1b" $NX >/dev/null 2>"$TMP/1b.nx.err" && ok "the printed next runs" || no "the printed next fails: $( head -1 "$TMP/1b.nx.err" )";;
-        *)   ( cd "$W1b" && sh -c "$NX" >/dev/null 2>&1 ) && ok "the printed run= recipe runs" || no "the printed run= recipe fails: $NX";;
+        --*) if "$BIN" "$W1b" $NX >/dev/null 2>"$TMP/1b.nx.err"; then ok "the printed next runs"; else no "the printed next fails: $( head -1 "$TMP/1b.nx.err" )"; fi;;
+        *)   if ( cd "$W1b" && sh -c "$NX" >/dev/null 2>&1 ); then ok "the printed run= recipe runs"; else no "the printed run= recipe fails: $NX"; fi;;
     esac
 fi
 grep -q '"tests_to_run"' "$TMP/1b.out" \

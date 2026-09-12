@@ -29,7 +29,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -503,7 +503,7 @@ assert g["text"] == disk, "region.text is not the bytes on disk:\n%r\n!=\n%r" % 
 assert g.get( "capped", False ) is False, "a 2-line edit's region must not be capped"
 print( "OK region %d..%d ctx=%d (%d bytes) == disk" % ( g["start"], g["end"], g["context"], len( g["text"] ) ) )
 PY
-[ $? -eq 0 ] && ok "(10) $( cat "$TMP/e2a.res" )" || no "(10) region: $( cat "$TMP/e2a.res" | tail -3 | tr '\n' ' ' )"
+if [ $? -eq 0 ]; then ok "(10) $( cat "$TMP/e2a.res" )"; else no "(10) region: $( cat "$TMP/e2a.res" | tail -3 | tr '\n' ' ' )"; fi
 WANT_SHA="$( cd "$TMP/w" && git hash-object geo.py )"
 GOT_SHA="$( jq_field blob_sha < "$TMP/r10.json" | tr -d '"' )"
 [ "$GOT_SHA" = "$WANT_SHA" ] && ok "(11) blob_sha == git hash-object of the written file ($GOT_SHA)" \
@@ -513,7 +513,7 @@ python3 -c 'import sys,json; r=json.load(open(sys.argv[1])); assert list(r).coun
     && [ "$NEXT" != "__ABSENT__" ] && ok "(12) the receipt carries exactly ONE next ($NEXT)" || no "(12) the receipt carries no single next (got $NEXT)"
 case "$NEXT" in --uses=geo.py:area_of_triangle) ok "(12) on a contract-change with broken callers next= is the uses verb on FILE:SYM";;
                 *) no "(12) next=$NEXT — the fixture is a contract-change with $EC_INCOMP incompatible callers; the rule says --uses=geo.py:area_of_triangle";; esac
-( cd "$TMP/w" && "$BIN" . $NEXT >/dev/null 2>&1 ) && ok "(12) the receipt's next= runs from the repo root" || no "(12) the receipt's next= does not run: $NEXT"
+if ( cd "$TMP/w" && "$BIN" . $NEXT >/dev/null 2>&1 ); then ok "(12) the receipt's next= runs from the repo root"; else no "(12) the receipt's next= does not run: $NEXT"; fi
 # the stderr line repeats the receipt's next and names NO other command: every --flag on it belongs to next=
 OTHER="$( grep -o -- ' --[a-z-]*' "$TMP/r10.err" | tr -d ' ' | grep -v -x -- "${NEXT%%=*}" | tr '\n' ' ' )"
 grep -q -- "$NEXT" "$TMP/r10.err" && [ -z "$OTHER" ] && ok "(12) the stderr line names that ONE next and no second command" \

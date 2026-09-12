@@ -37,7 +37,7 @@ CORPUS="$ROOT/test/extvetofix"
 CLEAN="$ROOT/test/lpinfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -122,7 +122,7 @@ grep -q '"external"' "$TMP/clean.json" && no '(I) "external" present in --json o
 cmp -s "$TMP/map.xml" "$TMP/map2.xml" && cmp -s "$TMP/c.tsv" "$TMP/c2.tsv" && ok "(J) map + census byte-identical across two runs" \
     || no "(J) map or census differs between two runs"
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/map.xml" 2>/dev/null && ok "(J) xmllint clean" || no "(J) xmllint rejected the map"
+    if xmllint --noout "$TMP/map.xml" 2>/dev/null; then ok "(J) xmllint clean"; else no "(J) xmllint rejected the map"; fi
 fi
 
 [ "$fail" = 0 ] && echo "externalvetocheck: PASS" || echo "externalvetocheck: FAIL"

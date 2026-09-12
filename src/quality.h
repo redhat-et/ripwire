@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // quality.h — --quality-baseline / --quality-delta: the deterministic oracle for a code-quality CONVERGENCE
 // LOOP. Snapshot the current per-symbol cognitive complexity, the duplicate-clone groups, and the dead-symbol
@@ -22,6 +25,7 @@
 #include "cloneidiom.h"         // idiom-class demotion — the closed 3-idiom shape classifier that turns an idiom-COLLISION clone group into a minor row instead of a gating one
 #include "lintrules.h"          // findErrorMasking — the built-in error-masking rule table (GitClear +47% kind)
 #include "arch.h"               // fnv1a64
+#include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — writeBaseline truncates, so its open must refuse a link atomically
 #include "gitmine.h"            // shSingleQuote + gitFileCommitCountsInDayWindow — short-horizon-churn window mining
 #include "docparse.h"           // docparse::detail::readWholeFile — THE canonical whole-file byte read (commentcoherence.h names it that); reused rather than re-rolled, see forEachSymbolBody
 #include "filter.h"             // B10.1a: isTestPath — the general test-dir convention behind isTestScriptPath
@@ -54,6 +58,7 @@
 #include <string>
 #include <type_traits>  // std::is_trivially_copyable_v — the qsnap POD put/get static_assert
 #include <utility>
+#include <span>          // mergeBuiltinsWithConfig — a non-owning view over either built-in list
 #include <vector>
 
 namespace rw
@@ -90,6 +95,19 @@ constexpr std::uint32_t   kMinorCcxDelta   = 3;    // complexity: delta < 3 → 
 constexpr std::uint32_t   kMinorLocDelta   = 10;   // verbosity:  delta < 10 LOC → minor
 constexpr std::uint32_t   kMinorParamDelta = 2;    // params:     +1 param → minor; +2 or more → major
 
+// Q-DIAL-3 (2026-09-10) — GROWTH IS A SIGNAL, and the bar alone was not one. `now > was && now > BAR` says
+// nothing about how much this change added: audit lane Q1 measured the median growth of a GATING complexity
+// row at 6% and of a gating verbosity row at 6% (§2d) — +3% on a function that was 1,068 lines before the
+// change gated, while 6 → 55 LOC (9x) and ccx 5 → 13 (+160%) were invisible because neither ends up over the
+// bar. Two thresholds fix both halves, and they apply to complexity and verbosity ONLY (params is the
+// highest-precision kind in the table at 77% and nesting has no measured false positive — neither is moved
+// on a hunch):
+constexpr std::uint32_t   kMaterialGrowthPct = 25;    // over the bar: gate on a bar CROSSING, or on growth >= this. Otherwise the row is real, reported, and sev="minor" — chronic debt the change did not create.
+constexpr std::uint32_t   kSubBarGrowthPct   = 100;   // UNDER the bar: a DOUBLING is worth a minor row rather than silence (synthetics S4b/S8) — never gating, because nothing is over the bar yet.
+// …with a floor so a 3 → 6 line helper is not a finding. Two thirds of the kind's own bar, so the floor moves
+// with the bar it belongs to and there is no third number to keep in sync: ccx 10, loc 40.
+inline constexpr std::uint32_t subBarGrowthFloor( std::uint32_t bar ) noexcept { return ( bar * 2 ) / 3; }
+
 // Signal-to-noise round — the per-finding ACK RATCHET sidecar (`--quality-ack[=REASON]`): each line records one
 // deliberately-accepted finding; --quality-delta suppresses it (honestly, via acked="N") until the finding
 // WORSENS past the acked magnitude, at which point it reappears. Committable, like the baseline sidecar.
@@ -122,7 +140,7 @@ inline std::string acksPath( const std::string& root )     { return rootQualifie
 // reader, no `RIPWIRE_CONFIG` constant). Smallest thing consistent with the two house sidecar
 // conventions already in the tree — `.ripwire_notes` (committed, degrade-don't-throw, absent=inert) and
 // `.ripwire_quality_acks` (root-qualified via rootQualifiedSidecar, never the process CWD): a committed,
-// human-editable key=value text file at the repo root. ONE recognized key today (readRegisterMacrosConfig
+// human-editable key=value text file at the repo root. TWO recognized keys today (readRegisterMacrosConfig
 // below); an unrecognized key is skipped rather than refused, so the file can grow new keys later without
 // a binary that predates them choking on it — notes.h's own forward-compat rule, restated here for a new
 // file rather than invented twice.
@@ -163,7 +181,7 @@ inline std::string baselineCanonId( const IngestResult& ing, NodeId i, std::stri
 struct Snapshot
 {
     gtl::btree_map<std::uint64_t, std::uint32_t> ccxBySym;    // hash(canonId) → MAX ccx (btree = sorted iteration for the byte-stable sidecar)
-    gtl::btree_map<std::uint64_t, std::uint32_t> locBySym;    // Q1 verbosity  — hash(canonId) → MAX physical LOC (the master variable, §1d)
+    gtl::btree_map<std::uint64_t, std::uint32_t> locBySym;    // Q1 verbosity  — hash(canonId) → MAX CODE lines (Q-DIAL-3: blank and comment-only lines are not debt; see codeLinesInBody). ALSO the r26 ORIGIN oracle, which reads MEMBERSHIP only, so the value change does not touch it.
     gtl::btree_map<std::uint64_t, std::uint32_t> nestBySym;   // Q1 erosion    — hash(canonId) → MAX control-nesting depth
     gtl::btree_map<std::uint64_t, std::uint32_t> paramsBySym; // Q1 erosion    — hash(canonId) → MAX parameter count
     gtl::btree_map<std::uint64_t, std::uint32_t> defsBySym;   // hash(canonId) → COUNT of definitions sharing the id (an overload set's CARDINALITY, deliberately NOT a MAX — see computeSnapshot)
@@ -321,10 +339,16 @@ inline bool isValidMacroToken( std::string_view token ) noexcept
 struct RegisterMacrosConfig
 {
     std::vector<std::string> names;              // valid register_macros=NAME tokens, sorted + deduped
-    std::vector<std::string> unrecognizedKeys;    // distinct non-"register_macros" keys seen, sorted + deduped
+    std::vector<std::string> vendoredPaths;      // Q-DIAL-5: vendored_paths=PATH[, PATH...] tokens, sorted + deduped
+    std::vector<std::string> unrecognizedKeys;    // distinct key seen that is neither of the two above, sorted + deduped
 };
+// NAME NOTE: this type and its reader are spelled for the FIRST key they carried, and they keep those names
+// on purpose — test/qschemetripcheck.sh's manifest keys the determinism guard on the function NAME
+// `readRegisterMacrosConfig`, so renaming it for tidiness would silently retire a guard. It is the
+// .ripwire_config reader; it reads two keys.
 
-// `.ripwire_config`'s ONE recognized key: `register_macros = NAME[, NAME...]`. Grammar: one directive per
+// `.ripwire_config`'s TWO recognized keys: `register_macros = NAME[, NAME...]` and, since 2026-09-10,
+// `vendored_paths = PATH[, PATH...]` (Q-DIAL-5 — code this repo carries but did not write). Grammar: one directive per
 // line, '#' full-line comments, blank lines ignored; a line with no '=' at all carries no key/value shape
 // this file defines anything for, so it is left alone rather than guessed at (same "never throws, never
 // guesses" posture as the malformed-token skip below). A line that DOES have that shape but whose key is
@@ -333,11 +357,44 @@ struct RegisterMacrosConfig
 // accepted. Absent/unreadable/empty file yields two empty lists — INERTNESS CONTRACT: no config file
 // changes nothing about this run's set of exempted names (kBuiltinRegisterMacros still applies), and an
 // unrecognized key is disclosed, never a refusal — a typo in an otherwise-inert config must not fail a run.
+// One directive's VALUE list: comma-separated tokens, each trimmed, each admitted by its key's own rule.
+// Hoisted out of the line loop so that loop stays readable (and under its bars) now that the file carries two
+// keys. A PATH is root-relative with no '..' segment and no leading '/'; anything else is a value this file's
+// grammar defines nothing for and is dropped rather than guessed at, the same posture the macro-token check
+// takes. Never throws, never warns: a malformed VALUE is inert, and only a malformed KEY is disclosed.
+inline void appendConfigValueTokens( std::string_view rest, bool isVendor, RegisterMacrosConfig& out )
+{
+    std::size_t start = 0;
+    while( start <= rest.size() )
+    {
+        const std::size_t comma = rest.find( ',', start );
+        std::string_view  tok( rest.data() + start, ( comma == std::string_view::npos ? rest.size() : comma ) - start );
+        while( !tok.empty() && ( tok.back()  == ' ' || tok.back()  == '\t' ) ) { tok.remove_suffix( 1 ); }
+        while( !tok.empty() && ( tok.front() == ' ' || tok.front() == '\t' ) ) { tok.remove_prefix( 1 ); }
+        if( isVendor )
+        {
+            if( !tok.empty() && tok.front() != '/' && tok.find( ".." ) == std::string_view::npos )
+            {
+                out.vendoredPaths.emplace_back( tok );
+            }
+        }
+        else if( isValidMacroToken( tok ) )
+        {
+            out.names.emplace_back( tok );
+        }
+        if( comma == std::string_view::npos )
+        {
+            break;
+        }
+        start = comma + 1;
+    }
+}
+
 inline RegisterMacrosConfig readRegisterMacrosConfig( std::string_view root )
 {
     RegisterMacrosConfig out;
-    std::string          text;
-    if( !docparse::detail::readWholeFile( configPath( root ), text ) || text.empty() )
+    const std::string    text = docparse::detail::readWholeFile( configPath( root ) ).value_or( std::string() );
+    if( text.empty() )
     {
         return out;   // absent/unreadable/empty — inert, never a refusal
     }
@@ -360,33 +417,20 @@ inline RegisterMacrosConfig readRegisterMacrosConfig( std::string_view root )
         }
         std::string_view key = line.substr( 0, eq );
         while( !key.empty() && ( key.back() == ' ' || key.back() == '\t' ) ) { key.remove_suffix( 1 ); }
-        constexpr std::string_view kKey = "register_macros";
-        if( key != kKey )
+        constexpr std::string_view kKey       = "register_macros";
+        constexpr std::string_view kVendorKey = "vendored_paths";   // Q-DIAL-5
+        const bool                 isVendor   = key == kVendorKey;
+        if( key != kKey && !isVendor )
         {
             out.unrecognizedKeys.emplace_back( key );   // F-13: disclosed, not skipped
             continue;
         }
-        std::string_view rest = line.substr( eq + 1 );
-        std::size_t      start = 0;
-        while( start <= rest.size() )
-        {
-            const std::size_t comma = rest.find( ',', start );
-            std::string_view  tok( rest.data() + start, ( comma == std::string_view::npos ? rest.size() : comma ) - start );
-            while( !tok.empty() && ( tok.back() == ' ' || tok.back() == '\t' ) ) { tok.remove_suffix( 1 ); }
-            while( !tok.empty() && ( tok.front() == ' ' || tok.front() == '\t' ) ) { tok.remove_prefix( 1 ); }
-            if( isValidMacroToken( tok ) )
-            {
-                out.names.emplace_back( tok );
-            }
-            if( comma == std::string_view::npos )
-            {
-                break;
-            }
-            start = comma + 1;
-        }
+        appendConfigValueTokens( line.substr( eq + 1 ), isVendor, out );
     }
     std::sort( out.names.begin(), out.names.end() );
     out.names.erase( std::unique( out.names.begin(), out.names.end() ), out.names.end() );
+    std::sort( out.vendoredPaths.begin(), out.vendoredPaths.end() );
+    out.vendoredPaths.erase( std::unique( out.vendoredPaths.begin(), out.vendoredPaths.end() ), out.vendoredPaths.end() );
     std::sort( out.unrecognizedKeys.begin(), out.unrecognizedKeys.end() );
     out.unrecognizedKeys.erase( std::unique( out.unrecognizedKeys.begin(), out.unrecognizedKeys.end() ), out.unrecognizedKeys.end() );
     return out;
@@ -394,16 +438,75 @@ inline RegisterMacrosConfig readRegisterMacrosConfig( std::string_view root )
 
 // The combined, sorted, deduped registered-macro name list for ONE run: the built-ins above plus whatever
 // .ripwire_config's register_macros= adds. Sorted so nothing downstream needs its own re-sort.
+// The ONE shape both .ripwire_config consumers need: this tool's built-in list, plus whatever the repo's own
+// config adds, sorted and deduped so nothing downstream re-sorts. Factored the moment the second consumer
+// existed — `--quality-delta` reported vendoredPathPrefixes as a 114-token clone of this function the first
+// time it was written out longhand, which is the kind's whole job.
+inline std::vector<std::string> mergeBuiltinsWithConfig( std::span<const std::string_view> builtins,
+                                                         std::vector<std::string> fromConfig )
+{
+    std::vector<std::string> out;
+    out.reserve( builtins.size() + fromConfig.size() );
+    for( std::string_view b : builtins )
+    {
+        out.emplace_back( b );
+    }
+    for( std::string& extra : fromConfig )
+    {
+        out.push_back( std::move( extra ) );
+    }
+    std::sort( out.begin(), out.end() );
+    out.erase( std::unique( out.begin(), out.end() ), out.end() );
+    return out;
+}
+
 inline std::vector<std::string> registeredMacroNames( std::string_view root )
 {
-    std::vector<std::string> names( kBuiltinRegisterMacros.begin(), kBuiltinRegisterMacros.end() );
-    for( std::string& extra : readRegisterMacrosConfig( root ).names )
+    return mergeBuiltinsWithConfig( kBuiltinRegisterMacros, readRegisterMacrosConfig( root ).names );
+}
+
+// Q-DIAL-5 (2026-09-10) — VENDORED PATHS: code this repo CARRIES but did not WRITE. No such notion existed
+// anywhere in this file, and the clone kinds paid for it: one commit (08416403, the timsort landing) produced
+// 9 duplication rows, 8 of 8 dead-code:new-symbol acks and 37 api-surface acks against an upstream body whose
+// shape is not this repo's to fix. The ledger says so in its own words, 11 times.
+//
+// Built-in conventions plus whatever `.ripwire_config`'s vendored_paths= adds. The built-ins are the four
+// directory names the ecosystem agrees on; a vendored file that lives somewhere else (this repo's own
+// src/infra/timsort.hpp) is exactly what the config key is for, because no convention can guess it.
+// HONEST SCOPE, measured while writing the gate for this: the CRAWLER already drops third_party/, vendor/
+// and node_modules/, so those three names are here for completeness rather than effect — `external/` is the
+// only built-in the indexer actually reaches, and everything else vendored is reached through the config key.
+inline constexpr std::array<std::string_view, 4> kBuiltinVendoredPrefixes = { "third_party/", "vendor/", "node_modules/", "external/" };
+
+inline std::vector<std::string> vendoredPathPrefixes( std::string_view root )
+{
+    return mergeBuiltinsWithConfig( kBuiltinVendoredPrefixes, readRegisterMacrosConfig( root ).vendoredPaths );
+}
+
+// `rel` is ROOT-RELATIVE (the relForHash spelling every sidecar key uses). A prefix ending in '/' names a
+// DIRECTORY and matches everything under it; one that does not is a whole path and must match exactly, so
+// `vendored_paths = src/infra/timsort.hpp` cannot silently swallow src/infra/timsort_extra.hpp.
+inline bool isVendoredPath( std::string_view rel, const std::vector<std::string>& prefixes ) noexcept
+{
+    for( const std::string& p : prefixes )
     {
-        names.push_back( std::move( extra ) );
+        if( p.empty() )
+        {
+            continue;
+        }
+        if( p.back() == '/' )
+        {
+            if( rel.size() >= p.size() && rel.compare( 0, p.size(), p ) == 0 )
+            {
+                return true;
+            }
+        }
+        else if( rel == p )
+        {
+            return true;
+        }
     }
-    std::sort( names.begin(), names.end() );
-    names.erase( std::unique( names.begin(), names.end() ), names.end() );
-    return names;
+    return false;
 }
 
 // A registered macro's own call syntax, read starting at the CALLEE's own signature start byte (`region`
@@ -472,8 +575,70 @@ inline std::vector<std::uint64_t> topLevelCalleeNameHashes( const IngestResult& 
     return hashes;
 }
 
+// Q-DIAL-2 (2026-09-10) — THE SYMBOLS A LANGUAGE INVOKES, for which "zero in-edges in a name-based call
+// graph" is evidence of nothing at all. This is what the dead kind's blanket header exclusion was a PROXY
+// for, stated directly, and it is measurable in both directions: all ten dead-code rows the verb produced
+// across 40 replayed commits were exactly these shapes (audit Q1 §2e W1), and the header rule that hid them
+// also hid 96.8% of this repo's own source from the kind (Q1 §3, synthetic S6 — the sole caller of a header
+// function deleted, silently missed).
+//
+// Each clause names a call site the parser cannot see as a named CALL:
+//   * a TYPE (class/struct/interface) is never invoked at all — its in-edge count is not a liveness signal;
+//   * `main` is invoked by the runtime;
+//   * `operator...` is invoked by the OPERATOR'S SYNTAX (`a + b`, `p[i]`, `new T`, `f( x )` on a functor);
+//   * a leading `~` is a C++ destructor — the language runs it at scope exit;
+//   * name == the innermost scope segment is a CONSTRUCTOR in every language that spells one that way
+//     (C++, Java, C#, PHP-in-part), built by object creation rather than by a call to that name;
+//   * a Python-style dunder (`__enter__`, `__repr__`, `__init__`) is invoked by a protocol, never by name;
+//   * a METHOD named init/deinit/constructor is Swift's / JavaScript's spelling of the same constructor
+//     protocol. Scoped to Method deliberately: a free function called `init` is an ordinary function, and
+//     excluding it would be the header rule's over-reach in a smaller costume.
+// FLOOR, stated: this is a NAME-level rule, exactly like the resolver's own bare-name matching, and it errs
+// toward false-LIVE (a symbol wrongly considered invoked is silently not reported) rather than false-dead,
+// which is the direction a deletion candidate must err in.
+inline bool languageInvokedSymbol( const Symbol& s ) noexcept
+{
+    if( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface )
+    {
+        return true; // a type is declared, never called
+    }
+    if( s.name == "main" )
+    {
+        return true; // the runtime's entry point
+    }
+    if( s.name.rfind( "operator", 0 ) == 0 )
+    {
+        return true; // invoked by the operator's own syntax
+    }
+    if( !s.name.empty() && s.name.front() == '~' )
+    {
+        return true; // C++ destructor
+    }
+    if( s.name.size() > 4 && s.name.rfind( "__", 0 ) == 0
+        && s.name.compare( s.name.size() - 2, 2, "__" ) == 0 )
+    {
+        return true; // Python dunder — invoked by a protocol
+    }
+    if( s.kind == SymKind::Method && ( s.name == "init" || s.name == "deinit" || s.name == "constructor" ) )
+    {
+        return true; // Swift init/deinit, JavaScript constructor
+    }
+    if( !s.scope.empty() )
+    {
+        const std::size_t     sep  = s.scope.rfind( "::" );
+        const std::string_view tail = sep == std::string::npos ? std::string_view( s.scope )
+                                                               : std::string_view( s.scope ).substr( sep + 2 );
+        if( !tail.empty() && tail == s.name )
+        {
+            return true; // constructor: the member that shares its type's name
+        }
+    }
+    return false;
+}
+
 // A "dead deletion-candidate": has a body, no caller in the indexed tree, not invoked from file scope, not
-// header-exported, not a test fixture, not produced by a registered self-registering macro. A SIMPLE,
+// invoked by the LANGUAGE itself (languageInvokedSymbol, above), not a test fixture, not produced by a
+// registered self-registering macro. A SIMPLE,
 // internally-consistent heuristic — the delta only needs baseline↔current consistency, not parity with the
 // fuller --dead-code verb. `topLevelCallees` is the sorted set topLevelCalleeNameHashes builds and
 // `registeredMacroIds` the sorted set registeredMacroSymbolIds builds (below, past forEachSymbolBody) —
@@ -508,13 +673,11 @@ inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i,
     {
         return false; // W1-S2: invoked from file scope (a top-level script statement) — a use the CSR drops
     }
-    const std::string& p = ing.files[ s.fileId ];
-    const auto ends = [ & ]( std::string_view e )
-    { return p.size() >= e.size() && p.compare( p.size() - e.size(), e.size(), e ) == 0; };
-    if( ends( ".h" ) || ends( ".hpp" ) || ends( ".hh" ) || ends( ".hxx" ) )
+    if( languageInvokedSymbol( s ) )
     {
-        return false; // header-exported by convention
+        return false; // Q-DIAL-2: the LANGUAGE calls it — see languageInvokedSymbol (this replaced a blanket header exclusion)
     }
+    const std::string& p = ing.files[ s.fileId ];
     if( isFixturePath( p ) )
     {
         return false; // fixtures are dead by design (noise rules)
@@ -682,14 +845,14 @@ inline void forEachSymbolBody( const IngestResult& ing, Fn&& visit )
 {
     // per-file def ids with a real body (see errorMaskCountsBySym above on `symbols[i].id == i`).
     const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte; } );
-    std::string         bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
         if( byFile[f].empty() )
         {
             continue;
         }
-        if( !docparse::detail::readWholeFile( ing.files[f], bytes ) || bytes.empty() )
+        const std::string bytes = docparse::detail::readWholeFile( ing.files[f] ).value_or( std::string() );
+        if( bytes.empty() )
         {
             continue;   // unreadable or empty — contributes nothing, silently: a partial read is evidence of nothing
         }
@@ -704,6 +867,216 @@ inline void forEachSymbolBody( const IngestResult& ing, Fn&& visit )
         }
     }
 }
+
+// Q-DIAL-3 (2026-09-10) — THE VERBOSITY KIND'S METRIC: CODE lines, not physical lines.
+//
+// `Symbol::loc` is the def's physical line span, and the verbosity kind judged it directly. That makes blank
+// lines and comments debt: audit lane Q1 added 60 PURE BLANK lines inside an 18-LOC body and got
+// `verbosity was="18" now="78"`, gating, exit 2 — and the same for 60 pure COMMENT lines, in a repo whose own
+// CONTRIBUTING.md requires the reasoning to be written down. It is not hypothetical either: landed commit
+// 7d5dd201 ("comment(caps): update three stale cap justifications") added 7 comment lines and 1 code line and
+// produced two verbosity regression rows. Measured composition of what the kind judges, over 60 rows:
+// 72.8% code, 23.3% comment, 3.9% blank.
+//
+// A LINE HEURISTIC, NOT A LEXER, and the floor is stated rather than implied: a line counts as code unless it
+// is blank or its first non-space characters open a comment. So a trailing comment after code counts as code
+// (correct), a comment marker inside a string literal makes that line read as a comment (wrong, and rare), and
+// a multi-line raw string full of blank lines reads as blank (wrong, and rarer). The alternative is a second
+// tokenization pass per symbol on every --quality-delta, for a metric whose whole job is to say "this body is
+// big". Both sides of every comparison run the identical rule, which is the property the delta actually needs.
+//
+// Markers by language family, from the symbol's own `lang`: `//` plus `/* … */` for the C family and its
+// descendants, `#` for the shell/Python/Ruby/Elixir/config family (in the C family `#` opens a PREPROCESSOR
+// directive, which is code — that is why this is per-language and not one union set), `--` for Lua. Markdown
+// and JSON have no comment syntax, so every non-blank line there is content.
+inline bool langUsesHashComment( Lang l ) noexcept
+{
+    return l == Lang::Python || l == Lang::Bash || l == Lang::Ruby || l == Lang::Elixir
+        || l == Lang::Toml   || l == Lang::Yaml;
+}
+
+inline std::uint32_t codeLinesInBody( std::string_view body, Lang lang ) noexcept
+{
+    const bool hash   = langUsesHashComment( lang );
+    const bool cLike  = !hash && lang != Lang::Markdown && lang != Lang::Json && lang != Lang::Lua;
+    const bool lua    = lang == Lang::Lua;
+    std::uint32_t  code    = 0;
+    bool           inBlock = false;
+    std::size_t    at      = 0;
+    while( at <= body.size() )
+    {
+        const std::size_t nl   = body.find( '\n', at );
+        std::string_view  line = body.substr( at, ( nl == std::string_view::npos ? body.size() : nl ) - at );
+        at = ( nl == std::string_view::npos ) ? body.size() + 1 : nl + 1;
+        while( !line.empty() && ( line.front() == ' ' || line.front() == '\t' || line.front() == '\r' ) )
+        {
+            line.remove_prefix( 1 );
+        }
+        while( !line.empty() && ( line.back() == ' ' || line.back() == '\t' || line.back() == '\r' ) )
+        {
+            line.remove_suffix( 1 );
+        }
+        if( inBlock )
+        {
+            const std::size_t close = line.find( "*/" );
+            if( close == std::string_view::npos )
+            {
+                continue;   // still inside the block comment
+            }
+            inBlock = false;
+            line.remove_prefix( close + 2 );
+            while( !line.empty() && ( line.front() == ' ' || line.front() == '\t' ) )
+            {
+                line.remove_prefix( 1 );
+            }
+        }
+        if( line.empty() )
+        {
+            continue;   // blank
+        }
+        if( cLike && line.rfind( "//", 0 ) == 0 )
+        {
+            continue;
+        }
+        if( hash && line.front() == '#' )
+        {
+            continue;
+        }
+        if( lua && line.rfind( "--", 0 ) == 0 )
+        {
+            continue;
+        }
+        if( cLike && line.rfind( "/*", 0 ) == 0 )
+        {
+            inBlock = line.find( "*/", 2 ) == std::string_view::npos;
+            if( !inBlock )
+            {
+                const std::size_t close = line.find( "*/", 2 );
+                std::string_view  rest  = line.substr( close + 2 );
+                while( !rest.empty() && ( rest.front() == ' ' || rest.front() == '\t' ) )
+                {
+                    rest.remove_prefix( 1 );
+                }
+                if( rest.empty() )
+                {
+                    continue;   // `/* … */` alone on the line
+                }
+            }
+            else
+            {
+                continue;
+            }
+        }
+        ++code;
+    }
+    return code;
+}
+
+// The per-NODE code-line count for THIS tree, read off each symbol's own body bytes in ONE pass over the
+// files (forEachSymbolBody). A symbol with no readable body — a declaration, a prototype, an unreadable file —
+// keeps its physical `loc`: that span IS its signature, there is nothing to discount, and a silent 0 there
+// would read as "this symbol shrank to nothing" on the next delta.
+inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing )
+{
+    std::vector<std::uint32_t> out( ing.symbols.size(), 0 );
+    for( NodeId i = 0; i < ing.symbols.size(); ++i )
+    {
+        out[i] = ing.symbols[i].loc;
+    }
+    forEachSymbolBody( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body )
+    {
+        if( s.kind == SymKind::Section )
+        {
+            return;   // a markdown SECTION is prose: there is no code/comment line to separate, and counting
+                      // its non-blank lines as "code" makes an in-place doc rewrite that swaps 5 blank lines
+                      // for 5 sentences read as +5 verbosity. Measured on the ref-pair replay before this
+                      // clause: 03ec6f14 (a docs correction) went from a clean report to three minor rows.
+                      // Sections keep the physical span they always had — the churn kind exempts them for the
+                      // same reason ("doc sections churn by design").
+        }
+        out[i] = codeLinesInBody( body, s.lang );
+    } );
+    return out;
+}
+
+// Q-DIAL-4 (2026-09-10) — DOES THE LAST DECLARED PARAMETER CARRY A DEFAULT?
+//
+// 113 of the 132 `api-surface` acks in this repo's own committed ledger (85.6%) say the same sentence: "one
+// trailing DEFAULTED parameter, every existing caller compiles unchanged". A kind whose acks are 86% one
+// shape is describing that shape, so the shape is read off the signature and reported sev="minor" instead of
+// being acked one row at a time. It is still a row — the contract DID change, and a defaulted parameter is
+// how most contract rot starts.
+//
+// A BRACE-DEPTH SCAN, NOT A PARSER, and the floor is stated: the signature's first '(' opens the parameter
+// list, its matching ')' closes it, the last comma at depth 0 starts the final parameter, and an '=' in that
+// final parameter is a default. Depth counts ( ) [ ] { } and, for C++ templates, < > — which is where the
+// heuristic can be fooled (`a < b` inside a default expression, an `operator<`), and where being fooled costs
+// exactly one severity tier on one row. Languages that spell defaults the same way (Python, TypeScript, PHP,
+// Ruby, C#, Swift) are covered by the same scan for free; a language that does not spell them at all simply
+// never matches.
+inline bool trailingParamHasDefault( std::string_view signature ) noexcept
+{
+    const std::size_t open = signature.find( '(' );
+    if( open == std::string_view::npos )
+    {
+        return false;
+    }
+    int         depth      = 0;
+    int         angle      = 0;
+    std::size_t lastComma  = std::string_view::npos;
+    std::size_t close      = std::string_view::npos;
+    for( std::size_t i = open; i < signature.size(); ++i )
+    {
+        const char c = signature[i];
+        if( c == '(' || c == '[' || c == '{' ) { ++depth; }
+        else if( c == ')' || c == ']' || c == '}' )
+        {
+            --depth;
+            if( depth == 0 ) { close = i; break; }
+        }
+        else if( c == '<' ) { ++angle; }
+        else if( c == '>' && angle > 0 ) { --angle; }
+        else if( c == ',' && depth == 1 && angle == 0 ) { lastComma = i; }
+    }
+    if( close == std::string_view::npos || close <= open + 1 )
+    {
+        return false;   // unclosed, or an empty parameter list
+    }
+    const std::size_t     from = ( lastComma == std::string_view::npos ) ? open + 1 : lastComma + 1;
+    const std::string_view last = signature.substr( from, close - from );
+    for( std::size_t i = 0; i < last.size(); ++i )
+    {
+        if( last[i] != '=' )
+        {
+            continue;
+        }
+        const bool cmp = ( i + 1 < last.size() && last[ i + 1 ] == '=' )
+                      || ( i > 0 && ( last[ i - 1 ] == '=' || last[ i - 1 ] == '!' || last[ i - 1 ] == '<' || last[ i - 1 ] == '>' ) );
+        if( !cmp )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The per-NODE answer for THIS tree, read off each symbol's own signature bytes in the same one-pass shape
+// codeLocByNode uses. forEachSymbolBody hands back [sigStartByte, endByte), and the signature is its prefix.
+inline std::vector<std::uint8_t> trailingDefaultByNode( const IngestResult& ing )
+{
+    std::vector<std::uint8_t> out( ing.symbols.size(), 0 );
+    forEachSymbolBody( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body )
+    {
+        const std::size_t sigLen = s.sigEndByte > s.sigStartByte ? std::size_t( s.sigEndByte - s.sigStartByte ) : 0;
+        if( sigLen == 0 || sigLen > body.size() )
+        {
+            return;
+        }
+        out[i] = trailingParamHasDefault( body.substr( 0, sigLen ) ) ? 1 : 0;
+    } );
+    return out;
+}
+
 
 // P2.2 — every symbol in THIS tree whose own signature text is a registered-macro call (built ONCE per
 // computeSnapshot/computeDelta run, exactly like topLevelCallees above), reading each file's bytes once via
@@ -785,7 +1158,7 @@ inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const Inges
     {
         std::sort( hs.begin(), hs.end() );                                    // order-independent overload fold
         std::string joined;
-        for( std::uint64_t h : hs ) { char b[ 17 ]; std::snprintf( b, sizeof( b ), "%016llx", static_cast<unsigned long long>( h ) ); joined += b; }
+        for( std::uint64_t h : hs ) { char b[ 17 ]; rw::formatTo( b, sizeof( b ), "{:016x}", static_cast<unsigned long long>( h ) ); joined += b; }
         out[ key ] = fnv1a64( joined );
     }
     return out;
@@ -1007,6 +1380,13 @@ inline std::string cacheDirLadder()
 // still spell quality::popenTrimmed, which this using-declaration resolves. Not a wrapper: one definition.
 using rw::popenTrimmed;
 
+// isBareCommitSha (THE object-name gate) and gitResolveCommitSha (THE commit resolver) live in gitmine.h too —
+// moved down 2026-09-10 when resolveSinceScope needed them, so --since hands git a resolved sha instead of the
+// caller's string. gitIsAncestor / materializeCommitTree below and crossref.h still spell them quality::…,
+// which these using-declarations resolve. One definition each.
+using rw::isBareCommitSha;
+using rw::gitResolveCommitSha;
+
 // Run one short git query against `root` and return its whitespace-trimmed output (expected single-line), or
 // "" on any failure. The shared shape behind gitHeadSha / gitWindowRefSha — `tail` is everything after
 // `git -C <root>` INCLUDING redirects (so a caller can pipe, e.g. "rev-list HEAD 2>/dev/null | tail -1").
@@ -1186,7 +1566,7 @@ inline std::string gitHeadSha( const std::string& root )
 // dashes at 4 and 7) — the caller degrades to a fixed epoch date. Read-only: `git log` never mutates the repo.
 inline std::string gitCommitterDateIso( const std::string& root )
 {
-    const std::string out = gitOneLine( root, "log -1 --format=%cs HEAD 2>/dev/null" );
+    std::string out = gitOneLine( root, "log -1 --format=%cs HEAD 2>/dev/null" );   // not const: a const local cannot be moved out on return
     if( out.size() != 10 || out[4] != '-' || out[7] != '-' )
     {
         return {};
@@ -1205,54 +1585,6 @@ inline std::string gitCommitterDateIso( const std::string& root )
 // the CLI while the MCP arm honestly reported zero); `selectBaseline` now decides staleness by STRICT sha
 // equality and never calls this. The remaining caller is `binstale.h`'s "is the built binary older than the
 // sources?" check, which is a genuine reachability question — do not delete this.
-// ─── r27 (Lane C routing) — the OBJECT-NAME gate on every token that reaches a git argv ────────────────
-//
-// `shSingleQuote` stops SHELL injection, but the token still arrives as its own argv ENTRY, and git reads a
-// leading `-` as an OPTION. Lane C's P0.1 defect is the proof this matters: `--pr-context=--output=FILE`
-// reached `git diff` as an option and TRUNCATED a file outside the repo, exit 0. The durable defense is not
-// quoting — it is refusing anything that is not a bare object name.
-//
-// A commit sha is 40 (SHA-1) or 64 (SHA-256) lowercase hex and NOTHING else: it cannot begin with `-`, cannot
-// contain a path separator, and cannot spell an option. Checking that SHAPE is a complete defense on its own
-// and needs no subprocess, so it is applied at both ends — at the trust boundary where an untrusted value is
-// READ (readBaselineHeadSha, whose input is a COMMITTED, therefore clone-attacker-influenceable sidecar) and
-// again at the SINK, here, because a future caller will not remember the boundary.
-//
-// KNOWN DUPLICATE, flagged by our own --quality-delta and left deliberately: `crossref::isBlobSha`
-// (crossref.h) is the same predicate for git BLOB shas. It cannot be reused from here — crossref.h INCLUDES
-// quality.h, so the dependency only runs one way. The consolidation is a one-line change in crossref.h
-// (`isBlobSha` delegating to this), which is outside this lane's file boundary; it is written up in the lane
-// report rather than done silently across a file this lane does not own.
-inline bool isBareCommitSha( std::string_view s ) noexcept
-{
-    if( s.size() != 40 && s.size() != 64 )
-    {
-        return false;
-    }
-    for( char c : s )
-    {
-        if( !std::isxdigit( static_cast<unsigned char>( c ) ) )
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-// Resolve `ref` to a concrete commit sha, or "" if it does not resolve to one. Belt AND braces: the ref is
-// refused outright if it could be read as an option, and the ANSWER must itself be a bare object name — a
-// `rev-parse` that echoes something else (a path, an error, a multi-line answer) is not trusted. Callers that
-// hand a token to git should hand THIS result, never the caller's own string.
-inline std::string gitResolveCommitSha( const std::string& root, const std::string& ref )
-{
-    if( ref.empty() || ref[0] == '-' )
-    {
-        return {};
-    }
-    const std::string out = gitOneLine( root, "rev-parse --verify --quiet " + shSingleQuote( ref + "^{commit}" ) + " 2>/dev/null" );
-    return isBareCommitSha( out ) ? out : std::string{};
-}
-
 inline bool gitIsAncestor( const std::string& root, const std::string& ancestor, const std::string& descendant )
 {
     if( ancestor.empty() || descendant.empty() )
@@ -1295,7 +1627,7 @@ inline std::string gitWindowRefSha( const std::string& root, std::uint32_t days 
     // newest commit at-or-before the window floor (rev-list --min-age filters on committer time ≤ the bound;
     // cutoff−1 keeps a commit landing exactly ON the floor inside the window, matching gitmine's inclusive floor).
     const std::int64_t cutoff = headEpoch - std::int64_t( days ) * 86400;
-    const std::string  preWindow = gitOneLine( root, "rev-list --max-count=1 --min-age=" + std::to_string( cutoff - 1 ) + " HEAD 2>/dev/null" );
+    std::string        preWindow = gitOneLine( root, "rev-list --max-count=1 --min-age=" + std::to_string( cutoff - 1 ) + " HEAD 2>/dev/null" );   // not const: moved out on return
     if( !preWindow.empty() )
     {
         return preWindow;
@@ -1353,19 +1685,83 @@ inline bool gitRepoHasHistory( const std::string& root )
 // header already self-validates). Folded into the filename key so an old-scheme file is simply never named.
 constexpr std::uint32_t kHeadSnapCacheScheme = 1;
 
-// The 16-hex repo key: fnv1a64 of realpath(root) (matching defaultCachePath) so two spellings of one repo
-// share one warm cache AND one eviction group. A null realpath (missing path) degrades to the verbatim
-// spelling — still correct, at worst one extra cold miss. Used by both the filename and the eviction glob.
-inline std::string headSnapRepoHex( const std::string& root )
+// ─── THE ROOT KEY — one canonical spelling, for every cache family ────────────────────────────────────
+//
+// The 16-hex field every cache blob's filename carries, identifying the ROOT the blob belongs to:
+// `ripwire-<rootKey>-{lean,rich}.bin` (main.cpp::defaultCachePath), `ripwire-mcp-<rootKey>.cache`
+// (mcpindex.h::mcpCachePath) and `ripwire-<family>-<rootKey>-<exclHex>-<shaHex>.bin`
+// (shaKeyedCachePath below: qheadsnap, qsnap, qbody, qhist, qms, qchurn, stier). It is what makes
+// "which root does this blob belong to?" answerable from the NAME alone — see cacheBlobRootKey and the
+// byte-budget pin in evictBySizeBudget, which is only ever as wide as the set of blobs that spell the
+// key the SAME way.
+//
+// AND TWO SPELLINGS SHIPPED. Both builders hashed realpath(root) with FNV-1a, but with DIFFERENT offset
+// bases: `defaultCachePath` (and `mcpCachePath`) seeded 1469598103934665603 — seventeen digits, a
+// TRUNCATED FNV-1a-64 basis — while this function seeded arch.h's `fnv1a64`, i.e. the real
+// 14695981039346656037. Same material, two keys, on every root, always. Measured on llvm-project:
+// lean/rich carried 4280d3ca01d82374 while qchurn carried 6b73c58ba5897c7a; reproduced on a four-file
+// fixture as `ripwire-844a155665d606eb-{lean,rich}.bin` beside `ripwire-qchurn-526f2ad625b9f069--….bin`.
+// The consequence is exactly the gap P1-1 stated: the pin covered lean+rich and left every git-metadata
+// family evictable by the very root that had just written it.
+//
+// WHY THE SURVIVING BASIS IS THE TRUNCATED ONE, AND WHY IT MUST NOT BE "FIXED". A key change orphans
+// every blob spelled the old way. Adopting `fnv1a64`'s basis would have renamed the MAIN PARSE CACHE —
+// 1.76 GB of it on llvm-project alone (rich 1.19 GB + lean 0.57 GB), a full cold re-parse for every root
+// on the machine. Adopting defaultCachePath's renames only the git-metadata families, which are
+// kilobytes and rebuild from one `git log` walk. The constant is an IDENTITY, not a digest: FNV-1a's
+// avalanche comes from the prime multiply, and any odd seed gives the same distribution over these
+// inputs, so nothing is weaker — only the naming compatibility differs, and it differs by three orders
+// of magnitude. Changing `kCacheRootKeySeed` to the textbook basis would silently throw away every warm
+// parse cache in existence; test/evictioncheck.sh (k) is what makes such a change visible, but it will
+// go GREEN on a uniform wrong seed, so this paragraph is the guard.
+//
+// NORMALIZED, so the key follows the TREE and not its spelling: `realpath` collapses symlinks, `.`/`..`,
+// `//` and a trailing '/'. When realpath fails — the path does not exist, so there is nothing to cache
+// under it anyway — the same folding is done LEXICALLY (resolve.h's `lexicalNormalize`, the house's
+// segment-stack folder) so that at least the trailing-slash and `.`/`..` cases still agree; an unsound
+// `..` escape yields "" there and degrades to the verbatim spelling, still correct, at worst one extra
+// cold miss. Gate: test/evictioncheck.sh (k) one root ⇒ one key across every family, (l) a trailing
+// slash and a symlinked spelling add no new key.
+//
+// NO SCHEME BUMP, AND THE REASON IS THE HOUSE RULE ITSELF, NOT AN OMISSION. `kQChurnCacheScheme`,
+// `kQSnapCacheScheme` and `kHeadSnapCacheScheme` exist so that a blob whose CONTENT MEANING changed
+// becomes a clean miss rather than a wrong answer served from cache (see kQChurnCacheScheme's own comment:
+// scheme 2 was a merge-blind stream). Nothing about any blob's content changes here — only the root FIELD
+// of its NAME. Every pre-existing blob is therefore already never NAMED again, which is precisely the
+// effect a bump buys, reached by the key rather than by a version. Bumping on top would assert a content
+// change that did not happen, and would additionally invalidate the blobs that are about to be re-minted
+// under the unified key anyway. The old-spelling blobs are ordinary orphans: the "ripwire-" family sweep
+// still matches them by prefix, so the 30-day age pass deletes them on schedule — verified by seeding one
+// backdated `ripwire-qchurn-<old-key>-…bin` and watching a later run remove it. That pass is silent for
+// every blob it takes (it has no disclosure line at all — see evictBySizeBudget's note on why only the
+// byte-budget pass speaks), so an orphan is treated exactly as any other aged-out blob, with no special
+// case in either direction.
+inline constexpr std::uint64_t kCacheRootKeySeed = 1469598103934665603ull;
+
+inline std::string cacheRootKeyHex( const std::string& root )
 {
-    char* rp = ::realpath( root.c_str(), nullptr );
-    const std::string absRoot = rp ? std::string( rp ) : root;
-    if( rp )
+    char*       rp = ::realpath( root.c_str(), nullptr );
+    std::string absRoot;
+    if( rp != nullptr )
     {
+        absRoot = rp;
         std::free( rp );
     }
+    else
+    {
+        absRoot = lexicalNormalize( root );
+        if( absRoot.empty() )
+        {
+            absRoot = root;   // a `..` that escapes above its own base — unsound to fold, hash it verbatim
+        }
+    }
+    std::uint64_t h = kCacheRootKeySeed;
+    for( const char c : absRoot )
+    {
+        h = rw::hashutil::fnv1aAbsorb( h, c );
+    }
     char hex[ 20 ];
-    std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( fnv1a64( absRoot ) ) );
+    rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( h ) );
     return std::string( hex );
 }
 
@@ -1397,12 +1793,25 @@ inline std::string headSnapRepoHex( const std::string& root )
 // lines too. Bumping kParserVer without updating these two lines is a hard gate failure, not a silent miss.
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 18;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 87;   // MUST equal ingest.cpp's kParserVer   (gated)
-                                                          // 87 = 2026-09-10 (Elixir module/name/arity resolution,
-                                                          //    rebased onto main): RE-BUMPED from the fork's 86 —
-                                                          //    main had already spent 86 on the Ruby receiver dedupe.
+constexpr std::uint32_t kIngestCacheVersionMirror   = 21;   // MUST equal ingest.cpp's kCacheVersion (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 95;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 95 = 2026-09-12 (Elixir module/name/arity resolution, PR #81):
+                                                          //    RE-BUMPED from the branch's 87 over #139's 93 and #172's 94.
                                                           //    See ingest_cache.h's kParserVer note.
+                                                          // 92 = 2026-09-11 (yaml unsigned-char, PR #140): the yaml scanner's
+                                                          //    status type. SCN_FAIL (-1) returned through plain `char` came
+                                                          //    back as 255 wherever `char` is unsigned (aarch64 Linux, the
+                                                          //    linux-arm64 release asset), parsing a malformed %-escape in a
+                                                          //    tag differently from every signed-`char` build. See
+                                                          //    ingest_cache.h's kParserVer note.
+                                                          // 91 = 2026-09-11 (Kotlin, PR #126): a twenty-fourth grammar, its
+                                                          //    extraction arms, two scanner patches that change a parse, and the
+                                                          //    string-nesting refusal. See ingest_cache.h's kParserVer note.
+                                                          // 90 = 2026-09-11 (member-macro re-parse): a C-family file
+                                                          //    whose first parse holds error bytes may be extracted from
+                                                          //    a re-parse with its member macro invocations blanked.
+                                                          // 89 = 2026-09-11 (extent honesty): each def carries the
+                                                          //    `recovered` extraction bit. See ingest_cache.h's note.
                                                           // 78 = 2026-09-07 (Elixir): a twenty-second grammar and its
                                                           //    definition/call filters.
                                                           // 79 = 2026-09-07 (ES import facts): named import aliases and
@@ -1573,7 +1982,7 @@ inline std::string exclConfigHex( const std::vector<std::string>& excludes, cons
     keyMat.push_back( '\x1f' );
     keyMat += std::to_string( maxFileBytes );          // P0.2: the file-size ceiling changes the extracted SET
     char hex[ 20 ];
-    std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( fnv1a64( keyMat ) ) );
+    rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( fnv1a64( keyMat ) ) );
     return std::string( hex );
 }
 
@@ -1600,14 +2009,14 @@ inline std::string headSnapExclHex( const std::vector<std::string>& excludes, st
 inline std::string blobShardHex( std::string_view filename )
 {
     char hex[ 3 ];
-    std::snprintf( hex, sizeof( hex ), "%02x", static_cast<unsigned>( fnv1a64( filename ) & 0xff ) );
+    rw::formatTo( hex, sizeof( hex ), "{:02x}", static_cast<unsigned>( fnv1a64( filename ) & 0xff ) );
     return std::string( hex );
 }
 
 inline std::string resolveCacheBlobPath( const std::string& dir, const std::string& filename )
 {
     namespace fs = std::filesystem;
-    const std::string flatPath = dir + "/" + filename;
+    std::string       flatPath = dir + "/" + filename;   // not const: moved out on either early return
     std::error_code   existsEc;
     if( fs::exists( fs::path( flatPath ), existsEc ) && !existsEc )
     {
@@ -1633,7 +2042,7 @@ inline std::string shaKeyedCachePath( const char* family, const std::string& rep
 {
     const std::uint64_t shaKey = fnv1a64( sha );
     char tail[ 96 ];
-    std::snprintf( tail, sizeof( tail ), "ripwire-%s-%s-%s-%016llx.bin",
+    rw::formatTo( tail, sizeof( tail ), "ripwire-{}-{}-{}-{:016x}.bin",
                    family, repoHex.c_str(), exclHex.c_str(), static_cast<unsigned long long>( shaKey ) );
     return resolveCacheBlobPath( cacheDirLadder(), tail );
 }
@@ -1641,6 +2050,206 @@ inline std::string shaKeyedCachePath( const char* family, const std::string& rep
 inline std::string headSnapCachePath( const std::string& repoHex, const std::string& exclHex, const std::string& headSha )
 {
     return shaKeyedCachePath( "qheadsnap", repoHex, exclHex, headSha );
+}
+
+// The builder for the two families whose whole key IS the root — the main parse cache
+// (`ripwire-<rootKey>-lean.bin` / `-rich.bin`, main.cpp::defaultCachePath) and the MCP index
+// (`ripwire-mcp-<rootKey>.cache`, mcpindex.h::mcpCachePath). They sat in different translation units and
+// each open-coded the same three lines around its own copy of the hash, which is exactly how the two root
+// spellings drifted apart in the first place; one body means a future family joins by naming a prefix and
+// a suffix rather than by re-deriving a key. `prefix`/`suffix` bracket the 16-hex field because that is the
+// only thing the two shapes disagree about — everything the pin reads is in the middle.
+inline std::string rootKeyedCachePath( const std::string& root, const char* prefix, const char* suffix )
+{
+    char tail[ 64 ];
+    rw::formatTo( tail, sizeof( tail ), "{}{}{}", prefix, cacheRootKeyHex( root ).c_str(), suffix );
+    return resolveCacheBlobPath( cacheDirLadder(), tail );
+}
+
+// P1-1 (2026-09-10 full audit) — THE PIN KEY. Every cache blob's filename carries the SAME 16-hex root
+// field, and since the follow-up round it really is the same one: `defaultCachePath` writes
+// `ripwire-<rootKey>-{lean,rich}.bin`, `mcpCachePath` writes `ripwire-mcp-<rootKey>.cache` and
+// `shaKeyedCachePath` writes `ripwire-<family>-<rootKey>-<exclHex>-<shaHex>.bin`, all three through the ONE
+// canonical `cacheRootKeyHex` above — so ONE root's every family (lean, rich, mcp, qheadsnap, qsnap, qbody,
+// qhist, qms, qchurn, stier) spells the same key in the same place. That makes "which root does this blob
+// belong to?" answerable from the NAME alone, with no plumbing: the byte-budget sweep reads the key off the
+// very blob it is about to write (`keepPath`) and pins its siblings.
+//
+// The rule is positional-free on purpose: return the FIRST '-'-delimited field that is exactly 16 hex
+// digits. No family tag is 16 characters of hex ("qheadsnap", "qsnap", "qbody", "qhist", "qms", "qchurn",
+// "stier", "mcp"), so the first such field is the root key in every filename shape, and a foreign or legacy
+// blob that carries no such field yields "" — which pins nothing and evicts exactly as it did before.
+//
+// TWO FAMILIES ARE EXCEPTIONS, and they are NAMED rather than guessed at — their 16-hex field is a real
+// key, just not a key over a ROOT:
+//   * `ripwire-docmd-<hash>.bin`  (ingest_docpass.h) is CONTENT-addressed: fnv1a64 of the DOCUMENT'S
+//     BYTES, so one PDF extracted under two checkouts is cached once.
+//   * `ripwire-stier-<hash>-…`    (ingest_astquery.h::spanTierMemoPath) is FILE-addressed: it passes a
+//     per-file disk path to cacheRootKeyHex, one memo per source file above a 32 KiB floor. An llvm --for
+//     leaves ~30 of them beside the three root-keyed blobs, each with its own key.
+// Reading either as a root key would be a wrong answer about OWNERSHIP — it names a document or a file,
+// not the tree the blob belongs to — and at 1-in-2^64 could pin a blob to an unrelated root. Both are
+// excluded here rather than renamed: their names are correct for what they identify, and renaming would
+// orphan the most expensive thing in this directory to rebuild (a docmd blob costs a markitdown popen and
+// a Python start, seconds per file). They yield "" and are treated as unowned, which is what they are —
+// the byte-budget sweep may take them, and that is the right policy for a per-file memo whose recompute
+// cost is one file, not one tree.
+//
+// KEEP THE LIST HONEST: test/evictioncheck.sh arm (k) mirrors these prefixes in shell and FAILS if the two
+// lists disagree, so a family added later with a non-root 16-hex field is a gate failure rather than a
+// blob quietly pinned to a stranger.
+inline constexpr std::string_view kNonRootKeyedBlobPrefixes[] = { "ripwire-docmd-", "ripwire-stier-" };
+
+inline bool isNonRootKeyedBlob( std::string_view blobName ) noexcept
+{
+    return std::any_of( std::begin( kNonRootKeyedBlobPrefixes ), std::end( kNonRootKeyedBlobPrefixes ),
+                        [ blobName ]( const std::string_view prefix ) noexcept { return blobName.starts_with( prefix ); } );
+}
+
+inline std::string cacheBlobRootKey( std::string_view blobName ) noexcept
+{
+    const auto isHex16 = []( std::string_view f ) noexcept
+    {
+        if( f.size() != 16 )
+        {
+            return false;
+        }
+        for( const char c : f )
+        {
+            if( !std::isxdigit( static_cast<unsigned char>( c ) ) )
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    if( isNonRootKeyedBlob( blobName ) )
+    {
+        return std::string{};   // content- or file-addressed, root-independent by design — see above
+    }
+
+    // A field ends at the next '-' OR at the '.' that opens the suffix. The dash-only scan this replaces
+    // could not read `ripwire-mcp-<rootKey>.cache` (mcpindex.h::mcpCachePath): its last field came out as
+    // `<rootKey>.cache`, 22 bytes, not hex16, so the function returned an EMPTY key for the one family
+    // whose name is nothing but a root key. The consequence is in evictBySizeBudget — an empty key pins
+    // nothing, so the byte-budget sweep would evict the MCP index blob of the very root it was serving
+    // while pinning that root's lean and rich blobs, and the MCP server paid a full re-parse for it.
+    // (CodeRabbit #127 / 3985249706. test/evictioncheck.sh's shell mirror `blobrootkey` already stripped
+    // `\.(bin|cache)$` before splitting, so the gate's reading and the binary's had silently diverged —
+    // arm (k) never primed an MCP blob, which is why nothing caught it.)
+    std::size_t at = 0;
+    while( at < blobName.size() )
+    {
+        const std::size_t      sep   = blobName.find_first_of( "-.", at );
+        const std::string_view field = blobName.substr( at, sep == std::string_view::npos ? std::string_view::npos : sep - at );
+        if( isHex16( field ) )
+        {
+            return std::string( field );
+        }
+        if( sep == std::string_view::npos )
+        {
+            break;
+        }
+        at = sep + 1;
+    }
+    return std::string{};
+}
+
+// One matching cache artifact as the sweep sees it: what it costs, how old it is, where it is. Hoisted out
+// of evictOldCacheFamily's body so the byte-budget pass below can be its own function rather than a third
+// in-line pass inside an already-long one.
+struct CacheBlobStat
+{
+    std::filesystem::file_time_type mtime;
+    std::uintmax_t                  byteSize;
+    std::string                     path;
+};
+
+// P1-1 (2026-09-10 full audit) — THE BYTE-BUDGET PASS: delete oldest-first until the family is under a
+// LOW-WATER mark of 7/8 budget, taking OTHER roots' blobs first and the MRU root's last. Returns the blobs
+// that survived. `mine` arrives unsorted; it is sorted oldest-first here.
+//
+// THE LOW-WATER MARK is F6's live-cache finding (B7.4, 2026-07-14): trimming to exactly the budget left the
+// dir hovering AT the ceiling, so every subsequent process re-crossed it on its first write and paid
+// deletion work on every save — sweeping to low water buys ~12% burst headroom and makes the common
+// next-process sweep a scan-only no-op.
+//
+// WHOSE BLOB GOES FIRST. Oldest-first alone is wrong at scale, and it was measured wrong: one llvm-project
+// root needs 1.76 GB for its OWN two families (rich 1.19 GB + lean 0.57 GB) against a 2 GB budget, so a
+// second corpus — or one --edit-check HEAD snapshot (0.52 GB) — made the sweep delete the SIBLING FAMILY OF
+// THE ROOT THE USER IS WORKING IN, the one thing they are certain to need next. Identical argv, same
+// session, same binary: `--grep` 20 s → 206 s, `--for` 19 s → 268 s, and SELF-SUSTAINING, because each cold
+// run's own save then evicts the other family again. `keepPath` alone never covered it: the blob being
+// written is precisely the family we are NOT about to need. src/main.cpp:181-189 already records the same
+// mechanism as a registered negative for a different key change ("the cache directory's 2 GiB cap evicts the
+// blob a running gate is about to reuse"). The BUDGET IS NOT LOWERED (owner rule
+// `quality-first-caps-are-blowup-guards`) — the ORDER is what changes, and the pin costs no state and no
+// stat: the root key is read off `keepPath`, i.e. whoever is writing IS the most-recently-used root.
+//
+// WHY ONLY THIS PASS IS PINNED. The age pass stays unpinned deliberately: a blob nobody has touched in 30
+// days is stale by that policy's own definition and losing it costs ONE cold parse, not a ping-pong —
+// whereas a blob evicted here is, by construction, one this very root just used.
+//
+// DISCLOSURE, and the reason P1-1 stayed invisible: all four measured 250 s runs wrote 0 bytes to stderr.
+// Conditional by construction — a sweep that frees nothing and is not over budget on its pinned set alone
+// says nothing at all, so no ordinary run, and no gate that compares stderr, grows a line. Plain emits,
+// NEVER DEGRADED_PATH_ALERT: NDEBUG compiles that out, and a Release binary is exactly where a 10x
+// slowdown needs to be visible.
+inline std::vector<CacheBlobStat> evictBySizeBudget( std::vector<CacheBlobStat>& mine, const std::string& dir,
+                                                     const std::string& keepPath, std::uintmax_t maxTotalBytes )
+{
+    namespace fs = std::filesystem;
+
+    std::uintmax_t totalBytes = 0;
+    for( const CacheBlobStat& b : mine )
+    {
+        totalBytes += b.byteSize;
+    }
+    if( totalBytes <= maxTotalBytes )
+    {
+        return std::move( mine );
+    }
+
+    const std::string    pinRootKey    = cacheBlobRootKey( fs::path( keepPath ).filename().string() );
+    const std::uintmax_t lowWaterBytes = maxTotalBytes - maxTotalBytes / 8;
+    std::sort( mine.begin(), mine.end(), []( const CacheBlobStat& a, const CacheBlobStat& b ){ return a.mtime < b.mtime; } );   // oldest first
+
+    std::vector<CacheBlobStat> kept;
+    kept.reserve( mine.size() );
+    std::size_t    evictedCount = 0;
+    std::uintmax_t pinnedBytes  = 0;
+    for( const CacheBlobStat& b : mine )
+    {
+        const bool pinned = b.path == keepPath
+                         || ( !pinRootKey.empty() && cacheBlobRootKey( fs::path( b.path ).filename().string() ) == pinRootKey );
+        if( pinned )
+        {
+            pinnedBytes += b.byteSize;
+        }
+        else if( totalBytes > lowWaterBytes )
+        {
+            std::error_code de;
+            fs::remove( fs::path( b.path ), de );
+            totalBytes -= b.byteSize;
+            ++evictedCount;
+            continue;
+        }
+        kept.push_back( b );
+    }
+
+    constexpr std::uintmax_t kMiB = 1024ull * 1024;
+    if( evictedCount > 0 )
+    {
+        rw::emitTo( stderr, "ripwire: cache {}: over its {} MiB budget — evicted {} blob(s) of other roots (this root's own families are kept)\n",
+                      dir.c_str(), maxTotalBytes / kMiB, evictedCount );
+    }
+    if( totalBytes > maxTotalBytes )
+    {
+        rw::emitTo( stderr, "ripwire: cache {}: this root's own families are {} MiB, past the {} MiB budget — kept anyway (evicting one costs a full re-parse)\n",
+                      dir.c_str(), pinnedBytes / kMiB, maxTotalBytes / kMiB );
+    }
+    return kept;
 }
 
 // Hygiene: within one (repo, excludes) FAMILY, keep at most `keep` HEAD-snapshot cache files (newest by mtime);
@@ -1667,14 +2276,17 @@ inline std::string headSnapCachePath( const std::string& repoHex, const std::str
 // subdirectories, "00".."ff") — so a family's blobs are found and evicted correctly regardless of which
 // layout wrote them, and a mid-migration mix of both is swept as one set. The 256 shard names are an EXACT,
 // bounded set (never an open-ended recursive walk of a shared $TMPDIR that may hold unrelated large trees).
+//
+// P1-1: the byte-budget pass additionally PINS the root `keepPath` belongs to (see evictBySizeBudget). That
+// needs no new parameter and no plumbing — the pin key is a function of `keepPath`, which every call site
+// already passes — and it cannot reach the keep-N call sites below, which run with maxTotalBytes == 0.
 inline void evictOldCacheFamily( const std::string& dir, const std::string& prefix,
                                  const std::string& keepPath, std::size_t keep,
                                  double maxAgeDays = 0.0, std::uintmax_t maxTotalBytes = 0 )
 {
     namespace fs = std::filesystem;
 
-    struct Blob { fs::file_time_type mtime; std::uintmax_t byteSize; std::string path; };
-    std::vector<Blob> mine;
+    std::vector<CacheBlobStat> mine;
     const auto matches = [ & ]( const std::string& name )
     {
         if( name.size() < prefix.size() || name.compare( 0, prefix.size(), prefix ) != 0 )
@@ -1714,7 +2326,7 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
             }
             std::error_code se;
             const auto sz = sit->file_size( se );
-            mine.push_back( Blob{ mt, se ? std::uintmax_t( 0 ) : sz, sit->path().string() } );   // size-stat failure degrades to 0 (age/count passes still see the file)
+            mine.push_back( CacheBlobStat{ mt, se ? std::uintmax_t( 0 ) : sz, sit->path().string() } );   // size-stat failure degrades to 0 (age/count passes still see the file)
         }
     };
 
@@ -1755,7 +2367,7 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
         }
         std::error_code se;
         const auto sz = it->file_size( se );
-        mine.push_back( Blob{ mt, se ? std::uintmax_t( 0 ) : sz, it->path().string() } );   // size-stat failure degrades to 0 (age/count passes still see the file)
+        mine.push_back( CacheBlobStat{ mt, se ? std::uintmax_t( 0 ) : sz, it->path().string() } );   // size-stat failure degrades to 0 (age/count passes still see the file)
     }
     for( const fs::path& sd : shardDirs )
     {
@@ -1767,9 +2379,9 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
     {
         const auto ageBudget = std::chrono::duration_cast<fs::file_time_type::duration>( std::chrono::duration<double, std::ratio<86400>>( maxAgeDays ) );
         const auto cutoff = fs::file_time_type::clock::now() - ageBudget;
-        std::vector<Blob> kept;
+        std::vector<CacheBlobStat> kept;
         kept.reserve( mine.size() );
-        for( const Blob& b : mine )
+        for( const CacheBlobStat& b : mine )
         {
             if( b.mtime < cutoff && b.path != keepPath )
             {
@@ -1782,43 +2394,17 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
         mine.swap( kept );
     }
 
-    // size pass: if the family is still over budget, delete oldest-first until under a LOW-WATER mark of
-    // 7/8 budget (disabled when maxTotalBytes == 0). The hysteresis is F6's live-cache finding (B7.4,
-    // 2026-07-14): trimming to exactly the budget left the dir hovering AT the ceiling, so every subsequent
-    // process re-crossed it on its first write and paid deletion work on every save — sweep-to-low-water
-    // buys ~12% burst headroom and makes the common next-process sweep a scan-only no-op.
+    // size pass — the byte budget, its eviction order and its disclosure all live in evictBySizeBudget
+    // above (disabled when maxTotalBytes == 0, which is every keep-N call site below).
     if( maxTotalBytes > 0 )
     {
-        const std::uintmax_t lowWaterBytes = maxTotalBytes - maxTotalBytes / 8;
-        std::uintmax_t totalBytes = 0;
-        for( const Blob& b : mine )
-        {
-            totalBytes += b.byteSize;
-        }
-        if( totalBytes > maxTotalBytes )
-        {
-            std::sort( mine.begin(), mine.end(), []( const Blob& a, const Blob& b ){ return a.mtime < b.mtime; } );   // oldest first
-            std::vector<Blob> kept;
-            kept.reserve( mine.size() );
-            for( const Blob& b : mine )
-            {
-                if( totalBytes > lowWaterBytes && b.path != keepPath )
-                {
-                    std::error_code de;
-                    fs::remove( fs::path( b.path ), de );
-                    totalBytes -= b.byteSize;
-                    continue;
-                }
-                kept.push_back( b );
-            }
-            mine.swap( kept );
-        }
+        mine = evictBySizeBudget( mine, dir, keepPath, maxTotalBytes );
     }
 
     // count pass (the original behavior): keep only the `keep` newest, delete the rest (disabled via keep == max()).
     if( keep != std::numeric_limits<std::size_t>::max() && mine.size() > keep )
     {
-        std::sort( mine.begin(), mine.end(), []( const Blob& a, const Blob& b ){ return a.mtime > b.mtime; } );   // newest first
+        std::sort( mine.begin(), mine.end(), []( const CacheBlobStat& a, const CacheBlobStat& b ){ return a.mtime > b.mtime; } );   // newest first
         for( std::size_t i = keep; i < mine.size(); ++i )
         {
             if( mine[i].path == keepPath )
@@ -2022,7 +2608,20 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // Benchmark BENCHMARK bodies reported as newly-dead the moment an agent added a test). No extraction
 // change — the underlying symbols were always indexed; only the dead-SET predicate narrowed — so
 // kParserVer/the mirrors deliberately did NOT move. Bumped 7 -> 8 to retire every blob written before it.
-constexpr std::uint32_t kQSnapCacheScheme = 8;
+// v9 (Q-DIAL-2, 2026-09-10) — `isDeadCandidate`'s header exclusion was REPLACED by languageInvokedSymbol,
+// so the dead SET both grew (every header symbol with no caller is now eligible) and shrank (constructors,
+// destructors, operators, bare types and main are out). Same shape as v6/v8 in the opposite direction, and
+// the direction is what makes the bump load-bearing rather than hygienic: a v8 blob's dead set was computed
+// while 96.8% of this repo's source was invisible to the predicate, so served to this binary every
+// newly-eligible dead symbol would read as ABSENT from the baseline dead set and be reported as freshly
+// dead — a whole tree of phantom regressions on the first run after an upgrade. No extraction change (the
+// symbols were always indexed; only the dead-SET predicate moved), so kParserVer and its mirrors deliberately
+// did NOT move. Bumped 8 -> 9 to retire every blob written before it.
+// v10 (Q-DIAL-3, 2026-09-10) — locBySym's VALUES are CODE lines now, not the physical span. Keys unchanged,
+// which is exactly what makes a stale blob dangerous rather than obvious: a v9 blob deserializes cleanly and
+// every symbol reads as having SHRUNK (its recorded physical loc exceeds the current code count), so the
+// verbosity kind reports NOTHING and says nothing about why. Bumped 9 -> 10.
+constexpr std::uint32_t kQSnapCacheScheme = 10;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -2248,38 +2847,38 @@ inline bool deserializeSnapshot( const std::string& blob, const std::string& hea
     return true;
 }
 
-// Read a qsnap blob whole. Returns 1 = readable non-empty file (out filled), 0 = absent/empty/unreadable/not-a-regular-file (a
-// CLEAN miss — no alert). A present-but-invalid blob still returns 1 here; deserializeSnapshot then rejects it,
+// Read a qsnap blob whole: its bytes for a readable non-empty file, nullopt for absent/empty/unreadable/not-a-regular-file
+// (a CLEAN miss — no alert). A present-but-invalid blob is still returned here; deserializeSnapshot then rejects it,
 // and the caller alerts. Binary-safe (no getline/text translation).
-inline int readQSnapBlob( const std::string& path, std::string& out )
+inline std::optional<std::string> readQSnapBlob( const std::string& path )
 {
     // L1 (Linux runtime probe): opening a DIRECTORY succeeds on Linux/glibc and fails on macOS, so a
     // non-regular file at a cache-blob path is a platform-split hazard rather than a clean miss — it cost
     // ingest.cpp's loadCache an abort (see isRegularFileAt there). A qsnap blob is always a REGULAR file
     // (atomicWriteFile renames one into place); every other shape is a miss on every platform, which is
-    // exactly what this function's 0 already means, so it stays silent and the caller recomputes.
+    // exactly what this function's nullopt already means, so it stays silent and the caller recomputes.
     {
         struct stat probe;
         if( ::stat( path.c_str(), &probe ) != 0 || !S_ISREG( probe.st_mode ) )
         {
-            return 0;
+            return std::nullopt;
         }
     }
 
     std::ifstream f( path, std::ios::binary | std::ios::ate );
     if( !f )
     {
-        return 0;
+        return std::nullopt;
     }
     const std::streamsize sz = f.tellg();
     if( sz <= 0 )
     {
-        return 0;
+        return std::nullopt;
     }
-    out.resize( static_cast<std::size_t>( sz ) );
+    std::string out( static_cast<std::size_t>( sz ), '\0' );
     f.seekg( 0 );
-    if( !f.read( out.data(), sz ) ) { out.clear(); return 0; }
-    return 1;
+    if( !f.read( out.data(), sz ) ) { return std::nullopt; }
+    return out;
 }
 
 // ─── Phase-M concurrency seam ───────────────────────────────────────────────────────────────────────
@@ -2338,12 +2937,12 @@ inline bool atomicWriteFile( const std::string& path, const std::string& blob )
 // -1 = present but corrupt/mismatched (caller decides whether to alert). Never throws.
 inline int probeSnapshotBlob( const std::string& path, const std::string& sha, Snapshot& out )
 {
-    std::string blob;
-    if( readQSnapBlob( path, blob ) != 1 )
+    const std::optional<std::string> blob = readQSnapBlob( path );
+    if( !blob )
     {
         return 0;
     }
-    return deserializeSnapshot( blob, sha, out ) ? 1 : -1;
+    return deserializeSnapshot( *blob, sha, out ) ? 1 : -1;
 }
 
 // RAII owner of a materialized commit tree — keep alive while reading file bytes through its ingest result.
@@ -2372,7 +2971,7 @@ inline std::string materializeCommitTree( const std::string& root, const std::st
     { DEGRADED_PATH_ALERT( "quality: commit-tree revision does not resolve to a commit — refusing to archive" ); return {}; }
 
     std::error_code ec;
-    const std::string tmpRoot = cacheDirLadder() + "/ripwire-" + tag + "-" + std::to_string( ::getpid() );
+    std::string tmpRoot = cacheDirLadder() + "/ripwire-" + tag + "-" + std::to_string( ::getpid() );   // not const: moved out on return
     fs::remove_all( fs::path( tmpRoot ), ec );                 // stale leftover from a crashed prior run
     if( !fs::create_directories( fs::path( tmpRoot ), ec ) && ec )
     { DEGRADED_PATH_ALERT( "quality: cannot create commit-tree temp dir" ); return {}; }
@@ -2522,7 +3121,7 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     // Cache keys, computed ONCE and shared by both the Snapshot cache (this step) and the ingest cache (step 3).
     const std::string headSha   = gitHeadSha( root );        // non-empty: gitRepoHasHistory passed above
     const bool        useCache  = !headSha.empty();
-    const std::string repoHex   = useCache ? headSnapRepoHex( root )     : std::string{};
+    const std::string repoHex   = useCache ? cacheRootKeyHex( root )     : std::string{};
     const std::string exclHex   = useCache ? headSnapExclHex( excludes, maxFileBytes ) : std::string{};   // ingest-cache family
     const std::string qExclHex  = useCache ? qsnapExclHex( excludes, maxFileBytes )    : std::string{};   // Snapshot-cache family
     const std::string qsnapPath = useCache ? qsnapCachePath( repoHex, qExclHex, headSha ) : std::string{};
@@ -2543,7 +3142,7 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
         {
             // the fprintf is the visible line in ALL build types (test/qsnapcachecheck.sh (e) gates on it);
             // DEGRADED_PATH_ALERT compiles out under NDEBUG.
-            std::fprintf( stderr, "ripwire: quality: HEAD Snapshot cache corrupt — recomputing\n" );
+            rw::emitRaw( stderr, "ripwire: quality: HEAD Snapshot cache corrupt — recomputing\n" );
             DEGRADED_PATH_ALERT( "quality: HEAD Snapshot cache corrupt — recomputing" );
         }
     }
@@ -2658,7 +3257,7 @@ inline bool loadRefTree( const std::string& repoRoot, const std::string& sha, co
     std::string cachePath;
     if( sha == gitHeadSha( repoRoot ) )
     {
-        cachePath = headSnapCachePath( headSnapRepoHex( repoRoot ), headSnapExclHex( excludes, maxFileBytes ), sha );
+        cachePath = headSnapCachePath( cacheRootKeyHex( repoRoot ), headSnapExclHex( excludes, maxFileBytes ), sha );
     }
 
     {
@@ -2700,7 +3299,7 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
         return { {}, false };
     }
 
-    const std::string repoHex   = headSnapRepoHex( root );
+    const std::string repoHex   = cacheRootKeyHex( root );
     const std::string exclHex   = headSnapExclHex( excludes, maxFileBytes );   // ingest-cache family (shared with qheadsnap)
     const std::string qbExclHex = qbodyExclHex( excludes, maxFileBytes );
     const std::string qbodyPath = qbodyCachePath( repoHex, qbExclHex, refSha );
@@ -2716,7 +3315,7 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
         }
         if( hit == -1 )
         {
-            std::fprintf( stderr, "ripwire: quality: window-ref body cache corrupt — recomputing\n" );
+            rw::emitRaw( stderr, "ripwire: quality: window-ref body cache corrupt — recomputing\n" );
             DEGRADED_PATH_ALERT( "quality: window-ref body cache corrupt — recomputing" );
         }
     }
@@ -2911,7 +3510,7 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
         return resolveCommitStream( gitLogNameOnlyRaw( root, coSince ), ing, maxFiles, churnCutoff, outChurn, onlyRoot );
     }
 
-    const std::string repoHex  = headSnapRepoHex( root );
+    const std::string repoHex  = cacheRootKeyHex( root );
     const std::string boundary = gitWindowBoundarySha( root, coSince );   // cheap — no --name-only
     std::string       keyMat   = headSha;
     keyMat.push_back( '\x1f' ); keyMat += coSince;
@@ -2919,9 +3518,9 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
     keyMat += "qchurn" + std::to_string( kQChurnCacheScheme );
     const std::string cachePath = shaKeyedCachePath( "qchurn", repoHex, std::string{}, keyMat );
 
-    RawCommitStream raw;
-    std::string      blob;
-    if( readQSnapBlob( cachePath, blob ) == 1 && deserializeRawCommitStream( blob, keyMat, raw ) )
+    RawCommitStream                  raw;
+    const std::optional<std::string> blob = readQSnapBlob( cachePath );
+    if( blob && deserializeRawCommitStream( *blob, keyMat, raw ) )
     {
         return resolveCommitStream( raw, ing, maxFiles, churnCutoff, outChurn, onlyRoot );   // warm hit — no walk
     }
@@ -2938,6 +3537,7 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
 inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::string_view root = {} )
 {
     Snapshot snap;
+    const std::vector<std::uint32_t> codeLoc         = codeLocByNode( ing );                     // Q-DIAL-3: the verbosity kind's metric is CODE lines
     const std::vector<std::uint64_t> topLevelCallees = topLevelCalleeNameHashes( ing );          // W1-S2: dead-kind evidence, built once
     const std::vector<std::string>   macroNames      = registeredMacroNames( root );             // P2.2: built-ins + .ripwire_config
     const std::vector<NodeId>        macroIds        = registeredMacroSymbolIds( ing, macroNames );
@@ -2953,7 +3553,7 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
         // last-writer-wins; otherwise a low-metric overload written last makes every later delta report a
         // phantom regression forever (THE trap). Every new per-symbol kind mirrors this MAX exactly.
         { std::uint32_t& slot = snap.ccxBySym[ key ];    slot = std::max( slot, s.ccx ); }
-        { std::uint32_t& slot = snap.locBySym[ key ];    slot = std::max( slot, s.loc ); }
+        { std::uint32_t& slot = snap.locBySym[ key ];    slot = std::max( slot, codeLoc[i] ); }   // Q-DIAL-3: CODE lines, not the physical span
         { std::uint32_t& slot = snap.nestBySym[ key ];   slot = std::max( slot, std::uint32_t( s.maxNest ) ); }
         { std::uint32_t& slot = snap.paramsBySym[ key ]; slot = std::max( slot, std::uint32_t( s.params ) ); }
         // THE ONE KIND THAT IS NOT A MAX, and the reason is the MAX itself. Every metric above collapses the
@@ -2998,6 +3598,28 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
     return snap;
 }
 
+// THE ONE PLACE THE QUALITY BASELINE SIDECAR IS OPENED, and the whole of its CWE-59/CWE-367 story.
+//
+// `path` is a fixed name inside a crawled repository and the write TRUNCATES, so a link planted at it turns
+// the tool's own write into an arbitrary-file overwrite. The refusal is the OPEN itself — O_NOFOLLOW, one
+// syscall, nothing between deciding and creating for a replacement to land in. The first fix asked lstat and
+// then opened anyway, which is check-then-open; see src/pathguard.h.
+//
+// It is a named seam rather than four lines inside writeBaseline for a reason a reviewer should be able to
+// check: acquiring a safe descriptor and serializing a snapshot are two jobs, and the security-relevant one
+// should be readable without scrolling through ten record loops. The two alerts are the two failure kinds
+// this site has always had, unchanged, and they stay macros HERE so each keeps its own file/line.
+inline int openBaselineSidecar( const std::string& path )
+{
+    auto [ fd, openErr ] = rw::pathguard::openNoFollowTruncate( "the quality baseline sidecar", path );
+    if( fd < 0 )
+    {
+        if( openErr == ELOOP ) { DEGRADED_PATH_ALERT( "quality: refusing to write the baseline sidecar through a symlink" ); }
+        else                   { DEGRADED_PATH_ALERT( "quality: cannot write baseline file" ); }
+    }
+    return fd;
+}
+
 // `absorbedGating` (H11, capture-audit 2026-09-04) is the number of GATING findings this tree already held
 // against HEAD when the pin was taken. Non-zero only under --allow-dirty — the bare form REFUSES rather
 // than absorb — and it is written as two records the snapshot reader skips as unknown kinds (`dirty 1`,
@@ -3006,8 +3628,14 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
 inline bool writeBaseline( const Snapshot& s, const std::string& path, std::string_view headSha = {},
                            std::size_t absorbedGating = 0 )
 {
-    std::ofstream f( path, std::ios::trunc );
-    if( !f ) { DEGRADED_PATH_ALERT( "quality: cannot write baseline file" ); return false; }
+    const int fd = openBaselineSidecar( path );
+    if( fd < 0 )
+    {
+        return false;
+    }
+    // The record stream is assembled in memory and handed to the descriptor in one write. The bytes below
+    // are unchanged, line for line — only their destination moved off a stream that cannot say O_NOFOLLOW.
+    std::ostringstream f;
     // v2 adds the Q1 kinds (loc/nest/params/api). Format is line-oriented + kind-tagged, so a v1 baseline (no
     // loc/nest/params/api lines) reads fine here — readBaseline skips unknown kinds and treats absent kinds as
     // empty; a v2 baseline read by an OLD binary likewise skips lines it doesn't know. Re-baseline after an
@@ -3020,7 +3648,12 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     // v4 (2026-08-25): every per-symbol key is pathQualifiedKey, not fnv1a64(baselineCanonId). readBaseline
     // REFUSES v3 and older rather than reading it — see there for why a silent read would be the dishonest
     // option here.
-    f << "# ripwire quality baseline v4 — regenerate with --quality-baseline; do not hand-edit\n";
+    // v5 (Q-DIAL-3, 2026-09-10): the `loc` record's VALUE changed meaning — CODE lines, not the physical span
+    // (codeLinesInBody). The key space is untouched, so a v4 sidecar would read perfectly and be WRONG in one
+    // direction only: its loc values are larger, every symbol reads as having SHRUNK, and the verbosity kind
+    // silently reports nothing at all. A kind that quietly stops firing is the worst of the three outcomes, so
+    // this is a version refusal like v4's, not a graceful skip.
+    f << "# ripwire quality baseline v5 — regenerate with --quality-baseline; do not hand-edit\n";
     // STALENESS STAMP: the HEAD commit the baseline was pinned at. --quality-delta compares this to the
     // current HEAD and, if they differ (a baseline left by an abandoned/parallel session, or from before a
     // commit), IGNORES the sidecar and falls back to the git-HEAD auto-baseline instead of reporting a wall
@@ -3077,7 +3710,9 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     {
         f << "api " << std::hex << h << std::dec << '\n';
     }
-    return true;
+    // Was an unconditional `return true`: a stream that failed to flush still reported a written baseline.
+    // The descriptor answers for the bytes, so a full disk is now a failure the caller can report.
+    return rw::pathguard::writeAllAndClose( fd, f.str() );
 }
 
 // Returns true only when `path` is a file that actually LOOKS like a baseline. r27 SUSPICION-A, second half:
@@ -3098,7 +3733,7 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
 // cost of refusing is one `--quality-baseline` re-pin.
 inline bool baselineHeaderIsForeign( const std::string& line ) noexcept
 {
-    return line.rfind( "# ripwire quality baseline v", 0 ) == 0 && line.find( " v4 " ) == std::string::npos;
+    return line.rfind( "# ripwire quality baseline v", 0 ) == 0 && line.find( " v5 " ) == std::string::npos;
 }
 
 // 2026-09-06 stranger audit: the sidecar readers dropped what they could not parse with no trace a Release
@@ -3108,23 +3743,36 @@ inline bool baselineHeaderIsForeign( const std::string& line ) noexcept
 struct BaselineReadStats
 {
     bool        present        = false;   // the file opened
+    bool        symlinkRefused = false;   // a SYMLINK sits at the name: refused unopened (pathguard.h round 3), so `present` stays false
     bool        unrecognizable = false;   // opened, but no line of the format's structure in it
     bool        preQ1          = false;   // structure, but no per-symbol loc records: origin cannot be classified
     std::size_t badLines       = 0;       // lines of a known kind whose payload did not parse — skipped
 };
 
+// THE ONE PLACE THE BASELINE SIDECAR IS READ — shared by readBaseline, readBaselineHeadSha and
+// readBaselineAbsorbed, and openBaselineSidecar's other half with the same answer to a link: O_NOFOLLOW, refused
+// in the open itself. A link here used to be followed on the way in, so the link chose which file was honored as
+// the floor. Why an in-tree link is refused too is round 3 of src/pathguard.h.
+inline rw::pathguard::NoFollowRead readBaselineSidecar( const std::string& path )
+{
+    rw::pathguard::NoFollowRead sidecar = rw::pathguard::openNoFollowRead( "the quality baseline sidecar", path );
+    if( sidecar.refused ) { DEGRADED_PATH_ALERT( "quality: refusing to read the baseline sidecar through a symlink" ); }
+    return sidecar;
+}
+
 inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadStats& stats )
 {
     stats = BaselineReadStats{};
-    std::ifstream f( path );
-    if( !f )
+    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path );
+    if( !sidecar.opened )
     {
+        stats.symlinkRefused = sidecar.refused;   // "no sidecar" and "a sidecar refused unopened" are different answers
         return false;
     }
     stats.present = true;
     std::size_t recognizedLineCount = 0;
     std::string line;
-    while( std::getline( f, line ) )
+    while( sidecar.readLine( line ) )
     {
         if( line.empty() )
         {
@@ -3135,7 +3783,7 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
             // The refusal is a USER-FACING disclosure, so it must survive NDEBUG: behind only a
             // DEGRADED_PATH_ALERT a Release binary refuses SILENTLY and the caller reads "no baseline
             // found" — a refusal that hides its reason misleads exactly like the misread it prevents.
-            std::fprintf( stderr, "ripwire: quality: baseline sidecar predates the pathQualifiedKey scheme — refused, re-pin with --quality-baseline\n" );
+            rw::emitRaw( stderr, "ripwire: quality: baseline sidecar predates this binary's baseline format — refused, re-pin with --quality-baseline\n" );
             out = Snapshot{};
             return false;
         }
@@ -3243,13 +3891,13 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
 // obeyed. `writeBaseline` only ever writes `gitHeadSha`'s output, so no legitimate sidecar is affected.
 inline std::string readBaselineHeadSha( const std::string& path )
 {
-    std::ifstream f( path );
-    if( !f )
+    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path );
+    if( !sidecar.opened )
     {
         return {};
     }
     std::string line;
-    while( std::getline( f, line ) )
+    while( sidecar.readLine( line ) )
     {
         if( line.rfind( "head ", 0 ) == 0 )
         {
@@ -3277,13 +3925,13 @@ inline std::string readBaselineHeadSha( const std::string& path )
 // one the report has something to say about.
 inline std::size_t readBaselineAbsorbed( const std::string& path )
 {
-    std::ifstream f( path );
-    if( !f )
+    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path );
+    if( !sidecar.opened )
     {
         return 0;
     }
     std::string line;
-    while( std::getline( f, line ) )
+    while( sidecar.readLine( line ) )
     {
         if( line.rfind( "absorbed ", 0 ) != 0 )
         {
@@ -3353,6 +4001,7 @@ struct BaselineSelection
     const char*    marker = "git-HEAD";                        // static storage; safe to hold as a bare pointer
     bool           staleFileRemoved = false;                   // Stale only: the unlink LANDED (file gone from disk)
     bool           sidecarUnreadable = false;                  // a sidecar EXISTS but could not be read (unrecognizable or pre-Q1): ignored, named
+    bool           sidecarSymlinkRefused = false;              // a SYMLINK sits at the name and was refused unopened (pathguard.h round 3): ignored, named
     std::size_t    sidecarBadLines   = 0;                      // honored sidecar: lines skipped as unparseable
 
     bool isSidecarHonored() const noexcept { return source == BaselineSource::Sidecar; }
@@ -3382,7 +4031,15 @@ inline BaselineSelection selectBaseline( const std::string& root, const std::str
         sel.snapshot = Snapshot{};                             // readBaseline already clears on the unrecognizable path; belt and braces
         sel.source   = BaselineSource::Absent;
         sel.marker   = "git-HEAD";
-        if( readStats.present && ( readStats.unrecognizable || readStats.preQ1 ) )
+        if( readStats.symlinkRefused )
+        {
+            // Round 3 (pathguard.h): a link at the name is refused on read as on write. Never "no sidecar existed"
+            // (the git-HEAD marker) about an entry that is right there, and never "unreadable" about bytes that
+            // were deliberately not opened.
+            sel.sidecarSymlinkRefused = true;
+            sel.marker                = "git-HEAD (symlinked sidecar refused)";
+        }
+        else if( readStats.present && ( readStats.unrecognizable || readStats.preQ1 ) )
         {
             sel.sidecarUnreadable = true;                      // 2026-09-06: never "no sidecar existed" about a file that is right there
             sel.marker            = "git-HEAD (sidecar unreadable)";
@@ -3445,10 +4102,15 @@ inline BaselineSelection selectBaseline( const std::string& root, const std::str
 //
 // The three existing gates (file churn-hot / this diff rewrites the symbol / committed thrash evidence)
 // establish that a symbol IS short-horizon churn. This pass answers a NARROWER question about the CURRENT
-// uncommitted edit specifically: does it MODIFY pre-existing (committed) lines that were themselves last
-// touched inside the churn window (SELF — genuine thrash, keep current severity), or does it only ADD new
-// lines / touch lines that predate the window (AMBIENT — the file is hot, but this particular edit isn't
-// touching hot content) — sev=minor, facet churn="ambient".
+// uncommitted edit specifically: how many COMMITTED commits inside the churn window last wrote the
+// pre-existing lines this edit modifies. One or more ⇒ the edit touches hot content, facet churn="self"; none
+// (the edit only ADDS lines, or touches lines that predate the window) ⇒ churn="ambient".
+//
+// Q-DIAL-1 (2026-09-10) — SEVERITY no longer follows that facet. BOTH facets are informational; what GATES is
+// the count reaching kShortHorizonMinCommits, i.e. "rewritten by >= 2 COMMITTED commits inside the window, the
+// working edit not counted". SELF-gates was measured at 0% precision over twelve landed commits (135 of 171
+// gating rows, audit Q1 §2b/§2d) for a structural reason: on an active branch every symbol you wrote this week
+// and are touching again modifies a line you yourself committed inside the window.
 //
 // Mechanism: `git diff --unified=0 HEAD -- path` gives zero-context unified-diff hunks
 // ("@@ -oldStart[,oldCount] +newStart[,newCount] @@"; git omits a count of 1). A hunk with oldCount==0 is a
@@ -3486,15 +4148,36 @@ inline std::string gitBlameConfigPins( const std::string& root )
     return hasFile ? " -c blame.ignoreRevsFile=" + shSingleQuote( ignoreRevs ) : std::string( " -c blame.ignoreRevsFile=" );
 }
 
-// Blame `root`'s HEAD over `relPath`'s [startLine, startLine+lineCount-1] and report whether ANY line in that
-// range was last committed at or after `windowCutoffEpoch` (the same cutoff basis gitFileCommitCountsInDayWindow
-// and gitWindowRefSha use: HEAD's own committer epoch minus the window, never wall-clock).
-inline bool gitBlameRangeHasWindowCommit( const std::string& root, const std::string& relPath,
-                                          std::uint32_t startLine, std::uint32_t lineCount, std::int64_t windowCutoffEpoch )
+// Blame `root`'s HEAD over `relPath`'s [startLine, startLine+lineCount-1] and APPEND, to `outShas`, the
+// fnv1a64 of every DISTINCT commit that last wrote a line in that range at or after `windowCutoffEpoch` (the
+// same cutoff basis gitFileCommitCountsInDayWindow and gitWindowRefSha use: HEAD's own committer epoch minus
+// the window, never wall-clock).
+//
+// Q-DIAL-1 (2026-09-10) — this used to answer a BOOL ("is any line in this range hot"), which is the SELF vs
+// AMBIENT question and nothing more. The churn kind's GATING question is narrower and needs a count: was this
+// symbol rewritten by >= kShortHorizonMinCommits COMMITTED commits inside the window, not counting the working
+// edit? One in-window commit is a single touch — the branch you are on — and gating on it made 135 of 171
+// gating rows on twelve landed commits the agent's own footprint (audit Q1 §2b/§2d). Blame runs on HEAD, so
+// the uncommitted edit is excluded BY CONSTRUCTION rather than by subtraction.
+//
+// The accumulator is a caller-owned vector rather than a return value because one symbol spans several diff
+// hunks and a commit that wrote lines in two of them must count ONCE; the caller sorts + uniques the union.
+// Ordering: blame output order, which is deterministic for a fixed HEAD + path, and the caller's sort makes
+// the count order-independent anyway. NO short-circuit any more (the bool arm could stop at the first hot
+// line): the whole range is read, which costs the rest of ONE already-spawned blame and no extra subprocess.
+//
+// PORCELAIN SHAPE, and why the sha is tracked separately from the time: `git blame --porcelain` prints a
+// commit's metadata (committer-time among it) only the FIRST time that commit appears; later lines from the
+// same commit carry the bare "<sha> <orig> <final> <n>" header alone. So the header line sets the CURRENT
+// sha and the committer-time line decides whether that sha counts — a repeat header with no metadata needs no
+// second decision, because the sha is already in (or already out of) the set.
+inline void gitBlameRangeWindowCommits( const std::string& root, const std::string& relPath,
+                                        std::uint32_t startLine, std::uint32_t lineCount, std::int64_t windowCutoffEpoch,
+                                        std::vector<std::uint64_t>& outShas )
 {
     if( startLine == 0 || lineCount == 0 )
     {
-        return false;
+        return;
     }
     const std::string cmd = "git -c core.quotepath=false" + gitBlameConfigPins( root ) + " -C " + shSingleQuote( root )
                           + " blame --porcelain -L " + std::to_string( startLine ) + ",+" + std::to_string( lineCount )
@@ -3502,9 +4185,9 @@ inline bool gitBlameRangeHasWindowCommit( const std::string& root, const std::st
     std::FILE* pipe = popen( cmd.c_str(), "r" );
     if( !pipe )
     {
-        return false;
+        return;
     }
-    bool hot = false;
+    std::uint64_t curSha = 0;
     char buf[ 512 ];
     while( std::fgets( buf, sizeof( buf ), pipe ) )
     {
@@ -3519,16 +4202,19 @@ inline bool gitBlameRangeHasWindowCommit( const std::string& root, const std::st
             && ( ln.size() == 40 || ln[40] == ' ' );
         if( isHeaderSha )
         {
-            continue; // the sha itself carries no date — wait for its committer-time line
+            curSha = fnv1a64( ln.substr( 0, 40 ) );   // the sha itself carries no date — wait for its committer-time line
+            continue;
         }
         if( ln.rfind( "committer-time ", 0 ) == 0 )
         {
             const std::int64_t t = std::strtoll( std::string( ln.substr( 15 ) ).c_str(), nullptr, 10 );
-            if( t >= windowCutoffEpoch ) { hot = true; break; }     // one hot line is enough — short-circuit
+            if( t >= windowCutoffEpoch && curSha != 0 )
+            {
+                outShas.push_back( curSha );
+            }
         }
     }
     pclose( pipe );
-    return hot;
 }
 
 // One zero-context unified-diff hunk, in the two coordinate systems the SELF test needs: the OLD-side range
@@ -3545,7 +4231,7 @@ static_assert( sizeof( DiffHunk ) == 16, "DiffHunk is a 4×u32 POD" );
 
 // P3 (r27) — the RUN-SCOPED hunk memo. `git diff --unified=0 HEAD -- <path>` is a pure function of (HEAD,
 // working tree), both FIXED for the life of one --quality-delta call (the code's own section comment says so),
-// yet churnEditTouchesHotLine spawned it once PER SYMBOL: a subprocess-shim log showed EIGHT byte-identical
+// yet the churn blame pass spawned it once PER SYMBOL: a subprocess-shim log showed EIGHT byte-identical
 // spawns for a single dirty file. Caller owns the storage (house rule — views/handles at seams, no hidden
 // process-global state that a second root or a second MCP request would silently share).
 using DiffHunkMemo = HashMap<std::string, std::vector<DiffHunk>>;
@@ -3612,17 +4298,26 @@ inline const std::vector<DiffHunk>& diffHunksMemoized( DiffHunkMemo& memo, const
     return memo.emplace( relPath, gitDiffHunksVsHead( root, relPath ) ).first->second;
 }
 
-// Does the CURRENT uncommitted edit to `relPath` (vs HEAD) modify any pre-existing line that overlaps the
-// symbol's current [symStart, symStart+symLoc-1] span AND was itself last committed inside the window? See the
-// section comment above for the full mechanism. `symStart`/`symLoc` come straight from the working-tree
-// Symbol (s.line / s.loc). `memo` is the caller-owned per-run hunk cache (P3).
-inline bool churnEditTouchesHotLine( DiffHunkMemo& memo, const std::string& root, const std::string& relPath,
-                                     std::uint32_t symStart, std::uint32_t symLoc, std::int64_t windowCutoffEpoch )
+// HOW MANY DISTINCT in-window COMMITS last wrote the pre-existing lines that the CURRENT uncommitted edit to
+// `relPath` (vs HEAD) modifies inside the symbol's [symStart, symStart+symLoc-1] span. See the section comment
+// above for the full mechanism. `symStart`/`symLoc` come straight from the working-tree Symbol (s.line /
+// s.loc). `memo` is the caller-owned per-run hunk cache (P3).
+//
+// Q-DIAL-1: the two facts the churn kind reads off this ONE number, so they cannot drift apart —
+//   >= 1  the edit touches hot content at all  → churn="self" (informational; it was the GATING rule until
+//         2026-09-10, and it is the agent's own edit window on any active branch);
+//   >= kShortHorizonMinCommits  the lines were rewritten by that many COMMITTED commits inside the window,
+//         the working edit excluded (blame is on HEAD) → this is the rewrite-thrash the kind exists to name,
+//         and the only form of it that gates.
+// 0 (no hunk, no git, no blame) stays AMBIENT, the degrade that never inflates severity on missing evidence.
+inline std::uint32_t churnEditWindowCommitCount( DiffHunkMemo& memo, const std::string& root, const std::string& relPath,
+                                                 std::uint32_t symStart, std::uint32_t symLoc, std::int64_t windowCutoffEpoch )
 {
     if( symStart == 0 )
     {
-        return false;
+        return 0;
     }
+    std::vector<std::uint64_t> shas;
     const std::uint32_t symEnd = symStart + ( symLoc > 0 ? symLoc - 1 : 0 );
 
     for( const DiffHunk& h : diffHunksMemoized( memo, root, relPath ) )
@@ -3655,12 +4350,11 @@ inline bool churnEditTouchesHotLine( DiffHunkMemo& memo, const std::string& root
             continue; // this hunk falls outside the symbol
         }
 
-        if( gitBlameRangeHasWindowCommit( root, relPath, h.oldStart, h.oldCount, windowCutoffEpoch ) )
-        {
-            return true;                                             // one hot line is enough — short-circuit
-        }
+        gitBlameRangeWindowCommits( root, relPath, h.oldStart, h.oldCount, windowCutoffEpoch, shas );
     }
-    return false;
+    std::sort( shas.begin(), shas.end() );
+    shas.erase( std::unique( shas.begin(), shas.end() ), shas.end() );   // a commit spanning two hunks of one symbol counts ONCE
+    return std::uint32_t( shas.size() );
 }
 
 // one reported regression (something the change made WORSE).
@@ -3968,7 +4662,7 @@ struct AckRecord
 inline std::string ackMapKey( const std::string& kind, std::uint64_t key )
 {
     char hex[ 20 ];
-    std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( key ) );
+    rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( key ) );
     return kind + " " + hex;
 }
 
@@ -4303,7 +4997,7 @@ struct SidecarWriteLock
         const std::string identity = canonEc ? sidecarPath : canon.string();
 
         char name[ 64 ];
-        std::snprintf( name, sizeof( name ), "ripwire-sidecar-%016llx.lock",
+        rw::formatTo( name, sizeof( name ), "ripwire-sidecar-{:016x}.lock",
                        static_cast<unsigned long long>( fnv1a64( identity ) ) );
         const std::string lockDir = cacheDirLadder() + "/locks";
         ::mkdir( lockDir.c_str(), 0700 );
@@ -4360,7 +5054,7 @@ inline std::string renderAckRecords( const gtl::btree_map<std::string, AckRecord
     for( const auto& [ mapKey, r ] : acks )                       // btree order → byte-stable, always-sorted file (the merge-friendly guarantee)
     {
         char hex[ 20 ];
-        std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( r.key ) );
+        rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( r.key ) );
         f << "ack " << r.kind << ' ' << hex << ' ' << r.ackNow << ' ';
         // R1: cid= is OMITTED entirely when unavailable rather than written as a zero — a row that never had
         // a content identity must not be indistinguishable from one whose body hashed to 0, and a repo that
@@ -4368,7 +5062,7 @@ inline std::string renderAckRecords( const gtl::btree_map<std::string, AckRecord
         if( r.cid != 0 )
         {
             char cidHex[ 20 ];
-            std::snprintf( cidHex, sizeof( cidHex ), "%016llx", static_cast<unsigned long long>( r.cid ) );
+            rw::formatTo( cidHex, sizeof( cidHex ), "{:016x}", static_cast<unsigned long long>( r.cid ) );
             f << "cid=" << cidHex << ' ';
         }
         // P1.4: same OMIT-when-unavailable rule cid= follows, and for the same reason — a repo whose sessions
@@ -5246,7 +5940,7 @@ inline std::string staleAcksXml( const std::vector<StaleAck>& staleAcks, EscapeF
     for( const StaleAck& sa : staleAcks )
     {
         char hex[ 20 ];
-        std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( sa.key ) );
+        rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( sa.key ) );
         out += "<sa kind=\"";
         out += sa.kind;
         out += "\" key=\"";
@@ -5292,7 +5986,7 @@ inline std::string staleAcksJsonArray( const std::vector<StaleAck>& staleAcks ) 
         }
         first = false;
         char hex[ 20 ];
-        std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( sa.key ) );
+        rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( sa.key ) );
         out += "{\"kind\":\"";
         out += rw::jsonesc::escapeMcp( sa.kind );
         out += "\",\"key\":\"";
@@ -5396,12 +6090,17 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                                              std::string_view root = {},
                                              const std::vector<std::string>& excludes = {},
                                              std::size_t maxFileBytes = kDefaultMaxFileBytes,
-                                             std::size_t* registerMacroExcludedOut = nullptr )   // P2.2: honest disclosure count, additive+optional — see isDeadCandidate
+                                             std::size_t* registerMacroExcludedOut = nullptr,   // P2.2: honest disclosure count, additive+optional — see isDeadCandidate
+                                             std::size_t* apiNewSurfaceOut = nullptr )          // Q-DIAL-4: the api-surface new-symbol COUNT that replaced N never-gating rows
 {
     std::vector<Regression> regs;
     if( registerMacroExcludedOut )
     {
         *registerMacroExcludedOut = 0;
+    }
+    if( apiNewSurfaceOut )
+    {
+        *apiNewSurfaceOut = 0;
     }
 
     // A4-P10 — HOIST the per-symbol quality key. It materializes a path-qualified string + hashes it; the
@@ -5561,8 +6260,18 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     // the trap is handled the same way for every one of them.
     // `minorDelta` is the kind's materiality tier: a regression whose growth (now − was) is under it is
     // reported sev="minor" and does not gate exit 2 (0 = no tier, every regression is major).
+    //
+    // Q-DIAL-3 — `growthTiered` swaps that flat delta tier for the pair of thresholds kMaterialGrowthPct /
+    // kSubBarGrowthPct define, for complexity and verbosity only:
+    //   OVER the bar   — gate on a bar CROSSING (was <= bar < now) or on growth >= 25%; anything else is a
+    //                    real row, printed, sev="minor". It names debt the change did not create.
+    //   UNDER the bar  — a DOUBLING that clears the floor is a minor row instead of silence. Nothing here can
+    //                    gate: the symbol is still under its bar, and the row exists to be seen, not to stop
+    //                    a commit.
+    // `metricOf` takes the NodeId rather than the Symbol because verbosity's metric is not on the Symbol any
+    // more (codeLoc is read off the body bytes); the other three still just read a field.
     const auto perSymbolKind =
-        [ & ]( const char* kindName, std::uint32_t bar, std::uint32_t minorDelta,
+        [ & ]( const char* kindName, std::uint32_t bar, std::uint32_t minorDelta, bool growthTiered,
                const gtl::btree_map<std::uint64_t, std::uint32_t>& baseMap,
                auto metricOf )
     {
@@ -5574,7 +6283,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 continue;
             }
             std::uint32_t& slot = nowBySym[ keyByNode[i] ];
-            slot = std::max( slot, metricOf( ing.symbols[i] ) );
+            slot = std::max( slot, metricOf( i ) );
         }
         ScratchMap<std::uint8_t> reported( ing.symbols.size() );
         for( NodeId i = 0; i < ing.symbols.size(); ++i )
@@ -5596,19 +6305,41 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             const std::uint32_t now = nowIt->second;
             const auto          it  = baseMap.find( key );
             const std::uint32_t was = ( it == baseMap.end() ) ? 0u : it->second;
-            if( now > was && now > bar )
+            if( now <= was )
             {
-                regs.push_back( { kindName, g.canonId[i], was, now, key, minorDelta > 0 && now - was < minorDelta,
+                continue;   // nothing got worse on this axis
+            }
+            const std::uint64_t growthPct = ( std::uint64_t( now - was ) * 100 ) / std::max( was, 1u );
+            if( now > bar )
+            {
+                const bool crossed  = was <= bar;
+                const bool material = !growthTiered ? ( minorDelta == 0 || now - was >= minorDelta )
+                                                    : ( crossed || growthPct >= kMaterialGrowthPct );
+                regs.push_back( { kindName, g.canonId[i], was, now, key, !material,
                                   {}, !existedAtBaseline( key ) } );          // origin: the finding IS this symbol
+                stampLoc( i );
+            }
+            else if( growthTiered && was > 0 && growthPct >= kSubBarGrowthPct && now >= subBarGrowthFloor( bar ) )
+            {
+                // Q-DIAL-3 — still UNDER the bar, so this can never gate; it is the row that turns synthetics
+                // S4b (6 → 55 LOC) and S8-sub-bar (ccx 5 → 13) from silence into something a reader can see.
+                // `was > 0` is load-bearing, not defensive: growth is a RATIO and a brand-new symbol has
+                // nothing to double from, so without it every added function of 40 code lines or ccx 10
+                // reported as "grew 4200%". Measured on the 40-commit ref-pair replay: 38 of the 57 rows this
+                // tier first produced were exactly that (`was="0"`), including every symbol of the vendored
+                // timsort landing at 08416403.
+                regs.push_back( { kindName, g.canonId[i], was, now, key, /*isMinor=*/true,
+                                  {}, !existedAtBaseline( key ) } );
                 stampLoc( i );
             }
         }
     };
 
-    perSymbolKind( "complexity", kCcxBar,   kMinorCcxDelta,   base.ccxBySym,    []( const Symbol& s ){ return s.ccx; } );
-    perSymbolKind( "verbosity",  kLocBar,   kMinorLocDelta,   base.locBySym,    []( const Symbol& s ){ return s.loc; } );
-    perSymbolKind( "nesting",    kNestBar,  0,                base.nestBySym,   []( const Symbol& s ){ return std::uint32_t( s.maxNest ); } );
-    perSymbolKind( "params",     kParamBar, kMinorParamDelta, base.paramsBySym, []( const Symbol& s ){ return std::uint32_t( s.params ); } );
+    const std::vector<std::uint32_t> nowCodeLoc = codeLocByNode( ing );   // Q-DIAL-3 — the same rule computeSnapshot recorded the baseline with
+    perSymbolKind( "complexity", kCcxBar,   kMinorCcxDelta,   true,  base.ccxBySym,    [ & ]( NodeId i ){ return ing.symbols[i].ccx; } );
+    perSymbolKind( "verbosity",  kLocBar,   kMinorLocDelta,   true,  base.locBySym,    [ & ]( NodeId i ){ return nowCodeLoc[i]; } );
+    perSymbolKind( "nesting",    kNestBar,  0,                false, base.nestBySym,   [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].maxNest ); } );
+    perSymbolKind( "params",     kParamBar, kMinorParamDelta, false, base.paramsBySym, [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].params ); } );
 
     // PERF (P5W2) — the working-tree clone pass is the dominant --quality-delta cost: on a large private C++ corpus the
     // Type-3 pass alone is ~2.7-3.2 s (60 M intra-bucket pair-visits; tokenization is only ~3 %). It is a PURE
@@ -5629,6 +6360,68 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     // group that classifies but fails the rest of the conjunction gates as before, name and all.
     const std::vector<CloneIdiomVerdict> exactIdioms = classifyCloneGroupIdioms( ing, exactClones );
     const std::vector<CloneIdiomVerdict> type3Idioms = classifyCloneGroupIdioms( ing, type3Clones );
+
+    // ── Q-DIAL-5 (2026-09-10) — three shapes that are not THIS CHANGE'S duplication ─────────────────────
+    // Duplication's gating precision over 40 replayed commits was 0%: 11 gating rows, 9 noise and 2 wrong.
+    // Three mechanisms produced them, and each is a property of the GROUP rather than of its text, so each is
+    // decidable here without touching the clone matcher:
+    //   (a) ONE OVERLOAD SET — every member shares one canonical id. Overloads of a function are near-
+    //       identical by construction (emitTo|emitTo, sort::stable|sort::stable); reporting them as a copy is
+    //       reporting the language.
+    //   (b) WITHDRAWN — see the note below.
+    //   (c) VENDORED — every member sits under a vendored path (see isVendoredPath). Upstream's shape is not
+    //       this repo's to fix, and one commit produced 9 such rows.
+    // ONE-FILE IS NOT ON THIS LIST, and the reason is worth more than the rows it would have dropped. The
+    // audit's labelling rule W3b called a group whose members share one file "sibling/alternate
+    // implementations" (mergeHi|mergeLo, gallopLeft|gallopRight) and 13 groups were labelled WRONG by it. The
+    // clause was written, and TWO of this repo's own gates went red on it: test/clonededupcheck.sh's whole
+    // positive case is a copy of a reused helper appended to the SAME file, and test/qualitycheck.sh §3 pins
+    // a dup1/dup2 pair inside one new file as a duplication finding. Both were written deliberately, and both
+    // are right: a copy-pasted body is duplication wherever it lands, and file identity cannot tell a
+    // deliberate specialization from a paste. A hand rule in a labelling script does not outrank two gates
+    // that encode the opposite policy, so the drop is withdrawn rather than argued around. The rows it aimed
+    // at need the discriminator the acks themselves use — no shared domain identifier — which is a
+    // cloneidiom.h round, not a group-shape predicate.
+    //
+    // NOT a token floor either: raising kMinCloneTokens was measured and REFUTED. The canonical true positive
+    // (synthetic S1, a 12-line copy of a reused helper) is 59 tokens, while the idiom collisions in the same
+    // replay run 22, 24, 31, 36, 56, 65, 66, 74, 78, 91, 92, 96, 114 and 127 — a floor above 22 loses true
+    // positives before it clears any noise. Token count is the wrong axis.
+    const std::vector<std::string> vendoredPrefixes = vendoredPathPrefixes( root );
+    const auto cloneGroupIsOutOfScope = [ & ]( const CloneGroup& cg )
+    {
+        if( cg.members.size() < 2 )
+        {
+            return false;
+        }
+        bool             oneId   = true;
+        bool             allVend = true;
+        std::string_view firstId;
+        bool             haveFirst = false;
+        for( NodeId m : cg.members )
+        {
+            if( m >= ing.symbols.size() || m >= g.canonId.size() )
+            {
+                return false;   // unclassifiable member — never claim a whole-group property
+            }
+            const std::uint32_t f = ing.symbols[m].fileId;
+            if( f >= ing.files.size() )
+            {
+                return false;
+            }
+            if( !isVendoredPath( relForHash( ing.files[f], root ), vendoredPrefixes ) )
+            {
+                allVend = false;
+            }
+            if( !haveFirst )
+            {
+                firstId = g.canonId[m]; haveFirst = true;
+                continue;
+            }
+            if( g.canonId[m] != firstId ) { oneId = false; }
+        }
+        return oneId || allVend;
+    };
 
     gtl::btree_map<std::uint64_t, std::uint8_t> dupSeen;
     const auto reportNewClones =
@@ -5655,6 +6448,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             if( allTestScript )
             {
                 continue;
+            }
+            if( cloneGroupIsOutOfScope( cg ) )
+            {
+                continue;   // Q-DIAL-5 — an overload set, one file, or vendored upstream (see the block above)
             }
             if( !dupSeen.insert( { h, 1 } ).second )
             {
@@ -5752,6 +6549,17 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         std::uint32_t& slot = nowParamsBySym[ keyByNode[i] ];
         slot = std::max( slot, std::uint32_t( ing.symbols[i].params ) );
     }
+    // Q-DIAL-4 — the two inputs the tiering below reads. `paramsRowKeys` is derived from the rows ALREADY
+    // pushed rather than plumbed out of perSymbolKind: `params` is the only kind that can have reported an
+    // arity change by now, and reading it off `regs` keeps the fold honest even if that kind's own gate moves.
+    std::vector<std::uint64_t> paramsRowKeys;
+    for( const Regression& r : regs )
+    {
+        if( r.kind == "params" ) { paramsRowKeys.push_back( r.key ); }
+    }
+    std::sort( paramsRowKeys.begin(), paramsRowKeys.end() );
+    const std::vector<std::uint8_t> trailingDefaults = trailingDefaultByNode( ing );
+
     ScratchMap<std::uint8_t> apiSeen( ing.symbols.size() );
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
@@ -5768,7 +6576,21 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         if( !std::binary_search( base.publicApi.begin(), base.publicApi.end(), key ) )
         {
             const bool isNewSymbol = !existedAtBaseline( key );                // SAME oracle the r26 origin axis uses — one source of truth
-            regs.push_back( { "api-surface", g.canonId[i], 0, 0, key, isNewSymbol, isNewSymbol ? "new-symbol" : "contract-change", isNewSymbol } );
+            if( isNewSymbol )
+            {
+                // Q-DIAL-4 — A COUNT, NOT N ROWS. This row could never gate (the legend says so), it is one
+                // per new export, and it dominated the document: 103 of 119 api-surface rows over 40 replayed
+                // commits, 193 of the 1,177 rows in this repo's own committed ack ledger — acked one at a
+                // time, by hand, for a fact the header can state in one attribute. api-new-surface= on the
+                // root says how much new public surface arrived; nothing is hidden, and nothing about it was
+                // ever actionable per row.
+                if( apiNewSurfaceOut )
+                {
+                    ++( *apiNewSurfaceOut );
+                }
+                continue;
+            }
+            regs.push_back( { "api-surface", g.canonId[i], 0, 0, key, false, "contract-change", false } );   // a visibility flip: it existed, and it is public now
             stampLoc( i );
             continue;
         }
@@ -5779,11 +6601,30 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             continue; // no baseline params recorded — nothing to compare
         }
         const std::uint32_t nowParams = nowParamsBySym[ key ];                // MAX-aggregated — see the overload-trap note above
-        if( nowParams != pit->second )
+        if( nowParams == pit->second )
         {
-            regs.push_back( { "api-surface", g.canonId[i], pit->second, nowParams, key, false, "contract-change", false } );   // origin: reached only for a symbol already in the baseline public set
-            stampLoc( i );
+            continue;
         }
+        if( nowParams < pit->second )
+        {
+            continue;   // Q-DIAL-4 — the surface got SMALLER. This document's first sentence is "only what a
+                        // change made WORSE"; three rows over 40 commits reported an arity DROP as a
+                        // regression (probeBodyCost 7->5, selectMonotoneBodySubset 7->5,
+                        // liftPackageDirMention 4->3). Drift is not the contract this verb publishes.
+        }
+        if( std::binary_search( paramsRowKeys.begin(), paramsRowKeys.end(), key ) )
+        {
+            continue;   // Q-DIAL-4 — ONE FACT, ONE ROW. The `params` kind already reported this symbol's arity
+                        // change, and it is the highest-precision kind in the table (77% TRUE); a second row
+                        // saying the same thing under another kind is what agents ack. Synthetic S3
+                        // (3 -> 7 parameters) produced two rows for one edit.
+        }
+        // Q-DIAL-4 — one ADDED parameter that carries a DEFAULT is source-compatible by construction: every
+        // existing caller still compiles, which is what 113 of this repo's 132 api-surface acks say in those
+        // words. Still a row (the contract moved), reported sev="minor".
+        const bool trailingDefault = nowParams == pit->second + 1 && i < trailingDefaults.size() && trailingDefaults[i] != 0;
+        regs.push_back( { "api-surface", g.canonId[i], pit->second, nowParams, key, trailingDefault, "contract-change", false } );   // origin: reached only for a symbol already in the baseline public set
+        stampLoc( i );
     }
 
     // ── §D#4-1 error-masking (GitClear +47%) ──────────────────────────────────────────────────────────────
@@ -5861,7 +6702,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 // B10.2d — SELF-vs-AMBIENT window cutoff, same basis as gates 1/3 (HEAD's own committer epoch
                 // minus the window, never wall-clock). A failed lookup (should not happen here since refOk
                 // already proved resolvable history, but kept defensive) leaves churnCutoffEpoch==0, which
-                // degrades every symbol below to AMBIENT (churnEditTouchesHotLine is gated on `> 0`).
+                // degrades every symbol below to AMBIENT (churnEditWindowCommitCount is gated on `> 0`).
                 std::int64_t churnCutoffEpoch = 0;
                 {
                     const std::string epochStr = gitOneLine( std::string( root ), "log -1 --format=%ct HEAD 2>/dev/null" );
@@ -5929,13 +6770,23 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                     }
 
                     // B10.2d: SELF vs AMBIENT — does THIS diff modify a pre-existing line that was itself
-                    // last committed inside the window? See the section comment above churnEditTouchesHotLine.
-                    const bool self = churnCutoffEpoch > 0
-                                    && churnEditTouchesHotLine( churnHunkMemo, std::string( root ),
-                                                                std::string( relForHash( ing.files[ s.fileId ], root ) ),
-                                                                s.line, s.loc, churnCutoffEpoch );
+                    // last committed inside the window? See the section comment above churnEditWindowCommitCount.
+                    // Q-DIAL-1 — ONE blame-derived number decides both the facet and the severity (see
+                    // churnEditWindowCommitCount): >=1 in-window commit on the edited lines is SELF, and it
+                    // is now INFORMATIONAL exactly as AMBIENT already was; >= kShortHorizonMinCommits is the
+                    // rewrite-thrash that gates. Measured on twelve LANDED commits of this repo (audit Q1
+                    // §2b): the old "SELF gates" rule fired 135 of 171 gating rows, 0% of them a finding a
+                    // reviewer would act on, because on an active branch the symbol you wrote this week and
+                    // are touching again is churn="self" by construction.
+                    const std::uint32_t windowCommits = churnCutoffEpoch > 0
+                                                      ? churnEditWindowCommitCount( churnHunkMemo, std::string( root ),
+                                                                                    std::string( relForHash( ing.files[ s.fileId ], root ) ),
+                                                                                    s.line, s.loc, churnCutoffEpoch )
+                                                      : 0u;
+                    const bool self  = windowCommits > 0;
+                    const bool gates = windowCommits >= kShortHorizonMinCommits;
                     regs.push_back( { "short-horizon-churn", g.canonId[i], 0, commitCounts[ s.fileId ], key,
-                                      !self, self ? "self" : "ambient", false } );   // now = window commit count on the file; origin: ALWAYS preexisting (gate 2 above required a baseline body)
+                                      !gates, self ? "self" : "ambient", false } );   // now = window commit count on the file; origin: ALWAYS preexisting (gate 2 above required a baseline body)
                     stampLoc( i );
                 }
             }
@@ -5988,6 +6839,11 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 if( maxFanin < kReusedHelperMinFanin )
                 {
                     continue; // no PREEXISTING reused helper in the group
+                }
+                if( cloneGroupIsOutOfScope( cg ) )
+                {
+                    continue;   // Q-DIAL-5 — the same three shapes, on the same groups: a helper cannot have
+                                // eroded its own reuse by being overloaded, and an upstream body is not ours.
                 }
                 if( !reuseSeen.insert( { h, 1 } ).second )
                 {

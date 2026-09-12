@@ -19,7 +19,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/namingconsistencyfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -30,11 +30,11 @@ echo "namingconsistencycheck: BIN=$BIN  FIX=$FIX"
 OUT="$( "$BIN" "$FIX" --naming-consistency --no-cache 2>"$TMP/err" )"; rc=$?
 
 # ── 1) runs clean and exit code is always 0 (a lens, never a gate) ─────────────────────────────────────
-[ $rc -eq 0 ] && ok "runs clean, exit 0" || { no "exit code $rc (want 0 — this verb never gates)"; cat "$TMP/err"; }
+if [ $rc -eq 0 ]; then ok "runs clean, exit 0"; else { no "exit code $rc (want 0 — this verb never gates)"; cat "$TMP/err"; }; fi
 
 # ── 2) deterministic: two runs byte-identical ───────────────────────────────────────────────────────────
 OUT2="$( "$BIN" "$FIX" --naming-consistency --no-cache 2>/dev/null )"
-[ "$OUT" = "$OUT2" ] && ok "two runs are byte-identical" || no "two runs differ — determinism broken"
+if [ "$OUT" = "$OUT2" ]; then ok "two runs are byte-identical"; else no "two runs differ — determinism broken"; fi
 
 # ── 3) well-formed XML ──────────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then

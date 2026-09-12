@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // pageview.h — §P8 ("Contract-level" bullets 1+2): the ONE paging window
 // and the ONE root-element disclosure every high-cardinality verb shares, so the vocabulary cannot drift
@@ -246,9 +248,14 @@ inline PageDisclosureValues computePageDisclosure( std::size_t rowsShown, std::s
 // once, and each surface supplies only its own punctuation.
 struct PageSyntax
 {
-    const char* capOnly;      // printf: rowsShown, cappedLiteral
-    const char* full;         // printf: rowsShown, cappedLiteral, rowTotal, hasMoreLiteral, nextOffset, offset, limit
-    const char* pagingOnly;   // printf: rowTotal, hasMoreLiteral, nextOffset, offset, limit — rule 1's noun-prefixed
+    bool json;                // WHICH DIALECT. The three format members below are documentation now:
+                              // the emitters branch on this and pass a LITERAL, because a runtime
+                              // format string needs std::vformat + std::make_format_args, whose
+                              // signature changed in C++23 and whose behaviour has not been uniform.
+                              // A literal is checked at compile time and cannot vary by library.
+    const char* capOnly;      // std::format: rowsShown, cappedLiteral
+    const char* full;         // std::format: rowsShown, cappedLiteral, rowTotal, hasMoreLiteral, nextOffset, offset, limit
+    const char* pagingOnly;   // std::format: rowTotal, hasMoreLiteral, nextOffset, offset, limit — rule 1's noun-prefixed
                               // exception (pagingDisclosure below), where the caller spelled its own shown_<noun>= pair
     const char* yes;          // how this surface spells a true boolean
     const char* no;
@@ -258,17 +265,19 @@ struct PageSyntax
 };
 inline constexpr PageSyntax kXmlPageSyntax
 {
-    " shown=\"%zu\" capped=\"%s\"",
-    " shown=\"%zu\" capped=\"%s\" total=\"%zu\" has_more=\"%s\" next_offset=\"%zu\" offset=\"%d\" limit=\"%d\"",
-    " total=\"%zu\" has_more=\"%s\" next_offset=\"%zu\" offset=\"%d\" limit=\"%d\"",
+    false,
+    " shown=\"{}\" capped=\"{}\"",
+    " shown=\"{}\" capped=\"{}\" total=\"{}\" has_more=\"{}\" next_offset=\"{}\" offset=\"{}\" limit=\"{}\"",
+    " total=\"{}\" has_more=\"{}\" next_offset=\"{}\" offset=\"{}\" limit=\"{}\"",
     "1", "0",
     " counts_floor=\"1\""
 };
 inline constexpr PageSyntax kJsonPageSyntax
 {
-    ",\"shown\":%zu,\"capped\":%s",
-    ",\"shown\":%zu,\"capped\":%s,\"total\":%zu,\"has_more\":%s,\"next_offset\":%zu,\"offset\":%d,\"limit\":%d",
-    ",\"total\":%zu,\"has_more\":%s,\"next_offset\":%zu,\"offset\":%d,\"limit\":%d",
+    true,
+    ",\"shown\":{},\"capped\":{}",
+    ",\"shown\":{},\"capped\":{},\"total\":{},\"has_more\":{},\"next_offset\":{},\"offset\":{},\"limit\":{}",
+    ",\"total\":{},\"has_more\":{},\"next_offset\":{},\"offset\":{},\"limit\":{}",
     "true", "false",         // JSON spells its booleans as booleans; a leading comma splices after the caller's own keys
     ",\"counts_floor\":true"
 };
@@ -288,24 +297,64 @@ inline const char* pageDisclosure( char* buf, std::size_t bufCap, std::size_t ro
     if( !v.active ) { buf[0] = '\0';  return buf; }
 
     const char* isCapped = v.capped ? syn.yes : syn.no;
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wformat-nonliteral"
-    int written = 0;
+    // The dialect row is chosen at runtime BY DESIGN (see the table above), so this is the one place that
+    // needs a runtime format. -Wformat-nonliteral goes with printf: there is no printf here to mis-parse.
+    std::size_t written = 0;
     if( !v.paging )
     {
-        written = std::snprintf( buf, bufCap, syn.capOnly, rowsShown, isCapped );
+        written = syn.json ? rw::formatTo( buf, bufCap, ",\"shown\":{},\"capped\":{}", rowsShown, isCapped )
+                           : rw::formatTo( buf, bufCap, " shown=\"{}\" capped=\"{}\"", rowsShown, isCapped );
     }
     else
     {
-        written = std::snprintf( buf, bufCap, syn.full, rowsShown, isCapped, rowTotal, v.hasMore ? syn.yes : syn.no,
-                                 v.nextOrTotal, v.offsetOut, v.limitOut );
+        written = syn.json
+            ? rw::formatTo( buf, bufCap, ",\"shown\":{},\"capped\":{},\"total\":{},\"has_more\":{},\"next_offset\":{},\"offset\":{},\"limit\":{}",
+                            rowsShown, isCapped, rowTotal, v.hasMore ? syn.yes : syn.no, v.nextOrTotal, v.offsetOut, v.limitOut )
+            : rw::formatTo( buf, bufCap, " shown=\"{}\" capped=\"{}\" total=\"{}\" has_more=\"{}\" next_offset=\"{}\" offset=\"{}\" limit=\"{}\"",
+                            rowsShown, isCapped, rowTotal, v.hasMore ? syn.yes : syn.no, v.nextOrTotal, v.offsetOut, v.limitOut );
     }
-    if( v.floor && written > 0 && std::size_t( written ) < bufCap )
+    if( v.floor && written > 0 && written < bufCap )
     {
-        std::snprintf( buf + written, bufCap - std::size_t( written ), "%s", syn.floor );
+        rw::formatTo( buf + written, bufCap - written, "{}", syn.floor );
     }
-#pragma clang diagnostic pop
     return buf;
+}
+
+// ── LB-G (listing-paging round, 2026-09-10) — the SECONDARY listing's pair, emitted ONLY on a CUT ────────
+//
+// Rule 6 reserves the paging half for a report's PRIMARY listing; a SECONDARY one "discloses through its own
+// shown_<noun>=/<noun>_capped= pair". Three reports had that listing and no pair at all: --doc-drift's per-doc
+// <a> rows (cut at 12), --flags' per-gate <read> rows (cut at 8) and --flip's six row families (cut at 25).
+// They are per-CHILD listings — one per <doc>, one per <gate> — so there is no single root window to page,
+// and the honest disclosure is the pair on the child that was cut.
+//
+// EMITTED ONLY WHEN THE CUT HAPPENED, both halves together or neither. Rule 3 says capped= is always emitted
+// beside its shown=, and that is exactly what this does — what it does NOT do is emit shown_<noun>="8"
+// <noun>_capped="0" on the ninety-nine children that fit, which on --flags would be 86 of 88 gates paying
+// bytes to say nothing was dropped. Rule 3's own sentence sanctions the shape ("If a verb emits no shown=,
+// it emits no capped= either — --skill-scan emits the pair only on a capped scan; that is conformant"), and
+// the round's rule 1 requires it: a capped="0" is a disclosure that never fires, and the reader cannot tell
+// it from one that cannot fire.
+//
+// `totalAttr` is rule 2's total: pass nullptr when the element ALREADY carries the row total under its own
+// name (--flags' reads=, --doc-drift's <weak-file-line n=>), and a name when it does not (--doc-drift's <doc>,
+// whose row population is drift= + dated= and has no single attribute — a reader should not have to sum two
+// numbers to learn what was cut). A caller must never pass a name the element already uses for something
+// else: `anchors=` on <doc> counts EVERY anchor in the doc, not the failed ones these rows list, and reusing
+// it would rebuild the dark=/dark_gates= count-vs-bool collision §P8 renamed its way out of.
+inline std::string secondaryCutAttrs( const char* noun, std::size_t shown, std::size_t total, const char* totalAttr = nullptr )
+{
+    if( shown >= total )
+    {
+        return {};   // nothing was cut: the element is byte-identical to what it was
+    }
+    std::string a = " shown_" + std::string( noun ) + "=\"" + std::to_string( shown )
+                  + "\" " + std::string( noun ) + "_capped=\"1\"";
+    if( totalAttr != nullptr )
+    {
+        a += " " + std::string( totalAttr ) + "=\"" + std::to_string( total ) + "\"";
+    }
+    return a;
 }
 
 // The PAGING HALF ALONE — rule 1's noun-prefixed exception, and the ONLY sanctioned way to emit a page
@@ -334,11 +383,18 @@ inline const char* pagingDisclosure( char* buf, std::size_t bufCap, std::size_t 
     const bool hasMore = windowEnd < rowTotal;
     if( limit <= 0 && offset <= 0 && !hasMore ) { buf[0] = '\0';  return buf; }
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wformat-nonliteral"
-    std::snprintf( buf, bufCap, syn.pagingOnly, rowTotal, hasMore ? syn.yes : syn.no,
-                   hasMore ? windowEnd : rowTotal, offset > 0 ? offset : 0, limit > 0 ? limit : 0 );
-#pragma clang diagnostic pop
+    if( syn.json )
+    {
+        rw::formatTo( buf, bufCap, ",\"total\":{},\"has_more\":{},\"next_offset\":{},\"offset\":{},\"limit\":{}",
+                      rowTotal, hasMore ? syn.yes : syn.no,
+                      hasMore ? windowEnd : rowTotal, offset > 0 ? offset : 0, limit > 0 ? limit : 0 );
+    }
+    else
+    {
+        rw::formatTo( buf, bufCap, " total=\"{}\" has_more=\"{}\" next_offset=\"{}\" offset=\"{}\" limit=\"{}\"",
+                      rowTotal, hasMore ? syn.yes : syn.no,
+                      hasMore ? windowEnd : rowTotal, offset > 0 ? offset : 0, limit > 0 ? limit : 0 );
+    }
     return buf;
 }
 

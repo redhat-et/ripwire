@@ -9,6 +9,8 @@
 
 #include "ingest.h"
 #include "model.h"
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 #include "infra/Diagnostics.h"   // VERIFY — the enum-index bounds check
 
@@ -32,10 +34,10 @@ namespace
 // serialize.h's calibration array can size on it (model.h documents why), and ingest never assigns it.
 inline constexpr const char* kLangName[] = {
     "cpp", "py", "ts", "go", "rust", "swift", "objc", "md", "js", "sh", "java", "rb", "?", "json", "cs", "c", "toml", "yaml",
-    "php", "lua", "ex",
+    "php", "lua", "ex", "dart", "kt",
 };
 
-static_assert( std::size( kLangName ) == std::size_t( rw::Lang::Elixir ) + 1,
+static_assert( std::size( kLangName ) == rw::kLangCount,
                "kLangName drifted from the Lang enum — update both together" );
 
 // SymKind has no table here: rw::symTag() already IS the declarative one. Only its count is needed,
@@ -68,7 +70,7 @@ int main( int argc, char** argv )
 {
     if( argc < 2 )
     {
-        std::fprintf( stderr, "usage: %s <directory>\n", argv[ 0 ] );
+        rw::emitTo( stderr, "usage: {} <directory>\n", argv[ 0 ] );
         return 1;
     }
 
@@ -89,24 +91,24 @@ int main( int argc, char** argv )
         ++langCount[ langIndex( s.lang ) ];
     }
 
-    std::printf( "==== ripwire ingest probe ====\n" );
-    std::printf( "root:        %s\n", root );
-    std::printf( "files:       %zu\n", ir.files.size() );
-    std::printf( "symbols:     %zu\n", ir.symbols.size() );
-    std::printf( "references:  %zu\n", ir.references.size() );
+    rw::emitRaw( stdout, "==== ripwire ingest probe ====\n" );
+    rw::emitTo( stdout, "root:        {}\n", root );
+    rw::emitTo( stdout, "files:       {}\n", ir.files.size() );
+    rw::emitTo( stdout, "symbols:     {}\n", ir.symbols.size() );
+    rw::emitTo( stdout, "references:  {}\n", ir.references.size() );
 
     // every kind, zeros included — a kind the corpus does NOT have is evidence too, and there are only
     // eight of them. `sec` (markdown heading) and `other` used to be off the end of the printf.
-    std::printf( "\nsymbols by kind:\n " );
+    rw::emitRaw( stdout, "\nsymbols by kind:\n " );
     for( std::size_t kind = 0; kind < kSymKindCount; ++kind )
     {
-        std::printf( "  %s=%d", rw::symTag( static_cast<rw::SymKind>( kind ) ), kindCount[ kind ] );
+        rw::emitTo( stdout, "  {}={}", rw::symTag( static_cast<rw::SymKind>( kind ) ), kindCount[ kind ] );
     }
-    std::printf( "\n" );
+    rw::emitRaw( stdout, "\n" );
 
     // languages: only the ones that ACTUALLY appear — sixteen rows of mostly zeros is noise, and what
     // the probe is evidence FOR is which grammars extracted something.
-    std::printf( "\ndefs by language:\n " );
+    rw::emitRaw( stdout, "\ndefs by language:\n " );
     {
         int langsShown = 0;
         for( std::size_t lang = 0; lang < std::size( kLangName ); ++lang )
@@ -116,16 +118,16 @@ int main( int argc, char** argv )
                 continue;
             }
 
-            std::printf( "  %s=%d", kLangName[ lang ], langCount[ lang ] );
+            rw::emitTo( stdout, "  {}={}", kLangName[ lang ], langCount[ lang ] );
             ++langsShown;
         }
 
         if( langsShown == 0 )
         {
-            std::printf( "  (no defs)" );
+            rw::emitRaw( stdout, "  (no defs)" );
         }
     }
-    std::printf( "\n" );
+    rw::emitRaw( stdout, "\n" );
 
     // ---- references resolved vs file-scope (fromSymbol == kNoNode) ----
     {
@@ -137,7 +139,7 @@ int main( int argc, char** argv )
                 ++attributed;
             }
         }
-        std::printf( "\nreferences attributed to an enclosing symbol: %zu / %zu (rest are file-scope)\n",
+        rw::emitTo( stdout, "\nreferences attributed to an enclosing symbol: {} / {} (rest are file-scope)\n",
                      attributed, ir.references.size() );
     }
 
@@ -153,31 +155,31 @@ int main( int argc, char** argv )
 
     // ---- first ~40 symbols + their references ----
     const std::size_t showN = ir.symbols.size() < 40 ? ir.symbols.size() : 40;
-    std::printf( "\n---- first %zu symbols (name | kind | lang | file:line  -> references) ----\n", showN );
+    rw::emitTo( stdout, "\n---- first {} symbols (name | kind | lang | file:line  -> references) ----\n", showN );
 
     for( std::size_t i = 0; i < showN; ++i )
     {
         const rw::Symbol& s = ir.symbols[ i ];
         const char* file = ( s.fileId < ir.files.size() ) ? ir.files[ s.fileId ].c_str() : "?";
 
-        std::printf( "[%4u] %-28s %-7s %-4s  %s:%u\n",
+        rw::emitTo( stdout, "[{:>4}] {:<28} {:<7} {:<4}  {}:{}\n",
                      s.id, s.name.c_str(), rw::symTag( s.kind ), langName( s.lang ), file, s.line );
 
         auto it = bySym.find( s.id );
         if( it != bySym.end() )
         {
             int shown = 0;
-            std::printf( "        calls:" );
+            rw::emitRaw( stdout, "        calls:" );
             for( const rw::Reference* r : it->second )
             {
-                std::printf( " %s", r->calleeName.c_str() );
+                rw::emitTo( stdout, " {}", r->calleeName.c_str() );
                 if( ++shown >= 12 )
                 {
-                    std::printf( " ..." );
+                    rw::emitRaw( stdout, " ..." );
                     break;
                 }
             }
-            std::printf( "\n" );
+            rw::emitRaw( stdout, "\n" );
         }
     }
 

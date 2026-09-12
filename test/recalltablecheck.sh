@@ -28,7 +28,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -69,7 +69,7 @@ echo
 echo "=== table is whole-or-nothing under a forced cut ==="
 OUT="$( recall --max-tokens=450 )"
 MARK="$( printf '%s' "$OUT" | grep -oE '\[truncated: [0-9]+ of [0-9]+ bytes[^]]*\]' )"
-[ -n "$MARK" ] && ok "truncation fired: $MARK" || { no "no [truncated: …] marker — fixture/budget did not force a cut"; printf '%s\n' "$OUT" | head -6; }
+if [ -n "$MARK" ]; then ok "truncation fired: $MARK"; else { no "no [truncated: …] marker — fixture/budget did not force a cut"; printf '%s\n' "$OUT" | head -6; }; fi
 
 HAS_START=0; printf '%s' "$OUT" | grep -q 'TABLE_START_SENTINEL' && HAS_START=1
 HAS_END=0;   printf '%s' "$OUT" | grep -q 'TABLE_END_SENTINEL'   && HAS_END=1
@@ -89,7 +89,7 @@ fi
 # never a half-emitted row cut mid-cell. Every emitted line containing "row0" must also contain the
 # trailing "|" that closes its last cell.
 BAD_ROWS="$( printf '%s' "$OUT" | grep -aE '\| row[0-9]{3} ' | grep -avE '\|[[:space:]]*$' | wc -l | tr -d ' ' )"
-[ "$BAD_ROWS" = "0" ] && ok "no row line missing its closing pipe" || no "$BAD_ROWS row line(s) missing a closing pipe — torn mid-row"
+if [ "$BAD_ROWS" = "0" ]; then ok "no row line missing its closing pipe"; else no "$BAD_ROWS row line(s) missing a closing pipe — torn mid-row"; fi
 
 # ─── budget compliance: kept-bytes never exceeds the byte ceiling the cut was computed against ────────
 echo
@@ -109,7 +109,7 @@ echo
 echo "=== determinism — same input + budget, byte-identical ==="
 recall --max-tokens=450 >"$TMP/d1"
 recall --max-tokens=450 >"$TMP/d2"
-cmp -s "$TMP/d1" "$TMP/d2" && ok "byte-identical across two runs" || no "NON-deterministic across two runs"
+if cmp -s "$TMP/d1" "$TMP/d2"; then ok "byte-identical across two runs"; else no "NON-deterministic across two runs"; fi
 
 echo
 [ "$fail" -eq 0 ] && { echo "recalltablecheck: ALL PASS"; exit 0; }

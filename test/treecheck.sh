@@ -26,7 +26,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/queryfix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -40,7 +40,7 @@ MAP="$( run )"
 
 # ── 1) exactly 2 <file> entries ──────────────────────────────────────────────────────────────────────
 NF="$( printf '%s' "$TREE" | grep -oE '<file ' | wc -l | tr -d ' ' )"
-[ "$NF" = 2 ] && ok "--tree: exactly 2 <file> entries" || no "--tree: expected 2 <file> entries, got $NF"
+if [ "$NF" = 2 ]; then ok "--tree: exactly 2 <file> entries"; else no "--tree: expected 2 <file> entries, got $NF"; fi
 
 # ── 2) per-file symbols= counts are the TRUE totals (chain=4, util=5), not the shown subset ──────────
 csym(){ printf '%s' "$TREE" | grep -oE "<file p=\"[^\"]*$1\" symbols=\"[0-9]+\"" | grep -oE 'symbols="[0-9]+"' | grep -oE '[0-9]+'; }
@@ -188,9 +188,9 @@ else
 fi
 
 # ── 6) determinism + xml well-formed ────────────────────────────────────────────────────────────────
-[ "$( run --tree )" = "$( run --tree )" ] && ok "--tree deterministic (byte-identical run-to-run)" || no "--tree non-deterministic"
+if [ "$( run --tree )" = "$( run --tree )" ]; then ok "--tree deterministic (byte-identical run-to-run)"; else no "--tree non-deterministic"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$TREE" | xmllint --noout - 2>/dev/null && ok "--tree xml well-formed" || no "--tree xml malformed"
+    if printf '%s' "$TREE" | xmllint --noout - 2>/dev/null; then ok "--tree xml well-formed"; else no "--tree xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

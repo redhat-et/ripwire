@@ -23,7 +23,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # house convention: the suite passes the binary via RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 echo "churnjsonstampcheck: BIN=$BIN"
@@ -64,8 +64,8 @@ fi
                   || no "churn JSON header is MISSING keys the pagerank header has: $MISSING"
 
 # (2) the values carry MEANING (not pinned to a sha/window that moves with the tree)
-[ "$RANK_BY" = "churn" ] && ok "rank_by == \"churn\"" || no "rank_by is '$RANK_BY', want \"churn\""
-[ -n "$WINDOW" ]         && ok "window is non-empty (\"$WINDOW\")" || no "window is empty — the mined window is the fact that makes k= interpretable"
+if [ "$RANK_BY" = "churn" ]; then ok "rank_by == \"churn\""; else no "rank_by is '$RANK_BY', want \"churn\""; fi
+if [ -n "$WINDOW" ]; then ok "window is non-empty (\"$WINDOW\")"; else no "window is empty — the mined window is the fact that makes k= interpretable"; fi
 case "$AT" in
     [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ok "at is a git sha stamp (\"$AT\")" ;;
     *) no "at is '$AT', want an abbreviated git sha (optionally +dirty)" ;;

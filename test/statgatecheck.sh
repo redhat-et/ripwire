@@ -42,7 +42,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 note(){ printf '  NOTE  %s\n' "$*"; }
 
@@ -188,7 +188,7 @@ if command -v xmllint >/dev/null 2>&1; then
     for f in "$TMP/a.warm" "$TMP/b.warm" "$TMP/b3.warm" "$TMP/c.warm" "$TMP/d.rm"; do
         xmllint --noout "$f" 2>/dev/null || allok=0
     done
-    [ "$allok" = 1 ] && ok "all warm outputs well-formed XML" || no "some warm output malformed"
+    if [ "$allok" = 1 ]; then ok "all warm outputs well-formed XML"; else no "some warm output malformed"; fi
 else
     ok "xml well-formed (xmllint absent — skipped)"
 fi

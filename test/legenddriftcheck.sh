@@ -37,7 +37,7 @@ TMPDIR="$( mktemp -d )"; trap 'rm -rf "$TMPDIR"' EXIT
 LEGEND_CHECK="$ROOT/test/legenddriftcheck.py"
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 echo "legenddriftcheck: BIN=$BIN  CORPUS=$CORPUS"

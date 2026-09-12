@@ -19,11 +19,12 @@
 // already carries schema= is left alone entirely — the layer never double-compacts.
 //
 // THE COMPLETENESS VOCABULARY is emitted present-only: a term rides the legend iff the payload carries the
-// attribute. The counts_floor reading keeps floormarkcheck's anchor ("is a FLOOR, never a total") verbatim —
-// one attribute, one reading, in both dialects (lane L4's law).
+// attribute (or, for a MapHeaderRead term, iff the kept map header carries the field). The counts_floor reading
+// keeps floormarkcheck's anchor ("is a FLOOR, never a total") verbatim — one attribute, one reading, in both
+// dialects (lane L4's law).
 //
 // CONSUMERS: main.cpp (CLI — stdout is captured for the run and rewritten once), mcp.h (the textResult
-// envelope, under the opt-in `legend:"compact"` argument). Gate: test/compactlegendcheck.sh (U)/(L)/(M).
+// envelope, under the opt-in `legend:"compact"` argument). Gate: test/compactlegendcheck.sh (U)/(L)/(M)/(D)/(S).
 
 #include <cctype>
 #include <cstddef>
@@ -108,8 +109,11 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "cochange",     "cochange",     "files that change together in git: <pair a= b= together= deg= conf_ab= conf_ba= surprising=>, or for of= <f p= together= conf_rev=>" },
     { "communities",  "communities",  "call-graph modules (Louvain): <community id= size= dir= label=> of <member t= n= p=>" },
     { "community",    "community",    "ONE module id=: <member t= n= p=> ranked members, its <bridge> edges; size= the TRUE count" },
-    { "zoom",         "zoom",         "nested module hierarchy: <module level= id= size= dir= shown= capped=> of <member t= n= p=>; levels= deep" },
-    { "tree",         "tree",         "each file with its top symbols by rank, files by best symbol: <file p= symbols=> of <s t= n=>; files_unlisted= have none" },
+    // zoom and tree (2026-09-12): symbols=/isolated=/top_modules=/levels_shown= and files= ride EVERY answer of their root and
+    // were defined only by the full legend, so they read here beside the levels=/files_unlisted= this line already named.
+    // zoom's line is the (U) --zoom probe's budget: 324 -> 394 B of its 400.
+    { "zoom",         "zoom",         "nested module hierarchy: <module level= id= size= dir= shown= capped=> of <member t= n= p=>; levels_shown= of levels= printed; symbols= = isolated= + size= of all top_modules=" },
+    { "tree",         "tree",         "each file with its top symbols by rank, files by best symbol: <file p= symbols=> of <s t= n=>; of files= indexed, files_unlisted= have none" },
     { "seams",        "seams",        "cross-directory call edges NO test reaches: <seam from= to= untested= shown= capped=> of <edge caller= p= callee= cp=>" },
     { "doc-drift",    "doc-drift",    "markdown anchors that no longer hold: <doc p=> of <a k= l= c= why= ref= want= got= tgt=>; unchecked/dated rows disclose the rest" },
     { "flags",        "flags",        "BUILT but DARK: <gate name= kind=compile|cmake|env default= dark= regions= loc= reads= p= l=> with <read p= l=> sites" },
@@ -139,6 +143,14 @@ inline constexpr std::string_view kCompactProsePrefixes[] =
                                        // native compact legends of grep/slice (`<!-- ripwire slice ripwire.slice/v1: …`),
                                        // which this layer restates at ≤400 B; --for's is never routed here (main.cpp)
     "<!-- root= ",                     // the shared root-relative-paths block (graphlegend.h)
+    "<!-- graph_unindexed=",           // the #66 third-gauge clause where it rides as its OWN comment
+                                       // (graphlegend.h graphUnindexedLegendComment — connect/lego/verify/
+                                       // nonlocal-state): prose like every other legend sentence, and the
+                                       // completeness table below carries its compact reading. Without this
+                                       // row the full ~200 B sentence survived into the compact dialect on
+                                       // --connect alone, one verb paying full price for a fact the table
+                                       // states in a third of the bytes.
+
     "<!-- r:root=",                    // the map header's terse spelling of the same block
     "<!-- pr_iters=",                  // the PageRank convergence block on map-family roots
     "<!-- at= is the git commit",      // the churn/quality provenance block
@@ -151,11 +163,14 @@ inline constexpr std::string_view kCompactProsePrefixes[] =
     "<!-- max_tokens=",                // --max-tokens' fit_bytes block
     "<!-- with-profile: ",             // --with-profile's heat_* block
     "<!-- slice-",                     // slice's seed/flow/since FULL-dialect tiers (slice-seed:/slice-flow:/slice-since:)
-    "<!-- root rows: ",                // --stray-content's root-row block
+    "<!-- root rows: ",                // the multi-root roots table's reading (serialize.h kMultiRootTableLegend, the one
+                                       // emitter of this opener); the completeness table's element-qualified label= row
+                                       // restates it
     "<!-- multi-root workspace: ",     // the multi-root churn note
     "<!-- hdr:",                       // the map header's ignored_files definition
     "<!-- format=columnar: ",          // the columnar re-serialization block
     "<!-- a body's sibs=",             // --expand's sibs= block
+    "<!-- extent_suspect=",            // the extent-honesty row reading (serialize.h kExtentSuspectRowLegend)
 };
 
 // Comments that share a prose opener and must stay: --for's trailer (est_tokens=/dropped_positive=/weak= are
@@ -182,22 +197,58 @@ inline bool isCompactProseComment( std::string_view comment ) noexcept
     return false;
 }
 
+// Where a term is read BESIDES the head: the map header. serialize.h buildStats writes the map's gauges as unquoted
+// `name=N` fields of one comment, `<!-- files=… -->`, which this layer keeps as DATA, while the `<!-- hdr:` clauses (and
+// the always-on legend's hdr: half) that define those fields are prose and go.
+enum class MapHeaderRead : std::uint8_t
+{
+    No,     // the head (and, with wholeDoc or onTag, the payload) only
+    Also,   // the head OR the header: est_tokens= rides the header alone under order=stable, over_ceiling= under max-tokens
+    Only,   // the header alone: extent_suspect_syms=, macro_blanked_files=, max_tokens=, external= are DIFFERENT quoted
+            // attributes on other verbs (a hotspots row, the skipped root, the for root, a uses row)
+};
+
 // The completeness vocabulary: attribute → terse reading. Emitted present-only, in this order. The counts_floor
 // reading carries floormarkcheck's BRIEF_ANCHOR verbatim ("is a FLOOR, never a total").
 struct CompactCompletenessTerm
 {
     std::string_view attr;
     std::string_view reading;
-    bool             wholeDoc = false;   // a ROW-level term (amb=, parse_degraded=, dangling=): read anywhere in the payload
+    bool             wholeDoc  = false;   // a ROW-level term (amb=, parse_degraded=, dangling=): read anywhere in the payload
+    std::string_view onTag     = {};      // read ONLY on this element and never on the head: label= on the multi-root <root>
+                                          // rows is not the label= --communities carries on its first child
+    MapHeaderRead    mapHeader = MapHeaderRead::No;
 };
 
 inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
 {
     { "counts_floor",      "counts_floor=1: every count is a FLOOR, never a total" },
     { "graph_ambiguous",   "graph_ambiguous=/graph_unresolved=: resolver gauge" },
+    // Issue #66's third gauge, and it needs its OWN row rather than a widening of the one above: the pair is
+    // unconditional on a graph-floored root while this one is OMITTED AT ZERO, so folding it into the gauge
+    // sentence would define an attribute most documents do not carry. Present-only, like every term here —
+    // which is also what kept it invisible: the compact dialect stripped the full clause and had nothing to
+    // put back, on every verb, for the whole of v0.6.0.
+    { "graph_unindexed",   "graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge" },
+    // THE COUNT QUALIFIERS the graph_unindexed row above did not bring along (2026-09-12). Each is absent at zero and
+    // its full clause rides only a document that carries it (graphlegend.h declinedCallsLegend( bool ),
+    // unprovenDefsLegend( bool ), the callees-only clause of callHierarchyLegendOpen( bool )), so the prose strip removed
+    // a definition this table never put back: --callers/--callees/--impact, their columnar forms and the MCP impact
+    // default all printed these numbers undefined. test/compactlegendcheck.sh (S) reads every conditional attribute the
+    // graphlegend.h family emits from source and fails the next one that lands without a row here.
+    // Written to the shortest honest form: a document carrying these is already near the 400 B ceiling, and the
+    // callees answer can carry the first two at once.
+    { "bodyless_defs",     "bodyless_defs=K: K of defs= have no body, so no callees to read" },
+    { "unproven_defs",     "unproven_defs=K: K same-named defs not tied to that file, in no count or row (bare name shows them)" },
+    { "declined_calls",    "declined_calls=K: K call sites left unbound (several defs, none chosen), in no count or row" },
+    // --uses=Owner.field's member form (fielduses.h appends kUsesFieldLegend to that answer alone). owner_candidates= is a
+    // row attribute that exists only beside member=, so one head term defines the whole form.
+    { "member",            "member=Owner.field: rows use that field; pinned=/amb_sites= rows with one owner/with owner_candidates=K; owners_of_name= fields so named" },
     { "hits_capped",       "hits_capped=1: hits= is a floor" },
-    { "est_tokens",        "est_tokens=: price as emitted (an upper bound under compact)" },
-    { "over_ceiling",      "over_ceiling=1: budget not met" },
+    // Both also ride the map header: est_tokens= alone there under order=stable (the root drops it), over_ceiling=1 there
+    // under max-tokens. Same number, same reading, so one row reads both places.
+    { "est_tokens",        "est_tokens=: price as emitted (an upper bound under compact)", false, {}, MapHeaderRead::Also },
+    { "over_ceiling",      "over_ceiling=1: budget not met", false, {}, MapHeaderRead::Also },
     // M1 (terminality round A, 2026-09-05): the ranked head's own floor — how many rank>0 candidates the
     // ceiling ladder cut. It rides the root on --for and (since M1) on --pack-task/explore too, so the
     // compact dialect has to define it wherever it appears, or the default answer names a number with no
@@ -206,6 +257,43 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "withheld",          "withheld=: rows the budget cut" },
     { "at",                "at=: commit+dirty+shallow" },
     { "root",              "root=: p= relative to it" },
+    // The multi-root roots table (serialize.h writeMultiRootTable): its `<!-- root rows:` clause is prose-stripped above
+    // and nothing put the reading back. ELEMENT-qualified, because --communities carries a different label= on its rows.
+    { "label",             "<root label= p=>: a workspace root; label= prefixes every p=/id=", true, "root" },
+    // THE MAP FAMILY AND --impact (2026-09-12), the same defect a second time. prconverge.h's clause rides as the map's
+    // `<!-- pr_iters=` comment and inside every other ranked verb's legend, prose either way, so pr_iters= reached every
+    // compact PageRank root undefined (--impact is an (L) loop verb, which is why its reading is this short).
+    // pr_converged="0" rides only a ranking that stopped at the iteration cap.
+    { "pr_iters",          "pr_iters=N: PageRank iterations" },
+    { "pr_converged",      "pr_converged=0: iteration cap hit before convergence" },
+    // Form-conditional map roots whose clauses (kRankByDisclosure, kChurnRankLegend, --around's seed block) are prose.
+    // window= and defs= are ELEMENT-qualified: --hotspots carries window= and --callers defs=, each meaning something else.
+    { "rank_by",           "rank_by=: the ranker behind k=" },
+    { "window",            "window=: the git span mined", true, "r" },
+    { "defs",              "defs=N: of= names N defs; the lowest-id one was walked", true, "r" },
+    // The map HEADER's absent-at-zero gauges: `<!-- files=` is kept as data while the `<!-- hdr:` clauses that define
+    // these fields go (kDeclinedMapLegend, kIgnoredLegend, kExtentSuspectHdrLegend, kMacroBlankedHdrLegend, the absent-if-0
+    // half of the always-on legend, kMaxTokensFitLegend). Header-ONLY: several are quoted attributes elsewhere.
+    { "declined",          "declined=K: K calls left unbound (several defs, none chosen)", false, {}, MapHeaderRead::Only },
+    { "external",          "external=K: K calls taken as outside the tree, no edge", false, {}, MapHeaderRead::Only },
+    { "locality_pinned",   "locality_pinned=K: K calls pinned by locality alone (a guess)", false, {}, MapHeaderRead::Only },
+    { "extent_suspect_syms", "extent_suspect_syms=K: K defs failed containment, corpus-wide", false, {}, MapHeaderRead::Only },
+    { "macro_blanked_files", "macro_blanked_files=K: K files indexed from a macro-blanked re-parse", false, {}, MapHeaderRead::Only },
+    { "ignored_files",     "ignored_files=K: K files git's ignore rules dropped", false, {}, MapHeaderRead::Only },
+    { "ignored_dirs",      "ignored_dirs=K: K subtrees git's ignore rules pruned, contents unknown", false, {}, MapHeaderRead::Only },
+    { "max_tokens",        "max_tokens=/fit_bytes=: tokens asked/the byte cap applied", false, {}, MapHeaderRead::Only },
+    // THE THIRD SWEEP (2026-09-12), the same defect on conditional fields the first two sweeps never produced. --zoom's
+    // <module children=> rides only a module AT the levels_shown= cut, and a map's <recent> file rows only a single-root
+    // rank_by=churn-decay (kChurnDecayRankLegend's `recent:` clause). Both clauses are prose. Both rows are ELEMENT-qualified:
+    // of= on the map root is --around's seed, and n= is a name on every <s> row.
+    { "children",          "children=K: K child modules below the levels_shown= cut, unprinted", true, "module" },
+    { "of",                "<recent n= of=>: the n= newest-touched of of= touched files; <rc age_d=> days since its last commit, w= decayed weight", true, "recent" },
+    // The map's ROW fields that are absent at their default, defined only inside the always-on `<!-- ripwire v1` legend (prose):
+    // lpin= and overloads= on <s>, prov= on <c>. Row-level, because each has one meaning tool-wide and the map emitter is its one
+    // XML writer. test/compactlegendcheck.sh (S) population 4 reads that legend's absence-marked row fields from source.
+    { "lpin",              "lpin=K: K calls pinned by locality alone (a guess)", true },
+    { "overloads",         "overloads=N: N same-name defs merged in this row; shown= counts each", true },
+    { "prov",              "prov=scip|binding|import|split: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick", true },
     { "parse_degraded",    "parse_degraded=1: ERROR nodes in that parse", true },
     { "tier_partial",      "tier_partial=1: tier elected under a partial classification" },
     { "dangling",          "dangling=1: matches nothing indexed", true },
@@ -216,10 +304,17 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // always rides and can define hub="1" in the same clause — two terms did not fit the 400 B ceiling, and
     // the ceiling is the point of this dialect. The full legend carries the derivation.
     { "hub_floor",         "hub_floor=D: connects= >= D is hub=1, vacuous" },
+    // --lego's contract caveat (serialize.h, on the <iface> row): the attribute pair rides only a NAMED interface whose
+    // language's method contract is not read, and no purpose line names it. ELEMENT-qualified, not a head term: the head
+    // span holds the full legend comment between <ctx> and its first child, and kLegoLegend spells caveat="…" in it, so
+    // a head read fired on every --lego answer (compactlegendcheck (D7) caught it on --lego=Point).
+    { "caveat",            "methods=0 caveat=not-extracted-for-lang: no <m> contract read for this language", true, "iface" },
     { "next",              "next=: the one pasteable follow-up", true },
     { "scrubbed",          "scrubbed=1: this CDATA is not the bytes (]]> split or C0 replaced)", true },
     { "preview",           "preview=1: an UNWRITTEN payload; <overwrite l= end= bytes=> = the span an apply replaces, CDATA as on disk (shown=/capped=1/elided_lines= when cut)" },
     { "redacted",          "redacted=1: a credential shape rewritten to [REDACTED:kind]; the no-redact flag serves the bytes", true },
+    // extent honesty (serialize.h kExtentSuspectRowLegend): a ROW-level term on the map, <d> and <b> rows alike.
+    { "extent_suspect",    "extent_suspect=: span/scope/kind failed containment (name|head|scope|error)", true },
 };
 
 // the paging window: these five mean the same on every element (L4's one-attribute-one-reading law), so they are
@@ -309,16 +404,23 @@ inline std::string_view compactDocHead( std::string_view doc, const CompactRootI
     return doc.substr( root.openBegin, end - root.openBegin );
 }
 
-// Does `head` carry ` <attr>="`? Matched at a tag boundary — a leading space and a trailing `="` — so `capped`
-// never matches `hits_capped`.
-inline bool headHasAttr( std::string_view head, std::string_view attr )
+// Does `span` carry ` <attr>=<tail>`? Matched after a leading space, so `capped` never matches `hits_capped` and `bytes`
+// never matches `fit_bytes`. The head reads a quoted attribute (tail `"`); the map header an unquoted field (no tail).
+inline bool spanHasAttr( std::string_view span, std::string_view attr, std::string_view tail )
 {
     std::string needle;
-    needle.reserve( attr.size() + 3 );
+    needle.reserve( attr.size() + tail.size() + 2 );
     needle += ' ';
     needle.append( attr );
-    needle += "=\"";
-    return head.find( needle ) != std::string_view::npos;
+    needle += '=';
+    needle.append( tail );
+    return span.find( needle ) != std::string_view::npos;
+}
+
+// Does `head` carry ` <attr>="`? Matched at a tag boundary — a leading space and a trailing `="`.
+inline bool headHasAttr( std::string_view head, std::string_view attr )
+{
+    return spanHasAttr( head, attr, "\"" );
 }
 
 // Any payload attribute ending in `_capped` (tests_capped=, importers_capped=, …) — their names, joined by '/'.
@@ -371,8 +473,23 @@ inline std::string payloadSubCapAttrs( std::string_view doc )
     return names;
 }
 
-// Row-level terms: does ANY tag outside comments/CDATA carry ` <attr>="`?
-inline bool payloadHasAnyAttr( std::string_view doc, std::string_view attr )
+// Is `tag` (one `<…>` span) an element named `name`? An empty name matches every element.
+inline bool isElementNamed( std::string_view tag, std::string_view name ) noexcept
+{
+    if( name.empty() )
+    {
+        return true;
+    }
+    if( tag.size() < name.size() + 2 || tag[ 0 ] != '<' || tag.substr( 1, name.size() ) != name )
+    {
+        return false;
+    }
+    const char next = tag[ name.size() + 1 ];
+    return next == ' ' || next == '/' || next == '>';
+}
+
+// Row-level terms: does ANY tag outside comments/CDATA carry ` <attr>="`? With `onTag`, only a `<onTag …>` element counts.
+inline bool payloadHasAnyAttr( std::string_view doc, std::string_view attr, std::string_view onTag = {} )
 {
     std::string needle;
     needle.reserve( attr.size() + 3 );
@@ -396,7 +513,7 @@ inline bool payloadHasAnyAttr( std::string_view doc, std::string_view attr )
         {
             const std::size_t j = doc.find( '>', i );
             const std::string_view tag = doc.substr( i, j == std::string_view::npos ? doc.size() - i : j + 1 - i );
-            if( tag.find( needle ) != std::string_view::npos ) { return true; }
+            if( tag.find( needle ) != std::string_view::npos && isElementNamed( tag, onTag ) ) { return true; }
             i = j == std::string_view::npos ? doc.size() : j + 1;
         }
         else
@@ -406,6 +523,46 @@ inline bool payloadHasAnyAttr( std::string_view doc, std::string_view attr )
         }
     }
     return false;
+}
+
+// The opener of the map header's data comment (serialize.h buildStats, its one emitter).
+inline constexpr std::string_view kCompactMapHeaderOpener = "<!-- files=";
+
+// The map header comment (before the root, or trailing under order=stable), or empty when the document has none: every
+// verb outside the map family and the bundles that embed it. A well-formed document spells `<!--` raw only in a comment
+// or a CDATA body, and a comment cannot hold `--`, so the first hit outside CDATA IS the header.
+inline std::string_view compactMapHeader( std::string_view doc ) noexcept
+{
+    for( std::size_t hit = doc.find( kCompactMapHeaderOpener ); hit != std::string_view::npos; hit = doc.find( kCompactMapHeaderOpener, hit + 1 ) )
+    {
+        const std::size_t cdataOpen = doc.rfind( "<![CDATA[", hit );
+        const bool        isInCdata = cdataOpen != std::string_view::npos && doc.find( "]]>", cdataOpen ) > hit;
+        if( !isInCdata )
+        {
+            const std::size_t close = doc.find( "-->", hit );
+            return doc.substr( hit, close == std::string_view::npos ? doc.size() - hit : close + 3 - hit );
+        }
+    }
+    return {};
+}
+
+// Does this document carry term `t`? An element-qualified term reads its element alone (the head can carry the same NAME
+// as a different attribute); a map-header term reads the kept header's unquoted field too (Also) or instead (Only).
+inline bool isCompletenessTermPresent( const CompactCompletenessTerm& t, std::string_view head, std::string_view doc, std::string_view mapHeader )
+{
+    if( t.mapHeader != MapHeaderRead::No && spanHasAttr( mapHeader, t.attr, {} ) )
+    {
+        return true;
+    }
+    if( t.mapHeader == MapHeaderRead::Only )
+    {
+        return false;
+    }
+    if( !t.onTag.empty() )
+    {
+        return payloadHasAnyAttr( doc, t.attr, t.onTag );
+    }
+    return headHasAttr( head, t.attr ) || ( t.wholeDoc && payloadHasAnyAttr( doc, t.attr ) );
 }
 
 // The ≤400 B compact legend for one document.
@@ -453,9 +610,10 @@ inline std::string compactLegendText( const CompactLegendSpec& spec, std::string
         out += subcaps;
         out += ": 1 = cut.";
     }
+    const std::string_view mapHeader = compactMapHeader( doc );
     for( const CompactCompletenessTerm& t : kCompactCompletenessTerms )
     {
-        if( headHasAttr( head, t.attr ) || ( t.wholeDoc && payloadHasAnyAttr( doc, t.attr ) ) )
+        if( isCompletenessTermPresent( t, head, doc, mapHeader ) )
         {
             out += ' ';
             out.append( t.reading );

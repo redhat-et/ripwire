@@ -1,0 +1,126 @@
+# limits_classes.tsv — cap name -> INDEXING | OUTPUT.  One row per cap, tab-separated, sorted by name.
+#
+# INDEXING caps bound what can EVER be found. A silent one is unrecoverable by the caller: no flag, no
+# budget, no follow-up call gets the answer back, and the output reads as "none exists".
+# OUTPUT caps bound what is SHOWN from what was found. A silent one is still a defect, but a --detail,
+# a page or a second call can recover the answer.
+#
+# WHY A SIDECAR AND NOT A TAG IN src/. This file is a stopgap with a known expiry. The classification
+# belongs beside the declaration — a trailing `// INDEXING` on the constant itself, read by
+# limits_build.py the same way it already reads the note — because a sidecar keyed by name can go stale
+# in a way an inline tag cannot. It is a sidecar today only because the round that produced the
+# taxonomy was not the round that could touch src/. Migrate it inline and delete this file; the gate
+# arm that requires every row here to name a LIVE cap is what keeps it honest until then.
+#
+# COVERAGE IS PARTIAL AND THE DOCUMENT SAYS SO. Only caps with a sourced classification are listed.
+# Everything else renders as an em dash, which reads as "not yet classified" — never as "neither".
+# Adding a row is a claim about what the cap bounds; make it by reading the call site, not the name.
+#
+# BOUNDARY — the third answer, added 2026-09-10. A BOUNDARY constant decides which SIDE of a rule
+# something falls on; it truncates nothing, so it can never honestly emit a `capped="1"` and must not be
+# judged by shown/total. `kUnitSizeLowRiskMax = 15` says "15 lines or fewer is low-risk";
+# `kMaxNameLen = 96` says a 97-character backticked token is a sentence, not an identifier;
+# `kMaxPartitions = 16` bounds a hand-written `--partition=N`. Review on #108 named the class; labelling
+# these OUTPUT would ask for a disclosure that could never fire, which is a different kind of dishonesty
+# from the silent cut this register was built to find.
+kChaConeCap	INDEXING
+kCoBoostMaxFilesPerCommit	INDEXING
+kCoBoostMaxPartnerFiles	INDEXING
+kCoBoostMaxSymbolsPerFile	INDEXING
+kDocMentionMaxAnchors	INDEXING
+kDocMentionMaxDocsPerAnchor	INDEXING
+kDocMentionMaxDocsTotal	INDEXING
+kEditCheckSpellingsShown	OUTPUT
+kEvidenceCap	OUTPUT
+kExpandMaxPer	OUTPUT
+kExpandMaxSeeds	OUTPUT
+kFieldWalkCap	INDEXING
+kHandoffCochangeRows	OUTPUT
+kHandoffDocRows	OUTPUT
+kHandoffNoteRows	OUTPUT
+kHandoffSymbolsPerCodeFile	OUTPUT
+kHandoffSymbolsPerDocFile	OUTPUT
+kIdiomMaxCondTokens	BOUNDARY
+kIdiomMaxLabelTokens	BOUNDARY
+kIdiomMaxReturnTokens	BOUNDARY
+kMatchMaxHits	INDEXING
+kMaxAggsModeled	INDEXING
+kMaxAliasDepth	INDEXING
+kMaxAnchorsShown	OUTPUT
+kMaxAssertChars	OUTPUT
+kMaxBindings	INDEXING
+kMaxCacheBlobAgeDays	BOUNDARY
+kMaxCacheBlobCount	BOUNDARY
+kMaxCandidates	INDEXING
+kMaxChainDepth	INDEXING
+kMaxClaimedLine	BOUNDARY
+kMaxDecDigits	BOUNDARY
+kMaxDefsShown	BOUNDARY
+kMaxEditDistance	BOUNDARY
+kMaxEditLockAgeDays	BOUNDARY
+kMaxEnvNameLen	BOUNDARY
+kMaxExtLen	BOUNDARY
+kMaxFamily	INDEXING
+kMaxFieldsShown	OUTPUT
+kMaxFlipRows	OUTPUT
+kMaxFnsShown	OUTPUT
+kMaxHexDigits	BOUNDARY
+kMaxHunkSide	INDEXING
+kMaxIdentLen	BOUNDARY
+kMaxIdentsPerLine	INDEXING
+kMaxImportContainerDepth	INDEXING
+kMaxLineLen	BOUNDARY
+kMaxMacroDepth	INDEXING
+kMaxNameLen	BOUNDARY
+kMaxNamesTracked	INDEXING
+kMaxNearMisses	OUTPUT
+kMaxNestDepth	INDEXING
+kMaxPairsShown	OUTPUT
+kMaxPartitions	BOUNDARY
+kMaxPlanScout	OUTPUT
+kMaxProbeCommits	INDEXING
+kMaxQualifierHops	INDEXING
+kMaxRefs	INDEXING
+kMaxSample	INDEXING
+kMaxScopeChars	OUTPUT
+kMaxScored	INDEXING
+kMaxShown	OUTPUT
+kMaxSig	OUTPUT
+kMaxSitesShown	OUTPUT
+kMaxSkipRowsPerClass	OUTPUT
+kMaxStructsPerRef	OUTPUT
+kMaxStructsShown	OUTPUT
+kMeasuredDigitsPricedWidth	OUTPUT
+kMemberSpellingsShown	OUTPUT
+kMentionMaxDirectSymbols	INDEXING
+kMentionMaxFiles	INDEXING
+kMentionMaxRawTokens	INDEXING
+kMentionMaxSymbolsPerFile	INDEXING
+kMinIdentLen	BOUNDARY
+kMinMentionLen	BOUNDARY
+kMinNameLen	BOUNDARY
+kMinValueNameLen	BOUNDARY
+kNameCandidateCap	OUTPUT
+kOtherDefCap	OUTPUT
+kRadixThreshold	BOUNDARY
+kRenameMaxChain	INDEXING
+kRenameMaxPairs	INDEXING
+kSelectorFilesShown	OUTPUT
+kShown	OUTPUT
+kSibliftMaxSeed	OUTPUT
+kSibliftMaxSib	OUTPUT
+kSideDepthStd	INDEXING
+kSideDepthUses	INDEXING
+kSituBlastFilesShown	OUTPUT
+kSituPartnerFileRowsShown	OUTPUT
+kSituPartnerRowsShown	OUTPUT
+kSkillScanFindingCap	INDEXING
+kSliceRdMaxIter	OUTPUT
+kTestHopBasenameRowCap	OUTPUT
+kTestHopCalleeRowCap	OUTPUT
+kType3MaxBucket	INDEXING
+kType3MaxTokensForLcs	INDEXING
+kUnitComplexityLowRiskMax	BOUNDARY
+kUnitInterfacingLowRiskMax	BOUNDARY
+kUnitSizeLowRiskMax	BOUNDARY
+kWhereisHits	OUTPUT

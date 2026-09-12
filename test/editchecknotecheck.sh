@@ -28,7 +28,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 BASE="${RIPWIRE_BASE_BIN:-}"
 fail=0
-ok(){   printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
@@ -108,7 +108,7 @@ D1="$( ec helper )"; D2="$( ec helper )"; D3="$( ec helper )"
 
 # ── (e) xmllint ──────────────────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$OUT" | xmllint --noout - 2>/dev/null && ok "(e) --edit-check with notes is xmllint-clean" || no "(e) --edit-check with notes is not well-formed"
+    if printf '%s' "$OUT" | xmllint --noout - 2>/dev/null; then ok "(e) --edit-check with notes is xmllint-clean"; else no "(e) --edit-check with notes is not well-formed"; fi
 else
     printf '  SKIP  (e) xmllint (not installed)\n'
 fi

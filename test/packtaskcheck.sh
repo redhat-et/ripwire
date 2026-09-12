@@ -27,7 +27,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -98,7 +98,7 @@ runw(){ ( cd "$WORK" && "$BIN" . --no-cache "$@" 2>/dev/null ); }
 
 # discover the scoped canonical id EXACTLY as serialization spells it (id= is emitted only when scoped)
 PID="$( runw | grep -oE 'id="[^"]*BudgetPlanner::parseBudget"' | head -1 | sed -E 's/id="([^"]*)"/\1/' )"
-[ -n "$PID" ] && ok "discovered scoped canonical id: $PID" || no "could not discover BudgetPlanner::parseBudget id"
+if [ -n "$PID" ]; then ok "discovered scoped canonical id: $PID"; else no "could not discover BudgetPlanner::parseBudget id"; fi
 # D5: --note-add normalizes a target's path component to ROOT-RELATIVE on write (strips the crawl's leading
 # "./"), and --pack-task's notes section keys on that same normalized form — see notescheck.sh for the full
 # root-relative-notes gate.
@@ -112,7 +112,7 @@ runw --pack-task="parse budget planner decoy" > "$BUN"
 
 # section presence
 for tag in "<sigs" "<bodies " "<callers " "<notes " "<tests "; do
-    grep -qF -- "$tag" "$BUN" && ok "section present: ${tag}…" || no "section missing: ${tag}"
+    if grep -qF -- "$tag" "$BUN"; then ok "section present: ${tag}…"; else no "section missing: ${tag}"; fi
 done
 
 # section ORDER (fixed): ranking < bodies < callers < notes < tests, by first byte offset
@@ -175,7 +175,7 @@ grep -oE '<tests[^>]*>.*</tests>' "$BUN" | grep -qF 'test/test_budget.cpp' \
     && ok "section 5 (tests) surfaces the reaching test file" || no "tests section did not surface the reaching test"
 
 # xmllint on the fixture bundle
-xmllint --noout "$BUN" 2>/dev/null && ok "fixture bundle is xmllint-clean (G4)" || no "fixture bundle is not well-formed"
+if xmllint --noout "$BUN" 2>/dev/null; then ok "fixture bundle is xmllint-clean (G4)"; else no "fixture bundle is not well-formed"; fi
 
 # the header names every truncation (no silent caps): it must carry the per-section report line
 grep -q 'sections in FIXED order ranking > bodies > callers > notes > tests' "$BUN" \
@@ -186,7 +186,7 @@ grep -q 'sections in FIXED order ranking > bodies > callers > notes > tests' "$B
 D1="$( runw --pack-task="parse budget planner decoy" )"
 D2="$( runw --pack-task="parse budget planner decoy" )"
 D3="$( runw --pack-task="parse budget planner decoy" )"
-{ [ "$D1" = "$D2" ] && [ "$D2" = "$D3" ]; } && ok "bundle is deterministic (byte-identical ×3)" || no "bundle is non-deterministic"
+if { [ "$D1" = "$D2" ] && [ "$D2" = "$D3" ]; }; then ok "bundle is deterministic (byte-identical ×3)"; else no "bundle is non-deterministic"; fi
 
 # ── 3) TINY budget → ranking-only, <bodies> present with shown="0" (R9 fix, W3-S 2026-08-19) ───────────────
 # Before the fix, a budget too tight for the bodies section left bodiesStr empty and the WHOLE <bodies>
@@ -205,7 +205,7 @@ else
     no "tiny-budget degradation wrong (expected <sigs> + <bodies shown=\"0\" total=\"N\" capped=\"1\">)"
     head -c 400 "$TINY"; echo
 fi
-xmllint --noout "$TINY" 2>/dev/null && ok "tiny-budget bundle is xmllint-clean" || no "tiny-budget bundle is not well-formed"
+if xmllint --noout "$TINY" 2>/dev/null; then ok "tiny-budget bundle is xmllint-clean"; else no "tiny-budget bundle is not well-formed"; fi
 
 # ── 4) budget ceiling respected across several --token-budget values (real src/ tree, exercises trimming) ──
 # runRel (not "$ROOT/src"): see the W3-S item-6 note by ceiling_bytes()'s definition above.
@@ -224,8 +224,8 @@ done
 DEF="$TMP/def.xml"
 runRel --no-cache --pack-task="serialize signatures budget payload trim" > "$DEF" 2>/dev/null
 defbytes="$( wc -c < "$DEF" | tr -d ' ' )"; defceil="$( ceiling_bytes 6000 )"
-{ [ "$defbytes" -le "$defceil" ]; } && ok "default 6K-token budget within ceiling ($defbytes <= $defceil)" || no "default budget exceeded ceiling ($defbytes > $defceil)"
-xmllint --noout "$DEF" 2>/dev/null && ok "default bundle is xmllint-clean" || no "default bundle is not well-formed"
+if { [ "$defbytes" -le "$defceil" ]; }; then ok "default 6K-token budget within ceiling ($defbytes <= $defceil)"; else no "default budget exceeded ceiling ($defbytes > $defceil)"; fi
+if xmllint --noout "$DEF" 2>/dev/null; then ok "default bundle is xmllint-clean"; else no "default bundle is not well-formed"; fi
 
 # ── 5) --for is UNPERTURBED: pack-task's ranking is the SAME ranking --for emits (shared computeLensRanking) ─
 #
@@ -296,8 +296,8 @@ b1bytes="$( wc -c < "$B1" | tr -d ' ' )"; b2bytes="$( wc -c < "$B2" | tr -d ' ' 
 { [ "$b1bytes" -le "$b2bytes" ]; } \
     && ok "F4: --token-budget=1 ($b1bytes B) <= --token-budget=2 ($b2bytes B) — no 0-floor inversion" \
     || no "F4 REGRESSION: --token-budget=1 ($b1bytes B) > --token-budget=2 ($b2bytes B) — the 0-floor inversion is back"
-xmllint --noout "$B1" 2>/dev/null && ok "F4: --token-budget=1 bundle is xmllint-clean" || no "F4: --token-budget=1 bundle is not well-formed"
-xmllint --noout "$B2" 2>/dev/null && ok "F4: --token-budget=2 bundle is xmllint-clean" || no "F4: --token-budget=2 bundle is not well-formed"
+if xmllint --noout "$B1" 2>/dev/null; then ok "F4: --token-budget=1 bundle is xmllint-clean"; else no "F4: --token-budget=1 bundle is not well-formed"; fi
+if xmllint --noout "$B2" 2>/dev/null; then ok "F4: --token-budget=2 bundle is xmllint-clean"; else no "F4: --token-budget=2 bundle is not well-formed"; fi
 
 # ── 8) F5 — --token-budget beyond INT_MAX must not go negative / crash (UBSan aborts on the size_t->int
 #    narrowing this used to do; release wrapped negative and read as effectively unlimited). Sanity-only: the
@@ -311,7 +311,7 @@ HUGE_RC=$?
 grep -qE 'budget="-|target, ceiling -' "$HUGE" \
     && no "F5 REGRESSION: header carries a negative budget/ceiling value" \
     || ok "F5: header carries no negative budget/ceiling value"
-xmllint --noout "$HUGE" 2>/dev/null && ok "F5: --token-budget=3000000000 bundle is xmllint-clean" || no "F5: --token-budget=3000000000 bundle is not well-formed"
+if xmllint --noout "$HUGE" 2>/dev/null; then ok "F5: --token-budget=3000000000 bundle is xmllint-clean"; else no "F5: --token-budget=3000000000 bundle is not well-formed"; fi
 
 echo
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

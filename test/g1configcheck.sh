@@ -9,13 +9,13 @@ HARNESS="$ROOT/test/fuzz/fuzz_ingest.cpp"
 RUNNER="$ROOT/test/fuzz/run.sh"
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 for mode in ASAN TSAN FUZZ; do
-    grep -q "option(RIPWIRE_$mode" "$CMAKE" && ok "RIPWIRE_$mode is explicitly declared" || no "RIPWIRE_$mode option missing"
+    if grep -q "option(RIPWIRE_$mode" "$CMAKE"; then ok "RIPWIRE_$mode is explicitly declared"; else no "RIPWIRE_$mode option missing"; fi
 done
-grep -q 'are mutually exclusive' "$CMAKE" && ok "sanitizer modes are mutually exclusive" || no "mutual-exclusion gate missing"
+if grep -q 'are mutually exclusive' "$CMAKE"; then ok "sanitizer modes are mutually exclusive"; else no "mutual-exclusion gate missing"; fi
 
 # The G1 set is no longer one literal flag string: `integer` is a Clang-only UBSan group and GCC rejects
 # the whole -fsanitize= option, so CMakeLists.txt declares the five checks as a LIST, filters it by
@@ -142,7 +142,7 @@ reply = pathlib.Path(sys.argv[1])
 index = json.loads(next(reply.glob('index-*.json')).read_text())
 model = json.loads((reply / index['reply']['codemodel-v2']['jsonFile']).read_text())
 expected = {'ripwire_fuzz_' + name for name in
-            'cpp python go rust typescript tsx swift objc javascript bash java ruby json toml yaml csharp c php elixir lua'.split()}
+            'cpp python go rust typescript tsx swift objc javascript bash java ruby json toml yaml csharp c php elixir lua dart kotlin'.split()}
 assert model['configurations']
 for config in model['configurations']:
     targets = [json.loads((reply / t['jsonFile']).read_text()) for t in config['targets']]
@@ -150,7 +150,7 @@ for config in model['configurations']:
     assert actual == expected, (actual, expected)
 PY
     then
-        ok "configured model contains all 20 grammar fuzz executables"
+        ok "configured model contains all 22 grammar fuzz executables"
     else
         no "configured grammar fuzz executable set differs"
     fi
@@ -160,7 +160,7 @@ else
     cat "$TMP/configure.log"
     no "fuzzer CMake configuration failed"
 fi
-grep -q 'EXCLUDE_FROM_ALL' "$CMAKE" && ok "fuzz targets excluded from normal builds" || no "fuzz targets can enter normal builds"
+if grep -q 'EXCLUDE_FROM_ALL' "$CMAKE"; then ok "fuzz targets excluded from normal builds"; else no "fuzz targets can enter normal builds"; fi
 
 grep -q 'LLVMFuzzerTestOneInput' "$HARNESS" && grep -q 'ts_parser_parse_string' "$HARNESS" \
     && grep -q 'ts_node_child(' "$HARNESS" && grep -q 'ts_node_named_child(' "$HARNESS" \
@@ -170,7 +170,7 @@ grep -q 'max_total_time=' "$RUNNER" && grep -q 'max_len=65536' "$RUNNER" && grep
     && ok "fuzz runner is time-, input-, and concurrency-bounded" || no "bounded fuzz runner contract missing"
 
 seedCount="$( find "$ROOT/test/fuzz/seeds" -mindepth 2 -maxdepth 2 -name valid | wc -l | tr -d ' ' )"
-[ "$seedCount" = 20 ] && ok "all 20 grammars have valid seeds" || no "expected 20 grammar seeds, found $seedCount"
+if [ "$seedCount" = 22 ]; then ok "all 22 grammars have valid seeds"; else no "expected 22 grammar seeds, found $seedCount"; fi
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"

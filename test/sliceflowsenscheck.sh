@@ -35,7 +35,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/sliceflowsensfix"
 EXPECT="$FIX/expect.tsv"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -136,7 +136,7 @@ python3 "$TMP/score.py" "$FIX" "$BIN" "$EXPECT" >"$TMP/score.out" 2>&1
 grep -v '^CLASS\|^SENTINEL' "$TMP/score.out" | head -20
 for c in kill join straight; do
     n="$( grep -oE "^CLASS $c fns=[0-9]+" "$TMP/score.out" | grep -oE '[0-9]+$' )"
-    [ "${n:-0}" -ge 10 ] && ok "(0) fixture composition: $c functions = $n (>= 10)" || no "(0) fixture composition: $c functions = ${n:-0} (< 10)"
+    if [ "${n:-0}" -ge 10 ]; then ok "(0) fixture composition: $c functions = $n (>= 10)"; else no "(0) fixture composition: $c functions = ${n:-0} (< 10)"; fi
 done
 S="$( grep '^SENTINEL' "$TMP/score.out" )"
 printf '  INFO  %s\n' "$S"
@@ -223,7 +223,7 @@ FBC="$( run --slice=joins.cpp:cj11:y --slice-flow=back --legend=compact )"
 
 # ── (8) determinism ─────────────────────────────────────────────────────────────────────────────────
 C2="$( run --slice=joins.cpp:cj01:x )"; Y2="$( run --slice=joins.py:pj01:x )"
-[ "$C" = "$C2" ] && [ "$Y" = "$Y2" ] && ok '(8) determinism x2 (C++ and Python runs byte-identical)' || no '(8) output differs between runs'
+if [ "$C" = "$C2" ] && [ "$Y" = "$Y2" ]; then ok '(8) determinism x2 (C++ and Python runs byte-identical)'; else no '(8) output differs between runs'; fi
 
 # ── (9) well-formedness ─────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then

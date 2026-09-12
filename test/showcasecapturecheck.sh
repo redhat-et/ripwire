@@ -49,7 +49,7 @@ SCRIPT="$ROOT/test/showcase_capture.py"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "showcasecapturecheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -189,6 +189,16 @@ else
     #               81.4 +/- 9, and the +/- 9 is corpus headroom, not measurement slop, since the same
     #               measurement reproduced to the digit across three root spellings and two checkouts. A
     #               caption edited to match a broken measurement still trips this.
+    #               RE-CENTERED (2026-09-09, the printf-family -> std::print conversion): 81.4 +/- 9 becomes
+    #               71.0 +/- 9 (band 62-80). MECHANISM, not a loosened tolerance, established by diffing the
+    #               measured top-50 symbol SETS across the change: exactly four symbols enter, and they are
+    #               emitTo (both overloads), emitRaw and formatTo. printf was an EXTERNAL name with no node
+    #               in the call graph; the wrappers are IN-REPO with ~1,600 callers each, so PageRank ranks
+    #               them into the measured set. They are one-line forwarding templates whose signature is
+    #               nearly the whole function, so they add signature bytes and almost no elidable body:
+    #               main measures 72.3%, this tree 71.0%. The ELISION did not regress — the population did.
+    #               Main was already only 0.3 above the old floor, so this band was one small refactor away
+    #               from red regardless.
     #               RE-CENTERED (V1, 2026-08-15): was 63.1 +/- 9 (band 55-72) before --expand's <b> bodies
     #               carried sibs=/inc= file-context attributes — those attributes grow the BODY side of this
     #               ratio (not the sig side), so the elision the caption measures genuinely got bigger; this
@@ -277,11 +287,22 @@ print('OK' if not bad else 'DRIFT ' + '; '.join('top-%d caption %.1f%% vs recoun
                 *)   no "(C-recount) $verdict — the caption and its own gate disagree; re-derive with the root-neutralised methodology stated above, and fix BOTH" ;;
             esac
         fi
-        bandLow=72.0; bandHigh=90.0
+        bandLow=73.0; bandHigh=91.0
+        # RE-CENTERED (2026-09-10, the sibs= cap raised 8 -> 100): 71.0 +/- 9 becomes 82 +/- 9, the
+        # band bounds kept ROUND because (C-help) demands --help state these two numbers EXACTLY and a
+        # tolerance region has no business carrying a tenth of a point. Measured centre is 81.8.
+        # MECHANISM, not a loosened tolerance. --pack-signatures elides exactly what it always did;
+        # --expand's <b> bodies now carry the file context the old cap was hiding, which grows the
+        # DENOMINATOR of this ratio. Measured on a fixed tree: cap=8 -> 71.0, cap=100 -> 81.8, with
+        # the top-50 membership and the signature side unchanged. See docs/LIMITS.md.
+        # printed, never hand-copied: the message used to quote a centre of 81.4 that an earlier
+        # re-centering had already moved past — the same stale-number drift arm (C-help) exists to catch.
+        bandCentre="$( python3 -c "print( ( $bandLow + $bandHigh ) / 2 )" )"
+        bandHalf="$(   python3 -c "print( ( $bandHigh - $bandLow ) / 2 )" )"
         pct="$( printf '%s' "$recount" | grep '^RECOUNT_OK top-50' | grep -oE 'reduction_pct=[0-9.-]+' | cut -d= -f2 )"
         in_band="$( python3 -c "print(1 if $bandLow <= $pct <= $bandHigh else 0)" 2>/dev/null || echo 0 )"
         if [ "$in_band" = "1" ]; then
-            ok "(C-band) root-neutralised top-50 reduction is ${pct}% — inside the $bandLow-$bandHigh% regression band (81.4 +/- 9)"
+            ok "(C-band) root-neutralised top-50 reduction is ${pct}% — inside the $bandLow-$bandHigh% regression band (centre $bandCentre +/- $bandHalf)"
         else
             no "(C-band) root-neutralised top-50 reduction is ${pct}% — OUTSIDE the $bandLow-$bandHigh% regression band; --pack-signatures is eliding materially less (or more) than when this was calibrated"
         fi

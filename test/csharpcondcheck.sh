@@ -53,7 +53,7 @@ FIX="$ROOT/test/csharpcondfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -64,8 +64,8 @@ echo "csharpcondcheck: BIN=$BIN  FIX=$FIX"
 MAP_OUT="$TMP/map.xml"
 "$BIN" "$FIX" --no-cache >"$MAP_OUT" 2>"$TMP/map.err"
 MAP_EXIT=$?
-[ "$MAP_EXIT" -eq 0 ] && ok "default map: exits 0" || no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP_OUT" && ok "default map: passes xmllint --noout" || no "default map: xmllint failed"; }
+if [ "$MAP_EXIT" -eq 0 ]; then ok "default map: exits 0"; else no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"; fi
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP_OUT"; then ok "default map: passes xmllint --noout"; else no "default map: xmllint failed"; fi; }
 [ -s "$TMP/map.err" ] && no "default map: unexpected stderr (ABI/degrade?): $( cat "$TMP/map.err" )" || ok "default map: clean stderr (no ABI mismatch / degrade)"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -79,12 +79,12 @@ echo "=== header literals (counted by hand from Cond.cs, not derived from the qu
 # ambiguous=0 / unresolved=0 : no name in the fixture has two definitions, BY CONSTRUCTION, so the
 #              12-refs-to-10-edges gap is attributable to pair collapse alone and never to spray.
 
-grep -q 'files=1 '     "$MAP_OUT" && ok "header: files=1"      || no "header: expected files=1: $( grep -o 'files=[0-9]*' "$MAP_OUT" | head -1 )"
-grep -q 'symbols=13 '  "$MAP_OUT" && ok "header: symbols=13"   || no "header: expected symbols=13: $( grep -o 'symbols=[0-9]*' "$MAP_OUT" | head -1 )"
+if grep -q 'files=1 '     "$MAP_OUT"; then ok "header: files=1"; else no "header: expected files=1: $( grep -o 'files=[0-9]*' "$MAP_OUT" | head -1 )"; fi
+if grep -q 'symbols=13 '  "$MAP_OUT"; then ok "header: symbols=13"; else no "header: expected symbols=13: $( grep -o 'symbols=[0-9]*' "$MAP_OUT" | head -1 )"; fi
 grep -q 'edges=10 '    "$MAP_OUT" && ok "header: edges=10 (7 before the ?. fix — CondOnly contributed nothing)" \
                                   || no "header: expected edges=10: $( grep -o 'edges=[0-9]*' "$MAP_OUT" | head -1 )"
-grep -q 'ambiguous=0'  "$MAP_OUT" && ok "header: ambiguous=0 (single-target fixture by construction)" || no "header: expected ambiguous=0: $( grep -o 'ambiguous=[0-9]*' "$MAP_OUT" | head -1 )"
-grep -q 'unresolved=0' "$MAP_OUT" && ok "header: unresolved=0"  || no "header: expected unresolved=0: $( grep -o 'unresolved=[0-9]*' "$MAP_OUT" | head -1 )"
+if grep -q 'ambiguous=0'  "$MAP_OUT"; then ok "header: ambiguous=0 (single-target fixture by construction)"; else no "header: expected ambiguous=0: $( grep -o 'ambiguous=[0-9]*' "$MAP_OUT" | head -1 )"; fi
+if grep -q 'unresolved=0' "$MAP_OUT"; then ok "header: unresolved=0"; else no "header: expected unresolved=0: $( grep -o 'unresolved=[0-9]*' "$MAP_OUT" | head -1 )"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -99,16 +99,16 @@ echo "=== per-caller edge attribution: which spelling belongs to which caller ==
 callees(){ "$BIN" "$FIX" --callees="$1" --no-cache 2>/dev/null; }
 
 CE_CALLER="$( callees Caller )"
-echo "$CE_CALLER" | grep -q 'count="6"' && ok "--callees=Caller count=6 (8 sites, Tool+Widget pairs collapsed)" || no "--callees=Caller expected count=6: $CE_CALLER"
+if echo "$CE_CALLER" | grep -q 'count="6"'; then ok "--callees=Caller count=6 (8 sites, Tool+Widget pairs collapsed)"; else no "--callees=Caller expected count=6: $CE_CALLER"; fi
 for n in Bare Bump Tool BumpGen Gen Widget; do
-    echo "$CE_CALLER" | grep -q "n=\"$n\"" && ok "--callees=Caller lists $n" || no "--callees=Caller missing $n: $CE_CALLER"
+    if echo "$CE_CALLER" | grep -q "n=\"$n\""; then ok "--callees=Caller lists $n"; else no "--callees=Caller missing $n: $CE_CALLER"; fi
 done
 
 CE_COND="$( callees CondOnly )"
-echo "$CE_COND" | grep -q 'count="3"' && ok "--callees=CondOnly count=3 — every one a ?. form (0 pre-fix)" || no "--callees=CondOnly expected count=3: $CE_COND"
-echo "$CE_COND" | grep -q 'n="Bump"'    && ok "?. member call    w?.Bump()          -> Bump edge"    || no "w?.Bump() produced no CondOnly->Bump edge: $CE_COND"
-echo "$CE_COND" | grep -q 'n="C"'       && ok "?. guarded chain  a?.b?.C()          -> C edge"       || no "a?.b?.C() produced no CondOnly->C edge: $CE_COND"
-echo "$CE_COND" | grep -q 'n="BumpGen"' && ok "?. generic call   w?.BumpGen<int>(1) -> BumpGen edge" || no "w?.BumpGen<int>(1) produced no CondOnly->BumpGen edge: $CE_COND"
+if echo "$CE_COND" | grep -q 'count="3"'; then ok "--callees=CondOnly count=3 — every one a ?. form (0 pre-fix)"; else no "--callees=CondOnly expected count=3: $CE_COND"; fi
+if echo "$CE_COND" | grep -q 'n="Bump"'; then ok "?. member call    w?.Bump()          -> Bump edge"; else no "w?.Bump() produced no CondOnly->Bump edge: $CE_COND"; fi
+if echo "$CE_COND" | grep -q 'n="C"'; then ok "?. guarded chain  a?.b?.C()          -> C edge"; else no "a?.b?.C() produced no CondOnly->C edge: $CE_COND"; fi
+if echo "$CE_COND" | grep -q 'n="BumpGen"'; then ok "?. generic call   w?.BumpGen<int>(1) -> BumpGen edge"; else no "w?.BumpGen<int>(1) produced no CondOnly->BumpGen edge: $CE_COND"; fi
 
 CE_CTM="$( callees CondThenMember )"
 echo "$CE_CTM" | grep -q 'count="1"' && echo "$CE_CTM" | grep -q 'n="C"' \
@@ -131,24 +131,24 @@ echo "=== per-spelling REFERENCE presence, pinned to the source LINE of each spe
 uses(){ "$BIN" "$FIX" --uses="$1" --no-cache 2>/dev/null; }
 
 U_BUMP="$( uses Bump )"
-echo "$U_BUMP" | grep -q 'count="2"'  && ok "--uses=Bump count=2 (plain + conditional spelling)" || no "--uses=Bump expected count=2: $U_BUMP"
-echo "$U_BUMP" | grep -q 'Cond.cs:45' && ok "  :45 w.Bump()   — plain member call"        || no "  :45 w.Bump() use-site missing: $U_BUMP"
-echo "$U_BUMP" | grep -q 'Cond.cs:56' && ok "  :56 w?.Bump()  — CONDITIONAL member call"  || no "  :56 w?.Bump() use-site missing (the H4 headline miss): $U_BUMP"
+if echo "$U_BUMP" | grep -q 'count="2"'; then ok "--uses=Bump count=2 (plain + conditional spelling)"; else no "--uses=Bump expected count=2: $U_BUMP"; fi
+if echo "$U_BUMP" | grep -q 'Cond.cs:45'; then ok "  :45 w.Bump()   — plain member call"; else no "  :45 w.Bump() use-site missing: $U_BUMP"; fi
+if echo "$U_BUMP" | grep -q 'Cond.cs:56'; then ok "  :56 w?.Bump()  — CONDITIONAL member call"; else no "  :56 w?.Bump() use-site missing (the H4 headline miss): $U_BUMP"; fi
 
 U_BG="$( uses BumpGen )"
-echo "$U_BG" | grep -q 'count="2"'  && ok "--uses=BumpGen count=2 (plain + conditional generic)" || no "--uses=BumpGen expected count=2: $U_BG"
-echo "$U_BG" | grep -q 'Cond.cs:48' && ok "  :48 w.BumpGen<int>(1)  — plain generic member call"       || no "  :48 use-site missing: $U_BG"
-echo "$U_BG" | grep -q 'Cond.cs:58' && ok "  :58 w?.BumpGen<int>(1) — CONDITIONAL generic member call" || no "  :58 use-site missing (generic ?. pattern): $U_BG"
+if echo "$U_BG" | grep -q 'count="2"'; then ok "--uses=BumpGen count=2 (plain + conditional generic)"; else no "--uses=BumpGen expected count=2: $U_BG"; fi
+if echo "$U_BG" | grep -q 'Cond.cs:48'; then ok "  :48 w.BumpGen<int>(1)  — plain generic member call"; else no "  :48 use-site missing: $U_BG"; fi
+if echo "$U_BG" | grep -q 'Cond.cs:58'; then ok "  :58 w?.BumpGen<int>(1) — CONDITIONAL generic member call"; else no "  :58 use-site missing (generic ?. pattern): $U_BG"; fi
 
 U_C="$( uses C )"
-echo "$U_C" | grep -q 'count="2"'  && ok "--uses=C count=2 (both chain forms)" || no "--uses=C expected count=2: $U_C"
-echo "$U_C" | grep -q 'Cond.cs:57' && ok "  :57 a?.b?.C() — final link GUARDED (member_binding: needs the fix)" || no "  :57 a?.b?.C() use-site missing: $U_C"
-echo "$U_C" | grep -q 'Cond.cs:63' && ok "  :63 a?.B.C()  — final link PLAIN  (member_access: never needed it)" || no "  :63 a?.B.C() use-site missing: $U_C"
+if echo "$U_C" | grep -q 'count="2"'; then ok "--uses=C count=2 (both chain forms)"; else no "--uses=C expected count=2: $U_C"; fi
+if echo "$U_C" | grep -q 'Cond.cs:57'; then ok "  :57 a?.b?.C() — final link GUARDED (member_binding: needs the fix)"; else no "  :57 a?.b?.C() use-site missing: $U_C"; fi
+if echo "$U_C" | grep -q 'Cond.cs:63'; then ok "  :63 a?.B.C()  — final link PLAIN  (member_access: never needed it)"; else no "  :63 a?.B.C() use-site missing: $U_C"; fi
 
 U_BARE="$( uses Bare )"
-echo "$U_BARE" | grep -q 'count="1"' && echo "$U_BARE" | grep -q 'Cond.cs:44' && ok "--uses=Bare count=1 @:44 (bare call)" || no "--uses=Bare expected count=1 @:44: $U_BARE"
+if echo "$U_BARE" | grep -q 'count="1"' && echo "$U_BARE" | grep -q 'Cond.cs:44'; then ok "--uses=Bare count=1 @:44 (bare call)"; else no "--uses=Bare expected count=1 @:44: $U_BARE"; fi
 U_GEN="$( uses Gen )"
-echo "$U_GEN" | grep -q 'count="1"' && echo "$U_GEN" | grep -q 'Cond.cs:49' && ok "--uses=Gen count=1 @:49 (bare generic call)" || no "--uses=Gen expected count=1 @:49: $U_GEN"
+if echo "$U_GEN" | grep -q 'count="1"' && echo "$U_GEN" | grep -q 'Cond.cs:49'; then ok "--uses=Gen count=1 @:49 (bare generic call)"; else no "--uses=Gen expected count=1 @:49: $U_GEN"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -167,9 +167,9 @@ echo "=== the Tool arm: 2 call sites, 1 edge — (from,to) COLLAPSE, not a lost 
 # fixture removes by declaring no constructor.
 
 U_TOOL="$( uses Tool )"
-echo "$U_TOOL" | grep -q 'count="2"'  && ok "REFS: --uses=Tool count=2 — the reference layer keeps BOTH sites" || no "--uses=Tool expected count=2 (a reference really was lost): $U_TOOL"
-echo "$U_TOOL" | grep -q 'Cond.cs:46' && ok "  :46 Util.Tool()    (2-segment member chain)"  || no "  :46 Util.Tool() use-site missing: $U_TOOL"
-echo "$U_TOOL" | grep -q 'Cond.cs:47' && ok "  :47 Ns.Util.Tool() (3-segment member chain)"  || no "  :47 Ns.Util.Tool() use-site missing: $U_TOOL"
+if echo "$U_TOOL" | grep -q 'count="2"'; then ok "REFS: --uses=Tool count=2 — the reference layer keeps BOTH sites"; else no "--uses=Tool expected count=2 (a reference really was lost): $U_TOOL"; fi
+if echo "$U_TOOL" | grep -q 'Cond.cs:46'; then ok "  :46 Util.Tool()    (2-segment member chain)"; else no "  :46 Util.Tool() use-site missing: $U_TOOL"; fi
+if echo "$U_TOOL" | grep -q 'Cond.cs:47'; then ok "  :47 Ns.Util.Tool() (3-segment member chain)"; else no "  :47 Ns.Util.Tool() use-site missing: $U_TOOL"; fi
 
 CR_TOOL="$( "$BIN" "$FIX" --callers=Tool --no-cache 2>/dev/null )"
 echo "$CR_TOOL" | grep -q 'count="1"' && echo "$CR_TOOL" | grep -q 'n="Caller"' \
@@ -177,9 +177,9 @@ echo "$CR_TOOL" | grep -q 'count="1"' && echo "$CR_TOOL" | grep -q 'n="Caller"' 
     || no "--callers=Tool expected count=1 listing Caller: $CR_TOOL"
 
 U_W="$( uses Widget )"
-echo "$U_W" | grep -q 'count="2"'  && ok "REFS: --uses=Widget count=2 (new Widget() + new Ns.Widget())" || no "--uses=Widget expected count=2: $U_W"
-echo "$U_W" | grep -q 'Cond.cs:50' && ok "  :50 new Widget()"    || no "  :50 new Widget() use-site missing: $U_W"
-echo "$U_W" | grep -q 'Cond.cs:51' && ok "  :51 new Ns.Widget()" || no "  :51 new Ns.Widget() use-site missing: $U_W"
+if echo "$U_W" | grep -q 'count="2"'; then ok "REFS: --uses=Widget count=2 (new Widget() + new Ns.Widget())"; else no "--uses=Widget expected count=2: $U_W"; fi
+if echo "$U_W" | grep -q 'Cond.cs:50'; then ok "  :50 new Widget()"; else no "  :50 new Widget() use-site missing: $U_W"; fi
+if echo "$U_W" | grep -q 'Cond.cs:51'; then ok "  :51 new Ns.Widget()"; else no "  :51 new Ns.Widget() use-site missing: $U_W"; fi
 CR_W="$( "$BIN" "$FIX" --callers=Widget --no-cache 2>/dev/null )"
 echo "$CR_W" | grep -q 'count="1"' \
     && ok 'EDGES: --callers=Widget count=1 — the two "new" spellings collapse to ONE pair too' \

@@ -25,7 +25,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -98,11 +98,11 @@ cchanged="$( printf '%s' "$CLEAN" | grep -oE 'changed=[0-9]+' | head -1 | grep -
 printf 'int a1() { return 2; }\n' > "$R/src/a.cpp"
 D1="$( "$BIN" "$R" --map-diff --no-cache 2>/dev/null )"
 D2="$( "$BIN" "$R" --map-diff --no-cache 2>/dev/null )"
-[ "$D1" = "$D2" ] && ok "--map-diff deterministic (byte-identical run-to-run)" || no "--map-diff non-deterministic"
+if [ "$D1" = "$D2" ]; then ok "--map-diff deterministic (byte-identical run-to-run)"; else no "--map-diff non-deterministic"; fi
 
 # ── 5) xml well-formed ───────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$D1" | xmllint --noout - 2>/dev/null && ok "--map-diff xml well-formed" || no "--map-diff xml malformed"
+    if printf '%s' "$D1" | xmllint --noout - 2>/dev/null; then ok "--map-diff xml well-formed"; else no "--map-diff xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

@@ -50,23 +50,6 @@ inline bool isCppCastKeyword( std::string_view name ) noexcept
     return name == "static_cast" || name == "reinterpret_cast" || name == "const_cast" || name == "dynamic_cast";
 }
 
-// First DIRECT child of `n` whose node type is `type`, or a null node when none exists — the one
-// child-scan shape shared by the using-declaration keyword guard below and the phantom-`::` probe
-// (hasPhantomScopeSeparator), so the two cannot drift into near-clones of each other.
-inline TSNode firstChildOfType( TSNode n, const char* type ) noexcept
-{
-    const std::uint32_t childCount = ts_node_child_count( n );
-    for( std::uint32_t i = 0; i < childCount; ++i )
-    {
-        const TSNode child = ts_node_child( n, i );
-        if( std::strcmp( ts_node_type( child ), type ) == 0 )
-        {
-            return child;
-        }
-    }
-    return TSNode {};
-}
-
 // using-declaration re-exports (r9 loss bucket 1): TRUE when a C++ `using_declaration` node is a grammar
 // KEYWORD form rather than a single-symbol re-export — `using namespace ns;` (its qualified spelling
 // `using namespace lib::nested;` carries a qualified_identifier and so matches the tags pattern) or
@@ -219,11 +202,11 @@ inline TSNode innermostQualifiedName( TSNode n ) noexcept
     constexpr int kMaxQualifierHops = 32;   // `a::b::c::…` past 32 segments is not written C++
     for( int hop = 0; hop < kMaxQualifierHops; ++hop )
     {
-        if( ts_node_is_null( n ) || std::strcmp( ts_node_type( n ), "qualified_identifier" ) != 0 )
+        if( ts_node_is_null( n ) || !kindIs( ts_node_type( n ), "qualified_identifier" ) )
         {
             break;
         }
-        const TSNode inner = ts_node_child_by_field_name( n, "name", 4 );
+        const TSNode inner = fieldChild( n, NodeField::Name );
         if( ts_node_is_null( inner ) )
         {
             break;
@@ -288,7 +271,7 @@ inline DefNameFacts cppDefNameReseat( bool applies, TSNode nameNode, std::string
 inline std::string qualifierOf( TSNode nameNode, std::string_view src )
 {
     const TSNode parent = ts_node_parent( nameNode );
-    if( ts_node_is_null( parent ) || std::strcmp( ts_node_type( parent ), "qualified_identifier" ) != 0 )
+    if( ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "qualified_identifier" ) )
     {
         return {};
     }
@@ -296,7 +279,7 @@ inline std::string qualifierOf( TSNode nameNode, std::string_view src )
     {
         return {}; // error-recovery artefact, not a written qualification
     }
-    const TSNode scope = ts_node_child_by_field_name( parent, "scope", 5 );
+    const TSNode scope = fieldChild( parent, NodeField::Scope );
     if( ts_node_is_null( scope ) )
     {
         return {};
@@ -369,9 +352,9 @@ inline std::string rustEnclosingScopeOf( TSNode node, std::string_view src, bool
     for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
     {
         const char* t = ts_node_type( p );
-        const bool  isImpl  = std::strcmp( t, "impl_item" )  == 0;
-        const bool  isTrait = std::strcmp( t, "trait_item" ) == 0;
-        const bool  isMod   = includeModules && std::strcmp( t, "mod_item" ) == 0;
+        const bool  isImpl  = kindIs( t, "impl_item" );
+        const bool  isTrait = kindIs( t, "trait_item" );
+        const bool  isMod   = includeModules && kindIs( t, "mod_item" );
         if( !isImpl && !isTrait && !isMod )
         {
             continue;
@@ -379,7 +362,7 @@ inline std::string rustEnclosingScopeOf( TSNode node, std::string_view src, bool
 
         // impl carries the implementor under `type:`; trait/mod carry their own `name:`. Anonymous/ill-formed
         // (empty text) yields "" — no usable scope — which is the same degrade as "no owner above".
-        const TSNode owner = isImpl ? ts_node_child_by_field_name( p, "type", 4 ) : ts_node_child_by_field_name( p, "name", 4 );
+        const TSNode owner = isImpl ? fieldChild( p, NodeField::Type ) : fieldChild( p, NodeField::Name );
         // V3 L-1: a container is not its OWN scope. `mod util { … }`'s definition node IS that `name:` child, so
         // the first ancestor found is the module itself and `util` would be published as `util::util` (likewise
         // `Shape::Shape`) — a self-scope in the canonical-id space, which is what ids are keyed on. Keep walking
@@ -403,12 +386,12 @@ inline std::string rustEnclosingScopeOf( TSNode node, std::string_view src, bool
 inline std::string rustQualifierOf( TSNode nameNode, std::string_view src )
 {
     const TSNode parent = ts_node_parent( nameNode );
-    if( ts_node_is_null( parent ) || std::strcmp( ts_node_type( parent ), "scoped_identifier" ) != 0 )
+    if( ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "scoped_identifier" ) )
     {
         return {};
     }
 
-    std::string qualifier = rustPathSegment( nodeTextOf( ts_node_child_by_field_name( parent, "path", 4 ), src ) );
+    std::string qualifier = rustPathSegment( nodeTextOf( fieldChild( parent, NodeField::Path ), src ) );
     // `Self::helper()` — resolve `Self` to the ENCLOSING impl/trait type at EXTRACTION time, so the ref keys
     // the same canonical entry the def side wrote (`Widget::helper`). Precedent: captureRustImpls already
     // reads an impl header's `type:` for inherit refs. Falls back to bare-name when there is no impl above.
@@ -428,11 +411,11 @@ inline std::string enclosingScopeOf( TSNode node, std::string_view src )
         //   C++: class_specifier/struct_specifier/namespace_definition · Python: class_definition.
         // Each exposes a `name` field; the nearest one is the enclosing scope used for canonical resolution
         // and P2-D Rule-1 narrowing (a `self.m()`/`this->m()`/bare member call resolves to scope::m).
-        const bool scopeOwner =    std::strcmp( t, "class_specifier" )     == 0 || std::strcmp( t, "struct_specifier" )    == 0
-                                || std::strcmp( t, "namespace_definition" ) == 0 || std::strcmp( t, "class_definition" )    == 0;
+        const bool scopeOwner =    kindIs( t, "class_specifier" ) || kindIs( t, "struct_specifier" )
+                                || kindIs( t, "namespace_definition" ) || kindIs( t, "class_definition" );
         if( scopeOwner )
         {
-            const TSNode nm = ts_node_child_by_field_name( p, "name", 4 );
+            const TSNode nm = fieldChild( p, NodeField::Name );
             if( ts_node_is_null( nm ) )
             {
                 return {}; // anonymous → no usable scope
@@ -440,6 +423,39 @@ inline std::string enclosingScopeOf( TSNode node, std::string_view src )
             const std::uint32_t a = ts_node_start_byte( nm ), b = ts_node_end_byte( nm );
             return ( a <= b && b <= src.size() ) ? std::string( src.substr( a, b - a ) ) : std::string{};
         }
+    }
+    return {};
+}
+
+// Kotlin: the enclosing class/object/companion-object of a definition. Not folded into the shared
+// enclosingScopeOf for two reasons, each sufficient alone. (1) Its scope-owner kinds carry NO `name:`
+// field in this grammar — class_declaration/object_declaration/companion_object expose the name only as
+// a positional `type_identifier` child — so the shared walker's field lookup would read "no scope" on
+// every call rather than fail loudly. (2) `class_declaration` is also a node kind in the Java, C#,
+// TypeScript and Swift grammars, WITH a `name:` field there, so listing it in the shared walker would
+// silently start scoping those languages' definitions too — Ruby's bare-word collision argument (below)
+// in a different spelling. Anonymous companion objects (`companion object { ... }`) have no
+// type_identifier child and are walked THROUGH, exactly like Ruby's `class << self` singleton_class,
+// so a member of one scopes to the class that owns it.
+inline std::string kotlinEnclosingScopeOf( TSNode nameNode, std::string_view src )
+{
+    for( TSNode p = ts_node_parent( nameNode ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    {
+        const char* t = ts_node_type( p );
+        const bool scopeOwner =    kindIs( t, "class_declaration" )
+                                 || kindIs( t, "object_declaration" )
+                                 || kindIs( t, "companion_object" );
+        if( !scopeOwner )
+        {
+            continue;
+        }
+        const TSNode nm = firstChildOfType( p, "type_identifier" );
+        if( ts_node_is_null( nm ) || ts_node_eq( nm, nameNode ) )
+        {
+            continue;   // anonymous companion object (walk through to whatever encloses IT), OR this
+                         // IS the definition being scoped (its scope is what encloses it) — same outcome
+        }
+        return std::string( nodeTextOf( nm, src ) );
     }
     return {};
 }
@@ -462,11 +478,11 @@ inline std::string rubyEnclosingScopeOf( TSNode nameNode, std::string_view src )
     for( TSNode p = ts_node_parent( nameNode ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
     {
         const char* t = ts_node_type( p );
-        if( std::strcmp( t, "class" ) != 0 && std::strcmp( t, "module" ) != 0 )
+        if( !kindIs( t, "class" ) && !kindIs( t, "module" ) )
         {
             continue;
         }
-        TSNode nm = ts_node_child_by_field_name( p, "name", 4 );
+        TSNode nm = fieldChild( p, NodeField::Name );
         if( ts_node_is_null( nm ) )
         {
             return {};   // anonymous → no usable scope (the grammar always names these; guard, don't assert)
@@ -475,9 +491,9 @@ inline std::string rubyEnclosingScopeOf( TSNode nameNode, std::string_view src )
         {
             continue;    // this IS the definition being scoped — its scope is what encloses it
         }
-        if( std::strcmp( ts_node_type( nm ), "scope_resolution" ) == 0 )
+        if( kindIs( ts_node_type( nm ), "scope_resolution" ) )
         {
-            const TSNode last = ts_node_child_by_field_name( nm, "name", 4 );
+            const TSNode last = fieldChild( nm, NodeField::Name );
             if( !ts_node_is_null( last ) )
             {
                 nm = last;
@@ -502,16 +518,16 @@ inline std::string rubyEnclosingScopeOf( TSNode nameNode, std::string_view src )
 inline bool rubyCallIsAssignmentTarget( TSNode nameNode ) noexcept
 {
     const TSNode call = ts_node_parent( nameNode );
-    if( ts_node_is_null( call ) || std::strcmp( ts_node_type( call ), "call" ) != 0 )
+    if( ts_node_is_null( call ) || !kindIs( ts_node_type( call ), "call" ) )
     {
         return false;
     }
     const TSNode assign = ts_node_parent( call );
-    if( ts_node_is_null( assign ) || std::strcmp( ts_node_type( assign ), "assignment" ) != 0 )
+    if( ts_node_is_null( assign ) || !kindIs( ts_node_type( assign ), "assignment" ) )
     {
         return false;
     }
-    const TSNode left = ts_node_child_by_field_name( assign, "left", 4 );
+    const TSNode left = fieldChild( assign, NodeField::Left );
     return !ts_node_is_null( left ) && ts_node_eq( left, call );
 }
 
@@ -529,12 +545,12 @@ inline bool isSwiftLocalBinding( TSNode declNode ) noexcept
     for( TSNode p = ts_node_parent( declNode ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
     {
         const char* t = ts_node_type( p );
-        if( std::strcmp( t, "statements" ) == 0 )
+        if( kindIs( t, "statements" ) )
         {
             return true;                                             // inside an executable block → local binding
         }
         // a member property's wrappers — reaching one first means it is NOT a local.
-        if( std::strcmp( t, "class_body" ) == 0 || std::strcmp( t, "enum_class_body" ) == 0 || std::strcmp( t, "protocol_body" ) == 0 || std::strcmp( t, "source_file" ) == 0 )
+        if( kindIs( t, "class_body" ) || kindIs( t, "enum_class_body" ) || kindIs( t, "protocol_body" ) || kindIs( t, "source_file" ) )
         {
             return false;
         }
@@ -615,20 +631,25 @@ inline bool rustItemCarriesTestAttr( TSNode item, std::string_view src ) noexcep
     for( TSNode prev = ts_node_prev_sibling( item ); !ts_node_is_null( prev ); prev = ts_node_prev_sibling( prev ) )
     {
         const char* t = ts_node_type( prev );
-        if( std::strcmp( t, "attribute_item" ) == 0 )
+        if( kindIs( t, "attribute_item" ) )
         {
-            const std::uint32_t childCount = ts_node_child_count( prev );
-            for( std::uint32_t ci = 0; ci < childCount; ++ci )
+            // O(children): `#[ /*…*/ test ]` puts the comments in the attribute_item — 56x at 16 000
+            // (test/childwalkscalecheck.sh, arm B23). The sibling climb this sits in is a different scan:
+            // ts_node_prev_sibling restarts from the parent's first child too (the parent-chain family).
+            bool        marked = false;
+            ChildCursor cursor( prev );
+            forEachChild( prev, cursor.cur, [ & ]( TSNode ch )
             {
-                const TSNode ch = ts_node_child( prev, ci );
-                if( std::strcmp( ts_node_type( ch ), "attribute" ) == 0 && rustAttrIsTestMarker( nodeTextOf( ch, src ) ) )
-                {
-                    return true;
-                }
+                marked = kindIs( ts_node_type( ch ), "attribute" ) && rustAttrIsTestMarker( nodeTextOf( ch, src ) );
+                return !marked;
+            } );
+            if( marked )
+            {
+                return true;
             }
             continue;
         }
-        if( std::strcmp( t, "line_comment" ) == 0 || std::strcmp( t, "block_comment" ) == 0 )
+        if( kindIs( t, "line_comment" ) || kindIs( t, "block_comment" ) )
         {
             continue;   // a doc comment may sit between an attribute and its item
         }
@@ -667,26 +688,28 @@ inline bool csharpAttrIsTestMarker( std::string_view name ) noexcept
 // they decorate (the mirror image of Rust's sibling placement — again verified by --match probe).
 inline bool csharpNodeCarriesTestAttr( TSNode n, std::string_view src ) noexcept
 {
-    const std::uint32_t childCount = ts_node_child_count( n );
-    for( std::uint32_t ci = 0; ci < childCount; ++ci )
+    // O(children) at both levels — and this runs on every ANCESTOR of a def (anySelfOrAncestor), so the
+    // declaration_list and the compilation_unit scan their whole child lists too: `public /*…*/ void M()`
+    // measured 37x its control at 16 000 comments (test/childwalkscalecheck.sh, arm B24). Two cursors:
+    // the attribute_list walk runs while the declaration walk is mid-iteration.
+    bool        marked = false;
+    ChildCursor lists( n );
+    ChildCursor attrs( n );
+    forEachChild( n, lists.cur, [ & ]( TSNode list )
     {
-        const TSNode list = ts_node_child( n, ci );
-        if( std::strcmp( ts_node_type( list ), "attribute_list" ) != 0 )
+        if( !kindIs( ts_node_type( list ), "attribute_list" ) )
         {
-            continue;
+            return true;
         }
-        const std::uint32_t attrCount = ts_node_child_count( list );
-        for( std::uint32_t ai = 0; ai < attrCount; ++ai )
+        forEachChild( list, attrs.cur, [ & ]( TSNode attr )
         {
-            const TSNode attr = ts_node_child( list, ai );
-            if(    std::strcmp( ts_node_type( attr ), "attribute" ) == 0
-                && csharpAttrIsTestMarker( nodeTextOf( ts_node_child_by_field_name( attr, "name", 4 ), src ) ) )
-            {
-                return true;
-            }
-        }
-    }
-    return false;
+            marked =    kindIs( ts_node_type( attr ), "attribute" )
+                     && csharpAttrIsTestMarker( nodeTextOf( fieldChild( attr, NodeField::Name ), src ) );
+            return !marked;
+        } );
+        return !marked;
+    } );
+    return marked;
 }
 
 // Python's rule, written as its own pass because the two halves are ORDERED: a `def test_*` counts
@@ -698,21 +721,21 @@ inline bool pythonInFileTestScope( TSNode defNode, std::string_view src ) noexce
     bool enclosedByClass = false;
     for( TSNode n = defNode; !ts_node_is_null( n ); n = ts_node_parent( n ) )
     {
-        if( std::strcmp( ts_node_type( n ), "class_definition" ) != 0 )
+        if( !kindIs( ts_node_type( n ), "class_definition" ) )
         {
             continue;
         }
-        if( pyTestClassName( nodeTextOf( ts_node_child_by_field_name( n, "name", 4 ), src ) ) )
+        if( pyTestClassName( nodeTextOf( fieldChild( n, NodeField::Name ), src ) ) )
         {
             return true;    // a member of a Test* class, at any nesting depth
         }
         enclosedByClass = true;
     }
-    if( enclosedByClass || std::strcmp( ts_node_type( defNode ), "function_definition" ) != 0 )
+    if( enclosedByClass || !kindIs( ts_node_type( defNode ), "function_definition" ) )
     {
         return false;
     }
-    return nodeTextOf( ts_node_child_by_field_name( defNode, "name", 4 ), src ).rfind( "test_", 0 ) == 0;
+    return nodeTextOf( fieldChild( defNode, NodeField::Name ), src ).rfind( "test_", 0 ) == 0;
 }
 
 // Is `pred` true of `node` itself or of any of its ancestors? Three of the four in-file test rules ask
@@ -733,13 +756,35 @@ inline bool anySelfOrAncestor( TSNode node, NodePred pred ) noexcept
     return false;
 }
 
+// The `recovered` extraction bit (RawDef::recovered; extentsuspect.h rule `error`). Two shapes, both measured on the
+// scope-leak fixture family (test/extentfix): a CLASS whose own body holds an error while an ERROR node encloses it —
+// the struct whose body swallowed the definitions after it — and a C++ `method` with NO scope inside an ERROR node — a
+// member of a class the recovery dissolved (a field_identifier declarator only exists inside a class body). A clean
+// class inside a recovered file is NOT marked: its body parsed, so its members' scope is the one the source gave them.
+// The ancestor walk (anySelfOrAncestor, above) runs only for those rare candidates, in a file whose root has an error.
+inline std::uint8_t parseRecoveredBits( TSNode defNode, SymKind kind, Lang lang, bool isScopeless )
+{
+    const bool isContainerShape = extent::inSet( extent::kExtentClassKinds, kind ) && ts_node_has_error( defNode );
+    const bool isOrphanShape    = lang == Lang::Cpp && kind == SymKind::Method && isScopeless;
+    if( !isContainerShape && !isOrphanShape )
+    {
+        return 0;
+    }
+    const bool hasErrorAncestor = anySelfOrAncestor( ts_node_parent( defNode ), []( TSNode n ) noexcept { return ts_node_is_error( n ); } );
+    if( !hasErrorAncestor )
+    {
+        return 0;
+    }
+    return isContainerShape ? extent::kRecoveredContainer : extent::kRecoveredOrphan;
+}
+
 // Rust: the def itself, or any enclosing `mod`/`fn`, carries a test attribute.
 inline bool rustInFileTestScope( TSNode defNode, std::string_view src ) noexcept
 {
     return anySelfOrAncestor( defNode, [ & ]( TSNode n ) noexcept
                                        {
                                            const char* t = ts_node_type( n );
-                                           return    ( std::strcmp( t, "mod_item" ) == 0 || std::strcmp( t, "function_item" ) == 0 )
+                                           return    ( kindIs( t, "mod_item" ) || kindIs( t, "function_item" ) )
                                                   && rustItemCarriesTestAttr( n, src );
                                        } );
 }
@@ -752,11 +797,11 @@ inline bool jsInFileTestScope( TSNode defNode, std::string_view src ) noexcept
 {
     return anySelfOrAncestor( defNode, [ & ]( TSNode n ) noexcept
                                        {
-                                           if( std::strcmp( ts_node_type( n ), "call_expression" ) != 0 )
+                                           if( !kindIs( ts_node_type( n ), "call_expression" ) )
                                            {
                                                return false;
                                            }
-                                           const std::string_view callee = nodeTextOf( ts_node_child_by_field_name( n, "function", 8 ), src );
+                                           const std::string_view callee = nodeTextOf( fieldChild( n, NodeField::Function ), src );
                                            return callee == "describe" || callee == "it" || callee == "test";
                                        } );
 }
@@ -824,40 +869,35 @@ struct TestMacroBlockParts
 
 inline TestMacroBlockParts testMacroBlockPartsOf( TSNode exprStmtNode, std::string_view src ) noexcept
 {
-    if( ts_node_is_null( exprStmtNode ) || std::strcmp( ts_node_type( exprStmtNode ), "expression_statement" ) != 0 )
+    if( ts_node_is_null( exprStmtNode ) || !kindIs( ts_node_type( exprStmtNode ), "expression_statement" ) )
     {
         return {};
     }
 
-    // the MISSING ";" — the one structural mark separating a macro-with-block from a real statement
-    bool hasMissingSemicolon = false;
-    const std::uint32_t childCount = ts_node_child_count( exprStmtNode );
-    for( std::uint32_t childIx = 0; childIx < childCount; ++childIx )
-    {
-        if( ts_node_is_missing( ts_node_child( exprStmtNode, childIx ) ) )
-        {
-            hasMissingSemicolon = true;
-            break;
-        }
-    }
+    // the MISSING ";" — the one structural mark separating a macro-with-block from a real statement.
+    // O(children): the recovered expression_statement owns every comment between `)` and the block —
+    // 16 000 of them measured 29x the identical flood after the block (childwalkscalecheck B26)
+    bool        hasMissingSemicolon = false;
+    ChildCursor cursor( exprStmtNode );
+    forEachChild( exprStmtNode, cursor.cur, [ & ]( TSNode c ) { hasMissingSemicolon = ts_node_is_missing( c ); return !hasMissingSemicolon; } );
     if( !hasMissingSemicolon )
     {
         return {};
     }
 
     const TSNode body = ts_node_next_named_sibling( exprStmtNode );
-    if( ts_node_is_null( body ) || std::strcmp( ts_node_type( body ), "compound_statement" ) != 0 )
+    if( ts_node_is_null( body ) || !kindIs( ts_node_type( body ), "compound_statement" ) )
     {
         return {};
     }
 
     // the callee must be a KNOWN test macro
     const TSNode call = ts_node_named_child( exprStmtNode, 0 );
-    if( ts_node_is_null( call ) || std::strcmp( ts_node_type( call ), "call_expression" ) != 0 )
+    if( ts_node_is_null( call ) || !kindIs( ts_node_type( call ), "call_expression" ) )
     {
         return {};
     }
-    const std::string_view callee = nodeTextOf( ts_node_child_by_field_name( call, "function", 8 ), src );
+    const std::string_view callee = nodeTextOf( fieldChild( call, NodeField::Function ), src );
     bool isKnownMacro = false;
     for( const std::string_view macroName : kTestBlockMacroNames )
     {
@@ -872,18 +912,23 @@ inline TestMacroBlockParts testMacroBlockPartsOf( TSNode exprStmtNode, std::stri
         return {};
     }
 
-    // the FIRST string literal among the arguments is the title
-    const TSNode args = ts_node_child_by_field_name( call, "arguments", 9 );
-    const std::uint32_t argCount = ts_node_is_null( args ) ? 0u : ts_node_named_child_count( args );
-    for( std::uint32_t argIx = 0; argIx < argCount; ++argIx )
+    // the FIRST string literal among the arguments is the title — O(children): `TEST_CASE( /*…*/ "t" )`
+    // measured 28x at 16 000 (childwalkscalecheck B25); the cursor above is free again, its walk is done
+    const TSNode args  = fieldChild( call, NodeField::Arguments );
+    TSNode       title = {};
+    if( !ts_node_is_null( args ) )
     {
-        const TSNode arg = ts_node_named_child( args, argIx );
-        if( std::strcmp( ts_node_type( arg ), "string_literal" ) == 0 && ts_node_end_byte( arg ) > ts_node_start_byte( arg ) + 2 )   // "" is not a name
+        forEachNamedChild( args, cursor.cur, [ & ]( TSNode arg )
         {
-            return { true, body, arg };
-        }
+            if( kindIs( ts_node_type( arg ), "string_literal" ) && ts_node_end_byte( arg ) > ts_node_start_byte( arg ) + 2 )   // "" is not a name
+            {
+                title = arg;
+                return false;
+            }
+            return true;
+        } );
     }
-    return {};
+    return ts_node_is_null( title ) ? TestMacroBlockParts {} : TestMacroBlockParts { true, body, title };
 }
 
 // the title text: the string_literal's content with the delimiting quotes stripped. Escape sequences
@@ -959,7 +1004,7 @@ inline bool nameBoundByInitDeclarator( TSNode nameNode, TSNode declNode ) noexce
 {
     for( TSNode walk = ts_node_parent( nameNode ); !ts_node_is_null( walk ) && !ts_node_eq( walk, declNode ); walk = ts_node_parent( walk ) )
     {
-        if( std::strcmp( ts_node_type( walk ), "init_declarator" ) == 0 )
+        if( kindIs( ts_node_type( walk ), "init_declarator" ) )
         {
             return true;
         }
@@ -974,35 +1019,35 @@ inline bool nameBoundByInitDeclarator( TSNode nameNode, TSNode declNode ) noexce
 // and returns the first child whose source text is one of `tokens` ("" = none).
 inline std::string_view childTokenAmong( TSNode node, std::string_view src, const char* namedChildType, bool acceptAnonymousToken, std::initializer_list<std::string_view> tokens ) noexcept
 {
-    const std::uint32_t childCount = ts_node_child_count( node );
-    for( std::uint32_t childIx = 0; childIx < childCount; ++childIx )
+    // O(children): a declaration with no `static` scans its whole child list, comments included — `int /*…*/ m;`
+    // measured 16x its control at 16 000 (test/childwalkscalecheck.sh, arm B27)
+    std::string_view hit;
+    ChildCursor      cursor( node );
+    forEachChild( node, cursor.cur, [ & ]( TSNode child )
     {
-        const TSNode child   = ts_node_child( node, childIx );
-        const bool   isNamed = ts_node_is_named( child );
-        if( isNamed && std::strcmp( ts_node_type( child ), namedChildType ) != 0 )
+        const bool isNamed = ts_node_is_named( child );
+        if( ( isNamed && std::strcmp( ts_node_type( child ), namedChildType ) != 0 ) || ( !isNamed && !acceptAnonymousToken ) )
         {
-            continue;
-        }
-        if( !isNamed && !acceptAnonymousToken )
-        {
-            continue;
+            return true;
         }
         const std::uint32_t beginByte = ts_node_start_byte( child );
         const std::uint32_t endByte   = ts_node_end_byte( child );
         if( endByte > src.size() || beginByte >= endByte )
         {
-            continue;
+            return true;
         }
         const std::string_view text = src.substr( beginByte, endByte - beginByte );
         for( const std::string_view token : tokens )
         {
             if( text == token )
             {
-                return text;
+                hit = text;
+                return false;
             }
         }
-    }
-    return {};
+        return true;
+    } );
+    return hit;
 }
 
 // CUDA memory-space qualifier of a module-scope declaration ("" = none). The uninitialized-declaration
@@ -1087,12 +1132,12 @@ inline bool fieldCaptureKept( Lang lang, TSNode nameNode, TSNode roleNode, std::
     {
         return false;
     }
-    if( std::strcmp( ts_node_type( parent ), "attribute" ) != 0 )
+    if( !kindIs( ts_node_type( parent ), "attribute" ) )
     {
         return false;
     }
-    const TSNode object = ts_node_child_by_field_name( parent, "object", 6 );
-    if( ts_node_is_null( object ) || std::strcmp( ts_node_type( object ), "identifier" ) != 0 || nodeTextOf( object, src ) != "self" )
+    const TSNode object = fieldChild( parent, NodeField::Object );
+    if( ts_node_is_null( object ) || !kindIs( ts_node_type( object ), "identifier" ) || nodeTextOf( object, src ) != "self" )
     {
         return false;   // `obj.x = …` / `cls.x = …` — not an instance attribute of the enclosing class
     }
@@ -1100,11 +1145,11 @@ inline bool fieldCaptureKept( Lang lang, TSNode nameNode, TSNode roleNode, std::
     for( TSNode up = ts_node_parent( roleNode ); !ts_node_is_null( up ); up = ts_node_parent( up ) )
     {
         const char* ut = ts_node_type( up );
-        if( std::strcmp( ut, "function_definition" ) == 0 )
+        if( kindIs( ut, "function_definition" ) )
         {
             sawFunction = true;
         }
-        else if( std::strcmp( ut, "class_definition" ) == 0 )
+        else if( kindIs( ut, "class_definition" ) )
         {
             return sawFunction;   // a method of this class (or a closure inside one) → keep; a class-body `self.x` → drop
         }
@@ -1157,7 +1202,7 @@ inline bool dropConstantCapture( Lang lang, std::string_view name, TSNode nameNo
     }
     // Class-static constants bind through a field_declaration (the loose default_value pattern), never
     // through init_declarator — their whole keep contract lives in fieldConstantCaptureKept.
-    if( std::strcmp( ts_node_type( roleNode ), "field_declaration" ) == 0 )
+    if( kindIs( ts_node_type( roleNode ), "field_declaration" ) )
     {
         return !fieldConstantCaptureKept( roleNode, src );
     }
@@ -1203,7 +1248,7 @@ inline bool yamlKeyCaptureDropped( std::string_view name, TSNode roleNode ) noex
     for( TSNode p = roleNode; !ts_node_is_null( p ); p = ts_node_parent( p ) )
     {
         const char* pt = ts_node_type( p );
-        if( std::strcmp( pt, "block_mapping" ) == 0 || std::strcmp( pt, "flow_mapping" ) == 0 )
+        if( kindIs( pt, "block_mapping" ) || kindIs( pt, "flow_mapping" ) )
         {
             if( ++mappingDepth > 2u )
             {
@@ -1262,7 +1307,7 @@ inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_
         // preproc_def and Rust macro_definition fail the node-type test and are never gated.
         const TSNode defineNode = ts_node_parent( nameNode );
         return !ts_node_is_null( defineNode )
-            && std::strcmp( ts_node_type( defineNode ), "preproc_function_def" ) == 0
+            && kindIs( ts_node_type( defineNode ), "preproc_function_def" )
             && !preprocFunctionDefHasBody( defineNode, src );
     }
     return false;
@@ -1282,22 +1327,22 @@ inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept
     {
         return false;
     }
-    const TSNode obj = ts_node_child_by_field_name( member, "object", 6 );
+    const TSNode obj = fieldChild( member, NodeField::Object );
     if( ts_node_is_null( obj ) )
     {
         return false;
     }
     const char* objType = ts_node_type( obj );
-    if( std::strcmp( objType, "identifier" ) == 0 )
+    if( kindIs( objType, "identifier" ) )
     {
         return nodeTextOf( obj, src ) == "exports";
     }
-    if( std::strcmp( objType, "member_expression" ) == 0 )
+    if( kindIs( objType, "member_expression" ) )
     {
-        const TSNode oo = ts_node_child_by_field_name( obj, "object", 6 );
-        return std::strcmp( ts_node_type( oo ), "identifier" ) == 0
+        const TSNode oo = fieldChild( obj, NodeField::Object );
+        return kindIs( ts_node_type( oo ), "identifier" )
             && nodeTextOf( oo, src ) == "module"
-            && nodeTextOf( ts_node_child_by_field_name( obj, "property", 8 ), src ) == "exports";
+            && nodeTextOf( fieldChild( obj, NodeField::Property ), src ) == "exports";
     }
     return false;
 }
@@ -1312,12 +1357,12 @@ inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noe
     {
         return false;
     }
-    const TSNode obj = ts_node_child_by_field_name( member, "object", 6 );
-    if( ts_node_is_null( obj ) || std::strcmp( ts_node_type( obj ), "member_expression" ) != 0 )
+    const TSNode obj = fieldChild( member, NodeField::Object );
+    if( ts_node_is_null( obj ) || !kindIs( ts_node_type( obj ), "member_expression" ) )
     {
         return false;
     }
-    return nodeTextOf( ts_node_child_by_field_name( obj, "property", 8 ), src ) == "prototype";
+    return nodeTextOf( fieldChild( obj, NodeField::Property ), src ) == "prototype";
 }
 
 // Python shape round (test/pyshapecheck.sh): `NAME = value` in a class body is a definition only when
@@ -1333,40 +1378,40 @@ inline bool isPyEnumMemberTarget( TSNode nameNode, std::string_view src ) noexce
     const TSNode stmt   = ts_node_is_null( assign ) ? assign : ts_node_parent( assign );  // expression_statement
     const TSNode body   = ts_node_is_null( stmt )   ? stmt   : ts_node_parent( stmt );    // block
     const TSNode cls    = ts_node_is_null( body )   ? body   : ts_node_parent( body );    // class_definition
-    if( ts_node_is_null( cls ) || std::strcmp( ts_node_type( cls ), "class_definition" ) != 0 )
+    if( ts_node_is_null( cls ) || !kindIs( ts_node_type( cls ), "class_definition" ) )
     {
         return false;
     }
-    const TSNode bases = ts_node_child_by_field_name( cls, "superclasses", 12 );
+    const TSNode bases = fieldChild( cls, NodeField::Superclasses );
     if( ts_node_is_null( bases ) )
     {
         return false;
     }
-    const std::uint32_t baseCount = ts_node_named_child_count( bases );
-    for( std::uint32_t baseIndex = 0; baseIndex < baseCount; ++baseIndex )
+    // O(children): the superclasses argument_list owns every comment between its names — `class C( # …
+    // Enum ):` measured 54x its control at 16 000 (test/childwalkscalecheck.sh, arm B28)
+    bool        isEnum = false;
+    ChildCursor cursor( bases );
+    forEachNamedChild( bases, cursor.cur, [ & ]( TSNode base )
     {
-        TSNode base = ts_node_named_child( bases, baseIndex );
-        if( std::strcmp( ts_node_type( base ), "attribute" ) == 0 )                      // models.TextChoices → TextChoices
+        if( kindIs( ts_node_type( base ), "attribute" ) )                      // models.TextChoices → TextChoices
         {
-            base = ts_node_child_by_field_name( base, "attribute", 9 );
+            base = fieldChild( base, NodeField::Attribute );
             if( ts_node_is_null( base ) )
             {
-                continue;
+                return true;
             }
         }
-        if( std::strcmp( ts_node_type( base ), "identifier" ) != 0 )
-        {
-            continue;
-        }
-        const std::string_view baseName = nodeTextOf( base, src );
-        if( baseName == "Enum" || baseName == "IntEnum" || baseName == "StrEnum"
-         || baseName == "Flag" || baseName == "IntFlag" || baseName == "ReprEnum"
-         || baseName == "Choices" || baseName == "TextChoices" || baseName == "IntegerChoices" )
+        if( !kindIs( ts_node_type( base ), "identifier" ) )
         {
             return true;
         }
-    }
-    return false;
+        const std::string_view baseName = nodeTextOf( base, src );
+        isEnum =    baseName == "Enum" || baseName == "IntEnum" || baseName == "StrEnum"
+                 || baseName == "Flag" || baseName == "IntFlag" || baseName == "ReprEnum"
+                 || baseName == "Choices" || baseName == "TextChoices" || baseName == "IntegerChoices";
+        return !isEnum;
+    } );
+    return isEnum;
 }
 }   // namespace — ingest_names.h section of ingest.cpp
 

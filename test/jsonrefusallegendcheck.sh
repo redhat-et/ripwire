@@ -26,7 +26,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # house convention: the suite passes the binary via RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 echo "jsonrefusallegendcheck: BIN=$BIN"
@@ -44,7 +44,7 @@ PY
 
 # ─────────────────────────── §B1.4: the --json refusal ───────────────────────────────────────────────────
 "$BIN" "$SBX" --regex="bet.*" --json > "$TMP/regex.out" 2>"$TMP/regex.err"; RC=$?
-[ $RC -eq 1 ] && ok "--regex --json refuses with exit 1" || no "--regex --json exited $RC, want 1"
+if [ $RC -eq 1 ]; then ok "--regex --json refuses with exit 1"; else no "--regex --json exited $RC, want 1"; fi
 [ -s "$TMP/regex.err" ] || { no "the refusal wrote nothing to stderr"; echo "FAILURES ABOVE"; exit 1; }
 MSG="$( cat "$TMP/regex.err" )"
 
@@ -68,7 +68,7 @@ fi
 
 # (3) a SHAPE MODIFIER must not be described as a verb
 "$BIN" "$SBX" --callers=beta --format=columnar --json > /dev/null 2>"$TMP/shape.err"; RC=$?
-[ $RC -eq 1 ] && ok "--callers --format=columnar --json refuses with exit 1" || no "--callers --format=columnar --json exited $RC, want 1"
+if [ $RC -eq 1 ]; then ok "--callers --format=columnar --json refuses with exit 1"; else no "--callers --format=columnar --json exited $RC, want 1"; fi
 SHAPE="$( cat "$TMP/shape.err" )"
 case "$SHAPE" in *--format=columnar*) ok "the shape-modifier refusal names --format=columnar" ;;
                  *)                   no "the shape-modifier refusal does not name --format=columnar: $SHAPE" ;; esac
@@ -151,7 +151,7 @@ check_json_refuses()
     local want="$1"; shift
     OUT="$( "$BIN" "$dir" "$@" --json 2>"$TMP/arm.err" )"; RC=$?
     ERRTXT="$( cat "$TMP/arm.err" )"
-    [ "$RC" -eq 1 ] && ok "$desc: --json exits 1" || no "$desc: --json exited $RC (want 1): $ERRTXT"
+    if [ "$RC" -eq 1 ]; then ok "$desc: --json exits 1"; else no "$desc: --json exited $RC (want 1): $ERRTXT"; fi
     case "$ERRTXT" in *"$want"*) ok "$desc: refusal names $want" ;;
                       *)         no "$desc: refusal does not name $want: $ERRTXT" ;; esac
     [ -z "$OUT" ] && ok "$desc: stdout stayed empty (no XML leaked before the refusal)" \

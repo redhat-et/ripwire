@@ -19,7 +19,7 @@ FIXTURE="$TMP/fixture"
 mkdir -p "$FIXTURE"
 
 fail=0
-ok(){ printf '  PASS  %s\n' "$1"; }
+ok(){ printf '  PASS  %s\n' "$1" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$1"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$1"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }

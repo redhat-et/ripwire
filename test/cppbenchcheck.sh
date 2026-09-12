@@ -21,7 +21,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -47,10 +47,10 @@ else no "harness run 1 failed rc=$rc1 (see $LOG1)"; cat "$LOG1" >&2; fi
 
 if command -v python3 >/dev/null && [ -f "$LOCK" ]; then
     n=$( python3 -c "import json; print(json.load(open('$LOCK'))['selected_count'])" 2>/dev/null )
-    [ "$n" = "3" ] && ok "dataset.lock mined exactly 3 instances" || no "dataset.lock instance count = ${n:-?} (expected 3)"
+    if [ "$n" = "3" ]; then ok "dataset.lock mined exactly 3 instances"; else no "dataset.lock instance count = ${n:-?} (expected 3)"; fi
 
     # self-consistency: recompute the lock's content hash the same way the harness does and compare
-    python3 - "$LOCK" <<'PY' && ok "dataset.lock content_sha256 is self-consistent" || no "dataset.lock content hash mismatch"
+    if python3 - "$LOCK" <<'PY'; then ok "dataset.lock content_sha256 is self-consistent"; else no "dataset.lock content hash mismatch"; fi
 import json, hashlib, sys
 lock = json.load(open(sys.argv[1]))
 canon = [dict(sha=i["sha"], parent=i["parent"], gold_files=i["gold_files"])

@@ -63,7 +63,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -162,7 +162,7 @@ done
 
 # ── F) determinism ─────────────────────────────────────────────────────────────────────────────────────
 rw '^#include' >"$TMP/d1"; rw '^#include' >"$TMP/d2"
-diff -q "$TMP/d1" "$TMP/d2" >/dev/null && ok "(F) two runs byte-identical" || no "(F) output is nondeterministic"
+if diff -q "$TMP/d1" "$TMP/d2" >/dev/null; then ok "(F) two runs byte-identical"; else no "(F) output is nondeterministic"; fi
 
 # ── G) MUTATION self-tests: each assertion must be able to see its own regression ──────────────────────
 # (A)/(D) revert: only the file-anchored hit survives — the exact pre-fix answer shape.
@@ -193,7 +193,7 @@ rm -f "$C/gamma.c"
 
 # ── H) G4: well-formed XML ─────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$A_OUT" | xmllint --noout - 2>/dev/null && ok "(H) xml well-formed (xmllint)" || no "(H) xml malformed"
+    if printf '%s' "$A_OUT" | xmllint --noout - 2>/dev/null; then ok "(H) xml well-formed (xmllint)"; else no "(H) xml malformed"; fi
 else
     ok "(H) xmllint absent — skipped"
 fi

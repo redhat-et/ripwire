@@ -34,7 +34,7 @@ IDX="$CORPUS/index.scip"
 EXC="--exclude=make_index.py"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -63,9 +63,9 @@ if awk -F'\t' '$1=="O" && $2 ~ /^b\.py::K::run#/ && $3=="sum"' "$TMP/scip.tsv" |
 else
     ok "(C) no phantom K.run -> sum row — \`local 0\` did not bind across files"
 fi
-grep -q 'prov="scip"' "$TMP/scip.xml" && ok "(C) the map still carries prov=\"scip\" edges (the control pinned)" || no "(C) no prov=\"scip\" edge at all"
+if grep -q 'prov="scip"' "$TMP/scip.xml"; then ok "(C) the map still carries prov=\"scip\" edges (the control pinned)"; else no "(C) no prov=\"scip\" edge at all"; fi
 N_SUM_EDGE="$( tr '>' '\n' <"$TMP/scip.xml" | awk '/id="b.py::K::run"/{f=1} f&&/n="sum"/{c++} /\/s/{if(f)exit} END{print c+0}' )"
-[ "$N_SUM_EDGE" = 0 ] && ok "(C) K.run emits no phantom edge to sum" || no "(C) K.run carries $N_SUM_EDGE phantom sum edge(s) from the local collision"
+if [ "$N_SUM_EDGE" = 0 ]; then ok "(C) K.run emits no phantom edge to sum"; else no "(C) K.run carries $N_SUM_EDGE phantom sum edge(s) from the local collision"; fi
 
 # ── (D) the PARAMETER trap: a parameter never binds its function; the call is a NON-DEF resolution ─
 PARAM_ROW="$( awk -F'\t' '$1=="O" && $2 ~ /^a\.py::Box::go#/ && $3=="model" {print $4}' "$TMP/scip.tsv" )"
@@ -93,7 +93,7 @@ printf '%s' "$LINE" | grep -q '(1/1)' && ok "(F) stderr: SCIP matched 1/1 intern
 # ── (G) the harness reads both definitions ────────────────────────────────────────────────────────
 python3 "$ROOT/bench/scip_pin_precision.py" --bin "$BIN" --repo "$CORPUS" --scip "$IDX" --exclude make_index.py \
         --workdir "$TMP" --label join --json "$TMP/join.json" >"$TMP/harness.out" 2>&1 || no "(G) harness failed: $( tail -3 "$TMP/harness.out" )"
-python3 - "$TMP/join.json" <<'PY' && ok "(G) harness: locality covered=1 precision=0.000 (full oracle), in-repo-only covered=0" || no "(G) harness readout wrong: $( cat "$TMP/harness.out" | tail -12 )"
+if python3 - "$TMP/join.json" <<'PY'; then ok "(G) harness: locality covered=1 precision=0.000 (full oracle), in-repo-only covered=0"; else no "(G) harness readout wrong: $( cat "$TMP/harness.out" | tail -12 )"; fi
 import json, sys
 j = json.load( open( sys.argv[ 1 ] ) )
 loc = j[ "rows" ][ "locality" ]
@@ -109,9 +109,9 @@ PY
 cmp -s "$TMP/scip.xml" "$TMP/scip2.xml" && ok "(H) stdout byte-identical with and without --pin-census under --scip" \
     || no "(H) --pin-census changed stdout under --scip"
 "$BIN" "$CORPUS" $EXC --no-cache --scip="$IDX" --pin-census="$TMP/scip3.tsv" >"$TMP/scip3.xml" 2>/dev/null
-cmp -s "$TMP/scip.tsv" "$TMP/scip3.tsv" && ok "(H) the census is byte-identical run to run" || no "(H) census differs between two armed runs"
+if cmp -s "$TMP/scip.tsv" "$TMP/scip3.tsv"; then ok "(H) the census is byte-identical run to run"; else no "(H) census differs between two armed runs"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/scip.xml" 2>/dev/null && ok "(H) --scip map is well-formed XML" || no "(H) --scip map fails xmllint"
+    if xmllint --noout "$TMP/scip.xml" 2>/dev/null; then ok "(H) --scip map is well-formed XML"; else no "(H) --scip map fails xmllint"; fi
 fi
 
 [ "$fail" = 0 ] && { echo "scipjoincheck: OK"; exit 0; }

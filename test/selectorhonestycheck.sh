@@ -38,7 +38,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -133,9 +133,9 @@ grep -q '^feat-doc def DOC\.md:' "$TMP/rows" \
 
 # determinism + well-formedness of the changed verb
 "$BIN" "$R" --whereis=parseArgs --limit=200 >"$TMP/w2.xml" 2>/dev/null
-cmp -s "$W" "$TMP/w2.xml" && ok "GUARD §A7: whereis is byte-identical run-to-run" || no "§A7: whereis is non-deterministic"
+if cmp -s "$W" "$TMP/w2.xml"; then ok "GUARD §A7: whereis is byte-identical run-to-run"; else no "§A7: whereis is non-deterministic"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$W" 2>/dev/null && ok "GUARD §A7: whereis XML well-formed" || no "§A7: whereis XML malformed"
+    if xmllint --noout "$W" 2>/dev/null; then ok "GUARD §A7: whereis XML well-formed"; else no "§A7: whereis XML malformed"; fi
 fi
 
 # ── §A6a: an ambiguous --edit-check REFUSES and hands back the spellings ────────────────────────────────
@@ -176,7 +176,7 @@ printf '%s' "$ECQ" | grep -q 'p="[^"]*one/h.h:2"' \
 
 # an UNAMBIGUOUS bare name is untouched (this fix must not turn every symbol into a refusal).
 ECU_RC=0; "$BIN" "$R" --edit-check=dispatch --no-cache >/dev/null 2>&1 || ECU_RC=$?
-[ "$ECU_RC" -eq 0 ] && ok "GUARD §A6a: an unambiguous bare name still answers (exit 0)" || no "§A6a: --edit-check=dispatch exited $ECU_RC (want 0)"
+if [ "$ECU_RC" -eq 0 ]; then ok "GUARD §A6a: an unambiguous bare name still answers (exit 0)"; else no "§A6a: --edit-check=dispatch exited $ECU_RC (want 0)"; fi
 
 # ── §A6b(ii): a file: qualifier naming a file with NO such def REFUSES, like its three siblings ─────────
 U_RC=0; "$BIN" "$R" --uses=core.h:helper --no-cache >"$TMP/uout" 2>"$TMP/uerr" || U_RC=$?

@@ -50,7 +50,7 @@ FIX="$ROOT/test/cfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -62,9 +62,9 @@ echo "ccheck: BIN=$BIN  FIX=$FIX"
 MAP_OUT="$TMP/map.xml"
 "$BIN" "$FIX" --no-cache >"$MAP_OUT" 2>"$TMP/map.err"
 MAP_EXIT=$?
-[ "$MAP_EXIT" -eq 0 ] && ok "default map: exits 0 on the C fixture" || no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"
+if [ "$MAP_EXIT" -eq 0 ]; then ok "default map: exits 0 on the C fixture"; else no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"; fi
 
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP_OUT" && ok "default map: passes xmllint --noout" || no "default map: xmllint failed"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP_OUT"; then ok "default map: passes xmllint --noout"; else no "default map: xmllint failed"; fi; }
 
 # no degrade / ABI-mismatch warning must reach stderr on the clean fixture (proves grammarAbiOk passed)
 [ -s "$TMP/map.err" ] && no "default map: unexpected stderr (ABI/degrade?): $( cat "$TMP/map.err" )" || ok "default map: clean stderr (no ABI mismatch / degrade)"
@@ -94,10 +94,10 @@ echo
 echo "=== structure: 9 symbols across 3 files, tags + edges match the fixture ==="
 # ═══════════════════════════════════════════════════════════════════════════
 
-grep -q 'symbols=9' "$MAP_OUT" && ok "header: symbols=9 (util.h:add_one, util.c:5, main.c:2)" || no "header: expected symbols=9: $( grep -o 'symbols=[0-9]*' "$MAP_OUT" )"
-grep -q 'edges=3' "$MAP_OUT" && ok "header: edges=3 (add_two->add_one, run->add_one, compute->add_two)" || no "header: expected edges=3: $( grep -o 'edges=[0-9]*' "$MAP_OUT" )"
-grep -q 'ambiguous=0' "$MAP_OUT" && ok "header: ambiguous=0 (util.h's decl-only add_one never splits the cross-lang candidate set)" || no "header: expected ambiguous=0: $( grep -o 'ambiguous=[0-9]*' "$MAP_OUT" )"
-grep -q 'unresolved=0' "$MAP_OUT" && ok "header: unresolved=0" || no "header: expected unresolved=0: $( grep -o 'unresolved=[0-9]*' "$MAP_OUT" )"
+if grep -q 'symbols=9' "$MAP_OUT"; then ok "header: symbols=9 (util.h:add_one, util.c:5, main.c:2)"; else no "header: expected symbols=9: $( grep -o 'symbols=[0-9]*' "$MAP_OUT" )"; fi
+if grep -q 'edges=3' "$MAP_OUT"; then ok "header: edges=3 (add_two->add_one, run->add_one, compute->add_two)"; else no "header: expected edges=3: $( grep -o 'edges=[0-9]*' "$MAP_OUT" )"; fi
+if grep -q 'ambiguous=0' "$MAP_OUT"; then ok "header: ambiguous=0 (util.h's decl-only add_one never splits the cross-lang candidate set)"; else no "header: expected ambiguous=0: $( grep -o 'ambiguous=[0-9]*' "$MAP_OUT" )"; fi
+if grep -q 'unresolved=0' "$MAP_OUT"; then ok "header: unresolved=0"; else no "header: expected unresolved=0: $( grep -o 'unresolved=[0-9]*' "$MAP_OUT" )"; fi
 
 python3 - "$TMP/parsed.json" <<'PYEOF' >"$TMP/struct_check"
 import json, sys
@@ -126,30 +126,30 @@ print("H_DECL:%s POINT:%s POINTT:%s COLOR:%s SQUARE:%s ADDONE:%s ADDTWO:%s ADDTW
 PYEOF
 cat "$TMP/struct_check"
 
-grep -q "H_DECL:True"      "$TMP/struct_check" && ok "util.h: body-less prototype add_one still emitted, t=\"fn\""      || no "util.h: add_one prototype missing or wrong tag"
-grep -q "POINT:True"       "$TMP/struct_check" && ok "util.c: struct Point tagged t=\"cls\""                            || no "util.c: Point missing or not t=\"cls\""
-grep -q "POINTT:True"      "$TMP/struct_check" && ok "util.c: typedef PointT tagged t=\"struct\" (type-alias bucket)"   || no "util.c: PointT missing or wrong tag"
-grep -q "COLOR:True"       "$TMP/struct_check" && ok "util.c: enum Color tagged t=\"struct\" (type bucket)"             || no "util.c: Color missing or wrong tag"
-grep -q "SQUARE:True"      "$TMP/struct_check" && ok "util.c: #define SQUARE tagged t=\"fn\" (macro bucket)"            || no "util.c: SQUARE macro missing or wrong tag"
-grep -q "ADDONE:True"      "$TMP/struct_check" && ok "util.c: add_one() definition tagged t=\"fn\""                     || no "util.c: add_one missing or wrong tag"
-grep -q "ADDTWO:True"      "$TMP/struct_check" && ok "util.c: add_two() definition tagged t=\"fn\""                     || no "util.c: add_two missing or wrong tag"
-grep -q "ADDTWO_EDGE:True" "$TMP/struct_check" && ok "util.c: same-file call edge add_two -> add_one present"           || no "util.c: add_two -> add_one edge MISSING"
-grep -q "RUN:True"         "$TMP/struct_check" && ok "main.c: run() tagged t=\"fn\""                                    || no "main.c: run missing or wrong tag"
-grep -q "COMPUTE:True"     "$TMP/struct_check" && ok "main.c: compute() tagged t=\"fn\""                                || no "main.c: compute missing or wrong tag"
-grep -q "RUN_EDGE:True"     "$TMP/struct_check" && ok "main.c: CROSS-FILE edge run -> add_one (resolves to util.c's DEF, not util.h's decl)" || no "main.c: run -> add_one edge MISSING"
-grep -q "COMPUTE_EDGE:True" "$TMP/struct_check" && ok "main.c: cross-file edge compute -> add_two"                      || no "main.c: compute -> add_two edge MISSING"
+if grep -q "H_DECL:True"      "$TMP/struct_check"; then ok "util.h: body-less prototype add_one still emitted, t=\"fn\""; else no "util.h: add_one prototype missing or wrong tag"; fi
+if grep -q "POINT:True"       "$TMP/struct_check"; then ok "util.c: struct Point tagged t=\"cls\""; else no "util.c: Point missing or not t=\"cls\""; fi
+if grep -q "POINTT:True"      "$TMP/struct_check"; then ok "util.c: typedef PointT tagged t=\"struct\" (type-alias bucket)"; else no "util.c: PointT missing or wrong tag"; fi
+if grep -q "COLOR:True"       "$TMP/struct_check"; then ok "util.c: enum Color tagged t=\"struct\" (type bucket)"; else no "util.c: Color missing or wrong tag"; fi
+if grep -q "SQUARE:True"      "$TMP/struct_check"; then ok "util.c: #define SQUARE tagged t=\"fn\" (macro bucket)"; else no "util.c: SQUARE macro missing or wrong tag"; fi
+if grep -q "ADDONE:True"      "$TMP/struct_check"; then ok "util.c: add_one() definition tagged t=\"fn\""; else no "util.c: add_one missing or wrong tag"; fi
+if grep -q "ADDTWO:True"      "$TMP/struct_check"; then ok "util.c: add_two() definition tagged t=\"fn\""; else no "util.c: add_two missing or wrong tag"; fi
+if grep -q "ADDTWO_EDGE:True" "$TMP/struct_check"; then ok "util.c: same-file call edge add_two -> add_one present"; else no "util.c: add_two -> add_one edge MISSING"; fi
+if grep -q "RUN:True"         "$TMP/struct_check"; then ok "main.c: run() tagged t=\"fn\""; else no "main.c: run missing or wrong tag"; fi
+if grep -q "COMPUTE:True"     "$TMP/struct_check"; then ok "main.c: compute() tagged t=\"fn\""; else no "main.c: compute missing or wrong tag"; fi
+if grep -q "RUN_EDGE:True"     "$TMP/struct_check"; then ok "main.c: CROSS-FILE edge run -> add_one (resolves to util.c's DEF, not util.h's decl)"; else no "main.c: run -> add_one edge MISSING"; fi
+if grep -q "COMPUTE_EDGE:True" "$TMP/struct_check"; then ok "main.c: cross-file edge compute -> add_two"; else no "main.c: compute -> add_two edge MISSING"; fi
 
 # cross-check via --callees / --callers (independent of the raw-XML parse)
 CE="$( "$BIN" "$FIX" --callees=run --no-cache 2>/dev/null )"
-echo "$CE" | grep -q 'count="1"'      && ok "--callees=run reports count=1"          || no "--callees=run did not report count=1: $CE"
+if echo "$CE" | grep -q 'count="1"'; then ok "--callees=run reports count=1"; else no "--callees=run did not report count=1: $CE"; fi
 echo "$CE" | grep -q 'n="add_one"'    && echo "$CE" | grep -q 'util.c'               \
     && ok "--callees=run resolves add_one to util.c (the definition, not util.h's decl)" \
     || no "--callees=run did not resolve to util.c's add_one: $CE"
 
 CR="$( "$BIN" "$FIX" --callers=add_one --no-cache 2>/dev/null )"
-echo "$CR" | grep -q 'count="2"'  && ok "--callers=add_one reports count=2 (run, add_two)" || no "--callers=add_one did not report count=2: $CR"
-echo "$CR" | grep -q 'n="run"'     && ok "--callers=add_one lists run"     || no "--callers=add_one missing run: $CR"
-echo "$CR" | grep -q 'n="add_two"' && ok "--callers=add_one lists add_two" || no "--callers=add_one missing add_two: $CR"
+if echo "$CR" | grep -q 'count="2"'; then ok "--callers=add_one reports count=2 (run, add_two)"; else no "--callers=add_one did not report count=2: $CR"; fi
+if echo "$CR" | grep -q 'n="run"'; then ok "--callers=add_one lists run"; else no "--callers=add_one missing run: $CR"; fi
+if echo "$CR" | grep -q 'n="add_two"'; then ok "--callers=add_one lists add_two"; else no "--callers=add_one missing add_two: $CR"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

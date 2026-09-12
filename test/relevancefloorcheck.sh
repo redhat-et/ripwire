@@ -60,7 +60,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -215,8 +215,8 @@ printf '%s' "$JZ_OUT" | grep -q '"sigs":\[\]' \
     && ok "(7b) --json answers a no-match query with an empty sigs array" \
     || no "(7b) --json still answered a no-match query with rows"
 if command -v python3 >/dev/null 2>&1; then
-    printf '%s' "$J_OUT"  | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null && ok "(7c) the floored --json bundle parses" || no "(7c) the floored --json bundle is not valid JSON"
-    printf '%s' "$JZ_OUT" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null && ok "(7d) the empty --json bundle parses"  || no "(7d) the empty --json bundle is not valid JSON"
+    if printf '%s' "$J_OUT"  | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then ok "(7c) the floored --json bundle parses"; else no "(7c) the floored --json bundle is not valid JSON"; fi
+    if printf '%s' "$JZ_OUT" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then ok "(7d) the empty --json bundle parses"; else no "(7d) the empty --json bundle is not valid JSON"; fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -243,9 +243,9 @@ echo "=== (9) determinism + well-formed XML on every floored surface ==="
 for q in FLOORANCHOR_uniquefn ZZQQNOSUCHTOKENXYZ "unrelated alpha"; do
     r1="$( rw --for="$q" )"
     r2="$( rw --for="$q" )"
-    [ "$r1" = "$r2" ] && ok "(9) --for=$q is byte-identical across runs" || no "(9) --for=$q is nondeterministic"
+    if [ "$r1" = "$r2" ]; then ok "(9) --for=$q is byte-identical across runs"; else no "(9) --for=$q is nondeterministic"; fi
     if command -v xmllint >/dev/null 2>&1; then
-        printf '%s' "$r1" | xmllint --noout - 2>/dev/null && ok "(9b) --for=$q is well-formed XML" || no "(9b) --for=$q is not well-formed XML"
+        if printf '%s' "$r1" | xmllint --noout - 2>/dev/null; then ok "(9b) --for=$q is well-formed XML"; else no "(9b) --for=$q is not well-formed XML"; fi
     fi
 done
 

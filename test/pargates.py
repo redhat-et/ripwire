@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -26,7 +27,7 @@ only = None
 jsonout = None
 shard = None          # (k, n): run only the k-th of n deterministic slices of the gate list
 shard_plan = False    # print every slice's membership and predicted weight, run nothing
-budget_scale = 1.0    # multiply the DEFAULT per-gate budget (never the explicit overrides) -- CI passes >1
+budget_scale = 1.0    # scales the DEFAULT budget; a declared override acts as a FLOOR under it -- CI passes >1
 exclude_list = None   # a committed file naming gates this leg does not run (one per line, # comments)
 args = sys.argv[3:]
 for i, a in enumerate(args):
@@ -191,6 +192,11 @@ exclusive = {"editcheckcheck.sh"}
 # for them -- it is shorter than the work. Measured: rc=124 at 300.1 s on ALL FOUR Linux legs of CI run
 # 31182301976, green on macOS where the same build fits in ~60 s. headbinlib.sh's own waiter budget
 # must stay well under 900 -- its comment explains the coupling.
+# Since 2026-09-10 CI no longer builds that binary inside any gate: ci.yml builds it in its own step BEFORE this
+# harness starts and exports RIPWIRE_HEADBIN, and headbinlib's STAGED mode then never builds and never waits
+# (test/headbinstagecheck.sh). No timeout could have fixed it -- the build is super-linear in the -j contention
+# these budgets run under, so a slow draw outgrew 900 s and then 1200 s. The six numbers stay as declared because
+# the unstaged path (a local run with RIPWIRE_HEADBIN unset) still builds inside the first gate and still waits.
 #
 # cppbenchcheck / regexbombcheck: legitimate ASan-on-a-cold-cache work, not a hang -- ~856 s and ~804 s
 # measured respectively -- so the old flat 300 s cap read a healthy run as a timeout. 1200 s leaves
@@ -212,8 +218,19 @@ exclusive = {"editcheckcheck.sh"}
 # 151 s local -> rc=124 at 300.1 s; paginationcheck 53 s local -> rc=124 at 300.0 s). Sixty-four uncapped gates
 # sit inside that multiplier of the cap, so per-gate entries would be the wrong shape -- and raising the constant
 # itself would blunt the tripwire on the machines it was measured on. So CI passes a scale factor that applies
-# to the DEFAULT only; the explicit entries in GATE_BUDGET_SEC were derived from CI measurements and stay as
-# declared. The TIMEOUT message names the effective budget and the scale, so a red still names its own limit.
+# to the DEFAULT, and a declared entry below acts as a FLOOR under it rather than a ceiling over it. The
+# TIMEOUT message names the effective budget and the scale, so a red still names its own limit.
+#
+# The floor (2026-09-10) repairs an inversion the first shape had. Skipping the scale for declared entries
+# meant that under CI's --budget-scale 4 the gates this table calls out as HEAVY were the only gates in the
+# job running on LESS time than an ordinary one: crossdirincludecheck, which builds a whole second ripwire
+# from git HEAD, got 900 s while xmlwellformed -- which pipes one map through xmllint -- got 300 x 4 = 1200.
+# Measured on a CI run of main (34479806177, macos-14 Release shard 2/2): crossdirincludecheck rc=124 at
+# 900.1 s in a shard whose wall was 3588.6 s, with xmlwellformed at 585.8 s and rootrelcheck at 345.9 s in
+# the same job -- every gate on that runner ran 6-10x its idle-local wall, and only the UNDECLARED ones had
+# a budget that had moved with it. max(declared, default x scale) keeps each declared number meaningful on
+# the machine it was measured on (at scale 1.0 the declared value still wins, unchanged) and stops the table
+# from buying a gate less time than saying nothing would have. It never loosens a tripwire below today.
 DEFAULT_TIMEOUT_SEC = 300
 GATE_BUDGET_SEC = {
     "crossdirincludecheck.sh":    900,
@@ -375,32 +392,190 @@ def failure_report(out, logpath):
     return "\n".join(block)
 
 
+# --- a gate is its whole process group, and a stop signals all of it (2026-09-10) ---------------------------------
+# A gate's work runs in its children -- ripwire over whole trees, and on the unstaged path headbinlib.sh's parallel
+# `cmake --build`. The budget used to be subprocess.run(timeout=), which expires into Popen.kill(): SIGKILL to the
+# gate's bash and to nothing else, and SIGKILL runs no trap. Measured on a probe gate under a 2 s budget: its
+# background child and the child it waited on inside $( ) were both alive, reparented to pid 1, after this harness had
+# printed TIMEOUT -- still running beside the next gates, on runners the budget table above describes as super-linear
+# in exactly that contention.
+#
+# So every gate starts in a session of its own, which makes it the leader of a process group holding each descendant
+# that does not move itself out (one that calls setsid is out of reach), and a stop signals that group: TERM first, so
+# the gate's EXIT trap still removes its temp dir -- a private checkout there is a whole tree of the repository -- then
+# KILL for whatever is still in the group KILL_GRACE_SEC later. The grace belongs to the whole group, not to the gate's
+# bash: a child whose output goes elsewhere can still be cleaning up after both are gone, and the first version KILLed
+# it right then (CodeRabbit on #129). A group seen empty is never signalled again. What the gate printed before and
+# during the stop is kept -- it is in the capture file described below, not in flight down a pipe.
+#
+# A session of its own also takes the gate out of the terminal's foreground group, so Ctrl-C would no longer reach it at
+# all. pargates therefore catches SIGINT, SIGTERM and SIGHUP -- unless it inherited one ignored -- stops every running
+# gate the same way within STOP_POLL_SEC, starts none after, and exits 128+signal with no summary. A gate admitted in
+# the instant the signal lands, between run()'s check and its spawn, is stopped before its first read (CodeRabbit on
+# #129); no check can close that window itself against an asynchronous signal. A second signal changes nothing: the
+# stop is bounded by 2 x (STOP_POLL_SEC + KILL_GRACE_SEC). A SIGKILL to pargates itself reaches no gate.
+# test/pargatescheck.sh runs these paths on probe gates, beside mutants of each that must go red.
+KILL_GRACE_SEC = 10
+STOP_POLL_SEC = 0.5
+stop_signal = None      # the first SIGINT/SIGTERM/SIGHUP pargates received; set only by _on_stop_signal
+
+
+def _on_stop_signal(signum, _frame):
+    global stop_signal
+    if stop_signal is None:
+        stop_signal = signum
+        try:
+            # os.write, not print: a handler writing through sys.stderr can re-enter the write it interrupted
+            os.write(2, f"\npargates: {signal.Signals(signum).name} -- stopping every running gate's process group\n".encode())
+        except OSError:
+            pass
+
+
+for _sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    if signal.getsignal(_sig) is not signal.SIG_IGN:        # nohup, or `&` without job control: an inherited ignore stands
+        signal.signal(_sig, _on_stop_signal)
+
+
+def _group_alive(p):
+    """Whether the gate's process group still has a member. An exited leader is reaped first, so it does not count."""
+    p.poll()
+    try:
+        os.killpg(p.pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        pass                        # EPERM: a member exists that this process may not signal
+    return True
+
+
+# --- a gate's stdout is a FILE, never a pipe (2026-09-11) -------------------------------------------------------
+# Whether a gate's `printf` succeeds is a property of what this harness hands it as stdout, and a verdict must never
+# depend on it. stdout used to be subprocess.PIPE: a blocking pipe with a ~16 KiB kernel buffer, drained by one Python
+# thread per gate. Let that reader stall -- GIL contention at -j 6, or the macOS runner starvation this repo has hit
+# before -- and a verbose gate fills the buffer, its next printf BLOCKS inside write(2), and because bash installs its
+# SIGCHLD handler without SA_RESTART (and every gate forks), the blocked write comes back EINTR. bash's printf then
+# reports `write error: Interrupted system call` and returns non-zero, which is how PR #126 got
+#     FAIL  B4 crossing: packet lists 12 of the map's 25 symbols in wide.md (cap 12)
+# out of an arm whose pass condition (12 == 12, 25 > 12) held. Measured on a plain blocking pipe with a stalled
+# reader: 600 arms -> 600 PASS lines AND 21 spurious FAILs, `Interrupted system call` on all 21. Contention alone did
+# not do it (1500 arms drained a byte at a time: none), so it is the BLOCKED write specifically.
+#
+# A regular file cannot block a write, so the write cannot be interrupted, and there is no reader whose absence can
+# break the descriptor -- the whole errno family goes away for every gate at once, however verbose and whatever the
+# runner is doing. stderr stays stderr=STDOUT, i.e. the SAME open file description, so the two streams still interleave
+# in real write order and a gate's stderr still lands beside the FAIL row it explains. The gate side of this is
+# test/gateexitcheck.sh arm (G); this side is pinned by test/pargatescheck.sh arm (H). Note that test/regression.sh
+# runs gates straight into CI's own pipe, where none of this applies -- which is why the gate-side contract, not this,
+# is the load-bearing fix.
+def _wait_for(p, secs):
+    """Wait up to `secs` for the gate's leader -> True once it has exited and been reaped."""
+    try:
+        p.wait(timeout=secs)
+        return True
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def _await_group(p, secs):
+    """Wait until the gate's process group is empty or `secs` pass."""
+    end = time.monotonic() + secs
+    while _group_alive(p) and time.monotonic() < end:
+        left = max(0.0, min(STOP_POLL_SEC, end - time.monotonic()))
+        if _wait_for(p, left):
+            time.sleep(left)        # the leader is reaped: what is left to wait on is the group itself
+
+
+def _stop_group(p):
+    """TERM the gate's process group and give the WHOLE group KILL_GRACE_SEC to exit -- not only its bash -- then KILL
+    whatever is still in it and give that the same. A group seen empty is not signalled again. Nothing the gate wrote
+    is at risk here any more: it is already in the capture file, including what the last members wrote on their way
+    out. A descendant that left the group can still be writing after this returns; the caller reads the file once,
+    so that tail is missed, exactly as the pipe version missed it."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        if not _group_alive(p):
+            break
+        try:
+            os.killpg(p.pid, sig)
+        except OSError:
+            pass
+        _await_group(p, KILL_GRACE_SEC)
+    _wait_for(p, STOP_POLL_SEC)
+
+
+def _capture_read(path):
+    """Everything the gate and its descendants have written so far. A capture that cannot be read is empty, never a
+    crash of the harness: the rc and the budget message still stand on their own."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except OSError:
+        return b""
+
+
+def run_gate(argv, env, limit):
+    """Run one gate in a session of its own, stdout and stderr merged in write order into a regular file. Returns
+    (rc, output bytes, how): how is "exited", "timeout" (rc 124, its group stopped at the budget) or "stopped"
+    (pargates itself was signalled)."""
+    deadline = time.monotonic() + limit
+    fd, capture = tempfile.mkstemp(prefix="ripwire-pargates-capture-", suffix=".out")
+    os.close(fd)
+    try:
+        with open(capture, "wb") as fh, \
+             subprocess.Popen(argv, cwd=root, env=env, stdout=fh, stderr=subprocess.STDOUT,
+                              start_new_session=True) as p:
+            while True:
+                if stop_signal is not None:     # before every wait, the first included: a gate admitted as the signal landed stops now
+                    _stop_group(p)
+                    return 128 + stop_signal, _capture_read(capture), "stopped"
+                if _wait_for(p, max(0.0, min(STOP_POLL_SEC, deadline - time.monotonic()))):
+                    return p.returncode, _capture_read(capture), "exited"
+                if time.monotonic() >= deadline:
+                    _stop_group(p)
+                    return 124, _capture_read(capture), "timeout"
+    finally:
+        try:
+            os.unlink(capture)
+        except OSError:
+            pass
+
+
 def run(g):
-    env = dict(os.environ, RIPWIRE_BIN=binp)
+    # PYTHONDONTWRITEBYTECODE: a gate that imports a module straight out of the checkout (agentlooplockcheck:
+    # bench/agentloop/; aiderbytescheck: bench/headtohead/r4-2026-08-06/) would otherwise have Python drop a
+    # __pycache__/ beside it. That directory is gitignored, so the tree tripwire below cannot see it, and its
+    # name is on the crawl's built-in denylist, so every crawl of the live repo still counts it
+    # (corpus_pruned_dirs=). Created between the two re-crawls of pagingsweepcheck's cold grep (G) pair, it
+    # made that pair disagree on main twice (CI runs 34534320580, 34536435376). pargatescheck.sh pins it.
+    env = dict(os.environ, RIPWIRE_BIN=binp, PYTHONDONTWRITEBYTECODE="1")
+    scaled_default = int( round( DEFAULT_TIMEOUT_SEC * budget_scale ) )
     if g in GATE_BUDGET_SEC:
-        limit, scaled = GATE_BUDGET_SEC[g], ""
+        # A declared entry is a FLOOR, not a ceiling: it is the number below which this gate would be a
+        # hang even on an idle machine. It must never buy the gate LESS time than an undeclared one gets.
+        declared = GATE_BUDGET_SEC[g]
+        limit = max( declared, scaled_default )
+        scaled = "" if limit == declared else f", declared {declared}s raised to the scaled default {DEFAULT_TIMEOUT_SEC}s x --budget-scale {budget_scale:g}"
     else:
-        limit = int(round(DEFAULT_TIMEOUT_SEC * budget_scale))
+        limit = scaled_default
         scaled = "" if budget_scale == 1.0 else f", default {DEFAULT_TIMEOUT_SEC}s x --budget-scale {budget_scale:g}"
     t0 = time.time()
+    if stop_signal is not None:
+        return g, 128 + stop_signal, 0.0, "", False     # pargates is stopping: no gate starts after the signal
     with running_lock:
         running.add(g)          # the tree tripwire names whoever is in flight when it sees new dirt
     try:
-        p = subprocess.run(
-            ["bash", os.path.join(testdir, g)],
-            cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=limit,
-        )
-        rc, out = p.returncode, p.stdout.decode("utf-8", "replace")
-    except subprocess.TimeoutExpired as e:
-        # the budget itself is part of the message -- a red names its own declared budget instead of
-        # making the reader go look it up in GATE_BUDGET_SEC. Whatever the gate managed to print before
-        # the budget expired is kept ahead of it: a gate killed at 300 s that had already announced a
-        # failing arm used to report ONLY the word TIMEOUT.
-        partial = (e.stdout or b"").decode("utf-8", "replace") if isinstance(e.stdout, (bytes, bytearray)) else (e.stdout or "")
-        rc, out = 124, partial + f"\nTIMEOUT after {limit}s (declared budget={limit}s{scaled})"
+        rc, raw, how = run_gate(["bash", os.path.join(testdir, g)], env, limit)
     finally:
         with running_lock:
             running.discard(g)
+    if how == "stopped":
+        return g, rc, round(time.time() - t0, 1), "", False
+    out = raw.decode("utf-8", "replace")
+    if how == "timeout":
+        # the budget itself is part of the message -- a red names its own declared budget instead of
+        # making the reader go look it up in GATE_BUDGET_SEC. Whatever the gate managed to print before
+        # the budget expired, and while its group was being stopped, is kept ahead of it: a gate killed at
+        # 300 s that had already announced a failing arm used to report ONLY the word TIMEOUT.
+        out += f"\nTIMEOUT after {limit}s (declared budget={limit}s{scaled})"
     # A gate that SKIPS is not a gate that PASSED. argvdiffcheck skips without a RIPWIRE_BASE
     # reference binary, and reporting that as a pass is exactly the green-while-inert failure this
     # suite exists to catch elsewhere (the CI/NDEBUG blindness is the same family).
@@ -460,6 +635,11 @@ def _bin_fingerprint():
 # counts. A hit FAILS the run: a writer is a defect whether or not a determinism arm happened to be
 # reading in that window, and the same suite would only flake somewhere else next time.
 # `--no-optional-locks` keeps the sampler from ever taking the index lock a gate might need.
+#
+# Its blind spot is a write git ignores. That is usually harmless, because the crawl skips gitignored paths
+# too -- EXCEPT a directory whose NAME is on the crawl's own denylist (build, __pycache__, node_modules, ...):
+# a crawl of the live repo still counts it in corpus_pruned_dirs= while `git status` stays empty. Python's
+# bytecode cache was one such writer (see run()'s PYTHONDONTWRITEBYTECODE); a clean report stays "none found".
 DIRT_POLL_SEC = float(os.environ.get("PARGATES_DIRT_POLL_SEC", "0.25"))
 
 
@@ -516,14 +696,21 @@ results = []
 with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
     for r in ex.map(run, parallel_gates):
         results.append(r)
-        sys.stderr.write("s" if r[4] else ("." if r[1] == 0 else "X"))
-        sys.stderr.flush()
+        if stop_signal is None:
+            sys.stderr.write("s" if r[4] else ("." if r[1] == 0 else "X"))
+            sys.stderr.flush()
 for g in exclusive_gates:
     r = run(g)
     results.append(r)
-    sys.stderr.write("s" if r[4] else ("." if r[1] == 0 else "X"))
-    sys.stderr.flush()
+    if stop_signal is None:
+        sys.stderr.write("s" if r[4] else ("." if r[1] == 0 else "X"))
+        sys.stderr.flush()
 sys.stderr.write("\n")
+if stop_signal is not None:
+    # a stopped run proved nothing and measured nothing: no summary, no --json, no timings for the next LPT sort
+    print(f"pargates: stopped by {signal.Signals(stop_signal).name} before the suite finished -- every gate still running had its "
+          f"whole process group stopped (TERM, then KILL after {KILL_GRACE_SEC}s), and no gate started after the signal")
+    sys.exit(128 + stop_signal)
 if dirt_thread is not None:
     dirt_stop.set()
     dirt_thread.join()
@@ -582,7 +769,8 @@ if dirt_seen:
         print(f"***   {ln}  seen {n}x, T+{t_first}s..T+{t_last}s; running then: {who}")
     print("***   Every stamped verb reads `git status --porcelain` for its at=\"...+dirty\" bit from ANY crawl root")
     print("***   inside this checkout, so a determinism arm that ran in that window can red with the tree innocent.")
-    print("***   Fix the writer first (work on a copy, or a gitignored name); only then triage the arms above.")
+    print("***   Fix the writer first (work on a copy, or a gitignored name that is not a crawl-pruned directory")
+    print("***   name -- never build/, __pycache__/ or node_modules/); only then triage the arms above.")
 if skips:
     print("\nSKIPPED (ran, but proved nothing — not counted as passing):")
     for g, rc, dt, out, _ in skips:

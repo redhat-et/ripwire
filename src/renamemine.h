@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // renamemine.h — §9.5 CALIBRATION: judge the naming-* lint rules against the repo's OWN rename history.
 //
@@ -502,10 +505,7 @@ struct FileBytesCache
         if( !loaded[fileId] )
         {
             loaded[fileId] = 1;
-            if( !docparse::detail::readWholeFile( diskPath( ing, fileId ), bytes[fileId] ) )
-            {
-                bytes[fileId].clear();
-            }
+            bytes[fileId] = docparse::detail::readWholeFile( diskPath( ing, fileId ) ).value_or( std::string() );   // unreadable ⇒ empty
         }
         return bytes[fileId];
     }
@@ -724,13 +724,13 @@ inline int writeNamingCalibrationReport( const IngestResult& ing, const std::str
     const std::string atStamp = gitstamp::atAttr( root );
     if( !report.harvest.ok )
     {
-        std::printf( "<naming-calibration probed=\"0\" r=\"%s\"%s/>",
+        rw::emitTo( stdout, "<naming-calibration probed=\"0\" r=\"{}\"{}/>",
                      report.harvest.nonGitRoot ? "not-a-git-repo" : "probe-failed", atStamp.c_str() );
         return 0;
     }
 
-    std::printf( "<naming-calibration probed=\"1\" pairs=\"%zu\" candidates=\"%zu\" commits=\"%u\" hunks=\"%llu\" wide_hunks=\"%llu\""
-                 " drop_old_alive=\"%llu\" drop_new_absent=\"%llu\" drop_ambiguous=\"%llu\" drop_old_skipped=\"%llu\"%s%s>",
+    rw::emitTo( stdout, "<naming-calibration probed=\"1\" pairs=\"{}\" candidates=\"{}\" commits=\"{}\" hunks=\"{}\" wide_hunks=\"{}\""
+                 " drop_old_alive=\"{}\" drop_new_absent=\"{}\" drop_ambiguous=\"{}\" drop_old_skipped=\"{}\"{}{}>",
                  report.pairs.size(), report.harvest.candidates.size(), report.harvest.commitsWalked,
                  (unsigned long long)report.harvest.hunksScanned, (unsigned long long)report.harvest.hunksTooWide,
                  (unsigned long long)report.droppedOldStillHere, (unsigned long long)report.droppedNewNotAtHead,
@@ -741,16 +741,16 @@ inline int writeNamingCalibrationReport( const IngestResult& ing, const std::str
     {
         if( !score.scored )
         {
-            std::printf( "<r n=\"%s\" scope=\"group-rule\"/>", score.rule );
+            rw::emitTo( stdout, "<r n=\"{}\" scope=\"group-rule\"/>", score.rule );
             continue;
         }
         const std::uint32_t fired = score.oldFires + score.newFires;
-        std::printf( "<r n=\"%s\" old=\"%u\" new=\"%u\" fired=\"%u\"", score.rule, score.oldFires, score.newFires, fired );
+        rw::emitTo( stdout, "<r n=\"{}\" old=\"{}\" new=\"{}\" fired=\"{}\"", score.rule, score.oldFires, score.newFires, fired );
         if( fired != 0 )
         {
-            std::printf( " proxy=\"%.3f\"", double( score.oldFires ) / double( fired ) );
+            rw::emitTo( stdout, " proxy=\"{:.3f}\"", double( score.oldFires ) / double( fired ) );
         }
-        std::printf( "/>" );
+        rw::emitRaw( stdout, "/>" );
     }
 
     // TWO scratch buffers, not one reused twice in the same call: escapeXml returns a VIEW into its `out`,
@@ -763,20 +763,20 @@ inline int writeNamingCalibrationReport( const IngestResult& ing, const std::str
         const std::string oldName( escapeXml( pair.oldName, escOld ) );
         const std::string newName( escapeXml( pair.newName, escNew ) );
         const std::string path( escapeXml( ing.files[pair.fileId], escPath ) );
-        std::printf( "<p o=\"%s\" n=\"%s\" sup=\"%u\" at=\"%s:%u\"", oldName.c_str(), newName.c_str(), pair.support, path.c_str(), pair.line );
+        rw::emitTo( stdout, "<p o=\"{}\" n=\"{}\" sup=\"{}\" at=\"{}:{}\"", oldName.c_str(), newName.c_str(), pair.support, path.c_str(), pair.line );
         const std::string oldFires = detail::ruleListOf( pair.oldMask );
         const std::string newFires = detail::ruleListOf( pair.newMask );
         if( !oldFires.empty() )
         {
-            std::printf( " old_fires=\"%s\"", oldFires.c_str() );
+            rw::emitTo( stdout, " old_fires=\"{}\"", oldFires.c_str() );
         }
         if( !newFires.empty() )
         {
-            std::printf( " new_fires=\"%s\"", newFires.c_str() );
+            rw::emitTo( stdout, " new_fires=\"{}\"", newFires.c_str() );
         }
-        std::printf( "/>" );
+        rw::emitRaw( stdout, "/>" );
     }
-    std::printf( "</naming-calibration>" );
+    rw::emitRaw( stdout, "</naming-calibration>" );
     return 0;
 }
 

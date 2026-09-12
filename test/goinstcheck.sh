@@ -36,7 +36,7 @@ PROBE="${RIPWIRE_PROBE:-${BIN}_probe}"
 [ "${PROBE#/}" = "$PROBE" ] && PROBE="$ROOT/$PROBE"
 FIX="$ROOT/test/goinstfix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$PROBE" ] || { echo "no ripwire_probe binary at $PROBE — build first (cmake --build build -j)"; exit 2; }

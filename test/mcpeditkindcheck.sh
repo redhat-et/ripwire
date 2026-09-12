@@ -11,7 +11,7 @@ set -u
 BIN="${1:-${RIPWIRE_BIN:-./build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
@@ -55,6 +55,6 @@ b="$(cat "$T/code.cpp")"; r="$(mcp_replace keeper 'int keeper( int x )\n{\n    r
 
 # 4) determinism: the refusal is stable
 r1="$(mcp_replace ZorbleWidgetConfig 'x')"; r2="$(mcp_replace ZorbleWidgetConfig 'x')"
-[ "$r1" = "$r2" ] && ok "refusal deterministic run-to-run" || no "refusal non-deterministic"
+if [ "$r1" = "$r2" ]; then ok "refusal deterministic run-to-run"; else no "refusal non-deterministic"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

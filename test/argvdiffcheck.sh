@@ -34,7 +34,7 @@ CTRL="$ROOT/argvdiffcheck_mutation_control"
 trap 'rm -rf "$TMP"; rm -f "$CTRL"' EXIT
 cd "$ROOT"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 # SORTED, and that is load-bearing: the mutation arm at the bottom diffs two snapshots with comm, and comm
 # on unsorted input drops lines without saying so. git prints staged entries BEFORE untracked ones, so a

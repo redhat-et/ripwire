@@ -80,7 +80,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -298,7 +298,7 @@ for Q in widgetAnchorProbe widgetFitProbe widgetSoloProbe widgetMidProbe widgetT
     rw --for="$Q" >"$TMP/d1"; rw --for="$Q" >"$TMP/d2"; rw --for="$Q" >"$TMP/d3"
     { diff -q "$TMP/d1" "$TMP/d2" >/dev/null && diff -q "$TMP/d2" "$TMP/d3" >/dev/null; } || { echo "    nondeterministic: $Q"; det=0; }
 done
-[ "$det" = 1 ] && ok "(6) byte-identical across three runs on every shape" || no "(6) NON-deterministic output"
+if [ "$det" = 1 ]; then ok "(6) byte-identical across three runs on every shape"; else no "(6) NON-deterministic output"; fi
 
 if command -v xmllint >/dev/null 2>&1; then
     lint=1
@@ -306,7 +306,7 @@ if command -v xmllint >/dev/null 2>&1; then
         eval "printf '%s' \"\$$V\"" >"$TMP/lint.xml"
         xmllint --noout "$TMP/lint.xml" 2>/dev/null || { echo "    malformed: $V"; lint=0; }
     done
-    [ "$lint" = 1 ] && ok "(6b) all shapes well-formed XML (G4)" || no "(6b) malformed XML"
+    if [ "$lint" = 1 ]; then ok "(6b) all shapes well-formed XML (G4)"; else no "(6b) malformed XML"; fi
 else
     printf '  SKIP  xmllint (not installed)\n'
 fi

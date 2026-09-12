@@ -20,7 +20,7 @@ set -u
 BIN="${1:-${RIPWIRE_BIN:-./build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -59,6 +59,6 @@ out_exc="$("$BIN" "$REPO" --quality-delta --exclude=tests --no-cache 2>&1)"; rc_
 # 3) determinism
 r1="$("$BIN" "$REPO" --quality-delta --exclude=tests --no-cache 2>/dev/null)"
 r2="$("$BIN" "$REPO" --quality-delta --exclude=tests --no-cache 2>/dev/null)"
-[ "$r1" = "$r2" ] && ok "--quality-delta --exclude deterministic run-to-run" || no "non-deterministic output"
+if [ "$r1" = "$r2" ]; then ok "--quality-delta --exclude deterministic run-to-run"; else no "non-deterministic output"; fi
 
 [ "$fail" -eq 0 ] && echo "qualityexcludecheck: ALL PASS" || { echo "qualityexcludecheck: SOME CHECKS FAILED"; exit 1; }

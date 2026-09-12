@@ -9,7 +9,8 @@
 // pasteable invocation of ≤ kNextAttrMaxBytes: --edit-check contract-change → --uses=SYM; --impact →
 // --safe-delete=SYM; a gating --quality-delta row → --expand=FILE:NAME; --test-gate → its first run= command;
 // --situ → --test-gate; --from-trace/--run-trace → --slice=@FILE:LINE (the innermost in-corpus frame);
-// --callers → --uses=SELECTOR (the @FILE:LINE spelling mirrored); --grep → --at=FILE:LINE of the top hit, or the
+// --callers → --uses=SELECTOR (bare NAME for a narrowed selector with declined calls; otherwise the spelling is mirrored);
+// --grep → --at=FILE:LINE of the top hit, or the
 // next page under --legend=compact when the answer is capped, or --for=PAT on a zero-hit answer; --for → the
 // top-ranked row's --expand=FILE:NAME. Gate: test/nextverbcheck.sh — every next= that starts with `--` is run
 // through the argv parser and must exit 0 or 4, never 1; a shell next= (test-gate) must be one of the rows' run=.

@@ -23,7 +23,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -38,13 +38,13 @@ Q="signature ranking bundle packSignatures"
 # ── 1) WITHOUT the flag: --for / --pack-task are byte-identical run-to-run AND carry no <graph> block ───────
 FOR_A="$( "$BIN" "$CORPUS" --no-cache --for="$Q" 2>/dev/null )"
 FOR_B="$( "$BIN" "$CORPUS" --no-cache --for="$Q" 2>/dev/null )"
-[ "$FOR_A" = "$FOR_B" ] && ok "--for (no flag): 2-run byte-identical" || no "--for (no flag): non-deterministic"
+if [ "$FOR_A" = "$FOR_B" ]; then ok "--for (no flag): 2-run byte-identical"; else no "--for (no flag): non-deterministic"; fi
 printf '%s' "$FOR_A" | grep -qF '<graph fmt="mermaid"' && no "--for (no flag): unexpectedly emitted a <graph> block" \
     || ok "--for (no flag): no <graph> block emitted (G5: additive, off by default)"
 
 PACK_A="$( "$BIN" "$CORPUS" --no-cache --pack-task="$Q" 2>/dev/null )"
 PACK_B="$( "$BIN" "$CORPUS" --no-cache --pack-task="$Q" 2>/dev/null )"
-[ "$PACK_A" = "$PACK_B" ] && ok "--pack-task (no flag): 2-run byte-identical" || no "--pack-task (no flag): non-deterministic"
+if [ "$PACK_A" = "$PACK_B" ]; then ok "--pack-task (no flag): 2-run byte-identical"; else no "--pack-task (no flag): non-deterministic"; fi
 printf '%s' "$PACK_A" | grep -qF '<graph fmt="mermaid"' && no "--pack-task (no flag): unexpectedly emitted a <graph> block" \
     || ok "--pack-task (no flag): no <graph> block emitted (G5: additive, off by default)"
 
@@ -59,7 +59,7 @@ printf '%s' "$PACK_A" | grep -qF '<graph fmt="mermaid"' && no "--pack-task (no f
 FORG="$TMP/for_graph.xml"
 "$BIN" "$CORPUS" --no-cache --for="$Q" --with-graph > "$FORG" 2>/dev/null
 
-xmllint --noout "$FORG" 2>/dev/null && ok "--for --with-graph: xmllint-clean (G4)" || { no "--for --with-graph: NOT well-formed"; xmllint --noout "$FORG" 2>&1 | head -5; }
+if xmllint --noout "$FORG" 2>/dev/null; then ok "--for --with-graph: xmllint-clean (G4)"; else { no "--for --with-graph: NOT well-formed"; xmllint --noout "$FORG" 2>&1 | head -5; }; fi
 
 grep -qF '<graph fmt="mermaid"><![CDATA[' "$FORG" && ok "--for --with-graph: <graph fmt=\"mermaid\"> block present, CDATA opened" \
     || no "--for --with-graph: <graph> block missing or malformed open tag"
@@ -100,7 +100,7 @@ grep -qF '</graph></ctx>' "$FORGA" && ok "--for --with-graph (auto shape): <grap
 PACKG="$TMP/pack_graph.xml"
 "$BIN" "$CORPUS" --no-cache --pack-task="$Q" --with-graph > "$PACKG" 2>/dev/null
 
-xmllint --noout "$PACKG" 2>/dev/null && ok "--pack-task --with-graph: xmllint-clean (G4)" || { no "--pack-task --with-graph: NOT well-formed"; xmllint --noout "$PACKG" 2>&1 | head -5; }
+if xmllint --noout "$PACKG" 2>/dev/null; then ok "--pack-task --with-graph: xmllint-clean (G4)"; else { no "--pack-task --with-graph: NOT well-formed"; xmllint --noout "$PACKG" 2>&1 | head -5; }; fi
 
 grep -qF '<graph fmt="mermaid"><![CDATA[' "$PACKG" && ok "--pack-task --with-graph: <graph fmt=\"mermaid\"> block present, CDATA opened" \
     || no "--pack-task --with-graph: <graph> block missing or malformed open tag"
@@ -128,11 +128,11 @@ done
 # ── 4) det-gate x2 on the --with-graph output itself ─────────────────────────────────────────────────────
 D1="$( "$BIN" "$CORPUS" --no-cache --for="$Q" --with-graph 2>/dev/null )"
 D2="$( "$BIN" "$CORPUS" --no-cache --for="$Q" --with-graph 2>/dev/null )"
-[ "$D1" = "$D2" ] && ok "--for --with-graph: det-gate (2-run byte-identical)" || no "--for --with-graph: non-deterministic"
+if [ "$D1" = "$D2" ]; then ok "--for --with-graph: det-gate (2-run byte-identical)"; else no "--for --with-graph: non-deterministic"; fi
 
 D3="$( "$BIN" "$CORPUS" --no-cache --pack-task="$Q" --with-graph 2>/dev/null )"
 D4="$( "$BIN" "$CORPUS" --no-cache --pack-task="$Q" --with-graph 2>/dev/null )"
-[ "$D3" = "$D4" ] && ok "--pack-task --with-graph: det-gate (2-run byte-identical)" || no "--pack-task --with-graph: non-deterministic"
+if [ "$D3" = "$D4" ]; then ok "--pack-task --with-graph: det-gate (2-run byte-identical)"; else no "--pack-task --with-graph: non-deterministic"; fi
 
 echo
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

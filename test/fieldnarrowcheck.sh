@@ -34,7 +34,7 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 FIX="$TMP/fieldfix"; FIX2="$TMP/dupfix"
 mkdir -p "$FIX" "$FIX2"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -211,6 +211,84 @@ GO2="$( "$BIN" "$FIX2" --callees=go --no-cache 2>/dev/null | grep -o '<callees.*
 ( printf '%s\n' "$GO2" | grep -q 'ns.cpp:1"' ) && ( printf '%s\n' "$GO2" | grep -q 'ns.cpp:3"' ) \
     && ok "(n) both grab() defs stay linked across the collision" \
     || no "(n) a grab() edge vanished — the tombstone dropped a correct edge"
+
+# ── KNOWN GAP (help wanted: prompts/help-wanted/ts-literal-receivers.md) — issue #59, on receivers whose type is CERTAIN ──
+# A built-in method called on a LITERAL binds an unrelated, same-named, never-imported user function — with the
+# graph's ambiguity gauge at zero, so the answer reads as confident. `"a-b".replace(…)` can only be
+# String.prototype.replace; today it binds src/unrelated.ts's `export function replace`. The arms below assert
+# TODAY's behaviour, so they PASS now. Flipping them is the acceptance test for the prompt: no edge into
+# unrelated.ts, and the call still COUNTED (a named, disclosed disposition — never a silent drop). A FAIL on a
+# KNOWN GAP arm means the gap moved: rewrite that arm to assert the fixed behaviour, never delete it.
+# The two CONTROLS are not gaps. They are TRUE edges any fix must keep: a typed user-object receiver, and a
+# literal receiver whose method the repo itself defines on String.prototype (a literal CAN reach user code).
+# Separate corpora on purpose: (h)'s ambiguous=7 is counted over $FIX and must not move.
+LIT="$TMP/tslitfix"; OBJ="$TMP/tsobjfix"
+mkdir -p "$LIT/src" "$OBJ/src"
+cat >"$LIT/src/literals.ts" <<'EOF'
+export function viaString(): string { return "a-b".replace(/-/g, " "); }
+export function viaChain(): string[] { return "a b".replace(/x/g, "").split(" "); }
+export function viaTemplate(n: number): string { return `n=${n}`.padStart(8); }
+export function viaArray(): number[] { return [3, 1, 2].map(v => v * 2); }
+export function viaRegex(s: string): boolean { return /x/.test(s); }
+EOF
+cat >"$LIT/src/unrelated.ts" <<'EOF'
+export function replace(value: number): number { return value; }
+export function split(value: number): number { return value; }
+export function padStart(value: number): number { return value; }
+export function map(value: number): number { return value; }
+export function test(value: number): number { return value; }
+EOF
+cat >"$OBJ/src/rewriter.ts" <<'EOF'
+export class Rewriter {
+  replace(a: string, b: string): string { return a + b; }
+}
+EOF
+cat >"$OBJ/src/user.ts" <<'EOF'
+import { Rewriter } from "./rewriter";
+export function viaObjectReceiver(r: Rewriter): string { return r.replace("a", "b"); }
+EOF
+cat >"$OBJ/src/proto.js" <<'EOF'
+String.prototype.shout = function () { return "!"; };
+function viaPrototypeExtension() { return "x".shout(); }
+module.exports = { viaPrototypeExtension };
+EOF
+LITMAP="$( "$BIN" "$LIT" --no-cache 2>/dev/null )"
+litMissing=""
+for want in viaString viaChain viaTemplate viaArray viaRegex replace split padStart map test; do
+    printf '%s' "$LITMAP" | grep -q "n=\"$want\"" || litMissing="$litMissing $want"
+done
+[ -z "$litMissing" ] && ok "(kg-ts) presence: every literal-receiver fixture symbol is indexed" \
+    || no "(kg-ts) presence guard: fixture symbols not indexed:$litMissing — every arm below would be vacuous"
+litGap(){  # litGap CALLER "LINE:NAME ..." — CALLER's literal-receiver calls each bind unrelated.ts:LINE, gauge at zero
+    local out root want line name missed=""
+    out="$( "$BIN" "$LIT" "--callees=src/literals.ts:$1" --no-cache 2>/dev/null )"
+    root="$( printf '%s' "$out" | grep -oE '<callees [^>]*>' | head -1 )"
+    if [ -z "$root" ]; then
+        no "(kg-ts) $1: no <callees> root — the arm cannot observe the gap"; return
+    fi
+    for want in $2; do
+        line="${want%%:*}"; name="${want#*:}"
+        printf '%s' "$out" | grep -q "n=\"$name\" p=\"src/unrelated.ts:$line\"" || missed="$missed .$name()"
+    done
+    if [ -z "$missed" ] && printf '%s' "$root" | grep -q 'graph_ambiguous="0"'; then
+        ok "KNOWN GAP (help wanted: prompts/help-wanted/ts-literal-receivers.md): $1's literal-receiver call(s) bind unrelated.ts ($2) with graph_ambiguous=\"0\" — flipping this is the acceptance test"
+    else
+        no "KNOWN GAP (help wanted: prompts/help-wanted/ts-literal-receivers.md) MOVED for $1:${missed:- the gauge} no longer binds unrelated.ts confidently — if the fix landed, rewrite this arm to assert no edge AND a counted disposition: $root"
+    fi
+}
+litGap viaString   "1:replace"
+litGap viaChain    "1:replace 2:split"
+litGap viaTemplate "3:padStart"
+litGap viaArray    "4:map"
+litGap viaRegex    "5:test"
+OBJOUT="$( "$BIN" "$OBJ" --callees=src/user.ts:viaObjectReceiver --no-cache 2>/dev/null )"
+printf '%s' "$OBJOUT" | grep -q 'n="replace" p="src/rewriter.ts:2"' \
+    && ok "(kg-ts control) a typed user-object receiver r.replace() keeps its edge to Rewriter.replace (rewriter.ts:2)" \
+    || no "(kg-ts control) viaObjectReceiver lost its edge to Rewriter.replace — a literal-receiver rule over-reached: $( printf '%s' "$OBJOUT" | grep -oE '<callees [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
+PROTOOUT="$( "$BIN" "$OBJ" --callees=src/proto.js:viaPrototypeExtension --no-cache 2>/dev/null )"
+printf '%s' "$PROTOOUT" | grep -q 'n="shout" p="src/proto.js:1"' \
+    && ok "(kg-ts control) \"x\".shout() keeps its edge to the repo's own String.prototype.shout (proto.js:1) — a literal receiver can reach user code" \
+    || no "(kg-ts control) \"x\".shout() lost its edge to String.prototype.shout — a literal-receiver veto must let prototype extensions through: $( printf '%s' "$PROTOOUT" | grep -oE '<callees [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
 
 # ── (i) determinism — narrowed candidate order must be byte-stable run-to-run ──
 "$BIN" "$FIX" --no-cache >"$TMP/m1" 2>/dev/null

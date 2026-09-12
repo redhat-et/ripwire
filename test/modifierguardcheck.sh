@@ -30,7 +30,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 cd "$ROOT"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
@@ -154,7 +154,7 @@ sz_comp="$(  "$BIN" "$FIX" --expand=computeArea --compress --no-cache 2>/dev/nul
 
 # --with-history: --doc-drift --with-history still exits 0 (historyoraclecheck.sh owns the full contract).
 "$BIN" "$SRC" --doc-drift --with-history --no-cache >/dev/null 2>"$TMP/wh.err"
-[ "$?" = 0 ] && ok "--doc-drift --with-history: still exits 0" || no "--doc-drift --with-history: broke ($(cat "$TMP/wh.err"))"
+if [ "$?" = 0 ]; then ok "--doc-drift --with-history: still exits 0"; else no "--doc-drift --with-history: broke ($(cat "$TMP/wh.err"))"; fi
 
 # --grep-context: still widens the hit context (grep gates own the full contract; spot-check row count grows).
 n0="$( "$BIN" "$FIX" --grep=computeArea --no-cache 2>/dev/null | grep -o '<hit' | wc -l | tr -d ' ' )"
@@ -166,15 +166,15 @@ rc_gc=$?
 
 # --no-prefilter: still exits 0 alongside --grep (soundness-oracle contract owned elsewhere).
 "$BIN" "$FIX" --grep=computeArea --no-prefilter --no-cache >/dev/null 2>"$TMP/np.err"
-[ "$?" = 0 ] && ok "--grep --no-prefilter: still exits 0" || no "--grep --no-prefilter: broke ($(cat "$TMP/np.err"))"
+if [ "$?" = 0 ]; then ok "--grep --no-prefilter: still exits 0"; else no "--grep --no-prefilter: broke ($(cat "$TMP/np.err"))"; fi
 
 # --detail: within the ranked head still works (detailcheck.sh owns the full contract).
 "$BIN" "$SRC" --for="distance" --detail=3 --no-cache >/dev/null 2>"$TMP/d.err"
-[ "$?" = 0 ] && ok "--for --detail=3 (within the head): still exits 0" || no "--for --detail=3: broke ($(cat "$TMP/d.err"))"
+if [ "$?" = 0 ]; then ok "--for --detail=3 (within the head): still exits 0"; else no "--for --detail=3: broke ($(cat "$TMP/d.err"))"; fi
 
 # --since: still exits 0 alongside --hotspots (a git repo — use ROOT itself, read-only).
 "$BIN" "$ROOT/src" --hotspots --since="2 weeks ago" --no-cache >/dev/null 2>"$TMP/s.err"
-[ "$?" = 0 ] && ok "--hotspots --since: still exits 0" || no "--hotspots --since: broke ($(cat "$TMP/s.err"))"
+if [ "$?" = 0 ]; then ok "--hotspots --since: still exits 0"; else no "--hotspots --since: broke ($(cat "$TMP/s.err"))"; fi
 
 # --with-graph: still splices a mermaid block into --pack-task's bundle.
 graph_out="$( "$BIN" "$FIX" --pack-task="compute area" --with-graph --no-cache 2>/dev/null )"
@@ -224,9 +224,9 @@ grep -qF 'naming_locals="1" on the root' "$TMP/nl.xml" \
     && ok "--lint --naming-locals output is well-formed XML (the legend clause carries no double-hyphen)" \
     || no "--lint --naming-locals output is MALFORMED XML"
 "$BIN" "$FIX" --expand=computeArea --no-redact --no-cache >/dev/null 2>"$TMP/nr.err"
-[ "$?" = 0 ] && ok "--expand --no-redact: still exits 0 (a body-serving verb composes)" || no "--expand --no-redact: broke ($(head -1 "$TMP/nr.err"))"
+if [ "$?" = 0 ]; then ok "--expand --no-redact: still exits 0 (a body-serving verb composes)"; else no "--expand --no-redact: broke ($(head -1 "$TMP/nr.err"))"; fi
 "$BIN" "$SRC" --for="distance" --no-redact --no-cache >/dev/null 2>"$TMP/nr2.err"
-[ "$?" = 0 ] && ok "--for --no-redact: still exits 0" || no "--for --no-redact: broke ($(head -1 "$TMP/nr2.err"))"
+if [ "$?" = 0 ]; then ok "--for --no-redact: still exits 0"; else no "--for --no-redact: broke ($(head -1 "$TMP/nr2.err"))"; fi
 
 # --baseline: full four-step contract owned by baselinecheck.sh; not re-verified here.
 

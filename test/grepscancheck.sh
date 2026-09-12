@@ -40,7 +40,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -103,7 +103,7 @@ perl -0777 -ne 'exit( /<hit [^>]*>\s*<b>.*?<\/b><!\[CDATA\[.*?\]\]><a>.*?<\/a><\
     && ok "(3) reading order is <b> → the hit's own CDATA → <a> (P12: no <m> wrapper)" \
     || { no "(3) context children are out of order"; cat "$TMP/ctx"; }
 
-xmllint --noout "$TMP/ctx" 2>/dev/null && ok "(3b) context+matched-line output is well-formed XML" || no "(3b) malformed XML with context + <m>"
+if xmllint --noout "$TMP/ctx" 2>/dev/null; then ok "(3b) context+matched-line output is well-formed XML"; else no "(3b) malformed XML with context + <m>"; fi
 
 # ── (4) determinism ×5 on a budget-saturating PARALLEL scan (truncation must not depend on thread order) ──
 # --pack-top-n is what caps --grep (cap × 4 = the raw budget the scan truncates at), so a common token
@@ -210,7 +210,7 @@ MAXB="$( grep -o 'MAXBYTES:[0-9]*' "$TMP/longv" | cut -d: -f2 )"
 { [ -n "${MAXB:-}" ] && [ "$MAXB" -le 512 ] && [ "$MAXB" -gt 0 ]; } \
     && ok "(8) minified line capped at $MAXB bytes (<= 512) and decodes as strict UTF-8" \
     || { no "(8) matched-line cap broken (max bytes=$MAXB) or invalid UTF-8"; cat "$TMP/longv"; }
-xmllint --noout "$TMP/long.xml" 2>/dev/null && ok "(8b) capped long-line output is well-formed XML" || no "(8b) capped long-line output is malformed XML"
+if xmllint --noout "$TMP/long.xml" 2>/dev/null; then ok "(8b) capped long-line output is well-formed XML"; else no "(8b) capped long-line output is malformed XML"; fi
 
 # ── (9) the regex path emits <m> too, and the per-file trigram reject is still sound ──────────────────
 "$BIN" "$ROOT/test/regexfix" --no-cache --regex='comp.te'                 >"$TMP/rx.pf" 2>/dev/null

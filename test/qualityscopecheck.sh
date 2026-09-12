@@ -36,7 +36,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN"; exit 2; }
 
@@ -68,7 +68,7 @@ inline int b_gamma( int a )
 EOF
 git add alpha/lib.h beta/lib.h; git commit -qm base
 "$BIN" . --quality-baseline >/dev/null 2>&1
-[ -f .ripwire_quality_baseline ] && ok "baseline snapshot written" || { no "no baseline written"; echo "ALL FAIL"; exit 1; }
+if [ -f .ripwire_quality_baseline ]; then ok "baseline snapshot written"; else { no "no baseline written"; echo "ALL FAIL"; exit 1; }; fi
 
 # ── both writers edit, at the same time, in their own subtree ─────────────────────────────────────────
 # Each adds the SAME two gating shapes (an arity contract-change on a preexisting public symbol, and a
@@ -119,32 +119,32 @@ attr(){ grep -oE "$2=\"[0-9]+\"" "$1" | head -1 | grep -oE '[0-9]+'; }
 
 # ── 0) fixture premise: the shared tree really does hold BOTH writers' gating debt ────────────────────
 "$BIN" . --quality-delta >"$TMP/plain.xml" 2>/dev/null; plain_rc=$?
-[ "$plain_rc" -eq 2 ] && ok "(0) plain --quality-delta gates on the shared tree (exit 2)" || no "(0) plain --quality-delta exited $plain_rc (expected 2)"
+if [ "$plain_rc" -eq 2 ]; then ok "(0) plain --quality-delta gates on the shared tree (exit 2)"; else no "(0) plain --quality-delta exited $plain_rc (expected 2)"; fi
 grep -q 'p="alpha/lib.h' "$TMP/plain.xml" && grep -q 'p="beta/lib.h' "$TMP/plain.xml" \
     && ok "(0) …and shows BOTH writers' rows — the friction this flag is about" \
     || { no "(0) fixture did not produce rows in both subtrees"; tr '>' '\n' <"$TMP/plain.xml" | grep '<r '; }
 PLAIN_GATING="$( attr "$TMP/plain.xml" gating )"
-[ "${PLAIN_GATING:-0}" -ge 2 ] && ok "(0) …with $PLAIN_GATING gating rows to partition" || no "(0) too few gating rows ($PLAIN_GATING) to tell the halves apart"
+if [ "${PLAIN_GATING:-0}" -ge 2 ]; then ok "(0) …with $PLAIN_GATING gating rows to partition"; else no "(0) too few gating rows ($PLAIN_GATING) to tell the halves apart"; fi
 
 # ── 1) (A)+(B) PARTITION and DISCLOSURE ───────────────────────────────────────────────────────────────
 "$BIN" . --quality-delta --scope=alpha >"$TMP/alpha.xml" 2>/dev/null; a_rc=$?
-grep -q 'scope="alpha"' "$TMP/alpha.xml" && ok "(1) the report names the scope it was taken under" || no "(1) no scope= on the report root"
+if grep -q 'scope="alpha"' "$TMP/alpha.xml"; then ok "(1) the report names the scope it was taken under"; else no "(1) no scope= on the report root"; fi
 inscope_part "$TMP/alpha.xml" >"$TMP/alpha.in"
 oos_part     "$TMP/alpha.xml" >"$TMP/alpha.out"
 grep -q 'beta/lib.h' "$TMP/alpha.in" && no "(1) a beta row is in the GATING half of an alpha-scoped report" \
                                      || ok "(1) no out-of-scope row leaks into the gating half"
-grep -q 'alpha/lib.h' "$TMP/alpha.in" && ok "(1) the agent's own rows are still there" || { no "(1) the scope dropped the agent's OWN rows"; cat "$TMP/alpha.in"; }
+if grep -q 'alpha/lib.h' "$TMP/alpha.in"; then ok "(1) the agent's own rows are still there"; else { no "(1) the scope dropped the agent's OWN rows"; cat "$TMP/alpha.in"; }; fi
 grep -q 'beta/lib.h' "$TMP/alpha.out" && ok "(1B) the sibling's rows are still PRINTED, under <out-of-scope>" \
                                       || { no "(1B) the sibling's rows were SUPPRESSED, not disclosed"; cat "$TMP/alpha.out"; }
-grep -q 'do not ack' "$TMP/alpha.out" && ok "(1B) …behind a one-line do-not-ack banner" || { no "(1B) <out-of-scope> carries no banner"; head -c 400 "$TMP/alpha.out"; }
-grep -qE 'scoped-out="[1-9]' "$TMP/alpha.xml" && ok "(1B) …and the header counts them (scoped-out)" || no "(1B) header does not count the disclosed rows"
+if grep -q 'do not ack' "$TMP/alpha.out"; then ok "(1B) …behind a one-line do-not-ack banner"; else { no "(1B) <out-of-scope> carries no banner"; head -c 400 "$TMP/alpha.out"; }; fi
+if grep -qE 'scoped-out="[1-9]' "$TMP/alpha.xml"; then ok "(1B) …and the header counts them (scoped-out)"; else no "(1B) header does not count the disclosed rows"; fi
 grep -qE 'scoped-out-gating="[1-9]' "$TMP/alpha.xml" \
     && ok "(1B) …and says how many of them WOULD have gated — the number a reader must not mistake for green" \
     || no "(1B) header does not disclose how many out-of-scope rows would have gated"
 grep -q 'gating="1"' "$TMP/alpha.out" && no "(1B) a disclosed out-of-scope row is marked gating" || ok "(1B) no disclosed row claims to gate"
 
 # ── 2) (C) GATING is scope-local, in both directions ──────────────────────────────────────────────────
-[ "$a_rc" -eq 2 ] && ok "(2) an agent with UNFIXED debt of its own still gates (exit 2)" || no "(2) alpha-scoped run exited $a_rc (expected 2)"
+if [ "$a_rc" -eq 2 ]; then ok "(2) an agent with UNFIXED debt of its own still gates (exit 2)"; else no "(2) alpha-scoped run exited $a_rc (expected 2)"; fi
 A_GATING="$( attr "$TMP/alpha.xml" gating )"
 [ "${A_GATING:-0}" -lt "${PLAIN_GATING:-0}" ] && [ "${A_GATING:-0}" -gt 0 ] \
     && ok "(2) gating narrowed to this agent's share ($PLAIN_GATING -> $A_GATING)" \
@@ -158,7 +158,7 @@ else
     ok "(3) xmllint unavailable — well-formedness arm skipped (regression.sh runs it separately)"
 fi
 "$BIN" . --quality-delta --scope=alpha >"$TMP/alpha2.xml" 2>/dev/null
-cmp -s "$TMP/alpha.xml" "$TMP/alpha2.xml" && ok "(3) two scoped runs are byte-identical" || no "(3) the scoped report is not deterministic"
+if cmp -s "$TMP/alpha.xml" "$TMP/alpha2.xml"; then ok "(3) two scoped runs are byte-identical"; else no "(3) the scoped report is not deterministic"; fi
 
 # ── 4) (A) the CLONE rule: a group is in-scope iff ANY member matches ─────────────────────────────────
 "$BIN" . --quality-delta --scope=beta >"$TMP/beta.xml" 2>/dev/null; b_rc=$?
@@ -174,22 +174,22 @@ fi
 
 # ── 5) a scope naming nothing indexed REFUSES — a typo must never read as "you're clean" ──────────────
 "$BIN" . --quality-delta --scope=zzz-no-such-dir >"$TMP/typo.out" 2>"$TMP/typo.err"; rc=$?
-[ $rc -eq 1 ] && ok "(5) a scope matching no indexed path exits 1" || no "(5) a typo'd scope exited $rc (expected 1)"
-[ ! -s "$TMP/typo.out" ] && ok "(5) …and prints nothing to stdout (no exit-0-looking empty report)" || no "(5) …but printed $( wc -c <"$TMP/typo.out" ) bytes"
-grep -q 'zzz-no-such-dir' "$TMP/typo.err" && ok "(5) …and names the offending pattern" || { no "(5) …without naming the pattern"; cat "$TMP/typo.err"; }
+if [ $rc -eq 1 ]; then ok "(5) a scope matching no indexed path exits 1"; else no "(5) a typo'd scope exited $rc (expected 1)"; fi
+if [ ! -s "$TMP/typo.out" ]; then ok "(5) …and prints nothing to stdout (no exit-0-looking empty report)"; else no "(5) …but printed $( wc -c <"$TMP/typo.out" ) bytes"; fi
+if grep -q 'zzz-no-such-dir' "$TMP/typo.err"; then ok "(5) …and names the offending pattern"; else { no "(5) …without naming the pattern"; cat "$TMP/typo.err"; }; fi
 
 # ── 6) --scope outside the quality family is refused, not ignored ─────────────────────────────────────
 "$BIN" . --scope=alpha >"$TMP/lone.out" 2>"$TMP/lone.err"; rc=$?
-[ $rc -eq 1 ] && ok "(6) --scope without --quality-delta exits 1" || no "(6) lone --scope exited $rc (expected 1)"
-[ ! -s "$TMP/lone.out" ] && ok "(6) …and prints no default map in its place" || no "(6) …but printed the ordinary map"
+if [ $rc -eq 1 ]; then ok "(6) --scope without --quality-delta exits 1"; else no "(6) lone --scope exited $rc (expected 1)"; fi
+if [ ! -s "$TMP/lone.out" ]; then ok "(6) …and prints no default map in its place"; else no "(6) …but printed the ordinary map"; fi
 grep -q -- '--quality-delta' "$TMP/lone.err" && grep -q -- '--scope' "$TMP/lone.err" \
     && ok "(6) …and the message names both flags" || { no "(6) …without naming both flags"; cat "$TMP/lone.err"; }
 
 # ── 7) (D) THE GUARD, part 1: a bare ack under --scope writes the agent's rows and NOT the sibling's ──
 A_ROWS="$( rowcount "$TMP/alpha.in" )"
 "$BIN" . --quality-delta --scope=alpha --quality-ack="alpha session" >/dev/null 2>"$TMP/ack.err"; rc=$?
-[ $rc -eq 0 ] && ok "(7) the scoped ack succeeds (exit 0)" || { no "(7) the scoped ack exited $rc"; cat "$TMP/ack.err"; }
-[ -f .ripwire_quality_acks ] && ok "(7) …and wrote the ledger" || no "(7) …but wrote no ledger"
+if [ $rc -eq 0 ]; then ok "(7) the scoped ack succeeds (exit 0)"; else { no "(7) the scoped ack exited $rc"; cat "$TMP/ack.err"; }; fi
+if [ -f .ripwire_quality_acks ]; then ok "(7) …and wrote the ledger"; else no "(7) …but wrote no ledger"; fi
 ACK_LINES="$( grep -c '^ack ' .ripwire_quality_acks 2>/dev/null || echo 0 )"
 [ "$ACK_LINES" = "$A_ROWS" ] && ok "(7) …with exactly the $A_ROWS in-scope finding(s), no more" \
     || no "(7) …with $ACK_LINES ack rows for $A_ROWS in-scope findings — the sibling's rows may have been absorbed"
@@ -200,9 +200,9 @@ grep -qi 'out of scope' "$TMP/ack.err" && ok "(7) …and says on stderr that it 
 [ $rc -eq 0 ] && ok "(7C) the agent that acked ITS OWN rows is now green under its scope (exit 0)" \
     || { no "(7C) the acking agent still gates (exit $rc)"; tr '>' '\n' <"$TMP/alpha3.xml" | grep '<r '; }
 "$BIN" . --quality-delta >/dev/null 2>&1; rc=$?
-[ $rc -eq 2 ] && ok "(7C) …while the UNSCOPED report still gates on the sibling's untouched debt (exit 2)" || no "(7C) the unscoped report exited $rc (expected 2)"
+if [ $rc -eq 2 ]; then ok "(7C) …while the UNSCOPED report still gates on the sibling's untouched debt (exit 2)"; else no "(7C) the unscoped report exited $rc (expected 2)"; fi
 "$BIN" . --quality-delta --scope=beta >"$TMP/beta2.xml" 2>/dev/null; rc=$?
-[ $rc -eq 2 ] && ok "(7C) …and so does the sibling's own scoped report (exit 2)" || no "(7C) the beta-scoped report exited $rc (expected 2)"
+if [ $rc -eq 2 ]; then ok "(7C) …and so does the sibling's own scoped report (exit 2)"; else no "(7C) the beta-scoped report exited $rc (expected 2)"; fi
 B_GATING_AFTER="$( attr "$TMP/beta2.xml" gating )"
 [ "${B_GATING_AFTER:-0}" = "${B_GATING_BEFORE:-x}" ] \
     && ok "(7C) …with its gating count untouched ($B_GATING_BEFORE) — alpha absorbed none of beta's debt" \
@@ -219,27 +219,27 @@ STRADDLE="$( tr '>' '\n' <"$TMP/beta.in" | grep -c 'kind="duplication"' || true 
 # ── 8) (E) PROVENANCE: the rows the scoped session wrote carry by=<scope> ─────────────────────────────
 grep -q 'by=alpha ' .ripwire_quality_acks && ok "(8) every scoped ack row records the scope that wrote it (by=)" \
     || { no "(8) no by= provenance on the scoped ack rows"; head -5 .ripwire_quality_acks; }
-grep -q 'alpha session' .ripwire_quality_acks && ok "(8) …without displacing the human reason" || no "(8) the reason string was lost behind by="
+if grep -q 'alpha session' .ripwire_quality_acks; then ok "(8) …without displacing the human reason"; else no "(8) the reason string was lost behind by="; fi
 cp .ripwire_quality_acks "$TMP/acks.scoped"
 
 # ── 9) (D) THE GUARD, part 2 — THE MOST IMPORTANT ARM IN THIS FILE ───────────────────────────────────
 # An ack selection that explicitly NAMES an out-of-scope row is refused outright: exit 1, the row named,
 # the ledger untouched. This is the line between a ratchet and a rubber stamp.
 "$BIN" . --quality-delta --scope=alpha --ack-only=b_gamma --quality-ack="not mine to accept" >"$TMP/steal.out" 2>"$TMP/steal.err"; rc=$?
-[ $rc -eq 1 ] && ok "(9) acking an OUT-OF-SCOPE row is refused (exit 1)" || no "(9) the foreign ack exited $rc (expected 1)"
-grep -q 'b_gamma' "$TMP/steal.err" && ok "(9) …and the refusal NAMES the row it would not accept" || { no "(9) …without naming the row"; cat "$TMP/steal.err"; }
-cmp -s .ripwire_quality_acks "$TMP/acks.scoped" && ok "(9) …and the ledger is byte-unchanged" || no "(9) …but the ledger was MODIFIED by a refused ack"
+if [ $rc -eq 1 ]; then ok "(9) acking an OUT-OF-SCOPE row is refused (exit 1)"; else no "(9) the foreign ack exited $rc (expected 1)"; fi
+if grep -q 'b_gamma' "$TMP/steal.err"; then ok "(9) …and the refusal NAMES the row it would not accept"; else { no "(9) …without naming the row"; cat "$TMP/steal.err"; }; fi
+if cmp -s .ripwire_quality_acks "$TMP/acks.scoped"; then ok "(9) …and the ledger is byte-unchanged"; else no "(9) …but the ledger was MODIFIED by a refused ack"; fi
 
 # the composed, legitimate form must still work: 'gating' is scope-local, so it selects this agent's rows only
 "$BIN" . --quality-delta --scope=beta --ack-only=gating --quality-ack="beta session" >/dev/null 2>"$TMP/backk.err"; rc=$?
 [ $rc -eq 0 ] && ok "(9) --ack-only=gating under a scope still works — it selects the SCOPE's gating rows" \
     || { no "(9) --ack-only=gating under a scope exited $rc"; cat "$TMP/backk.err"; }
-grep -q 'by=beta ' .ripwire_quality_acks && ok "(9) …and records its own provenance" || no "(9) …without by= provenance"
+if grep -q 'by=beta ' .ripwire_quality_acks; then ok "(9) …and records its own provenance"; else no "(9) …without by= provenance"; fi
 
 # ── 10) (E) BACKWARD COMPATIBILITY: rows with no by= (and no cid=) keep working, byte for byte ────────
 "$BIN" . --quality-delta >"$TMP/bothacked.xml" 2>/dev/null; rc=$?
 BOTH_ACKED="$( attr "$TMP/bothacked.xml" acked )"
-[ "${BOTH_ACKED:-0}" -gt 0 ] && ok "(10) with both sessions acked, the unscoped report suppresses ${BOTH_ACKED} finding(s)" || no "(10) nothing suppressed after two scoped acks"
+if [ "${BOTH_ACKED:-0}" -gt 0 ]; then ok "(10) with both sessions acked, the unscoped report suppresses ${BOTH_ACKED} finding(s)"; else no "(10) nothing suppressed after two scoped acks"; fi
 sed -E 's/ (cid|by)=[^ ]*//g' .ripwire_quality_acks > "$TMP/legacy.acks"
 grep -q '^ack .*by=' "$TMP/legacy.acks" && no "(10) could not construct a pre-feature ledger to test against" || ok "(10) built a pre-feature ledger (no cid=, no by= on any ack row)"
 cp "$TMP/legacy.acks" .ripwire_quality_acks
@@ -256,8 +256,8 @@ sed 's/by=alpha /by=zzz-not-my-subtree /' "$TMP/acks.scoped" > .ripwire_quality_
 "$BIN" . --quality-delta >"$TMP/foreign.xml" 2>/dev/null
 grep -qE 'foreign-acks="[1-9]' "$TMP/foreign.xml" && ok "(11) the header counts acks whose provenance does not cover what they suppress" \
     || { no "(11) no foreign-acks= disclosure"; grep -o '<quality-delta[^>]*>' "$TMP/foreign.xml"; }
-grep -q 'why="foreign-scope"' "$TMP/foreign.xml" && ok "(11) …with a per-row sa why=\"foreign-scope\"" || no "(11) no per-row foreign-scope detail"
-grep -q 'by="zzz-not-my-subtree"' "$TMP/foreign.xml" && ok "(11) …naming the scope that wrote it" || { no "(11) …without naming the writing scope"; grep -o '<sa[^>]*/>' "$TMP/foreign.xml" | head -3; }
+if grep -q 'why="foreign-scope"' "$TMP/foreign.xml"; then ok "(11) …with a per-row sa why=\"foreign-scope\""; else no "(11) no per-row foreign-scope detail"; fi
+if grep -q 'by="zzz-not-my-subtree"' "$TMP/foreign.xml"; then ok "(11) …naming the scope that wrote it"; else { no "(11) …without naming the writing scope"; grep -o '<sa[^>]*/>' "$TMP/foreign.xml" | head -3; }; fi
 cp "$TMP/acks.scoped" .ripwire_quality_acks
 
 # ── 12) P1.2 — the reserved `diff` token: the changed-files auto-scope ────────────────────────────────
@@ -265,7 +265,7 @@ cp "$TMP/acks.scoped" .ripwire_quality_acks
 # writers edited, so diff covers both and partitions nothing. The arms pin the expansion, its disclosure,
 # and the three refusals — never a silent widening.
 "$BIN" . --quality-delta --scope=diff >"$TMP/diff.xml" 2>/dev/null; rc=$?
-grep -q 'scope="diff"' "$TMP/diff.xml" && ok "(12) --scope=diff names itself on the report, unexpanded" || no "(12) no scope=\"diff\" on the report root"
+if grep -q 'scope="diff"' "$TMP/diff.xml"; then ok "(12) --scope=diff names itself on the report, unexpanded"; else no "(12) no scope=\"diff\" on the report root"; fi
 grep -qE 'scope-diff-files="[1-9]' "$TMP/diff.xml" \
     && ok "(12) …and discloses how many indexed files it expanded to ($( grep -oE 'scope-diff-files="[0-9]+"' "$TMP/diff.xml" | head -1 ))" \
     || { no "(12) the auto-scope does not disclose its expansion size"; grep -o '<quality-delta[^>]*>' "$TMP/diff.xml"; }
@@ -280,17 +280,17 @@ C="$TMP/clean"; mkdir -p "$C"; cd "$C"; git init -q .; git config user.email t@t
 printf '#pragma once\ninline int only( int a ) { return a; }\n' > only.h
 git add only.h; git commit -qm base
 "$BIN" . --quality-delta --scope=diff >"$TMP/cleandiff.out" 2>"$TMP/cleandiff.err"; rc=$?
-[ $rc -eq 1 ] && ok "(12) --scope=diff on an UNCHANGED tree refuses (exit 1)" || no "(12) --scope=diff on a clean tree exited $rc (expected 1)"
-[ ! -s "$TMP/cleandiff.out" ] && ok "(12) …printing nothing — an exit 0 there would say nothing about your change" || no "(12) …but printed a report anyway"
-grep -q 'NO changed indexed file' "$TMP/cleandiff.err" && ok "(12) …and says exactly what was empty" || { no "(12) …without explaining"; cat "$TMP/cleandiff.err"; }
+if [ $rc -eq 1 ]; then ok "(12) --scope=diff on an UNCHANGED tree refuses (exit 1)"; else no "(12) --scope=diff on a clean tree exited $rc (expected 1)"; fi
+if [ ! -s "$TMP/cleandiff.out" ]; then ok "(12) …printing nothing — an exit 0 there would say nothing about your change"; else no "(12) …but printed a report anyway"; fi
+if grep -q 'NO changed indexed file' "$TMP/cleandiff.err"; then ok "(12) …and says exactly what was empty"; else { no "(12) …without explaining"; cat "$TMP/cleandiff.err"; }; fi
 
 # the RANGE form compares two COMMITTED trees, so a working-tree auto-scope is the wrong question there
 cd "$R"; git add -A; git commit -qm "both writers land"
 "$BIN" . --quality-delta=HEAD~1..HEAD --scope=diff >"$TMP/rangediff.out" 2>"$TMP/rangediff.err"; rc=$?
-[ $rc -eq 1 ] && ok "(12) --scope=diff under the A..B range form refuses (exit 1)" || no "(12) --scope=diff with a ref range exited $rc (expected 1)"
-grep -q 'COMMITTED trees' "$TMP/rangediff.err" && ok "(12) …and says why the working tree is not the answer there" || { no "(12) …without saying why"; cat "$TMP/rangediff.err"; }
+if [ $rc -eq 1 ]; then ok "(12) --scope=diff under the A..B range form refuses (exit 1)"; else no "(12) --scope=diff with a ref range exited $rc (expected 1)"; fi
+if grep -q 'COMMITTED trees' "$TMP/rangediff.err"; then ok "(12) …and says why the working tree is not the answer there"; else { no "(12) …without saying why"; cat "$TMP/rangediff.err"; }; fi
 "$BIN" . --quality-delta=HEAD~1..HEAD --scope=alpha >/dev/null 2>&1; rc=$?
-[ $rc -ne 1 ] && ok "(12) …while a PATH scope still works on the range form (exit $rc)" || no "(12) a path scope was refused on the range form too"
+if [ $rc -ne 1 ]; then ok "(12) …while a PATH scope still works on the range form (exit $rc)"; else no "(12) a path scope was refused on the range form too"; fi
 
 # ── 13) (F) F-05 REGRESSION LOCK: a sibling's ack must never hide a row from YOUR disclosure ─────────────
 # A fresh two-owner repo: gamma writes four EXCLUSIVE findings (never delta's), plus a clone group that
@@ -324,7 +324,7 @@ inline int d_pub( int a ) { return a; }
 inline int d_twin() { int x = 0; x += 1; x += 2; x += 3; x += 4; x += 5; return x * x + 1; }
 EOF
 "$BIN" . --quality-delta --scope=gamma --ack-only=gammaMess --quality-ack="gamma session" --no-cache >/dev/null 2>"$TMP/f13ack.err"; rc=$?
-[ $rc -eq 0 ] && ok "(13) gamma's own-row ack under its scope succeeds" || { no "(13) gamma's ack exited $rc"; cat "$TMP/f13ack.err"; }
+if [ $rc -eq 0 ]; then ok "(13) gamma's own-row ack under its scope succeeds"; else { no "(13) gamma's ack exited $rc"; cat "$TMP/f13ack.err"; }; fi
 "$BIN" . --quality-delta --scope=delta --no-cache >"$TMP/f13delta.xml" 2>/dev/null
 grep -oE 'scoped-out="[0-9]+"' "$TMP/f13delta.xml" | grep -q 'scoped-out="4"' \
     && ok "(13B) delta's scoped-out= still counts all 4 of gamma's rows after gamma's own ack" \

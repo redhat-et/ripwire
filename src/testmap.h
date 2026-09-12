@@ -62,6 +62,7 @@ struct AffectedSeeds
     std::vector<NodeId>        seeds;                  // deduped seed symbols, id asc (both readings)
     std::vector<NodeId>        walkSeeds;              // seeds OUTSIDE test paths — the caller walk's roots
     std::vector<std::uint32_t> seedTestFiles;          // matched TEST files, file id asc, deduped
+    std::size_t                unprovenDefs  = 0;      // H1: the decl→def residue, summed over the SYMBOL items (a path item adds 0)
     bool                       sawFileItem   = false;  // at least one item read as a path pattern
     bool                       sawSymbolItem = false;  // at least one item read as a symbol
     bool                       ok            = true;   // false ⇒ badItem resolved under NEITHER reading
@@ -143,9 +144,14 @@ inline AffectedSeeds resolveAffectedSeeds( const IngestResult& ing, std::string_
             continue;
         }
 
-        const std::vector<NodeId> defs = resolveAllByNameQualified( ing, item );
+        // H1: the out-param is this item's decl→def residue — definitions a file:NAME item found and could not tie to
+        // the file it named, so they are no seed and the caller walk never starts from them. Summed item by item onto
+        // the answer, --path's rule for its two endpoints: a path item never reaches this line, a bare NAME never widens.
+        std::size_t               itemUnprovenDefs = 0;
+        const std::vector<NodeId> defs             = resolveAllByNameQualified( ing, item, &itemUnprovenDefs );
         if( defs.empty() ) { sel.ok = false;  sel.badItem.assign( item );  return sel; }
         sel.sawSymbolItem = true;
+        sel.unprovenDefs += itemUnprovenDefs;
         sel.seeds.insert( sel.seeds.end(), defs.begin(), defs.end() );
     }
     std::sort( sel.seeds.begin(), sel.seeds.end() );
@@ -295,22 +301,36 @@ inline std::vector<TestRow> rankTestRows( const IngestResult& ing, std::span<con
 enum class EvDialect : std::uint8_t { Xml, Json, Text };
 inline std::string testRowEvidence( const TestRow& r, EvDialect d )
 {
-    static constexpr const char* kFlag[3] = { " %s=\"1\"", ",\"%s\":true", " [%s]" };
-    static constexpr const char* kHops[3] = { " hops=\"%u\"", ",\"hops\":%u", " [hops=%u]" };
-    const int   di = int( d );
+    // The dialect tables were arrays of printf FORMATS indexed at runtime, which std::format_string —
+    // consteval — cannot hold. Switching on the dialect instead keeps every format a literal at its own
+    // call site, so each one is compile-time checked; the three spellings are unchanged.
     std::string s;
     char        buf[ 48 ];
+    const auto  flagOf = [ & ]( const char* name )
+    {
+        switch( d )
+        {
+            case EvDialect::Xml:  rw::formatTo( buf, sizeof buf, " {}=\"1\"", name );   break;
+            case EvDialect::Json: rw::formatTo( buf, sizeof buf, ",\"{}\":true", name ); break;
+            case EvDialect::Text: rw::formatTo( buf, sizeof buf, " [{}]", name );       break;
+        }
+    };
     for( const auto& [ name, on ] : { std::pair{ "changed", r.changed }, std::pair{ "partner", r.partner } } )
     {
         if( on )
         {
-            std::snprintf( buf, sizeof buf, kFlag[di], name );
+            flagOf( name );
             s += buf;
         }
     }
     if( r.hops )
     {
-        std::snprintf( buf, sizeof buf, kHops[di], unsigned( r.hops ) );
+        switch( d )
+        {
+            case EvDialect::Xml:  rw::formatTo( buf, sizeof buf, " hops=\"{}\"", unsigned( r.hops ) );   break;
+            case EvDialect::Json: rw::formatTo( buf, sizeof buf, ",\"hops\":{}", unsigned( r.hops ) );   break;
+            case EvDialect::Text: rw::formatTo( buf, sizeof buf, " [hops={}]", unsigned( r.hops ) );     break;
+        }
         s += buf;
     }
     return s;
@@ -533,10 +553,7 @@ private:
         texts_.resize( runners_.size() );
         for( std::size_t i = 0; i < runners_.size(); ++i )
         {
-            if( !docparse::detail::readWholeFile( diskPath( *ing_, runners_[i] ), texts_[i] ) )
-            {
-                texts_[i].clear(); // unreadable ⇒ no evidence, never a guess
-            }
+            texts_[i] = docparse::detail::readWholeFile( diskPath( *ing_, runners_[i] ) ).value_or( std::string() ); // unreadable ⇒ no evidence, never a guess
         }
     }
 
@@ -915,7 +932,7 @@ inline std::vector<std::string> registeredShellTokens( const IngestResult& ing )
     {
         if( mention_detail::baseNameOf( ing.files[f] ) == "regression.sh" && isTestPath( ing.files[f] ) )
         {
-            docparse::detail::readWholeFile( diskPath( ing, f ), manifest );
+            manifest = docparse::detail::readWholeFile( diskPath( ing, f ) ).value_or( std::string() );
             break;
         }
     }
@@ -929,10 +946,10 @@ inline std::vector<std::string> registeredShellTokens( const IngestResult& ing )
 inline void addRegisteredShellGate( const IngestResult& ing, const std::vector<char>& changedFiles, std::uint32_t fileId, ShellGateIndex& index )
 {
     ++index.registered;
-    std::string source;
-    if( !docparse::detail::readWholeFile( diskPath( ing, fileId ), source ) ) { return; }
-    const std::vector<std::string> manifestDeps = manifestDependencies( source );
-    const std::vector<std::string> literalDeps  = shellPathTokens( executableShellText( source ) );
+    const std::optional<std::string> source = docparse::detail::readWholeFile( diskPath( ing, fileId ) );
+    if( !source ) { return; }
+    const std::vector<std::string> manifestDeps = manifestDependencies( *source );
+    const std::vector<std::string> literalDeps  = shellPathTokens( executableShellText( *source ) );
     const bool manifestMapped = dependenciesMapCorpus( ing, manifestDeps );
     const bool literalMapped  = dependenciesMapCorpus( ing, literalDeps );
     if( manifestMapped || literalMapped ) { ++index.mapped; }

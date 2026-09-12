@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // landingplan.h — --stray-content --plan: "of all my branches, which still hold REAL work, and in what
 // order should I land them?" Two verbs already answer adjacent questions and stop just short of this one:
@@ -165,7 +167,7 @@ using XmlEscaper = std::function<std::string( std::string_view )>;
 
 inline void writePlanRef( std::FILE* out, const crossref::RefRow& r, bool scouted, const XmlEscaper& ex )
 {
-    std::fprintf( out, "<ref name=\"%s\" v=\"%s\" stray=\"%u\" files=\"%u\" scouted=\"%d\"/>",
+    rw::emitTo( out, "<ref name=\"{}\" v=\"{}\" stray=\"{}\" files=\"{}\" scouted=\"{}\"/>",
                   ex( r.ref.name ).c_str(), crossref::verdictTag( r.verdict ), r.strayLines, r.strayFiles, scouted ? 1 : 0 );
 }
 
@@ -184,12 +186,12 @@ inline void writePlanDrop( std::FILE* out, const crossref::RefRow& r, const XmlE
 {
     if( !r.ok || r.verdict == crossref::Verdict::Unknown )
     {
-        std::fprintf( out, "<undetermined name=\"%s\" v=\"%s\" reason=\"no merge base with HEAD (shallow clone or unrelated "
+        rw::emitTo( out, "<undetermined name=\"{}\" v=\"{}\" reason=\"no merge base with HEAD (shallow clone or unrelated "
                            "history) — this ref could not be analysed, it is NOT known to be merged; deepen the clone and re-run\"/>",
                       ex( r.ref.name ).c_str(), crossref::verdictTag( crossref::Verdict::Unknown ) );
         return;
     }
-    std::fprintf( out, "<excluded name=\"%s\" v=\"%s\" stray=\"%u\" reason=\"already re-implemented on the live line\"/>",
+    rw::emitTo( out, "<excluded name=\"{}\" v=\"{}\" stray=\"{}\" reason=\"already re-implemented on the live line\"/>",
                   ex( r.ref.name ).c_str(), crossref::verdictTag( r.verdict ), r.strayLines );
 }
 
@@ -209,7 +211,7 @@ inline void writePlan( std::FILE* out, const PlanResult& p )
 
     // G4: an XML comment may not contain a double hyphen, so this text (like writeStrayContent's and
     // writeWhereis's) uses an em dash for punctuation and names flags WITHOUT their leading dashes.
-    std::fprintf( out, "<!-- ripwire landing-plan: stray-content's cheap per-blob sweep composed with merge-scout's "
+    rw::emitRaw( out, "<!-- ripwire landing-plan: stray-content's cheap per-blob sweep composed with merge-scout's "
                        "per-arm overlap oracle — of every local branch, which still hold REAL work (v=\"unmerged\"), "
                        "which were already re-implemented on the live line (v=\"superseded\", EXCLUDED below — landing "
                        "them re-does work that is already done) or are already merged (omitted entirely, counted in "
@@ -237,8 +239,8 @@ inline void writePlan( std::FILE* out, const PlanResult& p )
     // DOCUMENTED instead: the header above states the containment in the OUTPUT, where consumers read it.
     // Converge by retiring head= across the whole family at once, never one verb at a time.
     const std::string atAttr = p.atStamp.empty() ? std::string() : ( " at=\"" + p.atStamp + "\"" );
-    std::fprintf( out, "<landing-plan head=\"%.9s\" refs=\"%zu\" unmerged=\"%zu\" superseded=\"%u\" merged=\"%u\" "
-                       "undetermined=\"%zu\" scouted=\"%zu\" bounded=\"%zu\" scout-ok=\"%d\"%s>",
+    rw::emitTo( out, "<landing-plan head=\"{:.9}\" refs=\"{}\" unmerged=\"{}\" superseded=\"{}\" merged=\"{}\" "
+                       "undetermined=\"{}\" scouted=\"{}\" bounded=\"{}\" scout-ok=\"{}\"{}>",
                   p.stray.headSha.c_str(), p.stray.refsScanned, p.scouted.size() + p.bounded.size(),
                   supersededCount, p.stray.mergedRefs, p.undetermined.size(), p.scouted.size(), p.bounded.size(),
                   p.scoutOk ? 1 : 0, atAttr.c_str() );
@@ -277,7 +279,7 @@ inline void writePlan( std::FILE* out, const PlanResult& p )
     }
     mergescout::writeScoutLanding( out, p.scout.arms, pairs, ex );
 
-    std::fprintf( out, "</landing-plan>" );
+    rw::emitRaw( out, "</landing-plan>" );
 }
 
 }}   // namespace rw::landingplan

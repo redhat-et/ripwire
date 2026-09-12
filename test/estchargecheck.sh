@@ -31,7 +31,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){   printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
@@ -318,7 +318,7 @@ if command -v xmllint >/dev/null 2>&1; then
         # wrapped in <ctx> by the binary itself; xmllint sees one root either way.
         xmllint --noout "$TMP/$label.out" 2>/dev/null || { echo "    $label: xmllint rejected"; g4=0; }
     done
-    [ "$g4" = 1 ] && ok "#8 all payload shapes well-formed XML" || no "#8 a payload shape is malformed XML"
+    if [ "$g4" = 1 ]; then ok "#8 all payload shapes well-formed XML"; else no "#8 a payload shape is malformed XML"; fi
 else
     printf '  SKIP  #8 xmllint not installed\n'
 fi
@@ -468,6 +468,65 @@ FTB="$( bytes_of "$TMP/f_tb.out" )"
 { [ "$( bytes_of "$TMP/f_for_detail.out" )" -gt "$ALLOW" ]; } 2>/dev/null \
     && ok "#11 A7 no --token-budget: --detail keeps its --pack-budget-bytes budget (unbudgeted bundle unshrunk)" \
     || no "#11 A7 no --token-budget: --detail was trimmed anyway — the budget bound leaked into the default path"
+
+# A7 SWEEP (PR #135 CI, 2026-09-11) — the budget must bound the document at EVERY budget, not at the one operating
+# point above. That arm went red at 5 429 B against its 5 428 B allowance when a merge moved the live src/ corpus,
+# and the main binary emits the same 5 429 bytes on the same tree, so the corpus only exposed it. The defect: the
+# ceiling ladder priced the document WITHOUT the root over_ceiling="1" (17 B) and the legend clause defining it
+# (53 B), which runForLens splices on AFTER the ladder whenever est_tokens exceeds budget_tokens. est_tokens prices
+# markup at 2.50 B/tok and the allowance is sized at 2.36 x 1.15 = 2.714 B/tok, so every bundle in that band
+# carries 70 unpriced bytes, and one the ladder fitted within 70 B of the allowance is pushed past it with no rung
+# fired. One budget on the live tree only sees that when the corpus lands a bundle in the 70 B window, so this arm
+# builds its OWN git-less corpus in $TMP and runs it from a relative path (no at=, no churn, a fixed root=, nothing
+# read from the live repo) and SWEEPS the budget in 10-token steps: the window recurs with every trimmed row
+# (~50 tokens), so a sweep this dense crosses it whatever the legend lengths are. Two shapes — the default bundle
+# and A7's own --detail=20 --with-graph. THE PROPERTY: delivered bytes <= N x 2.36 x 1.15 at exit 0, or the
+# ladder's LAST rung fired and says so (the header floor alone exceeds the budget — the one overshoot it documents).
+A7S="$TMP/a7sweep"
+mkdir -p "$A7S/corpus"
+python3 - "$A7S/corpus" <<'PYG'
+import os, sys
+out = sys.argv[1]
+for i in range( 4 ):
+    lines = []
+    for j in range( 8 ):
+        nxt = f"serializeRow{i}_{j + 1}( map, row )" if j + 1 < 8 else "0"
+        lines += [ f"// serializeRow{i}_{j}: serialize one map row into the output buffer the map writer flushes",
+                   f"int serializeRow{i}_{j}( int map, int row )", "{",
+                   f"    int acc = map + row + {i * 7 + j};",
+                   f"    for( int k = 0; k < {j + 3}; ++k )", "    {",
+                   f"        acc += k * {i + 1} - row;", "    }",
+                   f"    return acc + {nxt};", "}", "" ]
+    with open( os.path.join( out, f"mod{i}.cpp" ), "w" ) as fh:
+        fh.write( "\n".join( lines ) )
+PYG
+a7s_bad=""; a7s_badn=0; a7s_runs=0; a7s_inside_labelled=0
+for spec in "default:1200:1500:" "detail_graph:2880:3080:--detail=20 --with-graph"; do
+    s_label="${spec%%:*}"; s_rest="${spec#*:}"; s_from="${s_rest%%:*}"; s_rest="${s_rest#*:}"; s_to="${s_rest%%:*}"; s_args="${s_rest#*:}"
+    for (( N = s_from; N <= s_to; N += 10 )); do
+        # shellcheck disable=SC2086
+        ( cd "$A7S" && "$BIN" corpus --for="serialize the map" --token-budget=$N $s_args --no-cache ) >"$A7S/o.xml" 2>/dev/null
+        s_rc=$?
+        a7s_runs=$(( a7s_runs + 1 ))
+        s_b="$( bytes_of "$A7S/o.xml" )"
+        s_a="$( awk "BEGIN{printf \"%d\", $N*2.36*1.15}" )"
+        s_root="$( grep -aoE '^<ctx [^>]*>' "$A7S/o.xml" | head -1 )"
+        if [ "$s_rc" -ne 0 ] || { [ "$s_b" -gt "$s_a" ] && ! grep -aqF '[over_ceiling= is 1 on the root: the header floor' "$A7S/o.xml"; }; then
+            a7s_badn=$(( a7s_badn + 1 ))
+            [ "$a7s_badn" -le 6 ] && a7s_bad="$a7s_bad $s_label@$N=${s_b}/${s_a}B(exit $s_rc)"
+        elif [ "$s_b" -le "$s_a" ] && [ "${s_root#* over_ceiling=\"1\"}" != "$s_root" ]; then
+            a7s_inside_labelled=$(( a7s_inside_labelled + 1 ))
+        fi
+    done
+done
+[ "$a7s_badn" -eq 0 ] \
+    && ok "#11 A7 sweep: $a7s_runs budgets over a git-less corpus (default 1200..1500, --detail=20 --with-graph 2880..3080, step 10) — every document within N x 2.36 x 1.15 at exit 0, or on the ladder's disclosed last rung" \
+    || no "#11 A7 sweep: $a7s_badn of $a7s_runs budgets deliver past the allowance with no ladder rung fired (first:$a7s_bad) — a byte spliced in after the ladder priced the document"
+# control: the sweep must cross the band the defect lives in — a root that says over_ceiling="1" while the document
+# still fits the allowance (est_tokens > N at 2.50 B/tok, bytes <= 2.714 B/tok). No such budget = inert, re-anchor.
+[ "$a7s_inside_labelled" -gt 0 ] \
+    && ok "#11 A7 sweep control: $a7s_inside_labelled budget(s) carry a root over_ceiling=\"1\" INSIDE the allowance — the sweep crosses the late-label band" \
+    || no "#11 A7 sweep control: no budget carried over_ceiling=\"1\" inside the allowance — the sweep no longer reaches the est_tokens > N band, re-anchor its ranges"
 
 # A9/A10 — the header's own spliced attributes are inside the number. IDENTITY, not a band: for a bundle with
 # no --detail bodies, est_tokens is markup-only, so it must equal round(delivered bytes / 2.50) EXACTLY
@@ -1014,7 +1073,7 @@ printf '<handoff budget="100" withheld="12">' >"$TMP/p15_mut.xml"
 if command -v xmllint >/dev/null 2>&1; then
     for f in p15_pt p15_pt50 p15_ft p15_ft50 p15_ho100 p15_hobig p15_ex; do
         [ -s "$TMP/$f.xml" ] || continue
-        xmllint --noout "$TMP/$f.xml" 2>/dev/null && ok "#15 $f.xml is well-formed" || no "#15 $f.xml FAILED xmllint"
+        if xmllint --noout "$TMP/$f.xml" 2>/dev/null; then ok "#15 $f.xml is well-formed"; else no "#15 $f.xml FAILED xmllint"; fi
     done
 fi
 
@@ -1062,8 +1121,92 @@ else
     "$BIN" "$ROOT" --for="rank graph teleport" --no-cache >"$TMP/f5_cli.xml" 2>/dev/null
     band15 "CLI --for (same task, same repo)" "$TMP/f5_cli.xml" ctx 320 "#16"
     if command -v xmllint >/dev/null 2>&1; then
-        xmllint --noout "$TMP/f5_mcp.xml" 2>/dev/null && ok "#16 the priced MCP for bundle is well-formed XML" || no "#16 the priced MCP for bundle is malformed XML"
+        if xmllint --noout "$TMP/f5_mcp.xml" 2>/dev/null; then ok "#16 the priced MCP for bundle is well-formed XML"; else no "#16 the priced MCP for bundle is malformed XML"; fi
     fi
+fi
+
+# ── #17 (0.6.1, M2): --connect must charge its CONDITIONAL legend comment, and stay CONSERVATIVE ────────
+# packConnect emits THREE things ahead of its payload — kConnectHeader, the #66 graph_unindexed legend
+# comment (emitted exactly when graph_unindexed= rides the root), and the shared root-relative legend — and
+# connectExtraBytes charged only two of them. PR #72 (issue #66, 382e66e6) raised kConnectRootBytes 260 -> 285 for the
+# ATTRIBUTE and missed the 185 B COMMENT beside it, so on the two corpora below — identical but for one file
+# no grammar can read — the delivered document grew 205 B (185 B comment + the 20 B attribute) while
+# est_tokens did not move by a single token:
+#     0 unindexed files  2503 B   est_tokens=1049   modelled 2622 B   -119 B  (conservative)
+#     1 unindexed file   2708 B   est_tokens=1049   modelled 2622 B    +86 B  (OPTIMISTIC — the defect)
+# The printed est_tokens, the --max-tokens fit check and the over_ceiling="1" verdict then all measure a
+# smaller document than the caller receives, which is precisely what connectEstTokens' own header and
+# kConnectRootBytes' ("short is the ONE direction this constant may not be") say must never happen.
+#
+# WHY THIS IS NOT ALREADY COVERED by #1/#15's band arms: 2503/1049 = 2.38 B/tok and 2708/1049 = 2.58 B/tok
+# sit comfortably INSIDE the 2.00-3.20 markup band, so a band arm is green on both sides of the defect. The
+# separating property is the DIRECTION, not the magnitude — the delivered document must fit inside
+# est_tokens x kBytesPerTokenDefault (2.50) — and it must be asserted on a corpus that HAS an unindexed
+# file, because that is the only arm the uncharged comment reaches. Both corpora are asserted so the arm
+# cannot pass by measuring the side that was never broken.
+#
+# THE FIXTURE NAMES ARE THE SAME LENGTH ON PURPOSE, and that is not cosmetic. The first spelling of this
+# arm used "clean" and "unindexed": four extra path bytes land inside root="...", connectExtraBytes DOES
+# charge root=, and the estimate therefore moved 1047 -> 1048 across the mutation (observed, on the binary
+# this arm was written red against). The monotone arm (c)
+# passed on that ONE token while the defect it names was fully present — CONTRIBUTING §2 shape 5, a control
+# whose two arms differ in something other than the thing under test. Equal-length names make the legend
+# comment the only byte source that can move the estimate.
+C17="$TMP/c17"
+mkdir -p "$C17/unindexed_0/src" "$C17/unindexed_1/src"
+for d in unindexed_0 unindexed_1; do
+    printf 'export function greet( name: string ): string\n{\n    return `hello ${name}`;\n}\n'                        >"$C17/$d/src/util.ts"
+    printf 'import { greet } from "./util.ts";\nexport function render(): string\n{\n    return greet( "world" );\n}\n' >"$C17/$d/src/consumer.ts"
+done
+# THE ONE DIFFERENCE between the two corpora: a file no grammar in this build can read (real input, really
+# mutated — the identical extraction runs over both).
+printf -- '---\nconst x = 1;\n---\n<p>{x}</p>\n' >"$C17/unindexed_1/src/page.astro"
+for d in unindexed_0 unindexed_1; do
+    "$BIN" "$C17/$d" --connect=render,greet --no-cache >"$TMP/c17_$d.xml" 2>/dev/null
+done
+C17_LEGEND='graph_unindexed=N is a third gauge'
+# (a) presence guards — assert the mutation TOOK before trusting any number derived from it. Without these
+#     the arm is the "wrong population" shape: if .astro ever became indexable, or the legend moved, the two
+#     corpora would be identical and the comparison below would prove nothing while staying green.
+C17_CLEAN_U="$(  root_attr "$TMP/c17_unindexed_0.xml" connect graph_unindexed )"
+C17_UNIDX_U="$(  root_attr "$TMP/c17_unindexed_1.xml" connect graph_unindexed )"
+{ [ -z "$C17_CLEAN_U" ] && [ "$C17_UNIDX_U" = "1" ]; } \
+    && ok "#17 mutation took: the clean corpus carries no graph_unindexed= and the mutated one carries graph_unindexed=\"1\"" \
+    || no "#17 mutation did NOT take: graph_unindexed= is '${C17_CLEAN_U:-<absent>}' clean vs '${C17_UNIDX_U:-<absent>}' mutated — the arm is measuring two identical corpora"
+{ ! grep -q "$C17_LEGEND" "$TMP/c17_unindexed_0.xml" && grep -q "$C17_LEGEND" "$TMP/c17_unindexed_1.xml"; } \
+    && ok "#17 the #66 legend comment is emitted on the mutated corpus and absent on the clean one (the uncharged bytes are really there)" \
+    || no "#17 the #66 legend comment is not where this arm needs it — present on clean, or missing from the mutated corpus"
+C17_BC="$( bytes_of "$TMP/c17_unindexed_0.xml" )"; C17_EC="$( root_est "$TMP/c17_unindexed_0.xml" connect )"
+C17_BU="$( bytes_of "$TMP/c17_unindexed_1.xml" )"; C17_EU="$( root_est "$TMP/c17_unindexed_1.xml" connect )"
+{ [ -n "$C17_EC" ] && [ -n "$C17_EU" ] && [ "$C17_EC" -gt 0 ] && [ "$C17_EU" -gt 0 ]; } 2>/dev/null \
+    || no "#17 a <connect> root carries no positive est_tokens= (clean '$C17_EC', mutated '$C17_EU')"
+[ "$C17_BU" -gt "$C17_BC" ] 2>/dev/null \
+    && ok "#17 the mutated document is $(( C17_BU - C17_BC )) B larger than the clean one ($C17_BC -> $C17_BU B)" \
+    || no "#17 the mutated document did not grow ($C17_BC -> $C17_BU B) — there is nothing for est_tokens to have missed"
+# (b) THE PROPERTY, on both corpora: the WHOLE delivered document fits inside est_tokens x 2.50 B/tok.
+#     Integer math, no tolerance added: kConnectRootBytes deliberately OVER-covers the start tag, so a
+#     correctly charged document sits ~100 B clear of this line and only an uncharged section crosses it.
+#     The 2.50 is serialize.h's kBytesPerTokenDefault, the rate connectEstTokens divides by — if that
+#     constant ever moves, this arm's 25/10 moves with it, the same hand-pinned coupling #1's bands carry.
+for entry in "0 unindexed files:$C17_BC:$C17_EC" "1 unindexed file:$C17_BU:$C17_EU"; do
+    lab="${entry%%:*}"; rest="${entry#*:}"; b="${rest%%:*}"; e="${rest#*:}"
+    [ -n "$e" ] && [ "$e" -gt 0 ] 2>/dev/null || continue
+    m=$(( e * 25 / 10 ))
+    [ $(( b * 10 )) -le $(( e * 25 )) ] \
+        && ok "#17 --connect ($lab): $b B delivered against est_tokens=$e x 2.50 = $m B modelled — CONSERVATIVE by $(( m - b )) B" \
+        || no "#17 --connect ($lab): $b B delivered against est_tokens=$e x 2.50 = $m B modelled — OPTIMISTIC by $(( b - m )) B; a section of the document is not charged to est_tokens"
+done
+# (c) MONOTONE, the same property #2/#11 assert elsewhere: the two corpora share a payload byte for byte, so
+#     the ONLY thing that moved is the legend comment — and an estimate that does not move when the document
+#     does is the signature of the defect (est_tokens=1049 on both sides of a 205 B growth).
+{ [ -n "$C17_EU" ] && [ -n "$C17_EC" ] && [ "$C17_EU" -gt "$C17_EC" ]; } 2>/dev/null \
+    && ok "#17 --connect: est_tokens rose $C17_EC -> $C17_EU when the document grew (the conditional legend is charged)" \
+    || no "#17 --connect: est_tokens stayed at '$C17_EC' -> '$C17_EU' across a $(( C17_BU - C17_BC )) B growth — the conditional legend comment is uncharged"
+# (d) G4 — the two captures stay well-formed (this arm reads bytes, so it must not be reading a broken doc)
+if command -v xmllint >/dev/null 2>&1; then
+    for f in c17_unindexed_0 c17_unindexed_1; do
+        if xmllint --noout "$TMP/$f.xml" 2>/dev/null; then ok "#17 $f.xml is well-formed"; else no "#17 $f.xml FAILED xmllint"; fi
+    done
 fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

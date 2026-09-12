@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // dmm.h — `--dmm`: the Delta Maintainability Model, one comparable scalar per change.
 //
@@ -73,6 +76,17 @@ namespace rw::dmm
 
 // The SIG risk-profile boundaries, as PyDriller spells them (Method.UNIT_*_LOW_RISK_THRESHOLD). Named, not
 // inlined as three literals, so a reader can check them against the package without decoding an expression.
+//
+// NOT an OUTPUT-class cap, so no `*_capped` attribute belongs beside them (2026-09-10 lift-disclosure
+// audit). A truncating cap silently DROPS content past a ceiling — kDefsPerNameCap, kSymbolRowCap, the
+// truncating caps LIMITS.md lists elsewhere. These three do the opposite job: they CLASSIFY every unit
+// measured (never drop one), and the thresholds they classify against are themselves unconditionally on
+// the root every run — `low_loc="{kUnitSizeLowRiskMax}" low_cx="{kUnitComplexityLowRiskMax}" `
+// `low_params="{kUnitInterfacingLowRiskMax}"` (writeDmmReport, below) — so there is no silent state for a
+// `_capped` bit to distinguish; the classification boundary is printed on every single report, capped or
+// not. docs/limits_build.py's static scan still lists them (their names contain "Max", its one keyword
+// filter), which is why LIMITS.md's "Discloses" column reads "none" for this file — that column tracks
+// only the `*_capped` shape, and disclosure here takes the always-present-attribute shape instead.
 inline constexpr std::uint32_t kUnitSizeLowRiskMax        = 15;   // lines
 inline constexpr std::uint32_t kUnitComplexityLowRiskMax  = 5;    // cyclomatic complexity
 inline constexpr std::uint32_t kUnitInterfacingLowRiskMax = 2;    // parameters
@@ -257,7 +271,7 @@ inline bool ingestCommitTree( const std::string& root, const std::string& sha, c
     std::string cachePath;
     if( sha == quality::gitHeadSha( root ) )
     {
-        const std::string repoHex = quality::headSnapRepoHex( root );
+        const std::string repoHex = quality::cacheRootKeyHex( root );
         const std::string exclHex = quality::headSnapExclHex( excludes, maxFileBytes );
         cachePath                 = quality::headSnapCachePath( repoHex, exclHex, sha );
     }
@@ -379,9 +393,9 @@ inline void printScoreAttr( const char* name, bool available, double score )
     char value[16] = "UNAVAILABLE";
     if( available )
     {
-        std::snprintf( value, sizeof value, "%.3f", score );
+        rw::formatTo( value, sizeof value, "{:.3f}", score );
     }
-    std::printf( " %s=\"%s\"", name, value );
+    rw::emitTo( stdout, " {}=\"{}\"", name, rw::cstr( value ) );
 }
 
 // Emit the report. Returns the process exit code — always 0. This is a MEASUREMENT, not a gate: it has no
@@ -402,33 +416,33 @@ inline int writeDmmReport( const Result& r )
     if( r.status != Status::Ok )
     {
         const std::string reason( escapeXml( r.reason, escReason ) );
-        std::printf( " available=\"0\" dmm=\"UNAVAILABLE\" reason=\"%s\"%s/>", reason.c_str(), atAttrStr.c_str() );
+        rw::emitTo( stdout, " available=\"0\" dmm=\"UNAVAILABLE\" reason=\"{}\"{}/>", reason.c_str(), atAttrStr.c_str() );
         return 0;
     }
 
     const std::string base( escapeXml( r.baseSha, escBase ) );
     const std::string target( escapeXml( r.targetIsWorkingTree ? std::string( "working-tree" ) : r.targetSha, escTarget ) );
     // P8 (L7): the three low-risk thresholds beside the numbers they judge (PyDriller's, verbatim — see the constants)
-    std::printf( " base=\"%s\" target=\"%s\"%s available=\"%d\" combine=\"pooled\" size_metric=\"physical-loc\" low_loc=\"%u\" low_cx=\"%u\" low_params=\"%u\"",
+    rw::emitTo( stdout, " base=\"{}\" target=\"{}\"{} available=\"{}\" combine=\"pooled\" size_metric=\"physical-loc\" low_loc=\"{}\" low_cx=\"{}\" low_params=\"{}\"",
                  base.c_str(), target.c_str(), atAttrStr.c_str(), r.available ? 1 : 0, kUnitSizeLowRiskMax, kUnitComplexityLowRiskMax, kUnitInterfacingLowRiskMax );
     printScoreAttr( "dmm", r.available, r.score );
-    std::printf( " good=\"%llu\" bad=\"%llu\"", static_cast<unsigned long long>( r.good ), static_cast<unsigned long long>( r.bad ) );
-    std::printf( " base_units=\"%llu\" base_volume=\"%llu\" target_units=\"%llu\" target_volume=\"%llu\"",
+    rw::emitTo( stdout, " good=\"{}\" bad=\"{}\"", static_cast<unsigned long long>( r.good ), static_cast<unsigned long long>( r.bad ) );
+    rw::emitTo( stdout, " base_units=\"{}\" base_volume=\"{}\" target_units=\"{}\" target_volume=\"{}\"",
                  static_cast<unsigned long long>( r.base.unitCount ), static_cast<unsigned long long>( r.base.volume ),
                  static_cast<unsigned long long>( r.target.unitCount ), static_cast<unsigned long long>( r.target.volume ) );
     if( !r.available )
     {
         const std::string reason( escapeXml( r.reason, escReason ) );
-        std::printf( " reason=\"%s\"", reason.c_str() );
+        rw::emitTo( stdout, " reason=\"{}\"", reason.c_str() );
     }
     std::fputs( ">", stdout );
 
     for( std::size_t propIndex = 0; propIndex < kPropCount; ++propIndex )
     {
         const PropScore& p = r.props[propIndex];
-        std::printf( "<p k=\"%s\"", kPropNames[propIndex] );
+        rw::emitTo( stdout, "<p k=\"{}\"", kPropNames[propIndex] );
         printScoreAttr( "dmm", p.available, p.score );
-        std::printf( " good=\"%llu\" bad=\"%llu\" d_low=\"%lld\" d_high=\"%lld\"/>",
+        rw::emitTo( stdout, " good=\"{}\" bad=\"{}\" d_low=\"{}\" d_high=\"{}\"/>",
                      static_cast<unsigned long long>( p.good ), static_cast<unsigned long long>( p.bad ),
                      static_cast<long long>( p.deltaLow ), static_cast<long long>( p.deltaHigh ) );
     }

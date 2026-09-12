@@ -33,7 +33,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/fieldaffinityfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -146,7 +146,7 @@ fi
 # ── 12) determinism + well-formedness (the two standing contracts) ────────────────────────────────────
 "$BIN" "$FIX" --field-affinity --no-cache >"$TMP/a.xml" 2>/dev/null
 "$BIN" "$FIX" --field-affinity --no-cache >"$TMP/b.xml" 2>/dev/null
-cmp -s "$TMP/a.xml" "$TMP/b.xml" && ok 'two runs are byte-identical (determinism)' || no 'output is not deterministic'
+if cmp -s "$TMP/a.xml" "$TMP/b.xml"; then ok 'two runs are byte-identical (determinism)'; else no 'output is not deterministic'; fi
 if command -v xmllint >/dev/null 2>&1; then
     xmllint --noout "$TMP/out.xml" 2>"$TMP/xml.err" && ok 'output is well-formed XML' \
         || { no 'xmllint rejected the output'; cat "$TMP/xml.err"; }

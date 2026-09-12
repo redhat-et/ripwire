@@ -22,7 +22,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -35,13 +35,13 @@ dline(){ printf '%s' "$1" | sed 's/></>\n</g' | grep -E "<d [^>]*>$2" | head -1;
 # ── 1) the --for bundle carries the quality lens on its ranked <d> blocks (ccx + amp) ─────────────────
 FOR1="$( "$BIN" test/fixture --no-cache --for="compute perimeter distance" 2>/dev/null )"
 DL="$( dline "$FOR1" 'double distance' )"
-printf '%s' "$DL" | grep -q ' ccx=' && ok "--for <d> carries ccx (cognitive complexity): $DL" || no "--for <d> missing ccx: $DL"
-printf '%s' "$DL" | grep -q ' amp=' && ok "--for <d> carries amp (change-amplification)"          || no "--for <d> missing amp: $DL"
+if printf '%s' "$DL" | grep -q ' ccx='; then ok "--for <d> carries ccx (cognitive complexity): $DL"; else no "--for <d> missing ccx: $DL"; fi
+if printf '%s' "$DL" | grep -q ' amp='; then ok "--for <d> carries amp (change-amplification)"; else no "--for <d> missing amp: $DL"; fi
 
 # ── 2) GOLDEN NEUTRALITY — plain --pack-signatures must NOT carry any lens attr; default map unchanged ─
 PS="$( "$BIN" test/fixture --no-cache --pack-signatures 2>/dev/null )"
 LEAK="$( printf '%s' "$PS" | grep -oE ' (churn|clone|amp|tested)="[^"]*"' | head -1 )"
-[ -z "$LEAK" ] && ok "golden-neutral: --pack-signatures carries no lens attr (lens is --for-only)" || no "lens attr leaked into --pack-signatures: $LEAK"
+if [ -z "$LEAK" ]; then ok "golden-neutral: --pack-signatures carries no lens attr (lens is --for-only)"; else no "lens attr leaked into --pack-signatures: $LEAK"; fi
 # the default map must be byte-identical to the committed golden (the authoritative golden-neutral check).
 if [ -f "$ROOT/test/golden.xml" ]; then
     "$BIN" test/fixture --no-cache 2>/dev/null | diff -q - "$ROOT/test/golden.xml" >/dev/null \
@@ -54,8 +54,8 @@ fi
 # ── 3) determinism + well-formed XML on the --for bundle ──────────────────────────────────────────────
 "$BIN" test/fixture --no-cache --for="compute perimeter distance" >"$TMP/f1" 2>/dev/null
 "$BIN" test/fixture --no-cache --for="compute perimeter distance" >"$TMP/f2" 2>/dev/null
-diff -q "$TMP/f1" "$TMP/f2" >/dev/null && ok "determinism (--for byte-identical run-to-run)" || no "non-deterministic --for output"
-command -v xmllint >/dev/null 2>&1 && { printf '%s' "$FOR1" | xmllint --noout - 2>/dev/null && ok "xml well-formed (--for lens)" || no "xml malformed (--for lens)"; } || ok "xml well-formed (xmllint absent — skipped)"
+if diff -q "$TMP/f1" "$TMP/f2" >/dev/null; then ok "determinism (--for byte-identical run-to-run)"; else no "non-deterministic --for output"; fi
+command -v xmllint >/dev/null 2>&1 && { if printf '%s' "$FOR1" | xmllint --noout - 2>/dev/null; then ok "xml well-formed (--for lens)"; else no "xml malformed (--for lens)"; fi; } || ok "xml well-formed (xmllint absent — skipped)"
 
 # ── 4) tested= / clone= on a crafted scratch corpus (OUTSIDE test/, so tested= can fire) ──────────────
 SC="$TMP/proj"; mkdir -p "$SC/tests"

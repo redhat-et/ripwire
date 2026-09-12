@@ -1544,3 +1544,126 @@ build_prof/ripwire <scratch>/rails --callers=main >/dev/null 2>prime.err   # war
 # the stderr "hottest scopes" table is the phase split; buildGraph/2b is the closure.
 # Take the MIN over >=5 interleaved A,B reps — this box ran 1-minute loads of 5-19 across the session.
 ```
+
+## 2026-09-10 — timsort as a third algorithm: REFUTED on every sort shape here, and vendored anyway as an unrouted tool
+
+LEDGER rows, never a gate (the no-perf-budget rule). No call site changes in this round. The two edits it
+produced are a comment correction in `src/infra/radixSort.h` and, after the measurement was over, a
+deliberate override of its own recommendation — `src/infra/timsort.hpp` is now vendored and named as the
+third entry in `src/infra/fastSort.h`, with **no caller routed to it**. The measurement below is why that
+entry carries the warning it does; read it before you reach for the third algorithm.
+
+Radix cannot exploit existing order, so it loses where the input is already ascending: on `django`'s
+100%-pre-sorted `implementors` it is 3.27x `std::sort`. The obvious follow-up is that a **mostly-sorted
+specialist** should win exactly there. timsort is that specialist, it is header-only and MIT, and it was a
+plausible vendoring candidate on the merits. Measured on the real captured id sets of all three candidate
+sites across seven corpora, it **never won anywhere**.
+
+### Method
+
+Every pre-sort id set at the three candidate sites — `buildGraph/2b`'s `trans[s]` (`resolve.h`),
+`g.implementors[]` and `g.mentions[]` (`graph.h`) — was dumped to disk from an instrumented build
+(`-DRIPWIRE_SORTCAP`, a measurement-only define no shipped build sets; the instrumentation was reverted
+and is not in the tree). The replay harness sorts the REAL captured sets, six arms, **interleaved within
+each rep** so machine load hits every arm equally, medians of 21 reps, `-O2 -mcpu=apple-m1 -ffast-math`.
+Every arm's output is compared against an independently sorted reference on every rep — a wrong answer
+aborts the run, so no timing below belongs to an arm that did not actually sort. The census reproduces the
+radix round's numbers exactly (`django` Σ 646,700 over 47,830 records; `rails` 2b Σ 3,994,331 over 3,916),
+which is what says the two rounds measured the same population.
+
+Records of fewer than two elements are skipped by every arm identically. That matters: `go`'s
+`implementors` has 310,733 records and **not one element to sort**, and an earlier pass that did not skip
+them was reporting 0.40 ms of pure loop-and-call overhead as if it were sorting.
+
+### The table — ratio vs `std::sort`, <1 is faster; rows with Σ ≥ 3,000 only
+
+| site | corpus | Σ | maxN | sorted | desc/el | `std::sort` | radix | **timsort** | pdqsort | `is_sorted`+ | `stable_sort` |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| closure2b | `rails` | 3,994,257 | 1420 | 3.9% | 0.181 | 39.015 ms | **0.28x** | 1.71x | 1.01x | 1.00x | 0.28x |
+| closure2b | `llvm` | 15,806 | 84 | 44.8% | 0.225 | 0.054 ms | 0.90x | 2.00x | 1.09x | 0.93x | 1.01x |
+| closure2b | private C++ tree | 11,838 | 149 | 31.7% | 0.313 | 0.031 ms | 0.99x | 3.27x | 1.29x | 1.05x | 1.63x |
+| closure2b | this repo | 4,000 | 136 | 55.3% | 0.257 | 0.011 ms | 1.00x | 3.42x | 1.05x | 1.05x | 1.35x |
+| implementors | `django` | 645,991 | 2401 | 100.0% | 0.000 | 0.488 ms | 3.27x | 0.58x | 0.73x | **0.35x** | 2.31x |
+| implementors | `llvm` | 16,493 | 383 | 100.0% | 0.000 | 0.016 ms | 1.72x | 0.74x | 0.80x | **0.51x** | 0.92x |
+| implementors | `rust-analyzer` | 3,939 | 437 | 63.7% | 0.180 | 0.013 ms | 1.00x | 2.09x | 0.96x | 1.01x | 1.25x |
+| mentions | `rails` | 71,896 | 79 | 100.0% | 0.000 | 0.096 ms | 0.97x | 0.74x | 0.85x | **0.54x** | 0.65x |
+| mentions | private C++ tree | 49,256 | 116 | 100.0% | 0.000 | 0.054 ms | 1.00x | 0.70x | 0.86x | **0.51x** | 0.65x |
+| mentions | this repo | 5,776 | 43 | 100.0% | 0.000 | 0.005 ms | 1.00x | 0.68x | 0.78x | **0.48x** | 0.72x |
+| mentions | `rust-analyzer` | 5,772 | 30 | 100.0% | 0.000 | 0.005 ms | 0.96x | 0.69x | 0.92x | **0.53x** | 0.86x |
+
+`is_sorted`+ is three lines and no dependency: `if( !std::is_sorted( a, b ) ) { std::sort( a, b ); }`.
+
+**The covariate that decides every row is `desc/el` — adjacent descents per element — not Σ and not maxN.**
+Every row where timsort wins has `desc/el` 0.000; every row where it is the worst arm has `desc/el` ≥ 0.18.
+`rails` 2b at Σ 3,994,257 and this repo's closure at Σ 4,000 are three orders of magnitude apart in size and
+sit within 2x of each other in timsort's ratio column. Size is not the question to ask.
+
+### Why timsort is refused for every existing call site
+
+1. **It is never the best arm on any row.** On the pre-sorted sites it does beat `std::sort` (0.58–0.74x)
+   and it beats radix by up to 5.6x — the prediction was right about the *direction*. But the thing that
+   makes it win there is O(n) run detection, and a bare `std::is_sorted` guard does the same detection in
+   a tighter, vectorisable loop with no run stack and no merge bookkeeping: **0.35x vs timsort's 0.58x on
+   `django`, 0.48–0.54x vs 0.68–0.74x on every `mentions` row.** The three-line guard is ~1.5x faster than
+   the 770-line dependency at the one thing the dependency was wanted for.
+2. **On scattered input it is the worst arm measured** — 1.71x on `rails` 2b, and 2.00–3.42x on the four
+   smaller closure rows. It does not change the radix verdict for `buildGraph/2b`; it **confirms** it.
+   Against radix specifically on that site it is 6.0x slower (64.8 ms vs 10.8 ms).
+3. **Magnitude.** Outside `rails` 2b — the one site radix is wanted for — every site in the table costs **at
+   most 0.5 ms per run**, and `llvm`, the scale rung, is the *smallest* `implementors` of the three big
+   corpora at Σ 16,493 against `django`'s 645,991. The pre-sorted sites are not a place where any algorithm
+   choice is worth a dependency; the whole `is_sorted`+ win on `django` is 0.32 ms of a ~750 ms run.
+
+### The `stable_sort` control, and what it says about the radix win
+
+`std::stable_sort` was added as a control to test whether timsort's loss on scattered input was its
+allocation. It is not — and the control found something worth recording: on `rails` 2b `std::stable_sort`
+is **0.28x, statistically indistinguishable from radix's 0.28x** (11.31 ms vs 11.09 ms). On a synthetic
+control of the same record shape filled with pure random keys the ratio is 0.205x, so this is a property
+of the platform's `std::sort` on ~1,300-element `uint32` arrays and **not** of the closure data; note that
+`pdqsort_branchless` lands at 1.01x, i.e. with `std::sort`, so both quicksort-family arms are on one side
+of a 4x gap and both merge/radix-family arms on the other.
+
+The consequence is not that a radix conversion of that site would be wrong — it is 2% faster than
+`std::stable_sort` and, decisively, it sorts through **caller-owned scratch with no per-call allocation**,
+where `std::stable_sort` heap-allocates on each of the 3,087 calls (G2). But the honest framing of that win
+is *"leaving the quicksort family"*, not *"radix specifically"*, and a future reader comparing only against
+`std::sort` would over-attribute it.
+
+### The vendoring decision, and the version question it forced
+
+The measurement above recommended vendoring nothing. **That recommendation was overridden deliberately, on
+toolbox-parity grounds and not on performance:** the same `fastSort.h` layer is maintained in a private C++
+tree where it documents three algorithms, and the third should be available here rather than absent with no
+explanation. So it is vendored, it is named in the facade, and **every number above is quoted at the point
+of use** — the facade entry, not a document a reader has to go find. Nothing is routed to it.
+
+Vendoring forced a version question the refusal had been able to leave alone, and the answer was not what
+either side of it assumed. Two claims were on the table: that upstream has no caller-owned workspace (so
+vendoring buys nothing for G2), and that the copy in the private tree — whose header reads
+`GFX_TIMSORT_VERSION_MAJOR 3 / MINOR 0 / PATCH 0` — does have one. Both are true, and neither implies what
+it looks like:
+
+- **No upstream release has a workspace.** `timsort_workspace` appears in **none** of the 13 tags at
+  `github.com/timsort/cpp-TimSort`, nor on its default branch. `v3.0.0` and `v3.0.1` both allocate a
+  `TimSort` object, with its `tmp_` and `pending_` vectors, per call.
+- **The version macro is not a version.** Upstream shipped `v3.0.1` **without bumping
+  `GFX_TIMSORT_VERSION_PATCH`** — it still reads `0` at that tag. So a header saying `3 / 0 / 0` is
+  evidence of nothing, and reading it as "this is v3.0.0" is how the two claims came to look contradictory.
+  Content settles it: the private tree's copy carries v3.0.1's single-template-parameter `TimSort`, its
+  `std::iter_difference_t` alias and its fourth `rotateRight` call site. It is **v3.0.1 plus a local
+  patch**, not v3.0.0.
+
+What is vendored here is therefore upstream **v3.0.1 verbatim, plus that same local patch re-derived
+against it**: a `gfx::timsort_workspace<Iterator>` holding the `tmp_` and `pending_` vectors, `TimSort`
+binding references to either the workspace's vectors or its own, and workspace overloads of `gfx::timsort`
+/ `gfx::timmerge`. It is the only reason to prefer this copy over the release, so it is the property
+`test/timsortcheck.sh` gates: after one `reserve_for`, arm E requires **zero** heap allocations across 200
+sorts, and arm F requires the unpatched entry point to allocate on the same input, so the counter cannot
+pass by being dead. A re-vendor from upstream would delete the patch, and E and F both go red.
+
+### One correction this round owes
+
+`src/infra/radixSort.h` carried "the current paths already beat timsort 3-6x on random float keys" — a
+claim that could not be re-measured in this repo, because the routine it named was not vendored here at the
+time. It is now replaced with the two-sided, reproducible statement the table above supports.

@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 576 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 607 gate scripts plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -2205,6 +2205,208 @@ checks into their own `flowTaskChoice` function (mirroring the existing `instrum
 extraction) and by inlining the small filler-word loop directly rather than introducing a shared
 helper that collided token-for-token with `weakSymbolCandidate`'s existing shape.
 
+### MCP `no_route`: the CLI's recovery from a route mis-fire, reachable from an agent (2026-09-10)
+
+**The gap (audit F-R1-07).** `for`'s header carries `route=` — WHICH ranker answered and why — and the
+tool's own description tells the agent to read it. An agent that read it and disagreed had nowhere to go:
+`tools/call {"name":"for","arguments":{...,"no_route":true}}` was refused by name, and `explore` /
+`pack_task` had no such parameter either. The CLI's own answer to a route mis-fire (`--no-route`) was
+unreachable from the MCP surface. The mis-fire is measured, not hypothetical: `--for="parse tree"` on this
+repo routes name-exact, returns three rows from `bench/` and `test/`, and misses `parseTree` entirely,
+which `--no-route` finds at rank 1 (F-R1-06; the `ImplausibleAnchor` guard scales with corpus size, so
+SMALL repos are the exposed ones).
+
+**What shipped.** One declared optional boolean, `no_route`, on `for` and `explore` (and its `pack_task`
+alias). It is the CLI flag's twin, not a near-twin: under it the router is not asked, and — exactly as
+`verbs_for.h` does under `--no-route` — the query-shape demotion, the mention anchor and the co-change
+prior are all skipped, because each is part of the routed reading. There is then no route to disclose, so
+`ctxRootOpen` emits no `route=`, byte-for-byte what the CLI does.
+
+**Gated as a parity claim, not as a feature.** `test/mcpforparitycheck.sh` gains seven arms, and each one
+is asserted against the CLI's OWN behavior rather than against a remembered rule: the CLI emits no
+`route=` under `--no-route`, so neither may the MCP twin; every CLI `--no-route` row must be present in
+the MCP `no_route` set (subset, for the same payload reason the existing arms give); a quoted `"true"` is
+a STRING and refuses by name; `pack_task` honors it; and a verb that does NOT route (`grep`) must still
+refuse it, because the declaration is per-verb. The first arm asserts the call ANSWERED — measured while
+writing the gate, two of the arms went GREEN against the pre-change binary purely on emptiness, since a
+refused call returns no content and an empty document trivially has no `route=`.
+
+**Manifest cost, attributed.** 41,220 → 41,474 B; ceiling re-anchored 41,300 → 41,650. Schemas
+17,161 → 17,415 (+254: two property stanzas at +127 each — the schema envelope plus the description every
+declared property is obliged to carry). **Descriptions are byte-identical at 19,632 B**: a first draft
+added a pointer clause to both tool descriptions and it was REMOVED rather than re-anchored around,
+because that file's own rule is that the ceiling moves for a declared argument's obliged bytes and never
+for prose. The `--quality-delta` verbosity row this change first raised on `dispatchMcpLine`
+(1,376 → 1,387 lines) was likewise fixed rather than acked: the second hand-rolled five-line boolean
+accumulate became ONE guarded `boolArg` reader that `post_check` now shares — the rule `intArg` already
+states for the numeric fields — leaving the dispatcher smaller than before the change.
+
+### `--help-task` catalog tier: the verbs and the skills with no route (2026-09-10)
+
+**Two measurements, one cause.** `--help-task` recommended on **3 of 39** phrasings of the 13 surfaces
+added since the 2026-08-28 audit (F-R1-08), and could name **8 of the 16** shipped skills (F-R1-09) —
+nine skill directories existed that no `--help-task` answer could ever point at. `--help-task` and the
+skill catalog were two routers with two vocabularies. Three of the unrouted surfaces are VERBS rather
+than shaping flags: `--handoff` (which has its own shipped skill), `--plan-lint`, and the PROSE form of
+`--from-trace` — `looksLikeTrace` matches a PASTED artifact (`AddressSanitizer:`, `#0 … in`), and "I
+have a sanitizer report" contains none of those literals, so the #108 name-ladder work was unreachable
+from prose.
+
+**Ten intents, in a `catalogTaskChoice` tier placed LAST in `directTaskChoice`** so every older, more
+specific route keeps its rows: `handoff-brief` → `--handoff`, `plan-lint` → `--plan-lint=FILE`,
+`trace-prose` → `--from-trace=-`, `scan-skills`/`scan-skill` → `--scan-skills` / `--scan-skill=FILE`,
+`opt-remark` → `--for=TASK`, `architecture-health` → `--deps`, `quality-check` → `--quality-delta`,
+`perf-symbol` → `--around=SYM`, `graph-query` → `--graph-query=EXPR`, `maintenance-risk` →
+`--hotspots`. Each takes conjunctive evidence in the shape `instrumentedTaskChoice` established, and the
+value-carrying ones fire only when the task supplies the value.
+
+Two of them are worth stating plainly rather than listing. **`opt-remark` is the one skill with no verb
+of its own** — it is a contributor workflow around clang remarks and a profiling build — so it routes to
+the ranked lens and its reason string says exactly that, instead of implying a dedicated surface exists.
+**`graph-query` composes an expression** out of what the task supplied (the symbol it named, the
+direction it asked for) with a stated default depth, the same way `--grep-context=2` and
+`--slice-flow=back` are defaults; the gate unquotes what the router emitted and runs it through the real
+verb, so a composed expression the verb would refuse fails the gate rather than the user.
+
+| measurement | before | after |
+| --- | ---: | ---: |
+| skills the router can name (of 16, `ripwire-router` excluded) | **8** | **16** |
+| audit's 39 surface phrasings, recommends | **3** | **9** |
+| corpus `split=test` (n=114) accuracy / coverage | 0.754 / 0.627 | **0.939 / 0.907** |
+| corpus `split=dev` (n=111) accuracy / coverage | — | 0.946 / 0.929 |
+| corpus `split=all` (n=225) accuracy / coverage | 0.809 / 0.730 | **0.942 / 0.918** |
+| precision / harmful / neg-specificity, every split | 1.000 / 0.000 / 1.000 | 1.000 / 0.000 / 1.000 |
+| the 189 rows that predate this tier, (status, intent, resolved_symbols) | — | **0 differing** |
+
+The remaining 30 of 39 are declined by design and are gated as such: six SHAPING flags (`--scope`,
+`--slice-depth`, `--slice-flow`, `--allow-dirty`, `--no-ignore`, `--no-post-check`) are modifiers on
+other verbs and not commands a one-command router can recommend alone; `--pin-census` is eval-only; and
+the value-carrying abstentions (`--edit-plan=FILE`, `--grep=LIT --handles`, `--plan-lint` with no file
+named) keep the 2026-08-28 rule that the router may not emit a command the verb would refuse.
+
+**Red-first is the GATE here, not the eval.** Coverage has no floor by the round-1 rule, so the eval
+exits 0 either way; eleven `taskroutecheck` arms fail against the pre-change binary (every one abstained
+with `score="0"`), plus the two execution arms, and the skill-vocabulary arm — which reads BOTH sides
+from disk, the skill directories and the names `src/taskroute.h` can emit — fails against the pre-change
+source, naming all eight unreachable skills. That arm is the durable half: a new skill that ships
+without a route now fails as loudly as a route naming a skill that does not exist.
+
+**Two corrections the pre-insertion verification caught**, recorded because "every row verified before
+insertion" is only worth something if the failures are shown too. A plan file that names ITSELF
+(`PLAN_*.md`, `DESIGN_*.md`) is now surface evidence the prose need not repeat. And `"before i commit"`
+was re-weighted below the quality-check floor: it is a TIMING word, not a quality word, and at its first
+weight it stole *"lint the plan file layout before I commit it"* from the plan-lint abstention.
+
+### The four restored stop rules become measurable (2026-09-10)
+
+**The defect (audit F-R1-03).** #112 restored four frontmatter STOP RULES to the skill descriptions —
+`before-you-build` "A small feature with an obvious home needs none of this.", `fresh-eyes` "A
+single-lens question is a single call.", `orient` "Stop at the first rung that answers.",
+`write-tests` "For one target one `--seams` or `--callers` pass suffices." — and **no row in
+`test/skillevalfix/prompts.tsv` could see any of them**. Stripping all four left `split=test` bm25-desc
+hit@1 byte-identical at 63.8% and `split=dev` **1.4pp better**, with `skillevalcheck` 15/15 green
+either way. That is the same failure #112 itself repaired: the fix restored the TEXT without adding a
+MEASUREMENT, so the next rewrite that drops a stop rule ships green.
+
+**What now measures them.** 16 rows between the `STOP-RULE ROWS (2026-09-10)` markers in the corpus
+(all `split=dev` — the test split is frozen; `test/skillevalsplitcheck.sh` confirms `split=test`
+hit@1 unchanged at 63.8%), plus a new **stop-rule arm** in `test/skillevalcheck.sh` that asserts two
+different things, because a stop rule can fail two different ways:
+
+1. **PRESENCE, exact.** Each sentence is pinned in the gate verbatim, and the arm's strip must actually
+   remove it from that skill's `SKILL.md`. A rewrite that drops OR REWORDS a rule makes its strip a
+   no-op and the gate names which rule and stops. Whitespace between words is matched as `\s+` because
+   frontmatter folds — the wrap position is formatting, not the thing being measured.
+2. **LOAD-BEARING, differential.** The 16 rows are scored against `skills/` and against a mechanically
+   stripped copy the gate builds itself; the real tree must win by ≥12.5pp.
+
+| measurement (bm25-desc hit@1) | with the four rules | stripped |
+| --- | ---: | ---: |
+| the 16 stop-rule rows | **75.0%** | 50.0% |
+| — of which the 8 that echo the rules (`desc`) | **100.0%** | 50.0% |
+| — of which the 8 written to avoid them (`judged`) | 50.0% | **50.0%** |
+| whole corpus, `split=dev` (n=99) | **76.2%** | 72.6% |
+| whole corpus, `split=test` (n=183, frozen) | 63.8% | 63.8% |
+
+**The null result is the interesting one, and it is reported rather than buried.** The audit's own
+caveat was that its 8 prompts echo the stop rules' vocabulary and are therefore `desc`-shaped, and it
+proposed rows "phrased without quoting it". Eight such rows were written and measured: **50.0% with the
+rules and 50.0% without — zero discrimination.** A BM25 arm scores description TEXT, so it can only
+detect a sentence's removal through rows that share that sentence's words. "Phrase it without quoting
+the rule" is not available to this instrument; the exact-PRESENCE assertion above is what covers the
+case a lexical corpus cannot. The 8 rows are kept as ordinary hard judged rows (4/8 route correctly —
+their misses go to `find-bug`, `write-tests`, `handoff` and `navigate`, which is its own signal about
+how the descriptions read a "one lens only" request phrased in a user's words).
+
+**Red-first.** Against a skills tree with the four sentences mechanically stripped, six arms fail
+(four PRESENCE, the absolute floor, the differential) while **all 15 pre-existing arms still pass** —
+which is precisely the F-R1-03 finding, now closed by construction.
+
+**Floors were NOT moved.** A floor move is a deliberate recalibration commit. Slack as measured after
+this round: `split=test` hit@1 63.8% vs floor 52.0 (+11.8pp), sep-auc 0.901 vs 0.83 (+0.071);
+`split=dev` hit@1 76.2% vs floor 59.0 (+17.2pp), sep-auc 0.926 vs 0.75 (+0.176). The dev pair is
+outside the gate file's own stated policy (~10pp, ~0.06–0.07) and is left as a named owner decision
+(audit F-R1-10).
+
+### `--help-task` weak-tier precision: the self-confirming gate and the config-key read (2026-09-10)
+
+**The defect, in one sentence each.** `does` was a symbol-slot cue AND `how does` is the
+`understand-symbol` gate, so *"how does &lt;indexed-word&gt; …?"* minted the very symbol the gate then
+required — **13 of 25** adversarial prose prompts recommended `--expand=&lt;English word&gt;`
+(audit F-R1-01/04; the Codex `UserPromptSubmit` hook injects that answer into a live session at
+`confidence="high"`). And `resolveTaskSymbols` had no kind filter, so **6 of those 13** names existed
+only as `t="sec"` rows — JSON keys and markdown headings — and `--expand='version'` answered with
+`"version": "1.2.3"` out of a `package.json`, exit 0, no disclosure (F-R1-02).
+
+**Why the corpus said `harmful=0.000` throughout.** `bench/taskroute_eval.py::make_repo` built a
+fixture repo whose every symbol was camelCase or Pascal. The weak tier only fires on all-lowercase
+names, so **no corpus row could reach it**: the class was invisible by construction, not by luck.
+This is the same shape as the 2026-08-28 round's own finding — a measured precision of 1.000 over a
+population that excludes the failure. The fixture repo now carries both halves of the collision
+class (nine lowercase code definitions, plus a `package.json` whose keys index as `t="sec"`), and
+the 158 pre-existing rows are **byte-identical on (status, intent, resolved_symbols)** across that
+fixture change — the new symbols are reachable only from the new rows.
+
+**The rule that shipped.** An intent word is evidence about what the user WANTS; it may never
+double as the positional evidence that they NAMED something. `cueOccurrenceIsIntentGate`
+disqualifies exactly the cue OCCURRENCE that satisfies the gate (`understand`/`understanding`
+anywhere, `does` when preceded by `how`) — never the word, so a later independent cue in the same
+task still resolves the name. Plus `weakEvidenceKind`: a weak reading must be backed by a
+non-`Section` definition; an identifier-shaped mention is untouched, because there the SHAPE is the
+evidence. Rank is deliberately NOT part of the kind test (`k` is 0.0000 for nearly every row of any
+large corpus, so gating on it would make resolution depend on corpus size).
+
+**Coverage cost, named rather than summarised.** Exactly one shape is given up: the bare
+*"How does &lt;lowercase-name&gt; work?"* spelling now abstains, and `test/taskroutecheck.sh`'s arm for it
+is inverted into an assertion of the new invariant. The same weak lowercase name still routes to
+`--expand` through any cue the gate does not consume (*"the implementation of classify"*), which is
+what makes this a rule about self-confirmation rather than a retreat from the weak tier. **No corpus
+row lost its route**: every confusion line on both splits is identical to the pre-round run.
+
+**Measured, pre-change binary → post-change binary, same corpus (189 rows), same day:**
+
+| Set | Rows | Metric | Before | After |
+| --- | ---: | --- | ---: | ---: |
+| audit set A (2026-08-28 shape) | 25 | false recommends | 0 | **0** |
+| audit set B (word after a cue) | 25 | false recommends | **13** | **0** |
+| `prompts.tsv` test | 89 | precision / harmful / neg-spec | 0.797 / 0.135 / 0.657 | **1.000 / 0.000 / 1.000** |
+| `prompts.tsv` test | 89 | accuracy / coverage | 0.787 / 0.870 | **0.921** / 0.870 |
+| `prompts.tsv` dev | 100 | precision / harmful / neg-spec | — | **1.000 / 0.000 / 1.000** |
+| `prompts.tsv` dev | 100 | accuracy / coverage | — | **0.940** / 0.920 |
+| `prompts.tsv` all | 189 | precision / harmful | 0.879 / 0.085 | **1.000 / 0.000** |
+| 158 pre-existing rows | 158 | (status, intent, resolved_symbols) diff | — | **0 differing rows** |
+
+The pre-change `split=test` run **exits 1** on the grown corpus (precision under the 0.90 floor,
+harm over 0.02, specificity under 0.90), and four `test/taskroutecheck.sh` arms are red against the
+pre-change binary — the red-first proof that the corpus and the gate can now see this class. The map
+itself is untouched: default map, `--for`, `--grep` and `--pack-task` are byte-identical between the
+two binaries on this repo, and `src/taskroute.h` is included by exactly one translation unit.
+
+**The 2026-08-28 set is not in the repo.** That round's 20 adversarial prompts were never committed
+(`git log -S`, whole-tree grep: absent). Set A above — 25 prompts of the same shape, containing that
+round's own repro string verbatim — is the stand-in, and it was 0/25 both before and after: the
+sentence-POSITION fix that round shipped did not regress; it was defeated by a phrasing it never saw.
+
 ### Skill-routing surface forms — S1b round, PRE-REGISTERED 2026-08-19 (before any skill edit)
 
 **Why this round exists, and why it is close to one already rejected.** The S1 round above ran a
@@ -2593,6 +2795,13 @@ judged 97/152, for-routed 91/152); held-out judged bm25-desc **44/85** (today's 
 numbers for this exact text: C2 = 85 / 84 / 84 (Opus / Sonnet / Fable), 0 negative fires. What this landing
 claims is "no routing loss under three LLM readers and one artifact boundary removed", not the decisive win
 the band asked for — the record above stands as written.
+
+**Amendment 2026-09-10 — the per-description 320 is retired (owner).** It was a design ceiling, not a client
+limit: Codex has no per-description cut — it trims every description round-robin only when the whole catalog
+overflows its total budget — and it rejects a description over 1,024 characters; Claude Code caps an entry at
+1,536. Holding 320 pushed routing boundaries and the `agentloopcodexcheck` stop-rule markers out of the text
+(PR #112). `test/skilldescbudgetcheck.sh` now fails only a description over 1,024 and keeps the 5,400 set
+total, which is what guards the round-robin tail cut. The rules above stay as registered.
 
 ### Subtoken acronym shredding — PRE-REGISTERED 2026-08-19 (before the fix is measured)
 
@@ -5119,20 +5328,63 @@ verb elides* — count it and the headline becomes a function of how deep your c
 on disk. On one corpus, three spellings of the same root read **18.6 points apart** before the
 subtraction and agreed exactly after it.
 
-**Root-neutralised on this repository (re-derived 2026-08-23):**
+**Root-neutralised on this repository (re-derived 2026-09-10):**
 
-| Result size | Byte reduction | previous (2026-08-01) |
+| Result size | Byte reduction | previous (2026-09-09) |
 | --- | --- | --- |
-| top-10 | 86.5% | 46.7% |
-| **top-50** | **81.4%** | 67.0% |
-| top-100 | 81.6% | 66.2% |
+| top-10 | 89.5% | 81.3% |
+| **top-50** | **81.8%** | 71.0% |
+| top-100 | 84.3% | 73.7% |
+
+**`--pack-signatures` did not regress. The denominator did.** The move from 81.4% to 71.0% was
+attributed by bisection, not asserted, and it is mostly ONE commit — `08e757b0` (2026-09-05, lane L7's
+P16), which cut `kMaxExpandSibs` from **40 to 8**. That shrank `--expand`'s `<b>` elements ~23% at
+top-50 (41,827 B → 32,283 B on a FIXED tree), and since this ratio is `1 - sig/body`, a leaner
+baseline reads as a smaller saving.
+
+The attribution is a 2×2, binary × tree, on the 2026-08-30 corpus:
+
+| | 2026-08-30 binary | today's binary |
+| --- | --- | --- |
+| **2026-08-30 tree** | 85.6 / **80.2** / 80.7 | 80.6 / **74.7** / 73.6 |
+
+Same tree, same top-50 membership (44 of 45 symbols shared), signature side flat (8,269 B → 8,163 B).
+The published 80.2% was correctly measured and correctly dated; it stopped being reproducible the day
+the cap landed. The remainder — 74.7 → 72.3 → 71.0 — is ordinary corpus drift as this repository
+changed, of which the 2026-09-09 printf-to-`std::print` conversion is **1.3 points**.
+
+**Read this as a caution about the metric, not only about the number.** The denominator is `--expand`'s
+rendered output, so it includes `sibs=`/`inc=` file-context attributes that are not the symbol's body.
+That makes the headline move when `--expand`'s rendering is tuned, in both directions: adding
+`sibs=`/`inc=` on 2026-08-15 moved it UP from 70.0/61.0/63.8, and capping `sibs` moved it back down.
+A measure that rises when the baseline is padded and falls when the baseline is made cheaper is
+measuring the comparison, not the verb.
+
+**2026-09-10 — the cap was raised, and this is the same effect running forward.** `kMaxExpandSibs` went
+8 → **100**, so the figure rose 71.0% → 81.8%. `--pack-signatures` again elides exactly what it always
+did; `--expand` simply stopped hiding the file context it was cutting. The cap was set on **recall**
+grounds, not to move this number: at 8 it fired on **68.5%** of bodies and hid **89.3%** of all sibling
+names, while its stated cost — "~3.5 KB per `--pack-task` bundle" — was not reproducible, because
+`--pack-task` emits no `sibs=` at all, before or after. Symbols-per-file here is median 4, p90 18,
+p99 85; 100 clears the tail, fires on 15.8% of bodies, costs +36% on a single-symbol `--expand` answer
+and **nothing** on `--for` or `--pack-task`, which are byte-identical at every cap. The full inventory
+of the 205 caps in `src/` — and of the 7 ranking parameters partitioned out of the same census, which
+together make the 212 cap-shaped constants the generator parses — is `docs/LIMITS.md`, generated and
+gated by `test/limitstablecheck.sh`. Those figures were **114 / 6 / 120** until 2026-09-10, and the
+difference is not new code: `docs/limits_build.py` required the literal `inline constexpr` with the
+value on the same line, so 92 declarations under 81 distinct names — `kType3MaxBucket`, which bounds
+clone DETECTION; `kSkillScanFindingCap`, which bounds a security verdict; `kHandoffSymbolsPerFile`,
+which truncates output and discloses — were outside a register whose first line says "Every
+compile-time cap in `src/`". The old number was the size of a regex's output presented as the size of a
+population; `test/limitstablecheck.sh` arm (H) now plants a plain `constexpr`, a `static constexpr`
+member and a wrapped initializer in a synthetic tree and requires each to appear. What each cap COSTS, measured per verb, is `docs/TUNING.md`.
 
 The three figures moved together on 2026-08-15, and the cause is on the *denominator* side, not this
 verb's: `--expand`'s `<b>` bodies now carry `sibs=`/`inc=` file-context attributes, which grows the
 full-body side of the ratio. The verb elides no more than it did. `docs/COMMANDS.md`'s own
 `--pack-signatures` caption is regenerated from a live capture and carries the same triple, and
 `test/showcasecapturecheck.sh` fails if the caption and its own recount drift more than 1.5 points
-apart — at the time of writing that recount reads 86.5 / 81.1 / 81.3.
+apart — at the time of writing that recount reads 89.5 / 81.8 / 84.3.
 
 **Quote the top-50 figure.** The signature payload is top-50 regardless of `--top-k`, so it is what
 the command actually emits. A "~70%" headline is reachable at larger N but overstates the smaller
@@ -5153,8 +5405,11 @@ tolerance (the pre-change binary measured 67.0), so the true binary-to-binary to
 **This is gated, not asserted.** `test/showcasecapturecheck.sh` re-derives all three figures from
 this repository on every run, in the same quantity as the caption, and fails if the caption and the
 recount drift more than 1.5 points apart — plus a separate regression band at top-50, derived as the
-caption's own figure ±9 points (72–90% at the caption's current 81.4%). The
-documentation cannot silently diverge from the binary.
+caption's own figure ±9 points (73–91% at the caption's current 81.8%). The band is re-centred when
+the corpus moves it, and the centre is *derived* from the two edges in the gate's own message rather
+than hand-copied, because it was hand-copied once and went stale. `--help` states the same band, and
+`test/showcasecapturecheck.sh` arm (C-help) fails if it does not. The documentation cannot silently
+diverge from the binary.
 
 See §7 for the case where this verb makes output **larger**.
 
@@ -5579,13 +5834,28 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **576 gate scripts**, all of which exist on disk.
+naming **607 gate scripts**, all of which exist on disk. <!-- gatecount -->
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
 
 `test/manifestcheck.sh` fails if a committed top-level `*check.sh` is missing from `regression.sh`,
 so the list cannot rot.
+
+**The number itself is generated — never edit it.** The count above, and every other place this
+repository publishes it, is written by `python3 docs/gatecount_build.py` from that loop and gated by
+`test/gatecountcheck.sh`, the same way `docs/COMMANDS.md` and `docs/LIMITS.md` are build products of
+`--help` and of `src/`. It was hand-written at eight sites until 2026-09-10, and the failure that ended
+that was not a typo: two lanes that each add one gate both write N+1, git auto-merges the **identical**
+text clean, and the tree then publishes N+1 against a loop of N+2. Every check in the tree stays green
+through it — "my count equals my own loop" holds on each branch, "my loop equals main's loop" holds
+after the merge, and the member *sets* differ at the same number. It collided seven times in one night
+and serialised every gate-adding lane. Each published site now carries a marker comment (spelled in
+`CONTRIBUTING.md`) that the generator owns; a count on an unmarked line is a hand-written count and the
+generator refuses the tree rather than leave it behind. `test/manifestcheck.sh`'s derived-vs-stated arms
+are kept as the post-hoc catch: the generator is how the sites are *written*, manifestcheck is what
+notices if one was written some other way. After adding a gate — or after any rebase that moved the
+loop — the whole merge recipe is: union the `for _g in …` sets, run the generator, done.
 
 ### The TOML config-key tier — shape coverage, and the ceiling that was declined
 
@@ -5691,6 +5961,91 @@ A probe over three hand-picked fixtures would not have found this; 90 repos did.
 `.github/workflows/*.yml` and test fixtures now index (the `grepcheck` repro arm records the
 consequence and its resolution), and `.dSYM` debug-symbol bundles — 197 yaml-format relocation files
 and zero real config in the private validation corpus — are pruned by name suffix, pinned by a gate arm.
+
+### The narrow-counter family across four vendored scanners (2026-09-10)
+
+**Instrument:** the G1 asan flavour (`-fsanitize=address,undefined,integer,float-divide-by-zero,`
+`float-cast-overflow -fno-sanitize-recover=all`) plus `test/vendorpatchcheck.sh` arm I on
+`test/vendorwrapfix/`, over seven clones that had never been sanitizer-tested.
+
+**The trigger was one real file.** `rails/guides/source/getting_started.md` (105 436 B) exits 134 on
+its own — a single `.md` file, no include graph, no ripwire logic — at `markdown/src/scanner.c:1362`,
+where `s->indentation += advance( s, lexer )` accumulates a `size_t` column count into a `uint8_t`.
+Line 122 of that guide is a pipe-table row padded to 301 columns. Pre-existing since the grammar was
+vendored (`1d11ee80`, 2026-08-12). **64 tabs also suffice**, because `advance()` charges a tab at tab
+stop 4 — far more reachable in a real repository than 256 spaces, and its own fixture arm.
+
+**The shape is a family, which ruled out the ignorelist route.** Six of markdown's `+= advance(…)`
+instances are live aborts from three-line documents, in `match`, `parse_star`, `parse_plus`,
+`parse_ordered_list_marker`, `parse_minus` and `scan` — including the soft-line-ending lookahead at
+`scanner.c:1501`, which a fixture driving only `:1362` never reaches — and
+`parse_fenced_code_block`'s `level++` is a seventh. An exact-function `fun:` entry for `scan` would
+have exempted the site that fired and left five neighbours armed: the "exempted the neighbour, not
+the site" failure arm E was written for.
+
+**Sweeping the shape found three more grammars**, each a live `rc=134`: `rust/src/scanner.c:77`
+(`opening_hash_count++`), `lua/src/scanner.c:32` (`++count`), `csharp/src/scanner.c:205`
+(`dollar_advanced++`). Cleared as bounded rather than lucky: markdown's atx `level` (`uint16_t`,
+guarded `<= 6`), cpp/cuda's `delimiter_length` (`MAX_DELIMITER_LENGTH`), csharp's brace/quote
+counters, swift's `match_count`, elixir's `length`.
+
+#### The abort window and the wrong-parse window are different sizes
+
+This is the finding that governs both the remedy and the fixtures, and it is measured, not argued.
+The sanitizer aborts at **every** width ≥ 256. The **wrong parse** only fires while the wrapped
+value lands *under the threshold the parser tests* — `N mod 256` in 0..3:
+
+| N | indented `# Buried` | fence of N marks |
+| --- | --- | --- |
+| 255 | correct | correct |
+| 256, 257 | **heading minted at exit 0** | **fence never opens; body leaks as live markdown** |
+| 300 | correct — by luck (300 − 256 = 44) | correct — by luck |
+
+Two consequences. First, **saturation is the right remedy for both markdown counters**: indentation
+is read `>= 4`, `< 4` and `< list_item_indentation( block )` (max 17), and `level` is read `>= 3`
+before a fence may open — all *fixed* thresholds, where 255 answers exactly as any larger true value
+would. Wrapping does not blur those predicates, it inverts them. Second, **a fixture pinned at a
+round 300 reproduces the abort while asserting nothing about the parse**, so its plain-build arm
+would survive a full revert of the fix. Every width in `test/vendorwrapfix/` is therefore pinned at
+exactly 256 and gated with `==`, not `>=`.
+
+**The delimiter counters are genuinely a different case, also by measurement.** rust's
+`opening_hash_count`, lua's `count` and csharp's `dollar_advanced` close a token by matching the
+opening count, not against a fixed threshold. At 255, 256, 257 and 300 the symbols *after* the token
+are recovered identically in every case — there is no extraction difference to repair, so saturation
+would be a different wrong answer that merely looks like one. Those three keep an explicit cast,
+which makes the conversion defined (all G1 asks) and contributes **nothing** to `kParserVer`.
+
+**`kParserVer` 86 → 87, and the two measurements behind it disagree, so both are reported.** Map
+output is **byte-identical over 3 538 files** (1 258 `.md`, 132 `.rs`, 96 `.lua`, a 1-in-16 sample of
+2 052 `.cs`, from rails, django, vuejs/core, ripgrep, telescope.nvim, dotnet/runtime and this
+repository): no corpus file reaches 256 columns of indentation. A **constructed** 256-column ATX line
+does move — pristine emits `n="BuriedHeading"`, saturating does not. Byte-identical on real files is
+not byte-identical on all files, which is what `swift/001` and `yaml/002` could claim and this cannot,
+so the bump is owed, with `kIngestParserVerMirror` and a re-derived `test/qschemetrip.hash` in the
+same commit.
+
+**Post-patch, three corpora that had never been sanitizer-tested sweep clean** under the full G1
+stack — exit 0, empty stderr: rails (`files=3916 symbols=60700 edges=107493`), django
+(`files=3449 symbols=47830 edges=62591`), vuejs/core (`files=628 symbols=8287 edges=6731`).
+
+**The gate has two halves and the plain-build half was mutation-proven.** One fixture file per
+grammar, so a reverted patch turns exactly one file red. The exit code is the sanitizer tripwire and
+fires only under asan; the semantic assertions hold on the plain build, where a revert is an exit-0
+wrong answer rather than a crash. Run against a **fully reverted** binary, arm I comes back red with
+exactly `buriedByTwoFiftySixColumns buriedBySixtyFourTabs buriedInsideFence` — the mutation control
+that separates a gate from a comment. The fixture's list-continuation line is deliberately **not** in
+that list: it drives `scanner.c:1501` for the abort arm but mints no phantom either way, so asserting
+its absence would be a vacuous assertion dressed as coverage. Presence guards measure in `awk`
+because BSD grep caps interval repetition at 255, so a `{256,}` regex is a hard error on the macOS
+leg while passing under GNU grep.
+
+**Running that mutation found two defects in the gate itself**, both of which would have shipped: the
+run-measuring `awk` reset its accumulator on every line, so it reported the *last* line's value (0)
+rather than the file's longest run; and the patch files were being generated with `git diff` against
+the lane's own commit rather than against pristine upstream, which still reverse-apply-checks clean
+(arm B's test) while being useless as a re-vendor record. Each of the four patches is now verified to
+reconstruct the working tree byte-for-byte when applied to `origin/main`'s vendored sources.
 
 ### Swift shape coverage + TS #private — hand-port of stranded commit bb78f97 (2026-08-10)
 
@@ -6491,9 +6846,11 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 576. The
-  loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
-  very number against the loop's actual length, so it cannot go stale silently again.
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 607. The <!-- gatecount -->
+  loop is the authority; the stale docstrings are a known drift. Since 2026-09-10 the number is not
+  written by hand anywhere: `docs/gatecount_build.py` derives it from the loop and rewrites every
+  published site, `test/gatecountcheck.sh` fails if any of them drifts, and `test/manifestcheck.sh`
+  still asserts this very number against the loop's actual length as the post-hoc catch.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
   point-in-time snapshot. Quote the floor, not the snapshot.
 - **"~70% fewer bytes" for `--pack-signatures`**, unqualified. See §5 — quote the root-neutralised

@@ -20,7 +20,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -32,7 +32,7 @@ echo "graphqueryrefusecheck: BIN=$BIN  ROOT=$ROOT"
 # a genuine 1-edit typo of this repo's own "main" — a real near-miss — so the did-you-mean assertion still
 # tests the actual (fixed) behavior instead of pinning the old bug.
 "$BIN" "$ROOT" --graph-query='name("mainn")' >"$TMP/out" 2>"$TMP/err"; rc=$?
-[ "$rc" -eq 1 ] && ok "unknown name(): exit 1" || no "unknown name(): exit $rc (expected 1)"
+if [ "$rc" -eq 1 ]; then ok "unknown name(): exit 1"; else no "unknown name(): exit $rc (expected 1)"; fi
 grep -q 'mainn' "$TMP/err" && ok "refusal names the unresolved literal" \
     || no "refusal does not name the literal: $( head -c 200 "$TMP/err" )"
 grep -q 'count=' "$TMP/out" && no "refusal still printed a <query count=> element" || ok "no count= element on the refusal path"
@@ -43,7 +43,7 @@ grep -qi 'did you mean' "$TMP/err" && ok "refusal carries a did-you-mean suggest
 "$BIN" "$ROOT" --graph-query='and(callers(name("parseArgsTypo"),2),kind(all,fn))' >"$TMP/out2" 2>"$TMP/err2"; rc2=$?
 [ "$rc2" -eq 1 ] && ok "unknown name() nested in an expression: exit 1" \
     || no "unknown name() nested in an expression: exit $rc2 (expected 1)"
-grep -q 'parseArgsTypo' "$TMP/err2" && ok "nested refusal names the literal" || no "nested refusal does not name the literal"
+if grep -q 'parseArgsTypo' "$TMP/err2"; then ok "nested refusal names the literal"; else no "nested refusal does not name the literal"; fi
 
 # ── 2b. C3: the SAME typo, with the pushdown-eligible predicate(all,…) arm FIRST and the typo'd name() arm
 #    SECOND — the order check #2 doesn't exercise. and()'s predicate pushdown must not short-circuit the

@@ -38,7 +38,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -82,7 +82,7 @@ OUT1="$( sd leafUnused )"
 [ "$( attr "$OUT1" dead_code_candidate )" = 'dead_code_candidate="1"' ] \
     && ok "(1) leafUnused(): also a --dead-code high-confidence candidate (static, zero callers)" \
     || { no "(1) leafUnused() should carry dead_code_candidate=1 (static free function, zero callers)"; printf '%s\n' "$OUT1"; }
-[ "$( sdrc leafUnused )" = 0 ] && ok "(1) exits 0 (a report, not a gate)" || no "(1) unexpected nonzero exit"
+if [ "$( sdrc leafUnused )" = 0 ]; then ok "(1) exits 0 (a report, not a gate)"; else no "(1) unexpected nonzero exit"; fi
 
 # ── (2) symbol with a live, test-reached caller -> uses-exist, radius partly tested ────────────────────
 OUT2="$( sd helperCalled )"

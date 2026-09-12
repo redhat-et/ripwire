@@ -39,7 +39,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -96,6 +96,27 @@ EOF
 # mandatory spaces and lands at ws_freq 0.092, ABOVE the threshold. That near-miss is the reason arm (0)
 # asserts the whitespace count instead of trusting the generator to look minified.
 { printf 'function minifiedEntry(){var '; for i in $( seq 1 40 ); do printf 'v%d=%d,' "$i" "$i"; done; printf 'vLast=0;return v1;}'; } > "$TMP/corpus/bundle.js"
+# a file with a genuinely invalid UTF-8 byte (0xFF cannot start any valid sequence) sitting in an
+# otherwise well-formed function — tree-sitter's own error recovery may not flag this as ERROR/MISSING
+# (confirmed empirically on a random-byte .kt file during the Kotlin port's own adversarial testing),
+# so this is what measureFileHealth's byte-level UTF-8 scan exists to catch.
+printf 'int badUtf8Fn( int x )\n{\n    // bad byte follows: \xffhere\n    return x + 1;\n}\n' > "$TMP/corpus/badutf8.cpp"
+# the negative control: REAL multi-byte UTF-8 (not invalid bytes) in a comment and a string literal —
+# this must NOT be flagged degraded-parse, proving the scan validates sequences rather than just
+# rejecting every byte >= 0x80.
+printf 'int goodUtf8Fn( int x )\n{\n    // héllo wörld —日本語 ☺\n    const char* s = "café";\n    return x + 1;\n}\n' > "$TMP/corpus/goodutf8.cpp"
+# a bad UTF-8 byte sitting INSIDE a genuine tree-sitter top-most ERROR span (garbage tokens tree-sitter
+# cannot parse at all), not just anywhere in the file — measureFileHealth's overlap-dedup arithmetic
+# (the std::lower_bound scan against badUtf8Positions per ERROR span) exists specifically to avoid
+# double-counting THIS shape; badutf8.cpp above never exercises that path, since its bad byte sits in a
+# clean-parsing `//` comment with no ERROR node to overlap at all. The baseline swaps the bad byte for
+# an ordinary letter to pin the ERROR-only count first: both fixtures must report the SAME err= — proof
+# the bad-UTF-8 position was folded into the existing ERROR span rather than added on top of it (a
+# regression to the dedup arithmetic — a swapped lower_bound direction, a missed subtraction — would
+# show up here as badutf8inerror.cpp's err= being one higher than baselineerror.cpp's, or as a wildly
+# wrong count from a std::uint32_t underflow on a double-subtraction).
+printf 'int weirdErrorFn( int x )\n{\n    @@@ x garbage !!! more\n    return x + 1;\n}\n' > "$TMP/corpus/baselineerror.cpp"
+printf 'int weirdErrorFn( int x )\n{\n    @@@ \xff garbage !!! more\n    return x + 1;\n}\n' > "$TMP/corpus/badutf8inerror.cpp"
 
 cd "$TMP"
 
@@ -163,6 +184,45 @@ for f in goodcpp.cpp goodpy.py goodjs.js; do
                 || no "(2) corpus/$f reported a finding it should not: $row"
 done
 
+# ── (1b) invalid UTF-8 is caught even when tree-sitter's own error recovery stays silent ───────────────
+row="$( hrow 'badutf8.cpp' )"
+if [ -z "$row" ]; then
+  no '(1b) no parse-health row for corpus/badutf8.cpp — invalid UTF-8 went undetected'
+else
+  case "$row" in *degraded-parse*) ;; *) no "(1b) corpus/badutf8.cpp row lacks why=\"degraded-parse\": $row"; row="" ;; esac
+  if [ -n "$row" ]; then
+    e="$( attr "$row" err )"
+    [ -n "$e" ] && [ "$e" -ge 1 ] 2>/dev/null && ok "(1b) corpus/badutf8.cpp flagged degraded-parse err=$e (invalid UTF-8)" \
+                                              || no "(1b) corpus/badutf8.cpp row missing err=: $row"
+  fi
+fi
+
+# ── (2b) real multi-byte UTF-8 is NOT mistaken for invalid bytes ────────────────────────────────────────
+row="$( hrow 'goodutf8.cpp' )"
+[ -z "$row" ] && ok "(2b) corpus/goodutf8.cpp (real UTF-8 in comment+string) reports no parse-health finding" \
+              || no "(2b) corpus/goodutf8.cpp reported a finding it should not (false positive on valid UTF-8): $row"
+
+# ── (1c) invalid UTF-8 INSIDE a top-most ERROR span is deduped, not double-counted ──────────────────────
+# baselineerror.cpp and badutf8inerror.cpp are byte-identical except for one byte (an ordinary letter vs
+# an invalid 0xFF) inside the same unparseable garbage token — so they must produce the SAME err= if the
+# overlap-dedup arithmetic in measureFileHealth is correct (the bad-UTF-8 position was already counted as
+# part of the top-most ERROR span). A different err= between the two — usually one higher on the bad-byte
+# side — means the dedup missed this position and double-counted it.
+baseRow="$( hrow 'baselineerror.cpp' )"
+badRow="$( hrow 'badutf8inerror.cpp' )"
+if [ -z "$baseRow" ] || [ -z "$badRow" ]; then
+  no "(1c) missing parse-health row(s): baseline=[$baseRow] badutf8inerror=[$badRow]"
+else
+  baseErr="$( attr "$baseRow" err )"; badErr="$( attr "$badRow" err )"
+  [ -n "$baseErr" ] && [ "$baseErr" = "$badErr" ] \
+    && ok "(1c) bad UTF-8 inside an ERROR span is deduped: both fixtures report err=$baseErr" \
+    || no "(1c) dedup regression: baselineerror.cpp err=$baseErr but badutf8inerror.cpp err=$badErr — the bad-UTF-8 position was double-counted (or under-counted) against the ERROR span"
+  baseRatio="$( attr "$baseRow" err_ratio )"; badRatio="$( attr "$badRow" err_ratio )"
+  [ -n "$baseRatio" ] && [ "$baseRatio" = "$badRatio" ] \
+    && ok "(1c) err_ratio= also agrees: both report $baseRatio" \
+    || no "(1c) err_ratio= disagrees between the two fixtures: baseline=$baseRatio badutf8inerror=$badRatio"
+fi
+
 # ── (3) minified-suspect ─────────────────────────────────────────────────────────────────────────────
 row="$( hrow 'bundle.js' )"
 if [ -z "$row" ]; then
@@ -212,9 +272,9 @@ PY
 
 # ── (7) determinism + well-formedness ────────────────────────────────────────────────────────────────
 "$BIN" corpus --skipped --no-cache > "$TMP/h2.xml" 2>/dev/null
-cmp -s "$TMP/h.xml" "$TMP/h2.xml" && ok '(7) two runs are byte-identical' || no '(7) output is NOT deterministic'
+if cmp -s "$TMP/h.xml" "$TMP/h2.xml"; then ok '(7) two runs are byte-identical'; else no '(7) output is NOT deterministic'; fi
 if command -v xmllint >/dev/null 2>&1; then
-  xmllint --noout "$TMP/h.xml" 2>/dev/null && ok '(7) well-formed XML' || no '(7) NOT well-formed XML'
+  if xmllint --noout "$TMP/h.xml" 2>/dev/null; then ok '(7) well-formed XML'; else no '(7) NOT well-formed XML'; fi
 else
   echo "  SKIP  (7) xmllint unavailable"
 fi

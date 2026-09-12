@@ -30,7 +30,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/layoutfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -73,7 +73,7 @@ expect_refused(){
 # ── 1) determinism ────────────────────────────────────────────────────────────────────────────────────
 "$BIN" "$CORPUS" --layout=PadCase --no-cache >"$TMP/a" 2>/dev/null
 "$BIN" "$CORPUS" --layout=PadCase --no-cache >"$TMP/b" 2>/dev/null
-cmp -s "$TMP/a" "$TMP/b" && ok "determinism (byte-identical)" || no "--layout is non-deterministic"
+if cmp -s "$TMP/a" "$TMP/b"; then ok "determinism (byte-identical)"; else no "--layout is non-deterministic"; fi
 
 # ── 2) the padding case: interior pad before an over-aligned field ────────────────────────────────────
 expect_size  PadCase 24 8
@@ -154,8 +154,8 @@ CAVEAT_ROWS="$( printf '%s' "$L" | tr '<' '\n' | grep -c '^caveat k="unknown-typ
 for enumname in EnumClassCase EnumStructCase PlainEnumCase; do
     "$BIN" "$CORPUS" --layout="$enumname" --no-cache >"$TMP/enum.out" 2>"$TMP/enum.err"
     rc=$?
-    [ $rc -eq 1 ] && ok "$enumname: --layout refuses (exit 1)" || no "$enumname: --layout exited $rc (want 1)"
-    [ ! -s "$TMP/enum.out" ] && ok "$enumname: no XML on stdout (no silent degrade)" || no "$enumname: printed to stdout: $( cat "$TMP/enum.out" )"
+    if [ $rc -eq 1 ]; then ok "$enumname: --layout refuses (exit 1)"; else no "$enumname: --layout exited $rc (want 1)"; fi
+    if [ ! -s "$TMP/enum.out" ]; then ok "$enumname: no XML on stdout (no silent degrade)"; else no "$enumname: printed to stdout: $( cat "$TMP/enum.out" )"; fi
     grep -qi 'is an enum' "$TMP/enum.err" && grep -q -- "$enumname" "$TMP/enum.err" \
         && ok "$enumname: refusal names the type and says 'is an enum'" \
         || no "$enumname: refusal did not say 'is an enum' + name the type: $( cat "$TMP/enum.err" )"
@@ -209,9 +209,9 @@ run TwinUniforms
 
 # ── 10) refusals: a bare --layout, and an unknown name ────────────────────────────────────────────────
 "$BIN" "$CORPUS" --layout >/dev/null 2>&1
-[ $? -eq 1 ] && ok "bare --layout refuses loudly (exit 1)" || no "bare --layout did not exit 1"
+if [ $? -eq 1 ]; then ok "bare --layout refuses loudly (exit 1)"; else no "bare --layout did not exit 1"; fi
 "$BIN" "$CORPUS" --layout=NoSuchStructAnywhere >/dev/null 2>&1
-[ $? -eq 1 ] && ok "an unknown struct refuses loudly (exit 1, never an empty map)" || no "--layout on an unknown name did not exit 1"
+if [ $? -eq 1 ]; then ok "an unknown struct refuses loudly (exit 1, never an empty map)"; else no "--layout on an unknown name did not exit 1"; fi
 
 # file:name disambiguation, exactly like --around/--lego.
 run "mirror_gpu.h:MirrorUniforms"
@@ -228,7 +228,7 @@ if command -v xmllint >/dev/null 2>&1; then
 else
     ok "xmllint unavailable — XML well-formedness skipped"
 fi
-[ "$( grep -c '' "$TMP/a" )" -le 1 ] && ok "output is minified (no stray newlines)" || no "output contains newlines outside CDATA"
+if [ "$( grep -c '' "$TMP/a" )" -le 1 ]; then ok "output is minified (no stray newlines)"; else no "output contains newlines outside CDATA"; fi
 
 [ $fail -eq 0 ] && echo "layoutcheck: ALL PASS" || echo "layoutcheck: FAILURES"
 exit $fail

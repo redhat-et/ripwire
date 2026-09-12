@@ -9,34 +9,18 @@
 
 # Rip'n Fast. Fewer Tokens. Better Code.
 
-## Give your coding agent a map before it reads the repo.
+**The ripgrep of AI context. Give your coding agent a map before it reads the repo.**
 
-**ripwire is the ripgrep of AI context.** Point it at any repository and your agent gets a ranked,
-deterministic call graph — what to touch, what it breaks, which tests to run — instead of grepping
-around and reading whole files.
+Point it at any repository and your agent gets a ranked, deterministic call graph — what to touch,
+what it breaks, which tests to run — instead of grepping around and reading whole files.
 
-<p align="center"><img src="docs/assets/paddle-out.svg" alt="Paddle out with a map." width="470"></p>
+**Just want the manual?** [The reference guide](#reference-guide) near the bottom of this page covers install,
+commands, output format, exit codes and limits, in numbered sections.
 
-### The goal: one question, one complete answer.
-
-**Terminality is the objective.** Ask the codebase a question and the answer should carry everything
-you need — no follow-on grep, no three more whole-file reads to fill in what it left out. A call
-followed by three greps is the same search paid for twice: it does not save you tokens and it does
-not make the coding faster.
-
-**Two things make that reachable in practice, and neither is the destination.** Answers are honest
-about their own limits — a count that cannot be a total is labelled a floor, a zero means "none
-found" and never "none exists", every truncation is disclosed — so an answer never looks more
-complete than it is, and the map never degrades the code by guessing. And an answer can be given a
-token budget, so what one costs is something you ask for rather than discover; where a complete
-answer will not fit, it says it went over rather than silently dropping the row you needed.
-
-Those two are the stair-steps: honest about what is missing, priced in what it spends. The step they
-climb toward is a question fully answered in one call, which is not always trivial to reach — and
-where it is not, the output says so rather than pretending otherwise.
+<p align="center"><a href="https://trendshift.io/repositories/217924?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-217924"><img src="https://trendshift.io/api/badge/trendshift/repositories/217924/daily?language=C%2B%2B" alt="Trendshift: C++ Repository of the Day badge for redhat-et/ripwire" width="250" height="55"></a></p>
 
 <details>
-<summary><b>Fifty years of software-engineering results, and research from last month.</b> 46 repositories and 69 papers folded — McCabe (1976) through to <b>seven papers published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in, all of it put into a single blazing-fast compiled executable</summary>
+<summary><b>Fifty years of software-engineering results, and research from last month.</b> 49 repositories and 70 papers folded — McCabe (1976) through to <b>seven published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in</summary>
 
 Beside those sits a labelled survey of **237 tools** that contributed nothing and says so. The two
 sets are disjoint by construction, so they add rather than nest — a tool that gave a lesson is never
@@ -62,10 +46,21 @@ claim cannot quietly drift. The row-by-row ledger is
 </details>
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
-JavaScript · Java · Ruby · PHP · Lua · Elixir · Bash · C# · JSON · TOML · YAML · Markdown — see
+JavaScript · Java · Ruby · PHP · Lua · Elixir · Dart · Kotlin · Bash · C# · JSON · TOML · YAML · Markdown — see
 [language support and limits](#languages).
 
-### No API key. No embeddings. No index server. No daemon.
+**ripwire 0.6.0 — out now.** Kotlin and Dart bring it to 24 vendored grammars, and Ruby now reads the dependencies a
+Rails application actually has: superclasses, mixins, `autoload`, and the constant receivers an autoloader loads
+through. On llvm-project — 182,555 files — the cold parse drops from 194 s to 156 s. Declined calls, derailed parses
+and cut answers now say so, instead of returning a quiet zero.
+
+**[The presentation](present/ripwire-showcase.pdf) · [the changelog](CHANGELOG.md)** — with thanks to the
+contributors named there; this release is largely theirs.
+
+---
+
+<p align="center"><img src="docs/assets/no-deps.svg"
+  alt="No API key. No embeddings. No index server. No daemon." width="470"></p>
 
 <details>
 <summary><b>One process, no server</b> — indexes this repository in <b>0.25 s</b> using <b>6.6 MB</b>, against <b>46.8 s</b> and <b>391 MB</b> for the graph-database MCP server it was measured against; warm queries answer in <b>197 ms</b> to its <b>1,082 ms</b></summary>
@@ -96,9 +91,33 @@ cd your-repo
 ripwire . --for="<the change you are about to make, in words>"
 ```
 
+Every install route (prebuilt, from source, per-agent skills, hooks, the MCP server) is in [INSTALL.md](INSTALL.md).
+
 **Reach for the CLI first — it is the cheaper interface.** The MCP server is the optional second
 way in, and its convenience has a cost the shell pipe does not carry: its verb schemas sit in your
 agent's context every session, whether or not it calls them.
+
+### The goal: one question, one complete answer.
+
+**Terminality is the objective.** Ask the codebase a question and the answer should carry everything
+you need — no follow-on grep, no three more whole-file reads to fill in what it left out. A call
+followed by three greps is the same search paid for twice: it does not save you tokens and it does
+not make the coding faster.
+
+<details>
+<summary>The two stair-steps that make it reachable — <b>honest about what is missing</b>, <b>priced in what it spends</b></summary>
+
+**Two things make that reachable in practice, and neither is the destination.** Answers are honest
+about their own limits — a count that cannot be a total is labelled a floor, a zero means "none
+found" and never "none exists", every truncation is disclosed — so an answer never looks more
+complete than it is, and the map never degrades the code by guessing. And an answer can be given a
+token budget, so what one costs is something you ask for rather than discover; where a complete
+answer will not fit, it says it went over rather than silently dropping the row you needed.
+
+Those two are the stair-steps: honest about what is missing, priced in what it spends. The step they
+climb toward is a question fully answered in one call, which is not always trivial to reach — and
+where it is not, the output says so rather than pretending otherwise.
+</details>
 
 ### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
 
@@ -364,6 +383,8 @@ your agent starts in the right place at all.
 | Aider repo-map 0.86.2 | 20.0% | 35.0% | *(inside query)* | 2.920 s |
 | codeseek 0.1.31 (better of its two arms) | 15.0% | 20.0% | 3.37 s | 0.040 s |
 
+*Measured 2026-08-08, before the performance work that ships in 0.6.0. ripwire has become faster since — llvm-project's cold parse (182,555 files) fell from 194.1 s to 155.6 s of CPU, and `--pack-task` on a Go repository from 8.13 s to 5.88 s — but these timing columns have not been re-measured.*
+
 <details>
 <summary>What this table costs us — six paired losses named, a runner-up we had under-credited at <b>26.7%</b> and corrected to <b>40.0%</b>, and the multi-file stratum no arm solves</summary>
 
@@ -398,7 +419,8 @@ wherever they live — not by file path alone. On an astral-sh/ruff clone (5,945
 ---
 
 *The table above, read two other ways. Every figure in both is one of its measured numbers; only the
-manners and the cynicism are editorial.*
+manners and the cynicism are editorial. Should the reader find the manners excessive, the author begs
+them to recall that the alternative was a second table.*
 
 <details>
 <summary>📖 &nbsp;<b>The same table, as narrated by Jane Austen</b></summary>
@@ -773,7 +795,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 </p>
 
 <p align="center">
-  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 29 slides</b></a> — every figure names the instrument that pins it<br>
+  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 34 slides</b></a> — every figure names the instrument that pins it<br>
   <sub>renders in your browser · <a href="present/ripwire-showcase.pptx">pptx</a> beside it · <a href="docs/EVALS.md">the numbers behind it</a></sub>
 </p>
 
@@ -905,6 +927,9 @@ ripwire . --for="incremental cache invalidation"   # the task lens: what to touc
 ripwire . --callers=someFunction                   # who calls it
 ripwire . --test-gate                              # before you commit: which tests must run
 ```
+
+> **Written for your agent.** Every command prints compact XML sized for an AI agent to read, not for a person
+> scanning a terminal. Human-readable output is on the roadmap.
 
 <details>
 <summary>CLI or MCP, the <code>-DCMAKE_BUILD_TYPE=Release</code> trap, and the honesty contract in one line</summary>
@@ -1113,6 +1138,43 @@ shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
 
 ---
 
+> **Want to help?** Start anywhere on the spectrum. At the ready-made end, open problems — languages,
+> resolver bugs, fuzzers, docs — are written up as starter kits: the research is done, the file and line pointers
+> are in the prompt, and **each prompt writes a plan and stops**, so we can agree the approach before you write any
+> code.
+>
+> ```bash
+> git clone https://github.com/redhat-et/ripwire && cd ripwire
+> cmake -S . -B build && cmake --build build -j     # plain build, no build type
+> ls prompts/help-wanted/                           # pick one
+> claude "follow prompts/help-wanted/zig-language.md"     # or your agent of choice
+> ```
+>
+> In the middle, a few prompts hand your agent the whole repository and a job to do:
+>
+> - **[Full audit](prompts/full-audit.md)** — six independent lenses over the codebase; take one, or all six.
+> - **[Add a language](prompts/add-a-language.md)** — a vendored grammar, extraction and gates, start to finish.
+> - **[Use it for real, log every gap](prompts/dogfood-gaps.md)** — do an actual task with ripwire and write down
+>   every place it let you down.
+>
+> At the other end, bring your own:
+>
+> - research an idea you have been turning over
+> - bring in a paper that deserves to be in a tool
+> - show how AI agents could read and write better code
+> - automate something decades of software engineering already know
+> - check software algorithmically — a smell nobody measures yet, a way to prove an answer is complete, a bug class
+>   a tool could catch before a reviewer does
+>
+> Open an issue; we want to hear it. The part we would most like help thinking about is the quality lens: measuring
+> what a change makes *worse*, and handing that back while the code is still being written.
+>
+> [help wanted](https://github.com/redhat-et/ripwire/labels/help%20wanted) ·
+> [good first issue](https://github.com/redhat-et/ripwire/labels/good%20first%20issue) ·
+> [all the prompts](prompts/help-wanted/)
+
+---
+
 ## Real runs
 
 <details>
@@ -1244,105 +1306,13 @@ cmake --build build 2>&1 | ./build/ripwire . --from-trace=-
 
 ## What's new
 
-<details>
-<summary><b>New (2026-08-30)</b> — each measured, dated, and re-derivable; the losses and caveats stated in place</summary>
+**0.6.0 — 2026-09-11.** Kotlin and Dart bring the vendored grammars to 24; Ruby now reads the dependencies a
+Rails application actually has — superclasses, mixins, `autoload`, and the constant receivers an autoloader
+loads through. On llvm-project, 182,555 files, the cold parse drops from 194 s to 156 s. Declined calls,
+derailed parses and cut answers say so now, instead of returning a quiet zero.
 
-- **`--slice-flow=back|fwd|both` — cross-statement data-flow slicing (ARISE rung 2, arXiv:2605.03117).**
-  A bounded BFS from one variable over line-granular reaching-definition edges — backward to the
-  statements whose values feed it, forward to the statements its value reaches — that **stops at
-  function boundaries**, exactly as the paper's own slicer does. `--slice-depth=1..32` bounds it
-  (default 8, always disclosed as `depth=`); a bound that cuts a row says `flow_truncated="1"`;
-  without the new flags the v1 output is byte-identical. Measured on the registered fix-commit
-  protocol over this repository's own history (**7 commits / 38 instances, cpp only — a thin corpus,
-  reported as thin**): flow rows lift function-level added-line recall **0.163 → 0.198**, at a mean
-  4,993 output bytes — **25% of the 20,034-byte `--expand` whole-body baseline** whose recall is 1.0
-  by construction. (`bench/slice/run_slicerecall.py`; protocol, per-instance ledger and caveats in
-  [`docs/EVALS.md`](docs/EVALS.md).)
-- **The `--slice` v1 contract got its first measured numbers** (registered 2026-08-28, no numbers
-  until now): per-variable line-recall **0.726**, hit-all rate 0.632, over-inclusion 3.77×. The
-  misses were inspected one by one and are dominated by the measurement's own relevance oracle — a
-  word-regex that matches short identifiers inside comments and string literals, occurrences the
-  slicer correctly refuses to call variable uses — so 0.726 is a **floor under a noisy oracle**; no
-  inspected instance showed a real occurrence the slice dropped.
-- **`--expand` no longer hangs on minified bundles: the secret-redaction sweep was quadratic in LINE
-  length.** Invisible on ~100-byte source lines, fatal on a 2.9 KB-average-line minified bundle: one
-  selector in babel's 2.1 MB / 768-line yarn bundle **never completed** (killed at 1,343.9 s of user
-  CPU with an empty output file; 196.7 s is the only clean lower bound) and now answers in **0.46 s
-  warm**; the self-contained 20 KB single-line fixture went **23.02 s → 0.017 s (~1350×)**. A pure
-  memoization, so an output no-op — **120/120 invocations byte-identical** across 24 corpora × 5 verb
-  shapes — gated on behaviour only (`test/redactfixcheck.sh`), with the timings a ledger row in
-  [`bench/PROFILE.md`](bench/PROFILE.md), never a red-CI threshold.
-
-</details>
-
-<details>
-<summary><b>New (2026-08-23)</b> — each measured on this tree's binary, with the command that re-derives it</summary>
-
-- **`--pattern` — structural search written in CODE, not in node kinds.** `--pattern='foo($X, ...)'`
-  where `$NAME` binds one node, `$_` binds nothing and `...` is an ellipsis over siblings; comments
-  are transparent, everything else is kind- and text-exact. Served across **13 grammar objects (11
-  languages)**, and it *refuses* rather than lying: a pattern no served grammar resolves, or that
-  collapses to a bare token, exits 1 naming the served and unserved families — never `hits=0`.
-  (`./build/ripwire . --pattern='VERIFY($X)'` on this repo: **101 hits over 625 eligible files**,
-  each row carrying its enclosing symbol; `--pattern='$X'` exits **1** with the refusal text.)
-- **`--safe-delete=SYM` — "can I delete this?" in ONE call.** Composes the signals the tool already
-  computes for a resolved symbol: 1-hop callers, the transitive blast radius, every read/write/
-  import/call site, how much of that radius any test reaches, and `--dead-code`'s own shape — then
-  reports `risk=` as a **fact**, never a go/no-go verdict. (`--safe-delete=coversOrEquals`:
-  `callers="2" impact_reaches="17" uses="2" radius_tested="0" radius_untested="17"
-  dead_code_candidate="0" risk="untested-radius"`.)
-- **`--impact` grew a disclosed import tier.** A class whose consumers `#include` or `require` the
-  file that defines it used to look like it had no blast radius at all. `importers=` is now a second,
-  weaker reach beside `reaches=` — with its own cap pair and `<f via="import">` rows, and **never
-  summed into `reaches=`**, because files and symbols are different units.
-  (`--impact=IngestResult` on this repo: `reaches="0" importers="70" shown_importers="40"
-  importers_capped="1"` — a symbol that reads as unreachable by calls and is included by 70 files.)
-- **Conceptual `--for` queries serve a compact map instead of inline bodies.** Bodies were **52.7% of
-  every conceptual-query byte** — the one class that missed the byte target — so the subtoken+body
-  route now ships the ranked map plus one-hop `<hops>` edge context and no body CDATA, disclosed on
-  the root as `bundle="compact" bodies="0" reason="compact-route"`. Across the frozen 15-query class-B
-  set that is **184,857 B → 95,256 B, −48.5%**, with all 11 judged-decisive markers still present
-  (better than either pre-existing lever's 10/11). `--auto-bodies` is a permanent opt-out, not a
-  migration aid. (One pair on this repo, re-derived 2026-08-23:
-  `--for="incremental cache invalidation"` **8,487 B** compact vs **12,044 B** with `--auto-bodies`,
-  **−29.5%**; the 15-query total is [`docs/EVALS.md` §5](docs/EVALS.md).)
-- **`--pack-task` orders callers by corroboration.** A neighbour reached by several of the bundle's
-  top anchors is more likely to be the thing you must touch than one reached by exactly one, so rows
-  sort by `shared=` — the count of top-K anchors that reach them — omitted at 1 because that is what
-  every 1-hop row satisfies by construction. (`--pack-task="emit the minified xml map"` puts
-  `escapeXml` first at `shared="4"`.)
-- **`--lint` rolls up per rule, so a capped view stops hiding whole rules.** Every rule gets a
-  `<rule name= count= shown_rows= rows_capped=/>` row, and a rule whose registered languages match
-  nothing in the corpus carries `applicable="0"` so its zero reads as structural inertness rather
-  than a measurement. On this repository the default view shows 692 of 3,332 findings — and **14 of
-  the 31 rules that fired contribute zero shown rows**, 368 findings whose only evidence is their
-  `count=`. (`./build/ripwire . --lint`, counted from the `<rule>` rows.)
-- **PHP and Lua joined the language line**, with their floors stated rather than implied: PHP's
-  dynamic dispatch (`$fn()`, `call_user_func`, `__call`) names its callee at run time and is a
-  declared floor; a Lua corpus reports no inheritance edges, because metatable inheritance is a
-  runtime call with no syntax to read.
-</details>
-
-<details>
-<summary>Earlier — <b>New (2026-08-15)</b>, kept with its own dates rather than overwritten</summary>
-
-- **`--expand` answers "show me this function" in one call, −47.3% tokens** — an exact-name ask now
-  skips the ranked-map preamble by default and the body arrives with its file's sibling symbols and
-  imports inline (`sibs=`/`inc=`), so the follow-up "what else is in this file?" call never happens.
-  (Re-derived 2026-08-15 fix-expand round: `--expand=emitGrepReport` — 47,252 B classic 200-row-map
-  bundle vs 24,911 B today's exact-name default, on this repo; the figure moves as the corpus grows
-  and is not itself CI-gated, so re-measure before citing it in a future round.)
-- **`--grep` groups, deduplicates, and speaks boolean** — per-file grouping, identical-line collapse
-  ("this exact guard appears at 6 call sites" is the finding), and `--and=`/`--not=`/`--grep-scope=`:
-  a two-term ask returns the *complete* answer at **−78%** of the single-term dump. Default view now
-  runs at ~clean-grep cost while naming the enclosing symbol for every hit.
-- **C++ maps got materially truer**: out-of-line definitions past one qualifier
-  (`Outer::Inner::method(){}` — the house style of large C++ codebases) were silently invisible;
-  on one 6,600-file production tree that was ~15% of qualified definitions. Now indexed at any depth.
-- **Compound `--graph-query` filters run ~25× faster** via predicate pushdown — an exact algebraic
-  identity, byte-identical output, gate-enforced.
-
-</details>
+Every release, with its measurements and its caveats, is in **[CHANGELOG.md](CHANGELOG.md)** — that file is the
+record, and this line is only the pointer to it.
 
 ## Measured
 
@@ -1376,6 +1346,8 @@ profile-guided release build that now ships), one evaluator, all arms re-run on 
 | Aider repo-map 0.86.2 (no-personalization control) | 10.0% | 25.0% | *(inside query)* | 0.818 s |
 | codeseek 0.1.31 (ident-mention convention arm) | 15.0% | 20.0% | 3.37 s | 0.040 s |
 | codeseek 0.1.31 (raw issue text, keyless fallback) | 0.0%² | 0.0% | 3.37 s | 0.024 s |
+
+*Measured 2026-08-08, before the performance work that ships in 0.6.0. ripwire has become faster since — llvm-project's cold parse (182,555 files) fell from 194.1 s to 155.6 s of CPU, and `--pack-task` on a Go repository from 8.13 s to 5.88 s — but these timing columns have not been re-measured.*
 
 <details>
 <summary>Round-4 method and the paired losses — one binary, one evaluator, what re-running cost us, and the three limits that travel with this table</summary>
@@ -1510,7 +1482,7 @@ pins it:
 
 | Where the saving comes from | Measured | Pinned by |
 | --- | --- | --- |
-| `--pack-signatures` — body-elided declaration skeletons instead of full bodies | **80.2% fewer element bytes** at top-50 (84.5% at top-10, 80.6% at top-100) — re-derived 2026-08-30 | `test/showcasecapturecheck.sh`, re-derived from this repo every run |
+| `--pack-signatures` — body-elided declaration skeletons instead of full bodies | **81.8% fewer element bytes** at top-50 (89.5% at top-10, 84.3% at top-100) — re-derived 2026-09-10 | `test/showcasecapturecheck.sh`, re-derived from this repo every run |
 | Query-shape routing, on the production token ceiling | **−39.4%** p50, while strict file@10 rose +33.33pp | `bench/locbench/`, [EVALS §3](docs/EVALS.md) |
 | A whole-question bundle against a naive agent read | **96.0% fewer tokens (24.9×)** — 14,758 against 367,192, tiktoken `cl100k_base`, six realistic questions | `bench/BENCHMARK.md` — *historical, private corpus, not reproducible from this tree* |
 
@@ -1667,7 +1639,7 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 <summary>43 repositories, 69 papers and a 237-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**46 repositories and 69 papers** into one deterministic executable, alongside a labelled
+**49 repositories and 70 papers** into one deterministic executable, alongside a labelled
 survey of 237 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables
@@ -1718,7 +1690,8 @@ When a mark says the cheap answer is not enough, escalate on purpose — never b
 2. **`--uses=SYM` / `--impact=SYM`** — every read, write and import site, and the transitive blast
    radius. `--callers` alone under-counts, and says so.
 3. **`--scip=index.scip`** — hand it a compiler-grade index and precise edges *replace* the
-   name-based guesses, tagged `prov="scip"`. Missing or corrupt index degrades; it never fails.
+   name-based guesses, tagged `prov="scip"`. A path that is missing, empty or not a regular file
+   refuses (exit 1); a corrupt index warns on stderr and proceeds name-based.
 
 </details>
 
@@ -1820,9 +1793,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>576 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary>
+<summary><b>607 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **576 gate scripts** and is the authoritative list;
+`test/regression.sh` names **607 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -1930,7 +1903,7 @@ each verb is for. Install as symlinks back into this repo, so edits here take ef
 immediately:
 
 ```bash
-skills/install.sh                 # → ~/.claude/skills
+skills/install.sh                 # → ${CLAUDE_CONFIG_DIR:-~/.claude}/skills
 skills/install.sh --codex         # → ${AGENTS_HOME:-~/.agents}/skills (canonical Codex/agent path)
 skills/install.sh --codex --hook  # → also install Codex's task router, CLI nudge + session primer
 skills/install.sh --codex-legacy  # → ${CODEX_HOME:-~/.codex}/skills (older Codex installs)
@@ -2011,7 +1984,7 @@ are one contributor's corpus away from being measurably better, and we cannot se
 ## Languages
 
 <details>
-<summary><b>22</b> vendored grammars, and what each parser does and does not see — CUDA launch edges, PHP dynamic dispatch, Lua metatables</summary>
+<summary><b>24</b> vendored grammars, and what each parser does and does not see — CUDA launch edges, PHP dynamic dispatch, Lua metatables</summary>
 
 C, C++, Objective-C / Objective-C++, **Metal** (Metal Shading Language, `.metal` — indexed with the
 C++ grammar, since MSL is a C++14 dialect, so a dual-compile header's symbols resolve from both the
@@ -2026,10 +1999,10 @@ imports. Dynamic dispatch — `$fn()`, `call_user_func`, `__call` — names its 
 a stated floor, not a silence), **Lua** (all five spellings that define a function, including the
 `M.f = function` and table-constructor forms; `function M:f()` is a method. Metatable inheritance is
 a runtime call with no syntax to read, so a Lua corpus reports no inheritance edges — stated, not
-implied), **Elixir** (`.ex`/`.exs` — nested modules, structs, protocols and implementations, functions, macros, guards,
+implied), **Dart** (`.dart` — classes, mixins, extensions, enums, typedefs, functions, methods, getters/setters; `recv.m()`, `recv?.m()` and cascade `..m()` invocations are edges. Two stated floors: named constructors and factories index under the CLASS name, so `C()`, `C.seeded()` and `factory C.fromA()` are overloads of `C`; and `noSuchMethod` dynamic dispatch names its callee at run time. The grammar makes a function body a SIBLING of its signature rather than a child, so the definition span is extended through it at capture time — without that, every call in a body attributes to the enclosing class), **Elixir** (`.ex`/`.exs` — nested modules, structs, protocols and implementations, functions, macros, guards,
 delegates, types, callbacks, attributes and literal ExUnit tests; module/name/arity resolution with lexical aliases,
 filtered imports, default arguments, captures and pipes; see the
-[static-analysis limits](docs/ARCHITECTURE.md#elixir-extraction)), Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
+[static-analysis limits](docs/ARCHITECTURE.md#elixir-extraction)), **Kotlin** (`.kt` — classes, objects, companion objects, interfaces, enum classes and functions, extension functions included; bare and navigation calls, constructor delegation and imports are edges. Kotlin and Java share one call graph, and a call reaches the other language only when its own defines no candidate of that name, so adding `.kt` files never moves a Java edge. Stated floors: an explicit receiver (`A.f()`) does not narrow candidates; a multiplatform `expect`/`actual` type pair is two candidates; `.kts` is not indexed; and a file nesting string templates past 128 levels is refused and listed by `--skipped` — see the [Kotlin limits](docs/ARCHITECTURE.md#kotlin-extraction)), Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
 `[tool.ruff.lint]` table is one symbol under its full dotted name, and
 `pyproject.toml`/`Cargo.toml`/CI workflows become greppable), and **Markdown** (`.md`/`.markdown` —
 the DOC tier: every heading, ATX or setext, is a section symbol whose span runs to the next
@@ -2051,6 +2024,527 @@ tier: it parses with its own vendored grammar, so its headings are symbols, not 
 
 ---
 
+## Reference guide
+
+Publication date: 2026-09-12
+
+ripwire analyzes a source tree. The tool writes a ranked symbol map to standard output. The map
+shows the symbols that matter for a task, the callers of those symbols, and the tests that reach
+them. The tool is one binary. It has no runtime dependencies. It does not use a network and it does
+not use a background service.
+
+This guide tells you how to install, operate, and evaluate ripwire. Read `docs/COMMANDS.md` for the
+full command reference. Run `./build/ripwire --help` for the current flag list. The binary generates
+`--help` from its own flag table, so `--help` is the authority. If this guide disagrees with
+`--help`, report this guide as a defect.
+
+<details>
+<summary><b>Evidence basis.</b> Fifty years of software-engineering results. 49 repositories and 70 papers are folded. A survey of 237 tools is separate.</summary>
+
+The counts come from `docs/LINEAGE.md`. Counts are current as of 2026-09-08. Seventeen of the folded papers are from 2026, seven published in the last two months, and three in the last thirty days. This project folds 49 repositories and 70 papers into one executable. The survey describes 237 tools that contributed no lesson. The two sets are disjoint, so the counts add.
+
+</details>
+
+---
+
+### 1. Purpose and function
+
+ripwire reads a source tree and answers these questions:
+
+- Which symbols are important in this tree?
+- Who calls this symbol, and what does a change to it affect?
+- Which tests must run before a change is complete?
+- Where is the risk in this code, and did a change make the risk worse?
+
+The tool performs five steps in a fixed order:
+
+1. **Ingest.** The tool crawls the tree, parses each file with tree-sitter, and extracts definitions
+   and references.
+2. **Graph.** The tool resolves each reference to a definition and builds a call graph. The
+   resolution is name-based. Section 7 states the limits of this method.
+3. **Rank.** The tool ranks the symbols with Personalized PageRank.
+4. **Serialize.** The tool writes a minified XML map. The output is deterministic. Section 8 states
+   the determinism rules.
+5. **Serve.** The command line reads the map. An optional MCP server exposes the same computation
+   to a coding agent.
+
+Every command is a different view of the same graph. The command line and the MCP server use the
+same renderer. One computation has one output shape.
+
+### 2. System requirements
+
+| Item | Requirement |
+| --- | --- |
+| Operating system | macOS (arm64 or x86-64) or Linux (arm64 or x86-64) |
+| Prebuilt Linux floor | RHEL 8 or later |
+| Prebuilt x86-64 floor | x86-64-v3 (Intel Haswell, 2013, or later) |
+| Build tools | CMake 3.24 or later, and a C++23 compiler |
+| Compilers | clang 16+, AppleClang 15+, gcc 13+, or MSVC 19.36+ |
+| Dependencies | None outside the source tree. Every dependency is vendored. |
+| Network | Not required for a build or for a run. |
+
+The build completes with the network off. Use `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` to prove this
+condition.
+
+### 3. Installation
+
+#### 3.1 Install a prebuilt binary
+
+1. Run the installer:
+
+   ```bash
+   RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
+   ```
+
+2. Add the install directory to the path if necessary:
+
+   ```bash
+   export PATH="$HOME/.local/bin:$PATH"
+   ```
+
+3. Check the version:
+
+   ```bash
+   ripwire --version
+   ```
+
+The installer downloads the latest GitHub release, verifies the SHA-256 digest, and installs the
+binary to `~/.local/bin`. The installer also stages the agent skills under
+`~/.local/share/ripwire/skills`. It activates the skills for each agent it finds. It does not edit
+your shell profile. It does not register hooks. To register hooks, run
+`bash ~/.local/share/ripwire/skills/install.sh --hook`.
+
+#### 3.2 Build from source
+
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/redhat-et/ripwire.git
+   cd ripwire
+   ```
+
+2. Configure and build the development binary:
+
+   ```bash
+   cmake -S . -B build
+   cmake --build build -j
+   ```
+
+3. Test the binary:
+
+   ```bash
+   ./build/ripwire .
+   ```
+
+**Note:** Do not configure the development tree with `-DCMAKE_BUILD_TYPE=Release`. Release defines
+`NDEBUG`. `NDEBUG` removes the `DEGRADED_PATH_ALERT` diagnostics at compile time. A gate that
+asserts a degrade path then passes without evidence. Use a separate tree for a release build:
+
+```bash
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release -j
+```
+
+The continuous-integration pipeline builds both flavors. The plain build proves the degrade paths.
+The release build proves the optimizer-visible invariants. Neither flavor replaces the other.
+
+#### 3.3 Install the agent skills
+
+The `skills/` directory holds 18 task-shaped skill files. The skills tell an agent which command is
+correct for each situation. Install the skills with the script:
+
+```bash
+skills/install.sh
+skills/install.sh --codex
+skills/install.sh --contributor
+```
+
+The script links the skills into the configuration directory of the agent. The `--contributor` mode
+adds the skill for compiling ripwire itself. Read the header of `skills/install.sh` for all modes.
+To check a skill file before installation, run `ripwire --scan-skills`.
+
+#### 3.4 Register the MCP server (optional)
+
+The command line is the primary interface. The MCP server is the optional second interface. The MCP
+server exposes 31 MCP verbs. The verb schemas reside in the agent context for every session. For
+this reason, register the MCP server only when you need it.
+
+The server is a standard input and output MCP process. The complete configuration is:
+
+```json
+{
+  "mcpServers": {
+    "ripwire": { "command": "ripwire", "args": ["--mcp"] }
+  }
+}
+```
+
+For a socket instead of standard input and output, run `ripwire --listen=HOST:PORT`. A non-loopback
+bind requires `--mcp-token`. The three edit verbs are disabled on a remote bind unless you pass
+`--allow-remote-edits`. The socket speaks plain HTTP with no TLS, so on a non-loopback bind the bearer token and
+every request cross the network in the clear: put a TLS-terminating reverse proxy in front of it.
+
+### 4. First use
+
+#### 4.1 Make the first map
+
+Change to the repository. Run the following command:
+
+```bash
+./build/ripwire . --max-tokens=3000   # start here on an unfamiliar repository
+```
+
+The command writes the top of the ranked map within the token budget. Remove `--max-tokens=3000`
+for the complete map. The complete map is larger. On a large tree, use `--top-k=N` to limit the row
+count.
+
+#### 4.2 Use the common commands
+
+| Task | Command |
+| --- | --- |
+| Orient in a new tree | `ripwire . --max-tokens=3000` |
+| Prepare for a task | `ripwire . --for="<task description>"` |
+| Find a symbol's callers | `ripwire . --callers=SYM` |
+| Find the callees | `ripwire . --callees=SYM` |
+| Measure the blast radius | `ripwire . --impact=SYM` |
+| List the use sites | `ripwire . --uses=SYM` |
+| Read one function body | `ripwire . --expand=SYM` |
+| Find the tests for a change | `ripwire . --test-gate` |
+| Review the current diff | `ripwire . --situ` |
+| Review a branch | `ripwire . --pr-context=REF` |
+| Read a stack trace | `ripwire . --from-trace=FILE` |
+| Inspect code quality | `ripwire . --quality-panel` |
+| Locate a pattern | `ripwire . --grep=PATTERN` |
+| Search the documents | `ripwire . --recall="<task>"` |
+
+### 5. Command families
+
+The `--help` output groups 179 long flags advertised in `--help` into seven families. Run
+`./build/ripwire --help=all` for the complete catalog.
+
+| Family | Purpose | Representative flags |
+| --- | --- | --- |
+| Understand a codebase cold | What is this repository, and what matters? | `--for`, `--help-task`, `--tree`, `--lego`, `--exemplar`, `--recall`, `--top-k`, `--token-budget`, `--max-tokens` |
+| Navigate and answer a question | Who calls this, and is it safe to change? | `--callers`, `--callees`, `--uses`, `--impact`, `--path`, `--connect`, `--situ`, `--test-gate`, `--grep` |
+| Zoom the detail ladder | Show more detail only where it pays | `--detail`, `--pack-signatures`, `--outline`, `--expand`, `--compress` |
+| Assess quality and structure | Where is the risk, and did a change add risk? | `--quality-panel`, `--hotspots`, `--clones`, `--metrics`, `--deps`, `--lint`, `--quality-delta`, `--edit-check`, `--pr-context`, `--merge-scout` |
+| Self-diagnosis | Is the setup correct? | `--doctor` |
+| Security | Is this agent skill file safe to install? | `--scan-skill`, `--scan-skills` |
+| Knobs and modes | Shape, format, cache, and budget | `--json`, `--format`, `--mcp` |
+
+Not sure which command answers the task? Run `ripwire . --help-task="<task in words>"`. The command
+returns one recommended command, or it abstains when the evidence is thin. The command gives advice
+only. It does not run the recommendation.
+
+### 6. Output format
+
+The default output is minified XML. One comment line at the top holds the legend. The legend defines
+every attribute that the document uses. The elements are:
+
+| Element | Meaning |
+| --- | --- |
+| `<r>` | The map root |
+| `<f p="PATH">` | One source file |
+| `<s t="KIND" n="NAME" k="RANK">` | One symbol |
+| `<c n="CALLEE">` | One resolved call edge |
+
+The tool escapes `&`, `<`, `>`, `"`, and `'` in every attribute value and text node. C++ identifiers,
+such as `operator<`, and paths that contain `&` round-trip correctly.
+
+Two runs over one tree produce the same bytes. The output is streamed through a 64 KB buffer. The
+tool does not materialize the document in memory.
+
+#### 6.1 Output example
+
+The following command lists the callers of one function:
+
+```bash
+ripwire . --callers=rankGraphTeleport
+```
+
+The output has this shape. The line numbers are a capture and can move as the files grow.
+
+```xml
+<callers of="rankGraphTeleport" defs="1" count="6" root="." hop_tested="0" hop_untested="6" graph_ambiguous="7601" graph_unresolved="4206" graph_unindexed="218" counts_floor="1" next="--uses=rankGraphTeleport">
+<s t="fn" n="runEval" p="src/eval.h:171"/>
+<s t="fn" n="rankGraph" p="src/graph.h:3398"/>
+<s t="fn" n="anchoredLexicalRank" p="src/graph.h:3948"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:998"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:1123"/>
+<s t="fn" n="getIndex" p="src/mcpindex.h:1108"/>
+</callers>
+```
+
+#### 6.2 Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | The command completed. |
+| 1 | The command refused the request. A refusal names the reason. |
+| 3 | The output exceeded the token budget that you set. |
+| 4 | `--test-gate` found an open obligation. |
+
+#### 6.3 JSON output
+
+Add `--json` to a supported read command to select JSON instead of XML. The JSON carries the same
+attributes with the same meaning. Run `--json` only with the verbs that support it. The binary
+refuses the combination when a verb does not support it.
+
+### 7. Accuracy and disclosure rules
+
+The call graph is extracted from source text by name. The tool does not have a type system or a
+compiler. These limits follow:
+
+- Dynamic dispatch contributes no edge.
+- A callback through a function pointer contributes an edge in one case. One function must be bound
+  to the variable in scope. The variable must not escape.
+- A macro-generated call site contributes an edge only when the tool indexes the function-like
+  `#define`.
+- A name that has several definitions at the same resolution tier produces one edge per candidate.
+  Each edge carries the weight `1/k`. The symbol carries `amb="K"`. The header totals the events in
+  `ambiguous=`.
+
+The output uses these disclosure rules without exception:
+
+- **A zero is a measurement.** A zero means "none found". A zero never means "none exists".
+- **A floor is labelled.** A count that cannot be a total carries `counts_floor="1"`.
+- **A truncation is disclosed.** A header carries `total=`, `shown=`, and `capped=`. A document that
+  a budget cut carries its own marker and a `next=` step.
+- **A refusal is not a zero.** A selector that names nothing indexed refuses with a did-you-mean
+  suggestion computed from an edit distance. A query that resolves and selects nothing reports
+  `count="0"`.
+- **An estimate is labelled.** Token estimates are calibrated approximations. They are not exact
+  counts for every model.
+- **Counting units are named.** `--callers` counts distinct symbols. `--uses` counts
+  use sites. The two numbers differ by design.
+
+Use these methods when a disclosure says the answer is incomplete:
+
+1. Use `--expand=SYM` to read the body.
+2. Use `--uses=SYM` and `--impact=SYM` to measure the blast radius.
+3. Use `--scip=FILE` to supply a compiler-grade index. A precise index replaces the name-based edges
+   and marks the affected edges with `prov="scip"`. A path that is missing, empty or not a regular file
+   causes a refusal (exit 1). A corrupt index causes a fallback to the name-based edges and a warning on
+   standard error. Neither case is silent.
+
+### 8. Determinism
+
+The determinism contract is byte-identity. One tree produces one byte sequence on every run. The
+contract holds under four rules:
+
+1. The crawl sorts all candidate paths before it assigns symbol identifiers.
+2. Every global reduction folds fixed contiguous blocks in index order. No reduction uses an atomic
+   floating-point add.
+3. The rank vector uses type `double`.
+4. The PageRank translation unit compiles without floating-point reassociation.
+
+Thread count and thread timing never change the output.
+
+To verify the contract on your tree, run these commands:
+
+```bash
+ripwire . > a
+ripwire . > b
+diff -q a b
+```
+
+The diff must report no difference. The cached run must equal the uncached run. Use `--no-cache` for
+the uncached run.
+
+### 9. Verification and quality control
+
+`test/regression.sh` names **every gate script**. It is the authoritative list.
+
+**The gate scripts** hold five contracts that a unit test cannot hold.
+
+1. Two runs over one tree are byte-identical.
+2. A warm run equals a cold run.
+3. Every XML output is well-formed. The verification command is `xmllint --noout`.
+4. The sanitizer build uses `-fno-sanitize-recover=all`. AddressSanitizer, UndefinedBehaviorSanitizer,
+   and LeakSanitizer are part of the guardrails.
+5. A differential harness runs a reference binary and the candidate binary over every argument vector.
+   Standard output, standard error, and the exit code must match for each vector.
+
+Run the full gate suite in the foreground:
+
+```bash
+python3 test/pargates.py . ./build/ripwire -j 6
+```
+
+A new gate script must be added to `test/regression.sh` in the same change. The gate
+`test/manifestcheck.sh` enforces this rule.
+
+Another gate derives the cap inventory. The tool has 208 compile-time caps and 7 ranking parameters.
+`docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
+fires. `docs/TUNING.md` lists the measured cost of each cap.
+
+### 10. Quality evaluation
+
+`ripwire . --quality-panel` joins six independent evidence families:
+
+| Family | Question | Supporting command |
+| --- | --- | --- |
+| Structural | Shape: complexity, size, nesting, parameters, local variables | `--metrics` |
+| Lexical | Identifier text: the naming rules | `--lint`, `--naming-consistency` |
+| Confusion | Syntactic idiom: the confusion rules | `--lint` |
+| Historical | Git change frequency | `--hotspots` |
+| Colocation | How much code a reader must read outside the current file | `--context-ratio` |
+| State | Mutable state that a change can disturb at a distance | `--nonlocal-state` |
+
+The panel ranks a row by the count of families that agree. It does not blend the families into one
+score. A row appears at an agreement count of two or more.
+
+`--quality-delta` reports only the properties that the working tree made worse against a baseline.
+`--test-gate` names the tests that must run. `--edit-check` compares an edited symbol against git
+HEAD. `--safe-delete=SYM` composes the callers, the blast radius, the use sites, and the dead-code
+shape into one risk report.
+
+### 11. Agent integration
+
+The command line is the recommended interface. An agent that can run shell commands needs no
+registration. The installer adds the skills. The skills teach the agent when to use each command.
+
+`ripwire wrap <agent>` prints the wiring recipe for one agent. The command prints the recipe. It
+does not edit a configuration file. Run `ripwire wrap --all` to detect every installed agent and to
+print each recipe.
+
+```bash
+ripwire wrap claude
+ripwire wrap codex
+ripwire wrap cursor
+ripwire wrap windsurf
+ripwire wrap gemini
+ripwire wrap opencode
+ripwire wrap openclaw
+ripwire wrap hermes
+ripwire wrap aider
+```
+
+The write verbs are `--replace-symbol-body=SYM`, `--insert-before-symbol=SYM`, and
+`--insert-after-symbol=SYM`. Supply the new text with `--edit-payload=FILE` or `--edit-payload=-`
+for standard input. The CLI write verbs and the MCP write verbs use the same safety contract:
+
+- A stale file hash causes a refusal.
+- An ambiguous selector causes a refusal.
+- A symlink target causes a refusal.
+- The tool preserves the file mode.
+- The tool writes a temporary file, synchronizes it, and renames it over the target. A failure leaves
+  the original file unchanged.
+
+### 12. Supported languages and formats
+
+The tool vendors 24 tree-sitter grammars. A table maps a file extension to a grammar and a query
+file. One query engine runs over every language. A new language requires a vendored grammar, a query
+file, and one row in the extension table.
+
+| Language or format | Extensions | Notes |
+| --- | --- | --- |
+| C | `.c`, `.h` | |
+| C++ | `.cc`, `.cpp`, `.cxx`, `.hpp`, and others | Qualified calls and explicit template calls resolve in a precise tier. |
+| Objective-C / Objective-C++ | `.m`, `.mm` | |
+| Metal (MSL) | `.metal` | Indexed with the C++ grammar. |
+| CUDA | `.cu`, `.cuh` | `<<<>>>` launch sites are call edges. |
+| Python | `.py` | |
+| TypeScript / JavaScript | `.ts`, `.tsx`, `.js`, `.jsx` | Named imports and default imports resolve. |
+| Java | `.java` | Qualified `new` calls resolve in a precise tier. |
+| Kotlin | `.kt` | Shares one call graph with Java. A file with string templates past 128 levels is refused and listed by `--skipped`. |
+| Ruby | `.rb` | Superclasses, mixins, `autoload`, and constant receivers are read. |
+| PHP | `.php`, `.phtml` | Dynamic dispatch is a stated floor. |
+| Lua | `.lua` | Metatable inheritance produces no inheritance edge. `require` is a function call. A string-literal `require` that names exactly one file in the tree adds a dependency edge. |
+| Dart | `.dart` | A function body is a sibling of the signature. The capture extends the span through the body. |
+| Elixir | `.ex`, `.exs` | Modules, protocols, implementations, functions, macros, guards, and delegates are indexed. |
+| Swift | `.swift` | |
+| C# | `.cs` | The `?.` family resolves in a precise tier. |
+| Go | `.go` | Qualified calls are rejected and fenced, not guessed. |
+| Rust | `.rs` | Scoped, turbofish, and `Self::` calls resolve in a precise tier. |
+| Bash | `.sh`, `.bash` | |
+| JSON | `.json` | Config keys become symbols. The lane emits no call edges. |
+| TOML | `.toml` | A table header is one symbol. Keys below it are one level down. |
+| YAML | `.yml`, `.yaml` | Mapping depth 2 is the cut. Sequence levels are transparent. |
+| Markdown | `.md`, `.markdown` | Every heading is a section symbol. The span runs to the next heading of the same or higher level. |
+
+Notebooks, HTML, and CSV files are indexed as documents for `--recall` and `--mentions`.
+
+### 13. Performance
+
+| Operation | Scale | Measured result |
+| --- | --- | --- |
+| Cold parse and answer | This repository | See [Where its own cycles go](#where-its-own-cycles-go--hardware-counters-per-scope) |
+| Warm run | The same tree | See [Where its own cycles go](#where-its-own-cycles-go--hardware-counters-per-scope) |
+| Cache load | The same tree | About 167 times fewer instructions than a cold parse |
+
+One process answers a query. The tool starts no daemon and holds no server connection. The parse
+cache is keyed by file content hash and a parser version. An extraction change bumps the version and
+causes one cold re-parse. A gate asserts that the warm output is byte-identical to the cold output.
+
+Measured results with their instruments and corpora are in `docs/EVALS.md`. The document also lists
+the counterexamples that this project publishes against itself. For example, one comparison ran
+graphify 0.9.34 with `--code-only --no-cluster`. The measurement is in `bench/headtohead/r4-2026-08-06/`.
+
+### 14. Known limits
+
+- The call graph is name-based. Dynamic dispatch, callbacks, and macro expansion can hide an edge.
+  Section 7 states the disclosure rules.
+- Multi-file localization is hard. The tool finds one gold file more often than it finds all gold
+  files of one task.
+- Churn measurements need real git history. A shallow clone reports every file as one commit.
+- The tool skips files over 4 MB. Use `--max-file-size=N` to change the limit.
+- The JSON lane skips files over 256 KB. The YAML lane skips files over 512 KB.
+- Directory symlinks are not followed.
+- The default crawl honors `.gitignore`. Use `--no-ignore` to disable this behavior.
+- PHP dynamic dispatch and Lua metatable inheritance are floors, not complete answers.
+- The `--grep` view can cost more tokens than a plain grep on a small result set.
+- `--pack-signatures` can be larger than the body when a symbol is short.
+
+### 15. Documentation
+
+| Need | File |
+| --- | --- |
+| Every flag, with an invocation and a recorded output | `docs/COMMANDS.md` |
+| The authoritative flag list, always current | `./build/ripwire --help` |
+| Pipeline, data model, determinism contract, disclosure contract | `docs/ARCHITECTURE.md` |
+| Every published number, its instrument, and its counterexamples | `docs/EVALS.md` |
+| The build method as a transferable process | `docs/METHODOLOGY.md` |
+| The compile-time cap inventory | `docs/LIMITS.md` |
+| The measured cost of each cap | `docs/TUNING.md` |
+| The origin of every folded idea | `docs/LINEAGE.md` |
+| C++ style, the guardrails, and the submission checklist | `CONTRIBUTING.md` |
+| Installation and removal procedures | `INSTALL.md` |
+| Orientation for a coding agent that works on this repository | `AGENTS.md`, `CLAUDE.md` |
+| User-visible changes and known limits | `CHANGELOG.md` |
+| Vendored dependencies and their licenses | `THIRD_PARTY.md` |
+| Skill-file security checks | [security](docs/COMMANDS.md#--scan-skillsdir) |
+| The whole tool in 34 slides | `present/ripwire-showcase.pdf` |
+
+The presentation rebuilds from `present/deck5_ripwire_build.js`. The preprint draft is in
+`paper/PREPRINT.md`. The method is not submitted for peer review. Its tables name the measurement
+files under `bench/`.
+
+### 16. Improvement
+
+`prompts/` holds twelve **self-contained orchestrator prompts**. Each prompt is a workflow that a
+coding agent can run against this repository. Each prompt writes a plan and stops for your approval
+before it runs a command. Build the binary first. The prompts measure against the binary.
+
+The prompts cover a full audit, a gap analysis from real use, a capture audit, a head-to-head
+comparison, a ranking evaluation, a language improvement pass, a zero-context onboarding study, a
+sibling sweep, a command tour, and a presentation build. The index is `prompts/README.md`.
+
+If the tool answers incorrectly on your codebase, run `prompts/improve-for-my-language.md`. The
+prompt harvests your session transcript and produces one finding per event with its evidence. Open
+an issue with the result.
+
+### 17. License
+
+Apache License 2.0. See `LICENSE` for the full text.
+
+Copyright 2026 David Brewster
+
+Vendored third-party code keeps its own license. `THIRD_PARTY.md` lists every dependency and its
+terms.
+
+---
+
 ## Documentation
 
 | Need | File |
@@ -2066,7 +2560,7 @@ tier: it parses with its own vendored grammar, so its headings are symbols, not 
 | Orientation for a coding agent working *on* this repository | [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) |
 | User-visible capabilities, behaviour changes, known limits | [`CHANGELOG.md`](CHANGELOG.md) |
 | Vendored dependencies and their licences | [`THIRD_PARTY.md`](THIRD_PARTY.md) |
-| The whole tool in 29 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
+| The whole tool in 34 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
 
 If a document disagrees with `--help`, the document is the bug.
 

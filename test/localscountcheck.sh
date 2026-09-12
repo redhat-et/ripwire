@@ -49,7 +49,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){   printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -159,9 +159,9 @@ CPPXML="$( xml "$CPPDIR" )"
 c_zero="$( locals_of "$CPPXML" zeroLocals )"
 c_three="$( locals_of "$CPPXML" threeLocals )"
 c_five="$( locals_of "$CPPXML" fiveLocals )"
-[ "$c_zero" = "0" ]  && ok "count: zeroLocals -> locals=0"  || no "count: zeroLocals -> got '$c_zero', want 0"
-[ "$c_three" = "3" ] && ok "count: threeLocals -> locals=3" || no "count: threeLocals -> got '$c_three', want 3"
-[ "$c_five" = "5" ]  && ok "count: fiveLocals -> locals=5"  || no "count: fiveLocals -> got '$c_five', want 5"
+if [ "$c_zero" = "0" ]; then ok "count: zeroLocals -> locals=0"; else no "count: zeroLocals -> got '$c_zero', want 0"; fi
+if [ "$c_three" = "3" ]; then ok "count: threeLocals -> locals=3"; else no "count: threeLocals -> got '$c_three', want 3"; fi
+if [ "$c_five" = "5" ]; then ok "count: fiveLocals -> locals=5"; else no "count: fiveLocals -> got '$c_five', want 5"; fi
 
 # ══ 2. FLOOR-BOUNDARY ════════════════════════════════════════════════════════════════════════════════
 c_excl="$( locals_of "$CPPXML" excludedShapes )"
@@ -236,7 +236,7 @@ fi
 
 # ══ 5. HYGIENE ═══════════════════════════════════════════════════════════════════════════════════════
 A="$( xml "$CPPDIR" )"; B="$( xml "$CPPDIR" )"
-[ "$A" = "$B" ] && ok "hygiene: two cold runs are byte-identical (determinism)" || no "hygiene: two cold runs DIFFER"
+if [ "$A" = "$B" ]; then ok "hygiene: two cold runs are byte-identical (determinism)"; else no "hygiene: two cold runs DIFFER"; fi
 if printf '%s' "$CPPXML" | xmllint --noout - >/dev/null 2>&1; then
     ok "hygiene: --metrics map is well-formed XML"
 else

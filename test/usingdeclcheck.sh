@@ -36,7 +36,7 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 FIX="$TMP/usingfix"
 mkdir -p "$FIX"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }

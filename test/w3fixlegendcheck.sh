@@ -36,7 +36,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative binary
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
@@ -295,7 +295,10 @@ ANCH="$( dcCount "$ROOT" ./src )"; BARE="$( dcCount "$ROOT" src )"
 
 # ══ 4. --situ H6 disclosures + the M9 JSON twin ════════════════════════════════════════════════════════════
 echo "── 4. situ cap disclosures + JSON twin"
-# a sandbox where the test count EXCEEDS the 25-row cap (this repo's own probes stay under it).
+# a sandbox where the test count EXCEEDS the old 25-row cap. That cap (kSituTestRowsShown) was RETIRED on
+# 2026-09-10 (listing-paging lane): section [2] is the ANSWER of --situ — tests to run — and answer rows
+# never page (docs/METHODOLOGY.md §9; test/listingpagingcheck.sh arm D pins the retirement red-first). So
+# the disclosure this arm used to demand ("showing 25 of 30 tests") must now be ABSENT and every row listed.
 SITSB="$TMP/situsb"; mkdir -p "$SITSB/test"
 printf 'int coreFn(){ return 7; }\n' >"$SITSB/core.cpp"
 i=1; while [ $i -le 30 ]; do printf 'int coreFn();\nint t%02d_main(){ return coreFn(); }\n' "$i" >"$SITSB/test/t$i.cpp"; i=$(( i + 1 )); done
@@ -303,11 +306,12 @@ i=1; while [ $i -le 30 ]; do printf 'int coreFn();\nint t%02d_main(){ return cor
 S2LINE="$( grep -E '^  \[2\]' "$TMP/situ30" || true )"
 S2ROWS="$( sed -n '/\[2\]/,/\[3\]/p' "$TMP/situ30" | grep -c 'test/t[0-9]*\.cpp' || true )"
 case "$S2LINE" in
-    *"(30)"*"showing 25 of 30 tests"*) ok "situ [2]: '(30) (showing 25 of 30 tests)' with ${S2ROWS} rows — the cap is disclosed";;
-    *) no "situ [2] does not disclose its 25-row cap: $S2LINE";;
+    *"showing "*" of "*) no "situ [2] still discloses a cut on its ANSWER rows (the 25-row cap was retired): $S2LINE";;
+    *"(30)"*)             ok "situ [2]: '(30)' with no cut disclosed — answer rows never page";;
+    *)                    no "situ [2] header did not count all 30 tests: $S2LINE";;
 esac
-[ "${S2ROWS:-0}" = 25 ] && ok "situ [2]: exactly 25 rows listed, matching the disclosure" \
-                        || no "situ [2] listed ${S2ROWS:-0} rows, disclosure says 25"
+[ "${S2ROWS:-0}" = 30 ] && ok "situ [2]: all 30 rows listed (the retired 25-row cap is gone)" \
+                        || no "situ [2] listed ${S2ROWS:-0} rows, expected all 30 — answer rows never page"
 # section [3] on this repo (git history required for co-change partners).
 "$BIN" "$ROOT" --situ=src/graph.h >"$TMP/situ3" 2>&1
 S3LINE="$( grep -E '^  \[3\]' "$TMP/situ3" || true )"

@@ -25,7 +25,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 MINER="$ROOT/bench/mine_traces.py"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -45,7 +45,7 @@ cp "$ROOT/test/traceminefix/sample_session.jsonl" "$SESSDIR/sample_session.jsonl
 HOME="$TMP/home" python3 "$MINER" --repo "$REPO" --out "$TMP/mined1.jsonl" >/dev/null 2>&1; rc1=$?
 HOME="$TMP/home" python3 "$MINER" --repo "$REPO" --out "$TMP/mined2.jsonl" >/dev/null 2>&1; rc2=$?
 
-{ [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ]; } && ok "miner runs cleanly (exit 0 both runs)" || no "miner exit != 0 (rc1=$rc1 rc2=$rc2)"
+if { [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ]; }; then ok "miner runs cleanly (exit 0 both runs)"; else no "miner exit != 0 (rc1=$rc1 rc2=$rc2)"; fi
 diff -q "$TMP/mined1.jsonl" "$TMP/mined2.jsonl" >/dev/null 2>&1 && ok "miner determinism (byte-identical, no wall-clock)" \
     || { no "miner non-deterministic"; diff "$TMP/mined1.jsonl" "$TMP/mined2.jsonl" | head -8; }
 
@@ -140,7 +140,7 @@ NON100="$( printf '%s\n' "$EM" | awk '
     || { no "metric-parity: expected 100.0% recall@10/@20 and acc@10/@20 for every arm"; echo "$NON100"; printf '%s\n' "$EM" | sed 's/^/     /'; }
 
 # ── Gate 4: det-gate — --eval-mined stdout byte-identical run-to-run ─────────────────────────────────
-[ "$( run_mined )" = "$( run_mined )" ] && ok "--eval-mined deterministic (byte-identical run-to-run)" || no "--eval-mined non-deterministic"
+if [ "$( run_mined )" = "$( run_mined )" ]; then ok "--eval-mined deterministic (byte-identical run-to-run)"; else no "--eval-mined non-deterministic"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

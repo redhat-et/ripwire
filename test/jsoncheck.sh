@@ -33,7 +33,7 @@ fail=0
 # NOTE: ok/no print to STDERR (not stdout) — several checks below capture a verb's raw --json output via
 # `x="$( parses ... )"` and ok/no are called from inside that same command substitution (parses() reports
 # AND returns the payload); stdout must stay reserved for the payload or the PASS/FAIL lines corrupt it.
-ok(){ printf '  PASS  %s\n' "$*" >&2; }
+ok(){ printf '  PASS  %s\n' "$*" >&2 || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*" >&2; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*" >&2; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }

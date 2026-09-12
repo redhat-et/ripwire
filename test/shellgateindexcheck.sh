@@ -14,7 +14,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -56,7 +56,7 @@ case "$L" in
         ok 'literal changed path maps to its registered shell gate with script_literal evidence and run=' ;;
     *) no "literal shell gate row missing/wrong: $L" ;;
 esac
-[ "$LRC" = 4 ] && ok 'literal shell gate is an exit-4 test obligation' || no "literal test-gate exit=$LRC (want 4)"
+if [ "$LRC" = 4 ]; then ok 'literal shell gate is an exit-4 test obligation'; else no "literal test-gate exit=$LRC (want 4)"; fi
 case "$L" in
     *unregisteredcheck.sh*) no 'unregistered script leaked into tests-to-run' ;;
     *) ok 'unregistered script is excluded even when it names the changed path' ;;
@@ -102,7 +102,7 @@ esac
 [ "$( run --test-gate=src/literal.cpp )" = "$L" ] \
     && ok 'shell gate index is deterministic (byte-identical run-to-run)' || no 'shell gate index is nondeterministic'
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$L" | xmllint --noout - 2>/dev/null && ok 'shell-indexed --test-gate XML well formed' || no 'shell-indexed XML malformed'
+    if printf '%s' "$L" | xmllint --noout - 2>/dev/null; then ok 'shell-indexed --test-gate XML well formed'; else no 'shell-indexed XML malformed'; fi
 fi
 
 [ "$fail" = 0 ] && echo 'ALL PASS' || echo 'FAILURES ABOVE'

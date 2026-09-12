@@ -45,7 +45,7 @@ FIX="$ROOT/test/unresolvedfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 # extract the header gauge value: gauge_of <file> <name> → prints the integer (empty if absent).
@@ -61,9 +61,9 @@ echo "unresolvedcheck: BIN=$BIN  FIX=$FIX"
 MAP_OUT="$TMP/map.xml"
 $BIN "$FIX" --no-cache >"$MAP_OUT" 2>"$TMP/map.err"
 MAP_EXIT=$?
-[ "$MAP_EXIT" -eq 0 ] && ok "default map: exits 0 on the polyglot fixture" || no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"
+if [ "$MAP_EXIT" -eq 0 ]; then ok "default map: exits 0 on the polyglot fixture"; else no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"; fi
 
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP_OUT" && ok "default map: passes xmllint --noout (G4)" || no "default map: xmllint failed"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP_OUT"; then ok "default map: passes xmllint --noout (G4)"; else no "default map: xmllint failed"; fi; }
 [ -s "$TMP/map.err" ] && no "default map: unexpected stderr (degrade?): $( cat "$TMP/map.err" )" || ok "default map: clean stderr (no degrade)"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -75,7 +75,7 @@ grep -qE 'ambiguous=[0-9]+ unresolved=[0-9]+' "$MAP_OUT" \
     || no "header: unresolved= not found next to ambiguous=: $( head -c 400 "$MAP_OUT" )"
 
 # legend documents the new gauge
-grep -q 'unresolved=' "$MAP_OUT" && ok "header: unresolved= gauge present" || no "header: unresolved= gauge MISSING"
+if grep -q 'unresolved=' "$MAP_OUT"; then ok "header: unresolved= gauge present"; else no "header: unresolved= gauge MISSING"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

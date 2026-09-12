@@ -41,7 +41,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -98,10 +98,10 @@ echo "== P2.1 silent truncation: --impact =="
 "$BIN" "$SRC" --impact=leaf > "$TMP/impact.xml" 2>/dev/null
 rch="$( attr "$TMP/impact.xml" reaches )"; shw="$( attr "$TMP/impact.xml" shown )"; cap="$( attr "$TMP/impact.xml" capped )"
 rows="$( grep -o '<s ' "$TMP/impact.xml" | wc -l | tr -d ' ' )"
-[ "$rch" = "60" ]                 && ok "--impact reaches=60 (true blast radius)"        || no "--impact reaches='$rch' (want 60)"
-[ "$shw" = "40" ]                 && ok "--impact shown=40 (printed slice)"              || no "--impact shown='$shw' (want 40)"
-[ "$cap" = "1" ]                  && ok "--impact capped=1 on a truncated listing"       || no "--impact capped='$cap' (want 1)"
-[ "$rows" = "$shw" ]              && ok "--impact shown= equals the row count ($rows)"   || no "--impact shown='$shw' but printed $rows rows"
+if [ "$rch" = "60" ]; then ok "--impact reaches=60 (true blast radius)"; else no "--impact reaches='$rch' (want 60)"; fi
+if [ "$shw" = "40" ]; then ok "--impact shown=40 (printed slice)"; else no "--impact shown='$shw' (want 40)"; fi
+if [ "$cap" = "1" ]; then ok "--impact capped=1 on a truncated listing"; else no "--impact capped='$cap' (want 1)"; fi
+if [ "$rows" = "$shw" ]; then ok "--impact shown= equals the row count ($rows)"; else no "--impact shown='$shw' but printed $rows rows"; fi
 
 "$BIN" "$SRC" --impact=middle > "$TMP/impact_small.xml" 2>/dev/null
 srch="$( attr "$TMP/impact_small.xml" reaches )"; sshw="$( attr "$TMP/impact_small.xml" shown )"; scap="$( attr "$TMP/impact_small.xml" capped )"
@@ -113,12 +113,12 @@ srch="$( attr "$TMP/impact_small.xml" reaches )"; sshw="$( attr "$TMP/impact_sma
 # `capped` is a JSON BOOLEAN (true/false) rather than the 0/1 the hand-rolled pair emitted — the XML attribute
 # keeps "0"/"1", the JSON sibling spells the same fact the way JSON spells booleans, and both are ALWAYS
 # present rather than inferable from a missing key.
-has "$TMP/impact.json" '"shown":40'     && ok "--impact --json carries shown"     || no "--impact --json lost shown"
-has "$TMP/impact.json" '"capped":true'  && ok "--impact --json carries capped"    || no "--impact --json lost capped"
+if has "$TMP/impact.json" '"shown":40'; then ok "--impact --json carries shown"; else no "--impact --json lost shown"; fi
+if has "$TMP/impact.json" '"capped":true'; then ok "--impact --json carries capped"; else no "--impact --json lost capped"; fi
 
 "$BIN" "$SRC" --impact=leaf --format=columnar > "$TMP/impact.col" 2>/dev/null
-has "$TMP/impact.col" 'shown="40"'   && ok "--impact --format=columnar carries shown"  || no "--impact columnar lost shown"
-has "$TMP/impact.col" 'capped="1"'   && ok "--impact --format=columnar carries capped" || no "--impact columnar lost capped"
+if has "$TMP/impact.col" 'shown="40"'; then ok "--impact --format=columnar carries shown"; else no "--impact columnar lost shown"; fi
+if has "$TMP/impact.col" 'capped="1"'; then ok "--impact --format=columnar carries capped"; else no "--impact columnar lost capped"; fi
 
 echo "== P2.1 silent truncation: --match / --grep / --seams / --external-surface =="
 "$BIN" "$SRC" --match='(call_expression function: (identifier) @f)' --pack-top-n=5 > "$TMP/match.xml" 2>/dev/null
@@ -126,17 +126,17 @@ mh="$( attr "$TMP/match.xml" hits )"; ms="$( attr "$TMP/match.xml" shown )"; mc=
 mrows="$( grep -o '<m ' "$TMP/match.xml" | wc -l | tr -d ' ' )"
 [ -n "$mh" ] && [ "$ms" = "5" ] && [ "$mc" = "1" ] && [ "$mrows" = "5" ] \
     && ok "--match hits=$mh shown=5 capped=1 over 5 rows" || no "--match hits='$mh' shown='$ms' capped='$mc' rows=$mrows"
-has "$TMP/match.xml" 'hits_capped='  && ok "--match reports hits_capped (hits= floor vs total)" || no "--match has no hits_capped"
+if has "$TMP/match.xml" 'hits_capped='; then ok "--match reports hits_capped (hits= floor vs total)"; else no "--match has no hits_capped"; fi
 
 "$BIN" "$SRC" --grep=leaf --pack-top-n=4 > "$TMP/grep.xml" 2>/dev/null
 gh="$( attr "$TMP/grep.xml" hits )"; gs="$( attr "$TMP/grep.xml" shown )"; gc="$( attr "$TMP/grep.xml" capped )"
 grows="$( grep -o '<hit ' "$TMP/grep.xml" | wc -l | tr -d ' ' )"
 [ "$gs" = "4" ] && [ "$gc" = "1" ] && [ "$grows" = "4" ] \
     && ok "--grep hits=$gh shown=4 capped=1 over 4 rows" || no "--grep hits='$gh' shown='$gs' capped='$gc' rows=$grows"
-has "$TMP/grep.xml" 'hits_capped='   && ok "--grep reports hits_capped (collection-budget floor)" || no "--grep has no hits_capped"
+if has "$TMP/grep.xml" 'hits_capped='; then ok "--grep reports hits_capped (collection-budget floor)"; else no "--grep has no hits_capped"; fi
 
 "$BIN" "$SRC" --seams > "$TMP/seams.xml" 2>/dev/null
-has "$TMP/seams.xml" 'seam_pairs='        && ok "--seams reports seam_pairs (total)"        || no "--seams has no seam_pairs"
+if has "$TMP/seams.xml" 'seam_pairs='; then ok "--seams reports seam_pairs (total)"; else no "--seams has no seam_pairs"; fi
 # §P8 vocabulary: the root said shown_seam_pairs= AND capped= — the noun-prefixed spelling and the bare one
 # in a single element. The root has ONE listing, so it is the bare pair now (src/pageview.h, THE TRUNCATION
 # VOCABULARY, rule 1); the noun prefix is reserved for elements carrying SEVERAL independent listings.
@@ -165,10 +165,10 @@ echo "== P2.2 --top-k=0 emits the requested payload, not zero bytes =="
 # an actual map-riding-along run, which the bare default no longer reliably is.
 "$BIN" "$SRC" --top-k=5 --expand=middle > "$TMP/tkd.xml" 2>/dev/null
 n0="$( wc -c < "$TMP/tk0.xml" | tr -d ' ' )"; nd="$( wc -c < "$TMP/tkd.xml" | tr -d ' ' )"
-[ "$tk0rc" = "0" ]        && ok "--top-k=0 --expand exits 0"                            || no "--top-k=0 --expand exit=$tk0rc"
-[ "$n0" -gt 0 ]           && ok "--top-k=0 --expand emits $n0 bytes (was 0 — the body vanished)" || no "--top-k=0 --expand emitted 0 bytes"
-has "$TMP/tk0.xml" 'middle' && ok "--top-k=0 --expand contains the requested body"      || no "--top-k=0 --expand has no body"
-[ "$n0" -lt "$nd" ]       && ok "--top-k=0 ($n0 B) < explicit ranked-map run (--top-k=5, $nd B)" || no "--top-k=0 $n0 B not smaller than the ranked-map run's $nd B"
+if [ "$tk0rc" = "0" ]; then ok "--top-k=0 --expand exits 0"; else no "--top-k=0 --expand exit=$tk0rc"; fi
+if [ "$n0" -gt 0 ]; then ok "--top-k=0 --expand emits $n0 bytes (was 0 — the body vanished)"; else no "--top-k=0 --expand emitted 0 bytes"; fi
+if has "$TMP/tk0.xml" 'middle'; then ok "--top-k=0 --expand contains the requested body"; else no "--top-k=0 --expand has no body"; fi
+if [ "$n0" -lt "$nd" ]; then ok "--top-k=0 ($n0 B) < explicit ranked-map run (--top-k=5, $nd B)"; else no "--top-k=0 $n0 B not smaller than the ranked-map run's $nd B"; fi
 grep -q '<r ' "$TMP/tk0.xml" && no "--top-k=0 still emitted the ranked map" || ok "--top-k=0 emitted NO ranked map"
 
 # --token-budget must still gate on what was ACTUALLY emitted: serialize() normally folds the body tokens
@@ -178,7 +178,7 @@ grep -q '<r ' "$TMP/tk0.xml" && no "--top-k=0 still emitted the ranked map" || o
 [ "$tbrc" = "3" ] && ok "--top-k=0 still honors --token-budget (exit 3 on overrun)" \
                   || no "--top-k=0 --token-budget=1 exit=$tbrc (want 3 — budget went blind)"
 "$BIN" "$SRC" --top-k=0 --expand=middle --token-budget=100000 > /dev/null 2>&1; tbrc2=$?
-[ "$tbrc2" = "0" ] && ok "--top-k=0 under a generous --token-budget exits 0" || no "--top-k=0 generous budget exit=$tbrc2"
+if [ "$tbrc2" = "0" ]; then ok "--top-k=0 under a generous --token-budget exits 0"; else no "--top-k=0 generous budget exit=$tbrc2"; fi
 
 "$BIN" "$SRC" --top-k=0 > "$TMP/tk0alone.xml" 2>/dev/null; alonerc=$?
 na="$( wc -c < "$TMP/tk0alone.xml" | tr -d ' ' )"
@@ -194,9 +194,9 @@ echo "== P2.8 a refusal ships no payload =="
 # fixture's real "entry" symbol, so the did-you-mean assertions test the actual (fixed) behavior.
 "$BIN" "$SRC" --expand=entryy > "$TMP/exmiss.out" 2>"$TMP/exmiss.err"; exrc=$?
 nx="$( wc -c < "$TMP/exmiss.out" | tr -d ' ' )"
-[ "$exrc" = "1" ] && ok "--expand=MISSING exits 1"                     || no "--expand=MISSING exit=$exrc (want 1)"
-[ "$nx" = "0" ]   && ok "--expand=MISSING writes 0 bytes to stdout"    || no "--expand=MISSING wrote $nx bytes of payload"
-has "$TMP/exmiss.err" 'did you mean' && ok "--expand=MISSING keeps its did-you-mean" || no "--expand=MISSING lost did-you-mean"
+if [ "$exrc" = "1" ]; then ok "--expand=MISSING exits 1"; else no "--expand=MISSING exit=$exrc (want 1)"; fi
+if [ "$nx" = "0" ]; then ok "--expand=MISSING writes 0 bytes to stdout"; else no "--expand=MISSING wrote $nx bytes of payload"; fi
+if has "$TMP/exmiss.err" 'did you mean'; then ok "--expand=MISSING keeps its did-you-mean"; else no "--expand=MISSING lost did-you-mean"; fi
 
 "$BIN" "$SRC" --outline=entryy > "$TMP/olmiss.out" 2>/dev/null; olrc=$?
 no_="$( wc -c < "$TMP/olmiss.out" | tr -d ' ' )"
@@ -205,51 +205,51 @@ no_="$( wc -c < "$TMP/olmiss.out" | tr -d ' ' )"
 
 "$BIN" "$SRC" --uses=entryy > "$TMP/usmiss.out" 2>"$TMP/usmiss.err"; usrc=$?
 nu="$( wc -c < "$TMP/usmiss.out" | tr -d ' ' )"
-[ "$usrc" = "1" ] && ok "--uses=MISSING exits 1 like its six siblings"  || no "--uses=MISSING exit=$usrc (want 1)"
-[ "$nu" = "0" ]   && ok "--uses=MISSING writes 0 bytes"                 || no "--uses=MISSING wrote $nu bytes"
-has "$TMP/usmiss.err" 'did you mean' && ok "--uses=MISSING offers a did-you-mean" || no "--uses=MISSING has no did-you-mean"
+if [ "$usrc" = "1" ]; then ok "--uses=MISSING exits 1 like its six siblings"; else no "--uses=MISSING exit=$usrc (want 1)"; fi
+if [ "$nu" = "0" ]; then ok "--uses=MISSING writes 0 bytes"; else no "--uses=MISSING wrote $nu bytes"; fi
+if has "$TMP/usmiss.err" 'did you mean'; then ok "--uses=MISSING offers a did-you-mean"; else no "--uses=MISSING has no did-you-mean"; fi
 
 # the DOCUMENTED external case must survive: zz_undefined_helper is CALLED in app/ext.c but defined nowhere.
 "$BIN" "$SRC" --uses=zz_undefined_helper > "$TMP/usext.out" 2>/dev/null; usextrc=$?
 uext="$( attr "$TMP/usext.out" external )"; ucnt="$( attr "$TMP/usext.out" count )"
-[ "$usextrc" = "0" ] && ok "--uses on a genuine external symbol still exits 0" || no "--uses external exit=$usextrc"
+if [ "$usextrc" = "0" ]; then ok "--uses on a genuine external symbol still exits 0"; else no "--uses external exit=$usextrc"; fi
 [ "$uext" = "1" ] && [ "${ucnt:-0}" -gt 0 ] && ok "--uses external=\"1\" count=$ucnt preserved (def-less but referenced)" \
                                             || no "--uses external='$uext' count='$ucnt' — the documented feature broke"
 
 echo "== P2.10 --path: which def, and a pivot on a dead end =="
 "$BIN" "$SRC" --path=entry,deep > "$TMP/path.xml" 2>/dev/null
 pr="$( attr "$TMP/path.xml" reachable )"; pfd="$( attr "$TMP/path.xml" from_defs )"; pfp="$( attr "$TMP/path.xml" from_p )"
-[ "$pfd" = "2" ] && ok "--path from_defs=2 makes the ambiguity visible"   || no "--path from_defs='$pfd' (want 2)"
-[ -n "$pfp" ]    && ok "--path echoes the bound def from_p=$pfp"          || no "--path has no from_p"
-[ "$pr" = "1" ]  && ok "--path finds the path through the RIGHT def (was reachable=0)" || no "--path reachable='$pr' (want 1)"
-has "$TMP/path.xml" 'to_p='      && ok "--path echoes to_p"       || no "--path has no to_p"
-has "$TMP/path.xml" 'to_defs='   && ok "--path echoes to_defs"    || no "--path has no to_defs"
+if [ "$pfd" = "2" ]; then ok "--path from_defs=2 makes the ambiguity visible"; else no "--path from_defs='$pfd' (want 2)"; fi
+if [ -n "$pfp" ]; then ok "--path echoes the bound def from_p=$pfp"; else no "--path has no from_p"; fi
+if [ "$pr" = "1" ]; then ok "--path finds the path through the RIGHT def (was reachable=0)"; else no "--path reachable='$pr' (want 1)"; fi
+if has "$TMP/path.xml" 'to_p='; then ok "--path echoes to_p"; else no "--path has no to_p"; fi
+if has "$TMP/path.xml" 'to_defs='; then ok "--path echoes to_defs"; else no "--path has no to_defs"; fi
 
 "$BIN" "$SRC" --path=orphan,leaf > "$TMP/dead.xml" 2>/dev/null
 dr="$( attr "$TMP/dead.xml" reachable )"
-[ "$dr" = "0" ] && ok "--path reports reachable=0 on a genuine dead end"  || no "--path dead end reachable='$dr'"
-has "$TMP/dead.xml" 'hint='          && ok "--path dead end carries a hint="       || no "--path dead end has no hint="
-has "$TMP/dead.xml" 'connect=orphan,leaf' && ok "--path hint names --connect=A,B"  || no "--path hint does not name --connect=A,B"
+if [ "$dr" = "0" ]; then ok "--path reports reachable=0 on a genuine dead end"; else no "--path dead end reachable='$dr'"; fi
+if has "$TMP/dead.xml" 'hint='; then ok "--path dead end carries a hint="; else no "--path dead end has no hint="; fi
+if has "$TMP/dead.xml" 'connect=orphan,leaf'; then ok "--path hint names --connect=A,B"; else no "--path hint does not name --connect=A,B"; fi
 grep -q 'hint=' "$TMP/path.xml" && no "--path emits a hint on a REACHABLE path (should not)" || ok "--path emits no hint when reachable"
 
 echo "== P2.14 an unknown VALUE is not an unknown FLAG =="
 "$BIN" "$SRC" --rank-by=bogus > /dev/null 2>"$TMP/rb.err"; rbrc=$?
-[ "$rbrc" != "0" ] && ok "--rank-by=bogus exits non-zero ($rbrc)"                     || no "--rank-by=bogus exit=0"
-has "$TMP/rb.err" "unknown value 'bogus'" && ok "--rank-by names the unknown VALUE"   || no "--rank-by still blames the flag: $( cat "$TMP/rb.err" )"
-has "$TMP/rb.err" 'pagerank'              && ok "--rank-by lists the supported set"   || no "--rank-by lists no supported values"
+if [ "$rbrc" != "0" ]; then ok "--rank-by=bogus exits non-zero ($rbrc)"; else no "--rank-by=bogus exit=0"; fi
+if has "$TMP/rb.err" "unknown value 'bogus'"; then ok "--rank-by names the unknown VALUE"; else no "--rank-by still blames the flag: $( cat "$TMP/rb.err" )"; fi
+if has "$TMP/rb.err" 'pagerank'; then ok "--rank-by lists the supported set"; else no "--rank-by lists no supported values"; fi
 grep -q "unknown flag" "$TMP/rb.err" && no "--rank-by still says 'unknown flag'" || ok "--rank-by no longer says 'unknown flag'"
 
 "$BIN" "$SRC" --format=bogus > /dev/null 2>"$TMP/fm.err"; fmrc=$?
-[ "$fmrc" != "0" ] && ok "--format=bogus exits non-zero ($fmrc)"                      || no "--format=bogus exit=0"
-has "$TMP/fm.err" "unknown value 'bogus'" && ok "--format names the unknown VALUE"    || no "--format still blames the flag: $( cat "$TMP/fm.err" )"
-has "$TMP/fm.err" 'columnar'              && ok "--format lists the supported set"    || no "--format lists no supported values"
+if [ "$fmrc" != "0" ]; then ok "--format=bogus exits non-zero ($fmrc)"; else no "--format=bogus exit=0"; fi
+if has "$TMP/fm.err" "unknown value 'bogus'"; then ok "--format names the unknown VALUE"; else no "--format still blames the flag: $( cat "$TMP/fm.err" )"; fi
+if has "$TMP/fm.err" 'columnar'; then ok "--format lists the supported set"; else no "--format lists no supported values"; fi
 
 # §P6.7 (2026-07-28 output audit): the error text's advertised value set must equal the set that ACTUALLY
 # WORKS — this is the deckcheck fabrication class, in the binary's own error string, where deckcheck cannot
 # see it. Extract the "(supported: a|b|c)" list from the live error text itself (not a hardcoded copy of it)
 # and assert every one of those values actually parses with exit 0.
 fmsupported="$( grep -oE '\(supported: [^)]+\)' "$TMP/fm.err" | sed -E 's/\(supported: //; s/\)//' )"
-[ -n "$fmsupported" ] && ok "--format error names a supported set to reconcile against" || no "--format error has no (supported: …) list to reconcile"
+if [ -n "$fmsupported" ]; then ok "--format error names a supported set to reconcile against"; else no "--format error has no (supported: …) list to reconcile"; fi
 IFS='|' read -r -a fmvalues <<< "$fmsupported"
 # Each value is exercised on a verb it is DEFINED for.: columnar/rows on the bare map
 # used to exit 0 by ignoring the flag, so testing them there proved the accept-and-ignore bug rather than the
@@ -337,12 +337,12 @@ if command -v python3 > /dev/null 2>&1; then
 
     mcp_text '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"path_between","arguments":{"path":"'"$SRC"'","from":"entry","to":"deep"}}}' > "$TMP/mcp_path.xml"
     mp_r="$( attr "$TMP/mcp_path.xml" reachable )"; mp_d="$( attr "$TMP/mcp_path.xml" from_defs )"
-    [ "$mp_r" = "1" ] && ok "MCP path resolves through the RIGHT def (reachable=1)" || no "MCP path reachable='$mp_r'"
-    [ "$mp_d" = "2" ] && ok "MCP path echoes from_defs=2"                           || no "MCP path from_defs='$mp_d'"
-    has "$TMP/mcp_path.xml" 'from_p=' && ok "MCP path echoes from_p"                || no "MCP path has no from_p"
+    if [ "$mp_r" = "1" ]; then ok "MCP path resolves through the RIGHT def (reachable=1)"; else no "MCP path reachable='$mp_r'"; fi
+    if [ "$mp_d" = "2" ]; then ok "MCP path echoes from_defs=2"; else no "MCP path from_defs='$mp_d'"; fi
+    if has "$TMP/mcp_path.xml" 'from_p='; then ok "MCP path echoes from_p"; else no "MCP path has no from_p"; fi
 
     mcp_text '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"path_between","arguments":{"path":"'"$SRC"'","from":"orphan","to":"leaf"}}}' > "$TMP/mcp_dead.xml"
-    has "$TMP/mcp_dead.xml" 'hint=' && ok "MCP path dead end carries a hint=" || no "MCP path dead end has no hint="
+    if has "$TMP/mcp_dead.xml" 'hint='; then ok "MCP path dead end carries a hint="; else no "MCP path dead end has no hint="; fi
 else
     echo "  SKIP  MCP parity (python3 unavailable)"
 fi
@@ -362,7 +362,7 @@ grep -q 'capped=\|hits_capped=\|from_p=\|to_p=\|from_defs=\|to_defs=\|seam_pairs
 # attribute in the vocabulary pass — est_tokens=, the map's own size, previously reachable only inside
 # an XML comment a conformant parser may discard. Matching '<r' followed by space-or-'>' keeps the
 # wrapper check and stops re-breaking on every future root attribute.
-grep -q '<r[ >]' "$TMP/def1.xml" && ok "default map still the bare, UNWRAPPED <r> root" || no "default map root changed"
+if grep -q '<r[ >]' "$TMP/def1.xml"; then ok "default map still the bare, UNWRAPPED <r> root"; else no "default map root changed"; fi
 
 # the hard G5 proof: the committed golden for test/fixture must still match byte-for-byte.
 if [ -f "$ROOT/test/golden.xml" ]; then
@@ -420,7 +420,7 @@ ingest_astquery.h|never suppressed|1
 landingplan.h|always printed|1
 verbs_grep.h|always emitted|1
 verbs_grep.h|never suppressed|1
-verbs_quality.h|printed even at zero|1
+verbs_quality.h|printed even at zero|2
 verbs_report.h|never omitted|1
 EOF
 )"
@@ -530,6 +530,26 @@ else
     grep -q '"register-macro-excluded"' "$TMP/zqd.json" \
         && ok "(Z2c) --quality-delta --json: register-macro-excluded rides at zero" \
         || no "(Z2c) --quality-delta --json DROPPED register-macro-excluded"
+fi
+
+# ── (Z2g) api-new-surface= — 'printed even at zero' (verbs_quality.h, the second claim in that file) ────
+# The zero repo's change added an export (api-new-surface=1), so make a second change that adds NONE: the
+# body of keep() moves, no new symbol. The count must still ride, as the legend promises, at 0.
+(
+  cd "$ZQ" && git add lib.h && git commit -qm added
+  printf 'int keep( int a ) { return a + 3; }\nint added( int a ) { return a + 2; }\n' > lib.h
+) >/dev/null 2>&1
+"$BIN" "$ZQ" --quality-delta --no-cache > "$TMP/zqd2.xml" 2>/dev/null
+"$BIN" "$ZQ" --quality-delta --json --no-cache > "$TMP/zqd2.json" 2>/dev/null
+if ! grep -q '<quality-delta ' "$TMP/zqd2.xml"; then
+    no "(Z2g) presence guard: --quality-delta produced no root on the body-only change — the probe is inert"
+else
+    zAns="$( sed -n 's/.*api-new-surface="\([^"]*\)".*/\1/p' "$TMP/zqd2.xml" | head -1 )"
+    [ "$zAns" = "0" ] && ok "(Z2g) --quality-delta XML: api-new-surface=\"0\" rides at zero on a body-only change" \
+                      || no "(Z2g) --quality-delta XML: api-new-surface= is '$zAns' on a body-only change — the legend says it is printed even at zero"
+    grep -q '"api-new-surface"' "$TMP/zqd2.json" \
+        && ok "(Z2g) --quality-delta --json: api-new-surface rides at zero" \
+        || no "(Z2g) --quality-delta --json DROPPED api-new-surface at zero"
 fi
 
 # ── (Z2d) sub_windows= — 'the denominator and is never omitted' (verbs_report.h) ─────────────────────

@@ -22,7 +22,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/metricsfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -36,11 +36,11 @@ MAP="$( cat "$TMP/m1" )"
 DEF="$( cat "$TMP/def" )"
 
 # 1) determinism — --metrics output must be byte-identical run-to-run.
-diff -q "$TMP/m1" "$TMP/m2" >/dev/null && ok "determinism (--metrics byte-identical run-to-run)" || no "non-deterministic --metrics output"
+if diff -q "$TMP/m1" "$TMP/m2" >/dev/null; then ok "determinism (--metrics byte-identical run-to-run)"; else no "non-deterministic --metrics output"; fi
 
 # 2) GOLDEN NEUTRALITY — the default map (no --metrics) must carry NONE of the new attributes.
 LEAK="$( printf '%s' "$DEF" | grep -oE ' (loc|params|nest|cbo|lcom4|tested|amp)="[^"]*"' | head -1 )"
-[ -z "$LEAK" ] && ok "golden-neutral: no Q-metric attribute leaks into the default map" || no "attribute leaked into default map: $LEAK"
+if [ -z "$LEAK" ]; then ok "golden-neutral: no Q-metric attribute leaks into the default map"; else no "attribute leaked into default map: $LEAK"; fi
 
 # helper: the <s …> element line for a given symbol name (one-attr-per-line view), from the metrics MAP.
 sattr(){ printf '%s' "$MAP" | sed 's/>/>\n/g' | grep -E "<s t=\"[^\"]*\" n=\"$1\"" | head -1; }
@@ -91,17 +91,17 @@ def test_it():
 PY
 SCMAP="$( "$BIN" "$SC" --no-cache --metrics 2>/dev/null )"
 sattr_sc(){ printf '%s' "$SCMAP" | sed 's/>/>\n/g' | grep -E "<s t=\"[^\"]*\" n=\"$1\"" | head -1; }
-printf '%s' "$( sattr_sc covered )"   | grep -q ' tested="1"' && ok "tested=1 on a symbol referenced from a test file (covered)" || no "tested= missing on covered: $( sattr_sc covered )"
+if printf '%s' "$( sattr_sc covered )"   | grep -q ' tested="1"'; then ok "tested=1 on a symbol referenced from a test file (covered)"; else no "tested= missing on covered: $( sattr_sc covered )"; fi
 printf '%s' "$( sattr_sc uncovered )" | grep -q ' tested='    && no "tested= wrongly present on an untested symbol (uncovered)" || ok "tested= absent on an untested symbol (uncovered)"
 # tested= must NEVER leak into the default map of the scratch project either.
 "$BIN" "$SC" --no-cache 2>/dev/null | grep -q 'tested=' && no "tested= leaked into default (scratch) map" || ok "tested= stays --metrics-only (scratch default map clean)"
 
 # 6) amp= present + clean git-less degrade — the scratch dir has no git, so amp must equal caller count only
 #    (no crash, no hang). covered has exactly 1 caller (test_it) → amp=1.
-printf '%s' "$( sattr_sc covered )" | grep -q ' amp="1"' && ok "amp degrades to callers-only without git (covered amp=1)" || no "amp git-less degrade wrong: $( sattr_sc covered )"
+if printf '%s' "$( sattr_sc covered )" | grep -q ' amp="1"'; then ok "amp degrades to callers-only without git (covered amp=1)"; else no "amp git-less degrade wrong: $( sattr_sc covered )"; fi
 
 # 7) well-formed XML on the metrics output (G4).
-command -v xmllint >/dev/null 2>&1 && { printf '%s' "$MAP" | xmllint --noout - 2>/dev/null && ok "xml well-formed (--metrics)" || no "xml malformed (--metrics)"; } || ok "xml well-formed (xmllint absent — skipped)"
+command -v xmllint >/dev/null 2>&1 && { if printf '%s' "$MAP" | xmllint --noout - 2>/dev/null; then ok "xml well-formed (--metrics)"; else no "xml malformed (--metrics)"; fi; } || ok "xml well-formed (xmllint absent — skipped)"
 
 # 8) LEGEND ABSENCE HONESTY (Round C, lane E) — the legend's absence rule must match the EMITTER.
 #    kMetricsLegend closed with the universal claim "Absent=N/A, never 0.", and the emitter contradicts it

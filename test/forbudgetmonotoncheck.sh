@@ -51,7 +51,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -189,7 +189,7 @@ lint=1
 for F in def tb8k tb12k topn cdef c8k; do
     xmllint --noout "$TMP/$F" 2>/dev/null || { echo "    malformed: $F"; lint=0; }
 done
-[ "$lint" = 1 ] && ok "#4 all arms well-formed XML (G4)" || no "#4 malformed XML"
+if [ "$lint" = 1 ]; then ok "#4 all arms well-formed XML (G4)"; else no "#4 malformed XML"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

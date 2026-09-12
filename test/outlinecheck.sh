@@ -23,7 +23,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -99,7 +99,7 @@ ELEN="$( run --expand=classify  --top-k=0 | wc -c | tr -d ' ' )"
 [ "$( run --outline=classify )" = "$( run --outline=classify )" ] \
     && ok "--outline deterministic (byte-identical run-to-run)" || no "--outline non-deterministic"
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$OUT" | xmllint --noout - 2>/dev/null && ok "--outline xml well-formed" || no "--outline xml malformed"
+    if printf '%s' "$OUT" | xmllint --noout - 2>/dev/null; then ok "--outline xml well-formed"; else no "--outline xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

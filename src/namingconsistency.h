@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // namingconsistency.h — `--naming-consistency`: TIER A convention normalization (DESIGN_READABILITY_METRICS
 // §9.2, the private research record; §-numbers below refer to it). Of the three Tier-A categories that
@@ -388,20 +391,20 @@ inline int writeNamingConsistencyReport( const IngestResult& ing, int pageLimit,
     std::fputs( kNamingConsistencyLegend, stdout );
     // R-E fix (2026-08-19): the shared root-relative clause, emitted exactly when root= is (graphlegend.h).
     std::fputs( rw::rootRelPathsLegend( !rootAttr.empty() ), stdout );
-    std::printf( "<naming-consistency groups=\"%zu\" candidates=\"%zu\" decided=\"%zu\" flagged=\"%zu\"%s%s>",
-                 scan.groups.size(), scan.symbols.size(), decidedCount, total, disclosure, rootAttr.c_str() );
+    rw::emitTo( stdout, "<naming-consistency groups=\"{}\" candidates=\"{}\" decided=\"{}\" flagged=\"{}\"{}{}>",
+                 scan.groups.size(), scan.symbols.size(), decidedCount, total, rw::cstr( disclosure ), rootAttr.c_str() );
 
     for( const ConventionGroup& g : scan.groups )
     {
         if( g.decided )
         {
-            std::printf( "<g lang=\"%s\" kind=\"%s\" style=\"%s\" agree=\"%u\" total=\"%u\"/>",
+            rw::emitTo( stdout, "<g lang=\"{}\" kind=\"{}\" style=\"{}\" agree=\"{}\" total=\"{}\"/>",
                          langTag( g.lang ), kindBucketTag( g.kind ), styleTag( g.dominant ),
                          g.votes[ std::uint8_t( g.dominant ) ], g.total );
         }
         else
         {
-            std::printf( "<g lang=\"%s\" kind=\"%s\" style=\"UNAVAILABLE\" why=\"%s\" total=\"%u\"/>",
+            rw::emitTo( stdout, "<g lang=\"{}\" kind=\"{}\" style=\"UNAVAILABLE\" why=\"{}\" total=\"{}\"/>",
                          langTag( g.lang ), kindBucketTag( g.kind ), g.why, g.total );
         }
     }
@@ -418,11 +421,11 @@ inline int writeNamingConsistencyReport( const IngestResult& ing, int pageLimit,
         const std::string     path( escapeXml( rel, escPath ) );
         const std::string     name( escapeXml( s.name, escName ) );
         const std::string     propose( escapeXml( recombineToStyle( sym.toks, group->dominant ), escProp ) );
-        std::printf( "<f p=\"%s:%u\" n=\"%s\" lang=\"%s\" kind=\"%s\" style=\"%s\" propose=\"%s\"/>",
+        rw::emitTo( stdout, "<f p=\"{}:{}\" n=\"{}\" lang=\"{}\" kind=\"{}\" style=\"{}\" propose=\"{}\"/>",
                      path.c_str(), s.line, name.c_str(), langTag( sym.lang ), kindBucketTag( sym.kind ),
                      styleTag( sym.style ), propose.c_str() );
     }
-    std::printf( "</naming-consistency>" );
+    rw::emitRaw( stdout, "</naming-consistency>" );
     return 0;
 }
 

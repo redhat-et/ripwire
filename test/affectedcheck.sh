@@ -26,7 +26,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -290,7 +290,7 @@ printf '%s' "$A" | grep -q '<test p="test/test_leaf.cpp" hops="1"' && ok "(7g) c
 
 # ── 6) xml well-formed ───────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$A" | xmllint --noout - 2>/dev/null && ok "--affected xml well-formed" || no "--affected xml malformed"
+    if printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "--affected xml well-formed"; else no "--affected xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

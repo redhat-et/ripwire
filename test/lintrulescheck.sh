@@ -27,7 +27,7 @@ RULES="$CORPUS/rules"
 LINTFIX="$ROOT/test/lintfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ]    || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -45,21 +45,21 @@ diff -q "$TMP/out1" "$TMP/out2" >/dev/null && ok "deterministic (byte-identical 
 OUT="$TMP/out1"
 
 # 2. the good rule fires with its id, severity, and message honored
-grep -q 'rule="no-printf"' "$OUT"                 && ok "good rule fires (rule=\"no-printf\")"       || no "good rule no-printf NOT found"
-grep -q 'sev="warn"'       "$OUT"                 && ok "severity honored (sev=\"warn\")"            || no "sev=\"warn\" NOT emitted"
-grep -q 'use LOG() instead of printf' "$OUT"      && ok "message honored (element text)"             || no "rule message NOT emitted"
+if grep -q 'rule="no-printf"' "$OUT"; then ok "good rule fires (rule=\"no-printf\")"; else no "good rule no-printf NOT found"; fi
+if grep -q 'sev="warn"'       "$OUT"; then ok "severity honored (sev=\"warn\")"; else no "sev=\"warn\" NOT emitted"; fi
+if grep -q 'use LOG() instead of printf' "$OUT"; then ok "message honored (element text)"; else no "rule message NOT emitted"; fi
 # it must fire on the printf call site (sample.cpp), inside the enclosing fn
-grep -q 'rule="no-printf"[^>]*p="[^"]*sample.cpp' "$OUT" && ok "good rule located at the fixture printf" || no "good rule not located at sample.cpp"
+if grep -q 'rule="no-printf"[^>]*p="[^"]*sample.cpp' "$OUT"; then ok "good rule located at the fixture printf"; else no "good rule not located at sample.cpp"; fi
 # exactly one finding for the good rule (the @hit/@fn two-capture collapse worked — not two)
 CNT="$( grep -o 'rule="no-printf"' "$OUT" | wc -l | tr -d ' ' )"
-[ "$CNT" = "1" ] && ok "single finding per match (capture collapse: got 1)" || no "expected 1 no-printf finding, got $CNT"
+if [ "$CNT" = "1" ]; then ok "single finding per match (capture collapse: got 1)"; else no "expected 1 no-printf finding, got $CNT"; fi
 
 # 3 + 4. bad query and malformed yaml alert + skip, but the run still exits 0
 "$BIN" "$CORPUS" --lint-rules="$RULES" --no-cache >/dev/null 2>"$TMP/err"; rc=$?
-[ "$rc" -eq 0 ] && ok "--lint-rules exits 0 despite a bad query + a malformed file" || no "--lint-rules exit $rc (expected 0)"
-grep -qi 'did not compile' "$TMP/err" && ok "bad tree-sitter query alerted (astQuery)"        || no "no alert for the bad query"
-grep -qi 'malformed.yaml'  "$TMP/err" && ok "malformed yaml file alerted (file named)"          || no "no alert naming the malformed file"
-grep -Eq 'malformed.yaml:[0-9]+' "$TMP/err" && ok "malformed alert names a line number"         || no "malformed alert has no line number"
+if [ "$rc" -eq 0 ]; then ok "--lint-rules exits 0 despite a bad query + a malformed file"; else no "--lint-rules exit $rc (expected 0)"; fi
+if grep -qi 'did not compile' "$TMP/err"; then ok "bad tree-sitter query alerted (astQuery)"; else no "no alert for the bad query"; fi
+if grep -qi 'malformed.yaml'  "$TMP/err"; then ok "malformed yaml file alerted (file named)"; else no "no alert naming the malformed file"; fi
+if grep -Eq 'malformed.yaml:[0-9]+' "$TMP/err"; then ok "malformed alert names a line number"; else no "malformed alert has no line number"; fi
 # broken-query / bad-shape must NOT have produced findings
 grep -q 'rule="broken-query"' <(grep '<f ' "$OUT") && no "broken-query wrongly produced a finding" || ok "bad query produced no findings (skipped)"
 grep -q 'rule="bad-shape"'    "$OUT"               && no "malformed file's rule wrongly loaded"      || ok "malformed file skipped whole (bad-shape absent)"
@@ -82,15 +82,15 @@ grep -o '<rule name="no-printf"[^/]*/>' "$OUT" | grep -q 'compiled="0"' \
 
 # 6. built-ins still fire when --lint is also given (on the built-in lint fixture)
 "$BIN" "$LINTFIX" --lint --lint-rules="$RULES" --no-cache >"$TMP/both" 2>/dev/null; rc=$?
-[ "$rc" -eq 0 ] && ok "--lint + --lint-rules exits 0" || no "--lint + --lint-rules exit $rc"
-grep -q 'rule="magic-number"'      "$TMP/both" && ok "built-in rule still fires with --lint-rules present"   || no "built-in magic-number missing when combined"
-grep -q 'rule="typedef-over-using"' "$TMP/both" && ok "built-in typedef-over-using still fires"               || no "built-in typedef-over-using missing when combined"
+if [ "$rc" -eq 0 ]; then ok "--lint + --lint-rules exits 0"; else no "--lint + --lint-rules exit $rc"; fi
+if grep -q 'rule="magic-number"'      "$TMP/both"; then ok "built-in rule still fires with --lint-rules present"; else no "built-in magic-number missing when combined"; fi
+if grep -q 'rule="typedef-over-using"' "$TMP/both"; then ok "built-in typedef-over-using still fires"; else no "built-in typedef-over-using missing when combined"; fi
 
 # 7. flag given but zero rules load → exit 1 with a clear message
 EMPTY="$TMP/emptyrules"; mkdir -p "$EMPTY"
 "$BIN" "$CORPUS" --lint-rules="$EMPTY" --no-cache >/dev/null 2>"$TMP/e2"; rc=$?
-[ "$rc" -eq 1 ] && ok "empty rules dir → exit 1" || no "empty rules dir exit $rc (expected 1)"
-grep -qi 'no rules loaded' "$TMP/e2" && ok "empty rules dir → clear stderr message" || no "no 'no rules loaded' message"
+if [ "$rc" -eq 1 ]; then ok "empty rules dir → exit 1"; else no "empty rules dir exit $rc (expected 1)"; fi
+if grep -qi 'no rules loaded' "$TMP/e2"; then ok "empty rules dir → clear stderr message"; else no "no 'no rules loaded' message"; fi
 
 # ── 8. phase-2 combinators: inside / not-inside / not-matches ─────────────────────────────────────
 # Fixture: test/lintrulesfix/combinators/{combo.cpp, rules/}. Each combinator has a kept case AND a
@@ -111,16 +111,16 @@ else
     lns(){ grep -oE "rule=\"$1\" [^>]*p=\"[^\"]*combo.cpp:[0-9]+" "$COUT" | grep -oE 'combo.cpp:[0-9]+' | grep -oE '[0-9]+$' | paste -sd' ' - ; }
 
     # inside: KEEP L19 (new inside makesWidget) + L25 (new inside makesPool); DROP L15 (namespace-scope new)
-    [ "$( cnt new-inside-fn )" = "2" ]      && ok "inside: 2 kept (function-scoped new)"        || no "inside: expected 2 findings, got $( cnt new-inside-fn )"
-    [ "$( lns new-inside-fn )" = "19 25" ]  && ok "inside: kept exactly L19,L25 (L15 dropped)"  || no "inside: expected lines '19 25', got '$( lns new-inside-fn )'"
+    if [ "$( cnt new-inside-fn )" = "2" ]; then ok "inside: 2 kept (function-scoped new)"; else no "inside: expected 2 findings, got $( cnt new-inside-fn )"; fi
+    if [ "$( lns new-inside-fn )" = "19 25" ]; then ok "inside: kept exactly L19,L25 (L15 dropped)"; else no "inside: expected lines '19 25', got '$( lns new-inside-fn )'"; fi
 
     # not-inside: KEEP L33 (log in normalCaller); DROP L38 (log in skipMe — scope name ^skip)
-    [ "$( cnt log-not-in-skip )" = "1" ]    && ok "not-inside: 1 kept (log outside skip*)"       || no "not-inside: expected 1 finding, got $( cnt log-not-in-skip )"
-    [ "$( lns log-not-in-skip )" = "33" ]   && ok "not-inside: kept exactly L33 (L38 dropped)"   || no "not-inside: expected line '33', got '$( lns log-not-in-skip )'"
+    if [ "$( cnt log-not-in-skip )" = "1" ]; then ok "not-inside: 1 kept (log outside skip*)"; else no "not-inside: expected 1 finding, got $( cnt log-not-in-skip )"; fi
+    if [ "$( lns log-not-in-skip )" = "33" ]; then ok "not-inside: kept exactly L33 (L38 dropped)"; else no "not-inside: expected line '33', got '$( lns log-not-in-skip )'"; fi
 
     # not-matches: KEEP L15 + L19 (new Widget); DROP L25 (new Pool<int> — type ^Pool)
-    [ "$( cnt new-not-pool )" = "2" ]       && ok "not-matches: 2 kept (non-Pool new)"           || no "not-matches: expected 2 findings, got $( cnt new-not-pool )"
-    [ "$( lns new-not-pool )" = "15 19" ]   && ok "not-matches: kept exactly L15,L19 (L25 dropped)" || no "not-matches: expected lines '15 19', got '$( lns new-not-pool )'"
+    if [ "$( cnt new-not-pool )" = "2" ]; then ok "not-matches: 2 kept (non-Pool new)"; else no "not-matches: expected 2 findings, got $( cnt new-not-pool )"; fi
+    if [ "$( lns new-not-pool )" = "15 19" ]; then ok "not-matches: kept exactly L15,L19 (L25 dropped)"; else no "not-matches: expected lines '15 19', got '$( lns new-not-pool )'"; fi
 
     # combinators output stays xmllint-clean
     "$BIN" "$COMBO" --lint-rules="$CRULES" --no-cache 2>/dev/null | xmllint --noout - 2>/dev/null \
@@ -143,7 +143,7 @@ else
 YAML
     "$BIN" "$COMBO" --lint-rules="$AND" --no-cache >"$TMP/cand" 2>/dev/null
     AND_LNS="$( grep -oE 'rule="new-and" [^>]*p="[^"]*combo.cpp:[0-9]+' "$TMP/cand" | grep -oE 'combo.cpp:[0-9]+' | grep -oE '[0-9]+$' | paste -sd' ' - )"
-    [ "$AND_LNS" = "19 25" ] && ok "inside AND (repeated key): kept exactly L19,L25" || no "inside-AND expected '19 25', got '$AND_LNS'"
+    if [ "$AND_LNS" = "19 25" ]; then ok "inside AND (repeated key): kept exactly L19,L25"; else no "inside-AND expected '19 25', got '$AND_LNS'"; fi
 
     # a malformed combinator block (empty '|' body) alerts + skips the file WHOLE, run still exits 0
     BADC="$TMP/badcombo"; mkdir -p "$BADC"
@@ -151,10 +151,10 @@ YAML
     # add a sound rule too so the dir isn't empty (empty dir → exit 1 is a DIFFERENT check)
     cp "$CRULES/inside.yml" "$BADC/sound.yml"
     "$BIN" "$COMBO" --lint-rules="$BADC" --no-cache >"$TMP/bc" 2>"$TMP/bcerr"; rc=$?
-    [ "$rc" -eq 0 ] && ok "malformed combinator block → run still exits 0" || no "malformed combinator exit $rc (expected 0)"
-    grep -qi "empty 'inside' query" "$TMP/bcerr" && ok "malformed combinator alerted (empty 'inside' named)" || no "no alert for empty combinator block"
+    if [ "$rc" -eq 0 ]; then ok "malformed combinator block → run still exits 0"; else no "malformed combinator exit $rc (expected 0)"; fi
+    if grep -qi "empty 'inside' query" "$TMP/bcerr"; then ok "malformed combinator alerted (empty 'inside' named)"; else no "no alert for empty combinator block"; fi
     grep -q 'rule="empty-inside"' "$TMP/bc" && no "malformed combinator file wrongly loaded (empty-inside present)" || ok "malformed combinator file skipped whole (empty-inside absent)"
-    grep -q 'rule="new-inside-fn"' "$TMP/bc" && ok "the sound sibling rule still loaded" || no "sound sibling rule missing after skip"
+    if grep -q 'rule="new-inside-fn"' "$TMP/bc"; then ok "the sound sibling rule still loaded"; else no "sound sibling rule missing after skip"; fi
 fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

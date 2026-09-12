@@ -23,7 +23,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/queryfix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -57,10 +57,10 @@ OUT_D3="$( c d3 )"
 #    d1 (head of the chain, nothing calls it) and rec (self-recursive only; self-loops are DROPPED by
 #    design — see header note — so it also has count=0, not a caller-resolution miss). ──────────────────
 OUT_D1="$( c d1 )"
-[ "$( cnt "$OUT_D1" )" = 0 ] && ok "--callers=d1: count=0 (head of chain, never called)" || no "--callers=d1 should be count=0, got: $OUT_D1"
+if [ "$( cnt "$OUT_D1" )" = 0 ]; then ok "--callers=d1: count=0 (head of chain, never called)"; else no "--callers=d1 should be count=0, got: $OUT_D1"; fi
 OUT_REC="$( c rec )"
-[ "$( cnt "$OUT_REC" )" = 0 ] && ok "--callers=rec: count=0 (self-recursive only; self-loops dropped by design)" || no "--callers=rec should be count=0, got: $OUT_REC"
-[ "$( ec d1 )" = 0 ] && ok "--callers=d1 exits 0 (empty result is not an error)" || no "--callers=d1 should exit 0"
+if [ "$( cnt "$OUT_REC" )" = 0 ]; then ok "--callers=rec: count=0 (self-recursive only; self-loops dropped by design)"; else no "--callers=rec should be count=0, got: $OUT_REC"; fi
+if [ "$( ec d1 )" = 0 ]; then ok "--callers=d1 exits 0 (empty result is not an error)"; else no "--callers=d1 should exit 0"; fi
 
 # ── #4: --callers of a nonexistent symbol exits cleanly (non-zero) with a clear message on stderr ───────
 BOGUS_MSG="$( "$BIN" "$FIX" --callers=totally_bogus_symbol_zzz --no-cache 2>&1 1>/dev/null )"
@@ -71,11 +71,11 @@ BOGUS_EC="$( ec totally_bogus_symbol_zzz )"
 
 # ── #5: determinism — twice, byte-identical ──────────────────────────────────────────────────────────
 A="$( c hot )"; B="$( c hot )"
-[ "$A" = "$B" ] && ok "determinism: --callers=hot byte-identical run-to-run" || no "non-deterministic --callers output"
+if [ "$A" = "$B" ]; then ok "determinism: --callers=hot byte-identical run-to-run"; else no "non-deterministic --callers output"; fi
 
 # ── xml well-formed ──────────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    c hot | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if c hot | xmllint --noout - 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi
@@ -89,7 +89,7 @@ if [ -n "$cdefs" ] && [ "$cdefs" = "$udefs" ]; then
 else
     no "P10.6: --callers defs= '$cdefs' missing or disagrees with --uses '$udefs'"
 fi
-"$BIN" "$ROOT" --callees=empty 2>/dev/null | grep -qE '<callees of="empty" defs="[0-9]+"'     && ok "P10.6: --callees carries defs= (a count=0 is now a measurement over N known defs)"     || no "P10.6: --callees root missing defs="
+if "$BIN" "$ROOT" --callees=empty 2>/dev/null | grep -qE '<callees of="empty" defs="[0-9]+"'; then ok "P10.6: --callees carries defs= (a count=0 is now a measurement over N known defs)"; else no "P10.6: --callees root missing defs="; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

@@ -1,0 +1,36 @@
+package com.example.seed
+
+import kotlin.math.max
+
+data class Point(val x: Int, val y: Int)
+
+class Counter(private val start: Int = 0) {
+    companion object {
+        const val MAX = 100
+        fun of(n: Int): Counter = Counter(n)
+    }
+
+    private var total = start
+
+    fun increment(by: Int = 1): Int {
+        total = max(total + by, 0)
+        return total
+    }
+
+    fun label(): String = "Counter(total=$total)"
+}
+
+fun Int.doubled(): Int = this * 2
+
+fun runAll(counter: Counter, content: @Composable () -> Unit): Int {
+    val values = listOf(1, 2, 3).map { it.doubled() }
+    var sum = 0
+    for (v in values) {
+        sum += counter.increment(v)
+    }
+    return sum
+}
+
+object Registry {
+    val points = mutableListOf<Point>()
+}

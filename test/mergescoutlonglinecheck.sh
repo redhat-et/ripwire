@@ -35,7 +35,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -104,7 +104,7 @@ OUT="$( "$BIN" "$REPO" --merge-scout=A,B --no-cache 2>/dev/null )"
 if [ -z "$OUT" ]; then no "merge-scout: output is empty"; echo; echo "SOME CHECKS FAILED"; exit 1; fi
 echo "merge-scout output:"; echo "$OUT"; echo
 
-echo "$OUT" | grep -q 'arms="2"' && ok "2 arms reported" || no "expected arms=2: $( echo "$OUT" | grep -o 'arms="[0-9]*"' | head -1 )"
+if echo "$OUT" | grep -q 'arms="2"'; then ok "2 arms reported"; else no "expected arms=2: $( echo "$OUT" | grep -o 'arms="[0-9]*"' | head -1 )"; fi
 
 # ── the core fix: absorb.sh (zero real-body symbols) is COUNTED, not silently omitted ────────────────────
 echo "$OUT" | grep -q '<arm ref="A"[^>]*changed="2"' \
@@ -153,7 +153,7 @@ echo "$OUT" | xmllint --noout - 2>/dev/null \
 D1="$( "$BIN" "$REPO" --merge-scout=A,B --no-cache 2>/dev/null )"
 D2="$( "$BIN" "$REPO" --merge-scout=A,B --no-cache 2>/dev/null )"
 D3="$( "$BIN" "$REPO" --merge-scout=A,B --no-cache 2>/dev/null )"
-{ [ "$D1" = "$D2" ] && [ "$D2" = "$D3" ]; } && ok "determinism ×3: byte-identical" || no "determinism: output differs across runs"
+if { [ "$D1" = "$D2" ] && [ "$D2" = "$D3" ]; }; then ok "determinism ×3: byte-identical"; else no "determinism: output differs across runs"; fi
 
 # ── a lone arm touching ONLY absorb.sh (no companion symbol file) still reports changed="1", not "0" ──────
 git -C "$REPO" checkout -qb C

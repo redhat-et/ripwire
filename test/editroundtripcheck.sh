@@ -34,7 +34,7 @@ BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
@@ -129,11 +129,11 @@ for pair in $langs; do
             && ok "(D) $f: the raw CDATA text differs from the bytes (]]> split) and the element says scrubbed=\"1\"" \
             || no "(D) $f: the raw CDATA text differs from the bytes and NOTHING on the element says so"
     fi
-    grep -q 'probe_crlf' "$TMP/raw" && { grep -q $'\r' "$TMP/raw" && ok "(A) crlf.py: the served CDATA keeps its CRLF endings" || no "(A) crlf.py: the served CDATA lost its CRLF endings"; }
+    grep -q 'probe_crlf' "$TMP/raw" && { if grep -q $'\r' "$TMP/raw"; then ok "(A) crlf.py: the served CDATA keeps its CRLF endings"; else no "(A) crlf.py: the served CDATA lost its CRLF endings"; fi; }
 done
 [ "$nclean" = "$nlang" ] && ok "(A) $nclean/$nlang languages round-trip byte-exact through --expand → --replace-symbol-body (C, C++, ObjC, Python, JS, TS, Go, Rust, Java, Ruby, Swift, C#, Bash, CRLF, ]]>)" \
                         || no "(A) only $nclean/$nlang languages round-trip byte-exact"
-command -v xmllint >/dev/null 2>&1 && { fresh; ( cd "$TMP/w" && "$BIN" . --expand=cdata.cpp:pick --top-k=0 --no-cache 2>/dev/null ) | xmllint --noout - 2>/dev/null && ok "(A) the ]]>-split document is well-formed XML" || no "(A) the ]]>-split document is not well-formed"; }
+command -v xmllint >/dev/null 2>&1 && { if fresh; ( cd "$TMP/w" && "$BIN" . --expand=cdata.cpp:pick --top-k=0 --no-cache 2>/dev/null ) | xmllint --noout - 2>/dev/null; then ok "(A) the ]]>-split document is well-formed XML"; else no "(A) the ]]>-split document is not well-formed"; fi; }
 
 # ── ARM B — the MCP twins: fetch_body → replace_symbol_body, byte-exact ─────────────────────────────────
 mcp(){ # $1 = the tools/call JSON (params) ; prints the result text or __ERROR__:msg
@@ -156,7 +156,7 @@ for pair in probe.py:probe_py probe.cpp:probe_cpp cdata.cpp:pick crlf.py:probe_c
     [ -n "$BODY_JSON" ] || { no "(B) $f: fetch_body returned no body ($( printf '%s' "$FB" | head -c 160 ))"; continue; }
     RS="$( mcp '{"name":"replace_symbol_body","arguments":{"path":".","symbol":"'"$s"'","file":"'"$f"'","new_body":'"$BODY_JSON"'}}' )"
     case "$RS" in __ERROR__*) no "(B) $f: replace_symbol_body refused the fetched body: $RS";; esac
-    clean && ok "(B) $f:$s — MCP fetch_body → replace_symbol_body is byte-exact" || { no "(B) $f:$s — the MCP round trip is not byte-identical"; ( cd "$TMP/w" && git diff | sed -n '5,12p' ); }
+    if clean; then ok "(B) $f:$s — MCP fetch_body → replace_symbol_body is byte-exact"; else no "(B) $f:$s — the MCP round trip is not byte-identical"; ( cd "$TMP/w" && git diff | sed -n '5,12p' ); fi
 done
 
 # ── ARM C — the heredoc payload (one trailing newline) folds into the seam, disclosed ───────────────────
@@ -165,20 +165,20 @@ fresh; extract <( cd "$TMP/w" && "$BIN" . --expand=probe.py:probe_py --top-k=0 -
 ( cd "$TMP/w" && "$BIN" . --replace-symbol-body=probe_py --edit-target-file=probe.py --edit-payload="$TMP/heredoc" ) >"$TMP/c.json" 2>"$TMP/c.err"
 clean && ok "(C) a heredoc payload (body + one trailing newline) replaces byte-exact: the newline folds into the seam" \
       || { no "(C) a heredoc payload leaves one extra blank line after the definition (git diff not clean)"; ( cd "$TMP/w" && git diff | sed -n '5,12p' | sed 's/^/        /' ); }
-grep -q '"trailing_newline_folded":true' "$TMP/c.json" && ok "(C) the receipt discloses trailing_newline_folded:true" || no "(C) the receipt does not disclose the fold ($( head -c 200 "$TMP/c.json" ))"
+if grep -q '"trailing_newline_folded":true' "$TMP/c.json"; then ok "(C) the receipt discloses trailing_newline_folded:true"; else no "(C) the receipt does not disclose the fold ($( head -c 200 "$TMP/c.json" ))"; fi
 fresh
 ( cd "$TMP/w" && "$BIN" . --replace-symbol-body=probe_py --edit-target-file=probe.py --edit-payload="$TMP/body" ) >"$TMP/c2.json" 2>/dev/null
-grep -q '"trailing_newline_folded":false' "$TMP/c2.json" && ok "(C) an exact payload reports trailing_newline_folded:false" || no "(C) an exact payload does not report trailing_newline_folded:false"
+if grep -q '"trailing_newline_folded":false' "$TMP/c2.json"; then ok "(C) an exact payload reports trailing_newline_folded:false"; else no "(C) an exact payload does not report trailing_newline_folded:false"; fi
 # a DELIBERATE blank line (two trailing newlines) survives: one folds, one stays
 fresh; { cat "$TMP/body"; printf '\n\n'; } > "$TMP/two"
 ( cd "$TMP/w" && "$BIN" . --replace-symbol-body=probe_py --edit-target-file=probe.py --edit-payload="$TMP/two" ) >/dev/null 2>&1
-python3 - "$TMP/w/probe.py" <<'PY' && ok "(C) two trailing newlines: one folds, the deliberate blank line survives" || no "(C) two trailing newlines did not leave exactly one extra blank line"
+if python3 - "$TMP/w/probe.py" <<'PY'; then ok "(C) two trailing newlines: one folds, the deliberate blank line survives"; else no "(C) two trailing newlines did not leave exactly one extra blank line"; fi
 import sys; t = open(sys.argv[1]).read(); sys.exit(0 if '    return ""\n\n\n\ndef other_py' in t and '    return ""\n\n\n\n\ndef other_py' not in t else 1)
 PY
 # MCP twin: new_body ending in "\n"
 fresh; BODY_NL="$( python3 -c 'import sys,json; print(json.dumps(open(sys.argv[1]).read() + "\n"))' "$TMP/body" )"
 RS="$( mcp '{"name":"replace_symbol_body","arguments":{"path":".","symbol":"probe_py","file":"probe.py","new_body":'"$BODY_NL"'}}' )"
-clean && printf '%s' "$RS" | grep -q '"trailing_newline_folded":true' && ok "(C) MCP replace_symbol_body folds a trailing newline the same way and says so" || no "(C) the MCP twin does not fold/disclose ($( printf '%s' "$RS" | head -c 160 ))"
+if clean && printf '%s' "$RS" | grep -q '"trailing_newline_folded":true'; then ok "(C) MCP replace_symbol_body folds a trailing newline the same way and says so"; else no "(C) the MCP twin does not fold/disclose ($( printf '%s' "$RS" | head -c 160 ))"; fi
 
 # ── ARM G — insert seams: the block is separated by the file's OWN definition separator ────────────────
 printf 'int seam_new( int x )\n{\n    return x + 9;\n}\n' > "$TMP/new.cpp"          # heredoc-shaped: trailing newline, no blank lines
@@ -207,7 +207,7 @@ fresh
 ( cd "$TMP/w" && "$BIN" . --insert-after-symbol=seam_a --edit-target-file=seam.cpp --edit-payload="$TMP/new.cpp" ) >"$TMP/g1.json" 2>/dev/null
 [ "$( head -11 "$TMP/w/seam.cpp" )" = "$expect_cpp_after" ] && ok "(G) --insert-after-symbol keeps ONE blank line each side in a one-blank-line C++ file" \
     || { no "(G) --insert-after-symbol: the inserted definition is not separated like its neighbours:"; head -12 "$TMP/w/seam.cpp" | sed 's/^/        /'; }
-grep -q '"separator_padded":' "$TMP/g1.json" && ok "(G) the receipt discloses separator_padded" || no "(G) the receipt does not disclose separator_padded"
+if grep -q '"separator_padded":' "$TMP/g1.json"; then ok "(G) the receipt discloses separator_padded"; else no "(G) the receipt does not disclose separator_padded"; fi
 fresh
 ( cd "$TMP/w" && "$BIN" . --insert-before-symbol=seam_b --edit-target-file=seam.py --edit-payload="$TMP/new.py" ) >"$TMP/g2.json" 2>/dev/null
 [ "$( head -9 "$TMP/w/seam.py" )" = "$expect_py_before" ] && ok "(G) --insert-before-symbol keeps TWO blank lines each side in a two-blank-line Python file" \
@@ -220,7 +220,7 @@ fresh; printf 'def seam_new(x):\n    return x + 9\n\n\n' > "$TMP/new2.py"
     || no "(G) a payload carrying its own separator was padded again or not disclosed as 0"
 # MCP twin
 fresh; RS="$( mcp '{"name":"insert_after_symbol","arguments":{"path":".","symbol":"seam_a","file":"seam.cpp","text":"int seam_new( int x )\n{\n    return x + 9;\n}\n"}}' )"
-[ "$( head -11 "$TMP/w/seam.cpp" )" = "$expect_cpp_after" ] && ok "(G) MCP insert_after_symbol lands the same bytes" || no "(G) MCP insert_after_symbol lands different bytes ($( printf '%s' "$RS" | head -c 120 ))"
+if [ "$( head -11 "$TMP/w/seam.cpp" )" = "$expect_cpp_after" ]; then ok "(G) MCP insert_after_symbol lands the same bytes"; else no "(G) MCP insert_after_symbol lands different bytes ($( printf '%s' "$RS" | head -c 120 ))"; fi
 
 # ── ARM H — --edit-plan goes through the same seam rules ───────────────────────────────────────────────
 fresh; mkdir -p "$TMP/w/plans"; cp "$TMP/new.cpp" "$TMP/w/plans/1.txt"; cp "$TMP/new.py" "$TMP/w/plans/2.txt"; { cat "$TMP/body"; printf '\n'; } > "$TMP/w/plans/3.txt"
@@ -250,7 +250,7 @@ fresh
 ( cd "$TMP/w" && "$BIN" . --expand=cred.py:connect --top-k=0 --no-cache --no-redact ) >"$TMP/nored.xml" 2>/dev/null
 extract "$TMP/nored.xml" connect "$TMP/body" "$TMP/raw" "$TMP/attrs" 2>/dev/null
 ( cd "$TMP/w" && "$BIN" . --replace-symbol-body=connect --edit-target-file=cred.py --edit-payload="$TMP/body" ) >/dev/null 2>&1
-clean && ! grep -q 'redacted=1' "$TMP/attrs" && ok "(F) --no-redact serves the bytes (no redacted= on the element) and they round-trip byte-exact" || no "(F) the --no-redact body does not round-trip"
+if clean && ! grep -q 'redacted=1' "$TMP/attrs"; then ok "(F) --no-redact serves the bytes (no redacted= on the element) and they round-trip byte-exact"; else no "(F) the --no-redact body does not round-trip"; fi
 
 # ── ARM F2 — the TRUE NEGATIVE: source that legitimately spells the marker still round-trips ───────────
 # R1, wave-2 verifier, 2026-09-05. ARM F above only ever exercised the true positive, and the guard it
@@ -296,7 +296,7 @@ for s in legend_doc legend_real; do
         RS="$( mcp '{"name":"replace_symbol_body","arguments":{"path":".","symbol":"'"$s"'","file":"legend.py","new_body":'"$BODY_JSON"'}}' )"
         case "$RS" in
             __ERROR__*) no "(F2) legend.py:$s — MCP replace_symbol_body refused the body it just served: $( printf '%s' "$RS" | head -c 200 )";;
-            *) clean && ok "(F2) legend.py:$s — MCP fetch_body → replace_symbol_body is byte-exact" || no "(F2) legend.py:$s — the MCP round trip is not byte-identical";;
+            *) if clean; then ok "(F2) legend.py:$s — MCP fetch_body → replace_symbol_body is byte-exact"; else no "(F2) legend.py:$s — the MCP round trip is not byte-identical"; fi;;
         esac
     else
         no "(F2) legend.py:$s — fetch_body returned no body ($( printf '%s' "$FB" | head -c 160 ))"

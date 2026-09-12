@@ -31,7 +31,7 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 FIX="$TMP/shadowfix"
 mkdir -p "$FIX"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -483,13 +483,13 @@ done
 # ── (e) determinism + well-formedness ─────────────────────────────────────────────────────────────────
 A="$( "$BIN" "$FIX" --uses=run --no-cache 2>/dev/null )"
 B="$( "$BIN" "$FIX" --uses=run --no-cache 2>/dev/null )"
-[ "$A" = "$B" ] && ok "determinism (byte-identical run-to-run)" || no "non-deterministic --uses output"
+if [ "$A" = "$B" ]; then ok "determinism (byte-identical run-to-run)"; else no "non-deterministic --uses output"; fi
 C="$( "$BIN" "$FIX" --no-cache 2>/dev/null )"
 D="$( "$BIN" "$FIX" --no-cache 2>/dev/null )"
-[ "$C" = "$D" ] && ok "determinism (default map byte-identical run-to-run)" || no "non-deterministic default map"
+if [ "$C" = "$D" ]; then ok "determinism (default map byte-identical run-to-run)"; else no "non-deterministic default map"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$A" | xmllint --noout - 2>/dev/null && ok "--uses xml well-formed" || no "--uses xml malformed"
-    printf '%s' "$C" | xmllint --noout - 2>/dev/null && ok "default map xml well-formed" || no "default map xml malformed"
+    if printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "--uses xml well-formed"; else no "--uses xml malformed"; fi
+    if printf '%s' "$C" | xmllint --noout - 2>/dev/null; then ok "default map xml well-formed"; else no "default map xml malformed"; fi
 else
     ok "xml well-formed (xmllint absent — skipped)"
 fi

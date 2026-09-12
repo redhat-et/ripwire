@@ -32,7 +32,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # BOTH seams: positional and RIPWIRE_BIN
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -48,7 +48,7 @@ run(){ perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" "$@" --no-cache >"$TMP/out" 2>
 
 # ── (a) the found case: a two-dot ref range is refused, named, and given the expansion probe ──────────
 RC="$( run --test-gate=deadbeef..HEAD )"
-[ "$RC" = 1 ] && ok "(a) A..B exits 1" || no "(a) A..B exit was $RC, expected 1 (the found defect: silent changed=0 at exit 0)"
+if [ "$RC" = 1 ]; then ok "(a) A..B exits 1"; else no "(a) A..B exit was $RC, expected 1 (the found defect: silent changed=0 at exit 0)"; fi
 [ -s "$TMP/out" ] && no "(a) A..B still wrote a report body to stdout ($( head -c 120 "$TMP/out" ))" \
                   || ok "(a) A..B emits NO report — a refusal never carries a changed=\"0\" answer"
 grep -qF 'deadbeef..HEAD' "$TMP/err" && ok "(a) the refusal NAMES the offending token verbatim" \
@@ -58,13 +58,13 @@ grep -qF 'diff --name-only' "$TMP/err" && ok "(a) the refusal offers the adjacen
 
 # ── (b) the three-dot form: refused the same way, never silently read as A..B ─────────────────────────
 RC="$( run --test-gate=deadbeef...HEAD )"
-[ "$RC" = 1 ] && ok "(b) A...B exits 1" || no "(b) A...B exit was $RC, expected 1"
+if [ "$RC" = 1 ]; then ok "(b) A...B exits 1"; else no "(b) A...B exit was $RC, expected 1"; fi
 grep -qF 'deadbeef...HEAD' "$TMP/err" && ok "(b) the three-dot token is named verbatim (not silently rewritten)" \
                                        || { no "(b) three-dot token not named"; head -2 "$TMP/err"; }
 
 # ── (c) the half-typed --test-gate= is refused, not run as the bare git-diff form ─────────────────────
 RC="$( run --test-gate= )"
-[ "$RC" = 1 ] && ok "(c) --test-gate= exits 1" || no "(c) --test-gate= exit was $RC, expected 1"
+if [ "$RC" = 1 ]; then ok "(c) --test-gate= exits 1"; else no "(c) --test-gate= exit was $RC, expected 1"; fi
 [ -s "$TMP/out" ] && no "(c) --test-gate= still wrote to stdout" || ok "(c) --test-gate= wrote nothing to stdout"
 grep -qF -- '--test-gate' "$TMP/err" && grep -q 'is empty' "$TMP/err" \
     && ok "(c) the refusal names the flag and states the real problem (empty value)" \
@@ -72,7 +72,7 @@ grep -qF -- '--test-gate' "$TMP/err" && grep -q 'is empty' "$TMP/err" \
 
 # ── (d) a token matching no indexed file: named, with the --skipped adjacent probe ────────────────────
 RC="$( run --test-gate=zz_no_such_file_xyz.zzz )"
-[ "$RC" = 1 ] && ok "(d) a no-such-file token exits 1" || no "(d) no-such-file exit was $RC, expected 1"
+if [ "$RC" = 1 ]; then ok "(d) a no-such-file token exits 1"; else no "(d) no-such-file exit was $RC, expected 1"; fi
 [ -s "$TMP/out" ] && no "(d) no-such-file still wrote a report body" || ok "(d) no-such-file emits NO report"
 grep -qF 'zz_no_such_file_xyz.zzz' "$TMP/err" && ok "(d) the refusal names the token" \
                                                || { no "(d) refusal does not name the token"; head -2 "$TMP/err"; }

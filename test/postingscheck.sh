@@ -29,7 +29,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'chmod -R u+rw "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -99,7 +99,7 @@ fi
 # ── (b) CACHE-VERSION BUMP: an old-version rich cache is rejected and rebuilt cleanly ─────────────────
 stats(){ RIPWIRE_CACHE_STATS=1 "$BIN" "$TMP/rf" --cache="$TMP/rf.rich" --for="$QFIX" 2>&1 >/dev/null | grep -oE 'reparsed=[0-9]+' | cut -d= -f2; }
 R0="$( stats )"
-[ "$R0" = "0" ] && ok "(b) primed rich cache warm-hits (reparsed=0)" || no "(b) primed rich cache did not warm-hit (reparsed=$R0)"
+if [ "$R0" = "0" ]; then ok "(b) primed rich cache warm-hits (reparsed=0)"; else no "(b) primed rich cache did not warm-hit (reparsed=$R0)"; fi
 python3 - "$TMP/rf.rich" <<'PY'
 # decrement the header version field (bytes 4..8, native little-endian on this arch) and RE-SEAL the
 # 8-lane-FNV checksum trailer, so the load guard that fires is the VERSION guard, not the checksum guard.
@@ -127,7 +127,7 @@ R1="$( stats )"
     && ok "(b) old-version cache rejected — full clean rebuild (reparsed=$R1 of $NF files)" \
     || no "(b) old-version cache NOT rejected (reparsed=$R1, want > 0)"
 R2="$( stats )"
-[ "$R2" = "0" ] && ok "(b) rebuilt cache warm-hits again (reparsed=0 on the second run)" || no "(b) rebuild did not self-heal (reparsed=$R2)"
+if [ "$R2" = "0" ]; then ok "(b) rebuilt cache warm-hits again (reparsed=0 on the second run)"; else no "(b) rebuild did not self-heal (reparsed=$R2)"; fi
 
 # ── (c) DETERMINISM ×3 on the warm rich-cache path ────────────────────────────────────────────────────
 "$BIN" src --cache="$TMP/src.rich" --for="$QSRC" >"$TMP/d1" 2>/dev/null

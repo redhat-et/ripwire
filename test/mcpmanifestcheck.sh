@@ -101,6 +101,48 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # obliges), +1,568 B in all; nothing else moved. The same rule (a DECLARED argument, its bytes attributed, never
 # prose) and the same posture (159 B of headroom). What this buys back per session: every XML answer under
 # legend:"compact" drops 2.9–5.2 KB of repeated legend (compactlegendcheck (M): edit_check 5,561 → 582 B).
+# RE-ANCHORED 2026-09-10 (--edit-check answer-safe window): 41,000 → 41,300, measured 41,129 (from 40,895).
+# TWO declared optional arguments, `limit` and `offset`, on ONE verb — `edit_check`, which now honors them
+# (it windows its UNFLAGGED caller rows; the flagged callers, their sites_l= and the def census are never
+# paged, so the verdict cannot be paged away). Attributed against a build of the parent commit: edit_check
+# +234 B and nothing else moved — 92 B for the `limit` property entry and 92 B for `offset` (the schema
+# envelope plus the description arm (A/M12) obliges every declared property to carry), plus the 49 B clause
+# in the tool description that says WHAT they page, without which a router reads a paging verb whose page is
+# undefined. Same rule as the two re-anchors above (a DECLARED argument, its bytes attributed here, in the
+# commit that lands it, never prose) and the same posture: 171 B of headroom, less than one more argument.
+# RE-ANCHORED 2026-09-10 (C1 F-07/F-10, the listing-paging round): 41,300 -> 42,000, measured 41,830 (from
+# 41,220). TWO declared optional arguments, `limit` and `offset`, on TWO verbs — `flags` and
+# `situational_awareness`, which joined cli.h's honorsPaging set in the same commit (--flags windows the read
+# SITES under a gate and --flip its six context listings; --situ windows its blast-radius and co-change
+# sections — in both, the answer rows, the gate rows and tests_to_run, are never paged). Attributed tool by
+# tool against a build of the parent commit (6afaa457), by this gate's own metric:
+#   flags                  +329 = +184 B schema (92 for the `limit` property entry, 92 for `offset`: the
+#                                 envelope plus the description arm (A/M12) obliges every declared property
+#                                 to carry) +145 B of description, the clause saying WHAT they page — this
+#                                 verb has TWO lenses (the gate table and --flip), and a router that cannot
+#                                 tell which rows page from which rows are the answer has an undefined page
+#   situational_awareness  +281 = +184 B schema, same two entries, +97 B of description — shorter because
+#                                 the clause has one lens to describe, and it has to say the DEFAULT differs
+#                                 from the CLI's (unbounded here; the payload always served every row, so
+#                                 limit is relief for a caller who wants less, never a new cut)
+#   nothing else moved.
+# Same rule as the three re-anchors above (a DECLARED argument, its bytes attributed here, in the commit
+# that lands it, never prose) and the same posture: 170 B of headroom, less than one more argument entry.
+#
+# RE-ANCHORED 2026-09-10 (MCP no_route, audit F-R1-07): 41,300 → 41,650, measured 41,474 (from 41,220).
+# ONE declared optional argument, `no_route`, on the TWO verbs that ROUTE — `for` and `explore` (and its
+# `pack_task` alias, which shares explore's stanza) — the MCP twin of the CLI --no-route. Attributed against
+# a build of the parent commit: schemas 17,161 → 17,415 B (+254, two property stanzas at +127 each: the
+# schema envelope plus the description every declared property is obliged to carry) and DESCRIPTIONS
+# BYTE-IDENTICAL at 19,632 B. A first draft added a pointer clause to both tool descriptions (+43 B after
+# trimming to one); it was removed rather than re-anchored around, because this file's rule is that the
+# ceiling moves for a declared argument's obliged bytes and never for prose, and the schema property is
+# where a client renders an argument anyway. Same posture as the three re-anchors above: 176 B of headroom.
+# What it buys: `for`'s header names WHICH ranker answered and why, and until now an agent that read route=
+# and disagreed had no way to ask for the other one — the CLI's own recovery from a route mis-fire was
+# unreachable from MCP (measured: --for="parse tree" on this repo routes name-exact and returns three rows
+# from bench/ and test/, missing parseTree, which --no-route finds at rank 1).
+#
 # ── THE CEILING, DECIDED 2026-09-05 (terminality round A, lane M / M2): IT STAYS 41,000. ─────────────
 # Registered as an OWNER DECISION with the arithmetic, so it can be overruled with numbers rather than
 # re-litigated. Measured on this tree at the M1 commit: manifest 40,841 B (~10,210 tokens), descriptions
@@ -150,7 +192,17 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 #   TOTAL        40,986 -> 40,902 B; nothing else moved. Raw wire bytes (this gate measures json.dumps
 #                      with ensure_ascii, which spends 6 for each em dash instead of 3): 40,901 -> 40,811.
 # Headroom goes back UP, 14 B -> 98 B. That is item 5 below working, not a new allowance.
-CEILING = 41000
+# RE-ANCHORED 2026-09-10 (the string/perf round's integration, two lanes each declaring arguments):
+#   for, explore      +127 B each = +254 B: `no_route` (mirrors the CLI --no-route so an MCP agent that reads
+#                      route= and disagrees has a recovery path — R1 finding F-R1-07)
+#   flags             +329 B (+145 B description, `limit`/`offset` properties): the dark-flag site listing and
+#                      the six --flip listings join the paging family and disclose their cuts (C1 F-07)
+#   situational_awareness +281 B (+97 B description, `limit`/`offset`): --situ's blast-radius and co-change
+#                      listings page instead of cutting silently at 8 (C1 F-10)
+#   TOTAL             41,220 -> 42,084 B on the merged tree, attributed tool by tool against main's binary
+#                      (both lanes had re-anchored alone — 41,650 and 42,000 — and the sum is what ships).
+# Headroom after this line: 116 B, less than one declared argument, which is rule 5 above working.
+CEILING = 42200
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )

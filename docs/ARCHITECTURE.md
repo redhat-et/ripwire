@@ -122,10 +122,15 @@ Two of those carry a stated floor rather than a silence. **PHP**: dynamic dispat
 those sites produce no edge; a `use` directive is captured for `--uses`/`--deps` but never narrows a
 call, because PSR-4 maps a namespace onto a directory through a `composer.json` block this tool does
 not read. **Lua**: inheritance *is* `setmetatable( D, { __index = B } )`, an ordinary runtime call
-over an ordinary table, so a Lua corpus correctly reports no inheritance edges at all, and `require`
-is a plain function call rather than an import directive (as in Ruby), so a `.lua` file is never a
-node in the `--deps`/`--arch` graph. Both floors are asserted from the outside by
-`test/phpcheck.sh` and `test/luacheck.sh` so they stay decisions rather than drift.
+over an ordinary table, so a Lua corpus correctly reports no inheritance edges at all. A bare `require`
+call is read the way `package.path` reads it: a string-literal argument that resolves to exactly one
+file adds a dependency edge. Dots become directory separators (`require "a.b"` finds `a/b.lua`), a
+package also resolves through its `init.lua` (`require "pkg"` finds `pkg/init.lua`), and the file is
+looked for from the requiring file's directory up to the crawl root, directly and under `src/` and
+`lua/`. A qualified call (`loader.require "x"` is somebody's own function, not the loader), a dynamic or
+concatenated argument, an external module, or a name that more than one file answers adds no edge. Both
+floors are asserted from the outside by `test/phpcheck.sh`, `test/luacheck.sh` and
+`test/luarequirecheck.sh` so they stay decisions rather than drift.
 
 <a id="elixir-extraction"></a>
 
@@ -180,8 +185,52 @@ function headers carrying defaults do not preserve transitive caller reachabilit
 
 `test/elixircheck.sh`, `test/eliximportcheck.sh` and `test/elixirsemanticcheck.sh` cover extraction,
 metrics, exact target selection against decoys, lexical boundaries, contracts, CLI/MCP use-site parity,
-call-site mutation and cold/warm determinism. This extraction uses parser revision 87 (rich 88),
-mirrored in `src/quality.h`; record format 18 and snapshot scheme 8 are unchanged.
+call-site mutation and cold/warm determinism. This extraction uses parser revision 95 (rich 96),
+mirrored in `src/quality.h`; record format 21 and snapshot scheme 10 are unchanged.
+<a id="dart-extraction"></a>
+**Dart extraction.** tree-sitter-dart makes `function_body` a SIBLING of `function_signature` /
+`method_signature`, never a `body` field and never a child. The shared ancestor walk in
+`ingest_sidecap.h` therefore finds no body, the definition's span stops at the signature, and every
+call inside the body attributes to the nearest ENCLOSING symbol instead — measured on
+`test/dartfix` before the fix: `square` landed on the class `Calculator` rather than the method
+`accumulate`, and the three top-level edges were lost entirely (5 edges where 8 were expected). A
+`Lang::Dart` arm adopts the immediately-following `function_body` sibling and runs the span, the
+row extent and `complexityOf` through it — the same shape LB-E already uses for a test-macro
+block. An abstract member (`void f();`) has no such sibling, so it stays a declaration. Every
+other language is byte-identical across the change (verified against the pre-change binary on
+`src/` and on the multi-language `test/` fixture corpus). `test/dartcheck.sh` covers extraction,
+cascades, the constructor floor, call-site mutation, metrics and cold/warm determinism.
+
+<a id="kotlin-extraction"></a>
+**Kotlin extraction.** tree-sitter-kotlin gives its declarations no named fields, so
+`queries/kotlin/tags.scm` captures positionally and two ingest arms follow. `function_body`,
+`class_body` and `enum_class_body` are positional CHILDREN, so the ObjC body fallback in
+`ingest_sidecap.h` covers Kotlin too — without it every Kotlin definition read as bodyless. And
+`kotlinEnclosingScopeOf` (`ingest_names.h`) walks class/object/companion owners by their positional
+`type_identifier`, so members carry scoped canonical ids. A bodyless Kotlin TYPE
+(`data class User(val name: String)`, `class Token`, `interface Marker`) is still a definition —
+Kotlin has no forward declarations — so `isDefinitionNotDeclaration` (`model.h`) keeps the decl/def
+collapse from deleting it, and the collapse never lets a Kotlin body evict another language's
+declaration or the reverse. Kotlin and Java share one call graph through `langCompatible`, and
+`keepOwnJvmLanguageCandidates` (`graph.h`) lets a reference reach the other JVM language only when its
+own defines no candidate of that name, so adding `.kt` files never moves a Java edge (measured on
+square/retrofit: `Response.body` keeps its 279 callers). Stated floors: a navigation receiver (`A.f()`)
+does not narrow candidates, so a qualified call binds a same-named Kotlin definition over the Java class
+it names; that same own-language rule runs before the locality tiers, so a Kotlin call can lose a Java
+target in its own directory to Kotlin definitions elsewhere; an `expect` TYPE is a definition like any
+other, so a multiplatform `expect`/`actual` type pair is two candidates (measured on ktor against a build without the rule, it removes 138 Kotlin (caller, callee)
+pairs and adds 34; 48 of the removed and 4 of the added call a name ktor declares as an `expect`/`actual`
+class, interface or object); `.kts` is not a `kLangTable` row; and
+`ev=` is withheld (`evCountedLang`). A file whose string templates nest past `kMaxKotlinStringNestDepth`
+(128) is refused before the parse and rowed by `--skipped`, and the vendored scanner itself refuses a push
+past its 512-entry stack instead of aborting (`third_party/patches/kotlin/001-stack-push-no-abort`; `002` fixes a
+triple-quoted string that ends in an escaped `$`). `test/kotlincheck.sh`
+covers extraction, both bridge directions in flat and split layouts, the Java-edge invariant, the
+bodyless-type collapse, hostile nesting, metrics and determinism.
+
+Elixir extraction landed at revision 78 (rich 79) — `kParserVer` in `src/ingest_cache.h`, mirrored by
+`kIngestParserVerMirror` in `src/quality.h`. The required `qschemetrip` source-change pin is refreshed
+for this extraction change; snapshot scheme 8 is unchanged.
 
 The three config lanes are *data*, not code: they emit `t="sec"` symbols and **zero call edges**, and
 `langCompatible` keeps a config key from ever resolving a same-spelled code symbol. They differ in
@@ -269,7 +318,9 @@ Edge rules:
 
 ### rank — Personalized PageRank
 
-Power iteration over the in-edge CSR, parallelized over **fixed contiguous row blocks**. Constants
+Power iteration over the in-edge CSR, single-threaded. Every reduction (the dangling mass, the L1 residual)
+folds **fixed contiguous blocks** of `kReductionBlockSize = 1024` in canonical index order, so the summation tree
+is a property of the source, never of thread count or timing. Constants
 live in a named configuration struct, not as literals in the loop: damping `α = 0.85`, L1 residual
 tolerance `τ = 1e-6`, `maxIter = 100`, diff-teleport concentration `β = 0.7`.
 

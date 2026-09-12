@@ -11,7 +11,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 
@@ -27,7 +27,7 @@ ec(){ "$BIN" . --quality-delta --no-cache >/dev/null 2>&1; echo $?; }
 
 # ── 1) snapshot the clean state ───────────────────────────────────────────────────────────────────────
 "$BIN" . --quality-baseline --no-cache >/dev/null 2>&1
-[ -f .ripwire_quality_baseline ] && ok "--quality-baseline writes the sidecar" || no "no .ripwire_quality_baseline written"
+if [ -f .ripwire_quality_baseline ]; then ok "--quality-baseline writes the sidecar"; else no "no .ripwire_quality_baseline written"; fi
 
 # ── 2) no change ⇒ zero regressions, exit 0 ───────────────────────────────────────────────────────────
 { dq | grep -q 'regressions="0"'; } && [ "$( ec )" = 0 ] \
@@ -59,9 +59,9 @@ printf '%s' "$OUT" | grep -q 'kind="dead-code" sym="complex_fn"' \
     && no "complex_fn wrongly flagged dead (it IS called by callc)" || ok "called additions not flagged dead (precision)"
 
 # ── 4) determinism + XML well-formed ──────────────────────────────────────────────────────────────────
-[ "$OUT" = "$( dq )" ] && ok "deterministic (delta byte-identical run-to-run)" || no "non-deterministic delta"
+if [ "$OUT" = "$( dq )" ]; then ok "deterministic (delta byte-identical run-to-run)"; else no "non-deterministic delta"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$OUT" | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if printf '%s' "$OUT" | xmllint --noout - 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi
@@ -79,7 +79,7 @@ printf 'int existing_public( int a );\n'                                      > 
 ( cd "$QD" && "$BIN" . --quality-baseline --no-cache >/dev/null 2>&1 )
 dqd(){ ( cd "$QD" && "$BIN" . --quality-delta --no-cache 2>/dev/null ); }
 ecd(){ ( cd "$QD" && "$BIN" . --quality-delta --no-cache >/dev/null 2>&1; echo $? ); }
-[ "$( ecd )" = 0 ] && ok "Q1 sub-corpus: unchanged → exit 0" || { no "Q1 sub-corpus should start clean (exit $( ecd ))"; dqd; }
+if [ "$( ecd )" = 0 ]; then ok "Q1 sub-corpus: unchanged → exit 0"; else { no "Q1 sub-corpus should start clean (exit $( ecd ))"; dqd; }; fi
 
 # now regress each kind at once: grow() LOC over kLocBar(60), deepen() nesting over kNestBar(4),
 # widen() params over kParamBar(5), and add a NEW public header symbol (contract drift).
@@ -90,20 +90,22 @@ ecd(){ ( cd "$QD" && "$BIN" . --quality-delta --no-cache >/dev/null 2>&1; echo $
 } > "$QD/src/g.cpp"
 printf 'int existing_public( int a );\nint newly_public( int a );\n' > "$QD/src/api.h"
 OD="$( dqd )"
-[ "$( ecd )" = 2 ] && ok "Q1 regressions → exit 2" || no "Q1 regressions should exit 2 (got $( ecd ))"
+if [ "$( ecd )" = 2 ]; then ok "Q1 regressions → exit 2"; else no "Q1 regressions should exit 2 (got $( ecd ))"; fi
 printf '%s' "$OD" | grep -q 'kind="verbosity" sym="grow" was="' \
     && ok "verbosity regression: grow flagged (LOC grew over the bar)"  || { no "verbosity regression missing"; printf '%s\n' "$OD" | tr '>' '\n' | grep '<r '; }
 printf '%s' "$OD" | grep -q 'kind="nesting" sym="deepen" was="' \
     && ok "nesting regression: deepen flagged (nesting grew over the bar)" || no "nesting regression missing"
 printf '%s' "$OD" | grep -q 'kind="params" sym="widen" was="' \
     && ok "params regression: widen flagged (param count grew over the bar)" || no "params regression missing"
-printf '%s' "$OD" | grep -q 'kind="api-surface" sym="newly_public"' \
-    && ok "api-surface regression: newly_public flagged (new exported symbol)" || no "api-surface regression missing"
+# Q-DIAL-4 (2026-09-10): a brand-new export is counted on the root, not printed as a row it can never gate on.
+printf '%s' "$OD" | grep -q 'api-new-surface="[1-9]' \
+    && ok "api-surface: the new exported symbol is counted on the root (api-new-surface)" \
+    || { no "api-surface: newly_public not counted"; printf '%s\n' "$OD" | tr '>' '\n' | grep -E '<quality-delta|<r '; }
 # precision: the pre-existing public decl must NOT be reported (it was in the baseline set)
 printf '%s' "$OD" | grep -q 'kind="api-surface" sym="existing_public"' \
     && no "existing_public wrongly flagged (it was already public in the baseline)" || ok "pre-existing public not re-flagged (precision)"
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$OD" | xmllint --noout - 2>/dev/null && ok "Q1 delta xml well-formed" || no "Q1 delta xml malformed"
+    if printf '%s' "$OD" | xmllint --noout - 2>/dev/null; then ok "Q1 delta xml well-formed"; else no "Q1 delta xml malformed"; fi
 fi
 
 # ── 4c) THE OVERLOAD/CANONID TRAP: overloads share a canonId → MAX-aggregated on both sides so a re-run ─
@@ -125,7 +127,7 @@ OVOUT="$( cd "$OV" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
 
 # ── 5) missing baseline ⇒ a clean exit 1 with guidance (not a crash) ──────────────────────────────────
 rm -f .ripwire_quality_baseline
-[ "$( ec )" = 1 ] && ok "no baseline → exit 1 (tells you to run --quality-baseline first)" || no "missing baseline should exit 1"
+if [ "$( ec )" = 1 ]; then ok "no baseline → exit 1 (tells you to run --quality-baseline first)"; else no "missing baseline should exit 1"; fi
 
 # ── 6) baseline-format compatibility: a PRE-v4 baseline is REFUSED, never silently misread ─────────────
 #       This arm used to assert only "does not crash", and until 2026-08-25 that was the whole contract: an
@@ -146,8 +148,8 @@ case "$V1EC" in
     *)     no "pre-v4 baseline crashed (exit $V1EC)" ;;
 esac
 case "$V1OUT" in
-    *"predates the pathQualifiedKey scheme"*) ok "the pre-v4 sidecar is REFUSED by name, not silently misread" ;;
-    *) no "a pre-v4 sidecar was consumed without a refusal — every symbol would read as new debt: $( printf '%s' "$V1OUT" | head -c 160 )" ;;
+    *"predates this binary's baseline format"*) ok "the outdated sidecar is REFUSED by name, not silently misread" ;;
+    *) no "an outdated sidecar was consumed without a refusal — every symbol would read as new debt: $( printf '%s' "$V1OUT" | head -c 160 )" ;;
 esac
 # (b) WITH git history the refusal must land on the disclosed git-HEAD fallback rather than on nothing.
 if command -v git >/dev/null 2>&1; then
@@ -191,16 +193,16 @@ if command -v git >/dev/null 2>&1; then
       printf '  return 1;\n}\nint useit(){ return simple(); }\n'
     } > "$GH/src/a.cpp"
     RGH="$( dgh )"
-    [ "$( ecgh )" = 2 ] && ok "T0.1: uncommitted regression vs HEAD → exit 2" || no "T0.1: regression vs HEAD should exit 2 (got $( ecgh ))"
+    if [ "$( ecgh )" = 2 ]; then ok "T0.1: uncommitted regression vs HEAD → exit 2"; else no "T0.1: regression vs HEAD should exit 2 (got $( ecgh ))"; fi
     printf '%s' "$RGH" | grep -q 'kind="verbosity" sym="simple"' \
         && ok "T0.1: verbosity regression on simple() flagged vs HEAD" || { no "T0.1: verbosity regression missing"; printf '%s\n' "$RGH" | tr '>' '\n' | grep '<r '; }
     printf '%s' "$RGH" | grep -q 'kind="nesting" sym="simple"' \
         && ok "T0.1: nesting regression on simple() flagged vs HEAD" || no "T0.1: nesting regression missing"
 
     # 7c) determinism: HEAD content is fixed → byte-identical run-to-run.
-    [ "$RGH" = "$( dgh )" ] && ok "T0.1: auto-vs-HEAD delta byte-identical run-to-run (deterministic)" || no "T0.1: non-deterministic auto-vs-HEAD delta"
+    if [ "$RGH" = "$( dgh )" ]; then ok "T0.1: auto-vs-HEAD delta byte-identical run-to-run (deterministic)"; else no "T0.1: non-deterministic auto-vs-HEAD delta"; fi
     if command -v xmllint >/dev/null 2>&1; then
-        printf '%s' "$RGH" | xmllint --noout - 2>/dev/null && ok "T0.1: auto-vs-HEAD xml well-formed" || no "T0.1: auto-vs-HEAD xml malformed"
+        if printf '%s' "$RGH" | xmllint --noout - 2>/dev/null; then ok "T0.1: auto-vs-HEAD xml well-formed"; else no "T0.1: auto-vs-HEAD xml malformed"; fi
     fi
 
     # 7d) PRECEDENCE — an explicit sidecar (snapshot of the CURRENT edited tree) WINS over HEAD: baseline it

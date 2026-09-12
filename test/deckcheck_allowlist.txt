@@ -39,6 +39,8 @@
 --no-prose	repowise (competitor) flag, quoted in docs/EVALS.md §2 r2 head-to-head arm description — not a ripwire flag
 --codex	skills/install.sh's canonical Codex destination mode, not a ripwire binary flag
 --codex-legacy	skills/install.sh's compatibility mode for older CODEX_HOME skill installs, not a ripwire binary flag
+--hermes	skills/install.sh's Hermes destination mode (links into ${HERMES_HOME:-~/.hermes}/skills), quoted in INSTALL.md's skills table — not a ripwire binary flag
+--openclaw	skills/install.sh's openclaw destination mode (links into ~/.agents/skills, openclaw's compatibility skill root), quoted in INSTALL.md's skills table — not a ripwire binary flag
 --contributor	skills/install.sh's own flag (2026-09-06): also activate the skill whose front matter says audience: contributor (ripwire-opt-remarks, about compiling ripwire itself) — held back by default, not a ripwire binary flag
 --evaluator	bench/agentloop/run_agentloop.py harness flag ("--evaluator none|swebench") quoted in docs/EVALS.md §2 agent-loop pilot setup — not a ripwire binary flag
 --max-changeset-size	Code Maat's own flag ("code-maat --max-changeset-size 30"), quoted in docs/LINEAGE.md where ripwire's independently-derived 30-file bulk-commit cap is compared to the published value — not a ripwire flag

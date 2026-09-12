@@ -40,7 +40,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -78,7 +78,7 @@ EOF
 runw(){ ( cd "$WORK" && "$BIN" . --no-cache "$@" 2>/dev/null ); }
 
 PID="$( runw | grep -oE 'id="[^"]*BudgetPlanner::parseBudget"' | head -1 | sed -E 's/id="([^"]*)"/\1/' )"
-[ -n "$PID" ] && ok "discovered scoped canonical id: $PID" || no "could not discover BudgetPlanner::parseBudget id"
+if [ -n "$PID" ]; then ok "discovered scoped canonical id: $PID"; else no "could not discover BudgetPlanner::parseBudget id"; fi
 runw --note-add="$PID: watch integer overflow when raw is INT_MAX" >/dev/null
 # D5 (see packtaskcheck.sh): --note-add normalizes the target's path segment to ROOT-RELATIVE on write
 # (strips the crawl's leading "./"), and --pack-task's <notes> keys on that same normalized form.
@@ -94,7 +94,7 @@ B900="$TMP/b900.xml"
 runw --pack-task="$TASK" --token-budget=900 > "$B900"
 L900="$( section_line "$B900" )"
 echo "  900-token report: $L900"
-xmllint --noout "$B900" 2>/dev/null && ok "900-token bundle is xmllint-clean" || no "900-token bundle is not well-formed"
+if xmllint --noout "$B900" 2>/dev/null; then ok "900-token bundle is xmllint-clean"; else no "900-token bundle is not well-formed"; fi
 
 # ── 2) the fix's floor: <bodies> is no longer a hard zero at 900 tokens (pre-fix: "omitted (budget)" on this
 #    exact fixture at this exact budget — the quota reservation buys section 2 SOME room even this low). ─────
@@ -110,7 +110,7 @@ B2000="$TMP/b2000.xml"
 runw --pack-task="$TASK" --token-budget=2000 > "$B2000"
 L2000="$( section_line "$B2000" )"
 echo "  2000-token report: $L2000"
-xmllint --noout "$B2000" 2>/dev/null && ok "2000-token bundle is xmllint-clean" || no "2000-token bundle is not well-formed"
+if xmllint --noout "$B2000" 2>/dev/null; then ok "2000-token bundle is xmllint-clean"; else no "2000-token bundle is not well-formed"; fi
 
 if printf '%s' "$L2000" | grep -qE 'notes: (none|omitted \(budget\))'; then
     no "2000-token: <notes> is EMPTY ($( printf '%s' "$L2000" | grep -oE 'notes: [^|]*' )) — the finding's symptom persists"
@@ -145,7 +145,7 @@ grep -qE 'rank40/body30/caller15/note5/test10' "$B2000" \
 D1="$( runw --pack-task="$TASK" --token-budget=2000 )"
 D2="$( runw --pack-task="$TASK" --token-budget=2000 )"
 D3="$( runw --pack-task="$TASK" --token-budget=2000 )"
-{ [ "$D1" = "$D2" ] && [ "$D2" = "$D3" ]; } && ok "quota-budgeted bundle is deterministic (byte-identical x3)" || no "quota-budgeted bundle is non-deterministic"
+if { [ "$D1" = "$D2" ] && [ "$D2" = "$D3" ]; }; then ok "quota-budgeted bundle is deterministic (byte-identical x3)"; else no "quota-budgeted bundle is non-deterministic"; fi
 
 # ── 6) --token-budget=1 sanity: the quota split must not invert at the degenerate end (mirrors packtaskcheck's
 #    F4 arm for the OLD cap() — the new sectionBudget()/quotaOf() must hold the same no-inversion property). ──

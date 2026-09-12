@@ -32,7 +32,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -70,7 +70,7 @@ n="$( grep -lF 'foo(1, 2)' "$FIX"/* | wc -l | tr -d ' ' )"
 
 # ── 1. one pattern, eleven grammars ───────────────────────────────────────────────────────────────────
 "$BIN" "$FIX" --pattern='foo($A, $B)' >"$TMP/all" 2>"$TMP/allerr"; rc=$?
-[ "$rc" -eq 0 ] && ok "two-metavar call pattern: exit 0" || no "two-metavar call pattern: exit $rc ($( head -c 200 "$TMP/allerr" ))"
+if [ "$rc" -eq 0 ]; then ok "two-metavar call pattern: exit 0"; else no "two-metavar call pattern: exit $rc ($( head -c 200 "$TMP/allerr" ))"; fi
 h="$( hitsOf "$TMP/all" )"
 [ "${h:-0}" = "$FIXCOUNT" ] && ok "foo(\$A, \$B) found the call in all $FIXCOUNT languages (hits=$h)" \
     || no "foo(\$A, \$B) hits=${h:-<none>}, expected $FIXCOUNT — per-language rows: $( grep -oE '<m p="[^"]*"' "$TMP/all" | tr '\n' ' ' )"
@@ -88,8 +88,8 @@ s="$( attrOf "$TMP/all" shapes )"
     || no "shapes= missing — the reader cannot tell what the pattern was interpreted as"
 case "$s" in *"python:call"*) ok "shapes= python:call (the pattern really resolved, not just parsed)" ;;
              *) no "shapes= has no python:call entry (got: $s)" ;; esac
-[ -n "$( patAttrOf "$TMP/all" eligible_files )" ] && ok "eligible_files= present" || no "eligible_files= missing"
-[ -n "$( attrOf "$TMP/all" of_files )" ]       && ok "of_files= present"       || no "of_files= missing"
+if [ -n "$( patAttrOf "$TMP/all" eligible_files )" ]; then ok "eligible_files= present"; else no "eligible_files= missing"; fi
+if [ -n "$( attrOf "$TMP/all" of_files )" ]; then ok "of_files= present"; else no "of_files= missing"; fi
 
 # ── 2. the node-kind guard: a clean parse is not enough ───────────────────────────────────────────────
 # `foo` parses clean in every grammar (an identifier / a bash command / a ruby method call) and means
@@ -111,7 +111,7 @@ done
 
 # ── 3. the ellipsis is bounded and the bound is disclosed ─────────────────────────────────────────────
 "$BIN" "$FIX" --pattern='foo($A, ...)' >"$TMP/ell" 2>"$TMP/ellerr"; rce=$?
-[ "$rce" -eq 0 ] && ok "ellipsis pattern: exit 0" || no "ellipsis pattern: exit $rce ($( head -c 200 "$TMP/ellerr" ))"
+if [ "$rce" -eq 0 ]; then ok "ellipsis pattern: exit 0"; else no "ellipsis pattern: exit $rce ($( head -c 200 "$TMP/ellerr" ))"; fi
 eb="$( attrOf "$TMP/ell" ellipsis_bound )"
 [ -n "$eb" ] && [ "$eb" -gt 0 ] 2>/dev/null && ok "ellipsis_bound=\"$eb\" disclosed on the element" \
     || no "ellipsis_bound= missing or non-numeric on an ellipsis pattern (got '$eb')"
@@ -172,7 +172,7 @@ fi
 # somewhere — never as noise on a run that still worked. `if ($C) { ... }` is a C-family/JS/Java shape
 # that python's grammar cannot spell, and the fixture holds no if-statement at all, so both halves hold.
 "$BIN" "$FIX" --pattern='if ($C) { ... }' >"$TMP/soft" 2>/dev/null; rcs=$?
-[ "$rcs" -eq 0 ] && ok "partly-resolvable pattern still runs (exit 0)" || no "partly-resolvable pattern exit $rcs"
+if [ "$rcs" -eq 0 ]; then ok "partly-resolvable pattern still runs (exit 0)"; else no "partly-resolvable pattern exit $rcs"; fi
 [ "$( hitsOf "$TMP/soft" )" = "0" ] && ok "if (\$C) { ... } finds nothing in the fixture (hits=0)" \
     || no "fixture unexpectedly matched if (\$C) { ... } — pick a different soft-tier probe"
 pe="$( attrOf "$TMP/soft" unresolved_in )"
@@ -335,24 +335,26 @@ grep -q '<m p="[^"]*" in="g"' "$TMP/all" && ok "rows carry the enclosing symbol 
 # ── 8. determinism + well-formedness ──────────────────────────────────────────────────────────────────
 "$BIN" "$ROOT/src" --pattern='ts_node_child($A, $B)' >"$TMP/d1" 2>/dev/null
 "$BIN" "$ROOT/src" --pattern='ts_node_child($A, $B)' >"$TMP/d2" 2>/dev/null
-cmp -s "$TMP/d1" "$TMP/d2" && ok "determinism: two runs byte-identical" || no "determinism: two runs differ"
+if cmp -s "$TMP/d1" "$TMP/d2"; then ok "determinism: two runs byte-identical"; else no "determinism: two runs differ"; fi
 hr="$( hitsOf "$TMP/d1" )"
 [ "${hr:-0}" -ge 1 ] 2>/dev/null && ok "found ts_node_child(\$A, \$B) in ripwire's own src (hits=$hr)" \
     || no "ts_node_child(\$A, \$B) found nothing in src/ — it is called there (presence guard below)"
-# (the 2026-08-29 split moved ingest.cpp's tree walkers into its ingest_*.h sections — the probe's
-# ground truth lives in ingest_sidecap.h now)
-grep -qF 'ts_node_child(' "$ROOT/src/ingest_sidecap.h" && ok "presence guard: src/ingest_sidecap.h really calls ts_node_child(" \
-    || no "presence guard: src/ingest_sidecap.h no longer calls ts_node_child( — pick another probe"
+# (the 2026-08-29 split moved ingest.cpp's tree walkers into its ingest_*.h sections; the 2026-09-10
+# child-walk lanes then converted every UNBOUNDED indexed call in ingest_sidecap.h to a cursor, so the
+# probe's ground truth is ingest_binds.h now — its fixed-index probes such as `ts_node_child( value, 0 )`
+# are the form src/infra/tschildren.h keeps, and they stay)
+grep -qF 'ts_node_child(' "$ROOT/src/ingest_binds.h" && ok "presence guard: src/ingest_binds.h really calls ts_node_child(" \
+    || no "presence guard: src/ingest_binds.h no longer calls ts_node_child( — pick another probe"
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/d1" 2>"$TMP/xmlerr" && ok "output is well-formed XML" || no "xmllint rejected the output: $( head -c 200 "$TMP/xmlerr" )"
+    if xmllint --noout "$TMP/d1" 2>"$TMP/xmlerr"; then ok "output is well-formed XML"; else no "xmllint rejected the output: $( head -c 200 "$TMP/xmlerr" )"; fi
 else
     ok "xmllint not installed — well-formedness arm skipped"
 fi
 
 # ── 9. the coverage contract is DISCLOSED, not implied ────────────────────────────────────────────────
 "$BIN" --help=all >"$TMP/help" 2>&1
-grep -q -- '--pattern=' "$TMP/help" && ok "--help documents --pattern=" || no "--help does not mention --pattern="
-grep -q 'pattern' "$TMP/all" && ok "the emitted element/legend names the verb" || no "no legend on the pattern output"
+if grep -q -- '--pattern=' "$TMP/help"; then ok "--help documents --pattern="; else no "--help does not mention --pattern="; fi
+if grep -q 'pattern' "$TMP/all"; then ok "the emitted element/legend names the verb"; else no "no legend on the pattern output"; fi
 # unsupported families are NAMED, so a user of ruby/bash learns it from the tool and not from a zero
 "$BIN" "$FIX" --pattern='foo($A, $B)' 2>/dev/null | grep -q 'unsupported=' \
     && ok "unsupported= names the families --pattern deliberately does not serve" \

@@ -27,6 +27,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <new>
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 namespace
 {
@@ -80,8 +82,8 @@ struct Reporter
 {
     ~Reporter()
     {
-        std::fprintf( stderr,
-                      "ALLOC_REPORT allocs=%llu bytes=%llu frees=%llu peak_live_bytes=%llu\n",
+        rw::emitTo( stderr,
+                      "ALLOC_REPORT allocs={} bytes={} frees={} peak_live_bytes={}\n",
                       (unsigned long long) g_allocCount.load( std::memory_order_relaxed ),
                       (unsigned long long) g_allocBytes.load( std::memory_order_relaxed ),
                       (unsigned long long) g_freeCount.load( std::memory_order_relaxed ),

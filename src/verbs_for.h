@@ -3,6 +3,9 @@
 #error "verbs_for.h is a SECTION of src/main.cpp's translation unit - include it only from main.cpp (see the verb-family split note there)"
 #endif
 
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 // verbs_for.h — the QUERY family (§A2's contiguous dispatch block), moved VERBATIM from main.cpp in
 // the 2026-08-29 split: computeLensRanking (THE shared lens ranking — the change family's
 // --plan-lanes calls it too, which is why this section is included before verbs_change.h),
@@ -21,6 +24,42 @@ namespace
 // and runPackTask (L4) share ONE ranking implementation (the plan's "do not reimplement ranking" mandate).
 // rw::LensRanking itself now lives in packtask.h (L4) — shared with the MCP explore/pack_task verb's own
 // routed-ranking path (mcpverbs.h), which populates the SAME struct via the same low-level ranking calls.
+
+// r4/r6 (2026-09-10 lift-disclosure round): apply the lift and build its disclosure note in one call — "" for
+// either "the lift did not run" or "it ran and moved nothing" (the same silence-means-nothing-happened
+// convention mentionNote/boostNote/docMentionNote already follow). Pulled OUT of computeLensRanking (below,
+// already one of the largest functions in this file) rather than inlined at the call site like its three
+// siblings: those three predate this round and are not this change's to restructure, but two MORE
+// inlined branch-and-format blocks measurably worsened computeLensRanking's own complexity
+// (--quality-delta, 2026-09-10) for no reason the format text itself needs — the branch belongs beside the
+// mechanism it discloses, not beside the other three unrelated boosts it happens to run next to.
+inline std::string applySiblingLiftNoted( const rw::IngestResult& ing, std::vector<float>& lensRank, std::size_t sibSeed, std::size_t sibPer )
+{
+    rw::SibliftLiftInfo liftInfo;
+    if( !rw::applySiblingLift( ing, lensRank, sibSeed, sibPer, &liftInfo ) )
+    {
+        return {};
+    }
+    char nb[ 180 ];
+    rw::formatTo( nb, sizeof( nb ), " [sibling lift: promoted {} symbol{} in {} same-directory file{} of the top-ranked files (RIPWIRE_SIBLIFT={},{})]",
+                   liftInfo.symbolCount, liftInfo.symbolCount == 1 ? "" : "s",
+                   liftInfo.fileCount, liftInfo.fileCount == 1 ? "" : "s", sibSeed, sibPer );
+    return nb;
+}
+
+inline std::string applyStructuralExpansionNoted( const rw::IngestResult& ing, std::vector<float>& lensRank, std::size_t expSeeds, std::size_t expPer )
+{
+    rw::ExpandLiftInfo liftInfo;
+    if( !rw::applyStructuralExpansion( ing, lensRank, expSeeds, expPer, &liftInfo ) )
+    {
+        return {};
+    }
+    char nb[ 200 ];
+    rw::formatTo( nb, sizeof( nb ), " [structural expansion: promoted {} symbol{} in {} file{} reached via resolved import/reference edges from the top-ranked files (RIPWIRE_EXPAND={},{})]",
+                   liftInfo.symbolCount, liftInfo.symbolCount == 1 ? "" : "s",
+                   liftInfo.fileCount, liftInfo.fileCount == 1 ? "" : "s", expSeeds, expPer );
+    return nb;
+}
 
 // Compute the lens rank for `task` exactly as the --for path does (all existing boosts: routing, --anchor,
 // the B8 mention anchor, the B3 opt-in co-change prior). Pure function of (d, task): reads d.cfg for the same
@@ -139,12 +178,15 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         if( applyMentionBoost( ing, task, lensRank, &mentionInfo ) )
         {
             char nb[ 220 ];
-            std::snprintf( nb, sizeof( nb ), " [mention anchor: %u file%s + %u symbols named in the task, score lifted to within 5%% of the top score; "
+            rw::formatTo( nb, sizeof( nb ), " [mention anchor: {} file{} + {} symbols named in the task, score lifted to within 5% of the top score; "
                            "mention_anchored= on the root repeats this total]",
                            mentionInfo.fileCount, mentionInfo.fileCount == 1 ? "" : "s", mentionInfo.symbolCount );
             out.mentionNote  = nb;
             out.anchorLifts  = mentionInfo.fileCount + mentionInfo.symbolCount;   // §A4f: the count the candidates root emits
         }
+        // Collected whether or not the anchor MOVED anything: a task whose named file fell outside the
+        // extraction window lifts nothing, and is the run that most needs telling.
+        absorbCapDisclosure( mentionInfo.caps, out.capNote, out.capAttrs, out.capJson );
     }
 
     // r4 sibling lift (EXPERIMENTAL, pre-registered — bench/locbench/results/r4_siblift/PREREG.md): lift the
@@ -154,7 +196,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     {
         if( const auto [ sibSeed, sibPer ] = sibliftParams(); sibSeed > 0 )
         {
-            applySiblingLift( ing, lensRank, sibSeed, sibPer );
+            out.sibliftNote = applySiblingLiftNoted( ing, lensRank, sibSeed, sibPer );
         }
     }
 
@@ -180,7 +222,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     {
         if( const auto [ expSeeds, expPer ] = expandParams(); expSeeds > 0 )
         {
-            applyStructuralExpansion( ing, lensRank, expSeeds, expPer );
+            out.expandNote = applyStructuralExpansionNoted( ing, lensRank, expSeeds, expPer );
         }
     }
 
@@ -190,6 +232,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     {
         PROFILE_SCOPE_DESCRIBE( "main: co-change prior boost (mine + apply)" );
         std::vector<std::vector<std::uint32_t>> coSets;
+        CommitWindowCensus coCensus;   // the kCoBoostMaxFilesPerCommit census (gitmine.h)
         if( multiRoot )
         {
             for( std::uint32_t r = 0; r < ws.size(); ++r )
@@ -198,7 +241,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
                 {
                     continue;
                 }
-                auto part = gitRecentCommitFileSets( ws[r].arg, ing, kCoBoostCommitWindow, kCoBoostMaxFilesPerCommit, r );
+                auto part = gitRecentCommitFileSets( ws[r].arg, ing, kCoBoostCommitWindow, kCoBoostMaxFilesPerCommit, r, &coCensus );
                 for( std::vector<std::uint32_t>& c : part )
                 {
                     coSets.push_back( std::move( c ) );
@@ -207,17 +250,23 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         }
         else if( hasEnclosingGitRepo( root ) )
         {
-            coSets = gitRecentCommitFileSets( root, ing, kCoBoostCommitWindow, kCoBoostMaxFilesPerCommit );
+            coSets = gitRecentCommitFileSets( root, ing, kCoBoostCommitWindow, kCoBoostMaxFilesPerCommit, UINT32_MAX, &coCensus );
         }
 
         CoBoostInfo boostInfo;
-        if( !coSets.empty() && applyCoChangeBoost( ing, coSets, lensRank, &boostInfo ) )
+        // NOT guarded by coSets.empty(): applyCoChangeBoost records the commit-cap census BEFORE its own
+        // empty check and then returns false, so calling it unconditionally is what makes the cap honest.
+        // coSets is empty exactly when EVERY commit exceeded kCoBoostMaxFilesPerCommit -- the case where the
+        // cap bit hardest -- and a `!coSets.empty() &&` short-circuit meant coboost_commits_capped was the
+        // one disclosure never emitted at 100% drop. The return value still gates the boost NOTE alone.
+        if( applyCoChangeBoost( ing, coSets, lensRank, &boostInfo, &coCensus ) )
         {
             char nb[ 200 ];
-            std::snprintf( nb, sizeof( nb ), " [cochange boost: promoted %u symbols in %u files that historically change with the top seeds (last %u commits)]",
+            rw::formatTo( nb, sizeof( nb ), " [cochange boost: promoted {} symbols in {} files that historically change with the top seeds (last {} commits)]",
                            boostInfo.boostedSymbolCount, boostInfo.boostedFileCount, kCoBoostCommitWindow );
             out.boostNote = nb;
         }
+        absorbCapDisclosure( boostInfo.caps, out.capNote, out.capAttrs, out.capJson );
     }
 
     // R5 — doc-mention surfacing (default-on, route-agnostic; see mention.h applyDocMentionBoost):
@@ -230,12 +279,13 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         if( applyDocMentionBoost( g, lensRank, &docMentionInfo ) )
         {
             char nb[ 220 ];
-            std::snprintf( nb, sizeof( nb ), " [doc mentions: %u doc%s discussing %u top-ranked symbol%s surfaced; doc_mentions= on the root repeats the doc count]",
+            rw::formatTo( nb, sizeof( nb ), " [doc mentions: {} doc{} discussing {} top-ranked symbol{} surfaced; doc_mentions= on the root repeats the doc count]",
                            docMentionInfo.docCount, docMentionInfo.docCount == 1 ? "" : "s",
                            docMentionInfo.anchorCount, docMentionInfo.anchorCount == 1 ? "" : "s" );
             out.docMentionNote  = nb;
             out.docMentionCount = docMentionInfo.docCount;   // §L10b: machine form for the doc_mentions= root attribute
         }
+        absorbCapDisclosure( docMentionInfo.caps, out.capNote, out.capAttrs, out.capJson );
     }
     return out;
 }
@@ -263,22 +313,22 @@ inline void emitCandidates( std::FILE* out, const rw::IngestResult& ing, const s
         char nb[ 208 ];
         if( !ac.hitCeiling && ac.cliffRank < ac.kept )
         {
-            std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - sharp cliff at rank %zu (%d%% drop), clamped up to the floor of %zu -->",
+            rw::formatTo( nb, sizeof( nb ), "<!-- adaptive: kept {} of {} - sharp cliff at rank {} ({}% drop), clamped up to the floor of {} -->",
                            ac.kept, topK, ac.cliffRank, ac.dropPct, ac.kept );
         }
         else if( !ac.hitCeiling )
         {
-            std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - cliff at rank %zu, %d%% drop -->",
+            rw::formatTo( nb, sizeof( nb ), "<!-- adaptive: kept {} of {} - cliff at rank {}, {}% drop -->",
                            ac.kept, topK, ac.cliffRank, ac.dropPct );
         }
         else if( ac.positiveHits <= ac.kept )
         {
-            std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - only %zu symbols matched this query (sharp query, short tail) -->",
+            rw::formatTo( nb, sizeof( nb ), "<!-- adaptive: kept {} of {} - only {} symbols matched this query (sharp query, short tail) -->",
                            ac.kept, topK, ac.positiveHits );
         }
         else
         {
-            std::snprintf( nb, sizeof( nb ), "<!-- adaptive: kept %zu of %d - no relevance cliff (broad query saturates the score); capped at the ceiling -->",
+            rw::formatTo( nb, sizeof( nb ), "<!-- adaptive: kept {} of {} - no relevance cliff (broad query saturates the score); capped at the ceiling -->",
                            ac.kept, topK );
         }
         std::fputs( nb, out );
@@ -343,6 +393,8 @@ struct ForLensNotes
     const std::string& route;
     const std::string& mention;
     const std::string& boost;
+    const std::string& siblift;    // r4 EXPERIMENT — "" unless RIPWIRE_SIBLIFT actually promoted a symbol
+    const std::string& expand;     // r6 EXPERIMENT — "" unless RIPWIRE_EXPAND actually promoted a symbol
     const std::string& docMention;
     // §L10b: the XML twins of mention_anchored=/doc_mentions= (verbs_for.h ForLensHeaderParts) — same
     // absent-unless-present convention as `mention`/`docMention` above (0 only when the note above is
@@ -377,6 +429,9 @@ struct ForLensNotes
     std::size_t        keptCount;   // AdaptiveCut::kept — the cliff-clamped head size, in [floor, ceiling]
     std::size_t        scored;      // AdaptiveCut::positiveHits — indexed symbols with a routed score > 0
     std::size_t        corpus;      // symbols the lens scored at all — the denominator `scored` means nothing without
+    // The XML root's cap attributes, already spelled as JSON key pairs by mention.h's CapDisclosure so the
+    // two dialects cannot drift into two vocabularies. "" on every run where no indexing cap fired.
+    std::string_view   capJson;
 };
 
 // W3FIX H2 — the pieces --for's header comment is made of, so the header can be REBUILT in three shapes (as
@@ -389,6 +444,7 @@ struct ForLensHeaderParts
     std::string_view rootOpenStr;      // ctxRootOpen( task, routeNoteRaw ), pre-built (its size is charged)
     std::string_view taskNote;         // the comment's scrubbed echo of `task` (xmlCommentText)
     std::string_view adaptiveNote, mentionNote, boostNote, docMentionNote;
+    std::string_view sibliftNote, expandNote;   // r4/r6 EXPERIMENTS — present only when the env-gated lift actually promoted something
     std::string_view floorNote;        // LB-A: present only when the relevance floor actually shrank the quota
     // Ranking-confidence disclosure (paper-shape lane; arXiv 2607.24882 names abstention/confidence as the
     // unsolved retrieval axis). ALWAYS present — facts derived from the SAME adaptiveCut gap statistic
@@ -413,24 +469,42 @@ struct ForLensHeaderParts
                                               //   the facts (r= attrs, the <tail> element) survive, only the
                                               //   explainer goes — the L1 "first rung that costs no unique
                                               //   information" ordering.
+    bool             legendDropped = false;   // …and rung zero SAYS SO: set with the two clears above, it splices
+                                              //   kForLegendDroppedNote. A field rather than a note the rung
+                                              //   appends once, because the ladder rebuilds this header up to
+                                              //   three more times and a disclosure that survives only the
+                                              //   as-built shape is a disclosure the tight budgets never see.
     std::string_view rootArg;              // R-E (2026-08-17): the single-root run's own root= — the ladder's
                                             // route-dropped rebuild below calls ctxRootOpen a second time and
                                             // must carry the SAME root as the pre-built rootOpenStr did.
 };
 
+// Splice a pre-formatted fragment in front of a structural boundary, or leave the document exactly as it
+// was. Every late splice in this file is this operation: three root attributes go in front of the FIRST
+// "><!--" (escapeXml entity-escapes '<' inside attribute values, so that occurrence is unambiguously the
+// root element's own close), three note clauses go in front of the LAST " -->", and rootOpenWithExtraAttrs
+// below goes in front of a root open tag's '>'. All of them share the same fallback — an unexpected shape
+// leaves the document untouched rather than inserting at a guessed offset — and that fallback is the whole
+// of the error handling, which is why it belongs in one place instead of seven.
+// EMPTY IS A NO-OP, so a caller whose fragment did not fire needs no `if` of its own.
+inline void spliceBefore( std::string& doc, std::string_view boundary, bool fromEnd, std::string_view part )
+{
+    if( part.empty() )
+    {
+        return;
+    }
+    const std::size_t at = fromEnd ? doc.rfind( boundary ) : doc.find( boundary );
+    if( at != std::string::npos )
+    {
+        doc.insert( at, part );
+    }
+}
+
 // insert pre-formatted attributes (leading space, already attribute-safe — every caller's values come
 // from a fixed enum + an int or a versioned schema id, never corpus text) before the root open tag's '>'.
 inline std::string rootOpenWithExtraAttrs( std::string rootOpen, std::string_view attrs )
 {
-    if( attrs.empty() )
-    {
-        return rootOpen;
-    }
-    const std::size_t end = rootOpen.find( '>' );
-    if( end != std::string::npos )
-    {
-        rootOpen.insert( end, attrs );
-    }
+    spliceBefore( rootOpen, ">", /*fromEnd=*/false, attrs );
     return rootOpen;
 }
 
@@ -467,6 +541,63 @@ using rw::deriveForConfidence;
 inline constexpr std::string_view kForCompactConfidenceClause =
     " [confidence=/margin_pct=: the ranked head's largest relative score drop; low = flat ranking, a starting point]";
 
+// L1 — RUNG ZERO'S OWN DISCLOSURE. The ceiling ladder's rung zero (runForLens, below) buys header bytes back by
+// dropping the two clauses whose loss costs no UNIQUE information: the confidence=/margin_pct= +
+// budget_tokens=/max_tokens= sentence and the r=/tail sentence. Every fact they describe stays on the document;
+// only the explanation goes. THE TRADE IS RIGHT and stays — METHODOLOGY §9 takes the smaller document inside the
+// budget over the larger one past it, and on src/ at --token-budget=1300 that is 2 890 B against 3 654 B, the
+// two clauses being ~750 B of it. What was wrong is that it was SILENT: rungs (b) and (c) each splice a "[… dropped (ceiling)]"
+// sentence of their own, and rung zero spliced nothing, so `--for --token-budget=1300` shipped confidence=
+// margin_pct= budget_tokens= r= and the <tail> counts with no legend defining any of them and no word that a
+// definition had been removed — the reader cannot tell a budget cut from a missing feature. This is that word.
+// It names the attributes VERBATIM, the way the cap clause and dropped_positive= do, so a reader who meets one
+// on the root meets its name here and is told where its definition went. No "--" anywhere: it rides inside an
+// XML comment, where a double hyphen is ill-formed (G4). Gate: test/legendcoveragecheck.sh, the for-budgeted row.
+//
+// ITS LENGTH IS THE SIBLING RUNGS', not a paragraph. Rungs (b) and (c) say "[task_echo: dropped (ceiling) - the
+// verbatim copy is the task= attribute above]" in 31-80 B: the thing dropped, the cause, and where the survivor
+// is. This says the same four things in 181 B, and the extra bytes are ENTIRELY the attribute names, which are
+// the disclosure — a shorter sentence that said "some clauses were dropped" would leave the reader exactly where
+// the silence did. The bytes are not free and must not be: this note rides ONLY on a run whose header did not
+// fit, so every one of them competes with the sig row the rung just bought back. Gates that pin a budget against
+// this floor (fornotesbudgetcheck's tight rung, estcalib's for-budgeted pin) are re-anchored with arithmetic when
+// it moves — the note is never re-worded to fit a pin.
+//
+// WHERE IT SENDS THE READER, and why not to the help text. The first spelling of this note ended "the ripwire
+// help text defines them", which was FALSE of half of what it names, measured on the binary that shipped it:
+// `budget_tokens` appears ZERO times in --help (19 376 B), in --help=--for (5 027 B) and in --help=all
+// (202 636 B); `max_tokens=` appears only in --help=all, never in the --for entry a reader of THIS document
+// would open. Only confidence= and margin_pct= are genuinely defined there. A disclosure whose whole job is to
+// stop a reader mistaking a budget cut for a missing feature must not then send them somewhere the definition
+// is missing — they would conclude the feature is. So it points at the one place that provably has all of them:
+// the SAME query at a wider ceiling. Every clause rung zero drops is unconditional at a budget where no rung
+// fires, so re-running wider both recovers the definitions AND demonstrates that the absence was a cut. Gate:
+// test/legendcoveragecheck.sh arm (E) re-asks every name this note spells against that wider run.
+//
+// THE CORRECTION IS ONE BYTE SHORTER THAN THE SENTENCE IT REPLACES, and that is a measurement, not a coincidence
+// worth ignoring. A first draft of it ran to 191 B, and forrootlegendcheck's arm 2 went red: its --token-budget=800
+// fixture sat at est_tokens=799 with ONE token of headroom, the nine bytes took it to 802, and crossing the budget
+// bought the 70 B of over_ceiling="1" plus its legend clause — so nine bytes of prose landed as 31 tokens and put
+// a bundle that had fitted 3.9% past the ceiling it names. METHODOLOGY §9 is the tie-breaker: the smaller document
+// inside the budget beats the larger one past it. Two honest spellings were available and the shorter was taken;
+// that is not the same as trimming a disclosure until a pin goes green, and the day it is, the pin moves instead.
+inline constexpr std::string_view kForLegendDroppedNote =
+    " [legend clauses: confidence=/margin_pct=, budget_tokens=/max_tokens= and r=/tail (total= shown= capped=) "
+    "dropped (ceiling) - the attributes stay; a wider token-budget defines them]";
+
+// …and the COMPACT DIALECT's spelling, which names two fewer attributes because that dialect never had them.
+// The full dialect's confidence sentence carries "[budget_tokens=/max_tokens=: the token ceiling this bundle was
+// shaped against]" appended to it (runForLens), so rung zero really does take those definitions down with it
+// there. The compact dialect emits kForCompactConfidenceClause instead, which defines confidence= and
+// margin_pct= and nothing else — budget_tokens= has never been defined in it at any budget. Telling a compact
+// reader it was "dropped (ceiling)" would be the exact error this note exists to prevent, pointed the other way:
+// a feature that is missing, reported as a cut. Two constants rather than one assembled at runtime, for the
+// reason kForCompactConfidenceClause is one constant — the byte ledgers that exempt and charge these strings
+// read their sizes, and a string built at runtime has no size to read at compile time.
+inline constexpr std::string_view kForLegendDroppedNoteCompact =
+    " [legend clauses: confidence=/margin_pct= and r=/tail (total= shown= capped=) dropped (ceiling) - "
+    "the attributes stay; a wider token-budget defines them]";
+
 inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p, std::string_view extraNotes )
 {
     h += "<!-- ripwire for ripwire.for/v1: task/route/root and bundle/bodies/reason are root facts; "
@@ -475,6 +606,8 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     h.append( p.adaptiveNote );
     h.append( p.mentionNote );
     h.append( p.boostNote );
+    h.append( p.sibliftNote );
+    h.append( p.expandNote );
     h.append( p.docMentionNote );
     h.append( p.floorNote );
     // P1 (L7): the compact dialect's reader meets the same two root facts (confidence=/margin_pct=) — in the
@@ -486,6 +619,10 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     if( p.tailLegend )
     {
         h += rw::kForFileTailLegendCompact;   // deep-tail: r= + <tail> definitions ride the compact legend too, short form
+    }
+    if( p.legendDropped )
+    {
+        h += kForLegendDroppedNoteCompact;   // L1: the two clauses above went to the ceiling — in THIS dialect's inventory
     }
     h.append( extraNotes );
     h += " -->";
@@ -534,7 +671,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
 {
     std::string h;
     h.reserve( 640 + std::max( kForAutoBundleLegend.size(), kForCompactBundleLegend.size() ) + p.rootOpenStr.size() + p.taskNote.size() + p.adaptiveNote.size()
-               + p.mentionNote.size() + p.boostNote.size() + p.docMentionNote.size() + p.floorNote.size()
+               + p.mentionNote.size() + p.boostNote.size() + p.sibliftNote.size() + p.expandNote.size() + p.docMentionNote.size() + p.floorNote.size()
                + p.confidenceAttrs.size() + p.confidenceNote.size() + p.gitAtAttr.size() + p.mentionDocAttrs.size() + extraNotes.size() );
     h += rootOpenWithSchema( rootOpenWithExtraAttrs( rootOpenWithExtraAttrs( rootOpenWithExtraAttrs( withRouteAttr ? std::string( p.rootOpenStr )
                                                                    : rw::ctxRootOpen( p.task, {}, p.rootArg ),
@@ -560,6 +697,8 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     h.append( p.adaptiveNote );
     h.append( p.mentionNote );      // B8: present only when the task named something indexed (else "")
     h.append( p.boostNote );        // B3: present only when the co-change prior actually promoted something
+    h.append( p.sibliftNote );      // r4: present only when RIPWIRE_SIBLIFT actually promoted a symbol
+    h.append( p.expandNote );       // r6: present only when RIPWIRE_EXPAND actually promoted a symbol
     h.append( p.docMentionNote );   // R5: present only when a resolved symbol's mentioning docs surfaced
     h.append( p.floorNote );        // LB-A: present only when the relevance floor shrank the quota (else "")
     h.append( p.confidenceNote );   // ALWAYS present — defines the confidence=/margin_pct= root facts
@@ -587,6 +726,10 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     if( p.tailLegend )
     {
         h.append( rw::kForFileTailLegend );   // deep-tail: defines r= and the <tail> element (sigs-charge-exempt, serialize.h)
+    }
+    if( p.legendDropped )
+    {
+        h.append( kForLegendDroppedNote );   // L1: the confidence and tail clauses went to the ceiling — say so, and name what they defined
     }
     h.append( extraNotes );
     h += " -->";
@@ -639,19 +782,37 @@ inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes&
     if( !notes.mention.empty() )
     {
         h += ",\"mention\":\"" + jsonStr( notes.mention ) + "\"";
-        // §L10b: the XML twin's mention_anchored= — same absent-unless-present gate as the prose above.
+    }
+    // §L10b: the XML twin's mention_anchored=. Gated on the COUNT since the cap-disclosure lane — the note
+    // above can now carry a cap clause on a run that anchored nothing, and "mention_anchored":0 would be a
+    // fabricated zero.
+    if( notes.mentionAnchored > 0 )
+    {
         h += ",\"mention_anchored\":" + std::to_string( notes.mentionAnchored );
     }
     if( !notes.boost.empty() )
     {
         h += ",\"boost\":\"" + jsonStr( notes.boost ) + "\"";
     }
+    if( !notes.siblift.empty() )
+    {
+        h += ",\"siblift\":\"" + jsonStr( notes.siblift ) + "\"";
+    }
+    if( !notes.expand.empty() )
+    {
+        h += ",\"expand\":\"" + jsonStr( notes.expand ) + "\"";
+    }
     if( !notes.docMention.empty() )
     {
         h += ",\"doc_mention\":\"" + jsonStr( notes.docMention ) + "\"";
-        // §L10b: the XML twin's doc_mentions= — same absent-unless-present gate as the prose above.
+    }
+    // §L10b: the XML twin's doc_mentions=, gated on the COUNT for the same reason as mention_anchored above.
+    if( notes.docMentions > 0 )
+    {
         h += ",\"doc_mentions\":" + std::to_string( notes.docMentions );
     }
+    // …and the cap keys, verbatim from CapDisclosure — the XML root's own facts, same names, same order.
+    h.append( notes.capJson );
     if( !notes.adaptive.empty() )
     {
         h += ",\"adaptive\":\"" + jsonStr( notes.adaptive ) + "\"";
@@ -757,13 +918,123 @@ inline bool forLensJsonOverCeiling( std::size_t tokenBudget, std::size_t ceiling
 // ladderFired is the W3FIX ceiling ladder's last rung (a --token-budget state); it is kept as its own input
 // rather than folded into the budget comparison because the rung fires on BYTES against the allowance, which
 // is a strictly wider condition than the token comparison beside it — dropping it would narrow what the
-// attribute means. Gate: test/formaxtokenscheck.sh.
+// attribute means. It arrives as the VALUE the ladder returned (serialize.h CeilingRung), never as a search
+// of the emitted text — see ForLensRootFinish::lastRungFired. Gate: test/formaxtokenscheck.sh.
 inline bool forLensOverCeiling( bool ladderFired, std::size_t tokenBudget, int maxTokens, bool hasBodyCeiling,
                                 std::size_t estTokens ) noexcept
 {
     return ladderFired
         || ( tokenBudget > 0 && estTokens > tokenBudget )
         || ( hasBodyCeiling && maxTokens > 0 && estTokens > std::size_t( maxTokens ) );
+}
+
+// PR #135 — THE PRICED ROOT, as a function of the header shape the ceiling ladder chose. Everything runForLens
+// splices onto its header after the ladder lives here, in its original order: the late root attributes and
+// clauses, the est_tokens= clause, then the est_tokens fixpoint with over_ceiling="1" and the clause defining it.
+// It is one function so the ladder can price the header it will EMIT, not the one it builds. The label rides
+// whenever est_tokens exceeds budget_tokens (F2), and est_tokens prices markup at 2.50 B/tok while the allowance
+// is 2.36 x 1.15 = 2.714 B/tok. So a bundle in that band carried 70 bytes the ladder never saw, and one it had
+// fitted within 70 B of the allowance shipped past it with no rung fired: estchargecheck #11 A7, 5 429 B against
+// 5 428 B (the sweep beside it reds the same defect on a git-less corpus at 12 of 52 budgets).
+// `measured` is sigsPreRendered: the direct-emission degrade path gets the splices but no number, because its
+// header goes to stdout before the bundle it would describe has been measured.
+struct ForLensRootFinish
+{
+    std::string_view autoAttr, sigsCeilingAttr, capAttrs;                 // root attributes, before the first "><!--"
+    bool             weak = false;                                       // weak="1", before the last " -->"
+    std::string_view droppedPositiveNote, sigsCeilingNote, capNote;      // clauses, before the last " -->"
+    bool             measured = false;
+    std::string_view estTokensLegend, overCeilingLegend;
+    // M3: the ceiling ladder's VERDICT, carried as a value. False ⇒ the ladder did not run, or stopped above its
+    // last rung. It used to be the rung's note text, which finishForLensHeader searched the finished header for,
+    // and the header contains the caller's task echoed verbatim — so a task quoting the note forged the verdict
+    // and put over_ceiling="1" on a 9.8 KB bundle under a 100 000-token budget. climbCeilingLadderBy returns the
+    // rung it took (serialize.h CeilingRung); the fit predicate below sets this per candidate, the call site sets
+    // it from the chosen rung, and no code path derives it from text. Gate: test/ceilingverdictcheck.sh.
+    bool             lastRungFired        = false;
+    std::size_t      nonHeaderMarkupBytes = 0;                           // every markup byte outside the header, "</ctx>" included
+    std::size_t      bodyTokens           = 0;                           // the body-rate sections, already priced
+    std::size_t      tokenBudget          = 0;
+    int              maxTokens            = 0;
+    bool             bodyCeiling          = false;
+};
+
+inline std::string finishForLensHeader( std::string header, const ForLensRootFinish& f )
+{
+    // T3: the bundle=auto disclosure attributes, then budget_bytes= (its presence is decided by the sigs render),
+    // then the INDEXING-cap attributes (root facts of the RANKING, so on the root est_tokens prices rather than in
+    // the ladder's input). All three go in BEFORE est_tokens is computed, so the number measures a header that
+    // already carries these bytes exactly. An attribute dropped by an unexpected shape costs nothing a reader can
+    // be misled by: the auto section is still disclosed by its own element. See spliceBefore for the boundary.
+    spliceBefore( header, "><!--", /*fromEnd=*/false, f.autoAttr );
+    spliceBefore( header, "><!--", /*fromEnd=*/false, f.sigsCeilingAttr );
+    spliceBefore( header, "><!--", /*fromEnd=*/false, f.capAttrs );
+
+    // R4 + §L2: weak="1" goes in AHEAD of est_tokens, so its 9 bytes are an exact count inside header.size()
+    // below rather than bytes of the document the number describing it had not measured (CA4 verifier L2).
+    // Absent entirely when the query cleared the threshold — never a fabricated "weak=0".
+    spliceBefore( header, " -->", /*fromEnd=*/true, f.weak ? std::string_view( " weak=\"1\"" ) : std::string_view() );
+
+    // A2 dropped_positive="N" (absent at zero, the pr_converged precedent — never a fabricated "0"), then the
+    // budget_bytes= clause, whose attribute rides only a trimmed <sigs>, then the cap clause, which DEFINES its
+    // attributes by carrying them verbatim (the legendcoveragecheck contract dropped_positive= also uses).
+    spliceBefore( header, " -->", /*fromEnd=*/true, f.droppedPositiveNote );
+    spliceBefore( header, " -->", /*fromEnd=*/true, f.sigsCeilingNote );
+    spliceBefore( header, " -->", /*fromEnd=*/true, f.capNote );
+    if( !f.measured )
+    {
+        return header;
+    }
+
+    // N1: the legend clause defining est_tokens= goes into the LAST comment first, so header.size() below
+    // already counts it exactly.
+    spliceBefore( header, " -->", /*fromEnd=*/true, f.estTokensLegend );
+
+    // SELF-REFERENCE (the §L2 mechanism generalized): the est_tokens attribute is part of the document est_tokens
+    // measures, so its own digit string belongs inside the byte total. Bounded 4-pass fixpoint, same shape and
+    // bound as serialize()'s and buildRecall's; the attribute BUILT last is the attribute inserted. On convergence
+    // (the `break`, reached in <=2 passes on every shape measured) the number stated is exactly the number the
+    // document's own bytes were measured against; on the bound, a residual under one token — never fabricated.
+    // EACH KIND OF BYTE AT ITS OWN RATE: markup (header, <sigs>, <lego>, <compose>, <routes>, the mermaid graph
+    // block, the tail, a compact <hops>) at kBytesPerTokenDefault, and the --detail / auto bodies at the
+    // kBytesPerTokenBody rate chargeSection already charged them at (one rate for both kinds is §H7's defect).
+    const auto priceFixpoint = [ & ]( std::size_t markup, std::size_t overBytes )
+    {
+        std::size_t est = rw::tokensForEmittedBytes( markup + overBytes, rw::kBytesPerTokenDefault ) + f.bodyTokens;
+        std::string a   = " est_tokens=\"" + std::to_string( est ) + "\"";
+        for( int pass = 0; pass < 4; ++pass )
+        {
+            const std::size_t next = rw::tokensForEmittedBytes( markup + a.size() + overBytes, rw::kBytesPerTokenDefault ) + f.bodyTokens;
+            if( next == est )
+            {
+                break;
+            }
+            est = next;
+            a   = " est_tokens=\"" + std::to_string( est ) + "\"";
+        }
+        return std::pair<std::size_t, std::string>{ est, a };
+    };
+    auto        priced = priceFixpoint( header.size() + f.nonHeaderMarkupBytes, 0 );
+    std::string overAttr;
+
+    // F2 (capture-audit verify-wave2 2026-09-05): over_ceiling= is a PROPERTY OF THE EMITTED DOCUMENT, not of a
+    // rung — over_ceiling="1" whenever est_tokens exceeds A CEILING THE ROOT NAMES (#61: forLensOverCeiling), on
+    // every rung; absent means inside all of them. Decided from the fixpoint because its own 17 bytes are part of
+    // the document the number prices, and in two stages because its DEFINITION is header bytes too: splicing the
+    // clause unconditionally would charge every budgeted bundle for an attribute it does not carry. Monotone —
+    // adding bytes only RAISES est_tokens — so one extra stage is exact and the flag never oscillates. The
+    // definition rides the legend of the document that carries the attribute.
+    if( forLensOverCeiling( f.lastRungFired, f.tokenBudget, f.maxTokens, f.bodyCeiling, priced.first ) )
+    {
+        spliceBefore( header, " -->", /*fromEnd=*/true, f.overCeilingLegend );
+        overAttr = " over_ceiling=\"1\"";
+        priced   = priceFixpoint( header.size() + f.nonHeaderMarkupBytes, overAttr.size() );
+    }
+
+    // N1: onto the <ctx> root — the same "><!--" boundary the bundle= attributes above use — where --pack-task /
+    // --from-trace / --handoff / --expand put theirs (M11), not inside the comment.
+    spliceBefore( header, "><!--", /*fromEnd=*/false, priced.second + overAttr );
+    return header;
 }
 
 // DEEP-TAIL d2, JSON dialect — the tail stanza and its explicit-regime fit, as a free function over
@@ -989,7 +1260,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     std::fwrite( budgetStanza.data(), 1, budgetStanza.size(), out );                     // R1: beside the label it is compared against
     std::fwrite( sigsCeilingStanza.data(), 1, sigsCeilingStanza.size(), out );           // the ceiling the ladder applied, when it fired
     std::fwrite( overCeiling.data(), 1, overCeiling.size(), out );
-    std::fprintf( out, ",\"capped\":%s,\"est_tokens\":%zu,\"sigs\":", sigsCapped ? "true" : "false", estTokens );
+    rw::emitTo( out, ",\"capped\":{},\"est_tokens\":{},\"sigs\":", sigsCapped ? "true" : "false", estTokens );
     std::fwrite( sigsJson.data(), 1, sigsJson.size(), out );
     std::fputs( "}", out );
     return 0;
@@ -1504,7 +1775,6 @@ std::optional<int> runForLens( const MainDispatch& d )
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
     const std::string&                root         = d.root;
-    const bool                        multiRoot    = d.multiRoot;
     const std::vector<WorkspaceRoot>& ws           = d.ws;
     const std::vector<std::uint32_t>* fanInPtr     = d.fanInPtr;
     const std::vector<char>*          impurePtr    = d.impurePtr;
@@ -1548,6 +1818,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         const std::string  routeNoteRaw = std::move( lr.routeNote ); // verbatim; lands ONLY in route= (attribute-escaped) + the JSON twin — L1: the comment no longer echoes it
         const std::string  mentionNote( std::move( lr.mentionNote ) );
         const std::string  boostNote( std::move( lr.boostNote ) );
+        const std::string  sibliftNote( std::move( lr.sibliftNote ) );
+        const std::string  expandNote( std::move( lr.expandNote ) );
         const std::string  docMentionNote( std::move( lr.docMentionNote ) );
         const bool         conceptualRoute = isConceptualRoute( lr.routeTag );   // see the predicate for what "no-route" means here
         // the route's own anchors, resolved — read ONLY by the T3 auto-body allowance below (anchor-only)
@@ -1616,22 +1888,22 @@ std::optional<int> runForLens( const MainDispatch& d )
             char nb[ 200 ];
             if( !ac.hitCeiling && ac.cliffRank < ac.kept )
             {
-                std::snprintf( nb, sizeof( nb ), " [adaptive: kept %zu of %d - sharp cliff at rank %zu (%d%% drop), clamped up to the floor of %zu]",
+                rw::formatTo( nb, sizeof( nb ), " [adaptive: kept {} of {} - sharp cliff at rank {} ({}% drop), clamped up to the floor of {}]",
                                ac.kept, ceil, ac.cliffRank, ac.dropPct, ac.kept );
             }
             else if( !ac.hitCeiling )
             {
-                std::snprintf( nb, sizeof( nb ), " [adaptive: kept %zu of %d - cliff at rank %zu, %d%% drop]",
+                rw::formatTo( nb, sizeof( nb ), " [adaptive: kept {} of {} - cliff at rank {}, {}% drop]",
                                ac.kept, ceil, ac.cliffRank, ac.dropPct );
             }
             else if( ac.positiveHits <= ac.kept )
             {
-                std::snprintf( nb, sizeof( nb ), " [adaptive: kept %zu of %d - only %zu symbols matched this query (sharp query, short tail)]",
+                rw::formatTo( nb, sizeof( nb ), " [adaptive: kept {} of {} - only {} symbols matched this query (sharp query, short tail)]",
                                ac.kept, ceil, ac.positiveHits );
             }
             else
             {
-                std::snprintf( nb, sizeof( nb ), " [adaptive: kept %zu of %d - no relevance cliff (broad query saturates the score); capped at the ceiling]",
+                rw::formatTo( nb, sizeof( nb ), " [adaptive: kept {} of {} - no relevance cliff (broad query saturates the score); capped at the ceiling]",
                                ac.kept, ceil );
             }
             adaptiveNote = nb;
@@ -1698,15 +1970,19 @@ std::optional<int> runForLens( const MainDispatch& d )
         // present only when its own note fired (unlike confidence=/at=, these are not facts of every
         // ranking — a query that anchors or surfaces no docs carries neither). Same lr.anchorLifts the
         // candidates root's anchored= already reads (§A4f); lr.docMentionCount is new (§L10b, packtask.h).
+        // Both gates read the COUNTS, not the note strings — mention_anchored="0" is the fabricated zero
+        // non-negotiable #3 forbids, and a note can now be non-empty on a run that anchored nothing.
         std::string mentionDocAttrsStr;
-        if( !mentionNote.empty() )
+        if( lr.anchorLifts > 0 )
         {
             mentionDocAttrsStr += " mention_anchored=\"" + std::to_string( lr.anchorLifts ) + "\"";
         }
-        if( !docMentionNote.empty() )
+        if( lr.docMentionCount > 0 )
         {
             mentionDocAttrsStr += " doc_mentions=\"" + std::to_string( lr.docMentionCount ) + "\"";
         }
+        // The INDEXING caps do NOT join this string — they are spliced onto the root after the sigs ladder,
+        // where budget_bytes= goes and for its reason (see there).
 
         // M10: --for reads git for the per-file churn= column (folded onto the bundle below, mined once in
         // main.cpp's gitCoChangeAndChurnCached pass) and, before this fix, carried no anchor — an agent
@@ -1742,10 +2018,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         // root ATTRIBUTE is kept, paid for out of its own reserve). A tight explicit budget no longer
         // turns the disclosure off on EITHER serving shape — test/fordisclosurecheck.sh.
         ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
-                                        mentionNote, boostNote, docMentionNote, floorNote,
+                                        mentionNote, boostNote, docMentionNote, sibliftNote, expandNote, floorNote,
                                         forConf.attrs, forConf.note, forAtAttrStr, mentionDocAttrsStr,
                                         cfg.anchor, plan.autoBodies, plan.compact, cfg.legend == "compact",
-                                        /*tailLegend=*/true, flRootArg };
+                                        /*tailLegend=*/true, /*legendDropped=*/false, flRootArg };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
         std::string headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
@@ -1820,7 +2096,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             // runPackTask) already uses, rather than silently dropping the flag's effect with no tell at all.
             if( cfg.withGraph )
             {
-                std::fprintf( stderr, "ripwire: --with-graph is not applied under --json (the mermaid graph block is XML-only for now) — emitted without it\n" );
+                rw::emitRaw( stderr, "ripwire: --with-graph is not applied under --json (the mermaid graph block is XML-only for now) — emitted without it\n" );
             }
 
             std::size_t legoTotal = 0;
@@ -1864,6 +2140,7 @@ std::optional<int> runForLens( const MainDispatch& d )
 
             const int jsonRc = emitForLensJson( stdout,
                                                 forLensJsonHeader( cfg.forTask, ForLensNotes{ routeNoteRaw, mentionNote, boostNote,
+                                                                                              sibliftNote, expandNote,
                                                                                               docMentionNote, lr.anchorLifts, lr.docMentionCount,
                                                                                               adaptiveNote, floorNote,
                                                                                               forConf.level,
@@ -1876,7 +2153,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                                                               // over the whole index, so its size IS the
                                                                                               // scored corpus.
                                                                                               forCut.kept, forCut.positiveHits,
-                                                                                              lensRank.size() } ),
+                                                                                              lensRank.size(), lr.capJson } ),
                                                 ForLensJsonInputs{ ing, lensRank, forTopN, fanInPtr, impurePtr, &forChurn,
                                                                    &forClone, testedPtr, ampPtr, redactPtr,
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
@@ -2026,8 +2303,9 @@ std::optional<int> runForLens( const MainDispatch& d )
         // N1 (capture-audit verify-wave1 2026-09-04): est_tokens= moved from the header COMMENT onto the <ctx>
         // root (a comment-stripping parser read no price at all — the flagship budgeted verb was the one M11
         // outlier), so the legend now needs a clause defining it; the clause is fixed text, reserved here and
-        // exact-counted below. over_ceiling="1" rides the root only on the ladder's last rung, where the
-        // ceiling is already exceeded by the floor — its 17 bytes are not reserved (nothing is left to trim).
+        // exact-counted below. over_ceiling="1" and ITS clause are not reserved here: F2 made them reachable from
+        // every rung, so their bytes are not a constant — the ladder prices them per shape (PR #135,
+        // finishForLensHeader). Reserved on the last rung only, they let a bundle ship 70 B past its allowance.
         constexpr std::string_view kForEstTokensLegend = " est_tokens= prices this bundle in tokens";
         // F2: spliced ONLY onto a document that actually carries over_ceiling="1" (the attribute is now
         // reachable from every rung, not just the ladder's last), so a bundle inside its budget keeps every
@@ -2041,7 +2319,6 @@ std::optional<int> runForLens( const MainDispatch& d )
         // still selects kOverCeilingLegend, so nothing about --for --token-budget moves by a byte.
         const std::string_view kForOverCeilingLegend = rw::overCeilingLegendFor( forGateBudget, forBodyCeiling );
         const std::size_t     headerSpliceReserve   = kEstTokensAttrReserve + kForEstTokensLegend.size() + ( forWeak ? kWeakAttrBytes : 0u );
-        bool                  forOverCeiling        = false;   // N1: set when the ladder's last rung fired (root over_ceiling="1")
 
         // D10: --token-budget SHAPES this bundle (exit-0 trim) rather than gating it (exit-3 like the
         // default map/--query) — but the shaped result must still be checkable against the budget it shaped
@@ -2103,7 +2380,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         if( forDroppedPositive > 0 )
         {
             char nb[ 40 ];
-            std::snprintf( nb, sizeof( nb ), " dropped_positive=\"%zu\"", forDroppedPositive );
+            rw::formatTo( nb, sizeof( nb ), " dropped_positive=\"{}\"", forDroppedPositive );
             droppedPositiveNote = nb;
         }
         // ── budget_bytes= — THE CEILING A DEFAULT RUN NEVER NAMED (METHODOLOGY §9 #6) ──────────────────
@@ -2146,7 +2423,15 @@ std::optional<int> runForLens( const MainDispatch& d )
         const std::string sigsCeilingNote   = forDefaultCeiling
             ? std::string( " [budget_bytes= is the default BYTE ceiling this ranked payload was shaped against; it bounds that payload, not the whole document est_tokens prices]" )
             : std::string();
-        const std::size_t droppedPositiveSpliceReserve = droppedPositiveNote.size() + sigsCeilingNote.size() + sigsCeilingAttr.size();
+        // ── the INDEXING-cap disclosure (mention.h CapDisclosure), at the same splice point and for the
+        // same reason: a --for header is charged against the payload ceiling, so a disclosure folded into
+        // the notes above is paid for in ranked rows. Measured on sixteen real invocations, that cost three
+        // bundles a <d> row; riding this post-render splice costs bytes and never costs evidence.
+        // COST: zero unless a cap actually bit.
+        const std::string capAttrsStr = lr.capAttrs;
+        const std::string capNoteStr  = lr.capNote;
+        const std::size_t droppedPositiveSpliceReserve = droppedPositiveNote.size() + sigsCeilingNote.size() + sigsCeilingAttr.size()
+                                                       + capAttrsStr.size() + capNoteStr.size();
 
         // §P3 × §P4: the budget trim above can drop files the lego scope still references — narrow the lego
         // block to the RENDERED sigs' files and re-render (a byte-subset of what the budget already charged
@@ -2265,6 +2550,41 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                                + routeStr.size() + graphSection.xml.size() + detailSection.xml.size()
                                                                + autoSection.xml.size() + autoAttr.size() + 6 + headerSpliceReserve + droppedPositiveSpliceReserve );
 
+        // N1: the last rung's note DEFINES the root attribute it accompanies (over_ceiling= …), so the attribute is
+        // never on a document whose legend does not explain it; the bracket spelling stays. It is PROSE ONLY now —
+        // M3 took the verdict off it. finishForLensHeader used to recover "the last rung fired" by finding this
+        // exact text in the finished header, which the verbatim task echo could also supply.
+        static constexpr rw::CeilingLadderNotes kNotes{
+            " [task_echo: dropped (ceiling)]", " [task_echo + route_attr: dropped (ceiling)]",
+            " [over_ceiling= is 1 on the root: the header floor (verbatim task echo + fixed legend) exceeds this budget"
+            " - no payload left to trim]" };
+
+        // PR #135: the priced root this header will carry — every late splice and the est_tokens fixpoint, in
+        // finishForLensHeader (above runForLens, with each splice's rationale). Assembled BEFORE the ladder so the
+        // ladder prices the header it will EMIT. NOT const (M3): .lastRungFired is the ladder's answer, written
+        // from the rung climbCeilingLadderBy returns — it starts false, which is exactly the state of a run whose
+        // ladder never ran.
+        ForLensRootFinish rootFinish{
+            .autoAttr             = autoAttr,
+            .sigsCeilingAttr      = sigsCeilingAttr,
+            .capAttrs             = capAttrsStr,
+            .weak                 = forWeak,
+            .droppedPositiveNote  = droppedPositiveNote,
+            .sigsCeilingNote      = sigsCeilingNote,
+            .capNote              = capNoteStr,
+            .measured             = sigsPreRendered,
+            .estTokensLegend      = kForEstTokensLegend,
+            .overCeilingLegend    = kForOverCeilingLegend,
+            // F2: everything OUTSIDE the header at the markup rate. enrich.markupBytes is the compact <hops> section,
+            // folded in here rather than charged separately — one rate, one rounding (ForEnrichmentPlan).
+            .nonHeaderMarkupBytes = sigsStr.size() + legoStr.size() + composeStr.size() + routeStr.size() + graphSection.xml.size()
+                                  + enrich.markupBytes + tailStr.size() + 6,   // + "</ctx>" (deep-tail: the tail at the markup rate)
+            // T3: the body-rate sections; enrich.bodyTokens is zero on the compact route (markup, above)
+            .bodyTokens           = detailSection.tokens + enrich.bodyTokens,
+            .tokenBudget          = cfg.tokenBudget,
+            .maxTokens            = cfg.maxTokens,
+            .bodyCeiling          = forBodyCeiling };
+
         // W3FIX H2 — the ceiling ladder (rungs + rationale: serialize.h climbCeilingLadder), same rungs in the
         // same order --pack-task climbs. The header IS charged to the budget above, but charging is not FITTING: at
         // an explicit --token-budget the header floor (fixed legend + the task echoed twice) can exceed the stated
@@ -2273,12 +2593,6 @@ std::optional<int> runForLens( const MainDispatch& d )
         // BEFORE est_tokens so the estimate covers the disclosure; inert without an explicit --token-budget.
         if( cfg.tokenBudget > 0 && sigsPreRendered )
         {
-            // N1: the last rung's note DEFINES the root attribute it accompanies (over_ceiling= …), so the
-            // attribute is never on a document whose legend does not explain it; the bracket spelling stays.
-            static constexpr rw::CeilingLadderNotes kNotes{
-                " [task_echo: dropped (ceiling)]", " [task_echo + route_attr: dropped (ceiling)]",
-                " [over_ceiling= is 1 on the root: the header floor (verbatim task echo + fixed legend) exceeds this budget"
-                " - no payload left to trim]" };
             // §F1: the ladder prices what will actually be EMITTED, so the two sections charged above are in
             // this sum. headerSpliceReserve covers the est_tokens (and weak="1") attributes spliced in below —
             // see its definition for why a reserve rather than a measurement.
@@ -2287,6 +2601,29 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                  + tailStr.size()                               // deep-tail: the tail is priced like every other section
                                                  + autoAttr.size() + 6 + headerSpliceReserve + droppedPositiveSpliceReserve;   // + "</ctx>" + the header splices below (autoAttr exact-counted; A2's own reserve is exact too)
             const std::size_t ladderCeiling      = rw::ceilingAllowanceBytes( cfg.tokenBudget );
+            // PR #135: a shape FITS when the reserve-priced header above does AND the header it would emit does —
+            // finishForLensHeader's output plus every other byte stdout receives (the body section is --detail's, else
+            // the rendered auto one). The first half is the pre-#135 test verbatim, so a bundle that was inside its
+            // allowance picks the same shape byte for byte. The second half is what the reserve cannot see:
+            // over_ceiling="1" and its legend clause (70 B), owed whenever est_tokens exceeds budget_tokens.
+            const std::size_t emittedNonHeaderBytes = sigsStr.size() + legoStr.size() + composeStr.size() + routeStr.size() + tailStr.size()
+                                                    + detailSection.xml.size() + ( autoSection.isRendered ? autoSection.xml.size() : 0u )
+                                                    + graphSection.xml.size() + 6;   // + "</ctx>"
+            // The 70 B of over_ceiling="1" + the clause defining it are priced by finishForLensHeader itself, from
+            // the TOKEN comparison (est_tokens > budget_tokens) it makes on every candidate — so a candidate that
+            // will carry the label is measured carrying it. Nothing here decides that from text: the ladder's own
+            // verdict used to be recovered inside finishForLensHeader by looking for the rung's note in the
+            // candidate, which the verbatim task echo could supply, and injected text then added those bytes to
+            // EVERY rung's price and could push an honest bundle down the ladder for no reason.
+            // `rootFinish.lastRungFired` is FALSE here and stays false, because it is the ladder's answer and the
+            // ladder has not answered yet. M3's first version passed the candidate's rung in and set the flag from
+            // `rung == OverCeiling`, which no call could ever satisfy — the terminal rung is the branch that never
+            // asks `fits` — so the flag was invariantly false while a comment claimed it was doing the pricing.
+            const auto fitsCeiling = [ & ]( std::string_view candidate )
+            {
+                return candidate.size() + ladderPayloadBytes <= ladderCeiling
+                    && finishForLensHeader( std::string( candidate ), rootFinish ).size() + emittedNonHeaderBytes <= ladderCeiling;
+            };
             // RUNG ZERO — the confidence LEGEND clause, before any of the ladder's own rungs: it is the one
             // header string whose loss costs NO unique information (confidence=/margin_pct= stay on the root
             // as facts; only their explanation goes), so it must fall before the verbatim task echo does —
@@ -2296,200 +2633,26 @@ std::optional<int> runForLens( const MainDispatch& d )
             // Measured need: fornotesbudgetcheck's 850-ceiling fixture holds 35 tokens of headroom and the
             // clause is ~55 — charged-not-exempt (the explicit-regime split above) still cannot fit it,
             // because the floor there is notes + first-entry-whole, neither of which may trim.
-            if( headerStr.size() + ladderPayloadBytes > ladderCeiling
-                && ( !headerParts.confidenceNote.empty() || headerParts.tailLegend ) )
+            // L1: and it DISCLOSES itself now, like rungs (b) and (c) do — legendDropped splices
+            // kForLegendDroppedNote, naming the attributes whose definitions just went. Silence here was the
+            // reader seeing confidence= margin_pct= budget_tokens= r= and the <tail> counts with nothing in the
+            // legend about any of them and no way to tell a budget cut from a feature that does not exist.
+            if( !fitsCeiling( headerStr ) && ( !headerParts.confidenceNote.empty() || headerParts.tailLegend ) )
             {
                 headerParts.confidenceNote = {};
                 headerParts.tailLegend     = false;   // deep-tail: the explainer falls with the confidence clause —
                                                       //   the r= attrs and the <tail> element (the facts) survive
-                headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
+                headerParts.legendDropped  = true;    // …and this is the sentence that says both of them fell
+                headerStr                  = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
             }
-            headerStr = rw::climbCeilingLadder( buildForHeader, headerStr, ladderPayloadBytes, ladderCeiling,
-                                                 /*hasRouteAttr=*/!routeNoteRaw.empty(), kNotes );
-            forOverCeiling = headerStr.find( kNotes.overCeiling ) != std::string::npos;
+            // M3: the ladder hands back the rung it took. That value — never a search of the emitted text — is
+            // what puts over_ceiling="1" on the root below.
+            rw::CeilingLadderChoice chosen = rw::climbCeilingLadderBy( buildForHeader, headerStr, fitsCeiling,
+                                                                       /*hasRouteAttr=*/!routeNoteRaw.empty(), kNotes );
+            headerStr                = std::move( chosen.header );
+            rootFinish.lastRungFired = ( chosen.rung == rw::CeilingRung::OverCeiling );
         }
-
-        // T3: the bundle=auto disclosure attributes, spliced onto the <ctx> root AFTER the ladder (a rung
-        // rebuild would lose an earlier splice — the same reason weak=/est_tokens= splice late). The literal
-        // "><!--" boundary is unambiguous: escapeXml entity-escapes '<' inside attribute values, so the first
-        // occurrence is the root element's own close. Spliced BEFORE est_tokens is computed, so the number
-        // measures a header that already carries these bytes exactly.
-        if( !autoAttr.empty() )
-        {
-            const std::size_t rootCloseAt = headerStr.find( "><!--" );
-            if( rootCloseAt != std::string::npos )
-            {
-                headerStr.insert( rootCloseAt, autoAttr ); // else: unexpected shape, header left as-is (attr dropped, section still disclosed by its own element)
-            }
-        }
-        // budget_bytes= joins the root the same way and at the same point, and for the same reason: its
-        // presence is decided by the sigs render, and est_tokens below must price a header that already
-        // carries it.
-        if( !sigsCeilingAttr.empty() )
-        {
-            const std::size_t rootCloseAt = headerStr.find( "><!--" );
-            if( rootCloseAt != std::string::npos )
-            {
-                headerStr.insert( rootCloseAt, sigsCeilingAttr ); // else: unexpected shape, header left as-is
-            }
-        }
-
-        // R4 + §L2: weak="1" — same insert-before-"-->" mechanism as est_tokens below, but unconditional on
-        // sigsPreRendered (forWeak is known from lr.maxLexicalScore regardless of the sigs render path).
-        // Absent entirely when the query cleared the threshold (never a fabricated "weak=0" — same
-        // silence-means-fine convention as the other opt-in header notes above). It is spliced in AHEAD of
-        // est_tokens now: it used to go in afterwards, i.e. 9 bytes of the document that the number describing
-        // that document had not measured (CA4 verifier L2). Doing it first makes those 9 bytes part of
-        // headerStr.size() below — an exact count, not a reserve.
-        if( forWeak )
-        {
-            const std::size_t closeAt = headerStr.rfind( " -->" );
-            if( closeAt != std::string::npos )
-            {
-                headerStr.insert( closeAt, " weak=\"1\"" ); // else: unexpected shape, header left as-is
-            }
-        }
-
-        // A2 (survey card, 2026-09-03) — dropped_positive="N": how many symbols scored above the relevance
-        // floor (LB-A's own admission rule) and were then removed by the payload ceiling, either the H1
-        // ladder's step F or the collection-phase byte gate (droppedPositiveCount, serialize.h). Same
-        // insert-before-"-->" splice as weak=/est_tokens= (its value is only known once packSignatures has
-        // already run above) — ZERO stays 0 on this path (forDroppedPositive is never set on the direct-
-        // emission degrade path), which is what keeps the no-drop path byte-identical: absent entirely, the
-        // pr_converged="0" precedent (src/prconverge.h), never a fabricated "dropped_positive=\"0\"". The
-        // bracket note is self-defining (legendcoveragecheck's "mentioned"/"defined" predicates both read the
-        // name it carries), the same reason weak=/est_tokens= need no separate legend clause of their own.
-        if( !droppedPositiveNote.empty() )
-        {
-            const std::size_t closeAt = headerStr.rfind( " -->" );
-            if( closeAt != std::string::npos )
-            {
-                headerStr.insert( closeAt, droppedPositiveNote ); // else: unexpected shape, header left as-is
-            }
-        }
-        // ... and the budget_bytes= clause, at the same splice point and for the same reason: its presence
-        // is decided by the render above, and the attribute it defines rides only a trimmed <sigs>.
-        if( !sigsCeilingNote.empty() )
-        {
-            const std::size_t closeAt = headerStr.rfind( " -->" );
-            if( closeAt != std::string::npos )
-            {
-                headerStr.insert( closeAt, sigsCeilingNote ); // else: unexpected shape, header left as-is
-            }
-        }
-
-        if( sigsPreRendered )
-        {
-            // §F1: every section this lens emits is in this sum — <sigs>, <lego>, <compose>, <routes>, the
-            // --detail bodies and the --with-graph block — each from its own RENDERED bytes.
-            //
-            // SELF-REFERENCE (the §L2 mechanism generalized): the est_tokens attribute is part of the document
-            // est_tokens measures, so its own digit string belongs inside the byte total. The previous form
-            // summed the bundle WITHOUT it and reported ~8 tokens under, which is why the measured rate read
-            // 2.51 B/tok where this emitter's rate is 2.50. Bounded 4-pass fixpoint, same shape and same bound
-            // as serialize()'s and buildRecall's; the attribute BUILT last is the attribute inserted. WHAT THE
-            // LOOP GUARANTEES: on convergence (the `break`, reached in <=2 passes on every shape measured) the
-            // number stated is exactly the number the document's own bytes were measured against; on the bound
-            // it is the number measured against a header whose est_tokens field differed by at most a digit or
-            // two, i.e. a residual under one token — never a fabricated number.
-            // EACH KIND OF BYTE AT ITS OWN RATE, summed exactly the way the map path sums
-            // mapEstTokens + extraPayloadTokens: markup (header, <sigs>, <lego>, <compose>, <routes>, the
-            // mermaid graph block) at the mid-band kBytesPerTokenDefault, and the --detail bodies at the
-            // kBytesPerTokenBody rate chargeSection already charged them at, because def-body text BPE-merges
-            // far more aggressively than signature markup. Converting the WHOLE bundle at the markup rate
-            // would over-read the bodies by ~1.5x — the same "one number for two kinds of bytes" defect §H7
-            // is about, aimed the other way, and it would report a --for --detail bundle at 2.50 B/tok when
-            // its real shape is ~3.6.
-            // enrich.markupBytes is the compact <hops> section, folded in HERE rather than charged
-            // separately — one rate, one rounding (see ForEnrichmentPlan for the off-by-one that proves it).
-            // N1: the legend clause defining est_tokens= goes into the LAST comment first (the weak=/dropped_positive=
-            // splice point), so headerStr.size() below already counts it exactly.
-            {
-                const std::size_t legendAt = headerStr.rfind( " -->" );
-                if( legendAt != std::string::npos )
-                {
-                    headerStr.insert( legendAt, kForEstTokensLegend ); // else: unexpected shape, header left as-is
-                }
-            }
-            // F2: everything OUTSIDE the header, fixed for the rest of this block — the header itself still
-            // grows by the over_ceiling legend clause below, so it is added separately.
-            const std::size_t nonHeaderBytes = sigsStr.size() + legoStr.size() + composeStr.size()
-                                             + routeStr.size() + graphSection.xml.size() + enrich.markupBytes
-                                             + tailStr.size() + 6;   // + "</ctx>" (deep-tail: the tail's bytes are measured at the markup rate)
-            std::size_t       markupBytes    = headerStr.size() + nonHeaderBytes;
-            // T3: the auto bodies at the body rate — def-body text BPE-merges differently from markup, which
-            // is why this sum splits by kind. enrich.bodyTokens is zero on the compact route (markup, above).
-            const std::size_t bodyTokens  = detailSection.tokens + enrich.bodyTokens;
-            // N1: both root attributes are inside the number — over_ceiling="1" is a fixed 17 bytes.
-            //
-            // F2 (capture-audit verify-wave2 2026-09-05): over_ceiling= is a PROPERTY OF THE EMITTED DOCUMENT,
-            // not a property of a rung. N1 set it from forOverCeiling alone — the ceiling ladder's LAST rung —
-            // so a bundle that overshot by a lot was labelled and one that overshot by a little was not:
-            //   --token-budget=1500 → budget_tokens="1500" est_tokens="1725" over_ceiling="1"
-            //   --token-budget=1600 → budget_tokens="1600" est_tokens="1665"      (65 over, NO label)
-            // Both numbers sit on ONE root in ONE unit, so a reader can subtract them; withholding the
-            // attribute that reconciles them is worse than the pre-N1 silence, because the wave's own
-            // cross-verb rule says over_ceiling= names an overshoot. THE RULE: over_ceiling="1" whenever
-            // est_tokens exceeds A CEILING THE ROOT NAMES, on every rung; absent means inside all of them.
-            //
-            // The label is decided INSIDE the fixpoint because its own 17 bytes are part of the document the
-            // number prices. Convergence: adding the attribute only RAISES est_tokens, so a document already
-            // over the budget stays over — the flag never oscillates. A document that lands exactly ON the
-            // budget stays unlabelled and its printed number is exactly the budget, which is honest.
-            std::string overAttr;
-            // #61: the predicate is forLensOverCeiling (above runForLens, beside its JSON twin) — it answers
-            // to BOTH ceilings a --for root can name, and carries the §9 argument for disclosing rather than
-            // trimming the --max-tokens overshoot.
-            // The est_tokens fixpoint, run once WITHOUT the label and — only if the label is owed — once more
-            // WITH it and with the legend clause that defines it. Two stages rather than one flag inside the
-            // loop, because the DEFINITION is header bytes: splicing it unconditionally would charge every
-            // budgeted bundle ~50 B for an attribute it does not carry (fornotesbudgetcheck's rungs are that
-            // tight), and an attribute whose legend does not define it is the §B7 defect in the other
-            // direction. Monotone, so one extra stage is exact: adding bytes only RAISES est_tokens, so a
-            // document over its budget without the label is still over it with the label.
-            const auto priceFixpoint = [ & ]( std::size_t markup, std::size_t overBytes )
-            {
-                std::size_t est  = rw::tokensForEmittedBytes( markup + overBytes, kBytesPerTokenDefault ) + bodyTokens;
-                std::string a    = " est_tokens=\"" + std::to_string( est ) + "\"";
-                for( int pass = 0; pass < 4; ++pass )
-                {
-                    const std::size_t next = rw::tokensForEmittedBytes( markup + a.size() + overBytes, kBytesPerTokenDefault ) + bodyTokens;
-                    if( next == est )
-                    {
-                        break;
-                    }
-                    est = next;
-                    a   = " est_tokens=\"" + std::to_string( est ) + "\"";
-                }
-                return std::pair<std::size_t, std::string>{ est, a };
-            };
-            auto              priced    = priceFixpoint( markupBytes, 0 );
-            std::size_t       estTokens = priced.first;
-            std::string       attr      = priced.second;
-            if( forLensOverCeiling( forOverCeiling, cfg.tokenBudget, cfg.maxTokens, forBodyCeiling, estTokens ) )
-            {
-                // The attribute rides the root, so its definition rides the legend of the document that
-                // carries it. On the ladder's last rung the bracket note explains the RUNG; this clause
-                // defines the ATTRIBUTE, which is now reachable from every rung.
-                const std::size_t overLegendAt = headerStr.rfind( " -->" );
-                if( overLegendAt != std::string::npos )
-                {
-                    headerStr.insert( overLegendAt, kForOverCeilingLegend );
-                    markupBytes = headerStr.size() + nonHeaderBytes;
-                }
-                overAttr  = " over_ceiling=\"1\"";
-                priced    = priceFixpoint( markupBytes, overAttr.size() );
-                estTokens = priced.first;
-                attr      = priced.second;
-            }
-            // N1: onto the <ctx> root — the same "><!--" boundary the bundle= attributes above use — where
-            // --pack-task / --from-trace / --handoff / --expand put theirs (M11), not inside the comment.
-            const std::size_t rootCloseAt = headerStr.find( "><!--" );
-            if( rootCloseAt != std::string::npos )
-            {
-                headerStr.insert( rootCloseAt, attr + overAttr ); // else: unexpected shape, header left as-is
-            }
-        }
+        headerStr = finishForLensHeader( std::move( headerStr ), rootFinish );
 
         std::fwrite( headerStr.data(), 1, headerStr.size(), stdout );
         if( sigsPreRendered )
@@ -2559,7 +2722,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             rw::emitChargedSection( stdout, graphSection, [ & ]{ packGraphBlock( stdout, ing, lensRank, g.outOff, g.outTargets ); } );
         }
 
-        std::printf( "</ctx>" );
+        rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, redactCounts );
         return 0;
     }
@@ -2593,7 +2756,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         {
             // §B4.2: one shared refusal — a non-defining `file:name` says WHICH files define the type and
             // hands back a runnable retry; a genuinely unknown name still gets the near-miss it always had.
-            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --lego type not found: ",
+            rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: --lego type not found: ",
                                                                    cfg.legoType, "--lego=" ).c_str() );
             return 1;
         }
@@ -2602,10 +2765,14 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // R-E fix (2026-08-19): the document root DISCLOSES the root its p= are now relative to. The first
         // R-E landing made packLego's p= root-relative and left the root undisclosed, so a --lego bundle
         // carried relative paths against a root the reader could not name — the honesty rule this tool sells.
-        std::printf( "%s%s", rw::ctxRootOpen( {}, {}, tvRootArg ).c_str(), rw::kLegoLegend );   // H5: --lego had no legend at all
+        // H5: --lego had no legend at all. The #66 clause rides as its own adjacent comment (graphlegend.h
+        // graphUnindexedLegendComment) because kLegoLegend is one closed literal: the attribute below is
+        // conditional on g.unindexedFiles, so its definition has to be too.
+        rw::emitTo( stdout, "{}{}{}", rw::ctxRootOpen( {}, {}, tvRootArg ).c_str(), rw::kLegoLegend,
+                     rw::graphUnindexedLegendComment( g.unindexedFiles > 0 ).c_str() );
         packLego( stdout, ing, g.implementors, flat, 1, d.redactPtr, &legoImpure, focus, /*withPaths=*/true, tvRootArg,
                   rw::graphCountFloorAttrXml( g ) );   // M15: gauge + marker on the targeted root
-        std::printf( "</ctx>" );
+        rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, d.redactCounts );      // W3-N1: a contract <m> sig is a redacting seam — disclose the tally
         return 0;
     }
@@ -2626,11 +2793,11 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         {
             if( pick.targetKind == SymKind::Other )
             { // task string matched nothing lexical at all
-                std::fprintf( stderr, "ripwire: --exemplar: no symbol matches '%.*s'\n", int( cfg.exemplar.size() ), cfg.exemplar.data() );
+                rw::emitTo( stderr, "ripwire: --exemplar: no symbol matches '{}'\n", std::string_view( cfg.exemplar.data(), cfg.exemplar.size() ) );
             }
             else
             {
-                std::fprintf( stderr, "ripwire: --exemplar: no %s in the corpus to exemplify\n", symTag( pick.targetKind ) );
+                rw::emitTo( stderr, "ripwire: --exemplar: no {} in the corpus to exemplify\n", symTag( pick.targetKind ) );
             }
             return 1;   // no-candidate case degrades cleanly (clear message, nonzero exit, no crash)
         }
@@ -2661,7 +2828,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // The truncation-trio clause closes the four baseline lines this verb held (bodies@shown/total/capped
         // + calls@total, the "cheapest bulk win" shape the baseline header names) — packBodies emits both
         // children, and calls@total only surfaces when the winner has callees, so the gap was tree-dependent.
-        std::printf( "<!-- ripwire exemplar for \"%s\"%s: the repo's best-in-class %s to imitate — %s. "
+        rw::emitTo( stdout, "<!-- ripwire exemplar for \"{}\"{}: the repo's best-in-class {} to imitate — {}. "
                      "On the root, the three attributes that ARE that ordering's evidence: in=reuse-count "
                      "(callers), ccx=cognitive complexity, tested=1 when a test reaches it (OMITTED, never 0, "
                      "when none does). The body follows in a bodies section, its callee signatures in a calls "
@@ -2672,7 +2839,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // R-E fix (2026-08-19): root= — same reason as --lego above. p= went root-relative in the first R-E
         // landing with no attribute naming the root, on the one verb whose whole job is "open this file".
         const std::string exemplarRootAttr = tvSingleRoot ? ( " root=\"" + ex( tvRootArg ) + "\"" ) : std::string();
-        std::printf( "<exemplar kind=\"%s\" candidates=\"%zu\" n=\"%s\" p=\"%s:%u\" in=\"%u\" ccx=\"%u\"%s%s%s%s>",
+        rw::emitTo( stdout, "<exemplar kind=\"{}\" candidates=\"{}\" n=\"{}\" p=\"{}:{}\" in=\"{}\" ccx=\"{}\"{}{}{}{}>",
                      symTag( pick.targetKind ), pick.candidateCount, ex( wsym.name ).c_str(),
                      ex( tvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ wsym.fileId ], tvRootPrefix ) : std::string_view( ing.files[ wsym.fileId ] ) ).c_str(), wsym.line,
                      fin( pick.winner ), wsym.ccx, exemplarRootAttr.c_str(), ts( pick.winner ) ? " tested=\"1\"" : "",
@@ -2681,7 +2848,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         packBodies( stdout, ing, { pick.winner }, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
                    /*ranges=*/nullptr, /*noteIndex=*/nullptr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
                    /*withFileContext=*/false, tvRootArg );
-        std::printf( "</exemplar>" );
+        rw::emitRaw( stdout, "</exemplar>" );
         reportRedactions( stderr, redactCounts );
         return 0;
     }
@@ -2758,7 +2925,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
     }
     if( cfg.packTask.empty() )   // refuse loudly without a task string (never fall through to the default map)
     {
-        std::fprintf( stderr, "ripwire: --pack-task: a task string is required — e.g. --pack-task=\"add retry to the http client\"\n" );
+        rw::emitRaw( stderr, "ripwire: --pack-task: a task string is required — e.g. --pack-task=\"add retry to the http client\"\n" );
         return 1;
     }
     const std::string task( cfg.packTask );
@@ -2800,7 +2967,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
         // whole run over — the bundles themselves are unaffected).
         if( cfg.withGraph )
         {
-            std::fprintf( stderr, "ripwire: --with-graph is not applied in --partition mode (N+1 bundles, no single graph) — bundles emitted without it\n" );
+            rw::emitRaw( stderr, "ripwire: --with-graph is not applied in --partition mode (N+1 bundles, no single graph) — bundles emitted without it\n" );
         }
         if( cfg.json )
         {
@@ -2827,7 +2994,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
         // the flag's effect with no tell at all.
         if( cfg.withGraph )
         {
-            std::fprintf( stderr, "ripwire: --with-graph is not applied under --json (the mermaid graph block is XML-only for now) — emitted without it\n" );
+            rw::emitRaw( stderr, "ripwire: --with-graph is not applied under --json (the mermaid graph block is XML-only for now) — emitted without it\n" );
         }
         std::string js;
         packTaskBundleText( ing, g, task, lr, in, &js );
@@ -2860,7 +3027,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
     {
         std::fwrite( bundle.data(), 1, bundle.size() - 6, stdout );
         rw::emitChargedSection( stdout, graphSection, [ & ]{ packGraphBlock( stdout, ing, lr.rank, g.outOff, g.outTargets ); } );
-        std::printf( "</ctx>" );
+        rw::emitRaw( stdout, "</ctx>" );
     }
     else
     {

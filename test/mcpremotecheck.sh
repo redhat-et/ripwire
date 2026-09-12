@@ -13,8 +13,13 @@
 #                           (RIPWIRE_MCP_TIMINGS rebuilt=0), and the omitted-path form defaults to the workspace.
 #   oversized body        — a > 8 MB body → 413; malformed HTTP → 400/405 and the server LIVES.
 #   2 sequential clients  — two back-to-back HTTP clients both get correct answers off the one warm index.
+#   client drops mid-reply — a client that closes or resets before/while reading a multi-MB response costs only
+#                           its own connection: the SAME listener stays alive and answers the next request.
 #   hostile-input parity  — the mcpaudit4hardencheck corpus (25-digit start_line, XML-comment-breaking task)
 #                           degrades IDENTICALLY over HTTP — the hardened parser is transport-agnostic.
+#
+# A request nobody answered (a timeout, a refused connect, a close without a response, a short or garbled one) is a
+# named FAIL that stops the gate. It is never judged as a payload, a status or a PASS.
 #
 # Usage:  test/mcpremotecheck.sh   |   RIPWIRE_BIN=asan/ripwire test/mcpremotecheck.sh
 # Exits non-zero on any failure. Every mutation happens under a scratch mktemp dir; test/fixture is never
@@ -27,42 +32,82 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'cleanup' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 SRV_PID=""
 cleanup(){ [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null; rm -rf "$TMP"; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
-command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions and the HTTP client"; exit 2; }
 command -v curl    >/dev/null 2>&1 || { echo "curl required (present on macOS/Linux)"; exit 2; }
 command -v git     >/dev/null 2>&1 || { echo "git required (the workspace needs history — see the WS setup below)"; exit 2; }
 
+# The HTTP client the --listen gates share (test/lib/gatehttp.sh): ready means ANSWERED, and a request that gets no
+# answer is reported as exactly that.
+. "$ROOT/test/lib/gatehttp.sh"
+GATEHTTP="$( gatehttp_install "$TMP" )" || { echo "could not write the shared HTTP client into $TMP"; exit 2; }
+
 echo "mcpremotecheck: BIN=$BIN  FIX=$FIX"
 
-# pick an ephemeral-ish port and wait for the listener to answer (poll, don't race a fixed sleep).
+# pick an ephemeral-ish port; start_server waits until the listener ANSWERS (no fixed sleep, no bare accept).
 PORT=$(( 20000 + ( $$ % 20000 ) ))
 URL="http://127.0.0.1:$PORT/mcp"
 MCP_ACCEPT='application/json, text/event-stream'
 MCP_CURRENT_INIT='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ripwire-test","version":"1.0"}}}'
 
-# Every ordinary request in this gate is a conforming Streamable-HTTP request. Individual negative tests
-# bypass this wrapper with `command curl` so one missing/bad header remains the only variable under test.
+# The status probes speak curl: each one varies a header, the method, the target or the body size ON PURPOSE, and
+# gatehttp.post sends one fixed conforming request. This wrapper adds the two conforming media headers; individual
+# negative tests bypass it with `command curl` so one missing/bad header remains the only variable under test.
 curl() {
     command curl -H "Accept: $MCP_ACCEPT" -H 'Content-Type: application/json' "$@"
 }
 
+# Ready means ANSWERED: gatehttp's `wait` polls until the listener answers a request (30 s ceiling) and gives up the
+# moment the child dies. Either give-up leaves its sentence in $TMP/srv.why, and a listener that never answered is
+# stopped, so it cannot hold the port, or answer, for the next start.
 start_server() { # $@ = extra flags; server pinned to a fresh copy of the fixture
     "$BIN" "$WS" --listen=127.0.0.1:"$PORT" "$@" >"$TMP/srv.out" 2>"$TMP/srv.err" &
     SRV_PID=$!
-    for _ in $(seq 1 50); do
-        curl -s -o /dev/null -m 1 -X POST "$URL" -d "$MCP_CURRENT_INIT" 2>/dev/null && return 0
-        kill -0 "$SRV_PID" 2>/dev/null || return 1   # server died during startup
-        sleep 0.1
-    done
+    python3 "$GATEHTTP" wait "$PORT" "$SRV_PID" >"$TMP/srv.why" && return 0
+    stop_server
     return 1
 }
 stop_server() { [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null; SRV_PID=""; }
+
+# A request that gets NO ANSWER is its own FAIL, never a payload or a status to judge. The curl calls these replaced had
+# no timeout: a listener that stopped answering after its first reply hung the gate at the next request, for good, and
+# one that died read as 39 FAILs on the silence ("returned ''", "got 000", "HTTP payload differs from stdio") beside
+# three PASSes nothing had answered ("the target file is byte-identical after the refused remote edit"). Every later arm
+# would only re-read that silence, so the gate stops at the first one. 30 s is a hang tripwire, not a performance bar:
+# the slowest request here measured 41 ms (`for`, 2026-09-12, M-series plain build).
+REQUEST_TIMEOUT_SEC=30
+stop_on_no_answer() { # $1 = the request, $2 = why nothing answered it
+    no "no HTTP answer to $1: $2 — there is nothing to judge, and every later arm would only re-read the silence"
+    stop_server
+    echo "SOME CHECKS FAILED"; exit 1
+}
+client_stderr() { [ -s "$TMP/client.err" ] && printf '  client stderr: %s' "$( tail -c 200 "$TMP/client.err" | tr '\n' ' ' )"; }
+mcp_post() { # $1 = the variable the response body lands in, $2 = the JSON-RPC line; the body is read to its Content-Length
+    local _mp_body _mp_rc
+    _mp_body="$( python3 "$GATEHTTP" post "$PORT" "$2" "$REQUEST_TIMEOUT_SEC" 2>"$TMP/client.err" )"; _mp_rc=$?
+    if [ "$_mp_rc" != 0 ]; then
+        stop_on_no_answer "POST $( printf '%s' "$2" | cut -c1-72 )…" "$_mp_body$( client_stderr )"
+    fi
+    printf -v "$1" '%s' "$_mp_body"
+}
+http_status() { # $1 = the variable the status code lands in, $2 = what the probe is, $3… = the curl command; sets PROBE_BYTES
+    local _hs_var="$1" _hs_what="$2" _hs_out _hs_rc
+    shift 2
+    # -m is ONE deadline, connect through the last byte; any non-zero curl exit (refused, timed out, empty reply, short
+    # body, garbled reply) means no complete answer arrived, whatever status digits curl printed.
+    _hs_out="$( "$@" -sS -o /dev/null -w '%{http_code} %{size_download}' -m "$REQUEST_TIMEOUT_SEC" 2>"$TMP/client.err" )"; _hs_rc=$?
+    if [ "$_hs_rc" != 0 ] || [ "${_hs_out%% *}" = 000 ]; then
+        stop_on_no_answer "$_hs_what" "curl exit $_hs_rc, status '${_hs_out%% *}'$( client_stderr )"
+    fi
+    printf -v "$_hs_var" '%s' "${_hs_out%% *}"
+    PROBE_BYTES="${_hs_out##* }"
+}
 
 WS="$( mktemp -d "$TMP/ws.XXXXXX" )"; cp -R "$FIX/"* "$WS/"
 
@@ -84,16 +129,16 @@ echo
 echo "=== loopback listener starts + answers a read verb (200) ==="
 # ═══════════════════════════════════════════════════════════════════════════
 if start_server; then
-    ok "loopback --listen=127.0.0.1:$PORT starts and accepts connections"
+    ok "loopback --listen=127.0.0.1:$PORT starts and answers a request"
 else
-    no "loopback listener failed to start; stderr: $( head -3 "$TMP/srv.err" )"; echo "SOME CHECKS FAILED"; exit 1
+    no "loopback listener failed to start: $( cat "$TMP/srv.why" ); stderr: $( head -3 "$TMP/srv.err" )"; echo "SOME CHECKS FAILED"; exit 1
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
 echo "=== Streamable HTTP conformance: Origin, media types, lifecycle version, endpoint, GET/notification ==="
 # ═══════════════════════════════════════════════════════════════════════════
-INIT_CURRENT="$( curl -s -X POST "$URL" -d "$MCP_CURRENT_INIT" )"
+mcp_post INIT_CURRENT "$MCP_CURRENT_INIT"
 printf '%s' "$INIT_CURRENT" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
@@ -103,50 +148,53 @@ assert r["result"]["protocolVersion"] == "2025-11-25", r
 
 for version in 2025-06-18 2025-03-26 2024-11-05; do
     body="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"$version\",\"capabilities\":{},\"clientInfo\":{\"name\":\"ripwire-test\",\"version\":\"1.0\"}}}"
-    got="$( curl -s -X POST "$URL" -d "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("result",{}).get("protocolVersion",""))' 2>/dev/null )"
-    [ "$got" = "$version" ] && ok "initialize echoes supported $version" || no "initialize requested $version but returned '$got'"
+    mcp_post INIT_REPLY "$body"
+    got="$( printf '%s' "$INIT_REPLY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("result",{}).get("protocolVersion",""))' 2>/dev/null )"
+    if [ "$got" = "$version" ]; then ok "initialize echoes supported $version"; else no "initialize requested $version but returned '$got'"; fi
 done
 
 UNSUPPORTED='{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2099-01-01","capabilities":{},"clientInfo":{"name":"ripwire-test","version":"1.0"}}}'
-got="$( curl -s -X POST "$URL" -d "$UNSUPPORTED" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("result",{}).get("protocolVersion",""))' 2>/dev/null )"
-[ "$got" = "2025-11-25" ] && ok "unsupported initialize version negotiates to latest" || no "unsupported initialize version returned '$got'"
+mcp_post INIT_REPLY "$UNSUPPORTED"
+got="$( printf '%s' "$INIT_REPLY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("result",{}).get("protocolVersion",""))' 2>/dev/null )"
+if [ "$got" = "2025-11-25" ]; then ok "unsupported initialize version negotiates to latest"; else no "unsupported initialize version returned '$got'"; fi
 
-ORIGIN_BAD="$( curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -H 'Origin: https://evil.example' -d "$MCP_CURRENT_INIT" )"
-ORIGIN_NULL="$( curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -H 'Origin: null' -d "$MCP_CURRENT_INIT" )"
-ORIGIN_OK="$( curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -H "Origin: http://127.0.0.1:$PORT" -d "$MCP_CURRENT_INIT" )"
-[ "$ORIGIN_BAD" = "403" ] && ok "foreign Origin is rejected with 403" || no "foreign Origin got $ORIGIN_BAD (expected 403)"
-[ "$ORIGIN_NULL" = "403" ] && ok "Origin:null is rejected with 403" || no "Origin:null got $ORIGIN_NULL (expected 403)"
-[ "$ORIGIN_OK" = "200" ] && ok "exact loopback Origin is accepted" || no "exact loopback Origin got $ORIGIN_OK (expected 200)"
+http_status ORIGIN_BAD  "the foreign-Origin probe"        curl -X POST "$URL" -H 'Origin: https://evil.example' -d "$MCP_CURRENT_INIT"
+http_status ORIGIN_NULL "the Origin:null probe"           curl -X POST "$URL" -H 'Origin: null' -d "$MCP_CURRENT_INIT"
+http_status ORIGIN_OK   "the exact-loopback-Origin probe" curl -X POST "$URL" -H "Origin: http://127.0.0.1:$PORT" -d "$MCP_CURRENT_INIT"
+if [ "$ORIGIN_BAD" = "403" ]; then ok "foreign Origin is rejected with 403"; else no "foreign Origin got $ORIGIN_BAD (expected 403)"; fi
+if [ "$ORIGIN_NULL" = "403" ]; then ok "Origin:null is rejected with 403"; else no "Origin:null got $ORIGIN_NULL (expected 403)"; fi
+if [ "$ORIGIN_OK" = "200" ]; then ok "exact loopback Origin is accepted"; else no "exact loopback Origin got $ORIGIN_OK (expected 200)"; fi
 
-ACCEPT_MISSING="$( command curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' -d "$MCP_CURRENT_INIT" )"
-ACCEPT_JSON="$( command curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -H 'Accept: application/json' -H 'Content-Type: application/json' -d "$MCP_CURRENT_INIT" )"
-CTYPE_BAD="$( command curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -H "Accept: $MCP_ACCEPT" -H 'Content-Type: text/plain' -d "$MCP_CURRENT_INIT" )"
-CTYPE_OK="$( command curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -H "Accept: $MCP_ACCEPT" -H 'Content-Type: application/json; charset=utf-8' -d "$MCP_CURRENT_INIT" )"
-[ "$ACCEPT_MISSING" = "406" ] && ok "missing required Accept media pair is rejected with 406" || no "missing Accept got $ACCEPT_MISSING (expected 406)"
-[ "$ACCEPT_JSON" = "406" ] && ok "JSON-only Accept is rejected with 406" || no "JSON-only Accept got $ACCEPT_JSON (expected 406)"
-[ "$CTYPE_BAD" = "415" ] && ok "non-JSON Content-Type is rejected with 415" || no "text/plain Content-Type got $CTYPE_BAD (expected 415)"
-[ "$CTYPE_OK" = "200" ] && ok "application/json with charset parameter is accepted" || no "JSON charset Content-Type got $CTYPE_OK (expected 200)"
+http_status ACCEPT_MISSING "the missing-Accept probe"           command curl -X POST "$URL" -H 'Content-Type: application/json' -d "$MCP_CURRENT_INIT"
+http_status ACCEPT_JSON    "the JSON-only-Accept probe"         command curl -X POST "$URL" -H 'Accept: application/json' -H 'Content-Type: application/json' -d "$MCP_CURRENT_INIT"
+http_status CTYPE_BAD      "the text/plain Content-Type probe"  command curl -X POST "$URL" -H "Accept: $MCP_ACCEPT" -H 'Content-Type: text/plain' -d "$MCP_CURRENT_INIT"
+http_status CTYPE_OK       "the JSON-charset Content-Type probe" command curl -X POST "$URL" -H "Accept: $MCP_ACCEPT" -H 'Content-Type: application/json; charset=utf-8' -d "$MCP_CURRENT_INIT"
+if [ "$ACCEPT_MISSING" = "406" ]; then ok "missing required Accept media pair is rejected with 406"; else no "missing Accept got $ACCEPT_MISSING (expected 406)"; fi
+if [ "$ACCEPT_JSON" = "406" ]; then ok "JSON-only Accept is rejected with 406"; else no "JSON-only Accept got $ACCEPT_JSON (expected 406)"; fi
+if [ "$CTYPE_BAD" = "415" ]; then ok "non-JSON Content-Type is rejected with 415"; else no "text/plain Content-Type got $CTYPE_BAD (expected 415)"; fi
+if [ "$CTYPE_OK" = "200" ]; then ok "application/json with charset parameter is accepted"; else no "JSON charset Content-Type got $CTYPE_OK (expected 200)"; fi
 
-DUP_ORIGIN="$( command curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -H "Accept: $MCP_ACCEPT" -H 'Content-Type: application/json' \
-    -H "Origin: http://127.0.0.1:$PORT" -H 'Origin: https://evil.example' -d "$MCP_CURRENT_INIT" )"
-HUGE_LENGTH="$( command curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -H "Accept: $MCP_ACCEPT" -H 'Content-Type: application/json' \
-    -H 'Content-Length: 999999999999999999999999999999999999999999' -d '' )"
-[ "$DUP_ORIGIN" = "400" ] && ok "duplicate Origin headers are rejected as ambiguous framing" || no "duplicate Origin headers got $DUP_ORIGIN (expected 400)"
-[ "$HUGE_LENGTH" = "413" ] && ok "overflowing Content-Length saturates safely to 413" || no "overflowing Content-Length got $HUGE_LENGTH (expected 413)"
+http_status DUP_ORIGIN  "the duplicate-Origin probe" command curl -X POST "$URL" -H "Accept: $MCP_ACCEPT" -H 'Content-Type: application/json' \
+    -H "Origin: http://127.0.0.1:$PORT" -H 'Origin: https://evil.example' -d "$MCP_CURRENT_INIT"
+http_status HUGE_LENGTH "the overflowing-Content-Length probe" command curl -X POST "$URL" -H "Accept: $MCP_ACCEPT" -H 'Content-Type: application/json' \
+    -H 'Content-Length: 999999999999999999999999999999999999999999' -d ''
+if [ "$DUP_ORIGIN" = "400" ]; then ok "duplicate Origin headers are rejected as ambiguous framing"; else no "duplicate Origin headers got $DUP_ORIGIN (expected 400)"; fi
+if [ "$HUGE_LENGTH" = "413" ]; then ok "overflowing Content-Length saturates safely to 413"; else no "overflowing Content-Length got $HUGE_LENGTH (expected 413)"; fi
 
 LIST='{"jsonrpc":"2.0","id":3,"method":"tools/list"}'
-PROTO_BAD="$( curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -H 'MCP-Protocol-Version: 2099-01-01' -d "$LIST" )"
-PROTO_MISSING="$( curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -d "$LIST" )"
-[ "$PROTO_BAD" = "400" ] && ok "unsupported MCP-Protocol-Version is rejected with 400" || no "unsupported protocol header got $PROTO_BAD (expected 400)"
-[ "$PROTO_MISSING" = "200" ] && ok "missing protocol header uses the 2025-03-26 compatibility default" || no "missing protocol header got $PROTO_MISSING (expected 200)"
+http_status PROTO_BAD     "the unsupported-MCP-Protocol-Version probe" curl -X POST "$URL" -H 'MCP-Protocol-Version: 2099-01-01' -d "$LIST"
+http_status PROTO_MISSING "the missing-MCP-Protocol-Version probe"     curl -X POST "$URL" -d "$LIST"
+if [ "$PROTO_BAD" = "400" ]; then ok "unsupported MCP-Protocol-Version is rejected with 400"; else no "unsupported protocol header got $PROTO_BAD (expected 400)"; fi
+if [ "$PROTO_MISSING" = "200" ]; then ok "missing protocol header uses the 2025-03-26 compatibility default"; else no "missing protocol header got $PROTO_MISSING (expected 200)"; fi
 
-GET_CODE="$( command curl -s -o /dev/null -w '%{http_code}' -X GET "$URL" -H 'Accept: text/event-stream' )"
-ROOT_CODE="$( curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$PORT/" -d "$MCP_CURRENT_INIT" )"
+http_status GET_CODE  "the GET /mcp probe" command curl -X GET "$URL" -H 'Accept: text/event-stream'
+http_status ROOT_CODE "the POST / probe"   curl -X POST "http://127.0.0.1:$PORT/" -d "$MCP_CURRENT_INIT"
 NOTIFY='{"jsonrpc":"2.0","method":"notifications/initialized"}'
-NOTIFY_SHAPE="$( curl -s -o "$TMP/notify.body" -w '%{http_code}:%{size_download}' -X POST "$URL" -H 'MCP-Protocol-Version: 2025-11-25' -d "$NOTIFY" )"
-[ "$GET_CODE" = "405" ] && ok "GET /mcp returns 405 when SSE is unsupported" || no "GET /mcp got $GET_CODE (expected 405)"
-[ "$ROOT_CODE" = "404" ] && ok "the MCP listener exposes exactly /mcp (root is 404)" || no "POST / got $ROOT_CODE (expected 404)"
-[ "$NOTIFY_SHAPE" = "202:0" ] && ok "accepted notification returns bodyless 202" || no "notification response was $NOTIFY_SHAPE (expected 202:0)"
+http_status NOTIFY_CODE "the notification probe" curl -X POST "$URL" -H 'MCP-Protocol-Version: 2025-11-25' -d "$NOTIFY"
+NOTIFY_SHAPE="$NOTIFY_CODE:$PROBE_BYTES"
+if [ "$GET_CODE" = "405" ]; then ok "GET /mcp returns 405 when SSE is unsupported"; else no "GET /mcp got $GET_CODE (expected 405)"; fi
+if [ "$ROOT_CODE" = "404" ]; then ok "the MCP listener exposes exactly /mcp (root is 404)"; else no "POST / got $ROOT_CODE (expected 404)"; fi
+if [ "$NOTIFY_SHAPE" = "202:0" ]; then ok "accepted notification returns bodyless 202"; else no "notification response was $NOTIFY_SHAPE (expected 202:0)"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -162,11 +210,11 @@ CALL_batch="{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"tools/call\",\"params\":
 # caller must supply it; rooted: they need not), so the rootless-vs-rooted pair began differing in 30 spans,
 # all of them `"path"` removals — the fix working as designed, surfacing a gate that had been passing for the
 # wrong reason. What this arm is FOR is transport equivalence; hold configuration constant and vary only the
-# transport.
+# transport. An HTTP request nobody answered never reaches the comparison: mcp_post stops the gate on it.
 for label in list for batch; do
     eval "C=\$CALL_$label"
     STDIO="$( printf '%s\n%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' "$C" | "$BIN" "$WS" --mcp 2>/dev/null | tail -1 )"
-    HTTP="$( curl -s -X POST "$URL" -d "$C" )"
+    mcp_post HTTP "$C"
     if [ -n "$HTTP" ] && [ "$STDIO" = "$HTTP" ]; then
         ok "tools/$label: HTTP payload byte-identical to stdio ($( printf %s "$HTTP" | wc -c | tr -d ' ' ) bytes)"
     else
@@ -179,8 +227,7 @@ done
 echo
 echo "=== a successful remote 'for' call (transcript sample) ==="
 # ═══════════════════════════════════════════════════════════════════════════
-FOR_HTTP="$( curl -s -X POST "$URL" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"tools/call\",\"params\":{\"name\":\"for\",\"arguments\":{\"path\":\"$WS\",\"task\":\"distance\"}}}" )"
+mcp_post FOR_HTTP "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"tools/call\",\"params\":{\"name\":\"for\",\"arguments\":{\"path\":\"$WS\",\"task\":\"distance\"}}}"
 printf '%s' "$FOR_HTTP" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
@@ -194,8 +241,7 @@ assert ("<ctx>" in r["result"]["content"][0]["text"] or "<ctx " in r["result"]["
 echo
 echo "=== workspace pinning: off-workspace path refused + NO rebuild; omitted path defaults to workspace ==="
 # ═══════════════════════════════════════════════════════════════════════════
-OFF="$( curl -s -X POST "$URL" \
-    -d '{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"analyze","arguments":{"path":"/etc","task":"x"}}}' )"
+mcp_post OFF '{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"analyze","arguments":{"path":"/etc","task":"x"}}}'
 printf '%s' "$OFF" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
@@ -204,8 +250,7 @@ assert "error" in r and "workspace" in r["error"]["message"], r
              || no "off-workspace path not cleanly refused: $( printf %s "$OFF" | head -c 200 )"
 
 # omitted path must default to the pinned workspace (a real answer, not an error).
-OMIT="$( curl -s -X POST "$URL" \
-    -d '{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"for","arguments":{"task":"distance"}}}' )"
+mcp_post OMIT '{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"for","arguments":{"task":"distance"}}}'
 printf '%s' "$OMIT" | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
@@ -215,13 +260,13 @@ assert "error" not in r and ("<ctx>" in r["result"]["content"][0]["text"] or "<c
              || no "omitted path did not default to the workspace: $( printf %s "$OMIT" | head -c 200 )"
 
 # the "NO rebuild" half of gate 10: restart with RIPWIRE_MCP_TIMINGS and assert the off-workspace refusal
-# emits NO rebuilt=1 line (the refusal is built before getIndex, so mcpRebuildCounter cannot advance).
+# emits NO rebuilt=1 line (the refusal is built before getIndex, so mcpRebuildCounter cannot advance). The request
+# must be ANSWERED first: no timing line from a request nobody served proves nothing about a rebuild.
 stop_server
 if RIPWIRE_MCP_TIMINGS=1 start_server; then
     : > "$TMP/srv.err"   # clear the banner/startup lines so we only inspect this request's timing
     RB_BEFORE="$( grep -c 'rebuilt=' "$TMP/srv.err" 2>/dev/null || echo 0 )"
-    curl -s -o /dev/null -X POST "$URL" \
-        -d '{"jsonrpc":"2.0","id":33,"method":"tools/call","params":{"name":"analyze","arguments":{"path":"/nonexistent-tree-xyz","task":"x"}}}'
+    mcp_post OFF_TIMED '{"jsonrpc":"2.0","id":33,"method":"tools/call","params":{"name":"analyze","arguments":{"path":"/nonexistent-tree-xyz","task":"x"}}}'
     sleep 0.2
     if grep -q 'verb=analyze .*rebuilt=1' "$TMP/srv.err"; then
         no "off-workspace refusal triggered an index rebuild (rebuilt=1) — must refuse BEFORE getIndex"
@@ -229,8 +274,11 @@ if RIPWIRE_MCP_TIMINGS=1 start_server; then
         ok "off-workspace refusal did NOT rebuild the index (no rebuilt=1 timing line)"
     fi
     stop_server
+else
+    no "the RIPWIRE_MCP_TIMINGS listener failed to start, so the no-rebuild check did not run: $( cat "$TMP/srv.why" )"
 fi
-start_server   # back to the plain loopback server for the remaining loopback checks
+# back to the plain loopback server: the edit, oversized-body, malformed-HTTP and sequential-client arms all use it.
+start_server || stop_on_no_answer "the restarted loopback listener's readiness probe" "$( cat "$TMP/srv.why" )"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -239,8 +287,7 @@ echo "=== edit verb refused over the remote transport (no --allow-remote-edits);
 TARGET="$( ls "$WS"/*.cpp 2>/dev/null | head -1 )"
 [ -z "$TARGET" ] && TARGET="$( ls "$WS"/* 2>/dev/null | head -1 )"
 BEFORE_SHA="$( shasum "$TARGET" | awk '{print $1}' )"
-EDIT="$( curl -s -X POST "$URL" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":41,\"method\":\"tools/call\",\"params\":{\"name\":\"replace_symbol_body\",\"arguments\":{\"path\":\"$WS\",\"symbol\":\"distance\",\"new_body\":\"CORRUPTED\"}}}" )"
+mcp_post EDIT "{\"jsonrpc\":\"2.0\",\"id\":41,\"method\":\"tools/call\",\"params\":{\"name\":\"replace_symbol_body\",\"arguments\":{\"path\":\"$WS\",\"symbol\":\"distance\",\"new_body\":\"CORRUPTED\"}}}"
 AFTER_SHA="$( shasum "$TARGET" | awk '{print $1}' )"
 printf '%s' "$EDIT" | python3 -c '
 import sys, json
@@ -256,37 +303,106 @@ echo
 echo "=== oversized body → 413; malformed HTTP → 4xx and the server LIVES ==="
 # ═══════════════════════════════════════════════════════════════════════════
 python3 -c "import sys; sys.stdout.write('x'*(9*1024*1024))" > "$TMP/big.bin"
-BIG_CODE="$( curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" --data-binary @"$TMP/big.bin" )"
+http_status BIG_CODE "the 9 MiB body probe" curl -X POST "$URL" --data-binary @"$TMP/big.bin"
 [ "$BIG_CODE" = "413" ] && ok "a > 8 MB body is rejected with 413 Payload Too Large" \
                         || no "oversized body got HTTP $BIG_CODE (expected 413)"
 
-# malformed HTTP: a non-HTTP first line. Server must answer a 4xx (or drop) and STILL serve the next request.
-printf 'THIS IS NOT HTTP\r\n\r\n' | (exec 3<>/dev/tcp/127.0.0.1/"$PORT"; cat >&3; head -1 <&3) >/dev/null 2>&1 || true
-STILL="$( curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -d '{"jsonrpc":"2.0","id":51,"method":"initialize"}' )"
-[ "$STILL" = "200" ] && ok "server survives malformed HTTP and still answers the next request (200)" \
-                     || no "server did not recover after malformed HTTP (next request got $STILL)"
+# malformed HTTP: a non-HTTP first line. Server must answer a 4xx (or drop) and STILL serve the next request. The
+# probe's own read is bounded, so a listener that never answers it costs one timeout here and a named no-answer on
+# the next request, not a gate that waits on this socket for good.
+printf 'THIS IS NOT HTTP\r\n\r\n' | (exec 3<>/dev/tcp/127.0.0.1/"$PORT"; cat >&3; read -r -t "$REQUEST_TIMEOUT_SEC" line <&3) >/dev/null 2>&1 || true
+mcp_post STILL '{"jsonrpc":"2.0","id":51,"method":"initialize"}'
+printf '%s' "$STILL" | python3 -c 'import sys,json; json.load(sys.stdin)["result"]' 2>/dev/null \
+    && ok "server survives malformed HTTP and still answers the next request (an initialize result)" \
+    || no "server did not recover after malformed HTTP (the next request was answered with: $( printf %s "$STILL" | head -c 160 ))"
 
 # a partial/slow request (headers, then stall past the read timeout) must not wedge the server. We open a
 # connection, send only a partial request line, then close — the server's SO_RCVTIMEO drops it. Assert the
 # server still answers afterward. (Timeout is 10s; we don't wait for it — just prove the next request works.)
 ( exec 3<>/dev/tcp/127.0.0.1/"$PORT"; printf 'POST /mcp HTTP/1.1\r\nContent-Length: 999\r\n\r\n{partial' >&3; sleep 0.3 ) 2>/dev/null || true
-ALIVE="$( curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -d '{"jsonrpc":"2.0","id":52,"method":"initialize"}' )"
-[ "$ALIVE" = "200" ] && ok "a partial (slow-loris-ish) request does not wedge the single-threaded server" \
-                     || no "server unresponsive after a partial request (next got $ALIVE)"
+mcp_post ALIVE '{"jsonrpc":"2.0","id":52,"method":"initialize"}'
+printf '%s' "$ALIVE" | python3 -c 'import sys,json; json.load(sys.stdin)["result"]' 2>/dev/null \
+    && ok "a partial (slow-loris-ish) request does not wedge the single-threaded server" \
+    || no "server unresponsive after a partial request (the next request was answered with: $( printf %s "$ALIVE" | head -c 160 ))"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
 echo "=== two sequential clients both answered off the one warm index ==="
 # ═══════════════════════════════════════════════════════════════════════════
-C1="$( curl -s -X POST "$URL" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":61,\"method\":\"tools/call\",\"params\":{\"name\":\"find_symbol\",\"arguments\":{\"path\":\"$WS\",\"symbol\":\"distance\"}}}" )"
-C2="$( curl -s -X POST "$URL" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":62,\"method\":\"tools/call\",\"params\":{\"name\":\"impact\",\"arguments\":{\"path\":\"$WS\",\"symbol\":\"distance\"}}}" )"
+mcp_post C1 "{\"jsonrpc\":\"2.0\",\"id\":61,\"method\":\"tools/call\",\"params\":{\"name\":\"find_symbol\",\"arguments\":{\"path\":\"$WS\",\"symbol\":\"distance\"}}}"
+mcp_post C2 "{\"jsonrpc\":\"2.0\",\"id\":62,\"method\":\"tools/call\",\"params\":{\"name\":\"impact\",\"arguments\":{\"path\":\"$WS\",\"symbol\":\"distance\"}}}"
 { printf '%s' "$C1" | grep -q 'handle' && printf '%s' "$C2" | python3 -c 'import sys,json; json.load(sys.stdin)["result"]' 2>/dev/null; } \
     && ok "two sequential clients (find_symbol then impact) both answered correctly" \
     || no "one of two sequential clients failed: C1=$( printf %s "$C1" | head -c 80 ) C2=$( printf %s "$C2" | head -c 80 )"
 
 stop_server
+
+# ═══════════════════════════════════════════════════════════════════════════
+echo
+echo "=== a client that drops mid-response costs only its own connection (no SIGPIPE) ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# A peer that closes or resets its socket while the listener is still writing makes send() fail with EPIPE,
+# and unsuppressed that raises SIGPIPE, whose default action ends the process: ONE client that stopped
+# reading took the listener down for every client after it (2026-09-12, pre-fix binary on macOS: killed by
+# signal 13 on each of the three shapes below, the next client refused). A reply that fits in the socket
+# buffers is written in full before the peer's reset lands, so this arm first PROVES its reply is bigger than
+# any default buffer (4 MiB is Linux's tcp_wmem ceiling; macOS's sendspace is 131 KB). The `for` task is
+# echoed into the payload, which is what makes the reply large on a small fixture. A reply that shrinks below
+# the floor is a FAIL, so the arm cannot keep passing after it stops reaching a failing send().
+python3 -c 'import json,sys; sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":91,"method":"tools/call","params":{"name":"for","arguments":{"path":sys.argv[1],"task":"distance "*350000}}}))' "$WS" \
+    > "$TMP/bigreply.json"
+drop_client() { # $1 = read-all | close-before-read | reset-before-read | close-midway; prints "BYTES STATUSLINE"
+    python3 - "$PORT" "$1" "$TMP/bigreply.json" <<'PY'
+import socket, struct, sys, time
+port, mode, body = int(sys.argv[1]), sys.argv[2], open(sys.argv[3], "rb").read()
+head = ("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nAccept: application/json, text/event-stream\r\n"
+        "Content-Type: application/json\r\nContent-Length: %d\r\n\r\n" % (port, len(body))).encode()
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+if mode == "close-midway":
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)   # before connect: the listener blocks in send()
+s.settimeout(120)
+s.connect(("127.0.0.1", port))
+s.sendall(head + body)
+data = b""
+if mode in ("read-all", "close-midway"):
+    want = 4096 if mode == "close-midway" else None
+    while want is None or len(data) < want:
+        chunk = s.recv(65536 if want is None else want - len(data))
+        if not chunk:
+            break
+        data += chunk
+elif mode == "reset-before-read":
+    time.sleep(0.3)                                             # an RST before the listener READ the request discards it
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))   # close() now sends RST, not FIN
+s.close()
+print(len(data), data.split(b"\r\n", 1)[0].decode("latin-1") or "-")
+PY
+}
+if start_server; then
+    read -r BIG_BYTES _ BIG_CODE _ <<<"$( drop_client read-all 2>/dev/null )"
+    if [ "${BIG_BYTES:-0}" -gt 4194304 ] 2>/dev/null && [ "${BIG_CODE:-}" = "200" ]; then
+        ok "the probe reply outgrows every default socket buffer ($BIG_BYTES bytes, 200, read in full)"
+    else
+        no "the probe reply is '${BIG_BYTES:-}' bytes (HTTP '${BIG_CODE:-}'), not a 200 over 4 MiB — the drop shapes below would not reach a failing send()"
+    fi
+    for shape in close-before-read reset-before-read close-midway; do
+        drop_client "$shape" >/dev/null 2>&1
+        # The next request queues behind the dropped one on the single-threaded loop, so no sleep is needed: it
+        # is answered only if the listener outlived the failed write.
+        NEXT="$( curl -s -o /dev/null -w '%{http_code}' -m 60 -X POST "$URL" -d '{"jsonrpc":"2.0","id":92,"method":"initialize"}' )"
+        if [ "$NEXT" = "200" ] && kill -0 "$SRV_PID" 2>/dev/null; then
+            ok "$shape: the same listener is alive and answers the next request (200)"
+        else
+            # status 141 = the listener died of SIGPIPE on its own; 143 = it was alive and this kill ended it.
+            kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null; RC=$?; SRV_PID=""
+            no "$shape: the listener did not outlive the dropped client (next request got $NEXT, listener status $RC; 141 = SIGPIPE)"
+            start_server || no "$shape: the listener could not be restarted for the remaining shapes"
+        fi
+    done
+    stop_server
+else
+    no "drop-mid-response listener failed to start"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -308,17 +424,17 @@ echo "=== security: with a token, missing/wrong Bearer → 401, right Bearer →
 # ═══════════════════════════════════════════════════════════════════════════
 TOKEN="s3cr3t-$$"
 if start_server --mcp-token="$TOKEN"; then
-    # start_server's own probe has no Authorization header, so a successful start already proves the poll
-    # tolerates a 401 — re-check explicitly below.
-    NO="$(   curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -d '{"jsonrpc":"2.0","id":71,"method":"initialize"}' )"
-    WRONG="$( curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -H 'Authorization: Bearer WRONG' -d '{"jsonrpc":"2.0","id":72,"method":"initialize"}' )"
-    RIGHT="$( curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $TOKEN" -d '{"jsonrpc":"2.0","id":73,"method":"initialize"}' )"
-    [ "$NO" = "401" ]    && ok "missing bearer token → 401"           || no "missing token got $NO (expected 401)"
-    [ "$WRONG" = "401" ] && ok "wrong bearer token → 401"             || no "wrong token got $WRONG (expected 401)"
-    [ "$RIGHT" = "200" ] && ok "correct bearer token → 200"           || no "correct token got $RIGHT (expected 200)"
+    # the readiness probe (gatehttp's GET /mcp) has no Authorization header, so a successful start already proves
+    # the wait takes a 401 for an answer — re-check the bearer gate explicitly below.
+    http_status NO    "the no-bearer probe"      curl -X POST "$URL" -d '{"jsonrpc":"2.0","id":71,"method":"initialize"}'
+    http_status WRONG "the wrong-bearer probe"   curl -X POST "$URL" -H 'Authorization: Bearer WRONG' -d '{"jsonrpc":"2.0","id":72,"method":"initialize"}'
+    http_status RIGHT "the correct-bearer probe" curl -X POST "$URL" -H "Authorization: Bearer $TOKEN" -d '{"jsonrpc":"2.0","id":73,"method":"initialize"}'
+    if [ "$NO" = "401" ]; then ok "missing bearer token → 401"; else no "missing token got $NO (expected 401)"; fi
+    if [ "$WRONG" = "401" ]; then ok "wrong bearer token → 401"; else no "wrong token got $WRONG (expected 401)"; fi
+    if [ "$RIGHT" = "200" ]; then ok "correct bearer token → 200"; else no "correct token got $RIGHT (expected 200)"; fi
     stop_server
 else
-    no "token-guarded loopback server failed to start"
+    no "token-guarded loopback server failed to start: $( cat "$TMP/srv.why" )"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -327,12 +443,10 @@ echo "=== hostile-input parity: the mcpaudit4 corpus degrades identically over H
 # ═══════════════════════════════════════════════════════════════════════════
 if start_server; then
     # (A4-F6) a 26-digit start_line must not crash the server; it returns a well-formed JSON-RPC response.
-    H="$( curl -s -X POST "$URL" \
-        -d "{\"jsonrpc\":\"2.0\",\"id\":81,\"method\":\"tools/call\",\"params\":{\"name\":\"find_symbol\",\"arguments\":{\"path\":\"$WS\",\"symbol\":\"distance\"}}}" \
-        | python3 -c 'import sys,json; print(json.loads(json.load(sys.stdin)["result"]["content"][0]["text"])["symbol"]["handle"])' 2>/dev/null )"
+    mcp_post H_REPLY "{\"jsonrpc\":\"2.0\",\"id\":81,\"method\":\"tools/call\",\"params\":{\"name\":\"find_symbol\",\"arguments\":{\"path\":\"$WS\",\"symbol\":\"distance\"}}}"
+    H="$( printf '%s' "$H_REPLY" | python3 -c 'import sys,json; print(json.loads(json.load(sys.stdin)["result"]["content"][0]["text"])["symbol"]["handle"])' 2>/dev/null )"
     if [ -n "$H" ]; then
-        BOMB="$( curl -s -X POST "$URL" \
-            -d "{\"jsonrpc\":\"2.0\",\"id\":82,\"method\":\"tools/call\",\"params\":{\"name\":\"fetch_body\",\"arguments\":{\"path\":\"$WS\",\"handle\":\"$H\",\"start_line\":12345678901234567890123456}}}" )"
+        mcp_post BOMB "{\"jsonrpc\":\"2.0\",\"id\":82,\"method\":\"tools/call\",\"params\":{\"name\":\"fetch_body\",\"arguments\":{\"path\":\"$WS\",\"handle\":\"$H\",\"start_line\":12345678901234567890123456}}}"
         printf '%s' "$BOMB" | python3 -c 'import sys,json; json.load(sys.stdin)' 2>/dev/null \
             && ok "A4-F6 over HTTP: 26-digit start_line yields a well-formed JSON-RPC response (no UB/crash)" \
             || no "A4-F6 over HTTP: response not valid JSON: $( printf %s "$BOMB" | head -c 120 )"
@@ -343,8 +457,8 @@ if start_server; then
     # (A4-F7) an XML-comment-breaking task must not survive verbatim / break well-formedness.
     EVIL='--> <evil/> <!-- reopen: distance calculation'
     EVIL_JSON="$( python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$EVIL" )"
-    FOR_EVIL="$( curl -s -X POST "$URL" \
-        -d "{\"jsonrpc\":\"2.0\",\"id\":83,\"method\":\"tools/call\",\"params\":{\"name\":\"for\",\"arguments\":{\"path\":\"$WS\",\"task\":$EVIL_JSON}}}" \
+    mcp_post FOR_EVIL_REPLY "{\"jsonrpc\":\"2.0\",\"id\":83,\"method\":\"tools/call\",\"params\":{\"name\":\"for\",\"arguments\":{\"path\":\"$WS\",\"task\":$EVIL_JSON}}}"
+    FOR_EVIL="$( printf '%s' "$FOR_EVIL_REPLY" \
         | python3 -c 'import sys,json; r=json.load(sys.stdin); print(r["result"]["content"][0]["text"] if "error" not in r else "__ERR__")' 2>/dev/null )"
     if printf '%s' "$FOR_EVIL" | grep -q -- '--> <evil/>'; then
         no "A4-F7 over HTTP: the literal '--> <evil/>' survived uncollapsed (comment injection possible)"
@@ -352,12 +466,13 @@ if start_server; then
         ok "A4-F7 over HTTP: the '--' run was collapsed before landing in the XML comment"
     fi
     # server still alive after both hostile calls
-    LIVE="$( curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -d '{"jsonrpc":"2.0","id":84,"method":"initialize"}' )"
-    [ "$LIVE" = "200" ] && ok "server remains responsive after the hostile-input corpus" \
-                        || no "server unresponsive after hostile input (got $LIVE)"
+    mcp_post LIVE '{"jsonrpc":"2.0","id":84,"method":"initialize"}'
+    printf '%s' "$LIVE" | python3 -c 'import sys,json; json.load(sys.stdin)["result"]' 2>/dev/null \
+        && ok "server remains responsive after the hostile-input corpus" \
+        || no "server unresponsive after hostile input (the next request was answered with: $( printf %s "$LIVE" | head -c 160 ))"
     stop_server
 else
-    no "hostile-input server failed to start"
+    no "hostile-input server failed to start: $( cat "$TMP/srv.why" )"
 fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME CHECKS FAILED"

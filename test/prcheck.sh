@@ -21,7 +21,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/prfix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -42,7 +42,7 @@ ORDER="$( names_in_order "$OUT" )"
 first="$( printf '%s\n' "$ORDER" | head -1 )"
 count="$( printf '%s\n' "$ORDER" | wc -l | tr -d ' ' )"
 rest="$( printf '%s\n' "$ORDER" | tail -n +2 | sort | tr '\n' ',' )"
-[ "$first" = "hub" ] && ok "rank order: hub() emitted first" || no "rank order: expected hub() first, got: $first"
+if [ "$first" = "hub" ]; then ok "rank order: hub() emitted first"; else no "rank order: expected hub() first, got: $first"; fi
 { [ "$count" = 4 ] && [ "$rest" = "caller_x,caller_y,caller_z," ]; } \
     && ok "rank order: all 4 symbols present, hub followed by exactly {caller_x,caller_y,caller_z}" \
     || no "rank order: expected hub + {caller_x,caller_y,caller_z}, got count=$count rest=$rest"
@@ -68,11 +68,11 @@ fi
 
 # ── determinism ──────────────────────────────────────────────────────────────────────────────────────
 OUT_B="$( perl -e 'alarm 15; exec @ARGV' "$BIN" "$FIX" --rank-by=pagerank --no-cache 2>/dev/null )"
-[ "$OUT" = "$OUT_B" ] && ok "determinism: byte-identical run-to-run" || no "non-deterministic pagerank output"
+if [ "$OUT" = "$OUT_B" ]; then ok "determinism: byte-identical run-to-run"; else no "non-deterministic pagerank output"; fi
 
 # ── xml well-formed ──────────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$OUT" | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if printf '%s' "$OUT" | xmllint --noout - 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

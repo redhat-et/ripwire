@@ -31,7 +31,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -76,7 +76,7 @@ echo "headsnapcachecheck: BIN=$BIN"
 # ── (a) equivalence + reuse (unchanged HEAD == working tree, 0 regressions) ───────────────────────────────
 run --no-cache >"$TMP/a1" 2>/dev/null; rc1=$?
 SF="$( snapfiles | head -1 )"
-[ -n "$SF" ] && ok "run 1 creates a HEAD-snapshot cache file" || no "no ripwire-qheadsnap-*.bin after run 1"
+if [ -n "$SF" ]; then ok "run 1 creates a HEAD-snapshot cache file"; else no "no ripwire-qheadsnap-*.bin after run 1"; fi
 I1="$( [ -n "$SF" ] && inode_of "$SF" )"
 
 run --no-cache >"$TMP/a2" 2>/dev/null; rc2=$?
@@ -118,7 +118,7 @@ run --no-cache >"$TMP/b1" 2>/dev/null; rcb=$?
     || { no "stale HEAD snapshot reused after a new commit (exit=$rcb)"; grep -oE 'regressions="[0-9]+"' "$TMP/b1"; }
 
 # a NEW snapshot file must now exist for the new sha (old sha's file may still be present until eviction)
-[ "$( nsnap )" -ge 1 ] && ok "new-sha snapshot cache present" || no "no snapshot cache after new commit"
+if [ "$( nsnap )" -ge 1 ]; then ok "new-sha snapshot cache present"; else no "no snapshot cache after new commit"; fi
 
 # ── (c) key separation on --exclude (A4-F5 stays correct) ─────────────────────────────────────────────────
 before="$( nsnap )"

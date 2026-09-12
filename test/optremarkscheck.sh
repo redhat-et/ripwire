@@ -29,7 +29,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 FIX="$ROOT/test/optremarksfix"
 TRIAGE="$ROOT/scripts/optremarks.py"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 command -v python3 >/dev/null || { echo "python3 required"; exit 2; }
@@ -117,7 +117,7 @@ grep -q 'RIPWIRE_OPT_REMARKS requires Clang' "$ROOT/CMakeLists.txt" \
     && ok "a non-Clang configure is refused rather than silently producing no remarks" \
     || no "the non-Clang guard is gone (GCC would configure clean and emit nothing)"
 for flag in -gline-tables-only -fsave-optimization-record; do
-    grep -q -- "$flag" "$ROOT/CMakeLists.txt" && ok "remarks build passes $flag" || no "remarks build lost $flag"
+    if grep -q -- "$flag" "$ROOT/CMakeLists.txt"; then ok "remarks build passes $flag"; else no "remarks build lost $flag"; fi
 done
 
 # ── WHICH FRONT END? Both RIPWIRE_OPT_REMARKS and RIPWIRE_PGO are Clang-only by construction (-Rpass=/

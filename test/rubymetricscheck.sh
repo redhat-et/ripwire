@@ -14,7 +14,7 @@ set -u
 BIN="${1:-${RIPWIRE_BIN:-./build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 DIR="$(mktemp -d)"; trap 'rm -rf "$DIR"' EXIT
@@ -87,13 +87,13 @@ if [ "$fx" -lt "$bx" ]; then
 else
   no "branch-free flat ccx ($fx) should be < branchy ccx ($bx) — metric may be a constant"
 fi
-[ "$fx" -eq 0 ] && ok "branch-free method ccx == 0 (flat)" || no "branch-free flat ccx should be 0 (got $fx)"
+if [ "$fx" -eq 0 ]; then ok "branch-free method ccx == 0 (flat)"; else no "branch-free flat ccx should be 0 (got $fx)"; fi
 [ "$fp" -gt 0 ] && ok "branch-free method still counts its params (flat params=$fp)" \
                 || no "branch-free flat params should be > 0 (got $fp)"
 
 # determinism: two full runs byte-identical.
 r1="$("$BIN" "$DIR" --metrics --no-cache 2>/dev/null)"
 r2="$("$BIN" "$DIR" --metrics --no-cache 2>/dev/null)"
-[ "$r1" = "$r2" ] && ok "Ruby --metrics deterministic run-to-run" || no "Ruby --metrics not deterministic"
+if [ "$r1" = "$r2" ]; then ok "Ruby --metrics deterministic run-to-run"; else no "Ruby --metrics not deterministic"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

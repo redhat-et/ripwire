@@ -33,7 +33,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/archmetricsfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -86,7 +86,7 @@ perl -e 'alarm 20; exec @ARGV' "$BIN" "$FIX" --arch="$FIX/sibling.arch" --no-cac
 
 # ── 6) XML well-formed (G4) — the <metrics> element carrying the new attribute ────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$OUT" | xmllint --noout - 2>/dev/null && ok "xml well-formed (arch + metrics + propagation_cost)" || no "xml malformed"
+    if printf '%s' "$OUT" | xmllint --noout - 2>/dev/null; then ok "xml well-formed (arch + metrics + propagation_cost)"; else no "xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

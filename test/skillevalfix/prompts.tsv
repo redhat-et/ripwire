@@ -333,3 +333,36 @@ Fill in the sprint retro doc with what shipped.	none	neg	test
 Convert the images in assets to WebP.	none	neg	dev
 Explain Python's walrus operator.	none	neg	test
 Pin the GitHub Action to a commit SHA instead of a tag.	none	neg	dev
+# ── STOP-RULE ROWS (2026-09-10, lane/helptask-precision) — BEGIN. Sliced by test/skillevalcheck.sh's
+# stop-rule arm between these two markers; the arm asserts exactly 16 rows, 4 per rule, so a silent
+# slice failure fails the gate. Each row's ground truth depends on one of the four frontmatter STOP
+# RULES #112 restored — sentences that no other row in this corpus could see (2026-09-10 audit F-R1-03:
+# stripping all four left split=test hit@1 byte-identical and split=dev 1.4pp BETTER). split=dev by the
+# corpus header's own rule that the test split is FROZEN and new rows belong in dev.
+#   before-you-build  "A small feature with an obvious home needs none of this."
+#   fresh-eyes        "A single-lens question is a single call."
+#   orient            "Stop at the first rung that answers."
+#   write-tests       "For one target one --seams or --callers pass suffices."
+# PROVENANCE, stated honestly: the first 8 (the audit's own) echo the rules' vocabulary, which is what
+# `desc` means in this file — they are labelled `desc`, not `judged`, because a lexical ranker can only
+# detect a sentence's removal through rows that share its words. The second 8 were written to AVOID that
+# vocabulary and are `judged`; they were MEASURED at exactly zero discrimination (bm25-desc 50.0% with
+# the rules and 50.0% without), which is the honest answer to "phrase it without quoting it": for a BM25
+# arm, you cannot. They are kept as ordinary hard judged rows and as the record of that null result.
+This feature is small and I already know exactly which file it belongs in - do I still need a plan?	ripwire-before-you-build	desc	dev
+A one-file addition with an obvious home, nothing multi-symbol about it	ripwire-before-you-build	desc	dev
+Just one lens please: which files are the hotspots, nothing else	ripwire-fresh-eyes	desc	dev
+A single question about this inherited module - where is the rot, one answer is enough	ripwire-fresh-eyes	desc	dev
+Give me the first rung only - what are the main subsystems, then stop	ripwire-orient	desc	dev
+Landing cold here; one map is all I want before I start reading	ripwire-orient	desc	dev
+One target, one pass: which tests reach parseFrame and which do not	ripwire-write-tests	desc	dev
+This single function has no coverage - one call to find the seam is enough	ripwire-write-tests	desc	dev
+This addition is tiny and I already know which module owns it - is a full plan worth it?	ripwire-before-you-build	judged	dev
+Do I really need the whole planning pass for a change this contained?	ripwire-before-you-build	judged	dev
+I only want the hotspot list for this inherited service, nothing more.	ripwire-fresh-eyes	judged	dev
+Where is the dead code in this module? That is the only thing I am asking.	ripwire-fresh-eyes	judged	dev
+New to this repo - the top-level subsystems and entry points, and I will take it from there.	ripwire-orient	judged	dev
+I want just enough of a map to start reading, not a full tour.	ripwire-orient	judged	dev
+There is exactly one function I need coverage for - what is the shortest way to find its seam?	ripwire-write-tests	judged	dev
+One untested helper, one pass to find what reaches it, done.	ripwire-write-tests	judged	dev
+# ── STOP-RULE ROWS — END ────────────────────────────────────────────────────────────────────────────

@@ -20,7 +20,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/rankbyfix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -53,7 +53,7 @@ done
 
 # ── semantic: --rank-by=hub top symbol is hub() (highest out-fan to good authorities) ──────────────────
 hub_top="$( top_name "$OUT_hub" )"
-[ "$hub_top" = "hub" ] && ok "--rank-by=hub top symbol is hub() (got: $hub_top)" || no "--rank-by=hub top should be hub(), got: $hub_top"
+if [ "$hub_top" = "hub" ]; then ok "--rank-by=hub top symbol is hub() (got: $hub_top)"; else no "--rank-by=hub top should be hub(), got: $hub_top"; fi
 
 # ── semantic: --rank-by=authority top is NOT hub() — verified against real HITS math first: Kleinberg
 #    mutual reinforcement makes a()/b()/c() (pointed to by the one strong hub, hub()) the authorities here,
@@ -64,7 +64,7 @@ case "$auth_top" in
     a|b|c) ok "--rank-by=authority top is a/b/c (got: $auth_top — HITS mutual-reinforcement: hub() is the one strong hub, so its callees win authority mass, not sink()'s weak callers d()/e())" ;;
     *)     no "--rank-by=authority top should be a/b/c, got: $auth_top" ;;
 esac
-[ "$auth_top" != "hub" ] && ok "--rank-by=authority top is NOT hub() (HITS roles are distinct)" || no "--rank-by=authority top should never be hub()"
+if [ "$auth_top" != "hub" ]; then ok "--rank-by=authority top is NOT hub() (HITS roles are distinct)"; else no "--rank-by=authority top should never be hub()"; fi
 
 # ── semantic: pagerank top differs from hub top — proves the dispatch table actually switches algorithms
 #    instead of every mode silently falling through to plain PageRank ─────────────────────────────────
@@ -128,7 +128,7 @@ fi
 # churn determinism on the synthetic repo too
 CHURN_A="$( perl -e 'alarm 15; exec @ARGV' "$BIN" "$REPO" --rank-by=churn --no-cache 2>/dev/null )"
 CHURN_B="$( perl -e 'alarm 15; exec @ARGV' "$BIN" "$REPO" --rank-by=churn --no-cache 2>/dev/null )"
-[ "$CHURN_A" = "$CHURN_B" ] && ok "churn: deterministic on synthetic git repo" || no "churn: non-deterministic on synthetic git repo"
+if [ "$CHURN_A" = "$CHURN_B" ]; then ok "churn: deterministic on synthetic git repo"; else no "churn: non-deterministic on synthetic git repo"; fi
 
 # ── §L10: the churn legend must be TRUE, not just present — a differential fixture that proves the two
 #    rankings CAN put a different symbol in the #1 slot (a leaf with no call-graph support at all, but
@@ -168,7 +168,7 @@ printf '%s' "$CHURN_OUT2" | grep -q 'teleport BIASED by git CHANGE-FREQUENCY' \
 
 # ── xml well-formed (spot-check one mode) ────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    r pagerank | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if r pagerank | xmllint --noout - 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

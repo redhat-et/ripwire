@@ -50,7 +50,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/regexbombfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -114,9 +114,9 @@ bombCase(){
         return
     fi
     [ "$rc" -ge 128 ] && { no "$label: CRASHED (signal death, exit $rc)"; return; }
-    [ "$rc" -eq 1 ] && ok "$label: refused at exit 1 (bounded, no scan)" || no "$label: exit $rc (expected 1)"
+    if [ "$rc" -eq 1 ]; then ok "$label: refused at exit 1 (bounded, no scan)"; else no "$label: exit $rc (expected 1)"; fi
     grep -q 'hits=' "$TMP/out" && no "$label: printed a hits= element — a scan happened" || ok "$label: no hits= element on stdout"
-    grep -qF -- "$pat" "$TMP/err" && ok "$label: refusal names the pattern" || no "$label: refusal does not name the pattern"
+    if grep -qF -- "$pat" "$TMP/err"; then ok "$label: refusal names the pattern"; else no "$label: refusal does not name the pattern"; fi
     grep -qi 'backtrack' "$TMP/err" && ok "$label: refusal names the construct (catastrophic backtracking)" \
         || no "$label: refusal does not name the construct: $( head -c 200 "$TMP/err" )"
 }
@@ -204,7 +204,7 @@ grep -q 'normal.cpp' "$TMP/normal" \
     || { no "normal.cpp matches missing under a safe pattern"; head -40 "$TMP/normal"; }
 
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/normal" 2>/dev/null && ok "well-formed XML on the safe path" || { no "malformed XML"; cat "$TMP/normal"; }
+    if xmllint --noout "$TMP/normal" 2>/dev/null; then ok "well-formed XML on the safe path"; else { no "malformed XML"; cat "$TMP/normal"; }; fi
 else
     printf '  SKIP  xmllint (not installed)\n'
 fi
@@ -216,7 +216,7 @@ fi
     && ok "deterministic (two refusals byte-identical on stdout AND stderr)" || no "non-deterministic"
 "$BIN" "$CORPUS" --regex='a+b' --no-prefilter --no-cache >"$TMP/s1" 2>/dev/null
 "$BIN" "$CORPUS" --regex='a+b' --no-prefilter --no-cache >"$TMP/s2" 2>/dev/null
-diff -q "$TMP/s1" "$TMP/s2" >/dev/null && ok "deterministic on the safe scanning path too" || no "non-deterministic (safe path)"
+if diff -q "$TMP/s1" "$TMP/s2" >/dev/null; then ok "deterministic on the safe scanning path too"; else no "non-deterministic (safe path)"; fi
 
 # ── (5) informational: the MID-MATCH catch survives as belt-and-braces ──────────────────────────────────
 # The structural guard is a static approximation and says so — overlapping alternation like (a|a)+b is a

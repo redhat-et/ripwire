@@ -30,7 +30,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -221,7 +221,7 @@ for i in 1 2 3; do
     "$BIN" "$FIX" --no-cache --verify='calls(entry_caller, leaf_target)' >"$TMP/det.$i" 2>/dev/null
 done
 cmp -s "$TMP/det.1" "$TMP/det.2" && cmp -s "$TMP/det.2" "$TMP/det.3" || det=0
-[ $det -eq 1 ] && ok 'determinism: three runs are byte-identical' || no 'determinism: runs differ'
+if [ $det -eq 1 ]; then ok 'determinism: three runs are byte-identical'; else no 'determinism: runs differ'; fi
 xml_ok=1
 for f in c1 c2 n1 n2 n3 u1 u2 u3 d1 d2 d3 r1 r2 r3; do
     xmllint --noout "$TMP/$f.xml" 2>/dev/null || { xml_ok=0; no "xmllint: $f.xml is not well-formed"; }

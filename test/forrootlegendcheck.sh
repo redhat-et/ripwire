@@ -25,7 +25,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "forrootlegendcheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -76,7 +76,7 @@ if printf '%s' "$OUT2" | grep -qF "$CLAUSE_SNIPPET"; then
 else
     no "arm2: the clause is missing at --token-budget=800 — it was silently dropped instead of fitting"
 fi
-printf '%s' "$OUT2" | xmllint --noout - 2>/dev/null && ok "arm2: tight-budget output is well-formed (G4)" || no "arm2: tight-budget output fails xmllint"
+if printf '%s' "$OUT2" | xmllint --noout - 2>/dev/null; then ok "arm2: tight-budget output is well-formed (G4)"; else no "arm2: tight-budget output fails xmllint"; fi
 
 # ── arm 3: multi-root -- root= (and the clause) must be ABSENT, never a false claim about a root that
 #    does not exist (single-root only, per the clause's own text and every other verb's rootArg contract)
@@ -129,7 +129,7 @@ PY_EOF
 
 # ── arm 5: determinism ───────────────────────────────────────────────────────────────────────────────
 OUT1B="$( "$BIN" "$ROOT" --for="rank symbols by pagerank" --no-cache 2>/dev/null )"
-[ "$OUT1" = "$OUT1B" ] && ok "arm5: CLI --for output is byte-identical run-to-run" || no "arm5: CLI --for output is not deterministic"
+if [ "$OUT1" = "$OUT1B" ]; then ok "arm5: CLI --for output is byte-identical run-to-run"; else no "arm5: CLI --for output is not deterministic"; fi
 
 [ "$fail" -eq 0 ] && { echo "ALL PASS"; exit 0; }
 echo "FAILURES PRESENT"; exit 1

@@ -334,6 +334,12 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     // argument's obliged description and never for prose, and prose there would cost ~680 B against 159 B
     // of headroom. The refusal example names the NON-default value, which is the one a caller has to type.
     { "legend",        "a STRING legend posture: compact (the default) or full",                      "legend=\"full\"" },
+    // ── boolean ──
+    // F-R1-07 (2026-09-10 audit): the CLI's own answer to a route MIS-FIRE is to re-run with --no-route,
+    // and the MCP surface had no equivalent — an agent that reads route= and disagrees was told WHICH ranker
+    // answered and given no way to ask for the other one. Advertised as a real boolean, not a string, so a
+    // quoted "true" refuses instead of being guessed at (mcpBoolArg).
+    { "no_route",      "a BOOLEAN: true forces plain subtoken+body BM25 (omit it for the default router)", "no_route=true", "boolean" },
     // ── the ENVELOPE, outside `params` (§B6 M6/M7) ──
     // These four were read through the bare findString/findObject path, which collapses "absent" onto
     // "present but not the shape I read" — so `"method":5` became `-32700 "parse error"` (a JSON that parsed
@@ -980,9 +986,9 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     // --cochange is in that set, so its twin declares the same window.
     { "cochange",                 "path file limit offset" },
     { "memory_recall",            "path task top_k budget_tokens" },
-    { "situational_awareness",    "path diff files" },
+    { "situational_awareness",    "path diff files limit offset" },
     { "mentions",                 "path paths symbol limit offset" },
-    { "for",                      "path paths task budget_tokens" },
+    { "for",                      "path paths task budget_tokens no_route" },
     { "lego",                     "path paths type legend" },
     { "owners",                   "path symbol limit offset legend" },
     { "fetch_body",               "path handle start_line end_line" },
@@ -998,12 +1004,15 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "uses",                     "path paths symbol limit offset legend" },
     { "path_between",             "path paths from to legend" },
     { "connect",                  "path paths symbols radius legend" },
-    { "explore",                  "path paths task budget_tokens partition legend" },
+    { "explore",                  "path paths task budget_tokens partition legend no_route" },
     { "from_trace",               "path paths trace budget_tokens legend" },
-    { "edit_check",               "path paths symbol new_body legend" },
+    // 2026-09-10: limit/offset are DECLARED here because the verb now HONORS them (mcpPageArgs -> the
+    // unflagged-row window in editcheck.h), the same rule the `impact`/`uses` rows above state. They
+    // page the CONTEXT rows only; the flagged callers this verb exists to name are never windowed.
+    { "edit_check",               "path paths symbol new_body limit offset legend" },
     { "whereis",                  "path symbol kind limit offset legend" },
     { "stray_content",            "path kind limit offset legend" },
-    { "flags",                    "path kind symbol legend" },
+    { "flags",                    "path kind symbol limit offset legend" },
     { "doc_drift",                "path kind limit offset legend" },
     // lane/tc-sliceat: the ARISE def-use slice — var/flow/depth mirror the CLI's :VAR / --slice-flow /
     // --slice-depth knobs; single-root by kMcpSingleRootVerbs (a per-definition on-disk re-parse).

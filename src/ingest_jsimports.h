@@ -73,10 +73,10 @@ inline std::vector<std::string> jsPatternNames( TSNode pattern, std::string_view
         else if( jsNodeIs( node, "pair_pattern" ) || jsNodeIs( node, "assignment_pattern" )
                  || jsNodeIs( node, "object_assignment_pattern" ) || jsNodeIs( node, "required_parameter" ) || jsNodeIs( node, "optional_parameter" ) )
         {
-            const char* field = jsNodeIs( node, "pair_pattern" ) ? "value"
-                              : ( jsNodeIs( node, "required_parameter" ) || jsNodeIs( node, "optional_parameter" ) ) ? "pattern" : "left";
-            TSNode child = ts_node_child_by_field_name( node, field, std::strlen( field ) );
-            if( ts_node_is_null( child ) ) { child = ts_node_child_by_field_name( node, "name", 4 ); }
+            const NodeField field = jsNodeIs( node, "pair_pattern" ) ? NodeField::Value
+                                  : ( jsNodeIs( node, "required_parameter" ) || jsNodeIs( node, "optional_parameter" ) ) ? NodeField::Pattern : NodeField::Left;
+            TSNode child = fieldChild( node, field );
+            if( ts_node_is_null( child ) ) { child = fieldChild( node, NodeField::Name ); }
             if( !ts_node_is_null( child ) ) { pending.push_back( child ); }
         }
         else if( std::strcmp( kind, "formal_parameters" ) == 0 || std::strcmp( kind, "array_pattern" ) == 0
@@ -101,7 +101,7 @@ inline std::vector<std::string> jsPatternNames( TSNode pattern, std::string_view
 inline std::vector<std::pair<std::string, std::string>> jsExportClauseNames( TSNode stmt, std::string_view src )
 {
     std::vector<std::pair<std::string, std::string>> names;
-    if( !ts_node_is_null( ts_node_child_by_field_name( stmt, "source", 6 ) ) || jsHasToken( stmt, "type" ) )
+    if( !ts_node_is_null( fieldChild( stmt, NodeField::Source ) ) || jsHasToken( stmt, "type" ) )
     {
         return names;
     }
@@ -112,8 +112,8 @@ inline std::vector<std::pair<std::string, std::string>> jsExportClauseNames( TSN
         pending.pop_back();
         if( jsNodeIs( node, "export_specifier" ) )
         {
-            TSNode local = ts_node_child_by_field_name( node, "name", 4 );
-            TSNode alias = ts_node_child_by_field_name( node, "alias", 5 );
+            TSNode local = fieldChild( node, NodeField::Name );
+            TSNode alias = fieldChild( node, NodeField::Alias );
             if( ts_node_is_null( alias ) ) { alias = local; }
             if( jsNodeIs( local, "identifier" ) && jsNodeIs( alias, "identifier" ) && !jsHasToken( node, "type" ) )
             {
@@ -141,7 +141,7 @@ inline std::uint32_t jsModuleBindingCount( TSNode root, std::string_view name, s
     collectChildren( root, cursor.cur, children );
     for( TSNode stmt : children )
     {
-        TSNode decl = jsNodeIs( stmt, "export_statement" ) ? ts_node_child_by_field_name( stmt, "declaration", 11 ) : stmt;
+        TSNode decl = jsNodeIs( stmt, "export_statement" ) ? fieldChild( stmt, NodeField::Declaration ) : stmt;
         if( ts_node_is_null( decl ) || jsHasToken( stmt, "type" ) ) { continue; }
         std::vector<TSNode> pending{ decl };
         while( !pending.empty() )
@@ -153,12 +153,12 @@ inline std::uint32_t jsModuleBindingCount( TSNode root, std::string_view name, s
                 || jsNodeIs( node, "generator_function_declaration" ) || jsNodeIs( node, "class_declaration" )
                 || jsNodeIs( node, "abstract_class_declaration" ) || jsNodeIs( node, "enum_declaration" ) )
             {
-                binding = ts_node_child_by_field_name( node, "name", 4 );
+                binding = fieldChild( node, NodeField::Name );
             }
             else if( jsNodeIs( node, "import_specifier" ) && !jsHasToken( node, "type" ) )
             {
-                binding = ts_node_child_by_field_name( node, "alias", 5 );
-                if( ts_node_is_null( binding ) ) { binding = ts_node_child_by_field_name( node, "name", 4 ); }
+                binding = fieldChild( node, NodeField::Alias );
+                if( ts_node_is_null( binding ) ) { binding = fieldChild( node, NodeField::Name ); }
             }
             else if( jsNodeIs( node, "identifier" ) ) { binding = node; }
             else if( jsNodeIs( node, "lexical_declaration" ) || jsNodeIs( node, "variable_declaration" )
@@ -216,7 +216,7 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
     {
         if( jsNodeIs( stmt, "import_statement" ) )
         {
-            TSNode source = ts_node_child_by_field_name( stmt, "source", 6 );
+            TSNode source = fieldChild( stmt, NodeField::Source );
             if( ts_node_is_null( source ) ) { continue; }
             const std::string module = importSpecifierText( source, src );
             std::vector<TSNode> pending{ stmt };
@@ -227,8 +227,8 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
                 const bool isDefault = jsNodeIs( node, "identifier" ) && jsNodeIs( ts_node_parent( node ), "import_clause" );
                 if( isDefault || jsNodeIs( node, "import_specifier" ) )
                 {
-                    TSNode name = isDefault ? node : ts_node_child_by_field_name( node, "name", 4 );
-                    TSNode alias = isDefault ? node : ts_node_child_by_field_name( node, "alias", 5 );
+                    TSNode name = isDefault ? node : fieldChild( node, NodeField::Name );
+                    TSNode alias = isDefault ? node : fieldChild( node, NodeField::Alias );
                     if( ts_node_is_null( alias ) ) { alias = name; }
                     if( !jsNodeIs( alias, "identifier" ) ) { continue; }
                     std::string local( pattern::nodeText( alias, src ) );
@@ -251,12 +251,12 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         }
         else if( jsNodeIs( stmt, "export_statement" ) )
         {
-            TSNode decl = ts_node_child_by_field_name( stmt, "declaration", 11 );
+            TSNode decl = fieldChild( stmt, NodeField::Declaration );
             if( jsHasToken( stmt, "default" ) )
             {
-                TSNode value = ts_node_child_by_field_name( stmt, "value", 5 );
+                TSNode value = fieldChild( stmt, NodeField::Value );
                 TSNode name{};
-                if( !ts_node_is_null( decl ) ) { name = ts_node_child_by_field_name( decl, "name", 4 ); }
+                if( !ts_node_is_null( decl ) ) { name = fieldChild( decl, NodeField::Name ); }
                 record( stmt, LocalBindKind::JsExport, "default", root );
                 if( jsNodeIs( value, "identifier" ) && jsModuleBindingCount( root, pattern::nodeText( value, src ), src ) == 1 )
                 {
@@ -292,7 +292,7 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
                 }
                 continue;
             }
-            TSNode name = ts_node_child_by_field_name( decl, "name", 4 );
+            TSNode name = fieldChild( decl, NodeField::Name );
             if( jsNodeIs( decl, "function_declaration" ) || jsNodeIs( decl, "generator_function_declaration" )
                 || jsNodeIs( decl, "class_declaration" ) || jsNodeIs( decl, "abstract_class_declaration" ) )
             {
@@ -306,9 +306,9 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
                 for( TSNode variable : declarators )
                 {
                     if( !jsNodeIs( variable, "variable_declarator" ) ) { continue; }
-                    TSNode value = ts_node_child_by_field_name( variable, "value", 5 );
+                    TSNode value = fieldChild( variable, NodeField::Value );
                     if( !jsNodeIs( value, "arrow_function" ) && !jsNodeIs( value, "function_expression" ) ) { continue; }
-                    TSNode binding = ts_node_child_by_field_name( variable, "name", 4 );
+                    TSNode binding = fieldChild( variable, NodeField::Name );
                     if( jsNodeIs( binding, "identifier" ) )
                     {
                         record( stmt, LocalBindKind::JsExport, std::string( pattern::nodeText( binding, src ) ), decl );
@@ -330,18 +330,18 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         TSNode scope{};
         if( jsFunctionScope( node ) )
         {
-            binding = ts_node_child_by_field_name( node, "parameters", 10 );
-            if( ts_node_is_null( binding ) ) { binding = ts_node_child_by_field_name( node, "parameter", 9 ); }
+            binding = fieldChild( node, NodeField::Parameters );
+            if( ts_node_is_null( binding ) ) { binding = fieldChild( node, NodeField::Parameter ); }
             scope = node;
         }
         else if( jsNodeIs( node, "catch_clause" ) )
         {
-            binding = ts_node_child_by_field_name( node, "parameter", 9 );
+            binding = fieldChild( node, NodeField::Parameter );
             scope = node;
         }
         else if( jsNodeIs( node, "for_in_statement" ) )
         {
-            binding = ts_node_child_by_field_name( node, "left", 4 );
+            binding = fieldChild( node, NodeField::Left );
             scope = node;
             if( jsHasToken( node, "var" ) )
             {
@@ -353,7 +353,7 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         }
         else if( jsNodeIs( node, "variable_declarator" ) )
         {
-            binding = ts_node_child_by_field_name( node, "name", 4 );
+            binding = fieldChild( node, NodeField::Name );
             const bool isVar = jsNodeIs( ts_node_parent( node ), "variable_declaration" );
             for( scope = ts_node_parent( node ); !ts_node_is_null( scope ); scope = ts_node_parent( scope ) )
             {
@@ -365,7 +365,7 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         if( ( jsNodeIs( node, "variable_declarator" ) || jsNodeIs( node, "for_in_statement" ) )
             && !ts_node_is_null( scope ) && jsFunctionScope( scope ) )
         {
-            scope = ts_node_child_by_field_name( scope, "body", 4 );
+            scope = fieldChild( scope, NodeField::Body );
         }
         for( std::string name : jsPatternNames( binding, src ) )
         {
@@ -376,7 +376,7 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
             || jsNodeIs( node, "function_expression" ) || jsNodeIs( node, "generator_function" ) || jsNodeIs( node, "class" )
             || jsNodeIs( node, "abstract_class_declaration" ) )
         {
-            TSNode nameNode = ts_node_child_by_field_name( node, "name", 4 );
+            TSNode nameNode = fieldChild( node, NodeField::Name );
             if( !ts_node_is_null( nameNode ) )
             {
                 std::string name( pattern::nodeText( nameNode, src ) );

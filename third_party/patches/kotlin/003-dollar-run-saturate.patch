@@ -1,0 +1,18 @@
+diff --git a/third_party/deps/kotlin/src/scanner.c b/third_party/deps/kotlin/src/scanner.c
+index ed6b9609..6ffb0a95 100644
+--- a/third_party/deps/kotlin/src/scanner.c
++++ b/third_party/deps/kotlin/src/scanner.c
+@@ -146,7 +146,12 @@ static bool scan_string_content(TSLexer *lexer, Stack *stack,
+       uint16_t additional_dollars = 0;
+       while (lexer->lookahead == '$') {
+         advance(lexer);
+-        additional_dollars++;
++        // RIPWIRE_VENDOR_PATCH(kotlin/003-dollar-run-saturate): a uint16_t counter, and both `++` here and
++        // `1 + additional_dollars` below are implicit truncations once a run reaches 65,536 `$` — a hard
++        // abort under G1's -fno-sanitize-recover=all, and a wrapped count (a missed interpolation) in a
++        // plain build. Saturate at 256 and keep consuming the run: prefix_len is at most 255, so every
++        // comparison below reads a saturated count exactly as it reads the true one.
++        if (additional_dollars < 256) additional_dollars = (uint16_t)(additional_dollars + 1);
+       }
+       uint16_t total_dollars = 1 + additional_dollars;
+       if (total_dollars >= prefix_len &&

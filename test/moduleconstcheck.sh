@@ -35,7 +35,7 @@ FIX="$ROOT/test/moduleconstfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -46,7 +46,7 @@ echo "moduleconstcheck: BIN=$BIN  FIX=$FIX"
 MAP="$TMP/map.xml"
 $BIN "$FIX" --no-cache >"$MAP" 2>"$TMP/map.err" || { no "default map exited non-zero: $( cat "$TMP/map.err" )"; exit 1; }
 
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP" && ok "map passes xmllint --noout" || no "map fails xmllint"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP"; then ok "map passes xmllint --noout"; else no "map fails xmllint"; fi; }
 
 # presence guard (CONTRIBUTING §2: assert the probe target exists before asserting the property)
 grep -q 'n="mcConsumeAll"' "$MAP" || { no "presence guard: fixture parse produced no mcConsumeAll fn — gate cannot observe its subject"; exit 1; }
@@ -57,17 +57,17 @@ has_any(){ grep -q "n=\"$1\"" "$MAP"; }
 # ── 1. [RED] C++ module-scope const-qualified camel constants become t="var" ───────────────────
 for sym in kMcTuConstexpr kMcTuConstPtr kMcTuStaticConst \
            kMcNsConstexpr kMcNsInlineConstexpr kMcNsPlainConst kMcNsConstinit; do
-    has_var "$sym" && ok "extracted t=\"var\": $sym" || no "MISSING t=\"var\" def: $sym"
+    if has_var "$sym"; then ok "extracted t=\"var\": $sym"; else no "MISSING t=\"var\" def: $sym"; fi
 done
 
 # ── 2. [RED] class-static const/constexpr members with in-class initializers ───────────────────
 for sym in kMcClassConstexpr MC_CLASS_SCREAM kMcClassConstInt; do
-    has_var "$sym" && ok "extracted class-static: $sym" || no "MISSING class-static def: $sym"
+    if has_var "$sym"; then ok "extracted class-static: $sym"; else no "MISSING class-static def: $sym"; fi
 done
 
 # ── 3. [RED] C file-scope const-qualified camel constants ──────────────────────────────────────
 for sym in k_mc_file_buf_bytes k_mc_file_default_name; do
-    has_var "$sym" && ok "extracted C const: $sym" || no "MISSING C const def: $sym"
+    if has_var "$sym"; then ok "extracted C const: $sym"; else no "MISSING C const def: $sym"; fi
 done
 
 # ── 4. scope negatives: the fix must not index mutables, locals, or per-instance fields ────────
@@ -82,7 +82,7 @@ done
 
 # ── 6. no-gap languages pinned unchanged (probed case-blind pre-fix) ───────────────────────────
 for sym in MC_PY_UPPER mc_py_lower MC_RS_SCREAM kMcRsCamel McGoCamel MC_TS_SCREAM MC_JS_SCREAM; do
-    has_var "$sym" && ok "existing behavior pinned: $sym" || no "regressed existing capture: $sym"
+    if has_var "$sym"; then ok "existing behavior pinned: $sym"; else no "regressed existing capture: $sym"; fi
 done
 
 # ── 7. [RED] decoy separation: same name, two files, two symbols (pathQualifiedKey era) ────────
@@ -103,7 +103,7 @@ firstRanked="$( grep -o '<d [^>]*' "$FOR_OUT" | head -1 | grep -o ' n="[^"]*"' |
 # ── 9. [RED] --uses on a camel constant: the def exists and the read site is found ─────────────
 USES_OUT="$TMP/uses.xml"
 $BIN "$FIX" --no-cache --uses=kMcTuConstexpr >"$USES_OUT" 2>/dev/null
-grep -q 'defs="1"' "$USES_OUT" && ok "--uses=kMcTuConstexpr sees the def (defs=\"1\")" || no "--uses=kMcTuConstexpr defs != 1"
+if grep -q 'defs="1"' "$USES_OUT"; then ok "--uses=kMcTuConstexpr sees the def (defs=\"1\")"; else no "--uses=kMcTuConstexpr defs != 1"; fi
 grep -q 'role="read" p="[^"]*cfg\.cpp:' "$USES_OUT" \
     && ok "--uses=kMcTuConstexpr finds the cfg.cpp read site" \
     || no "--uses=kMcTuConstexpr finds no read site in cfg.cpp"
@@ -111,19 +111,19 @@ grep -q 'role="read" p="[^"]*cfg\.cpp:' "$USES_OUT" \
 # ── 10. [RED] the live repro, pinned: the repo's own version constants resolve on src/ ─────────
 SRC_USES="$TMP/src_uses.xml"
 $BIN "$ROOT/src" --no-cache --uses=kParserVer >"$SRC_USES" 2>/dev/null
-grep -q 'defs="1"' "$SRC_USES" && ok "src/: --uses=kParserVer sees the ingest_cache.h def" || no "src/: --uses=kParserVer defs != 1 (the live gap)"
+if grep -q 'defs="1"' "$SRC_USES"; then ok "src/: --uses=kParserVer sees the ingest_cache.h def"; else no "src/: --uses=kParserVer defs != 1 (the live gap)"; fi
 $BIN "$ROOT/src" --no-cache --uses=kIngestParserVerMirror >"$TMP/src_uses2.xml" 2>/dev/null
-grep -q 'defs="1"' "$TMP/src_uses2.xml" && ok "src/: --uses=kIngestParserVerMirror sees the quality.h def" || no "src/: --uses=kIngestParserVerMirror defs != 1"
+if grep -q 'defs="1"' "$TMP/src_uses2.xml"; then ok "src/: --uses=kIngestParserVerMirror sees the quality.h def"; else no "src/: --uses=kIngestParserVerMirror defs != 1"; fi
 $BIN "$ROOT/src" --no-cache --for="kParserVer" >"$TMP/src_for.xml" 2>/dev/null
 if grep -q 'weak="1"' "$TMP/src_for.xml"; then
     no "src/: --for=kParserVer still weak=\"1\" — the 2026-08-12 census repro"
 else
-    grep -q 'n="kParserVer"' "$TMP/src_for.xml" && ok "src/: --for=kParserVer resolves non-weak to the constant" || no "src/: --for=kParserVer non-weak but constant missing"
+    if grep -q 'n="kParserVer"' "$TMP/src_for.xml"; then ok "src/: --for=kParserVer resolves non-weak to the constant"; else no "src/: --for=kParserVer non-weak but constant missing"; fi
 fi
 
 # ── 11. determinism on this fixture ────────────────────────────────────────────────────────────
 $BIN "$FIX" --no-cache >"$TMP/map2.xml" 2>/dev/null
-diff -q "$MAP" "$TMP/map2.xml" >/dev/null && ok "two runs byte-identical" || no "determinism drift on moduleconstfix"
+if diff -q "$MAP" "$TMP/map2.xml" >/dev/null; then ok "two runs byte-identical"; else no "determinism drift on moduleconstfix"; fi
 
 echo
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

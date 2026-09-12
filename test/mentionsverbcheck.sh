@@ -28,7 +28,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -87,7 +87,7 @@ printf '%s' "$singleRow" | grep -q 'mentions="1"' \
 # ──         is worse than none. The legend must say why the locator is absent.
 printf '%s' "$multiRow"  | grep -qE ' l="' && no "multi.md row still carries the fake l=" || ok "multi.md row carries no l= (V2-2)"
 printf '%s' "$singleRow" | grep -qE ' l="' && no "single.md row still carries the fake l=" || ok "single.md row carries no l= (V2-2)"
-printf '%s' "$OUT" | grep -q "No line locator" && ok "legend explains the absent locator" || no "legend does not explain the absent locator"
+if printf '%s' "$OUT" | grep -q "No line locator"; then ok "legend explains the absent locator"; else no "legend does not explain the absent locator"; fi
 
 # ── 4) root docs= is the ROW COUNT (distinct files, 2), not the section tally ────────────────────────────
 rowCount="$( printf '%s' "$OUT" | grep -o '<doc p=' | wc -l | tr -d ' ' )"
@@ -104,11 +104,11 @@ sectionsAttr="$( printf '%s' "$OUT" | grep -oE '<mentions[^>]*>' | grep -oE ' se
 
 # ── 6) xml well-formed + determinism ─────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$OUT" | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if printf '%s' "$OUT" | xmllint --noout - 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi
 OUT2="$( "$BIN" "$FIX" --mentions=widget_pipeline_process --no-cache 2>/dev/null )"
-[ "$OUT" = "$OUT2" ] && ok "deterministic (byte-identical run-to-run)" || no "non-deterministic output"
+if [ "$OUT" = "$OUT2" ]; then ok "deterministic (byte-identical run-to-run)"; else no "non-deterministic output"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

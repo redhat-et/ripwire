@@ -41,7 +41,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -275,7 +275,7 @@ REFS_BEFORE="$( git -C "$C" for-each-ref --format='%(refname) %(objectname)' 2>/
 if command -v xmllint >/dev/null 2>&1; then
     g4=0
     for x in "$TMP"/*.xml; do xmllint --noout "$x" >/dev/null 2>&1 || { g4=1; echo "     bad: $x"; }; done
-    [ "$g4" = "0" ] && ok "G4: every emitted document is xmllint-clean" || no "G4: some emitted document is malformed"
+    if [ "$g4" = "0" ]; then ok "G4: every emitted document is xmllint-clean"; else no "G4: some emitted document is malformed"; fi
 fi
 
 [ "$fail" = "0" ] && echo "crossrefdegradecheck: ALL PASS" || echo "crossrefdegradecheck: FAILURES"

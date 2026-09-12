@@ -20,7 +20,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # BOTH seams: positional AND env (a single-bound gate silently ignores the binary a red-first run hands it)
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # absolutize BEFORE we cd away
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "  SKIP  qualitysignalcheck (git not available)"; exit 0; }
@@ -58,8 +58,8 @@ printf '%s' "$OCH" | grep -q 'kind="short-horizon-churn" sym="steady"' \
 printf '%s' "$OCH" | grep -q 'kind="short-horizon-churn" sym="fresh"' \
     && no "churn evidence: brand-new fresh() wrongly flagged (a first write is not a REwrite)" \
     || ok "churn evidence: brand-new symbol silent (no committed history at all)"
-[ "$( ecch )" = 2 ] && ok "churn evidence: hot() thrash still gates exit 2" || no "churn evidence: should exit 2 on hot() (got $( ecch ))"
-[ "$OCH" = "$( dch )" ] && ok "churn evidence: delta byte-identical run-to-run" || no "churn evidence: non-deterministic delta"
+if [ "$( ecch )" = 2 ]; then ok "churn evidence: hot() thrash still gates exit 2"; else no "churn evidence: should exit 2 on hot() (got $( ecch ))"; fi
+if [ "$OCH" = "$( dch )" ]; then ok "churn evidence: delta byte-identical run-to-run"; else no "churn evidence: non-deterministic delta"; fi
 
 # 1c) markdown Sections are exempt from churn even when genuinely thrashed: a section body rewritten in a
 #     window commit and again in the working tree must stay silent (doc sections are not code churn).
@@ -75,7 +75,7 @@ EMD="$( cd "$MD" && "$BIN" . --quality-delta --no-cache >/dev/null 2>&1; echo $?
 printf '%s' "$OMD" | grep -q 'kind="short-horizon-churn"' \
     && { no "churn evidence: markdown Section wrongly flagged (doc sections exempt from churn)"; printf '%s\n' "$OMD" | tr '>' '\n' | grep '<r '; } \
     || ok "churn evidence: thrashed markdown section silent (Section symbols exempt)"
-[ "$EMD" = 0 ] && ok "churn evidence: doc-only edit → exit 0" || no "churn evidence: doc-only edit should exit 0 (got $EMD)"
+if [ "$EMD" = 0 ]; then ok "churn evidence: doc-only edit → exit 0"; else no "churn evidence: doc-only edit should exit 0 (got $EMD)"; fi
 
 # ── 1d) CROSS-FILE SAME-NAME: churn identity is (file, scope, name), never the bare name ────────────────
 #   W1-S2 repro (2026-08-11): adding a shell function rows() in one test script produced a churn finding
@@ -193,7 +193,7 @@ printf '%s' "$OAK" | grep -q 'kind="complexity" sym="f"' && [ "$( ecak )" = 2 ] 
 
 ( cd "$AK" && "$BIN" . --quality-ack='known refactor debt' --no-cache >/dev/null 2>&1 )
 AKEC=$?
-[ "$AKEC" = 0 ] && ok "ack ratchet: --quality-ack exits 0" || no "ack ratchet: --quality-ack should exit 0 (got $AKEC)"
+if [ "$AKEC" = 0 ]; then ok "ack ratchet: --quality-ack exits 0"; else no "ack ratchet: --quality-ack should exit 0 (got $AKEC)"; fi
 [ -f "$AK/.ripwire_quality_acks" ] && grep -q 'known refactor debt' "$AK/.ripwire_quality_acks" \
     && ok "ack ratchet: .ripwire_quality_acks written with the reason" \
     || no "ack ratchet: acks sidecar missing or reason not recorded"
@@ -205,14 +205,14 @@ printf '%s' "$OAK2" | grep -q 'kind="complexity" sym="f"' \
 printf '%s' "$OAK2" | grep -q 'acked="1"' \
     && ok "ack ratchet: suppression is honest (acked=\"1\" in the header)" \
     || { no "ack ratchet: acked count missing from header"; printf '%s\n' "$OAK2" | head -c 300; }
-[ "$( ecak )" = 0 ] && ok "ack ratchet: acked-only run → exit 0" || no "ack ratchet: acked-only run should exit 0 (got $( ecak ))"
+if [ "$( ecak )" = 0 ]; then ok "ack ratchet: acked-only run → exit 0"; else no "ack ratchet: acked-only run should exit 0 (got $( ecak ))"; fi
 
 printf 'int f( int a ){ int s=0;%s return s; }\nint usef(){ return f(1); }\n' "$( ifs 30 )" > "$AK/src/c.cpp"
 OAK3="$( dak )"
 printf '%s' "$OAK3" | grep -q 'kind="complexity" sym="f"' && [ "$( ecak )" = 2 ] \
     && ok "ack ratchet: worsening past the acked magnitude REAPPEARS (ratchet, exit 2)" \
     || { no "ack ratchet: worsened finding stayed suppressed (exit $( ecak ))"; printf '%s\n' "$OAK3" | tr '>' '\n' | grep '<r '; }
-[ "$OAK3" = "$( dak )" ] && ok "ack ratchet: delta byte-identical run-to-run" || no "ack ratchet: non-deterministic delta"
+if [ "$OAK3" = "$( dak )" ]; then ok "ack ratchet: delta byte-identical run-to-run"; else no "ack ratchet: non-deterministic delta"; fi
 
 # ── 3b) ACK REASON CHAIN: RE-ACKING A KNOWN KEY PRESERVES THE PRIOR REASON ────────────────────────────────
 #   Real shape (2026-08-29 fix): a shared row like printUsage's verbosity finding is re-acked by every
@@ -265,14 +265,14 @@ OMT="$( dmt )"
 printf '%s' "$OMT" | grep -q 'kind="complexity" sym="g"[^/]*sev="minor"' \
     && ok "materiality: +1-ccx over-the-bar edit reported sev=\"minor\"" \
     || { no "materiality: +1-ccx edit not marked minor"; printf '%s\n' "$OMT" | tr '>' '\n' | grep '<r '; }
-[ "$( ecmt )" = 0 ] && ok "materiality: minor-only run → exit 0 (does not gate)" || no "materiality: minor-only run should exit 0 (got $( ecmt ))"
+if [ "$( ecmt )" = 0 ]; then ok "materiality: minor-only run → exit 0 (does not gate)"; else no "materiality: minor-only run should exit 0 (got $( ecmt ))"; fi
 
 printf 'int g( int a ){ int s=0;%s return s; }\nint useg(){ return g(1); }\n' "$( ifs 26 )" > "$MT/src/m.cpp"
 OMT2="$( dmt )"
 printf '%s' "$OMT2" | tr '>' '\n' | grep '<r kind="complexity" sym="g"' | grep -q 'sev="minor"' \
     && no "materiality: +10-ccx edit wrongly marked minor" \
     || ok "materiality: material (+10 ccx) regression stays major"
-[ "$( ecmt )" = 2 ] && ok "materiality: major regression still gates exit 2" || no "materiality: major regression should exit 2 (got $( ecmt ))"
+if [ "$( ecmt )" = 2 ]; then ok "materiality: major regression still gates exit 2"; else no "materiality: major regression should exit 2 (got $( ecmt ))"; fi
 if command -v xmllint >/dev/null 2>&1; then
     printf '%s' "$OMT" | xmllint --noout - 2>/dev/null && printf '%s' "$OMT2" | xmllint --noout - 2>/dev/null \
         && ok "materiality: xml well-formed (minor + major outputs)" || no "materiality: xml malformed"
@@ -318,7 +318,7 @@ SB="$WORK/stale"; mkdir -p "$SB/src"
 printf 'int a(){ return 1; }\n' > "$SB/src/a.cpp"
 ( cd "$SB" && git add -A >/dev/null 2>&1 && git commit -qm c1 >/dev/null 2>&1 )
 ( cd "$SB" && "$BIN" . --quality-baseline >/dev/null 2>&1 )
-[ -f "$SB/.ripwire_quality_baseline" ] && ok "stale-baseline self-heal: sidecar written (setup)" || no "stale-baseline self-heal: sidecar not written (setup)"
+if [ -f "$SB/.ripwire_quality_baseline" ]; then ok "stale-baseline self-heal: sidecar written (setup)"; else no "stale-baseline self-heal: sidecar not written (setup)"; fi
 
 # 6a) reachable-ancestor case: commit more work on top — the pinned sha stays an ancestor of HEAD. Post-R3 that
 #     is STALE. ONE invocation only: this run deletes the sidecar, so a second call would legitimately hit the
@@ -342,7 +342,7 @@ printf '%s' "$OSBA" | grep -q 'baseline="git-HEAD (stale sidecar removed)"' \
 ( cd "$SB" && git checkout -q --orphan orphanbr >/dev/null 2>&1 && git rm -rf --cached . >/dev/null 2>&1 )
 printf 'int c(){ return 1; }\n' > "$SB/src/a.cpp"
 ( cd "$SB" && git add -A >/dev/null 2>&1 && git commit -qm "orphan root" >/dev/null 2>&1 )
-[ -f "$SB/.ripwire_quality_baseline" ] && ok "stale-baseline self-heal: sidecar still present before the unreachable run" || no "stale-baseline self-heal: setup lost the sidecar"
+if [ -f "$SB/.ripwire_quality_baseline" ]; then ok "stale-baseline self-heal: sidecar still present before the unreachable run"; else no "stale-baseline self-heal: setup lost the sidecar"; fi
 OSBB="$( cd "$SB" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
 ESBB="$( cd "$SB" && : )"   # nothing left to run — the prior call already consumed/healed the sidecar; re-check state below
 printf '%s' "$OSBB" | grep -q 'baseline="git-HEAD (stale sidecar removed)"' \
@@ -400,11 +400,18 @@ printf '#pragma once\nint pubfn( int a );\nint pubfn( int a ){ return a; }\n' > 
 
 printf '#pragma once\nint pubfn( int a );\nint pubfn( int a ){ return a; }\nint newpubfn(){ return 1; }\n' > "$API/include/api.h"
 ONS="$( cd "$API" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
-printf '%s' "$ONS" | grep -q 'kind="api-surface" sym="newpubfn"[^/]*sev="minor"[^/]*surface="new-symbol"' \
-    && ok "api-surface tiering: brand-new public symbol → sev=\"minor\" surface=\"new-symbol\"" \
-    || { no "api-surface tiering: new-symbol case not tiered correctly"; printf '%s\n' "$ONS" | tr '>' '\n' | grep '<r '; }
+# Q-DIAL-4 (2026-09-10): the brand-new public symbol is a header COUNT, not a row. It could never gate — the
+# legend said so — it was one row per new export, and 193 of this repo's 1,177 committed ack rows are that
+# shape, acked by hand for a fact one attribute states. The TIER is still asserted, in the only two ways left
+# that can go wrong: the count must be right, and the row must not be there.
+printf '%s' "$ONS" | grep -q 'api-new-surface="1"' \
+    && ok "api-surface tiering: brand-new public symbol counted on the root (api-new-surface=1)" \
+    || { no "api-surface tiering: new-symbol not counted on the root"; printf '%s\n' "$ONS" | tr '>' '\n' | grep -E '<quality-delta|<r '; }
+printf '%s' "$ONS" | tr '>' '\n' | grep 'kind="api-surface"' | grep -q 'newpubfn' \
+    && { no "api-surface tiering: the new-symbol row is still emitted beside the count"; printf '%s\n' "$ONS" | tr '>' '\n' | grep '<r '; } \
+    || ok "api-surface tiering: no row for the brand-new export (the count replaced it)"
 ENS="$( cd "$API" && "$BIN" . --quality-delta --no-cache >/dev/null 2>&1; echo $? )"
-[ "$ENS" = 0 ] && ok "api-surface tiering: new-symbol-only run does not gate exit 2" || no "api-surface tiering: new-symbol run should exit 0 (got $ENS)"
+if [ "$ENS" = 0 ]; then ok "api-surface tiering: new-symbol-only run does not gate exit 2"; else no "api-surface tiering: new-symbol run should exit 0 (got $ENS)"; fi
 
 ( cd "$API" && git checkout -q -- include/api.h )
 printf '#pragma once\nint pubfn( int a, int b );\nint pubfn( int a, int b ){ return a+b; }\n' > "$API/include/api.h"
@@ -416,7 +423,7 @@ printf '%s' "$OCC" | grep -q 'kind="api-surface" sym="pubfn"[^/]*sev="minor"' \
     && no "api-surface tiering: contract-change wrongly marked sev=\"minor\" (a public signature edit is always major)" \
     || ok "api-surface tiering: contract-change stays MAJOR"
 ECC="$( cd "$API" && "$BIN" . --quality-delta --no-cache >/dev/null 2>&1; echo $? )"
-[ "$ECC" = 2 ] && ok "api-surface tiering: contract-change gates exit 2" || no "api-surface tiering: contract-change should exit 2 (got $ECC)"
+if [ "$ECC" = 2 ]; then ok "api-surface tiering: contract-change gates exit 2"; else no "api-surface tiering: contract-change should exit 2 (got $ECC)"; fi
 if command -v xmllint >/dev/null 2>&1; then
     printf '%s' "$ONS" | xmllint --noout - 2>/dev/null && printf '%s' "$OCC" | xmllint --noout - 2>/dev/null \
         && ok "api-surface tiering: xml well-formed (new-symbol + contract-change outputs)" || no "api-surface tiering: xml malformed"
@@ -460,7 +467,7 @@ printf '%s' "$ODEL" | grep -q 'kind="complexity" sym="g"' \
 
 # 9b) --quality-ack on rootB, invoked FROM foreigncwd: the ack must land in ROOTB, never in foreigncwd.
 EACK="$( cd "$FCWD" && "$BIN" "$ROOTB" --quality-ack='cross-cwd test' --no-cache >/dev/null 2>&1; echo $? )"
-[ "$EACK" = 0 ] && ok "D1 foreign-cwd: --quality-ack on rootB (from foreigncwd) exits 0" || no "D1 foreign-cwd: --quality-ack should exit 0 (got $EACK)"
+if [ "$EACK" = 0 ]; then ok "D1 foreign-cwd: --quality-ack on rootB (from foreigncwd) exits 0"; else no "D1 foreign-cwd: --quality-ack should exit 0 (got $EACK)"; fi
 [ -f "$ROOTB/.ripwire_quality_acks" ] && grep -q 'cross-cwd test' "$ROOTB/.ripwire_quality_acks" \
     && ok "D1 foreign-cwd: rootB's OWN .ripwire_quality_acks written with the ack" \
     || no "D1 foreign-cwd: rootB's acks sidecar missing or reason not recorded"
@@ -515,7 +522,7 @@ edp(){ ( cd "$DP" && "$BIN" . --quality-delta --no-cache >/dev/null 2>&1; echo $
 
 ( cd "$DP" && "$BIN" . --quality-ack='seed' --no-cache >/dev/null 2>&1 )
 ACKLINE="$( grep '^ack complexity ' "$DP/.ripwire_quality_acks" )"
-[ -n "$ACKLINE" ] && ok "duplicate acks: seed ack line written (setup)" || no "duplicate acks: setup failed to write an ack line"
+if [ -n "$ACKLINE" ]; then ok "duplicate acks: seed ack line written (setup)"; else no "duplicate acks: setup failed to write an ack line"; fi
 HEXKEY="$( printf '%s' "$ACKLINE" | awk '{print $3}' )"
 REALNOW="$( printf '%s' "$ACKLINE" | awk '{print $4}' )"
 
@@ -532,7 +539,7 @@ ODP="$( ddp )"
 printf '%s' "$ODP" | grep -q 'kind="complexity" sym="f"' \
     && { no "duplicate acks: max-wins broken — finding reappeared after a lower duplicate line (last-wins bug)"; printf '%s\n' "$ODP" | tr '>' '\n' | grep '<r '; } \
     || ok "duplicate acks: finding stays suppressed — reader kept the HIGHER duplicate's ackNow as the floor"
-[ "$( edp )" = 0 ] && ok "duplicate acks: still exit 0 after the lower duplicate line" || no "duplicate acks: should stay exit 0 (got $( edp ))"
+if [ "$( edp )" = 0 ]; then ok "duplicate acks: still exit 0 after the lower duplicate line"; else no "duplicate acks: should stay exit 0 (got $( edp ))"; fi
 
 # a rewrite (another --quality-ack call) must collapse the duplicate to ONE canonical line, and it must keep
 # the HIGHER (real) value — not the lower duplicate that happened to sort last.

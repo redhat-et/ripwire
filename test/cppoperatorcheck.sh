@@ -56,7 +56,7 @@ FIX="$ROOT/test/cppopfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -68,7 +68,7 @@ echo "cppoperatorcheck: BIN=$BIN  FIX=$FIX"
 MAP="$TMP/map.xml"
 "$BIN" --no-cache "$FIX" >"$MAP" 2>"$TMP/map.err"
 MAP_EXIT=$?
-[ "$MAP_EXIT" -eq 0 ] && ok "default map: exits 0 on operator fixture" || no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"
+if [ "$MAP_EXIT" -eq 0 ]; then ok "default map: exits 0 on operator fixture"; else no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"; fi
 
 # ── the escaping proof: xmllint MUST be clean on every view that names operators ─────────────────
 for FLAG in "" "--pack-signatures" "--metrics"; do
@@ -86,22 +86,22 @@ has_name(){ grep -q "n=\"$1\"" "$SIG"; }
 
 echo
 echo "=== symbolic / subscript / call / arrow operators captured (operator_name declarator) ==="
-has_name 'operator=='       && ok "operator== captured"       || no "operator== NOT captured"
-has_name 'operator='        && ok "operator= captured"        || no "operator= NOT captured"
-has_name 'operator+'        && ok "operator+ captured"        || no "operator+ NOT captured"
-has_name 'operator\[\]'     && ok "operator[] captured"       || no "operator[] NOT captured"
-has_name 'operator()'       && ok "operator() captured"       || no "operator() NOT captured"
-has_name 'operator-&gt;'    && ok "operator-> captured (escaped operator-&gt;)" || no "operator-> NOT captured / not escaped"
+if has_name 'operator=='; then ok "operator== captured"; else no "operator== NOT captured"; fi
+if has_name 'operator='; then ok "operator= captured"; else no "operator= NOT captured"; fi
+if has_name 'operator+'; then ok "operator+ captured"; else no "operator+ NOT captured"; fi
+if has_name 'operator\[\]'; then ok "operator[] captured"; else no "operator[] NOT captured"; fi
+if has_name 'operator()'; then ok "operator() captured"; else no "operator() NOT captured"; fi
+if has_name 'operator-&gt;'; then ok "operator-> captured (escaped operator-&gt;)"; else no "operator-> NOT captured / not escaped"; fi
 
 echo
 echo "=== XML-SPECIAL operator names — MUST be present AND XML-escaped ==="
-has_name 'operator&lt;'         && ok "operator<  -> escaped operator&lt;"          || no "operator< missing or unescaped"
-has_name 'operator&lt;&lt;'     && ok "operator<< -> escaped operator&lt;&lt;"       || no "operator<< missing or unescaped"
-has_name 'operator&lt;='        && ok "operator<= -> escaped operator&lt;="          || no "operator<= missing or unescaped"
-has_name 'operator&lt;=&gt;'    && ok "operator<=> (spaceship) -> escaped operator&lt;=&gt;" || no "operator<=> missing or unescaped"
-has_name 'operator&amp;'        && ok "operator&  -> escaped operator&amp;"          || no "operator& missing or unescaped"
-has_name 'operator&amp;&amp;'   && ok "operator&& -> escaped operator&amp;&amp;"      || no "operator&& missing or unescaped"
-has_name 'operator&gt;'         && ok "operator>  -> escaped operator&gt;"           || no "operator> missing or unescaped"
+if has_name 'operator&lt;'; then ok "operator<  -> escaped operator&lt;"; else no "operator< missing or unescaped"; fi
+if has_name 'operator&lt;&lt;'; then ok "operator<< -> escaped operator&lt;&lt;"; else no "operator<< missing or unescaped"; fi
+if has_name 'operator&lt;='; then ok "operator<= -> escaped operator&lt;="; else no "operator<= missing or unescaped"; fi
+if has_name 'operator&lt;=&gt;'; then ok "operator<=> (spaceship) -> escaped operator&lt;=&gt;"; else no "operator<=> missing or unescaped"; fi
+if has_name 'operator&amp;'; then ok "operator&  -> escaped operator&amp;"; else no "operator& missing or unescaped"; fi
+if has_name 'operator&amp;&amp;'; then ok "operator&& -> escaped operator&amp;&amp;"; else no "operator&& missing or unescaped"; fi
+if has_name 'operator&gt;'; then ok "operator>  -> escaped operator&gt;"; else no "operator> missing or unescaped"; fi
 
 # a bare `operator` (name truncated at '<') is the pre-fix regression — assert it NEVER appears.
 grep -q 'n="operator"' "$SIG" \
@@ -110,8 +110,8 @@ grep -q 'n="operator"' "$SIG" \
 
 echo
 echo "=== conversion operator (operator_cast declarator) captured with 'operator <type>' name ==="
-has_name 'operator bool'    && ok "operator bool captured (conversion, operator_cast)"   || no "operator bool NOT captured"
-has_name 'operator double'  && ok "operator double captured (conversion, operator_cast)" || no "operator double NOT captured"
+if has_name 'operator bool'; then ok "operator bool captured (conversion, operator_cast)"; else no "operator bool NOT captured"; fi
+if has_name 'operator double'; then ok "operator double captured (conversion, operator_cast)"; else no "operator double NOT captured"; fi
 # the conversion name must NOT carry the param list / const from the operator_cast span.
 grep -q 'n="operator bool()' "$SIG" \
     && no "operator bool name includes the param list — operator_cast trim failed" \

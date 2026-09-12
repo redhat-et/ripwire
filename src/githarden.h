@@ -136,8 +136,8 @@ inline std::vector<std::filesystem::path> localConfigCandidates( const std::file
         out.push_back( dotGit / "config.worktree" );
         return out;
     }
-    std::string head;
-    if( !docparse::detail::readWholeFile( dotGit.string(), head ) || !head.starts_with( "gitdir:" ) )
+    const std::string head = docparse::detail::readWholeFile( dotGit.string() ).value_or( std::string() );
+    if( !head.starts_with( "gitdir:" ) )
     {
         return out;   // not a repository at all — nothing for git to read, nothing to probe
     }
@@ -148,10 +148,9 @@ inline std::vector<std::filesystem::path> localConfigCandidates( const std::file
     }
     out.push_back( gitDir / "config" );
     out.push_back( gitDir / "config.worktree" );
-    std::string common;
-    if( docparse::detail::readWholeFile( ( gitDir / "commondir" ).string(), common ) )
+    if( const std::optional<std::string> common = docparse::detail::readWholeFile( ( gitDir / "commondir" ).string() ) )
     {
-        std::filesystem::path commonDir = trimmedFirstLine( common );
+        std::filesystem::path commonDir = trimmedFirstLine( *common );
         if( commonDir.is_relative() )
         {
             commonDir = gitDir / commonDir;
@@ -165,16 +164,16 @@ inline bool localConfigMayCarryFsmonitor( const std::string& root )
 {
     for( const std::filesystem::path& candidate : localConfigCandidates( root ) )
     {
-        std::string bytes;
-        if( !docparse::detail::readWholeFile( candidate.string(), bytes ) )
+        std::optional<std::string> bytes = docparse::detail::readWholeFile( candidate.string() );
+        if( !bytes )
         {
             continue;
         }
-        for( char& c : bytes )
+        for( char& c : *bytes )
         {
             if( c >= 'A' && c <= 'Z' ) { c = static_cast<char>( c + ( 'a' - 'A' ) ); }
         }
-        if( bytes.find( "fsmonitor" ) != std::string::npos || bytes.find( "include" ) != std::string::npos )
+        if( bytes->find( "fsmonitor" ) != std::string::npos || bytes->find( "include" ) != std::string::npos )
         {
             return true;
         }

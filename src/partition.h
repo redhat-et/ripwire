@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // partition.h — `--pack-task="TASK" --partition=N`, the FAN-OUT form of the task bundle.
 // Evidence: four parallel audit agents each re-derived the SAME orientation context for one shared task.
@@ -75,10 +77,24 @@ namespace packpartition
 
 // N bounds. 2 because a 1-way "split" is just --pack-task (refused at the CLI seam, VERIFYed here); 16 to
 // match the multi-root cap — the same "an orchestrator fanning out past this is doing something else" line.
+//
+// NEITHER of this file's two docs/LIMITS.md-listed constants is an OUTPUT-class silent cap, so neither
+// gets a `*_capped` attribute (2026-09-10 lift-disclosure audit):
+//   - kMaxPartitions is a REFUSAL boundary, never a silent clamp. Every path that bounds a request against
+//     it — --partition=N (cli.h validateConfig, ~line 4379: "--partition=N is out of range — N must be
+//     2..16"), --plan-lanes=N (cli.h validatePlanLanes: "--plan-lanes=N is out of range"), and
+//     --plan-lanes --brief=FILE's derived count (verbs_change.h: "has N non-blank line(s) ... the lane
+//     count must be 2..16") — refuses LOUDLY on stderr and exits non-zero BEFORE any bundle is built. An
+//     out-of-range N never reaches a truncated answer for a `_capped` bit to mark; the disclosure already
+//     exists, in the strongest form available (refusal, not a degrade).
+//   - kCoreBudgetShare (below) is a PROPORTION, not a ceiling — it splits one already-known budget in two
+//     fixed parts; nothing measured against it can "exceed" it the way a row count exceeds kFileRowCap, so
+//     there is no crossing event to disclose.
 inline constexpr std::uint32_t kMinPartitions = 2;
 inline constexpr std::uint32_t kMaxPartitions = 16;
 
 // the share of ONE AGENT's token budget the shared core takes; the partition gets the rest (see decision 4).
+// A proportion, not a cap — see the note above kMinPartitions/kMaxPartitions.
 inline constexpr double kCoreBudgetShare = 0.34;
 
 // how much ranked surface each partition is sized for — the assembler's own ranking window, so a partition
@@ -450,10 +466,10 @@ struct PartitionSummary
 inline std::string partitionSummaryAttrs( const PartitionPlan& plan, const PartitionSummary& sum, const OverlapStats& ov )
 {
     char b[ 640 ];
-    std::snprintf( b, sizeof( b ),
-                   " partitions=\"%u\" requested=\"%u\" core_symbols=\"%zu\" surface=\"%u\" modules=\"%u\" split=\"%u\""
-                   " budget_per_agent_tokens=\"%zu\" core_budget_tokens=\"%zu\" partition_budget_tokens=\"%zu\" total_bytes=\"%zu\""
-                   " overlap_mean=\"%.3f\" overlap_max=\"%.3f\" shared_symbols=\"%u\" union_symbols=\"%u\" core_overlap=\"%.3f\"",
+    rw::formatTo( b, sizeof( b ),
+                   " partitions=\"{}\" requested=\"{}\" core_symbols=\"{}\" surface=\"{}\" modules=\"{}\" split=\"{}\""
+                   " budget_per_agent_tokens=\"{}\" core_budget_tokens=\"{}\" partition_budget_tokens=\"{}\" total_bytes=\"{}\""
+                   " overlap_mean=\"{:.3f}\" overlap_max=\"{:.3f}\" shared_symbols=\"{}\" union_symbols=\"{}\" core_overlap=\"{:.3f}\"",
                    sum.emitted, sum.requested, plan.coreIds.size(), plan.surfaceCount, plan.moduleCount, plan.splitCount,
                    sum.agentTokens, sum.coreTokens, sum.partitionTokens, sum.totalBytes,
                    ov.mean, ov.worst, ov.sharedCount, ov.unionCount, ov.coreLeak );
@@ -562,12 +578,12 @@ inline std::string packTaskPartitionText( const IngestResult& ing, const Graph& 
         char h[ 288 ];
         if( index < 0 )
         {
-            std::snprintf( h, sizeof( h ), "<bundle role=\"%s\" symbols=\"%u\" bytes=\"%zu\" tokens=\"%zu\" est_tokens=\"%zu\">",
+            rw::formatTo( h, sizeof( h ), "<bundle role=\"{}\" symbols=\"{}\" bytes=\"{}\" tokens=\"{}\" est_tokens=\"{}\">",
                            role, b.assigned, b.xml.size(), estTokens, estTokens );
         }
         else
         {
-            std::snprintf( h, sizeof( h ), "<bundle role=\"%s\" i=\"%d\" symbols=\"%u\" modules=\"%u\" bytes=\"%zu\" tokens=\"%zu\" est_tokens=\"%zu\">",
+            rw::formatTo( h, sizeof( h ), "<bundle role=\"{}\" i=\"{}\" symbols=\"{}\" modules=\"{}\" bytes=\"{}\" tokens=\"{}\" est_tokens=\"{}\">",
                            role, index, b.assigned, b.modules, b.xml.size(), estTokens, estTokens );
         }
         return h;
@@ -593,10 +609,10 @@ inline std::string packTaskPartitionText( const IngestResult& ing, const Graph& 
     {
         std::string& j = *jsonOut;
         char         nb[ 640 ];
-        std::snprintf( nb, sizeof( nb ),
-                       "{\"partitions\":%u,\"requested\":%u,\"core_symbols\":%zu,\"surface\":%u,\"modules\":%u,\"split\":%u,"
-                       "\"budget_per_agent_tokens\":%zu,\"core_budget_tokens\":%zu,\"partition_budget_tokens\":%zu,\"total_bytes\":%zu,"
-                       "\"overlap_mean\":%.3f,\"overlap_max\":%.3f,\"shared_symbols\":%u,\"union_symbols\":%u,\"core_overlap\":%.3f",
+        rw::formatTo( nb, sizeof( nb ),
+                       "{{\"partitions\":{},\"requested\":{},\"core_symbols\":{},\"surface\":{},\"modules\":{},\"split\":{},"
+                       "\"budget_per_agent_tokens\":{},\"core_budget_tokens\":{},\"partition_budget_tokens\":{},\"total_bytes\":{},"
+                       "\"overlap_mean\":{:.3f},\"overlap_max\":{:.3f},\"shared_symbols\":{},\"union_symbols\":{},\"core_overlap\":{:.3f}",
                        sum.emitted, sum.requested, plan.coreIds.size(), plan.surfaceCount, plan.moduleCount, plan.splitCount,
                        sum.agentTokens, sum.coreTokens, sum.partitionTokens, sum.totalBytes,
                        ov.mean, ov.worst, ov.sharedCount, ov.unionCount, ov.coreLeak );
@@ -605,7 +621,7 @@ inline std::string packTaskPartitionText( const IngestResult& ing, const Graph& 
         for( std::size_t p = 0; p < parts.size(); ++p )
         {
             char pb[ 96 ];
-            std::snprintf( pb, sizeof( pb ), "%s{\"index\":%zu,\"symbols\":%u,\"modules\":%u,\"bundle\":",
+            rw::formatTo( pb, sizeof( pb ), "{}{{\"index\":{},\"symbols\":{},\"modules\":{},\"bundle\":",
                            p == 0 ? "" : ",", p, parts[p].assigned, parts[p].modules );
             j += pb;
             j += parts[p].json.empty() ? "{}" : parts[p].json;

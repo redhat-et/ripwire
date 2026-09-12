@@ -37,7 +37,7 @@ PROBE="${BIN}_probe"                                  # same build dir as the bi
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$PROBE" ] || { echo "no ripwire_probe at $PROBE — build first (cmake --build build -j)"; exit 2; }
@@ -60,12 +60,12 @@ haspos(){ printf '%s' "$2" | grep -qE "[[:space:]]$1=[1-9][0-9]*"; }
 if [ "$rc" = 0 ]; then ok "probe exits 0 on a plain-C corpus (test/cfix)"
 else no "probe exited $rc on test/cfix (was 139/138: langCount[15] off a 6-slot array)"; fi
 
-[ -s "$TMP/c.out" ] && ok "probe produced output on test/cfix" || no "probe produced NO output on test/cfix"
+if [ -s "$TMP/c.out" ]; then ok "probe produced output on test/cfix"; else no "probe produced NO output on test/cfix"; fi
 
 # 2) …and C is NAMED there, not printed as the unknown label.
 CLINE="$( langline "$TMP/c.out" )"
-haspos c "$CLINE" && ok "test/cfix defs by language names c ($CLINE )" || no "test/cfix: no c= count in [$CLINE ]"
-haspos cpp "$CLINE" && ok "test/cfix names cpp (the .h prototype stays C++-owned, L3)" || no "test/cfix: no cpp= count in [$CLINE ]"
+if haspos c "$CLINE"; then ok "test/cfix defs by language names c ($CLINE )"; else no "test/cfix: no c= count in [$CLINE ]"; fi
+if haspos cpp "$CLINE"; then ok "test/cfix names cpp (the .h prototype stays C++-owned, L3)"; else no "test/cfix: no cpp= count in [$CLINE ]"; fi
 
 # 3) EVERY language the ingest table indexes: one trivial file per extension, one probe run. This is
 #    the arm that fails the moment a language is appended to Lang without a kLangName row — the same
@@ -90,7 +90,7 @@ printf '[tool.pkg]\nkey = 1\n'                              >"$ALL/a.toml"
 printf 'ymlkey: 1\n'                                       >"$ALL/a.yml"
 
 "$PROBE" "$ALL" >"$TMP/all.out" 2>"$TMP/all.err"; rc=$?
-[ "$rc" = 0 ] && ok "probe exits 0 on the all-languages corpus" || no "probe exited $rc on the all-languages corpus"
+if [ "$rc" = 0 ]; then ok "probe exits 0 on the all-languages corpus"; else no "probe exited $rc on the all-languages corpus"; fi
 
 ALINE="$( langline "$TMP/all.out" )"
 missing=""
@@ -110,8 +110,8 @@ else ok "no unknown-language bucket (?=) on a fully-typed corpus"; fi
 # 5) the SymKind half of the same bug: `sec` (markdown headings) had been printed under the "other"
 #    label and SymKind::Other was off the end of the printf's argument list.
 KLINE="$( kindline "$TMP/all.out" )"
-haspos sec "$KLINE" && ok "kind summary names sec (markdown headings, own bucket)" || no "no sec= count in [$KLINE ]"
-hastok other "$KLINE" && ok "kind summary reaches other (the last SymKind)" || no "no other= count in [$KLINE ]"
+if haspos sec "$KLINE"; then ok "kind summary names sec (markdown headings, own bucket)"; else no "no sec= count in [$KLINE ]"; fi
+if hastok other "$KLINE"; then ok "kind summary reaches other (the last SymKind)"; else no "no other= count in [$KLINE ]"; fi
 
 # 6) determinism — the probe reads the same deterministic ingest the main binary does. Two EMPTY files
 #    also compare equal, so the non-empty guard is what keeps this arm honest on a crash.

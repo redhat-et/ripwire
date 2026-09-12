@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // lintrules.h — user-extensible lint rules, ast-grep style (Wave 4 #2). Load a directory of YAML
 // rule files; each rule is a tree-sitter s-expression run through the EXISTING astQuery engine over
@@ -28,6 +30,7 @@
 
 #include "model.h"              // Lang enum
 #include "ingest.h"             // AstQuerySpec, AstMatch, astQuery, IngestResult
+#include "docparse.h"           // detail::readWholeFile — THE canonical whole-file byte read; never re-rolled
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT (no-op in release; the fprintf below is the visible line)
 
 namespace rw
@@ -78,7 +81,7 @@ inline bool isValidSeverity( std::string_view s ) noexcept
 inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
 {
     struct Row { std::string_view name; Lang lang; };
-    static constexpr std::array<Row, 16> kMap = { {
+    static constexpr std::array<Row, 18> kMap = { {
         { "cpp",        Lang::Cpp        },
         { "python",     Lang::Python     },
         { "typescript", Lang::TypeScript },
@@ -95,6 +98,8 @@ inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
         { "php",        Lang::Php        },
         { "lua",        Lang::Lua        },
         { "elixir",     Lang::Elixir     },
+        { "dart",       Lang::Dart       },
+        { "kotlin",     Lang::Kotlin     },
     } };
     for( const Row& r : kMap )
     {
@@ -127,7 +132,7 @@ inline Lang langOfPath( std::string_view path ) noexcept
     }
 
     struct Row { std::string_view ext; Lang lang; };
-    static const std::array<Row, 32> kExt = { {
+    static const std::array<Row, 34> kExt = { {
         { ".cpp", Lang::Cpp }, { ".cc", Lang::Cpp }, { ".cxx", Lang::Cpp },
         { ".h", Lang::Cpp }, { ".hpp", Lang::Cpp }, { ".hh", Lang::Cpp }, { ".hxx", Lang::Cpp }, { ".c", Lang::C },
         { ".py", Lang::Python },
@@ -144,6 +149,8 @@ inline Lang langOfPath( std::string_view path ) noexcept
         { ".php", Lang::Php },
         { ".lua", Lang::Lua },
         { ".ex", Lang::Elixir }, { ".exs", Lang::Elixir },
+        { ".dart", Lang::Dart },
+        { ".kt", Lang::Kotlin },
     } };
     for( const Row& r : kExt )
     {
@@ -208,6 +215,7 @@ inline bool dependencyCapable( Lang lang ) noexcept
         case Lang::Rust: case Lang::Go: case Lang::Swift:
         case Lang::Java: case Lang::CSharp: case Lang::Php:
         case Lang::Bash: case Lang::Ruby: case Lang::Lua: case Lang::Elixir:
+        case Lang::Kotlin:
             return true;
         case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Markdown: case Lang::Unknown:
         default:
@@ -230,7 +238,11 @@ inline bool dependencyCapable( Lang lang ) noexcept
 // (resolve.h::resolveTsImport). Every other language resolves only onto its own files (resolve.h's
 // Step-A candidate lists are extension-closed), so each is its own group. Java/Go/Swift/C#/PHP keep a
 // group despite being DEFERRED in the resolver: capability is about the language, not about how far this
-// tool currently resolves it, and a deferred pair is honestly "could carry one, we found none".
+// tool currently resolves it, and a deferred pair is honestly "could carry one, we found none". Kotlin
+// joins Java's group rather than minting its own, for the SAME reason C-family is one group: a Kotlin
+// file genuinely imports a Java class and vice versa in a mixed Android/JVM module (graph.h's
+// langCompatible bridges the two for the same reason on the call-graph side) — a separate Kotlin dialect
+// would report a real cross-language import pair as "not defined" instead of "found none".
 enum class DepDialect : std::uint8_t { None = 0, CFamily, Web, Python, Rust, Go, Swift, Java, CSharp, Php, Bash, Ruby, Lua, Elixir };
 
 /// Return the dependency dialect of a language, or DepDialect::None when it carries no file dependency.
@@ -244,7 +256,7 @@ inline DepDialect dependencyDialect( Lang lang ) noexcept
         case Lang::Rust:                                return DepDialect::Rust;
         case Lang::Go:                                  return DepDialect::Go;
         case Lang::Swift:                               return DepDialect::Swift;
-        case Lang::Java:                                return DepDialect::Java;
+        case Lang::Java: case Lang::Kotlin:              return DepDialect::Java;
         case Lang::CSharp:                              return DepDialect::CSharp;
         case Lang::Php:                                 return DepDialect::Php;
         case Lang::Bash:                                return DepDialect::Bash;
@@ -275,7 +287,7 @@ inline bool dependencyPairCapable( Lang a, Lang b ) noexcept
 inline std::string dependencyCapableLangTags()
 {
     std::string out;
-    for( std::size_t i = 0; i <= std::size_t( Lang::Elixir ); ++i )
+    for( std::size_t i = 0; i < kLangCount; ++i )
     {
         const Lang l = Lang( i );
         if( l == Lang::Unknown || !dependencyCapable( l ) )
@@ -377,7 +389,7 @@ inline bool parseLintRuleFile( const std::string& path, std::string_view src, st
 
     const auto badLine = [ & ]( std::size_t lineNo, const char* why ) -> bool
     {
-        std::fprintf( stderr, "ripwire: lint-rules: %s:%zu: %s — file skipped\n", path.c_str(), lineNo + 1, why );
+        rw::emitTo( stderr, "ripwire: lint-rules: {}:{}: {} — file skipped\n", path.c_str(), lineNo + 1, why );
         DEGRADED_PATH_ALERT( "lint-rules: malformed rule file skipped" );
         return false;
     };
@@ -621,7 +633,7 @@ inline std::vector<LintRule> loadLintRules( const std::string& dir )
         // No DEGRADED_PATH_ALERT (M7/F20): the caller REFUSES on an empty rule list, so the alert stamped a
         // "this run continued in a reduced mode" notice on stderr in front of a refusal that continued
         // nothing. The user-facing sentence is the whole message.
-        std::fprintf( stderr, "ripwire: --lint-rules: not a directory: %s\n", dir.c_str() );
+        rw::emitTo( stderr, "ripwire: --lint-rules: not a directory: {}\n", dir.c_str() );
         return rules;
     }
 
@@ -653,7 +665,7 @@ inline std::vector<LintRule> loadLintRules( const std::string& dir )
     {
         // read the file
         std::FILE* fp = std::fopen( path.c_str(), "rb" );
-        if( fp == nullptr ) { std::fprintf( stderr, "ripwire: --lint-rules: cannot read %s — skipped\n", path.c_str() ); DEGRADED_PATH_ALERT( "lint-rules: unreadable file" ); continue; }
+        if( fp == nullptr ) { rw::emitTo( stderr, "ripwire: --lint-rules: cannot read {} — skipped\n", path.c_str() ); DEGRADED_PATH_ALERT( "lint-rules: unreadable file" ); continue; }
         std::string buf;
         {
             std::fseek( fp, 0, SEEK_END );
@@ -1056,10 +1068,122 @@ inline constexpr std::array<ErrorMaskRule, 7> kErrorMaskRules = { {
     { "(call_expression function: (member_expression property: (property_identifier) @p (#eq? @p \"then\"))  arguments: (arguments (_) (arrow_function body: (statement_block) @m)))", "swallow-then-arrow",  true  },  // .then(_, ()=>{})
 } } ;
 
-// Is the collapsed source of a captured block "empty" — only braces and whitespace? astQuery returns the
+// Does the captured block SWALLOW — is there nothing in it that could handle the error? astQuery returns the
 // @m span text with \n/\r/\t already flattened to spaces and truncated to 120 chars; an empty `{}` (even
 // `{  }` / `{ }`) is far under 120, so the collapsed check is exact for the shapes we target. Deterministic.
-inline bool errorMaskBlockIsEmpty( std::string_view collapsed ) noexcept
+//
+// Q-DIAL-6 (2026-09-10) — A COMMENT IS NOT A HANDLER. This asked one question, "is the collapsed text exactly
+// {}", and audit lane Q1's synthetic S2b — `catch( const std::exception& ) { /* ignore */ }` — walked straight
+// past it, as does every `// intentionally ignored`. The comment is where the intent is WRITTEN DOWN; it is
+// the most likely spelling of a deliberate swallow, and it was the one spelling the kind could not see. A
+// block whose only content is a comment counts. Measured on 40 replayed commits of this repo: +0 rows — the
+// widening finds nothing in this history and turns S2b from a silent miss into a reported row.
+//
+// TWO FLOORS, stated. (1) astQuery truncates the span at 120 characters, so a comment-only block longer than
+// that does not end in '}' here and is not recognized — a miss, never a false hit. (2) The scan is over
+// flattened text, so a ';' or a '{' anywhere inside means "a statement survives" and the block is not a
+// swallow, which is what keeps `catch { log( x ); }` out; a semicolon inside the comment PROSE therefore also
+// keeps the block out. Both directions of the imprecision lose recall rather than manufacturing a finding.
+// The @p capture filter in findErrorMasking depends on a bare identifier ("catch"/"then") answering false
+// here, and it still does: no braces, no match.
+// The comment-only half, factored out so neither this test nor its caller crosses a complexity bar: is
+// `collapsed` a brace pair whose entire interior is one comment? Called only after the exact-`{}` test has
+// already failed.
+inline bool errorMaskBlockIsCommentOnly( std::string_view collapsed ) noexcept
+{
+    std::string_view t = collapsed;
+    while( !t.empty() && ( t.front() == ' ' || t.front() == '\t' ) ) { t.remove_prefix( 1 ); }
+    while( !t.empty() && ( t.back()  == ' ' || t.back()  == '\t' ) ) { t.remove_suffix( 1 ); }
+    if( t.size() < 2 || t.front() != '{' || t.back() != '}' )
+    {
+        return false;
+    }
+    const std::string_view mid = t.substr( 1, t.size() - 2 );
+    if( mid.find( ';' ) != std::string_view::npos || mid.find( '{' ) != std::string_view::npos )
+    {
+        return false;   // a statement survives inside it — not a swallow
+    }
+    std::size_t first = std::string_view::npos;
+    for( std::string_view opener : { std::string_view( "//" ), std::string_view( "/*" ), std::string_view( "#" ) } )
+    {
+        const std::size_t at = mid.find( opener );
+        if( at != std::string_view::npos && ( first == std::string_view::npos || at < first ) ) { first = at; }
+    }
+    if( first == std::string_view::npos )
+    {
+        return false;   // content that is not a comment at all
+    }
+    return mid.substr( 0, first ).find_first_not_of( " \t" ) == std::string_view::npos;
+}
+
+// ── the EXACT answer, over the block's UNFLATTENED bytes (CodeRabbit #127 / 3985249701) ─────────────
+// The test above is a PREFILTER and nothing more: it proves a comment OPENS the interior, never that the
+// comment CLOSES it. `catch( e ) { /* ignore */ recover() }` is valid JavaScript, holds no ';' and no inner
+// '{', and opens with a comment — so the prefilter said "comment-only" about a block that handles the
+// error, and the kind manufactured a finding. That is the one direction §Q-DIAL-6's own floors forbid.
+//
+// It cannot be fixed on the flattened text. astQuery scrubs '\n' to ' ' (makeAstMatch, the ONE cut), and a
+// `//` comment ends at a newline that is no longer there: `{ // ignore <NL> recover() }` and
+// `{ // ignore recover() }` are the same 23 bytes after the scrub, and the first is a handler while the
+// second is a swallow. So the confirm reads the block's RAW bytes and asks the only question that decides
+// it — does comment text consume the WHOLE interior?
+//
+//   /* … */   spans to its closer; an unterminated one is NOT comment-only (it cannot be, the block closed)
+//   //  #     run to the end of THEIR line — the fact the scrub destroyed
+//   between   only spaces, tabs, CR and LF
+//
+// `raw` is the block's bytes cut to exactly the length astQuery cut its text to, so the 120-byte floor
+// §Q-DIAL-6 states is preserved character for character: this confirm can only REMOVE rows, never add one.
+inline bool errorMaskCommentConsumesBlock( std::string_view raw ) noexcept
+{
+    const auto isSpace = []( char c ) noexcept { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+
+    std::string_view t = raw;
+    while( !t.empty() && isSpace( t.front() ) ) { t.remove_prefix( 1 ); }
+    while( !t.empty() && isSpace( t.back()  ) ) { t.remove_suffix( 1 ); }
+    if( t.size() < 2 || t.front() != '{' || t.back() != '}' )
+    {
+        return false;
+    }
+
+    const std::string_view mid = t.substr( 1, t.size() - 2 );
+    std::size_t            at  = 0;
+    while( at < mid.size() )
+    {
+        if( isSpace( mid[ at ] ) )
+        {
+            ++at;
+            continue;
+        }
+        if( mid.compare( at, 2, "/*" ) == 0 )
+        {
+            const std::size_t close = mid.find( "*/", at + 2 );
+            if( close == std::string_view::npos )
+            {
+                return false;      // the block closed but the comment did not — not decidable as a swallow
+            }
+            at = close + 2;
+            continue;
+        }
+        if( mid.compare( at, 2, "//" ) == 0 || mid[ at ] == '#' )
+        {
+            const std::size_t nl = mid.find( '\n', at );
+            if( nl == std::string_view::npos )
+            {
+                return true;       // the line comment runs to the end of the interior
+            }
+            at = nl + 1;
+            continue;
+        }
+        return false;              // code survives inside the block — a handler, not a swallow
+    }
+    return true;
+}
+
+// A brace pair with nothing at all between them. Split out from errorMaskBlockIsEmpty so the caller can
+// tell WHICH half answered: this one needs no confirm (there is no comment to mis-read), the comment half
+// does.
+inline bool errorMaskBlockIsBareBraces( std::string_view collapsed ) noexcept
 {
     std::string stripped;
     for( char c : collapsed )
@@ -1070,6 +1194,45 @@ inline bool errorMaskBlockIsEmpty( std::string_view collapsed ) noexcept
         }
     }
     return stripped == "{}";
+}
+
+// THE PREFILTER, over astQuery's flattened span text. Cheap and deliberately over-accepting on its comment
+// half — findErrorMasking confirms every row this admits through a comment against the block's RAW bytes
+// (errorMaskCommentConsumesBlock). Never call this alone to decide a finding.
+inline bool errorMaskBlockIsEmpty( std::string_view collapsed ) noexcept
+{
+    return errorMaskBlockIsBareBraces( collapsed ) || errorMaskBlockIsCommentOnly( collapsed );
+}
+
+// THE CONFIRM (CodeRabbit #127 / 3985249701), as its own step so findErrorMasking stays under the bars.
+// The flattened prefilter cannot see where a `//` comment ends, because astQuery scrubbed the newline
+// that ended it — so a block admitted through its COMMENT half is re-asked of the file's own bytes. A
+// bare `{}` never reaches here: there is no comment there to mis-read, and skipping it keeps the cost at
+// "one read per file that has a comment-shaped candidate", a handful of files rather than the corpus.
+//
+// `m.text.size()` IS the cut length makeAstMatch used (the scrub is byte-for-byte), so the raw slice is
+// the same span — the 120-byte floor §Q-DIAL-6 discloses is preserved exactly. `memoFileId`/`memoBytes`
+// are the caller's ONE-ENTRY memo: astQuery already sorts (file, startByte, tag), so one slot holds a
+// whole file's candidates. An UNREADABLE or MOVED file answers false — a finding that cannot be
+// substantiated is not reported. Never throws.
+inline bool errorMaskConfirmOnDisk( const IngestResult& ing, const AstMatch& m,
+                                    std::uint32_t& memoFileId, std::string& memoBytes )
+{
+    if( m.fileId != memoFileId )
+    {
+        memoFileId = m.fileId;
+        std::optional<std::string> bytes = docparse::detail::readWholeFile( diskPath( ing, m.fileId ) );
+        if( !bytes )
+        {
+            DEGRADED_PATH_ALERT( "lintrules: error-mask confirm cannot re-read the block's file" );
+        }
+        memoBytes = std::move( bytes ).value_or( std::string() );
+    }
+    if( std::size_t( m.startByte ) + m.text.size() > memoBytes.size() )
+    {
+        return false;
+    }
+    return errorMaskCommentConsumesBlock( std::string_view( memoBytes ).substr( m.startByte, m.text.size() ) );
 }
 
 // One error-masking hit: the suppressing block's file + start byte (so a caller can attribute it to the
@@ -1108,6 +1271,11 @@ inline std::vector<ErrorMaskHit> findErrorMasking( const IngestResult& ing )
     // AstMatch per CAPTURE, so a swallow rule yields both a @p hit and a @m hit. We keep only the @m block by
     // its emptiness signature: @p (a bare identifier "catch"/"then") is never "{}", and for non-emptyOnly
     // Python rules @p does not exist, so every emitted capture is the block. Route by tag → rule.
+    // one-entry raw-bytes memo for the confirm below: astQuery already sorts (file, startByte, tag), so the
+    // candidates of one file arrive together and a single slot is the whole cache.
+    std::uint32_t rawFileId = ~std::uint32_t( 0 );
+    std::string   rawBytes;
+
     for( const AstMatch& m : astQuery( ing, specs ) )
     {
         std::size_t r = 0;
@@ -1130,6 +1298,11 @@ inline std::vector<ErrorMaskHit> findErrorMasking( const IngestResult& ing )
         if( rule.emptyOnly && !errorMaskBlockIsEmpty( m.text ) )
         {
             continue; // the @p identifier capture is dropped here too (never "{}")
+        }
+        if( rule.emptyOnly && !errorMaskBlockIsBareBraces( m.text )
+            && !errorMaskConfirmOnDisk( ing, m, rawFileId, rawBytes ) )
+        {
+            continue;       // a comment OPENS the block but code follows it — that is a handler
         }
         out.push_back( { m.fileId, m.startByte, m.line, std::string( rule.id ) } );
     }

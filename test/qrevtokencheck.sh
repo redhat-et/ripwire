@@ -32,7 +32,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 QSRC="$ROOT/src/quality.h"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -59,12 +59,12 @@ int added( int a );
 EOF
 
 NOSIDECAR="$( run )"; NOSIDECAR_RC="$( rc_of )"
-[ -n "$NOSIDECAR" ] && ok "baseline phase: the no-sidecar (git-HEAD) report is non-empty" || no "no-sidecar report empty — checks are vacuous"
+if [ -n "$NOSIDECAR" ]; then ok "baseline phase: the no-sidecar (git-HEAD) report is non-empty"; else no "no-sidecar report empty — checks are vacuous"; fi
 
 # ── (a)(b) hostile `head` stamps ───────────────────────────────────────────────────────────────────────────
 BASEF="$REPO/.ripwire_quality_baseline"
 for payload in "--output=$VICTIM" "-e" "--upload-pack=touch $WORK/pwned" "$WORK/../victim.txt" "HEAD; touch $WORK/pwned2"; do
-    printf '# ripwire quality baseline v4 — regenerate with --quality-baseline; do not hand-edit\nhead %s\nloc deadbeef 10\n' "$payload" > "$BASEF"
+    printf '# ripwire quality baseline v5 — regenerate with --quality-baseline; do not hand-edit\nhead %s\nloc deadbeef 10\n' "$payload" > "$BASEF"
     OUT="$( run )"; RC="$( rc_of )"
     [ "$( cat "$VICTIM" )" = "$VICTIM_BEFORE" ] \
         && ok "hostile head stamp '$payload': the file outside the repo is untouched" \
@@ -80,7 +80,7 @@ done
 # The tampered sidecar must be DISTRUSTED: it routes into the existing unreachable-pin self-heal, so the
 # FINDINGS equal the no-sidecar git-HEAD answer, and the header says out loud that the sidecar was removed
 # (never a silent substitution — the baseline= marker is the audit trail).
-printf '# ripwire quality baseline v4 — regenerate with --quality-baseline; do not hand-edit\nhead --output=%s\nloc deadbeef 10\n' "$VICTIM" > "$BASEF"
+printf '# ripwire quality baseline v5 — regenerate with --quality-baseline; do not hand-edit\nhead --output=%s\nloc deadbeef 10\n' "$VICTIM" > "$BASEF"
 TAMPERED="$( run )"
 rows_of(){ printf '%s' "$1" | tr '<' '\n' | grep '^r kind='; }
 [ "$( rows_of "$TAMPERED" )" = "$( rows_of "$NOSIDECAR" )" ] \

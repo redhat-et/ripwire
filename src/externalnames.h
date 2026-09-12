@@ -170,5 +170,29 @@ inline bool isCFamilyStdName( std::string_view name ) noexcept
     return std::binary_search( std::begin( kCFamilyStdNames ), std::end( kCFamilyStdNames ), name, rw::sortutil::svLess );
 }
 
+// The INLINE ABI namespaces a standard library implementation opens inside namespace std — the one fact
+// graph.h's keepStdQualifiedCandidates needs beyond the literal `std`. Symbol::scope and Reference::qualifier
+// are both the IMMEDIATE segment, so a def written in `namespace std { inline namespace __1 { … } }` carries
+// scope "__1", and a call written `std::__1::move( x )` carries qualifier "__1". Provenance, per spelling:
+//   __1 __2   libc++ <__config>: _LIBCPP_ABI_NAMESPACE is `__` + _LIBCPP_ABI_VERSION (1 = the stable ABI every
+//             shipping toolchain uses, 2 = the unstable next ABI)
+//   __ndk1    the Android NDK's libc++ build defines _LIBCPP_ABI_NAMESPACE=__ndk1
+//   __Cr      Chromium's bundled libc++ build defines _LIBCPP_ABI_NAMESPACE=__Cr
+//   __cxx11   libstdc++ <bits/c++config.h>: _GLIBCXX_BEGIN_NAMESPACE_CXX11 opens `inline namespace __cxx11`
+//             (the dual-ABI std::string and std::list)
+//   __8       libstdc++ configured with the versioned namespace (_GLIBCXX_INLINE_VERSION, GCC 8 onward)
+// RESERVED SPELLINGS ONLY, on purpose. Every entry starts with a double underscore, which [lex.name] reserves to
+// the implementation, so no conforming program names a namespace or an alias this way. The standard's own inline
+// namespaces (`literals`, `chrono_literals`, …) are NOT here: those are legal user spellings, and a user's
+// `mylib::literals::f()` must never read as a std-qualified call.
+// Read by binary_search through svLess inside keepStdQualifiedCandidates, its only consumer — the lookup lives
+// there rather than as a fourth `isX( name )` one-liner here, because --quality-delta reads that sibling shape as
+// a gating clone group (measured on this lane: 35 tokens, five members). The assert below keeps the search valid.
+inline constexpr std::string_view kStdInlineNamespaceNames[] = { "__1", "__2", "__8", "__Cr", "__cxx11", "__ndk1" };
+
+static_assert( std::is_sorted( std::begin( kStdInlineNamespaceNames ), std::end( kStdInlineNamespaceNames ), rw::sortutil::svLess )
+               && std::adjacent_find( std::begin( kStdInlineNamespaceNames ), std::end( kStdInlineNamespaceNames ) ) == std::end( kStdInlineNamespaceNames ),
+               "kStdInlineNamespaceNames must be strictly sorted (binary search)" );
+
 }   // namespace externalnames
 }   // namespace rw

@@ -36,7 +36,7 @@ CORPUS="$ROOT/test/pincensusfix"
 SCIPFIX="$ROOT/test/scipfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -67,7 +67,7 @@ printf '%s' "$MAP" | grep -q 'ambiguous=1 ' && ok "(A) header ambiguous=1 — th
 # ── (B) the census surface exists and declares itself ─────────────────────────────────────────────
 "$BIN" "$CORPUS" --pin-census="$TMP/c1.tsv" --no-cache >"$TMP/map1" 2>"$TMP/err1"
 rc=$?
-[ "$rc" = 0 ] && ok "(B) --pin-census exits 0" || { no "(B) --pin-census exited $rc"; sed 's/^/          /' "$TMP/err1"; }
+if [ "$rc" = 0 ]; then ok "(B) --pin-census exits 0"; else { no "(B) --pin-census exited $rc"; sed 's/^/          /' "$TMP/err1"; }; fi
 if [ -s "$TMP/c1.tsv" ]; then
     ok "(B) census file written ($( wc -l <"$TMP/c1.tsv" | tr -d ' ' ) lines)"
 else

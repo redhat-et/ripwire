@@ -6,7 +6,7 @@ map 1009 999 1123
 map-topk5 538 535 653 --top-k=5
 metrics 2381 2370 2509 --metrics
 pack-signatures 1801 1784 2116 --pack-signatures
-expand 543 544 454 --expand=billableTotal
+expand 541 542 455 --expand=billableTotal
 for-named 789 785 1050 --for=billableTotal
-for-budgeted 374 370 525 --for=dedupe --token-budget=400
+for-budgeted 419 415 598 --for=dedupe --token-budget=400
 pack-task 882 862 1104 --pack-task=dedupe

@@ -71,7 +71,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -426,7 +426,7 @@ echo "=== (G4) well-formedness ==="
 if command -v xmllint >/dev/null 2>&1; then
     for f in match_bare match_all match_page match_small lint_bare lint_all lint_page lint_select lint_ignore lint_keep grep_tier grep_small cr9 cr2 lint_rows; do
         [ -s "$TMP/$f.xml" ] || continue
-        xmllint --noout "$TMP/$f.xml" 2>/dev/null && ok "(G4) $f.xml is well-formed" || no "(G4) $f.xml FAILED xmllint"
+        if xmllint --noout "$TMP/$f.xml" 2>/dev/null; then ok "(G4) $f.xml is well-formed"; else no "(G4) $f.xml FAILED xmllint"; fi
     done
 else
     no "(G4) xmllint is NOT INSTALLED — the arm could not run"

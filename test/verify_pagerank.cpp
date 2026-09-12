@@ -62,7 +62,9 @@ TEST_CASE( "double PageRank numeric, dangling, and top-K contracts" )
     {
         const sparseCsr<float> csr( 0, 0, 0 );
         std::vector<double> rank;
-        const unsigned iterationCount = rw::pageRankDouble( csr, {}, {}, rank, preciseConfig );
+        // pageRankDouble returns PageRankRun { iterationCount, hasConverged } since 2bbd134d; the boundary
+        // this case pins is the iteration count, so read that member rather than the whole struct.
+        const unsigned iterationCount = rw::pageRankDouble( csr, {}, {}, rank, preciseConfig ).iterationCount;
         const bool isEmptyBoundaryValid = iterationCount == 0 && rank.empty();
         CHECK_MESSAGE( isEmptyBoundaryValid, "empty PageRank boundary failed" );
     }

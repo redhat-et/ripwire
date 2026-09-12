@@ -33,7 +33,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -66,12 +66,12 @@ run(){ env -u TMPDIR XDG_CACHE_HOME="$XDG" "$BIN" "$CORPUS" "$@"; }
 # ── (a) structural no-thrash: rich → lean → rich ─────────────────────────────────────────────────
 run --for="distance between two points" >/dev/null 2>/dev/null   # rich (cold) — writes the rich class file
 RF="$( richfile )"
-[ -n "$RF" ] && ok "rich verb creates a -rich.bin auto-cache" || no "no -rich.bin created by a rich verb"
+if [ -n "$RF" ]; then ok "rich verb creates a -rich.bin auto-cache"; else no "no -rich.bin created by a rich verb"; fi
 RI1="$( [ -n "$RF" ] && inode_of "$RF" )"
 
 run >/dev/null 2>/dev/null                                        # lean (cold) — writes the lean class file
 LF="$( leanfile )"
-[ -n "$LF" ] && ok "lean verb creates a SEPARATE -lean.bin auto-cache" || no "no -lean.bin created by a lean verb"
+if [ -n "$LF" ]; then ok "lean verb creates a SEPARATE -lean.bin auto-cache"; else no "no -lean.bin created by a lean verb"; fi
 
 # both class files coexist → proves the split (old single-file scheme could only ever have ONE file)
 # Y4: shard-aware lookup — count matching blobs in either layout. Narrowed to the -rich.bin/-lean.bin

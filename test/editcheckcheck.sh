@@ -20,7 +20,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # BOTH seams: `bash test/editcheckcheck.sh asan/ripwire` and RIPWIRE_BIN=
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -80,7 +80,7 @@ printf '%s' "$OUTB" | grep -q 'public_was="0" public_now="0"' \
     && ok "(b) publicness reported, unchanged (0 -> 0)" || { no "(b) publicness was/now missing/wrong"; printf '%s\n' "$OUTB"; }
 rows "$OUTB" | grep -q 'n="useit".*incompatible="1"' \
     && ok "(b) the now-incompatible caller useit() is flagged" || { no "(b) incompatible caller not flagged"; printf '%s\n' "$OUTB"; }
-[ "$( ecrc helper )" = 0 ] && ok "(b) contract-change still exits 0 (a report, not a gate)" || no "(b) unexpected nonzero exit"
+if [ "$( ecrc helper )" = 0 ]; then ok "(b) contract-change still exits 0 (a report, not a gate)"; else no "(b) unexpected nonzero exit"; fi
 
 # ── (c) brand-new symbol -> new-symbol, zero callers ─────────────────────────────────────────────────
 cat >> "$WORK/src/a.cpp" <<'EOF'
@@ -109,7 +109,7 @@ D1="$( ec helper )"; D2="$( ec helper )"; D3="$( ec helper )"
 
 # ── xml well-formed ──────────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$D1" | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if printf '%s' "$D1" | xmllint --noout - 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

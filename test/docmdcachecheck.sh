@@ -20,7 +20,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -45,22 +45,22 @@ echo "docmdcachecheck: BIN=$BIN"
 
 # 1. cold — bridge fires once
 PATH="$TMP/bin:$PATH" "$BIN" "$TMP/corpus" > "$TMP/cold.xml" 2>/dev/null
-[ "$( count )" = "1" ] && ok "cold run invoked the bridge exactly once" || no "cold run: expected 1 invocation, got $( count )"
+if [ "$( count )" = "1" ]; then ok "cold run invoked the bridge exactly once"; else no "cold run: expected 1 invocation, got $( count )"; fi
 
 # 2. warm — zero new invocations, byte-identical map
 PATH="$TMP/bin:$PATH" "$BIN" "$TMP/corpus" > "$TMP/warm.xml" 2>/dev/null
-[ "$( count )" = "1" ] && ok "warm run added zero invocations (content-hash hit)" || no "warm run re-invoked the bridge ($( count ) total)"
+if [ "$( count )" = "1" ]; then ok "warm run added zero invocations (content-hash hit)"; else no "warm run re-invoked the bridge ($( count ) total)"; fi
 diff -q "$TMP/cold.xml" "$TMP/warm.xml" >/dev/null && ok "warm map byte-identical to cold (determinism holds through the sidecar)" \
     || no "cold and warm maps differ"
 
 # 3. --no-cache disables the sidecar
 PATH="$TMP/bin:$PATH" "$BIN" "$TMP/corpus" --no-cache >/dev/null 2>&1
-[ "$( count )" = "2" ] && ok "--no-cache bypasses the sidecar (bridge invoked again)" || no "--no-cache: expected 2 total invocations, got $( count )"
+if [ "$( count )" = "2" ]; then ok "--no-cache bypasses the sidecar (bridge invoked again)"; else no "--no-cache: expected 2 total invocations, got $( count )"; fi
 
 # 4. changed bytes → new content hash → re-extract
 printf ' changed' >> "$TMP/corpus/deck.docx"
 PATH="$TMP/bin:$PATH" "$BIN" "$TMP/corpus" >/dev/null 2>&1
-[ "$( count )" = "3" ] && ok "changed doc bytes re-invoke the bridge (key is content)" || no "changed bytes: expected 3 total invocations, got $( count )"
+if [ "$( count )" = "3" ]; then ok "changed doc bytes re-invoke the bridge (key is content)"; else no "changed bytes: expected 3 total invocations, got $( count )"; fi
 
 # 5. empty extraction is never cached — a silent fake is re-invoked next run, not wedged
 cat > "$TMP/bin/markitdown" <<'FAKE'
@@ -72,7 +72,7 @@ chmod +x "$TMP/bin/markitdown"
 printf 'silent doc bytes %s' "$$" > "$TMP/corpus/deck.docx"
 PATH="$TMP/bin:$PATH" "$BIN" "$TMP/corpus" >/dev/null 2>&1
 PATH="$TMP/bin:$PATH" "$BIN" "$TMP/corpus" >/dev/null 2>&1
-[ "$( count )" = "5" ] && ok "empty extraction not cached (silent bridge re-invoked each run)" || no "empty-extraction arm: expected 5 total invocations, got $( count )"
+if [ "$( count )" = "5" ]; then ok "empty extraction not cached (silent bridge re-invoked each run)"; else no "empty-extraction arm: expected 5 total invocations, got $( count )"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

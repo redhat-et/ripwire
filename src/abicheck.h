@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // abicheck.h — `--stray-content --abi`: the cross-branch ABI-BREAK gate neither verb alone can see.
 //
@@ -789,7 +792,7 @@ inline void writeAbiCaveats( std::FILE* out, const char* tag, const std::vector<
 {
     for( const layout::Caveat& c : cs )
     {
-        std::fprintf( out, "<%s k=\"%s\" d=\"%s\"/>", tag, ex( c.kind ).c_str(), ex( c.detail ).c_str() );
+        rw::emitTo( out, "<{} k=\"{}\" d=\"{}\"/>", tag, ex( c.kind ).c_str(), ex( c.detail ).c_str() );
     }
 }
 
@@ -803,21 +806,21 @@ inline void writeAbiStruct( std::FILE* out, const StructRow& s, const XmlEscaper
     // at all, and "unknown" refused to place a number (finalizeLayout leaves size at 0, which would print
     // as ref_size="0" and read as "an empty struct" — a plausible-looking wrong number of exactly the kind
     // the honesty contract exists to prevent). Omitted rather than printed as a misleading 0.
-    std::fprintf( out, "<struct n=\"%s\" p=\"%s\" l=\"%u\" kind=\"%s\" head_size=\"%u\"",
+    rw::emitTo( out, "<struct n=\"{}\" p=\"{}\" l=\"{}\" kind=\"{}\" head_size=\"{}\"",
                   ex( s.name ).c_str(), ex( rp ).c_str(), s.headLine, s.kind, s.headSize );
     if( s.refSized )
     {
-        std::fprintf( out, " ref_size=\"%u\" size_differs=\"%d\" size_delta=\"%u\"",
+        rw::emitTo( out, " ref_size=\"{}\" size_differs=\"{}\" size_delta=\"{}\"",
                       s.refSize, s.sizeDiffers ? 1 : 0, s.sizeDelta );
     }
-    std::fprintf( out, ">" );
+    rw::emitRaw( out, ">" );
     for( const layout::FieldDiff& f : s.fields )
     {
-        std::fprintf( out, "<d n=\"%s\" a=\"%s\" b=\"%s\"/>", ex( f.name ).c_str(), ex( f.inA ).c_str(), ex( f.inB ).c_str() );
+        rw::emitTo( out, "<d n=\"{}\" a=\"{}\" b=\"{}\"/>", ex( f.name ).c_str(), ex( f.inA ).c_str(), ex( f.inB ).c_str() );
     }
     writeAbiCaveats( out, "head_caveat", s.headCaveats, ex );
     writeAbiCaveats( out, "ref_caveat",  s.refCaveats,  ex );
-    std::fprintf( out, "</struct>" );
+    rw::emitRaw( out, "</struct>" );
 }
 
 // Every kind with a non-zero tally, as attributes, in kKindPolicy order (a fixed order = a deterministic
@@ -828,7 +831,7 @@ inline void writeKindAttrs( std::FILE* out, const KindCounts& k )
     {
         if( k.n[i] )
         {
-            std::fprintf( out, " %s=\"%u\"", kKindPolicy[i].tag, k.n[i] );
+            rw::emitTo( out, " {}=\"{}\"", kKindPolicy[i].tag, k.n[i] );
         }
     }
 }
@@ -858,11 +861,11 @@ inline void writeAbiRef( std::FILE* out, const RefRow& r, const XmlEscaper& ex, 
     // its capped= companion, so a <ref> at exactly maxStructs rows read as complete. The bit is against
     // `eligible` — the rows THIS VIEW lists — not against rows=, which counts every parsed struct including
     // the kinds this view excludes; <more structs="N"/> below already states the same fact as a count.
-    std::fprintf( out, "<ref name=\"%s\" tip=\"%.9s\" date=\"%s\" rows=\"%zu\" shown=\"%zu\" capped=\"%u\" excluded=\"%u\" head_only=\"%u\"",
+    rw::emitTo( out, "<ref name=\"{}\" tip=\"{:.9}\" date=\"{}\" rows=\"{}\" shown=\"{}\" capped=\"{}\" excluded=\"{}\" head_only=\"{}\"",
                   ex( r.ref.name ).c_str(), r.ref.tip.c_str(), ex( r.ref.date ).c_str(),
                   r.structs.size(), shownCount, unsigned( shownCount < eligible ), r.counts.excluded(), r.headOnly );
     writeKindAttrs( out, r.counts );
-    std::fprintf( out, ">" );
+    rw::emitRaw( out, ">" );
 
     std::size_t shown = 0;
     for( const StructRow& s : r.structs )
@@ -879,9 +882,9 @@ inline void writeAbiRef( std::FILE* out, const RefRow& r, const XmlEscaper& ex, 
     }
     if( eligible > shownCount )
     {
-        std::fprintf( out, "<more structs=\"%zu\"/>", eligible - shownCount );
+        rw::emitTo( out, "<more structs=\"{}\"/>", eligible - shownCount );
     }
-    std::fprintf( out, "</ref>" );
+    rw::emitRaw( out, "</ref>" );
 }
 
 // `rootArg` — R-E (2026-08-17 harvest), same single-root-only root argument serialize() takes; --abi is
@@ -913,7 +916,7 @@ inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t max
 
     // G4: an XML comment may not contain a double hyphen, so this text names flags and git subcommands
     // WITHOUT their leading dashes (the same rule layout.h's and crossref.h's own comments follow).
-    std::fprintf( out, "<!-- ripwire abi: the cross-branch ABI-BREAK gate — layout(STRUCT) crossed with "
+    rw::emitRaw( out, "<!-- ripwire abi: the cross-branch ABI-BREAK gate — layout(STRUCT) crossed with "
                        "stray-content(BRANCH). Scope is what each ref AUTHORED: the paths `diff base..tip` "
                        "reports against its own merge base, never `diff HEAD..tip` (a file the branch never "
                        "opened cannot be a break the branch introduced, and on a long-lived tree that one "
@@ -949,15 +952,15 @@ inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t max
     // M10: head= stays a bare 9-hex sha (gitstampcheck.sh's existing arm pins that spelling); at= is the new
     // attribute, carrying the dirty bit this document never disclosed before.
     const std::string atAttrStr = res.atStamp.empty() ? std::string() : ( " at=\"" + res.atStamp + "\"" );
-    std::fprintf( out, "<abi head=\"%.9s\" head_ref=\"%s\" refs=\"%zu\" candidates=\"%zu\" compared=\"%zu\" blobs=\"%zu\""
-                       " rows=\"%u\" shown=\"%u\" capped=\"%u\" dropped=\"%u\" excluded=\"%u\" head_only=\"%zu\" unmodelable=\"%zu\""
-                       " unrelated=\"%u\" broken_refs=\"%u\" quiet=\"%u\" excluded_refs=\"%u\"%s",
+    rw::emitTo( out, "<abi head=\"{:.9}\" head_ref=\"{}\" refs=\"{}\" candidates=\"{}\" compared=\"{}\" blobs=\"{}\""
+                       " rows=\"{}\" shown=\"{}\" capped=\"{}\" dropped=\"{}\" excluded=\"{}\" head_only=\"{}\" unmodelable=\"{}\""
+                       " unrelated=\"{}\" broken_refs=\"{}\" quiet=\"{}\" excluded_refs=\"{}\"{}",
                   res.headSha.c_str(), ex( res.headRef ).c_str(), res.refsScanned, res.candidates, res.compared,
                   res.distinctBlobs, res.counts.total(), shownRows, unsigned( droppedRows > 0 ), droppedRows, res.counts.excluded(),
                   res.headOnly, res.unmodelable, res.unrelated, brokenRefs, res.quietRefs, excludedRefs, atAttrStr.c_str() );
     writeKindAttrs( out, res.counts );
-    if( !rootArg.empty() ) { std::fprintf( out, " root=\"%s\"", ex( rootArg ).c_str() ); }
-    std::fprintf( out, ">" );
+    if( !rootArg.empty() ) { rw::emitTo( out, " root=\"{}\"", ex( rootArg ).c_str() ); }
+    rw::emitRaw( out, ">" );
     for( const RefRow& r : res.refs )
     {
         if( eligibleRows( r, listAll ) > 0 )
@@ -965,7 +968,7 @@ inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t max
             writeAbiRef( out, r, ex, maxStructs, listAll, rootPrefix );
         }
     }
-    std::fprintf( out, "</abi>" );
+    rw::emitRaw( out, "</abi>" );
 }
 
 }}   // namespace rw::abicheck

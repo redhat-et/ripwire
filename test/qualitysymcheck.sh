@@ -24,7 +24,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -96,7 +96,7 @@ SLASH_SYMS="$( printf '%s\n' "$ROWS" | grep -oE 'sym="/[^"]*"' | wc -l | tr -d '
 
 # ── (b) the specific api-surface row on Widget::run: sym= path segment == p= path segment ───────────────
 WROW="$( printf '%s\n' "$ROWS" | grep 'kind="api-surface"' | grep 'Widget::run' )"
-[ -n "$WROW" ] && ok "Widget::run's api-surface (contract-change) row found" || no "Widget::run's api-surface row NOT found — fixture didn't trigger as expected"
+if [ -n "$WROW" ]; then ok "Widget::run's api-surface (contract-change) row found"; else no "Widget::run's api-surface row NOT found — fixture didn't trigger as expected"; fi
 if [ -n "$WROW" ]; then
     SYM_PATH="$( printf '%s' "$WROW" | sed -n 's/.*sym="\([^"]*\)::Widget::run".*/\1/p' )"
     P_PATH="$(   printf '%s' "$WROW" | sed -n 's/.* p="\([^"]*\)::[0-9]*".*/\1/p' )"
@@ -130,9 +130,9 @@ printf '%s' "$JOUT" | grep -q '"sym":"src/widget.h::Widget::run"' \
 
 # ── (e) determinism + xmllint (the usual discipline, exercised on the actual fix) ────────────────────
 OUT2="$( run 2>/dev/null )"
-[ "$OUT" = "$OUT2" ] && ok "deterministic (byte-identical run-to-run)" || no "non-deterministic output"
+if [ "$OUT" = "$OUT2" ]; then ok "deterministic (byte-identical run-to-run)"; else no "non-deterministic output"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$OUT" | xmllint --noout - && ok "xmllint-clean" || no "xmllint rejected the report"
+    if printf '%s' "$OUT" | xmllint --noout -; then ok "xmllint-clean"; else no "xmllint rejected the report"; fi
 fi
 
 [ "$fail" -eq 0 ] && echo "qualitysymcheck: ALL PASS" || { echo "qualitysymcheck: SOME CHECKS FAILED"; exit 1; }

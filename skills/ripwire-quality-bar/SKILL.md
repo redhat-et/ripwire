@@ -1,10 +1,10 @@
 ---
 name: ripwire-quality-bar
 description: >
-  Code QUALITY of what YOU just wrote, before you commit or say 'done': --quality-delta reports only
-  what got WORSE across 10 kinds and exits non-zero on new debt; then which restructuring a measured
-  shape (humps/deep, a tangle) calls for. Merge safety → change-check. Even a single-line leaf fix
-  runs the one-shot delta.
+  Code QUALITY of what YOU just wrote, before you commit or say 'done', or verifying a cleanup:
+  --quality-delta lists what got WORSE in 10 kinds and exits 2 only when pre-existing code got
+  materially worse; which restructuring a measured shape (humps/deep, a tangle) calls for. Merge
+  safety → change-check. Even a single-line leaf fix runs it.
 allowed-tools: Bash, Read
 ---
 
@@ -119,8 +119,10 @@ of its own. Discount it accordingly: on a row whose other evidence is thin, `his
 something always fires.)
 
 ## The loop
-1. **Zero-setup path:** just make your change, then run `ripwire <dir> --quality-delta` before you call it
-   done — in a git repo it auto-compares the working tree vs `git HEAD` (`<quality-delta
+1. **Zero-setup path:** just make your change, then run `ripwire <dir> --quality-delta --legend=compact`
+   before you call it done — add `--legend=compact` every time you run this in a loop: on a CLEAN report the
+   legend is nearly the whole payload (2,776 B to 454 B measured on a small fixture, 15,601 B to 8,775 B on
+   a mid-change repo), the rows are byte-identical either way, and you have already read the dictionary — in a git repo it auto-compares the working tree vs `git HEAD` (`<quality-delta
    baseline="git-HEAD">` confirms it), no start-of-task action needed. **Tighter loop on a long change:** run
    `ripwire <dir> --quality-baseline` FIRST — **on a clean tree** — to pin an explicit floor (takes
    precedence over HEAD) so each edit deltas against the original start, not the last commit. On a tree that
@@ -128,7 +130,8 @@ something always fires.)
    floor: commit first, or pass `--allow-dirty` to pin anyway, which stamps the absorbed count so every later
    report carries `baseline_absorbed="N"` and a green exit beside it reads "clean *since the pin*".
 2. **Make your change.**
-3. **Measure the delta** — `ripwire <dir> --quality-delta` → only the regressions you introduced, across the
+3. **Measure the delta** — `ripwire <dir> --quality-delta --legend=compact` → only the regressions you
+   introduced, across the
    10 kinds in the table below. Each emits `<r kind="…" sym=… was=… now=…>` (`members=` for duplication).
    Test-fixture dirs are exempt from `dead-code`; `short-horizon-churn` ignores your own current edit and
    exempts brand-new symbols/markdown/fixtures. Two exemptions are DISCLOSED on the report rather than

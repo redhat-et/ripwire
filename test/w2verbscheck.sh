@@ -43,7 +43,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="test/w2verbsfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -59,7 +59,7 @@ echo "=== --metrics: hand-checked loc/params/nest/ccx/cbo on Java ==="
 "$BIN" "$FIX" --metrics --no-cache >"$TMP/m1" 2>/dev/null
 "$BIN" "$FIX" --metrics --no-cache >"$TMP/m2" 2>/dev/null
 MAP="$( cat "$TMP/m1" )"
-diff -q "$TMP/m1" "$TMP/m2" >/dev/null && ok "determinism (--metrics byte-identical run-to-run)" || no "non-deterministic --metrics output"
+if diff -q "$TMP/m1" "$TMP/m2" >/dev/null; then ok "determinism (--metrics byte-identical run-to-run)"; else no "non-deterministic --metrics output"; fi
 
 sattr(){ printf '%s' "$MAP" | sed 's/>/>\n/g' | grep -E "<s t=\"[^\"]*\" n=\"$1\"" | head -1; }
 assert_attr(){ # name attr val
@@ -75,7 +75,7 @@ assert_attr deepNest loc 14; assert_attr deepNest params 3;  assert_attr deepNes
 assert_attr callsBoth loc 4; assert_attr callsBoth params 1; assert_attr callsBoth nest 0; assert_attr callsBoth cbo 2
 
 # sanity: at least one Java nest value is non-zero (catches a wholesale "everything defaulted to 0" regression)
-printf '%s' "$( sattr deepNest )" | grep -qv ' nest="0"' && ok "sanity: Java nest values are NOT all defaulting to 0" || no "sanity: Java nest defaulted to 0 — metrics may be silently broken on Java"
+if printf '%s' "$( sattr deepNest )" | grep -qv ' nest="0"'; then ok "sanity: Java nest values are NOT all defaulting to 0"; else no "sanity: Java nest defaulted to 0 — metrics may be silently broken on Java"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -99,7 +99,7 @@ assert_attr leaf_rb nest 0;       assert_attr leaf_rb ccx 0
 assert_attr deep_nest_rb nest 3;  assert_attr deep_nest_rb cx 4;  assert_attr deep_nest_rb ccx 6
 
 # sanity: at least one Ruby nest value is non-zero (catches a regression back to the always-0 bug).
-printf '%s' "$( sattr deep_nest_rb )" | grep -qv ' nest="0"' && ok "sanity: Ruby nest values are NOT defaulting to 0 (the old bug did not regress)" || no "sanity: Ruby deep_nest_rb nest defaulted to 0 — the fixed Ruby metrics regressed"
+if printf '%s' "$( sattr deep_nest_rb )" | grep -qv ' nest="0"'; then ok "sanity: Ruby nest values are NOT defaulting to 0 (the old bug did not regress)"; else no "sanity: Ruby deep_nest_rb nest defaulted to 0 — the fixed Ruby metrics regressed"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -109,17 +109,17 @@ JCE="$( "$BIN" "$FIX" --callees=callsBoth --no-cache 2>/dev/null )"
 printf '%s' "$JCE" | grep -q 'count="2"' && printf '%s' "$JCE" | grep -q 'n="leaf"' && printf '%s' "$JCE" | grep -q 'n="deepNest"' \
     && ok "Java: --callees=callsBoth count=2 {leaf,deepNest}" || no "Java --callees wrong: $JCE"
 JCR="$( "$BIN" "$FIX" --callers=leaf --no-cache 2>/dev/null )"
-printf '%s' "$JCR" | grep -q 'n="callsBoth"' && ok "Java: --callers=leaf lists callsBoth" || no "Java --callers wrong: $JCR"
+if printf '%s' "$JCR" | grep -q 'n="callsBoth"'; then ok "Java: --callers=leaf lists callsBoth"; else no "Java --callers wrong: $JCR"; fi
 
 RCE="$( "$BIN" "$FIX" --callees=calls_both_rb --no-cache 2>/dev/null )"
 printf '%s' "$RCE" | grep -q 'count="2"' && printf '%s' "$RCE" | grep -q 'n="leaf_rb"' && printf '%s' "$RCE" | grep -q 'n="deep_nest_rb"' \
     && ok "Ruby: --callees=calls_both_rb count=2 {leaf_rb,deep_nest_rb}" || no "Ruby --callees wrong: $RCE"
 RCR="$( "$BIN" "$FIX" --callers=leaf_rb --no-cache 2>/dev/null )"
-printf '%s' "$RCR" | grep -q 'n="calls_both_rb"' && ok "Ruby: --callers=leaf_rb lists calls_both_rb" || no "Ruby --callers wrong: $RCR"
+if printf '%s' "$RCR" | grep -q 'n="calls_both_rb"'; then ok "Ruby: --callers=leaf_rb lists calls_both_rb"; else no "Ruby --callers wrong: $RCR"; fi
 
 # pagination sanity: leaf_rb has exactly 1 caller -> offset=1 is an empty (not repeating, not erroring) page
 PG1="$( "$BIN" "$FIX" --callers=leaf_rb --limit=1 --offset=1 --no-cache 2>/dev/null )"; PG1_RC=$?
-[ $PG1_RC -eq 0 ] && ok "Ruby: --callers pagination past-end exits 0" || no "Ruby --callers pagination past-end failed (rc=$PG1_RC)"
+if [ $PG1_RC -eq 0 ]; then ok "Ruby: --callers pagination past-end exits 0"; else no "Ruby --callers pagination past-end failed (rc=$PG1_RC)"; fi
 printf '%s' "$PG1" | grep -q 'n="calls_both_rb"' && no "Ruby: --callers pagination page 1 wrongly repeats calls_both_rb" || ok "Ruby: --callers pagination page 1 correctly empty"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -127,9 +127,9 @@ echo
 echo "=== --deps: Java + Ruby files appear in the file-level dependency view ==="
 # ═══════════════════════════════════════════════════════════════════════════
 DEPS_OUT="$( "$BIN" "$FIX" --deps --no-cache 2>/dev/null )"; DEPS_RC=$?
-[ $DEPS_RC -eq 0 ] && ok "--deps exits 0 on a Java/Ruby corpus" || no "--deps failed on Java/Ruby (rc=$DEPS_RC)"
-printf '%s' "$DEPS_OUT" | grep -q 'files="2"' && ok "--deps health block correctly counts files=2" || no "--deps file count wrong: $DEPS_OUT"
-command -v xmllint >/dev/null 2>&1 && { printf '%s' "$DEPS_OUT" | xmllint --noout - 2>/dev/null && ok "--deps output well-formed XML on Java/Ruby" || no "--deps XML malformed on Java/Ruby"; }
+if [ $DEPS_RC -eq 0 ]; then ok "--deps exits 0 on a Java/Ruby corpus"; else no "--deps failed on Java/Ruby (rc=$DEPS_RC)"; fi
+if printf '%s' "$DEPS_OUT" | grep -q 'files="2"'; then ok "--deps health block correctly counts files=2"; else no "--deps file count wrong: $DEPS_OUT"; fi
+command -v xmllint >/dev/null 2>&1 && { if printf '%s' "$DEPS_OUT" | xmllint --noout - 2>/dev/null; then ok "--deps output well-formed XML on Java/Ruby"; else no "--deps XML malformed on Java/Ruby"; fi; }
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -145,7 +145,7 @@ printf '%s' "$GQ_RB" | grep -q 'count="2"' && printf '%s' "$GQ_RB" | grep -q 'n=
 
 # and() join across languages doesn't apply (single-corpus query) but exercise it on Ruby to prove filters compose
 GQ_AND="$( "$BIN" "$FIX" --graph-query='and(callees(name("calls_both_rb"),2),kind(all,method))' --no-cache 2>/dev/null )"
-printf '%s' "$GQ_AND" | grep -q 'n="leaf_rb"' && ok "Ruby: --graph-query and(callees(...),kind(all,method)) join works" || no "Ruby --graph-query and() join failed: $GQ_AND"
+if printf '%s' "$GQ_AND" | grep -q 'n="leaf_rb"'; then ok "Ruby: --graph-query and(callees(...),kind(all,method)) join works"; else no "Ruby --graph-query and() join failed: $GQ_AND"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -182,9 +182,9 @@ class A
 EOF
   git add A.java && git commit -q -m "add nesting" )
 HOTJ_OUT="$( cd "$HOTJ" && "$BIN" . --hotspots --no-cache 2>/dev/null )"
-printf '%s' "$HOTJ_OUT" | grep -q 'ranked="1"' && ok "Java --hotspots ranks exactly 1 file" || no "Java --hotspots ranked count wrong: $HOTJ_OUT"
-printf '%s' "$HOTJ_OUT" | grep -q 'churn="2"' && ok "Java --hotspots correctly counts churn=2" || no "Java --hotspots churn wrong: $HOTJ_OUT"
-printf '%s' "$HOTJ_OUT" | grep -oE 'ccx="[0-9]+"' | grep -qv 'ccx="0"' && ok "Java --hotspots reports non-zero ccx for nested code" || no "Java --hotspots ccx stayed 0 — cognitive complexity not wired for Java hotspots"
+if printf '%s' "$HOTJ_OUT" | grep -q 'ranked="1"'; then ok "Java --hotspots ranks exactly 1 file"; else no "Java --hotspots ranked count wrong: $HOTJ_OUT"; fi
+if printf '%s' "$HOTJ_OUT" | grep -q 'churn="2"'; then ok "Java --hotspots correctly counts churn=2"; else no "Java --hotspots churn wrong: $HOTJ_OUT"; fi
+if printf '%s' "$HOTJ_OUT" | grep -oE 'ccx="[0-9]+"' | grep -qv 'ccx="0"'; then ok "Java --hotspots reports non-zero ccx for nested code"; else no "Java --hotspots ccx stayed 0 — cognitive complexity not wired for Java hotspots"; fi
 
 # Ruby: SAME nesting pattern, SAME 2 commits — FIXED downstream: ccx now accumulates (see the
 # --metrics fix above), so the file scores non-zero and enters the ranked list, like the Java twin.
@@ -209,13 +209,13 @@ EOF
   git add a.rb && git commit -q -m "add nesting" )
 HOTR_OUT="$( cd "$HOTR" && "$BIN" . --hotspots --no-cache 2>/dev/null )"
 # Mirror the Java assertions above: the 2-deep-nested, 2-commit-churned Ruby method now ranks.
-printf '%s' "$HOTR_OUT" | grep -q 'ranked="1"' && ok "Ruby --hotspots ranks exactly 1 file (fixed: enters the ranked list like the Java twin)" || no "Ruby --hotspots ranked count wrong: $HOTR_OUT"
-printf '%s' "$HOTR_OUT" | grep -q 'churn="2"' && ok "Ruby --hotspots correctly counts churn=2" || no "Ruby --hotspots churn wrong: $HOTR_OUT"
-printf '%s' "$HOTR_OUT" | grep -oE 'ccx="[0-9]+"' | grep -qv 'ccx="0"' && ok "Ruby --hotspots reports non-zero ccx for nested code (fixed)" || no "Ruby --hotspots ccx stayed 0 — cognitive complexity not wired for Ruby hotspots"
+if printf '%s' "$HOTR_OUT" | grep -q 'ranked="1"'; then ok "Ruby --hotspots ranks exactly 1 file (fixed: enters the ranked list like the Java twin)"; else no "Ruby --hotspots ranked count wrong: $HOTR_OUT"; fi
+if printf '%s' "$HOTR_OUT" | grep -q 'churn="2"'; then ok "Ruby --hotspots correctly counts churn=2"; else no "Ruby --hotspots churn wrong: $HOTR_OUT"; fi
+if printf '%s' "$HOTR_OUT" | grep -oE 'ccx="[0-9]+"' | grep -qv 'ccx="0"'; then ok "Ruby --hotspots reports non-zero ccx for nested code (fixed)"; else no "Ruby --hotspots ccx stayed 0 — cognitive complexity not wired for Ruby hotspots"; fi
 
 # determinism: Ruby --hotspots is byte-identical run-to-run
 HOTR_OUT2="$( cd "$HOTR" && "$BIN" . --hotspots --no-cache 2>/dev/null )"
-[ "$HOTR_OUT" = "$HOTR_OUT2" ] && ok "Ruby --hotspots deterministic run-to-run" || no "Ruby --hotspots non-deterministic"
+if [ "$HOTR_OUT" = "$HOTR_OUT2" ]; then ok "Ruby --hotspots deterministic run-to-run"; else no "Ruby --hotspots non-deterministic"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -233,7 +233,7 @@ class A
 }
 EOF
 ( cd "$QDJ" && "$BIN" . --quality-baseline --no-cache >/dev/null 2>&1 )
-[ -f "$QDJ/.ripwire_quality_baseline" ] && ok "--quality-baseline writes a sidecar for a Java-only corpus" || no "--quality-baseline did not write a sidecar for Java"
+if [ -f "$QDJ/.ripwire_quality_baseline" ]; then ok "--quality-baseline writes a sidecar for a Java-only corpus"; else no "--quality-baseline did not write a sidecar for Java"; fi
 cat > "$QDJ/A.java" <<'EOF'
 class A
 {
@@ -260,8 +260,8 @@ class A
 }
 EOF
 QDJ_OUT="$( cd "$QDJ" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"; QDJ_RC=$?
-[ $QDJ_RC -eq 2 ] && ok "Java --quality-delta exits 2 on a real nesting regression" || no "Java --quality-delta exit code wrong (got $QDJ_RC, want 2): $QDJ_OUT"
-printf '%s' "$QDJ_OUT" | grep -q 'kind="nesting"' && ok "Java --quality-delta classifies it as a nesting regression" || no "Java --quality-delta did not classify as nesting: $QDJ_OUT"
+if [ $QDJ_RC -eq 2 ]; then ok "Java --quality-delta exits 2 on a real nesting regression"; else no "Java --quality-delta exit code wrong (got $QDJ_RC, want 2): $QDJ_OUT"; fi
+if printf '%s' "$QDJ_OUT" | grep -q 'kind="nesting"'; then ok "Java --quality-delta classifies it as a nesting regression"; else no "Java --quality-delta did not classify as nesting: $QDJ_OUT"; fi
 
 # Ruby: THE SAME transformation — FIXED: nest now moves off 0, so the regression IS reported (exit 2),
 # exactly like the Java twin above.
@@ -272,7 +272,7 @@ def simple(x)
 end
 EOF
 ( cd "$QDR" && "$BIN" . --quality-baseline --no-cache >/dev/null 2>&1 )
-[ -f "$QDR/.ripwire_quality_baseline" ] && ok "--quality-baseline writes a sidecar for a Ruby-only corpus" || no "--quality-baseline did not write a sidecar for Ruby"
+if [ -f "$QDR/.ripwire_quality_baseline" ]; then ok "--quality-baseline writes a sidecar for a Ruby-only corpus"; else no "--quality-baseline did not write a sidecar for Ruby"; fi
 cat > "$QDR/a.rb" <<'EOF'
 def simple(x)
   if x > 0
@@ -291,8 +291,8 @@ end
 EOF
 QDR_OUT="$( cd "$QDR" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"; QDR_RC=$?
 # Mirror the Java assertions: the flat -> 5-deep-nested Ruby transformation is now caught.
-[ $QDR_RC -eq 2 ] && ok "Ruby --quality-delta exits 2 on a real nesting regression (fixed: now caught like the Java twin)" || no "Ruby --quality-delta exit code wrong (got $QDR_RC, want 2): $QDR_OUT"
-printf '%s' "$QDR_OUT" | grep -q 'kind="nesting"' && ok "Ruby --quality-delta classifies it as a nesting regression" || no "Ruby --quality-delta did not classify as nesting: $QDR_OUT"
+if [ $QDR_RC -eq 2 ]; then ok "Ruby --quality-delta exits 2 on a real nesting regression (fixed: now caught like the Java twin)"; else no "Ruby --quality-delta exit code wrong (got $QDR_RC, want 2): $QDR_OUT"; fi
+if printf '%s' "$QDR_OUT" | grep -q 'kind="nesting"'; then ok "Ruby --quality-delta classifies it as a nesting regression"; else no "Ruby --quality-delta did not classify as nesting: $QDR_OUT"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -322,7 +322,7 @@ MUT4="$( ok(){ :; }; no(){ echo TRIPPED; }
 [ "$MUT4" = "TRIPPED" ] && ok "mutation self-test (asserting Ruby deep_nest_rb nest=999 when it is really 3 correctly fails)" \
                         || no "mutation self-test broke — the Ruby nest fixed-value assertion is not live"
 
-command -v xmllint >/dev/null 2>&1 && { printf '%s' "$MAP" | xmllint --noout - 2>/dev/null && ok "xml well-formed (--metrics on Java/Ruby)" || no "xml malformed (--metrics on Java/Ruby)"; }
+command -v xmllint >/dev/null 2>&1 && { if printf '%s' "$MAP" | xmllint --noout - 2>/dev/null; then ok "xml well-formed (--metrics on Java/Ruby)"; else no "xml malformed (--metrics on Java/Ruby)"; fi; }
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME CHECKS FAILED"
 exit "$fail"

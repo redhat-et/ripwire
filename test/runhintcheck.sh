@@ -26,7 +26,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -97,8 +97,8 @@ case "$S" in *'(run: bash '*'/test/mythingcheck.sh)'*) ok "--situ tests-to-run l
 [ "$( run --affected=src/core.cpp )" = "$A" ] \
     && ok "run= deterministic (byte-identical run-to-run)" || no "run= non-deterministic"
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$A" | xmllint --noout - 2>/dev/null && ok "--affected with run= xml well-formed" || no "--affected with run= xml malformed"
-    printf '%s' "$G" | xmllint --noout - 2>/dev/null && ok "--test-gate with run= xml well-formed" || no "--test-gate with run= xml malformed"
+    if printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "--affected with run= xml well-formed"; else no "--affected with run= xml malformed"; fi
+    if printf '%s' "$G" | xmllint --noout - 2>/dev/null; then ok "--test-gate with run= xml well-formed"; else no "--test-gate with run= xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi
@@ -144,7 +144,7 @@ if command -v git >/dev/null 2>&1; then
         *)                         ok "--pr-context: no fabricated run= (absent stays absent when not derivable)" ;;
     esac
     if command -v xmllint >/dev/null 2>&1; then
-        printf '%s' "$PR" | xmllint --noout - 2>/dev/null && ok "--pr-context with run= xml well-formed" || no "--pr-context with run= xml malformed"
+        if printf '%s' "$PR" | xmllint --noout - 2>/dev/null; then ok "--pr-context with run= xml well-formed"; else no "--pr-context with run= xml malformed"; fi
     fi
 else
     printf '  SKIP  --pr-context run= arms (no git)\n'

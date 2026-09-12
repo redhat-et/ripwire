@@ -32,7 +32,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 SCRIPT="$ROOT/bench/arise-h2h/followup_calls.py"
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 command -v python3 >/dev/null 2>&1 || { echo "arisefollowupcheck: python3 required"; exit 2; }

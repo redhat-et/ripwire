@@ -44,7 +44,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/cloneidiomfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -133,7 +133,7 @@ check_counter()
 {
     local dir="$1" attr="$2" want="$3" got
     got="$( root "$dir" | sed -n "s/.* $attr=\"\([0-9]*\)\".*/\1/p" )"
-    [ "$got" = "$want" ] && ok "$dir: $attr=$want" || no "$dir: $attr=$got, expected $want"
+    if [ "$got" = "$want" ]; then ok "$dir: $attr=$want"; else no "$dir: $attr=$got, expected $want"; fi
 }
 check_counter ladder_demote idiom_groups   1
 check_counter ladder_demote demoted_groups 1
@@ -219,7 +219,7 @@ esac
 # ── (J) determinism ───────────────────────────────────────────────────────────────────────────────────
 "$BIN" "$CORPUS" --clones --no-cache >"$TMP/a" 2>/dev/null
 "$BIN" "$CORPUS" --clones --no-cache >"$TMP/b" 2>/dev/null
-cmp -s "$TMP/a" "$TMP/b" && ok "two --clones runs byte-identical" || no "--clones is not deterministic"
+if cmp -s "$TMP/a" "$TMP/b"; then ok "two --clones runs byte-identical"; else no "--clones is not deterministic"; fi
 
 # ── (K) mutation control ──────────────────────────────────────────────────────────────────────────────
 # Every arm above is a grep for a string. If the emitter stopped emitting entirely, the NONE/no arms would

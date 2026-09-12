@@ -44,7 +44,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/chaconefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -122,9 +122,9 @@ else no "cap: expected count=4095 amb=1 without B1::m — got count=${CNT:-?} am
 
 # ── 6) determinism + well-formedness ────────────────────────────────────────────────────────────────────
 A="$( "$BIN" "$FIX" --callees=g2 --no-cache 2>/dev/null )"; B="$( "$BIN" "$FIX" --callees=g2 --no-cache 2>/dev/null )"
-[ "$A" = "$B" ] && ok "determinism: --callees=g2 byte-identical run-to-run" || no "non-deterministic --callees output"
+if [ "$A" = "$B" ]; then ok "determinism: --callees=g2 byte-identical run-to-run"; else no "non-deterministic --callees output"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$A" | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

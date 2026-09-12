@@ -53,7 +53,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -238,7 +238,7 @@ G_N="$( printf '%s\n' "$G_RW" | grep '^scanned=' | cut -d= -f2 )"
 
 # ── H) determinism ─────────────────────────────────────────────────────────────────────────────────────
 rw --grep=rwIgnNeedleShared >"$TMP/d1"; rw --grep=rwIgnNeedleShared >"$TMP/d2"
-diff -q "$TMP/d1" "$TMP/d2" >/dev/null && ok "(H) two runs byte-identical" || no "(H) output is nondeterministic"
+if diff -q "$TMP/d1" "$TMP/d2" >/dev/null; then ok "(H) two runs byte-identical"; else no "(H) output is nondeterministic"; fi
 
 # ── I) MUTATION self-tests: each assertion must be able to see its own regression ─────────────────────
 # (A) equality: the oracle with the hidden file appended is the pre-fix served set — must NOT equal.
@@ -262,8 +262,8 @@ MUT_B="$( printf '%s\n' "$B_OR" | sed '1s/$/.moved/' )"
 
 # ── J) G4: well-formed XML ─────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$A_OUT" | xmllint --noout - 2>/dev/null && ok "(J) xml well-formed (xmllint)" || no "(J) xml malformed"
-    printf '%s' "$D_OUT" | xmllint --noout - 2>/dev/null && ok "(J) --skipped xml well-formed (xmllint)" || no "(J) --skipped xml malformed"
+    if printf '%s' "$A_OUT" | xmllint --noout - 2>/dev/null; then ok "(J) xml well-formed (xmllint)"; else no "(J) xml malformed"; fi
+    if printf '%s' "$D_OUT" | xmllint --noout - 2>/dev/null; then ok "(J) --skipped xml well-formed (xmllint)"; else no "(J) --skipped xml malformed"; fi
 else
     ok "(J) xmllint absent — skipped"
 fi

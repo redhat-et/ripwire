@@ -22,7 +22,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -133,7 +133,7 @@ if [ -f "$LOCK" ]; then
     [ "$noissue" = "1" ] && ok "mining_stats counts the excluded no-issue row (not a silent drop)" \
         || no "mining_stats.no_resolved_issue = ${noissue:-?} (expected 1)"
 
-    python3 - "$LOCK" <<'PY' && ok "dataset.lock content_sha256 is self-consistent" || no "dataset.lock content hash mismatch"
+    if python3 - "$LOCK" <<'PY'; then ok "dataset.lock content_sha256 is self-consistent"; else no "dataset.lock content hash mismatch"; fi
 import json, hashlib, sys
 lock = json.load(open(sys.argv[1]))
 all_inst = [i for insts in lock["instances_by_lang"].values() for i in insts]
@@ -176,7 +176,7 @@ PY
         || no "scoreboard missing expected arm rows"
     grep -q "mention-anchor ablation" "$LOG1" && ok "mention-anchor ablation line present" \
         || no "mention-anchor ablation line missing"
-    grep -q "license" "$OUT1" && ok "JSON records the dataset license" || no "JSON missing license field"
+    if grep -q "license" "$OUT1"; then ok "JSON records the dataset license"; else no "JSON missing license field"; fi
 else
     no "missing $OUT1 — harness did not write JSON"
 fi

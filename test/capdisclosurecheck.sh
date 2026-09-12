@@ -49,7 +49,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -125,7 +125,7 @@ print("A2 %s disclosure: line_bytes=%s (want %d)" % ("OK" if m and int(m.group(1
 print("A3 %s silence: uncut row attrs=%r" % ("OK" if "line_bytes" not in nattrs else "NO", nattrs.strip()))
 PY
 while read -r tag verdict rest; do
-    [ "$verdict" = OK ] && ok "$tag $rest" || no "$tag $rest"
+    if [ "$verdict" = OK ]; then ok "$tag $rest"; else no "$tag $rest"; fi
 done < <( grep -E '^A[0-9] ' "$TMP/a_grep.res" )
 grep -q PROBE_BROKEN "$TMP/a_grep.res" && no "(A) --grep probe broken: $( cat "$TMP/a_grep.res" )"
 
@@ -177,7 +177,7 @@ else:
           % ("OK" if h.get("line_bytes") == want else "NO", h.get("line_bytes"), want))
 PY
 while read -r tag verdict rest; do
-    [ "$verdict" = OK ] && ok "$tag $rest" || no "$tag $rest"
+    if [ "$verdict" = OK ]; then ok "$tag $rest"; else no "$tag $rest"; fi
 done < <( grep -E '^A[0-9] ' "$TMP/a_mcp.res" )
 
 # ===================================================================================================
@@ -208,7 +208,7 @@ print("B2 %s disclosure: emitted sig ends %r" % ("OK" if wide.endswith("…") el
 print("B3 %s silence: uncut sig %r" % ("OK" if "…" not in narrow else "NO", narrow))
 PY
 while read -r tag verdict rest; do
-    [ "$verdict" = OK ] && ok "$tag $rest" || no "$tag $rest"
+    if [ "$verdict" = OK ]; then ok "$tag $rest"; else no "$tag $rest"; fi
 done < <( grep -E '^B[0-9] ' "$TMP/b_sigs.res" )
 grep -q PROBE_BROKEN "$TMP/b_sigs.res" && no "(B) --pack-signatures probe broken: $( cat "$TMP/b_sigs.res" )"
 
@@ -229,7 +229,7 @@ print("B4 %s --for <sigs> carries the same signature-cut marker"
       % ("OK" if "\u2026".encode() in raw else "NO"))
 PY
 while read -r tag verdict rest; do
-    [ "$verdict" = OK ] && ok "$tag $rest" || no "$tag $rest"
+    if [ "$verdict" = OK ]; then ok "$tag $rest"; else no "$tag $rest"; fi
 done < <( grep -E '^B[0-9] ' "$TMP/b_for.res" )
 
 # ===================================================================================================
@@ -352,7 +352,7 @@ print("C10 %s --json exclusivity: explicit run has budget_tokens=%s and budget_b
          dt.get("budget_tokens"), dt.get("budget_bytes")))
 PY
 while read -r tag verdict rest; do
-    [ "$verdict" = OK ] && ok "$tag $rest" || no "$tag $rest"
+    if [ "$verdict" = OK ]; then ok "$tag $rest"; else no "$tag $rest"; fi
 done < <( grep -E '^C[0-9]+ ' "$TMP/c_json.res" )
 
 # ===================================================================================================
@@ -368,7 +368,7 @@ if command -v xmllint >/dev/null 2>&1; then
         [ -s "$f" ] || continue
         xmllint --noout "$f" >/dev/null 2>&1 || { xmlfail=1; echo "      ill-formed: $f"; }
     done
-    [ "$xmlfail" -eq 0 ] && ok "D2 every disclosed document is well-formed XML" || no "D2 a disclosed document is ill-formed"
+    if [ "$xmlfail" -eq 0 ]; then ok "D2 every disclosed document is well-formed XML"; else no "D2 a disclosed document is ill-formed"; fi
 else
     ok "D2 (skipped: no xmllint)"
 fi

@@ -17,7 +17,7 @@ DEPS="$ROOT/third_party/deps"
 SWIFT_COMMIT="31d17fe7e818a2048c808b5c6fdc2dc792f4f5b5"
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 # ── (A) provenance pins ───────────────────────────────────────────────────────────────────────────
@@ -62,7 +62,7 @@ else
 fi
 
 missing=""
-for dep in bash c cpp csharp cuda elixir go java javascript json markdown objc python ruby rust swift toml yaml; do
+for dep in bash c cpp csharp cuda dart elixir go java javascript json kotlin markdown objc python ruby rust swift toml yaml; do
     [ -f "$DEPS/$dep/src/parser.c" ] || missing="$missing$dep/src/parser.c
 "
     [ -f "$DEPS/$dep/LICENSE" ]      || missing="$missing$dep/LICENSE
@@ -81,6 +81,23 @@ if [ -n "$missing" ]; then
     printf '%s' "$missing" | sed 's/^/          /'
 else
     ok "every vendored dependency ships its compiled sources and its LICENSE"
+fi
+
+# ── (A') attribution: every vendored tree has its THIRD_PARTY.md row ────────────────────────────────
+# The list is the POPULATION under third_party/deps/, never a hand-kept name list — a hand list is how
+# deps/markdown came to ship with its sources, its LICENSE and its CMake pin but no attribution row.
+THIRD="$ROOT/THIRD_PARTY.md"
+norow=""
+for d in "$DEPS"/*/; do
+    name="$( basename "$d" )"
+    grep -q "^| \`deps/$name\` |" "$THIRD" || norow="$norow$name
+"
+done
+if [ -n "$norow" ]; then
+    no "vendored dependency with no THIRD_PARTY.md row (its licence attribution is missing):"
+    printf '%s' "$norow" | sed 's/^/          /'
+else
+    ok "every vendored dependency under third_party/deps/ has its THIRD_PARTY.md row"
 fi
 
 # ── (B') the hermeticity proof: a real disconnected configure ─────────────────────────────────────

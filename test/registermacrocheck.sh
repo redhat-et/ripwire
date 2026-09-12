@@ -56,7 +56,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # absolutize BEFORE we cd away
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -296,8 +296,8 @@ QD1b="$( cd "$A1" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
 [ "$QD1" = "$QD1b" ] && ok "arm6: --quality-delta deterministic (byte-identical run-to-run)" \
     || no "arm6: --quality-delta non-deterministic output"
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$QD1" | xmllint --noout - 2>/dev/null && ok "arm6: --quality-delta xml well-formed" || no "arm6: --quality-delta xml malformed"
-    printf '%s' "$DC2" | xmllint --noout - 2>/dev/null && ok "arm6: --dead-code xml well-formed" || no "arm6: --dead-code xml malformed"
+    if printf '%s' "$QD1" | xmllint --noout - 2>/dev/null; then ok "arm6: --quality-delta xml well-formed"; else no "arm6: --quality-delta xml malformed"; fi
+    if printf '%s' "$DC2" | xmllint --noout - 2>/dev/null; then ok "arm6: --dead-code xml well-formed"; else no "arm6: --dead-code xml malformed"; fi
 else
     ok "arm6: xml well-formed (xmllint absent — skipped)"
 fi

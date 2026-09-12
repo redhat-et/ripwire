@@ -41,7 +41,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -142,7 +142,7 @@ grep -qi fsmonitor "$FH/.git/config" \
     && no "(H) the fixture still spells fsmonitor in .git/config — the include arm is not testing the include" \
     || ok "(H) mutation took: .git/config no longer spells fsmonitor; the key lives only behind include.path"
 rm -f "$TMP/MARK"; "$REALGIT" -C "$FH" status --porcelain >/dev/null 2>&1
-[ "$( fired )" -ge 1 ] && ok "(H) presence: git itself follows the include (hook fired $( fired ))" || no "(H) git did not follow the include — the arm cannot conclude"
+if [ "$( fired )" -ge 1 ]; then ok "(H) presence: git itself follows the include (hook fired $( fired ))"; else no "(H) git did not follow the include — the arm cannot conclude"; fi
 rm -f "$TMP/MARK"; "$BIN" "$FH" --situ >/dev/null 2> "$TMP/situh.err"
 [ "$( fired )" -eq 0 ] && grep -q 'git_harden=fsmonitor-hook' "$TMP/situh.err" \
     && ok "(H) a hook reached only through [include] is still neutralised and disclosed" \
@@ -150,9 +150,9 @@ rm -f "$TMP/MARK"; "$BIN" "$FH" --situ >/dev/null 2> "$TMP/situh.err"
 
 # ── (I) a linked worktree: .git is a FILE naming a gitdir whose commondir holds the config ────────────────
 "$REALGIT" -C "$FX" worktree add -q "$TMP/wt" -b gatewt >/dev/null 2>&1 || no "(I) could not create a linked worktree"
-[ -f "$TMP/wt/.git" ] && ok "(I) the worktree's .git is a file ($( head -c 40 "$TMP/wt/.git" | tr -d '\n' )…)" || no "(I) expected $TMP/wt/.git to be a gitdir: FILE"
+if [ -f "$TMP/wt/.git" ]; then ok "(I) the worktree's .git is a file ($( head -c 40 "$TMP/wt/.git" | tr -d '\n' )…)"; else no "(I) expected $TMP/wt/.git to be a gitdir: FILE"; fi
 rm -f "$TMP/MARK"; "$REALGIT" -C "$TMP/wt" status --porcelain >/dev/null 2>&1
-[ "$( fired )" -ge 1 ] && ok "(I) presence: the shared config's hook fires in the worktree ($( fired ))" || no "(I) the hook did not fire in the worktree — the arm cannot conclude"
+if [ "$( fired )" -ge 1 ]; then ok "(I) presence: the shared config's hook fires in the worktree ($( fired ))"; else no "(I) the hook did not fire in the worktree — the arm cannot conclude"; fi
 rm -f "$TMP/MARK"; "$BIN" "$TMP/wt" --situ >/dev/null 2> "$TMP/situi.err"
 [ "$( fired )" -eq 0 ] && grep -q 'git_harden=fsmonitor-hook' "$TMP/situi.err" \
     && ok "(I) the worktree root is neutralised and disclosed (gitdir/commondir resolved)" \

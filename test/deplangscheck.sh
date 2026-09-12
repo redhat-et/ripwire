@@ -30,7 +30,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){   printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
@@ -53,9 +53,9 @@ DEPS="$( cat "$TMP/deps" )"
 LANGS="$( printf '%s' "$DEPS" | grep -oE 'dep_langs="[^"]*"' | head -1 )"
 
 # ── (A) the published set, exactly ────────────────────────────────────────────────────────────────────
-EXPECT='dep_langs="cpp,py,ts,go,rs,swift,objc,js,sh,java,rb,cs,c,php,lua,ex"'
+EXPECT='dep_langs="cpp,py,ts,go,rs,swift,objc,js,sh,java,rb,cs,c,php,lua,ex,kt"'
 [ "$LANGS" = "$EXPECT" ] \
-    && ok "(A) <health dep_langs=> is exactly the 16-language capable set, in Lang-enum order" \
+    && ok "(A) <health dep_langs=> is exactly the 17-language capable set, in Lang-enum order" \
     || no "(A) dep_langs= drifted: got [$LANGS] want [$EXPECT]"
 
 # ── (B) MUTATION CONTROL for (A) — the exclusions are real ────────────────────────────────────────────
@@ -206,14 +206,14 @@ if len(extToLang) < 20 or len(extToDialect) < 15 or len(capable) < 10:
     print(f"  FAIL  (G) a table parsed suspiciously small (ext->lang={len(extToLang)} ext->dialect={len(extToDialect)} capable={len(capable)}) — the arm would pass vacuously")
     sys.exit(1)
 
-# The DEFERRED LEDGER, pinned rather than inferred. These four languages are dependency-capable (they
+# The DEFERRED LEDGER, pinned rather than inferred. These five languages are dependency-capable (they
 # emit Include records, so their files belong in the denominator) yet have NO includeLangOf dialect on
-# purpose: a Java/C#/PHP namespace and a Swift module do not map 1:1 onto a file, so there is no sound
-# string->fileId rule and a wrong narrow is worse than none (resolve.h::includeLangOf says so at the
-# `.cs` row). They are therefore counted in dep_files= while resolving nothing — a real, PRE-EXISTING
-# dilution, recorded here so it is a known quantity instead of a surprise. A FIFTH language landing in
-# this state goes red, which is the whole point: the ledger must be edited deliberately.
-DEFERRED = {"Java", "CSharp", "Php", "Swift"}
+# purpose: a Java/C#/PHP/Kotlin namespace and a Swift module do not map 1:1 onto a file, so there is no
+# sound string->fileId rule and a wrong narrow is worse than none (resolve.h::includeLangOf says so at
+# the `.cs` row). They are therefore counted in dep_files= while resolving nothing — a real,
+# PRE-EXISTING dilution, recorded here so it is a known quantity instead of a surprise. A SIXTH language
+# landing in this state goes red, which is the whole point: the ledger must be edited deliberately.
+DEFERRED = {"Java", "CSharp", "Php", "Swift", "Kotlin"}
 
 bad = []
 for ext, lang in sorted(extToLang.items()):

@@ -26,7 +26,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -97,7 +97,7 @@ sig "pkg-dir dotted"    "widget pipeline process records regression traced to pl
 # a backticked word matching NO directory stays inert (precision guard)
 ONX="$( cands 'widget pipeline process records inside the `nonexistentpkg` module' )"
 OFFX="$( cands 'widget pipeline process records inside the `nonexistentpkg` module' --no-mention-boost )"
-[ "$ONX" = "$OFFX" ] && ok "unmatched backtick stays inert" || no "unmatched backtick moved the ranking"
+if [ "$ONX" = "$OFFX" ]; then ok "unmatched backtick stays inert"; else no "unmatched backtick moved the ranking"; fi
 
 # header note appears when (and only when) something anchored
 "$BIN" "$FIX" --for="widget pipeline in pkg/beta.py" --no-cache 2>/dev/null | grep -q 'mention anchor:' \
@@ -141,7 +141,7 @@ grep -q 'mention anchor:' "$TMP/p1.xml" && no "header note must not appear when 
 QM="widget pipeline in pkg/beta.py"
 "$BIN" "$FIX" --query="$QM" --no-cache >"$TMP/q1.xml" 2>/dev/null
 RIPWIRE_NO_MENTION=1 "$BIN" "$FIX" --query="$QM" --no-cache >"$TMP/q2.xml" 2>/dev/null
-cmp -s "$TMP/q1.xml" "$TMP/q2.xml" && ok "--query path untouched" || no "--query path affected"
+if cmp -s "$TMP/q1.xml" "$TMP/q2.xml"; then ok "--query path untouched"; else no "--query path affected"; fi
 "$BIN" "$FIX" --for="$QM" --no-route --no-cache >"$TMP/nr1.xml" 2>/dev/null
 "$BIN" "$FIX" --for="$QM" --no-route --no-mention-boost --no-cache >"$TMP/nr2.xml" 2>/dev/null
 cmp -s "$TMP/nr1.xml" "$TMP/nr2.xml" && ok "--no-route path keeps its pre-routing bytes" \
@@ -154,14 +154,14 @@ cmp -s "$TMP/nr1.xml" "$TMP/nr2.xml" && ok "--no-route path keeps its pre-routin
 cmp -s "$TMP/d1.xml" "$TMP/d2.xml" && cmp -s "$TMP/d2.xml" "$TMP/d3.xml" && ok "determinism x3 (anchored)" \
     || no "anchored output not deterministic"
 if command -v xmllint >/dev/null; then
-    xmllint --noout "$TMP/d1.xml" 2>/dev/null && ok "anchored bundle is xmllint-clean (G4)" || no "anchored bundle not well-formed"
+    if xmllint --noout "$TMP/d1.xml" 2>/dev/null; then ok "anchored bundle is xmllint-clean (G4)"; else no "anchored bundle not well-formed"; fi
 else ok "xmllint not present — skipped (G4 covered by xmlwellformed.sh)"; fi
 "$BIN" "$FIX" --for="$QM" --no-mention-boost --no-cache >"$TMP/f1.xml" 2>/dev/null
 RIPWIRE_NO_MENTION=1 "$BIN" "$FIX" --for="$QM" --no-cache >"$TMP/f2.xml" 2>/dev/null
 cmp -s "$TMP/f1.xml" "$TMP/f2.xml" && ok "RIPWIRE_NO_MENTION=1 == --no-mention-boost (byte-identical)" \
     || no "env disable and flag disable diverge"
 "$BIN" "$FIX" --no-mention-boost >/dev/null 2>"$TMP/refuse.err"
-[ $? -ne 0 ] && grep -q 'no-mention-boost' "$TMP/refuse.err" && ok "flag alone refuses loudly" || no "flag alone did not refuse"
+if [ $? -ne 0 ] && grep -q 'no-mention-boost' "$TMP/refuse.err"; then ok "flag alone refuses loudly"; else no "flag alone did not refuse"; fi
 
 # ── §L10b (finding #1): mention_anchored= is a root ATTRIBUTE, not just legend prose — the "mention
 #    anchor: N file + M symbols..." note had no machine-readable twin. The XML root now carries

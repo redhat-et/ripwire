@@ -1528,7 +1528,7 @@ std::optional<int> runLint( const MainDispatch& d )
         {
             if( !magicFileRead[fileId] )
             {
-                darkflags::readWhole( diskPath( ing, fileId ), magicFileBytes[fileId] );
+                magicFileBytes[fileId] = darkflags::readWhole( diskPath( ing, fileId ) ).value_or( std::string() );
                 magicFileRead[fileId] = 1;
             }
             return magicFileBytes[fileId];

@@ -15,7 +15,7 @@ CORPUS="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -24,25 +24,25 @@ echo "htmlexport: BIN=$BIN  CORPUS=$CORPUS"
 
 # 1) --html output is a well-formed HTML document containing the required markers
 "$BIN" "$CORPUS" --html --no-cache >"$TMP/out.html" 2>/dev/null
-grep -q "<!DOCTYPE html" "$TMP/out.html" && ok "output starts with <!DOCTYPE html>" || no "output missing <!DOCTYPE html>"
-grep -q "<html"          "$TMP/out.html" && ok "output contains <html>"            || no "output missing <html>"
-grep -q "const NODES"    "$TMP/out.html" && ok "output contains const NODES"       || no "output missing const NODES"
-grep -q "<canvas"        "$TMP/out.html" && ok "output contains <canvas>"          || no "output missing <canvas>"
+if grep -q "<!DOCTYPE html" "$TMP/out.html"; then ok "output starts with <!DOCTYPE html>"; else no "output missing <!DOCTYPE html>"; fi
+if grep -q "<html"          "$TMP/out.html"; then ok "output contains <html>"; else no "output missing <html>"; fi
+if grep -q "const NODES"    "$TMP/out.html"; then ok "output contains const NODES"; else no "output missing const NODES"; fi
+if grep -q "<canvas"        "$TMP/out.html"; then ok "output contains <canvas>"; else no "output missing <canvas>"; fi
 
 # 2) at least 3 node entries in the NODES array (fixture has several symbols)
 count="$( grep -c '"id"' "$TMP/out.html" 2>/dev/null || echo 0 )"
-[ "$count" -ge 3 ] && ok "NODES array has >= 3 entries (found $count)" || no "NODES array has < 3 entries (found $count)"
+if [ "$count" -ge 3 ]; then ok "NODES array has >= 3 entries (found $count)"; else no "NODES array has < 3 entries (found $count)"; fi
 
 # 3) determinism: two runs produce byte-identical output
 "$BIN" "$CORPUS" --html --no-cache >"$TMP/a.html" 2>/dev/null
 "$BIN" "$CORPUS" --html --no-cache >"$TMP/b.html" 2>/dev/null
-diff -q "$TMP/a.html" "$TMP/b.html" >/dev/null && ok "determinism: byte-identical run-to-run" || no "determinism: non-identical output"
+if diff -q "$TMP/a.html" "$TMP/b.html" >/dev/null; then ok "determinism: byte-identical run-to-run"; else no "determinism: non-identical output"; fi
 
 # 4) --html=FILE: writes to the file, stdout is empty
 "$BIN" "$CORPUS" --html="$TMP/g.html" --no-cache >"$TMP/stdout.txt" 2>/dev/null
-[ -s "$TMP/g.html" ]        && ok "--html=FILE: file is non-empty"    || no "--html=FILE: file is empty or missing"
-[ ! -s "$TMP/stdout.txt" ]  && ok "--html=FILE: stdout is empty"      || no "--html=FILE: stdout is not empty"
-grep -q "const NODES" "$TMP/g.html" && ok "--html=FILE: file contains const NODES" || no "--html=FILE: file missing const NODES"
+if [ -s "$TMP/g.html" ]; then ok "--html=FILE: file is non-empty"; else no "--html=FILE: file is empty or missing"; fi
+if [ ! -s "$TMP/stdout.txt" ]; then ok "--html=FILE: stdout is empty"; else no "--html=FILE: stdout is not empty"; fi
+if grep -q "const NODES" "$TMP/g.html"; then ok "--html=FILE: file contains const NODES"; else no "--html=FILE: file missing const NODES"; fi
 
 # 5) no external script src= or link href= (self-contained, no CDN)
 if grep -qE '<script[^>]+src=' "$TMP/out.html" 2>/dev/null; then
@@ -66,18 +66,18 @@ else
 fi
 
 # 7) wiki views: the overview module-card marker, module/node hash routes, and MODULES payload exist
-grep -q 'data-module-card'  "$TMP/out.html" && ok "wiki: overview module-card marker present"       || no "wiki: overview module-card marker missing"
-grep -q 'const MODULES'     "$TMP/out.html" && ok "wiki: output contains const MODULES"              || no "wiki: output missing const MODULES"
-grep -q 'const FILES'       "$TMP/out.html" && ok "wiki: output contains const FILES"                || no "wiki: output missing const FILES"
-grep -q "#module/"          "$TMP/out.html" && ok "wiki: module-view hash route (#module/) present"  || no "wiki: module-view hash route missing"
-grep -q "#node/"            "$TMP/out.html" && ok "wiki: node-view hash route (#node/) present"      || no "wiki: node-view hash route missing"
-grep -q "egoGraph"          "$TMP/out.html" && ok "wiki: ego-graph BFS function present"             || no "wiki: ego-graph BFS function missing"
-grep -q "id=\"crumb\""      "$TMP/out.html" && ok "wiki: breadcrumb trail element present"           || no "wiki: breadcrumb trail element missing"
+if grep -q 'data-module-card'  "$TMP/out.html"; then ok "wiki: overview module-card marker present"; else no "wiki: overview module-card marker missing"; fi
+if grep -q 'const MODULES'     "$TMP/out.html"; then ok "wiki: output contains const MODULES"; else no "wiki: output missing const MODULES"; fi
+if grep -q 'const FILES'       "$TMP/out.html"; then ok "wiki: output contains const FILES"; else no "wiki: output missing const FILES"; fi
+if grep -q "#module/"          "$TMP/out.html"; then ok "wiki: module-view hash route (#module/) present"; else no "wiki: module-view hash route missing"; fi
+if grep -q "#node/"            "$TMP/out.html"; then ok "wiki: node-view hash route (#node/) present"; else no "wiki: node-view hash route missing"; fi
+if grep -q "egoGraph"          "$TMP/out.html"; then ok "wiki: ego-graph BFS function present"; else no "wiki: ego-graph BFS function missing"; fi
+if grep -q "id=\"crumb\""      "$TMP/out.html"; then ok "wiki: breadcrumb trail element present"; else no "wiki: breadcrumb trail element missing"; fi
 
 # 8) MODULES array actually has at least one entry on the fixture corpus (it has several files/dirs,
 #    so Louvain should find at least one ≥2-member community)
 mod_count="$( grep -c '"symCount"' "$TMP/out.html" 2>/dev/null || echo 0 )"
-[ "$mod_count" -ge 1 ] && ok "wiki: MODULES array has >= 1 entry (found $mod_count)" || no "wiki: MODULES array is empty (found $mod_count)"
+if [ "$mod_count" -ge 1 ]; then ok "wiki: MODULES array has >= 1 entry (found $mod_count)"; else no "wiki: MODULES array is empty (found $mod_count)"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # 9) EDGE CONFIDENCE IS RENDERED, not discarded (Round C, lane B).

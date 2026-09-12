@@ -7,7 +7,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 HOME_FAKE="$TMP/home"; CODEX_FAKE="$TMP/codex"; AGENTS_FAKE="$TMP/agents"
@@ -55,7 +55,7 @@ run_doctor()
 }
 
 OUT="$( run_doctor )"; RC=$?
-[ "$RC" -eq 0 ] && ok "fully wired fake Codex surface exits 0" || no "healthy Codex doctor exited $RC: $OUT"
+if [ "$RC" -eq 0 ]; then ok "fully wired fake Codex surface exits 0"; else no "healthy Codex doctor exited $RC: $OUT"; fi
 # DERIVED, not pinned at 10: what this arm actually asserts is that --agent=codex adds exactly FOUR rows to
 # whatever the base doctor emits, that every row passed on a fully wired surface, and that the report is
 # labelled. A literal total measures the BASE check count instead — it was 10, then 11 when the base grew an
@@ -82,7 +82,7 @@ printf '%s' "$OUT" | grep -q 'DO_NOT_PRINT_CODEX_DOCTOR_SECRET' \
 before="$( cksum "$CODEX_FAKE/hooks.json" "$CODEX_FAKE/config.toml" "$AGENTS_FAKE/skills/.ripwire-manifest-v1"; find "$AGENTS_FAKE/skills" -mindepth 1 -maxdepth 1 -print | sort )"
 run_doctor >/dev/null
 after="$( cksum "$CODEX_FAKE/hooks.json" "$CODEX_FAKE/config.toml" "$AGENTS_FAKE/skills/.ripwire-manifest-v1"; find "$AGENTS_FAKE/skills" -mindepth 1 -maxdepth 1 -print | sort )"
-[ "$before" = "$after" ] && ok "Codex doctor is read-only" || no "Codex doctor mutated the active surface"
+if [ "$before" = "$after" ]; then ok "Codex doctor is read-only"; else no "Codex doctor mutated the active surface"; fi
 
 declared="$( sed -n 's/^skill=//p' "$AGENTS_FAKE/skills/.ripwire-manifest-v1" | head -1 )"
 mv "$AGENTS_FAKE/skills/$declared" "$TMP/$declared"

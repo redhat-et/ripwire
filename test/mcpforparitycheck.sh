@@ -38,7 +38,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -217,6 +217,66 @@ for tb in 900 1200 1600 2000 6000; do
         esac
     fi
 done
+
+# ── (6) no_route: the CLI's own recovery from a route MIS-FIRE, reachable from MCP (audit F-R1-07) ────────
+# `for`'s header names WHICH ranker answered and why. Until 2026-09-10 an agent that read route= and
+# disagreed had no way to ask for the other one: the server refused `no_route` by name, so the CLI's own
+# answer to a mis-fire was unreachable from the MCP surface. These arms are RED against a pre-change binary
+# (the first returns -32602 "unknown field: 'no_route'").
+mcp_for_nr(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s","no_route":%s}}}\n' \
+                     "$CORPUS" "$1" "$2" | "$BIN" --mcp 2>/dev/null | python3 "$TMP/mcptext.py"; }
+NR_Q="parse tree"
+mcp_for     "$NR_Q"        >"$TMP/nr.routed.xml"
+mcp_for_nr  "$NR_Q" true   >"$TMP/nr.off.xml"
+cli_for     "$NR_Q"        >"$TMP/nr.cli.routed.xml"
+cli_for     "$NR_Q" --no-route >"$TMP/nr.cli.off.xml"
+grep -q 'route="' "$TMP/nr.routed.xml" \
+    && ok "(6) MCP for still discloses route= by default" \
+    || no "(6) MCP for lost its route= disclosure"
+# FIRST, that the call ANSWERED. A refused call returns no content, and an empty document trivially
+# satisfies "no route=" and "not the routed row set" — the two arms below would then pass against a binary
+# that does not know the argument at all. Measured while writing this gate: against the pre-change binary
+# those two arms went green on emptiness, which is exactly the false-green this arm exists to prevent.
+if ! grep -q '<sigs' "$TMP/nr.off.xml"; then
+    no "(6) no_route:true returned no bundle at all (refused?) — every arm below would measure emptiness"
+fi
+# The CLI emits NO route= under --no-route (there is no route to disclose), and the MCP twin must not
+# invent one. Asserted against the CLI's own behavior, not against a remembered rule.
+if grep -q 'route="' "$TMP/nr.cli.off.xml"; then
+    no "(6) the CLI --no-route now emits a route= — this arm's premise moved, re-derive it"
+else
+    grep -q 'route="' "$TMP/nr.off.xml" \
+        && no "(6) MCP no_route:true still emitted a route= the CLI --no-route does not" \
+        || ok "(6) MCP no_route:true emits no route=, exactly as the CLI --no-route"
+fi
+# The point of the escape hatch: it must actually change the answer the way the CLI's does. Same served
+# set as the CLI's --no-route on this repo's own measured mis-fire ("parse tree" routes name-exact and
+# misses parseTree, which --no-route finds at rank 1) — subset, for the same payload reason arm (2) gives.
+python3 "$TMP/rows.py" <"$TMP/nr.off.xml"     >"$TMP/nr.off.rows"
+python3 "$TMP/rows.py" <"$TMP/nr.cli.off.xml" >"$TMP/nr.cli.off.rows"
+python3 "$TMP/rows.py" <"$TMP/nr.routed.xml"  >"$TMP/nr.routed.rows"
+if [ ! -s "$TMP/nr.off.rows" ] || [ ! -s "$TMP/nr.cli.off.rows" ]; then
+    no "(6) one of the two no-route dialects served no rows — this arm measured nothing"
+else
+    cmp -s "$TMP/nr.off.rows" "$TMP/nr.routed.rows" \
+        && no "(6) no_route:true served the SAME rows as the routed call — the argument is inert" \
+        || ok "(6) no_route:true changes the served set, as --no-route does on the CLI"
+    missing="$( comm -23 "$TMP/nr.cli.off.rows" "$TMP/nr.off.rows" | head -3 )"
+    [ -z "$missing" ] \
+        && ok "(6) every CLI --no-route row is present in the MCP no_route set" \
+        || no "(6) MCP no_route dropped CLI --no-route rows: $( printf '%s' "$missing" | tr '\n' ' ' )"
+fi
+# Typed, like every other MCP argument: a quoted "true" is a STRING and refuses rather than being guessed.
+QT="$( printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"x","no_route":"true"}}}\n' "$CORPUS" | "$BIN" --mcp 2>/dev/null )"
+case "$QT" in *'invalid value for field: no_route'*) ok "(6) a quoted \"true\" refuses by name, never read as absent";; *) no "(6) no_route:\"true\" did not refuse: $( printf '%s' "$QT" | head -c 160 )";; esac
+# explore (and its pack_task alias) route too, and declare the same argument.
+EX="$( printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"pack_task","arguments":{"path":"%s","task":"%s","no_route":true}}}\n' "$CORPUS" "$NR_Q" | "$BIN" --mcp 2>/dev/null | python3 "$TMP/mcptext.py" )"
+{ [ -n "$EX" ] && ! printf '%s' "$EX" | grep -q 'route="'; } \
+    && ok "(6) explore/pack_task honors no_route too (bundle served, no route=)" \
+    || no "(6) explore/pack_task did not honor no_route"
+# A verb that does NOT route must still refuse the argument — the declaration is per-verb, not global.
+GR="$( printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"grep","arguments":{"path":"%s","pattern":"x","no_route":true}}}\n' "$CORPUS" | "$BIN" --mcp 2>/dev/null )"
+case "$GR" in *"unknown field: 'no_route'"*) ok "(6) a non-routing verb still refuses no_route by name";; *) no "(6) grep accepted no_route: $( printf '%s' "$GR" | head -c 160 )";; esac
 
 # ── determinism + well-formedness on the MCP dialect ─────────────────────────────────────────────────────
 mcp_for "$INERT_Q" >"$TMP/d1.xml"; mcp_for "$INERT_Q" >"$TMP/d2.xml"

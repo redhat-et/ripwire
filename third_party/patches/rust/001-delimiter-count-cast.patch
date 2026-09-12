@@ -1,0 +1,22 @@
+diff --git a/third_party/deps/rust/src/scanner.c b/third_party/deps/rust/src/scanner.c
+index 269f6b2a..5cc96835 100644
+--- a/third_party/deps/rust/src/scanner.c
++++ b/third_party/deps/rust/src/scanner.c
+@@ -71,10 +71,16 @@ static inline bool scan_raw_string_start(Scanner *scanner, TSLexer *lexer) {
+     }
+     advance(lexer);
+ 
++    // RIPWIRE_VENDOR_PATCH(rust/001-delimiter-count-cast): opening_hash_count is a
++    // uint8_t and `++` promotes to int before storing back — an IMPLICIT truncating conversion on
++    // a raw string literal opened with 256 or more hashes (`r###…#"x"#…###`), which rustc rejects
++    // but a file on disk can still contain. Aborts the G1 -fno-sanitize-recover=all stack at
++    // scanner.c:77. Explicit cast keeps the wrapped value upstream production builds compute.
++    // Sibling of lua/001 and csharp/001. A CAST and not saturation, unlike markdown/002-counter-saturate: this counter closes a token by matching the opening count, so saturation is not more correct, and measurement found no extraction difference at any width — 255/256/257/300 all recover the symbols after the raw string. Same remedy as swift/001 and yaml/002; contributes nothing to kParserVer.
+     uint8_t opening_hash_count = 0;
+     while (lexer->lookahead == '#') {
+         advance(lexer);
+-        opening_hash_count++;
++        opening_hash_count = (uint8_t)(opening_hash_count + 1);  /* RIPWIRE_VENDOR_PATCH(rust/001-delimiter-count-cast) */
+     }
+ 
+     if (lexer->lookahead != '"') {

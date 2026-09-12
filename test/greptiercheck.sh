@@ -52,7 +52,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 attr(){ printf '%s' "$2" | grep -oE "$1=\"[^\"]*\"" | head -1 | sed -E "s/^$1=\"//; s/\"$//"; }
 
@@ -107,7 +107,7 @@ echo "=== (2) --grep-in=any: every tier, and NO tier attributes at all ==="
 # ═══════════════════════════════════════════════════════════════════════════
 A_OUT="$( "$BIN" "$SB" --no-cache --grep=TIERTOKEN_frob --grep-in=any 2>/dev/null )"
 a_hits="$( attr hits "$A_OUT" )"
-[ "$a_hits" = "5" ] && ok "(2) --grep-in=any keeps all 5 hits" || no "(2) --grep-in=any expected hits=5, got $a_hits"
+if [ "$a_hits" = "5" ]; then ok "(2) --grep-in=any keeps all 5 hits"; else no "(2) --grep-in=any expected hits=5, got $a_hits"; fi
 if printf '%s' "$A_OUT" | grep -qE 'suppressed_comment=|suppressed_string=|tier_budget=|tier_unclassified=|tier="'; then
     no "(2b) --grep-in=any leaked a tier attribute onto an untiered answer"
 else
@@ -478,9 +478,9 @@ echo "=== (10) determinism + well-formed XML on every tiered surface ==="
 for q in TIERTOKEN_frob TIERTOKEN_prose TIERTOKEN_md; do
     r1="$( "$BIN" "$SB" --no-cache --grep="$q" 2>/dev/null )"
     r2="$( "$BIN" "$SB" --no-cache --grep="$q" 2>/dev/null )"
-    [ "$r1" = "$r2" ] && ok "(10) --grep=$q is byte-identical across runs" || no "(10) --grep=$q is nondeterministic"
+    if [ "$r1" = "$r2" ]; then ok "(10) --grep=$q is byte-identical across runs"; else no "(10) --grep=$q is nondeterministic"; fi
     if command -v xmllint >/dev/null 2>&1; then
-        printf '%s' "$r1" | xmllint --noout - 2>/dev/null && ok "(10b) --grep=$q is well-formed XML" || no "(10b) --grep=$q is not well-formed XML"
+        if printf '%s' "$r1" | xmllint --noout - 2>/dev/null; then ok "(10b) --grep=$q is well-formed XML"; else no "(10b) --grep=$q is not well-formed XML"; fi
     fi
 done
 

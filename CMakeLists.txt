@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 # The version string lives in exactly ONE place — this project() call. --version (main.cpp)
 # reads it via the generated version.h below; test/versioncheck.sh asserts the two never drift.
-project(ripwire VERSION 0.5.0 LANGUAGES C CXX)
+project(ripwire VERSION 0.6.0 LANGUAGES C CXX)
 
 # ---- language standards (C++23 for our own code / C11 for the vendored C dependencies) ----
 set(CMAKE_CXX_STANDARD 23)
@@ -50,8 +50,8 @@ if(RIPWIRE_FUZZ)
 endif()
 
 # ---- optimization profile (portable by default) ----
-# default: arch-neutral on anything that isn't Apple Silicon; auto-detected apple-m1 tuning (safe generic
-# tuning, not a native-host bake-in) on real Apple Silicon. -DRIPWIRE_NATIVE=ON: dev-machine-only opt-in
+# default: the TARGET architecture decides — -march=x86-64-v3 for x86-64 (the owner's floor), generic apple-m1
+# tuning (not a native-host bake-in) for Apple Silicon, arch-neutral otherwise. -DRIPWIRE_NATIVE=ON: dev-machine-only opt-in
 # (-march=native bakes in host CPU extensions — never for a binary that ships or runs elsewhere).
 # See cmake/PortableFlags.cmake for the full rationale and the RIPWIRE_PRETEND_LINUX test-only hook.
 # DECLARED here, beside the other five options, rather than left to be conjured by a bare -D on the
@@ -244,11 +244,13 @@ set(_ripwire_query_names
   c
   cpp
   csharp
+  dart
   elixir
   go
   java
   javascript
   json
+  kotlin
   lua
   objc
   php
@@ -451,6 +453,7 @@ add_ts_grammar(c      https://github.com/tree-sitter/tree-sitter-c.git          
 # LANGUAGE_VERSION]=[13,15] for core v0.26.9. Ships a scanner.c (inherited from cpp: raw strings)
 # which the macro picks up. The tag is lightweight, so the SHA below IS the tagged commit.
 add_ts_grammar(cuda   https://github.com/tree-sitter-grammars/tree-sitter-cuda.git 48b066f334f4cf2174e05a50218ce2ed98b6fd01)  # v0.21.1
+add_ts_grammar(dart   https://github.com/UserNobody14/tree-sitter-dart.git be07cf7118d3dba06236a3f19541685a68209934)  # ABI 15
 add_ts_grammar(elixir https://github.com/elixir-lang/tree-sitter-elixir.git 4b0c7118760af58a2e7081bbc8396e136f820b37)  # ABI 14
 # Lua (.lua): tree-sitter-grammars/tree-sitter-lua — there is no first-party Lua grammar under
 # tree-sitter/. v0.5.0 → ABI 15, in [MIN_COMPATIBLE, LANGUAGE_VERSION]=[13,15] for core v0.26.9.
@@ -459,6 +462,17 @@ add_ts_grammar(elixir https://github.com/elixir-lang/tree-sitter-elixir.git 4b0c
 # serialize (unlike toml's stateless one), but through create/destroy/serialize callbacks the core
 # owns — no new leak surface, and the G1 leg is run with the existing suppressions unchanged.
 add_ts_grammar(lua    https://github.com/tree-sitter-grammars/tree-sitter-lua.git 10fe0054734eec83049514ea2e718b2a56acd0c9)  # v0.5.0
+
+# Kotlin (.kt): fwcd/tree-sitter-kotlin — the only actively maintained Kotlin grammar. Pinned
+# to a bare commit on `main`, not the last tag (v0.3.8, Aug 2024): that tag predates a scanner
+# segfault fix (upstream #136), and main's scanner.c is still plain C, so add_ts_grammar's
+# scanner.c-only glob applies unchanged. Local-corpus probe (501 real .kt files, 2026-09-07):
+# 0.03% of bytes fall in ERROR subtrees, concentrated in one understood construct
+# (`@Composable () -> Unit`-shaped annotated function-type parameters: ~23% of Composable-heavy files
+# carry one, localized to a few bytes each with the enclosing declaration intact); zero ASan/UBSan
+# reports parsing the same corpus, despite the grammar's own scanner-segfault history. `.kts` is
+# deliberately not a kLangTable row yet — see the note there.
+add_ts_grammar(kotlin https://github.com/fwcd/tree-sitter-kotlin.git 1852ea17b7f60fb3f9d84e0b1555d56b46b39fb1)  # main, post-0.3.8
 
 # PHP (.php): the official tree-sitter org grammar. Like TypeScript this repo hosts TWO sub-grammars
 # in subdirectories — `php/` (the full one: HTML text interleaved with `<?php … ?>` blocks) and
@@ -519,6 +533,8 @@ set(RIPWIRE_TS_OBJECTS
   $<TARGET_OBJECTS:ts_ruby>
   $<TARGET_OBJECTS:ts_json>
   $<TARGET_OBJECTS:ts_lua>
+  $<TARGET_OBJECTS:ts_dart>
+  $<TARGET_OBJECTS:ts_kotlin>
   $<TARGET_OBJECTS:ts_elixir>
   $<TARGET_OBJECTS:ts_php>
   $<TARGET_OBJECTS:ts_toml>
@@ -637,6 +653,19 @@ if(RIPWIRE_TESTS)
     src/infra/diagnostics.cpp)
   target_include_directories(ripwire_test_radix PRIVATE src/infra third_party src)
   add_test(NAME ripwire.radix COMMAND ripwire_test_radix)
+
+  # src/infra/strkern.h's SIMD-vs-scalar parity, src/lexindex.h's tokenizer equivalence, and the three
+  # emit escapers' byte-identity — one target, driven by test/strkerncheck.sh and test/emitescapecheck.sh
+  # (each adds its own mutation and cross-arch arms, which are compile flags a second configure cannot
+  # express in this tree). RIPWIRE_TEST_ROOT is the repo whose src/ and docs/ the real-text arms read, so
+  # a bare `ctest` is as honest as a gate run; the gates override it with RIPWIRE_ROOT in the environment.
+  add_executable(ripwire_test_strkern
+    test/verify_strkern.cpp
+    src/infra/diagnostics.cpp)
+  target_include_directories(ripwire_test_strkern PRIVATE src/infra third_party src)
+  target_compile_definitions(ripwire_test_strkern PRIVATE RIPWIRE_TEST_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(ripwire_test_strkern PRIVATE doctest::doctest)
+  add_test(NAME ripwire.strkern COMMAND ripwire_test_strkern)
 endif()
 
 # ---- self-profiling build (src/infra/profileScope.h): -DRIPWIRE_PROFILE=ON ----
@@ -716,16 +745,16 @@ endif()
 set(RIPWIRE_GRAMMAR_TARGETS
   ts_cpp ts_python ts_go ts_rust ts_tsts ts_tstsx ts_swift ts_objc
   ts_javascript ts_bash ts_java ts_ruby ts_json ts_toml ts_yaml ts_csharp ts_c ts_cuda ts_markdown
-  ts_php ts_lua ts_elixir)
+  ts_php ts_lua ts_elixir ts_dart ts_kotlin)
 set(RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_probe ripwire tree-sitter ${RIPWIRE_GRAMMAR_TARGETS})
 set(RIPWIRE_RUNTIME_LINK_TARGETS ripwire_probe ripwire)
 # The C++ subset of the compile list — the only targets that include a C++ standard library at all, and so
 # the only ones the libstdc++ header exemption below has anything to say about (the grammars are C).
 set(RIPWIRE_OWNED_CXX_TARGETS ripwire_probe ripwire)
 if(RIPWIRE_TESTS)
-  list(APPEND RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix)
-  list(APPEND RIPWIRE_RUNTIME_LINK_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix)
-  list(APPEND RIPWIRE_OWNED_CXX_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix)
+  list(APPEND RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix ripwire_test_strkern)
+  list(APPEND RIPWIRE_RUNTIME_LINK_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix ripwire_test_strkern)
+  list(APPEND RIPWIRE_OWNED_CXX_TARGETS ripwire_test_csr ripwire_test_pagerank ripwire_test_radix ripwire_test_strkern)
 endif()
 # G1's `integer` is a CLANG-ONLY UBSan group (unsigned-integer-overflow, implicit-*-truncation,
 # implicit-integer-sign-change — the defined-but-suspicious conversions, not UB). GCC has no such group
@@ -954,7 +983,9 @@ if(RIPWIRE_FUZZ)
   add_ripwire_fuzzer(csharp     tree_sitter_c_sharp    csharp)
   add_ripwire_fuzzer(c          tree_sitter_c          c)
   add_ripwire_fuzzer(php        tree_sitter_php        php)
+  add_ripwire_fuzzer(dart       tree_sitter_dart       dart)
   add_ripwire_fuzzer(elixir     tree_sitter_elixir     elixir)
   add_ripwire_fuzzer(lua        tree_sitter_lua        lua)
+  add_ripwire_fuzzer(kotlin     tree_sitter_kotlin     kotlin)
   add_custom_target(ripwire_fuzzers DEPENDS ${RIPWIRE_FUZZ_TARGETS})
 endif()

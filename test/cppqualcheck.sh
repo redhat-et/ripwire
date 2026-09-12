@@ -46,7 +46,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"      # BOTH seams: positional ar
 PROBE="$( dirname "$BIN" )/ripwire_probe"
 FIX="$ROOT/test/cppqualfix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -178,7 +178,11 @@ US="$( run . --uses=selectBaseline --no-cache )"
     || no "repo: --uses=selectBaseline expected 2 incl. mcpverbs.h, got '$( cnt "$US" )': $US"
 # 4 -> 5 when src/readability.h adopted docparse::detail::readWholeFile as the canonical whole-file read
 # (the feat/readability-lens round); 5 -> 6 when src/renamemine.h adopted the same one (feat/naming-calibration);
-# 6 -> 7 when src/commentcoherence.h adopted the same one (feat/comment-coherence).
+# 6 -> 7 when src/commentcoherence.h adopted the same one (feat/comment-coherence);
+# 22 -> 23 when src/lexical.h adopted the same one (the 2026-09-10 string-perf round: lexicalScanText read
+# every file through ifstream + ostringstream << rdbuf() + str(), two copies, on the BM25 scan path);
+# 23 -> 24 when src/quality.h's error-masking confirm read a block's RAW bytes through it (CodeRabbit on
+# #127: a flattened block loses the newline that ends a // comment, so comment-only had to be confirmed raw).
 # The literal counts REAL call sites, so it moves when a real call site is
 # added; what it pins is that the qualified `docparse::detail::` spelling still RESOLVES, which is the defect
 # this arm was written for. Bumping it is correct; changing it to a >= would retire the arm.
@@ -211,9 +215,9 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # 19 -> 22 2026-09-09 (harvest githarden): githarden.h's local-config pre-scan reads the `.git` gitdir FILE, the
 # gitdir's `commondir`, and each config candidate through the same canonical helper — three sites for one probe,
 # rather than a fourth fopen/fread of its own.
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 22 ] \
-    && ok "repo: --uses=readWholeFile count=22 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 22"
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 24 ] \
+    && ok "repo: --uses=readWholeFile count=24 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 24"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"

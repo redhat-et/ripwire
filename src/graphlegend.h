@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // graphlegend.h — the ONE floor marker and the ONE shared legend wording for the five GRAPH-COUNT verbs
 // (--uses, --callers, --callees, --impact, --edit-check).
@@ -32,10 +34,12 @@
 //
 // Gate: test/floormarkcheck.sh (all five verbs, CLI ≡ MCP wording, and the retired absolutism absent).
 
+#include <array>
 #include <cstdint>
 #include <utility>
 #include <cstdio>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rw
@@ -74,11 +78,11 @@ inline std::string graphGaugeAttrXml( const std::vector<std::uint32_t>& ambOut, 
     char buf[160];
     if( unindexedFiles > 0 )
     {
-        std::snprintf( buf, sizeof( buf ), " graph_ambiguous=\"%zu\" graph_unresolved=\"%zu\" graph_unindexed=\"%zu\"", amb, unresolved, unindexedFiles );
+        rw::formatTo( buf, sizeof( buf ), " graph_ambiguous=\"{}\" graph_unresolved=\"{}\" graph_unindexed=\"{}\"", amb, unresolved, unindexedFiles );
     }
     else
     {
-        std::snprintf( buf, sizeof( buf ), " graph_ambiguous=\"%zu\" graph_unresolved=\"%zu\"", amb, unresolved );
+        rw::formatTo( buf, sizeof( buf ), " graph_ambiguous=\"{}\" graph_unresolved=\"{}\"", amb, unresolved );
     }
     return buf;
 }
@@ -89,11 +93,11 @@ inline std::string graphGaugeAttrJson( const std::vector<std::uint32_t>& ambOut,
     char buf[160];
     if( unindexedFiles > 0 )
     {
-        std::snprintf( buf, sizeof( buf ), ",\"graph_ambiguous\":%zu,\"graph_unresolved\":%zu,\"graph_unindexed\":%zu", amb, unresolved, unindexedFiles );
+        rw::formatTo( buf, sizeof( buf ), ",\"graph_ambiguous\":{},\"graph_unresolved\":{},\"graph_unindexed\":{}", amb, unresolved, unindexedFiles );
     }
     else
     {
-        std::snprintf( buf, sizeof( buf ), ",\"graph_ambiguous\":%zu,\"graph_unresolved\":%zu", amb, unresolved );
+        rw::formatTo( buf, sizeof( buf ), ",\"graph_ambiguous\":{},\"graph_unresolved\":{}", amb, unresolved );
     }
     return buf;
 }
@@ -124,11 +128,22 @@ inline constexpr const char* kGraphUnindexedLegend =
 inline const char* graphUnindexedLegend( bool on ) noexcept { return on ? kGraphUnindexedLegend : ""; }
 
 // The same sentence as its OWN XML comment, for the legends that are one closed <!-- ... --> literal rather
-// than a %s inside one (--connect). Wrapped, never re-spelled: a second copy of this sentence is the drift
+// than a %s inside one. Wrapped, never re-spelled: a second copy of this sentence is the drift
 // this header exists to stop, and splicing the bare clause after a closing "-->" is not a wording bug but a
 // WELL-FORMEDNESS one (test/floormarkcheck.sh arm (9) caught exactly that during this change).
 // legendcoveragecheck reads the whole LEADING RUN of comments as the legend, so an adjacent comment IS the
 // legend -- the rule kRootRelPathsLegend already relies on.
+//
+// FOUR USERS, and the fourth-to-first of them is why this paragraph is here. #66 landed the clause into the
+// three SHARED legend builders below (graphCountDisclosure, graphCountFloorBrief, graphUnindexedTextClause)
+// plus --connect through this wrapper -- but the ATTRIBUTE rides a different code path entirely
+// (graph.h graphCountFloorAttrXml/Json, whose only condition is g.unindexedFiles > 0). So every verb whose
+// legend is a hand-spelled closed literal rather than a call into a builder got the attribute and no clause:
+// --lego (kLegoLegend below, CLI and MCP), --verify (verify.h kVerifyLegend) and --nonlocal-state
+// (nonlocalstate.h kNonLocalStateLegend) shipped that way in v0.6.0. They now take this wrapper, which is
+// what it was written for. `on` is always the emitter's own g.unindexedFiles > 0, never a re-derivation.
+// Gate: test/blindspotcheck.sh arm (F) (attribute => clause, every surface, both dialects) and (G) (the
+// mirror: neither, on a corpus with nothing unindexed).
 inline std::string graphUnindexedLegendComment( bool on )
 {
     return on ? std::string( "<!-- " ) + kGraphUnindexedLegend + "-->" : std::string();
@@ -158,7 +173,7 @@ inline std::string graphCountFloorBrief( bool hasUnindexed )
 // keeps the same omit-at-zero reading as the XML/JSON attribute rather than printing a bare "0" the other
 // two dialects never print. Rendered through graphUnindexedTextClause() below, never spelled at the site.
 inline constexpr const char* kGraphCountFloorTextLine =
-    "        counts_floor=1: every count above is a FLOOR, never a total (call edges are name-based; dynamic dispatch, callbacks and macros can be missing) — read a zero as \"none found\", never as \"none exists\"; graph_ambiguous=%zu graph_unresolved=%zu is the whole graph's resolver gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=%s\n"; // printf FORMAT: two gauge totals + the clause
+    "        counts_floor=1: every count above is a FLOOR, never a total (call edges are name-based; dynamic dispatch, callbacks and macros can be missing) — read a zero as \"none found\", never as \"none exists\"; graph_ambiguous={} graph_unresolved={} is the whole graph's resolver gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved={}\n"; // std::format FORMAT: two gauge totals + the clause
 
 // The #66 clause for the prose dialect. "" at zero — the absence IS the confident case, same as the attribute.
 inline std::string graphUnindexedTextClause( std::size_t unindexedFiles )
@@ -168,9 +183,9 @@ inline std::string graphUnindexedTextClause( std::size_t unindexedFiles )
         return {};
     }
     char buf[256]; // literal ~180 B + one %zu at 20 digits = ~198 B worst case; snprintf truncates regardless
-    std::snprintf( buf, sizeof( buf ),
-                   "; graph_unindexed=%zu is a third gauge — files no grammar in this build could read at all (the map header's unindexed=), whose calls produce no reference and so raise neither gauge above",
-                   unindexedFiles );
+    rw::formatTo( buf, sizeof( buf ),
+                  "; graph_unindexed={} is a third gauge — files no grammar in this build could read at all (the map header's unindexed=), whose calls produce no reference and so raise neither gauge above",
+                  unindexedFiles );
     return buf;
 }
 
@@ -389,14 +404,21 @@ inline constexpr const char* kCallHierarchyLegendOpen =
 inline constexpr const char* kCallHierarchyLegendCalleesOnly =
     "callees-only: bodyless_defs= (when present) counts defs= that are bodyless declarations (header-only or forward-declared); zero callees may mean no body to read callees from, not truly no dependencies. ";
 
+// The callers answer's next= reading in its two forms. callHierarchyNextSelector (callhierarchy.h) decides which
+// one the emitter printed, and callHierarchyLegendOpen repeats that decision rather than re-deriving it.
+inline constexpr const char* kCallersNextSelectorLegend = "next= is the one pasteable follow-up (the uses verb on this selector: the call sites). ";
+inline constexpr const char* kCallersNextBareNameLegend = "next= is the one pasteable follow-up (the uses verb on the called name: all same-named definitions' call sites, including sites bound to other definitions, because a declined call names no single definition). ";
+
 // The composed opener, one call for the caller — keeps the wantCallers/callees branch out of
 // runCallHierarchy (already this file's largest dispatcher) rather than adding a ternary at the call site.
-inline std::string callHierarchyLegendOpen( bool wantCallers )
+inline std::string callHierarchyLegendOpen( bool wantCallers, bool nextUsesBareName = false )
 {
+    const char* const callersNextClause = nextUsesBareName ? kCallersNextBareNameLegend : kCallersNextSelectorLegend;
     // F-02: the blind-spot clause rides with hop_tested=/hop_untested=, which both forms always carry.
     // P3 (L7): next= defined where the reader meets it — callers hand over the SITES (the uses verb on the same
     // selector, its @FILE:LINE spelling mirrored), callees the BODY whose callees these are (expand).
-    return wantCallers ? std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kTestedLensBlindSpotLegend + "next= is the one pasteable follow-up (the uses verb on this selector: the call sites). "
+    // nextUsesBareName is the emitter's OWN decision, never re-derived here; no double hyphen in comment text.
+    return wantCallers ? std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kTestedLensBlindSpotLegend + callersNextClause
                        : std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kTestedLensBlindSpotLegend + kCallHierarchyLegendCalleesOnly + "next= is the one pasteable follow-up (expand on this selector: the body). ";
 }
 
@@ -422,6 +444,134 @@ inline constexpr const char* kNeighbourCapLegend =
 inline const char* capLegendClause( bool active ) noexcept
 {
     return active ? kNeighbourCapLegend : "";
+}
+
+// ── TIER-3 DECLINES — declined_calls= on the callers, callees and impact answers (test/declinecheck.sh) ────
+// A call whose candidates are two or more same-language definitions, none in the caller's file or directory,
+// and that no qualifier or receiver rule pinned, gets NO edge: the resolver declines to guess. Until this
+// clause the decline was also SILENT, so count="0" read as "no caller exists" about a call the resolver had
+// seen. One sentence for the three answers and their MCP twins, emitted exactly when the attribute is:
+// declinedCallsLegend( bool ) takes the emitter's own attribute-present condition, never a re-derivation. No
+// double hyphen anywhere, because it lands inside an XML comment.
+inline constexpr const char* kDeclinedCallsLegend =
+    "declined_calls=K (absent when 0) counts call SITES the resolver declined to bind: the called name has two or more same-language definitions, none in the caller's file or directory, and no qualifier, receiver type or include chose one, so no edge exists and no count or row here includes them (the map header's declined=). Callers form: declined calls that could have meant this selector's definitions; impact form: that could have reached SYM or a symbol in its radius; callees form: declined calls these definitions make. Each call counts once however many candidates it had; the uses verb on the called name lists the sites. ";
+inline const char* declinedCallsLegend( bool on ) noexcept { return on ? kDeclinedCallsLegend : ""; }
+
+// ONE absent-at-zero count attribute: ` name="N"`, or nothing at all when count is 0. declined_calls= below and
+// --skipped's extent_suspect_files=/macro_blanked_files= (root) and extent_suspect_syms=/macro_blanked= (<h> rows)
+// all spell through it, so the shape has one definition instead of a copy per verb.
+inline std::string countAttrXmlOrEmpty( std::string_view name, std::size_t count )
+{
+    return count > 0 ? " " + std::string( name ) + "=\"" + std::to_string( count ) + "\"" : std::string();
+}
+
+// The attribute and the key, one spelling each, absent at zero like bodyless_defs= and graph_unindexed=.
+inline std::string declinedCallsAttrXml( std::size_t declinedCalls )
+{
+    return countAttrXmlOrEmpty( "declined_calls", declinedCalls );
+}
+inline std::string declinedCallsKeyJson( std::size_t declinedCalls )
+{
+    return declinedCalls > 0 ? ",\"declined_calls\":" + std::to_string( declinedCalls ) : std::string();
+}
+
+// ── THE DECL→DEF RESIDUE — unproven_defs= on the callers/callees answers (test/decltodefcheck.sh arm E2) ──
+// H1's fix (graph.h::declToDefFollowThrough) stopped a `file:name` selector from answering with same-named
+// definitions it could not tie to the file it named. What it DROPS has to be said: without this clause and
+// its attribute a dropped candidate reaches the reader as `count="0"`, which is the silent zero #63 exists to
+// kill — the fix would have traded one honesty defect for another. BOTH directions carry it, unlike
+// bodyless_defs= above: that one is callees-only because a declaration has no callees to read, and the
+// residue has no such asymmetry — a selector whose definitions could not be tied to its file is equally
+// unanswered whichever edge direction was asked.
+//
+// EMITTED EXACTLY WHEN THE ATTRIBUTE IS (unprovenDefsLegend takes the emitter's own condition, never a
+// re-derivation) — this header's own rootRelPathsLegend rule: a legend that defines an attribute the
+// document did not emit is the mirror-image false claim. That is also why graphlegendbudgetcheck's pins did
+// not move: it measures a BARE-NAME selector, which never reaches the widening, so the shared essay is
+// byte-identical there. Same shape graphUnindexedLegend( bool ) already uses, and for the same two reasons.
+//
+// G4: inside an XML comment, so no double hyphen — `file:name` is written without dashes for that reason.
+inline constexpr const char* kUnprovenDefsLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: they are NOT in defs= and no row or count here includes them. A declaration widens to the definitions it stands for only where the definition is IN the named file, or its own file includes the named file, resolved path-precisely; a same-named body anywhere else is not evidence and is never served. Widen the selector to the bare NAME, or to Scope::name, to see them. ";
+inline const char* unprovenDefsLegend( bool on ) noexcept { return on ? kUnprovenDefsLegend : ""; }
+
+// The attribute and the key, one spelling each, absent at zero — through the shared countAttrXmlOrEmpty
+// above, so this cannot become a second spelling of bodyless_defs='s hand-rolled idiom.
+inline std::string unprovenDefsAttrXml( std::size_t unprovenDefs )
+{
+    return countAttrXmlOrEmpty( "unproven_defs", unprovenDefs );
+}
+inline std::string unprovenDefsKeyJson( std::size_t unprovenDefs )
+{
+    return unprovenDefs > 0 ? ",\"unproven_defs\":" + std::to_string( unprovenDefs ) : std::string();
+}
+
+// ── THE SAME RESIDUE ON THE VERBS THAT READ THE SAME RESOLVER — safe-delete, impact, path (decltodefcheck arm E2e) ──
+// resolveAllByNameQualified serves --safe-delete, --impact (and the MCP impact twin) and --path (and path_between)
+// exactly as it serves --callers, so a `file:name` selector whose definitions were dropped reached THOSE readers as
+// callers="0" risk="none-found", reaches="0" and reachable="0": the silent zero E2 closed on the callers form, on the
+// verb whose answer a reader acts on as "safe to delete". The attribute is the one the callers form carries —
+// unprovenDefsAttrXml / unprovenDefsKeyJson above, and compactlegend.h's existing unproven_defs row reads it off any
+// root — so the vocabulary does not grow. What differs per verb is what the dropped definitions are MISSING FROM, and
+// that is the clause: the callers sentence names defs= and rows, while --path has from_defs=/to_defs= and a yes/no,
+// and --safe-delete has a risk= value computed from counts that never walked them.
+//
+// One clause per verb, one shared proof-and-widen tail, emitted exactly when the attribute is (the caller passes its
+// own attribute-present condition, the unprovenDefsLegend( bool ) rule above). kUnprovenDefsLegend states the same
+// proof rule inline and is left byte-for-byte as it is: the callers/callees emitter that selects it is not this
+// change's, and its bytes are pinned there.
+//
+// G4: inside an XML comment, so no double hyphen anywhere. Each clause OPENS with `unproven_defs=` — the house form,
+// and the attribute test/compactlegendcheck.sh (S) reduces a conditionally-selected clause to.
+inline constexpr const char* kUnprovenDefsImpactLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: they are NOT in defs=, the walk never started from them, and so none of their callers or importers is in reaches=, importers=, the radius partition or any row. ";
+inline constexpr const char* kUnprovenDefsPathLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS a file:name endpoint found and could not tie to the file it named, summed over from= and to= (a bare NAME endpoint never adds to it): they are NOT in from_defs= or to_defs=, the search neither started nor ended at them, and so reachable= and hops= say nothing about a path through them. ";
+inline constexpr const char* kUnprovenDefsSafeDeleteLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: they are NOT in defs=, and callers=, impact_reaches=, uses=, the tested partition and dead_code_candidate= were all read without them. So risk= describes defs= alone, and risk=none-found beside unproven_defs= is an INCOMPLETE read, never a sign that the name can go. ";
+// AND ON uses, mentions, verify AND affected (decltodefcheck arms E2i..E2m). The same resolver serves four more readers,
+// and on the same repro each met the drop as a zero with nothing beside it: uses count="0" (a call site is kept only where
+// it resolves to a def in defs=), mentions docs="0" (graph.h stores a doc edge on a body, never on a declaration, so the
+// declaration that stays carries none), verify count="0" or verdict="not-established" with limit= naming the model's
+// floor instead, and affected tests="0" reached="0". Same attribute, same tail, one clause each for what is missing.
+// verify's legend is a closed literal (verify.h kVerifyLegend), so runVerify wraps its clause as its own comment.
+inline constexpr const char* kUnprovenDefsUsesLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: they are NOT in defs=, so a role=\"call\" site whose call resolves to one of them is in neither count= nor the rows (call_sites_of_name= still counts it). ";
+inline constexpr const char* kUnprovenDefsMentionsLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: they are NOT in defs=, and a doc edge is stored on a definition's body, never on a declaration, so a doc whose edge lands only on them is in neither docs=, sections= nor the rows. ";
+inline constexpr const char* kUnprovenDefsVerifyLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS a file:name symbol argument found and could not tie to the file it named, summed over both symbols of calls(): they are NOT in defs=, from_defs=, to_defs= or target_defs=, so no call path, witness or role=\"call\" site that reaches only them was read. verdict=confirmed or refuted still stands on the evidence it prints; verdict=not-established beside unproven_defs= is an INCOMPLETE read that limit= does not name, never a sign the claim is false. ";
+inline constexpr const char* kUnprovenDefsAffectedLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS a file:name item found and could not tie to the file it named, summed item by item (a path item adds 0): they are NOT in seeds=, the caller walk never started from them, and so a test that reaches only them is in neither tests=, reached= nor the rows. A bare NAME item that also matches an indexed path is read as that path. ";
+inline constexpr const char* kUnprovenDefsProofTail =
+    "A declaration widens to the definitions it stands for only where the definition is IN the named file, or its own file includes the named file, resolved path-precisely; a same-named body anywhere else is not evidence and is never served. Widen the file:name spelling to the bare NAME, or to Scope::name, to include them. ";
+
+// Append-only: unprovenDefsVerbLegend below indexes its clause rows by this order.
+enum class UnprovenDefsVerb : std::uint8_t
+{
+    Impact,
+    Path,
+    SafeDelete,
+    Uses,
+    Mentions,
+    Verify,
+    Affected,
+};
+
+// `on` is the emitter's own `unprovenDefs > 0`, never a re-derivation; "" otherwise, so an answer that dropped
+// nothing stays byte-identical on every one of these verbs.
+//
+// ONE ROW PER UnprovenDefsVerb, in enum order. The rows are spelled INSIDE the arm that selects them rather than in a
+// named table: test/compactlegendcheck.sh (S) counts a clause as conditionally emitted when a ?: arm names it, and a
+// table declared elsewhere would take every row out of its population. A ternary chain names them too, at a nesting
+// that grows by one with every verb.
+inline std::string unprovenDefsVerbLegend( UnprovenDefsVerb verb, bool on )
+{
+    const char* const clause = on ? std::array { kUnprovenDefsImpactLegend, kUnprovenDefsPathLegend, kUnprovenDefsSafeDeleteLegend,
+                                                 kUnprovenDefsUsesLegend, kUnprovenDefsMentionsLegend, kUnprovenDefsVerifyLegend,
+                                                 kUnprovenDefsAffectedLegend }[std::size_t( verb )]
+                                  : nullptr;
+    return clause != nullptr ? std::string( clause ) + kUnprovenDefsProofTail : std::string();
 }
 
 // M12's writeMultiRootTable/multiRootTableLegend (the multi-root roots-table disclosure --callers/--uses

@@ -22,7 +22,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/cachefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ]    || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -41,14 +41,14 @@ OUT="$TMP/out1"
 for rule in cache-node-container cache-vector-of-raw-ptr cache-vector-of-indirect \
             cache-heap-alloc-in-loop cache-pointer-chase-loop cache-gather-subscript \
             cache-shared-ptr-by-value cache-manual-prefetch; do
-    grep -q "rule name=\"$rule\"" "$OUT" && ok "tally row present: $rule" || no "tally row MISSING: $rule"
+    if grep -q "rule name=\"$rule\"" "$OUT"; then ok "tally row present: $rule"; else no "tally row MISSING: $rule"; fi
 done
 
 # 3. RECALL — rule id → the exact unfriendly.cpp line(s) it must fire on, space-joined in emit order.
 lns(){ grep -oE "rule=\"$1\" [^>]*p=\"[^\"]*unfriendly.cpp:[0-9]+" "$OUT" | grep -oE 'unfriendly.cpp:[0-9]+' | grep -oE '[0-9]+$' | paste -sd' ' - ; }
 want(){ # want <rule-id> <expected-lines>
     got="$( lns "$1" )"
-    [ "$got" = "$2" ] && ok "$1 fires at exactly: $2" || no "$1 expected lines '$2', got '${got:-none}'"
+    if [ "$got" = "$2" ]; then ok "$1 fires at exactly: $2"; else no "$1 expected lines '$2', got '${got:-none}'"; fi
 }
 want cache-node-container      "13 14"
 want cache-vector-of-raw-ptr   "17 21"

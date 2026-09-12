@@ -298,6 +298,27 @@ already knew about the others, several while fixing one. So the rule is mechanic
 
 ### Output: `std::print`, feature-tested and disclosed — never a new printf-family site
 
+- **Pick the primitive by what you actually have.** All three live in `src/infra/emit.h`; a same-shaped
+  wrapper such as `lintPrintOut` / `lintPrintErr` in `src/verbs_lint.h` is fine too.
+
+  | You have | Use |
+  | --- | --- |
+  | A format string **with arguments**, going to a stream | `rw::emitTo( stream, "…{}…", args )` |
+  | **Literal text, no arguments** | `rw::emitRaw( stream, "…" )` |
+  | A **caller-owned char buffer** | `rw::formatTo( buf, cap, "…{}…", args )` |
+
+  `emitRaw` is not a stylistic alternative to `emitTo`: `std::format_string` is **consteval**, so literal
+  text routed through `emitTo` pays compile-time format parsing for formatting that never happens — and
+  the `--help` table, one 114,985-character literal, does not compile at all that way ("call to consteval
+  function … is not a constant expression"). 353 sites in this tree pass a string and no arguments.
+  `formatTo` exists for the same reason in the other direction: `std::format` into a `std::string` puts an
+  allocation on `serialize.h`'s per-symbol path, which is a G2 regression, so buffer-targeted sites keep
+  their stack buffer via `std::format_to_n`.
+- **`rw::formatTo` reproduces `snprintf`'s contract exactly — do not hand-roll it with `format_to_n`.**
+  `snprintf( p, S, … )` writes at most `S-1` characters **plus a NUL**; `std::format_to_n( p, S, … )` writes
+  up to `S` and terminates nothing. Substituting one for the other buys a byte of buffer and drops the
+  terminator. Measured 2026-09-09: that substitution made a symbol row emit `amp="1"` where every previous
+  build truncated it away, with the whole parity fence green — the fixture never reaches the buffer.
 - **Emit through `rw::emitTo` (`src/infra/emit.h`)**, or a same-shaped wrapper such as `lintPrintOut` /
   `lintPrintErr` in `src/verbs_lint.h`. That header is the ONE place the emitter is chosen: `std::print`
   where the standard library defines `__cpp_lib_print`, `std::format` rendered and written with
@@ -318,10 +339,32 @@ already knew about the others, several while fixing one. So the rule is mechanic
   and the stream. The trap it exists for is float rendering — `%g` prints six significant digits, `{}`
   prints the shortest round-trip (`0.3` versus `0.30000000000000004`) — so a per-specifier swap is never
   mechanical. Every emitted byte feeds G4, the determinism gate, and the stored captures.
+- **The specifier mapping is measured. Use the measured one; do not extend it from memory.** 218 checks
+  against printf on this toolchain found exactly ONE unsafe mapping, the bare `%g`/`%f` above:
+
+  ```
+  %s %u %d %zu %zd %lu %ld %llu %lld %i  ->  {}          %10s -> {:>10}   %-11s -> {:<11}
+  %.*s (precision, pointer)              ->  {} with std::string_view( ptr, len )
+  %016llx -> {:016x}   %llx -> {:x}   %llX -> {:X}   %o -> {:o}   %.9s -> {:.9}
+  %.3f -> {:.3f}       %6.1f -> {:6.1f}   %.6g -> {:.6g}          (explicit precision ONLY)
+  ```
+- **A green fence is not coverage, and the fence cannot cover everything.** Two facts to hold together.
+  First: `printffmtparitycheck` proves nothing about a verb it has no label for — add the label and pin it
+  BEFORE converting, and note that pinning refuses any verb whose output embeds the git stamp (`at="<sha>"`),
+  because such a verb's bytes move on the very commit that carries the pin. Second: even a covered verb
+  reaches only the branches the fixture reaches — a coverage build measured 25% of one batch's call sites
+  ever executed. For anything unfenceable or under-covered, **differential-test**: build the base commit
+  into a scratch worktree and diff both binaries' bytes over `src/`, `test/`, `docs/` and the repo root,
+  normalising only the stamp. A toy fixture cannot reach a truncation branch; a real tree does it by
+  accident, which is how the `format_to_n` byte above was caught.
 - **`std::print` throws on a failed write where `fputs` returns EOF.** `emitTo` catches that one
   `std::system_error` so both arms keep the contract every emitting site always had — a failed write is
   silent — rather than a `std::terminate` the fallback arm could never produce (§3 "Self-check, don't
   throw": a recoverable runtime error is a degrade, never a throw that escapes).
+- **`%%` and braces invert in OPPOSITE directions when you convert.** A printf format spells a literal
+  percent `%%`; text handed to `emitRaw` is no longer a format, so `%%` there prints TWO characters and must
+  collapse to one `%`. Braces are the mirror image: `emitTo` needs `{{`/`}}` for a literal brace where
+  `emitRaw` needs a bare `{`/`}`. JSON emitters are where the brace half bites.
 - **Until a string is converted it is a printf FORMAT, not text.** The `--help` table in `src/cli.h` is one:
   a literal `%` in a help line is a conversion (`% /`, `% o` and `% c` all parse), and the generated
   `docs/COMMANDS.md` then carries garbage where the number was. Write `%%` there, and treat the regeneration
@@ -395,11 +438,82 @@ Release CI job covered it.
 2. Build both flavours locally; run `python3 test/pargates.py . ./build/ripwire -j 6` green.
 3. Run the sanitizer build clean, and the determinism gate three times.
 4. Add any new `test/*check.sh` to `test/regression.sh` in the same commit.
-5. If your change alters emitted output, regenerate the goldens as their **own** commit with the
+5. **Never edit the published gate count by hand.** After adding a gate — and again after any rebase
+   or merge that moved the `for _g in …; do` loop — run `python3 docs/gatecount_build.py`. See below.
+6. If your change alters emitted output, regenerate the goldens as their **own** commit with the
    diff reviewed by eye — never bundled with logic.
-6. Keep formatting churn out of logic commits.
+7. Keep formatting churn out of logic commits.
+
+**The gate count is a build product.** It is stated in `README.md`, `docs/EVALS.md` and
+`present/deck5_ripwire_build.js` — eight sites — and every one of them is written by
+`docs/gatecount_build.py` from the single absorb loop in `test/regression.sh`, then gated by
+`test/gatecountcheck.sh`. Hand-writing it is not a style preference: two lanes that each add one gate
+both write N+1, git auto-merges the **identical** text clean, and the tree publishes N+1 against a loop
+of N+2 with every existing check green (each branch's count matches its own loop, and the merged loop
+matches main's — the member *sets* differ at the same number). That collided seven times in one night
+on 2026-09-10. The merge recipe is therefore: **union the `for _g in …` sets, run the generator, done.**
+
+Each published site carries a marker comment the generator owns — `<!-- gatecount -->` in markdown and
+HTML (invisible when rendered), `// gatecount` in the deck's JavaScript. A count claim on a line
+*without* that marker is a hand-written count, and the generator refuses the tree instead of leaving it
+behind. Do not spell the marker inside a site file except at a real site.
 
 Scope each commit. A commit that touches one concern is a commit a reviewer can actually check.
+
+## 7. How we write
+
+This applies to commit subjects, PR descriptions, issues, gate comments, `README.md` and the docs. It is
+here because tone drifts every time someone rewrites a page, and drift in either direction costs us
+contributors: too warm and vague reads as not competent, too cold and dense reads as a project nobody
+wants to spend a Saturday on.
+
+**Competence carries the fun.** The humour in this repo is not decoration laid on top of the engineering —
+it comes from being unusually exact about something and then being light about it. Get the precision right
+and the tone follows.
+
+The reference for the voice is the commit log, not the front page:
+
+> ``#if 0`` stopped serving calls and went on serving every other role
+> twelve flag rows sat one indent too deep, so `--help` did not list every row
+> `graph_unindexed=` shipped a number the document never defined
+
+**Commit subjects say what was WRONG, not what you did.** "fix(help): twelve flag rows sat one indent too
+deep" tells a reader in the log five months from now what the world was like before the commit.
+"fix(help): change indentation" tells them nothing they cannot get from the diff.
+
+**Let the number be the punchline.** `182,555 files. 194 s → 156 s.` An adjective on a strong number makes
+it weaker — "blazingly fast" reads as though the writer does not trust the measurement. Declining to
+embellish *is* the confidence.
+
+**Deadpan the failures, especially ours.** "The gate that guards H2 reports PASS on H2." That sentence is
+funny and damning at once, and it signals more competence than any claim of quality could: a project that
+roasts its own bugs precisely is obviously run by people who find them. Never write a defect up as though
+it were someone else's fault or a surprise.
+
+**Rhythm, not exclamation marks.** Long sentence, then a short one. "Declined calls, derailed parses and
+cut answers now say so. A zero means none found." The energy is in the cut.
+
+**Attitude in the names, precision in the bodies.** "Rip'n Fast. Fewer Tokens. Better Code." earns its
+swagger because every claim underneath it is measured and linked. Swagger plus receipts is fun; swagger
+alone is marketing, receipts alone is a paper.
+
+**Respect the reader rather than welcoming them.** "The research is done, the pointers are in the prompt,
+and the prompt writes a plan and stops" recruits better than "we'd love your help!" — it says *your time is
+worth something and we spent ours first*. Warmth that costs the writer nothing reads as filler; warmth that
+shows up as prepared work reads as real.
+
+Cut on sight: hedges (`we think maybe`, `a bit`, `somewhat`, `basically`), mission statements
+("on a mission to revolutionize…"), exclamation marks after a claim, emoji standing in for a point of view,
+and apologising for the age of the project. "Twelve weeks old and there is a lot worth doing" is confident;
+"it's still early days, sorry!" is the same fact, badly told.
+
+**The test.** Read a paragraph as two people: a skeptical staff engineer scanning for overclaim, and a
+curious newcomer deciding whether this looks like a good weekend. Warm-and-vague loses the first;
+cold-and-dense loses the second. A line like *"a zero means none found, never none exists"* wins both — it
+is a precise contract and it has a point of view.
+
+None of this licenses inaccuracy. Where this section and §2's honesty rules could ever disagree, the
+honesty rules win and the sentence gets rewritten until it is both.
 
 By contributing you agree that your contributions are licensed under the project's `LICENSE`, and
 that you will follow `CODE_OF_CONDUCT.md`. Security issues go through `SECURITY.md`, not the public

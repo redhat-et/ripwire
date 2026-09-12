@@ -30,7 +30,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/gateabilityfix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -60,7 +60,7 @@ fi
 # ── --doc-drift --gateability: the block itself ────────────────────────────────────────────────────────
 full="$( "$BIN" "$CORPUS" --doc-drift --gateability --no-cache 2>/dev/null )"
 rc=$?
-[ "$rc" = "0" ] && ok "exits 0 (a report, not a gate)" || no "--doc-drift --gateability exited $rc, expected 0"
+if [ "$rc" = "0" ]; then ok "exits 0 (a report, not a gate)"; else no "--doc-drift --gateability exited $rc, expected 0"; fi
 
 block="$( printf '%s' "$full" | tr '<' '\n' | sed -n '/^gateability /,/^\/gateability/p' )"
 
@@ -95,7 +95,7 @@ strip_at(){ printf '%s' "$1" | sed -E 's/ at="[^"]*"//g'; }
 [ "$( strip_at "$full" )" = "$( strip_at "$full2" )" ] \
     && ok "determinism (byte-identical, modulo the at= working-tree stamp)" \
     || no "--doc-drift --gateability is non-deterministic"
-printf '%s' "$full" | xmllint --noout - >/dev/null 2>&1 && ok "xmllint clean" || no "xmllint FAILED"
+if printf '%s' "$full" | xmllint --noout - >/dev/null 2>&1; then ok "xmllint clean"; else no "xmllint FAILED"; fi
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fi
 exit "$fail"

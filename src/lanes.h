@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // lanes.h — `--plan-lanes=N --task="…"` / `--plan-lanes --brief=FILE`, the
 // ORCHESTRATOR surface: *if I split this task across N isolated worktrees, which lanes would collide, and in
@@ -828,8 +831,8 @@ inline void warnCoincidingClaims( PlanLanesResult& result )
                 continue; // only flag a genuinely degenerate carve
             }
 
-            std::snprintf( buf, sizeof( buf ),
-                           "%s and %s claim %zu of %zu symbols IN COMMON (Jaccard %.2f). Their conflicts are an artifact of the "
+            rw::formatTo( buf, sizeof( buf ),
+                           "{} and {} claim {} of {} symbols IN COMMON (Jaccard {:.2f}). Their conflicts are an artifact of the "
                            "carve handing the same symbols to both lanes, not a property of the work — do not serialize on them. "
                            "This happens when the ranked surface is smaller than the requested lane count; give each lane its own "
                            "line via brief, or ask for fewer lanes.",
@@ -850,9 +853,9 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
     // graphlegend.h's kCallCountUnitLegend names for the map header). One ambiguous call site can still
     // emit several 1/k-split edges, so "ambiguous of edges" is not a subset fraction in one unit — say two
     // counts, never a ratio that implies they share a denominator.
-    std::snprintf( buf, sizeof( buf ),
-                   "%zu outgoing calls are name-ambiguous — a call-SITE count, not the %zu distinct call edges this "
-                   "graph carries — and %zu reference names resolve to no in-corpus definition. "
+    rw::formatTo( buf, sizeof( buf ),
+                   "{} outgoing calls are name-ambiguous — a call-SITE count, not the {} distinct call edges this "
+                   "graph carries — and {} reference names resolve to no in-corpus definition. "
                    "blast_radius and contract_touch inherit that; dynamic dispatch is not an edge at all (a fn-pointer/"
                    "callback call is an edge only when ONE function is bound to that variable in scope, and a "
                    "macro-generated call only when its function-like #define is indexed), "
@@ -863,21 +866,21 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
     addWarning( result.warnings, "name-based-callgraph", "info", buf );
 
     // §KEY — addressability, stated as a count of the rows it affects rather than as prose.
-    std::snprintf( buf, sizeof( buf ),
-                   "%llu of %llu claimed symbols have no scope captured, so id is null and cannot be pasted into "
+    rw::formatTo( buf, sizeof( buf ),
+                   "{} of {} claimed symbols have no scope captured, so id is null and cannot be pasted into "
                    "expand/callers/impact. Claims are keyed on path+scope+name and are unaffected; only addressability is.",
                    ( unsigned long long )t.bareNameClaims, ( unsigned long long )t.claimTotal );
     addCountedWarning( result.warnings, "bare-name-claims", t.bareNameClaims ? "warn" : "info", t.bareNameClaims, buf );
 
-    std::snprintf( buf, sizeof( buf ),
-                   "%llu claims fold two or more same-file overloads under one key. A folded claim OVER-reports overlap; "
+    rw::formatTo( buf, sizeof( buf ),
+                   "{} claims fold two or more same-file overloads under one key. A folded claim OVER-reports overlap; "
                    "it never hides one — the error runs toward a serialization you did not need, never toward a missed "
                    "collision. Folded rows carry overloads>1 and id_addressable=false.",
                    ( unsigned long long )t.foldedClaims );
     addCountedWarning( result.warnings, "folded-claims", t.foldedClaims ? "warn" : "info", t.foldedClaims, buf );
 
-    std::snprintf( buf, sizeof( buf ),
-                   "%llu claimed symbols share their canonicalId with at least one other symbol in this tree, so their id "
+    rw::formatTo( buf, sizeof( buf ),
+                   "{} claimed symbols share their canonicalId with at least one other symbol in this tree, so their id "
                    "is reported but id_addressable is false. This is the reason the claim key is path+scope+name and not id.",
                    ( unsigned long long )t.idCollisions );
     addCountedWarning( result.warnings, "id-collisions", t.idCollisions ? "warn" : "info", t.idCollisions, buf );
@@ -905,8 +908,8 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
         addWarning( result.warnings, "overlap-is-ceiling", "info",
                     "carve.overlap_* are measured over each lane's claims PLUS its blast radius — the surface a lane may read, "
                     "which is a superset of what it will read. They are an upper bound on the overlap actually paid for." );
-        std::snprintf( buf, sizeof( buf ),
-                       "Lanes were carved from the ranked surface (%u symbols over %u call-graph modules, split=%u). The carve "
+        rw::formatTo( buf, sizeof( buf ),
+                       "Lanes were carved from the ranked surface ({} symbols over {} call-graph modules, split={}). The carve "
                        "balances the RANKING; it does not read the task's clauses, so a task with enumerable parts can have a part "
                        "land in no lane at all. If your task has enumerable parts, use brief with one line per part.",
                        result.carve.surface, result.carve.modules, result.carve.split );
@@ -922,7 +925,7 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
 
     if( result.lanes.size() < in.requested )
     {
-        std::snprintf( buf, sizeof( buf ), "%zu lanes were requested but only %zu could be carved — there are fewer separable "
+        rw::formatTo( buf, sizeof( buf ), "{} lanes were requested but only {} could be carved — there are fewer separable "
                                            "modules than lanes on this task's ranked surface. Emitting the lanes that exist "
                                            "rather than inventing empty ones.",
                        std::size_t( in.requested ), result.lanes.size() );
@@ -933,7 +936,7 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
     {
         if( lane.moduleSpan < 2 && !lane.claims.empty() )
         {
-            std::snprintf( buf, sizeof( buf ), "%s spans %u call-graph module(s): its surface sits in one place, so what it got "
+            rw::formatTo( buf, sizeof( buf ), "{} spans {} call-graph module(s): its surface sits in one place, so what it got "
                                                "is a rank cut, not a semantic split.", lane.id.c_str(), lane.moduleSpan );
             addWarning( result.warnings, "single-module-lane", "warn", buf );
         }
@@ -943,8 +946,8 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
 
     if( t.nonSourceClaims > 0 )
     {
-        std::snprintf( buf, sizeof( buf ),
-                       "%llu claims are on test/fixture paths. Fixture, bench and presentation files are ranked like source, so "
+        rw::formatTo( buf, sizeof( buf ),
+                       "{} claims are on test/fixture paths. Fixture, bench and presentation files are ranked like source, so "
                        "they inflate claims.files and same_file_risk on lanes no agent will actually edit. Pass ignore-tests to "
                        "cut the test half of it.",
                        ( unsigned long long )t.nonSourceClaims );
@@ -964,7 +967,7 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
         {
             continue;
         }
-        std::snprintf( buf, sizeof( buf ), "%s is claimed by %u lanes and is hotspot rank %u (complexity x churn). Same-file risk "
+        rw::formatTo( buf, sizeof( buf ), "{} is claimed by {} lanes and is hotspot rank {} (complexity x churn). Same-file risk "
                                            "on one of the repo's highest-churn files is the most likely place this plan goes wrong.",
                        path.c_str(), laneCount, rankOfFile[ path ] );
         addCountedWarning( result.warnings, "shared-hotspot", "warn", laneCount, buf );
@@ -1189,206 +1192,206 @@ inline void writeJsonStringOrNull( std::FILE* out, const std::string& value )
 {
     if( value.empty() )
     {
-        std::fprintf( out, "null" );
+        rw::emitRaw( out, "null" );
     }
     else
     {
-        std::fprintf( out, "\"%s\"", jsonStr( value ).c_str() );
+        rw::emitTo( out, "\"{}\"", jsonStr( value ).c_str() );
     }
 }
 
 inline void writePathArray( std::FILE* out, const std::vector<std::string>& paths )
 {
-    std::fprintf( out, "[" );
+    rw::emitRaw( out, "[" );
     for( std::size_t i = 0; i < paths.size(); ++i )
     {
-        std::fprintf( out, "%s\"%s\"", i == 0 ? "" : ",", jsonStr( paths[i] ).c_str() );
+        rw::emitTo( out, "{}\"{}\"", i == 0 ? "" : ",", jsonStr( paths[i] ).c_str() );
     }
-    std::fprintf( out, "]" );
+    rw::emitRaw( out, "]" );
 }
 
 inline void writeClaimRow( std::FILE* out, const Claim& c )
 {
-    std::fprintf( out, "{\"p\":\"%s\",\"n\":\"%s\",\"scope\":\"%s\",\"key\":\"%016llx\",\"id\":",
+    rw::emitTo( out, "{{\"p\":\"{}\",\"n\":\"{}\",\"scope\":\"{}\",\"key\":\"{:016x}\",\"id\":",
                   jsonStr( c.path ).c_str(), jsonStr( c.name ).c_str(), jsonStr( c.scope ).c_str(),
                   ( unsigned long long )c.key );
     writeJsonStringOrNull( out, c.id );
-    std::fprintf( out, ",\"id_addressable\":%s,\"id_collides_with\":%u,\"l\":%u,\"ord\":%u,\"overloads\":%u,"
-                       "\"amb\":%u,\"cx\":%u,\"ccx\":%u,\"churn\":%u,\"tested\":%u}",
+    rw::emitTo( out, ",\"id_addressable\":{},\"id_collides_with\":{},\"l\":{},\"ord\":{},\"overloads\":{},"
+                       "\"amb\":{},\"cx\":{},\"ccx\":{},\"churn\":{},\"tested\":{}}}",
                   c.idAddressable ? "true" : "false", c.idCollidesWith, c.line, c.ord, c.overloads,
                   c.amb, c.cx, c.ccx, c.churn, unsigned( c.tested ) );
 }
 
 inline void writeLaneFileRow( std::FILE* out, const LaneFileRow& f )
 {
-    std::fprintf( out, "{\"p\":\"%s\",\"symbols\":%u,\"churn\":%u,\"ccx\":%u,\"hotspot_rank\":",
+    rw::emitTo( out, "{{\"p\":\"{}\",\"symbols\":{},\"churn\":{},\"ccx\":{},\"hotspot_rank\":",
                   jsonStr( f.path ).c_str(), f.symbolCount, f.churn, f.ccxSum );
     if( f.hotspotRank == 0 )
     {
-        std::fprintf( out, "null}" );
+        rw::emitRaw( out, "null}" );
     }
     else
     {
-        std::fprintf( out, "%u}", f.hotspotRank );
+        rw::emitTo( out, "{}}}", f.hotspotRank );
     }
 }
 
 inline void writeExecution( std::FILE* out, const ExecutionRecommendation& execution )
 {
     const ExecutionSignals& s = execution.signals;
-    std::fprintf( out, "{\"policy\":\"%s\",\"model\":\"%s\",\"reasoning\":\"%s\",\"rule\":\"%s\",\"basis\":\"%s\","
-                       "\"signals\":{\"claims\":%zu,\"files\":%zu,\"module_span\":%u,\"max_ccx\":%zu,\"sum_ccx\":%zu,"
-                       "\"ambiguous_calls\":%zu,\"blast_reaches\":%zu,\"contract_touches\":%zu,\"conflicts\":%zu,"
-                       "\"untested\":%zu,\"tests_total\":%zu,\"blast_capped\":%s,\"tests_capped\":%s},\"caveats\":",
+    rw::emitTo( out, "{{\"policy\":\"{}\",\"model\":\"{}\",\"reasoning\":\"{}\",\"rule\":\"{}\",\"basis\":\"{}\","
+                       "\"signals\":{{\"claims\":{},\"files\":{},\"module_span\":{},\"max_ccx\":{},\"sum_ccx\":{},"
+                       "\"ambiguous_calls\":{},\"blast_reaches\":{},\"contract_touches\":{},\"conflicts\":{},"
+                       "\"untested\":{},\"tests_total\":{},\"blast_capped\":{},\"tests_capped\":{}}},\"caveats\":",
                   execution.policy, execution.model, execution.reasoning, execution.rule, execution.basis,
                   s.claims, s.files, s.moduleSpan, s.maxCcx, s.sumCcx, s.ambiguousCalls, s.blastReaches,
                   s.contractTouches, s.conflicts, s.untested, s.testsTotal,
                   s.blastCapped ? "true" : "false", s.testsCapped ? "true" : "false" );
     writePathArray( out, execution.caveats );
-    std::fprintf( out, "}" );
+    rw::emitRaw( out, "}" );
 }
 
 inline void writeLane( std::FILE* out, const Lane& lane )
 {
-    std::fprintf( out, "{\"id\":\"%s\",\"task\":\"%s\",\"claims\":{\"symbols\":[",
+    rw::emitTo( out, "{{\"id\":\"{}\",\"task\":\"{}\",\"claims\":{{\"symbols\":[",
                   jsonStr( lane.id ).c_str(), jsonStr( lane.task ).c_str() );
     for( std::size_t i = 0; i < lane.claims.size(); ++i )
     {
         if( i )
         {
-            std::fprintf( out, "," );
+            rw::emitRaw( out, "," );
         }
         writeClaimRow( out, lane.claims[i] );
     }
-    std::fprintf( out, "],\"files\":[" );
+    rw::emitRaw( out, "],\"files\":[" );
     for( std::size_t i = 0; i < lane.files.size(); ++i )
     {
         if( i )
         {
-            std::fprintf( out, "," );
+            rw::emitRaw( out, "," );
         }
         writeLaneFileRow( out, lane.files[i] );
     }
-    std::fprintf( out, "]},\"blast_radius\":{\"reaches\":%zu,\"files_total\":%zu,\"capped\":%s,\"files\":",
+    rw::emitTo( out, "]}},\"blast_radius\":{{\"reaches\":{},\"files_total\":{},\"capped\":{},\"files\":",
                   lane.blastReaches, lane.blastFileTotal, lane.blastCapped ? "true" : "false" );
     writePathArray( out, lane.blastFiles );
-    std::fprintf( out, "},\"tests_to_run\":" );
+    rw::emitRaw( out, "},\"tests_to_run\":" );
     writePathArray( out, lane.tests );
-    std::fprintf( out, ",\"tests_total\":%zu,\"tests_capped\":%s,\"tests_granularity\":\"claimed-symbols\","
-                       "\"untested\":%zu,\"module_span\":%u,\"notes\":",
+    rw::emitTo( out, ",\"tests_total\":{},\"tests_capped\":{},\"tests_granularity\":\"claimed-symbols\","
+                       "\"untested\":{},\"module_span\":{},\"notes\":",
                   lane.testTotal, lane.testsCapped ? "true" : "false", lane.untested, lane.moduleSpan );
     writePathArray( out, lane.notes );
-    std::fprintf( out, ",\"execution\":" );
+    rw::emitRaw( out, ",\"execution\":" );
     writeExecution( out, lane.execution );
-    std::fprintf( out, "}" );
+    rw::emitRaw( out, "}" );
 }
 
 inline void writePair( std::FILE* out, const PairRow& row )
 {
-    std::fprintf( out, "{\"a\":\"%s\",\"b\":\"%s\",\"conflicts\":[", jsonStr( row.a ).c_str(), jsonStr( row.b ).c_str() );
+    rw::emitTo( out, "{{\"a\":\"{}\",\"b\":\"{}\",\"conflicts\":[", jsonStr( row.a ).c_str(), jsonStr( row.b ).c_str() );
     for( std::size_t i = 0; i < row.conflicts.size(); ++i )
     {
         const Claim& c = row.conflicts[i];
-        std::fprintf( out, "%s{\"key\":\"%016llx\",\"p\":\"%s\",\"n\":\"%s\",\"overloads\":%u,\"id\":",
+        rw::emitTo( out, "{}{{\"key\":\"{:016x}\",\"p\":\"{}\",\"n\":\"{}\",\"overloads\":{},\"id\":",
                       i == 0 ? "" : ",", ( unsigned long long )c.key, jsonStr( c.path ).c_str(), jsonStr( c.name ).c_str(), c.overloads );
         writeJsonStringOrNull( out, c.id );
-        std::fprintf( out, "}" );
+        rw::emitRaw( out, "}" );
     }
-    std::fprintf( out, "],\"conflict_count\":%zu,\"same_file_risk\":[", row.conflicts.size() );
+    rw::emitTo( out, "],\"conflict_count\":{},\"same_file_risk\":[", row.conflicts.size() );
     for( std::size_t i = 0; i < row.sameFileRisk.size(); ++i )
     {
         const RiskFileRow& f = row.sameFileRisk[i];
-        std::fprintf( out, "%s{\"p\":\"%s\",\"a_symbols\":%u,\"b_symbols\":%u,\"pairs\":%zu}",
+        rw::emitTo( out, "{}{{\"p\":\"{}\",\"a_symbols\":{},\"b_symbols\":{},\"pairs\":{}}}",
                       i == 0 ? "" : ",", jsonStr( f.path ).c_str(), f.aSymbols, f.bSymbols, f.pairCount );
     }
-    std::fprintf( out, "],\"risk_count\":%zu,\"contract_touch\":[", row.riskPairCount );
+    rw::emitTo( out, "],\"risk_count\":{},\"contract_touch\":[", row.riskPairCount );
     for( std::size_t i = 0; i < row.contractTouch.size(); ++i )
     {
         const TouchRow& t = row.contractTouch[i];
-        std::fprintf( out, "%s{\"p\":\"%s\",\"n\":\"%s\",\"key\":\"%016llx\",\"from\":\"%s\",\"to\":\"%s\"}",
+        rw::emitTo( out, "{}{{\"p\":\"{}\",\"n\":\"{}\",\"key\":\"{:016x}\",\"from\":\"{}\",\"to\":\"{}\"}}",
                       i == 0 ? "" : ",", jsonStr( t.path ).c_str(), jsonStr( t.name ).c_str(),
                       ( unsigned long long )t.key, jsonStr( t.from ).c_str(), jsonStr( t.to ).c_str() );
     }
-    std::fprintf( out, "],\"touch_count\":%zu}", row.contractTouch.size() );
+    rw::emitTo( out, "],\"touch_count\":{}}}", row.contractTouch.size() );
 }
 
 inline void writeCarve( std::FILE* out, const PlanLanesResult& r )
 {
-    if( !r.haveCarve ) { std::fprintf( out, "null" ); return; }
-    std::fprintf( out, "{\"surface\":%u,\"modules\":%u,\"split\":%u,\"overlap_mean\":%.3f,\"overlap_max\":%.3f,"
-                       "\"shared_symbols\":%u,\"union_symbols\":%u,\"core_overlap\":%.3f,"
-                       "\"overlap_surface\":\"claims-plus-blast-radius\",\"overlap_is_ceiling\":true}",
+    if( !r.haveCarve ) { rw::emitRaw( out, "null" ); return; }
+    rw::emitTo( out, "{{\"surface\":{},\"modules\":{},\"split\":{},\"overlap_mean\":{:.3f},\"overlap_max\":{:.3f},"
+                       "\"shared_symbols\":{},\"union_symbols\":{},\"core_overlap\":{:.3f},"
+                       "\"overlap_surface\":\"claims-plus-blast-radius\",\"overlap_is_ceiling\":true}}",
                   r.carve.surface, r.carve.modules, r.carve.split, r.carve.overlapMean, r.carve.overlapMax,
                   r.carve.sharedSymbols, r.carve.unionSymbols, r.carve.coreOverlap );
 }
 
 inline void writeCore( std::FILE* out, const PlanLanesResult& r )
 {
-    std::fprintf( out, "{\"files\":" );
+    rw::emitRaw( out, "{\"files\":" );
     writePathArray( out, r.coreFiles );
-    std::fprintf( out, ",\"symbols\":[" );
+    rw::emitRaw( out, ",\"symbols\":[" );
     for( std::size_t i = 0; i < r.coreSymbols.size(); ++i )
     {
         const CoreSymbol& cs = r.coreSymbols[i];
-        std::fprintf( out, "%s{\"p\":\"%s\",\"n\":\"%s\",\"scope\":\"%s\",\"l\":%u,\"id\":",
+        rw::emitTo( out, "{}{{\"p\":\"{}\",\"n\":\"{}\",\"scope\":\"{}\",\"l\":{},\"id\":",
                       i == 0 ? "" : ",", jsonStr( cs.path ).c_str(), jsonStr( cs.name ).c_str(),
                       jsonStr( cs.scope ).c_str(), cs.line );
         writeJsonStringOrNull( out, cs.id );
-        std::fprintf( out, "}" );
+        rw::emitRaw( out, "}" );
     }
-    std::fprintf( out, "]}" );
+    rw::emitRaw( out, "]}" );
 }
 
 inline void writePlanLanes( std::FILE* out, const PlanLanesResult& r )
 {
-    std::fprintf( out, "{\"v\":%d,\"verb\":\"plan-lanes\",\"at\":", kSchemaVersion );
+    rw::emitTo( out, "{{\"v\":{},\"verb\":\"plan-lanes\",\"at\":", kSchemaVersion );
     writeJsonStringOrNull( out, r.at );                       // never a fake sha: null on a non-git root
-    std::fprintf( out, ",\"root\":\"%s\",\"task\":", jsonStr( r.root ).c_str() );
+    rw::emitTo( out, ",\"root\":\"{}\",\"task\":", jsonStr( r.root ).c_str() );
     writeJsonStringOrNull( out, r.task );                     // null in brief mode
-    std::fprintf( out, ",\"source\":\"%s\",\"requested\":%u,\"lane_count\":%zu,"
+    rw::emitTo( out, ",\"source\":\"{}\",\"requested\":{},\"lane_count\":{},"
                        "\"claim_key\":\"path+scope+name\",\"on_conflict\":\"producing-lane-rebases\","
-                       "\"corpus\":{\"files\":%zu,\"symbols\":%zu,\"edges\":%zu,\"ambiguous\":%zu,\"unresolved\":%zu},\"carve\":",
+                       "\"corpus\":{{\"files\":{},\"symbols\":{},\"edges\":{},\"ambiguous\":{},\"unresolved\":{}}},\"carve\":",
                   jsonStr( r.source ).c_str(), r.requested, r.lanes.size(),
                   r.corpus.files, r.corpus.symbols, r.corpus.edges, r.corpus.ambiguous, r.corpus.unresolved );
     writeCarve( out, r );
-    std::fprintf( out, ",\"core\":" );
+    rw::emitRaw( out, ",\"core\":" );
     writeCore( out, r );
 
-    std::fprintf( out, ",\"lanes\":[" );
+    rw::emitRaw( out, ",\"lanes\":[" );
     for( std::size_t i = 0; i < r.lanes.size(); ++i )
     {
         if( i )
         {
-            std::fprintf( out, "," );
+            rw::emitRaw( out, "," );
         }
         writeLane( out, r.lanes[i] );
     }
-    std::fprintf( out, "],\"pairs\":[" );
+    rw::emitRaw( out, "],\"pairs\":[" );
     for( std::size_t i = 0; i < r.pairs.size(); ++i )
     {
         if( i )
         {
-            std::fprintf( out, "," );
+            rw::emitRaw( out, "," );
         }
         writePair( out, r.pairs[i] );
     }
-    std::fprintf( out, "],\"landing_order\":" );
+    rw::emitRaw( out, "],\"landing_order\":" );
     writePathArray( out, r.landingOrder );
-    std::fprintf( out, ",\"landing_rule\":\"fewest-conflicts-first greedy; ties by lane id ascending (lexicographic on the lane id string)\","
+    rw::emitRaw( out, ",\"landing_rule\":\"fewest-conflicts-first greedy; ties by lane id ascending (lexicographic on the lane id string)\","
                        "\"contract_touch_rule\":\"a claim of lane `from` lies in the transitive-caller blast radius of lane `to`'s claims, so "
                        "`from` may have to adapt to a contract change `to` makes; it is NOT a merge conflict and is never counted into "
                        "conflict_count\",\"warnings\":[" );
     for( std::size_t i = 0; i < r.warnings.size(); ++i )
     {
         const Warning& w = r.warnings[i];
-        std::fprintf( out, "%s{\"code\":\"%s\",\"sev\":\"%s\",", i == 0 ? "" : ",", w.code, w.sev );
+        rw::emitTo( out, "{}{{\"code\":\"{}\",\"sev\":\"{}\",", i == 0 ? "" : ",", w.code, w.sev );
         if( w.hasCount )
         {
-            std::fprintf( out, "\"count\":%llu,", (unsigned long long)w.count );
+            rw::emitTo( out, "\"count\":{},", (unsigned long long)w.count );
         }
-        std::fprintf( out, "\"text\":\"%s\"}", jsonStr( w.text ).c_str() );
+        rw::emitTo( out, "\"text\":\"{}\"}}", jsonStr( w.text ).c_str() );
     }
-    std::fprintf( out, "]}\n" );
+    rw::emitRaw( out, "]}\n" );
 }
 
 }   // namespace lanes

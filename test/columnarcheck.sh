@@ -16,7 +16,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -102,7 +102,7 @@ if command -v xmllint >/dev/null 2>&1; then
     for V in "$VERB_CALLERS" "$VERB_IMPACT" "$VERB_USES"; do
         "$BIN" src $V --format=columnar --no-cache 2>/dev/null | xmllint --noout - 2>/dev/null || { echo "    malformed: $V"; lint=0; }
     done
-    [ "$lint" = 1 ] && ok "columnar output well-formed XML for all flat verbs" || no "columnar output malformed for some verb"
+    if [ "$lint" = 1 ]; then ok "columnar output well-formed XML for all flat verbs"; else no "columnar output malformed for some verb"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

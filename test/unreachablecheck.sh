@@ -21,7 +21,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/unreachablefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ]    || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -44,18 +44,18 @@ xmllint --format "$TMP/raw1" >"$TMP/out1" 2>/dev/null || cp "$TMP/raw1" "$TMP/ou
 OUT="$TMP/out1"
 
 # 2. the rule fires
-grep -q 'rule="unreachable-code"' "$OUT" && ok "rule fires (rule=\"unreachable-code\")" || no "rule NOT found in output"
+if grep -q 'rule="unreachable-code"' "$OUT"; then ok "rule fires (rule=\"unreachable-code\")"; else no "rule NOT found in output"; fi
 
 # exactly 5 MUST-flag findings (C++: return/throw/break; Python: return/raise)
 CNT="$( grep -o 'rule="unreachable-code"' "$OUT" | wc -l | tr -d ' ' )"
-[ "$CNT" = "5" ] && ok "fires on exactly 5 dead statements (got $CNT)" || no "expected 5 findings, got $CNT"
+if [ "$CNT" = "5" ]; then ok "fires on exactly 5 dead statements (got $CNT)"; else no "expected 5 findings, got $CNT"; fi
 
 # 3. enclosing symbol + line correct for each MUST-flag case
-grep -q 'p="dead.cpp:8" in="afterReturn"'  "$OUT" && ok "flags stmt after return (afterReturn, dead.cpp:8)"      || no "afterReturn dead stmt NOT flagged at line 8"
-grep -q 'p="dead.cpp:25" in="afterThrow"'  "$OUT" && ok "flags stmt after throw (afterThrow, dead.cpp:25)"        || no "afterThrow dead stmt NOT flagged at line 25"
-grep -q 'p="dead.cpp:34" in="afterBreak"'  "$OUT" && ok "flags stmt after break (afterBreak, dead.cpp:34)"        || no "afterBreak dead stmt NOT flagged at line 34"
-grep -q 'p="dead.py:7" in="after_return"'  "$OUT" && ok "flags stmt after return (Python after_return, dead.py:7)" || no "Python after_return dead stmt NOT flagged at line 7"
-grep -q 'p="dead.py:13" in="after_raise"'  "$OUT" && ok "flags stmt after raise (Python after_raise, dead.py:13)"  || no "Python after_raise dead stmt NOT flagged at line 13"
+if grep -q 'p="dead.cpp:8" in="afterReturn"'  "$OUT"; then ok "flags stmt after return (afterReturn, dead.cpp:8)"; else no "afterReturn dead stmt NOT flagged at line 8"; fi
+if grep -q 'p="dead.cpp:25" in="afterThrow"'  "$OUT"; then ok "flags stmt after throw (afterThrow, dead.cpp:25)"; else no "afterThrow dead stmt NOT flagged at line 25"; fi
+if grep -q 'p="dead.cpp:34" in="afterBreak"'  "$OUT"; then ok "flags stmt after break (afterBreak, dead.cpp:34)"; else no "afterBreak dead stmt NOT flagged at line 34"; fi
+if grep -q 'p="dead.py:7" in="after_return"'  "$OUT"; then ok "flags stmt after return (Python after_return, dead.py:7)"; else no "Python after_return dead stmt NOT flagged at line 7"; fi
+if grep -q 'p="dead.py:13" in="after_raise"'  "$OUT"; then ok "flags stmt after raise (Python after_raise, dead.py:13)"; else no "Python after_raise dead stmt NOT flagged at line 13"; fi
 
 # 4. FALSE-POSITIVE GUARDS — these must NEVER appear as unreachable-code findings.
 # grab only the unreachable-code finding lines, then assert the trap symbols are absent.

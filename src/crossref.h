@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // crossref.h — the CROSS-BRANCH CONTENT INDEX: --whereis=SYM and --stray-content.
 // Evidence: a completed, soak-verified canyon fix sat UNMERGED on 1 of
@@ -485,7 +487,7 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
         }
         for( const std::string& s : shas )
         {
-            std::fprintf( lf, "%s\n", s.c_str() );
+            rw::emitTo( lf, "{}\n", s.c_str() );
         }
         std::fclose( lf );
     }
@@ -1864,21 +1866,21 @@ inline void writeStrayEval( std::FILE* out, const EvalReport& rep )
 
     const std::size_t n   = rep.cases.size();
     const double      acc = n ? ( 100.0 * double( rep.correct ) / double( n ) ) : 0.0;
-    std::fprintf( out, "<!-- ripwire stray-content eval: labelled verdict accuracy. Each row is one branch whose "
+    rw::emitRaw( out, "<!-- ripwire stray-content eval: labelled verdict accuracy. Each row is one branch whose "
                        "true state was established by hand; want= is the label, got= is what the classifier said. "
                        "A branch absent from the report scores as merged ONLY when it is a real ref this repo has "
                        "(merged refs are omitted by design); a label naming a ref that does not exist is refused, "
                        "not scored (see badRefs on refusal). unknown= on the root counts cases whose verdict "
                        "is unknown (no merge-base / unrelated history); its own bucket, never folded into merged. "
                        "Use this to MEASURE a threshold change instead of eyeballing it. -->" );
-    std::fprintf( out, "<stray-eval cases=\"%zu\" correct=\"%u\" unknown=\"%u\" accuracy=\"%.1f\">", n, rep.correct, rep.unknownCount, acc );
+    rw::emitTo( out, "<stray-eval cases=\"{}\" correct=\"{}\" unknown=\"{}\" accuracy=\"{:.1f}\">", n, rep.correct, rep.unknownCount, acc );
     for( const EvalCase& c : rep.cases )
     {
-        std::fprintf( out, "<case ref=\"%s\" want=\"%s\" got=\"%s\" hit=\"%d\" reported=\"%d\"/>",
+        rw::emitTo( out, "<case ref=\"{}\" want=\"{}\" got=\"{}\" hit=\"{}\" reported=\"{}\"/>",
                       ex( c.ref ).c_str(), verdictTag( c.expected ), verdictTag( c.got ),
                       c.got == c.expected ? 1 : 0, c.found ? 1 : 0 );
     }
-    std::fprintf( out, "</stray-eval>" );
+    rw::emitRaw( out, "</stray-eval>" );
 }
 
 // ── XML emission (G4: minified, xmllint-clean; no `\n` outside CDATA) ────────────────────────────────────
@@ -1887,7 +1889,7 @@ using XmlEscaper = std::function<std::string( std::string_view )>;
 
 inline void writeStrayFile( std::FILE* out, const FileRow& f, const XmlEscaper& ex )
 {
-    std::fprintf( out, "<file p=\"%s\" v=\"%s\" stray=\"%u\" authored=\"%u\" del=\"%u\" redone=\"%u\" sim=\"%.2f\" head-touched=\"%d\"%s/>",
+    rw::emitTo( out, "<file p=\"{}\" v=\"{}\" stray=\"{}\" authored=\"{}\" del=\"{}\" redone=\"{}\" sim=\"{:.2f}\" head-touched=\"{}\"{}/>",
                   ex( f.path ).c_str(), verdictTag( f.verdict ), f.strayLines, f.authored, f.deleted, f.redone,
                   double( f.sim ), f.headTouched ? 1 : 0, f.diffable ? "" : " diffable=\"0\"" );
 }
@@ -1900,7 +1902,7 @@ inline void writeStrayRef( std::FILE* out, const RefRow& r, const XmlEscaper& ex
     const Verdict shownVerdict = r.ok ? r.verdict : Verdict::Unknown;
     VERIFY( r.ok || shownVerdict == Verdict::Unknown );
 
-    std::fprintf( out, "<ref name=\"%s\" tip=\"%.9s\" date=\"%s\" base=\"%.9s\" ok=\"%d\" v=\"%s\" stray=\"%u\" files=\"%u\" superseded=\"%u\">",
+    rw::emitTo( out, "<ref name=\"{}\" tip=\"{:.9}\" date=\"{}\" base=\"{:.9}\" ok=\"{}\" v=\"{}\" stray=\"{}\" files=\"{}\" superseded=\"{}\">",
                   ex( r.ref.name ).c_str(), r.ref.tip.c_str(), ex( r.ref.date ).c_str(), r.base.c_str(),
                   r.ok ? 1 : 0, verdictTag( shownVerdict ), r.strayLines, r.strayFiles, r.supersededLines );
 
@@ -1920,9 +1922,9 @@ inline void writeStrayRef( std::FILE* out, const RefRow& r, const XmlEscaper& ex
     VERIFY( shownCount == std::min( r.files.size(), maxFiles ) );
     if( r.files.size() > maxFiles )
     {
-        std::fprintf( out, "<more files=\"%zu\"/>", r.files.size() - maxFiles );
+        rw::emitTo( out, "<more files=\"{}\"/>", r.files.size() - maxFiles );
     }
-    std::fprintf( out, "</ref>" );
+    rw::emitRaw( out, "</ref>" );
 }
 
 // §P15/§P16: res.refs is already deterministic (strayLines desc, then ref.name asc — computeStrayContent's
@@ -1958,7 +1960,7 @@ inline void writeStrayContentPage( std::FILE* out, const StrayResult& res, std::
 
     // G4: an XML comment may not contain a double hyphen, so this text (and writeWhereis's) names flags and
     // git subcommands WITHOUT their leading dashes. Keep it that way when editing.
-    std::fprintf( out, "<!-- ripwire stray-content: per ref, the lines its own divergent work AUTHORED (vs its merge-base "
+    rw::emitRaw( out, "<!-- ripwire stray-content: per ref, the lines its own divergent work AUTHORED (vs its merge-base "
                        "with HEAD) that the live line does NOT have. v=\"superseded\" means the live line removed the same "
                        "base code this ref removed (redone/del) — it re-implemented the work, the case `git cherry` cannot "
                        "see; v=\"unmerged\" means the work is genuinely absent; merged refs are omitted. Read-only: git "
@@ -1998,7 +2000,7 @@ inline void writeStrayContentPage( std::FILE* out, const StrayResult& res, std::
     // H14/M6: refs="2" under a ref-name filter reads as "this repo has two branches" unless the filter is
     // named. --doc-drift already echoed its own filter=; this is the same attribute on a sibling that did not.
     const std::string filterAttr = res.filter.empty() ? std::string() : ( " filter=\"" + ex( res.filter ) + "\"" );
-    std::fprintf( out, "<stray-content head=\"%.9s\" head_ref=\"%s\" refs=\"%zu\" blobs=\"%zu\" unmerged=\"%u\" superseded=\"%u\" merged=\"%u\" unknown=\"%u\"%s%s%s>",
+    rw::emitTo( out, "<stray-content head=\"{:.9}\" head_ref=\"{}\" refs=\"{}\" blobs=\"{}\" unmerged=\"{}\" superseded=\"{}\" merged=\"{}\" unknown=\"{}\"{}{}{}>",
                   res.headSha.c_str(), ex( res.headRef ).c_str(), res.refsScanned, res.distinctBlobs, unmerged, superseded, res.mergedRefs, unknown,
                   filterAttr.c_str(),
                   pageDisclosure( srab, sizeof( srab ), refPage.end - refPage.begin, res.refs.size(), refPage.end, pageLimit, pageOffset, false ),
@@ -2007,7 +2009,7 @@ inline void writeStrayContentPage( std::FILE* out, const StrayResult& res, std::
     {
         writeStrayRef( out, res.refs[refIndex], ex, maxFiles );
     }
-    std::fprintf( out, "</stray-content>" );
+    rw::emitRaw( out, "</stray-content>" );
 }
 
 inline void writeStrayContent( std::FILE* out, const StrayResult& res, std::size_t maxFiles )
@@ -2098,7 +2100,7 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
                              : ( maxHits >= res.hits.size() ? int( res.hits.size() ) : int( maxHits ) );
     const PageWindow hitPage = pageWindow( res.hits.size(), rowCap, pageOffset );
 
-    std::fprintf( out, "<!-- ripwire whereis: every LOCAL ref whose TREE contains this symbol, HEAD first, and within a ref "
+    rw::emitRaw( out, "<!-- ripwire whereis: every LOCAL ref whose TREE contains this symbol, HEAD first, and within a ref "
                        "SOURCE files before test files before docs, then definitions before references, then path and line. "
                        "The doc demotion is ORDER ONLY: a doc line that quotes a signature still reads as a definition to "
                        "the heuristic below and still says kind=\"def\", it is simply printed after the code. kind= is answered "
@@ -2170,7 +2172,7 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
     // H14/M6: refs_scanned="80" under a ref-name filter is a total for the FILTER, not for the repo (the
     // audit measured 80 filtered vs 189 unfiltered) — so the filter is named beside the number it bounds.
     const std::string whFilterAttr = res.filter.empty() ? std::string() : ( " filter=\"" + ex( res.filter ) + "\"" );
-    std::fprintf( out, "<whereis sym=\"%s\" on-head=\"%d\" refs_scanned=\"%zu\" blobs=\"%zu\" hits=\"%zu\" head_labels=\"%s\"%s%s at=\"%.9s\"%s>",
+    rw::emitTo( out, "<whereis sym=\"{}\" on-head=\"{}\" refs_scanned=\"{}\" blobs=\"{}\" hits=\"{}\" head_labels=\"{}\"{}{} at=\"{:.9}\"{}>",
                   ex( res.sym ).c_str(), res.onHead ? 1 : 0, res.refsScanned, res.distinctBlobs, res.hits.size(),
                   res.headLabelsFromIndex ? "index" : "lexical", whFilterAttr.c_str(),
                   pageDisclosure( pab, sizeof( pab ), hitPage.end - hitPage.begin, res.hits.size(), hitPage.end,
@@ -2183,19 +2185,19 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
     // file-qualified selector. It never appears beside a nonzero hit list, so it cannot dilute a real answer.
     if( res.hits.empty() && whereisSpecIsFileQualified( res.sym ) )
     {
-        std::fprintf( out, "<selector-note r=\"qualified-selector\" spec=\"%s\" retry=\"%s\"/>",
+        rw::emitTo( out, "<selector-note r=\"qualified-selector\" spec=\"{}\" retry=\"{}\"/>",
                       ex( res.sym ).c_str(), ex( whereisBareNameOf( res.sym ) ).c_str() );
     }
     // H7: the same element, two more reasons — the line seed that was RESOLVED before the scan (so sym= is a
     // name and not the raw @spec), and the near-miss beside a zero the index can explain.
     if( !res.seedSpec.empty() )
     {
-        std::fprintf( out, "<selector-note r=\"line-seed\" spec=\"%s\" retry=\"%s\"/>",
+        rw::emitTo( out, "<selector-note r=\"line-seed\" spec=\"{}\" retry=\"{}\"/>",
                       ex( res.seedSpec ).c_str(), ex( res.sym ).c_str() );
     }
     if( res.hits.empty() && !res.nearMiss.empty() )
     {
-        std::fprintf( out, "<selector-note r=\"near-miss\" spec=\"%s\" retry=\"%s\"/>",
+        rw::emitTo( out, "<selector-note r=\"near-miss\" spec=\"{}\" retry=\"{}\"/>",
                       ex( res.sym ).c_str(), ex( res.nearMiss ).c_str() );
     }
 
@@ -2228,7 +2230,7 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
     {
         const WhereHit& h = res.hits[ hitIndex ];
         ++shownCount;
-        std::fprintf( out, "<hit ref=\"%s\" tip=\"%.9s\" date=\"%s\" p=\"%s\" l=\"%u\" kind=\"%s\" t=\"%s\"/>",
+        rw::emitTo( out, "<hit ref=\"{}\" tip=\"{:.9}\" date=\"{}\" p=\"{}\" l=\"{}\" kind=\"{}\" t=\"{}\"/>",
                       ex( h.ref ).c_str(), h.tip.c_str(), ex( h.date ).c_str(), ex( h.path ).c_str(),
                       h.line, h.isDef ? "def" : "ref", ex( h.text ).c_str() );
     }
@@ -2238,9 +2240,9 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
     // (and next_offset= on the root says where to ask for it).
     if( hitPage.end < res.hits.size() )
     {
-        std::fprintf( out, "<more hits=\"%zu\"/>", res.hits.size() - hitPage.end );
+        rw::emitTo( out, "<more hits=\"{}\"/>", res.hits.size() - hitPage.end );
     }
-    std::fprintf( out, "</whereis>" );
+    rw::emitRaw( out, "</whereis>" );
 }
 
 // The un-paginated form — unchanged contract, for callers that want the whole (capped) listing.

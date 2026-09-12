@@ -33,7 +33,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -220,10 +220,10 @@ ERR="$( "$BIN" "$SRC" --partition=4 2>&1 >/dev/null )"; RC=$?
     || { no "bare --partition did not refuse loudly"; printf '  rc=%s err=%s\n' "$RC" "$ERR"; }
 for n in 1 0 17 99; do
     "$BIN" "$SRC" --pack-task="$TASK" --partition=$n >/dev/null 2>&1
-    [ $? -ne 0 ] && ok "--partition=$n refused (out of the documented 2..16 range)" || no "--partition=$n was accepted"
+    if [ $? -ne 0 ]; then ok "--partition=$n refused (out of the documented 2..16 range)"; else no "--partition=$n was accepted"; fi
 done
 "$BIN" "$SRC" --pack-task="$TASK" --partition=abc >/dev/null 2>&1
-[ $? -ne 0 ] && ok "a non-numeric --partition refuses loudly" || no "--partition=abc was accepted"
+if [ $? -ne 0 ]; then ok "a non-numeric --partition refuses loudly"; else no "--partition=abc was accepted"; fi
 
 # --with-graph has no single </ctx> to splice into here — it must SAY so, not drop silently.
 WG="$( "$BIN" "$SRC" --pack-task="$TASK" --partition=2 --with-graph 2>&1 >/dev/null )"
@@ -251,7 +251,7 @@ if command -v xmllint >/dev/null 2>&1; then
     for f in "$TMP/p4" "$TMP/p4big" "$TMP/fx4" "$TMP/fx8"; do
         xmllint --noout "$f" 2>/dev/null || { badxml=$(( badxml + 1 )); echo "     malformed: $f"; }
     done
-    [ "$badxml" -eq 0 ] && ok "every partitioned emission is well-formed XML (G4)" || no "$badxml partitioned emission(s) malformed"
+    if [ "$badxml" -eq 0 ]; then ok "every partitioned emission is well-formed XML (G4)"; else no "$badxml partitioned emission(s) malformed"; fi
 else
     ok "xmllint unavailable — XML well-formedness skipped"
 fi
@@ -262,7 +262,7 @@ x = open( sys.argv[1] ).read()
 outside = re.sub( r'<!\[CDATA\[.*?\]\]>', '', x, flags = re.S )
 sys.exit( 1 if '\n' in outside else 0 )
 PY
-[ $? -eq 0 ] && ok "no newline outside CDATA (minified)" || no "the partitioned document has newlines outside CDATA"
+if [ $? -eq 0 ]; then ok "no newline outside CDATA (minified)"; else no "the partitioned document has newlines outside CDATA"; fi
 
 # ── 13) the MCP explore verb takes the same `partition` argument (one verb, not a new one) ────────────────
 if command -v python3 >/dev/null 2>&1; then
@@ -306,7 +306,7 @@ if [ -n "$P10_SINGLE" ] && [ "$P10_SINGLE" -gt 0 ] && [ $(( P10_PART * 10 )) -le
 else
     no "P10: partitioned prose legend $P10_PART B exceeds 1.3x the single bundle's ${P10_SINGLE:-?} B"
 fi
-[ "$P10_INNER" = 0 ] && ok "P10: no inner ctx repeats the task-bundle legend" || no "P10: $P10_INNER inner ctx document(s) still open a task-bundle legend"
+if [ "$P10_INNER" = 0 ]; then ok "P10: no inner ctx repeats the task-bundle legend"; else no "P10: $P10_INNER inner ctx document(s) still open a task-bundle legend"; fi
 
 [ $fail -eq 0 ] && echo "partitioncheck: ALL PASS" || echo "partitioncheck: FAILURES"
 exit $fail

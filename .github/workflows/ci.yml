@@ -6,7 +6,7 @@ name: CI
 #                    build-flavour (Release / plain) x front end (macOS AppleClang, Linux gcc, Linux
 #                    clang) — see the job comment for why each axis exists — run in parallel via
 #                    test/pargates.py -j 3 (same authoritative list as regression.sh), each leg's suite
-#                    SHARDED across 2 (macOS) or 4 (Linux) runner jobs (--shard K/N, cost-balanced by
+#                    SHARDED across 4 runner jobs on every leg (--shard K/N, cost-balanced by
 #                    .github/pargates-shard-weights.json) so the workflow's wall clock is one shard, not one suite.
 #                    ubuntu-24.04 here is also the FIRST real proof of L1's portability fix: real x86-64
 #                    Linux hardware, not the local RIPWIRE_PRETEND_LINUX proxy test/portablebuildcheck.sh
@@ -70,7 +70,11 @@ jobs:
   # C arrays, 32-bit handles, VERIFY instead of exceptions), so the config is curated down to bugprone-* /
   # clang-analyzer-* / performance-* / misc-dangling-* and even those only report. Baseline at the commit
   # that added it: 312 unique sites, of which 126 are bugprone-easily-swappable-parameters and 85 are
-  # bugprone-exception-escape. Read it as a to-triage list, not a queue of defects.
+  # bugprone-exception-escape. Re-measured 2026-09-10 at d90acb2c, unique file:line:check: 358 while main.cpp's
+  # TU failed to parse (see the configure step below), 396 once it parsed, 359 after triage — 204 of them
+  # bugprone-easily-swappable-parameters and 30 bugprone-exception-escape. Every remaining class was read and
+  # refused with evidence; the record is in the commit that wrote these numbers. Read it as a to-triage list,
+  # not a queue of defects.
   style:
     name: style (clang-format gate + advisory clang-tidy)
     runs-on: ubuntu-24.04
@@ -116,10 +120,15 @@ jobs:
       - name: clang-format — advisory report over the whole first-party set (non-gating)
         run: CLANG_FORMAT=clang-format-"$CLANG_VERSION" bash scripts/formatcheck.sh --advisory
 
-      # embedded_queries.h and version.h are written at CONFIGURE time, not build time, so a configure
-      # is the whole provisioning story for a compile database — no compile needed to lint.
+      # embedded_queries.h is written at CONFIGURE time (file(WRITE) in CMakeLists.txt). version.h is NOT: it is
+      # the BYPRODUCT of the ripwire_version_stamp custom target, which only runs at build time. src/cli.h
+      # includes it, so a configure-only database handed clang-tidy a fatal "'version.h' file not found" in
+      # every TU and the report was taken over a broken parse. Building that one target runs a cmake -P script,
+      # not the compiler, so there is still no compile needed to lint.
       - name: Configure a compile database for clang-tidy
-        run: cmake -S . -B build-tidy -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+        run: |
+          cmake -S . -B build-tidy -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build build-tidy --target ripwire_version_stamp
 
       - name: clang-tidy — ADVISORY, never gates
         continue-on-error: true
@@ -155,15 +164,22 @@ jobs:
       # Each leg's gate suite is SHARDED across runner jobs (2026-09-07): at 560+ gates the suite is ~150
       # CPU-minutes, ~60 min wall at -j 3 on a 4-vCPU runner, and that one number was the wall clock of the
       # whole workflow. test/pargates.py --shard K/N cuts the list into N cost-balanced, deterministic slices
-      # (weights in .github/pargates-shard-weights.json); every shard job builds its own binary (~3 min) and
-      # runs its slice. Linux legs take 4 shards; macOS legs take 2 because GitHub caps concurrent macOS jobs
-      # far lower than Linux and 4 macOS shards would queue behind each other instead of running.
+      # (weights in .github/pargates-shard-weights.json); every shard job builds its own binary (~3 min), stages the
+      # HEAD comparison binary in its own step (a second build, outside every gate budget -- see that step), and
+      # runs its slice. Every leg takes 4 shards. macOS took 2 until PR #110, on the grounds that GitHub caps
+      # concurrent macOS jobs far lower than Linux; 2 put ~300 gates in each macOS job, doubling the -j 3 contention
+      # every gate there ran under. The cost of 4 is stated rather than hidden: when the eight macOS shard jobs
+      # (plus asan's) exceed the account's concurrent macOS cap, the excess waits for a free runner.
       matrix:
         include:
-          - { os: macos-14,     flavor: Release, cc: appleclang, shard: 1, shards: 2 }
-          - { os: macos-14,     flavor: Release, cc: appleclang, shard: 2, shards: 2 }
-          - { os: macos-14,     flavor: plain,   cc: appleclang, shard: 1, shards: 2, skiplist: .github/pargates-macos-plain-skip.txt }
-          - { os: macos-14,     flavor: plain,   cc: appleclang, shard: 2, shards: 2, skiplist: .github/pargates-macos-plain-skip.txt }
+          - { os: macos-14,     flavor: Release, cc: appleclang, shard: 1, shards: 4 }
+          - { os: macos-14,     flavor: Release, cc: appleclang, shard: 2, shards: 4 }
+          - { os: macos-14,     flavor: Release, cc: appleclang, shard: 3, shards: 4 }
+          - { os: macos-14,     flavor: Release, cc: appleclang, shard: 4, shards: 4 }
+          - { os: macos-14,     flavor: plain,   cc: appleclang, shard: 1, shards: 4, skiplist: .github/pargates-macos-plain-skip.txt }
+          - { os: macos-14,     flavor: plain,   cc: appleclang, shard: 2, shards: 4, skiplist: .github/pargates-macos-plain-skip.txt }
+          - { os: macos-14,     flavor: plain,   cc: appleclang, shard: 3, shards: 4, skiplist: .github/pargates-macos-plain-skip.txt }
+          - { os: macos-14,     flavor: plain,   cc: appleclang, shard: 4, shards: 4, skiplist: .github/pargates-macos-plain-skip.txt }
           - { os: ubuntu-24.04, flavor: Release, cc: gcc,   shard: 1, shards: 4 }
           - { os: ubuntu-24.04, flavor: Release, cc: gcc,   shard: 2, shards: 4 }
           - { os: ubuntu-24.04, flavor: Release, cc: gcc,   shard: 3, shards: 4 }
@@ -250,6 +266,26 @@ jobs:
         run: |
           ./build/ripwire --version
           ./build/ripwire --version | grep -q 'emit=std::print'
+
+      # The HEAD comparison binary, built ONCE per job in its own step: before the suite, outside every gate budget.
+      # Six gates (crossdirinclude, nestedimport, preproccond, py/rust/tsimportprecise; binoverridecheck re-runs them)
+      # compare this tree's binary against a second ripwire built from git HEAD. test/lib/headbinlib.sh used to build
+      # it INSIDE whichever of them ran first: a parallel cmake build inside a wall-clock budget, beside -j 3
+      # neighbours, whose cost is super-linear in that contention. On macos-14 Release shard 2/2 the xmlwellformed
+      # runner-speed probe moved 4.6x across five draws while crossdirincludecheck moved more than 15x, and it was
+      # killed at 900 s and then at 1200 s with the budget floor applied (runs 34479806177, 34495265793; again in
+      # 34514091873). No budget survives the next slow draw, so the build moved here, where it gets the idle runner
+      # the Build step above gets. RIPWIRE_HEADBIN puts headbinlib.sh in STAGED mode for every gate in this job: it
+      # never builds and never waits, and a missing or wrong binary FAILS the gate instead of rebuilding inside its
+      # budget. test/headbinstagecheck.sh gates that this step exists, precedes the suite, verifies and exports.
+      - name: Stage the HEAD comparison binary (once per job, before the suite, outside every gate budget)
+        run: |
+          export RIPWIRE_HEADBIN_BUILD_LOG="$RUNNER_TEMP/headbin-build.log"
+          . test/lib/headbinlib.sh
+          hb="$( ripwire_head_binary "$PWD" "$RUNNER_TEMP" )" || { echo "HEAD binary build failed; last 80 lines of its log:"; tail -n 80 "$RIPWIRE_HEADBIN_BUILD_LOG"; exit 1; }
+          ripwire_headbin_verify "$hb" "$( git rev-parse HEAD )"
+          "$hb" --version
+          echo "RIPWIRE_HEADBIN=$hb" >> "$GITHUB_ENV"
 
       # test/pargates.py runs the SAME authoritative gate list regression.sh holds (manifestcheck.sh
       # keeps that list honest) in parallel, with the timing-sensitive edit-check budget isolated via

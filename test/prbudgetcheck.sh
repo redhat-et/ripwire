@@ -20,7 +20,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -75,7 +75,7 @@ case "$UROOT" in
     *'budget_tokens="8000"'*'budget_default="1"'*) ok "no explicit budget: the default 8000-token ceiling is in force and disclosed (budget_default=\"1\")";;
     *) no "no explicit budget: root lacks budget_tokens=\"8000\" budget_default=\"1\": $UROOT";;
 esac
-grep -q 'est_tokens=' "$TMP/unc" && ok "default-budget run carries the est_tokens=/truncated= ledger" || no "default-budget run carries no est_tokens="
+if grep -q 'est_tokens=' "$TMP/unc"; then ok "default-budget run carries the est_tokens=/truncated= ledger"; else no "default-budget run carries no est_tokens="; fi
 UNC_FILES=$( filecount "$TMP/unc" )
 [ "$UNC_FILES" -gt 0 ] || { echo "  SKIP  prbudgetcheck (no changed indexed files vs $BASE)"; exit 0; }
 
@@ -113,7 +113,7 @@ done
 # ── #4: truncation marker HONEST — a trimmed run names a non-"none" drop; a level-0 run says "none" ─────
 TT=$( attr "$TMP/c_2000" truncated ); TL=$( attr "$TMP/c_2000" trim_level )
 if [ "$TL" = "0" ]; then
-    [ "$TT" = "none" ] && ok "trim_level=0 reports truncated=none (honest)" || no "trim_level=0 but truncated=$TT (dishonest)"
+    if [ "$TT" = "none" ]; then ok "trim_level=0 reports truncated=none (honest)"; else no "trim_level=0 but truncated=$TT (dishonest)"; fi
 else
     { [ -n "$TT" ] && [ "$TT" != "none" ]; } \
         && ok "trimmed run (trim_level=$TL) names what it dropped: truncated=\"$TT\"" \
@@ -138,7 +138,7 @@ if command -v xmllint >/dev/null 2>&1; then
     for F in "$TMP/unc" "$TMP/big" "$TMP/c_2000" "$TMP/c_4000"; do
         xmllint --noout "$F" 2>/dev/null || { echo "    malformed: $F"; lint=1; lint=0; }
     done
-    [ "$lint" = 1 ] && ok "budgeted + unbudgeted --pr-context well-formed XML" || no "a --pr-context payload was malformed XML"
+    if [ "$lint" = 1 ]; then ok "budgeted + unbudgeted --pr-context well-formed XML"; else no "a --pr-context payload was malformed XML"; fi
 else
     printf '  SKIP  xmllint (not installed)\n'
 fi
@@ -184,7 +184,7 @@ else
         && ok "(F4) empty-diff est_tokens is PRICED, not zero (the document still costs its legend)" \
         || no "(F4) empty-diff est_tokens is '$EE' — a document that ships a legend cannot cost nothing"
     if command -v xmllint >/dev/null 2>&1; then
-        xmllint --noout "$TMP/wt_clean" 2>/dev/null && ok "(F4) empty-diff --pr-context well-formed XML" || no "(F4) empty-diff --pr-context malformed XML"
+        if xmllint --noout "$TMP/wt_clean" 2>/dev/null; then ok "(F4) empty-diff --pr-context well-formed XML"; else no "(F4) empty-diff --pr-context malformed XML"; fi
     fi
 fi
 

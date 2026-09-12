@@ -60,7 +60,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -118,7 +118,7 @@ echo
 echo "=== section-granular note carries a lines=\"LO-HI\" anchor matching ground truth ==="
 OUT="$( recall )"
 NOTE="$( printf '%s' "$OUT" | grep -oE '\[sections: [^]]*\]' )"
-[ -n "$NOTE" ] && ok "section-granular note present: $NOTE" || { no "no [sections: …] note — fixture did not trigger section-granular recall"; printf '%s\n' "$OUT" | head -5; }
+if [ -n "$NOTE" ]; then ok "section-granular note present: $NOTE"; else { no "no [sections: …] note — fixture did not trigger section-granular recall"; printf '%s\n' "$OUT" | head -5; }; fi
 
 ANCHOR="$( printf '%s' "$NOTE" | grep -oE 'lines="[0-9]+-[0-9]+(,[0-9]+-[0-9]+)*"' )"
 if [ -n "$ANCHOR" ]; then
@@ -187,7 +187,7 @@ echo
 echo "=== determinism — same input, byte-identical ==="
 recall >"$TMP/d1"
 recall >"$TMP/d2"
-cmp -s "$TMP/d1" "$TMP/d2" && ok "byte-identical across two runs" || no "NON-deterministic across two runs"
+if cmp -s "$TMP/d1" "$TMP/d2"; then ok "byte-identical across two runs"; else no "NON-deterministic across two runs"; fi
 
 echo
 [ "$fail" -eq 0 ] && { echo "recallanchorcheck: ALL PASS"; exit 0; }

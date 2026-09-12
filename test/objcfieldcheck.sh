@@ -36,7 +36,7 @@ PROBE="${RIPWIRE_PROBE:-${BIN}_probe}"
 [ "${PROBE#/}" = "$PROBE" ] && PROBE="$ROOT/$PROBE"
 FIX="$ROOT/test/objcfieldfix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
@@ -50,27 +50,27 @@ case "$callsline" in
   *"calls: freeFn init ops"*) ok "caller's raw refs include init (extraction landed): $callsline" ;;
   *) no "caller's raw refs missing init (got: $callsline)" ;;
 esac
-printf '%s' "$callsline" | grep -q 'freeFn' && ok "control freeFn still present" || no "control freeFn MISSING (regression on the unrelated bare-call pattern)"
+if printf '%s' "$callsline" | grep -q 'freeFn'; then ok "control freeFn still present"; else no "control freeFn MISSING (regression on the unrelated bare-call pattern)"; fi
 
 # ── resolution stays honest: init has no def in this fixture, so --callees is UNCHANGED ─────────
 cout="$( "$BIN" "$FIX" --callees=caller --no-cache 2>/dev/null )"
 ccount="$( printf '%s' "$cout" | grep -oE 'count="[0-9]+"' | head -1 )"
 [ "$ccount" = 'count="1"' ] && ok "--callees=caller stays count=\"1\" (init extracts but does not resolve, matching C's own documented behavior)" \
                              || no "--callees=caller count changed unexpectedly (got $ccount) — init should NOT resolve in this fixture"
-printf '%s' "$cout" | grep -q 'n="freeFn"' && ok "--callees=caller still names freeFn" || no "--callees=caller lost freeFn"
+if printf '%s' "$cout" | grep -q 'n="freeFn"'; then ok "--callees=caller still names freeFn"; else no "--callees=caller lost freeFn"; fi
 
 # ── honesty: no new mis-resolution / ambiguity introduced by the widened pattern ────────────────
 hdr="$( "$BIN" "$FIX" --no-cache 2>/dev/null )"
 amb="$( printf '%s' "$hdr" | grep -oE 'ambiguous=[0-9]+' | head -1 )"
 unr="$( printf '%s' "$hdr" | grep -oE 'unresolved=[0-9]+' | head -1 )"
-[ "$amb" = "ambiguous=0" ] && ok "fixture $amb" || no "fixture $amb (expected 0)"
-[ "$unr" = "unresolved=0" ] && ok "fixture $unr (init drops silently pre-resolution, same as C field calls — it never reaches the unresolved= gauge)" || no "fixture $unr (expected 0)"
+if [ "$amb" = "ambiguous=0" ]; then ok "fixture $amb"; else no "fixture $amb (expected 0)"; fi
+if [ "$unr" = "unresolved=0" ]; then ok "fixture $unr (init drops silently pre-resolution, same as C field calls — it never reaches the unresolved= gauge)"; else no "fixture $unr (expected 0)"; fi
 
 # ── determinism ───────────────────────────────────────────────────────────────────────────────
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 "$BIN" "$FIX" --no-cache >"$TMP/d1" 2>/dev/null
 "$BIN" "$FIX" --no-cache >"$TMP/d2" 2>/dev/null
-cmp -s "$TMP/d1" "$TMP/d2" && ok "deterministic" || no "non-deterministic"
+if cmp -s "$TMP/d1" "$TMP/d2"; then ok "deterministic"; else no "non-deterministic"; fi
 command -v xmllint >/dev/null 2>&1 \
   && { xmllint --noout "$TMP/d1" 2>/dev/null && ok "xml well-formed" || no "xml malformed"; } \
   || ok "xml well-formed (xmllint absent — skipped)"

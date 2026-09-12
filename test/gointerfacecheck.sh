@@ -24,7 +24,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -48,7 +48,7 @@ EOF
 XML="$TMP/map.xml"
 "$BIN" "$TMP/g" --no-cache > "$XML" 2>/dev/null
 
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$XML" && ok "map: passes xmllint --noout" || no "map: xmllint failed"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$XML"; then ok "map: passes xmllint --noout"; else no "map: xmllint failed"; fi; }
 
 # parse name -> (kind, count)
 # §P6.3 repin: identical-(kind,id) rows now collapse into one row with overloads="N" — count
@@ -75,8 +75,8 @@ awk -F'\t' '$1=="Store" && $2=="iface"{ found=1 } END{ exit found?0:1 }' "$TMP/s
     || no "interface type Store missing: $( cat "$TMP/syms" )"
 
 # Put and Delete are interface-only requirements → each must appear as a method symbol.
-[ "$( count_of Put )" -ge 1 ]    && ok "interface requirement 'Put' captured as a symbol"    || no "interface requirement 'Put' DROPPED (F3): $( grep -c Put "$TMP/syms" )"
-[ "$( count_of Delete )" -ge 1 ] && ok "interface requirement 'Delete' captured as a symbol" || no "interface requirement 'Delete' DROPPED (F3)"
+if [ "$( count_of Put )" -ge 1 ]; then ok "interface requirement 'Put' captured as a symbol"; else no "interface requirement 'Put' DROPPED (F3): $( grep -c Put "$TMP/syms" )"; fi
+if [ "$( count_of Delete )" -ge 1 ]; then ok "interface requirement 'Delete' captured as a symbol"; else no "interface requirement 'Delete' DROPPED (F3)"; fi
 
 # Put/Delete are tagged t="method"
 awk -F'\t' '$1=="Put"||$1=="Delete"{ if($2!="method") bad=1 } END{ exit bad?1:0 }' "$TMP/syms" \
@@ -96,11 +96,11 @@ awk -F'\t' '$1=="Put"||$1=="Delete"{ if($2!="method") bad=1 } END{ exit bad?1:0 
 # determinism + warm==cold
 "$BIN" "$TMP/g" --no-cache > "$TMP/det_a" 2>/dev/null
 "$BIN" "$TMP/g" --no-cache > "$TMP/det_b" 2>/dev/null
-diff -q "$TMP/det_a" "$TMP/det_b" >/dev/null && ok "determinism: byte-identical across two cold runs" || no "determinism: differs across runs"
+if diff -q "$TMP/det_a" "$TMP/det_b" >/dev/null; then ok "determinism: byte-identical across two cold runs"; else no "determinism: differs across runs"; fi
 "$BIN" "$TMP/g" --no-cache > "$TMP/cold" 2>/dev/null
 "$BIN" "$TMP/g"            > /dev/null 2>&1
 "$BIN" "$TMP/g"            > "$TMP/warm" 2>/dev/null
-diff -q "$TMP/cold" "$TMP/warm" >/dev/null && ok "determinism: warm == cold (stable ids)" || no "determinism: warm != cold"
+if diff -q "$TMP/cold" "$TMP/warm" >/dev/null; then ok "determinism: warm == cold (stable ids)"; else no "determinism: warm != cold"; fi
 
 echo
 if [ "$fail" -eq 0 ]; then

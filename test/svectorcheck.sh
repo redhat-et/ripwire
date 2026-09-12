@@ -29,7 +29,7 @@ CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 INC=( -I"$ROOT/src" -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/bench" )
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 echo "svectorcheck: CXX=$CXX"

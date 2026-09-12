@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // nonlocalstate.h — `--nonlocal-state`: per function, the NON-LOCAL MUTABLE STATE it can reach, with
 // READS and WRITES kept apart.
@@ -219,15 +222,23 @@ inline bool isAnalyzedLang( Lang l ) noexcept
 // be noise rather than a disclosure. PHP and Lua ARE named, for the reason the ceiling note above gives:
 // both hold real functions and real module-level state (`static $x`, a PHP class `const`, a Lua file-scope
 // `local`), and captureUses knows neither language's assignment shapes — so an unnamed zero would be exactly
-// the confident, wrong zero this table exists to prevent. The emission order is this table's order, which
-// makes it deterministic.
+// the confident, wrong zero this table exists to prevent. DART is named for the same reason and lands
+// here in the SAME change that appends Lang::Dart: a Dart corpus holds real functions and real library
+// scope state, captureUses reads neither, and before this row --nonlocal-state emitted no
+// unanalyzed_langs= at all on a corpus that was half Dart — the absence of the attribute, not a zero.
+// KOTLIN is named for the same reason: a Kotlin corpus holds real functions and real top-level/companion-
+// object state, captureUses does not read Kotlin's assignment shapes either, and the same "attribute
+// absent, not zero" failure applies. Gate: the registration arm of test/kotlincheck.sh (Dart's is
+// test/dartcheck.sh), with lua as their shared live contrast. The emission order is this table's order,
+// which makes it deterministic.
 struct UnanalyzedLang { Lang lang; std::string_view name; };
-inline constexpr std::array<UnanalyzedLang, 13> kUnanalyzedLangs = { {
+inline constexpr std::array<UnanalyzedLang, 15> kUnanalyzedLangs = { {
     { Lang::C, "c" }, { Lang::Go, "go" }, { Lang::Rust, "rust" },
     { Lang::JavaScript, "javascript" }, { Lang::TypeScript, "typescript" },
     { Lang::Java, "java" }, { Lang::CSharp, "csharp" }, { Lang::Swift, "swift" },
     { Lang::Ruby, "ruby" }, { Lang::Bash, "bash" },
-    { Lang::Php, "php" }, { Lang::Lua, "lua" }, { Lang::Elixir, "elixir" } } };
+    { Lang::Php, "php" }, { Lang::Lua, "lua" }, { Lang::Elixir, "elixir" },
+    { Lang::Dart, "dart" }, { Lang::Kotlin, "kotlin" } } };
 
 // The immutability keywords of the covered families. A declaration prefix carrying any of these is not
 // mutable state. Conservative on purpose: a type argument that merely MENTIONS const (`vector<const T*> v`)
@@ -964,25 +975,29 @@ inline int writeNonLocalStateReport( const IngestResult& ing, const Graph& g, in
     };
 
     std::fputs( kNonLocalStateLegend, stdout );
-    std::printf( "<nonlocal_state cells=\"%zu\" functions=\"%zu\"%s%s", scan.cells.size(), total, disclosure,
-                 rw::graphCountFloorAttrXml( g ).c_str() );   // M15: gauge + marker
+    // #66: the root below carries graph_unindexed= when the crawl could not read a file at all, and the legend
+    // above is one closed literal — so its definition rides as its own adjacent comment, emitted on exactly
+    // the emitter's own condition (graphlegend.h graphUnindexedLegendComment), never a re-derivation of it.
+    rw::emitTo( stdout, "{}", rw::graphUnindexedLegendComment( g.unindexedFiles > 0 ).c_str() );
+    rw::emitTo( stdout, "<nonlocal_state cells=\"{}\" functions=\"{}\"{}{}", scan.cells.size(), total, rw::cstr( disclosure ),
+                 rw::graphCountFloorAttrXml( g ).c_str()  );   // M15: gauge + marker
     if( !scan.unanalyzedLangs.empty() )
     {
-        std::printf( " unanalyzed_langs=\"%s\" unanalyzed_files=\"%u\"", scan.unanalyzedLangs.c_str(), scan.unanalyzedFileCount );
+        rw::emitTo( stdout, " unanalyzed_langs=\"{}\" unanalyzed_files=\"{}\"", scan.unanalyzedLangs.c_str(), scan.unanalyzedFileCount );
     }
     if( scan.undecidedDeclCount != 0 )
     {
-        std::printf( " undecided_decls=\"%u\"", scan.undecidedDeclCount );
+        rw::emitTo( stdout, " undecided_decls=\"{}\"", scan.undecidedDeclCount );
     }
     if( scan.cellsCapped )
     {
-        std::printf( " cells_capped=\"1\"" );
+        rw::emitRaw( stdout, " cells_capped=\"1\"" );
     }
     if( scan.declsCapped )
     {
-        std::printf( " decls_capped=\"1\"" );
+        rw::emitRaw( stdout, " decls_capped=\"1\"" );
     }
-    std::printf( "%s>", rootAttr.c_str() );
+    rw::emitTo( stdout, "{}>", rootAttr.c_str() );
 
     // Separate scratch buffers per concurrently-live view: escapeXml returns a VIEW into its `out`, so
     // reusing one buffer for two live strings invalidates the first (see readability.h's note).
@@ -995,14 +1010,14 @@ inline int writeNonLocalStateReport( const IngestResult& ing, const Graph& g, in
         const std::string name( escapeXml( s.name, escB ) );
         const std::size_t cellsShown = std::min( row.cells.size(), kCellsPerRowCap );
 
-        std::printf( "<fn p=\"%s:%u\" n=\"%s\" writes=\"%u\" reads=\"%u\" direct_writes=\"%u\" direct_reads=\"%u\" cells_total=\"%zu\"",
+        rw::emitTo( stdout, "<fn p=\"{}:{}\" n=\"{}\" writes=\"{}\" reads=\"{}\" direct_writes=\"{}\" direct_reads=\"{}\" cells_total=\"{}\"",
                      path.c_str(), s.line, name.c_str(),
                      row.writeCount, row.readCount, row.directWriteCount, row.directReadCount, row.cells.size() );
         if( cellsShown != row.cells.size() )
         {
-            std::printf( " cells_shown=\"%zu\" cells_capped=\"1\"", cellsShown );
+            rw::emitTo( stdout, " cells_shown=\"{}\" cells_capped=\"1\"", cellsShown );
         }
-        std::printf( ">" );
+        rw::emitRaw( stdout, ">" );
 
         for( std::size_t k = 0; k < cellsShown; ++k )
         {
@@ -1011,25 +1026,25 @@ inline int writeNonLocalStateReport( const IngestResult& ing, const Graph& g, in
             const std::string cellName( escapeXml( cell.name, escC ) );
             const std::string cellPath( escapeXml( pathRel( cell.fileId ), escD ) );
             const char*       dir = rc.read && rc.write ? "rw" : ( rc.write ? "w" : "r" );
-            std::printf( "<cell n=\"%s\" p=\"%s:%u\" dir=\"%s\"", cellName.c_str(), cellPath.c_str(), cell.line, dir );
+            rw::emitTo( stdout, "<cell n=\"{}\" p=\"{}:{}\" dir=\"{}\"", cellName.c_str(), cellPath.c_str(), cell.line, dir );
             if( rc.direct )
             {
                 std::vector<char>  escSite;
                 const std::string  sitePath( escapeXml( pathRel( rc.siteFile ), escSite ) );
                 const char*        atDir = rc.directRead && rc.directWrite ? "rw" : ( rc.directWrite ? "w" : "r" );
-                std::printf( " at=\"%s:%u\" at_dir=\"%s\"", sitePath.c_str(), rc.siteLine, atDir );
+                rw::emitTo( stdout, " at=\"{}:{}\" at_dir=\"{}\"", sitePath.c_str(), rc.siteLine, atDir );
             }
             else
             {
                 std::vector<char> escVia;
                 const std::string via( escapeXml( ing.symbols[rc.via].name, escVia ) );
-                std::printf( " via=\"%s\"", via.c_str() );
+                rw::emitTo( stdout, " via=\"{}\"", via.c_str() );
             }
-            std::printf( "/>" );
+            rw::emitRaw( stdout, "/>" );
         }
-        std::printf( "</fn>" );
+        rw::emitRaw( stdout, "</fn>" );
     }
-    std::printf( "</nonlocal_state>" );
+    rw::emitRaw( stdout, "</nonlocal_state>" );
     return 0;
 }
 

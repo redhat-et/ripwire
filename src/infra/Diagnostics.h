@@ -32,6 +32,18 @@
 // --------------------------------------------------------------------------
 // 2. Handler declarations — implemented in diagnostics.cpp
 // --------------------------------------------------------------------------
+
+// handleAssert and handleThreadViolation end in __builtin_trap, but in diagnostics.cpp, out of the static
+// analyzer's sight. Without this it walks on past a failed VERIFY and reports exactly what the VERIFY ruled
+// out — an out-of-bounds read of an index the VERIFY had just bounded. analyzer_noreturn informs the analyzer
+// ONLY; codegen is untouched, unlike [[noreturn]], which would let the optimizer drop whatever follows the
+// call. GCC has no such attribute and warns on it, hence the guard.
+#if defined(__clang__)
+  #define DIAGNOSTICS_ANALYZER_NORETURN __attribute__((analyzer_noreturn))
+#else
+  #define DIAGNOSTICS_ANALYZER_NORETURN
+#endif
+
 namespace Diagnostics {
 
 class ConsoleLog {
@@ -40,7 +52,7 @@ public:
     static void handleAssert( const char* expr,
                                const char* file, int line,
                                const char* function,
-                               const char* description = "" ) noexcept;
+                               const char* description = "" ) noexcept DIAGNOSTICS_ANALYZER_NORETURN;
 
     [[gnu::cold, gnu::noinline, noreturn]]
     static void handlePanic( const char* file, int line,
@@ -53,7 +65,7 @@ public:
     static void handleThreadViolation( uint64_t expected, uint64_t got,
                                         const char* file, int line,
                                         const char* function,
-                                        const char* description = "" ) noexcept;
+                                        const char* description = "" ) noexcept DIAGNOSTICS_ANALYZER_NORETURN;
 
     // DEGRADED_PATH_ALERT reporter — one-line notice, never traps, debug only.
     [[gnu::cold, gnu::noinline]]

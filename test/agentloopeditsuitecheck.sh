@@ -28,7 +28,7 @@ BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "agentloopeditsuitecheck: no binary at $BIN — build first"; exit 2; }
@@ -43,16 +43,16 @@ SUITE="$ROOT/bench/agentloop/editsuite"
     || { no "(1) expected/ does not match what gen_expected.py derives"; cat "$TMP/gen.txt"; }
 W="$TMP/w"; rm -rf "$W"; cp -R "$SUITE/fixture" "$W"
 bash "$SUITE/oracle.sh" r1 "$W" >/dev/null 2>&1; rc=$?
-[ "$rc" = 1 ] && ok "(1) oracle: the pristine fixture FAILS task r1 (rc=1)" || no "(1) oracle on the pristine fixture returned $rc, want 1"
+if [ "$rc" = 1 ]; then ok "(1) oracle: the pristine fixture FAILS task r1 (rc=1)"; else no "(1) oracle on the pristine fixture returned $rc, want 1"; fi
 cp "$SUITE/expected/r1/geometry.cpp.expected" "$W/geometry.cpp"
 bash "$SUITE/oracle.sh" r1 "$W" >/dev/null 2>&1; rc=$?
-[ "$rc" = 0 ] && ok "(1) oracle: the expected bytes PASS task r1 (rc=0)" || no "(1) oracle on the expected bytes returned $rc, want 0"
+if [ "$rc" = 0 ]; then ok "(1) oracle: the expected bytes PASS task r1 (rc=0)"; else no "(1) oracle on the expected bytes returned $rc, want 0"; fi
 printf '\n' >> "$W/geometry.cpp"
 bash "$SUITE/oracle.sh" r1 "$W" >/dev/null 2>&1; rc=$?
-[ "$rc" = 2 ] && ok "(1) oracle: one extra trailing newline is ws-only (rc=2), never a pass" || no "(1) oracle on a trailing-newline variant returned $rc, want 2"
+if [ "$rc" = 2 ]; then ok "(1) oracle: one extra trailing newline is ws-only (rc=2), never a pass"; else no "(1) oracle on a trailing-newline variant returned $rc, want 2"; fi
 rm -rf "$W"; cp -R "$SUITE/fixture" "$W"; cp "$SUITE/expected/p2/stats.py.expected" "$W/stats.py"
 bash "$SUITE/oracle.sh" p2 "$W" >/dev/null 2>&1; rc=$?
-[ "$rc" = 1 ] && ok "(1) oracle: a plan task with only one of its two files edited FAILS" || no "(1) oracle on a half-applied plan returned $rc, want 1"
+if [ "$rc" = 1 ]; then ok "(1) oracle: a plan task with only one of its two files edited FAILS"; else no "(1) oracle on a half-applied plan returned $rc, want 1"; fi
 
 # ── 2–4. the python contract ───────────────────────────────────────────────────────────────────────────
 python3 - "$ROOT" "$BIN" "$TMP" >"$TMP/out.txt" 2>&1 <<'PY'

@@ -4,7 +4,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 
@@ -33,7 +33,7 @@ EOF
 BEFORE="$( shasum "$R/src/math.cpp" | awk '{print $1}' )"
 DRY="$( "$BIN" "$R" --edit-plan="$R/plans/good.json" --dry-run 2>/dev/null )"; DRC=$?
 AFTER="$( shasum "$R/src/math.cpp" | awk '{print $1}' )"
-[ "$DRC" = 0 ] && [ "$BEFORE" = "$AFTER" ] && ok 'dry-run validates two edits without mutating the file' || no 'dry-run mutated or failed'
+if [ "$DRC" = 0 ] && [ "$BEFORE" = "$AFTER" ]; then ok 'dry-run validates two edits without mutating the file'; else no 'dry-run mutated or failed'; fi
 case "$DRY" in
   *'"schema":"ripwire.edit-plan/v1"'*'"mode":"dry-run"'*'"edits":2'*'"files":1'*) ok 'dry-run receipt is versioned and tallies edits/files' ;;
   *) no "dry-run receipt missing facts: $DRY" ;;
@@ -84,9 +84,9 @@ for PLAN in trailing-comma missing-comma; do
 done
 
 "$BIN" "$R" --edit-plan="$R/plans/good.json" >/dev/null 2>"$TMP/mode.err"; MRC=$?
-[ "$MRC" = 1 ] && grep -q 'dry-run.*apply' "$TMP/mode.err" && ok 'a plan requires an explicit mode' || no 'missing mode did not refuse clearly'
+if [ "$MRC" = 1 ] && grep -q 'dry-run.*apply' "$TMP/mode.err"; then ok 'a plan requires an explicit mode'; else no 'missing mode did not refuse clearly'; fi
 "$BIN" "$R" --edit-plan="$R/plans/good.json" --dry-run --apply >/dev/null 2>&1; XRC=$?
-[ "$XRC" = 1 ] && ok 'dry-run and apply together refuse' || no 'conflicting modes were accepted'
+if [ "$XRC" = 1 ]; then ok 'dry-run and apply together refuse'; else no 'conflicting modes were accepted'; fi
 
 M="$TMP/multi"; mkdir -p "$M/src" "$M/plans"
 printf 'int left() { return 1; }\n' > "$M/src/left.cpp"

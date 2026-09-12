@@ -1878,11 +1878,13 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
     return buildPreciseIncludeAdjWithContext( ing, dedup, lazyPairsOut ).first;
 }
 
-// Transitive include-set per file: for each file f, the sorted, deduped set of fileIds reachable from
-// f by ≥1 include hop (f itself EXCLUDED). Cycle-safe via a `seen` bitset (a file already visited is
+// Transitive include-set per file: for each file f, the sorted, duplicate-free set of fileIds reachable
+// from f by ≥1 include hop (f itself EXCLUDED). Cycle-safe via a `seen` bitset (a file already visited is
 // not re-pushed), so mutually-including headers (a↔b) simply each reach the other — the exact
-// reachability walk shape as graph.h::dependencyHealth. Deterministic: `adj` is sorted, each result
-// set is re-sorted+deduped, so it is a pure function of the adjacency regardless of visit order.
+// reachability walk shape as graph.h::dependencyHealth. Deterministic: `adj` is sorted and each result set
+// is re-sorted, so it is a pure function of the adjacency regardless of visit order. Duplicate-free is a
+// property of the epoch stamp, NOT of a dedup pass — there is no longer one to describe; see the NO DEDUP
+// PASS note at the sort below, which is where the removed std::unique used to sit.
 inline std::vector<std::vector<NodeId>> transitiveIncludeSet( const std::vector<std::vector<std::uint32_t>>& adj )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2b: transitive include closure (resolve.h)" );

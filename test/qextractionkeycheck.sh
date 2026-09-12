@@ -39,7 +39,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 QSRC="$ROOT/src/quality.h"
 ISRC="$ROOT/src/ingest_cache.h"   # the extraction-identity constants moved here in the 2026-08-29 ingest.cpp section split
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 [ -x "$BIN" ]  || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -134,7 +134,7 @@ else
     set -- $hdr
     B_SCHEME="${1:-}"; B_CACHE="${2:-}"; B_PARSER="${3:-}"
     magic="$( dd if="$QF" bs=1 count=4 2>/dev/null )"
-    [ "$magic" = "QSNP" ] && ok "qsnap blob starts with the QSNP magic" || no "qsnap blob magic is '$magic', not QSNP"
+    if [ "$magic" = "QSNP" ]; then ok "qsnap blob starts with the QSNP magic"; else no "qsnap blob magic is '$magic', not QSNP"; fi
     { [ "$B_CACHE" = "$ING_CACHE" ] && [ "$B_PARSER" = "$ING_PARSER" ]; } \
         && ok "qsnap blob header carries the live extraction identity (scheme=$B_SCHEME cacheVer=$B_CACHE parserVer=$B_PARSER)" \
         || no "qsnap blob header extraction identity is cacheVer=$B_CACHE parserVer=$B_PARSER, expected $ING_CACHE/$ING_PARSER"

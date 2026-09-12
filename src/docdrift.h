@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // docdrift.h — `--doc-drift`, the DOC-ANCHOR VERIFIER.
 // Evidence: four parallel audit agents burned tokens re-verifying stale doc claims — a §Status six weeks
@@ -103,6 +106,7 @@
 #include "infra/Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
 #include "gitstamp.h"           // r26-stamp Task A: gitstamp::stampAt — the at="<sha>[+dirty]" root anchor
 #include "layout.h"             // layout::isCFamilyPath — shared C/C++/ObjC/CUDA extension classifier
+#include "nextverb.h"           // P3: nextAttrXml — the ONE pasteable follow-up a cut root carries
 
 #include <algorithm>
 #include <atomic>
@@ -124,7 +128,7 @@ namespace docdrift
 
 // ── tuning constants (every bound the report rests on, in one place) ─────────────────────────────────────
 
-constexpr std::size_t   kMaxAnchorsShown = 12;      // drifted anchors printed per doc; detail lifts the cap
+constexpr std::size_t   kMaxAnchorsShown = 12;      // failed anchors per doc; a SECONDARY listing (pageview.h rule 6) — --detail lifts it, --limit does not
 constexpr std::size_t   kMinMentionLen   = 4;       // a backticked name shorter than this is prose, not code
 constexpr std::size_t   kMinValueNameLen = 3;       // …and the bar for a `= N` / `[N]` subject name
 constexpr std::size_t   kMaxNameLen      = 96;      // past this it is a sentence, not an identifier
@@ -279,6 +283,10 @@ struct DriftResult
                                                   //   not a verdict, so it must not move the clean= count.
     std::uint32_t       docsScanned = 0;
     std::uint32_t       docsUnread  = 0;        // 2026-09-06: indexed docs whose read failed at scan time — omitted from docs=, disclosed as docs_unread=
+    // §SEC1: files this verb's OWN walk refused because a symlink left the root. Disclosed as escaped_root=,
+    // absent at zero, on docs_unread='s rule — a presence probe that quietly lost a file answers "missing"
+    // about a file that is there, which is this verb's named cry-wolf failure.
+    std::uint64_t       escapedRoot = 0;
     std::uint32_t       cleanDocs   = 0;
     std::uint32_t       anchors     = 0;
     std::uint32_t       checked     = 0;
@@ -1648,6 +1656,7 @@ struct RepoPaths
     std::vector<std::string>                                 rel;      // root-relative, sorted
     std::vector<std::string>                                 auxFull;  // unparsed-but-textual files, absolute, sorted
     HashMap<std::string, rw::SmallVec<std::uint32_t, 2>>     byBase;   // basename → indices into `rel`
+    std::uint64_t                                            escaped = 0;   // §SEC1 — links whose target left the root
 };
 
 // The AUXILIARY presence corpus: text files the INDEX does not parse but a doc legitimately names symbols
@@ -1692,6 +1701,7 @@ inline RepoPaths collectRepoPaths( const std::string& root, const std::vector<st
     std::error_code ec;
     fs::recursive_directory_iterator it( root, fs::directory_options::skip_permission_denied, ec );
     if( ec ) { DEGRADED_PATH_ALERT( "doc-drift: cannot walk the root — the on-disk existence probe is skipped" ); return out; }
+    const std::string rootReal = canonicalCrawlRoot( root );   // §SEC1 — the crawl boundary, canonicalized once
 
     const fs::recursive_directory_iterator end;
     for( ; it != end; it.increment( ec ) )
@@ -1716,6 +1726,21 @@ inline RepoPaths collectRepoPaths( const std::string& root, const std::vector<st
         }
         if( skip )
         {
+            continue;
+        }
+
+        // §SEC1 — THE CRAWL BOUNDARY, the third walker (ingest.h owns the rule; ingest's own crawl and
+        // darkflags.h's CMake harvest are the other two). This one is not merely an existence probe: every
+        // auxFull path is OPENED and its identifiers harvested, so a symlinked CMakeLists.txt/README pointing
+        // outside the root had its names read and reported UNDER THE IN-ROOT PATH — narrower than the ingest
+        // disclosure (facts, not bytes) and the same defect. The `rel` side needs it too: an existence probe
+        // that answers "present" for a path whose content lives outside the root is answering about the wrong
+        // file. is_symlink() reads the cached readdir type; only a symlink pays the realpath.
+        std::error_code lec;
+        if( it->is_symlink( lec ) && !crawlPathStaysInRoot( full, rootReal ) )
+        {
+            ++out.escaped;
+            DEGRADED_PATH_ALERT( "doc-drift: a file's symlink target leaves the root — file refused" );
             continue;
         }
 
@@ -2005,7 +2030,7 @@ inline void forEachIndexParallel( std::size_t count, const char* what, Work&& wo
         }
         catch( ... )
         {
-            std::fprintf( stderr, "ripwire: doc-drift %s worker degraded (exception swallowed)\n", what );
+            rw::emitTo( stderr, "ripwire: doc-drift {} worker degraded (exception swallowed)\n", what );
         }
     };
 
@@ -2092,12 +2117,12 @@ inline DocScan scanDocAnchors( const IngestResult& ing, const std::string& root,
     // SLOT-DISJOINT: doc d writes out.*[d] and nothing else; `defined` is read-only here.
     forEachIndexParallel( docCount, "doc scan", [ & ]( std::size_t d )
     {
-        std::string bytes;
-        if( !darkflags::readWhole( diskPath( ing, docFileIds[d] ), bytes ) )
+        const std::optional<std::string> bytes = darkflags::readWhole( diskPath( ing, docFileIds[d] ) );
+        if( !bytes )
         {
             return; // isDocRead stays 0
         }
-        out.perDoc[d]    = collectDocAnchors( out.docRel[d], bytes, defined, out.perDocResolving[d] );
+        out.perDoc[d]    = collectDocAnchors( out.docRel[d], *bytes, defined, out.perDocResolving[d] );
         out.isDocRead[d] = 1;
     } );
     return out;
@@ -2145,8 +2170,8 @@ inline std::size_t scanCorpusFacts( const IngestResult& ing, const std::string& 
         const std::string& readPath  = isIndexed ? diskPath( ing, std::uint32_t( k ) ) : repo.auxFull[ k - indexedCount ];
         const std::string& identPath = isIndexed ? ing.files[k]                        : repo.auxFull[ k - indexedCount ];
 
-        std::string bytes;
-        if( !darkflags::readWhole( readPath, bytes ) )
+        const std::optional<std::string> bytes = darkflags::readWhole( readPath );
+        if( !bytes )
         {
             return; // oversized/unreadable: counts stay 0
         }
@@ -2156,12 +2181,12 @@ inline std::size_t scanCorpusFacts( const IngestResult& ing, const std::string& 
         {
             // A doc never vouches for its own mentions — line counts only, so a `README.md:900` anchor can
             // still be bounds-checked without the doc's own prose making every name it names "present".
-            lineCounts[k] = forEachLine( bytes, []( std::string_view, std::uint32_t ) {} );
+            lineCounts[k] = forEachLine( *bytes, []( std::string_view, std::uint32_t ) {} );
             return;
         }
         const std::string rel( relForHash( identPath, root ) );
         std::string       uncommented;
-        const std::string_view corpusBytes = codeFactText( identPath, bytes, uncommented );
+        const std::string_view corpusBytes = codeFactText( identPath, *bytes, uncommented );
         const std::uint32_t lineCount = forEachLine( corpusBytes, [ & ]( std::string_view line, std::uint32_t lineIndex )
                                                      { harvestCodeLine( line, rel, lineIndex, wantsFirstByte, facts, into ); } );
         if( isIndexed )
@@ -2340,7 +2365,7 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
         {
             DEGRADED_PATH_ALERT( "doc-drift: cannot read a markdown file — its anchors are omitted" );
             ++res.docsUnread;   // 2026-09-06: the doc used to vanish from docs= with no trace a Release binary keeps
-            std::fprintf( stderr, "ripwire: doc-drift: cannot read %s — its anchors are omitted (docs_unread= counts it)\n", scan.docRel[d].c_str() );
+            rw::emitTo( stderr, "ripwire: doc-drift: cannot read {} — its anchors are omitted (docs_unread= counts it)\n", scan.docRel[d].c_str() );
             continue;
         }
         for( const Anchor& a : scan.perDoc[d] )
@@ -2376,6 +2401,7 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
     // Hoisted ABOVE the corpus scan (it reads no file contents and depends on nothing the scan produces) so
     // the indexed files and the auxiliary text files form ONE index space the scan can carve into blocks.
     const RepoPaths repo = anchorTotal > 0 ? collectRepoPaths( root, excludes ) : RepoPaths{};
+    res.escapedRoot      = repo.escaped;   // §SEC1 — a refusal this walk made is this verb's to disclose
 
     std::vector<std::uint32_t> lineCounts( ing.files.size(), 0 );
     if( anchorTotal > 0 )
@@ -2479,36 +2505,36 @@ inline void writeTally( std::FILE* out, const char* tag, std::span<const Spec> t
     {
         if( counts[r] )
         {
-            std::fprintf( out, "<%s r=\"%s\" n=\"%u\" note=\"%s\"/>", tag, table[r].tag, counts[r], ex( table[r].note ).c_str() );
+            rw::emitTo( out, "<{} r=\"{}\" n=\"{}\" note=\"{}\"/>", tag, table[r].tag, counts[r], ex( table[r].note ).c_str() );
         }
     }
 }
 
 inline void writeAnchor( std::FILE* out, const Anchor& a, const XmlEscaper& ex )
 {
-    std::fprintf( out, "<a k=\"%s\" l=\"%u\" c=\"%u\" why=\"%s\"", anchorKindTag( a.kind ), a.line, a.col, driftTag( a.why ) );
+    rw::emitTo( out, "<a k=\"{}\" l=\"{}\" c=\"{}\" why=\"{}\"", anchorKindTag( a.kind ), a.line, a.col, driftTag( a.why ) );
     if( a.rec != Record::Live )
     {
-        std::fprintf( out, " kind=\"dated-record\" rec=\"%s\"", recordTag( a.rec ) );
+        rw::emitTo( out, " kind=\"dated-record\" rec=\"{}\"", recordTag( a.rec ) );
     }
-    std::fprintf( out, " ref=\"%s\"", ex( a.ref ).c_str() );
+    rw::emitTo( out, " ref=\"{}\"", ex( a.ref ).c_str() );
     if( !a.name.empty() && a.kind == AnchorKind::FileLine )
     {
-        std::fprintf( out, " sym=\"%s\"", ex( a.name ).c_str() );
+        rw::emitTo( out, " sym=\"{}\"", ex( a.name ).c_str() );
     }
     if( a.kind == AnchorKind::Const || a.kind == AnchorKind::Array )
     {
-        std::fprintf( out, " want=\"%llu\"", (unsigned long long)a.want );
+        rw::emitTo( out, " want=\"{}\"", (unsigned long long)a.want );
     }
     if( !a.got.empty() )
     {
-        std::fprintf( out, " got=\"%s\"", ex( a.got ).c_str() );
+        rw::emitTo( out, " got=\"{}\"", ex( a.got ).c_str() );
     }
     if( !a.tgt.empty() )
     {
-        std::fprintf( out, " tgt=\"%s\"", ex( a.tgt ).c_str() );
+        rw::emitTo( out, " tgt=\"{}\"", ex( a.tgt ).c_str() );
     }
-    std::fprintf( out, "/>" );
+    rw::emitRaw( out, "/>" );
 }
 
 // A weak-file-line DISCLOSURE row — never a verdict, so it carries none of writeAnchor's why=/k= vocabulary.
@@ -2517,7 +2543,7 @@ inline void writeAnchor( std::FILE* out, const Anchor& a, const XmlEscaper& ex )
 // know whether that is the symbol the DOC meant — it only stopped hiding the one thing it does know.
 inline void writeWeakAnchor( std::FILE* out, const Anchor& a, const XmlEscaper& ex )
 {
-    std::fprintf( out, "<w l=\"%u\" c=\"%u\" ref=\"%s\" resolves-to=\"%s\"/>",
+    rw::emitTo( out, "<w l=\"{}\" c=\"{}\" ref=\"{}\" resolves-to=\"{}\"/>",
                   a.line, a.col, ex( a.ref ).c_str(), ex( a.resolvesTo ).c_str() );
 }
 
@@ -2558,7 +2584,7 @@ inline void writeGateability( std::FILE* out, const DriftResult& res, const XmlE
     }
     const std::uint32_t projectedDrift = res.drift > liveTotal ? res.drift - liveTotal : 0u;
 
-    std::fprintf( out, "<!-- ripwire doc-drift gateability: every doc below still has >=1 LIVE (undated) "
+    rw::emitRaw( out, "<!-- ripwire doc-drift gateability: every doc below still has >=1 LIVE (undated) "
                        "failing anchor (live=). The ONE fix that reclassifies ALL of a doc's live rows at "
                        "once: an ISO date (YYYY-MM-DD) in its H1 heading or filename, OR a front-matter "
                        "line naming date/dated/written/generated/captured/recorded/reviewed/audited/"
@@ -2568,13 +2594,13 @@ inline void writeGateability( std::FILE* out, const DriftResult& res, const XmlE
                        "remove, NOT a mandate to date every doc — a doc that is genuinely a live/current "
                        "reference (not a snapshot-in-time record) would have real rot HIDDEN, not honestly "
                        "classified, by a date it does not deserve. Weigh each row; do not game the number. -->" );
-    std::fprintf( out, "<gateability docs=\"%zu\" projected_drift=\"%u\">", targets.size(), projectedDrift );
+    rw::emitTo( out, "<gateability docs=\"{}\" projected_drift=\"{}\">", targets.size(), projectedDrift );
     for( const DocRow* row : targets )
     {
-        std::fprintf( out, "<fix p=\"%s\" live=\"%u\"/>", ex( row->path ).c_str(),
+        rw::emitTo( out, "<fix p=\"{}\" live=\"{}\"/>", ex( row->path ).c_str(),
                       std::uint32_t( row->drifted.size() ) - row->datedCount );
     }
-    std::fprintf( out, "</gateability>" );
+    rw::emitRaw( out, "</gateability>" );
 }
 
 // The doc-drift legend, hoisted to a file-scope constant for the reason situ.h states of kTestGateLegend:
@@ -2648,7 +2674,27 @@ inline constexpr const char* kDocDriftLegend =
     "Neither number is "
     "wrong. corpus=\"0\" means the corpus scan never ran at all, which happens only when the docs raised "
     "no anchor SHAPE whatsoever — prose ones included — so anchors=\"0\" beside a non-zero prose= still "
-    "scanned, and still reports the corpus it scanned. ";
+    "scanned, and still reports the corpus it scanned. "
+    // 2026-09-10 (listing-paging round, C1 F-06): the per-doc <a> listing was cut at 12 with no shown=/capped=
+    // anywhere and no way to lift it — the verb sits in the --limit-honoring set, but --limit windowed the
+    // <doc> rows only, so --limit=1000000 still served 12 anchors a doc. See pageview.h, THE TRUNCATION
+    // VOCABULARY (rules 1, 3 and 6) for the pair; this paragraph DEFINES it where the reader meets it.
+    "PER-DOC ROW LISTINGS AND WHAT THEY DISCLOSE. The <a> rows under a <doc> are the FAILED anchors of that "
+    "doc and they are capped, by default at 12 a doc. A doc whose listing was cut says so on its own element: "
+    "shown_failed= is how many <a> rows this run printed, failed_capped=\"1\" says rows were dropped, and "
+    "failed_total= is the whole failed population for that doc — which is drift= + dated=, stated as its own "
+    "number so no reader has to sum two attributes to learn what was cut, and deliberately NOT spelled "
+    "anchors_total=, because anchors= on the same element counts EVERY anchor in the doc and not these rows. "
+    "The <weak-file-line> groups cap the same way and disclose the same way against their own n=: "
+    "shown_weak= with weak_capped=\"1\". Both pairs are emitted ONLY when the cut happened — no element "
+    "carries a capped=\"0\" that could never fire — and the more drift= / more weak= remainders they sit "
+    "beside are unchanged. THE VERDICT IS NEVER THE WINDOW: docs=, clean=, anchors=, checked=, unchecked=, "
+    "drift=, dated= and prose= on this root, and drift=/dated=/anchors=/checked= on every <doc>, are computed "
+    "over the FULL anchor set before any cap exists, so raising or removing the cap cannot move one of them. "
+    "limit=N does NOT raise this cap and is not meant to: it windows the <doc> ROWS, which are this "
+    "report's primary listing, and one flag governing both would make the same doc print a different number "
+    "of anchor rows depending on the page it was served on. The flag that lifts the per-doc cap entirely is "
+    "detail=N (any N above zero), and next= on this root is exactly that invocation, emitted only when a listing was cut. ";
     // §L10b: the trailing "-->" moved to this constant's ONE call site (below), which now splices in
     // gitoracle::kHistoryProbeLegend first — the with_history lane's own <history> element, previously
     // undefined on this legend, shared verbatim with --whereis's copy so the two cannot drift.
@@ -2664,20 +2710,62 @@ inline void writeWeakDisclosures( std::FILE* out, const DriftResult& res, std::s
 {
     for( const WeakDocGroup& g : res.weakGroups )
     {
-        std::fprintf( out, "<weak-file-line p=\"%s\" n=\"%zu\">", ex( g.path ).c_str(), g.rows.size() );
         const std::size_t shownCount = std::min( g.rows.size(), maxPerDoc );
+        // n= is already this listing's rule-2 total, so the pair rides without a third number.
+        rw::emitTo( out, "<weak-file-line p=\"{}\" n=\"{}\"{}>", ex( g.path ).c_str(), g.rows.size(),
+                      secondaryCutAttrs( "weak", shownCount, g.rows.size() ).c_str() );
         for( std::size_t rowIndex = 0; rowIndex < shownCount; ++rowIndex )
         {
             writeWeakAnchor( out, g.rows[ rowIndex ], ex );
         }
         if( g.rows.size() > shownCount )
         {
-            std::fprintf( out, "<more weak=\"%zu\"/>", g.rows.size() - shownCount );
+            rw::emitTo( out, "<more weak=\"{}\"/>", g.rows.size() - shownCount );
         }
-        std::fprintf( out, "</weak-file-line>" );
+        rw::emitRaw( out, "</weak-file-line>" );
     }
 }
 
+// P3 (nextverb.h): the ONE pasteable follow-up, and it is EXACT — --detail is the flag that lifts the
+// per-doc cap outright, so the invocation it names cuts nothing at all rather than being sized to this run.
+// Empty when NO listing was cut, which is what keeps an uncut root byte-identical to what it was. Its own
+// function rather than a prepass inside the emitter: two scans and a predicate are a fact about the
+// document, and folding them into writeDocDriftPage took that function from ccx 12 to 19, past the bar.
+inline std::string docDriftNextAttr( const DriftResult& res, const PageWindow& docPage, std::size_t anchorCap )
+{
+    bool cut = false;
+    for( std::size_t docIndex = docPage.begin; docIndex < docPage.end && !cut; ++docIndex )
+    {
+        cut = res.docs[ docIndex ].drifted.size() > anchorCap;
+    }
+    for( std::size_t groupIndex = 0; groupIndex < res.weakGroups.size() && !cut; ++groupIndex )
+    {
+        cut = res.weakGroups[ groupIndex ].rows.size() > anchorCap;
+    }
+    return cut ? nextAttrXml( "--doc-drift --detail=1" ) : std::string();
+}
+
+// C1 F-06 (2026-09-10). The finding: --doc-drift sits in cli.h's honorsPaging set, but --limit reached
+// the <doc> rows ONLY, so `--doc-drift --limit=1000000` served the same 56 anchor rows the bare run did,
+// with the cut disclosed by nothing but a <more drift=> remainder. The suggested fix was to route the
+// per-doc cap through effectiveRowCap like every PRIMARY row cap in the tool.
+//
+// THAT FIX WAS BUILT, AND IT BREAKS THE PAGING CONTRACT — measured, not reasoned about. The <a> rows are
+// a SECONDARY listing (pageview.h rule 6: the paging half describes the report's PRIMARY, --limit
+// windowed listing, and the primary here is the <doc> rows). Tie the secondary cap to the SAME --limit
+// and the <doc> element's own text starts varying with the window: `--limit=3` prints shown_failed="3"
+// and `--limit=6` prints shown_failed="6" for the same doc, so page[0:3] + page[3:6] no longer equals
+// page[0:6] and test/pagingsweepcheck.sh's --offset continuity arm goes red on doc-drift — correctly.
+// A paged walk that is not equivalent to the whole is the §P8 bug this family exists to prevent.
+//
+// So this follows the precedent the tool already set for exactly this shape: kImportReachRowCap, the
+// secondary import tier under --impact, which pageview.h states "is NOT raisable by --limit — rule 6
+// reserves the paging half for the PRIMARY listing, so a secondary one discloses through
+// shown_importers=/importers_capped= and nothing else." Same here. What F-06 is actually about is the
+// SILENCE, and that is what closes: the cut says shown_failed=/failed_capped=/failed_total= on the doc
+// it happened to, and the root names the exact invocation that lifts it — --detail, which has lifted
+// this cap since the verb was written and which no output ever mentioned.
+//
 // §P8: --limit/--offset used to be accepted and IGNORED here — every run emitted the same full <doc> list,
 // so a paging loop over --doc-drift never advanced. `pageLimit`/`pageOffset` (0 = un-paginated, the pre-§P8
 // shape byte for byte) window the <doc> ROWS, which are already deterministically ordered (§P11.10: live
@@ -2702,6 +2790,10 @@ inline void writeDocDriftPage( std::FILE* out, const DriftResult& res, std::size
 
     const PageWindow docPage = pageWindow( res.docs.size(), pageLimit, pageOffset );
 
+    const std::size_t anchorCap = maxPerDoc;   // C1 F-06: --detail lifts it, --limit deliberately does not (see above)
+
+    const std::string docDriftNext = docDriftNextAttr( res, docPage, anchorCap );
+
     std::fputs( kDocDriftLegend, out );
     // §L10b: the <history> clause only when --with-history actually made that element reachable — an
     // unconditional splice would cost every plain --doc-drift run bytes describing an absent element.
@@ -2710,28 +2802,34 @@ inline void writeDocDriftPage( std::FILE* out, const DriftResult& res, std::size
         std::fputs( gitoracle::kHistoryProbeLegend, out );
     }
     std::fputs( "-->", out );
-    std::fprintf( out, "<doc-drift docs=\"%u\" clean=\"%u\" anchors=\"%u\" checked=\"%u\" unchecked=\"%u\" drift=\"%u\" dated=\"%u\" prose=\"%u\" corpus=\"%zu\"",
+    rw::emitTo( out, "<doc-drift docs=\"{}\" clean=\"{}\" anchors=\"{}\" checked=\"{}\" unchecked=\"{}\" drift=\"{}\" dated=\"{}\" prose=\"{}\" corpus=\"{}\"",
                   res.docsScanned, res.cleanDocs, res.anchors, res.checked, unchecked, res.drift, res.dated, res.prose, res.corpusFiles );
     if( res.docsUnread > 0 )
     {
-        std::fprintf( out, " docs_unread=\"%u\"", res.docsUnread );   // absent means every indexed doc was read
+        rw::emitTo( out, " docs_unread=\"{}\"", res.docsUnread );   // absent means every indexed doc was read
+    }
+    if( res.escapedRoot > 0 )
+    {
+        // §SEC1 — absent means no symlink under this root pointed out of it (every repository, until one is hostile)
+        rw::emitTo( out, " escaped_root=\"{}\"", ( unsigned long long ) res.escapedRoot );
     }
     if( !res.filter.empty() )
     {
-        std::fprintf( out, " filter=\"%s\"", ex( res.filter ).c_str() );
+        rw::emitTo( out, " filter=\"{}\"", ex( res.filter ).c_str() );
     }
     // r26-stamp Task A: anchor these counts to the commit (and dirty-tree state) they were computed against —
     // omitted entirely on a non-git root rather than printed as a placeholder (see gitstamp.h's header comment).
     if( !res.atStamp.empty() )
     {
-        std::fprintf( out, " at=\"%s\"", res.atStamp.c_str() );
+        rw::emitTo( out, " at=\"{}\"", res.atStamp.c_str() );
     }
     {
         char pab[ kPageDisclosureCap ];
-        std::fprintf( out, "%s", pageDisclosure( pab, sizeof( pab ), docPage.end - docPage.begin, res.docs.size(),
+        rw::emitTo( out, "{}", pageDisclosure( pab, sizeof( pab ), docPage.end - docPage.begin, res.docs.size(),
                                                  docPage.end, pageLimit, pageOffset, false ) );
     }
-    std::fprintf( out, ">" );
+    rw::emitTo( out, "{}", docDriftNext.c_str() );
+    rw::emitRaw( out, ">" );
 
     // What the history probe did, when it was asked for — stated up front so a reader knows whether the
     // mention lane below is the strong (three-way) one or the old two-way one.
@@ -2743,26 +2841,31 @@ inline void writeDocDriftPage( std::FILE* out, const DriftResult& res, std::size
     for( std::size_t docIndex = docPage.begin; docIndex < docPage.end; ++docIndex )
     {
         const DocRow& row = res.docs[ docIndex ];
-        std::fprintf( out, "<doc p=\"%s\" anchors=\"%u\" checked=\"%u\" drift=\"%zu\" dated=\"%u\">",
+        // THE VERDICT IS COMPUTED FROM THE FULL SET, NOT THE WINDOW: both numbers below are taken from
+        // row.drifted.size() / row.datedCount, which the cap never touches. Asserted rather than trusted —
+        // the whole class this round closes is a count that quietly starts following the emitted rows.
+        VERIFY( row.datedCount <= row.drifted.size() );
+        rw::emitTo( out, "<doc p=\"{}\" anchors=\"{}\" checked=\"{}\" drift=\"{}\" dated=\"{}\"",
                       ex( row.path ).c_str(), row.anchorCount, row.checkedCount + std::uint32_t( row.drifted.size() ),
                       row.drifted.size() - row.datedCount, row.datedCount );
         // "Nothing is dropped without a number": shownCount is what the loop will PRINT, so the <more/>
         // remainder is exactly what it will not. The `shown++ >= cap` form got this wrong twice over — it
         // left the counter at cap+1, so <more/> under-reported the drop by one, and at exactly cap+1 rows
         // the element vanished entirely and one row disappeared unmarked.
-        const std::size_t shownCount = std::min( row.drifted.size(), maxPerDoc );
+        const std::size_t shownCount = std::min( row.drifted.size(), anchorCap );
+        rw::emitTo( out, "{}>", secondaryCutAttrs( "failed", shownCount, row.drifted.size(), "failed_total" ).c_str() );
         for( std::size_t anchorIndex = 0; anchorIndex < shownCount; ++anchorIndex )
         {
             writeAnchor( out, row.drifted[ anchorIndex ], ex );
         }
         if( row.drifted.size() > shownCount )
         {
-            std::fprintf( out, "<more drift=\"%zu\"/>", row.drifted.size() - shownCount );
+            rw::emitTo( out, "<more drift=\"{}\"/>", row.drifted.size() - shownCount );
         }
-        std::fprintf( out, "</doc>" );
+        rw::emitRaw( out, "</doc>" );
     }
 
-    writeWeakDisclosures( out, res, maxPerDoc, ex );
+    writeWeakDisclosures( out, res, anchorCap, ex );
 
     // The two tallies print the same shape from two tables, so one emitter serves both — the reader can see
     // WHICH reason or WHICH dating mark carried each count rather than taking the header number on trust.
@@ -2776,7 +2879,7 @@ inline void writeDocDriftPage( std::FILE* out, const DriftResult& res, std::size
         writeGateability( out, res, ex );
     }
 
-    std::fprintf( out, "</doc-drift>" );
+    rw::emitRaw( out, "</doc-drift>" );
 }
 
 // The un-paginated form — unchanged contract, for callers that want every drifted doc in one document.

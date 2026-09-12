@@ -28,7 +28,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -146,7 +146,7 @@ MISS_OUT="$( "$BIN" src --expand=totally_bogus_symbol_zzz --no-cache 2>/dev/null
 
 # a REAL symbol under --expand still exits 0 (the fix must not regress the success path)
 HIT_RC=$( "$BIN" src --expand=buildGraph --no-cache >/dev/null 2>&1; echo $? )
-[ "$HIT_RC" = 0 ] && ok "--expand of a real symbol (buildGraph) still exits 0" || no "--expand=buildGraph regressed to exit $HIT_RC"
+if [ "$HIT_RC" = 0 ]; then ok "--expand of a real symbol (buildGraph) still exits 0"; else no "--expand=buildGraph regressed to exit $HIT_RC"; fi
 
 # a MIXED list (one hit, one miss) still exits non-zero — any miss in the comma list fails the call
 MIX_RC=$( "$BIN" src --expand=buildGraph,totally_bogus_symbol_zzz --no-cache >/dev/null 2>&1; echo $? )

@@ -41,7 +41,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -232,7 +232,7 @@ forXmlSib "2,2" >"$TMP/d2.xml"
     && ok "determinism x2 with RIPWIRE_SIBLIFT=2,2 set" \
     || no "non-deterministic (or empty) output with RIPWIRE_SIBLIFT=2,2 set"
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/d1.xml" 2>/dev/null && ok "RIPWIRE_SIBLIFT=2,2 output is xmllint-clean (G4)" || no "RIPWIRE_SIBLIFT=2,2 output not well-formed"
+    if xmllint --noout "$TMP/d1.xml" 2>/dev/null; then ok "RIPWIRE_SIBLIFT=2,2 output is xmllint-clean (G4)"; else no "RIPWIRE_SIBLIFT=2,2 output not well-formed"; fi
 else
     ok "xmllint not present — skipped (G4 covered elsewhere)"
 fi

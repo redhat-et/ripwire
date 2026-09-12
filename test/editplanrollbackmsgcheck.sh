@@ -37,7 +37,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ "$( id -u )" != 0 ] || { echo "SKIP: running as root — a read-only directory cannot fail a write"; exit 0; }
@@ -122,7 +122,7 @@ echo "=== 2b. E4 (terminality round A 2026-09-05): each failure names the ONE ca
 for tag in first second; do
     NX="$( sed -n 's/.*next: //p' "$TMP/$tag.err" | head -1 )"
     NNEXT="$( grep -o 'next: ' "$TMP/$tag.err" | wc -l | tr -d ' ' )"
-    [ "$NNEXT" = 1 ] && ok "($tag) the message carries exactly one next:" || no "($tag) the message carries $NNEXT 'next:' clauses (want 1): $( head -c 200 "$TMP/$tag.err" )"
+    if [ "$NNEXT" = 1 ]; then ok "($tag) the message carries exactly one next:"; else no "($tag) the message carries $NNEXT 'next:' clauses (want 1): $( head -c 200 "$TMP/$tag.err" )"; fi
     case "$NX" in
         "git -C corpus diff --exit-code -- "*) ok "($tag) next: is git -C <root> diff --exit-code over the plan's files ($NX)";;
         *) no "($tag) next: is not 'git -C <root> diff --exit-code -- <files>': '$NX'";;

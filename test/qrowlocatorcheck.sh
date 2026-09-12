@@ -25,7 +25,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -90,8 +90,8 @@ for loc in $( printf '%s\n' "$ROWS" | sed -n 's/.* p="\([^"]*\)".*/\1/p' ); do
     [ -f "$REPO/$lp" ] || { badpath=$(( badpath + 1 )); echo "      unresolvable: $loc"; }
     case "$ln" in ''|*[!0-9]*|0) badline=$(( badline + 1 )); echo "      bad line: $loc";; esac
 done
-[ "$badpath" -eq 0 ] && ok "every p= path is root-relative and resolves to a real file" || no "$badpath p= path(s) do not resolve"
-[ "$badline" -eq 0 ] && ok "every p= line number is a non-zero integer" || no "$badline p= line number(s) are 0/non-numeric"
+if [ "$badpath" -eq 0 ]; then ok "every p= path is root-relative and resolves to a real file"; else no "$badpath p= path(s) do not resolve"; fi
+if [ "$badline" -eq 0 ]; then ok "every p= line number is a non-zero integer"; else no "$badline p= line number(s) are 0/non-numeric"; fi
 
 # ── (c)(d) gating="1" is an explicit, self-consistent marker ───────────────────────────────────────────────
 HDR_GATING="$( sed -n 's/.*<quality-delta [^>]*gating="\([0-9]*\)".*/\1/p' "$TMP/x" )"
@@ -99,14 +99,14 @@ ROW_GATING="$( printf '%s\n' "$ROWS" | grep -c ' gating="1"' )"
 { [ -n "$HDR_GATING" ] && [ "$HDR_GATING" = "$ROW_GATING" ]; } \
     && ok "rows marked gating=\"1\" ($ROW_GATING) == header gating=\"$HDR_GATING\"" \
     || no "gating row count $ROW_GATING != header gating=\"$HDR_GATING\""
-[ "$ROW_GATING" -gt 0 ] && ok "the fixture has at least one gating row (non-vacuous)" || no "no gating rows — (c)/(e) are vacuous"
+if [ "$ROW_GATING" -gt 0 ]; then ok "the fixture has at least one gating row (non-vacuous)"; else no "no gating rows — (c)/(e) are vacuous"; fi
 
 contra="$( printf '%s\n' "$ROWS" | grep ' gating="1"' | grep -cE 'sev="minor"|origin="new-symbol"' )"
 [ "$contra" -eq 0 ] && ok "gating=\"1\" never co-occurs with sev=\"minor\" or origin=\"new-symbol\"" \
                     || { no "$contra gating row(s) also carry minor/new-symbol — the marker contradicts the predicate"; printf '%s\n' "$ROWS" | grep ' gating="1"' | grep -E 'sev="minor"|origin="new-symbol"' | head -2; }
 
 # ── (e) one stderr line naming the gating finding at exit 2 ────────────────────────────────────────────────
-[ "$rc" -eq 2 ] && ok "gating findings exit 2" || no "expected exit 2, got $rc"
+if [ "$rc" -eq 2 ]; then ok "gating findings exit 2"; else no "expected exit 2, got $rc"; fi
 if grep -q 'ripwire: --quality-delta gating: ' "$TMP/xerr"; then
     LINE="$( grep 'ripwire: --quality-delta gating: ' "$TMP/xerr" )"
     ok "exit 2 prints a gating line on stderr"
@@ -152,7 +152,7 @@ cat >> "$REPO/inc/api.h" <<'EOF'
 int addedExport( int a );
 EOF
 run --json >"$TMP/j" 2>/dev/null
-grep -q '"p":"' "$TMP/j" && ok "--json rows carry \"p\"" || { no "--json rows have no \"p\" locator"; head -c 400 "$TMP/j"; echo; }
+if grep -q '"p":"' "$TMP/j"; then ok "--json rows carry \"p\""; else { no "--json rows have no \"p\" locator"; head -c 400 "$TMP/j"; echo; }; fi
 J_HDR="$( grep -o '"gating":[0-9][0-9]*' "$TMP/j" | head -1 | cut -d: -f2 )"
 J_ROWS="$( grep -o '"gating":true' "$TMP/j" | wc -l | tr -d ' ' )"
 { [ -n "$J_HDR" ] && [ "$J_HDR" = "$J_ROWS" ] && [ "$J_ROWS" -gt 0 ]; } \
@@ -164,7 +164,7 @@ J_ROWS="$( grep -o '"gating":true' "$TMP/j" | wc -l | tr -d ' ' )"
 
 if command -v xmllint >/dev/null 2>&1; then
     run >"$TMP/x2" 2>/dev/null
-    xmllint --noout "$TMP/x2" 2>/dev/null && ok "G4: the report with p=/gating= is xmllint-clean" || no "G4: xmllint rejected the report"
+    if xmllint --noout "$TMP/x2" 2>/dev/null; then ok "G4: the report with p=/gating= is xmllint-clean"; else no "G4: xmllint rejected the report"; fi
 else
     echo "  SKIP  xmllint not available (G4 sub-check)"
 fi

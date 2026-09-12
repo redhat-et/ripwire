@@ -37,7 +37,7 @@ SERVER="$FIXTURE/server"
 CLIENT="$FIXTURE/client"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -63,7 +63,7 @@ SINGLE="$( forDump "$FIXTURE" )"
 "$BIN" "$FIXTURE" --for="$FORQ" --no-cache >"$TMP/s3" 2>/dev/null
 diff -q "$TMP/s1" "$TMP/s2" >/dev/null && diff -q "$TMP/s2" "$TMP/s3" >/dev/null \
   && ok "single-root: determinism x3 (byte-identical)" || no "single-root: non-deterministic output"
-printf '%s' "$SINGLE" | xmllint --noout - 2>/dev/null && ok "single-root: xmllint-clean" || no "single-root: xmllint failed"
+if printf '%s' "$SINGLE" | xmllint --noout - 2>/dev/null; then ok "single-root: xmllint-clean"; else no "single-root: xmllint failed"; fi
 
 # (a) route DEF facts: the handler signatures are visible
 printf '%s' "$SINGLE" | grep -q 'def get_user(user_id: int):' \
@@ -115,7 +115,7 @@ MULTI="$( forDump "$SERVER" "$CLIENT" )"
 "$BIN" "$SERVER" "$CLIENT" --for="$FORQ" --no-cache >"$TMP/m3" 2>/dev/null
 diff -q "$TMP/m1" "$TMP/m2" >/dev/null && diff -q "$TMP/m2" "$TMP/m3" >/dev/null \
   && ok "multi-root: determinism x3 (byte-identical)" || no "multi-root: non-deterministic output"
-printf '%s' "$MULTI" | xmllint --noout - 2>/dev/null && ok "multi-root: xmllint-clean" || no "multi-root: xmllint failed"
+if printf '%s' "$MULTI" | xmllint --noout - 2>/dev/null; then ok "multi-root: xmllint-clean"; else no "multi-root: xmllint failed"; fi
 
 printf '%s' "$MULTI" | grep -q '<route method="GET" path="/users/{user_id}" from="loadUser" to="get_user"/>' \
   && ok "multi-root: cross-root template-path match GET /users/{user_id} loadUser->get_user" \

@@ -17,7 +17,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -32,8 +32,8 @@ CALLS_TAG="$( printf '%s' "$EXP_XML" | grep -oE '<calls[^>]*>' | head -1 )"
 CALLEES_COUNT="$( "$BIN" . --callees=ingest --no-cache 2>/dev/null | grep -oE 'count="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"
 EXP_TOTAL="$( printf '%s' "$CALLS_TAG" | grep -oE 'total="[0-9]+"' | grep -oE '[0-9]+' )"
 
-[ -n "$CALLS_TAG" ] && ok "--expand=ingest emits a <calls> block ($CALLS_TAG)" || no "--expand=ingest emitted NO <calls> block"
-[ -n "$EXP_TOTAL" ] && ok "<calls> carries total= ($EXP_TOTAL)" || no "<calls> has no total= attribute (the P10.1 bug)"
+if [ -n "$CALLS_TAG" ]; then ok "--expand=ingest emits a <calls> block ($CALLS_TAG)"; else no "--expand=ingest emitted NO <calls> block"; fi
+if [ -n "$EXP_TOTAL" ]; then ok "<calls> carries total= ($EXP_TOTAL)"; else no "<calls> has no total= attribute (the P10.1 bug)"; fi
 if [ -n "$EXP_TOTAL" ] && [ -n "$CALLEES_COUNT" ] && [ "$EXP_TOTAL" = "$CALLEES_COUNT" ]; then
     ok "<calls total=\"$EXP_TOTAL\"> agrees with --callees=ingest's count=\"$CALLEES_COUNT\""
 else

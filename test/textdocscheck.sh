@@ -42,7 +42,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -127,7 +127,7 @@ QUERY='which isolation scheme did we choose for the settlement worker and why'
 echo
 echo "=== presence guards: the fixture really spells what the arms below assert ==="
 # ═══════════════════════════════════════════════════════════════════════════
-guard(){ grep -qF -- "$2" "$1" && ok "fixture spells $3" || no "fixture LOST $3 — its arm below would pass by finding nothing"; }
+guard(){ if grep -qF -- "$2" "$1"; then ok "fixture spells $3"; else no "fixture LOST $3 — its arm below would pass by finding nothing"; fi; }
 guard "$FIX/docs/adr/0007-isolation.rst" 'bulkhead isolation'    'the .rst decision phrase "bulkhead isolation"'
 guard "$FIX/docs/adr/0007-isolation.rst" '======================' 'the .rst setext-shaped title underline'
 guard "$FIX/docs/adr/0008-retry.adoc"    '== Decision'           'the .adoc section marker'
@@ -210,7 +210,7 @@ case "$rstLine" in
 esac
 "$BIN" "$FIX" --recall='retry budget for the refund poller' --no-cache >"$TMP/recall_adoc.txt" 2>&1
 adocLine="$( grep -F '0008-retry.adoc' "$TMP/recall_adoc.txt" | head -1 )"
-[ -n "$adocLine" ] && ok "C: the .adoc is reachable by its own query" || no "C: the .adoc is unreachable"
+if [ -n "$adocLine" ]; then ok "C: the .adoc is reachable by its own query"; else no "C: the .adoc is unreachable"; fi
 case "$adocLine" in
     *section-granular*) no "C: the .adoc claims section-granular serving — markdown cannot read '== Section'" ;;
     *)                  ok "C: the .adoc serves as one whole-file unit (no false granularity claim)" ;;

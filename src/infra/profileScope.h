@@ -40,6 +40,8 @@
 //
 
 #pragma once
+#include "emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // ---- configuration (override by #define-ing before the include) -------------
 #ifndef PROFILE_ENABLED
@@ -518,8 +520,8 @@ public:
             }
             else
             {
-                std::fprintf( stderr,
-                    "PROFILE WARNING: thread %llu (%s) still running at exit — join it "
+                rw::emitTo( stderr,
+                    "PROFILE WARNING: thread {} ({}) still running at exit — join it "
                     "before main() returns; leaking its profile data to stay safe\n",
                     (unsigned long long) d->tid, d->name[ 0 ] ? d->name : "unnamed" );
             }
@@ -804,23 +806,23 @@ inline void fmt_count( char* buf, std::size_t sz, uint64_t v ) noexcept
 {
     if( v < 1000ull )
     {
-        std::snprintf( buf, sz, "%llu", (unsigned long long)v );
+        rw::formatTo( buf, sz, "{}", (unsigned long long)v );
     }
     else if( v < 1000000ull )
     {
-        std::snprintf( buf, sz, "%.2fk", double( v ) * 1e-3 );
+        rw::formatTo( buf, sz, "{:.2f}k", double( v ) * 1e-3 );
     }
     else if( v < 1000000000ull )
     {
-        std::snprintf( buf, sz, "%.2fM", double( v ) * 1e-6 );
+        rw::formatTo( buf, sz, "{:.2f}M", double( v ) * 1e-6 );
     }
     else if( v < 1000000000000ull )
     {
-        std::snprintf( buf, sz, "%.2fG", double( v ) * 1e-9 );
+        rw::formatTo( buf, sz, "{:.2f}G", double( v ) * 1e-9 );
     }
     else
     {
-        std::snprintf( buf, sz, "%.2fT", double( v ) * 1e-12 );
+        rw::formatTo( buf, sz, "{:.2f}T", double( v ) * 1e-12 );
     }
 }
 
@@ -878,13 +880,13 @@ inline void name_and_loc( const Row& r, char* nameBuf, std::size_t nameSz,
     trim_pretty( r.site->pretty, fn, sizeof( fn ) );
     if( r.site->description )
     {
-        std::snprintf( nameBuf, nameSz, "%s [%s]", fn, r.site->description );
+        rw::formatTo( nameBuf, nameSz, "{} [{}]", rw::cstr( fn ), r.site->description );
     }
     else
     {
-        std::snprintf( nameBuf, nameSz, "%s", fn );
+        rw::formatTo( nameBuf, nameSz, "{}", rw::cstr( fn ) );
     }
-    std::snprintf( locBuf, locSz, "%s:%d", r.site->file, r.site->line );
+    rw::formatTo( locBuf, locSz, "{}:{}", r.site->file, r.site->line );
 }
 
 inline int index_of_site( const ThreadSnap& s, const Site* site )
@@ -927,8 +929,10 @@ inline void print_tree_node( const ThreadSnap& s, const std::vector<std::vector<
 
     char indented[ 208 ];
     const int pad = depth * 2;
-    std::snprintf( indented, sizeof( indented ), "%*s%s%s", pad, "", nameBuf,
-                   multiParent ? " *" : "" );
+    // %*s -> {:{}}: std::format takes the VALUE first and the width as the following argument, where
+    // printf takes the width first. Proven byte-identical across pad 0..16.
+    rw::formatTo( indented, sizeof( indented ), "{:{}}{}{}", "", pad, rw::cstr( nameBuf ),
+                  multiParent ? " *" : "" );
 
     // Percentage is share of the thread's top-level time (a fixed, bounded denominator),
     // not child/parent -- the latter is meaningless once a child aggregates many callers.

@@ -13,7 +13,7 @@ set -u
 BIN="${1:-${RIPWIRE_BIN:-./build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 REPO="$(mktemp -d)"; NR="$(mktemp -d)"; trap 'rm -rf "$REPO" "$NR"' EXIT
@@ -40,7 +40,7 @@ if printf '%s' "$hout" | grep -q 'ranked="0"' && printf '%s' "$hout" | grep -q '
 else
   no "--hotspots empty since-window should report ranked=\"0\" commits=\"0\""; echo "     got: $hout"
 fi
-printf '%s' "$hout" | xmllint --noout - 2>/dev/null && ok "--hotspots empty-window output is well-formed XML" || no "--hotspots empty-window XML malformed"
+if printf '%s' "$hout" | xmllint --noout - 2>/dev/null; then ok "--hotspots empty-window output is well-formed XML"; else no "--hotspots empty-window XML malformed"; fi
 
 # ── 1b) --cochange --since=<future>: exit 0 + honest zero, NOT the git-unavailable error ──────────────────────
 cout="$("$BIN" "$REPO" --cochange --since="$FUTURE" --no-cache 2>"$REPO/c.err")"; crc=$?
@@ -55,22 +55,22 @@ if printf '%s' "$cout" | grep -q 'pairs="0"' && printf '%s' "$cout" | grep -q 'c
 else
   no "--cochange empty since-window should report pairs=\"0\" commits=\"0\""; echo "     got: $cout"
 fi
-printf '%s' "$cout" | xmllint --noout - 2>/dev/null && ok "--cochange empty-window output is well-formed XML" || no "--cochange empty-window XML malformed"
+if printf '%s' "$cout" | xmllint --noout - 2>/dev/null; then ok "--cochange empty-window output is well-formed XML"; else no "--cochange empty-window XML malformed"; fi
 
 # ── 2) a genuine non-repo dir STILL errors (exit non-zero) for both verbs ─────────────────────────────────────
 printf 'int c(int x){ if(x){return 1;} return 0; }\n' > "$NR/C.cpp"
 "$BIN" "$NR" --hotspots --no-cache >/dev/null 2>&1; nrh=$?
-[ "$nrh" -ne 0 ] && ok "--hotspots on a genuine non-repo still errors (exit $nrh)" || no "--hotspots on a non-repo should exit non-zero"
+if [ "$nrh" -ne 0 ]; then ok "--hotspots on a genuine non-repo still errors (exit $nrh)"; else no "--hotspots on a non-repo should exit non-zero"; fi
 "$BIN" "$NR" --cochange --no-cache >/dev/null 2>&1; nrc=$?
-[ "$nrc" -ne 0 ] && ok "--cochange on a genuine non-repo still errors (exit $nrc)" || no "--cochange on a non-repo should exit non-zero"
+if [ "$nrc" -ne 0 ]; then ok "--cochange on a genuine non-repo still errors (exit $nrc)"; else no "--cochange on a non-repo should exit non-zero"; fi
 
 # ── 3) determinism of the empty-window outputs ───────────────────────────────────────────────────────────────
 h1="$("$BIN" "$REPO" --hotspots --since="$FUTURE" --no-cache 2>/dev/null)"
 h2="$("$BIN" "$REPO" --hotspots --since="$FUTURE" --no-cache 2>/dev/null)"
-[ "$h1" = "$h2" ] && ok "--hotspots empty-window deterministic" || no "--hotspots empty-window not deterministic"
+if [ "$h1" = "$h2" ]; then ok "--hotspots empty-window deterministic"; else no "--hotspots empty-window not deterministic"; fi
 p1="$("$BIN" "$REPO" --cochange --since="$FUTURE" --no-cache 2>/dev/null)"
 p2="$("$BIN" "$REPO" --cochange --since="$FUTURE" --no-cache 2>/dev/null)"
-[ "$p1" = "$p2" ] && ok "--cochange empty-window deterministic" || no "--cochange empty-window not deterministic"
+if [ "$p1" = "$p2" ]; then ok "--cochange empty-window deterministic"; else no "--cochange empty-window not deterministic"; fi
 
 
 # ── 4) THE DEFAULT WINDOW'S ANCHOR (F1/F2/F3, round C lane D) ────────────────────────────────────────────────
@@ -207,8 +207,8 @@ rm -rf "$NH"
 
 # 4f) determinism + well-formedness on the anchored path (the anchor must not import the wall clock).
 oc1="$("$BIN" "$OLD" --cochange --no-cache 2>/dev/null)"; oc2="$("$BIN" "$OLD" --cochange --no-cache 2>/dev/null)"
-[ "$oc1" = "$oc2" ] && ok "--cochange anchored window deterministic" || no "--cochange anchored window not deterministic"
-printf '%s' "$oc1" | xmllint --noout - 2>/dev/null && ok "--cochange anchored output is well-formed XML" || no "--cochange anchored XML malformed"
+if [ "$oc1" = "$oc2" ]; then ok "--cochange anchored window deterministic"; else no "--cochange anchored window not deterministic"; fi
+if printf '%s' "$oc1" | xmllint --noout - 2>/dev/null; then ok "--cochange anchored output is well-formed XML"; else no "--cochange anchored XML malformed"; fi
 
 # 4g) an EXPLICIT --since is the user's own choice and stays wall-clock-relative — the opt-out, and the reason
 #     no new flag exists. A future date must still be an honest empty window here.

@@ -27,7 +27,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -47,20 +47,20 @@ CPP
 
 # ── 1) connected triple: one <g>, Steiner node orch (as <s> with sig=), the exact 3 edges ──────────────
 OUT="$( "$BIN" "$SC" --no-cache --connect=a,b,c 2>/dev/null )"
-printf '%s' "$OUT" | grep -q '<connect '            && ok "--connect emits a <connect> root"          || no "no <connect> root: $( printf '%s' "$OUT" | head -c 200 )"
+if printf '%s' "$OUT" | grep -q '<connect '; then ok "--connect emits a <connect> root"; else no "no <connect> root: $( printf '%s' "$OUT" | head -c 200 )"; fi
 [ "$( printf '%s' "$OUT" | grep -o '<g ' | wc -l | tr -d ' ' )" = "1" ] \
     && ok "connected triple forms exactly ONE group" || no "expected exactly one <g>: $OUT"
 printf '%s' "$OUT" | grep -q '<s n="orch"[^>]* sig="' \
     && ok "orch is the Steiner <s> node and carries sig=" || no "orch missing as <s> with sig=: $OUT"
 for e in '<e f="orch" t="a"/>' '<e f="orch" t="b"/>' '<e f="b" t="c"/>'; do
-    printf '%s' "$OUT" | grep -qF "$e" && ok "edge present: $e" || no "edge missing: $e in $OUT"
+    if printf '%s' "$OUT" | grep -qF "$e"; then ok "edge present: $e"; else no "edge missing: $e in $OUT"; fi
 done
 [ "$( printf '%s' "$OUT" | grep -o '<e f="' | wc -l | tr -d ' ' )" = "3" ] \
     && ok "exactly 3 edges (no spurious edges)" || no "edge count != 3: $OUT"
 for t in a b c; do
-    printf '%s' "$OUT" | grep -q "<t n=\"$t\"" && ok "terminal <t n=\"$t\"> present" || no "terminal $t missing: $OUT"
+    if printf '%s' "$OUT" | grep -q "<t n=\"$t\""; then ok "terminal <t n=\"$t\"> present"; else no "terminal $t missing: $OUT"; fi
 done
-printf '%s' "$OUT" | grep -q 'est_tokens="' && ok "root carries est_tokens=" || no "est_tokens missing: $OUT"
+if printf '%s' "$OUT" | grep -q 'est_tokens="'; then ok "root carries est_tokens="; else no "est_tokens missing: $OUT"; fi
 
 # ── 2) direction correctness is covered by the exact-attribute greps above (f=\"orch\" t=\"a\") ────────
 
@@ -68,7 +68,7 @@ printf '%s' "$OUT" | grep -q 'est_tokens="' && ok "root carries est_tokens=" || 
 OUT2="$( "$BIN" "$SC" --no-cache --connect=a,b,island 2>/dev/null )"
 printf '%s' "$OUT2" | grep -q '<unconnected radius="[0-9]*"><t n="island"' \
     && ok "island lands in <unconnected> (with the radius that was tried)" || no "island not in <unconnected>: $OUT2"
-printf '%s' "$OUT2" | grep -q '<g ' && ok "the a,b pair still forms a connected <g> beside the island" || no "a,b group missing: $OUT2"
+if printf '%s' "$OUT2" | grep -q '<g '; then ok "the a,b pair still forms a connected <g> beside the island"; else no "a,b group missing: $OUT2"; fi
 # a fully-disconnected pair: BOTH terminals appear, in <unconnected>, and the output is never empty
 OUT3="$( "$BIN" "$SC" --no-cache --connect=a,island 2>/dev/null )"
 printf '%s' "$OUT3" | grep -q '<t n="a"' && printf '%s' "$OUT3" | grep -q '<t n="island"' \
@@ -82,11 +82,11 @@ diff -q "$TMP/d1" "$TMP/d2" >/dev/null && diff -q "$TMP/d2" "$TMP/d3" >/dev/null
     && ok "determinism: 3 runs byte-identical" || no "non-deterministic --connect output"
 "$BIN" "$SC" --connect=a,b,c >"$TMP/w1" 2>/dev/null     # first cached run
 "$BIN" "$SC" --connect=a,b,c >"$TMP/w2" 2>/dev/null     # warm run
-diff -q "$TMP/d1" "$TMP/w2" >/dev/null && ok "warm == cold (cache-neutral)" || no "warm run differs from cold"
+if diff -q "$TMP/d1" "$TMP/w2" >/dev/null; then ok "warm == cold (cache-neutral)"; else no "warm run differs from cold"; fi
 
 # ── 5) G4: well-formed XML ──────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$OUT2" | xmllint --noout - 2>/dev/null && ok "xml well-formed (xmllint)" || no "xml malformed"
+    if printf '%s' "$OUT2" | xmllint --noout - 2>/dev/null; then ok "xml well-formed (xmllint)"; else no "xml malformed"; fi
 else
     ok "xmllint absent — skipped"
 fi
@@ -117,7 +117,7 @@ printf '%s' "$R8" | grep -q '<g ' && printf '%s' "$R8" | grep -q '<s n="n4"' \
 ERR="$( "$BIN" "$SC" --no-cache --connect=a,orcj 2>&1 >/dev/null )"; RC=$?
 [ "$RC" -ne 0 ] && printf '%s' "$ERR" | grep -qi 'not found' \
     && ok "unresolvable terminal → hard error (exit $RC)" || no "bad terminal did not fail cleanly: rc=$RC err=$ERR"
-printf '%s' "$ERR" | grep -q 'orch' && ok "did-you-mean suggests 'orch' for 'orcj'" || no "no did-you-mean suggestion: $ERR"
+if printf '%s' "$ERR" | grep -q 'orch'; then ok "did-you-mean suggests 'orch' for 'orcj'"; else no "no did-you-mean suggestion: $ERR"; fi
 # terminal-count usage errors: 1 symbol / >16 symbols
 "$BIN" "$SC" --no-cache --connect=a >/dev/null 2>&1 && no "single terminal accepted (usage error expected)" || ok "single terminal rejected (needs 2..16)"
 MANY="a,b,c,orch,island,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12"
@@ -164,8 +164,8 @@ print("__ERROR__:" + json.dumps(r["error"]) if "error" in r else r["result"]["co
         *'<connect '*) ok "connect verb returns a <connect> payload";;
         *) no "connect verb payload malformed: $( printf '%s' "$INNER" | head -c 200 )";;
     esac
-    printf '%s' "$INNER" | grep -q '<s n="orch"' && ok "MCP payload carries the orch Steiner node" || no "MCP payload missing orch: $INNER"
-    diff -q "$TMP/m1" "$TMP/m2" >/dev/null && ok "connect verb deterministic across two MCP calls" || no "connect verb non-deterministic"
+    if printf '%s' "$INNER" | grep -q '<s n="orch"'; then ok "MCP payload carries the orch Steiner node"; else no "MCP payload missing orch: $INNER"; fi
+    if diff -q "$TMP/m1" "$TMP/m2" >/dev/null; then ok "connect verb deterministic across two MCP calls"; else no "connect verb non-deterministic"; fi
     # comma-string symbols form + radius arg accepted
     CMSG2='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"connect","arguments":{"path":"'"$SC"'","symbols":"a,b","radius":3}}}'
     INNER2="$( mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' "$CMSG2" | tail -1 | python3 -c '
@@ -173,7 +173,7 @@ import sys, json
 r = json.load(sys.stdin)
 print("__ERROR__" if "error" in r else r["result"]["content"][0]["text"])
 ' )"
-    printf '%s' "$INNER2" | grep -q 'radius="3"' && ok "comma-string symbols + radius arg honored" || no "comma-string/radius form failed: $INNER2"
+    if printf '%s' "$INNER2" | grep -q 'radius="3"'; then ok "comma-string symbols + radius arg honored"; else no "comma-string/radius form failed: $INNER2"; fi
 else
     ok "python3 absent — MCP smoke skipped"
 fi

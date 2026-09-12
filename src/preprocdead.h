@@ -36,6 +36,9 @@
 
 #include <tree_sitter/api.h>
 
+#include "infra/fieldid.h"   // rw::fieldChild / NodeField — the field id resolved once per grammar, not per node
+#include "infra/tschildren.h"   // P1-0: ChildCursor/collectChildren — the O(C) child collection this walk needs
+
 namespace rw
 {
 
@@ -71,7 +74,7 @@ inline PreprocLiteral preprocLiteralBranch( TSNode n, std::string_view src ) noe
     {
         return PreprocLiteral::Undecided;
     }
-    const TSNode cond = ts_node_child_by_field_name( n, "condition", 9 );
+    const TSNode cond = fieldChild( n, NodeField::Condition );
     if( ts_node_is_null( cond ) || !preprocNodeKindIs( cond, "number_literal" ) )
     {
         return PreprocLiteral::Undecided;
@@ -95,8 +98,29 @@ inline PreprocLiteral preprocLiteralBranch( TSNode n, std::string_view src ) noe
 // covers it. The dead ALTERNATIVE of `#if 1` runs from the start of that chain to the end of the node.
 //
 // Ranges may overlap and are NOT merged: the only consumer asks "does this byte fall in any of them", and
-// merging would be work done for no reader. Deterministic — pre-order, no map iteration, no allocation
-// beyond the output vector.
+// merging would be work done for no reader. Deterministic — one fixed DFS order, no map iteration.
+//
+// THE WALK IS CURSOR-BASED, NOT INDEXED (audit P1-0, 2026-09-10). It used to read its children with
+// `ts_node_child( n, i )`, which restarts tree-sitter's child iterator from the first child on every call
+// and so costs O(C²) in a node's child count — the exact rule stated on src/infra/tschildren.h, broken
+// here because the helper that enforces it used to be reachable only from inside ingest.cpp. The `#if`
+// text gate below is what hid it: no `#if` anywhere in a file means no walk at all, so Go/Python/JS
+// corpora never pay it — but every C/C++ header on earth opens that gate with its INCLUDE GUARD, which
+// then makes the guard's own preproc_ifdef node one node whose child list is the whole file. MEASURED,
+// cold llvm-project, one interleaved pair on the same box: 202.14 s CPU / 26.60 s wall -> 170.46 s /
+// 18.99 s, map byte-identical; this function's inclusive share of busy leaf samples 56.67% -> 2.07%, and
+// `ts_node_child_iterator_next` 62.99% -> 13.44% (the residue is the OTHER indexed walks, itemised in
+// test/preprocdeadscalecheck.sh's FOLLOW-UP block). The 31.7 s realised is well short of the 107 s the
+// 56.67% share implies, because that share was read from a 12 s window of a 26 s run and a leaf share is
+// not a whole-run share — the A/B is the number to believe. Same child set, same left-to-right order,
+// same emitted ranges — only the cost changed. Gate:
+// test/preprocdeadscalecheck.sh, whose arm (C) is the isolating control (the identical comment flood with
+// and without an include guard) and whose (D1)/(D2) arms hold the byte-identity against the indexed form.
+//
+// Children are pushed in index order and popped from the back, so a node's children are VISITED in
+// reverse; that is the order the indexed form had and it is preserved deliberately. Nothing downstream
+// reads the range vector in order (inPreprocDead is a membership test), but "the ranges are the same
+// SET" is a weaker claim than "the output is byte-identical", and only the second one is gateable.
 inline std::vector<PreprocDeadRange> collectPreprocDeadRanges( TSNode root, std::string_view src )
 {
     std::vector<PreprocDeadRange> out;
@@ -108,6 +132,7 @@ inline std::vector<PreprocDeadRange> collectPreprocDeadRanges( TSNode root, std:
     }
 
     std::vector<TSNode> stack;
+    ChildCursor         cursor( root );   // reused across nodes — ts_tree_cursor_reset re-points it at each one
     stack.push_back( root );
     while( !stack.empty() )
     {
@@ -117,8 +142,8 @@ inline std::vector<PreprocDeadRange> collectPreprocDeadRanges( TSNode root, std:
         const PreprocLiteral lit = preprocLiteralBranch( n, src );
         if( lit != PreprocLiteral::Undecided )
         {
-            const TSNode      cond = ts_node_child_by_field_name( n, "condition", 9 );
-            const TSNode      alt  = ts_node_child_by_field_name( n, "alternative", 11 );
+            const TSNode      cond = fieldChild( n, NodeField::Condition );
+            const TSNode      alt  = fieldChild( n, NodeField::Alternative );
             const std::uint32_t nEnd = ts_node_end_byte( n );
             if( lit == PreprocLiteral::BodyDead )
             {
@@ -133,11 +158,7 @@ inline std::vector<PreprocDeadRange> collectPreprocDeadRanges( TSNode root, std:
             }
         }
 
-        const std::uint32_t kids = ts_node_child_count( n );
-        for( std::uint32_t i = 0; i < kids; ++i )
-        {
-            stack.push_back( ts_node_child( n, i ) );
-        }
+        appendChildren( n, cursor.cur, stack );   // O(C), not O(C²) — index order in, reverse order out
     }
     return out;
 }

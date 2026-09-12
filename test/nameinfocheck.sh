@@ -149,7 +149,7 @@ int data( int amount )
 CPP
 
 fail=0
-ok(){ printf '  PASS  %s\n' "$1"; }
+ok(){ printf '  PASS  %s\n' "$1" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$1"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$1"; fail=1; }
 
 # ── determinism + non-vacuity ───────────────────────────────────────────────────────────────────────

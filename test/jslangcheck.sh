@@ -40,7 +40,7 @@ FIX="$ROOT/test/jslangfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -52,9 +52,9 @@ echo "jslangcheck: BIN=$BIN  FIX=$FIX"
 MAP_OUT="$TMP/map.xml"
 $BIN "$FIX" --no-cache >"$MAP_OUT" 2>"$TMP/map.err"
 MAP_EXIT=$?
-[ "$MAP_EXIT" -eq 0 ] && ok "default map: exits 0 on JS/Bash fixture" || no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"
+if [ "$MAP_EXIT" -eq 0 ]; then ok "default map: exits 0 on JS/Bash fixture"; else no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"; fi
 
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP_OUT" && ok "default map: passes xmllint --noout" || no "default map: xmllint failed"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP_OUT"; then ok "default map: passes xmllint --noout"; else no "default map: xmllint failed"; fi; }
 
 # ─── parse the per-file symbol + edge structure once, reuse for all checks ────
 python3 - "$MAP_OUT" <<'PYEOF' >"$TMP/parsed.json"
@@ -101,12 +101,12 @@ if grep -q "SYMS:0" "$TMP/js_check"; then
 else
     ok "a.js (JavaScript): extracted $( grep -o 'SYMS:[0-9]*' "$TMP/js_check" | cut -d: -f2 ) symbol(s)"
 fi
-grep -q "SYMS:2" "$TMP/js_check" && ok "a.js: exactly 2 symbols (addOne, addTwo — no phantom nodes)" || no "a.js: expected 2 symbols, got: $( grep SYMS "$TMP/js_check" )"
-grep -q "HAS_ADDONE:True" "$TMP/js_check" && ok "a.js: addOne symbol present" || no "a.js: addOne symbol missing"
-grep -q "HAS_ADDTWO:True" "$TMP/js_check" && ok "a.js: addTwo (arrow-fn const) symbol present" || no "a.js: addTwo symbol missing"
-grep -q "ALL_FN:True" "$TMP/js_check" && ok "a.js: both symbols tagged t=\"fn\"" || no "a.js: symbols not tagged t=\"fn\" as expected"
-grep -q "EDGE:True" "$TMP/js_check" && ok "a.js: intra-file call edge addTwo -> addOne present" || no "a.js: call edge addTwo -> addOne MISSING"
-grep -q "EDGE_N:1" "$TMP/js_check" && ok "a.js: exactly ONE addTwo -> addOne edge (dedup)" || no "a.js: expected a single addTwo -> addOne edge: $( grep EDGE_N "$TMP/js_check" )"
+if grep -q "SYMS:2" "$TMP/js_check"; then ok "a.js: exactly 2 symbols (addOne, addTwo — no phantom nodes)"; else no "a.js: expected 2 symbols, got: $( grep SYMS "$TMP/js_check" )"; fi
+if grep -q "HAS_ADDONE:True" "$TMP/js_check"; then ok "a.js: addOne symbol present"; else no "a.js: addOne symbol missing"; fi
+if grep -q "HAS_ADDTWO:True" "$TMP/js_check"; then ok "a.js: addTwo (arrow-fn const) symbol present"; else no "a.js: addTwo symbol missing"; fi
+if grep -q "ALL_FN:True" "$TMP/js_check"; then ok "a.js: both symbols tagged t=\"fn\""; else no "a.js: symbols not tagged t=\"fn\" as expected"; fi
+if grep -q "EDGE:True" "$TMP/js_check"; then ok "a.js: intra-file call edge addTwo -> addOne present"; else no "a.js: call edge addTwo -> addOne MISSING"; fi
+if grep -q "EDGE_N:1" "$TMP/js_check"; then ok "a.js: exactly ONE addTwo -> addOne edge (dedup)"; else no "a.js: expected a single addTwo -> addOne edge: $( grep EDGE_N "$TMP/js_check" )"; fi
 
 # cross-check via --callees / --callers (independent of the raw-XML parse)
 JS_CE="$( $BIN "$FIX" --callees=addTwo 2>/dev/null )"
@@ -144,12 +144,12 @@ if grep -q "SYMS:0" "$TMP/sh_check"; then
 else
     ok "b.sh (Bash): extracted $( grep -o 'SYMS:[0-9]*' "$TMP/sh_check" | cut -d: -f2 ) symbol(s)"
 fi
-grep -q "SYMS:2" "$TMP/sh_check" && ok "b.sh: exactly 2 symbols (square, sum_of_squares — bash built-ins not indexed)" || no "b.sh: expected 2 symbols, got: $( grep SYMS "$TMP/sh_check" )"
-grep -q "HAS_SQUARE:True" "$TMP/sh_check" && ok "b.sh: square symbol present" || no "b.sh: square symbol missing"
-grep -q "HAS_SOS:True" "$TMP/sh_check" && ok "b.sh: sum_of_squares symbol present" || no "b.sh: sum_of_squares symbol missing"
-grep -q "ALL_FN:True" "$TMP/sh_check" && ok "b.sh: both symbols tagged t=\"fn\"" || no "b.sh: symbols not tagged t=\"fn\" as expected"
-grep -q "PHANTOM:none" "$TMP/sh_check" && ok "b.sh: no phantom symbol nodes from bash built-ins (echo/local)" || no "b.sh: phantom nodes present: $( grep PHANTOM "$TMP/sh_check" )"
-grep -q "EDGE:True" "$TMP/sh_check" && ok "b.sh: intra-file call edge sum_of_squares -> square present" || no "b.sh: call edge sum_of_squares -> square MISSING"
+if grep -q "SYMS:2" "$TMP/sh_check"; then ok "b.sh: exactly 2 symbols (square, sum_of_squares — bash built-ins not indexed)"; else no "b.sh: expected 2 symbols, got: $( grep SYMS "$TMP/sh_check" )"; fi
+if grep -q "HAS_SQUARE:True" "$TMP/sh_check"; then ok "b.sh: square symbol present"; else no "b.sh: square symbol missing"; fi
+if grep -q "HAS_SOS:True" "$TMP/sh_check"; then ok "b.sh: sum_of_squares symbol present"; else no "b.sh: sum_of_squares symbol missing"; fi
+if grep -q "ALL_FN:True" "$TMP/sh_check"; then ok "b.sh: both symbols tagged t=\"fn\""; else no "b.sh: symbols not tagged t=\"fn\" as expected"; fi
+if grep -q "PHANTOM:none" "$TMP/sh_check"; then ok "b.sh: no phantom symbol nodes from bash built-ins (echo/local)"; else no "b.sh: phantom nodes present: $( grep PHANTOM "$TMP/sh_check" )"; fi
+if grep -q "EDGE:True" "$TMP/sh_check"; then ok "b.sh: intra-file call edge sum_of_squares -> square present"; else no "b.sh: call edge sum_of_squares -> square MISSING"; fi
 
 SH_CE="$( $BIN "$FIX" --callees=sum_of_squares 2>/dev/null )"
 echo "$SH_CE" | grep -q 'count="1"' && echo "$SH_CE" | grep -q 'n="square"' \

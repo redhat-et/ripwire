@@ -24,7 +24,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 CORPUS="$TMP/corpus"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "langcensuscheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -120,9 +120,9 @@ case "$ORDER" in
 esac
 
 # ── arm 4: well-formed + deterministic ──────────────────────────────────────────────────────────────
-printf '%s' "$OUT" | xmllint --noout - 2>/dev/null && ok "arm4: --skipped with <lang> rows is well-formed (G4)" || no "arm4: not well-formed XML"
+if printf '%s' "$OUT" | xmllint --noout - 2>/dev/null; then ok "arm4: --skipped with <lang> rows is well-formed (G4)"; else no "arm4: not well-formed XML"; fi
 OUT2="$( "$BIN" "$CORPUS" --skipped --no-cache 2>/dev/null )"
-[ "$OUT" = "$OUT2" ] && ok "arm4: output is byte-identical run-to-run" || no "arm4: output is not deterministic"
+if [ "$OUT" = "$OUT2" ]; then ok "arm4: output is byte-identical run-to-run"; else no "arm4: output is not deterministic"; fi
 
 # ── arm 5: symbols= is never LESS than any single file's count could suggest — a sanity floor, not a
 #    tight bound: every language row that exists has symbols >= files (each fixture file here has >=1

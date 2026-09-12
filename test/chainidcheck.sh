@@ -16,7 +16,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 cd "$ROOT"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN"; exit 2; }
 
@@ -46,8 +46,8 @@ else no "id + range did not slice (the :: was probably eaten as a range separato
 
 # 4) consumer -> producer: the pre-existing forms are untouched (this change must be purely additive).
 NAME="${ID##*::}"
-"$BIN" . "--callers=$NAME"  2>/dev/null | grep -q "<callers of=\"$NAME\"" && ok "bare name still resolves" || no "bare-name resolution regressed"
-"$BIN" . --callers="serialize.h:$NAME" 2>/dev/null | grep -q '<callers of=' && ok "file:name still resolves" || no "file:name disambiguation regressed"
+if "$BIN" . "--callers=$NAME"  2>/dev/null | grep -q "<callers of=\"$NAME\""; then ok "bare name still resolves"; else no "bare-name resolution regressed"; fi
+if "$BIN" . --callers="serialize.h:$NAME" 2>/dev/null | grep -q '<callers of='; then ok "file:name still resolves"; else no "file:name disambiguation regressed"; fi
 
 # 5) a malformed range on a NON-id token must still degrade loudly to whole-body (the old contract).
 #    REPINNED (§P8 seam 1, 2026-07-28): a tail that does NOT start with a digit is now a file:name selector
@@ -55,7 +55,7 @@ NAME="${ID##*::}"
 #    reached with a digit-leading malformed tail instead. The contract under test — degrade + loud note,
 #    never a hard error — is unchanged; only the token that triggers it moved. See selectorchaincheck.sh.
 err="$( "$BIN" . --top-k=1 --expand=blobChecksum:5x-9 2>&1 >/dev/null )"
-printf '%s' "$err" | grep -qi 'malformed range' && ok "malformed range on a bare name still warns" || no "lost the malformed-range degrade note"
+if printf '%s' "$err" | grep -qi 'malformed range'; then ok "malformed range on a bare name still warns"; else no "lost the malformed-range degrade note"; fi
 
 # 6) a genuine typo must still be refused — the "::" branch must not swallow unknown names.
 "$BIN" . "--callers=./src/nope.h::Nope::nope" >/dev/null 2>&1 && no "a bogus canonical id was accepted" || ok "a bogus canonical id is still refused"

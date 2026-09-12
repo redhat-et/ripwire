@@ -63,7 +63,7 @@ PYFIX="test/narrowlangfix/py"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 bugs=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 bug(){ printf '  REAL BUG (pinned, not asserted-correct)  %s\n' "$*"; bugs=$((bugs+1)); }
 
@@ -214,7 +214,7 @@ echo "=== determinism (the pinned-buggy Python behavior is at least stable, not 
 # ═══════════════════════════════════════════════════════════════════════════
 "$BIN" "$PYFIX" --no-cache >"$TMP/py1.xml" 2>/dev/null
 "$BIN" "$PYFIX" --no-cache >"$TMP/py2.xml" 2>/dev/null
-diff -q "$TMP/py1.xml" "$TMP/py2.xml" >/dev/null && ok "Python narrowlangfix map deterministic (byte-identical across runs)" || no "Python narrowlangfix map non-deterministic"
+if diff -q "$TMP/py1.xml" "$TMP/py2.xml" >/dev/null; then ok "Python narrowlangfix map deterministic (byte-identical across runs)"; else no "Python narrowlangfix map non-deterministic"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

@@ -43,7 +43,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/qualnewfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
@@ -80,17 +80,17 @@ callees_has   'Main.java:caller'  C
 
 # ── ambiguity accounting: no explicit ctors in the fixture ⇒ every widened edge is PRECISE ──────
 famb="$( "$BIN" "$FIX" --no-cache 2>/dev/null | grep -oE 'ambiguous=[0-9]+' | head -1 )"
-[ "$famb" = "ambiguous=0" ] && ok "fixture $famb (no ctor-name collisions in this fixture)" || no "fixture $famb (expected 0)"
+if [ "$famb" = "ambiguous=0" ]; then ok "fixture $famb (no ctor-name collisions in this fixture)"; else no "fixture $famb (expected 0)"; fi
 funr="$( "$BIN" "$FIX" --no-cache 2>/dev/null | grep -oE 'unresolved=[0-9]+' | head -1 )"
-[ "$funr" = "unresolved=0" ] && ok "fixture $funr" || no "fixture $funr (expected 0)"
+if [ "$funr" = "unresolved=0" ]; then ok "fixture $funr"; else no "fixture $funr (expected 0)"; fi
 
 # ── determinism + warm==cold ──────────────────────────────────────────────────────────────────
 "$BIN" "$FIX" --no-cache >"$TMP/d1" 2>/dev/null
 "$BIN" "$FIX" --no-cache >"$TMP/d2" 2>/dev/null
-cmp -s "$TMP/d1" "$TMP/d2" && ok "deterministic (two --no-cache runs identical)" || no "non-deterministic"
+if cmp -s "$TMP/d1" "$TMP/d2"; then ok "deterministic (two --no-cache runs identical)"; else no "non-deterministic"; fi
 "$BIN" "$FIX" --cache="$TMP/c.bin" >"$TMP/cold" 2>/dev/null
 "$BIN" "$FIX" --cache="$TMP/c.bin" >"$TMP/warm" 2>/dev/null
-cmp -s "$TMP/cold" "$TMP/warm" && ok "warm == cold" || no "warm != cold"
+if cmp -s "$TMP/cold" "$TMP/warm"; then ok "warm == cold"; else no "warm != cold"; fi
 
 # ── well-formed XML ───────────────────────────────────────────────────────────────────────────
 command -v xmllint >/dev/null 2>&1 \

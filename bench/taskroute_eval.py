@@ -33,10 +33,38 @@ int parseConfigValue() { return StorageDriver(); }
 int renderXmlRow() { return parseConfigValue(); }
 int sendRequest() { return renderXmlRow(); }
 int cacheValue() { return sendRequest(); }
+int classify() { return cacheValue(); }
+int report() { return classify(); }
+int patch() { return report(); }
+int header() { return patch(); }
+int prefix() { return header(); }
+int audit() { return prefix(); }
+int release() { return audit(); }
+int target() { return release(); }
+int binary() { return target(); }
 """,
         encoding="utf-8",
     )
-    run(["git", "add", "router.cpp"], repo)
+    # Ordinary English words that are ALSO indexed names are the collision class the weak symbol tier
+    # draws its false positives from, and until 2026-09-10 this fixture repo had none: every name here
+    # was camelCase or Pascal, so no corpus row could exercise the tier at all. The nine lowercase
+    # functions above are the CODE half of the class; the config keys below are the t="sec" half (a JSON
+    # key or a markdown heading — the kind an English word collides with most often, and the kind
+    # --expand answers with a line of config rather than a definition).
+    (repo / "package.json").write_text(
+        """{
+  "name": "route-eval-fixture",
+  "version": "1.2.3",
+  "license": "MIT",
+  "summary": "fixture package for the routing evaluator",
+  "agent": "ripwire-eval",
+  "author": "ripwire",
+  "notes": "keys here index as t=sec symbols, never as code"
+}
+""",
+        encoding="utf-8",
+    )
+    run(["git", "add", "router.cpp", "package.json"], repo)
     run(["git", "commit", "-qm", "base"], repo)
     return repo
 

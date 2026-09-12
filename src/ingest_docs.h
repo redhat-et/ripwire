@@ -111,6 +111,11 @@ inline void mdWalk( TSNode node, std::string_view src, bool inQuote, std::uint32
         out.opaque.emplace_back( a, b );
         return;   // nothing inside is structure, mention or link
     }
+    // Every indexed named-child loop in this walker stays indexed ON PURPOSE (src/infra/tschildren.h's
+    // one-line test): the markdown grammar declares NO extras — its vendored parser.c carries zero
+    // SHIFT_EXTRA actions — so nothing is ever spliced into a child array here, and every list below is a
+    // balanced grammar repeat that ts_node__child skips in O(1). Measured: a 16 000-paragraph document is
+    // flat on the indexed form (lane W3's sweep, test/childwalkscalecheck.sh).
     if( std::strcmp( type, "link_reference_definition" ) == 0 )
     {
         out.opaque.emplace_back( a, b );   // not mention-scanned …

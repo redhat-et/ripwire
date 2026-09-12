@@ -1,0 +1,7 @@
+# Layering rules for test/printffmtparitycheck.sh's `arch` label. Deliberately produces ONE violation
+# (sub/consumer.cpp reaches geometry) so the label fences the violation-row emitter and the exit-2
+# path, not just the <metrics> block. Lives OUTSIDE test/fixture on purpose: a file inside the crawl
+# root would change every other label's hash.
+layer core = geometry
+layer consumer = sub/
+deny consumer -> core

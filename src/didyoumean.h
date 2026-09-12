@@ -202,7 +202,7 @@ inline std::string_view nearestSymbolNameWhere( const IngestResult& ing, std::st
     {
         return {};   // F10: the nearest name to "" is the shortest name, which is a suggestion about nothing
     }
-    constexpr int kMaxEditDistance = 3;   // bandwidth cutoff (§P12.1): beyond this a "hint" is noise, not help
+    constexpr int kMaxEditDistance = 3;   // bandwidth cutoff: beyond this edit distance a "hint" is noise, not help
     return nearestNameByEditDistance( ing.symbols.begin(), ing.symbols.end(), typed, kMaxEditDistance,
                                       [ keep ]( const Symbol& s ) -> std::string_view
                                       { return keep( s ) ? std::string_view( s.name ) : std::string_view(); } );

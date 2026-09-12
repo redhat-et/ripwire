@@ -25,7 +25,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 : "$BIN"   # unused -- this gate exercises bench/routing_ab_report.py, a standalone Python script
 SCRIPT="$ROOT/bench/routing_ab_report.py"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -f "$SCRIPT" ] || { echo "no $SCRIPT"; exit 2; }
@@ -129,7 +129,7 @@ run()
 #    +50pp, comfortably KEEP, so this same fixture also exercises the edge-case accounting.
 D1="$TMP/d1"; build_fixture "$D1" 30 10 40
 OUT1="$( run "$D1" )"; RC1=$?
-[ "$RC1" = 0 ] && ok "exit 0 on a normal readout" || no "exit code was $RC1, expected 0"
+if [ "$RC1" = 0 ]; then ok "exit 0 on a normal readout"; else no "exit code was $RC1, expected 0"; fi
 
 # treatment: 40 arm rows + edge3 + nometer = 42 recommended; adopted = 30 (edge3's position=3 excluded)
 echo "$OUT1" | grep -Eq '^treatment[[:space:]]+43[[:space:]]+42[[:space:]]+30[[:space:]]' \
@@ -168,7 +168,7 @@ echo "$OUT3" | grep -Eq '^REMOVE -- treatment 30\.0% - control 40\.0% = -10\.0pp
 #    verdict-eligible fixture is a single missing row (no --force flag exists to override this).
 D4="$TMP/d4"; build_fixture "$D4" 30 10 39
 OUT4="$( run "$D4" )"; RC4=$?
-echo "$OUT4" | grep -q 'UNDERPOWERED' && ok "B: refuses below the 40/arm floor" || no "B: did not refuse -- $OUT4"
+if echo "$OUT4" | grep -q 'UNDERPOWERED'; then ok "B: refuses below the 40/arm floor"; else no "B: did not refuse -- $OUT4"; fi
 echo "$OUT4" | grep -Eq 'needs >= 40 recommended prompts per arm' \
     && ok "B: refusal names the band (40 recommended/arm)" || no "B: refusal did not name the band"
 echo "$OUT4" | grep -Eq 'treatment has 41 \(needs 0 more\)' \
@@ -177,7 +177,7 @@ echo "$OUT4" | grep -Eq 'treatment has 41 \(needs 0 more\)' \
 echo "$OUT4" | grep -Eq 'control has 39 \(needs 1 more\)' \
     && ok "B: refusal names control's current n and shortfall (needs 1 more)" \
     || no "B: control n/shortfall wrong -- $( echo "$OUT4" | grep control )"
-[ "$RC4" = 0 ] && ok "B: refusal exits 0 (a refusal is a correct answer)" || no "B: refusal exit code was $RC4, expected 0"
+if [ "$RC4" = 0 ]; then ok "B: refusal exits 0 (a refusal is a correct answer)"; else no "B: refusal exit code was $RC4, expected 0"; fi
 
 # ── M: malformed input -- a routing.jsonl with content, none of which parses as JSON, must exit non-zero.
 D5="$TMP/d5"; mkdir -p "$D5"
@@ -286,7 +286,7 @@ with open(outdir + "/substitution.jsonl", "w") as fh:
 PYEOF
 
 OUT8="$( run "$D8" )"; RC8=$?
-[ "$RC8" = 0 ] && ok "router fixture: exit 0" || no "router fixture: exit $RC8"
+if [ "$RC8" = 0 ]; then ok "router fixture: exit 0"; else no "router fixture: exit $RC8"; fi
 echo "$OUT8" | grep -q '=== router=prompt ===' && ok "router: prints a '=== router=prompt ===' section" \
     || no "router: no prompt section -- $OUT8"
 echo "$OUT8" | grep -q '=== router=toolcall ===' && ok "router: prints a '=== router=toolcall ===' section" \

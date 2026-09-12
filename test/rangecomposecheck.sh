@@ -28,7 +28,7 @@ JSFIX="$ROOT/test/jsmetricsfix"
 CPPFIX="$ROOT/test/expandrangefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -46,13 +46,13 @@ echo "=== 1. --expand=SYM:START-END + --compress compose (slice survives comment
 # (c) be SHORTER than the uncompressed slice, (d) NOT silently widen back to the whole body.
 "$BIN" "$CPPFIX" --expand=bigFunction:6-8 --no-cache            >"$TMP/slice_plain.xml" 2>/dev/null
 "$BIN" "$CPPFIX" --expand=bigFunction:6-8 --compress --no-cache >"$TMP/slice_compress.xml" 2>/dev/null
-rc1=$?; [ $rc1 -eq 0 ] && ok "--expand:range + --compress exits 0" || no "--expand:range + --compress failed (rc=$rc1)"
+if rc1=$?; [ $rc1 -eq 0 ]; then ok "--expand:range + --compress exits 0"; else no "--expand:range + --compress failed (rc=$rc1)"; fi
 
-grep -q 'lines="6-8/11"' "$TMP/slice_compress.xml" && ok "compressed slice KEEPS the lines=\"6-8/11\" range marker" || no "compressed slice lost/changed the range marker"
-grep -q 'café' "$TMP/slice_plain.xml" && ok "uncompressed slice contains the comment (café)" || no "uncompressed slice missing the expected comment line"
+if grep -q 'lines="6-8/11"' "$TMP/slice_compress.xml"; then ok "compressed slice KEEPS the lines=\"6-8/11\" range marker"; else no "compressed slice lost/changed the range marker"; fi
+if grep -q 'café' "$TMP/slice_plain.xml"; then ok "uncompressed slice contains the comment (café)"; else no "uncompressed slice missing the expected comment line"; fi
 grep -q 'café' "$TMP/slice_compress.xml" && no "compressed slice STILL contains the stripped comment (compress did not apply to the slice)" || ok "compressed slice correctly strips the comment"
-grep -q 'int line5' "$TMP/slice_compress.xml" && ok "compressed slice still contains real code (line5)" || no "compressed slice lost real code, not just the comment"
-grep -q 'int line7' "$TMP/slice_compress.xml" && ok "compressed slice still contains real code (line7)" || no "compressed slice lost line7"
+if grep -q 'int line5' "$TMP/slice_compress.xml"; then ok "compressed slice still contains real code (line5)"; else no "compressed slice lost real code, not just the comment"; fi
+if grep -q 'int line7' "$TMP/slice_compress.xml"; then ok "compressed slice still contains real code (line7)"; else no "compressed slice lost line7"; fi
 
 # whole file sizes stand in for the <b>...</b> body-block size: everything else in the map (the <r> symbol
 # table, comments) is byte-identical across these three invocations (same corpus, same flags otherwise), so
@@ -86,19 +86,19 @@ echo "=== 2. ranged --expand on JavaScript AND Bash symbols ==="
 # ═══════════════════════════════════════════════════════════════════════════
 # deepNest (JS) body: 1=signature 2={ 3=if(a>0) 4={ 5=for(...) ... 14=}. Slice 3-5 = if/brace/for lines only.
 "$BIN" "$JSFIX" --expand=deepNest:3-5 --no-cache >"$TMP/js_slice.xml" 2>/dev/null
-rc=$?; [ $rc -eq 0 ] && ok "JS ranged --expand=deepNest:3-5 exits 0" || no "JS ranged expand failed (rc=$rc)"
-grep -q 'lines="3-5/14"' "$TMP/js_slice.xml" && ok "JS slice marker lines=\"3-5/14\" present" || no "JS slice marker missing/wrong"
-grep -q 'if ( a > 0 )' "$TMP/js_slice.xml" && ok "JS slice contains the expected if-line" || no "JS slice missing the if-line"
-grep -q 'for ( let i = 0' "$TMP/js_slice.xml" && ok "JS slice contains the expected for-line" || no "JS slice missing the for-line"
+if rc=$?; [ $rc -eq 0 ]; then ok "JS ranged --expand=deepNest:3-5 exits 0"; else no "JS ranged expand failed (rc=$rc)"; fi
+if grep -q 'lines="3-5/14"' "$TMP/js_slice.xml"; then ok "JS slice marker lines=\"3-5/14\" present"; else no "JS slice marker missing/wrong"; fi
+if grep -q 'if ( a > 0 )' "$TMP/js_slice.xml"; then ok "JS slice contains the expected if-line"; else no "JS slice missing the if-line"; fi
+if grep -q 'for ( let i = 0' "$TMP/js_slice.xml"; then ok "JS slice contains the expected for-line"; else no "JS slice missing the for-line"; fi
 grep -q 'function deepNest' "$TMP/js_slice.xml" && no "JS slice leaked the signature line (out of range)" || ok "JS slice correctly excludes the signature line"
 
 # deep_nest_sh (Bash) body: 1={ 2=if 3=for 4=if 5=echo 6=fi 7=done 8=fi 9=} — wait, actual body starts at
 # the opening brace on its own line per bash function_definition capture (verified earlier); slice 2-4.
 "$BIN" "$JSFIX" --expand=deep_nest_sh:2-4 --no-cache >"$TMP/sh_slice.xml" 2>/dev/null
-rc=$?; [ $rc -eq 0 ] && ok "Bash ranged --expand=deep_nest_sh:2-4 exits 0" || no "Bash ranged expand failed (rc=$rc)"
-grep -q 'lines="2-4/10"' "$TMP/sh_slice.xml" && ok "Bash slice marker lines=\"2-4/10\" present" || no "Bash slice marker missing/wrong"
-grep -q 'if \[ "\$1" -gt 0 \]' "$TMP/sh_slice.xml" && ok "Bash slice contains the expected if-line" || no "Bash slice missing the if-line"
-grep -q 'for i in' "$TMP/sh_slice.xml" && ok "Bash slice contains the expected for-line" || no "Bash slice missing the for-line"
+if rc=$?; [ $rc -eq 0 ]; then ok "Bash ranged --expand=deep_nest_sh:2-4 exits 0"; else no "Bash ranged expand failed (rc=$rc)"; fi
+if grep -q 'lines="2-4/10"' "$TMP/sh_slice.xml"; then ok "Bash slice marker lines=\"2-4/10\" present"; else no "Bash slice marker missing/wrong"; fi
+if grep -q 'if \[ "\$1" -gt 0 \]' "$TMP/sh_slice.xml"; then ok "Bash slice contains the expected if-line"; else no "Bash slice missing the if-line"; fi
+if grep -q 'for i in' "$TMP/sh_slice.xml"; then ok "Bash slice contains the expected for-line"; else no "Bash slice missing the for-line"; fi
 grep -q 'deep_nest_sh()' "$TMP/sh_slice.xml" && no "Bash slice leaked the signature line (out of range)" || ok "Bash slice correctly excludes the signature line"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -110,9 +110,9 @@ echo "=== 3. <calls> sidecar reflects real callees regardless of the slice windo
 # edges, not the visible window) — but as a stronger check, slice 1-1 (signature only, EXCLUDES both call
 # sites) must STILL list both calls in <calls>, proving the sidecar isn't re-derived from the visible text.
 "$BIN" "$JSFIX" --expand=callsLeafAndDeep:1-1 --no-cache >"$TMP/narrow_slice.xml" 2>/dev/null
-grep -q 'lines="1-1/5"' "$TMP/narrow_slice.xml" && ok "narrow 1-line slice marker correct" || no "narrow slice marker wrong"
-grep -q '<c n="leaf"' "$TMP/narrow_slice.xml" && ok "1-line slice EXCLUDING the call sites still lists <c n=\"leaf\"> in <calls>" || no "<calls> sidecar missing leaf when window excludes it"
-grep -q '<c n="deepNest"' "$TMP/narrow_slice.xml" && ok "1-line slice EXCLUDING the call sites still lists <c n=\"deepNest\"> in <calls>" || no "<calls> sidecar missing deepNest when window excludes it"
+if grep -q 'lines="1-1/5"' "$TMP/narrow_slice.xml"; then ok "narrow 1-line slice marker correct"; else no "narrow slice marker wrong"; fi
+if grep -q '<c n="leaf"' "$TMP/narrow_slice.xml"; then ok "1-line slice EXCLUDING the call sites still lists <c n=\"leaf\"> in <calls>"; else no "<calls> sidecar missing leaf when window excludes it"; fi
+if grep -q '<c n="deepNest"' "$TMP/narrow_slice.xml"; then ok "1-line slice EXCLUDING the call sites still lists <c n=\"deepNest\"> in <calls>"; else no "<calls> sidecar missing deepNest when window excludes it"; fi
 grep -q 'leaf( x )' "$TMP/narrow_slice.xml" && no "1-line slice leaked line 3 (leaf call site) — window not respected" || ok "1-line slice body correctly excludes the call-site lines"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -126,15 +126,15 @@ echo "=== 4. --outline=SYM:START-END (range suffix, unsupported by outline) degr
 # The contract now: strip the range, outline the whole symbol, and SAY SO on stderr. Never silent either way.
 "$BIN" "$CPPFIX" --outline=bigFunction:3-5 --no-cache >"$TMP/outline_range.xml" 2>"$TMP/outline_range.err"
 rc=$?
-[ $rc -eq 0 ] && ok "--outline=SYM:START-END exits 0 (no crash on an unsupported suffix)" || no "--outline=SYM:START-END crashed/failed (rc=$rc)"
-grep -q '<outline>' "$TMP/outline_range.xml" && ok "--outline=SYM:START-END outlines the WHOLE symbol (range stripped, name honoured)" || no "--outline=SYM:START-END emitted no outline — a valid name was refused for its suffix"
-grep -q 'no line-range form' "$TMP/outline_range.err" && ok "--outline=SYM:START-END explains the strip on stderr (not a silent reinterpretation)" || no "--outline=SYM:START-END dropped the range SILENTLY — the reader cannot tell they got the whole symbol"
+if [ $rc -eq 0 ]; then ok "--outline=SYM:START-END exits 0 (no crash on an unsupported suffix)"; else no "--outline=SYM:START-END crashed/failed (rc=$rc)"; fi
+if grep -q '<outline>' "$TMP/outline_range.xml"; then ok "--outline=SYM:START-END outlines the WHOLE symbol (range stripped, name honoured)"; else no "--outline=SYM:START-END emitted no outline — a valid name was refused for its suffix"; fi
+if grep -q 'no line-range form' "$TMP/outline_range.err"; then ok "--outline=SYM:START-END explains the strip on stderr (not a silent reinterpretation)"; else no "--outline=SYM:START-END dropped the range SILENTLY — the reader cannot tell they got the whole symbol"; fi
 grep -q 'did you mean' "$TMP/outline_range.err" && no "--outline=SYM:START-END still reports a valid name as a typo (did-you-mean)" || ok "--outline=SYM:START-END no longer misreports a valid name as a typo"
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$TMP/outline_range.xml" 2>/dev/null && ok "--outline=SYM:START-END output still well-formed XML" || no "--outline=SYM:START-END produced malformed XML"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$TMP/outline_range.xml" 2>/dev/null; then ok "--outline=SYM:START-END output still well-formed XML"; else no "--outline=SYM:START-END produced malformed XML"; fi; }
 
 # the PLAIN --outline=bigFunction (no range) still works normally as the control.
 "$BIN" "$CPPFIX" --outline=bigFunction --no-cache >"$TMP/outline_plain.xml" 2>/dev/null
-grep -q '<outline>' "$TMP/outline_plain.xml" && ok "control: plain --outline=bigFunction (no range) DOES emit an <outline> block" || no "control: plain --outline broken"
+if grep -q '<outline>' "$TMP/outline_plain.xml"; then ok "control: plain --outline=bigFunction (no range) DOES emit an <outline> block"; else no "control: plain --outline broken"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

@@ -31,7 +31,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -129,10 +129,10 @@ case "$EX_INNER" in
     "")         no "exemplar: inner text empty";;
     *)          ok "exemplar: returned non-empty text";;
 esac
-echo "$EX_INNER" | grep -q "<exemplar " && ok "exemplar: result contains <exemplar> element" || no "exemplar: no <exemplar> element"
+if echo "$EX_INNER" | grep -q "<exemplar "; then ok "exemplar: result contains <exemplar> element"; else no "exemplar: no <exemplar> element"; fi
 # the body: packBodies emits a <b ...> body element (or the def source) inside <exemplar>. Assert a body tag
 # is present AND that the chosen function's name appears (leaf/mid/top are the only fns).
-echo "$EX_INNER" | grep -qE "leaf|mid|top" && ok "exemplar: body includes a real function name" || no "exemplar: body missing a function name"
+if echo "$EX_INNER" | grep -qE "leaf|mid|top"; then ok "exemplar: body includes a real function name"; else no "exemplar: body missing a function name"; fi
 # A3-F2 gate: the body must actually ARRIVE — a non-empty <bodies> holding a <b> CDATA block with real
 # def source ("return" appears in every fixture fn). The 0-budget sentinel bug emitted a bare
 # <bodies></bodies>, and the name-only grep above still passed (the name rides the <exemplar> attrs).
@@ -141,14 +141,14 @@ if echo "$EX_INNER" | grep -qE "<bodies [^>]*><b " && echo "$EX_INNER" | grep -q
 else
     no "exemplar: <bodies> is EMPTY (no <b>/CDATA def source — A3-F2 0-budget sentinel) — got: $( echo "$EX_INNER" | head -c 300 )"
 fi
-diff -q "$TMP/ex_a" "$TMP/ex_b" >/dev/null && ok "exemplar: deterministic" || no "exemplar: non-deterministic"
+if diff -q "$TMP/ex_a" "$TMP/ex_b" >/dev/null; then ok "exemplar: deterministic"; else no "exemplar: non-deterministic"; fi
 
 # bad exemplar arg (a kind with no members: 'iface' — no interfaces in the fixture) → error, not silent empty
 BAD_EX="$( mcp_call \
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"exemplar","arguments":{"path":"'"$REPO"'","kind":"iface"}}}' \
     | tail -1 | python3 -c 'import sys,json;r=json.load(sys.stdin);print("ERR:"+str(r["error"]["code"]) if "error" in r else "OK")' )"
-[ "$BAD_EX" = "ERR:-32602" ] && ok "exemplar: no-candidate kind → -32602 (not a silent empty)" || no "exemplar: no-candidate did not error: $BAD_EX"
+if [ "$BAD_EX" = "ERR:-32602" ]; then ok "exemplar: no-candidate kind → -32602 (not a silent empty)"; else no "exemplar: no-candidate did not error: $BAD_EX"; fi
 
 # ─── 3. quality_delta — baseline marker + regressions array ──────────────────
 echo
@@ -180,7 +180,7 @@ print("CLEAN_OK")
 ' >"$TMP/qd.clean" 2>"$TMP/qd.err" \
     && ok "quality_delta: clean tree → baseline=git-HEAD, regressions=[] (empty array)" \
     || no "quality_delta clean-tree shape: $( cat "$TMP/qd.err" )"
-diff -q "$TMP/qd_a" "$TMP/qd_b" >/dev/null && ok "quality_delta: deterministic (clean tree)" || no "quality_delta: non-deterministic"
+if diff -q "$TMP/qd_a" "$TMP/qd_b" >/dev/null; then ok "quality_delta: deterministic (clean tree)"; else no "quality_delta: non-deterministic"; fi
 
 # now introduce a gnarly (high-complexity, deeply-nested) function in the WORKING TREE (uncommitted) → the
 # delta vs HEAD must become non-empty (the exit-2-equivalent). The innermost `if( i%7 )` exists because
@@ -223,11 +223,11 @@ case "$QB_INNER" in
     __ERROR__) no "quality_baseline returned an error";;
     *)         ok "quality_baseline: returned a result";;
 esac
-[ -f "$REPO/.ripwire_quality_baseline" ] && ok "quality_baseline: wrote the .ripwire_quality_baseline sidecar" || no "quality_baseline: sidecar NOT written"
+if [ -f "$REPO/.ripwire_quality_baseline" ]; then ok "quality_baseline: wrote the .ripwire_quality_baseline sidecar"; else no "quality_baseline: sidecar NOT written"; fi
 # the sidecar carries a 'head <sha>' record; the HEAD of the fixture is a real 40-hex sha.
 HEAD_SHA="$( git -C "$REPO" rev-parse HEAD )"
-grep -q "head $HEAD_SHA" "$REPO/.ripwire_quality_baseline" && ok "quality_baseline: sidecar stamped with the current HEAD sha" || no "quality_baseline: sidecar not stamped with HEAD ($HEAD_SHA)"
-echo "$QB_INNER" | grep -q "$HEAD_SHA" && ok "quality_baseline: result JSON reports the head_sha" || no "quality_baseline: result JSON missing head_sha"
+if grep -q "head $HEAD_SHA" "$REPO/.ripwire_quality_baseline"; then ok "quality_baseline: sidecar stamped with the current HEAD sha"; else no "quality_baseline: sidecar not stamped with HEAD ($HEAD_SHA)"; fi
+if echo "$QB_INNER" | grep -q "$HEAD_SHA"; then ok "quality_baseline: result JSON reports the head_sha"; else no "quality_baseline: result JSON missing head_sha"; fi
 
 # after pinning, quality_delta must prefer the sidecar (baseline=sidecar). The gnarly fn is now BASELINED
 # (it is in the working tree the sidecar snapshotted), so regressions return to 0 — confirms sidecar precedence.
@@ -252,11 +252,11 @@ IMP_MSGS=(
 mcp_call "${IMP_MSGS[@]}" >"$TMP/imp_a"
 mcp_call "${IMP_MSGS[@]}" >"$TMP/imp_b"
 IMP_INNER="$( inner_of "$TMP/imp_a" )"
-echo "$IMP_INNER" | grep -q "<impact " && ok "impact: result contains <impact> element" || no "impact: no <impact> element"
+if echo "$IMP_INNER" | grep -q "<impact "; then ok "impact: result contains <impact> element"; else no "impact: no <impact> element"; fi
 echo "$IMP_INNER" | grep -q 'n="mid"' && echo "$IMP_INNER" | grep -q 'n="top"' \
     && ok "impact(leaf): blast radius includes mid AND top (transitive)" \
     || no "impact(leaf): missing mid/top in blast radius — got: $( echo "$IMP_INNER" | head -c 200 )"
-diff -q "$TMP/imp_a" "$TMP/imp_b" >/dev/null && ok "impact: deterministic" || no "impact: non-deterministic"
+if diff -q "$TMP/imp_a" "$TMP/imp_b" >/dev/null; then ok "impact: deterministic"; else no "impact: non-deterministic"; fi
 
 # uses(gCounter): a read AND a write site (mid writes it, top reads it).
 USE_MSGS=(
@@ -266,9 +266,9 @@ USE_MSGS=(
 mcp_call "${USE_MSGS[@]}" >"$TMP/use_a"
 mcp_call "${USE_MSGS[@]}" >"$TMP/use_b"
 USE_INNER="$( inner_of "$TMP/use_a" )"
-echo "$USE_INNER" | grep -q "<uses " && ok "uses: result contains <uses> element" || no "uses: no <uses> element"
-echo "$USE_INNER" | grep -q '<u ' && ok "uses(gCounter): at least one <u> use-site" || no "uses(gCounter): no use-sites — got: $( echo "$USE_INNER" | head -c 200 )"
-diff -q "$TMP/use_a" "$TMP/use_b" >/dev/null && ok "uses: deterministic" || no "uses: non-deterministic"
+if echo "$USE_INNER" | grep -q "<uses "; then ok "uses: result contains <uses> element"; else no "uses: no <uses> element"; fi
+if echo "$USE_INNER" | grep -q '<u '; then ok "uses(gCounter): at least one <u> use-site"; else no "uses(gCounter): no use-sites — got: $( echo "$USE_INNER" | head -c 200 )"; fi
+if diff -q "$TMP/use_a" "$TMP/use_b" >/dev/null; then ok "uses: deterministic"; else no "uses: non-deterministic"; fi
 
 # path_between(top,leaf): top -> mid -> leaf reaches, hops>=1.
 PB_MSGS=(
@@ -278,9 +278,9 @@ PB_MSGS=(
 mcp_call "${PB_MSGS[@]}" >"$TMP/pb_a"
 mcp_call "${PB_MSGS[@]}" >"$TMP/pb_b"
 PB_INNER="$( inner_of "$TMP/pb_a" )"
-echo "$PB_INNER" | grep -q '<path ' && ok "path_between: result contains <path> element" || no "path_between: no <path> element"
-echo "$PB_INNER" | grep -q 'reachable="1"' && ok "path_between(top->leaf): reachable=1" || no "path_between(top->leaf): not reachable — got: $( echo "$PB_INNER" | head -c 200 )"
-diff -q "$TMP/pb_a" "$TMP/pb_b" >/dev/null && ok "path_between: deterministic" || no "path_between: non-deterministic"
+if echo "$PB_INNER" | grep -q '<path '; then ok "path_between: result contains <path> element"; else no "path_between: no <path> element"; fi
+if echo "$PB_INNER" | grep -q 'reachable="1"'; then ok "path_between(top->leaf): reachable=1"; else no "path_between(top->leaf): not reachable — got: $( echo "$PB_INNER" | head -c 200 )"; fi
+if diff -q "$TMP/pb_a" "$TMP/pb_b" >/dev/null; then ok "path_between: deterministic"; else no "path_between: non-deterministic"; fi
 
 # ─── 6. bad symbol → standard -32602 not-found (never a silent empty) ────────
 echo
@@ -293,12 +293,12 @@ err_code() {
 mcp_call \
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"impact","arguments":{"path":"'"$REPO"'","symbol":"zzz_no_such"}}}' >"$TMP/imp_bad"
-[ "$( err_code "$TMP/imp_bad" )" = "-32602" ] && ok "impact(bad symbol): -32602 not-found" || no "impact(bad symbol): expected -32602, got $( err_code "$TMP/imp_bad" )"
+if [ "$( err_code "$TMP/imp_bad" )" = "-32602" ]; then ok "impact(bad symbol): -32602 not-found"; else no "impact(bad symbol): expected -32602, got $( err_code "$TMP/imp_bad" )"; fi
 
 mcp_call \
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"path_between","arguments":{"path":"'"$REPO"'","from":"zzz_no_such","to":"leaf"}}}' >"$TMP/pb_bad"
-[ "$( err_code "$TMP/pb_bad" )" = "-32602" ] && ok "path_between(bad endpoint): -32602 not-found" || no "path_between(bad endpoint): expected -32602, got $( err_code "$TMP/pb_bad" )"
+if [ "$( err_code "$TMP/pb_bad" )" = "-32602" ]; then ok "path_between(bad endpoint): -32602 not-found"; else no "path_between(bad endpoint): expected -32602, got $( err_code "$TMP/pb_bad" )"; fi
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
 echo

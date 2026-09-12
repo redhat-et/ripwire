@@ -12,7 +12,7 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 SK="$ROOT/skills"
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 [ -f "$SK/install.sh" ] || { echo "no skills/install.sh"; exit 2; }

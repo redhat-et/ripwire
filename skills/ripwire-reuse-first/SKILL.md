@@ -3,7 +3,7 @@ name: ripwire-reuse-first
 description: >
   About to write ONE symbol (even a 'quick' one-liner) or add a dependency: reuse before you reinvent.
   Finds the building block that already exists, the house pattern to imitate, the duplicate you'd
-  recreate, a vendored dependency. A whole feature → before-you-build. One --exemplar or --grep call
+  recreate, a vendored dependency. An interface or whole feature → before-you-build. One --exemplar or --grep call
   at most.
 allowed-tools: Bash, Read
 ---

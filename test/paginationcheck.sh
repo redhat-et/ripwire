@@ -32,7 +32,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -80,8 +80,8 @@ check_verb(){
     # (b) --limit=3 emits at most 3 items and the container total is unchanged.
     p1="$( run "$@" --limit=3 --offset=0 )"
     local n1; n1="$( printf '%s' "$p1" | items "$kind" | wc -l | tr -d ' ' )"
-    [ "$n1" -le 3 ] && ok "$label: --limit=3 emits <=3 items ($n1)" || no "$label: --limit=3 emitted $n1 items"
-    printf '%s' "$p1" | grep -qE 'offset="0" limit="3"' && ok "$label: page attrs present when paginated" || no "$label: missing page attrs under --limit"
+    if [ "$n1" -le 3 ]; then ok "$label: --limit=3 emits <=3 items ($n1)"; else no "$label: --limit=3 emitted $n1 items"; fi
+    if printf '%s' "$p1" | grep -qE 'offset="0" limit="3"'; then ok "$label: page attrs present when paginated"; else no "$label: missing page attrs under --limit"; fi
 
     # (c) SEAM: pages [0:3)+[3:6)+[6:9) concatenated == full[0:9], in order, no dup/drop.
     p2="$( run "$@" --limit=3 --offset=3 )"
@@ -103,11 +103,11 @@ check_verb(){
 
     # (e) determinism: a paginated page is byte-identical run-to-run.
     local d1 d2; d1="$( run "$@" --limit=4 --offset=2 )"; d2="$( run "$@" --limit=4 --offset=2 )"
-    [ "$d1" = "$d2" ] && ok "$label: paginated page deterministic" || no "$label: non-deterministic paginated page"
+    if [ "$d1" = "$d2" ]; then ok "$label: paginated page deterministic"; else no "$label: non-deterministic paginated page"; fi
 
     # (f) xml well-formed under pagination.
     if command -v xmllint >/dev/null 2>&1; then
-        printf '%s' "$p2" | xmllint --noout - 2>/dev/null && ok "$label: xml well-formed under pagination" || no "$label: xml malformed under pagination"
+        if printf '%s' "$p2" | xmllint --noout - 2>/dev/null; then ok "$label: xml well-formed under pagination"; else no "$label: xml malformed under pagination"; fi
     fi
 }
 

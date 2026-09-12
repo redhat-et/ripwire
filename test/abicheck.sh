@@ -40,7 +40,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -242,16 +242,16 @@ attr(){ printf '%s' "$S" | tr '<' '\n' | grep "^$1" | head -1 | sed -n "s/.* $2=
 
 # ── 0) refusals: --abi requires --stray-content; --abi on a non-git root refuses ────────────────────────
 "$BIN" "$ROOT/test/fixture" --abi >/dev/null 2>&1
-[ $? -eq 1 ] && ok "bare --abi (no --stray-content) refuses loudly (exit 1)" || no "bare --abi did not exit 1"
+if [ $? -eq 1 ]; then ok "bare --abi (no --stray-content) refuses loudly (exit 1)"; else no "bare --abi did not exit 1"; fi
 mkdir -p "$TMP/plain"; printf 'int main(){return 0;}\n' > "$TMP/plain/m.cpp"
 "$BIN" "$TMP/plain" --stray-content --abi >/dev/null 2>&1
-[ $? -eq 1 ] && ok "--stray-content --abi on a non-git root refuses loudly (exit 1)" || no "--stray-content --abi on a non-git root did not exit 1"
+if [ $? -eq 1 ]; then ok "--stray-content --abi on a non-git root refuses loudly (exit 1)"; else no "--stray-content --abi on a non-git root did not exit 1"; fi
 
 # ── 1) the real run: exit code, determinism, xmllint ──────────────────────────────────────────────────
 "$BIN" "$R" --stray-content --abi >"$TMP/a" 2>/dev/null; rc=$?
 "$BIN" "$R" --stray-content --abi >"$TMP/b" 2>/dev/null
-cmp -s "$TMP/a" "$TMP/b" && ok "abi determinism (byte-identical)" || no "abi output is non-deterministic"
-[ "$rc" -eq 2 ] && ok "exit 2 (a real drift is present)" || no "exit code was $rc, want 2 (feat-abi-break is a real drift)"
+if cmp -s "$TMP/a" "$TMP/b"; then ok "abi determinism (byte-identical)"; else no "abi output is non-deterministic"; fi
+if [ "$rc" -eq 2 ]; then ok "exit 2 (a real drift is present)"; else no "exit code was $rc, want 2 (feat-abi-break is a real drift)"; fi
 S="$( cat "$TMP/a" )"
 OUT="$TMP/a"
 
@@ -259,14 +259,14 @@ OUT="$TMP/a"
 # but does not list. Everything the default view excludes has to be reachable through exactly this lever.
 "$BIN" "$R" --stray-content --abi --detail=1 >"$TMP/full" 2>/dev/null
 "$BIN" "$R" --stray-content --abi --detail=1 >"$TMP/full2" 2>/dev/null
-cmp -s "$TMP/full" "$TMP/full2" && ok "abi --detail determinism (byte-identical)" || no "abi --detail output is non-deterministic"
+if cmp -s "$TMP/full" "$TMP/full2"; then ok "abi --detail determinism (byte-identical)"; else no "abi --detail output is non-deterministic"; fi
 
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/a" 2>/dev/null && ok "abi XML well-formed" || no "abi XML malformed"
+    if xmllint --noout "$TMP/a" 2>/dev/null; then ok "abi XML well-formed"; else no "abi XML malformed"; fi
 else
     ok "xmllint unavailable — well-formedness skipped"
 fi
-[ "$( grep -c '' "$TMP/a" )" -le 1 ] && ok "output is minified (no stray newlines)" || no "output contains newlines outside CDATA"
+if [ "$( grep -c '' "$TMP/a" )" -le 1 ]; then ok "output is minified (no stray newlines)"; else no "output contains newlines outside CDATA"; fi
 
 # python helper: print the <ref name="X" ...>...</ref> slice, or nothing if absent.
 # slicefrom FILE NAME reads any file; refslice NAME is the default (capped) view.
@@ -392,7 +392,7 @@ BROKEN="$( attr abi broken_refs )"
 for pair in "drift 2" "rename 1" "head-moved 1" "absent 1" "unknown 1"; do
     set -- $pair
     got="$( attr abi "$1" )"
-    [ "$got" = "$2" ] && ok "abi: $1=\"$2\" on the header" || no "abi: header $1=\"$got\", want \"$2\""
+    if [ "$got" = "$2" ]; then ok "abi: $1=\"$2\" on the header"; else no "abi: header $1=\"$got\", want \"$2\""; fi
 done
 EXCL="$( attr abi excluded )"
 [ "$EXCL" = "2" ] && ok "abi: excluded=2 (the rename + the head-moved row, counted not dropped)" \

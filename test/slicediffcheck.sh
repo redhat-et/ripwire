@@ -39,7 +39,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -367,10 +367,10 @@ done
 # (14) determinism x2, and cold == warm
 d1="$( "$BIN" "$A" --slice=src/a.cpp:worker:v --since="$BASE_A" --no-cache 2>/dev/null )"
 d2="$( "$BIN" "$A" --slice=src/a.cpp:worker:v --since="$BASE_A" --no-cache 2>/dev/null )"
-[ "$d1" = "$d2" ] && ok '(14a) determinism: two cold runs byte-identical' || no '(14a) two cold runs differ'
+if [ "$d1" = "$d2" ]; then ok '(14a) determinism: two cold runs byte-identical'; else no '(14a) two cold runs differ'; fi
 w1="$( "$BIN" "$A" --slice=src/a.cpp:worker:v --since="$BASE_A" 2>/dev/null )"
 w2="$( "$BIN" "$A" --slice=src/a.cpp:worker:v --since="$BASE_A" 2>/dev/null )"
-[ "$w1" = "$w2" ] && [ "$w1" = "$d1" ] && ok '(14b) cold == warm, and warm is stable' || no '(14b) cold and warm disagree'
+if [ "$w1" = "$w2" ] && [ "$w1" = "$d1" ]; then ok '(14b) cold == warm, and warm is stable'; else no '(14b) cold and warm disagree'; fi
 
 # (15) well-formedness
 if command -v xmllint >/dev/null 2>&1; then

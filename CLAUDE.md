@@ -82,12 +82,18 @@ changed mid-compile; the discipline is the fix.
 ## Verify
 
 ```bash
+./build/ripwire . --quality-delta --legend=compact      # the "am I done" checkpoint — see the note below
 python3 test/pargates.py . ./build/ripwire -j 6         # the full gate suite, in parallel
 test/regression.sh                                      # the same set, sequentially (authoritative list)
 LSAN_OPTIONS=suppressions=lsan_suppressions.txt ./asan/ripwire <dir> >/dev/null
 ./build/ripwire <dir> >a; ./build/ripwire <dir> >b; diff -q a b     # determinism gate
 ./build/ripwire <dir> | xmllint --noout -                          # well-formedness gate
 ```
+
+`--legend=compact` on the checkpoint run is not cosmetic: on a clean report the legend is nearly the
+whole document, and dropping it takes the run from 2,776 B to 454 B (measured 2026-09-10 on a
+two-function fixture; 15,601 B to 8,775 B on this repo mid-change). The findings are byte-identical
+either way — only the dictionary in front of them is shorter, and you already know it.
 
 Run gates in the **foreground**. A new `test/*check.sh` must be listed in `test/regression.sh` in
 the same commit — `test/manifestcheck.sh` fails otherwise.

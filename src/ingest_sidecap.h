@@ -3,6 +3,8 @@
 #error "ingest_sidecap.h is a SECTION of src/ingest.cpp's translation unit - include it only from ingest.cpp (see the ingest-family split note there)"
 #endif
 
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 // ingest_sidecap.h — parse infrastructure + the fused side-capture passes, moved VERBATIM from
 // ingest.cpp in the 2026-08-29 split: ParserGuard/grammarAbiOk (the block that sat between the
 // metrics and relations families; its only users are here and downstream, so it travels with its
@@ -94,6 +96,43 @@ FfiCtx makeFfiCtx( std::uint32_t fileId, Lang lang, std::string_view src, std::v
     return cx;
 }
 
+// `m.def( "alias", &Scope::target )` — the alias string and the `&`-stripped target text of a pybind def
+// call's argument_list, each empty when absent. O(children): the list owns every comment written between
+// its arguments — 13x at 16 000 (test/childwalkscalecheck.sh, arm B31). Its own function so ffiVisitNode's
+// nesting stays where it was: the cursor walk sits one level deeper than the loop it replaced.
+inline std::pair<std::string, std::string> pybindDefParts( TSNode args, std::string_view src )
+{
+    std::string alias, tgt;
+    if( ts_node_is_null( args ) )
+    {
+        return { alias, tgt };
+    }
+    ChildCursor cursor( args );
+    forEachNamedChild( args, cursor.cur, [ & ]( TSNode c )   // named only: skips '(' ',' ')'
+    {
+        const std::string_view ct = ts_node_type( c );
+        if( alias.empty() && ct == "string_literal" )
+        {
+            alias = ffiUnquote( nodeTextOf( c, src ) );
+        }
+        else if( tgt.empty() )
+        {
+            std::string_view txt = nodeTextOf( c, src );               // `&target` / `&Scope::method`
+            if( !txt.empty() && txt.front() == '&' )
+            {
+                txt.remove_prefix( 1 );
+                while( !txt.empty() && ( txt.front() == ' ' || txt.front() == '\t' ) )
+                {
+                    txt.remove_prefix( 1 );
+                }
+                tgt = std::string( txt );
+            }
+        }
+        return true;
+    } );
+    return { alias, tgt };
+}
+
 void ffiVisitNode( FfiCtx& cx, TSNode n, const char* t )
 {
     FUSEPROBE_BUMP( kFfi );
@@ -107,43 +146,15 @@ void ffiVisitNode( FfiCtx& cx, TSNode n, const char* t )
     const auto nodeSrc = [ & ]( TSNode nn ) noexcept -> std::string_view { return nodeTextOf( nn, src ); };
 
         // pybind11:  m.def("alias", &target)  /  cls.def("alias", &Scope::method)  /  .def_static(...)
-        if( hasPybind && std::strcmp( t, "call_expression" ) == 0 )
+        if( hasPybind && kindIs( t, "call_expression" ) )
         {
-            const TSNode fn = ts_node_child_by_field_name( n, "function", 8 );
-            if( !ts_node_is_null( fn ) && std::strcmp( ts_node_type( fn ), "field_expression" ) == 0 )
+            const TSNode fn = fieldChild( n, NodeField::Function );
+            if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "field_expression" ) )
             {
-                const std::string_view meth = nodeSrc( ts_node_child_by_field_name( fn, "field", 5 ) );
+                const std::string_view meth = nodeSrc( fieldChild( fn, NodeField::Field ) );
                 if( meth == "def" || meth == "def_static" )
                 {
-                    const TSNode args = ts_node_child_by_field_name( n, "arguments", 9 );
-                    std::string alias, tgt;
-                    const std::uint32_t cc = ts_node_is_null( args ) ? 0 : ts_node_child_count( args );
-                    for( std::uint32_t i = 0; i < cc; ++i )
-                    {
-                        const TSNode c = ts_node_child( args, i );
-                        if( !ts_node_is_named( c ) )
-                        {
-                            continue; // skip '(' ',' ')'
-                        }
-                        const std::string_view ct = ts_node_type( c );
-                        if( alias.empty() && ct == "string_literal" )
-                        {
-                            alias = ffiUnquote( nodeSrc( c ) );
-                        }
-                        else if( tgt.empty() )
-                        {
-                            std::string_view txt = nodeSrc( c );               // `&target` / `&Scope::method`
-                            if( !txt.empty() && txt.front() == '&' )
-                            {
-                                txt.remove_prefix( 1 );
-                                while( !txt.empty() && ( txt.front() == ' ' || txt.front() == '\t' ) )
-                                {
-                                    txt.remove_prefix( 1 );
-                                }
-                                tgt = std::string( txt );
-                            }
-                        }
-                    }
+                    auto [ alias, tgt ] = pybindDefParts( fieldChild( n, NodeField::Arguments ), src );
                     if( !alias.empty() && !tgt.empty() )
                     {
                         auto [ scope, name ] = ffiSplitScopeName( tgt );
@@ -156,32 +167,30 @@ void ffiVisitNode( FfiCtx& cx, TSNode n, const char* t )
             }
         }
         // extern "C": every function DECLARED inside becomes reachable from ctypes/cffi/cgo by its bare name.
-        else if( cish && std::strcmp( t, "linkage_specification" ) == 0 )
+        else if( cish && kindIs( t, "linkage_specification" ) )
         {
             // confirm the linkage string is "C" (not "C++") before harvesting.
-            bool isC = false;
-            const std::uint32_t lc = ts_node_child_count( n );
-            for( std::uint32_t i = 0; i < lc; ++i )
-            {
-                const TSNode c = ts_node_child( n, i );
-                if( std::strcmp( ts_node_type( c ), "string_literal" ) == 0 ) { isC = ( ffiUnquote( nodeSrc( c ) ) == "C" ); break; }
-            }
+            // O(children): `extern /*…*/ "C"` puts the comments in the linkage_specification itself, before
+            // the string — 13x at 16 000 (childwalkscalecheck B32; ffi/ floods the BODY, arm B4)
+            const TSNode linkage = firstChildOfKind( n, /*namedOnly=*/false, { "string_literal" } );
+            const bool   isC     = !ts_node_is_null( linkage ) && ffiUnquote( nodeSrc( linkage ) ) == "C";
             if( isC )
             {
                 // inner DFS: collect the identifier of every function_declarator in the linkage body.
                 std::vector<TSNode> inner;
+                ChildCursor         cursor( n );   // reused across nodes — this walk never recurses
                 inner.push_back( n );
                 while( !inner.empty() )
                 {
                     const TSNode m = inner.back();
                     inner.pop_back();
-                    if( std::strcmp( ts_node_type( m ), "function_declarator" ) == 0 )
+                    if( kindIs( ts_node_type( m ), "function_declarator" ) )
                     {
-                        const TSNode decl = ts_node_child_by_field_name( m, "declarator", 10 );
+                        const TSNode decl = fieldChild( m, NodeField::Declarator );
                         if( !ts_node_is_null( decl ) )
                         {
                             const char* dt = ts_node_type( decl );
-                            if( std::strcmp( dt, "identifier" ) == 0 || std::strcmp( dt, "field_identifier" ) == 0 )
+                            if( kindIs( dt, "identifier" ) || kindIs( dt, "field_identifier" ) )
                             {
                                 std::string nm = finalSegment( nodeSrc( decl ) );
                                 if( !nm.empty() )
@@ -191,23 +200,24 @@ void ffiVisitNode( FfiCtx& cx, TSNode n, const char* t )
                             }
                         }
                     }
-                    const std::uint32_t mc = ts_node_child_count( m );
-                    for( std::uint32_t i = 0; i < mc; ++i )
-                    {
-                        inner.push_back( ts_node_child( m, i ) );
-                    }
+                    // O(children), not O(children²): an `extern "C"` block's declaration list is one node
+                    // holding every declaration in it AND every comment between them (extras land in the
+                    // child array — src/infra/tschildren.h). 16 000 of them measured 14× the identical
+                    // flood outside a linkage_specification before this became a cursor
+                    // (test/childwalkscalecheck.sh, arm B5). `inner` IS the work list, so APPEND.
+                    appendChildren( m, cursor.cur, inner );
                 }
             }
         }
         // Python ctypes handle:  lib = CDLL(...)  /  lib = ctypes.CDLL(...)  /  lib = cdll.LoadLibrary(...)
-        else if( py && std::strcmp( t, "assignment" ) == 0 )
+        else if( py && kindIs( t, "assignment" ) )
         {
-            const TSNode lhs = ts_node_child_by_field_name( n, "left",  4 );
-            const TSNode rhs = ts_node_child_by_field_name( n, "right", 5 );
-            if( !ts_node_is_null( lhs ) && std::strcmp( ts_node_type( lhs ), "identifier" ) == 0
-                && !ts_node_is_null( rhs ) && std::strcmp( ts_node_type( rhs ), "call" ) == 0 )
+            const TSNode lhs = fieldChild( n, NodeField::Left );
+            const TSNode rhs = fieldChild( n, NodeField::Right );
+            if( !ts_node_is_null( lhs ) && kindIs( ts_node_type( lhs ), "identifier" )
+                && !ts_node_is_null( rhs ) && kindIs( ts_node_type( rhs ), "call" ) )
             {
-                const std::string_view ftext = nodeSrc( ts_node_child_by_field_name( rhs, "function", 8 ) );
+                const std::string_view ftext = nodeSrc( fieldChild( rhs, NodeField::Function ) );
                 const std::string      seg   = finalSegment( ftext.substr( 0, ftext.find( '(' ) ) );   // final `.`/`::` segment
                 const bool loader = seg == "CDLL" || seg == "WinDLL" || seg == "OleDLL" || seg == "PyDLL"
                                  || seg == "LoadLibrary" || seg == "dlopen";
@@ -244,7 +254,7 @@ inline std::string firstPathStringArg( TSNode argsNode, std::string_view src )
         return {};
     }
     const TSNode first = ts_node_named_child( argsNode, 0 );
-    if( std::strcmp( ts_node_type( first ), "string" ) != 0 )
+    if( !kindIs( ts_node_type( first ), "string" ) )
     {
         return {}; // template_string/f-string/identifier → skip
     }
@@ -282,13 +292,13 @@ inline std::string lastArgHandlerName( TSNode argsNode, std::string_view src )
         const std::uint32_t a = ts_node_start_byte( nn ), b = ts_node_end_byte( nn );
         return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
     };
-    if( std::strcmp( lt, "identifier" ) == 0 )
+    if( kindIs( lt, "identifier" ) )
     {
         return finalSegment( text( last ) );
     }
-    if( std::strcmp( lt, "member_expression" ) == 0 )
+    if( kindIs( lt, "member_expression" ) )
     {
-        const TSNode prop = ts_node_child_by_field_name( last, "property", 8 );
+        const TSNode prop = fieldChild( last, NodeField::Property );
         if( !ts_node_is_null( prop ) )
         {
             return finalSegment( text( prop ) );
@@ -304,7 +314,7 @@ inline std::string lastArgHandlerName( TSNode argsNode, std::string_view src )
 // a plain string literal (never guess).
 inline HttpMethod stringNodeToMethod( TSNode strNode, std::string_view src )
 {
-    if( ts_node_is_null( strNode ) || std::strcmp( ts_node_type( strNode ), "string" ) != 0 )
+    if( ts_node_is_null( strNode ) || !kindIs( ts_node_type( strNode ), "string" ) )
     {
         return HttpMethod::Unknown;
     }
@@ -328,37 +338,34 @@ inline HttpMethod pyMethodsKeyword( TSNode argsNode, std::string_view src, bool&
     {
         return HttpMethod::Unknown;
     }
-    const std::uint32_t nc = ts_node_named_child_count( argsNode );
-    for( std::uint32_t i = 0; i < nc; ++i )
+    // O(children): `@app.route( "/x", # … methods=[…] )` — 58x at 16 000 (childwalkscalecheck B33)
+    HttpMethod  method = HttpMethod::Unknown;
+    ChildCursor cursor( argsNode );
+    forEachNamedChild( argsNode, cursor.cur, [ & ]( TSNode c )
     {
-        const TSNode c = ts_node_named_child( argsNode, i );
-        if( std::strcmp( ts_node_type( c ), "keyword_argument" ) != 0 )
+        if( !kindIs( ts_node_type( c ), "keyword_argument" ) )
         {
-            continue;
+            return true;
         }
-        const TSNode nameN = ts_node_child_by_field_name( c, "name", 4 );
+        const TSNode nameN = fieldChild( c, NodeField::Name );
         if( ts_node_is_null( nameN ) )
         {
-            continue;
+            return true;
         }
         const std::uint32_t na = ts_node_start_byte( nameN ), nb = ts_node_end_byte( nameN );
         if( na > nb || nb > src.size() || src.substr( na, nb - na ) != "methods" )
         {
-            continue;
+            return true;
         }
         hasKeyword = true;
-        const TSNode valueN = ts_node_child_by_field_name( c, "value", 5 );
-        if( ts_node_is_null( valueN ) || std::strcmp( ts_node_type( valueN ), "list" ) != 0 )
+        const TSNode valueN = fieldChild( c, NodeField::Value );
+        if( !ts_node_is_null( valueN ) && kindIs( ts_node_type( valueN ), "list" ) && ts_node_named_child_count( valueN ) == 1 )
         {
-            return HttpMethod::Unknown;
+            method = stringNodeToMethod( ts_node_named_child( valueN, 0 ), src );   // else 0 or >1 verbs → ambiguous, path-only match
         }
-        if( ts_node_named_child_count( valueN ) != 1 )
-        {
-            return HttpMethod::Unknown; // 0 or >1 verbs → ambiguous, path-only match
-        }
-        return stringNodeToMethod( ts_node_named_child( valueN, 0 ), src );
-    }
-    return HttpMethod::Unknown;
+        return false;
+    } );
+    return method;
 }
 
 // JS options-object `{ method: 'POST', ... }`: the `method` property's string-literal value, else Unknown
@@ -366,49 +373,47 @@ inline HttpMethod pyMethodsKeyword( TSNode argsNode, std::string_view src, bool&
 // method per routematch::methodsCompatible in graph.h).
 inline HttpMethod jsMethodProperty( TSNode objNode, std::string_view src )
 {
-    if( ts_node_is_null( objNode ) || std::strcmp( ts_node_type( objNode ), "object" ) != 0 )
+    if( ts_node_is_null( objNode ) || !kindIs( ts_node_type( objNode ), "object" ) )
     {
         return HttpMethod::Unknown;
     }
-    const std::uint32_t nc = ts_node_named_child_count( objNode );
-    for( std::uint32_t i = 0; i < nc; ++i )
+    // O(children): `fetch( '/x', { /*…*/ method: 'POST' } )` — 55x at 16 000 (childwalkscalecheck B34)
+    HttpMethod  method = HttpMethod::Unknown;
+    ChildCursor cursor( objNode );
+    forEachNamedChild( objNode, cursor.cur, [ & ]( TSNode c )
     {
-        const TSNode c = ts_node_named_child( objNode, i );
-        if( std::strcmp( ts_node_type( c ), "pair" ) != 0 )
+        if( !kindIs( ts_node_type( c ), "pair" ) )
         {
-            continue;
+            return true;
         }
-        const TSNode keyN = ts_node_child_by_field_name( c, "key", 3 );
+        const TSNode keyN = fieldChild( c, NodeField::Key );
         if( ts_node_is_null( keyN ) )
         {
-            continue;
+            return true;
         }
         const char* kt = ts_node_type( keyN );
         const std::uint32_t ka = ts_node_start_byte( keyN ), kb = ts_node_end_byte( keyN );
         if( ka > kb || kb > src.size() )
         {
-            continue;
+            return true;
         }
         std::string key;
-        if( std::strcmp( kt, "property_identifier" ) == 0 )
+        if( kindIs( kt, "property_identifier" ) )
         {
             key = std::string( src.substr( ka, kb - ka ) );
         }
-        else if( std::strcmp( kt, "string" ) == 0 )
+        else if( kindIs( kt, "string" ) )
         {
             key = ffiUnquote( src.substr( ka, kb - ka ) );
         }
-        else
-        {
-            continue;
-        }
         if( key != "method" )
         {
-            continue;
+            return true;
         }
-        return stringNodeToMethod( ts_node_child_by_field_name( c, "value", 5 ), src );
-    }
-    return HttpMethod::Unknown;
+        method = stringNodeToMethod( fieldChild( c, NodeField::Value ), src );
+        return false;
+    } );
+    return method;
 }
 
 // One visitor on the shared pre-order stream (streamSideCaptures below). The pass arms only on Python/JS/TS;
@@ -457,42 +462,45 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
     const auto nodeSrc = [ & ]( TSNode nn ) noexcept -> std::string_view { return nodeTextOf( nn, src ); };
 
         // Python server: @app.get("/path") / @app.route("/path", methods=[...]) directly above a def.
-        if( pyServerGated && std::strcmp( t, "decorated_definition" ) == 0 )
+        if( pyServerGated && kindIs( t, "decorated_definition" ) )
         {
-            const TSNode defNode = ts_node_child_by_field_name( n, "definition", 10 );
+            const TSNode defNode = fieldChild( n, NodeField::Definition );
             std::string  handlerName;
-            if( !ts_node_is_null( defNode ) && std::strcmp( ts_node_type( defNode ), "function_definition" ) == 0 )
+            if( !ts_node_is_null( defNode ) && kindIs( ts_node_type( defNode ), "function_definition" ) )
             {
-                const TSNode nameNode = ts_node_child_by_field_name( defNode, "name", 4 );
+                const TSNode nameNode = fieldChild( defNode, NodeField::Name );
                 if( !ts_node_is_null( nameNode ) )
                 {
                     handlerName.assign( nodeSrc( nameNode ) );
                 }
             }
-            const std::uint32_t cc = ts_node_child_count( n );
-            for( std::uint32_t i = 0; i < cc; ++i )
+            // decorators of ONE definition: the count comes from the input, and a comment between two
+            // decorators is a further child, so the indexed form was O(children²) here too. No scaling arm
+            // exists for it (a decorator flood is not a shape any corpus produces) — this is the
+            // pure-iteration conversion, covered by the byte-identical arms (test/childwalkscalecheck.sh).
+            ChildCursor cursor( n );
+            forEachChild( n, cursor.cur, [ & ]( TSNode dec )
             {
-                const TSNode dec = ts_node_child( n, i );
-                if( std::strcmp( ts_node_type( dec ), "decorator" ) != 0 )
+                if( !kindIs( ts_node_type( dec ), "decorator" ) )
                 {
-                    continue;
+                    return true;
                 }
                 const TSNode expr = ts_node_named_child( dec, 0 );
-                if( ts_node_is_null( expr ) || std::strcmp( ts_node_type( expr ), "call" ) != 0 )
+                if( ts_node_is_null( expr ) || !kindIs( ts_node_type( expr ), "call" ) )
                 {
-                    continue;
+                    return true;
                 }
-                const TSNode fn = ts_node_child_by_field_name( expr, "function", 8 );
-                if( ts_node_is_null( fn ) || std::strcmp( ts_node_type( fn ), "attribute" ) != 0 )
+                const TSNode fn = fieldChild( expr, NodeField::Function );
+                if( ts_node_is_null( fn ) || !kindIs( ts_node_type( fn ), "attribute" ) )
                 {
-                    continue;
+                    return true;
                 }
-                const std::string_view attrName = nodeSrc( ts_node_child_by_field_name( fn, "attribute", 9 ) );
-                const TSNode argsNode = ts_node_child_by_field_name( expr, "arguments", 9 );
+                const std::string_view attrName = nodeSrc( fieldChild( fn, NodeField::Attribute ) );
+                const TSNode argsNode = fieldChild( expr, NodeField::Arguments );
                 const std::string path = firstPathStringArg( argsNode, src );
                 if( path.empty() )
                 {
-                    continue;
+                    return true;
                 }
 
                 HttpMethod method = HttpMethod::Unknown;
@@ -507,11 +515,12 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
                     method = httpMethodFromName( attrName );
                     if( method == HttpMethod::Unknown )
                     {
-                        continue; // not a recognized verb shortcut (e.g. .on_event)
+                        return true; // not a recognized verb shortcut (e.g. .on_event)
                     }
                 }
                 routeDefs.push_back( RouteDef{ fileId, ts_node_start_point( n ).row + 1, method, path, handlerName } );
-            }
+                return true;
+            } );
         }
         // JS/TS: ONE dispatch over every call_expression — client shapes (`fetch`, `axios.<verb>`) are
         // checked FIRST and UNCONDITIONALLY (their callee shape is specific enough to need no file gate),
@@ -520,14 +529,14 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
         // fixes the structural trap an `if/else if` split on `jsServerGated` vs `js` would fall into: once
         // the (possibly file-gated) branch claims a call_expression, an else-if chain never lets the OTHER
         // shape see that same node.
-        else if( js && std::strcmp( t, "call_expression" ) == 0 )
+        else if( js && kindIs( t, "call_expression" ) )
         {
-            const TSNode fn = ts_node_child_by_field_name( n, "function", 8 );
+            const TSNode fn = fieldChild( n, NodeField::Function );
             bool handled = false;
 
-            if( !ts_node_is_null( fn ) && std::strcmp( ts_node_type( fn ), "identifier" ) == 0 && nodeSrc( fn ) == "fetch" )
+            if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "identifier" ) && nodeSrc( fn ) == "fetch" )
             {
-                const TSNode argsNode = ts_node_child_by_field_name( n, "arguments", 9 );
+                const TSNode argsNode = fieldChild( n, NodeField::Arguments );
                 const std::string path = firstPathStringArg( argsNode, src );
                 if( !path.empty() )
                 {
@@ -540,16 +549,16 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
                 }
                 handled = true;   // "fetch(...)" is never ALSO a server registrar shape
             }
-            else if( !ts_node_is_null( fn ) && std::strcmp( ts_node_type( fn ), "member_expression" ) == 0 )
+            else if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "member_expression" ) )
             {
-                const TSNode objN = ts_node_child_by_field_name( fn, "object", 6 );
-                if( !ts_node_is_null( objN ) && std::strcmp( ts_node_type( objN ), "identifier" ) == 0 && nodeSrc( objN ) == "axios" )
+                const TSNode objN = fieldChild( fn, NodeField::Object );
+                if( !ts_node_is_null( objN ) && kindIs( ts_node_type( objN ), "identifier" ) && nodeSrc( objN ) == "axios" )
                 {
-                    const TSNode propN     = ts_node_child_by_field_name( fn, "property", 8 );
+                    const TSNode propN     = fieldChild( fn, NodeField::Property );
                     const HttpMethod method = httpMethodFromName( nodeSrc( propN ) );
                     if( method != HttpMethod::Unknown )
                     {
-                        const TSNode argsNode = ts_node_child_by_field_name( n, "arguments", 9 );
+                        const TSNode argsNode = fieldChild( n, NodeField::Arguments );
                         const std::string path = firstPathStringArg( argsNode, src );
                         if( !path.empty() )
                         {
@@ -563,13 +572,13 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
             // JS/TS server FALLBACK: app.get('/path', handler) / router.post('/path', mw, handler) — last
             // arg = handler. Only tried when the callee wasn't already claimed by a client shape above, and
             // only on a file-level framework signal (captureFfi's pybind-gate posture).
-            if( !handled && jsServerGated && !ts_node_is_null( fn ) && std::strcmp( ts_node_type( fn ), "member_expression" ) == 0 )
+            if( !handled && jsServerGated && !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "member_expression" ) )
             {
-                const TSNode propN     = ts_node_child_by_field_name( fn, "property", 8 );
+                const TSNode propN     = fieldChild( fn, NodeField::Property );
                 const HttpMethod method = httpMethodFromName( nodeSrc( propN ) );
                 if( method != HttpMethod::Unknown )
                 {
-                    const TSNode argsNode = ts_node_child_by_field_name( n, "arguments", 9 );
+                    const TSNode argsNode = fieldChild( n, NodeField::Arguments );
                     const std::string path = firstPathStringArg( argsNode, src );
                     if( !path.empty() )
                     {
@@ -580,19 +589,19 @@ void routesVisitNode( RouteCtx& cx, TSNode n, const char* t )
             }
         }
         // Python client: requests.get('/path') / requests.post('/path', json=...)
-        else if( py && std::strcmp( t, "call" ) == 0 )
+        else if( py && kindIs( t, "call" ) )
         {
-            const TSNode fn = ts_node_child_by_field_name( n, "function", 8 );
-            if( !ts_node_is_null( fn ) && std::strcmp( ts_node_type( fn ), "attribute" ) == 0 )
+            const TSNode fn = fieldChild( n, NodeField::Function );
+            if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "attribute" ) )
             {
-                const TSNode objN = ts_node_child_by_field_name( fn, "object", 6 );
-                if( !ts_node_is_null( objN ) && std::strcmp( ts_node_type( objN ), "identifier" ) == 0 && nodeSrc( objN ) == "requests" )
+                const TSNode objN = fieldChild( fn, NodeField::Object );
+                if( !ts_node_is_null( objN ) && kindIs( ts_node_type( objN ), "identifier" ) && nodeSrc( objN ) == "requests" )
                 {
-                    const TSNode attrN     = ts_node_child_by_field_name( fn, "attribute", 9 );
+                    const TSNode attrN     = fieldChild( fn, NodeField::Attribute );
                     const HttpMethod method = httpMethodFromName( nodeSrc( attrN ) );
                     if( method != HttpMethod::Unknown )
                     {
-                        const TSNode argsNode = ts_node_child_by_field_name( n, "arguments", 9 );
+                        const TSNode argsNode = fieldChild( n, NodeField::Arguments );
                         const std::string path = firstPathStringArg( argsNode, src );
                         if( !path.empty() )
                         {
@@ -649,18 +658,18 @@ inline bool isUpdateOrAssignmentTarget( TSNode node ) noexcept
     const char* pt = ts_node_type( parent );
 
     // C++ `x++` / `--x` and Python aug targets handled via update_expression (the operand is the target).
-    if( std::strcmp( pt, "update_expression" ) == 0 )
+    if( kindIs( pt, "update_expression" ) )
     {
         return true;
     }
 
     // direct LHS of an assignment: parent is the assignment node and `node` sits in its `left` field.
-    const bool isAssign =    std::strcmp( pt, "assignment_expression" ) == 0       // C++ `=` `+=` `-=` …
-                          || std::strcmp( pt, "assignment" ) == 0                  // Python `=`
-                          || std::strcmp( pt, "augmented_assignment" ) == 0;       // Python `+=` …
+    const bool isAssign =    kindIs( pt, "assignment_expression" )       // C++ `=` `+=` `-=` …
+                          || kindIs( pt, "assignment" )                  // Python `=`
+                          || kindIs( pt, "augmented_assignment" );       // Python `+=` …
     if( isAssign )
     {
-        const TSNode lhs = ts_node_child_by_field_name( parent, "left", 4 );
+        const TSNode lhs = fieldChild( parent, NodeField::Left );
         return !ts_node_is_null( lhs ) && sameSpan( lhs, node );
     }
     return false;
@@ -675,8 +684,8 @@ inline TSNode outermostBaseOf( TSNode node, bool throughMemberAccess ) noexcept
     for( TSNode up = ts_node_parent( node ); !ts_node_is_null( up ); up = ts_node_parent( node ) )
     {
         const char* ut = ts_node_type( up );
-        const bool isSubscript = std::strcmp( ut, "subscript_expression" ) == 0 || std::strcmp( ut, "subscript" ) == 0;   // C/C++ · Python `a[i]`
-        const bool isMember    = std::strcmp( ut, "field_expression" ) == 0 || std::strcmp( ut, "attribute" ) == 0;       // C/C++ `p->f`,`a.b` · Python `a.b`
+        const bool isSubscript = kindIs( ut, "subscript_expression" ) || kindIs( ut, "subscript" );   // C/C++ · Python `a[i]`
+        const bool isMember    = kindIs( ut, "field_expression" ) || kindIs( ut, "attribute" );       // C/C++ `p->f`,`a.b` · Python `a.b`
         const bool climbs      = isSubscript || ( throughMemberAccess && isMember );
         if( !( climbs && ts_node_start_byte( up ) == ts_node_start_byte( node ) ) )
         {
@@ -703,17 +712,17 @@ inline bool isCallCallee( TSNode id ) noexcept
     const char* pt = ts_node_type( parent );
 
     // bare call `foo()` — the function field is the identifier itself.
-    if( std::strcmp( pt, "call_expression" ) == 0 || std::strcmp( pt, "call" ) == 0 )
+    if( kindIs( pt, "call_expression" ) || kindIs( pt, "call" ) )
     {
-        const TSNode fn = ts_node_child_by_field_name( parent, "function", 8 );
+        const TSNode fn = fieldChild( parent, NodeField::Function );
         return !ts_node_is_null( fn ) && sameSpan( fn, id );
     }
     // member call `x.m()` / `x->m()` — `id` is the field of a field_expression/attribute that is the
     // function of a call. (The receiver `x` is NOT the callee → still captured as a read below.)
-    if( std::strcmp( pt, "field_expression" ) == 0 || std::strcmp( pt, "attribute" ) == 0 )
+    if( kindIs( pt, "field_expression" ) || kindIs( pt, "attribute" ) )
     {
-        const TSNode fieldNode = ts_node_child_by_field_name( parent, "field", 5 );
-        const TSNode attrNode  = ts_node_child_by_field_name( parent, "attribute", 9 );
+        const TSNode fieldNode = fieldChild( parent, NodeField::Field );
+        const TSNode attrNode  = fieldChild( parent, NodeField::Attribute );
         const bool   isField   = ( !ts_node_is_null( fieldNode ) && sameSpan( fieldNode, id ) )
                               || ( !ts_node_is_null( attrNode )  && sameSpan( attrNode,  id ) );
         if( !isField )
@@ -726,11 +735,11 @@ inline bool isCallCallee( TSNode id ) noexcept
             return false;
         }
         const char* gt = ts_node_type( gp );
-        if( std::strcmp( gt, "call_expression" ) != 0 && std::strcmp( gt, "call" ) != 0 )
+        if( !kindIs( gt, "call_expression" ) && !kindIs( gt, "call" ) )
         {
             return false;
         }
-        const TSNode fn = ts_node_child_by_field_name( gp, "function", 8 );
+        const TSNode fn = fieldChild( gp, NodeField::Function );
         return !ts_node_is_null( fn ) && sameSpan( fn, parent );
     }
     return false;
@@ -750,36 +759,42 @@ inline bool isCallCallee( TSNode id ) noexcept
 // resolves to an `argument_list`, the same node every genuine call ARGUMENT lives under. Suppressing that
 // parent would delete real reads corpus-wide to chase a shape that is vanishingly rare in real source.
 // Iteration 4 adds the shape arm 2 looks straight at and still misses: a `declaration` carries one
-// `declarator` FIELD PER DECLARED NAME, so ts_node_child_by_field_name — which returns the FIRST — sees
+// `declarator` FIELD PER DECLARED NAME, so a field read — which returns the FIRST — sees
 // `a` in `int a, key;` and never `key`; a bare `int key;` it misses outright, the parent type not being in
 // arm 2's list at all. Iterations 1-3 could not observe either, because the block-start span suppressed the
 // declaration line along with the rest of the block; declaration-point spans stop covering it.
 inline bool isDeclSiteName( TSNode id, TSNode parent, const char* pt ) noexcept
 {
-    if( std::strcmp( pt, "reference_declarator" ) == 0 || std::strcmp( pt, "structured_binding_declarator" ) == 0
-        || std::strcmp( pt, "variadic_declarator" ) == 0 || std::strcmp( pt, "attributed_declarator" ) == 0 )
+    if( kindIs( pt, "reference_declarator" ) || kindIs( pt, "structured_binding_declarator" )
+        || kindIs( pt, "variadic_declarator" ) || kindIs( pt, "attributed_declarator" ) )
     {
         return true;
     }
-    if( std::strcmp( pt, "declaration" ) == 0 )
+    if( kindIs( pt, "declaration" ) )
     {
-        const std::uint32_t cc = ts_node_child_count( parent );
-        for( std::uint32_t i = 0; i < cc; ++i )
+        // O(children) on the cursor's O(1) field name, and this runs PER IDENTIFIER of the declaration:
+        // the indexed form was O(names × C²) in a width a comment run sets (src/infra/tschildren.h,
+        // test/childwalkscalecheck.sh arm B7).
+        bool        isSlot = false;
+        ChildCursor cursor( parent );
+        forEachChild( parent, cursor.cur, [ & ]( TSNode c )
         {
-            const char* fieldName = ts_node_field_name_for_child( parent, i );
-            if( fieldName != nullptr && std::strcmp( fieldName, "declarator" ) == 0 && sameSpan( ts_node_child( parent, i ), id ) )
+            const char* fieldName = ts_tree_cursor_current_field_name( &cursor.cur );
+            if( fieldName == nullptr || !kindIs( fieldName, "declarator" ) || !sameSpan( c, id ) )
             {
                 return true;
             }
-        }
-        return false;
+            isSlot = true;
+            return false;
+        } );
+        return isSlot;
     }
-    if( std::strcmp( pt, "for_range_loop" ) == 0 )
+    if( kindIs( pt, "for_range_loop" ) )
     {
-        const TSNode decl = ts_node_child_by_field_name( parent, "declarator", 10 );
+        const TSNode decl = fieldChild( parent, NodeField::Declarator );
         return !ts_node_is_null( decl ) && sameSpan( decl, id );
     }
-    if( std::strcmp( pt, "lambda_capture_initializer" ) == 0 )
+    if( kindIs( pt, "lambda_capture_initializer" ) )
     {
         return ts_node_named_child_count( parent ) > 0 && sameSpan( ts_node_named_child( parent, 0 ), id );
     }
@@ -802,7 +817,7 @@ inline bool isNonValueContext( TSNode id ) noexcept
     // (1) part of a qualified / scoped NAME (`A::process` def name, `A::b()` qualified call name, `ns::T`
     //     type, `A::kConst` qualified value): the segment is not a plain value identifier. Calls/defs of
     //     this shape are captured by the tags query; qualified value reads are intentionally out of scope.
-    if( std::strcmp( pt, "qualified_identifier" ) == 0 || std::strcmp( pt, "scoped_identifier" ) == 0 || std::strcmp( pt, "scoped_type_identifier" ) == 0 || std::strcmp( pt, "qualified_type_identifier" ) == 0 || std::strcmp( pt, "template_function" ) == 0 || std::strcmp( pt, "template_type" ) == 0 )
+    if( kindIs( pt, "qualified_identifier" ) || kindIs( pt, "scoped_identifier" ) || kindIs( pt, "scoped_type_identifier" ) || kindIs( pt, "qualified_type_identifier" ) || kindIs( pt, "template_function" ) || kindIs( pt, "template_type" ) )
     {
         return true;
     }
@@ -811,12 +826,12 @@ inline bool isNonValueContext( TSNode id ) noexcept
     // `optional_parameter_declaration` is `parameter_declaration`'s DEFAULTED sibling (`int x = 0`) and
     // carries the same `declarator` field — probing the field, not the node type, is what keeps a default
     // VALUE that names a symbol (`int v = probe()`, a different field) a genuine use.
-    if(    std::strcmp( pt, "function_declarator" ) == 0 || std::strcmp( pt, "init_declarator" ) == 0
-        || std::strcmp( pt, "parameter_declaration" ) == 0 || std::strcmp( pt, "pointer_declarator" ) == 0
-        || std::strcmp( pt, "reference_declarator" ) == 0  || std::strcmp( pt, "array_declarator" ) == 0
-        || std::strcmp( pt, "optional_parameter_declaration" ) == 0 )
+    if(    kindIs( pt, "function_declarator" ) || kindIs( pt, "init_declarator" )
+        || kindIs( pt, "parameter_declaration" ) || kindIs( pt, "pointer_declarator" )
+        || kindIs( pt, "reference_declarator" )  || kindIs( pt, "array_declarator" )
+        || kindIs( pt, "optional_parameter_declaration" ) )
     {
-        const TSNode decl = ts_node_child_by_field_name( parent, "declarator", 10 );
+        const TSNode decl = fieldChild( parent, NodeField::Declarator );
         if( !ts_node_is_null( decl ) && sameSpan( decl, id ) )
         {
             return true;
@@ -828,12 +843,12 @@ inline bool isNonValueContext( TSNode id ) noexcept
         return true;
     }
     // (3) Python function / parameter NAME field (a DEF/param, not a use).
-    if( std::strcmp( pt, "function_definition" ) == 0 || std::strcmp( pt, "parameters" ) == 0
-        || std::strcmp( pt, "typed_parameter" ) == 0 || std::strcmp( pt, "default_parameter" ) == 0
-        || std::strcmp( pt, "lambda_parameters" ) == 0 )
+    if( kindIs( pt, "function_definition" ) || kindIs( pt, "parameters" )
+        || kindIs( pt, "typed_parameter" ) || kindIs( pt, "default_parameter" )
+        || kindIs( pt, "lambda_parameters" ) )
     {
-        const TSNode nm = ts_node_child_by_field_name( parent, "name", 4 );
-        if( ( !ts_node_is_null( nm ) && sameSpan( nm, id ) ) || std::strcmp( pt, "parameters" ) == 0 || std::strcmp( pt, "lambda_parameters" ) == 0 )
+        const TSNode nm = fieldChild( parent, NodeField::Name );
+        if( ( !ts_node_is_null( nm ) && sameSpan( nm, id ) ) || kindIs( pt, "parameters" ) || kindIs( pt, "lambda_parameters" ) )
         {
             return true;   // every direct child of a parameter list is a param NAME, not a use
         }
@@ -899,14 +914,14 @@ inline bool isTypeDeclarationSite( TSNode id ) noexcept
     const char* pt = ts_node_type( parent );
 
     // (b) base clause — RefRole::Extends owns this position.
-    if( std::strcmp( pt, "base_class_clause" ) == 0 )
+    if( kindIs( pt, "base_class_clause" ) )
     {
         return true;
     }
 
     // (c) a type parameter DECLARES its name.
-    if(    std::strcmp( pt, "type_parameter_declaration" ) == 0 || std::strcmp( pt, "variadic_type_parameter_declaration" ) == 0
-        || std::strcmp( pt, "optional_type_parameter_declaration" ) == 0 )
+    if(    kindIs( pt, "type_parameter_declaration" ) || kindIs( pt, "variadic_type_parameter_declaration" )
+        || kindIs( pt, "optional_type_parameter_declaration" ) )
     {
         return true;
     }
@@ -920,7 +935,7 @@ inline bool isTypeDeclarationSite( TSNode id ) noexcept
     {
         if( std::strcmp( pt, k ) == 0 )
         {
-            const TSNode nm = ts_node_child_by_field_name( parent, "name", 4 );
+            const TSNode nm = fieldChild( parent, NodeField::Name );
             if( !ts_node_is_null( nm ) && sameSpan( nm, id ) )
             {
                 return true;
@@ -928,9 +943,9 @@ inline bool isTypeDeclarationSite( TSNode id ) noexcept
         }
     }
     // `typedef struct X Y;` — Y is the DECLARATOR field and is the new name; X keeps its mention.
-    if( std::strcmp( pt, "type_definition" ) == 0 )
+    if( kindIs( pt, "type_definition" ) )
     {
-        const TSNode dc = ts_node_child_by_field_name( parent, "declarator", 10 );
+        const TSNode dc = fieldChild( parent, NodeField::Declarator );
         if( !ts_node_is_null( dc ) && sameSpan( dc, id ) )
         {
             return true;
@@ -977,8 +992,8 @@ inline UseSiteShape classifyUseSite( TSNode n, const char* t, Lang lang ) noexce
 {
     UseSiteShape shape;
     shape.typeMention = isTypeMentionNode( t );
-    const bool isFieldIdent = std::strcmp( t, "field_identifier" ) == 0;
-    if( !shape.typeMention && !isFieldIdent && std::strcmp( t, "identifier" ) != 0 )
+    const bool isFieldIdent = kindIs( t, "field_identifier" );
+    if( !shape.typeMention && !isFieldIdent && !kindIs( t, "identifier" ) )
     {
         return shape;
     }
@@ -1054,7 +1069,7 @@ bool prepareParserFor( TSParser* parser, const LangEntry& le )
     if( !ts_parser_set_language( parser, lang ) || !grammarAbiOk( lang ) )
     {
         // never emit a silently-empty tree — say which language we dropped.
-        std::fprintf( stderr, "[ripwire] grammar ABI mismatch or set_language failed for %s — skipping language\n",
+        rw::emitTo( stderr, "[ripwire] grammar ABI mismatch or set_language failed for {} — skipping language\n",
                       std::string( le.querySub ).c_str() );
         return false;
     }
@@ -1107,6 +1122,74 @@ struct TreeGuard
         return out;
     }
 };
+
+// ── THE MEMBER-MACRO RE-PARSE (src/macroreparse.h; gate test/macroreparsecheck.sh) ──────────────────────────────────
+// Per-worker scratch, reused across files: the scanner's scope stack, the spans the CURRENT file's adopted re-parse
+// blanked (cleared for every file; non-empty only after an adoption), the blanked copy of the bytes, and whether this
+// ingest records value uses (the rich family) — which decides whether a blanked invocation stays a --uses site.
+struct MemberMacroReparse
+{
+    macroreparse::ScanScratch            scan;
+    std::vector<macroreparse::BlankSpan> spans;
+    std::string                          blanked;
+    bool                                 captureValueUses = false;
+};
+
+// §L1 health of the parse this file's symbols will come from. For a C-family file whose FIRST parse holds error bytes,
+// try the re-parse with its semicolon-less member macro invocations blanked, and swap `tree` for it only when
+// macroreparse::adoptsReparse says it holds strictly fewer error bytes. The returned health then describes the ADOPTED
+// tree (errNodes/errBytes measured on it, wsBytes on the original bytes) and carries macroBlanked; otherwise it is the
+// first parse's, byte for byte what measureFileHealth always returned. A clean first parse pays one comparison.
+inline FileHealth measureHealthAdoptingMemberMacroReparse( TSParser* parser, Lang lang, std::string_view bytes, TreeGuard& tree, MemberMacroReparse& work )
+{
+    const FileHealth first = measureFileHealth( ts_tree_root_node( tree.get() ), bytes );
+    work.spans.clear();
+    if( first.errBytes == 0 || !macroreparse::isMacroReparseLang( lang ) )
+    {
+        return first;
+    }
+    macroreparse::findMemberMacroInvocations( bytes, work.spans, work.scan );
+    if( work.spans.empty() )
+    {
+        return first;
+    }
+    PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: member-macro re-parse" );
+    macroreparse::blankInvocations( bytes, work.spans, work.blanked );
+    TreeGuard  second( parseTree( parser, work.blanked ) );
+    FileHealth reparsed = second.get() != nullptr ? measureFileHealth( ts_tree_root_node( second.get() ), bytes ) : first;
+    if( second.get() == nullptr || !macroreparse::adoptsReparse( first.errBytes, reparsed.errBytes ) )
+    {
+        work.spans.clear();
+        return first;
+    }
+    reparsed.macroBlanked = std::uint32_t( work.spans.size() );
+    tree = std::move( second );
+    return reparsed;
+}
+
+// A blanked invocation stays a use of the macro NAME: role=Type, the role the unrepaired parse gave it (it read
+// `NAME(X)` as a declaration whose type is NAME), so --uses=NAME lists the same sites whether or not the re-parse was
+// adopted. Only where that parse recorded uses at all — the rich family, C++/ObjC, captureSideFacts' own arming. Type
+// never enters the call graph, so PageRank and the default map are untouched by these rows. Identifiers inside the
+// parentheses are NOT re-recorded (disclosed in the skipped verb's legend).
+inline void appendBlankedMacroUses( const MemberMacroReparse& work, Lang lang, std::uint32_t fileId, std::string_view bytes, std::vector<RawRef>& refs )
+{
+    if( !work.captureValueUses || ( lang != Lang::Cpp && lang != Lang::ObjC ) )
+    {
+        return;
+    }
+    for( const macroreparse::BlankSpan& span : work.spans )
+    {
+        RawRef use;
+        use.fileId    = fileId;
+        use.startByte = span.startByte;
+        use.line      = span.line;
+        use.lang      = lang;
+        use.role      = RefRole::Type;
+        use.name      = std::string( bytes.substr( span.startByte, span.nameEndByte - span.startByte ) );
+        refs.push_back( std::move( use ) );
+    }
+}
 
 // ── ONE pre-order stream for every whole-AST side-capture pass ────────────────────────────────────────
 // FFI, routes, Rust impls, bindings and value-uses each used to run their OWN iterative pre-order walk of
@@ -1410,6 +1493,9 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     // #62: byte ranges this file's preprocessor decides are dead; see preprocDeadRangesFor above.
     const std::vector<PreprocDeadRange> ppDead = preprocDeadRangesFor( le, root, src );
 
+    // extent honesty: the recovered-bit walk (parseRecoveredBits) only exists in a file the parser had to recover.
+    const bool fileHasError = ts_node_has_error( root );
+
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: tags query exec+captures" );
         ts_query_cursor_exec( cursor, query, root );
@@ -1473,9 +1559,9 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                         // the `type` field so the symbol name is `operator bool` / `operator MyType`, not the
                         // param list. Symbolic ops (operator==/[]/()) go through operator_name and are untouched —
                         // trimming at `(` there would wrongly cut `operator()`, so this is operator_cast-only.
-                        if( std::strcmp( ts_node_type( cap.node ), "operator_cast" ) == 0 )
+                        if( kindIs( ts_node_type( cap.node ), "operator_cast" ) )
                         {
-                            const TSNode typeNode = ts_node_child_by_field_name( cap.node, "type", 4 );
+                            const TSNode typeNode = fieldChild( cap.node, NodeField::Type );
                             if( !ts_node_is_null( typeNode ) )
                             {
                                 const uint32_t typeEnd = ts_node_end_byte( typeNode );
@@ -1548,15 +1634,15 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             {
                 // Bare pipe targets have their own capture; every other bare name needs lexical variable exclusion.
                 const TSNode parent = ts_node_parent( nameNode );
-                if( ( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, "operator", 8, src ) == "|>"
-                      && ts_node_eq( ts_node_child_by_field_name( parent, "right", 5 ), nameNode ) ) || !elixir.bareCall( nameNode ) ) { continue; }
+                if( ( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "|>"
+                      && ts_node_eq( fieldChild( parent, NodeField::Right ), nameNode ) ) || !elixir.bareCall( nameNode ) ) { continue; }
             }
             if( le.lang == Lang::Elixir && refCapSv == "reference.operator" )
             {
                 constexpr std::string_view special[] = { "=", "<-", "\\\\", "::", "|>", "when", "|", "^", "&", "@" };
                 if( std::find( std::begin( special ), std::end( special ), nameTxt ) != std::end( special ) ) { continue; }
                 const TSNode parent = ts_node_parent( roleNode );
-                if( nameTxt == "/" && elixirNodeIs( parent, "unary_operator" ) && nodeFieldText( parent, "operator", 8, src ) == "&" ) { continue; }
+                if( nameTxt == "/" && elixirNodeIs( parent, "unary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "&" ) { continue; }
             }
 
             if( isDef )
@@ -1613,15 +1699,15 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     // these, so reaching here means roleNode is a prototype/declaration with no body.
                     // (Without this, an in-class method declaration would climb into class_specifier and
                     // wrongly grab the whole CLASS body as its span — corrupting spans + ref attribution.)
-                    const bool scope =    std::strcmp( pt, "class_specifier" ) == 0        || std::strcmp( pt, "struct_specifier" ) == 0
-                                       || std::strcmp( pt, "field_declaration_list" ) == 0 || std::strcmp( pt, "declaration_list" ) == 0
-                                       || std::strcmp( pt, "namespace_definition" ) == 0   || std::strcmp( pt, "enum_specifier" ) == 0
-                                       || std::strcmp( pt, "translation_unit" ) == 0       || std::strcmp( pt, "source_file" ) == 0       // Swift top
-                                       || std::strcmp( pt, "class_body" ) == 0             || std::strcmp( pt, "protocol_body" ) == 0     // Swift type bodies
-                                       || std::strcmp( pt, "enum_class_body" ) == 0
-                                       || std::strcmp( pt, "class_interface" ) == 0        || std::strcmp( pt, "class_implementation" ) == 0   // ObjC
-                                       || std::strcmp( pt, "implementation_definition" ) == 0 || std::strcmp( pt, "protocol_declaration" ) == 0
-                                       || std::strcmp( pt, "compound_statement" ) == 0     || std::strcmp( pt, "block" ) == 0;   // a function BODY: a block-scope
+                    const bool scope =    kindIs( pt, "class_specifier" )        || kindIs( pt, "struct_specifier" )
+                                       || kindIs( pt, "field_declaration_list" ) || kindIs( pt, "declaration_list" )
+                                       || kindIs( pt, "namespace_definition" )   || kindIs( pt, "enum_specifier" )
+                                       || kindIs( pt, "translation_unit" )       || kindIs( pt, "source_file" )       // Swift top
+                                       || kindIs( pt, "class_body" )             || kindIs( pt, "protocol_body" )     // Swift type bodies
+                                       || kindIs( pt, "enum_class_body" )
+                                       || kindIs( pt, "class_interface" )        || kindIs( pt, "class_implementation" )   // ObjC
+                                       || kindIs( pt, "implementation_definition" ) || kindIs( pt, "protocol_declaration" )
+                                       || kindIs( pt, "compound_statement" )     || kindIs( pt, "block" );   // a function BODY: a block-scope
                     // `Type v(args);` (most-vexing-parse) must not climb up and steal its enclosing function's span. A real
                     // function definition's declarator parents directly to function_definition (found at hop 1, above), so this never fires for it.
                     if( scope )
@@ -1629,7 +1715,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                         // prototype/declaration: use the member/decl wrapper as the span so the RETURN
                         // TYPE is included (not just the declarator), WITHOUT grabbing the class body.
                         const char* ct = ts_node_type( child );
-                        if( std::strcmp( ct, "field_declaration" ) == 0 || std::strcmp( ct, "declaration" ) == 0 )
+                        if( kindIs( ct, "field_declaration" ) || kindIs( ct, "declaration" ) )
                         {
                             defNode = child;
                         }
@@ -1644,7 +1730,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     // all reported loc=3439 cx=487). The enclosing statement_block is not in the scope-stop
                     // list above (only C-family compound_statement/block are), so nested defs escaped upward;
                     // containment is the grammar-agnostic stop. Gate: test/jsnestedcheck.sh.
-                    const TSNode pb = ts_node_child_by_field_name( p, "body", 4 );
+                    const TSNode pb = fieldChild( p, NodeField::Body );
                     if( !ts_node_is_null( pb ) )
                     {
                         if( !spanContains( pb, roleNode ) ) { defNode = p; body = pb; }
@@ -1655,7 +1741,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 }
             }
 
-            // ObjC-only body-field fallback for the grammar that exposes a body as an unnamed CHILD, not a
+            // ObjC/Kotlin body-field fallback for the grammars that expose a body as an unnamed CHILD, not a
             // named "body" field. C++ function_definition owns a "body" field (found above); the ObjC grammar
             // never does, so the field lookup returns null and bodyByte would stay 0 for a real definition —
             // making an @implementation def indistinguishable from its @interface DECL (both bodyByte==0). That
@@ -1666,32 +1752,50 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             //   - an ObjC CLASS: an @implementation carries `implementation_definition` member children; the
             //     matching @interface carries only `method_declaration`s → so an `implementation_definition`
             //     child is exactly "this is the class's definition, not its forward @interface".
+            //   - Kotlin: `function_body` / `class_body` / `enum_class_body` are positional children too
+            //     (function_declaration's only named field is `receiver`), and the cost of missing them is
+            //     the same collapse bug in the other direction — a Kotlin definition read as bodyless is
+            //     deleted from the candidate pool as a forward declaration whenever a same-named Java
+            //     definition exists (test/kotlincheck.sh §5). `enum_class_body` (`enum class Status { … }`)
+            //     was the one omission a second-opinion review caught: `class_declaration`'s enum-class form
+            //     nests its members under that node, not `class_body` — verified via a raw parse of
+            //     `enum class Status { READY, DONE }` → `(class_declaration (type_identifier)
+            //     (enum_class_body (enum_entry …) (enum_entry …)))`.
             // A bodyLESS declaration (@interface method / @interface class) has none of these children →
-            // bodyByte stays 0 → it stays a decl (the discriminant the collapse needs). GATED to Lang::ObjC so
-            // C++/Python/Rust/Go/TS/Swift bodyByte — and therefore their sigEndByte, spans, and node/edge
-            // output — are BYTE-for-byte unchanged (a .mm's C++ functions take the C "body"-field path above
-            // and never reach here). See test/langcheck.sh c.m and the byte-identical src/ regression gate.
-            if( ts_node_is_null( body ) && le.lang == Lang::ObjC )
+            // bodyByte stays 0 → it stays a decl (a bodyless KOTLIN TYPE does too, and is still a definition: model.h isDefinitionNotDeclaration). GATED to ObjC and
+            // Kotlin so C++/Python/Rust/Go/TS/Swift bodyByte — and therefore their sigEndByte, spans, and
+            // node/edge output — are BYTE-for-byte unchanged (a .mm's C++ functions take the C "body"-field
+            // path above and never reach here). See test/langcheck.sh c.m and the byte-identical src/
+            // regression gate.
+            if( ts_node_is_null( body ) && ( le.lang == Lang::ObjC || le.lang == Lang::Kotlin ) )
             {
-                const std::uint32_t childCount = ts_node_child_count( defNode );
-                for( std::uint32_t ci = 0; ci < childCount; ++ci )
-                {
-                    const TSNode ch = ts_node_child( defNode, ci );
-                    const char*  ct = ts_node_type( ch );
-                    if( std::strcmp( ct, "compound_statement" ) == 0     || std::strcmp( ct, "function_body" ) == 0
-                        || std::strcmp( ct, "block" ) == 0               || std::strcmp( ct, "implementation_definition" ) == 0 )
-                    { body = ch; break; }
-                }
+                // O(children): `- (void) m /*…*/ { }` puts the comments in the method_definition, before its
+                // body — 24x at 16 000 (test/childwalkscalecheck.sh, arm B35)
+                body = firstChildOfKind( defNode, /*namedOnly=*/false,
+                                         { "compound_statement", "function_body", "block", "implementation_definition", "class_body", "enum_class_body" } );
             }
 
+            // Dart's body is a SIBLING of the signature, so neither defBodyNodeOf nor the climb above can
+            // find it and the span would stop at the signature — see dartFollowingBody (ingest_relations.h)
+            // for the measurement and for why an abstract member still comes back null.
+            bool dartSiblingBody = false;
+            if( ts_node_is_null( body ) && le.lang == Lang::Dart )
+            {
+                body            = dartFollowingBody( defNode );
+                dartSiblingBody = !ts_node_is_null( body );
+            }
+            // Both flags mean the same thing to the three span consumers below: the code this symbol
+            // owns lives in a SIBLING node, so byte/row extents and complexity must run through it.
+            const bool spanThroughBody = isTestMacroBlock || dartSiblingBody;
+
             d.startByte = ts_node_start_byte( defNode );
-            d.endByte   = isTestMacroBlock ? ts_node_end_byte( body ) : ts_node_end_byte( defNode );   // LB-E: the span runs THROUGH the sibling block
+            d.endByte   = spanThroughBody ? ts_node_end_byte( body ) : ts_node_end_byte( defNode );   // LB-E: the span runs THROUGH the sibling block
             d.nameByte  = nameByte;
             d.bodyByte  = ts_node_is_null( body ) ? 0u : ts_node_start_byte( body );
             const bool  fnOrMethod = ( kind == SymKind::Function || kind == SymKind::Method );
             // LB-E: for a testmacroblock the body SIBLING is where the code lives — complexityOf walks
             // INSIDE its root node, so handing it defNode (the bare macro statement) would count nothing.
-            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal ] = fnOrMethod ? complexityOf( isTestMacroBlock ? body : defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {} };
+            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal ] = fnOrMethod ? complexityOf( spanThroughBody ? body : defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {} };
             d.cx        = cxVal;
             d.ccx       = ccxVal;
             d.locals    = localsVal;   // Phase 1: floor count, C/C++ only (model.h localsCountedLang) — 0 elsewhere, never emitted there
@@ -1703,7 +1807,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // param count + max nesting for functions/methods only (0 otherwise, absent in emit). All descriptive.
             {
                 const std::uint32_t startRow = ts_node_start_point( defNode ).row;
-                const std::uint32_t endRow   = ts_node_end_point( isTestMacroBlock ? body : defNode ).row;   // LB-E: rows through the sibling block
+                const std::uint32_t endRow   = ts_node_end_point( spanThroughBody ? body : defNode ).row;   // LB-E: rows through the sibling block
                 d.loc = ( endRow >= startRow ) ? ( endRow - startRow + 1u ) : 1u;
             }
             d.params    = fnOrMethod ? ( le.lang == Lang::Elixir ? elixirParams( defNode, src ) : countParams( defNode ) ) : std::uint16_t( 0 );
@@ -1801,6 +1905,16 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             { // enclosing class/module → id= addressability, per-class overload sets, editCheckImplicitReceiver
                 d.scope = rubyEnclosingScopeOf( nameNode, src );   // (test/rubyscopecheck.sh)
             }
+            else if( le.lang == Lang::Kotlin )
+            { // enclosing class/object/companion-object → same P2-D Rule-1 narrowing Python/Ruby get;
+              // ALSO what keeps two classes' same-named methods from colliding under the new
+              // Kotlin<->Java langCompatible bridge (graph.h) — an unqualified name-only match is
+              // exactly the false-candidate risk that bridge's own comment names.
+                d.scope = kotlinEnclosingScopeOf( nameNode, src );
+            }
+            // extent honesty: did the parse RECOVER this def's container or kind? Only asked in a file whose root
+            // holds an error (fileHasError, one O(1) flag test per file) — see parseRecoveredBits.
+            d.recovered = fileHasError ? parseRecoveredBits( defNode, kind, le.lang, d.scope.empty() ) : std::uint8_t( 0 );
             defs.push_back( std::move( d ) );
             if( kind == SymKind::Class || kind == SymKind::Struct || kind == SymKind::Interface )
             {
@@ -1847,10 +1961,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                         refs.push_back( std::move( r ) );
                         continue;
                     }
-                    const TSNode target = ts_node_child_by_field_name( roleNode, "target", 6 );
-                    if( !ts_node_is_null( target ) && std::strcmp( ts_node_type( target ), "dot" ) == 0 )
+                    const TSNode target = fieldChild( roleNode, NodeField::Target );
+                    if( !ts_node_is_null( target ) && kindIs( ts_node_type( target ), "dot" ) )
                     {
-                        const TSNode receiver = ts_node_child_by_field_name( target, "left", 4 );
+                        const TSNode receiver = fieldChild( target, NodeField::Left );
                         r.qualifier = elixir.moduleOf( receiver, roleNode );
                         if( r.qualifier.empty() ) { continue; }
                         r.recv = nodeTextOf( receiver, src ).starts_with( "__MODULE__" ) ? RecvKind::ElixirSelfModule : RecvKind::ElixirModule;

@@ -1,0 +1,22 @@
+diff --git a/third_party/deps/kotlin/src/scanner.c b/third_party/deps/kotlin/src/scanner.c
+index 267c8377..ed6b9609 100644
+--- a/third_party/deps/kotlin/src/scanner.c
++++ b/third_party/deps/kotlin/src/scanner.c
+@@ -202,6 +202,17 @@ static bool scan_string_content(TSLexer *lexer, Stack *stack,
+         // however this leaves an edgecase where an escaped dollar sign could
+         // appear at the end of a string (e.g "aa\$") which isn't handled
+         // correctly; if we were at the end of the string, terminate properly
++        //
++        // RIPWIRE_VENDOR_PATCH(kotlin/002-triple-dollar-escape): a TRIPLE-quoted string's closing
++        // delimiter is three quote characters, not one — treating the first as the whole STRING_END
++        // here (the un-triple-aware path below this comment) consumes only one of them, so
++        // """a\$""" lost its first closing quote and mis-tokenized the remainder. Defer to the
++        // ordinary end_char handling further down, which already does the triple-quote counting
++        // correctly (the same is_triple deferral the plain-backslash case uses two branches below).
++        if (is_triple && lexer->lookahead == end_char) {
++          has_content = true;
++          continue;
++        }
+         if (lexer->lookahead == end_char) {
+           stack_pop(stack);
+           advance(lexer);

@@ -39,7 +39,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # make BIN absolute BEFORE we cd away
 fail=0
-ok(){   printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
 info(){ printf '  INFO  %s\n' "$*"; }
 
@@ -155,7 +155,13 @@ EOF
 
 run_budget qd_clean       2300  8574  "$FX"  --quality-delta
 printf '%s' "$DIRT" >> "$FX/src/base.cpp"
-run_budget qd_dirty       3800  8574  "$FX"  --quality-delta
+# qd_dirty 3800 -> 3900 (2026-09-10, the string/perf round): the --quality-delta legend gained two facts a reader
+# needs to act on a row — the api-new-surface= count (one sentence, +105 B in every form, "printed even at zero"
+# is emittertruthcheck's roster phrase) and the churn facets' gating rule (one clause). Measured on this fixture
+# against the pre-round binary: clean 2177 -> 2282, dirty 3642 -> 3855, scope 4916 -> 5129, refpair 4058 -> 4271.
+# Three forms still clear their ceilings; the dirty form's 3800 had 158 B of headroom and the two sentences cost
+# 213 there, so the ceiling moves by less than the growth (45 B of headroom left) — a ratchet, not an allowance.
+run_budget qd_dirty       3900  8574  "$FX"  --quality-delta
 run_budget qd_dirty_scope 5200 10512  "$FX"  --quality-delta "--scope=src/*"
 run_budget sd_uses        3800  4112  "$FX"  --safe-delete=classifyWidth
 run_budget sd_none        3800  4112  "$FX"  --safe-delete=tangle
@@ -264,7 +270,7 @@ echo
 echo "=== (e) still well-formed and still deterministic after a prose-only edit =========================="
 for n in qd_clean qd_dirty qd_dirty_scope qd_refpair sd_uses sd_none tg_empty; do
     if command -v xmllint >/dev/null 2>&1; then
-        xmllint --noout "$WORK/$n.xml" 2>/dev/null && ok "(e) $n is well-formed XML" || no "(e) $n fails xmllint"
+        if xmllint --noout "$WORK/$n.xml" 2>/dev/null; then ok "(e) $n is well-formed XML"; else no "(e) $n fails xmllint"; fi
     fi
 done
 # The ref-pair form is the one re-run that is safe HERE: the fixture's working tree was committed above

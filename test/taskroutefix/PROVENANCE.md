@@ -157,3 +157,138 @@ resolves" shape and the "wording never scores" shape per intent.
 
 **Seal: sha256(prompts.tsv) = `b113a217a19237a1616f81fe412b06475df848e5974214f1efc496db2519dcc0`**
 (post-round; rows=158, dev=92, test=66).
+
+## Weak-tier precision round (2026-09-10, lane/helptask-precision)
+
+**Why the corpus grew.** The 2026-09-10 audit (F-R1-01/02) showed the weak symbol tier recommending
+`--expand=<English word>` on 13 of 25 adversarial prose prompts, and the committed corpus scoring
+`harmful=0.000` throughout — because **the evaluator's fixture repo had no lowercase English-word
+symbols at all**. Every name in `make_repo` was camelCase or Pascal, so no row could reach the weak
+tier, and the class was invisible by construction. Two things changed together, and neither is
+useful without the other:
+
+- `bench/taskroute_eval.py::make_repo` gained nine lowercase code definitions (`classify`, `report`,
+  `patch`, `header`, `prefix`, `audit`, `release`, `target`, `binary`) and a `package.json` whose keys
+  index as `t="sec"` symbols (`version`, `summary`, `license`, `agent`, `author`, `notes`) — the two
+  halves of the collision class: an English word that IS code, and an English word that is only a
+  config key. `test/taskroutecheck.sh`'s own fixture repo gained the same two halves (`patch`, plus a
+  `package.json` carrying `version`/`license`/`notes`).
+- **Measured control:** on the 158 pre-existing rows the extended fixture repo changed nothing —
+  `split=test/dev/all` accuracy, precision, harm, specificity, coverage and every confusion line are
+  byte-identical before and after the repo grew (same pre-change binary). The new symbols are reachable
+  only from the new rows.
+
+**Rows added: 31 (23 test, 8 dev).** Split by the same content-hash rule
+(`sha256(prompt)[0] < 0x4D → dev`), computed mechanically per row.
+
+- **25 negatives, `provenance=handwritten-auditR1`** — the audit's own adversarial set
+  (`$S/r1/s2b_adversarial.tsv`), quoted verbatim as evidence: non-code questions whose subject word is
+  also an indexed name, placed directly after a symbol-slot cue. 13 of them recommended before this
+  round. They are recorded under a `handwritten*` provenance deliberately, so the trigram screen and
+  the split rule both apply to them.
+- **3 negatives, `provenance=instrumented-cli`** — the `t="sec"` half stated in the understand card's
+  own closed vocabulary (`the implementation of version|license|author`). These are caught ONLY by the
+  kind filter: their intent word is disjoint from the cue that mints the name, so the
+  self-confirmation rule never sees them. Same `instrumented-cli` rationale as the 2026-09-02 section
+  above (a paraphrase that still triggers a closed-phrase intent necessarily reuses a card phrase).
+- **3 positives (`understand-symbol`), `provenance=instrumented-cli`** — the recall the fix must NOT
+  buy its precision with: a lowercase weak name still routing to `--expand` through a cue the gate does
+  not itself consume (`the implementation of prefix`, `the implementation of audit`), and the sharpest
+  statement of the invariant — a how-does question that later asks for the body OF the same name, which
+  routes on that second, independent cue occurrence.
+
+**Screen result: 2 flagged lines, one pre-existing and one new, both stated rather than reworded.**
+`python3 test/taskroutefix/contamination_screen.py --bin build/ripwire`:
+
+- `line 61, 'i change its'` — the pre-existing `handwritten-digD-10` flag documented in the 2026-09-02
+  section above. Unchanged, still out of scope.
+- `line 176, 'the value of'` — new, on the negative row *what is the value of module thinking in org
+  design?*. The trigram collides with the `kVariableSlotCues` literal `"the value of"`. It is not
+  reworded, for two reasons: the row is audit evidence quoted verbatim, and card vocabulary inside a
+  NEGATIVE row is adversarial pressure (a live cue phrase that must still not route), the opposite of
+  the self-quotation the screen exists to catch. The screen makes no positive/negative distinction and
+  was deliberately not taught one to pass this round.
+
+`FIXTURE_SYMBOLS` in the screen was deliberately NOT extended with the new lowercase names: they are
+ordinary English words, so exempting them would blank real prose out of every screened row and hide
+flags the screen is there to raise.
+
+**Scoring run, same binary, three splits** (`python3 bench/taskroute_eval.py --bin build/ripwire
+--corpus test/taskroutefix/prompts.tsv --split …`), pre-change binary → post-change binary:
+
+| split | rows | accuracy | precision | harmful | neg-specificity | coverage |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| test | 89 | 0.787 → **0.921** | 0.797 → **1.000** | 0.135 → **0.000** | 0.657 → **1.000** | 0.870 → 0.870 |
+| dev | 100 | — → **0.940** | — → **1.000** | — → **0.000** | — → **1.000** | — → 0.920 |
+| all | 189 | 0.847 → **0.931** | 0.879 → **1.000** | 0.085 → **0.000** | 0.733 → **1.000** | 0.899 → 0.899 |
+
+The pre-change `split=test` run **exits 1** (precision below the 0.90 floor, harm above 0.02,
+specificity below 0.90): the corpus can now fail on this class, which is the whole point of the round.
+Coverage is unmoved and every confusion line is identical to the pre-round run — no actionable row lost
+its route.
+
+**Seal: sha256(prompts.tsv) = `25283f2eba85aad889fe3746308df76ed8b1244529f44986c936eb6ef60b0b53`**
+(post-round; rows=189, dev=100, test=89).
+
+## Catalog-tier round (2026-09-10, lane/helptask-precision) — the verbs and skills with no route
+
+**The gap.** The audit measured `--help-task` at **3 recommends over 39 phrasings** of the 13 surfaces
+added since 2026-08-28 (F-R1-08), and found the router able to name **8 of the 16** shipped skills
+(F-R1-09) — `--help-task` and the skill catalog were two routers with two vocabularies. Three of the
+unrouted surfaces are VERBS, not shaping flags: `--handoff` (which has its own shipped skill),
+`--plan-lint`, and the PROSE form of `--from-trace` (`looksLikeTrace` matches a PASTED artifact, and a
+sanitizer report described in words contains none of its literals).
+
+**Ten new intents** in a `catalogTaskChoice` tier that sits LAST in `directTaskChoice`, so every older
+and more specific route keeps its rows: `handoff-brief` (`--handoff`), `plan-lint` (`--plan-lint=FILE`),
+`trace-prose` (`--from-trace=-`), `scan-skills`/`scan-skill` (`--scan-skills`, `--scan-skill=FILE`),
+`opt-remark` (`--for=TASK`), `architecture-health` (`--deps`), `quality-check` (`--quality-delta`),
+`perf-symbol` (`--around=SYM`), `graph-query` (`--graph-query=EXPR`), `maintenance-risk`
+(`--hotspots`). Skills nameable: **8 → 16**, and `test/taskroutecheck.sh` now reads BOTH sides from disk
+so a new skill shipping without a route fails as loudly as a route naming a skill that does not exist.
+
+**Rows added: 36 (30 positives, 3 per intent, + 6 negatives), `provenance=instrumented-cli`**, split by
+the same content-hash rule. `instrumented-cli` for the same reason the 2026-09-02 section gives: each new
+intent's trigger is a small closed phrase list, so a sentence that routes necessarily reuses one of its
+phrases. Every row's routing outcome was verified against a live binary before insertion (30/30 after one
+correction — see below); the 6 negatives are the near misses that must NOT route (an account handed off
+to support, a landing-page design that needs a check, vetting a candidate's onboarding plan, a team that
+inherited a support queue, a profiler vendor selling licences, a quarterly summary handed to leadership).
+
+**Two corrections the pre-insertion verification caught, recorded rather than smoothed over:**
+
+- *"lint the shape of docs/design-notes.md before I circulate it"* abstained: the surface test wanted the
+  words "plan"/"design doc" in the PROSE. A file that names ITSELF a plan (`PLAN_*.md`, `DESIGN_*.md`) is
+  surface evidence the prose need not repeat, so the check now reads the named file's own name too.
+- *"lint the plan file layout before I commit it"* routed to `quality-check`. `"before i commit"` is a
+  TIMING word, not a quality word — it fits linting a plan or running a gate equally well. Re-weighted
+  below the floor so it can only ever CONFIRM a quality word, never carry the route alone. The prompt
+  now abstains, which is correct: it names no file, and `--plan-lint` refuses a file that is not there.
+
+**Held-out floors, before → after** (`bench/taskroute_eval.py`, same corpus, only the binary changed —
+the pre-change binary is this lane's own commit 2, built and kept for the comparison):
+
+| split | rows | accuracy | precision | harmful | neg-specificity | coverage |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| test | 114 | 0.754 → **0.939** | 1.000 → 1.000 | 0.000 → 0.000 | 1.000 → 1.000 | 0.627 → **0.907** |
+| dev | 111 | — → **0.946** | — → 1.000 | — → 0.000 | — → 1.000 | — → **0.929** |
+| all | 225 | 0.809 → **0.942** | 1.000 → 1.000 | 0.000 → 0.000 | 1.000 → 1.000 | 0.730 → **0.918** |
+
+This round's red-first proof is the GATE, not the eval: coverage has no floor by the round-1 rule, so
+the eval exits 0 either way. Eleven `taskroutecheck` arms fail against the pre-change binary (every one
+abstained with `score="0"`), plus the two execution arms; the skill-vocabulary arm fails against the
+pre-change SOURCE, naming all eight skills no `--help-task` answer could reach.
+
+**Regression discipline.** All 189 rows that predate this tier are BYTE-IDENTICAL on
+(status, intent, resolved_symbols) between this lane's commit 2 and commit 3. Surface coverage on the
+audit's own 39 phrasings: **3/39 → 9/39** — the remaining 30 are the shaping flags (`--scope`,
+`--slice-depth`, `--slice-flow`, `--allow-dirty`, `--no-ignore`, `--no-post-check`), the eval-only
+`--pin-census`, `--edit-check` paging, and value-carrying abstentions, all of which a one-command router
+declines by design.
+
+**Screen: unchanged at 2 flagged lines** (line 61 pre-existing, line 176 from the previous section) even
+though this round added a large amount of new card vocabulary to `src/taskroute.h` — no `handwritten*`
+row collides with any of it.
+
+**Seal: sha256(prompts.tsv) = `1719aea95449e222718ec38151d2bd6998a95e1dd070038baa0b6e28fd0c9cf5`**
+(post-round; rows=225, dev=111, test=114).

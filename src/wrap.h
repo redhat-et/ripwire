@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // wrap.h — `ripwire wrap <agent>`: print the copy-paste recipe that wires ripwire into a coding
 // agent's loop. The adoption pattern from the competitive scan: get the deterministic map/MCP IN
@@ -101,7 +104,7 @@ struct AgentTarget
 
 inline constexpr AgentTarget kAgentTargets[] = {
     { "claude",   "Claude Code",  "CLAUDE.md",                   "",
-      "~/.claude",           "~/.claude/skills",                 "",            true,  WrapPrimary::Cli,     McpForm::CliAdd,     "claude mcp add ripwire -- ",          " --mcp\n",            "" },
+      "~/.claude",           "${CLAUDE_CONFIG_DIR:-~/.claude}/skills", "",       true,  WrapPrimary::Cli,     McpForm::CliAdd,     "claude mcp add ripwire -- ",          " --mcp\n",            "" },
     { "codex",    "OpenAI Codex", "AGENTS.md",                   "",
       "~/.codex",            "${AGENTS_HOME:-~/.agents}/skills", " --codex",    true,  WrapPrimary::Cli,     McpForm::Toml,       "",                                    "",                    "" },
     { "cursor",   "Cursor",       ".cursor/rules (a .mdc file)", "",
@@ -181,15 +184,23 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, c
         }
         const std::string hookFlagStr = flagStr + " --hook";
         const char* hookFlags = hookFlagStr.c_str();
-        std::fprintf( out, quoted ? "bash \"%s\"%s   # RECOMMENDED: advisory Read/Grep -> ripwire CLI nudge + session primer (opt-in, never blocks)\n"
-                                  : "bash %s%s   # RECOMMENDED: advisory Read/Grep -> ripwire CLI nudge + session primer (opt-in, never blocks)\n",
-                      installer, hookFlags );
+        // Split from a ternary over two format strings — see packtask.h for the same shape and reason.
+        if( quoted )
+        {
+            rw::emitTo( out, "bash \"{}\"{}   # RECOMMENDED: advisory Read/Grep -> ripwire CLI nudge + session primer (opt-in, never blocks)\n",
+                        installer, hookFlags );
+        }
+        else
+        {
+            rw::emitTo( out, "bash {}{}   # RECOMMENDED: advisory Read/Grep -> ripwire CLI nudge + session primer (opt-in, never blocks)\n",
+                        installer, hookFlags );
+        }
     };
 
     // (a) checkout cwd — the repo's own installer is right here
     if( fs::is_regular_file( "skills/install.sh", ec ) && !ec )
     {
-        std::fprintf( out, "bash skills/install.sh%s   # deploy to %s (drift-gated)\n", codexFlag, destComment );
+        rw::emitTo( out, "bash skills/install.sh{}   # deploy to {} (drift-gated)\n", codexFlag, destComment );
         hookLine( "skills/install.sh", false );
         return;
     }
@@ -199,13 +210,13 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, c
     const fs::path stagedInstaller = fs::path( executablePath ).parent_path().parent_path() / "share" / "ripwire" / "skills" / "install.sh";
     if( !executablePath.empty() && fs::is_regular_file( stagedInstaller, ec ) && !ec )
     {
-        std::fprintf( out, "bash \"%s\"%s   # deploy to %s (drift-gated)\n", stagedInstaller.string().c_str(), codexFlag, destComment );
+        rw::emitTo( out, "bash \"{}\"{}   # deploy to {} (drift-gated)\n", stagedInstaller.string().c_str(), codexFlag, destComment );
         hookLine( stagedInstaller.string().c_str(), true );
         return;
     }
 
     // (c) nothing local — point at the source instead of printing a command that cannot run
-    std::fprintf( out, "# skills not found locally — clone https://github.com/redhat-et/ripwire and run skills/install.sh%s\n", codexFlag );
+    rw::emitTo( out, "# skills not found locally — clone https://github.com/redhat-et/ripwire and run skills/install.sh{}\n", codexFlag );
 }
 
 // agent → the context/rules file its use-when blurb belongs in (declarative table, one row per client)
@@ -263,19 +274,19 @@ inline void wrapPrintBlurb( std::FILE* out, const std::string_view agent )
         return;
     }
 
-    std::fprintf( out, "#\n# context wiring — a binary on PATH is invisible to an agent until its rules file says when\n"
-                       "# to reach for it. Paste the block below into %.*s:\n", int( targetFile.size() ), targetFile.data() );
-    std::fprintf( out, "# --- paste into %.*s ---\n", int( targetFile.size() ), targetFile.data() );
+    rw::emitTo( out, "#\n# context wiring — a binary on PATH is invisible to an agent until its rules file says when\n"
+                       "# to reach for it. Paste the block below into {}:\n", std::string_view( targetFile.data(), targetFile.size() ) );
+    rw::emitTo( out, "# --- paste into {} ---\n", std::string_view( targetFile.data(), targetFile.size() ) );
     for( const std::string_view line : wrapUseWhenBlurbLines() )
     {
-        std::fprintf( out, "%.*s\n", int( line.size() ), line.data() );
+        rw::emitTo( out, "{}\n", std::string_view( line.data(), line.size() ) );
     }
-    std::fprintf( out, "# --- end paste ---\n" );
+    rw::emitRaw( out, "# --- end paste ---\n" );
 }
 
 inline void wrapList( std::FILE* out )
 {
-    std::fprintf( out,
+    rw::emitRaw( out,
         "ripwire wrap <agent> — print the recipe to wire ripwire into an agent's loop.\n" );
 
     // Printed FROM the table: a row added above shows up here without anyone remembering to update prose.
@@ -286,19 +297,19 @@ inline void wrapList( std::FILE* out )
     };
     for( const auto& g : kGroups )
     {
-        std::fprintf( out, "%.*s", int( g.label.size() ), g.label.data() );
+        rw::emitTo( out, "{}", std::string_view( g.label.data(), g.label.size() ) );
         const char* sep = "";
         for( const AgentTarget& a : kAgentTargets )
         {
             if( a.primary == g.p )
             {
-                std::fprintf( out, "%s%.*s", sep, int( a.name.size() ), a.name.data() );
+                rw::emitTo( out, "{}{}", sep, std::string_view( a.name.data(), a.name.size() ) );
                 sep = "  ";      // SEPARATOR, not a suffix — a suffix leaves trailing blanks on every line
             }
         }
-        std::fprintf( out, "\n" );
+        rw::emitRaw( out, "\n" );
     }
-    std::fprintf( out,
+    rw::emitRaw( out,
         "  example:     ripwire wrap claude\n"
         "  --all        detect every installed agent + emit each one's config\n" );
 }
@@ -355,7 +366,7 @@ inline void wrapPrintPathNote( const std::string& token )
 {
     if( token != "ripwire" )
     {
-        std::printf( "# NOTE: nothing on PATH is named ripwire right now, so the command below is this binary's absolute path;\n"
+        rw::emitRaw( stdout, "# NOTE: nothing on PATH is named ripwire right now, so the command below is this binary's absolute path;\n"
                      "#       put its directory on PATH (the installer printed the export line) and the bare word works too.\n" );
     }
 }
@@ -363,13 +374,13 @@ inline void wrapPrintPathNote( const std::string& token )
 inline void wrapMcpJson( const char* configPath, const std::string& token )
 {
     wrapPrintPathNote( token );
-    std::printf(
-        "# ripwire -> add to %s\n"
-        "{\n"
-        "  \"mcpServers\": {\n"
-        "    \"ripwire\": { \"command\": \"%s\", \"args\": [\"--mcp\"] }\n"
-        "  }\n"
-        "}\n", configPath, token.c_str() );
+    rw::emitTo( stdout,
+        "# ripwire -> add to {}\n"
+        "{{\n"
+        "  \"mcpServers\": {{\n"
+        "    \"ripwire\": {{ \"command\": \"{}\", \"args\": [\"--mcp\"] }}\n"
+        "  }}\n"
+        "}}\n", configPath, token.c_str() );
 }
 
 // opencode's config is a DIFFERENT shape, not a different path: the top-level key is `mcp` (not
@@ -381,13 +392,13 @@ inline void wrapMcpJson( const char* configPath, const std::string& token )
 // additionalProperties:false); test/opencodewrapcheck.sh checks this against the pinned copy.
 inline void wrapMcpJsonOpencode( const std::string& token )
 {
-    std::printf(
-        "{\n"
+    rw::emitTo( stdout,
+        "{{\n"
         "  \"$schema\": \"https://opencode.ai/config.json\",\n"
-        "  \"mcp\": {\n"
-        "    \"ripwire\": { \"type\": \"local\", \"command\": [\"%s\", \"--mcp\"] }\n"
-        "  }\n"
-        "}\n", token.c_str() );
+        "  \"mcp\": {{\n"
+        "    \"ripwire\": {{ \"type\": \"local\", \"command\": [\"{}\", \"--mcp\"] }}\n"
+        "  }}\n"
+        "}}\n", token.c_str() );
 }
 
 // Agent configuration: name, config directory path (using ~ for home), and a lambda to
@@ -399,6 +410,32 @@ struct AgentConfig
     // return true if this agent's config directory exists
     std::function<bool()> isInstalled;
 };
+
+// A config root an ENV VAR relocates. TWO agents now have this shape, not one — opencode resolves
+// every path through xdg-basedir, and Claude Code reads CLAUDE_CONFIG_DIR — and hand-writing the
+// second lambda beside the first took agentDetector from 13 to 19 against a bar of 15, which is the
+// same refusal recorded below for the version before it. So the shape is a function: read the
+// variable, fall back to a home-relative default, append the fixed suffix, and accept one optional
+// second candidate. EMPTY IS UNSET, the rule envOr() and every ${VAR:-...} in the installers follow;
+// an alternate of "" means the agent has no second candidate, never a check against the empty path.
+inline std::function<bool()> relocatableRootDetector( const char* envVar, std::string fallbackRoot,
+                                                      std::string suffix, std::string alternate )
+{
+    return [ envVar, fallbackRoot = std::move( fallbackRoot ), suffix = std::move( suffix ),
+             alternate = std::move( alternate ) ]() -> bool
+    {
+        namespace fs = std::filesystem;
+        std::error_code   ec;
+        const char* const value = std::getenv( envVar );
+        const std::string root  = ( value && *value ) ? std::string( value ) : fallbackRoot;
+        if( fs::is_directory( root + suffix, ec ) && !ec )
+        {
+            return true;
+        }
+        ec.clear();
+        return !alternate.empty() && fs::is_directory( alternate, ec ) && !ec;
+    };
+}
 
 // Detection for ONE row. Split out of getAgentConfigs so that an agent's exception does not raise the
 // complexity of the loop that walks the table — --quality-delta refused the combined version (19 -> 24
@@ -413,22 +450,17 @@ inline std::function<bool()> agentDetector( const AgentTarget& row, const std::s
         return []() { return true; };   // aider ships no config dir — it is always available
     }
 
+    if( row.name == "claude" )
+    {
+        // CLAUDE_CONFIG_DIR relocates the entire config directory away from ~/.claude.
+        return relocatableRootDetector( "CLAUDE_CONFIG_DIR", home + "/.claude", "", "" );
+    }
+
     if( row.name == "opencode" )
     {
         // opencode resolves every path through xdg-basedir, so ~/.config/opencode is the DEFAULT, not
         // the location — XDG_CONFIG_HOME relocates it. Accept ~/.opencode as the second candidate.
-        return [ home ]() -> bool
-        {
-            std::error_code   ec;
-            const char*       xdg  = std::getenv( "XDG_CONFIG_HOME" );
-            const std::string base = ( xdg && *xdg ) ? std::string( xdg ) : home + "/.config";
-            if( fs::is_directory( base + "/opencode", ec ) && !ec )
-            {
-                return true;
-            }
-            ec.clear();
-            return fs::is_directory( home + "/.opencode", ec ) && !ec;
-        };
+        return relocatableRootDetector( "XDG_CONFIG_HOME", home + "/.config", "/opencode", home + "/.opencode" );
     }
 
     const std::string expanded = ( row.homeDir.front() == '~' )
@@ -500,7 +532,7 @@ inline int wrapScanSkillDir( const std::string& dir, bool force ) noexcept
             {
                 continue; // silent on INFO
             }
-            std::fprintf( stderr, "ripwire wrap: %s  %s:%d  %s  — \"%s\"\n",
+            rw::emitTo( stderr, "ripwire wrap: {}  {}:{}  {}  — \"{}\"\n",
                           skillSeverityStr( f.sev ), p.c_str(), f.line, f.rule, f.excerpt.c_str() );
         }
     }
@@ -521,32 +553,31 @@ inline void wrapEmitCliFirst( const AgentTarget& row, const std::string& token,
                               const std::string_view executablePath,
                               const std::vector<std::string>& verbLines ) noexcept
 {
-    std::printf( "# ripwire -> %.*s (CLI-first)\n", static_cast<int>( row.displayName.size() ), row.displayName.data() );
+    rw::emitTo( stdout, "# ripwire -> {} (CLI-first)\n", std::string_view( row.displayName.data(), static_cast<int>( row.displayName.size() ) ) );
     wrapPrintPathNote( token );
-    std::printf(
+    rw::emitTo( stdout,
         "# RECOMMENDED — this agent can run shell commands, so call the CLI directly. It costs\n"
-        "# nothing until you invoke it, and it reads %.*s, so the paste block below IS the wiring:\n"
-        "%s . --for=\"<your task>\" --token-budget=2000\n"
+        "# nothing until you invoke it, and it reads {}, so the paste block below IS the wiring:\n"
+        "{} . --for=\"<your task>\" --token-budget=2000\n"
         "#\n"
         "# ...then add --legend=compact to every FOLLOW-UP call: the legend is a small share of a --for\n"
         "# bundle but most of a --callers/--uses/--impact answer, and the payload is byte-identical either\n"
         "# way. `ripwire --help` carries the measured range (one place, gate-held) -- this line does not\n"
         "# repeat it, because two copies of a number is one copy that goes stale:\n"
-        "#   ripwire . --callers=SYM --legend=compact\n",
-        static_cast<int>( row.contextFile.size() ), row.contextFile.data(), token.c_str() );
+        "#   ripwire . --callers=SYM --legend=compact\n", std::string_view( row.contextFile.data(), static_cast<int>( row.contextFile.size() ) ), token.c_str() );
     if( !row.contextNote.empty() )
     {
-        std::printf( "#        (%.*s)\n", static_cast<int>( row.contextNote.size() ), row.contextNote.data() );
+        rw::emitTo( stdout, "#        ({})\n", std::string_view( row.contextNote.data(), static_cast<int>( row.contextNote.size() ) ) );
     }
     if( !row.caveat.empty() )
     {
-        std::printf( "# NOTE: %.*s\n", static_cast<int>( row.caveat.size() ), row.caveat.data() );
+        rw::emitTo( stdout, "# NOTE: {}\n", std::string_view( row.caveat.data(), static_cast<int>( row.caveat.size() ) ) );
     }
     if( row.mcpForm == McpForm::None )
     {
         return;
     }
-    std::printf( "#\n# ALTERNATIVE — register the MCP server instead, for a warm index across calls:\n" );
+    rw::emitRaw( stdout, "#\n# ALTERNATIVE — register the MCP server instead, for a warm index across calls:\n" );
     switch( row.mcpForm )
     {
         case McpForm::CliAdd:
@@ -555,10 +586,8 @@ inline void wrapEmitCliFirst( const AgentTarget& row, const std::string& token,
             // passed it as a non-literal format string, which then wanted a consteval guard proving
             // every row held exactly one %s. Splitting the command at its substitution point removes
             // the hazard rather than containing it: there is no format string left to get wrong.
-            std::printf( "%.*s%s%.*s",
-                         static_cast<int>( row.mcpAddPre.size() ),  row.mcpAddPre.data(),
-                         token.c_str(),
-                         static_cast<int>( row.mcpAddPost.size() ), row.mcpAddPost.data() );
+            rw::emitTo( stdout, "{}{}{}", std::string_view( row.mcpAddPre.data(), static_cast<int>( row.mcpAddPre.size() ) ),
+                         token.c_str(), std::string_view( row.mcpAddPost.data(), static_cast<int>( row.mcpAddPost.size() ) ) );
             break;
         }
         case McpForm::Toml:
@@ -567,19 +596,19 @@ inline void wrapEmitCliFirst( const AgentTarget& row, const std::string& token,
             // bare "ripwire" here produces a config that looks right and never starts. Gated by
             // skillinstallcheck.sh, which caught exactly this when the shared emitter first landed.
             const std::string command = wrapTomlString( executablePath );
-            std::printf(
+            rw::emitTo( stdout,
                 "# The MCP surface here is deliberately RESTRICTED to audit/health verbs — the CLI above is\n"
                 "# the general-purpose path, and a narrow always-on server is easier to trust than a wide one.\n"
                 "# Add this ABSOLUTE command to ~/.codex/config.toml (Desktop may not inherit shell PATH):\n"
                 "[mcp_servers.ripwire]\n"
-                "command = \"%s\"\n"
+                "command = \"{}\"\n"
                 "args = [\"--mcp\"]\n"
                 "enabled_tools = [\"analyze\", \"quality_delta\", \"flags\", \"doc_drift\"]\n"
                 "default_tools_approval_mode = \"approve\"\n", command.c_str() );
             break;
         }
         case McpForm::JsonMcpKey:
-            std::printf(
+            rw::emitRaw( stdout,
                 "# opencode.json (project) or ~/.config/opencode/opencode.json (global; merged\n"
                 "# per-key, project wins). The key is \"mcp\" — the \"mcpServers\" shape other clients\n"
                 "# use parses fine here and is then silently ignored:\n" );
@@ -589,10 +618,10 @@ inline void wrapEmitCliFirst( const AgentTarget& row, const std::string& token,
         case McpForm::None:
             break;
     }
-    std::printf( "# verbs the agent can then call mid-task (%zu total):\n", kMcpVerbCount );
+    rw::emitTo( stdout, "# verbs the agent can then call mid-task ({} total):\n", kMcpVerbCount );
     for( const std::string& line : verbLines )
     {
-        std::printf( "%s\n", line.c_str() );
+        rw::emitTo( stdout, "{}\n", line.c_str() );
     }
 }
 
@@ -611,8 +640,7 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
     // MCP row cannot forget it.
     if( cliRow != nullptr && cliRow->primary == WrapPrimary::Mcp )
     {
-        std::printf( "# ripwire -> %.*s (MCP — deterministic, no LLM, no embeddings)\n",
-                     static_cast<int>( cliRow->displayName.size() ), cliRow->displayName.data() );
+        rw::emitTo( stdout, "# ripwire -> {} (MCP — deterministic, no LLM, no embeddings)\n", std::string_view( cliRow->displayName.data(), static_cast<int>( cliRow->displayName.size() ) ) );
     }
 
     if( cliFirst )
@@ -633,7 +661,7 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
     }
     else if( agent == "aider" )
     {
-        std::printf(
+        rw::emitRaw( stdout,
             "# ripwire -> aider (no MCP; feed a ranked repo map as read-only context)\n"
             "ripwire . --for=\"<your task>\" --token-budget=2000 > .ripwire-map.txt\n"
             "aider --read .ripwire-map.txt\n"
@@ -645,10 +673,10 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
     // instead of duplicating the printf calls per-branch); aider has no MCP verbs to list.
     if( !cliFirst && ( agent == "cursor" || agent == "windsurf" || agent == "gemini" ) )
     {
-        std::printf( "# verbs the agent can then call mid-task (%zu total):\n", kMcpVerbCount );
+        rw::emitTo( stdout, "# verbs the agent can then call mid-task ({} total):\n", kMcpVerbCount );
         for( const std::string& line : verbLines )
         {
-            std::printf( "%s\n", line.c_str() );
+            rw::emitTo( stdout, "{}\n", line.c_str() );
         }
     }
 
@@ -681,7 +709,7 @@ inline int runWrap( int argc, char** argv, const std::string_view executablePath
 
     if( maxWrapSev >= 2 && !force )
     {
-        std::fprintf( stderr,
+        rw::emitRaw( stderr,
             "ripwire wrap: CRITICAL skill findings above — refusing to emit recipe.\n"
             "              Fix the skills or re-run with --force to proceed anyway.\n" );
         return 1;
@@ -705,14 +733,14 @@ inline int runWrap( int argc, char** argv, const std::string_view executablePath
             }
             if( configuredCount > 0 )
             {
-                std::printf( "\n" ); // blank line separator between agents
+                rw::emitRaw( stdout, "\n" ); // blank line separator between agents
             }
-            std::printf( "# ──── %.*s ────\n", int( ac.name.size() ), ac.name.data() );
+            rw::emitTo( stdout, "# ──── {} ────\n", std::string_view( ac.name.data(), ac.name.size() ) );
             wrapEmitAgent( ac.name, verbLines, executablePath );
             ++configuredCount;
         }
 
-        std::printf( "\n# summary: %d surfaces configured, %d skipped (not detected)\n",
+        rw::emitTo( stdout, "\n# summary: {} surfaces configured, {} skipped (not detected)\n",
                      configuredCount, skippedCount );
         return 0;
     }
@@ -725,7 +753,7 @@ inline int runWrap( int argc, char** argv, const std::string_view executablePath
         return 0;
     }
 
-    std::fprintf( stderr, "ripwire wrap: unknown agent '%.*s'\n", int( agent.size() ), agent.data() );
+    rw::emitTo( stderr, "ripwire wrap: unknown agent '{}'\n", std::string_view( agent.data(), agent.size() ) );
     wrapList( stderr );
     wrapMcpJson( "your client's MCP config (generic stanza)", wrapCommandToken( executablePath ) );   // don't leave them stuck
     return 2;

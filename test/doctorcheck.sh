@@ -25,7 +25,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -70,7 +70,7 @@ OUT="$( PATH="$BINDIR:$PATH" TMPDIR="$HAPPYCACHE" "$BINDIR/ripwire" "$REPO" --do
 RC=$?
 echo "happy-path output:"; echo "$OUT"; echo "(exit=$RC)"; echo
 
-[ "$RC" -eq 0 ] && ok "happy path exits 0" || no "happy path exit code was $RC, expected 0"
+if [ "$RC" -eq 0 ]; then ok "happy path exits 0"; else no "happy path exit code was $RC, expected 0"; fi
 
 # 2026-09-06: the fixture's one edit-lock file (locks/0b/ripwire-edit-test.lock) is counted by the cache-dir
 # row's locks= — the blob scan still never enters locks/ (blobs= stays 2), the count is a separate walk.
@@ -102,7 +102,7 @@ echo "$HEAD_ATTR" | grep -qE '^head="[0-9a-f]{9}"$' \
     && ok "doctor git row head= is a 9-hex-char sha (matches at= width, §A10.4)" \
     || no "doctor git row head= is not 9 hex chars: $HEAD_ATTR"
 
-echo "$OUT" | xmllint --noout - 2>/dev/null && ok "xmllint clean" || no "xmllint reported malformed XML"
+if echo "$OUT" | xmllint --noout - 2>/dev/null; then ok "xmllint clean"; else no "xmllint reported malformed XML"; fi
 
 # §P11 doctor item: hint= is a FAILURE-only attribute — an all-green run must carry none.
 echo "$OUT" | grep -q 'hint=' \
@@ -135,7 +135,7 @@ echo "$UOUT" | grep -q '<c n="cache-dir" ok="0"' \
     && ok "unwritable cache dir -> cache-dir row ok=\"0\"" \
     || no "unwritable cache dir did not flag cache-dir row"
 
-[ "$URC" -eq 1 ] && ok "unwritable cache dir -> overall exit 1" || no "overall exit was $URC, expected 1"
+if [ "$URC" -eq 1 ]; then ok "unwritable cache dir -> overall exit 1"; else no "overall exit was $URC, expected 1"; fi
 
 # §P11 doctor item: a failing check carries a hint= naming the derived verdict, not just raw facts.
 echo "$UOUT" | grep -oE '<c n="cache-dir" ok="0"[^<]*/>' | grep -q 'hint="' \
@@ -158,7 +158,7 @@ echo "$NOUT" | grep -q 'repo="0"' \
     && ok "non-repo dir -> repo=\"0\"" \
     || no "non-repo dir: repo= attr missing/not 0"
 
-echo "$NOUT" | xmllint --noout - 2>/dev/null && ok "xmllint clean (non-repo)" || no "xmllint reported malformed XML (non-repo)"
+if echo "$NOUT" | xmllint --noout - 2>/dev/null; then ok "xmllint clean (non-repo)"; else no "xmllint reported malformed XML (non-repo)"; fi
 
 # ── (E) copied-but-identical binary: install.sh COPIES (never symlinks), so dev/ino always differ
 #     from a same-content build — same_file="0" alone false-positives every working install. The
@@ -287,8 +287,8 @@ echo "$GOUT" | grep -qF 'p0="bin/tool"' && echo "$GOUT" | grep -qF 'src0="bin/to
 echo "$GOUT" | grep -oE '<c n="tracked-binaries" ok="0"[^<]*/>' | grep -q 'hint="' \
     && ok "G: stale tracked-binaries row carries hint=" \
     || no "G: stale tracked-binaries row has no hint="
-[ "$GRC" -eq 1 ] && ok "G: a stale tracked binary fails the overall --doctor exit (1)" || no "G: overall exit was $GRC, expected 1"
-echo "$GOUT" | xmllint --noout - 2>/dev/null && ok "G: xmllint clean (stale case)" || no "G: xmllint reported malformed XML (stale case)"
+if [ "$GRC" -eq 1 ]; then ok "G: a stale tracked binary fails the overall --doctor exit (1)"; else no "G: overall exit was $GRC, expected 1"; fi
+if echo "$GOUT" | xmllint --noout - 2>/dev/null; then ok "G: xmllint clean (stale case)"; else no "G: xmllint reported malformed XML (stale case)"; fi
 
 FRESHREPO="$TMP/freshbinrepo"; mkdir -p "$FRESHREPO/bin"
 git -C "$FRESHREPO" init -q
@@ -305,9 +305,9 @@ echo "tracked-binary-staleness (fresh case) output:"; echo "$FOUT"; echo "(exit=
 echo "$FOUT" | grep -q '<c n="tracked-binaries" ok="1"' \
     && ok "G: binary + source committed together (never re-edited) -> tracked-binaries row ok=\"1\"" \
     || no "G: fresh binary/source pair wrongly flagged"
-echo "$FOUT" | grep -q 'stale="0"' && ok "G: fresh pair reports stale=\"0\"" || no "G: fresh pair did not report stale=\"0\""
-[ "$FRC" -eq 0 ] && ok "G: a fresh tracked binary does not fail the overall --doctor exit" || no "G: overall exit was $FRC, expected 0"
-echo "$FOUT" | xmllint --noout - 2>/dev/null && ok "G: xmllint clean (fresh case)" || no "G: xmllint reported malformed XML (fresh case)"
+if echo "$FOUT" | grep -q 'stale="0"'; then ok "G: fresh pair reports stale=\"0\""; else no "G: fresh pair did not report stale=\"0\""; fi
+if [ "$FRC" -eq 0 ]; then ok "G: a fresh tracked binary does not fail the overall --doctor exit"; else no "G: overall exit was $FRC, expected 0"; fi
+if echo "$FOUT" | xmllint --noout - 2>/dev/null; then ok "G: xmllint clean (fresh case)"; else no "G: xmllint reported malformed XML (fresh case)"; fi
 
 # non-git root degrades quietly (ok=1, non_git=1) — mirrors the git-row's own non-repo degrade in (C).
 NGOUT="$( "$BIN" "$NONREPO" --doctor --no-cache 2>/dev/null )"
@@ -319,8 +319,8 @@ echo "$NGOUT" | grep -q '<c n="tracked-binaries" ok="1"' && echo "$NGOUT" | grep
 REPO2="$TMP/repo2"; mkdir -p "$REPO2"; echo 'int g(){return 0;}' >"$REPO2/g.cpp"
 MOUT="$( "$BIN" "$REPO" "$REPO2" --doctor --no-cache 2>&1 )"
 MRC=$?
-[ "$MRC" -eq 1 ] && ok "multi-root --doctor refuses (exit 1)" || no "multi-root --doctor exit was $MRC, expected 1"
-echo "$MOUT" | grep -qi 'doctor' && ok "multi-root refusal names --doctor" || no "multi-root refusal message missing"
+if [ "$MRC" -eq 1 ]; then ok "multi-root --doctor refuses (exit 1)"; else no "multi-root --doctor exit was $MRC, expected 1"; fi
+if echo "$MOUT" | grep -qi 'doctor'; then ok "multi-root refusal names --doctor"; else no "multi-root refusal message missing"; fi
 
 # §L10: a legend, and blobs_floor= when the 4096-blob scan cap fires — blobs="4096" alone cannot say
 # whether that is the TRUE count or a floor (at least that many). Built in an ISOLATED TMPDIR (never the
@@ -356,7 +356,7 @@ echo "$CAP_ROW" | grep -q 'truncated="1"' \
 [ "$CAPOUT1" = "$CAPOUT2" ] \
     && ok "L10: over-the-cap cache-dir row is byte-identical run-to-run (truncated is monotone in blobs, not a flake)" \
     || { no "L10: over-the-cap cache-dir row DIFFERED run-to-run on a static fixture"; diff <(echo "$CAPOUT1") <(echo "$CAPOUT2"); }
-echo "$CAPOUT1" | xmllint --noout - 2>/dev/null && ok "L10: over-the-cap output is well-formed XML" || no "L10: over-the-cap output malformed XML"
+if echo "$CAPOUT1" | xmllint --noout - 2>/dev/null; then ok "L10: over-the-cap output is well-formed XML"; else no "L10: over-the-cap output malformed XML"; fi
 
 # ── (H) TWO SHAS, LABELLED: built_from= (the binary) vs at= (the tree) ──────────────────────────
 # lens2-crossverb L6 (capture-audit-2026-09-04): --version printed "git <sha>" — the commit this BINARY was
@@ -379,7 +379,7 @@ BUILT="$( printf '%s' "$HOUT" | sed -n 's/.*<doctor[^>]* built_from="\([^"]*\)".
 printf '%s' "$HOUT" | grep -q ' at="' \
     && ok "H: at= (the tree's HEAD) rides beside it, so the two facts are distinguishable" \
     || no "H: --doctor lost its at= anchor"
-printf '%s' "$HOUT" | xmllint --noout - 2>/dev/null && ok "H: xmllint clean" || no "H: malformed XML"
+if printf '%s' "$HOUT" | xmllint --noout - 2>/dev/null; then ok "H: xmllint clean"; else no "H: malformed XML"; fi
 
 
 # ── (V) F6 — the machine-dependent fields are NAMED, and everything else is deterministic under load ─────

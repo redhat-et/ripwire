@@ -21,7 +21,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/exemplarfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -40,7 +40,7 @@ printf '%s' "$HDR" | grep -q 'n="goodHelper"' \
 # it must NOT pick the messy sibling.
 printf '%s' "$HDR" | grep -q 'n="messyHelper"' && no "exemplar=fn wrongly picked messyHelper" || ok "exemplar=fn avoids the worse sibling (messyHelper)"
 # the winner's BODY is emitted (packBodies) so the agent has an imitation target, not just a pointer.
-printf '%s' "$FN1" | grep -q '<b t="fn"[^>]*n="goodHelper"' && ok "exemplar emits the winner's full body (<b>)" || no "exemplar body missing"
+if printf '%s' "$FN1" | grep -q '<b t="fn"[^>]*n="goodHelper"'; then ok "exemplar emits the winner's full body (<b>)"; else no "exemplar body missing"; fi
 
 # ── 2) TASK argument → resolves to a KIND, then role-selection (not the lexical winner) ────────────────
 # "helper function" isn't a kind token → the top lexical match's kind (fn) is used, then goodHelper wins
@@ -54,8 +54,8 @@ printf '%s' "$THDR" | grep -q 'kind="fn"' && printf '%s' "$THDR" | grep -q 'n="g
 # ── 3) determinism (byte-identical run-to-run) + well-formed XML ──────────────────────────────────────
 "$BIN" "$CORPUS" --no-cache --exemplar=fn >"$TMP/e1" 2>/dev/null
 "$BIN" "$CORPUS" --no-cache --exemplar=fn >"$TMP/e2" 2>/dev/null
-diff -q "$TMP/e1" "$TMP/e2" >/dev/null && ok "determinism (--exemplar byte-identical run-to-run)" || no "non-deterministic --exemplar output"
-command -v xmllint >/dev/null 2>&1 && { printf '%s' "$FN1" | xmllint --noout - 2>/dev/null && ok "xml well-formed (--exemplar)" || no "xml malformed (--exemplar)"; } || ok "xml well-formed (xmllint absent — skipped)"
+if diff -q "$TMP/e1" "$TMP/e2" >/dev/null; then ok "determinism (--exemplar byte-identical run-to-run)"; else no "non-deterministic --exemplar output"; fi
+command -v xmllint >/dev/null 2>&1 && { if printf '%s' "$FN1" | xmllint --noout - 2>/dev/null; then ok "xml well-formed (--exemplar)"; else no "xml malformed (--exemplar)"; fi; } || ok "xml well-formed (xmllint absent — skipped)"
 
 # ── 4) tested= PARTICIPATES — exercised OUTSIDE test/ (a test/ path is itself a test-path) ─────────────
 # Two same-kind siblings where the LOWER-fan-in one is TESTED and the higher-fan-in one is not — tested
@@ -145,7 +145,7 @@ printf '%s' "$WHDR" | grep -qE 'p="[^"]*/test/[^"]*fix' \
 # (5) determinism on THIS repo (the fix must stay byte-stable run-to-run at repo scale).
 "$BIN" "$SELF" --no-cache --exemplar=fn >"$TMP/s1" 2>/dev/null
 "$BIN" "$SELF" --no-cache --exemplar=fn >"$TMP/s2" 2>/dev/null
-diff -q "$TMP/s1" "$TMP/s2" >/dev/null && ok "repo-root exemplar=fn byte-identical run-to-run" || no "repo-root exemplar=fn non-deterministic"
+if diff -q "$TMP/s1" "$TMP/s2" >/dev/null; then ok "repo-root exemplar=fn byte-identical run-to-run"; else no "repo-root exemplar=fn non-deterministic"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"

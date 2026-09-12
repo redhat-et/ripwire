@@ -32,7 +32,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 # Sandboxes whose WRITE BIT this script deliberately clears (arms 7/8b). They must be made writable again
@@ -168,7 +168,7 @@ echo "$unstamped" | grep -q 'baseline="git-HEAD (stale sidecar removed)"' \
 
 # 6) determinism
 r1="$("$BIN" "$REPO" --quality-delta --no-cache 2>/dev/null)"; r2="$("$BIN" "$REPO" --quality-delta --no-cache 2>/dev/null)"
-[ "$r1" = "$r2" ] && ok "--quality-delta deterministic run-to-run" || no "--quality-delta non-deterministic"
+if [ "$r1" = "$r2" ]; then ok "--quality-delta deterministic run-to-run"; else no "--quality-delta non-deterministic"; fi
 
 # ── DEGRADE-OBSERVABILITY / BUILD-FLAVOUR PROBE (for arms 7 and 8c) ───────────────────────────────────────
 # Arms 7 and 8c assert a DEGRADED_PATH_ALERT, which a Release/NDEBUG build compiles OUT ("if you add a
@@ -268,7 +268,7 @@ NOHEAD="$(mktemp -d)"; mkorphan "$NOHEAD"
     || no "setup(8): sandbox is not the stale-pin + no-HEAD shape"
 "$BIN" "$NOHEAD" --quality-delta --no-cache >/dev/null 2>"$REPO/.nohead.err"
 nohead_rc=$?; nohead_err="$(cat "$REPO/.nohead.err")"; rm -f "$REPO/.nohead.err"
-[ "$nohead_rc" -eq 1 ] && ok "stale + no-HEAD still exits 1 (exit-code semantics unchanged)" || no "stale + no-HEAD exit code is $nohead_rc, expected 1"
+if [ "$nohead_rc" -eq 1 ]; then ok "stale + no-HEAD still exits 1 (exit-code semantics unchanged)"; else no "stale + no-HEAD exit code is $nohead_rc, expected 1"; fi
 printf '%s' "$nohead_err" | grep -q 'was STALE (pinned at a different HEAD)' \
     && ok "stale + no-HEAD fatal is STALE-AWARE (mirrors the MCP twin's wording)" \
     || { no "stale + no-HEAD fatal is not stale-aware"; printf '     got: %s\n' "$nohead_err"; }
@@ -285,7 +285,7 @@ NOHEADRO="$(mktemp -d)"; ROSANDBOXES="$ROSANDBOXES $NOHEADRO"; mkorphan "$NOHEAD
 chmod a-w "$NOHEADRO"
 "$BIN" "$NOHEADRO" --quality-delta --no-cache >/dev/null 2>"$REPO/.nohead2.err"
 nohead2_rc=$?; nohead2_err="$(cat "$REPO/.nohead2.err")"; rm -f "$REPO/.nohead2.err"
-[ "$nohead2_rc" -eq 1 ] && ok "stale + no-HEAD + failed unlink still exits 1" || no "stale + no-HEAD + failed unlink exit code is $nohead2_rc, expected 1"
+if [ "$nohead2_rc" -eq 1 ]; then ok "stale + no-HEAD + failed unlink still exits 1"; else no "stale + no-HEAD + failed unlink exit code is $nohead2_rc, expected 1"; fi
 [ -f "$NOHEADRO/.ripwire_quality_baseline" ] \
     && ok "stale + no-HEAD + read-only dir: the sidecar is STILL on disk (the premise of 8b)" \
     || no "8b premise broken: the sidecar was removed from a read-only dir"

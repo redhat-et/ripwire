@@ -30,6 +30,7 @@ struct IngestFileScan
     std::vector<long long>        statMtime;
     std::vector<long long>        statCtime;
     std::vector<FileHealth>       health;      // §L1: one slot per fileId, one writer per slot
+    std::vector<std::uint32_t>    nestRefusedBytes;   // the Kotlin nesting guard: the refused file's size, 0 = not refused (one writer per slot)
 };
 
 // size the per-file arrays and classify each file's language — the fileId space is the crawl's sorted list.
@@ -43,6 +44,7 @@ inline IngestFileScan makeFileScan( const std::vector<std::string>& files )
     scan.statMtime.assign( nfilesEarly, -1 );
     scan.statCtime.assign( nfilesEarly, -1 );
     scan.health.resize( nfilesEarly );
+    scan.nestRefusedBytes.assign( nfilesEarly, 0u );
     {
         PROFILE_SCOPE_DESCRIBE( "ingest: classify file languages" );
         for( std::size_t fileId = 0; fileId < nfilesEarly; ++fileId )
@@ -52,6 +54,65 @@ inline IngestFileScan makeFileScan( const std::vector<std::string>& files )
         }
     }
     return scan;
+}
+
+// The Kotlin nesting guard's refusals, as --skipped rows (why="nest-refused"). Serial and in ascending fileId, so the rows
+// are path-sorted like every other drop list; capped at kMaxSkipRowsPerClass like them, with the exact count kept beside.
+// A refused file never reaches the cache (no facts were extracted), so every run — cold or warm — re-reads it, re-refuses
+// it, and rebuilds this list: the rows cannot go stale.
+inline void collectNestRefusals( const IngestFileScan& scan, IngestResult& result )
+{
+    for( std::size_t fileId = 0; fileId < scan.nestRefusedBytes.size() && fileId < result.files.size(); ++fileId )
+    {
+        if( scan.nestRefusedBytes[ fileId ] == 0 )
+        {
+            continue;
+        }
+        ++result.crawlSkips.nestRefusedFiles;
+        if( result.crawlSkips.nestRefused.size() < kMaxSkipRowsPerClass )
+        {
+            result.crawlSkips.nestRefused.push_back( SkippedFile{ result.files[ fileId ], scan.nestRefusedBytes[ fileId ], lowerExtensionOf( result.files[ fileId ] ) } );
+        }
+    }
+}
+
+// A file the nesting guard refused yielded NO facts, so the cache record saveCache writes for every crawled file would
+// read, on the next warm run, as "parsed, nothing there": a stat-gate or hash hit that never reaches the prescan, so the
+// refusal — its stderr note and its --skipped row — vanished from every warm run (kotlincheck §12's warm arm caught it).
+// The record is written as UNKNOWN instead: hash 0 and the stat gate's own -1 "not captured" triple, so the next run
+// re-reads the file, re-refuses it and re-rows it. Called on the save path only, after the pool has joined; nothing
+// reads these slots afterwards. The price is a cache rewrite on each warm run of a tree that holds a refused file.
+inline void forgetNestRefusalsForCache( IngestFileScan& scan ) noexcept
+{
+    for( std::size_t fileId = 0; fileId < scan.nestRefusedBytes.size(); ++fileId )
+    {
+        if( scan.nestRefusedBytes[ fileId ] == 0 )
+        {
+            continue;
+        }
+        scan.hash[ fileId ]      = 0;
+        scan.statSize[ fileId ]  = -1;
+        scan.statMtime[ fileId ] = -1;
+        scan.statCtime[ fileId ] = -1;
+    }
+}
+
+// The Kotlin string-template nesting guard, as one named step of the parse worker (the json/yaml/markdown guards sit
+// inline beside its call). PROCESS-SURVIVAL load-bearing: tree-sitter-kotlin's scanner abort()ed the whole run past ~512
+// nested string templates (see kMaxKotlinStringNestDepth in ingest.h; the vendored scanner now refuses the push under
+// third_party/patches/kotlin/, so this is the FIRST of two independent layers). Unlike those three guards a refusal here
+// is ITEMIZED — its size lands in scan.nestRefusedBytes, which collectNestRefusals turns into --skipped rows — because a
+// .kt file refused here takes real code out of the map. True means "refused: skip the parse".
+inline bool refuseKotlinNesting( const LangEntry& le, std::string_view bytes, const char* path, std::size_t fileId, IngestFileScan& scan )
+{
+    if( le.lang != Lang::Kotlin || !kotlinStringsNestTooDeep( bytes ) )
+    {
+        return false;
+    }
+    DEGRADED_PATH_ALERT( "ingest: a .kt file nests string templates past kMaxKotlinStringNestDepth — refused before the parse (--skipped why=nest-refused)" );
+    rw::emitTo( stderr, "[ripwire] {}: kotlin string-template nesting > {} levels — refused before the parse (skipped)\n", path, kMaxKotlinStringNestDepth );
+    scan.nestRefusedBytes[ fileId ] = static_cast<std::uint32_t>( std::min<std::size_t>( bytes.size(), UINT32_MAX ) );
+    return true;
 }
 
 // The compile/ready state the prewarm launch hands to the parse pool's install moment. Non-movable on

@@ -25,7 +25,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/jsmetricsfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -41,7 +41,7 @@ echo "=== --metrics: hand-checked loc/params/nest/cbo on JavaScript ==="
 "$BIN" "$FIX" --metrics --no-cache >"$TMP/m2" 2>/dev/null
 MAP="$( cat "$TMP/m1" )"
 
-diff -q "$TMP/m1" "$TMP/m2" >/dev/null && ok "determinism (--metrics byte-identical run-to-run)" || no "non-deterministic --metrics output"
+if diff -q "$TMP/m1" "$TMP/m2" >/dev/null; then ok "determinism (--metrics byte-identical run-to-run)"; else no "non-deterministic --metrics output"; fi
 
 sattr(){ printf '%s' "$MAP" | sed 's/>/>\n/g' | grep -E "<s t=\"[^\"]*\" n=\"$1\"" | head -1; }
 assert_attr(){ # name attr val
@@ -63,7 +63,7 @@ assert_attr arrowWithParams params 2; assert_attr arrowWithParams nest 1; assert
 # nest and NON-ZERO params, so a wholesale "everything defaulted to 0" regression cannot slip past a
 # coincidental single bad assertion.
 NONZERO_NEST_JS="$( printf '%s' "$MAP" | grep -c 'p="test/jsmetricsfix/shapes.js"' )"
-printf '%s' "$( sattr deepNest )" | grep -qv ' nest="0"' && ok "sanity: JS nest values are NOT all defaulting to 0" || no "sanity: JS nest defaulted to 0 across the board — metrics may be silently broken on JS"
+if printf '%s' "$( sattr deepNest )" | grep -qv ' nest="0"'; then ok "sanity: JS nest values are NOT all defaulting to 0"; else no "sanity: JS nest defaulted to 0 across the board — metrics may be silently broken on JS"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -76,12 +76,12 @@ assert_attr deep_nest_sh loc 10; assert_attr deep_nest_sh params 0; assert_attr 
 # calls_leaf_and_deep_sh: calls leaf_sh()+deep_nest_sh() -> cbo=2
 assert_attr calls_leaf_and_deep_sh nest 0; assert_attr calls_leaf_and_deep_sh cbo 2
 
-printf '%s' "$( sattr deep_nest_sh )" | grep -qv ' nest="0"' && ok "sanity: Bash nest values are NOT all defaulting to 0" || no "sanity: Bash nest defaulted to 0 across the board — metrics may be silently broken on Bash"
+if printf '%s' "$( sattr deep_nest_sh )" | grep -qv ' nest="0"'; then ok "sanity: Bash nest values are NOT all defaulting to 0"; else no "sanity: Bash nest defaulted to 0 across the board — metrics may be silently broken on Bash"; fi
 
 # golden neutrality: the default map (no --metrics) carries none of these attributes on JS/Bash either.
 "$BIN" "$FIX" --no-cache >"$TMP/def" 2>/dev/null
 LEAK="$( grep -oE ' (loc|params|nest|cbo)="[^"]*"' "$TMP/def" | head -1 )"
-[ -z "$LEAK" ] && ok "golden-neutral: no Q-metric attribute leaks into the default JS/Bash map" || no "attribute leaked into default map: $LEAK"
+if [ -z "$LEAK" ]; then ok "golden-neutral: no Q-metric attribute leaks into the default JS/Bash map"; else no "attribute leaked into default map: $LEAK"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -89,11 +89,11 @@ echo "=== --for: the task lens surfaces cx/ccx on JS/Bash and ranks by relevance
 # ═══════════════════════════════════════════════════════════════════════════
 FOR_OUT="$( "$BIN" "$FIX" --for="deep nesting" --no-cache 2>/dev/null )"
 FOR_RC=$?
-[ $FOR_RC -eq 0 ] && ok "--for exits 0 on JS/Bash corpus" || no "--for failed (rc=$FOR_RC)"
-printf '%s' "$FOR_OUT" | grep -q 'shapes.js' && ok "--for includes the JS file" || no "--for missing the JS file"
-printf '%s' "$FOR_OUT" | grep -q 'shapes.sh' && ok "--for includes the Bash file" || no "--for missing the Bash file"
-printf '%s' "$FOR_OUT" | grep -q 'function deepNest' && ok "--for surfaces the deepNest JS signature (matches the query)" || no "--for did not surface deepNest for a 'deep nesting' query"
-printf '%s' "$FOR_OUT" | grep -q 'deep_nest_sh' && ok "--for surfaces the deep_nest_sh Bash signature" || no "--for did not surface deep_nest_sh"
+if [ $FOR_RC -eq 0 ]; then ok "--for exits 0 on JS/Bash corpus"; else no "--for failed (rc=$FOR_RC)"; fi
+if printf '%s' "$FOR_OUT" | grep -q 'shapes.js'; then ok "--for includes the JS file"; else no "--for missing the JS file"; fi
+if printf '%s' "$FOR_OUT" | grep -q 'shapes.sh'; then ok "--for includes the Bash file"; else no "--for missing the Bash file"; fi
+if printf '%s' "$FOR_OUT" | grep -q 'function deepNest'; then ok "--for surfaces the deepNest JS signature (matches the query)"; else no "--for did not surface deepNest for a 'deep nesting' query"; fi
+if printf '%s' "$FOR_OUT" | grep -q 'deep_nest_sh'; then ok "--for surfaces the deep_nest_sh Bash signature"; else no "--for did not surface deep_nest_sh"; fi
 # deepNest's cx/ccx in the --for lens must match the --metrics values (cx=4 ccx=6), not be zeroed out.
 printf '%s' "$FOR_OUT" | grep -A0 'function deepNest' | grep -q 'cx="4" ccx="6"' \
     && ok "--for: deepNest carries the correct cx=4 ccx=6 (matches --metrics, not zeroed)" \
@@ -102,7 +102,7 @@ printf '%s' "$FOR_OUT" | grep -A0 'function deepNest' | grep -q 'cx="4" ccx="6"'
 # determinism of --for on this corpus
 "$BIN" "$FIX" --for="deep nesting" --no-cache >"$TMP/for2" 2>/dev/null
 printf '%s' "$FOR_OUT" >"$TMP/for1"
-diff -q "$TMP/for1" "$TMP/for2" >/dev/null && ok "--for deterministic on JS/Bash corpus" || no "--for non-deterministic"
+if diff -q "$TMP/for1" "$TMP/for2" >/dev/null; then ok "--for deterministic on JS/Bash corpus"; else no "--for non-deterministic"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -118,7 +118,7 @@ function simple( x )
 }
 EOF
 ( cd "$QD" && "$BIN" . --quality-baseline --no-cache >/dev/null 2>&1 )
-[ -f "$QD/.ripwire_quality_baseline" ] && ok "--quality-baseline writes a sidecar for a JS-only corpus" || no "--quality-baseline did not write a sidecar for JS"
+if [ -f "$QD/.ripwire_quality_baseline" ]; then ok "--quality-baseline writes a sidecar for a JS-only corpus"; else no "--quality-baseline did not write a sidecar for JS"; fi
 
 cat > "$QD/a.js" <<'EOF'
 function simple( x )
@@ -144,11 +144,11 @@ function simple( x )
 EOF
 QD_OUT="$( cd "$QD" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
 QD_RC=$?
-[ $QD_RC -eq 2 ] && ok "--quality-delta exits 2 on a real JS nesting regression" || no "--quality-delta exit code wrong (got $QD_RC, want 2)"
-printf '%s' "$QD_OUT" | grep -q 'regressions="1"' && ok "--quality-delta reports exactly 1 regression" || no "--quality-delta regression count wrong: $QD_OUT"
-printf '%s' "$QD_OUT" | grep -q 'kind="nesting"' && ok "--quality-delta correctly classifies it as a nesting regression" || no "--quality-delta did not classify as nesting: $QD_OUT"
-printf '%s' "$QD_OUT" | grep -q 'sym="simple"' && ok "--quality-delta names the regressed JS symbol (simple)" || no "--quality-delta did not name the symbol: $QD_OUT"
-printf '%s' "$QD_OUT" | grep -q 'now="5"' && ok "--quality-delta reports the correct now=5 nest depth" || no "--quality-delta now= value wrong: $QD_OUT"
+if [ $QD_RC -eq 2 ]; then ok "--quality-delta exits 2 on a real JS nesting regression"; else no "--quality-delta exit code wrong (got $QD_RC, want 2)"; fi
+if printf '%s' "$QD_OUT" | grep -q 'regressions="1"'; then ok "--quality-delta reports exactly 1 regression"; else no "--quality-delta regression count wrong: $QD_OUT"; fi
+if printf '%s' "$QD_OUT" | grep -q 'kind="nesting"'; then ok "--quality-delta correctly classifies it as a nesting regression"; else no "--quality-delta did not classify as nesting: $QD_OUT"; fi
+if printf '%s' "$QD_OUT" | grep -q 'sym="simple"'; then ok "--quality-delta names the regressed JS symbol (simple)"; else no "--quality-delta did not name the symbol: $QD_OUT"; fi
+if printf '%s' "$QD_OUT" | grep -q 'now="5"'; then ok "--quality-delta reports the correct now=5 nest depth"; else no "--quality-delta now= value wrong: $QD_OUT"; fi
 
 # negative control: re-running quality-delta with NO further change reports 0 regressions (not sticky).
 QD2_OUT="$( cd "$QD" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
@@ -178,8 +178,8 @@ MUT2="$( ok(){ :; }; no(){ echo TRIPPED; }
 
 # well-formed XML on the --metrics / --for output (G4)
 command -v xmllint >/dev/null 2>&1 && {
-    printf '%s' "$MAP" | xmllint --noout - 2>/dev/null && ok "xml well-formed (--metrics on JS/Bash)" || no "xml malformed (--metrics on JS/Bash)"
-    printf '%s' "$FOR_OUT" | xmllint --noout - 2>/dev/null && ok "xml well-formed (--for on JS/Bash)" || no "xml malformed (--for on JS/Bash)"
+    if printf '%s' "$MAP" | xmllint --noout - 2>/dev/null; then ok "xml well-formed (--metrics on JS/Bash)"; else no "xml malformed (--metrics on JS/Bash)"; fi
+    if printf '%s' "$FOR_OUT" | xmllint --noout - 2>/dev/null; then ok "xml well-formed (--for on JS/Bash)"; else no "xml malformed (--for on JS/Bash)"; fi
 }
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME CHECKS FAILED"

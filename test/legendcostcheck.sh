@@ -24,7 +24,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 FAILED=0
 fail() { printf '  FAIL  %s\n' "$*"; FAILED=$(( FAILED + 1 )); }
-ok()   { printf '  PASS  %s\n' "$*"; }
+ok()   { printf '  PASS  %s\n' "$*" || { FAILED=$(( FAILED + 1 )); printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 [ -x "$BIN" ] || { echo "legendcostcheck: no binary at $BIN — build first"; exit 2; }
 
 "$BIN" --help=all >"$TMP/help" 2>/dev/null

@@ -1,3 +1,5 @@
+#include <charconv>   // std::from_chars (elixirCallArity); Apple clang does not get it transitively
+
 #pragma once
 
 #if !defined( RIPWIRE_INGEST_TU )
@@ -19,7 +21,7 @@ std::string_view elixirTarget( TSNode node, std::string_view src ) noexcept
     {
         return {};
     }
-    const TSNode target = ts_node_child_by_field_name( node, "target", 6 );
+    const TSNode target = fieldChild( node, NodeField::Target );
     if( ts_node_is_null( target ) || std::strcmp( ts_node_type( target ), "identifier" ) != 0 )
     {
         return {};
@@ -47,15 +49,10 @@ TSNode elixirArguments( TSNode node ) noexcept
     {
         return {};
     }
-    for( std::uint32_t childId = 0; childId < ts_node_named_child_count( node ); ++childId )
-    {
-        const TSNode child = ts_node_named_child( node, childId );
-        if( std::strcmp( ts_node_type( child ), "arguments" ) == 0 )
-        {
-            return child;
-        }
-    }
-    return {};
+    // O(children): tree-sitter-elixir accepts comments between a call's head and its do-block and splices
+    // them into the call node itself — 16 000 of them measured 82x under elixirBody's twin of this scan
+    // (test/childwalkscalecheck.sh, arm B30, attributed by `sample`; the rule is on src/infra/tschildren.h)
+    return firstChildOfKind( node, /*namedOnly=*/true, { "arguments" } );
 }
 
 /// Return the first direct call argument, or a null node for an absent or empty argument list.
@@ -80,43 +77,45 @@ TSNode elixirKeywordValue( TSNode node, std::string_view key, std::string_view s
     {
         return {};
     }
-    for( std::uint32_t argId = 0; argId < ts_node_named_child_count( args ); ++argId )
+    // O(children) at both levels: `def f(x), # … do: x` puts the comments in the arguments (81x at 16 000,
+    // test/childwalkscalecheck.sh arm B29). Two cursors: the pair walk runs while the argument walk is open.
+    TSNode      value   = {};
+    bool        matched = false;
+    ChildCursor argCursor( args );
+    ChildCursor pairCursor( args );
+    forEachNamedChild( args, argCursor.cur, [ & ]( TSNode arg )
     {
-        const TSNode arg = ts_node_named_child( args, argId );
         if( std::strcmp( ts_node_type( arg ), "keywords" ) != 0 )
         {
-            continue;
+            return true;
         }
-        for( std::uint32_t pairId = 0; pairId < ts_node_named_child_count( arg ); ++pairId )
+        forEachNamedChild( arg, pairCursor.cur, [ & ]( TSNode pair )
         {
-            const TSNode pair = ts_node_named_child( arg, pairId );
-            auto found = nodeTextOf( ts_node_child_by_field_name( pair, "key", 3 ), src );
+            auto found = nodeTextOf( fieldChild( pair, NodeField::Key ), src );
             while( !found.empty() && std::isspace( static_cast<unsigned char>( found.back() ) ) )
             {
                 found.remove_suffix( 1 );
             }
-            if( found == key )
+            if( found != key )
             {
-                return ts_node_child_by_field_name( pair, "value", 5 );
+                return true;
             }
-        }
-    }
-    return {};
+            value   = fieldChild( pair, NodeField::Value );
+            matched = true;
+            return false;
+        } );
+        return !matched;
+    } );
+    return value;
 }
 
 /// Find a definition's direct do-block or do-keyword value without adopting an ancestor's body.
 /// node must be non-null; src must contain its source span. Return a null node when no body exists.
 TSNode elixirBody( TSNode node, std::string_view src ) noexcept
 {
-    for( std::uint32_t childId = 0; childId < ts_node_named_child_count( node ); ++childId )
-    {
-        const TSNode child = ts_node_named_child( node, childId );
-        if( std::strcmp( ts_node_type( child ), "do_block" ) == 0 )
-        {
-            return child;
-        }
-    }
-    return elixirKeywordValue( node, "do:", src );
+    // O(children) — arm B30 in test/childwalkscalecheck.sh; the note is on elixirArguments
+    const TSNode block = firstChildOfKind( node, /*namedOnly=*/true, { "do_block" } );
+    return ts_node_is_null( block ) ? elixirKeywordValue( node, "do:", src ) : block;
 }
 
 /// Count syntactic parameters in an ordinary or guarded definition head, saturating at UINT16_MAX.
@@ -124,9 +123,9 @@ TSNode elixirBody( TSNode node, std::string_view src ) noexcept
 std::uint16_t elixirParams( TSNode node, std::string_view src ) noexcept
 {
     TSNode head = elixirFirstArgument( node );
-    if( !ts_node_is_null( head ) && std::strcmp( ts_node_type( head ), "binary_operator" ) == 0 && nodeFieldText( head, "operator", 8, src ) == "when" )
+    if( !ts_node_is_null( head ) && std::strcmp( ts_node_type( head ), "binary_operator" ) == 0 && nodeFieldText( head, NodeField::Operator, src  ) == "when" )
     {
-        head = ts_node_child_by_field_name( head, "left", 4 );
+        head = fieldChild( head, NodeField::Left );
     }
     if( !ts_node_is_null( head ) && std::strcmp( ts_node_type( head ), "binary_operator" ) == 0 ) { return 2; }
     if( !ts_node_is_null( head ) && std::strcmp( ts_node_type( head ), "unary_operator" ) == 0 ) { return 1; }
@@ -141,8 +140,8 @@ std::uint16_t elixirParams( TSNode node, std::string_view src ) noexcept
 
 std::string_view elixirAttribute( TSNode node, std::string_view src ) noexcept
 {
-    if( ts_node_is_null( node ) || nodeFieldText( node, "operator", 8, src ) != "@" ) { return {}; }
-    return elixirTarget( ts_node_child_by_field_name( node, "operand", 7 ), src );
+    if( ts_node_is_null( node ) || nodeFieldText( node, NodeField::Operator, src  ) != "@" ) { return {}; }
+    return elixirTarget( fieldChild( node, NodeField::Operand ), src );
 }
 
 bool elixirTypedAttribute( std::string_view name ) noexcept
@@ -169,10 +168,10 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
         {
             return false;
         }
-        if( std::strcmp( ts_node_type( parent ), "unary_operator" ) == 0 && nodeFieldText( parent, "operator", 8, src ) == "@" )
+        if( std::strcmp( ts_node_type( parent ), "unary_operator" ) == 0 && nodeFieldText( parent, NodeField::Operator, src  ) == "@" )
         {
             if( elixirMetadataAttribute( elixirAttribute( parent, src ) )
-                || ts_node_eq( ts_node_child_by_field_name( parent, "operand", 7 ), role ) ) { return false; }
+                || ts_node_eq( fieldChild( parent, NodeField::Operand ), role ) ) { return false; }
         }
     }
     const auto target = elixirTarget( role, src );
@@ -189,6 +188,8 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
             {
                 return false; // only complete, ordinary string titles have a static display name here
             }
+            // indexed on purpose: a string's children come from the external scanner, which owns every byte
+            // between the quotes, so no comment token can be lexed into this list (src/infra/tschildren.h)
             for( std::uint32_t childId = 0; childId < ts_node_named_child_count( name ); ++childId )
             {
                 if( std::strcmp( ts_node_type( ts_node_named_child( name, childId ) ), "interpolation" ) == 0 )
@@ -207,10 +208,10 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
     {
         return false; // the test declaration itself is not a call
     }
-    const TSNode callTarget = ts_node_child_by_field_name( role, "target", 6 );
+    const TSNode callTarget = fieldChild( role, NodeField::Target );
     if( !ts_node_is_null( callTarget ) && std::strcmp( ts_node_type( callTarget ), "dot" ) == 0 )
     {
-        const TSNode receiver = ts_node_child_by_field_name( callTarget, "left", 4 );
+        const TSNode receiver = fieldChild( callTarget, NodeField::Left );
         if( ts_node_is_null( receiver ) || ( std::strcmp( ts_node_type( receiver ), "alias" ) != 0
             && std::strcmp( ts_node_type( receiver ), "atom" ) != 0 && std::strcmp( ts_node_type( receiver ), "dot" ) != 0
             && nodeTextOf( receiver, src ) != "__MODULE__" ) )
@@ -228,9 +229,9 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
     bool inDefault = false;
     for( TSNode parent = ts_node_parent( role ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
     {
-        if( std::strcmp( ts_node_type( parent ), "binary_operator" ) == 0 && nodeFieldText( parent, "operator", 8, src ) == "\\\\" )
+        if( std::strcmp( ts_node_type( parent ), "binary_operator" ) == 0 && nodeFieldText( parent, NodeField::Operator, src ) == "\\\\" )
         {
-            const TSNode value = ts_node_child_by_field_name( parent, "right", 5 );
+            const TSNode value = fieldChild( parent, NodeField::Right );
             inDefault = inDefault || ( !ts_node_is_null( value ) && ts_node_start_byte( role ) >= ts_node_start_byte( value )
                                       && ts_node_end_byte( role ) <= ts_node_end_byte( value ) );
         }
@@ -239,9 +240,9 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
             continue;
         }
         TSNode head = elixirFirstArgument( parent );
-        if( !ts_node_is_null( head ) && std::strcmp( ts_node_type( head ), "binary_operator" ) == 0 && nodeFieldText( head, "operator", 8, src ) == "when" )
+        if( !ts_node_is_null( head ) && std::strcmp( ts_node_type( head ), "binary_operator" ) == 0 && nodeFieldText( head, NodeField::Operator, src  ) == "when" )
         {
-            head = ts_node_child_by_field_name( head, "left", 4 );
+            head = fieldChild( head, NodeField::Left );
         }
         if( !ts_node_is_null( head ) && ts_node_start_byte( name ) >= ts_node_start_byte( head ) && ts_node_end_byte( name ) <= ts_node_end_byte( head ) )
         {
@@ -377,8 +378,8 @@ struct ElixirContext
         if( nodeTextOf( name, src ) == "__MODULE__" ) { return scopeOf( site, depth + 1 ); }
         if( elixirNodeIs( name, "dot" ) )
         {
-            const TSNode left = ts_node_child_by_field_name( name, "left", 4 );
-            const TSNode right = ts_node_child_by_field_name( name, "right", 5 );
+            const TSNode left = fieldChild( name, NodeField::Left );
+            const TSNode right = fieldChild( name, NodeField::Right );
             if( !elixirNodeIs( right, "alias" ) ) { return {}; }
             const auto prefix = moduleOf( left, site, depth + 1 );
             if( !prefix.empty() ) { return prefix + "." + std::string( nodeTextOf( right, src ) ); }
@@ -437,8 +438,8 @@ struct ElixirContext
         const TSNode first = elixirFirstArgument( node );
         if( auto name = moduleOf( first, node ); !name.empty() ) { out.push_back( std::move( name ) ); return out; }
         if( !elixirNodeIs( first, "dot" ) ) { return out; }
-        const auto prefix = moduleOf( ts_node_child_by_field_name( first, "left", 4 ), node );
-        const TSNode members = ts_node_child_by_field_name( first, "right", 5 );
+        const auto prefix = moduleOf( fieldChild( first, NodeField::Left ), node );
+        const TSNode members = fieldChild( first, NodeField::Right );
         if( prefix.empty() || !elixirNodeIs( members, "tuple" ) ) { return out; }
         for( std::uint32_t i = 0; i < ts_node_named_child_count( members ); ++i )
         {
@@ -460,32 +461,32 @@ struct ElixirContext
     {
         for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
         {
-            if( elixirNodeIs( p, "unary_operator" ) && nodeFieldText( p, "operator", 8, src ) == "^" ) { return {}; }
+            if( elixirNodeIs( p, "unary_operator" ) && nodeFieldText( p, NodeField::Operator, src  ) == "^" ) { return {}; }
             if( elixirFunctionKeyword( elixirTarget( p, src ) ) )
             {
                 TSNode head = elixirFirstArgument( p );
-                if( elixirNodeIs( head, "binary_operator" ) && nodeFieldText( head, "operator", 8, src ) == "when" )
+                if( elixirNodeIs( head, "binary_operator" ) && nodeFieldText( head, NodeField::Operator, src  ) == "when" )
                 {
-                    head = ts_node_child_by_field_name( head, "left", 4 );
+                    head = fieldChild( head, NodeField::Left );
                 }
                 if( elixirNodeIs( head, "binary_operator" ) || elixirNodeIs( head, "unary_operator" ) ) { return elixirContains( head, node ) ? p : TSNode{}; }
                 return elixirContains( elixirArguments( head ), node ) ? p : TSNode{};
             }
             if( elixirNodeIs( p, "stab_clause" ) )
             {
-                TSNode pattern = ts_node_child_by_field_name( p, "left", 4 );
-                if( elixirNodeIs( pattern, "binary_operator" ) && nodeFieldText( pattern, "operator", 8, src ) == "when" )
+                TSNode pattern = fieldChild( p, NodeField::Left );
+                if( elixirNodeIs( pattern, "binary_operator" ) && nodeFieldText( pattern, NodeField::Operator, src  ) == "when" )
                 {
-                    pattern = ts_node_child_by_field_name( pattern, "left", 4 );
+                    pattern = fieldChild( pattern, NodeField::Left );
                 }
                 return elixirContains( pattern, node ) ? p : TSNode{};
             }
             if( elixirNodeIs( p, "binary_operator" ) )
             {
-                const auto op = nodeFieldText( p, "operator", 8, src );
+                const auto op = nodeFieldText( p, NodeField::Operator, src  );
                 if( op == "=" || op == "<-" || op == "\\\\" )
                 {
-                    if( !elixirContains( ts_node_child_by_field_name( p, "left", 4 ), node ) ) { return {}; }
+                    if( !elixirContains( fieldChild( p, NodeField::Left ), node ) ) { return {}; }
                     if( op == "<-" )
                     {
                         for( TSNode c = ts_node_parent( p ); !ts_node_is_null( c ); c = ts_node_parent( c ) )
@@ -506,11 +507,11 @@ struct ElixirContext
         if( text.empty() || text.front() == '_' || text == "true" || text == "false" || text == "nil" ) { return false; }
         const TSNode parent = ts_node_parent( name );
         if( elixirNodeIs( parent, "dot" ) || ( elixirNodeIs( parent, "call" )
-            && ts_node_eq( ts_node_child_by_field_name( parent, "target", 6 ), name ) ) ) { return false; }
+            && ts_node_eq( fieldChild( parent, NodeField::Target ), name ) ) ) { return false; }
         // A capture names a function even if a variable with the same spelling is bound.
-        if( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, "operator", 8, src ) == "/"
+        if( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "/"
             && elixirNodeIs( ts_node_parent( parent ), "unary_operator" )
-            && nodeFieldText( ts_node_parent( parent ), "operator", 8, src ) == "&" ) { return true; }
+            && nodeFieldText( ts_node_parent( parent ), NodeField::Operator, src  ) == "&" ) { return true; }
         if( !ts_node_is_null( bindingScope( name ) ) ) { return false; }
         if( const auto it = variables.find( std::string( text ) ); it != variables.end() )
         {
@@ -617,9 +618,9 @@ struct ElixirContext
                         for( std::uint32_t j = 0; j < ts_node_named_child_count( entries ); ++j )
                         {
                             const TSNode pair = ts_node_named_child( entries, j );
-                            auto key = nodeTextOf( ts_node_child_by_field_name( pair, "key", 3 ), src );
+                            auto key = nodeTextOf( fieldChild( pair, NodeField::Key ), src );
                             while( !key.empty() && ( key.back() == ':' || std::isspace( static_cast<unsigned char>( key.back() ) ) ) ) { key.remove_suffix( 1 ); }
-                            const auto count = nodeTextOf( ts_node_child_by_field_name( pair, "value", 5 ), src );
+                            const auto count = nodeTextOf( fieldChild( pair, NodeField::Value ), src );
                             bind.importedName += "\n" + std::string( key ) + "/" + std::string( count ) + "\n";
                         }
                     }
@@ -634,8 +635,8 @@ struct ElixirContext
             auto visibleFrom = ts_node_start_byte( identifier );
             for( TSNode p = ts_node_parent( identifier ); !ts_node_is_null( p ) && !ts_node_eq( p, scope ); p = ts_node_parent( p ) )
             {
-                const auto op = nodeFieldText( p, "operator", 8, src );
-                if( ( op == "=" || op == "<-" ) && elixirContains( ts_node_child_by_field_name( p, "left", 4 ), identifier ) )
+                const auto op = nodeFieldText( p, NodeField::Operator, src  );
+                if( ( op == "=" || op == "<-" ) && elixirContains( fieldChild( p, NodeField::Left ), identifier ) )
                 {
                     visibleFrom = ts_node_end_byte( p ); // the RHS runs before the new binding exists
                     break;
@@ -689,15 +690,15 @@ void elixirExpandImplementations( const ElixirContext& context, std::vector<RawD
 std::pair<std::uint16_t, bool> elixirCallArity( TSNode role, TSNode name, std::string_view src ) noexcept
 {
     TSNode expression = role;
-    if( elixirNodeIs( role, "binary_operator" ) && nodeFieldText( role, "operator", 8, src ) == "|>" )
+    if( elixirNodeIs( role, "binary_operator" ) && nodeFieldText( role, NodeField::Operator, src  ) == "|>" )
     {
         expression = name;
     }
     const TSNode parent = ts_node_parent( expression );
-    if( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, "operator", 8, src ) == "/"
-        && nodeFieldText( ts_node_parent( parent ), "operator", 8, src ) == "&" )
+    if( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "/"
+        && nodeFieldText( ts_node_parent( parent ), NodeField::Operator, src  ) == "&" )
     {
-        const auto arity = nodeFieldText( parent, "right", 5, src );
+        const auto arity = nodeFieldText( parent, NodeField::Right, src  );
         std::uint16_t count = 0;
         const auto parsed = std::from_chars( arity.data(), arity.data() + arity.size(), count );
         return { count, parsed.ec == std::errc{} && parsed.ptr == arity.data() + arity.size() };
@@ -715,8 +716,8 @@ std::pair<std::uint16_t, bool> elixirCallArity( TSNode role, TSNode name, std::s
     {
         if( elixirNodeIs( ts_node_named_child( expression, i ), "do_block" ) ) { ++count; }
     }
-    if( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, "operator", 8, src ) == "|>"
-        && ts_node_eq( ts_node_child_by_field_name( parent, "right", 5 ), expression ) ) { ++count; }
+    if( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "|>"
+        && ts_node_eq( fieldChild( parent, NodeField::Right ), expression ) ) { ++count; }
     return { std::uint16_t( std::min( count, 65535u ) ), count <= 65535u };
 }
 
@@ -730,15 +731,15 @@ void elixirDefinitionFacts( const RawDef& def, TSNode node, std::string_view src
     bind.spanStart = def.startByte; bind.spanEnd = def.endByte;
     binds.push_back( bind );
     TSNode head = elixirFirstArgument( node );
-    if( elixirNodeIs( head, "binary_operator" ) && nodeFieldText( head, "operator", 8, src ) == "when" )
+    if( elixirNodeIs( head, "binary_operator" ) && nodeFieldText( head, NodeField::Operator, src  ) == "when" )
     {
-        head = ts_node_child_by_field_name( head, "left", 4 );
+        head = fieldChild( head, NodeField::Left );
     }
     const TSNode args = elixirArguments( head );
     std::uint32_t defaults = 0;
     for( std::uint32_t i = 0; !ts_node_is_null( args ) && i < ts_node_named_child_count( args ); ++i )
     {
-        if( nodeFieldText( ts_node_named_child( args, i ), "operator", 8, src ) == "\\\\" ) { ++defaults; }
+        if( nodeFieldText( ts_node_named_child( args, i ), NodeField::Operator, src  ) == "\\\\" ) { ++defaults; }
     }
     const auto name = std::string_view( def.name ).substr( 0, def.name.rfind( '/' ) );
     for( std::uint32_t count = 1; count <= defaults && count <= def.params; ++count )

@@ -29,7 +29,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -153,14 +153,14 @@ grep -q 'doc mentions:' "$TMP/i1.xml" && no "header note must not appear when no
 cmp -s "$TMP/d1.xml" "$TMP/d2.xml" && cmp -s "$TMP/d2.xml" "$TMP/d3.xml" && ok "determinism x3 (doc-mention lifted)" \
     || no "doc-mention output not deterministic"
 if command -v xmllint >/dev/null; then
-    xmllint --noout "$TMP/d1.xml" 2>/dev/null && ok "doc-mention bundle is xmllint-clean (G4)" || no "doc-mention bundle not well-formed"
+    if xmllint --noout "$TMP/d1.xml" 2>/dev/null; then ok "doc-mention bundle is xmllint-clean (G4)"; else no "doc-mention bundle not well-formed"; fi
 else ok "xmllint not present — skipped (G4 covered by xmlwellformed.sh)"; fi
 "$BIN" "$FIX" --for="$Q" --no-doc-mention --no-cache >"$TMP/f1.xml" 2>/dev/null
 RIPWIRE_NO_DOC_MENTION=1 "$BIN" "$FIX" --for="$Q" --no-cache >"$TMP/f2.xml" 2>/dev/null
 cmp -s "$TMP/f1.xml" "$TMP/f2.xml" && ok "RIPWIRE_NO_DOC_MENTION=1 == --no-doc-mention (byte-identical)" \
     || no "env disable and flag disable diverge"
 "$BIN" "$FIX" --no-doc-mention >/dev/null 2>"$TMP/refuse.err"
-[ $? -ne 0 ] && grep -q 'no-doc-mention' "$TMP/refuse.err" && ok "flag alone refuses loudly" || no "flag alone did not refuse"
+if [ $? -ne 0 ] && grep -q 'no-doc-mention' "$TMP/refuse.err"; then ok "flag alone refuses loudly"; else no "flag alone did not refuse"; fi
 
 # ── §L10b (finding #1): doc_mentions= is a root ATTRIBUTE, not just legend prose — the "doc mentions: N
 #    doc..." note had no machine-readable twin, so a caller that wants the count without parsing prose had

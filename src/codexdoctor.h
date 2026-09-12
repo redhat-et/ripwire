@@ -290,7 +290,12 @@ inline void retargetHint( Check& check, std::string_view claudeHint )
 
 inline std::vector<Check> claudeInspect( const std::string& selfPath )
 {
-    const std::filesystem::path claudeHome = envOr( "HOME", "" ) + "/.claude";
+    // CLAUDE_CONFIG_DIR relocates Claude Code's WHOLE config directory — skills/ and settings.json
+    // together — so reading $HOME/.claude here would report a correct relocated install as missing
+    // skills and an unregistered hook, with a hint telling the user to re-run an installer that had
+    // already succeeded. Same envOr() shape as CODEX_HOME/AGENTS_HOME below, including its rule that
+    // an env var set to the empty string is UNSET (the shell installers spell that as ${VAR:-...}).
+    const std::filesystem::path claudeHome = envOr( "CLAUDE_CONFIG_DIR", envOr( "HOME", "" ) + "/.claude" );
     Check binary = binaryCheck( selfPath );
     binary.name = "claude-binary";
     retargetHint( binary, "reinstall the current build so Claude Code shell calls and this doctor resolve the same ripwire binary" );

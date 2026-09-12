@@ -61,7 +61,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -72,7 +72,7 @@ skip(){ printf '  SKIP  %s\n' "$*"; }
 
 "$BIN" "$ROOT" --cochange >"$TMP/out" 2>"$TMP/err"
 rc=$?
-[ "$rc" -eq 0 ] && ok "--cochange exits 0" || { no "--cochange exits $rc"; cat "$TMP/err"; }
+if [ "$rc" -eq 0 ]; then ok "--cochange exits 0"; else { no "--cochange exits $rc"; cat "$TMP/err"; }; fi
 [ -s "$TMP/out" ] || { echo "cochangesurprisecheck: empty output, cannot proceed"; exit 2; }
 
 # --pack-top-n raises the cap so the rows checked below aren't hidden by the default 30-row truncation
@@ -140,7 +140,7 @@ mkCochangeFixture || { echo "cochangesurprisecheck: could not build the fixture 
 
 "$BIN" "$FIX" --cochange --pack-top-n=1000 --no-cache >"$TMP/fix" 2>"$TMP/fix.err"
 rc_fix=$?
-[ "$rc_fix" -eq 0 ] && ok "fixture: --cochange exits 0 on the scripted repo" || { no "fixture: --cochange exits $rc_fix"; head -3 "$TMP/fix.err"; }
+if [ "$rc_fix" -eq 0 ]; then ok "fixture: --cochange exits 0 on the scripted repo"; else { no "fixture: --cochange exits $rc_fix"; head -3 "$TMP/fix.err"; }; fi
 
 # pull out one <pair .../> element mentioning BOTH path fragments, regardless of a=/b= order. Fragments
 # are matched against the fixture's own repo-relative paths, which are unique inside it.
@@ -216,7 +216,7 @@ fi
 # ── 3c. fixture determinism — the scripted history is fixed, so two runs must be byte-identical.
 "$BIN" "$FIX" --cochange --no-cache >"$TMP/fd1" 2>/dev/null
 "$BIN" "$FIX" --cochange --no-cache >"$TMP/fd2" 2>/dev/null
-diff -q "$TMP/fd1" "$TMP/fd2" >/dev/null && ok "fixture: deterministic (byte-identical run-to-run)" || no "fixture: non-deterministic --cochange output"
+if diff -q "$TMP/fd1" "$TMP/fd2" >/dev/null; then ok "fixture: deterministic (byte-identical run-to-run)"; else no "fixture: non-deterministic --cochange output"; fi
 
 # ══ LIVE-CORPUS SWEEP — presence-guarded ═════════════════════════════════════════════════════════════
 # §A9.3's no-leak sweep genuinely wants a big real corpus, so it keeps running against this checkout.
@@ -340,7 +340,7 @@ fi
 # ── 3. determinism
 "$BIN" "$ROOT" --cochange >"$TMP/d1" 2>/dev/null
 "$BIN" "$ROOT" --cochange >"$TMP/d2" 2>/dev/null
-diff -q "$TMP/d1" "$TMP/d2" >/dev/null && ok "deterministic (byte-identical run-to-run)" || no "non-deterministic --cochange output"
+if diff -q "$TMP/d1" "$TMP/d2" >/dev/null; then ok "deterministic (byte-identical run-to-run)"; else no "non-deterministic --cochange output"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

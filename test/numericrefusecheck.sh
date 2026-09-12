@@ -38,7 +38,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative binary
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -63,8 +63,8 @@ for f in $NUMERIC; do
     # shellcheck disable=SC2086
     "$BIN" test/fixture "$f=zzq" $X >"$TMP/o.garb" 2>"$TMP/e.garb"; rcg=$?
 
-    [ "$rce" -eq 1 ] && ok "$f= (empty) exits 1"     || no "$f= (empty) exits $rce (expected 1)"
-    [ "$rcg" -eq 1 ] && ok "$f=zzq (garbage) exits 1" || no "$f=zzq (garbage) exits $rcg (expected 1)"
+    if [ "$rce" -eq 1 ]; then ok "$f= (empty) exits 1"; else no "$f= (empty) exits $rce (expected 1)"; fi
+    if [ "$rcg" -eq 1 ]; then ok "$f=zzq (garbage) exits 1"; else no "$f=zzq (garbage) exits $rcg (expected 1)"; fi
 
     grep -q "got ''"    "$TMP/e.empty" && ok "$f= echoes the empty value it got" \
                                        || no "$f= does not echo got '': [$( head -c 160 "$TMP/e.empty" )]"
@@ -87,8 +87,8 @@ for f in --token-budget --max-file-size; do
     "$BIN" test/fixture "$f=" >"$TMP/o.empty" 2>"$TMP/e.empty"; rce=$?
     "$BIN" test/fixture "$f=zzq" >"$TMP/o.garb" 2>"$TMP/e.garb"; rcg=$?
 
-    [ "$rce" -eq 1 ] && ok "$f= (empty) exits 1"     || no "$f= (empty) exits $rce (expected 1)"
-    [ "$rcg" -eq 1 ] && ok "$f=zzq (garbage) exits 1" || no "$f=zzq (garbage) exits $rcg (expected 1)"
+    if [ "$rce" -eq 1 ]; then ok "$f= (empty) exits 1"; else no "$f= (empty) exits $rce (expected 1)"; fi
+    if [ "$rcg" -eq 1 ]; then ok "$f=zzq (garbage) exits 1"; else no "$f=zzq (garbage) exits $rcg (expected 1)"; fi
 
     grep -q "got ''"    "$TMP/e.empty" && ok "$f= echoes the empty value it got" \
                                        || no "$f= does not echo got '': [$( head -c 160 "$TMP/e.empty" )]"
@@ -104,17 +104,17 @@ for f in --token-budget --max-file-size; do
 done
 # accept-side control: the suffix grammar itself must be untouched by the refusal-only change
 "$BIN" test/fixture --token-budget=16000 --pack-task=t >/dev/null 2>"$TMP/e.tbp"
-[ $? -eq 0 ] && ok "--token-budget=16000 (plain) still accepted" || no "--token-budget=16000 was refused: [$( head -c 160 "$TMP/e.tbp" )]"
+if [ $? -eq 0 ]; then ok "--token-budget=16000 (plain) still accepted"; else no "--token-budget=16000 was refused: [$( head -c 160 "$TMP/e.tbp" )]"; fi
 "$BIN" test/fixture --token-budget=16K --pack-task=t >/dev/null 2>"$TMP/e.tbk"
-[ $? -eq 0 ] && ok "--token-budget=16K (suffix) still accepted" || no "--token-budget=16K was refused: [$( head -c 160 "$TMP/e.tbk" )]"
+if [ $? -eq 0 ]; then ok "--token-budget=16K (suffix) still accepted"; else no "--token-budget=16K was refused: [$( head -c 160 "$TMP/e.tbk" )]"; fi
 "$BIN" test/fixture --max-file-size=4194304 >/dev/null 2>"$TMP/e.mfp"
-[ $? -eq 0 ] && ok "--max-file-size=4194304 (plain) still accepted" || no "--max-file-size=4194304 was refused: [$( head -c 160 "$TMP/e.mfp" )]"
+if [ $? -eq 0 ]; then ok "--max-file-size=4194304 (plain) still accepted"; else no "--max-file-size=4194304 was refused: [$( head -c 160 "$TMP/e.mfp" )]"; fi
 "$BIN" test/fixture --max-file-size=10MB >/dev/null 2>"$TMP/e.mfm"
-[ $? -eq 0 ] && ok "--max-file-size=10MB (suffix) still accepted" || no "--max-file-size=10MB was refused: [$( head -c 160 "$TMP/e.mfm" )]"
+if [ $? -eq 0 ]; then ok "--max-file-size=10MB (suffix) still accepted"; else no "--max-file-size=10MB was refused: [$( head -c 160 "$TMP/e.mfm" )]"; fi
 
 # ── --path=SRC,DST' bare-arg-count path (the same class, one file over in main.cpp) ────────────────────
 "$BIN" test/fixture --path=zzq >/dev/null 2>"$TMP/e.path"; rc=$?
-[ "$rc" -eq 1 ] && ok "--path=zzq exits 1" || no "--path=zzq exits $rc (expected 1)"
+if [ "$rc" -eq 1 ]; then ok "--path=zzq exits 1"; else no "--path=zzq exits $rc (expected 1)"; fi
 grep -q "got 'zzq'" "$TMP/e.path" && ok "--path=zzq echoes the offending value" \
                                   || no "--path=zzq does not echo got 'zzq': [$( head -c 160 "$TMP/e.path" )]"
 grep -q "e\.g\. --path=" "$TMP/e.path" && ok "--path=zzq refusal shows a runnable example" \
@@ -122,7 +122,7 @@ grep -q "e\.g\. --path=" "$TMP/e.path" && ok "--path=zzq refusal shows a runnabl
 # its EMPTY form is the kViewFlags empty-value refusal (a different, already-compliant sentence): the two
 # must still differ, which is the whole point of echoing the value.
 "$BIN" test/fixture --path= >/dev/null 2>"$TMP/e.pathempty"; rc=$?
-[ "$rc" -eq 1 ] && ok "--path= (empty) exits 1" || no "--path= (empty) exits $rc (expected 1)"
+if [ "$rc" -eq 1 ]; then ok "--path= (empty) exits 1"; else no "--path= (empty) exits $rc (expected 1)"; fi
 cmp -s "$TMP/e.path" "$TMP/e.pathempty" \
     && no "--path=: empty and garbage produce a BYTE-IDENTICAL refusal" \
     || ok "--path=: empty and garbage refusals differ"
@@ -163,14 +163,14 @@ done
 # a sample of the other arms' accept side, so a refusal that swallowed every value cannot pass this gate
 # --top-k=0 needs a payload verb to be a legal COMBINATION (validateConfig, unrelated to value parsing);
 # pairing it with --pack-signatures keeps this assertion about the numeric arm and nothing else.
-"$BIN" test/fixture --top-k=0 --pack-signatures >/dev/null 2>&1 && ok "--top-k=0 still accepted (0 = payload-only)" || no "--top-k=0 was refused"
-"$BIN" test/fixture --detail=0 >/dev/null 2>&1 && ok "--detail=0 still accepted (0 = off)"        || no "--detail=0 was refused"
-"$BIN" test/fixture --zoom=2   >/dev/null 2>&1 && ok "--zoom=2 still accepted"                    || no "--zoom=2 was refused"
-"$BIN" test/fixture --grep=double --grep-context=2 >/dev/null 2>&1 && ok "--grep-context=2 still accepted" || no "--grep-context=2 was refused"
+if "$BIN" test/fixture --top-k=0 --pack-signatures >/dev/null 2>&1; then ok "--top-k=0 still accepted (0 = payload-only)"; else no "--top-k=0 was refused"; fi
+if "$BIN" test/fixture --detail=0 >/dev/null 2>&1; then ok "--detail=0 still accepted (0 = off)"; else no "--detail=0 was refused"; fi
+if "$BIN" test/fixture --zoom=2   >/dev/null 2>&1; then ok "--zoom=2 still accepted"; else no "--zoom=2 was refused"; fi
+if "$BIN" test/fixture --grep=double --grep-context=2 >/dev/null 2>&1; then ok "--grep-context=2 still accepted"; else no "--grep-context=2 was refused"; fi
 # the four W2FIX-CLI arrivals' accept side (each needs the companion flag its own guard requires)
-"$BIN" test/fixture --around=perimeter --around-depth=3 --around-fanout=50 >/dev/null 2>&1 && ok "--around-depth=3/--around-fanout=50 still accepted" || no "--around-depth=3/--around-fanout=50 was refused"
-"$BIN" test/fixture --pack-task=t --partition=4 >/dev/null 2>&1 && ok "--partition=4 still accepted" || no "--partition=4 was refused"
-"$BIN" test/fixture --plan-lanes=3 --task="paint the tile" >/dev/null 2>&1 && ok "--plan-lanes=3 still accepted" || no "--plan-lanes=3 was refused"
+if "$BIN" test/fixture --around=perimeter --around-depth=3 --around-fanout=50 >/dev/null 2>&1; then ok "--around-depth=3/--around-fanout=50 still accepted"; else no "--around-depth=3/--around-fanout=50 was refused"; fi
+if "$BIN" test/fixture --pack-task=t --partition=4 >/dev/null 2>&1; then ok "--partition=4 still accepted"; else no "--partition=4 was refused"; fi
+if "$BIN" test/fixture --plan-lanes=3 --task="paint the tile" >/dev/null 2>&1; then ok "--plan-lanes=3 still accepted"; else no "--plan-lanes=3 was refused"; fi
 
 # ── the reference dialect: --limit/--offset already do all of this (unchanged) ─────────────────────────
 "$BIN" test/fixture --deps --limit=zzq >/dev/null 2>"$TMP/e.lim"

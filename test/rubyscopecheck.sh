@@ -28,7 +28,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -90,15 +90,15 @@ PY
 
 MAP="$DIR/map.xml"
 "$BIN" "$FIX" --no-cache >"$MAP" 2>"$DIR/map.err"
-[ $? -eq 0 ] && ok "default map exits 0" || no "default map exited non-zero: $( cat "$DIR/map.err" )"
+if [ $? -eq 0 ]; then ok "default map exits 0"; else no "default map exited non-zero: $( cat "$DIR/map.err" )"; fi
 [ -s "$DIR/map.err" ] && no "unexpected stderr: $( head -3 "$DIR/map.err" )" || ok "clean stderr"
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP" && ok "xmllint --noout" || no "xmllint failed"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP"; then ok "xmllint --noout"; else no "xmllint failed"; fi; }
 
 ROWS="$DIR/rows"
 sed 's/></>\n</g' "$MAP" | grep '^<s ' >"$ROWS"
 
 hasId(){ # $1=id $2=label
-  grep -q "id=\"$1\"" "$ROWS" && ok "$2 → id=\"$1\"" || no "$2 → id=\"$1\" MISSING: $( grep -o "n=\"${1##*::}\"[^>]*" "$ROWS" | head -2 | tr '\n' ' ' )"
+  if grep -q "id=\"$1\"" "$ROWS"; then ok "$2 → id=\"$1\""; else no "$2 → id=\"$1\" MISSING: $( grep -o "n=\"${1##*::}\"[^>]*" "$ROWS" | head -2 | tr '\n' ' ' )"; fi
 }
 
 echo "=== ids: every Ruby def inside a class/module carries path::scope::name ==="
@@ -113,20 +113,20 @@ hasId "t.py::B::__init__"    "Python control: __init__ inside class B (unchanged
 
 echo "=== negative controls ==="
 TOP="$( grep 'n="toplevel"' "$ROWS" )"
-[ -n "$TOP" ] && ok "top-level def toplevel indexed" || no "top-level def toplevel missing"
+if [ -n "$TOP" ]; then ok "top-level def toplevel indexed"; else no "top-level def toplevel missing"; fi
 echo "$TOP" | grep -q ' id="' && no "top-level def carries an id= (the file is not a scope): $TOP" || ok "top-level def carries NO id= (no scope)"
 grep -q 'n="Outer" id=' "$ROWS" && no "top-level module Outer carries an id= (nothing encloses it)" || ok "top-level module Outer carries NO id="
 
 echo "=== overload folding: same name in DIFFERENT classes must stay separate rows ==="
 N_INIT="$( grep -c 'n="initialize"' "$ROWS" )"
-[ "$N_INIT" -eq 2 ] && ok "two initialize rows (one per class)" || no "expected 2 initialize rows, got $N_INIT"
+if [ "$N_INIT" -eq 2 ]; then ok "two initialize rows (one per class)"; else no "expected 2 initialize rows, got $N_INIT"; fi
 grep 'n="initialize"' "$ROWS" | grep -q 'overloads=' && no "initialize rows folded as overloads across classes" || ok "no overloads= on initialize (different scopes are different symbols)"
 
 echo "=== Scope::name selector addresses ONE Ruby method ==="
 EXP="$( "$BIN" "$FIX" --no-cache --top-k=0 --expand=B::initialize 2>/dev/null | sed 's/></>\n</g' )"
 NB="$( echo "$EXP" | grep -c '^<b ' )"
-[ "$NB" -eq 1 ] && ok "--expand=B::initialize returns exactly one body" || no "--expand=B::initialize returned $NB bodies"
-echo "$EXP" | grep -q '^<b [^>]*l="16"' && ok "…and it is B's initialize (line 16), not A's (line 6)" || no "expanded body is not B's initialize: $( echo "$EXP" | grep '^<b ' )"
+if [ "$NB" -eq 1 ]; then ok "--expand=B::initialize returns exactly one body"; else no "--expand=B::initialize returned $NB bodies"; fi
+if echo "$EXP" | grep -q '^<b [^>]*l="16"'; then ok "…and it is B's initialize (line 16), not A's (line 6)"; else no "expanded body is not B's initialize: $( echo "$EXP" | grep '^<b ' )"; fi
 
 echo "=== resolution: scope must never LOSE an edge the bare-name spray used to find ==="
 # Delegation under the caller's own name — `def publish_event; notifier.publish_event(e); end` — is how Ruby
@@ -159,10 +159,10 @@ end
 RUBY
 DMAP="$( "$BIN" "$DEL" --no-cache 2>/dev/null | sed 's/></>\n</g' )"
 DEDGES="$( echo "$DMAP" | grep -o '<!-- files=[^>]*edges=[0-9]*' | grep -o 'edges=[0-9]*' | cut -d= -f2 )"
-[ "${DEDGES:-0}" -eq 2 ] && ok "facade delegation keeps both real targets (edges=2)" || no "facade delegation: expected edges=2, got ${DEDGES:-0} — the caller won its own locality tie-break?"
+if [ "${DEDGES:-0}" -eq 2 ]; then ok "facade delegation keeps both real targets (edges=2)"; else no "facade delegation: expected edges=2, got ${DEDGES:-0} — the caller won its own locality tie-break?"; fi
 FAC="$( echo "$DMAP" | awk '/id="n.rb::Facade::publish_event"/{f=1;print;next} /^<s /{f=0} f' )"
-[ "$( echo "$FAC" | grep -c '<c n="publish_event"' )" -eq 2 ] && ok "Facade::publish_event → two publish_event callee rows (Fanout, Subscriber)" || no "Facade::publish_event callee rows: $( echo "$FAC" | grep -c '<c n="publish_event"' )"
-echo "$FAC" | grep -q 'amb="1"' && ok "…disclosed as an honest split (amb=\"1\"), not a locality guess" || no "Facade::publish_event is not marked amb=\"1\": $( echo "$FAC" | head -1 )"
+if [ "$( echo "$FAC" | grep -c '<c n="publish_event"' )" -eq 2 ]; then ok "Facade::publish_event → two publish_event callee rows (Fanout, Subscriber)"; else no "Facade::publish_event callee rows: $( echo "$FAC" | grep -c '<c n="publish_event"' )"; fi
+if echo "$FAC" | grep -q 'amb="1"'; then ok "…disclosed as an honest split (amb=\"1\"), not a locality guess"; else no "Facade::publish_event is not marked amb=\"1\": $( echo "$FAC" | head -1 )"; fi
 echo "$FAC" | grep -q 'lpin=' && no "Facade::publish_event carries lpin= — the tie-break picked ONE target from a two-way tie" || ok "…and no lpin= (a two-way tie is left a tie)"
 
 echo "=== resolution: an explicit self receiver / a bare paren call inside a class pins to THAT class (Rule 1) ==="
@@ -191,18 +191,18 @@ RUBY
 RMAP="$( "$BIN" "$R1" --no-cache 2>/dev/null | sed 's/></>\n</g' )"
 GO="$( echo "$RMAP" | awk '/id="r.rb::A::go"/{f=1;print;next} /^<s /{f=0} f' )"
 echo "$GO" | grep -q 'amb=' && no "self.helper(1) inside A stayed ambiguous: $( echo "$GO" | head -1 )" || ok "self.helper(1) inside A is not ambiguous (Rule 1: ThisObj receiver)"
-[ "$( echo "$GO" | grep -c '<c n="helper"' )" -eq 1 ] && ok "…and resolves to exactly one helper" || no "self.helper resolved to $( echo "$GO" | grep -c '<c n="helper"' ) helpers"
+if [ "$( echo "$GO" | grep -c '<c n="helper"' )" -eq 1 ]; then ok "…and resolves to exactly one helper"; else no "self.helper resolved to $( echo "$GO" | grep -c '<c n="helper"' ) helpers"; fi
 echo "$GO" | grep -q 'lpin=' && no "self.helper(1) was pinned by the LOCALITY prior (lpin=), not by Rule 1 — a disclosed guess where a fact exists" || ok "…pinned as a fact (no lpin=), not by the locality prior"
 GB="$( echo "$RMAP" | awk '/id="r.rb::A::go_bare"/{f=1;print;next} /^<s /{f=0} f' )"
 echo "$GB" | grep -q 'amb=' && no "bare helper(2) inside A stayed ambiguous: $( echo "$GB" | head -1 )" || ok "bare helper(2) inside A is not ambiguous (Rule 1: implicit self)"
-[ "$( echo "$GB" | grep -c '<c n="helper"' )" -eq 1 ] && ok "…and resolves to exactly one helper" || no "bare helper(2) resolved to $( echo "$GB" | grep -c '<c n="helper"' ) helpers"
+if [ "$( echo "$GB" | grep -c '<c n="helper"' )" -eq 1 ]; then ok "…and resolves to exactly one helper"; else no "bare helper(2) resolved to $( echo "$GB" | grep -c '<c n="helper"' ) helpers"; fi
 echo "$GB" | grep -q 'lpin=' && no "bare helper(2) was pinned by the LOCALITY prior (lpin=), not by Rule 1" || ok "…pinned as a fact (no lpin=), not by the locality prior"
-"$BIN" "$R1" --no-cache --callers=A::helper 2>/dev/null | grep -q 'count="2"' && ok "--callers=A::helper counts go + go_bare (count=2)" || no "--callers=A::helper did not report count=2: $( "$BIN" "$R1" --no-cache --callers=A::helper 2>/dev/null | grep -o '<callers[^>]*' )"
-"$BIN" "$R1" --no-cache --callers=B::helper 2>/dev/null | grep -q 'count="0"' && ok "--callers=B::helper is empty (nothing in A reaches B)" || no "--callers=B::helper is not empty: $( "$BIN" "$R1" --no-cache --callers=B::helper 2>/dev/null | grep -o '<callers[^>]*' )"
+if "$BIN" "$R1" --no-cache --callers=A::helper 2>/dev/null | grep -q 'count="2"'; then ok "--callers=A::helper counts go + go_bare (count=2)"; else no "--callers=A::helper did not report count=2: $( "$BIN" "$R1" --no-cache --callers=A::helper 2>/dev/null | grep -o '<callers[^>]*' )"; fi
+if "$BIN" "$R1" --no-cache --callers=B::helper 2>/dev/null | grep -q 'count="0"'; then ok "--callers=B::helper is empty (nothing in A reaches B)"; else no "--callers=B::helper is not empty: $( "$BIN" "$R1" --no-cache --callers=B::helper 2>/dev/null | grep -o '<callers[^>]*' )"; fi
 
 echo "=== determinism ==="
 "$BIN" "$FIX" --no-cache >"$DIR/b.xml" 2>/dev/null
-cmp -s "$MAP" "$DIR/b.xml" && ok "byte-identical across two runs" || no "output differs across runs"
+if cmp -s "$MAP" "$DIR/b.xml"; then ok "byte-identical across two runs"; else no "output differs across runs"; fi
 
 echo "=== mutation: hoist B's initialize to top level → its id must vanish (non-tautological) ==="
 MUT="$DIR/mut"; mkdir -p "$MUT"

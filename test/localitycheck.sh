@@ -23,7 +23,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/localityfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -33,7 +33,7 @@ echo "localitycheck: BIN=$BIN  CORPUS=$CORPUS"
 # 1) determinism — same input, byte-identical output run-to-run (the tie-break must stay deterministic)
 "$BIN" "$CORPUS" --no-cache >"$TMP/a" 2>/dev/null
 "$BIN" "$CORPUS" --no-cache >"$TMP/b" 2>/dev/null
-diff -q "$TMP/a" "$TMP/b" >/dev/null && ok "determinism (byte-identical, $(wc -c <"$TMP/a" | tr -d ' ') B)" || no "determinism (non-deterministic output)"
+if diff -q "$TMP/a" "$TMP/b" >/dev/null; then ok "determinism (byte-identical, $(wc -c <"$TMP/a" | tr -d ' ') B)"; else no "determinism (non-deterministic output)"; fi
 
 # 2) the spurious-prefix call (`b.go()` in Xenon::call) must NOT be a lone confident pick of the WRONG class.
 #    --callees lists resolved out-edges with file:line. Xtra::go = loc.cpp:28, Bravo::go = loc.cpp:29.
@@ -61,13 +61,13 @@ fi
 # 3) ambiguous= header count is > 0 — the resolver is HONEST about the unresolved same-name call, not falsely
 #    certain (ambiguous=0 was the bug's false-confidence signature). This count RISING is the fix working.
 AMB="$( "$BIN" "$CORPUS" --no-cache 2>/dev/null | grep -o 'ambiguous=[0-9]*' | grep -o '[0-9]*' )"
-[ "${AMB:-0}" -gt 0 ] && ok "ambiguous=$AMB on the fixture (>0 — honest, was falsely 0 with the byte-prefix bug)" || no "ambiguous=${AMB:-?} on the fixture (expected >0 — the resolver is falsely confident)"
+if [ "${AMB:-0}" -gt 0 ]; then ok "ambiguous=$AMB on the fixture (>0 — honest, was falsely 0 with the byte-prefix bug)"; else no "ambiguous=${AMB:-?} on the fixture (expected >0 — the resolver is falsely confident)"; fi
 
 # 4) no symbol loss + well-formed XML (the corrected tie-break must not corrupt the map or drop symbols).
 MAP="$( "$BIN" "$CORPUS" --no-cache 2>/dev/null )"
-printf '%s' "$MAP" | grep -q 'n="call"' && ok "call symbol still present (no symbol loss)" || no "call symbol vanished"
-printf '%s' "$MAP" | grep -q 'n="go"'   && ok "go symbols still present (no symbol loss)"   || no "go symbols vanished"
-command -v xmllint >/dev/null 2>&1 && { printf '%s' "$MAP" | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"; } || ok "xml well-formed (xmllint absent — skipped)"
+if printf '%s' "$MAP" | grep -q 'n="call"'; then ok "call symbol still present (no symbol loss)"; else no "call symbol vanished"; fi
+if printf '%s' "$MAP" | grep -q 'n="go"'; then ok "go symbols still present (no symbol loss)"; else no "go symbols vanished"; fi
+command -v xmllint >/dev/null 2>&1 && { if printf '%s' "$MAP" | xmllint --noout - 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi; } || ok "xml well-formed (xmllint absent — skipped)"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"

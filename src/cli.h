@@ -20,8 +20,8 @@
 namespace rw
 {
 
-enum class RankBy { PageRank, Authority, Hub, Rrf, Churn, ChurnDecay };   // --rank-by=pagerank|authority|hub|rrf|churn|churn-decay
-enum class ColorBy { Lang, Community, Cx, Churn, Tested };    // --color-by=lang|community|cx|churn|tested (with --html)
+enum class RankBy : std::uint8_t { PageRank, Authority, Hub, Rrf, Churn, ChurnDecay };   // --rank-by=pagerank|authority|hub|rrf|churn|churn-decay
+enum class ColorBy : std::uint8_t { Lang, Community, Cx, Churn, Tested };    // --color-by=lang|community|cx|churn|tested (with --html)
 
 struct Config
 {
@@ -601,7 +601,7 @@ inline constexpr long kPageValueMax = 1000000000;
 // `got` is a view because the --path arm's value is a slice of argv, not a NUL-terminated tail.
 inline void refuseFlagValue( const char* flag, const char* wanted, std::string_view got, const char* example ) noexcept
 {
-    std::fprintf( stderr, "ripwire: %s needs %s — got '%.*s', e.g. %s\n", flag, wanted, int( got.size() ), got.data(), example );
+    rw::emitTo( stderr, "ripwire: {} needs {} — got '{}', e.g. {}\n", flag, wanted, std::string_view( got.data(), got.size() ), example );
 }
 
 // Parse ONE paging value and, on refusal, print the reason itself. Returns false ⇔ the caller must set
@@ -620,7 +620,7 @@ inline bool refusePageValue( const char* flag, const char* s, bool isZeroAllowed
     // the two paging arms stay one line each, and printed through the shared refusal above so a change to
     // the sentence reaches every value-taking flag at once.
     char example[64] = {};
-    std::snprintf( example, sizeof( example ), "%s=100", flag );
+    rw::formatTo( example, sizeof( example ), "{}=100", flag );
 
     if( !isDigit || end == s || *end != '\0' || v < least )
     {
@@ -629,7 +629,7 @@ inline bool refusePageValue( const char* flag, const char* s, bool isZeroAllowed
     }
     if( v > kPageValueMax )
     {
-        std::fprintf( stderr, "ripwire: %s=%s is out of range (the maximum is %ld) — e.g. %s=100\n", flag, s, kPageValueMax, flag );
+        rw::emitTo( stderr, "ripwire: {}={} is out of range (the maximum is {}) — e.g. {}=100\n", flag, s, kPageValueMax, flag );
         return false;
     }
     out = int( v );
@@ -657,7 +657,7 @@ inline bool refusePageValue( const char* flag, const char* s, bool isZeroAllowed
 inline void refuseEmptyValue( std::string_view flag, const char* needs, const char* example ) noexcept
 {
     const std::string_view bare = flag.substr( 0, flag.size() - 1 );
-    std::fprintf( stderr, "ripwire: %.*s= is empty — it needs %s, e.g. %s\n", int( bare.size() ), bare.data(), needs, example );
+    rw::emitTo( stderr, "ripwire: {}= is empty — it needs {}, e.g. {}\n", std::string_view( bare.data(), bare.size() ), needs, example );
 }
 
 // parse a NUL-terminated "...=<u64>" value tail with the same reject rules as parsePosInt: empty /
@@ -765,7 +765,7 @@ inline constexpr char kHelpHead[] =
         "ripwire — the \"ripgrep of AI context\": parse a codebase, rank symbols by Personalized PageRank,\n"
         "stream a deterministic minified XML map to stdout. Zero runtime deps. Languages: C++, C, ObjC/ObjC++,\n"
         "Metal (MSL, .metal — C++ grammar), CUDA (.cu/.cuh — tree-sitter-cuda, <<<>>> launches are call edges),\n"
-        "Python, TypeScript, JavaScript, Java, Ruby, PHP (.php/.phtml), Lua, Elixir (.ex/.exs), Bash, Go, Rust, Swift, C#;\n"
+        "Python, TypeScript, JavaScript, Java, Ruby, PHP (.php/.phtml), Lua, Elixir (.ex/.exs), Dart (.dart), Kotlin (.kt), Bash, Go, Rust, Swift, C#;\n"
         "JSON, TOML, YAML (config keys); Markdown (.md/.markdown — headings are section symbols with spans).\n\n"
         "usage: ripwire <dir> [flags]            # default = the ranked map of <dir> on stdout\n"
         "       ripwire <dir1> <dir2> ... [flags] # multi-root workspace: ONE merged graph over 2..16 checkouts\n"
@@ -784,7 +784,7 @@ inline constexpr char kHelpHead[] =
         "                               plain --query, and --format=candidates (incl. with --for). --for's OWN\n"
         "                               signature/lego/compose bundle self-limits via --pack-top-n instead — --top-k is\n"
         "                               INERT there (documented, not fixed — a real fix is a behavior change).\n"
-        "                               --pack-task/--from-trace/--run-trace/--situ self-budget via --token-budget, not --top-k.\n"
+        "                               --pack-task/--from-trace/--run-trace self-budget via --token-budget, not --top-k.\n"
         "                               --top-k=0 emits NO ranked map at all — ONLY the payload you asked for\n"
         "                               (--expand/--outline/--pack-signatures/--pack-top-n). Use it when you want the\n"
         "                               body and not the ~200-symbol map that otherwise rides along with it; the <ctx>\n"
@@ -1154,13 +1154,15 @@ inline constexpr char kHelpHead[] =
         "                               For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance).\n"
         "                               --regex is LINE-ORIENTED, like grep/rg: each line is its own search range, so ^ and $\n"
         "                               are LINE anchors and no match may span a newline (a trailing CR sits outside the range).\n"
-        "      --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit\n"
-        "      --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex)\n"
-        "      --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)\n"
-        "      --grep-scope=line|file   modifies --and=/--not=: line (default) requires the SAME matched line; file requires\n"
+        "    --grep-context=N | --grep-before=N / --grep-after=N     ripgrep-style N lines of source around each hit\n"
+        "    --and=STR (repeatable)     modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex)\n"
+        "    --not=STR (repeatable)     modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)\n"
+        "    --grep-scope=line|file     modifies --and=/--not=: must the other term hit the SAME line (default) or anywhere in the file\n"
+        "                               modifies --and=/--not=: line (default) requires the SAME matched line; file requires\n"
         "                               anywhere in the same file. Second occurrence of --grep=/--regex= itself REFUSES\n"
         "                               (naming --and= as the AND spelling) rather than silently overwriting the pattern.\n"
-        "      --grep-in=code|any       SPAN TIERS: which tree-sitter span a hit must sit in to print. code (default) serves the\n"
+        "    --grep-in=code|any         SPAN TIERS: which tree-sitter span a hit must sit in — code (default) or any (exhaustive)\n"
+        "                               SPAN TIERS: which tree-sitter span a hit must sit in to print. code (default) serves the\n"
         "                               CODE tier when any hit is code, and otherwise comment AND string TOGETHER (tier=\n"
         "                               \"comment+string\"), disclosing what it held back (suppressed_comment=/suppressed_string=);\n"
         "                               a pattern living only in prose is still answered, never silently emptied. any turns\n"
@@ -1192,8 +1194,8 @@ inline constexpr char kHelpHead[] =
         "                               see --max-tokens: past its ceiling the root says over_ceiling=\"1\" rather than cut\n"
         "                               the rows that answered) and --adaptive. 0 = off.\n"
         "    --pack-signatures          print declaration skeletons with the bodies elided — far cheaper than full bodies\n"
-        "                               body-elided decl skeletons — ~72-90% fewer element bytes than the same symbols'\n"
-        "                               full --expand bodies (roughly 80% at the top-50 sigs payload cap — the sigs\n"
+        "                               body-elided decl skeletons — ~73-91% fewer element bytes than the same symbols'\n"
+        "                               full --expand bodies (about 82% at the top-50 sigs payload cap — the sigs\n"
         "                               payload is top-50 whatever --top-k is set to, and --top-k's own default is 200),\n"
         "                               measured at top-10/50/100 on this repo with the corpus-root prefix subtracted\n"
         "                               from both sides: that prefix repeats inside every element, is charged in both\n"
@@ -1303,6 +1305,8 @@ inline constexpr char kHelpHead[] =
         "                               complexity x recent git churn (maintenance pain); each row's top= is the worst function's\n"
         "                               BARE name, top_ccx= its cognitive complexity, top_l= its source line (build an --expand\n"
         "                               selector from p=/top_l=/top=, not from top= alone — it no longer carries a :line suffix)\n"
+        "                               A function whose extent failed a containment check is LEFT OUT of ccx=/score=/top= and\n"
+        "                               counted: extent_suspect_syms= on its row, unranked_extent_suspect= for a file with none left\n"
         "    --clones                   token-normalized duplicate bodies\n"
         "    --readability              rank functions least-readable first, by volume, token entropy and length\n"
         "                               per-function readability lens, LEAST readable first: vol= Halstead volume V (N*log2(eta)),\n"
@@ -1596,14 +1600,16 @@ inline constexpr char kHelpHead[] =
         "                               accept the current findings into .ripwire_quality_acks (per-finding ratchet): re-runs suppress them honestly (acked=\"N\") until one WORSENS past its acked size.\n"
         "                               =REASON implies the --quality-delta report it acks; the reason-less spelling needs --quality-delta\n"
         "                               beside it (refused alone). An ack with 0 findings to accept writes nothing and says so.\n"
-        "      --ack-only=SUBSTR[,SUBSTR] (with --quality-ack) ack only SOME findings — those whose KIND, canonical id, or\n"
+        "    --ack-only=SUBSTR[,SUBSTR]   (with --quality-ack) ack only SOME findings — those whose KIND, canonical id or FACET matches\n"
+        "                               (with --quality-ack) ack only SOME findings — those whose KIND, canonical id, or\n"
         "                               FACET contains one of these; the pseudo-token 'gating' selects exactly what would\n"
         "                               exit 2. Bare --quality-ack accepts the WHOLE report, so accepting one deliberate\n"
         "                               change silently accepts the rest — how a ratchet turns into a rubber stamp. Prefer\n"
         "                               the facet: --ack-only=contract-change acks the deliberate arity changes WITHOUT the\n"
         "                               never-gating api-surface new-symbol rows. Matching nothing refuses (exit 1) rather\n"
         "                               than falling back to acking everything. Whatever you leave unacked stays visible.\n"
-        "      --scope=GLOB[,GLOB...]   (with --quality-delta/--quality-ack) OWNERSHIP partition for a working tree that has\n"
+        "    --scope=GLOB[,GLOB...]     (with --quality-delta/--quality-ack) file findings by OWNERSHIP when one tree has several writers\n"
+        "                               (with --quality-delta/--quality-ack) OWNERSHIP partition for a working tree that has\n"
         "                               MORE THAN ONE WRITER in it — N agent sessions sharing one checkout. The delta compares\n"
         "                               the working tree against HEAD, so every concurrent writer's uncommitted rows land in\n"
         "                               YOUR report; this files each finding by its p= path. Rows in scope gate as usual; rows\n"
@@ -1673,8 +1679,9 @@ inline constexpr char kHelpHead[] =
         "                               discloses resolved_from_seed, a faulted seed refuses with a specific diagnosis, and\n"
         "                               --edit-target-file may not accompany a seed), or a freshness-pinned sym# handle\n"
         "                               emitted by --grep --handles.\n"
-        "      --edit-payload=FILE|-    required exact byte payload ('-' reads stdin); empty payloads refuse, never imply deletion\n"
-        "      --edit-target-file=PATH  optional file-path substring disambiguating a same-named definition. RELATIVE (matched against\n"
+        "    --edit-payload=FILE|-      required exact byte payload ('-' reads stdin); empty payloads refuse, never imply deletion\n"
+        "    --edit-target-file=PATH    optional file-path substring disambiguating a same-named definition (relative or absolute)\n"
+        "                               optional file-path substring disambiguating a same-named definition. RELATIVE (matched against\n"
         "                               the indexed spelling) or ABSOLUTE (matched against the file's resolved on-disk path), so the\n"
         "                               path a receipt or a trace hands you works verbatim. These three CLI verbs\n"
         "                               reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation\n"
@@ -1696,14 +1703,16 @@ inline constexpr char kHelpHead[] =
         "                               in EVIDENCE order (a changed or partner test outranks a deeper graph hop);\n"
         "                               else --test-gate=FILE; under --no-post-check: --edit-check=FILE:SYM). Edit, see what\n"
         "                               landed, verify and find the tests to run is ONE call.\n"
-        "      --no-post-check          skip that folded verification (the index refresh it needs is the one the next verb call\n"
+        "    --no-post-check            skip that folded verification — pass it when you are about to edit again immediately\n"
+        "                               skip that folded verification (the index refresh it needs is the one the next verb call\n"
         "                               would pay for anyway; pass this when you are about to edit again immediately). The MCP\n"
         "                               spelling is post_check:false. Single-root only.\n"
         "    --edit-plan=FILE           apply several edits as one transaction, described in a versioned JSON file\n"
         "                               versioned JSON multi-edit transaction: {version:1, edits:[{op,target,file?,payload}]};\n"
         "                               op is one of replace_symbol_body, insert_before_symbol, insert_after_symbol\n"
         "                               each target takes the same forms as TARGET above (a name, an @FILE:LINE seed, a handle)\n"
-        "      --dry-run | --apply      the plan's explicit mode: --dry-run preflights and prints the receipt without writing,\n"
+        "    --dry-run | --apply        the plan's mode: --dry-run preflights, --apply commits; exactly one of the two is required\n"
+        "                               the plan's explicit mode: --dry-run preflights and prints the receipt without writing,\n"
         "                               --apply commits; exactly one of the two is required. Payload paths are relative to the\n"
         "                               plan file and CONFINED to its directory: a path resolving outside it (an absolute path,\n"
         "                               a '..' escape, or a symlink pointing out) refuses, naming the path it resolved to, and\n"
@@ -2186,7 +2195,8 @@ inline constexpr char kHelpTail[] =
         "                               eventually but never past its own fair share. Each section truncates rank-adaptively and\n"
         "                               the header reports EVERY truncation (no silent caps). A tiny budget degrades to\n"
         "                               ranking-only WITH the truncation note. Refuses loudly without a task string.\n"
-        "      --partition=N            (with --pack-task, N=2..16) FAN-OUT form: instead of one bundle, emit ONE shared common core\n"
+        "    --partition=N              (with --pack-task, N=2..16) FAN OUT: one shared core plus N per-agent slices, not one bundle\n"
+        "                               (with --pack-task, N=2..16) FAN-OUT form: instead of one bundle, emit ONE shared common core\n"
         "                               plus N per-agent slices, so N parallel agents stop re-deriving the same orientation. The\n"
         "                               task's ranked surface is carved along the call graph's own Louvain communities — a partition\n"
         "                               is a union of WHOLE modules (largest-first packing) so it reads coherently; when there are\n"
@@ -2283,7 +2293,11 @@ inline constexpr char kHelpTail[] =
         "                               population, plus unsupported_ext=, excluded_dirs= (SUBTREES --exclude pruned: contents\n"
         "                               UNKNOWN, not zero), pruned_dirs= (SUBTREES this build always prunes by policy — the\n"
         "                               committed noise/vendor/build denylist and any dir holding a CMakeCache.txt — contents\n"
-        "                               likewise UNKNOWN), degraded_parse=, minified_suspect=, unmeasured= (indexed files this run\n"
+        "                               likewise UNKNOWN), degraded_parse=, minified_suspect=, extent_suspect_files= (files holding\n"
+        "                               a definition whose extent/scope failed a containment check; the <h> row says\n"
+        "                               why=extent-suspect with extent_suspect_syms=), macro_blanked_files= (files whose\n"
+        "                               symbols come from a re-parse with semicolon-less member macro invocations blanked;\n"
+        "                               the <h> row says why=macro-blanked with macro_blanked=), unmeasured= (indexed files this run\n"
         "                               never parsed) and the effective ceilings, so a zero-row report still states its\n"
         "                               bounds. rows_capped=\"1\" ⇒ rows are a sample of an exact count. Rows sort by path;\n"
         "                               composes with --max-file-size/--exclude and multi-root (rows carry the\n"
@@ -2296,7 +2310,7 @@ inline constexpr char kHelpTail[] =
         "                               carries the human tally line\n"
         "    --scan-skill=FILE          scan a single skill file before installing (any file, not just .md)\n"
         "    --scan-skills[=DIR]        scan a skills directory before installing — every text file, .md and .sh alike\n"
-        "                               scan DIR (or .agents/skills/ + ~/.claude/skills/ + ${CODEX_HOME:-~/.codex}/skills/).\n"
+        "                               scan DIR (or .agents/skills/ + ${CLAUDE_CONFIG_DIR:-~/.claude}/skills/ + ${CODEX_HOME:-~/.codex}/skills/).\n"
         "                               EVERY text file, .md and .sh alike — a skill dir's executables are the\n"
         "                               files most worth scanning. skipped= counts what it could not scan\n"
         "                               (binary content, or unreadable); denylisted subtrees (.git, node_modules,\n"
@@ -2363,11 +2377,17 @@ inline constexpr char kHelpTail[] =
         "                               --whereis --grep/--regex --match --pattern --impact --uses --exercises --seams\n"
         "                               --zoom --external-surface --dead-code --mentions --graph-query --stray-content\n"
         "                               --test-gate --readability --ensemble --quality-panel --context-ratio\n"
-        "                               --nonlocal-state --comment-coherence --naming-consistency --safe-delete --pr-context.\n"
+        "                               --nonlocal-state --comment-coherence --naming-consistency --safe-delete --pr-context\n"
+        "                               --edit-check --flags --situ.\n"
         "                               Emit at most N rows, skipping the first M; N overrides the verb's own display cap\n"
         "                               (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40\n"
         "                               impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio\n"
-        "                               symbol rows, 40 nonlocal-state rows, 200 graph-query rows / --top-k).\n"
+        "                               symbol rows, 40 nonlocal-state rows, 200 graph-query rows / --top-k, 40\n"
+        "                               unflagged --edit-check caller rows, 8 --flags read sites per gate, 25 --flip\n"
+        "                               context rows per listing, 8 --situ blast-radius files and 8 co-change partners).\n"
+        "                               A verb NEVER pages the rows that ARE its answer: --edit-check's flagged callers,\n"
+        "                               --flip's and --situ's tests-to-run rows and --flags' gate rows ride every page in\n"
+        "                               full, and every verdict/count attribute is computed over the full set first.\n"
         "                               With --offset alone (no --limit) the verb's own default page size applies and\n"
         "                               the root discloses limit=\"0\" — on OUTPUT that 0 means 'no explicit --limit',\n"
         "                               never a zero-row page (the flag itself refuses --limit=0). A BARE run whose\n"
@@ -2384,7 +2404,13 @@ inline constexpr char kHelpTail[] =
         "                               shown_modules=/modules_capped= + shown_bridges=/bridges_capped=, --ensemble and\n"
         "                               --context-ratio shown_syms=/syms_capped= + shown_files=/files_capped=; the window\n"
         "                               takes the PRIMARY listing (--test-gate's <u> rows; its <t> rows repeat on every\n"
-        "                               page, complete).\n"
+        "                               page, complete). --edit-check is the same shape for a different reason: its\n"
+        "                               <c> rows split into the ANSWER (callers flagged incompatible=\"1\", with their\n"
+        "                               complete sites_l=) and the CONTEXT (unflagged callers). Only the context pages\n"
+        "                               — shown_unflagged=/unflagged_capped=, with total= the unflagged count — while\n"
+        "                               the flagged rows and the <def> overload census ride every page in full and\n"
+        "                               status=/defs=/callers=/incompatible= are computed over the FULL caller set\n"
+        "                               before any window, so a page can never make the verdict say less than it knows.\n"
         "                               Any verb NOT in that list REFUSES both flags (exit 1) rather than accepting and\n"
         "                               ignoring them: budget/top-k verbs (--for/--recall/--pack-task/--from-trace/\n"
         "                               --expand/--outline/--pack-signatures/--format=candidates) are shaped by\n"
@@ -2428,8 +2454,9 @@ inline constexpr char kHelpTail[] =
         "                               cached one (default: reuse forever; stderr notes the cached clone's age)\n"
         "    --scip=index.scip          consume a SCIP index as a precision overlay: exact call edges replace name guesses\n"
         "                               consume a SCIP index as a PRECISION overlay: precise call edges replace\n"
-        "                               name-based guesses (tagged prov=\"scip\"), ambiguous= drops. Missing/corrupt\n"
-        "                               index → degrades to name-based (never fails). Zero deps (hand-rolled reader).\n"
+        "                               name-based guesses (tagged prov=\"scip\"), ambiguous= drops. A path that is missing,\n"
+        "                               empty or not a regular file refuses (exit 1). A corrupt index warns on stderr and\n"
+        "                               degrades to name-based. Zero deps (hand-rolled reader).\n"
         "    --pin-census=FILE          eval only: record which mechanism resolved each call site\n"
         "                               eval-only: write a per-call-site census of WHICH mechanism resolved each call\n"
         "                               (unique/qualified/receiver-rule/cone/arity/locality/split/scip/binding) and the\n"
@@ -2503,7 +2530,19 @@ enum class HelpTier : std::uint8_t
 };
 
 // A line's role in the catalog, decided by indentation alone — the same contract
-// docs/docs_commands_build.py's parse_help() has always parsed this text with.
+// docs/docs_commands_build.py's parse_help() parses this text with.
+//
+// FOUR SPACES IS THE ONLY INDENT THAT MEANS "THIS ROW EXISTS". Anything deeper is prose, however much
+// it looks like a row, and tier 1 drops it. v0.6.0 shipped the counter-example: twelve flag rows were
+// written at SIX spaces to read as sub-flags of the entry above them, this function classified all
+// twelve as Cont, and fifteen real flags — --and --not --grep-in --grep-scope --grep-context
+// --grep-before --grep-after --ack-only --scope --edit-payload --edit-target-file --no-post-check
+// --dry-run --apply --partition — were absent from `--help` while working perfectly. parse_help then
+// accepted 4..6, so docs/COMMANDS.md listed every one of them and the disagreement had no symptom
+// there; the only visible edge was `--help=--and` REFUSING with "`ripwire --help` lists every row",
+// which was a false claim about our own output.
+// Nest a sub-flag by what its summary SAYS, never by moving it right; test/helpbudgetcheck.sh arm (K)
+// fails the moment an accepted flag stops being named on the first screen.
 enum class HelpLine : std::uint8_t
 {
     Section,   // two spaces then text: a family heading
@@ -2653,13 +2692,12 @@ inline void printUsage( std::FILE* out ) noexcept { printUsageTier( out, HelpTie
     if( want == "all" ) { printUsage( stdout ); std::exit( 0 ); }
     if( want.empty() )
     {
-        std::fprintf( stderr, "ripwire: --help= needs a flag, a section name, or 'all' (e.g. --help=--for, --help=quality, --help=all)\n" );
+        rw::emitRaw( stderr, "ripwire: --help= needs a flag, a section name, or 'all' (e.g. --help=--for, --help=quality, --help=all)\n" );
         std::exit( 2 );
     }
     if( printUsageTier( stdout, HelpTier::Pick, want ) ) { std::exit( 0 ); }
     // An honest miss names the tier that WOULD have the answer rather than printing it unasked.
-    std::fprintf( stderr, "ripwire: --help=%.*s matched no flag or section — `ripwire --help` lists every row, `--help=all` is the whole catalog\n",
-                  int( want.size() ), want.data() );
+    rw::emitTo( stderr, "ripwire: --help={} matched no flag or section — `ripwire --help` lists every row, `--help=all` is the whole catalog\n", std::string_view( want.data(), want.size() ) );
     std::exit( 2 );
 }
 
@@ -2669,12 +2707,7 @@ inline void printUsage( std::FILE* out ) noexcept { printUsageTier( out, HelpTie
 // shape for a mistake; it just never applied it here.
 inline void usage() noexcept
 {
-    std::fprintf( stderr,
-        "ripwire: no <dir> given — the repository to map is the one required argument.\n"
-        "  ripwire .                     the ranked map of the current directory\n"
-        "  ripwire . --for=\"TASK\"        the task lens: what to read first\n"
-        "  ripwire --help                every flag, one line each\n"
-        "  ripwire --help=--for          one flag in full  (also --help=<section>, --help=all)\n" );
+    rw::emitRaw( stderr, "ripwire: no <dir> given — the repository to map is the one required argument.\n  ripwire .                     the ranked map of the current directory\n  ripwire . --for=\"TASK\"        the task lens: what to read first\n  ripwire --help                every flag, one line each\n  ripwire --help=--for          one flag in full  (also --help=<section>, --help=all)\n" );
 }
 
 // ── the flag tables — the 91 arms that are exactly "set one member" ─────────────────────────────────
@@ -3209,7 +3242,7 @@ inline ViewFlagMatch applyViewFlag( std::string_view arg, Config& c )
         // assignment so the first value is never clobbered on the way to refusing.
         if( vf.dupGuardFlag != nullptr && c.*vf.dupGuardFlag )
         {
-            std::fprintf( stderr, "ripwire: %s\n", vf.dupMessage );
+            rw::emitTo( stderr, "ripwire: {}\n", vf.dupMessage );
             return ViewFlagMatch::Refused;
         }
 
@@ -3259,7 +3292,7 @@ inline IntFlagMatch applyIntFlag( std::string_view arg, Config& c )
             // which is the difference the caller actually needs to see
             const std::string_view bare = f.prefix.substr( 0, f.prefix.size() - 1 );
             char                   flag[ 32 ] = {};
-            std::snprintf( flag, sizeof( flag ), "%.*s", int( bare.size() ), bare.data() );
+            rw::formatTo( flag, sizeof( flag ), "{}", std::string_view( bare.data(), bare.size() ) );
             refuseFlagValue( flag, f.wanted, value, f.example );
             return IntFlagMatch::Refused;
         }
@@ -3275,7 +3308,7 @@ inline IntFlagMatch applyIntFlag( std::string_view arg, Config& c )
         }
         if( f.deprecation != nullptr )
         {
-            std::fprintf( stderr, "%s", f.deprecation );
+            rw::emitTo( stderr, "{}", f.deprecation );
         }
         return IntFlagMatch::Assigned;
     }
@@ -3305,12 +3338,12 @@ inline void validatePlanLanes( Config& c ) noexcept
 {
     if( !c.laneTask.empty() && !c.planLanesFlag )
     {
-        std::fprintf( stderr, "ripwire: --task=GOAL is the input to --plan-lanes=N — pass both (e.g. ripwire <dir> --plan-lanes=3 --task=\"the goal\")\n" );
+        rw::emitRaw( stderr, "ripwire: --task=GOAL is the input to --plan-lanes=N — pass both (e.g. ripwire <dir> --plan-lanes=3 --task=\"the goal\")\n" );
         c.ok = false;
     }
     if( !c.laneBrief.empty() && !c.planLanesFlag )
     {
-        std::fprintf( stderr, "ripwire: --brief=FILE is the input to --plan-lanes — pass both (e.g. ripwire <dir> --plan-lanes --brief=tasks.md)\n" );
+        rw::emitRaw( stderr, "ripwire: --brief=FILE is the input to --plan-lanes — pass both (e.g. ripwire <dir> --plan-lanes --brief=tasks.md)\n" );
         c.ok = false;
     }
     if( !c.planLanesFlag )
@@ -3320,25 +3353,22 @@ inline void validatePlanLanes( Config& c ) noexcept
 
     if( c.laneTask.empty() && c.laneBrief.empty() )
     {
-        std::fprintf( stderr, "ripwire: --plan-lanes needs a task to split — pass --plan-lanes=N --task=\"the goal\" (auto-carve), "
-                              "or --plan-lanes --brief=FILE with one non-blank line per lane\n" );
+        rw::emitRaw( stderr, "ripwire: --plan-lanes needs a task to split — pass --plan-lanes=N --task=\"the goal\" (auto-carve), or --plan-lanes --brief=FILE with one non-blank line per lane\n" );
         c.ok = false;
     }
     if( !c.laneTask.empty() && !c.laneBrief.empty() )
     {
-        std::fprintf( stderr, "ripwire: --plan-lanes takes --task=GOAL or --brief=FILE, never both — the lanes would come from two "
-                              "different carves and only one of them is the one you meant\n" );
+        rw::emitRaw( stderr, "ripwire: --plan-lanes takes --task=GOAL or --brief=FILE, never both — the lanes would come from two different carves and only one of them is the one you meant\n" );
         c.ok = false;
     }
     if( !c.laneTask.empty() && ( c.planLaneCount < 2 || c.planLaneCount > 16 ) )
     {
-        std::fprintf( stderr, "ripwire: --plan-lanes=%d is out of range — N must be 2..16 (1 is not a fan-out)\n", c.planLaneCount );
+        rw::emitTo( stderr, "ripwire: --plan-lanes={} is out of range — N must be 2..16 (1 is not a fan-out)\n", c.planLaneCount );
         c.ok = false;
     }
     if( !c.laneBrief.empty() && c.planLaneCount > 0 )
     {
-        std::fprintf( stderr, "ripwire: --plan-lanes=%d with --brief=FILE is a contradiction — in brief mode the lane count IS the "
-                              "file's non-blank line count; drop the =N\n", c.planLaneCount );
+        rw::emitTo( stderr, "ripwire: --plan-lanes={} with --brief=FILE is a contradiction — in brief mode the lane count IS the file's non-blank line count; drop the =N\n", c.planLaneCount );
         c.ok = false;
     }
 }
@@ -3374,12 +3404,18 @@ inline void validatePlanLanes( Config& c ) noexcept
 // 25-row literal cap (situ.h kMaxUntestedRows) with no shown=/capped= and a refusal on --limit that FALSELY
 // claimed "no page to walk" (there were 41 more rows). It now windows through pageview.h like every verb
 // above, so it belongs in the honoring set, not the refusing one.
+// 2026-09-10 (C1 F-07/F-10): --flags (with its --flip mode) and --situ join. Both were listing verbs whose
+// row caps no flag could reach: --flags cut the <read> sites under a gate at 8, --flip cut six listings at
+// 25, and --situ cut its blast-radius and co-change sections at 8 while REFUSING --limit outright. All of
+// those listings run through pageWindow() now, which is what membership in this set means. --situ is the
+// first PROSE member — it has no XML root, so it spells the same shown=/total=/capped= facts in its section
+// headers (situ.h) and test/pagingsweepcheck.sh (L) reads it as prose rather than parsing a root element.
 constexpr const char* kPagingHonoringVerbs =
     "--lint --hotspots --callers --callees --tree --deps --cochange --owners --clones --doc-drift "
     "--communities --community --whereis --grep/--regex --match --pattern --impact --uses --exercises "
     "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate "
     "--readability --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence "
-    "--naming-consistency --safe-delete --pr-context";
+    "--naming-consistency --safe-delete --pr-context --edit-check --flags --situ";
 
 inline bool honorsPaging( const Config& c ) noexcept
 {
@@ -3390,7 +3426,10 @@ inline bool honorsPaging( const Config& c ) noexcept
         || c.seams || ( c.zoom && !c.mermaid ) || c.externalSurface || c.deadCode || !c.mentionsSym.empty()
         || !c.graphQuery.empty() || ( c.strayContent && !c.landingPlan && !c.abiFlag ) || c.testGate
         || c.readability || c.ensemble || c.qualityPanel || c.contextRatio || c.nonlocalState || c.commentCoherence
-        || c.namingConsistency || !c.safeDeleteSym.empty() || c.prContext;   // P4 (L7): the changed-file window
+        || c.namingConsistency || !c.safeDeleteSym.empty() || c.prContext   // P4 (L7): the changed-file window
+        || !c.editCheckSym.empty()    // 2026-09-10: --edit-check windows its UNFLAGGED caller rows (editcheck.h)
+        || c.darkFlags                // 2026-09-10 (C1 F-07): --flags' per-gate <read> sites, and --flip's six listings
+        || c.situ || !c.situFiles.empty();   // 2026-09-10 (C1 F-10): --situ sections [1] and [3] (section [2] is the answer)
 }
 
 // --limit/--offset on a verb that windows NOTHING. Same accept-then-silently-ignore class as every guard in
@@ -3455,13 +3494,9 @@ inline void validatePagingHonored( Config& c ) noexcept
     // read as self-contradicting, and the remedy ("drop the mode flag") is not derivable from it.
     if( const char* mode = pagingDisablingMode( c ) )
     {
-        std::fprintf( stderr, "ripwire: %s turns this run into a fixed report, so --limit/--offset have nothing to "
-                              "window — the base verb pages, this mode does not. Drop %s to page it.\n", mode, mode );
+        rw::emitTo( stderr, "ripwire: {} turns this run into a fixed report, so --limit/--offset have nothing to window — the base verb pages, this mode does not. Drop {} to page it.\n", mode, mode );
     }
-    std::fprintf( stderr, "ripwire: --limit/--offset are honored only by: %s. The default map is bounded by --top-k=N "
-                          "(or --max-tokens=N) and --recall by --top-k=N, not --limit; the rest emit a fixed report with "
-                          "no page to walk\n",
-                  kPagingHonoringVerbs );
+    rw::emitTo( stderr, "ripwire: --limit/--offset are honored only by: {}. The default map is bounded by --top-k=N (or --max-tokens=N) and --recall by --top-k=N, not --limit; the rest emit a fixed report with no page to walk\n", kPagingHonoringVerbs );
     c.ok = false;
 }
 
@@ -3487,9 +3522,7 @@ inline void validateColumnarVerb( Config& c ) noexcept
         return;
     }
 
-    std::fprintf( stderr, "ripwire: --format=columnar re-serializes the FLAT symbol-row verbs only — supported: "
-                          "--callers/--callees/--uses/--impact (e.g. ripwire <dir> --callers=SYM --format=columnar). "
-                          "Every other verb emits a report with no parallel-array row list to re-encode\n" );
+    rw::emitRaw( stderr, "ripwire: --format=columnar re-serializes the FLAT symbol-row verbs only — supported: --callers/--callees/--uses/--impact (e.g. ripwire <dir> --callers=SYM --format=columnar). Every other verb emits a report with no parallel-array row list to re-encode\n" );
     c.ok = false;
 }
 
@@ -3573,9 +3606,7 @@ inline constexpr PagingFamilyFlagGuard kTokenBudgetGuard
 
 inline void refusePagingFamilyFlag( Config& c, const PagingFamilyFlagGuard& g ) noexcept
 {
-    std::fprintf( stderr, "ripwire: %s%s%s. The rest of that set emit a fixed report with %s; narrow it with "
-                          "--limit=N instead (e.g. %s)\n",
-                  g.honoredPre, kPagingHonoringVerbs, g.honoredPost, g.lacks, g.example );
+    rw::emitTo( stderr, "ripwire: {}{}{}. The rest of that set emit a fixed report with {}; narrow it with --limit=N instead (e.g. {})\n", g.honoredPre, kPagingHonoringVerbs, g.honoredPost, g.lacks, g.example );
     c.ok = false;
 }
 
@@ -3650,8 +3681,15 @@ struct ShapingVerb
 //                         --pr-context, --from-trace, --for --detail=N                    [6 shapes]
 //   HONOURS --top-k       default map (+ the same riders), --query, --format=candidates, --recall,
 //                         --graph-query, and the MCP/batch/--listen pass-throughs
-//   IGNORES both          --pack-task, --exemplar, --around, --path, --lego, --report, --edit-check,
-//                         --situ, --scan-skills, --merge-scout, and --for for --top-k (R12's residual)
+//   IGNORES both          --pack-task, --exemplar, --around, --path, --lego, --report,
+//                         --scan-skills, --merge-scout, and --for for --top-k (R12's residual)
+//                         (--situ and --flags LEFT this class on 2026-09-10 (C1 F-07/F-10), the way
+//                         --edit-check did: their row listings became windowable, so they joined
+//                         honorsPaging and refuse all three like every other member.)
+//                         (--edit-check LEFT this class the same day: it joined honorsPaging when its
+//                         unflagged caller rows became windowable, so it refuses all three like every
+//                         other paging member instead of accepting them and ignoring them. A verb cannot
+//                         hold a row in BOTH tables — the header sentence above is the invariant.)
 //   IGNORES --top-k only  --connect, --pr-context, --from-trace — the three the verifier first read as
 //                         ignoring --max-tokens too. They were INERT on its probes: --connect answered a
 //                         705 B subgraph, so a 200-token ceiling had nothing to trim. On a shape where the
@@ -3675,10 +3713,8 @@ inline constexpr ShapingVerb kShapingVerbs[] = {
     { "--path",         nullptr, &Config::pathSpec     },
     { "--lego",         nullptr, &Config::legoType     },
     { "--report",       &Config::report,       nullptr },
-    { "--edit-check",   nullptr, &Config::editCheckSym },
     { "--slice",        nullptr, &Config::sliceSpec    },
     { "--at",           nullptr, &Config::atSpec       },
-    { "--situ",         &Config::situ,         nullptr },
     { "--handoff",      &Config::handoff,      nullptr, false, false, true },   // writeHandoffPacket takes the budget
     { "--scan-skills",  &Config::scanSkills,   nullptr },
     { "--merge-scout",  &Config::mergeScoutFlag, nullptr },
@@ -3695,7 +3731,6 @@ inline constexpr ShapingVerb kShapingVerbs[] = {
     // which rides the default map's serialize path and honours --top-k/--max-tokens like the map does.
     { "--html",              &Config::html,               nullptr, true, true },
     { "--verify",            nullptr, &Config::verifyClaim },
-    { "--flags",             &Config::darkFlags,          nullptr },
     { "--layout",            &Config::layoutFlag,         nullptr },
     { "--field-affinity",    &Config::fieldAffinity,      nullptr },
     { "--naming-calibration",&Config::namingCalibration,  nullptr },
@@ -3775,10 +3810,7 @@ inline void noticeShapingFlagIgnored( const Config& c ) noexcept
     const bool isTopKConsumedBeside = c.candidates || c.topK == 0;
     if( c.topKExplicit && !verb->honorsTopK && !isTopKConsumedBeside )
     {
-        std::fprintf( stderr, "ripwire: --top-k is not read by %.*s — it shapes the default map, --query, "
-                              "--format=candidates, --recall and --graph-query. %.*s emitted its full result "
-                              "(nothing was dropped); narrow it with the verb's own arguments instead\n",
-                      int( verb->name.size() ), verb->name.data(), int( verb->name.size() ), verb->name.data() );
+        rw::emitTo( stderr, "ripwire: --top-k is not read by {} — it shapes the default map, --query, --format=candidates, --recall and --graph-query. {} emitted its full result (nothing was dropped); narrow it with the verb's own arguments instead\n", std::string_view( verb->name.data(), verb->name.size() ), std::string_view( verb->name.data(), verb->name.size() ) );
     }
 
     // the --detail carve-out: `--for --detail=N` DOES bound its bodies with --max-tokens, so a note there
@@ -3786,10 +3818,7 @@ inline void noticeShapingFlagIgnored( const Config& c ) noexcept
     const bool isForDetailBudget = !c.forTask.empty() && c.detail > 0;
     if( c.maxTokens > 0 && !verb->honorsMaxTokens && !isForDetailBudget )
     {
-        std::fprintf( stderr, "ripwire: --max-tokens is not read by %.*s — it shapes the default map, --recall, "
-                              "--connect, --pr-context, --from-trace and --for --detail=N. %.*s emitted its full "
-                              "result (nothing was dropped)\n",
-                      int( verb->name.size() ), verb->name.data(), int( verb->name.size() ), verb->name.data() );
+        rw::emitTo( stderr, "ripwire: --max-tokens is not read by {} — it shapes the default map, --recall, --connect, --pr-context, --from-trace and --for --detail=N. {} emitted its full result (nothing was dropped)\n", std::string_view( verb->name.data(), verb->name.size() ), std::string_view( verb->name.data(), verb->name.size() ) );
     }
 
     // §H4 / V3 M-4: the third budget flag reaches the same rows. --edit-check is the graph-count verb this
@@ -3799,10 +3828,7 @@ inline void noticeShapingFlagIgnored( const Config& c ) noexcept
     // a shape that has exited 0 for the tool's whole life. Same treatment, same reason.
     if( c.tokenBudget > 0 && !verb->honorsTokenBudget )
     {
-        std::fprintf( stderr, "ripwire: --token-budget is not read by %.*s — it gates the default map and bounds "
-                              "--for, --pack-task, --recall, --from-trace and --run-trace. %.*s emitted its full result "
-                              "(nothing was withheld)\n",
-                      int( verb->name.size() ), verb->name.data(), int( verb->name.size() ), verb->name.data() );
+        rw::emitTo( stderr, "ripwire: --token-budget is not read by {} — it gates the default map and bounds --for, --pack-task, --recall, --from-trace and --run-trace. {} emitted its full result (nothing was withheld)\n", std::string_view( verb->name.data(), verb->name.size() ), std::string_view( verb->name.data(), verb->name.size() ) );
     }
 }
 
@@ -3815,7 +3841,7 @@ inline void validateSarifModifierGuards( Config& c ) noexcept
     // Modifies --lint / --lint-rules; alone it would silently no-op exactly like --with-profile above.
     if( c.sarif && !c.lint && c.lintRulesDir.empty() )
     {
-        std::fprintf( stderr, "ripwire: --sarif modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --sarif)\n" );
+        rw::emitRaw( stderr, "ripwire: --sarif modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --sarif)\n" );
         c.ok = false;
     }
     // --match takes an entirely different branch of runLint (its own <match> element, no rule/severity
@@ -3823,7 +3849,7 @@ inline void validateSarifModifierGuards( Config& c ) noexcept
     // would silently never take effect there. Refuse rather than let it look honored.
     if( c.sarif && !c.match.empty() )
     {
-        std::fprintf( stderr, "ripwire: --sarif has no effect with --match — it serializes --lint/--lint-rules findings only\n" );
+        rw::emitRaw( stderr, "ripwire: --sarif has no effect with --match — it serializes --lint/--lint-rules findings only\n" );
         c.ok = false;
     }
     // R2: --pattern is --match's sibling in exactly the way that matters here — its own <pattern> element,
@@ -3832,14 +3858,14 @@ inline void validateSarifModifierGuards( Config& c ) noexcept
     // arm exists to prevent, and adding the verb without adding the arm would have reintroduced it.
     if( c.sarif && !c.pattern.empty() )
     {
-        std::fprintf( stderr, "ripwire: --sarif has no effect with --pattern — it serializes --lint/--lint-rules findings only\n" );
+        rw::emitRaw( stderr, "ripwire: --sarif has no effect with --pattern — it serializes --lint/--lint-rules findings only\n" );
         c.ok = false;
     }
     // --with-profile's heat_* join has no SARIF field defined yet (the honesty rule: represent it or
     // refuse, never drop it silently) — refuse the pairing rather than silently omit the join.
     if( c.sarif && !c.withProfile.empty() )
     {
-        std::fprintf( stderr, "ripwire: --sarif does not yet support --with-profile — the heat_* join has no SARIF field; run them separately\n" );
+        rw::emitRaw( stderr, "ripwire: --sarif does not yet support --with-profile — the heat_* join has no SARIF field; run them separately\n" );
         c.ok = false;
     }
     // SARIF is meant to be ONE complete document per run (that is what upload-sarif consumes) — a
@@ -3847,7 +3873,7 @@ inline void validateSarifModifierGuards( Config& c ) noexcept
     // rather than emit a partial document that looks complete.
     if( c.sarif && ( c.pageLimit > 0 || c.pageOffset > 0 ) )
     {
-        std::fprintf( stderr, "ripwire: --sarif always emits the full result set — drop --limit=N/--offset=M\n" );
+        rw::emitRaw( stderr, "ripwire: --sarif always emits the full result set — drop --limit=N/--offset=M\n" );
         c.ok = false;
     }
 }
@@ -3860,12 +3886,12 @@ inline void validateLintSelectionModifierGuards( Config& c ) noexcept
 {
     if( !c.lintSelect.empty() && !c.lint && c.lintRulesDir.empty() )
     {
-        std::fprintf( stderr, "ripwire: --lint-select=PREFIX modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-select=cache-)\n" );
+        rw::emitRaw( stderr, "ripwire: --lint-select=PREFIX modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-select=cache-)\n" );
         c.ok = false;
     }
     if( !c.lintIgnore.empty() && !c.lint && c.lintRulesDir.empty() )
     {
-        std::fprintf( stderr, "ripwire: --lint-ignore=PREFIX modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-ignore=naming-)\n" );
+        rw::emitRaw( stderr, "ripwire: --lint-ignore=PREFIX modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-ignore=naming-)\n" );
         c.ok = false;
     }
 }
@@ -3878,8 +3904,7 @@ static inline void validateLegendModifier( Config& c ) noexcept
     }
     if( c.legend != "full" && c.legend != "compact" )
     {
-        std::fprintf( stderr, "ripwire: --legend needs full or compact — got '%.*s', e.g. --legend=compact\n",
-                      int( c.legend.size() ), c.legend.data() );
+        rw::emitTo( stderr, "ripwire: --legend needs full or compact — got '{}', e.g. --legend=compact\n", std::string_view( c.legend.data(), c.legend.size() ) );
         c.ok = false;
     }
     // P1 (capture-audit 2026-09-04, L7): every XML verb honors --legend=compact (main.cpp's runWithCompactLegend
@@ -3907,9 +3932,7 @@ static inline void validateLegendModifier( Config& c ) noexcept
     else if( c.mcp || !c.listen.empty() )     { nonXml = "--mcp/--listen (pass legend:\"compact\" per call instead)"; }
     if( nonXml != nullptr )
     {
-        std::fprintf( stderr, "ripwire: --legend=%.*s applies to the XML verbs only — %s has no XML legend to compact; drop --legend "
-                              "(e.g. ripwire <dir> --callers=SYM --legend=compact)\n",
-                      int( c.legend.size() ), c.legend.data(), nonXml );
+        rw::emitTo( stderr, "ripwire: --legend={} applies to the XML verbs only — {} has no XML legend to compact; drop --legend (e.g. ripwire <dir> --callers=SYM --legend=compact)\n", std::string_view( c.legend.data(), c.legend.size() ), nonXml );
         c.ok = false;
     }
 }
@@ -3920,12 +3943,12 @@ static inline void validateDefaultCeilingModifiers( Config& c ) noexcept
 {
     if( c.zoomLevelsSet && !c.zoom )
     {
-        std::fprintf( stderr, "ripwire: --zoom-levels=N modifies --zoom — pass it too (e.g. ripwire <dir> --zoom --zoom-levels=0 prints every level)\n" );
+        rw::emitRaw( stderr, "ripwire: --zoom-levels=N modifies --zoom — pass it too (e.g. ripwire <dir> --zoom --zoom-levels=0 prints every level)\n" );
         c.ok = false;
     }
     if( c.includeBuiltins && !c.externalSurface )
     {
-        std::fprintf( stderr, "ripwire: --include-builtins modifies --external-surface — pass it too (e.g. ripwire <dir> --external-surface --include-builtins)\n" );
+        rw::emitRaw( stderr, "ripwire: --include-builtins modifies --external-surface — pass it too (e.g. ripwire <dir> --external-surface --include-builtins)\n" );
         c.ok = false;
     }
 }
@@ -3934,8 +3957,7 @@ static inline void validateGrepHandleModifier( Config& c ) noexcept
 {
     if( c.grepHandles && c.grep.empty() )
     {
-        std::fprintf( stderr, "ripwire: --handles modifies --grep=STR or --regex=PAT — pass one too "
-                              "(e.g. ripwire <dir> --grep=stale --handles)\n" );
+        rw::emitRaw( stderr, "ripwire: --handles modifies --grep=STR or --regex=PAT — pass one too (e.g. ripwire <dir> --grep=stale --handles)\n" );
         c.ok = false;
     }
 }
@@ -4018,12 +4040,12 @@ inline void validateModifierGuards( Config& c ) noexcept
     // they set a token or granted remote-edit access that never reached the server.
     if( !c.mcpToken.empty() && c.listen.empty() )
     {
-        std::fprintf( stderr, "ripwire: --mcp-token is read by the --listen HTTP transport only — pass both (e.g. ripwire . --listen=127.0.0.1:8765 --mcp-token=SECRET)\n" );
+        rw::emitRaw( stderr, "ripwire: --mcp-token is read by the --listen HTTP transport only — pass both (e.g. ripwire . --listen=127.0.0.1:8765 --mcp-token=SECRET)\n" );
         c.ok = false;
     }
     if( c.allowRemoteEdits && c.listen.empty() )
     {
-        std::fprintf( stderr, "ripwire: --allow-remote-edits is read by the --listen HTTP transport only — pass both (e.g. ripwire . --listen=127.0.0.1:8765 --allow-remote-edits --mcp-token=SECRET)\n" );
+        rw::emitRaw( stderr, "ripwire: --allow-remote-edits is read by the --listen HTTP transport only — pass both (e.g. ripwire . --listen=127.0.0.1:8765 --allow-remote-edits --mcp-token=SECRET)\n" );
         c.ok = false;
     }
 
@@ -4033,8 +4055,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // does nothing for any verb. Refuse — this is a different subcommand, not a missing companion flag.
     if( c.force )
     {
-        std::fprintf( stderr, "ripwire: --force only applies to `ripwire wrap <agent>` (proceed past CRITICAL skill findings) — "
-                              "pass it there instead (e.g. ripwire wrap claude --force)\n" );
+        rw::emitRaw( stderr, "ripwire: --force only applies to `ripwire wrap <agent>` (proceed past CRITICAL skill findings) — pass it there instead (e.g. ripwire wrap claude --force)\n" );
         c.ok = false;
     }
 
@@ -4042,7 +4063,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // no-op exactly like the modifiers around it. Refuse loudly, naming both flags.
     if( c.runTimeoutSec > 0 && c.runTrace.empty() )
     {
-        std::fprintf( stderr, "ripwire: --run-timeout=SECONDS modifies --run-trace — pass it too (e.g. ripwire <dir> --run-trace=\"make -j\" --run-timeout=60)\n" );
+        rw::emitRaw( stderr, "ripwire: --run-timeout=SECONDS modifies --run-trace — pass it too (e.g. ripwire <dir> --run-trace=\"make -j\" --run-timeout=60)\n" );
         c.ok = false;
     }
 
@@ -4051,7 +4072,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // "a no-op alone"; a documented no-op is still the accept-and-ignore class every sibling here refuses.
     if( c.namingLocals && !c.lint )
     {
-        std::fprintf( stderr, "ripwire: --naming-locals modifies --lint (the naming-* rules over local variables) — pass both (e.g. ripwire <dir> --lint --naming-locals)\n" );
+        rw::emitRaw( stderr, "ripwire: --naming-locals modifies --lint (the naming-* rules over local variables) — pass both (e.g. ripwire <dir> --lint --naming-locals)\n" );
         c.ok = false;
     }
 
@@ -4063,8 +4084,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // output byte moves. (--listen= sets c.mcp, so the server transports are both covered by the one test.)
     if( c.noStable && !c.mcp )
     {
-        std::fprintf( stderr, "ripwire: --no-stable is read only by --mcp/--listen (it opts out of the stable ordering the server turns on) — it changed nothing here; "
-                              "the CLI map orders important-first unless you pass --order=stable\n" );
+        rw::emitRaw( stderr, "ripwire: --no-stable is read only by --mcp/--listen (it opts out of the stable ordering the server turns on) — it changed nothing here; the CLI map orders important-first unless you pass --order=stable\n" );
     }
 
     // capture-audit 2026-09-04 (H11): --allow-dirty is the explicit consent --quality-baseline needs before
@@ -4074,8 +4094,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // for that verb.
     if( c.allowDirty && !c.qualityBaseline )
     {
-        std::fprintf( stderr, "ripwire: --allow-dirty modifies --quality-baseline (it consents to pinning a floor on a tree that differs from HEAD) — "
-                              "pass both (e.g. ripwire <dir> --quality-baseline --allow-dirty)\n" );
+        rw::emitRaw( stderr, "ripwire: --allow-dirty modifies --quality-baseline (it consents to pinning a floor on a tree that differs from HEAD) — pass both (e.g. ripwire <dir> --quality-baseline --allow-dirty)\n" );
         c.ok = false;
     }
 
@@ -4083,7 +4102,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // alone it would silently no-op exactly like the modifiers around it. Refuse loudly.
     if( !c.withProfile.empty() && !c.lint )
     {
-        std::fprintf( stderr, "ripwire: --with-profile=FILE modifies --lint — pass it too (e.g. ripwire <dir> --lint --with-profile=report.txt)\n" );
+        rw::emitRaw( stderr, "ripwire: --with-profile=FILE modifies --lint — pass it too (e.g. ripwire <dir> --lint --with-profile=report.txt)\n" );
         c.ok = false;
     }
 
@@ -4096,7 +4115,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // reaches nothing. Alone it silently no-ops exactly like --anchor/--cochange-boost (validateConfig); refuse loudly.
     if( c.withHistory && !c.docDrift && !c.whereisFlag )
     {
-        std::fprintf( stderr, "ripwire: --with-history modifies --doc-drift or --whereis=SYM — pass one (e.g. ripwire <dir> --doc-drift --with-history)\n" );
+        rw::emitRaw( stderr, "ripwire: --with-history modifies --doc-drift or --whereis=SYM — pass one (e.g. ripwire <dir> --doc-drift --with-history)\n" );
         c.ok = false;
     }
 
@@ -4105,8 +4124,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // (grepHits is only ever called inside the `!cfg.grep.empty()` branch, main.cpp). Refuse loudly.
     if( ( c.grepBefore > 0 || c.grepAfter > 0 ) && c.grep.empty() )
     {
-        std::fprintf( stderr, "ripwire: --grep-context=N (or --grep-before/--grep-after) modifies --grep=STR or --regex=PAT — "
-                              "pass one (e.g. ripwire <dir> --grep=STR --grep-context=3)\n" );
+        rw::emitRaw( stderr, "ripwire: --grep-context=N (or --grep-before/--grep-after) modifies --grep=STR or --regex=PAT — pass one (e.g. ripwire <dir> --grep=STR --grep-context=3)\n" );
         c.ok = false;
     }
 
@@ -4114,7 +4132,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // `!cfg.grep.empty()` branch as --grep-context above. Alone it silently no-ops; refuse loudly.
     if( c.noPrefilter && c.grep.empty() )
     {
-        std::fprintf( stderr, "ripwire: --no-prefilter modifies --grep=STR or --regex=PAT — pass one (e.g. ripwire <dir> --grep=STR --no-prefilter)\n" );
+        rw::emitRaw( stderr, "ripwire: --no-prefilter modifies --grep=STR or --regex=PAT — pass one (e.g. ripwire <dir> --grep=STR --no-prefilter)\n" );
         c.ok = false;
     }
 
@@ -4124,20 +4142,19 @@ inline void validateModifierGuards( Config& c ) noexcept
     // modifiers above; combined with --regex they would silently ignore the extra terms. Both refuse loudly.
     if( ( !c.grepAnd.empty() || !c.grepNot.empty() || !c.grepScope.empty() ) && c.grep.empty() )
     {
-        std::fprintf( stderr, "ripwire: --and=/--not=/--grep-scope= modify --grep=STR — pass it too (e.g. ripwire <dir> --grep=stale --and=mcp)\n" );
+        rw::emitRaw( stderr, "ripwire: --and=/--not=/--grep-scope= modify --grep=STR — pass it too (e.g. ripwire <dir> --grep=stale --and=mcp)\n" );
         c.ok = false;
     }
     // R-H: --grep-in= is the one grep modifier that ALSO applies to --regex (a regex hit lands in a span
     // exactly like a literal one), so its refusal tests both spellings rather than --grep= alone.
     if( !c.grepIn.empty() && c.grep.empty() )
     {
-        std::fprintf( stderr, "ripwire: --grep-in=code|any modifies --grep=STR / --regex=PAT — pass one too (e.g. ripwire <dir> --grep=stale --grep-in=any)\n" );
+        rw::emitRaw( stderr, "ripwire: --grep-in=code|any modifies --grep=STR / --regex=PAT — pass one too (e.g. ripwire <dir> --grep=stale --grep-in=any)\n" );
         c.ok = false;
     }
     if( ( !c.grepAnd.empty() || !c.grepNot.empty() ) && c.grepRegex )
     {
-        std::fprintf( stderr, "ripwire: --and=/--not= are literal-only and do not apply to --regex=PAT — "
-                              "use --grep=STR --and=... instead, or fold the term into the regex itself (e.g. --regex='A.*B')\n" );
+        rw::emitRaw( stderr, "ripwire: --and=/--not= are literal-only and do not apply to --regex=PAT — use --grep=STR --and=... instead, or fold the term into the regex itself (e.g. --regex='A.*B')\n" );
         c.ok = false;
     }
 
@@ -4147,7 +4164,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // --pack-task/--partition) it silently no-ops; refuse loudly.
     if( c.withGraph && c.forTask.empty() && !c.packTaskFlag && c.partitionCount <= 0 )
     {
-        std::fprintf( stderr, "ripwire: --with-graph modifies --for=TASK or --pack-task=TASK — pass one (e.g. ripwire <dir> --pack-task=\"task\" --with-graph)\n" );
+        rw::emitRaw( stderr, "ripwire: --with-graph modifies --for=TASK or --pack-task=TASK — pass one (e.g. ripwire <dir> --pack-task=\"task\" --with-graph)\n" );
         c.ok = false;
     }
 
@@ -4160,9 +4177,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // same rule as every other pairing: a run where the flag would do nothing refuses instead.
     if( !c.since.empty() && !anySinceHostActive( c ) )
     {
-        std::fprintf( stderr, "ripwire: --since=REV|DATE scopes --hotspots/--cochange/--rank-by=churn|churn-decay, and beside "
-                              "--slice=SYM:VAR it names the revision to diff that variable's def-use slice against — pass one "
-                              "(e.g. ripwire <dir> --hotspots --since=\"1 week ago\")\n" );
+        rw::emitRaw( stderr, "ripwire: --since=REV|DATE scopes --hotspots/--cochange/--rank-by=churn|churn-decay, and beside --slice=SYM:VAR it names the revision to diff that variable's def-use slice against — pass one (e.g. ripwire <dir> --hotspots --since=\"1 week ago\")\n" );
         c.ok = false;
     }
 
@@ -4170,8 +4185,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // runMaintenanceViews (main.cpp). Alone they silently no-op; refuse loudly, exactly like --since above.
     if( ( c.cochangeRecur > 0 || c.cochangeGroups ) && !c.cochange )
     {
-        std::fprintf( stderr, "ripwire: --cochange-recur=K and --cochange-groups modify --cochange — pass it "
-                              "(e.g. ripwire <dir> --cochange --cochange-recur=2)\n" );
+        rw::emitRaw( stderr, "ripwire: --cochange-recur=K and --cochange-groups modify --cochange — pass it (e.g. ripwire <dir> --cochange --cochange-recur=2)\n" );
         c.ok = false;
     }
 
@@ -4180,9 +4194,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // that looks like a finding — the honest reading is that the question is not defined for this form.
     if( c.cochangeGroups && !c.cochangeFile.empty() )
     {
-        std::fprintf( stderr, "ripwire: --cochange-groups groups the repo-wide violating pairs — it has nothing to "
-                              "group under --cochange=FILE, whose core file is already the one you named "
-                              "(e.g. ripwire <dir> --cochange --cochange-groups)\n" );
+        rw::emitRaw( stderr, "ripwire: --cochange-groups groups the repo-wide violating pairs — it has nothing to group under --cochange=FILE, whose core file is already the one you named (e.g. ripwire <dir> --cochange --cochange-groups)\n" );
         c.ok = false;
     }
 
@@ -4191,8 +4203,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // loudly (mirrors --gateability/--abi/--plan's "rides on another verb's sweep" shape, validateConfig below).
     if( ( c.baseline || c.baselineUpdate ) && c.archRules.empty() )
     {
-        std::fprintf( stderr, "ripwire: --baseline/--baseline-update writes the --arch=FILE debt sidecar — pass both "
-                              "(e.g. ripwire <dir> --arch=rules.yaml --baseline)\n" );
+        rw::emitRaw( stderr, "ripwire: --baseline/--baseline-update writes the --arch=FILE debt sidecar — pass both (e.g. ripwire <dir> --arch=rules.yaml --baseline)\n" );
         c.ok = false;
     }
 
@@ -4208,8 +4219,7 @@ inline void validateModifierGuards( Config& c ) noexcept
         const int forTopN = c.packTopN > 0 ? c.packTopN : 40;
         if( c.detail > forTopN )
         {
-            std::fprintf( stderr, "ripwire: --detail=%d exceeds the ranked head — N must be 1..%d (raise the head with "
-                                  "--pack-top-n=N, or lower --detail)\n", c.detail, forTopN );
+            rw::emitTo( stderr, "ripwire: --detail={} exceeds the ranked head — N must be 1..{} (raise the head with --pack-top-n=N, or lower --detail)\n", c.detail, forTopN );
             c.ok = false;
         }
     }
@@ -4226,8 +4236,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     if( c.compress && c.expand.empty() && c.outline.empty() && !c.packTaskFlag && c.fromTrace.empty()
         && c.exemplar.empty() && c.forTask.empty() )
     {
-        std::fprintf( stderr, "ripwire: --compress strips comments from served-body output (expand/outline/for/"
-                              "pack-task/from-trace/exemplar) — pass one (e.g. ripwire <dir> --expand=SYM --compress)\n" );
+        rw::emitRaw( stderr, "ripwire: --compress strips comments from served-body output (expand/outline/for/pack-task/from-trace/exemplar) — pass one (e.g. ripwire <dir> --expand=SYM --compress)\n" );
         c.ok = false;
     }
 
@@ -4235,8 +4244,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     // Alone it silently no-ops; refuse loudly (same shape as --with-graph/--compress above).
     if( c.colorByExplicit && !c.html )
     {
-        std::fprintf( stderr, "ripwire: --color-by=MODE colors the --html export — pass both "
-                              "(e.g. ripwire <dir> --html=g.html --color-by=community)\n" );
+        rw::emitRaw( stderr, "ripwire: --color-by=MODE colors the --html export — pass both (e.g. ripwire <dir> --html=g.html --color-by=community)\n" );
         c.ok = false;
     }
 }
@@ -4252,17 +4260,17 @@ inline void refuseAutoBodiesMisuse( Config& c )
 {
     if( c.autoBodies && c.forTask.empty() )
     {
-        std::fprintf( stderr, "ripwire: --auto-bodies modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --auto-bodies)\n" );
+        rw::emitRaw( stderr, "ripwire: --auto-bodies modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --auto-bodies)\n" );
         c.ok = false;
     }
     if( c.autoBodies && c.signaturesOnly )
     {
-        std::fprintf( stderr, "ripwire: --auto-bodies contradicts --signatures-only — pass one (--auto-bodies asks for the automatic bodies; --signatures-only means no bodies at all)\n" );
+        rw::emitRaw( stderr, "ripwire: --auto-bodies contradicts --signatures-only — pass one (--auto-bodies asks for the automatic bodies; --signatures-only means no bodies at all)\n" );
         c.ok = false;
     }
     if( c.autoBodies && c.detail > 0 )
     {
-        std::fprintf( stderr, "ripwire: --auto-bodies contradicts --detail=N — pass one (--detail=N is the explicit body knob and already supersedes the automatic pick)\n" );
+        rw::emitRaw( stderr, "ripwire: --auto-bodies contradicts --detail=N — pass one (--detail=N is the explicit body knob and already supersedes the automatic pick)\n" );
         c.ok = false;
     }
 }
@@ -4271,12 +4279,12 @@ inline void validateAgent( Config& c ) noexcept
 {
     if( !c.agent.empty() && !c.doctor )
     {
-        std::fprintf( stderr, "ripwire: --agent=codex modifies --doctor — pass both (e.g. ripwire <dir> --doctor --agent=codex)\n" );
+        rw::emitRaw( stderr, "ripwire: --agent=codex modifies --doctor — pass both (e.g. ripwire <dir> --doctor --agent=codex)\n" );
         c.ok = false;
     }
     if( !c.agent.empty() && c.agent != "codex" && c.agent != "claude" )
     {
-        std::fprintf( stderr, "ripwire: unsupported --agent value '%.*s' (supported: codex, claude)\n", int( c.agent.size() ), c.agent.data() );
+        rw::emitTo( stderr, "ripwire: unsupported --agent value '{}' (supported: codex, claude)\n", std::string_view( c.agent.data(), c.agent.size() ) );
         c.ok = false;
     }
 }
@@ -4293,7 +4301,7 @@ inline void validateConfig( Config& c ) noexcept
     // needs a root on the command line (stdio --mcp does not — its clients name a path per request).
     if( !c.listen.empty() && c.rootPath.empty() )
     {
-        std::fprintf( stderr, "ripwire: --listen serves ONE workspace fixed at startup — pass the repo root (e.g. ripwire . --listen=127.0.0.1:8765)\n" );
+        rw::emitRaw( stderr, "ripwire: --listen serves ONE workspace fixed at startup — pass the repo root (e.g. ripwire . --listen=127.0.0.1:8765)\n" );
         c.ok = false;
     }
 
@@ -4315,28 +4323,28 @@ inline void validateConfig( Config& c ) noexcept
     // RIPWIRE_DEV=1 so it stays reachable for continued eval work without advertising it as supported.
     if( c.anchor && !std::getenv( "RIPWIRE_DEV" ) )
     {
-        std::fprintf( stderr, "ripwire: --anchor is experimental, set RIPWIRE_DEV=1\n" );
+        rw::emitRaw( stderr, "ripwire: --anchor is experimental, set RIPWIRE_DEV=1\n" );
         c.ok = false;
     }
 
     // --anchor only modifies the --for lens rank; alone it would silently do nothing — refuse loudly instead.
     if( c.anchor && c.forTask.empty() )
     {
-        std::fprintf( stderr, "ripwire: --anchor modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --anchor)\n" );
+        rw::emitRaw( stderr, "ripwire: --anchor modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --anchor)\n" );
         c.ok = false;
     }
 
     // --no-route forces plain subtoken+body on --for/--query (routing is the default); alone it does nothing — refuse loudly.
     if( c.noRoute && c.forTask.empty() && c.query.empty() )
     {
-        std::fprintf( stderr, "ripwire: --no-route modifies --for=TASK or --query=TERMS — pass one (e.g. ripwire <dir> --for=\"task\" --no-route)\n" );
+        rw::emitRaw( stderr, "ripwire: --no-route modifies --for=TASK or --query=TERMS — pass one (e.g. ripwire <dir> --for=\"task\" --no-route)\n" );
         c.ok = false;
     }
 
     // --adaptive cuts the --for/--query result set at the relevance cliff; alone it does nothing — refuse loudly.
     if( c.adaptive && c.forTask.empty() && c.query.empty() )
     {
-        std::fprintf( stderr, "ripwire: --adaptive modifies --for=TASK or --query=TERMS — pass one (e.g. ripwire <dir> --for=\"task\" --adaptive)\n" );
+        rw::emitRaw( stderr, "ripwire: --adaptive modifies --for=TASK or --query=TERMS — pass one (e.g. ripwire <dir> --for=\"task\" --adaptive)\n" );
         c.ok = false;
     }
 
@@ -4345,21 +4353,21 @@ inline void validateConfig( Config& c ) noexcept
     // main.cpp) is untouched — it is not a --help-advertised flag.
     if( c.cochangeBoost && !std::getenv( "RIPWIRE_DEV" ) )
     {
-        std::fprintf( stderr, "ripwire: --cochange-boost is experimental, set RIPWIRE_DEV=1\n" );
+        rw::emitRaw( stderr, "ripwire: --cochange-boost is experimental, set RIPWIRE_DEV=1\n" );
         c.ok = false;
     }
 
     // --cochange-boost only augments the --for lens; alone it would silently do nothing — refuse loudly.
     if( c.cochangeBoost && c.forTask.empty() )
     {
-        std::fprintf( stderr, "ripwire: --cochange-boost modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --cochange-boost)\n" );
+        rw::emitRaw( stderr, "ripwire: --cochange-boost modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --cochange-boost)\n" );
         c.ok = false;
     }
 
     // --no-mention-boost only disables a --for lens behavior; alone it would silently do nothing — refuse loudly.
     if( c.noMentionBoost && c.forTask.empty() )
     {
-        std::fprintf( stderr, "ripwire: --no-mention-boost modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --no-mention-boost)\n" );
+        rw::emitRaw( stderr, "ripwire: --no-mention-boost modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --no-mention-boost)\n" );
         c.ok = false;
     }
 
@@ -4369,14 +4377,14 @@ inline void validateConfig( Config& c ) noexcept
     // consistent with the pre-existing --no-mention-boost/--cochange-boost validation, not a new gap.)
     if( c.noDocMention && c.forTask.empty() )
     {
-        std::fprintf( stderr, "ripwire: --no-doc-mention modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --no-doc-mention)\n" );
+        rw::emitRaw( stderr, "ripwire: --no-doc-mention modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --no-doc-mention)\n" );
         c.ok = false;
     }
 
     // --signatures-only opts out of --for's terminal-by-default bundle (T3); alone it does nothing — refuse loudly.
     if( c.signaturesOnly && c.forTask.empty() )
     {
-        std::fprintf( stderr, "ripwire: --signatures-only modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --signatures-only)\n" );
+        rw::emitRaw( stderr, "ripwire: --signatures-only modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --signatures-only)\n" );
         c.ok = false;
     }
 
@@ -4384,7 +4392,7 @@ inline void validateConfig( Config& c ) noexcept
     // honoring one silently drops the other's effect with no tell, so the pair is refused loudly instead.
     if( c.signaturesOnly && c.detail > 0 )
     {
-        std::fprintf( stderr, "ripwire: --signatures-only contradicts --detail=N — pass one (--detail=N is the explicit body knob; --signatures-only means no bodies at all)\n" );
+        rw::emitRaw( stderr, "ripwire: --signatures-only contradicts --detail=N — pass one (--detail=N is the explicit body knob; --signatures-only means no bodies at all)\n" );
         c.ok = false;
     }
 
@@ -4406,7 +4414,7 @@ inline void validateConfig( Config& c ) noexcept
         // admitted it, so that branch was unreachable and `--flags --detail=N` refused instead of widening.
         if( c.detail > 0 && c.forTask.empty() && !c.strayContent && !c.whereisFlag && !c.docDrift && !c.darkFlags )
         {
-            std::fprintf( stderr, "ripwire: --detail=N modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --detail=3)\n" );
+            rw::emitRaw( stderr, "ripwire: --detail=N modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --detail=3)\n" );
             c.ok = false;
         }
     }
@@ -4417,12 +4425,12 @@ inline void validateConfig( Config& c ) noexcept
     // doing something other than a fan-out (the same cap --connect and multi-root use).
     if( c.partitionCount > 0 && !c.packTaskFlag )
     {
-        std::fprintf( stderr, "ripwire: --partition=N splits a --pack-task bundle — pass both (e.g. ripwire <dir> --pack-task=\"task\" --partition=4)\n" );
+        rw::emitRaw( stderr, "ripwire: --partition=N splits a --pack-task bundle — pass both (e.g. ripwire <dir> --pack-task=\"task\" --partition=4)\n" );
         c.ok = false;
     }
     if( c.partitionCount > 0 && ( c.partitionCount < 2 || c.partitionCount > 16 ) )
     {
-        std::fprintf( stderr, "ripwire: --partition=%d is out of range — N must be 2..16 (1 is just --pack-task)\n", c.partitionCount );
+        rw::emitTo( stderr, "ripwire: --partition={} is out of range — N must be 2..16 (1 is just --pack-task)\n", c.partitionCount );
         c.ok = false;
     }
 
@@ -4434,12 +4442,12 @@ inline void validateConfig( Config& c ) noexcept
     // sensible default, and an empty-looking success is the failure mode this verb exists to prevent.
     if( c.flipFlag && !c.darkFlags )
     {
-        std::fprintf( stderr, "ripwire: --flip=NAME reports one gate from the --flags table — pass both (e.g. ripwire <dir> --flags --flip=CANYON_HARMONY_SFX)\n" );
+        rw::emitRaw( stderr, "ripwire: --flip=NAME reports one gate from the --flags table — pass both (e.g. ripwire <dir> --flags --flip=CANYON_HARMONY_SFX)\n" );
         c.ok = false;
     }
     if( c.flipFlag && c.flipGate.empty() )
     {
-        std::fprintf( stderr, "ripwire: --flip needs a gate name (e.g. --flip=CANYON_HARMONY_SFX) — run `ripwire <dir> --flags` to list them\n" );
+        rw::emitRaw( stderr, "ripwire: --flip needs a gate name (e.g. --flip=CANYON_HARMONY_SFX) — run `ripwire <dir> --flags` to list them\n" );
         c.ok = false;
     }
 
@@ -4448,7 +4456,7 @@ inline void validateConfig( Config& c ) noexcept
     // --flip/--partition).
     if( c.landingPlan && !c.strayContent )
     {
-        std::fprintf( stderr, "ripwire: --plan composes with --stray-content's sweep — pass both (e.g. ripwire <dir> --stray-content --plan)\n" );
+        rw::emitRaw( stderr, "ripwire: --plan composes with --stray-content's sweep — pass both (e.g. ripwire <dir> --stray-content --plan)\n" );
         c.ok = false;
     }
 
@@ -4457,7 +4465,7 @@ inline void validateConfig( Config& c ) noexcept
     // Refuse loudly (mirrors --flip/--partition/--detail above) rather than let it look like a no-op success.
     if( c.abiFlag && !c.strayContent )
     {
-        std::fprintf( stderr, "ripwire: --abi reports the cross-branch ABI-break gate over the --stray-content ref sweep — pass both (e.g. ripwire <dir> --stray-content --abi)\n" );
+        rw::emitRaw( stderr, "ripwire: --abi reports the cross-branch ABI-break gate over the --stray-content ref sweep — pass both (e.g. ripwire <dir> --stray-content --abi)\n" );
         c.ok = false;
     }
 
@@ -4465,7 +4473,7 @@ inline void validateConfig( Config& c ) noexcept
     // on the default map. Refuse loudly (mirrors --plan/--abi immediately above).
     if( c.gateabilityFlag && !c.docDrift )
     {
-        std::fprintf( stderr, "ripwire: --gateability reports over --doc-drift's own scan — pass both (e.g. ripwire <dir> --doc-drift --gateability)\n" );
+        rw::emitRaw( stderr, "ripwire: --gateability reports over --doc-drift's own scan — pass both (e.g. ripwire <dir> --doc-drift --gateability)\n" );
         c.ok = false;
     }
 
@@ -4475,18 +4483,17 @@ inline void validateConfig( Config& c ) noexcept
     // inventory" half lives in runSlice, after the spec split that discovers whether a VAR was given.
     if( !c.sliceFlow.empty() && c.sliceFlow != "back" && c.sliceFlow != "fwd" && c.sliceFlow != "both" )
     {
-        std::fprintf( stderr, "ripwire: --slice-flow=%.*s — unknown direction (supported: back|fwd|both), e.g. --slice-flow=back\n",
-                      int( c.sliceFlow.size() ), c.sliceFlow.data() );
+        rw::emitTo( stderr, "ripwire: --slice-flow={} — unknown direction (supported: back|fwd|both), e.g. --slice-flow=back\n", std::string_view( c.sliceFlow.data(), c.sliceFlow.size() ) );
         c.ok = false;
     }
     if( !c.sliceFlow.empty() && c.sliceSpec.empty() )
     {
-        std::fprintf( stderr, "ripwire: --slice-flow modifies --slice=SYM:VAR — pass both (e.g. ripwire <dir> --slice=parseArgs:argIndex --slice-flow=back)\n" );
+        rw::emitRaw( stderr, "ripwire: --slice-flow modifies --slice=SYM:VAR — pass both (e.g. ripwire <dir> --slice=parseArgs:argIndex --slice-flow=back)\n" );
         c.ok = false;
     }
     if( c.sliceDepth != 0 && c.sliceFlow.empty() )
     {
-        std::fprintf( stderr, "ripwire: --slice-depth bounds the --slice-flow BFS — pass both (e.g. ripwire <dir> --slice=parseArgs:argIndex --slice-flow=fwd --slice-depth=4)\n" );
+        rw::emitRaw( stderr, "ripwire: --slice-depth bounds the --slice-flow BFS — pass both (e.g. ripwire <dir> --slice=parseArgs:argIndex --slice-flow=fwd --slice-depth=4)\n" );
         c.ok = false;
     }
 
@@ -4499,8 +4506,7 @@ inline void validateConfig( Config& c ) noexcept
     // knob notice sees the implied verb.
     if( c.qualityAck && !c.qualityDelta )
     {
-        std::fprintf( stderr, "ripwire: bare --quality-ack accepts EVERY finding of a --quality-delta report with no reason recorded — "
-                              "pass --quality-delta with it, and say why (e.g. ripwire <dir> --quality-delta --quality-ack=\"why this debt is deliberate\")\n" );
+        rw::emitRaw( stderr, "ripwire: bare --quality-ack accepts EVERY finding of a --quality-delta report with no reason recorded — pass --quality-delta with it, and say why (e.g. ripwire <dir> --quality-delta --quality-ack=\"why this debt is deliberate\")\n" );
         c.ok = false;
     }
 
@@ -4511,7 +4517,7 @@ inline void validateConfig( Config& c ) noexcept
     // loudly (mirrors --gateability/--abi/--plan immediately above), naming both flags.
     if( !c.qualityAckOnly.empty() && !c.qualityAck )
     {
-        std::fprintf( stderr, "ripwire: --ack-only=SUBSTR narrows --quality-ack — pass both (e.g. ripwire <dir> --quality-delta --ack-only=contract-change --quality-ack=\"reason\")\n" );
+        rw::emitRaw( stderr, "ripwire: --ack-only=SUBSTR narrows --quality-ack — pass both (e.g. ripwire <dir> --quality-delta --ack-only=contract-change --quality-ack=\"reason\")\n" );
         c.ok = false;
     }
 
@@ -4524,7 +4530,7 @@ inline void validateConfig( Config& c ) noexcept
     // vocabulary belongs to quality.h — the same line --quality-panel=PRESET's refusal draws.)
     if( !c.qualityScope.empty() && !c.qualityDelta )
     {
-        std::fprintf( stderr, "ripwire: --scope=GLOB partitions --quality-delta by ownership — pass both (e.g. ripwire <dir> --quality-delta --scope=src/quality.h)\n" );
+        rw::emitRaw( stderr, "ripwire: --scope=GLOB partitions --quality-delta by ownership — pass both (e.g. ripwire <dir> --quality-delta --scope=src/quality.h)\n" );
         c.ok = false;
     }
 
@@ -4532,7 +4538,7 @@ inline void validateConfig( Config& c ) noexcept
     // would silently no-op on the plain map. Refuse loudly (mirrors --adaptive/--detail).
     if( c.candidates && c.forTask.empty() && c.query.empty() )
     {
-        std::fprintf( stderr, "ripwire: --format=candidates exports a --for=TASK or --query=TERMS result — pass one (e.g. ripwire <dir> --query=\"terms\" --format=candidates)\n" );
+        rw::emitRaw( stderr, "ripwire: --format=candidates exports a --for=TASK or --query=TERMS result — pass one (e.g. ripwire <dir> --query=\"terms\" --format=candidates)\n" );
         c.ok = false;
     }
 
@@ -4549,14 +4555,12 @@ inline void validateConfig( Config& c ) noexcept
     // asks to recall zero documents), wording matched to what --top-k actually means on this verb.
     if( c.topK == 0 && !c.recall.empty() )
     {
-        std::fprintf( stderr, "ripwire: --recall --top-k=0 means \"emit zero documents\" — raise it (--top-k=N) "
-                              "or drop it for the default of 8\n" );
+        rw::emitRaw( stderr, "ripwire: --recall --top-k=0 means \"emit zero documents\" — raise it (--top-k=N) or drop it for the default of 8\n" );
         c.ok = false;
     }
     else if( c.topK == 0 && c.expand.empty() && c.outline.empty() && !c.packSignatures && c.packTopN <= 0 )
     {
-        std::fprintf( stderr, "ripwire: --top-k=0 means \"no ranked map, payload only\" — pass a payload verb "
-                              "(--expand=SYM / --outline=SYM / --pack-signatures / --pack-top-n=N), or use --top-k=1 for the smallest map\n" );
+        rw::emitRaw( stderr, "ripwire: --top-k=0 means \"no ranked map, payload only\" — pass a payload verb (--expand=SYM / --outline=SYM / --pack-signatures / --pack-top-n=N), or use --top-k=1 for the smallest map\n" );
         c.ok = false;
     }
 }
@@ -4574,7 +4578,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             return;
         }
         orderDeprecWarned = true;
-        std::fprintf( stderr, "ripwire: %s is deprecated — use --order=%s instead\n", oldFlag, newValue );
+        rw::emitTo( stderr, "ripwire: {} is deprecated — use --order={} instead\n", oldFlag, newValue );
     };
     for( int i = 1; i < argc; ++i )
     {
@@ -4649,7 +4653,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 }
                 else
                 {
-                    std::fprintf( stderr, "ripwire: --order: unknown value '%.*s' (supported: stable|important-first|important-last)\n", int( v.size() ), v.data() );
+                    rw::emitTo( stderr, "ripwire: --order: unknown value '{}' (supported: stable|important-first|important-last)\n", std::string_view( v.data(), v.size() ) );
                     c.ok = false;
                     return c;
                 }
@@ -4676,7 +4680,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             {
                 if( !parsePosU64( a.data() + 20, c.packBudgetBytes ) )
                 { refuseFlagValue( "--pack-budget-bytes", "a positive integer", a.data() + 20, "--pack-budget-bytes=32768" );  c.ok = false;  return c; }
-                std::fprintf( stderr, "ripwire: --pack-budget-bytes is deprecated — use --pack-task/--detail instead (unchanged behavior for now)\n" );
+                rw::emitRaw( stderr, "ripwire: --pack-budget-bytes is deprecated — use --pack-task/--detail instead (unchanged behavior for now)\n" );
             }
             // §B8.2 verifier finding N4 (W2FIX-CLI): same std::size_t-byte-count reasoning as --token-budget
             // above — stays hand-written, refusal only routed onto the shared sentence.
@@ -4715,8 +4719,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 const std::string_view v = a.substr( 13 );
                 if( v != "line" && v != "file" )
                 {
-                    std::fprintf( stderr, "ripwire: --grep-scope=%.*s — unknown value (supported: line|file), e.g. --grep-scope=file\n",
-                                  int( v.size() ), v.data() );
+                    rw::emitTo( stderr, "ripwire: --grep-scope={} — unknown value (supported: line|file), e.g. --grep-scope=file\n", std::string_view( v.data(), v.size() ) );
                     c.ok = false; return c;
                 }
                 c.grepScope = v;
@@ -4729,8 +4732,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 const std::string_view v = a.substr( 10 );
                 if( v != "code" && v != "any" )
                 {
-                    std::fprintf( stderr, "ripwire: --grep-in=%.*s — unknown value (supported: code|any), e.g. --grep-in=any\n",
-                                  int( v.size() ), v.data() );
+                    rw::emitTo( stderr, "ripwire: --grep-in={} — unknown value (supported: code|any), e.g. --grep-in=any\n", std::string_view( v.data(), v.size() ) );
                     c.ok = false; return c;
                 }
                 c.grepIn = v;
@@ -4764,7 +4766,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 }
                 else
                 {
-                    std::fprintf( stderr, "ripwire: --rank-by: unknown value '%.*s' (supported: pagerank|authority|hub|rrf|churn|churn-decay)\n", int( v.size() ), v.data() );
+                    rw::emitTo( stderr, "ripwire: --rank-by: unknown value '{}' (supported: pagerank|authority|hub|rrf|churn|churn-decay)\n", std::string_view( v.data(), v.size() ) );
                     c.ok = false;
                     return c;
                 }
@@ -4796,7 +4798,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 {
                     // An empty value lands here too, on purpose: `--color-by=` is a bad VALUE, not an unknown
                     // FLAG, and the refusal must say which (r27-emitters T5).
-                    std::fprintf( stderr, "ripwire: --color-by: unknown value '%.*s' (supported: lang|community|cx|churn|tested)\n", int( v.size() ), v.data() );
+                    rw::emitTo( stderr, "ripwire: --color-by: unknown value '{}' (supported: lang|community|cx|churn|tested)\n", std::string_view( v.data(), v.size() ) );
                     c.ok = false;
                     return c;
                 }
@@ -4825,7 +4827,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 }
                 else
                 {
-                    std::fprintf( stderr, "ripwire: --format: unknown value '%.*s' (supported: xml|columnar|rows|candidates)\n", int( v.size() ), v.data() );
+                    rw::emitTo( stderr, "ripwire: --format: unknown value '{}' (supported: xml|columnar|rows|candidates)\n", std::string_view( v.data(), v.size() ) );
                     c.ok = false;
                     return c;
                 }
@@ -4886,9 +4888,9 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 if( const std::size_t colon = v.find( ':' ); colon != std::string_view::npos )
                 { fmt = v.substr( 0, colon ); file = v.substr( colon + 1 ); }
                 if( fmt == "cc.json" || fmt == "ccjson" ) { c.exportCcJson = true; c.exportFile = file; }
-                else { std::fprintf( stderr, "ripwire: --export: unknown format '%.*s' (supported: cc.json)\n", int( fmt.size() ), fmt.data() ); c.ok = false; return c; }
+                else { rw::emitTo( stderr, "ripwire: --export: unknown format '{}' (supported: cc.json)\n", std::string_view( fmt.data(), fmt.size() ) ); c.ok = false; return c; }
             }
-            else { std::fprintf( stderr, "ripwire: unknown flag '%.*s'\n", int( a.size() ), a.data() ); c.ok = false; return c; }
+            else { rw::emitTo( stderr, "ripwire: unknown flag '{}'\n", std::string_view( a.data(), a.size() ) ); c.ok = false; return c; }
         }
         else
         {
@@ -4896,7 +4898,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             // verbatim; 2..kMaxWorkspaceRoots = a multi-root workspace merged into ONE graph.
             if( c.roots.size() >= kMaxWorkspaceRoots )
             {
-                std::fprintf( stderr, "ripwire: too many roots (max %zu): '%.*s'\n", kMaxWorkspaceRoots, int( a.size() ), a.data() );
+                rw::emitTo( stderr, "ripwire: too many roots (max {}): '{}'\n", kMaxWorkspaceRoots, std::string_view( a.data(), a.size() ) );
                 c.ok = false;  return c;
             }
             if( c.rootPath.empty() )

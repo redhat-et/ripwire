@@ -32,7 +32,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -67,7 +67,7 @@ echo
 echo "=== (a)/(b) forced cut lands on a sentence boundary, not mid-word ==="
 OUT="$( recall --max-tokens=800 )"
 MARK="$( printf '%s' "$OUT" | grep -oE '\[truncated: [0-9]+ of [0-9]+ bytes[^]]*\]' )"
-[ -n "$MARK" ] && ok "truncation fired: $MARK" || { no "no [truncated: …] marker — fixture/budget did not force a cut"; echo "$OUT" | head -5; }
+if [ -n "$MARK" ]; then ok "truncation fired: $MARK"; else { no "no [truncated: …] marker — fixture/budget did not force a cut"; echo "$OUT" | head -5; }; fi
 
 KEPT="$( printf '%s' "$MARK" | grep -oE '[0-9]+' | head -1 )"
 FULL="$( printf '%s' "$MARK" | grep -oE '[0-9]+' | sed -n 2p )"
@@ -124,7 +124,7 @@ echo
 echo "=== (d) determinism — same input + budget, byte-identical ==="
 recall --max-tokens=500 >"$TMP/d1"
 recall --max-tokens=500 >"$TMP/d2"
-cmp -s "$TMP/d1" "$TMP/d2" && ok "byte-identical across two runs" || no "NON-deterministic across two runs"
+if cmp -s "$TMP/d1" "$TMP/d2"; then ok "byte-identical across two runs"; else no "NON-deterministic across two runs"; fi
 
 echo
 [ "$fail" -eq 0 ] && { echo "recallboundarycheck: ALL PASS"; exit 0; }

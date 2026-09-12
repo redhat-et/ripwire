@@ -33,7 +33,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -69,7 +69,7 @@ if head -1 "$TMP/live_verbs" | grep -q '^__ERROR__'; then
 fi
 
 LIVE_COUNT="$( wc -l <"$TMP/live_verbs" | tr -d ' ' )"
-[ "$LIVE_COUNT" -gt 0 ] && ok "tools/list returned $LIVE_COUNT verb(s)" || no "tools/list returned zero verbs"
+if [ "$LIVE_COUNT" -gt 0 ]; then ok "tools/list returned $LIVE_COUNT verb(s)"; else no "tools/list returned zero verbs"; fi
 
 echo
 echo "=== 2. ripwire wrap claude — verb coverage ==="

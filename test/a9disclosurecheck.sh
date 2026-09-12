@@ -30,7 +30,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -215,7 +215,7 @@ for f in whereis pack-task community zoom exercises; do
 done
 # and a NON-empty value on the same flags must still work — the refusal is about emptiness, nothing else
 perl -e 'alarm 120; exec @ARGV' "$BIN" "$ROOT" --grep=parseArgs >"$TMP/g" 2>/dev/null
-[ -s "$TMP/g" ] && ok 'V1-4 --grep=parseArgs (non-empty) still answers' || no 'V1-4 the empty-value guard broke a real --grep'
+if [ -s "$TMP/g" ]; then ok 'V1-4 --grep=parseArgs (non-empty) still answers'; else no 'V1-4 the empty-value guard broke a real --grep'; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

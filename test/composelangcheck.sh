@@ -43,7 +43,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/composelangfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 # The single <compose>…</compose> block of a map (--around / --for emit at most one), and the rows in it
@@ -62,7 +62,7 @@ echo
 echo "=== 1. --around=Widget: compose edges admit only lang-compatible targets ==="
 # ═══════════════════════════════════════════════════════════════════════════
 "$BIN" "$FIX" --around=Widget --no-cache >"$TMP/widget.xml" 2>/dev/null
-rc=$?; [ $rc -eq 0 ] && ok "--around=Widget exits 0" || no "--around=Widget failed (rc=$rc)"
+if rc=$?; [ $rc -eq 0 ]; then ok "--around=Widget exits 0"; else no "--around=Widget failed (rc=$rc)"; fi
 
 FOO_COUNT="$( grep -o 'name="m_foo"' "$TMP/widget.xml" | wc -l | tr -d ' ' )"
 [ "$FOO_COUNT" -eq 1 ] && ok "m_foo emitted exactly once (count=$FOO_COUNT) — cross-language Foo candidate rejected" \

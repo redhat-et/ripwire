@@ -57,7 +57,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){   printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -168,7 +168,7 @@ presence Cond.cs '#else'         'C# #else arm present'
 # ══ 1+2+3+4. one --metrics run, per-row assertions ═══════════════════════════════════════════════════
 "$BIN" "$FIX" --metrics --no-cache >"$TMP/map.xml" 2>"$TMP/map.err"
 rc=$?
-[ "$rc" -eq 0 ] && ok "--metrics exits 0" || { no "--metrics exits $rc"; head -3 "$TMP/map.err"; }
+if [ "$rc" -eq 0 ]; then ok "--metrics exits 0"; else { no "--metrics exits $rc"; head -3 "$TMP/map.err"; }; fi
 [ -s "$TMP/map.xml" ] || { echo "ppaltcheck: empty --metrics output, cannot proceed"; exit 2; }
 
 row(){ # row <name> — the one <s …n="name"…> opening tag

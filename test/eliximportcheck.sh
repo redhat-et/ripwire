@@ -33,7 +33,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/eliximportfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -95,7 +95,7 @@ printf '%s' "$DEPS" | grep -q '<f p="lib/my_app/nestedcall.ex" includes="3"' \
 printf '%s' "$DEPS" | grep -q '<health files="9" dep_files="9"' \
     && ok 'capability: all 9 .ex files are dependency-capable (dep_files == files)' \
     || no "capability: dep_files wrong: $( printf '%s' "$DEPS" | grep -oE '<health [^/]*/>' )"
-printf '%s' "$DEPS" | grep -qE 'dep_langs="[^"]*,ex"' \
+printf '%s' "$DEPS" | grep -qE 'dep_langs="[^"]*,ex[,"]' \
     && ok 'capability: <health dep_langs=> discloses ex in the capable set' \
     || no "capability: dep_langs= does not name ex"
 
@@ -123,12 +123,12 @@ PY
 # ── 7. determinism, warm == cold, well-formed XML ─────────────────────────────────────────────────────
 "$BIN" "$FIX" --deps --no-cache >"$TMP/d1" 2>/dev/null
 "$BIN" "$FIX" --deps --no-cache >"$TMP/d2" 2>/dev/null
-cmp -s "$TMP/d1" "$TMP/d2" && ok "deterministic (two --no-cache runs identical)" || no "non-deterministic"
+if cmp -s "$TMP/d1" "$TMP/d2"; then ok "deterministic (two --no-cache runs identical)"; else no "non-deterministic"; fi
 "$BIN" "$FIX" --deps --cache="$TMP/c.bin" >"$TMP/cold" 2>/dev/null
 "$BIN" "$FIX" --deps --cache="$TMP/c.bin" >"$TMP/warm" 2>/dev/null
-cmp -s "$TMP/cold" "$TMP/warm" && ok "warm == cold (directives survive the cache round-trip)" || no "warm != cold"
+if cmp -s "$TMP/cold" "$TMP/warm"; then ok "warm == cold (directives survive the cache round-trip)"; else no "warm != cold"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/d1" 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if xmllint --noout "$TMP/d1" 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 else
     ok "xml well-formed (xmllint absent — skipped)"
 fi

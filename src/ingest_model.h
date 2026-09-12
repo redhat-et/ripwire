@@ -376,6 +376,45 @@ inline DefSpanIndex buildDefSpanIndex( const IngestResult& result, const std::ve
     return index;
 }
 
+// 4a) extent honesty (src/extentsuspect.h, gate test/extentcheck.sh): classify every file's definitions against
+//     the containment rules and record the failed reasons on the Symbol. Rides the span order buildDefSpanIndex
+//     just produced (startByte ascending, endByte descending — exactly the order the classifier's stack needs), so
+//     the pass adds no sort of its own. Every input is a fact the cache already carries (the extents, nameByte,
+//     RawDef::recovered), so the bits are recomputed on every load and never persisted: a warm run and a cold run
+//     classify identically, and a rule change needs no parser bump.
+inline void markExtentSuspects( IngestResult& result, const std::vector<RawDef>& rawDefs, const DefSpanIndex& index )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest/build-model: extent honesty (containment check)" );
+
+    std::vector<extent::ExtentDef> fileDefs;
+    std::vector<std::uint8_t>      fileBits;
+    extent::ExtentScratch          scratch;
+    for( std::size_t fileId = 0; fileId < result.files.size(); ++fileId )
+    {
+        const std::size_t begin = index.fileSpanStart[ fileId ];
+        const std::size_t end   = index.fileSpanStart[ fileId + 1 ];
+        if( end == begin )
+        {
+            continue;
+        }
+
+        fileDefs.clear();
+        for( std::size_t spanIndex = begin; spanIndex < end; ++spanIndex )
+        {
+            const NodeId  id = index.spans[ spanIndex ].id;
+            const Symbol& s  = result.symbols[ id ];
+            const RawDef& d  = rawDefs[ id ];   // aligned 1:1 with result.symbols after assignSymbols' sort
+            fileDefs.push_back( { s.sigStartByte, s.sigEndByte, s.endByte, d.nameByte, s.kind, s.lang, d.recovered, s.name, s.scope } );
+        }
+        fileBits.assign( fileDefs.size(), 0 );
+        extent::classifyFileExtents( fileDefs, fileBits, scratch );
+        for( std::size_t spanIndex = begin; spanIndex < end; ++spanIndex )
+        {
+            result.symbols[ index.spans[ spanIndex ].id ].extentSuspect = fileBits[ spanIndex - begin ];
+        }
+    }
+}
+
 // innermost enclosing def of a byte position: the container span with the LARGEST start ≤ pos whose end
 // is past pos (spans are start-sorted per file). Refs/bindings are consumed in deterministic
 // (fileId,startByte,...) order, so a single per-file sweep replaces one binary search per fact. The active

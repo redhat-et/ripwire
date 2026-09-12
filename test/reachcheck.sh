@@ -30,7 +30,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/queryfix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -118,7 +118,7 @@ callees_d2="$( names "$( run --callees=d2 )" | sort | tr '\n' ',' )"
 if command -v xmllint >/dev/null 2>&1; then
     xw=0
     for out in "$P" "$I4" "$C2"; do printf '%s' "$out" | xmllint --noout - 2>/dev/null || xw=1; done
-    [ "$xw" = 0 ] && ok "xml well-formed (--path/--impact/--callees)" || no "xml malformed in one of --path/--impact/--callees"
+    if [ "$xw" = 0 ]; then ok "xml well-formed (--path/--impact/--callees)"; else no "xml malformed in one of --path/--impact/--callees"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

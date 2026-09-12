@@ -29,7 +29,7 @@ FIX="$ROOT/test/pyimportprecisefix"
 . "$ROOT/test/lib/headbinlib.sh"                       # shared sha-keyed cache of the HEAD comparison binary
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
@@ -47,7 +47,7 @@ callee_binds(){  # $1 caller  $2 expected-path-substr  $3 must-NOT-contain-subst
 }
 callee_count(){  # $1 caller  $2 expected count=
   local c; c="$( grep -oE 'count="[0-9]+"' "$TMP/$1.out" | head -1 )"
-  [ "$c" = "count=\"$2\"" ] && ok "$1 has $c callee(s)" || no "$1 callee count wrong (got $c, want count=\"$2\")"
+  if [ "$c" = "count=\"$2\"" ]; then ok "$1 has $c callee(s)"; else no "$1 callee count wrong (got $c, want count=\"$2\")"; fi
 }
 
 # ── B1 path-precise resolution ────────────────────────────────────────────────────────────────────
@@ -69,15 +69,15 @@ grep -q '<inc t="pkg.mod"' "$TMP/deps.out" \
 
 # ── the fixture resolves everything → ambiguous=0 (a precise narrow never MANUFACTURES ambiguity) ─
 famb="$( "$BIN" "$FIX" --no-cache 2>/dev/null | grep -oE 'ambiguous=[0-9]+' | head -1 )"
-[ "$famb" = "ambiguous=0" ] && ok "fixture $famb" || no "fixture $famb (expected 0)"
+if [ "$famb" = "ambiguous=0" ]; then ok "fixture $famb"; else no "fixture $famb (expected 0)"; fi
 
 # ── determinism + warm==cold ──────────────────────────────────────────────────────────────────────
 "$BIN" "$FIX" --no-cache >"$TMP/d1" 2>/dev/null
 "$BIN" "$FIX" --no-cache >"$TMP/d2" 2>/dev/null
-cmp -s "$TMP/d1" "$TMP/d2" && ok "deterministic (two --no-cache runs identical)" || no "non-deterministic"
+if cmp -s "$TMP/d1" "$TMP/d2"; then ok "deterministic (two --no-cache runs identical)"; else no "non-deterministic"; fi
 "$BIN" "$FIX" --cache="$TMP/c.bin" >"$TMP/cold" 2>/dev/null
 "$BIN" "$FIX" --cache="$TMP/c.bin" >"$TMP/warm" 2>/dev/null
-cmp -s "$TMP/cold" "$TMP/warm" && ok "warm == cold (resolver order-stable through cache)" || no "warm != cold"
+if cmp -s "$TMP/cold" "$TMP/warm"; then ok "warm == cold (resolver order-stable through cache)"; else no "warm != cold"; fi
 
 # ── well-formed XML ───────────────────────────────────────────────────────────────────────────────
 command -v xmllint >/dev/null 2>&1 \
@@ -96,7 +96,7 @@ monotonic_check()
     # HEAD sha, then reused by all four monotonicity gates and every rerun until HEAD moves.
     local OLDBIN
     OLDBIN="$( ripwire_head_binary "$ROOT" "$TMP" )" \
-        || { skip "monotonicity: pre-change build failed"; return; }
+        || { headbin_refusal $? "monotonicity"; return; }
 
     local ao an
     ao="$( "$OLDBIN" "$FIX" --no-cache 2>/dev/null | grep -oE 'ambiguous=[0-9]+' | head -1 | grep -oE '[0-9]+' )"

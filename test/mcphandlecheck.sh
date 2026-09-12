@@ -32,7 +32,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -75,7 +75,7 @@ import sys, json
 names = [t["name"] for t in json.loads(sys.argv[1])["result"]["tools"]]
 print("FETCH_OK" if "fetch_body" in names else "MISSING")
 ' "$LIST_OUT" > "$TMP/listchk"
-grep -q FETCH_OK "$TMP/listchk" && ok "fetch_body tool is listed" || no "fetch_body tool MISSING from tools/list"
+if grep -q FETCH_OK "$TMP/listchk"; then ok "fetch_body tool is listed"; else no "fetch_body tool MISSING from tools/list"; fi
 
 echo
 echo "=== 2. find_symbol returns a well-formed handle on every surfaced symbol ==="
@@ -90,8 +90,8 @@ bad = [s["handle"] for s in syms if s.get("handle") and not re.fullmatch(r"sym#[
 print("NO_HANDLE:" + ",".join(missing) if missing else "ALL_HAVE_HANDLE")
 print("BAD_FORMAT:" + ",".join(bad) if bad else "FORMAT_OK")
 ' "$TMP/find_a" > "$TMP/hchk"
-grep -q ALL_HAVE_HANDLE "$TMP/hchk" && ok "every symbol carries a handle" || no "$(grep NO_HANDLE "$TMP/hchk")"
-grep -q FORMAT_OK      "$TMP/hchk" && ok "handles match sym#<16hex>@<16hex>" || no "$(grep BAD_FORMAT "$TMP/hchk")"
+if grep -q ALL_HAVE_HANDLE "$TMP/hchk"; then ok "every symbol carries a handle"; else no "$(grep NO_HANDLE "$TMP/hchk")"; fi
+if grep -q FORMAT_OK      "$TMP/hchk"; then ok "handles match sym#<16hex>@<16hex>"; else no "$(grep BAD_FORMAT "$TMP/hchk")"; fi
 
 H="$( mcp_call "${FIND_MSGS[@]}" | handle_of_symbol )"
 # Hard gate: every later step depends on H being a REAL handle. A missing/garbage H (e.g. the handle
@@ -133,7 +133,7 @@ echo
 echo "=== 4. handle is byte-identical across TWO independent server processes ==="
 H1="$( mcp_call "${FIND_MSGS[@]}" | handle_of_symbol )"
 H2="$( mcp_call "${FIND_MSGS[@]}" | handle_of_symbol )"
-[ "$H1" = "$H2" ] && ok "handle stable across two processes ($H1)" || no "handle differs across processes: $H1 vs $H2"
+if [ "$H1" = "$H2" ]; then ok "handle stable across two processes ($H1)"; else no "handle differs across processes: $H1 vs $H2"; fi
 
 echo
 echo "=== 5. STALE handle is REFUSED (file changed since issue), no body returned ==="
@@ -150,7 +150,7 @@ code = r.get("error", {}).get("code")
 msg  = r.get("error", {}).get("message", "")
 print("STALE_REFUSED" if (not has_result and code == -32602 and "stale" in msg) else "STALE_SERVED:" + json.dumps(r)[:200])
 ' "$TMP/stale" > "$TMP/stalechk"
-grep -q STALE_REFUSED "$TMP/stalechk" && ok "stale handle refused with -32602 'stale', no body" || no "stale handle NOT refused: $(cat "$TMP/stalechk")"
+if grep -q STALE_REFUSED "$TMP/stalechk"; then ok "stale handle refused with -32602 'stale', no body"; else no "stale handle NOT refused: $(cat "$TMP/stalechk")"; fi
 
 echo
 echo "=== 6. garbage / mutated handle is REFUSED ==="
@@ -163,7 +163,7 @@ import sys, json
 r = json.load(open(sys.argv[1]))
 print("GARBAGE_REFUSED" if ("result" not in r and r.get("error",{}).get("code")==-32602) else "GARBAGE_SERVED")
 ' "$TMP/garbage" > "$TMP/gchk"
-grep -q GARBAGE_REFUSED "$TMP/gchk" && ok "garbage handle refused" || no "garbage handle NOT refused"
+if grep -q GARBAGE_REFUSED "$TMP/gchk"; then ok "garbage handle refused"; else no "garbage handle NOT refused"; fi
 
 # well-formed but non-existent id: flip the first id hex nibble deterministically → resolves to nothing.
 MUT="$( python3 -c '
@@ -181,7 +181,7 @@ import sys, json
 r = json.load(open(sys.argv[1]))
 print("MUT_REFUSED" if ("result" not in r and r.get("error",{}).get("code")==-32602) else "MUT_SERVED:" + json.dumps(r)[:160])
 ' "$TMP/mut" > "$TMP/mchk"
-grep -q MUT_REFUSED "$TMP/mchk" && ok "mutated (non-existent id) handle refused, no body" || no "mutated handle NOT refused: $(cat "$TMP/mchk")"
+if grep -q MUT_REFUSED "$TMP/mchk"; then ok "mutated (non-existent id) handle refused, no body"; else no "mutated handle NOT refused: $(cat "$TMP/mchk")"; fi
 
 echo
 echo "=== 6b. R2c (the 2026-08-12 usage mine): a bare symbol NAME is accepted where a handle is expected ==="
@@ -374,7 +374,7 @@ echo
 echo "=== 7. determinism: two find_symbol calls byte-identical ==="
 mcp_call "${FIND_MSGS[@]}" > "$TMP/det_a"
 mcp_call "${FIND_MSGS[@]}" > "$TMP/det_b"
-diff -q "$TMP/det_a" "$TMP/det_b" >/dev/null && ok "find_symbol deterministic (byte-identical)" || no "find_symbol non-deterministic"
+if diff -q "$TMP/det_a" "$TMP/det_b" >/dev/null; then ok "find_symbol deterministic (byte-identical)"; else no "find_symbol non-deterministic"; fi
 
 echo
 echo "=== 8. every response line is valid JSON ==="
@@ -389,7 +389,7 @@ for i, ln in enumerate(open(sys.argv[1]), 1):
     except Exception as e: print("LINE", i, "INVALID:", e); bad += 1
 print("JSON_OK" if bad == 0 else "JSON_BAD:" + str(bad))
 ' "$TMP/json_lines" > "$TMP/jchk"
-grep -q JSON_OK "$TMP/jchk" && ok "all response lines are valid JSON" || no "$(grep -v JSON_OK "$TMP/jchk")"
+if grep -q JSON_OK "$TMP/jchk"; then ok "all response lines are valid JSON"; else no "$(grep -v JSON_OK "$TMP/jchk")"; fi
 
 echo
 if [ "$fail" -eq 0 ]; then

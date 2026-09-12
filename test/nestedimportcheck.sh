@@ -76,7 +76,7 @@ FIX="$ROOT/test/nestedimportfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){   printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
@@ -106,13 +106,13 @@ presence scope_control.ts 'fakeModule.require' 'TS member-expression negative co
 for f in guarded.py guarded.rs Nested.cs filescoped.cs scope_control.ts; do
     mkdir -p "$TMP/parse/$f.d" && cp "$FIX/$f" "$TMP/parse/$f.d/"
     errs="$( "$BIN" "$TMP/parse/$f.d" --match='(ERROR) @e' --no-cache 2>/dev/null | grep -oE 'hits="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"
-    [ "${errs:-1}" = "0" ] && ok "presence: $f parses with zero ERROR nodes" || no "presence: $f has ${errs:-?} ERROR node(s) — arms on it prove nothing"
+    if [ "${errs:-1}" = "0" ]; then ok "presence: $f parses with zero ERROR nodes"; else no "presence: $f has ${errs:-?} ERROR node(s) — arms on it prove nothing"; fi
 done
 
 # ══ 1. CAPTURE ═══════════════════════════════════════════════════════════════════════════════════════
 "$BIN" "$FIX" --deps --no-cache --limit=500 >"$TMP/deps" 2>"$TMP/deps.err"
 rc=$?
-[ "$rc" -eq 0 ] && ok "--deps exits 0" || { no "--deps exits $rc"; head -3 "$TMP/deps.err"; }
+if [ "$rc" -eq 0 ]; then ok "--deps exits 0"; else { no "--deps exits $rc"; head -3 "$TMP/deps.err"; }; fi
 [ -s "$TMP/deps" ] || { echo "nestedimportcheck: empty --deps output, cannot proceed"; exit 2; }
 
 inc(){ # inc <target> <label>
@@ -297,7 +297,7 @@ else
     no "400-deep container nest: non-zero exit"; head -3 "$TMP/deep.err"
 fi
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/deep.out" 2>/dev/null && ok "400-deep container nest: XML well-formed" || no "400-deep container nest: XML malformed"
+    if xmllint --noout "$TMP/deep.out" 2>/dev/null; then ok "400-deep container nest: XML well-formed"; else no "400-deep container nest: XML malformed"; fi
 else
     skip "400-deep container nest: xmllint absent"
 fi
@@ -305,15 +305,15 @@ fi
 # ══ 5. HYGIENE ═══════════════════════════════════════════════════════════════════════════════════════
 "$BIN" "$FIX" --deps --no-cache --limit=500 >"$TMP/d1" 2>/dev/null
 "$BIN" "$FIX" --deps --no-cache --limit=500 >"$TMP/d2" 2>/dev/null
-cmp -s "$TMP/d1" "$TMP/d2" && ok "deterministic (two --no-cache runs identical)" || no "non-deterministic"
+if cmp -s "$TMP/d1" "$TMP/d2"; then ok "deterministic (two --no-cache runs identical)"; else no "non-deterministic"; fi
 
 "$BIN" "$FIX" --deps --limit=500 --cache="$TMP/c.bin" >"$TMP/cold" 2>/dev/null
 "$BIN" "$FIX" --deps --limit=500 --cache="$TMP/c.bin" >"$TMP/warm" 2>/dev/null
-cmp -s "$TMP/cold" "$TMP/warm" && ok "warm == cold (nested imports survive the extraction cache)" || { no "warm != cold"; diff "$TMP/cold" "$TMP/warm" | head -4; }
-cmp -s "$TMP/cold" "$TMP/d1"   && ok "cached run == --no-cache run" || no "cached run differs from --no-cache run"
+if cmp -s "$TMP/cold" "$TMP/warm"; then ok "warm == cold (nested imports survive the extraction cache)"; else { no "warm != cold"; diff "$TMP/cold" "$TMP/warm" | head -4; }; fi
+if cmp -s "$TMP/cold" "$TMP/d1"; then ok "cached run == --no-cache run"; else no "cached run differs from --no-cache run"; fi
 
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/d1" 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if xmllint --noout "$TMP/d1" 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 else
     skip "xml well-formedness (xmllint absent)"
 fi
@@ -331,13 +331,12 @@ monotonicity_check()
     ( cd "$ROOT" && git rev-parse --verify HEAD >/dev/null 2>&1 ) || { skip "monotonicity: not a git repo"; return; }
     . "$ROOT/test/lib/headbinlib.sh"
 
-    local WT="$TMP/head"
-    ( cd "$ROOT" && git worktree add -q --detach "$WT" HEAD ) 2>"$TMP/wt.err" \
-        || { skip "monotonicity: cannot create HEAD worktree ($( head -1 "$TMP/wt.err" ))"; return; }
-    trap '( cd "$ROOT" && git worktree remove --force "'"$WT"'" >/dev/null 2>&1 ); rm -rf "$TMP"' EXIT
+    local WT="$TMP/head"                               # a private clone, never a registered worktree (test/worktreeleakcheck.sh)
+    ripwire_private_checkout "$ROOT" HEAD "$WT" 2>"$TMP/wt.err" \
+        || { skip "monotonicity: cannot check out HEAD ($( head -1 "$TMP/wt.err" ))"; return; }
 
     local OLDBIN
-    OLDBIN="$( ripwire_head_binary "$ROOT" "$TMP" )" || { skip "monotonicity: pre-change build failed"; return; }
+    OLDBIN="$( ripwire_head_binary "$ROOT" "$TMP" )" || { headbin_refusal $? "monotonicity"; return; }
 
     local IN="$WT/src"
     # (a) captured includes — compare the PER-FILE COUNT, never the emitted <inc> rows. serialize.h caps

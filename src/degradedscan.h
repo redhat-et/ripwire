@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // degradedscan.h — THE ONE degraded-parse text scan behind every "that name resolved to nothing" refusal.
 //
@@ -54,7 +56,6 @@ inline DegradedTextHit degradedTextHit( const IngestResult& ing, std::string_vie
         return {};
     }
     std::size_t scannedFiles = 0, scannedBytes = 0;
-    std::string bytes;
     for( std::size_t fileIndex = 0; fileIndex < ing.files.size() && fileIndex < ing.fileHealth.size(); ++fileIndex )
     {
         if( !fileParseDegraded( ing, fileIndex ) )
@@ -66,11 +67,12 @@ inline DegradedTextHit degradedTextHit( const IngestResult& ing, std::string_vie
         {
             return {};                                   // budget — absent claims nothing
         }
-        if( !darkflags::readWhole( diskPath( ing, std::uint32_t( fileIndex ) ), bytes ) )
+        const std::optional<std::string> bytes = darkflags::readWhole( diskPath( ing, std::uint32_t( fileIndex ) ) );
+        if( !bytes )
         {
             continue;
         }
-        const std::string_view hay( bytes );
+        const std::string_view hay( *bytes );
         for( std::size_t at = hay.find( name ); at != std::string_view::npos; at = hay.find( name, at + 1 ) )
         {
             if( darkflags::wholeWordAt( hay, at, name.size() ) )
@@ -78,7 +80,7 @@ inline DegradedTextHit degradedTextHit( const IngestResult& ing, std::string_vie
                 DegradedTextHit hit;
                 hit.found     = true;
                 hit.fileIndex = fileIndex;
-                std::snprintf( hit.errRatio, sizeof( hit.errRatio ), "%.3f", double( h.errBytes ) / double( h.fileBytes ) );
+                rw::formatTo( hit.errRatio, sizeof( hit.errRatio ), "{:.3f}", double( h.errBytes ) / double( h.fileBytes ) );
                 return hit;
             }
         }

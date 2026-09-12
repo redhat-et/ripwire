@@ -1,4 +1,6 @@
 #pragma once
+#include "emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // blanktext.h — THE ONE PREDICATE for "this value is PRESENT but carries NOTHING".
 //
@@ -228,7 +230,7 @@ inline std::pair<std::size_t, std::string> blankPayloadSpelling( std::string_vie
         if( codePointCount < kBlankSpellingMaxCodePoints )
         {
             char hex[16] = {};
-            std::snprintf( hex, sizeof( hex ), "U+%04X", decoded.codePoint );
+            rw::formatTo( hex, sizeof( hex ), "U+{:04X}", decoded.codePoint );
             if( !spelling.empty() )
             {
                 spelling += ' ';

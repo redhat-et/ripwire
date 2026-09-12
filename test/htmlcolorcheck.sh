@@ -43,7 +43,7 @@ CORPUS="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -53,23 +53,23 @@ echo "htmlcolorcheck: BIN=$BIN  CORPUS=$CORPUS"
 # ── 1) baseline payload: --html with no --color-by still carries the machinery, defaulted to lang ────
 "$BIN" "$CORPUS" --html --no-cache >"$TMP/out.html" 2>/dev/null
 count="$( grep -c '"id"' "$TMP/out.html" 2>/dev/null || echo 0 )"
-[ "$count" -ge 3 ]                             && ok "NODES array has >= 3 entries (found $count)"        || no "NODES array has < 3 entries (found $count)"
-grep -q '"cx":'                "$TMP/out.html" && ok "output contains \"cx\": per-node field"              || no "output missing \"cx\": per-node field"
-grep -q '"ts":'                "$TMP/out.html" && ok "output contains \"ts\": per-node field"              || no "output missing \"ts\": per-node field"
-grep -q 'const FCHURN'         "$TMP/out.html" && ok "output contains const FCHURN"                        || no "output missing const FCHURN"
-grep -q 'const CHURN_OK'       "$TMP/out.html" && ok "output contains const CHURN_OK"                      || no "output missing const CHURN_OK"
-grep -q 'id="colorMode"'       "$TMP/out.html" && ok "output contains <select id=\"colorMode\">"           || no "output missing <select id=\"colorMode\">"
-grep -q 'value="lang"'         "$TMP/out.html" && ok "colorMode select has value=\"lang\" option"          || no "colorMode select missing value=\"lang\" option"
-grep -q 'value="community"'    "$TMP/out.html" && ok "colorMode select has value=\"community\" option"     || no "colorMode select missing value=\"community\" option"
-grep -q 'value="cx"'           "$TMP/out.html" && ok "colorMode select has value=\"cx\" option"            || no "colorMode select missing value=\"cx\" option"
-grep -q 'value="churn"'        "$TMP/out.html" && ok "colorMode select has value=\"churn\" option"         || no "colorMode select missing value=\"churn\" option"
-grep -q 'value="tested"'       "$TMP/out.html" && ok "colorMode select has value=\"tested\" option"        || no "colorMode select missing value=\"tested\" option"
-grep -q 'renderLegend'         "$TMP/out.html" && ok "output contains renderLegend function"               || no "output missing renderLegend function"
-grep -q 'const COLOR_MODE = "lang"' "$TMP/out.html" && ok "default COLOR_MODE is \"lang\" when --color-by omitted" || no "default COLOR_MODE is not \"lang\" when --color-by omitted"
+if [ "$count" -ge 3 ]; then ok "NODES array has >= 3 entries (found $count)"; else no "NODES array has < 3 entries (found $count)"; fi
+if grep -q '"cx":'                "$TMP/out.html"; then ok "output contains \"cx\": per-node field"; else no "output missing \"cx\": per-node field"; fi
+if grep -q '"ts":'                "$TMP/out.html"; then ok "output contains \"ts\": per-node field"; else no "output missing \"ts\": per-node field"; fi
+if grep -q 'const FCHURN'         "$TMP/out.html"; then ok "output contains const FCHURN"; else no "output missing const FCHURN"; fi
+if grep -q 'const CHURN_OK'       "$TMP/out.html"; then ok "output contains const CHURN_OK"; else no "output missing const CHURN_OK"; fi
+if grep -q 'id="colorMode"'       "$TMP/out.html"; then ok "output contains <select id=\"colorMode\">"; else no "output missing <select id=\"colorMode\">"; fi
+if grep -q 'value="lang"'         "$TMP/out.html"; then ok "colorMode select has value=\"lang\" option"; else no "colorMode select missing value=\"lang\" option"; fi
+if grep -q 'value="community"'    "$TMP/out.html"; then ok "colorMode select has value=\"community\" option"; else no "colorMode select missing value=\"community\" option"; fi
+if grep -q 'value="cx"'           "$TMP/out.html"; then ok "colorMode select has value=\"cx\" option"; else no "colorMode select missing value=\"cx\" option"; fi
+if grep -q 'value="churn"'        "$TMP/out.html"; then ok "colorMode select has value=\"churn\" option"; else no "colorMode select missing value=\"churn\" option"; fi
+if grep -q 'value="tested"'       "$TMP/out.html"; then ok "colorMode select has value=\"tested\" option"; else no "colorMode select missing value=\"tested\" option"; fi
+if grep -q 'renderLegend'         "$TMP/out.html"; then ok "output contains renderLegend function"; else no "output missing renderLegend function"; fi
+if grep -q 'const COLOR_MODE = "lang"' "$TMP/out.html"; then ok "default COLOR_MODE is \"lang\" when --color-by omitted"; else no "default COLOR_MODE is not \"lang\" when --color-by omitted"; fi
 
 # ── 2) explicit mode: --color-by=cx bakes COLOR_MODE = "cx" into the page ────────────────────────────
 "$BIN" "$CORPUS" --html --color-by=cx --no-cache >"$TMP/cx.html" 2>/dev/null
-grep -q 'const COLOR_MODE = "cx"' "$TMP/cx.html" && ok "--color-by=cx: COLOR_MODE = \"cx\" baked in" || no "--color-by=cx: COLOR_MODE = \"cx\" not baked in"
+if grep -q 'const COLOR_MODE = "cx"' "$TMP/cx.html"; then ok "--color-by=cx: COLOR_MODE = \"cx\" baked in"; else no "--color-by=cx: COLOR_MODE = \"cx\" not baked in"; fi
 
 # ── 3) determinism: two runs of --html --color-by=community are byte-identical ───────────────────────
 #      NON-EMPTY is part of the assertion: two empty outputs from a refusing binary also "match".

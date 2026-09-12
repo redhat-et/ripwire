@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // contextratio.h — `--context-ratio`: the LOCAL-REASONING lens. One question, per symbol and per file:
 // *to understand this, how much must I know that is not in front of me?*
@@ -540,11 +543,11 @@ inline int writeContextRatioReport( const IngestResult& ing, int pageLimit, int 
     std::fputs( rw::rootRelPathsLegend( !rootAttr.empty() ), stdout );
     // N2: the fired marker and its floor in ONE statement (collectioncapcheck.sh arm (D) reads that from src/ alone).
     const std::string defsCappedAttr = scan.defsCapFired ? std::string( " defs_capped=\"1\"" ) + rw::kGraphCountFloorAttrXml : std::string();
-    std::printf( "<contextratio units=\"%zu\" file_units=\"%zu\" defs_per_name_cap=\"%u\" body_bytes_per_token=\"%.2f\""
-                 " shown_syms=\"%zu\" syms_capped=\"%s\" shown_files=\"%zu\" files_capped=\"%s\"%s%s%s>",
+    rw::emitTo( stdout, "<contextratio units=\"{}\" file_units=\"{}\" defs_per_name_cap=\"{}\" body_bytes_per_token=\"{:.2f}\""
+                 " shown_syms=\"{}\" syms_capped=\"{}\" shown_files=\"{}\" files_capped=\"{}\"{}{}{}>",
                  total, scan.files.size(), unsigned( kDefsPerNameCap ), kBytesPerTokenBody,
                  shown, shown < total ? "1" : "0",
-                 fileShown, fileShown < scan.files.size() ? "1" : "0", paging, defsCappedAttr.c_str(), rootAttr.c_str() );
+                 fileShown, fileShown < scan.files.size() ? "1" : "0", rw::cstr( paging ), defsCappedAttr.c_str(), rootAttr.c_str() );
 
     // TWO scratch buffers, not one reused twice in the same call: escapeXml returns a VIEW into its `out`,
     // so a second call with the same buffer invalidates the first view (readability.h carries the same note).
@@ -560,8 +563,8 @@ inline int writeContextRatioReport( const IngestResult& ing, int pageLimit, int 
         const Symbol&     s   = ing.symbols[row.unitId];
         const std::string path( escapeXml( pathRel( s.fileId ), escPath ) );
         const std::string name( escapeXml( s.name, escName ) );
-        std::printf( "<s p=\"%s:%u\" n=\"%s\" t=\"%s\" sites=\"%u\" ents=\"%u\" ents_out=\"%u\" ent_ratio=\"%.3f\""
-                     " files=\"%u\" files_out=\"%u\" rtok=\"%llu\" rtok_out=\"%llu\" read_ratio=\"%.3f\" ext=\"%u\" amb_names=\"%u\"/>",
+        rw::emitTo( stdout, "<s p=\"{}:{}\" n=\"{}\" t=\"{}\" sites=\"{}\" ents=\"{}\" ents_out=\"{}\" ent_ratio=\"{:.3f}\""
+                     " files=\"{}\" files_out=\"{}\" rtok=\"{}\" rtok_out=\"{}\" read_ratio=\"{:.3f}\" ext=\"{}\" amb_names=\"{}\"/>",
                      path.c_str(), s.line, name.c_str(), symTag( s.kind ),
                      row.sites, row.ents, row.entsOut, ratioOf( row.entsOut, row.ents ),
                      row.files, row.filesOut,
@@ -572,14 +575,14 @@ inline int writeContextRatioReport( const IngestResult& ing, int pageLimit, int 
     {
         const Row&        row = scan.files[fileIndex];
         const std::string path( escapeXml( pathRel( row.unitId ), escPath ) );
-        std::printf( "<f p=\"%s\" sites=\"%u\" ents=\"%u\" ents_out=\"%u\" ent_ratio=\"%.3f\""
-                     " files=\"%u\" files_out=\"%u\" rtok=\"%llu\" rtok_out=\"%llu\" read_ratio=\"%.3f\" ext=\"%u\" amb_names=\"%u\"/>",
+        rw::emitTo( stdout, "<f p=\"{}\" sites=\"{}\" ents=\"{}\" ents_out=\"{}\" ent_ratio=\"{:.3f}\""
+                     " files=\"{}\" files_out=\"{}\" rtok=\"{}\" rtok_out=\"{}\" read_ratio=\"{:.3f}\" ext=\"{}\" amb_names=\"{}\"/>",
                      path.c_str(), row.sites, row.ents, row.entsOut, ratioOf( row.entsOut, row.ents ),
                      row.files, row.filesOut,
                      static_cast<unsigned long long>( row.rtok ), static_cast<unsigned long long>( row.rtokOut ),
                      ratioOf( row.rtokOut, row.rtok ), row.ext, row.amb );
     }
-    std::printf( "</contextratio>" );
+    rw::emitRaw( stdout, "</contextratio>" );
     return 0;
 }
 

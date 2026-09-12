@@ -17,7 +17,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/duprowfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -52,14 +52,14 @@ printf '%s' "$OUT" | grep -o '<s[^>]*n="touch"[^>]*>[^<]*<c[^/]*/>' | grep -q 'n
 
 # ── 5) xml well-formed (G4) ─────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$OUT" | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if printf '%s' "$OUT" | xmllint --noout - 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi
 
 # ── 6) determinism — two runs byte-identical ────────────────────────────────────────────────────────────
 OUT2="$( "$BIN" test/duprowfix --no-cache 2>/dev/null )"
-[ "$OUT" = "$OUT2" ] && ok "deterministic (byte-identical run-to-run)" || no "non-deterministic output"
+if [ "$OUT" = "$OUT2" ]; then ok "deterministic (byte-identical run-to-run)"; else no "non-deterministic output"; fi
 
 # ── 8) §A8.7: the v1 legend closes the shown=/overloads= arithmetic — the ONE clause a reader needs to
 # know rows + Σ(overloads-1) == shown, which was previously true but undocumented.

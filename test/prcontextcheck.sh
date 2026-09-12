@@ -24,7 +24,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -74,19 +74,19 @@ echo "$OUT" | grep -q '<file p="[^"]*src/core\.cpp" symbols="2">' \
     || no "no <file> section for src/core.cpp with symbols=2"
 
 # changed symbols present
-echo "$OUT" | grep -q '<s t="fn" n="helper"' && ok "symbol helper present" || no "symbol helper missing"
-echo "$OUT" | grep -q '<s t="fn" n="core"'   && ok "symbol core present"   || no "symbol core missing"
+if echo "$OUT" | grep -q '<s t="fn" n="helper"'; then ok "symbol helper present"; else no "symbol helper missing"; fi
+if echo "$OUT" | grep -q '<s t="fn" n="core"'; then ok "symbol core present"; else no "symbol core missing"; fi
 
 # callers: core calls helper; useCore + test_core call core
-echo "$OUT" | grep -q '<caller t="fn" n="core"'      && ok "helper's caller (core) present"      || no "helper's caller (core) missing"
-echo "$OUT" | grep -q '<caller t="fn" n="useCore"'   && ok "core's caller (useCore) present"     || no "core's caller (useCore) missing"
-echo "$OUT" | grep -q '<caller t="fn" n="test_core"' && ok "core's caller (test_core) present"   || no "core's caller (test_core) missing"
+if echo "$OUT" | grep -q '<caller t="fn" n="core"'; then ok "helper's caller (core) present"; else no "helper's caller (core) missing"; fi
+if echo "$OUT" | grep -q '<caller t="fn" n="useCore"'; then ok "core's caller (useCore) present"; else no "core's caller (useCore) missing"; fi
+if echo "$OUT" | grep -q '<caller t="fn" n="test_core"'; then ok "core's caller (test_core) present"; else no "core's caller (test_core) missing"; fi
 
 # blast radius includes user.cpp and test_core.cpp
 echo "$OUT" | grep -q '<impact ' \
     && ok "impact (blast radius) block present" \
     || no "impact block missing"
-echo "$OUT" | grep -q '<f p="[^"]*src/user\.cpp"' && ok "blast radius includes src/user.cpp" || no "blast radius missing src/user.cpp"
+if echo "$OUT" | grep -q '<f p="[^"]*src/user\.cpp"'; then ok "blast radius includes src/user.cpp"; else no "blast radius missing src/user.cpp"; fi
 
 # affected test file
 # M21(b) re-pin (capture-audit 2026-09-04): a tests_to_run row now always carries a run recipe or the
@@ -151,7 +151,7 @@ chmod "$ORIG_MODE" "$REPO/src/user.cpp"
 # ── Determinism ─────────────────────────────────────────────────────────────────────────────────────
 A="$( "$BIN" "$REPO" --pr-context --no-cache 2>/dev/null )"
 B="$( "$BIN" "$REPO" --pr-context --no-cache 2>/dev/null )"
-[ "$A" = "$B" ] && ok "determinism: byte-identical run-to-run" || no "determinism: output differs"
+if [ "$A" = "$B" ]; then ok "determinism: byte-identical run-to-run"; else no "determinism: output differs"; fi
 
 # ── Degrade: non-git dir → comment + files=0, exit 0 ────────────────────────────────────────────────
 NG="$TMP/nongit"; mkdir -p "$NG"; echo 'int f(){return 0;}' >"$NG/a.cpp"

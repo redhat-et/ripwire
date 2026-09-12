@@ -45,7 +45,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -490,7 +490,7 @@ if command -v xmllint >/dev/null 2>&1; then
         [ -s "$f" ] || continue
         xmllint --noout "$f" 2>/dev/null || bad="$bad $( basename "$f" )"
     done
-    [ -z "$bad" ] && ok "G4: every swept document is xmllint-clean" || no "G4: malformed XML from:$bad"
+    if [ -z "$bad" ]; then ok "G4: every swept document is xmllint-clean"; else no "G4: malformed XML from:$bad"; fi
 else
     ok "G4: xmllint unavailable (skipped)"
 fi

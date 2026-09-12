@@ -35,7 +35,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -105,10 +105,10 @@ armAttrs "$FRESH" armC | grep -q 'head_conflicts="0"' && ok 'an arm off current 
 # ── determinism + G4 ──────────────────────────────────────────────────────────────────────────────────
 "$BIN" "$REPO" --merge-scout=armA,armB >"$TMP/a.xml" 2>/dev/null
 "$BIN" "$REPO" --merge-scout=armA,armB >"$TMP/b.xml" 2>/dev/null
-cmp -s "$TMP/a.xml" "$TMP/b.xml" && ok "deterministic (byte-identical run-to-run)" || no "deterministic"
+if cmp -s "$TMP/a.xml" "$TMP/b.xml"; then ok "deterministic (byte-identical run-to-run)"; else no "deterministic"; fi
 
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$OUT" >/dev/null 2>&1 && ok "G4: xmllint-clean" || no "G4: xmllint-clean"
+    if xmllint --noout "$OUT" >/dev/null 2>&1; then ok "G4: xmllint-clean"; else no "G4: xmllint-clean"; fi
 else
     ok "G4: xmllint unavailable — skipped"
 fi

@@ -18,7 +18,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -62,7 +62,7 @@ fi
 # ── #4: --for --format=candidates works and is capped by --top-k ────────────────────────────────────────
 "$BIN" src --for="rank symbols by pagerank" --format=candidates --top-k=7 --no-cache >"$TMP/f7" 2>/dev/null
 R7=$( rows "$TMP/f7" )
-[ "$R7" = 7 ] && ok "--for candidates --top-k=7 -> 7 rows" || no "--for candidates --top-k=7 -> $R7 rows (expected 7)"
+if [ "$R7" = 7 ]; then ok "--for candidates --top-k=7 -> 7 rows"; else no "--for candidates --top-k=7 -> $R7 rows (expected 7)"; fi
 
 # ── #5: ranks are 1..K in order (r="1" first, ascending) ───────────────────────────────────────────────
 FIRST=$( grep -oE '<cand r="[0-9]+"' "$TMP/f7" | head -1 | grep -oE '[0-9]+' )
@@ -89,7 +89,7 @@ if command -v xmllint >/dev/null 2>&1; then
     for FF in "$TMP/q10" "$TMP/f7" "$TMP/det1"; do
         xmllint --noout "$FF" 2>/dev/null || { echo "    malformed: $FF"; lint=0; }
     done
-    [ "$lint" = 1 ] && ok "candidates output well-formed XML (G4)" || no "candidates output malformed XML"
+    if [ "$lint" = 1 ]; then ok "candidates output well-formed XML (G4)"; else no "candidates output malformed XML"; fi
 else
     printf '  SKIP  xmllint (not installed)\n'
 fi

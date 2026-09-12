@@ -18,7 +18,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/queryfix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -37,24 +37,24 @@ ec(){ perl -e 'alarm 8; exec @ARGV' "$BIN" "$FIX" --graph-query="$1" --no-cache 
 is(){ local got; got="$( cnt "$1" )"; [ "$got" = "$2" ] || { printf '%s' "  (got '$got' want '$2' for: $1)"; return 1; }; return 0; }
 
 # ── sources ──────────────────────────────────────────────────────────────────────────────────────────
-is 'name("d4")' 1 && ok "source name(): d4 → 1" || no "source name()$(is 'name("d4")' 1)"
+if is 'name("d4")' 1; then ok "source name(): d4 → 1"; else no "source name()$(is 'name("d4")' 1)"; fi
 
 # ── bounded transitive closure: depth controls reach (the load-bearing operator) ──────────────────────
 { is 'callers(name("d4"),1)' 1 && is 'callers(name("d4"),2)' 2 && is 'callers(name("d4"),3)' 3; } \
     && ok "closure: callers(d4) at depth 1/2/3 → 1/2/3 (bounded transitive reach over the chain)" \
     || no "closure depth ladder wrong (callers(d4) 1/2/3 should be 1/2/3)"
-is 'callees(name("d1"),3)' 3 && ok "closure: callees(d1,3) → d2,d3,d4 (3, out-edge direction)" || no "callees(d1,3) should be 3"
+if is 'callees(name("d1"),3)' 3; then ok "closure: callees(d1,3) → d2,d3,d4 (3, out-edge direction)"; else no "callees(d1,3) should be 3"; fi
 
 # ── filters (node predicates) ─────────────────────────────────────────────────────────────────────────
-{ is 'kind(all,fn)' 8 && is 'kind(all,cls)' 1; } && ok "filter kind: 8 fn + 1 cls (Gadget)" || no "kind filter counts wrong"
-{ is 'cx(name("hot"),3)' 1 && is 'cx(name("d4"),3)' 0; } && ok "filter cx>=3: catches complex hot(), not trivial d4()" || no "cx filter wrong"
-{ is 'fanin(name("hot"),2)' 1 && is 'fanin(name("hot"),3)' 0; } && ok "filter fanin>=2: hot() has exactly 2 callers" || no "fanin filter wrong"
-is 'file(all,"chain")' 4 && ok "filter file~chain: 4 nodes (d1..d4)" || no "file filter should be 4"
+if { is 'kind(all,fn)' 8 && is 'kind(all,cls)' 1; }; then ok "filter kind: 8 fn + 1 cls (Gadget)"; else no "kind filter counts wrong"; fi
+if { is 'cx(name("hot"),3)' 1 && is 'cx(name("d4"),3)' 0; }; then ok "filter cx>=3: catches complex hot(), not trivial d4()"; else no "cx filter wrong"; fi
+if { is 'fanin(name("hot"),2)' 1 && is 'fanin(name("hot"),3)' 0; }; then ok "filter fanin>=2: hot() has exactly 2 callers"; else no "fanin filter wrong"; fi
+if is 'file(all,"chain")' 4; then ok "filter file~chain: 4 nodes (d1..d4)"; else no "file filter should be 4"; fi
 
 # ── 2-relation joins ──────────────────────────────────────────────────────────────────────────────────
-is 'and(callers(name("d4"),3),file(all,"chain"))' 3 && ok "join and: callers(d4,3) ∩ file(chain) = 3 (d1,d2,d3)" || no "and join wrong"
-is 'or(name("d4"),name("hot"))' 2 && ok "join or: d4 ∪ hot = 2" || no "or join wrong"
-is 'not(callers(name("d4"),3),name("d2"))' 2 && ok "join not: callers(d4,3) − d2 = 2 (d1,d3)" || no "not join wrong"
+if is 'and(callers(name("d4"),3),file(all,"chain"))' 3; then ok "join and: callers(d4,3) ∩ file(chain) = 3 (d1,d2,d3)"; else no "and join wrong"; fi
+if is 'or(name("d4"),name("hot"))' 2; then ok "join or: d4 ∪ hot = 2"; else no "or join wrong"; fi
+if is 'not(callers(name("d4"),3),name("d2"))' 2; then ok "join not: callers(d4,3) − d2 = 2 (d1,d3)"; else no "not join wrong"; fi
 
 # ── C3: and()'s predicate-pushdown, EXACT equivalence — X ∩ {n∈all:P(n)} ≡ {n∈X:P(n)}, same sorted-unique
 #    vector either way. Byte-compare (query-header `expr=` attr stripped — it just echoes the literal query
@@ -106,19 +106,19 @@ printf '%s' "$fullout" | grep -qE 'count="8" shown="8" capped="0"' \
     || no "--graph-query untruncated does not report count=8 shown=8 capped=\"0\""
 
 # ── robustness: parse errors + a malformed regex DEGRADE to a clean exit 1 (no hang, no crash) ─────────
-[ "$( ec 'callers(name("x")' )" = 1 ]  && ok "malformed expression → exit 1 (parse error reported)" || no "malformed expr should exit 1"
-[ "$( ec 'frobnicate(all)' )"   = 1 ]  && ok "unknown operator → exit 1" || no "unknown op should exit 1"
-[ "$( ec 'file(all,"a{2,")' )"  = 1 ]  && ok "malformed file() regex → degrades to exit 1 (no hang/crash)" || no "bad regex should exit 1"
+if [ "$( ec 'callers(name("x")' )" = 1 ]; then ok "malformed expression → exit 1 (parse error reported)"; else no "malformed expr should exit 1"; fi
+if [ "$( ec 'frobnicate(all)' )"   = 1 ]; then ok "unknown operator → exit 1"; else no "unknown op should exit 1"; fi
+if [ "$( ec 'file(all,"a{2,")' )"  = 1 ]; then ok "malformed file() regex → degrades to exit 1 (no hang/crash)"; else no "bad regex should exit 1"; fi
 
 # ── cycle-safety: a self-recursive function's closure must terminate (seen-set caps each node once) ────
 perl -e 'alarm 8; exec @ARGV' "$BIN" "$FIX" --graph-query='callers(name("rec"),9)' --no-cache >/dev/null 2>&1; rcy=$?
-[ "$rcy" = 0 ] && ok "cycle-safety: self-recursive rec() closure terminates (no hang on a cyclic call graph)" || no "rec closure hung/failed (exit $rcy)"
+if [ "$rcy" = 0 ]; then ok "cycle-safety: self-recursive rec() closure terminates (no hang on a cyclic call graph)"; else no "rec closure hung/failed (exit $rcy)"; fi
 
 # ── determinism + well-formedness ─────────────────────────────────────────────────────────────────────
 A="$( q 'and(kind(all,fn),callers(name("d4"),3))' )"; B="$( q 'and(kind(all,fn),callers(name("d4"),3))' )"
-[ "$A" = "$B" ] && ok "deterministic (composed query byte-identical run-to-run)" || no "non-deterministic"
+if [ "$A" = "$B" ]; then ok "deterministic (composed query byte-identical run-to-run)"; else no "non-deterministic"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    q 'and(callers(name("d4"),3),kind(all,fn))' | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if q 'and(callers(name("d4"),3),kind(all,fn))' | xmllint --noout - 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

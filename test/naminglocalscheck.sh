@@ -46,7 +46,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){   printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -252,7 +252,7 @@ fi
 
 # ══ 6. HYGIENE ═══════════════════════════════════════════════════════════════════════════════════════
 ON2="$( xml_lint "$FIXDIR" )"
-[ "$ON" = "$ON2" ] && ok "hygiene: two --naming-locals runs are byte-identical (determinism)" || no "hygiene: two runs DIFFER"
+if [ "$ON" = "$ON2" ]; then ok "hygiene: two --naming-locals runs are byte-identical (determinism)"; else no "hygiene: two runs DIFFER"; fi
 if printf '%s' "$ON" | xmllint --noout - >/dev/null 2>&1; then
     ok "hygiene: --lint --naming-locals output is well-formed XML"
 else

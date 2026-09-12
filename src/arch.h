@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // arch.h — architectural fitness functions (layering rules) for --arch.
 // The rules are the USER's, declared in a small text file; ripwire imposes no architecture of its own —
@@ -28,12 +31,14 @@
 //   --baseline-update merges current violations into the sidecar and exits 0 (accept new debt deliberately).
 
 #include "model.h"
+#include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — THE one atomic no-follow open the sidecar writers share
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — graceful-degrade on a malformed path-regex (never throw at match time)
 #include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cerrno>      // ELOOP — the one errno openArchBaselineSidecar re-words into its own symlink alert
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -349,7 +354,7 @@ inline ArchRules parseArchRules( const std::string& path )
     // mirroring parseLintRuleFile's badLine/"file skipped" contract exactly.
     const auto badLine = [ & ]( std::size_t lineNo, const char* why ) -> bool
     {
-        std::fprintf( stderr, "ripwire: --arch: %s:%zu: %s — rules file rejected\n", path.c_str(), lineNo, why );
+        rw::emitTo( stderr, "ripwire: --arch: {}:{}: {} — rules file rejected\n", path.c_str(), lineNo, why );
         DEGRADED_PATH_ALERT( "arch: malformed rules line — rules file rejected" );
         return false;
     };
@@ -635,25 +640,57 @@ inline std::uint64_t archViolHash( std::string_view srcFile,
     return h;
 }
 
-// Sidecar file name written next to the rules file (or in CWD when rules file has no dir component).
-// Using a fixed name in CWD keeps it repo-committable and rules-file-independent; the user adds it to .gitignore or commits it.
+// Sidecar file name for the arch baseline. A BARE name, so it resolves against the process CWD — NOT
+// against the crawl root, and NOT next to the rules file. Fixed and rules-file-independent keeps it
+// repo-committable; the user adds it to .gitignore or commits it.
+//
+// The comment here used to say "written next to the rules file (or in CWD when the rules file has no dir
+// component)", which the body has never done — `rulesPath` is unused. Corrected rather than implemented:
+// changing WHERE this resolves moves the read half (archReadBaseline) with it, so a user whose committed
+// sidecar stops being found gets their accepted debt re-reported as new violations and a CI exit 2. That
+// is a deliberate behaviour decision with a migration to design (read the old location when the new one
+// is absent), not a rider on a security fix. The CWE-59 guard in archWriteBaseline closes the reported
+// vulnerability wherever this resolves, so the two questions are genuinely separable — and separated.
 inline std::string archBaselinePath( const std::string& /*rulesPath*/ ) noexcept
 {
     return ".ripwire_arch_baseline";
 }
 
-// Read the baseline sidecar.  Returns the set of violation hashes committed as accepted debt.
-// Returns empty set if the file does not exist (first run) — callers treat that as "no baseline".
-inline std::unordered_set<std::uint64_t> archReadBaseline( const std::string& sidecarPath ) noexcept
+// THE ONE PLACE THE ARCH BASELINE SIDECAR IS READ — openArchBaselineSidecar's other half, with the same answer
+// to a link: O_NOFOLLOW, refused in the open itself. A link here used to be followed, so the link chose which
+// file's hashes were accepted as debt. Why an in-tree link is refused too is round 3 of src/pathguard.h.
+// noexcept like its neighbours, with the same allocation exposure openArchBaselineSidecar describes.
+inline rw::pathguard::NoFollowRead readArchBaselineSidecar( const std::string& sidecarPath ) noexcept
+{
+    rw::pathguard::NoFollowRead sidecar = rw::pathguard::openNoFollowRead( "the arch baseline sidecar", sidecarPath );
+    if( sidecar.refused ) { DEGRADED_PATH_ALERT( "arch: refusing to read the arch baseline sidecar through a symlink" ); }
+    return sidecar;
+}
+
+// What archReadBaseline found: the violation hashes committed as accepted debt, and whether there was a sidecar
+// to read at all. `present` is the open, not the hash count — a sidecar holding only its comment header accepts
+// nothing and is still a baseline in force. It replaces a SECOND open of the same path that the arch verb used
+// to make with a bare stream just to ask that question; that open followed a link as well and read nothing, so
+// no check on the verb's output could ever have seen it.
+struct ArchBaselineRead
 {
     std::unordered_set<std::uint64_t> hashes;
-    std::ifstream f( sidecarPath );
-    if( !f )
+    bool                              present = false;
+};
+
+// Read the baseline sidecar. An absent file (first run) and a refused link both come back with no hashes and not
+// present, which callers treat as "no baseline".
+inline ArchBaselineRead archReadBaseline( const std::string& sidecarPath ) noexcept
+{
+    ArchBaselineRead            baseline;
+    rw::pathguard::NoFollowRead sidecar = readArchBaselineSidecar( sidecarPath );
+    if( !sidecar.opened )
     {
-        return hashes;
+        return baseline;
     }
+    baseline.present = true;
     std::string line;
-    while( std::getline( f, line ) )
+    while( sidecar.readLine( line ) )
     {
         // skip comment lines (start with '#') and blank lines
         if( line.empty() || line[0] == '#' )
@@ -664,10 +701,33 @@ inline std::unordered_set<std::uint64_t> archReadBaseline( const std::string& si
         const std::uint64_t h   = std::strtoull( line.c_str(), &end, 16 );
         if( end != line.c_str() )
         {
-            hashes.insert( h );
+            baseline.hashes.insert( h );
         }
     }
-    return hashes;
+    return baseline;
+}
+
+// THE ONE PLACE THE ARCH BASELINE SIDECAR IS OPENED, and the whole of its CWE-59/CWE-367 story.
+//
+// The write TRUNCATES and `sidecarPath` is a fixed name (see archBaselinePath), so a link planted at it
+// turned --arch --baseline into an arbitrary-file overwrite. The refusal is the OPEN itself — O_NOFOLLOW,
+// one syscall, nothing between deciding and creating for a replacement to land in. The first fix asked lstat
+// and then opened anyway, which is check-then-open; see src/pathguard.h.
+//
+// Only the ELOOP case gets an alert here, because only it had one: a plain open failure has always been this
+// site's silent `return false`, which its caller turns into "--baseline cannot write sidecar". The user-
+// facing sentence for both now comes from pathguard, on stderr, naming the real reason either way.
+//
+// noexcept, like its caller — matching the contract archWriteBaseline has always had (the caller allocates — the
+// sorted copy, the sidecar buffer — and an allocation can in principle throw; allocating under noexcept predates this round).
+inline int openArchBaselineSidecar( const std::string& sidecarPath ) noexcept
+{
+    auto [ fd, openErr ] = rw::pathguard::openNoFollowTruncate( "the arch baseline sidecar", sidecarPath );
+    if( fd < 0 && openErr == ELOOP )
+    {
+        DEGRADED_PATH_ALERT( "arch: refusing to write the arch baseline sidecar through a symlink" );
+    }
+    return fd;
 }
 
 // Write (or overwrite) the baseline sidecar with exactly the given hash set, sorted for determinism.
@@ -678,18 +738,33 @@ inline bool archWriteBaseline( const std::string&                         sideca
     std::vector<std::uint64_t> sorted( hashes.begin(), hashes.end() );
     std::sort( sorted.begin(), sorted.end() );
 
-    std::FILE* f = std::fopen( sidecarPath.c_str(), "w" );
-    if( !f )
+    const int fd = openArchBaselineSidecar( sidecarPath );
+    if( fd < 0 )
     {
         return false;
     }
-    std::fprintf( f, "# ripwire arch baseline — do not edit by hand. Regenerate with --baseline or --baseline-update.\n" );
+
+    // The whole sidecar is assembled here and handed to the descriptor in one call — the shape notes::writeNotes
+    // and quality::writeBaseline already had. It used to write through a FILE* adopted with ::fdopen: the
+    // emitters report no failed write, and std::fclose answers only for its own final flush, so an EARLIER flush
+    // that failed followed by one that succeeded came back true for a baseline that was not on disk.
+    // writeAllAndClose fails on any short or failed write and on a failed close.
+    //
+    // The bytes are the ones it always wrote — the header line, then one 16-digit zero-padded lowercase hex hash
+    // per line, ascending — and test/sidecarsymlinkcheck.sh (w) holds them. The buffer allocates, as the sorted
+    // copy above already does: the same exposure under noexcept this function has always had.
+    const std::string_view header = "# ripwire arch baseline — do not edit by hand. Regenerate with --baseline or --baseline-update.\n";
+    std::string            content;
+    content.reserve( header.size() + sorted.size() * 17 ); // 16 hex digits + '\n' per hash
+    content += header;
     for( std::uint64_t h : sorted )
     {
-        std::fprintf( f, "%016llx\n", static_cast<unsigned long long>( h ) );
+        char hex[ 17 ]; // 16 digits + NUL: a 64-bit value never needs a 17th digit, so formatTo cannot truncate
+        rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( h ) );
+        content += hex;
+        content += '\n';
     }
-    std::fclose( f );
-    return true;
+    return rw::pathguard::writeAllAndClose( fd, content );
 }
 
 // ── ABS-4: Robert C. Martin package metrics + reachability, per MODULE (= directory) ──────────────────

@@ -24,7 +24,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/clsrecvfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -78,9 +78,9 @@ printf '%s' "$HDR" | grep -q ' locality_pinned=3 ' && ok "(F) header locality_pi
 
 # ── (G) determinism + well-formedness ─────────────────────────────────────────────────────────────
 "$BIN" "$CORPUS" --no-cache >"$TMP/map2.xml" 2>/dev/null
-cmp -s "$TMP/map.xml" "$TMP/map2.xml" && ok "(G) two runs byte-identical" || no "(G) the map is not deterministic"
+if cmp -s "$TMP/map.xml" "$TMP/map2.xml"; then ok "(G) two runs byte-identical"; else no "(G) the map is not deterministic"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/map.xml" 2>/dev/null && ok "(G) well-formed XML" || no "(G) xmllint rejects the map"
+    if xmllint --noout "$TMP/map.xml" 2>/dev/null; then ok "(G) well-formed XML"; else no "(G) xmllint rejects the map"; fi
 fi
 
 [ "$fail" = 0 ] && { echo "clsrecvcheck: OK"; exit 0; }

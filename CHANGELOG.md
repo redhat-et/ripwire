@@ -15,7 +15,7 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
-### Added — Elixir module and arity resolution (parser version 87)
+### Added — Elixir module and arity resolution (parser version 95)
 
 Elixir calls now resolve by module, name and arity, with lexical aliases, filtered imports, default
 arguments, pipes, captures and delegates. Nested modules and each target of a multi-target `defimpl`
@@ -27,24 +27,1056 @@ The implementation uses the existing vendored parser and cache records, with no 
 dependency. Macro expansion and runtime dispatch remain static-analysis limits; the supported syntax
 and boundaries are documented in [Elixir extraction](docs/ARCHITECTURE.md#elixir-extraction).
 
-`kParserVer` 86 → 87 with `quality.h`'s `kIngestParserVerMirror` in the same commit (this branch carried
-86, which the Ruby receiver dedupe fix below had already taken landing the same day — re-bumped to the
-next free number over the merged tip, per the rule in `src/ingest_cache.h`); `kCacheVersion` stays 18.
+`kParserVer` 94 → 95 with `quality.h`'s `kIngestParserVerMirror` in the same commit (the branch carried
+87; main spent 87..92 while it was open and the 0.6.1 round takes 93 and 94 — re-bumped to the next free
+number over the merged tip, per the rule in `src/ingest_cache.h`); `kCacheVersion` stays 21.
+### Upgrade notes
+
+- **A sidecar must be a regular file: a symlink at a sidecar name is refused, on read as well as on write.**
+  `.ripwire_notes`, `.ripwire_quality_baseline` and `.ripwire_arch_baseline` are opened with `O_NOFOLLOW`, so a
+  link at one of those names is not opened, wherever its target is. Anything else at the name that is not a regular
+  file, a FIFO for example, is refused as well instead of being waited on. If you symlinked one on purpose (into a shared
+  config directory, say), replace the link with a regular copy of its target. Until you do, every read of it prints
+  a refusal on stderr, no notes surface, `--quality-delta` reports `baseline="git-HEAD (symlinked sidecar refused)"`
+  and compares against HEAD, `--arch` reports every violation as new, and `--note-add`, `--quality-baseline`,
+  `--arch --baseline` and `--baseline-update` exit 1 without writing. `.ripwire_config` and
+  `.ripwire_quality_acks` are unchanged.
+
+## [0.6.0] — 2026-09-11
+
+**Languages and integrations from outside the project, much faster on the largest trees, and answers that say where
+they stop.** Outside contributors wrote the Kotlin support (@xCatG), the Dart support (@calvinchengx), the Hermes
+installer mode and Hermes-native skill (@AnkitArya, @ashutoshsinghpr7), JavaScript and TypeScript default-import
+resolution (@PollyBot13), `CLAUDE_CONFIG_DIR` support (@s0undt3ch) and the Ruby constant-dependency work
+(@andriytyurnikov). Outside reports caught the tool being confidently wrong (@YogevKr, @mariadb-KyleHutchinson,
+@snrmwg) and asked how to remove it (@luisdavim). Each is named below, beside the entry their work produced.
+
+### Highlights
+
+**Kotlin.** `.kt` files are indexed: classes, objects and companion objects, functions, calls, imports and
+inheritance. Calls cross the Kotlin/Java boundary in both directions, and a reference reaches the other JVM language
+only when its own defines no candidate of that name, so adding `.kt` files never moves a Java-only edge. nowinandroid
+indexes to 1,850 symbols across 384 files, ktor to 19,906 across 2,527, and retrofit's `Response.java:body` keeps its
+279 callers (@xCatG, [#126](https://github.com/redhat-et/ripwire/pull/126)).
+
+**Dart.** The 23rd grammar. On flutter/packages (3,706 `.dart` files) it indexes 71,726 Dart symbols (@calvinchengx,
+[#75](https://github.com/redhat-et/ripwire/pull/75), landed in
+[#106](https://github.com/redhat-et/ripwire/pull/106)).
+
+**Ruby: the dependencies a Rails application actually has.** A Zeitwerk application spells almost none of its
+dependencies with `require`. 0.6.0 reads the ones it does use: superclass constants, `include`/`extend`/`prepend`,
+`autoload`, and constant receivers such as `User.find` — the reference that makes the autoloader load the file, where
+nothing else in the file says so (@andriytyurnikov, [#57](https://github.com/redhat-et/ripwire/pull/57),
+[#65](https://github.com/redhat-et/ripwire/pull/65), and [#78](https://github.com/redhat-et/ripwire/pull/78) landed in
+[#91](https://github.com/redhat-et/ripwire/pull/91)).
+
+**Faster where it hurt.** Warm `--grep` on llvm-project falls from 159.7 s to 9.2 s, and the warm default map from
+248 s to 10 s ([#83](https://github.com/redhat-et/ripwire/pull/83)). The cold parse on that tree drops from 194.1 s to
+155.6 s of CPU ([#127](https://github.com/redhat-et/ripwire/pull/127),
+[#130](https://github.com/redhat-et/ripwire/pull/130)), warm `--pack-task` on go from 8.13 s to 5.88 s, and a repeated
+`--for` on llvm-project from 274 s to 26 s once the cache stopped evicting its own working root
+([#127](https://github.com/redhat-et/ripwire/pull/127)).
+
+**Answers that say where they stop.** A `std::`-qualified call no longer binds an in-repo definition, so memgraph's
+`SafeString::move` goes from 2,107 false callers to 3 ([#134](https://github.com/redhat-et/ripwire/pull/134)). A call
+the resolver declines to guess is counted and named instead of silently dropped: 65,516 of memgraph's 295,086 call
+references ([#136](https://github.com/redhat-et/ripwire/pull/136)). A parse derailed by a member macro carries
+`extent_suspect=` and leaves the `--hotspots` ranking, and a budgeted `--for` stops shipping past its allowance
+without saying so ([#135](https://github.com/redhat-et/ripwire/pull/135)). And YAML parses the same on aarch64 Linux
+as everywhere else ([#140](https://github.com/redhat-et/ripwire/pull/140)).
+
+**Agent integrations.** Initial Hermes and OpenClaw support, activated by `skills/install.sh --hermes` or `--openclaw`,
+with `ripwire wrap` printing the MCP setup ([#51](https://github.com/redhat-et/ripwire/pull/51),
+[#46](https://github.com/redhat-et/ripwire/pull/46)). `CLAUDE_CONFIG_DIR` is respected wherever ripwire looks for
+Claude Code's configuration (@s0undt3ch, [#101](https://github.com/redhat-et/ripwire/pull/101)). `INSTALL.md` lists
+every install route and how to remove all of it ([#121](https://github.com/redhat-et/ripwire/pull/121), asked for in
+[#111](https://github.com/redhat-et/ripwire/issues/111)).
+
+### Upgrade notes
+
+- **Prebuilt x86-64 binaries now need an x86-64-v3 CPU, on Linux and on macOS.** x86-64 builds target
+  `-march=x86-64-v3`: AVX2, BMI1/BMI2, FMA, LZCNT and MOVBE, the floor RHEL 10 sets, found on roughly Intel Haswell (2013)
+  or AMD Excavator (2015) and newer. On an older x86-64 CPU the 0.6.0 binary will not run. The Intel macOS binary
+  carries the same floor and still runs on macOS 14 and later; on Apple silicon, use the arm64 binary. arm64 builds need
+  nothing new, because NEON is in the arm64 baseline. A plain build from source on x86-64 targets the same level;
+  `-DRIPWIRE_NATIVE=ON` builds for the configuring machine only, and `./install.sh` from a checkout builds a Release
+  binary tuned for that machine's CPU ([#127](https://github.com/redhat-et/ripwire/pull/127),
+  [#137](https://github.com/redhat-et/ripwire/pull/137)).
+- **The installer checks the CPU before it downloads.** On an x86-64 machine below v3, `scripts/install.sh` stops before
+  the download and lists the missing features. `RIPWIRE_SKIP_CPU_CHECK=1` skips the check, for a VM that hides CPU flags
+  its host still executes. When a downloaded binary cannot run, the installer now says why instead of reporting a
+  version mismatch ([#138](https://github.com/redhat-et/ripwire/pull/138)).
+- **The first run on each tree is a cold parse.** The cache format moves from 16 to 20 and the parser version from 81 to
+  91, so a cache written by 0.5.0 is not reused. Separately, the cache root key is now one derivation for every cache
+  family, so lean, rich, qchurn and MCP blobs written by older builds are clean misses, one cold parse per root, and the
+  age pass sweeps them ([#127](https://github.com/redhat-et/ripwire/pull/127)).
+  The parser version moves once more, to 92, for the YAML scanner fix below
+  ([#140](https://github.com/redhat-et/ripwire/pull/140)); the cache format stays 20.
+- **Output that changes by design.** Each change is described in its entry below.
+  - `--quality-delta` dials each kind separately, and `churn="self"` no longer gates (#127).
+  - `--help` prints one line per flag; `--help=all` prints the whole catalog (#92).
+  - `--regex` anchors `^` and `$` match per line, and a match can no longer span lines. The `--grep` root gains
+    `corpus_pruned_dirs=` (#85).
+  - `--grep` and `--regex` no longer read gitignored files of an extension the indexer skips; `--no-ignore` restores
+    them (#87).
+  - `--recall` spends its budget on sections in rank order, and its disclosure names what was served (30b72ec0).
+  - `--expand` lists up to 100 sibling names per body, where it listed 8 (3367d537).
+  - `--handoff` shows up to 50 symbols per code file and 12 per prose file, where it showed 6. `--situ` lists every
+    tests-to-run row, and `--doc-drift` and `--flags`/`--flip` page (#127).
+  - `--help-task` no longer answers a "how does …" question with a symbol, and the MCP answer can carry `no_route`
+    (#127).
+  - A call inside a literal `#if 0` is no longer a call site, and graph verb roots carry `graph_unindexed=` (#72).
+  - A `std::`-qualified C++ call no longer binds an in-repo definition outside namespace `std`. It counts toward
+    `external=` instead, so `external=` reads higher (#134).
+  - The map header can carry `declined=`, and `--callers`, `--callees` and `--impact` can carry `declined_calls=`
+    (#136).
+  - Cuts disclose themselves where they fire: `line_bytes=` on long matched lines, `…` on cut signatures,
+    `budget_bytes="7500"` on a trimmed default `--for`, and cut markers on several listings (#100, #108). A cut
+    `<calls>` listing keeps the callees ranked for the query (#95).
+  - `--for --detail` says `over_ceiling="1"` when the answer passes `--max-tokens` (#77).
+  - `--version` prints `emit=`, the formatted-output emitter the binary compiled in (88a5503b).
+  - `--since`, `--merge-scout` and `--pr-context` refuse a revision that begins with `-` or does not resolve to a
+    commit (#115, #116, #117).
+  - A malformed `RIPWIRE_*` ranking calibration variable falls back to its default with one stderr line (#120).
+  - `skills/install.sh --openclaw --hook` exits 2 instead of being silently ignored, and `--hermes --hook` is refused
+    the same way (#51). `ripwire wrap claude` leads with the CLI (75ed8d3a).
+  - `--hotspots` leaves functions flagged `extent_suspect=` out of its ranking and counts them in
+    `unranked_extent_suspect=` (#135).
+  - A file whose scanned sample holds invalid UTF-8 now reports a degraded parse (#126).
+  - A budgeted `--for` that cannot fit its allowance takes the ladder's last rung and discloses the overflow, where it
+    used to ship past the allowance silently, so a few already-over-budget bundles come out larger (3d98f84d).
+
+### Added — Kotlin, with calls that cross into Java (parser version 91, cache format 20)
+
+Kotlin (`.kt`) is indexed from a vendored `fwcd/tree-sitter-kotlin` grammar: classes, objects and companion objects,
+functions, calls, imports and inheritance, with scope-qualified canonical ids and complexity scoring. A JVM interop
+bridge in `graph.h`'s `langCompatible` resolves calls between Kotlin and Java in both directions. Contributed by
+**@xCatG** ([#126](https://github.com/redhat-et/ripwire/pull/126)).
+
+- **A disclosure hole closed on the way.** File health never validated UTF-8 on the sample it scans, so a file with
+  invalid UTF-8 but no tree-sitter `ERROR` or `MISSING` node reported no degraded parse at all, and `--skipped`'s
+  disclosure had a hole. The same sample is now checked with the existing UTF-8 validator.
+- **Checked.** `test/kotlincheck.sh` runs a fixture with calls in both directions between Kotlin and Java, a constructed
+  same-name collision pair (including an `enum class` and a plain class), cross-file calls and imports, with every number
+  pinned from a real run and mutation arms. The contributor found no ASan, UBSan or LSan report across 501 real `.kt`
+  files from 8 Android/JVM repositories, a 41-file adversarial corpus (merge-conflict markers, mid-edit fragments,
+  invalid UTF-8, Unicode, emoji and RTL identifiers, deep nesting), and about 9,500 more `.kt` files across nowinandroid,
+  compose-samples, architecture-samples, ktor and Signal-Android. Output was deterministic and well-formed on every one.
+
+### Added — Dart, the 23rd grammar (parser version 88)
+
+Dart (`.dart`) is indexed as a first-class language: definitions, call edges and metrics, from a vendored
+tree-sitter-dart grammar. Contributed by **@calvinchengx** ([#75](https://github.com/redhat-et/ripwire/pull/75)), landed
+in [#106](https://github.com/redhat-et/ripwire/pull/106) with four maintainer commits on top. On flutter/packages (3,706
+`.dart` files) it indexes 71,726 Dart symbols, and none of that corpus's 289 degraded parses is a `.dart` file. The
+binaries before and after produce identical bytes on `src/` and on a 1,406-file multi-language corpus, so no other
+language moves.
+
+**The tree shape is why this is more than a table row.** tree-sitter-dart makes `function_body` a *sibling* of the
+signature, never a child. A definition's span therefore stopped at the signature's closing paren, and every call in the
+body was attributed to the nearest enclosing symbol. On the gate's fixture that meant 5 edges where 8 are expected, a
+method's call landing on its class, and three top-level edges gone. The Dart arm adopts the following body for the byte
+extent, the row extent and complexity. The call query is adapted from upstream rather than copied, so the cascade
+`this..add(1)..reset()` is two call edges and the receiver is not one.
+
+**A latent bug it exposed, fixed for every language.** Six per-language arrays took their extent from the last
+enumerator written out by hand (`std::size_t( Lang::Elixir ) + 1`) instead of `kLangCount`, so appending a language
+dropped it silently. With the two `--skipped` tallies reverted, a corpus of two `.cpp` and two `.dart` files prints
+`indexed="4"` and a single `cpp` row, and nothing says a row is missing. The same landing registered Dart in two more
+places where the honesty contract applies:
+- `--nonlocal-state` had printed no `unanalyzed_langs=` on a corpus that was half Dart;
+- `--lint` printed `count="1"` beside `applicable="0"` on naming rules that do fire on Dart names.
+
+**Stated floors.**
+- Named constructors and factories index under the class name, so a `C.seeded(1)` call site is unresolved rather than
+  wrong.
+- `noSuchMethod` dispatch names its callee at run time and is not an edge.
+- `part` / `part of` is not resolved.
+
+ASan/UBSan is clean over a 6,554-file Dart corpus, and a libFuzzer run of 109,431 executions produced no crash, leak or
+timeout. Gate: `test/dartcheck.sh`, red against a pre-Dart binary and against a binary with the span arm alone disabled.
+
+### Added — initial Hermes and OpenClaw support
+
+`skills/install.sh` gains `--hermes` and `--openclaw`, and `ripwire wrap` prints a setup recipe for `hermes` and
+`openclaw`. **This is initial support.** CI checks what the installers write on disk. For Hermes, **@ashutoshsinghpr7**
+also ran the installer and the MCP registration against a real Hermes install when support landed; the maintainers have
+not re-verified it since. OpenClaw has not been verified against a real install. If you use either,
+[#69 (Hermes)](https://github.com/redhat-et/ripwire/issues/69) and
+[#68 (OpenClaw)](https://github.com/redhat-et/ripwire/issues/68) ask for exactly that check.
+
+**Hermes.**
+- **Install.** `--hermes` deploys 17 skills into `${HERMES_HOME:-~/.hermes}/skills`: the 16 flat user-facing skills,
+  plus the Hermes-native `ripwire-repo-map` skill from `skills/hermes/`. The release one-liner activates them when that
+  home exists.
+- **MCP.** `ripwire wrap hermes` prints the `hermes mcp add` registration. In the live run it connected and discovered
+  31 tools.
+- **No hook yet.** `--hermes --hook` is refused with exit 2. Hermes has a `pre_tool_call` slot, but ripwire's nudge hook
+  still switches on Claude Code's tool names, so the installer says the port has not landed instead of printing a hook
+  line it cannot honour.
+- **Credit.** The installer mode, the release-installer branch and the `wrap` recipe are **@AnkitArya**'s
+  ([#51](https://github.com/redhat-et/ripwire/pull/51)). They landed in
+  [#76](https://github.com/redhat-et/ripwire/pull/76), which adds a gate arm checking that `wrap hermes` names the flag and
+  directory the installer really uses. The Hermes-native skill is **@ashutoshsinghpr7**'s
+  ([#46](https://github.com/redhat-et/ripwire/pull/46)), as is the widening of both skill-vetting sweeps so that a skill
+  in a subdirectory cannot escape them.
+
+**OpenClaw.** Agent support in `src/wrap.h` used to live in five hand-maintained lists that nothing forced to agree. It
+is now one table, `kAgentTargets`, and OpenClaw is a row in it
+([75ed8d3a](https://github.com/redhat-et/ripwire/commit/75ed8d3ac9e155618acf6317aa88a084e4f207b5)). Dispatch, usage
+text, the skills line, `--all` detection and the README block all read from that table.
+- **Skills root.** OpenClaw's is `~/.agents/skills`, which it reads only while its state directory is the default
+  `~/.openclaw`. The recipe prints that caveat.
+- **Context file.** It is `~/.openclaw/workspace/AGENTS.md`, not the repository's `AGENTS.md`.
+- **No hook.** OpenClaw has no shell hook slot, so `--openclaw --hook` is now refused with exit 2 instead of being
+  silently ignored ([#51](https://github.com/redhat-et/ripwire/pull/51)).
+- **`wrap claude` changed too:** it now leads with the CLI, as `codex` and `opencode` do.
+- **Gate.** `test/agenttablecheck.sh` iterates the table, so the next row is covered without editing the gate.
+
+How to install and remove both is in `INSTALL.md` ([#121](https://github.com/redhat-et/ripwire/pull/121)).
+
+### Added — derailed C-family parses disclose their guesses (`extent_suspect=`), and a member-macro re-parse repairs the commonest derailment (parser version 90, cache format 20)
+
+**The problem.** A function-like macro invoked without `;` as the last member of a class or struct, such as
+`EXC_NAME(Foo)` right before `};`, sends tree-sitter-cpp's error recovery off course. The earlier structs dissolve into
+an ERROR region, and the last struct's body swallows what follows. The same shape derails tree-sitter-c and
+tree-sitter-objc. On memgraph, one file had 472 of its 487 definitions misfiled. A 14-line function,
+`PrintFuncSignature`, was reported with `cx=749 ccx=920` and ranked #4 in `--hotspots`, and nothing on the row said
+anything was wrong.
+
+**The detector.** `src/extentsuspect.h` makes one linear pass per file over spans that are already sorted. A definition
+a derailed parse filed in the wrong place carries `extent_suspect=`, naming the rules that fired:
+- `name`: a name outside its own definition's signature;
+- `head` (C family): a definition in another definition's return-type position, before its name;
+- `scope` (C++): filed under `C::` while lying inside a different class;
+- `error`: a class whose body holds an error inside an ERROR region, and what it contains.
+
+Map, `--for`, `--expand` and `--json` rows carry the attribute. The header carries `extent_suspect_syms=`, and
+`--skipped` gets per-file rows plus `extent_suspect_files=`. Each is absent at zero, and its legend line appears only on
+output that carries it. `--hotspots` leaves flagged functions out of its ranking instead of ranking a number the tool
+itself calls an artifact. It says so with `extent_suspect_syms=` on the row and a fourth partition bucket,
+`unranked_extent_suspect=`, so the partition still sums to `files=`.
+
+**The re-parse.** `src/macroreparse.h` touches only a C, C++ (including CUDA and Metal) or ObjC file whose first parse
+holds error bytes. It blanks ALL-CAPS function-like macro invocations that sit alone on a line as class, struct or union
+members, keeping newlines and byte offsets. It re-parses the blanked text and adopts the new tree only if that tree holds
+strictly fewer error bytes. A blanked invocation stays a `role=type` use of the macro name, so `--uses` is unchanged.
+Disclosure: `why=macro-blanked` and `macro_blanked=N` on the `--skipped` row, and `macro_blanked_files=` on the map,
+`--json` and `--skipped` headers, absent at zero.
+
+**Measured** on memgraph, main `096e3544` against the change:
+
+| | before | after |
+| --- | --- | --- |
+| `PrintFuncSignature` | a method, `cx=749 ccx=920 loc=5479` | a free function, `cx=3 ccx=2 loc=15` |
+| `mg_procedure_impl.cpp` in `--hotspots` | ccx 1871, top function 920 | ccx 960, top function 40, 0 flagged |
+| degraded-parse files | 307 | 289 |
+| extent-suspect definitions | — (no detector) | 241 in 9 files (detector alone: 1,613 in 31) |
+| re-parsed files | — | 24 |
+| cold CPU, 5 alternating runs | 8.114 s | 8.108 s |
+
+On an llvm-project checkout, extent-suspect definitions go from 1,650 to 1,483, and 24 files are re-parsed. A file that
+is not re-parsed keeps every definition, scope and complexity; only graph knock-on effects, such as caller counts and
+rank, move.
+
+**Limits, stated.**
+- Only the ALL-CAPS class-body shape is repaired. Lowercase and namespace-scope macro runs still derail, and the detector
+  keeps flagging them: on memgraph 241 flags remain, 93 of them in `eval.hpp`.
+- A partial repair is still adopted when it holds fewer error bytes. `err=` describes the adopted parse, so it can rise
+  while `err_ratio` falls: on `mg_procedure_impl.cpp` it goes from 1 to 50 nodes while error bytes fall from 271,971 to
+  376.
+- `--match`, `--lint` and `--slice` parse files themselves, so they still see the first parse.
+- The `name` and `scope` rules have no real-world trigger today; they are guards, pinned by unit cases.
+- This repository's own map always carries the new legend lines, because the fixtures live in the tree (about +430
+  `est_tokens` on ripwire itself). Corpora with nothing flagged are unaffected.
+
+`kParserVer` goes 88 → 90 and `kCacheVersion` 18 → 20, because the per-file cache record gains a field. Gates:
+`test/extentcheck.sh` (55 checks) and `test/macroreparsecheck.sh` (103 checks), both red on their pre-change binaries
+([#135](https://github.com/redhat-et/ripwire/pull/135)).
+
+### Added — `INSTALL.md`: every install route, and how to remove all of it
+
+A new `INSTALL.md` gathers every way to install ripwire:
+- the prebuilt one-liner and its variables;
+- building from source, and `./install.sh`;
+- activating skills for Claude Code, Codex, Hermes, OpenClaw or any directory;
+- the optional advisory hooks;
+- the MCP server via `ripwire wrap <agent>`;
+- checking and upgrading.
+
+It ends with how to uninstall, which **@luisdavim** asked for in
+[#111](https://github.com/redhat-et/ripwire/issues/111). The uninstall section covers:
+- the binary and staged files;
+- the `ripwire-*` skill links;
+- ripwire's hook entries;
+- MCP registrations, per agent;
+- pasted rules blocks;
+- the cache;
+- the per-repository files ripwire writes only on request.
+
+Every path comes from the code. The uninstall snippets were extracted from the page itself and run against a sandboxed
+`HOME` with synthetic installs, and all 15 checks passed. They cover both what must be removed and what must be kept,
+such as an unrelated binary, another tool's hook and non-hook settings keys. A `.bak` is written before each config edit,
+and a second run is a no-op ([#121](https://github.com/redhat-et/ripwire/pull/121)).
+
+### Added — `--help` in two tiers: one line per flag, every disclosure one call away
+
+`--help` now prints one line per row, saying what exists and roughly what it does, in **4,473 tokens instead of
+46,385** (10.4×). Nothing is deleted:
+- `--help=<flag>` returns that row's every disclosure;
+- `--help=<section>` returns one family at full detail;
+- `--help=all` returns the whole catalog exactly as before.
+
+The evidence made this a split rather than a trim. A third-party evaluation (callstack/agent-device #2400) measured
+ripwire spending about 10% more tokens than grep-and-read and traced the cost to the per-call legend. The fix,
+`--legend=compact`, was already documented, but 92% of the way down a 1,597-line document. Asking for the one row that
+answers a question now costs 90 tokens. `test/helpbudgetcheck.sh` holds tier 1 to a token ceiling and proves every
+advertised row is still retrievable from tier 2, so the ceiling cannot be met by deleting content
+([#92](https://github.com/redhat-et/ripwire/pull/92)). Before the split, the `--legend` entry was rewritten to lead with
+what the full legend costs, a fixed ~3 KB, and `test/legendcostcheck.sh` reads that floor out of `--help` and measures
+against it ([8c20e108](https://github.com/redhat-et/ripwire/commit/8c20e108)).
+
+### Added — `.rst`, `.adoc`, `.org` and `.mdx` reach `--recall` (parser version 85)
+
+These extensions were not indexed at all, so a `--recall` over a repository that documents itself in reStructuredText
+or AsciiDoc returned nothing and, correctly but unhelpfully, said zero. They now reach `--recall`, `--for` and
+`--handoff` on the markdown grammar tier. Gate: `test/textdocscheck.sh`
+([#80](https://github.com/redhat-et/ripwire/pull/80)).
+
+### Changed — `--recall` serves ranked passages, not document prefixes
+
+`--recall` scored a document's markdown sections by relevance, then put them back in document order and let the byte
+budget cut from the front. On a document larger than its share of the budget, the best section could be unreachable at
+every ceiling: on a 616 KB `docs/COMMANDS.md`, the `--field-affinity` section at line 3570 of 4755 ranked #1 and was
+served at none of 1,500, 4,000, 12,000 or 40,000 tokens, while the table of contents at the front of the file was.
+Sections are now own-prose units that tile the document, the allowance is spent in rank order one whole unit at a time,
+and the disclosure reports what was served: `[sections: S of R selected (N in doc) ... dropped_by_budget=D]`, with
+`lines=` naming exactly the ranges in the body. An enclosing section no longer outranks the subsection that holds the
+answer, because a unit's score is scaled by its own-prose evidence over the strongest own-prose evidence in its subtree.
+
+Measured on a frozen 1.88 MB corpus: answer reachability went from 5 of 14 to 9 of 14, natural-language-first from 43
+to 79 at 1,600 tokens, and query-term coverage rose by 58, 56 and 40 at 4,000, 8,000 and 16,000 tokens. Budget
+monotonicity holds within a document over 1,380 ceilings with 0 shrinks, but not across documents, and the surfaces
+that claimed otherwise now say so. Gate: `test/recallpassagecheck.sh`, written before the fix
+([30b72ec0](https://github.com/redhat-et/ripwire/commit/30b72ec0)).
+
+### Changed — one header of SIMD string kernels, and the quadratic child walks gone
+
+For every invocation below, output is byte-identical before and after; the verbs whose output this round changes on
+purpose are in their own entries. Main's binary (source `9356cf23`) was measured against the merged tip of the round,
+with the same argv and interleaved arms. CPU is user+sys, the median over n pairs, on a shared machine at load 7–14:
+
+| corpus | invocation | before (CPU s) | after (CPU s) | Δ median | n |
+| --- | --- | ---: | ---: | ---: | ---: |
+| llvm-project | cold map `--no-cache` | 194.14 | 155.60 | −19.9% | 1 |
+| go | warm `--pack-task` | 8.13 | 5.88 | −27.6% | 5 |
+| go | warm `--lint` | 18.43 | 15.18 | −17.7% | 5 |
+| rocksdb | warm `--lint` | 6.77 | 5.60 | −17.3% | 5 |
+| rocksdb | warm `--pack-task` | 0.68 | 0.60 | −10.9% | 5 |
+| rocksdb | cold map `--no-cache` | 7.96 | 7.42 | −6.7% | 5 |
+| ripwire (own tree) | warm `--pack-task` | 0.45 | 0.38 | −15.5% | 5 |
+| ripwire (own tree) | warm `--lint` | 4.21 | 3.91 | −7.3% | 5 |
+
+A warm map, `--for` and `--grep` are within noise; their floors are the serial resolve loop and file opens.
+
+**The O(C²) child walks.** An indexed child walk over a tree-sitter node restarts the vendored iterator on every call, so
+the loop is quadratic in the number of children. It only bites on wide, flat child lists, which C/C++ include guards
+and comment floods produce, which is why the llvm-project cold parse moved most. `collectPreprocDeadRanges` and the other
+23 quadratic walks move to one cursor helper, `src/infra/tschildren.h`, with 18 isolation arms proven red first at
+11–125× ([#127](https://github.com/redhat-et/ripwire/pull/127)). [#130](https://github.com/redhat-et/ripwire/pull/130)
+converts 22 more, each proven quadratic on the pre-change binary first at 13×–126× its control under a 16,000-comment
+flood. Three loops stay indexed, with the reason written at the loop, and 156 generated fixture × verb pairs plus the 21
+committed ones are byte-identical.
+
+**One header of string kernels.** `src/infra/strkern.h` holds nibble-table byte classification, an A–Z fold, and byte,
+byte-set and 3-byte finds, each with a NEON path, an AVX2 path and a scalar twin. The query tokenizer is rewritten on it
+as mask algebra, proven against verbatim copies of the old walkers, beside a BM25 head-mask index; that is the
+`--pack-task` row. The XML and JSON escapers copy clean runs between the bytes a 256-bit set finds (escaper share 4.6% →
+2.0% and 6.3% → 2.6%). A SIMD scan for `--grep` was measured and refused: that verb is bound by file opens, and the scan
+is 0.4% of busy samples.
+
+**Lookups hoisted out of the per-node path.** 199 `ts_node_child_by_field_name` sites now read a per-grammar `TSFieldId`
+table, checked on 1,189,205 enumerated (node, field) pairs. The `#match?` predicate's regex is compiled once per query,
+not once per match, which is the `--lint` row.
+
+The techniques are credited in `docs/LINEAGE.md`, which now folds 49 repositories and 70 papers, among them Langdale &
+Lemire (VLDB J. 2019) for nibble-table classification, Daniel Lemire's 2023-07-13 blog code, StringZilla and Tempesta
+fast_str. The kernel tests are a doctest target, `ripwire_test_strkern`.
+
+### Changed — `--quality-delta` dials each kind separately
+
+On 12 landed commits, `--quality-delta` had gated all 12, with a true-positive share of 2%. Each kind now has its own
+rule:
+- `churn="self"` is informational; what gates is two committed rewrites inside the window.
+- Dead-code sees header files, where 96.8% of this repository's `src/` lines live, and excludes language-invoked symbols
+  instead.
+- Verbosity counts code lines.
+- Complexity and verbosity gate on a threshold crossing or on growth of at least 25%.
+- New api-surface symbols become a count, `api-new-surface=`.
+
+On the same 12 commits, gating went from 12 of 12 to 8 of 12, the true-positive share rose from 2% to 12% with 0 wrong
+rows, and the synthetic regressions caught rose from 5 to 7. The legend gains the `api-new-surface=` count and the churn
+facets' gating rule ([#127](https://github.com/redhat-et/ripwire/pull/127)).
+
+### Changed — `--handoff` shows more, and three listing verbs page instead of cutting
+
+Caps are blow-up guards on the way to one complete answer, and none of this lowers a value to shrink a byte count.
+- **`--handoff`** shows up to 50 symbols per code file and 12 per prose file, where it showed 6. Containment rises from
+  16% to 54%, and the change only adds rows.
+- **`--doc-drift`, `--flags`/`--flip` and `--situ`** disclose their cuts and page. Answer rows never page, so `--situ`'s
+  25-row cap on tests-to-run is retired: every row is listed, and no cut is disclosed because none is made. The gate has
+  33 checks, 24 of them red before the change.
+- **The cap sweep was re-derived** once six honesty defects in its harness were fixed: 64 of 151 answering rows, where
+  59 of 195 had been published ([#127](https://github.com/redhat-et/ripwire/pull/127)).
+
+### Changed — `--expand` lists up to 100 sibling names, and every cap is listed in `docs/LIMITS.md`
+
+A body's `sibs=` list on `--expand` was capped at 8 names. On this repository the median file holds 4 symbols but p99
+holds 85, and symbols concentrate in large files, so the cap fired on 68.5% of bodies and hid 89.3% of sibling names. The
+cap is now 100, above p99: 15.8% of bodies are cut, 56.2% of sibling names are visible where 10.7% were, and a
+single-symbol `--expand` answer grows 36%. `sibs=` reaches only `--expand`, so `--for` and `--pack-task` are
+byte-identical at every cap value tested. The README's `--pack-signatures` figure moves as a consequence (top-50 71.0% →
+81.8%), because `--expand`'s bodies are that ratio's denominator; the cap was chosen on recall grounds and the figure
+re-derived afterwards ([3367d537](https://github.com/redhat-et/ripwire/commit/3367d537)).
+
+That cap is why caps now have an inventory. `docs/LIMITS.md` lists every cap in `src/` with its value, its site and
+whether its file discloses a cut when it fires. It is generated by `docs/limits_build.py`, and `test/limitstablecheck.sh`
+fails when it drifts. It began at 120 caps across 51 files (3367d537).
+[#108](https://github.com/redhat-et/ripwire/pull/108) added the INDEXING/OUTPUT column, the hyperparameter register,
+`docs/TUNING.md` and the `bench/capsweep` harness. [#123](https://github.com/redhat-et/ripwire/pull/123) pins each cap by
+what it is rather than the line it sits on, so a comment above a cap no longer reddens CI.
+[#127](https://github.com/redhat-et/ripwire/pull/127) adds a BOUNDARY class, and
+[#128](https://github.com/redhat-et/ripwire/pull/128) gives the per-file tables their own `## Caps, by file` heading;
+they had been filed under "Not caps". On main the register counts 208 caps across 83 files.
+
+### Changed — faster ingest and graph building: the per-node dispatch, the include closure, three loop hoists
+
+These build on the cone memo in the Fixed entries below. Every result here is an interleaved A/B, and output is
+byte-identical before and after.
+
+**The per-AST-node `strcmp` dispatch goes inline.** The ingest walk chooses a branch with chains of about forty
+`std::strcmp` calls against `ts_node_type()`, once per AST node. `strcmp` is an external symbol that LTO cannot inline,
+and on macOS each call also hops two dyld stubs. Sized before any change, `strcmp` was this share of busy samples:
+
+| corpus | `strcmp` share of busy samples |
+| --- | --- |
+| rust-analyzer | 12.31% |
+| go | 10.76% |
+| llvm-project | 10.56% |
+| django | 9.31% |
+| rails | 6.14% |
+
+`rw::kindIs` (`src/infra/nodekind.h`) is the same compare, unrolled inline against a literal, and it replaces `strcmp` at
+569 call sites. On llvm-project `strcmp` is now 0.23% of busy samples.
+- **Why not SIMD.** On llvm-project, 92.96% of 4,861,917,534 compares decide at byte 0, and clang compiles the chain to a
+  shared-prefix decision tree that uses no vector registers.
+- **The claim.** As a range over llvm-project, django, go and this repository: **cold CPU 1–7% lower, cold wall 0.3–8%
+  lower**, with all 32 statistics in the same direction.
+- **Same output.** Byte-identical on seven corpora. `test/argvdiffcheck.sh` finds 640 of 642 vectors identical; the
+  other two differ only in `--version`'s `built_from=`.
+- **Gate.** `test/nodekindcheck.sh` checks `kindIs` against `strcmp` on 1,348,096 enumerated pairs, and uses a guard page
+  to catch any read past the NUL ([#107](https://github.com/redhat-et/ripwire/pull/107)).
+
+**The include closure's sort goes radix, above 128 elements.** On rails, 38.7 ms of the ~62 ms transitive include
+closure (`buildGraph/2b`) was one `std::sort`. With radix above a crossover of 128:
+
+| on rails | before | after |
+| --- | --- | --- |
+| `buildGraph/2b` | 65.21 ms | 35.01 ms (−46%) |
+| `buildGraph` | 223.0 ms | 186.7 ms (−16%) |
+| whole `--callers=main` run | | 7.8% and 8.5% faster at the median, two independent A/Bs |
+
+Five control corpora stay within ±1.7%. The threshold is what makes the change safe: without it, the same conversion
+regresses django 7.9×, a private C++ tree 7.7× and rust-analyzer 4.7×. Three more sites were refused with numbers.
+django's `implementors` would be 2.87× slower, because its records arrive already sorted, which `std::sort` detects and
+radix cannot. A `std::unique` that removed 0 duplicates in 24,216 calls is gone
+([#97](https://github.com/redhat-et/ripwire/pull/97)).
+
+**Three loop hoists; two candidates refuted.**
+- The CHA-lite ancestor closure is memoised: −13.2% warm on rust-analyzer.
+- `lexicalNormalize` builds one string: −6.0% on rails.
+- The shadow guard asks its cheap question first: −26% on that phase.
+
+A candidate-spray optimisation was 53% of scan volume and 0% of wall, so it was not built, and another candidate
+measured inside the noise. After the cone fix, no single phase dominates on any corpus, and which phase is largest
+depends on the corpus's language. `bench/PROFILE.md` carries the six-corpus table
+([#96](https://github.com/redhat-et/ripwire/pull/96)).
+
+**timsort is vendored and routed nowhere.** It was measured against `std::sort`, radix, pdqsort, an `is_sorted` guard and
+`std::stable_sort`, on the real id sets of three call sites across seven corpora, and was not recommended for any of
+them:
+- on presorted input, a three-line `is_sorted` guard measured 0.35× where timsort measured 0.58×;
+- on scattered input, timsort measured 1.71×, 6.0× slower than radix.
+
+It ships in `src/infra/` for parity with the portable layer it belongs to. The measurement is in its header, and a gate
+checks that no call site uses it ([#93](https://github.com/redhat-et/ripwire/pull/93)).
+
+### Changed — `est_tokens` measured against a real tokenizer
+
+`est_tokens` had been checked for being present, positive and deterministic, but never for being accurate. It is now
+measured: 25 invocations on 2 corpora, counted with `o200k_base` and `cl100k_base`, which agree to within 1.4%. Three
+findings are published in `docs/EVALS.md`:
+
+- **Only 9 of 25 invocations print a price at all.** The sixteen that do not include every navigation verb. One
+  `--edit-check` emitted 99,006 real tokens priced at nothing.
+- **The signed error runs −18.4% to +41.7%**, with a median of +16–18%. It follows document shape, not corpus language:
+  real bytes per token run from 2.44 on dense signature rows to 4.66 on legend prose. So no extra `kTokenCalib` row can
+  fix it.
+- **`--token-budget=N` delivers 48–82% of N.** The budget is a ceiling on the estimate, and at binding budgets the
+  estimate over-reads by 25–42%.
+
+`kTokenCalib` is unchanged on purpose. A single rate cannot correct a +40% bundle and a −16% body at once, and the
+per-span charge that could is a change of its own. What landed is the instrument for that change:
+`test/tokenbudgetcheck.sh` #18 holds every pinned invocation inside a measured band and the set's error under a 30%
+ceiling. A comment in `src/serialize.h` saying the estimate "never systematically under-reads" was false on two corpora
+and is gone. `--legend=compact` is a wash or a small loss on `--for`, whose budget refills the bytes the legend frees
+([#79](https://github.com/redhat-et/ripwire/pull/79)).
+
+### Changed — one emitter for formatted output, and `--version` says which one it compiled in
+
+`src/infra/emit.h` is now the one place the formatted-output path is chosen: `std::print` where the standard library
+defines `__cpp_lib_print` (libstdc++ 14 and later; libc++ at a macOS 14 or later deployment target), and `std::format`
+plus `fputs` where it does not, so every toolchain still builds. `--version` prints the choice as `emit=`, and every CI
+and release leg asserts `emit=std::print` off the binary it built. Behind it, `src/` no longer holds a single
+`std::printf`, `std::fprintf`, `std::snprintf` or `std::sprintf` call site: 1,526 became 0, converted in batches against
+a byte-parity fence that was widened before anything was converted
+([88a5503b](https://github.com/redhat-et/ripwire/commit/88a5503b),
+[25d901cd](https://github.com/redhat-et/ripwire/commit/25d901cd)).
+
+### Changed — Shotgun Surgery is named where ripwire already measures it
+
+Fowler's Shotgun Surgery, one change that touches many modules, has two measurable forms. The historical one is change
+coupling, which `--cochange` mines and `--situ` and `--pr-context` turn into a check; the name now appears on the
+`--cochange` and `--situ` help entries, the MCP `cochange` and `situational_awareness` descriptions, the README and four
+skills. The static one, Lanza & Marinescu's CM×CC detection strategy, was prototyped on the call graph on two corpora and
+not built: its top flags were stable hubs, and per-file static fan-in tracked how widely edits actually scatter at
+Spearman +0.158 and +0.163. The shipped `--situ` co-change rule, backtested against prior history only, scores
+precision@8 of 0.352 and 0.427 on the same two corpora. The tables are in `docs/EVALS.md` and re-derive from
+`bench/shotgun/` ([8dfd7380](https://github.com/redhat-et/ripwire/commit/8dfd7380)).
+
+### Changed — skill descriptions get their routing triggers and stop rules back
+
+Six skill descriptions get back discovery triggers that had been cut to fit a 320-character per-description ceiling, and
+four one-sentence stop rules return to the frontmatter. The 320 was a design number, not a client limit: Codex rejects a
+description over 1,024 characters, and Claude Code caps an entry at 1,536. `test/skilldescbudgetcheck.sh` now fails only
+a description over 1,024 characters and keeps the 5,400-character ceiling on the set
+([#112](https://github.com/redhat-et/ripwire/pull/112)).
+
+The quality-bar description also stops promising that `--quality-delta` "exits non-zero on new debt". Exit 2 fires only
+when pre-existing code got materially worse, and new-symbol rows never gate, so a clean exit is not a verdict on new code
+([#114](https://github.com/redhat-et/ripwire/pull/114)).
+
+### Changed — the README and the docs
+
+- **The goal.** The README states what the tool is for: one question, one complete answer, with honest limits and token
+  budgets as the two stair-steps toward it. It is worded so it does not promise a hard cap the tool deliberately exceeds
+  with `over_ceiling="1"` ([#88](https://github.com/redhat-et/ripwire/pull/88)).
+- **The top of the page.** It leads with what a stranger can check in ten seconds. The four negations are a local badge,
+  `docs/assets/no-deps.svg`, rather than images fetched from a badge service. The H1 says "Fewer Tokens", and the tagline
+  under it is bold text rather than a second heading. The hero keeps the Trendshift badge; the paddle-out wave moves to
+  the presentation deck ([#82](https://github.com/redhat-et/ripwire/pull/82),
+  [#90](https://github.com/redhat-et/ripwire/pull/90), [#103](https://github.com/redhat-et/ripwire/pull/103),
+  [#113](https://github.com/redhat-et/ripwire/pull/113), [#119](https://github.com/redhat-et/ripwire/pull/119),
+  [#133](https://github.com/redhat-et/ripwire/pull/133)).
+- **The banner** reads "shaped in '76, finned last month, every guess says how many it chose from, see the rip before
+  you're in it", and ends on "Paddle out with a map." The lineage line claims both halves of the ledger: fifty years of
+  software-engineering results, and research from last month. The 5.0% token row now carries the strict-satisfaction
+  caveat beside it instead of 1,150 lines away, and `test/readmedriftcheck.sh` arm (H) holds the lineage summary's counts
+  to the ledger (ca3ce335, ef6168b1, a46a514d, 61d84eef, 441e35cf, 64c81d47).
+- **The task example's 4.3K figure** is described as what one run produced, not an enforced budget, since the example
+  passes no budget flag. Contributed by **@PollyBot13** ([#54](https://github.com/redhat-et/ripwire/pull/54)).
+- **The lineage ledger** gains three rows (tgrep, codeburn, markitdown), going from 43 to 46 repositories, with a gate
+  arm requiring every copy of that count in the README to agree ([#86](https://github.com/redhat-et/ripwire/pull/86)). The
+  string-kernel credits in #127 take it to 49 repositories and 70 papers.
+- **The head-to-head tables say what they predate.** An italic note beside both Round 4 tables records that they were
+  measured on 2026-08-08, before the performance work that ships in 0.6.0, and names two of the figures that have moved
+  since: llvm-project's cold parse, on 182,555 files, from 194.1 s to 155.6 s of CPU, and `--pack-task` on a Go
+  repository from 8.13 s to 5.88 s. No number in the tables changes; they still show what was measured that day
+  ([#141](https://github.com/redhat-et/ripwire/pull/141)).
+- **The README links `INSTALL.md` again.** The sentence under the quick-install block naming every install route was
+  lost when #127's merge took a branch side that predated it, and main had not linked the page since. It goes back in
+  the same place ([#141](https://github.com/redhat-et/ripwire/pull/141)).
+- **Adding a language, for contributors.** `prompts/add-a-language.md` is derived from the diff of the Elixir landing
+  rather than from memory. It starts by measuring the parse rate on a real corpus before any code is written, and it ends
+  with the traps earlier PRs actually hit (7780e4d3, d582d0de).
+- **Three places where the docs contradicted the repository** ([#131](https://github.com/redhat-et/ripwire/pull/131)):
+  - `THIRD_PARTY.md` gains the MIT attribution row the vendored `tree-sitter-markdown` shipped without, and a gate arm
+    now derives the required rows from the directories under `third_party/deps/`;
+  - `INSTALL.md` says Hermes was run live by a contributor when it landed, and OpenClaw has not been;
+  - `docs/ARCHITECTURE.md` said PageRank's power iteration is parallelized; it is single-threaded, and its fixed row
+    blocks exist for determinism, not parallelism.
+
+### Changed — CI, the gate harness and internals, with no change to output
+
+None of this changes the binary's output.
+
+**CI.**
+- macOS legs shard four ways like every other leg, which halves the gates per macOS job. A run grows from 26 checks to
+  30 ([#110](https://github.com/redhat-et/ripwire/pull/110)).
+- The HEAD comparison binary is built once per job, in its own step, never inside a gate's time budget, where a parallel
+  `cmake` build under contention had been killed at 900 s and again at 1200 s
+  ([#118](https://github.com/redhat-et/ripwire/pull/118)).
+- A declared gate budget is now a floor. Under CI's 4× budget scale, 15 of 18 declared budgets had been smaller than what
+  an undeclared gate got ([#109](https://github.com/redhat-et/ripwire/pull/109)).
+- Every non-Ubuntu apt source is removed before `apt-get update`, after a vendor source took down every Linux leg for the
+  second time ([#99](https://github.com/redhat-et/ripwire/pull/99)).
+- The advisory clang-tidy step lints a real parse. `version.h` was not generated before it ran, so the translation unit
+  that includes nearly every header failed to parse and 64 diagnostics were hidden. One of them is the file-handle leak
+  fixed below ([#120](https://github.com/redhat-et/ripwire/pull/120)).
+- Its `bugprone-easily-swappable-parameters` options are set to reveal rather than silence: of the 209 rows the check
+  reports at upstream defaults, 208 are genuine, and the two options add 18 more genuine rows while silencing none
+  ([#124](https://github.com/redhat-et/ripwire/pull/124)). Eight of the flagged functions, among them the whole-file
+  readers, then stop filling an out-parameter and return what they produce; the flagged sites drop from 237 to 229, and a
+  36-case byte-for-byte differential is identical ([#132](https://github.com/redhat-et/ripwire/pull/132)).
+- `test/*.sh` is marked `linguist-detectable=false`. The gate scripts had come within 5% of the C++ source's byte count
+  (8,921,478 against 9,398,027), and a few dozen more gates would have relabelled the repository's language as Shell
+  ([f2589419](https://github.com/redhat-et/ripwire/commit/f2589419)).
+
+**The gate harness.**
+- The published gate count is generated from `test/regression.sh` by `docs/gatecount_build.py`. Two lanes that each add a
+  gate both write N+1, and git merges that cleanly against a loop of N+2; it collided seven times in one night
+  ([#104](https://github.com/redhat-et/ripwire/pull/104)).
+- `test/pargates.py` watches the checkout while gates run. It samples `git status` every 0.25 s and fails the run on any
+  new file a gate leaves in the tree, naming the gates in flight, and it says the count is a floor. A transient probe file
+  had been flipping stamped determinism arms by marking builds `+dirty`; the writer is fixed, and `CONTRIBUTING.md` states
+  the rule ([4c10be9d](https://github.com/redhat-et/ripwire/commit/4c10be9d)).
+- Gates run with `PYTHONDONTWRITEBYTECODE=1`. A gitignored `__pycache__/` had changed what the crawl counts
+  (`corpus_pruned_dirs=` 3 → 4), which made a paging gate nondeterministic
+  ([#122](https://github.com/redhat-et/ripwire/pull/122)).
+- Gates check out commits as private shared clones rather than with `git worktree add`, so a gate killed with SIGKILL
+  leaves nothing registered in the shared `.git` ([#125](https://github.com/redhat-et/ripwire/pull/125)).
+- A timed-out gate is stopped whole. `test/pargates.py` used to SIGKILL only the gate's `bash`, and 5 of 6 probe processes
+  outlived the timeout. Each gate now leads its own process group, which gets TERM and then KILL after a 10 s grace, and a
+  Ctrl-C or SIGTERM to pargates stops every running gate the same way
+  ([#129](https://github.com/redhat-et/ripwire/pull/129)).
+- The installer gates clear inherited agent-home variables before setting up their fixtures, so a gate run from inside an
+  agent session no longer writes into that agent's real home. Contributed by **@PollyBot13** (#55, landed as fed2e2b1 and
+  d05af44e, with a5c95aa6 on top); `test/agenttablecheck.sh` got the same fix for `XDG_CONFIG_HOME` (1fdf70d3).
+- Four gates that could fail for reasons outside what they check now fail only as themselves: a gate whose command died
+  no longer reports a missing feature ([#94](https://github.com/redhat-et/ripwire/pull/94)); a partition arm that ties
+  skips with its numbers instead of failing (cb32e0dd); a truncated pipeline no longer reads as a missing attribute
+  (321ee839); and the skill-eval sweep counts directories that contain a `SKILL.md`, not every directory under
+  `skills/` (5e96a6a5).
+- `scripts/optremarks.py --hot` covers the 14 headers the ingest split moved work into. It had been reading 0.20% of the
+  ingest translation unit ([#98](https://github.com/redhat-et/ripwire/pull/98)).
+
+### Fixed — the macOS x86-64 release binary is built for its own architecture
+
+`cmake/PortableFlags.cmake` picked its flags from `CMAKE_SYSTEM_PROCESSOR`, which CMake takes from the build host. The
+release job builds the macOS x86-64 binary on an arm64 runner, so every x86-64 compile line got `-mcpu=apple-m1` and no
+`-march`. Releases through v0.5.0 therefore most likely shipped a baseline x86-64 macOS binary; no release log shows the
+flags, so that is an inference. With the Xcode pinned after v0.5.0 the same flag is a hard compiler error, so the 0.6.0
+macOS x86-64 job, and with it the whole release, would have failed.
+
+Flags now follow `CMAKE_OSX_ARCHITECTURES` when it names exactly one architecture, so the macOS x86-64 binary gets
+`-march=x86-64-v3` like Linux, and a build tree naming more than one architecture stops at configure ("ripwire builds one
+architecture per build tree"). The job moves to a `macos-26` runner, whose Rosetta can run x86-64-v3 code for PGO
+training, with Xcode 26.6 and `MACOSX_DEPLOYMENT_TARGET=14.0` pinned; without the pin the move would silently have raised
+the minimum macOS to 26. A new release step reads `minos` back off the binary. Gates: `test/portablebuildcheck.sh` arms
+#2d–#2h ([#137](https://github.com/redhat-et/ripwire/pull/137)).
+
+### Fixed — the installer names an x86-64 CPU below v3 instead of reporting a version mismatch
+
+On a CPU below x86-64-v3, `scripts/install.sh` downloaded the binary and ran `--version` to verify it; the binary died
+with SIGILL inside a pipeline whose status came from `head`, and the user was told
+`release vX contains ripwire <unknown> — refusing version mismatch`, which never names the requirement.
+- **Before downloading**, on x86-64 and for 0.6.0 and later, the installer reads the CPU flags (`/proc/cpuinfo` on Linux,
+  the `sysctl` feature keys on an Intel Mac). Below v3 it stops, lists the missing features and points to a source build
+  with `./install.sh`, which builds for the local CPU. It never blocks when the flags cannot be read, under Rosetta, for
+  0.5.x and older, or with `RIPWIRE_SKIP_CPU_CHECK=1`, which covers a VM that hides flags its host still executes.
+- **After downloading**, the verification run's exit code is read. Exit 132 on x86-64 names the v3 requirement and the
+  source-build route, and under Rosetta suggests a native arm64 shell. Any other failure, such as a glibc loader error,
+  is shown with the binary's own output. "Version mismatch" is reported only when the binary ran and printed a different
+  version.
+- `INSTALL.md` states the requirement and the new variable. Gate: `test/releaseinstallcheck.sh` section G, 12 arms, five
+  of them red on main ([#138](https://github.com/redhat-et/ripwire/pull/138)).
+
+### Fixed — a `std::`-qualified C++ call binds only a definition inside namespace `std`
+
+A call written `std::X(...)` bound to the repository's lone in-repo definition named `X`, at full confidence and with no
+`amb=` or `prov=` marker. On memgraph, `SafeString::move` became map row #1 with 2,107 false callers from `std::move`. In
+ripwire's own graph, `std::min`, `std::max` and `std::sort` bound `fastmath` and `svector` members.
+
+A call whose written qualifier is `std`, `::std` or a standard-library inline ABI namespace (`__1 __2 __8 __Cr __cxx11
+__ndk1`, tabled with sources in `src/externalnames.h`) now keeps only candidates scoped inside `std`. Otherwise it is
+counted through the existing external path, `external=`, and gets no edge. Only an exact `qualifier::name` pin exempts a
+site; include-based narrowing does not. Unqualified `move(x)`, ADL, using-directives and namespace aliases behave as
+before, and the rule is deliberately not generalised to other qualifiers.
+
+| `--no-cache` | before | after |
+| --- | --- | --- |
+| memgraph `--callers=SafeString::move` | 2,107 | 3 |
+| memgraph edges / ambiguous / external | 177,280 / 39,771 / 7,404 | 174,787 / 39,606 / 12,370 |
+| ripwire (main `096e3544`) edges / ambiguous / external | 20,857 / 7,626 / 1,003 | 20,413 / 7,528 / 2,498 |
+| ripwire `--callers=min` / `max` / `sort` | 131 / 67 / 7 | 5 / 14 / 2 |
+
+`unresolved=` and map wall time are unchanged. Of the three memgraph callers left, two are `SafeString` unit tests and one
+is a `std::ranges::move`, the first gap below.
+
+**Known gaps, disclosed.**
+- Nested std namespaces (`std::ranges::`, `std::chrono::`) arrive as their last segment only, which cannot be told apart
+  from a user namespace.
+- In ObjC++, the grammar parses `std::move( x )` as an error node plus a bare `move( x )`, so the qualifier is gone before
+  resolution. The gate pins this behaviour.
+- A declaration-only `namespace std { void f(); }` would still receive edges. This is not gated.
+- `external=` now also counts refused `std::` calls, so it reads higher than before.
+
+No cache or parser version moves: the change is resolution-only, and a warm run on a cache written by the old binary
+equals `--no-cache`. Gate: `test/stdqualcheck.sh`, 35 checks. On the pre-fix binary 19 fail, and the 16 that pass are
+controls ([#134](https://github.com/redhat-et/ripwire/pull/134)).
+
+### Fixed — the cache evicted its own working root, and every root minted two key families
+
+One llvm-project root needs 1.76 GB of cache, and the cache sweep holds the whole cache to 2 GB. The sweep was evicting
+that root's own rich blob, so a repeated same-argv `--for` on llvm-project took 274 s of CPU; with the blob kept it takes
+26 s. Eviction now pins every family of the working root, and an eviction is disclosed on stderr only when one happens.
+Separately, the lean/rich cache-key builder hashed the root with a truncated FNV basis while the git-metadata families
+used the real one, so every root minted two key families. There is one root key for all seven families now, which is why
+blobs from older builds are clean misses (see the upgrade notes) ([#127](https://github.com/redhat-et/ripwire/pull/127)).
+
+### Fixed — `--help-task` no longer answers "how does <word>" with a symbol
+
+`--help-task` no longer mints a symbol from a "how does <word>…" question, and JSON keys never resolve as symbols.
+Harmful recommendations fell from 13 of 25 to 0, and precision rose from 0.797 to 1.000. The skills' stop rules are gated
+as present and load-bearing, the router names all 16 skills, and the MCP answer gains `no_route`
+([#127](https://github.com/redhat-et/ripwire/pull/127)).
+
+### Fixed — the confident zero: three outside reports, three causes (cache format 18)
+
+Three reports filed on 2026-09-08 described one symptom: a number that reads as authoritative and is not. They turned out
+to have three causes, so each got its own fix. A single "blind spot" attribute would have been a false claim on two of
+the three.
+
+- **Callers in a file no grammar reads gave `count="0"`, undisclosed.** Reported by **@snrmwg**
+  ([#66](https://github.com/redhat-et/ripwire/issues/66)). Every graph verb's root now carries `graph_unindexed=`, folded
+  from the same list the map header prints and absent at zero. ripwire also stops reporting its own cache blob as an
+  unread language when that file sits inside the crawl root; that had made one query answer differently cold and warm.
+- **A header-qualified selector gave `reaches="0"` for seven real callers.** Reported by **@mariadb-KyleHutchinson**
+  ([#63](https://github.com/redhat-et/ripwire/issues/63)). `Foo.h:name` resolved to bodyless declarations, which carry no
+  edges. A selector that resolves only to declarations now widens to the definitions they stand for, matched on scope and
+  name, never on name alone. `docs/EVALS.md` had published "Blast-radius calls returning an empty radius for a symbol
+  with real callers: ripwire 0". That sentence is now scoped to the corpora it measured, only one of which was C++.
+- **A call inside `#if 0` was served as a live call site.** Reported by **@mariadb-KyleHutchinson**
+  ([#62](https://github.com/redhat-et/ripwire/issues/62)). This is an over-count, which breaks the promise of
+  `counts_floor="1"` that the true count is at least the reported one. The dead-range rule `--slice` already used moved
+  to `src/preprocdead.h`, and the call graph now reads the same implementation, so the two cannot disagree about which
+  lines exist. Only literal `#if 0`/`#if 1` counts; `#ifdef X` and `#if EXPR` stay live. The edge is dropped, not flagged,
+  because a flagged row still counts.
+
+`kCacheVersion` goes 17 → 18: this changes which references are extracted, so a version-17 blob would replay edges this
+build does not produce. Gate: `test/blindspotcheck.sh`, written red first
+([#72](https://github.com/redhat-et/ripwire/pull/72)).
+
+### Fixed — `--for --detail` named a `max_tokens` ceiling it did not apply
+
+On a `--for --detail` run, `--max-tokens=N` budgeted the bodies only. Signatures, the header, the legend and the symbol
+table were never charged, yet the root printed `max_tokens="N"` regardless. Reported by **@YogevKr**
+([#61](https://github.com/redhat-et/ripwire/issues/61)): at `--max-tokens=300` the answer cost 2,640 estimated tokens,
+8.8× the ceiling it named, with no `over_ceiling`.
+
+The fix is disclosure, not enforcement, which is what the issue asked for. Thirty small functions is the complete
+answer, and trimming it to fit 300 would serve the caller less while looking more obedient. The reproduction now reads
+`max_tokens="300" est_tokens="3589" over_ceiling="1"`, and `--help` states what `--max-tokens` bounds on that path and
+what it does not ([#77](https://github.com/redhat-et/ripwire/pull/77)).
+
+### Fixed — a budgeted `--for` shipped past its allowance with no ladder rung fired
+
+`--for`'s ceiling ladder priced the header it was about to emit, but not the two pieces spliced on afterwards: the root
+`over_ceiling="1"` and the legend clause that defines it, 70 bytes between them. `est_tokens` prices markup at 2.50
+bytes per token while the allowance is sized at 2.714, so any bundle in that band carried 70 bytes the ladder never saw,
+and a bundle the ladder had fitted within 70 bytes of the allowance shipped past it. It was latent, not new: the
+pre-fix binary, on the repository's own `src/`, overshot at 14 of 111 budgets.
+
+The post-ladder splices and the `est_tokens` fixpoint now move inside the shape the ladder prices, so a shape fits only
+when the old reserve test passes **and** the finished header plus every other emitted byte fits the allowance. The first
+half is the old test verbatim, so a bundle that was already inside its allowance picks the same shape: over 1,971
+invocations across three trees, the flag combinations and the MCP `for` twin, 1,918 are byte-identical to the pre-fix
+binary. All 53 that move were past their allowance with no rung fired — 29 now fit, and 24 land on the ladder's
+disclosed last rung, which is **larger** than what shipped before, because it carries the overflow disclosure the old
+path dropped. `--pack-task` and `--from-trace` keep the fixed-payload form of the ladder and are unchanged by
+construction. Gate: `test/estchargecheck.sh` #11 A7 and its new 52-budget sweep, red on the parent commit
+([7caf968f](https://github.com/redhat-et/ripwire/commit/7caf968f),
+[3d98f84d](https://github.com/redhat-et/ripwire/commit/3d98f84d), in
+[#135](https://github.com/redhat-et/ripwire/pull/135)).
+
+### Fixed — caps that cut an answer now say so where they fire
+
+A cap that cuts output silently makes an answer look complete. Each cap below now discloses only when it fires, so an
+answer the cap did not touch is byte-identical to before. No cap value moved.
+
+- **`--grep` and `--verify` matched lines** are cut at 512 bytes, and a 512-byte source line used to print the same
+  payload as a truncated 50 KB minified line. The row now carries `line_bytes="N"`, the whole line's length. The payload
+  itself stays raw file bytes, because `--and`/`--not` read the same line and `--at=` must reproduce it
+  ([#100](https://github.com/redhat-et/ripwire/pull/100)).
+- **Signatures** cut at 240 bytes now end in `…`, through the same truncator the other three signature cuts already use.
+  This affects `--pack-signatures`, `--for`'s `<sigs>`, `<calls>` callee rows and `--lego`
+  ([#100](https://github.com/redhat-et/ripwire/pull/100)).
+- **A default `--for` named no ceiling.** Its 7,500-byte payload budget applies to every run, but only an explicit
+  `--token-budget` was ever named. A trimmed default bundle now carries `budget_bytes="7500"` on its root, in the JSON
+  dialect and in the MCP `for` verb ([#100](https://github.com/redhat-et/ripwire/pull/100)).
+- **Several listings disclose their own cuts** ([#108](https://github.com/redhat-et/ripwire/pull/108)):
+  - `--from-trace` discloses its name-ladder cut (`name_ladder_capped`), and `--handoff` its per-file symbol cut
+    (`syms_capped`).
+  - The expand and sibling lifts say when they re-ranked, and a malformed `RIPWIRE_EXPAND` or `RIPWIRE_SIBLIFT` is
+    reported instead of being read silently as off.
+  - The seven mention caps and three co-boost caps disclose on `--for`, `--pack-task` and MCP. Across a 195-invocation
+    sweep, only four `--for` invocations changed (+106 B, where `doc_mentions_capped="1"` fired), and their ranked rows
+    were identical once that attribute was stripped.
+- **`--edit-check`** pages its context rows only. Flagged callers and their `sites_l=` never page, the verdict is computed
+  before any window, and the root carries `est_tokens=`. A gate arm proves the verdict byte-identical at
+  `--limit=1000000` ([#108](https://github.com/redhat-et/ripwire/pull/108)).
+
+One cap was refuted rather than changed. `kSliceRdMaxIter` (64) cannot fire, because each slot of the reaching-definitions
+lattice stabilises on the second round. Instrumented, the highest iteration reached was 1, over 4,528 loop fixpoints in
+this tree's `src/` and on adversarial C and Python fixtures ([#100](https://github.com/redhat-et/ripwire/pull/100)).
+Gate: `test/capdisclosurecheck.sh`, whose nine disclosure arms fail on the parent commit while every crossing and silence
+arm passes.
+
+### Fixed — a cut callee listing kept the lowest node ids, not the rows the question was about
+
+A body's `<calls>` listing keeps at most sixteen callee rows. On `--for`'s bodies, `--pack-task`'s `<bodies>` and
+`--from-trace`'s rank-1 body, the sixteen kept were the sixteen lowest node ids. The disclosure,
+`<calls total="22" shown="14" capped="1">`, was honest about the count and silent about the choice.
+
+A cut listing is now ordered by the query's rank, with ties broken by id:
+- **The measured case.** On this repository, `--pack-task="merge scout conflict"` used to keep 13 of
+  `computeMergeScout`'s 22 callees, six of them STL noise, with the merge-scout functions last. It now keeps 14, with
+  those functions first.
+- **`--from-trace`** ranks a callee that is itself a frame of the same trace ahead of the rest, so the edge the trace
+  walked survives the cut.
+- **Unchanged.** `--expand`, `--around` and `--exemplar` have no query, so they keep node-id order, byte-identical.
+
+Gate: `test/callsrankordercheck.sh` ([#95](https://github.com/redhat-et/ripwire/pull/95)).
+
+### Fixed — `--regex` anchors match per line, and a regex can no longer kill the run
+
+`--regex` handed a whole file to one iterator, so `^` matched only at offset 0 and `$` only at end of file, in a verb
+whose every answer is a single line. On llvm-project, `--regex='^#include'` returned 1,487 hits where a line-oriented scan
+returns 289,646. Anchors now match per line, as `grep`, `rg` and editors read them. The scan is also faster on that corpus
+(3.40 s against 4.48 s warm).
+
+Disclosed narrowing: a match can no longer span lines, which `[\s\S]*` could do before. That is `rg`'s default contract
+too.
+
+- **Why not `std::regex::multiline`.** It is the obvious fix and is not used. Apple libc++ reads one byte before the
+  buffer when matching at offset 0, and a 40-line standalone with no ripwire code in it faulted on 74 of this
+  repository's ~130 headers.
+- **A bad regex no longer ends the run.** A `std::regex_error` thrown mid-scan by catastrophic backtracking used to reach
+  `std::terminate`. That file now degrades, and the scan continues.
+- **`corpus_pruned_dirs=` on the `--grep` root** names the built-in directory denylist, which grep had never disclosed. On
+  this repository `--grep='malloc('` served 33 hits with `complete="1"` where `rg` found 78, and the 45 missing lines
+  were all under `third_party/`.
+
+Gate: `test/grepanchorcheck.sh` ([#85](https://github.com/redhat-et/ripwire/pull/85)).
+
+### Fixed — `--grep` no longer reads gitignored files the indexer skips
+
+`--grep` and `--regex` also scan text files whose extension the indexer does not handle. That set was recorded before the
+ignore rules were consulted, so a file that was both gitignored and of an unindexed extension was read and served. In the
+measured case, that was four hits from a `.cpp.bak` that the repository's own `.gitignore` names. The crawl now consults
+the ignore verdict before recording such a file, and `--no-ignore` restores it. On the reporting corpus,
+`unindexed_files_scanned` went from 409 to 52. `docs/ARCHITECTURE.md` had still said `.gitignore` is not consulted; that
+paragraph is corrected. Gate: `test/grepignorecheck.sh` ([#87](https://github.com/redhat-et/ripwire/pull/87)).
+
+### Fixed — a revision reaches git only as a resolved commit (`--since`, `--merge-scout`, `--pr-context`)
+
+Three verbs resolved a caller's revision with their own copy of the `rev-parse` probe. None of the copies held the whole
+rule the shared resolver states: refuse a value that begins with `-` before git is asked, and trust only a bare 40- or
+64-hex answer. All three now call `gitResolveCommitSha`. This is defence in depth, not a reachable exploit today, but two
+of the gaps gave wrong answers at exit 0:
+
+- **`--since`.** For `--since='^HEAD~3'`, `rev-parse --verify` answers `^<sha>` with status 0, so the run stamped
+  `window="^HEAD~3" commits="0"` and exited 0. A date value beginning with `-` passed the date check and reached git's
+  argv. Both now refuse, and `git log` receives the resolved commit instead of the caller's string
+  ([#115](https://github.com/redhat-et/ripwire/pull/115)).
+- **`--merge-scout`.** `--merge-scout=^HEAD~1` printed an empty `ok="0"` arm at exit 0. It now refuses with exit 1 and
+  names the ref ([#116](https://github.com/redhat-et/ripwire/pull/116)).
+- **`--pr-context`.** `--pr-context=--output=FILE` reached git as an argv entry and was stopped only by git's own
+  `rev-parse`. ripwire now refuses it before git is asked ([#117](https://github.com/redhat-et/ripwire/pull/117)).
+
+Valid refs give byte-identical output. The gates `test/sincecheck.sh`, `test/mergescoutcheck.sh` and
+`test/prrefsafecheck.sh` log every git argv entry through a PATH shim, and each is red on the base binary.
+
+### Fixed — a repository's hook-form `core.fsmonitor` no longer runs under ripwire's git calls
+
+A repository can configure git to run an arbitrary command on git operations, and ripwire shells out to git during a
+crawl. A hook-form `core.fsmonitor` in the crawl root would therefore have run under ripwire. It is now neutralised for
+ripwire's own git children and disclosed on stderr and in `--doctor`. Gate: `test/githardencheck.sh`
+([#80](https://github.com/redhat-et/ripwire/pull/80)).
+
+### Fixed — JavaScript and TypeScript default imports resolve by what the module exports (parser version 83)
+
+`import save from './storage.js'` bound to whichever function happened to be spelled `save`. It now binds to what
+`storage.js` exports as default, with `prov="import"`:
+- default declarations, local identifier defaults and `export { local as default }` are all covered;
+- the existing lexical-shadow and module-ambiguity handling is reused;
+- an anonymous default expression stays unresolved;
+- conflicting default exports cannot pick a function just because it is the only function-shaped symbol.
+
+Contributed by **@PollyBot13** ([#56](https://github.com/redhat-et/ripwire/pull/56)). The gate covers TS, TSX, MTS, CTS,
+JS, JSX, MJS and CJS, with a same-spelled decoy in each arm. The version is 83 because #57 had already spent 82; the
+record shape is unchanged.
+
+### Fixed — an 8-bit counter overflow in four vendored grammar scanners (parser version 87)
+
+Markdown's external scanner added a `size_t` column count into a `uint8_t`. One Rails guide, whose pipe-table row is
+padded to 301 columns, made the ASan build exit 134 on that file alone. On the plain build the damage was a wrong parse at
+exit 0, and only at widths just past a wrap. At 256 or 257 columns:
+- an indented `# Buried` became a heading;
+- a fence of that many marks never opened, so its body leaked out as live markdown.
+
+Markdown's counters now saturate at 255, which every threshold they are compared against reads the same way as a larger
+true value. The Rust, Lua and C# scanners take an explicit cast instead. Their counters close a token by matching the
+opening count, and at 255, 256, 257 and 300 the output recovered identically in all three.
+
+Output is byte-identical over 3,538 real `.md`/`.rs`/`.lua`/`.cs` files, but a constructed 256-column line does move, so
+the parser version moves too. Gate: `test/vendorpatchcheck.sh` arm I, with every width pinned at exactly 256
+([#102](https://github.com/redhat-et/ripwire/pull/102)).
+
+### Fixed — the vendored YAML scanner's failure status survives an unsigned `char` (parser version 92)
+
+tree-sitter-yaml returns its scan status through four functions declared plain `char`, and one of the values it returns
+is `SCN_FAIL`, `#define`d `(-1)`. **`char` is unsigned on aarch64 Linux**, which is where the `linux-arm64` release
+asset is built, so there the `-1` came back as 255, with two consequences:
+
+- **A silent parse difference, in every build type the release ships.** The three `case SCN_FAIL:` labels never matched
+  255, so a malformed `%`-escape in a tag or a `%TAG` prefix was swallowed into the token instead of ending it.
+  `a: !<tag:x%zz> b` parses as `ERROR` under a signed `char` and as a clean tagged scalar under an unsigned one — the
+  same bytes, a different tree, decided by the CPU the binary was built for. At the product level, a ripwire built
+  `-funsigned-char` minted a key the signed build does not.
+- **A sanitizer abort on ordinary YAML.** `scn_pln_cnt` reaches its `return SCN_FAIL;` on a plain `key: value` line, so
+  G1's implicit-conversion check stops the run there. All three `test/yamlfix` files abort, which means an aarch64 Linux
+  ASan build dies on the first YAML file it crawls.
+
+CI could not see either symptom: both sanitizer legs have a signed `char`, and there is no aarch64 Linux leg.
+
+The fix backports upstream's own change, **a1c4812a**, which no tagged release of the grammar contains yet: the three
+`#define`s become an enum whose negative member forces a signed type, and the four functions return it. Its added and
+removed lines are identical to upstream's, with only the vendor-patch markers ours. A cast was rejected because it
+silences the sanitizer while still never matching `case SCN_FAIL:`.
+
+Every `char` in the grammar sources was audited, not only the two functions the report named, and the rest of the family
+was swept: a detector for negative returns through plain `char`, run over all 18 vendored `scanner.c` files plus the
+Kotlin scanner, finds YAML only. On a signed-`char` host the default map, `--json` and `--skipped` are byte-identical
+before and after, over the repository root, five fixture directories and the generated YAML corpora. Gate:
+`test/vendorpatchcheck.sh` arm K builds the vendored grammar twice, once `-fsigned-char` and once `-funsigned-char`,
+and asserts identical trees for ten fixtures — one per audited site, plus a control that reaches no failure path — and
+that the unsigned build parses all of them and every `test/yamlfix` file clean under the implicit-conversion sanitizer.
+On unpatched main five of the ten trees differ and twelve inputs abort under the sanitizer — nine fixtures, only the
+control clean, and all three `test/yamlfix` files. `kParserVer` goes 91 → 92, because the extraction of real input changes
+wherever `char` is unsigned and a cache blob cannot tell the two architectures apart; `kCacheVersion` stays 20
+([#140](https://github.com/redhat-et/ripwire/pull/140)).
+
+### Fixed — `--help=all` said `--situ` self-budgets through `--token-budget`, which `--situ` refuses
+
+The `--top-k` paragraph listed `--situ` among the verbs that self-budget via `--token-budget`. Passing the two together
+exits 1, and the refusal's own roster of honouring verbs does not name `--situ`; `src/situ.h` reads neither the token
+budget, the max-tokens value nor `--top-k`. The sentence sent an agent to a flag that fails. Only `--situ` is removed
+from it; `--pack-task`, `--from-trace` and `--run-trace` are in the refusal's roster and keep their place.
+`docs/COMMANDS.md` mirrors the sentence and is generated, so it was regenerated through the repository's own recipe;
+that also drops `--top-k` from `--situ`'s derived "Shaped by" list, which is the true statement
+([#140](https://github.com/redhat-et/ripwire/pull/140)).
+
+### Fixed — `CLAUDE_CONFIG_DIR` is respected
+
+Every path that located Claude Code's config directory read `$HOME/.claude` and ignored `CLAUDE_CONFIG_DIR`, the variable
+Claude Code itself honours. The installers, `skills/install.sh --hook`, `--scan-skills`, `ripwire wrap`'s detection and
+`--doctor --agent=claude` now follow `${CLAUDE_CONFIG_DIR:-~/.claude}`, the pattern `CODEX_HOME`, `AGENTS_HOME` and
+`HERMES_HOME` already use. Unset behaves as before, and set-but-empty counts as unset.
+
+Contributed by **@s0undt3ch** ([#101](https://github.com/redhat-et/ripwire/pull/101)), who found six sites. Review found a
+seventh, in `--doctor`: with the variable set, the installer deployed into the relocated home and reported success, and
+`--doctor --agent=claude` then reported `claude-skills ok="0"` and told the user to re-run the installer that had just
+worked. `test/claudeconfigdircheck.sh` is a census over executable code rather than a list of known sites, so an eighth
+site would go red on the commit that adds it ([#105](https://github.com/redhat-et/ripwire/pull/105)).
+
+### Fixed — `--edit-check`'s tests-to-run receipt gives the answer `--affected` gives
+
+The receipt walked its own path instead of the one `--affected` serves, so the same change could get two different
+answers depending on which verb was asked. It now routes through `--affected`'s answer, emits the same evidence tiers and
+carries `order="evidence"`. `--pack-task` keeps its deliberately different row set, with the reason stated in the source.
+The divergence surfaced while digging into two reports by **@YogevKr**
+([#59](https://github.com/redhat-et/ripwire/issues/59), [#60](https://github.com/redhat-et/ripwire/issues/60)). This
+change closes neither report; both remain open.
+
+In the same change, a published capture whose `--at=` seed had drifted onto a different function (right shape, wrong
+symbol, exit 0) is regenerated. Captures now derive each seed from source, and a gate arm requires every published seed
+to resolve to the symbol its demo is about ([#89](https://github.com/redhat-et/ripwire/pull/89)).
+
+### Fixed — two defects clang-tidy found once it could parse the tree
+
+- **A file-handle leak.** `readWholeFile` skipped `fclose` on a short read. The reader is shared by the git-config probe,
+  which runs at startup and per request under `--mcp`, and by the notebook reader.
+- **Unchecked calibration variables.** The `RIPWIRE_*` ranking calibration variables were read with `atof`/`atoi`. `nan`
+  passed through the clamp into every BM25 score, `8x` read as 8, and `notanumber` read as 0 and was clamped to the floor:
+  three rankings nobody configured, each at exit 0. A value must now parse as one whole finite token; otherwise the
+  default is used and one stderr line names the variable.
+
+Both fixes are in [#120](https://github.com/redhat-et/ripwire/pull/120).
+
+### Fixed — a call the resolver declined to guess at no longer reads as "no caller exists" (`declined=`, `declined_calls=`)
+
+Tier 3 of the name-based resolver refuses a call whose candidates are two or more same-language definitions, none
+in the caller's file or directory, and that no qualifier or receiver rule pins. That rule stands: guessing among
+cross-directory same-named definitions is how false edges are born. But the refusal was silent — no edge, no `amb=`,
+and `ambiguous=`/`unresolved=`/`external=` unmoved — so `--callers` on either definition answered `count="0"` about
+a call the resolver had seen, and nothing said how often. At merge, on the `--no-cache` default map, it was 22.2% of
+memgraph's call references (65,516 of 295,086) and 4.6% of ripwire's own (6,263 of 135,449); on the branch base it was
+8.6% of retrofit's and 0.15% of llvm `lib/Support`'s.
+
+The decline is now counted and shown, and no edge moves:
+
+- The map header carries `declined=N` (JSON `"declined":N`), absent at zero; its legend entry appears only on a map
+  that carries the attribute.
+- `--callers`, `--callees` and `--impact` carry `declined_calls="K"` in XML, `--json` and `--format=columnar`, as do
+  their MCP twins `find_referencing_symbols`, `find_symbol` and `impact`: declined calls that could have meant the
+  selector's definitions (callers), that those definitions make (callees), or that could reach SYM or its radius
+  (impact), counted once per call. Absent at zero, defined in the legend when present.
+- `--pin-census` ends with a conservation line, `# dispositions calls=N …`: every call reference lands in exactly one
+  of bound, self, external, unresolved, undefined, other_root, qualified_external, declined, file_scope or
+  unaccounted, and `calls=` is re-derived from the references. A resolver exit that names no bucket lands in
+  `unaccounted` and raises a degrade alert on plain builds, so the next silent `continue` is caught, not shipped.
+
+Measured on the `--no-cache` default map, the base binary against the change. memgraph and ripwire were re-measured at
+merge, on a tree that already carries the `std::`-qualified call guard; retrofit and llvm `lib/Support` are from the
+branch base (5c808487), where each map's byte diff is exactly the new `declined=N` plus one legend comment (+245 to
++248 B) and `edges=`, `ambiguous=`, `unresolved=`, `locality_pinned=` and `external=` are identical on every corpus. At
+merge, `edges=`, `ambiguous=`, `unresolved=` and `locality_pinned=` are unchanged everywhere.
+
+| corpus | call references | `declined=` | share |
+| --- | ---: | ---: | ---: |
+| memgraph (at merge) | 295,086 | 65,516 | 22.2% |
+| ripwire (at merge) | 135,449 | 6,263 | 4.6% |
+| retrofit (branch base) | 29,983 | 2,587 | 8.6% |
+| llvm `lib/Support` (branch base) | 20,425 | 30 | 0.15% |
+
+memgraph peak RSS 621 → 630 MB (+1.5%, the candidate index behind `declined_calls=`); wall time unchanged (0.76 s →
+0.75 s). A cache written by the pre-change binary reads back warm to output byte-identical with `--no-cache`, so no
+cache or parser version moves. Gate `test/declinecheck.sh` covers 17 languages and was red on the pre-change binary
+(50 FAIL / 38 PASS as first committed); `test/resolverhonestycheck.sh` F5 now requires the decline to be disclosed,
+not merely edge-free.
+
+The at-merge rows are lower than the branch base's (66,015 of memgraph's calls, 7,279 of 134,739 on ripwire's
+5c808487 tree) because the `std::`-qualified call guard refuses some `std::` sites before they reach tier 3. The
+`# dispositions` line balances with `unaccounted=0` on both; the guard's refusals count as `external`, and
+`test/declinecheck.sh` runs the guard's own fixture (`test/stdqualfix`) to keep them there.
 
 ### Fixed — the super-linear warm floor under every graph-building verb (`--grep`, `--callers`, the map)
 
-On llvm-project (182,555 files, warm cache) a `--grep` for an absent literal took ~157 s, `--callers=main`
-~152 s and the default map 248 s, while the same crawl + cache load + model build without the graph took
+On llvm-project (182,555 files, warm cache) a `--grep` for an absent literal took 159.7 s, `--callers=main`
+152.9 s and the default map 248 s, while the same crawl + cache load + model build without the graph took
 3.8 s. Profiled to one operation: the resolver rebuilt a receiver type's inheritance cone (two BFS walks
 with quadratic dedup) on every still-ambiguous receiver-typed call — 86,667 rebuilds for 2,984 distinct
 types, 143 s of the 154 s run. `ChaConeMemo` (`src/graph.h`) computes each cone once with the identical
-walk and cap; warm `--grep` is now 9 s, `--callers` 8.6 s, the map 10 s, and default maps are byte-identical
+walk and cap; warm `--grep` is now 9.2 s, `--callers` 8.6 s, the map 10 s, and default maps are byte-identical
 before and after on go and llvm. Gate `test/chaconecheck.sh`; the phase tables are in `bench/PROFILE.md`
 and the evidence chain in `docs/EVALS.md` (2026-09-09).
+
 ### Fixed — a Ruby receiver's lazy bit is order-blind, and a deep constant chain no longer overflows the stack (parser version 86)
 
-Two defects in the receiver round (parser version 83 above, 84 on main after the renumber), both found by
-review after the merge and both reproduced before they were fixed.
+Two defects in the receiver round (parser version 84, the entry below; its branch numbered it 83), both found by
+review after the merge and both reproduced before they were fixed. Contributed by **@andriytyurnikov**
+([#78](https://github.com/redhat-et/ripwire/pull/78), landed in [#91](https://github.com/redhat-et/ripwire/pull/91)).
 
 **A load-time site below a lazy one was lost.** The receiver dedupe keeps one `Include` per (file, innermost
 open, written name), and the first occurrence in source order carried the lazy bit. A `Helper.fmt` inside a
@@ -61,7 +1093,7 @@ clears the bit on the retained record (`captureIncludes`, `seenReceivers` now ma
 on macOS; 2 000 survived. The check is a loop now. Nothing else on the path recurses per segment: the walk is
 an explicit stack, the resolver splits the text.
 
-**`--help` said `lazy="1"` was TS/JS only.** It has read Ruby closures and autoloads since parser version 83;
+**`--help` said `lazy="1"` was TS/JS only.** It has read Ruby closures and autoloads since parser version 84;
 the `--impact` line now says so, and `docs/COMMANDS.md` is regenerated from it.
 
 Measured (`--deps --limit=100000`, parser version 83 → 86, the same four corpora as the receiver round; the
@@ -92,12 +1124,16 @@ arms fail against the pre-fix binary — the eager-after-lazy importer reads `la
 the cache round-trip. Re-pins with reasons in-file: `qschemetrip.hash` (parser mirror), `printf_parity.manifest`
 (`help` and `impact` bytes — the `--impact` import-tier legend moved with the `--help` line).
 
-### Added — a Ruby constant receiver is a dependency (parser version 83)
+### Added — a Ruby constant receiver is a dependency (parser version 84)
 
 Round two of the Ruby constant work. Parser version 82 gave the declarative spellings — `class X < Base`,
 include/extend/prepend, `autoload :Name`. This round adds the one a Zeitwerk application actually depends
 through: a **constant receiver** — `User.find`, `App::Mailer.deliver`, `Struct.new`. The autoloader loads
 lib/app/user.rb on that first reference, and nothing else in the file says so.
+
+Contributed by **@andriytyurnikov** ([#65](https://github.com/redhat-et/ripwire/pull/65)). The round was measured and
+gated on its branch as parser version 83 and shipped as 84, because the JavaScript and TypeScript default-import fix had
+taken 83 first; the version numbers in this entry's tables and gate notes are the branch's.
 
 Four decisions, each stated in `test/rubyrecvcheck.sh`'s header rather than asked:
 
@@ -280,6 +1316,8 @@ caches visit the sites in different orders — the fixture gave the helper two i
 The memo is now keyed on the whole chain. Written red first: 24 arms
 fail against the parser-version-81 binary, every mutation-control and floor arm passes there. 557 → 558
 gate scripts.
+
+Contributed by **@andriytyurnikov** ([#57](https://github.com/redhat-et/ripwire/pull/57)).
 
 ## [0.5.0] — 2026-09-07
 

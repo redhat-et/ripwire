@@ -56,7 +56,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/fieldusesfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -86,18 +86,18 @@ for fld in Counter.count Counter.step Counter.label Gauge.count Gauge.level Gaug
         && ok "(A) field $fld answers the member form (member=\"$fld\" defs=\"1\")" || no "(A) field $fld: member=$( attr member "$OUT" ) defs=$( attr defs "$OUT" )"
 done
 for name in count step label level inner hits; do   # (`total` is ALSO a free function in shapes.cpp; `limit` stays a t="var" symbol — both legitimate map rows)
-printf '%s' "$MAP" | grep -q '<s t="var"[^>]* n="limit"' && ok '(A) annotated class attribute limit stays a t="var" map symbol (pre-round contract)' || no '(A) annotated attribute limit is no longer a t="var" symbol'
+if printf '%s' "$MAP" | grep -q '<s t="var"[^>]* n="limit"'; then ok '(A) annotated class attribute limit stays a t="var" map symbol (pre-round contract)'; else no '(A) annotated attribute limit is no longer a t="var" symbol'; fi
 printf '%s' "$MAP" | grep -q '<s t="var"[^>]* n="limit"' || true
     printf '%s' "$MAP" | grep -q "<s t=\"[a-z]*\"[^>]* n=\"$name\"" && no "(A) field name '$name' is a map symbol" || ok "(A) '$name' is not a map symbol"
 done
-printf '%s' "$MAP" | grep -q '<s t="var"[^>]* n="kMax"'   && ok '(A) class-static constant kMax stays t="var"' || no '(A) kMax is no longer t="var"'
+if printf '%s' "$MAP" | grep -q '<s t="var"[^>]* n="kMax"'; then ok '(A) class-static constant kMax stays t="var"'; else no '(A) kMax is no longer t="var"'; fi
 "$BIN" "$FIX" --uses=Counter.live --no-cache >/dev/null 2>&1 && no '(A) static data member live answers as a field' || ok '(A) static data member live is not a field (refuses, disclosed)'
 printf '%s' "$MAP" | grep -q '<s t="[a-z]*"[^>]* n="width"' && no '(A) Go struct field `width` became a symbol (Go is not served)' || ok '(A) Go struct field `width` is not a symbol (unserved language)'
 # one field per Python (class, name) even though Tally.total/Meter.total are assigned in several methods: the
 # scope-qualified spellings resolve exactly ONE field each (arm F pins their rows), and a bare `label` — two C++
 # owners, no same-named function — refuses with exactly two spellings
 "$BIN" "$FIX" --uses=label --no-cache >/dev/null 2>"$TMP/label.err"
-grep -q 'declared by 2 owners' "$TMP/label.err" && ok "(A) bare label: exactly one field per owner (2 owners)" || { no "(A) bare label owners != 2"; cat "$TMP/label.err"; }
+if grep -q 'declared by 2 owners' "$TMP/label.err"; then ok "(A) bare label: exactly one field per owner (2 owners)"; else { no "(A) bare label owners != 2"; cat "$TMP/label.err"; }; fi
 
 # ── (B) golden ───────────────────────────────────────────────────────────────────────────────────────────
 expect_rows Counter.count "(B) Counter.count" \
@@ -108,12 +108,12 @@ expect_rows Gauge.level   "(B) Gauge.level"   "write shapes.cpp:27" "read shapes
 expect_rows Counter.step  "(B) Counter.step"  "read shapes.cpp:11"
 expect_rows Counter.label "(B) Counter.label" "write shapes.cpp:40"
 CC="$( "$BIN" "$FIX" --uses=Counter.count --no-cache 2>/dev/null )"
-[ "$( attr count "$CC" )" = "9" ]          && ok '(B) Counter.count count="9"'          || no "(B) Counter.count count=$( attr count "$CC" ) (want 9)"
-[ "$( attr pinned "$CC" )" = "8" ]         && ok '(B) Counter.count pinned="8"'         || no "(B) Counter.count pinned=$( attr pinned "$CC" ) (want 8)"
-[ "$( attr amb_sites "$CC" )" = "1" ]      && ok '(B) Counter.count amb_sites="1"'      || no "(B) Counter.count amb_sites=$( attr amb_sites "$CC" ) (want 1)"
-[ "$( attr owners_of_name "$CC" )" = "2" ] && ok '(B) Counter.count owners_of_name="2"' || no "(B) Counter.count owners_of_name=$( attr owners_of_name "$CC" ) (want 2)"
-[ "$( attr defs "$CC" )" = "1" ]           && ok '(B) Counter.count defs="1"'           || no "(B) Counter.count defs=$( attr defs "$CC" ) (want 1)"
-printf '%s' "$CC" | grep -q 'counts_floor="1"' && ok '(B) counts_floor="1" on the member form' || no '(B) member form lacks counts_floor="1"'
+if [ "$( attr count "$CC" )" = "9" ]; then ok '(B) Counter.count count="9"'; else no "(B) Counter.count count=$( attr count "$CC" ) (want 9)"; fi
+if [ "$( attr pinned "$CC" )" = "8" ]; then ok '(B) Counter.count pinned="8"'; else no "(B) Counter.count pinned=$( attr pinned "$CC" ) (want 8)"; fi
+if [ "$( attr amb_sites "$CC" )" = "1" ]; then ok '(B) Counter.count amb_sites="1"'; else no "(B) Counter.count amb_sites=$( attr amb_sites "$CC" ) (want 1)"; fi
+if [ "$( attr owners_of_name "$CC" )" = "2" ]; then ok '(B) Counter.count owners_of_name="2"'; else no "(B) Counter.count owners_of_name=$( attr owners_of_name "$CC" ) (want 2)"; fi
+if [ "$( attr defs "$CC" )" = "1" ]; then ok '(B) Counter.count defs="1"'; else no "(B) Counter.count defs=$( attr defs "$CC" ) (want 1)"; fi
+if printf '%s' "$CC" | grep -q 'counts_floor="1"'; then ok '(B) counts_floor="1" on the member form'; else no '(B) member form lacks counts_floor="1"'; fi
 
 # ── (C) the known miss ───────────────────────────────────────────────────────────────────────────────────
 rows Counter.count | grep -q 'shapes.cpp:42' && no "(C) alias write (line 42) CLAIMED for Counter.count — no alias analysis exists, this is a false row" \
@@ -123,8 +123,8 @@ rows Counter.count | grep -q 'shapes.cpp:59' && no "(C) the free-function global
 
 # ── (D) refusals ─────────────────────────────────────────────────────────────────────────────────────────
 "$BIN" "$FIX" --uses=count --no-cache >"$TMP/bare.out" 2>"$TMP/bare.err"; rc=$?
-[ "$rc" = "1" ] && ok "(D) bare --uses=count (two owners) refuses, exit 1" || no "(D) bare --uses=count exit $rc (want 1)"
-[ ! -s "$TMP/bare.out" ] && ok "(D) the refusal writes nothing to stdout" || no "(D) refusal wrote stdout bytes"
+if [ "$rc" = "1" ]; then ok "(D) bare --uses=count (two owners) refuses, exit 1"; else no "(D) bare --uses=count exit $rc (want 1)"; fi
+if [ ! -s "$TMP/bare.out" ]; then ok "(D) the refusal writes nothing to stdout"; else no "(D) refusal wrote stdout bytes"; fi
 grep -q 'Counter.count' "$TMP/bare.err" && grep -q 'Gauge.count' "$TMP/bare.err" \
     && ok "(D) refusal lists the Owner.field spellings (Counter.count, Gauge.count)" || { no "(D) refusal does not list both spellings"; cat "$TMP/bare.err"; }
 LV="$( "$BIN" "$FIX" --uses=level --no-cache 2>/dev/null )"; rc=$?
@@ -134,12 +134,12 @@ LV="$( "$BIN" "$FIX" --uses=level --no-cache 2>/dev/null )"; rc=$?
 [ "$rc" = "1" ] && grep -q 'lang=go' "$TMP/go.err" && ok "(D) --uses=Box.width refuses naming the language (lang=go)" \
     || { no "(D) --uses=Box.width rc=$rc, stderr does not name lang=go"; cat "$TMP/go.err"; }
 "$BIN" "$FIX" --uses=Nope.count --no-cache >/dev/null 2>"$TMP/nope.err"; rc=$?
-[ "$rc" = "1" ] && ok "(D) --uses=Nope.count (unknown owner) refuses, exit 1" || no "(D) --uses=Nope.count exit $rc (want 1)"
+if [ "$rc" = "1" ]; then ok "(D) --uses=Nope.count (unknown owner) refuses, exit 1"; else no "(D) --uses=Nope.count exit $rc (want 1)"; fi
 
 # ── (E) spellings agree ──────────────────────────────────────────────────────────────────────────────────
-[ "$( rows Counter::count )" = "$( rows Counter.count )" ] && ok "(E) Counter::count rows == Counter.count rows" || no "(E) Counter::count and Counter.count disagree"
+if [ "$( rows Counter::count )" = "$( rows Counter.count )" ]; then ok "(E) Counter::count rows == Counter.count rows"; else no "(E) Counter::count and Counter.count disagree"; fi
 CANON="shapes.h::Counter::count"   # the path::Owner::field spelling (a path TAIL resolves, as everywhere)
-[ "$( rows "$CANON" )" = "$( rows Counter.count )" ] && ok "(E) canonical id rows == Counter.count rows" || no "(E) canonical id '$CANON' disagrees with Counter.count"
+if [ "$( rows "$CANON" )" = "$( rows Counter.count )" ]; then ok "(E) canonical id rows == Counter.count rows"; else no "(E) canonical id '$CANON' disagrees with Counter.count"; fi
 
 # ── (F) python ───────────────────────────────────────────────────────────────────────────────────────────
 expect_rows Tally.total "(F) Tally.total" "write tally.py:13" "read tally.py:17" "read tally.py:25 owner_candidates=2"
@@ -154,33 +154,33 @@ LIM="$( "$BIN" "$FIX" --uses=Tally::limit --no-cache 2>/dev/null )"; rc=$?   # t
 # ── (G) nonlocal-state precision ─────────────────────────────────────────────────────────────────────────
 NLS="$( "$BIN" "$FIX" --nonlocal-state --no-cache 2>/dev/null )"
 NROWS="$( printf '%s' "$NLS" | grep -o '<fn [^>]*n="[A-Za-z_]*"' | wc -l | tr -d ' ' )"
-printf '%s' "$NLS" | grep -q '<fn [^>]*n="reset_global"' && ok "(G) the free function writing the GLOBAL count is a nonlocal-state row" || no "(G) reset_global row missing"
+if printf '%s' "$NLS" | grep -q '<fn [^>]*n="reset_global"'; then ok "(G) the free function writing the GLOBAL count is a nonlocal-state row"; else no "(G) reset_global row missing"; fi
 for fn in bump set peek fill reset total relay; do
     printf '%s' "$NLS" | grep -q "<fn [^>]*n=\"$fn\"" && no "(G) $fn touches only the FIELD count/level, yet is charged to the global cell" || ok "(G) $fn (field-only) is not charged to the global"
 done
-[ "$NROWS" = "1" ] && ok "(G) exactly one nonlocal-state row (the global's one writer)" || no "(G) nonlocal-state rows = $NROWS (want 1)"
-printf '%s' "$NLS" | grep -q 'field' && ok "(G) the nonlocal-state legend discloses the instance-field exclusion" || no "(G) nonlocal-state legend does not mention fields"
+if [ "$NROWS" = "1" ]; then ok "(G) exactly one nonlocal-state row (the global's one writer)"; else no "(G) nonlocal-state rows = $NROWS (want 1)"; fi
+if printf '%s' "$NLS" | grep -q 'field'; then ok "(G) the nonlocal-state legend discloses the instance-field exclusion"; else no "(G) nonlocal-state legend does not mention fields"; fi
 
 # ── (H) additive / determinism / well-formedness ─────────────────────────────────────────────────────────
-printf '%s' "$MAP" | grep -q 'symbols=27 ' && ok "(H) flagless map symbols=27 — the 8e186bb binary's count on this fixture (fields add nothing)" || no "(H) flagless map symbols= moved: $( printf '%s' "$MAP" | grep -o 'symbols=[0-9]*' | head -1 )"
+if printf '%s' "$MAP" | grep -q 'symbols=27 '; then ok "(H) flagless map symbols=27 — the 8e186bb binary's count on this fixture (fields add nothing)"; else no "(H) flagless map symbols= moved: $( printf '%s' "$MAP" | grep -o 'symbols=[0-9]*' | head -1 )"; fi
 "$BIN" "$FIX" --uses=Counter.count --no-cache >"$TMP/a" 2>/dev/null
 "$BIN" "$FIX" --uses=Counter.count --no-cache >"$TMP/b" 2>/dev/null
-cmp -s "$TMP/a" "$TMP/b" && ok "(H) determinism: two --no-cache runs byte-identical" || no "(H) --uses=Counter.count is not deterministic"
+if cmp -s "$TMP/a" "$TMP/b"; then ok "(H) determinism: two --no-cache runs byte-identical"; else no "(H) --uses=Counter.count is not deterministic"; fi
 "$BIN" "$FIX" --uses=Counter.count --cache="$TMP/c.bin" >/dev/null 2>&1
 "$BIN" "$FIX" --uses=Counter.count --cache="$TMP/c.bin" >"$TMP/w" 2>/dev/null
-cmp -s "$TMP/a" "$TMP/w" && ok "(H) warm cache == cold (field refs round-trip the cache)" || no "(H) warm --uses=Counter.count differs from cold"
+if cmp -s "$TMP/a" "$TMP/w"; then ok "(H) warm cache == cold (field refs round-trip the cache)"; else no "(H) warm --uses=Counter.count differs from cold"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/a" 2>/dev/null && ok "(H) --uses=Counter.count is well-formed XML" || no "(H) --uses=Counter.count is not well-formed XML"
-    printf '%s' "$MAP" | xmllint --noout - 2>/dev/null && ok "(H) the map with field rows is well-formed XML" || no "(H) the map is not well-formed XML"
+    if xmllint --noout "$TMP/a" 2>/dev/null; then ok "(H) --uses=Counter.count is well-formed XML"; else no "(H) --uses=Counter.count is not well-formed XML"; fi
+    if printf '%s' "$MAP" | xmllint --noout - 2>/dev/null; then ok "(H) the map with field rows is well-formed XML"; else no "(H) the map is not well-formed XML"; fi
 fi
 
 # ── (I) legend ───────────────────────────────────────────────────────────────────────────────────────────
 LEG="$( printf '%s' "$CC" | sed 's/-->.*//' )"
 for a in owner_candidates pinned amb_sites owners_of_name; do
-    printf '%s' "$LEG" | grep -q "$a=" && ok "(I) legend defines $a=" || no "(I) legend does not define $a="
+    if printf '%s' "$LEG" | grep -q "$a="; then ok "(I) legend defines $a="; else no "(I) legend does not define $a="; fi
 done
-printf '%s' "$LEG" | grep -qi 'alias' && ok "(I) legend states the no-alias-analysis limit" || no "(I) legend does not state the alias limit"
-printf '%s' "$LEG" | grep -qi 'macro' && ok "(I) legend states the macro limit" || no "(I) legend does not state the macro limit"
+if printf '%s' "$LEG" | grep -qi 'alias'; then ok "(I) legend states the no-alias-analysis limit"; else no "(I) legend does not state the alias limit"; fi
+if printf '%s' "$LEG" | grep -qi 'macro'; then ok "(I) legend states the macro limit"; else no "(I) legend does not state the macro limit"; fi
 
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; exit 0; fi

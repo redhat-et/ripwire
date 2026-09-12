@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // flipimpact.h — `--flags --flip=NAME`, the ONE-GATE BLAST RADIUS (the sequel `--flags` demands).
 //
@@ -68,6 +70,8 @@
 #include "docparse.h"           // isProseExtension / lowerExtOf — the shared prose vocabulary
 #include "serialize.h"          // escapeXml
 #include "testmap.h"            // M21(b): TestRunnerIndex / runAttrDisclosed — the ONE run= hint the tests_to_run family shares
+#include "pageview.h"           // §P8: pageWindow / effectiveRowCap / secondaryCutAttrs — the ONE paging contract
+#include "nextverb.h"           // P3: nextAttrXml / kNextAttrMaxBytes — the ONE pasteable follow-up
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
@@ -75,8 +79,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <climits>
 #include <cstdlib>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -89,8 +95,8 @@ namespace flipimpact
 constexpr std::size_t   kMaxFamily     = 64;   // gates one flip may light — an alias fan-out past this is a table, not a switch
 constexpr std::uint32_t kMaxChainDepth = 8;    // alias-chain depth cap (mirrors darkflags::kMaxAliasDepth)
 constexpr std::size_t   kMaxBindings   = 32;   // value-style constants tracked — bounds pass B's needle count
-constexpr std::size_t   kMaxFlipRows   = 25;   // per emitted list; --detail lifts every cap
-constexpr std::size_t   kMaxNearMisses = 5;    // "did you mean" suggestions on an unknown gate name
+constexpr std::size_t   kMaxFlipRows   = 25;   // per emitted list; a DEFAULT --limit=N raises and --detail lifts
+constexpr std::size_t   kMaxNearMisses = 5;    // "did you mean" suggestions on an unknown gate name; --limit=N raises it
 
 // ── result model (POD-ish, ids/handles over pointers) ────────────────────────────────────────────────────
 
@@ -140,6 +146,7 @@ struct FlipResult
     bool                      ok          = false;   // false ⇒ refuse loudly; never emit an empty-looking success
     bool                      unknownGate = false;
     std::vector<std::string>  nearMisses;            // cheap suggestions for an unknown name
+    std::size_t               nearMissTotal = 0;     // C1 F-07: how many QUALIFIED before the cap above cut the list
 
     // the flipped gate's own identity, copied from the harvest (never recomputed)
     std::string               name;
@@ -495,15 +502,16 @@ inline void forEachCodeLine( std::string_view bytes, Visit&& visit )
     forEachLine( bytes, [ & ]( std::string_view line, std::uint32_t lineNo ) { if( isCodeLine( darkflags::trimView( line ) ) ) { visit( line, lineNo ); } } );
 }
 
-// The C-family files worth opening for `needles`, as (fileId, display path) — the needles-first screen that
-// keeps both passes off the ~97% of a tree that never mentions the gate family.
-inline bool fileMayHold( const IngestResult& ing, std::uint32_t fileId, std::string& bytesOut )
+// A C-family file's bytes, or nullopt for any other file and for one readWhole refuses (unreadable, or past
+// kMaxFlagFileBytes) — the needles-first screen that keeps both passes off the ~97% of a tree that never
+// mentions the gate family.
+inline std::optional<std::string> fileMayHold( const IngestResult& ing, std::uint32_t fileId )
 {
     if( !isCFamilyPath( ing.files[fileId] ) )
     {
-        return false;
+        return std::nullopt;
     }
-    return darkflags::readWhole( diskPath( ing, fileId ), bytesOut );
+    return darkflags::readWhole( diskPath( ing, fileId ) );
 }
 
 // PASS A — every ordinary-code mention of a family gate, split into value BINDINGS (`constexpr bool kWalls =
@@ -511,17 +519,17 @@ inline bool fileMayHold( const IngestResult& ing, std::uint32_t fileId, std::str
 inline void scanGateMentions( const IngestResult& ing, const std::string& root,
                               const std::vector<std::string>& family, ValueScanResult& out )
 {
-    std::string bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( !fileMayHold( ing, f, bytes ) )
+        const std::optional<std::string> bytes = fileMayHold( ing, f );
+        if( !bytes )
         {
             continue;
         }
         std::vector<std::string_view> needles;                     // the family names this file actually contains
         for( const std::string& gname : family )
         {
-            if( bytes.find( gname ) != std::string::npos )
+            if( bytes->find( gname ) != std::string::npos )
             {
                 needles.push_back( gname );
             }
@@ -532,7 +540,7 @@ inline void scanGateMentions( const IngestResult& ing, const std::string& root,
         }
 
         const std::string rel( relForHash( ing.files[f], root ) );
-        forEachCodeLine( bytes, [ & ]( std::string_view line, std::uint32_t lineNo )
+        forEachCodeLine( *bytes, [ & ]( std::string_view line, std::uint32_t lineNo )
         {
             for( std::string_view gname : needles )
             {
@@ -572,17 +580,17 @@ inline void scanGateMentions( const IngestResult& ing, const std::string& root,
 // declaration can sit BELOW the use (a class member, a later block), so hits are held and filtered at the end.
 inline void scanBindingUses( const IngestResult& ing, const std::string& root, ValueScanResult& out )
 {
-    std::string bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( !fileMayHold( ing, f, bytes ) )
+        const std::optional<std::string> bytes = fileMayHold( ing, f );
+        if( !bytes )
         {
             continue;
         }
         std::vector<std::size_t> needles;                          // indices into out.bindings
         for( std::size_t b = 0; b < out.bindings.size(); ++b )
         {
-            if( bytes.find( out.bindings[b].name ) != std::string::npos )
+            if( bytes->find( out.bindings[b].name ) != std::string::npos )
             {
                 needles.push_back( b );
             }
@@ -596,7 +604,7 @@ inline void scanBindingUses( const IngestResult& ing, const std::string& root, V
         std::vector<char>        shadowed( needles.size(), 0 );
         std::vector<LitBranch>   pending;
         std::vector<std::size_t> pendingNeedle;
-        forEachCodeLine( bytes, [ & ]( std::string_view line, std::uint32_t lineNo )
+        forEachCodeLine( *bytes, [ & ]( std::string_view line, std::uint32_t lineNo )
         {
             for( std::size_t k = 0; k < needles.size(); ++k )
             {
@@ -649,7 +657,11 @@ inline ValueScanResult scanValueLane( const IngestResult& ing, const std::string
 // Gate names are SCREAMING_SNAKE and usually family-prefixed, so the useful hint is containment
 // (`RRF_ALL` → `CANYON_RRF_ALL`), with a shared-prefix score as the fallback. (main.cpp's didYouMean scores
 // the SYMBOL pool for typo'd function names — a different pool answering a different question.)
-inline std::vector<std::string> nearestGateNames( const std::vector<darkflags::Gate>& gates, std::string_view want )
+// C1 F-07: `maxOut` is a raisable DEFAULT (--limit=N through effectiveRowCap at the call site), and
+// `totalOut` reports how many candidates QUALIFIED — a "did you mean" list that silently dropped seven
+// better names is the same silent cut as a report row cap, on the one output a lost caller reads.
+inline std::vector<std::string> nearestGateNames( const std::vector<darkflags::Gate>& gates, std::string_view want,
+                                                  std::size_t maxOut = kMaxNearMisses, std::size_t* totalOut = nullptr )
 {
     const auto lower = []( std::string_view v ) { std::string o; o.reserve( v.size() ); for( char c : v ) { o.push_back( char( std::tolower( (unsigned char)c ) ) ); } return o; };
     const std::string wantLow = lower( want );
@@ -685,9 +697,13 @@ inline std::vector<std::string> nearestGateNames( const std::vector<darkflags::G
     {
         cands.erase( std::find_if( cands.begin(), cands.end(), []( const Cand& c ) { return c.score < kContainsBonus; } ), cands.end() );
     }
-    if( cands.size() > kMaxNearMisses )
+    if( totalOut != nullptr )
     {
-        cands.resize( kMaxNearMisses );
+        *totalOut = cands.size();
+    }
+    if( cands.size() > maxOut )
+    {
+        cands.resize( maxOut );
     }
 
     std::vector<std::string> out;
@@ -960,7 +976,8 @@ inline void adoptGateIdentity( const gtl::btree_map<std::string, darkflags::Gate
 }
 
 inline FlipResult computeFlip( const IngestResult& ing, const Graph& g, const std::string& root,
-                               const std::vector<std::string>& excludes, std::string_view gateName )
+                               const std::vector<std::string>& excludes, std::string_view gateName,
+                               int pageLimit = 0 )
 {
     FlipResult res;
 
@@ -979,7 +996,8 @@ inline FlipResult computeFlip( const IngestResult& ing, const Graph& g, const st
     if( self == byName.end() )
     {
         res.unknownGate = true;
-        res.nearMisses  = nearestGateNames( harvest.gates, gateName );
+        res.nearMisses  = nearestGateNames( harvest.gates, gateName,
+                                            std::size_t( effectiveRowCap( pageLimit, int( kMaxNearMisses ) ) ), &res.nearMissTotal );
         return res;                                                 // ok stays false — the caller refuses loudly
     }
     const darkflags::Gate& gate = self->second;
@@ -1042,40 +1060,90 @@ inline std::string qualifiedName( const Symbol& s )
 // Rows + the honest `<more …>` remainder, WITHOUT a wrapper element (the lights block holds two of these).
 // Returns how many it printed. Every capped list in the report goes through here, so "cap then admit what
 // was elided" is written once instead of six times.
-template<class Seq, class Row>
-inline std::size_t writeCappedRows( std::FILE* out, const char* moreAttr, const Seq& seq, std::size_t maxRows, Row&& row )
+// C1 F-07 (2026-09-10): every list below was cut at 25 and this file emitted no shown=/total=/capped= token
+// anywhere — the `<more …>` remainder was the whole disclosure, and no flag could lift the cap. The window
+// is pageview.h's now, so --limit=N raises it and --offset=M pages it exactly as it does everywhere else,
+// and the cut is disclosed in the shared vocabulary. `maxRows == SIZE_MAX` is --detail ("every row"), which
+// pageWindow spells as limit <= 0.
+inline PageWindow flipRowWindow( std::size_t total, std::size_t maxRows, int pageOffset ) noexcept
 {
-    std::size_t shown = 0;
+    const int limit = maxRows >= std::size_t( INT_MAX ) ? 0 : int( maxRows );
+    return pageWindow( total, limit, pageOffset );
+}
+
+template<class Seq, class Row>
+inline std::size_t writeCappedRows( std::FILE* out, const char* moreAttr, const Seq& seq, std::size_t maxRows, Row&& row,
+                                    int pageOffset = 0 )
+{
+    const PageWindow window = flipRowWindow( seq.size(), maxRows, pageOffset );
+    std::size_t      index  = 0;
+    std::size_t      shown  = 0;
     for( const auto& item : seq )
     {
-        if( shown >= maxRows )
+        if( index >= window.begin && index < window.end )
         {
-            break;
+            ++shown;
+            row( item );
         }
-        ++shown;
-        row( item );
+        ++index;
     }
     if( seq.size() > shown )
     {
-        std::fprintf( out, "<more %s=\"%zu\"/>", moreAttr, seq.size() - shown );
+        rw::emitTo( out, "<more {}=\"{}\"/>", moreAttr, seq.size() - shown );
     }
     return shown;
 }
 
-// The same, wrapped in `<TAG n="N"> … </TAG>`.
+// The same, wrapped in `<TAG n="N"> … </TAG>` — n= is the listing's rule-2 total, so a cut adds rule 1's
+// pair beside it (shown_<tag>= / <tag>_capped="1") and nothing more.
 template<class Seq, class Row>
-inline void writeCappedList( std::FILE* out, const char* tag, const Seq& seq, std::size_t maxRows, Row&& row )
+inline void writeCappedList( std::FILE* out, const char* tag, const Seq& seq, std::size_t maxRows, Row&& row,
+                             int pageOffset = 0 )
 {
-    std::fprintf( out, "<%s n=\"%zu\">", tag, seq.size() );
-    writeCappedRows( out, tag, seq, maxRows, row );
-    std::fprintf( out, "</%s>", tag );
+    const PageWindow window = flipRowWindow( seq.size(), maxRows, pageOffset );
+    rw::emitTo( out, "<{} n=\"{}\"{}>", tag, seq.size(),
+                  secondaryCutAttrs( tag, window.end - window.begin, seq.size() ).c_str() );
+    writeCappedRows( out, tag, seq, maxRows, row, pageOffset );
+    rw::emitTo( out, "</{}>", tag );
 }
+
+// P3 (nextverb.h): the ONE pasteable follow-up, and it is EXACT — the smallest --limit that cuts none of
+// the listings THIS run cut. Empty when nothing was cut (so an uncut root is byte-identical to what it was)
+// and empty again if a very long gate name pushes the invocation past kNextAttrMaxBytes, because a truncated
+// command line is worse than none — the reader still has the cap disclosure on every cut listing.
+inline std::string flipNextInvocation( const FlipResult& res, std::size_t maxRows, int pageOffset )
+{
+    const std::size_t totals[] = { res.regions.size(), res.branches.size(), res.hosts.size(),
+                                   res.downstream.size(), res.untested.size(), res.buildSites.size() };
+    std::size_t       widestCut = 0;
+    for( const std::size_t total : totals )
+    {
+        const PageWindow window = flipRowWindow( total, maxRows, pageOffset );
+        if( window.end - window.begin < total )
+        {
+            widestCut = std::max( widestCut, total );
+        }
+    }
+    if( widestCut == 0 )
+    {
+        return {};
+    }
+    const std::string invocation = "--flags " + rw::nextFlag( "--flip=", res.name ) + " --limit=" + std::to_string( widestCut );
+    return invocation.size() > rw::kNextAttrMaxBytes ? std::string() : invocation;
+}
+
+// C1 F-07 (2026-09-10): six row listings, every one cut at 25 in silence. The vocabulary they use is
+// DEFINED here, where the reader meets it (legendcoveragecheck's rule), and as its own constant rather
+// than 15 more lines inside writeFlipHeader, which the verbosity bar counts and is right to.
+inline constexpr const char* kFlipRowLegend =
+    "ROWS AND WHAT IS NEVER CUT: the t rows are the tests_to_run answer and are never windowed, capped or paged, exactly as the test gate verb serves its own — a listing you act on is not a listing that may be trimmed. Every other listing here is CONTEXT and pages at 25 rows by default: r and b inside lights, hosts, downstream, untested and the build sites. A listing that was cut says so on its own wrapper, against the n= (or r=/b=) total already there: shown_hosts= with hosts_capped=\"1\", and the same pair under shown_downstream=, shown_untested=, shown_r=, shown_b= and shown_build=. The pair rides ONLY a listing that was actually cut, never as a capped=\"0\" on one that fit, and the more rows= remainder beside it is unchanged. THE VERDICT IS NEVER THE WINDOW: family/regions/loc/branches/bindings/hosts/filescope/downstream/dependents/tests/untested/files on this root are counted over the FULL sets before any cap exists, so raising or removing a cap cannot move one of them. limit=N raises every context cap (offset=M pages them), detail lifts them all, and next= is the exact pasteable invocation that shows every row this run dropped. ";
 
 // The doc comment, the `<flip …>` header attributes, and the four situational rows that qualify them
 // (already-lit / also / parent / capped) plus the family roll-up.
-inline void writeFlipHeader( std::FILE* out, const FlipResult& res, const XmlEscaper& ex )
+inline void writeFlipHeader( std::FILE* out, const FlipResult& res, const XmlEscaper& ex,
+                             const std::string& nextInvocation = std::string() )
 {
-    std::fprintf( out, "<!-- ripwire flip: the blast radius of turning ONE gate ON. lights = the code that becomes live: r rows "
+    rw::emitTo( out, "<!-- ripwire flip: the blast radius of turning ONE gate ON. lights = the code that becomes live: r rows "
                        "are #if regions, b rows are C++ branch sites (a gate read as a VALUE through a constexpr bool, via= names "
                        "the binding). hosts = the indexed defs that code sits inside; downstream = what those defs transitively "
                        "CALL (what starts executing); dependents = what transitively calls THEM. tests = test files reaching the "
@@ -1086,126 +1154,139 @@ inline void writeFlipHeader( std::FILE* out, const FlipResult& res, const XmlEsc
                        "C family source only and treats a file declaring its OWN constant of that name as shadowing the gate's, "
                        "but a third header's same named constant (included, not redeclared) would still count. A lit site inside "
                        "no indexed def counts into filescope instead of a host. "
-                       "%s"
+                       "{}"
                        // §B12.5 — the cross-verb UNIT collision, in the same words on each verb that spells it.
                        "UNIT: untested= here counts HOSTS (indexed defs this gate lights that no test reaches). The test gate "
                        "verb spells untested= over impacted SYMBOLS and the seams verb over cross-directory call EDGES, so the "
-                       "three numbers count three different things and must never be compared or summed across verbs. -->",
+                       "three numbers count three different things and must never be compared or summed across verbs. {}-->",
                        // M21(b): the run=/run_unknown= rule, from testmap.h's ONE constant.
-                       std::string( rw::kRunHintLegendClause ).c_str() );
+                       std::string( rw::kRunHintLegendClause ).c_str(), kFlipRowLegend );
 
-    std::fprintf( out, "<flip gate=\"%s\" kind=\"%s\" default=\"%s\" dark=\"%d\" runtime=\"%d\" p=\"%s\" l=\"%u\""
-                       " family=\"%zu\" regions=\"%u\" loc=\"%u\" branches=\"%zu\" bindings=\"%zu\""
-                       " hosts=\"%zu\" filescope=\"%u\" downstream=\"%zu\" dependents=\"%zu\" tests=\"%zu\" untested=\"%zu\" files=\"%zu\">",
+    rw::emitTo( out, "<flip gate=\"{}\" kind=\"{}\" default=\"{}\" dark=\"{}\" runtime=\"{}\" p=\"{}\" l=\"{}\""
+                       " family=\"{}\" regions=\"{}\" loc=\"{}\" branches=\"{}\" bindings=\"{}\""
+                       " hosts=\"{}\" filescope=\"{}\" downstream=\"{}\" dependents=\"{}\" tests=\"{}\" untested=\"{}\" files=\"{}\"{}>",
                   ex( res.name ).c_str(), darkflags::gateKindTag( res.kind ), ex( res.def ).c_str(),
                   res.isDark ? 1 : 0, res.isRuntime ? 1 : 0, ex( res.defSite.path ).c_str(), res.defSite.line,
                   res.family.size(), res.totalRegions, res.totalLines, res.branches.size(), res.bindings.size(),
                   res.hosts.size(), res.fileScopeLights, res.downstream.size(), res.dependents,
-                  res.tests.size(), res.untested.size(), res.filesScanned );
+                  res.tests.size(), res.untested.size(), res.filesScanned,
+                  rw::nextAttrXml( nextInvocation ).c_str() );
 
     // the contradiction row: this gate is ALREADY lit by the winning declaration, and dark only in the other
     if( !res.isDark )
     {
-        std::fprintf( out, "<already-lit note=\"the winning default already builds this code; the radius below is what the other declaration keeps dark\"/>" );
+        rw::emitRaw( out, "<already-lit note=\"the winning default already builds this code; the radius below is what the other declaration keeps dark\"/>" );
     }
     if( res.hasAlso )
     {
-        std::fprintf( out, "<also kind=\"%s\" default=\"%s\" p=\"%s\" l=\"%u\"/>",
+        rw::emitTo( out, "<also kind=\"{}\" default=\"{}\" p=\"{}\" l=\"{}\"/>",
                       darkflags::gateKindTag( res.alsoKind ), ex( res.alsoDef ).c_str(),
                       ex( res.alsoSite.path ).c_str(), res.alsoSite.line );
     }
     if( !res.parent.empty() )
     {
-        std::fprintf( out, "<parent name=\"%s\" siblings=\"%u\"/>", ex( res.parent ).c_str(), res.siblingCount );
+        rw::emitTo( out, "<parent name=\"{}\" siblings=\"{}\"/>", ex( res.parent ).c_str(), res.siblingCount );
     }
     if( res.familyCapped )
     {
-        std::fprintf( out, "<capped what=\"family\" at=\"%zu\"/>", kMaxFamily );
+        rw::emitTo( out, "<capped what=\"family\" at=\"{}\"/>", kMaxFamily );
     }
 
     for( const FamilyMember& m : res.family )
     {
-        std::fprintf( out, "<member name=\"%s\" via=\"%s\" regions=\"%u\" loc=\"%u\" branches=\"%u\"/>",
+        rw::emitTo( out, "<member name=\"{}\" via=\"{}\" regions=\"{}\" loc=\"{}\" branches=\"{}\"/>",
                       ex( m.name ).c_str(), m.isSelf ? "self" : "alias", m.regions, m.lines, m.branches );
     }
 }
 
 // The two lit-site row kinds, in one element: `#if` regions and C++ branch sites.
 inline void writeFlipLights( std::FILE* out, const FlipResult& res, const IngestResult& ing,
-                             const XmlEscaper& ex, std::size_t maxRows )
+                             const XmlEscaper& ex, std::size_t maxRows, int pageOffset = 0 )
 {
-    std::fprintf( out, "<lights r=\"%zu\" b=\"%zu\">", res.regions.size(), res.branches.size() );
+    // TWO independent listings on ONE element, so two noun-prefixed pairs (pageview.h rule 1) against the
+    // r=/b= totals already here — never a bare shown=, which could only describe one of them.
+    const PageWindow regionPage = flipRowWindow( res.regions.size(),  maxRows, pageOffset );
+    const PageWindow branchPage = flipRowWindow( res.branches.size(), maxRows, pageOffset );
+    rw::emitTo( out, "<lights r=\"{}\" b=\"{}\"{}{}>", res.regions.size(), res.branches.size(),
+                  secondaryCutAttrs( "r", regionPage.end - regionPage.begin, res.regions.size() ).c_str(),
+                  secondaryCutAttrs( "b", branchPage.end - branchPage.begin, res.branches.size() ).c_str() );
     writeCappedRows( out, "r", res.regions, maxRows, [ & ]( const LitRegion& r )
     {
-        std::fprintf( out, "<r p=\"%s\" l=\"%u\" lines=\"%u\" gate=\"%s\" syms=\"%u\"/>",
+        rw::emitTo( out, "<r p=\"{}\" l=\"{}\" lines=\"{}\" gate=\"{}\" syms=\"{}\"/>",
                       ex( r.path ).c_str(), r.line, r.lines, ex( r.gate ).c_str(), r.hostCount );
-    } );
+    }, pageOffset );
     writeCappedRows( out, "b", res.branches, maxRows, [ & ]( const LitBranch& b )
     {
-        std::fprintf( out, "<b p=\"%s\" l=\"%u\" gate=\"%s\" via=\"%s\" sym=\"%s\"/>",
+        rw::emitTo( out, "<b p=\"{}\" l=\"{}\" gate=\"{}\" via=\"{}\" sym=\"{}\"/>",
                       ex( b.path ).c_str(), b.line, ex( b.gate ).c_str(), ex( b.via ).c_str(),
                       b.host == kNoNode ? "" : ex( ing.symbols[ b.host ].name ).c_str() );
-    } );
-    std::fprintf( out, "</lights>" );
+    }, pageOffset );
+    rw::emitRaw( out, "</lights>" );
 }
 
 inline void writeFlip( std::FILE* out, const FlipResult& res, const IngestResult& ing,
-                       const std::string& root, std::size_t maxRows )
+                       const std::string& root, std::size_t maxRows, int pageOffset = 0 )
 {
     std::vector<char> esc;
     const XmlEscaper  ex  = [ & ]( std::string_view s ) { return std::string( escapeXml( s, esc ) ); };
     const auto        rel = [ & ]( std::uint32_t fileId ) { return std::string( relForHash( ing.files[ fileId ], root ) ); };
     const auto        isTested = [ & ]( NodeId n ) { return n < res.testReach.size() && res.testReach[n]; };
 
-    writeFlipHeader( out, res, ex );
-    writeFlipLights( out, res, ing, ex, maxRows );
+    writeFlipHeader( out, res, ex, flipNextInvocation( res, maxRows, pageOffset ) );
+    writeFlipLights( out, res, ing, ex, maxRows, pageOffset );
 
     for( const ValueBinding& b : res.bindings )
     {
-        std::fprintf( out, "<bind name=\"%s\" gate=\"%s\" p=\"%s\" l=\"%u\" uses=\"%u\"/>",
+        rw::emitTo( out, "<bind name=\"{}\" gate=\"{}\" p=\"{}\" l=\"{}\" uses=\"{}\"/>",
                       ex( b.name ).c_str(), ex( b.gate ).c_str(), ex( b.path ).c_str(), b.line, b.uses );
     }
 
     writeCappedList( out, "hosts", res.hosts, maxRows, [ & ]( NodeId h )
     {
         const Symbol& s = ing.symbols[h];
-        std::fprintf( out, "<h sym=\"%s\" p=\"%s\" l=\"%u\" ccx=\"%u\" tested=\"%d\"/>",
+        rw::emitTo( out, "<h sym=\"{}\" p=\"{}\" l=\"{}\" ccx=\"{}\" tested=\"{}\"/>",
                       ex( qualifiedName( s ) ).c_str(), ex( rel( s.fileId ) ).c_str(), s.line, s.ccx, isTested( h ) ? 1 : 0 );
-    } );
+    }, pageOffset );
     writeCappedList( out, "downstream", res.downstream, maxRows, [ & ]( NodeId d )
     {
         const Symbol& s = ing.symbols[d];
-        std::fprintf( out, "<d sym=\"%s\" p=\"%s\" ccx=\"%u\"/>",
+        rw::emitTo( out, "<d sym=\"{}\" p=\"{}\" ccx=\"{}\"/>",
                       ex( qualifiedName( s ) ).c_str(), ex( rel( s.fileId ) ).c_str(), s.ccx );
-    } );
+    }, pageOffset );
     // M21(b) (capture-audit 2026-09-04): this <t> listing is a tests_to_run row family like every other,
     // and it asked for no runner at all — so a reader of a flip report could not tell a harness with no
     // derivable command from one this verb never looked up. Lazy by construction: a flip with no test row
     // never reads a runner script.
+    // C1 F-07 (2026-09-10): the t rows are the ANSWER, and they used to page like everything else — a flip
+    // with 26 reachable tests named 25 of them and dropped the 26th because it sorted last. --test-gate's
+    // own <t> listing has never been windowed for exactly this reason; this listing is the same obligation
+    // read from a different seed, so it is served whole on every page. SIZE_MAX, not maxRows.
     const rw::TestRunnerIndex flipRunners( ing );
-    writeCappedList( out, "tests", res.tests, maxRows, [ & ]( std::uint32_t f )
+    writeCappedList( out, "tests", res.tests, SIZE_MAX, [ & ]( std::uint32_t f )
     {
-        std::fprintf( out, "<t p=\"%s\"%s/>", ex( rel( f ) ).c_str(), rw::runAttrDisclosed( flipRunners, f, ex ).c_str() );
+        rw::emitTo( out, "<t p=\"{}\"{}/>", ex( rel( f ) ).c_str(), rw::runAttrDisclosed( flipRunners, f, ex ).c_str() );
     } );
     writeCappedList( out, "untested", res.untested, maxRows, [ & ]( NodeId u )
     {
         const Symbol& s = ing.symbols[u];
-        std::fprintf( out, "<u sym=\"%s\" p=\"%s\" l=\"%u\" ccx=\"%u\"/>",
+        rw::emitTo( out, "<u sym=\"{}\" p=\"{}\" l=\"{}\" ccx=\"{}\"/>",
                       ex( qualifiedName( s ) ).c_str(), ex( rel( s.fileId ) ).c_str(), s.line, s.ccx );
-    } );
+    }, pageOffset );
 
     if( !res.buildSites.empty() )
     {
-        std::fprintf( out, "<build n=\"%zu\" note=\"CMake read sites: a switch here can add whole translation units or link targets, which this verb does NOT follow\">",
-                      res.buildSites.size() );
+        const PageWindow buildPage = flipRowWindow( res.buildSites.size(), maxRows, pageOffset );
+        rw::emitTo( out, "<build n=\"{}\" note=\"CMake read sites: a switch here can add whole translation units or link targets, which this verb does NOT follow\"{}>",
+                      res.buildSites.size(),
+                      secondaryCutAttrs( "build", buildPage.end - buildPage.begin, res.buildSites.size() ).c_str() );
         writeCappedRows( out, "build", res.buildSites, maxRows, [ & ]( const darkflags::Site& s )
         {
-            std::fprintf( out, "<c p=\"%s\" l=\"%u\"/>", ex( s.path ).c_str(), s.line );
-        } );
-        std::fprintf( out, "</build>" );
+            rw::emitTo( out, "<c p=\"{}\" l=\"{}\"/>", ex( s.path ).c_str(), s.line );
+        }, pageOffset );
+        rw::emitRaw( out, "</build>" );
     }
 
-    std::fprintf( out, "</flip>" );
+    rw::emitRaw( out, "</flip>" );
 }
 
 }}   // namespace rw::flipimpact

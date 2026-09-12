@@ -39,7 +39,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 # fnorm FILE — stdout with the DOCUMENTED machine-dependent readings masked. Those are the only
 # non-determinisms the (B) and (F) byte-identity arms may not blame on a knob:
@@ -287,8 +287,8 @@ case "$innerFrame" in
     *)                     no "(B-anchor) the derived --from-trace frame did NOT resolve to ${TRACE_FN} — it landed on: ${innerFrame:-<no innermost frame at all>}. The honouring row it feeds proves nothing until the anchor is fixed" ;;
 esac
 
-[ "$nNotice" -ge 20 ] && ok "(B) $nNotice ignore-disclosures fired across the table" || no "(B) only $nNotice ignore-disclosures fired (want >=20)"
-[ "$nHonor"  -ge 3  ] && ok "(B) $nHonor honouring rows proved to actually bind (not merely inert)" || no "(B) only $nHonor honouring rows bound"
+if [ "$nNotice" -ge 20 ]; then ok "(B) $nNotice ignore-disclosures fired across the table"; else no "(B) only $nNotice ignore-disclosures fired (want >=20)"; fi
+if [ "$nHonor"  -ge 3  ]; then ok "(B) $nHonor honouring rows proved to actually bind (not merely inert)"; else no "(B) only $nHonor honouring rows bound"; fi
 
 # ── (C) the two families must not BOTH speak ───────────────────────────────────────────────────────────
 # honorsPaging()'s members REFUSE these flags (exit 1). A verb there must get the refusal and NOT the notice,

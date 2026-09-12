@@ -41,7 +41,7 @@ FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -166,7 +166,7 @@ sys.exit(1 if bad else 0)
 else
     no "F-07: the spliced file still has a bare LF mixed with CRLF"
 fi
-grep -q 'return 7' "$W1B/crlf.cpp" && ok "F-07: the new body is present" || no "F-07: new body missing after CRLF splice"
+if grep -q 'return 7' "$W1B/crlf.cpp"; then ok "F-07: the new body is present"; else no "F-07: new body missing after CRLF splice"; fi
 
 # a plain-LF target is left untouched — normalization is Crlf-target-only.
 W1C="$( mktemp -d "$TMP/work.XXXXXX" )"

@@ -39,7 +39,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -86,7 +86,7 @@ OUT="$TMP/out.xml"
 # ── the anchor is stated, and it is the merge base ────────────────────────────────────────────────────
 grep -q 'anchor="merge-base"' "$OUT" && ok 'BASEREF form reports anchor="merge-base"' \
                                      || no 'BASEREF form reports anchor="merge-base"'
-grep -q 'base_sha="' "$OUT" && ok "the anchor sha is named (base_sha=)" || no "the anchor sha is named (base_sha=)"
+if grep -q 'base_sha="' "$OUT"; then ok "the anchor sha is named (base_sha=)"; else no "the anchor sha is named (base_sha=)"; fi
 
 # ── the excluded class is COUNTED, not silently filtered ──────────────────────────────────────────────
 grep -q 'base_moved="1"' "$OUT" && ok 'base_moved="1" counts the path only the base ref moved' \
@@ -132,10 +132,10 @@ grep -q 'anchor=.ref-tip-two-dot. instead means' "$ORPHAN" && ok 'legend prose n
 # ── determinism + G4 ──────────────────────────────────────────────────────────────────────────────────
 "$BIN" "$REPO" --pr-context=mainline >"$TMP/a.xml" 2>/dev/null
 "$BIN" "$REPO" --pr-context=mainline >"$TMP/b.xml" 2>/dev/null
-cmp -s "$TMP/a.xml" "$TMP/b.xml" && ok "deterministic (byte-identical run-to-run)" || no "deterministic"
+if cmp -s "$TMP/a.xml" "$TMP/b.xml"; then ok "deterministic (byte-identical run-to-run)"; else no "deterministic"; fi
 
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$OUT" >/dev/null 2>&1 && ok "G4: xmllint-clean" || no "G4: xmllint-clean"
+    if xmllint --noout "$OUT" >/dev/null 2>&1; then ok "G4: xmllint-clean"; else no "G4: xmllint-clean"; fi
 else
     ok "G4: xmllint unavailable — skipped"
 fi

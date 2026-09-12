@@ -27,7 +27,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -106,6 +106,6 @@ fi
 # ── (7) determinism: the enriched refusal is byte-identical across two fresh servers ────────────────
 mcp_verb find_symbol ',"symbol":"ghostFn"' > "$TMP/r1"
 mcp_verb find_symbol ',"symbol":"ghostFn"' > "$TMP/r2"
-diff -q "$TMP/r1" "$TMP/r2" >/dev/null && ok "(7) refusal deterministic across runs" || no "(7) refusal differs run-to-run"
+if diff -q "$TMP/r1" "$TMP/r2" >/dev/null; then ok "(7) refusal deterministic across runs"; else no "(7) refusal differs run-to-run"; fi
 
 exit $fail

@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // sarif.h — W1-SARIF (board Track A P0-7): serialize --lint's findings as SARIF 2.1.0
 // (github.com/oasis-tcs/sarif-spec) instead of the native XML <lint> block, so they land in
@@ -174,7 +176,7 @@ inline void writeSarifRuleDecl( std::FILE* out, const SarifRuleDecl& r )
     {
         std::fputs( "\"defaultConfiguration\":{\"enabled\":false},", out );
     }
-    std::fprintf( out, "\"properties\":{\"builtin\":%s,\"capped\":%s,\"applicable\":%s}}",
+    rw::emitTo( out, "\"properties\":{{\"builtin\":{},\"capped\":{},\"applicable\":{}}}}}",
                   r.isUserRule ? "false" : "true", r.capped ? "true" : "false",
                   r.applicable ? "true" : "false" );
 }
@@ -185,11 +187,11 @@ inline void writeSarifResult( std::FILE* out, const SarifFinding& f, std::string
 {
     std::fputs( "{\"ruleId\":", out );
     jsonQuoted( out, f.rule );
-    std::fprintf( out, ",\"level\":\"%s\",\"message\":{\"text\":", sarifLevel( f.sev ) );
+    rw::emitTo( out, ",\"level\":\"{}\",\"message\":{{\"text\":", sarifLevel( f.sev ) );
     jsonQuoted( out, f.text );
     std::fputs( "},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":", out );
     jsonQuoted( out, rootRelativeUri( f.file, rootPrefix ) );
-    std::fprintf( out, "},\"region\":{\"startLine\":%u}}}]", f.line );
+    rw::emitTo( out, "}},\"region\":{{\"startLine\":{}}}}}}}]", f.line );
     std::fputs( ",\"properties\":{\"enclosingSymbol\":", out );
     jsonQuoted( out, f.enclosing );
     std::fputs( ",\"sev\":", out );
@@ -201,7 +203,7 @@ inline void writeSarifResult( std::FILE* out, const SarifFinding& f, std::string
 // selection, so a consumer can never read "no selection" as "a selection that kept everything".
 inline void writeSarifRunProperties( std::FILE* out, const SarifRunProperties& props )
 {
-    std::fprintf( out, "\"properties\":{\"findingsCapped\":%s", props.anyRuleCapped ? "true" : "false" );
+    rw::emitTo( out, "\"properties\":{{\"findingsCapped\":{}", props.anyRuleCapped ? "true" : "false" );
     if( props.selectionActive )
     {
         std::fputs( ",\"selected\":", out );

@@ -157,3 +157,70 @@ dev	clean	who-writes	handwritten-digE	who modifies StorageDriver once the pipeli
 dev	clean	who-writes	handwritten-digE	who sets renderXmlRow before the page ships
 dev	clean	abstain	handwritten-digE	the failure happened somewhere around line 12 but I do not have a filename yet
 test	clean	abstain	handwritten-digE	the dashboard numbers on the nightly run look stale and nobody can say why
+test	clean	abstain	handwritten-auditR1	how does version bumping work on this team?
+test	clean	abstain	handwritten-auditR1	how does release week usually go for you all?
+dev	clean	abstain	handwritten-auditR1	I want to understand budget season better before the offsite
+test	clean	abstain	handwritten-auditR1	how does summary writing help the leadership review?
+test	clean	abstain	handwritten-auditR1	what is the cost of legend placement on the marketing page?
+dev	clean	abstain	handwritten-auditR1	how does license renewal get approved?
+dev	clean	abstain	handwritten-auditR1	tell me about the process of owners meeting every month
+test	clean	abstain	handwritten-auditR1	how does patch Tuesday affect our support load?
+dev	clean	abstain	handwritten-auditR1	the price of release candidates in engineer time is too high
+dev	clean	abstain	handwritten-auditR1	how does audit season work at a company this size?
+test	clean	abstain	handwritten-auditR1	the concept of baseline expectations for a new hire
+dev	clean	abstain	handwritten-auditR1	how does agent onboarding differ from employee onboarding?
+test	clean	abstain	handwritten-auditR1	I need to understand author attribution rules for the paper
+test	clean	abstain	handwritten-auditR1	the idea of brief writing as a leadership skill
+dev	clean	abstain	handwritten-auditR1	how does header design affect the newsletter open rate?
+test	clean	abstain	handwritten-auditR1	the notion of active listening in one-on-ones
+test	clean	abstain	handwritten-auditR1	what is the value of module thinking in org design?
+test	clean	abstain	handwritten-auditR1	how does notes taking work best in a long meeting?
+dev	clean	abstain	handwritten-auditR1	the practice of build weeks every quarter
+test	clean	abstain	handwritten-auditR1	how does target setting work for the sales team?
+test	clean	abstain	handwritten-auditR1	what does result orientation mean for performance reviews?
+test	clean	abstain	handwritten-auditR1	the cost of update fatigue among our customers
+test	clean	abstain	handwritten-auditR1	how does prefix branding work for product families?
+test	clean	abstain	handwritten-auditR1	the role of parent companies in this acquisition
+test	clean	abstain	handwritten-auditR1	how does binary thinking hurt a design discussion?
+test	clean	abstain	instrumented-cli	explain the implementation of version to the new hire
+test	clean	abstain	instrumented-cli	i need to understand the implementation of license terms for this quarter
+test	clean	abstain	instrumented-cli	walk me through the implementation of author guidelines for the newsletter
+test	clean	understand-symbol	instrumented-cli	walk me through the implementation of prefix before i touch it
+test	clean	understand-symbol	instrumented-cli	i want to understand the implementation of audit end to end
+test	clean	understand-symbol	instrumented-cli	how does classify work? show me the body of classify
+dev	clean	handoff-brief	instrumented-cli	I am going on leave next week - put together a brief on the scheduler for whoever takes it over
+test	clean	handoff-brief	instrumented-cli	hand this area off to the next session with the entry points and the risky bits
+test	clean	handoff-brief	instrumented-cli	my teammate is picking this up tomorrow, write the handover for the ingest path
+test	clean	plan-lint	instrumented-cli	does docs/cache-round-plan.md have the structure a plan file is supposed to have?
+dev	clean	plan-lint	instrumented-cli	lint the shape of docs/design-notes.md before I circulate it
+test	clean	plan-lint	instrumented-cli	check that docs/next-plan.md is well-formed as a plan document
+dev	clean	trace-prose	instrumented-cli	I have a sanitizer report from last night - map it onto the indexed symbols
+test	clean	trace-prose	instrumented-cli	here is a compiler error from the build, which of my symbols does it name
+test	clean	trace-prose	instrumented-cli	got a crash log with frames in it, translate it into symbols I can read
+test	clean	scan-skills	instrumented-cli	someone sent me a skills bundle - is it safe to install, any prompt injection in there?
+dev	clean	scan-skills	instrumented-cli	vet this untrusted skill collection before installing it
+test	clean	scan-skill	instrumented-cli	check tools/helper.md for exfiltration before installing it as a skill
+test	clean	opt-remark	instrumented-cli	clang says the inner loop was not vectorized - is that worth a diff here?
+dev	clean	opt-remark	instrumented-cli	the optimization remark claims this will not be inlined, where does that land
+test	clean	opt-remark	instrumented-cli	I am reading an opt-record dump and want the code behind one of the remarks
+test	clean	architecture-health	instrumented-cli	do we have a dependency mess in here - any circular dependencies or god file?
+test	clean	architecture-health	instrumented-cli	are there layering violations we should be gating on
+dev	clean	architecture-health	instrumented-cli	what is the propagation cost of touching this module
+test	clean	quality-check	instrumented-cli	before I call it done - did my change make anything worse?
+test	clean	quality-check	instrumented-cli	I want to verify the cleanup actually removed debt rather than adding new debt
+test	clean	quality-check	instrumented-cli	is the code I just wrote past the quality bar
+dev	clean	perf-symbol	instrumented-cli	the profiler puts targetSymbol at the top - what is around it
+test	clean	perf-symbol	instrumented-cli	a perf record run names parseConfigValue as the hot symbol, show me its neighborhood
+test	clean	perf-symbol	instrumented-cli	flame graph says renderXmlRow is the hottest frame here
+test	clean	graph-query	instrumented-cli	which functions can reach cacheValue - one-hop callers cannot phrase that
+dev	clean	graph-query	instrumented-cli	everything that reaches StorageDriver transitively, please
+test	clean	graph-query	instrumented-cli	I need a graph query for what sits within one hop of sendRequest
+test	clean	maintenance-risk	instrumented-cli	I inherited this service and have no idea what is gnarly in it
+test	clean	maintenance-risk	instrumented-cli	where is the rot in code I did not write
+dev	clean	maintenance-risk	instrumented-cli	is this module safe to touch, what is the maintenance risk
+dev	clean	abstain	instrumented-cli	we handed the account off to support last week, any update on the customer?
+test	clean	abstain	instrumented-cli	the design of the new landing page needs a check before Friday
+test	clean	abstain	instrumented-cli	vet the candidate's onboarding plan with HR before the offer goes out
+test	clean	abstain	instrumented-cli	our team inherited the support queue from the old vendor
+dev	clean	abstain	instrumented-cli	the profiler vendor is offering licenses, should we buy a few seats?
+test	clean	abstain	instrumented-cli	write the quarterly summary for leadership and hand me a draft

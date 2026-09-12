@@ -26,7 +26,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -67,7 +67,7 @@ L="$( run --exercises=test/test_leaf.cpp )"
 # meaningless, and "everything this file transitively calls" is a different question with its own verbs.
 runec --exercises=src/core.cpp; XEC=$?
 E="$( cat "$TMP/err.txt" )"
-[ "$XEC" = 1 ] && ok "--exercises=src/core.cpp (non-test) exits 1" || no "--exercises non-test exit=$XEC (want 1)"
+if [ "$XEC" = 1 ]; then ok "--exercises=src/core.cpp (non-test) exits 1"; else no "--exercises non-test exit=$XEC (want 1)"; fi
 case "$E" in *test*) TE=1 ;; *) TE=0 ;; esac
 case "$E" in *--callees*|*--impact*) AE=1 ;; *) AE=0 ;; esac
 { [ "$TE" = 1 ] && [ "$AE" = 1 ]; } \
@@ -109,7 +109,7 @@ P2="$( run --exercises=test/test_mid.cpp --limit=1 --offset=1 )"
 [ "$( run --exercises=test/test_mid.cpp )" = "$( run --exercises=test/test_mid.cpp )" ] \
     && ok "--exercises deterministic (byte-identical run-to-run)" || no "--exercises non-deterministic"
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$M" | xmllint --noout - 2>/dev/null && ok "--exercises xml well-formed" || no "--exercises xml malformed"
+    if printf '%s' "$M" | xmllint --noout - 2>/dev/null; then ok "--exercises xml well-formed"; else no "--exercises xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

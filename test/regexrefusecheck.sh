@@ -18,7 +18,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -28,8 +28,8 @@ echo "regexrefusecheck: BIN=$BIN  ROOT=$ROOT"
 refuseCase(){
     local label="$1"; shift
     "$BIN" "$ROOT" "$@" >"$TMP/out" 2>"$TMP/err"; local rc=$?
-    [ "$rc" -eq 1 ] && ok "$label: exit 1" || no "$label: exit $rc (expected 1)"
-    [ -s "$TMP/err" ] && ok "$label: stderr is not empty" || no "$label: stderr EMPTY (a silent refusal is still a false zero)"
+    if [ "$rc" -eq 1 ]; then ok "$label: exit 1"; else no "$label: exit $rc (expected 1)"; fi
+    if [ -s "$TMP/err" ]; then ok "$label: stderr is not empty"; else no "$label: stderr EMPTY (a silent refusal is still a false zero)"; fi
     grep -q 'hits=' "$TMP/out" && no "$label: still printed a hits= element on stdout" || ok "$label: no hits= element on stdout"
 }
 
@@ -39,12 +39,12 @@ refuseCase "--no-prefilter --regex='(fnv1a'"  --no-prefilter --regex='(fnv1a'
 
 # the refusal must name the offending pattern, not just complain
 "$BIN" "$ROOT" --regex='(fnv1a' >/dev/null 2>"$TMP/err"
-grep -q '(fnv1a' "$TMP/err" && ok "refusal names the pattern" || no "refusal does not name the pattern: $( head -c 200 "$TMP/err" )"
+if grep -q '(fnv1a' "$TMP/err"; then ok "refusal names the pattern"; else no "refusal does not name the pattern: $( head -c 200 "$TMP/err" )"; fi
 
 # ── a VALID pattern is untouched: still scans, still exits 0, still finds what it found before
 "$BIN" "$ROOT" --regex='fnv1a\w+' >"$TMP/ok" 2>/dev/null; rc=$?
 HITS="$( grep -oE ' hits="[0-9]+"' "$TMP/ok" | head -1 | grep -oE '[0-9]+' )"
-[ "$rc" -eq 0 ] && ok "valid --regex exits 0" || no "valid --regex exits $rc (expected 0)"
+if [ "$rc" -eq 0 ]; then ok "valid --regex exits 0"; else no "valid --regex exits $rc (expected 0)"; fi
 
 # "Still finds what it found before" was pinned as `hits > 100`, a literal count of THIS tree. That made
 # the arm a corpus assertion wearing a scanner assertion's clothes: prune a few documents that happen to

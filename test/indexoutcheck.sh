@@ -32,7 +32,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -54,7 +54,7 @@ rc_gen=$?
 LEAN="$BASE.lean.ripwirecache"
 RICH="$BASE.rich.ripwirecache"
 
-[ "$rc_gen" -eq 0 ] && ok "(a) --index-out exits 0" || { no "(a) --index-out exit $rc_gen"; cat "$TMP/gen.err"; }
+if [ "$rc_gen" -eq 0 ]; then ok "(a) --index-out exits 0"; else { no "(a) --index-out exit $rc_gen"; cat "$TMP/gen.err"; }; fi
 { [ -s "$LEAN" ] && [ -s "$RICH" ]; } \
     && ok "(a) both families written (lean=$(wc -c <"$LEAN" | tr -d ' ')B  rich=$(wc -c <"$RICH" | tr -d ' ')B)" \
     || no "(a) a family file is missing/empty (lean=$([ -s "$LEAN" ] && echo ok || echo MISSING) rich=$([ -s "$RICH" ] && echo ok || echo MISSING))"

@@ -23,7 +23,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -78,7 +78,7 @@ grep -oE '<match [^>]*>' "$TMP/exp" | grep -q 'auto_captured=' \
 
 # ── a MULTI-pattern capture-less query cannot be auto-captured safely: refuse, do not guess
 "$BIN" "$ROOT" --match='(goto_statement) (do_statement)' >"$TMP/multi" 2>"$TMP/multierr"; rcm=$?
-[ "$rcm" -eq 1 ] && ok "multi-pattern capture-less query: exit 1" || no "multi-pattern capture-less query: exit $rcm (expected 1)"
+if [ "$rcm" -eq 1 ]; then ok "multi-pattern capture-less query: exit 1"; else no "multi-pattern capture-less query: exit $rcm (expected 1)"; fi
 grep -q '@name' "$TMP/multierr" && ok "multi-pattern refusal carries the add-@name message" \
     || no "multi-pattern refusal message missing: $( head -c 160 "$TMP/multierr" )"
 grep -q 'hits=' "$TMP/multi" && no "multi-pattern refusal still printed a hits= element" \

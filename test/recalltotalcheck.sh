@@ -51,7 +51,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -88,7 +88,7 @@ BIG="$( run --top-k=9999 )";     BIG_RC=$?
 
 for pair in "DEFAULT:$DEFAULT_RC" "K2:$K2_RC" "K20:$K20_RC" "BIG:$BIG_RC"; do
     name="${pair%%:*}"; rc="${pair##*:}"
-    [ "$rc" = 0 ] && ok "$name run: exit 0" || no "$name run: exit $rc (expected 0) — cannot evaluate further fields for $name"
+    if [ "$rc" = 0 ]; then ok "$name run: exit 0"; else no "$name run: exit $rc (expected 0) — cannot evaluate further fields for $name"; fi
 done
 
 DEFAULT_TOTAL="$( total_of "$DEFAULT" )";  DEFAULT_SHOWN="$( shown_of "$DEFAULT" )";  DEFAULT_CAPPED="$( capped_of "$DEFAULT" )"

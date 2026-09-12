@@ -18,7 +18,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/zoomfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -28,16 +28,16 @@ echo "zoomcheck: BIN=$BIN  CORPUS=$CORPUS"
 # 1) determinism — byte-identical output run-to-run (multi-level Louvain must stay seeded/ordered stably)
 "$BIN" "$CORPUS" --zoom --no-cache >"$TMP/a" 2>/dev/null
 "$BIN" "$CORPUS" --zoom --no-cache >"$TMP/b" 2>/dev/null
-diff -q "$TMP/a" "$TMP/b" >/dev/null && ok "determinism (byte-identical, $(wc -c <"$TMP/a" | tr -d ' ') B)" || no "determinism (non-deterministic output)"
+if diff -q "$TMP/a" "$TMP/b" >/dev/null; then ok "determinism (byte-identical, $(wc -c <"$TMP/a" | tr -d ' ') B)"; else no "determinism (non-deterministic output)"; fi
 ZOOM="$( cat "$TMP/a" )"
 
 # 2) ≥2 hierarchy levels (the whole point of multi-level — a single partition is NOT a hierarchy)
 LEVELS="$( printf '%s' "$ZOOM" | grep -o 'levels="[0-9]*"' | grep -o '[0-9]*' )"
-[ "${LEVELS:-0}" -ge 2 ] && ok "hierarchy has ≥2 levels (levels=$LEVELS)" || no "hierarchy levels=${LEVELS:-?} (expected ≥2)"
+if [ "${LEVELS:-0}" -ge 2 ]; then ok "hierarchy has ≥2 levels (levels=$LEVELS)"; else no "hierarchy levels=${LEVELS:-?} (expected ≥2)"; fi
 
 # 3) the hierarchy is NESTED — a level-0 <module> is emitted INSIDE a level-1 <module> (not a flat list). We
 #    assert a level="1" module open-tag appears, then a level="0" module before that level-1 module closes.
-printf '%s' "$ZOOM" | grep -q 'level="1"' && ok "a top/intermediate module (level=1) exists" || no "no level=1 module (hierarchy not contracted)"
+if printf '%s' "$ZOOM" | grep -q 'level="1"'; then ok "a top/intermediate module (level=1) exists"; else no "no level=1 module (hierarchy not contracted)"; fi
 printf '%s' "$ZOOM" \
   | python3 -c '
 import sys,re
@@ -55,16 +55,16 @@ sys.exit(0 if (sawL1 and nested) else 1)
 
 # 4) top modules are labelled by their directory (core/io/util) — the dominant-dir label is meaningful
 for d in core io util; do
-  printf '%s' "$ZOOM" | grep -q "dir=\"[^\"]*zoomfix/$d\"" && ok "top module labelled dir .../$d" || no "no top module for dir .../$d"
+  if printf '%s' "$ZOOM" | grep -q "dir=\"[^\"]*zoomfix/$d\""; then ok "top module labelled dir .../$d"; else no "no top module for dir .../$d"; fi
 done
 
 # 5) cross-module BRIDGES are emitted (app.cpp bridges the three subsystems → ≥1 <bridge>)
 BRIDGES="$( printf '%s' "$ZOOM" | grep -o '<bridge ' | wc -l | tr -d ' ' )"
-[ "$BRIDGES" -ge 1 ] && ok "cross-module bridges shown ($BRIDGES)" || no "no <bridge> emitted (expected ≥1)"
+if [ "$BRIDGES" -ge 1 ]; then ok "cross-module bridges shown ($BRIDGES)"; else no "no <bridge> emitted (expected ≥1)"; fi
 
 # 6) well-formed XML
 if command -v xmllint >/dev/null 2>&1; then
-  printf '%s' "$ZOOM" | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+  if printf '%s' "$ZOOM" | xmllint --noout - 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 else ok "xml well-formed (xmllint absent — skipped)"; fi
 
 # 7) --zoom --mermaid: a nested-subgraph diagram, deterministic, with subgraph blocks
@@ -75,7 +75,7 @@ else ok "xml well-formed (xmllint absent — skipped)"; fi
 
 # 8) --zoom=DEPTH respects an explicit depth cap (=1 → exactly 2 levels: base + 1 contraction)
 D1="$( "$BIN" "$CORPUS" --zoom=1 --no-cache 2>/dev/null | grep -o 'levels="[0-9]*"' | grep -o '[0-9]*' )"
-[ "${D1:-0}" -eq 2 ] && ok "--zoom=1 caps at 2 levels (base + 1 contraction)" || no "--zoom=1 levels=${D1:-?} (expected 2)"
+if [ "${D1:-0}" -eq 2 ]; then ok "--zoom=1 caps at 2 levels (base + 1 contraction)"; else no "--zoom=1 levels=${D1:-?} (expected 2)"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"

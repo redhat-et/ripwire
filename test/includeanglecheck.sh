@@ -23,7 +23,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -41,7 +41,7 @@ CACHE="$TMP/c.bin"
 # ── cold run: populate the cache ──────────────────────────────────────────────────────────────────
 "$BIN" "$WORK" --cache="$CACHE" >"$TMP/cold.xml" 2>"$TMP/cold.err"
 rc=$?
-[ "$rc" -eq 0 ] && ok "cold run (cache populate) exits 0" || { no "cold run exit $rc"; cat "$TMP/cold.err"; }
+if [ "$rc" -eq 0 ]; then ok "cold run (cache populate) exits 0"; else { no "cold run exit $rc"; cat "$TMP/cold.err"; }; fi
 
 grep -q 'n="use"' "$TMP/cold.xml" && ok "fixture parsed (symbol 'use' present)" \
   || { no "fixture did not parse"; head -3 "$TMP/cold.xml"; }

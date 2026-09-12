@@ -29,7 +29,7 @@ CORPUS="$ROOT/test/lpinfix"
 FIXTURE="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -48,7 +48,7 @@ printf '%s' "$RUN_ROW" | grep -q 'lpin="1"' && ok "(A) pinned.py::Alpha::run car
 printf '%s' "$RUN_ROW" | grep -q 'amb=' && no "(A) pinned.py::Alpha::run carries amb= — the marker inflated amb=: $RUN_ROW" \
     || ok "(A) the pin still contributes nothing to amb="
 N_HELPER="$( printf '%s' "$MAP" | tr '>' '\n' | awk '/id="pinned.py::Alpha::run"/{f=1} f{print} /\/s/{if(f)exit}' | grep -c 'n="helper"' )"
-[ "$N_HELPER" = 1 ] && ok "(A) the pin still emits ONE confident edge" || no "(A) $N_HELPER helper edges on Alpha::run, want 1"
+if [ "$N_HELPER" = 1 ]; then ok "(A) the pin still emits ONE confident edge"; else no "(A) $N_HELPER helper edges on Alpha::run, want 1"; fi
 
 # ── (B) the tied control — a split is not a pin ───────────────────────────────────────────────────
 GO_ROW="$( row 'tied.py::Eps::go' )"
@@ -69,7 +69,7 @@ grep -E '^C	locality	' "$TMP/c.tsv" | grep -q 'modlevel.py::Caller::go' \
 
 # ── (D) the header counter, and its equality with the census ──────────────────────────────────────
 HDR="$( printf '%s' "$MAP" | grep -o '<!-- files=[^>]*-->' | head -1 )"
-printf '%s' "$HDR" | grep -q ' locality_pinned=1 ' && ok "(D) header locality_pinned=1" || no "(D) header lacks locality_pinned=1: $HDR"
+if printf '%s' "$HDR" | grep -q ' locality_pinned=1 '; then ok "(D) header locality_pinned=1"; else no "(D) header lacks locality_pinned=1: $HDR"; fi
 printf '%s' "$HDR" | grep -q ' ambiguous=2 ' && ok "(D) header ambiguous=2 — the marker added nothing, the tie-break added exactly the module-level split" \
     || no "(D) header ambiguous= is not 2: $HDR"
 N_LOC="$( grep -cE '^C	locality	' "$TMP/c.tsv" )"
@@ -88,14 +88,14 @@ cmp -s "$TMP/fix.xml" "$ROOT/test/golden.xml" && ok "(E) test/golden.xml byte-id
 
 # ── (F) the legend defines both names (legendcoveragecheck's definitional predicate) ─────────────
 LEGEND="$( printf '%s' "$MAP" | grep -o '<!-- ripwire v1[^>]*-->' | head -1 )"
-printf '%s' "$LEGEND" | grep -q ' lpin=' && ok "(F) legend defines lpin=" || no "(F) legend lacks lpin=: $LEGEND"
-printf '%s' "$LEGEND" | grep -q 'locality_pinned=' && ok "(F) legend defines locality_pinned=" || no "(F) legend lacks locality_pinned="
+if printf '%s' "$LEGEND" | grep -q ' lpin='; then ok "(F) legend defines lpin="; else no "(F) legend lacks lpin=: $LEGEND"; fi
+if printf '%s' "$LEGEND" | grep -q 'locality_pinned='; then ok "(F) legend defines locality_pinned="; else no "(F) legend lacks locality_pinned="; fi
 
 # ── (G) the --json dialect carries the same two facts ─────────────────────────────────────────────
 "$BIN" "$CORPUS" --json --no-cache >"$TMP/map.json" 2>/dev/null
-python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$TMP/map.json" 2>/dev/null && ok "(G) --json parses" || no "(G) --json output does not parse"
-grep -q '"lpin":1' "$TMP/map.json" && ok "(G) --json carries \"lpin\":1" || no "(G) --json lacks \"lpin\":1"
-grep -q '"locality_pinned":1' "$TMP/map.json" && ok "(G) --json header carries \"locality_pinned\":1" || no "(G) --json header lacks \"locality_pinned\":1"
+if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$TMP/map.json" 2>/dev/null; then ok "(G) --json parses"; else no "(G) --json output does not parse"; fi
+if grep -q '"lpin":1' "$TMP/map.json"; then ok "(G) --json carries \"lpin\":1"; else no "(G) --json lacks \"lpin\":1"; fi
+if grep -q '"locality_pinned":1' "$TMP/map.json"; then ok "(G) --json header carries \"locality_pinned\":1"; else no "(G) --json header lacks \"locality_pinned\":1"; fi
 "$BIN" "$FIXTURE" --json --no-cache 2>/dev/null | grep -q '"lpin"\|"locality_pinned"' && no "(G) --json on test/fixture emits the keys with nothing to disclose" \
     || ok "(G) --json on test/fixture: both keys absent"
 
@@ -158,9 +158,9 @@ printf '%s' "$RESH" | grep -q ' edges=0 ' \
 
 # ── (H) determinism + well-formedness ─────────────────────────────────────────────────────────────
 "$BIN" "$CORPUS" --no-cache >"$TMP/map2.xml" 2>/dev/null
-cmp -s "$TMP/map.xml" "$TMP/map2.xml" && ok "(H) two runs byte-identical" || no "(H) the map is not deterministic"
+if cmp -s "$TMP/map.xml" "$TMP/map2.xml"; then ok "(H) two runs byte-identical"; else no "(H) the map is not deterministic"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/map.xml" 2>/dev/null && ok "(H) well-formed XML" || no "(H) xmllint rejects the map"
+    if xmllint --noout "$TMP/map.xml" 2>/dev/null; then ok "(H) well-formed XML"; else no "(H) xmllint rejects the map"; fi
 fi
 
 [ "$fail" = 0 ] && { echo "lpincheck: OK"; exit 0; }

@@ -27,7 +27,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -67,7 +67,7 @@ COLD_N="$( name_only_count "$TMP/trace_cold.log" )"
     && ok "cold --for run spawns the name-only walk ($COLD_N invocation(s))" \
     || no "cold run wrong (rc=$rcCold, name-only count=$COLD_N)"
 
-[ "$( nqchurn )" -ge 1 ] && ok "cold run writes a ripwire-qchurn-*.bin blob" || no "no qchurn blob after cold run"
+if [ "$( nqchurn )" -ge 1 ]; then ok "cold run writes a ripwire-qchurn-*.bin blob"; else no "no qchurn blob after cold run"; fi
 
 run "$TMP/trace_warm.log" --for="helper" --no-cache >"$TMP/warm.out" 2>"$TMP/warm.err"; rcWarm=$?
 WARM_N="$( name_only_count "$TMP/trace_warm.log" )"

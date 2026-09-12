@@ -1,0 +1,118 @@
+# capsweep sweep — columns: cap / value / probe / site / default_bytes / probe_bytes / invocation — measured_at=da7af625543881aff54d4aedd363603f93288480 — TSV not json: ripwire indexes .json as config keys (src/ingest_crawl.h) while .tsv is unindexed prose (src/docparse.h kUnindexedProseExts) — a harness must not enter the index it measures
+kBatchCap	16	128	src/mcpverbs.h:4218	408	409	. --batch=$RIPWIRE_CAPSWEEP_TMP
+kCallHierarchyRowCap	40	320	src/pageview.h:164	7860	8975	. --impact=rankGraphTeleport
+kCellsPerRowCap	12	96	src/nonlocalstate.h:116	9819	9993	. --nonlocal-state --limit=8
+kCommonNameDefThreshold	5	40	src/graph.h:244	17674	17669	. --communities
+kCommonNameDefThreshold	5	40	src/graph.h:244	11760	11735	. --tree
+kCommonNameDefThreshold	5	40	src/graph.h:244	8411	8459	. --zoom
+kCommonNameDefThreshold	5	40	src/graph.h:244	12093	12165	. --zoom --zoom-levels=3
+kDefaultRecallMaxTokens	8000	64000	src/recall.h:311	13196	132377	. --recall="quality delta gating exit codes"
+kDefsPerNameCap	8	64	src/contextratio.h:94	13314	13702	. --context-ratio --limit=8
+kDocMentionMaxAnchors	8	64	src/mention.h:807	9903	10059	. --for="incremental cache invalidation when a file content hash changes"
+kDocMentionMaxAnchors	8	64	src/mention.h:807	14560	14562	. --for="pagerank power iteration" --detail=2
+kDocMentionMaxAnchors	8	64	src/mention.h:807	10078	10080	. --for="pagerank power iteration" --with-graph
+kDocMentionMaxAnchors	8	64	src/mention.h:807	10055	10057	. --for="quality delta acks ledger rubber stamp"
+kDocMentionMaxAnchors	8	64	src/mention.h:807	15900	15902	. --for="rankGraphTeleport" --no-route
+kDocMentionMaxAnchors	8	64	src/mention.h:807	9897	9810	. --for="tree-sitter parse of a source file" --adaptive
+kDocMentionMaxAnchors	8	64	src/mention.h:807	15916	15829	. --for="tree-sitter parse of a source file" --auto-bodies
+kDocMentionMaxAnchors	8	64	src/mention.h:807	9566	9484	. --for="tree-sitter parse of a source file" --legend=compact
+kDocMentionMaxAnchors	8	64	src/mention.h:807	10268	10266	. --for="why does src/lexical.h chooseForRanker pick name-exact BM25"
+kDocMentionMaxAnchors	8	64	src/mention.h:807	9480	9593	. --pack-task="add a new output format flag to the CLI"
+kDocMentionMaxAnchors	8	64	src/mention.h:807	24028	22287	. --pack-task="add a new output format flag to the CLI" --partition=3
+kDocMentionMaxDocsPerAnchor	2	34	src/mention.h:808	14560	14408	. --for="pagerank power iteration" --detail=2
+kDocMentionMaxDocsPerAnchor	2	34	src/mention.h:808	10078	9926	. --for="pagerank power iteration" --with-graph
+kDocMentionMaxDocsPerAnchor	2	34	src/mention.h:808	10268	10111	. --for="why does src/lexical.h chooseForRanker pick name-exact BM25"
+kEnsembleFileRowCap	20	160	src/ensemble.h:108	10499	27791	. --ensemble --limit=8
+kExternalSurfaceRowCap	100	800	src/pageview.h:186	5611	38720	. --external-surface
+kExternalSurfaceRowCap	100	800	src/pageview.h:186	5553	38663	. --external-surface --include-builtins
+kFileRowCap	40	320	src/contextratio.h:89	13314	64465	. --context-ratio --limit=8
+kForAutoBodyBudgetBytes	6000	48000	src/serialize.h:760	15900	22181	. --for="rankGraphTeleport" --no-route
+kForAutoBodyBudgetBytes	6000	48000	src/serialize.h:760	15916	27182	. --for="tree-sitter parse of a source file" --auto-bodies
+kForCapTailSigBytes	96	768	src/serialize.h:727	10055	9843	. --for="quality delta acks ledger rubber stamp"
+kForCapTailSigBytes	96	768	src/serialize.h:727	10119	10006	. --for="quality delta acks ledger rubber stamp" --no-doc-mention
+kForCapTailSigBytes	96	768	src/serialize.h:727	9897	9765	. --for="tree-sitter parse of a source file" --adaptive
+kForCapTailSigBytes	96	768	src/serialize.h:727	15916	15784	. --for="tree-sitter parse of a source file" --auto-bodies
+kForCapTailSigBytes	96	768	src/serialize.h:727	9566	9558	. --for="tree-sitter parse of a source file" --legend=compact
+kForCapTailSigBytes	96	768	src/serialize.h:727	10268	10296	. --for="why does src/lexical.h chooseForRanker pick name-exact BM25"
+kForCapTailSigBytes	96	768	src/serialize.h:727	9480	9544	. --pack-task="add a new output format flag to the CLI"
+kForCapTailSigBytes	96	768	src/serialize.h:727	24028	24137	. --pack-task="add a new output format flag to the CLI" --partition=3
+kForFileTailShownCap	24	192	src/serialize.h:815	9903	14704	. --for="incremental cache invalidation when a file content hash changes"
+kForFileTailShownCap	24	192	src/serialize.h:815	14560	16231	. --for="pagerank power iteration" --detail=2
+kForFileTailShownCap	24	192	src/serialize.h:815	10078	11749	. --for="pagerank power iteration" --with-graph
+kForFileTailShownCap	24	192	src/serialize.h:815	10055	15611	. --for="quality delta acks ledger rubber stamp"
+kForFileTailShownCap	24	192	src/serialize.h:815	10119	15684	. --for="quality delta acks ledger rubber stamp" --no-doc-mention
+kForFileTailShownCap	24	192	src/serialize.h:815	15900	21436	. --for="rankGraphTeleport" --no-route
+kForFileTailShownCap	24	192	src/serialize.h:815	9897	14662	. --for="tree-sitter parse of a source file" --adaptive
+kForFileTailShownCap	24	192	src/serialize.h:815	15916	20681	. --for="tree-sitter parse of a source file" --auto-bodies
+kForFileTailShownCap	24	192	src/serialize.h:815	9566	14333	. --for="tree-sitter parse of a source file" --legend=compact
+kForFileTailShownCap	24	192	src/serialize.h:815	10268	15148	. --for="why does src/lexical.h chooseForRanker pick name-exact BM25"
+kForLensDefaultTopN	40	320	src/serialize.h:740	9903	9828	. --for="incremental cache invalidation when a file content hash changes"
+kForLensDefaultTopN	40	320	src/serialize.h:740	14560	14142	. --for="pagerank power iteration" --detail=2
+kForLensDefaultTopN	40	320	src/serialize.h:740	10078	9660	. --for="pagerank power iteration" --with-graph
+kForLensDefaultTopN	40	320	src/serialize.h:740	10055	10103	. --for="quality delta acks ledger rubber stamp"
+kForLensDefaultTopN	40	320	src/serialize.h:740	10119	9984	. --for="quality delta acks ledger rubber stamp" --no-doc-mention
+kForLensDefaultTopN	40	320	src/serialize.h:740	5491	5493	. --for="rankGraphTeleport"
+kForLensDefaultTopN	40	320	src/serialize.h:740	15900	16075	. --for="rankGraphTeleport" --no-route
+kForLensDefaultTopN	40	320	src/serialize.h:740	2813	2815	. --for="rankGraphTeleport" --signatures-only
+kForLensDefaultTopN	40	320	src/serialize.h:740	9897	9948	. --for="tree-sitter parse of a source file" --adaptive
+kForLensDefaultTopN	40	320	src/serialize.h:740	15916	15965	. --for="tree-sitter parse of a source file" --auto-bodies
+kForLensDefaultTopN	40	320	src/serialize.h:740	9566	9569	. --for="tree-sitter parse of a source file" --legend=compact
+kForLensDefaultTopN	40	320	src/serialize.h:740	10268	10038	. --for="why does src/lexical.h chooseForRanker pick name-exact BM25"
+kForPayloadBudgetBytes	7500	60000	src/serialize.h:726	9903	18389	. --for="incremental cache invalidation when a file content hash changes"
+kForPayloadBudgetBytes	7500	60000	src/serialize.h:726	14560	20545	. --for="pagerank power iteration" --detail=2
+kForPayloadBudgetBytes	7500	60000	src/serialize.h:726	10078	16063	. --for="pagerank power iteration" --with-graph
+kForPayloadBudgetBytes	7500	60000	src/serialize.h:726	10055	15996	. --for="quality delta acks ledger rubber stamp"
+kForPayloadBudgetBytes	7500	60000	src/serialize.h:726	10119	15859	. --for="quality delta acks ledger rubber stamp" --no-doc-mention
+kForPayloadBudgetBytes	7500	60000	src/serialize.h:726	15900	30265	. --for="rankGraphTeleport" --no-route
+kForPayloadBudgetBytes	7500	60000	src/serialize.h:726	9897	14781	. --for="tree-sitter parse of a source file" --adaptive
+kForPayloadBudgetBytes	7500	60000	src/serialize.h:726	15916	32067	. --for="tree-sitter parse of a source file" --auto-bodies
+kForPayloadBudgetBytes	7500	60000	src/serialize.h:726	9566	13971	. --for="tree-sitter parse of a source file" --legend=compact
+kForPayloadBudgetBytes	7500	60000	src/serialize.h:726	10268	16466	. --for="why does src/lexical.h chooseForRanker pick name-exact BM25"
+kGrepMatchedLineMaxBytes	512	4096	src/search.h:941	44699	63891	. --grep=deterministic
+kHandoffDocRows	4	36	src/handoff.h:42	5044	6529	. --handoff
+kHandoffDocRows	4	36	src/handoff.h:42	4955	4956	. --handoff --token-budget=1200
+kHandoffSymbolsPerCodeFile	50	400	src/handoff.h:79	5044	5045	. --handoff
+kHandoffSymbolsPerCodeFile	50	400	src/handoff.h:79	4955	4956	. --handoff --token-budget=1200
+kHandoffSymbolsPerDocFile	12	96	src/handoff.h:80	5044	12377	. --handoff
+kHandoffSymbolsPerDocFile	12	96	src/handoff.h:80	4955	12288	. --handoff --token-budget=1200
+kLintMaxPerRule	5000	40000	src/lintrules.h:821	71025	70972	. --lint
+kLintMaxPerRule	5000	40000	src/lintrules.h:821	66983	66930	. --lint --lint-ignore=naming-,cache-
+kLintMaxPerRule	5000	40000	src/lintrules.h:821	73708	73655	. --lint --naming-locals
+kLintMaxPerRule	5000	40000	src/lintrules.h:821	1162929	1675848	. --lint --sarif
+kMaxExpandIncludes	24	192	src/serialize.h:4584	11317	11632	. --expand=readAckRecords --top-k=0 --no-redact
+kMaxExpandSibs	100	800	src/serialize.h:4575	8077	9675	. --expand=compressBody --top-k=0 --compress
+kMaxExpandSibs	100	800	src/serialize.h:4575	4926	6033	. --expand=rankGraphTeleport --top-k=0
+kMaxExpandSibs	100	800	src/serialize.h:4575	4314	5421	. --expand=rankGraphTeleport:1-12 --top-k=0
+kMaxExpandSibs	100	800	src/serialize.h:4575	11317	16612	. --expand=readAckRecords --top-k=0 --no-redact
+kMaxExpandSibs	100	800	src/serialize.h:4575	4926	6033	. --top-k=0 --expand=rankGraphTeleport
+kMentionMaxSymbolsPerFile	3	35	src/mention.h:159	10268	10187	. --for="why does src/lexical.h chooseForRanker pick name-exact BM25"
+kOrdinalWindowCap	40	320	src/ensemble.h:112	10499	10786	. --ensemble --limit=8
+kOrdinalWindowCap	40	320	src/ensemble.h:112	15454	16072	. --quality-panel
+kPanelRowCap	40	320	src/qualitypanel.h:145	15454	66476	. --quality-panel
+kPrDefaultBudgetTokens	8000	64000	src/prcontext.h:452	7947	7948	. --pr-context
+kPrDefaultBudgetTokens	8000	64000	src/prcontext.h:452	8729	8730	. --pr-context=HEAD~1
+kSituBlastFilesShown	8	64	src/situ.h:348	1705	1679	. --situ
+kSliceFlowDefaultDepth	8	64	src/slice.h:2094	7224	7225	. --slice=rankGraphTeleport:teleport --slice-flow=fwd
+kSpecificMinLen	8	64	src/graph.h:250	24372	24676	.
+kSpecificMinLen	8	64	src/graph.h:250	17674	17600	. --communities
+kSpecificMinLen	8	64	src/graph.h:250	7860	7823	. --impact=rankGraphTeleport
+kSpecificMinLen	8	64	src/graph.h:250	2684	2925	. --map-diff --top-k=5
+kSpecificMinLen	8	64	src/graph.h:250	1920	1825	. --no-cache --top-k=3
+kSpecificMinLen	8	64	src/graph.h:250	1920	1825	. --no-ignore --top-k=3
+kSpecificMinLen	8	64	src/graph.h:250	1920	1825	. --no-stable --top-k=3
+kSpecificMinLen	8	64	src/graph.h:250	65670	65748	. --pack-top-n=3 --top-k=0
+kSpecificMinLen	8	64	src/graph.h:250	13085	13108	. --seams
+kSpecificMinLen	8	64	src/graph.h:250	11760	11675	. --tree
+kSpecificMinLen	8	64	src/graph.h:250	8411	8525	. --zoom
+kSpecificMinLen	8	64	src/graph.h:250	12093	12264	. --zoom --zoom-levels=3
+kSymbolRowCap	40	320	src/contextratio.h:88	15454	16795	. --quality-panel
+kTreeRowCap	80	640	src/pageview.h:184	11760	92860	. --tree
+kUnitComplexityLowRiskMax	5	40	src/dmm.h:91	3045	3046	. --dmm
+kUnitComplexityLowRiskMax	5	40	src/dmm.h:91	3073	3074	. --dmm=HEAD
+kUnitInterfacingLowRiskMax	2	34	src/dmm.h:92	3045	3046	. --dmm
+kUnitInterfacingLowRiskMax	2	34	src/dmm.h:92	3073	3074	. --dmm=HEAD
+kUnitSizeLowRiskMax	15	120	src/dmm.h:90	3045	3046	. --dmm
+kUnitSizeLowRiskMax	15	120	src/dmm.h:90	3073	3074	. --dmm=HEAD
+kWithGraphNodeCap	8	64	src/serialize.h:5642	10078	13134	. --for="pagerank power iteration" --with-graph
+kZoomTopModuleCap	40	320	src/pageview.h:185	8411	49506	. --zoom
+kZoomTopModuleCap	40	320	src/pageview.h:185	12093	71914	. --zoom --zoom-levels=3

@@ -41,7 +41,7 @@ CORPUS="$ROOT/test/zoomfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -291,14 +291,14 @@ L4_WHEREIS="$( l4_field '"whereis" in names' )"
 L4_STRAY="$(   l4_field '"stray_content" in names' )"
 L4_FLAGS="$(   l4_field '"flags" in names' )"
 L4_DDRIFT="$( l4_field '"doc_drift" in names' )"
-[ "$L4_COUNT" = "31" ]     && ok "tools/list shows exactly 31 verbs" || no "tools/list shows $L4_COUNT verbs, expected 31"
-[ "$L4_DDRIFT" = "True" ]  && ok "tools/list includes 'doc_drift'"     || no "tools/list is missing 'doc_drift'"
-[ "$L4_WHEREIS" = "True" ] && ok "tools/list includes 'whereis'"       || no "tools/list is missing 'whereis'"
-[ "$L4_STRAY" = "True" ]   && ok "tools/list includes 'stray_content'" || no "tools/list is missing 'stray_content'"
-[ "$L4_FLAGS" = "True" ]   && ok "tools/list includes 'flags'"         || no "tools/list is missing 'flags'"
-[ "$L4_EXPLORE" = "True" ] && ok "tools/list includes 'explore'"    || no "tools/list is missing 'explore'"
-[ "$L4_TRACE" = "True" ]   && ok "tools/list includes 'from_trace'" || no "tools/list is missing 'from_trace'"
-[ "$L4_EDITCHK" = "True" ] && ok "tools/list includes 'edit_check'" || no "tools/list is missing 'edit_check'"
+if [ "$L4_COUNT" = "31" ]; then ok "tools/list shows exactly 31 verbs"; else no "tools/list shows $L4_COUNT verbs, expected 31"; fi
+if [ "$L4_DDRIFT" = "True" ]; then ok "tools/list includes 'doc_drift'"; else no "tools/list is missing 'doc_drift'"; fi
+if [ "$L4_WHEREIS" = "True" ]; then ok "tools/list includes 'whereis'"; else no "tools/list is missing 'whereis'"; fi
+if [ "$L4_STRAY" = "True" ]; then ok "tools/list includes 'stray_content'"; else no "tools/list is missing 'stray_content'"; fi
+if [ "$L4_FLAGS" = "True" ]; then ok "tools/list includes 'flags'"; else no "tools/list is missing 'flags'"; fi
+if [ "$L4_EXPLORE" = "True" ]; then ok "tools/list includes 'explore'"; else no "tools/list is missing 'explore'"; fi
+if [ "$L4_TRACE" = "True" ]; then ok "tools/list includes 'from_trace'"; else no "tools/list is missing 'from_trace'"; fi
+if [ "$L4_EDITCHK" = "True" ]; then ok "tools/list includes 'edit_check'"; else no "tools/list is missing 'edit_check'"; fi
 [ "$L4_PACKTASK" = "False" ] && ok "'pack_task' is NOT separately advertised in tools/list (dispatch-only alias)" \
                               || no "'pack_task' unexpectedly appears in tools/list"
 

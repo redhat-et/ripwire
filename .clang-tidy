@@ -41,3 +41,20 @@ WarningsAsErrors: ''
 
 # No automatic fixes. `-fix` on a data-oriented tree rewrites layout decisions that were made on purpose.
 FormatStyle: none
+
+# bugprone-easily-swappable-parameters is set to REVEAL, because the rows are real. Measured 2026-09-10 on e63e2d43
+# with the style job's toolchain and version.h stamped: every one of the 209 rows the upstream defaults report was
+# read and labeled. 208 are role pairs where a swap compiles and silently changes the answer — (root, path),
+# (fileId, line), (topN, budgetBytes), out-parameter pairs — and 1 is noise. So every option that shrinks the table
+# silences real rows. Counted per option: ModelImplicitConversions=false 31, MinimumLength=3 192, ignoring the
+# string_view suffix 54, the name lists a;b;x;y / from;to;lo;hi;start;stop;open;close / second;lo;hi 4 / 9 / 1, and a
+# name-affix threshold of 3 8. None of those is set. The two options below only ADD rows, and every added row is real:
+#   NamePrefixSuffixSilenceDissimilarityThreshold 0 (upstream 1): +3. Names one character apart were silenced as
+#     "similar", which hid archViolates(la, lb), findStringValue(vs, ve) and parseCappedCsvPair(capA, capB).
+#   QualifiersMix true (upstream false): +15. A const T& input beside a T& output, e.g. readFile(path, out): a swap
+#     compiles whenever the caller's input is a mutable lvalue, the common case here. These rows are also debt against
+#     CONTRIBUTING.md §3 "Interfaces" (structured-binding returns over out-params).
+# SuppressParametersUsedTogether stays true: false adds 440 rows, most of them (a, b) / (i, n) noise.
+CheckOptions:
+  bugprone-easily-swappable-parameters.NamePrefixSuffixSilenceDissimilarityThreshold: 0
+  bugprone-easily-swappable-parameters.QualifiersMix: true

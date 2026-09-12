@@ -28,7 +28,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -116,7 +116,7 @@ grep -q '<history ' "$TMP/plain" \
 # ── 2) WITH the flag: the two names separate ──────────────────────────────────────────────────────────
 TMPDIR="$C1" "$BIN" "$R" --doc-drift --with-history --detail=999 >"$TMP/hist" 2>/dev/null
 rc=$?
-[ "$rc" = "0" ] && ok "--doc-drift --with-history exits 0 (a report, not a gate)" || no "exited $rc, expected 0"
+if [ "$rc" = "0" ]; then ok "--doc-drift --with-history exits 0 (a report, not a gate)"; else no "exited $rc, expected 0"; fi
 
 rows "$TMP/hist" | grep -q "why=\"deleted\" ref=\"vanishedContourWalker\" got=\"removed in $DEL_SHA " \
     && ok "vanishedContourWalker -> why=\"deleted\", naming the commit that removed it ($DEL_SHA)" \
@@ -213,7 +213,7 @@ grep -q '<fate ' "$TMP/w3" \
 C4="$TMP/t4"; mkdir -p "$C4"
 TMPDIR="$C4" "$BIN" "$R" --whereis=vanishedContourWalker --with-history >"$TMP/wc" 2>/dev/null
 TMPDIR="$C4" "$BIN" "$R" --whereis=vanishedContourWalker --with-history >"$TMP/ww" 2>/dev/null
-cmp -s "$TMP/wc" "$TMP/ww" && ok "whereis: warm == cold, byte-identical" || no "whereis warm/cold disagree"
+if cmp -s "$TMP/wc" "$TMP/ww"; then ok "whereis: warm == cold, byte-identical"; else no "whereis warm/cold disagree"; fi
 
 # ONE blob serves both verbs: doc-drift built it above in t2; whereis must not write a second family member.
 nblob="$( find "$C4" -name 'ripwire-qhist-*.bin' | wc -l | tr -d ' ' )"
@@ -236,12 +236,12 @@ rows "$TMP/nogit" | grep -q 'why="undefined"' \
 
 # ── 7) G4: well-formed, minified XML for both verbs under the flag ────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/hist" 2>/dev/null && ok "doc-drift --with-history XML well-formed" || no "doc-drift --with-history XML malformed"
-    xmllint --noout "$TMP/w1"   2>/dev/null && ok "whereis --with-history XML well-formed"   || no "whereis --with-history XML malformed"
+    if xmllint --noout "$TMP/hist" 2>/dev/null; then ok "doc-drift --with-history XML well-formed"; else no "doc-drift --with-history XML malformed"; fi
+    if xmllint --noout "$TMP/w1"   2>/dev/null; then ok "whereis --with-history XML well-formed"; else no "whereis --with-history XML malformed"; fi
 else
     ok "xmllint unavailable — well-formedness skipped"
 fi
-[ "$( grep -c '' "$TMP/hist" )" -le 1 ] && ok "output is minified (no stray newlines)" || no "output contains newlines outside CDATA"
+if [ "$( grep -c '' "$TMP/hist" )" -le 1 ]; then ok "output is minified (no stray newlines)"; else no "output contains newlines outside CDATA"; fi
 
 # ── 8) L10: a symbol still on HEAD must never carry <fate v="removed"> ─────────────────────────────────
 # The oracle's line-removal walk cannot tell "the SYMBOL left" from "a DOC QUOTING the symbol left" — both
@@ -289,7 +289,7 @@ grep -q 'head_labels="lexical"' "$TMP/w1" \
     || { no "L10 regression check: expected head_labels=\"lexical\" on the PLAN-doc-only fixture"; cat "$TMP/w1"; }
 
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/w4" 2>/dev/null && ok "L10 fixture: whereis --with-history XML well-formed" || no "L10 fixture: whereis --with-history XML malformed"
+    if xmllint --noout "$TMP/w4" 2>/dev/null; then ok "L10 fixture: whereis --with-history XML well-formed"; else no "L10 fixture: whereis --with-history XML malformed"; fi
 fi
 
 # ── §L10b LOW tail: the <history> element's own attributes (probed=/commits=/removed-names=/truncated=)

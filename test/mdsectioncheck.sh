@@ -45,7 +45,7 @@ FIX="$ROOT/test/mdsectionfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -59,7 +59,7 @@ echo
 echo "=== presence guards: the fixture really spells what the arms below assert ==="
 # ═══════════════════════════════════════════════════════════════════════════
 G="$FIX/guide.md"
-guard(){ grep -qF -- "$2" "$1" && ok "fixture spells $3" || no "fixture LOST $3 — its arm below would pass by finding nothing"; }
+guard(){ if grep -qF -- "$2" "$1"; then ok "fixture spells $3"; else no "fixture LOST $3 — its arm below would pass by finding nothing"; fi; }
 guard "$G" 'zqfrontkey'                    'the front-matter key zqfrontkey'
 guard "$G" '# Orientation Guide'           'the H1  # Orientation Guide'
 guard "$G" '## Cache Warm Path'            'the H2  ## Cache Warm Path'
@@ -85,7 +85,7 @@ guard "$G" '`codeIdentFn`'                 'the backtick doc→code mention'
     || no "the Install Steps decoy pair is gone"
 grep -qE '^#' "$FIX/plainprose.md" && no "plainprose.md grew a heading — the whole-doc fallback arm is dead" \
     || ok "plainprose.md is heading-less (the whole-doc fallback arm has its subject)"
-grep -qF 'zqplainprose' "$FIX/plainprose.md" && ok "plainprose.md carries zqplainprose" || no "plainprose.md lost zqplainprose"
+if grep -qF 'zqplainprose' "$FIX/plainprose.md"; then ok "plainprose.md carries zqplainprose"; else no "plainprose.md lost zqplainprose"; fi
 # deepquote.md is GENERATED, never committed: a committed 300-deep file would put the guard's stderr
 # note into every repo-wide run (xmlwellformed's --owners arm merges stderr and caught exactly that).
 DEEPFIX="$TMP/deepfix"
@@ -93,9 +93,9 @@ mkdir -p "$DEEPFIX"
 python3 -c "open('$DEEPFIX/deepquote.md','w').write('>'*300 + ' three hundred nested blockquote markers on one line\n')"
 [ "$( head -c 300 "$DEEPFIX/deepquote.md" | tr -dc '>' | wc -c | tr -d ' ' )" -eq 300 ] \
     && ok "deepquote.md (generated) opens 300 blockquote markers" || no "deepquote.md generation failed"
-grep -q $'\r' "$FIX/crlf.md" && ok "crlf.md really has CRLF line endings" || no "crlf.md lost its CR bytes"
-grep -qF 'zqaltextension' "$FIX/alt.markdown" && ok "alt.markdown carries zqaltextension" || no "alt.markdown lost zqaltextension"
-grep -qF 'zqCodeAnchorFn' "$FIX/helpers.c" && ok "helpers.c defines zqCodeAnchorFn" || no "helpers.c lost zqCodeAnchorFn"
+if grep -q $'\r' "$FIX/crlf.md"; then ok "crlf.md really has CRLF line endings"; else no "crlf.md lost its CR bytes"; fi
+if grep -qF 'zqaltextension' "$FIX/alt.markdown"; then ok "alt.markdown carries zqaltextension"; else no "alt.markdown lost zqaltextension"; fi
+if grep -qF 'zqCodeAnchorFn' "$FIX/helpers.c"; then ok "helpers.c defines zqCodeAnchorFn"; else no "helpers.c lost zqCodeAnchorFn"; fi
 head -1 "$FIX/setext0.md" | grep -qx 'Setext At Byte Zero' \
     && ok "setext0.md opens with setext heading TEXT at byte 0 (the identity-collision shape)" \
     || no "setext0.md no longer opens with its setext heading at byte 0"
@@ -107,14 +107,14 @@ echo "=== default map: exit/wellformed/deep-quote guard, and the section symbol 
 MAP="$TMP/map.xml"
 $BIN "$FIX" --no-cache >"$MAP" 2>"$TMP/map.err"
 RC=$?
-[ "$RC" -eq 0 ] && ok "default map exits 0" || no "default map exited $RC: $( head -3 "$TMP/map.err" )"
-xmllint --noout "$MAP" 2>/dev/null && ok "map passes xmllint --noout" || no "map is not well-formed XML"
+if [ "$RC" -eq 0 ]; then ok "default map exits 0"; else no "default map exited $RC: $( head -3 "$TMP/map.err" )"; fi
+if xmllint --noout "$MAP" 2>/dev/null; then ok "map passes xmllint --noout"; else no "map is not well-formed XML"; fi
 
 # deep-quote guard, on its own GENERATED corpus: refused BEFORE the parse with a one-line note (the
 # yaml posture). The committed fixture dir stays note-free — nearlimit.md (150 deep) parses fine.
 $BIN "$DEEPFIX" --no-cache >"$TMP/deep.xml" 2>"$TMP/deep.err"
 DEEP_RC=$?
-[ "$DEEP_RC" -eq 0 ] && ok "deep corpus exits 0" || no "deep corpus exited $DEEP_RC"
+if [ "$DEEP_RC" -eq 0 ]; then ok "deep corpus exits 0"; else no "deep corpus exited $DEEP_RC"; fi
 grep -q 'deepquote\.md.*nesting' "$TMP/deep.err" \
     && ok "deepquote.md refused with a nesting note (scanner OOB depth never reaches the parser)" \
     || no "deepquote.md was NOT refused — the markdown depth guard is missing (scanner serialize() OOB class)"
@@ -124,6 +124,58 @@ grep -q 'nearlimit\.md' "$TMP/map.err" \
 [ -s "$TMP/map.err" ] \
     && no "unexpected stderr on the committed fixture: $( head -2 "$TMP/map.err" )" \
     || ok "clean stderr on the committed fixture (no note pollutes repo-wide runs)"
+
+# ── KNOWN GAP (help wanted: prompts/help-wanted/nesting-refusals-visible.md): the markdown twin of yamllangcheck's block ──
+# The deep-quote guard above refuses deepquote.md before the parse, and says so ONLY as one stderr line on a COLD
+# run. Measured on main:
+#   - --skipped never rows the file;
+#   - a warm run stat-hits its cache record and prints nothing;
+#   - --match parses it anyway (hits inside the refused file).
+# The KNOWN GAP arms assert TODAY's behaviour and PASS now; flipping them is the acceptance test. A FAIL on a
+# KNOWN GAP arm means the gap moved: rewrite the arm to assert the fixed behaviour, never delete it. Its own
+# generated corpus, never the committed fixture (the committed dir must stay note-free, see above).
+KGM="$TMP/kgmd"; mkdir -p "$KGM"
+cp "$DEEPFIX/deepquote.md" "$KGM/deepquote.md"
+printf '# Kg Sibling Heading\n\nzqkgsibling prose\n' > "$KGM/sibling.md"
+$BIN "$KGM" --cache="$TMP/kgmd.cache" >"$TMP/kgm_cold.xml" 2>"$TMP/kgm_cold.err"; KGM_COLD_RC=$?
+$BIN "$KGM" --cache="$TMP/kgmd.cache" >"$TMP/kgm_warm.xml" 2>"$TMP/kgm_warm.err"; KGM_WARM_RC=$?
+KGM_LIVE=0
+if [ "$KGM_COLD_RC" -eq 0 ] && [ "$KGM_WARM_RC" -eq 0 ] && grep -q 'deepquote\.md.*nesting' "$TMP/kgm_cold.err" \
+   && grep -qF 'n="Kg Sibling Heading"' "$TMP/kgm_warm.xml" && cmp -s "$TMP/kgm_cold.xml" "$TMP/kgm_warm.xml"; then
+    ok "(kg-md) presence: the cold run refuses deepquote.md on stderr; the warm run serves the same map from the cache, sibling indexed"
+    KGM_LIVE=1
+else
+    no "(kg-md) presence: expected rc=0 twice, a cold refusal note for deepquote.md and a warm map identical to the cold one (cold rc=$KGM_COLD_RC, warm rc=$KGM_WARM_RC) — the arms below would be vacuous: $( head -2 "$TMP/kgm_cold.err" )"
+fi
+if [ "$KGM_LIVE" -eq 1 ]; then
+    grep -q 'deepquote\.md' "$TMP/kgm_warm.err" \
+        && no "KNOWN GAP MOVED (prompts/help-wanted/nesting-refusals-visible.md): the warm run now names deepquote.md on stderr — rewrite this arm to assert the warm refusal is visible" \
+        || ok "KNOWN GAP (help wanted: prompts/help-wanted/nesting-refusals-visible.md): a WARM run says nothing about the refused deepquote.md — flipping this is the acceptance test"
+    for mode in cold warm; do
+        if [ "$mode" = cold ]; then
+            $BIN "$KGM" --no-cache --skipped >"$TMP/kgm_sk_$mode.xml" 2>/dev/null; SK_RC=$?
+        else
+            $BIN "$KGM" --cache="$TMP/kgmd.cache" --skipped >"$TMP/kgm_sk_$mode.xml" 2>/dev/null; SK_RC=$?
+        fi
+        if [ "$SK_RC" -ne 0 ] || ! grep -q '<skipped indexed="2"' "$TMP/kgm_sk_$mode.xml"; then
+            no "(kg-md) $mode --skipped: exit $SK_RC or no <skipped indexed=\"2\"> report — the arm cannot observe the gap"
+        elif grep -qE '<f p="[^"]*deepquote\.md"' "$TMP/kgm_sk_$mode.xml"; then
+            no "KNOWN GAP MOVED (prompts/help-wanted/nesting-refusals-visible.md): $mode --skipped now rows deepquote.md — rewrite this arm to assert the row, its why=, and its legend clause"
+        else
+            ok "KNOWN GAP (help wanted: prompts/help-wanted/nesting-refusals-visible.md): $mode --skipped has no row for the refused deepquote.md — flipping this is the acceptance test"
+        fi
+    done
+fi
+$BIN "$KGM" --no-cache --match='(block_quote)' >"$TMP/kgm_match.xml" 2>"$TMP/kgm_match.err"; KGM_M_RC=$?
+if [ "$KGM_M_RC" -ne 0 ]; then
+    no "(kg-md) --match over the refused deepquote.md exited $KGM_M_RC — a parse the guard exists to prevent went wrong (the vendored scanner clamp is --match's only layer): $( head -2 "$TMP/kgm_match.err" )"
+elif ! grep -q 'deepquote\.md.*nesting' "$TMP/kgm_match.err"; then
+    no "(kg-md) --match: the same run's ingest did not refuse deepquote.md — the arm cannot show the two paths disagree"
+elif grep -q '<m p="deepquote\.md:' "$TMP/kgm_match.xml"; then
+    ok "KNOWN GAP (help wanted: prompts/help-wanted/nesting-refusals-visible.md): --match returns hits INSIDE deepquote.md in the same run whose ingest refused it — flipping this is the acceptance test"
+else
+    no "KNOWN GAP MOVED (prompts/help-wanted/nesting-refusals-visible.md): --match no longer returns hits inside the refused deepquote.md — rewrite this arm to assert the refusal and its disclosure"
+fi
 
 sec(){ # sec NAME — the map carries a t="sec" symbol with exactly this name
     if grep -qF "<s t=\"sec\" n=\"$1\"" "$MAP"; then ok "section symbol present: $1"; else no "section symbol MISSING: $1"; fi
@@ -186,7 +238,7 @@ for m in re.finditer(r'<s t="sec" n="([^"]*)"[^>]*>(.*?)</s>', xml, re.S):
     for c in re.finditer(r'<c n="([^"]*)"', m.group(2)):
         print(f"{src} -> {c.group(1)}")
 PYEOF
-edge(){ grep -qF "$1 -> $2" "$TMP/edges.txt" && ok "edge: $1 -> $2  ($3)" || no "edge MISSING: $1 -> $2  ($3)"; }
+edge(){ if grep -qF "$1 -> $2" "$TMP/edges.txt"; then ok "edge: $1 -> $2  ($3)"; else no "edge MISSING: $1 -> $2  ($3)"; fi; }
 edge "Cache Warm Path" "partner"        'inline [text](partner.md) link, attributed to its section'
 edge "Cache Warm Path" "Result Tables"  'in-file [text](#result-tables) anchor — doc-section→doc-section'
 edge "Result Tables"   "decoy"          '[[wikilink]], attributed to its section'
@@ -203,7 +255,7 @@ $BIN "$FIX" --no-cache --for="zqcachewarmbody" >"$TMP/for.xml" 2>/dev/null
 grep -qF 'n="Cache Warm Path"' "$TMP/for.xml" \
     && ok "--for on a section-body token returns THAT section's row" \
     || no "--for does not surface the section for its own body token (whole-doc-dump residual)"
-python3 - "$TMP/for.xml" <<'PYEOF' && ok "the section row's sig is the heading line (never the section body)" || no "the section row's sig leaks the section body"
+if python3 - "$TMP/for.xml" <<'PYEOF'; then ok "the section row's sig is the heading line (never the section body)"; else no "the section row's sig leaks the section body"; fi
 import sys, re
 xml = open(sys.argv[1], encoding='utf-8').read()
 m = re.search(r'<d[^>]*n="Cache Warm Path"[^>]*>(.*?)</d>', xml, re.S)
@@ -212,7 +264,7 @@ PYEOF
 
 echo "--- code-query pollution: a name-exact code query is answered by the code symbol first ---"
 $BIN "$FIX" --no-cache --for="zqCodeAnchorFn" >"$TMP/forcode.xml" 2>/dev/null
-python3 - "$TMP/forcode.xml" <<'PYEOF' && ok "--for=zqCodeAnchorFn: first row is the C function, not a doc section" || no "--for=zqCodeAnchorFn: a doc section displaced the code answer"
+if python3 - "$TMP/forcode.xml" <<'PYEOF'; then ok "--for=zqCodeAnchorFn: first row is the C function, not a doc section"; else no "--for=zqCodeAnchorFn: a doc section displaced the code answer"; fi
 import sys, re
 xml = open(sys.argv[1], encoding='utf-8').read()
 # \bn= would still bite on in=/churn= tails after greedy backtracking; anchor on the attribute
@@ -228,7 +280,7 @@ echo "=== --expand serves the SECTION span (heading → next same-or-higher head
 xp(){ # xp SELECTOR OUTFILE
     $BIN "$FIX" --no-cache --expand="$1" --top-k=0 >"$2" 2>/dev/null
 }
-has(){ grep -qF "$2" "$1" && ok "$3" || no "$4"; }
+has(){ if grep -qF "$2" "$1"; then ok "$3"; else no "$4"; fi; }
 hasnot(){ grep -qF "$2" "$1" && no "$4" || ok "$3"; }
 
 xp "guide.md:Cache Warm Path" "$TMP/x1"
@@ -272,7 +324,7 @@ grep -qF '[sections:' "$TMP/r1" \
 
 $BIN "$FIX" --no-cache --recall="zqplainprose" >"$TMP/r2" 2>/dev/null
 has    "$TMP/r2" 'zqplainprose'        "a heading-less doc is still recalled" "the heading-less doc vanished from recall"
-grep -qF 'plainprose.md' "$TMP/r2" && ok "…as its whole doc (the disclosed fallback)" || no "plainprose.md separator missing"
+if grep -qF 'plainprose.md' "$TMP/r2"; then ok "…as its whole doc (the disclosed fallback)"; else no "plainprose.md separator missing"; fi
 
 echo "--- doc-query pollution: --recall (docs-only) never emits code content ---"
 $BIN "$FIX" --no-cache --recall="zqcachewarmbody cache warm compute" >"$TMP/r3" 2>/dev/null
@@ -302,7 +354,7 @@ fi
 rm -f "$TMP/cache.bin"
 $BIN "$FIX" --cache="$TMP/cache.bin" >"$TMP/cold" 2>/dev/null
 $BIN "$FIX" --cache="$TMP/cache.bin" >"$TMP/warm" 2>/dev/null
-diff -q "$TMP/cold" "$TMP/warm" >/dev/null && ok "cache transparency (warm == cold)" || no "cache transparency: warm run differs from cold"
+if diff -q "$TMP/cold" "$TMP/warm" >/dev/null; then ok "cache transparency (warm == cold)"; else no "cache transparency: warm run differs from cold"; fi
 
 # ── verdict ─────────────────────────────────────────────────────────────────
 echo

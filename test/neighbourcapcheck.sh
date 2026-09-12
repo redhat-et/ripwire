@@ -61,7 +61,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 attr(){ printf '%s' "$2" | grep -oE "(^|[^_a-z])$1=\"[^\"]*\"" | head -1 | sed -E "s/.*$1=\"//; s/\"$//"; }
 
@@ -234,7 +234,7 @@ if [ "${u_count:-0}" -lt "$CAP_USES" ]; then
         && ok "(7) --uses has $u_count sites, under its own $CAP_USES cap, and serves all of them (the symbol cap did not leak onto the site unit)" \
         || no "(7) --uses served $u_rows of $u_count sites while under its own cap"
 else
-    [ "$u_rows" = "$CAP_USES" ] && ok "(7) --uses capped at $CAP_USES" || no "(7) --uses expected $CAP_USES rows, got $u_rows"
+    if [ "$u_rows" = "$CAP_USES" ]; then ok "(7) --uses capped at $CAP_USES"; else no "(7) --uses expected $CAP_USES rows, got $u_rows"; fi
 fi
 # ordering: --uses rows carry p= only, so assert the source sites lead
 u_first="$( printf '%s' "$U_DEF" | grep -oE '<u role="[^"]*" p="[^"]*"' | head -1 )"
@@ -260,7 +260,7 @@ if [ "$js_rows" = "$CAP_CALL" ] && [ "$js_shown" = "$CAP_CALL" ] && [ "$js_count
 else
     no "(8) --json diverged: rows=$js_rows shown=$js_shown count=$js_count (expected $CAP_CALL/$CAP_CALL/$full_count)"
 fi
-command -v python3 >/dev/null 2>&1 && { printf '%s' "$JS" | python3 -c 'import sys,json; json.load(sys.stdin)' 2>/dev/null && ok "(8b) the capped --json answer parses" || no "(8b) the capped --json answer is not valid JSON"; }
+command -v python3 >/dev/null 2>&1 && { if printf '%s' "$JS" | python3 -c 'import sys,json; json.load(sys.stdin)' 2>/dev/null; then ok "(8b) the capped --json answer parses"; else no "(8b) the capped --json answer is not valid JSON"; fi; }
 COL="$( rw --callers=neighbourHubFn --format=columnar )"
 col_shown="$( attr shown "$COL" )"
 [ "$col_shown" = "$CAP_CALL" ] \
@@ -285,9 +285,9 @@ echo "=== (10) determinism + well-formed XML ==="
 # ═══════════════════════════════════════════════════════════════════════════
 for v in "--callers=neighbourHubFn" "--callees=neighbourHubCaller" "--uses=neighbourHubFn"; do
     r1="$( rw "$v" )"; r2="$( rw "$v" )"
-    [ "$r1" = "$r2" ] && ok "(10) $v is byte-identical across runs" || no "(10) $v is nondeterministic"
+    if [ "$r1" = "$r2" ]; then ok "(10) $v is byte-identical across runs"; else no "(10) $v is nondeterministic"; fi
     if command -v xmllint >/dev/null 2>&1; then
-        printf '%s' "$r1" | xmllint --noout - 2>/dev/null && ok "(10b) $v is well-formed XML" || no "(10b) $v is not well-formed XML"
+        if printf '%s' "$r1" | xmllint --noout - 2>/dev/null; then ok "(10b) $v is well-formed XML"; else no "(10b) $v is not well-formed XML"; fi
     fi
 done
 

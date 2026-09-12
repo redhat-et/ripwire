@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // prcontext.h — Wave-4 feature: --pr-context[=BASEREF]. The no-LLM review-evidence bundle: for the
 // current working-tree diff (default) or a diff vs BASEREF, emit ONE deterministic XML section per
@@ -54,7 +57,8 @@
 #include "graph.h"
 #include "filter.h"             // isTestPath
 #include "gitmine.h"            // shSingleQuote, cochangePartners, gitFileAuthors, FileOwnership
-#include "quality.h"            // gitOneLine — the SAME one-line git primitive crossref/abicheck/mergescout resolve their merge-base with
+#include "quality.h"            // gitOneLine — the SAME one-line git primitive crossref/abicheck/mergescout resolve their merge-base with;
+                                // gitResolveCommitSha — the shared resolver BASEREF goes through (P0.1)
 #include "serialize.h"          // escapeXml
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — the unrelated-history (no merge-base) degrade
 #include "gitstamp.h"           // gitstamp::atAttr — the at="<sha>[+dirty]" root anchor
@@ -258,15 +262,20 @@ inline NumstatDiff numstatChangedPaths( const std::string& root, const std::stri
 // stops SHELL injection, but the token still arrives at git as its own argv entry — and `git diff` honors
 // `--output=FILE`, which TRUNCATES and rewrites FILE. A ref beginning with `-` fails merge-base first,
 // which is *exactly* what routed it into that fallback: `--pr-context=--output=/etc/x` clobbered a file
-// outside the repo and exited 0. So: resolve through `rev-parse --verify ...^{commit}` FIRST (the same
-// probe mergescout.h:resolveCommittish uses) and diff the resulting 40-hex sha, which can never begin
-// with `-`. An unresolvable ref is a REFUSAL (`badRef`), never a fallback — the caller exits 1 (P2.8).
+// outside the repo and exited 0. So: resolve through quality::gitResolveCommitSha FIRST and diff the sha it
+// returns. That is the one resolver a user-supplied revision goes through, and it holds both halves of the
+// house rule: a ref beginning with `-` is refused before git is asked at all (a private copy of the probe
+// used to live here and handed `rev-parse` `--output=…^{commit}` as its own argv entry, stopped only by git's
+// own rejection), and `rev-parse --verify ...^{commit}`'s answer counts only as a bare 40/64-hex object name
+// (`^REF` answers `^<sha>` at rc 0) — so "the revision token can never begin with `-`" is proven in ripwire,
+// not inherited from git's output format. An unresolvable ref is a REFUSAL (`badRef`), never a fallback — the
+// caller exits 1 (P2.8). test/prrefsafecheck.sh proves both halves from the git child's argv, through a PATH shim.
 struct DiffAnchor
 {
     std::string revArgs;               // the already-shell-quoted revision tail for `git diff --numstat`
     std::string baseSha;               // the resolved merge-base, or "" (default form / unrelated history)
-    std::string refSha;                // BASEREF resolved to a commit sha — the ONLY spelling of the ref that
-                                       // reaches a git argv (see the base-moved probe below)
+    std::string refSha;                // BASEREF resolved to a commit sha — the ONLY spelling of the ref any git
+                                       // call after its own resolve probe is handed (see the base-moved probe below)
     bool        baseRefGiven = false;
     bool        baseAnchored = false;
     bool        refHasNoWork = false;  // §A9.2: merge-base == the ref's own tip ⇒ the ref is an ancestor of HEAD
@@ -274,34 +283,6 @@ struct DiffAnchor
     bool        badRef       = false;  // ref given, root has git history, ref does not resolve ⇒ refuse (exit 1)
     bool        gitUnusable  = false;  // no HEAD at all (non-git root / git unavailable) ⇒ the exit-0 degrade
 };
-
-// A git object name is 40 (sha-1) or 64 (sha-256) lowercase hex characters. Checked explicitly rather than
-// assumed so "the revision token can never look like an option" is a property this file PROVES rather than
-// inherits from git's output format — a non-hex answer degrades to a refusal, never to a raw-token diff.
-inline bool isCommitSha( std::string_view s )
-{
-    if( s.size() != 40 && s.size() != 64 )
-    {
-        return false;
-    }
-    for( const char c : s )
-    {
-        if( !( ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'f' ) ) )
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-// Resolve REF to a commit sha. `^{commit}` peels — so a blob/tree hash or a malformed ref answers "" — and
-// mirrors mergescout.h:resolveCommittish verbatim rather than growing a second dialect of the same probe.
-inline std::string resolveBaseRefSha( const std::string& root, std::string_view ref )
-{
-    const std::string sha = quality::gitOneLine( root, "rev-parse --verify --quiet "
-                                                       + shSingleQuote( std::string( ref ) + "^{commit}" ) + " 2>/dev/null" );
-    return isCommitSha( sha ) ? sha : std::string{};
-}
 
 inline DiffAnchor resolveDiffAnchor( const std::string& root, std::string_view baseRef )
 {
@@ -315,8 +296,9 @@ inline DiffAnchor resolveDiffAnchor( const std::string& root, std::string_view b
     const std::string headSha = quality::gitOneLine( root, "rev-parse --verify --quiet HEAD 2>/dev/null" );
     if( headSha.empty() ) { out.gitUnusable = true; return out; }
 
-    // P0.1 + P2.8: an unresolvable ref REFUSES. It is never handed to `git diff` as a token.
-    out.refSha = resolveBaseRefSha( root, baseRef );
+    // P0.1 + P2.8: an unresolvable ref REFUSES. It is never handed to `git diff` as a token — and one beginning
+    // with `-` is refused inside the resolver, before git is asked to resolve it at all.
+    out.refSha = quality::gitResolveCommitSha( root, std::string( baseRef ) );
     if( out.refSha.empty() )
     {
         // No DEGRADED_PATH_ALERT (F20): the caller REFUSES on badRef, so this stamped a "[math degraded] …"
@@ -596,7 +578,7 @@ inline std::string prBudgetTail( std::size_t changedFiles, std::uint32_t skipped
                                  const PrTrimRender& chosen, const std::string& truncatedEscaped )
 {
     char tail[ 256 ];
-    std::snprintf( tail, sizeof( tail ), " files=\"%zu\" skipped_mode_only=\"%u\" budget_tokens=\"%zu\" est_tokens=\"%zu\" trim_level=\"%zu\" truncated=\"%s\"",
+    rw::formatTo( tail, sizeof( tail ), " files=\"{}\" skipped_mode_only=\"{}\" budget_tokens=\"{}\" est_tokens=\"{}\" trim_level=\"{}\" truncated=\"{}\"",
                    changedFiles, skippedModeOnly, budgetTokens, chosen.estTokens, chosen.level, truncatedEscaped.c_str() );
     return tail;
 }
@@ -985,7 +967,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             // this file's defined symbols, in id order (== file/line order by the ingest sort).
             const FileSymbols& fileSyms = symsByFile[f];
 
-            std::fprintf( o, "<file p=\"%s\" symbols=\"%zu\">", ex( prPathRel( f ) ).c_str(), std::size_t( fileSyms.size() ) );
+            rw::emitTo( o, "<file p=\"{}\" symbols=\"{}\">", ex( prPathRel( f ) ).c_str(), std::size_t( fileSyms.size() ) );
 
             // (1) blast radius: transitive dependents of ALL this file's symbols. Reuse transitiveCallers.
             const std::vector<NodeId>  reach = transitiveCallers( g, fileSyms );
@@ -1043,17 +1025,17 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             const PrShownCap fSc = prShownCap( radiusFiles.size(), trim.impactCap );
             if( trim.impactCap > 0 )
             {
-                std::fprintf( o, "<impact dependents=\"%zu\" files=\"%zu\" files_other=\"%zu\" shown=\"%zu\" capped=\"%u\">",
+                rw::emitTo( o, "<impact dependents=\"{}\" files=\"{}\" files_other=\"{}\" shown=\"{}\" capped=\"{}\">",
                              reach.size(), totalReachFiles, radiusFiles.size(), fSc.shown, fSc.capped );
                 for( std::size_t i = 0; i < fSc.shown; ++i )
                 {
-                    std::fprintf( o, "<f p=\"%s\" deps=\"%u\"/>", ex( prPathRel( radiusFiles[i] ) ).c_str(), fileReachers[ radiusFiles[i] ] );
+                    rw::emitTo( o, "<f p=\"{}\" deps=\"{}\"/>", ex( prPathRel( radiusFiles[i] ) ).c_str(), fileReachers[ radiusFiles[i] ] );
                 }
-                std::fprintf( o, "</impact>" );
+                rw::emitRaw( o, "</impact>" );
             }
             else
             {
-                std::fprintf( o, "<impact dependents=\"%zu\" files=\"%zu\" files_other=\"%zu\" shown=\"%zu\" capped=\"%u\"/>",
+                rw::emitTo( o, "<impact dependents=\"{}\" files=\"{}\" files_other=\"{}\" shown=\"{}\" capped=\"{}\"/>",
                              reach.size(), totalReachFiles, radiusFiles.size(), fSc.shown, fSc.capped );
             }
 
@@ -1061,16 +1043,16 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             const PrShownCap tSc = prShownCap( testFiles.size(), trim.testCap );
             if( trim.testCap > 0 )
             {
-                std::fprintf( o, "<tests count=\"%zu\" shown=\"%zu\" capped=\"%u\">", testFiles.size(), tSc.shown, tSc.capped );
+                rw::emitTo( o, "<tests count=\"{}\" shown=\"{}\" capped=\"{}\">", testFiles.size(), tSc.shown, tSc.capped );
                 for( std::size_t i = 0; i < tSc.shown; ++i )
                 {
-                    std::fprintf( o, "<test p=\"%s\"%s/>", ex( prPathRel( testFiles[i] ) ).c_str(), runAttrDisclosed( prRunners, testFiles[i], ex ).c_str() );   // §A9.5
+                    rw::emitTo( o, "<test p=\"{}\"{}/>", ex( prPathRel( testFiles[i] ) ).c_str(), runAttrDisclosed( prRunners, testFiles[i], ex ).c_str() );   // §A9.5
                 }
-                std::fprintf( o, "</tests>" );
+                rw::emitRaw( o, "</tests>" );
             }
             else
             {
-                std::fprintf( o, "<tests count=\"%zu\" shown=\"%zu\" capped=\"%u\"/>", testFiles.size(), tSc.shown, tSc.capped );
+                rw::emitTo( o, "<tests count=\"{}\" shown=\"{}\" capped=\"{}\"/>", testFiles.size(), tSc.shown, tSc.capped );
             }
 
             // (5) per-symbol callers (1-hop in-edges) — the review anchor "who breaks if this symbol changes".
@@ -1081,7 +1063,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
 
             if( trim.emitSymbolRows )
             {
-                std::fprintf( o, "<changed-symbols count=\"%zu\"%s>", std::size_t( fileSyms.size() ), sectionsAttr.c_str() );
+                rw::emitTo( o, "<changed-symbols count=\"{}\"{}>", std::size_t( fileSyms.size() ), sectionsAttr.c_str() );
                 for( NodeId s : rowSyms )
                 {
                     const Symbol& sy = ing.symbols[s];
@@ -1107,26 +1089,26 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
                     const PrShownCap cSc = prShownCap( callers.size(), trim.callerCap );
                     if( trim.callerCap > 0 )
                     {
-                        std::fprintf( o, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\" callers=\"%zu\" shown=\"%zu\" capped=\"%u\">",
+                        rw::emitTo( o, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\" callers=\"{}\" shown=\"{}\" capped=\"{}\">",
                                      symTag( sy.kind ), ex( sy.name ).c_str(), ex( prPathRel( sy.fileId ) ).c_str(), sy.line, callers.size(), cSc.shown, cSc.capped );
                         for( std::size_t i = 0; i < cSc.shown; ++i )
                         {
                             const Symbol& cs = ing.symbols[ callers[i] ];
-                            std::fprintf( o, "<caller t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( cs.kind ), ex( cs.name ).c_str(), ex( prPathRel( cs.fileId ) ).c_str(), cs.line );
+                            rw::emitTo( o, "<caller t=\"{}\" n=\"{}\" p=\"{}:{}\"/>", symTag( cs.kind ), ex( cs.name ).c_str(), ex( prPathRel( cs.fileId ) ).c_str(), cs.line );
                         }
-                        std::fprintf( o, "</s>" );
+                        rw::emitRaw( o, "</s>" );
                     }
                     else
                     { // keep the row + its callers COUNT (the cheap structural fact), drop the caller list
-                        std::fprintf( o, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\" callers=\"%zu\" shown=\"%zu\" capped=\"%u\"/>",
+                        rw::emitTo( o, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\" callers=\"{}\" shown=\"{}\" capped=\"{}\"/>",
                                      symTag( sy.kind ), ex( sy.name ).c_str(), ex( prPathRel( sy.fileId ) ).c_str(), sy.line, callers.size(), cSc.shown, cSc.capped );
                     }
                 }
-                std::fprintf( o, "</changed-symbols>" );
+                rw::emitRaw( o, "</changed-symbols>" );
             }
             else
             {
-                std::fprintf( o, "<changed-symbols count=\"%zu\"%s/>", std::size_t( fileSyms.size() ), sectionsAttr.c_str() );
+                rw::emitTo( o, "<changed-symbols count=\"{}\"{}/>", std::size_t( fileSyms.size() ), sectionsAttr.c_str() );
             }
 
             // (6) co-change partners NOT in the diff (gitmine). Degrades to an empty list without git. A4-P10:
@@ -1146,17 +1128,17 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             const PrShownCap pSc = prShownCap( outside.size(), trim.cochangeCap );
             if( trim.cochangeCap > 0 )
             {
-                std::fprintf( o, "<cochange window=\"%s\" commits=\"%u\" partners=\"%zu\" shown=\"%zu\" capped=\"%u\">", coWindow.c_str(), commits, outside.size(), pSc.shown, pSc.capped );
+                rw::emitTo( o, "<cochange window=\"{}\" commits=\"{}\" partners=\"{}\" shown=\"{}\" capped=\"{}\">", coWindow.c_str(), commits, outside.size(), pSc.shown, pSc.capped );
                 for( std::size_t i = 0; i < pSc.shown; ++i )
                 {
-                    std::fprintf( o, "<partner p=\"%s\" deg=\"%.2f\"%s/>", ex( prPathRel( outside[i]->fileId ) ).c_str(),
-                                 outside[i]->deg, coPairAttr( *outside[i] ) );   // §A9.3: surprising= or dep_capable="0"
+                    rw::emitTo( o, "<partner p=\"{}\" deg=\"{:.2f}\"{}/>", ex( prPathRel( outside[i]->fileId ) ).c_str(),
+                                 outside[i]->deg, coPairAttr( *outside[i] )  );   // §A9.3: surprising= or dep_capable="0"
                 }
-                std::fprintf( o, "</cochange>" );
+                rw::emitRaw( o, "</cochange>" );
             }
             else
             {
-                std::fprintf( o, "<cochange window=\"%s\" commits=\"%u\" partners=\"%zu\" shown=\"%zu\" capped=\"%u\"/>", coWindow.c_str(), commits, outside.size(), pSc.shown, pSc.capped );
+                rw::emitTo( o, "<cochange window=\"{}\" commits=\"{}\" partners=\"{}\" shown=\"{}\" capped=\"{}\"/>", coWindow.c_str(), commits, outside.size(), pSc.shown, pSc.capped );
             }
 
             // (7) owners of this file (gitmine, recency-weighted). A4-P?: answered from the once-mined
@@ -1167,23 +1149,23 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             if( ow && trim.ownerCap > 0 )
             {
                 const PrShownCap aSc = prShownCap( ow->authors.size(), trim.ownerCap );
-                std::fprintf( o, "<owners authors=\"%u\" bf=\"%d\" shown=\"%zu\" capped=\"%u\">", ow->uniqueAuthors, ow->busFactor ? 1 : 0, aSc.shown, aSc.capped );
+                rw::emitTo( o, "<owners authors=\"{}\" bf=\"{}\" shown=\"{}\" capped=\"{}\">", ow->uniqueAuthors, ow->busFactor ? 1 : 0, aSc.shown, aSc.capped );
                 for( std::size_t i = 0; i < aSc.shown; ++i )
                 {
-                    std::fprintf( o, "<author email=\"%s\" share=\"%.2f\"/>", ex( ow->authors[i].email ).c_str(), ow->authors[i].share );
+                    rw::emitTo( o, "<author email=\"{}\" share=\"{:.2f}\"/>", ex( ow->authors[i].email ).c_str(), ow->authors[i].share );
                 }
-                std::fprintf( o, "</owners>" );
+                rw::emitRaw( o, "</owners>" );
             }
             else if( ow )
             { // trimmed: keep the author COUNT + bus-factor flag (cheap structural facts), drop the list
-                std::fprintf( o, "<owners authors=\"%u\" bf=\"%d\" shown=\"0\" capped=\"%u\"/>", ow->uniqueAuthors, ow->busFactor ? 1 : 0, ow->authors.empty() ? 0u : 1u );
+                rw::emitTo( o, "<owners authors=\"{}\" bf=\"{}\" shown=\"0\" capped=\"{}\"/>", ow->uniqueAuthors, ow->busFactor ? 1 : 0, ow->authors.empty() ? 0u : 1u );
             }
             else
             {
-                std::fprintf( o, "<owners authors=\"0\" bf=\"0\"/>" );   // no git ownership data at all — not a capped listing, nothing to disclose
+                rw::emitRaw( o, "<owners authors=\"0\" bf=\"0\"/>" );   // no git ownership data at all — not a capped listing, nothing to disclose
             }
 
-            std::fprintf( o, "</file>" );
+            rw::emitRaw( o, "</file>" );
         }
     };
 

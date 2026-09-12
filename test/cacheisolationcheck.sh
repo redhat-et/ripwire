@@ -6,7 +6,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -27,11 +27,11 @@ printf '%s\n' \
     | TMPDIR="$SHARED" "$BIN" --mcp >"$TMP/mcp.out" 2>"$TMP/mcp.err"
 
 PRIVATE="$SHARED/ripwire"
-[ -d "$PRIVATE" ] && ok "creates a dedicated TMPDIR/ripwire directory" || no "missing private directory: $PRIVATE"
+if [ -d "$PRIVATE" ]; then ok "creates a dedicated TMPDIR/ripwire directory"; else no "missing private directory: $PRIVATE"; fi
 
 if [ -d "$PRIVATE" ]; then
     if stat --version >/dev/null 2>&1; then mode="$( stat -c %a "$PRIVATE" )"; else mode="$( stat -f %Lp "$PRIVATE" )"; fi
-    [ "$mode" = "700" ] && ok "private directory mode is 0700" || no "private directory mode is $mode, expected 700"
+    if [ "$mode" = "700" ]; then ok "private directory mode is 0700"; else no "private directory mode is $mode, expected 700"; fi
 fi
 
 topArtifacts="$( find "$SHARED" -mindepth 1 -maxdepth 1 -name 'ripwire-*' -print 2>/dev/null )"
@@ -40,9 +40,9 @@ topArtifacts="$( find "$SHARED" -mindepth 1 -maxdepth 1 -name 'ripwire-*' -print
 
 cacheCount="$( find "$PRIVATE" -mindepth 2 -maxdepth 2 -type f -name 'ripwire-mcp-*.cache' 2>/dev/null | wc -l | tr -d ' ' )"
 lockCount="$( find "$PRIVATE/locks" -mindepth 2 -maxdepth 2 -type f -name 'ripwire-edit-*.lock' 2>/dev/null | wc -l | tr -d ' ' )"
-[ "$cacheCount" -ge 1 ] && ok "MCP cache is sharded under the private directory" || no "no sharded MCP cache found"
-[ "$lockCount" -ge 1 ] && ok "edit lock is sharded under the private locks subtree" || no "no sharded edit lock found"
+if [ "$cacheCount" -ge 1 ]; then ok "MCP cache is sharded under the private directory"; else no "no sharded MCP cache found"; fi
+if [ "$lockCount" -ge 1 ]; then ok "edit lock is sharded under the private locks subtree"; else no "no sharded edit lock found"; fi
 
-[ -f "$SHARED/not-ripwire" ] && ok "unrelated TMPDIR content remains untouched" || no "unrelated TMPDIR content was removed"
+if [ -f "$SHARED/not-ripwire" ]; then ok "unrelated TMPDIR content remains untouched"; else no "unrelated TMPDIR content was removed"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "FAILURES ABOVE"; exit 1; }

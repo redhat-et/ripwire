@@ -32,7 +32,7 @@ FIX="$ROOT/test/crossdirincludefix"
 . "$ROOT/test/lib/headbinlib.sh"                       # shared sha-keyed cache of the HEAD comparison binary
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
@@ -54,20 +54,20 @@ grep -q 'dirB/x.h:' "$TMP/b.out" && ! grep -q 'dirA/x.h:' "$TMP/b.out" \
 # each caller has exactly ONE callee (the precise edge), not zero (dropped) or two (ambiguous spray).
 ca="$( grep -oE 'count="[0-9]+"' "$TMP/a.out" | head -1 )"
 cb="$( grep -oE 'count="[0-9]+"' "$TMP/b.out" | head -1 )"
-[ "$ca" = 'count="1"' ] && ok "callerA has exactly ONE precise callee edge ($ca)" || no "callerA callee count wrong ($ca)"
-[ "$cb" = 'count="1"' ] && ok "callerB has exactly ONE precise callee edge ($cb)" || no "callerB callee count wrong ($cb)"
+if [ "$ca" = 'count="1"' ]; then ok "callerA has exactly ONE precise callee edge ($ca)"; else no "callerA callee count wrong ($ca)"; fi
+if [ "$cb" = 'count="1"' ]; then ok "callerB has exactly ONE precise callee edge ($cb)"; else no "callerB callee count wrong ($cb)"; fi
 
 # ── the fixture stays honest: ambiguous=0 (a precise narrow never MANUFACTURES ambiguity) ────────
 famb="$( "$BIN" "$FIX" --no-cache 2>/dev/null | grep -oE 'ambiguous=[0-9]+' | head -1 )"
-[ "$famb" = "ambiguous=0" ] && ok "fixture $famb (precise narrow adds no ambiguity)" || no "fixture $famb (expected 0)"
+if [ "$famb" = "ambiguous=0" ]; then ok "fixture $famb (precise narrow adds no ambiguity)"; else no "fixture $famb (expected 0)"; fi
 
 # ── determinism: byte-identical run-to-run + warm == cold ─────────────────────────────────────────
 "$BIN" "$FIX" --no-cache >"$TMP/d1" 2>/dev/null
 "$BIN" "$FIX" --no-cache >"$TMP/d2" 2>/dev/null
-cmp -s "$TMP/d1" "$TMP/d2" && ok "deterministic (two --no-cache runs identical)" || no "non-deterministic"
+if cmp -s "$TMP/d1" "$TMP/d2"; then ok "deterministic (two --no-cache runs identical)"; else no "non-deterministic"; fi
 "$BIN" "$FIX" --cache="$TMP/c.bin" >"$TMP/cold" 2>/dev/null
 "$BIN" "$FIX" --cache="$TMP/c.bin" >"$TMP/warm" 2>/dev/null
-cmp -s "$TMP/cold" "$TMP/warm" && ok "warm == cold (include-set closure order-stable through cache)" || no "warm != cold"
+if cmp -s "$TMP/cold" "$TMP/warm"; then ok "warm == cold (include-set closure order-stable through cache)"; else no "warm != cold"; fi
 
 # ── well-formed XML ───────────────────────────────────────────────────────────────────────────────
 command -v xmllint >/dev/null 2>&1 \
@@ -83,17 +83,17 @@ monotonic_check()
     command -v cmake >/dev/null 2>&1 || { skip "monotonicity: cmake absent"; return; }
     ( cd "$ROOT" && git rev-parse --verify HEAD >/dev/null 2>&1 ) || { skip "monotonicity: not a git repo"; return; }
 
+    # HEAD's tree as a private clone inside $TMP, removed by $TMP's own trap — never a registered worktree, which a
+    # gate killed before its cleanup would leave in every session's shared .git (test/worktreeleakcheck.sh).
     local WT="$TMP/head"
-    ( cd "$ROOT" && git worktree add -q --detach "$WT" HEAD ) 2>"$TMP/wt.err" \
-        || { skip "monotonicity: cannot create HEAD worktree ($(head -1 "$TMP/wt.err"))"; return; }
-    # ensure cleanup of the worktree
-    trap '( cd "$ROOT" && git worktree remove --force "'"$WT"'" >/dev/null 2>&1 ); rm -rf "$TMP"' EXIT
+    ripwire_private_checkout "$ROOT" HEAD "$WT" 2>"$TMP/wt.err" \
+        || { skip "monotonicity: cannot check out HEAD ($(head -1 "$TMP/wt.err"))"; return; }
 
-    # pre-change binary from the shared sha-keyed cache (test/lib/headbinlib.sh); the worktree above is
+    # pre-change binary from the shared sha-keyed cache (test/lib/headbinlib.sh); the checkout above is
     # still needed as the held-constant INPUT corpus (HEAD's src/), but no longer as a build tree.
     local OLDBIN
     OLDBIN="$( ripwire_head_binary "$ROOT" "$TMP" )" \
-        || { skip "monotonicity: pre-change build failed"; return; }
+        || { headbin_refusal $? "monotonicity"; return; }
 
     # SAME input (HEAD's src/) for both binaries → isolates the resolver change from any working-tree edits.
     local IN="$WT/src"

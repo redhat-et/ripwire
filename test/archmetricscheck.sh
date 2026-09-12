@@ -34,7 +34,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/archmetricsfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -62,7 +62,7 @@ nv="$( printf '%s' "$OUT" | grep -o '<v ' | wc -l | tr -d ' ' )"
 # ── 2) allow overrides deny (allow-listed) → 0 violations ─────────────────────────────────────────────
 printf 'allow path src/(\\w+)/.* -> src/.*\ndeny path src/(\\w+)/.* -> src/(?!\\1/).*\n' > "$TMP/allow.arch"
 na="$( arch "$TMP/allow.arch" | grep -o '<v ' | wc -l | tr -d ' ' )"
-[ "$na" = 0 ] && ok "allow rule overrides deny (allow-listed → 0 violations)" || no "allow override failed ($na violations)"
+if [ "$na" = 0 ]; then ok "allow rule overrides deny (allow-listed → 0 violations)"; else no "allow override failed ($na violations)"; fi
 
 # ── 3) malformed path-regex is REFUSED — no hang, no crash, no silently-disarmed rule (alarm-guarded) ───
 # Until 2026-09-06 this arm pinned "degrades: rule skipped, exit 0/2, <arch> emitted" — which is the CI
@@ -154,7 +154,7 @@ np="$( vcount "$OP" )"; ns="$( vcount "$OS" )"
 
 # ── 7) XML well-formed (G4) — the whole --arch document incl. <metrics> ──────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$OUT" | xmllint --noout - 2>/dev/null && ok "xml well-formed (arch + metrics)" || no "xml malformed"
+    if printf '%s' "$OUT" | xmllint --noout - 2>/dev/null; then ok "xml well-formed (arch + metrics)"; else no "xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

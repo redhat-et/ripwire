@@ -35,7 +35,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -187,7 +187,7 @@ diff -q "$TMP/g1.xml" "$TMP/g1b.xml" >/dev/null \
     && ok 'grep: a claiming answer is byte-deterministic across runs' \
     || no 'grep: claiming answer differs across two runs'
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/g1.xml" 2>/dev/null && ok 'grep: claiming document is well-formed XML' || no 'grep: claiming document is malformed'
+    if xmllint --noout "$TMP/g1.xml" 2>/dev/null; then ok 'grep: claiming document is well-formed XML'; else no 'grep: claiming document is malformed'; fi
 else
     printf '  SKIP  xmllint (not installed)\n'
 fi
@@ -269,7 +269,7 @@ PYEOF
         && ok 'whereis: a claiming answer is byte-deterministic across runs' \
         || no 'whereis: claiming answer differs across two runs'
     if command -v xmllint >/dev/null 2>&1; then
-        xmllint --noout "$TMP/w1.xml" 2>/dev/null && ok 'whereis: claiming document is well-formed XML' || no 'whereis: claiming document is malformed'
+        if xmllint --noout "$TMP/w1.xml" 2>/dev/null; then ok 'whereis: claiming document is well-formed XML'; else no 'whereis: claiming document is malformed'; fi
     fi
 else
     printf '  SKIP  whereis arms (git unavailable)\n'

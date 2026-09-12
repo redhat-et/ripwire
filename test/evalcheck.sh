@@ -24,7 +24,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -53,16 +53,16 @@ EV="$( run )"
 run >/dev/null 2>&1; EC=$?
 
 # ── 0) it ran, exit 0 ────────────────────────────────────────────────────────────────────────────────
-{ [ "$EC" = 0 ] && [ -n "$EV" ]; } && ok "--eval runs (exit 0, non-empty)" || no "--eval failed (exit=$EC empty=$( [ -z "$EV" ] && echo y || echo n ))"
+if { [ "$EC" = 0 ] && [ -n "$EV" ]; }; then ok "--eval runs (exit 0, non-empty)"; else no "--eval failed (exit=$EC empty=$( [ -z "$EV" ] && echo y || echo n ))"; fi
 
 # ── 1) expected rankers present ──────────────────────────────────────────────────────────────────────
 missing=""
 for rk in ripwire BM25 fused same-dir random; do printf '%s' "$EV" | grep -q "$rk" || missing="$missing $rk"; done
-[ -z "$missing" ] && ok "--eval lists all expected rankers (ripwire, BM25, fused, same-dir, random)" || no "--eval missing rankers:$missing"
+if [ -z "$missing" ]; then ok "--eval lists all expected rankers (ripwire, BM25, fused, same-dir, random)"; else no "--eval missing rankers:$missing"; fi
 
 # ── 2) averaged over ≥1 historical commit (the held-out eval actually happened) ──────────────────────
 NC="$( printf '%s' "$EV" | grep -oE 'over [0-9]+ historical commit' | grep -oE '[0-9]+' | head -1 )"
-{ [ -n "$NC" ] && [ "$NC" -ge 1 ]; } && ok "--eval averaged over $NC historical commit(s)" || no "--eval header reports 0/no historical commits (NC='$NC')"
+if { [ -n "$NC" ] && [ "$NC" -ge 1 ]; }; then ok "--eval averaged over $NC historical commit(s)"; else no "--eval header reports 0/no historical commits (NC='$NC')"; fi
 
 # ── 3+4) per-real-ranker: cells in [0,100] AND monotone non-decreasing @5≤@10≤@20 ────────────────────
 #    (parse rows that begin with a real ranker name; the `random` floor row is EXCLUDED — it normalises
@@ -90,18 +90,18 @@ BAD_MONO="$( printf '%s' "$PARSE" | sed -n 's/^MONO=//p' )"
 { [ -n "$ROWS" ] && [ "$ROWS" -ge 6 ]; } \
     && ok "--eval: parsed $ROWS real-ranker rows (all 6 rankers examined, not a vacuous pass)" \
     || no "--eval: parsed only ROWS='$ROWS' real-ranker rows (expected ≥6 — table format changed?)"
-[ -z "$BAD_RANGE" ] && ok "--eval: every real-ranker recall cell is a percentage in [0,100]" || no "--eval out-of-range recall cells:$BAD_RANGE"
-[ -z "$BAD_MONO" ]  && ok "--eval: recall MONOTONE non-decreasing @5≤@10≤@20 for every real ranker" || no "--eval recall not monotone (a larger cut-off found FEWER held-out files):$BAD_MONO"
+if [ -z "$BAD_RANGE" ]; then ok "--eval: every real-ranker recall cell is a percentage in [0,100]"; else no "--eval out-of-range recall cells:$BAD_RANGE"; fi
+if [ -z "$BAD_MONO" ]; then ok "--eval: recall MONOTONE non-decreasing @5≤@10≤@20 for every real ranker"; else no "--eval recall not monotone (a larger cut-off found FEWER held-out files):$BAD_MONO"; fi
 
 # ── 5) determinism ───────────────────────────────────────────────────────────────────────────────────
-[ "$( run )" = "$( run )" ] && ok "--eval deterministic (byte-identical run-to-run)" || no "--eval non-deterministic"
+if [ "$( run )" = "$( run )" ]; then ok "--eval deterministic (byte-identical run-to-run)"; else no "--eval non-deterministic"; fi
 
 # ── 6) §P11.12: an interpretive note names what each ranker is and which one is the SHIPPED default ────
 # (purely additive — the table rows/columns above are untouched, so this gates green-by-design; asserted
 # here so the note can't silently regress back to a bare, uninterpreted table).
-printf '%s' "$EV" | grep -q 'note:' && ok "--eval: table carries an interpretive note (was bare pre-§P11.12)" || no "--eval: no interpretive note found"
-printf '%s' "$EV" | grep -q 'SHIPPED default' && ok "--eval: note names which ranker is the SHIPPED default" || no "--eval: note does not name the shipped default"
-printf '%s' "$EV" | grep -q 'structural-only PageRank' && ok "--eval: note explains ripwire= is structural PageRank, not a retrieval ranker" || no "--eval: note does not explain the ripwire row"
+if printf '%s' "$EV" | grep -q 'note:'; then ok "--eval: table carries an interpretive note (was bare pre-§P11.12)"; else no "--eval: no interpretive note found"; fi
+if printf '%s' "$EV" | grep -q 'SHIPPED default'; then ok "--eval: note names which ranker is the SHIPPED default"; else no "--eval: note does not name the shipped default"; fi
+if printf '%s' "$EV" | grep -q 'structural-only PageRank'; then ok "--eval: note explains ripwire= is structural PageRank, not a retrieval ranker"; else no "--eval: note does not explain the ripwire row"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

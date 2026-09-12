@@ -37,7 +37,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -80,7 +80,10 @@ FL="$( cat "$TMP/flags" )"
 # assertions go through this; a gate row and a doc row differ only in which open tag names them.
 element(){ printf '%s' "$1" | tr '>' '\n' | sed -n "/$2/,/<\/$3/p"; }
 gate(){ element "$FL" "<gate name=\"$1\"" gate; }
-gate_reads_attr(){ gate "$1" | sed -n 's/.*reads="\([0-9]*\)".*/\1/p' | head -1; }
+# ` reads="` with the LEADING SPACE, not `reads="`: the greedy .* takes the LAST match on the tag, and the
+# element now also carries shown_reads=/reads_capped= when a gate was cut (C1 F-07's disclosure), so the
+# space-anchored form is what still names the TOTAL rather than the window.
+gate_reads_attr(){ gate "$1" | sed -n 's/.* reads="\([0-9]*\)".*/\1/p' | head -1; }
 gate_rows(){ gate "$1" | grep -c '<read p=' || true; }
 gate_more(){ gate "$1" | sed -n 's/.*<more reads="\([0-9]*\)".*/\1/p' | head -1; }
 
@@ -179,9 +182,9 @@ for pair in "flagsfix --flags" "driftfix --doc-drift"; do
     set -- $pair
     "$BIN" "$TMP/$1" "$2" --no-cache >"$TMP/det1" 2>/dev/null
     "$BIN" "$TMP/$1" "$2" --no-cache >"$TMP/det2" 2>/dev/null
-    cmp -s "$TMP/det1" "$TMP/det2" && ok "$2: byte-identical run to run" || no "$2 is non-deterministic"
+    if cmp -s "$TMP/det1" "$TMP/det2"; then ok "$2: byte-identical run to run"; else no "$2 is non-deterministic"; fi
     if command -v xmllint >/dev/null 2>&1; then
-        xmllint --noout "$TMP/det1" 2>/dev/null && ok "$2: G4 xmllint clean" || no "$2: output is not well-formed XML"
+        if xmllint --noout "$TMP/det1" 2>/dev/null; then ok "$2: G4 xmllint clean"; else no "$2: output is not well-formed XML"; fi
     fi
 done
 

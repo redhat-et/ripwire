@@ -23,7 +23,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/zoomfix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -114,7 +114,7 @@ A2="$( printf '%s' "$P2" | grep -oE '<member [^>]*p="[^"]*"' | tr '\n' ',' )"
 # the caller holds a number and needs to know which numbers are legal.
 perl -e 'alarm 30; exec @ARGV' "$BIN" "$CORPUS" --community=999999 --no-cache >/dev/null 2>"$TMP/err.txt"; XEC=$?
 E="$( cat "$TMP/err.txt" )"
-[ "$XEC" = 1 ] && ok "--community=999999 exits 1 (refusal, not an empty module)" || no "--community unknown id exit=$XEC (want 1)"
+if [ "$XEC" = 1 ]; then ok "--community=999999 exits 1 (refusal, not an empty module)"; else no "--community unknown id exit=$XEC (want 1)"; fi
 case "$E" in *0..*) RE=1 ;; *) RE=0 ;; esac
 case "$E" in *neares*) NE=1 ;; *) NE=0 ;; esac
 { [ "$RE" = 1 ] && [ "$NE" = 1 ]; } \
@@ -142,7 +142,7 @@ perl -e 'alarm 30; exec @ARGV' "$BIN" "$CORPUS" --community --no-cache >/dev/nul
 [ "$( run --community="$ID" --limit=1000 )" = "$D" ] \
     && ok "--community deterministic (byte-identical run-to-run)" || no "--community non-deterministic"
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$D" | xmllint --noout - 2>/dev/null && ok "--community xml well-formed" || no "--community xml malformed"
+    if printf '%s' "$D" | xmllint --noout - 2>/dev/null; then ok "--community xml well-formed"; else no "--community xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

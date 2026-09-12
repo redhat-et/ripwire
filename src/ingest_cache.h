@@ -3,6 +3,9 @@
 #error "ingest_cache.h is a SECTION of src/ingest.cpp's translation unit - include it only from ingest.cpp (see the ingest-family split note there)"
 #endif
 
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 // ingest_cache.h — the raw-facts model + incremental cache, moved VERBATIM from ingest.cpp in the
 // 2026-08-29 split: RawDef (the pre-id-assignment definition record), the extraction identity
 // (kCacheVersion + kParserVer + parserVerFor), content/blob hashing, FileFacts, the ByteW/ByteR
@@ -41,6 +44,9 @@ struct RawDef
     std::uint8_t  maxNest   = 0;   // Q4: max control-structure nesting depth inside the def (from cc_walk)
     std::uint8_t  arityExact = 0;  // B2.2: 1 ⇒ params is a fixed call-comparable arity (no variadic/default, not implicit-self)
     std::uint8_t  testScope = 0;   // L8: 1 ⇒ an IN-FILE test convention encloses this def (see inFileTestScope)
+    std::uint8_t  recovered = 0;   // extent honesty (extentsuspect.h kRecovered*): the parse RECOVERED this def's container
+                                   //   (a class whose body holds an error, inside an ERROR region) or its kind (a scopeless
+                                   //   C++ method inside one); 0 ⇒ no recovery claim. Feeds the `error` reason at load.
     SymKind       kind      = SymKind::Other;
     Lang          lang      = Lang::Unknown;
     std::string   name;
@@ -116,7 +122,18 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 //   all match) rather than silently re-absolutizing a key that was never root-relative to begin
 //   with — a v2 cache simply misses on every lookup that survives the guard, which is exactly the
 //   self-healing full-reparse path already used for any other corrupt/stale cache.
-constexpr std::uint32_t kCacheVersion = 18;           // 18: #62 — call refs inside a preprocessor-DECIDED-dead region
+constexpr std::uint32_t kCacheVersion = 21;           // 21: PR #139 — Include gains `bool isValueUse` (parser version 93).
+                                                      //    PR #81 (Elixir, parser version 95) changes NO record shape: its
+                                                      //    RecvKind / LocalBindKind enumerators are APPENDED and ride the
+                                                      //    existing u8, so the format stays at #139's 21.
+                                                      // 20: the member-macro re-parse (test/macroreparsecheck.sh) — each
+                                                      //    FILE record gains FileHealth::macroBlanked, a fifth health
+                                                      //    u32 after wsBytes — a FORMAT change → reject v19 blobs.
+                                                      //    kParserVer moves with it.
+                                                      // 19: extent honesty (test/extentcheck.sh) — each def record gains
+                                                      //    the `recovered` u8 (RawDef::recovered, after testScope) — a
+                                                      //    FORMAT change → reject v18 blobs. kParserVer moves with it.
+                                                      // 18: #62 — call refs inside a preprocessor-DECIDED-dead region
                                                       //    (`#if 0`, the `#else` of `#if 1`) are no longer captured. The
                                                       //    record SHAPE is unchanged, but a v17 blob holds refs this build
                                                       //    would not produce, and replaying them warm would resurrect the
@@ -203,21 +220,148 @@ constexpr std::uint32_t kCacheVersion = 18;           // 18: #62 — call refs i
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 87;           // bump on any grammar/.scm/extraction change
-                                                      // 87 = 2026-09-10 (Elixir module/name/arity resolution,
-                                                      //    test/elixirsemanticcheck.sh, rebased onto main): module/
-                                                      //    name/arity identities, lexical aliases, filtered imports,
-                                                      //    default arguments, pipes, captures, delegates, attributes
-                                                      //    and protocol/behaviour contracts. Existing bind/ref record
-                                                      //    layouts are unchanged (kCacheVersion stays 18,
-                                                      //    kQSnapCacheScheme stays 8); old Elixir extraction facts
-                                                      //    must be re-parsed. Landed at 87 (not the 86 the fork
-                                                      //    carried) — main had already spent 86 on the Ruby receiver
-                                                      //    dedupe below (test/rubyrecvcheck.sh), landing the same
-                                                      //    day: RE-BUMPED to the next free number over main's tip,
-                                                      //    never keeping the fork's value (the same rule applied at
-                                                      //    78, 80, 69 and 65 below). quality.h's
-                                                      //    kIngestParserVerMirror bumped in the SAME commit.
+constexpr std::uint32_t kParserVer    = 95;           // bump on any grammar/.scm/extraction change
+                                                      // 95 = 2026-09-12 (Elixir module/name/arity resolution, PR #81,
+                                                      //    test/elixirsemanticcheck.sh): module/name/arity identities,
+                                                      //    lexical aliases, filtered imports, default arguments, pipes,
+                                                      //    captures, delegates, attributes and protocol/behaviour
+                                                      //    contracts. Existing bind/ref record layouts are unchanged
+                                                      //    (kCacheVersion stays #139's 21, kQSnapCacheScheme stays 10);
+                                                      //    old Elixir extraction facts must be re-parsed. The branch
+                                                      //    carried 87; main spent 87..92 while it was open, #139 takes
+                                                      //    93 and #172 takes 94 in the 0.6.1 round, so this lands on
+                                                      //    the next free number over the merged tip (the 78/80/88/91
+                                                      //    rule). quality.h's kIngestParserVerMirror bumped in the
+                                                      //    SAME commit.
+                                                      // 92 = 2026-09-11 (yaml unsigned-char, PR #140): vendor patch
+                                                      //    yaml/003-scan-status-enum gives tree-sitter-yaml's scan status
+                                                      //    (SCN_SUCC 1, SCN_STOP 0, SCN_FAIL -1) a real `ScanStatus` enum
+                                                      //    type instead of returning it through plain `char`. `char` is
+                                                      //    UNSIGNED on aarch64 Linux — the platform the linux-arm64 release
+                                                      //    asset is built for — and there SCN_FAIL came back as 255, which
+                                                      //    no `case SCN_FAIL:` label matched: a malformed %-escape in a tag
+                                                      //    or a %TAG prefix was swallowed into the token rather than ending
+                                                      //    it, so `a: !<tag:x%zz> b` parsed as ERROR under a signed `char`
+                                                      //    and as a clean tagged scalar under an unsigned one. The patch
+                                                      //    makes the unsigned-`char` build parse as the signed one always
+                                                      //    did — byte-identical on a signed-`char` host, CHANGED on an
+                                                      //    unsigned one. kArtifactArch cannot tell an aarch64 cache blob
+                                                      //    from an x86-64 one, so only this version can reject a blob
+                                                      //    written by the pre-patch unsigned-`char` binary. Record shapes
+                                                      //    are untouched, so kCacheVersion stays #135's 20. quality.h's
+                                                      //    kIngestParserVerMirror carries the same value (gated). Live
+                                                      //    tripwire: vendorpatchcheck arm K, which compiles the vendored
+                                                      //    grammar -fsigned-char and -funsigned-char on any host.
+                                                      // 91 = 2026-09-11 (Kotlin, PR #126): a 24th grammar joins kLangTable
+                                                      //    (.kt), so the crawl admits files a v90 blob never saw — ABSENT,
+                                                      //    not stale, and only the header version can reject that blob.
+                                                      //    91 and not 89/90: #135 spent both, and main stands at 90. Also
+                                                      //    under 91: vendor patch kotlin/002-triple-dollar-escape changes a
+                                                      //    real parse (a triple-quoted string ending right after an escaped
+                                                      //    `\$`, e.g. """a\$""", lost its first closing quote);
+                                                      //    kotlin/003-dollar-run-saturate changes the parse of a run of
+                                                      //    65,536 or more `$`, where upstream's counter wrapped; and the
+                                                      //    ingest nesting guard refuses a .kt file whose string templates
+                                                      //    nest past kMaxKotlinStringNestDepth before the parse, which
+                                                      //    changes WHICH .kt files are extracted. kotlin/001-stack-push-
+                                                      //    no-abort alone would not need a bump: it only changes input that
+                                                      //    used to abort (the yaml/001 and markdown/001 precedent). A
+                                                      //    refused file's cache record is written UNKNOWN with the existing
+                                                      //    hash-0 encoding, so record SHAPES are unchanged and kCacheVersion
+                                                      //    stays #135's 20. The bodyless-Kotlin-type and own-JVM-language rules
+                                                      //    live in graph.h and are recomputed every run. quality.h's
+                                                      //    kIngestParserVerMirror carries the same value (gated). The
+                                                      //    branch's two earlier steps, folded in under their branch numbers
+                                                      //    so no 89/90 label collides with #135:
+                                                      //    (branch 90, 2026-09-08, adversarial-corpus follow-up)
+                                                      //    measureFileHealth now also validates UTF-8 in the leading
+                                                      //    sample (a file that only trips this check needs a cold
+                                                      //    re-measure to pick up the new degraded-parse disclosure —
+                                                      //    a cached FileHealth from before this version predates the
+                                                      //    check and would read as healthy); enum_class_body added to
+                                                      //    the Kotlin positional body-fallback (an `enum class` was
+                                                      //    read as bodyless, same collapse bug as 89's class_body
+                                                      //    fix, just for the enum-class node shape). RE-BUMPED from
+                                                      //    87 on rebase: main independently spent 86 (Ruby receiver),
+                                                      //    87 (markdown scanner counter saturation) and 88 (Dart)
+                                                      //    while this branch was in progress, and 86/87 collided
+                                                      //    EXACTLY with this branch's own prior use of those numbers.
+                                                      //    quality.h's kIngestParserVerMirror bumped in the SAME
+                                                      //    commit.
+                                                      //    (branch 89, 2026-09-08) grammar + queries/kotlin/tags.scm;
+                                                      //    positional body/scope lookups (function_body, class_body and
+                                                      //    type_identifier are children, not fields — a def read as
+                                                      //    bodyless is deleted by graph.h's decl/def collapse);
+                                                      //    captureBases reads delegation_specifier; when_entry/
+                                                      //    when_expression/do_while_statement/catch_block count as
+                                                      //    decisions; function_value_parameters counts `parameter`
+                                                      //    children. Originally 86, RE-BUMPED for the same
+                                                      //    collision reason as 90 above.
+                                                      // 90 = 2026-09-11 (member-macro re-parse, test/macroreparsecheck.sh):
+                                                      //    a C-family file whose first parse holds error bytes may be
+                                                      //    extracted from a re-parse with its semicolon-less member macro
+                                                      //    invocations blanked (src/macroreparse.h) — different defs,
+                                                      //    scopes, complexity and health for exactly those files, plus
+                                                      //    one role=Type use per blanked invocation on the rich family.
+                                                      //    A v89 record cannot say which parse it came from, and the
+                                                      //    file record grows a u32, so kCacheVersion moves 19 -> 20.
+                                                      // 89 = 2026-09-11 (extent honesty, test/extentcheck.sh): every
+                                                      //    def carries RawDef::recovered — the parse recovered its
+                                                      //    container (a class whose body holds an error, inside an
+                                                      //    ERROR node) or its kind (a scopeless C++ method inside one),
+                                                      //    set by ingest_names.h parseRecoveredBits. A new extracted
+                                                      //    fact, so a v88 record cannot answer it; the record SHAPE
+                                                      //    grows one u8 too, so kCacheVersion moves 18 -> 19 with it.
+                                                      //    Every symbol, edge and metric is byte-identical (verified
+                                                      //    against the pre-change binary on src/ and the test/ corpus);
+                                                      //    only rows the new check flags gain extent_suspect=.
+                                                      //    quality.h's kIngestParserVerMirror bumped in the SAME commit.
+                                                      // 88 = 2026-09-10 (Dart, test/dartcheck.sh): a 23rd grammar joins
+                                                      //    kLangTable, so the CRAWL ADMITS FILES IT PREVIOUSLY REFUSED —
+                                                      //    a v87 blob has no record for the `.dart` it never saw, so the
+                                                      //    file is ABSENT rather than stale and only the header version
+                                                      //    can reject it. The definition SPAN is also extended for Dart
+                                                      //    only (dartFollowingBody, adopted in ingest_sidecap.h) and
+                                                      //    formal_parameter_list joins cc_isParamList; both are
+                                                      //    extraction identity, which is what parserVer covers, and every
+                                                      //    other language is byte-identical (verified against the
+                                                      //    pre-change binary on src/ and a 1 406-file multi-language
+                                                      //    corpus). Record shapes unchanged, so kCacheVersion stays 18.
+                                                      //    RE-BUMPED from 87 on landing: main spent 82..87 while PR #75
+                                                      //    was open, and 87 collided EXACTLY — the declaration line
+                                                      //    auto-merged clean at the same wrong number while only the
+                                                      //    comment conflicted. quality.h's kIngestParserVerMirror bumped
+                                                      //    in the SAME commit.
+                                                      // 87 = 2026-09-10 (test/vendorpatchcheck.sh arm I,
+                                                      //    third_party/patches/markdown/002-counter-saturate):
+                                                      //    the vendored markdown scanner accumulated consumed
+                                                      //    whitespace, and its fence delimiter count, into
+                                                      //    uint8_t counters with a bare `+=` and WRAPPED. Both
+                                                      //    are read by ordering tests against a FIXED threshold
+                                                      //    (`>= 4` indented chunk; `>= 3` before a fence may
+                                                      //    open), so wrapping did not blur them, it INVERTED
+                                                      //    them — and only inside a narrow window. MEASURED:
+                                                      //    N=255 correct, N=256/257 WRONG at exit 0, N=300
+                                                      //    correct again by luck (300-256=44, still over both
+                                                      //    thresholds). At 256 an indented code block came back
+                                                      //    as a heading, and a fence never opened so its body
+                                                      //    leaked out as live markdown; ripwire minted phantom
+                                                      //    symbols for both. Counters now saturate at 255, which
+                                                      //    is exact for every threshold in that file.
+                                                      //    Map output is byte-identical over 3 538 real files —
+                                                      //    no corpus file reaches 256 columns of indent — but a
+                                                      //    constructed 256-column line does move, so a v86 blob
+                                                      //    can hold a phantom heading and the extraction
+                                                      //    identity must move with it.
+                                                      //    The sibling patches rust|lua|csharp/001-delimiter-
+                                                      //    count-cast take an explicit CAST, not saturation:
+                                                      //    those counters close a token by matching the opening
+                                                      //    count, and measurement found NO extraction difference
+                                                      //    at any width (255/256/257/300), so they contribute
+                                                      //    nothing to this bump.
+                                                      //    Record shapes unchanged, so kCacheVersion stays 18.
+                                                      //    quality.h's kIngestParserVerMirror bumped in the
+                                                      //    SAME commit.
                                                       // 86 = 2026-09-09 (test/rubyrecvcheck.sh): a Ruby constant
                                                       //    RECEIVER's lazy bit is the AND over its occurrences —
                                                       //    a later load-time site clears the bit the first,
@@ -936,8 +1080,8 @@ inline std::uint64_t blobChecksum( std::string_view s ) noexcept
 //     [21:25)  u32  entryCount    file records == offset-table entries; cross-checked against the trailer
 //
 //   RECORD REGION — [ kCacheHeaderBytes, tableOffset ), entryCount records in ASCENDING pathHash order.
-//     Each record is the v14 per-file record, unchanged byte for byte: the root-relative path string,
-//     the content hash, the (size, mtime, ctime) stat-gate triple, the four FileHealth u32s, the rich
+//     Each record is the v14 per-file record plus v20's fifth FileHealth u32: the root-relative path string,
+//     the content hash, the (size, mtime, ctime) stat-gate triple, the five FileHealth u32s, the rich
 //     family's subtoken dictionary, then the seven counted record arrays (defs, refs, includes, binds,
 //     FFI aliases, route defs, route uses). Nothing inside a record moved — that is what lets a carry-
 //     over be a raw byte copy and what will let a future content-addressed store lift a record whole.
@@ -1329,7 +1473,7 @@ inline unsigned lexDictIndexWidth( std::size_t dictCount ) noexcept
 }
 inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileDictCount, const std::uint32_t* rowDictIndex )
 {
-    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.ev ); w.u32( d.params ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( d.testScope ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
+    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.ev ); w.u32( d.params ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( d.testScope ); w.u8( d.recovered ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
     for( const std::uint8_t tagCount : d.evWhy ) { w.u8( tagCount ); }   // 8×u8, fixed order (model.h kEvWhyTagTable)
     if( withLex )
     {
@@ -1352,6 +1496,7 @@ inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileD
         // specialized fill loops per width — no per-byte push_back on this multi-million-pair seam.
         const std::size_t count = d.lex.tokenTfs.size();
         char*             p     = w.extend( count * ( idxWidth + tfWidth ) );
+        VERIFY( count == 0 || rowDictIndex != nullptr );   // null only with an empty row: verifyCacheRecordMinimaTripwire's probe
         if( idxWidth == 1 )
         {
             for( std::size_t k = 0; k < count; ++k )
@@ -1424,12 +1569,13 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // written as a u32 — 10 -> 11; the nesting profile then added `humps` and `deepLoc`, written as u32 each —
 // 11 -> 13; essential complexity then added `ev` as a u32 in the run plus the 8×u8 evWhy tag counters
 // after the strings — 13 -> 14 u32 and 4 -> 12 u8, so 56 + 12 + 8 = 76; L8's in-file `testScope` then
-// added one u8 in the run — 12 -> 13 u8, so 56 + 13 + 8 = 77); the RICH (withLex) extra is
+// added one u8 in the run — 12 -> 13 u8, so 56 + 13 + 8 = 77; the extent-honesty `recovered` bit then added
+// one more u8 in the run — 13 -> 14 u8, so 56 + 14 + 8 = 78); the RICH (withLex) extra is
 // dlWeighted u32 + tokenCount u32 + tfWidth u8 = 9 bytes. A ref record is 3 u32 + 7 u8 + 5 empty
 // str(len u32) fields = 3*4 + 7*1 + 5*4 = 39 bytes. verifyCacheRecordMinimaTripwire() below derives these
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
-inline constexpr std::size_t kMinDefRecordBytesLean      = 77;   // 14×u32 + 13×u8 + 2×str(len u32, empty)
+inline constexpr std::size_t kMinDefRecordBytesLean      = 78;   // 14×u32 + 14×u8 + 2×str(len u32, empty)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
 inline constexpr std::size_t kMinRefRecordBytes          = 39;   // 3×u32 + 7×u8 + 5×str(len u32, empty)
 
@@ -1459,7 +1605,7 @@ inline void verifyCacheRecordMinimaTripwire() noexcept
 
 inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>& fileDict )
 {
-    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.ppAlt = std::uint16_t( r.u32() ); d.humps = std::uint16_t( r.u32() ); d.deepLoc = std::uint16_t( r.u32() ); d.ev = std::uint16_t( r.u32() ); d.params = std::uint16_t( r.u32() ); d.maxNest = r.u8(); d.arityExact = r.u8(); d.testScope = r.u8(); d.kind = SymKind( r.u8() ); d.lang = Lang( r.u8() ); d.name = r.str(); d.scope = r.str();
+    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.ppAlt = std::uint16_t( r.u32() ); d.humps = std::uint16_t( r.u32() ); d.deepLoc = std::uint16_t( r.u32() ); d.ev = std::uint16_t( r.u32() ); d.params = std::uint16_t( r.u32() ); d.maxNest = r.u8(); d.arityExact = r.u8(); d.testScope = r.u8(); d.recovered = r.u8(); d.kind = SymKind( r.u8() ); d.lang = Lang( r.u8() ); d.name = r.str(); d.scope = r.str();
     for( std::uint8_t& tagCount : d.evWhy ) { tagCount = r.u8(); }   // mirrors writeDef's fixed 8×u8 order
     if( withLex && r.ok )
     {
@@ -1616,6 +1762,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     ffOut.health.errBytes  = r.u32();       //   NOT-MEASURED meaning across the round trip
     ffOut.health.fileBytes = r.u32();
     ffOut.health.wsBytes   = r.u32();
+    ffOut.health.macroBlanked = r.u32();   // v20: member-macro re-parse — rides the record so the disclosure survives a warm run
     if( !r.ok )
     {
         return false;
@@ -1782,7 +1929,7 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
         // ordinary cold-start miss (absent) stays silent; anything else says what it found, once per run.
         if( frame.reason != CacheReject::Absent )
         {
-            std::fprintf( stderr, "ripwire: cache %s: %s — not used; this run parses from source and rewrites it\n",
+            rw::emitTo( stderr, "ripwire: cache {}: {} — not used; this run parses from source and rewrites it\n",
                           path.c_str(), cacheRejectName( frame.reason ) );
         }
         return out;
@@ -2175,6 +2322,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 // NOT MEASURED — no sentinel of its own, and no way to mistake it for "clean".
                 const FileHealth fh = f < fileHealth.size() ? fileHealth[f] : FileHealth{};
                 w.u32( fh.errNodes );  w.u32( fh.errBytes );  w.u32( fh.fileBytes );  w.u32( fh.wsBytes );
+                w.u32( fh.macroBlanked );   // v20: the member-macro re-parse's per-file count (0 ⇒ the first parse was kept)
             }
             if( captureValueUses )
             {
@@ -2325,8 +2473,8 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     if( !fp )
     {
         DEGRADED_PATH_ALERT( "ingest: saveCache could not open temp file for write — cache left unchanged" );
-        std::fprintf( stderr, "ripwire: cache %s: cannot write (%s) — every run parses from source until this is fixed\n",
-                      path.c_str(), std::strerror( errno ) );   // 2026-09-06: Release kept no signal for this
+        rw::emitTo( stderr, "ripwire: cache {}: cannot write ({}) — every run parses from source until this is fixed\n",
+                      path.c_str(), std::strerror( errno )  );   // 2026-09-06: Release kept no signal for this
         return;
     }
     const std::size_t wrote = std::fwrite( w.b.data(), 1, w.b.size(), fp );
@@ -2335,14 +2483,14 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     {
         std::remove( tmp.c_str() );   // never rename a short/torn write over a good cache
         DEGRADED_PATH_ALERT( "ingest: saveCache write failed (short write or fclose error) — old cache preserved" );
-        std::fprintf( stderr, "ripwire: cache %s: write failed (short write; disk full?) — old cache kept, this run was parsed from source\n", path.c_str() );
+        rw::emitTo( stderr, "ripwire: cache {}: write failed (short write; disk full?) — old cache kept, this run was parsed from source\n", path.c_str() );
         return;
     }
     if( std::rename( tmp.c_str(), path.c_str() ) != 0 )
     {
         std::remove( tmp.c_str() );   // clean up on failure
         DEGRADED_PATH_ALERT( "ingest: saveCache rename(tmp -> cache) failed — old cache preserved" );
-        std::fprintf( stderr, "ripwire: cache %s: cannot replace (%s) — old cache kept, this run was parsed from source\n",
+        rw::emitTo( stderr, "ripwire: cache {}: cannot replace ({}) — old cache kept, this run was parsed from source\n",
                       path.c_str(), std::strerror( errno ) );
         return;
     }

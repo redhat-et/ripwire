@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // eval.h — deterministic, LLM-free self-eval (--eval): which ranking recovers a change's CO-CHANGED files
 // best? Gold = git's changed-file set per commit. For each qualifying commit (>=2 changed source files,
@@ -155,7 +157,7 @@ inline std::vector<float> anchoredFileScore( const IngestResult& ing, const Grap
 // (adoption decisions get read straight off it).
 inline void printEvalRankerNote()
 {
-    std::printf( "  note: `ripwire` here is the DEFAULT MAP's structural-only PageRank (importance, not\n"
+    rw::emitRaw( stdout, "  note: `ripwire` here is the DEFAULT MAP's structural-only PageRank (importance, not\n"
                  "        relatedness) — it is NOT what a --for/--query retrieval call ranks with. BM25 /\n"
                  "        BM25sub / BM25body are QUERY-TIME lexical rankers (whole-name / subtoken /\n"
                  "        subtoken+body); fused = RRF(ripwire, BM25sub); anchored = BM25body + anchored PPR\n"
@@ -286,7 +288,7 @@ inline int runEval( const std::string& root, const IngestResult& ing, const Grap
                 cur.push_back( f );
             }
         }
-        if( cur.size() < 2 ) { std::fprintf( stderr, "ripwire --eval: no git-history sample and <2 changed files\n" ); return 1; }
+        if( cur.size() < 2 ) { rw::emitRaw( stderr, "ripwire --eval: no git-history sample and <2 changed files\n" ); return 1; }
         qual.push_back( cur );
     }
 
@@ -351,14 +353,14 @@ inline int runEval( const std::string& root, const IngestResult& ing, const Grap
         addRecall( accDir, rankFiles( dScore ), gold, goldTotal );
         ++n;
     }
-    if( n == 0 ) { std::fprintf( stderr, "ripwire --eval: no qualifying commits\n" ); return 1; }
+    if( n == 0 ) { rw::emitRaw( stderr, "ripwire --eval: no qualifying commits\n" ); return 1; }
 
     const double N   = n;
     const auto   row = [ & ]( const char* name, const EvalAcc& a )
-    { std::printf( "  %-9s %8.1f%% %9.1f%% %9.1f%%\n", name, 100.0 * a.r5 / N, 100.0 * a.r10 / N, 100.0 * a.r20 / N ); };
-    std::printf( "ripwire --eval  (co-change recovery, averaged over %d %s)\n",
+    { rw::emitTo( stdout, "  {:<9} {:8.1f}% {:9.1f}% {:9.1f}%\n", name, 100.0 * a.r5 / N, 100.0 * a.r10 / N, 100.0 * a.r20 / N ); };
+    rw::emitTo( stdout, "ripwire --eval  (co-change recovery, averaged over {} {})\n",
                  n, historical ? "historical commits" : "current diff [n=1, no history]" );
-    std::printf( "  %-9s %9s %10s %10s\n", "ranker", "recall@5", "recall@10", "recall@20" );
+    rw::emitTo( stdout, "  {:<9} {:>9} {:>10} {:>10}\n", "ranker", "recall@5", "recall@10", "recall@20" );
     row( "ripwire", accCtx );   // structural (PageRank) — importance, not relatedness
     row( "BM25",    accW );     // lexical, whole-name (the original baseline)
     row( "BM25sub", accS );     // lexical, SUBTOKEN names+callees (E#2 round 1 winner)
@@ -366,7 +368,7 @@ inline int runEval( const std::string& root, const IngestResult& ing, const Grap
     row( "fused",   accF );     // RRF(structural, subtoken)
     row( "anchored",accA );     // BM25body + lexically-anchored PPR expansion (--for --anchor, LARGER-style)
     row( "same-dir",accDir );   // cheapest real prior — the bar to beat
-    std::printf( "  %-9s %8.1f%% %9.1f%% %9.1f%%   <- floor (random ranking over F=%u files)\n", "random",
+    rw::emitTo( stdout, "  {:<9} {:8.1f}% {:9.1f}% {:9.1f}%   <- floor (random ranking over F={} files)\n", "random",
                  F > 1 ? 100.0 * 5.0  / double( F - 1 ) : 0.0,
                  F > 1 ? 100.0 * 10.0 / double( F - 1 ) : 0.0,
                  F > 1 ? 100.0 * 20.0 / double( F - 1 ) : 0.0, F );
@@ -524,12 +526,12 @@ inline void printRetrievalDisclosure( std::size_t population, std::size_t scored
     // rule, so nothing about the corpus's layout can reach the numbers below.
     if( exhaustive )
     {
-        std::printf( "  sample: population=%zu scored=%zu rule=exhaustive (every qualifying symbol; path- and order-independent)\n",
+        rw::emitTo( stdout, "  sample: population={} scored={} rule=exhaustive (every qualifying symbol; path- and order-independent)\n",
                      population, scored );
     }
     else
     {
-        std::printf( "  sample: population=%zu scored=%zu rule=smallest-key CAPPED — a SUBSET, not the population\n"
+        rw::emitTo( stdout, "  sample: population={} scored={} rule=smallest-key CAPPED — a SUBSET, not the population\n"
                      "          (smallest fnv1a64(scope::name) over the population, cut on the key so an identity is never split;\n"
                      "           path- and order-independent, but a corpus this size is NOT graded exhaustively — say so when citing it)\n",
                      population, scored );
@@ -541,7 +543,7 @@ inline void printRetrievalDisclosure( std::size_t population, std::size_t scored
     // its CPU, and not one byte of output said so. The two paths are proven equivalent by
     // test/postingscheck.sh, so this never changes a number — it names the regime a number was produced
     // under, which is the same disclosure the sampling rule above had to grow for the same reason.
-    std::printf( "  ingest: lex=%s (%s)\n",
+    rw::emitTo( stdout, "  ingest: lex={} ({})\n",
                  hasLexStats ? "rich" : "scan",
                  hasLexStats ? "persisted subtoken stats; no per-query corpus re-tokenize"
                              : "LEAN ingest — every query re-tokenizes the corpus; add this verb to needsValueUses" );
@@ -698,7 +700,7 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
     const std::size_t                     population = goldSet.population;
     const bool                            exhaustive = goldSet.exhaustive;
     const std::vector<RetrievalGoldItem>& sample     = goldSet.scored;
-    if( sample.empty() ) { std::fprintf( stderr, "ripwire --eval-retrieval: no doc-commented symbols to sample\n" ); return 1; }
+    if( sample.empty() ) { rw::emitRaw( stderr, "ripwire --eval-retrieval: no doc-commented symbols to sample\n" ); return 1; }
 
     // rankers: subtoken+body (--for default), name-exact, anchored (over subtoken+body), routed (chooseForRanker).
     // Two query modes: name (a), doc-phrase (b). One RetrievalAcc per (ranker, mode).
@@ -743,13 +745,13 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
     const auto row = [ & ]( const char* ranker, const char* mode, const RetrievalAcc& a )
     {
         const double N = double( a.n ? a.n : 1 );
-        std::printf( "  %-9s %-11s %6.3f %8.1f%% %8.1f%% %8.1f%%\n",
+        rw::emitTo( stdout, "  {:<9} {:<11} {:6.3f} {:8.1f}% {:8.1f}% {:8.1f}%\n",
                      ranker, mode, a.mrr / N,
                      100.0 * double( a.r1 ) / N, 100.0 * double( a.r5 ) / N, 100.0 * double( a.r10 ) / N );
     };
-    std::printf( "ripwire --eval-retrieval  (known-item, %zu doc-commented symbols; gold is in-corpus by construction)\n", sample.size() );
+    rw::emitTo( stdout, "ripwire --eval-retrieval  (known-item, {} doc-commented symbols; gold is in-corpus by construction)\n", sample.size() );
     printRetrievalDisclosure( population, sample.size(), exhaustive, ing.hasLexStats );
-    std::printf( "  %-9s %-11s %6s %9s %9s %9s\n", "ranker", "query-mode", "MRR", "recall@1", "recall@5", "recall@10" );
+    rw::emitTo( stdout, "  {:<9} {:<11} {:>6} {:>9} {:>9} {:>9}\n", "ranker", "query-mode", "MRR", "recall@1", "recall@5", "recall@10" );
     row( "subtoken", "name",      subN );
     row( "subtoken", "doc-phrase",subP );
     row( "name-exact","name",     exN );
@@ -758,7 +760,7 @@ inline int runEvalRetrieval( const IngestResult& ing, const Graph& g )
     row( "anchored", "doc-phrase",anP );
     row( "routed",   "name",      rtN );
     row( "routed",   "doc-phrase",rtP );
-    std::printf( "  note: routing chose name-exact on %zu/%zu NAME queries (a NAME query is always identifier-shaped);\n"
+    rw::emitTo( stdout, "  note: routing chose name-exact on {}/{} NAME queries (a NAME query is always identifier-shaped);\n"
                  "        the confidence gate routes doc-phrase queries to name-exact ONLY when EVERY content word names a symbol\n"
                  "        (or an explicit camel/snake token appears) AND every matched name is specific enough to anchor on —\n"
                  "        a common name (many definitions, or a subtoken carried by many symbol names) declines the route — so\n"
@@ -1063,7 +1065,7 @@ inline void addMinedRow( MinedAcc& a, const std::vector<std::uint32_t>& ranked, 
 inline int runEvalMined( const std::string& root, const IngestResult& ing, const Graph& g, const std::string& path )
 {
     std::ifstream in( path );
-    if( !in ) { std::fprintf( stderr, "ripwire --eval-mined: cannot open '%s'\n", path.c_str() ); return 1; }
+    if( !in ) { rw::emitTo( stderr, "ripwire --eval-mined: cannot open '{}'\n", path.c_str() ); return 1; }
 
     // gold paths in the artifact are REPO-RELATIVE (the miner strips the repo root); ing.files carry
     // the as-invoked crawl paths (absolute or CWD-relative). Index BOTH forms so `ripwire /abs/repo
@@ -1123,29 +1125,29 @@ inline int runEvalMined( const std::string& root, const IngestResult& ing, const
     }
     if( nPairs[0] + nPairs[1] == 0 )
     {
-        std::fprintf( stderr, "ripwire --eval-mined: no qualifying pairs (>=2 in-corpus gold files) in '%s' "
-                              "(%zu malformed, %zu under-qualified)\n", path.c_str(), skipped, underqualified );
+        rw::emitTo( stderr, "ripwire --eval-mined: no qualifying pairs (>=2 in-corpus gold files) in '{}' "
+                              "({} malformed, {} under-qualified)\n", path.c_str(), skipped, underqualified );
         return 1;
     }
 
     const auto printTable = [ & ]( const char* label, MinedAcc& fA, MinedAcc& qA, MinedAcc& aA, std::size_t n )
     {
-        std::printf( "ripwire --eval-mined  (%s, %zu session-mined pair%s; gold = files the session Edited/Wrote)\n",
+        rw::emitTo( stdout, "ripwire --eval-mined  ({}, {} session-mined pair{}; gold = files the session Edited/Wrote)\n",
                      label, n, n == 1 ? "" : "s" );
-        if( n == 0 ) { std::printf( "  (no %s pairs)\n", label ); return; }
+        if( n == 0 ) { rw::emitTo( stdout, "  (no {} pairs)\n", label ); return; }
         const double N = double( n );
-        std::printf( "  %-8s %8s %9s %9s   %7s %8s %8s   %6s\n",
+        rw::emitTo( stdout, "  {:<8} {:>8} {:>9} {:>9}   {:>7} {:>8} {:>8}   {:>6}\n",
                      "arm", "recall@5", "recall@10", "recall@20", "acc@5", "acc@10", "acc@20", "mrr" );
         const auto row = [ & ]( const char* name, const MinedAcc& a )
         {
-            std::printf( "  %-8s %7.1f%% %8.1f%% %8.1f%%   %6.1f%% %7.1f%% %7.1f%%   %6.3f\n", name,
+            rw::emitTo( stdout, "  {:<8} {:7.1f}% {:8.1f}% {:8.1f}%   {:6.1f}% {:7.1f}% {:7.1f}%   {:6.3f}\n", name,
                          100.0 * a.recall.r5 / N, 100.0 * a.recall.r10 / N, 100.0 * a.recall.r20 / N,
                          100.0 * a.acc5 / N, 100.0 * a.acc10 / N, 100.0 * a.acc20 / N, a.mrr / N );
         };
         row( "for",    fA );
         row( "query",  qA );
         row( "anchor", aA );
-        std::printf( "  %-8s %7.1f%% %8.1f%% %8.1f%%   <- floor (random ranking over F=%u files; this eval's gold is a file SET with no seed file, so nothing is excluded from the draw)\n",
+        rw::emitTo( stdout, "  {:<8} {:7.1f}% {:8.1f}% {:8.1f}%   <- floor (random ranking over F={} files; this eval's gold is a file SET with no seed file, so nothing is excluded from the draw)\n",
                      "random",
                      F > 0 ? 100.0 * std::min<double>( 5.0,  F ) / double( F ) : 0.0,
                      F > 0 ? 100.0 * std::min<double>( 10.0, F ) / double( F ) : 0.0,
@@ -1157,7 +1159,7 @@ inline int runEvalMined( const std::string& root, const IngestResult& ing, const
                forA[1], queryA[1], anchorA[1], nPairs[1] );
     if( skipped || underqualified )
     {
-        std::fprintf( stderr, "ripwire --eval-mined: skipped %zu malformed line(s), %zu under-qualified pair(s) (<2 in-corpus gold files)\n",
+        rw::emitTo( stderr, "ripwire --eval-mined: skipped {} malformed line(s), {} under-qualified pair(s) (<2 in-corpus gold files)\n",
                      skipped, underqualified );
     }
     return 0;

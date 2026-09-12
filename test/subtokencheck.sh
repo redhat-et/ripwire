@@ -26,7 +26,7 @@
 #   (B) unit, MIRROR EQUIVALENCE — lexindex.h's forEachLexSubtoken() (the corpus-side walker BM25
 #       actually scans with) must yield exactly the token list subtokens() yields, over every case in
 #       the table. This is the arm that stops the three copies drifting apart again.
-#   (C) unit, HASH PARITY — forEachLexSubtokenHashed()'s fused rolling hash must equal
+#   (C) unit, HASH PARITY — forEachLexSubtokenHashed()'s per-token hash must equal
 #       lexSubtokenHash() of the token's lowercased bytes. A token may now carry INTERIOR uppercase,
 #       which is exactly the input that used to normalize differently on the two paths; if this arm
 #       is red, the persisted postings path and the query-time scan disagree.
@@ -47,7 +47,7 @@ FIX="test/subtokfix"                                  # kept REPO-RELATIVE: the 
 cd "$ROOT" || exit 2                                  # arm compares against are relative to the cwd
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -168,7 +168,9 @@ int main()
         }
     }
 
-    // (C) the fused rolling hash must equal lexSubtokenHash() of the token's lowercased bytes
+    // (C) the walker's per-token hash must equal lexSubtokenHash() of the token's lowercased bytes
+    // (it was a rolling hash fused into a second copy of the state machine until 2026-09-10; the walkers
+    // now share ONE block walk and the hash runs over the span, so this arm pins the FOLD, not the roll)
     for( const Row& r : kRows )
     {
         const std::string_view text( r.in );
@@ -205,7 +207,7 @@ EOF
         else
             grep -q '^A-MISMATCH'      "$TMP/subtok.out" && no "unit (A) subtokens() disagrees with the registered rule" || ok "unit (A) subtokens() splits all five shapes per the registered rule"
             grep -q '^B-MIRROR-DRIFT'  "$TMP/subtok.out" && no "unit (B) forEachLexSubtoken() has drifted from subtokens()" || ok "unit (B) forEachLexSubtoken() mirrors subtokens() token-for-token"
-            grep -q '^C-HASH-DRIFT'    "$TMP/subtok.out" && no "unit (C) the fused rolling hash disagrees with lexSubtokenHash()" || ok "unit (C) forEachLexSubtokenHashed() agrees with lexSubtokenHash() on every token"
+            grep -q '^C-HASH-DRIFT'    "$TMP/subtok.out" && no "unit (C) the walker's per-token hash disagrees with lexSubtokenHash()" || ok "unit (C) forEachLexSubtokenHashed() agrees with lexSubtokenHash() on every token"
             sed -n '1,24p' "$TMP/subtok.out"
         fi
     else

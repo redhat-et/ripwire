@@ -28,7 +28,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -112,14 +112,14 @@ BJROWS="$( printf '%s' "$BJ" | grep -o '"sym"' | wc -l | tr -d ' ' )"
 if command -v xmllint >/dev/null 2>&1; then
     xok=1
     for X in "$A" "$B" "$C" "$LAST"; do printf '%s' "$X" | xmllint --noout - 2>/dev/null || xok=0; done
-    [ "$xok" = 1 ] && ok "xml well-formed (all paged variants)" || no "xml malformed on a paged variant"
+    if [ "$xok" = 1 ]; then ok "xml well-formed (all paged variants)"; else no "xml malformed on a paged variant"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi
 if command -v python3 >/dev/null 2>&1; then
     jok=1
     for J in "$AJ" "$BJ"; do printf '%s' "$J" | python3 -c 'import sys,json; json.load(sys.stdin)' 2>/dev/null || jok=0; done
-    [ "$jok" = 1 ] && ok "json well-formed (both paged variants)" || no "json malformed on a paged variant"
+    if [ "$jok" = 1 ]; then ok "json well-formed (both paged variants)"; else no "json malformed on a paged variant"; fi
 else
     printf '  SKIP  json well-formed (no python3)\n'
 fi
@@ -159,18 +159,18 @@ printf '%s' "$S2" | grep -qE 'across (0|[1-8]) files transitively depend on thes
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 HELPTEXT="$( "$BIN" --help=all 2>&1 | tr '\n' ' ' )"
 HELPLIST="$( printf '%s' "$HELPTEXT" | sed -E 's/.*HONORED by: //; s/ Emit at most N rows.*//' )"
-[ -n "$HELPLIST" ] && ok "PC-2: --help's HONORED-by list extracted" || no "PC-2: could not find --help's HONORED-by list"
+if [ -n "$HELPLIST" ]; then ok "PC-2: --help's HONORED-by list extracted"; else no "PC-2: could not find --help's HONORED-by list"; fi
 
 # RE-PINNED 2026-09-05 (capture-audit P4, lane L7): --pr-context HONORS --limit/--offset now (its changed-file window),
 # so it no longer refuses — the probe is --dmm, a verb outside the paging set, which still produces the refusal.
 REFUSEMSG="$( "$BIN" "$R" --dmm --limit=1 2>&1 )"
 REFUSELIST="$( printf '%s' "$REFUSEMSG" | sed -E 's/.*honored only by: //; s/\. The default map.*//' )"
-[ -n "$REFUSELIST" ] && ok "PC-2: the runtime refusal message's honored-set list extracted" || no "PC-2: could not find the runtime refusal's honored-set list (msg: $REFUSEMSG)"
+if [ -n "$REFUSELIST" ]; then ok "PC-2: the runtime refusal message's honored-set list extracted"; else no "PC-2: could not find the runtime refusal's honored-set list (msg: $REFUSEMSG)"; fi
 
 helptoks="$( printf '%s' "$HELPLIST" | grep -oE -- '--[A-Za-z][A-Za-z/-]*' | sort -u )"
 runtoks="$(  printf '%s' "$REFUSELIST" | grep -oE -- '--[A-Za-z][A-Za-z/-]*' | sort -u )"
-[ -n "$helptoks" ] && ok "PC-2: --help list has $( printf '%s\n' "$helptoks" | wc -l | tr -d ' ' ) verb tokens" || no "PC-2: --help list yielded zero verb tokens"
-[ -n "$runtoks" ]  && ok "PC-2: runtime list has $( printf '%s\n' "$runtoks" | wc -l | tr -d ' ' ) verb tokens"  || no "PC-2: runtime list yielded zero verb tokens"
+if [ -n "$helptoks" ]; then ok "PC-2: --help list has $( printf '%s\n' "$helptoks" | wc -l | tr -d ' ' ) verb tokens"; else no "PC-2: --help list yielded zero verb tokens"; fi
+if [ -n "$runtoks" ]; then ok "PC-2: runtime list has $( printf '%s\n' "$runtoks" | wc -l | tr -d ' ' ) verb tokens"; else no "PC-2: runtime list yielded zero verb tokens"; fi
 
 DIFF="$( diff <( printf '%s\n' "$helptoks" ) <( printf '%s\n' "$runtoks" ) )"
 [ -z "$DIFF" ] \
@@ -187,8 +187,43 @@ done
 ok "PC-2: every runtime-honored verb is named in --help's HONORED-by list"
 
 # --test-gate itself must be a member of both (the item this round actually migrated)
-printf '%s\n' "$runtoks" | grep -qxF -- '--test-gate' && ok "PC-2: --test-gate is in the runtime honored set" || no "PC-2: --test-gate missing from the runtime honored set"
-printf '%s\n' "$helptoks" | grep -qxF -- '--test-gate' && ok "PC-2: --test-gate is in --help's HONORED-by list" || no "PC-2: --test-gate missing from --help's HONORED-by list"
+if printf '%s\n' "$runtoks" | grep -qxF -- '--test-gate'; then ok "PC-2: --test-gate is in the runtime honored set"; else no "PC-2: --test-gate missing from the runtime honored set"; fi
+if printf '%s\n' "$helptoks" | grep -qxF -- '--test-gate'; then ok "PC-2: --test-gate is in --help's HONORED-by list"; else no "PC-2: --test-gate missing from --help's HONORED-by list"; fi
+
+# ── (d) tests_capped= is DERIVED, not asserted ─────────────────────────────────────────────────────────────
+# It was the string literal "0" in both dialects (src/situ.h) — a disclosure that could never become "1",
+# so a <t> row cap added later would keep saying nothing was cut while something was. The invariant that
+# replaces the literal: shown_tests= is the number of <t> rows this document ACTUALLY emitted, and
+# tests_capped= is shown_tests < tests. Checked against the emitted rows, not against another attribute.
+# Its own fixture, so the counted quantities are non-zero: $R has no test file at all, and an arm whose
+# every number is 0 is an arm that cannot tell a derivation from a literal.
+TG="$TMP/tgrepo"; mkdir -p "$TG/src" "$TG/test"
+printf 'int lib0() { return 0; }\nint lib1() { return 1; }\nint lib2() { return 2; }\n' > "$TG/src/lib.cpp"
+printf '#include "../src/lib.cpp"\nint test_lib0() { return lib0(); }\n' > "$TG/test/lib0_test.cpp"
+printf '#include "../src/lib.cpp"\nint test_lib1() { return lib1(); }\n' > "$TG/test/lib1_test.cpp"
+D="$( run "$TG" --test-gate=src/lib.cpp )"
+DTROWS="$( printf '%s' "$D" | grep -o '<t ' | wc -l | tr -d ' ' )"
+DSHOWN="$( attr "$D" shown_tests )"; DTOTAL="$( attr "$D" tests )"; DCAP="$( attr "$D" tests_capped )"
+DWANT=0; [ "${DSHOWN:-0}" -lt "${DTOTAL:-0}" ] && DWANT=1
+{ [ -n "$DSHOWN" ] && [ "$DSHOWN" = "$DTROWS" ] && [ "$DCAP" = "$DWANT" ]; } \
+    && ok "(d) tests_capped=$DCAP is shown_tests($DSHOWN) < tests($DTOTAL), and shown_tests is the $DTROWS <t> rows emitted" \
+    || no "(d) wrong (shown_tests=$DSHOWN <t> rows=$DTROWS tests=$DTOTAL tests_capped=$DCAP want=$DWANT)"
+DJ="$( run "$TG" --test-gate=src/lib.cpp --json )"
+DJCAP="$( jattr "$DJ" tests_capped )"; DJSHOWN="$( jattr "$DJ" shown_tests )"
+DJWANT="$DWANT"      # jattr() already normalises JSON true/false to 1/0
+{ [ "$DJSHOWN" = "$DSHOWN" ] && [ "$DJCAP" = "$DJWANT" ]; } \
+    && ok "(d-json) the JSON dialect mirrors it key-for-key (shown_tests=$DJSHOWN tests_capped=$DJCAP)" \
+    || no "(d-json) mirror broken (shown_tests=$DJSHOWN vs $DSHOWN, tests_capped=$DJCAP vs $DJWANT)"
+# THE CONTROL, on a synthetic COPY of the document. A literal "0" satisfies the arm above on every tree
+# where nothing is cut — which is every tree today — so without this the arm is green forever and proves
+# nothing about the derivation. Rewrite the copy so shown_tests is BELOW tests with tests_capped still "0",
+# exactly the shape the literal would produce under a future <t> cap, and require the check to reject it.
+DFAKE="$( printf '%s' "$D" | sed 's/ tests="[0-9]*"/ tests="99"/' )"
+FSHOWN="$( attr "$DFAKE" shown_tests )"; FTOTAL="$( attr "$DFAKE" tests )"; FCAP="$( attr "$DFAKE" tests_capped )"
+FWANT=0; [ "${FSHOWN:-0}" -lt "${FTOTAL:-0}" ] && FWANT=1
+{ [ "$FSHOWN" != "$FTOTAL" ] && [ "$FCAP" != "$FWANT" ]; } \
+    && ok "(d) control: a document claiming tests_capped=\"$FCAP\" with shown_tests=$FSHOWN of $FTOTAL is REJECTED — the arm can go red" \
+    || no "(d) control: the arm accepted a document whose tests_capped contradicts its own counts — (d) is inert"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

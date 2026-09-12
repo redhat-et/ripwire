@@ -35,7 +35,7 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 CORPUS="$TMP/corpus"
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 # hard input requirements — a missing input is a FAILURE of the gate, never a silent skip
@@ -86,22 +86,22 @@ run(){ # run <outfile> <errfile> <args...>
 # ── 1) XML control — this already passed pre-fix; it pins the reference behaviour ──────────────────
 run "$TMP/for.xml" "$TMP/for.xml.err" --for=probeSecretLoader --token-budget=1500
 grep -qF "$AWS_RAW" "$TMP/for.xml" && no "XML CONTROL BROKEN: raw AWS key in --for XML" || ok "XML --for: raw AWS key absent"
-grep -qF 'REDACTED:aws-key' "$TMP/for.xml" && ok "XML --for: aws-key redaction marker present" || no "XML CONTROL BROKEN: no aws-key marker in --for XML"
+if grep -qF 'REDACTED:aws-key' "$TMP/for.xml"; then ok "XML --for: aws-key redaction marker present"; else no "XML CONTROL BROKEN: no aws-key marker in --for XML"; fi
 
 run "$TMP/pt.xml" "$TMP/pt.xml.err" --pack-task="$TASK"
 grep -qF "$GH_RAW" "$TMP/pt.xml" && no "XML CONTROL BROKEN: raw GitHub token in --pack-task XML" || ok "XML --pack-task: raw GitHub token absent"
-grep -qF 'REDACTED:github-token' "$TMP/pt.xml" && ok "XML --pack-task: github-token marker present" || no "XML CONTROL BROKEN: no github-token marker in --pack-task XML"
+if grep -qF 'REDACTED:github-token' "$TMP/pt.xml"; then ok "XML --pack-task: github-token marker present"; else no "XML CONTROL BROKEN: no github-token marker in --pack-task XML"; fi
 
 # ── 2) the §B0 fix — the same two verbs under --json ───────────────────────────────────────────────
 run "$TMP/for.json" "$TMP/for.json.err" --for=probeSecretLoader --token-budget=1500 --json
 grep -qF "$AWS_RAW" "$TMP/for.json" && no "LEAK: raw AWS key in --for --json (collectJsonSigEntries doc seam)" || ok "JSON --for: raw AWS key absent"
-grep -qF 'REDACTED:aws-key' "$TMP/for.json" && ok "JSON --for: aws-key redaction marker present" || no "JSON --for: no aws-key redaction marker"
+if grep -qF 'REDACTED:aws-key' "$TMP/for.json"; then ok "JSON --for: aws-key redaction marker present"; else no "JSON --for: no aws-key redaction marker"; fi
 
 run "$TMP/pt.json" "$TMP/pt.json.err" --pack-task="$TASK" --json
 grep -qF "$GH_RAW" "$TMP/pt.json" && no "LEAK: raw GitHub token in --pack-task --json (packBodiesJson body seam)" || ok "JSON --pack-task: raw GitHub token absent"
 grep -qF "$AWS_RAW" "$TMP/pt.json" && no "LEAK: raw AWS key in --pack-task --json (ranking doc seam)" || ok "JSON --pack-task: raw AWS key absent"
-grep -qF 'REDACTED:github-token' "$TMP/pt.json" && ok "JSON --pack-task: github-token marker present" || no "JSON --pack-task: no github-token redaction marker"
-grep -qF 'REDACTED:aws-key' "$TMP/pt.json" && ok "JSON --pack-task: aws-key marker present" || no "JSON --pack-task: no aws-key redaction marker"
+if grep -qF 'REDACTED:github-token' "$TMP/pt.json"; then ok "JSON --pack-task: github-token marker present"; else no "JSON --pack-task: no github-token redaction marker"; fi
+if grep -qF 'REDACTED:aws-key' "$TMP/pt.json"; then ok "JSON --pack-task: aws-key marker present"; else no "JSON --pack-task: no aws-key redaction marker"; fi
 
 # ── 3) the tally is really threaded — the JSON runs report on stderr, same as the XML runs ─────────
 grep -q 'ripwire: redacted .* from emitted context (' "$TMP/for.json.err" \
@@ -111,26 +111,26 @@ grep -q 'ripwire: redacted .* from emitted context (' "$TMP/pt.json.err" \
 
 # ── 4) --no-redact remains the opt-out on the JSON surfaces too ────────────────────────────────────
 run "$TMP/for.nr.json" "$TMP/for.nr.json.err" --for=probeSecretLoader --token-budget=1500 --json --no-redact
-grep -qF "$AWS_RAW" "$TMP/for.nr.json" && ok "JSON --for --no-redact: raw value passes through (opt-out intact)" || no "JSON --for --no-redact: raw value missing — redaction is unconditional, not gated"
+if grep -qF "$AWS_RAW" "$TMP/for.nr.json"; then ok "JSON --for --no-redact: raw value passes through (opt-out intact)"; else no "JSON --for --no-redact: raw value missing — redaction is unconditional, not gated"; fi
 run "$TMP/pt.nr.json" "$TMP/pt.nr.json.err" --pack-task="$TASK" --json --no-redact
-grep -qF "$GH_RAW" "$TMP/pt.nr.json" && ok "JSON --pack-task --no-redact: raw value passes through (opt-out intact)" || no "JSON --pack-task --no-redact: raw value missing — redaction is unconditional, not gated"
+if grep -qF "$GH_RAW" "$TMP/pt.nr.json"; then ok "JSON --pack-task --no-redact: raw value passes through (opt-out intact)"; else no "JSON --pack-task --no-redact: raw value missing — redaction is unconditional, not gated"; fi
 grep -q 'ripwire: redacted' "$TMP/for.nr.json.err" && no "JSON --no-redact: stderr summary printed although nothing was redacted" || ok "JSON --no-redact: no stderr summary"
 
 # ── 5) precision — a decoy (40-hex git SHA in prose, no credential keyword) survives in JSON too ───
-grep -qF "$SHA_DECOY" "$TMP/for.json" && ok "JSON --for: git-SHA decoy intact (no false redaction)" || no "JSON --for: FALSE REDACTION of the git-SHA decoy"
-grep -qF "$SHA_DECOY" "$TMP/pt.json" && ok "JSON --pack-task: git-SHA decoy intact (no false redaction)" || no "JSON --pack-task: FALSE REDACTION of the git-SHA decoy"
+if grep -qF "$SHA_DECOY" "$TMP/for.json"; then ok "JSON --for: git-SHA decoy intact (no false redaction)"; else no "JSON --for: FALSE REDACTION of the git-SHA decoy"; fi
+if grep -qF "$SHA_DECOY" "$TMP/pt.json"; then ok "JSON --pack-task: git-SHA decoy intact (no false redaction)"; else no "JSON --pack-task: FALSE REDACTION of the git-SHA decoy"; fi
 
 # ── 6) the redacted JSON is still well-formed and deterministic ────────────────────────────────────
 for f in "$TMP/for.json" "$TMP/pt.json"; do
-  python3 -m json.tool <"$f" >/dev/null 2>&1 && ok "valid JSON after redaction: $( basename "$f" )" || no "MALFORMED JSON after redaction: $( basename "$f" )"
+  if python3 -m json.tool <"$f" >/dev/null 2>&1; then ok "valid JSON after redaction: $( basename "$f" )"; else no "MALFORMED JSON after redaction: $( basename "$f" )"; fi
 done
 run "$TMP/pt.json.2" "$TMP/pt.json.2.err" --pack-task="$TASK" --json
-cmp -s "$TMP/pt.json" "$TMP/pt.json.2" && ok "redacted --pack-task --json is deterministic (two runs byte-identical)" || no "--pack-task --json not deterministic across runs"
+if cmp -s "$TMP/pt.json" "$TMP/pt.json.2"; then ok "redacted --pack-task --json is deterministic (two runs byte-identical)"; else no "--pack-task --json not deterministic across runs"; fi
 
 # ── 7) clone-seam guard — the marker must ride the JSON *body* value, not only the doc value ──────
 # (a fix that plumbed only collectJsonSigEntries would pass every doc arm above and still leak bodies;
 #  assert the marker inside the "body": string itself, which is packBodiesJson's own output)
-python3 - "$TMP/pt.json" <<'PY_EOF' && ok "JSON --pack-task: marker is inside a \"body\" value (packBodiesJson seam covered)" || no "JSON --pack-task: no \"body\" value carries a redaction marker"
+if python3 - "$TMP/pt.json" <<'PY_EOF'; then ok "JSON --pack-task: marker is inside a \"body\" value (packBodiesJson seam covered)"; else no "JSON --pack-task: no \"body\" value carries a redaction marker"; fi
 import json, sys
 with open( sys.argv[1] ) as fh: doc = json.load( fh )
 sys.exit( 0 if any( "[REDACTED:" in b.get( "body", "" ) for b in doc.get( "bodies", [] ) ) else 1 )

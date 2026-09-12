@@ -72,7 +72,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/pyshapefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -159,9 +159,9 @@ done
 
 # ── 8) determinism + well-formedness on this fixture ──────────────────────────────────────────────
 "$BIN" "$FIX" --no-cache --top-k=500 >"$TMP/map2" 2>/dev/null
-cmp -s "$TMP/map" "$TMP/map2" && ok "two cold runs byte-identical" || no "cold runs DIFFER on the Python shape fixture"
+if cmp -s "$TMP/map" "$TMP/map2"; then ok "two cold runs byte-identical"; else no "cold runs DIFFER on the Python shape fixture"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/map" 2>/dev/null && ok "map is well-formed XML" || no "map is not well-formed XML"
+    if xmllint --noout "$TMP/map" 2>/dev/null; then ok "map is well-formed XML"; else no "map is not well-formed XML"; fi
 else
     ok "xmllint absent — well-formedness check skipped"
 fi

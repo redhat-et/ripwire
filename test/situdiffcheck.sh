@@ -21,7 +21,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/zoomfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -39,7 +39,7 @@ req(){
 # 1) determinism — the verb's response is byte-identical across two identical drives.
 req | "$BIN" --mcp >"$TMP/a" 2>/dev/null
 req | "$BIN" --mcp >"$TMP/b" 2>/dev/null
-diff -q "$TMP/a" "$TMP/b" >/dev/null && ok "determinism (byte-identical MCP response)" || no "non-deterministic MCP response"
+if diff -q "$TMP/a" "$TMP/b" >/dev/null; then ok "determinism (byte-identical MCP response)"; else no "non-deterministic MCP response"; fi
 
 # extract the inner situational_awareness JSON text (the tools/call response is id=2, last line).
 INNER="$( tail -1 "$TMP/a" | python3 -c '
@@ -58,7 +58,7 @@ need=["blast_radius","tests_to_run","forgotten","hotspot_alert","modules_touched
 missing=[k for k in need if k not in d]
 print("MISSING:"+",".join(missing) if missing else "OK")
 ' >"$TMP/fields"
-[ "$( cat "$TMP/fields" )" = "OK" ] && ok "all 5 fields present (blast_radius, tests_to_run, forgotten, hotspot_alert, modules_touched)" || no "fields $( cat "$TMP/fields" )"
+if [ "$( cat "$TMP/fields" )" = "OK" ]; then ok "all 5 fields present (blast_radius, tests_to_run, forgotten, hotspot_alert, modules_touched)"; else no "fields $( cat "$TMP/fields" )"; fi
 
 # 3) blast_radius is correct — the deterministic, git-independent core signal. Changing engine.cpp must reach
 #    scheduler.cpp (calls engineRun) AND app.cpp (calls schedRun). Assert both files appear.
@@ -72,7 +72,7 @@ has_sched=any(f=="core/scheduler.cpp" or f.endswith("/core/scheduler.cpp") for f
 has_app  =any(f=="app.cpp" or f.endswith("/app.cpp") for f in br)
 print("OK" if (has_sched and has_app) else "BAD:"+";".join(br))
 ' >"$TMP/br"
-[ "$( cat "$TMP/br" )" = "OK" ] && ok "blast_radius reaches scheduler.cpp + app.cpp (transitive dependents)" || no "blast_radius wrong: $( cat "$TMP/br" )"
+if [ "$( cat "$TMP/br" )" = "OK" ]; then ok "blast_radius reaches scheduler.cpp + app.cpp (transitive dependents)"; else no "blast_radius wrong: $( cat "$TMP/br" )"; fi
 
 # 4) the changed file itself is reported, and modules_touched names its directory ("core").
 printf '%s' "$INNER" | python3 -c '
@@ -83,7 +83,7 @@ ok_chg=any(f=="core/engine.cpp" or f.endswith("/core/engine.cpp") for f in chg)
 ok_mod="core" in d["modules_touched"]
 print("OK" if (ok_chg and ok_mod) else "BAD changed=%r modules=%r"%(chg,d["modules_touched"]))
 ' >"$TMP/mod"
-[ "$( cat "$TMP/mod" )" = "OK" ] && ok "changed file reported + modules_touched=['core']" || no "$( cat "$TMP/mod" )"
+if [ "$( cat "$TMP/mod" )" = "OK" ]; then ok "changed file reported + modules_touched=['core']"; else no "$( cat "$TMP/mod" )"; fi
 
 # 5) the field types are arrays (a well-formed object the agent can consume without guessing shapes).
 printf '%s' "$INNER" | python3 -c '
@@ -92,7 +92,7 @@ d=json.load(sys.stdin)
 bad=[k for k in ["blast_radius","tests_to_run","forgotten","hotspot_alert","modules_touched"] if not isinstance(d.get(k),list)]
 print("OK" if not bad else "NON_ARRAY:"+",".join(bad))
 ' >"$TMP/types"
-[ "$( cat "$TMP/types" )" = "OK" ] && ok "all 5 fields are JSON arrays" || no "non-array fields: $( cat "$TMP/types" )"
+if [ "$( cat "$TMP/types" )" = "OK" ]; then ok "all 5 fields are JSON arrays"; else no "non-array fields: $( cat "$TMP/types" )"; fi
 
 # 6) clean-tree gate — create a fresh git repo with one committed file (clean working tree) and call
 #    situational_awareness with NO diff/files arg. The verb must return a VALID RESULT (not -32602 error)
@@ -152,7 +152,7 @@ try:
 except Exception as e:
     print("BAD:"+str(e))
 ' >"$TMP/def"
-[ "$( cat "$TMP/def" )" = "OK" ] && ok "git-diff default path returns valid 5-field result (no error)" || no "default path: $( cat "$TMP/def" )"
+if [ "$( cat "$TMP/def" )" = "OK" ]; then ok "git-diff default path returns valid 5-field result (no error)"; else no "default path: $( cat "$TMP/def" )"; fi
 
 # 8) §H6b — the verb's git-diff DEFAULT path resolves changed paths through the ONE shared join, so it must
 #    work when the scanned root is a SUBDIR of the repo and every indexed path is spelled "./<name>".

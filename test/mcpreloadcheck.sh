@@ -50,7 +50,7 @@ FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -221,7 +221,7 @@ case "$SLICE_JSON" in
             echo "    got:   $( cat "$TMP/slice_got"  | tr '\n' '|' )"
             echo "    truth: $( cat "$TMP/slice_truth" | tr '\n' '|' )"
         fi
-        grep -q PARTIAL "$TMP/slice_meta" && ok "range 3..5 reports partial=true" || no "range 3..5 did not report partial=true"
+        if grep -q PARTIAL "$TMP/slice_meta"; then ok "range 3..5 reports partial=true"; else no "range 3..5 did not report partial=true"; fi
     ;;
 esac
 
@@ -237,7 +237,7 @@ b = json.load(sys.stdin)
 # end_line must clamp to total_lines, and start must stay 8
 print("CLAMP_OK" if (b["end_line"] == b["total_lines"] and b["start_line"] == 8) else "CLAMP_BAD:%d/%d" % (b["end_line"], b["total_lines"]))
 ' > "$TMP/clampchk"
-       grep -q CLAMP_OK "$TMP/clampchk" && ok "end_line=999 clamped to the last line" || no "end clamp wrong: $( cat "$TMP/clampchk" )";;
+       if grep -q CLAMP_OK "$TMP/clampchk"; then ok "end_line=999 clamped to the last line"; else no "end clamp wrong: $( cat "$TMP/clampchk" )"; fi;;
 esac
 
 # --- 4. start_line past EOF → clean -32602 error, no body ---
@@ -261,7 +261,7 @@ import sys, json
 b = json.loads(json.load(sys.stdin)["result"]["content"][0]["text"])
 print("FULL_OK" if (b["partial"] == False and b["start_line"] == 1 and b["end_line"] == b["total_lines"]) else "FULL_BAD")
 ' > "$TMP/fullchk"
-grep -q FULL_OK "$TMP/fullchk" && ok "no-range fetch returns the whole body, partial=false" || no "no-range fetch regressed: $( cat "$TMP/fullchk" )"
+if grep -q FULL_OK "$TMP/fullchk"; then ok "no-range fetch returns the whole body, partial=false"; else no "no-range fetch regressed: $( cat "$TMP/fullchk" )"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 echo
@@ -309,7 +309,7 @@ norepl = "�" not in body
 open(sys.argv[1], "w", encoding="utf-8").write(body)
 print("UTF8_OK" if (valid and intact and norepl) else "UTF8_BAD valid=%s intact=%s norepl=%s" % (valid, intact, norepl))
 ' "$TMP/utf_got" > "$TMP/utfchk"
-    grep -q UTF8_OK "$TMP/utfchk" && ok "range over multibyte body is valid UTF-8, codepoints intact, no U+FFFD" || no "UTF-8 range unsafe: $( cat "$TMP/utfchk" )"
+    if grep -q UTF8_OK "$TMP/utfchk"; then ok "range over multibyte body is valid UTF-8, codepoints intact, no U+FFFD"; else no "UTF-8 range unsafe: $( cat "$TMP/utfchk" )"; fi
     # cross-check the fetched slice byte-matches source lines 2..4 of the file.
     sed -n '2,4p' "$UTF/uni.py" > "$TMP/utf_truth"
     if [ "$( cat "$TMP/utf_got" )" = "$( cat "$TMP/utf_truth" )" ]; then
@@ -343,7 +343,7 @@ for i, ln in enumerate(open(sys.argv[1]), 1):
     except Exception as e: print("LINE", i, "INVALID:", e); bad += 1
 print("JSON_OK" if bad == 0 else "JSON_BAD:" + str(bad))
 ' "$TMP/det_a" > "$TMP/jchk"
-grep -q JSON_OK "$TMP/jchk" && ok "all response lines are valid JSON" || no "$( grep -v JSON_OK "$TMP/jchk" )"
+if grep -q JSON_OK "$TMP/jchk"; then ok "all response lines are valid JSON"; else no "$( grep -v JSON_OK "$TMP/jchk" )"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 echo

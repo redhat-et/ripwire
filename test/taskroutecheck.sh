@@ -7,7 +7,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -24,6 +24,7 @@ int targetSymbol() { return gammaNode(); }
 int classify() { return targetSymbol(); }
 int report() { return classify(); }
 int summary() { return report(); }
+int patch() { return summary(); }
 int computeBudget( int rawBytes )
 {
     int budget = rawBytes / 2;
@@ -31,11 +32,23 @@ int computeBudget( int rawBytes )
     return budget + reserve;
 }
 SRC
-git -C "$REPO" add router.cpp
+# A config file is part of the fixture on purpose: its keys index as t="sec" symbols with names that are
+# ordinary English words, which is the collision class the weak symbol tier draws its false positives from
+# (an English word meets a JSON key far more often than a function). Without a t="sec" row in the fixture
+# the kind-filter arms below cannot fail, and the class stayed invisible to this gate until 2026-09-10.
+cat >"$REPO/package.json" <<'JSON'
+{
+  "name": "router-fixture",
+  "version": "1.2.3",
+  "license": "MIT",
+  "notes": "fixture package for the router gate"
+}
+JSON
+git -C "$REPO" add router.cpp package.json
 git -C "$REPO" commit -qm base
 route(){ "$BIN" "$REPO" --no-cache --help-task="$1" 2>"$TMP/err"; }
 
-"$BIN" --help=all 2>&1 | grep -q -- '--help-task=' && ok "--help advertises --help-task=" || no "--help does not advertise --help-task="
+if "$BIN" --help=all 2>&1 | grep -q -- '--help-task='; then ok "--help advertises --help-task="; else no "--help does not advertise --help-task="; fi
 V="$( route 'calls(betaNode, alphaNode)' )"
 case "$V" in *'status="recommend"'*'intent="verify-claim"'*'--verify='*) ok "closed claim -> --verify";; *) no "closed claim route wrong: $V";; esac
 C="$( route 'How do alphaNode, betaNode, and gammaNode connect?' )"
@@ -59,7 +72,7 @@ case "$EC" in *'status="recommend"'*'intent="edit-contract"'*'--edit-check='*'ta
 # word"; sentence POSITION is the real discriminator, so these arms assert both directions of it. The two
 # recall arms are red against a pre-fix binary (both abstained, resolved_symbols="0"); the four precision
 # arms are the guard that the relaxation did not buy recall with prose false-positives.
-LW="$( route 'How does classify work?' )"
+LW="$( route 'Explain the implementation of classify' )"
 case "$LW" in *'status="recommend"'*'intent="understand-symbol"'*'--expand='*'classify'*) ok "lowercase name in an understand slot -> --expand";; *) no "lowercase understand route wrong: $LW";; esac
 LE="$( route 'I just edited classify; did I change its contract?' )"
 case "$LE" in *'status="recommend"'*'intent="edit-contract"'*'--edit-check='*'classify'*) ok "lowercase name in a post-edit slot -> --edit-check";; *) no "lowercase edit-contract route wrong: $LE";; esac
@@ -74,6 +87,36 @@ LS="$( route 'How does classify work? I just edited classify and report and summ
 case "$LS" in *'--connect='*) no "several lowercase words minted a --connect route: $LS";; *) ok "several lowercase words never mint --connect";; esac
 LC="$( route 'how do classify, report and summary connect?' )"
 case "$LC" in *'--connect='*) no "three lowercase words minted a --connect route: $LC";; *) ok "three lowercase words never satisfy the three-symbol --connect";; esac
+
+# ── the weak tier may not confirm itself, and may not read a config key as code (2026-09-10) ───────────
+# Two independent defects, two independent arms each; all four recommend-side arms are RED against a
+# pre-change binary (each recommended understand-symbol with an --expand).
+#
+# (1) SELF-CONFIRMATION. `does` was a symbol-slot cue AND `how does` is the understand-symbol gate, so
+#     "how does <indexed-word> …?" minted the very symbol the gate then required — the words are the same
+#     two words. Same for `understand` as cue and `understand` as gate. An intent word is evidence about
+#     what the user WANTS; it may never double as the positional evidence that they NAMED something.
+#     Cost, stated plainly: the bare "How does classify work?" spelling no longer routes. That recall is
+#     reachable through any cue the gate does not itself consume — the LW arm above ("the implementation
+#     of classify") is that same weak lowercase name, still resolving, still routing to --expand.
+# (2) KIND. A t="sec" row is a markdown heading or a JSON/TOML/YAML key. `version` is a config key here
+#     and in most repos; --expand='version' then answers with `"version": "1.2.3"` at exit 0. A weak
+#     reading must be backed by a CODE definition; a strong (camel/snake/scoped) mention is untouched.
+SC1="$( route 'how does patch Tuesday affect our support load?' )"
+case "$SC1" in *'--expand='*) no "the understand gate minted its own symbol out of 'how does': $SC1";; *) ok "'how does <word>' never mints the symbol its own gate requires";; esac
+SC2="$( route 'How does classify work?' )"
+case "$SC2" in *'--expand='*) no "self-confirming 'how does' route still fires on a real function: $SC2";; *) ok "'how does <fn>' abstains — the gate word may not be the cue (recall via the slot arm above)";; esac
+SC3="$( route 'I want to understand summary writing for the leadership review' )"
+case "$SC3" in *'--expand='*) no "the understand gate minted its own symbol out of 'understand': $SC3";; *) ok "'understand <word>' never mints the symbol its own gate requires";; esac
+KF1="$( route 'Explain the implementation of version' )"
+case "$KF1" in *'--expand='*) no "a t=sec config key resolved as a weak symbol: $KF1";; *) ok "a config-key-only name never resolves from the weak tier";; esac
+# The kind filter is scoped to the WEAK tier: an identifier-shaped mention still resolves whatever it names.
+KF2="$( route 'Explain the implementation of targetSymbol' )"
+case "$KF2" in *'status="recommend"'*'intent="understand-symbol"'*'--expand='*'targetSymbol'*) ok "an identifier-shaped mention still resolves (kind filter is weak-tier only)";; *) no "kind filter leaked into strong mentions: $KF2";; esac
+# And --expand on the config key is the answer the router would have handed over: still a real command,
+# just never one the router mints out of prose. (Run it: the honesty is that this is what it returns.)
+KF3="$( "$BIN" "$REPO" --no-cache --expand='version' )"
+case "$KF3" in *'"version": "1.2.3"'*) ok "the refused route's own command really does answer with a JSON key";; *) no "the kind-filter premise no longer holds: --expand=version returned something else";; esac
 
 # ── paraphrase tolerance: neither intent may recognise only the wording it was written against ─────────
 # exact-grep and edit-contract shipped as fixed OR-chains of four or five literal phrases. These six are
@@ -180,24 +223,96 @@ ALRUN="$( "$BIN" "$REPO" --no-cache --slice='@router.cpp:10' )"; rc=$?
     && ok "the emitted at-line @FILE:LINE command runs and seeds at the named line" \
     || no "the emitted at-line @FILE:LINE command failed to run (rc=$rc)"
 
+# ── the catalog tier: verbs and skills the router could not name at all (2026-09-10) ──────────────────
+# F-R1-08: --help-task recommended on 3 of 39 phrasings of the 13 surfaces added since 2026-08-28, and
+# three of the unrouted ones were VERBS — --handoff (which has its own shipped skill), --plan-lint, and
+# the PROSE form of --from-trace (looksLikeTrace matches a PASTED artifact; "I have a sanitizer report"
+# contains none of its literals). F-R1-09: the router could name 8 of the 16 shipped skills.
+# Every recommend arm below is red against a pre-change binary: all of them abstained with score="0".
+HO="$( route 'I am going on leave next week - put together a brief on the scheduler for whoever takes it over' )"
+case "$HO" in *'status="recommend"'*'intent="handoff-brief"'*'skill="ripwire-handoff"'*'--handoff'*) ok "briefing a second party -> --handoff";; *) no "handoff route wrong: $HO";; esac
+HO0="$( route 'we handed the account off to support last week, any update on the customer?' )"
+case "$HO0" in *'--handoff'*) no "an account handover minted a --handoff route: $HO0";; *) ok "prose about handing over anything else mints no --handoff";; esac
+PL="$( route 'check that docs/next-plan.md is well-formed as a plan document' )"
+case "$PL" in *'status="recommend"'*'intent="plan-lint"'*'--plan-lint='*'docs/next-plan.md'*) ok "plan-structure wording + a named markdown file -> --plan-lint=FILE";; *) no "plan-lint route wrong: $PL";; esac
+# Value-carrying, like --edit-plan: the verb refuses a file that is not there, so no file, no command.
+PL0="$( route 'can you lint the structure of our planning docs in general?' )"
+case "$PL0" in *'--plan-lint='*) no "plan-lint invented a file the task never named: $PL0";; *) ok "plan-lint abstains rather than invent a plan document";; esac
+TP="$( route 'I have a sanitizer report from last night - map it onto the indexed symbols' )"
+case "$TP" in *'status="recommend"'*'intent="trace-prose"'*'--from-trace=-'*) ok "a trace DESCRIBED rather than pasted -> --from-trace=-";; *) no "trace-prose route wrong: $TP";; esac
+SS="$( route 'someone sent me a skills bundle - is it safe to install, any prompt injection in there?' )"
+case "$SS" in *'status="recommend"'*'intent="scan-skills"'*'skill="ripwire-security-scan"'*'--scan-skills'*) ok "pre-install vetting -> --scan-skills";; *) no "scan-skills route wrong: $SS";; esac
+SS1="$( route 'check tools/helper.md for exfiltration before installing it as a skill' )"
+case "$SS1" in *'intent="scan-skill"'*'--scan-skill='*'tools/helper.md'*) ok "a named file upgrades the scan to --scan-skill=FILE";; *) no "scan-skill route wrong: $SS1";; esac
+AH="$( route 'do we have a dependency mess in here - any circular dependencies or god file?' )"
+case "$AH" in *'status="recommend"'*'intent="architecture-health"'*'skill="ripwire-layers"'*'--deps'*) ok "architecture-health wording -> --deps";; *) no "architecture-health route wrong: $AH";; esac
+QC="$( route 'before I call it done - did my change make anything worse?' )"
+case "$QC" in *'status="recommend"'*'intent="quality-check"'*'skill="ripwire-quality-bar"'*'--quality-delta'*) ok "own-code quality wording -> --quality-delta";; *) no "quality-check route wrong: $QC";; esac
+# The narrow quality vocabulary must not steal the dirty-worktree review route, whose words are about a
+# DIFF and a push. (This repo is CLEAN here, so review-diff cannot fire either way — assert the intent.)
+QC0="$( route 'Reviewing my own diff now - am I ready to push and is this safe to merge?' )"
+case "$QC0" in *'intent="quality-check"'*) no "diff-review wording was stolen by quality-check: $QC0";; *) ok "diff-review wording is not a quality-delta request";; esac
+PS="$( route 'the profiler puts targetSymbol at the top - what is around it' )"
+case "$PS" in *'status="recommend"'*'intent="perf-symbol"'*'skill="ripwire-perf-target"'*'--around='*'targetSymbol'*) ok "a measured profile + the symbol it names -> --around=SYM";; *) no "perf-symbol route wrong: $PS";; esac
+PS0="$( route 'the profiler vendor is offering licenses, should we buy a few seats?' )"
+case "$PS0" in *'--around='*) no "profile wording with no resolved symbol invented an --around: $PS0";; *) ok "profile wording alone (no symbol) abstains rather than invent one";; esac
+GQ="$( route 'which functions can reach targetSymbol - one-hop callers cannot phrase that' )"
+case "$GQ" in *'status="recommend"'*'intent="graph-query"'*'skill="ripwire-graph-query"'*'--graph-query='*'targetSymbol'*) ok "a bounded-closure question + one symbol -> --graph-query=EXPR";; *) no "graph-query route wrong: $GQ";; esac
+MR="$( route 'where is the rot in code I did not write' )"
+case "$MR" in *'status="recommend"'*'intent="maintenance-risk"'*'skill="ripwire-fresh-eyes"'*'--hotspots'*) ok "maintenance-risk wording -> --hotspots";; *) no "maintenance-risk route wrong: $MR";; esac
+OR="$( route 'clang says the inner loop was not vectorized - is that worth a diff here?' )"
+case "$OR" in *'status="recommend"'*'intent="opt-remark"'*'skill="ripwire-opt-remarks"'*'--for='*) ok "a clang optimization remark -> the ranked lens, under the opt-remarks skill";; *) no "opt-remark route wrong: $OR";; esac
+# Execution check: the two catalog commands that carry a COMPOSED value are not placeholders. Unquote
+# what the router emitted and run it through the real verb, the same way the SYM:VAR arm above does.
+GQEXPR="$( printf '%s' "$GQ" | sed -n 's|.*--graph-query=&apos;\(.*\)&apos;</run>.*|\1|p' | sed 's/&quot;/"/g' )"
+GQRUN="$( "$BIN" "$REPO" --no-cache --graph-query="$GQEXPR" )"; rc=$?
+{ [ $rc -eq 0 ] && printf '%s' "$GQRUN" | grep -q '<query expr='; } \
+    && ok "the emitted --graph-query expression runs and returns a <query> root" \
+    || no "the emitted --graph-query expression failed to run (rc=$rc, expr=[$GQEXPR])"
+printf '# A plan\n\n## Goal\n\nship it\n' >"$REPO/plan-gate.md"
+PLRUN="$( "$BIN" "$REPO" --no-cache --plan-lint=plan-gate.md )"; rc=$?
+[ $rc -le 2 ] && ok "the emitted --plan-lint=FILE command runs against a real plan file (rc=$rc)" \
+              || no "the emitted --plan-lint=FILE command failed to run (rc=$rc)"
+rm -f "$REPO/plan-gate.md"
+# ── two routers, ONE vocabulary: every shipped skill must be nameable by --help-task ──────────────────
+# F-R1-09 measured 8 of 16. This arm reads BOTH sides from disk — the skill directories that exist, and
+# the skill= names src/taskroute.h can emit — so it fails when a NEW skill ships with no route as much as
+# when a route names a skill that does not exist. ripwire-router is excluded: it is the fallback map, not
+# a destination (test/skillevalcheck.sh refuses it as a label for the same reason).
+routerNames="$( grep -o 'ripwire-[a-z-]*' "$ROOT/src/taskroute.h" | sort -u )"
+unnameable=""; phantom=""
+for _d in "$ROOT"/skills/*/; do
+    _s="$( basename "$_d" )"
+    [ -f "$_d/SKILL.md" ] || continue
+    [ "$_s" = "ripwire-router" ] && continue
+    printf '%s\n' "$routerNames" | grep -qx "$_s" || unnameable="$unnameable $_s"
+done
+for _n in $routerNames; do
+    [ -f "$ROOT/skills/$_n/SKILL.md" ] || phantom="$phantom $_n"
+done
+[ -z "$unnameable" ] && ok "every shipped skill (except ripwire-router) is nameable by --help-task" \
+                     || no "shipped skill(s) no --help-task answer can ever name:$unnameable"
+[ -z "$phantom" ] && ok "every skill the router can name exists on disk" \
+                  || no "router names skill(s) with no directory:$phantom"
+
 N="$( route 'Write a cheerful release announcement' )"
 case "$N" in *'status="abstain"'*) ok "off-topic prompt abstains";; *) no "off-topic prompt did not abstain: $N";; esac
-[ "$( printf '%s' "$N" | grep -o '<run>' | wc -l | tr -d ' ' )" = 0 ] && ok "abstention emits zero commands" || no "abstention emitted a command"
-[ "$( printf '%s' "$D" | grep -o '<run>' | wc -l | tr -d ' ' )" = 1 ] && ok "recommendation emits exactly one command" || no "recommendation command cardinality != 1"
+if [ "$( printf '%s' "$N" | grep -o '<run>' | wc -l | tr -d ' ' )" = 0 ]; then ok "abstention emits zero commands"; else no "abstention emitted a command"; fi
+if [ "$( printf '%s' "$D" | grep -o '<run>' | wc -l | tr -d ' ' )" = 1 ]; then ok "recommendation emits exactly one command"; else no "recommendation command cardinality != 1"; fi
 
 Q="Plan feature O'Brien & <friends>; touch $TMP/PWNED"
 route "$Q" >"$TMP/q1"; route "$Q" >"$TMP/q2"
-diff -q "$TMP/q1" "$TMP/q2" >/dev/null && ok "task routing byte-identical" || no "task routing nondeterministic"
-[ ! -e "$TMP/PWNED" ] && ok "task text executes nothing" || no "task text was executed"
-grep -Fq 'O&apos;\&apos;&apos;Brien' "$TMP/q1" && ok "single quote receives POSIX shell quoting" || no "recommended argv is not safely shell-quoted"
-if command -v xmllint >/dev/null 2>&1; then xmllint --noout "$TMP/q1" 2>/dev/null && ok "task route XML well formed" || no "task route XML malformed"; fi
+if diff -q "$TMP/q1" "$TMP/q2" >/dev/null; then ok "task routing byte-identical"; else no "task routing nondeterministic"; fi
+if [ ! -e "$TMP/PWNED" ]; then ok "task text executes nothing"; else no "task text was executed"; fi
+if grep -Fq 'O&apos;\&apos;&apos;Brien' "$TMP/q1"; then ok "single quote receives POSIX shell quoting"; else no "recommended argv is not safely shell-quoted"; fi
+if command -v xmllint >/dev/null 2>&1; then if xmllint --noout "$TMP/q1" 2>/dev/null; then ok "task route XML well formed"; else no "task route XML malformed"; fi; fi
 
 "$BIN" "$REPO" --help-task= >/dev/null 2>"$TMP/empty.err"; rc=$?
-[ "$rc" -ne 0 ] && grep -q 'needs' "$TMP/empty.err" && ok "empty task refuses" || no "empty task did not refuse clearly"
+if [ "$rc" -ne 0 ] && grep -q 'needs' "$TMP/empty.err"; then ok "empty task refuses"; else no "empty task did not refuse clearly"; fi
 "$BIN" "$REPO" --help-task='plan a feature' --json >/dev/null 2>"$TMP/json.err"; rc=$?
-[ "$rc" -ne 0 ] && grep -qi 'json' "$TMP/json.err" && ok "unsupported --json combination refuses" || no "--json combination did not refuse"
+if [ "$rc" -ne 0 ] && grep -qi 'json' "$TMP/json.err"; then ok "unsupported --json combination refuses"; else no "--json combination did not refuse"; fi
 "$BIN" "$REPO" "$ROOT/test/fixture" --help-task='plan a feature' >/dev/null 2>"$TMP/multi.err"; rc=$?
-[ "$rc" -ne 0 ] && grep -qi 'single-root' "$TMP/multi.err" && ok "multi-root routing refuses" || no "multi-root routing did not refuse"
+if [ "$rc" -ne 0 ] && grep -qi 'single-root' "$TMP/multi.err"; then ok "multi-root routing refuses"; else no "multi-root routing did not refuse"; fi
 for f in --verify --connect --expand --grep --grep-context --edit-check --from-trace --situ --pack-task --exemplar --for \
          --edit-plan --dry-run --handles --legend --doctor --agent=codex --test-gate --slice --slice-flow --at --uses --seams; do "$BIN" --help=all 2>&1 | grep -q -- "$f" || no "recommended flag absent from --help: $f"; done
 
@@ -264,7 +379,7 @@ case "$RB" in
 esac
 
 EVAL="$( python3 "$ROOT/bench/taskroute_eval.py" --bin "$BIN" --corpus "$ROOT/test/taskroutefix/prompts.tsv" --split test 2>&1 )"; rc=$?
-[ "$rc" -eq 0 ] && ok "held-out command-routing floors ($EVAL)" || no "held-out command-routing floors failed: $EVAL"
+if [ "$rc" -eq 0 ]; then ok "held-out command-routing floors ($EVAL)"; else no "held-out command-routing floors failed: $EVAL"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit "$fail"

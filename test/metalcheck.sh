@@ -29,7 +29,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/metalfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -87,7 +87,7 @@ grep -q 'role="call" p="[^"]*GalleryShaders\.metal:[0-9]' "$TMP/uses" \
     && ok "--uses=ml_styleFor reports the .metal use-sites (role=call, file:line)" \
     || { no "--uses=ml_styleFor missing .metal use-sites"; head -c 700 "$TMP/uses"; }
 UN="$( sed -n 's/.*<uses [^>]*count="\([0-9]*\)".*/\1/p' "$TMP/uses" )"
-[ "${UN:-0}" -ge 4 ] && ok "--uses=ml_styleFor count=$UN" || no "--uses=ml_styleFor count=${UN:-?} (want >= 4)"
+if [ "${UN:-0}" -ge 4 ]; then ok "--uses=ml_styleFor count=$UN"; else no "--uses=ml_styleFor count=${UN:-?} (want >= 4)"; fi
 
 # ── 7) shader-internal call edges resolve (not just the cross-half one) ───────────────────────────────
 "$BIN" "$FIX" --no-cache --callers=gallery_falloff >"$TMP/gf" 2>/dev/null
@@ -118,9 +118,9 @@ grep -q 'kernel void gallery_prefilter' "$TMP/exp" \
 # ── 10) determinism + G4 well-formedness + minification ───────────────────────────────────────────────
 "$BIN" "$FIX" --no-cache >"$TMP/a" 2>/dev/null
 "$BIN" "$FIX" --no-cache >"$TMP/b" 2>/dev/null
-cmp -s "$TMP/a" "$TMP/b" && ok "determinism (two cold runs byte-identical)" || no "non-deterministic on a .metal corpus"
+if cmp -s "$TMP/a" "$TMP/b"; then ok "determinism (two cold runs byte-identical)"; else no "non-deterministic on a .metal corpus"; fi
 "$BIN" "$FIX" >"$TMP/w1" 2>/dev/null; "$BIN" "$FIX" >"$TMP/w2" 2>/dev/null
-cmp -s "$TMP/w1" "$TMP/w2" && ok "determinism (warm/cached runs byte-identical)" || no "warm run differs from itself"
+if cmp -s "$TMP/w1" "$TMP/w2"; then ok "determinism (warm/cached runs byte-identical)"; else no "warm run differs from itself"; fi
 cmp -s "$TMP/a" "$TMP/w2" && ok "warm run matches the cold run (cache carries .metal facts correctly)" \
                           || no "warm .metal run differs from cold — cache/parserVer mismatch"
 # The same warm/cold identity on the CANONICAL-ID surface specifically. The per-def `scope` field is
@@ -132,11 +132,11 @@ cmp -s "$TMP/a" "$TMP/w2" && ok "warm run matches the cold run (cache carries .m
 cmp -s "$TMP/uc" "$TMP/uw" && ok "warm == cold on canonical ids (--uses; the cached scope field is not stale)" \
                            || { no "warm/cold canonical-id mismatch — a cached extraction field changed without a kParserVer bump"; diff "$TMP/uc" "$TMP/uw" | head -4; }
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/a" 2>/dev/null && ok "G4: .metal map XML well-formed" || no "G4: malformed XML on a .metal corpus"
+    if xmllint --noout "$TMP/a" 2>/dev/null; then ok "G4: .metal map XML well-formed"; else no "G4: malformed XML on a .metal corpus"; fi
 else
     ok "xmllint unavailable — G4 skipped"
 fi
-[ "$( grep -c '' "$TMP/a" )" -le 1 ] && ok "output is minified (no stray newlines)" || no "newlines outside CDATA"
+if [ "$( grep -c '' "$TMP/a" )" -le 1 ]; then ok "output is minified (no stray newlines)"; else no "newlines outside CDATA"; fi
 
 # ── 11) the user-visible language list names Metal (doc/binary agreement) ─────────────────────────────
 "$BIN" --help=all 2>&1 | grep -qi 'Metal' \

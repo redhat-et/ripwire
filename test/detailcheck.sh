@@ -18,7 +18,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -100,7 +100,7 @@ if command -v xmllint >/dev/null 2>&1; then
     for F in "$TMP/d3" "$TMP/d6" "$TMP/dmt" "$TMP/dad"; do
         xmllint --noout "$F" 2>/dev/null || { echo "    malformed: $F"; lint=0; }
     done
-    [ "$lint" = 1 ] && ok "--detail output well-formed XML (G4)" || no "--detail output malformed XML"
+    if [ "$lint" = 1 ]; then ok "--detail output well-formed XML (G4)"; else no "--detail output malformed XML"; fi
 else
     printf '  SKIP  xmllint (not installed)\n'
 fi

@@ -32,7 +32,7 @@ FIX="$ROOT/test/hostilefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -85,7 +85,7 @@ echo "=== default map: XML well-formed + valid UTF-8 ==="
 MAP_OUT="$TMP/map.xml"
 $BIN "$FIX" >"$MAP_OUT" 2>"$TMP/map.err"
 MAP_EXIT=$?
-[ "$MAP_EXIT" -eq 0 ] && ok "default map: exits 0 on hostile fixture" || no "default map: exited $MAP_EXIT"
+if [ "$MAP_EXIT" -eq 0 ]; then ok "default map: exits 0 on hostile fixture"; else no "default map: exited $MAP_EXIT"; fi
 
 xmllint --noout "$MAP_OUT" 2>"$TMP/xmllint.err" \
     && ok "default map: passes xmllint --noout" \
@@ -114,7 +114,7 @@ echo "=== --pack-signatures: doc-comment metacharacters escaped ==="
 
 SIG_OUT="$TMP/sig.xml"
 $BIN "$FIX" --pack-signatures >"$SIG_OUT" 2>"$TMP/sig.err"
-[ $? -eq 0 ] && ok "--pack-signatures: exits 0" || no "--pack-signatures: nonzero exit"
+if [ $? -eq 0 ]; then ok "--pack-signatures: exits 0"; else no "--pack-signatures: nonzero exit"; fi
 
 xmllint --noout "$SIG_OUT" 2>"$TMP/sig_lint.err" \
     && ok "--pack-signatures: passes xmllint --noout" \
@@ -145,7 +145,7 @@ echo "=== --for=\"quoted tag\": task lens, XML well-formed ==="
 
 FOR_OUT="$TMP/for.xml"
 $BIN "$FIX" --for="quoted tag" >"$FOR_OUT" 2>"$TMP/for.err"
-[ $? -eq 0 ] && ok "--for=: exits 0" || no "--for=: nonzero exit"
+if [ $? -eq 0 ]; then ok "--for=: exits 0"; else no "--for=: nonzero exit"; fi
 
 xmllint --noout "$FOR_OUT" 2>"$TMP/for_lint.err" \
     && ok "--for=: passes xmllint --noout" \
@@ -162,7 +162,7 @@ echo "=== --grep=quoted: literal hit + XML well-formed ==="
 
 GREP_OUT="$TMP/grep.xml"
 $BIN "$FIX" --grep=quoted >"$GREP_OUT" 2>"$TMP/grep.err"
-[ $? -eq 0 ] && ok "--grep=: exits 0" || no "--grep=: nonzero exit"
+if [ $? -eq 0 ]; then ok "--grep=: exits 0"; else no "--grep=: nonzero exit"; fi
 
 xmllint --noout "$GREP_OUT" 2>"$TMP/grep_lint.err" \
     && ok "--grep=: passes xmllint --noout" \
@@ -183,7 +183,7 @@ echo "=== --lint: hostile fixture doesn't crash the AST checks ==="
 
 LINT_OUT="$TMP/lint.xml"
 $BIN "$FIX" --lint >"$LINT_OUT" 2>"$TMP/lint.err"
-[ $? -eq 0 ] && ok "--lint: exits 0" || no "--lint: nonzero exit"
+if [ $? -eq 0 ]; then ok "--lint: exits 0"; else no "--lint: nonzero exit"; fi
 
 xmllint --noout "$LINT_OUT" 2>"$TMP/lint_lint.err" \
     && ok "--lint: passes xmllint --noout" \
@@ -200,8 +200,8 @@ echo "=== --html=OUT.html: no script-tag breakout in embedded JSON ==="
 
 HTML_OUT="$TMP/out.html"
 $BIN "$FIX" --html="$HTML_OUT" >"$TMP/html_stdout" 2>"$TMP/html.err"
-[ $? -eq 0 ] && ok "--html=: exits 0" || no "--html=: nonzero exit"
-[ -s "$HTML_OUT" ] && ok "--html=: output file was written and is non-empty" || no "--html=: output file missing/empty"
+if [ $? -eq 0 ]; then ok "--html=: exits 0"; else no "--html=: nonzero exit"; fi
+if [ -s "$HTML_OUT" ]; then ok "--html=: output file was written and is non-empty"; else no "--html=: output file missing/empty"; fi
 
 iconv -f UTF-8 -t UTF-8 <"$HTML_OUT" >/dev/null 2>"$TMP/html_iconv.err" \
     && ok "--html=: valid UTF-8 output" \

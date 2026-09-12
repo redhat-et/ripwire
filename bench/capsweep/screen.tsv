@@ -1,0 +1,200 @@
+# capsweep screen — columns: baseline_bytes / all_bumped_bytes / sensitive / baseline_state / all_bumped_state / invocation — measured_at=da7af625543881aff54d4aedd363603f93288480 — TSV not json: ripwire indexes .json as config keys (src/ingest_crawl.h) while .tsv is unindexed prose (src/docparse.h kUnindexedProseExts) — a harness must not enter the index it measures
+# split recipe: DENOMINATOR = rows that answered under the BASELINE arm (state=ok, >0 bytes).
+# A row that emits nothing cannot respond to a cap; 44 row(s) of 195 never answer and are
+# recorded here but excluded from the ratio.
+# cap-sensitive=64 of 151 answering (42%); 0 row(s) answer only when a cap is bumped.
+63	63	0	ok	ok	--scan-skill=skills/ripwire-orient/SKILL.md
+64	64	0	ok	ok	--scan-skills=skills
+85	85	0	ok	ok	--version
+24372	24345	1	ok	ok	.
+2792	2792	0	ok	ok	. --affected=src/graph.h
+49347	49121	1	ok	ok	. --arch=test/archfix/rules.txt
+8316	8316	0	ok	ok	. --around=rankGraphTeleport
+84792	84792	0	ok	ok	. --around=rankGraphTeleport --around-depth=2
+3989	3989	0	ok	ok	. --around=rankGraphTeleport --around-fanout=4
+1093	1093	0	ok	ok	. --at=src/graph.h:3062
+-	-	0	rc=1	rc=1	. --at=src/graph.h:999999
+408	409	1	ok	ok	. --batch=$RIPWIRE_CAPSWEEP_TMP
+-	-	0	rc=1	rc=1	. --cache=$RIPWIRE_CAPSWEEP_TMP
+4357	4357	0	ok	ok	. --callees=rankGraphTeleport
+4081	4081	0	ok	ok	. --callers=@src/graph.h:3062
+-	-	0	rc=1	rc=1	. --callers=DoesNotExist
+3838	3838	0	ok	ok	. --callers=rankGraphTeleport
+-	-	0	rc=1	rc=1	. --callers=rankGraphTeleport --format=bogus
+4469	4469	0	ok	ok	. --callers=rankGraphTeleport --format=columnar
+509	509	0	ok	ok	. --callers=rankGraphTeleport --json
+861	861	0	ok	ok	. --callers=rankGraphTeleport --legend=compact
+18623	18623	0	ok	ok	. --clones
+2937	2937	0	ok	ok	. --cochange
+1993	1993	0	ok	ok	. --cochange --cochange-groups
+2951	2951	0	ok	ok	. --cochange --cochange-recur=2
+3402	3402	0	ok	ok	. --comment-coherence --limit=8
+17674	17693	1	ok	ok	. --communities
+2152	2152	0	ok	ok	. --community=0
+2753	2753	0	ok	ok	. --connect=rankGraphTeleport,runEval,getIndex
+13314	65135	1	ok	ok	. --context-ratio --limit=8
+2068	2068	0	ok	ok	. --dead-code=src
+21924	21924	0	ok	ok	. --deps
+3045	3048	1	ok	ok	. --dmm
+3073	3076	1	ok	ok	. --dmm=HEAD
+-	-	0	rc=1	rc=1	. --dmm=HEAD~3..HEAD
+18186	18186	0	ok	ok	. --doc-drift
+19659	19659	0	ok	ok	. --doc-drift --gateability
+17884	17884	0	ok	ok	. --doc-drift --with-history
+-	-	0	rc=1	rc=1	. --doctor
+-	-	0	rc=1	rc=1	. --doctor --agent=claude
+-	-	0	rc=1	rc=1	. --doctor --agent=nosuch
+10499	28383	1	ok	ok	. --ensemble --limit=8
+1306	1306	0	ok	ok	. --eval
+1446	1446	0	ok	ok	. --eval-retrieval
+676	676	0	ok	ok	. --eval-stray=$RIPWIRE_CAPSWEEP_TMP
+2004	2004	0	ok	ok	. --exclude=present --exclude=bench --top-k=5
+2530	2530	0	ok	ok	. --exemplar="format byte sizes for humans"
+1829	1829	0	ok	ok	. --exercises=test/regression.sh
+8077	9675	1	ok	ok	. --expand=compressBody --top-k=0 --compress
+4926	6033	1	ok	ok	. --expand=rankGraphTeleport --top-k=0
+4314	5421	1	ok	ok	. --expand=rankGraphTeleport:1-12 --top-k=0
+11317	16927	1	ok	ok	. --expand=readAckRecords --top-k=0 --no-redact
+-	-	0	rc=1	rc=1	. --export=cc.json:$RIPWIRE_CAPSWEEP_TMP
+5611	38720	1	ok	ok	. --external-surface
+5553	38663	1	ok	ok	. --external-surface --include-builtins
+43277	43277	0	ok	ok	. --field-affinity
+5343	5343	0	ok	ok	. --field-affinity=Symbol
+20553	20553	0	ok	ok	. --flags
+-	-	0	rc=1	rc=1	. --flags --flip=RIPWIRE_ASA
+2321	2321	0	ok	ok	. --flags --flip=RIPWIRE_ASAN
+2293	2293	0	ok	ok	. --for="cache invalidation" --format=candidates --top-k=5
+9903	68105	1	ok	ok	. --for="incremental cache invalidation when a file content hash changes"
+14560	66641	1	ok	ok	. --for="pagerank power iteration" --detail=2
+10078	65317	1	ok	ok	. --for="pagerank power iteration" --with-graph
+10055	69178	1	ok	ok	. --for="quality delta acks ledger rubber stamp"
+10119	69114	1	ok	ok	. --for="quality delta acks ledger rubber stamp" --no-doc-mention
+5491	5493	1	ok	ok	. --for="rankGraphTeleport"
+15900	81130	1	ok	ok	. --for="rankGraphTeleport" --no-route
+2813	2815	1	ok	ok	. --for="rankGraphTeleport" --signatures-only
+9897	67641	1	ok	ok	. --for="tree-sitter parse of a source file" --adaptive
+15916	84924	1	ok	ok	. --for="tree-sitter parse of a source file" --auto-bodies
+9566	67587	1	ok	ok	. --for="tree-sitter parse of a source file" --legend=compact
+10268	68397	1	ok	ok	. --for="why does src/lexical.h chooseForRanker pick name-exact BM25"
+-	-	0	rc=1	rc=1	. --for="why does src/lexical.h chooseForRanker pick name-exact BM25" --no-mention-b
+-	-	0	rc=1	rc=1	. --from-trace=-
+5246	5246	0	ok	ok	. --graph-query='and(callers(name("rankGraphTeleport"),2),kind(all,fn))'
+33683	9041	1	ok	ok	. --grep=DEGRADED_PATH_ALERT
+18198	8135	1	ok	ok	. --grep=DEGRADED_PATH_ALERT --and=cache
+9516	8729	1	ok	ok	. --grep=DEGRADED_PATH_ALERT --grep-before=1 --grep-after=2 --limit=3
+43535	9152	1	ok	ok	. --grep=DEGRADED_PATH_ALERT --grep-context=1
+30177	8050	1	ok	ok	. --grep=DEGRADED_PATH_ALERT --grep-in=any
+-	-	0	rc=1	rc=1	. --grep=DEGRADED_PATH_ALERT --grep=cache
+36872	9499	1	ok	ok	. --grep=DEGRADED_PATH_ALERT --handles
+26707	2075	1	ok	ok	. --grep=DEGRADED_PATH_ALERT --legend=compact
+14233	8134	1	ok	ok	. --grep=DEGRADED_PATH_ALERT --not=test --grep-scope=file
+44699	20641	1	ok	ok	. --grep=deterministic
+5044	13863	1	ok	ok	. --handoff
+4955	12290	1	ok	ok	. --handoff --token-budget=1200
+344	344	0	ok	ok	. --help-task="calls(runDefaultMap, rankGraphTeleport)"
+139	139	0	ok	ok	. --help-task="write a cheerful release announcement"
+5878	5878	0	ok	ok	. --hotspots
+-	-	0	rc=1	rc=1	. --hotspots --json
+2028	2028	0	ok	ok	. --hotspots --limit=3 --offset=3
+286	286	0	ok	ok	. --hotspots --since="2 weeks ago"
+-	-	0	rc=1	rc=1	. --html=$RIPWIRE_CAPSWEEP_TMP/
+2028	2028	0	ok	ok	. --ignore-tests --top-k=5
+7860	8975	1	ok	ok	. --impact=rankGraphTeleport
+-	-	0	rc=1	rc=1	. --layout=Lang
+3050	3050	0	ok	ok	. --layout=Symbol
+1266	1266	0	ok	ok	. --lego=Vehicle
+71025	70972	1	ok	ok	. --lint
+66983	66930	1	ok	ok	. --lint --lint-ignore=naming-,cache-
+-	-	0	rc=1	rc=1	. --lint --lint-select=cach-
+51004	51004	0	ok	ok	. --lint --lint-select=cache-
+-	-	0	rc=1	rc=1	. --lint --lint-select=nosuchfamily
+73708	73655	1	ok	ok	. --lint --naming-locals
+1162929	1675848	1	ok	ok	. --lint --sarif
+-	-	0	rc=1	rc=1	. --lint --sarif --limit=5
+8004	8004	0	ok	ok	. --lint-catalog
+3779	3779	0	ok	ok	. --lint-rules=test/lintrulesfix/rules
+2684	2925	1	ok	ok	. --map-diff --top-k=5
+17153	17153	0	ok	ok	. --match='(if_statement) @i'
+17171	17171	0	ok	ok	. --match='(if_statement)'
+1923	1923	0	ok	ok	. --max-file-size=8K --top-k=3
+3002	3433	1	ok	ok	. --max-tokens=1500
+873	873	0	ok	ok	. --mentions=rankGraphTeleport
+3299	3299	0	ok	ok	. --merge-scout=HEAD~2,HEAD~1
+1531	1531	0	ok	ok	. --mermaid
+5395	5395	0	ok	ok	. --metrics --top-k=10
+3003	3003	0	ok	ok	. --naming-calibration
+5294	5294	0	ok	ok	. --naming-consistency --limit=8
+1920	1825	1	ok	ok	. --no-cache --top-k=3
+1920	1825	1	ok	ok	. --no-ignore --top-k=3
+1920	1825	1	ok	ok	. --no-stable --top-k=3
+9819	9993	1	ok	ok	. --nonlocal-state --limit=8
+898	898	0	ok	ok	. --notes
+1981	1981	0	ok	ok	. --order=stable --top-k=5
+870	870	0	ok	ok	. --outline=rankGraphTeleport --top-k=0
+870	870	0	ok	ok	. --outline=rankGraphTeleport:1-10 --top-k=0
+1441	1441	0	ok	ok	. --owners
+12256	12281	1	ok	ok	. --pack-signatures --top-k=10
+9480	14100	1	ok	ok	. --pack-task="add a new output format flag to the CLI"
+24028	20379	1	ok	ok	. --pack-task="add a new output format flag to the CLI" --partition=3
+65670	65748	1	ok	ok	. --pack-top-n=3 --top-k=0
+1426	1426	0	ok	ok	. --path=main,rankGraphTeleport
+18068	18068	0	ok	ok	. --pattern='DEGRADED_PATH_ALERT(...)'
+2806	2806	0	ok	ok	. --pattern='rankGraphTeleport($A, $B, $C)'
+-	-	0	rc=1	rc=1	. --pattern='x'
+-	-	0	rc=1	rc=1	. --plan-lanes --brief=$RIPWIRE_CAPSWEEP_TMP
+-	-	0	unparseable: No closing quotation	unparseable: No closing quotation	. --plan-lanes=3 --task="add a --since filter to the doc-drift verb and cover it wit
+-	-	0	rc=1	rc=1	. --plan-lanes=99 --task=x
+-	-	0	rc=2	rc=2	. --plan-lint=test/planlintfix/wave.md
+-	-	0	rc=2	rc=2	. --plan-lint=test/planlintfix/wave_ledger.md
+7947	7948	1	ok	ok	. --pr-context
+8729	8730	1	ok	ok	. --pr-context=HEAD~1
+7331	7331	0	ok	ok	. --quality-delta
+15454	82295	1	ok	ok	. --quality-panel
+2939	2939	0	ok	ok	. --query="teleport pagerank" --top-k=5
+-	-	0	rc=1	rc=1	. --rank-by=bogus --top-k=5
+2749	2749	0	ok	ok	. --rank-by=churn --top-k=5
+2931	2931	0	ok	ok	. --readability --limit=8
+13196	148979	1	ok	ok	. --recall="quality delta gating exit codes"
+24849	9569	1	ok	ok	. --regex='fnv1a\w+'
+3670	3670	0	ok	ok	. --report
+-	-	0	rc=1	rc=1	. --run-timeout=5
+-	-	0	unparseable: No closing quotation	unparseable: No closing quotation	. --run-trace="cat $RIPWIRE_CAPSWEEP_TMP
+-	-	0	rc=4	rc=4	. --run-trace="sleep 30" --run-timeout=2
+1185	1185	0	ok	ok	. --run-trace="true"
+-	-	0	rc=1	rc=1	. --safe-delete=DoesNotExist
+4737	4737	0	ok	ok	. --safe-delete=rankGraphTeleport
+-	-	0	rc=1	rc=1	. --scip=does_not_exist.scip --callers=rankGraphTeleport
+13085	13108	1	ok	ok	. --seams
+1705	1679	1	ok	ok	. --situ
+36047	36047	0	ok	ok	. --skipped
+-	-	0	rc=1	rc=1	. --slice-depth=3
+5119	5119	0	ok	ok	. --slice=rankGraphTeleport
+-	-	0	rc=1	rc=1	. --slice=rankGraphTeleport:nosuchvar
+5147	5147	0	ok	ok	. --slice=rankGraphTeleport:teleport
+934	934	0	ok	ok	. --slice=rankGraphTeleport:teleport --legend=compact
+6923	6923	0	ok	ok	. --slice=rankGraphTeleport:teleport --slice-flow=back --slice-depth=3
+7224	7225	1	ok	ok	. --slice=rankGraphTeleport:teleport --slice-flow=fwd
+-	-	0	rc=1	rc=1	. --stray-content=lane
+-	-	0	rc=1	rc=1	. --stray-content=lane --abi
+-	-	0	rc=1	rc=1	. --stray-content=lane/ --plan
+-	-	0	rc=1	rc=1	. --stray-content=worktree-agent-
+-	-	0	rc=1	rc=1	. --stray-content=zzzz-no-such-ref --plan
+-	-	0	rc=4	rc=4	. --test-gate
+-	-	0	rc=3	rc=3	. --token-budget=100
+-	-	0	rc=1	rc=1	. --top-k=0
+4926	6033	1	ok	ok	. --top-k=0 --expand=rankGraphTeleport
+2031	2031	0	ok	ok	. --top-k=5
+11760	92319	1	ok	ok	. --tree
+4727	4727	0	ok	ok	. --uses=rankGraphTeleport
+2888	2888	0	ok	ok	. --verify="calls(runDefaultMap, rankGraphTeleport)"
+2705	2705	0	ok	ok	. --verify="contains(src/graph.h, \"no such literal anywhere\")"
+-	-	0	rc=1	rc=1	. --verify="frobnicate(x)"
+3375	3375	0	ok	ok	. --verify="unused(rankGraphTeleport)"
+29563	29563	0	ok	ok	. --whereis=computeOnePairOverlap --with-history
+18480	18480	0	ok	ok	. --whereis=rankGraphTeleport
+8411	49130	1	ok	ok	. --zoom
+12093	71350	1	ok	ok	. --zoom --zoom-levels=3
+-	-	0	rc=1	rc=1	$RIPWIRE_CAPSWEEP_TMP/aux/kbcor
+-	-	0	rc=1	rc=1	skills --eval-skills=$RIPWIRE_CAPSWEEP_TMP
+1959	1959	0	ok	ok	src test --top-k=5
+3592	3592	0	ok	ok	wrap claude

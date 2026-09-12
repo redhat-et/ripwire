@@ -43,7 +43,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/rustancfix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -85,9 +85,9 @@ else no "zonk_again: a hit returned the wrong closure — expected {$ALPHA_LINE 
 
 # ── 4) determinism + well-formedness ───────────────────────────────────────────────────────────────────
 A="$( "$BIN" "$FIX" --no-cache --top-k=100000 2>/dev/null )"; B="$( "$BIN" "$FIX" --no-cache --top-k=100000 2>/dev/null )"
-[ "$A" = "$B" ] && ok "determinism: the default map is byte-identical run-to-run" || no "non-deterministic default map"
+if [ "$A" = "$B" ]; then ok "determinism: the default map is byte-identical run-to-run"; else no "non-deterministic default map"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$A" | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

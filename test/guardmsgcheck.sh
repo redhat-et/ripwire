@@ -26,7 +26,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 cd "$ROOT"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN"; exit 2; }
 
@@ -126,7 +126,7 @@ stableorder()
     local got mode
     got="$( "$BIN" "$@" </dev/null 2>/dev/null | grep -c 'order=important-first' )"
     [ "$got" = 0 ] && mode=STABLE || mode=UNSTABLE
-    [ "$mode" = "$want" ] && ok "$name" || no "$name (map came out $mode, want $want)"
+    if [ "$mode" = "$want" ]; then ok "$name"; else no "$name (map came out $mode, want $want)"; fi
 }
 stableorder "plain run is NOT stable-ordered"         UNSTABLE  test/fixture
 stableorder "--order=stable IS stable-ordered"        STABLE    test/fixture --order=stable
@@ -143,7 +143,7 @@ stablemcp()
     got="$( printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"analyze","arguments":{"path":"test/fixture"}}}\n' \
             | "$BIN" "$@" 2>/dev/null | grep -c 'order=important-first' )"
     [ "$got" = 0 ] && mode=STABLE || mode=UNSTABLE
-    [ "$mode" = "$want" ] && ok "$name" || no "$name (map came out $mode, want $want)"
+    if [ "$mode" = "$want" ]; then ok "$name"; else no "$name (map came out $mode, want $want)"; fi
 }
 stablemcp "--mcp implies --stable"           STABLE    --mcp
 stablemcp "--mcp --no-stable opts back out"  UNSTABLE  --mcp --no-stable

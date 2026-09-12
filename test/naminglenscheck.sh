@@ -180,7 +180,7 @@ class Snapshot:
 PY
 
 fail=0
-ok(){ printf '  PASS  %s\n' "$1"; }
+ok(){ printf '  PASS  %s\n' "$1" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$1"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$1"; fail=1; }
 
 # ── determinism: two cold runs must be byte-identical, and non-empty (non-vacuity) ────────────────
@@ -260,6 +260,6 @@ for name in never_flagged:
 
 print("PASS planted violations flagged, every near-miss silent, withdrawn rule stays withdrawn, tallies truthful")
 PY
-[ $? -eq 0 ] && ok "owners + counts + near-miss silences" || no "owners/counts/near-miss assertions (see FAIL line above)"
+if [ $? -eq 0 ]; then ok "owners + counts + near-miss silences"; else no "owners/counts/near-miss assertions (see FAIL line above)"; fi
 
 exit "$fail"

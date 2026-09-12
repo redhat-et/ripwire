@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // handoff.h — `--handoff`: the deterministic continuation packet for the NEXT agent session.
 //
@@ -29,6 +31,7 @@
 #include "docparse.h"          // isIndexedDocExtension / lowerExtOf — the shared prose vocabulary
 #include <algorithm>
 #include <cstdio>
+#include <format>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -39,7 +42,42 @@ namespace rw
 inline constexpr std::size_t kHandoffDocRows      = 4;   // heuristic doc pointers shown
 inline constexpr std::size_t kHandoffNoteRows     = 8;   // heuristic note rows shown
 inline constexpr std::size_t kHandoffCochangeRows = 8;   // heuristic co-change rows shown
-inline constexpr std::size_t kHandoffSymbolsPerFile = 6; // verified symbols listed per changed file
+// Verified symbols listed per changed file. This cuts the DISK-TRUTH half of the packet — the section whose
+// whole contract is "this is what the change set is" — and at 6 it fired on the TYPICAL case, not a tail.
+//
+// MEASURED, 2026-09-10, over 12 real commits of this repository replayed as working-tree diffs (39 changed
+// files, 1,406 symbols; the frozen capsweep corpus cannot see this cap at all, so the ladder was run against
+// real history). At 6 the cap fired on 27 of 39 changed files — 69% — and per-commit containment ran
+// 6.6% / 8.4% / 10.0% / 14.6% / 17.8% / 21.6% / 46.2% / 79.2% / 80.0% / 100%: on the typical commit the
+// packet showed one symbol in six of what actually changed.
+//
+//   cap        files cut   symbols shown / 1406   containment   bytes over 12 handoffs
+//     6           27            222                 15.8%          46,993
+//    12           21            363                 25.8%          52,021  (+10.7%)
+//    25           15            565                 40.2%          58,823  (+25.2%)
+//    50            8            830                 59.0%          71,139  (+51.4%)
+//   100            3           1051                 74.8%          82,662  (+75.9%)
+//     inf          0           1406                100.0%         113,472  (+141%)
+//
+// TWO CAPS, NOT ONE, because a single number is decided by the wrong population. 26 of the 39 changed files
+// were markdown carrying 1,009 of the 1,406 symbols (72%), and the entire heavy tail is documentation:
+// docs/EVALS.md 217 sections, docs/LIMITS.md 55, README.md 35. Code files: p50=21, p90=57, tail
+// src/mcpverbs.h 104. A uniform cap set at the doc tail buys a +141% packet, 72% of it section titles;
+// a uniform cap set at the code p90 spends most of its budget on markdown anyway. Split by kind:
+//
+//   code (.h/.cpp/.py/.js/.sh):  6 -> 50   containment 16.6% -> 83.6%, and 50 is just under the code p90 of 57
+//   docs (markdown/prose):       6 -> 12   containment 15.5% -> 24.2%; a continuation packet wants the doc's
+//                                          NAME and its first sections, not its table of contents
+//
+// The p99 rule does not survive contact with this sample: with n=39, p95, p99 and max are all 217 — one
+// file, docs/EVALS.md, appearing in three of the twelve commits. p90 is the highest quantile it supports.
+//
+// PURELY ADDITIVE at every rung of every commit: across all 60 rung transitions, 0 rows removed, 0 rows
+// replaced, 0 attribute changes other than syms_capped/syms_total RETIRING as the cap stops firing.
+// The <f> row that is cut carries syms_total= and syms_capped="1"; an <f> under the cap carries neither,
+// so a packet whose every file fits is byte-identical to the pre-disclosure one.
+inline constexpr std::size_t kHandoffSymbolsPerCodeFile = 50;
+inline constexpr std::size_t kHandoffSymbolsPerDocFile  = 12;
 
 namespace handoff_detail
 {
@@ -59,6 +97,64 @@ inline bool isIndexedDocPath( std::string_view p ) noexcept
     return docparse::isIndexedDocExtension( docparse::lowerExtOf( p ) );
 }
 
+// Which of the two caps a changed file is judged by. isIndexedDocPath is the SAME vocabulary the brief
+// already uses to decide what counts as a design document (docparse.h), so a prose format the crawl learns
+// gets the prose cap on the same day — rather than a private extension list here that drifts from it.
+inline std::size_t symbolsPerFileCap( std::string_view pathRel )
+{
+    return isIndexedDocPath( pathRel ) ? kHandoffSymbolsPerDocFile : kHandoffSymbolsPerCodeFile;
+}
+
+// ONE changed file's <f> row, and whether its cap cut it.
+//
+// Counting and emitting share the SINGLE pass the row loop always made: the old loop stopped AT the cap, so
+// it could not say how many symbols it had not reached, and the packet's disk-truth half showed six names
+// beside nothing at all. The row is assembled into a string rather than appended in place because
+// syms_total= belongs on the OPENING tag and is only known once the whole file has been walked — the same
+// build-then-splice renderTestHopBlock uses for the same reason. `esc` is the caller's escapeXml scratch;
+// every view it returns is consumed before the next call reuses the buffer.
+struct VerifiedFileRow
+{
+    std::string xml;
+    bool        isCapped = false;
+};
+
+inline VerifiedFileRow verifiedFileRow( const IngestResult& ing, std::uint32_t fileId, std::string_view pathRel,
+                                        std::vector<char>& esc )
+{
+    std::string       shownRows;
+    std::uint32_t     total = 0;
+    const std::size_t cap   = symbolsPerFileCap( pathRel );
+    for( const Symbol& sym : ing.symbols )
+    {
+        if( sym.fileId != fileId )
+        {
+            continue;
+        }
+        ++total;
+        if( total > cap )
+        {
+            continue;                                   // counted, not shown — that gap is what syms_total= names
+        }
+        shownRows += "<s n=\"";
+        shownRows += escapeXml( sym.name, esc );
+        shownRows += "\"/>";
+    }
+
+    // serialize.h's ONE economy-of-attributes idiom: empty when the file's whole symbol set fits, so an uncut
+    // <f> stays byte-identical to the pre-disclosure packet.
+    const std::string capAttr = countFieldIfAbove( total, std::uint32_t( cap ),
+                                                   " syms_total=\"", "\" syms_capped=\"1\"" );
+    std::string row = "<f p=\"";
+    row += escapeXml( pathRel, esc );
+    row += "\"";
+    row += capAttr;
+    row += ">";
+    row += shownRows;
+    row += "</f>";
+    return { std::move( row ), !capAttr.empty() };
+}
+
 } // namespace handoff_detail
 
 // Split in two around the tests_to_run run-hint clause: that sentence is testmap.h's kRunHintLegendClause,
@@ -69,6 +165,21 @@ inline constexpr const char* kHandoffLegendHead =
     "<!-- ripwire handoff: the continuation packet for the NEXT session. <verified> is disk truth "
     "(branch=/at=<sha>[+dirty]/subject=<commit subject text>, changed files+symbols via git numstat, "
     "blast_files=transitive dependent files, tests-to-run); ";
+// Spliced between the two halves ONLY when an <f> row was actually cut — tracelocus.h's hopLegendOf seam, so a
+// packet whose every changed file fits under its cap stays byte-identical to the pre-disclosure one. Angle
+// brackets are entity-escaped because this text rides inside an XML comment, like the tail below.
+//
+// The two numbers are FORMATTED from the constants, not typed into the sentence: a legend that names a value
+// it does not read is the one-number-six-artifacts shape, and this one already went stale once when the cap
+// moved off 6.
+inline std::string handoffSymsCapClause()
+{
+    return std::format( "&lt;f&gt; lists at most {} of a changed CODE file's symbols and {} of a prose file's; "
+                        "syms_total= is how many that file actually defines and syms_capped=\"1\" says the list "
+                        "was cut to that many - both absent on the files that fit, so an &lt;f&gt; without them "
+                        "is the WHOLE set and not a floor. ",
+                        kHandoffSymbolsPerCodeFile, kHandoffSymbolsPerDocFile );
+}
 inline constexpr const char* kHandoffLegendTail =
     "<heuristic> is labeled non-verified suggestion (cochange=usually-edited-together deg=degree, note=committed "
     ".ripwire_notes row, doc=plan/design pointer s=lexical score for the branch+commit-subject query). "
@@ -147,26 +258,15 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
     const SituationFacts facts = computeSituationFacts( root, ing, g, changedMask );
 
     // ── verified core (never budget-dropped) ─────────────────────────────────────────────────────────
+    bool        anySymsCapped = false;
     std::string v;
     v += "<verified changed=\"" + std::to_string( facts.changed.size() )
        + "\" blast_files=\"" + std::to_string( facts.blastRadius.size() ) + "\">";
     for( const std::uint32_t f : facts.changed )
     {
-        v += "<f p=\"";
-        v += escapeXml( hoPathRel( f ), esc );
-        v += "\">";
-        std::size_t shown = 0;
-        for( std::size_t i = 0; i < ing.symbols.size() && shown < kHandoffSymbolsPerFile; ++i )
-        {
-            if( ing.symbols[i].fileId == f )
-            {
-                v += "<s n=\"";
-                v += escapeXml( ing.symbols[i].name, esc );
-                v += "\"/>";
-                ++shown;
-            }
-        }
-        v += "</f>";
+        const auto [ rowXml, rowCapped ] = verifiedFileRow( ing, f, hoPathRel( f ), esc );
+        anySymsCapped                    = anySymsCapped || rowCapped;
+        v += rowXml;
     }
     v += "<tests n=\"" + std::to_string( facts.tests.size() ) + "\">";
     // M4(b) (lane L2) + M21(b) (lane L8), merged 2026-09-04: the SAME run= hint --situ / --test-gate /
@@ -205,7 +305,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
             continue;
         }
         char degBuf[32];
-        std::snprintf( degBuf, sizeof degBuf, "%.2f", deg );
+        rw::formatTo( degBuf, sizeof degBuf, "{:.2f}", deg );
         std::string r = "<cochange p=\"";
         r += escapeXml( hoPathRel( f ), esc );
         r += "\" deg=\"";
@@ -274,7 +374,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
         for( std::size_t i = 0; i < best.size() && i < kHandoffDocRows; ++i )
         {
             char sBuf[32];
-            std::snprintf( sBuf, sizeof sBuf, "%.3f", double( best[i].first ) );
+            rw::formatTo( sBuf, sizeof sBuf, "{:.3f}", double( best[i].first ) );
             std::string r = "<doc p=\"";
             r += escapeXml( hoPathRel( best[i].second ), esc );
             r += "\" s=\"";
@@ -289,6 +389,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
     {
         std::string doc = kHandoffLegendHead;
         doc += rw::kRunHintLegendClause;   // M21(b): the ONE wording, spliced — never a seventh paraphrase
+        if( anySymsCapped ) { doc += handoffSymsCapClause(); }   // absent unless an <f> row was cut
         doc += kHandoffLegendTail;
         doc += "<handoff";
         doc += at;

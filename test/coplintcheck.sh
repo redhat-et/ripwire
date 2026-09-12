@@ -18,7 +18,7 @@ CORPUS="$ROOT/test/coplintfix"
 RULES="$CORPUS/rules"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ]    || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -36,21 +36,21 @@ diff -q "$TMP/out1" "$TMP/out2" >/dev/null && ok "deterministic (byte-identical 
 OUT="$TMP/out1"
 
 # 2. the rule fires on position.cpp (calls with 5+ args)
-grep -q 'rule="cop-many-args"' "$OUT"                      && ok "rule fires (rule=\"cop-many-args\")"                                     || no "rule NOT found in output"
-grep -q 'sev="warn"'           "$OUT"                       && ok "severity correct (sev=\"warn\")"                                         || no "sev=\"warn\" NOT emitted"
-grep -q 'connascence of position' "$OUT"                   && ok "message present (connascence of position)"                               || no "rule message NOT emitted"
+if grep -q 'rule="cop-many-args"' "$OUT"; then ok "rule fires (rule=\"cop-many-args\")"; else no "rule NOT found in output"; fi
+if grep -q 'sev="warn"'           "$OUT"; then ok "severity correct (sev=\"warn\")"; else no "sev=\"warn\" NOT emitted"; fi
+if grep -q 'connascence of position' "$OUT"; then ok "message present (connascence of position)"; else no "rule message NOT emitted"; fi
 # must fire on all three target calls in position.cpp
 CNT="$( grep -o 'rule="cop-many-args"' "$OUT" | wc -l | tr -d ' ' )"
-[ "$CNT" = "3" ] && ok "fires on 3 bad calls in position.cpp (got $CNT)" || no "expected 3 findings, got $CNT"
+if [ "$CNT" = "3" ]; then ok "fires on 3 bad calls in position.cpp (got $CNT)"; else no "expected 3 findings, got $CNT"; fi
 
 # verify the exact lines where calls with 5+ args appear
-grep -q 'position.cpp:31' "$OUT" && ok "fires on drawCircle call (line 31)" || no "drawCircle call line NOT flagged"
-grep -q 'position.cpp:62' "$OUT" && ok "fires on allocateMemory call (line 62)" || no "allocateMemory call line NOT flagged"
-grep -q 'position.cpp:78' "$OUT" && ok "fires on transformMatrix call (line 78)" || no "transformMatrix call line NOT flagged"
+if grep -q 'position.cpp:31' "$OUT"; then ok "fires on drawCircle call (line 31)"; else no "drawCircle call line NOT flagged"; fi
+if grep -q 'position.cpp:62' "$OUT"; then ok "fires on allocateMemory call (line 62)"; else no "allocateMemory call line NOT flagged"; fi
+if grep -q 'position.cpp:78' "$OUT"; then ok "fires on transformMatrix call (line 78)"; else no "transformMatrix call line NOT flagged"; fi
 
 # 3. the rule does NOT fire on safe.cpp (calls with <5 args)
 SAFE_CNT=$( grep -c 'safe.cpp' "$OUT" 2>/dev/null ) || SAFE_CNT=0
-[ "$SAFE_CNT" = "0" ] && ok "safe.cpp clean: no findings on calls with <5 args" || no "safe.cpp wrongly has findings"
+if [ "$SAFE_CNT" = "0" ]; then ok "safe.cpp clean: no findings on calls with <5 args"; else no "safe.cpp wrongly has findings"; fi
 
 # 4. xmllint-clean
 "$BIN" "$CORPUS" --lint-rules="$RULES" --no-cache 2>/dev/null | xmllint --noout - 2>/dev/null \

@@ -32,7 +32,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -129,14 +129,14 @@ EOF
 
 "$BIN" "$FIX" --flags --no-cache >"$TMP/o" 2>/dev/null
 rc=$?
-[ "$rc" = "0" ] && ok "exits 0 (a report, not a gate)" || no "--flags exited $rc, expected 0"
+if [ "$rc" = "0" ]; then ok "exits 0 (a report, not a gate)"; else no "--flags exited $rc, expected 0"; fi
 
 names(){ tr '<' '\n' <"$TMP/o" | sed -n 's/^gate name="\([^"]*\)".*/\1/p'; }
 has(){ names | grep -qx "$1"; }
 
 # ── 1) every real gate is still found ─────────────────────────────────────────────────────────────────
 for g in REAL_CPP_GATE REAL_CPP_TIGHT REAL_PY_GATE REAL_PY_ENVIRON_GET REAL_PY_SUBSCRIPT REAL_COMPILE_GATE; do
-    has "$g" && ok "kept: $g (a real declaration survives the filter)" || no "OVER-FILTERED: $g is gone"
+    if has "$g"; then ok "kept: $g (a real declaration survives the filter)"; else no "OVER-FILTERED: $g is gone"; fi
 done
 
 # ── 2) nothing invented ───────────────────────────────────────────────────────────────────────────────
@@ -171,9 +171,9 @@ envcount="$( sed -n 's/.*<flags [^>]*env="\([0-9]*\)".*/\1/p' "$TMP/o" )"
 
 # ── 4) determinism + G4 ───────────────────────────────────────────────────────────────────────────────
 "$BIN" "$FIX" --flags --no-cache >"$TMP/o2" 2>/dev/null
-cmp -s "$TMP/o" "$TMP/o2" && ok "byte-identical run to run" || no "--flags is non-deterministic"
+if cmp -s "$TMP/o" "$TMP/o2"; then ok "byte-identical run to run"; else no "--flags is non-deterministic"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/o" 2>/dev/null && ok "G4 xmllint clean" || no "output is not well-formed XML"
+    if xmllint --noout "$TMP/o" 2>/dev/null; then ok "G4 xmllint clean"; else no "output is not well-formed XML"; fi
 fi
 
 # ── 5) the regression that started this: the verb must not read its OWN help text ──────────────────────

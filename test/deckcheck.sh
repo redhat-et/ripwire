@@ -6,7 +6,7 @@
 # This gate makes that grep automatic and runs it on every prose source that quotes ripwire flags.
 #
 # Scope (what counts as "prose that quotes flags") — EVERY shipped prose surface in this export:
-#   README.md, AGENTS.md, CLAUDE.md, CONTRIBUTING.md, CHANGELOG.md — the public-facing and
+#   README.md, INSTALL.md, AGENTS.md, CLAUDE.md, CONTRIBUTING.md, CHANGELOG.md — the public-facing and
 #                    agent-facing docs at the root; same fabrication risk as a slide.
 #   docs/*.md      — ARCHITECTURE / EVALS / METHODOLOGY and the docs index, EXCEPT the generated
 #                    docs/COMMANDS.md (see the skip below it).
@@ -169,6 +169,7 @@ addSource() {  # addSource <path> <family: root|docs|skills|prompts|paper|presen
     esac
 }
 addSource "$ROOT/README.md" root      # arrives with the public-README lane; addSource no-ops until then
+addSource "$ROOT/INSTALL.md" root     # install/uninstall steps quote installer and binary flags verbatim
 addSource "$ROOT/AGENTS.md" root
 addSource "$ROOT/CLAUDE.md" root
 addSource "$ROOT/CONTRIBUTING.md" root
@@ -194,7 +195,7 @@ for f in "$ROOT"/present/*.js;              do addSource "$f" present; done
 # surviving family could satisfy while another vanished entirely — the failure that let this gate go
 # inert (mutation-proven: `rm -rf prompts/` left the total at exactly the old floor, still a PASS).
 # Each glob family must contribute at least one source, independent of what the others total.
-[ "$rootCount"    -ge 1 ] || { echo "deckcheck: 0 root-doc prose source(s) found (README.md/AGENTS.md/CLAUDE.md/CONTRIBUTING.md/CHANGELOG.md) — refusing to run"; exit 2; }
+[ "$rootCount"    -ge 1 ] || { echo "deckcheck: 0 root-doc prose source(s) found (README.md/INSTALL.md/AGENTS.md/CLAUDE.md/CONTRIBUTING.md/CHANGELOG.md) — refusing to run"; exit 2; }
 [ "$docsCount"    -ge 1 ] || { echo "deckcheck: 0 docs/*.md prose source(s) found — refusing to run"; exit 2; }
 [ "$skillsCount"  -ge 1 ] || { echo "deckcheck: 0 skills/*/*.md prose source(s) found — refusing to run"; exit 2; }
 [ "$promptsCount" -ge 1 ] || { echo "deckcheck: 0 prompts/*.md prose source(s) found — refusing to run"; exit 2; }

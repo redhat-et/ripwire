@@ -19,7 +19,7 @@ CORPUS="$ROOT/test/expandrangefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -44,51 +44,51 @@ echo "expandrangecheck: BIN=$BIN  CORPUS=$CORPUS"
 #    and must contain the entire def, signature through closing brace.
 "$BIN" "$CORPUS" --expand=bigFunction --no-cache >"$TMP/whole.xml" 2>/dev/null
 rc=$?
-[ $rc -eq 0 ] && ok "--expand=bigFunction (no range) exits 0" || no "--expand=bigFunction failed (rc=$rc)"
+if [ $rc -eq 0 ]; then ok "--expand=bigFunction (no range) exits 0"; else no "--expand=bigFunction failed (rc=$rc)"; fi
 grep -q 'lines="' "$TMP/whole.xml" && no "whole-body output carries a lines= marker (should be absent)" || ok "whole-body output has NO lines= marker"
-grep -q 'int bigFunction( int a, int b )' "$TMP/whole.xml" && ok "whole body includes the signature line" || no "whole body missing the signature line"
-grep -q 'return line8;' "$TMP/whole.xml" && ok "whole body includes the last statement" || no "whole body missing the last statement"
+if grep -q 'int bigFunction( int a, int b )' "$TMP/whole.xml"; then ok "whole body includes the signature line"; else no "whole body missing the signature line"; fi
+if grep -q 'return line8;' "$TMP/whole.xml"; then ok "whole body includes the last statement"; else no "whole body missing the last statement"; fi
 
 # 2) determinism of the whole-body (no-range) path — two runs byte-identical.
 "$BIN" "$CORPUS" --expand=bigFunction --no-cache >"$TMP/whole2.xml" 2>/dev/null
-diff -q "$TMP/whole.xml" "$TMP/whole2.xml" >/dev/null && ok "whole-body path deterministic (byte-identical)" || no "whole-body path non-deterministic"
+if diff -q "$TMP/whole.xml" "$TMP/whole2.xml" >/dev/null; then ok "whole-body path deterministic (byte-identical)"; else no "whole-body path non-deterministic"; fi
 
 # 3) --expand=bigFunction:3-5 — exact slice: lines2/3/4 declarations only, nothing else.
 "$BIN" "$CORPUS" --expand=bigFunction:3-5 --no-cache >"$TMP/slice.xml" 2>/dev/null
 rc=$?
-[ $rc -eq 0 ] && ok "--expand=bigFunction:3-5 exits 0" || no "--expand=bigFunction:3-5 failed (rc=$rc)"
-grep -q 'lines="3-5/11"' "$TMP/slice.xml" && ok "slice marker lines=\"3-5/11\" present" || no "slice marker missing/wrong (want lines=\"3-5/11\")"
-grep -q 'int line2 = a + b;' "$TMP/slice.xml" && ok "slice contains line2 (in range)" || no "slice missing line2"
-grep -q 'int line3 = a - b;' "$TMP/slice.xml" && ok "slice contains line3 (in range)" || no "slice missing line3"
-grep -q 'int line4 = a \* b;' "$TMP/slice.xml" && ok "slice contains line4 (in range)" || no "slice missing line4"
+if [ $rc -eq 0 ]; then ok "--expand=bigFunction:3-5 exits 0"; else no "--expand=bigFunction:3-5 failed (rc=$rc)"; fi
+if grep -q 'lines="3-5/11"' "$TMP/slice.xml"; then ok "slice marker lines=\"3-5/11\" present"; else no "slice marker missing/wrong (want lines=\"3-5/11\")"; fi
+if grep -q 'int line2 = a + b;' "$TMP/slice.xml"; then ok "slice contains line2 (in range)"; else no "slice missing line2"; fi
+if grep -q 'int line3 = a - b;' "$TMP/slice.xml"; then ok "slice contains line3 (in range)"; else no "slice missing line3"; fi
+if grep -q 'int line4 = a \* b;' "$TMP/slice.xml"; then ok "slice contains line4 (in range)"; else no "slice missing line4"; fi
 grep -q 'int bigFunction( int a, int b )' "$TMP/slice.xml" && no "slice leaked the signature line (out of range)" || ok "slice correctly excludes the signature line"
 grep -q 'return line8;' "$TMP/slice.xml" && no "slice leaked the return statement (out of range)" || ok "slice correctly excludes the return statement"
 grep -q 'int line5' "$TMP/slice.xml" && no "slice leaked line5 (out of range)" || ok "slice correctly excludes line5"
 
 # 4) determinism of a ranged slice — fixed range on a fixed symbol → byte-identical run to run.
 "$BIN" "$CORPUS" --expand=bigFunction:3-5 --no-cache >"$TMP/slice2.xml" 2>/dev/null
-diff -q "$TMP/slice.xml" "$TMP/slice2.xml" >/dev/null && ok "ranged slice deterministic (byte-identical)" || no "ranged slice non-deterministic"
+if diff -q "$TMP/slice.xml" "$TMP/slice2.xml" >/dev/null; then ok "ranged slice deterministic (byte-identical)"; else no "ranged slice non-deterministic"; fi
 
 # 5) out-of-range clamps (never OOB): 9-999 clamps to 9-11 (the def's actual last line), not a crash.
 "$BIN" "$CORPUS" --expand=bigFunction:9-999 --no-cache >"$TMP/clamp.xml" 2>/dev/null
 rc=$?
-[ $rc -eq 0 ] && ok "out-of-range END exits 0 (no crash)" || no "out-of-range END crashed/failed (rc=$rc)"
-grep -q 'lines="9-11/11"' "$TMP/clamp.xml" && ok "out-of-range END clamps to lines=\"9-11/11\"" || no "out-of-range END did not clamp correctly"
-grep -q '}' "$TMP/clamp.xml" && ok "clamped slice includes the closing brace (last real line)" || no "clamped slice missing the closing brace"
+if [ $rc -eq 0 ]; then ok "out-of-range END exits 0 (no crash)"; else no "out-of-range END crashed/failed (rc=$rc)"; fi
+if grep -q 'lines="9-11/11"' "$TMP/clamp.xml"; then ok "out-of-range END clamps to lines=\"9-11/11\""; else no "out-of-range END did not clamp correctly"; fi
+if grep -q '}' "$TMP/clamp.xml"; then ok "clamped slice includes the closing brace (last real line)"; else no "clamped slice missing the closing brace"; fi
 
 # 5b) START clamps too: START far beyond the def's span still yields a valid (last-line) slice.
 "$BIN" "$CORPUS" --expand=bigFunction:500-999 --no-cache >"$TMP/clamp2.xml" 2>/dev/null
 rc=$?
-[ $rc -eq 0 ] && ok "out-of-range START exits 0 (no crash)" || no "out-of-range START crashed/failed (rc=$rc)"
-grep -q 'lines="11-11/11"' "$TMP/clamp2.xml" && ok "out-of-range START clamps to the last line (lines=\"11-11/11\")" || no "out-of-range START did not clamp correctly"
+if [ $rc -eq 0 ]; then ok "out-of-range START exits 0 (no crash)"; else no "out-of-range START crashed/failed (rc=$rc)"; fi
+if grep -q 'lines="11-11/11"' "$TMP/clamp2.xml"; then ok "out-of-range START clamps to the last line (lines=\"11-11/11\")"; else no "out-of-range START did not clamp correctly"; fi
 
 # 6) reversed range (START>END) degrades cleanly to the swapped, correct slice — never a crash, never
 #    an inverted/empty emission.
 "$BIN" "$CORPUS" --expand=bigFunction:5-3 --no-cache >"$TMP/rev.xml" 2>/dev/null
 rc=$?
-[ $rc -eq 0 ] && ok "reversed range (5-3) exits 0 (no crash)" || no "reversed range crashed/failed (rc=$rc)"
-grep -q 'lines="3-5/11"' "$TMP/rev.xml" && ok "reversed range (5-3) swaps to lines=\"3-5/11\"" || no "reversed range did not swap correctly"
-diff -q "$TMP/rev.xml" "$TMP/slice.xml" >/dev/null && ok "reversed range (5-3) == forward range (3-5) output" || no "reversed range output differs from the equivalent forward range"
+if [ $rc -eq 0 ]; then ok "reversed range (5-3) exits 0 (no crash)"; else no "reversed range crashed/failed (rc=$rc)"; fi
+if grep -q 'lines="3-5/11"' "$TMP/rev.xml"; then ok "reversed range (5-3) swaps to lines=\"3-5/11\""; else no "reversed range did not swap correctly"; fi
+if diff -q "$TMP/rev.xml" "$TMP/slice.xml" >/dev/null; then ok "reversed range (5-3) == forward range (3-5) output"; else no "reversed range output differs from the equivalent forward range"; fi
 
 # 7) malformed range degrades to the WHOLE body, with a clear stderr note — never a crash.
 #    REPINNED (§P8 seam 1, 2026-07-28): the disambiguator is now "the tail after the LAST ':' is a range
@@ -98,10 +98,10 @@ diff -q "$TMP/rev.xml" "$TMP/slice.xml" >/dev/null && ok "reversed range (5-3) =
 #    UNCHANGED and still gated here — it just needs a digit-leading malformed tail to reach it.
 "$BIN" "$CORPUS" --expand=bigFunction:5x-7 --no-cache >"$TMP/mal.xml" 2>"$TMP/mal.err"
 rc=$?
-[ $rc -eq 0 ] && ok "malformed range (5x-7) exits 0 (degrades, no crash)" || no "malformed range (5x-7) crashed/failed (rc=$rc)"
+if [ $rc -eq 0 ]; then ok "malformed range (5x-7) exits 0 (degrades, no crash)"; else no "malformed range (5x-7) crashed/failed (rc=$rc)"; fi
 grep -q 'lines="' "$TMP/mal.xml" && no "malformed range still emitted a lines= marker (should degrade to whole-body)" || ok "malformed range correctly degrades to whole-body (no lines= marker)"
-grep -q 'int bigFunction( int a, int b )' "$TMP/mal.xml" && ok "malformed range: whole body present (signature line included)" || no "malformed range: whole body missing after degrade"
-grep -qi 'malformed range' "$TMP/mal.err" && ok "malformed range prints a clear stderr note" || no "malformed range: no stderr note"
+if grep -q 'int bigFunction( int a, int b )' "$TMP/mal.xml"; then ok "malformed range: whole body present (signature line included)"; else no "malformed range: whole body missing after degrade"; fi
+if grep -qi 'malformed range' "$TMP/mal.err"; then ok "malformed range prints a clear stderr note"; else no "malformed range: no stderr note"; fi
 
 # 7a) …and the OTHER reading of the same token shape now works: a non-digit tail is a file:name selector.
 "$BIN" "$CORPUS" --top-k=0 --expand=rangedemo.cpp:bigFunction --no-cache >"$TMP/sel.xml" 2>"$TMP/sel.err"
@@ -113,25 +113,25 @@ rc=$?
 # 7b) malformed range (START=0, 1-based so 0 is invalid) also degrades cleanly.
 "$BIN" "$CORPUS" --expand=bigFunction:0-5 --no-cache >"$TMP/mal0.xml" 2>"$TMP/mal0.err"
 rc=$?
-[ $rc -eq 0 ] && ok "malformed range (0-5) exits 0 (degrades, no crash)" || no "malformed range (0-5) crashed/failed (rc=$rc)"
+if [ $rc -eq 0 ]; then ok "malformed range (0-5) exits 0 (degrades, no crash)"; else no "malformed range (0-5) crashed/failed (rc=$rc)"; fi
 grep -q 'lines="' "$TMP/mal0.xml" && no "malformed range (0-5) still emitted a lines= marker" || ok "malformed range (0-5) degrades to whole-body"
 
 # 7c) malformed range (missing dash) also degrades cleanly.
 "$BIN" "$CORPUS" --expand=bigFunction:5 --no-cache >"$TMP/mal5.xml" 2>"$TMP/mal5.err"
 rc=$?
-[ $rc -eq 0 ] && ok "malformed range (5, no dash) exits 0 (degrades, no crash)" || no "malformed range (5, no dash) crashed/failed (rc=$rc)"
+if [ $rc -eq 0 ]; then ok "malformed range (5, no dash) exits 0 (degrades, no crash)"; else no "malformed range (5, no dash) crashed/failed (rc=$rc)"; fi
 grep -q 'lines="' "$TMP/mal5.xml" && no "malformed range (5, no dash) still emitted a lines= marker" || ok "malformed range (5, no dash) degrades to whole-body"
 
 # 8) UTF-8 safety: a 1-line slice landing exactly on the café (UTF-8) comment line must stay valid UTF-8
 #    (no split codepoint) and must pass xmllint.
 "$BIN" "$CORPUS" --expand=bigFunction:7-7 --no-cache >"$TMP/utf8.xml" 2>/dev/null
 rc=$?
-[ $rc -eq 0 ] && ok "UTF-8 line slice (7-7) exits 0" || no "UTF-8 line slice (7-7) failed (rc=$rc)"
-grep -q 'lines="7-7/11"' "$TMP/utf8.xml" && ok "UTF-8 line slice marker lines=\"7-7/11\" present" || no "UTF-8 line slice marker missing/wrong"
-grep -q 'café' "$TMP/utf8.xml" && ok "UTF-8 codepoint (café) survived the slice intact" || no "UTF-8 codepoint corrupted or missing from the slice"
+if [ $rc -eq 0 ]; then ok "UTF-8 line slice (7-7) exits 0"; else no "UTF-8 line slice (7-7) failed (rc=$rc)"; fi
+if grep -q 'lines="7-7/11"' "$TMP/utf8.xml"; then ok "UTF-8 line slice marker lines=\"7-7/11\" present"; else no "UTF-8 line slice marker missing/wrong"; fi
+if grep -q 'café' "$TMP/utf8.xml"; then ok "UTF-8 codepoint (café) survived the slice intact"; else no "UTF-8 codepoint corrupted or missing from the slice"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/utf8.xml" 2>"$TMP/utf8.lint" && ok "UTF-8 slice output is well-formed XML (xmllint)" || { no "UTF-8 slice output failed xmllint"; cat "$TMP/utf8.lint"; }
-    python3 -c "import sys; open('$TMP/utf8.xml','rb').read().decode('utf-8')" 2>"$TMP/utf8.dec" && ok "UTF-8 slice output decodes as valid UTF-8" || { no "UTF-8 slice output is NOT valid UTF-8"; cat "$TMP/utf8.dec"; }
+    if xmllint --noout "$TMP/utf8.xml" 2>"$TMP/utf8.lint"; then ok "UTF-8 slice output is well-formed XML (xmllint)"; else { no "UTF-8 slice output failed xmllint"; cat "$TMP/utf8.lint"; }; fi
+    if python3 -c "import sys; open('$TMP/utf8.xml','rb').read().decode('utf-8')" 2>"$TMP/utf8.dec"; then ok "UTF-8 slice output decodes as valid UTF-8"; else { no "UTF-8 slice output is NOT valid UTF-8"; cat "$TMP/utf8.dec"; }; fi
 else
     printf '  SKIP  xmllint not installed\n'
 fi
@@ -148,10 +148,10 @@ fi
 #     one invocation — the bare one stays whole, the ranged one slices. (Uses helperOne + bigFunction:3-5.)
 "$BIN" "$CORPUS" --expand=helperOne,bigFunction:3-5 --no-cache >"$TMP/mix.xml" 2>/dev/null
 rc=$?
-[ $rc -eq 0 ] && ok "mixed --expand=helperOne,bigFunction:3-5 exits 0" || no "mixed --expand failed (rc=$rc)"
+if [ $rc -eq 0 ]; then ok "mixed --expand=helperOne,bigFunction:3-5 exits 0"; else no "mixed --expand failed (rc=$rc)"; fi
 grep -q 'n="helperOne"' "$TMP/mix.xml" && ! grep -A2 'n="helperOne"' "$TMP/mix.xml" | grep -q 'lines="' \
     && ok "mixed request: helperOne (no range) stays whole-body" || no "mixed request: helperOne unexpectedly carries a lines= marker"
-grep -q 'lines="3-5/11"' "$TMP/mix.xml" && ok "mixed request: bigFunction still slices to 3-5/11" || no "mixed request: bigFunction slice missing/wrong"
+if grep -q 'lines="3-5/11"' "$TMP/mix.xml"; then ok "mixed request: bigFunction still slices to 3-5/11"; else no "mixed request: bigFunction slice missing/wrong"; fi
 
 echo
 if [ "$fail" -eq 0 ]; then

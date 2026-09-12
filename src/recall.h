@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // recall.h — `--recall=TASK` / MCP `memory_recall`: retrieve the most RELEVANT documents (agent-memory
 // notes, design docs) for a task and emit their FULL bodies, token-budgeted. Where `--for` returns the
@@ -713,7 +716,7 @@ inline std::string formatDemotedNote( docparse::GeneratedDocReason reason )
 inline std::string formatRecallSeparator( std::string_view path, float score, std::string_view demotedNote )
 {
     char scoreText[ 352 ];
-    std::snprintf( scoreText, sizeof( scoreText ), "%.3f", double( score ) );
+    rw::formatTo( scoreText, sizeof( scoreText ), "{:.3f}", double( score ) );
 
     std::string line;
     line.reserve( 40 + path.size() + demotedNote.size() );
@@ -2043,7 +2046,7 @@ inline int emitRecallBudgeted( std::FILE* out, const RecallBundle& bundle, std::
             std::fwrite( honest.data(), 1, honest.size(), out );
         }
         std::fwrite( note.data(), 1, noteBytes, out );
-        std::fprintf( stderr, "ripwire: --token-budget exceeded: withheld_est_tokens=%zu > budget=%zu\n",
+        rw::emitTo( stderr, "ripwire: --token-budget exceeded: withheld_est_tokens={} > budget={}\n",
                       bundle.shape.estTokens, budgetTokens );
         return 3;
     }

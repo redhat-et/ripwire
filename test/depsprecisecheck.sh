@@ -27,7 +27,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/depsprecisefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -67,10 +67,10 @@ fi
 # ── determinism: byte-identical run-to-run + warm == cold ─────────────────────────────────────────
 "$BIN" "$FIX" --deps --no-cache >"$TMP/d1" 2>/dev/null
 "$BIN" "$FIX" --deps --no-cache >"$TMP/d2" 2>/dev/null
-cmp -s "$TMP/d1" "$TMP/d2" && ok "deterministic (two --deps --no-cache runs identical)" || no "non-deterministic"
+if cmp -s "$TMP/d1" "$TMP/d2"; then ok "deterministic (two --deps --no-cache runs identical)"; else no "non-deterministic"; fi
 "$BIN" "$FIX" --deps --cache="$TMP/c.bin" >"$TMP/cold" 2>/dev/null
 "$BIN" "$FIX" --deps --cache="$TMP/c.bin" >"$TMP/warm" 2>/dev/null
-cmp -s "$TMP/cold" "$TMP/warm" && ok "warm == cold (precise adjacency order-stable through cache)" || no "warm != cold"
+if cmp -s "$TMP/cold" "$TMP/warm"; then ok "warm == cold (precise adjacency order-stable through cache)"; else no "warm != cold"; fi
 
 # ── well-formed XML ───────────────────────────────────────────────────────────────────────────────
 command -v xmllint >/dev/null 2>&1 \

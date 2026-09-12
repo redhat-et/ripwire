@@ -32,7 +32,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -100,6 +100,6 @@ fi
 # ── (7) determinism with the new attribute ──────────────────────────────────────────────────────────
 "$BIN" "$TMP/corpus" --no-cache --grep="return x + 1" >"$TMP/g1" 2>/dev/null
 "$BIN" "$TMP/corpus" --no-cache --grep="return x + 1" >"$TMP/g2" 2>/dev/null
-diff -q "$TMP/g1" "$TMP/g2" >/dev/null && ok "(7) grep output deterministic" || no "(7) grep output differs run-to-run"
+if diff -q "$TMP/g1" "$TMP/g2" >/dev/null; then ok "(7) grep output deterministic"; else no "(7) grep output differs run-to-run"; fi
 
 exit $fail

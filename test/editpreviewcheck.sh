@@ -53,7 +53,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/editpreviewfix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -81,13 +81,18 @@ BASE="$WORK/base"; mkcorpus "$BASE"
 mkdir -p "$WORK/gen"
 printf 'int trim( int a, int b )\n{\n    return \000 a;\n}\n' > "$WORK/gen/nul.txt"
 
-# the FOUR normalisations, and nothing else. The document is minified XML on ONE line, so the greedy
+# the FIVE normalisations, and nothing else. The document is minified XML on ONE line, so the greedy
 # comment strip removes exactly the single leading legend. The fourth (E3, terminality round A 2026-09-05):
 # the preview-only <overwrite> child — the CURRENT span an apply would replace, which the post-hoc document
 # cannot carry because after the apply that span no longer exists — is dropped before the comparison.
 # (perl -0 slurps the whole document: the overwrite CDATA carries the span's own newlines, which a per-line sed
 # could never match across.)
-norm(){ printf '%s' "$1" | perl -0pe 's/<overwrite [^>]*><!\[CDATA\[.*?\]\]><\/overwrite>//s' | sed -e 's/<!--.*-->//' -e 's/ at="[^"]*"//g' -e 's/ preview="1"//g'; }
+# The FIFTH (2026-09-10): est_tokens=, which prices THIS document in bytes. The preview document is bigger
+# than the applied one BY CONSTRUCTION — it carries the preview sentence in its legend and the <overwrite>
+# child, both of which the three normalisations above then remove — so the two prices differ, and a price
+# that did NOT differ would be the bug (it would mean est_tokens stopped covering the whole document).
+# Stripped, therefore, exactly like at=: a per-document fact this comparison is not about.
+norm(){ printf '%s' "$1" | perl -0pe 's/<overwrite [^>]*><!\[CDATA\[.*?\]\]><\/overwrite>//s' | sed -e 's/<!--.*-->//' -e 's/ at="[^"]*"//g' -e 's/ preview="1"//g' -e 's/ est_tokens="[0-9]*"//g'; }
 statusOf(){ printf '%s' "$1" | sed -e 's/<!--.*-->//' | grep -oE 'status="[a-z-]+"' | head -1; }
 
 preview(){ # $1 selector  $2 payload-path
@@ -157,7 +162,7 @@ disagree=$(( valid - agree ))
 # "at most one disagreement", which on 25 valid payloads is a STRICTER rate than 29/30, never a looser one.
 [ "$disagree" -le 1 ] && ok "pre-apply == post-apply on $agree of $valid valid payloads ($disagree disagreement, floor is at most 1)" \
                       || no "$disagree disagreements across $valid valid payloads — the band allows at most 1"
-[ "$falseclean" = 0 ] && ok "zero false \"unchanged\" verdicts" || no "$falseclean false-clean verdict(s) — the band fails outright"
+if [ "$falseclean" = 0 ]; then ok "zero false \"unchanged\" verdicts"; else no "$falseclean false-clean verdict(s) — the band fails outright"; fi
 [ "$refused" = "$invalid" ] && ok "all $invalid invalid payloads refused (exit != 0, empty stdout)" \
                             || no "only $refused of $invalid invalid payloads refused"
 
@@ -333,7 +338,7 @@ assert "\n".join( lines[ int( attrs["l"] ) - 1 : int( attrs["end"] ) ] ) == body
 assert "capped" not in attrs, "a %d-byte span must not be capped" % len( body )
 print( "OK <overwrite l=%s end=%s bytes=%s> == the span on disk" % ( attrs["l"], attrs["end"], attrs["bytes"] ) )
 PY
-[ $? -eq 0 ] && ok "(O) $( cat "$WORK/o.res" )" || no "(O) $( tail -1 "$WORK/o.res" )"
+if [ $? -eq 0 ]; then ok "(O) $( cat "$WORK/o.res" )"; else no "(O) $( tail -1 "$WORK/o.res" )"; fi
 # (O3) the budget: a 400-line definition previews with head bytes only, disclosed
 OWB="$WORK/owbig"; mkcorpus "$OWB"
 python3 - "$OWB/big.cpp" <<'PY'
@@ -356,7 +361,7 @@ assert "elided_lines" in a and int( a["elided_lines"] ) > 0, "capped without eli
 assert m.group( 2 ).startswith( "int huge( int x )\n{" ), "the head is not the span's start"
 print( "OK capped: shown=%s of bytes=%s, elided_lines=%s" % ( a["shown"], a["bytes"], a["elided_lines"] ) )
 PY
-[ $? -eq 0 ] && ok "(O3) an oversize span is budgeted and disclosed: $( cat "$WORK/o3.res" )" || no "(O3) $( tail -1 "$WORK/o3.res" )"
+if [ $? -eq 0 ]; then ok "(O3) an oversize span is budgeted and disclosed: $( cat "$WORK/o3.res" )"; else no "(O3) $( tail -1 "$WORK/o3.res" )"; fi
 # (O4) compact <-> compact parity: the CLI preview under --legend=compact == MCP edit_check with legend:"compact"
 CLI_C="$( cd "$BASE" && "$BIN" . --edit-check=lib.h:scale --edit-payload="$FIX/payloads/chg01.txt" --dry-run --no-cache --legend=compact 2>/dev/null )"
 MCP_C="$( cd "$BASE" && python3 - "$BIN" "$FIX/payloads/chg01.txt" <<'PYEOF' 2>/dev/null

@@ -38,6 +38,8 @@
 //
 
 #pragma once
+#include "emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 #include "platform.h"        // ALWAYS_INLINE
 
@@ -77,7 +79,7 @@ struct Snapshot
 #endif
 
 #if PROFILE_PMC_VERBOSE
-  #define PMC_DIAG( ... ) std::fprintf( stderr, "prof::pmc: " __VA_ARGS__ )
+  #define PMC_DIAG( ... ) rw::emitRaw( stderr, "prof::pmc: " __VA_ARGS__  )
 #else
   #define PMC_DIAG( ... ) ( (void) 0 )
 #endif

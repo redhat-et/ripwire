@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // pincensus.h — the S6-C SILENT-PIN CENSUS: an eval-only, flag-gated record of WHICH mechanism decided
 // each resolved call site, and WHICH target it decided on, by canonical identity.
@@ -19,9 +21,9 @@
 // the index's own pinned target(s) in the SAME canonical-id space — so the census file holds both sides
 // of the join and no protobuf reader is needed downstream.
 //
-// Sites that never reach emission (a name with no in-repo def, a tier-3 non-unique drop, a self-only
-// tier) produce NO row: they made no commitment, so there is nothing to audit. That is a floor on the
-// row count, not a total, and the trailer says so.
+// Sites that never reach emission (a name with no in-repo def, a tier-3 decline, a self-only tier) produce
+// NO row: they made no commitment, so there is nothing to audit. That is a floor on the row count, not a
+// total, and the trailer says so — the `# dispositions` line beside it is the total (CallDisposition below).
 //
 // ── shape (G2) ──────────────────────────────────────────────────────────────────────────────────────
 // SoA over parallel vectors keyed by row index, 32-bit handles throughout, callee names in one flat pool
@@ -36,6 +38,7 @@
 #include "resolve.h"        // canonicalIdForEmit — the census id must be the map's id= spelling
 #include "scipoverlay.h"    // kScipNonDefExternal / kScipNonDefInIndex — the O-row sentinel kinds
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -91,6 +94,53 @@ inline const char* pinMechName( std::uint8_t m ) noexcept
     return "?";
 }
 
+// ── the CALL DISPOSITIONS — the census's conservation line ────────────────────────────────────────────
+// The `C` rows are a FLOOR: a site that commits to nothing writes no row. The dispositions are the TOTAL.
+// Every reference buildGraph's resolve loop takes up as a call (isResolvableCallReference below) ends in
+// EXACTLY ONE bucket, counted when its loop iteration ends — so a `continue` that names no bucket lands in
+// Unaccounted instead of vanishing. The census writer re-derives the population from ing.references and
+// prints both; test/declinecheck.sh arm (F) asserts they balance. Three buckets are also header gauges
+// (external=, unresolved=, declined=); the others have no header surface on purpose, each for the reason
+// its comment gives.
+enum class CallDisposition : std::uint8_t
+{
+    Bound             = 0,   // at least one non-self edge committed — exactly the sites with a non-external C row
+    Self              = 1,   // every surviving target was the caller itself (recursion), or a SCIP-covered site whose
+                             // targets were all self/out-of-range: the only symbol that could lose a caller is the caller
+    External          = 2,   // a vetoExternal refusal — the Phase-5 veto, an ES import bound outside the tree, super() past the MRO, the C++ std:: guard — header external=
+    Unresolved        = 3,   // an in-repo name the tool refused to answer (every def lang-filtered, an L3 known-indirect
+                             // call, a shadowed/refused/renamed ES import) — header unresolved=
+    Undefined         = 4,   // no in-repo definition of the name at all — a stdlib or third-party call, no gauge by design
+    OtherRoot         = 5,   // multi-root only: every compatible definition lives in ANOTHER root and no include/import
+                             // reaches it — external to this root, which is what that root's solo run would say
+    QualifiedExternal = 6,   // a Rust `Scope::name()` call no in-repo member of `Scope` can answer (the H4 W3 guard)
+    Declined          = 7,   // tier 3: two or more same-language candidates, none in the caller's file or directory, none
+                             // pinned by a qualifier or a receiver rule — header declined=, answers' declined_calls=
+    FileScope         = 8,   // a call outside every symbol (module / file scope): there is no caller node to hang an edge on
+    Unaccounted       = 9    // an exit that named no bucket. Always a resolver bug: buildGraph raises a degrade alert
+};
+inline constexpr std::size_t kCallDispositionCount = 10;   // one past Unaccounted — size every per-disposition array with this
+
+using CallDispositionCounts = std::array<std::size_t, kCallDispositionCount>;
+
+// The census spelling of each bucket, indexed by its value: a declarative table (CONTRIBUTING §3), sized by the
+// count so a new bucket without a name does not compile, and pinned at both ends so a reorder cannot misname one.
+inline constexpr std::array<const char*, kCallDispositionCount> kCallDispositionNames = {
+    "bound", "self", "external", "unresolved", "undefined", "other_root", "qualified_external", "declined", "file_scope", "unaccounted"
+};
+static_assert( std::string_view( kCallDispositionNames[ std::size_t( CallDisposition::Bound ) ] ) == "bound" );
+static_assert( std::string_view( kCallDispositionNames[ std::size_t( CallDisposition::Declined ) ] ) == "declined" );
+static_assert( std::string_view( kCallDispositionNames[ std::size_t( CallDisposition::Unaccounted ) ] ) == "unaccounted" );
+
+// The POPULATION the dispositions partition: a reference the call graph could carry. Inheritance, doc-mention
+// and HAS-A references are other relations with their own passes; read/write/import/type use-sites live only in
+// the use-site index (ABS-3). One predicate, read by the resolve loop's filter AND by the census writer's
+// re-derivation, so the two cannot disagree about what a call is — only about what happened to one.
+inline bool isResolvableCallReference( const Reference& r ) noexcept
+{
+    return !r.isInherit && !r.isDocLink && !r.isCompose && ( r.role == RefRole::Call || r.role == RefRole::Macro );
+}
+
 // Per-row provenance bits — every narrowing stage that FIRED on this site, not just the deciding one. A
 // site S6-C narrowed 3→2 is labelled `split` (it is still ambiguous and still counted in `amb=`), and
 // without these bits the fact that locality touched it at all would be invisible. Cheap, and it keeps the
@@ -127,6 +177,9 @@ struct PinCensus
     std::vector<std::uint8_t>  oraSentinel; // 0 = in-repo target(s) in oraTo; kScipNonDefExternal / kScipNonDefInIndex =
                                             //   SCIP resolved the site to something that is not a ripwire definition
                                             //   (no oraTo entries; the writer prints `@external` / `@nondef`)
+
+    // ---- the conservation line's buckets (buildGraph copies Graph::callDispositions in when armed) --------
+    CallDispositionCounts      dispositions{};
 
     bool armed = false;                     // false ⇒ nothing was recorded and nothing will be written
 
@@ -291,14 +344,14 @@ inline void writePinCensusDecisionRows( std::FILE* f, const PinCensus& pc, const
             // file. Derived from the roster now, so a mechanism added below cannot be dropped again.
             ++mechCount[ m ];
         }
-        std::fprintf( f, "C\t%s\t%u\t%u\t%s\t%s\t%s\t", pinMechName( m ), unsigned( pc.preTier[ i ] ), unsigned( pc.postReal[ i ] ),
+        rw::emitTo( f, "C\t{}\t{}\t{}\t{}\t{}\t{}\t", pinMechName( m ), unsigned( pc.preTier[ i ] ), unsigned( pc.postReal[ i ] ),
                       pinFlagString( pc.flags[ i ] ).c_str(), pinCensusIdOf( canon, pc.fromSym[ i ] ), pc.nameAt( pc.nameOff[ i ] ) );
         const std::uint32_t end = pc.rowEnd( i );
         for( std::uint32_t t = pc.tgtStart[ i ]; t < end; ++t )
         {
-            std::fprintf( f, "%s%s", ( t > pc.tgtStart[ i ] ) ? "|" : "", pinCensusIdOf( canon, pc.tgtIds[ t ] ) );
+            rw::emitTo( f, "{}{}", ( t > pc.tgtStart[ i ] ) ? "|" : "", pinCensusIdOf( canon, pc.tgtIds[ t ] ) );
         }
-        std::fprintf( f, "\t%u\n", unsigned( pc.line[ i ] ) );
+        rw::emitTo( f, "\t{}\n", unsigned( pc.line[ i ] ) );
     }
 }
 
@@ -307,7 +360,7 @@ inline void writePinCensusOracleRows( std::FILE* f, const PinCensus& pc, const s
 {
     for( std::size_t i = 0; i < pc.oraRows(); ++i )
     {
-        std::fprintf( f, "O\t%s\t%s\t", pinCensusIdOf( canon, pc.oraFrom[ i ] ), pc.nameAt( pc.oraNameOff[ i ] ) );
+        rw::emitTo( f, "O\t{}\t{}\t", pinCensusIdOf( canon, pc.oraFrom[ i ] ), pc.nameAt( pc.oraNameOff[ i ] ) );
         const std::uint8_t sentinel = ( i < pc.oraSentinel.size() ) ? pc.oraSentinel[ i ] : std::uint8_t( 0 );
         if( sentinel != 0 )
         {
@@ -316,7 +369,7 @@ inline void writePinCensusOracleRows( std::FILE* f, const PinCensus& pc, const s
         const std::uint32_t end = pc.oraRowEnd( i );
         for( std::uint32_t t = pc.oraStart[ i ]; t < end; ++t )
         {
-            std::fprintf( f, "%s%s", ( t > pc.oraStart[ i ] ) ? "|" : "", pinCensusIdOf( canon, pc.oraTo[ t ] ) );
+            rw::emitTo( f, "{}{}", ( t > pc.oraStart[ i ] ) ? "|" : "", pinCensusIdOf( canon, pc.oraTo[ t ] ) );
         }
         std::fputc( '\n', f );
     }
@@ -327,7 +380,7 @@ inline void writePinCensusSymbolRows( std::FILE* f, const IngestResult& ing, con
 {
     for( std::size_t i = 0; i < ing.symbols.size(); ++i )
     {
-        std::fprintf( f, "S\t%s\t%s\t%u\n", canon[ i ].c_str(), symTag( ing.symbols[ i ].kind ), unsigned( ing.symbols[ i ].line ) );
+        rw::emitTo( f, "S\t{}\t{}\t{}\n", canon[ i ].c_str(), symTag( ing.symbols[ i ].kind ), unsigned( ing.symbols[ i ].line ) );
     }
 }
 
@@ -342,32 +395,51 @@ inline bool writePinCensus( const char* path, const PinCensus& pc, const IngestR
     }
     const std::vector<std::string> canon = pinCensusIdentities( ing, root );
 
-    std::fprintf( f, "# ripwire pin-census v2\tC=kind\\tmech\\tpre\\tpost\\tflags\\tcaller_id\\tcallee\\ttargets(|-sep)\\tline\n" );
-    std::fprintf( f, "# line is the 1-based call-site line in the caller's file (v2, appended LAST so v1 readers are unchanged):\n" );
-    std::fprintf( f, "#   the key a SCIP occurrence joins on, so a coverage loss can be classified per site instead of guessed.\n" );
-    std::fprintf( f, "# O rows (only under --scip) are the SCIP oracle: O\\tcaller_id\\tcallee\\ttargets(|-sep)\n" );
-    std::fprintf( f, "#   a target of @external (a builtin / another package) or @nondef (an in-index parameter, local or\n" );
-    std::fprintf( f, "#   attribute ripwire extracts no symbol for) means SCIP resolved the site to something that is NOT a\n" );
-    std::fprintf( f, "#   ripwire definition — the index spoke, and disagrees with every in-repo target the C row names.\n" );
-    std::fprintf( f, "# S rows (v2) are the DEFINITION universe, one per symbol: S\\tid\\tkind\\tline — the def side of the\n" );
-    std::fprintf( f, "#   SCIP join (buildScipOverlay maps a SCIP definition to a symbol by exact file+line), listed in full.\n" );
-    std::fprintf( f, "# ids are path::scope::name#NODEID (path::name#NODEID when unscoped) — NEVER a bare name: the\n" );
-    std::fprintf( f, "#   handle is the join key and is stable across runs of one binary on one corpus, --scip or not.\n" );
-    std::fprintf( f, "# mech: unique|qualified|receiver-rule|cone|arity|locality|split|scip|binding|external|import — the stage that DECIDED the site\n" );
-    std::fprintf( f, "#   external (Phase 5): the external-name VETO refused the site — an EMPTY target list, no edge; the row is\n" );
-    std::fprintf( f, "#   scored right iff SCIP's answer is @external (the name was bound outside the indexed tree).\n" );
-    std::fprintf( f, "# flags: q=qualified r=receiver-rule c=cha-cone a=arity l=locality-tiebreak-fired m=es-import-binding (every stage that fired)\n" );
-    std::fprintf( f, "# rows are a FLOOR on call sites, not a total: a site that produced no edge (name undefined in-repo,\n" );
-    std::fprintf( f, "#   tier-3 non-unique drop, self-only tier) made no commitment and is deliberately absent.\n" );
+    rw::emitRaw( f, "# ripwire pin-census v2\tC=kind\\tmech\\tpre\\tpost\\tflags\\tcaller_id\\tcallee\\ttargets(|-sep)\\tline\n" );
+    rw::emitRaw( f, "# line is the 1-based call-site line in the caller's file (v2, appended LAST so v1 readers are unchanged):\n" );
+    rw::emitRaw( f, "#   the key a SCIP occurrence joins on, so a coverage loss can be classified per site instead of guessed.\n" );
+    rw::emitRaw( f, "# O rows (only under --scip) are the SCIP oracle: O\\tcaller_id\\tcallee\\ttargets(|-sep)\n" );
+    rw::emitRaw( f, "#   a target of @external (a builtin / another package) or @nondef (an in-index parameter, local or\n" );
+    rw::emitRaw( f, "#   attribute ripwire extracts no symbol for) means SCIP resolved the site to something that is NOT a\n" );
+    rw::emitRaw( f, "#   ripwire definition — the index spoke, and disagrees with every in-repo target the C row names.\n" );
+    rw::emitRaw( f, "# S rows (v2) are the DEFINITION universe, one per symbol: S\\tid\\tkind\\tline — the def side of the\n" );
+    rw::emitRaw( f, "#   SCIP join (buildScipOverlay maps a SCIP definition to a symbol by exact file+line), listed in full.\n" );
+    rw::emitRaw( f, "# ids are path::scope::name#NODEID (path::name#NODEID when unscoped) — NEVER a bare name: the\n" );
+    rw::emitRaw( f, "#   handle is the join key and is stable across runs of one binary on one corpus, --scip or not.\n" );
+    rw::emitRaw( f, "# mech: unique|qualified|receiver-rule|cone|arity|locality|split|scip|binding|external|import — the stage that DECIDED the site\n" );
+    rw::emitRaw( f, "#   external (Phase 5): the external-name VETO refused the site — an EMPTY target list, no edge; the row is\n" );
+    rw::emitRaw( f, "#   scored right iff SCIP's answer is @external (the name was bound outside the indexed tree).\n" );
+    rw::emitRaw( f, "# flags: q=qualified r=receiver-rule c=cha-cone a=arity l=locality-tiebreak-fired m=es-import-binding (every stage that fired)\n" );
+    rw::emitRaw( f, "# rows are a FLOOR on call sites, not a total: a site that produced no edge (name undefined in-repo,\n" );
+    rw::emitRaw( f, "#   tier-3 decline, self-only tier) made no commitment and is deliberately absent.\n" );
+    rw::emitRaw( f, "# the TOTAL is the `# dispositions` line above the summary: calls= is re-derived from the references, and\n" );
+    rw::emitRaw( f, "#   every call lands in exactly one of bound|self|external|unresolved|undefined|other_root|qualified_external|\n" );
+    rw::emitRaw( f, "#   declined|file_scope|unaccounted, which must sum to it; bound == the non-external C rows, unaccounted == 0.\n" );
 
     std::size_t mechCount[ kPinMechCount ] = {};
     writePinCensusDecisionRows( f, pc, canon, mechCount );
     writePinCensusOracleRows( f, pc, canon );
     writePinCensusSymbolRows( f, ing, canon );
-    std::fprintf( f, "# summary rows=%zu oracle_rows=%zu symbols=%zu", pc.rows(), pc.oraRows(), ing.symbols.size() );
+    // calls= is counted HERE, off the references, never summed from the buckets it is checked against: a sum of
+    // the buckets would balance by construction and catch nothing.
+    std::size_t callCount = 0;
+    for( const Reference& r : ing.references )
+    {
+        if( isResolvableCallReference( r ) )
+        {
+            ++callCount;
+        }
+    }
+    rw::emitTo( f, "# dispositions calls={}", callCount );
+    for( std::size_t d = 0; d < kCallDispositionCount; ++d )
+    {
+        rw::emitTo( f, " {}={}", kCallDispositionNames[ d ], pc.dispositions[ d ] );
+    }
+    std::fputc( '\n', f );
+    rw::emitTo( f, "# summary rows={} oracle_rows={} symbols={}", pc.rows(), pc.oraRows(), ing.symbols.size() );
     for( std::uint8_t m = 0; m < kPinMechCount; ++m )
     {
-        std::fprintf( f, " %s=%zu", pinMechName( m ), mechCount[ m ] );
+        rw::emitTo( f, " {}={}", pinMechName( m ), mechCount[ m ] );
     }
     std::fputc( '\n', f );
     std::fclose( f );

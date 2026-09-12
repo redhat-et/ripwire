@@ -72,7 +72,7 @@ FIX="$ROOT/test/phpfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -87,7 +87,7 @@ echo "=== 0. PRESENCE: the fixture really spells every shape the arms below asse
 # ═══════════════════════════════════════════════════════════════════════════
 # A gate whose probe target can vanish passes for the wrong reason (CONTRIBUTING.md §2). These greps
 # are the guard: if a fixture edit deletes a shape, THIS arm reds instead of the assertion going inert.
-presence(){ grep -qF -- "$2" "$FIX/$1" && ok "fixture $1 spells: $3" || no "fixture $1 no longer spells: $3"; }
+presence(){ if grep -qF -- "$2" "$FIX/$1"; then ok "fixture $1 spells: $3"; else no "fixture $1 no longer spells: $3"; fi; }
 presence src/GreeterInterface.php 'interface GreeterInterface'        'an interface declaration'
 presence src/Greeter.php          'trait Loggable'                    'a trait declaration'
 presence src/Greeter.php          'implements GreeterInterface'       'a class_interface_clause'
@@ -104,8 +104,8 @@ presence view.phtml               '<?php'                             'markup wr
 MAP_OUT="$TMP/map.xml"
 "$BIN" "$FIX" --no-cache >"$MAP_OUT" 2>"$TMP/map.err"
 MAP_EXIT=$?
-[ "$MAP_EXIT" -eq 0 ] && ok "default map: exits 0 on the PHP fixture" || no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP_OUT" && ok "default map: passes xmllint --noout" || no "default map: xmllint failed"; }
+if [ "$MAP_EXIT" -eq 0 ]; then ok "default map: exits 0 on the PHP fixture"; else no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"; fi
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP_OUT"; then ok "default map: passes xmllint --noout"; else no "default map: xmllint failed"; fi; }
 [ -s "$TMP/map.err" ] && no "default map: unexpected stderr (ABI/degrade?): $( cat "$TMP/map.err" )" || ok "default map: clean stderr (no ABI mismatch / degrade)"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -113,10 +113,10 @@ echo
 echo "=== 1. STRUCTURE: 16 symbols across 5 files, kinds + edges match the fixture ==="
 # ═══════════════════════════════════════════════════════════════════════════
 
-grep -q 'files=5 symbols=16' "$MAP_OUT" && ok "header: files=5 symbols=16" || no "header: expected files=5 symbols=16: $( grep -o 'files=[0-9]* symbols=[0-9]*' "$MAP_OUT" )"
-grep -q 'edges=5' "$MAP_OUT" && ok "header: edges=5" || no "header: expected edges=5: $( grep -o 'edges=[0-9]*' "$MAP_OUT" )"
-grep -q 'ambiguous=0' "$MAP_OUT" && ok "header: ambiguous=0 (decl/def collapse resolved the interface's greet away)" || no "header: expected ambiguous=0: $( grep -o 'ambiguous=[0-9]*' "$MAP_OUT" )"
-grep -q 'unresolved=0' "$MAP_OUT" && ok "header: unresolved=0" || no "header: expected unresolved=0: $( grep -o 'unresolved=[0-9]*' "$MAP_OUT" )"
+if grep -q 'files=5 symbols=16' "$MAP_OUT"; then ok "header: files=5 symbols=16"; else no "header: expected files=5 symbols=16: $( grep -o 'files=[0-9]* symbols=[0-9]*' "$MAP_OUT" )"; fi
+if grep -q 'edges=5' "$MAP_OUT"; then ok "header: edges=5"; else no "header: expected edges=5: $( grep -o 'edges=[0-9]*' "$MAP_OUT" )"; fi
+if grep -q 'ambiguous=0' "$MAP_OUT"; then ok "header: ambiguous=0 (decl/def collapse resolved the interface's greet away)"; else no "header: expected ambiguous=0: $( grep -o 'ambiguous=[0-9]*' "$MAP_OUT" )"; fi
+if grep -q 'unresolved=0' "$MAP_OUT"; then ok "header: unresolved=0"; else no "header: expected unresolved=0: $( grep -o 'unresolved=[0-9]*' "$MAP_OUT" )"; fi
 
 # ─── parse the per-file symbol + edge structure once, reuse for all checks ────
 python3 - "$MAP_OUT" <<'PYEOF' >"$TMP/parsed.json"
@@ -162,7 +162,7 @@ print("E_SELFCALL:%s"   % edge("Formatter.php", "wrap", "shout"))            # s
 PYEOF
 cat "$TMP/struct_check"
 
-arm(){ grep -q "^$1:True" "$TMP/struct_check" && ok "$2" || no "$2 — MISSING"; }
+arm(){ if grep -q "^$1:True" "$TMP/struct_check"; then ok "$2"; else no "$2 — MISSING"; fi; }
 arm IFACE        'GreeterInterface.php: interface -> t="iface"'
 arm IFACE_METHOD 'GreeterInterface.php: body-less greet() still emitted as t="method"'
 arm TRAIT        'Greeter.php: trait Loggable -> t="iface" (the documented trait bucket)'
@@ -182,10 +182,10 @@ arm E_SELFCALL   'edge: wrap -> shout      (bare function_call_expression)'
 
 # cross-check via --callees / --callers (independent of the raw-XML parse)
 CE="$( "$BIN" "$FIX" --callees=describe --no-cache 2>/dev/null )"
-echo "$CE" | grep -q 'n="Greeter"' && ok "--callees=describe lists Greeter" || no "--callees=describe missing Greeter: $CE"
-echo "$CE" | grep -q 'n="greet"'   && ok "--callees=describe lists greet"   || no "--callees=describe missing greet: $CE"
+if echo "$CE" | grep -q 'n="Greeter"'; then ok "--callees=describe lists Greeter"; else no "--callees=describe missing Greeter: $CE"; fi
+if echo "$CE" | grep -q 'n="greet"'; then ok "--callees=describe lists greet"; else no "--callees=describe missing greet: $CE"; fi
 CR="$( "$BIN" "$FIX" --callers=wrap --no-cache 2>/dev/null )"
-echo "$CR" | grep -q 'n="decorate"' && ok "--callers=wrap lists decorate" || no "--callers=wrap did not list decorate: $CR"
+if echo "$CR" | grep -q 'n="decorate"'; then ok "--callers=wrap lists decorate"; else no "--callers=wrap did not list decorate: $CR"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -201,9 +201,9 @@ for T in 'PhpFix\Services\Greeter' 'PhpFix\Support\Style' 'PhpFix\Support\Format
 done
 
 USES_NS="$( "$BIN" "$FIX" --uses=PhpFix --no-cache 2>/dev/null )"
-echo "$USES_NS" | grep -q 'count="3"' && ok "--uses=PhpFix: count=3 import use-sites" || no "--uses=PhpFix: expected count=3: $( echo "$USES_NS" | grep -o 'count="[0-9]*"' )"
-echo "$USES_NS" | grep -q 'role="import" p="index.php:3"' && ok '--uses=PhpFix: role="import" @index.php:3' || no '--uses=PhpFix: index.php:3 import site missing'
-echo "$USES_NS" | grep -q 'role="import" p="src/Greeter.php:5"' && ok '--uses=PhpFix: role="import" @src/Greeter.php:5' || no '--uses=PhpFix: Greeter.php:5 import site missing'
+if echo "$USES_NS" | grep -q 'count="3"'; then ok "--uses=PhpFix: count=3 import use-sites"; else no "--uses=PhpFix: expected count=3: $( echo "$USES_NS" | grep -o 'count="[0-9]*"' )"; fi
+if echo "$USES_NS" | grep -q 'role="import" p="index.php:3"'; then ok '--uses=PhpFix: role="import" @index.php:3'; else no '--uses=PhpFix: index.php:3 import site missing'; fi
+if echo "$USES_NS" | grep -q 'role="import" p="src/Greeter.php:5"'; then ok '--uses=PhpFix: role="import" @src/Greeter.php:5'; else no '--uses=PhpFix: Greeter.php:5 import site missing'; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -280,9 +280,9 @@ print("NULLSAFE_GONE:%s" % (not bool(re.search(r'n="describe"[^>]*>(?:(?!</s>).)
 print("NEW_GONE:%s"      % (not bool(re.search(r'n="describe"[^>]*>(?:(?!</s>).)*?<c n="Greeter"', xml, re.S))))
 PYEOF
 cat "$TMP/mut_check"
-grep -q "THIS_GONE:True"     "$TMP/mut_check" && ok "mutation: renamed \$this->decorate() -> greet -> decorate edge vanished"         || no "mutation: greet -> decorate edge survived a renamed call site (tautology)"
-grep -q "NULLSAFE_GONE:True" "$TMP/mut_check" && ok "mutation: renamed ?->greet() -> describe -> greet edge vanished"                 || no "mutation: describe -> greet edge survived a renamed call site (tautology)"
-grep -q "NEW_GONE:True"      "$TMP/mut_check" && ok "mutation: renamed new Greeter() -> describe -> Greeter edge vanished"            || no "mutation: describe -> Greeter edge survived a renamed call site (tautology)"
+if grep -q "THIS_GONE:True"     "$TMP/mut_check"; then ok "mutation: renamed \$this->decorate() -> greet -> decorate edge vanished"; else no "mutation: greet -> decorate edge survived a renamed call site (tautology)"; fi
+if grep -q "NULLSAFE_GONE:True" "$TMP/mut_check"; then ok "mutation: renamed ?->greet() -> describe -> greet edge vanished"; else no "mutation: describe -> greet edge survived a renamed call site (tautology)"; fi
+if grep -q "NEW_GONE:True"      "$TMP/mut_check"; then ok "mutation: renamed new Greeter() -> describe -> Greeter edge vanished"; else no "mutation: describe -> Greeter edge survived a renamed call site (tautology)"; fi
 
 # 7b. delete ONE conditional match arm -> cx must drop 7 -> 6 (proves match arms are counted)
 mutate

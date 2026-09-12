@@ -22,7 +22,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # BOTH seams: positional and R
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -124,7 +124,7 @@ echo "crossrefcheck: BIN=$BIN  REPO=$R"
 # ── 1) determinism ────────────────────────────────────────────────────────────────────────────────────
 "$BIN" "$R" --stray-content >"$TMP/a" 2>/dev/null
 "$BIN" "$R" --stray-content >"$TMP/b" 2>/dev/null
-cmp -s "$TMP/a" "$TMP/b" && ok "stray-content determinism (byte-identical)" || no "stray-content is non-deterministic"
+if cmp -s "$TMP/a" "$TMP/b"; then ok "stray-content determinism (byte-identical)"; else no "stray-content is non-deterministic"; fi
 S="$( cat "$TMP/a" )"
 
 # ── 2) the three verdicts ─────────────────────────────────────────────────────────────────────────────
@@ -240,9 +240,9 @@ else
 fi
 
 # ── 6) refusals: bare --whereis, and a non-git root ────────────────────────────────────────────────────
-"$BIN" "$R" --whereis >/dev/null 2>&1;                 [ $? -eq 1 ] && ok "bare --whereis refuses loudly (exit 1)" || no "bare --whereis did not exit 1"
+if "$BIN" "$R" --whereis >/dev/null 2>&1;                 [ $? -eq 1 ]; then ok "bare --whereis refuses loudly (exit 1)"; else no "bare --whereis did not exit 1"; fi
 mkdir -p "$TMP/plain"; printf 'int main(){return 0;}\n' > "$TMP/plain/m.cpp"
-"$BIN" "$TMP/plain" --stray-content >/dev/null 2>&1;   [ $? -eq 1 ] && ok "--stray-content on a non-git root refuses loudly (exit 1)" || no "--stray-content on a non-git root did not exit 1"
+if "$BIN" "$TMP/plain" --stray-content >/dev/null 2>&1;   [ $? -eq 1 ]; then ok "--stray-content on a non-git root refuses loudly (exit 1)"; else no "--stray-content on a non-git root did not exit 1"; fi
 
 # ── 7) the per-blob economy: N refs cost far less than N trees ─────────────────────────────────────────
 BLOBS="$( printf '%s' "$S" | sed -n 's/.*<stray-content [^>]*blobs="\([0-9]*\)".*/\1/p' )"
@@ -265,7 +265,7 @@ printf 'feat-unmerged\tsuperseded\n' > "$TMP/badlabels.tsv"
              || no "--eval-stray did not exit 3 on a deliberately wrong label"
 
 "$BIN" "$R" --eval-stray="$TMP/nosuchfile.tsv" >/dev/null 2>&1
-[ $? -eq 1 ] && ok "--eval-stray refuses loudly on a missing labels file" || no "--eval-stray did not exit 1 on a missing file"
+if [ $? -eq 1 ]; then ok "--eval-stray refuses loudly on a missing labels file"; else no "--eval-stray did not exit 1 on a missing file"; fi
 
 # ── 8b) H13: a label naming a ref this repo does NOT have is refused, never scored as "merged" ──────────
 # Before the fix, a ref absent from the classifier's report defaulted straight to Verdict::Merged with no
@@ -300,12 +300,12 @@ grep -q 'unknown="' "$TMP/ev" \
 
 # ── 9) well-formed, minified XML (G4) ─────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    "$BIN" "$R" --stray-content 2>/dev/null | xmllint --noout - 2>/dev/null && ok "stray-content XML well-formed" || no "stray-content XML malformed"
-    "$BIN" "$R" --whereis=computeBudget 2>/dev/null | xmllint --noout - 2>/dev/null && ok "whereis XML well-formed" || no "whereis XML malformed"
+    if "$BIN" "$R" --stray-content 2>/dev/null | xmllint --noout - 2>/dev/null; then ok "stray-content XML well-formed"; else no "stray-content XML malformed"; fi
+    if "$BIN" "$R" --whereis=computeBudget 2>/dev/null | xmllint --noout - 2>/dev/null; then ok "whereis XML well-formed"; else no "whereis XML malformed"; fi
 else
     ok "xmllint unavailable — XML well-formedness skipped"
 fi
-[ "$( grep -c '' "$TMP/a" )" -le 1 ] && ok "output is minified (no stray newlines)" || no "output contains newlines outside CDATA"
+if [ "$( grep -c '' "$TMP/a" )" -le 1 ]; then ok "output is minified (no stray newlines)"; else no "output contains newlines outside CDATA"; fi
 
 # ── 10) §B8.2 — THE SECOND TRUNCATION VOCABULARY IS DEFINED WHERE IT IS EMITTED ───────────────────────
 # Both verbs emit a `<more X="N"/>` remainder element. It is count-accurate and deliberate, and it was
@@ -450,9 +450,9 @@ else
 fi
 
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$SW" | xmllint --noout - 2>/dev/null && ok "capped stray-content still G4 clean" || no "capped stray-content XML malformed"
-    printf '%s' "$W1" | xmllint --noout - 2>/dev/null && ok "paged whereis still G4 clean"        || no "paged whereis XML malformed"
-    printf '%s' "$Q"  | xmllint --noout - 2>/dev/null && ok "selector-note document still G4 clean" || no "selector-note document is not well-formed"
+    if printf '%s' "$SW" | xmllint --noout - 2>/dev/null; then ok "capped stray-content still G4 clean"; else no "capped stray-content XML malformed"; fi
+    if printf '%s' "$W1" | xmllint --noout - 2>/dev/null; then ok "paged whereis still G4 clean"; else no "paged whereis XML malformed"; fi
+    if printf '%s' "$Q"  | xmllint --noout - 2>/dev/null; then ok "selector-note document still G4 clean"; else no "selector-note document is not well-formed"; fi
 fi
 
 [ $fail -eq 0 ] && echo "crossrefcheck: ALL PASS" || echo "crossrefcheck: FAILURES"

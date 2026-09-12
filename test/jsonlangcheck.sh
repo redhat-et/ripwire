@@ -39,7 +39,7 @@ FIX="$ROOT/test/jsonfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -51,16 +51,16 @@ echo "jsonlangcheck: BIN=$BIN  FIX=$FIX"
 MAP_OUT="$TMP/map.xml"
 $BIN "$FIX" --no-cache >"$MAP_OUT" 2>"$TMP/map.err"
 MAP_EXIT=$?
-[ "$MAP_EXIT" -eq 0 ] && ok "default map: exits 0 on JSON fixture" || no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"
+if [ "$MAP_EXIT" -eq 0 ]; then ok "default map: exits 0 on JSON fixture"; else no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"; fi
 
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP_OUT" && ok "default map: passes xmllint --noout" || no "default map: xmllint failed"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP_OUT"; then ok "default map: passes xmllint --noout"; else no "default map: xmllint failed"; fi; }
 
 # no degrade / ABI-mismatch warning must reach stderr on the clean fixture
 [ -s "$TMP/map.err" ] && no "default map: unexpected stderr (ABI/degrade?): $( cat "$TMP/map.err" )" || ok "default map: clean stderr (no ABI mismatch / degrade)"
 
 # edges=0: JSON is data, no call graph
 EDGES="$( grep -o 'edges=[0-9]*' "$MAP_OUT" | head -1 )"
-[ "$EDGES" = "edges=0" ] && ok "default map: $EDGES (JSON is data — no call edges)" || no "default map: expected edges=0, got $EDGES"
+if [ "$EDGES" = "edges=0" ]; then ok "default map: $EDGES (JSON is data — no call edges)"; else no "default map: expected edges=0, got $EDGES"; fi
 
 # ─── parse per-file symbols once ────────────────────────────────────────────
 python3 - "$MAP_OUT" <<'PYEOF' >"$TMP/parsed.json"
@@ -108,9 +108,9 @@ print("DOTTED_OK:%s" % ("lodash.merge" in names and "merge" not in names))
 PYEOF
 cat "$TMP/pkg_check"
 grep -q "SYMS:0" "$TMP/pkg_check" && no "package.json: extracted ZERO symbols — JSON ingest may be broken" || ok "package.json: extracted $( grep -o 'SYMS:[0-9]*' "$TMP/pkg_check" | cut -d: -f2 ) key symbol(s)"
-grep -q "TOP_OK:True"  "$TMP/pkg_check" && ok "package.json: all 6 top-level keys present as symbols" || no "package.json: missing top-level keys: $( grep MISSING_TOP "$TMP/pkg_check" )"
-grep -q "LVL2_OK:True" "$TMP/pkg_check" && ok "package.json: second-level keys present (scripts/deps entries)" || no "package.json: missing second-level keys: $( grep MISSING_LVL2 "$TMP/pkg_check" )"
-grep -q "ALL_SEC:True" "$TMP/pkg_check" && ok "package.json: every key tagged t=\"sec\"" || no "package.json: some keys not t=\"sec\""
+if grep -q "TOP_OK:True"  "$TMP/pkg_check"; then ok "package.json: all 6 top-level keys present as symbols"; else no "package.json: missing top-level keys: $( grep MISSING_TOP "$TMP/pkg_check" )"; fi
+if grep -q "LVL2_OK:True" "$TMP/pkg_check"; then ok "package.json: second-level keys present (scripts/deps entries)"; else no "package.json: missing second-level keys: $( grep MISSING_LVL2 "$TMP/pkg_check" )"; fi
+if grep -q "ALL_SEC:True" "$TMP/pkg_check"; then ok "package.json: every key tagged t=\"sec\""; else no "package.json: some keys not t=\"sec\""; fi
 grep -qF '"lodash.merge"' "$FIX/package.json" || no "jsonfix LOST its dotted key — the arm below would pass by finding nothing"
 grep -q "DOTTED_OK:True" "$TMP/pkg_check" \
     && ok "package.json: dotted key \`lodash.merge\` survives whole (not truncated to \`merge\`)" \
@@ -141,7 +141,7 @@ function main() { return react(); }
 JSEOF
 XL_OUT="$( $BIN "$XL" --no-cache 2>/dev/null )"
 XL_EDGES="$( echo "$XL_OUT" | grep -o 'edges=[0-9]*' | head -1 )"
-[ "$XL_EDGES" = "edges=1" ] && ok "mixed JSON+JS: $XL_EDGES (only the JS-internal main->react edge)" || no "mixed JSON+JS: expected edges=1, got $XL_EDGES"
+if [ "$XL_EDGES" = "edges=1" ]; then ok "mixed JSON+JS: $XL_EDGES (only the JS-internal main->react edge)"; else no "mixed JSON+JS: expected edges=1, got $XL_EDGES"; fi
 XL_CR="$( $BIN "$XL" --callers=react --no-cache 2>/dev/null )"
 echo "$XL_CR" | grep -q 'count="1"' && echo "$XL_CR" | grep -q 'app.js' \
     && ok "--callers=react: count=1, from app.js (JSON \"react\" key is NOT a caller/target)" \
@@ -150,7 +150,7 @@ echo "$XL_CR" | grep -q 'count="1"' && echo "$XL_CR" | grep -q 'app.js' \
 # mutation: rename the JS call site → the ONLY edge must vanish (non-tautological)
 sed 's/return react()/return reactX()/' "$XL/app.js" >"$XL/app.js.tmp" && mv "$XL/app.js.tmp" "$XL/app.js"
 XL_MUT="$( $BIN "$XL" --no-cache 2>/dev/null | grep -o 'edges=[0-9]*' | head -1 )"
-[ "$XL_MUT" = "edges=0" ] && ok "mutation: renamed JS call site → edges=0 (the edge assertion is real)" || no "mutation: expected edges=0 after rename, got $XL_MUT"
+if [ "$XL_MUT" = "edges=0" ]; then ok "mutation: renamed JS call site → edges=0 (the edge assertion is real)"; else no "mutation: expected edges=0 after rename, got $XL_MUT"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

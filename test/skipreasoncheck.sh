@@ -47,7 +47,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -93,9 +93,9 @@ for m in re.finditer(r'<f\b[^>]*/>', x):
 sys.exit(1)
 PY
 }
-hasrow 'big.cpp'       oversize        && ok '(1) big.cpp     row carries why="oversize"'        || no '(1) NO why="oversize" row for corpus/big.cpp'
-hasrow 'vendorgen.cpp' excluded       && ok '(1) vendorgen.cpp row carries why="excluded"'      || no '(1) NO why="excluded" row for corpus/vendorgen.cpp'
-hasrow 'mod1.ml'       unsupported-ext && ok '(1) mod1.ml     row carries why="unsupported-ext"' || no '(1) NO why="unsupported-ext" row for corpus/mod1.ml'
+if hasrow 'big.cpp'       oversize; then ok '(1) big.cpp     row carries why="oversize"'; else no '(1) NO why="oversize" row for corpus/big.cpp'; fi
+if hasrow 'vendorgen.cpp' excluded; then ok '(1) vendorgen.cpp row carries why="excluded"'; else no '(1) NO why="excluded" row for corpus/vendorgen.cpp'; fi
+if hasrow 'mod1.ml'       unsupported-ext; then ok '(1) mod1.ml     row carries why="unsupported-ext"'; else no '(1) NO why="unsupported-ext" row for corpus/mod1.ml'; fi
 grep -q 'p="keep.cpp"' "$TMP/sk.xml" && no '(1) keep.cpp is INDEXED — it must not appear as a skip row' \
                                             || ok '(1) the indexed file (keep.cpp) has no skip row'
 

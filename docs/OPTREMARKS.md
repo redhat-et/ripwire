@@ -244,6 +244,128 @@ tension with G3's one-deterministic-build-step rule; the script makes the tensio
 absent. The `.profdata` is deliberately **not committed**: a stale committed profile is a clang
 *warning*, not an error, which would trade a visible two-step build for an invisible wrong one.
 
+## 5c. F3 — the per-node `strcmp` dispatch, and why a hand-written SIMD routine lost to a byte loop
+
+**The lead.** §8b, from the newly-covered 98%: **528 distinct `inline/NoDefinition` sites naming
+`strcmp`** — a figure inherited from §8b, not re-measured here, and one that carries the site→callee
+selection §7 documents: `scripts/optremarks.py` keys a distinct site on `( file, line, remark-name )`
+and keeps the FIRST record, while the callee lives in the detail, so a site naming more than one
+callee is counted under whichever it named first. **Nothing below rests on it.** F3's conclusion rests
+on leaf-of-stack attribution and an instrumented call count; a different reading of the site count
+changes no sentence in this section. The chains it points at are (`isDecisionType`, `cc_isNestingControl`, `ev_ctrlKindFor`,
+`bindsVisitNode`) that are ~forty comparisons long and run per AST node. Neither F1 nor any §6
+dismissal covered it: LTO cannot make libc's `strcmp` available (so F1's answer does not reach), and
+D4's "inlining a syscall wrapper saves nothing" does not apply to a leaf string compare.
+
+**Sizing it before touching it.** A remark is not a measurement, and these functions have no
+`PROFILE_SCOPE` of their own — their cost is folded into `captureTagsFacts`. So the sizing came from
+leaf-of-stack attribution instead (`sample` at a 1 ms interval, cold run, the whole process):
+
+| corpus | language | `strcmp` frames, share of **busy** samples |
+| --- | --- | --- |
+| rust-analyzer | Rust | **12.31%** |
+| go | Go | **10.76%** |
+| llvm-project | C/C++ | **10.56%** |
+| django | Python | **9.31%** |
+| rails | Ruby | **6.14%** |
+
+On llvm-project that is 4,582 of 43,330 busy samples, and it splits three ways:
+`_platform_strcmp` 2,619 · `DYLD-STUB$$_platform_strcmp` 1,023 · `DYLD-STUB$$strcmp` 940. **43% of
+the cost is the two dyld stubs** — `strcmp` is an external symbol, so every call hops our image's
+stub, then libsystem_platform's, before the routine begins. Attributed to callers, the class is
+almost entirely one walk: `cc_walk` 60.7%, `isDecisionType` 17.9%, `bindsVisitNode` 15.3%,
+`captureTagsFacts` 2.0% — i.e. the complexity DFS, not the side-capture walk §8b guessed at.
+
+**The change.** `rw::kindIs` (`src/infra/nodekind.h`): `kindIs( t, "if_statement" )` is exactly
+`std::strcmp( t, "if_statement" ) == 0`, unrolled inline against a literal whose length the type
+system carries. Applied mechanically to the **569** `std::strcmp` call sites (on 412 lines) in the five ingest
+walk sections. Sites comparing against a *variable* (`ev_childText`'s caller-supplied list,
+`isTypeDeclarationSite`'s parent table) keep `std::strcmp` — the array-reference signature does not
+bind to them, deliberately.
+
+**Why not SIMD — the question this answers with numbers, not taste.** `_platform_strcmp` *is* the
+hand-written NEON routine, and it is what lost. Instrumenting the compare to histogram the byte index
+at which it decides (throwaway build, one cold run per corpus):
+
+| corpus | `kindIs` calls | decided at byte 0 | by byte 1 | by byte 2 |
+| --- | --- | --- | --- | --- |
+| llvm-project | 4,861,917,534 | 92.96% | 98.12% | 99.04% |
+| go | 1,930,294,567 | 92.63% | 98.64% | 99.54% |
+| rails | 353,856,824 | 92.30% | 97.89% | 98.88% |
+
+**~1.1 bytes decide the average call.** A 16-byte vector load does an order of magnitude more work
+than the answer needs, and it cannot be used here anyway without reading past `t`'s NUL — the exact
+hazard the byte loop avoids by construction and `test/nodekindcheck.sh` arm B proves the absence of
+with an `mprotect( PROT_NONE )` guard page. Nor does the compiler want vectors: given the chain,
+clang emits a **shared-prefix decision tree** — one `ldrb` of byte 0, then immediate compares that
+fall straight to the common exit — with **zero vector registers in the emitted function**. The
+dispatch is not a string problem; it is a branch problem, and the win came from deleting the call.
+
+**The result on the same instrument.** llvm-project, cold: `strcmp` frames **10.56% → 0.23%** of busy
+samples. The compares did not vanish, they moved inline: `cc_walk`'s own self time goes 1.02% → 1.92%.
+
+**The A/B.** §7's rules in full: interleaved `A,B,A,B,…`, ≥20 runs per arm, median **and** min, the
+whole thing repeated end to end with the **arms swapped**, on corpora that are not this repository.
+Both instruments are reported because they disagree in precision: this machine carried heavy
+competing load from other sessions, which inflates wall clock without changing how many instructions
+the process executes, so **child CPU time (user+sys) is the tighter instrument here and wall clock is
+the noisier one**. Negative = the change is faster.
+
+| corpus | R1 cpu med / min | R1 wall med / min | R2 cpu med / min | R2 wall med / min |
+| --- | --- | --- | --- | --- |
+| llvm-project (n=20/arm) | −3.83% / −3.93% | −2.64% / −2.86% | −3.86% / −4.12% | −3.90% / −1.53% |
+| django (n=25/arm) | −1.21% / −0.71% | −0.46% / −0.34% | −2.71% / −3.46% | *(−43%, outlier)* / −1.90% |
+| go (n=25/arm) | −3.32% / −2.92% | −1.01% / −3.13% | −6.82% / −8.55% | −1.70% / −8.08% |
+| this repo, frozen (n=25/arm) | −3.62% / −2.89% | −1.28% / −1.67% | −3.24% / −6.39% | −5.32% / −6.28% |
+
+**All 32 statistics favour the change**, which is the unanimity-of-direction test F1 passes and D2
+fails. **The honest claim is a range: cold CPU is 1–7% lower and cold wall 0.3–8% lower**, with the
+larger figures on Go and the smaller ones on Python. Do not quote −8.55%: django R2's wall median is
+a single contaminated run (mean 1,071 ms against a min of 543 ms) and is shown struck through rather
+than dropped, because dropping it silently is how a table starts flattering itself.
+
+**Behaviour.** Byte-identical: seven corpora × `--metrics` / `--lint` / `--hotspots` / `--clones` /
+the default map, plus `--slice` / `--for` / `--pack-task` / `--expand` on the frozen self corpus.
+`test/argvdiffcheck.sh` against a pre-change reference binary: **640 of 642 vectors identical** in
+stdout, stderr and exit code; the two that differ are both `--version`, differing by exactly the six
+bytes of the `+dirty` build stamp an uncommitted tree earns. Determinism three times, `xmllint`
+clean, ASan/UBSan/LSan clean on six corpora.
+
+**The gate, written before the code it measures.** `test/nodekindcheck.sh`: (A) `kindIs` must agree
+with `std::strcmp( … ) == 0` on **1,348,096 enumerated pairs** — every node-kind literal the walk
+sections actually use, harvested from the tree at gate time, against a candidate matrix of every
+proper prefix, every one-byte extension, last-byte substitutions, high bytes 0x80..0xFF and the empty
+string; (B) the guard-page arm above; (C) **two mutation controls** — a header whose loop stops
+before the NUL must turn A red (it does: 1,417 disagreements), and one that reads a byte past must
+turn B red (it does: a fault on the guard page); (D) the five walk sections must still be on `kindIs`,
+so the measured win cannot be reverted a site at a time.
+
+**What it cost.** `--clones`, uncapped: 407 groups before, 409 after — the rewrite adds 7 and removes
+5. Six of the seven added pair a node-kind `||`-chain with an unrelated `||`-chain over a **disjoint**
+literal set in another subsystem (`cc_isParamList` against `predicatePrefixed`, whose literals are
+English name prefixes), because a shorter compare puts short predicate bodies inside the clone
+detector's token window. Those are idiom collisions, not copies, and are acked with that reasoning
+rather than merged into a helper parameterised on an unrelated table.
+
+**A near-miss worth recording, because the instrument was the interesting part.**
+`test/showcasecapturecheck.sh` arm (C-band) asserts the top-50 `--pack-signatures` reduction on **this
+repository as its own corpus**. Measured against the lane's original base, shortening 569 dispatch
+comparisons cut top-50 *body* bytes 31,887 → 30,275 (−5.1%) and moved the ratio 72.4% → 71.7%, one
+step below a 72.0 floor — and it really was this lane's doing: one fixed binary over the twelve
+preceding checkouts reads 72.3–72.4%, so the quantity barely moves on its own and the floor had 0.4
+points of margin. The floor was **not** lowered to accommodate it. Rebasing dissolved the collision
+instead: `main` had already re-centred the band twice for unrelated reasons — once for the
+printf-family → `std::print` conversion, once for `--expand`'s `sibs=` cap going 8 → 100, which grows
+the BODY side of this very ratio — so the arm now reads **81.9% inside 73.0–91.0** and this change sits
+nine points clear of the floor.
+
+The lesson survives the near-miss, and it is the one to keep: **the arm reads the LIVE tree, so it
+cannot distinguish "the elider elides less" from "our own source got shorter."** This lane's output is
+byte-identical on seven corpora — the elider provably did not change — yet the arm fired. Three
+re-centerings in two days, all for changes to the *corpus* rather than to the elision, are that
+blind spot showing. A corpus-frozen basis (`git archive`, the way `test/optremarkshotcheck.sh` freezes
+the hot set) would make the band mean what its own comment says it means. That is its own round.
+
 ## 6. The dismissals, and why
 
 Reported because a triage that only lists wins is not a triage.
@@ -322,6 +444,24 @@ cmake -S . -B build_prof -DRIPWIRE_PROFILE=ON && cmake --build build_prof -j 6
 ./build_prof/ripwire . --no-cache 2>&1 >/dev/null | sed -n '/hottest scopes/,/PROF_TSV/p'
 ```
 
+`PROFILE_SCOPE` answers "which phase", and a remark class that sits INSIDE one phase — F3's per-node
+dispatch is folded whole into `captureTagsFacts` — is invisible to it. The instrument for that is
+leaf-of-stack attribution, which needs no instrumentation and no rebuild:
+
+```bash
+./build/ripwire <dir> --no-cache >/dev/null 2>&1 & sample $! 6 1 -f /tmp/s.txt   # 1 ms, whole run
+awk '/Sort by top of stack, same collapsed/,0' /tmp/s.txt | head -20            # leaf symbols, by cost
+```
+
+Read it as a share of BUSY samples (subtract the `__ulock_wait` / `__psynch_cvwait` idle rows first —
+a 19-thread run parks workers in them), then walk the call tree up from a leaf to find which of our
+own functions owns it. That is how F3 was found, and how it was afterwards shown to be gone.
+
+A wall clock is not the only instrument, and on a loaded machine it is not the best one. F3's arms
+separate cleanly in **child CPU time (user+sys)** and barely at all in wall clock, because competing
+load changes how long the process waits without changing how many instructions it runs. Report both,
+say which machine state they were taken in, and never quote the flattering one alone.
+
 Any A/B must be interleaved and reported as median **and** min over at least ~20 runs per arm — and
 then **repeated end to end at least once more**. D2 is what a single non-interleaved run would have
 let you publish; F1's four-run spread is what a single run would have let you *oversell*.
@@ -356,7 +496,7 @@ section's own `RIPWIRE_<X>_TU` `#error` guard, or by name family — must be in 
 `COLD_FILES` **with a stated reason**, and a ceiling arm keeps the list from buying coverage by
 growing into a copy of the tree.
 
-### 8b. F3 — a lead from the newly-covered 98%, deliberately NOT acted on
+### 8b. F3 — a lead from the newly-covered 98%, since measured and acted on (§5c)
 
 Re-triaging the previously hidden remarks surfaced one class that neither F1 nor any dismissal in §6
 explains: **528 distinct `inline/NoDefinition` sites naming `strcmp`** — 414 of them in files that
@@ -371,11 +511,14 @@ these are leaf string compares in a per-node dispatch, and the chain is linear i
 kinds. It is not F1 either: LTO cannot make libc's `strcmp` definition available, so the answer that
 covered the `ts_*` accessors does not reach this.
 
-**No change is being made here, and that is the point.** This is a lead, not a result. The rules in
-§7 apply to it in full — interleaved A/B, median and min over ≥20 runs per arm, repeated end to end,
-plus a corpus that is not this one — and D2 is the standing reminder of what happens when a remark is
-real, the fix is correct, and the wall clock does not move. Recorded here so the next pass starts
-from it rather than rediscovering it.
+**Acted on, and it held: see §5c (F3).** It was recorded here as a lead, not a result, with §7's
+rules to clear and D2 as the standing reminder of what happens when a remark is real, the fix is
+correct and the wall clock does not move. It cleared them: `strcmp` was measured at 6–12% of busy CPU
+across five corpora, the fix took llvm-project's share to 0.23%, and all 32 A/B statistics across two
+end-to-end rounds and four corpora favour it. **§5c also corrects this section's guess about WHERE**:
+the cost is `cc_walk` (the complexity DFS), not the side-capture walk named above — 78.6% of the
+class sits in `cc_walk` + `isDecisionType` and 15.3% in `bindsVisitNode`, which is why the sizing had
+to come from leaf-of-stack attribution rather than from the remark's own file counts.
 
 ---
 

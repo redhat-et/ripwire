@@ -33,7 +33,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -88,7 +88,7 @@ echo "=== F2: Swift init / subscript / deinit are captured as symbols ==="
 F2_XML="$TMP/f2.xml"
 "$BIN" "$TMP/f2" --no-cache > "$F2_XML" 2>/dev/null
 
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$F2_XML" && ok "F2 map: passes xmllint --noout" || no "F2 map: xmllint failed"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$F2_XML"; then ok "F2 map: passes xmllint --noout"; else no "F2 map: xmllint failed"; fi; }
 
 # parse: name -> count of <s> symbols
 # §P6.3 repin: the map now collapses identical-(kind,id) overload rows into ONE row carrying

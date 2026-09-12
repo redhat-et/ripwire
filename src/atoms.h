@@ -96,7 +96,7 @@ using lintdetail::Span;
 //   Cover     — the candidate sits anywhere INSIDE the recorded region, e.g. a whole for-header.
 //   WiderThan — Cover, but a span identical to the candidate does NOT count: used to keep only the
 //               outermost member of a nest, where the candidate set IS the recorded set.
-enum class SpanRelation { Exact, Cover, WiderThan };
+enum class SpanRelation : std::uint8_t { Exact, Cover, WiderThan };
 
 inline Span spanOf( const AstMatch& m ) noexcept
 {

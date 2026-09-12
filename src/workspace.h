@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // workspace.h — multi-root workspaces: N crawl roots → ONE merged symbol graph.
 //
@@ -116,7 +118,7 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
         }
         if( dup )
         {
-            std::fprintf( stderr, "ripwire: duplicate root '%s' ignored (same directory already listed)\n", a.c_str() );
+            rw::emitTo( stderr, "ripwire: duplicate root '{}' ignored (same directory already listed)\n", a.c_str() );
             continue;
         }
         out.push_back( { a, real, std::string() } );
@@ -136,7 +138,7 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
             if( inner.size() > outer.size() && inner.compare( 0, outer.size(), outer ) == 0
                 && inner[ outer.size() ] == '/' )
             {
-                std::fprintf( stderr, "ripwire: nested roots are not allowed: '%s' is inside '%s' — pass disjoint roots "
+                rw::emitTo( stderr, "ripwire: nested roots are not allowed: '{}' is inside '{}' — pass disjoint roots "
                                       "(to focus on a subtree, use --for / DIR-scoped verbs instead)\n",
                               out[j].arg.c_str(), out[i].arg.c_str() );
                 return false;
@@ -235,7 +237,14 @@ inline void mergeCrawlDisclosures( IngestResult& m, IngestResult& part, const Wo
     relabel( part.crawlSkips.unsupported, m.crawlSkips.unsupported );
     relabel( part.crawlSkips.ignored,        m.crawlSkips.ignored );          // §N6-C, per root, labeled like its siblings
     relabel( part.crawlSkips.ignoredDirRows, m.crawlSkips.ignoredDirRows );   // §N6-C
+    relabel( part.crawlSkips.nestRefused,    m.crawlSkips.nestRefused );      // the Kotlin nesting guard's refusals
+    // §SEC1 — the crawl boundary is applied PER ROOT (a file is bounded by the root it was crawled under, not
+    // by the workspace's union), so its rows relabel and its count sums exactly like every sibling above. A
+    // link in root A pointing into root B is an escape from A; B's own copy is indexed under B, where it lives.
+    relabel( part.crawlSkips.escaped,        m.crawlSkips.escaped );
 
+    m.crawlSkips.escapedFiles     += part.crawlSkips.escapedFiles;
+    m.crawlSkips.nestRefusedFiles += part.crawlSkips.nestRefusedFiles;
     m.crawlSkips.excludedFiles    += part.crawlSkips.excludedFiles;
     m.crawlSkips.unsupportedFiles += part.crawlSkips.unsupportedFiles;
     m.crawlSkips.excludedDirs     += part.crawlSkips.excludedDirs;

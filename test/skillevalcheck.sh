@@ -23,7 +23,7 @@ CORPUS="$ROOT/test/skillevalfix/prompts.tsv"
 SKILLS="$ROOT/skills"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -184,6 +184,74 @@ awk -v v="$h1d"  'BEGIN{exit !(v+0 >= 59.0)}' \
 awk -v v="$aucd" 'BEGIN{exit !(v+0 >= 0.75)}' \
     && ok "dev-split bm25-desc sep-auc = ${aucd} (floor 0.75)" \
     || no "dev-split bm25-desc sep-auc = ${aucd} fell under 0.75"
+
+# ── 13) the four frontmatter STOP RULES are PRESENT and LOAD-BEARING ─────────────────────────────────
+# 2026-09-10 audit F-R1-03: #112 restored four stop rules to the skill descriptions, and NO row in this
+# corpus could see them. Deleting all four left split=test bm25-desc hit@1 byte-identical (63.8%) and
+# split=dev 1.4pp BETTER, with all 15 arms above green — the same failure #112 itself repaired, still
+# open, because the fix restored the TEXT without adding a measurement.
+#
+# Two assertions, because a stop rule can fail in two different ways:
+#   (a) PRESENCE, exact. Each sentence is pinned here verbatim. The strip below must actually remove
+#       something from each of the four descriptions; a rewrite that drops or REWORDS a rule makes its
+#       strip a no-op, and this arm says which one and stops. This is the half that catches the defect
+#       directly, and it cannot be fooled by a corpus that happens to score the same either way.
+#   (b) LOAD-BEARING, differential. The same 16 stop-rule rows are scored twice — against skills/ and
+#       against a mechanically stripped copy — and the real tree must win by a margin. This is what
+#       proves (a) is guarding something that matters rather than a decorative sentence.
+# Measured on this commit: 75.0% with the rules, 50.0% without (n=16). Floors: 65.0% absolute (10pp
+# under measured, the file's own header rule) and a >= 12.5pp gap (half the measured 25.0pp).
+# HONEST LIMIT, stated because the number would otherwise read as more than it is: 8 of the 16 rows echo
+# the rules' own wording and carry all of the discrimination; the 8 written to AVOID that wording score
+# 50.0% with the rules and 50.0% without — measured, not assumed. A lexical ranker can only detect a
+# sentence's removal through rows that share its words, so "phrase it without quoting the rule" is not
+# available to this instrument. See the marker block in prompts.tsv.
+STOPTSV="$TMP/stoprules.tsv"
+awk -F'\t' 'BEGIN{p=0} /STOP-RULE ROWS \(2026-09-10/{p=1;next} /STOP-RULE ROWS . END/{p=0} p && !/^#/ && NF>=3' "$CORPUS" >"$STOPTSV"
+stopRows=$( wc -l <"$STOPTSV" | tr -d ' ' )
+stopSkills=$( awk -F'\t' '{print $2}' "$STOPTSV" | sort -u | wc -l | tr -d ' ' )
+{ [ "$stopRows" = 16 ] && [ "$stopSkills" = 4 ]; } \
+    && ok "stop-rule rows sliced from the corpus: ${stopRows} rows over ${stopSkills} skills" \
+    || no "stop-rule slice found ${stopRows} rows / ${stopSkills} skills (want 16 / 4) — the marker block moved or shrank"
+NOSTOP="$TMP/skills_nostop"
+rm -rf "$NOSTOP"; cp -R "$SKILLS" "$NOSTOP"
+strip_rule(){   # $1 = skill dir, $2 = the sentence, verbatim
+    local f="$NOSTOP/$1/SKILL.md"
+    [ -f "$f" ] || { no "stop-rule arm: no SKILL.md for $1"; return; }
+    python3 - "$f" "$2" <<'PY'
+import re, sys
+# The frontmatter FOLDS: a description is a wrapped YAML block, so a stop rule can straddle a newline +
+# indent ("Stop at the first rung\n  that answers."). Match the sentence word-for-word with any run of
+# whitespace between words — exact on the WORDS, tolerant of where the wrap happens to fall, which is a
+# formatting fact and not the thing this arm measures.
+path, sentence = sys.argv[1], sys.argv[2]
+text = open(path, encoding="utf-8").read()
+pattern = re.compile(r"\s+".join(re.escape(w) for w in sentence.split()))
+found = pattern.search(text)
+if not found:
+    sys.exit(3)
+open(path, "w", encoding="utf-8").write(text[:found.start()] + text[found.end():])
+PY
+    case $? in
+        0) ok "stop rule PRESENT in $1: \"${2:0:44}...\"";;
+        3) no "stop rule MISSING from $1 — the sentence this arm measures is no longer in the description: \"$2\"";;
+        *) no "stop-rule strip failed for $1";;
+    esac
+}
+strip_rule ripwire-before-you-build 'A small feature with an obvious home needs none of this.'
+strip_rule ripwire-fresh-eyes       'A single-lens question is a single call.'
+strip_rule ripwire-orient           'Stop at the first rung that answers.'
+strip_rule ripwire-write-tests      'For one target one --seams or --callers pass suffices.'
+"$BIN" "$SKILLS" --eval-skills="$STOPTSV" --no-cache >"$TMP/stop.on"  2>/dev/null
+"$BIN" "$NOSTOP" --eval-skills="$STOPTSV" --no-cache >"$TMP/stop.off" 2>/dev/null
+stopOn=$(  awk '$1=="bm25-desc"{gsub("%","",$2); print $2}' "$TMP/stop.on" )
+stopOff=$( awk '$1=="bm25-desc"{gsub("%","",$2); print $2}' "$TMP/stop.off" )
+awk -v v="$stopOn" 'BEGIN{exit !(v+0 >= 65.0)}' \
+    && ok "stop-rule rows route with the rules present: bm25-desc hit@1 = ${stopOn}% (floor 65.0%)" \
+    || no "stop-rule rows fell to ${stopOn}% (floor 65.0%) — a stop rule stopped doing its job"
+awk -v on="$stopOn" -v off="$stopOff" 'BEGIN{exit !((on+0)-(off+0) >= 12.5)}' \
+    && ok "the rules are LOAD-BEARING: ${stopOn}% with them vs ${stopOff}% without (gap floor 12.5pp)" \
+    || no "stripping all four stop rules moved hit@1 only ${stopOn}% -> ${stopOff}% — this arm measures nothing"
 
 [ $fail -eq 0 ] && echo "skillevalcheck: ALL PASS" || echo "skillevalcheck: FAILURES"
 exit $fail

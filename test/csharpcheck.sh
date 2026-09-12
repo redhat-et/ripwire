@@ -49,7 +49,7 @@ FIX="$ROOT/test/csharpfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -61,9 +61,9 @@ echo "csharpcheck: BIN=$BIN  FIX=$FIX"
 MAP_OUT="$TMP/map.xml"
 "$BIN" "$FIX" --no-cache >"$MAP_OUT" 2>"$TMP/map.err"
 MAP_EXIT=$?
-[ "$MAP_EXIT" -eq 0 ] && ok "default map: exits 0 on the C# fixture" || no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"
+if [ "$MAP_EXIT" -eq 0 ]; then ok "default map: exits 0 on the C# fixture"; else no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"; fi
 
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP_OUT" && ok "default map: passes xmllint --noout" || no "default map: xmllint failed"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP_OUT"; then ok "default map: passes xmllint --noout"; else no "default map: xmllint failed"; fi; }
 
 # no degrade / ABI-mismatch warning must reach stderr on the clean fixture (proves grammarAbiOk passed)
 [ -s "$TMP/map.err" ] && no "default map: unexpected stderr (ABI/degrade?): $( cat "$TMP/map.err" )" || ok "default map: clean stderr (no ABI mismatch / degrade)"
@@ -93,9 +93,9 @@ echo
 echo "=== structure: 7 symbols across 3 files, tags + edges match the fixture ==="
 # ═══════════════════════════════════════════════════════════════════════════
 
-grep -q 'symbols=7' "$MAP_OUT" && ok "header: symbols=7 (Program,Main,Greeter,Greet,SayHello,IGreeter,Greet)" || no "header: expected symbols=7: $( grep -o 'symbols=[0-9]*' "$MAP_OUT" )"
-grep -q 'edges=3' "$MAP_OUT" && ok "header: edges=3 (SayHello->Greet, Main->Greeter, Main->SayHello)" || no "header: expected edges=3: $( grep -o 'edges=[0-9]*' "$MAP_OUT" )"
-grep -q 'ambiguous=0' "$MAP_OUT" && ok "header: ambiguous=0 (decl/def collapse resolved IGreeter's Greet away)" || no "header: expected ambiguous=0: $( grep -o 'ambiguous=[0-9]*' "$MAP_OUT" )"
+if grep -q 'symbols=7' "$MAP_OUT"; then ok "header: symbols=7 (Program,Main,Greeter,Greet,SayHello,IGreeter,Greet)"; else no "header: expected symbols=7: $( grep -o 'symbols=[0-9]*' "$MAP_OUT" )"; fi
+if grep -q 'edges=3' "$MAP_OUT"; then ok "header: edges=3 (SayHello->Greet, Main->Greeter, Main->SayHello)"; else no "header: expected edges=3: $( grep -o 'edges=[0-9]*' "$MAP_OUT" )"; fi
+if grep -q 'ambiguous=0' "$MAP_OUT"; then ok "header: ambiguous=0 (decl/def collapse resolved IGreeter's Greet away)"; else no "header: expected ambiguous=0: $( grep -o 'ambiguous=[0-9]*' "$MAP_OUT" )"; fi
 
 python3 - "$TMP/parsed.json" <<'PYEOF' >"$TMP/struct_check"
 import json, sys
@@ -122,25 +122,25 @@ print("IFACE:%s IG_GREET:%s CLS:%s GREET:%s SAYHELLO:%s SH_EDGE:%s PROGRAM:%s MA
 PYEOF
 cat "$TMP/struct_check"
 
-grep -q "IFACE:True"          "$TMP/struct_check" && ok "IGreeter.cs: interface IGreeter tagged t=\"iface\""            || no "IGreeter.cs: IGreeter missing or not t=\"iface\""
-grep -q "IG_GREET:True"       "$TMP/struct_check" && ok "IGreeter.cs: body-less Greet() still emitted, t=\"method\""    || no "IGreeter.cs: interface member Greet missing or wrong tag"
-grep -q "CLS:True"            "$TMP/struct_check" && ok "Greeter.cs: class Greeter tagged t=\"cls\""                    || no "Greeter.cs: Greeter missing or not t=\"cls\""
-grep -q "GREET:True"          "$TMP/struct_check" && ok "Greeter.cs: Greet() implementation tagged t=\"method\""        || no "Greeter.cs: Greet missing or wrong tag"
-grep -q "SAYHELLO:True"       "$TMP/struct_check" && ok "Greeter.cs: SayHello() tagged t=\"method\""                    || no "Greeter.cs: SayHello missing or wrong tag"
-grep -q "SH_EDGE:True"        "$TMP/struct_check" && ok "Greeter.cs: same-file call edge SayHello -> Greet present"     || no "Greeter.cs: SayHello -> Greet edge MISSING"
-grep -q "PROGRAM:True"        "$TMP/struct_check" && ok "Program.cs: class Program tagged t=\"cls\""                    || no "Program.cs: Program missing or not t=\"cls\""
-grep -q "MAIN:True"           "$TMP/struct_check" && ok "Program.cs: Main() tagged t=\"method\""                        || no "Program.cs: Main missing or wrong tag"
-grep -q "MAIN_CTOR_EDGE:True" "$TMP/struct_check" && ok "Program.cs: cross-file edge Main -> Greeter (new Greeter())"   || no "Program.cs: Main -> Greeter (object-creation) edge MISSING"
-grep -q "MAIN_CALL_EDGE:True" "$TMP/struct_check" && ok "Program.cs: cross-file edge Main -> SayHello (g.SayHello())"   || no "Program.cs: Main -> SayHello edge MISSING"
+if grep -q "IFACE:True"          "$TMP/struct_check"; then ok "IGreeter.cs: interface IGreeter tagged t=\"iface\""; else no "IGreeter.cs: IGreeter missing or not t=\"iface\""; fi
+if grep -q "IG_GREET:True"       "$TMP/struct_check"; then ok "IGreeter.cs: body-less Greet() still emitted, t=\"method\""; else no "IGreeter.cs: interface member Greet missing or wrong tag"; fi
+if grep -q "CLS:True"            "$TMP/struct_check"; then ok "Greeter.cs: class Greeter tagged t=\"cls\""; else no "Greeter.cs: Greeter missing or not t=\"cls\""; fi
+if grep -q "GREET:True"          "$TMP/struct_check"; then ok "Greeter.cs: Greet() implementation tagged t=\"method\""; else no "Greeter.cs: Greet missing or wrong tag"; fi
+if grep -q "SAYHELLO:True"       "$TMP/struct_check"; then ok "Greeter.cs: SayHello() tagged t=\"method\""; else no "Greeter.cs: SayHello missing or wrong tag"; fi
+if grep -q "SH_EDGE:True"        "$TMP/struct_check"; then ok "Greeter.cs: same-file call edge SayHello -> Greet present"; else no "Greeter.cs: SayHello -> Greet edge MISSING"; fi
+if grep -q "PROGRAM:True"        "$TMP/struct_check"; then ok "Program.cs: class Program tagged t=\"cls\""; else no "Program.cs: Program missing or not t=\"cls\""; fi
+if grep -q "MAIN:True"           "$TMP/struct_check"; then ok "Program.cs: Main() tagged t=\"method\""; else no "Program.cs: Main missing or wrong tag"; fi
+if grep -q "MAIN_CTOR_EDGE:True" "$TMP/struct_check"; then ok "Program.cs: cross-file edge Main -> Greeter (new Greeter())"; else no "Program.cs: Main -> Greeter (object-creation) edge MISSING"; fi
+if grep -q "MAIN_CALL_EDGE:True" "$TMP/struct_check"; then ok "Program.cs: cross-file edge Main -> SayHello (g.SayHello())"; else no "Program.cs: Main -> SayHello edge MISSING"; fi
 
 # cross-check via --callees / --callers (independent of the raw-XML parse)
 CE="$( "$BIN" "$FIX" --callees=Main --no-cache 2>/dev/null )"
-echo "$CE" | grep -q 'count="2"' && ok "--callees=Main reports count=2" || no "--callees=Main did not report count=2: $CE"
-echo "$CE" | grep -q 'n="Greeter"'  && ok "--callees=Main lists Greeter"  || no "--callees=Main missing Greeter: $CE"
-echo "$CE" | grep -q 'n="SayHello"' && ok "--callees=Main lists SayHello" || no "--callees=Main missing SayHello: $CE"
+if echo "$CE" | grep -q 'count="2"'; then ok "--callees=Main reports count=2"; else no "--callees=Main did not report count=2: $CE"; fi
+if echo "$CE" | grep -q 'n="Greeter"'; then ok "--callees=Main lists Greeter"; else no "--callees=Main missing Greeter: $CE"; fi
+if echo "$CE" | grep -q 'n="SayHello"'; then ok "--callees=Main lists SayHello"; else no "--callees=Main missing SayHello: $CE"; fi
 
 CR="$( "$BIN" "$FIX" --callers=SayHello --no-cache 2>/dev/null )"
-echo "$CR" | grep -q 'n="Main"' && ok "--callers=SayHello lists Main" || no "--callers=SayHello did not list Main: $CR"
+if echo "$CR" | grep -q 'n="Main"'; then ok "--callers=SayHello lists Main"; else no "--callers=SayHello did not list Main: $CR"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

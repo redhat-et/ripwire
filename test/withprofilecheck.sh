@@ -22,7 +22,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/cachefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ]    || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -48,7 +48,7 @@ OUT="$TMP/out1"
 # 2. the join — exact row, exact values, root counter
 grep -q 'rule="cache-pointer-chase-loop" p="[^"]*unfriendly.cpp:38" in="pointerChase" heat_scope="chase walk" heat_calls="12" heat_total_ms="48.500" heat_l1d_mpki="7.250"' "$OUT" \
     && ok "join: L38 chase finding carries the L33 site's measured values" || no "join row missing or wrong values"
-grep -q 'heat_joined="1"' "$OUT" && ok 'root heat_joined="1"' || no 'root heat_joined="1" missing'
+if grep -q 'heat_joined="1"' "$OUT"; then ok 'root heat_joined="1"'; else no 'root heat_joined="1" missing'; fi
 
 # 3. the fence — exactly ONE annotated finding in total (the L5 file-head site joined nothing)
 HEATS="$( grep -o 'heat_scope="' "$OUT" | wc -l | tr -d ' ' )"
@@ -63,20 +63,20 @@ printf '#PROF_TSV_BEGIN\thdr\nscope\tfile\tline\tcalls\ttotal_ms\nx\tfriendly.cp
 
 # 5. refusals
 "$BIN" "$CORPUS" --with-profile="$TMP/prof.txt" --no-cache >/dev/null 2>"$TMP/e1"; rc=$?
-[ "$rc" -eq 1 ] && grep -q 'modifies --lint' "$TMP/e1" && ok "flag alone refuses (exit 1, names --lint)" || no "flag-alone: rc=$rc"
+if [ "$rc" -eq 1 ] && grep -q 'modifies --lint' "$TMP/e1"; then ok "flag alone refuses (exit 1, names --lint)"; else no "flag-alone: rc=$rc"; fi
 "$BIN" "$CORPUS" --lint --with-profile="$TMP/absent.txt" --no-cache >/dev/null 2>"$TMP/e2"; rc=$?
-[ "$rc" -eq 1 ] && ok "missing file refuses (exit 1)" || no "missing file: rc=$rc"
+if [ "$rc" -eq 1 ]; then ok "missing file refuses (exit 1)"; else no "missing file: rc=$rc"; fi
 printf 'not a profile at all\n' > "$TMP/junk.txt"
 "$BIN" "$CORPUS" --lint --with-profile="$TMP/junk.txt" --no-cache >/dev/null 2>"$TMP/e3"; rc=$?
-[ "$rc" -eq 1 ] && grep -q 'PROF_TSV' "$TMP/e3" && ok "sentinel-less file refuses (exit 1, names the block)" || no "junk file: rc=$rc"
+if [ "$rc" -eq 1 ] && grep -q 'PROF_TSV' "$TMP/e3"; then ok "sentinel-less file refuses (exit 1, names the block)"; else no "junk file: rc=$rc"; fi
 
 # 6. the heat legend is armed-only
-grep -q 'with-profile: heat_\*' "$OUT" && ok "heat legend present when armed" || no "heat legend missing when armed"
+if grep -q 'with-profile: heat_\*' "$OUT"; then ok "heat legend present when armed"; else no "heat legend missing when armed"; fi
 "$BIN" "$CORPUS" --lint --no-cache > "$TMP/plain" 2>/dev/null
 grep -q 'heat_' "$TMP/plain" && no "bare --lint leaked heat_* content" || ok "bare --lint carries no heat_* (legend and attrs)"
 
 # 7. xmllint
-xmllint --noout "$OUT" 2>/dev/null && ok "xmllint clean" || no "xmllint reported malformed XML"
+if xmllint --noout "$OUT" 2>/dev/null; then ok "xmllint clean"; else no "xmllint reported malformed XML"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

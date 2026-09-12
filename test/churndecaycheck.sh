@@ -36,7 +36,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -114,7 +114,7 @@ else
     no "arm 1b: two runs DIFFER — churn-decay is not deterministic"
 fi
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$A" | xmllint --noout - 2>"$WORK/xl" && ok "arm 1c: output is well-formed XML" || { no "arm 1c: xmllint rejected the output"; sed 's/^/    /' "$WORK/xl" | head -3; }
+    if printf '%s' "$A" | xmllint --noout - 2>"$WORK/xl"; then ok "arm 1c: output is well-formed XML"; else { no "arm 1c: xmllint rejected the output"; sed 's/^/    /' "$WORK/xl" | head -3; }; fi
 else
     no "arm 1c: xmllint missing — cannot verify well-formedness (install libxml2-utils)"
 fi

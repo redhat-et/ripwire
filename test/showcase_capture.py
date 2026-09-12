@@ -333,7 +333,7 @@ add(S2, f'{BIN} . --query="teleport pagerank" --top-k=5', "Raw BM25 ranking (deb
 
 S3 = "zoom the detail ladder"
 add(S3, f'{BIN} . --for="pagerank power iteration" --detail=2', "Importance-weighted detail: FULL bodies for top-2, signatures for the rest.")
-add(S3, f"{BIN} . --pack-signatures --top-k=10", "Body-elided decl skeletons — recounted on this corpus. Measured as element bytes: the <d> signature+doc elements --pack-signatures emits, against the SAME symbols' full <b> bodies from --expand, with the CORPUS-ROOT PREFIX SUBTRACTED FROM BOTH SIDES. That subtraction is the whole methodology and the figure is meaningless without it: the root repeats inside every element's id= and p=, it is not what this verb elides, and counting it makes the headline a function of how deep the checkout happens to sit on disk — on one corpus, three spellings of the same root read 18.6 points apart before the subtraction and agree exactly after it. Root-neutralised on THIS repo: 81.3% fewer bytes at top-10, 72.3% at top-50, 72.7% at top-100 (re-derived 2026-09-08 at the confident-zero round, issues #62/#63/#66: that change adds symbols to src/graphlegend.h and the new src/preprocdead.h and re-homes two long comment blocks from call sites onto the helpers they explain, which moves both WHICH symbols the ranked top-50 holds and how large their bodies are — top-50 from 74.0. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-06 at the stranger-audit fix round: the doctor, cache-sweep and html-provenance bodies grew this corpus's BODY side, moving top-50 from 75.6 — a real re-derivation, not a tolerance edit; before that, re-derived 2026-09-05 at the capture-audit close: lane L7's P16 caps --expand's sibs= at 8 names, which SHRINKS the body side of this ratio and moved the figure down from 84.5/80.2/80.6 — the V1 2026-08-15 re-center, when sibs=/inc= first grew the body side from 70.0/61.0/63.8, in reverse; both were real re-derivations, not tolerance edits). top-50 is the number to quote, because the sigs payload is top-50 regardless of --top-k and is therefore what THIS command emits. A single small/trivial body can still invert it (signature+doc bigger than the body), like the --format=columnar sibling below. test/showcasecapturecheck.sh (C) re-derives all three from this repo every run, in the same quantity, and fails if the caption and the recount drift apart.")
+add(S3, f"{BIN} . --pack-signatures --top-k=10", "Body-elided decl skeletons — recounted on this corpus. Measured as element bytes: the <d> signature+doc elements --pack-signatures emits, against the SAME symbols' full <b> bodies from --expand, with the CORPUS-ROOT PREFIX SUBTRACTED FROM BOTH SIDES. That subtraction is the whole methodology and the figure is meaningless without it: the root repeats inside every element's id= and p=, it is not what this verb elides, and counting it makes the headline a function of how deep the checkout happens to sit on disk — on one corpus, three spellings of the same root read 18.6 points apart before the subtraction and agree exactly after it. Root-neutralised on THIS repo: 89.5% fewer bytes at top-10, 81.8% at top-50, 84.3% at top-100 (re-derived 2026-09-10 at the sibs= cap raise: kMaxExpandSibs went 8 -> 100, so --expand's <b> bodies now carry the file context the old cap hid — 89.3% of all sibling names — and the body side is this ratio's DENOMINATOR, so the figure rises without --pack-signatures eliding anything new. Measured on a fixed tree with the top-50 membership and the signature side unchanged: top-50 from 71.0. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-09 at the printf-family -> std::print conversion: converting ~1,500 emitter call sites to rw::emitTo/emitRaw/formatTo across 93 files changes how large the ranked symbols' BODIES are, and the body side is this ratio's denominator — top-50 from 72.3. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-08 at the confident-zero round, issues #62/#63/#66: that change adds symbols to src/graphlegend.h and the new src/preprocdead.h and re-homes two long comment blocks from call sites onto the helpers they explain, which moves both WHICH symbols the ranked top-50 holds and how large their bodies are — top-50 from 74.0. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-06 at the stranger-audit fix round: the doctor, cache-sweep and html-provenance bodies grew this corpus's BODY side, moving top-50 from 75.6 — a real re-derivation, not a tolerance edit; before that, re-derived 2026-09-05 at the capture-audit close: lane L7's P16 caps --expand's sibs= at 8 names, which SHRINKS the body side of this ratio and moved the figure down from 84.5/80.2/80.6 — the V1 2026-08-15 re-center, when sibs=/inc= first grew the body side from 70.0/61.0/63.8, in reverse; both were real re-derivations, not tolerance edits). top-50 is the number to quote, because the sigs payload is top-50 regardless of --top-k and is therefore what THIS command emits. A single small/trivial body can still invert it (signature+doc bigger than the body), like the --format=columnar sibling below. test/showcasecapturecheck.sh (C) re-derives all three from this repo every run, in the same quantity, and fails if the caption and the recount drift apart.")
 add(S3, f"{BIN} . --outline=rankGraphTeleport --top-k=0", "Control-flow skeleton of one symbol, payload-only via the new --top-k=0.")
 add(S3, f"{BIN} . --outline=rankGraphTeleport:1-10 --top-k=0", "CHANGED: a line range on --outline is now STRIPPED with a stderr note (it used to refuse).")
 add(S3, f"{BIN} . --expand=rankGraphTeleport --top-k=0", "Full body + inline callee signatures.")
@@ -795,6 +795,16 @@ def fmt_block(data):
         out.append(marker)
     return "\n".join(out)
 
+def publish_block(data):
+    """fmt_block, then the project's own rebrand rows withheld (exportscrub.withhold_rebrand_rows).
+
+    AFTER the display cut, deliberately: the window and its `… [N more display lines]` marker still describe
+    the real output, and the disclosure's count is exactly the rows taken out of what this block shows. So
+    rows shown + withheld + past the cut still equals the pairs= the tool reported — the sum
+    test/docscommandscheck.sh arm (E) checks on every capture."""
+    lines, _withheld = exportscrub.withhold_rebrand_rows(fmt_block(data).split("\n"))
+    return "\n".join(lines)
+
 ver = subprocess.run(f"{BIN} --version", shell=True, cwd=REPO, capture_output=True).stdout.decode().strip()
 # §B11.5: the --help line count is DERIVED at generation time — the hardcoded "543 lines" went stale
 # (live was 669) and a meta-claim about the binary must come from the binary.
@@ -845,12 +855,12 @@ for r in results:
         doc.append(r["pre"].rstrip())
         doc.append(FENCE + "\n")
     doc.append(FENCE)
-    doc.append(fmt_block(r["out"]))
+    doc.append(publish_block(r["out"]))
     doc.append(FENCE + "\n")
     if r["err"].strip():
         doc.append("stderr:\n")
         doc.append(FENCE)
-        doc.append(fmt_block(r["err"]))
+        doc.append(publish_block(r["err"]))
         doc.append(FENCE + "\n")
     if r["post"]:
         doc.append(c.get("post_label", "Artifact written:") + "\n")
@@ -883,13 +893,21 @@ published = exportscrub.scrub(published, "ripwire")
 # checked but NOT substituted: an audit COORDINATE has no honest rewrite in a transcript (the
 # generator DROPS such lines from COMMANDS.md samples, which a recorded run cannot do), so a coordinate
 # reaching the output is a human decision about the source it came from, not something to paper over.
+# The same goes for a rebrand rename row that survived publish_block: withholding takes out only a row
+# that is its line's whole content, so one sharing a line with other output stops the write here.
 HOME_RE = re.compile(r"/[Uu]sers/")
-CLASSES = (("absolute home path", HOME_RE.search),
+CLASSES = (("the project's own rebrand rename row", exportscrub.rebrand_rename_row),
+           ("absolute home path", HOME_RE.search),
            ("temp/scratch path", exportscrub.TMP_PATH.search),
            ("internal coordinate shape", exportscrub.COORD.search),
            ("internal document name", exportscrub.INTERNAL_DOC.search),
            ("email address", exportscrub.find_address))
-leaks = [f"{i}: {label}: {line.strip()[:100]}"
+def leak_shown(line):
+    """A line carrying a rebrand row is named by that row's public side, never printed: the refusal would
+    otherwise publish the old spelling in the very log that reports it."""
+    row = exportscrub.rebrand_rename_row(line)
+    return exportscrub.rebrand_row_public_side(row) if row is not None else line.strip()[:100]
+leaks = [f"{i}: {label}: {leak_shown(line)}"
          for i, line in enumerate(published.split("\n"), 1)
          for label, hit in CLASSES if hit(line)]
 if leaks:

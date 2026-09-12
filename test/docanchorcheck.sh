@@ -30,7 +30,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -70,7 +70,7 @@ EOF
 
 "$BIN" "$FIX" --doc-drift --detail=1 --no-cache >"$TMP/o" 2>/dev/null
 rc=$?
-[ "$rc" = "0" ] && ok "exits 0 (a report, not a gate)" || no "--doc-drift exited $rc, expected 0"
+if [ "$rc" = "0" ]; then ok "exits 0 (a report, not a gate)"; else no "--doc-drift exited $rc, expected 0"; fi
 rows(){ tr '<' '\n' <"$TMP/o" | grep '^a k='; }
 
 # ── the boundary, per file ────────────────────────────────────────────────────────────────────────────
@@ -132,7 +132,7 @@ tr '<' '\n' <"$TMP/self" | grep '^a k=' | grep -q 'tgt="' \
 
 # ── determinism + G4 ──────────────────────────────────────────────────────────────────────────────────
 "$BIN" "$FIX" --doc-drift --detail=1 --no-cache >"$TMP/o2" 2>/dev/null
-cmp -s "$TMP/o" "$TMP/o2" && ok "byte-identical run to run" || no "--doc-drift is non-deterministic"
+if cmp -s "$TMP/o" "$TMP/o2"; then ok "byte-identical run to run"; else no "--doc-drift is non-deterministic"; fi
 # The doc scan, the corpus scan and the anchor resolution all run on a worker pool now, and the corpus scan
 # folds into a FIRST-WINS table — so scheduling could reorder the answer if the block discipline ever broke.
 # Determinism is a hard law here (the verb's whole value is that its numbers can be quoted), so this is a
@@ -146,13 +146,13 @@ done
                   || no "--doc-drift is non-deterministic on this repo — a threaded pass is order-dependent"
 "$BIN" "$ROOT" --doc-drift --gateability --no-cache >"$TMP/g1" 2>/dev/null
 "$BIN" "$ROOT" --doc-drift --gateability --no-cache >"$TMP/g2" 2>/dev/null
-cmp -s "$TMP/g1" "$TMP/g2" && ok "--gateability byte-identical run to run" || no "--gateability is non-deterministic"
+if cmp -s "$TMP/g1" "$TMP/g2"; then ok "--gateability byte-identical run to run"; else no "--gateability is non-deterministic"; fi
 grep -q 'projected_drift="' "$TMP/g1" \
     && ok "--gateability still emits projected_drift= (the clamp survives, it was not folded away)" \
     || no "--gateability lost projected_drift="
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/o" 2>/dev/null    && ok "G4 xmllint clean (fixture)" || no "fixture output is not well-formed XML"
-    xmllint --noout "$TMP/self" 2>/dev/null && ok "G4 xmllint clean (this repo)" || no "self output is not well-formed XML"
+    if xmllint --noout "$TMP/o" 2>/dev/null; then ok "G4 xmllint clean (fixture)"; else no "fixture output is not well-formed XML"; fi
+    if xmllint --noout "$TMP/self" 2>/dev/null; then ok "G4 xmllint clean (this repo)"; else no "self output is not well-formed XML"; fi
 fi
 
 [ $fail -eq 0 ] && echo "docanchorcheck: ALL PASS" || echo "docanchorcheck: FAILURES"

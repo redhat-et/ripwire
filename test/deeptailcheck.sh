@@ -26,7 +26,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -59,7 +59,7 @@ case "$TAILTAG" in
     *)  no "tail element has wrong counts: $TAILTAG (expected total=11 shown=11 capped=0)" ;;
 esac
 TROWS="$( printf '%s' "$XML" | grep -o '<t p="[^"]*"/>' | wc -l | tr -d ' ' )"
-[ "$TROWS" = "11" ] && ok "tail serves 11 <t p= rows" || no "tail rows: $TROWS (expected 11)"
+if [ "$TROWS" = "11" ]; then ok "tail serves 11 <t p= rows"; else no "tail rows: $TROWS (expected 11)"; fi
 # disjoint: no tail path may also be a head row's p= (P7: the head is flat <d … p=> rows, no <f> wrapper)
 DUP="$( printf '%s' "$XML" | python3 -c '
 import re, sys
@@ -68,11 +68,11 @@ head  = set( re.findall( r"<d [^>]*?\bp=\"([^\"]*)\"", s ) )
 tails = re.findall( r"<t p=\"([^\"]*)\"/>", s )
 print( sum( 1 for t in tails if t in head ) )
 ' )"
-[ "$DUP" = "0" ] && ok "tail files are disjoint from the head's files" || no "$DUP tail file(s) duplicate a head file"
+if [ "$DUP" = "0" ]; then ok "tail files are disjoint from the head's files"; else no "$DUP tail file(s) duplicate a head file"; fi
 
 # ── 2) d1: r= on every ranked row, exactly the ranks 1..K ──────────────────────────────────────────────
 RSEQ="$( printf '%s' "$XML" | grep -o '<d l="[^>]*>' | grep -o ' r="[0-9]*"' | grep -o '[0-9]*' | sort -n | tr '\n' ' ' )"
-[ "$RSEQ" = "1 2 3 4 " ] && ok "every <d> row carries r=, ranks exactly 1..4" || no "XML r= sequence wrong: '$RSEQ' (expected '1 2 3 4 ')"
+if [ "$RSEQ" = "1 2 3 4 " ]; then ok "every <d> row carries r=, ranks exactly 1..4"; else no "XML r= sequence wrong: '$RSEQ' (expected '1 2 3 4 ')"; fi
 
 # ── 3) d1 cross-surface: r=1 names the same symbol the flat candidates export ranks first ──────────────
 TOPD="$( printf '%s' "$XML" | grep -o '<d l="[^>]*r="1"[^>]*>' | head -1 | grep -o 'n="[^"]*"' | head -1 )"
@@ -107,14 +107,14 @@ esac
 
 # ── 5) pack-task: both dialects carry the rank fact ────────────────────────────────────────────────────
 PT="$( "$BIN" "$CORPUS" --no-cache --pack-task="$Q" 2>/dev/null )"
-printf '%s' "$PT" | grep -q '<d l="[^>]*r="1"' && ok "pack-task XML ranking rows carry r=" || no "pack-task XML rows carry no r="
+if printf '%s' "$PT" | grep -q '<d l="[^>]*r="1"'; then ok "pack-task XML ranking rows carry r="; else no "pack-task XML rows carry no r="; fi
 PTJ="$( "$BIN" "$CORPUS" --no-cache --pack-task="$Q" --json 2>/dev/null | python3 -c '
 import json, sys
 d = json.load( sys.stdin )
 rs = [ s.get( "r", 0 ) for s in d.get( "ranking", [] ) ]   # P7: flat ranking array
 print( "Y" if rs and all( r > 0 for r in rs ) else "N" )
 ' )"
-[ "$PTJ" = "Y" ] && ok "pack-task JSON ranking rows carry r" || no "pack-task JSON ranking rows carry no r"
+if [ "$PTJ" = "Y" ]; then ok "pack-task JSON ranking rows carry r"; else no "pack-task JSON ranking rows carry no r"; fi
 
 # ── 6) hard ceiling: the tail funds LAST and its disclosure survives a spent budget ────────────────────
 TB="$( "$BIN" "$CORPUS" --no-cache --for="$Q" --pack-top-n=4 --token-budget=220 2>/dev/null )"
@@ -131,7 +131,7 @@ if [ -n "$TBSHOWN" ] && [ "$TBSHOWN" -lt 11 ] && [ "$TBCAP" = "1" ]; then
 else
     no "tight budget did not trim/disclose honestly (shown=$TBSHOWN capped=$TBCAP)"
 fi
-printf '%s' "$TB" | xmllint --noout - 2>/dev/null && ok "tight-budget bundle stays well-formed" || no "tight-budget bundle fails xmllint"
+if printf '%s' "$TB" | xmllint --noout - 2>/dev/null; then ok "tight-budget bundle stays well-formed"; else no "tight-budget bundle fails xmllint"; fi
 
 # ── 7) zero-tail honesty: a head that covers every file still emits the element (0 = none remain) ──────
 MINI="$TMP/mini"
@@ -180,8 +180,8 @@ T9J_NSHOWN="$( printf '%s' "$T9J" | grep -o '"p":"w[0-9]*\.py"' | sort -u | grep
 
 # ── 8) the legend defines both new surfaces where the reader meets them ────────────────────────────────
 HDR="$( printf '%s' "$XML" | sed 's/-->.*//' )"
-printf '%s' "$HDR" | grep -q 'tail: file-grain tail' && ok "legend defines the tail (file-grain, weaker evidence)" || no "legend does not define the tail"
-printf '%s' "$HDR" | grep -q 'r= on a ranked row' && ok "legend defines r= (true ranker order)" || no "legend does not define r="
+if printf '%s' "$HDR" | grep -q 'tail: file-grain tail'; then ok "legend defines the tail (file-grain, weaker evidence)"; else no "legend does not define the tail"; fi
+if printf '%s' "$HDR" | grep -q 'r= on a ranked row'; then ok "legend defines r= (true ranker order)"; else no "legend does not define r="; fi
 
 # ── 9) determinism + well-formedness ───────────────────────────────────────────────────────────────────
 "$BIN" "$CORPUS" --no-cache --for="$Q" --pack-top-n=4 2>/dev/null > "$TMP/d1.xml"
@@ -192,7 +192,7 @@ if cmp -s "$TMP/d1.xml" "$TMP/d2.xml" && cmp -s "$TMP/d2.xml" "$TMP/d3.xml"; the
 else
     no "runs differ byte-wise (determinism broken)"
 fi
-xmllint --noout "$TMP/d1.xml" 2>/dev/null && ok "bundle is well-formed XML" || no "bundle fails xmllint"
+if xmllint --noout "$TMP/d1.xml" 2>/dev/null; then ok "bundle is well-formed XML"; else no "bundle fails xmllint"; fi
 
 # ── 10) MCP parity: the `for` verb serves the same two surfaces ────────────────────────────────────────
 MCP_INNER="$( printf '%s\n' \
@@ -203,8 +203,8 @@ import json, sys
 r = json.load( sys.stdin )
 print( "" if "error" in r else r["result"]["content"][0]["text"] )
 ' )"
-printf '%s' "$MCP_INNER" | grep -q '<tail total=' && ok "MCP for verb serves the file-grain tail" || no "MCP for verb has no <tail>"
-printf '%s' "$MCP_INNER" | grep -q '<d l="[^>]*r="1"' && ok "MCP for verb rows carry r=" || no "MCP for verb rows carry no r="
+if printf '%s' "$MCP_INNER" | grep -q '<tail total='; then ok "MCP for verb serves the file-grain tail"; else no "MCP for verb has no <tail>"; fi
+if printf '%s' "$MCP_INNER" | grep -q '<d l="[^>]*r="1"'; then ok "MCP for verb rows carry r="; else no "MCP for verb rows carry no r="; fi
 
 echo
 if [ "$fail" = "0" ]; then echo "deeptailcheck: ALL PASS"; else echo "deeptailcheck: FAILURES ABOVE"; fi

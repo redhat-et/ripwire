@@ -56,6 +56,7 @@ is why the sizes are what they are — `parser.c` is one big static table, not h
 | `deps/javascript` | tree-sitter-javascript (v0.23.1) | Max Brunsfeld | MIT | `3a837b6f3658ca3618f2022f8707e29739c91364` | https://github.com/tree-sitter/tree-sitter-javascript | 2.4 MB |
 | `deps/ts_typescript` | tree-sitter-typescript (v0.23.2; supplies both the `typescript` and `tsx` grammars) | Max Brunsfeld | MIT | `f975a621f4e7f532fe322e13c4f79495e0a7b2e7` | https://github.com/tree-sitter/tree-sitter-typescript | 17 MB |
 | `deps/elixir` | tree-sitter-elixir (ABI 14) | Elixir contributors | Apache-2.0, MIT (generated sources; see NOTICE) | `4b0c7118760af58a2e7081bbc8396e136f820b37` | https://github.com/elixir-lang/tree-sitter-elixir | 12 MB |
+| `deps/dart` | tree-sitter-dart (ABI 15) | UserNobody14 and contributors | MIT | `be07cf7118d3dba06236a3f19541685a68209934` | https://github.com/UserNobody14/tree-sitter-dart | 6.8 MB |
 | `deps/ruby` | tree-sitter-ruby (v0.23.1) | Rob Rix | MIT | `71bd32fb7607035768799732addba884a37a6210` | https://github.com/tree-sitter/tree-sitter-ruby | 15 MB |
 | `deps/bash` | tree-sitter-bash (v0.23.3) | Max Brunsfeld | MIT | `487734f87fd87118028a65a4599352fa99c9cde8` | https://github.com/tree-sitter/tree-sitter-bash | 10 MB |
 | `deps/csharp` | tree-sitter-c-sharp (v0.23.5) | Max Brunsfeld, Damien Guard, Amaan Qureshi and contributors | MIT | `cac6d5fb595f5811a076336682d5d595ac1c9e85` | https://github.com/tree-sitter/tree-sitter-c-sharp | 28 MB |
@@ -66,6 +67,8 @@ is why the sizes are what they are — `parser.c` is one big static table, not h
 | `deps/swift` | tree-sitter-swift | Alex Pinkus | MIT | `31d17fe7e818a2048c808b5c6fdc2dc792f4f5b5` | https://github.com/alex-pinkus/tree-sitter-swift | 20 MB |
 | `deps/php` | tree-sitter-php (v0.24.2; the `php/` sub-grammar only) | Josh Vera, GitHub | MIT | `5b5627faaa290d89eb3d01b9bf47c3bb9e797dea` | https://github.com/tree-sitter/tree-sitter-php | 6.9 MB |
 | `deps/lua` | tree-sitter-lua (v0.5.0) | Munif Tanjim | MIT | `10fe0054734eec83049514ea2e718b2a56acd0c9` | https://github.com/tree-sitter-grammars/tree-sitter-lua | 392 KB |
+| `deps/markdown` | tree-sitter-markdown (v0.5.3; the block grammar `tree-sitter-markdown/` only) | Matthias Deiml | MIT | `f969cd3ae3f9fbd4e43205431d0ae286014c05b5` | https://github.com/tree-sitter-grammars/tree-sitter-markdown | 2.1 MB |
+| `deps/kotlin` | tree-sitter-kotlin (ABI 14) | fwcd | MIT | `1852ea17b7f60fb3f9d84e0b1555d56b46b39fb1` | https://github.com/fwcd/tree-sitter-kotlin | 32 MB |
 | `deps/doctest` | doctest (v2.4.12) | Viktor Kirilov | MIT | `1da23a3e8119ec5cce4f9388e91b065e20bf06f5` | https://github.com/doctest/doctest | 0.7 MB |
 
 Notes:
@@ -75,6 +78,9 @@ Notes:
   carrying its own `LICENSE` (Unicode-DFS-2016) and `ICU_SHA` provenance file, left untouched.
 - `deps/swift` is pinned to a bare commit rather than a tag because upstream's default branch does
   not carry a generated `parser.c`; that commit's generated output is what is vendored here.
+- `deps/kotlin` is pinned to a bare commit rather than the last tag (`v0.3.8`, Aug 2024) because
+  that tag predates a scanner segfault fix (upstream #136) present on `main`; the pinned commit is
+  `main`'s tip as of this vendoring, chosen for the fix, not for being a release.
 - `deps/ts_typescript` keeps `common/scanner.h`, which both sub-grammars' `src/scanner.c` include.
 - `deps/php` keeps the repo-relative layout `common/scanner.h` + `php/src/…` for the same reason, and
   for one more: upstream hosts TWO sub-grammars (`php/`, `php_only/`) whose `src/scanner.c` each

@@ -34,13 +34,118 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
-# 2026-09-10, ELIXIR SEMANTICS (test/elixirsemanticcheck.sh), rebased onto main: parserVer and its quality
-#   mirror move 86 -> 87 for module/name/arity identities, lexical imports, defaults, captures, delegates,
+# 2026-09-12, ELIXIR SEMANTICS (test/elixirsemanticcheck.sh, PR #81), merged onto main: parserVer and its quality
+#   mirror move 94 -> 95 for module/name/arity identities, lexical imports, defaults, captures, delegates,
 #   attributes and protocol/behaviour relationships. Binding/Reference record layouts are unchanged:
-#   kCacheVersion stays 18 and kQSnapCacheScheme stays 8. Old extraction facts must be re-parsed.
-#   Landed at 87, not the 86 the fork carried — main had already spent 86 on the Ruby receiver dedupe
-#   below (test/rubyrecvcheck.sh), landing the same day: RE-BUMPED to the next free number over main's
-#   tip, per the collision rule in ingest_cache.h's kParserVer note.
+#   kCacheVersion stays #139's 21 and kQSnapCacheScheme stays 10. Old extraction facts must be re-parsed.
+#   Landed at 95, not the 87 the branch carried — main spent 87..92 while it was open and the 0.6.1 round
+#   takes 93 (#139) and 94 (#172): RE-BUMPED to the next free number over the merged tip, per the collision
+#   rule in ingest_cache.h's kParserVer note. RE-DERIVED ON THE MERGE (the branch's pin hashed 87 over 18).
+# 2026-09-11, YAML UNSIGNED CHAR (fix/yaml-scanner-unsigned-char-2026-09-11, PR #140; test/vendorpatchcheck.sh arm K):
+#   kParserVer 91 -> 92 and kIngestParserVerMirror -> 92, kCacheVersion STAYS 20 and kQSnapCacheScheme STAYS 10.
+#   EXTRACTION identity, and the only kind this repo cannot see from its own CI: vendor patch
+#   yaml/003-scan-status-enum gives tree-sitter-yaml's scan status a real enum type instead of returning SCN_FAIL
+#   (-1) through plain `char`. Where `char` is UNSIGNED — aarch64 Linux, which is where the linux-arm64 release
+#   asset is built — that -1 came back as 255 and no `case SCN_FAIL:` matched it, so a malformed %-escape in a tag
+#   parsed as a clean tagged scalar there and as ERROR everywhere else. The patch makes the unsigned-`char` build
+#   agree with the signed one, which is byte-identical HERE and a changed parse THERE; kArtifactArch cannot tell an
+#   aarch64 blob from an x86-64 one, so only this version can reject a blob the pre-patch unsigned-`char` binary
+#   wrote. No Snapshot-side function changed and record SHAPES are untouched. RE-DERIVED ON THE MERGE with main
+#   1ad9184a, not carried: the lane's pre-merge tree hashed 88 over kCacheVersion 18 and main's pin hashes 91 over
+#   20, so neither side hashed the merged 92/20 declaration lines.
+# 2026-09-11, KOTLIN (test/kotlincheck.sh, PR #126): kParserVer 90 -> 91 and kIngestParserVerMirror -> 91, as the
+#   contributor's head 1e21943a carries them. Main stands at 90 since #135, so 91 is also the land-time
+#   value. A 24th grammar joins kLangTable (.kt), so the crawl admits files it previously refused and only the
+#   header version can reject a v90 blob. The port also widens ingest_sidecap.h's positional body fallback and adds
+#   Kotlin's scope walker, countParams and complexity arms; its vendor patch kotlin/002 changes a real parse; and the
+#   maintainer round refuses a .kt file whose string templates nest past kMaxKotlinStringNestDepth before the parse.
+#   All of that is extraction identity for .kt only. Record SHAPES are unchanged (a refused file's record is written
+#   UNKNOWN with the existing encoding), so this lane leaves kCacheVersion at #135's 20. No Snapshot-side function changed and
+#   kQSnapCacheScheme stays 10. RE-PINNED ON THE MERGED TREE, carried from neither side: main's #132 pin predates
+#   this lane's constants, and the PR's pin predates #132's readRegisterMacrosConfig move. RE-DERIVED AGAIN on the
+#   merge with main 1187b7f3 (#135): the lane's pin (957701449b76...) hashed 91 over kCacheVersion 18 and #135's
+#   (d8dcd5c0b3f9...) hashed 90 over 20, so neither hashed the merged 91/20 declaration lines.
+# 2026-09-11, EXTENT HONESTY + MEMBER-MACRO RE-PARSE (fix/cpp-macro-member-reparse-2026-09-11; test/extentcheck.sh,
+#   test/macroreparsecheck.sh): kParserVer 88 -> 89 -> 90 and kCacheVersion 18 -> 19 -> 20, with
+#   kIngestParserVerMirror / kIngestCacheVersionMirror moved in the same commits. Both are EXTRACTION identity:
+#   89 gives every def record the RawDef::recovered u8; 90 extracts a C-family file whose first parse holds error
+#   bytes from a re-parse with its semicolon-less member macro invocations blanked, and the FILE record grows
+#   FileHealth::macroBlanked. Only the hashed ingest_cache.h declaration lines moved; quality.h's one hunk is the
+#   mirror block, outside every manifest function. kQSnapCacheScheme STAYS 10: the mirrors already key each qsnap
+#   blob on the extraction behind it, and what a cached Snapshot MEANS is untouched. RE-DERIVED ON THE MERGE with
+#   main 096e3544, not carried: the lane's pin (e1e921ca, over 5afadeca) lacked #132's readRegisterMacrosConfig
+#   read below, and #132's pin (e005aacc) lacked these version lines, so neither side hashed the merged manifest.
+# 2026-09-11, OUT-PARAM RETURNS (lane/outparam-returns-2026-09-11, PR #132): RE-PIN ONLY, kQSnapCacheScheme STAYS 10.
+#   One manifest function's SOURCE moved, and only its read. Because readWholeFile returns
+#   std::optional<std::string> now, readRegisterMacrosConfig went from
+#     if( !docparse::detail::readWholeFile( configPath( root ), text ) || text.empty() )
+#   to
+#     const std::string text = docparse::detail::readWholeFile( configPath( root ) ).value_or( std::string() );
+#     if( text.empty() )
+#   Absent, unreadable and empty still all return the inert config. The other eleven manifest functions, and
+#   the ingest_cache.h / gitmine.h identity lines, are byte-identical, checked function by function with this
+#   gate's own extract_fn. End to end, as the entries below settle it: --quality-baseline written by the
+#   pre-change binary (5afadeca) and by this one, on the same corpus, is BYTE-IDENTICAL, 2,454 B on
+#   test/fixture and 969,627 B on the real src/ tree. Refactor-only arm: re-pin, do not bump the scheme.
+# 2026-09-10, DART (test/dartcheck.sh): kParserVer 87 -> 88 and kIngestParserVerMirror -> 88. A 23rd
+#   grammar joins kLangTable, so the CRAWL ADMITS FILES IT PREVIOUSLY REFUSED: a v87 blob's file list has
+#   no record for the `.dart` it never saw, the file is ABSENT rather than stale, and only the header
+#   version can reject the blob — the same class as the plain-text prose tier below. The commit also
+#   extends the definition SPAN for Dart only (dartFollowingBody, adopted in ingest_sidecap.h) and adds
+#   formal_parameter_list to cc_isParamList; both are extraction identity, which is exactly what parserVer
+#   covers, and every other language is byte-identical (verified against the pre-change binary on src/ and
+#   on a 1 406-file multi-language corpus). Record SHAPES are unchanged, so kCacheVersion stays 18. No
+#   Snapshot-side function changed and kQSnapCacheScheme stays 8: what a cached Snapshot MEANS is
+#   untouched — the corpus it is computed over is what grew. RE-ANSWERED TWICE on the landing rebase: the
+#   branch was written against 81 -> 82, and 87 (below) was taken by the markdown-saturation lane while
+#   this PR was open — the kParserVer DECLARATION auto-merged clean at that same wrong 87 and only the
+#   comment conflicted, which is why the number is re-derived from main rather than carried.
+# 2026-09-10, MARKDOWN COUNTER SATURATION (test/vendorpatchcheck.sh arm I,
+#   third_party/patches/markdown/002-counter-saturate): kParserVer 86 -> 87 and
+#   kIngestParserVerMirror -> 87. A uint8_t counter in four vendored external scanners overflowed past 255 —
+#   a hard abort under G1's -fno-sanitize-recover=all (rc=134), found on rails/guides/source/
+#   getting_started.md, a pipe-table row padded to 301 columns; 64 tabs also suffice, since advance()
+#   charges a tab at tab stop 4. Only ONE of the two remedies in that lane moves extraction. markdown's
+#   indentation counters AND its fence `level` SATURATE, because both are read by ordering tests against a
+#   FIXED threshold (`>= 4` indented chunk, `< 4` thematic break, `< list_item_indentation` max 17; `>= 3`
+#   before a fence may open) and 255 answers each exactly as any larger true value would. Wrapping inverted
+#   those predicates inside a narrow window: measured N=255 correct, N=256/257 WRONG at exit 0, N=300 correct
+#   again by luck — at 256 an indented code block parsed as a heading and a fence never opened, leaking its
+#   body out as live markdown, both minting phantom symbols. The rust/lua/csharp siblings take an explicit
+#   CAST instead: those counters close a token by matching the opening count, saturation is not more correct
+#   there, and measurement found no extraction difference at any width (255/256/257/300), so the cast half
+#   contributes NOTHING to this bump. Measured both ways rather than assumed: map output is byte-identical
+#   over 3 538 real files, and a constructed 256-column ATX line changes from n="BuriedHeading" emitted to
+#   absent. Record shapes unchanged, kCacheVersion stays 18. No Snapshot-side function changed and
+#   kQSnapCacheScheme stays 8: what a cached Snapshot MEANS is untouched.
+#   RE-DERIVED OVER main's OWN RE-PIN, not carried over: this lane landed on top of the printf-family
+#   -> std::print conversion, which had itself re-pinned this hash for a source-text move in
+#   bodyHashesBySym. Both sides of that conflict were stale — main's value predates kParserVer 87 and
+#   this lane's predates the conversion — so the correct hash exists only on the MERGED tree and was
+#   regenerated there with UPDATE_GOLDEN=1. Taking either side would have pinned a hash no tree has.
+# 2026-09-09, REBASED onto main c38d3eea (parser 85, text-docs tier): the entry below is RE-ANSWERED
+#   against THAT tree rather than carried over — --quality-baseline written by main's own binary and by
+#   this lane's, on the same corpus, is BYTE-IDENTICAL at 930,546 B. So the conversion is still the
+#   refactor-only arm on the new base and kQSnapCacheScheme still stays 8.
+# 2026-09-09, PRINTF-FAMILY -> std::print (lane/stdprint-conversion): RE-PIN ONLY, kQSnapCacheScheme STAYS 8.
+#   One manifest function's SOURCE moved: bodyHashesBySym's hex fold went
+#     std::snprintf( b, sizeof( b ), "%016llx", ... )  ->  rw::formatTo( b, sizeof( b ), "{:016x}", ... )
+#   That string is concatenated into `joined` and fed to fnv1a64, so it IS the body hash a snapshot stores,
+#   and a byte moving there would silently repartition clone groups and the dead set. It does not move:
+#   %016llx and {:016x} were proven byte-identical over 0, 1, 255, 4886718345 and UINT64_MAX before the
+#   conversion, and the END-TO-END check is what settles it — --quality-baseline written by the
+#   pre-conversion binary and by this one, on the same corpus, is BYTE-IDENTICAL: 2,388 B on test/fixture
+#   and 924,402 B on the real src/ tree. Nothing a Snapshot means has changed, so this is the
+#   refactor-only arm of this gate's own instructions: re-pin, do not bump the scheme.
+#   RE-PINNED AGAIN in the same lane (the whitespace pass): the converter had left a double space before
+#   the closing paren, and collapsing it touched bodyHashesBySym's line a second time. Same answer, re-run
+#   rather than assumed — the --quality-baseline blobs are byte-identical again (924,394 B on src/), so it
+#   is still the refactor-only arm and the scheme still stays 8. Lesson for the next conversion: re-pin a
+#   source-text tripwire ONCE, at the end of the lane, after formatting has settled.
+#   (Note for the next reader: the manifest is TWELVE functions, not the six the family is often described
+#   by — topLevelCalleeNameHashes, bodyHashesBySym, readRegisterMacrosConfig, registeredMacroNames,
+#   startsWithRegisteredMacro and registeredMacroSymbolIds are in it too, and bodyHashesBySym is the one a
+#   formatting change can reach.)
 # 2026-09-09, PLAIN-TEXT PROSE TIER (test/textdocscheck.sh): kParserVer 84 -> 85 and
 #   kIngestParserVerMirror -> 85. `.rst`/`.adoc`/`.org`/`.mdx` join kLangTable on Lang::Markdown and the
 #   markdown BLOCK grammar, so the CRAWL ADMITS FILES IT PREVIOUSLY REFUSED. That is the one class of
@@ -229,7 +334,7 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   This is an EXTRACTION change, not a Snapshot-SEMANTICS change: what a cached Snapshot MEANS (dead set,
 #   clone-group identity, blob shape) is untouched, so kQSnapCacheScheme deliberately did NOT move.
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -f "$SRC" ] || { echo "no $SRC — run from the repo"; exit 2; }

@@ -24,7 +24,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/regexfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -92,7 +92,7 @@ for m in re.finditer( r"<f p=\"([^\"]*)\"", xml ):
         [ -z "$f" ] && continue
         printf '%s\n' "$cx" | grep -qxF "$f" || { miss=1; echo "      grep matched $f but ripwire dropped it"; }
     done <<< "$gp"
-    [ "$miss" -eq 0 ] && ok "oracle ⊇ grep   $(printf '%-14s' "$p")" || no "oracle dropped a grep-matched file for /$p/"
+    if [ "$miss" -eq 0 ]; then ok "oracle ⊇ grep   $(printf '%-14s' "$p")"; else no "oracle dropped a grep-matched file for /$p/"; fi
 done
 
 # ── NARROWING: the prefilter must EXCLUDE files (else soundness is trivial). A token unique to one

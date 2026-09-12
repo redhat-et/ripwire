@@ -34,7 +34,7 @@ fail=0
 # AND returns that payload, so stdout must stay reserved for the payload or the PASS/FAIL lines corrupt it
 # (jsoncheck.sh learned this the same way). `fail` is still set in the parent shell — jsonok is called in a
 # command substitution, so its own `no` cannot; every arm re-asserts on the returned payload anyway.
-ok(){ printf '  PASS  %s\n' "$*" >&2; }
+ok(){ printf '  PASS  %s\n' "$*" >&2 || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*" >&2; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*" >&2; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }

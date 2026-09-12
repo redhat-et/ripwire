@@ -38,7 +38,7 @@ FIX="$ROOT/test/javarubyfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -50,9 +50,9 @@ echo "javarubycheck: BIN=$BIN  FIX=$FIX"
 MAP_OUT="$TMP/map.xml"
 $BIN "$FIX" --no-cache >"$MAP_OUT" 2>"$TMP/map.err"
 MAP_EXIT=$?
-[ "$MAP_EXIT" -eq 0 ] && ok "default map: exits 0 on Java/Ruby fixture" || no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"
+if [ "$MAP_EXIT" -eq 0 ]; then ok "default map: exits 0 on Java/Ruby fixture"; else no "default map: exited $MAP_EXIT: $( cat "$TMP/map.err" )"; fi
 
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP_OUT" && ok "default map: passes xmllint --noout" || no "default map: xmllint failed"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP_OUT"; then ok "default map: passes xmllint --noout"; else no "default map: xmllint failed"; fi; }
 
 # no degrade / ABI-mismatch warning must reach stderr on the clean fixture
 [ -s "$TMP/map.err" ] && no "default map: unexpected stderr (ABI/degrade?): $( cat "$TMP/map.err" )" || ok "default map: clean stderr (no ABI mismatch / degrade)"
@@ -106,14 +106,14 @@ if grep -q "SYMS:0" "$TMP/java_check"; then
 else
     ok "A.java (Java): extracted $( grep -o 'SYMS:[0-9]*' "$TMP/java_check" | cut -d: -f2 ) symbol(s)"
 fi
-grep -q "SYMS:3" "$TMP/java_check" && ok "A.java: exactly 3 symbols (addOne, addTwo, class A — no field/local phantom nodes)" || no "A.java: expected 3 symbols, got: $( grep SYMS "$TMP/java_check" )"
-grep -q "HAS_ADDONE:True" "$TMP/java_check" && ok "A.java: addOne method present" || no "A.java: addOne method missing"
-grep -q "HAS_ADDTWO:True" "$TMP/java_check" && ok "A.java: addTwo method present" || no "A.java: addTwo method missing"
-grep -q "HAS_CLASS_A:True" "$TMP/java_check" && ok "A.java: class A present, tagged t=\"cls\"" || no "A.java: class A missing or not t=\"cls\""
-grep -q "METHODS:True" "$TMP/java_check" && ok "A.java: addOne/addTwo tagged t=\"method\"" || no "A.java: methods not tagged t=\"method\" as expected"
-grep -q "PHANTOM:none" "$TMP/java_check" && ok "A.java: no phantom nodes (params/locals not indexed)" || no "A.java: phantom nodes present: $( grep PHANTOM "$TMP/java_check" )"
-grep -q "EDGE:True" "$TMP/java_check" && ok "A.java: intra-file call edge addTwo -> addOne present" || no "A.java: call edge addTwo -> addOne MISSING"
-grep -q "EDGE_N:1" "$TMP/java_check" && ok "A.java: exactly ONE addTwo -> addOne edge (dedup)" || no "A.java: expected a single addTwo -> addOne edge: $( grep EDGE_N "$TMP/java_check" )"
+if grep -q "SYMS:3" "$TMP/java_check"; then ok "A.java: exactly 3 symbols (addOne, addTwo, class A — no field/local phantom nodes)"; else no "A.java: expected 3 symbols, got: $( grep SYMS "$TMP/java_check" )"; fi
+if grep -q "HAS_ADDONE:True" "$TMP/java_check"; then ok "A.java: addOne method present"; else no "A.java: addOne method missing"; fi
+if grep -q "HAS_ADDTWO:True" "$TMP/java_check"; then ok "A.java: addTwo method present"; else no "A.java: addTwo method missing"; fi
+if grep -q "HAS_CLASS_A:True" "$TMP/java_check"; then ok "A.java: class A present, tagged t=\"cls\""; else no "A.java: class A missing or not t=\"cls\""; fi
+if grep -q "METHODS:True" "$TMP/java_check"; then ok "A.java: addOne/addTwo tagged t=\"method\""; else no "A.java: methods not tagged t=\"method\" as expected"; fi
+if grep -q "PHANTOM:none" "$TMP/java_check"; then ok "A.java: no phantom nodes (params/locals not indexed)"; else no "A.java: phantom nodes present: $( grep PHANTOM "$TMP/java_check" )"; fi
+if grep -q "EDGE:True" "$TMP/java_check"; then ok "A.java: intra-file call edge addTwo -> addOne present"; else no "A.java: call edge addTwo -> addOne MISSING"; fi
+if grep -q "EDGE_N:1" "$TMP/java_check"; then ok "A.java: exactly ONE addTwo -> addOne edge (dedup)"; else no "A.java: expected a single addTwo -> addOne edge: $( grep EDGE_N "$TMP/java_check" )"; fi
 
 # cross-check via --callees / --callers (independent of the raw-XML parse)
 JV_CE="$( $BIN "$FIX" --callees=addTwo 2>/dev/null )"
@@ -151,12 +151,12 @@ if grep -q "SYMS:0" "$TMP/ruby_check"; then
 else
     ok "b.rb (Ruby): extracted $( grep -o 'SYMS:[0-9]*' "$TMP/ruby_check" | cut -d: -f2 ) symbol(s)"
 fi
-grep -q "SYMS:2" "$TMP/ruby_check" && ok "b.rb: exactly 2 symbols (square, sum_of_squares — puts not indexed)" || no "b.rb: expected 2 symbols, got: $( grep SYMS "$TMP/ruby_check" )"
-grep -q "HAS_SQUARE:True" "$TMP/ruby_check" && ok "b.rb: square method present" || no "b.rb: square method missing"
-grep -q "HAS_SOS:True" "$TMP/ruby_check" && ok "b.rb: sum_of_squares method present" || no "b.rb: sum_of_squares method missing"
-grep -q "ALL_METHOD:True" "$TMP/ruby_check" && ok "b.rb: both symbols tagged t=\"method\"" || no "b.rb: symbols not tagged t=\"method\" as expected"
-grep -q "PHANTOM:none" "$TMP/ruby_check" && ok "b.rb: no phantom symbol nodes (puts / unresolved calls dropped)" || no "b.rb: phantom nodes present: $( grep PHANTOM "$TMP/ruby_check" )"
-grep -q "EDGE:True" "$TMP/ruby_check" && ok "b.rb: intra-file call edge sum_of_squares -> square present" || no "b.rb: call edge sum_of_squares -> square MISSING"
+if grep -q "SYMS:2" "$TMP/ruby_check"; then ok "b.rb: exactly 2 symbols (square, sum_of_squares — puts not indexed)"; else no "b.rb: expected 2 symbols, got: $( grep SYMS "$TMP/ruby_check" )"; fi
+if grep -q "HAS_SQUARE:True" "$TMP/ruby_check"; then ok "b.rb: square method present"; else no "b.rb: square method missing"; fi
+if grep -q "HAS_SOS:True" "$TMP/ruby_check"; then ok "b.rb: sum_of_squares method present"; else no "b.rb: sum_of_squares method missing"; fi
+if grep -q "ALL_METHOD:True" "$TMP/ruby_check"; then ok "b.rb: both symbols tagged t=\"method\""; else no "b.rb: symbols not tagged t=\"method\" as expected"; fi
+if grep -q "PHANTOM:none" "$TMP/ruby_check"; then ok "b.rb: no phantom symbol nodes (puts / unresolved calls dropped)"; else no "b.rb: phantom nodes present: $( grep PHANTOM "$TMP/ruby_check" )"; fi
+if grep -q "EDGE:True" "$TMP/ruby_check"; then ok "b.rb: intra-file call edge sum_of_squares -> square present"; else no "b.rb: call edge sum_of_squares -> square MISSING"; fi
 
 RB_CE="$( $BIN "$FIX" --callees=sum_of_squares 2>/dev/null )"
 echo "$RB_CE" | grep -q 'count="1"' && echo "$RB_CE" | grep -q 'n="square"' \

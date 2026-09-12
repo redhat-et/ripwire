@@ -24,7 +24,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/bm25fix"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -61,7 +61,7 @@ nonzero_k="$( printf '%s' "$OUT_NOMATCH" | grep -oE 'k="[0-9.]+"' | grep -vE 'k=
 
 # ── #3: determinism — twice, byte-identical ─────────────────────────────────────────────────────────────
 A="$( q "frobnicate widget" )"; B="$( q "frobnicate widget" )"
-[ "$A" = "$B" ] && ok "determinism: --query byte-identical run-to-run" || no "non-deterministic --query output"
+if [ "$A" = "$B" ]; then ok "determinism: --query byte-identical run-to-run"; else no "non-deterministic --query output"; fi
 
 # ── #4: IDF sanity — a term in ALL 7 docs ("module") must not make frobnicate_widget() dominate the way
 #    the distinctive query does; concretely: frobnicate_widget()'s own k= under the distinctive query must
@@ -84,7 +84,7 @@ ubiq_syms="$( printf '%s' "$OUT_UBIQ" | grep -oE '<s ' | wc -l | tr -d ' ' )"
 
 # ── xml well-formed ──────────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    q "frobnicate widget" | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if q "frobnicate widget" | xmllint --noout - 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi

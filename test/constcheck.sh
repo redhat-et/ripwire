@@ -42,7 +42,7 @@ FIX="$ROOT/test/constfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -53,7 +53,7 @@ echo "constcheck: BIN=$BIN  FIX=$FIX"
 MAP="$TMP/map.xml"
 $BIN "$FIX" --no-cache >"$MAP" 2>"$TMP/map.err" || { no "default map exited non-zero: $( cat "$TMP/map.err" )"; exit 1; }
 
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP" && ok "map passes xmllint --noout" || no "map fails xmllint"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP"; then ok "map passes xmllint --noout"; else no "map fails xmllint"; fi; }
 
 # a var-def row for NAME anywhere in the map: <s t="var" n="NAME" ...
 has_var(){ grep -q "t=\"var\" n=\"$1\"" "$MAP"; }
@@ -69,7 +69,7 @@ for sym in TS_PASSWORD_HASHERS TS_FEATURE_FLAGS TS_MAX_RETRIES \
            CS_MAX_RETRIES CS_DEFAULT_HOSTS \
            C_MAX_BUFFER_BYTES C_DEFAULT_NAME C_DEFAULT_HOSTS \
            CPP_MAX_DEPTH CPP_DEFAULT_HOSTS; do
-    has_var "$sym" && ok "extracted t=\"var\": $sym" || no "MISSING t=\"var\" def: $sym"
+    if has_var "$sym"; then ok "extracted t=\"var\": $sym"; else no "MISSING t=\"var\" def: $sym"; fi
 done
 
 # ── 2. ranking: the r3 report's gate shape — a config-flavored --for surfaces the constant ─────
@@ -91,13 +91,13 @@ grep -q 't="fn" n="TS_MAKE_HANDLER"' "$MAP" \
 has_var "TS_MAKE_HANDLER" && no "TS_MAKE_HANDLER doubled as a var def" || ok "TS_MAKE_HANDLER not doubled as var"
 
 # ── 5. existing behavior pinned ────────────────────────────────────────────────────────────────
-has_var "PY_SETTING_MODE"   && ok "Python module assignment still var (upper)" || no "Python PY_SETTING_MODE regressed"
-has_var "py_lower_setting"  && ok "Python module assignment still var (lower — case-blind, unchanged)" || no "Python py_lower_setting regressed"
-has_var "NotAConst"         && ok "C# property_declaration var def survives" || no "C# NotAConst property def regressed"
+if has_var "PY_SETTING_MODE"; then ok "Python module assignment still var (upper)"; else no "Python PY_SETTING_MODE regressed"; fi
+if has_var "py_lower_setting"; then ok "Python module assignment still var (lower — case-blind, unchanged)"; else no "Python py_lower_setting regressed"; fi
+if has_var "NotAConst"; then ok "C# property_declaration var def survives"; else no "C# NotAConst property def regressed"; fi
 
 # ── 6. determinism on this fixture ─────────────────────────────────────────────────────────────
 $BIN "$FIX" --no-cache >"$TMP/map2.xml" 2>/dev/null
-diff -q "$MAP" "$TMP/map2.xml" >/dev/null && ok "two runs byte-identical" || no "determinism drift on constfix"
+if diff -q "$MAP" "$TMP/map2.xml" >/dev/null; then ok "two runs byte-identical"; else no "determinism drift on constfix"; fi
 
 echo
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

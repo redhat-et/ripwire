@@ -69,7 +69,7 @@ FIX="$ROOT/test/preproccondfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
-ok(){   printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
@@ -99,7 +99,7 @@ presence Cond.cs     '#region grouped'               'C# #region negative contro
 # ══ 1. CAPTURE — one named assertion per grammar node kind the extractor must descend through ════════
 "$BIN" "$FIX" --deps --no-cache >"$TMP/deps" 2>"$TMP/deps.err"
 rc=$?
-[ "$rc" -eq 0 ] && ok "--deps exits 0" || { no "--deps exits $rc"; head -3 "$TMP/deps.err"; }
+if [ "$rc" -eq 0 ]; then ok "--deps exits 0"; else { no "--deps exits $rc"; head -3 "$TMP/deps.err"; }; fi
 [ -s "$TMP/deps" ] || { echo "preproccondcheck: empty --deps output, cannot proceed"; exit 2; }
 
 inc(){ # inc <target> <label>
@@ -273,7 +273,7 @@ else
     skip "600-deep guard stack: DEGRADED_PATH_ALERT compiled out of this binary (NDEBUG); the plain-flavour leg proves it"
 fi
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/deep.out" 2>/dev/null && ok "600-deep guard stack: XML well-formed" || no "600-deep guard stack: XML malformed"
+    if xmllint --noout "$TMP/deep.out" 2>/dev/null; then ok "600-deep guard stack: XML well-formed"; else no "600-deep guard stack: XML malformed"; fi
 else
     skip "600-deep guard stack: xmllint absent"
 fi
@@ -281,15 +281,15 @@ fi
 # ══ 5. HYGIENE — determinism, warm == cold, well-formed XML ═══════════════════════════════════════════
 "$BIN" "$FIX" --deps --no-cache >"$TMP/d1" 2>/dev/null
 "$BIN" "$FIX" --deps --no-cache >"$TMP/d2" 2>/dev/null
-cmp -s "$TMP/d1" "$TMP/d2" && ok "deterministic (two --no-cache runs identical)" || no "non-deterministic"
+if cmp -s "$TMP/d1" "$TMP/d2"; then ok "deterministic (two --no-cache runs identical)"; else no "non-deterministic"; fi
 
 "$BIN" "$FIX" --deps --cache="$TMP/c.bin" >"$TMP/cold" 2>/dev/null
 "$BIN" "$FIX" --deps --cache="$TMP/c.bin" >"$TMP/warm" 2>/dev/null
-cmp -s "$TMP/cold" "$TMP/warm" && ok "warm == cold (guarded includes survive the extraction cache)" || { no "warm != cold"; diff "$TMP/cold" "$TMP/warm" | head -4; }
-cmp -s "$TMP/cold" "$TMP/d1"   && ok "cached run == --no-cache run" || no "cached run differs from --no-cache run"
+if cmp -s "$TMP/cold" "$TMP/warm"; then ok "warm == cold (guarded includes survive the extraction cache)"; else { no "warm != cold"; diff "$TMP/cold" "$TMP/warm" | head -4; }; fi
+if cmp -s "$TMP/cold" "$TMP/d1"; then ok "cached run == --no-cache run"; else no "cached run differs from --no-cache run"; fi
 
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/d1" 2>/dev/null && ok "xml well-formed" || no "xml malformed"
+    if xmllint --noout "$TMP/d1" 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi
 else
     skip "xml well-formedness (xmllint absent)"
 fi
@@ -311,13 +311,12 @@ monotonicity_check()
     ( cd "$ROOT" && git rev-parse --verify HEAD >/dev/null 2>&1 ) || { skip "monotonicity: not a git repo"; return; }
     . "$ROOT/test/lib/headbinlib.sh"                   # sha-keyed cache — shared with the other monotonicity gates
 
-    local WT="$TMP/head"
-    ( cd "$ROOT" && git worktree add -q --detach "$WT" HEAD ) 2>"$TMP/wt.err" \
-        || { skip "monotonicity: cannot create HEAD worktree ($( head -1 "$TMP/wt.err" ))"; return; }
-    trap '( cd "$ROOT" && git worktree remove --force "'"$WT"'" >/dev/null 2>&1 ); rm -rf "$TMP"' EXIT
+    local WT="$TMP/head"                               # a private clone, never a registered worktree (test/worktreeleakcheck.sh)
+    ripwire_private_checkout "$ROOT" HEAD "$WT" 2>"$TMP/wt.err" \
+        || { skip "monotonicity: cannot check out HEAD ($( head -1 "$TMP/wt.err" ))"; return; }
 
     local OLDBIN
-    OLDBIN="$( ripwire_head_binary "$ROOT" "$TMP" )" || { skip "monotonicity: pre-change build failed"; return; }
+    OLDBIN="$( ripwire_head_binary "$ROOT" "$TMP" )" || { headbin_refusal $? "monotonicity"; return; }
 
     local IN="$WT/src"
     # (a) captured includes — compare the PER-FILE COUNT, never the emitted <inc> rows. serialize.h caps

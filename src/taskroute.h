@@ -150,6 +150,40 @@ inline constexpr std::string_view kWeakSymbolCues[] = {
 
 inline constexpr std::size_t kMinWeakSymbolLen = 5;
 
+// A cue occurrence that is ALSO the word satisfying an intent gate is not evidence of a symbol slot.
+// Without this the understand-symbol route confirms itself out of thin air: its gate is
+// `understand | implementation | how does`, and `does`/`understand` were both symbol-slot cues, so every
+// English question of the form `how does <indexed-word> …?` minted the very symbol the gate then required
+// — the same two words playing both parts (a question about version bumping on a team recommended
+// --expand='version', 13 of 25 adversarial prose prompts, 2026-09-10 audit F-R1-01). An intent word is
+// evidence about what the user WANTS; it may never double as the positional evidence that they NAMED
+// something. Only occurrences are disqualified, never words: a LATER cue in the same task still resolves
+// the name (a how-does question that later asks for the body OF the same name routes on that `of`), which is what
+// keeps the rule about self-confirmation rather than about the weak tier as a whole. Kept next to the cue
+// table, and complete with respect to that gate's three phrases — `implementation` is not a cue at all.
+inline bool cueOccurrenceIsIntentGate( std::string_view lowerTask, std::size_t begin, std::string_view cue ) noexcept
+{
+    if( cue == "understand" || cue == "understanding" )
+    {
+        return true;   // the gate reads `has( lower, "understand" )`, which this occurrence already satisfies
+    }
+    if( cue != "does" )
+    {
+        return false;
+    }
+    std::size_t end = begin;
+    while( end > 0 && lowerTask[end - 1] == ' ' )
+    {
+        --end;
+    }
+    std::size_t from = end;
+    while( from > 0 && wordByte( lowerTask[from - 1] ) )
+    {
+        --from;
+    }
+    return lowerTask.substr( from, end - from ) == "how";   // "how does" IS the gate
+}
+
 // True when the word immediately before `pos` is a symbol-slot cue. `lowerTask` is the lowercased task,
 // so the comparison is a plain equality. Opening quotes and backticks between the cue and the name are
 // stepped over — they are themselves symbol evidence, never separators.
@@ -167,8 +201,26 @@ inline bool precededBySymbolCue( std::string_view lowerTask, std::size_t pos ) n
         --begin;
     }
     const std::string_view word = lowerTask.substr( begin, end - begin );
-    return std::any_of( std::begin( kWeakSymbolCues ), std::end( kWeakSymbolCues ),
-                        [word]( const std::string_view cue ) { return cue == word; } );
+    if( std::none_of( std::begin( kWeakSymbolCues ), std::end( kWeakSymbolCues ),
+                      [word]( const std::string_view cue ) { return cue == word; } ) )
+    {
+        return false;
+    }
+    return !cueOccurrenceIsIntentGate( lowerTask, begin, word );
+}
+
+// A WEAK reading needs the name to be backed by a CODE definition. A t="sec" row is a markdown heading or
+// a JSON/TOML/YAML config key — doc structure and data, isolated in the call graph — and an ordinary
+// English word collides with those far more often than with a function: six of the thirteen names the
+// weak tier falsely resolved on adversarial prose existed ONLY as t="sec" (`version`, `summary`,
+// `license`, `agent`, `author`, `notes` — 2026-09-10 audit F-R1-02), so --expand='version' answered with
+// `"version": "1.2.3"` out of a package.json at exit 0. The filter is scoped to the weak tier: an
+// identifier-shaped (camel/snake/scoped) mention still resolves whatever kind it names, because there the
+// SHAPE is the evidence. Rank is deliberately not part of this test — k is 0.0000 for nearly every row in
+// any large corpus, so gating on it would make resolution depend on corpus size.
+inline bool weakEvidenceKind( SymKind kind ) noexcept
+{
+    return kind != SymKind::Section;
 }
 
 // A name with no identifier punctuation and no capital is a WEAK match: it might be a symbol mention, or
@@ -237,6 +289,10 @@ inline std::vector<std::string> resolveTaskSymbols( std::string_view task, const
         if( !at.matched )
         {
             continue;
+        }
+        if( !at.strong && !weakEvidenceKind( sym.kind ) )
+        {
+            continue;   // this definition is a heading or a config key — no weak evidence (see weakEvidenceKind)
         }
         std::vector<At>& bucket = at.strong ? found : weak;
         const bool duplicate = std::any_of( bucket.begin(), bucket.end(), [&]( const At& s ) { return s.name == sym.name; } );
@@ -321,7 +377,7 @@ inline std::string commaSymbols( const std::vector<std::string>& symbols )
 // sentence is full of dotted tokens (URLs, "e.g.", version numbers) that are not a source file.
 inline constexpr std::string_view kCodeExtensions[] = {
     ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh", ".c", ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs",
-    ".java", ".rb", ".swift", ".cs", ".m", ".mm", ".cu", ".cuh", ".metal",
+    ".java", ".rb", ".swift", ".cs", ".m", ".mm", ".cu", ".cuh", ".metal", ".kt",
 };
 
 inline bool looksLikeFileToken( std::string_view token ) noexcept
@@ -495,9 +551,11 @@ inline void addLexical( std::vector<RouteChoice>& choices, const char* id, const
     }
 }
 
-// A plan path the user actually WROTE. The router never invents one: --edit-plan refuses a file that is
-// not there, and recommending a command the verb refuses is a prerequisite violation, not a suggestion.
-inline std::string firstJsonPathToken( std::string_view task )
+// A path the user actually WROTE, recognised by its extension. The router never invents one: --edit-plan
+// and --plan-lint both refuse a file that is not there, and recommending a command the verb refuses is a
+// prerequisite violation, not a suggestion. One extractor for every value-carrying path route, so the two
+// cannot disagree about what counts as a written path.
+inline std::string firstPathTokenWithSuffix( std::string_view task, std::initializer_list<std::string_view> suffixes )
 {
     constexpr std::string_view kBreaks = " \t\n\r\"'`(),;";
     for( std::size_t i = 0; i < task.size(); )
@@ -512,14 +570,26 @@ inline std::string firstJsonPathToken( std::string_view task )
         {
             end = task.size();
         }
-        const std::string_view token = task.substr( begin, end - begin );
-        if( token.ends_with( ".json" ) || token.ends_with( ".ndjson" ) )
+        std::string_view token = task.substr( begin, end - begin );
+        while( !token.empty() && ( token.back() == '.' || token.back() == '?' || token.back() == '!' ) )
         {
-            return std::string( token );
+            token.remove_suffix( 1 );
+        }
+        for( const std::string_view suffix : suffixes )
+        {
+            if( token.size() > suffix.size() && token.ends_with( suffix ) )
+            {
+                return std::string( token );
+            }
         }
         i = end + 1;
     }
     return {};
+}
+
+inline std::string firstJsonPathToken( std::string_view task )
+{
+    return firstPathTokenWithSuffix( task, { ".json", ".ndjson" } );
 }
 
 // Routes for surfaces whose trigger is a NAME rather than a phrase-scoring shape: the flag is asked for by
@@ -633,6 +703,155 @@ inline std::optional<RouteChoice> flowTaskChoice( std::string_view task, std::st
     return std::nullopt;
 }
 
+// ── the catalog tier: verbs and skills the router could not name at all ───────────────────────────────
+// The 2026-09-10 audit measured `--help-task` at 3 recommends over 39 phrasings of the 13 surfaces added
+// since 2026-08-28 (F-R1-08), and found the router able to name 8 of the 16 shipped skills (F-R1-09) —
+// `--help-task` and the skill catalog were two routers with two vocabularies. These routes close both
+// gaps for the surfaces that are VERBS rather than shaping flags. They sit LAST in directTaskChoice on
+// purpose: every route above them is older, more specific, and keeps its rows unchanged.
+//
+// Each requires conjunctive evidence in the same shape instrumentedTaskChoice uses — the surface asked
+// for close to its own vocabulary, plus a second word that says it is being asked FOR — and the two that
+// carry a user-supplied value fire only when the task supplies it. What is deliberately NOT here, and
+// why: `--scope`, `--slice-depth`, `--slice-flow`, `--allow-dirty`, `--no-ignore`, `--no-post-check` are
+// SHAPING flags on other verbs, not commands a one-command router can recommend on their own.
+inline std::optional<RouteChoice> catalogTaskChoice( std::string_view task, std::string_view lower,
+                                                     const std::string& root, const std::vector<std::string>& symbols )
+{
+    const std::string ripRoot = "ripwire " + shSingleQuote( root ) + " ";
+    // handoff: brief SOMEONE ELSE. The discriminator against orient is the second party — a successor, a
+    // teammate, the next session — never the speaker's own understanding.
+    const int handoffScore = phraseScore( lower, { { "hand off", 9 }, { "hand this off", 9 }, { "handing off", 9 },
+                                                   { "hand-off", 8 }, { "handover", 8 }, { "hand over", 8 },
+                                                   { "takes it over", 8 }, { "taking over", 7 }, { "take it over", 7 },
+                                                   { "next session", 7 }, { "successor", 7 }, { "picks this up", 7 },
+                                                   { "whoever", 6 }, { "going on leave", 7 }, { "brief the next", 8 },
+                                                   { "brief someone", 8 }, { "for the next agent", 8 },
+                                                   { "onboard", 5 }, { "teammate", 5 } } );
+    if( handoffScore >= 7 )
+    {
+        return RouteChoice{ "handoff-brief", "ripwire-handoff", "briefing a SECOND party (successor/teammate/next session)",
+                            ripRoot + "--handoff", 100, 79 };
+    }
+    // plan-lint: a PLAN/DESIGN file's structure. Value-carrying — the verb refuses a file that is not
+    // there, so the route fires only when the task names one.
+    const std::string planDoc  = firstPathTokenWithSuffix( task, { ".md", ".markdown" } );
+    const std::string planDocL = lowerAscii( planDoc );
+    // The file may name ITSELF as the plan (docs/cache-plan.md, docs/design-notes.md) — that is surface evidence
+    // the task's prose does not have to repeat.
+    if( ( has( lower, "plan" ) || has( lower, "design doc" ) || has( lower, "design document" )
+       || has( planDocL, "plan" ) || has( planDocL, "design" ) )
+     && ( has( lower, "lint" ) || has( lower, "structure" ) || has( lower, "well-formed" ) || has( lower, "sections" )
+       || has( lower, "shape" ) || has( lower, "check" ) ) )
+    {
+        if( !planDoc.empty() )
+        {
+            return RouteChoice{ "plan-lint", "ripwire-before-you-build", "plan/design structure wording plus a named markdown file",
+                                commandWithValue( root, "--plan-lint=", planDoc ), 100, 78 };
+        }
+    }
+    // trace-prose: the user SAYS they are holding a trace instead of pasting one. looksLikeTrace matches a
+    // pasted artifact (`AddressSanitizer:`, `#0 … in`), and a sanitizer REPORT described in words contains
+    // none of those literals, so the #108 name-ladder work was unreachable from prose (F-R1-08 §1.2).
+    const bool holdsTrace = has( lower, "sanitizer report" ) || has( lower, "asan report" ) || has( lower, "crash log" )
+                         || has( lower, "compiler error" ) || has( lower, "backtrace" ) || has( lower, "core dump" )
+                         || has( lower, "build error" ) || has( lower, "panic message" );
+    if( holdsTrace
+     && ( has( lower, "map" ) || has( lower, "onto" ) || has( lower, "which symbol" ) || has( lower, "indexed" )
+       || has( lower, "translate" ) || has( lower, "i have" ) || has( lower, "here is" ) || has( lower, "frames" ) ) )
+    {
+        return RouteChoice{ "trace-prose", "ripwire-find-bug", "a trace/report described rather than pasted; pass it on stdin",
+                            ripRoot + "--from-trace=-", 100, 77 };
+    }
+    // security-scan: vetting something UNTRUSTED before installing it. --scan-skills defaults its directory,
+    // so the valueless form is a real command; a named file upgrades it to --scan-skill=FILE.
+    const int scanScore = phraseScore( lower, { { "before installing", 9 }, { "before i install", 9 },
+                                                { "prompt injection", 9 }, { "exfiltration", 9 }, { "untrusted", 7 },
+                                                { "vet", 6 }, { "audit", 4 }, { "safe to install", 9 },
+                                                { "skill file", 6 }, { "mcp.json", 6 }, { "skill", 3 } } );
+    if( scanScore >= 9 && ( has( lower, "skill" ) || has( lower, "mcp" ) || has( lower, "install" ) ) )
+    {
+        const std::string skillFile = firstPathTokenWithSuffix( task, { ".md", ".markdown", ".json", ".sh" } );
+        return skillFile.empty()
+             ? RouteChoice{ "scan-skills", "ripwire-security-scan", "pre-install vetting wording; --scan-skills defaults its directory",
+                            ripRoot + "--scan-skills", 100, 76 }
+             : RouteChoice{ "scan-skill", "ripwire-security-scan", "pre-install vetting wording plus a named file",
+                            commandWithValue( root, "--scan-skill=", skillFile ), 100, 76 };
+    }
+    // opt-remarks: clang optimization remarks while building ripwire itself. The ONLY skill with no verb of
+    // its own — the ranked lens is what finds the symbol a remark names, and the reason says exactly that
+    // rather than implying a dedicated surface exists.
+    if( has( lower, "not vectorized" ) || has( lower, "will not be inlined" ) || has( lower, "-rpass" )
+     || has( lower, "opt-record" ) || has( lower, "optimization remark" ) || has( lower, "optimisation remark" ) )
+    {
+        return RouteChoice{ "opt-remark", "ripwire-opt-remarks", "a clang optimization remark; the ranked lens locates the symbol it names",
+                            commandWithValue( root, "--for=", task ), 100, 75 };
+    }
+    // architecture-health: cycles, god files, propagation. --arch=FILE is the GATING form and needs a rules
+    // file the task names; without one, --deps is the real, runnable overview the same skill leads with.
+    const int layersScore = phraseScore( lower, { { "layering", 9 }, { "layer violation", 9 }, { "dependency mess", 9 },
+                                                  { "module boundaries", 9 }, { "circular dependenc", 9 },
+                                                  { "dependency cycle", 9 }, { "god file", 8 }, { "godfile", 8 },
+                                                  { "propagation cost", 9 }, { "architecture health", 9 },
+                                                  { "reaches into the database", 9 }, { "cycles", 5 } } );
+    if( layersScore >= 8 )
+    {
+        return RouteChoice{ "architecture-health", "ripwire-layers", "architecture-health wording (--arch=FILE is the gating form and needs a rules file)",
+                            ripRoot + "--deps", 100, 74 };
+    }
+    // quality-bar: what YOU just wrote, before you call it done. Deliberately narrow so it cannot steal the
+    // dirty-worktree review route below, whose wording is about a DIFF and a push rather than about debt.
+    // "before i commit" is a TIMING word, not a quality word — on its own it also fits linting a plan or
+    // running a gate, and at the old weight it stole "lint the plan file layout before I commit it" from
+    // the plan-lint abstention above. Weighted below the floor so it can only ever CONFIRM a quality word.
+    const int qualityScore = phraseScore( lower, { { "call it done", 9 }, { "before i commit", 6 },
+                                                   { "new debt", 9 }, { "made anything worse", 9 },
+                                                   { "made it worse", 8 }, { "got worse", 8 },
+                                                   { "code i just wrote", 9 }, { "quality of what i", 9 },
+                                                   { "verify the cleanup", 9 }, { "quality bar", 8 } } );
+    if( qualityScore >= 9 )
+    {
+        return RouteChoice{ "quality-check", "ripwire-quality-bar", "own-code quality wording (what got WORSE), not merge safety",
+                            ripRoot + "--quality-delta", 100, 73 };
+    }
+    // perf-target: a MEASURED profile that NAMES a symbol. Static metrics are not runtime heat, so this
+    // needs the profile wording AND the one symbol the profile named — never the wording alone.
+    const int perfScore = phraseScore( lower, { { "profiler", 9 }, { "flame graph", 9 }, { "flamegraph", 9 },
+                                                { "perf sample", 9 }, { "perf record", 9 }, { "hot symbol", 8 },
+                                                { "hot path", 7 }, { "hottest", 8 }, { "benchmark says", 8 },
+                                                { "cpu time", 7 }, { "profile names", 8 } } );
+    if( symbols.size() == 1 && perfScore >= 7 )
+    {
+        return RouteChoice{ "perf-symbol", "ripwire-perf-target", "a measured profile plus the one symbol it names",
+                            commandWithValue( root, "--around=", symbols[0] ), 100, 72 };
+    }
+    // graph-query: a closure question the fixed verbs cannot phrase. The EXPRESSION is built only out of
+    // what the task supplied — the symbol it named and the direction it asked for — and the depth is a
+    // stated default the reason names, the same way --grep-context=2 and --slice-flow=back are.
+    const int closureScore = phraseScore( lower, { { "can reach", 8 }, { "that reach", 8 }, { "everything that reaches", 9 },
+                                                   { "transitively", 7 }, { "within one hop", 8 }, { "within two hops", 8 },
+                                                   { "graph query", 9 }, { "call graph question", 9 }, { "fan-in", 7 } } );
+    if( symbols.size() == 1 && closureScore >= 7 )
+    {
+        const bool outward = has( lower, "reachable from" ) || has( lower, "everything it calls" ) || has( lower, "downstream of" );
+        const std::string expr = std::string( outward ? "callees(name(\"" : "callers(name(\"" ) + symbols[0] + "\"),3)";
+        return RouteChoice{ "graph-query", "ripwire-graph-query", "a bounded-closure question plus one named symbol (depth 3 is the default; raise it)",
+                            commandWithValue( root, "--graph-query=", expr ), 100, 71 };
+    }
+    // fresh-eyes: maintenance risk in code the speaker did NOT write. LAST of the catalog tier because its
+    // vocabulary is the broadest, so every more specific reading above gets first refusal.
+    const int riskScore = phraseScore( lower, { { "gnarly", 9 }, { "where is the rot", 9 }, { "the rot", 8 },
+                                                { "safe to touch", 9 }, { "god object", 9 }, { "maintenance risk", 9 },
+                                                { "did not write", 8 }, { "didn't write", 8 }, { "i inherited", 8 },
+                                                { "inherited", 6 }, { "where maintenance hurts", 9 }, { "bus factor", 9 } } );
+    if( riskScore >= 8 )
+    {
+        return RouteChoice{ "maintenance-risk", "ripwire-fresh-eyes", "maintenance-risk wording about code the speaker did not write",
+                            ripRoot + "--hotspots", 100, 70 };
+    }
+    return std::nullopt;
+}
+
 inline std::optional<RouteChoice> directTaskChoice( std::string_view task, std::string_view lower,
                                                     const std::string& root, const std::vector<std::string>& symbols )
 {
@@ -683,6 +902,13 @@ inline std::optional<RouteChoice> directTaskChoice( std::string_view task, std::
     if( std::optional<RouteChoice> flow = flowTaskChoice( task, lower, root, symbols ) )
     {
         return flow;
+    }
+    // catalog tier LAST: the verbs and skills the router could not name at all before 2026-09-10. Every
+    // route above this line is older and more specific and keeps its rows unchanged (measured: all 189
+    // corpus rows byte-identical on status/intent across this addition).
+    if( std::optional<RouteChoice> catalog = catalogTaskChoice( task, lower, root, symbols ) )
+    {
+        return catalog;
     }
     return std::nullopt;
 }

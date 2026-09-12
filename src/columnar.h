@@ -1,4 +1,6 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+
 
 // columnar.h — an OPT-IN columnar re-serialization for the FLAT list verbs
 // (--callers / --callees / --uses / --impact). §A5c: this header and --help both used to name the
@@ -112,7 +114,7 @@ inline void emitPathTable( std::FILE* out, const IngestResult& ing,
         {
             std::fputc( ' ', out );
         }
-        std::fprintf( out, "%zu=", i );
+        rw::emitTo( out, "{}=", i );
         const std::string_view raw = ing.files[ uniqueFiles[i] ];
         const std::string_view rel = rootPrefix.empty() ? raw : rw::sarif::rootRelativeUri( raw, rootPrefix );
         const std::string_view p   = escapeXml( rel, esc );
@@ -162,9 +164,9 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
     buildPathTable( rowFiles, uniqueFiles, rowPathIdx );
 
     std::fputs( kColumnarLegend, out );   // §B1.5: once per output, before the element it describes
-    std::fprintf( out, "<%s %s format=\"columnar\">", wrapperTag, wrapperAttrs.c_str() );
+    rw::emitTo( out, "<{} {} format=\"columnar\">", wrapperTag, wrapperAttrs.c_str() );
     emitPathTable( out, ing, uniqueFiles, esc, rootPrefix );
-    std::fprintf( out, "<cols n=\"%zu\" fields=\"path,name,line,kind%s\">", rows.size(), testReach ? ",tested" : "" );
+    rw::emitTo( out, "<cols n=\"{}\" fields=\"path,name,line,kind{}\">", rows.size(), testReach ? ",tested" : "" );
 
     // path index array
     std::fputs( "<path>", out );
@@ -174,7 +176,7 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
         {
             std::fputc( ',', out );
         }
-        std::fprintf( out, "%u", rowPathIdx[i] );
+        rw::emitTo( out, "{}", rowPathIdx[i] );
     }
     std::fputs( "</path>", out );
     // name array (XML-escaped; most identifiers never contain a comma, but markdown SECTION symbols and
@@ -198,7 +200,7 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
         {
             std::fputc( ',', out );
         }
-        std::fprintf( out, "%u", ing.symbols[rows[i]].line );
+        rw::emitTo( out, "{}", ing.symbols[rows[i]].line );
     }
     std::fputs( "</line>", out );
     // kind array (terse tags)
@@ -218,7 +220,7 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
         emitColumnarTestedColumn( out, ing, rows, *testReach );
     }
 
-    std::fprintf( out, "</cols></%s>", wrapperTag );
+    rw::emitTo( out, "</cols></{}>", wrapperTag );
 }
 
 // COLUMNAR form of the --uses verb: use-site rows carry (fileId, line, role, enclosing-symbol name `in`)
@@ -238,9 +240,9 @@ inline void emitColumnarUseSites( std::FILE* out, const IngestResult& ing,
     const std::size_t nRows = fileIds.size();
 
     std::fputs( kColumnarLegend, out );   // §B1.5: the same one legend the symbol-row emitter uses
-    std::fprintf( out, "<uses %s format=\"columnar\">", wrapperAttrs.c_str() );
+    rw::emitTo( out, "<uses {} format=\"columnar\">", wrapperAttrs.c_str() );
     emitPathTable( out, ing, uniqueFiles, esc, rootPrefix );
-    std::fprintf( out, "<cols n=\"%zu\" fields=\"path,line,role,in_id\">", nRows );
+    rw::emitTo( out, "<cols n=\"{}\" fields=\"path,line,role,in_id\">", nRows );
 
     std::fputs( "<path>", out );
     for( std::size_t i = 0; i < rowPathIdx.size(); ++i )
@@ -249,7 +251,7 @@ inline void emitColumnarUseSites( std::FILE* out, const IngestResult& ing,
         {
             std::fputc( ',', out );
         }
-        std::fprintf( out, "%u", rowPathIdx[i] );
+        rw::emitTo( out, "{}", rowPathIdx[i] );
     }
     std::fputs( "</path>", out );
     std::fputs( "<line>", out );
@@ -259,7 +261,7 @@ inline void emitColumnarUseSites( std::FILE* out, const IngestResult& ing,
         {
             std::fputc( ',', out );
         }
-        std::fprintf( out, "%u", lines[i] );
+        rw::emitTo( out, "{}", lines[i] );
     }
     std::fputs( "</line>", out );
     std::fputs( "<role>", out );

@@ -39,7 +39,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/docdriftfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -49,8 +49,8 @@ echo "docdriftcheck: BIN=$BIN  CORPUS=$CORPUS"
 "$BIN" "$CORPUS" --doc-drift --no-cache >"$TMP/a" 2>/dev/null
 rc=$?
 "$BIN" "$CORPUS" --doc-drift --no-cache >"$TMP/b" 2>/dev/null
-cmp -s "$TMP/a" "$TMP/b" && ok "determinism (byte-identical)" || no "--doc-drift is non-deterministic"
-[ "$rc" = "0" ] && ok "exits 0 (a report, not a gate)" || no "--doc-drift exited $rc, expected 0"
+if cmp -s "$TMP/a" "$TMP/b"; then ok "determinism (byte-identical)"; else no "--doc-drift is non-deterministic"; fi
+if [ "$rc" = "0" ]; then ok "exits 0 (a report, not a gate)"; else no "--doc-drift exited $rc, expected 0"; fi
 F="$( cat "$TMP/a" )"
 
 # rows: one <a .../> element per line, so grep can assert on whole rows
@@ -159,7 +159,7 @@ printf '%s' "$F" | grep -q '<unchecked r="not-indexed"[^>]*note="[^"]\+"' \
 # ── 5b) the DATED-RECORD lane: it fires on each dating mark, and abstains on each look-alike ──────────
 # The abstain half matters more than the fire half: a false record hides real rot, which is the one failure
 # this lane must not have. So every negative control below is asserted by NAME, not by a total.
-[ "$T" = "6" ] && ok "dated=6 — one title, one stamp, one block and three line records" || no "dated=$T, expected 6"
+if [ "$T" = "6" ]; then ok "dated=6 — one title, one stamp, one block and three line records"; else no "dated=$T, expected 6"; fi
 
 TOTALROWS="$( rows | grep -c . )"
 [ "$TOTALROWS" = "$(( D + T ))" ] \
@@ -197,11 +197,11 @@ printf '%s' "$F" | grep -q '<dated r="live"' && no "Record::Live emitted a tally
 
 # ── 6) well-formed, minified XML (G4) ─────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/a" 2>/dev/null && ok "XML well-formed" || no "XML malformed"
+    if xmllint --noout "$TMP/a" 2>/dev/null; then ok "XML well-formed"; else no "XML malformed"; fi
 else
     ok "xmllint unavailable — well-formedness skipped"
 fi
-[ "$( grep -c '' "$TMP/a" )" -le 1 ] && ok "output is minified (no stray newlines)" || no "output contains newlines outside CDATA"
+if [ "$( grep -c '' "$TMP/a" )" -le 1 ]; then ok "output is minified (no stray newlines)"; else no "output contains newlines outside CDATA"; fi
 
 # ── 7) --doc-drift=SUBSTR filters the DOCS, and a miss REFUSES rather than reporting a clean zero ──────
 # F-04: docs="0" drift="0" under a typo'd filter used to read as "no rot" (exit 0) — the same trap

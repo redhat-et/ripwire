@@ -40,7 +40,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 note(){ printf '  ....  %s\n' "$*"; }
 
@@ -210,7 +210,7 @@ git -C "$FIX" commit -q -am "split the router" >/dev/null 2>&1
 FIXOUT="$TMP/fixture.xml"
 "$BIN" "$FIX" --naming-calibration >"$FIXOUT" 2>"$TMP/fixture.err"
 rc=$?
-[ "$rc" = "0" ] && ok "instrument: exit 0 (a measurement, never a verdict)" || no "instrument: exit $rc, expected 0"
+if [ "$rc" = "0" ]; then ok "instrument: exit 0 (a measurement, never a verdict)"; else no "instrument: exit $rc, expected 0"; fi
 
 hdr="$( rows "$FIXOUT" | grep '^naming-calibration ' | head -1 )"
 [ -n "$hdr" ] || no "instrument: no <naming-calibration> element emitted"
@@ -225,7 +225,7 @@ for want in \
     'o="isBrokenState" n="stateCode"' \
     'o="okayNamed" n="ab"'
 do
-    grep -q "$want" "$FIXOUT" && ok "instrument: pair $want mined" || no "instrument: pair $want MISSING"
+    if grep -q "$want" "$FIXOUT"; then ok "instrument: pair $want mined"; else no "instrument: pair $want MISSING"; fi
 done
 
 # per-rule, the hand-derived side. `old=` is the true-positive-ish side, `new=` the false-positive-ish one.
@@ -276,14 +276,14 @@ grep -q 'o="oldRouter"' "$FIXOUT" && no "instrument: a one-to-many split was sco
 
 # determinism, well-formedness, minification, and the G5 additivity contract
 "$BIN" "$FIX" --naming-calibration >"$TMP/fixture2.xml" 2>/dev/null
-cmp -s "$FIXOUT" "$TMP/fixture2.xml" && ok "instrument: two runs byte-identical" || no "instrument: NOT deterministic"
+if cmp -s "$FIXOUT" "$TMP/fixture2.xml"; then ok "instrument: two runs byte-identical"; else no "instrument: NOT deterministic"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$FIXOUT" 2>/dev/null && ok "instrument: XML well-formed" || no "instrument: XML not well-formed"
-    xmllint --noout "$LIVE" 2>/dev/null && ok "live: XML well-formed" || no "live: XML not well-formed"
+    if xmllint --noout "$FIXOUT" 2>/dev/null; then ok "instrument: XML well-formed"; else no "instrument: XML not well-formed"; fi
+    if xmllint --noout "$LIVE" 2>/dev/null; then ok "live: XML well-formed"; else no "live: XML not well-formed"; fi
 else
     note "xmllint absent — well-formedness not checked here (the suite checks it elsewhere)"
 fi
-[ "$( wc -l <"$FIXOUT" | tr -d ' ' )" -le 1 ] && ok "instrument: output is minified (G4)" || no "instrument: stray newlines in output"
+if [ "$( wc -l <"$FIXOUT" | tr -d ' ' )" -le 1 ]; then ok "instrument: output is minified (G4)"; else no "instrument: stray newlines in output"; fi
 "$BIN" "$FIX" >"$TMP/plain.xml" 2>/dev/null
 grep -q 'naming-calibration' "$TMP/plain.xml" && no "G5: a flagless run mentions naming-calibration" \
                                               || ok "G5: a flagless run is untouched by this verb"
@@ -298,7 +298,7 @@ grep -q 'probed="0" r="not-a-git-repo"' "$TMP/nogit.xml" \
 # the honesty contract, asserted on the OUTPUT and not merely believed of the source
 grep -q 'NOISY PROXY' "$FIXOUT" && ok "honesty: the legend leads with the noisy-proxy caveat" \
                                 || no "honesty: the legend does not state that this is a noisy proxy"
-grep -q 'pairs="' "$FIXOUT" && ok "honesty: the report states its sample size" || no "honesty: no sample size in the report"
+if grep -q 'pairs="' "$FIXOUT"; then ok "honesty: the report states its sample size"; else no "honesty: no sample size in the report"; fi
 
 if [ "$fail" != "0" ]; then
     echo "namingcalibrationcheck: FAIL"

@@ -17,6 +17,8 @@
 
 #include <atomic>       // AstQueryGroup::ellipsisCappedOut — a summed counter across the parallel file walk
 #include <cctype>
+#include <climits>       // PATH_MAX — the crawl-boundary realpath buffer below
+#include <cstdlib>       // realpath  — likewise
 #include <cstring>
 #include <span>          // spanTiersOfFiles takes a VIEW of paths — the caller owns the storage
 #include <string_view>
@@ -115,6 +117,18 @@ constexpr std::uint32_t kMaxYamlNestDepth = 64u;
 // ~25% under the 255-slot cliff and far above real prose: a thematic break is 3 markers, the
 // deepest real nesting in this repo's own docs is 4.
 constexpr std::uint32_t kMaxMdBlockDepth = 200u;
+
+// Kotlin-lane string-template nesting ceiling (companion prescan: kotlinStringsNestTooDeep in ingest_crawl.h) —
+// PROCESS-SURVIVAL load-bearing, the yaml/markdown posture on a different upstream defect. tree-sitter-kotlin's external
+// scanner keeps one 2-byte stack entry per OPEN string literal (a string nests inside another only through a `${ … }`
+// interpolation), and upstream bounded that stack with abort(): measured on the vendored 1852ea17 with
+// `"a${"a${ … "leaf" … }"}"`, 512 open strings parse and 513 end the process (SIGABRT, rc=134) — so one such .kt file
+// silently killed the index of every tree that contained it, with no output at all. The vendored scanner now refuses
+// the push instead (third_party/patches/kotlin/001-stack-push-no-abort.patch; vendorpatchcheck arms B and J),
+// and this prescan refuses the FILE before any parse and rows it in --skipped (why="nest-refused") — two independent
+// layers, the yaml pair's shape. 128 is 4x under the cliff and ~60x over real code: across the 2 741 .kt files of
+// nowinandroid, ktor and retrofit the deepest nesting is 2 (61 files; every other file is at 0 or 1).
+constexpr std::uint32_t kMaxKotlinStringNestDepth = 128u;
 
 // ── §L1 skip taxonomy / parse health ────────────────────────────────────────────────────────────────
 // How many ROWS --skipped will itemize per drop class before it stops collecting them. The COUNTS
@@ -248,6 +262,81 @@ inline bool isSkippedCrawlDir( std::string_view dirName ) noexcept
     // ZERO real .yml config — so an unpruned .dSYM ships hundreds of pure-noise t="sec" symbols. A
     // suffix rule (not a table entry) because the bundle is named after its product, never literally ".dSYM".
     return dirName.size() > 5 && dirName.compare( dirName.size() - 5, 5, ".dSYM" ) == 0;
+}
+
+// ── §SEC1: THE CRAWL BOUNDARY ────────────────────────────────────────────────────────────────────────────
+//
+// ONE RULE, STATED ONCE, FOR EVERY WALK THIS BINARY OWNS: a path a crawl collected must resolve, AFTER LINK
+// RESOLUTION, to somewhere inside the root it was crawled under. Shared for the same reason kCrawlSkipDirs
+// above is shared — there is a second walker (darkflags.h's CMake harvest) and a boundary two walkers
+// disagreed about is not a boundary.
+//
+// WHY THIS EXISTS (v0.5.0 and main). The crawl accepted a
+// file symlink whose LEXICAL path was inside the root while its TARGET was outside it: `directory_entry`'s
+// `is_regular_file()` and `file_size()` both FOLLOW the link, so a repository-controlled tracked symlink made
+// ripwire open and serve any text file the invoking user could read — through --expand, --recall, --grep's
+// unindexed aux scan, --flags, and MCP memory_recall, i.e. straight into a connected model. And it emitted
+// those bytes under the IN-ROOT link path, so the map ATTRIBUTED out-of-root content to a path inside the
+// repository: a disclosure defect layered on a disclosure.
+//
+// THE LEXICAL TEST IS THE BUG, so do not write another one. Both sides are canonicalized:
+//
+//   * the ROOT, because a root reached through a link is ordinary (`/tmp` is a link to `/private/tmp` on
+//     macOS; every worktree this project's own gates build lives under one). Compare a resolved target
+//     against an unresolved root and every file under a symlinked root reads as an escape — the corpus
+//     silently empties on a correct tree.
+//   * the FILE, because the whole point is that its lexical spelling lies.
+//
+// …and the comparison is at a COMPONENT BOUNDARY, never a raw string prefix: `<root>-evil/f.c` shares a byte
+// prefix with `<root>` and is not inside it.
+//
+// FAIL CLOSED. An unresolvable path is refused, not admitted. A root that will not canonicalize keeps its
+// literal spelling, which can only make the test stricter.
+//
+// COST. `realpath()` is a syscall per call, so the walk must not pay it per FILE. It does not: the caller
+// tests `is_symlink()` first — a cached readdir `d_type` on every platform this builds for — and only a
+// symlink reaches here. A tree with no symlinks pays nothing measurable (llvm-project, 10 034 files: cold
+// crawl within run-to-run noise of the unfixed binary).
+//
+// WHAT IT DOES NOT COVER, said plainly: a HARD link to an out-of-root file is indistinguishable from an
+// ordinary file — same inode, no link to resolve — so no path-based rule can see it. A `--bind` mount or a
+// firmlink is the same shape. This bounds the SYMLINK channel, which is the one a git repository can carry.
+//
+// `real` and `rootReal` must both already be canonical absolute paths.
+inline bool withinCanonicalRoot( std::string_view real, std::string_view rootReal ) noexcept
+{
+    if( rootReal.empty() || real.size() < rootReal.size() || real.compare( 0, rootReal.size(), rootReal ) != 0 )
+    {
+        return false;
+    }
+    if( real.size() == rootReal.size() )
+    {
+        return true;   // the root itself — a single-file root is its own boundary
+    }
+    // "/" already ends in the separator; every other root needs the next byte to BE one, or this is a sibling
+    // whose name merely starts with the root's ("/x/repo" vs "/x/repo-evil").
+    return rootReal.back() == '/' || real[ rootReal.size() ] == '/';
+}
+
+// The canonical spelling of a crawl root, computed ONCE per walk. Falls back to the literal argument when the
+// root will not resolve (fail closed: an unresolved root matches fewer targets, never more).
+inline std::string canonicalCrawlRoot( std::string_view rootDir )
+{
+    const std::string dir( rootDir.empty() ? std::string_view( "." ) : rootDir );
+    char              resolved[ PATH_MAX ];
+    return ::realpath( dir.c_str(), resolved ) != nullptr ? std::string( resolved ) : dir;
+}
+
+// Does `path` (as the walk spelled it) still live inside `rootReal` once every link on it is resolved?
+// Call ONLY for entries that are symlinks — see the cost note above.
+inline bool crawlPathStaysInRoot( const std::string& path, const std::string& rootReal ) noexcept
+{
+    char resolved[ PATH_MAX ];
+    if( ::realpath( path.c_str(), resolved ) == nullptr )
+    {
+        return false;   // fail closed
+    }
+    return withinCanonicalRoot( resolved, rootReal );
 }
 
 // Crawl + parse rootDir into the symbol/reference model. Never throws: a bad file, missing

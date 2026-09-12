@@ -22,7 +22,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -202,7 +202,7 @@ echo "=== CLI --batch=FILE counterpart (shared machinery) ==="
 printf 'for:distance between two points\ngrep:distance\n# comment line\ncallers:distance\nimpact:distance\n' > "$TMP/b.txt"
 CLI1="$( "$BIN" "$FIX" --batch="$TMP/b.txt" 2>/dev/null )"
 CLI2="$( "$BIN" "$FIX" --batch="$TMP/b.txt" 2>/dev/null )"
-[ "$CLI1" = "$CLI2" ] && ok "CLI: --batch is deterministic" || no "CLI: --batch not deterministic"
+if [ "$CLI1" = "$CLI2" ]; then ok "CLI: --batch is deterministic"; else no "CLI: --batch not deterministic"; fi
 printf '%s' "$CLI1" | grep -q '<q i="0" verb="for" ok="1">' \
     && printf '%s' "$CLI1" | grep -q '<q i="3" verb="impact" ok="1">' \
     && ok "CLI: verb:arg lines map to the right sub-verbs in order (comment line skipped)" \

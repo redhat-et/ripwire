@@ -56,7 +56,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -97,7 +97,7 @@ REC="$( grep -E $'^AGG\trecall\t' "$OUT" )"
 RNK="$( grep -E $'^AGG\tranking\t' "$OUT" )"
 LIV="$( grep -E $'^AGG\trecall_livepol\t' "$OUT" )"
 field(){ printf '%s' "$1" | tr '\t' '\n' | sed -n "s/^$2=//p"; }
-{ [ -n "$REC" ] && [ -n "$RNK" ]; } && ok "both AGG rows present" || no "missing an AGG row"
+if { [ -n "$REC" ] && [ -n "$RNK" ]; }; then ok "both AGG rows present"; else no "missing an AGG row"; fi
 # Each scored lane must announce the corpus it was scored on, and it must be that lane's pinned one — a
 # harness silently falling back to the live root would re-open the ratchet this file retired. Asserted
 # per lane against its OWN lock, because the two corpora are pinned at different commits by design
@@ -347,13 +347,13 @@ KL5="$( field "$RNK" lenient_r5 )"; KMRR="$( field "$RNK" mrr_lenient )"; KPOL="
 #   after the source tree has moved far enough that the frozen corpus no longer resembles what the tool
 #   ships. A RED FLOOR IS NEVER A REASON TO REFRESH — on a frozen corpus a red floor is a ranker
 #   regression, full stop, and "the corpus moved" is no longer available as an explanation.
-floor "$RL5" 71   && ok "recall lane lenient recall@5 ($RL5%) >= floor 71% (frozen-corpus baseline 76.2%)"  || no "recall lane lenient recall@5 ($RL5%) under floor 71% — ranker regression on the FROZEN corpus"
-floor "$RMRR" 0.57 && ok "recall lane lenient MRR ($RMRR) >= floor 0.57 (frozen-corpus baseline 0.619)" || no "recall lane lenient MRR ($RMRR) under floor 0.57 — ranker regression on the FROZEN corpus"
+if floor "$RL5" 71; then ok "recall lane lenient recall@5 ($RL5%) >= floor 71% (frozen-corpus baseline 76.2%)"; else no "recall lane lenient recall@5 ($RL5%) under floor 71% — ranker regression on the FROZEN corpus"; fi
+if floor "$RMRR" 0.57; then ok "recall lane lenient MRR ($RMRR) >= floor 0.57 (frozen-corpus baseline 0.619)"; else no "recall lane lenient MRR ($RMRR) under floor 0.57 — ranker regression on the FROZEN corpus"; fi
 LPOL="$( field "$LIV" pollution5 )"
-ceil  "${LPOL:-999}" 16 && ok "LIVE-corpus pollution@5 ($LPOL%) <= ceiling 16% (the corpus-composition reporter; exported-tree baseline 10.0%)" || no "LIVE-corpus pollution@5 (${LPOL:-missing}%) over ceiling 16% — generated/fixture docs are retaking --recall on the live tree"
-floor "$KL5" 70   && ok "ranking lane lenient recall@5 ($KL5%) >= floor 70% (frozen-corpus baseline 71.9%)"  || no "ranking lane lenient recall@5 ($KL5%) under floor 70% — ranker regression on the FROZEN corpus"
-floor "$KMRR" 0.55 && ok "ranking lane lenient MRR ($KMRR) >= floor 0.55 (frozen-corpus baseline 0.660)"    || no "ranking lane lenient MRR ($KMRR) under floor 0.55 — ranker regression on the FROZEN corpus"
-ceil  "$KPOL" 5    && ok "ranking lane pollution@5 ($KPOL%) <= ceiling 5% (frozen-corpus baseline 0.0%; post-§P4 0.0%)"    || no "ranking lane pollution@5 ($KPOL%) over ceiling 5% — fixtures/present are retaking --for"
+if ceil  "${LPOL:-999}" 16; then ok "LIVE-corpus pollution@5 ($LPOL%) <= ceiling 16% (the corpus-composition reporter; exported-tree baseline 10.0%)"; else no "LIVE-corpus pollution@5 (${LPOL:-missing}%) over ceiling 16% — generated/fixture docs are retaking --recall on the live tree"; fi
+if floor "$KL5" 70; then ok "ranking lane lenient recall@5 ($KL5%) >= floor 70% (frozen-corpus baseline 71.9%)"; else no "ranking lane lenient recall@5 ($KL5%) under floor 70% — ranker regression on the FROZEN corpus"; fi
+if floor "$KMRR" 0.55; then ok "ranking lane lenient MRR ($KMRR) >= floor 0.55 (frozen-corpus baseline 0.660)"; else no "ranking lane lenient MRR ($KMRR) under floor 0.55 — ranker regression on the FROZEN corpus"; fi
+if ceil  "$KPOL" 5; then ok "ranking lane pollution@5 ($KPOL%) <= ceiling 5% (frozen-corpus baseline 0.0%; post-§P4 0.0%)"; else no "ranking lane pollution@5 ($KPOL%) over ceiling 5% — fixtures/present are retaking --for"; fi
 
 # ── #5b: §P4's own number — the adversarial class (queries built to let fixtures/decks win) must stay
 #    de-polluted. Ceiling 8% = one polluted top-5 slot across the class (5 queries × 5 slots → 1/25 = 4%);

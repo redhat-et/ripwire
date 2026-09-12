@@ -34,7 +34,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # BOTH seams: positional and RIPWIRE_BIN
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -118,7 +118,7 @@ if command -v xmllint >/dev/null 2>&1; then
         [ -n "$X" ] || continue
         printf '%s' "$X" | xmllint --noout - 2>/dev/null || xok=0
     done
-    [ "$xok" = 1 ] && ok "(f) xml well-formed (all variants)" || no "(f) xml malformed"
+    if [ "$xok" = 1 ]; then ok "(f) xml well-formed (all variants)"; else no "(f) xml malformed"; fi
 else
     printf '  SKIP  (f) xml well-formed (no xmllint)\n'
 fi

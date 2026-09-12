@@ -33,7 +33,7 @@ HOOK="$ROOT/hooks/ripwire-claude-route.sh"
 NUDGE="$ROOT/hooks/ripwire-nudge.sh"
 INSTALL="$ROOT/skills/install.sh"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -f "$HOOK" ] || { echo "no $HOOK"; exit 2; }
@@ -116,7 +116,7 @@ esac
 H1="$TMP/h1"; mkdir -p "$H1"
 OUT1="$( route_run "$H1" "$WITH_RIPWIRE" "$( promptjson recsession "$REPO" "$RECPROMPT" )" RIPWIRE_METER_ARM=treatment )"; RC1=$?
 echo "-- recommend case --"; echo "$OUT1"; echo "(exit=$RC1)"
-[ "$RC1" -eq 0 ] && ok "R1 route: exit 0 on a recommend" || no "R1 route: exit was $RC1"
+if [ "$RC1" -eq 0 ]; then ok "R1 route: exit 0 on a recommend"; else no "R1 route: exit was $RC1"; fi
 printf '%s' "$OUT1" | jq -e . >/dev/null 2>&1 && ok "R2 route: stdout is valid JSON" \
     || no "R2 route: stdout is not valid JSON: [$OUT1]"
 [ "$( printf '%s' "$OUT1" | jq -r '.hookSpecificOutput.hookEventName' 2>/dev/null )" = "UserPromptSubmit" ] \
@@ -152,7 +152,7 @@ OUT2="$( route_run "$H2" "$WITH_RIPWIRE" "$( promptjson abssession "$REPO" "$ABS
 # (L) THE LOG — hash-only by construction, never the prompt text
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 L1="$H1/routing.jsonl"
-[ "$( rows "$L1" )" = "1" ] && ok "L1 log: one row per prompt" || no "L1 log: $( rows "$L1" ) row(s)"
+if [ "$( rows "$L1" )" = "1" ]; then ok "L1 log: one row per prompt"; else no "L1 log: $( rows "$L1" ) row(s)"; fi
 for k in v at agent event status intent recommended arm session_hash prompt_hash prompt_bytes; do
     v="$( rowget "$L1" 1 "$k" )"
     case "$v" in ""|"<missing>") no "L2 log: row is missing field $k" ;; esac
@@ -403,7 +403,7 @@ grep -v '^[[:space:]]*#' "$HOOK" | grep -Eq 'exit[[:space:]]+2\b' \
 IHOME="$TMP/ihome"; mkdir -p "$IHOME"
 IOUT1="$( HOME="$IHOME" bash "$INSTALL" --hook 2>&1 )"; IRC1=$?
 SETTINGS="$IHOME/.claude/settings.json"
-[ "$IRC1" -eq 0 ] && ok "I1 install: --hook exits 0" || no "I1 install: exit was $IRC1"
+if [ "$IRC1" -eq 0 ]; then ok "I1 install: --hook exits 0"; else no "I1 install: exit was $IRC1"; fi
 jq -e --arg cmd "$HOOK" 'any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; .command == $cmd)' "$SETTINGS" >/dev/null 2>&1 \
     && ok "I2 install: settings.json registers the router as a UserPromptSubmit hook" \
     || no "I2 install: no UserPromptSubmit entry for $HOOK"
@@ -426,7 +426,7 @@ printf '%s' "$BADOUT" | grep -Fq 'Registered ripwire' \
 [ "$( cksum <"$BADHOME/.claude/settings.json" )" = "$( printf 'not json {{{\n' | cksum )" ] \
     && ok "I4b install: and the unparseable file is left byte-for-byte untouched" \
     || no "I4b install: the installer modified a settings.json it could not parse"
-[ "$BADRC" -ne 0 ] && ok "I4c install: it exits non-zero on that path" || no "I4c install: exited 0 after failing to merge"
+if [ "$BADRC" -ne 0 ]; then ok "I4c install: it exits non-zero on that path"; else no "I4c install: exited 0 after failing to merge"; fi
 # The router is never bundled into a flagless install: --hook stays opt-in, as it always has.
 DEFHOME="$TMP/defhome"; mkdir -p "$DEFHOME"
 HOME="$DEFHOME" bash "$INSTALL" >/dev/null 2>&1

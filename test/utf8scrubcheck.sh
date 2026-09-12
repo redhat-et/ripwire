@@ -30,7 +30,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 FIX="$ROOT/test/utf8scrubfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -69,7 +69,7 @@ done
 
 # the default map must remain well-formed too (the fixture has no doc-comment/CDATA there, but check anyway)
 "$BIN" "$FIX" --no-cache >"$TMP/map.xml" 2>/dev/null
-xmllint --noout "$TMP/map.xml" 2>/dev/null && ok "default map on the Latin-1 fixture: xmllint-clean" || no "default map: xmllint FAILED"
+if xmllint --noout "$TMP/map.xml" 2>/dev/null; then ok "default map on the Latin-1 fixture: xmllint-clean"; else no "default map: xmllint FAILED"; fi
 
 # ── (C) --html on the Latin-1 fixture: valid UTF-8 output + no raw 0xE9 + parseable HTML page ────────
 HTMLOUT="$TMP/out.html"

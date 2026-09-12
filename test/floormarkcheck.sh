@@ -61,7 +61,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -368,19 +368,18 @@ for spec in "callers:--callers=$SYM" "callees:--callees=$SYMC" "uses:--uses=$SYM
         fi
     done
 done
-# --edit-check sits OUTSIDE the --limit/--offset family, so it takes the §B9.2 NOTICE instead of a refusal.
-# That asymmetry is DELIBERATE (R12: disclose, do not refuse, out here — refusing would break
-# `--for=X --max-tokens=5000`), so the gate pins the notice rather than demanding a refusal it should not get.
+# --edit-check took the §B9.2 NOTICE while it sat OUTSIDE the --limit/--offset family. On 2026-09-10 it JOINED
+# that family (it windows its unflagged caller rows; the flagged callers and their sites_l= never page), and
+# cli.h's own invariant is that a verb holds a row in kShapingVerbs OR honorsPaging, never both — so it now
+# takes the family REFUSAL like its five neighbours above, and this arm pins that instead. The asymmetry the
+# old wording protected still exists; it just no longer covers this verb.
 for flag in --token-budget=200 --max-tokens=200; do
     ERR="$( "$BIN" . --edit-check="$SYM" "$flag" 2>&1 >/dev/null )"; rc=$?
-    OUT="$( "$BIN" . --edit-check="$SYM" "$flag" 2>/dev/null | wc -c | tr -d ' ' )"
-    case "$rc:$ERR" in
-        0:*"is not read by --edit-check"*)
-            [ "$OUT" -gt 0 ] \
-                && ok "(8) edit-check $flag: warns and emits ($OUT B, rc=0) — the deliberate outside-the-family shape" \
-                || no "(8) edit-check $flag: warned but emitted nothing" ;;
-        *)  no "(8) edit-check $flag: rc=$rc and no 'is not read by' notice — it is silently ignoring the flag: $( printf '%s' "$ERR" | head -c 120 )" ;;
-    esac
+    if [ "$rc" != 0 ] && [ -n "$ERR" ]; then
+        ok "(8) edit-check $flag: refused loudly (rc=$rc, message present) — the paging family's shape"
+    else
+        no "(8) edit-check $flag: rc=$rc with $( printf '%s' "$ERR" | wc -c | tr -d ' ' ) B of stderr — accepted-and-ignored"
+    fi
 done
 # V4 MED-3, the byte half. --pr-context is the ONE marked surface that HONOURS --max-tokens (it is in the
 # honoring set the M-4 work above derived from the read sites), so its marker bytes are not free the way the
@@ -668,7 +667,7 @@ done
 if command -v xmllint >/dev/null 2>&1; then
     for f in path9 connect9 affected9 exercises9 seams9 deadcode9 communities9 community9 zoom9 lego9 mcp_path9 mcp_connect9 mcp_lego9; do
         [ -s "$TMP/$f.xml" ] || { no "(9) $f.xml is empty — nothing was validated"; continue; }
-        xmllint --noout "$TMP/$f.xml" 2>"$TMP/xl9.err" && ok "(9) $f.xml is well-formed" || no "(9) $f.xml FAILED xmllint: $( head -1 "$TMP/xl9.err" )"
+        if xmllint --noout "$TMP/$f.xml" 2>"$TMP/xl9.err"; then ok "(9) $f.xml is well-formed"; else no "(9) $f.xml FAILED xmllint: $( head -1 "$TMP/xl9.err" )"; fi
     done
 fi
 
@@ -688,8 +687,11 @@ src = sys.argv[1]
 # not the member row the communities listing prints under the same tag).
 # `<uses` (fielduses.h / columnar.h) and `<edit-check` (editcheck.h) are 40-line `out +=` builders whose marker
 # lands far past any statement window; arm (1) pins them LIVE, so they are deliberately not re-derived here.
+# NOTE: these are SOURCE literals, so the std::print conversion respelled the conversion specifiers
+# inside them (`blast radius: %zu symbols` -> `blast radius: {} symbols`). A pattern that stops
+# matching after a conversion is this guard working, not noise -- re-pin it to the new spelling.
 PATTERNS = [ r'"<path ', r'"<connect ', r'"<affected ', r'"<exercises ', r'"<seams ', r'"<dead-code ', r'"<communities ',
-             r'"<community id=', r'"<zoom ', r'"<lego', r'\\"dependent_symbols\\"', r'blast radius: %zu symbols',
+             r'"<community id=', r'"<zoom ', r'"<lego', r'\\"dependent_symbols\\"', r'blast radius: {} symbols',
              r'"<impact of=', r'"<query ', r'"<pr-context" \+', r'"<safe-delete ', r'"<test-gate' ]
 fail, found = 0, { p: 0 for p in PATTERNS }
 for fn in sorted( os.listdir( src ) ):

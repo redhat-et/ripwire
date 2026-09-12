@@ -42,7 +42,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -81,11 +81,11 @@ if printf '%s' "$CC_WIN" | grep -q 'a="[^"]*C.cpp" b="[^"]*D.cpp"' && ! printf '
 else
     no "--cochange --since=HEAD~3 should keep only C+D: $CC_WIN"
 fi
-printf '%s' "$CC_WIN" | grep -q 'pairs="1"' && ok "--cochange --since=HEAD~3 reports exactly pairs=1" || no "--cochange --since=HEAD~3 pair count wrong: $CC_WIN"
+if printf '%s' "$CC_WIN" | grep -q 'pairs="1"'; then ok "--cochange --since=HEAD~3 reports exactly pairs=1"; else no "--cochange --since=HEAD~3 pair count wrong: $CC_WIN"; fi
 
 # determinism of the REV-form window
 CC_WIN2="$( "$BIN" "$REPO" --cochange --since=HEAD~3 --no-cache 2>/dev/null )"
-[ "$CC_WIN" = "$CC_WIN2" ] && ok "--cochange --since=HEAD~3 deterministic run-to-run" || no "--cochange --since=HEAD~3 non-deterministic"
+if [ "$CC_WIN" = "$CC_WIN2" ]; then ok "--cochange --since=HEAD~3 deterministic run-to-run"; else no "--cochange --since=HEAD~3 non-deterministic"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -97,7 +97,7 @@ k_of(){ printf '%s' "$1" | grep -oE "n=\"$2\"[^/]*k=\"[0-9.]+\"" | grep -oE 'k="
 
 RB_ALL="$( "$BIN" "$REPO" --rank-by=churn --no-cache 2>/dev/null )"
 ka_all="$( k_of "$RB_ALL" a )"; kc_all="$( k_of "$RB_ALL" c )"
-[ -n "$ka_all" ] && [ -n "$kc_all" ] && ok "all-history --rank-by=churn: parsed k for both a and c (ka=$ka_all kc=$kc_all)" || no "could not parse all-history churn k values"
+if [ -n "$ka_all" ] && [ -n "$kc_all" ]; then ok "all-history --rank-by=churn: parsed k for both a and c (ka=$ka_all kc=$kc_all)"; else no "could not parse all-history churn k values"; fi
 
 RB_WIN="$( "$BIN" "$REPO" --rank-by=churn --since=HEAD~3 --no-cache 2>/dev/null )"
 ka_win="$( k_of "$RB_WIN" a )"; kc_win="$( k_of "$RB_WIN" c )"
@@ -116,7 +116,7 @@ fi
 
 # determinism of the windowed churn ranking
 RB_WIN2="$( "$BIN" "$REPO" --rank-by=churn --since=HEAD~3 --no-cache 2>/dev/null )"
-[ "$RB_WIN" = "$RB_WIN2" ] && ok "--rank-by=churn --since=HEAD~3 deterministic run-to-run" || no "--rank-by=churn --since=HEAD~3 non-deterministic"
+if [ "$RB_WIN" = "$RB_WIN2" ]; then ok "--rank-by=churn --since=HEAD~3 deterministic run-to-run"; else no "--rank-by=churn --since=HEAD~3 non-deterministic"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -216,15 +216,15 @@ echo "=== shell safety: --since value with metacharacters, on --cochange (not ju
 # ═══════════════════════════════════════════════════════════════════════════
 rm -f "$REPO/PWNED_CC"
 "$BIN" "$REPO" --cochange --since='HEAD~3; touch '"$REPO"'/PWNED_CC' --no-cache >/dev/null 2>&1
-[ ! -f "$REPO/PWNED_CC" ] && ok "shell-metacharacter --since on --cochange executes nothing (quoted safely)" || no "shell injection via --since on --cochange!"
+if [ ! -f "$REPO/PWNED_CC" ]; then ok "shell-metacharacter --since on --cochange executes nothing (quoted safely)"; else no "shell injection via --since on --cochange!"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
 echo "=== xml well-formed ==="
 # ═══════════════════════════════════════════════════════════════════════════
 command -v xmllint >/dev/null 2>&1 && {
-    printf '%s' "$CC_WIN" | xmllint --noout - 2>/dev/null && ok "xml well-formed (--cochange --since=HEAD~3)" || no "xml malformed (--cochange --since=HEAD~3)"
-    printf '%s' "$RB_WIN" | xmllint --noout - 2>/dev/null && ok "xml well-formed (--rank-by=churn --since=HEAD~3)" || no "xml malformed (--rank-by=churn --since=HEAD~3)"
+    if printf '%s' "$CC_WIN" | xmllint --noout - 2>/dev/null; then ok "xml well-formed (--cochange --since=HEAD~3)"; else no "xml malformed (--cochange --since=HEAD~3)"; fi
+    if printf '%s' "$RB_WIN" | xmllint --noout - 2>/dev/null; then ok "xml well-formed (--rank-by=churn --since=HEAD~3)"; else no "xml malformed (--rank-by=churn --since=HEAD~3)"; fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -80,7 +80,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){   printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
@@ -134,7 +134,7 @@ run(){ "$BIN" "$FIX" --cochange --pack-top-n=1000 --no-cache "$@" 2>"$TMP/err"; 
 
 run > "$TMP/fix"
 rc=$?
-[ "$rc" -eq 0 ] && ok "fixture: --cochange exits 0" || { no "fixture: --cochange exits $rc"; head -3 "$TMP/err"; }
+if [ "$rc" -eq 0 ]; then ok "fixture: --cochange exits 0"; else { no "fixture: --cochange exits $rc"; head -3 "$TMP/err"; }; fi
 [ -s "$TMP/fix" ] || { echo "cochangecliocheck: empty fixture output, cannot proceed"; exit 2; }
 
 # pull one <pair .../> element naming BOTH fragments, in either a=/b= order.
@@ -269,7 +269,7 @@ fi
 # ══ 3. MVG GROUPS — one row naming the file to fix, not N pair rows ════════════════════════════════
 "$BIN" "$FIX" --cochange --cochange-groups --pack-top-n=1000 --no-cache > "$TMP/fix.g" 2>"$TMP/gerr"
 rcg=$?
-[ "$rcg" -eq 0 ] && ok "(3a) --cochange-groups exits 0" || { no "(3a) --cochange-groups exits $rcg"; head -3 "$TMP/gerr"; }
+if [ "$rcg" -eq 0 ]; then ok "(3a) --cochange-groups exits 0"; else { no "(3a) --cochange-groups exits $rcg"; head -3 "$TMP/gerr"; }; fi
 
 ngroups="$( grep -oE '<group [^>]*>' "$TMP/fix.g" | wc -l | tr -d ' ' )"
 # Six surprising pairs; core covers three of them, the other three are disjoint edges.
@@ -358,7 +358,7 @@ fi
 # ══ 5. G4 + determinism ════════════════════════════════════════════════════════════════════════════
 if command -v xmllint >/dev/null; then
     for f in fix fix.r2 fix.g fix.gr fix.pf; do
-        xmllint --noout "$TMP/$f" 2>/dev/null && ok "(5a) xmllint clean: $f" || no "(5a) xmllint REJECTED $f"
+        if xmllint --noout "$TMP/$f" 2>/dev/null; then ok "(5a) xmllint clean: $f"; else no "(5a) xmllint REJECTED $f"; fi
     done
 else
     skip "(5a) xmllint not on PATH"

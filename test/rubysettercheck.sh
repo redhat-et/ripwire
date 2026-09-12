@@ -22,7 +22,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ echo "  PASS  $1"; }
+ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -106,36 +106,36 @@ RUBY
 
 MAP="$DIR/map.xml"
 "$BIN" "$FIX" --no-cache >"$MAP" 2>"$DIR/map.err"
-[ $? -eq 0 ] && ok "default map exits 0" || no "default map exited non-zero: $( cat "$DIR/map.err" )"
+if [ $? -eq 0 ]; then ok "default map exits 0"; else no "default map exited non-zero: $( cat "$DIR/map.err" )"; fi
 [ -s "$DIR/map.err" ] && no "unexpected stderr: $( head -3 "$DIR/map.err" )" || ok "clean stderr"
-command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$MAP" && ok "xmllint --noout" || no "xmllint failed"; }
+command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP"; then ok "xmllint --noout"; else no "xmllint failed"; fi; }
 
 SPLIT="$DIR/split"; sed 's/></>\n</g' "$MAP" >"$SPLIT"
 rowOf(){ awk -v pat="$1" '$0 ~ pat{f=1;print;next} /^<s /{f=0} f' "$SPLIT"; }   # the <s> row matching an attribute + its <c> children (top-level defs carry no id=, so pass n="…")
 
 echo "=== setter definitions are indexed, scoped, and distinct from their getters ==="
-grep -q '<s t="method" n="name=" id="s.rb::W::name="' "$SPLIT" && ok "def name=(v) → t=\"method\" n=\"name=\" id=\"s.rb::W::name=\"" || no "def name=(v) not indexed as W::name=: $( grep -o 'n="name[^"]*"[^>]*' "$SPLIT" | head -3 | tr '\n' ' ' )"
-grep -q 'n="count=" id="s.rb::W::count="' "$SPLIT" && ok "def count=(v) → W::count=" || no "def count=(v) not indexed"
-grep -q 'n="limit=" id="s.rb::W::limit="' "$SPLIT" && ok "def self.limit=(v) → W::limit= (singleton setter)" || no "def self.limit=(v) not indexed"
-grep -q 'n="name=" id="s.rb::Other::name="' "$SPLIT" && ok "Other#name= indexed separately" || no "Other#name= not indexed"
-grep -q '<s t="method" n="name" id="s.rb::W::name"' "$SPLIT" && ok "getter def name still indexed as W::name" || no "getter W::name missing"
-[ "$( grep -c 'n="name" ' "$SPLIT" )" -eq 1 ] && ok "exactly one symbol named name (the getter)" || no "expected one getter row, got $( grep -c 'n="name" ' "$SPLIT" )"
+if grep -q '<s t="method" n="name=" id="s.rb::W::name="' "$SPLIT"; then ok "def name=(v) → t=\"method\" n=\"name=\" id=\"s.rb::W::name=\""; else no "def name=(v) not indexed as W::name=: $( grep -o 'n="name[^"]*"[^>]*' "$SPLIT" | head -3 | tr '\n' ' ' )"; fi
+if grep -q 'n="count=" id="s.rb::W::count="' "$SPLIT"; then ok "def count=(v) → W::count="; else no "def count=(v) not indexed"; fi
+if grep -q 'n="limit=" id="s.rb::W::limit="' "$SPLIT"; then ok "def self.limit=(v) → W::limit= (singleton setter)"; else no "def self.limit=(v) not indexed"; fi
+if grep -q 'n="name=" id="s.rb::Other::name="' "$SPLIT"; then ok "Other#name= indexed separately"; else no "Other#name= not indexed"; fi
+if grep -q '<s t="method" n="name" id="s.rb::W::name"' "$SPLIT"; then ok "getter def name still indexed as W::name"; else no "getter W::name missing"; fi
+if [ "$( grep -c 'n="name" ' "$SPLIT" )" -eq 1 ]; then ok "exactly one symbol named name (the getter)"; else no "expected one getter row, got $( grep -c 'n="name" ' "$SPLIT" )"; fi
 
 echo "=== a setter CALL edges to the setter, never to the getter ==="
 WR="$( rowOf 'n="writer" ' )"
-echo "$WR" | grep -q '<c n="name="' && ok "writer: w.name = 3 → edge to name=" || no "writer: no edge to name=: $WR"
+if echo "$WR" | grep -q '<c n="name="'; then ok "writer: w.name = 3 → edge to name="; else no "writer: no edge to name=: $WR"; fi
 echo "$WR" | grep -q '<c n="name"/>\|<c n="name" ' && no "writer: w.name = 3 ALSO edges to the getter name (false edge)" || ok "writer: no edge to the getter name"
 RD="$( rowOf 'n="reader" ' )"
-echo "$RD" | grep -q '<c n="name"' && ok "reader: w.name → edge to the getter name (unchanged)" || no "reader: lost the getter edge: $RD"
+if echo "$RD" | grep -q '<c n="name"'; then ok "reader: w.name → edge to the getter name (unchanged)"; else no "reader: lost the getter edge: $RD"; fi
 echo "$RD" | grep -q '<c n="name="' && no "reader: a plain read edges to name=" || ok "reader: no edge to name="
 RN="$( rowOf 'id="s.rb::W::rename"' )"
-echo "$RN" | grep -q '<c n="name="' && ok "rename: self.name = v → edge to name=" || no "rename: no edge to name=: $RN"
+if echo "$RN" | grep -q '<c n="name="'; then ok "rename: self.name = v → edge to name="; else no "rename: no edge to name=: $RN"; fi
 echo "$RN" | grep -q 'amb=' && no "rename: self.name = v stayed ambiguous between W::name= and Other::name= (Rule 1 should pin the self receiver)" || ok "rename: pinned to W::name= (self receiver, no amb=)"
 echo "$RN" | grep -q '<c n="name"/>\|<c n="name" ' && no "rename: self.name = v also edges the getter" || ok "rename: no edge to the getter"
 
 echo "=== stated floor: compound assignment keeps the getter edge only ==="
 BP="$( rowOf 'n="bumper" ' )"
-echo "$BP" | grep -q '<c n="count"' && ok "bumper: w.count += 1 → edge to count (the read half)" || no "bumper: lost the getter edge: $BP"
+if echo "$BP" | grep -q '<c n="count"'; then ok "bumper: w.count += 1 → edge to count (the read half)"; else no "bumper: lost the getter edge: $BP"; fi
 echo "$BP" | grep -q '<c n="count="' && no "bumper: w.count += 1 edges count= — the floor moved; update this gate AND the tags.scm header" || ok "bumper: no edge to count= (floor, stated)"
 
 echo "=== the OTHER two stated floors, pinned so they stay decisions ==="
@@ -144,10 +144,10 @@ echo "=== the OTHER two stated floors, pinned so they stay decisions ==="
 #   * (operator_assignment) `w.count ||= 1` — like `+=`, it reads AND writes; one capture carries one name.
 #   * (left_assignment_list) `a.count, b.count = 1, 2` — the targets sit one level deeper than `left:`.
 OW="$( rowOf 'n="orwriter" ' )"
-echo "$OW" | grep -q '<c n="count"' && ok "orwriter: w.count ||= 1 → edge to the getter count (the read half)" || no "orwriter: lost the getter edge: $OW"
+if echo "$OW" | grep -q '<c n="count"'; then ok "orwriter: w.count ||= 1 → edge to the getter count (the read half)"; else no "orwriter: lost the getter edge: $OW"; fi
 echo "$OW" | grep -q '<c n="count="' && no "orwriter: w.count ||= 1 edges count= — the floor moved; update this gate, src/ingest_names.h AND the tags.scm header" || ok "orwriter: no edge to count= (floor, stated)"
 PW="$( rowOf 'n="pairwriter" ' )"
-echo "$PW" | grep -q '<c n="count"' && ok "pairwriter: a.count, b.count = 1, 2 → getter edge only (the read half)" || no "pairwriter: lost the getter edge: $PW"
+if echo "$PW" | grep -q '<c n="count"'; then ok "pairwriter: a.count, b.count = 1, 2 → getter edge only (the read half)"; else no "pairwriter: lost the getter edge: $PW"; fi
 echo "$PW" | grep -q '<c n="count="' && no "pairwriter: a multiple assignment edges count= — the floor moved; update this gate AND src/ingest_names.h" || ok "pairwriter: no edge to count= (floor, stated)"
 
 echo "=== stated floor: attr_accessor / attr_writer / attr_reader generate NO indexed methods ==="
@@ -169,22 +169,22 @@ echo "=== the two write spellings that DO reach the setter ==="
 # (assignment) whose `left:` is the (call), so both take the rename. Asserted because neither is obvious from
 # the rule's wording, and a narrowing of it would silently lose them.
 EX="$( rowOf 'n="explicit" ' )"
-echo "$EX" | grep -q '<c n="name="' && ok "explicit: w.name=(4) → edge to name= (the explicit call spelling)" || no "explicit: no edge to name=: $EX"
+if echo "$EX" | grep -q '<c n="name="'; then ok "explicit: w.name=(4) → edge to name= (the explicit call spelling)"; else no "explicit: no edge to name=: $EX"; fi
 echo "$EX" | grep -q '<c n="name"/>\|<c n="name" ' && no "explicit: w.name=(4) also edges the getter" || ok "explicit: no edge to the getter"
 CH="$( rowOf 'n="chained" ' )"
-echo "$CH" | grep -q '<c n="name="' && ok "chained: w.inner.name = 5 → edge to name= (the rename does not care how deep the receiver is)" || no "chained: no edge to name=: $CH"
+if echo "$CH" | grep -q '<c n="name="'; then ok "chained: w.inner.name = 5 → edge to name= (the rename does not care how deep the receiver is)"; else no "chained: no edge to name=: $CH"; fi
 
 echo "=== verbs address the setter by its own name ==="
 CL="$( "$BIN" "$FIX" --no-cache --callers=name= 2>/dev/null )"
-echo "$CL" | grep -q 'count="4"' && ok "--callers=name= reports count=4 (writer, rename, explicit, chained)" || no "--callers=name= did not report count=4: $( echo "$CL" | grep -o '<callers[^>]*' )"
-echo "$CL" | grep -q 'n="writer"' && echo "$CL" | grep -q 'n="rename"' && ok "…listing writer and rename" || no "--callers=name= is missing writer or rename"
+if echo "$CL" | grep -q 'count="4"'; then ok "--callers=name= reports count=4 (writer, rename, explicit, chained)"; else no "--callers=name= did not report count=4: $( echo "$CL" | grep -o '<callers[^>]*' )"; fi
+if echo "$CL" | grep -q 'n="writer"' && echo "$CL" | grep -q 'n="rename"'; then ok "…listing writer and rename"; else no "--callers=name= is missing writer or rename"; fi
 CG="$( "$BIN" "$FIX" --no-cache --callers=W::name 2>/dev/null )"
 echo "$CG" | grep -q 'n="writer"' && no "--callers=W::name lists writer — a setter call still reaches the getter" || ok "--callers=W::name does not list writer"
-echo "$CG" | grep -q 'n="reader"' && ok "--callers=W::name lists reader" || no "--callers=W::name is missing reader: $CG"
+if echo "$CG" | grep -q 'n="reader"'; then ok "--callers=W::name lists reader"; else no "--callers=W::name is missing reader: $CG"; fi
 
 echo "=== determinism ==="
 "$BIN" "$FIX" --no-cache >"$DIR/b.xml" 2>/dev/null
-cmp -s "$MAP" "$DIR/b.xml" && ok "byte-identical across two runs" || no "output differs across runs"
+if cmp -s "$MAP" "$DIR/b.xml"; then ok "byte-identical across two runs"; else no "output differs across runs"; fi
 
 echo "=== mutation: turn the write into a read → the setter edge must vanish (non-tautological) ==="
 MUT="$DIR/mut"; mkdir -p "$MUT"
@@ -192,7 +192,7 @@ sed 's/  w.name = 3/  w.name/' "$FIX/s.rb" >"$MUT/s.rb"
 grep -q '^  w.name$' "$MUT/s.rb" || no "mutation did not apply"
 MW="$( "$BIN" "$MUT" --no-cache 2>/dev/null | sed 's/></>\n</g' | awk '/n="writer" /{f=1;print;next} /^<s /{f=0} f' )"
 echo "$MW" | grep -q '<c n="name="' && no "mutation: writer still edges name= after the write became a read" || ok "mutation: setter edge gone"
-echo "$MW" | grep -q '<c n="name"' && ok "mutation: …and the read now edges the getter" || no "mutation: the read did not edge the getter: $MW"
+if echo "$MW" | grep -q '<c n="name"'; then ok "mutation: …and the read now edges the getter"; else no "mutation: the read did not edge the getter: $MW"; fi
 
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

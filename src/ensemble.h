@@ -1,4 +1,7 @@
 #pragma once
+#include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include <string_view>       // %.*s (precision, pointer) collapses to one view
+
 
 // ensemble.h — `--ensemble`: the FAMILY JOIN. Wave 1 shipped four readability-adjacent evidence families and
 // nothing that combines them; four lenses run separately are four opinions, not an ensemble. This verb is the
@@ -862,30 +865,30 @@ inline int writeEnsembleReport( const IngestResult& ing, const std::vector<std::
     const std::string ensUnavailableAttr    = ensUnavailNamesStr.empty() ? std::string() : ( " unavailable=\"" + ensUnavailNamesStr + "\"" );
     const std::string ensUnavailableWhyAttr = ensUnavailWhyStr.empty()   ? std::string() : ( " unavailable_why=\"" + std::string( escapeXml( ensUnavailWhyStr, escUnavail ) ) + "\"" );
     std::fputs( rw::rootRelPathsLegend( singleRoot ), stdout );   // M12: root= is new below
-    std::printf( "<ensemble families=\"%u\" eligible=\"%zu\" ranked=\"%zu\" no_family=\"%zu\"%s%s",
+    rw::emitTo( stdout, "<ensemble families=\"{}\" eligible=\"{}\" ranked=\"{}\" no_family=\"{}\"{}{}",
                  unsigned( kFamilyCount ), scan.eligibleCount, total, scan.noFamilyCount,
                  ensUnavailableAttr.c_str(), ensUnavailableWhyAttr.c_str() );
-    std::printf( " bar_ccx=\"%u\" bar_loc=\"%u\" bar_nest=\"%u\" bar_params=\"%u\"",
+    rw::emitTo( stdout, " bar_ccx=\"{}\" bar_loc=\"{}\" bar_nest=\"{}\" bar_params=\"{}\"",
                  quality::kCcxBar, quality::kLocBar, quality::kNestBar, quality::kParamBar );
-    std::printf( " rcut=\"%zu\" rmeasured=\"%zu\" hcut=\"%zu\" hranked=\"%zu\" window=\"%s\"",
+    rw::emitTo( stdout, " rcut=\"{}\" rmeasured=\"{}\" hcut=\"{}\" hranked=\"{}\" window=\"{}\"",
                  scan.readabilityCut, scan.readabilityMeasured, scan.churnCut, scan.churnRanked, kEnsembleWindowLabel );
     // The LANGUAGE-COVERAGE denominators — what the availability verdict was computed FROM, so a reader can
-    std::printf( " cfiles=\"%zu\" cscope=\"%zu\" lscope=\"%zu\"",     // check the verdict instead of taking it.
+    rw::emitTo( stdout, " cfiles=\"{}\" cscope=\"{}\" lscope=\"{}\"",     // check the verdict instead of taking it.
                  scan.confusionFiles, scan.confusionScope, scan.lexicalScope );
     if( scan.unreadableFileCount != 0 )
     {
-        std::printf( " unreadable_files=\"%u\"", scan.unreadableFileCount );
+        rw::emitTo( stdout, " unreadable_files=\"{}\"", scan.unreadableFileCount );
     }
     if( !floorRules.empty() )
     {
-        std::printf( " findings_capped=\"1\" floor_rules=\"%s\"%s", std::string( escapeXml( std::string_view( floorRules ), escFloor ) ).c_str(),
-                     kGraphCountFloorAttrXml );   // H8: a floored family floors the root's counts
+        rw::emitTo( stdout, " findings_capped=\"1\" floor_rules=\"{}\"{}", std::string( escapeXml( std::string_view( floorRules ), escFloor ) ).c_str(),
+                     kGraphCountFloorAttrXml  );   // H8: a floored family floors the root's counts
         // (kGraphCountFloorAttrXml: graphlegend.h — one attribute, one reading, for cap floors and graph floors alike)
     }
-    std::printf( " shown_syms=\"%zu\" syms_capped=\"%s\" shown_files=\"%zu\" files_capped=\"%s\"%s%s%s>",
+    rw::emitTo( stdout, " shown_syms=\"{}\" syms_capped=\"{}\" shown_files=\"{}\" files_capped=\"{}\"{}{}{}>",
                  shown, shown < total ? "1" : "0",
                  fileShown, fileShown < scan.files.size() ? "1" : "0",
-                 paging, gitstamp::atAttr( root ).c_str(), rootAttr.c_str() );
+                 rw::cstr( paging ), gitstamp::atAttr( root ).c_str(), rootAttr.c_str() );
 
     // TWO scratch buffers, not one reused twice in the same call: escapeXml returns a VIEW into its `out`, so a
     // second call with the same buffer invalidates the first view (readability.h carries the same note).
@@ -903,7 +906,7 @@ inline int writeEnsembleReport( const IngestResult& ing, const std::vector<std::
         const std::string_view rp = singleRoot ? rw::sarif::rootRelativeUri( ing.files[s.fileId], rootPrefix ) : std::string_view( ing.files[s.fileId] );
         const std::string  path( escapeXml( rp, escPath ) );
         const std::string  name( escapeXml( s.name, escName ) );
-        std::printf( "<s p=\"%s:%u\" n=\"%s\" fam=\"%u\" of=\"%u\" fired=\"%s\"%s>",
+        rw::emitTo( stdout, "<s p=\"{}:{}\" n=\"{}\" fam=\"{}\" of=\"{}\" fired=\"{}\"{}>",
                      path.c_str(), s.line, name.c_str(), unsigned( row.firedCount ), evaluable,
                      familyList( row.firedMask ).c_str(), unavailAttr.c_str() );
         for( std::uint8_t family = 0; family < kFamilyCount; ++family )
@@ -913,10 +916,10 @@ inline int writeEnsembleReport( const IngestResult& ing, const std::vector<std::
                 continue;
             }
             std::vector<char> escWhy;
-            std::printf( "<e f=\"%s\" why=\"%s\"/>", kFamilyNames[family],
+            rw::emitTo( stdout, "<e f=\"{}\" why=\"{}\"/>", kFamilyNames[family],
                          std::string( escapeXml( row.why[family], escWhy ) ).c_str() );
         }
-        std::printf( "</s>" );
+        rw::emitRaw( stdout, "</s>" );
     }
     for( std::size_t fileIndex = 0; fileIndex < fileShown; ++fileIndex )
     {
@@ -926,11 +929,11 @@ inline int writeEnsembleReport( const IngestResult& ing, const std::vector<std::
         const std::string      path( escapeXml( frp, escPath ) );
         const std::string      name( escapeXml( top.name, escName ) );
         const std::string      names = familyList( agg.unionMask );
-        std::printf( "<f p=\"%s\" top=\"%s\" top_l=\"%u\" top_fam=\"%u\" union_fam=\"%u\" union=\"%s\" syms=\"%u\"/>",
+        rw::emitTo( stdout, "<f p=\"{}\" top=\"{}\" top_l=\"{}\" top_fam=\"{}\" union_fam=\"{}\" union=\"{}\" syms=\"{}\"/>",
                      path.c_str(), name.c_str(), top.line, unsigned( agg.topCount ),
                      unsigned( detail::familyCountOf( agg.unionMask ) ), names.c_str(), agg.symCount );
     }
-    std::printf( "</ensemble>" );
+    rw::emitRaw( stdout, "</ensemble>" );
     return 0;
 }
 

@@ -33,7 +33,7 @@ FIX="$ROOT/test/flagsfix"
 ALIASFIX="$ROOT/test/flagsaliasfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -45,12 +45,12 @@ flip(){ local c="$1" g="$2"; shift 2; "$BIN" "$c" --flags --flip="$g" --no-cache
 # attr XML ELEM ATTR -> the attribute value on the FIRST element of that name ("" if absent)
 attr(){ printf '%s' "$1" | tr '<' '\n' | grep -m1 "^$2 " | sed -n "s/.* $3=\"\([^\"]*\)\".*/\1/p"; }
 want(){ # want LABEL GOT EXPECTED
-    [ "$2" = "$3" ] && ok "$1 ($3)" || no "$1: got '$2', want '$3'"; }
+    if [ "$2" = "$3" ]; then ok "$1 ($3)"; else no "$1: got '$2', want '$3'"; fi; }
 
 # ── 1) determinism — two runs byte-identical (§1) ────────────────────────────────────────────────
 flip "$FIX" FIXTURE_VALUE_ALL >"$TMP/a"
 flip "$FIX" FIXTURE_VALUE_ALL >"$TMP/b"
-cmp -s "$TMP/a" "$TMP/b" && ok "determinism (byte-identical)" || no "--flip is non-deterministic"
+if cmp -s "$TMP/a" "$TMP/b"; then ok "determinism (byte-identical)"; else no "--flip is non-deterministic"; fi
 
 # ── 2) a plain #if gate: regions -> the defs those regions hold ───────────────────────────────────────
 F="$( flip "$FIX" FIXTURE_DARK_FEATURE )"
@@ -62,8 +62,8 @@ want "plain #if: hosts"       "$( attr "$F" flip hosts )"    "2"
 [ "$( attr "$F" flip loc )" -gt 0 ] 2>/dev/null \
     && ok "plain #if: sizes the guarded code (loc=$( attr "$F" flip loc ))" || no "plain #if: loc is 0"
 # the hosts are the two functions that live INSIDE the guarded regions, not the live one beside them
-printf '%s' "$F" | grep -q 'sym="darkOnly"'   && ok "plain #if: darkOnly is a host"   || no "plain #if: darkOnly missing from hosts"
-printf '%s' "$F" | grep -q 'sym="nestedDark"' && ok "plain #if: nestedDark is a host" || no "plain #if: nestedDark missing from hosts"
+if printf '%s' "$F" | grep -q 'sym="darkOnly"'; then ok "plain #if: darkOnly is a host"; else no "plain #if: darkOnly missing from hosts"; fi
+if printf '%s' "$F" | grep -q 'sym="nestedDark"'; then ok "plain #if: nestedDark is a host"; else no "plain #if: nestedDark missing from hosts"; fi
 printf '%s' "$F" | grep -q 'sym="liveEntry"'  && no "plain #if: liveEntry (outside every region) reported as a host" \
                                               || ok "plain #if: unguarded code is NOT a host"
 
@@ -212,7 +212,7 @@ N_DETAIL="$(  flip "$FIX" FIXTURE_VALUE_ALL --detail=1 | tr '<' '\n' | grep -c '
 [ "$N_CAPPED" = "$N_DETAIL" ] && ok "--detail is accepted alongside --flags/--flip" \
                               || no "--detail changed the small-fixture row count ($N_CAPPED vs $N_DETAIL)"
 "$BIN" "$FIX" --flags --flip=FIXTURE_VALUE_ALL --detail=1 --no-cache >/dev/null 2>"$TMP/e"
-[ ! -s "$TMP/e" ] && ok "--detail=N with --flags no longer refuses" || no "--detail refused: $( head -1 "$TMP/e" )"
+if [ ! -s "$TMP/e" ]; then ok "--detail=N with --flags no longer refuses"; else no "--detail refused: $( head -1 "$TMP/e" )"; fi
 
 # ── 9) G4 — well-formed, minified XML on every kind ───────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
@@ -222,7 +222,7 @@ if command -v xmllint >/dev/null 2>&1; then
         xmllint --noout "$TMP/x" 2>/dev/null || { xmlfail=1; echo "      (malformed for $g)"; }
         [ "$( grep -c '' "$TMP/x" )" -le 1 ] || { xmlfail=1; echo "      (newlines outside CDATA for $g)"; }
     done
-    [ $xmlfail -eq 0 ] && ok "XML well-formed + minified for every gate kind" || no "XML/G4 violation"
+    if [ $xmlfail -eq 0 ]; then ok "XML well-formed + minified for every gate kind"; else no "XML/G4 violation"; fi
 else
     ok "xmllint unavailable — well-formedness skipped"
 fi

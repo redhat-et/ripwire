@@ -12,7 +12,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 CORPUS="$ROOT/test/lintfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -59,7 +59,7 @@ grep -q 'large-function' "$OUT" && ok "large-function fires" \
 # Overall: no crash (binary must exit 0 on --lint)
 "$BIN" "$CORPUS" --lint --no-cache >/dev/null 2>&1
 rc=$?
-[ "$rc" -eq 0 ] && ok "--lint exits 0 (no crash)" || no "--lint crashed (exit $rc)"
+if [ "$rc" -eq 0 ]; then ok "--lint exits 0 (no crash)"; else no "--lint crashed (exit $rc)"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
