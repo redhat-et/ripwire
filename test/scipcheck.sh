@@ -16,6 +16,9 @@
 #   * a CORRUPT (truncated) index → a stderr alert AND output byte-IDENTICAL to the no---scip run
 #     (degrade, never fail); a MISSING index → same
 #   * FUZZ: 20 random truncations / byte-flips of the index → ripwire never crashes (exit 0/degrades)
+#   * TYPED RANGES: an index carrying scip.proto's `typed_range` oneof (single_line_range = 8,
+#     multi_line_range = 9) instead of the deprecated `range` joins the same way, and the typed form
+#     outranks a deprecated `range` on the same occurrence regardless of which arrives first
 # Exits non-zero on any failure. Does NOT touch regression.sh.
 
 set -u
@@ -221,6 +224,75 @@ if grep -q 'prov="scip"' <( "$BIN" "$CORPUS" --scip="$IDX" $EXC --no-cache 2>/de
 else
     no "mutation: fresh index unexpectedly lacks prov=scip — step-8(b) assertion is vacuous"
 fi
+
+# 10) TYPED_RANGE — scip.proto deprecated `Occurrence.range` (field 1) in favour of the `typed_range` oneof
+#     (single_line_range = 8, multi_line_range = 9) and requires the typed form to win when both are set.
+#     Every arm above feeds the reader an index make_index.py wrote with the deprecated field, so the reader
+#     was only ever exercised against its own generator and a reader blind to fields 8/9 passed all of them.
+#     make_index.py --typed re-encodes the same fixture in the typed form, spreading the three cases over
+#     four occurrences: the `handler` def as a lone multi_line_range, the `helperAlpha` def as a lone
+#     single_line_range, and the two refs each carrying BOTH a typed range and a deprecated one that points
+#     at a line past EOF — one with the deprecated field first on the wire, one with the typed field first.
+#     ASSERT: both refs pin (so the typed form wins in either order), the ratio reads 100% (2/2), and no def
+#     goes unmatched. --typed --blind re-emits the same index with fields 8/9 stripped — precisely what a
+#     typed_range-blind reader sees — and must pin NOTHING, which is what makes this arm discriminate.
+python3 "$GEN" --typed "$TMP/typed.scip" 2>/dev/null && ok "make_index.py --typed generated a typed_range index" \
+    || no "make_index.py --typed failed"
+TYPED_ERR="$( "$BIN" "$CORPUS" --scip="$TMP/typed.scip" $EXC --no-cache 2>&1 >"$TMP/typed.out" )"; rct=$?
+if [ $rct -eq 0 ]; then ok "typed_range index → exit 0"; else no "typed_range index → nonzero exit ($rct)"; fi
+printf '%s\n' "$TYPED_ERR" | grep -q 'SCIP matched 100% of occurrences (2/2)' \
+    && ok "typed_range: both ref occurrences matched (100%, 2/2)" \
+    || { no "typed_range: refs not matched — the reader is not reading fields 8/9"; printf '    %s\n' "$TYPED_ERR"; }
+# that the two defs BOUND at all is what the 2/2 above proves (a ref only counts toward the ratio once its
+# symbol resolved into a def in this tree). This line guards the other direction: a typed range decoded to
+# the WRONG line — end_line read as start_line, say — binds no def and shows up here.
+printf '%s\n' "$TYPED_ERR" | grep -q '0 defs unmatched' \
+    && ok "typed_range: no def bound to a wrong line (0 defs unmatched)" \
+    || { no "typed_range: a def went unmatched — a typed range decoded to the wrong line"; printf '    %s\n' "$TYPED_ERR"; }
+printf '%s\n' "$TYPED_ERR" | grep -q 'older commit' \
+    && { no "typed_range: a fully-matched index wrongly claims 'older commit' staleness"; printf '    %s\n' "$TYPED_ERR"; } \
+    || ok "typed_range: fully-matched index omits the 'older commit' hint"
+grep -o 'precise=[0-9]*' "$TMP/typed.out" | grep -qx 'precise=2' && ok "typed_range: summary reports precise=2" \
+    || { no "typed_range: summary precise!=2"; grep -o 'files=3[^-]*' "$TMP/typed.out"; }
+# the caller ref carries typed-FIRST: its deprecated half points past EOF, so this edge exists only if the
+# typed range won despite arriving before the deprecated one.
+TYPED_RUN="$( tr '>' '\n' <"$TMP/typed.out" | awk '/n="run"/{f=1} f{print} /<\/s/{if(f)exit}' )"
+N_TYPED="$( printf '%s' "$TYPED_RUN" | grep -c 'n="handler"' )"
+[ "$N_TYPED" -eq 1 ] && printf '%s' "$TYPED_RUN" | grep -q 'n="handler" prov="scip"' \
+    && ok "typed_range: typed-first occurrence wins — run→handler is ONE prov=\"scip\" edge" \
+    || { no "typed_range: run→handler not a single prov=\"scip\" edge (found $N_TYPED handler edges)"; printf '    %s\n' "$TYPED_RUN"; }
+printf '%s' "$TYPED_RUN" | grep -q 'amb=' \
+    && { no "typed_range: run still carries amb="; printf '    %s\n' "$TYPED_RUN"; } \
+    || ok "typed_range: run no longer carries amb= (pinned by the typed range)"
+# the alpha.cpp ref carries deprecated-FIRST, and its target def came in as a lone single_line_range.
+grep -q '<c n="helperAlpha" prov="scip"/>' "$TMP/typed.out" \
+    && ok "typed_range: deprecated-first occurrence wins too — handler→helperAlpha carries prov=\"scip\"" \
+    || { no "typed_range: handler→helperAlpha not pinned (deprecated field beat the typed one)"; grep -o '<r[ >].*</r>' "$TMP/typed.out"; }
+if command -v xmllint >/dev/null 2>&1; then
+    grep -o '<r[ >].*</r>' "$TMP/typed.out" >"$TMP/typed.doc.xml"   # §P8: attribute-agnostic, see note above
+    xmllint --noout "$TMP/typed.doc.xml" 2>/dev/null && ok "typed_range: stdout still valid XML" \
+        || { no "typed_range: stdout not well-formed"; head -c 300 "$TMP/typed.doc.xml"; }
+fi
+"$BIN" "$CORPUS" --scip="$TMP/typed.scip" $EXC --no-cache >"$TMP/ty1" 2>"$TMP/tye1"
+"$BIN" "$CORPUS" --scip="$TMP/typed.scip" $EXC --no-cache >"$TMP/ty2" 2>"$TMP/tye2"
+diff -q "$TMP/ty1" "$TMP/ty2" >/dev/null && diff -q "$TMP/tye1" "$TMP/tye2" >/dev/null \
+    && ok "typed_range: deterministic (stdout AND stderr byte-identical run-to-run)" \
+    || no "typed_range: non-deterministic output"
+
+# 10b) DISCRIMINATION — the same index with fields 8/9 stripped. Both defs lose their range entirely and
+#      both refs keep only their past-EOF deprecated line, so a reader that passes 10 must fail everything
+#      here: zero precise edges and run back to the honest name-based split.
+python3 "$GEN" --typed --blind "$TMP/blind.scip" 2>/dev/null && ok "make_index.py --typed --blind generated the typed_range-stripped index" \
+    || no "make_index.py --typed --blind failed"
+"$BIN" "$CORPUS" --scip="$TMP/blind.scip" $EXC --no-cache >"$TMP/blind.out" 2>/dev/null; rcb=$?
+if [ $rcb -eq 0 ]; then ok "typed_range-stripped index → exit 0 (degrades, never fails)"; else no "typed_range-stripped index → nonzero exit ($rcb)"; fi
+grep -q 'prov="scip"' "$TMP/blind.out" \
+    && { no "discrimination: the stripped index still pinned an edge — arm 10 is vacuous"; } \
+    || ok "discrimination: stripped index pins NOTHING (arm 10 measures the typed_range read, nothing else)"
+BLIND_RUN="$( tr '>' '\n' <"$TMP/blind.out" | awk '/n="run"/{f=1} f{print} /<\/s/{if(f)exit}' )"
+printf '%s' "$BLIND_RUN" | grep -q 'amb=' \
+    && ok "discrimination: stripped index → run reverts to the name-based ambiguous split" \
+    || { no "discrimination: stripped index → run not restored to name-based ambiguity"; printf '    %s\n' "$BLIND_RUN"; }
 
 echo
 [ "$fail" -eq 0 ] && { echo "scipcheck: ALL PASS"; exit 0; } || { echo "scipcheck: FAILURES above"; exit 1; }
