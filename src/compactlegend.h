@@ -5,12 +5,13 @@
 // legend, the canonical ten-verb edit loop pays 29,824 B of legend per session for ~9 KB of rows, and the
 // MCP server re-pays it on every call. --for/--grep/--slice grew a compact dialect by hand (each emitter
 // branching on the posture); the other ~60 XML roots are printed by as many emitters. Compact is therefore
-// applied HERE, once, to the finished document: the explanatory comments are replaced by ONE ≤400 B legend
-// (schema id + the verb's purpose + a reading for every completeness attribute the document actually
-// carries), the root gains schema="ripwire.<key>/v1", and every payload byte is untouched — rows, root
-// attributes, CDATA bodies, and the comments that CARRY DATA (the map header's <!-- files= … -->, pack-task's
-// <!-- body omitted … -->, the <!-- +more --> marker, --notes' counted header). The full dialect (the default,
-// and --legend=full) never passes through this file.
+// applied HERE, once, to the finished document: the explanatory comments are replaced by ONE legend (schema id +
+// the verb's purpose + a reading for every completeness attribute the document actually carries), held to that
+// verb's measured byte pin (test/compactlegendcheck.sh pinFor: the pins fit the definitions, docs/METHODOLOGY.md §9),
+// the root gains schema="ripwire.<key>/v1", and every payload byte is untouched — rows, root attributes, CDATA
+// bodies, and the comments that CARRY DATA (the map header's <!-- files= … -->, pack-task's <!-- body omitted … -->,
+// the <!-- +more --> marker, --notes' counted header). The full dialect (the default, and --legend=full) never passes
+// through this file.
 //
 // WHAT IS PROSE. A comment is explanatory prose iff it starts with one of kCompactProsePrefixes and none of
 // kCompactDataPrefixes — the prefixes are the legend openers the emitters use (`<!-- ripwire <verb>: …`, the
@@ -35,10 +36,11 @@
 namespace rw
 {
 
-// One entry per XML root the tool emits. `key` is the schema id stem (ripwire.<key>/v1); `purpose` is the
-// one-clause reading of the verb, ≤ ~110 B so the whole legend stays under the 400 B ceiling with every
-// completeness term present. Roots shared by several verbs (`r` = the ranked map family, `ctx` = the bundle
-// family) are disambiguated by a HINT the caller derives from its own flags (compactLegendHintFromRoot).
+// One entry per XML root the tool emits. `key` is the schema id stem (ripwire.<key>/v1); `purpose` is the reading
+// of the verb and of the root vocabulary EVERY answer of that root carries. Its bytes count against the verb's
+// per-verb pin in test/compactlegendcheck.sh, and that pin is measured from the definitions, never the reverse.
+// Roots shared by several verbs (`r` = the ranked map family, `ctx` = the bundle family) are disambiguated by a
+// HINT the caller derives from its own flags (compactLegendHintFromRoot).
 struct CompactLegendSpec
 {
     std::string_view rootTag;
@@ -69,7 +71,13 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "callers",     "callers",     "1-hop CALLERS of of= (defs= matched, count= distinct symbols): <s t= n= p=>; hop_tested=/hop_untested=" },
     { "callees",     "callees",     "1-hop CALLEES of of= (defs= matched, count= distinct symbols): <s t= n= p= role= tested=>" },
     { "uses",        "uses",        "resolvable use-sites of of=: <u role=call|macro|read|write|import|extends|type p=file:line in_id=>" },
-    { "impact",      "impact",      "transitive blast radius of of=: <s t= n= p=> reach set, <f via= p=> importers" },
+    // impact (2026-09-12, the fourth sweep): defs=/reaches=/radius_tested=/radius_untested=/importers= ride EVERY answer of this
+    // root (the CLI XML and columnar forms and the MCP twin all write them) and were defined only by the full legend, so they read
+    // here beside the rows this line already named, present exactly when the root is. Checked against the emitters: reaches= is
+    // transitiveCallers( defs ), the defs themselves excluded; radius_tested= counts isTestedByReach, which never counts a test
+    // symbol (a seed), so a test in the reach set lands in radius_untested=; importers= is impactImportTier's one-hop set of
+    // files whose include/import resolves to a def's file. shown_importers= is a present-only term: the columnar form omits it.
+    { "impact",      "impact",      "transitive blast radius of of=: <s t= n= p=> reach set, <f via= p=> importers; defs= matched, reaches= their transitive callers, radius_tested= non-tests an indexed test reaches, radius_untested= the rest; importers= files that #include/import a def's file" },
     { "path",        "path",        "one DIRECTED call path from= to to=, each <s t= n= p=> a hop; reachable=0 hops=0 when none" },
     { "connect",     "connect",     "minimal joining subgraph: <g> groups, <t> terminals, <s connects=> joins, <e f= t=> edges, <unconnected>" },
     { "at",          "at",          "enclosing-definition chain at p=:l=: sym= innermost, chain= outermost-first, <s n= t= l= el=> spans" },
@@ -85,7 +93,16 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "slice",       "slice",       "name-based def-use rows of one variable in one definition: <s l= k=def|use|both|scope t= [b= pp= rd=]> (rd= reaching-def lines per reach=cfg|linear), <v n= l= t=> inventory; steps=/depth= flow" },
     // ── change / quality ──
     { "edit-check",   "edit-check",   "sym='s contract NOW vs HEAD: status=unchanged|new-symbol|contract-change; <c n= p= incompatible=1 sites_l=> callers" },
-    { "safe-delete",  "safe-delete",  "can sym= go, a READ never a verdict: callers= impact_reaches= uses= tested_self= risk=; <c n= p= amb=>" },
+    // safe-delete (2026-09-12, the fourth sweep): radius_tested=/radius_untested= ride every answer and read here, by the same
+    // isTestedByReach lens as --impact's pair (verbs_navigate.h runSafeDelete), over impact_reaches= instead of reaches=. The
+    // sweep's last pass read the rest of that root against runSafeDelete: t= and p= are defs[0]'s, the lowest id
+    // resolveAllByNameQualified returns. That is a MATCH, not always a definition (the sweep's design review): on a
+    // header-qualified file:name selector the decl→def widening keeps the declarations beside the definitions it adds
+    // (graph.h declToDefFollowThrough), and a declaration can hold the lowest id, so the reading names the unit defs= counts.
+    // ambiguous_callers= counts callers whose g.ambOut is non-zero; dead_code_candidate=1 needs defs=1, no 1-hop caller,
+    // deadCodeEligibleKind (SymKind::Function with a body, not in a .h/.hpp/.hh/.hxx path) and a whole-word `static` inside the
+    // signature span (quality.h sourceHasStaticToken).
+    { "safe-delete",  "safe-delete",  "can sym= go, a READ never a verdict: callers= impact_reaches= uses= tested_self= risk=; <c n= p= amb=>; radius_tested= non-tests of impact_reaches= an indexed test reaches, radius_untested= the rest; t= p= its lowest-id match's kind and file:line; defs= matched; ambiguous_callers= callers with a call split over several defs; dead_code_candidate=1 only at defs=1 with no caller, for a t=fn with a body, outside .h/.hpp/.hh/.hxx, whose signature spells static (0 never means in use)" },
     { "quality-delta","quality-delta","only what the change made WORSE vs baseline=: regressions= minor= gating=; <r kind= sym= p= was= now= gating= bar=>, <sa> acked" },
     { "test-gate",    "test-gate",    "tests <t p= changed= partner= hops= run=> + untested blast radius <u sym= p= l= ccx=>; exit 4 while either exists" },
     { "affected",     "affected",     "test files that transitively reach the changed files/symbols: <test p= partner= hops= run=> in evidence order (order= partners=); seeded_by= the reading taken" },
@@ -107,11 +124,25 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "external-surface", "external-surface", "names used but never defined in the index: <x n= lang= refs= calls=>" },
     { "owners",       "owners",       "recency-weighted author ownership (half-life 6mo): <f p= authors= bf= top= share=>; bf=1 = one person holds it" },
     { "cochange",     "cochange",     "files that change together in git: <pair a= b= together= deg= conf_ab= conf_ba= surprising=>, or for of= <f p= together= conf_rev=>" },
-    { "communities",  "communities",  "call-graph modules (Louvain): <community id= size= dir= label=> of <member t= n= p=>" },
-    { "community",    "community",    "ONE module id=: <member t= n= p=> ranked members, its <bridge> edges; size= the TRUE count" },
+    // communities and community (2026-09-12, the fourth sweep): every attribute read below rides EVERY answer of its root
+    // (verbs_report.h emitCommunitiesReport / emitCommunityDrill), so its reading lives in the purpose line, present exactly
+    // when the root is: the zoom/tree precedent below. Checked against the emitters: bridges= on <communities> counts community
+    // PAIRS joined by a cross-community call edge (its <bridge a= b=> rows), one-symbol communities included, so its reading says
+    // community where modules= (2+ symbols only) says module (the sweep's design review); on <community> the PEER communities
+    // of this one, which that line's partition= clause already counts as modules, singletons included;
+    // isolated= counts symbols with neither an in- nor an out-edge, and isolateStats splits it in that precedence (a markdown
+    // section, then a bodyless def, then a header file, else source); dir= is the most common member directory, and
+    // communityPresentation takes a top-level file's own path as its directory; label= anchors on the member with the highest
+    // fan-in, non-accessors first, and appends up to three known leading verbs of member names when any occur; partition= is
+    // the community count (ids 0..partition-1, the range --community refuses outside), modules= nonIsolatedModuleCount.
+    // The sweep's last pass read the rest of both roots: shown_bridges= is the <bridge> rows printed (min( pairs, 12 ), with
+    // bridges_capped= marking a cut) on both; connected_singletons= counts one-symbol communities whose symbol still has an in-
+    // or out-edge (isolateStats); symbols= is ing.symbols.size(). The <bridge> row attributes are present-only terms below.
+    { "communities",  "communities",  "call-graph modules (Louvain): <community id= size= dir= label=> of <member t= n= p=>; drill= the verb taking a row's id=; shown_modules=/shown_bridges= <community>/<bridge> rows listed; bridges= community pairs joined by a call edge; isolated= symbols with no call edge: isolated_doc= doc sections, isolated_decl= other bodyless, isolated_header= other header defs, isolated_source= the rest; modules= modules of 2+ symbols; connected_singletons= 1-symbol modules with a call edge; symbols= indexed symbols" },
+    { "community",    "community",    "ONE module id=: <member t= n= p=> ranked members, its <bridge> edges; size= the TRUE count; dir= its members' most common directory (a top-level file's own path); label= dir::name@file:line:byte of its top fan-in member (non-accessors first) [up to 3 top name verbs]; bridges= modules a call edge joins to it; partition= module count incl. singletons (ids 0..partition-1); modules= those of 2+ symbols; shown_bridges= <bridge> rows listed" },
     // zoom and tree (2026-09-12): symbols=/isolated=/top_modules=/levels_shown= and files= ride EVERY answer of their root and
     // were defined only by the full legend, so they read here beside the levels=/files_unlisted= this line already named.
-    // zoom's line is the (U) --zoom probe's budget: 324 -> 394 B of its 400.
+    // That line moved the (U) --zoom probe's compact legend from 324 to 394 B.
     { "zoom",         "zoom",         "nested module hierarchy: <module level= id= size= dir= shown= capped=> of <member t= n= p=>; levels_shown= of levels= printed; symbols= = isolated= + size= of all top_modules=" },
     { "tree",         "tree",         "each file with its top symbols by rank, files by best symbol: <file p= symbols=> of <s t= n=>; of files= indexed, files_unlisted= have none" },
     { "seams",        "seams",        "cross-directory call edges NO test reaches: <seam from= to= untested= shown= capped=> of <edge caller= p= callee= cp=>" },
@@ -141,7 +172,8 @@ inline constexpr std::string_view kCompactProsePrefixes[] =
 {
     "<!-- ripwire ",                   // every verb's own legend opener (`<!-- ripwire callers/callees: …`), incl. the
                                        // native compact legends of grep/slice (`<!-- ripwire slice ripwire.slice/v1: …`),
-                                       // which this layer restates at ≤400 B; --for's is never routed here (main.cpp)
+                                       // which this layer restates as its own compact legend; --for's is never routed
+                                       // here (main.cpp)
     "<!-- root= ",                     // the shared root-relative-paths block (graphlegend.h)
     "<!-- graph_unindexed=",           // the #66 third-gauge clause where it rides as its OWN comment
                                        // (graphlegend.h graphUnindexedLegendComment — connect/lego/verify/
@@ -236,8 +268,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // a definition this table never put back: --callers/--callees/--impact, their columnar forms and the MCP impact
     // default all printed these numbers undefined. test/compactlegendcheck.sh (S) reads every conditional attribute the
     // graphlegend.h family emits from source and fails the next one that lands without a row here.
-    // Written to the shortest honest form: a document carrying these is already near the 400 B ceiling, and the
-    // callees answer can carry the first two at once.
+    // Written to the shortest honest form: every byte counts against the verb's pin, and the callees answer can carry the
+    // first two at once.
     { "bodyless_defs",     "bodyless_defs=K: K of defs= have no body, so no callees to read" },
     { "unproven_defs",     "unproven_defs=K: K same-named defs not tied to that file, in no count or row (bare name shows them)" },
     { "declined_calls",    "declined_calls=K: K call sites left unbound (several defs, none chosen), in no count or row" },
@@ -294,6 +326,66 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "lpin",              "lpin=K: K calls pinned by locality alone (a guess)", true },
     { "overloads",         "overloads=N: N same-name defs merged in this row; shown= counts each", true },
     { "prov",              "prov=scip|binding|import|split: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick", true },
+    // THE FOURTH SWEEP (2026-09-12): attributes that ride their documents with no reading here, which the earlier sweeps stopped
+    // on at the byte pins. Owner decision: per-verb pins that fit honest definitions (docs/METHODOLOGY.md §9). The unconditional
+    // root vocabulary of --impact, --safe-delete, --communities and --community reads in those roots' purpose lines above, and
+    // the row here is the PRESENT-ONLY half: shown_importers= is impactImportTier's listed <f> rows, ELEMENT-qualified (only
+    // <impact> carries it) and absent from the columnar form, which names the omission in lens=. The sweep also defined the map
+    // header's unresolved=, which sums graph.h's unresolvedOut: three sites raise it and none mints an edge (a name defined in
+    // the tree whose every def was language-filtered, a shadowed, refused or renamed-unlisted ES import binding, a
+    // function-pointer binding with no function target). It had a row of its own until the sweep's design review folded it
+    // into the always-on header clause below (the `files` row): buildStats writes it into EVERY map header beside files=, so
+    // one clause is present exactly when both fields are, and the header-ONLY read still keeps it off <trace unresolved=>,
+    // which counts frames. compactlegendcheck (S) accepts an always-on header field spelled inside that clause.
+    { "shown_importers",   "shown_importers=: <f> rows", true, "impact" },
+    // THE SWEEP'S LAST PASS (2026-09-12) listed every attribute the compact --impact, --safe-delete, --communities,
+    // --community=ID and map-header documents emit and found these still without a reading. Each rides only SOME answers of
+    // its root, so each is a present-only term rather than a purpose-line clause. Checked against the emitters:
+    //   lazy= (serialize.h emitImportRowsXml) is graph.h scanImporterEdges' allLazy over that importer's edges into the def
+    //     files; its full clause is graphlegend.h kImpactImportTierLegend. ELEMENT-qualified on <f>, the importer row.
+    //   <bridge> (verbs_report.h): --communities prints a= b= (a (min,max) community pair), from_label=/to_label= (their
+    //     communityPresentation labels) and edges=; --community prints to= to_label= edges=; --zoom prints a= b= edges= over
+    //     top-module pairs. edges= sums the call edges crossing the pair in both directions on all three. Four terms, because
+    //     the attribute SET differs by root and a reading must not name what its row does not carry.
+    //   the map header (serialize.h buildStats): files= is ing.files.size(), symbols= ing.symbols.size(), edges= the CSR's
+    //     outTargets (graph.h dedupes them per caller, so distinct caller-callee pairs), shown= the kept symbol count (a
+    //     merged overload row counts each def, the map legend's own arithmetic), ambiguous= the sum of every symbol's ambOut,
+    //     unresolved= (above), order= the stable / important-last / important-last(auto:fill) / important-first choice. Absent
+    //     unless it applies: roots= (two or more workspace roots), changed= (--map-diff only, and there even at 0: main.cpp
+    //     counts the INDEXED files git reports changed, and a tree git cannot read counts 0 and ranks uniform, as a clean tree
+    //     does; the sweep's design review), skipped_oversize=,
+    //     unindexed= (ext:count, at most kUnindexedHeaderExts entries) with unindexed_exts= once that list was cut,
+    //     escaped_root=, precise= (edges a SCIP index pinned, prov value 1 only). serialize.h records that the FULL map
+    //     legend cannot define unindexed=/escaped_root= (tokenbudgetcheck arm #3's seven bytes of floor headroom); a compact
+    //     legend replaces more prose than it adds, which compactlegendcheck (U) asserts on every probe, so here they fit.
+    //     Header-ONLY: files=, symbols=, edges=, shown= and order= are quoted attributes with other meanings on other roots.
+    //   the columnar form (columnar.h kColumnarLegend): format="columnar" on the root, <paths> I=path, <cols n= fields=>.
+    //     ELEMENT-qualified on <cols>: --from-trace's <trace format=> names a trace dialect. lens= names what one form of an
+    //     answer withholds and another serves: the columnar --impact (shown_importers,importers_capped), --order=stable's
+    //     <r> (k,est_tokens), the MCP for dialect (churn,amp,tested). Read on the head, with one meaning on all three.
+    { "lazy",              "<f lazy=1>: every edge from that importer into a def file is deferred (in a function/block body, or an autoload), firing only if reached; lazy=0: at least one is load-time", true, "f" },
+    { "a",                 "<bridge a= b=>: two module ids joined by call edges", true, "bridge" },
+    { "from_label",        "from_label=/to_label=: the label= of a=/b=", true, "bridge" },
+    { "to",                "<bridge to= to_label=>: a peer module's id and label=", true, "bridge" },
+    { "edges",             "<bridge edges=>: call edges between the two, either direction", true, "bridge" },
+    { "files",             "files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (defs all language-filtered, or import/pointer binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable)", false, {}, MapHeaderRead::Only },
+    { "roots",             "roots=N: N workspace roots", false, {}, MapHeaderRead::Only },
+    { "changed",           "changed=K: K indexed git-changed files seed the PageRank teleport (0: uniform, incl. no git)", false, {}, MapHeaderRead::Only },
+    { "skipped_oversize",  "skipped_oversize=K: K files over a size ceiling, not indexed", false, {}, MapHeaderRead::Only },
+    { "unindexed",         "unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most)", false, {}, MapHeaderRead::Only },
+    { "unindexed_exts",    "unindexed_exts=E: E such extensions in all, the list cut", false, {}, MapHeaderRead::Only },
+    { "escaped_root",      "escaped_root=K: K files refused: a symlink led out of the root", false, {}, MapHeaderRead::Only },
+    { "precise",           "precise=K: K call edges a SCIP index pinned", false, {}, MapHeaderRead::Only },
+    { "fields",            "format=columnar: parallel arrays, not row attributes: <paths> maps I=path, each <cols> array holds n= comma-separated values in one row order, fields= naming them (the path column indexes <paths>; &#44; is a comma)", true, "cols" },
+    { "lens",              "lens=: attributes another form of this answer serves, withheld here" },
+    // THE SWEEP'S DESIGN REVIEW (2026-09-12) checked every reading above against its emitter and found one row reading still
+    // missing: tested="1" on <s>. --callers/--callees and --impact (verbs_navigate.h), the MCP impact twin (mcpverbs.h) and the
+    // map's own rows (serialize.h, whose tested[] column computeQMetrics fills by the same predicate) print it where graph.h
+    // isTestedByReach holds: an indexed test transitively reaches that row's symbol and the symbol is not itself a test. Never
+    // a literal 0. ELEMENT-qualified on <s>: flipimpact.h's <h tested=> prints 0 as well as 1 and <exemplar tested=> is another
+    // root's attribute; a <d> body row's tested= is not read by this row. No earlier sweep saw it because the gate fixture holds
+    // no test (compactlegendcheck (D31) builds the smallest tree that prints one).
+    { "tested",            "<s tested=1>: a non-test row an indexed test transitively reaches (absent otherwise, never 0)", true, "s" },
     { "parse_degraded",    "parse_degraded=1: ERROR nodes in that parse", true },
     { "tier_partial",      "tier_partial=1: tier elected under a partial classification" },
     { "dangling",          "dangling=1: matches nothing indexed", true },
@@ -565,7 +657,7 @@ inline bool isCompletenessTermPresent( const CompactCompletenessTerm& t, std::st
     return headHasAttr( head, t.attr ) || ( t.wholeDoc && payloadHasAnyAttr( doc, t.attr ) );
 }
 
-// The ≤400 B compact legend for one document.
+// The compact legend for one document: schema id, purpose, paging window, sub-caps, and every present term.
 inline std::string compactLegendText( const CompactLegendSpec& spec, std::string_view head, std::string_view doc )
 {
     std::string out;

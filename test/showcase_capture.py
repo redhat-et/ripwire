@@ -307,7 +307,7 @@ add(S2, f"{BIN} . --around=rankGraphTeleport", "Ego graph around one symbol — 
 add(S2, f"{BIN} . --around=rankGraphTeleport --around-depth=2", "The restoring knob: --around-depth=2 brings back the whole 2-hop neighbourhood (depth=\"2\" on the root) — pay for it only when the 1-hop view was not enough.")
 add(S2, f"{BIN} . --around=rankGraphTeleport --around-fanout=4", "The other knob: --around-fanout=4 keeps only the 4 strongest edges per node (default 32) — the same 1-hop depth, a quarter of the rows.")
 add(S2, f"{BIN} . --callers=rankGraphTeleport", "Who calls SYM (1-hop in-edges).")
-add(S2, f"{BIN} . --callers=rankGraphTeleport --legend=compact", "The same rows under --legend=compact: the prose legend becomes one <=400 B comment plus schema=\"ripwire.callers/v1\" on the root — every row byte and every completeness attribute (counts_floor=, graph_ambiguous=, next=) identical, ~3 KB of legend gone. Works on EVERY XML verb now, not four.")
+add(S2, f"{BIN} . --callers=rankGraphTeleport --legend=compact", "The same rows under --legend=compact: the prose legend becomes one compact comment plus schema=\"ripwire.callers/v1\" on the root — every row byte and every completeness attribute (counts_floor=, graph_ambiguous=, next=) identical, ~3 KB of legend gone. Works on EVERY XML verb now, not four.")
 add(S2, f"{BIN} . --callers=DoesNotExist", "Unknown-symbol REFUSAL shape (exit 1) with a did-you-mean from real edit distance.")
 add(S2, f"{BIN} . --callees=rankGraphTeleport", "What SYM calls (1-hop out-edges).")
 add(S2, f"{BIN} . --uses=rankGraphTeleport", "The resolvable use-sites (call/read/write/import/extends) with file:line; count= is a floor.")

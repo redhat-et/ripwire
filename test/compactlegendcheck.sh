@@ -9,8 +9,8 @@
 # opt-in on the CLI this round), and an opt-in `legend:"compact"` argument on every MCP verb that answers XML.
 #
 # THE COMPACT CONTRACT (what every arm below asserts):
-#   • the root carries schema="ripwire.<key>/v1"; the legend (= every <!-- --> comment outside CDATA) is
-#     ≤ 400 B and names every completeness attribute the document carries (counts_floor / capped / shown /
+#   • the root carries schema="ripwire.<key>/v1"; the legend (= every <!-- --> comment outside CDATA) fits
+#     its verb's byte pin and names every completeness attribute the document carries (counts_floor / capped / shown /
 #     total / has_more / next_offset / offset / limit / *_capped / est_tokens / at / root / graph_ambiguous
 #     / graph_unresolved …) — the prose moved to --help and --legend=full;
 #   • the ROWS are byte-identical to the full dialect and the root's attribute-name set is the full set plus
@@ -23,13 +23,20 @@
 # UNIVERSE arm (U): the verb set is DERIVED from src/cli.h (test/flaguniverse.py) — the same derivation
 # jsoncheck #8b and shapingflagcheck (F) use — so a verb added tomorrow is probed tomorrow. Each flag runs at
 # defaults on a tmp git fixture; whatever answers with an XML root is an XML verb and must honor compact,
-# everything else must refuse it. LOOP arm (L): the ten-verb loop's compact legend bill ≤ 4,100 B (was 29,824
-# on the ripwire tree). MCP arm (M): edit_check with legend:"compact" answers in ≤ 900 B on a clean tree.
+# everything else must refuse it, and each verb's prose legend fits its per-verb pin (pinFor). LOOP arm (L): the ten-verb
+# loop's compact legend bill ≤ 4,900 B (was 29,824 on the ripwire tree). MCP arm (M): edit_check with legend:"compact" answers
+# in ≤ 900 B on a clean tree, and five more MCP verbs' legends fit their per-verb pins.
 # CONDITIONAL arm (D): an absent-at-zero or form-conditional attribute (declined_calls=, unproven_defs=, bodyless_defs=,
 # the member form, the multi-root <root label=> rows, --lego's caveat=; on the map family and --impact: pr_iters=,
 # pr_converged=, the map header's gauges, --around's defs=, --rank-by's rank_by=/window=; in the third sweep: --tree's
-# files=, --zoom's root counts and <module children=>, churn-decay's <recent>, the map rows' lpin=/overloads=/prov=) is
-# DEFINED by the compact legend of a document that carries it, and by none that does not. STRUCTURAL arm (S): every
+# files=, --zoom's root counts and <module children=>, churn-decay's <recent>, the map rows' lpin=/overloads=/prov=; in the
+# fourth sweep: the map header's unresolved=, --impact's defs=/reaches=/importers=/shown_importers=/radius_tested=/
+# radius_untested=, --communities' drill=/isolated=/isolated_*=/shown_modules=/bridges=, --community's dir=/label=/bridges=/
+# partition=/modules=, --safe-delete's radius_tested=/radius_untested=; in that sweep's last pass: --communities' modules=/
+# shown_bridges=/connected_singletons=/symbols=, --community's shown_bridges=, the <bridge> rows, --safe-delete's t=/defs=/
+# ambiguous_callers=/dead_code_candidate=, --impact's <f lazy=>, every map-header field, the columnar format=/<cols fields=> and
+# lens=; from that sweep's design review: the <s tested=> rows of --callers/--impact) is DEFINED by the compact legend of a
+# document that carries it, and by none that does not. STRUCTURAL arm (S): every
 # conditional attribute the graphlegend.h helper family emits, the PageRank disclosure, every conditional hdr: field of
 # the map header, and every absence-marked row field of the map legend, read from source, has a compact reading — so the
 # next one cannot land undefined.
@@ -309,6 +316,88 @@ probeFor()
         *)                 printf '%s' "$1" ;;
     esac
 }
+# PER-VERB PINS (owner decision 2026-09-12: per-verb pins that fit honest definitions, docs/METHODOLOGY.md §9: honesty lives in
+# attributes, the ceiling is a constraint). One 400 B ceiling held every verb until the fourth sweep, and three sweeps stopped on it
+# with attributes still undefined. Each schema's pin is its LARGEST measured (U) probe on this gate's fixture, rounded up to the
+# next multiple of 10 B, plus 10 B, so a verb whose legend grows is re-pinned in the commit that adds the bytes, with the bytes
+# attributed there. A schema with no row FAILS: a new XML verb is measured and pinned, never waved through under a default.
+# --for keeps its native dialect and is exempt (below).
+# ONE ROW PER SCHEMA: the pin, then the largest (U) probe it was measured from. Measured 2026-09-12 in the fourth sweep's last
+# pass, once every attribute the --impact, --safe-delete, --communities, --community and map-header answers print had a reading;
+# re-measured the same day after that sweep's design review corrected three readings, added the present-only <s tested=> reading
+# (no probe on this fixture prints one) and shortened fourteen readings without losing accuracy. Ten pins moved down.
+# schema                      pin  measured
+PIN_TABLE='
+ripwire.map/v1                   810   799
+ripwire.map-diff/v1              800   789
+ripwire.pack-signatures/v1       680   663
+ripwire.metrics/v1               720   702
+ripwire.deps/v1                  260   245
+ripwire.hotspots/v1              280   264
+ripwire.clones/v1                290   280
+ripwire.readability/v1           240   224
+ripwire.nonlocal-state/v1        360   344
+ripwire.ensemble/v1              280   261
+ripwire.context-ratio/v1         250   240
+ripwire.quality-panel/v1         290   271
+ripwire.naming-calibration/v1    220   206
+ripwire.naming-consistency/v1    280   261
+ripwire.comment-coherence/v1     260   241
+ripwire.cochange/v1              290   271
+ripwire.communities/v1           820   807
+ripwire.zoom/v1                  410   394
+ripwire.tree/v1                  250   238
+ripwire.seams/v1                 380   365
+ripwire.handoff/v1               340   325
+ripwire.test-gate/v1             410   400
+ripwire.field-affinity/v1        320   304
+ripwire.skipped/v1               210   195
+ripwire.lint/v1                  250   240
+ripwire.lint-catalog/v1          140   124
+ripwire.external-surface/v1      190   171
+ripwire.scan-skills/v1           160   147
+ripwire.owners/v1                220   207
+ripwire.dead-code/v1             310   297
+ripwire.quality-delta/v1         230   212
+ripwire.dmm/v1                   200   189
+ripwire.pr-context/v1            410   399
+ripwire.stray-content/v1         190   179
+ripwire.flags/v1                 170   159
+ripwire.doc-drift/v1             220   205
+ripwire.notes/v1                 150   135
+ripwire.path/v1                  280   263
+ripwire.connect/v1               410   392
+ripwire.impact/v1                780   770
+ripwire.mentions/v1              180   168
+ripwire.affected/v1              350   339
+ripwire.verify/v1                330   316
+ripwire.help-task/v1             170   153
+ripwire.query/v1                 630   611
+ripwire.grep/v1                  360   345
+ripwire.match/v1                 270   260
+ripwire.lego/v1                  290   275
+ripwire.exemplar/v1              250   232
+ripwire.around/v1                720   707
+ripwire.callers/v1               330   317
+ripwire.callees/v1               380   369
+ripwire.uses/v1                  290   271
+ripwire.batch/v1                 160   142
+ripwire.safe-delete/v1           720   708
+ripwire.at/v1                    180   161
+ripwire.from-trace/v1            300   290
+ripwire.plan-lint/v1             170   156
+ripwire.merge-scout/v1           220   208
+ripwire.whereis/v1               240   223
+ripwire.community/v1             730   719
+ripwire.layout/v1                160   149
+ripwire.pack-task/v1             340   327
+ripwire.pack-top-n/v1            660   649
+ripwire.expand/v1                280   265
+'
+pinFor()
+{
+    printf '%s\n' "$PIN_TABLE" | awk -v schema="$1" '$1 == schema { printf "%s", $2; exit }'
+}
 nXml=0; nXmlBad=0; nRefuse=0; nSkip=0; loopBytes=0; xmlVerbs=""
 while IFS="$( printf '\t' )" read -r flag kind example policy; do
     [ -n "$flag" ] || continue
@@ -338,7 +427,12 @@ while IFS="$( printf '\t' )" read -r flag kind example policy; do
     case "$schema" in ripwire.*/v1) ;; *) no "(U) $probe compact root has no schema=\"ripwire.<key>/v1\" (got '$schema')" ;; esac
     case "$flag" in
         --for=) [ "$lb" -lt "$lbfull" ] || no "(U) --for compact legend ($lb B) did not shrink vs full ($lbfull B)" ;;   # native dialect, data in its comments (A10) — registered follow-up
-        *)      [ "$lb" -le 400 ] || no "(U) $probe compact PROSE legend is $lb B (> 400 B; all comments $lball B, full $lbfull B): $( leg legend "$TMP/u.c" | head -c 200 )" ;;
+        *)      pin="$( pinFor "$schema" )"
+                if [ -z "$pin" ]; then
+                    no "(U) $probe answers $schema, which has no per-verb pin: measure its compact PROSE legend ($lb B here) and pin it in pinFor"
+                elif [ "$lb" -gt "$pin" ]; then
+                    no "(U) $probe compact PROSE legend is $lb B (> its $pin B pin for $schema; all comments $lball B, full $lbfull B): $( leg legend "$TMP/u.c" | head -c 200 )"
+                fi ;;
     esac
     [ "$lball" -lt "$lbfull" ] || [ "$lbfull" -eq 0 ] || no "(U) $probe compact comments ($lball B) are not smaller than the full dialect's ($lbfull B)"
     fa="$( leg rootattrs "$TMP/u.full" )"; ca="$( leg rootattrs "$TMP/u.c" )"
@@ -380,7 +474,7 @@ while IFS="$( printf '\t' )" read -r flag kind example policy; do
         xmllint --noout "$TMP/u.c" >/dev/null 2>&1 || no "(U) $probe compact document is malformed XML"
     fi
 done < "$UNIV"
-[ "$nXml" -ge 60 ] && [ "$nXmlBad" -eq 0 ] && ok "(U) $nXml XML flags answer under --legend=compact (schema id, ≤400 B legend, rows byte-identical, root attrs kept):$xmlVerbs" \
+[ "$nXml" -ge 60 ] && [ "$nXmlBad" -eq 0 ] && ok "(U) $nXml XML flags answer under --legend=compact (schema id, legend within its per-verb pin, rows byte-identical, root attrs kept):$xmlVerbs" \
                    || no "(U) $nXml XML flags probed, $nXmlBad refused compact (want ≥ 60 probed, 0 refused — rows above name them):$xmlVerbs"
 [ "$nRefuse" -ge 60 ] && ok "(U) $nRefuse non-XML flags refuse --legend=compact (empty stdout, non-zero exit); $nSkip write/serve/exec flags not probed" \
                       || no "(U) only $nRefuse non-XML flags refused compact (want ≥ 60)"
@@ -401,7 +495,18 @@ echo
 # else in the loop moved. Same rule the SIZE ceilings in test/mcpmanifestcheck.sh follow — a ceiling moves up
 # only for a DECLARED attribute the contract obliges to define, in the commit that lands it, with its bytes
 # attributed here, never for prose.
-echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 4,100 B (29,824 B in full on the ripwire tree) ==="
+# RE-ANCHORED 2026-09-12 (the fourth sweep): 4,100 → 4,400 B, measured 4,392 (from 4,089). Owner decision 2026-09-12: per-verb
+# pins that fit honest definitions (METHODOLOGY §9); the loop's pin is the next multiple of 100 B above its measured total.
+# Attributed against a build of the parent merge: --impact 390 → 597 B (defs=/reaches=/radius_tested=/radius_untested=/
+# importers= in its purpose line, shown_importers= as a term) and --safe-delete 328 → 424 B (its radius pair); nothing else
+# in the loop moved.
+# RE-ANCHORED 2026-09-12 (the fourth sweep's last pass): 4,400 → 4,900 B, measured 4,860 (from 4,392), by the same rule. Attributed
+# against the previous lane build: --impact 597 → 777 B (its <f lazy=> importer-row reading) and --safe-delete 424 → 712 B (t=/p=,
+# defs=, ambiguous_callers=, dead_code_candidate=); nothing else in the loop moved.
+# RE-MEASURED 2026-09-12 (that sweep's design review): 4,849 B, the pin unchanged at 4,900. Attributed against the last-pass build:
+# --impact 777 → 770 B (the shorter <f lazy=> reading) and --safe-delete 712 → 708 B (t= reads a match, dead_code_candidate= says
+# outside); nothing else in the loop moved.
+echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 4,900 B (29,824 B in full on the ripwire tree) ==="
 loopBytes=0; fullBytes=0
 for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--uses=distance" "--edit-check=total_area" \
          "--quality-delta" "--test-gate=geometry.cpp" "--affected=geometry.cpp" "--safe-delete=total_area" "--slice=total_area"; do
@@ -410,11 +515,11 @@ for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--u
     b="$( leg bytes "$TMP/l.c" )"; f="$( leg bytes "$TMP/l.f" )"
     loopBytes=$(( loopBytes + b )); fullBytes=$(( fullBytes + f ))
 done
-[ "$loopBytes" -le 4100 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
-                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 4,100 B; full: $fullBytes B)"
+[ "$loopBytes" -le 4900 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
+                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 4,900 B; full: $fullBytes B)"
 
 echo
-echo "=== (M) MCP: legend:\"compact\" on edit_check answers in ≤ 900 B on a clean tree; every XML verb takes the argument ==="
+echo "=== (M) MCP: legend:\"compact\" on edit_check answers in ≤ 900 B on a clean tree; every XML verb takes the argument, within its per-verb legend pin ==="
 mcp_call() { printf '%s\n' "$@" | ( cd "$REPO" && "$BIN" --mcp 2>/dev/null ); }
 mcp_text() {   # mcp_text VERB '<json-arguments>' → the text payload, or __ERROR__:code:message
     mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
@@ -445,19 +550,25 @@ cmp -s "$TMP/m.p1" "$TMP/m.p2" && ok "(M) MCP edit_check rows are byte-identical
 mcp_text edit_check '{"path":".","symbol":"total_area","legend":"terse"}' >"$TMP/m.bad"
 grep -q '^__ERROR__' "$TMP/m.bad" && ok "(M) MCP edit_check legend:\"terse\" is refused (closed set full|compact)" \
                                   || no "(M) MCP edit_check accepted legend:\"terse\" — an unknown value read as a default"
-for pair in "impact:{\"path\":\".\",\"symbol\":\"distance\",\"legend\":\"compact\"}" \
-            "uses:{\"path\":\".\",\"symbol\":\"distance\",\"legend\":\"compact\"}" \
-            "path_between:{\"path\":\".\",\"from\":\"total_area\",\"to\":\"distance\",\"legend\":\"compact\"}" \
-            "lego:{\"path\":\".\",\"type\":\"Point\",\"legend\":\"compact\"}" \
-            "exemplar:{\"path\":\".\",\"kind\":\"fn\",\"task\":\"distance\",\"legend\":\"compact\"}"; do
-    verb="${pair%%:*}"; args="${pair#*:}"
+# Per-verb legend pins, the (U) rule on the MCP surface (the legend, never the whole answer, which edit_check's 900 B above bounds):
+#   impact        780  measured 770 B; owner decision 2026-09-12: per-verb pins that fit honest definitions (METHODOLOGY §9)
+#   uses          290  measured 271 B; owner decision 2026-09-12: per-verb pins that fit honest definitions (METHODOLOGY §9)
+#   path_between  280  measured 263 B; owner decision 2026-09-12: per-verb pins that fit honest definitions (METHODOLOGY §9)
+#   lego          260  measured 249 B; owner decision 2026-09-12: per-verb pins that fit honest definitions (METHODOLOGY §9)
+#   exemplar      260  measured 243 B; owner decision 2026-09-12: per-verb pins that fit honest definitions (METHODOLOGY §9)
+for pair in "impact:780:{\"path\":\".\",\"symbol\":\"distance\",\"legend\":\"compact\"}" \
+            "uses:290:{\"path\":\".\",\"symbol\":\"distance\",\"legend\":\"compact\"}" \
+            "path_between:280:{\"path\":\".\",\"from\":\"total_area\",\"to\":\"distance\",\"legend\":\"compact\"}" \
+            "lego:260:{\"path\":\".\",\"type\":\"Point\",\"legend\":\"compact\"}" \
+            "exemplar:260:{\"path\":\".\",\"kind\":\"fn\",\"task\":\"distance\",\"legend\":\"compact\"}"; do
+    verb="${pair%%:*}"; rest="${pair#*:}"; mpin="${rest%%:*}"; args="${rest#*:}"
     mcp_text "$verb" "$args" >"$TMP/m.v"
     if grep -q '^__ERROR__' "$TMP/m.v"; then
         no "(M) MCP $verb legend:compact refused: $( head -c 160 "$TMP/m.v" )"
-    elif [ "$( leg bytes "$TMP/m.v" )" -le 400 ] && [ -n "$( leg schema "$TMP/m.v" )" ]; then
-        ok "(M) MCP $verb legend:compact: $( leg bytes "$TMP/m.v" ) B legend, schema $( leg schema "$TMP/m.v" )"
+    elif [ "$( leg bytes "$TMP/m.v" )" -le "$mpin" ] && [ -n "$( leg schema "$TMP/m.v" )" ]; then
+        ok "(M) MCP $verb legend:compact: $( leg bytes "$TMP/m.v" ) B legend (pin $mpin B), schema $( leg schema "$TMP/m.v" )"
     else
-        no "(M) MCP $verb legend:compact: legend $( leg bytes "$TMP/m.v" ) B, schema '$( leg schema "$TMP/m.v" )'"
+        no "(M) MCP $verb legend:compact: legend $( leg bytes "$TMP/m.v" ) B (pin $mpin B), schema '$( leg schema "$TMP/m.v" )'"
     fi
 done
 
@@ -595,8 +706,8 @@ isHdr = spec.startswith( "#" )   # `#name`: an UNQUOTED field of the map header,
 tag, _, attr = ( "", "", spec[ 1: ] ) if isHdr else spec.rpartition( ":" )
 def on( t ):   # a tag-qualified spec reads only that element: <root label=> is not <community label=>
     return not tag or re.match( r"<" + re.escape( tag ) + r"[\s/>]", t ) is not None
-if isHdr:
-    vals = [ m.group( 1 ) for h in header for m in [ re.search( r"\s" + re.escape( attr ) + r"=([^\s\"]+)", h ) ] if m ]
+if isHdr:   # a header field's value is bare (files=6) or QUOTED (unindexed="f90:1,zzqa:1"): both spellings are read
+    vals = [ m.group( 1 ) for h in header for m in [ re.search( r"\s" + re.escape( attr ) + r"=(\"[^\"]*\"|[^\s\"]+)", h ) ] if m ]
 else:
     vals = [ m.group( 1 ) for t in tags if on( t ) for m in [ re.search( r"\s" + re.escape( attr ) + r"=\"([^\"]*)\"", t ) ] if m ]
 leg = " ".join( legend )
@@ -606,18 +717,24 @@ elif op == "defines":  print( 1 if re.search( r"(?<![A-Za-z0-9_])" + re.escape( 
 elif op == "mentions": print( 1 if spec in leg else 0 )   # a literal needle anywhere in the legend
 PY
 ca(){ python3 "$TMP/condattr.py" "$@"; }
-# condArm ID LABEL FULL COMPACT SPEC… — the control, then the compact definition, one verdict row per document
+# condArm ID LABEL FULL COMPACT SPEC… — the control, then the compact definition, one verdict row per document. A spec written
+# `!el:attr` skips the FULL-legend control and only that: the full dialect names the attribute as row vocabulary or not at
+# all (the fourth sweep's --impact defs=, --communities' isolated_*=/shown_modules=/bridges=, --community's dir=/label=/
+# bridges=), so the compact reading is the one definition a reader gets and the row asserts exactly that. Whether the full
+# legend should define them too is test/legendcoveragecheck.sh's question, not this arm's.
 condArm()
 {
-    local id="$1" label="$2" full="$3" comp="$4" spec attr bad=0 got=""
+    local id="$1" label="$2" full="$3" comp="$4" spec attr bad=0 got="" needFull
     shift 4
     for spec in "$@"; do
+        needFull=1
+        case "$spec" in '!'*) needFull=0; spec="${spec#!}" ;; esac
         attr="${spec#*:}"; attr="${attr#\#}"
         if [ "$( ca carries "$full" "$spec" )" != 1 ] || [ "$( ca carries "$comp" "$spec" )" != 1 ]; then
             no "($id) $label: control broken — the answer does not carry $attr= in both postures, so its definition row would be vacuous: $( head -c 160 "$comp" )"
             bad=1; continue
         fi
-        if [ "$( ca defines "$full" "$attr" )" != 1 ]; then
+        if [ "$needFull" -eq 1 ] && [ "$( ca defines "$full" "$attr" )" != 1 ]; then
             no "($id) $label: control broken — the FULL legend does not define $attr= either, so this row asserts nothing compact-specific"
             bad=1; continue
         fi
@@ -731,7 +848,10 @@ for v in "" "--query=distance" "--rank-by=hub" "--around=total_area" "--impact=d
     for spec in pr_iters pr_converged "#declined" "#external" "#locality_pinned" "#extent_suspect_syms" "#macro_blanked_files" \
                 "#ignored_files" "#ignored_dirs" "#max_tokens" "#fit_bytes" "#over_ceiling" r:defs r:rank_by r:window; do
         attr="${spec#*:}"; attr="${attr#\#}"
-        if [ "$( ca defines "$TMP/d12.c" "$attr" )" = 1 ] && [ "$( ca carries "$TMP/d12.c" "$spec" )" != 1 ]; then
+        # Since the fourth sweep (2026-09-12) --impact's purpose line reads its OWN defs=, so the map root's defs= reading is
+        # found by its opener rather than its attribute name, the way (D17)/(D23) find theirs.
+        if [ "$spec" = r:defs ]; then isRead="$( ca mentions "$TMP/d12.c" "the lowest-id one was walked" )"; else isRead="$( ca defines "$TMP/d12.c" "$attr" )"; fi
+        if [ "$isRead" = 1 ] && [ "$( ca carries "$TMP/d12.c" "$spec" )" != 1 ]; then
             no "(D12) ${v:-the flagless map}: the compact legend defines $attr= but the document carries no $spec — a reading of a field that is not there"
             d12bad=1
         fi
@@ -778,9 +898,8 @@ done
 #   FAIL (D14) --zoom --zoom-levels=1 over test/chafix (modules AT the depth cut): children="2" is carried but the compact legend never defines it
 #   FAIL (D15) --rank-by=churn-decay (the <recent> file rows): of="6" is carried but the compact legend never defines it
 #   FAIL (D16) the map over test/declinefix (merged overloads, split edges): prov="split" is carried but the compact legend never defines it
-# NOT FIXED, stopped on the (U) 400 B pin: --communities' drill= and isolated=. Its compact prose is 385 B on this gate's
-# repo; the shortest honest pair ("drill= takes an id=; isolated= edgeless symbols") costs 49 B (434 B), and even
-# "drill=/isolated=: id= verb/edgeless" costs 37 B (422 B). No ceiling is raised for it.
+# Stopped here on the (U) 400 B pin, and defined in the fourth sweep (D20) below once the owner raised the pins to fit honest
+# definitions: --communities' drill= and isolated=.
 condPair D13 "--tree (files= on its root)" "$FIX" "--tree" tree:files
 condPair D13 "--zoom (its root's counts)" "$FIX" "--zoom" zoom:symbols zoom:isolated zoom:top_modules zoom:levels_shown
 [ -d "$ROOT/test/chafix" ] || no "(D14) fixture missing: test/chafix — its children= row would be vacuous"
@@ -820,6 +939,213 @@ for v in "--around=distance" "--rank-by=churn" "--zoom" "" "--communities"; do
 done
 [ "$d17bad" -eq 0 ] && [ "$d17n" -eq 5 ] && ok "(D17) mirror: no third-sweep reading prints on $d17n answers that lack its field (--around's <r of=>, churn, a one-level zoom, the plain map, --communities' isolated=/symbols=)"
 
+# ── THE FOURTH SWEEP (2026-09-12): the vocabulary the earlier sweeps stopped on at the byte pins ─────────────────────────
+# Owner decision 2026-09-12: per-verb pins that fit honest definitions (docs/METHODOLOGY.md §9 — honesty lives in attributes,
+# the ceiling is a constraint). Each attribute below rides EVERY answer of its document, and was defined by prose if at all:
+#   (D18) the map header's unresolved= (serialize.h buildStats writes it unconditionally; the always-on legend's
+#         hdr:unresolved= clause defines it), read from the header ALONE: --from-trace's <trace unresolved=> is a frame count;
+#   (D19) --impact's defs=, reaches=, importers=, shown_importers=, radius_tested=, radius_untested= on the XML form, the
+#         columnar form (which omits shown_importers= and names the omission in lens=) and the MCP default;
+#   (D20) --communities' drill=, isolated= and its isolated_decl=/isolated_header=/isolated_source=/isolated_doc= split,
+#         shown_modules=, bridges= (<zoom isolated=> and <seams bridges=> count other things);
+#   (D21) --community=ID's dir=, label=, bridges=, partition=, modules= (<communities modules=/bridges=>, <seams modules=> are
+#         other roots' attributes);
+#   (D22) --safe-delete's radius_tested=/radius_untested=, which partition impact_reaches= where --impact's partition reaches=.
+# A `!` spec is one the FULL legend does not define either (condArm's comment): --impact's defs=, the isolated_* split,
+# shown_modules=, --communities' bridges= (its full legend spells bridge=), --community's dir=/label=/bridges=.
+condPair D18 "the flagless map (unresolved= on its header)" "$FIX" "" "#unresolved"
+condPair D18 "--max-tokens=50 (the header beside a fit-cut root)" "$FIX" "--max-tokens=50" "#unresolved"
+condPair D19 "--impact=distance" "$FIX" "--impact=distance" '!impact:defs' impact:reaches impact:importers impact:shown_importers impact:radius_tested impact:radius_untested
+condPair D19 "--impact=distance --format=columnar" "$FIX" "--impact=distance --format=columnar" '!impact:defs' impact:reaches impact:importers impact:radius_tested impact:radius_untested
+mcp_text impact "{\"path\":\"$FIX\",\"symbol\":\"distance\",\"legend\":\"full\"}" >"$TMP/d.full"
+mcp_text impact "{\"path\":\"$FIX\",\"symbol\":\"distance\"}" >"$TMP/d.comp"
+condArm D19 "MCP impact at its DEFAULT posture (compact) vs legend:\"full\"" "$TMP/d.full" "$TMP/d.comp" '!impact:defs' impact:reaches impact:importers impact:shown_importers impact:radius_tested impact:radius_untested
+condPair D20 "--communities (its root's counts)" "$FIX" "--communities" communities:drill communities:isolated '!communities:isolated_decl' '!communities:isolated_header' \
+    '!communities:isolated_source' '!communities:isolated_doc' '!communities:shown_modules' '!communities:bridges'
+condPair D21 "--community=0 (its root's counts and names)" "$FIX" "--community=0" community:partition community:modules '!community:dir' '!community:label' '!community:bridges'
+condPair D22 "--safe-delete=total_area (its root's radius partition)" "$FIX" "--safe-delete=total_area" safe-delete:radius_tested safe-delete:radius_untested
+
+# (D23) THE MIRROR, on answers chosen for what they LACK, each lack asserted before it is relied on. The needles are the
+# readings' own openers, so a reading printed on the wrong document is caught however its NAME is spelled there: --from-trace
+# carries <trace unresolved=> and no map header; the columnar --impact carries no shown_importers= (the one present-only term
+# here); --safe-delete carries radius_tested= over impact_reaches= and no <impact>; --zoom carries an isolated= of its own;
+# --seams carries modules=/bridges= of its own; --community=0 carries its own bridges= and no drill=; --communities carries its
+# own bridges= and no partition=; the plain map carries none of these roots.
+rrun --from-trace="$TMP/trace.txt" --legend=compact >"$TMP/d23.trace"
+[ "$( ca carries "$TMP/d23.trace" trace:unresolved )" = 1 ] && [ "$( ca carries "$TMP/d23.trace" "#unresolved" )" != 1 ] \
+    || no "(D23) control: --from-trace no longer carries <trace unresolved=> without a map header, so it proves nothing about the header-only read"
+rrun --impact=distance --format=columnar --legend=compact >"$TMP/d23.col"
+[ "$( ca carries "$TMP/d23.col" impact:reaches )" = 1 ] && [ "$( ca carries "$TMP/d23.col" impact:shown_importers )" != 1 ] \
+    || no "(D23) control: the columnar --impact no longer carries reaches= without shown_importers=, so it proves nothing about that term being present-only"
+rrun --safe-delete=total_area --legend=compact >"$TMP/d23.sd"
+[ "$( ca carries "$TMP/d23.sd" safe-delete:radius_tested )" = 1 ] && [ "$( ca carries "$TMP/d23.sd" impact:reaches )" != 1 ] \
+    || no "(D23) control: --safe-delete carries no radius_tested= (or now an <impact reaches=>), so it no longer proves the two partitions read apart"
+rrun --zoom --legend=compact >"$TMP/d23.zoom"
+[ "$( ca carries "$TMP/d23.zoom" zoom:isolated )" = 1 ] \
+    || no "(D23) control: --zoom carries no isolated= any more, so it no longer proves the communities reading is element-qualified"
+rrun --seams --legend=compact >"$TMP/d23.seams"
+[ "$( ca carries "$TMP/d23.seams" seams:modules )" = 1 ] && [ "$( ca carries "$TMP/d23.seams" seams:bridges )" = 1 ] \
+    || no "(D23) control: --seams carries no modules=/bridges= any more, so it no longer proves the module readings are element-qualified"
+rrun --community=0 --legend=compact >"$TMP/d23.one"
+[ "$( ca carries "$TMP/d23.one" community:bridges )" = 1 ] && [ "$( ca carries "$TMP/d23.one" communities:drill )" != 1 ] \
+    || no "(D23) control: --community=0 no longer carries its bridges= without a drill=, so it proves nothing about the two roots reading apart"
+d23bad=0; d23n=0
+for v in "--from-trace=$TMP/trace.txt" "--impact=distance --format=columnar" "--safe-delete=total_area" "--impact=distance" "--zoom" "--seams" \
+         "--communities" "--community=0" ""; do
+    rrun $v --legend=compact >"$TMP/d23.c"
+    if [ ! -s "$TMP/d23.c" ]; then
+        no "(D23) ${v:-the flagless map} --legend=compact answered nothing — its mirror row would be vacuous"; d23bad=1; continue
+    fi
+    d23n=$(( d23n + 1 ))
+    for pair in "unresolved= calls with in-tree evidence@#unresolved" "reaches= their transitive callers@impact:reaches" "shown_importers=:@impact:shown_importers" \
+                "non-tests of impact_reaches=@safe-delete:radius_tested" "drill= the verb taking@communities:drill" \
+                "isolated= symbols with no call edge@communities:isolated" "bridges= community pairs@communities:bridges" \
+                "partition= module count@community:partition" "bridges= modules a call edge joins@community:bridges" "label= dir::name@community:label"; do
+        needle="${pair%%@*}"; spec="${pair#*@}"
+        if [ "$( ca mentions "$TMP/d23.c" "$needle" )" = 1 ] && [ "$( ca carries "$TMP/d23.c" "$spec" )" != 1 ]; then
+            no "(D23) ${v:-the flagless map}: the compact legend spells '$needle' but the document carries no $spec — a reading of a field that is not there"
+            d23bad=1
+        fi
+    done
+done
+[ "$d23bad" -eq 0 ] && [ "$d23n" -eq 9 ] && ok "(D23) mirror: no fourth-sweep reading prints on $d23n answers that lack its field (--from-trace, the columnar --impact, --safe-delete, --impact, --zoom, --seams, --communities, --community=0, the plain map)"
+
+# ── THE FOURTH SWEEP, LAST PASS (2026-09-12): every attribute the four answers and the map header print ─────────────────────
+# (D18)..(D23) closed what the earlier sweeps had named. This pass LISTED every attribute the compact --impact, --safe-delete,
+# --communities, --community=ID and map-header documents emit, on test/fixture and on corpora that reach their conditional
+# rows, and found these still undefined (each RUN before any reading landed):
+#   (D24) --communities' modules=, shown_bridges=, connected_singletons=, symbols= and --community's shown_bridges=: EVERY answer
+#         of the root carries them, so they read in the purpose lines;
+#   (D25) the <bridge> rows: --communities' a=/b=/from_label=/to_label=/edges= and --community's to=/to_label=/edges=. Only an
+#         answer with a cross-module call edge prints one (test/chafix does; test/fixture does not), so each is a present-only
+#         term read on <bridge> alone;
+#   (D26) --safe-delete's t=, defs=, ambiguous_callers=, dead_code_candidate= (its root p= reads in t='s clause; it is not a red
+#         spec because <c n= p=> already spells the name);
+#   (D27) --impact's <f lazy=> importer rows, present-only on <f>: the columnar form prints no <f> row;
+#   (D28) the map header: the always-on files=/symbols=/edges=/shown=/ambiguous=/order=, and the conditional roots=, changed=,
+#         skipped_oversize=, unindexed=/unindexed_exts=, escaped_root=, precise=. The full map legend defines none but shown=
+#         (serialize.h buildUnindexedAttr records why it cannot: tokenbudgetcheck arm #3 leaves that floor seven bytes); a
+#         compact legend replaces MORE prose than it adds, which (U) asserts on every probe, so here the readings fit;
+#   (D29) the columnar form's format=/<cols fields=> (<cols n=> reads in the same term, and is not a red spec because the
+#         purpose line's <s n=> already spells the name) and lens=, which --order=stable's <r> carries too.
+# A `#name` header value may be QUOTED (unindexed="zzqa:1,…"), so condattr.py reads both spellings.
+OVR="$TMP/oversize"; mkdir -p "$OVR"; cp -R "$FIX"/. "$OVR"/; head -c 5000 /dev/zero | tr '\0' 'a' >"$OVR/huge.py"
+UNX="$TMP/unindexed"; mkdir -p "$UNX"; printf 'x = 1\n' >"$UNX/a.py"
+for e in zzqa zzqb zzqc zzqd zzqe zzqf zzqg; do printf 'text\n' >"$UNX/a.$e"; done
+ESC="$TMP/escape"; mkdir -p "$ESC/inner" "$ESC/outside"; cp -R "$FIX"/. "$ESC/inner"/
+printf 'def far():\n    return 2\n' >"$ESC/outside/far.py"; ln -s ../outside/far.py "$ESC/inner/far.py"
+CHA="$ROOT/test/chafix"; SCIPF="$ROOT/test/scipfix"
+for d in "$CHA" "$SCIPF"; do [ -d "$d" ] || no "(D25/D28) fixture missing: $d — every row reading it would be vacuous"; done
+
+condPair D24 "--communities (the rest of its root's counts)" "$FIX" "--communities" \
+    '!communities:modules' '!communities:shown_bridges' '!communities:connected_singletons' '!communities:symbols'
+condPair D24 "--community=0 (its bridge listing's width)" "$FIX" "--community=0" '!community:shown_bridges'
+cdRun "$TMP/d25.cm" "$CHA" --communities
+chaModule="$( grep -o '<bridge a="[0-9]*"' "$TMP/d25.cm" | head -1 | grep -o '[0-9][0-9]*' )"
+[ -n "$chaModule" ] || no "(D25) control: --communities over test/chafix prints no <bridge> row any more, so both rows below are vacuous"
+condPair D25 "--communities over test/chafix (a cross-module <bridge> row)" "$CHA" "--communities" \
+    '!bridge:a' '!bridge:b' '!bridge:from_label' '!bridge:to_label' '!bridge:edges'
+condPair D25 "--community=${chaModule:-0} over test/chafix (its peer <bridge> row)" "$CHA" "--community=${chaModule:-0}" '!bridge:to' '!bridge:to_label' '!bridge:edges'
+condPair D26 "--safe-delete=total_area (the rest of its root)" "$FIX" "--safe-delete=total_area" \
+    safe-delete:t safe-delete:defs safe-delete:ambiguous_callers safe-delete:dead_code_candidate
+condPair D27 "--impact=distance (<f lazy=> importer rows)" "$FIX" "--impact=distance" f:lazy
+mcp_text impact "{\"path\":\"$FIX\",\"symbol\":\"distance\",\"legend\":\"full\"}" >"$TMP/d.full"
+mcp_text impact "{\"path\":\"$FIX\",\"symbol\":\"distance\"}" >"$TMP/d.comp"
+condArm D27 "MCP impact at its DEFAULT posture (compact) vs legend:\"full\"" "$TMP/d.full" "$TMP/d.comp" f:lazy
+condPair D28 "the flagless map (its always-on header)" "$FIX" "" '!#files' '!#symbols' '!#edges' '#shown' '!#ambiguous' '!#order'
+"$BIN" "$FIX" "$H1" >"$TMP/d.full" 2>/dev/null </dev/null
+"$BIN" "$FIX" "$H1" --legend=compact >"$TMP/d.comp" 2>/dev/null </dev/null
+condArm D28 "two roots, the flagless map (roots= on its header)" "$TMP/d.full" "$TMP/d.comp" '!#roots'
+condPair D28 "--map-diff (changed= on its header)" "$REPO" "--map-diff" '!#changed'
+condPair D28 "--max-file-size=1K over a tree with a 5 KB file" "$OVR" "--max-file-size=1K" '!#skipped_oversize'
+condPair D28 "a tree of seven extensions no grammar reads" "$UNX" "" '!#unindexed' '!#unindexed_exts'
+condPair D28 "a tree whose symlink leads out of the root" "$ESC/inner" "" '!#escaped_root'
+condPair D28 "test/scipfix under --scip (precise= on its header)" "$SCIPF" "--scip=index.scip --exclude=make_index.py --no-cache" '!#precise'
+condPair D29 "--impact=distance --format=columnar" "$FIX" "--impact=distance --format=columnar" cols:fields impact:format '!impact:lens'
+condPair D29 "--order=stable (lens= on the map root)" "$FIX" "--order=stable" '!r:lens'
+
+# (D30) THE MIRROR, on answers chosen for what they LACK, each lack asserted before it is relied on: --from-trace carries a
+# <trace format=> of its own (the trace's dialect) and no <cols>; --communities and --community=0 over test/fixture print no
+# <bridge> row; the columnar --impact prints no <f> row; --impact=distance carries no map header and no lens=; the flagless
+# map carries none of the conditional header fields. The needles are the readings' own openers, as in (D23).
+rrun --from-trace="$TMP/trace.txt" --legend=compact >"$TMP/d30.trace"
+[ "$( ca carries "$TMP/d30.trace" trace:format )" = 1 ] && [ "$( ca carries "$TMP/d30.trace" cols:fields )" != 1 ] \
+    || no "(D30) control: --from-trace no longer carries <trace format=> without <cols>, so it proves nothing about the columnar reading's element"
+rrun --communities --legend=compact >"$TMP/d30.cm"
+[ "$( ca carries "$TMP/d30.cm" communities:bridges )" = 1 ] && [ "$( ca carries "$TMP/d30.cm" bridge:edges )" != 1 ] \
+    || no "(D30) control: --communities over the fixture now prints a <bridge> row, so it no longer proves the bridge readings are present-only"
+rrun --impact=distance --format=columnar --legend=compact >"$TMP/d30.col"
+[ "$( ca carries "$TMP/d30.col" impact:importers )" = 1 ] && [ "$( ca carries "$TMP/d30.col" f:lazy )" != 1 ] \
+    || no "(D30) control: the columnar --impact now prints an <f lazy=> row, so it no longer proves that reading is present-only"
+rrun --impact=distance --legend=compact >"$TMP/d30.imp"
+[ "$( ca carries "$TMP/d30.imp" f:lazy )" = 1 ] && [ "$( ca carries "$TMP/d30.imp" "#files" )" != 1 ] && [ "$( ca carries "$TMP/d30.imp" lens )" != 1 ] \
+    || no "(D30) control: --impact=distance no longer carries <f lazy=> without a map header or lens=, so it proves nothing about the header-only and head readings"
+d30bad=0; d30n=0
+for v in "--from-trace=$TMP/trace.txt" "--communities" "--community=0" "--impact=distance --format=columnar" "--impact=distance" ""; do
+    rrun $v --legend=compact >"$TMP/d30.c"
+    if [ ! -s "$TMP/d30.c" ]; then
+        no "(D30) ${v:-the flagless map} --legend=compact answered nothing — its mirror row would be vacuous"; d30bad=1; continue
+    fi
+    d30n=$(( d30n + 1 ))
+    for pair in "<f lazy=1>:@f:lazy" "<bridge a= b=>:@bridge:a" "from_label=/to_label=:@bridge:from_label" "<bridge to= to_label=>:@bridge:to" \
+                "<bridge edges=>:@bridge:edges" "files=/symbols=:@#files" "roots=N:@#roots" "changed=K:@#changed" "skipped_oversize=K:@#skipped_oversize" \
+                "unindexed=ext:N:@#unindexed" "unindexed_exts=E:@#unindexed_exts" "escaped_root=K:@#escaped_root" "precise=K:@#precise" \
+                "format=columnar:@cols:fields" "lens=:@lens"; do
+        needle="${pair%%@*}"; spec="${pair#*@}"
+        if [ "$( ca mentions "$TMP/d30.c" "$needle" )" = 1 ] && [ "$( ca carries "$TMP/d30.c" "$spec" )" != 1 ]; then
+            no "(D30) ${v:-the flagless map}: the compact legend spells '$needle' but the document carries no $spec — a reading of a field that is not there"
+            d30bad=1
+        fi
+    done
+done
+[ "$d30bad" -eq 0 ] && [ "$d30n" -eq 6 ] && ok "(D30) mirror: no last-pass reading prints on $d30n answers that lack its field (--from-trace, --communities, --community=0, the columnar --impact, --impact, the plain map)"
+
+# ── THE TESTED ROW LENS (2026-09-12, the design review of the fourth sweep) ──────────────────────────────────────────────────
+# (D31) <s tested="1"> rows. --callers/--callees and --impact (verbs_navigate.h), the MCP impact twin (mcpverbs.h) and the map's
+# own rows (serialize.h, over computeQMetrics' tested[] column) print tested="1" on a row graph.h isTestedByReach accepts: an
+# indexed test transitively reaches it and it is not itself a test symbol; never a literal 0. The full legend defines it
+# (graphlegend.h kTestedRowLegend) and the compact layer stripped that clause with nothing to put back. No row above could see
+# it: test/fixture holds no test, so every probe here printed radius_tested="0" and no tested row, while --impact=
+# svector::push_back on this repo printed four. The corpus below is the smallest that prints one: test_lib.py's test_run calls
+# run, which calls helper. The reading is ELEMENT-qualified on <s>: flipimpact.h's <h tested=> prints 0 as well as 1, and
+# <exemplar tested=> is another root's attribute.
+# RED on the fourth sweep's last-pass build (the uncommitted lane over b7c55908, plain and ASan alike): all three rows FAILed and
+# nothing else did, for example
+#   FAIL (D31) --callers=helper over a tree with a test (its caller run is tested): tested="1" is carried but the compact legend never defines it
+#   FAIL (D31) MCP impact over a tree with a test, at its DEFAULT posture (compact) vs legend:"full": tested="1" is carried but the compact legend never defines it
+TESTED="$TMP/testedrows"; mkdir -p "$TESTED/src"
+printf 'def helper():\n    return 1\n\n\ndef run():\n    return helper()\n' >"$TESTED/src/lib.py"
+printf 'from src.lib import run\n\n\ndef test_run():\n    assert run() == 1\n' >"$TESTED/test_lib.py"
+condPair D31 "--callers=helper over a tree with a test (its caller run is tested)" "$TESTED" "--callers=helper" s:tested
+condPair D31 "--impact=helper over a tree with a test (run, in its reach set, is tested)" "$TESTED" "--impact=helper" s:tested
+mcp_text impact "{\"path\":\"$TESTED\",\"symbol\":\"helper\",\"legend\":\"full\"}" >"$TMP/d.full"
+mcp_text impact "{\"path\":\"$TESTED\",\"symbol\":\"helper\"}" >"$TMP/d.comp"
+condArm D31 "MCP impact over a tree with a test, at its DEFAULT posture (compact) vs legend:\"full\"" "$TMP/d.full" "$TMP/d.comp" s:tested
+
+# (D32) THE MIRROR, on answers chosen for what they LACK, each lack asserted before it is relied on: --callers=run over the same
+# corpus lists one caller, test_run, which is a test symbol, so it carries hop_tested= and no tested row; --safe-delete=helper
+# carries radius_tested= and lists <c> rows; test/fixture's --callers, --impact and flagless map carry no tested row at all. The
+# needle is the reading's own opener, as in (D23)/(D30). Green on the red build by construction, like (D7). Shown able to fail:
+# with the reading spliced into the legend of --callers=run over this corpus, the row's check read the needle as spelled and no
+# <s tested=> row as carried, which is its FAIL.
+cdRun "$TMP/d32.run" "$TESTED" --callers=run --legend=compact
+[ "$( ca carries "$TMP/d32.run" callers:hop_tested )" = 1 ] && [ "$( ca carries "$TMP/d32.run" s:tested )" != 1 ] \
+    || no "(D32) control: --callers=run over the tested corpus no longer carries hop_tested= without a tested row, so it proves nothing about the row reading being present-only"
+d32bad=0; d32n=0
+for v in "$TESTED@--callers=run" "$TESTED@--safe-delete=helper" "$REPO@--callers=distance" "$REPO@--impact=distance" "$REPO@"; do
+    dir="${v%%@*}"; args="${v#*@}"
+    cdRun "$TMP/d32.c" "$dir" $args --legend=compact
+    if [ ! -s "$TMP/d32.c" ]; then
+        no "(D32) ${args:-the flagless map} --legend=compact answered nothing — its mirror row would be vacuous"; d32bad=1; continue
+    fi
+    d32n=$(( d32n + 1 ))
+    if [ "$( ca mentions "$TMP/d32.c" "<s tested=1>:" )" = 1 ] && [ "$( ca carries "$TMP/d32.c" s:tested )" != 1 ]; then
+        no "(D32) ${args:-the flagless map}: the compact legend spells '<s tested=1>:' but the document carries no <s tested=> row — a reading of a field that is not there"
+        d32bad=1
+    fi
+done
+[ "$d32bad" -eq 0 ] && [ "$d32n" -eq 5 ] && ok "(D32) mirror: the tested row reading prints on none of $d32n answers that lack an <s tested=> row (a test-only caller list, --safe-delete's radius, the fixture's --callers/--impact, the plain map)"
+
 echo
 echo "=== (S) STRUCTURAL: every conditional attribute the graphlegend.h family, the PageRank disclosure, the map header and the map's rows emit has a compact reading ==="
 # The (D) rows prove today's members; this row keeps the NEXT one from landing undefined. The population is READ FROM
@@ -845,10 +1171,13 @@ echo "=== (S) STRUCTURAL: every conditional attribute the graphlegend.h family, 
 # conditional at its CALL SITE rather than inside graphlegend.h (fielduses.h's member form, serialize.h's multi-root
 # table, --lego's caveat=) — rows (D4)/(D5)/(D6) are what guard those; nor a map-family clause not spelled `hdr:`
 # (kMaxTokensFitLegend's max_tokens=/fit_bytes=/over_ceiling=, est_tokens= under order=stable, --around's defs=,
-# --rank-by's rank_by=/window=) — (D10)/(D11) guard those. And BY CONSTRUCTION not the always-on header field unresolved=
-# (no absent-if-0 marker), which the reader prints as INFO on every run because it is STILL undefined under compact: its
-# shortest reading, "unresolved=: resolver gauge", costs 29 B on every map and puts two (U) probes over the 400 B ceiling
-# (--max-tokens=3 379 -> 408, --rank-by=churn 376 -> 405 over their measured legends). No ceiling is raised for it.
+# --rank-by's rank_by=/window=) — (D10)/(D11) guard those. The always-on header field unresolved= (no absent-if-0 marker)
+# was printed here as INFO, still undefined under compact, until the fourth sweep (2026-09-12, owner decision: raise the pins
+# to fit honest definitions): population 3 now requires a header reading for EVERY hdr: field of that legend, marked or
+# not, and (D18) shows the reading live. Shown able to fail: this reader run over 27fc151d's src/compactlegend.h (no row)
+# FAILed on unresolved= and on nothing else. The sweep's design review folded unresolved= into the always-on files= clause, so an
+# UNMARKED field may read inside that one row; a marked field still needs a row of its own. Shown able to fail on the fold: with
+# unresolved= deleted from that clause, this reader FAILed on unresolved= and on nothing else.
 # RED on origin/main 28ee1df3: bodyless_defs=, declined_calls= and unproven_defs= FAILed. Shown able to fail on the fix
 # too: with the declined_calls row deleted from kCompactCompletenessTerms this arm went red on that name (landing commit).
 # RED on 34a97f66 for population 3: pr_iters=, pr_converged= and all seven hdr: fields FAILed. Shown able to fail on the
@@ -1014,7 +1343,25 @@ else:
             print( "FAIL|%s= (%s) has no kCompactCompletenessTerms row that reads the payload (wholeDoc or onTag) — a compact map carrying it leaves it undefined" % ( attr, rowPop[ attr ] ) )
     if len( rowCovered ) == len( rowPop ):
         print( "PASS|map rows: %d of %d absence-marked row fields of the always-on legend have a payload-reading compact term: %s" % ( len( rowCovered ), len( rowPop ), " ".join( rowCovered ) ) )
-print( "INFO|outside that population by construction (unconditional on every map, no absent-if-0 marker): %s — still undefined under compact, see the arm's comment" % " ".join( a + "=" for a in sorted( always ) ) )
+# The always-on header fields (no absent-if-0 marker) ride EVERY map header, so each needs a header reading as much as a
+# conditional one does (the fourth sweep, 2026-09-12: unresolved=). Since that sweep's design review the reading may sit inside
+# the always-on header clause, the `files` row (MapHeaderRead::Only): buildStats writes files= into every header, so a field
+# spelled there is read exactly when the header is. A CONDITIONAL field never qualifies that way (the population above wants a
+# row of its own), so a field that gains an absence marker leaves this set and fails there until it is split back out.
+hdrClause = None
+for m in re.finditer( r"\{\s*\"S(\d+)\"\s*,\s*\"S(\d+)\"(?:[^{}]|\{\})*?MapHeaderRead::Only", rows ):
+    if clits[ int( m.group( 1 ) ) ] == "files":
+        hdrClause = clits[ int( m.group( 2 ) ) ]
+if hdrClause is None:
+    print( "FAIL|no always-on map-header row (attr files, MapHeaderRead::Only) was read from src/compactlegend.h — the reader broke, so the always-on row below means nothing" )
+    hdrClause = ""
+inClause = lambda a: re.search( r"(?<![A-Za-z0-9_])" + re.escape( a ) + r"=", hdrClause ) is not None
+alwaysCovered = [ "hdr:" + a + "=" + ( "" if a in hdrTerms else " (in the files= clause)" ) for a in sorted( always ) if a in hdrTerms or inClause( a ) ]
+for attr in sorted( always ):
+    if attr not in hdrTerms and not inClause( attr ):
+        print( "FAIL|%s= (serialize.h's always-on map legend defines hdr:%s= with no absence marker, so EVERY map header carries it) has no compact reading that reads the map header, neither a row of its own nor a clause of the always-on files= row — every compact map carries it undefined" % ( attr, attr ) )
+if len( alwaysCovered ) == len( always ):
+    print( "PASS|map header, always-on: %d of %d unconditional header fields have a compact reading: %s" % ( len( alwaysCovered ), len( always ), " ".join( alwaysCovered ) ) )
 PY
 python3 "$TMP/struct.py" "$ROOT" >"$TMP/s.rows" 2>"$TMP/s.err" || no "(S) the source reader crashed: $( head -c 300 "$TMP/s.err" )"
 [ -s "$TMP/s.rows" ] || no "(S) the source reader printed no rows — the structural arm would be vacuous"

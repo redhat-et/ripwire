@@ -2647,7 +2647,7 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
 //
 // --for/--grep/--slice compact their own legend (each emitter branches on cfg.legend); every other XML verb
 // is compacted HERE, after the fact: the run's stdout is captured into an anonymous tmpfile, the finished
-// document is rewritten once by compactlegend.h (prose comments out, ONE ≤400 B legend + schema= in, every
+// document is rewritten once by compactlegend.h (prose comments out, ONE compact legend + schema= in, every
 // payload byte untouched), and written to the real stdout. Exit codes pass through unchanged. A run that
 // produced no XML root (a refusal already happened, or a text verb slipped past validateLegendModifier's
 // list) is refused here naming the flag — never served as if the posture had applied.
@@ -2711,7 +2711,7 @@ static std::string_view compactLegendHint( const rw::Config& c ) noexcept
 // --for's compact legend is its own (verbs_for.h): it splices est_tokens=/dropped_positive=/weak= and the
 // adaptive/relevance-floor counts INTO its comments (estchargecheck A10 pins the form), so the layer would strip
 // data there. It is the one verb the layer skips. --grep/--slice compact natively too, but their compact
-// legends are pure prose — the layer restates them at ≤400 B and keeps their schema id.
+// legends are pure prose — the layer restates them as its own compact legend and keeps their schema id.
 static bool nativeCompactLegendVerb( const rw::Config& c ) noexcept
 {
     return !c.forTask.empty();
