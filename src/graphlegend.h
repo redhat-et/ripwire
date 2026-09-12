@@ -544,6 +544,23 @@ inline constexpr const char* kUnprovenDefsVerifyLegend =
     "unproven_defs=K (absent when 0) counts same-named DEFINITIONS a file:name symbol argument found and could not tie to the file it named, summed over both symbols of calls(): they are NOT in defs=, from_defs=, to_defs= or target_defs=, so no call path, witness or role=\"call\" site that reaches only them was read. verdict=confirmed or refuted still stands on the evidence it prints; verdict=not-established beside unproven_defs= is an INCOMPLETE read that limit= does not name, never a sign the claim is false. ";
 inline constexpr const char* kUnprovenDefsAffectedLegend =
     "unproven_defs=K (absent when 0) counts same-named DEFINITIONS a file:name item found and could not tie to the file it named, summed item by item (a path item adds 0): they are NOT in seeds=, the caller walk never started from them, and so a test that reaches only them is in neither tests=, reached= nor the rows. A bare NAME item that also matches an indexed path is read as that path. ";
+// AND ON edit-check, lego, connect, around AND slice (decltodefcheck arms E2n..E2t). --lego, --connect and --around resolve
+// through resolveFocus, the lowest-id projection of the same resolver, so a drop left the DECLARATION as their focus;
+// --edit-check and --slice read the whole match set, and a set holding that one declaration is answered about it. On the
+// same repro each read a zero with nothing beside it: edit-check callers="0" incompatible="0" — a false "no broken caller"
+// when the dropped definition is the one whose caller stopped binding — lego implementors="0", connect edges="0" groups="0",
+// around the declaration's own row as the whole neighbourhood, and slice uses="0". Same attribute, same tail, one clause
+// each for what is missing; the edit-check clause addresses incompatible= by name, as the safe-delete clause does risk=.
+inline constexpr const char* kUnprovenDefsEditCheckLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: the contract compared is the declaration p= names, and callers=, incompatible= and the c rows were read from that declaration alone, so a caller of only those definitions is in neither count nor any row. incompatible=\"0\" beside unproven_defs= is an INCOMPLETE read, never a sign that the edit breaks no caller. ";
+inline constexpr const char* kUnprovenDefsLegoLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: the iface row is the declaration the selector named, and implementors= and the impl and m rows were read from it alone, so a type that extends or implements only those definitions is in neither implementors= nor any row. ";
+inline constexpr const char* kUnprovenDefsConnectLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS a file:name terminal found and could not tie to the file it named, summed over the terminals (a bare NAME terminal never adds to it): that terminal's row is the declaration it named, the search never started from those definitions, and so nodes=, edges=, groups= and every unconnected row say nothing about a join through them. ";
+inline constexpr const char* kUnprovenDefsAroundLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: the neighbourhood is centred on the declaration the selector named, the walk never started from those definitions, and so none of their callers or callees is a row here. ";
+inline constexpr const char* kUnprovenDefsSliceLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: the slice read the declaration p= names, so defs=, uses=, vars= and every row describe that declaration's own text and nothing inside those definitions' bodies. ";
 inline constexpr const char* kUnprovenDefsProofTail =
     "A declaration widens to the definitions it stands for only where the definition is IN the named file, or its own file includes the named file, resolved path-precisely; a same-named body anywhere else is not evidence and is never served. Widen the file:name spelling to the bare NAME, or to Scope::name, to include them. ";
 
@@ -557,6 +574,11 @@ enum class UnprovenDefsVerb : std::uint8_t
     Mentions,
     Verify,
     Affected,
+    EditCheck,
+    Lego,
+    Connect,
+    Around,
+    Slice,
 };
 
 // `on` is the emitter's own `unprovenDefs > 0`, never a re-derivation; "" otherwise, so an answer that dropped
@@ -570,9 +592,19 @@ inline std::string unprovenDefsVerbLegend( UnprovenDefsVerb verb, bool on )
 {
     const char* const clause = on ? std::array { kUnprovenDefsImpactLegend, kUnprovenDefsPathLegend, kUnprovenDefsSafeDeleteLegend,
                                                  kUnprovenDefsUsesLegend, kUnprovenDefsMentionsLegend, kUnprovenDefsVerifyLegend,
-                                                 kUnprovenDefsAffectedLegend }[std::size_t( verb )]
+                                                 kUnprovenDefsAffectedLegend, kUnprovenDefsEditCheckLegend, kUnprovenDefsLegoLegend,
+                                                 kUnprovenDefsConnectLegend, kUnprovenDefsAroundLegend, kUnprovenDefsSliceLegend }[std::size_t( verb )]
                                   : nullptr;
     return clause != nullptr ? std::string( clause ) + kUnprovenDefsProofTail : std::string();
+}
+
+// The same clause as its OWN comment, for a verb whose legend is a closed literal the clause cannot be spliced into
+// (kLegoLegend, kConnectHeader) or a run of comments (the map legend --around extends). `opener` is that verb's
+// `<!-- ripwire VERB: ` spelling, so compactlegend.h strips it as the prose it is and its term table states the compact
+// reading. "" when `on` is false, so an answer that dropped nothing is byte-identical.
+inline std::string unprovenDefsVerbComment( UnprovenDefsVerb verb, bool on, std::string_view opener )
+{
+    return on ? std::string( opener ) + unprovenDefsVerbLegend( verb, true ) + "-->" : std::string();
 }
 
 // M12's writeMultiRootTable/multiRootTableLegend (the multi-root roots-table disclosure --callers/--uses

@@ -1962,9 +1962,10 @@ inline std::string forTaskText( const std::string& root, const std::string& task
 // genuinely different, unambiguous outcomes.
 inline std::string legoText( const std::string& root, const std::string& type, RedactCounts* redact )
 {
-    const McpIndex&     ix    = getIndex( root );
-    const IngestResult& ing   = ix.ing;
-    const NodeId        focus = resolveFocus( ing, type );
+    const McpIndex&     ix           = getIndex( root );
+    const IngestResult& ing          = ix.ing;
+    std::size_t         unprovenDefs = 0;   // H1: the decl→def residue, the CLI --lego's unproven_defs= — same resolver, same helpers
+    const NodeId        focus        = resolveFocus( ing, type, &unprovenDefs );
     if( focus == kNoNode )
     {
         return {};
@@ -1976,11 +1977,13 @@ inline std::string legoText( const std::string& root, const std::string& type, R
     return captureXml( [ & ]( std::FILE* mem )
     {
         // H5: the same legend the CLI --lego prints, and (issue #66) the same adjacent clause defining the
-        // graph_unindexed= the root below carries — CLI and MCP are one wording by construction.
-        rw::emitTo( mem, "<ctx>{}{}", kLegoLegend, graphUnindexedLegendComment( ix.g.unindexedFiles > 0 ).c_str() );
+        // graph_unindexed= the root below carries — CLI and MCP are one wording by construction. H1: the unproven_defs=
+        // clause rides as its own comment beside the closed literal, exactly as on the CLI.
+        rw::emitTo( mem, "<ctx>{}{}{}", kLegoLegend, graphUnindexedLegendComment( ix.g.unindexedFiles > 0 ).c_str(),
+                    unprovenDefsVerbComment( UnprovenDefsVerb::Lego, unprovenDefs > 0, "<!-- ripwire lego: " ).c_str() );
         packLego( mem, ing, ix.g.implementors, flat, 1, redact, &impure, focus, /*withPaths=*/true,
                   ing.realPaths.empty() ? std::string_view( root ) : std::string_view(),    // R-R: root-relative <iface p=>
-                  graphCountFloorAttrXml( ix.g ) );                                           // M15: gauge + marker
+                  unprovenDefsAttrXml( unprovenDefs ) + graphCountFloorAttrXml( ix.g ) );    // H1 + M15: residue, gauge, marker
         rw::emitRaw( mem, "</ctx>" );
     } );
 }
@@ -2864,9 +2867,10 @@ inline std::size_t connectEstTokens( std::size_t payloadBytes, std::size_t extra
 inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g, const ConnectResult& res,
                          RedactCounts* redact,                  // §B0/W3-N1: REQUIRED — the Steiner-node sig= attrs are emitted text
                          int maxTokens = 0,
-                         std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
+                         std::string_view rootArg = {},    // R-E (2026-08-17): same single-root-only root
                                                            // argument serialize() takes — see its comment.
                                                            // Shared by CLI --connect and the MCP connect verb.
+                         std::size_t unprovenDefs = 0 )    // H1: the terminals' decl→def residue, SUMMED by the caller
 {
     std::vector<char> escBuf;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, escBuf ) ); };
@@ -2889,8 +2893,13 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     // bytes counted here and the bytes written below are now the same object, so the two cannot drift again
     // (same reason connectExtraBytes itself is built once). Gate: estchargecheck #17.
     const std::string  connectUnindexedLegend = graphUnindexedLegendComment( g.unindexedFiles > 0 );
+    // H1: the residue attribute and its clause are two more things this document carries ahead of its payload, charged
+    // the way the unindexed clause above is — named once, counted from the same objects that are written. Both are empty
+    // at zero, so an answer that dropped nothing prices and emits byte-identically.
+    const std::string  connectUnprovenAttr   = unprovenDefsAttrXml( unprovenDefs );
+    const std::string  connectUnprovenLegend = unprovenDefsVerbComment( UnprovenDefsVerb::Connect, unprovenDefs > 0, "<!-- ripwire connect: " );
     const std::size_t  connectExtraBytes = connectRootAttr.size() + std::strlen( rootRelPathsLegend( !rootArg.empty() ) )
-                                         + connectUnindexedLegend.size();
+                                         + connectUnindexedLegend.size() + connectUnprovenAttr.size() + connectUnprovenLegend.size();
 
     // §2.4a: the derived hub threshold every Steiner row's connects= is read against, computed ONCE (it is a
     // property of the graph, not of a row) and named on the root so the label is never a bare assertion.
@@ -3101,9 +3110,12 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     {
         estTokens = connectEstTokens( payload.size(), connectExtraBytes + std::strlen( connectOverAttr ) );
     }
-    rw::emitTo( out, "{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), rootRelPathsLegend( !rootArg.empty() ) );
-    rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\" est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}>",
-                  res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups, estTokens, hubFloor,
+    rw::emitTo( out, "{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
+                rootRelPathsLegend( !rootArg.empty() ) );
+    rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\"{} est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}>",
+                  res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups,
+                  connectUnprovenAttr.c_str(),   // H1: beside the counts it qualifies; absent at zero
+                  estTokens, hubFloor,
                   rw::cstr( connectCeiling ), connectOverAttr,
                   truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str(),
                   graphCountFloorAttrXml( g ).c_str()  );   // H5/M15: nodes=/edges= are read off the name-based CSR — a floor, with the gauge
@@ -3125,11 +3137,14 @@ inline std::string connectText( const std::string& root, const std::vector<std::
     { err = "connect needs 2..16 symbols (got " + std::to_string( symbolSpecs.size() ) + ")"; return {}; }
 
     std::vector<NodeId> terminals;
+    std::size_t         unprovenDefs = 0;   // H1: summed over the terminals, exactly as the CLI --connect sums them
     for( const std::string& spec : symbolSpecs )
     {
-        const NodeId id = resolveFocus( ing, spec );
+        std::size_t  termUnprovenDefs = 0;
+        const NodeId id               = resolveFocus( ing, spec, &termUnprovenDefs );
         if( id == kNoNode ) { err = "symbol not found: " + spec + mcprefuse::atSeedClause( ing, spec ); return {}; }   // the @-clause is "" for a plain name
         terminals.push_back( id );
+        unprovenDefs += termUnprovenDefs;
     }
 
     const ConnectResult res = connectSubgraph( g, terminals, radius );
@@ -3138,7 +3153,8 @@ inline std::string connectText( const std::string& root, const std::vector<std::
     std::FILE*  mem = open_memstream( &buf, &sz );
     if( !mem ) { err = "internal error"; return {}; }
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
-    packConnect( mem, ing, g, res, redact, /*maxTokens=*/0, ing.realPaths.empty() ? std::string_view( root ) : std::string_view() );
+    packConnect( mem, ing, g, res, redact, /*maxTokens=*/0, ing.realPaths.empty() ? std::string_view( root ) : std::string_view(),
+                 unprovenDefs );
     std::fflush( mem );
     std::fclose( mem );
     std::string out = buf ? std::string( buf, sz ) : std::string{};
@@ -3655,7 +3671,10 @@ inline EditCheckReply editCheckText( const std::string& root, const std::string&
     }
     const Graph g = buildGraph( ing, nullptr );
 
-    const std::vector<NodeId> matches = resolveAllByNameQualified( ing, symbol );
+    // H1: the decl→def residue, the CLI --edit-check's unproven_defs= — same resolver, same assembler parameter, so the two
+    // surfaces cannot disagree about the number. The new_body preview re-resolves on its merged tree (editpreview.h).
+    std::size_t               unprovenDefs = 0;
+    const std::vector<NodeId> matches      = resolveAllByNameQualified( ing, symbol, &unprovenDefs );
     // verifier N5: this was the last MCP not-found still speaking the pre-M8 dialect — four words, no echo of
     // the spelling, no near-miss — on the one verb an agent reaches for right after a rename, where a typo
     // and a genuinely absent symbol are the two likeliest causes and the message distinguished neither.
@@ -3686,7 +3705,7 @@ inline EditCheckReply editCheckText( const std::string& root, const std::string&
     }
 
     return EditCheckReply{ editCheckBundleText( ing, g, root, kDefaultMaxFileBytes, {}, groups[0].lowestNode,
-                                                 /*ni=*/nullptr, /*preview=*/false, pg.limit, pg.offset ), {} };
+                                                 /*ni=*/nullptr, /*preview=*/false, pg.limit, pg.offset, unprovenDefs ), {} };
 }
 
 // ─── `slice` verb (lane/tc-sliceat): the ARISE def-use slice over MCP, mirroring the CLI --slice ────────
@@ -3732,9 +3751,11 @@ inline SliceReply sliceText( const std::string& root, const std::string& symbol,
 
     // ── the two-phase spec split, exactly as the CLI: whole spelling first, then HEAD:VAR — skipped when
     //    the var field already carries the variable (then `symbol` is a pure selector).
-    std::string_view    selector = symbol;
-    std::string_view    varName  = var;
-    std::vector<NodeId> matches  = resolveAllByNameQualified( ing, selector );
+    // H1: `unprovenDefs` is the residue of whichever reading produced `matches` — the second resolve overwrites the first.
+    std::string_view    selector     = symbol;
+    std::string_view    varName      = var;
+    std::size_t         unprovenDefs = 0;
+    std::vector<NodeId> matches      = resolveAllByNameQualified( ing, selector, &unprovenDefs );
     if( matches.empty() && var.empty() )
     {
         const std::size_t lastColon = symbol.rfind( ':' );
@@ -3742,7 +3763,7 @@ inline SliceReply sliceText( const std::string& root, const std::string& symbol,
         {
             selector = std::string_view( symbol ).substr( 0, lastColon );
             varName  = std::string_view( symbol ).substr( lastColon + 1 );
-            matches  = resolveAllByNameQualified( ing, selector );
+            matches  = resolveAllByNameQualified( ing, selector, &unprovenDefs );
         }
     }
     if( matches.empty() )
@@ -3879,6 +3900,7 @@ inline SliceReply sliceText( const std::string& root, const std::string& symbol,
     emit.flow          = flowActive ? &flowSpec : nullptr;
     emit.seed          = seededRun ? &seedInfo : nullptr;
     emit.compactLegend = compactLegend;   // decision 3: the same posture flag the CLI --legend=compact sets
+    emit.unprovenDefs  = unprovenDefs;    // H1: the CLI --slice's unproven_defs=, through the one emitter both surfaces call
     return SliceReply{ slicev::sliceBundleText( ing, root, focus, varName, scan, src, redact, emit ), {} };
 }
 

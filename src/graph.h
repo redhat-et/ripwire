@@ -4815,9 +4815,13 @@ inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::
 // order and every tier preserves that), so front() IS the historic lowest-id pick; one grammar, one
 // resolver, and every tier the full resolver gains (canonical id, Scope::name) reaches the single-pick
 // verbs in the same commit. Declared here, below the full resolver, for exactly that reason.
-inline NodeId resolveFocus( const IngestResult& ing, std::string_view spec )
+//
+// `unprovenDefCountOut` (H1, optional): the residue the full resolver reports for the SAME selector — the same-named
+// definitions a file:name spelling dropped, which the single pick therefore never focuses on either. Passed straight
+// through, so it is written on every path exactly as resolveAllByNameQualified writes it.
+inline NodeId resolveFocus( const IngestResult& ing, std::string_view spec, std::size_t* unprovenDefCountOut = nullptr )
 {
-    const std::vector<NodeId> matches = resolveAllByNameQualified( ing, spec );
+    const std::vector<NodeId> matches = resolveAllByNameQualified( ing, spec, unprovenDefCountOut );
     return matches.empty() ? kNoNode : matches.front();
 }
 
