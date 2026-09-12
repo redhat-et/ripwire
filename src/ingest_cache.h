@@ -236,6 +236,25 @@ constexpr std::uint32_t kParserVer    = 95;           // bump on any grammar/.sc
                                                       //    the next free number over the merged tip (the 78/80/88/91
                                                       //    rule). quality.h's kIngestParserVerMirror bumped in the
                                                       //    SAME commit.
+                                                      // 94 = 2026-09-11 (#62/#72 follow-up, all roles + definitions):
+                                                      //    the decided-dead `#if 0` filter moved from captureTagsFacts'
+                                                      //    @reference.call/@reference.import arm to a window post-pass
+                                                      //    over every fact family a C-family file produces. FIVE more
+                                                      //    emitters now honour it — the value-use pass (role=read/write),
+                                                      //    the type-mention pass (role=type), captureBases (role=extends),
+                                                      //    captureIncludes' directive site (role=import, plus the Include
+                                                      //    FILE-dependency record the same directive minted) and the
+                                                      //    blanked member-macro use — and a DEFINITION whose name sits in
+                                                      //    a dead range is no longer indexed at all, so it can no longer
+                                                      //    split resolution (overloads=/amb=/prov="split"/graph_ambiguous=
+                                                      //    against a definition that cannot compile). The extracted SET
+                                                      //    SHRINKS on any C-family tree carrying a literal `#if 0`/`#if 1`,
+                                                      //    so a v93 blob replays rows this binary refuses. Record shapes
+                                                      //    are untouched, so kCacheVersion stays #139's 21. quality.h's
+                                                      //    kIngestParserVerMirror carries the same value (gated). Gate:
+                                                      //    test/ppdeadrolescheck.sh, one live/dead pair per --uses role.
+                                                      //    RENUMBERED 93 -> 94 on the merge with main 558a2e03: the
+                                                      //    branch spent 93 while main spent it on #139 (Ruby arguments).
                                                       // 93 = 2026-09-11 (Ruby argument + rescue constants,
                                                       //    test/rubyargcheck.sh): a constant chain that is a direct
                                                       //    argument of a call/super/yield (or a keyword pair's value

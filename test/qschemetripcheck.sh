@@ -45,6 +45,16 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   Landed at 95, not the 87 the branch carried — main spent 87..92 while it was open and the 0.6.1 round
 #   takes 93 (#139) and 94 (#172): RE-BUMPED to the next free number over the merged tip, per the collision
 #   rule in ingest_cache.h's kParserVer note. RE-DERIVED ON THE MERGE (the branch's pin hashed 87 over 18).
+#   RE-DERIVED AGAIN on the merges with main 558a2e03 (#139: 93 over 21) and #172 208433b2 (94 over 21): neither
+#   side hashed 95 over 21. The value equals the branch's pre-merge ce851b68 — neither #139 nor #172 changed a
+#   manifest function or kMergeDiffArgs, and the branch already declared 95 over 21.
+# 2026-09-12, `#if 0` ALL ROLES + DEFINITIONS (fix/ppdead-all-roles, PR #172; test/ppdeadrolescheck.sh): RE-PIN ONLY, kQSnapCacheScheme STAYS 10.
+#   kParserVer 93 -> 94 and kIngestParserVerMirror -> 94; kCacheVersion STAYS #139's 21. The decided-dead filter now
+#   drops every fact a C-family file captures inside a decided-dead range (every --uses role, the Include record, and a
+#   definition sited at its name), so the extracted SET shrinks and only the parser version can reject a v93 blob; no
+#   record gains or loses a field. The branch was written as 92 -> 93 over cache 20 and RENUMBERED on the merge with
+#   main 558a2e03, where #139 had already spent 93: its pre-merge pin hashed 93 over 20 and main's hashed 93 over 21, so
+#   neither side hashed the merged 94/21 declaration lines. This lane changes no Snapshot-side function.
 # 2026-09-11, RUBY ARGUMENT + RESCUE CONSTANTS (feat/ruby-argument-rescue-constants, PR #139): RE-PIN ONLY, kQSnapCacheScheme STAYS 10.
 #   Both extraction-identity lines moved: kParserVer 92 -> 93 (a constant argument of a call/super/yield and a rescue
 #   class are symbolic Include records; an older blob lacks them, so the parser version is what rejects it) and

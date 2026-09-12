@@ -130,21 +130,27 @@ struct RawFacts
 
 // A parsed-but-unqueried file waiting for the tags-query gate: owns its bytes and its TSTree until
 // the flush hands them to captureTagsFacts (move-only; the tree is freed on destruction if unflushed).
+// It also owns the file's decided-dead byte ranges (#72 follow-up): those are walked ONCE, beside the
+// side captures, and the tags pass that consumes them can run several files later — so they ride here
+// rather than being re-derived at the flush, which would pay preprocdead.h's walk twice on every
+// C-family file that owns an include guard (the shape whose cost audit P1-0 measured at 56.67% of busy
+// leaf samples before the cursor fix).
 struct PendingParsedFile
 {
     std::uint32_t   fileId = 0;
     const LangEntry* le    = nullptr;
     std::string     bytes;
     TSTree*         tree   = nullptr;
+    std::vector<PreprocDeadRange> ppDead;
 
-    PendingParsedFile( std::uint32_t fileIdIn, const LangEntry* leIn, std::string&& bytesIn, TSTree* treeIn )
-        : fileId( fileIdIn ), le( leIn ), bytes( std::move( bytesIn ) ), tree( treeIn )
+    PendingParsedFile( std::uint32_t fileIdIn, const LangEntry* leIn, std::string&& bytesIn, TSTree* treeIn, std::vector<PreprocDeadRange>&& ppDeadIn )
+        : fileId( fileIdIn ), le( leIn ), bytes( std::move( bytesIn ) ), tree( treeIn ), ppDead( std::move( ppDeadIn ) )
     {
     }
     PendingParsedFile( const PendingParsedFile& ) = delete;
     PendingParsedFile& operator=( const PendingParsedFile& ) = delete;
     PendingParsedFile( PendingParsedFile&& other ) noexcept
-        : fileId( other.fileId ), le( other.le ), bytes( std::move( other.bytes ) ), tree( other.tree )
+        : fileId( other.fileId ), le( other.le ), bytes( std::move( other.bytes ) ), tree( other.tree ), ppDead( std::move( other.ppDead ) )
     {
         other.tree = nullptr;
     }
@@ -160,6 +166,7 @@ struct PendingParsedFile
             le     = other.le;
             bytes  = std::move( other.bytes );
             tree   = other.tree;
+            ppDead = std::move( other.ppDead );
             other.tree = nullptr;
         }
         return *this;
@@ -404,7 +411,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 }
                 const TSNode root = ts_tree_root_node( pending.tree );
                 const std::size_t firstNewDefIndex = out.defs.size();
-                captureTagsFacts( cursor, *pending.le, pending.fileId, pending.bytes, root, out.defs, out.refs, out.binds, out.incs );
+                captureTagsFacts( cursor, *pending.le, pending.fileId, pending.bytes, root, out.defs, out.refs, out.binds, out.incs, pending.ppDead );
                 buildLexForNewDefs( out.defs, firstNewDefIndex, pending.bytes );   // B0.2: bytes still in memory
                 ts_tree_delete( pending.tree );
                 pending.tree = nullptr;
@@ -591,8 +598,12 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 // §L1 — before `bytes` can be moved below. May swap `tree` for the member-macro re-parse (macroreparse.h).
                 scan.health[ fileId ] = measureHealthAdoptingMemberMacroReparse( pg.p, le->lang, bytes, tree, macroWork );
                 const TSNode root = ts_tree_root_node( tree.get() );
-                captureSideFacts( *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.refs, out.incs, out.binds, out.ffis, out.routeDefs, out.routeUses, out.constOpens, sh.captureValueUses );
-                appendBlankedMacroUses( macroWork, le->lang, static_cast<std::uint32_t>( fileId ), bytes, out.refs );
+                // #72 follow-up: ONE preprocdead.h walk per file, shared by both capture drivers. It must
+                // be taken from the ADOPTED tree (the member-macro re-parse may have swapped it just
+                // above), which is why it is computed here and not inside either driver.
+                std::vector<PreprocDeadRange> ppDead = preprocDeadRangesFor( *le, root, bytes );
+                captureSideFacts( *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.refs, out.incs, out.binds, out.ffis, out.routeDefs, out.routeUses, out.constOpens, sh.captureValueUses, ppDead );
+                appendBlankedMacroUses( macroWork, le->lang, static_cast<std::uint32_t>( fileId ), bytes, out.refs, ppDead );
 
                 const bool canQueueParsed = !sh.prewarm.ready.load( std::memory_order_acquire )
                                          && pendingParsed.size() < kMaxPendingParsedFiles
@@ -600,7 +611,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 if( canQueueParsed )
                 {
                     pendingParsedBytes += bytes.size();
-                    pendingParsed.emplace_back( static_cast<std::uint32_t>( fileId ), le, std::move( bytes ), tree.release() );
+                    pendingParsed.emplace_back( static_cast<std::uint32_t>( fileId ), le, std::move( bytes ), tree.release(), std::move( ppDead ) );
                     continue;
                 }
 
@@ -609,7 +620,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                     waitForQueryPrewarm( &sh.gate );
                 }
                 const std::size_t firstNewDefIndex = out.defs.size();
-                captureTagsFacts( cursor, *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.defs, out.refs, out.binds, out.incs );
+                captureTagsFacts( cursor, *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.defs, out.refs, out.binds, out.incs, ppDead );
                 buildLexForNewDefs( out.defs, firstNewDefIndex, bytes );   // B0.2: bytes still in memory
             }
         }

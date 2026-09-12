@@ -1811,6 +1811,12 @@ constexpr std::uint32_t kIngestParserVerMirror    = 95;   // MUST equal ingest.c
                                                           // 95 = 2026-09-12 (Elixir module/name/arity resolution, PR #81):
                                                           //    RE-BUMPED from the branch's 87 over #139's 93 and #172's 94.
                                                           //    See ingest_cache.h's kParserVer note.
+                                                          // 94 = 2026-09-11 (#62/#72 follow-up): the decided-dead `#if 0`
+                                                          //    filter now covers every --uses role, the Include record, and
+                                                          //    DEFINITIONS — the extracted set shrinks on any C-family tree
+                                                          //    with a literal `#if 0`/`#if 1`. See ingest_cache.h's
+                                                          //    kParserVer note. Renumbered 93 -> 94 on the merge with
+                                                          //    main 558a2e03, where #139 had spent 93.
                                                           // 93 = 2026-09-11 (Ruby argument + rescue constants): a
                                                           //    constant argument of a call/super/yield and a rescue
                                                           //    class are directives. See ingest_cache.h's note.
