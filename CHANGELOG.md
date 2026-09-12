@@ -43,6 +43,22 @@ contract-change on `run` (params 1 → 2) with every caller of the old arity lis
 still reports the change but flags nobody (`kQSnapCacheScheme` 10 → 11). `--for` by an exact function
 name (`generate_app`, `text`) routes name-exact and ranks the `name/N` symbol first.
 
+Five resolution rules the branch got wrong, found by reproducing against Elixir 1.20.3 / OTP 29 before
+the merge, each with a row and a control in `test/elixirnamearitycheck.sh` over `test/elixirresolvefix`.
+`import M, except: [...]` after `import M, only: [...]` subtracts from the only-list instead of replacing
+it (a function the only-list never named minted an edge, silently; the refusal is now counted). A dotted
+nested `defmodule Inner.Deep` aliases `Inner` → `Outer.Inner` from its declaration on, so the later
+`Inner.Deep.f()` names the nested module rather than a top-level one — or, with no top-level one,
+rather than nothing. `alias __MODULE__, as: Current` inside a multi-target `defimpl` reaches each
+implementation's own function, not the first implementation's. `&_seed/0` names the underscore-named
+function (the underscore rule is for unused variables; a bare `_seed` read still is one). And `f()` on a
+bodyless `def f(x \\ default())` head reaches the head beside the clauses, so `--path=caller,default`
+and `--impact=default` see the caller; `f(1)` still reaches the clauses alone. Every one was a wrong
+answer or an uncounted drop. They ride parser version 95 — the number this entry introduces, which no
+released binary has written — with `kCacheVersion` 21 and `kQSnapCacheScheme` 11 unchanged. Still open,
+and documented in [Elixir extraction](docs/ARCHITECTURE.md#elixir-extraction): calls inside
+`unquote(...)` / `bind_quoted:` under `quote`.
+
 ### Upgrade notes
 
 - **A sidecar must be a regular file: a symlink at a sidecar name is refused, on read as well as on write.**

@@ -237,6 +237,19 @@ constexpr std::uint32_t kParserVer    = 95;           // bump on any grammar/.sc
                                                       //    the next free number over the merged tip (the 78/80/88/91
                                                       //    rule). quality.h's kIngestParserVerMirror bumped in the
                                                       //    SAME commit.
+                                                      //    Three pre-merge follow-ups on the same PR move extraction
+                                                      //    OUTPUT within 95 (test/elixirnamearitycheck.sh H, I, J): a
+                                                      //    dotted nested defmodule binds its first segment (ref
+                                                      //    qualifiers), an alias of __MODULE__ classifies its receiver
+                                                      //    ElixirSelfModule (RawRef::recv), and `&_seed/0` is captured
+                                                      //    (the extracted SET). No second bump: the never-reuse rule is
+                                                      //    about TWO LANES shipping one in-flight number with different
+                                                      //    sets, and 95 is this lane's alone — minted here over the
+                                                      //    merged tip, written by no released binary. Record shapes are
+                                                      //    unchanged (kCacheVersion stays 21). A blob a pre-follow-up
+                                                      //    build of this branch wrote is the one exposure, and it is
+                                                      //    local to whoever built that branch: --no-cache, or let the
+                                                      //    stat gate re-parse the edited files.
                                                       // 94 = 2026-09-11 (#62/#72 follow-up, all roles + definitions):
                                                       //    the decided-dead `#if 0` filter moved from captureTagsFacts'
                                                       //    @reference.call/@reference.import arm to a window post-pass

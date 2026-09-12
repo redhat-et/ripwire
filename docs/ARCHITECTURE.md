@@ -174,23 +174,31 @@ inferred. Type expressions are indexed as declarations, not type-checked. Defaul
 are syntactic possibilities, not narrowed by supplied arguments. Metrics count written controls,
 clauses and boolean joins before macro expansion. These limits apply to CLI and MCP alike.
 
-Four resolution gaps are open, each reproduced against Elixir 1.20.3 / OTP 29 and each a floor rather
-than a wrong answer everywhere else: a later `import M, except: [...]` **replaces** an earlier
-`import M, only: [...]` selection instead of subtracting from it, so a function that was never imported
-can supply an edge (`src/elixir_resolve.h`); a dotted nested declaration such as `defmodule Inner.Deep`
-inside `defmodule Outer` does not register the enclosing module's implicit prefix alias, so a later
-`Inner.Deep.target()` resolves to nothing (`src/ingest_elixir.h`); inside a multi-target `defimpl`,
-`alias __MODULE__, as: Current` binds every implementation's `Current.f()` to the FIRST target's `f`
-rather than its own (`src/ingest_model.h`); and an explicit named capture of an underscore-prefixed
-function (`&_seed/0`) is dropped by the unused-parameter filter (`src/ingest_elixir.h`). Bodyless
-function headers carrying defaults do not preserve transitive caller reachability, and executable
-`unquote` / `bind_quoted` expressions are omitted with the rest of the quoted-AST filter.
+Five resolution rules, each reproduced against Elixir 1.20.3 / OTP 29 before the merge and each gated
+with its control in `test/elixirnamearitycheck.sh` (G)–(K) over `test/elixirresolvefix`: a later
+`import M, except: [...]` **subtracts** from the `import M, only: [...]` in force instead of replacing it,
+so a function the only-list never named stays un-imported and the refusal is counted
+(`src/elixir_resolve.h`); a dotted nested declaration such as `defmodule Inner.Deep` inside `defmodule
+Outer` aliases its first segment, `Inner` → `Outer.Inner`, from that point on, so a later
+`Inner.Deep.target()` names the nested module even beside a top-level `Inner.Deep`, and a call written
+before the declaration still names the top-level one (`src/ingest_elixir.h`); inside a multi-target
+`defimpl`, `alias __MODULE__, as: Current` binds each implementation's `Current.f()` to its OWN `f`,
+as `__MODULE__.f()` does, while a literal `P.A.f()` stays literal (`src/ingest_elixir.h`,
+`src/ingest_sidecap.h`); a named capture of an underscore-prefixed function (`&_seed/0`) is a call of
+that function — the underscore rule is for unused variables, and a bare `_seed` read still is one
+(`src/ingest_elixir.h`); and a call that omits a defaulted argument reaches the bodyless head that
+evaluates the default beside the clauses, so `--path` and `--impact` see the default expression's calls
+from that caller, while a call that supplies the argument reaches the clauses alone
+(`src/elixir_resolve.h`). One gap stays open: executable `unquote(...)` and `bind_quoted:` expressions
+under `quote` are omitted with the rest of the quoted-AST filter, so a helper called only from inside
+an `unquote` has no caller edge from its macro.
 
 `test/elixircheck.sh`, `test/eliximportcheck.sh` and `test/elixirsemanticcheck.sh` cover extraction,
 metrics, exact target selection against decoys, lexical boundaries, contracts, CLI/MCP use-site parity,
 call-site mutation and cold/warm determinism; `test/elixirnamearitycheck.sh` covers what the `name/N`
 key must not cost the verbs around it (the counted `use` drop, pattern bindings on the right of `=`,
-`--edit-check` and `--quality-delta` across an arity change, `--for` by exact name). This extraction
+`--edit-check` and `--quality-delta` across an arity change, `--for` by exact name) and the five
+resolution rules above. This extraction
 uses parser revision 95 (rich 96), mirrored in `src/quality.h`; record format 21 is unchanged. The
 quality key (`pathQualifiedKey`) folds the arity out of an Elixir name — `run/1` and `run/2` are one
 piece of source, as C++ overloads of `f` are — which is snapshot scheme 11.
