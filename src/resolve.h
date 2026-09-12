@@ -1695,8 +1695,15 @@ inline void recordLazyPair( HashMap<std::uint64_t, char>& lazyPairs, std::uint32
 // Include occurrence resolving to this edge so far was lazy" (Include::isLazy) — see recordLazyPair above.
 // Independent of `dedup`: keyed by file-id PAIR, not by adj's post-sort indices, so it stays correct
 // whichever adjacency shape the caller asked for.
+// `forCallNarrow` (parser version 93): true ⇒ Include records read off a VALUE position (Include::isValueUse — a
+// constant argument, a rescue class) are left out. Those are dependencies of the file and every dependency view
+// keeps them, but they are not import evidence for a bare call: `notify(Dev::Config)` beside `record.update!` says
+// nothing about `record`, and buildGraph's narrow bound 1,017 discourse call sites on that reading, 19 of 20
+// sampled wrong (PR #139 review). Only buildGraph's fileIncludes passes true; the default keeps every consumer
+// byte-identical.
 inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPreciseIncludeAdjWithContext( const IngestResult& ing, bool dedup = true,
-                                                                       HashMap<std::uint64_t, char>* lazyPairsOut = nullptr )
+                                                                       HashMap<std::uint64_t, char>* lazyPairsOut = nullptr,
+                                                                       bool forCallNarrow = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2a: precise include adjacency (resolve.h)" );
     const std::uint32_t F = std::uint32_t( ing.files.size() );
@@ -1823,6 +1830,10 @@ inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPre
         }
         if( inc.isSymbolic )
         {
+            if( forCallNarrow && inc.isValueUse )
+            {
+                continue;   // a dependency, not import evidence — see the parameter note above
+            }
             // A Ruby constant: index + lexical rule, and an edge to EVERY definer (multiplicity — see the
             // RubyConstantIndex note). Self-includes are dropped exactly as on the path branch below.
             const auto [ off, cnt ] = resolveRubyConstant( rubyConsts, rubyMemo, inc.fileId, inc.byte, inc.target );

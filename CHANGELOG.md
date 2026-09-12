@@ -54,6 +54,87 @@ name (`generate_app`, `text`) routes name-exact and ranks the `name/N` symbol fi
   `--arch --baseline` and `--baseline-update` exit 1 without writing. `.ripwire_config` and
   `.ripwire_quality_acks` are unchanged.
 
+### Added — a Ruby constant argument and a rescue class are dependencies; `lazy_edges=` counts distinct pairs (parser version 93)
+
+Round three of the Ruby constant work, on the same corpus-own index as round one (superclass, mixins, autoload —
+parser version 82) and round two (constant receivers — 83). Ruby's rule is that EVALUATING a constant is what makes
+the autoloader load its file, and a receiver is only one of the places a constant is evaluated. Round two pinned the
+other two as its disclosed floor; this round lifts them.
+
+**A constant argument is a directive.** A constant chain that is a direct positional child of an `argument_list`,
+or the value of a keyword pair written directly in that list, is a symbolic Include: `raise Errors::Boom`,
+`validates_with Validator`, `delegate :name, to: Helper`, `record.is_a?(User)`, `super(Validator)`, `yield User`.
+The `argument_list` is the grammar's one node for the arguments of a call (with or without parens), a `super` and a
+`yield`, so one read covers all three. The lists of `include`/`extend`/`prepend`/`autoload` stay round one's, one
+record per statement. An argument is lazy inside a closure and load-time at class-body or file level, exactly like
+a receiver — `validates_with Validator` in a class body is a load-time dependency on validator.rb, which is what a
+Rails model file's structure actually is.
+
+**A rescue class is a directive, and it is lazy always.** Every constant chain in a `rescue` clause's exception list
+(`rescue Errors::Bust, Errors::Boom => e`) is a symbolic Include. Ruby evaluates that list only while matching an
+exception, never when the clause is loaded — `class X; begin; 1; rescue Nope; end; end` is silent, and the same
+`begin` with a `raise` inside names `Nope` in a NameError (ruby 4.0.6) — so a class-body rescue is a use, not a
+load-time dependency, and it stays out of the ccd/godfiles structure like every other lazy pair.
+
+**One dedupe key.** Arguments and rescue classes share round two's (file, innermost open, written name) record with
+receivers: a `raise Errors::Boom`, a `rescue Errors::Boom` and an `Errors::Boom.new` in one nesting are one
+directive, and the parser-86 AND rule still decides the lazy bit — a rescue above a class-body receiver of the same
+name is one load-time directive.
+
+**`lazy_edges=` over-counted, and the fixture for this round is the shape that showed it.** `<health lazy_edges=>`
+and a row's `lazy_edges=` are documented as DISTINCT (file, target) pairs, but the count walked an un-deduped
+adjacency that is in directive order, not sorted, and counted a pair once per run of equal ids: `Errors::Boom`,
+`User`, `Errors::Bust` in one method resolve to errors.rb, user.rb, errors.rb and read as 3 for 2 pairs. It now
+sorts the dropped ids and counts unique ones. At this round's parser version the old count read 1 546 / 1 147 / 6 398 / 2 549
+on the four corpora below against the distinct 1 381 / 1 015 / 6 342 / 2 519; every other byte of `--deps` is
+identical between the two counts (checked on activerecord). Round two's own fixture never interleaved two spellings
+of one file with another target, so its pins were right by shape rather than by the count.
+
+**A value-position constant is a dependency, not import evidence — and the call graph is byte-identical to main.**
+The first cut of this round let the new records feed buildGraph's include narrow, which reads a file's resolved
+includes as evidence for which definition a bare call means. That is wrong for a value position: `notify(Dev::Config)`
+beside `record.update!` says nothing about what `record` is, and the narrow bound `update!` to `Config#update!` on that
+reading — on discourse 1,017 call sites newly bound or narrowed, 19 of 20 sampled wrong (the PR #139 review). `Include`
+gains `isValueUse` (cache format 21), set for argument and rescue records and cleared by any receiver occurrence of the
+same name, and `buildPreciseIncludeAdjWithContext( …, forCallNarrow=true )` — called only for buildGraph's
+`fileIncludes` — leaves those records out; `--deps`, `--impact`'s importer tier and the lazy-pair count read them as
+before. Measured against main's binary, built from the same merge base: the default map is **byte-identical** on the
+four corpora below and on this repository, and `--report`'s totals match to the unit (activesupport 3 650 edges /
+410 modules, activerecord 8 638 / 912, the Rails apps 23 784 / 2 067 and 12 108 / 1 384). The pre-fix branch had moved
+every one of them (23 447 / 2 030 and 55 more isolated symbols on the first app). Gate: the review's own repro,
+`test/rubyargnarrowfix` — two `update!` definitions in different directories, a caller in a third that passes
+`Dev::Config` and then calls `record.update!` — declines the call as main does (0 callers, `declined_calls="1"`) while
+`dev/config.rb` keeps notifier.rb as a lazy importer; red on the pre-fix binary (1 false caller).
+
+**Disclosed floor, pinned to yield nothing** (`test/rubyargfix/lib/app/floor.rb`): a `when` pattern (evaluated
+eagerly by Ruby — the next round's first candidate), an array or hash-literal element, a splat, an assignment's
+right-hand side, string interpolation, a binary operand. Each is an evaluation Ruby performs that this round does
+not read.
+
+Measured (`--deps --limit=100000 --no-cache`, parser version 88 → 93, measured on the branch's pre-merge binaries; the gems are Rails 7.2.3.2, the apps the same
+two Rails apps as rounds one and two, aggregates only):
+
+| corpus | ccd | nccd | shape | load-time importees | lazy_edges | bytes |
+| --- | --- | --- | --- | --- | --- | --- |
+| activesupport `lib/` (282) | 15 299 → 15 775 | 7.59 → 7.83 | tangled | 201 → 202 | 935 → 1 381 | 75 988 → 85 530 |
+| activerecord `lib/` (395) | 4 325 → 4 657 | 1.44 → 1.55 | vertical | 310 → 310 | 1 023 → 1 015 | 114 763 → 129 011 |
+| a Rails app, 4683 files / 3532 `.rb` | 13 172 → 17 798 | 0.32 → 0.43 | horizontal | 414 → 1 015 | 5 630 → 6 342 | 750 915 → 855 559 |
+| a second Rails app, 2002 / 1895 `.rb` | 6 543 → 7 577 | 0.34 → 0.39 | horizontal | 200 → 557 | 1 878 → 2 519 | 370 991 → 471 865 |
+
+The importee column is the finding: on the two applications the files with a load-time importer went 414 → 1 015
+and 200 → 557, because a class-body DSL argument (`validates_with Validator`, `delegate … to: Helper`, `rescue_from
+Errors::Boom`) is where a Rails file names what it loads. No shape moved; ccd grew and stayed horizontal,
+which is the structure/use cut doing its job. The `lazy_edges` column carries BOTH mechanisms above — new lazy
+pairs in, the over-count out — and activerecord is the corpus where the second outweighs the first. The default map
+of this repository (no Ruby) is byte-identical before and after.
+
+Gate `test/rubyargcheck.sh` + fixture `test/rubyargfix/` (19 files, written RED against the parser-88 binary: 22
+arms red, every control green); `test/rubyrecvcheck.sh`'s floor arm inverts and its report.rb pins move by the one
+`raise`/`rescue` directive; `test/rubyrequirecheck.sh`'s main.rb counts its `rescue LoadError` as a shown,
+out-of-tree row (12 → 13). `kParserVer` 92 → 93 with the mirror (the branch spent 89 while main spent 89..92 on the extent detector, Kotlin and the yaml patch); cache format 20 → 21 (`Include::isValueUse`);
+re-pins with reasons in-file: `test/qschemetrip.hash`, `test/printf_parity.manifest` (the `--impact` help and
+legend name the two new closure kinds; the `--deps` legend's lazy definition gains the rescue class). `docs/COMMANDS.md`
+regenerated (2026-09-11).
 ## [0.6.0] — 2026-09-11
 
 **Languages and integrations from outside the project, much faster on the largest trees, and answers that say where

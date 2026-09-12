@@ -1811,6 +1811,9 @@ constexpr std::uint32_t kIngestParserVerMirror    = 95;   // MUST equal ingest.c
                                                           // 95 = 2026-09-12 (Elixir module/name/arity resolution, PR #81):
                                                           //    RE-BUMPED from the branch's 87 over #139's 93 and #172's 94.
                                                           //    See ingest_cache.h's kParserVer note.
+                                                          // 93 = 2026-09-11 (Ruby argument + rescue constants): a
+                                                          //    constant argument of a call/super/yield and a rescue
+                                                          //    class are directives. See ingest_cache.h's note.
                                                           // 92 = 2026-09-11 (yaml unsigned-char, PR #140): the yaml scanner's
                                                           //    status type. SCN_FAIL (-1) returned through plain `char` came
                                                           //    back as 255 wherever `char` is unsigned (aarch64 Linux, the

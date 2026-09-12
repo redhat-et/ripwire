@@ -527,9 +527,11 @@ struct Include
                                     //   which is lazy by definition (the file loads on the constant's first
                                     //   use); Ruby (parser version 83): true for a constant receiver inside a
                                     //   method/lambda/block, and (parser version 86) only when EVERY
-                                    //   occurrence of that (file, open, name) is inside one. false for every
-                                    //   other directive kind and for a top-level TS/JS require/import. See
-                                    //   ingest.cpp::captureIncludes.
+                                    //   occurrence of that (file, open, name) is inside one; Ruby (parser
+                                    //   version 93): a constant ARGUMENT follows the receiver rule, and a
+                                    //   RESCUE class is lazy always — Ruby evaluates the exception list only
+                                    //   while matching an exception. false for every other directive kind and
+                                    //   for a top-level TS/JS require/import. See ingest.cpp::captureIncludes.
     bool          isSymbolic = false; // parser version 82: true ⇒ `target` names a language-level SYMBOL (a Ruby
                                     //   constant: superclass, include/extend/prepend argument, path-less
                                     //   `autoload :Name`), resolved through the corpus's OWN definition index
@@ -542,6 +544,15 @@ struct Include
                                     //   site is recovered from this byte by span containment against the
                                     //   file's class/module symbols — the same containment that attributes a
                                     //   Reference to its enclosing def, so the two sides cannot disagree.
+    bool          isValueUse = false; // parser version 93: true ⇒ the directive was read off a VALUE position — a
+                                    //   constant ARGUMENT of a call/super/yield or a RESCUE class — rather than
+                                    //   a receiver, a superclass, a mixin, a require or an autoload. It is a
+                                    //   dependency of the file (--deps, --impact's importer tier, lazy pairs)
+                                    //   but it is NOT import evidence for call narrowing: `notify(Dev::Config)`
+                                    //   beside `record.update!` says nothing about what `record` is, and a
+                                    //   narrow that read it as an include bound update! to Config#update!
+                                    //   (19 of 20 sampled bindings wrong on discourse — PR #139 review).
+                                    //   buildGraph's fileIncludes skips these; every other consumer keeps them.
     std::string   target;           // raw include path ("foo.h", <vector>), module name, or (isSymbolic)
                                     //   the constant AS WRITTEN (`Base`, `::App::User`, `ActiveRecord::Base`)
 };

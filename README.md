@@ -795,7 +795,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 </p>
 
 <p align="center">
-  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 34 slides</b></a> — every figure names the instrument that pins it<br>
+  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 33 slides</b></a> — every figure names the instrument that pins it<br>
   <sub>renders in your browser · <a href="present/ripwire-showcase.pptx">pptx</a> beside it · <a href="docs/EVALS.md">the numbers behind it</a></sub>
 </p>
 
@@ -1793,9 +1793,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>608 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>609 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **608 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **609 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -2514,7 +2514,7 @@ graphify 0.9.34 with `--code-only --no-cluster`. The measurement is in `bench/he
 | User-visible changes and known limits | `CHANGELOG.md` |
 | Vendored dependencies and their licenses | `THIRD_PARTY.md` |
 | Skill-file security checks | [security](docs/COMMANDS.md#--scan-skillsdir) |
-| The whole tool in 34 slides | `present/ripwire-showcase.pdf` |
+| The whole tool in 33 slides | `present/ripwire-showcase.pdf` |
 
 The presentation rebuilds from `present/deck5_ripwire_build.js`. The preprint draft is in
 `paper/PREPRINT.md`. The method is not submitted for peer review. Its tables name the measurement
@@ -2560,7 +2560,7 @@ terms.
 | Orientation for a coding agent working *on* this repository | [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) |
 | User-visible capabilities, behaviour changes, known limits | [`CHANGELOG.md`](CHANGELOG.md) |
 | Vendored dependencies and their licences | [`THIRD_PARTY.md`](THIRD_PARTY.md) |
-| The whole tool in 34 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
+| The whole tool in 33 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
 
 If a document disagrees with `--help`, the document is the bug.
 
