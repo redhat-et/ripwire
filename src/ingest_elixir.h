@@ -326,6 +326,7 @@ struct ElixirLexicalName
     std::uint32_t startByte = 0;
     std::string target;
     std::uint32_t endByte = 0;
+    bool selfRelative = false;   // an alias of `__MODULE__` (`alias __MODULE__, as: Current`): target names the enclosing module
 };
 
 struct ElixirContext
@@ -350,23 +351,43 @@ struct ElixirContext
         return {};
     }
 
+    // The alias binding of the name segment `first` in force at `site` — the newest one whose visibility span and
+    // lexical scope hold the site — or null when no alias binds it there.
+    const ElixirLexicalName* aliasInForce( std::string_view first, TSNode site ) const
+    {
+        const auto found = aliases.find( std::string( first ) );
+        if( found == aliases.end() ) { return nullptr; }
+        for( auto it = found->second.rbegin(); it != found->second.rend(); ++it )
+        {
+            if( it->startByte <= ts_node_start_byte( site ) && ts_node_start_byte( site ) < it->endByte && elixirContains( it->scope, site ) ) { return &*it; }
+        }
+        return nullptr;
+    }
+
     std::string expandAlias( std::string written, TSNode site ) const
     {
         if( written.starts_with( "Elixir." ) ) { return written.substr( 7 ); }
         const auto dot = written.find( '.' );
-        const std::string first = written.substr( 0, dot );
-        const auto found = aliases.find( first );
-        if( found != aliases.end() )
+        if( const ElixirLexicalName* alias = aliasInForce( std::string_view( written ).substr( 0, dot ), site ); alias != nullptr )
         {
-            for( auto it = found->second.rbegin(); it != found->second.rend(); ++it )
-            {
-                if( it->startByte <= ts_node_start_byte( site ) && ts_node_start_byte( site ) < it->endByte && elixirContains( it->scope, site ) )
-                {
-                    return it->target + ( dot == std::string::npos ? "" : written.substr( dot ) );
-                }
-            }
+            return alias->target + ( dot == std::string::npos ? "" : written.substr( dot ) );
         }
         return written;
+    }
+
+    // Whether a call's receiver names the enclosing module THROUGH an alias — `alias __MODULE__, as: Current`, then
+    // `Current.f(x)` — so the reference is classified ElixirSelfModule and re-attributed per implementation of a
+    // multi-target defimpl (expandElixirImplementationReferences), exactly as a literal `__MODULE__` receiver is.
+    // Classifying from the receiver's text alone bound every implementation's `Current.f()` to the first one's f
+    // (test/elixirnamearitycheck.sh I). A `dot` receiver is judged by its leftmost segment.
+    bool selfRelativeAlias( TSNode receiver, TSNode site ) const
+    {
+        if( elixirNodeIs( receiver, "dot" ) ) { return selfRelativeAlias( fieldChild( receiver, NodeField::Left ), site ); }
+        if( !elixirNodeIs( receiver, "alias" ) ) { return false; }
+        const auto written = nodeTextOf( receiver, src );
+        if( written.starts_with( "Elixir." ) ) { return false; }
+        const ElixirLexicalName* alias = aliasInForce( written.substr( 0, written.find( '.' ) ), site );
+        return alias != nullptr && alias->selfRelative;
     }
 
     std::string moduleOf( TSNode name, TSNode site, unsigned depth = 0 ) const
@@ -449,10 +470,10 @@ struct ElixirContext
         return out;
     }
 
-    void bindAlias( std::string local, std::string target, TSNode node )
+    void bindAlias( std::string local, std::string target, TSNode node, bool selfRelative = false )
     {
         const TSNode scope = elixirLexicalScope( node );
-        aliases[ std::move( local ) ].push_back( { scope, ts_node_start_byte( node ), std::move( target ), elixirVisibilityEnd( scope, src ) } );
+        aliases[ std::move( local ) ].push_back( { scope, ts_node_start_byte( node ), std::move( target ), elixirVisibilityEnd( scope, src ), selfRelative } );
     }
 
     // An identifier is a binding only in a pattern. The innermost matching construct defines
@@ -621,7 +642,10 @@ struct ElixirContext
                 {
                     const auto dot = target.rfind( '.' );
                     const auto local = ts_node_is_null( as ) ? target.substr( dot == std::string::npos ? 0 : dot + 1 ) : std::string( nodeTextOf( as, src ) );
-                    if( local != "false" ) { bindAlias( local, target, call ); }
+                    // `alias __MODULE__[.Sub], as: X` names the enclosing module: the binding carries that, so a call
+                    // through X is classified like a literal `__MODULE__` receiver (selfRelativeAlias)
+                    const bool selfRelative = nodeTextOf( elixirFirstArgument( call ), src ).starts_with( "__MODULE__" );
+                    if( local != "false" ) { bindAlias( local, target, call, selfRelative ); }
                 }
                 if( keyword != "import" ) { continue; }
                 RawBind bind;

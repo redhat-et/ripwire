@@ -2051,7 +2051,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                         const TSNode receiver = fieldChild( target, NodeField::Left );
                         r.qualifier = elixir.moduleOf( receiver, roleNode );
                         if( r.qualifier.empty() ) { continue; }
-                        r.recv = nodeTextOf( receiver, src ).starts_with( "__MODULE__" ) ? RecvKind::ElixirSelfModule : RecvKind::ElixirModule;
+                        // `__MODULE__` spelled, or an alias of it (`alias __MODULE__, as: Current`): the receiver names the
+                        // enclosing module, and the reference is re-attributed per implementation of a multi-target defimpl
+                        r.recv = nodeTextOf( receiver, src ).starts_with( "__MODULE__" ) || elixir.selfRelativeAlias( receiver, roleNode )
+                               ? RecvKind::ElixirSelfModule : RecvKind::ElixirModule;
                     }
                     auto [ count, known ] = elixirCallArity( roleNode, nameNode, src );
                     if( refCapSv == "reference.operator" ) { count = elixirNodeIs( roleNode, "binary_operator" ) ? 2 : 1; known = true; }
