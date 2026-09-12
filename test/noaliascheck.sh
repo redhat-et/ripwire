@@ -349,11 +349,17 @@ extern "C" __attribute__(( noinline )) void axpyBuf( std::vector<uint32_t>& dst,
 }
 // The builtin on the BUFFERS called directly, no header macro: the loop-path classification probe (LOOP_CONSUMED
 // vs LOOP_NOT_CONSUMED is a fact about the compiler, so it must not depend on whichever Diagnostics.h is on disk).
+// Guarded: arm 7 compiles this file in DEBUG on the gcc legs too, where the builtin does not exist; there the
+// classification never runs (RELEASE_ARMS=0), so the probe function is simply absent.
+#if defined( __has_builtin )
+#if __has_builtin( __builtin_assume_separate_storage )
 extern "C" __attribute__(( noinline )) void axpyBuiltin( std::vector<uint32_t>& dst, const std::vector<uint32_t>& src )
 {
     __builtin_assume_separate_storage( dst.data(), src.data() );
     for( std::size_t i = 0; i < dst.size(); ++i ) { dst[ i ] += src[ i ] * 3u; }
 }
+#endif
+#endif
 
 int main( int argc, char** argv )
 {
