@@ -214,6 +214,12 @@ uint64_t currentThreadId() noexcept;
 //          `-mllvm -basic-aa-separate-storage` to our targets whenever the
 //          compiler accepts it, so LLVM 17 consumes the promise too (a no-op
 //          on 18+; test/noaliascheck.sh arm 8 is the `=false` control).
+//          Even with the option on, LLVM 17 consults the hint only at the
+//          assume's own context, which the loop vectorizer's alias queries
+//          never carry (llvm/llvm-project#64666, fixed in LLVM 18 by #76770):
+//          on AppleClang 16 the promise removes scalar reloads but leaves a
+//          loop's runtime overlap check in place. The gate classifies that
+//          loop path separately (LOOP_CONSUMED / LOOP_NOT_CONSUMED).
 //
 // THE CONTRACT (clang/docs/LanguageExtensions.rst, release/19.x): the arguments
 // "are assumed to point into separately allocated storage (either different

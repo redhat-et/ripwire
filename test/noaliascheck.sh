@@ -60,6 +60,16 @@
 # same reason $CXX defaults to the cache's CMAKE_CXX_COMPILER, not to whatever `c++` is on PATH. On NO_BUILTIN and
 # NOT_CONSUMED arms 2, 3, 6 and 8 are reported as WARN (skipped, naming the compiler), never as PASS: the gcc CI
 # legs run arms 1, 4, 5, 7; the clang legs run all eight.
+#
+# A SECOND capability sits behind the first. Reading the bundle for a scalar reload (arm 2) and reaching the loop
+# vectorizer's overlap analysis (arm 6) are different code paths: LLVM 17 consults the hint only at the assume's own
+# context, which LoopAccessAnalysis never supplies, so on AppleClang 16 the flag fixes arm 2 and leaves arm 6 at
+# plain (CI, PR #200, head 5156d668: arm 2 green, arm 6 "48 is not below plain (48)"). Upstream: llvm/llvm-project
+# issue #64666 "[Loop Vectorizer] __builtin_assume_separate_storage is not propagated to LV AA", fixed by #76770
+# (LLVM 18). So arm 6 classifies the LOOP path on its own real slice — axpyBuiltin, the builtin on .data() called
+# directly — LOOP_CONSUMED (axpyBuiltin at least 2 below plain: the macro form must match, hard FAIL otherwise) or
+# LOOP_NOT_CONSUMED (WARN naming the compiler and #64666; the one row still asserted is that the macro form is no
+# worse than the direct builtin, so a header regression cannot hide behind the compiler's limit).
 # Counts are BANDS, never exact numbers — an LLVM release moves them by one or two.
 #
 # Usage:  bash test/noaliascheck.sh            (compiles with c++/clang++; objdump = llvm-objdump or GNU)
@@ -337,6 +347,13 @@ extern "C" __attribute__(( noinline )) void axpyBuf( std::vector<uint32_t>& dst,
     VERIFY_NO_ALIAS_BUF( dst, src );
     for( std::size_t i = 0; i < dst.size(); ++i ) { dst[ i ] += src[ i ] * 3u; }
 }
+// The builtin on the BUFFERS called directly, no header macro: the loop-path classification probe (LOOP_CONSUMED
+// vs LOOP_NOT_CONSUMED is a fact about the compiler, so it must not depend on whichever Diagnostics.h is on disk).
+extern "C" __attribute__(( noinline )) void axpyBuiltin( std::vector<uint32_t>& dst, const std::vector<uint32_t>& src )
+{
+    __builtin_assume_separate_storage( dst.data(), src.data() );
+    for( std::size_t i = 0; i < dst.size(); ++i ) { dst[ i ] += src[ i ] * 3u; }
+}
 
 int main( int argc, char** argv )
 {
@@ -360,14 +377,22 @@ EOF
 if [ "$RELEASE_ARMS" = 1 ]; then
     if "$CXX" "$CXXSTD" -O2 -DNDEBUG "${INC[@]}" ${OPTFLAGS[@]+"${OPTFLAGS[@]}"} -c "$WORK/bufprobe.cpp" -o "$WORK/bufprobe.o" 2> "$WORK/cc6.log"; then
         ok "arm 6: buffer probe compiled (-O2 -DNDEBUG${OPTFLAGS[@]+ ${OPTFLAGS[*]}})"
-        bPlain="$( insnCount "$WORK/bufprobe.o" axpyPlain )"; bObj="$( insnCount "$WORK/bufprobe.o" axpyObj )"; bBuf="$( insnCount "$WORK/bufprobe.o" axpyBuf )"
-        echo "  info  release instructions: axpyPlain=$bPlain axpyObj=$bObj axpyBuf=$bBuf (measured 2026-09-12: arm64 65/65/61, x86-64 65/65/41)"
+        bPlain="$( insnCount "$WORK/bufprobe.o" axpyPlain )"; bObj="$( insnCount "$WORK/bufprobe.o" axpyObj )"; bBuf="$( insnCount "$WORK/bufprobe.o" axpyBuf )"; bBuiltin="$( insnCount "$WORK/bufprobe.o" axpyBuiltin )"
+        echo "  info  release instructions: axpyPlain=$bPlain axpyObj=$bObj axpyBuf=$bBuf axpyBuiltin=$bBuiltin (measured 2026-09-12: arm64 65/65/61/61, x86-64 65/65/41/41; AppleClang 16 + flag: 48/48/48/48)"
         if [ "$bPlain" -ge 20 ] && [ "$bPlain" -le 160 ]; then ok "arm 6: axpyPlain instruction count $bPlain in band [20,160]"
         else no "arm 6: axpyPlain instruction count $bPlain outside band [20,160] — count the wrong function?"; fi
-        if [ "$bBuf" -ge 8 ] && [ "$bBuf" -le $(( bPlain - 2 )) ]; then ok "arm 6: VERIFY_NO_ALIAS_BUF loop $bBuf instructions, at least 2 below plain ($bPlain)"
-        else no "arm 6: VERIFY_NO_ALIAS_BUF loop $bBuf instructions is not below plain ($bPlain) — the buffer promise bought nothing"; fi
-        if [ "$bObj" -ge $(( bPlain - 1 )) ]; then ok "arm 6: negative control — VERIFY_NO_ALIAS on the two OBJECTS leaves the loop at $bObj (plain $bPlain)"
-        else no "arm 6: negative control lost — the object form ALSO shortened the loop ($bObj vs plain $bPlain); the buffer form is no longer the discriminating one"; fi
+        LOOPCLASS=LOOP_NOT_CONSUMED; [ "$bBuiltin" -ge 8 ] && [ "$bBuiltin" -le $(( bPlain - 2 )) ] && LOOPCLASS=LOOP_CONSUMED
+        echo "  info  optimizer reaches the LOOP vectorizer with \"separate_storage\": $LOOPCLASS (axpyBuiltin $bBuiltin vs plain $bPlain)"
+        if [ "$LOOPCLASS" = LOOP_CONSUMED ]; then
+            if [ "$bBuf" -ge 8 ] && [ "$bBuf" -le $(( bPlain - 2 )) ]; then ok "arm 6: VERIFY_NO_ALIAS_BUF loop $bBuf instructions, at least 2 below plain ($bPlain)"
+            else no "arm 6: VERIFY_NO_ALIAS_BUF loop $bBuf instructions is not below plain ($bPlain) — the buffer promise bought nothing, and the direct builtin did ($bBuiltin): the header is what is wrong"; fi
+            if [ "$bObj" -ge $(( bPlain - 1 )) ]; then ok "arm 6: negative control — VERIFY_NO_ALIAS on the two OBJECTS leaves the loop at $bObj (plain $bPlain)"
+            else no "arm 6: negative control lost — the object form ALSO shortened the loop ($bObj vs plain $bPlain); the buffer form is no longer the discriminating one"; fi
+        else
+            warn "arm 6: LOOP_NOT_CONSUMED on $CXXID — the direct builtin leaves the loop at $bBuiltin (plain $bPlain): this optimizer does not carry \"separate_storage\" into the loop vectorizer (llvm/llvm-project#64666, fixed in LLVM 18 by #76770); the loop-shortening rows are not claimed here"
+            if [ "$bBuf" -le "$bBuiltin" ]; then ok "arm 6: VERIFY_NO_ALIAS_BUF loop $bBuf instructions is no worse than the direct builtin ($bBuiltin) — the header is not the limit"
+            else no "arm 6: VERIFY_NO_ALIAS_BUF loop $bBuf instructions is WORSE than the direct builtin ($bBuiltin) — the header costs something the builtin does not"; fi
+        fi
     else
         no "arm 6: buffer probe failed to compile"; sed 's/^/    /' "$WORK/cc6.log"
     fi
@@ -413,6 +438,16 @@ if [ "$RELEASE_ARMS" = 1 ] && [ "$FLAG_ACCEPTED" = 1 ]; then
         else no "arm 8: accNew $cOffNew instructions still beats plain ($cOffPlain) with the analysis off — the option did not take"; fi
         if [ -n "${newReload:-}" ] && [ "$newReload" != "$offReload" ]; then ok "arm 2/8: contrast — on and off DISAGREE (on reload=$newReload, off reload=$offReload)"
         else no "arm 2/8: NO CONTRAST — arm 2 (reload=${newReload:-unset}) and arm 8 (reload=$offReload) agree; the flag is not what separates them"; fi
+        # the LOOP classification must be able to fail too: with the analysis off the direct builtin buys the loop nothing
+        if [ "${LOOPCLASS:-}" = LOOP_CONSUMED ]; then
+            if "$CXX" "$CXXSTD" -O2 -DNDEBUG "${INC[@]}" "${SEP_OFF[@]}" -c "$WORK/bufprobe.cpp" -o "$WORK/bufoff.o" 2>> "$WORK/cc8.log"; then
+                lOffPlain="$( insnCount "$WORK/bufoff.o" axpyPlain )"; lOffBuiltin="$( insnCount "$WORK/bufoff.o" axpyBuiltin )"
+                if [ "$lOffBuiltin" -ge $(( lOffPlain - 1 )) ]; then ok "arm 6/8: with the analysis off axpyBuiltin is $lOffBuiltin, no better than plain ($lOffPlain) — LOOP_CONSUMED can fail"
+                else no "arm 6/8: axpyBuiltin $lOffBuiltin still beats plain ($lOffPlain) with the analysis off — the loop classification cannot distinguish consumed from ignored"; fi
+            else
+                no "arm 6/8: buffer probe failed to compile with ${SEP_OFF[*]}"
+            fi
+        fi
     else
         no "arm 8: release probe failed to compile with ${SEP_OFF[*]}"; sed 's/^/    /' "$WORK/cc8.log"
     fi

@@ -935,6 +935,10 @@ endif()
 #
 # The option's name is the same from LLVM 17 through 21 and clang takes it as a compile flag, so it is passed
 # wherever the compiler accepts it: on LLVM 17 it turns the analysis on, on 18+ it restates the default (a no-op).
+# What the option buys on LLVM 17 is the SCALAR half only: the reload after a store through a possibly-aliasing
+# pointer goes away, but the loop vectorizer's overlap checks stay, because LLVM 17 consults the hint only at the
+# assume's own context and LoopAccessAnalysis never supplies one (llvm/llvm-project#64666, fixed in LLVM 18 by
+# #76770). CI showed exactly that split on PR #200 head 5156d668: noaliascheck arm 2 green, arm 6 at plain.
 # Probed, never assumed — GCC rejects -mllvm outright and a clang whose LLVM had dropped the name would reject the
 # option; either way the check says no, the build keeps the compiler default, and the header's debug check still
 # runs. The two-token option rides in CMAKE_REQUIRED_FLAGS (a whitespace-split string, the way the libFuzzer probe
