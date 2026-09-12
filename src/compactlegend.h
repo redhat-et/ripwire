@@ -311,7 +311,10 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // window= and defs= are ELEMENT-qualified: --hotspots carries window= and --callers defs=, each meaning something else.
     { "rank_by",           "rank_by=: the ranker behind k=" },
     { "window",            "window=: the git span mined", true, "r" },
-    { "defs",              "defs=N: of= names N defs; the lowest-id one was walked", true, "r" },
+    // defs= names resolveFocus's pick (graph.h), and the body preference there holds only IN THE DECLARATION'S SCOPE: a pure
+    // virtual beside another class's override keeps the focus. Unconditional, this reading described that answer wrongly
+    // (test/decltodefcheck.sh E3g, which also holds the full --around and --connect readings to the same condition).
+    { "defs",              "defs=N: of= names N defs; the lowest-id one was walked, a C/C++ body in the same scope over its declaration", true, "r" },
     // The map HEADER's absent-at-zero gauges: `<!-- files=` is kept as data while the `<!-- hdr:` clauses that define
     // these fields go (kDeclinedMapLegend, kIgnoredLegend, kExtentSuspectHdrLegend, kMacroBlankedHdrLegend, the absent-if-0
     // half of the always-on legend, kMaxTokensFitLegend). Header-ONLY: several are quoted attributes elsewhere.
