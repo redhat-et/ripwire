@@ -932,7 +932,7 @@ ripwire . --callers=someFunction                   # who calls it
 ripwire . --test-gate                              # before you commit: which tests must run
 ```
 
-> **Written for your agent.** Every command prints compact XML sized for an AI agent to read, not for a person
+> **Written for your agent.** By default, every command prints compact XML sized for an AI agent to read, not for a person
 > scanning a terminal. Human-readable output is on the roadmap.
 
 <details>
@@ -2245,7 +2245,7 @@ every request cross the network in the clear: put a TLS-terminating reverse prox
 
 ### 4. First use
 
-> **ripwire is AI-driven today.** Every command prints compact XML sized for a coding agent to read, not for a person
+> **ripwire is AI-driven today.** By default, every command prints compact XML sized for a coding agent to read, not for a person
 > scanning a terminal. The commands in this section are the ones your agent runs. Human-friendly use is on the
 > roadmap: output a person can read, and more convenient input for common coding cases.
 
@@ -2301,7 +2301,7 @@ only. It does not run the recommendation.
 
 ### 6. Output format
 
-> **Written for an agent.** ripwire is AI-driven today: the output described here is compact XML sized for a coding
+> **Written for an agent.** ripwire is AI-driven today: the default output described here is compact XML sized for a coding
 > agent to read, not for a person scanning a terminal. Human-friendly use is on the roadmap: output a person can
 > read, and more convenient input for common coding cases.
 
