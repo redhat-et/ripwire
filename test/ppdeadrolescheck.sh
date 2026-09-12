@@ -36,7 +36,8 @@
 #  (10) WARM == COLD — the filtered set is what the per-file cache record stores, so a warm run replays
 #                  it. Byte-identity on every answer above, through a private XDG_CACHE_HOME.
 #  (11) MUTATION — every row reader and every attribute reader above is shown able to see the thing it
-#                  claims to look for, against hand-built input.
+#                  claims to look for, against hand-built input; and both ripwire INVOKERS are shown to
+#                  record a non-zero exit rather than discard it.
 #  (12) BINDINGS — the ambiguity half rather than the counting one: a `Bar x;` inside `#if 0` above a
 #                  live `Foo x;` used to leave `x.m()` unnarrowed, amb="1" and split across both `m`s.
 #                  Its control is the SAME file with the dead block physically deleted, so the arm
@@ -348,7 +349,20 @@ int caller(int x)
 EOF
 
 # ── the answers, cold ─────────────────────────────────────────────────────────────────────────────────
-run(){ local out="$1"; shift; "$BIN" "$@" >"$out" 2>/dev/null; }
+# Every ripwire invocation in this gate goes through run() or warm(), and BOTH record the exit status.
+# Discarding it is CONTRIBUTING.md §2 from the other side: each arm below reads a document, so a run that
+# fails *after* writing a parseable one satisfies every string check in the file, and the gate certifies a
+# filtered answer that an ingestion which did not finish happened to leave behind. Nothing downstream can
+# see that — `--uses` output looks the same either way — so the status is the only witness there is.
+# The answer file's basename goes in the report, because it is what names the arm about to read it.
+# Arm (11) probes both helpers against a refused invocation, so this guard is one observed RED.
+run(){
+    local out="$1"; shift
+    "$BIN" "$@" >"$out" 2>/dev/null
+    local rc=$?
+    [ "$rc" -eq 0 ] || no "ripwire exited $rc writing ${out##*/}: $*"
+    return "$rc"
+}
 run "$TMP/a_call.xml"    "$TMP/roles" --no-cache --uses=roles.cpp:target
 run "$TMP/a_macro.xml"   "$TMP/roles" --no-cache --uses=STAMP
 run "$TMP/a_field.xml"   "$TMP/roles" --no-cache --uses=Owner.field
@@ -472,7 +486,13 @@ fi
 echo
 echo "=== (10) WARM == COLD — the cache record replays the filtered set ==="
 XDG="$TMP/xdg"; mkdir -p "$XDG/ripwire"
-warm(){ local out="$1"; shift; env -u TMPDIR XDG_CACHE_HOME="$XDG" "$BIN" "$@" >"$out" 2>/dev/null; }
+warm(){
+    local out="$1"; shift
+    env -u TMPDIR XDG_CACHE_HOME="$XDG" "$BIN" "$@" >"$out" 2>/dev/null
+    local rc=$?
+    [ "$rc" -eq 0 ] || no "ripwire exited $rc writing ${out##*/}: $*"
+    return "$rc"
+}
 wfail=0
 for probe in "roles --uses=Owner.field:w_field" "roles --uses=Widget:w_type" "roles --uses=Base:w_extends" \
              "roles :w_map" "inc --uses=Widget:w_inc" "alt --uses=Gauge.level:w_alt" "defs :w_defs" \
@@ -480,10 +500,14 @@ for probe in "roles --uses=Owner.field:w_field" "roles --uses=Widget:w_type" "ro
     spec="${probe%%:*}"; tag="${probe##*:}"
     corpus="${spec%% *}"; verb="${spec#* }"
     [ "$verb" = "$corpus" ] && verb=""
+    # warm() reports the exit status itself; the caller ties it to the arm and skips a comparison whose
+    # two sides are no longer a cold answer and its replay.
     # shellcheck disable=SC2086
-    warm "$TMP/$tag.cold" "$TMP/$corpus" $verb      # populates the cache
+    warm "$TMP/$tag.cold" "$TMP/$corpus" $verb \
+        || { no "(10) $tag: the cache-populating run failed — the replay has nothing to replay"; wfail=1; continue; }
     # shellcheck disable=SC2086
-    warm "$TMP/$tag.warm" "$TMP/$corpus" $verb      # reads it back
+    warm "$TMP/$tag.warm" "$TMP/$corpus" $verb \
+        || { no "(10) $tag: the replay run failed"; wfail=1; continue; }
     [ -s "$TMP/$tag.cold" ] || { no "(10) $tag: the cold answer is empty — the comparison would be vacuous"; wfail=1; continue; }
     cmp -s "$TMP/$tag.cold" "$TMP/$tag.warm" || { no "(10) $tag: warm output differs from cold"; wfail=1; }
 done
@@ -495,7 +519,7 @@ NBLOB="$( find "$XDG/ripwire" -type f -name 'ripwire-*' 2>/dev/null | wc -l | tr
 [ "$wfail" -eq 0 ] && ok "(10) warm == cold, byte for byte, on every corpus with dead ranges ($NBLOB cache records)"
 
 echo
-echo "=== (11) MUTATION — every reader above is shown able to see what it looks for ==="
+echo "=== (11) MUTATION — every reader above, and both ripwire invokers, are shown able to fire ==="
 printf '<uses of="x" count="2"><u role="write" p="c.cpp:7" in_id="liveWrite"/><u role="write" p="c.cpp:12" in_id="deadWrite"/></uses>' >"$TMP/m_rows.xml"
 [ -n "$( rows "$TMP/m_rows.xml" 'in_id="deadWrite"' )" ] \
     && ok "(11) rows(): a served dead row IS detected" \
@@ -534,6 +558,34 @@ if ( nonempty "probe" "" >/dev/null 2>&1 ); then
 else
     ok "(11) vacuity guard: nonempty() rejects an empty capture"
 fi
+# the EXIT-STATUS guard, on both invokers and in both directions. A ripwire run that fails after writing
+# a parseable document satisfies every reader above, so run()/warm() discarding the status is the same
+# defect as a reader that cannot see — and a guard that only ever runs against a binary which succeeds has
+# never been shown to have a failing state. Each helper is probed through a command substitution, so the
+# FAIL line the refused half provokes is captured here instead of reaching this shell's `fail`.
+# $1 = the invoker's name, called as a function.
+statusGuard(){
+    local helper="$1" bad good badrc goodrc
+    bad="$( "$helper" "$TMP/m_${helper}_bad.xml" "$TMP/roles" --no-cache --ppdeadroles-not-a-flag )"; badrc=$?
+    good="$( "$helper" "$TMP/m_${helper}_ok.xml"  "$TMP/roles" --no-cache --uses=Widget )";           goodrc=$?
+    if [ "$badrc" -eq 0 ]; then
+        no "(11) $helper() returns 0 for an invocation ripwire refused — every answer it writes is unguarded"
+    else
+        case "$bad" in
+            *'  FAIL  '*) ok "(11) $helper(): a non-zero ripwire exit IS recorded, not discarded" ;;
+            *)            no "(11) $helper() returns $badrc for a refused invocation but records no FAIL line" ;;
+        esac
+    fi
+    if [ "$goodrc" -ne 0 ]; then
+        no "(11) $helper() returns $goodrc for the same invocation arm (7) reads — the guard has no contrast"
+    elif [ -n "$good" ]; then
+        no "(11) $helper() reports on an invocation that exited 0: $good"
+    else
+        ok "(11) $helper(): a succeeding invocation returns 0 and says nothing — the guard has contrast"
+    fi
+}
+statusGuard run
+statusGuard warm
 
 echo
 [ "$fail" -eq 0 ] && { echo "ppdeadrolescheck: ALL PASS"; exit 0; }
