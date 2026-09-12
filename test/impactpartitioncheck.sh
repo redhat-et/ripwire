@@ -224,6 +224,49 @@ for flag in INERT:
     else:
         ok("(4) %s pays 0 bytes for the caveat (no tested partition on it)" % flag)
 
+# ── (5) EACH FORM'S LEGEND READS THE TESTED LENS AS THAT FORM PRINTS IT (2026-09-12) ─────────────────────────────────────
+# kTestedRowLegend says tested="1" is "never 0, omitted when it does not", which is true of the XML rows: they print the
+# attribute only where the lens holds. The columnar form of the same three verbs carries the lens as a DENSE <tested> column
+# (columnar.h emitColumnarTestedColumn), one value per row and 0 on every row the lens does not accept, a test row included,
+# and it printed the row sentence anyway: test/fixture's --callers=distance --format=columnar read "never 0" beside
+# <tested>0,0</tested>. So the columnar legend must read the column and not carry the row sentence, and the XML legend must
+# keep the row sentence, carry no column reading, and print no <s tested="0">. test/fixture holds no test, so every value in
+# its columns is 0 and the control is certain. The needles are the two readings' own words (graphlegend.h).
+# RED on 036c827d (plain): the three columnar rows FAILed and nothing else did, for example
+#   FAIL  (5) --callers=distance --format=columnar: prints <tested>0,0</tested> under a legend that says tested is never 0
+ROW_READING = "never 0, omitted when it does not"
+COL_READING = "0 = none found, or a test row"
+
+def run_fixture(args):
+    p = subprocess.run([BIN, "test/fixture"] + args, capture_output=True, text=True, timeout=60)
+    return p.stdout
+
+for args in (["--callers=distance", "--format=columnar"], ["--callees=total_area", "--format=columnar"], ["--impact=distance", "--format=columnar"]):
+    doc, label = run_fixture(args), " ".join(args)
+    lg     = legend_of(doc)
+    fields = re.search(r'<cols [^>]*fields="([^"]*)"', doc)
+    col    = re.search(r'<tested>([^<]*)</tested>', doc)
+    if not fields or "tested" not in fields.group(1).split(",") or not col or "0" not in col.group(1).split(","):
+        no("(5) %s: control broken — no tested column holding a 0, so the legend has nothing to disagree with" % label)
+    elif ROW_READING in lg:
+        no("(5) %s: prints <tested>%s</tested> under a legend that says tested is never 0" % (label, col.group(1)))
+    elif COL_READING not in lg:
+        no("(5) %s: prints <tested>%s</tested> and its legend never reads the column's 0" % (label, col.group(1)))
+    else:
+        ok("(5) %s: the legend reads the column it prints (<tested>%s</tested>)" % (label, col.group(1)))
+
+for args in (["--callers=distance"], ["--impact=distance"]):
+    doc, label = run_fixture(args), " ".join(args)
+    lg = legend_of(doc)
+    if not re.search(r'<s [^>]*>', doc):
+        no("(5) %s: control broken — no <s> row, so the row reading has nothing to agree with" % label)
+    elif re.search(r'<s [^>]* tested="0"', doc):
+        no("(5) %s: an <s> row prints tested=\"0\" beside a row reading that says never 0" % label)
+    elif ROW_READING not in lg or COL_READING in lg:
+        no("(5) %s: the XML legend %s" % (label, "lost the row reading" if ROW_READING not in lg else "reads a column this form does not print"))
+    else:
+        ok("(5) %s: the row reading rides the XML form, whose rows never print tested=\"0\", and the column reading does not" % label)
+
 print()
 if fail[0]:
     print("impactpartitioncheck: FAILURES")

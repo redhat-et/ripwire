@@ -389,6 +389,14 @@ inline constexpr const char* kTestedLensBlindSpotLegend =
 inline constexpr const char* kTestedRowLegend =
     "tested=\"1\" on a row means an indexed test transitively reaches it (never 0, omitted when it does not). ";
 
+// The same lens in the COLUMNAR form (2026-09-12). A parallel array cannot omit a false entry, so --callers/--callees/--impact
+// --format=columnar carry it as a dense <tested> column (columnar.h emitColumnarTestedColumn): 1 where graph.h isTestedByReach
+// holds, 0 on every other row, a test symbol's row included. Those forms printed kTestedRowLegend's "never 0" beside a column of
+// zeros (test/fixture's --callers=distance read <tested>0,0</tested>), so they read the column instead, in the words of
+// compactlegend.h's compact column reading. Gate: test/impactpartitioncheck.sh arm (5).
+inline constexpr const char* kTestedColumnLegend =
+    "tested= is a dense column in this form: fields= names tested, and <tested> holds one value per row: 1 = a non-test row an indexed test transitively reaches; 0 = none found, or a test row. ";
+
 // --callers / --callees shipped NO legend at all (0 bytes on both, which is why every one of their root
 // attributes sits in test/legendcoverage_baseline.txt). ONE legend serves both forms: the two verbs are one
 // code path with the edge direction flipped, and giving them two descriptions is precisely the per-verb
@@ -410,17 +418,26 @@ inline constexpr const char* kCallHierarchyLegendCalleesOnly =
 inline constexpr const char* kCallersNextSelectorLegend = "next= is the one pasteable follow-up (the uses verb on this selector: the call sites). ";
 inline constexpr const char* kCallersNextBareNameLegend = "next= is the one pasteable follow-up (the uses verb on the called name: all same-named definitions' call sites, including sites bound to other definitions, because a declined call names no single definition). ";
 
+// The tested lens's reading for the form a document takes: an XML row omits a false tested=, the columnar array prints 0.
+// ONE choice for --callers/--callees (callHierarchyLegendOpen below) and --impact (verbs_navigate.h runImpact), so the verbs
+// cannot disagree about which form reads which sentence.
+inline constexpr const char* testedLensLegend( bool isColumnar ) noexcept
+{
+    return isColumnar ? kTestedColumnLegend : kTestedRowLegend;
+}
+
 // The composed opener, one call for the caller — keeps the wantCallers/callees branch out of
 // runCallHierarchy (already this file's largest dispatcher) rather than adding a ternary at the call site.
-inline std::string callHierarchyLegendOpen( bool wantCallers, bool nextUsesBareName = false )
+inline std::string callHierarchyLegendOpen( bool wantCallers, bool nextUsesBareName, bool isColumnar )
 {
     const char* const callersNextClause = nextUsesBareName ? kCallersNextBareNameLegend : kCallersNextSelectorLegend;
+    const char* const testedClause = testedLensLegend( isColumnar );
     // F-02: the blind-spot clause rides with hop_tested=/hop_untested=, which both forms always carry.
     // P3 (L7): next= defined where the reader meets it — callers hand over the SITES (the uses verb on the same
     // selector, its @FILE:LINE spelling mirrored), callees the BODY whose callees these are (expand).
     // nextUsesBareName is the emitter's OWN decision, never re-derived here; no double hyphen in comment text.
-    return wantCallers ? std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kTestedLensBlindSpotLegend + callersNextClause
-                       : std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kTestedLensBlindSpotLegend + kCallHierarchyLegendCalleesOnly + "next= is the one pasteable follow-up (expand on this selector: the body). ";
+    return wantCallers ? std::string( kCallHierarchyLegendOpen ) + testedClause + kTestedLensBlindSpotLegend + callersNextClause
+                       : std::string( kCallHierarchyLegendOpen ) + testedClause + kTestedLensBlindSpotLegend + kCallHierarchyLegendCalleesOnly + "next= is the one pasteable follow-up (expand on this selector: the body). ";
 }
 
 // ── LB-G (r10 GitNexus round) — the DISPLAY-CAP clause the neighbour verbs share ─────────────────────────
