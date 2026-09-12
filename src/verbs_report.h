@@ -1542,6 +1542,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         std::uint32_t onlyFileId    = UINT32_MAX;
         std::size_t   symDefCount   = 0;              // §B11.3-class: how many definitions the fold below discarded
         std::string   owSeedSym;                      // @-seed rebind: the rebound definition's name, disclosed as sym=
+        std::size_t   owUnprovenDefs = 0;             // H1: the decl→def residue — definitions whose files were never analysed
         if( !cfg.ownersSym.empty() )
         {
             // §B11.1 — this arm resolved with the BARE-NAME resolver and refused in the pre-§B4.2 dialect, so
@@ -1550,7 +1551,9 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             // plainly exists. Both halves join the family: resolveAllByNameQualified (bare names resolve
             // byte-identically; splitQualifiedSpec leaves a spec with no ':' alone) and the shared
             // selectorNotFoundMessage, which says whether the PATH half or the NAME half is the fault.
-            const std::vector<NodeId> defs = resolveAllByNameQualified( ing, cfg.ownersSym );
+            // H1: a file:name selector whose definitions were dropped resolves to the declaration alone, so defs="1" and
+            // the one file analysed is the declaration's — the out-param says how many definitions that left out.
+            const std::vector<NodeId> defs = resolveAllByNameQualified( ing, cfg.ownersSym, &owUnprovenDefs );
             if( defs.empty() )
             {
                 rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: --owners symbol not found: ",
@@ -1620,7 +1623,9 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                      "holding the FIRST of them (lowest node id, the same pick around and lego make), so defs= above 1 means "
                      "the other definitions' files were NOT analysed. Qualify with file:name to choose one. An @FILE:LINE "
                      "seed rebinds to the innermost definition enclosing that line (sym= names it) and covers exactly that "
-                     "definition's file -->{}{}",
+                     "definition's file -->{}{}{}",
+                     // H1: the residue clause as its own comment, exactly when the root carries unproven_defs=
+                     rw::unprovenDefsVerbComment( rw::UnprovenDefsVerb::Owners, owUnprovenDefs > 0, "<!-- ripwire owners: " ).c_str(),
                      rw::kAtStampLegend, rw::rootRelPathsLegend( mvSingleRoot )  );   // sweep: ditto
         // §P8: --limit/--offset used to be accepted and ignored here (757 rows whatever you asked for). They
         // window `printRows`, which is already deterministic (files sorted by path). files= keeps meaning the
@@ -1642,7 +1647,8 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         const std::string owSymAttr  = cfg.ownersSym.empty()
                                      ? std::string{}
                                      : " of=\"" + std::string( escapeXml( cfg.ownersSym, owSymEsc ) ) + "\"" + owSeedAttr
-                                     + " defs=\"" + std::to_string( symDefCount ) + "\"";
+                                     + " defs=\"" + std::to_string( symDefCount ) + "\""
+                                     + rw::unprovenDefsAttrXml( owUnprovenDefs );   // H1: beside the defs= it qualifies; absent at zero
         rw::emitTo( stdout, "<owners files=\"{}\"{}{}{}{}>", ownerships.size(),
                      pageDisclosure( owab, sizeof( owab ), owpw.end - owpw.begin, printRows.size(), owpw.end,
                                      cfg.pageLimit, cfg.pageOffset, false ),

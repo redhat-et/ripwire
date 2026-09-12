@@ -4056,8 +4056,11 @@ inline FetchOutcome fetchBodyByName( const std::string& root, const std::string&
         return oc;
     }
 
-    const McpIndex&           nameIx      = getIndex( root );          // same index a read verb would build
-    const std::vector<NodeId> nameMatches = resolveAllByNameQualified( nameIx.ing, name );
+    const McpIndex&           nameIx       = getIndex( root );          // same index a read verb would build
+    // H1: a file:name spelling whose definitions were dropped serves the declaration's body; the out-param says how many
+    // definitions that left out, and rides the JSON beside resolved_from_name (absent at zero).
+    std::size_t               unprovenDefs = 0;
+    const std::vector<NodeId> nameMatches  = resolveAllByNameQualified( nameIx.ing, name, &unprovenDefs );
     if( nameMatches.empty() )
     {
         FetchOutcome oc;
@@ -4087,6 +4090,10 @@ inline FetchOutcome fetchBodyByName( const std::string& root, const std::string&
     if( byName.ok && !byName.resultJson.empty() && byName.resultJson.front() == '{' )
     {
         std::string disclosure = "\"resolved_from_name\":\"" + mcpdetail::jsonEscape( name ) + "\",";
+        if( unprovenDefs > 0 )
+        {
+            disclosure += "\"unproven_defs\":" + std::to_string( unprovenDefs ) + ",";
+        }
         if( distinctHandles.size() > 1 )
         {
             disclosure += "\"name_defs\":" + std::to_string( distinctHandles.size() ) + ",\"other_defs\":[";

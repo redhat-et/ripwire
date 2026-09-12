@@ -68,6 +68,11 @@
 #       Each carries unproven_defs= with a clause worded for that verb, absent on a proven file:name and a bare name, and
 #       the existing compact row fires with the full clause stripped (E2t). The corpora sort the DEFINITION's file first
 #       (a_impl.cpp before api.h), so a bare name's lowest id is the body and every control answers.
+#   (E2u..E2z) THE SAME RESIDUE WHERE THE ANSWER IS NARROWER RATHER THAN ZERO. --expand and --outline served the
+#       declaration's text alone and share one <ctx> root, summed item by item (E2u, E2v); --owners covered the
+#       declaration's file under defs="1" (E2w); MCP fetch_body served the declaration's body (E2x); --note-add keyed its
+#       note to the declaration (E2y). Each now carries unproven_defs= — on the root, as a key of fetch_body's JSON, on
+#       --note-add's stderr — and the compact row fires on --expand and --owners with the full clause stripped (E2z).
 #   (F) MUTATION — every assertion SHAPE above is shown able to fail, against hand-built inputs.
 #
 # WHAT (E) AND (E2) EACH COVER, since between them they close what was once a stated gap. (E) reads the
@@ -188,14 +193,19 @@ fullClauseIn(){ case "$1" in *'unproven_defs=K (absent when 0)'*) printf 1 ;; *)
 # error about something else, is not that refusal (E2j, and its (F) row).
 refusesAsCliOnly(){ case "$( mcpPayload "$1" )" in '__ERROR__:'*'CLI-only'*) printf 1 ;; *) printf 0 ;; esac; }
 
-# The first <EL …> start tag OUTSIDE every comment. rootEl reads the first match anywhere, which is right for a document
-# whose root leads it; (E2n..E2t) read roots that do not lead (<lego> inside <ctx>, the map's <r> behind a legend that may
-# spell `<r` in prose), so a tag named inside a comment must never be read as the element.
+# elNC <file> <EL> [ATTR] — elements read OUTSIDE every comment. rootEl reads the first match anywhere, which is right for a
+# document whose root leads it; (E2n..E2z) read roots that do not lead (<lego> inside <ctx>, the map's <r> behind a legend
+# that may spell `<r` in prose) and rows below them, so a tag named inside a comment must never be read as the element.
+# Without ATTR: the first <EL …> start tag. With it: ATTR's value on EVERY <EL> row, one per line (left-anchored, as attr).
 elNC(){ python3 -c '
 import re,sys
 d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S)
-m=re.search(r"<"+re.escape(sys.argv[2])+r"(?=[\s/>])[^>]*>",d)
-sys.stdout.write(m.group(0) if m else "")' "$1" "$2"; }
+tags=re.findall(r"<"+re.escape(sys.argv[2])+r"(?=[\s/>])[^>]*>",d)
+if len(sys.argv)<4:
+    sys.stdout.write(tags[0] if tags else "")
+else:
+    vals=[m.group(1) for t in tags for m in [re.search(r"(?<![A-Za-z0-9_])"+sys.argv[3]+r"=\"([^\"]*)\"",t)] if m]
+    sys.stdout.write("\n".join(vals))' "$@"; }
 
 # Every comment met before the first <EL> start tag outside a comment: the legend a reader has read by the time they
 # reach that element, wherever it sits (the lego legend rides inside <ctx>). Empty when the document has no such element.
@@ -209,10 +219,7 @@ for m in re.finditer(r"<!--.*?-->|<"+re.escape(sys.argv[2])+r"(?=[\s/>])",d,re.S
     seen.append(m.group(0))' "$1" "$2"; }
 
 # The n= of every <s> row outside comments — --around's neighbourhood, read as a NAME SET.
-rowNamesNC(){ python3 -c '
-import re,sys
-d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S)
-sys.stdout.write("\n".join(re.findall(r"<s\b[^>]*\bn=\"([^\"]*)\"",d)))' "$1"; }
+rowNamesNC(){ elNC "$1" s n; }
 
 # ── corpora, built here rather than committed: each is a minimal repro and a committed .h/.cpp fixture
 #    would also join every OTHER gate's view of test/. ────────────────────────────────────────────────
@@ -1248,6 +1255,165 @@ for pair in "e2_ec_cmp.xml:edit-check" "e2_lg_cmp.xml:lego" "e2_cn_cmp.xml:conne
     fi
 done
 
+# ── (E2u..E2z) THE SAME RESIDUE WHERE THE ANSWER IS NARROWER RATHER THAN ZERO ─────────────────────────────────────────────
+# --expand, --outline, --owners, MCP fetch_body and --note-add resolve through the same resolver and answer the drop with
+# less, not with nothing: the declaration's text, the declaration's file, a note keyed to the declaration. The PREMISE is
+# therefore which FILES the answer served (the declaration's alone), and the control is an answer that served the
+# definition's file too. --expand and --outline share one <ctx> root, so the attribute rides that root and its clause
+# rides as a comment inside it, ahead of the payload element whichever mode served it (whole-file <src>, <bodies>,
+# <outline>).
+
+# The distinct p= values of every <EL> row outside comments, sorted and space-joined: which FILES an answer served.
+pathsOf(){ elNC "$1" "$2" p | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//'; }
+
+# exPresent <label> <file> <want> <payload-el> <row-el> <served-paths>
+exPresent(){
+    _lbl="$1" _f="$2" _want="$3" _pe="$4" _re="$5" _paths="$6"
+    _R="$( elNC "$_f" ctx )"
+    nonempty "$_lbl: no <ctx> root" "$_R" || return 0
+    _P="$( pathsOf "$_f" "$_re" )"
+    if [ "$_P" != "$_paths" ]; then
+        no "$_lbl: premise broken — the <$_re> rows serve \"$_P\", expected \"$_paths\"; the arm would be about an answer that is not narrower"
+        return 0
+    fi
+    _G="$( attr "$_R" unproven_defs )"
+    if [ "$_G" = "$_want" ]; then
+        ok "$_lbl: <$_re> rows from \"$_P\", and <ctx> carries unproven_defs=\"$_G\""
+    else
+        no "$_lbl: <ctx> unproven_defs=\"${_G:-<absent>}\", expected \"$_want\" — the answer serves \"$_P\" with nothing saying which definitions it left out"
+    fi
+    if [ "$( fullClauseIn "$( legendBefore "$_f" "$_pe" )" )" = 1 ]; then
+        ok "$_lbl: the legend met before <$_pe> defines unproven_defs="
+    else
+        no "$_lbl: no clause defining unproven_defs= in the legend met before <$_pe>"
+    fi
+}
+
+# exAbsent <label> <file> <payload-el> <row-el> <path-the-control-serves>
+exAbsent(){
+    _lbl="$1" _f="$2" _pe="$3" _re="$4" _must="$5"
+    _R="$( elNC "$_f" ctx )"
+    nonempty "$_lbl: no <ctx> root" "$_R" || return 0
+    case " $( pathsOf "$_f" "$_re" ) " in
+        *" $_must "*) ;;
+        *) no "$_lbl: control broken — the <$_re> rows do not serve $_must ($( pathsOf "$_f" "$_re" ))"; return 0 ;;
+    esac
+    if [ -n "$( attr "$_R" unproven_defs )" ]; then
+        no "$_lbl: carries unproven_defs=\"$( attr "$_R" unproven_defs )\" — nothing was dropped, so there is no residue to disclose"
+    else
+        case "$( legendBefore "$_f" "$_pe" )" in
+            *'unproven_defs='*) no "$_lbl: nothing dropped, yet the legend defines unproven_defs=" ;;
+            *)                  ok "$_lbl: <$_re> rows serve $_must, and neither unproven_defs= nor its clause is present" ;;
+        esac
+    fi
+}
+
+echo
+echo "=== (E2u) --expand serves the declaration alone, and now says what it left out ==="
+run  "$TMP/dord" --expand=api.h:helper                            >"$TMP/e2_ex.xml"
+run2 "$TMP/dord" --expand=api.h:helper --top-k=0                  >"$TMP/e2_ex0.xml"
+run2 "$TMP/dord" --expand=api.h:helper,useHelper --top-k=0        >"$TMP/e2_ex_mixed.xml"
+run2 "$TMP/two"  --expand=a.h:alpha,b.h:beta --top-k=0            >"$TMP/e2_ex_two.xml"
+run  "$TMP/dctl" --expand=api.h:helper                            >"$TMP/e2_ex_ctl.xml"
+run2 "$TMP/dctl" --expand=api.h:helper --top-k=0                  >"$TMP/e2_ex0_ctl.xml"
+run2 "$TMP/dord" --expand=helper --top-k=0                        >"$TMP/e2_ex0_bare.xml"
+exPresent "(E2u) --expand=api.h:helper (whole-file)"                          "$TMP/e2_ex.xml"       1 src    src "api.h"
+exPresent "(E2u) --expand=api.h:helper --top-k=0 (bodies)"                    "$TMP/e2_ex0.xml"      1 bodies b   "api.h"
+exPresent "(E2u) --expand=api.h:helper,useHelper --top-k=0 (a NAME item adds 0)" "$TMP/e2_ex_mixed.xml" 1 bodies b "api.h caller.cpp"
+exPresent "(E2u) --expand=a.h:alpha,b.h:beta --top-k=0 (summed item by item)" "$TMP/e2_ex_two.xml"   2 bodies b   "a.h b.h"
+exAbsent  "(E2u) --expand=api.h:helper, every candidate proven"               "$TMP/e2_ex_ctl.xml"     src    src a_impl.cpp
+exAbsent  "(E2u) --expand=api.h:helper --top-k=0, every candidate proven"     "$TMP/e2_ex0_ctl.xml"    bodies b   a_impl.cpp
+exAbsent  "(E2u) --expand=helper --top-k=0, bare name"                        "$TMP/e2_ex0_bare.xml"   bodies b   a_impl.cpp
+
+echo
+echo "=== (E2v) --outline, alone and beside --expand on the root they share ==="
+run2 "$TMP/dord" --outline=api.h:helper --top-k=0 >"$TMP/e2_ol.xml"
+run2 "$TMP/dctl" --outline=api.h:helper --top-k=0 >"$TMP/e2_ol_ctl.xml"
+"$BIN" "$TMP/dord" --no-cache --expand=api.h:helper --outline=api.h:helper --top-k=0 >"$TMP/e2_exol.xml" 2>/dev/null
+exPresent "(E2v) --outline=api.h:helper --top-k=0"                            "$TMP/e2_ol.xml"     1 outline o "api.h"
+exPresent "(E2v) --expand=api.h:helper --outline=api.h:helper (one root, summed)" "$TMP/e2_exol.xml" 2 bodies b "api.h"
+exAbsent  "(E2v) --outline=api.h:helper --top-k=0, every candidate proven"    "$TMP/e2_ol_ctl.xml"   outline o a_impl.cpp
+
+echo
+echo "=== (E2w) --owners covers the declaration's file under defs=\"1\", and now says what it did not analyse ==="
+run "$TMP/ecp" --owners=api.h:helper    >"$TMP/e2_ow.xml"
+run "$TMP/ecp" --owners=impl.cpp:helper >"$TMP/e2_ow_def.xml"
+run "$TMP/ecp" --owners=helper          >"$TMP/e2_ow_bare.xml"
+e3Present "(E2w) --owners=api.h:helper"                     "$TMP/e2_ow.xml"      owners 1 owners defs 1
+e3Absent  "(E2w) --owners=impl.cpp:helper, the definition"  "$TMP/e2_ow_def.xml"  owners   owners defs 1
+e3Absent  "(E2w) --owners=helper, bare name"                "$TMP/e2_ow_bare.xml" owners   owners defs 2
+
+echo
+echo "=== (E2x) MCP fetch_body serves the declaration's body, and now carries \"unproven_defs\" ==="
+mcpTranscript "$TMP/e2_mcp_fb.rpc"      fetch_body "" "path=$TMP/mcp_dord" "handle=api.h:helper"
+mcpTranscript "$TMP/e2_mcp_fb_def.rpc"  fetch_body "" "path=$TMP/mcp_dord" "handle=a_impl.cpp:helper"
+mcpTranscript "$TMP/e2_mcp_fb_bare.rpc" fetch_body "" "path=$TMP/mcp_dord" "handle=helper"
+for n in e2_mcp_fb e2_mcp_fb_def e2_mcp_fb_bare; do
+    mcpPayload "$TMP/$n.rpc" >"$TMP/$n.json"
+done
+fbRow(){ # fbRow <label> <json-file> <served-file> <unproven_defs, or "" for absent>
+    _lbl="$1" _j="$2" _file="$3" _want="$4"
+    case "$( head -c 1 "$_j" )" in
+        '{') ;;
+        *) no "$_lbl: fetch_body did not answer ($( head -c 160 "$_j" ))"; return 0 ;;
+    esac
+    _F="$( jsonKey "$_j" file )"
+    if [ "$_F" != "$_file" ]; then
+        no "$_lbl: premise broken — the body served is from \"$_F\", expected \"$_file\""
+        return 0
+    fi
+    _U="$( jsonKey "$_j" unproven_defs )"
+    if [ "$_U" = "$_want" ]; then
+        ok "$_lbl: serves $_F's body, and \"unproven_defs\" is ${_U:-absent}"
+    else
+        no "$_lbl: serves $_F's body with \"unproven_defs\" ${_U:-absent}, expected ${_want:-absent}"
+    fi
+}
+fbRow "(E2x) MCP fetch_body handle=api.h:helper"                     "$TMP/e2_mcp_fb.json"      api.h      1
+fbRow "(E2x) MCP fetch_body handle=a_impl.cpp:helper, the definition" "$TMP/e2_mcp_fb_def.json"  a_impl.cpp ""
+fbRow "(E2x) MCP fetch_body handle=helper, bare name"                "$TMP/e2_mcp_fb_bare.json" a_impl.cpp ""
+
+echo
+echo "=== (E2y) --note-add keys its note to the declaration, and now says so about the definition on stderr ==="
+cp -R "$TMP/dord" "$TMP/na_drop" && cp -R "$TMP/dord" "$TMP/na_def" || no "(E2y) could not copy the corpora --note-add writes into"
+"$BIN" "$TMP/na_drop" --no-cache --note-add="api.h:helper: a gotcha"      >/dev/null 2>"$TMP/e2_na.err";     NA_RC=$?
+"$BIN" "$TMP/na_def"  --no-cache --note-add="a_impl.cpp:helper: a gotcha" >/dev/null 2>"$TMP/e2_na_def.err"; NA_DEF_RC=$?
+if [ "$NA_RC" != 0 ] || ! grep -q 'canonicalised' "$TMP/e2_na.err"; then
+    no "(E2y) premise broken — --note-add=api.h:helper did not store a canonicalised note (rc=$NA_RC): $( head -c 200 "$TMP/e2_na.err" )"
+elif grep -q 'unproven_defs=1' "$TMP/e2_na.err"; then
+    ok "(E2y) --note-add=api.h:helper stores its note and says unproven_defs=1 on stderr"
+else
+    no "(E2y) --note-add=api.h:helper stored its note on the declaration with nothing on stderr about the definition it could not tie to api.h"
+fi
+if [ "$NA_DEF_RC" != 0 ]; then
+    no "(E2y) control broken — --note-add=a_impl.cpp:helper failed (rc=$NA_DEF_RC): $( head -c 200 "$TMP/e2_na_def.err" )"
+elif grep -q 'unproven_defs' "$TMP/e2_na_def.err"; then
+    no "(E2y) --note-add=a_impl.cpp:helper mentions unproven_defs — nothing was dropped"
+else
+    ok "(E2y) --note-add=a_impl.cpp:helper, the definition: stored, and nothing on stderr about unproven_defs"
+fi
+
+echo
+echo "=== (E2z) under the compact legend, the existing unproven_defs row fires on --expand's <ctx> and on <owners> ==="
+run2 "$TMP/dord" --expand=api.h:helper --legend=compact >"$TMP/e2_ex_cmp.xml"
+run2 "$TMP/ecp"  --owners=api.h:helper --legend=compact >"$TMP/e2_ow_cmp.xml"
+for triple in "e2_ex_cmp.xml:ctx:src" "e2_ow_cmp.xml:owners:owners"; do
+    f="${triple%%:*}"; rest="${triple#*:}"; el="${rest%%:*}"; before="${rest#*:}"
+    R="$( elNC "$TMP/$f" "$el" )"
+    nonempty "(E2z) no <$el> root in $f" "$R" || continue
+    L="$( legendBefore "$TMP/$f" "$before" )"
+    if [ -z "$( attr "$R" unproven_defs )" ]; then
+        no "(E2z) $f: the compact <$el> root carries no unproven_defs= — nothing for the compact reading to define"
+    elif [ "$( fullClauseIn "$L" )" = 1 ]; then
+        no "(E2z) $f: the FULL unproven_defs= clause survived into the compact dialect beside its compact reading"
+    else
+        case "$L" in
+            *'unproven_defs=K:'*) ok "(E2z) $f: <$el unproven_defs=\"$( attr "$R" unproven_defs )\">, the compact legend reads it, and the full clause is gone" ;;
+            *)                    no "(E2z) $f: <$el> carries unproven_defs= under the compact legend with no unproven_defs=K: reading" ;;
+        esac
+    fi
+done
+
 echo
 echo "=== (F) MUTATION — every assertion shape above is shown able to fail ==="
 # (A)/(B) shape: the row-name reader must SEE a wrong caller when one is present…
@@ -1355,6 +1521,12 @@ printf '<!-- <s n="useHelper"> --><r><f p="api.h"><s t="fn" n="helper"/></f></r>
 [ "$( rowNamesNC "$TMP/m_e3r.xml" )" = "helper" ] \
     && ok "(F) E2r-shape: rowNamesNC reads the rows, never a row spelled in a comment" \
     || no "(F) rowNamesNC read a commented row — the (E2r) premise could pass on a legend: $( rowNamesNC "$TMP/m_e3r.xml" | tr '\n' ' ' )"
+# (E2u) shape: pathsOf must read each served file once, and never a row spelled in a comment or a longer tag sharing the
+# row's prefix (<b> is a prefix of <bodies>), or the narrower-answer premise could pass on a legend.
+printf '<!-- <b p="impl.cpp"> --><ctx><bodies shown="3"><b p="api.h"/><b p="api.h"/><bx p="x.h"/><b p="caller.cpp"/></bodies></ctx>' >"$TMP/m_e2u.xml"
+[ "$( pathsOf "$TMP/m_e2u.xml" b )" = "api.h caller.cpp" ] \
+    && ok "(F) E2u-shape: pathsOf reads each served file once, never a commented row or a prefix-sharing tag" \
+    || no "(F) pathsOf misread the served files: $( pathsOf "$TMP/m_e2u.xml" b )"
 # VACUITY guard itself. Run in a subshell so it cannot set fail.
 if ( nonempty "probe" "" >/dev/null 2>&1 ); then
     no "(F) nonempty() accepts an empty capture — every arm's vacuity guard is inert"
@@ -1381,7 +1553,9 @@ if command -v xmllint >/dev/null 2>&1; then
        && xmllint --noout "$TMP/e2_ec.xml" 2>/dev/null && xmllint --noout "$TMP/e2_ecd.xml" 2>/dev/null \
        && xmllint --noout "$TMP/e2_lg.xml" 2>/dev/null && xmllint --noout "$TMP/e2_cn.xml" 2>/dev/null \
        && xmllint --noout "$TMP/e2_ar.xml" 2>/dev/null && xmllint --noout "$TMP/e2_sl.xml" 2>/dev/null \
-       && xmllint --noout "$TMP/e2_mcp_lg.xml" 2>/dev/null && xmllint --noout "$TMP/e2_mcp_cn.xml" 2>/dev/null; then
+       && xmllint --noout "$TMP/e2_mcp_lg.xml" 2>/dev/null && xmllint --noout "$TMP/e2_mcp_cn.xml" 2>/dev/null \
+       && xmllint --noout "$TMP/e2_ex.xml" 2>/dev/null && xmllint --noout "$TMP/e2_ex0.xml" 2>/dev/null \
+       && xmllint --noout "$TMP/e2_exol.xml" 2>/dev/null && xmllint --noout "$TMP/e2_ow.xml" 2>/dev/null; then
         ok "xml well-formed"
     else
         no "xml malformed"

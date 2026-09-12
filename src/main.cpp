@@ -607,25 +607,47 @@ struct NoteTargetResolution
     bool        refused = false;    // the refusal is already on stderr; the caller exits 1
 };
 
+// The UNIQUE-definition arm of resolveNoteAddTarget: store the canonical id and SAY SO when it differs from what was
+// typed. Lifted out when H1's residue line joined it, because the handler already sat at the verbosity bar.
+//
+// H1 — the decl→def residue, on the one surface this verb has: its stderr. `unprovenDefs` is what the resolver dropped
+// for a file:name target — same-named definitions it could not tie to the file it named. The one definition left is
+// then the declaration, the note keys it, and it will not surface on them; nothing is printed at zero.
+NoteTargetResolution noteTargetForDefinition( const MainDispatch& d, rw::NodeId def, const std::string& rawTarget,
+                                              const std::string& normalized, std::size_t unprovenDefs )
+{
+    using namespace rw;
+    const IngestResult& ing = d.ing;
+    const Symbol&       s   = ing.symbols[ def ];
+    // EXACTLY the key --notes' liveness set and serialize.h's surfacing lookup build (canonicalIdRelTo),
+    // spelled from the same three fields, so "stored" and "found" can never be two different strings.
+    const std::string canon = canonicalId( relForHash( ing.files[ s.fileId ], d.root ), s.scope, s.name );
+    if( canon != normalized )
+    {
+        rw::emitTo( stderr, "ripwire: --note-add: target '{}' canonicalised to '{}' — that is the id --for/--expand key notes by\n",
+                      rawTarget.c_str(), canon.c_str() );
+    }
+    if( unprovenDefs > 0 )
+    {
+        rw::emitTo( stderr, "ripwire: --note-add: unproven_defs={} — the target also matched {} same-named definition(s) it could not tie to "
+                              "the file it named; the note keys the declaration above and will not surface on them. Widen the target to "
+                              "the bare NAME, or to Scope::name, to see them\n",
+                      unprovenDefs, unprovenDefs );
+    }
+    return { canon, false };
+}
+
 NoteTargetResolution resolveNoteAddTarget( const MainDispatch& d, const std::string& rawTarget, std::string normalized )
 {
     using namespace rw;
     const IngestResult& ing = d.ing;
 
-    const std::vector<NodeId> defs = resolveAllByNameQualified( ing, rawTarget );
+    std::size_t               naUnprovenDefs = 0;   // H1: the residue noteTargetForDefinition discloses
+    const std::vector<NodeId> defs           = resolveAllByNameQualified( ing, rawTarget, &naUnprovenDefs );
 
     if( defs.size() == 1 )
     {
-        const Symbol&     s     = ing.symbols[ defs[0] ];
-        // EXACTLY the key --notes' liveness set and serialize.h's surfacing lookup build (canonicalIdRelTo),
-        // spelled from the same three fields, so "stored" and "found" can never be two different strings.
-        const std::string canon = canonicalId( relForHash( ing.files[ s.fileId ], d.root ), s.scope, s.name );
-        if( canon != normalized )
-        {
-            rw::emitTo( stderr, "ripwire: --note-add: target '{}' canonicalised to '{}' — that is the id --for/--expand key notes by\n",
-                          rawTarget.c_str(), canon.c_str() );
-        }
-        return { canon, false };
+        return noteTargetForDefinition( d, defs[0], rawTarget, normalized, naUnprovenDefs );
     }
 
     if( defs.size() > 1 )
@@ -1550,6 +1572,10 @@ int runDefaultMap( const MainDispatch& d )
     // like --callers/--callees/--impact/--lego/--around/--edit-check.
     std::vector<NodeId>         expandNodes;
     HashMap<NodeId, LineRange>  expandRanges;
+    // H1: the decl→def residue of every --expand and --outline item, SUMMED: the two verbs share one <ctx> root, a bare
+    // NAME item adds 0, and the remedy is the same for any item (widen its file:name spelling). Unreported, a file:name
+    // item whose definitions were dropped served the declaration's text alone with nothing saying what was left out.
+    std::size_t                 ctxUnprovenDefs = 0;
     if( !cfg.expand.empty() )
     {
         bool expandMissed = false;
@@ -1558,8 +1584,10 @@ int runDefaultMap( const MainDispatch& d )
             // §P8 seam 1: resolveAllByNameQualified — the SAME resolver --callers/--callees/--impact use,
             // so `file:name` / `file:line:name` / a canonical id / a bare name all mean here exactly what
             // they mean there. On a bare name it is byte-identical to the resolveAllByName it replaces.
-            const ExpandToken         et      = parseExpandToken( tok, "--expand" );
-            const std::vector<NodeId> matches = resolveAllByNameQualified( ing, et.selector );
+            const ExpandToken         et              = parseExpandToken( tok, "--expand" );
+            std::size_t               tokUnprovenDefs = 0;
+            const std::vector<NodeId> matches         = resolveAllByNameQualified( ing, et.selector, &tokUnprovenDefs );
+            ctxUnprovenDefs += tokUnprovenDefs;
             if( matches.empty() )
             {
                 // §M7 (W3FIX): --expand takes the same file:name grammar as --uses/--callers and refused in the
@@ -1631,7 +1659,9 @@ int runDefaultMap( const MainDispatch& d )
                               rawNm.c_str(), ot.selector.c_str(), ot.range.startLine, ot.range.endLine );
             }
 
-            const std::vector<NodeId> matches = resolveAllByNameQualified( ing, nm );
+            std::size_t               nmUnprovenDefs = 0;
+            const std::vector<NodeId> matches        = resolveAllByNameQualified( ing, nm, &nmUnprovenDefs );
+            ctxUnprovenDefs += nmUnprovenDefs;   // H1: onto the <ctx> root --expand shares
             if( matches.empty() )
             {
                 // §M7 (W3FIX): same grammar, same shared refusal as --expand above.
@@ -1649,6 +1679,14 @@ int runDefaultMap( const MainDispatch& d )
             return 1;
         }
     }
+
+    // H1: the residue's attribute and its clause, for the <ctx> root --expand and --outline share. Built ONCE, because
+    // three things read their bytes and must agree: the payload charge below (so est_tokens covers them in every serving
+    // mode), the M6 bundle price, and the --max-tokens ceiling verdict. All three are empty at zero, so an answer that
+    // dropped nothing prices, chooses and emits byte-identically.
+    const std::string ctxUnprovenAttr   = rw::unprovenDefsAttrXml( ctxUnprovenDefs );
+    const std::string ctxUnprovenLegend = rw::unprovenDefsVerbComment( rw::UnprovenDefsVerb::Expand, ctxUnprovenDefs > 0, "<!-- ripwire expand: " );
+    const std::size_t ctxUnprovenBytes  = ctxUnprovenAttr.size() + ctxUnprovenLegend.size();
 
     // §P6.8: `out` replaces every `stdout` from here through the map body's closing tag, so nothing reaches
     // the real stdout until finishTokenBudgetGate below has measured and decided (see openTokenBudgetBuffer's
@@ -1706,7 +1744,8 @@ int runDefaultMap( const MainDispatch& d )
         + ( ( !expandNodes.empty() && !bodiesSection.isRendered )
                 ? estimateExpandBodyTokens( ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress,
                                             expandRanges.empty() ? nullptr : &expandRanges )
-                : bodiesSection.tokens );
+                : bodiesSection.tokens )
+        + ( ctxUnprovenBytes > 0 ? rw::tokensForEmittedBytes( ctxUnprovenBytes, rw::kBytesPerTokenDefault ) : 0 );   // H1: charged at the markup rate
 
     // ── M6 (density audit 2026-08-08, owner directive: ONE call does the smart thing, no two-step) ──────
     // CHEAPEST-COMPLETE-ANSWER SERVING for a BARE --expand. The verb could always serve three forms:
@@ -1761,7 +1800,7 @@ int runDefaultMap( const MainDispatch& d )
         // guarded siblings at the ceiling verdict and the topK>0 emission gate). Same guard here: a map
         // that will not be emitted must not be charged, exactly like every other measureEmittedMapBytes
         // call site in this function.
-        const std::size_t bundleBytes = ( sizeof( "<ctx>" ) - 1 ) + ctxRootBytesWhenNoMap
+        const std::size_t bundleBytes = ( sizeof( "<ctx>" ) - 1 ) + ctxRootBytesWhenNoMap + ctxUnprovenBytes   // H1: the root carries it in both modes
                                       + ( mapTopK > 0 ? measureEmittedMapBytes( mapTopK, payloadTokens ) : 0 )
                                       + bodiesSection.xml.size() + ( sizeof( "</ctx>" ) - 1 );
         wholeFile = rw::renderWholeFiles( ing, expandNodes, redactPtr, d.notesPtr, cfg.compress, mapRootArg );   // D2: shaped candidate (R-R: root-relative <src p=>)
@@ -1784,6 +1823,15 @@ int runDefaultMap( const MainDispatch& d )
     {
         VERIFY( ctxOpenStr.rfind( "<ctx", 0 ) == 0 );
         ctxOpenStr.insert( 4, ctxRootAttr );
+    }
+    // H1: the residue rides the root in EVERY serving mode (whole-file, bundle with its map, bodies alone), and its clause
+    // rides straight after the start tag, ahead of the map or the payload, so the reader meets it before the text it
+    // qualifies. The later est_tokens splices find the start tag's own '>' first, so they still land on the root.
+    if( ctxUnprovenDefs > 0 )
+    {
+        VERIFY( ctxOpenStr.rfind( "<ctx", 0 ) == 0 );
+        ctxOpenStr.insert( 4, ctxUnprovenAttr );
+        ctxOpenStr += ctxUnprovenLegend;
     }
 
     // r27-emitters T2: the ride-along map. A bare `--expand=SYM` costs ~24 KB for a ~1.4 KB body because the
@@ -1823,7 +1871,7 @@ int runDefaultMap( const MainDispatch& d )
     // is inside the delivered map portion (everything through `</r>`), so the verdict charges it exactly as
     // the search above did; see mapCtxOpenBytes's own comment for the 1-byte-over measurement that found it.
     if( cfg.maxTokens > 0 && mapTopK > 0
-        && measureEmittedMapBytes( mapTopK, cfg.json ? 0 : payloadTokens ) + mapCtxOpenBytes > maxTokensCeilingBytes )
+        && measureEmittedMapBytes( mapTopK, cfg.json ? 0 : payloadTokens ) + mapCtxOpenBytes + ctxUnprovenBytes > maxTokensCeilingBytes )
     {
         maxTokensFit.isOverCeiling = true;
     }

@@ -561,6 +561,13 @@ inline constexpr const char* kUnprovenDefsAroundLegend =
     "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: the neighbourhood is centred on the declaration the selector named, the walk never started from those definitions, and so none of their callers or callees is a row here. ";
 inline constexpr const char* kUnprovenDefsSliceLegend =
     "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: the slice read the declaration p= names, so defs=, uses=, vars= and every row describe that declaration's own text and nothing inside those definitions' bodies. ";
+// AND WHERE THE ANSWER IS NARROWER RATHER THAN ZERO (decltodefcheck arms E2u..E2z): expand and outline served the
+// declaration's text alone, and owners covered the declaration's file under defs="1". expand and outline share one <ctx>
+// root, so one clause names both and the count is summed over their items.
+inline constexpr const char* kUnprovenDefsExpandLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS the file:name items of expand and outline found and could not tie to the file each named, summed item by item (a bare NAME item adds 0): they are NOT among the bodies, whole files or outlines served here, so this answer holds the text of the declarations those items named and none of theirs. ";
+inline constexpr const char* kUnprovenDefsOwnersLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: they are NOT in defs=, and this report covers the declaration's file alone, so nothing here says who owns theirs. ";
 inline constexpr const char* kUnprovenDefsProofTail =
     "A declaration widens to the definitions it stands for only where the definition is IN the named file, or its own file includes the named file, resolved path-precisely; a same-named body anywhere else is not evidence and is never served. Widen the file:name spelling to the bare NAME, or to Scope::name, to include them. ";
 
@@ -579,6 +586,8 @@ enum class UnprovenDefsVerb : std::uint8_t
     Connect,
     Around,
     Slice,
+    Expand,
+    Owners,
 };
 
 // `on` is the emitter's own `unprovenDefs > 0`, never a re-derivation; "" otherwise, so an answer that dropped
@@ -593,7 +602,8 @@ inline std::string unprovenDefsVerbLegend( UnprovenDefsVerb verb, bool on )
     const char* const clause = on ? std::array { kUnprovenDefsImpactLegend, kUnprovenDefsPathLegend, kUnprovenDefsSafeDeleteLegend,
                                                  kUnprovenDefsUsesLegend, kUnprovenDefsMentionsLegend, kUnprovenDefsVerifyLegend,
                                                  kUnprovenDefsAffectedLegend, kUnprovenDefsEditCheckLegend, kUnprovenDefsLegoLegend,
-                                                 kUnprovenDefsConnectLegend, kUnprovenDefsAroundLegend, kUnprovenDefsSliceLegend }[std::size_t( verb )]
+                                                 kUnprovenDefsConnectLegend, kUnprovenDefsAroundLegend, kUnprovenDefsSliceLegend,
+                                                 kUnprovenDefsExpandLegend, kUnprovenDefsOwnersLegend }[std::size_t( verb )]
                                   : nullptr;
     return clause != nullptr ? std::string( clause ) + kUnprovenDefsProofTail : std::string();
 }
