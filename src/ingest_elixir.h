@@ -486,7 +486,18 @@ struct ElixirContext
                 const auto op = nodeFieldText( p, NodeField::Operator, src  );
                 if( op == "=" || op == "<-" || op == "\\\\" )
                 {
-                    if( !elixirContains( fieldChild( p, NodeField::Left ), node ) ) { return {}; }
+                    if( !elixirContains( fieldChild( p, NodeField::Left ), node ) )
+                    {
+                        // The right of `<-` is the generator's expression and the right of `\\` a default
+                        // value: neither binds. The right of `=` binds exactly when the whole match sits in a
+                        // PATTERN — `def join(%Socket{} = socket, _)`, `%S{} = s -> …`, `{:ok, %{} = m} <- x` —
+                        // and only the construct above can say so, so the walk carries on upward instead of
+                        // deciding here. A body-level `x = y` reaches the def head, is outside it, and stays a
+                        // call. Returning empty from here turned every such `socket` into a zero-arity call
+                        // (PR #81 review item 3: 12 false callers of a socket/0; test/elixirnamearitycheck.sh B).
+                        if( op != "=" ) { return {}; }
+                        continue;
+                    }
                     if( op == "<-" )
                     {
                         for( TSNode c = ts_node_parent( p ); !ts_node_is_null( c ); c = ts_node_parent( c ) )
