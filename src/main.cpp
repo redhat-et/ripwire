@@ -611,8 +611,21 @@ struct NoteTargetResolution
 // typed. Lifted out when H1's residue line joined it, because the handler already sat at the verbosity bar.
 //
 // H1 — the decl→def residue, on the one surface this verb has: its stderr. `unprovenDefs` is what the resolver dropped
-// for a file:name target — same-named definitions it could not tie to the file it named. The one definition left is
-// then the declaration, the note keys it, and it will not surface on them; nothing is printed at zero.
+// for a file:name target — same-named definitions it could not tie to the file it named — and `consequence` says what
+// that means for THIS outcome: a note stored on the declaration, or a refusal that stored nothing. One line for both, so
+// the count and the remedy cannot drift apart between them; nothing is printed at zero.
+void emitNoteAddUnprovenDefs( std::size_t unprovenDefs, const char* consequence )
+{
+    if( unprovenDefs == 0 )
+    {
+        return;
+    }
+    rw::emitTo( stderr, "ripwire: --note-add: unproven_defs={} — the target also matched {} same-named definition(s) it could not tie to "
+                          "the file it named; {}. Widen the target to the bare NAME, or to Scope::name, to see them\n",
+                unprovenDefs, unprovenDefs, consequence );
+}
+
+// The one definition left is the declaration: the note keys it, and it will not surface on the dropped definitions.
 NoteTargetResolution noteTargetForDefinition( const MainDispatch& d, rw::NodeId def, const std::string& rawTarget,
                                               const std::string& normalized, std::size_t unprovenDefs )
 {
@@ -627,13 +640,7 @@ NoteTargetResolution noteTargetForDefinition( const MainDispatch& d, rw::NodeId 
         rw::emitTo( stderr, "ripwire: --note-add: target '{}' canonicalised to '{}' — that is the id --for/--expand key notes by\n",
                       rawTarget.c_str(), canon.c_str() );
     }
-    if( unprovenDefs > 0 )
-    {
-        rw::emitTo( stderr, "ripwire: --note-add: unproven_defs={} — the target also matched {} same-named definition(s) it could not tie to "
-                              "the file it named; the note keys the declaration above and will not surface on them. Widen the target to "
-                              "the bare NAME, or to Scope::name, to see them\n",
-                      unprovenDefs, unprovenDefs );
-    }
+    emitNoteAddUnprovenDefs( unprovenDefs, "the note keys the declaration above and will not surface on them" );
     return { canon, false };
 }
 
@@ -642,7 +649,7 @@ NoteTargetResolution resolveNoteAddTarget( const MainDispatch& d, const std::str
     using namespace rw;
     const IngestResult& ing = d.ing;
 
-    std::size_t               naUnprovenDefs = 0;   // H1: the residue noteTargetForDefinition discloses
+    std::size_t               naUnprovenDefs = 0;   // H1: the residue both outcomes below disclose
     const std::vector<NodeId> defs           = resolveAllByNameQualified( ing, rawTarget, &naUnprovenDefs );
 
     if( defs.size() == 1 )
@@ -652,6 +659,10 @@ NoteTargetResolution resolveNoteAddTarget( const MainDispatch& d, const std::str
 
     if( defs.size() > 1 )
     {
+        // H1 on the REFUSAL: the candidates it lists are the definitions the resolver could PROVE, so a caller who retypes
+        // one of them never learns the dropped ones exist. Said first, and worded for a path that stores nothing
+        // (decltodefcheck E2y2).
+        emitNoteAddUnprovenDefs( naUnprovenDefs, "they are not among the definitions listed below, and no note was stored" );
         const std::vector<EditCheckGroup> groups = editCheckGroups( ing, d.g, defs );
         std::string msg = "ripwire: --note-add: target '" + rawTarget + "' is ambiguous — it matches "
                         + std::to_string( defs.size() ) + " definitions in " + std::to_string( groups.size() )

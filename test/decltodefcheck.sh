@@ -73,6 +73,10 @@
 #       declaration's file under defs="1" (E2w); MCP fetch_body served the declaration's body (E2x); --note-add keyed its
 #       note to the declaration (E2y). Each now carries unproven_defs= — on the root, as a key of fetch_body's JSON, on
 #       --note-add's stderr — and the compact row fires on --expand and --owners with the full clause stripped (E2z).
+#   (E2y2) --NOTE-ADD'S REFUSAL. A file:name that resolves to several PROVEN definitions is refused as ambiguous, and when the
+#       resolver also dropped an unprovable one the refusal listed the proven candidates with no word about it — the (E2y)
+#       disclosure rode the stored-note path alone. It now precedes the refusal, says no note was stored, and nothing is
+#       written; a bare name and a refusal that dropped nothing print no such line.
 #   (E3a..E3f) THE FOCUS PICK. --lego, --connect and --around take ONE node from a match set (resolveFocus), and it was the
 #       lowest id — with the header sorting first, the DECLARATION, even where no definition was dropped: a bare name and a
 #       fully proven file:name answered the same zero as the dropping selector. A bodyless C/C++ lowest id now yields to the
@@ -1415,6 +1419,75 @@ else
 fi
 
 echo
+echo "=== (E2y2) --note-add REFUSES an ambiguous file:name, and discloses on that refusal what the resolver dropped ==="
+# `naamb` is dctl (api.h; a_impl.cpp, which includes it; caller.cpp) plus other.cpp, an internal-linkage helper in a TU that
+# never includes api.h. api.h:helper therefore resolves to TWO definitions it can prove, the declaration in api.h and the
+# body whose file includes it, which is the ambiguity refusal, and DROPS the third. The controls: the bare name over the same
+# tree (three definitions, nothing dropped) and dctl's api.h:helper (the same two-definition refusal, nothing to drop).
+mkdir -p "$TMP/naamb" && cp "$TMP/dctl/"* "$TMP/naamb/" || no "(E2y2) could not copy dctl into the refusal corpus"
+cat > "$TMP/naamb/other.cpp" <<'EOF'
+namespace {
+int helper(int a)
+{
+    return a + 7;
+}
+}
+int otherUser(int a)
+{
+    return helper(a);
+}
+EOF
+cp -R "$TMP/naamb" "$TMP/naamb_bare" && cp -R "$TMP/dctl" "$TMP/na_ctl" || no "(E2y2) could not copy the control corpora"
+"$BIN" "$TMP/naamb"      --no-cache --note-add="api.h:helper: a gotcha" >/dev/null 2>"$TMP/e2_naa.err";  NAA_RC=$?
+"$BIN" "$TMP/naamb_bare" --no-cache --note-add="helper: a gotcha"       >/dev/null 2>"$TMP/e2_naa_bare.err"; NAA_BARE_RC=$?
+"$BIN" "$TMP/na_ctl"     --no-cache --note-add="api.h:helper: a gotcha" >/dev/null 2>"$TMP/e2_naa_ctl.err"; NAA_CTL_RC=$?
+
+# naDisclosure <stderr-file> — the stderr line carrying unproven_defs=, from that key on, when it comes BEFORE the ambiguity
+# refusal (or there is no refusal); `AFTER: …` when it follows the refusal; empty when there is no such line.
+naDisclosure(){ python3 -c '
+import sys
+lines=open(sys.argv[1],errors="replace").read().splitlines()
+d=[i for i,l in enumerate(lines) if "unproven_defs=" in l]
+r=[i for i,l in enumerate(lines) if "is ambiguous" in l]
+if d:
+    t=lines[d[0]][lines[d[0]].find("unproven_defs="):]
+    sys.stdout.write(t if not r or d[0]<r[0] else "AFTER: "+t)' "$1"; }
+
+# naRefusal <label> <corpus> <rc> <stderr-file> <definitions> <unproven_defs, or "" for none>
+naRefusal(){
+    _lbl="$1" _d="$2" _rc="$3" _e="$4" _n="$5" _want="$6"
+    if [ "$_rc" = 0 ] || ! grep -q "is ambiguous — it matches $_n definitions" "$_e"; then
+        no "$_lbl: premise broken — not the ambiguity refusal over $_n definitions (rc=$_rc): $( head -c 240 "$_e" )"
+        return 0
+    fi
+    if [ -e "$_d/.ripwire_notes" ]; then
+        no "$_lbl: refused, yet $_d/.ripwire_notes was written"
+    else
+        ok "$_lbl: refused over $_n definitions (rc=$_rc), and no .ripwire_notes was written"
+    fi
+    _L="$( naDisclosure "$_e" )"
+    if [ -z "$_want" ]; then
+        if [ -z "$_L" ]; then
+            ok "$_lbl: nothing was dropped, and stderr says nothing about unproven_defs"
+        else
+            no "$_lbl: nothing was dropped, yet stderr says: $_L"
+        fi
+        return 0
+    fi
+    case "$_L" in
+        '')                no "$_lbl: refused with nothing on stderr about the $_want same-named definition(s) the resolver dropped" ;;
+        'AFTER: '*)        no "$_lbl: the unproven_defs= line follows the refusal, after the reader was told which spelling to retype: $_L" ;;
+        *'note keys'*)     no "$_lbl: the unproven_defs= line reads as a stored note on a refusal that stored nothing: $_L" ;;
+        "unproven_defs=$_want "*'no note was stored'*)
+                           ok "$_lbl: unproven_defs=$_want is disclosed ahead of the refusal, and says no note was stored" ;;
+        *)                 no "$_lbl: the unproven_defs= line does not say unproven_defs=$_want and that no note was stored: $_L" ;;
+    esac
+}
+naRefusal "(E2y2) --note-add=api.h:helper over naamb, one definition dropped"  "$TMP/naamb"      "$NAA_RC"      "$TMP/e2_naa.err"      2 1
+naRefusal "(E2y2) --note-add=helper over naamb, bare name"                     "$TMP/naamb_bare" "$NAA_BARE_RC" "$TMP/e2_naa_bare.err" 3 ""
+naRefusal "(E2y2) --note-add=api.h:helper over dctl, nothing to drop"          "$TMP/na_ctl"     "$NAA_CTL_RC"  "$TMP/e2_naa_ctl.err"  2 ""
+
+echo
 echo "=== (E2z) under the compact legend, the existing unproven_defs row fires on --expand's <ctx> and on <owners> ==="
 run2 "$TMP/dord" --expand=api.h:helper --legend=compact >"$TMP/e2_ex_cmp.xml"
 run2 "$TMP/ecp"  --owners=api.h:helper --legend=compact >"$TMP/e2_ow_cmp.xml"
@@ -1742,6 +1815,18 @@ case "$( readingOf "$L_E3G_FULL" "defs= (only when >1)" )" in *'of its scope'*) 
 [ "$G_BAD" = 0 ] && [ "$G_OK" = 1 ] && [ "$G_FULL" = 0 ] && [ -z "$( readingOf "$L_E3G_OK" "rank_by=" )" ] \
     && ok "(F) E3g-shape: readingOf reads the named head's reading alone, stops at '; qualify', and is empty for an absent head" \
     || no "(F) readingOf credited a needle outside the named reading or missed one inside it (bad=$G_BAD ok=$G_OK past-qualify=$G_FULL)"
+# (E2y2) shape: naDisclosure must tell a disclosure BEFORE the refusal from one AFTER it, report none as empty, and keep the
+# unique-definition path (no refusal line) readable, or the order and absence rows above would pass on anything.
+printf 'ripwire: --note-add: unproven_defs=1 — x; no note was stored\nripwire: --note-add: target t is ambiguous — it matches 2 definitions\n' >"$TMP/m_na_before.err"
+printf 'ripwire: --note-add: target t is ambiguous — it matches 2 definitions\nripwire: --note-add: unproven_defs=1 — x; no note was stored\n' >"$TMP/m_na_after.err"
+printf 'ripwire: --note-add: target t is ambiguous — it matches 2 definitions\n' >"$TMP/m_na_none.err"
+printf 'ripwire: --note-add: unproven_defs=2 — x; the note keys the declaration\n' >"$TMP/m_na_unique.err"
+[ "$( naDisclosure "$TMP/m_na_before.err" )" = 'unproven_defs=1 — x; no note was stored' ] \
+    && [ "$( naDisclosure "$TMP/m_na_after.err" )" = 'AFTER: unproven_defs=1 — x; no note was stored' ] \
+    && [ -z "$( naDisclosure "$TMP/m_na_none.err" )" ] \
+    && [ "$( naDisclosure "$TMP/m_na_unique.err" )" = 'unproven_defs=2 — x; the note keys the declaration' ] \
+    && ok "(F) E2y2-shape: naDisclosure reads a disclosure before the refusal, marks one after it, and is empty when there is none" \
+    || no "(F) naDisclosure cannot tell before from after, or invents a disclosure (before=$( naDisclosure "$TMP/m_na_before.err" ) after=$( naDisclosure "$TMP/m_na_after.err" ) none=$( naDisclosure "$TMP/m_na_none.err" ))"
 # VACUITY guard itself. Run in a subshell so it cannot set fail.
 if ( nonempty "probe" "" >/dev/null 2>&1 ); then
     no "(F) nonempty() accepts an empty capture — every arm's vacuity guard is inert"
