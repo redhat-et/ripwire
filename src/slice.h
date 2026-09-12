@@ -2143,6 +2143,9 @@ struct SliceEmitOpts
     // and a run without --since is byte-identical to one before the flag existed (both stay nullptr).
     const std::string*   sinceLegend   = nullptr;
     const std::string*   sinceBody     = nullptr;
+    // H1: the selector's decl→def residue — same-named definitions a file:name spelling found and could not tie to the
+    // file it named. unproven_defs= on the root and its clause beside the legend, both absent at zero (graphlegend.h).
+    std::size_t          unprovenDefs  = 0;
 };
 
 // the per-BINDING line folds, (name, binding)-ascending. scan.all is source-ordered, so a stable sort
@@ -2505,6 +2508,9 @@ inline std::string sliceLegendText( const SliceEmitOpts& opts )
                 "the guard (if/loop) deciding whether a def executes is never a row. -->";
         }
     }
+    // H1: the residue clause, in BOTH dialects and as its own comment — opened `<!-- ripwire slice: ` so the compact layer
+    // strips it as prose and states its term instead. "" at zero, so no tier above changes shape without a drop.
+    out += unprovenDefsVerbComment( UnprovenDefsVerb::Slice, opts.unprovenDefs > 0, "<!-- ripwire slice: " );
     // the --since block owns its own rules and restates the ones above that bind BOTH of its sides; it is
     // appended whole, never interleaved, so no tier here changes shape when the diff is present.
     if( opts.sinceLegend != nullptr )
@@ -2765,6 +2771,9 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
             }
         }
     }
+
+    // H1: beside the counts it qualifies (vars=, or defs=/uses=), ahead of every trailing group; absent at zero.
+    out += unprovenDefsAttrXml( opts.unprovenDefs );
 
     // preproc_rows= — the LINES a preprocessor-dead region cost this answer: in VAR mode the seed
     // variable's dropped lines (the rows that would have printed), in inventory mode every dropped line

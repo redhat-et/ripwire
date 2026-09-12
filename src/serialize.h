@@ -1561,7 +1561,7 @@ struct MapAnnotations
     // the two BOUNDS that decide what the neighbourhood even contains — --around-depth (default 2) and
     // --around-fanout (default 32) — were not recoverable at all, from the output or from --help. A reader
     // handed 189 rows could not tell a 1-hop from a 3-hop answer. defs= is the same single-pick disclosure
-    // --callers/--uses/--impact/--path already carry: resolveFocus takes the lowest-id definition, so a name
+    // --callers/--uses/--impact/--path already carry: resolveFocus takes ONE definition (graph.h states which), so a name
     // with several says so on the root instead of silently answering about one of them.
     // Held by value with a default that renders NOTHING (empty `of`), so every unseeded map is byte-identical.
     struct SeedDisclosure
@@ -1576,6 +1576,10 @@ struct MapAnnotations
         // neighbourhood the bounds did not clip is byte-identical to before (presence has to mean something).
         std::uint32_t fanoutCut      = 0;       // symbols the fanout cap dropped that are absent from the whole answer (exact)
         bool          depthTruncated = false;   // ≥1 symbol one hop past the last emitted hop is absent
+        // H1: the decl→def residue of a file:name seed — same-named definitions the selector found and could not tie to the
+        // file it named, so the walk never started from them. unproven_defs= beside defs= and its clause in the legend,
+        // both absent at zero (graphlegend.h unprovenDefsAttrXml / unprovenDefsVerbComment).
+        std::size_t   unprovenDefs   = 0;
     };
     // F3 (H2H-Graft): rank_by=churn-decay's file-level <recent> rows; null/empty ⇒ absent, byte-free. Positional
     // slots 8 and 9 at main.cpp's mapAnn (seed below is filled by assignment, never positionally).
@@ -2220,9 +2224,12 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += "<!-- of= is the resolved SEED this neighbourhood is centred on; depth= call hops walked and fanout= "
                   "neighbours kept per hop are its whole boundary, so a row's absence means outside them, not nonexistent. "
-                  "defs= (only when >1) = that NAME has N definitions and the lowest-id one was walked; qualify with "
+                  "defs= (only when >1) = that NAME has N definitions and the lowest-id one was walked (a C/C++ declaration "
+                  "without a body yields to the lowest-id definition of its scope that has one); qualify with "
                   "file:name or @FILE:LINE to pick another. -->";
         legend += seedBiteLegend( ann.seed );   // C2: charged only on a run whose root carries a bite attribute (the at= rule)
+        // H1: charged only on a run whose root carries unproven_defs= — the same rule, and part of the head est_tokens prices.
+        legend += unprovenDefsVerbComment( UnprovenDefsVerb::Around, ann.seed.unprovenDefs > 0, "<!-- ripwire around: " );
     }
     if( metrics )
     {
@@ -2403,6 +2410,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             h += " depth=\"";   h += std::to_string( ann.seed.depth );     h += "\"";
             h += " fanout=\"";  h += std::to_string( ann.seed.fanout );    h += "\"";
             if( ann.seed.defs > 1 ) { h += " defs=\"";  h += std::to_string( ann.seed.defs );  h += "\""; }
+            h += unprovenDefsAttrXml( ann.seed.unprovenDefs );   // H1: beside defs=, the rest of what the seed name resolved to
             h += seedBiteAttrs( ann.seed );   // C2: each bound's BITE, right after the bound it qualifies (empty when neither bit)
         }
         // §A9.6: after at= (so gitstampcheck's `<r at="<sha>` byte sequence is unmoved) — see MapAnnotations.
@@ -6187,7 +6195,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
         const bool  isContractExtracted = legoMethodContractSound( isym.lang );
         const char* caveatAttr          = legoContractCaveat( isContractExtracted, focusId != kNoNode );   // §A9.4
         // H6/F2 (capture-audit 2026-09-04): the TARGETED form resolves a bare name through resolveFocus,
-        // which picks the LOWEST-ID definition. `--lego=size` (6 definitions in 4 files) therefore answered
+        // which then picked the LOWEST-ID definition. `--lego=size` (6 definitions in 4 files) therefore answered
         // implementors="0" about ONE of them with nothing on the row to say a pick had happened, so a
         // genuine "this interface has no implementors" and a wrong-definition zero rendered identically.
         // defs= is that fact on the row — the same disclosure --owners and --layout already carry for the
