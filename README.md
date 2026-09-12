@@ -2322,8 +2322,9 @@ Use these methods when a disclosure says the answer is incomplete:
 1. Use `--expand=SYM` to read the body.
 2. Use `--uses=SYM` and `--impact=SYM` to measure the blast radius.
 3. Use `--scip=FILE` to supply a compiler-grade index. A precise index replaces the name-based edges
-   and marks the affected edges with `prov="scip"`. A missing index causes a refusal. A corrupt index
-   causes a fallback to the name-based edges and a warning on standard error. Neither case is silent.
+   and marks the affected edges with `prov="scip"`. A path that is missing, empty or not a regular file
+   causes a refusal (exit 1). A corrupt index causes a fallback to the name-based edges and a warning on
+   standard error. Neither case is silent.
 
 ### 8. Determinism
 
