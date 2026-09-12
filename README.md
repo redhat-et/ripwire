@@ -2177,7 +2177,8 @@ The server is a standard input and output MCP process. The complete configuratio
 
 For a socket instead of standard input and output, run `ripwire --listen=HOST:PORT`. A non-loopback
 bind requires `--mcp-token`. The three edit verbs are disabled on a remote bind unless you pass
-`--allow-remote-edits`.
+`--allow-remote-edits`. The socket speaks plain HTTP with no TLS, so on a non-loopback bind the bearer token and
+every request cross the network in the clear: put a TLS-terminating reverse proxy in front of it.
 
 ### 4. First use
 
