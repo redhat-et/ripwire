@@ -138,7 +138,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // §H4 §3.4: the FIRST legend these two verbs have ever shipped (0 bytes before — which is why every
         // one of their root attributes sits in test/legendcoverage_baseline.txt), and the floor marker that
         // is the round's honest half. ONE opener for both forms, printed BEFORE the format branches so the
-        // columnar and default shapes carry the identical disclosure. JSON has no comment-node analogue, so
+        // columnar and default shapes carry the same disclosure, all but the tested lens's reading, which names
+        // its form's shape (kTestedColumnLegend: the columnar array prints 0). JSON has no comment-node analogue, so
         // there the marker travels as the counts_floor key on the root object instead.
         // V1 fix (verifier finding 3): bodyless_defs= is callees-only (main.cpp gates the attribute itself
         // behind !wantCallers a few lines up), so its defining sentence rides along only on the callees
@@ -149,7 +150,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         {
             // M12: under multi-root this verb carries no root= at all (correctly — no single root exists)
             // and, before this, disclosed nothing about the `<label>/` prefix every p= below carries.
-            rw::emitTo( stdout, "{}{}{}{}{}-->{}{}", rw::callHierarchyLegendOpen( wantCallers, chNextIsBare ).c_str(),
+            rw::emitTo( stdout, "{}{}{}{}{}-->{}{}", rw::callHierarchyLegendOpen( wantCallers, chNextIsBare, cfg.columnar ).c_str(),
                          rw::capLegendClause( rw::computePageDisclosure( pw.end - pw.begin, result.size(), pw.end,
                                                                         cfg.pageLimit, cfg.pageOffset, chDiscloseCap ).active ),
                          rw::declinedCallsLegend( chRows.declinedCalls > 0 ),   // exactly when the root carries declined_calls=
@@ -2244,7 +2245,7 @@ std::optional<int> runImpact( const MainDispatch& d )
             // form carries the count without the rows and a reader must be told which shape they hold.
             rw::emitTo( stdout, "{}{}. {}{}{}{}{}{}{}{}-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
                          cfg.columnar ? rw::kImpactImportTierColumnarLegend : rw::kImpactImportTierLegend,
-                         rw::kTestedRowLegend, rw::kImpactTestedPartitionLegend,   // A6
+                         rw::testedLensLegend( cfg.columnar ), rw::kImpactTestedPartitionLegend,   // A6: the columnar form reads its dense column
                          rw::kTestedLensBlindSpotLegend,                           // F-02: rides with the partition
                          rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Impact, imUnprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=
                          rw::declinedCallsLegend( imDeclinedCalls > 0 ),           // exactly when the root carries declined_calls=
