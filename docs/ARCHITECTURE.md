@@ -188,8 +188,12 @@ function headers carrying defaults do not preserve transitive caller reachabilit
 
 `test/elixircheck.sh`, `test/eliximportcheck.sh` and `test/elixirsemanticcheck.sh` cover extraction,
 metrics, exact target selection against decoys, lexical boundaries, contracts, CLI/MCP use-site parity,
-call-site mutation and cold/warm determinism. This extraction uses parser revision 95 (rich 96),
-mirrored in `src/quality.h`; record format 21 and snapshot scheme 10 are unchanged.
+call-site mutation and cold/warm determinism; `test/elixirnamearitycheck.sh` covers what the `name/N`
+key must not cost the verbs around it (the counted `use` drop, pattern bindings on the right of `=`,
+`--edit-check` and `--quality-delta` across an arity change, `--for` by exact name). This extraction
+uses parser revision 95 (rich 96), mirrored in `src/quality.h`; record format 21 is unchanged. The
+quality key (`pathQualifiedKey`) folds the arity out of an Elixir name — `run/1` and `run/2` are one
+piece of source, as C++ overloads of `f` are — which is snapshot scheme 11.
 <a id="dart-extraction"></a>
 **Dart extraction.** tree-sitter-dart makes `function_body` a SIBLING of `function_signature` /
 `method_signature`, never a `body` field and never a child. The shared ancestor walk in

@@ -1887,6 +1887,12 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 if( elixirFunctionKeyword( elixirTarget( roleNode, src ) ) )
                 {
                     d.name = elixirFunctionName( nameTxt, d.params );
+                    // B2.2 for Elixir: a clause's arity IS its parameter count (no variadic form), so `params`
+                    // is call-comparable unless a `\\` default widens the callable to more than one arity.
+                    // cc_paramArityExact's language gate leaves this at 0, which made every Elixir caller
+                    // unflaggable by --edit-check (test/elixirnamearitycheck.sh arm C: run(x) -> run(x, y)
+                    // must flag run(x) callers; run(x, y \\ 1) must flag none).
+                    d.arityExact = elixirHeadDefaultCount( roleNode, src ) == 0 ? std::uint8_t( 1 ) : std::uint8_t( 0 );
                     elixirDefinitionFacts( d, roleNode, src, binds );
                     if( elixirTarget( roleNode, src ) == "defdelegate" )
                     {

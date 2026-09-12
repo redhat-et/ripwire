@@ -732,15 +732,10 @@ std::pair<std::uint16_t, bool> elixirCallArity( TSNode role, TSNode name, std::s
     return { std::uint16_t( std::min( count, 65535u ) ), count <= 65535u };
 }
 
-void elixirDefinitionFacts( const RawDef& def, TSNode node, std::string_view src, std::vector<RawBind>& binds )
+/// Count the `\\` default parameters in a definition head; 0 for a parameterless or bodyless head. A clause's
+/// arity is otherwise EXACT — Elixir has no variadic form — which is what makes it call-comparable (arityExact).
+std::uint32_t elixirHeadDefaultCount( TSNode node, std::string_view src ) noexcept
 {
-    const auto keyword = elixirTarget( node, src );
-    if( !elixirFunctionKeyword( keyword ) ) { return; }
-    RawBind bind;
-    bind.fileId = def.fileId; bind.startByte = def.startByte; bind.lang = Lang::Elixir;
-    bind.kind = LocalBindKind::ElixirCallable; bind.var = def.name; bind.typeName = def.scope; bind.importedName = keyword;
-    bind.spanStart = def.startByte; bind.spanEnd = def.endByte;
-    binds.push_back( bind );
     TSNode head = elixirFirstArgument( node );
     if( elixirNodeIs( head, "binary_operator" ) && nodeFieldText( head, NodeField::Operator, src  ) == "when" )
     {
@@ -752,6 +747,19 @@ void elixirDefinitionFacts( const RawDef& def, TSNode node, std::string_view src
     {
         if( nodeFieldText( ts_node_named_child( args, i ), NodeField::Operator, src  ) == "\\\\" ) { ++defaults; }
     }
+    return defaults;
+}
+
+void elixirDefinitionFacts( const RawDef& def, TSNode node, std::string_view src, std::vector<RawBind>& binds )
+{
+    const auto keyword = elixirTarget( node, src );
+    if( !elixirFunctionKeyword( keyword ) ) { return; }
+    RawBind bind;
+    bind.fileId = def.fileId; bind.startByte = def.startByte; bind.lang = Lang::Elixir;
+    bind.kind = LocalBindKind::ElixirCallable; bind.var = def.name; bind.typeName = def.scope; bind.importedName = keyword;
+    bind.spanStart = def.startByte; bind.spanEnd = def.endByte;
+    binds.push_back( bind );
+    const std::uint32_t defaults = elixirHeadDefaultCount( node, src );
     const auto name = std::string_view( def.name ).substr( 0, def.name.rfind( '/' ) );
     for( std::uint32_t count = 1; count <= defaults && count <= def.params; ++count )
     {

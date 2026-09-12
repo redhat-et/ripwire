@@ -150,7 +150,7 @@ inline ClaimIdentity buildClaimIdentity( const IngestResult& ing, const Graph& g
             continue; // degrade: an unfilable symbol keeps key 0
         }
         const Symbol& s = ing.symbols[i];
-        out.key[i] = quality::pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s.scope, s.name );
+        out.key[i] = quality::pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s );   // the Symbol overload: one keying rule per language
         byKey[ out.key[i] ].push_back( i );
     }
     for( auto& [ k, members ] : byKey )

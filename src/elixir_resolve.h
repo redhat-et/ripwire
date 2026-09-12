@@ -11,18 +11,53 @@
 namespace rw
 {
 
+// The arity-less spelling of a `name/N` symbol name — `run/2` → `run`, `+/2` → `+`, `@type id/0` → `@type id`.
+// A name with no `/digits` tail (a module, a plain attribute) comes back whole. A VIEW into `name`, so it is
+// free to call per symbol; callers gate on Lang::Elixir, the function itself only reads the string.
+inline std::string_view elixirBaseName( std::string_view name ) noexcept
+{
+    const std::size_t slash = name.rfind( '/' );
+    if( slash == std::string_view::npos || slash + 1 == name.size() )
+    {
+        return name;
+    }
+    for( std::size_t i = slash + 1; i < name.size(); ++i )
+    {
+        if( name[ i ] < '0' || name[ i ] > '9' )
+        {
+            return name;
+        }
+    }
+    return name.substr( 0, slash );
+}
+
 // Elixir binds functions by module/name/arity, independently of their physical file or directory.
 // Reuse persisted Binding facts: defaults add lookup aliases, imports carry lexical spans, and
 // callable declarations supply visibility. No per-reference payload or global symbol layout grows.
+//
+// `foldArity` keys the table by `Module::name` instead of `Module::name/N`, so a call reaches EVERY arity of
+// the function its lexical facts bind it to. That is the --edit-check question — "which callers of run/1
+// are now facing run/2?" — where the old arity no longer exists to key on (editcheck.h); every other verb
+// keeps the exact key. Import filters (`only: [run: 1]`) still test the CALL's own arity either way.
 struct ElixirResolver
 {
     const IngestResult& ing;
+    const bool          foldArity;
     HashMap<std::string, std::vector<NodeId>> functions;
     HashMap<std::uint32_t, std::vector<const Binding*>> imports;
     std::vector<std::uint8_t> privateFunction;
     std::vector<std::uint8_t> macroFunction;
 
-    explicit ElixirResolver( const IngestResult& input ) : ing( input )
+    // the table key for a callable of `module` — see foldArity
+    std::string keyOf( std::string_view module, std::string_view name ) const
+    {
+        std::string key( module );
+        key += "::";
+        key += foldArity ? elixirBaseName( name ) : name;
+        return key;
+    }
+
+    explicit ElixirResolver( const IngestResult& input, bool foldArityKeys = false ) : ing( input ), foldArity( foldArityKeys )
     {
         std::size_t count = 0;
         for( const Symbol& symbol : ing.symbols ) { count += symbol.lang == Lang::Elixir ? 1 : 0; }
@@ -35,14 +70,14 @@ struct ElixirResolver
         {
             if( symbol.lang == Lang::Elixir && symbol.kind == SymKind::Function )
             {
-                functions[ symbol.scope + "::" + symbol.name ].push_back( symbol.id );
+                functions[ keyOf( symbol.scope, symbol.name ) ].push_back( symbol.id );
             }
         }
         for( const Binding& bind : ing.bindings )
         {
             if( bind.kind == LocalBindKind::ElixirImport ) { imports[ bind.fileId ].push_back( &bind ); }
             if( bind.kind != LocalBindKind::ElixirCallable ) { continue; }
-            const auto found = functions.find( bind.typeName + "::" + bind.var );
+            const auto found = functions.find( keyOf( bind.typeName, bind.var ) );
             if( found == functions.end() ) { continue; }
             for( NodeId node : found->second )
             {
@@ -56,11 +91,11 @@ struct ElixirResolver
         for( const Binding& bind : ing.bindings )
         {
             if( bind.kind != LocalBindKind::ElixirDefault ) { continue; }
-            const auto found = functions.find( bind.typeName + "::" + bind.importedName );
+            const auto found = functions.find( keyOf( bind.typeName, bind.importedName ) );
             if( found == functions.end() ) { continue; }
             // Copy before inserting: HashMap invalidates references when it grows.
             const auto targets = found->second;
-            auto& aliases = functions[ bind.typeName + "::" + bind.var ];
+            auto& aliases = functions[ keyOf( bind.typeName, bind.var ) ];
             for( NodeId target : targets )
             {
                 if( ing.symbols[ target ].fileId == bind.fileId ) { aliases.push_back( target ); }
@@ -75,7 +110,7 @@ struct ElixirResolver
 
     void append( const Reference& ref, std::string_view module, bool external, std::string_view filter, std::vector<NodeId>& out ) const
     {
-        const auto found = functions.find( std::string( module ) + "::" + ref.calleeName );
+        const auto found = functions.find( keyOf( module, ref.calleeName ) );
         if( found == functions.end() ) { return; }
         for( NodeId node : found->second )
         {

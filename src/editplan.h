@@ -315,8 +315,9 @@ inline Outcome prepare( const std::string& root, const std::string& planPath, st
             const Symbol& target = ix.ing.symbols[ edit.node ];
             edit.symName = target.name;
             edit.line    = target.line;
-            const auto [ callerIds, callerIncompatible ] =
-                editCheckCallers( ix.ing, ix.g, editCheckOverloadSet( ix.ing, ix.g, edit.node ), target.name );
+            const std::vector<NodeId> overloads = editCheckOverloadSet( ix.ing, ix.g, edit.node );
+            EditCheckCalleeTest       callee( ix.ing, target, overloads );
+            const auto [ callerIds, callerIncompatible ] = editCheckCallers( ix.ing, ix.g, overloads, callee );
             (void) callerIncompatible;   // the FLAGS are an after-the-edit question; a dry-run has no edit yet
             edit.callers = callerIds;
         }

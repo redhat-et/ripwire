@@ -193,7 +193,7 @@ inline SymTreeIndex buildTreeIndex( const IngestResult& ing, std::string_view ro
         }
         const std::string    relFile( relForHash( ing.files[ s.fileId ], root ) );
         const std::string    canon = canonicalId( relFile, s.scope, s.name );          // DISPLAY id (may be a bare name)
-        const std::uint64_t  key   = quality::pathQualifiedKey( relFile, s.scope, s.name );   // COMPARISON key — the one body-hash key space
+        const std::uint64_t  key   = quality::pathQualifiedKey( relFile, s );   // COMPARISON key — the one body-hash key space (the Symbol overload: one keying rule per language)
         out.identity.try_emplace( key, ChangedSym{ key, relFile, canon } );   // first writer wins — overloads share one id
     }
     const SymbolsByFile realBodySyms = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte; } );

@@ -38,6 +38,10 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   mirror move 94 -> 95 for module/name/arity identities, lexical imports, defaults, captures, delegates,
 #   attributes and protocol/behaviour relationships. Binding/Reference record layouts are unchanged:
 #   kCacheVersion stays #139's 21 and kQSnapCacheScheme stays 10. Old extraction facts must be re-parsed.
+# 2026-09-12, ELIXIR ARITY FOLD (PR #81 review item 4, test/elixirnamearitycheck.sh arm C): pathQualifiedKey
+#   gained a Symbol overload that folds an Elixir `name/N` arity out of the KEY (run/1 and run/2 are one piece
+#   of source, as C++ overloads are); computeSnapshot and bodyHashesBySym key through it. SEMANTICS changed
+#   for one language's keys → kQSnapCacheScheme 10 -> 11, then re-pinned. Extraction unchanged: parserVer 95.
 #   Landed at 95, not the 87 the branch carried — main spent 87..92 while it was open and the 0.6.1 round
 #   takes 93 (#139) and 94 (#172): RE-BUMPED to the next free number over the merged tip, per the collision
 #   rule in ingest_cache.h's kParserVer note. RE-DERIVED ON THE MERGE (the branch's pin hashed 87 over 18).
