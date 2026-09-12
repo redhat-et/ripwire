@@ -239,8 +239,15 @@ uint64_t currentThreadId() noexcept;
 // form drops it to 61 arm64 / 41 x86-64). VERIFY_NO_ALIAS_BUF checks the
 // OBJECTS (two live containers never share an allocation) and promises the
 // BUFFERS. Empty containers are fine: nothing is ever accessed through a null
-// data(), so the promise is vacuous there. Works for anything with .data():
-// std::vector, std::span, std::string, std::array.
+// data(), so the promise is vacuous there — the bundle is read only by alias
+// queries, which need an access to ask about, and LLVM does not fold `p == q`
+// from it (measured at -O3: the compare survives and answers true for two
+// empty vectors). The two forms that would avoid the null — promising the
+// object address when empty, or a branch around the builtin — both lose the
+// whole loop effect (arm64 66/66 vs 61, x86-64 66/65 vs 41), so the plain
+// .data() form stays; test/noaliascheck.sh arm 7 runs the release probe on
+// two empty vectors. Works for anything with .data(): std::vector, std::span,
+// std::string, std::array.
 //
 // WHY NOT `__restrict` ON THE SIGNATURE. Prefer this macro in the body: it is
 // checked in debug, it is the same optimizer fact in release, and it does not

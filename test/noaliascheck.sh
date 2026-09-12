@@ -205,7 +205,14 @@ echo "  info  optimizer consumes \"separate_storage\": $CLASS (accBuiltin reload
 OPTFLAGS=(); if [ "$FLAG_ACCEPTED" = 1 ]; then OPTFLAGS=( "${SEP_OPT[@]}" ); fi
 RELEASE_ARMS=0; case "$CLASS" in CONSUMED_DEFAULT|CONSUMED_WITH_FLAG) RELEASE_ARMS=1;; esac
 # CMake's cached probe must agree with this one, or the gate is measuring a different toolchain than the binary
-if [ -f "$CACHE" ]; then
+# ... and the cached boolean only describes the compiler CMake configured with. A CXX override that resolves to a
+# DIFFERENT compiler can accept the same flag with different optimizer defaults, so the booleans agreeing would
+# prove nothing: the identities (`--version` first line) must match before the booleans are compared.
+cachedCXX="$( cacheVar CMAKE_CXX_COMPILER )"; cachedID=""
+if [ -n "$cachedCXX" ] && [ -x "$cachedCXX" ]; then cachedID="$( "$cachedCXX" --version 2>/dev/null | head -1 )"; fi
+if [ -f "$CACHE" ] && [ -n "$cachedCXX" ] && [ "$cachedID" != "$CXXID" ]; then
+    warn "probe: cache cross-check skipped — CXX override '$CXX' ($CXXID) is not the compiler build/ripwire was built with ('$cachedCXX': ${cachedID:-not runnable here}); this run classifies the override, not the binary"
+elif [ -f "$CACHE" ]; then
     if grep -q '^RIPWIRE_CXX_HAS_BASIC_AA_SEPARATE_STORAGE:' "$CACHE"; then
         cmakeAccepted=0; [ "$( cacheVar RIPWIRE_CXX_HAS_BASIC_AA_SEPARATE_STORAGE )" = 1 ] && cmakeAccepted=1
         if [ "$cmakeAccepted" = "$FLAG_ACCEPTED" ]; then ok "probe: CMake's cached probe agrees (RIPWIRE_CXX_HAS_BASIC_AA_SEPARATE_STORAGE=$cmakeAccepted, CMAKE_CXX_COMPILER=$( cacheVar CMAKE_CXX_COMPILER ); gate CXX=$CXX)"
@@ -421,6 +428,19 @@ if "$CXX" "$CXXSTD" -O1 -g -Wall -Wextra "${INC[@]}" "$WORK/bufprobe.cpp" "$ROOT
     else no "arm 7: stderr does not name 'dst' and 'src'"; sed 's/^/    /' "$WORK/b2.err" | head -8; fi
 else
     no "arm 7: debug buffer probe failed to compile"; sed 's/^/    /' "$WORK/cc7.log" | head -12
+fi
+# The RELEASE path on empty containers: data() is null on both, and the promise is made on those nulls. That is
+# vacuous, not a lie the optimizer can act on: the bundle is read only by alias queries, which need an access to
+# ask about, and no access exists through a null buffer; LLVM does not fold `p == q` from the bundle (measured
+# 2026-09-12, -O3: the icmp survives and returns 1 for two empty vectors). The two forms that would avoid the
+# null — promising the object address when empty, or a branch around the builtin — both lose the whole loop
+# effect (arm64 66/66 vs 61, x86-64 66/65 vs 41), so the plain .data() form is the one the header keeps.
+if "$CXX" "$CXXSTD" -O2 -DNDEBUG "${INC[@]}" ${OPTFLAGS[@]+"${OPTFLAGS[@]}"} "$WORK/bufprobe.cpp" "$ROOT/src/infra/diagnostics.cpp" -o "$WORK/buf_rel" 2> "$WORK/cc7r.log"; then
+    "$WORK/buf_rel" > "$WORK/b3.out" 2> "$WORK/b3.err"; rc=$?
+    if [ "$rc" = 0 ] && grep -q '^7$' "$WORK/b3.out"; then ok "arm 7: RELEASE probe — two empty vectors (null data() on both), then two distinct ones -> exit 0, d2[7] = 7"
+    else no "arm 7: RELEASE probe on empty / distinct vectors: rc=$rc out=$( cat "$WORK/b3.out" )"; sed 's/^/    /' "$WORK/b3.err" | head -8; fi
+else
+    no "arm 7: release buffer probe failed to compile"; sed 's/^/    /' "$WORK/cc7r.log" | head -12
 fi
 
 # ── arm 8: NEGATIVE CONTROL for the probe — the analysis forced OFF must bring the reload back ──────────────
