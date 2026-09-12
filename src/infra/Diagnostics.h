@@ -246,14 +246,13 @@ uint64_t currentThreadId() noexcept;
 // object address when empty, or a branch around the builtin — both lose the
 // whole loop effect (arm64 66/66 vs 61, x86-64 66/65 vs 41), so the plain
 // .data() form stays; test/noaliascheck.sh arm 7 runs the release probe on
-// two empty vectors. The one form that avoids the null AND keeps the effect
-// is the function's own early return on empty input, placed BEFORE the macro:
-// the promise then runs on non-null buffers and still dominates the loop
-// (measured: 64 vs 61 arm64, 44 vs 41 x86-64 — the difference is the
-// emptiness test itself, which costs the same without the promise). So the
-// placement rule is: after the "nothing to do" early return, before the first
-// access. Works for anything with .data(): std::vector, std::span,
-// std::string, std::array.
+// two empty vectors. If the function already has a "nothing to do" early
+// return on empty input, put the macro AFTER it: the promise then runs on
+// non-null buffers and still dominates the loop (measured: 64 vs 61 arm64,
+// 44 vs 41 x86-64 — the difference is the emptiness test itself, which costs
+// the same without the promise). Do not add an early return for the macro's
+// sake; the one line alone is the full effect. Works for anything with
+// .data(): std::vector, std::span, std::string, std::array.
 //
 // WHY NOT `__restrict` ON THE SIGNATURE. Prefer this macro in the body: it is
 // checked in debug, it is the same optimizer fact in release, and it does not
