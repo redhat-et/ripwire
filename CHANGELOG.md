@@ -30,6 +30,18 @@ and boundaries are documented in [Elixir extraction](docs/ARCHITECTURE.md#elixir
 `kParserVer` 94 → 95 with `quality.h`'s `kIngestParserVerMirror` in the same commit (the branch carried
 87; main spent 87..92 while it was open and the 0.6.1 round takes 93 and 94 — re-bumped to the next free
 number over the merged tip, per the rule in `src/ingest_cache.h`); `kCacheVersion` stays 21.
+
+Four review findings were closed as maintainer commits on the branch, each with a row in
+`test/elixirnamearitycheck.sh`. A call that only a `use`-injected import could answer minted no edge
+and was dropped silently; it now counts in the map header's `unresolved=` and every answer's
+`graph_unresolved=` (an undefined spelling stays undefined, modelling `__using__` stays open). A
+variable bound on the right of `=` inside a pattern — `def join(%Socket{} = socket, _)`, a `case`
+clause, a `with` generator — is a binding, not a zero-arity call of a same-named function. The quality
+key folds the arity out of an Elixir name, so `run(x)` → `run(x, y)` is a `--edit-check`
+contract-change on `run` (params 1 → 2) with every caller of the old arity listed and flagged, and a
+`--quality-delta` params row, rather than a dead symbol beside a new one; a default (`run(x, y \\ 1)`)
+still reports the change but flags nobody (`kQSnapCacheScheme` 10 → 11). `--for` by an exact function
+name (`generate_app`, `text`) routes name-exact and ranks the `name/N` symbol first.
 ### Upgrade notes
 
 - **A sidecar must be a regular file: a symlink at a sidecar name is refused, on read as well as on write.**
