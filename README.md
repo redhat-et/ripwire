@@ -2462,8 +2462,8 @@ Notebooks, HTML, and CSV files are indexed as documents for `--recall` and `--me
 
 | Operation | Scale | Measured result |
 | --- | --- | --- |
-| Cold parse and answer | 1,900-file tree | About 0.7 s on an Apple M-series host |
-| Warm run | The same tree | About 0.11 s |
+| Cold parse and answer | This repository | See [Where its own cycles go](#where-its-own-cycles-go--hardware-counters-per-scope) |
+| Warm run | The same tree | See [Where its own cycles go](#where-its-own-cycles-go--hardware-counters-per-scope) |
 | Cache load | The same tree | About 167 times fewer instructions than a cold parse |
 
 One process answers a query. The tool starts no daemon and holds no server connection. The parse
