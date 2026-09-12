@@ -1,4 +1,5 @@
 defmodule Sample.Run do
+  import Sample.Math, only: [untouched: 1]
   @moduledoc "Exercise remote calls and negative definition-capture candidates."
   @doc "Exercise a remote call using a literal module name."
   def run(x), do: Sample.Math.square(x)

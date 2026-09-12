@@ -20,10 +20,8 @@
 #   nestedcall.ex  alias/import/require inside an if, a case arm and a def body (the container arms)
 #   decoy/foo.ex   defmodule Decoy.Foo — a same-BASENAME file no module name reaches
 #
-# NOT COVERED, and disclosed rather than approximated: `alias A.B.C` also binds the local NAME `C`, so a
-# later `C.f()` means `A.B.C.f`. That is call RESOLUTION, not a file dependency, and it needs the call's
-# receiver — which queries/elixir/tags.scm deliberately does not keep. The file edge lands; the name alias
-# does not narrow --callers/--callees. Arm 6 pins that boundary so it cannot rot into a silent claim.
+# Arm 6 also checks alias-based call resolution with a same-named decoy and a mutated alias target.
+# test/elixirsemanticcheck.sh covers lexical scope, arity and the other name-resolution rules.
 #
 # Usage:  test/eliximportcheck.sh   |   RIPWIRE_BIN=asan/ripwire test/eliximportcheck.sh
 # Exit:   0 = clean · 1 = an arm failed · 2 = usage / missing prerequisite
@@ -101,16 +99,31 @@ printf '%s' "$DEPS" | grep -qE 'dep_langs="[^"]*,ex[,"]' \
     && ok 'capability: <health dep_langs=> discloses ex in the capable set' \
     || no "capability: dep_langs= does not name ex"
 
-# ── 6. THE DISCLOSED NON-GOAL: the alias does NOT bind a name for call resolution ─────────────────────
-# main.ex aliases MyApp.Foo and then calls `Foo.run()`. The FILE edge exists (arm 2). The call is still
-# resolved by the global name ladder, so it binds MyApp.Foo::run only because `run` is unique here — not
-# because the alias was followed. Asserting the boundary keeps the doc comment honest: if a later round
-# teaches the resolver to follow aliases, this arm goes red and the claim must be rewritten, not silently
-# widened.
-"$BIN" "$FIX" --callees=go --no-cache >"$TMP/callees" 2>/dev/null
-grep -q 'run' "$TMP/callees" \
-    && ok 'boundary: `Foo.run()` binds `run` (via the name ladder — the alias is not followed, by design)' \
-    || no "boundary: the call inside go/0 disappeared entirely: $( head -c 300 "$TMP/callees" )"
+# ── 6. ALIAS RESOLUTION: a receiver's module wins over a same-named function elsewhere ──────────────
+# The python block is the CONDITION of the if, so its exit status reaches the reporter: a failed assertion is
+# a FAIL row and fail=1, never a bare traceback the accounting cannot see.
+if python3 - "$BIN" "$FIX" "$TMP" <<'PY'
+import pathlib, shutil, subprocess, sys, xml.etree.ElementTree as ET
+binary, source, tmp = sys.argv[1:]
+fixture = pathlib.Path(tmp) / 'alias-control'
+shutil.copytree(source, fixture)
+(fixture / 'decoy/foo.ex').write_text('defmodule Decoy.Foo do\n  def run(), do: :decoy\nend\n')
+def paths():
+    tree = ET.fromstring(subprocess.check_output([binary, str(fixture), '--callees=go', '--no-cache']))
+    return [s.get('p') for s in tree.iter('s')]
+assert paths() and all(p.startswith('lib/my_app/foo.ex:') for p in paths()), paths()
+main = fixture / 'lib/my_app/main.ex'
+before = main.read_text()
+after = before.replace('alias MyApp.Foo\n', 'alias Missing.Foo\n')
+assert before != after
+main.write_text(after)
+assert not paths(), 'an unknown alias target fell back to a same-named function'
+PY
+then
+    ok 'alias: exact module target, same-name decoy excluded, mutated unknown target unresolved'
+else
+    no 'alias call resolution failed'
+fi
 
 # ── 7. determinism, warm == cold, well-formed XML ─────────────────────────────────────────────────────
 "$BIN" "$FIX" --deps --no-cache >"$TMP/d1" 2>/dev/null

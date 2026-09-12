@@ -173,7 +173,7 @@ inline const char* langTag( Lang l ) noexcept
 //              `@external` veto, never a spray. APPENDED so no persisted value renumbers (RawRef rides the
 //              cache with recv as a u8). Python only: isMemberAccessNode classifies C++/Python receivers and
 //              C++ has no `super`.
-enum class RecvKind : std::uint8_t { None, ThisObj, NamedVar, FieldOfThis, FieldOfVar, SuperObj };
+enum class RecvKind : std::uint8_t { None, ThisObj, NamedVar, FieldOfThis, FieldOfVar, SuperObj, ElixirModule, ElixirSelfModule };
 
 // ABS-3 reference / use-site ROLE: WHAT a reference does at the use site, captured at ingest so a
 // use-site index (`--uses=SYM`) can report the resolvable places a name is referenced, not just calls.
@@ -635,6 +635,10 @@ enum class LocalBindKind : std::uint8_t
                //     the file. Re-export (`export { f } from ...`) and default exports record nothing: see
                //     ingest_jsimports.h for why an absent name must degrade rather than refuse.
     JsShadow,  // lexical declaration hiding an ES import; spanStart/spanEnd cover the declaring scope.
+    ElixirCallable, // var=name/arity, typeName=module, importedName=definition keyword; span is the declaration.
+    ElixirDefault,  // var=callable name/arity, importedName=full name/arity, typeName=module; no synthetic symbol.
+    ElixirImport,   // typeName=module, var=all/only/except/functions/macros; importedName=newline-delimited name/arities.
+                   // spanStart/spanEnd delimit lexical visibility, starting after the directive.
 };
 
 inline constexpr const char* kFnBindLambdaTarget  = "(lambda)";    // parens are illegal in identifiers, so
@@ -645,16 +649,17 @@ struct Binding
     NodeId        fromSymbol = kNoNode;   // enclosing function/method (the binding's scope); kNoNode if file-scope
     std::uint32_t fileId     = 0;
     LocalBindKind kind       = LocalBindKind::Type;
-    std::uint32_t spanStart  = 0;         // kind==VarDecl only: the byte span the name shadows within — a block
+    std::uint32_t spanStart  = 0;         // VarDecl: the byte span the name shadows within — a block
     std::uint32_t spanEnd    = 0;         //   declaration runs from its DECLARATION POINT (end of the complete
                                           //   declarator, [basic.scope.pdecl]) to the block's end; a whole-scope
                                           //   shape (parameters, captures, range-for and control-statement header
                                           //   declarations) from its scope's start. See suppressShadowedReferences.
-                                          //   {0,0} on every other kind and on a scope-less capture (contains nothing).
+                                          //   ES/Elixir bindings also use spans as documented in LocalBindKind.
+                                          //   {0,0} on a scope-less shadow capture (contains nothing).
     std::string   var;                    // the declared variable identifier (`x`)
     std::string   importedName;           // JsImport: the requested export name; never a global-name fallback.
                                           //   JsExport: the LOCAL name the exported spelling binds (empty when
-                                          //   the two are identical). Empty on every other kind.
+                                          //   the two are identical). Elixir: see LocalBindKind's field contracts.
     std::string   typeName;               // kind==Type: the written type's final segment (`Foo`), resolved to a
                                           //   class in buildGraph. kind==FnDecl/FnAssign: the bound FUNCTION
                                           //   name as written minus `&` (`alpha`, `ns::alpha`), or a sentinel.

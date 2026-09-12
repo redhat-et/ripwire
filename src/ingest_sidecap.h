@@ -1401,7 +1401,10 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
         }
 #endif
 
-        captureIncludes( root, le.lang, fileId, src, incs, refs, binds, constOpens );   // physical deps + ABS-3 import-role use-sites + Phase 5 import bindings + Ruby class/module opens
+        if( le.lang != Lang::Elixir )
+        {
+            captureIncludes( root, le.lang, fileId, src, incs, refs, binds, constOpens );   // Elixir directives share the lexical tags context below.
+        }
         captureJsImportFacts( root, le.lang, fileId, src, binds );
 
         // A4-R5: cross-language FFI binding declarations (pybind11 / extern "C" / ctypes handle). Inert on a
@@ -1547,7 +1550,8 @@ inline void foldFieldDefs( std::vector<RawDef>& defs, std::size_t first, Lang la
 /// parse-pool worker and shared with captureSideFacts — the ranges outlive both calls because a queued
 /// file's tags pass runs later, at the prewarm flush).
 void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
-                       std::vector<RawDef>& defs, std::vector<RawRef>& refs, const std::vector<PreprocDeadRange>& ppDead )
+                       std::vector<RawDef>& defs, std::vector<RawRef>& refs, std::vector<RawBind>& binds, std::vector<Include>& includes,
+                       const std::vector<PreprocDeadRange>& ppDead )
 {
     if( cursor == nullptr )
     {
@@ -1562,6 +1566,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
 
     const std::size_t firstDefOfFile = defs.size();   // member-variable round: foldFieldDefs' window (below)
     const std::size_t firstRefOfFile = refs.size();   // #72 follow-up: dropPreprocDead's window (below)
+    const std::size_t firstBindOfFile = binds.size();
+
+    ElixirContext elixir;
+    if( le.lang == Lang::Elixir ) { elixir.prepare( cursor, query, root, src, fileId, binds, includes, refs ); }
 
     // extent honesty: the recovered-bit walk (parseRecoveredBits) only exists in a file the parser had to recover.
     const bool fileHasError = ts_node_has_error( root );
@@ -1700,9 +1708,24 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             {
                 continue;
             }
+            if( le.lang == Lang::Elixir && refCapSv == "reference.bare" )
+            {
+                // Bare pipe targets have their own capture; every other bare name needs lexical variable exclusion.
+                const TSNode parent = ts_node_parent( nameNode );
+                if( ( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "|>"
+                      && ts_node_eq( fieldChild( parent, NodeField::Right ), nameNode ) ) || !elixir.bareCall( nameNode ) ) { continue; }
+            }
+            if( le.lang == Lang::Elixir && refCapSv == "reference.operator" )
+            {
+                constexpr std::string_view special[] = { "=", "<-", "\\\\", "::", "|>", "when", "|", "^", "&", "@" };
+                if( std::find( std::begin( special ), std::end( special ), nameTxt ) != std::end( special ) ) { continue; }
+                const TSNode parent = ts_node_parent( roleNode );
+                if( nameTxt == "/" && elixirNodeIs( parent, "unary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "&" ) { continue; }
+            }
 
             if( isDef )
             {
+                if( le.lang == Lang::Elixir && defCapSv == "definition.attribute" ) { kind = SymKind::Var; }
                 RawDef d;
                 d.fileId    = fileId;
                 d.line      = nameRow + 1;   // the identifier's line — most accurate, dedup-stable
@@ -1865,7 +1888,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 const std::uint32_t endRow   = ts_node_end_point( spanThroughBody ? body : defNode ).row;   // LB-E: rows through the sibling block
                 d.loc = ( endRow >= startRow ) ? ( endRow - startRow + 1u ) : 1u;
             }
-            d.params    = fnOrMethod ? ( le.lang == Lang::Elixir ? elixirParams( defNode ) : countParams( defNode ) ) : std::uint16_t( 0 );
+            d.params    = fnOrMethod ? ( le.lang == Lang::Elixir ? elixirParams( defNode, src ) : countParams( defNode ) ) : std::uint16_t( 0 );
             // LB-E: a testmacroblock's parameter surface is the MACRO's business, not visible here — claim
             // inexact so the resolver's arity narrowing never trusts params=0 on a test-title symbol.
             d.arityExact = ( fnOrMethod && !isTestMacroBlock ) ? std::uint8_t( cc_paramArityExact( defNode, le.lang, kind ) ? 1 : 0 ) : std::uint8_t( 0 );   // B2.2
@@ -1892,11 +1915,33 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 d.name = "test " + std::string( nameTxt.substr( 1, nameTxt.size() - 2 ) );
                 d.testScope = 1;
             }
-            else if( le.lang == Lang::Elixir && !elixirImplName( roleNode, src ).empty() )
+            else if( le.lang == Lang::Elixir && !elixirAttribute( roleNode, src ).empty() )
+            {
+                const auto attribute = elixirAttribute( roleNode, src );
+                if( elixirTypedAttribute( attribute ) )
+                {
+                    const TSNode args = elixirArguments( ts_node_parent( nameNode ) );
+                    std::uint32_t arity = 0;
+                    for( std::uint32_t i = 0; !ts_node_is_null( args ) && i < ts_node_named_child_count( args ); ++i )
+                    {
+                        arity += elixirNodeIs( ts_node_named_child( args, i ), "comment" ) ? 0u : 1u;
+                    }
+                    d.name = ( attribute == "callback" || attribute == "macrocallback" ? "@callback " : "@type " ) + elixirFunctionName( nameTxt, arity );
+                }
+                else { d.name = "@" + std::string( nameTxt ); }
+            }
+            else if( le.lang == Lang::Elixir && kind == SymKind::Other )
             {
                 // `defimpl P, for: T` — the @name capture is just the protocol alias, but the module Elixir
                 // generates is `P.T`, which is what the impl's own defs carry as their scope.
-                d.name = elixirImplName( roleNode, src );
+                d.name = elixir.moduleName( roleNode );
+                if( d.name.empty() ) { continue; }
+                d.kind = elixirTarget( roleNode, src ) == "defprotocol" ? SymKind::Interface : SymKind::Class;
+                for( TSNode call : elixir.calls )
+                {
+                    const auto keyword = elixirTarget( call, src );
+                    if( ( keyword == "defstruct" || keyword == "defexception" ) && elixir.scopeOf( call ) == d.name ) { d.kind = SymKind::Struct; break; }
+                }
             }
             if( le.lang == Lang::Cpp )                              // canonical scope (E#4): out-of-line `A::b` → "A", else enclosing class/namespace
             {
@@ -1916,8 +1961,29 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             }
             else if( le.lang == Lang::Elixir )
             {
-                // A defimpl row's own name is already absolute (`P.For`), so no enclosing module scopes it.
-                d.scope = elixirImplName( roleNode, src ).empty() ? elixirScope( roleNode, src ) : std::string{};
+                d.scope = kind == SymKind::Other ? std::string{} : elixir.scopeOf( roleNode );
+                if( elixirFunctionKeyword( elixirTarget( roleNode, src ) ) )
+                {
+                    d.name = elixirFunctionName( nameTxt, d.params );
+                    // B2.2 for Elixir: a clause's arity IS its parameter count (no variadic form), so `params`
+                    // is call-comparable unless a `\\` default widens the callable to more than one arity.
+                    // cc_paramArityExact's language gate leaves this at 0, which made every Elixir caller
+                    // unflaggable by --edit-check (test/elixirnamearitycheck.sh arm C: run(x) -> run(x, y)
+                    // must flag run(x) callers; run(x, y \\ 1) must flag none).
+                    d.arityExact = elixirHeadDefaultCount( roleNode, src ) == 0 ? std::uint8_t( 1 ) : std::uint8_t( 0 );
+                    elixirDefinitionFacts( d, roleNode, src, binds );
+                    if( elixirTarget( roleNode, src ) == "defdelegate" )
+                    {
+                        RawRef delegated;
+                        delegated.fileId = fileId; delegated.startByte = d.startByte; delegated.line = d.line;
+                        delegated.lang = le.lang; delegated.recv = RecvKind::ElixirModule;
+                        delegated.qualifier = elixir.moduleOf( elixirKeywordValue( roleNode, "to:", src ), roleNode );
+                        const auto as = nodeTextOf( elixirKeywordValue( roleNode, "as:", src ), src );
+                        delegated.name = elixirFunctionName( as.starts_with( ":" ) ? as.substr( 1 ) : nameTxt, d.params );
+                        delegated.argCount = d.params; delegated.argCountKnown = true;
+                        if( !delegated.qualifier.empty() ) { refs.push_back( std::move( delegated ) ); }
+                    }
+                }
             }
             else if( le.lang == Lang::Ruby )
             { // enclosing class/module → id= addressability, per-class overload sets, editCheckImplicitReceiver
@@ -1972,16 +2038,29 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 r.name      = finalSegment( nameTxt );
                 if( le.lang == Lang::Elixir )
                 {
-                    r.qualifier = elixirScope( roleNode, src );
+                    r.qualifier = elixir.scopeOf( roleNode );
+                    if( refCapSv == "reference.attribute" )
+                    {
+                        r.role = RefRole::Read; r.name = "@" + std::string( nameTxt );
+                        refs.push_back( std::move( r ) );
+                        continue;
+                    }
                     const TSNode target = fieldChild( roleNode, NodeField::Target );
                     if( !ts_node_is_null( target ) && kindIs( ts_node_type( target ), "dot" ) )
                     {
                         const TSNode receiver = fieldChild( target, NodeField::Left );
-                        if( !ts_node_is_null( receiver ) && kindIs( ts_node_type( receiver ), "alias" ) )
-                        {
-                            r.qualifier = std::string( nodeTextOf( receiver, src ) );
-                        }
+                        r.qualifier = elixir.moduleOf( receiver, roleNode );
+                        if( r.qualifier.empty() ) { continue; }
+                        // `__MODULE__` spelled, or an alias of it (`alias __MODULE__, as: Current`): the receiver names the
+                        // enclosing module, and the reference is re-attributed per implementation of a multi-target defimpl
+                        r.recv = nodeTextOf( receiver, src ).starts_with( "__MODULE__" ) || elixir.selfRelativeAlias( receiver, roleNode )
+                               ? RecvKind::ElixirSelfModule : RecvKind::ElixirModule;
                     }
+                    auto [ count, known ] = elixirCallArity( roleNode, nameNode, src );
+                    if( refCapSv == "reference.operator" ) { count = elixirNodeIs( roleNode, "binary_operator" ) ? 2 : 1; known = true; }
+                    if( !known ) { continue; }
+                    r.argCount = count; r.argCountKnown = true;
+                    r.name = elixirFunctionName( nameTxt, count );
                 }
                 else if( le.lang == Lang::Ruby && rubyCallIsAssignmentTarget( nameNode ) )
                 {
@@ -2030,7 +2109,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     }
                 }
 
-                if( !isImportRef )                                                       // an import site has no receiver and no argument list —
+                if( !isImportRef && le.lang != Lang::Elixir )                             // an import site has no receiver and no argument list —
                 {                                                                        //   the defaults (RecvKind::None, argCountKnown=false) are the truth
                     RecvShape rs = receiverOf( nameNode, le.lang, src );                 // P2-D: `this`/`self`/`x`/`base.field` shape
                     r.recv = rs.kind;  r.recvVar = std::move( rs.var );                  //   → one-hop narrowing in resolve.h
@@ -2063,9 +2142,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     // its NAME (defSiteByte), so a live function whose BODY holds an `#if 0` block keeps its row and only
     // the facts spelled inside the block are dropped. Before foldFieldDefs, so the Python
     // one-field-per-(class,name) fold can never elect a definition that cannot compile.
+    //
+    // BINDS / INCLUDES — this function appends to them only for Elixir (ElixirContext), a language with no
+    // preprocessor: preprocDeadRangesFor is empty there, so neither window needs the filter.
     dropPreprocDead( refs, firstRefOfFile, ppDead, refSiteByte );
     dropPreprocDead( defs, firstDefOfFile, ppDead, defSiteByte );
 
+    if( le.lang == Lang::Elixir ) { elixirExpandImplementations( elixir, defs, firstDefOfFile, binds, firstBindOfFile ); }
     foldFieldDefs( defs, firstDefOfFile, le.lang );   // member-variable round: owner-less fields drop, Python fields fold to one per (class, name)
 }
 

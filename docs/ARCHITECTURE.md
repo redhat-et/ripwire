@@ -134,20 +134,79 @@ floors are asserted from the outside by `test/phpcheck.sh`, `test/luacheck.sh` a
 
 <a id="elixir-extraction"></a>
 
-Elixir's grammar models definitions as calls. Its tags query selects candidate shapes; the small
-`ingest_elixir.h` capture filter checks definition keywords, excludes declaration-head/pattern references, module attributes and
-quoted AST, and locates block/keyword bodies. `defimpl P, for: T` is indexed as the module Elixir itself
-generates — `P.T`, an ABSOLUTE name that nesting inside a `defmodule` does not qualify — so an implementation
-clause that shares a name with the enclosing module's function is a second row with its own canonical id,
-not a dropped definition. Macros, guards and literal ExUnit tests are parsed `fn` symbols. Local and
-remote calls, executable default expressions and pipes produce references; module scope qualifies definitions.
-Default-expression edges are syntactic possibilities; they are not narrowed by which arguments a caller supplies. Alias/import/use
-resolution, macro expansion, dynamic dispatch and protocol implementation DISPATCH remain outside this
-initial port: implementations are indexed, but a call through a protocol is not narrowed to them. Bare identifiers outside pipes are omitted because they may be variables or
-zero-arity calls. Metrics count syntactic controls, clause arms and boolean joins, not expanded macros;
-arity narrowing is deliberately disabled (default arguments and pipes change call arity).
-`test/elixircheck.sh` covers extraction, call-site mutation, metrics and cold/warm determinism.
+Elixir `.ex` and `.exs` files use the vendored grammar and the shared tags-query engine. No Elixir,
+Mix, language server, compiler, or application execution is required. `ingest_elixir.h` interprets the
+grammar's ordinary call nodes as declarations and collects lexical facts; `elixir_resolve.h` uses those
+facts in the graph and CLI/MCP use-site queries. The existing binding and reference cache records carry
+the facts without adding fields to every language's symbols or references.
 
+The extraction covers nested and explicitly rooted modules, structs/exceptions, protocols, single- and
+multi-target implementations (including an implicit enclosing-module target), public/private functions,
+macros, guards, delegates, operator definitions, guarded clauses, and literal ExUnit tests. Functions
+are identified by **module, name and arity**: `MyApp.Work::run/1` selects one arity; the existing
+`MyApp.Work::run` selector selects all arities. Each written clause retains its source span. Default
+arguments add callable lookup arities that resolve to those source definitions, without fabricated bodies.
+`defimpl P, for: [A, B]` produces separate `P.A` and `P.B` scopes, each with its own calls.
+
+Aliases (including groups and `as:`), `require ... as:`, nested-module aliases, `__MODULE__` and
+`Elixir.` root qualification resolve in lexical source order. Imports support `only`, `except`,
+`:functions` and `:macros`; private functions are callable only locally. Local calls, static remote
+calls, zero-arity bare calls, pipes, named captures, executable defaults, and `defdelegate to:/as:`
+share the arity-aware resolver. Bound parameters and pattern variables are excluded as calls. A
+missing module, excluded import or wrong arity stays unresolved; an unrelated same-named function
+does not supply an edge. Multiple matching clauses remain candidate destinations.
+
+Types (`@type`, `@typep`, `@opaque`) and callbacks (`@callback`, `@macrocallback`) are navigable
+declarations, named `@type name/N` and `@callback name/N`. Ordinary attributes are `@name` symbols;
+their expressions can carry calls and reads appear in `--uses`. Documentation, specs and other
+metadata do not become executable calls. Alias/import/require/use and behaviour declarations supply
+module dependencies resolved through declared module identities, regardless of umbrella/file layout.
+`@behaviour` and `defimpl` supply contract/implementation relationships for `--uses` and `--lego`.
+
+**Static limits:** quoted AST and macro-generated definitions are not expanded. `use` records the
+dependency, but does not execute `__using__`; framework DSLs and generated Phoenix/Ecto functions
+therefore need an explicit source definition to appear. A call that only an injected import could
+answer has no lexical candidate: no edge is minted from a same-named function elsewhere, and the call
+is counted in the map header's `unresolved=` and every answer's `graph_unresolved=` when some
+definition spells the name (an undefined spelling has no header surface, as in every language). Runtime module receivers, `apply`, anonymous
+function dispatch, protocol dispatch by runtime argument type, and HEEx template execution are not
+inferred. Type expressions are indexed as declarations, not type-checked. Default-expression edges
+are narrowed by arity alone, and only where a bodyless head declares the defaults: a call that omits a
+defaulted argument reaches that head beside the clauses, a call that supplies every argument reaches
+the clauses alone (the fifth rule below), and a head that is reached carries every default expression
+it declares, whichever one the call omitted. A default written on a clause that has a body stays on
+that clause's symbol, so every call to it reaches the default expression, supplied argument or not.
+Metrics count written controls, clauses and boolean joins before macro expansion. These limits apply
+to CLI and MCP alike.
+
+Five resolution rules, each reproduced against Elixir 1.20.3 / OTP 29 before the merge and each gated
+with its control in `test/elixirnamearitycheck.sh` (G)–(K) over `test/elixirresolvefix`: a later
+`import M, except: [...]` **subtracts** from the `import M, only: [...]` in force instead of replacing it,
+so a function the only-list never named stays un-imported and the refusal is counted
+(`src/elixir_resolve.h`); a dotted nested declaration such as `defmodule Inner.Deep` inside `defmodule
+Outer` aliases its first segment, `Inner` → `Outer.Inner`, from that point on, so a later
+`Inner.Deep.target()` names the nested module even beside a top-level `Inner.Deep`, and a call written
+before the declaration still names the top-level one (`src/ingest_elixir.h`); inside a multi-target
+`defimpl`, `alias __MODULE__, as: Current` binds each implementation's `Current.f()` to its OWN `f`,
+as `__MODULE__.f()` does, while a literal `P.A.f()` stays literal (`src/ingest_elixir.h`,
+`src/ingest_sidecap.h`); a named capture of an underscore-prefixed function (`&_seed/0`) is a call of
+that function — the underscore rule is for unused variables, and a bare `_seed` read still is one
+(`src/ingest_elixir.h`); and a call that omits a defaulted argument reaches the bodyless head that
+evaluates the default beside the clauses, so `--path` and `--impact` see the default expression's calls
+from that caller, while a call that supplies the argument reaches the clauses alone
+(`src/elixir_resolve.h`). One gap stays open: executable `unquote(...)` and `bind_quoted:` expressions
+under `quote` are omitted with the rest of the quoted-AST filter, so a helper called only from inside
+an `unquote` has no caller edge from its macro.
+
+`test/elixircheck.sh`, `test/eliximportcheck.sh` and `test/elixirsemanticcheck.sh` cover extraction,
+metrics, exact target selection against decoys, lexical boundaries, contracts, CLI/MCP use-site parity,
+call-site mutation and cold/warm determinism; `test/elixirnamearitycheck.sh` covers what the `name/N`
+key must not cost the verbs around it (the counted `use` drop, pattern bindings on the right of `=`,
+`--edit-check` and `--quality-delta` across an arity change, `--for` by exact name) and the five
+resolution rules above. This extraction
+uses parser revision 95 (rich 96), mirrored in `src/quality.h`; record format 21 is unchanged. The
+quality key (`pathQualifiedKey`) folds the arity out of an Elixir name — `run/1` and `run/2` are one
+piece of source, as C++ overloads of `f` are — which is snapshot scheme 11.
 <a id="dart-extraction"></a>
 **Dart extraction.** tree-sitter-dart makes `function_body` a SIBLING of `function_signature` /
 `method_signature`, never a `body` field and never a child. The shared ancestor walk in

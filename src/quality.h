@@ -735,6 +735,20 @@ inline std::uint64_t pathQualifiedKey( std::string_view relPath, std::string_vie
     return fnv1a64( idText );
 }
 
+// THE SAME KEY, taken from a Symbol — and the ONE place a language's keying rule lives. Elixir indexes a
+// callable as `name/N` (parser version 95): run/1 and run/2 are two ENTITIES, so canonicalId keeps the arity,
+// but they are one piece of SOURCE under this key — exactly as C++ overloads of `f` already share one — so
+// an arity edit is a params movement on one identity (--edit-check: contract-change, params_was/params_now;
+// --quality-delta: a params row), never a dead old symbol beside a brand-new one, which is what the
+// arity-carrying key reported (PR #81 review item 4, test/elixirnamearitycheck.sh arm C). Every language
+// but Elixir keys by the name as indexed. Every call site keys through this overload: a raw
+// (path, scope, name) call beside it would be a second rule that has to be ARGUED equal to this one.
+// kQSnapCacheScheme v11 is this fold — a v10 blob's Elixir keys hash a different byte string.
+inline std::uint64_t pathQualifiedKey( std::string_view relPath, const Symbol& s )
+{
+    return pathQualifiedKey( relPath, s.scope, s.lang == Lang::Elixir ? elixirBaseName( s.name ) : std::string_view( s.name ) );
+}
+
 // §D#4 error-masking — attribute each error-masking hit (findErrorMasking) to its ENCLOSING symbol by byte-span
 // containment, then COUNT hits per baseline canonId. A symbol contains a hit iff the hit's start byte lies in
 // the symbol's full def span [sigStartByte, endByte) in the same file. Overloads sharing a canonId SUM (the
@@ -780,8 +794,7 @@ inline gtl::btree_map<std::uint64_t, std::uint32_t> errorMaskCountsBySym( const 
             // pathQualifiedKey, via the SAME rule maskBySym is stored under (see qualityKey). These counts are
             // compared against that map key-for-key, so a scheme that differs by one byte silently reports every
             // masking construct as new.
-            ++counts[ pathQualifiedKey( relForHash( ing.files[ing.symbols[owner].fileId], root ),
-                                        ing.symbols[owner].scope, ing.symbols[owner].name ) ];
+            ++counts[ pathQualifiedKey( relForHash( ing.files[ing.symbols[owner].fileId], root ), ing.symbols[owner] ) ];
         }
     }
     return counts;
@@ -817,7 +830,7 @@ inline gtl::btree_map<std::uint64_t, std::uint32_t> errorMaskCountsBySym( const 
 inline std::uint64_t qualityKey( const IngestResult& ing, NodeId i, std::string_view root )
 {
     const Symbol& s = ing.symbols[i];
-    return pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s.scope, s.name );
+    return pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s );   // the Symbol overload: the one keying rule per language
 }
 
 // §D#4 short-horizon-churn — a per-identity hash of the symbols' RAW body bytes, for CHANGE detection that
@@ -1150,7 +1163,7 @@ inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const Inges
     forEachSymbolBody( ing,
                        [ & ]( NodeId, const Symbol& s, std::string_view body )
                        {
-                           const std::uint64_t key = pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s.scope, s.name );
+                           const std::uint64_t key = pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s );
                            perId[ key ].push_back( fnv1a64( body ) );
                        } );
     gtl::btree_map<std::uint64_t, std::uint64_t> out;
@@ -1311,7 +1324,7 @@ inline ContentIdIndex contentIdsBySym( const IngestResult& ing, const Graph& g, 
                            const std::uint64_t cid      = scrubbedBodyHash( body, s.name );
                            const bool          hasCanon = ( i < g.canonId.size() && !g.canonId[i].empty() );
                            out.symbolsPerCid[ cid ] += 1;              // per SYMBOL — the uniqueness question
-                           const std::uint64_t pqKey = pathQualifiedKey( rel, s.scope, s.name );
+                           const std::uint64_t pqKey = pathQualifiedKey( rel, s );
                            if( hasCanon )
                            {
                                // The canonId-space key is still INDEXED (an ack written by a pre-2026-08-25
@@ -1794,7 +1807,10 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 21;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 94;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 95;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 95 = 2026-09-12 (Elixir module/name/arity resolution, PR #81):
+                                                          //    RE-BUMPED from the branch's 87 over #139's 93 and #172's 94.
+                                                          //    See ingest_cache.h's kParserVer note.
                                                           // 94 = 2026-09-11 (#62/#72 follow-up): the decided-dead `#if 0`
                                                           //    filter now covers every --uses role, the Include record, and
                                                           //    DEFINITIONS — the extracted set shrinks on any C-family tree
@@ -2627,7 +2643,13 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // which is exactly what makes a stale blob dangerous rather than obvious: a v9 blob deserializes cleanly and
 // every symbol reads as having SHRUNK (its recorded physical loc exceeds the current code count), so the
 // verbosity kind reports NOTHING and says nothing about why. Bumped 9 -> 10.
-constexpr std::uint32_t kQSnapCacheScheme = 10;
+// v11 (PR #81 review item 4, 2026-09-12) — pathQualifiedKey( relPath, Symbol ) folds an Elixir `name/N` arity
+// OUT of the key: run/1 and run/2 are one piece of source, as C++ overloads of `f` are, so an arity edit is a
+// params movement on one identity instead of a dead symbol beside a new one. The v6/v7 shape again (the keys
+// hash a different byte string), confined to one language: a v10 blob's Elixir entries are absent from every
+// lookup this binary makes, so each Elixir symbol would read as new. Extraction is unchanged (parser version
+// 95 stays), so kParserVer and its mirror deliberately did NOT move. Bumped 10 -> 11.
+constexpr std::uint32_t kQSnapCacheScheme = 11;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -5200,14 +5222,14 @@ inline IdentityAliases identityAliases( const IngestResult& ing, const Graph& g,
         }
         const bool          hasCanon = ( i < g.canonId.size() && !g.canonId[i].empty() );
         const std::uint64_t curCanon = hasCanon ? fnv1a64( canonicalId( rel, s.scope, s.name ) ) : 0;
-        const std::uint64_t curPath  = pathQualifiedKey( rel, s.scope, s.name );
+        const std::uint64_t curPath  = pathQualifiedKey( rel, s );
         for( const std::string& anc : ancByFile[ s.fileId ] )
         {
             if( hasCanon )
             {
                 link( fnv1a64( canonicalId( anc, s.scope, s.name ) ), curCanon );
             }
-            link( pathQualifiedKey( anc, s.scope, s.name ), curPath );
+            link( pathQualifiedKey( anc, s ), curPath );
         }
     }
     // drop the entries poisoned by ambiguity above, so no consumer has to know about the 0 sentinel
@@ -5255,7 +5277,7 @@ inline void addSchemeAliases( IdentityAliases& al, const IngestResult& ing, cons
         }
         const std::string   rel{ relForHash( ing.files[ s.fileId ], root ) };
         const std::uint64_t oldKey = fnv1a64( canonicalId( rel, s.scope, s.name ) );
-        const std::uint64_t newKey = pathQualifiedKey( rel, s.scope, s.name );
+        const std::uint64_t newKey = pathQualifiedKey( rel, s );
         if( oldKey == newKey || oldKey == 0 || newKey == 0 )
         {
             continue;
@@ -6752,7 +6774,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                     // W1-S2: join on the path-qualified identity, NOT keyByNode — a scope-less symbol's
                     // bare-canonId key folded every same-named symbol in the tree into one identity, so
                     // gates 2+3 judged cross-file FOLDS (see bodyHashesBySym's doc; gate: §1d).
-                    const std::uint64_t key = pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s.scope, s.name );
+                    const std::uint64_t key = pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s );
                     if( !insertScratchSeen( churnSeen, key, "quality: churn seen scratch capacity exceeded" ) )
                     {
                         continue; // one report per (file, scope, name) identity — same-file overloads fold

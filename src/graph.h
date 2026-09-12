@@ -4,6 +4,7 @@
 // resolved out-edges for serialization. Ranking lives in pagerank.cpp.
 
 #include "model.h"
+#include "elixir_resolve.h"      // lexical module/name/arity resolution; reuses cached Binding records
 #include "filter.h"              // isTestPath — for the Q2 tested= post-pass
 #include "pageview.h"            // LB-H: kImportReachRowCap — the import tier's display cap lives with the rest of the truncation vocabulary
 #include "graphlegend.h"         // M15: graphGaugeAttrXml/Json + kGraphCountFloorAttrXml/Json — graphCountFloorAttrXml( g ) below
@@ -1959,6 +1960,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // to the variable's type; Rule 3 pins a call to the ONE file the caller includes that defines it — all
     // BEFORE the bare-name spray below. See resolve.h.
     const Narrower narrower( canonByName, varType, fileIncludes, symFileId );
+    const ElixirResolver elixirResolver( ing );
     // ONE apply step for every receiver rule (1 / 2 / 2c / 2b): keep the rule's definition ids that are
     // language-compatible with the call and inside the same root, and say whether anything survived. The
     // four rules used to carry four copies of this loop; the filter is stated once so it cannot drift.
@@ -2215,7 +2217,48 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
         // ---- name-based resolution (the fallback ladder below + P2-D narrowing) — SKIPPED when the SCIP overlay pinned this site.
         bool canonical = false;
-        if( !scipPinned && !r.qualifier.empty() )
+        if( !scipPinned && r.lang == Lang::Elixir )
+        {
+            elixirResolver.resolve( r, cand );
+            std::erase_if( cand, [ & ]( NodeId c ) { return !sameRoot( c, r.fileId ); } );
+            if( cand.empty() )
+            {
+                // No lexical fact answers this call: no alias, import or receiver names a definition of its
+                // module/name/arity. The commonest reason is a `use` — `__using__` injects imports the tool
+                // does not expand (docs/ARCHITECTURE.md, Elixir extraction) — and the next is a wrong arity or
+                // an excluded import. Decided 2026-09-12 (PR #81 review item 2): NO edge is minted from the
+                // name ladder, because a same-spelled function in an unrelated module is exactly the false
+                // edge this resolver exists to refuse (on one framework corpus the ladder gave `text/2` 55
+                // callers where 3 were real); and the drop is COUNTED, never silent. Same vocabulary as the
+                // ladder's own refusal below: a spelling some in-repo definition carries is unresolved= (the
+                // header gauge, and the caller's own unresolvedOut); a spelling no definition carries at all is
+                // undefined, which has no header surface by design (pincensus.h); and in a multi-root run a
+                // name defined only in ANOTHER root is that root's, counted OtherRoot, as the solo run would
+                // say. Modelling what `__using__` injects stays open (test/elixirnamearitycheck.sh arm A).
+                if( it == byName.end() )
+                {
+                    disposition = CallDisposition::Undefined;
+                    continue;
+                }
+                bool anySameRootDef = !multiRoot;
+                for( NodeId c : it->second )
+                {
+                    if( multiRoot && sameRoot( c, r.fileId ) ) { anySameRootDef = true; break; }
+                }
+                if( anySameRootDef )
+                {
+                    ++g.unresolvedOut[ r.fromSymbol ];
+                    disposition = CallDisposition::Unresolved;
+                }
+                else
+                {
+                    disposition = CallDisposition::OtherRoot;
+                }
+                continue;
+            }
+            canonical = true;
+        }
+        if( !scipPinned && r.lang != Lang::Elixir && !r.qualifier.empty() )
         {
             qkey.clear();                                       // "qualifier::name" — reused buffer, identical bytes
             qkey.append( r.qualifier ).append( "::" ).append( r.calleeName );
@@ -2503,7 +2546,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
         // ---- tier ladder (the name-based fallback) — SKIPPED when the SCIP overlay pinned this site (tier already holds the
         // precise target(s) at full confidence; the ladder would only re-derive a guess). -----------------
-        if( !scipPinned )
+        if( !scipPinned && r.lang == Lang::Elixir ) { tier = cand; }
+        if( !scipPinned && r.lang != Lang::Elixir )
         {
             if( cand.empty() )
             {
@@ -2698,7 +2742,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // contradicted by the receiver (`this->` IS the enclosing class; a typed var already narrowed above).
         // Phase 5: a `super()` receiver is excluded for the same reason — the enclosing class winning the scope
         // credit is exactly the class `super()` skips; a multi-base tie stays an honest split.
-        if( !scipPinned && !bindingPinned && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
+        if( !scipPinned && !bindingPinned && r.lang != Lang::Elixir && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
          && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar && r.recv != RecvKind::SuperObj )
         {
             const std::string& callerCanon = g.localityKey[ r.fromSymbol ];   // == canonId here (the caller is scoped)
@@ -3735,7 +3779,7 @@ inline std::vector<NodeId> resolveAllByScopeQualified( const IngestResult& ing, 
     const std::string_view name      = spec.substr( cut + 2 );
     for( const Symbol& s : ing.symbols )
     {
-        if( s.name == name && !s.scope.empty() && scopeSuffixMatches( s.scope, scopePart ) )
+        if( elixirNameMatches( s, name ) && !s.scope.empty() && scopeSuffixMatches( s.scope, scopePart ) )
         {
             out.push_back( s.id );
         }
@@ -4071,7 +4115,7 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
     std::vector<NodeId> out;
     for( const Symbol& s : ing.symbols )
     {
-        if( s.name == name )
+        if( elixirNameMatches( s, name ) )
         {
             out.push_back( s.id );
         }
@@ -4388,7 +4432,7 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
     std::vector<NodeId> out;
     for( const Symbol& s : ing.symbols )
     {
-        if( s.name == name && ( file.empty() || filePathContains( ing.files[ s.fileId ], file ) ) )
+        if( elixirNameMatches( s, name ) && ( file.empty() || filePathContains( ing.files[ s.fileId ], file ) ) )
         {
             out.push_back( s.id );
         }
@@ -4678,6 +4722,9 @@ inline FieldUseAnswer collectFieldUseSites( const IngestResult& ing, FieldId fie
         const std::string_view ctxOwner = ownerOfContext( r.fromSymbol );
         switch( r.recv )
         {
+            case RecvKind::ElixirModule:
+            case RecvKind::ElixirSelfModule:
+            break; // module receivers name callables, not instance fields
             case RecvKind::None:
             {
                 candidatesIn( ctxOwner, r.lang );   // empty ⇒ a local/global/inherited name — not a field use this pass can see

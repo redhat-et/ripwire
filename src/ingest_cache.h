@@ -85,10 +85,10 @@ struct RawBind
     std::uint32_t startByte = 0;   // position inside the enclosing function (for enclosing-def attribution)
     Lang          lang      = Lang::Unknown;
     LocalBindKind kind      = LocalBindKind::Type;   // Type = Rule 2 var→type; FnDecl/FnAssign = L3 var→function
-    std::uint32_t spanStart = 0;   // kind==VarDecl only: the declaring BLOCK's byte span (shadow scope);
-    std::uint32_t spanEnd   = 0;   //   {0,0} on every other kind — see model.h Binding
+    std::uint32_t spanStart = 0;   // lexical visibility or declaration span; see model.h Binding/LocalBindKind
+    std::uint32_t spanEnd   = 0;
     std::string   var;             // the declared variable identifier (`x`)
-    std::string   importedName;    // JsImport only; persisted beside the local name and module target.
+    std::string   importedName;    // ES export identity or Elixir callable/import fact; see LocalBindKind.
     std::string   typeName;        // kind==Type: the written type's final segment (`Foo`);
                                    // kind==FnDecl/FnAssign: the bound function name (or an L3 sentinel)
 };
@@ -126,6 +126,9 @@ constexpr std::uint32_t kCacheVersion = 21;           // 21: Include gains `bool
                                                       //    u8 after isSymbolic) — the constant-argument / rescue-class
                                                       //    origin bit the call narrow skips. A FORMAT change → reject
                                                       //    v20 blobs. kParserVer moves with it.
+                                                      //    PR #81 (Elixir, parser version 95) changes NO record shape: its
+                                                      //    RecvKind / LocalBindKind enumerators are APPENDED and ride the
+                                                      //    existing u8, so the format stays at #139's 21.
                                                       // 20: the member-macro re-parse (test/macroreparsecheck.sh) — each
                                                       //    FILE record gains FileHealth::macroBlanked, a fifth health
                                                       //    u32 after wsBytes — a FORMAT change → reject v19 blobs.
@@ -220,7 +223,33 @@ constexpr std::uint32_t kCacheVersion = 21;           // 21: Include gains `bool
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 94;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 95;           // bump on any grammar/.scm/extraction change
+                                                      // 95 = 2026-09-12 (Elixir module/name/arity resolution, PR #81,
+                                                      //    test/elixirsemanticcheck.sh): module/name/arity identities,
+                                                      //    lexical aliases, filtered imports, default arguments, pipes,
+                                                      //    captures, delegates, attributes and protocol/behaviour
+                                                      //    contracts. Existing bind/ref record layouts are unchanged
+                                                      //    (kCacheVersion stays #139's 21; the same PR's kQSnapCacheScheme
+                                                      //    10 -> 11 is quality.h's arity-key fold, not an extraction change);
+                                                      //    old Elixir extraction facts must be re-parsed. The branch
+                                                      //    carried 87; main spent 87..92 while it was open, #139 takes
+                                                      //    93 and #172 takes 94 in the 0.6.1 round, so this lands on
+                                                      //    the next free number over the merged tip (the 78/80/88/91
+                                                      //    rule). quality.h's kIngestParserVerMirror bumped in the
+                                                      //    SAME commit.
+                                                      //    Three pre-merge follow-ups on the same PR move extraction
+                                                      //    OUTPUT within 95 (test/elixirnamearitycheck.sh H, I, J): a
+                                                      //    dotted nested defmodule binds its first segment (ref
+                                                      //    qualifiers), an alias of __MODULE__ classifies its receiver
+                                                      //    ElixirSelfModule (RawRef::recv), and `&_seed/0` is captured
+                                                      //    (the extracted SET). No second bump: the never-reuse rule is
+                                                      //    about TWO LANES shipping one in-flight number with different
+                                                      //    sets, and 95 is this lane's alone — minted here over the
+                                                      //    merged tip, written by no released binary. Record shapes are
+                                                      //    unchanged (kCacheVersion stays 21). A blob a pre-follow-up
+                                                      //    build of this branch wrote is the one exposure, and it is
+                                                      //    local to whoever built that branch: --no-cache, or let the
+                                                      //    stat gate re-parse the edited files.
                                                       // 94 = 2026-09-11 (#62/#72 follow-up, all roles + definitions):
                                                       //    the decided-dead `#if 0` filter moved from captureTagsFacts'
                                                       //    @reference.call/@reference.import arm to a window post-pass

@@ -969,7 +969,8 @@ namespace mcpedit
     {
         const std::vector<NodeId> overloadNodes = editCheckOverloadSet( ing, g, focus );
         const EditCheckContract   contract      = editCheckContractVsHead( ing, g, root, kDefaultMaxFileBytes, {}, focus, overloadNodes );
-        const auto [ callerIds, callerIncompatible ] = editCheckCallers( ing, g, overloadNodes, ing.symbols[ focus ].name );
+        EditCheckCalleeTest       callee( ing, ing.symbols[ focus ], overloadNodes );
+        const auto [ callerIds, callerIncompatible ] = editCheckCallers( ing, g, overloadNodes, callee );
         std::size_t incompatibleCount = 0;
         for( NodeId c : callerIds )
         {
@@ -977,7 +978,7 @@ namespace mcpedit
         }
         const EditCheckVerdict verdict = editCheckVerdict( contract, incompatibleCount );
         const std::vector<std::pair<NodeId, std::uint32_t>> callSites =
-            incompatibleCount > 0 ? editCheckCallSites( ing, ing.symbols[ focus ].name, callerIncompatible )
+            incompatibleCount > 0 ? editCheckCallSites( ing, callee, callerIncompatible )
                                   : std::vector<std::pair<NodeId, std::uint32_t>>{};
 
         std::string out = std::string( ",\"edit_check\":{\"status\":\"" ) + verdict.status

@@ -1337,9 +1337,16 @@ bool isRouteAnchorSymbol( const rw::IngestResult& ing, rw::NodeId sid, const std
 {
     const rw::Symbol& s     = ing.symbols[sid];
     const std::string lower = rw::routeLower( s.name );
+    // An Elixir callable is indexed as `name/N` and anchored by its arity-less spelling too (lexical.h
+    // noteWholeNameDef registers both), so the definition the anchor names IS the `name/N` row: without this
+    // second spelling the anchor resolved to the right file and then filtered its own definition out of the
+    // body head, and `--for=generate_app` served bodies="0" reason="no_candidates" (PR #81 review item 5,
+    // test/elixirnamearitycheck.sh arm D). Empty for every other language: one comparison, as before.
+    const std::string lowerBase = ( s.lang == rw::Lang::Elixir && rw::elixirBaseName( s.name ).size() != s.name.size() )
+                                ? rw::routeLower( rw::elixirBaseName( s.name ) ) : std::string{};
     for( const rw::RouteAnchorDef& a : anchorDefs )
     {
-        if( a.fileId == s.fileId && a.lowerName == lower )
+        if( a.fileId == s.fileId && ( a.lowerName == lower || ( !lowerBase.empty() && a.lowerName == lowerBase ) ) )
         {
             return true;
         }

@@ -15,6 +15,50 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — Elixir module and arity resolution (parser version 95)
+
+Elixir calls now resolve by module, name and arity, with lexical aliases, filtered imports, default
+arguments, pipes, captures and delegates. Nested modules and each target of a multi-target `defimpl`
+have separate identities. Types, callbacks and attributes are navigable, and protocol/behaviour
+relationships appear in the existing relationship views. CLI and MCP use-site queries share the same
+resolution rules; unknown modules and excluded imports no longer fall back to unrelated functions.
+
+The implementation uses the existing vendored parser and cache records, with no Elixir runtime
+dependency. Macro expansion and runtime dispatch remain static-analysis limits; the supported syntax
+and boundaries are documented in [Elixir extraction](docs/ARCHITECTURE.md#elixir-extraction).
+
+`kParserVer` 94 → 95 with `quality.h`'s `kIngestParserVerMirror` in the same commit (the branch carried
+87; main spent 87..92 while it was open and the 0.6.1 round takes 93 and 94 — re-bumped to the next free
+number over the merged tip, per the rule in `src/ingest_cache.h`); `kCacheVersion` stays 21.
+
+Four review findings were closed as maintainer commits on the branch, each with a row in
+`test/elixirnamearitycheck.sh`. A call that only a `use`-injected import could answer minted no edge
+and was dropped silently; it now counts in the map header's `unresolved=` and every answer's
+`graph_unresolved=` (an undefined spelling stays undefined, modelling `__using__` stays open). A
+variable bound on the right of `=` inside a pattern — `def join(%Socket{} = socket, _)`, a `case`
+clause, a `with` generator — is a binding, not a zero-arity call of a same-named function. The quality
+key folds the arity out of an Elixir name, so `run(x)` → `run(x, y)` is a `--edit-check`
+contract-change on `run` (params 1 → 2) with every caller of the old arity listed and flagged, and a
+`--quality-delta` params row, rather than a dead symbol beside a new one; a default (`run(x, y \\ 1)`)
+still reports the change but flags nobody (`kQSnapCacheScheme` 10 → 11). `--for` by an exact function
+name (`generate_app`, `text`) routes name-exact and ranks the `name/N` symbol first.
+
+Five resolution rules the branch got wrong, found by reproducing against Elixir 1.20.3 / OTP 29 before
+the merge, each with a row and a control in `test/elixirnamearitycheck.sh` over `test/elixirresolvefix`.
+`import M, except: [...]` after `import M, only: [...]` subtracts from the only-list instead of replacing
+it (a function the only-list never named minted an edge, silently; the refusal is now counted). A dotted
+nested `defmodule Inner.Deep` aliases `Inner` → `Outer.Inner` from its declaration on, so the later
+`Inner.Deep.f()` names the nested module rather than a top-level one — or, with no top-level one,
+rather than nothing. `alias __MODULE__, as: Current` inside a multi-target `defimpl` reaches each
+implementation's own function, not the first implementation's. `&_seed/0` names the underscore-named
+function (the underscore rule is for unused variables; a bare `_seed` read still is one). And `f()` on a
+bodyless `def f(x \\ default())` head reaches the head beside the clauses, so `--path=caller,default`
+and `--impact=default` see the caller; `f(1)` still reaches the clauses alone. Every one was a wrong
+answer or an uncounted drop. They ride parser version 95 — the number this entry introduces, which no
+released binary has written — with `kCacheVersion` 21 and `kQSnapCacheScheme` 11 unchanged. Still open,
+and documented in [Elixir extraction](docs/ARCHITECTURE.md#elixir-extraction): calls inside
+`unquote(...)` / `bind_quoted:` under `quote`.
+
 ### Upgrade notes
 
 - **A sidecar must be a regular file: a symlink at a sidecar name is refused, on read as well as on write.**

@@ -339,10 +339,12 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
 // split per-def); suggestName is the NAME half for did-you-mean (--expand/--outline's Lane H rule), so a
 // "file:" prefix never again poisons the suggester (the constant "srcmut_sigchange" bug). defsOfName is the
 // un-narrowed def count for the disclosure attribute — meaningful only when fileQualified.
-struct UsesSelector { bool fileQualified; std::string_view siteMatchName; std::string_view suggestName; std::size_t defsOfName; };
+struct UsesSelector { bool fileQualified; std::string_view siteMatchName; std::string_view suggestName; std::size_t defsOfName; std::vector<rw::NodeId> elixirDefs; };
 inline UsesSelector resolveUsesSelector( const rw::IngestResult& ing, std::string_view sym, std::size_t defsCount )
 {
     UsesSelector u;
+    u.elixirDefs = rw::resolveAllByNameQualified( ing, sym );
+    std::erase_if( u.elixirDefs, [ & ]( rw::NodeId node ) { return ing.symbols[ node ].lang != rw::Lang::Elixir; } );
     if( !sym.empty() && sym.front() == '@' )
     {
         // @FILE:LINE line-seed: the site scan matches NAMES, so the seed must rebind to the innermost
@@ -435,9 +437,11 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
     using namespace rw;
     std::vector<UseSite> sites;
     std::size_t          callSitesOfName = 0;
+    const ElixirResolver elixirResolver( ing );
     for( const Reference& r : ing.references )
     {
-        if( r.calleeName != sel.siteMatchName )
+        const bool elixirPath = ( r.lang == Lang::Elixir && !sel.elixirDefs.empty() );
+        if( elixirPath ? !elixirResolver.reachesAny( r, sel.elixirDefs ) : r.calleeName != sel.siteMatchName )
         {
             continue;
         }

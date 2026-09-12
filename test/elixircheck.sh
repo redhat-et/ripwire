@@ -12,12 +12,12 @@ cp -R "$ROOT/test/elixirfix" "$TMP/fix"
 python3 - "$TMP/map.xml" <<'PY'
 import sys, xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
-syms = {s.get('n'): s for s in root.iter('s')}
+syms = {s.get('n').split('/')[0]: s for s in root.iter('s')}
 expected = {'Sample.Math', 'Sample.Run', 'square', 'twice', 'secret', 'answer', 'literal', 'positive', 'pipeline', 'untouched', 'run', 'build', 'quoted', 'branchy', 'Sample.MathTest', 'test squares'}
 assert set(syms) == expected, (set(syms), expected)
 for name in expected - {'Sample.Math', 'Sample.Run', 'Sample.MathTest'}:
     assert syms[name].get('t') == 'fn', (name, syms[name].attrib)
-def calls(name): return {c.get('n') for c in syms[name].iter('c')}
+def calls(name): return {c.get('n').split('/')[0] for c in syms[name].iter('c')}
 assert not calls('Sample.Math'), 'typespec became a module call edge'
 assert 'square' in calls('twice')
 assert 'secret' in calls('answer')
@@ -47,16 +47,16 @@ PY
 "$BIN" "$TMP/fix" --no-cache > "$TMP/mut.xml"
 python3 - "$TMP/mut.xml" <<'PY'
 import sys, xml.etree.ElementTree as ET
-syms = {s.get('n'): s for s in ET.parse(sys.argv[1]).iter('s')}
+syms = {s.get('n').split('/')[0]: s for s in ET.parse(sys.argv[1]).iter('s')}
 assert 'secret' in syms
-assert 'secret' not in {c.get('n') for c in syms['answer'].iter('c')}
+assert 'secret' not in {c.get('n').split('/')[0] for c in syms['answer'].iter('c')}
 print('  PASS call-site mutation removes the edge')
 PY
 
 "$BIN" "$TMP/fix" --metrics --no-cache > "$TMP/metrics.xml"
 python3 - "$TMP/metrics.xml" <<'PYMET'
 import sys, xml.etree.ElementTree as ET
-syms = {s.get('n'): s for s in ET.parse(sys.argv[1]).iter('s')}
+syms = {s.get('n').split('/')[0]: s for s in ET.parse(sys.argv[1]).iter('s')}
 assert syms['square'].get('params') == '1', syms['square'].attrib
 assert syms['answer'].get('params') == '0', syms['answer'].attrib
 assert syms['branchy'].get('cx') == '2', syms['branchy'].attrib
@@ -73,7 +73,7 @@ printf 'defmodule Tab do\n def tabbed(), do:\t123456789\nend\n' > "$TMP/tabbed/t
 "$BIN" "$TMP/tabbed" --no-cache --pack-signatures > "$TMP/tabbed.xml"
 python3 - "$TMP/tabbed.xml" <<'PYBODY'
 import sys, xml.etree.ElementTree as ET
-rows = [d for d in ET.parse(sys.argv[1]).iter('d') if d.get('n') == 'tabbed']
+rows = [d for d in ET.parse(sys.argv[1]).iter('d') if d.get('n') == 'tabbed/0']
 assert len(rows) == 1
 assert '123456789' not in ''.join(rows[0].itertext()), rows[0].text
 print('  PASS tab-separated keyword body is elided from signatures')
@@ -114,21 +114,21 @@ EX
 python3 - "$TMP/boundaries.xml" <<'PYBOUND'
 import sys, xml.etree.ElementTree as ET
 rows = list(ET.parse(sys.argv[1]).iter('s'))
-syms = {s.get('n'): s for s in rows}
+syms = {s.get('n').split('/')[0]: s for s in rows}
 byid = {s.get('id'): s for s in rows if s.get('id')}
-def calls(node): return {c.get('n') for c in node.iter('c')}
+def calls(node): return {c.get('n').split('/')[0] for c in node.iter('c')}
 # `defimpl P, for: T` defines the module Elixir itself generates, `P.T`, and its clauses are ordinary
 # executable functions. They are indexed under that scope, so a name the enclosing module also defines
 # (render) yields TWO rows with DISTINCT canonical ids rather than one row or a silent drop.
 assert {'Boundary', 'render', 'seed', 'wrap', 'run', 'guarded', 'pattern', 'invoke',
         'hidden', 'outside_impl', 'Inspect.Any', 'Inspect.Atom'} == set(syms), set(syms)
-assert len([s for s in rows if s.get('n') == 'render']) == 2, 'defimpl render lost or merged'
-assert 'boundaries.ex::Boundary::render' in byid and 'boundaries.ex::Inspect.Any::render' in byid, sorted(byid)
+assert len([s for s in rows if s.get('n') == 'render/1']) == 2, 'defimpl render lost or merged'
+assert 'boundaries.ex::Boundary::render/1' in byid and 'boundaries.ex::Inspect.Any::render/1' in byid, sorted(byid)
 # A defimpl module name is ABSOLUTE: nesting inside `defmodule Boundary` does not make it Boundary.Inspect.Any.
-assert byid['boundaries.ex::Inspect.Any::hidden'] is not None
-assert calls(byid['boundaries.ex::Inspect.Any::render']) == {'hidden'}, 'impl-local call escaped its impl'
-assert calls(byid['boundaries.ex::Inspect.Any::hidden']) == {'seed'}
-assert calls(byid['boundaries.ex::Inspect.Atom::outside_impl']) == {'seed'}
+assert byid['boundaries.ex::Inspect.Any::hidden/1'] is not None
+assert calls(byid['boundaries.ex::Inspect.Any::render/1']) == {'hidden'}, 'impl-local call escaped its impl'
+assert calls(byid['boundaries.ex::Inspect.Any::hidden/1']) == {'seed'}
+assert calls(byid['boundaries.ex::Inspect.Atom::outside_impl/1']) == {'seed'}
 assert calls(syms['invoke']) == {'render'}
 assert calls(syms['run']) == {'wrap', 'seed'}
 assert 'seed' in calls(syms['guarded'])
