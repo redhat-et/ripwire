@@ -106,7 +106,7 @@ EXEMPT = {
     "optremarkscheck.sh":        "checks -DRIPWIRE_OPT_REMARKS/-DRIPWIRE_PGO CMake config text; no binary invocation",
     "optremarkshotcheck.sh":     "audits scripts/optremarks.py's HOT_FILES/COLD_FILES against the SOURCE TREE (os.walk over src/, plus each file's own RIPWIRE_<X>_TU guard); the subject is a triage list versus the files it claims to cover, so no ripwire binary is bound or executed at all",
     "pargatescheck.sh":          "meta-check of test/pargates.py's own source; pure file check",
-    "noaliascheck.sh":           "compiles its OWN $CXX probes against src/infra/Diagnostics.h (debug trap, -O2 -DNDEBUG IR + objdump bands, the GCC-shape preprocess) and greps src/ for a bare __restrict; never invokes build/ripwire — the file contains neither RIPWIRE_BIN nor $BIN",
+    "noaliascheck.sh":           "compiles its OWN $CXX probes against src/infra/Diagnostics.h (debug trap, -O2 -DNDEBUG IR + objdump bands, the GCC-shape preprocess, the =false control) and greps src/ for a bare __restrict; READS build/CMakeCache.txt for the front end and CMake's -basic-aa-separate-storage probe result but never invokes build/ripwire — the file contains neither RIPWIRE_BIN nor $BIN",
     "pmccheck.sh":               "builds its OWN standalone harness binary, independent of build/ripwire",
     "portablebuildcheck.sh":     "CMake-configure-level gate only; the gate's own banner says 'no ripwire binary needed'",
     "qschemetripcheck.sh":       "greps src/quality.h's tripwire comment against the test/*.sh manifest; pure file check",

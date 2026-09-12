@@ -20,8 +20,13 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   check, so codegen matches `__restrict__` on the parameters (`out=a; out+=b; out+=a;` arm64 10 → 6 instructions);
   `VERIFY_NO_ALIAS_BUF` is the form for two containers (the object form is inert for their loops); the comment carries
   the complete-object contract and the macOS `<sys/cdefs.h>` trap that deletes bare `__restrict` in C++ —
-  `__restrict__` is the only spelling allowed in `src/`. `test/noaliascheck.sh` (seven arms, red against the old
-  definition) proves it.
+  `__restrict__` is the only spelling allowed in `src/`. `test/noaliascheck.sh` (eight arms, red against the old
+  definition) proves it. The optimizer half is a separate switch: BasicAA reads the bundle only when
+  `basic-aa-separate-storage` is on — `cl::init(false)` in LLVM 17 (AppleClang 16 / Xcode 16.2: the macos-14 CI
+  runners and the macos-arm64 release leg), `true` from LLVM 18 — so CMake now probes and passes
+  `-mllvm -basic-aa-separate-storage` to our targets (and to the ld64 link under LTO), and the gate classifies the
+  compiler by compiling the real slice three ways, with a `=false` negative control and a cross-check against the
+  cached CMake probe.
 
 ## [0.6.0] — 2026-09-11
 

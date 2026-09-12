@@ -35,8 +35,31 @@
 #   7  buffer debug:   two EMPTY vectors pass (the promise over two null data() is vacuous); the same vector
 #                      twice traps naming both expressions ('dst' and 'src').
 #
-# Arms 2, 3 and 6 need a compiler with __builtin_assume_separate_storage (clang 17+). On one without it they
-# are reported as WARN (skipped), never as PASS: the gcc CI legs run arms 1, 4, 5, 7; the clang legs run all.
+#   8  NEGATIVE CONTROL for the probe itself: the arm-2 probe compiled with `-mllvm -basic-aa-separate-storage=false`
+#                      MUST bring the reload back and land at plain's instruction count. On LLVM 18+ (every dev
+#                      machine here) forcing the option off is the only way to exercise the LLVM 17 path locally,
+#                      and it shows the arm-2 measurement is able to fail.
+#
+# THE OPTIMIZER HALF IS A SEPARATE SWITCH (found 2026-09-12 by CI job "release (macos-14, plain, appleclang, shard
+# 4/4)" on PR #200: arm 7 and the IR-bundle row green, arms 2, 2/3 and 6 red). The front end has emitted the
+# "separate_storage" bundle since clang 17, but BasicAA reads it only when its `basic-aa-separate-storage` option is
+# on — llvm/lib/Analysis/BasicAliasAnalysis.cpp has `cl::init(false)` in LLVM 17 and `cl::init(true)` from 18. Xcode
+# 16.2's AppleClang 16 is LLVM 17: it accepts the builtin, emits the bundle, and generates the same code as no promise
+# at all. CMakeLists.txt therefore passes `-mllvm -basic-aa-separate-storage` to our targets whenever the compiler
+# accepts it. So `__has_builtin` is NOT the capability probe here — the real slice is. The arm-2 probe is compiled
+# three ways at -O2 -DNDEBUG (default, `=true`, `=false`) and the compiler is CLASSIFIED by whether accBuiltin —
+# the builtin called DIRECTLY, so the verdict is about the compiler and not about the header on disk — reloads `a`
+# after the store:
+#     CONSUMED_DEFAULT    default has no reload (LLVM 18+)
+#     CONSUMED_WITH_FLAG  default reloads, `=true` does not (LLVM 17 / AppleClang 16 — the CMake flag is load-bearing)
+#     NOT_CONSUMED        both reload — the optimizer cannot be made to read the bundle
+#     NO_BUILTIN          no __builtin_assume_separate_storage (GCC, clang < 17)
+# Arms 2, 3 and 6 then compile with exactly the option CMake adds, and CMake's own cached probe result
+# (RIPWIRE_CXX_HAS_BASIC_AA_SEPARATE_STORAGE in build/CMakeCache.txt, or $RIPWIRE_CMAKE_CACHE) must AGREE with this
+# gate's — a disagreement is a FAIL, because the gate exists to measure what build/ripwire was built with; for the
+# same reason $CXX defaults to the cache's CMAKE_CXX_COMPILER, not to whatever `c++` is on PATH. On NO_BUILTIN and
+# NOT_CONSUMED arms 2, 3, 6 and 8 are reported as WARN (skipped, naming the compiler), never as PASS: the gcc CI
+# legs run arms 1, 4, 5, 7; the clang legs run all eight.
 # Counts are BANDS, never exact numbers — an LLVM release moves them by one or two.
 #
 # Usage:  bash test/noaliascheck.sh            (compiles with c++/clang++; objdump = llvm-objdump or GNU)
@@ -45,7 +68,11 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-CXX="${CXX:-c++}"
+# The build tree whose binary this gate must measure: its CMakeCache.txt names the front end and holds CMake's
+# probe result. RIPWIRE_CMAKE_CACHE points at another tree's cache; CXX in the environment still wins.
+CACHE="${RIPWIRE_CMAKE_CACHE:-$ROOT/build/CMakeCache.txt}"
+cacheVar(){ [ -f "$CACHE" ] && sed -n "s/^$1:[A-Z]*=//p" "$CACHE" | head -1; return 0; }
+CXX="${CXX:-$( cacheVar CMAKE_CXX_COMPILER )}"; CXX="${CXX:-c++}"
 OBJDUMP="${OBJDUMP:-objdump}"
 HDR="$ROOT/src/infra/Diagnostics.h"
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
@@ -116,6 +143,18 @@ extern "C" __attribute__(( noinline )) void accPlain( uint32_t& out, const uint3
 {
     out = a; out += b; out += a;
 }
+// The builtin called DIRECTLY, no header macro in the way: what the classification probe measures, so that it
+// classifies the COMPILER and not whichever Diagnostics.h happens to be on disk (the old header must red arm 2,
+// not turn the compiler into NOT_CONSUMED).
+extern "C" __attribute__(( noinline )) void accBuiltin( uint32_t& out, const uint32_t& a, const uint32_t& b )
+{
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_assume_separate_storage)
+    __builtin_assume_separate_storage( &out, &a ); __builtin_assume_separate_storage( &out, &b ); __builtin_assume_separate_storage( &a, &b );
+#endif
+#endif
+    out = a; out += b; out += a;
+}
 
 int main( int argc, char** argv )
 {
@@ -126,6 +165,47 @@ int main( int argc, char** argv )
     return x == 5u + 7u + 5u ? 0 : 3;
 }
 EOF
+
+# ── does THIS compiler's OPTIMIZER consume the bundle? the real slice, three ways — see the header ───────────
+# SEP_OPT is byte-for-byte the option CMakeLists.txt attaches to our targets; SEP_ON / SEP_OFF are its explicit
+# forms for the classification and the arm-8 control. On a compiler that rejects -mllvm none of them compiles.
+SEP_OPT=( -mllvm -basic-aa-separate-storage ); SEP_ON=( -mllvm -basic-aa-separate-storage=true ); SEP_OFF=( -mllvm -basic-aa-separate-storage=false )
+CXXID="$( "$CXX" --version 2>/dev/null | head -1 )"
+# acceptance is probed on a TU that compiles CLEAN without the option (hb.cpp above deliberately does not: its
+# #error is the __has_builtin tell), and asserted so, or an unrelated compile error would read as "rejected"
+printf 'int main() { return 0; }\n' > "$WORK/flag.cpp"
+"$CXX" "$CXXSTD" -O2 -c "$WORK/flag.cpp" -o "$WORK/flag.o" 2>/dev/null || no "probe: the acceptance TU does not compile even WITHOUT the option — the acceptance probe cannot say anything"
+FLAG_ACCEPTED=0
+if "$CXX" "$CXXSTD" -O2 "${SEP_OPT[@]}" -c "$WORK/flag.cpp" -o "$WORK/flag.o" 2>/dev/null; then FLAG_ACCEPTED=1; fi
+# 0/1: does accBuiltin (the builtin called directly — the compiler, not the header, is what is classified) reload a
+# after the store when the probe is compiled with the given extra flags?
+probeReload(){ "$CXX" "$CXXSTD" -O2 -DNDEBUG -fno-discard-value-names "${INC[@]}" "$@" -S -emit-llvm "$WORK/probe.cpp" -o "$WORK/cls.ll" 2>/dev/null \
+    && irBlock "$WORK/cls.ll" accBuiltin | reloadAfterStore; }
+CLASS=NO_BUILTIN; rDefault=-; rOn=-; rOff=-
+if [ "$HAS_BUILTIN" = 1 ]; then
+    rDefault="$( probeReload )"; rDefault="${rDefault:--}"
+    if [ "$FLAG_ACCEPTED" = 1 ]; then rOn="$( probeReload "${SEP_ON[@]}" )"; rOff="$( probeReload "${SEP_OFF[@]}" )"; rOn="${rOn:--}"; rOff="${rOff:--}"; fi
+    if [ "$rDefault" = 0 ]; then CLASS=CONSUMED_DEFAULT
+    elif [ "$rDefault" = 1 ] && [ "$rOn" = 0 ]; then CLASS=CONSUMED_WITH_FLAG
+    else CLASS=NOT_CONSUMED; fi
+fi
+echo "  info  compiler: $CXXID"
+echo "  info  optimizer consumes \"separate_storage\": $CLASS (accBuiltin reload after store — default: $rDefault, =true: $rOn, =false: $rOff; -mllvm -basic-aa-separate-storage accepted: $FLAG_ACCEPTED)"
+# the option arms 2, 3 and 6 compile with: exactly what CMake adds when the compiler accepts it, nothing otherwise
+OPTFLAGS=(); if [ "$FLAG_ACCEPTED" = 1 ]; then OPTFLAGS=( "${SEP_OPT[@]}" ); fi
+RELEASE_ARMS=0; case "$CLASS" in CONSUMED_DEFAULT|CONSUMED_WITH_FLAG) RELEASE_ARMS=1;; esac
+# CMake's cached probe must agree with this one, or the gate is measuring a different toolchain than the binary
+if [ -f "$CACHE" ]; then
+    if grep -q '^RIPWIRE_CXX_HAS_BASIC_AA_SEPARATE_STORAGE:' "$CACHE"; then
+        cmakeAccepted=0; [ "$( cacheVar RIPWIRE_CXX_HAS_BASIC_AA_SEPARATE_STORAGE )" = 1 ] && cmakeAccepted=1
+        if [ "$cmakeAccepted" = "$FLAG_ACCEPTED" ]; then ok "probe: CMake's cached probe agrees (RIPWIRE_CXX_HAS_BASIC_AA_SEPARATE_STORAGE=$cmakeAccepted, CMAKE_CXX_COMPILER=$( cacheVar CMAKE_CXX_COMPILER ); gate CXX=$CXX)"
+        else no "probe: CMake's cached probe DISAGREES — cache says accepted=$cmakeAccepted (CMAKE_CXX_COMPILER=$( cacheVar CMAKE_CXX_COMPILER )), this gate says $FLAG_ACCEPTED (CXX=$CXX); the gate is not measuring what the binary was built with"; fi
+    else
+        no "probe: $CACHE has no RIPWIRE_CXX_HAS_BASIC_AA_SEPARATE_STORAGE row — a configure older than the probe; reconfigure (cmake -S . -B build)"
+    fi
+else
+    warn "probe: no $CACHE — CMake's side of the probe is unchecked (configure build/, or set RIPWIRE_CMAKE_CACHE)"
+fi
 
 # ── arm 1: debug catches ─────────────────────────────────────────────────────────────────────────────────────
 if "$CXX" "$CXXSTD" -O1 -g -Wall -Wextra "${INC[@]}" "$WORK/probe.cpp" "$ROOT/src/infra/diagnostics.cpp" -o "$WORK/probe_dbg" 2> "$WORK/cc1.log"; then
@@ -147,10 +227,10 @@ if [ -x "$WORK/probe_dbg" ]; then
 fi
 
 # ── arms 2 + 3: release IR and codegen, header macro vs the OLD definition ───────────────────────────────────
-if [ "$HAS_BUILTIN" = 1 ]; then
-    if "$CXX" "$CXXSTD" -O2 -DNDEBUG -fno-discard-value-names "${INC[@]}" -S -emit-llvm "$WORK/probe.cpp" -o "$WORK/probe.ll" 2> "$WORK/cc2.log" \
-       && "$CXX" "$CXXSTD" -O2 -DNDEBUG "${INC[@]}" -c "$WORK/probe.cpp" -o "$WORK/probe.o" 2>> "$WORK/cc2.log"; then
-        ok "arm 2: release probe compiled (-O2 -DNDEBUG, IR + object)"
+if [ "$RELEASE_ARMS" = 1 ]; then
+    if "$CXX" "$CXXSTD" -O2 -DNDEBUG -fno-discard-value-names "${INC[@]}" ${OPTFLAGS[@]+"${OPTFLAGS[@]}"} -S -emit-llvm "$WORK/probe.cpp" -o "$WORK/probe.ll" 2> "$WORK/cc2.log" \
+       && "$CXX" "$CXXSTD" -O2 -DNDEBUG "${INC[@]}" ${OPTFLAGS[@]+"${OPTFLAGS[@]}"} -c "$WORK/probe.cpp" -o "$WORK/probe.o" 2>> "$WORK/cc2.log"; then
+        ok "arm 2: release probe compiled (-O2 -DNDEBUG${OPTFLAGS[@]+ ${OPTFLAGS[*]}}, IR + object)"
         irBlock "$WORK/probe.ll" accNew   > "$WORK/new.ll"
         irBlock "$WORK/probe.ll" accOld   > "$WORK/old.ll"
         irBlock "$WORK/probe.ll" accPlain > "$WORK/plain.ll"
@@ -184,6 +264,8 @@ if [ "$HAS_BUILTIN" = 1 ]; then
     else
         no "arm 2: release probe failed to compile"; sed 's/^/    /' "$WORK/cc2.log"
     fi
+elif [ "$CLASS" = NOT_CONSUMED ]; then
+    warn "arms 2 and 3 skipped: NOT_CONSUMED — $CXXID has the builtin but its optimizer never reads the bundle (reload: default $rDefault, =true $rOn); the codegen rows cannot pass here and are not claimed"
 else
     warn "arms 2 and 3 skipped: $CXX has no __builtin_assume_separate_storage (needs clang 17+); the debug and shape arms still run"
 fi
@@ -275,9 +357,9 @@ int main( int argc, char** argv )
 EOF
 
 # ── arm 6: the buffer form shortens the release loop; the object form must not ──────────────────────────────
-if [ "$HAS_BUILTIN" = 1 ]; then
-    if "$CXX" "$CXXSTD" -O2 -DNDEBUG "${INC[@]}" -c "$WORK/bufprobe.cpp" -o "$WORK/bufprobe.o" 2> "$WORK/cc6.log"; then
-        ok "arm 6: buffer probe compiled (-O2 -DNDEBUG)"
+if [ "$RELEASE_ARMS" = 1 ]; then
+    if "$CXX" "$CXXSTD" -O2 -DNDEBUG "${INC[@]}" ${OPTFLAGS[@]+"${OPTFLAGS[@]}"} -c "$WORK/bufprobe.cpp" -o "$WORK/bufprobe.o" 2> "$WORK/cc6.log"; then
+        ok "arm 6: buffer probe compiled (-O2 -DNDEBUG${OPTFLAGS[@]+ ${OPTFLAGS[*]}})"
         bPlain="$( insnCount "$WORK/bufprobe.o" axpyPlain )"; bObj="$( insnCount "$WORK/bufprobe.o" axpyObj )"; bBuf="$( insnCount "$WORK/bufprobe.o" axpyBuf )"
         echo "  info  release instructions: axpyPlain=$bPlain axpyObj=$bObj axpyBuf=$bBuf (measured 2026-09-12: arm64 65/65/61, x86-64 65/65/41)"
         if [ "$bPlain" -ge 20 ] && [ "$bPlain" -le 160 ]; then ok "arm 6: axpyPlain instruction count $bPlain in band [20,160]"
@@ -289,6 +371,8 @@ if [ "$HAS_BUILTIN" = 1 ]; then
     else
         no "arm 6: buffer probe failed to compile"; sed 's/^/    /' "$WORK/cc6.log"
     fi
+elif [ "$CLASS" = NOT_CONSUMED ]; then
+    warn "arm 6 skipped: NOT_CONSUMED on $CXXID — the buffer promise cannot be shown to buy anything here"
 else
     warn "arm 6 skipped: $CXX has no __builtin_assume_separate_storage"
 fi
@@ -306,6 +390,36 @@ if "$CXX" "$CXXSTD" -O1 -g -Wall -Wextra "${INC[@]}" "$WORK/bufprobe.cpp" "$ROOT
     else no "arm 7: stderr does not name 'dst' and 'src'"; sed 's/^/    /' "$WORK/b2.err" | head -8; fi
 else
     no "arm 7: debug buffer probe failed to compile"; sed 's/^/    /' "$WORK/cc7.log" | head -12
+fi
+
+# ── arm 8: NEGATIVE CONTROL for the probe — the analysis forced OFF must bring the reload back ──────────────
+# `-mllvm -basic-aa-separate-storage=false` puts an LLVM 18+ compiler in exactly the state AppleClang 16 / LLVM 17 is
+# in before CMake adds the option, so on every dev machine here it is the only way to exercise that path locally.
+# Same probe, same extraction, one flag flipped: if the reload does NOT come back, arm 2 was never able to fail.
+if [ "$RELEASE_ARMS" = 1 ] && [ "$FLAG_ACCEPTED" = 1 ]; then
+    if "$CXX" "$CXXSTD" -O2 -DNDEBUG -fno-discard-value-names "${INC[@]}" "${SEP_OFF[@]}" -S -emit-llvm "$WORK/probe.cpp" -o "$WORK/off.ll" 2> "$WORK/cc8.log" \
+       && "$CXX" "$CXXSTD" -O2 -DNDEBUG "${INC[@]}" "${SEP_OFF[@]}" -c "$WORK/probe.cpp" -o "$WORK/off.o" 2>> "$WORK/cc8.log"; then
+        ok "arm 8: release probe compiled with ${SEP_OFF[*]}"
+        irBlock "$WORK/off.ll" accNew > "$WORK/off_new.ll"; irBlock "$WORK/off.ll" accBuiltin > "$WORK/off_builtin.ll"
+        for f in off_new off_builtin; do grep -q '^define ' "$WORK/$f.ll" || no "arm 8: could not extract the IR block for $f (wrong artifact)"; done
+        offLoadsA="$( grep -c 'load i32, ptr %a,' "$WORK/off_new.ll" )"; offReload="$( reloadAfterStore < "$WORK/off_new.ll" )"
+        if grep -q '"separate_storage"' "$WORK/off_builtin.ll"; then ok "arm 8: the front end still emits the \"separate_storage\" bundle with the analysis off (the flag flips the reader, not the writer)"
+        else no "arm 8: the bundle vanished with the analysis off — the flag changed the front end, not just BasicAA"; fi
+        if [ "$offReload" = 1 ] && [ "$offLoadsA" = 2 ]; then ok "arm 8: with the analysis off accNew reloads a after the store (loads of a: $offLoadsA) — the arm-2 measurement can fail"
+        else no "arm 8: with the analysis off accNew still shows no reload (loads of a: $offLoadsA, reload=$offReload) — the probe cannot distinguish consumed from ignored"; fi
+        cOffNew="$( insnCount "$WORK/off.o" accNew )"; cOffPlain="$( insnCount "$WORK/off.o" accPlain )"
+        echo "  info  release instructions with the analysis off: accPlain=$cOffPlain accNew=$cOffNew (measured 2026-09-12 Apple clang 21 arm64: 9/9)"
+        if [ "$cOffNew" -ge $(( cOffPlain - 1 )) ]; then ok "arm 8: accNew $cOffNew instructions, no better than plain ($cOffPlain) with the analysis off — what the LLVM 17 leg saw"
+        else no "arm 8: accNew $cOffNew instructions still beats plain ($cOffPlain) with the analysis off — the option did not take"; fi
+        if [ -n "${newReload:-}" ] && [ "$newReload" != "$offReload" ]; then ok "arm 2/8: contrast — on and off DISAGREE (on reload=$newReload, off reload=$offReload)"
+        else no "arm 2/8: NO CONTRAST — arm 2 (reload=${newReload:-unset}) and arm 8 (reload=$offReload) agree; the flag is not what separates them"; fi
+    else
+        no "arm 8: release probe failed to compile with ${SEP_OFF[*]}"; sed 's/^/    /' "$WORK/cc8.log"
+    fi
+elif [ "$CLASS" = NOT_CONSUMED ]; then
+    warn "arm 8 skipped: NOT_CONSUMED on $CXXID — there is no consumed state to contrast against"
+else
+    warn "arm 8 skipped: $CXX has no __builtin_assume_separate_storage or rejects -mllvm (accepted: $FLAG_ACCEPTED)"
 fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "FAILURES ABOVE"; exit 1; }
