@@ -54,8 +54,8 @@ for t in './sib' 'json' 'tool.rb' 'shared' 'optional_gem'; do
         && ok "capture: <inc t=\"$t\"/>" \
         || no "capture: no <inc t=\"$t\"/> row"
 done
-printf '%s' "$DEPS" | grep -q '<f p="main.rb" includes="12"' \
-    && ok 'capture: exactly 12 directives — `require some_variable` is NOT invented; `autoload :Late, "lib/helper"` IS a directive (parser version 82)' \
+printf '%s' "$DEPS" | grep -q '<f p="main.rb" includes="13"' \
+    && ok 'capture: exactly 13 directives — `require some_variable` is NOT invented; `autoload :Late, "lib/helper"` IS a directive (parser version 82); `rescue LoadError` is a shown, out-of-tree rescue class (parser version 93)' \
     || no "capture: directive count wrong: $( printf '%s' "$DEPS" | grep -oE '<f p="main.rb" includes="[0-9]*"' )"
 
 # ── 2. RESOLUTION ─────────────────────────────────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ done
 # (a) unique-or-degrade: `require "shared"` is answered by ./shared.rb AND lib/shared.rb. main.rb's cone
 #     is therefore exactly {itself + 7 resolved files} = 8; a resolver that picked one would make it 9. (The
 #     autoload's lib/helper.rb is already in the cone through `require_relative`, so parser version 82 adds no file.)
-printf '%s' "$DEPS" | grep -q '<f p="main.rb" includes="12" afferent="0" instab="1.00" transitive="8">' \
+printf '%s' "$DEPS" | grep -q '<f p="main.rb" includes="13" afferent="0" instab="1.00" transitive="8">' \
     && ok 'mutation control: the ambiguous `require "shared"` degrades — cone is 8, not 9' \
     || no "mutation control: the ambiguous require resolved: $( printf '%s' "$DEPS" | grep -oE '<f p="main.rb"[^>]*>' )"
 printf '%s' "$DEPS" | grep -qE '<f p="(lib/)?shared.rb" afferent=' \

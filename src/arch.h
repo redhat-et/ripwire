@@ -656,18 +656,41 @@ inline std::string archBaselinePath( const std::string& /*rulesPath*/ ) noexcept
     return ".ripwire_arch_baseline";
 }
 
-// Read the baseline sidecar.  Returns the set of violation hashes committed as accepted debt.
-// Returns empty set if the file does not exist (first run) — callers treat that as "no baseline".
-inline std::unordered_set<std::uint64_t> archReadBaseline( const std::string& sidecarPath ) noexcept
+// THE ONE PLACE THE ARCH BASELINE SIDECAR IS READ — openArchBaselineSidecar's other half, with the same answer
+// to a link: O_NOFOLLOW, refused in the open itself. A link here used to be followed, so the link chose which
+// file's hashes were accepted as debt. Why an in-tree link is refused too is round 3 of src/pathguard.h.
+// noexcept like its neighbours, with the same allocation exposure openArchBaselineSidecar describes.
+inline rw::pathguard::NoFollowRead readArchBaselineSidecar( const std::string& sidecarPath ) noexcept
+{
+    rw::pathguard::NoFollowRead sidecar = rw::pathguard::openNoFollowRead( "the arch baseline sidecar", sidecarPath );
+    if( sidecar.refused ) { DEGRADED_PATH_ALERT( "arch: refusing to read the arch baseline sidecar through a symlink" ); }
+    return sidecar;
+}
+
+// What archReadBaseline found: the violation hashes committed as accepted debt, and whether there was a sidecar
+// to read at all. `present` is the open, not the hash count — a sidecar holding only its comment header accepts
+// nothing and is still a baseline in force. It replaces a SECOND open of the same path that the arch verb used
+// to make with a bare stream just to ask that question; that open followed a link as well and read nothing, so
+// no check on the verb's output could ever have seen it.
+struct ArchBaselineRead
 {
     std::unordered_set<std::uint64_t> hashes;
-    std::ifstream f( sidecarPath );
-    if( !f )
+    bool                              present = false;
+};
+
+// Read the baseline sidecar. An absent file (first run) and a refused link both come back with no hashes and not
+// present, which callers treat as "no baseline".
+inline ArchBaselineRead archReadBaseline( const std::string& sidecarPath ) noexcept
+{
+    ArchBaselineRead            baseline;
+    rw::pathguard::NoFollowRead sidecar = readArchBaselineSidecar( sidecarPath );
+    if( !sidecar.opened )
     {
-        return hashes;
+        return baseline;
     }
+    baseline.present = true;
     std::string line;
-    while( std::getline( f, line ) )
+    while( sidecar.readLine( line ) )
     {
         // skip comment lines (start with '#') and blank lines
         if( line.empty() || line[0] == '#' )
@@ -678,10 +701,10 @@ inline std::unordered_set<std::uint64_t> archReadBaseline( const std::string& si
         const std::uint64_t h   = std::strtoull( line.c_str(), &end, 16 );
         if( end != line.c_str() )
         {
-            hashes.insert( h );
+            baseline.hashes.insert( h );
         }
     }
-    return hashes;
+    return baseline;
 }
 
 // THE ONE PLACE THE ARCH BASELINE SIDECAR IS OPENED, and the whole of its CWE-59/CWE-367 story.

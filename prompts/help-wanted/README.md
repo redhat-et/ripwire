@@ -9,7 +9,6 @@ below. Comment on that issue to claim it.
 | Slug | What it delivers | Difficulty | Prompt |
 | --- | --- | --- | --- |
 | `struct-layout-doctor` | A `--doctor` row that catches a binary whose translation units were compiled against different struct layouts | good first issue | [`struct-layout-doctor.md`](struct-layout-doctor.md) |
-| `next-uses-bare-name` | The callers answer's `next=` pointer lands on a declined call site for narrowed selectors too | good first issue | [`next-uses-bare-name.md`](next-uses-bare-name.md) |
 | `uses-qualified-selector` | `--uses`, `--safe-delete`, `--verify` and the MCP `uses` verb stop answering 0 for a `::` selector that `--callers` resolves | good first issue | [`uses-qualified-selector.md`](uses-qualified-selector.md) |
 | `cpp-nested-std-namespaces` | Nested `std::` calls such as `std::ranges::move` and `std::chrono::duration_cast` stop binding in-repo definitions | medium | [`cpp-nested-std-namespaces.md`](cpp-nested-std-namespaces.md) |
 | `ts-literal-receivers` | TS/JS built-in calls on literal receivers, such as `"x".replace()`, stop binding unrelated user functions (#59) | medium | [`ts-literal-receivers.md`](ts-literal-receivers.md) |
@@ -34,3 +33,11 @@ reaches its finish line, not of its first measurement alone. The top-level
 [`../full-audit.md`](../full-audit.md) is open for help too, with its own issue: run one lens, or all six.
 
 Build the tool before you start, as [`../README.md`](../README.md) shows: a plain build, no build type.
+
+## Solved
+
+These prompts led to a merged fix. Each stays here as a worked example of a kit that landed.
+
+| Slug | What it delivered | Solved by | Prompt |
+| --- | --- | --- | --- |
+| `next-uses-bare-name` | The callers answer's `next=` pointer lands on a declined call site for narrowed selectors too | @antoleod, in [#182](https://github.com/redhat-et/ripwire/pull/182), closing [#158](https://github.com/redhat-et/ripwire/issues/158) | [`next-uses-bare-name.md`](next-uses-bare-name.md) |

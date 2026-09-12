@@ -29,6 +29,12 @@ std::string noBaselineFatalMessage( const std::string& baselineFile, const rw::q
     // auto-compare against" errMsg) has always carried both halves for the identical state, so a CLI reader
     // could not tell the fallback had even been tried and would look for a bug in the sidecar. Same two
     // clauses, same order, same verb-name spelling convention as the stale arms below.
+    if( sel.sidecarSymlinkRefused )
+    {
+        // Round 3 (pathguard.h): "no <file>" is false while a link sits at the name, so say what happened to it.
+        return "ripwire: " + baselineFile + " is a symlink, which is refused on read exactly as on write (it was not opened), and there is no git HEAD to auto-compare against — "
+               "replace the link with a regular copy of its target, or remove it and run `ripwire <dir> --quality-baseline` BEFORE the change you want to measure\n";
+    }
     if( !sel.isSidecarStale() )
     {
         return "ripwire: no " + baselineFile + " and no git HEAD to auto-compare against — run `ripwire <dir> --quality-baseline` BEFORE the change you want to measure\n";
@@ -244,8 +250,9 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
             rw::emitTo( stderr, "ripwire: {} exists but is not a readable baseline (unrecognizable, or a pre-Q1 sidecar without per-symbol loc records) — IGNORED; "
                                   "auto-comparing the working tree vs git HEAD; re-pin it with --quality-baseline\n", baselineFile.c_str() );
         }
-        else if( !out.baseSel.isSidecarStale() )
-        { // the stale/healed case is silent by design — only the true "never baselined" case is informative
+        else if( !out.baseSel.isSidecarStale() && !out.baseSel.sidecarSymlinkRefused )
+        { // the stale/healed case is silent by design — only the true "never baselined" case is informative. A refused
+          // link (pathguard.h round 3) is not "never baselined" either, and pathguard has already said why on stderr.
             rw::emitTo( stderr, "ripwire: no {} — auto-comparing the working tree vs git HEAD (commit the baseline with --quality-baseline to pin it)\n",
                           baselineFile.c_str() );
         }
@@ -534,6 +541,10 @@ inline constexpr const char* kQdBaseHeadUnreadable =
     "working tree was compared against the HEAD tree — re-pin it with quality-baseline. baseline_bad_lines= and "
     "acks_bad_lines=, when present, count sidecar lines of a known kind whose payload did not parse and were "
     "skipped (absent means none). ";
+inline constexpr const char* kQdBaseHeadSymlinkRefused =
+    "baseline=\"git-HEAD (symlinked sidecar refused)\" means .ripwire_quality_baseline is a SYMLINK, which is refused on "
+    "read exactly as on write: it was not opened, so the working tree was compared against the HEAD tree — replace "
+    "the link with a regular copy of its target, or remove it and re-pin with quality-baseline. ";
 inline constexpr const char* kQdBaseHeadIgnored =
     "baseline=\"git-HEAD (stale sidecar ignored)\" is the same staleness verdict, but the file was left on "
     "disk (the read-only MCP arm, or an unlink that failed), and the comparison fell back to the HEAD "
@@ -721,6 +732,7 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p )
     else if( p.marker == "git-HEAD (stale sidecar removed)" ) { std::fputs( kQdBaseHeadRemoved, stdout ); }
     else if( p.marker == "git-HEAD (stale sidecar ignored)" ) { std::fputs( kQdBaseHeadIgnored, stdout ); }
     else if( p.marker == "git-HEAD (sidecar unreadable)"     ) { std::fputs( kQdBaseHeadUnreadable, stdout ); }
+    else if( p.marker == "git-HEAD (symlinked sidecar refused)" ) { std::fputs( kQdBaseHeadSymlinkRefused, stdout ); }
     else                                                      { std::fputs( kQdBaseHead,        stdout ); }
     if( p.baselineAbsorbed > 0 )
     {

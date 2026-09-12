@@ -1793,8 +1793,11 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // lines too. Bumping kParserVer without updating these two lines is a hard gate failure, not a silent miss.
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 20;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 92;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestCacheVersionMirror   = 21;   // MUST equal ingest.cpp's kCacheVersion (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 93;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 93 = 2026-09-11 (Ruby argument + rescue constants): a
+                                                          //    constant argument of a call/super/yield and a rescue
+                                                          //    class are directives. See ingest_cache.h's note.
                                                           // 92 = 2026-09-11 (yaml unsigned-char, PR #140): the yaml scanner's
                                                           //    status type. SCN_FAIL (-1) returned through plain `char` came
                                                           //    back as 255 wherever `char` is unsigned (aarch64 Linux, the
@@ -3740,23 +3743,36 @@ inline bool baselineHeaderIsForeign( const std::string& line ) noexcept
 struct BaselineReadStats
 {
     bool        present        = false;   // the file opened
+    bool        symlinkRefused = false;   // a SYMLINK sits at the name: refused unopened (pathguard.h round 3), so `present` stays false
     bool        unrecognizable = false;   // opened, but no line of the format's structure in it
     bool        preQ1          = false;   // structure, but no per-symbol loc records: origin cannot be classified
     std::size_t badLines       = 0;       // lines of a known kind whose payload did not parse — skipped
 };
 
+// THE ONE PLACE THE BASELINE SIDECAR IS READ — shared by readBaseline, readBaselineHeadSha and
+// readBaselineAbsorbed, and openBaselineSidecar's other half with the same answer to a link: O_NOFOLLOW, refused
+// in the open itself. A link here used to be followed on the way in, so the link chose which file was honored as
+// the floor. Why an in-tree link is refused too is round 3 of src/pathguard.h.
+inline rw::pathguard::NoFollowRead readBaselineSidecar( const std::string& path )
+{
+    rw::pathguard::NoFollowRead sidecar = rw::pathguard::openNoFollowRead( "the quality baseline sidecar", path );
+    if( sidecar.refused ) { DEGRADED_PATH_ALERT( "quality: refusing to read the baseline sidecar through a symlink" ); }
+    return sidecar;
+}
+
 inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadStats& stats )
 {
     stats = BaselineReadStats{};
-    std::ifstream f( path );
-    if( !f )
+    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path );
+    if( !sidecar.opened )
     {
+        stats.symlinkRefused = sidecar.refused;   // "no sidecar" and "a sidecar refused unopened" are different answers
         return false;
     }
     stats.present = true;
     std::size_t recognizedLineCount = 0;
     std::string line;
-    while( std::getline( f, line ) )
+    while( sidecar.readLine( line ) )
     {
         if( line.empty() )
         {
@@ -3875,13 +3891,13 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
 // obeyed. `writeBaseline` only ever writes `gitHeadSha`'s output, so no legitimate sidecar is affected.
 inline std::string readBaselineHeadSha( const std::string& path )
 {
-    std::ifstream f( path );
-    if( !f )
+    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path );
+    if( !sidecar.opened )
     {
         return {};
     }
     std::string line;
-    while( std::getline( f, line ) )
+    while( sidecar.readLine( line ) )
     {
         if( line.rfind( "head ", 0 ) == 0 )
         {
@@ -3909,13 +3925,13 @@ inline std::string readBaselineHeadSha( const std::string& path )
 // one the report has something to say about.
 inline std::size_t readBaselineAbsorbed( const std::string& path )
 {
-    std::ifstream f( path );
-    if( !f )
+    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path );
+    if( !sidecar.opened )
     {
         return 0;
     }
     std::string line;
-    while( std::getline( f, line ) )
+    while( sidecar.readLine( line ) )
     {
         if( line.rfind( "absorbed ", 0 ) != 0 )
         {
@@ -3985,6 +4001,7 @@ struct BaselineSelection
     const char*    marker = "git-HEAD";                        // static storage; safe to hold as a bare pointer
     bool           staleFileRemoved = false;                   // Stale only: the unlink LANDED (file gone from disk)
     bool           sidecarUnreadable = false;                  // a sidecar EXISTS but could not be read (unrecognizable or pre-Q1): ignored, named
+    bool           sidecarSymlinkRefused = false;              // a SYMLINK sits at the name and was refused unopened (pathguard.h round 3): ignored, named
     std::size_t    sidecarBadLines   = 0;                      // honored sidecar: lines skipped as unparseable
 
     bool isSidecarHonored() const noexcept { return source == BaselineSource::Sidecar; }
@@ -4014,7 +4031,15 @@ inline BaselineSelection selectBaseline( const std::string& root, const std::str
         sel.snapshot = Snapshot{};                             // readBaseline already clears on the unrecognizable path; belt and braces
         sel.source   = BaselineSource::Absent;
         sel.marker   = "git-HEAD";
-        if( readStats.present && ( readStats.unrecognizable || readStats.preQ1 ) )
+        if( readStats.symlinkRefused )
+        {
+            // Round 3 (pathguard.h): a link at the name is refused on read as on write. Never "no sidecar existed"
+            // (the git-HEAD marker) about an entry that is right there, and never "unreadable" about bytes that
+            // were deliberately not opened.
+            sel.sidecarSymlinkRefused = true;
+            sel.marker                = "git-HEAD (symlinked sidecar refused)";
+        }
+        else if( readStats.present && ( readStats.unrecognizable || readStats.preQ1 ) )
         {
             sel.sidecarUnreadable = true;                      // 2026-09-06: never "no sidecar existed" about a file that is right there
             sel.marker            = "git-HEAD (sidecar unreadable)";
