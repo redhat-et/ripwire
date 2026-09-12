@@ -772,10 +772,15 @@ inline void editCheckPriceRoot( std::string& doc )
 // nothing else — see editCheckRowWindow above for why this verb cannot take the family's plain row window.
 // Both default to 0, which is "no explicit window": the verb's own default cap then shapes the page, the
 // same posture the four neighbour verbs took when they adopted kCallHierarchyRowCap.
+//
+// `unprovenDefs` (H1) is the residue the caller's resolver reported for the selector that picked `focus`: same-named
+// definitions a file:name spelling found and could not tie to the file it named. callers=/incompatible= are read from
+// `focus` alone, so without it a declaration whose dropped definition carries the broken caller answered incompatible="0"
+// with nothing beside it. Defaults to 0 — absent attribute, absent clause — for a caller that resolved no file:name.
 inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g, const std::string& root,
                                         std::size_t maxFileBytes, const std::vector<std::string>& excludes, NodeId focus,
                                         const notes::NoteIndex* ni = nullptr, bool preview = false,
-                                        int pageLimit = 0, int pageOffset = 0 )
+                                        int pageLimit = 0, int pageOffset = 0, std::size_t unprovenDefs = 0 )
 {
     const Symbol& fsym = ing.symbols[ focus ];
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — the ONE
@@ -895,6 +900,9 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     {
         out += kEditCheckWindowLegend;
     }
+    // H1: what callers= and incompatible= did not read, addressed to incompatible= by name — ahead of the floor tail, and
+    // emitted exactly when the root carries unproven_defs= (graphlegend.h unprovenDefsVerbLegend).
+    out += unprovenDefsVerbLegend( UnprovenDefsVerb::EditCheck, unprovenDefs > 0 );
     // §H4 §3.4: the shared floor + counting-unit tail, appended from the ONE constant every graph-count verb
     // splices. It is load-bearing HERE more than anywhere: callers="1" on a symbol with an unmodelled second
     // caller is the exact shape §H4 measured, and this legend's own "the tree as it stands" paragraph reads
@@ -938,6 +946,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     char callersOpen[ 64 ];
     rw::formatTo( callersOpen, sizeof( callersOpen ), " callers=\"{}\" incompatible=\"{}\"", callerIds.size(), incompatibleCount );
     out += callersOpen;
+    out += unprovenDefsAttrXml( unprovenDefs );   // H1: beside the incompatible= it qualifies; absent at zero
     // r26-stamp Task A: the HEAD baseline this contract compares against is only meaningful pinned to a
     // commit (+dirty state) — omitted entirely on a non-git root. Appended LAST (after every pre-existing
     // attribute) so an existing substring-adjacency assertion elsewhere (e.g. "status=\"x\" callers=\"N\"")

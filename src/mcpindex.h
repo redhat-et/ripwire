@@ -1274,6 +1274,7 @@ inline const McpIndex& getIndex( const std::string& root )
 // identity and there is nothing to strip.
 inline void handleIdentity( const McpIndex& ix, NodeId id, std::string& canonOut, std::string& pathOut )
 {
+    VERIFY_NO_ALIAS( canonOut, pathOut );
     const Symbol&          s       = ix.ing.symbols[ id ];
     const std::string_view rootArg = ix.ing.realPaths.empty() ? std::string_view( ix.root ) : std::string_view();
     canonOut = ( id < ix.g.canonId.size() ) ? canonicalIdForEmit( ix.ing, s, rootArg ) : s.name;

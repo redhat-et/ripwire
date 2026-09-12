@@ -271,6 +271,7 @@ inline WarmHitTotals markCacheHits( const std::vector<std::string>& files, const
                                     HashMap<std::string, FileFacts>& cache,
                                     std::vector<FileFacts*>& candidates, std::vector<FileFacts*>& hits )
 {
+    VERIFY_NO_ALIAS( candidates, hits );
     WarmHitTotals tot;
     for( std::size_t fileId = 0; fileId < files.size(); ++fileId )
     {

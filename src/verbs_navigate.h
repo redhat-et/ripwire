@@ -1086,6 +1086,7 @@ inline std::optional<int> sliceSincePrepare( const MainDispatch& d, std::string_
                                              const ::TSLanguage* grammar, const rw::slicev::SliceScan& scan, const std::string& src,
                                              std::string& legendOut, std::string& bodyOut, rw::slicev::SliceEmitOpts& emit )
 {
+    VERIFY_NO_ALIAS( legendOut, bodyOut );
     const rw::Config& cfg = d.cfg;
     if( cfg.since.empty() )
     {
@@ -1136,9 +1137,13 @@ std::optional<int> runSlice( const MainDispatch& d )
     }
 
     // ── the two-phase spec split ───────────────────────────────────────────────────────────────────────
-    std::string_view    selector = cfg.sliceSpec;
+    // H1: `slUnprovenDefs` is the decl→def residue of whichever reading produced `matches` (the HEAD:VAR retry overwrites the
+    // whole-spelling one). A slice of the declaration those definitions were dropped from reads its own text alone, so
+    // unreported, the drop reached the reader as uses="0".
+    std::string_view    selector       = cfg.sliceSpec;
     std::string_view    varName;
-    std::vector<NodeId> matches  = resolveAllByNameQualified( ing, selector );
+    std::size_t         slUnprovenDefs = 0;
+    std::vector<NodeId> matches        = resolveAllByNameQualified( ing, selector, &slUnprovenDefs );
     if( matches.empty() )
     {
         const std::size_t lastColon = cfg.sliceSpec.rfind( ':' );
@@ -1146,7 +1151,7 @@ std::optional<int> runSlice( const MainDispatch& d )
         {
             selector = cfg.sliceSpec.substr( 0, lastColon );
             varName  = cfg.sliceSpec.substr( lastColon + 1 );
-            matches  = resolveAllByNameQualified( ing, selector );
+            matches  = resolveAllByNameQualified( ing, selector, &slUnprovenDefs );
         }
     }
 
@@ -1333,6 +1338,7 @@ std::optional<int> runSlice( const MainDispatch& d )
     emit.flow          = flowActive ? &flowSpec : nullptr;
     emit.seed          = seededRun ? &seedInfo : nullptr;
     emit.compactLegend = cfg.legend == "compact";   // the ripwire.slice/v1 dialect: legend only, rows byte-identical
+    emit.unprovenDefs  = slUnprovenDefs;            // H1: unproven_defs= on the root and its clause, absent at zero
 
     std::string sinceLegend, sinceBody;             // card A4: owned here, pointed at by emit on success
     if( std::optional<int> refused = sliceSincePrepare( d, selector, varName, path, sym, fam, grammar, scan, src,
@@ -2017,9 +2023,15 @@ std::optional<int> runConnect( const MainDispatch& d )
             return 1;
         }
         std::vector<NodeId> terminals;
+        // H1: each terminal's decl→def residue, SUMMED onto the root as --path sums its endpoints: the remedy is the same for
+        // any terminal (widen its file:name spelling), and a bare-name terminal always adds 0. Unreported, a drop reached the
+        // reader as edges="0" groups="0" between a declaration and the caller of the definition it could not be tied to.
+        std::size_t cnUnprovenDefs = 0;
         for( const std::string_view spec : specs )
         {
-            const NodeId id = resolveFocus( ing, spec );                 // "name" or "file:name" — exactly --around/--lego
+            std::size_t  termUnprovenDefs = 0;
+            const NodeId id = resolveFocus( ing, spec, &termUnprovenDefs );   // "name" or "file:name" — exactly --around/--lego
+            cnUnprovenDefs += termUnprovenDefs;
             if( id == kNoNode )
             {
                 // §M7 (W3FIX): resolveFocus is the SAME file:name resolver --around/--lego use, so this arm
@@ -2038,7 +2050,7 @@ std::optional<int> runConnect( const MainDispatch& d )
         static_assert( rw::kConnectRadiusMax == int( rw::connectcfg::kMaxRadius ),
                        "--connect-radius' refusal band drifted from the core's clamp band — the refusal would name a range the core does not honor" );
         const rw::ConnectResult res = rw::connectSubgraph( g, terminals, std::uint32_t( cfg.connectRadius ) );
-        rw::packConnect( stdout, ing, g, res, d.redactPtr, cfg.maxTokens, cnRootArg );
+        rw::packConnect( stdout, ing, g, res, d.redactPtr, cfg.maxTokens, cnRootArg, cnUnprovenDefs );
         return 0;
     }
     return std::nullopt;
@@ -2378,7 +2390,11 @@ std::optional<int> runAround( const MainDispatch& d )
     // whole-repo map — "give me the context centered on THIS symbol".
     if( !cfg.around.empty() )
     {
-        const NodeId focus = resolveFocus( ing, cfg.around );
+        // H1: the out-param is the decl→def widening's residue — definitions a file:name seed found and could not tie to the
+        // file it named, so the ego walk below never starts from them. Unreported, a drop reached the reader as the
+        // declaration's own row standing for the whole neighbourhood.
+        std::size_t  arUnprovenDefs = 0;
+        const NodeId focus          = resolveFocus( ing, cfg.around, &arUnprovenDefs );
         if( focus == kNoNode )
         {
             rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: --around symbol not found: ",
@@ -2430,6 +2446,7 @@ std::optional<int> runAround( const MainDispatch& d )
         // C2 (harvest B): the last two are which bound CUT — only the walk knows, so they ride out of EgoGraph.
         rw::MapAnnotations aroundAnn;
         aroundAnn.seed = { ing.symbols[ focus ].name, cfg.aroundDepth, cfg.aroundFanout, definitionCountOfName( ing, focus ), eg.fanoutCut, eg.depthTruncated };
+        aroundAnn.seed.unprovenDefs = arUnprovenDefs;   // H1: unproven_defs= beside defs= on the root, its clause in the map legend
 
         serialize( stdout, ing, rank, g.outOff, g.outTargets, int( eg.nodes.size() ), cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, false, g.outProv.empty() ? nullptr : &g.outProv, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, /*autoOrder=*/false, /*outEstTokens=*/nullptr, aroundCompose.tokens + aroundRoutes.tokens + wrap.tokens, aroundAnn, /*statsFirstScreen=*/false, aroundRootArg, &g.locPinOut, g.externalCalls, &g.declinedOut );
 
