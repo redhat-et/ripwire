@@ -381,7 +381,7 @@ ripwire.grep/v1                  360   345
 ripwire.match/v1                 270   260
 ripwire.lego/v1                  290   275
 ripwire.exemplar/v1              250   232
-ripwire.around/v1                720   707
+ripwire.around/v1                780   760
 ripwire.callers/v1               330   317
 ripwire.callees/v1               380   369
 ripwire.uses/v1                  290   271
