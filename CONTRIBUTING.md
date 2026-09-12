@@ -314,8 +314,11 @@ already knew about the others, several while fixing one. So the rule is mechanic
   function paid for anyway). Do not add an early return for the macro's sake — the one line is the full
   effect, and two empty containers are a vacuous promise, not a broken one.
   Three reasons, one each: it is checked in debug and is the same optimizer fact in release
-  (`__builtin_assume_separate_storage`); it does not change the API; `__builtin_assume( &a != &b )`
-  is NOT that fact — alias analysis never reads it.
+  (`__builtin_assume_separate_storage`) on compilers that consume it — clang 18+ by default, LLVM 17 /
+  AppleClang 16 only with the `-mllvm -basic-aa-separate-storage` that CMake adds when the compiler
+  accepts it (and there only for scalar accesses, not the loop vectorizer), GCC and clang before 17
+  not at all, where the release expansion is `( (void)0 )` and only the debug check runs; it does not
+  change the API; `__builtin_assume( &a != &b )` is NOT that fact — alias analysis never reads it.
 - **The contract is different complete allocations, not different addresses.** Verbatim from
   clang's `LanguageExtensions.rst`: the arguments "are assumed to point into separately allocated
   storage (either different variable definitions or different dynamic storage allocations) …
