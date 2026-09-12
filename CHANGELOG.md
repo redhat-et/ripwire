@@ -122,6 +122,13 @@ regenerated (2026-09-11).
   `-mllvm -basic-aa-separate-storage` to our targets (and to the ld64 link under LTO), and the gate classifies the
   compiler by compiling the real slice three ways, with a `=false` negative control and a cross-check against the
   cached CMake probe.
+- **Four more aliasing contracts at function entry, one of them the tree's only codegen row.** `waterFillRecallShares`
+  (`src/recall.h`) reads `demand[i]` while writing `alloc[i]` and never resizes either, so it takes the buffer form:
+  release codegen 309 → 301 instructions under the build's own flags. `splitNoteTail` (`src/notes.h`),
+  `takeAckNamedToken` and `computeDelta` (`src/quality.h`) take debug-only guards; `computeDelta`'s two out-pointers
+  both default to null, so its guard is a null-safe `VERIFY_TEXT` rather than the object form. Two rows remain,
+  `markCandidateFilesIncludingDecl` (`src/graph.h`) and `partitionByScope` (`src/verbs_quality.h`), until the lane that
+  owns those files lands.
 
 ## [0.6.0] — 2026-09-11
 

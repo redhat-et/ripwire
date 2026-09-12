@@ -11,6 +11,7 @@
 // best score of any symbol it holds (the markdown file-node, which indexes the whole body, dominates). The
 // graph half ([[links]]/PageRank) is intentionally NOT fused — the eval showed importance ≠ relatedness.
 
+#include "infra/Diagnostics.h" // VERIFY_NO_ALIAS_BUF — waterFillRecallShares reads demand[] while writing alloc[]
 #include "docparse.h"    // §P2b: the generated-document signals (marker / size+fences) + the ONE markdown
                          //       fence scanner — a doc-side property, computed from the file's own bytes
 #include "layout.h"      // §L4.3: layout::lineOf — the ONE byte-offset-to-line-number helper (reused, not
@@ -1611,6 +1612,7 @@ inline std::size_t recallServedPrefix( const std::vector<std::size_t>& overhead,
 inline std::size_t waterFillRecallShares( const std::vector<std::size_t>& demand, std::size_t served, std::size_t avail,
                                           std::vector<char>& isSatisfied, std::vector<std::size_t>& alloc )
 {
+    VERIFY_NO_ALIAS_BUF( demand, alloc );   // read demand[i] / write alloc[i] in one loop; never resized here, so the buffer promise holds
     std::size_t remaining   = avail;
     std::size_t unsatisfied = served;
     std::size_t share       = 0;
