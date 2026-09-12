@@ -99,87 +99,70 @@ fi
 # slide is invisible to every text sweep of the tree. A deck is CLEARED only by being READ. No extractor, a
 # failed extraction or an empty result FAILS this arm — never a SKIP beside a standing PASS, which pargates
 # counts as proving nothing while CI still goes green. deck_text below defines what counts as read.
+#
+# DECK PATHS STAY NUL-DELIMITED END TO END. They come from `git ls-files -z`, are read with `read -r -d ''` from a
+# file, are matched by a glob on the whole path (extension in any case), never name a file on disk (a counter
+# names each text file), and reach python as NUL-separated pairs. Python prints every path with control
+# characters escaped, so a newline in a path can neither split one deck into two inputs nor split an output
+# record. A temp-repo control proves it on a newline, a space and an upper-case extension.
 PRERELEASE_NAME_SHA256='7 904522dda28c1584057c235feec23321855e1760d01116dfc6bf851411c69c7c'
 PRERELEASE_EXEMPT_SHA256='bench/recalleval/snapshot.mdpack 6f60a279b582356f5e06091069d1c948889b6d3ccbc1b2d4e3b0d31321326717'
+# deck_kind PATH — sets _kind to pdf, pptx or nothing. A glob on the WHOLE path with the extension in any case:
+# no subshell and no line splitting, so a newline or a space in the path is just another character.
+deck_kind(){
+    case "$1" in
+      *.[pP][dD][fF])     _kind=pdf ;;
+      *.[pP][pP][tT][xX]) _kind=pptx ;;
+      *)                  _kind= ;;
+    esac
+}
 # deck_text DECK OUT — the deck's text into OUT. Exit 0 only when the file was READ: its extractor exists, exited
 # 0, and wrote at least one letter. Otherwise exit 1 with the reason on stdout. The PPTX needs nothing beyond
 # python3 (required above); the PDF needs pdftotext, which CI installs (poppler) for this arm.
 deck_text(){
-    # The extension picks the extractor in ANY case, so X.PDF and slides.Pptx are read like their lowercase twins.
-    case "$( printf '%s' "${1##*.}" | tr '[:upper:]' '[:lower:]' )" in
-      pdf)    command -v pdftotext >/dev/null 2>&1 || { printf 'pdftotext (poppler) is not installed'; return 1; }
-              pdftotext "$1" "$2" 2>/dev/null     || { printf 'pdftotext could not read it'; return 1; } ;;
-      pptx)   python3 -c 'import re, sys, zipfile
+    deck_kind "$1"
+    case "$_kind" in
+      pdf)  command -v pdftotext >/dev/null 2>&1 || { printf 'pdftotext (poppler) is not installed'; return 1; }
+            pdftotext "$1" "$2" 2>/dev/null     || { printf 'pdftotext could not read it'; return 1; } ;;
+      pptx) python3 -c 'import re, sys, zipfile
 deck = zipfile.ZipFile( sys.argv[ 1 ] )
 parts = sorted( n for n in deck.namelist() if re.fullmatch( r"ppt/(slides|notesSlides)/[^/]+\.xml", n ) )
 open( sys.argv[ 2 ], "wb" ).write( b"\n".join( deck.read( n ) for n in parts ) )' "$1" "$2" 2>/dev/null \
-                  || { printf 'it is not a readable PPTX archive'; return 1; } ;;
-      *)      printf 'there is no extractor for this file type'; return 1 ;;
+                || { printf 'it is not a readable PPTX archive'; return 1; } ;;
+      *)    printf 'there is no extractor for this file type'; return 1 ;;
     esac
     grep -q '[A-Za-z]' "$2" 2>/dev/null || { printf 'extraction produced no text'; return 1; }
 }
-# tracked_decks LIST — the deck paths in a NUL-separated `git ls-files -z` LIST, one per line. The extension
-# matches in any case (grep -i), the same rule deck_text applies.
-tracked_decks(){ tr '\0' '\n' < "$1" | grep -iE '\.(pdf|pptx)$'; }
-# CONTROL: the extractor must REFUSE what it cannot read. If it did not, a failed read would pass for a scanned,
-# clean deck — the exact hole the check below closes.
-printf 'not a deck\n' > "$TMP/arm1b.junk.pdf"
-printf 'not a deck\n' > "$TMP/arm1b.junk.pptx"
-_ctl=0
-for _junk in "$TMP/arm1b.junk.pdf" "$TMP/arm1b.junk.pptx"; do
-    deck_text "$_junk" "$TMP/arm1b.junk.txt" >/dev/null && { no "arm 1b control — deck extraction accepted an unreadable .${_junk##*.} file"; _ctl=1; }
-done
-# CONTROL (positive): an upper- or mixed-case extension is still a deck. Selection must pick exactly the two decks
-# out of a planted tracked list, and deck_text must read a planted .PDF and .Pptx back to their planted word.
-printf 'present/X.PDF\0talks/slides.Pptx\0notes.txt\0pdf\0a.pdf.bak\0' > "$TMP/arm1b.ctl.z"
-_picked="$( tracked_decks "$TMP/arm1b.ctl.z" | tr '\n' ' ' )"
-[ "$_picked" = "present/X.PDF talks/slides.Pptx " ] \
-    || { no "arm 1b control — deck selection picked [${_picked% }] from a planted list, not present/X.PDF and talks/slides.Pptx"; _ctl=1; }
-python3 - "$TMP/arm1b.ctl.PDF" "$TMP/arm1b.ctl.Pptx" <<'PY'
-import sys, zipfile
-# A one-page PDF whose only text is the planted word, with a real xref table so no reader has to repair it.
-text = b"BT /F1 18 Tf 20 40 Td (deckcontrol) Tj ET"
-objs = ( b"<</Type /Catalog /Pages 2 0 R>>", b"<</Type /Pages /Kids [3 0 R] /Count 1>>",
-         b"<</Type /Page /Parent 2 0 R /MediaBox [0 0 300 100] /Contents 4 0 R /Resources <</Font <</F1 5 0 R>>>>>>",
-         b"<</Length %d>>\nstream\n%s\nendstream" % ( len( text ), text ),
-         b"<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>" )
-pdf, offsets = bytearray( b"%PDF-1.4\n" ), []
-for number, body in enumerate( objs, 1 ):
-    offsets.append( len( pdf ) )
-    pdf += b"%d 0 obj\n%s\nendobj\n" % ( number, body )
-xref = len( pdf )
-pdf += b"xref\n0 %d\n0000000000 65535 f \n" % ( len( objs ) + 1 ) + b"".join( b"%010d 00000 n \n" % o for o in offsets )
-pdf += b"trailer\n<</Size %d /Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n" % ( len( objs ) + 1, xref )
-open( sys.argv[ 1 ], "wb" ).write( pdf )
-with zipfile.ZipFile( sys.argv[ 2 ], "w" ) as deck:
-    deck.writestr( "ppt/slides/slide1.xml", "<p:sld><a:t>deckcontrol</a:t></p:sld>" )
-PY
-for _deck in "$TMP/arm1b.ctl.PDF" "$TMP/arm1b.ctl.Pptx"; do
-    if _why="$( deck_text "$_deck" "$TMP/arm1b.ctl.txt" )"; then
-        grep -q deckcontrol "$TMP/arm1b.ctl.txt" || { no "arm 1b control — a planted .${_deck##*.} deck was read but its planted word is missing"; _ctl=1; }
-    else
-        no "arm 1b control — a planted, readable .${_deck##*.} deck was not read: $_why"; _ctl=1
-    fi
-done
-[ "$_ctl" -eq 0 ] && ok "arm 1b control — deck extraction refuses unreadable input and reads a planted .PDF and .Pptx"
-# Every TRACKED deck, not a hard-coded pair: a new deck is scanned the day it is committed. The loop reads a
-# process substitution, not a pipe, so _deckfail and no()'s fail=1 are set in THIS shell.
-: > "$TMP/arm1b.extra"
-_deckfail=0
-while IFS= read -r _bin; do
-    _out="$TMP/arm1b.$( printf '%s' "$_bin" | tr '/' '_' ).txt"
-    if _why="$( deck_text "$ROOT/$_bin" "$_out" )"; then
-        printf '%s\t%s\n' "$_bin" "$_out" >> "$TMP/arm1b.extra"
-    else
-        no "arm 1b — $_bin was NOT scanned: $_why. A deck this arm could not read is not a deck it cleared."
-        _deckfail=1
-    fi
-done < <( tracked_decks "$TMP/tracked.z" )
-python3 - "$TMP/tracked.z" "$TMP/arm1b.extra" "$PRERELEASE_NAME_SHA256" "$PRERELEASE_EXEMPT_SHA256" \
-    > "$TMP/arm1b" 2> "$TMP/arm1b.err" <<'PY'
+# scan_decks ROOT LIST EXTRA TAG WHO — every deck in LIST (a `git ls-files -z` list of paths under ROOT) is read
+# into $TMP and appended to EXTRA as "path NUL textfile NUL". A deck that cannot be read prints a FAIL, with WHO
+# naming the run. Sets _decks (decks seen) and _unread (decks not read). The loop reads LIST through a
+# redirection, not a pipe, so no()'s fail=1 lands in THIS shell.
+scan_decks(){
+    local root="$1" list="$2" extra="$3" tag="$4" who="$5" deck out why shown
+    : > "$extra"
+    _decks=0
+    _unread=0
+    while IFS= read -r -d '' deck; do
+        deck_kind "$deck"
+        [ -n "$_kind" ] || continue
+        _decks=$(( _decks + 1 ))
+        out="$TMP/arm1b.$tag.deck$_decks.txt"
+        if why="$( deck_text "$root/$deck" "$out" )"; then
+            printf '%s\0%s\0' "$deck" "$out" >> "$extra"
+        else
+            printf -v shown '%q' "$deck"
+            no "$who — $shown was NOT scanned: $why. A deck this arm could not read is not a deck it cleared."
+            _unread=$(( _unread + 1 ))
+        fi
+    done < "$list"
+}
+# The scanner. argv: tracked list (ls-files -z), deck list (path NUL textfile NUL pairs), target rows, exempt rows.
+# Written once and run twice: over the control repo below, then over this tree.
+cat > "$TMP/arm1b.py" <<'PY'
 import hashlib, re, sys
 paths = [ p for p in open( sys.argv[ 1 ], 'rb' ).read().split( b'\0' ) if p ]
-extra = [ line.split( '\t', 1 ) for line in open( sys.argv[ 2 ], encoding='utf-8' ).read().splitlines() if line ]
+fields = open( sys.argv[ 2 ], 'rb' ).read().split( b'\0' )[ :-1 ]
+extra = list( zip( fields[ 0::2 ], fields[ 1::2 ] ) )
 exempt = dict( line.split() for line in sys.argv[ 4 ].splitlines() if line.strip() )
 targets = {}
 for line in sys.argv[ 3 ].splitlines():
@@ -193,6 +176,11 @@ for line in sys.argv[ 3 ].splitlines():
 if not targets:
     print( 'REFUSE no target hashes: the arm would pass while matching nothing' )
     sys.exit( 1 )
+
+def shown( path ):
+    """A path as ONE output record: undecodable bytes and control characters (a newline above all) become \\xNN."""
+    text = path.decode( 'utf-8', 'backslashreplace' ) if isinstance( path, bytes ) else path
+    return re.sub( r'[\x00-\x1f\x7f]', lambda m: '\\x%02x' % ord( m.group() ), text )
 
 def make_scan( targets ):
     """data (bytes) -> the 1-based line numbers carrying a target token. Each maximal letter run is hashed
@@ -238,28 +226,90 @@ for raw in paths:
     except OSError:
         continue
     if b'\0' in data:
-        continue   # binary, skip (mirrors grep -I); the deck binaries are scanned below as extracted text
+        continue   # binary, skip (mirrors grep -I); the decks are scanned below as extracted text
     found = scan( data )
     if not found:
         continue
     if p in exempt and hashlib.sha256( data ).hexdigest() == exempt[ p ]:
-        print( f'EXEMPT {len( found )} {p}' )
+        print( f'EXEMPT {len( found )} {shown( raw )}' )
         continue
     for i in found:
-        print( f'HIT {p}:{i}' )
+        print( f'HIT {shown( raw )}:{i}' )
 for label, txt in extra:
     for i in scan( open( txt, 'rb' ).read() ):
-        print( f'HIT {label} (extracted text):{i}' )
+        print( f'HIT {shown( label )} (extracted text):{i}' )
 for p, digest in exempt.items():
     try:
         live = hashlib.sha256( open( p, 'rb' ).read() ).hexdigest() if p in tracked else None
     except OSError:
         live = None
     if live != digest:
-        print( f'STALE {p}' )
+        print( f'STALE {shown( p )}' )
 PY
+# CONTROL: the extractor must REFUSE what it cannot read. If it did not, a failed read would pass for a scanned,
+# clean deck — the exact hole this arm closes.
+printf 'not a deck\n' > "$TMP/arm1b.junk.pdf"
+printf 'not a deck\n' > "$TMP/arm1b.junk.pptx"
+_ctl=0
+for _junk in "$TMP/arm1b.junk.pdf" "$TMP/arm1b.junk.pptx"; do
+    deck_text "$_junk" "$TMP/arm1b.junk.txt" >/dev/null && { no "arm 1b control — deck extraction accepted an unreadable .${_junk##*.} file"; _ctl=1; }
+done
+# CONTROL (end to end, in a temp repo): three TRACKED decks whose paths carry a NEWLINE, a SPACE and an UPPER-CASE
+# extension, beside a `.pdf.bak` decoy. Each deck holds the planted token only inside compressed, extractable text,
+# so nothing but the deck pipeline can find it. The same enumeration, extraction and scanner the real sweep uses
+# must count exactly three decks and report the token from every one's extracted text. GIT_* is cleared so an
+# inherited GIT_DIR cannot point these git calls at some other repository.
+_ctlrepo="$TMP/arm1b.ctlrepo"
+ctlgit(){ env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$_ctlrepo" "$@"; }
+{ mkdir -p "$_ctlrepo" && ctlgit init -q 2>/dev/null; } || _ctl=1
+python3 - "$_ctlrepo" <<'PY' || _ctl=1
+import os, sys, zipfile, zlib
+root, word = sys.argv[ 1 ], b"qzvkwjx"
+def pdf_bytes():
+    """A one-page PDF whose text is the word, deflated so the raw bytes never spell it, with a real xref table."""
+    stream = zlib.compress( b"BT /F1 18 Tf 20 40 Td (" + word + b") Tj ET" )
+    objs = ( b"<</Type /Catalog /Pages 2 0 R>>", b"<</Type /Pages /Kids [3 0 R] /Count 1>>",
+             b"<</Type /Page /Parent 2 0 R /MediaBox [0 0 300 100] /Contents 4 0 R /Resources <</Font <</F1 5 0 R>>>>>>",
+             b"<</Length %d /Filter /FlateDecode>>\nstream\n" % len( stream ) + stream + b"\nendstream",
+             b"<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>" )
+    pdf, offsets = bytearray( b"%PDF-1.4\n" ), []
+    for number, body in enumerate( objs, 1 ):
+        offsets.append( len( pdf ) )
+        pdf += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+    xref = len( pdf )
+    pdf += b"xref\n0 %d\n0000000000 65535 f \n" % ( len( objs ) + 1 ) + b"".join( b"%010d 00000 n \n" % o for o in offsets )
+    pdf += b"trailer\n<</Size %d /Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n" % ( len( objs ) + 1, xref )
+    return bytes( pdf )
+os.makedirs( os.path.join( root, "talks" ), exist_ok=True )
+with zipfile.ZipFile( os.path.join( root, "talks", "new\nline.Pptx" ), "w", zipfile.ZIP_DEFLATED ) as deck:
+    deck.writestr( "ppt/slides/slide1.xml", b"<p:sld><a:t>" + word + b"</a:t></p:sld>" )
+for name in ( "with space.pdf", "UPPER.PDF" ):
+    with open( os.path.join( root, "talks", name ), "wb" ) as out:
+        out.write( pdf_bytes() )
+with open( os.path.join( root, "talks", "decoy.pdf.bak" ), "wb" ) as out:
+    out.write( b"not a deck\n" )
+PY
+{ ctlgit add -A && ctlgit ls-files -z > "$TMP/arm1b.ctl.z"; } || _ctl=1
+scan_decks "$_ctlrepo" "$TMP/arm1b.ctl.z" "$TMP/arm1b.ctl.extra" ctl "arm 1b control"
+if [ "$_decks" -ne 3 ] || [ "$_unread" -ne 0 ]; then
+    no "arm 1b control — the temp repo tracks 3 decks and a .pdf.bak decoy; enumeration saw $_decks and read $(( _decks - _unread ))"
+    _ctl=1
+fi
+_ctlhash="7 $( python3 -c 'import hashlib; print( hashlib.sha256( b"qzvkwjx" ).hexdigest() )' )"
+( cd "$_ctlrepo" && PYTHONIOENCODING=utf-8:backslashreplace python3 "$TMP/arm1b.py" "$TMP/arm1b.ctl.z" "$TMP/arm1b.ctl.extra" "$_ctlhash" '' ) \
+    > "$TMP/arm1b.ctl.out" 2>&1 || _ctl=1
+for _want in 'talks/new\x0aline.Pptx' 'talks/with space.pdf' 'talks/UPPER.PDF'; do
+    grep -Fq "HIT $_want (extracted text):" "$TMP/arm1b.ctl.out" \
+        || { no "arm 1b control — the planted token in tracked deck $_want was not reported from its extracted text"; _ctl=1; }
+done
+[ "$_ctl" -eq 0 ] && ok "arm 1b control — extraction refuses unreadable input; tracked decks with a newline, a space and an upper-case extension in their paths are each enumerated, read and scanned"
+# THE SWEEP: every tracked deck of this tree, then the scanner over the tree and those decks.
+scan_decks "$ROOT" "$TMP/tracked.z" "$TMP/arm1b.extra" tree "arm 1b"
+_treedecks=$_decks
+_treeunread=$_unread
+PYTHONIOENCODING=utf-8:backslashreplace python3 "$TMP/arm1b.py" "$TMP/tracked.z" "$TMP/arm1b.extra" \
+    "$PRERELEASE_NAME_SHA256" "$PRERELEASE_EXEMPT_SHA256" > "$TMP/arm1b" 2> "$TMP/arm1b.err"
 py_status=$?
-_deckn="$( wc -l < "$TMP/arm1b.extra" | tr -d ' ' )"
 if grep -q '^REFUSE' "$TMP/arm1b"; then
     no "arm 1b — $( grep '^REFUSE' "$TMP/arm1b" | head -1 | cut -c8- )"
 elif [ "$py_status" -ne 0 ]; then
@@ -267,8 +317,8 @@ elif [ "$py_status" -ne 0 ]; then
 elif grep -q '^HIT ' "$TMP/arm1b"; then
     no "arm 1b — private pre-release name on $( grep -c '^HIT ' "$TMP/arm1b" | tr -d ' ' ) line(s); locations only, the text is not echoed:"
     grep '^HIT ' "$TMP/arm1b" | cut -c5- | sed 's/^/          /'
-elif [ "$_deckfail" -eq 0 ]; then
-    ok "arm 1b — no private pre-release name in the committed tree or in all $_deckn tracked deck file(s)$( awk '/^EXEMPT /{ printf " (%s line(s) in byte-frozen %s exempt by content hash)", $2, $3 }' "$TMP/arm1b" )"
+elif [ "$_treeunread" -eq 0 ]; then
+    ok "arm 1b — no private pre-release name in the committed tree or in all $_treedecks tracked deck file(s)$( awk '/^EXEMPT /{ printf " (%s line(s) in byte-frozen %s exempt by content hash)", $2, $3 }' "$TMP/arm1b" )"
 fi
 sed -n 's/^STALE //p' "$TMP/arm1b" | while IFS= read -r _path; do
     printf 'NOTE: arm 1b — the content-hash exemption for %s no longer matches its bytes; it exempts nothing and can be deleted\n' "$_path"
