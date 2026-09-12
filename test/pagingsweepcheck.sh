@@ -105,10 +105,10 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 # Inherited from a hook running the suite, these would aim every git and ripwire call below at the caller's
-# repository: the paging fixture's own init/commit/branch calls, and the ref scans of the --whereis and
+# repository (GIT_COMMON_DIR too: it redirects refs even when GIT_DIR is unset): the paging fixture's own init/commit/branch calls, and the ref scans of the --whereis and
 # --stray-content rows, which must read ONLY the refs that fixture holds (see mkPagingFixture).
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
-cd "$ROOT"
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
+cd "$ROOT" || exit 2
 
 echo "pagingsweepcheck: BIN=$BIN  PREBIN=${PREBIN:-<none>}"
 
