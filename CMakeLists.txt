@@ -927,6 +927,12 @@ endif()
 # optimizer half was off. Reproduced on Apple clang 21: the arm-2 probe is 5 instructions by default, 9 with
 # `-mllvm -basic-aa-separate-storage=false`, 5 with `=true`.
 #
+# Why LLVM 17 left it off, and why turning it on there is safe: llvm/llvm-project#76864 "[BasicAA] Enable separate
+# storage hints by default" (merged 2024-01-03) flipped the default because "a few months of experimentation in a
+# large codebase did not reveal any significant build speed regressions" — the LLVM-17 default was a compile-time
+# hedge, not a soundness one; #76770 the same week only makes the hint fire in more contexts. LLVM 17 with the option
+# on runs the analysis LLVM 18+ runs unconditionally.
+#
 # The option's name is the same from LLVM 17 through 21 and clang takes it as a compile flag, so it is passed
 # wherever the compiler accepts it: on LLVM 17 it turns the analysis on, on 18+ it restates the default (a no-op).
 # Probed, never assumed — GCC rejects -mllvm outright and a clang whose LLVM had dropped the name would reject the
