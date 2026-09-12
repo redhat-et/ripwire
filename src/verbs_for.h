@@ -2751,7 +2751,11 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
     // single-symbol verbs (--around/--expand). file:name disambiguates a same-named type across languages.
     if( !cfg.legoType.empty() )
     {
-        const NodeId focus = resolveFocus( ing, cfg.legoType );
+        // H1: the out-param is the decl→def widening's residue — same-named definitions a file:name type found and could
+        // not tie to the file it named. implementors= is read off the one node picked here, so unreported, a drop reached
+        // the reader as implementors="0" about a forward declaration.
+        std::size_t  legoUnprovenDefs = 0;
+        const NodeId focus            = resolveFocus( ing, cfg.legoType, &legoUnprovenDefs );
         if( focus == kNoNode )
         {
             // §B4.2: one shared refusal — a non-defining `file:name` says WHICH files define the type and
@@ -2768,10 +2772,12 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // H5: --lego had no legend at all. The #66 clause rides as its own adjacent comment (graphlegend.h
         // graphUnindexedLegendComment) because kLegoLegend is one closed literal: the attribute below is
         // conditional on g.unindexedFiles, so its definition has to be too.
-        rw::emitTo( stdout, "{}{}{}", rw::ctxRootOpen( {}, {}, tvRootArg ).c_str(), rw::kLegoLegend,
-                     rw::graphUnindexedLegendComment( g.unindexedFiles > 0 ).c_str() );
+        // H1: the unproven_defs= clause takes the same route for the same reason (graphlegend.h unprovenDefsVerbComment).
+        rw::emitTo( stdout, "{}{}{}{}", rw::ctxRootOpen( {}, {}, tvRootArg ).c_str(), rw::kLegoLegend,
+                     rw::graphUnindexedLegendComment( g.unindexedFiles > 0 ).c_str(),
+                     rw::unprovenDefsVerbComment( rw::UnprovenDefsVerb::Lego, legoUnprovenDefs > 0, "<!-- ripwire lego: " ).c_str() );
         packLego( stdout, ing, g.implementors, flat, 1, d.redactPtr, &legoImpure, focus, /*withPaths=*/true, tvRootArg,
-                  rw::graphCountFloorAttrXml( g ) );   // M15: gauge + marker on the targeted root
+                  rw::unprovenDefsAttrXml( legoUnprovenDefs ) + rw::graphCountFloorAttrXml( g ) );   // H1 + M15: residue, gauge, marker on the targeted root
         rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, d.redactCounts );      // W3-N1: a contract <m> sig is a redacting seam — disclose the tally
         return 0;
