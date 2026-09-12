@@ -95,24 +95,50 @@ fi
 # `make_snapshot.py --freeze` changes those bytes, the exemption stops applying, and a pack refrozen from
 # a tree that still carries the name is reported like any other file.
 #
-# The deck binaries are extracted and scanned too — arm 2b's population, for arm 2b's reason: a name
-# rendered into a slide is invisible to every text sweep of the tree.
+# Every tracked PDF/PPTX (the deck) is extracted and scanned too, for arm 2b's reason: a name rendered into a
+# slide is invisible to every text sweep of the tree. A deck is CLEARED only by being READ. No extractor, a
+# failed extraction or an empty result FAILS this arm — never a SKIP beside a standing PASS, which pargates
+# counts as proving nothing while CI still goes green. deck_text below defines what counts as read.
 PRERELEASE_NAME_SHA256='7 904522dda28c1584057c235feec23321855e1760d01116dfc6bf851411c69c7c'
 PRERELEASE_EXEMPT_SHA256='bench/recalleval/snapshot.mdpack 6f60a279b582356f5e06091069d1c948889b6d3ccbc1b2d4e3b0d31321326717'
-: > "$TMP/arm1b.extra"
-for _bin in present/ripwire-showcase.pdf present/ripwire-showcase.pptx; do
-    [ -f "$ROOT/$_bin" ] || continue
-    _out="$TMP/arm1b.$( basename "$_bin" ).txt"
-    case "$_bin" in
-      *.pdf)  command -v pdftotext >/dev/null 2>&1 && pdftotext "$ROOT/$_bin" "$_out" 2>/dev/null ;;
-      *.pptx) command -v unzip >/dev/null 2>&1 && unzip -p "$ROOT/$_bin" 'ppt/slides/*.xml' 'ppt/notesSlides/*.xml' > "$_out" 2>/dev/null ;;
+# deck_text DECK OUT — the deck's text into OUT. Exit 0 only when the file was READ: its extractor exists, exited
+# 0, and wrote at least one letter. Otherwise exit 1 with the reason on stdout. The PPTX needs nothing beyond
+# python3 (required above); the PDF needs pdftotext, which CI installs (poppler) for this arm.
+deck_text(){
+    case "$1" in
+      *.pdf)  command -v pdftotext >/dev/null 2>&1 || { printf 'pdftotext (poppler) is not installed'; return 1; }
+              pdftotext "$1" "$2" 2>/dev/null     || { printf 'pdftotext could not read it'; return 1; } ;;
+      *.pptx) python3 -c 'import re, sys, zipfile
+deck = zipfile.ZipFile( sys.argv[ 1 ] )
+parts = sorted( n for n in deck.namelist() if re.fullmatch( r"ppt/(slides|notesSlides)/[^/]+\.xml", n ) )
+open( sys.argv[ 2 ], "wb" ).write( b"\n".join( deck.read( n ) for n in parts ) )' "$1" "$2" 2>/dev/null \
+                  || { printf 'it is not a readable PPTX archive'; return 1; } ;;
+      *)      printf 'there is no extractor for this file type'; return 1 ;;
     esac
-    if [ -s "$_out" ]; then
+    grep -q '[A-Za-z]' "$2" 2>/dev/null || { printf 'extraction produced no text'; return 1; }
+}
+# CONTROL: the extractor must REFUSE what it cannot read. If it did not, a failed read would pass for a scanned,
+# clean deck — the exact hole the check below closes.
+printf 'not a deck\n' > "$TMP/arm1b.junk.pdf"
+printf 'not a deck\n' > "$TMP/arm1b.junk.pptx"
+_ctl=0
+for _junk in "$TMP/arm1b.junk.pdf" "$TMP/arm1b.junk.pptx"; do
+    deck_text "$_junk" "$TMP/arm1b.junk.txt" >/dev/null && { no "arm 1b control — deck extraction accepted an unreadable .${_junk##*.} file"; _ctl=1; }
+done
+[ "$_ctl" -eq 0 ] && ok "arm 1b control — deck extraction refuses an unreadable PDF and an unreadable PPTX"
+# Every TRACKED deck, not a hard-coded pair: a new deck is scanned the day it is committed. The loop reads a
+# process substitution, not a pipe, so _deckfail and no()'s fail=1 are set in THIS shell.
+: > "$TMP/arm1b.extra"
+_deckfail=0
+while IFS= read -r _bin; do
+    _out="$TMP/arm1b.$( printf '%s' "$_bin" | tr '/' '_' ).txt"
+    if _why="$( deck_text "$ROOT/$_bin" "$_out" )"; then
         printf '%s\t%s\n' "$_bin" "$_out" >> "$TMP/arm1b.extra"
     else
-        printf 'SKIP: arm 1b — %s not extractable here (NOT a pass for that file)\n' "$_bin"
+        no "arm 1b — $_bin was NOT scanned: $_why. A deck this arm could not read is not a deck it cleared."
+        _deckfail=1
     fi
-done
+done < <( tr '\0' '\n' < "$TMP/tracked.z" | grep -E '\.(pdf|pptx)$' )
 python3 - "$TMP/tracked.z" "$TMP/arm1b.extra" "$PRERELEASE_NAME_SHA256" "$PRERELEASE_EXEMPT_SHA256" \
     > "$TMP/arm1b" 2> "$TMP/arm1b.err" <<'PY'
 import hashlib, re, sys
@@ -205,8 +231,8 @@ elif [ "$py_status" -ne 0 ]; then
 elif grep -q '^HIT ' "$TMP/arm1b"; then
     no "arm 1b — private pre-release name on $( grep -c '^HIT ' "$TMP/arm1b" | tr -d ' ' ) line(s); locations only, the text is not echoed:"
     grep '^HIT ' "$TMP/arm1b" | cut -c5- | sed 's/^/          /'
-else
-    ok "arm 1b — no private pre-release name in the committed tree or $_deckn extracted deck file(s)$( awk '/^EXEMPT /{ printf " (%s line(s) in byte-frozen %s exempt by content hash)", $2, $3 }' "$TMP/arm1b" )"
+elif [ "$_deckfail" -eq 0 ]; then
+    ok "arm 1b — no private pre-release name in the committed tree or in all $_deckn tracked deck file(s)$( awk '/^EXEMPT /{ printf " (%s line(s) in byte-frozen %s exempt by content hash)", $2, $3 }' "$TMP/arm1b" )"
 fi
 sed -n 's/^STALE //p' "$TMP/arm1b" | while IFS= read -r _path; do
     printf 'NOTE: arm 1b — the content-hash exemption for %s no longer matches its bytes; it exempts nothing and can be deleted\n' "$_path"
