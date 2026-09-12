@@ -33,6 +33,38 @@
 #       (the CodeRabbit reachesAny finding on PR #81, declined — this is the evidence).
 #   (F) determinism and well-formedness of the fixture map.
 #
+# Fixture test/elixirresolvefix (its own crawl: every row below adds a COUNTED unresolved call, which would move
+# arm (A)'s header count on the fixture above; copied to a tmp dir, the arm-(H) mutation deletes a file):
+#   lib/toolbox.ex  `import Toolbox, only: [...]` then `import Toolbox, except: [...]` in Narrowed; Widened has the
+#                   `except:` alone — the CONTROL where except applies to every function
+#   lib/ring.ex     a TOP-LEVEL Ring.Core — the decoy a dotted nested declaration's later caller must not reach
+#   lib/shell.ex    `defmodule Ring.Core` nested in Shell, called before and after its declaration, by full name,
+#                   and an undotted nested Plain as the control
+#   lib/shape.ex    `defimpl Shape, for: [Disc, Box]` with `alias __MODULE__, as: Current`; `__MODULE__.measure`
+#                   and a literal `Shape.Disc.measure` are the controls
+#   lib/seeds.ex    `&_seed/0`, the bare capture of an underscore-named function; the remote capture, the plain
+#                   call and an `_seed` PARAMETER read are the controls
+#   lib/dflt.ex     a bodyless `def f(x \\ default())` head over two clauses; `f()` omits the argument,
+#                   `f(1)` supplies it, `g(x \\ default()), do: x` is the head-with-body control
+#
+# Arms (each a resolution rule of Kernel.SpecialForms / Kernel, reproduced against Elixir 1.20.3 / OTP 29):
+#   (G) `import M, except: [...]` after `import M, only: [...]` SUBTRACTS from the only-list in force (import/2:
+#       ":except is always exclusive on a previously declared import"); it does not replace it. A function absent
+#       from the only-list stays un-imported — no edge, and the refusal is COUNTED in the header. With no earlier
+#       import, except applies to all of M's functions.
+#   (H) `defmodule Inner.Deep` nested in Outer defines Outer.Inner.Deep AND aliases its FIRST segment, Inner ->
+#       Outer.Inner, in the enclosing scope from that point on (defmodule/2, nesting). A later `Inner.Deep.f()`
+#       names the nested module even when a top-level Inner.Deep exists; an earlier one still names the top-level
+#       module; with no top-level module the later call resolves instead of being dropped.
+#   (I) inside a multi-target defimpl, `alias __MODULE__, as: Current` is `__MODULE__` under another name: each
+#       implementation's `Current.f()` reaches its OWN f, exactly as `__MODULE__.f()` already does; a literal
+#       `Proto.A.f()` stays literal in every implementation.
+#   (J) `&_seed/0` names a function: the leading underscore marks an unused VARIABLE, and a named capture is never
+#       one. The remote capture and the plain call already resolved; an `_seed` parameter read still does not.
+#   (K) a call that OMITS a defaulted argument reaches the bodyless head that declares the default (the only symbol
+#       that calls the default expression), so `--path` and `--impact` see the caller through it; a call that
+#       supplies the argument never evaluates the default and keeps reaching the clauses alone.
+#
 # Usage:  test/elixirnamearitycheck.sh   |   RIPWIRE_BIN=asan/ripwire test/elixirnamearitycheck.sh
 # Exit:   0 = clean · 1 = an arm failed · 2 = usage / missing prerequisite
 
@@ -41,6 +73,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/elixirnamearityfix"
+FIX2="$ROOT/test/elixirresolvefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
@@ -48,14 +81,17 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/elixirnamearityfix — fixture missing"; exit 2; }
+[ -d "$FIX2" ] || { echo "no test/elixirresolvefix — fixture missing"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
-echo "elixirnamearitycheck: BIN=$BIN  FIX=$FIX"
+echo "elixirnamearitycheck: BIN=$BIN  FIX=$FIX  FIX2=$FIX2"
 
 mkdir -p "$TMP/cache"
 export XDG_CACHE_HOME="$TMP/cache"     # every quality/ingest blob this gate writes stays inside its own tmp dir
 cp -R "$FIX" "$TMP/fix"
 F="$TMP/fix"
+cp -R "$FIX2" "$TMP/resolve"
+R="$TMP/resolve"
 
 # callees of the symbol whose canonical id ends with $2, from the map in $1 — one sorted line, empty when none
 callees(){
@@ -220,6 +256,115 @@ if command -v xmllint >/dev/null 2>&1; then
     if xmllint --noout "$TMP/map.xml" 2>/dev/null; then ok "(F) xml well-formed"; else no "(F) xml malformed"; fi
 else
     ok "(F) xml well-formed (xmllint absent — skipped)"
+fi
+
+# ═══ the resolution-rule fixture (test/elixirresolvefix) — its own crawl, see the header ═════════════════
+"$BIN" "$R" --no-cache >"$TMP/resolve.xml" 2>/dev/null
+# the rows the arms below assert on, or the assertions cannot fail (a vanishing probe target)
+for probe in 'import Toolbox, except: [flatten: 1]' 'defmodule Ring.Core do' 'alias __MODULE__, as: Current' '&_seed/0' 'def f(x \\ default())'; do
+    grep -rqF -- "$probe" "$R/lib" || no "(G-K) the fixture no longer spells the probe target: $probe"
+done
+# --uses in_id rows of one symbol, sorted, one per line
+use_ids(){ grep -oE 'in_id="[^"]*"' "$1" | sort; }
+# the p= of every callee row of $2, sorted onto one line
+callee_ps(){ "$BIN" "$R" "--callees=$1" --no-cache 2>/dev/null | grep -oE '<s [^>]*/>' | grep -oE 'p="[^"]*"' | sort | tr '\n' ' ' | sed 's/ $//'; }
+
+# ── (G) import M, except: [...] after import M, only: [...] subtracts; it does not replace ──────────────
+[ "$( callees "$TMP/resolve.xml" '::Narrowed::c_never/1' )" = "" ] \
+    && ok "(G) Narrowed.c_never/1: never/1 was outside the only-list and the later except: kept it out — no edge" \
+    || no "(G) Narrowed.c_never/1 gained an edge the only-list never admitted: $( callees "$TMP/resolve.xml" '::Narrowed::c_never/1' )"
+[ "$( header_unresolved "$TMP/resolve.xml" )" = "unresolved=3" ] \
+    && ok "(G) the refused never/1 call is COUNTED beside the two excluded flatten/1 calls: unresolved=3" \
+    || no "(G) the refused call is not disclosed in the header: $( header_unresolved "$TMP/resolve.xml" ) (expected unresolved=3)"
+[ "$( callees "$TMP/resolve.xml" '::Narrowed::c_keyfind/1' )" = "keyfind/1" ] && [ "$( callees "$TMP/resolve.xml" '::Narrowed::c_flatten/1' )" = "" ] \
+    && ok "(G) control: keyfind/1 (only-listed, not excepted) resolves; flatten/1 (only-listed, then excepted) does not" \
+    || no "(G) control wrong: keyfind='$( callees "$TMP/resolve.xml" '::Narrowed::c_keyfind/1' )' flatten='$( callees "$TMP/resolve.xml" '::Narrowed::c_flatten/1' )'"
+[ "$( callees "$TMP/resolve.xml" '::Widened::c_never/1' )" = "never/1" ] && [ "$( callees "$TMP/resolve.xml" '::Widened::c_flatten/1' )" = "" ] \
+    && ok "(G) control: except: with no earlier import admits every other function — Widened.c_never/1 -> never/1, flatten/1 out" \
+    || no "(G) control wrong: Widened never='$( callees "$TMP/resolve.xml" '::Widened::c_never/1' )' flatten='$( callees "$TMP/resolve.xml" '::Widened::c_flatten/1' )'"
+
+# ── (H) a dotted nested defmodule aliases its first segment in the enclosing scope ──────────────────────
+[ "$( callee_ps 'Shell::late/0' )" = 'p="lib/shell.ex:6"' ] \
+    && ok "(H) Shell.late/0 (after the declaration): Ring.Core.spin() names the nested Shell.Ring.Core, not the top-level decoy" \
+    || no "(H) Shell.late/0 reached the wrong spin/0: $( callee_ps 'Shell::late/0' ) (expected lib/shell.ex:6)"
+"$BIN" "$R" '--callers=lib/ring.ex:spin/0' --no-cache >"$TMP/callers_top_spin.xml" 2>/dev/null
+grep -q '<callers of="lib/ring.ex:spin/0" defs="1" count="1"' "$TMP/callers_top_spin.xml" && grep -q 'n="early/0"' "$TMP/callers_top_spin.xml" \
+    && ok "(H) the top-level Ring.Core.spin/0 keeps exactly one caller, early/0 — the call written before the declaration" \
+    || no "(H) top-level spin/0 callers wrong: $( grep -oE '<callers [^>]*>|<s [^>]*/>' "$TMP/callers_top_spin.xml" | tr '\n' ' ' )"
+[ "$( callee_ps 'Shell::early/0' )" = 'p="lib/ring.ex:3"' ] \
+    && ok "(H) control: Shell.early/0 (before the declaration) still names the top-level Ring.Core — source order" \
+    || no "(H) control: early/0 wrong: $( callee_ps 'Shell::early/0' )"
+[ "$( callee_ps 'Shell::full/0' )" = 'p="lib/shell.ex:6"' ] && [ "$( callee_ps 'Shell::plain/0' )" = 'p="lib/shell.ex:14"' ] \
+    && ok "(H) control: the full name Shell.Ring.Core and the undotted nested Plain resolve as before" \
+    || no "(H) control wrong: full=$( callee_ps 'Shell::full/0' ) plain=$( callee_ps 'Shell::plain/0' )"
+# mutation: no top-level Ring.Core at all — the later call must resolve to the nested module, never drop
+cp -R "$R" "$TMP/nodecoy" && rm "$TMP/nodecoy/lib/ring.ex"
+[ ! -e "$TMP/nodecoy/lib/ring.ex" ] || no "(H) mutation did not take"
+"$BIN" "$TMP/nodecoy" --no-cache >"$TMP/nodecoy.xml" 2>/dev/null
+[ "$( callees "$TMP/nodecoy.xml" '::Shell::late/0' )" = "spin/0" ] && [ "$( callees "$TMP/nodecoy.xml" '::Shell::early/0' )" = "" ] \
+    && ok "(H) mutation: without the decoy, late/0 -> spin/0 through the nested module; early/0 (before it) has nothing to name" \
+    || no "(H) mutation: late='$( callees "$TMP/nodecoy.xml" '::Shell::late/0' )' early='$( callees "$TMP/nodecoy.xml" '::Shell::early/0' )'"
+
+# ── (I) alias __MODULE__, as: Current inside a multi-target defimpl ─────────────────────────────────────
+"$BIN" "$R" --uses=Shape.Disc::measure/1 --no-cache >"$TMP/uses_disc.xml" 2>/dev/null
+"$BIN" "$R" --uses=Shape.Box::measure/1 --no-cache >"$TMP/uses_box.xml" 2>/dev/null
+use_ids "$TMP/uses_disc.xml" | grep -q '::Shape.Disc::area/1"' && ! use_ids "$TMP/uses_disc.xml" | grep -q '::Shape.Box::area/1"' \
+    && use_ids "$TMP/uses_box.xml" | grep -q '::Shape.Box::area/1"' && ! use_ids "$TMP/uses_box.xml" | grep -q '::Shape.Disc::area/1"' \
+    && ok "(I) Current.measure(x): Shape.Disc.area/1 -> Shape.Disc.measure/1 and Shape.Box.area/1 -> Shape.Box.measure/1 — each its own" \
+    || no "(I) Current.measure(x) crossed implementations: disc=[$( use_ids "$TMP/uses_disc.xml" | tr '\n' ' ' )] box=[$( use_ids "$TMP/uses_box.xml" | tr '\n' ' ' )]"
+use_ids "$TMP/uses_disc.xml" | grep -q '::Shape.Disc::own/1"' && ! use_ids "$TMP/uses_disc.xml" | grep -q '::Shape.Box::own/1"' \
+    && use_ids "$TMP/uses_box.xml" | grep -q '::Shape.Box::own/1"' && ! use_ids "$TMP/uses_box.xml" | grep -q '::Shape.Disc::own/1"' \
+    && ok "(I) control: the literal __MODULE__.measure(x) resolves per implementation" \
+    || no "(I) control: __MODULE__ crossed implementations: disc=[$( use_ids "$TMP/uses_disc.xml" | tr '\n' ' ' )] box=[$( use_ids "$TMP/uses_box.xml" | tr '\n' ' ' )]"
+use_ids "$TMP/uses_disc.xml" | grep -q '::Shape.Disc::literal/1"' && use_ids "$TMP/uses_disc.xml" | grep -q '::Shape.Box::literal/1"' \
+    && ! use_ids "$TMP/uses_box.xml" | grep -q 'literal/1"' \
+    && ok "(I) control: a literal Shape.Disc.measure(x) stays literal — both implementations' literal/1 reach Shape.Disc.measure/1 only" \
+    || no "(I) control: the literal receiver moved: disc=[$( use_ids "$TMP/uses_disc.xml" | tr '\n' ' ' )] box=[$( use_ids "$TMP/uses_box.xml" | tr '\n' ' ' )]"
+
+# ── (J) &_seed/0 names a function ───────────────────────────────────────────────────────────────────────
+[ "$( callees "$TMP/resolve.xml" '::Seeds::by_capture/0' )" = "_seed/0" ] \
+    && ok "(J) by_capture/0: the bare capture &_seed/0 -> _seed/0" \
+    || no "(J) by_capture/0 has no _seed/0 edge: '$( callees "$TMP/resolve.xml" '::Seeds::by_capture/0' )'"
+"$BIN" "$R" --callers=Seeds::_seed/0 --no-cache >"$TMP/callers_seed.xml" 2>/dev/null
+grep -q '<callers of="Seeds::_seed/0" defs="1" count="3"' "$TMP/callers_seed.xml" && grep -q 'n="by_capture/0"' "$TMP/callers_seed.xml" \
+    && ok "(J) --callers=Seeds::_seed/0: count=3 — the bare capture, the remote capture and the plain call" \
+    || no "(J) --callers=Seeds::_seed/0 wrong: $( grep -oE '<callers [^>]*>|<s [^>]*/>' "$TMP/callers_seed.xml" | tr '\n' ' ' )"
+[ "$( callees "$TMP/resolve.xml" '::Seeds::by_remote_capture/0' )" = "_seed/0" ] && [ "$( callees "$TMP/resolve.xml" '::Seeds::by_call/0' )" = "_seed/0" ] \
+    && ok "(J) control: &Seeds._seed/0 and the plain _seed() call resolve" \
+    || no "(J) control lost an edge: remote='$( callees "$TMP/resolve.xml" '::Seeds::by_remote_capture/0' )' call='$( callees "$TMP/resolve.xml" '::Seeds::by_call/0' )'"
+[ "$( callees "$TMP/resolve.xml" '::Seeds::by_parameter/1' )" = "" ] \
+    && ok "(J) control: the _seed PARAMETER read in by_parameter/1 is a variable — no _seed/0 edge" \
+    || no "(J) control: an underscore parameter read became a call: $( callees "$TMP/resolve.xml" '::Seeds::by_parameter/1' )"
+
+# ── (K) a call that omits a defaulted argument reaches the bodyless head ────────────────────────────────
+"$BIN" "$R" --path=caller/0,default/0 --no-cache >"$TMP/path_caller.xml" 2>/dev/null
+grep -q '<path from="caller/0" to="default/0" [^>]*reachable="1"' "$TMP/path_caller.xml" \
+    && ok "(K) --path=caller/0,default/0: f() omits the argument, so default/0 is reachable through the head" \
+    || no "(K) --path=caller/0,default/0 unreachable: $( grep -oE '<path [^>]*>' "$TMP/path_caller.xml" | grep -oE 'reachable="[0-9]"' )"
+"$BIN" "$R" --impact=default/0 --no-cache >"$TMP/impact_default.xml" 2>/dev/null
+grep -q 'n="caller/0"' "$TMP/impact_default.xml" && ! grep -q 'n="caller_explicit/0"' "$TMP/impact_default.xml" \
+    && ok "(K) --impact=default/0 lists caller/0 and not caller_explicit/0" \
+    || no "(K) --impact=default/0 wrong: $( grep -oE '<s [^>]*/>' "$TMP/impact_default.xml" | tr '\n' ' ' )"
+[ "$( callee_ps 'Dflt::caller/0' )" = 'p="lib/dflt.ex:5" p="lib/dflt.ex:6" p="lib/dflt.ex:7"' ] \
+    && ok "(K) caller/0's f() reaches the head (line 5) and both clauses" \
+    || no "(K) caller/0 callees wrong: $( callee_ps 'Dflt::caller/0' )"
+[ "$( callee_ps 'Dflt::caller_explicit/0' )" = 'p="lib/dflt.ex:6" p="lib/dflt.ex:7"' ] \
+    && ok "(K) control: caller_explicit/0's f(1) supplies the argument — the two clauses only, never the head" \
+    || no "(K) control: caller_explicit/0 callees wrong: $( callee_ps 'Dflt::caller_explicit/0' )"
+"$BIN" "$R" --path=caller_explicit/0,default/0 --no-cache >"$TMP/path_explicit.xml" 2>/dev/null
+"$BIN" "$R" --path=caller_g/0,default/0 --no-cache >"$TMP/path_g.xml" 2>/dev/null
+grep -q '<path from="caller_explicit/0" to="default/0" [^>]*reachable="0"' "$TMP/path_explicit.xml" \
+    && grep -q '<path from="caller_g/0" to="default/0" [^>]*reachable="1"' "$TMP/path_g.xml" \
+    && ok "(K) control: no path from caller_explicit/0; caller_g/0 reaches default/0 through the head that has a body" \
+    || no "(K) control paths wrong: explicit $( grep -oE 'reachable="[0-9]"' "$TMP/path_explicit.xml" ) g $( grep -oE 'reachable="[0-9]"' "$TMP/path_g.xml" )"
+
+# ── (F, again) determinism and well-formedness of the resolution fixture ────────────────────────────────
+"$BIN" "$R" --no-cache >"$TMP/resolve2.xml" 2>/dev/null
+if cmp -s "$TMP/resolve.xml" "$TMP/resolve2.xml"; then ok "(F) resolution fixture deterministic"; else no "(F) resolution fixture non-deterministic"; fi
+if command -v xmllint >/dev/null 2>&1; then
+    if xmllint --noout "$TMP/resolve.xml" 2>/dev/null; then ok "(F) resolution fixture xml well-formed"; else no "(F) resolution fixture xml malformed"; fi
+else
+    ok "(F) resolution fixture xml well-formed (xmllint absent — skipped)"
 fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
