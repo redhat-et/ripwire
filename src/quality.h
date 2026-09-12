@@ -4827,6 +4827,7 @@ inline std::string normalizeLegacyAckKind( const std::string& kind, std::uint32_
 // different language, and a caller that rejects the value restores `reason` itself.
 inline bool takeAckNamedToken( std::string& reason, std::string_view name, std::string& valueOut )
 {
+    VERIFY_NO_ALIAS( reason, valueOut );
     if( reason.size() < name.size() || reason.compare( 0, name.size(), name ) != 0 )
     {
         return false;
@@ -6121,6 +6122,8 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                                              std::size_t* registerMacroExcludedOut = nullptr,   // P2.2: honest disclosure count, additive+optional — see isDeadCandidate
                                              std::size_t* apiNewSurfaceOut = nullptr )          // Q-DIAL-4: the api-surface new-symbol COUNT that replaced N never-gating rows
 {
+    VERIFY_TEXT( registerMacroExcludedOut == nullptr || registerMacroExcludedOut != apiNewSurfaceOut,
+                 "computeDelta: registerMacroExcludedOut and apiNewSurfaceOut must be distinct" );   // both default to nullptr, so the object form would dereference null
     std::vector<Regression> regs;
     if( registerMacroExcludedOut )
     {
