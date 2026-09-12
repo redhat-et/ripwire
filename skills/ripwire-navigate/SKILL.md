@@ -162,9 +162,9 @@ result you're about to act on is exactly the case where "read the source" isn't 
 edges on top of the name-based graph: a matched edge is tagged `prov="scip"` and its `amb=` risk drops (it's
 no longer a guess). Edges `--scip` didn't cover keep their plain name-based status — `amb="K"` on a symbol
 still means K of its calls are guessed, `prov=` absent or not. Read `prov="scip"` as "trust this edge more
-than an unmarked one," not as "the whole symbol is now precise." A missing index refuses (exit 1); a corrupt
-one warns on stderr and proceeds all-name-based (same stdout as not passing `--scip`) — check header
-`precise=N` to confirm the overlay actually matched anything.
+than an unmarked one," not as "the whole symbol is now precise." A path that is missing, empty or not a
+regular file refuses (exit 1); a corrupt index warns on stderr and proceeds all-name-based (same stdout as not
+passing `--scip`) — check header `precise=N` to confirm the overlay actually matched anything.
 
 ## Deep-dive ONE symbol — understand it before editing
 

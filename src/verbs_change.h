@@ -134,11 +134,17 @@ std::optional<int> runAffected( const MainDispatch& d )
                      "script-to-binary edges are NOT modelled, so those gates are invisible to this walk and never counted in tests=/reached=. "
                      "{}"     // H2H-Graft F1: the evidence-order clause, testmap.h's ONE wording (changed= is spelled seed_kind="test" here: the argument matched it)
                      "order=evidence says so on the root; partners= counts the partner rows. "
-                     "{}-->{}", rw::kTestRowEvidenceLegend,
+                     "{}{}-->{}", rw::kTestRowEvidenceLegend,
+                     // H1: the decl→def residue resolveAffectedSeeds summed over the symbol items. A file:name item whose
+                     // definitions were dropped seeded the walk with declarations alone, which reached the reader as a bare
+                     // tests="0" — on the verb whose answer is the list of tests to run. Exactly when the root carries it.
+                     rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Affected, sel.unprovenDefs > 0 ).c_str(),
                      rw::graphCountFloorBrief( g.unindexedFiles > 0 ).c_str(), rw::rootRelPathsLegend( afSingleRoot ) );
-        rw::emitTo( stdout, "<affected changed=\"{}\" seeded_by=\"{}\" seeds=\"{}\" seed_test_files=\"{}\" tests=\"{}\" reached=\"{}\" script_gates_unmodelled=\"{}\""
+        rw::emitTo( stdout, "<affected changed=\"{}\" seeded_by=\"{}\" seeds=\"{}\" seed_test_files=\"{}\" tests=\"{}\" reached=\"{}\"{} script_gates_unmodelled=\"{}\""
                      " order=\"evidence\" partners=\"{}\"{}{}>",
-                     ex( cfg.affectedFiles ).c_str(), rw::affectedSeededBy( sel ), seeds.size(), sel.seedTestFiles.size(), testFiles.size(), reach.size(), scriptGatesUnmodelledCount( ing ),
+                     ex( cfg.affectedFiles ).c_str(), rw::affectedSeededBy( sel ), seeds.size(), sel.seedTestFiles.size(), testFiles.size(), reach.size(),
+                     rw::unprovenDefsAttrXml( sel.unprovenDefs ).c_str(),   // H1: beside the zero it qualifies; absent at zero
+                     scriptGatesUnmodelledCount( ing ),
                      rw::testRowPartnerCount( answer.rows ),      // F1: how many rows stand on the name convention alone or as well
                      afRootAttr.c_str(),                          // M12: root= says what every <test p=> below is relative to
                      rw::graphCountFloorAttrXml( g ).c_str()  );   // H5/M15: gauge + marker; tests=/reached= are a transitive-caller walk over the name-based CSR

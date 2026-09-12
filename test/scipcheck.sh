@@ -14,8 +14,10 @@
 #                      precise=1 in the summary
 #   * deterministic (run twice → byte-identical), xmllint-clean well-formed XML
 #   * a CORRUPT (truncated) index → a stderr alert AND output byte-IDENTICAL to the no---scip run
-#     (degrade, never fail); a MISSING index → same
-#   * FUZZ: 20 random truncations / byte-flips of the index → ripwire never crashes (exit 0/degrades)
+#     (degrade, never fail); a MISSING index REFUSES, exit 1 (arm 5b) — and so do an empty file and a
+#     directory (namedfileinputcheck.sh arm F)
+#   * FUZZ: 20 random truncations / byte-flips of the index → ripwire never crashes (exit 0 and degrades, or
+#     the exit-1 refusal when a truncation leaves 0 bytes)
 #   * TYPED RANGES: an index carrying scip.proto's `typed_range` oneof (single_line_range = 8,
 #     multi_line_range = 9) instead of the deprecated `range` joins the same way, and the typed form
 #     outranks a deprecated `range` on the same occurrence regardless of which arrives first

@@ -52,6 +52,14 @@
 #       unproven_defs= with a clause worded for that verb (--path sums both endpoints, E2g), --safe-delete's clause
 #       addresses risk= itself so none-found does not stand as a safety reading (E2f), the existing compact row
 #       fires on all of them (E2h), and a fully-proven file:name or a bare name carries neither (E2e absent rows).
+#   (E2i..E2m) THE SAME RESIDUE ON --uses, --mentions, --verify AND --affected. Each resolves its SYM through the same
+#       resolver and met the same drop as count="0" (--uses, and --verify's uses()/unused()), docs="0" (a doc edge is
+#       stored on a body, never on a declaration), verdict="not-established" (--verify's calls()/reaches()) and tests="0"
+#       reached="0" (--affected). Each now carries unproven_defs= with a clause worded for that verb (E2i); --verify's
+#       rides as its own comment beside a closed legend and addresses verdict= itself (E2k); verify's calls() sums both
+#       symbols and --affected sums its symbol items (E2l); the existing compact row fires and the full clause is
+#       stripped (E2m). The MCP uses/mentions twins resolve through resolveAllByName and refuse a file:name spelling as
+#       CLI-only, so there is no zero there to disclose — asserted, not assumed (E2j). There is no MCP verify/affected.
 #   (F) MUTATION — every assertion SHAPE above is shown able to fail, against hand-built inputs.
 #
 # WHAT (E) AND (E2) EACH COVER, since between them they close what was once a stated gap. (E) reads the
@@ -164,9 +172,17 @@ import re,sys
 m=re.search(r"unproven_defs=K\b.*?(?=counts_floor=|-->)",sys.argv[1],re.S)
 sys.stdout.write(m.group(0) if m else "")' "$1"; }
 
+# 1 when a legend holds the FULL unproven_defs= clause (its `(absent when 0)` opening), else 0 — what (E2m) asserts the
+# compact dialect strips, and what (F) shows able to fail.
+fullClauseIn(){ case "$1" in *'unproven_defs=K (absent when 0)'*) printf 1 ;; *) printf 0 ;; esac; }
+
+# 1 when an MCP transcript's last response is the refusal of a qualified spelling as CLI-only, else 0 — an answer, or an
+# error about something else, is not that refusal (E2j, and its (F) row).
+refusesAsCliOnly(){ case "$( mcpPayload "$1" )" in '__ERROR__:'*'CLI-only'*) printf 1 ;; *) printf 0 ;; esac; }
+
 # ── corpora, built here rather than committed: each is a minimal repro and a committed .h/.cpp fixture
 #    would also join every OTHER gate's view of test/. ────────────────────────────────────────────────
-mkdir -p "$TMP/ns/a" "$TMP/ns/b" "$TMP/free" "$TMP/hdr" "$TMP/split/include" "$TMP/split/src" "$TMP/same" "$TMP/two"
+mkdir -p "$TMP/ns/a" "$TMP/ns/b" "$TMP/free" "$TMP/hdr" "$TMP/split/include" "$TMP/split/src" "$TMP/same" "$TMP/two" "$TMP/combo/test"
 
 # (A) two namespaces, one class name, one shared basename.
 cat > "$TMP/ns/a/Store.h" <<'EOF'
@@ -334,6 +350,33 @@ int beta(int b)
 int useBeta(int b)
 {
     return beta(b);
+}
+EOF
+
+# (E2i) DOCS AND TESTS over (B) and (C1) side by side: a markdown file naming both in backticks (--mentions) and one test
+#       per shape reaching it through its caller (--affected), so the dropping selector and its proven and bare-name
+#       controls answer over ONE tree. The names are disjoint, so neither half's include proof touches the other, and
+#       neither test file is named after a source file, so a control's test row is the caller WALK's, never the partner
+#       convention's.
+cp "$TMP/free/"* "$TMP/hdr/"* "$TMP/combo/"
+cat > "$TMP/combo/NOTES.md" <<'EOF'
+# Notes
+
+The `helper` function doubles its argument, and `putObject` stores a key.
+EOF
+cat > "$TMP/combo/test/test_uses_helper.cpp" <<'EOF'
+int unrelatedCaller(int a);
+int testUsesHelper()
+{
+    return unrelatedCaller(3);
+}
+EOF
+cat > "$TMP/combo/test/test_drive_store.cpp" <<'EOF'
+class Store;
+int driveTheStore(Store& s);
+int testDriveStore(Store& s)
+{
+    return driveTheStore(s);
 }
 EOF
 
@@ -752,6 +795,145 @@ for pair in "e2_sd_cmp.xml:safe-delete" "e2_imp_cmp.xml:impact" "e2_pth_cmp.xml:
     fi
 done
 
+# ── (E2i..E2m) THE SAME RESIDUE ON --uses, --mentions, --verify AND --affected ─────────────────────────────────────────
+# Four more verbs resolve SYM through the same resolver, and on the same repros answered the drop as silence:
+# --uses=api.h:helper read count="0" (a call site is kept only where it resolves to a def in defs=, and the one def
+# kept is the bodyless declaration), --mentions read docs="0" (graph.h stores a doc edge on a body, never on a
+# declaration), --verify's uses()/unused() read count="0" and calls()/reaches() verdict="not-established" with limit=
+# naming the model floor rather than the drop, and --affected read tests="0" reached="0" — the zero on the verb whose
+# answer is the list of tests to run. Same four questions per verb as (E2e): PREMISE, PRESENT, DEFINED, ABSENT.
+# Dialects: --uses has XML and --format=columnar (its --json refuses); the other three have XML alone.
+
+echo
+echo "=== (E2i) --uses, --mentions, --verify and --affected carry the residue beside their zero ==="
+run  "$TMP/free"  --uses=api.h:helper                                >"$TMP/e2_us.xml"
+run2 "$TMP/free"  --uses=api.h:helper --format=columnar              >"$TMP/e2_us_col.xml"
+run  "$TMP/combo" --mentions=api.h:helper                            >"$TMP/e2_mn.xml"
+run  "$TMP/free"  '--verify=uses(api.h:helper)'                      >"$TMP/e2_vf_uses.xml"
+run  "$TMP/free"  '--verify=unused(api.h:helper)'                    >"$TMP/e2_vf_unused.xml"
+run  "$TMP/free"  '--verify=calls(unrelatedCaller,api.h:helper)'     >"$TMP/e2_vf_calls.xml"
+run  "$TMP/free"  '--verify=reaches(api.h:helper,"other.cpp")'       >"$TMP/e2_vf_reaches.xml"
+run  "$TMP/combo" --affected=api.h:helper                            >"$TMP/e2_af.xml"
+run  "$TMP/hdr"   --uses=Store.h:putObject                           >"$TMP/e2_us_clean.xml"
+run  "$TMP/free"  --uses=helper                                      >"$TMP/e2_us_bare.xml"
+run  "$TMP/combo" --mentions=Store.h:putObject                       >"$TMP/e2_mn_clean.xml"
+run  "$TMP/combo" --mentions=helper                                  >"$TMP/e2_mn_bare.xml"
+run  "$TMP/hdr"   '--verify=uses(Store.h:putObject)'                 >"$TMP/e2_vf_uses_clean.xml"
+run  "$TMP/free"  '--verify=uses(helper)'                            >"$TMP/e2_vf_uses_bare.xml"
+run  "$TMP/hdr"   '--verify=calls(driveTheStore,Store.h:putObject)'  >"$TMP/e2_vf_calls_clean.xml"
+run  "$TMP/free"  '--verify=calls(unrelatedCaller,helper)'           >"$TMP/e2_vf_calls_bare.xml"
+run  "$TMP/hdr"   '--verify=reaches(Store.h:putObject,"Caller.cpp")' >"$TMP/e2_vf_reaches_clean.xml"
+run  "$TMP/free"  '--verify=reaches(helper,"other.cpp")'             >"$TMP/e2_vf_reaches_bare.xml"
+run  "$TMP/combo" --affected=Store.h:putObject                       >"$TMP/e2_af_clean.xml"
+run  "$TMP/combo" --affected=helper                                  >"$TMP/e2_af_bare.xml"
+
+e2Present "(E2i) --uses=api.h:helper"                          "$TMP/e2_us.xml"         uses     2 count     0
+e2Present "(E2i) --uses=api.h:helper --format=columnar"        "$TMP/e2_us_col.xml"     uses     2 count     0
+e2Present "(E2i) --mentions=api.h:helper"                      "$TMP/e2_mn.xml"         mentions 2 docs      0
+e2Present "(E2i) --verify=uses(api.h:helper)"                  "$TMP/e2_vf_uses.xml"    verify   2 count     0
+e2Present "(E2i) --verify=unused(api.h:helper)"                "$TMP/e2_vf_unused.xml"  verify   2 count     0
+e2Present "(E2i) --verify=calls(unrelatedCaller,api.h:helper)" "$TMP/e2_vf_calls.xml"   verify   2 verdict   not-established
+e2Present "(E2i) --verify=reaches(api.h:helper,\"other.cpp\")" "$TMP/e2_vf_reaches.xml" verify   2 witnesses 0
+e2Present "(E2i) --affected=api.h:helper"                      "$TMP/e2_af.xml"         affected 2 tests     0
+
+e2Absent "(E2i) --uses=Store.h:putObject, every candidate proven"           "$TMP/e2_us_clean.xml"         uses     count     1
+e2Absent "(E2i) --uses=helper, bare name"                                   "$TMP/e2_us_bare.xml"          uses     count     2
+e2Absent "(E2i) --mentions=Store.h:putObject, every candidate proven"       "$TMP/e2_mn_clean.xml"         mentions docs      1
+e2Absent "(E2i) --mentions=helper, bare name"                               "$TMP/e2_mn_bare.xml"          mentions docs      1
+e2Absent "(E2i) --verify=uses(Store.h:putObject), every candidate proven"   "$TMP/e2_vf_uses_clean.xml"    verify   count     1
+e2Absent "(E2i) --verify=uses(helper), bare name"                           "$TMP/e2_vf_uses_bare.xml"     verify   count     2
+e2Absent "(E2i) --verify=calls(driveTheStore,Store.h:putObject), proven"    "$TMP/e2_vf_calls_clean.xml"   verify   verdict   confirmed
+e2Absent "(E2i) --verify=calls(unrelatedCaller,helper), bare name"          "$TMP/e2_vf_calls_bare.xml"    verify   verdict   confirmed
+e2Absent "(E2i) --verify=reaches(Store.h:putObject,\"Caller.cpp\"), proven" "$TMP/e2_vf_reaches_clean.xml" verify   witnesses 1
+e2Absent "(E2i) --verify=reaches(helper,\"other.cpp\"), bare name"          "$TMP/e2_vf_reaches_bare.xml"  verify   witnesses 1
+e2Absent "(E2i) --affected=Store.h:putObject, every candidate proven"       "$TMP/e2_af_clean.xml"         affected tests     1
+e2Absent "(E2i) --affected=helper, bare name"                               "$TMP/e2_af_bare.xml"          affected tests     1
+
+echo
+echo "=== (E2j) the MCP uses and mentions twins refuse a file:name spelling — there is no zero there to disclose ==="
+# Both twins resolve through resolveAllByName, which never runs the widening, and both refuse a qualified spelling as
+# CLI-only instead of answering it. A twin that began to ANSWER api.h:helper would answer from the same declaration and
+# would owe the attribute the CLI now carries, so the refusal is asserted rather than left as a sentence in a header.
+cp -R "$TMP/combo" "$TMP/mcp_combo" || no "(E2j) could not copy the corpus for the MCP twins"
+mcpTranscript "$TMP/e2_mcp_us.rpc"      uses     "" "path=$TMP/mcp_combo" "symbol=api.h:helper"
+mcpTranscript "$TMP/e2_mcp_mn.rpc"      mentions "" "path=$TMP/mcp_combo" "symbol=api.h:helper"
+mcpTranscript "$TMP/e2_mcp_mn_bare.rpc" mentions "" "path=$TMP/mcp_combo" "symbol=helper"
+# CONTROL FIRST: the same server answers the bare name, so a refusal below is about the spelling, not a dead transcript.
+P_MN_BARE="$( mcpPayload "$TMP/e2_mcp_mn_bare.rpc" )"
+case "$P_MN_BARE" in
+    '__ERROR__:'*|'') no "(E2j) control broken — MCP mentions symbol=helper did not answer ($( printf '%s' "$P_MN_BARE" | head -c 160 )); the refusal rows would be about a server that answers nothing" ;;
+    *'"docs":1'*)
+        ok "(E2j) control: MCP mentions symbol=helper answers \"docs\":1"
+        for n in e2_mcp_us e2_mcp_mn; do
+            if [ "$( refusesAsCliOnly "$TMP/$n.rpc" )" = 1 ]; then
+                ok "(E2j) $n: the twin refuses api.h:helper as a CLI-only spelling"
+            else
+                no "(E2j) $n: the twin no longer refuses api.h:helper ($( mcpPayload "$TMP/$n.rpc" | head -c 160 )) — an answer comes from the declaration and owes unproven_defs="
+            fi
+        done ;;
+    *) no "(E2j) control broken — MCP mentions symbol=helper answered without \"docs\":1: $( printf '%s' "$P_MN_BARE" | head -c 160 )" ;;
+esac
+
+echo
+echo "=== (E2k) --verify's verdict: not-established beside a residue is qualified where it is defined ==="
+# verdict= keeps its three values (the claim grammar and --help close the set). limit= names the MODEL's floor, which is
+# a different reason from a selector that dropped definitions, and a reader acts on the two differently — so the clause
+# that defines unproven_defs= addresses verdict= and not-established itself, asserted on the clause's own span. --verify's
+# legend is one closed literal, so the clause rides as its own comment; legendOf reads the whole leading run.
+R_VF="$( rootEl "$TMP/e2_vf_uses.xml" verify )"
+if nonempty "(E2k) no <verify> root for uses(api.h:helper)" "$R_VF"; then
+    CL_VF="$( clauseOf "$( legendOf "$TMP/e2_vf_uses.xml" )" )"
+    if [ "$( attr "$R_VF" verdict )" != "not-established" ]; then
+        no "(E2k) premise broken — verdict=\"$( attr "$R_VF" verdict )\", expected not-established; the verdict arm would be about another value"
+    elif [ -z "$( attr "$R_VF" unproven_defs )" ]; then
+        no "(E2k) verdict=\"not-established\" stands with no unproven_defs= beside it — limit= names the model floor, never the two definitions nobody read"
+    else
+        case "$CL_VF" in
+            *'verdict='*'not-established'*) ok "(E2k) the unproven_defs= clause addresses verdict= and not-established within its own span" ;;
+            *)                              no "(E2k) the unproven_defs= clause never names verdict= and not-established: ${CL_VF:-<no clause>}" ;;
+        esac
+    fi
+fi
+
+echo
+echo "=== (E2l) --verify=calls sums both symbols' residue; --affected sums its symbol items and a path item adds nothing ==="
+# With (E2i)'s calls(unrelatedCaller,api.h:helper) (the TO symbol alone, 2), these tell a sum from src-only, dst-only and
+# double counting; the --affected pair tells a per-item sum from first-item-only and from a path item that counts.
+run "$TMP/two" '--verify=calls(a.h:alpha,b.h:beta)' >"$TMP/e2_vf_two_both.xml"
+run "$TMP/two" '--verify=calls(a.h:alpha,useBeta)'  >"$TMP/e2_vf_two_from.xml"
+run "$TMP/two" --affected=a.h:alpha,b.h:beta         >"$TMP/e2_af_two_both.xml"
+run "$TMP/two" --affected=x.cpp,a.h:alpha            >"$TMP/e2_af_two_mixed.xml"
+e2Present "(E2l) --verify=calls(a.h:alpha,b.h:beta) (one dropped per symbol)" "$TMP/e2_vf_two_both.xml"  verify   2 verdict not-established
+e2Present "(E2l) --verify=calls(a.h:alpha,useBeta) (the FROM symbol alone)"   "$TMP/e2_vf_two_from.xml"  verify   1 verdict not-established
+e2Present "(E2l) --affected=a.h:alpha,b.h:beta (one dropped per item)"        "$TMP/e2_af_two_both.xml"  affected 2 tests   0
+e2Present "(E2l) --affected=x.cpp,a.h:alpha (the path item adds nothing)"     "$TMP/e2_af_two_mixed.xml" affected 1 tests   0
+
+echo
+echo "=== (E2m) under the compact legend, the existing unproven_defs row fires on the four roots and the full clause goes ==="
+# No compact term was added: the row compactlegend.h already carries reads unproven_defs= off any root's head. --verify's
+# clause is the one that could survive, being its own comment rather than a sentence inside a stripped legend, so every
+# document here is also asserted to have lost the full clause.
+run2 "$TMP/free"  --uses=api.h:helper           --legend=compact >"$TMP/e2_us_cmp.xml"
+run2 "$TMP/combo" --mentions=api.h:helper       --legend=compact >"$TMP/e2_mn_cmp.xml"
+run2 "$TMP/free"  '--verify=uses(api.h:helper)' --legend=compact >"$TMP/e2_vf_cmp.xml"
+run2 "$TMP/combo" --affected=api.h:helper       --legend=compact >"$TMP/e2_af_cmp.xml"
+for pair in "e2_us_cmp.xml:uses" "e2_mn_cmp.xml:mentions" "e2_vf_cmp.xml:verify" "e2_af_cmp.xml:affected"; do
+    f="${pair%%:*}"; el="${pair#*:}"
+    R="$( rootEl "$TMP/$f" "$el" )"
+    nonempty "(E2m) no <$el> root in $f" "$R" || continue
+    L="$( legendOf "$TMP/$f" )"
+    if [ -z "$( attr "$R" unproven_defs )" ]; then
+        no "(E2m) $f: the compact <$el> root carries no unproven_defs= — nothing for the compact reading to define"
+    elif [ "$( fullClauseIn "$L" )" = 1 ]; then
+        no "(E2m) $f: the FULL unproven_defs= clause survived into the compact dialect beside its compact reading"
+    else
+        case "$L" in
+            *'unproven_defs=K:'*) ok "(E2m) $f: <$el unproven_defs=\"$( attr "$R" unproven_defs )\">, the compact legend reads it, and the full clause is gone" ;;
+            *)                    no "(E2m) $f: <$el> carries unproven_defs= under the compact legend with no unproven_defs=K: reading" ;;
+        esac
+    fi
+done
+
 echo
 echo "=== (F) MUTATION — every assertion shape above is shown able to fail ==="
 # (A)/(B) shape: the row-name reader must SEE a wrong caller when one is present…
@@ -825,6 +1007,23 @@ case "$( clauseOf "$L_OUT" )" in *'risk='*) M_OUT=1 ;; *) M_OUT=0 ;; esac
 [ "$M_IN" = 1 ] && [ "$M_OUT" = 0 ] \
     && ok "(F) E2f-shape: clauseOf reads risk= inside the clause and does not credit one outside it" \
     || no "(F) clauseOf cannot tell a clause that addresses risk= from a legend that merely contains it (in=$M_IN out=$M_OUT)"
+# (E2j) shape: only a refusal of the spelling as CLI-only counts — an ANSWER (the silent zero itself) and an error about
+# something else must both read as "not refused", or the arm would pass on a twin that answers.
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{}}' \
+    '{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"qualified file:name selectors are CLI-only on this verb"}}' >"$TMP/m_e2j_ref.rpc"
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{}}' \
+    '{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"<uses of=\"api.h:helper\" defs=\"1\" count=\"0\"></uses>"}]}}' >"$TMP/m_e2j_ans.rpc"
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{}}' \
+    '{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"unknown field: legend"}}' >"$TMP/m_e2j_err.rpc"
+[ "$( refusesAsCliOnly "$TMP/m_e2j_ref.rpc" )" = 1 ] && [ "$( refusesAsCliOnly "$TMP/m_e2j_ans.rpc" )" = 0 ] && [ "$( refusesAsCliOnly "$TMP/m_e2j_err.rpc" )" = 0 ] \
+    && ok "(F) E2j-shape: refusesAsCliOnly reads the CLI-only refusal, and neither an answer nor another error" \
+    || no "(F) refusesAsCliOnly cannot tell the refusal from an answer or another error — (E2j) would pass on a twin that answers"
+# (E2m) shape: a compact leading run that KEPT the full clause beside its compact reading must be told from one that did not.
+printf '<!-- ripwire verify ripwire.verify/v1: x. unproven_defs=K: K defs. --><!-- ripwire verify: unproven_defs=K (absent when 0) counts --><verify unproven_defs="2"></verify>' >"$TMP/m_e2m_kept.xml"
+printf '<!-- ripwire verify ripwire.verify/v1: x. unproven_defs=K: K defs. --><verify unproven_defs="2"></verify>' >"$TMP/m_e2m_gone.xml"
+[ "$( fullClauseIn "$( legendOf "$TMP/m_e2m_kept.xml" )" )" = 1 ] && [ "$( fullClauseIn "$( legendOf "$TMP/m_e2m_gone.xml" )" )" = 0 ] \
+    && ok "(F) E2m-shape: a full clause kept in a compact leading run IS detected, and a compact reading alone is not" \
+    || no "(F) fullClauseIn cannot tell a compact legend that kept the full clause from one that dropped it"
 # VACUITY guard itself. Run in a subshell so it cannot set fail.
 if ( nonempty "probe" "" >/dev/null 2>&1 ); then
     no "(F) nonempty() accepts an empty capture — every arm's vacuity guard is inert"
@@ -844,7 +1043,10 @@ if command -v xmllint >/dev/null 2>&1; then
     # The e2_* documents are the ones whose legends grew a clause — an XML comment may not hold a double hyphen (G4).
     if xmllint --noout "$TMP/a_far.xml" 2>/dev/null && xmllint --noout "$TMP/c_hdr_hdr.xml" 2>/dev/null \
        && xmllint --noout "$TMP/e2_sd.xml" 2>/dev/null && xmllint --noout "$TMP/e2_imp.xml" 2>/dev/null \
-       && xmllint --noout "$TMP/e2_pth.xml" 2>/dev/null && xmllint --noout "$TMP/e2_mcp_imp.xml" 2>/dev/null; then
+       && xmllint --noout "$TMP/e2_pth.xml" 2>/dev/null && xmllint --noout "$TMP/e2_mcp_imp.xml" 2>/dev/null \
+       && xmllint --noout "$TMP/e2_us.xml" 2>/dev/null && xmllint --noout "$TMP/e2_us_col.xml" 2>/dev/null \
+       && xmllint --noout "$TMP/e2_mn.xml" 2>/dev/null && xmllint --noout "$TMP/e2_vf_calls.xml" 2>/dev/null \
+       && xmllint --noout "$TMP/e2_af.xml" 2>/dev/null; then
         ok "xml well-formed"
     else
         no "xml malformed"

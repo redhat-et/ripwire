@@ -308,18 +308,32 @@ inline void splitNoteTail( std::string_view rest, std::string& text, std::string
     branch = std::string( tail.substr( t4 + 1 ) );
 }
 
+// THE ONE PLACE THE NOTES SIDECAR IS READ — openNotesSidecar's other half, with the same answer to a link.
+//
+// A link at `.ripwire_notes` used to be followed on the way in, so the link chose what was read as notes. The
+// read now refuses a link with
+// the same O_NOFOLLOW the write uses, one syscall with nothing in front of it to race; why an in-tree link is
+// refused too, rather than followed the way the crawl follows one, is round 3 of src/pathguard.h. Refused or
+// absent, the caller reads no notes, and only the refusal says anything.
+inline rw::pathguard::NoFollowRead readNotesSidecar( const std::string& path )
+{
+    rw::pathguard::NoFollowRead sidecar = rw::pathguard::openNoFollowRead( "the field-notes sidecar", path );
+    if( sidecar.refused ) { DEGRADED_PATH_ALERT( "notes: refusing to read the notes sidecar through a symlink" ); }
+    return sidecar;
+}
+
 // tolerant read (readAckRecords precedent): skip blank/'#'/CRLF; a line missing either of the first two tabs
 // degrades+skips. splitNoteTail (above) owns the legacy-vs-stamped decision for everything after them.
 inline std::vector<Note> readNotes( const std::string& path )
 {
-    std::vector<Note> notes;
-    std::ifstream f( path );
-    if( !f )
+    std::vector<Note>           notes;
+    rw::pathguard::NoFollowRead sidecar = readNotesSidecar( path );
+    if( !sidecar.opened )
     {
         return notes;
     }
     std::string line;
-    while( std::getline( f, line ) )
+    while( sidecar.readLine( line ) )
     {
         while( !line.empty() && ( line.back() == '\r' || line.back() == '\n' ) )
         {
