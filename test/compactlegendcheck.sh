@@ -27,10 +27,12 @@
 # on the ripwire tree). MCP arm (M): edit_check with legend:"compact" answers in ≤ 900 B on a clean tree.
 # CONDITIONAL arm (D): an absent-at-zero or form-conditional attribute (declined_calls=, unproven_defs=, bodyless_defs=,
 # the member form, the multi-root <root label=> rows, --lego's caveat=; on the map family and --impact: pr_iters=,
-# pr_converged=, the map header's gauges, --around's defs=, --rank-by's rank_by=/window=) is DEFINED by the compact legend
-# of a document that carries it, and by none that does not. STRUCTURAL arm (S): every conditional attribute the
-# graphlegend.h helper family emits, the PageRank disclosure, and every conditional hdr: field of the map header, read
-# from source, has a compact reading — so the next one cannot land undefined.
+# pr_converged=, the map header's gauges, --around's defs=, --rank-by's rank_by=/window=; in the third sweep: --tree's
+# files=, --zoom's root counts and <module children=>, churn-decay's <recent>, the map rows' lpin=/overloads=/prov=) is
+# DEFINED by the compact legend of a document that carries it, and by none that does not. STRUCTURAL arm (S): every
+# conditional attribute the graphlegend.h helper family emits, the PageRank disclosure, every conditional hdr: field of
+# the map header, and every absence-marked row field of the map legend, read from source, has a compact reading — so the
+# next one cannot land undefined.
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/compactlegendcheck.sh
 
@@ -761,8 +763,65 @@ for v in "--callers=distance" "--callees=distance" "--impact=distance" "--uses=d
 done
 [ "$d7bad" -eq 0 ] && [ "$d7n" -eq 6 ] && ok "(D7) mirror: no conditional reading prints on $d7n single-root answers that lack its attribute (incl. --communities' <community label=>)"
 
+# ── THE THIRD SWEEP (2026-09-12): the verbs #185's last agent listed but did not fix, each RUN before any reading landed ──
+# (D13) UNCONDITIONAL root vocabulary that the full legend defines and the compact document did not: --tree's files= (the
+# indexed corpus, beside the files_unlisted= its purpose already named), and --zoom's symbols=/isolated=/top_modules= (the
+# identity its full legend says reconciles exactly) and levels_shown=. They ride EVERY answer of their root, so each reading
+# lives in that root's purpose line, where files_unlisted= and levels= already were: present exactly when the root is.
+# (D14)..(D16) CONDITIONAL fields, each a present-only term: --zoom's <module children=> (only a module AT the levels_shown=
+# cut, so the row lowers the cut to 1 on test/chafix, a two-level hierarchy), rank_by=churn-decay's <recent n= of=> file rows
+# with <rc age_d= w=> (single-root only), and the map's absent-when-default row fields lpin=, overloads=, prov= (defined only
+# inside the always-on `<!-- ripwire v1` legend). test/declinefix and test/lpinfix are (D10)'s own corpora: their maps
+# carried those fields undefined while the (D10) rows passed on the header gauges alone.
+# RED on 3c89ac0b: all 12 specs below FAILed, for example
+#   FAIL (D13) --zoom (its root's counts): symbols="14" is carried but the compact legend never defines it
+#   FAIL (D14) --zoom --zoom-levels=1 over test/chafix (modules AT the depth cut): children="2" is carried but the compact legend never defines it
+#   FAIL (D15) --rank-by=churn-decay (the <recent> file rows): of="6" is carried but the compact legend never defines it
+#   FAIL (D16) the map over test/declinefix (merged overloads, split edges): prov="split" is carried but the compact legend never defines it
+# NOT FIXED, stopped on the (U) 400 B pin: --communities' drill= and isolated=. Its compact prose is 385 B on this gate's
+# repo; the shortest honest pair ("drill= takes an id=; isolated= edgeless symbols") costs 49 B (434 B), and even
+# "drill=/isolated=: id= verb/edgeless" costs 37 B (422 B). No ceiling is raised for it.
+condPair D13 "--tree (files= on its root)" "$FIX" "--tree" tree:files
+condPair D13 "--zoom (its root's counts)" "$FIX" "--zoom" zoom:symbols zoom:isolated zoom:top_modules zoom:levels_shown
+[ -d "$ROOT/test/chafix" ] || no "(D14) fixture missing: test/chafix — its children= row would be vacuous"
+condPair D14 "--zoom --zoom-levels=1 over test/chafix (modules AT the depth cut)" "$ROOT/test/chafix" "--zoom --zoom-levels=1" module:children
+condPair D15 "--rank-by=churn-decay (the <recent> file rows)" "$REPO" "--rank-by=churn-decay" recent:of rc:age_d rc:w
+condPair D16 "the map over test/declinefix (merged overloads, split edges)" "$DECL" "" s:overloads c:prov
+condPair D16 "the map over test/lpinfix (a locality-pinned call)" "$LPIN" "" s:lpin
+
+# (D17) THE MIRROR for those readings, on answers chosen for what they LACK, each lack asserted before it is relied on:
+# --around=distance carries of= on its <r> root (the seed) and no <recent>; --rank-by=churn is the sibling ranker with no
+# <recent>; --zoom on this fixture has ONE level, so no module sits at a cut; the flagless map here has no merged overload,
+# split edge or pinned call; and --communities carries isolated=/symbols= on ITS root, which must not pull in --zoom's
+# identity. The needles are the readings' own openers, so a reading printed on the wrong document is caught however its
+# NAME is spelled elsewhere in that legend (of= is a word of --around's own purpose line). Green on 3c89ac0b by
+# construction, like (D7)/(D12). Its failing state: with a reading spliced into four real compact legends from the fix
+# (<recent n= of=> into --around, children= into --zoom, prov= into the map, --zoom's identity into --communities), this
+# check fired on all four, and on none of the unspliced four (landing commit).
+[ "$( rrun --around=distance --legend=compact | grep -c '<r [^>]* of="' )" -ge 1 ] \
+    || no "(D17) control: --around=distance carries no <r of=> any more, so it no longer proves the <recent of=> reading is element-qualified"
+[ "$( rrun --zoom --legend=compact | grep -c ' children="' )" = 0 ] \
+    || no "(D17) control: --zoom on this fixture now carries children=, so it no longer proves the children= reading is present-only"
+d17bad=0; d17n=0
+for v in "--around=distance" "--rank-by=churn" "--zoom" "" "--communities"; do
+    rrun $v --legend=compact >"$TMP/d17.c"
+    if [ ! -s "$TMP/d17.c" ]; then
+        no "(D17) ${v:-the flagless map} --legend=compact answered nothing — its mirror row would be vacuous"; d17bad=1; continue
+    fi
+    d17n=$(( d17n + 1 ))
+    for pair in "children=K:@module:children" "<recent n= of=>@recent:of" "lpin=K:@lpin" "overloads=N:@overloads" "prov=scip@c:prov" \
+                "symbols= = isolated=@zoom:top_modules" "of files= indexed@tree:files"; do
+        needle="${pair%%@*}"; spec="${pair#*@}"
+        if [ "$( ca mentions "$TMP/d17.c" "$needle" )" = 1 ] && [ "$( ca carries "$TMP/d17.c" "$spec" )" != 1 ]; then
+            no "(D17) ${v:-the flagless map}: the compact legend spells '$needle' but the document carries no ${spec#*:}= — a reading of a field that is not there"
+            d17bad=1
+        fi
+    done
+done
+[ "$d17bad" -eq 0 ] && [ "$d17n" -eq 5 ] && ok "(D17) mirror: no third-sweep reading prints on $d17n answers that lack its field (--around's <r of=>, churn, a one-level zoom, the plain map, --communities' isolated=/symbols=)"
+
 echo
-echo "=== (S) STRUCTURAL: every conditional attribute the graphlegend.h family, the PageRank disclosure and the map header emit has a compact reading ==="
+echo "=== (S) STRUCTURAL: every conditional attribute the graphlegend.h family, the PageRank disclosure, the map header and the map's rows emit has a compact reading ==="
 # The (D) rows prove today's members; this row keeps the NEXT one from landing undefined. The population is READ FROM
 # SOURCE, never listed here, from the places a conditional attribute is spelled:
 #   1. every `countAttrXmlOrEmpty( "NAME"` call, tree-wide — the one absent-at-zero spelling graphlegend.h mandates;
@@ -774,6 +833,10 @@ echo "=== (S) STRUCTURAL: every conditional attribute the graphlegend.h family, 
 #      always-on `<!-- ripwire v1` legend. pr_iters=/pr_converged= need a row that reads the head; a header field needs a
 #      row that reads the kept `<!-- files=` comment (MapHeaderRead::Only/Also), because a head-only row never sees an
 #      unquoted field — and a header-ONLY row is not coverage for a (1)/(2) name, which is a quoted attribute.
+#   4. (2026-09-12, the third sweep) every UNPREFIXED row field of that same always-on `<!-- ripwire v1` legend whose clause
+#      carries an absence marker (`absent-if-N`, `absent=`): lpin= and overloads= on <s>, prov= on <c>. Its row must READ
+#      THE PAYLOAD (wholeDoc, or an onTag element): a head-only row never sees an <s>/<c> below the first child, and a
+#      header-only row reads the `<!-- files=` comment alone.
 # Each (1)/(2) name must have a kCompactCompletenessTerms row, a paging-window name, or the *_capped rule (all read from
 # src/compactlegend.h). The one other way to be defined is a full clause the compact layer KEEPS because it is not
 # prose-prefixed — --skipped's `<!-- why=…` health comments — and that is never taken on trust: each such name is run
@@ -791,6 +854,11 @@ echo "=== (S) STRUCTURAL: every conditional attribute the graphlegend.h family, 
 # RED on 34a97f66 for population 3: pr_iters=, pr_converged= and all seven hdr: fields FAILed. Shown able to fail on the
 # fix: deleting the declined row, making pr_iters header-only, or dropping ignored_dirs' header read each went red on
 # exactly that name, and on nothing else (landing commit).
+# Population 4 does NOT see unconditional root vocabulary (--tree's files=, --zoom's symbols=/isolated=/top_modules=/
+# levels_shown=), nor a conditional element whose clause is not a marked field of that legend (--zoom's children=,
+# churn-decay's <recent>): (D13)..(D15) guard those. RED on 3c89ac0b: lpin=, overloads= and prov= FAILed. Shown able to fail
+# on the fix: deleting the prov row, making overloads head-only, or making lpin header-only each went red on exactly that
+# name, and on nothing else (landing commit).
 cat > "$TMP/struct.py" <<'PY'
 import os, re, sys
 root = sys.argv[1]
@@ -919,6 +987,33 @@ for attr in sorted( hdr ):
         print( "FAIL|%s= (%s) has no kCompactCompletenessTerms row that reads the map header — a compact map keeps the field and drops its clause" % ( attr, hdr[ attr ] ) )
 if len( mapCovered ) == len( prs ) + len( hdr ):
     print( "PASS|map family: %d of %d PageRank attributes and conditional map-header fields have a compact reading: %s" % ( len( mapCovered ), len( prs ) + len( hdr ), " ".join( mapCovered ) ) )
+
+# 4. THE MAP'S ROW FIELDS (2026-09-12, the third sweep): every UNPREFIXED field of the always-on `<!-- ripwire v1` legend
+#    whose clause carries an absence marker (`absent-if-N`, `absent=`) — lpin= and overloads= on <s>, prov= on <c>. That
+#    legend is prose under compact, and a row field rides deep in the payload, so its term must READ the payload (wholeDoc,
+#    or an onTag element): a head-only row never sees an <s>/<c> below the first child, and a header row sees `<!-- files=`.
+nextField = re.compile( r"(?<= )(?:hdr:|r:)?[a-z][a-z0-9_]*=| -->" )
+rowPop = {}
+for s in slits:
+    if not s.startswith( "<!-- ripwire v1" ):
+        continue
+    for m in re.finditer( r"(?<= )([a-z][a-z0-9_]*)=", s ):
+        nxt    = nextField.search( s, m.end() )
+        clause = s[ m.end():( nxt.start() if nxt else len( s ) ) ]
+        if "absent-if-" in clause or "absent=" in clause:
+            rowPop.setdefault( m.group( 1 ), "serialize.h's always-on map legend marks %s= absent at its default" % m.group( 1 ) )
+rowTerms = set( clits[ int( k ) ] for k in re.findall( r"\{\s*\"S(\d+)\"\s*,\s*\"S\d+\"\s*,\s*true\b", rows ) )
+if not { "lpin", "overloads", "prov" } <= set( rowPop ):
+    print( "FAIL|the map row-field population read from src/serialize.h lacks a known member (got: %s) — the reader broke" % " ".join( sorted( rowPop ) ) )
+else:
+    rowCovered = []
+    for attr in sorted( rowPop ):
+        if attr in rowTerms:
+            rowCovered.append( attr + "=" )
+        else:
+            print( "FAIL|%s= (%s) has no kCompactCompletenessTerms row that reads the payload (wholeDoc or onTag) — a compact map carrying it leaves it undefined" % ( attr, rowPop[ attr ] ) )
+    if len( rowCovered ) == len( rowPop ):
+        print( "PASS|map rows: %d of %d absence-marked row fields of the always-on legend have a payload-reading compact term: %s" % ( len( rowCovered ), len( rowPop ), " ".join( rowCovered ) ) )
 print( "INFO|outside that population by construction (unconditional on every map, no absent-if-0 marker): %s — still undefined under compact, see the arm's comment" % " ".join( a + "=" for a in sorted( always ) ) )
 PY
 python3 "$TMP/struct.py" "$ROOT" >"$TMP/s.rows" 2>"$TMP/s.err" || no "(S) the source reader crashed: $( head -c 300 "$TMP/s.err" )"

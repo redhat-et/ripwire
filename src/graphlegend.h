@@ -34,6 +34,7 @@
 //
 // Gate: test/floormarkcheck.sh (all five verbs, CLI ≡ MCP wording, and the retired absolutism absent).
 
+#include <array>
 #include <cstdint>
 #include <utility>
 #include <cstdio>
@@ -528,28 +529,49 @@ inline constexpr const char* kUnprovenDefsPathLegend =
     "unproven_defs=K (absent when 0) counts same-named DEFINITIONS a file:name endpoint found and could not tie to the file it named, summed over from= and to= (a bare NAME endpoint never adds to it): they are NOT in from_defs= or to_defs=, the search neither started nor ended at them, and so reachable= and hops= say nothing about a path through them. ";
 inline constexpr const char* kUnprovenDefsSafeDeleteLegend =
     "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: they are NOT in defs=, and callers=, impact_reaches=, uses=, the tested partition and dead_code_candidate= were all read without them. So risk= describes defs= alone, and risk=none-found beside unproven_defs= is an INCOMPLETE read, never a sign that the name can go. ";
+// AND ON uses, mentions, verify AND affected (decltodefcheck arms E2i..E2m). The same resolver serves four more readers,
+// and on the same repro each met the drop as a zero with nothing beside it: uses count="0" (a call site is kept only where
+// it resolves to a def in defs=), mentions docs="0" (graph.h stores a doc edge on a body, never on a declaration, so the
+// declaration that stays carries none), verify count="0" or verdict="not-established" with limit= naming the model's
+// floor instead, and affected tests="0" reached="0". Same attribute, same tail, one clause each for what is missing.
+// verify's legend is a closed literal (verify.h kVerifyLegend), so runVerify wraps its clause as its own comment.
+inline constexpr const char* kUnprovenDefsUsesLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: they are NOT in defs=, so a role=\"call\" site whose call resolves to one of them is in neither count= nor the rows (call_sites_of_name= still counts it). ";
+inline constexpr const char* kUnprovenDefsMentionsLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: they are NOT in defs=, and a doc edge is stored on a definition's body, never on a declaration, so a doc whose edge lands only on them is in neither docs=, sections= nor the rows. ";
+inline constexpr const char* kUnprovenDefsVerifyLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS a file:name symbol argument found and could not tie to the file it named, summed over both symbols of calls(): they are NOT in defs=, from_defs=, to_defs= or target_defs=, so no call path, witness or role=\"call\" site that reaches only them was read. verdict=confirmed or refuted still stands on the evidence it prints; verdict=not-established beside unproven_defs= is an INCOMPLETE read that limit= does not name, never a sign the claim is false. ";
+inline constexpr const char* kUnprovenDefsAffectedLegend =
+    "unproven_defs=K (absent when 0) counts same-named DEFINITIONS a file:name item found and could not tie to the file it named, summed item by item (a path item adds 0): they are NOT in seeds=, the caller walk never started from them, and so a test that reaches only them is in neither tests=, reached= nor the rows. A bare NAME item that also matches an indexed path is read as that path. ";
 inline constexpr const char* kUnprovenDefsProofTail =
     "A declaration widens to the definitions it stands for only where the definition is IN the named file, or its own file includes the named file, resolved path-precisely; a same-named body anywhere else is not evidence and is never served. Widen the file:name spelling to the bare NAME, or to Scope::name, to include them. ";
 
+// Append-only: unprovenDefsVerbLegend below indexes its clause rows by this order.
 enum class UnprovenDefsVerb : std::uint8_t
 {
     Impact,
     Path,
     SafeDelete,
+    Uses,
+    Mentions,
+    Verify,
+    Affected,
 };
 
 // `on` is the emitter's own `unprovenDefs > 0`, never a re-derivation; "" otherwise, so an answer that dropped
 // nothing stays byte-identical on every one of these verbs.
+//
+// ONE ROW PER UnprovenDefsVerb, in enum order. The rows are spelled INSIDE the arm that selects them rather than in a
+// named table: test/compactlegendcheck.sh (S) counts a clause as conditionally emitted when a ?: arm names it, and a
+// table declared elsewhere would take every row out of its population. A ternary chain names them too, at a nesting
+// that grows by one with every verb.
 inline std::string unprovenDefsVerbLegend( UnprovenDefsVerb verb, bool on )
 {
-    if( !on )
-    {
-        return {};
-    }
-    const char* const clause = verb == UnprovenDefsVerb::Impact ? kUnprovenDefsImpactLegend
-                               : verb == UnprovenDefsVerb::Path ? kUnprovenDefsPathLegend
-                                                                : kUnprovenDefsSafeDeleteLegend;
-    return std::string( clause ) + kUnprovenDefsProofTail;
+    const char* const clause = on ? std::array { kUnprovenDefsImpactLegend, kUnprovenDefsPathLegend, kUnprovenDefsSafeDeleteLegend,
+                                                 kUnprovenDefsUsesLegend, kUnprovenDefsMentionsLegend, kUnprovenDefsVerifyLegend,
+                                                 kUnprovenDefsAffectedLegend }[std::size_t( verb )]
+                                  : nullptr;
+    return clause != nullptr ? std::string( clause ) + kUnprovenDefsProofTail : std::string();
 }
 
 // M12's writeMultiRootTable/multiRootTableLegend (the multi-root roots-table disclosure --callers/--uses

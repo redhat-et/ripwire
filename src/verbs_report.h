@@ -605,7 +605,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // --baseline-update: merge current violations into an existing (or new) sidecar; exit 0.
         if( cfg.baselineUpdate )
         {
-            std::unordered_set<std::uint64_t> hashes = archReadBaseline( sidecarPath );
+            std::unordered_set<std::uint64_t> hashes = archReadBaseline( sidecarPath ).hashes;
             for( const Viol& v : viols )
             {
                 hashes.insert( v.hash );
@@ -629,14 +629,12 @@ std::optional<int> runArchViews( const MainDispatch& d )
             return 0;
         }
 
-        // Normal run: load baseline (if present) and split violations into baselined vs new.
-        const std::unordered_set<std::uint64_t> baseline    = archReadBaseline( sidecarPath );
-        const bool                              hasBaseline  = !baseline.empty() || [ &sidecarPath ]()
-        {
-            // detect sidecar presence even if it contains only comments (0 hashes)
-            std::ifstream probe( sidecarPath );
-            return probe.good();
-        }();
+        // Normal run: load baseline (if present) and split violations into baselined vs new. Presence is the READ's
+        // own answer (a comment-only sidecar is present with 0 hashes). It used to be a second, bare open of the
+        // same path, which followed a link and read nothing — see ArchBaselineRead.
+        const ArchBaselineRead                   baselineRead = archReadBaseline( sidecarPath );
+        const std::unordered_set<std::uint64_t>& baseline     = baselineRead.hashes;
+        const bool                               hasBaseline  = baselineRead.present;
 
         std::vector<const Viol*> newViols, basedViols;
         for( const Viol& v : viols )

@@ -528,9 +528,12 @@ std::optional<int> runUses( const MainDispatch& d )
         const std::string_view sym = cfg.usesSym;
 
         // resolveAllByNameQualified — the SAME resolver --callers/--impact/--expand/--path use — so --uses
-        // finally accepts "file:name" too; byte-identical to the old resolveAllByName on a bare name/id.
-        const std::vector<NodeId> defs = resolveAllByNameQualified( ing, sym );
-        const UsesSelector        sel  = resolveUsesSelector( ing, sym, defs.size() );
+        // finally accepts "file:name" too; byte-identical to the old resolveAllByName on a bare name/id. H1: the
+        // out-param is the decl→def widening's residue — definitions defs= does not hold, so the call-role narrowing
+        // below drops every site that resolves to them, which reached the reader as a bare count="0".
+        std::size_t               usUnprovenDefs = 0;
+        const std::vector<NodeId> defs           = resolveAllByNameQualified( ing, sym, &usUnprovenDefs );
+        const UsesSelector        sel            = resolveUsesSelector( ing, sym, defs.size() );
 
         // member-variable round (card A3): ONE resolved field takes the per-site path (fielduses.h — the renderer
         // the MCP twin returns); a bare field name declared by several owners refuses with the Owner.field
@@ -601,7 +604,8 @@ std::optional<int> runUses( const MainDispatch& d )
                      "chosen def (the callers verb's own narrowing, read the other way, so the two agree); read/write/import/extends carry no "
                      "resolution and stay name-matched across every def sharing the name. narrowed_roles= names what narrowed, and "
                      "defs_of_name=/call_sites_of_name= (file: qualifier only) are the un-narrowed totals. "
-                     "{}{}-->{}{}", rw::kUsesLegendOpen,
+                     "{}{}{}-->{}{}", rw::kUsesLegendOpen,
+                     rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Uses, usUnprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=
                      rw::capLegendClause( rw::computePageDisclosure( pageRows, sites.size(), upw.end,
                                                                     cfg.pageLimit, cfg.pageOffset, usDiscloseCap ).active ),
                      rw::graphCountDisclosure( g.unindexedFiles > 0 ).c_str(), rw::rootRelPathsLegend( usSingleRoot ),
@@ -624,13 +628,16 @@ std::optional<int> runUses( const MainDispatch& d )
             // a markdown SECTION heading reaches routinely. Same shape as runImpact / the callers arm.
             const std::string attr = "of=\"" + ex( sym ) + "\" defs=\"" + std::to_string( defs.size() )
                                    + "\" external=\"" + ( external ? "1" : "0" ) + "\" count=\"" + std::to_string( sites.size() ) + "\""
+                                   + rw::unprovenDefsAttrXml( usUnprovenDefs )   // H1: where the XML root carries it
                                    + selectorAttrs + usRootAttr + upage + rw::graphCountFloorAttrXml( g );   // §H4 §3.4
             emitColumnarUseSites( stdout, ing, attr, ufiles, ulines, uroles, uins, usRootPrefix );
             return 0;
         }
 
-        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}>",
-                     ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(), selectorAttrs.c_str(), usRootAttr.c_str(), upage,
+        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}>",
+                     ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(),
+                     rw::unprovenDefsAttrXml( usUnprovenDefs ).c_str(),   // H1: beside the count it qualifies; absent at zero
+                     selectorAttrs.c_str(), usRootAttr.c_str(), upage,
                      rw::graphCountFloorAttrXml( g ).c_str() );
         rw::writeMultiRootTable( stdout, ing );   // M12: the roots list this element's own root= cannot carry
         for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
@@ -1415,6 +1422,12 @@ std::optional<int> runVerify( const MainDispatch& d )
         return 1;
     };
 
+    // H1: the decl→def residue of the SYM arguments this claim resolves. The three shapes that resolve one set it before
+    // they open the root — calls() sums both symbols as --path sums its endpoints, uses()/unused() and reaches() take
+    // their one — and contains()/defines() resolve no SYM and leave it 0. openRoot reads it for the clause comment, so
+    // the comment rides exactly when a shape's facts carry unproven_defs=.
+    std::size_t vfUnprovenDefs = 0;
+
     // the root opener, shared by every shape so the attribute ORDER is fixed: claim, shape, verdict,
     // shape-specific facts, root= (M12), limit=, then the honesty attribute (complete= XOR counts_floor=),
     // then the disclosure pair. `honesty` is exactly one of kGraphCountFloorAttrXml / " complete=\"1\"" / "".
@@ -1424,8 +1437,13 @@ std::optional<int> runVerify( const MainDispatch& d )
         // #66: vfFloor above can carry graph_unindexed=, and kVerifyLegend is one closed literal that cannot
         // splice a conditional clause — so the clause rides as its own adjacent comment, emitted exactly when
         // the attribute is (graphlegend.h graphUnindexedLegendComment), ahead of the root= block.
-        rw::emitTo( stdout, "{}{}{}<verify claim=\"{}\" shape=\"{}\" verdict=\"{}\"{}{}", verify::kVerifyLegend,
+        // H1: the unproven_defs= clause takes the same route for the same reason, opened `<!-- ripwire verify: ` so the
+        // compact dialect strips it as the prose it is (compactlegend.h kCompactProsePrefixes) and states its own row.
+        const std::string vfUnprovenClause  = rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Verify, vfUnprovenDefs > 0 );
+        const std::string vfUnprovenComment = vfUnprovenClause.empty() ? std::string() : "<!-- ripwire verify: " + vfUnprovenClause + "-->";
+        rw::emitTo( stdout, "{}{}{}{}<verify claim=\"{}\" shape=\"{}\" verdict=\"{}\"{}{}", verify::kVerifyLegend,
                      rw::graphUnindexedLegendComment( g.unindexedFiles > 0 ).c_str(),
+                     vfUnprovenComment.c_str(),
                      rw::rootRelPathsLegend( verSingleRoot ),
                      ex( cfg.verifyClaim ).c_str(), verify::kShapeTags[ std::size_t( claim.shape ) ], verdict, facts.c_str(),
                      verRootAttr.c_str() );
@@ -1443,8 +1461,12 @@ std::optional<int> runVerify( const MainDispatch& d )
     // ── calls( A , B ) — does A transitively call B (directed, name-based call graph) ────────────────
     if( claim.shape == verify::ClaimShape::Calls )
     {
-        const std::vector<NodeId> srcDefs = resolveAllByNameQualified( ing, claim.arg1 );
-        const std::vector<NodeId> dstDefs = resolveAllByNameQualified( ing, claim.arg2 );
+        // H1: each symbol's decl→def residue, summed onto the root exactly as --path sums its two endpoints.
+        std::size_t               srcUnprovenDefs = 0;
+        std::size_t               dstUnprovenDefs = 0;
+        const std::vector<NodeId> srcDefs         = resolveAllByNameQualified( ing, claim.arg1, &srcUnprovenDefs );
+        const std::vector<NodeId> dstDefs         = resolveAllByNameQualified( ing, claim.arg2, &dstUnprovenDefs );
+        vfUnprovenDefs                            = srcUnprovenDefs + dstUnprovenDefs;
         if( srcDefs.empty() || dstDefs.empty() )
         {
             const std::string_view missing = srcDefs.empty() ? claim.arg1 : claim.arg2;
@@ -1453,6 +1475,7 @@ std::optional<int> runVerify( const MainDispatch& d )
         }
         const std::vector<NodeId> path = rw::shortestPathAny( g, srcDefs, dstDefs );
         const std::string         facts = " from_defs=\"" + std::to_string( srcDefs.size() ) + "\" to_defs=\"" + std::to_string( dstDefs.size() ) + "\""
+                                        + rw::unprovenDefsAttrXml( vfUnprovenDefs )   // H1: beside the defs counts it is not in; absent at zero
                                         + ( path.empty() ? std::string{} : " hops=\"" + std::to_string( path.size() - 1 ) + "\"" );
         if( !path.empty() )
         {
@@ -1474,7 +1497,7 @@ std::optional<int> runVerify( const MainDispatch& d )
     if( claim.shape == verify::ClaimShape::Uses || claim.shape == verify::ClaimShape::Unused )
     {
         const std::string_view    sym  = claim.arg1;
-        const std::vector<NodeId> defs = resolveAllByNameQualified( ing, sym );
+        const std::vector<NodeId> defs = resolveAllByNameQualified( ing, sym, &vfUnprovenDefs );   // H1: the residue --uses discloses
         const UsesSelector        sel  = resolveUsesSelector( ing, sym, defs.size() );
         const std::vector<char>   isChosenCaller = sel.fileQualified ? usesChosenCallers( ing, g, defs ) : std::vector<char>{};
         const auto [ sites, callSitesOfName ]    = collectUseSites( ing, sel, isChosenCaller,
@@ -1490,7 +1513,8 @@ std::optional<int> runVerify( const MainDispatch& d )
         const std::size_t total    = sites.size();
         const PageWindow  w        = pageWindow( total, kEvidenceCap, 0 );
         const std::string facts    = " defs=\"" + std::to_string( defs.size() ) + "\" external=\"" + ( external ? "1" : "0" )
-                                   + "\" count=\"" + std::to_string( total ) + "\"";
+                                   + "\" count=\"" + std::to_string( total ) + "\""
+                                   + rw::unprovenDefsAttrXml( vfUnprovenDefs );   // H1: beside the count it qualifies; absent at zero
         const bool        anySites = total > 0;
         const char*       verdict  = claim.shape == verify::ClaimShape::Uses ? ( anySites ? "confirmed" : "not-established" )
                                                                         : ( anySites ? "refuted"   : "not-established" );
@@ -1633,7 +1657,7 @@ std::optional<int> runVerify( const MainDispatch& d )
 
     // ── reaches( SYM , "FILE" | LAYER ) — does code there transitively CALL the target (impact-based) ─
     VERIFY( claim.shape == verify::ClaimShape::Reaches );
-    const std::vector<NodeId> targetDefs = resolveAllByNameQualified( ing, claim.arg1 );
+    const std::vector<NodeId> targetDefs = resolveAllByNameQualified( ing, claim.arg1, &vfUnprovenDefs );   // H1: the residue, as --impact's
     if( targetDefs.empty() )
     {
         rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: --verify symbol not found: ", claim.arg1, "--verify=" ).c_str() );
@@ -1661,7 +1685,9 @@ std::optional<int> runVerify( const MainDispatch& d )
             witnesses.push_back( n );
         }
     }
-    const std::string facts = " target_defs=\"" + std::to_string( targetDefs.size() ) + "\" witnesses=\"" + std::to_string( witnesses.size() ) + "\"";
+    const std::string facts = " target_defs=\"" + std::to_string( targetDefs.size() ) + "\""
+                            + rw::unprovenDefsAttrXml( vfUnprovenDefs )   // H1: beside the defs count it is not in; absent at zero
+                            + " witnesses=\"" + std::to_string( witnesses.size() ) + "\"";
     if( !witnesses.empty() )
     {
         const std::vector<NodeId> path = rw::shortestPathAny( g, witnesses, targetDefs );
@@ -2265,7 +2291,11 @@ std::optional<int> runMentions( const MainDispatch& d )
         // §B11.1 — the --owners twin, same defect, same fix: the shared file:name grammar and the shared
         // refusal that names which half is at fault. A qualified spelling now NARROWS the mention scan to the
         // definitions in that file instead of being refused as an unknown symbol.
-        const std::vector<NodeId> defs = resolveAllByNameQualified( ing, cfg.mentionsSym );
+        // H1: the out-param is the decl→def widening's residue. graph.h stores a doc edge on a BODY, never on a
+        // declaration, so a file:name selector whose definitions were dropped kept only edge-less declarations and
+        // answered a bare docs="0" about the docs that name the definitions it never read.
+        std::size_t               mnUnprovenDefs = 0;
+        const std::vector<NodeId> defs           = resolveAllByNameQualified( ing, cfg.mentionsSym, &mnUnprovenDefs );
         if( defs.empty() )
         {
             rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: --mentions symbol not found: ",
@@ -2291,9 +2321,11 @@ std::optional<int> runMentions( const MainDispatch& d )
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
         rw::emitTo( stdout, "<!-- ripwire mentions: markdown FILES that name this symbol in a `backtick` (doc<->code; NOT a call edge). "
                      "docs= is the row count (distinct files); sections= counts the underlying markdown-section mentions "
-                     "before file-collapse (docs <= sections). Each row's mentions= is its own section-mention count. "
+                     "before file-collapse (docs <= sections). Each row's mentions= is its own section-mention count. {}"
                      "An @FILE:LINE seed rebinds to the innermost definition enclosing that line — sym= names it, of= echoes the seed as typed. "
-                     "No line locator: the doc edge is stored at file granularity — a fabricated always-1 l= was removed; absent beats fake -->{}", rw::rootRelPathsLegend( mnSingleRoot ) );
+                     "No line locator: the doc edge is stored at file granularity — a fabricated always-1 l= was removed; absent beats fake -->{}",
+                     rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Mentions, mnUnprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=
+                     rw::rootRelPathsLegend( mnSingleRoot ) );
         // §P15/§P16: fileRows is deterministic (file path order) and printed unconditionally, no historic
         // display cap — pageWindow directly on cfg.pageLimit/cfg.pageOffset, discloseCap=false so the
         // un-paginated tag stays byte-identical.
@@ -2305,8 +2337,9 @@ std::optional<int> runMentions( const MainDispatch& d )
         const std::string mnSymAttr  = ( !cfg.mentionsSym.empty() && cfg.mentionsSym.front() == '@' )
                                      ? " sym=\"" + ex( ing.symbols[ defs[0] ].name ) + "\""
                                      : std::string();
-        rw::emitTo( stdout, "<mentions of=\"{}\"{} defs=\"{}\" docs=\"{}\" sections=\"{}\"{}{}>", ex( cfg.mentionsSym ).c_str(), mnSymAttr.c_str(), defs.size(),
+        rw::emitTo( stdout, "<mentions of=\"{}\"{} defs=\"{}\" docs=\"{}\" sections=\"{}\"{}{}{}>", ex( cfg.mentionsSym ).c_str(), mnSymAttr.c_str(), defs.size(),
                      fileRows.size(), sectionCount,
+                     rw::unprovenDefsAttrXml( mnUnprovenDefs ).c_str(),   // H1: beside the zero counts it qualifies; absent at zero
                      pageDisclosure( mentionsAb, sizeof( mentionsAb ), mentionsPw.end - mentionsPw.begin, fileRows.size(), mentionsPw.end,
                                      cfg.pageLimit, cfg.pageOffset, false ),
                      mnRootAttr.c_str() );
