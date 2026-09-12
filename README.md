@@ -14,8 +14,12 @@
 Point it at any repository and your agent gets a ranked, deterministic call graph — what to touch,
 what it breaks, which tests to run — instead of grepping around and reading whole files.
 
-**Just want the manual?** [The reference guide](#reference-guide) near the bottom of this page covers install,
-commands, output format, exit codes and limits, in numbered sections.
+**Just want to use it?** Install it with the one line below, then start each coding session by telling your agent to
+use it, for example: *"Use ripwire on this repo."* That is all most people need: the install also teaches your agent
+when to reach for each command.
+
+**Want every detail?** [The reference guide](#reference-guide) near the bottom covers install, commands, output
+format, exit codes and limits. You do not need it to get started.
 
 <p align="center"><a href="https://trendshift.io/repositories/217924?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-217924"><img src="https://trendshift.io/api/badge/trendshift/repositories/217924/daily?language=C%2B%2B" alt="Trendshift: C++ Repository of the Day badge for redhat-et/ripwire" width="250" height="55"></a></p>
 
@@ -2024,6 +2028,10 @@ tier: it parses with its own vendored grammar, so its headings are symbols, not 
 ---
 
 ## Reference guide
+
+> **You do not need this guide to use ripwire.** Install it, tell your agent to use it, and the agent takes it from
+> there. Come here when you want to know exactly what a command does, what its output means, or where the tool stops
+> being right.
 
 Publication date: 2026-09-12
 
