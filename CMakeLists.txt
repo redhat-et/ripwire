@@ -914,6 +914,91 @@ if(RIPWIRE_TSAN)
   endforeach()
 endif()
 
+# ---- separate-storage alias analysis: -mllvm -basic-aa-separate-storage (LLVM 17 keeps it OFF) ----
+# src/infra/Diagnostics.h §6's VERIFY_NO_ALIAS lowers, in release, to `llvm.assume [ "separate_storage"(a, b) ]`
+# through __builtin_assume_separate_storage. The FRONT END has emitted that bundle since clang 17; whether BasicAA
+# READS it is a separate switch inside the optimizer, llvm/lib/Analysis/BasicAliasAnalysis.cpp:
+#     static cl::opt<bool> EnableSeparateStorageAnalysis("basic-aa-separate-storage", cl::Hidden, cl::init(false))
+# in LLVM 17, and cl::init(true) from LLVM 18 on. So on an LLVM-17 toolchain — AppleClang 16.0.0.16000026 (Xcode
+# 16.2), the macos-14 CI runners and release.yml's macos-arm64 leg — the header compiles, the IR carries the bundle,
+# and codegen is byte-identical to no promise at all. Found by CI job "release (macos-14, plain, appleclang, shard
+# 4/4)" on PR #200: test/noaliascheck.sh arms 2, 2/3 and 6 red ("accNew still reloads a after the store", "NO
+# CONTRAST", "not at least 2 below plain"), arm 7 and the IR-bundle row green — the front-end half worked, the
+# optimizer half was off. Reproduced on Apple clang 21: the arm-2 probe is 5 instructions by default, 9 with
+# `-mllvm -basic-aa-separate-storage=false`, 5 with `=true`.
+#
+# Why LLVM 17 left it off, and why turning it on there is safe: llvm/llvm-project#76864 "[BasicAA] Enable separate
+# storage hints by default" (merged 2024-01-03) flipped the default because "a few months of experimentation in a
+# large codebase did not reveal any significant build speed regressions" — the LLVM-17 default was a compile-time
+# hedge, not a soundness one; #76770 the same week only makes the hint fire in more contexts. LLVM 17 with the option
+# on runs the analysis LLVM 18+ runs unconditionally.
+#
+# The option's name is the same from LLVM 17 through 21 and clang takes it as a compile flag, so it is passed
+# wherever the compiler accepts it: on LLVM 17 it turns the analysis on, on 18+ it restates the default (a no-op).
+# What the option buys on LLVM 17 is the SCALAR half only: the reload after a store through a possibly-aliasing
+# pointer goes away, but the loop vectorizer's overlap checks stay, because LLVM 17 consults the hint only at the
+# assume's own context and LoopAccessAnalysis never supplies one (llvm/llvm-project#64666, fixed in LLVM 18 by
+# #76770). CI showed exactly that split on PR #200 head 5156d668: noaliascheck arm 2 green, arm 6 at plain.
+# Probed, never assumed — GCC rejects -mllvm outright and a clang whose LLVM had dropped the name would reject the
+# option; either way the check says no, the build keeps the compiler default, and the header's debug check still
+# runs. The two-token option rides in CMAKE_REQUIRED_FLAGS (a whitespace-split string, the way the libFuzzer probe
+# above passes its flags). Verified 2026-09-12 in a scratch configure: Apple clang 21 says yes, and the same probe
+# over `-mllvm -bogus-option-xyz` says no (clang exits 1 on an unknown -mllvm name). test/noaliascheck.sh reads the
+# cached answer back out of build/CMakeCache.txt and fails if its own probe of the same compiler disagrees.
+#
+# OUR TARGETS ONLY, via target_compile_options — never add_compile_options: the tree-sitter core and the grammar
+# objects are C that never spells the builtin, and per-target attachment is the rule this file already follows for
+# the remarks and sanitizer flags. RIPWIRE_OWNED_CXX_TARGETS is ripwire, ripwire_probe and the test executables, in
+# every flavour (plain, Release, asan, tsan): the list is flavour-independent, so nothing here is.
+#
+# LTO. With -flto the compile step still runs the PRE-link pipeline (which already removes the arm-2 reload under
+# this option — measured: compile default + link `=false` gives 5), and ld64's libLLVMLTO runs the POST-link one,
+# whose BasicAA reads the same cl::opt. So under LTO the option must reach the link as well, or every inlining
+# opportunity the link step creates on an LLVM-17 toolchain is analysed with the promise off. Apple ld64 takes it as
+# `-Wl,-mllvm,-basic-aa-separate-storage` — verified: compile `=false` + link `=false` gives 9 instructions, compile
+# `=false` + link `=true` gives 5, and a bogus name fails the link ("libLLVMLTO: Unknown command line argument") —
+# and it is probed below with a real -flto link before it is attached. The ELF spelling
+# (`-Wl,-plugin-opt=-basic-aa-separate-storage` for lld / gold) is deliberately NOT added: it could not be verified
+# on this machine, and no CI or release leg pairs LTO with an LLVM-17 ELF toolchain (ubuntu-24.04's clang is 18,
+# the Linux release leg is gcc, which never sees the builtin). An LTO build on such a toolchain keeps the compile-time
+# option and the linker's default; that limit is stated here rather than papered over with an unverified flag.
+include(CheckCXXCompilerFlag)
+set(_ripwire_required_flags_save "${CMAKE_REQUIRED_FLAGS}")
+set(CMAKE_REQUIRED_FLAGS "-mllvm -basic-aa-separate-storage")
+check_cxx_compiler_flag("" RIPWIRE_CXX_HAS_BASIC_AA_SEPARATE_STORAGE)
+set(CMAKE_REQUIRED_FLAGS "${_ripwire_required_flags_save}")
+if(RIPWIRE_CXX_HAS_BASIC_AA_SEPARATE_STORAGE)
+  foreach(_t IN LISTS RIPWIRE_OWNED_CXX_TARGETS)
+    target_compile_options(${_t} PRIVATE -mllvm -basic-aa-separate-storage)
+  endforeach()
+  set(_ripwire_separate_storage_link "no LTO, so nothing runs at link")
+  if(RIPWIRE_LTO)
+    if(APPLE)
+      include(CheckCXXSourceCompiles)
+      set(_ripwire_required_flags_save "${CMAKE_REQUIRED_FLAGS}")
+      set(_ripwire_required_link_options_save "${CMAKE_REQUIRED_LINK_OPTIONS}")
+      set(CMAKE_REQUIRED_FLAGS "-flto")
+      set(CMAKE_REQUIRED_LINK_OPTIONS "-flto;-Wl,-mllvm,-basic-aa-separate-storage")
+      check_cxx_source_compiles("int main() { return 0; }" RIPWIRE_LD64_HAS_BASIC_AA_SEPARATE_STORAGE)
+      set(CMAKE_REQUIRED_FLAGS "${_ripwire_required_flags_save}")
+      set(CMAKE_REQUIRED_LINK_OPTIONS "${_ripwire_required_link_options_save}")
+      if(RIPWIRE_LD64_HAS_BASIC_AA_SEPARATE_STORAGE)
+        foreach(_t IN LISTS RIPWIRE_OWNED_CXX_TARGETS)
+          target_link_options(${_t} PRIVATE "-Wl,-mllvm,-basic-aa-separate-storage")
+        endforeach()
+        set(_ripwire_separate_storage_link "forced on at the LTO link too (-Wl,-mllvm,-basic-aa-separate-storage)")
+      else()
+        set(_ripwire_separate_storage_link "LTO link keeps the linker default (ld64 refused -Wl,-mllvm,-basic-aa-separate-storage)")
+      endif()
+    else()
+      set(_ripwire_separate_storage_link "LTO link keeps the linker default (the ELF -plugin-opt spelling is unverified — see the comment above)")
+    endif()
+  endif()
+  message(STATUS "separate-storage alias analysis: forced on (-mllvm -basic-aa-separate-storage — turns BasicAA's separate_storage reader on for LLVM 17 / AppleClang 16, a no-op on LLVM 18+); ${_ripwire_separate_storage_link}")
+else()
+  message(STATUS "separate-storage alias analysis: compiler default (${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} does not accept -mllvm -basic-aa-separate-storage; VERIFY_NO_ALIAS keeps its debug check, the release promise is whatever this optimizer does by default)")
+endif()
+
 # ---- opt-in ingestion fuzzing: isolated coverage-instrumented parser objects ----
 # Keep these copies separate from production objects: fuzzer-no-link coverage callbacks must never leak
 # into a normal executable. RIPWIRE_FUZZ is OFF by default and every target is EXCLUDE_FROM_ALL.

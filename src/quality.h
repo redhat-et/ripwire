@@ -1794,7 +1794,13 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 21;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 93;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 94;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 94 = 2026-09-11 (#62/#72 follow-up): the decided-dead `#if 0`
+                                                          //    filter now covers every --uses role, the Include record, and
+                                                          //    DEFINITIONS — the extracted set shrinks on any C-family tree
+                                                          //    with a literal `#if 0`/`#if 1`. See ingest_cache.h's
+                                                          //    kParserVer note. Renumbered 93 -> 94 on the merge with
+                                                          //    main 558a2e03, where #139 had spent 93.
                                                           // 93 = 2026-09-11 (Ruby argument + rescue constants): a
                                                           //    constant argument of a call/super/yield and a rescue
                                                           //    class are directives. See ingest_cache.h's note.

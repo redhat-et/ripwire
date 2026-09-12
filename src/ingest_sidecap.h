@@ -43,6 +43,82 @@ bool grammarAbiOk( const TSLanguage* lang ) noexcept
     return v >= TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION && v <= TREE_SITTER_LANGUAGE_VERSION;
 }
 
+// ── #62 THE DECIDED-DEAD FILTER — the ONE spelling every capture driver in this file consults ────────
+// #62 (2026-09-08, @mariadb-KyleHutchinson): the byte ranges this file's preprocessor DECIDES are dead
+// (src/preprocdead.h — the same literal `#if 0` rule --slice has always used). Walked ONCE per file by
+// the parse-pool worker, C-family only, and the helper's own `#if` text gate makes it a single find() on
+// the overwhelming majority of files. A fact captured from one of these ranges describes source that
+// cannot compile, so serving it makes a `counts_floor="1"` count LARGER than the truth — which breaks
+// the floor's promise (true >= reported) rather than merely adding noise. That is why the row is DROPPED
+// at capture rather than flagged downstream: a flagged row still counts. The filtered set is what the
+// per-file cache record stores, so a warm run replays it (kParserVer bumped with this change).
+//
+// Non-C-family languages have no preproc_if nodes at all, so the empty return is the whole rule.
+inline std::vector<PreprocDeadRange> preprocDeadRangesFor( const LangEntry& le, TSNode root, std::string_view src )
+{
+    if( le.lang != Lang::Cpp && le.lang != Lang::C && le.lang != Lang::ObjC )
+    {
+        return {};
+    }
+    return collectPreprocDeadRanges( root, src );
+}
+
+// #72 follow-up (2026-09-11): the consult is a POST-PASS over the window ONE file just appended, not a
+// `continue` inside one capture branch. #62 put it inside captureTagsFacts' @reference.call /
+// @reference.import arm — where the reported call site came from — and that covered two of the seven
+// roles --uses publishes. The value-use pass (read/write), the type-mention pass (type), the base clause
+// (extends), captureIncludes' own directive site (import — a SECOND emitter of the role the tags arm
+// already filtered) and the blanked member-macro use each ran their own walk and never asked. Measured
+// on test/ppdeadrolescheck.sh's fixture against the pre-fix binary: `--uses=Owner.field` answered
+// count="4" where the truth is 2, on a root carrying counts_floor="1".
+//
+// A window filter rather than five more `continue`s, for two reasons. Five consult sites of one rule is
+// the §B4 echo-site drift this tree has scar tissue for — and preprocdead.h's own header says why it
+// would be worse than usual here, because the copies would disagree about which lines of a file exist.
+// And the question "was this fact captured from dead source" is answerable from the RECORD (its site
+// byte), so it need not be asked at each of the places a record is born. One stable partition, order
+// preserved, no allocation — the same shape foldFieldDefs already uses on the def window.
+template<typename RowT, typename SiteByteOf>
+inline void dropPreprocDead( std::vector<RowT>& rows, std::size_t firstOfFile, const std::vector<PreprocDeadRange>& ppDead, SiteByteOf siteByteOf )
+{
+    if( ppDead.empty() || firstOfFile >= rows.size() )
+    {
+        return;   // the overwhelming majority of files: one compare, no scan
+    }
+    std::size_t write = firstOfFile;
+    for( std::size_t read = firstOfFile; read < rows.size(); ++read )
+    {
+        if( inPreprocDead( ppDead, siteByteOf( rows[ read ] ) ) )
+        {
+            continue;
+        }
+        if( write != read )
+        {
+            rows[ write ] = std::move( rows[ read ] );
+        }
+        ++write;
+    }
+    rows.resize( write );
+}
+
+// The four site-byte readers, named once so no call site spells the wrong field. A REFERENCE is sited
+// at its own reference node (`startByte` — the byte the enclosing-def scan already attributes it by). A
+// DEFINITION is sited at its NAME identifier, NOT at its span start: a live function whose body holds an
+// `#if 0` block has a span that overlaps a dead range and must survive, while a definition spelled
+// inside one has its name there. An INCLUDE is sited at the directive node, the byte emitDirective
+// already stores on the record. A local var→type BINDING is sited where it is declared.
+//
+// THE ONE FAMILY THIS CANNOT REACH, said out loud rather than left to be rediscovered: BindingAlias
+// (the A4-R5 FFI aliases) carries fileId and names and NO site byte, so an `extern "C"` block spelled
+// inside `#if 0` still contributes its aliases. Giving it a byte is a cache RECORD-SHAPE change
+// (kCacheVersion, not kParserVer), which is a wider blast radius than the defect earns: an alias whose
+// target has no live definition mints no edge at all, and one whose target IS live names a symbol that
+// really is in the index. Left as a disclosed floor, not a silent one.
+inline std::uint32_t refSiteByte ( const RawRef& r )  noexcept { return r.startByte; }
+inline std::uint32_t defSiteByte ( const RawDef& d )  noexcept { return d.nameByte; }
+inline std::uint32_t incSiteByte ( const Include& i ) noexcept { return i.byte; }
+inline std::uint32_t bindSiteByte( const RawBind& b ) noexcept { return b.startByte; }
+
 // ── A4-R5 CROSS-LANGUAGE FFI BINDING capture (pybind11 · extern "C" · ctypes handle) ─────────────────
 // Walk a C/C++ or Python subtree and emit one BindingAlias per language-binding DECLARATION, so buildGraph
 // can add a provenance-tagged FALLBACK edge across the language border. Pure-syntactic, deterministic. The
@@ -1172,12 +1248,14 @@ inline FileHealth measureHealthAdoptingMemberMacroReparse( TSParser* parser, Lan
 // adopted. Only where that parse recorded uses at all — the rich family, C++/ObjC, captureSideFacts' own arming. Type
 // never enters the call graph, so PageRank and the default map are untouched by these rows. Identifiers inside the
 // parentheses are NOT re-recorded (disclosed in the skipped verb's legend).
-inline void appendBlankedMacroUses( const MemberMacroReparse& work, Lang lang, std::uint32_t fileId, std::string_view bytes, std::vector<RawRef>& refs )
+inline void appendBlankedMacroUses( const MemberMacroReparse& work, Lang lang, std::uint32_t fileId, std::string_view bytes, std::vector<RawRef>& refs,
+                                    const std::vector<PreprocDeadRange>& ppDead )
 {
     if( !work.captureValueUses || ( lang != Lang::Cpp && lang != Lang::ObjC ) )
     {
         return;
     }
+    const std::size_t firstRefOfFile = refs.size();   // #72 follow-up: dropPreprocDead's window
     for( const macroreparse::BlankSpan& span : work.spans )
     {
         RawRef use;
@@ -1189,6 +1267,7 @@ inline void appendBlankedMacroUses( const MemberMacroReparse& work, Lang lang, s
         use.name      = std::string( bytes.substr( span.startByte, span.nameEndByte - span.startByte ) );
         refs.push_back( std::move( use ) );
     }
+    dropPreprocDead( refs, firstRefOfFile, ppDead, refSiteByte );   // #72 follow-up: a macro invoked inside `#if 0` is not invoked
 }
 
 // ── ONE pre-order stream for every whole-AST side-capture pass ────────────────────────────────────────
@@ -1305,8 +1384,12 @@ void streamSideCaptures( TSNode root, const SideArms& arms )
 void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawRef>& refs, std::vector<Include>& incs, std::vector<RawBind>& binds,
                        std::vector<BindingAlias>& ffis, std::vector<RouteDef>& routeDefs,
-                       std::vector<RawRouteUse>& routeUses, std::vector<ConstOpen>& constOpens, bool captureValueUses )
+                       std::vector<RawRouteUse>& routeUses, std::vector<ConstOpen>& constOpens, bool captureValueUses,
+                       const std::vector<PreprocDeadRange>& ppDead )
 {
+    const std::size_t firstRefOfFile  = refs.size();
+    const std::size_t firstIncOfFile  = incs.size();
+    const std::size_t firstBindOfFile = binds.size();
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: side captures" );
 
@@ -1402,6 +1485,20 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
             fuseprobe::gFilesTotal.fetch_add( 1, std::memory_order_relaxed );
         }
 #endif
+
+        // #72 follow-up: everything the side passes just appended for THIS file, filtered through the one
+        // decided-dead rule.
+        //   refs  — captureIncludes' import sites plus the value-use / type-mention rows.
+        //   incs  — the FILE dependency the same directive minted. Dropping the use-site while keeping
+        //           the dependency would leave the two halves of one `#include` disagreeing about
+        //           whether the line exists.
+        //   binds — the P2-D Rule 2 var→type bindings, which is the ambiguity half of the same defect
+        //           rather than a counting one: a `Bar x;` inside `#if 0` above a live `Foo x;` gave
+        //           `x.m()` amb="1" and two prov="split" edges, where deleting the dead block outright
+        //           resolves it to one. Gated (arm 12) with that exact pair as the control.
+        dropPreprocDead( refs,  firstRefOfFile,  ppDead, refSiteByte );
+        dropPreprocDead( incs,  firstIncOfFile,  ppDead, incSiteByte );
+        dropPreprocDead( binds, firstBindOfFile, ppDead, bindSiteByte );
     }
 }
 
@@ -1446,29 +1543,11 @@ inline void foldFieldDefs( std::vector<RawDef>& defs, std::size_t first, Lang la
 
 /// Append definitions and references captured by the language query, with language-specific filtering.
 /// Captured spans refer to src and root; a null cursor appends nothing. Existing output rows are retained.
-// #62 (2026-09-08, @mariadb-KyleHutchinson): the byte ranges this file's preprocessor DECIDES are dead
-// (src/preprocdead.h — the same literal `#if 0` rule --slice has always used). Computed ONCE per file,
-// C-family only, and the helper's own `#if` text gate makes it a single find() on the overwhelming
-// majority of files. A call site inside one of these ranges cannot compile, so admitting it as an edge
-// makes count= larger than the truth — which breaks counts_floor="1"'s promise (true >= reported)
-// rather than merely adding noise. That is why the site is DROPPED here at capture rather than flagged
-// downstream: a flagged row still counts. Cached per file like every other captured fact, so a warm
-// run replays the filtered set (kCacheVersion bumped with this change).
-//
-// #62: the C-family gate for preprocdead.h's ranges. A free function rather than four more lines inside
-// captureTagsFacts, which --quality-delta already scores at cx 258 - this change adds one line to it.
-// Non-C-family languages have no preproc_if nodes at all, so the empty return is the whole rule.
-inline std::vector<PreprocDeadRange> preprocDeadRangesFor( const LangEntry& le, TSNode root, std::string_view src )
-{
-    if( le.lang != Lang::Cpp && le.lang != Lang::C && le.lang != Lang::ObjC )
-    {
-        return {};
-    }
-    return collectPreprocDeadRanges( root, src );
-}
-
+/// `ppDead` is this file's decided-dead byte ranges (preprocDeadRangesFor, computed ONCE per file by the
+/// parse-pool worker and shared with captureSideFacts — the ranges outlive both calls because a queued
+/// file's tags pass runs later, at the prewarm flush).
 void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
-                       std::vector<RawDef>& defs, std::vector<RawRef>& refs )
+                       std::vector<RawDef>& defs, std::vector<RawRef>& refs, const std::vector<PreprocDeadRange>& ppDead )
 {
     if( cursor == nullptr )
     {
@@ -1482,9 +1561,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     }
 
     const std::size_t firstDefOfFile = defs.size();   // member-variable round: foldFieldDefs' window (below)
-
-    // #62: byte ranges this file's preprocessor decides are dead; see preprocDeadRangesFor above.
-    const std::vector<PreprocDeadRange> ppDead = preprocDeadRangesFor( le, root, src );
+    const std::size_t firstRefOfFile = refs.size();   // #72 follow-up: dropPreprocDead's window (below)
 
     // extent honesty: the recovered-bit walk (parseRecoveredBits) only exists in a file the parser had to recover.
     const bool fileHasError = ts_node_has_error( root );
@@ -1961,14 +2038,33 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     auto [ ac, ak ] = callArity( nameNode, le.lang, src );               // B2.2: call-site positional arg count
                     r.argCount = ac;  r.argCountKnown = ak;                              //   → arity filter in graph.h
                 }
-                if( !ppDead.empty() && inPreprocDead( ppDead, r.startByte ) )
-                {
-                    continue;   // #62: inside `#if 0` — never compiled, so never a call edge
-                }
                 refs.push_back( std::move( r ) );
             }
         }
     }
+
+    // #72 follow-up: the decided-dead filter over BOTH windows this function appended, before anything
+    // else reads either one.
+    //
+    // REFERENCES — this is the site #62's own `continue` occupied, moved out of the @reference arm to
+    // where it covers the file. The rows it dropped there are the rows it drops here (a reference is
+    // sited at the same `startByte` either way); what it did NOT reach are the refs the isDef arm mints
+    // through captureBases / captureFields / captureMacroBodyCalls — a base clause, a member's type, a
+    // call inside a `#define` replacement — each of which can be spelled inside a dead range of a LIVE
+    // enclosing definition, so no def-level test can stand in for it.
+    //
+    // DEFINITIONS — #72 stopped serving call SITES from dead ranges and left dead DEFINITIONS in the
+    // index, where they went on splitting resolution: one `dup` defined inside `#if 0` and one live gave
+    // the single caller amb="1", two prov="split" edges, overloads="2" on the survivor and
+    // graph_ambiguous="1" on the <callers> root — four claims of ambiguity where the source admits one
+    // candidate. That degrades exactly the trust calibration the tool sells ("read the source if
+    // which-target matters"), so the definition goes the same way its references already did rather than
+    // being disclosed: a disclosed phantom is still a phantom the resolver picks between. It is sited at
+    // its NAME (defSiteByte), so a live function whose BODY holds an `#if 0` block keeps its row and only
+    // the facts spelled inside the block are dropped. Before foldFieldDefs, so the Python
+    // one-field-per-(class,name) fold can never elect a definition that cannot compile.
+    dropPreprocDead( refs, firstRefOfFile, ppDead, refSiteByte );
+    dropPreprocDead( defs, firstDefOfFile, ppDead, defSiteByte );
 
     foldFieldDefs( defs, firstDefOfFile, le.lang );   // member-variable round: owner-less fields drop, Python fields fold to one per (class, name)
 }
