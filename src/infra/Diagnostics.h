@@ -45,6 +45,22 @@
 #endif
 
 namespace Diagnostics {
+namespace detail {
+// A view can share one allocation with another view; VERIFY_NO_ALIAS_BUF refuses them at compile time (§6).
+// Detected structurally so this header stays library-free (no <span>/<string_view>/<type_traits>): std::span is
+// the standard type with a static `extent`; std::basic_string_view has `traits_type` and, unlike basic_string,
+// no `allocator_type`. A custom view is the author's own contract to keep.
+template<class T> struct StripCvRef { using type = T; };
+template<class T> struct StripCvRef<const T> { using type = T; };
+template<class T> struct StripCvRef<volatile T> { using type = T; };
+template<class T> struct StripCvRef<const volatile T> { using type = T; };
+template<class T> struct StripCvRef<T&> { using type = typename StripCvRef<T>::type; };
+template<class T> struct StripCvRef<T&&> { using type = typename StripCvRef<T>::type; };
+template<class T> using Bare = typename StripCvRef<T>::type;
+template<class T> concept HasStaticExtent = requires { Bare<T>::extent; };
+template<class T> concept HasTraitsNoAllocator = requires { typename Bare<T>::traits_type; } && !requires { typename Bare<T>::allocator_type; };
+template<class T> inline constexpr bool isView = HasStaticExtent<T> || HasTraitsNoAllocator<T>;
+} // namespace detail
 
 class ConsoleLog {
 public:
@@ -187,32 +203,140 @@ uint64_t currentThreadId() noexcept;
 #define TODO_IMPLEMENT()          VERIFY_NOT_REACHED_TEXT("Feature not yet implemented.")
 
 // --------------------------------------------------------------------------
-// 6. VERIFY_NO_ALIAS — catch accidental self-aliasing in debug builds
+// 6. VERIFY_NO_ALIAS — a debug check AND a release optimizer fact
 //
 // Use in functions that WRITE through one reference while READING another of
 // the same type, where passing the same object twice would silently produce a
-// wrong result (e.g. out-parameters of decompose/extract functions, or a
-// destination that is read mid-computation).
+// wrong result (out-parameters of decompose/extract functions, a destination
+// that is read mid-computation).
 //
-// Takes two objects (not pointers); compares their addresses. Fires VERIFY if
-// they are the same object. Compiles to nothing in release builds.
+// Debug:   VERIFY_TEXT fires if a and b are the same object (exact address
+//          equality — it does NOT catch partial overlap).
+// Release: VERIFY_TEXT is an inert __builtin_assume that alias analysis never
+//          reads (measured 2026-09-12: codegen byte-identical to no macro at
+//          all). RW_ASSUME_SEPARATE_STORAGE is the part that does the work — it
+//          lowers to `llvm.assume [ "separate_storage"(a, b) ]`, which BasicAA
+//          consumes, so the codegen matches `__restrict__` on the parameters
+//          exactly. Measured at -O2 -DNDEBUG, instructions:
+//              `out=a; out+=b; out+=a;`  arm64 10 -> 6, x86-64 11 -> 9
+//              `dst[i] += k*src[i]` loop  arm64 62 -> 56, x86-64 68 -> 45
+//          (the loop delta is the runtime overlap check plus the scalar
+//          fallback loop LLVM emits when it cannot prove dst and src disjoint).
+//          On a compiler without __builtin_assume_separate_storage (GCC, clang
+//          < 17) the assumption is `( (void)0 )` and the debug check still runs.
+//          BasicAA reads the bundle only when its `basic-aa-separate-storage`
+//          option is on: off by default in LLVM 17 (AppleClang 16 / Xcode
+//          16.2), on from LLVM 18. CMakeLists.txt passes
+//          `-mllvm -basic-aa-separate-storage` to our targets whenever the
+//          compiler accepts it, so LLVM 17 consumes the promise too (a no-op
+//          on 18+; test/noaliascheck.sh arm 8 is the `=false` control).
+//          Even with the option on, LLVM 17 consults the hint only at the
+//          assume's own context, which the loop vectorizer's alias queries
+//          never carry (llvm/llvm-project#64666, fixed in LLVM 18 by #76770):
+//          on AppleClang 16 the promise removes scalar reloads but leaves a
+//          loop's runtime overlap check in place. The gate classifies that
+//          loop path separately (LOOP_CONSUMED / LOOP_NOT_CONSUMED).
 //
-// This is a CORRECTNESS guard, not an optimisation. It documents and enforces
-// the no-alias contract that __restrict would assert — without the UB risk of
-// __restrict (which would make self-aliasing undefined rather than caught).
+// THE CONTRACT (clang/docs/LanguageExtensions.rst, release/19.x): the arguments
+// "are assumed to point into separately allocated storage (either different
+// variable definitions or different dynamic storage allocations) … 'storage'
+// here refers to the outermost enclosing allocation of any particular object
+// (so for example, it's never correct to call this function passing the
+// addresses of fields in the same struct, elements of the same array, etc.)".
+// LangRef: "no pointer based on one of its arguments can alias any pointer
+// based on the other." Two elements of one array or two members of one struct
+// are a LIE and undefined behaviour in release; the debug check cannot see it.
+//
+// TWO CONTAINERS need the _BUF form. `separate_storage( &dst, &src )` on two
+// std::vector references says the 24-byte headers are separate; the loop body
+// indexes the HEAP BUFFERS, reached through the begin_ pointers loaded from
+// those headers, and the optimizer cannot infer buffer separation from header
+// separation (measured: the object form leaves the loop at 65/65, the .data()
+// form drops it to 61 arm64 / 41 x86-64). VERIFY_NO_ALIAS_BUF checks the
+// OBJECTS (two live containers never share an allocation) and promises the
+// BUFFERS. Empty containers are fine: nothing is ever accessed through a null
+// data(), so the promise is vacuous there — the bundle is read only by alias
+// queries, which need an access to ask about, and LLVM does not fold `p == q`
+// from it (measured at -O3: the compare survives and answers true for two
+// empty vectors). The two forms that would avoid the null — promising the
+// object address when empty, or a branch around the builtin — both lose the
+// whole loop effect (arm64 66/66 vs 61, x86-64 66/65 vs 41), so the plain
+// .data() form stays; test/noaliascheck.sh arm 7 runs the release probe on
+// two empty vectors. If the function already has a "nothing to do" early
+// return on empty input, put the macro AFTER it: the promise then runs on
+// non-null buffers and still dominates the loop (measured: 64 vs 61 arm64,
+// 44 vs 41 x86-64 — the difference is the emptiness test itself, which costs
+// the same without the promise). Do not add an early return for the macro's
+// sake; the one line alone is the full effect.
+//
+// OWNING CONTAINERS ONLY: std::vector, std::string, std::array — anything
+// whose .data() is its own allocation (or lies inside the object itself, as
+// std::array's and a short std::string's do; two distinct objects are two
+// allocations either way). NEVER a view: two std::span or std::string_view
+// objects can look into ONE allocation, and the promise is per allocation,
+// so even two non-overlapping views would be a lie the release build acts
+// on while the object check passes. The macro refuses views at compile
+// time (static_assert on Diagnostics::detail::isView); for a pair of views,
+// promise the OWNERS they came from, or use VERIFY_NO_ALIAS on the views
+// (the object check alone) and accept that the loop keeps its overlap check.
+//
+// WHY NOT `__restrict` ON THE SIGNATURE. Prefer this macro in the body: it is
+// checked in debug, it is the same optimizer fact in release, and it does not
+// change the API. If a signature ever does need the qualifier, `__restrict__`
+// (double underscore BOTH sides) is the only spelling allowed in this tree. On
+// macOS <sys/cdefs.h> does
+//     #if __STDC_VERSION__ < 199901
+//     #define __restrict
+//     #endif
+// and __STDC_VERSION__ is undefined in C++, so every bare `__restrict` that
+// follows any libc/libc++ include is silently deleted — verified by bisect: a
+// function lost its noalias IR attributes the moment <cstdio> was included.
+// `__restrict__` is a keyword and survives. test/noaliascheck.sh arm 4 sweeps
+// src/ for the bare spelling.
 //
 //   void decompose(const T& src, U& outA, U& outB) {
 //       VERIFY_NO_ALIAS(outA, outB);   // the two outputs must be distinct
 //       ...
 //   }
+//   void axpy(std::vector<uint32_t>& dst, const std::vector<uint32_t>& src) {
+//       VERIFY_NO_ALIAS_BUF(dst, src); // the two BUFFERS are separate storage
+//       ...
+//   }
 // --------------------------------------------------------------------------
+#if defined(__has_builtin)
+  #if __has_builtin(__builtin_assume_separate_storage)
+    #define RW_ASSUME_SEPARATE_STORAGE(p, q)  __builtin_assume_separate_storage((p), (q))
+  #endif
+#endif
+#if !defined(RW_ASSUME_SEPARATE_STORAGE)
+  #define RW_ASSUME_SEPARATE_STORAGE(p, q)  ( (void)0 )   // GCC / clang < 17: no equivalent; the debug check still runs
+#endif
+
+// Debug: VERIFY_TEXT fires if a and b are the same object. Release: VERIFY_TEXT
+// is an inert assume, and RW_ASSUME_SEPARATE_STORAGE hands the optimizer what
+// __restrict__ on the parameters would have.
 #define VERIFY_NO_ALIAS(a, b)                                                   \
-    VERIFY_TEXT( static_cast<const void*>(&(a)) != static_cast<const void*>(&(b)), \
-                 "aliasing violation: '" #a "' and '" #b "' are the same object" )
+    do {                                                                        \
+        VERIFY_TEXT( static_cast<const void*>(&(a)) != static_cast<const void*>(&(b)), \
+                     "aliasing violation: '" #a "' and '" #b "' are the same object" ); \
+        RW_ASSUME_SEPARATE_STORAGE( &(a), &(b) );                               \
+    } while (0)
 
 // Three-way variant for functions with three outputs (e.g. decomposeToTRS).
 #define VERIFY_NO_ALIAS3(a, b, c)                                               \
     do { VERIFY_NO_ALIAS(a, b); VERIFY_NO_ALIAS(a, c); VERIFY_NO_ALIAS(b, c); } while (0)
+
+// Two containers: the OBJECTS must be distinct (checked), and the fact the loop
+// needs is that their BUFFERS are separate storage (promised via .data()).
+#define VERIFY_NO_ALIAS_BUF(a, b)                                               \
+    do {                                                                        \
+        static_assert( !::Diagnostics::detail::isView<decltype(a)>                  \
+                    && !::Diagnostics::detail::isView<decltype(b)>,                 \
+                       "VERIFY_NO_ALIAS_BUF: a view (std::span / std::string_view) can share one allocation with another view; promise the owning containers instead" ); \
+        VERIFY_TEXT( static_cast<const void*>(&(a)) != static_cast<const void*>(&(b)), \
+                     "aliasing violation: '" #a "' and '" #b "' are the same container" ); \
+        RW_ASSUME_SEPARATE_STORAGE( (a).data(), (b).data() );                   \
+    } while (0)
 
 // --------------------------------------------------------------------------
 // 7. Benchmark micro-helpers — DoNotOptimize / ClobberMemory

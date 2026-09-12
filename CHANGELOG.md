@@ -108,6 +108,21 @@ out-of-tree row (12 → 13). `kParserVer` 92 → 93 with the mirror (the branch 
 re-pins with reasons in-file: `test/qschemetrip.hash`, `test/printf_parity.manifest` (the `--impact` help and
 legend name the two new closure kinds; the `--deps` legend's lazy definition gains the rescue class). `docs/COMMANDS.md`
 regenerated (2026-09-11).
+### Changed — `VERIFY_NO_ALIAS` is a release optimizer fact, on LLVM 17 as well
+
+- **`VERIFY_NO_ALIAS` is now an optimizer fact in release, not an inert assume.** `src/infra/Diagnostics.h` §6 adds
+  `__builtin_assume_separate_storage` (clang 17+, `__has_builtin`-guarded, `( (void)0 )` elsewhere) beside the debug
+  check, so codegen matches `__restrict__` on the parameters (`out=a; out+=b; out+=a;` arm64 10 → 6 instructions);
+  `VERIFY_NO_ALIAS_BUF` is the form for two OWNING containers (the object form is inert for their loops; views — `std::span`, `std::string_view` — can share one allocation and are refused at compile time); the comment carries
+  the complete-object contract and the macOS `<sys/cdefs.h>` trap that deletes bare `__restrict` in C++ —
+  `__restrict__` is the only spelling allowed in `src/`. `test/noaliascheck.sh` (eight arms, red against the old
+  definition) proves it. The optimizer half is a separate switch: BasicAA reads the bundle only when
+  `basic-aa-separate-storage` is on — `cl::init(false)` in LLVM 17 (AppleClang 16 / Xcode 16.2: the macos-14 CI
+  runners and the macos-arm64 release leg), `true` from LLVM 18 — so CMake now probes and passes
+  `-mllvm -basic-aa-separate-storage` to our targets (and to the ld64 link under LTO), and the gate classifies the
+  compiler by compiling the real slice three ways, with a `=false` negative control and a cross-check against the
+  cached CMake probe.
+
 ## [0.6.0] — 2026-09-11
 
 **Languages and integrations from outside the project, much faster on the largest trees, and answers that say where
