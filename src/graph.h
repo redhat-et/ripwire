@@ -4135,6 +4135,7 @@ inline std::size_t definitionCountOfName( const IngestResult& ing, NodeId focus 
 inline void markCandidateFilesIncludingDecl( const IngestResult& ing, const std::vector<char>& isDecl,
                                              const std::vector<char>& isCand, std::vector<char>& proven )
 {
+    VERIFY_NO_ALIAS3( isDecl, isCand, proven );   // three same-role dense arrays: proven[] is written while isDecl[]/isCand[] are read
     // The index: ONE entry per DECLARATION file, keyed the way buildPreciseIncludeAdj keys its own
     // (lexicalNormalize on BOTH sides, so a `.`-rooted crawl's `./a/x.h` and a resolved `a/x.h` agree).
     HashMap<std::string, std::uint32_t> declIndex;

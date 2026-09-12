@@ -126,9 +126,9 @@ regenerated (2026-09-11).
   (`src/recall.h`) reads `demand[i]` while writing `alloc[i]` and never resizes either, so it takes the buffer form:
   release codegen 309 → 301 instructions under the build's own flags. `splitNoteTail` (`src/notes.h`),
   `takeAckNamedToken` and `computeDelta` (`src/quality.h`) take debug-only guards; `computeDelta`'s two out-pointers
-  both default to null, so its guard is a null-safe `VERIFY_TEXT` rather than the object form. Two rows remain,
-  `markCandidateFilesIncludingDecl` (`src/graph.h`) and `partitionByScope` (`src/verbs_quality.h`), until the lane that
-  owns those files lands.
+  both default to null, so its guard is a null-safe `VERIFY_TEXT` rather than the object form.
+  `markCandidateFilesIncludingDecl` (`src/graph.h`) and `partitionByScope` (`src/verbs_quality.h`) take the last two
+  guards of the audit's apply list, which is now complete: 21 functions state their no-alias contract at entry.
 
 ## [0.6.0] — 2026-09-11
 

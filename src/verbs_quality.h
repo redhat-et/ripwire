@@ -379,6 +379,7 @@ std::size_t partitionByScope( const rw::quality::Scope& scope, std::vector<rw::q
                               std::vector<rw::quality::Regression>& outOfScope,
                               const gtl::btree_map<std::string, rw::quality::AckRecord>& acks )
 {
+    VERIFY_NO_ALIAS( regs, outOfScope );   // push_back into outOfScope while iterating regs: the same vector twice is UB
     if( !scope.active() )
     {
         return 0;
