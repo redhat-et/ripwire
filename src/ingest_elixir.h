@@ -536,14 +536,18 @@ struct ElixirContext
     bool bareCall( TSNode name ) const
     {
         const auto text = nodeTextOf( name, src );
-        if( text.empty() || text.front() == '_' || text == "true" || text == "false" || text == "nil" ) { return false; }
+        if( text.empty() || text == "true" || text == "false" || text == "nil" ) { return false; }
         const TSNode parent = ts_node_parent( name );
         if( elixirNodeIs( parent, "dot" ) || ( elixirNodeIs( parent, "call" )
             && ts_node_eq( fieldChild( parent, NodeField::Target ), name ) ) ) { return false; }
-        // A capture names a function even if a variable with the same spelling is bound.
+        // A capture names a function even if a variable with the same spelling is bound — and even when the spelling
+        // starts with `_`: the underscore marks an UNUSED VARIABLE, and a named capture is never one, so `&_seed/0`
+        // names _seed/0. This ran after the underscore rule below and the capture minted nothing, uncounted
+        // (test/elixirnamearitycheck.sh J). A bare `_seed` read still falls to that rule.
         if( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "/"
             && elixirNodeIs( ts_node_parent( parent ), "unary_operator" )
             && nodeFieldText( ts_node_parent( parent ), NodeField::Operator, src  ) == "&" ) { return true; }
+        if( text.front() == '_' ) { return false; }
         if( !ts_node_is_null( bindingScope( name ) ) ) { return false; }
         if( const auto it = variables.find( std::string( text ) ); it != variables.end() )
         {
