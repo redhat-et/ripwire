@@ -21,11 +21,16 @@
 #       red rather than vacuously green: this is the ONLY arm in the suite that reads an OLD
 #       capture, and a leak in one is otherwise invisible to everything. A generator predicate that
 #       is not listed here is enforced only when the generator WRITES (assert_scrubbed) — never
-#       against the captures already on disk, which is where the shipped leak actually lived
+#       against the captures already on disk, which is where the shipped leak actually lived.
+#       One class is the project's own rebrand in --naming-calibration's rename rows, keyed on the
+#       PUBLIC name so neither this gate nor its output ever spells what it withholds; every capture's
+#       withheld block must also ACCOUNT for its rows: shown + withheld + past the cut == pairs=
 #   (F) MUTATION CONTROL for (E) — each class must fire on a synthetic offender, and real output that
 #       merely LOOKS like a leak (--hotspots `top=`, community `sym@file.ext` labels, --layout
-#       `owner=`) must survive untouched: an over-broad scrub corrupts output, which is worse than
-#       the leak because the corruption ships as the tool's answer
+#       `owner=`, a rename row that is not the rebrand) must survive untouched: an over-broad scrub
+#       corrupts output, which is worse than the leak because the corruption ships as the tool's
+#       answer. The withholding itself must keep a non-rebrand row byte-identical, disclose the exact
+#       count, and an off-by-one disclosure must make the accounting red
 #   (G) REGENERATION PARITY — regenerating from the binary plus the newest capture in the tree must
 #       reproduce docs/COMMANDS.md byte for byte. Arms (A)-(F) all passed while the shipped doc was
 #       built from a capture (and a generator variant) that were never committed — (B) compares flag
@@ -121,20 +126,61 @@ fi
 # green. `find_address` in particular carries the discriminator that keeps ripwire's own
 # `symbol@file.ext` community labels from being mistaken for addresses — restating it by hand here
 # would have this arm red on correct output.
+# The ACCOUNTING a withheld --naming-calibration block must close, written ONCE and imported by (E) and
+# by its mutation control in (F), so the real sweep and the proof that it can fail share one definition.
+# Withholding rows from a recorded run stays honest only while the disclosure states exactly what left:
+# the rows a block shows, plus the rows its disclosure says were withheld, plus the rows past the
+# capture's display cut, must equal the pairs= the tool itself reported. A capture that was never
+# withheld closes the same sum with withheld=0.
+cat > "$TMP/rebrandaccount.py" <<'PY'
+import re
+import docs_commands_build as gen
+
+VERB  = re.compile( r'\s--naming-calibration(?![\w-])' )
+PAIRS = re.compile( r'<naming-calibration\s[^<>]*\bpairs="([0-9]+)"' )
+CUT   = re.compile( r'^… \[([0-9]+) more display lines; ' )
+CLOSE = '</naming-calibration>'
+
+def account( cmd, body ):
+    """None when the block is not a --naming-calibration run; else ( 'ACCOUNT_OK' | 'ACCOUNT_BAD', detail )."""
+    if not VERB.search( ' ' + cmd ):
+        return None
+    text     = '\n'.join( body )
+    withheld = sum( int( m.group( 1 ) ) for m in gen.REBRAND_DISCLOSURE_RE.finditer( text ) )
+    pairs    = PAIRS.search( text )
+    if pairs is None:
+        if withheld:
+            return ( 'ACCOUNT_BAD', 'a disclosure of %d withheld row(s) with no pairs= to account against' % withheld )
+        return None
+    shown = sum( 1 for ln in body if ln.startswith( '<p ' ) )
+    cut   = CUT.match( body[ -1 ] ) if body else None
+    # past the cut: the r rows all sit inside the window, so every hidden display line is a p row except
+    # the closing tag, which is hidden too whenever the block was cut
+    past  = ( int( cut.group( 1 ) ) - ( 0 if CLOSE in text else 1 ) ) if cut else 0
+    detail = 'shown=%d withheld=%d past_cut=%d pairs=%s' % ( shown, withheld, past, pairs.group( 1 ) )
+    return ( 'ACCOUNT_OK' if shown + withheld + past == int( pairs.group( 1 ) ) else 'ACCOUNT_BAD', detail )
+PY
+
 cat > "$TMP/scrubarm.py" <<'PY'
 import glob, os, re, sys
 
 ROOT = sys.argv[1]
 sys.path.insert( 0, os.path.join( ROOT, 'docs' ) )
+sys.path.insert( 0, sys.argv[2] )
 try:
     import docs_commands_build as gen
+    import rebrandaccount
 except ImportError as exc:
     print( 'IMPORT_FAIL %s' % exc )
     sys.exit( 0 )
 
 # spelled with a class so this gate does not itself contain the literal it hunts for
 HOME = re.compile( r'/[Uu]sers/' )
+REBRAND = "the project's own rebrand rename row"
 CLASSES = (
+    # FIRST: a line carrying such a row is reported by the row's PUBLIC side and never printed, whatever
+    # else it trips — printing it would publish the old spelling in the log of every red CI run
+    ( REBRAND,                     lambda ln: gen.rebrand_rename_row( ln ) ),
     ( 'absolute home path',        lambda ln: HOME.search( ln ) ),
     ( 'temp/scratch path',         lambda ln: gen.TMP_PATH.search( ln ) ),
     ( 'internal coordinate shape', lambda ln: gen.COORD.search( ln ) ),
@@ -150,11 +196,19 @@ for path in targets:
     rel = os.path.relpath( path, ROOT )
     for i, line in enumerate( open( path, encoding = 'utf-8', errors = 'replace' ), 1 ):
         for label, hit in CLASSES:
-            if hit( line ):
-                print( 'HIT %s:%d: %s: %s' % ( rel, i, label, line.strip()[ :100 ] ) )
+            found = hit( line )
+            if found:
+                shown = gen.rebrand_row_public_side( found ) if label == REBRAND else line.strip()[ :100 ]
+                print( 'HIT %s:%d: %s: %s' % ( rel, i, label, shown ) )
                 break
+    if path == targets[ 0 ]:
+        continue                     # COMMANDS.md carries no `## ` capture headings to account
+    for item in gen.parse_capture( path ):
+        verdict = rebrandaccount.account( item[ 'cmd' ], item[ 'body' ] )
+        if verdict is not None:
+            print( '%s %s: %s' % ( verdict[ 0 ], rel, verdict[ 1 ] ) )
 PY
-python3 "$TMP/scrubarm.py" "$ROOT" > "$TMP/scrub" 2>&1
+python3 "$TMP/scrubarm.py" "$ROOT" "$TMP" > "$TMP/scrub" 2>&1
 scannedCount="$( grep '^SCANNED ' "$TMP/scrub" | awk '{print $2}' )"
 # The count is checked against the TREE, not against a floor. `showcasecapturecheck.sh` and
 # `argvdiffcheck.sh` both scope themselves to the NEWEST capture deliberately (they judge the
@@ -171,7 +225,19 @@ elif grep -q '^HIT ' "$TMP/scrub"; then
     no "(E) shipped document(s) trip the public-export scrub in $( grep -c '^HIT ' "$TMP/scrub" ) place(s):"
     grep '^HIT ' "$TMP/scrub" | sed 's/^HIT /          /'
 else
-    ok "(E) all $scannedCount shipped document(s) — docs/COMMANDS.md + every one of $captureCount capture(s) — clean on every scrub class (home path, temp path, coordinate, internal doc name, internal doc heading, address)"
+    ok "(E) all $scannedCount shipped document(s) — docs/COMMANDS.md + every one of $captureCount capture(s) — clean on every scrub class (the project's own rebrand rows, home path, temp path, coordinate, internal doc name, internal doc heading, address)"
+fi
+if ! grep -q '^IMPORT_FAIL' "$TMP/scrub"; then
+    if grep -q '^ACCOUNT_BAD ' "$TMP/scrub"; then
+        no "(E) a --naming-calibration block does not account for its rows — shown + withheld + past the cut must equal the pairs= the tool reported:"
+        grep '^ACCOUNT_BAD ' "$TMP/scrub" | sed 's/^ACCOUNT_BAD /          /'
+    elif ! grep -q '^ACCOUNT_OK ' "$TMP/scrub"; then
+        no "(E) no capture carries a --naming-calibration block to account — the accounting has nothing to judge (heading renamed, or the verb left the capture)"
+    else
+        accounted="$( grep -c '^ACCOUNT_OK ' "$TMP/scrub" )"
+        withheldTotal="$( grep '^ACCOUNT_OK ' "$TMP/scrub" | sed -n 's/.* withheld=\([0-9]*\) .*/\1/p' | awk '{ s += $1 } END { print s + 0 }' )"
+        ok "(E) all $accounted --naming-calibration block(s) account for their rows (shown + withheld + past the cut == pairs=); $withheldTotal row(s) withheld across them"
+    fi
 fi
 
 # ── (F) mutation control for (E) — prove the scrub arm can still see a leak ────────────────────────
@@ -183,10 +249,15 @@ import os, re, sys
 
 ROOT = sys.argv[1]
 sys.path.insert( 0, os.path.join( ROOT, 'docs' ) )
+sys.path.insert( 0, sys.argv[2] )
 import docs_commands_build as gen
+import rebrandaccount
 
 HOME = re.compile( r'/[Uu]sers/' )
 PROBES = (
+    # spelled with a placeholder: the class keys on the PUBLIC side, so any other single part will do
+    ( "the project's own rebrand rename row", '<p o="ARM_OLDNAME" n="ARM_RIPWIRE" sup="3" at="./a.py:1"/>',
+                                                                            lambda ln: gen.rebrand_rename_row( ln ) ),
     ( 'absolute home path',        '/' + 'Users' + '/someone/checkout/src', lambda ln: HOME.search( ln ) ),
     ( 'temp/scratch path',         '/private/tmp/ripwire_showcase_ab12/aux', lambda ln: gen.TMP_PATH.search( ln ) ),
     ( 'internal coordinate shape', 'see ' + '§' + 'B12.9 of the round plan',  lambda ln: gen.COORD.search( ln ) ),
@@ -230,14 +301,99 @@ if 'someone@example.com' in gen.scrub_emails( gen.scrub_author_attrs( ownerRow )
 headingRow = '<sym p="NOTES.md" id="8c. Local reasoning — commercial tool survey"/>'
 if 'commercial tool survey' in gen.scrub_internal_rows( headingRow ):
     print( 'DEAD heading row: an internal heading on an anonymised row survived the scrub' ); bad += 1
+
+# ── the rebrand class: what it must KEEP, then the withholding, its accounting and its refusal ─────
+rebrandBefore = bad
+# Renames that touch the public name, or sit beside it, and are NOT the rebrand. The first is a real row
+# from the 2026-09-11 capture; withholding any of them would delete a true row from the tool's answer.
+REBRAND_KEPT = (
+    ( 'an existing non-rebrand rename row', '<p o="copyRange" n="moveRange" sup="2" at="./src/infra/svector.h:130"/>' ),
+    ( 'a re-casing of the public name',     '<p o="Ripwire" n="RIPWIRE" sup="1" at="./a.py:1"/>' ),
+    ( 'a DIFFERENT part changed',           '<p o="RIPWIRE_OLD" n="RIPWIRE_REPO" sup="1" at="./a.py:2"/>' ),
+    ( 'a part added, not swapped',          '<p o="OLDNAME" n="ARM_RIPWIRE" sup="1" at="./a.py:3"/>' ),
+    ( 'the public name inside a part',      '<p o="oldwire" n="ripwired" sup="1" at="./a.py:4"/>' ),
+)
+for label, line in REBRAND_KEPT:
+    if gen.rebrand_rename_row( line ) is not None:
+        print( 'OVERSCRUB %s: the rebrand predicate claimed a row that is not the rebrand: %s' % ( label, line ) ); bad += 1
+
+CMD      = './build/ripwire . --naming-calibration'
+KEPT_ROW = REBRAND_KEPT[ 0 ][ 1 ]
+# shaped like a real cut block: three rebrand rows (two ahead of the kept row, one after it), the cut
+# marker, and a pairs= the unwithheld block already closes (4 shown + 0 withheld + 3-1 past the cut = 6)
+BLOCK = [
+    '<naming-calibration probed="1" pairs="6" at="0000000">',
+    '<r n="naming-short" old="0" new="0" fired="0"/>',
+    '<p o="ARM_OLDNAME" n="ARM_RIPWIRE" sup="3" at="./a.py:1"/>',
+    '<p o="OLDNAME" n="RIPWIRE" sup="12" at="./b.py:2"/>',
+    KEPT_ROW,
+    '<p o="oldname_context" n="ripwire_context" sup="2" at="./c.py:3"/>',
+    '… [3 more display lines; full output is 900 bytes on 1 raw line(s)]',
+]
+out, withheld = gen.withhold_rebrand_rows( BLOCK )
+disclosure = [ ln for ln in out if gen.REBRAND_DISCLOSURE_RE.search( ln ) ]
+survivors  = [ ln for ln in BLOCK if gen.rebrand_rename_row( ln ) is None ]
+if withheld != 3 or len( disclosure ) != 1 or gen.REBRAND_DISCLOSURE_RE.search( disclosure[ 0 ] ).group( 1 ) != '3':
+    print( 'DEAD rebrand withholding: expected 3 rows withheld under ONE disclosure saying 3, got %d under %r' % ( withheld, disclosure ) ); bad += 1
+elif out.index( disclosure[ 0 ] ) != 2:
+    print( 'DEAD rebrand withholding: the disclosure does not stand where the first withheld row stood: %r' % out ); bad += 1
+if [ ln for ln in out if ln not in disclosure ] != survivors or KEPT_ROW not in out:
+    print( 'OVERSCRUB rebrand withholding: a line that is not the rebrand was changed, dropped or reordered: %r' % out ); bad += 1
+if any( gen.rebrand_rename_row( ln ) is not None for ln in out ):
+    print( 'DEAD rebrand withholding: a rebrand row survived it' ); bad += 1
+if gen.withhold_rebrand_rows( out ) != ( out, 0 ):
+    print( 'DEAD rebrand withholding: a second pass is not a no-op, so an already-withheld capture would churn' ); bad += 1
+
+offByOne = [ ln.replace( '<!-- 3 rename', '<!-- 2 rename' ) for ln in out ]
+if offByOne == out:
+    print( 'DEAD rebrand accounting: the off-by-one mutation did not take, so its red below would prove nothing' ); bad += 1
+for label, body, want in (
+        ( 'the block before withholding',            BLOCK,                                    'ACCOUNT_OK'  ),
+        ( 'the withheld block',                      out,                                      'ACCOUNT_OK'  ),
+        ( 'a disclosure one short of what left',     offByOne,                                 'ACCOUNT_BAD' ),
+        ( 'a row dropped with no disclosure at all', [ ln for ln in BLOCK if ln != KEPT_ROW ], 'ACCOUNT_BAD' ) ):
+    got = rebrandaccount.account( CMD, body )
+    if got is None or got[ 0 ] != want:
+        print( 'DEAD rebrand accounting: %s should read %s, got %r' % ( label, want, got ) ); bad += 1
+
+# a row the capture's 300-byte display cut truncated is still withheld whole
+truncated = '<p o="OLDNAME_X" n="RIPWIRE_X" sup="1" at="./' + 'd' * 300 + ' … [line truncated: 40 more bytes on this line]'
+if gen.withhold_rebrand_rows( [ truncated ] )[ 1 ] != 1:
+    print( 'DEAD rebrand withholding: a row truncated by the display cut was not withheld' ); bad += 1
+# one sharing its line with other output is NOT cut out of it; the refusal stops it, by its public side only
+shared = '<x/><p o="OLDNAME" n="RIPWIRE" sup="1" at="./a.py:5"/>'
+if gen.withhold_rebrand_rows( [ shared ] ) != ( [ shared ], 0 ):
+    print( 'OVERSCRUB rebrand withholding: a row sharing its line with other output was edited out of that line' ); bad += 1
+try:
+    gen.assert_scrubbed( shared )
+    print( 'DEAD rebrand refusal: assert_scrubbed let a rebrand row through' ); bad += 1
+except SystemExit as refusal:
+    if 'OLDNAME' in str( refusal.code ) or 'n="RIPWIRE"' not in str( refusal.code ):
+        print( 'DEAD rebrand refusal: the refusal must name the row by its public side and never print the old spelling' ); bad += 1
+# and the docs/COMMANDS.md path: a sample lifted from a capture that was never withheld
+sample = gen.trim_sample( BLOCK, 'ripwire' )
+if ( any( gen.rebrand_rename_row( ln ) is not None for ln in sample ) or KEPT_ROW not in sample
+     or not any( gen.REBRAND_DISCLOSURE_RE.search( ln ) for ln in sample ) ):
+    print( 'DEAD rebrand withholding in trim_sample: the sample kept a rebrand row, or lost the disclosure or the kept row: %r' % sample ); bad += 1
+if bad == rebrandBefore:
+    print( 'REBRAND_CONTROL the real non-rebrand row copyRange->moveRange and four near misses are kept byte-identical; '
+           '3 rebrand rows are withheld under ONE disclosure saying 3; an off-by-one disclosure and a silent drop both make '
+           'the accounting red; a display-cut row is withheld, a row sharing its line is refused by its public side only; '
+           'trim_sample withholds too' )
 print( 'MUTATE %d' % bad )
 PY
-mutateOut="$( python3 "$TMP/scrubmutate.py" "$ROOT" 2>&1 )"
+mutateOut="$( python3 "$TMP/scrubmutate.py" "$ROOT" "$TMP" 2>&1 )"
 if printf '%s' "$mutateOut" | grep -q '^MUTATE 0$'; then
-    ok "(F) mutation control — every scrub class fires on a synthetic leak, and real output (hotspots top=, community labels, layout owner=, code/public-doc id=, n=, a colliding fixture path) survives untouched"
+    ok "(F) mutation control — every scrub class fires on a synthetic leak, and real output (hotspots top=, community labels, layout owner=, code/public-doc id=, n=, a colliding fixture path, a rename row that is not the rebrand) survives untouched"
 else
     no "(F) mutation control failed — the scrub is inert or over-broad:"
     printf '%s\n' "$mutateOut" | sed 's/^/          /'
+fi
+rebrandControl="$( printf '%s\n' "$mutateOut" | sed -n 's/^REBRAND_CONTROL //p' )"
+if [ -n "$rebrandControl" ]; then
+    ok "(F) rebrand control — $rebrandControl"
+else
+    no "(F) rebrand control did not complete — the withholding, its accounting or its refusal is inert or over-broad (lines above)"
 fi
 
 # ── (G) regeneration parity — the doc must be reproducible from the COMMITTED capture ─────────────

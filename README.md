@@ -925,6 +925,9 @@ ripwire . --callers=someFunction                   # who calls it
 ripwire . --test-gate                              # before you commit: which tests must run
 ```
 
+> **Written for your agent.** Every command prints compact XML sized for an AI agent to read, not for a person
+> scanning a terminal. Human-readable output is on the roadmap.
+
 <details>
 <summary>CLI or MCP, the <code>-DCMAKE_BUILD_TYPE=Release</code> trap, and the honesty contract in one line</summary>
 

@@ -62,6 +62,7 @@ struct AffectedSeeds
     std::vector<NodeId>        seeds;                  // deduped seed symbols, id asc (both readings)
     std::vector<NodeId>        walkSeeds;              // seeds OUTSIDE test paths — the caller walk's roots
     std::vector<std::uint32_t> seedTestFiles;          // matched TEST files, file id asc, deduped
+    std::size_t                unprovenDefs  = 0;      // H1: the decl→def residue, summed over the SYMBOL items (a path item adds 0)
     bool                       sawFileItem   = false;  // at least one item read as a path pattern
     bool                       sawSymbolItem = false;  // at least one item read as a symbol
     bool                       ok            = true;   // false ⇒ badItem resolved under NEITHER reading
@@ -143,9 +144,14 @@ inline AffectedSeeds resolveAffectedSeeds( const IngestResult& ing, std::string_
             continue;
         }
 
-        const std::vector<NodeId> defs = resolveAllByNameQualified( ing, item );
+        // H1: the out-param is this item's decl→def residue — definitions a file:NAME item found and could not tie to
+        // the file it named, so they are no seed and the caller walk never starts from them. Summed item by item onto
+        // the answer, --path's rule for its two endpoints: a path item never reaches this line, a bare NAME never widens.
+        std::size_t               itemUnprovenDefs = 0;
+        const std::vector<NodeId> defs             = resolveAllByNameQualified( ing, item, &itemUnprovenDefs );
         if( defs.empty() ) { sel.ok = false;  sel.badItem.assign( item );  return sel; }
         sel.sawSymbolItem = true;
+        sel.unprovenDefs += itemUnprovenDefs;
         sel.seeds.insert( sel.seeds.end(), defs.begin(), defs.end() );
     }
     std::sort( sel.seeds.begin(), sel.seeds.end() );

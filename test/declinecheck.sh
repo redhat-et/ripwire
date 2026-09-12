@@ -41,14 +41,14 @@
 #   (E) the three answers in XML / --json / --format=columnar and the MCP twins; each legend defines the key it
 #       emits, and an answer with nothing declined carries neither the key nor its clause; the callers answer's next=
 #       LANDS: --uses=NAME lists each declined site's file:line, and the call sites no caller row encloses number
-#       exactly declined_calls (1 on the four arm-A names, 0 on three bound controls); a file-qualified selector's
-#       narrowed uses cannot list a site that resolves to no definition, so call_sites_of_name must disclose it
+#       exactly declined_calls (1 on the four arm-A names, 0 on three bound controls); narrowed file:name,
+#       line-seed, canonical and scope spellings hand over the bare name, with CLI/MCP parity and an honest legend
 #   (F) conservation: the dispositions sum to calls=, unaccounted=0, census declined/external/unresolved == the
 #       header's, bound == the non-external decision rows; every exit the fixture is built to reach is reached;
 #       a two-root run reaches other_root and conserves too; and test/stdqualfix, where the std:: guard refuses
 #       std::move sites through vetoExternal, conserves with each refusal counted external, never unaccounted
 #   (G) the predicates can fail (a line that does not sum, unaccounted=1, a bare zero, a header without declined=,
-#       a uses answer that drops the declined site)
+#       a uses answer that drops the declined site, a next= that incorrectly retains the narrowed selector)
 #   (H) determinism x2 (map and census), xmllint, no degrade alert on stderr
 #
 # Exits non-zero on any failure.
@@ -273,19 +273,51 @@ jtwin|-|0
 ctwin|-|0
 pytwin|-|0
 EOF
-# the file-qualified selector the dialect loop reads: its next= is --uses on that SAME selector, which keeps only the call
-# sites that RESOLVE to the chosen definition — a declined site resolves to none, so it cannot be a row there. It must be
-# disclosed instead: call_sites_of_name (the un-narrowed total) minus the call rows shown is at least declined_calls.
-rw --callers="$DEF" >"$TMP/nxcallers.xml"
-R="$( root_tag "$TMP/nxcallers.xml" callers )"
-NEXT="$( attr "$R" next )"; K="$( attr "$R" declined_calls )"
-: >"$TMP/nxuses.xml"
-case "$NEXT" in --uses=*) rw "$NEXT" >"$TMP/nxuses.xml" ;; esac
-U="$( root_tag "$TMP/nxuses.xml" uses )"; TOTAL="$( attr "$U" call_sites_of_name )"
-SHOWN="$( call_sites "$TMP/nxuses.xml" | wc -l | tr -d ' ' )"
-[ "$NEXT" = "--uses=$DEF" ] && [ -n "$K" ] && [ -n "$TOTAL" ] && [ $(( TOTAL - SHOWN )) -ge "$K" ] \
-    && ok "(E) --callers=$DEF next=\"$NEXT\" discloses the declined site: call_sites_of_name=$TOTAL, $SHOWN call row(s) shown, declined_calls=$K" \
-    || no "(E) --callers=$DEF next=\"$NEXT\" hides the declined site: ${U:-no <uses> root} (declined_calls=${K:-absent})"
+# The narrowed callers pointer must land on the actual declined site, not just disclose arithmetic.
+# One table drives CLI and MCP; retain the Python/Rust coverage added by the original work.
+narrowed_cases(){ cat <<'CASES'
+java/alpha/Alpha.java:jbody|jbody|java/caller/JavaCaller.java:7
+@java/alpha/Alpha.java:5|jbody|java/caller/JavaCaller.java:7
+cpp/alpha/alpha.cpp:crender|crender|cpp/caller/caller.cpp:3
+cpp/alpha/alpha.cpp::Alpha::crender|crender|cpp/caller/caller.cpp:3
+Alpha::crender|crender|cpp/caller/caller.cpp:3
+py/alpha/alpha.py:pyfetch|pyfetch|py/caller/caller.py:2
+rust/alpha/alpha.rs:rfetch|rfetch|rust/caller/caller.rs:3
+CASES
+}
+is_bare_next(){ [ "$( attr "$1" next )" = "--uses=$2" ]; }
+while IFS='|' read -r wanted_selector want site; do
+    rw --callers="$wanted_selector" >"$TMP/nxcallers.xml"
+    R="$( root_tag "$TMP/nxcallers.xml" callers )"
+    NEXT="$( attr "$R" next )"; K="$( attr "$R" declined_calls )"
+    [ "$K" = 1 ] && is_bare_next "$R" "$want" \
+        && ok "(E) --callers=$wanted_selector next=\"$NEXT\" is the bare name with one declined call" \
+        || no "(E) --callers=$wanted_selector expected --uses=$want and declined_calls=1: ${R:-no root}"
+    : >"$TMP/nxuses.xml"
+    case "$NEXT" in --uses=*) rw "$NEXT" >"$TMP/nxuses.xml" ;; esac
+    call_sites "$TMP/nxuses.xml" | grep -qxF "$site" \
+        && ok "(E) --callers=$wanted_selector next= actually lists $site" \
+        || no "(E) --callers=$wanted_selector next= does not list $site"
+    rw --callers="$wanted_selector" --format=columnar >"$TMP/nxcolumnar.xml"
+    C="$( root_tag "$TMP/nxcolumnar.xml" callers )"
+    [ -n "$NEXT" ] && [ "$( attr "$C" next )" = "$NEXT" ] \
+        && ok "(E) --callers=$wanted_selector XML and columnar next= agree" \
+        || no "(E) --callers=$wanted_selector columnar next= differs"
+    L="$( legend_of "$TMP/nxcallers.xml" )"
+    printf '%s' "$L" | grep -qF 'follow-up (the uses verb on the called name' \
+        && ! printf '%s' "$L" | grep -qF 'the uses verb on this selector' \
+        && ok "(E) --callers=$wanted_selector legend defines the emitted bare-name pointer" \
+        || no "(E) --callers=$wanted_selector legend still describes the wrong selector"
+done < <( narrowed_cases )
+# Both unchanged populations retain the original selector legend and pointer.
+for sel in java/solo/Solo.java:jonly jbody; do
+    rw --callers="$sel" >"$TMP/control.xml"
+    R="$( root_tag "$TMP/control.xml" callers )"
+    [ "$( attr "$R" next )" = "--uses=$sel" ] \
+        && legend_of "$TMP/control.xml" | grep -qF 'the uses verb on this selector: the call sites' \
+        && ok "(E) --callers=$sel keeps its original pointer and legend" \
+        || no "(E) --callers=$sel changed its pointer or legend"
+done
 # omit-at-zero: an answer with nothing declined carries neither the key nor the clause
 for spec in "callers java/solo/Solo.java:jonly" "callees javaUnique" "impact java/solo/Solo.java:jonly"; do
     set -- $spec
@@ -308,6 +340,13 @@ print( "__ERROR__:" + r[ "error" ].get( "message", "" ) if "error" in r else r[ 
 '
 }
 call(){ printf '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"%s","arguments":%s}}' "$1" "$2"; }
+# The very same selector table and JSON-RPC helpers verify the MCP twin.
+while IFS='|' read -r wanted_selector want site; do
+    M="$( mcp_text "$( call find_referencing_symbols '{"path":"'"$CORPUS"'","symbol":"'"$wanted_selector"'"}' )" )"
+    printf '%s' "$M" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("next")==sys.argv[1] and d.get("declined_calls")==1 else 1)' "--uses=$want" \
+        && ok "(E) MCP find_referencing_symbols $wanted_selector next= matches CLI" \
+        || no "(E) MCP find_referencing_symbols $wanted_selector next= differs"
+done < <( narrowed_cases )
 M="$( mcp_text "$( call find_referencing_symbols '{"path":"'"$CORPUS"'","symbol":"jbody"}' )" )"
 printf '%s' "$M" | grep -q '"declined_calls":1[,}]' && ok "(E) MCP find_referencing_symbols carries \"declined_calls\":1" \
     || no "(E) MCP find_referencing_symbols: $( printf '%s' "$M" | head -c 240 )"
@@ -389,6 +428,12 @@ H='<!-- files=1 symbols=2 edges=0 shown=2 est_tokens=9 ambiguous=0 unresolved=0 
 printf '%s' '<uses of="jbody" defs="2" external="0" count="0" root="." counts_floor="1"></uses>' >"$TMP/g_uses.xml"
 call_sites "$TMP/g_uses.xml" | grep -qxF java/caller/JavaCaller.java:7 \
     && no "(G) the site predicate finds a declined site the uses answer does not list" || ok "(G) a uses answer that drops the declined site IS detected"
+
+# Exercise the identical live predicate against the original broken pointer shape.
+R='<callers of="java/alpha/Alpha.java:jbody" defs="1" count="0" declined_calls="1" next="--uses=java/alpha/Alpha.java:jbody">'
+is_bare_next "$R" jbody \
+    && no "(G) the bare-name pointer predicate accepts a narrowed selector" \
+    || ok "(G) a next= that still names the narrowed selector IS rejected"
 
 # ── (H) determinism, well-formedness, no degrade alert ────────────────────────────────────────────────────────
 echo "=== (H) determinism + well-formedness ==="

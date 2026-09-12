@@ -143,6 +143,87 @@ def scrub_internal_rows( text ):
     return INTERNAL_ROW.sub( redact, text )
 
 
+# ── the project's own rebrand, withheld from every published sample ───────────────────────────────
+# `--naming-calibration` mines THIS repository's git history for old->new identifier renames, and the
+# largest family it finds is the project's own rebrand: rows whose NEW spelling carries the public name
+# as one `_`-delimited part and whose OLD spelling is the same identifier with only that part swapped.
+# That old part is a private pre-release identifier, and a capture of a real run on this repository
+# publishes it at exit 0, clean on every class above.
+#
+# The rule keys on the PUBLIC side on purpose. It never spells what it withholds, so this file, the
+# capture harness and the gate can be read and published without naming it — and the count is still
+# exact, because that shape (one part swapped for the public name) IS the family.
+#
+# Withheld, never silently dropped: ONE comment replaces the rows, with the exact count, where the first
+# of them stood. Rows shown + rows withheld + rows past the display cut therefore still add up to the
+# pairs= the tool reported, and test/docscommandscheck.sh arm (E) checks that sum on every capture.
+PUBLIC_NAME_PART      = 'ripwire'
+RENAME_ROW            = re.compile( r'<p\s[^<>]*>?' )
+RENAME_ROW_ATTR       = re.compile( r'(?<=\s)([on])="([^"]*)"' )
+REBRAND_DISCLOSURE    = "<!-- %d rename row%s withheld: the project's own rebrand, which names a private pre-release identifier -->"
+REBRAND_DISCLOSURE_RE = re.compile( r"<!-- ([0-9]+) rename rows? withheld: the project's own rebrand" )
+
+
+def is_rebrand_rename( old, new ):
+    """True when NEW holds the public name as a whole `_`-delimited part (in any case, or as the whole
+    identifier) and OLD is NEW with exactly that one part replaced by a different single part.
+
+    A re-casing of the public name itself (`Ripwire` -> `RIPWIRE`) is not a rebrand and is kept, and so is
+    a rename whose changed part is some OTHER part (`RIPWIRE_OLD` -> `RIPWIRE_REPO`)."""
+    oldParts = old.split( '_' )
+    newParts = new.split( '_' )
+    if len( oldParts ) != len( newParts ):
+        return False
+    changed = [ i for i in range( len( newParts ) ) if oldParts[ i ] != newParts[ i ] ]
+    if len( changed ) != 1:
+        return False
+    swapped = changed[ 0 ]
+    return ( newParts[ swapped ].lower() == PUBLIC_NAME_PART
+             and oldParts[ swapped ] != ''
+             and oldParts[ swapped ].lower() != PUBLIC_NAME_PART )
+
+
+def rebrand_rename_row( line ):
+    """The leak PREDICATE for the rows `withhold_rebrand_rows` removes, shared with `assert_scrubbed`, the
+    capture harness and the gate so none of them can disagree. Returns the offending row, or None.
+
+    The closing `>` is optional so a row the capture's 300-byte display cut truncated is still seen."""
+    for row in RENAME_ROW.finditer( line ):
+        attrs = dict( RENAME_ROW_ATTR.findall( row.group( 0 ) ) )
+        if 'o' in attrs and 'n' in attrs and is_rebrand_rename( attrs[ 'o' ], attrs[ 'n' ] ):
+            return row.group( 0 )
+    return None
+
+
+def rebrand_row_public_side( row ):
+    """How a report NAMES an offending row: by its new spelling only. Printing the row would publish the
+    old spelling in the log of every run that goes red, CI logs included."""
+    return 'n="%s"' % dict( RENAME_ROW_ATTR.findall( row ) ).get( 'n', '' )
+
+
+def withhold_rebrand_rows( lines ):
+    """LINES without the project's own rebrand rows -> ( lines, withheld ).
+
+    One disclosure comment with the exact count stands where the first withheld row stood; every other
+    line comes back byte-identical and in order, and a second pass withholds nothing. Only a row that is
+    its line's whole content is withheld: cutting one out of the middle of other output would edit the
+    tool's answer, so such a row is left in place for the callers' refuse-to-write check to stop."""
+    out      = []
+    withheld = 0
+    firstAt  = -1
+    for line in lines:
+        row = rebrand_rename_row( line )
+        if row is not None and line.strip() == row:
+            if firstAt < 0:
+                firstAt = len( out )
+            withheld += 1
+            continue
+        out.append( line )
+    if withheld:
+        out.insert( firstAt, REBRAND_DISCLOSURE % ( withheld, '' if withheld == 1 else 's' ) )
+    return out, withheld
+
+
 MAX_SAMPLE_LINES = 14
 MAX_SAMPLE_BYTES = 1600
 
@@ -413,6 +494,10 @@ def trim_sample( body, name ):
     # seams, so an element can be the only thing on its line but its ownership context is the block.
     # No substitution above adds or removes a newline, so the split below is line-for-line with `body`.
     scrubbedBody = scrub( '\n'.join( body ), name ).split( '\n' )
+    # The project's own rebrand rows are the one class withheld by whole LINE, so this is the one step that
+    # changes the line count: every count below is taken over the withheld body, whose disclosure comment
+    # accounts for what left. A no-op on a capture the harness already withheld them from.
+    scrubbedBody, _withheld = withhold_rebrand_rows( scrubbedBody )
     kept    = []
     total   = 0
     dropped = 0
@@ -433,7 +518,7 @@ def trim_sample( body, name ):
         kept.append( line )
         if not isLegend:
             total += len( line )
-    more = len( body ) - len( kept ) - dropped
+    more = len( scrubbedBody ) - len( kept ) - dropped
     if more > 0:
         kept.append( '... [%d more line(s); run it to see the whole thing]' % more )
     if dropped:
@@ -684,7 +769,13 @@ def assert_scrubbed( text, what = 'refusing to write' ):
     """The generator must not be able to emit — or bless — what the public-export gate forbids."""
     bad = []
     for i, line in enumerate( text.split( '\n' ), 1 ):
-        if HOME_PATH.search( line ):
+        rebrandRow = rebrand_rename_row( line )
+        if rebrandRow is not None:
+            # checked FIRST, and named by its public side only: a report that printed this line would
+            # publish the old spelling in the log of every run that fails here
+            bad.append( '%d: the project\'s own rebrand rename row, which names a private pre-release identifier: %s'
+                        % ( i, rebrand_row_public_side( rebrandRow ) ) )
+        elif HOME_PATH.search( line ):
             bad.append( '%d: absolute home path' % i )
         elif COORD.search( line ):
             bad.append( '%d: internal coordinate shape: %s' % ( i, line.strip()[ :90 ] ) )

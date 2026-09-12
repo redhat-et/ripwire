@@ -76,6 +76,32 @@ struct CallHierarchyRows
     std::size_t         declinedCalls = 0;
 };
 
+// The ONE selector derivation for both callers emitters and their legend condition.
+// A declined call names no single definition: widen only a narrowed callers selector to
+// its resolved definitions' shared name. Bare selectors and all non-declined answers keep their bytes.
+inline std::pair<std::string_view, bool> callHierarchyNextSelector( const IngestResult& ing, const CallHierarchyRows& hierarchy,
+                                                                  std::string_view selector, bool wantCallers )
+{
+    if( !wantCallers || hierarchy.declinedCalls == 0 || hierarchy.matches.empty() )
+    {
+        return { selector, false };
+    }
+    const std::string_view name = ing.symbols[ hierarchy.matches.front() ].name;
+    if( name == selector )
+    {
+        return { selector, false };
+    }
+    // resolveAllByNameQualified's tiers share one leaf name; guard that before widening.
+    for( const NodeId id : hierarchy.matches )
+    {
+        if( ing.symbols[id].name != name )
+        {
+            return { selector, false };
+        }
+    }
+    return { name, true };
+}
+
 inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph& g, std::string_view selector, bool wantCallers )
 {
     CallHierarchyRows out;
