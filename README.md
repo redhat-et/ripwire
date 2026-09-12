@@ -1132,7 +1132,7 @@ shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
 
 ---
 
-> **Want to help?** Start anywhere on the spectrum. At the ready-made end, twenty open problems — languages,
+> **Want to help?** Start anywhere on the spectrum. At the ready-made end, open problems — languages,
 > resolver bugs, fuzzers, docs — are written up as starter kits: the research is done, the file and line pointers
 > are in the prompt, and **each prompt writes a plan and stops**, so we can agree the approach before you write any
 > code.
@@ -1140,7 +1140,7 @@ shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
 > ```bash
 > git clone https://github.com/redhat-et/ripwire && cd ripwire
 > cmake -S . -B build && cmake --build build -j     # plain build, no build type
-> ls prompts/help-wanted/                           # twenty kits — pick one
+> ls prompts/help-wanted/                           # pick one
 > claude "follow prompts/help-wanted/zig-language.md"     # or your agent of choice
 > ```
 >
@@ -1164,8 +1164,8 @@ shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
 > what a change makes *worse*, and handing that back while the code is still being written.
 >
 > [help wanted](https://github.com/redhat-et/ripwire/labels/help%20wanted) ·
-> [good first issue](https://github.com/redhat-et/ripwire/labels/good%20first%20issue) (three) ·
-> [all twenty prompts](prompts/help-wanted/)
+> [good first issue](https://github.com/redhat-et/ripwire/labels/good%20first%20issue) ·
+> [all the prompts](prompts/help-wanted/)
 
 ---
 
