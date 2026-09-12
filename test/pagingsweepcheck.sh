@@ -104,15 +104,20 @@ ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write th
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
-cd "$ROOT"
+# Inherited from a hook running the suite, these would aim every git and ripwire call below at the caller's
+# repository (GIT_COMMON_DIR too: it redirects refs even when GIT_DIR is unset): the paging fixture's own init/commit/branch calls, and the ref scans of the --whereis and
+# --stray-content rows, which must read ONLY the refs that fixture holds (see mkPagingFixture).
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
+cd "$ROOT" || exit 2
 
 echo "pagingsweepcheck: BIN=$BIN  PREBIN=${PREBIN:-<none>}"
 
 # PAGE_CORPUS lets one arm point at a corpus other than this checkout. The paging contract
 # (limit windows, offset advances, has_more terminates) is a property of the CODE, not of the corpus, so
 # an arm whose row supply this repo cannot guarantee is re-anchored onto a fixture built below rather
-# than left to red on whichever clone happens to be short of rows. Defaults to $ROOT: every other arm is
-# untouched.
+# than left to red on whichever clone happens to be short of rows — and so is an arm whose INPUT this
+# checkout cannot hold still between two runs (--whereis: the ref namespace). Defaults to $ROOT: every
+# other arm is untouched.
 # §R-J: --grep's <unindexed> block (queries/*.scm-class hits) is a SEPARATE population from the indexed
 # hits= this whole file's paging CONTRACT is about. Stripped here, at the one seam every page_verb capture
 # runs through, so a pattern that happens to also live in an unsupported-ext file cannot inflate a generic
@@ -138,6 +143,10 @@ cold(){ "$BIN" "${PAGE_CORPUS:-$ROOT}" "$@" --no-cache 2>/dev/null | stripUninde
 # TWO places therefore stay COLD on purpose, and say so at their own site: page_verb's (G) determinism
 # pair (a pair of runs restoring ONE cache file cannot observe a re-crawl+re-rank ordering defect), and
 # section (I)'s differential against a SECOND binary, which must never read a cache this one wrote.
+# Cold rules out the cache, not motion in the input: each run of a cold pair re-reads everything it answers
+# from, so all of it must hold still between the two. --whereis also answers from the enclosing repository's
+# refs, which on $ROOT every session on the machine writes, so its (G) pair runs on the in-gate fixture built
+# below — and (I) runs it, and --stray-content, there too.
 # cacheFor() keys on the corpus and primes on first use, so the in-gate fixture built below — and any
 # PAGE_CORPUS override — gets its OWN file instead of silently reading $ROOT's.
 cacheFor(){   # $1 = corpus dir → that corpus's cache path, primed once on first use
@@ -149,8 +158,9 @@ cacheFor(){   # $1 = corpus dir → that corpus's cache path, primed once on fir
 ROOTCACHE="$( cacheFor "$ROOT" )"   # the main corpus, primed up front — section (K) invokes $BIN directly
 
 # ── the in-gate paging fixture ────────────────────────────────────────────────────────────────────────
-# TWO of these arms — --mentions and --stray-content — need a corpus-SHAPE this repo does not supply on
-# a fresh clone, which is every clone but the author's and therefore every CI leg:
+# THREE of these arms run here instead of on $ROOT. Two — --mentions and --stray-content — need a
+# corpus-SHAPE this repo does not supply on a fresh clone, which is every clone but the author's and
+# therefore every CI leg:
 #
 #   --mentions=main       needs >= 6 doc rows for page_verb's (C) seam check (page[0:3]+[3:6] == [0:6])
 #                         and >= 4 for has_more="1" on --limit=3. The published repo has exactly 3 docs
@@ -162,10 +172,24 @@ ROOTCACHE="$( cacheFor "$ROOT" )"   # the main corpus, primed up front — secti
 #                         unanalysable ("v=unknown ... the fix is to deepen the clone") — so even a repo
 #                         with real stray branches could not assert here.
 #
-# So both are re-anchored onto one throwaway fixture built from scratch here: 8 markdown docs naming one
-# symbol, and 8 branches each authoring lines HEAD does not have. It carries its own full history, so it
-# asserts identically on a fresh clone, a shallow CI checkout, and the author's machine. Every other arm
-# still runs against $ROOT. Both verbs also still meet the live corpus in section (K)'s honoring-set loop.
+# The third, --whereis, has rows to spare on $ROOT. What it lacks there is an input that holds still:
+#
+#   --whereis             scans every refs/heads of the repository ENCLOSING the crawl root. On $ROOT that
+#                         is the checkout's .git, which every worktree and every session on the machine
+#                         writes, and which pargates' tree tripwire cannot see (a ref write is not a `git
+#                         status` line). (G)'s cold pair compares whole documents, so one branch created
+#                         between its two runs moved refs_scanned="302" -> "303", blobs=, hits=/total= and
+#                         <more hits=>, and a full pargates run (2026-09-12) reported "paged page NOT
+#                         deterministic" about a verb that answered correctly both times. Stripping those
+#                         attributes would have kept (G) green by comparing less; here the refs are the
+#                         gate's own, so (G) still compares every byte.
+#
+# So all three are re-anchored onto one throwaway fixture built from scratch here: 8 markdown docs naming
+# one symbol, and 8 branches each authoring lines HEAD does not have. It carries its own full history, so
+# it asserts identically on a fresh clone, a shallow CI checkout, and the author's machine, and nothing but
+# this gate writes a ref in it. Every other arm still runs against $ROOT. All three verbs also still meet
+# the live corpus in section (K)'s honoring-set loop, and --whereis in (H), (L) and the §A10.1 legend arm
+# too — each of those reads the ref namespace once per assertion, so ref motion cannot split a comparison.
 PAGEFIX="$TMP/pagefix"
 mkPagingFixture(){
     mkdir -p "$PAGEFIX/src" "$PAGEFIX/docs" || return 1
@@ -180,6 +204,7 @@ mkPagingFixture(){
         git config user.email paging@example.invalid
         git config user.name  paging-fixture
         git config commit.gpgsign false
+        git config core.hooksPath /dev/null   # no host hook runs in (or adds a ref to) a repo whose refs arms count
         git add -A && git commit -qm "fixture base" || exit 1
         local home; home="$( git rev-parse --abbrev-ref HEAD )"   # init.defaultBranch varies by host
         local b
@@ -275,7 +300,6 @@ page_verb "clones"      '<group '     --clones
 page_verb "doc-drift"   '<doc p='     --doc-drift
 SHOWNATTR=shown_modules \
 page_verb "communities" '<community ' --communities
-page_verb "whereis"     '<hit '       --whereis=rankGraph
 page_verb "grep"        '<hit '       --grep=NodeId
 page_verb "hotspots"    '<f p='       --hotspots
 
@@ -312,6 +336,35 @@ page_verb "graph-query"      '<s t='         --graph-query='name("main")'
 # asserted is identical; only the corpus that supplies the rows changes.
 PAGE_CORPUS="$PAGEFIX" page_verb "mentions"      '<doc p='    --mentions=renderWidget
 PAGE_CORPUS="$PAGEFIX" page_verb "stray-content" '<ref name=' --stray-content
+# --whereis runs there too, for a different reason: not rows ($ROOT has hits to spare) but its REF input, which on
+# $ROOT every session on the machine writes — see mkPagingFixture(). renderWidget keeps every branch the arm took
+# over rankGraph on $ROOT: its 90 hits (10 on HEAD, 10 on each of the 8 strays) exceed the 60-hit default cap, so
+# (E) still checks the CUT posture (M2), and the rows (C) and (G) page through are still HEAD's index-labelled rows.
+#
+# The isolation is asserted, not assumed. GUARD: (G)'s exact page must scan the fixture's 8 stray branches and
+# nothing else (refs_scanned= does not count HEAD); pointed back at a shared checkout it reads that clone's branch
+# count instead ("302" where this was found, "0" on a fresh clone) and reds. CONTROL: a branch created IN the
+# fixture must reach that same page (refs_scanned="9"), and deleting it must restore the page byte for byte — so
+# ref motion does reach the pair, and only this gate can cause it. The control branches at stray1, not at HEAD: a
+# ref whose tip IS HEAD's commit is not scanned at all, so a control there would move nothing (shape 5).
+wherePageG(){ PAGE_CORPUS="$PAGEFIX" cold --whereis=renderWidget --limit=3 --offset=3; }
+WH0="$( wherePageG )"
+if ! printf '%s' "$WH0" | grep -q '<whereis sym="renderWidget" on-head="1" refs_scanned="8" '; then
+    no "whereis fixture refs: (G)'s page does not scan exactly the paging fixture's 8 stray branches — its pair would compare two reads of a ref namespace this gate does not own (got: $( printf '%s' "$WH0" | grep -oE '<whereis [^>]*>' | head -c 160 ))"
+else
+    git -C "$PAGEFIX" branch -q wherecontrol stray1 >/dev/null 2>&1
+    WH1="$( wherePageG )"
+    git -C "$PAGEFIX" branch -q -D wherecontrol >/dev/null 2>&1
+    WH2="$( wherePageG )"
+    if ! printf '%s' "$WH1" | grep -q ' refs_scanned="9" '; then
+        no "whereis fixture refs (control): a branch created in the paging fixture did not reach (G)'s page (no refs_scanned=\"9\") — ref motion cannot reach the pair there, so the isolation proves nothing"
+    elif [ "$WH2" != "$WH0" ]; then
+        no "whereis fixture refs (control): deleting the control branch did not restore (G)'s page byte for byte"
+    else
+        ok "whereis fixture refs: (G)'s page scans only the fixture's 8 branches; a branch created there reaches it (refs_scanned=9) and deleting it restores every byte"
+    fi
+fi
+PAGE_CORPUS="$PAGEFIX" page_verb "whereis"       '<hit '      --whereis=renderWidget
 
 # --zoom is a NESTED hierarchy — every level emits a <module level="L" ...> element, so a bare '<module '
 # pattern would count every descendant too, not just the top-level row list --limit/--offset actually
@@ -504,7 +557,7 @@ if [ -n "$PREBIN" ] && [ -x "$PREBIN" ]; then
     # deliberately narrow to those two spots so a regression ELSEWHERE in --deps' output is still caught.
     strip(){ sed -E -e 's/ shown="[0-9]+" capped="[01]"//g' -e 's/<deps files="[0-9]+"/<deps/' -e 's/<!--[^>]*-->//g' \
                      -e 's/<health[^>]*\/>/<health\/>/' -e 's/instab="[0-9.]+"/instab="X"/g'; }
-    for v in "--clones" "--communities" "--doc-drift" "--grep=NodeId" "--hotspots" "--cochange" "--whereis=rankGraph" "--owners" \
+    for v in "--clones" "--communities" "--doc-drift" "--grep=NodeId" "--hotspots" "--cochange" "--owners" \
              "--callers=escapeXml" "--callees=runUses" "--tree" "--deps" "--impact=escapeXml" "--uses=escapeXml"; do
         "$BIN"    "$ROOT" $v --no-cache 2>/dev/null | strip > "$TMP/new"
         "$PREBIN" "$ROOT" $v --no-cache 2>/dev/null | strip > "$TMP/old"
@@ -515,6 +568,15 @@ if [ -n "$PREBIN" ] && [ -x "$PREBIN" ]; then
             diff "$TMP/old" "$TMP/new" | head -4 | cut -c1-200
         fi
     done
+    # --whereis separately, on the paging fixture: it reads the enclosing repository's REFS, and on $ROOT every
+    # session on the machine writes those, so a branch created between the two sides would red this differential
+    # about ref motion rather than about either binary — (G)'s defect, see mkPagingFixture(). --stray-content,
+    # below, moves for the same reason.
+    "$BIN"    "$PAGEFIX" --whereis=renderWidget --no-cache 2>/dev/null | strip > "$TMP/new"
+    "$PREBIN" "$PAGEFIX" --whereis=renderWidget --no-cache 2>/dev/null | strip > "$TMP/old"
+    diff -q "$TMP/old" "$TMP/new" >/dev/null \
+        && ok "--whereis (paging fixture): un-paginated data byte-identical modulo root disclosure attrs" \
+        || no "--whereis (paging fixture): un-paginated output CHANGED beyond the root disclosure attrs"
     # --match separately: its query carries a space, so it cannot ride the unquoted `for v` expansion.
     # This ONE arm stays (string_literal) — a non-nesting kind — while the paging arms above use
     # (call_expression): the PRE-change binary's tie order over a nesting kind was NONDETERMINISTIC (the
@@ -528,7 +590,7 @@ if [ -n "$PREBIN" ] && [ -x "$PREBIN" ]; then
 
     # §P15/§P16's seven: none of them changed their un-paginated byte shape at all (see the extended table
     # above), so no strip() normalization is needed — a bare diff must hold.
-    for v in "--seams" "--zoom" "--external-surface" "--dead-code" "--mentions=main" "--stray-content"; do
+    for v in "--seams" "--zoom" "--external-surface" "--dead-code" "--mentions=main"; do
         "$BIN"    "$ROOT" $v --no-cache 2>/dev/null > "$TMP/new"
         "$PREBIN" "$ROOT" $v --no-cache 2>/dev/null > "$TMP/old"
         if diff -q "$TMP/old" "$TMP/new" >/dev/null; then
@@ -538,6 +600,12 @@ if [ -n "$PREBIN" ] && [ -x "$PREBIN" ]; then
             diff "$TMP/old" "$TMP/new" | head -4 | cut -c1-200
         fi
     done
+    # --stray-content on the paging fixture, for --whereis's reason above: its input is the refs.
+    "$BIN"    "$PAGEFIX" --stray-content --no-cache 2>/dev/null > "$TMP/new"
+    "$PREBIN" "$PAGEFIX" --stray-content --no-cache 2>/dev/null > "$TMP/old"
+    diff -q "$TMP/old" "$TMP/new" >/dev/null \
+        && ok "--stray-content (paging fixture): un-paginated output byte-identical to the pre-change binary" \
+        || no "--stray-content (paging fixture): un-paginated output CHANGED vs the pre-change binary"
     "$BIN"    "$ROOT" --graph-query='name("main")' --no-cache 2>/dev/null > "$TMP/new"
     "$PREBIN" "$ROOT" --graph-query='name("main")' --no-cache 2>/dev/null > "$TMP/old"
     diff -q "$TMP/old" "$TMP/new" >/dev/null \

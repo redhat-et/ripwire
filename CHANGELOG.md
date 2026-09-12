@@ -15,6 +15,50 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — Elixir module and arity resolution (parser version 95)
+
+Elixir calls now resolve by module, name and arity, with lexical aliases, filtered imports, default
+arguments, pipes, captures and delegates. Nested modules and each target of a multi-target `defimpl`
+have separate identities. Types, callbacks and attributes are navigable, and protocol/behaviour
+relationships appear in the existing relationship views. CLI and MCP use-site queries share the same
+resolution rules; unknown modules and excluded imports no longer fall back to unrelated functions.
+
+The implementation uses the existing vendored parser and cache records, with no Elixir runtime
+dependency. Macro expansion and runtime dispatch remain static-analysis limits; the supported syntax
+and boundaries are documented in [Elixir extraction](docs/ARCHITECTURE.md#elixir-extraction).
+
+`kParserVer` 94 → 95 with `quality.h`'s `kIngestParserVerMirror` in the same commit (the branch carried
+87; main spent 87..92 while it was open and the 0.6.1 round takes 93 and 94 — re-bumped to the next free
+number over the merged tip, per the rule in `src/ingest_cache.h`); `kCacheVersion` stays 21.
+
+Four review findings were closed as maintainer commits on the branch, each with a row in
+`test/elixirnamearitycheck.sh`. A call that only a `use`-injected import could answer minted no edge
+and was dropped silently; it now counts in the map header's `unresolved=` and every answer's
+`graph_unresolved=` (an undefined spelling stays undefined, modelling `__using__` stays open). A
+variable bound on the right of `=` inside a pattern — `def join(%Socket{} = socket, _)`, a `case`
+clause, a `with` generator — is a binding, not a zero-arity call of a same-named function. The quality
+key folds the arity out of an Elixir name, so `run(x)` → `run(x, y)` is a `--edit-check`
+contract-change on `run` (params 1 → 2) with every caller of the old arity listed and flagged, and a
+`--quality-delta` params row, rather than a dead symbol beside a new one; a default (`run(x, y \\ 1)`)
+still reports the change but flags nobody (`kQSnapCacheScheme` 10 → 11). `--for` by an exact function
+name (`generate_app`, `text`) routes name-exact and ranks the `name/N` symbol first.
+
+Five resolution rules the branch got wrong, found by reproducing against Elixir 1.20.3 / OTP 29 before
+the merge, each with a row and a control in `test/elixirnamearitycheck.sh` over `test/elixirresolvefix`.
+`import M, except: [...]` after `import M, only: [...]` subtracts from the only-list instead of replacing
+it (a function the only-list never named minted an edge, silently; the refusal is now counted). A dotted
+nested `defmodule Inner.Deep` aliases `Inner` → `Outer.Inner` from its declaration on, so the later
+`Inner.Deep.f()` names the nested module rather than a top-level one — or, with no top-level one,
+rather than nothing. `alias __MODULE__, as: Current` inside a multi-target `defimpl` reaches each
+implementation's own function, not the first implementation's. `&_seed/0` names the underscore-named
+function (the underscore rule is for unused variables; a bare `_seed` read still is one). And `f()` on a
+bodyless `def f(x \\ default())` head reaches the head beside the clauses, so `--path=caller,default`
+and `--impact=default` see the caller; `f(1)` still reaches the clauses alone. Every one was a wrong
+answer or an uncounted drop. They ride parser version 95 — the number this entry introduces, which no
+released binary has written — with `kCacheVersion` 21 and `kQSnapCacheScheme` 11 unchanged. Still open,
+and documented in [Elixir extraction](docs/ARCHITECTURE.md#elixir-extraction): calls inside
+`unquote(...)` / `bind_quoted:` under `quote`.
+
 ### Upgrade notes
 
 - **A sidecar must be a regular file: a symlink at a sidecar name is refused, on read as well as on write.**
@@ -108,6 +152,41 @@ out-of-tree row (12 → 13). `kParserVer` 92 → 93 with the mirror (the branch 
 re-pins with reasons in-file: `test/qschemetrip.hash`, `test/printf_parity.manifest` (the `--impact` help and
 legend name the two new closure kinds; the `--deps` legend's lazy definition gains the rescue class). `docs/COMMANDS.md`
 regenerated (2026-09-11).
+### Changed — `VERIFY_NO_ALIAS` is a release optimizer fact, on LLVM 17 as well
+
+- **`VERIFY_NO_ALIAS` is now an optimizer fact in release, not an inert assume.** `src/infra/Diagnostics.h` §6 adds
+  `__builtin_assume_separate_storage` (clang 17+, `__has_builtin`-guarded, `( (void)0 )` elsewhere) beside the debug
+  check, so codegen matches `__restrict__` on the parameters (`out=a; out+=b; out+=a;` arm64 10 → 6 instructions);
+  `VERIFY_NO_ALIAS_BUF` is the form for two OWNING containers (the object form is inert for their loops; views — `std::span`, `std::string_view` — can share one allocation and are refused at compile time); the comment carries
+  the complete-object contract and the macOS `<sys/cdefs.h>` trap that deletes bare `__restrict` in C++ —
+  `__restrict__` is the only spelling allowed in `src/`. `test/noaliascheck.sh` (eight arms, red against the old
+  definition) proves it. The optimizer half is a separate switch: BasicAA reads the bundle only when
+  `basic-aa-separate-storage` is on — `cl::init(false)` in LLVM 17 (AppleClang 16 / Xcode 16.2: the macos-14 CI
+  runners and the macos-arm64 release leg), `true` from LLVM 18 — so CMake now probes and passes
+  `-mllvm -basic-aa-separate-storage` to our targets (and to the ld64 link under LTO), and the gate classifies the
+  compiler by compiling the real slice three ways, with a `=false` negative control and a cross-check against the
+  cached CMake probe.
+### Added — `VERIFY_NO_ALIAS` guards at 15 call sites where self-aliasing was a silent wrong answer or UB
+
+`VERIFY_NO_ALIAS` / `VERIFY_NO_ALIAS3` at the top of 15 functions whose two-or-more same-element-type
+out-parameters would silently mis-compute or invalidate an iterator if a caller ever passed the same
+object twice. The check runs in debug builds; in release the macro leaves only the
+`__builtin_assume_separate_storage` promise on the two objects, which the optimizer reads on clang 18+
+by default, on LLVM 17 / AppleClang 16 only with the CMake-added `-mllvm -basic-aa-separate-storage`
+and there for scalar accesses, and not at all on GCC or clang before 17. For these 15 functions the
+promise measured no codegen change (the object form says nothing about a container's heap buffer), so
+there is no performance claim here: these are correctness contracts.
+- **Six more aliasing contracts at function entry, completing the audit; one of them is the tree's only codegen row.** `waterFillRecallShares`
+  (`src/recall.h`) reads `demand[i]` while writing `alloc[i]` and never resizes either, so it takes the buffer form:
+  release codegen 309 → 301 instructions under the build's own flags. `splitNoteTail` (`src/notes.h`),
+  `takeAckNamedToken` and `computeDelta` (`src/quality.h`) take the object form, whose check runs in debug and whose
+  release residue is the `separate_storage` promise on the two objects (read on clang 18+ by default, on LLVM 17 /
+  AppleClang 16 only with the CMake-added flag and for scalar accesses, never on GCC or clang before 17); for these
+  it measured no codegen change. `computeDelta`'s two out-pointers both default to null, so its guard is a
+  null-safe `VERIFY_TEXT` rather than the object form.
+  `markCandidateFilesIncludingDecl` (`src/graph.h`) and `partitionByScope` (`src/verbs_quality.h`) take the last two
+  guards of the audit's apply list, which is now complete: 21 functions state their no-alias contract at entry.
+
 ## [0.6.0] — 2026-09-11
 
 **Languages and integrations from outside the project, much faster on the largest trees, and answers that say where

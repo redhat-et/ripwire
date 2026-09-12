@@ -4,6 +4,7 @@
 // resolved out-edges for serialization. Ranking lives in pagerank.cpp.
 
 #include "model.h"
+#include "elixir_resolve.h"      // lexical module/name/arity resolution; reuses cached Binding records
 #include "filter.h"              // isTestPath — for the Q2 tested= post-pass
 #include "pageview.h"            // LB-H: kImportReachRowCap — the import tier's display cap lives with the rest of the truncation vocabulary
 #include "graphlegend.h"         // M15: graphGaugeAttrXml/Json + kGraphCountFloorAttrXml/Json — graphCountFloorAttrXml( g ) below
@@ -1960,6 +1961,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // to the variable's type; Rule 3 pins a call to the ONE file the caller includes that defines it — all
     // BEFORE the bare-name spray below. See resolve.h.
     const Narrower narrower( canonByName, varType, fileIncludes, symFileId );
+    const ElixirResolver elixirResolver( ing );
     // ONE apply step for every receiver rule (1 / 2 / 2c / 2b): keep the rule's definition ids that are
     // language-compatible with the call and inside the same root, and say whether anything survived. The
     // four rules used to carry four copies of this loop; the filter is stated once so it cannot drift.
@@ -2218,7 +2220,48 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
         // ---- name-based resolution (the fallback ladder below + P2-D narrowing) — SKIPPED when the SCIP overlay pinned this site.
         bool canonical = false;
-        if( !scipPinned && !r.qualifier.empty() )
+        if( !scipPinned && r.lang == Lang::Elixir )
+        {
+            elixirResolver.resolve( r, cand );
+            std::erase_if( cand, [ & ]( NodeId c ) { return !sameRoot( c, r.fileId ); } );
+            if( cand.empty() )
+            {
+                // No lexical fact answers this call: no alias, import or receiver names a definition of its
+                // module/name/arity. The commonest reason is a `use` — `__using__` injects imports the tool
+                // does not expand (docs/ARCHITECTURE.md, Elixir extraction) — and the next is a wrong arity or
+                // an excluded import. Decided 2026-09-12 (PR #81 review item 2): NO edge is minted from the
+                // name ladder, because a same-spelled function in an unrelated module is exactly the false
+                // edge this resolver exists to refuse (on one framework corpus the ladder gave `text/2` 55
+                // callers where 3 were real); and the drop is COUNTED, never silent. Same vocabulary as the
+                // ladder's own refusal below: a spelling some in-repo definition carries is unresolved= (the
+                // header gauge, and the caller's own unresolvedOut); a spelling no definition carries at all is
+                // undefined, which has no header surface by design (pincensus.h); and in a multi-root run a
+                // name defined only in ANOTHER root is that root's, counted OtherRoot, as the solo run would
+                // say. Modelling what `__using__` injects stays open (test/elixirnamearitycheck.sh arm A).
+                if( it == byName.end() )
+                {
+                    disposition = CallDisposition::Undefined;
+                    continue;
+                }
+                bool anySameRootDef = !multiRoot;
+                for( NodeId c : it->second )
+                {
+                    if( multiRoot && sameRoot( c, r.fileId ) ) { anySameRootDef = true; break; }
+                }
+                if( anySameRootDef )
+                {
+                    ++g.unresolvedOut[ r.fromSymbol ];
+                    disposition = CallDisposition::Unresolved;
+                }
+                else
+                {
+                    disposition = CallDisposition::OtherRoot;
+                }
+                continue;
+            }
+            canonical = true;
+        }
+        if( !scipPinned && r.lang != Lang::Elixir && !r.qualifier.empty() )
         {
             qkey.clear();                                       // "qualifier::name" — reused buffer, identical bytes
             qkey.append( r.qualifier ).append( "::" ).append( r.calleeName );
@@ -2506,7 +2549,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
         // ---- tier ladder (the name-based fallback) — SKIPPED when the SCIP overlay pinned this site (tier already holds the
         // precise target(s) at full confidence; the ladder would only re-derive a guess). -----------------
-        if( !scipPinned )
+        if( !scipPinned && r.lang == Lang::Elixir ) { tier = cand; }
+        if( !scipPinned && r.lang != Lang::Elixir )
         {
             if( cand.empty() )
             {
@@ -2697,7 +2741,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // contradicted by the receiver (`this->` IS the enclosing class; a typed var already narrowed above).
         // Phase 5: a `super()` receiver is excluded for the same reason — the enclosing class winning the scope
         // credit is exactly the class `super()` skips; a multi-base tie stays an honest split.
-        if( !scipPinned && !bindingPinned && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
+        if( !scipPinned && !bindingPinned && r.lang != Lang::Elixir && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
          && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar && r.recv != RecvKind::SuperObj )
         {
             const std::string& callerCanon = g.localityKey[ r.fromSymbol ];   // == canonId here (the caller is scoped)
@@ -3735,7 +3779,7 @@ inline std::vector<NodeId> resolveAllByScopeQualified( const IngestResult& ing, 
     const std::string_view name      = spec.substr( cut + 2 );
     for( const Symbol& s : ing.symbols )
     {
-        if( s.name == name && !s.scope.empty() && scopeSuffixMatches( s.scope, scopePart ) )
+        if( elixirNameMatches( s, name ) && !s.scope.empty() && scopeSuffixMatches( s.scope, scopePart ) )
         {
             out.push_back( s.id );
         }
@@ -3744,7 +3788,7 @@ inline std::vector<NodeId> resolveAllByScopeQualified( const IngestResult& ing, 
 }
 
 // resolveFocus — the --around/--lego/--edit-check single-pick resolver — is defined BELOW
-// resolveAllByNameQualified as its lowest-id projection (2026-08-30, selectorscopecheck): the two used to
+// resolveAllByNameQualified as its single-pick projection (2026-08-30, selectorscopecheck): the two used to
 // carry the same spec grammar as separate loops, and the moment the Scope::name tier landed in both, the
 // clone lens flagged the pair — one resolver, one pick rule, no drift.
 
@@ -4071,7 +4115,7 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
     std::vector<NodeId> out;
     for( const Symbol& s : ing.symbols )
     {
-        if( s.name == name )
+        if( elixirNameMatches( s, name ) )
         {
             out.push_back( s.id );
         }
@@ -4135,6 +4179,7 @@ inline std::size_t definitionCountOfName( const IngestResult& ing, NodeId focus 
 inline void markCandidateFilesIncludingDecl( const IngestResult& ing, const std::vector<char>& isDecl,
                                              const std::vector<char>& isCand, std::vector<char>& proven )
 {
+    VERIFY_NO_ALIAS3( isDecl, isCand, proven );   // three same-role dense arrays: proven[] is written while isDecl[]/isCand[] are read
     // The index: ONE entry per DECLARATION file, keyed the way buildPreciseIncludeAdj keys its own
     // (lexicalNormalize on BOTH sides, so a `.`-rooted crawl's `./a/x.h` and a resolved `a/x.h` agree).
     HashMap<std::string, std::uint32_t> declIndex;
@@ -4234,7 +4279,7 @@ inline std::vector<NodeId> declToDefCandidates( const IngestResult& ing, std::st
 // X9(b): qualified "file:name" variant of resolveAllByName, for --callers/--callees/--impact — a same-
 // named symbol living in more than one file (a common overload/shadow shape) previously had no way to
 // disambiguate on these verbs even though --around/--lego/--edit-check already could (resolveFocus). Uses
-// the SAME splitQualifiedSpec rule as resolveFocus, but returns EVERY match (not just the lowest-id pick)
+// the SAME splitQualifiedSpec rule as resolveFocus, but returns EVERY match (not just the single pick)
 // — --callers/--impact want the union across all matches (overloads share callers/impact by design),
 // unlike --around's single-target ego-graph. A bare "name" (no colon) is BYTE-IDENTICAL to the existing
 // resolveAllByName( ing, name ) — every symbol with that name, across every file — so this is purely
@@ -4387,7 +4432,7 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
     std::vector<NodeId> out;
     for( const Symbol& s : ing.symbols )
     {
-        if( s.name == name && ( file.empty() || filePathContains( ing.files[ s.fileId ], file ) ) )
+        if( elixirNameMatches( s, name ) && ( file.empty() || filePathContains( ing.files[ s.fileId ], file ) ) )
         {
             out.push_back( s.id );
         }
@@ -4677,6 +4722,9 @@ inline FieldUseAnswer collectFieldUseSites( const IngestResult& ing, FieldId fie
         const std::string_view ctxOwner = ownerOfContext( r.fromSymbol );
         switch( r.recv )
         {
+            case RecvKind::ElixirModule:
+            case RecvKind::ElixirSelfModule:
+            break; // module receivers name callables, not instance fields
             case RecvKind::None:
             {
                 candidatesIn( ctxOwner, r.lang );   // empty ⇒ a local/global/inherited name — not a field use this pass can see
@@ -4810,15 +4858,49 @@ inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::
     return {};
 }
 
-// resolve a --around/--lego spec to the lowest-id matching symbol; kNoNode if none. The lowest-id
-// PROJECTION of resolveAllByNameQualified — matches ascend by NodeId there (symbols are walked in id
-// order and every tier preserves that), so front() IS the historic lowest-id pick; one grammar, one
-// resolver, and every tier the full resolver gains (canonical id, Scope::name) reaches the single-pick
-// verbs in the same commit. Declared here, below the full resolver, for exactly that reason.
-inline NodeId resolveFocus( const IngestResult& ing, std::string_view spec )
+// resolve a --around/--lego/--connect spec to ONE matching symbol; kNoNode if none. A PROJECTION of
+// resolveAllByNameQualified — matches ascend by NodeId there (symbols are walked in id order and every tier preserves
+// that) — so one grammar, one resolver, and every tier the full resolver gains (canonical id, Scope::name) reaches the
+// single-pick verbs in the same commit. Declared here, below the full resolver, for exactly that reason.
+//
+// THE PICK is the lowest id, with ONE exception: a bodyless C/C++ lowest id (a header prototype, an in-class method
+// declaration, a forward-declared class) yields to the lowest-id C/C++ match WITH a body in the SAME scope, when the set
+// holds one. The lowest id alone made the declaration the focus whenever its header sorted first, and a declaration has
+// no call or extends edges — so --around served its own row, --connect found no join and --lego counted no implementor,
+// for a bare name and a fully proven file:name alike (decltodefcheck E3a..E3d). Everything else keeps the lowest id:
+//   * a set of declarations only, or a single match — nothing to prefer;
+//   * every other language — measured on this repository, an unscoped "bodied first" moved 69 non-C/C++ names (Python and
+//     JSON keys, Ruby classes, TypeScript overload signatures, even py -> cpp), none of them a declaration beside its
+//     definition; this rule moved 54 names, every one a C/C++ declaration to its definition (E3e);
+//   * a body in ANOTHER scope — a pure virtual's override in a derived class is a dispatch claim, not the declaration's
+//     definition, the same line declToDefFollowThrough draws (E3f).
+// `defs=` on these verbs still says how many definitions the NAME has, so a pick among several stays disclosed.
+//
+// `unprovenDefCountOut` (H1, optional): the residue the full resolver reports for the SAME selector — the same-named
+// definitions a file:name spelling dropped, which the single pick therefore never focuses on either. Passed straight
+// through, so it is written on every path exactly as resolveAllByNameQualified writes it.
+inline NodeId resolveFocus( const IngestResult& ing, std::string_view spec, std::size_t* unprovenDefCountOut = nullptr )
 {
-    const std::vector<NodeId> matches = resolveAllByNameQualified( ing, spec );
-    return matches.empty() ? kNoNode : matches.front();
+    const std::vector<NodeId> matches = resolveAllByNameQualified( ing, spec, unprovenDefCountOut );
+    if( matches.empty() )
+    {
+        return kNoNode;
+    }
+    const Symbol& lowest = ing.symbols[ matches.front() ];
+    const auto    cOrCpp = []( Lang lang ) noexcept { return lang == Lang::Cpp || lang == Lang::C; };
+    if( isDefinitionNotDeclaration( lowest ) || !cOrCpp( lowest.lang ) )
+    {
+        return matches.front();
+    }
+    for( NodeId id : matches )
+    {
+        const Symbol& candidate = ing.symbols[ id ];
+        if( isDefinitionNotDeclaration( candidate ) && cOrCpp( candidate.lang ) && candidate.scope == lowest.scope )
+        {
+            return id;
+        }
+    }
+    return matches.front();
 }
 
 // clearly side-effecting C/C++ intrinsics (I/O, allocation, nondeterminism, process control). A

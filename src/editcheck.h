@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -58,14 +59,27 @@ struct EditCheckContract
 // unions three unrelated free functions named `empty` in three different files into one "overload set" and
 // reports one contract for all of them. Two definitions are one contract only when they share a file AND a
 // scope — which is exactly what the `file:name` selector can pick out.
+//
+// The CONTRACT ID a definition folds under is its canonical id minus an Elixir `name/N` arity. Elixir keys a
+// callable by arity, so run/1 and run/2 are two canonical ids — two entities — but ONE contract at one
+// definition site, exactly as C++ overloads of `f` are, and a widened arity is the very change this verb
+// exists to report (PR #81 review item 4: run(x) -> run(x, y) answered "new-symbol" with 0 callers;
+// test/elixirnamearitycheck.sh arm C). Every other language: the canonical id itself, unchanged.
+inline std::string_view editCheckContractId( const std::string& canon, const Symbol& s ) noexcept
+{
+    return s.lang == Lang::Elixir ? elixirBaseName( canon ) : std::string_view( canon );
+}
+
 inline std::vector<NodeId> editCheckOverloadSet( const IngestResult& ing, const Graph& g, NodeId focus )
 {
     std::vector<NodeId> overloadNodes;
     if( focus < g.canonId.size() && !g.canonId[ focus ].empty() )
     {
+        const std::string_view focusContract = editCheckContractId( g.canonId[ focus ], ing.symbols[ focus ] );
         for( NodeId i = 0; i < ing.symbols.size(); ++i )
         {
-            if( i < g.canonId.size() && g.canonId[i] == g.canonId[ focus ] && ing.symbols[i].fileId == ing.symbols[ focus ].fileId )
+            if( i < g.canonId.size() && !g.canonId[i].empty() && ing.symbols[i].fileId == ing.symbols[ focus ].fileId
+                && editCheckContractId( g.canonId[i], ing.symbols[i] ) == focusContract )
             {
                 overloadNodes.push_back( i );
             }
@@ -106,7 +120,7 @@ inline std::vector<EditCheckGroup> editCheckGroups( const IngestResult& ing, con
             continue;
         }
         const std::uint32_t fileId = ing.symbols[m].fileId;
-        const std::string   canon  = ( m < g.canonId.size() ) ? g.canonId[m] : ing.symbols[m].name;
+        const std::string   canon( editCheckContractId( ( m < g.canonId.size() ) ? g.canonId[m] : ing.symbols[m].name, ing.symbols[m] ) );
         if( std::find( keys.begin(), keys.end(), std::make_pair( fileId, canon ) ) != keys.end() )
         {
             continue;
@@ -402,6 +416,55 @@ inline bool editCheckImplicitReceiver( const Symbol& s ) noexcept
     return ( s.lang == Lang::Python || s.lang == Lang::Ruby ) && !s.scope.empty();
 }
 
+// ── THE CALLEE TEST, with the Elixir arity fold ──────────────────────────────────────────────────────────
+// "Does this call reference name the focus's contract?" For every language but Elixir it is the exact
+// calleeName == name test the in-edge walk already implied, byte for byte. Elixir keys a callable by `name/N`,
+// and an arity edit is a change of that key: after run(x) -> run(x, y) no reference spells run/2, the in-edge
+// walk finds nothing, and the callers of the OLD arity — the ones the edit just broke — are exactly the rows
+// this verb exists to print. So for an Elixir focus a call reference reaches the contract when its arity-less
+// name matches AND the fold-arity ElixirResolver (elixir_resolve.h) binds it, through the caller's own
+// aliases, imports and receiver, to a definition in the overload set: the same lexical evidence the map used,
+// asked about the function rather than one arity of it. Built once per document; `scratch` is the resolver's
+// output buffer, reused across a pass.
+struct EditCheckCalleeTest
+{
+    const IngestResult&           ing;
+    const Symbol&                 focus;
+    std::span<const NodeId>       overloadNodes;
+    std::optional<ElixirResolver> logical;   // engaged for an Elixir focus only
+    std::vector<NodeId>           scratch;
+
+    EditCheckCalleeTest( const IngestResult& input, const Symbol& focusSymbol, std::span<const NodeId> overloads )
+        : ing( input ), focus( focusSymbol ), overloadNodes( overloads )
+    {
+        if( focus.lang == Lang::Elixir )
+        {
+            logical.emplace( ing, /*foldArityKeys=*/true );
+        }
+    }
+
+    bool reaches( const Reference& r )
+    {
+        if( !logical || r.lang != Lang::Elixir )
+        {
+            return r.calleeName == focus.name;
+        }
+        if( elixirBaseName( r.calleeName ) != elixirBaseName( focus.name ) )
+        {
+            return false;
+        }
+        logical->resolve( r, scratch );
+        for( NodeId target : scratch )
+        {
+            if( std::find( overloadNodes.begin(), overloadNodes.end(), target ) != overloadNodes.end() )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
 // per-node flags for the seen callers whose call-site is incompatible with the CURRENT arity: a call site is
 // flagged only when its argument count is reliably counted AND NO overload could accept it (every overload
 // has a FIXED arity (arityExact!=0) that disagrees — a variadic/default-arg/implicit-receiver wildcard can
@@ -409,10 +472,10 @@ inline bool editCheckImplicitReceiver( const Symbol& s ) noexcept
 // membership test — never an O(callers × references) rescan.
 //
 // The test is one-sided IN THE ARITY only: it never flags a call the compared definitions could accept. It is
-// NOT a proof that the call site binds to those definitions at all — that half is name-based, and the emitted
-// legend says so.
+// NOT a proof that the call site binds to those definitions at all — that half is name-based (module-resolved
+// for Elixir, see EditCheckCalleeTest), and the emitted legend says so.
 inline std::vector<char> editCheckIncompatibleFlags( const IngestResult& ing, std::span<const NodeId> overloadNodes,
-                                                     const std::string& symName, std::span<const char> seenCaller )
+                                                     EditCheckCalleeTest& callee, std::span<const char> seenCaller )
 {
     const auto provenIncompatible = [ & ]( std::uint16_t argCount ) -> bool
     {
@@ -433,7 +496,7 @@ inline std::vector<char> editCheckIncompatibleFlags( const IngestResult& ing, st
         {
             continue;
         }
-        if( r.calleeName != symName || !r.argCountKnown )
+        if( !r.argCountKnown || !callee.reaches( r ) )
         {
             continue;
         }
@@ -464,7 +527,7 @@ inline std::vector<char> editCheckIncompatibleFlags( const IngestResult& ing, st
 // rule; a widely-shared name has hundreds of caller rows). Duplicate (node,line) pairs collapse: this is a
 // set of LINES TO OPEN, so two calls on one line are one site.
 inline std::vector<std::pair<NodeId, std::uint32_t>>
-editCheckCallSites( const IngestResult& ing, const std::string& symName, std::span<const char> callerIncompatible )
+editCheckCallSites( const IngestResult& ing, EditCheckCalleeTest& callee, std::span<const char> callerIncompatible )
 {
     std::vector<std::pair<NodeId, std::uint32_t>> sites;
     for( const Reference& r : ing.references )
@@ -473,7 +536,7 @@ editCheckCallSites( const IngestResult& ing, const std::string& symName, std::sp
         {
             continue;
         }
-        if( r.fromSymbol >= callerIncompatible.size() || !callerIncompatible[ r.fromSymbol ] || r.calleeName != symName )
+        if( r.fromSymbol >= callerIncompatible.size() || !callerIncompatible[ r.fromSymbol ] || !callee.reaches( r ) )
         {
             continue;
         }
@@ -502,7 +565,7 @@ inline std::string editCheckSiteList( std::span<const std::pair<NodeId, std::uin
 // 1-hop callers of the overload set (the --callers in-edge walk, unioned), sorted (file, line, name), plus a
 // parallel per-node flag for call-sites PROVABLY incompatible with the CURRENT arity.
 inline std::pair<std::vector<NodeId>, std::vector<char>>
-editCheckCallers( const IngestResult& ing, const Graph& g, std::span<const NodeId> overloadNodes, const std::string& symName )
+editCheckCallers( const IngestResult& ing, const Graph& g, std::span<const NodeId> overloadNodes, EditCheckCalleeTest& callee )
 {
     std::vector<char>   seenCaller( ing.symbols.size(), 0 );
     std::vector<NodeId> callerIds;
@@ -519,8 +582,31 @@ editCheckCallers( const IngestResult& ing, const Graph& g, std::span<const NodeI
             if( NodeId c = ci[k]; c < seenCaller.size() && !seenCaller[c] ) { seenCaller[c] = 1; callerIds.push_back( c ); }
         }
     }
+    // Elixir: the callers of an arity the edit REMOVED have no in-edge to walk — no definition spells their
+    // callee any more — so they are recovered from the reference table through the fold-arity test
+    // (EditCheckCalleeTest). Self is skipped as the in-edge walk skips it (an edge is never a self-loop), and
+    // the sort below makes the union's order independent of which pass found a caller.
+    if( callee.logical )
+    {
+        for( const Reference& r : ing.references )
+        {
+            if( r.role != RefRole::Call || r.fromSymbol >= seenCaller.size() || seenCaller[ r.fromSymbol ] )
+            {
+                continue;
+            }
+            if( std::find( overloadNodes.begin(), overloadNodes.end(), r.fromSymbol ) != overloadNodes.end() )
+            {
+                continue;
+            }
+            if( callee.reaches( r ) )
+            {
+                seenCaller[ r.fromSymbol ] = 1;
+                callerIds.push_back( r.fromSymbol );
+            }
+        }
+    }
 
-    std::vector<char> callerIncompatible = editCheckIncompatibleFlags( ing, overloadNodes, symName, seenCaller );
+    std::vector<char> callerIncompatible = editCheckIncompatibleFlags( ing, overloadNodes, callee, seenCaller );
 
     std::sort( callerIds.begin(), callerIds.end(), [ & ]( NodeId a, NodeId b )
     {
@@ -686,10 +772,15 @@ inline void editCheckPriceRoot( std::string& doc )
 // nothing else — see editCheckRowWindow above for why this verb cannot take the family's plain row window.
 // Both default to 0, which is "no explicit window": the verb's own default cap then shapes the page, the
 // same posture the four neighbour verbs took when they adopted kCallHierarchyRowCap.
+//
+// `unprovenDefs` (H1) is the residue the caller's resolver reported for the selector that picked `focus`: same-named
+// definitions a file:name spelling found and could not tie to the file it named. callers=/incompatible= are read from
+// `focus` alone, so without it a declaration whose dropped definition carries the broken caller answered incompatible="0"
+// with nothing beside it. Defaults to 0 — absent attribute, absent clause — for a caller that resolved no file:name.
 inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g, const std::string& root,
                                         std::size_t maxFileBytes, const std::vector<std::string>& excludes, NodeId focus,
                                         const notes::NoteIndex* ni = nullptr, bool preview = false,
-                                        int pageLimit = 0, int pageOffset = 0 )
+                                        int pageLimit = 0, int pageOffset = 0, std::size_t unprovenDefs = 0 )
 {
     const Symbol& fsym = ing.symbols[ focus ];
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — the ONE
@@ -703,7 +794,8 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
 
     const std::vector<NodeId> overloadNodes = editCheckOverloadSet( ing, g, focus );
     const EditCheckContract   contract      = editCheckContractVsHead( ing, g, root, maxFileBytes, excludes, focus, overloadNodes );
-    const auto [ callerIds, callerIncompatible ] = editCheckCallers( ing, g, overloadNodes, fsym.name );
+    EditCheckCalleeTest       callee( ing, fsym, overloadNodes );
+    const auto [ callerIds, callerIncompatible ] = editCheckCallers( ing, g, overloadNodes, callee );
 
     // the flagged-caller COUNT, needed BEFORE the headline is written: the verdict joins it with the was/now
     // pair (see editCheckVerdict), so counting it after the status attribute was already emitted is what made
@@ -723,7 +815,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // P3/M21: the call-site lines for the flagged rows. Paid for only when a row will carry them — an
     // unchanged contract with no flagged caller does not scan the reference table at all.
     const std::vector<std::pair<NodeId, std::uint32_t>> callSites =
-        incompatibleCount > 0 ? editCheckCallSites( ing, fsym.name, callerIncompatible )
+        incompatibleCount > 0 ? editCheckCallSites( ing, callee, callerIncompatible )
                               : std::vector<std::pair<NodeId, std::uint32_t>>{};
 
     std::vector<char> esc;
@@ -808,6 +900,9 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     {
         out += kEditCheckWindowLegend;
     }
+    // H1: what callers= and incompatible= did not read, addressed to incompatible= by name — ahead of the floor tail, and
+    // emitted exactly when the root carries unproven_defs= (graphlegend.h unprovenDefsVerbLegend).
+    out += unprovenDefsVerbLegend( UnprovenDefsVerb::EditCheck, unprovenDefs > 0 );
     // §H4 §3.4: the shared floor + counting-unit tail, appended from the ONE constant every graph-count verb
     // splices. It is load-bearing HERE more than anywhere: callers="1" on a symbol with an unmodelled second
     // caller is the exact shape §H4 measured, and this legend's own "the tree as it stands" paragraph reads
@@ -851,6 +946,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     char callersOpen[ 64 ];
     rw::formatTo( callersOpen, sizeof( callersOpen ), " callers=\"{}\" incompatible=\"{}\"", callerIds.size(), incompatibleCount );
     out += callersOpen;
+    out += unprovenDefsAttrXml( unprovenDefs );   // H1: beside the incompatible= it qualifies; absent at zero
     // r26-stamp Task A: the HEAD baseline this contract compares against is only meaningful pinned to a
     // commit (+dirty state) — omitted entirely on a non-git root. Appended LAST (after every pre-existing
     // attribute) so an existing substring-adjacency assertion elsewhere (e.g. "status=\"x\" callers=\"N\"")

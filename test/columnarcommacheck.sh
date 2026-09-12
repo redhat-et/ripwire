@@ -45,7 +45,9 @@ command -v "$CXX" >/dev/null 2>&1 || CXX=g++
 # (PR #1, run 30732976779). Rationale + the CMake mapping this mirrors: scripts/cxxstd.sh.
 . "$ROOT/scripts/cxxstd.sh"
 CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
-"$CXX" "$CXXSTD" -I "$ROOT/src" -I "$ROOT/src/infra" -I "$ROOT/third_party" "$SRC" -o "$TMP/t" 2>"$TMP/build.err"
+# diagnostics.cpp supplies Diagnostics::ConsoleLog::handleAssert — link it exactly as every other
+# standalone harness in test/ does, now that buildPathTable carries a VERIFY_NO_ALIAS3 guard.
+"$CXX" "$CXXSTD" -I "$ROOT/src" -I "$ROOT/src/infra" -I "$ROOT/third_party" "$SRC" "$ROOT/src/infra/diagnostics.cpp" -o "$TMP/t" 2>"$TMP/build.err"
 if [ -x "$TMP/t" ]; then
     ok "standalone gate binary built"
 else

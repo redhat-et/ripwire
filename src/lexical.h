@@ -9,6 +9,7 @@
 // and BODY text, so a query matches code by what it DOES, not just what it's named. Deterministic.
 
 #include "model.h"
+#include "elixir_resolve.h"      // elixirBaseName — the arity-less spelling of an Elixir `name/N`, a second whole-name token for the name-exact lane
 #include "docparse.h"            // detail::readWholeFile — THE canonical whole-file byte read (P2-4); never re-rolled
 #include "lexindex.h"            // B0: the ONE subtoken state machine + docCommentStart + persisted-stats types
 #include "sarif.h"               // rootRelativeUri — the ONE root-relative path view, included directly
@@ -1342,8 +1343,30 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
     std::vector<int> dl( S, 0 );
     std::vector<int> tfFlat( S * uniqueCount, 0 );
 
-    // lowercase-compare a symbol's whole name (one token) against every unique query token
-    const auto matchWholeName = [ & ]( std::size_t i, std::string_view name )
+    // does an (already lowercased) query token equal a symbol spelling, compared lowercase?
+    const auto equalsLowered = []( const std::string& q, std::string_view name ) noexcept
+    {
+        if( q.size() != name.size() )
+        {
+            return false;
+        }
+        for( std::size_t k = 0; k < name.size(); ++k )
+        {
+            const unsigned char nc = static_cast<unsigned char>( name[k] );
+            const char          lc = ( nc >= 'A' && nc <= 'Z' ) ? char( nc - 'A' + 'a' ) : char( nc );
+            if( lc != q[k] )
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+    // lowercase-compare a symbol's whole name (ONE document token) against every unique query token. `alt` is
+    // a second spelling the same token may equal: the arity-less form of an Elixir `name/N` — `run` for
+    // `run/2` — so a query that names the function the way Elixir source spells it still hits (PR #81 review
+    // item 5: `generate_phoenix_app` routed name-exact and then scored nothing, no_candidates). Empty for
+    // every other symbol, where the scoring is byte-identical to before; dl counts the name once either way.
+    const auto matchWholeName = [ & ]( std::size_t i, std::string_view name, std::string_view alt )
     {
         if( name.size() < 2 )
         {
@@ -1354,39 +1377,34 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
         for( std::size_t u = 0; u < uniqueCount; ++u )
         {
             const std::string& q = uniqueToks[u];
-            if( q.size() != name.size() )
-            {
-                continue;
-            }
-            bool eq = true;
-            for( std::size_t k = 0; k < name.size() && eq; ++k )
-            {
-                const unsigned char nc = static_cast<unsigned char>( name[k] );
-                const char          lc = ( nc >= 'A' && nc <= 'Z' ) ? char( nc - 'A' + 'a' ) : char( nc );
-                if( lc != q[k] )
-                {
-                    eq = false;
-                }
-            }
-            if( eq )
+            if( equalsLowered( q, name ) || ( !alt.empty() && equalsLowered( q, alt ) ) )
             {
                 ++tfRow[u];
-                break;
-            } // unique tokens distinct → at most one match
+                break; // unique tokens distinct → at most one match
+            }
         }
     };
 
     // document = whole name (+ container::name as a second whole token, when a scope exists)
     for( std::size_t i = 0; i < S; ++i )
     {
-        const Symbol& s = ing.symbols[i];
-        matchWholeName( i, s.name );
+        const Symbol&          s    = ing.symbols[i];
+        const std::string_view base = ( s.lang == Lang::Elixir ) ? elixirBaseName( s.name ) : std::string_view( s.name );
+        const std::string_view alt  = ( base.size() != s.name.size() ) ? base : std::string_view{};
+        matchWholeName( i, s.name, alt );
         if( !s.scope.empty() )
         {
             std::string qualified = s.scope;
             qualified += "::";
             qualified += s.name;
-            matchWholeName( i, qualified );
+            std::string qualifiedAlt;
+            if( !alt.empty() )
+            {
+                qualifiedAlt = s.scope;
+                qualifiedAlt += "::";
+                qualifiedAlt += alt;
+            }
+            matchWholeName( i, qualified, qualifiedAlt );
         }
     }
 
@@ -1861,10 +1879,10 @@ inline std::string routeLower( std::string_view w )
 // one symbol's WHOLE lowercased name enters (or upgrades) its entry: the first definition claims fileId,
 // the first body-carrying one TAKES it, later definitions count into extraDefs either way, and a
 // carrier-only entry created earlier by some other name's subtoken is upgraded rather than shadowed.
-inline void noteWholeNameDef( HashMap<std::string, NameAnchor>& names, const Symbol& s )
+inline void noteWholeNameSpelling( HashMap<std::string, NameAnchor>& names, const Symbol& s, std::string_view spelling )
 {
     const bool hasBody          = s.endByte > s.sigEndByte;
-    const auto [ at, inserted ] = names.try_emplace( routeLower( s.name ), NameAnchor{ s.fileId, 0u, 0u, true, hasBody } );
+    const auto [ at, inserted ] = names.try_emplace( routeLower( spelling ), NameAnchor{ s.fileId, 0u, 0u, true, hasBody } );
     if( inserted )
     {
         return;
@@ -1881,6 +1899,22 @@ inline void noteWholeNameDef( HashMap<std::string, NameAnchor>& names, const Sym
     {
         at->second.fileId  = s.fileId;                 // the first body-carrying definition takes the claim from a
         at->second.bodyDef = true;                     // bodyless incumbent, and only ever from a bodyless one
+    }
+}
+
+// one symbol's whole name enters the index — and, for an Elixir callable indexed as `name/N`, its arity-less
+// spelling too: the source spells it `name`, and so does a query, so a plain word naming an Elixir function
+// is a whole-name hit (the route fires, the anchor names its defining file) rather than a carrier-only miss
+// (PR #81 review item 5). Each arity is a further definition of that spelling; extraDefs counts them.
+inline void noteWholeNameDef( HashMap<std::string, NameAnchor>& names, const Symbol& s )
+{
+    noteWholeNameSpelling( names, s, s.name );
+    if( s.lang == Lang::Elixir )
+    {
+        if( const std::string_view base = elixirBaseName( s.name ); base.size() != s.name.size() )
+        {
+            noteWholeNameSpelling( names, s, base );
+        }
     }
 }
 

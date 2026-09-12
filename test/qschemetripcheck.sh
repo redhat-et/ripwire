@@ -34,6 +34,20 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-12, ELIXIR SEMANTICS (test/elixirsemanticcheck.sh, PR #81), merged onto main: parserVer and its quality
+#   mirror move 94 -> 95 for module/name/arity identities, lexical imports, defaults, captures, delegates,
+#   attributes and protocol/behaviour relationships. Binding/Reference record layouts are unchanged:
+#   kCacheVersion stays #139's 21 and kQSnapCacheScheme stays 10. Old extraction facts must be re-parsed.
+# 2026-09-12, ELIXIR ARITY FOLD (PR #81 review item 4, test/elixirnamearitycheck.sh arm C): pathQualifiedKey
+#   gained a Symbol overload that folds an Elixir `name/N` arity out of the KEY (run/1 and run/2 are one piece
+#   of source, as C++ overloads are); computeSnapshot and bodyHashesBySym key through it. SEMANTICS changed
+#   for one language's keys → kQSnapCacheScheme 10 -> 11, then re-pinned. Extraction unchanged: parserVer 95.
+#   Landed at 95, not the 87 the branch carried — main spent 87..92 while it was open and the 0.6.1 round
+#   takes 93 (#139) and 94 (#172): RE-BUMPED to the next free number over the merged tip, per the collision
+#   rule in ingest_cache.h's kParserVer note. RE-DERIVED ON THE MERGE (the branch's pin hashed 87 over 18).
+#   RE-DERIVED AGAIN on the merges with main 558a2e03 (#139: 93 over 21) and #172 208433b2 (94 over 21): neither
+#   side hashed 95 over 21. The value equals the branch's pre-merge ce851b68 — neither #139 nor #172 changed a
+#   manifest function or kMergeDiffArgs, and the branch already declared 95 over 21.
 # 2026-09-12, `#if 0` ALL ROLES + DEFINITIONS (fix/ppdead-all-roles, PR #172; test/ppdeadrolescheck.sh): RE-PIN ONLY, kQSnapCacheScheme STAYS 10.
 #   kParserVer 93 -> 94 and kIngestParserVerMirror -> 94; kCacheVersion STAYS #139's 21. The decided-dead filter now
 #   drops every fact a C-family file captures inside a decided-dead range (every --uses role, the Include record, and a

@@ -1337,9 +1337,16 @@ bool isRouteAnchorSymbol( const rw::IngestResult& ing, rw::NodeId sid, const std
 {
     const rw::Symbol& s     = ing.symbols[sid];
     const std::string lower = rw::routeLower( s.name );
+    // An Elixir callable is indexed as `name/N` and anchored by its arity-less spelling too (lexical.h
+    // noteWholeNameDef registers both), so the definition the anchor names IS the `name/N` row: without this
+    // second spelling the anchor resolved to the right file and then filtered its own definition out of the
+    // body head, and `--for=generate_app` served bodies="0" reason="no_candidates" (PR #81 review item 5,
+    // test/elixirnamearitycheck.sh arm D). Empty for every other language: one comparison, as before.
+    const std::string lowerBase = ( s.lang == rw::Lang::Elixir && rw::elixirBaseName( s.name ).size() != s.name.size() )
+                                ? rw::routeLower( rw::elixirBaseName( s.name ) ) : std::string{};
     for( const rw::RouteAnchorDef& a : anchorDefs )
     {
-        if( a.fileId == s.fileId && a.lowerName == lower )
+        if( a.fileId == s.fileId && ( a.lowerName == lower || ( !lowerBase.empty() && a.lowerName == lowerBase ) ) )
         {
             return true;
         }
@@ -2751,7 +2758,11 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
     // single-symbol verbs (--around/--expand). file:name disambiguates a same-named type across languages.
     if( !cfg.legoType.empty() )
     {
-        const NodeId focus = resolveFocus( ing, cfg.legoType );
+        // H1: the out-param is the decl→def widening's residue — same-named definitions a file:name type found and could
+        // not tie to the file it named. implementors= is read off the one node picked here, so unreported, a drop reached
+        // the reader as implementors="0" about a forward declaration.
+        std::size_t  legoUnprovenDefs = 0;
+        const NodeId focus            = resolveFocus( ing, cfg.legoType, &legoUnprovenDefs );
         if( focus == kNoNode )
         {
             // §B4.2: one shared refusal — a non-defining `file:name` says WHICH files define the type and
@@ -2768,10 +2779,12 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // H5: --lego had no legend at all. The #66 clause rides as its own adjacent comment (graphlegend.h
         // graphUnindexedLegendComment) because kLegoLegend is one closed literal: the attribute below is
         // conditional on g.unindexedFiles, so its definition has to be too.
-        rw::emitTo( stdout, "{}{}{}", rw::ctxRootOpen( {}, {}, tvRootArg ).c_str(), rw::kLegoLegend,
-                     rw::graphUnindexedLegendComment( g.unindexedFiles > 0 ).c_str() );
+        // H1: the unproven_defs= clause takes the same route for the same reason (graphlegend.h unprovenDefsVerbComment).
+        rw::emitTo( stdout, "{}{}{}{}", rw::ctxRootOpen( {}, {}, tvRootArg ).c_str(), rw::kLegoLegend,
+                     rw::graphUnindexedLegendComment( g.unindexedFiles > 0 ).c_str(),
+                     rw::unprovenDefsVerbComment( rw::UnprovenDefsVerb::Lego, legoUnprovenDefs > 0, "<!-- ripwire lego: " ).c_str() );
         packLego( stdout, ing, g.implementors, flat, 1, d.redactPtr, &legoImpure, focus, /*withPaths=*/true, tvRootArg,
-                  rw::graphCountFloorAttrXml( g ) );   // M15: gauge + marker on the targeted root
+                  rw::unprovenDefsAttrXml( legoUnprovenDefs ) + rw::graphCountFloorAttrXml( g ) );   // H1 + M15: residue, gauge, marker on the targeted root
         rw::emitRaw( stdout, "</ctx>" );
         reportRedactions( stderr, d.redactCounts );      // W3-N1: a contract <m> sig is a redacting seam — disclose the tally
         return 0;

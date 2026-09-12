@@ -379,6 +379,7 @@ std::size_t partitionByScope( const rw::quality::Scope& scope, std::vector<rw::q
                               std::vector<rw::quality::Regression>& outOfScope,
                               const gtl::btree_map<std::string, rw::quality::AckRecord>& acks )
 {
+    VERIFY_NO_ALIAS( regs, outOfScope );   // push_back into outOfScope while iterating regs: the same vector twice is UB
     if( !scope.active() )
     {
         return 0;
@@ -2022,7 +2023,12 @@ std::optional<int> runEditCheck( const MainDispatch& d )
         return std::nullopt;
     }
 
-    const std::vector<NodeId> matches = resolveAllByNameQualified( ing, cfg.editCheckSym );
+    // H1: the out-param is the decl→def widening's RESIDUE — same-named definitions this selector found and could not tie
+    // to the file it named. callers=/incompatible= are read from the one definition picked below, so unreported, a drop
+    // reached the reader as incompatible="0": a no-broken-callers reading about a definition nobody read. The --dry-run
+    // preview re-resolves on the tree it measures and reports its own (editpreview.h).
+    std::size_t               ecUnprovenDefs = 0;
+    const std::vector<NodeId> matches        = resolveAllByNameQualified( ing, cfg.editCheckSym, &ecUnprovenDefs );
     if( matches.empty() )
     {
         // §B4.2: the shared refusal — see selectorrefuse.h. A `file:name` whose FILE half is the fault used
@@ -2070,7 +2076,7 @@ std::optional<int> runEditCheck( const MainDispatch& d )
     // editCheckRowWindow). cli.h's honorsPaging() lists this verb, so the pair reaches here rather than
     // being refused, and 0/0 — the un-spelled window — is the default cap, not "unbounded".
     const std::string xml = editCheckBundleText( ing, d.g, d.root, cfg.maxFileBytes, cfg.excludes, focus, d.notesPtr,
-                                                  /*preview=*/false, cfg.pageLimit, cfg.pageOffset );
+                                                  /*preview=*/false, cfg.pageLimit, cfg.pageOffset, ecUnprovenDefs );
     std::fwrite( xml.data(), 1, xml.size(), stdout );
     return 0;
 }
