@@ -137,6 +137,52 @@ struct ElixirResolver
         }
     }
 
+    // The import of one module in force at a call site — Kernel.SpecialForms.import/2 folded over the directives
+    // whose span encloses the site, in SOURCE order (bindings are start-byte sorted per file). Importing a module
+    // again ERASES its previous import: a plain import, an `only:` list and `only: :functions`/`:macros` each reset
+    // what is admitted — EXCEPT that `except:` is always exclusive on the import in force, so after
+    // `import L, only: [a: 1, b: 1]` and `import L, except: [a: 1]` only b/1 is imported (repeated except:s
+    // accumulate, as elixir_import does); with no import in force it excludes from all of L. Reading newest-first
+    // and keeping one directive per module (the previous shape) let that later `except:` admit every function the
+    // `only:` never listed (test/elixirnamearitycheck.sh G).
+    struct ImportInForce
+    {
+        std::string_view module;
+        std::string_view kind;     // all | only | functions | macros — anything else admits nothing
+        std::string_view only;     // the `only:` list, "\nname/N\n"-delimited, when kind == only
+        std::string      except;   // every `except:` list subtracted since the last reset, same delimiting
+    };
+
+    std::vector<ImportInForce> importsInForce( const Reference& ref ) const
+    {
+        std::vector<ImportInForce> inForce;
+        const auto found = imports.find( ref.fileId );
+        if( found == imports.end() ) { return inForce; }
+        for( const Binding* bindPtr : found->second )
+        {
+            const Binding& bind = *bindPtr;
+            if( ref.startByte < bind.spanStart || ref.startByte >= bind.spanEnd ) { continue; }
+            const auto state = std::find_if( inForce.begin(), inForce.end(), [ & ]( const ImportInForce& s ) { return s.module == bind.typeName; } );
+            if( bind.var == "except" )
+            {
+                if( state != inForce.end() ) { state->except += bind.importedName; continue; }   // exclusive on the import in force
+                inForce.push_back( { bind.typeName, "all", {}, bind.importedName } );              // none in force: all of the module, minus the list
+                continue;
+            }
+            if( state != inForce.end() ) { inForce.erase( state ); }                               // a plain import, an only: list or only: :functions/:macros resets
+            inForce.push_back( { bind.typeName, bind.var, bind.importedName, {} } );               // importedName is the only: list, or empty
+        }
+        return inForce;
+    }
+
+    // whether the import in force admits the callee `key` ("\nname/N\n"); a filter kind append() does not know admits nothing
+    static bool admits( const ImportInForce& state, std::string_view key ) noexcept
+    {
+        if( state.kind != "all" && state.kind != "only" && state.kind != "functions" && state.kind != "macros" ) { return false; }
+        if( state.kind == "only" && state.only.find( key ) == std::string_view::npos ) { return false; }
+        return state.except.find( key ) == std::string::npos;
+    }
+
     void resolve( const Reference& ref, std::vector<NodeId>& out ) const
     {
         out.clear();
@@ -144,51 +190,11 @@ struct ElixirResolver
         append( ref, ref.qualifier, remote, {}, out );
         if( remote ) { return; }
         bool explicitKernel = false;
-        if( const auto found = imports.find( ref.fileId ); found != imports.end() )
+        const std::string key = "\n" + ref.calleeName + "\n";
+        for( const ImportInForce& state : importsInForce( ref ) )
         {
-            // Fold every import of a module whose span encloses the call, in SOURCE order (bindings are start-byte
-            // sorted per file). Kernel.SpecialForms.import/2: importing a module again ERASES its previous import —
-            // a plain import, an `only:` list and `only: :functions`/`:macros` each reset what is admitted — EXCEPT
-            // that `except:` is always exclusive on the import in force, so after `import L, only: [a: 1, b: 1]`
-            // and `import L, except: [a: 1]` only b/1 is imported; with no import in force it excludes from all.
-            // Reading newest-first and keeping one directive per module (the previous shape) let that later
-            // `except:` admit every function the `only:` never listed (test/elixirnamearitycheck.sh G).
-            struct ImportInForce
-            {
-                std::string_view module;
-                std::string_view kind;     // all | only | functions | macros — anything else admits nothing
-                std::string_view only;     // the `only:` list, "\nname/N\n"-delimited, when kind == only
-                std::string      except;   // every `except:` list subtracted since the last reset, same delimiting
-            };
-            std::vector<ImportInForce> inForce;
-            for( const Binding* bindPtr : found->second )
-            {
-                const Binding& bind = *bindPtr;
-                if( ref.startByte < bind.spanStart || ref.startByte >= bind.spanEnd ) { continue; }
-                auto state = std::find_if( inForce.begin(), inForce.end(), [ & ]( const ImportInForce& s ) { return s.module == bind.typeName; } );
-                if( bind.var == "except" && state != inForce.end() )
-                {
-                    state->except += bind.importedName;
-                    continue;
-                }
-                if( state == inForce.end() )
-                {
-                    inForce.push_back( { bind.typeName, {}, {}, {} } );
-                    state = inForce.end() - 1;
-                }
-                state->kind   = bind.var == "except" ? std::string_view( "all" ) : std::string_view( bind.var );
-                state->only   = bind.var == "only" ? std::string_view( bind.importedName ) : std::string_view{};
-                state->except = bind.var == "except" ? bind.importedName : std::string{};
-            }
-            const std::string key = "\n" + ref.calleeName + "\n";
-            for( const ImportInForce& state : inForce )
-            {
-                explicitKernel = explicitKernel || state.module == "Kernel";
-                if( state.kind != "all" && state.kind != "only" && state.kind != "functions" && state.kind != "macros" ) { continue; }
-                if( state.kind == "only" && state.only.find( key ) == std::string_view::npos ) { continue; }
-                if( state.except.find( key ) != std::string::npos ) { continue; }
-                append( ref, state.module, true, state.kind, out );
-            }
+            explicitKernel = explicitKernel || state.module == "Kernel";
+            if( admits( state, key ) ) { append( ref, state.module, true, state.kind, out ); }
         }
         if( !explicitKernel && out.empty() ) { append( ref, "Kernel", true, {}, out ); }
         std::sort( out.begin(), out.end() );

@@ -547,8 +547,7 @@ struct ElixirContext
         if( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "/"
             && elixirNodeIs( ts_node_parent( parent ), "unary_operator" )
             && nodeFieldText( ts_node_parent( parent ), NodeField::Operator, src  ) == "&" ) { return true; }
-        if( text.front() == '_' ) { return false; }
-        if( !ts_node_is_null( bindingScope( name ) ) ) { return false; }
+        if( text.front() == '_' || !ts_node_is_null( bindingScope( name ) ) ) { return false; }
         if( const auto it = variables.find( std::string( text ) ); it != variables.end() )
         {
             for( const auto& variable : it->second )
