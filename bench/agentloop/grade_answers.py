@@ -68,8 +68,11 @@ VERDICT_RE = re.compile( r"^\s*[-*]?\s*(?P<claim>[^\s:][^:]{0,60}?)\s*:\s*"
 # A bank whose commands run an older build of the instrument under another command name must refuse
 # those rows too, and that name does not belong in a tracked file: AGENTLOOP_TOOL_ALIASES (comma- or
 # space-separated) adds each name to the same command-position test. Unset, only `ripwire` counts.
+# The name ends at `(?!\w)`, not `\b`. After a name ending in a word character the two are the same test, so
+# ripwire's own refusal set does not move; but `\b` never matches after an alias ending in `-` or `.` (no
+# boundary between two non-word characters), and it would take `tool.py` for the alias `tool.`.
 TOOL_ALIASES = tuple( n for n in re.split( r"[\s,]+", os.environ.get( "AGENTLOOP_TOOL_ALIASES", "" ) ) if n )
-CIRCULAR_RE = re.compile( r"(?:^|[|;&`]|\$\(|&&|\|\|)\s*(?:[\w./\-]*/)?(%s)\b"
+CIRCULAR_RE = re.compile( r"(?:^|[|;&`]|\$\(|&&|\|\|)\s*(?:[\w./\-]*/)?(%s)(?!\w)"
                           % "|".join( re.escape( n ) for n in ( "ripwire", ) + TOOL_ALIASES ) )
 
 
