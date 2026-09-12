@@ -208,6 +208,12 @@ uint64_t currentThreadId() noexcept;
 //          fallback loop LLVM emits when it cannot prove dst and src disjoint).
 //          On a compiler without __builtin_assume_separate_storage (GCC, clang
 //          < 17) the assumption is `( (void)0 )` and the debug check still runs.
+//          BasicAA reads the bundle only when its `basic-aa-separate-storage`
+//          option is on: off by default in LLVM 17 (AppleClang 16 / Xcode
+//          16.2), on from LLVM 18. CMakeLists.txt passes
+//          `-mllvm -basic-aa-separate-storage` to our targets whenever the
+//          compiler accepts it, so LLVM 17 consumes the promise too (a no-op
+//          on 18+; test/noaliascheck.sh arm 8 is the `=false` control).
 //
 // THE CONTRACT (clang/docs/LanguageExtensions.rst, release/19.x): the arguments
 // "are assumed to point into separately allocated storage (either different
