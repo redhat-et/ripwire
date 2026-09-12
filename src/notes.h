@@ -298,6 +298,7 @@ inline std::string shortSha( std::string_view sha )
 // empty); a third but no fourth ⇒ a hand-edited 4-field oddity (sha only, degrade rather than reject).
 inline void splitNoteTail( std::string_view rest, std::string& text, std::string& sha, std::string& branch )
 {
+    VERIFY_NO_ALIAS3( text, sha, branch );
     const std::size_t t3 = rest.find( '\t' );
     if( t3 == std::string_view::npos ) { text = std::string( rest ); return; }
     text = std::string( rest.substr( 0, t3 ) );
