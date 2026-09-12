@@ -15,6 +15,13 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — `VERIFY_NO_ALIAS` guards at 15 call sites where self-aliasing was a silent wrong answer or UB
+
+Debug-only correctness checks (`VERIFY_NO_ALIAS` / `VERIFY_NO_ALIAS3`, zero release codegen change)
+at the top of 15 functions whose two-or-more same-element-type out-parameters would silently
+mis-compute or invalidate an iterator if a caller ever passed the same object twice. No performance
+claim; this is a debug-build guard, not an optimizer hint.
+
 ## [0.6.0] — 2026-09-11
 
 **Languages and integrations from outside the project, much faster on the largest trees, and answers that say where

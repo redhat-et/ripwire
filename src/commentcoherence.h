@@ -102,6 +102,7 @@ inline bool isCommentStopword( std::string_view w ) noexcept
 // splitIdentifier(...) lowercased, one call site — the ONE tokenizer this whole lens uses (header note).
 inline void lowerSplitInto( std::string_view text, std::vector<std::string>& scratch, std::vector<std::string>& out )
 {
+    VERIFY_NO_ALIAS( scratch, out );
     naminglens::splitIdentifier( text, scratch );
     out.reserve( out.size() + scratch.size() );
     for( const std::string& tok : scratch )

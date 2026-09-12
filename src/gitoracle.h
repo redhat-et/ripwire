@@ -255,6 +255,7 @@ inline void putStr( std::string& b, const std::string& s )
 {
     // Every field written here is a git-controlled identifier / sha / date / path, all far inside 64 KiB; a
     // pathological one is CLAMPED rather than allowed to wrap the length field (G1 runs -fsanitize=integer).
+    VERIFY_NO_ALIAS( b, s );
     const std::uint16_t n = std::uint16_t( std::min<std::size_t>( s.size(), 0xffffu ) );
     qsnapPut( b, n );
     b.append( s.data(), n );
