@@ -124,10 +124,14 @@ regenerated (2026-09-11).
   cached CMake probe.
 ### Added — `VERIFY_NO_ALIAS` guards at 15 call sites where self-aliasing was a silent wrong answer or UB
 
-Debug-only correctness checks (`VERIFY_NO_ALIAS` / `VERIFY_NO_ALIAS3`, zero release codegen change)
-at the top of 15 functions whose two-or-more same-element-type out-parameters would silently
-mis-compute or invalidate an iterator if a caller ever passed the same object twice. No performance
-claim; this is a debug-build guard, not an optimizer hint.
+`VERIFY_NO_ALIAS` / `VERIFY_NO_ALIAS3` at the top of 15 functions whose two-or-more same-element-type
+out-parameters would silently mis-compute or invalidate an iterator if a caller ever passed the same
+object twice. The check runs in debug builds; in release the macro leaves only the
+`__builtin_assume_separate_storage` promise on the two objects, which the optimizer reads on clang 18+
+by default, on LLVM 17 / AppleClang 16 only with the CMake-added `-mllvm -basic-aa-separate-storage`
+and there for scalar accesses, and not at all on GCC or clang before 17. For these 15 functions the
+promise measured no codegen change (the object form says nothing about a container's heap buffer), so
+there is no performance claim here: these are correctness contracts.
 
 ## [0.6.0] — 2026-09-11
 

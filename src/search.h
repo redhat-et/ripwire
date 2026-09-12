@@ -283,7 +283,8 @@ inline bool matchesOnlyEmpty( const RegexInfo& r )
 // (e.g. `(ab|cd)(ef|gh)` → abef, abgh, cdef, cdgh, whose trigrams the AND can then require).
 inline bool crossProduct( const std::vector<std::string>& a, const std::vector<std::string>& b, std::vector<std::string>& out )
 {
-    VERIFY_NO_ALIAS3( a, b, out );
+    VERIFY_NO_ALIAS( a, out );   // inputs are only read: a self-product crossProduct( v, v, out ) is valid,
+    VERIFY_NO_ALIAS( b, out );   // so the contract is each input against the output, never a against b
     if( a.size() * b.size() > kMaxExactSet )
     {
         return false;
