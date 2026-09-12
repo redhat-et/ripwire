@@ -32,12 +32,16 @@
 # calls it through an untyped receiver from a third directory — the shape no rule can pin.
 #   (A) java, cpp, py, rust   the decline: --callees on the caller and --callers on BOTH definitions read
 #                             count="0" declined_calls="1"; the bare name (defs="2") still counts ONE call
-#   (B) the other 13 code languages (ts js go swift objc bash ruby csharp c php lua elixir dart): the same decline
+#   (B) the other 12 ladder languages (ts js go swift objc bash ruby csharp c php lua dart): the same decline; Elixir
+#       (parser version 95, PR #81) never reaches the ladder — a bare call binds by module/name/arity through the
+#       caller's own aliases and imports, so ex_hop/0 defined in two OTHER modules is refused lexically and COUNTED in
+#       unresolved= (the gauge the ladder uses for a lang-filtered name), never declined= and never guessed
 #   (C) controls, each one census decision row, exactly as the pre-change binary emitted it:
 #       same-directory duplicates -> split (Java, C++, Python); a unique global -> unique (Java, C++, Python);
 #       a Rule-1 `narrowed` rescue (Widget::run -> step, flags r); a `canonical` rescue (ns::pick, flags q);
-#       an external name -> external (C++ find, Python sum); header edges=13 ambiguous=5 unresolved=1 external=2
-#   (D) header declined=17, legend-defined, JSON twin; both ABSENT on a one-directory corpus (test/lpinfix)
+#       an external name -> external (C++ find, Python sum); header edges=13 ambiguous=5 unresolved=2 external=2
+#       (unresolved: the lang-filtered C++ name, plus the Elixir lexical refusal of arm B)
+#   (D) header declined=16, legend-defined, JSON twin; both ABSENT on a one-directory corpus (test/lpinfix)
 #   (E) the three answers in XML / --json / --format=columnar and the MCP twins; each legend defines the key it
 #       emits, and an answer with nothing declined carries neither the key nor its clause; the callers answer's next=
 #       LANDS: --uses=NAME lists each declined site's file:line, and the call sites no caller row encloses number
@@ -155,7 +159,7 @@ EOF
 # ── (B) the ladder is language-agnostic ───────────────────────────────────────────────────────────────────────
 echo "=== (B) the same decline in every other code language ==="
 for pair in ts:tsDeclined js:jsDeclined go:GoDeclined swift:swiftDeclined objc:objcDeclined bash:bash_declined \
-            ruby:ruby_declined csharp:CsDeclined c:c_declined php:phpDeclined lua:lua_declined elixir:ex_declined dart:dartDeclined; do
+            ruby:ruby_declined csharp:CsDeclined c:c_declined php:phpDeclined lua:lua_declined dart:dartDeclined; do
     lang="${pair%%:*}"; caller="${pair#*:}"
     rw --callees="$caller" >"$TMP/sweep.xml"
     R="$( root_tag "$TMP/sweep.xml" callees )"
@@ -163,6 +167,21 @@ for pair in ts:tsDeclined js:jsDeclined go:GoDeclined swift:swiftDeclined objc:o
         && ok "(B) $lang: --callees=$caller count=\"0\" declined_calls=\"1\"" \
         || no "(B) $lang: --callees=$caller should read count=\"0\" declined_calls=\"1\": ${R:-no <callees> root}"
 done
+# Elixir never reaches the ladder (parser version 95, PR #81): ExCaller's bare ex_hop() has no alias, import or receiver
+# naming either ExAlpha.ex_hop/0 or ExBeta.ex_hop/0, so the resolver refuses it lexically instead of guessing between
+# two modules. The refusal is COUNTED — unresolved= on the header, graph_unresolved= on every answer, the gauge the
+# ladder itself uses for a lang-filtered name — so the zero below is still read beside its reason; it is simply the
+# other gauge. Before this row, the fixture called ex_hop(m): an arity no definition carries, undefined under name/N.
+rw --callees=ex_declined >"$TMP/sweep.xml"
+R="$( root_tag "$TMP/sweep.xml" callees )"
+[ "$( attr "$R" count )" = 0 ] && [ -z "$( attr "$R" declined_calls )" ] && [ "$( attr "$R" graph_unresolved )" = 2 ] \
+    && ok "(B) elixir: --callees=ex_declined count=\"0\" beside graph_unresolved=\"2\" — refused lexically, counted, no declined_calls=" \
+    || no "(B) elixir: --callees=ex_declined should read count=\"0\" graph_unresolved=\"2\" and no declined_calls=: ${R:-no <callees> root}"
+rw --callers=ex_hop >"$TMP/sweep.xml"
+R="$( root_tag "$TMP/sweep.xml" callers )"
+[ "$( attr "$R" defs )" = 2 ] && [ "$( attr "$R" count )" = 0 ] && [ -z "$( attr "$R" declined_calls )" ] \
+    && ok "(B) elixir: --callers=ex_hop defs=\"2\" count=\"0\" — neither module's definition gained a guessed caller" \
+    || no "(B) elixir: --callers=ex_hop should read defs=\"2\" count=\"0\" with no declined_calls=: ${R:-no <callers> root}"
 
 # ── (C) controls: every shape that is NOT a decline resolves exactly as the pre-change binary resolved it ─────
 echo "=== (C) controls — resolution unchanged ==="
@@ -193,7 +212,8 @@ R="$( root_tag "$TMP/split.xml" callees )"
 [ "$( attr "$R" count )" = 2 ] && [ -z "$( attr "$R" declined_calls )" ] \
     && ok "(C) a same-directory split is an edge pair, never a decline: --callees=javaSplit count=\"2\", no declined_calls=" \
     || no "(C) --callees=javaSplit: $R"
-for pin in "edges 13" "ambiguous 5" "unresolved 1" "external 2"; do
+# unresolved=2 since parser version 95: the pre-change binary's lang-filtered C++ name, plus arm B's Elixir lexical refusal
+for pin in "edges 13" "ambiguous 5" "unresolved 2" "external 2"; do
     set -- $pin
     [ "$( gauge "$HDR" "$1" )" = "$2" ] && ok "(C) header $1=$2, the pre-change binary's own number" \
         || no "(C) header $1=$( gauge "$HDR" "$1" ) — the pre-change binary emits $1=$2 on this fixture"
@@ -201,8 +221,8 @@ done
 
 # ── (D) the header gauge ──────────────────────────────────────────────────────────────────────────────────────
 echo "=== (D) header declined= counts every declined call, is defined, and is silent at zero ==="
-[ "$( gauge "$HDR" declined )" = 17 ] && ok "(D) header declined=17 (4 in arm A + 13 in arm B)" \
-    || no "(D) header declined= is not 17: $( printf '%s' "$HDR" | grep -oE ' declined=[0-9]+' || echo absent )"
+[ "$( gauge "$HDR" declined )" = 16 ] && ok "(D) header declined=16 (4 in arm A + 12 in arm B; Elixir is counted unresolved, arm B)" \
+    || no "(D) header declined= is not 16: $( printf '%s' "$HDR" | grep -oE ' declined=[0-9]+' || echo absent )"
 legend_of "$TMP/map.xml" | grep -q 'hdr:declined=' && ok "(D) the map legend defines hdr:declined=" \
     || no "(D) the map legend does not define hdr:declined="
 "$BIN" "$CLEAN" --no-cache >"$TMP/clean.xml" 2>/dev/null
@@ -211,7 +231,7 @@ stats "$TMP/clean.xml" | grep -q ' declined=' \
     && no "(D) declined= present on a one-directory corpus, where no call can reach tier 3" \
     || ok "(D) declined= absent where nothing was declined (test/lpinfix)"
 rw --json >"$TMP/map.json"
-grep -q '"declined":17,' "$TMP/map.json" && ok '(D) --json header carries "declined":17' \
+grep -q '"declined":16,' "$TMP/map.json" && ok '(D) --json header carries "declined":16' \
     || no "(D) --json declined gauge missing or wrong: $( grep -oE '"declined":[0-9]+' "$TMP/map.json" || echo absent )"
 "$BIN" "$CLEAN" --json --no-cache >"$TMP/clean.json" 2>/dev/null
 grep -q '"declined"' "$TMP/clean.json" && no '(D) "declined" present in --json on a decline-free corpus' \
@@ -424,7 +444,7 @@ R='<callers of="x" defs="1" count="0" root="." counts_floor="1">'
 [ "$( attr "$R" count )" = 0 ] && [ "$( attr "$R" declined_calls )" = 1 ] \
     && no "(G) the answer predicate cannot see a bare zero" || ok "(G) a bare count=\"0\" without declined_calls= IS detected"
 H='<!-- files=1 symbols=2 edges=0 shown=2 est_tokens=9 ambiguous=0 unresolved=0 order=important-first -->'
-[ "$( gauge "$H" declined )" = 17 ] && no "(G) the header predicate cannot see a missing gauge" || ok "(G) a header without declined= IS detected"
+[ "$( gauge "$H" declined )" = 16 ] && no "(G) the header predicate cannot see a missing gauge" || ok "(G) a header without declined= IS detected"
 printf '%s' '<uses of="jbody" defs="2" external="0" count="0" root="." counts_floor="1"></uses>' >"$TMP/g_uses.xml"
 call_sites "$TMP/g_uses.xml" | grep -qxF java/caller/JavaCaller.java:7 \
     && no "(G) the site predicate finds a declined site the uses answer does not list" || ok "(G) a uses answer that drops the declined site IS detected"

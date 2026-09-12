@@ -165,7 +165,10 @@ module dependencies resolved through declared module identities, regardless of u
 
 **Static limits:** quoted AST and macro-generated definitions are not expanded. `use` records the
 dependency, but does not execute `__using__`; framework DSLs and generated Phoenix/Ecto functions
-therefore need an explicit source definition to appear. Runtime module receivers, `apply`, anonymous
+therefore need an explicit source definition to appear. A call that only an injected import could
+answer has no lexical candidate: no edge is minted from a same-named function elsewhere, and the call
+is counted in the map header's `unresolved=` and every answer's `graph_unresolved=` when some
+definition spells the name (an undefined spelling has no header surface, as in every language). Runtime module receivers, `apply`, anonymous
 function dispatch, protocol dispatch by runtime argument type, and HEEx template execution are not
 inferred. Type expressions are indexed as declarations, not type-checked. Default-expression edges
 are syntactic possibilities, not narrowed by supplied arguments. Metrics count written controls,

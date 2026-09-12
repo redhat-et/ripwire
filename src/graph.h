@@ -2220,12 +2220,37 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             std::erase_if( cand, [ & ]( NodeId c ) { return !sameRoot( c, r.fileId ); } );
             if( cand.empty() )
             {
-                // A known static module/name/arity cannot fall back to unrelated same-spelled functions. Counted,
-                // never silent (pincensus.h CallDisposition, main 6b8dc9d0): a spelling some in-repo def carries but
-                // the lexical resolver refused is unresolved=; a name no in-repo def carries at all is undefined.
-                // PROVISIONAL (0.6.1 rehearsal): the design choice — model the imports `use`/`__using__` injects, or
-                // fall back to the name ladder marked ambiguous — is review item 2 on PR #81 and stays the author's.
-                disposition = byName.find( r.calleeName ) == byName.end() ? CallDisposition::Undefined : CallDisposition::Unresolved;
+                // No lexical fact answers this call: no alias, import or receiver names a definition of its
+                // module/name/arity. The commonest reason is a `use` — `__using__` injects imports the tool
+                // does not expand (docs/ARCHITECTURE.md, Elixir extraction) — and the next is a wrong arity or
+                // an excluded import. Decided 2026-09-12 (PR #81 review item 2): NO edge is minted from the
+                // name ladder, because a same-spelled function in an unrelated module is exactly the false
+                // edge this resolver exists to refuse (on one framework corpus the ladder gave `text/2` 55
+                // callers where 3 were real); and the drop is COUNTED, never silent. Same vocabulary as the
+                // ladder's own refusal below: a spelling some in-repo definition carries is unresolved= (the
+                // header gauge, and the caller's own unresolvedOut); a spelling no definition carries at all is
+                // undefined, which has no header surface by design (pincensus.h); and in a multi-root run a
+                // name defined only in ANOTHER root is that root's, counted OtherRoot, as the solo run would
+                // say. Modelling what `__using__` injects stays open (test/elixirnamearitycheck.sh arm A).
+                if( it == byName.end() )
+                {
+                    disposition = CallDisposition::Undefined;
+                    continue;
+                }
+                bool anySameRootDef = !multiRoot;
+                for( NodeId c : it->second )
+                {
+                    if( multiRoot && sameRoot( c, r.fileId ) ) { anySameRootDef = true; break; }
+                }
+                if( anySameRootDef )
+                {
+                    ++g.unresolvedOut[ r.fromSymbol ];
+                    disposition = CallDisposition::Unresolved;
+                }
+                else
+                {
+                    disposition = CallDisposition::OtherRoot;
+                }
                 continue;
             }
             canonical = true;
