@@ -140,21 +140,50 @@ struct ElixirResolver
         append( ref, ref.qualifier, remote, {}, out );
         if( remote ) { return; }
         bool explicitKernel = false;
-        std::vector<std::string_view> seen;
         if( const auto found = imports.find( ref.fileId ); found != imports.end() )
         {
-            // Later directives in an enclosing lexical span replace earlier imports of that module.
-            for( auto it = found->second.rbegin(); it != found->second.rend(); ++it )
+            // Fold every import of a module whose span encloses the call, in SOURCE order (bindings are start-byte
+            // sorted per file). Kernel.SpecialForms.import/2: importing a module again ERASES its previous import —
+            // a plain import, an `only:` list and `only: :functions`/`:macros` each reset what is admitted — EXCEPT
+            // that `except:` is always exclusive on the import in force, so after `import L, only: [a: 1, b: 1]`
+            // and `import L, except: [a: 1]` only b/1 is imported; with no import in force it excludes from all.
+            // Reading newest-first and keeping one directive per module (the previous shape) let that later
+            // `except:` admit every function the `only:` never listed (test/elixirnamearitycheck.sh G).
+            struct ImportInForce
             {
-                const Binding& bind = **it;
+                std::string_view module;
+                std::string_view kind;     // all | only | functions | macros — anything else admits nothing
+                std::string_view only;     // the `only:` list, "\nname/N\n"-delimited, when kind == only
+                std::string      except;   // every `except:` list subtracted since the last reset, same delimiting
+            };
+            std::vector<ImportInForce> inForce;
+            for( const Binding* bindPtr : found->second )
+            {
+                const Binding& bind = *bindPtr;
                 if( ref.startByte < bind.spanStart || ref.startByte >= bind.spanEnd ) { continue; }
-                if( std::find( seen.begin(), seen.end(), bind.typeName ) != seen.end() ) { continue; }
-                seen.push_back( bind.typeName );
-                explicitKernel = explicitKernel || bind.typeName == "Kernel";
-                const bool listed = bind.importedName.find( "\n" + ref.calleeName + "\n" ) != std::string::npos;
-                if( ( bind.var == "only" && !listed ) || ( bind.var == "except" && listed ) ) { continue; }
-                if( bind.var != "all" && bind.var != "only" && bind.var != "except" && bind.var != "functions" && bind.var != "macros" ) { continue; }
-                append( ref, bind.typeName, true, bind.var, out );
+                auto state = std::find_if( inForce.begin(), inForce.end(), [ & ]( const ImportInForce& s ) { return s.module == bind.typeName; } );
+                if( bind.var == "except" && state != inForce.end() )
+                {
+                    state->except += bind.importedName;
+                    continue;
+                }
+                if( state == inForce.end() )
+                {
+                    inForce.push_back( { bind.typeName, {}, {}, {} } );
+                    state = inForce.end() - 1;
+                }
+                state->kind   = bind.var == "except" ? std::string_view( "all" ) : std::string_view( bind.var );
+                state->only   = bind.var == "only" ? std::string_view( bind.importedName ) : std::string_view{};
+                state->except = bind.var == "except" ? bind.importedName : std::string{};
+            }
+            const std::string key = "\n" + ref.calleeName + "\n";
+            for( const ImportInForce& state : inForce )
+            {
+                explicitKernel = explicitKernel || state.module == "Kernel";
+                if( state.kind != "all" && state.kind != "only" && state.kind != "functions" && state.kind != "macros" ) { continue; }
+                if( state.kind == "only" && state.only.find( key ) == std::string_view::npos ) { continue; }
+                if( state.except.find( key ) != std::string::npos ) { continue; }
+                append( ref, state.module, true, state.kind, out );
             }
         }
         if( !explicitKernel && out.empty() ) { append( ref, "Kernel", true, {}, out ); }
