@@ -171,8 +171,13 @@ is counted in the map header's `unresolved=` and every answer's `graph_unresolve
 definition spells the name (an undefined spelling has no header surface, as in every language). Runtime module receivers, `apply`, anonymous
 function dispatch, protocol dispatch by runtime argument type, and HEEx template execution are not
 inferred. Type expressions are indexed as declarations, not type-checked. Default-expression edges
-are syntactic possibilities, not narrowed by supplied arguments. Metrics count written controls,
-clauses and boolean joins before macro expansion. These limits apply to CLI and MCP alike.
+are narrowed by arity alone, and only where a bodyless head declares the defaults: a call that omits a
+defaulted argument reaches that head beside the clauses, a call that supplies every argument reaches
+the clauses alone (the fifth rule below), and a head that is reached carries every default expression
+it declares, whichever one the call omitted. A default written on a clause that has a body stays on
+that clause's symbol, so every call to it reaches the default expression, supplied argument or not.
+Metrics count written controls, clauses and boolean joins before macro expansion. These limits apply
+to CLI and MCP alike.
 
 Five resolution rules, each reproduced against Elixir 1.20.3 / OTP 29 before the merge and each gated
 with its control in `test/elixirnamearitycheck.sh` (G)–(K) over `test/elixirresolvefix`: a later
