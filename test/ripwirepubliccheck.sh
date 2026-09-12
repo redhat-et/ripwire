@@ -105,10 +105,11 @@ PRERELEASE_EXEMPT_SHA256='bench/recalleval/snapshot.mdpack 6f60a279b582356f5e060
 # 0, and wrote at least one letter. Otherwise exit 1 with the reason on stdout. The PPTX needs nothing beyond
 # python3 (required above); the PDF needs pdftotext, which CI installs (poppler) for this arm.
 deck_text(){
-    case "$1" in
-      *.pdf)  command -v pdftotext >/dev/null 2>&1 || { printf 'pdftotext (poppler) is not installed'; return 1; }
+    # The extension picks the extractor in ANY case, so X.PDF and slides.Pptx are read like their lowercase twins.
+    case "$( printf '%s' "${1##*.}" | tr '[:upper:]' '[:lower:]' )" in
+      pdf)    command -v pdftotext >/dev/null 2>&1 || { printf 'pdftotext (poppler) is not installed'; return 1; }
               pdftotext "$1" "$2" 2>/dev/null     || { printf 'pdftotext could not read it'; return 1; } ;;
-      *.pptx) python3 -c 'import re, sys, zipfile
+      pptx)   python3 -c 'import re, sys, zipfile
 deck = zipfile.ZipFile( sys.argv[ 1 ] )
 parts = sorted( n for n in deck.namelist() if re.fullmatch( r"ppt/(slides|notesSlides)/[^/]+\.xml", n ) )
 open( sys.argv[ 2 ], "wb" ).write( b"\n".join( deck.read( n ) for n in parts ) )' "$1" "$2" 2>/dev/null \
@@ -117,6 +118,9 @@ open( sys.argv[ 2 ], "wb" ).write( b"\n".join( deck.read( n ) for n in parts ) )
     esac
     grep -q '[A-Za-z]' "$2" 2>/dev/null || { printf 'extraction produced no text'; return 1; }
 }
+# tracked_decks LIST — the deck paths in a NUL-separated `git ls-files -z` LIST, one per line. The extension
+# matches in any case (grep -i), the same rule deck_text applies.
+tracked_decks(){ tr '\0' '\n' < "$1" | grep -iE '\.(pdf|pptx)$'; }
 # CONTROL: the extractor must REFUSE what it cannot read. If it did not, a failed read would pass for a scanned,
 # clean deck — the exact hole the check below closes.
 printf 'not a deck\n' > "$TMP/arm1b.junk.pdf"
@@ -125,7 +129,39 @@ _ctl=0
 for _junk in "$TMP/arm1b.junk.pdf" "$TMP/arm1b.junk.pptx"; do
     deck_text "$_junk" "$TMP/arm1b.junk.txt" >/dev/null && { no "arm 1b control — deck extraction accepted an unreadable .${_junk##*.} file"; _ctl=1; }
 done
-[ "$_ctl" -eq 0 ] && ok "arm 1b control — deck extraction refuses an unreadable PDF and an unreadable PPTX"
+# CONTROL (positive): an upper- or mixed-case extension is still a deck. Selection must pick exactly the two decks
+# out of a planted tracked list, and deck_text must read a planted .PDF and .Pptx back to their planted word.
+printf 'present/X.PDF\0talks/slides.Pptx\0notes.txt\0pdf\0a.pdf.bak\0' > "$TMP/arm1b.ctl.z"
+_picked="$( tracked_decks "$TMP/arm1b.ctl.z" | tr '\n' ' ' )"
+[ "$_picked" = "present/X.PDF talks/slides.Pptx " ] \
+    || { no "arm 1b control — deck selection picked [${_picked% }] from a planted list, not present/X.PDF and talks/slides.Pptx"; _ctl=1; }
+python3 - "$TMP/arm1b.ctl.PDF" "$TMP/arm1b.ctl.Pptx" <<'PY'
+import sys, zipfile
+# A one-page PDF whose only text is the planted word, with a real xref table so no reader has to repair it.
+text = b"BT /F1 18 Tf 20 40 Td (deckcontrol) Tj ET"
+objs = ( b"<</Type /Catalog /Pages 2 0 R>>", b"<</Type /Pages /Kids [3 0 R] /Count 1>>",
+         b"<</Type /Page /Parent 2 0 R /MediaBox [0 0 300 100] /Contents 4 0 R /Resources <</Font <</F1 5 0 R>>>>>>",
+         b"<</Length %d>>\nstream\n%s\nendstream" % ( len( text ), text ),
+         b"<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>" )
+pdf, offsets = bytearray( b"%PDF-1.4\n" ), []
+for number, body in enumerate( objs, 1 ):
+    offsets.append( len( pdf ) )
+    pdf += b"%d 0 obj\n%s\nendobj\n" % ( number, body )
+xref = len( pdf )
+pdf += b"xref\n0 %d\n0000000000 65535 f \n" % ( len( objs ) + 1 ) + b"".join( b"%010d 00000 n \n" % o for o in offsets )
+pdf += b"trailer\n<</Size %d /Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n" % ( len( objs ) + 1, xref )
+open( sys.argv[ 1 ], "wb" ).write( pdf )
+with zipfile.ZipFile( sys.argv[ 2 ], "w" ) as deck:
+    deck.writestr( "ppt/slides/slide1.xml", "<p:sld><a:t>deckcontrol</a:t></p:sld>" )
+PY
+for _deck in "$TMP/arm1b.ctl.PDF" "$TMP/arm1b.ctl.Pptx"; do
+    if _why="$( deck_text "$_deck" "$TMP/arm1b.ctl.txt" )"; then
+        grep -q deckcontrol "$TMP/arm1b.ctl.txt" || { no "arm 1b control — a planted .${_deck##*.} deck was read but its planted word is missing"; _ctl=1; }
+    else
+        no "arm 1b control — a planted, readable .${_deck##*.} deck was not read: $_why"; _ctl=1
+    fi
+done
+[ "$_ctl" -eq 0 ] && ok "arm 1b control — deck extraction refuses unreadable input and reads a planted .PDF and .Pptx"
 # Every TRACKED deck, not a hard-coded pair: a new deck is scanned the day it is committed. The loop reads a
 # process substitution, not a pipe, so _deckfail and no()'s fail=1 are set in THIS shell.
 : > "$TMP/arm1b.extra"
@@ -138,7 +174,7 @@ while IFS= read -r _bin; do
         no "arm 1b — $_bin was NOT scanned: $_why. A deck this arm could not read is not a deck it cleared."
         _deckfail=1
     fi
-done < <( tr '\0' '\n' < "$TMP/tracked.z" | grep -E '\.(pdf|pptx)$' )
+done < <( tracked_decks "$TMP/tracked.z" )
 python3 - "$TMP/tracked.z" "$TMP/arm1b.extra" "$PRERELEASE_NAME_SHA256" "$PRERELEASE_EXEMPT_SHA256" \
     > "$TMP/arm1b" 2> "$TMP/arm1b.err" <<'PY'
 import hashlib, re, sys
