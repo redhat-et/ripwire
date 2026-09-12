@@ -1793,7 +1793,12 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 20;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 92;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 93;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 93 = 2026-09-11 (#62/#72 follow-up): the decided-dead `#if 0`
+                                                          //    filter now covers every --uses role, the Include record, and
+                                                          //    DEFINITIONS — the extracted set shrinks on any C-family tree
+                                                          //    with a literal `#if 0`/`#if 1`. See ingest_cache.h's
+                                                          //    kParserVer note.
                                                           // 92 = 2026-09-11 (yaml unsigned-char, PR #140): the yaml scanner's
                                                           //    status type. SCN_FAIL (-1) returned through plain `char` came
                                                           //    back as 255 wherever `char` is unsigned (aarch64 Linux, the
