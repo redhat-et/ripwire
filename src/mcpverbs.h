@@ -3224,6 +3224,13 @@ inline const char* mcpBaselineMarker( const rw::quality::BaselineSelection& sele
     {
         return selection.marker;
     }
+    // Round 3 (pathguard.h): a refused link is decided by the refused open itself. The probe below FOLLOWS a link
+    // (std::filesystem::exists is a stat, not an lstat), so asking it would call a refusal "unreadable" whenever
+    // the link's target exists and "no sidecar" whenever it does not — an answer about some other file entirely.
+    if( selection.sidecarSymlinkRefused )
+    {
+        return selection.marker;
+    }
 
     std::error_code sidecarEc;
     if( std::filesystem::exists( std::filesystem::path( sidecarPath ), sidecarEc ) && !sidecarEc )
@@ -3268,7 +3275,11 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
             // (baseSel.isStaleFileOnDisk() is true whenever isSidecarStale() is) — "delete it" is therefore
             // always the true instruction and the wording needs no removed-vs-ignored split. The CLI twin,
             // which unlinks, does branch on isStaleFileOnDisk().
-            oc.errMsg = baseSel.isSidecarStale()
+            // Round 3 (pathguard.h): a refused link gets the CLI twin's refused-link wording, per-arm verb aside —
+            // "no <file>" is false while the link is sitting at the name.
+            oc.errMsg = baseSel.sidecarSymlinkRefused
+                ? std::string( rw::quality::kBaselineFile ) + " is a symlink, which is refused on read exactly as on write (it was not opened), and there is no git HEAD to auto-compare against — replace the link with a regular copy of its target, or remove it and run the quality_baseline verb"
+                : baseSel.isSidecarStale()
                 ? std::string( rw::quality::kBaselineFile ) + " is STALE (pinned at a different HEAD) and there is no current HEAD tree to fall back to — delete it or re-run the quality_baseline verb"
                 : std::string( "no " ) + rw::quality::kBaselineFile + " and no git HEAD to auto-compare against — run the quality_baseline verb BEFORE the change you want to measure";
             return oc;
