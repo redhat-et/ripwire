@@ -15,6 +15,14 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+- **`VERIFY_NO_ALIAS` is now an optimizer fact in release, not an inert assume.** `src/infra/Diagnostics.h` §6 adds
+  `__builtin_assume_separate_storage` (clang 17+, `__has_builtin`-guarded, `( (void)0 )` elsewhere) beside the debug
+  check, so codegen matches `__restrict__` on the parameters (`out=a; out+=b; out+=a;` arm64 10 → 6 instructions);
+  `VERIFY_NO_ALIAS_BUF` is the form for two containers (the object form is inert for their loops); the comment carries
+  the complete-object contract and the macOS `<sys/cdefs.h>` trap that deletes bare `__restrict` in C++ —
+  `__restrict__` is the only spelling allowed in `src/`. `test/noaliascheck.sh` (seven arms, red against the old
+  definition) proves it.
+
 ## [0.6.0] — 2026-09-11
 
 **Languages and integrations from outside the project, much faster on the largest trees, and answers that say where
