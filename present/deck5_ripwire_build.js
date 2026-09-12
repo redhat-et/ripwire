@@ -30,154 +30,6 @@ const SANS  = "Arial";
 
 const W = 13.33, H = 7.5, MX = 0.62;
 
-// ── --quality-delta examples: DATA, not layout ──────────────────────────────────────────────────────────
-// The "What --quality-delta catches" slide renders these entries, copied from docs/QUALITY_DELTA_CATALOG.md
-// (catalog commit 553dbadb, whose rows were re-derived with a build of main 766913d0). Nothing is invented: a card
-// quotes its row's own attributes, and the entry's notes carry the whole row, the commits and the command that
-// reproduces it. An empty array renders the slide as a marked placeholder.
-//   { kind:    "…",    // the kind exactly as --quality-delta prints it
-//     finding: "…",    // quoted from the row: the symbol(s) and the attributes that carry the finding
-//     before:  "…",    // the snippet before the change; "\n" separates lines
-//     after:   "…",    // the snippet after the change
-//     why:     "…",    // one sentence: why the finding matters
-//     notes:   ["…"] } // optional speaker-note lines: catalog section, commits, verbatim row, how to reproduce
-// At most 6 entries. The note above qdExamples says how much code a pane holds; this slide shows 4, the most that
-// leaves each pane 10 lines of 39 columns. The four vary in kind and in outcome: a copy of a helper three callers
-// used, folded back; a nested scan, flattened; dead helpers, deleted, beside the one the kind missed; a near-copy
-// extracted, whose residue the detector still gates.
-const QD_EXAMPLES = [
-  { kind: "new-clone-of-reused-helper",
-    finding: 'registeredMacroNames | vendoredPathPrefixes',
-    before: [
-      "std::vector<std::string> out;",
-      "for( std::string_view p :",
-      "     kBuiltinVendoredPrefixes )",
-      "{ … }",
-      "for( std::string& extra :",
-      "     readRegisterMacrosConfig( root )",
-      "         .vendoredPaths )",
-      "{ … }",
-      "std::sort( out.begin(), out.end() );",
-      "out.erase( std::unique( … ), … );",
-    ].join("\n"),
-    after: [
-      "inline std::vector<std::string>",
-      "mergeBuiltinsWithConfig( … builtins,",
-      "    … fromConfig )",
-      "// … reserve, append both lists,",
-      "//   sort, unique",
-      "// vendoredPathPrefixes( root ):",
-      "return mergeBuiltinsWithConfig(",
-      "    kBuiltinVendoredPrefixes,",
-      "    readRegisterMacrosConfig( root )",
-      "        .vendoredPaths );",
-    ].join("\n"),
-    why: "A helper with three callers, copied while building the feature that measures copies.",
-    notes: [
-      `Catalog §1, "new-clone-of-reused-helper: a helper written out longhand beside the one it copies" (catalog commit 553dbadb). Commits: base 05f4b892 → before c7e93089 → after cca0bf8d, in the per-kind dials round (PR #127).`,
-      `Row, verbatim (05f4b892..c7e93089): <r kind="new-clone-of-reused-helper" sym="src/quality.h::quality::registeredMacroNames | src/quality.h::quality::vendoredPathPrefixes" was="0" now="3" p="src/quality.h:433" gating="1" next="--expand=src/quality.h:vendoredPathPrefixes"/>. The same report gates two duplication rows (tokens="114") and a verbosity row on readRegisterMacrosConfig (was="58" now="69" bar="60").`,
-      `Why it is more than a duplication row: now="3" is the fan-in of the helper the copy duplicated, so three call sites already relied on that shape. Both readers now call mergeBuiltinsWithConfig, and the third member (editplan::callersUnionSize) lost its duplication row with it. The commit ran this on the round that built the dials.`,
-      `Reproduce: base=05f4b892 before=c7e93089 after=cca0bf8d; git worktree add --detach ../qd-before $before; ./build/ripwire ../qd-before --quality-delta=$base..$before --scope=src/quality.h --legend=compact → the four rows, gating="4", exit 2; with $base..$after → gating="0", exit 0. Re-run 2026-09-11 with a built_from=766913d02 build: both match the catalog.`,
-    ] },
-  { kind: "nesting",
-    finding: 'runChangeViews was="6" now="8" · complexity was="141" now="178"',
-    before: [
-      "for( … o < ws.size(); ++o )",
-      "{",
-      "    if( o == r ) { continue; }",
-      "    for( char c : perRootChanged[o] )",
-      "    {",
-      "        if( c )",
-      "        {",
-      "            if( !elsewhere.empty() ) …",
-      "            elsewhere += ws[o].label;",
-      "            break;",
-    ].join("\n"),
-    after: [
-      "const std::string elsewhere =",
-      "    situRootsHoldingMatches(",
-      "        ws, perRootChanged, r );",
-      "// … in situRootsHoldingMatches:",
-      "if( o != self && std::any_of(",
-      "    perRootChanged[o].begin(),",
-      "    perRootChanged[o].end(),",
-      "    []( char c ) { return c != 0; } ) )",
-      "{",
-      "    // … labels += ws[o].label;",
-    ].join("\n"),
-    why: "The inner loop asked one question; it is now std::any_of, in a named function.",
-    notes: [
-      `Catalog §6, "nesting: an inline scan inside a per-root loop" (catalog commit 553dbadb). Commits: base e3b52d39 → before 4c526577 → after a8e994d1.`,
-      `Rows, verbatim (e3b52d39..4c526577): <r kind="nesting" sym="runChangeViews" was="6" now="8" bar="4" p="src/verbs_change.h:245" gating="1" next="--expand=src/verbs_change.h:runChangeViews"/> and <r kind="complexity" sym="runChangeViews" was="141" now="178" bar="15" p="src/verbs_change.h:245" gating="1" next="--expand=src/verbs_change.h:runChangeViews"/>. A third row gates resolveSinceScope's second git-pipe reader (was="6" now="23" bar="15").`,
-      `The inner for/if/break asked whether this root has any change, so it is std::any_of, and the scan is a named function that takes two more levels out of the dispatcher. resolveSinceScope now reads both git answers through popenTrimmed, the pipe reader the tree already had; the commit records a first attempt, a private copy of that reader, which the report flagged as a new-clone-of-reused-helper. The dispatcher keeps a minor row (was="141" now="146"): chronic debt this change neither created nor gated on.`,
-      `Reproduce: base=e3b52d39 before=4c526577 after=a8e994d1; git worktree add --detach ../qd-before $before; ./build/ripwire ../qd-before --quality-delta=$base..$before --scope=src/verbs_change.h,src/gitmine.h --legend=compact → the three rows, gating="3", exit 2; with $base..$after → minor rows only, gating="0", exit 0. Re-run 2026-09-11 with a built_from=766913d02 build: both match the catalog.`,
-    ] },
-  { kind: "dead-code",
-    finding: 'mentionFilesCut · namesUnkeptPackageIndex',
-    before: [
-      "inline bool namesFileNotKept( … )",
-      "{ … return !unkept.empty(); }",
-      "inline bool mentionFilesCut( … )",
-      "{",
-      "    // …",
-      "    return std::any_of( …, [ & ]( … )",
-      "    {",
-      "        return namesFileNotKept( … );",
-      "    } );",
-      "}",
-    ].join("\n"),
-    after: [
-      "// all three definitions: deleted",
-      "",
-      "// the live verdict comes from a line",
-      "// that was already there, unchanged:",
-      "const std::uint32_t mentionFilesTotal =",
-      "    mentionFilesNamedTotal(",
-      "        ing, raw, mentionedFiles );",
-    ].join("\n"),
-    why: "Deleted, not acked. namesFileNotKept had no row: its only caller was dead too.",
-    notes: [
-      `Catalog §7, "dead-code: helpers a rewrite left with no caller" (catalog commit 553dbadb). Commits: base edbb978d → before 1ec420f1 → after 06414b52.`,
-      `Rows, verbatim (edbb978d..1ec420f1): <r kind="dead-code" sym="src/mention.h::mention_detail::mentionFilesCut" p="src/mention.h:467" gating="1" next="--expand=src/mention.h:mentionFilesCut"/> and <r kind="dead-code" sym="src/mention.h::mention_detail::namesUnkeptPackageIndex" p="src/mention.h:397" gating="1" next="--expand=src/mention.h:namesUnkeptPackageIndex"/>.`,
-      `The mention cap's verdict changed to total > kept.size(), computed from mentionFilesNamedTotal, and the predicates that used to answer it lost their callers. The commit's own words are "Deleted, not acked." Dead predicates beside a live verdict leave the next reader unsure which answer is authoritative. The kind could see them only because PR #127 replaced its blanket "headers are exported" exclusion with the rule that names what a language invokes (09d4f5fc).`,
-      `The limit, disclosed: namesFileNotKept was deleted too, but no row named it, because its only caller was itself dead. Catalog improvement path IP-8, "Dead code is one hop deep".`,
-      `Reproduce: base=edbb978d before=1ec420f1 after=06414b52; git worktree add --detach ../qd-before $before; ./build/ripwire ../qd-before --quality-delta=$base..$before --scope=src/mention.h --legend=compact → both rows, gating="2", exit 2; with $base..$after → new-symbol rows only, gating="0", exit 0. Re-run 2026-09-11 with a built_from=766913d02 build: both match the catalog.`,
-    ] },
-  { kind: "duplication",
-    finding: 'withHeaderAttrAfter | withHeaderField  tokens="122"',
-    before: [
-      "const std::size_t pos =",
-      "    line.find( afterField );",
-      "// …",
-      "std::size_t at =",
-      "    pos + afterField.size();",
-      "while( at < line.size()",
-      "       && line[ at ] >= '0'",
-      "       && line[ at ] <= '9' )",
-      "{ ++at; }",
-      "line.insert( at, attr );",
-    ].join("\n"),
-    after: [
-      "std::pair<std::size_t, std::size_t>",
-      "headerFieldDigits( … line, … field )",
-      "// … find it, walk its digit run",
-      "// withHeaderAttrAfter( … ):",
-      "const auto [ start, end ] =",
-      "    headerFieldDigits(",
-      "        line, afterField );",
-      "if( start != std::string::npos )",
-      "{",
-      "    line.insert( end, attr );",
-    ].join("\n"),
-    why: "The locator is shared now, yet a 63-token residue still gates: a false positive.",
-    notes: [
-      `Catalog §3, "duplication, Type-3: two header writers that each located the same digit run" (catalog commit 553dbadb). Commits: base e3b52d39 → before cf24501d → after 6ef4cb0f.`,
-      `Row, verbatim (e3b52d39..cf24501d): <r kind="duplication" members="src/recall.h::rw::withHeaderAttrAfter | src/recall.h::rw::withHeaderField" tokens="122" p="src/recall.h:1058" gating="1"/>. withHeaderField spelled the same locator, then replace() instead of insert().`,
-      `The locator is now headerFieldDigits, defined once beside the two writers, and each writer states only its own difference: insert or replace. The detector does not agree this is finished. Against the same base the after-tree still gates on the pair: <r kind="duplication" members="src/recall.h::rw::withHeaderAttrAfter | src/recall.h::rw::withHeaderField" tokens="63" p="src/recall.h:1069" gating="1"/>. The catalog classes that residue as a false positive, improvement path IP-4, "An extraction's residue still gates": what the two writers still share is the call to their common helper.`,
-      `Reproduce: base=e3b52d39 before=cf24501d after=6ef4cb0f; git worktree add --detach ../qd-before $before; ./build/ripwire ../qd-before --quality-delta=$base..$before --scope=src/recall.h --legend=compact → tokens="122", gating="1", exit 2; with $base..$after → tokens="63", gating="1", exit 2. Re-run 2026-09-11 with a built_from=766913d02 build: both match the catalog.`,
-    ] },
-];
-
 function bg(s){ s.background = { color: BG }; }
 function kicker(s, txt, color){ s.addText(txt, { x: MX, y: 0.42, w: 9, h: 0.32, fontFace: MONO, fontSize: 13, color, margin: 0 }); }
 function title(s, txt, opts={}){ s.addText(txt, { x: MX, y: 0.72, w: W-2*MX, h: 0.9, fontFace: SANS, fontSize: opts.size||34, bold: true, color: TEXT, margin: 0 }); }
@@ -242,69 +94,6 @@ function storyCards(s, { kick, head, stories, footText }){
     s.addText(st.gate,      { x: x+0.2, y: y+4.8,  w: tw, h: 0.26, fontFace: MONO, fontSize: 8.5, color: MUTED, valign: "middle", margin: 0 });
   });
   if (footText){ foot(s, footText); }
-  return s;
-}
-// "What --quality-delta catches": 1–3 entries lay out as one column of wide cards, 4–6 as two columns; each
-// card is a kind + finding header, a before/after pair of mono panes, and a one-line why. With no entries the
-// slide is a marked PLACEHOLDER showing three empty frames of that layout — it never renders an invented row.
-// Like storyCards, it draws on a slide its caller added. An entry's optional `notes` (an array of strings) is
-// printed under that entry in the speaker notes: the catalog section, the commits, the verbatim row, the command.
-// Pane capacity (Courier New advances 0.6 em; text boxes keep their default inset): with 4 entries, measured on the
-// render, a pane holds 10 lines of 39 columns at 8 pt, and a 40-column line wraps. By the same arithmetic 2 entries hold
-// about 10 lines of 69 columns at 9.5 pt, and 3, 5 or 6 entries about 3 lines.
-function qdExamples(s, entries){
-  if (entries.length > 6){ throw new Error(`QD_EXAMPLES has ${entries.length} entries; the slide is laid out for at most 6`); }
-  entries.forEach((e, i) => {
-    for (const k of ["kind", "finding", "before", "after", "why"]){
-      if (typeof e[k] !== "string" || e[k] === ""){ throw new Error(`QD_EXAMPLES[${i}].${k} is missing or empty`); }
-    }
-    if (e.notes !== undefined && !(Array.isArray(e.notes) && e.notes.every((l) => typeof l === "string" && l !== ""))){
-      throw new Error(`QD_EXAMPLES[${i}].notes must be an array of non-empty strings`);
-    }
-  });
-  const placeholder = entries.length === 0;
-  kicker(s, placeholder ? "// examples from docs/QUALITY_DELTA_CATALOG.md — each one reproduced, none invented"
-                        : "// real findings from ripwire's own history — each one re-derived by a command", CYAN);
-  title(s, "What --quality-delta catches", { size: 32 });
-  const shown = placeholder
-    ? [0, 1, 2].map(() => ({ kind: "‹kind›", finding: "‹the finding, as the tool prints it›", before: "‹before›", after: "‹after›", why: "‹why it matters, in one sentence›" }))
-    : entries;
-  const AW = W - 2*MX, AH = 5.08, GAP = 0.14, top = 1.74, PAD = 0.14, PGAP = 0.1;
-  const cols = shown.length <= 3 ? 1 : 2, rows = Math.ceil(shown.length / cols);
-  const cw = (AW - (cols-1)*GAP) / cols, ch = (AH - (rows-1)*GAP) / rows, codeSize = cols === 1 ? 9.5 : 8;
-  shown.forEach((e, i) => {
-    const x = MX + (i % cols) * (cw + GAP), y = top + Math.floor(i / cols) * (ch + GAP);
-    const edge = placeholder ? { color: "3A4353", width: 1, dashType: "dash" } : { color: "232D3D", width: 0.75 };
-    s.addShape("roundRect", { x, y, w: cw, h: ch, fill: { color: CARD }, rectRadius: 0.09, line: edge });
-    // The kind box is as wide as its own text, and the finding starts where it ends: the longest kind,
-    // new-clone-of-reused-helper, is 2.38 in at 11 pt and wrapped out of the fixed 2.2 in box this replaced.
-    const kindW = Math.max(0.9, e.kind.length * 11 * 0.6 / 72 + 0.12);
-    s.addText(e.kind,    { x: x+PAD, y: y+0.06, w: kindW, h: 0.3, fontFace: MONO, fontSize: 11, bold: true, color: placeholder ? MUTED : AMBER, valign: "middle", margin: 0 });
-    s.addText(e.finding, { x: x+PAD+kindW+PGAP, y: y+0.06, w: cw-2*PAD-kindW-PGAP, h: 0.3, fontFace: SANS, fontSize: 10, color: placeholder ? MUTED : TEXT, valign: "middle", margin: 0 });
-    const paneY = y + 0.42, paneH = ch - 0.42 - 0.38, paneW = (cw - 2*PAD - PGAP) / 2;
-    [["before", e.before], ["after", e.after]].forEach(([label, code], j) => {
-      const px = x + PAD + j * (paneW + PGAP);
-      s.addShape("rect", { x: px, y: paneY, w: paneW, h: paneH, fill: { color: BG }, line: { color: "232D3D", width: 0.5 } });
-      s.addText(label, { x: px+0.06, y: paneY+0.03, w: paneW-0.12, h: 0.17, fontFace: MONO, fontSize: 7.5, color: MUTED, margin: 0 });
-      s.addText(code,  { x: px+0.06, y: paneY+0.21, w: paneW-0.12, h: paneH-0.24, fontFace: MONO, fontSize: codeSize, color: placeholder ? MUTED : TEXT, valign: "top", margin: 0 });
-    });
-    s.addText(e.why, { x: x+PAD, y: y+ch-0.35, w: cw-2*PAD, h: 0.3, fontFace: SANS, fontSize: 9.5, italic: true, color: MUTED, valign: "middle", margin: 0 });
-  });
-  if (placeholder){
-    chip(s, "PLACEHOLDER", W-MX-2.0, 0.38, 2.0, AMBER, { h: 0.36, size: 12, line: AMBER });
-    foot(s, "placeholder: the examples arrive as data (QD_EXAMPLES, top of the generator) once docs/QUALITY_DELTA_CATALOG.md lands");
-    notes(s, [
-      "PLACEHOLDER — no example is shown on purpose.",
-      "The examples come from docs/QUALITY_DELTA_CATALOG.md, which a separate lane is writing with real, reproduced findings. Still not in the tree as of main 40a1895b (checked 2026-09-11): the catalog lives on commit 553dbadb only.",
-      "To fill: add 3 to 6 { kind, finding, before, after, why } entries to QD_EXAMPLES at the top of present/deck5_ripwire_build.js, copied from the catalog, then rebuild. The notes list each entry against the catalog.",
-    ]);
-  } else {
-    foot(s, "each pair is copied from docs/QUALITY_DELTA_CATALOG.md, where the command that reproduces it is recorded");
-    notes(s, [
-      "SOURCES: docs/QUALITY_DELTA_CATALOG.md — one entry per card, left to right, then top to bottom.",
-      "The snippets are the catalog's excerpts, trimmed to fit a card: … marks elided code, long lines wrap, and a comment line stands for code the catalog says was elided or deleted.",
-    ].concat(entries.flatMap((e, i) => [`${i+1}. ${e.kind}: ${e.finding}`].concat((e.notes || []).map((l) => `   ${l}`)))));
-  }
   return s;
 }
 
@@ -1279,7 +1068,7 @@ function qdExamples(s, entries){
   kicker(s, "// how it stays true", AMBER);
   title(s, "Proven, not promised");
   const cards = [
-    ["606 gate scripts", "the suite runs on every push — plus determinism, cache-transparency and golden contracts; the gate count itself is gated against the runner's own loop"], // gatecount
+    ["607 gate scripts", "the suite runs on every push — plus determinism, cache-transparency and golden contracts; the gate count itself is gated against the runner's own loop"], // gatecount
     ["byte-identical, always", "two runs over the same tree produce the same bytes; warm equals cold. Enforced in CI, twice — Release AND a plain flavour, because NDEBUG once blinded a whole class of checks"],
     ["differential refactoring", "a refactor must prove it changed nothing observable: two binaries, hundreds of argv vectors, stdout + stderr + exit codes byte-identical"],
     ["held-out labels, authored blind", "eval labels were written by reading source before the ranker ever ran on them — so the eval is allowed to say the ranker is wrong. It has."],
@@ -1303,7 +1092,7 @@ function qdExamples(s, entries){
   title(s, "Claims you can trust, because we publish what failed", { size: 32 });
 
   card(s, MX, 1.72, 3.86, 1.72);
-  stat(s, "606", "gate scripts named by test/regression.sh — and the COUNT itself is gated against the runner's own loop, so it cannot go stale quietly", // gatecount
+  stat(s, "607", "gate scripts named by test/regression.sh — and the COUNT itself is gated against the runner's own loop, so it cannot go stale quietly", // gatecount
     MX+0.15, 1.86, 3.56, CYAN, { bsize: 42, bh: 0.66, lsize: 9.5 });
   card(s, 4.68, 1.72, 3.86, 1.72, CARD2);
   stat(s, "8", "registered NEGATIVES — changes built, gated green, measured against a band written before the code, and reverted rather than tuned",
@@ -1419,9 +1208,6 @@ function qdExamples(s, entries){
   ], { x: MX+0.25, y: 5.79, w: 11.55, h: 0.84, fontFace: SANS, fontSize: 11.5, valign: "middle", margin: 0 });
   foot(s, "docs/EVALS.md §9.9 — same harness and criteria as the original four families, run BEFORE the two new ones shipped enabled");
 }
-
-/* ── S11d · what --quality-delta catches (examples: QD_EXAMPLES, top of this file) ─────────── */
-{ const s = p.addSlide(); bg(s); qdExamples(s, QD_EXAMPLES); }
 
 /* ── S12 · agent wiring ─────────────────────────────────────────────────── */
 {
@@ -1553,10 +1339,10 @@ function qdExamples(s, entries){
   kicker(s, "// do not take any of it on trust", AMBER);
   title(s, "Every claim, and the command that re-derives it");
   const claims = [
-    ["179 long flags · 34 slides",        "bash test/deckclaimcheck.sh"],
+    ["179 long flags · 33 slides",        "bash test/deckclaimcheck.sh"],
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
     ["74.7% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
-    ["606 gate scripts",                  "bash test/manifestcheck.sh"], // gatecount
+    ["607 gate scripts",                  "bash test/manifestcheck.sh"], // gatecount
     ["49 repos · 70 papers · 237 surveyed","bash test/readmedriftcheck.sh"],
     ["the ten moments, any row",          "ripwire . --callers=SYM | wc -c"],
     ["the head-to-head table",            "bench/headtohead/r4-2026-08-06/"],
