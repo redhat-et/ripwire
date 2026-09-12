@@ -2787,38 +2787,120 @@ static std::string_view scipIndexUnreadableReason( const std::string& scipPath )
 
 static int dispatchMain( const rw::Config& cfg, char** argv );
 
-// The key for a SHARED root (`r` = the map family, `ctx` = the bundle family): the ROOT picks the family, then the flags that
-// shaped the answer pick the key, in the order below. One flag order across both families cannot be right, because verb
-// precedence interleaves them: --pack-task and --from-trace answer over --around, while --around answers over --expand and
-// --pack-signatures. A key from the other family matches no spec under the root, and findCompactSpec then takes that root's
-// FIRST spec, so --pack-task --metrics compacted as pack-signatures, its bundle vocabulary read under a schema that never named
-// it (test/compactlegendcheck.sh (D36)).
-static std::string_view compactMapLegendHint( const rw::Config& c ) noexcept
+// The key for a SHARED root (`r` = the map family, `ctx` = the bundle family) is read off the ANSWER, never off a flag order.
+// The ROOT picks the family: one flag order across both families cannot be right, because verb precedence interleaves them, and
+// a key from the other family took that root's FIRST spec, so --pack-task --metrics compacted as pack-signatures
+// (test/compactlegendcheck.sh (D36)). Nor can a flag order WITHIN a family: the bundle hint read --expand before --pack-task and
+// the map hint --around before --query, so --pack-task --expand compacted as expand and --query --around as around, over
+// documents byte-identical to --pack-task's and --query's alone ((D38), CodeRabbit on #203). So within the family a verb with a
+// mark of its own names its key only when the document carries that mark, and a flag whose verb lost dispatch cannot lend its
+// schema to the verb that answered. The row order is left as a TIE-BREAK between marks that share one answer: --metrics renders
+// into --map-diff's and --around's answers and keeps its old place between them, and a pack-task root carries from-trace's
+// task= beside its own budget_tokens=. A rule with no mark (--query, and the bundle modifiers only the default map renders, which
+// answers last) is read only after every marked verb was ruled out, which the static_asserts below hold.
+enum class CompactKeyMark : std::uint8_t
 {
-    if( c.mapDiff )                { return "map-diff"; }
-    if( c.metrics )                { return "metrics"; }
-    if( !c.around.empty() )        { return "around"; }
-    if( !c.query.empty() )         { return "query"; }
-    return {};
+    None,            // no mark of its own: the flag alone names the key
+    RootAttr,        // the root's own open tag carries needle="
+    FirstChild,      // the root's first child element, past the legend comments before it, is <needle>
+    MapHeaderField,  // the map header comment carries the unquoted field needle=
+    CommentOpener,   // a comment outside CDATA opens with needle (the verb's own legend block)
+};
+
+struct CompactKeyRule
+{
+    std::string_view key;
+    bool ( *isAsked )( const rw::Config& ) noexcept;
+    CompactKeyMark   mark;
+    std::string_view needle;
+};
+
+// Each mark read against its one emitter: changed= is serialize.h's changedCount, which only runDefaultMap's map-diff arm passes
+// (a clean tree still prints changed=0, and the query arm ahead of it never does); the metrics block is serialize.h's
+// `if( metrics )` legend; of= is the SeedDisclosure only --around's annotation fills.
+static constexpr CompactKeyRule kMapKeyRules[] =
+{
+    { "map-diff", []( const rw::Config& c ) noexcept { return c.mapDiff; },         CompactKeyMark::MapHeaderField, "changed" },
+    { "metrics",  []( const rw::Config& c ) noexcept { return c.metrics; },         CompactKeyMark::CommentOpener,  "<!-- metrics: " },
+    { "around",   []( const rw::Config& c ) noexcept { return !c.around.empty(); }, CompactKeyMark::RootAttr,       "of" },
+    { "query",    []( const rw::Config& c ) noexcept { return !c.query.empty(); },  CompactKeyMark::None,           {} },
+};
+
+// <skipped>, <notes> and <lego> open runSkipped's, runNotes' and the --lego arm's <ctx>; budget_tokens= rides every pack-task root
+// (packtask.h rootAttrsFor); task= rides every --from-trace and --run-trace root (ctxRootOpen with the trace label), including
+// the command-succeeded record, which has no <trace> block.
+static constexpr CompactKeyRule kBundleKeyRules[] =
+{
+    { "skipped",         []( const rw::Config& c ) noexcept { return c.skippedList; },                               CompactKeyMark::FirstChild, "skipped" },
+    { "notes",           []( const rw::Config& c ) noexcept { return c.notesList; },                                 CompactKeyMark::FirstChild, "notes" },
+    { "lego",            []( const rw::Config& c ) noexcept { return !c.legoType.empty(); },                         CompactKeyMark::FirstChild, "lego" },
+    { "pack-task",       []( const rw::Config& c ) noexcept { return c.packTaskFlag || !c.packTask.empty(); },       CompactKeyMark::RootAttr,   "budget_tokens" },
+    { "from-trace",      []( const rw::Config& c ) noexcept { return !c.fromTrace.empty() || !c.runTrace.empty(); }, CompactKeyMark::RootAttr,   "task" },
+    { "expand",          []( const rw::Config& c ) noexcept { return !c.expand.empty(); },                           CompactKeyMark::None,       {} },
+    { "exemplar",        []( const rw::Config& c ) noexcept { return !c.exemplar.empty(); },                         CompactKeyMark::None,       {} },
+    { "pack-signatures", []( const rw::Config& c ) noexcept { return c.packSignatures; },                            CompactKeyMark::None,       {} },
+    { "pack-top-n",      []( const rw::Config& c ) noexcept { return c.packTopN > 0; },                              CompactKeyMark::None,       {} },
+};
+
+// A rule with no mark sits below every marked rule, so a bare flag is read only once the answer itself has ruled out every verb
+// that could have answered in its place.
+static constexpr bool unmarkedRulesTrail( std::span<const CompactKeyRule> rules ) noexcept
+{
+    bool hasUnmarkedAbove = false;
+    for( const CompactKeyRule& rule : rules )
+    {
+        if( rule.mark == CompactKeyMark::None )
+        {
+            hasUnmarkedAbove = true;
+        }
+        else if( hasUnmarkedAbove )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+static_assert( unmarkedRulesTrail( kMapKeyRules ), "kMapKeyRules: a rule with no mark sits above a marked rule" );
+static_assert( unmarkedRulesTrail( kBundleKeyRules ), "kBundleKeyRules: a rule with no mark sits above a marked rule" );
+
+static bool isCompactKeyMarkPresent( const CompactKeyRule& rule, std::string_view doc, const rw::CompactRootInfo& root )
+{
+    switch( rule.mark )
+    {
+        case CompactKeyMark::None:
+            return true;
+        case CompactKeyMark::RootAttr:
+            return rw::headHasAttr( doc.substr( root.openBegin, root.openEnd - root.openBegin ), rule.needle );
+        case CompactKeyMark::FirstChild:
+            return rw::isElementNamed( rw::compactFirstChildTag( doc, root ), rule.needle );
+        case CompactKeyMark::MapHeaderField:
+            return rw::spanHasAttr( rw::compactMapHeader( doc ), rule.needle, {} );
+        case CompactKeyMark::CommentOpener:
+            return !rw::compactCommentOpenedBy( doc, rule.needle ).empty();
+    }
+    return false;
 }
 
-static std::string_view compactBundleLegendHint( const rw::Config& c ) noexcept
+static std::string_view compactLegendHint( const rw::Config& c, std::string_view doc )
 {
-    if( c.skippedList )            { return "skipped"; }
-    if( c.notesList )              { return "notes"; }
-    if( !c.legoType.empty() )      { return "lego"; }
-    if( !c.expand.empty() )        { return "expand"; }
-    if( c.packTaskFlag || !c.packTask.empty() ) { return "pack-task"; }
-    if( !c.fromTrace.empty() || !c.runTrace.empty() ) { return "from-trace"; }
-    if( !c.exemplar.empty() )      { return "exemplar"; }
-    if( c.packSignatures )         { return "pack-signatures"; }
-    if( c.packTopN > 0 )           { return "pack-top-n"; }
+    const rw::CompactRootInfo root = rw::findCompactRoot( doc );
+    if( root.tag.empty() )
+    {
+        return {};   // no root element: applyCompactDialect answers NotXml before any key is read
+    }
+    // The default map's --token-budget gate replaces an over-budget answer with <r withheld="1"/> (main.cpp's budget gate, its one
+    // emitter): no rows, no header, no legend, so no verb's mark. Nothing on it can rule a verb out, so there the flags keep their
+    // old order. That is the one residue no mark can reach: a withheld --query --map-diff still compacts as map-diff.
+    const bool isWithheld = root.tag == "r" && rw::spanHasAttr( doc.substr( root.openBegin, root.openEnd - root.openBegin ), "withheld", "\"1\"" );
+    const std::span<const CompactKeyRule> rules = root.tag == "r" ? std::span<const CompactKeyRule>( kMapKeyRules ) : std::span<const CompactKeyRule>( kBundleKeyRules );
+    for( const CompactKeyRule& rule : rules )
+    {
+        if( rule.isAsked( c ) && ( isWithheld || isCompactKeyMarkPresent( rule, doc, root ) ) )
+        {
+            return rule.key;
+        }
+    }
     return {};
-}
-
-static std::string_view compactLegendHint( const rw::Config& c, std::string_view rootTag ) noexcept
-{
-    return rootTag == "r" ? compactMapLegendHint( c ) : compactBundleLegendHint( c );
 }
 
 // --for's compact legend is its own (verbs_for.h): it splices est_tokens=/dropped_positive=/weak= and the
@@ -2870,7 +2952,7 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
     {
         return rc;   // a refusal (or an empty answer) — nothing to rewrite, the exit code says what happened
     }
-    switch( rw::applyCompactDialect( doc, compactLegendHint( cfg, rw::findCompactRoot( doc ).tag ) ) )
+    switch( rw::applyCompactDialect( doc, compactLegendHint( cfg, doc ) ) )
     {
         case rw::CompactOutcome::Rewritten:
         case rw::CompactOutcome::AlreadyCompact:

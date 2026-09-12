@@ -40,8 +40,8 @@ namespace rw
 // of the verb and of the root vocabulary EVERY answer of that root carries. Its bytes count against the verb's
 // per-verb pin in test/compactlegendcheck.sh, and that pin is measured from the definitions, never the reverse.
 // Roots shared by several verbs (`r` = the ranked map family, `ctx` = the bundle family) are disambiguated by a
-// HINT the caller derives from the root's family, then from its own flags (main.cpp compactLegendHint; mcpverbs.h
-// mcpCompactLegendHint keys it by verb name).
+// HINT: main.cpp compactLegendHint reads it off the answer (the root picks the family, then the mark the answering verb
+// writes), and mcpverbs.h mcpCompactLegendHint keys it by verb name.
 struct CompactLegendSpec
 {
     std::string_view rootTag;
@@ -534,6 +534,16 @@ inline std::string_view compactDocHead( std::string_view doc, const CompactRootI
     return doc.substr( root.openBegin, end - root.openBegin );
 }
 
+// The root's FIRST CHILD open tag alone, or empty when the root has no child element. compactDocHead's span runs from the root to
+// that tag and keeps the comments between them (lego/skipped/notes put their legends there), so the child's '<' is the span's LAST
+// one: every comment ends before the child begins, and a tag spells '<' inside an attribute value as &lt;.
+inline std::string_view compactFirstChildTag( std::string_view doc, const CompactRootInfo& root ) noexcept
+{
+    const std::string_view head    = compactDocHead( doc, root );
+    const std::size_t      childAt = head.rfind( '<' );
+    return childAt == std::string_view::npos || childAt == 0 ? std::string_view() : head.substr( childAt );
+}
+
 // Does `span` carry ` <attr>=<tail>`? Matched after a leading space, so `capped` never matches `hits_capped` and `bytes`
 // never matches `fit_bytes`. The head reads a quoted attribute (tail `"`); the map header an unquoted field (no tail).
 inline bool spanHasAttr( std::string_view span, std::string_view attr, std::string_view tail )
@@ -686,12 +696,12 @@ inline bool payloadHasAnyAttr( std::string_view doc, std::string_view attr, std:
 // The opener of the map header's data comment (serialize.h buildStats, its one emitter).
 inline constexpr std::string_view kCompactMapHeaderOpener = "<!-- files=";
 
-// The map header comment (before the root, or trailing under order=stable), or empty when the document has none: every
-// verb outside the map family and the bundles that embed it. A well-formed document spells `<!--` raw only in a comment
-// or a CDATA body, and a comment cannot hold `--`, so the first hit outside CDATA IS the header.
-inline std::string_view compactMapHeader( std::string_view doc ) noexcept
+// The first comment outside CDATA that opens with `opener` (which itself starts `<!--`), or empty when the document has none. A
+// well-formed document spells `<!--` raw only in a comment or a CDATA body, and a comment cannot hold `--`, so the first hit
+// outside CDATA IS that comment.
+inline std::string_view compactCommentOpenedBy( std::string_view doc, std::string_view opener ) noexcept
 {
-    for( std::size_t hit = doc.find( kCompactMapHeaderOpener ); hit != std::string_view::npos; hit = doc.find( kCompactMapHeaderOpener, hit + 1 ) )
+    for( std::size_t hit = doc.find( opener ); hit != std::string_view::npos; hit = doc.find( opener, hit + 1 ) )
     {
         const std::size_t cdataOpen = doc.rfind( "<![CDATA[", hit );
         const bool        isInCdata = cdataOpen != std::string_view::npos && doc.find( "]]>", cdataOpen ) > hit;
@@ -702,6 +712,13 @@ inline std::string_view compactMapHeader( std::string_view doc ) noexcept
         }
     }
     return {};
+}
+
+// The map header comment (before the root, or trailing under order=stable), or empty when the document has none: every
+// verb outside the map family and the bundles that embed it.
+inline std::string_view compactMapHeader( std::string_view doc ) noexcept
+{
+    return compactCommentOpenedBy( doc, kCompactMapHeaderOpener );
 }
 
 // Does this document carry term `t`? An element-qualified term reads its element alone (the head can carry the same NAME

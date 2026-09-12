@@ -37,7 +37,8 @@
 # ambiguous_callers=/dead_code_candidate=, --impact's <f lazy=>, every map-header field, the columnar format=/<cols fields=> and
 # lens=; from that sweep's design review: the <s tested=> rows of --callers/--impact; in its follow-up: the <d tested=> rows of
 # --pack-task --metrics and the columnar tested column; at the lane's end: the schema of a bundle answered beside a map-family
-# flag, every attribute of --pack-task --metrics, and the <d r= cx= ccx= in= amp=> lens facts) is DEFINED by the compact legend of
+# flag, every attribute of --pack-task --metrics, and the <d r= cx= ccx= in= amp=> lens facts; from the review of #203: the schema,
+# and every reading, of an answer given beside a flag whose verb lost dispatch) is DEFINED by the compact legend of
 # a document that carries it, and by none that does not. STRUCTURAL arm (S): every
 # conditional attribute the graphlegend.h helper family emits, the PageRank disclosure, every conditional hdr: field of
 # the map header, and every absence-marked row field of the map legend, read from source, has a compact reading — so the
@@ -1356,6 +1357,108 @@ for v in "--pack-task=helper|d37.pt" "--pack-signatures|d37.ps" "MCP explore no_
     done
 done
 [ "$d37bad" -eq 0 ] && [ "$d37n" -eq 3 ] && ok "(D37) mirror: no <d> lens-fact or route= reading prints on $d37n answers that lack its field (<d> rows without amp=, <d> rows without the lens facts, a bundle not routed)"
+
+# ── THE KEY NAMES THE VERB THAT ANSWERED (2026-09-12, CodeRabbit on #203) ──────────────────────────────────────────────────────────
+# (D38) (D36) took the FAMILY from the root and kept each family's flag order for the key, and that order disagreed with dispatch
+# inside both families: the bundle hint read --expand before --pack-task, the map hint --around before --query. --pack-task=geometry
+# --expand=distance prints the byte-identical document --pack-task=geometry prints, and compacted under ripwire.expand/v1, reading
+# sibs=/sibs_total=/sibs_capped=/inc= that nothing in it carries; --query=distance --around=distance prints --query's lexical map and
+# compacted under ripwire.around/v1, reading of=/depth=/fanout= off a map with no seed. The same order lent the losing flag's schema on
+# every other pair below (each run, its stderr's precedence line read, its full answer compared with the winner's alone): --pack-task
+# beside --skipped/--notes/--lego, --from-trace beside --expand/--notes/--skipped, --notes beside --skipped, and --query and --around
+# beside --map-diff, whose changed= only the default map's non-query arm writes. main.cpp now reads the key off the answer: a verb
+# with a mark of its own (map-diff's header changed=, the metrics block, around's root of=, <skipped>/<notes>/<lego> as the first
+# child, pack-task's root budget_tokens=, from-trace's root task=) names its key only when the document carries that mark, and a flag
+# with none (--query, the default map's bundle modifiers) is read only after every marked verb was ruled out.
+# dispatchRow asserts, per pair: the controls (the pair's FULL answer is byte-identical to the winner's alone, and the winner alone
+# compacts under WANT), the schema, and that every NAME= reading the pair's compact legend spells is carried by the document (a tag
+# attribute or a map-header field) or printed by the winner's own compact legend over that same document (its conditional
+# vocabulary: pack-task's purpose line reads id=/run=/shared=, absent on this fixture, and (D36)/(D37) own those). schemaRow pins the
+# pairs whose verbs render into ONE answer, where the old order stays the tie-break and must not move: --metrics beside --around,
+# --map-diff beside --metrics, --expand beside --pack-signatures.
+# RED on 3a55f52d (plain): twenty-two (D38) checks FAILed, both checks of every dispatchRow, and nothing else did (the three
+# schemaRow tie-break rows are green by construction), for example
+#   FAIL (D38) --pack-task=geometry --expand=distance (...) compacts under 'ripwire.expand/v1', not ripwire.pack-task/v1 — the schema of a flag whose verb did not answer
+#   FAIL (D38) --pack-task=geometry --expand=distance (...): its compact legend reads inc= sibs= sibs_capped= sibs_total= — carried by no attribute or header field of the document, and printed by no compact legend of --pack-task=geometry alone
+#   FAIL (D38) --query=distance --around=distance (...): its compact legend reads depth= fanout= of= — carried by no attribute or header field of the document, and printed by no compact legend of --query=distance alone
+#   FAIL (D38) --notes --skipped compacts under 'ripwire.skipped/v1', not ripwire.notes/v1 — the schema of a flag whose verb did not answer
+cat > "$TMP/unread.py" <<'PY'
+import re, sys
+buf = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
+legend, tags, header = "", [], ""
+i = 0; n = len( buf )
+while i < n:
+    if buf.startswith( "<![CDATA[", i ):
+        j = buf.find( "]]>", i ); i = n if j < 0 else j + 3
+    elif buf.startswith( "<!--", i ):
+        j = buf.find( "-->", i ); j = n if j < 0 else j + 3; c = buf[ i:j ]; i = j
+        if "/v1:" in c: legend += c
+        elif c.startswith( "<!-- files=" ) and not header: header = c
+    elif buf[ i ] == "<":
+        j = buf.find( ">", i ); j = n if j < 0 else j + 1; tags.append( buf[ i:j ] ); i = j
+    else:
+        j = buf.find( "<", i ); i = n if j < 0 else j
+carried = { a for t in tags for a in re.findall( r'\s([\w:.-]+)="', t ) } | set( re.findall( r'\s(\w+)=', header ) )
+print( " ".join( sorted( set( re.findall( r'(?<![A-Za-z0-9_])([A-Za-z_]\w*)=', legend ) ) - carried ) ) )
+PY
+# dispatchRow ID LABEL DIR "PAIR ARGS" "WINNER ARGS" WANT — the pair compacts as the verb that answered it, reading nothing that verb's
+# own compact legend would not.
+dispatchRow()
+{
+    local id="$1" label="$2" dir="$3" pair="$4" winner="$5" want="$6" own extra r
+    cdRun "$TMP/d38.pf" "$dir" $pair;   cdRun "$TMP/d38.pc" "$dir" $pair --legend=compact
+    cdRun "$TMP/d38.wf" "$dir" $winner; cdRun "$TMP/d38.wc" "$dir" $winner --legend=compact
+    if [ ! -s "$TMP/d38.pf" ] || ! cmp -s "$TMP/d38.pf" "$TMP/d38.wf"; then
+        no "($id) $label: control broken — its full answer is not byte-identical to $winner alone, so the row cannot say which verb answered: $( head -c 160 "$TMP/d38.pf" )"
+        return 0
+    fi
+    if [ "$( leg schema "$TMP/d38.wc" )" != "$want" ]; then
+        no "($id) $label: control broken — $winner alone compacts under '$( leg schema "$TMP/d38.wc" )', not $want"
+        return 0
+    fi
+    if [ "$( leg schema "$TMP/d38.pc" )" = "$want" ]; then
+        ok "($id) $label compacts under $want, the verb that answered"
+    else
+        no "($id) $label compacts under '$( leg schema "$TMP/d38.pc" )', not $want — the schema of a flag whose verb did not answer"
+    fi
+    own=" $( python3 "$TMP/unread.py" "$TMP/d38.wc" ) "; extra=""
+    for r in $( python3 "$TMP/unread.py" "$TMP/d38.pc" ); do
+        case "$own" in *" $r "*) ;; *) extra="$extra $r=" ;; esac
+    done
+    if [ -z "$extra" ]; then
+        ok "($id) $label: every reading its compact legend spells is carried by the document or printed by $winner's own"
+    else
+        no "($id) $label: its compact legend reads$extra — carried by no attribute or header field of the document, and printed by no compact legend of $winner alone"
+    fi
+    return 0
+}
+dispatchRow D38 "--pack-task=geometry --expand=distance (--pack-task answers; the default map's --expand never renders)" "$REPO" "--pack-task=geometry --expand=distance" "--pack-task=geometry" "ripwire.pack-task/v1"
+dispatchRow D38 "--query=distance --around=distance (--query answers, ahead of --around)" "$REPO" "--query=distance --around=distance" "--query=distance" "ripwire.query/v1"
+dispatchRow D38 "--pack-task=geometry --skipped" "$REPO" "--pack-task=geometry --skipped" "--pack-task=geometry" "ripwire.pack-task/v1"
+dispatchRow D38 "--pack-task=geometry --notes" "$REPO" "--pack-task=geometry --notes" "--pack-task=geometry" "ripwire.pack-task/v1"
+dispatchRow D38 "--pack-task=geometry --lego=Point" "$REPO" "--pack-task=geometry --lego=Point" "--pack-task=geometry" "ripwire.pack-task/v1"
+dispatchRow D38 "--from-trace --expand=distance" "$REPO" "--from-trace=$TMP/trace.txt --expand=distance" "--from-trace=$TMP/trace.txt" "ripwire.from-trace/v1"
+dispatchRow D38 "--from-trace --notes" "$REPO" "--from-trace=$TMP/trace.txt --notes" "--from-trace=$TMP/trace.txt" "ripwire.from-trace/v1"
+dispatchRow D38 "--from-trace --skipped" "$REPO" "--from-trace=$TMP/trace.txt --skipped" "--from-trace=$TMP/trace.txt" "ripwire.from-trace/v1"
+dispatchRow D38 "--notes --skipped" "$REPO" "--notes --skipped" "--notes" "ripwire.notes/v1"
+dispatchRow D38 "--query=distance --map-diff (the query arm answers; map-diff's arm never runs)" "$REPO" "--query=distance --map-diff" "--query=distance" "ripwire.query/v1"
+dispatchRow D38 "--around=distance --map-diff" "$REPO" "--around=distance --map-diff" "--around=distance" "ripwire.around/v1"
+schemaRow D38 "--metrics --around=distance (both render into --around's answer; the tie-break keeps metrics)" "$REPO" "--metrics --around=distance" "ripwire.metrics/v1"
+schemaRow D38 "--map-diff --metrics (both render into the map-diff answer)" "$REPO" "--map-diff --metrics" "ripwire.map-diff/v1"
+schemaRow D38 "--pack-signatures --expand=distance (both render into the default map's bundle)" "$REPO" "--pack-signatures --expand=distance" "ripwire.expand/v1"
+# Every MARKED verb alone keeps its own schema, so a mark its own answer never carries is red on its own row rather than hidden in a
+# pair (dispatchRow's controls hold pack-task, query, from-trace, notes and around). The first cut of this fix read <lego>, <skipped>
+# and <notes> from the whole head span, which starts with the legend comments those verbs put before their first child, and all
+# three compacted as pack-signatures while only the --notes control noticed.
+schemaRow D38 "--map-diff alone (its mark: the header's changed=)" "$REPO" "--map-diff" "ripwire.map-diff/v1"
+schemaRow D38 "--metrics alone (its mark: the metrics legend block)" "$REPO" "--metrics" "ripwire.metrics/v1"
+schemaRow D38 "--skipped alone (its mark: <skipped> first, after its legend comments)" "$REPO" "--skipped" "ripwire.skipped/v1"
+schemaRow D38 "--lego=Point alone (its mark: <lego> first, after its legend comments)" "$REPO" "--lego=Point" "ripwire.lego/v1"
+# The default map's --token-budget gate replaces an over-budget answer with <r withheld="1"/>, which carries no verb's mark. A
+# byte-identity sweep of 854 probes against 3a55f52d caught the second cut of this fix compacting both answers below as
+# ripwire.map/v1; the arm that answered is the flag's, so on that stub alone the flags keep their old order.
+schemaRow D38 "--map-diff --token-budget=1 (the budget gate withholds the map: no mark, the flag decides)" "$REPO" "--map-diff --token-budget=1" "ripwire.map-diff/v1"
+schemaRow D38 "--metrics --token-budget=1 (withheld the same way)" "$REPO" "--metrics --token-budget=1" "ripwire.metrics/v1"
 
 echo
 echo "=== (S) STRUCTURAL: every conditional attribute the graphlegend.h family, the PageRank disclosure, the map header and the map's rows emit has a compact reading ==="
