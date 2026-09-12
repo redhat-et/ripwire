@@ -45,6 +45,22 @@
 #endif
 
 namespace Diagnostics {
+namespace detail {
+// A view can share one allocation with another view; VERIFY_NO_ALIAS_BUF refuses them at compile time (§6).
+// Detected structurally so this header stays library-free (no <span>/<string_view>/<type_traits>): std::span is
+// the standard type with a static `extent`; std::basic_string_view has `traits_type` and, unlike basic_string,
+// no `allocator_type`. A custom view is the author's own contract to keep.
+template<class T> struct StripCvRef { using type = T; };
+template<class T> struct StripCvRef<const T> { using type = T; };
+template<class T> struct StripCvRef<volatile T> { using type = T; };
+template<class T> struct StripCvRef<const volatile T> { using type = T; };
+template<class T> struct StripCvRef<T&> { using type = typename StripCvRef<T>::type; };
+template<class T> struct StripCvRef<T&&> { using type = typename StripCvRef<T>::type; };
+template<class T> using Bare = typename StripCvRef<T>::type;
+template<class T> concept HasStaticExtent = requires { Bare<T>::extent; };
+template<class T> concept HasTraitsNoAllocator = requires { typename Bare<T>::traits_type; } && !requires { typename Bare<T>::allocator_type; };
+template<class T> inline constexpr bool isView = HasStaticExtent<T> || HasTraitsNoAllocator<T>;
+} // namespace detail
 
 class ConsoleLog {
 public:
@@ -251,8 +267,18 @@ uint64_t currentThreadId() noexcept;
 // non-null buffers and still dominates the loop (measured: 64 vs 61 arm64,
 // 44 vs 41 x86-64 — the difference is the emptiness test itself, which costs
 // the same without the promise). Do not add an early return for the macro's
-// sake; the one line alone is the full effect. Works for anything with
-// .data(): std::vector, std::span, std::string, std::array.
+// sake; the one line alone is the full effect.
+//
+// OWNING CONTAINERS ONLY: std::vector, std::string, std::array — anything
+// whose .data() is its own allocation (or lies inside the object itself, as
+// std::array's and a short std::string's do; two distinct objects are two
+// allocations either way). NEVER a view: two std::span or std::string_view
+// objects can look into ONE allocation, and the promise is per allocation,
+// so even two non-overlapping views would be a lie the release build acts
+// on while the object check passes. The macro refuses views at compile
+// time (static_assert on Diagnostics::detail::isView); for a pair of views,
+// promise the OWNERS they came from, or use VERIFY_NO_ALIAS on the views
+// (the object check alone) and accept that the loop keeps its overlap check.
 //
 // WHY NOT `__restrict` ON THE SIGNATURE. Prefer this macro in the body: it is
 // checked in debug, it is the same optimizer fact in release, and it does not
@@ -304,6 +330,9 @@ uint64_t currentThreadId() noexcept;
 // needs is that their BUFFERS are separate storage (promised via .data()).
 #define VERIFY_NO_ALIAS_BUF(a, b)                                               \
     do {                                                                        \
+        static_assert( !::Diagnostics::detail::isView<decltype(a)>                  \
+                    && !::Diagnostics::detail::isView<decltype(b)>,                 \
+                       "VERIFY_NO_ALIAS_BUF: a view (std::span / std::string_view) can share one allocation with another view; promise the owning containers instead" ); \
         VERIFY_TEXT( static_cast<const void*>(&(a)) != static_cast<const void*>(&(b)), \
                      "aliasing violation: '" #a "' and '" #b "' are the same container" ); \
         RW_ASSUME_SEPARATE_STORAGE( (a).data(), (b).data() );                   \

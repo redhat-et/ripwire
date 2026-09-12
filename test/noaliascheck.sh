@@ -72,8 +72,10 @@
 # worse than the direct builtin, so a header regression cannot hide behind the compiler's limit).
 # Counts are BANDS, never exact numbers — an LLVM release moves them by one or two.
 #
-# Usage:  bash test/noaliascheck.sh            (compiles with c++/clang++; objdump = llvm-objdump or GNU)
-#         CXX=clang++ OBJDUMP=llvm-objdump bash test/noaliascheck.sh
+# Usage:  bash test/noaliascheck.sh            (compiles with build/'s CMAKE_CXX_COMPILER; objdump = llvm-objdump or GNU)
+#         CXX=clang++ RIPWIRE_CMAKE_CACHE=/nonexistent bash test/noaliascheck.sh   (classify ANOTHER compiler: the
+#         cache cross-check is then WARN/skipped; a CXX that is not the cached compiler with the cache present is
+#         a FAIL, because the gate exists to measure what build/ripwire was built with)
 # Exit:   0 = clean · 1 = an arm failed · 2 = a prerequisite is missing
 
 set -u
@@ -211,7 +213,7 @@ RELEASE_ARMS=0; case "$CLASS" in CONSUMED_DEFAULT|CONSUMED_WITH_FLAG) RELEASE_AR
 cachedCXX="$( cacheVar CMAKE_CXX_COMPILER )"; cachedID=""
 if [ -n "$cachedCXX" ] && [ -x "$cachedCXX" ]; then cachedID="$( "$cachedCXX" --version 2>/dev/null | head -1 )"; fi
 if [ -f "$CACHE" ] && [ -n "$cachedCXX" ] && [ "$cachedID" != "$CXXID" ]; then
-    warn "probe: cache cross-check skipped — CXX override '$CXX' ($CXXID) is not the compiler build/ripwire was built with ('$cachedCXX': ${cachedID:-not runnable here}); this run classifies the override, not the binary"
+    no "probe: CXX '$CXX' ($CXXID) is not the compiler build/ripwire was built with ('$cachedCXX': ${cachedID:-not runnable here}) — this gate measures the binary's toolchain; to classify another compiler point RIPWIRE_CMAKE_CACHE at a tree built with it (or at a nonexistent path to skip the cross-check)"
 elif [ -f "$CACHE" ]; then
     if grep -q '^RIPWIRE_CXX_HAS_BASIC_AA_SEPARATE_STORAGE:' "$CACHE"; then
         cmakeAccepted=0; [ "$( cacheVar RIPWIRE_CXX_HAS_BASIC_AA_SEPARATE_STORAGE )" = 1 ] && cmakeAccepted=1
@@ -482,5 +484,37 @@ elif [ "$CLASS" = NOT_CONSUMED ]; then
 else
     warn "arm 8 skipped: $CXX has no __builtin_assume_separate_storage or rejects -mllvm (accepted: $FLAG_ACCEPTED)"
 fi
+
+# ── arm 9: VERIFY_NO_ALIAS_BUF refuses views at compile time — two std::span can look into ONE allocation ───
+# separate_storage is a promise per ALLOCATION; two non-overlapping spans over one vector would make it a lie the
+# release build acts on while the object check passes. The header static_asserts on Diagnostics::detail::isView.
+cat > "$WORK/view.cpp" <<'EOF9'
+#include <cstdint>
+#include <span>
+#include <string_view>
+#include <vector>
+#include "Diagnostics.h"
+void spanPair( std::span<uint32_t> d, std::span<const uint32_t> s ) { VERIFY_NO_ALIAS_BUF( d, s ); (void)d; (void)s; }
+EOF9
+cat > "$WORK/view2.cpp" <<'EOF9'
+#include <string_view>
+#include "Diagnostics.h"
+void svPair( std::string_view a, std::string_view b ) { VERIFY_NO_ALIAS_BUF( a, b ); (void)a; (void)b; }
+EOF9
+cat > "$WORK/owner.cpp" <<'EOF9'
+#include <array>
+#include <string>
+#include <vector>
+#include "Diagnostics.h"
+void owners( std::vector<int>& v, std::string& s, std::array<int, 4>& a, std::vector<int>& w, std::string& t, std::array<int, 4>& b )
+{ VERIFY_NO_ALIAS_BUF( v, w ); VERIFY_NO_ALIAS_BUF( s, t ); VERIFY_NO_ALIAS_BUF( a, b ); }
+EOF9
+for f in view view2; do
+    if "$CXX" "$CXXSTD" -fsyntax-only "${INC[@]}" "$WORK/$f.cpp" 2> "$WORK/cc9_$f.log"; then no "arm 9: $f.cpp (a pair of views) COMPILED — VERIFY_NO_ALIAS_BUF no longer refuses views"
+    elif grep -q 'can share one allocation with another view' "$WORK/cc9_$f.log"; then ok "arm 9: $f.cpp refused at compile time with the view message"
+    else no "arm 9: $f.cpp failed to compile for some OTHER reason"; sed 's/^/    /' "$WORK/cc9_$f.log" | head -6; fi
+done
+if "$CXX" "$CXXSTD" -fsyntax-only "${INC[@]}" "$WORK/owner.cpp" 2> "$WORK/cc9_owner.log"; then ok "arm 9: positive control — std::vector / std::string / std::array pairs still compile"
+else no "arm 9: owning containers no longer compile"; sed 's/^/    /' "$WORK/cc9_owner.log" | head -6; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "FAILURES ABOVE"; exit 1; }
