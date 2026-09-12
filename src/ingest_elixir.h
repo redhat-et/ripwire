@@ -575,10 +575,27 @@ struct ElixirContext
                 }
                 if( keyword != "defimpl" )
                 {
-                    const auto written = nodeTextOf( elixirFirstArgument( call ), src );
-                    if( written.find( '.' ) == std::string_view::npos && elixirNodeIs( elixirFirstArgument( call ), "alias" ) )
+                    const TSNode name = elixirFirstArgument( call );
+                    const auto written = nodeTextOf( name, src );
+                    if( elixirNodeIs( name, "alias" ) && !written.starts_with( "Elixir." ) )
                     {
-                        bindAlias( std::string( written ), full, call );
+                        // Kernel.defmodule/2, nesting: a declaration inside Outer binds the FIRST segment of its written
+                        // name in the enclosing scope from here on — `defmodule Inner` binds Inner -> Outer.Inner (the
+                        // module itself); `defmodule Inner.Deep` defines Outer.Inner.Deep and binds Inner -> Outer.Inner,
+                        // so a later `Inner.Deep.f()` names the nested module even when a top-level Inner.Deep exists.
+                        // Exactly when moduleName nested it (`full` is the parent's name plus the written one) — a
+                        // top-level or alias-expanded name binds nothing new. The dotted shape bound nothing at all,
+                        // and the later call reached the top-level module, or nothing (test/elixirnamearitycheck.sh H).
+                        const auto dot = written.find( '.' );
+                        if( dot == std::string_view::npos )
+                        {
+                            bindAlias( std::string( written ), full, call );
+                        }
+                        else if( const auto parent = scopeOf( call ); !parent.empty() && full == parent + "." + std::string( written ) )
+                        {
+                            const std::string first( written.substr( 0, dot ) );
+                            bindAlias( first, parent + "." + first, call );
+                        }
                     }
                 }
                 continue;
