@@ -2058,10 +2058,62 @@ The counts come from `docs/LINEAGE.md`. Counts are current as of 2026-09-08. Sev
 
 ripwire reads a source tree and answers these questions:
 
-- Which symbols are important in this tree?
-- Who calls this symbol, and what does a change to it affect?
-- Which tests must run before a change is complete?
-- Where is the risk in this code, and did a change make the risk worse?
+**Orient**
+
+- Which symbols matter most in this tree? (`ripwire .`)
+- Where do I start on this task, and which code does it touch? (`--for`)
+- Can I get the ranking, the key function bodies, their callers and the tests to run in one bounded bundle? (`--pack-task`)
+- What does the tree look like, directory by directory? (`--tree`)
+- Which command answers my question? (`--help-task`)
+- What do the project's notes and docs already say about this task? (`--recall`, `--notes`)
+- Which existing code should new code imitate? (`--exemplar`)
+- What must a new implementation of this interface provide, and who implements it already? (`--lego`)
+
+**Navigate**
+
+- Who calls this symbol? (`--callers`)
+- What does this symbol call? (`--callees`)
+- Where is this symbol read, written or imported, not only called? (`--uses`)
+- What does a change to this symbol affect, transitively? (`--impact`)
+- How does one symbol reach another? (`--path`)
+- How do several symbols connect? (`--connect`)
+- What sits around this symbol in the graph? (`--around`)
+- What does this function's body say, with its callees' signatures inline? (`--expand`)
+- Where does this text appear, and in which function? (`--grep`)
+- Where does this code shape appear? (`--match`)
+- How does one variable flow through a function? (`--slice`)
+- Which branch's tree defines or mentions this symbol? (`--whereis`)
+- Which frames of this stack trace, sanitizer report or compiler error are in my code? (`--from-trace`)
+- Is this claim about the code true? (`--verify`)
+
+**Change it safely**
+
+- Is it safe to delete this symbol? (`--safe-delete`)
+- Did my edit change a function's contract, and which callers does that break? (`--edit-check`)
+- Which tests must run for this change, and what does no test reach? (`--test-gate`)
+- Which tests reach these changed files? (`--affected`)
+- What is my change's blast radius, and which files usually change with these that I haven't touched? (`--situ`)
+- What does this branch touch, and which of those files are risky? (`--pr-context`)
+- Do these branches conflict, and in what order should they land? (`--merge-scout`)
+- How did the map change between two revisions? (`--map-diff`)
+
+**Quality and structure**
+
+- Where is the risk: complex code that changes often? (`--hotspots`)
+- Did my change make the code worse? (`--quality-delta`)
+- Where is code duplicated? (`--clones`)
+- What does the linter flag? (`--lint`)
+- How do the modules depend on each other? (`--deps`)
+- Does the code follow our layering rules? (`--arch`)
+- Which clusters of code belong together? (`--communities`)
+- Who knows this code, and where is that knowledge concentrated in one person? (`--owners`)
+- Which documented claims are no longer true? (`--doc-drift`)
+- Which files did ripwire skip, and why? (`--skipped`)
+
+**Setup and safety**
+
+- Is my install working? (`--doctor`)
+- Is this agent skill file safe to install? (`--scan-skill`)
 
 The tool performs five steps in a fixed order:
 
@@ -2193,6 +2245,10 @@ every request cross the network in the clear: put a TLS-terminating reverse prox
 
 ### 4. First use
 
+> **ripwire is AI-driven today.** Every command prints compact XML sized for a coding agent to read, not for a person
+> scanning a terminal. The commands in this section are the ones your agent runs. Human-friendly use is on the
+> roadmap: output a person can read, and more convenient input for common coding cases.
+
 #### 4.1 Make the first map
 
 Change to the repository. Run the following command:
@@ -2244,6 +2300,10 @@ returns one recommended command, or it abstains when the evidence is thin. The c
 only. It does not run the recommendation.
 
 ### 6. Output format
+
+> **Written for an agent.** ripwire is AI-driven today: the output described here is compact XML sized for a coding
+> agent to read, not for a person scanning a terminal. Human-friendly use is on the roadmap: output a person can
+> read, and more convenient input for common coding cases.
 
 The default output is minified XML. One comment line at the top holds the legend. The legend defines
 every attribute that the document uses. The elements are:
