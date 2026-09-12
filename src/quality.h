@@ -1793,8 +1793,11 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // lines too. Bumping kParserVer without updating these two lines is a hard gate failure, not a silent miss.
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 20;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 92;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestCacheVersionMirror   = 21;   // MUST equal ingest.cpp's kCacheVersion (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 93;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 93 = 2026-09-11 (Ruby argument + rescue constants): a
+                                                          //    constant argument of a call/super/yield and a rescue
+                                                          //    class are directives. See ingest_cache.h's note.
                                                           // 92 = 2026-09-11 (yaml unsigned-char, PR #140): the yaml scanner's
                                                           //    status type. SCN_FAIL (-1) returned through plain `char` came
                                                           //    back as 255 wherever `char` is unsigned (aarch64 Linux, the

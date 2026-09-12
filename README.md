@@ -795,7 +795,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 </p>
 
 <p align="center">
-  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 34 slides</b></a> — every figure names the instrument that pins it<br>
+  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 33 slides</b></a> — every figure names the instrument that pins it<br>
   <sub>renders in your browser · <a href="present/ripwire-showcase.pptx">pptx</a> beside it · <a href="docs/EVALS.md">the numbers behind it</a></sub>
 </p>
 
@@ -1138,7 +1138,7 @@ shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
 
 ---
 
-> **Want to help?** Start anywhere on the spectrum. At the ready-made end, twenty open problems — languages,
+> **Want to help?** Start anywhere on the spectrum. At the ready-made end, open problems — languages,
 > resolver bugs, fuzzers, docs — are written up as starter kits: the research is done, the file and line pointers
 > are in the prompt, and **each prompt writes a plan and stops**, so we can agree the approach before you write any
 > code.
@@ -1146,7 +1146,7 @@ shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
 > ```bash
 > git clone https://github.com/redhat-et/ripwire && cd ripwire
 > cmake -S . -B build && cmake --build build -j     # plain build, no build type
-> ls prompts/help-wanted/                           # twenty kits — pick one
+> ls prompts/help-wanted/                           # pick one
 > claude "follow prompts/help-wanted/zig-language.md"     # or your agent of choice
 > ```
 >
@@ -1170,8 +1170,8 @@ shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
 > what a change makes *worse*, and handing that back while the code is still being written.
 >
 > [help wanted](https://github.com/redhat-et/ripwire/labels/help%20wanted) ·
-> [good first issue](https://github.com/redhat-et/ripwire/labels/good%20first%20issue) (three) ·
-> [all twenty prompts](prompts/help-wanted/)
+> [good first issue](https://github.com/redhat-et/ripwire/labels/good%20first%20issue) ·
+> [all the prompts](prompts/help-wanted/)
 
 ---
 
@@ -1793,9 +1793,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>607 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>608 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **607 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **608 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -2322,8 +2322,9 @@ Use these methods when a disclosure says the answer is incomplete:
 1. Use `--expand=SYM` to read the body.
 2. Use `--uses=SYM` and `--impact=SYM` to measure the blast radius.
 3. Use `--scip=FILE` to supply a compiler-grade index. A precise index replaces the name-based edges
-   and marks the affected edges with `prov="scip"`. A missing index causes a refusal. A corrupt index
-   causes a fallback to the name-based edges and a warning on standard error. Neither case is silent.
+   and marks the affected edges with `prov="scip"`. A path that is missing, empty or not a regular file
+   causes a refusal (exit 1). A corrupt index causes a fallback to the name-based edges and a warning on
+   standard error. Neither case is silent.
 
 ### 8. Determinism
 
@@ -2512,7 +2513,7 @@ graphify 0.9.34 with `--code-only --no-cluster`. The measurement is in `bench/he
 | User-visible changes and known limits | `CHANGELOG.md` |
 | Vendored dependencies and their licenses | `THIRD_PARTY.md` |
 | Skill-file security checks | [security](docs/COMMANDS.md#--scan-skillsdir) |
-| The whole tool in 34 slides | `present/ripwire-showcase.pdf` |
+| The whole tool in 33 slides | `present/ripwire-showcase.pdf` |
 
 The presentation rebuilds from `present/deck5_ripwire_build.js`. The preprint draft is in
 `paper/PREPRINT.md`. The method is not submitted for peer review. Its tables name the measurement
@@ -2558,7 +2559,7 @@ terms.
 | Orientation for a coding agent working *on* this repository | [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) |
 | User-visible capabilities, behaviour changes, known limits | [`CHANGELOG.md`](CHANGELOG.md) |
 | Vendored dependencies and their licences | [`THIRD_PARTY.md`](THIRD_PARTY.md) |
-| The whole tool in 34 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
+| The whole tool in 33 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
 
 If a document disagrees with `--help`, the document is the bug.
 

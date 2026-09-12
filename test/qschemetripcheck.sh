@@ -34,6 +34,13 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-11, RUBY ARGUMENT + RESCUE CONSTANTS (feat/ruby-argument-rescue-constants, PR #139): RE-PIN ONLY, kQSnapCacheScheme STAYS 10.
+#   Both extraction-identity lines moved: kParserVer 92 -> 93 (a constant argument of a call/super/yield and a rescue
+#   class are symbolic Include records; an older blob lacks them, so the parser version is what rejects it) and
+#   kCacheVersion 20 -> 21 (Include gains `bool isValueUse`, a fourth u8 in the record — the origin bit the call
+#   narrow skips; a FORMAT change). kIngestParserVerMirror 93 and kIngestCacheVersionMirror 21 in the same diff,
+#   test/qextractionkeycheck.sh green. RE-DERIVED ON THE MERGE with main 40a1895b (the branch's pre-merge pin
+#   hashed 89 over 18). The twelve manifest functions are byte-identical; no snapshot field changed shape.
 # 2026-09-11, YAML UNSIGNED CHAR (fix/yaml-scanner-unsigned-char-2026-09-11, PR #140; test/vendorpatchcheck.sh arm K):
 #   kParserVer 91 -> 92 and kIngestParserVerMirror -> 92, kCacheVersion STAYS 20 and kQSnapCacheScheme STAYS 10.
 #   EXTRACTION identity, and the only kind this repo cannot see from its own CI: vendor patch
