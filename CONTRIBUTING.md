@@ -306,7 +306,11 @@ already knew about the others, several while fixing one. So the rule is mechanic
   the body over a qualifier on the signature.** For a container or span, the promise has to land on
   `.data()` — on the objects themselves it is inert for the loop, because the optimizer reaches the
   heap buffer through a pointer loaded from the header, not through the header's own address. Place
-  the macro at the top of the function, before the first load or store through either argument.
+  the macro at the top of the function, before the first load or store through either argument; if the
+  function already has a "nothing to do" early return on empty input, put it after that return, so the
+  promise is never made on a null `.data()` (measured: same loop effect, plus only the emptiness test the
+  function paid for anyway). Do not add an early return for the macro's sake — the one line is the full
+  effect, and two empty containers are a vacuous promise, not a broken one.
   Three reasons, one each: it is checked in debug and is the same optimizer fact in release
   (`__builtin_assume_separate_storage`); it does not change the API; `__builtin_assume( &a != &b )`
   is NOT that fact — alias analysis never reads it.
