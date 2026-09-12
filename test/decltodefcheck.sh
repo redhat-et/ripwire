@@ -81,6 +81,11 @@
 #       lowest id wins (E3d). Kept as they were: a set of declarations only (the dropping selector still carries its
 #       residue), a TypeScript overload signature beside its implementation (E3e), and a C++ pure virtual beside an override
 #       of another class (E3f).
+#   (E3g) THE READING OF THAT PICK. The compact reading of --around's defs= said "a C/C++ body over its declaration" with no
+#       condition, which on (E3f)'s corpus describes a pick the answer did not make: the body there is another class's, and
+#       the declaration kept the focus. Every legend that describes the pick — the compact --around reading, the full
+#       --around seed clause, the --connect header — must name the same-scope condition, read on the corpus where it keeps
+#       the declaration and on the one where the body wins.
 #   (F) MUTATION — every assertion SHAPE above is shown able to fail, against hand-built inputs.
 #
 # WHAT (E) AND (E2) EACH COVER, since between them they close what was once a stated gap. (E) reads the
@@ -122,10 +127,13 @@ sys.stdout.write(m.group(0) if m else "")' "$1" "$2"; }
 # LEFT-ANCHORED on purpose: `defs` is a proper suffix of `unproven_defs` and of `bodyless_defs`, so an
 # unanchored search would read one attribute's value out of another's name — and arm (E2) below asserts the
 # ABSENCE of one of them, which is exactly the assertion a suffix match makes vacuous.
-attr(){ python3 -c '
+# anchoredMatch <text> <head> <tail-regex> <group> — the ONE left-anchored reader: HEAD literal, then TAIL; prints GROUP of
+# the first match, or nothing. attr reads an attribute's value with it, readingOf (below) one legend term's reading.
+anchoredMatch(){ python3 -c '
 import re,sys
-m=re.search(r"(?<![A-Za-z0-9_])"+sys.argv[2]+r"=\"([^\"]*)\"",sys.argv[1])
-sys.stdout.write(m.group(1) if m else "")' "$1" "$2"; }
+m=re.search(r"(?<![A-Za-z0-9_])"+re.escape(sys.argv[2])+sys.argv[3],sys.argv[1],re.S)
+sys.stdout.write(m.group(int(sys.argv[4])) if m else "")' "$1" "$2" "$3" "$4"; }
+attr(){ anchoredMatch "$1" "$2=\"" '([^"]*)"' 1; }
 
 # The LEADING comment block — the legend a reader meets before the first element, read as a span because G4
 # minifies the whole document onto one line (the same extraction test/graphlegendbudgetcheck.sh uses).
@@ -192,6 +200,11 @@ clauseOf(){ python3 -c '
 import re,sys
 m=re.search(r"unproven_defs=K\b.*?(?=counts_floor=|-->)",sys.argv[1],re.S)
 sys.stdout.write(m.group(0) if m else "")' "$1"; }
+
+# The reading a legend gives ONE head term, as a span: from the head, LEFT-ANCHORED (`defs=` is a suffix of unproven_defs=
+# and bodyless_defs=), to the end of that reading — the next ". ", a "; qualify" hand-off, or the comment's end. Lets (E3g)
+# assert what the defs= reading SAYS, never that a word occurs somewhere in a legend that also holds other terms.
+readingOf(){ anchoredMatch "$1" "$2" '.*?(?=\. |\.?\s*-->|; qualify)' 0; }
 
 # 1 when a legend holds the FULL unproven_defs= clause (its `(absent when 0)` opening), else 0 — what (E2m) asserts the
 # compact dialect strips, and what (F) shows able to fail.
@@ -1568,6 +1581,39 @@ for triple in "e3_cn_ts.xml:describe:ovl.ts:1:(E3e) TypeScript overload signatur
 done
 
 echo
+echo "=== (E3g) every legend that describes the pick names its same-scope condition ==="
+# Two corpora, so the reading is checked where the condition DECIDES the answer: pvirt, where the only body is Derived's and
+# the focus stays on Base's pure virtual (the neighbourhood is its own row), and hord, where the body is in the declaration's
+# scope and wins (useHelper is reached). A reading with no condition is true of hord and false of pvirt.
+run2 "$TMP/pvirt" --around=area   --legend=compact >"$TMP/e3_ar_pv_cmp.xml"
+run2 "$TMP/hord"  --around=helper --legend=compact >"$TMP/e3_ar_bare_cmp.xml"
+run  "$TMP/pvirt" --around=area                    >"$TMP/e3_ar_pv.xml"
+# e3Reading <label> <file> <el-the-legend-precedes> <reading-head> <needle> — the reading must hold the needle
+e3Reading(){
+    _lbl="$1" _f="$2" _el="$3" _head="$4" _needle="$5"
+    _C="$( readingOf "$( legendBefore "$_f" "$_el" )" "$_head" )"
+    nonempty "$_lbl: no '$_head' reading in the legend before <$_el>" "$_C" || return 0
+    case "$_C" in
+        *"$_needle"*) ok "$_lbl: the '$_head' reading names the condition ('$_needle')" ;;
+        *)            no "$_lbl: the '$_head' reading states no same-scope condition, so it describes a pick the answer does not always make: $_C" ;;
+    esac
+}
+for pair in "e3_ar_pv_cmp.xml:area" "e3_ar_bare_cmp.xml:helper useHelper"; do
+    f="${pair%%:*}"; rows="${pair#*:}"
+    R="$( elNC "$TMP/$f" r )"
+    nonempty "(E3g) no <r> root in $f" "$R" || continue
+    GOT="$( rowNamesNC "$TMP/$f" | paste -sd ' ' - )"
+    if [ "$( attr "$R" defs )" != "2" ] || [ "$GOT" != "$rows" ]; then
+        no "(E3g) $f: premise broken — defs=\"$( attr "$R" defs )\" rows={ $GOT }, expected defs=\"2\" rows={ $rows }"
+        continue
+    fi
+    e3Reading "(E3g) compact --around, rows { $rows }" "$TMP/$f" r "defs=N:" "same scope"
+done
+e3Reading "(E3g) full --around seed clause (pvirt)" "$TMP/e3_ar_pv.xml"   r       "defs= (only when >1)"   "of its scope"
+e3Reading "(E3g) full --around seed clause (hord)"  "$TMP/e3_ar_bare.xml" r       "defs= (only when >1)"   "of its scope"
+e3Reading "(E3g) --connect header (pvirt)"          "$TMP/e3_cn_pv.xml"   connect "defs= on a terminal row" "of its scope"
+
+echo
 echo "=== (F) MUTATION — every assertion shape above is shown able to fail ==="
 # (A)/(B) shape: the row-name reader must SEE a wrong caller when one is present…
 printf '<callers of="a/Store.h:putObject" defs="2" count="1"><s t="fn" n="callB" p="b/Store.cpp:8"/></callers>' >"$TMP/m_a.xml"
@@ -1685,6 +1731,17 @@ printf '<!-- <t n="helper" p="api.h:2"/> --><connect edges="1"><g><t n="useHelpe
 [ "$( termP "$TMP/m_e3b.xml" helper )" = "impl.cpp:1" ] && [ "$( termP "$TMP/m_e3b.xml" useHelper )" = "caller.cpp:2" ] && [ -z "$( termP "$TMP/m_e3b.xml" absent )" ] \
     && ok "(F) E3b-shape: termP reads the named terminal's p=, never a commented row or another terminal's, and nothing for an absent name" \
     || no "(F) termP misread a terminal: helper=$( termP "$TMP/m_e3b.xml" helper ) useHelper=$( termP "$TMP/m_e3b.xml" useHelper ) absent=$( termP "$TMP/m_e3b.xml" absent )"
+# (E3g) shape: readingOf must read the NAMED head's reading alone — never another term whose name ends in the same bytes
+# (unproven_defs=K: holds the needle below), never a later term (rank_by= holds it too), and it must stop at "; qualify".
+L_E3G_BAD='<!-- unproven_defs=K: K defs of the same scope. defs=N: of= names N defs; the lowest-id one was walked, a C/C++ body over its declaration. rank_by=: the same scope -->'
+L_E3G_OK='<!-- defs=N: of= names N defs; the lowest-id one was walked, a C/C++ body in the same scope over its declaration. -->'
+L_E3G_FULL='<!-- defs= (only when >1) = N definitions (a declaration yields); qualify with file:name of its scope. -->'
+case "$( readingOf "$L_E3G_BAD" "defs=N:" )"  in *'same scope'*)   G_BAD=1 ;;  *) G_BAD=0 ;;  esac
+case "$( readingOf "$L_E3G_OK" "defs=N:" )"   in *'same scope'*)   G_OK=1 ;;   *) G_OK=0 ;;   esac
+case "$( readingOf "$L_E3G_FULL" "defs= (only when >1)" )" in *'of its scope'*) G_FULL=1 ;; *) G_FULL=0 ;; esac
+[ "$G_BAD" = 0 ] && [ "$G_OK" = 1 ] && [ "$G_FULL" = 0 ] && [ -z "$( readingOf "$L_E3G_OK" "rank_by=" )" ] \
+    && ok "(F) E3g-shape: readingOf reads the named head's reading alone, stops at '; qualify', and is empty for an absent head" \
+    || no "(F) readingOf credited a needle outside the named reading or missed one inside it (bad=$G_BAD ok=$G_OK past-qualify=$G_FULL)"
 # VACUITY guard itself. Run in a subshell so it cannot set fail.
 if ( nonempty "probe" "" >/dev/null 2>&1 ); then
     no "(F) nonempty() accepts an empty capture — every arm's vacuity guard is inert"
