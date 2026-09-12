@@ -46,12 +46,15 @@
 #include "model.h"              // HashMap<> — the flat, cache-friendly lookup index (never std::unordered_map)
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — the degrade path for a malformed line / unwritable file
 #include "arch.h"               // D5: relForHash — the SAME lexical, no-I/O root-relative strip the baseline sidecars use
+#include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — writeNotes truncates, so its open must refuse a link atomically
 #include "infra/blanktext.h"    // §S3: rw::hasVisibleContent — the ONE "present but carries nothing" predicate
 
 #include <algorithm>
 #include <array>
+#include <cerrno>    // ELOOP — the one errno writeNotes re-words into its own symlink alert
 #include <cstdint>
 #include <fstream>
+#include <sstream>   // the note lines are assembled in memory, then handed to the no-follow descriptor
 #include <string>
 #include <string_view>
 #include <utility>
@@ -371,19 +374,42 @@ inline std::string noteLine( const Note& n )
     return line;
 }
 
+// THE ONE PLACE THE NOTES SIDECAR IS OPENED, and the whole of its CWE-59/CWE-367 story.
+//
+// `.ripwire_notes` is a fixed name at the root of a crawled repository and the write TRUNCATES, so a link
+// committed at that name turned --note-add into an arbitrary-file overwrite. The refusal is the OPEN itself
+// — O_NOFOLLOW, one syscall, nothing between deciding and creating for a replacement to land in. The first
+// fix asked lstat and then opened anyway, which is check-then-open; see
+// src/pathguard.h. The two alerts are this site's two failure kinds, unchanged, and they stay macros HERE so
+// each keeps its own file/line.
+inline int openNotesSidecar( const std::string& path )
+{
+    auto [ fd, openErr ] = rw::pathguard::openNoFollowTruncate( "the field-notes sidecar", path );
+    if( fd < 0 )
+    {
+        if( openErr == ELOOP ) { DEGRADED_PATH_ALERT( "notes: refusing to write the notes sidecar through a symlink" ); }
+        else                   { DEGRADED_PATH_ALERT( "notes: cannot write notes file" ); }
+    }
+    return fd;
+}
+
 // write SORTED (self-healing: canonical order regardless of the on-disk shape read). The leading '#' header is
 // constant across every version (identical in a merge → never a conflict) and is skipped by readNotes.
 inline bool writeNotes( const std::string& path, std::vector<Note> notes )
 {
     sortNotes( notes );
-    std::ofstream f( path, std::ios::trunc );
-    if( !f ) { DEGRADED_PATH_ALERT( "notes: cannot write notes file" ); return false; }
+    const int fd = openNotesSidecar( path );
+    if( fd < 0 )
+    {
+        return false;
+    }
+    std::ostringstream f;
     f << "# ripwire field notes v1 — one per line: <canonical-id or path> <TAB> <ISO-date> <TAB> <text> [<TAB> <HEAD sha> <TAB> <branch>]. Kept SORTED (merge-friendly union); dates are git committer-clock, not wall time; the trailing sha/branch pair is present only on provenance-stamped notes.\n";
     for( const Note& n : notes )
     {
         f << noteLine( n ) << '\n';
     }
-    return bool( f );
+    return rw::pathguard::writeAllAndClose( fd, f.str() );
 }
 
 // append (target,date,text[,sha,branch]), re-sort, write; return the EXACT written data line so --note-add

@@ -3430,7 +3430,12 @@ inline std::pair<std::string, std::string> qualityBaselineJson( const std::strin
                                                     sidecar, headSha );
     if( !wrote )
     {
-        return { std::string(), std::string( "could not write " ) + sidecar + " (unwritable directory?)" };
+        // The parenthetical names BOTH causes since the CWE-59 guard landed. writeBaseline now also returns
+        // false when the destination is a symlink it refused to follow, and a JSON error that says only
+        // "unwritable directory?" would be a guess that is sometimes simply wrong — the honest reason is on
+        // stderr (rw::pathguard::openNoFollowTruncate), which the MCP protocol channel on stdout never carries.
+        return { std::string(), std::string( "could not write " ) + sidecar
+                                + " (unwritable directory, or the path is a symlink and was refused — see stderr)" };
     }
     std::string json = std::string( "{\"wrote\":\"" ) + mcpdetail::jsonEscape( sidecar )
                      + "\",\"symbols\":" + std::to_string( ing.symbols.size() )

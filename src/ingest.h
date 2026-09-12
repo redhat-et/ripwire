@@ -271,7 +271,7 @@ inline bool isSkippedCrawlDir( std::string_view dirName ) noexcept
 // above is shared — there is a second walker (darkflags.h's CMake harvest) and a boundary two walkers
 // disagreed about is not a boundary.
 //
-// WHY THIS EXISTS (reported privately by Ahmed Ibrahim, @skeletonsec; v0.5.0 and main). The crawl accepted a
+// WHY THIS EXISTS (v0.5.0 and main). The crawl accepted a
 // file symlink whose LEXICAL path was inside the root while its TARGET was outside it: `directory_entry`'s
 // `is_regular_file()` and `file_size()` both FOLLOW the link, so a repository-controlled tracked symlink made
 // ripwire open and serve any text file the invoking user could read — through --expand, --recall, --grep's

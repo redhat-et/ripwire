@@ -112,12 +112,22 @@ inline std::string_view trim( std::string_view s ) noexcept
 }
 
 // send an entire buffer, tolerating short writes; false if the peer went away mid-write (we just drop it).
+// A peer that closed or reset its socket fails the write with EPIPE/ECONNRESET — an ordinary client disconnect, which
+// must never raise SIGPIPE: its default action ends the process, so ONE client that stopped reading took the listener
+// down for every client after it. The suppression is per socket, never process-wide, so the CLI's stdout keeps its
+// ordinary closed-pipe behaviour: MSG_NOSIGNAL on each send where the platform defines it (Linux), SO_NOSIGPIPE on each
+// accepted socket where that exists (macOS; see the accept loop). A platform with both gets both.
 inline bool sendAll( int fd, const std::string& data ) noexcept
 {
+#ifdef MSG_NOSIGNAL
+    const int sendFlags = MSG_NOSIGNAL;
+#else
+    const int sendFlags = 0;
+#endif
     std::size_t sent = 0;
     while( sent < data.size() )
     {
-        const ssize_t n = ::send( fd, data.data() + sent, data.size() - sent, 0 );
+        const ssize_t n = ::send( fd, data.data() + sent, data.size() - sent, sendFlags );
         if( n <= 0 )
         {
             return false;
@@ -586,6 +596,11 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
         timeval tv{ kRecvTimeoutSec, 0 };
         ::setsockopt( fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof( tv ) );
         ::setsockopt( fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof( one ) );
+#ifdef SO_NOSIGPIPE
+        // a client that drops mid-response costs only its own connection: a send() to a peer that is gone fails with EPIPE
+        // instead of raising SIGPIPE (macOS's per-socket switch; sendAll passes MSG_NOSIGNAL where the platform has that).
+        ::setsockopt( fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof( one ) );
+#endif
 
         bool          tooManyHeaderBytes = false, tooLargeBody = false;
         const Request req = readRequest( fd, tooManyHeaderBytes, tooLargeBody );

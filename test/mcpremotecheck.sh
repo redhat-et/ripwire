@@ -13,6 +13,8 @@
 #                           (RIPWIRE_MCP_TIMINGS rebuilt=0), and the omitted-path form defaults to the workspace.
 #   oversized body        — a > 8 MB body → 413; malformed HTTP → 400/405 and the server LIVES.
 #   2 sequential clients  — two back-to-back HTTP clients both get correct answers off the one warm index.
+#   client drops mid-reply — a client that closes or resets before/while reading a multi-MB response costs only
+#                           its own connection: the SAME listener stays alive and answers the next request.
 #   hostile-input parity  — the mcpaudit4hardencheck corpus (25-digit start_line, XML-comment-breaking task)
 #                           degrades IDENTICALLY over HTTP — the hardened parser is transport-agnostic.
 #
@@ -287,6 +289,73 @@ C2="$( curl -s -X POST "$URL" \
     || no "one of two sequential clients failed: C1=$( printf %s "$C1" | head -c 80 ) C2=$( printf %s "$C2" | head -c 80 )"
 
 stop_server
+
+# ═══════════════════════════════════════════════════════════════════════════
+echo
+echo "=== a client that drops mid-response costs only its own connection (no SIGPIPE) ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# A peer that closes or resets its socket while the listener is still writing makes send() fail with EPIPE,
+# and unsuppressed that raises SIGPIPE, whose default action ends the process: ONE client that stopped
+# reading took the listener down for every client after it (2026-09-12, pre-fix binary on macOS: killed by
+# signal 13 on each of the three shapes below, the next client refused). A reply that fits in the socket
+# buffers is written in full before the peer's reset lands, so this arm first PROVES its reply is bigger than
+# any default buffer (4 MiB is Linux's tcp_wmem ceiling; macOS's sendspace is 131 KB). The `for` task is
+# echoed into the payload, which is what makes the reply large on a small fixture. A reply that shrinks below
+# the floor is a FAIL, so the arm cannot keep passing after it stops reaching a failing send().
+python3 -c 'import json,sys; sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":91,"method":"tools/call","params":{"name":"for","arguments":{"path":sys.argv[1],"task":"distance "*350000}}}))' "$WS" \
+    > "$TMP/bigreply.json"
+drop_client() { # $1 = read-all | close-before-read | reset-before-read | close-midway; prints "BYTES STATUSLINE"
+    python3 - "$PORT" "$1" "$TMP/bigreply.json" <<'PY'
+import socket, struct, sys, time
+port, mode, body = int(sys.argv[1]), sys.argv[2], open(sys.argv[3], "rb").read()
+head = ("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nAccept: application/json, text/event-stream\r\n"
+        "Content-Type: application/json\r\nContent-Length: %d\r\n\r\n" % (port, len(body))).encode()
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+if mode == "close-midway":
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)   # before connect: the listener blocks in send()
+s.settimeout(120)
+s.connect(("127.0.0.1", port))
+s.sendall(head + body)
+data = b""
+if mode in ("read-all", "close-midway"):
+    want = 4096 if mode == "close-midway" else None
+    while want is None or len(data) < want:
+        chunk = s.recv(65536 if want is None else want - len(data))
+        if not chunk:
+            break
+        data += chunk
+elif mode == "reset-before-read":
+    time.sleep(0.3)                                             # an RST before the listener READ the request discards it
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))   # close() now sends RST, not FIN
+s.close()
+print(len(data), data.split(b"\r\n", 1)[0].decode("latin-1") or "-")
+PY
+}
+if start_server; then
+    read -r BIG_BYTES _ BIG_CODE _ <<<"$( drop_client read-all 2>/dev/null )"
+    if [ "${BIG_BYTES:-0}" -gt 4194304 ] 2>/dev/null && [ "${BIG_CODE:-}" = "200" ]; then
+        ok "the probe reply outgrows every default socket buffer ($BIG_BYTES bytes, 200, read in full)"
+    else
+        no "the probe reply is '${BIG_BYTES:-}' bytes (HTTP '${BIG_CODE:-}'), not a 200 over 4 MiB — the drop shapes below would not reach a failing send()"
+    fi
+    for shape in close-before-read reset-before-read close-midway; do
+        drop_client "$shape" >/dev/null 2>&1
+        # The next request queues behind the dropped one on the single-threaded loop, so no sleep is needed: it
+        # is answered only if the listener outlived the failed write.
+        NEXT="$( curl -s -o /dev/null -w '%{http_code}' -m 60 -X POST "$URL" -d '{"jsonrpc":"2.0","id":92,"method":"initialize"}' )"
+        if [ "$NEXT" = "200" ] && kill -0 "$SRV_PID" 2>/dev/null; then
+            ok "$shape: the same listener is alive and answers the next request (200)"
+        else
+            # status 141 = the listener died of SIGPIPE on its own; 143 = it was alive and this kill ended it.
+            kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null; RC=$?; SRV_PID=""
+            no "$shape: the listener did not outlive the dropped client (next request got $NEXT, listener status $RC; 141 = SIGPIPE)"
+            start_server || no "$shape: the listener could not be restarted for the remaining shapes"
+        fi
+    done
+    stop_server
+else
+    no "drop-mid-response listener failed to start"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

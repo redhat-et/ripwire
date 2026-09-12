@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # crawlescapecheck.sh — THE CRAWL ROOT IS A BOUNDARY, and a symlink does not get to move it.
 #
-# THE VULNERABILITY THIS GATE CLOSES (reported privately by Ahmed Ibrahim, @skeletonsec, against v0.5.0 and
-# main). `collectSources()` accepted a file symlink whose LEXICAL path sat inside the selected root even when
+# THE VULNERABILITY THIS GATE CLOSES (v0.5.0 and main).
+# `collectSources()` accepted a file symlink whose LEXICAL path sat inside the selected root even when
 # its TARGET sat outside it: `directory_entry::is_regular_file()` and `file_size()` both FOLLOW the link, so a
 # repository-controlled tracked symlink made ripwire open and emit any text file the invoking user could read
 # — and emit it under the IN-ROOT link path, so the XML/JSON attributed out-of-root bytes to a path inside the
 # repository. That second half is its own defect: a reader (or a model) has no way to tell that the bytes did
 # not come from where the map says they did.
 #
-# FIVE serving channels, not the three the report named. The first three are the reporter's; the fourth is
-# the independent `--flags` CMake walk he also found; the FIFTH was found while fixing it and is the reason
+# FIVE serving channels, not the three the report named. The fourth, the independent `--flags` CMake walk,
+# was in the report too; the FIFTH was found while fixing it and is the reason
 # the boundary test must run BEFORE the extension classification, not after:
 #
 #   1. --expand           a source-shaped link (.c) — the whole victim body in CDATA

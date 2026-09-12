@@ -25,6 +25,7 @@
 #include "cloneidiom.h"         // idiom-class demotion — the closed 3-idiom shape classifier that turns an idiom-COLLISION clone group into a minor row instead of a gating one
 #include "lintrules.h"          // findErrorMasking — the built-in error-masking rule table (GitClear +47% kind)
 #include "arch.h"               // fnv1a64
+#include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — writeBaseline truncates, so its open must refuse a link atomically
 #include "gitmine.h"            // shSingleQuote + gitFileCommitCountsInDayWindow — short-horizon-churn window mining
 #include "docparse.h"           // docparse::detail::readWholeFile — THE canonical whole-file byte read (commentcoherence.h names it that); reused rather than re-rolled, see forEachSymbolBody
 #include "filter.h"             // B10.1a: isTestPath — the general test-dir convention behind isTestScriptPath
@@ -3594,6 +3595,28 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
     return snap;
 }
 
+// THE ONE PLACE THE QUALITY BASELINE SIDECAR IS OPENED, and the whole of its CWE-59/CWE-367 story.
+//
+// `path` is a fixed name inside a crawled repository and the write TRUNCATES, so a link planted at it turns
+// the tool's own write into an arbitrary-file overwrite. The refusal is the OPEN itself — O_NOFOLLOW, one
+// syscall, nothing between deciding and creating for a replacement to land in. The first fix asked lstat and
+// then opened anyway, which is check-then-open; see src/pathguard.h.
+//
+// It is a named seam rather than four lines inside writeBaseline for a reason a reviewer should be able to
+// check: acquiring a safe descriptor and serializing a snapshot are two jobs, and the security-relevant one
+// should be readable without scrolling through ten record loops. The two alerts are the two failure kinds
+// this site has always had, unchanged, and they stay macros HERE so each keeps its own file/line.
+inline int openBaselineSidecar( const std::string& path )
+{
+    auto [ fd, openErr ] = rw::pathguard::openNoFollowTruncate( "the quality baseline sidecar", path );
+    if( fd < 0 )
+    {
+        if( openErr == ELOOP ) { DEGRADED_PATH_ALERT( "quality: refusing to write the baseline sidecar through a symlink" ); }
+        else                   { DEGRADED_PATH_ALERT( "quality: cannot write baseline file" ); }
+    }
+    return fd;
+}
+
 // `absorbedGating` (H11, capture-audit 2026-09-04) is the number of GATING findings this tree already held
 // against HEAD when the pin was taken. Non-zero only under --allow-dirty — the bare form REFUSES rather
 // than absorb — and it is written as two records the snapshot reader skips as unknown kinds (`dirty 1`,
@@ -3602,8 +3625,14 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
 inline bool writeBaseline( const Snapshot& s, const std::string& path, std::string_view headSha = {},
                            std::size_t absorbedGating = 0 )
 {
-    std::ofstream f( path, std::ios::trunc );
-    if( !f ) { DEGRADED_PATH_ALERT( "quality: cannot write baseline file" ); return false; }
+    const int fd = openBaselineSidecar( path );
+    if( fd < 0 )
+    {
+        return false;
+    }
+    // The record stream is assembled in memory and handed to the descriptor in one write. The bytes below
+    // are unchanged, line for line — only their destination moved off a stream that cannot say O_NOFOLLOW.
+    std::ostringstream f;
     // v2 adds the Q1 kinds (loc/nest/params/api). Format is line-oriented + kind-tagged, so a v1 baseline (no
     // loc/nest/params/api lines) reads fine here — readBaseline skips unknown kinds and treats absent kinds as
     // empty; a v2 baseline read by an OLD binary likewise skips lines it doesn't know. Re-baseline after an
@@ -3678,7 +3707,9 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     {
         f << "api " << std::hex << h << std::dec << '\n';
     }
-    return true;
+    // Was an unconditional `return true`: a stream that failed to flush still reported a written baseline.
+    // The descriptor answers for the bytes, so a full disk is now a failure the caller can report.
+    return rw::pathguard::writeAllAndClose( fd, f.str() );
 }
 
 // Returns true only when `path` is a file that actually LOOKS like a baseline. r27 SUSPICION-A, second half:

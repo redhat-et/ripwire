@@ -133,6 +133,8 @@ TABLE = {
     ( "src/lexical.h", "attrBuf" ):  ( 1, "safe", "attrBuf[48]: ' confidence=\"%s\" margin_pct=\"%d\"' where %s is the two-value literal high|low and %d is a 0..100 percent — worst case ' confidence=\"high\" margin_pct=\"100\"' = 34 B against 47 usable + NUL, 13 B of margin. No user text can reach either interpoland." ),
     ( "src/packtask.h", "tag" ):       ( 1, "safe", "tag[112]: '<bodies shown=\"0\" total=\"%zu\" capped=\"%d\"%s></bodies>' — %zu is a vector size (20 digits at absolute most), %d is 0|1, %s is the literal ' compress=\"1\"' or empty. Worst case 40 fixed + 20 + 1 + 13 = 74 B against 111 usable. Escaper irrelevant: no interpoland carries text." ),
     ( "src/serialize.h", "open" ): ( 4, "safe", "open[112]: '<bodies shown=\"%zu\" total=\"%zu\" capped=\"%d\"%s>' — two sizes, a 0|1, and the same fixed compress literal. Worst case 33 fixed + 40 + 1 + 13 = 87 B against 111 usable. Same all-numeric/fixed-vocab class as its packtask.h sibling." ),
+    # ── src/arch.h ───────────────────────────────────────────────────────────────────────────────────────
+    ( "src/arch.h", "hex" ):           ( 1, "not-markup", "hex[17] in archWriteBaseline: '{:016x}' of ONE uint64 violation hash and no string argument — exactly 16 lowercase digits + NUL = 17 B, so it cannot truncate. Appended to the .ripwire_arch_baseline sidecar's bytes, which go to that file through pathguard::writeAllAndClose; never emitted as a document." ),
     # ── src/cli.h ────────────────────────────────────────────────────────────────────────────────────────
     ( "src/cli.h", "example" ):        ( 1, "not-markup", "example[64]: ' %s=100' with the FLAG NAME from kIntFlags/the paging arms (longest ~20 B). A stderr refusal example, never a document." ),
     ( "src/cli.h", "flag" ):           ( 1, "not-markup", "flag[32] (`%.*s`, so INVISIBLE to the pre-wave-3 population): applyIntFlag's echoed flag name. `bare` is f.prefix minus its trailing '=', and f.prefix is a literal in the compile-time kIntFlags table — 13 rows, longest '--connect-radius=' ⇒ bare 16 B against 31 usable + NUL, 15 B of margin. The `.*` precision is int( bare.size() ) and bounds NOTHING; the bound is the table. Result goes to refuseFlagValue, which fprintf's it to STDERR — never a document." ),
@@ -421,7 +423,15 @@ if not bad:
 #            emit sites this change adds (darkflags.h's ` escaped_root="N"` on <flags>, docdrift.h's on
 #            <doc-drift>, serialize.h's buildEscapedRootAttr for the XML map header) compose on std::string
 #            or write straight to a FILE*, so none of them joins this population at all.
-EXPECTED = { "mentions": 320, "calls": 217, "sites": 217, "rows": 91, "widthforms": 0 }
+#            2026-09-12 (the arch baseline writer moves onto pathguard::writeAllAndClose): calls 217 -> 218,
+#            mentions 320 -> 322, sites 217 -> 218, rows 91 -> 92 — re-read from the diff, not accepted from the
+#            delta. The one new call is archWriteBaseline's `hex[17]`, a NEW TABLE row above (src/arch.h):
+#            '{:016x}' of one uint64, no string argument, exactly 16 digits + NUL, and the bytes go to the sidecar
+#            file, never to a document. It is a TABLE row and not NUMERIC_ONLY because it has no pre-conversion
+#            format to derive a class from — the same reason nestAttr and escAttr are rows. mentions is +2 because
+#            the comment on that buffer names formatTo as well; arch.h's third mention, its emit.h include line,
+#            predates this change. The code it replaced wrote through emitRaw/emitTo, which this gate does not count.
+EXPECTED = { "mentions": 322, "calls": 218, "sites": 218, "rows": 92, "widthforms": 0 }
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the
 #            H9 ` max_tokens="%d"` ceiling disclosure: a single %d of a caller-supplied INTEGER, no %s,

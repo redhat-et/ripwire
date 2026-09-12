@@ -59,43 +59,6 @@ contributors named there; this release is largely theirs.
 
 ---
 
-> **Want to help?** Start anywhere on the spectrum. At the ready-made end, twenty open problems — languages,
-> resolver bugs, fuzzers, docs — are written up as starter kits: the research is done, the file and line pointers
-> are in the prompt, and **each prompt writes a plan and stops**, so we can agree the approach before you write any
-> code.
->
-> ```bash
-> git clone https://github.com/redhat-et/ripwire && cd ripwire
-> cmake -S . -B build && cmake --build build -j     # plain build, no build type
-> ls prompts/help-wanted/                           # twenty kits — pick one
-> claude "follow prompts/help-wanted/zig-language.md"     # or your agent of choice
-> ```
->
-> In the middle, a few prompts hand your agent the whole repository and a job to do:
->
-> - **[Full audit](prompts/full-audit.md)** — six independent lenses over the codebase; take one, or all six.
-> - **[Add a language](prompts/add-a-language.md)** — a vendored grammar, extraction and gates, start to finish.
-> - **[Use it for real, log every gap](prompts/dogfood-gaps.md)** — do an actual task with ripwire and write down
->   every place it let you down.
->
-> At the other end, bring your own:
->
-> - research an idea you have been turning over
-> - bring in a paper that deserves to be in a tool
-> - show how AI agents could read and write better code
-> - automate something decades of software engineering already know
-> - check software algorithmically — a smell nobody measures yet, a way to prove an answer is complete, a bug class
->   a tool could catch before a reviewer does
->
-> Open an issue; we want to hear it. The part we would most like help thinking about is the quality lens: measuring
-> what a change makes *worse*, and handing that back while the code is still being written.
->
-> [help wanted](https://github.com/redhat-et/ripwire/labels/help%20wanted) ·
-> [good first issue](https://github.com/redhat-et/ripwire/labels/good%20first%20issue) (three) ·
-> [all twenty prompts](prompts/help-wanted/)
-
----
-
 <p align="center"><img src="docs/assets/no-deps.svg"
   alt="No API key. No embeddings. No index server. No daemon." width="470"></p>
 
@@ -1172,6 +1135,43 @@ shipping) → [`docs/LINEAGE.md`](docs/LINEAGE.md).
 
 ---
 
+> **Want to help?** Start anywhere on the spectrum. At the ready-made end, twenty open problems — languages,
+> resolver bugs, fuzzers, docs — are written up as starter kits: the research is done, the file and line pointers
+> are in the prompt, and **each prompt writes a plan and stops**, so we can agree the approach before you write any
+> code.
+>
+> ```bash
+> git clone https://github.com/redhat-et/ripwire && cd ripwire
+> cmake -S . -B build && cmake --build build -j     # plain build, no build type
+> ls prompts/help-wanted/                           # twenty kits — pick one
+> claude "follow prompts/help-wanted/zig-language.md"     # or your agent of choice
+> ```
+>
+> In the middle, a few prompts hand your agent the whole repository and a job to do:
+>
+> - **[Full audit](prompts/full-audit.md)** — six independent lenses over the codebase; take one, or all six.
+> - **[Add a language](prompts/add-a-language.md)** — a vendored grammar, extraction and gates, start to finish.
+> - **[Use it for real, log every gap](prompts/dogfood-gaps.md)** — do an actual task with ripwire and write down
+>   every place it let you down.
+>
+> At the other end, bring your own:
+>
+> - research an idea you have been turning over
+> - bring in a paper that deserves to be in a tool
+> - show how AI agents could read and write better code
+> - automate something decades of software engineering already know
+> - check software algorithmically — a smell nobody measures yet, a way to prove an answer is complete, a bug class
+>   a tool could catch before a reviewer does
+>
+> Open an issue; we want to hear it. The part we would most like help thinking about is the quality lens: measuring
+> what a change makes *worse*, and handing that back while the code is still being written.
+>
+> [help wanted](https://github.com/redhat-et/ripwire/labels/help%20wanted) ·
+> [good first issue](https://github.com/redhat-et/ripwire/labels/good%20first%20issue) (three) ·
+> [all twenty prompts](prompts/help-wanted/)
+
+---
+
 ## Real runs
 
 <details>
@@ -1687,7 +1687,8 @@ When a mark says the cheap answer is not enough, escalate on purpose — never b
 2. **`--uses=SYM` / `--impact=SYM`** — every read, write and import site, and the transitive blast
    radius. `--callers` alone under-counts, and says so.
 3. **`--scip=index.scip`** — hand it a compiler-grade index and precise edges *replace* the
-   name-based guesses, tagged `prov="scip"`. Missing or corrupt index degrades; it never fails.
+   name-based guesses, tagged `prov="scip"`. A missing index refuses (exit 1); a corrupt one warns
+   on stderr and proceeds name-based.
 
 </details>
 
@@ -1789,9 +1790,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>605 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>606 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **605 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **606 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a

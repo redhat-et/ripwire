@@ -4602,7 +4602,7 @@ stderr notes the cached clone's age)
 
 **Answers:** consume a SCIP index as a precision overlay: exact call edges replace name guesses consume a SCIP index as a PRECISION overlay: precise call edges replace name-based guesses (tagged prov="scip"), ambiguous= drops.
 
-Missing/corrupt index → degrades to name-based (never fails). Zero deps (hand-rolled reader).
+A missing index refuses (exit 1). A corrupt one warns on stderr and degrades to name-based. Zero deps (hand-rolled reader).
 
 **Try it**
 
@@ -4618,7 +4618,8 @@ $ ./build/ripwire . --scip=does_not_exist.scip --callers=rankGraphTeleport
 **Caveats (stated by the binary):**
 
 - consume a SCIP index as a precision overlay: exact call edges replace name guesses consume a SCIP index as a PRECISION overlay: precise call edges replace name-based guesses (tagged prov="scip"), ambiguous= drops.
-- Missing/corrupt index → degrades to name-based (never fails).
+- A missing index refuses (exit 1).
+- A corrupt one warns on stderr and degrades to name-based.
 
 ### `--pin-census=FILE`
 

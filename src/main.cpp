@@ -3626,15 +3626,15 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             "        includes/targets   = {} ({} B)\n",
             total, bytes, ing.files.size(), pathB, ing.symbols.size(), nameB, ing.references.size(), calleeB, ing.includes.size(), incB );
     }
-    // SCIP precision overlay: parse the index (if --scip given) → map to ripwire ids → hand to
-    // buildGraph as an optional parameter. A missing/corrupt/mismatched index yields an EMPTY overlay
-    // (one DEGRADED_PATH_ALERT + stderr note) and the build proceeds name-based, byte-identical to no --scip.
+    // SCIP precision overlay: parse the index (if --scip given) → map to ripwire ids → hand to buildGraph as an optional
+    // parameter. An unreadable/corrupt/mismatched index (a path that cannot be opened was refused above, exit 1) yields an
+    // EMPTY overlay (one DEGRADED_PATH_ALERT + stderr note) and the build proceeds name-based, byte-identical to no --scip.
     ScipOverlay scipOverlay;
     if( !cfg.scipIndex.empty() )
     {
         scipOverlay = loadScipOverlay( cfg.scipIndex, ing );
     }
-    // An EMPTY overlay (no --scip, OR a missing/corrupt/mismatched index that already alerted) is treated as
+    // An EMPTY overlay (no --scip, OR an unreadable/corrupt/mismatched index that already alerted) is treated as
     // no overlay at all: scipPtr stays nullptr so buildGraph/serialize produce output BYTE-IDENTICAL to a
     // run with no --scip (the degrade contract — a bad index must never change the map, only stderr).
     const ScipOverlay* scipPtr = scipOverlay.empty() ? nullptr : &scipOverlay;
