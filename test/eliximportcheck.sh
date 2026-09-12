@@ -100,7 +100,9 @@ printf '%s' "$DEPS" | grep -qE 'dep_langs="[^"]*,ex[,"]' \
     || no "capability: dep_langs= does not name ex"
 
 # ── 6. ALIAS RESOLUTION: a receiver's module wins over a same-named function elsewhere ──────────────
-python3 - "$BIN" "$FIX" "$TMP" <<'PY'
+# The python block is the CONDITION of the if, so its exit status reaches the reporter: a failed assertion is
+# a FAIL row and fail=1, never a bare traceback the accounting cannot see.
+if python3 - "$BIN" "$FIX" "$TMP" <<'PY'
 import pathlib, shutil, subprocess, sys, xml.etree.ElementTree as ET
 binary, source, tmp = sys.argv[1:]
 fixture = pathlib.Path(tmp) / 'alias-control'
@@ -117,8 +119,11 @@ assert before != after
 main.write_text(after)
 assert not paths(), 'an unknown alias target fell back to a same-named function'
 PY
-[ "$?" -eq 0 ] && ok 'alias: exact module target, same-name decoy excluded, mutated unknown target unresolved' \
-    || no 'alias call resolution failed'
+then
+    ok 'alias: exact module target, same-name decoy excluded, mutated unknown target unresolved'
+else
+    no 'alias call resolution failed'
+fi
 
 # ── 7. determinism, warm == cold, well-formed XML ─────────────────────────────────────────────────────
 "$BIN" "$FIX" --deps --no-cache >"$TMP/d1" 2>/dev/null
