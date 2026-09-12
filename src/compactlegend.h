@@ -40,7 +40,8 @@ namespace rw
 // of the verb and of the root vocabulary EVERY answer of that root carries. Its bytes count against the verb's
 // per-verb pin in test/compactlegendcheck.sh, and that pin is measured from the definitions, never the reverse.
 // Roots shared by several verbs (`r` = the ranked map family, `ctx` = the bundle family) are disambiguated by a
-// HINT the caller derives from its own flags (compactLegendHintFromRoot).
+// HINT the caller derives from the root's family, then from its own flags (main.cpp compactLegendHint; mcpverbs.h
+// mcpCompactLegendHint keys it by verb name).
 struct CompactLegendSpec
 {
     std::string_view rootTag;
@@ -63,7 +64,13 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "ctx", "notes",      "field notes by target: <target id= dangling=> holds <note d= sha= branch=>; counts = the rows" },
     { "ctx", "lego",       "ONE interface/base type: <iface n= p= defs= implementors=>, its <m> method contract, every implementor" },
     { "ctx", "expand",     "full bodies: <bodies shown= total= capped=> of <b t= l= p= n= sibs= sibs_total= sibs_capped= inc=>; <calls><c n= l=> resolved callees" },
-    { "ctx", "pack-task",  "one-call task bundle under budget_tokens=: <sigs> ranking > <bodies> > <far> callers > notes > tests_to_run" },
+    // pack-task (2026-09-12, the lane's end): the bundle's own vocabulary reads here, checked against packtask.h. task= is the task
+    // text (a bare --pack-task refuses); <far> is the ranked name-only tier inside <sigs> (renderNameOnlyRows: t= n= p=), of_top=
+    // there the ranked rows it was cut from (topRanked); <calls><c> are a body's callee signatures; <callers> rows are the bodies'
+    // 1-hop neighbours in either direction, rel= which one, of_top= there the bodies that qualified (bodiesTotal), shared= how many
+    // of them a row neighbours (emitted above 1); run= rides a <test> row only when a runner is derivable (testmap.h runHint). The
+    // <d> lens facts and route= ride only some answers and are present-only terms below. compactlegendcheck (D36).
+    { "ctx", "pack-task",  "one-call task bundle for task= under budget_tokens=: <sigs><d n= id= l= p=> ranking, <far><s t= n= p=> ranked but over 1 hop out (of_top= ranked rows) > <bodies><b t= n= p= l=> with <calls><c n= l=> callees > <callers><s rel=caller|callee shared=> 1-hop from the bodies (of_top= bodies; shared= bodies reached, absent at 1) > notes > <tests><test p= run=> (run= when derivable)" },
     { "ctx", "from-trace", "trace frames mapped to indexed symbols, innermost first; the innermost in-corpus body included" },
     { "ctx", "exemplar",   "the best-in-class instance of kind= for the task, chosen by role: <exemplar n= p= in= ccx= tested=>, <bodies><b> to imitate" },
     { "ctx-partitions", "pack-task", "N minimally overlapping agent bundles carved along call-graph communities plus one shared core; each <bundle> wraps a <ctx>" },
@@ -400,6 +407,20 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // keeps its native legend). ELEMENT-qualified on <d>, like the row above: flipimpact.h's <d sym=> and the dead-code <d n=>
     // rows carry no tested=. compactlegendcheck (D33)/(D35).
     { "tested",            "<d tested=1>: a non-test row an indexed test transitively reaches (absent otherwise, never 0)", true, "d" },
+    // THE LENS FACTS ON <d> ROWS (2026-09-12, the lane's end). serialize.h sigRowHead writes r= on a lens row (rank > 0), cx=/ccx=
+    // under facts.metrics and in= when a fan-in vector was supplied, and packSignatures' lens appends amp= (main.cpp computes it
+    // under --metrics; printed above 0). --pack-task passes metrics and supplies its own fan-in, so every one of its <d> rows
+    // carries the first four, and --from-trace's do too; their full legends define them in a "Row keys" clause, which is prose and
+    // goes. amp= is graph.h's callerCount (direct callers, the in-edge CSR) plus the co-change degree of the symbol's file (the
+    // other files sharing a commit with it in git's 18-month window; 0 without git). ELEMENT-qualified on <d>: the map's <s> rows
+    // carry the same names under the metrics schema's purpose line, and <exemplar in= ccx=> is another root's. route= (serialize.h
+    // ctxRootOpen) rides a bundle whose task was routed to a ranker: --pack-task always, MCP explore unless no_route; it is
+    // ELEMENT-qualified on <ctx>. compactlegendcheck (D36)/(D37).
+    { "r",                 "<d r=N>: rank N in this ranking, rows in r= order", true, "d" },
+    { "ccx",               "<d cx= ccx=>: cyclomatic/cognitive complexity", true, "d" },
+    { "in",                "<d in=N>: N callers in the index (absent: not measured)", true, "d" },
+    { "amp",               "<d amp=N>: direct callers + files sharing a commit with its file (absent at 0)", true, "d" },
+    { "route",             "route=: the ranker the task was routed to, and why", true, "ctx" },
     { "parse_degraded",    "parse_degraded=1: ERROR nodes in that parse", true },
     { "tier_partial",      "tier_partial=1: tier elected under a partial classification" },
     { "dangling",          "dangling=1: matches nothing indexed", true },

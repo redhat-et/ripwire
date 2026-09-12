@@ -36,8 +36,9 @@
 # shown_bridges=/connected_singletons=/symbols=, --community's shown_bridges=, the <bridge> rows, --safe-delete's t=/defs=/
 # ambiguous_callers=/dead_code_candidate=, --impact's <f lazy=>, every map-header field, the columnar format=/<cols fields=> and
 # lens=; from that sweep's design review: the <s tested=> rows of --callers/--impact; in its follow-up: the <d tested=> rows of
-# --pack-task --metrics and the columnar tested column) is DEFINED by the compact legend of a document that carries it, and by
-# none that does not. STRUCTURAL arm (S): every
+# --pack-task --metrics and the columnar tested column; at the lane's end: the schema of a bundle answered beside a map-family
+# flag, every attribute of --pack-task --metrics, and the <d r= cx= ccx= in= amp=> lens facts) is DEFINED by the compact legend of
+# a document that carries it, and by none that does not. STRUCTURAL arm (S): every
 # conditional attribute the graphlegend.h helper family emits, the PageRank disclosure, every conditional hdr: field of
 # the map header, and every absence-marked row field of the map legend, read from source, has a compact reading — so the
 # next one cannot land undefined.
@@ -327,6 +328,8 @@ probeFor()
 # pass, once every attribute the --impact, --safe-delete, --communities, --community and map-header answers print had a reading;
 # re-measured the same day after that sweep's design review corrected three readings, added the present-only <s tested=> reading
 # (no probe on this fixture prints one) and shortened fourteen readings without losing accuracy. Ten pins moved down.
+# Re-measured at the lane's end, (D36): pack-task 327 -> 804 B (its purpose line spells the bundle's own vocabulary, and the
+# <d r= cx= ccx= in=> and route= readings ride its rows) and from-trace 290 -> 445 B (the same four <d> readings); no other schema moved.
 # schema                      pin  measured
 PIN_TABLE='
 ripwire.map/v1                   810   799
@@ -385,13 +388,13 @@ ripwire.uses/v1                  290   271
 ripwire.batch/v1                 160   142
 ripwire.safe-delete/v1           720   708
 ripwire.at/v1                    180   161
-ripwire.from-trace/v1            300   290
+ripwire.from-trace/v1            460   445
 ripwire.plan-lint/v1             170   156
 ripwire.merge-scout/v1           220   208
 ripwire.whereis/v1               240   223
 ripwire.community/v1             730   719
 ripwire.layout/v1                160   149
-ripwire.pack-task/v1             340   327
+ripwire.pack-task/v1             820   804
 ripwire.pack-top-n/v1            660   649
 ripwire.expand/v1                280   265
 '
@@ -1153,8 +1156,8 @@ done
 #   (D33) <d tested="1"> signature rows. serialize.h's two signature-row writers print it from computeQMetrics' tested[] column,
 #         which graph.h isTestedByReach fills: the <s> rows' predicate, an indexed test transitively reaches that symbol and it
 #         is not itself a test. Never a literal 0. main.cpp computes that column only under --metrics, --for or --exemplar, so a
-#         plain --pack-task prints no tested= at all; --pack-task --metrics does, and main.cpp's compactLegendHint checks
-#         metrics before pack-task, so that answer compacts under the pack-signatures schema. Its FULL legend never names
+#         plain --pack-task prints no tested= at all; --pack-task --metrics does (it compacted under the pack-signatures
+#         schema until (D36) had the hint read the root's family first). Its FULL legend never names
 #         tested= either (a `!` spec). condArm's left-anchored tested= would also be satisfied by (D31)'s <s tested=1> reading
 #         on an answer printing both forms, so the row asserts the <d> reading's own opener too.
 #   (D34) the columnar form's tested column. --callers/--callees/--impact --format=columnar always pass the test-reach lens
@@ -1237,6 +1240,122 @@ for v in "$TESTED@--pack-task=helper" "$REPO@--pack-task=geometry --metrics" "$T
     fi
 done
 [ "$d35bad" -eq 0 ] && [ "$d35n" -eq 5 ] && ok "(D35) mirror: neither new tested reading, nor (D31)'s, prints on $d35n answers that lack its field (<d> rows with no column computed, <d> rows over a tree with no test, a columnar fields= without tested, <s tested=> rows alone, <d tested=> rows alone)"
+
+# ── THE HINT READS THE ROOT, AND THE BUNDLE'S OWN VOCABULARY (2026-09-12, found at the end of the lane) ──────────────────────────────
+# (D36) main.cpp's compactLegendHint derived ONE key from the flags in ONE order: map-diff, metrics, around, query, then the bundle
+# verbs. A key names a spec only under its own root (<r> for those four, <ctx> for the rest), and a key from the other family took
+# that root's FIRST spec, pack-signatures. --pack-task --metrics is a pack-task bundle whose rows --metrics shapes, and it compacted
+# as pack-signatures; so did --from-trace --metrics and --pack-task beside --around. No single flag order is right, because verb
+# precedence interleaves the families (each pair run, its stderr read): --pack-task and --from-trace answer over --around, while
+# --around answers over --expand and --pack-signatures, whose bundles it never renders. So the ROOT picks the family and the flags
+# pick the key within it, in the old order; the around-over-expand row is the neighbour a flag reorder would break.
+# Under the right schema the bundle still carried attributes no compact reading named: task=, route=, its <d>/<b>/<s>/<c>/<test>
+# row vocabulary, of_top=, rel=, shared=, run=, and the lens facts serialize.h sigRowHead writes on every <d> row of a ranked bundle,
+# r= cx= ccx= in= (amp= too under --metrics). The full legend's "Row keys" clause defines most of them and is prose, so the layer
+# stripped it. schemaRow reads the schema. allAttrsRow reads EVERY attribute name the compact answer carries, and each must be
+# spelled NAME= in that legend; the <d> and route= readings must also be their own openers, as in (D33). --from-trace carries the
+# same four <d> facts, and its full legend defines them.
+# RED on 036c827d (plain): eleven (D36) checks FAILed and nothing else did (the around-over-expand row and (D37) are green by
+# construction), for example
+#   FAIL (D36) --pack-task=helper --metrics (a pack-task bundle; --metrics shapes its rows) compacts under 'ripwire.pack-signatures/v1', not ripwire.pack-task/v1
+#   FAIL (D36) --pack-task=helper --metrics over a tree with a test: carried, and spelled NAME= nowhere in the compact legend: amp budget_tokens ccx cx in of_top r rel route run t task
+#   FAIL (D36) MCP explore over a tree with a test, at its DEFAULT posture (compact): carried, and spelled NAME= nowhere in the compact legend: ccx cx in l n of_top r rel route run t task
+schemaRow()
+{
+    local id="$1" label="$2" dir="$3" args="$4" want="$5" got
+    cdRun "$TMP/d36.s" "$dir" $args --legend=compact
+    got="$( leg schema "$TMP/d36.s" )"
+    if [ "$got" = "$want" ]; then
+        ok "($id) $label compacts under $want"
+    else
+        no "($id) $label compacts under '$got', not $want"
+    fi
+    return 0
+}
+schemaRow D36 "--pack-task=helper --metrics (a pack-task bundle; --metrics shapes its rows)" "$TESTED" "--pack-task=helper --metrics" "ripwire.pack-task/v1"
+schemaRow D36 "--from-trace --metrics (a from-trace bundle)" "$REPO" "--from-trace=$TMP/trace.txt --metrics" "ripwire.from-trace/v1"
+schemaRow D36 "--pack-task=geometry --around=distance (--pack-task answers)" "$REPO" "--pack-task=geometry --around=distance" "ripwire.pack-task/v1"
+schemaRow D36 "--around=distance --expand=distance (--around answers; the neighbour a flag reorder breaks)" "$REPO" "--around=distance --expand=distance" "ripwire.around/v1"
+cat > "$TMP/allattrs.py" <<'PY'
+import re, sys
+buf = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
+legend, tags = [], []
+i = 0; n = len( buf )
+while i < n:
+    if buf.startswith( "<![CDATA[", i ):
+        j = buf.find( "]]>", i ); i = n if j < 0 else j + 3
+    elif buf.startswith( "<!--", i ):
+        j = buf.find( "-->", i ); j = n if j < 0 else j + 3; legend.append( buf[ i:j ] ); i = j
+    elif buf[ i ] == "<":
+        j = buf.find( ">", i ); j = n if j < 0 else j + 1; tags.append( buf[ i:j ] ); i = j
+    else:
+        j = buf.find( "<", i ); i = n if j < 0 else j
+leg = " ".join( legend )
+names = sorted( { a for t in tags for a in re.findall( r'\s([\w:.-]+)="', t ) } - { "schema" } )
+print( len( names ), " ".join( a for a in names if not re.search( r"(?<![A-Za-z0-9_])" + re.escape( a ) + "=", leg ) ) )
+PY
+# allAttrsRow ID LABEL FILE — every attribute name the compact document carries (schema= is the dialect's own id) is spelled NAME=
+# in its compact legend.
+allAttrsRow()
+{
+    local id="$1" label="$2" file="$3" count missing
+    read -r count missing <<<"$( python3 "$TMP/allattrs.py" "$file" )"
+    if [ "${count:-0}" -lt 12 ]; then
+        no "($id) $label: control broken — ${count:-0} attribute names carried, too few for this row to read a bundle: $( head -c 160 "$file" )"
+    elif [ -n "$missing" ]; then
+        no "($id) $label: carried, and spelled NAME= nowhere in the compact legend: $missing — $( leg legend "$file" | head -c 260 )"
+    else
+        ok "($id) $label: all $count attribute names it carries are defined by its compact legend"
+    fi
+    return 0
+}
+cdRun "$TMP/d36.a" "$TESTED" --pack-task=helper --metrics --legend=compact
+allAttrsRow D36 "--pack-task=helper --metrics over a tree with a test" "$TMP/d36.a"
+d36miss=""
+for opener in "<d r=N>:" "<d cx= ccx=>:" "<d in=N>:" "<d amp=N>:" "route=:"; do
+    [ "$( ca mentions "$TMP/d36.a" "$opener" )" = 1 ] || d36miss="$d36miss '$opener'"
+done
+if [ -z "$d36miss" ]; then
+    ok "(D36) --pack-task=helper --metrics: the <d> lens facts and route= read under their own openers"
+else
+    no "(D36) --pack-task=helper --metrics: the compact legend does not spell the reading(s)$d36miss: $( leg legend "$TMP/d36.a" | head -c 260 )"
+fi
+cdRun "$TMP/d36.b" "$REPO" --pack-task=geometry --metrics --legend=compact
+allAttrsRow D36 "--pack-task=geometry --metrics over the fixture" "$TMP/d36.b"
+mcp_text explore "{\"path\":\"$TESTED\",\"task\":\"helper\"}" >"$TMP/d36.c"
+allAttrsRow D36 "MCP explore over a tree with a test, at its DEFAULT posture (compact)" "$TMP/d36.c"
+condPair D36 "--from-trace (its <d> rows carry the lens facts)" "$REPO" "--from-trace=$TMP/trace.txt" d:r d:cx d:ccx d:in
+
+# (D37) THE MIRROR, on answers chosen for what they LACK, each lack asserted before it is relied on: --pack-task=helper without
+# --metrics prints <d> rows carrying r=/cx=/ccx=/in= and no amp=; --pack-signatures prints <d> rows with none of the four (no lens
+# rank, no metrics); MCP explore with no_route prints <ctx task=> and no route=. The needles are the readings' own openers, as in
+# (D35). Green on the red build by construction, like (D7).
+cdRun "$TMP/d37.pt" "$TESTED" --pack-task=helper --legend=compact
+cdRun "$TMP/d37.ps" "$REPO" --pack-signatures --legend=compact
+mcp_text explore "{\"path\":\"$TESTED\",\"task\":\"helper\",\"no_route\":true}" >"$TMP/d37.nr"
+{ [ "$( ca carries "$TMP/d37.pt" d:ccx )" = 1 ] && [ "$( ca carries "$TMP/d37.pt" d:amp )" != 1 ]; } \
+    || no "(D37) control: --pack-task=helper no longer prints <d ccx=> rows without amp=, so it proves nothing about the amp= reading being present-only"
+{ [ "$( ca carries "$TMP/d37.ps" d:l )" = 1 ] && [ "$( ca carries "$TMP/d37.ps" d:r )" != 1 ] && [ "$( ca carries "$TMP/d37.ps" d:ccx )" != 1 ] \
+    && [ "$( ca carries "$TMP/d37.ps" d:in )" != 1 ]; } \
+    || no "(D37) control: --pack-signatures no longer prints <d> rows without r=/ccx=/in=, so it proves nothing about those readings being present-only"
+{ [ "$( ca carries "$TMP/d37.nr" ctx:task )" = 1 ] && [ "$( ca carries "$TMP/d37.nr" ctx:route )" != 1 ]; } \
+    || no "(D37) control: MCP explore with no_route no longer prints <ctx task=> without route=, so it proves nothing about the route= reading being present-only"
+d37bad=0; d37n=0
+for v in "--pack-task=helper@d37.pt" "--pack-signatures@d37.ps" "MCP explore no_route@d37.nr"; do
+    label="${v%%@*}"; f="$TMP/${v#*@}"
+    if [ ! -s "$f" ] || grep -q '^__ERROR__' "$f"; then
+        no "(D37) $label answered nothing — its mirror row would be vacuous"; d37bad=1; continue
+    fi
+    d37n=$(( d37n + 1 ))
+    for pair in "<d r=N>:@d:r" "<d cx= ccx=>:@d:ccx" "<d in=N>:@d:in" "<d amp=N>:@d:amp" "route=:@ctx:route"; do
+        needle="${pair%%@*}"; spec="${pair#*@}"
+        if [ "$( ca mentions "$f" "$needle" )" = 1 ] && [ "$( ca carries "$f" "$spec" )" != 1 ]; then
+            no "(D37) $label: the compact legend spells '$needle' but the document carries no <${spec%%:*} ${spec#*:}=> — a reading of a field that is not there"
+            d37bad=1
+        fi
+    done
+done
+[ "$d37bad" -eq 0 ] && [ "$d37n" -eq 3 ] && ok "(D37) mirror: no <d> lens-fact or route= reading prints on $d37n answers that lack its field (<d> rows without amp=, <d> rows without the lens facts, a bundle not routed)"
 
 echo
 echo "=== (S) STRUCTURAL: every conditional attribute the graphlegend.h family, the PageRank disclosure, the map header and the map's rows emit has a compact reading ==="

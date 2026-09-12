@@ -2728,13 +2728,23 @@ static std::string_view scipIndexUnreadableReason( const std::string& scipPath )
 
 static int dispatchMain( const rw::Config& cfg, char** argv );
 
-// the key for a SHARED root (`r` = the map family, `ctx` = the bundle family), from the flags that shaped it
-static std::string_view compactLegendHint( const rw::Config& c ) noexcept
+// The key for a SHARED root (`r` = the map family, `ctx` = the bundle family): the ROOT picks the family, then the flags that
+// shaped the answer pick the key, in the order below. One flag order across both families cannot be right, because verb
+// precedence interleaves them: --pack-task and --from-trace answer over --around, while --around answers over --expand and
+// --pack-signatures. A key from the other family matches no spec under the root, and findCompactSpec then takes that root's
+// FIRST spec, so --pack-task --metrics compacted as pack-signatures, its bundle vocabulary read under a schema that never named
+// it (test/compactlegendcheck.sh (D36)).
+static std::string_view compactMapLegendHint( const rw::Config& c ) noexcept
 {
     if( c.mapDiff )                { return "map-diff"; }
     if( c.metrics )                { return "metrics"; }
     if( !c.around.empty() )        { return "around"; }
     if( !c.query.empty() )         { return "query"; }
+    return {};
+}
+
+static std::string_view compactBundleLegendHint( const rw::Config& c ) noexcept
+{
     if( c.skippedList )            { return "skipped"; }
     if( c.notesList )              { return "notes"; }
     if( !c.legoType.empty() )      { return "lego"; }
@@ -2745,6 +2755,11 @@ static std::string_view compactLegendHint( const rw::Config& c ) noexcept
     if( c.packSignatures )         { return "pack-signatures"; }
     if( c.packTopN > 0 )           { return "pack-top-n"; }
     return {};
+}
+
+static std::string_view compactLegendHint( const rw::Config& c, std::string_view rootTag ) noexcept
+{
+    return rootTag == "r" ? compactMapLegendHint( c ) : compactBundleLegendHint( c );
 }
 
 // --for's compact legend is its own (verbs_for.h): it splices est_tokens=/dropped_positive=/weak= and the
@@ -2796,7 +2811,7 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
     {
         return rc;   // a refusal (or an empty answer) — nothing to rewrite, the exit code says what happened
     }
-    switch( rw::applyCompactDialect( doc, compactLegendHint( cfg ) ) )
+    switch( rw::applyCompactDialect( doc, compactLegendHint( cfg, rw::findCompactRoot( doc ).tag ) ) )
     {
         case rw::CompactOutcome::Rewritten:
         case rw::CompactOutcome::AlreadyCompact:
