@@ -13,7 +13,8 @@
 // delimited fields, and field-skipping — walking only the ~4 message paths that matter:
 //   Index    { documents = 2 }                                            (repeated Document)
 //   Document { relative_path = 1, occurrences = 2, symbols = 3 }
-//   Occurrence { range = 1 (repeated int32, packed), symbol = 2, symbol_roles = 3 }
+//   Occurrence { range = 1 (repeated int32, packed, DEPRECATED), symbol = 2, symbol_roles = 3,
+//                single_line_range = 8, multi_line_range = 9 }
 //   SymbolInformation { symbol = 1, display_name = 6 }                     (display only; optional)
 // Field numbers VERIFIED against https://raw.githubusercontent.com/sourcegraph/scip/main/scip.proto
 // (fetched during implementation): Index.documents=2, Document.relative_path=1/occurrences=2/symbols=3,
@@ -141,7 +142,7 @@ namespace scipwire
 // One occurrence as the wire yields it: 0-based start line + the SCIP symbol string + the role bitfield.
 struct ScipOccurrence
 {
-    std::int64_t startLine = -1;    // range[0]; -1 if the range was absent / malformed
+    std::int64_t startLine = -1;    // start line from range[0] or typed_range; -1 if absent / malformed
     std::string  symbol;            // the SCIP symbol string (e.g. "scip-clang … `A::f`().")
     std::uint32_t roles = 0;        // symbol_roles bitfield; bit 0 (0x1) = Definition
 };
@@ -166,10 +167,41 @@ inline std::int64_t scipDecodeRangeStart( const std::uint8_t* q, std::size_t len
     return std::int64_t( first );
 }
 
+// parse a SingleLineRange / MultiLineRange sub-message -> its start line. Both messages carry the
+// start line in field 1 (SingleLineRange.line, MultiLineRange.start_line). proto3 omits a zero, so a
+// sub-message that carries no field 1 is line 0, not a malformed range.
+inline std::int64_t scipDecodeTypedRangeStart( const std::uint8_t* q, std::size_t len ) noexcept
+{
+    scipwire::Reader r{ q, q + len };
+    while( !r.atEnd() )
+    {
+        std::uint32_t field = 0, wire = 0;
+        if( !r.tag( field, wire ) )
+        {
+            return -1;
+        }
+        if( field == 1 && wire == 0 )
+        {
+            std::uint64_t v;
+            if( !r.varint( v ) )
+            {
+                return -1;
+            }
+            return std::int64_t( v );
+        }
+        if( !r.skip( wire ) )
+        {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 // decode one Occurrence sub-message.
 inline bool scipDecodeOccurrence( const std::uint8_t* q, std::size_t len, ScipOccurrence& occ ) noexcept
 {
     scipwire::Reader r{ q, q + len };
+    bool             typed = false;   // a typed_range outranks the deprecated `range`, per scip.proto
     while( !r.atEnd() )
     {
         std::uint32_t field = 0, wire = 0;
@@ -184,7 +216,10 @@ inline bool scipDecodeOccurrence( const std::uint8_t* q, std::size_t len, ScipOc
             {
                 return false;
             }
-            occ.startLine = scipDecodeRangeStart( rp, rn );
+            if( !typed )
+            {
+                occ.startLine = scipDecodeRangeStart( rp, rn );
+            }
         }
         else if( field == 1 && wire == 0 )                              // range (unpacked): first int = start line
         {
@@ -193,10 +228,20 @@ inline bool scipDecodeOccurrence( const std::uint8_t* q, std::size_t len, ScipOc
             {
                 return false;
             }
-            if( occ.startLine < 0 )
+            if( !typed && occ.startLine < 0 )
             {
                 occ.startLine = std::int64_t( v );
             }
+        }
+        else if( ( field == 8 || field == 9 ) && wire == 2 )            // typed_range: single_line_range | multi_line_range
+        {
+            const std::uint8_t* rp; std::size_t rn;
+            if( !r.lenDelim( rp, rn ) )
+            {
+                return false;
+            }
+            occ.startLine = scipDecodeTypedRangeStart( rp, rn );
+            typed         = true;
         }
         else if( field == 2 && wire == 2 )                              // symbol (string)
         {
