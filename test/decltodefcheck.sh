@@ -73,6 +73,14 @@
 #       declaration's file under defs="1" (E2w); MCP fetch_body served the declaration's body (E2x); --note-add keyed its
 #       note to the declaration (E2y). Each now carries unproven_defs= — on the root, as a key of fetch_body's JSON, on
 #       --note-add's stderr — and the compact row fires on --expand and --owners with the full clause stripped (E2z).
+#   (E3a..E3f) THE FOCUS PICK. --lego, --connect and --around take ONE node from a match set (resolveFocus), and it was the
+#       lowest id — with the header sorting first, the DECLARATION, even where no definition was dropped: a bare name and a
+#       fully proven file:name answered the same zero as the dropping selector. A bodyless C/C++ lowest id now yields to the
+#       lowest-id bodied C/C++ match of the same scope: --around reaches the caller (E3a), --connect joins it and names the
+#       definition's file on its terminal row (E3b), --lego counts the implementor (E3c), and among several definitions the
+#       lowest id wins (E3d). Kept as they were: a set of declarations only (the dropping selector still carries its
+#       residue), a TypeScript overload signature beside its implementation (E3e), and a C++ pure virtual beside an override
+#       of another class (E3f).
 #   (F) MUTATION — every assertion SHAPE above is shown able to fail, against hand-built inputs.
 #
 # WHAT (E) AND (E2) EACH COVER, since between them they close what was once a stated gap. (E) reads the
@@ -1414,6 +1422,151 @@ for triple in "e2_ex_cmp.xml:ctx:src" "e2_ow_cmp.xml:owners:owners"; do
     fi
 done
 
+# ── (E3a..E3f) THE FOCUS PICK: a definition with a body over a bodyless declaration ─────────────────────────────────────
+# The (E2n..E2t) corpora sort the definition's file FIRST so their controls answer. These sort the HEADER first — api.h
+# before impl.cpp, a_fwd.h before shape.h — which is the order that exposed the pick: the lowest id is then the declaration,
+# so a bare name and a fully proven file:name answered the same zero the dropping selector did.
+mkdir -p "$TMP/hord" "$TMP/hctl" "$TMP/legoh" "$TMP/legohctl" "$TMP/tsovl" "$TMP/pvirt"
+cp "$TMP/dord/api.h" "$TMP/dord/caller.cpp" "$TMP/hord/"
+cp "$TMP/dord/a_impl.cpp" "$TMP/hord/impl.cpp"
+cp "$TMP/hord/"* "$TMP/hctl/"
+{ printf '#include "api.h"\n'; cat "$TMP/hord/impl.cpp"; } >"$TMP/hctl/impl.cpp"
+printf '#pragma once\nclass Shape;\n' >"$TMP/legoh/a_fwd.h"
+cp "$TMP/lego/a_shape.h" "$TMP/legoh/shape.h"
+sed 's/a_shape\.h/shape.h/' "$TMP/lego/circle.h" >"$TMP/legoh/circle.h"
+cp "$TMP/legoh/"* "$TMP/legohctl/"
+{ printf '#pragma once\n#include "a_fwd.h"\n'; tail -n +2 "$TMP/legoh/shape.h"; } >"$TMP/legohctl/shape.h"
+# (E3e) a TypeScript overload SIGNATURE (bodyless) ahead of its implementation, in one file.
+cat > "$TMP/tsovl/ovl.ts" <<'EOF'
+export function describe(x: number): string;
+export function describe(x: any): string {
+    return String(x);
+}
+export function useDescribe(): string {
+    return describe(1);
+}
+EOF
+# (E3f) a C++ pure virtual (bodyless, scope Base) sorting ahead of an override in ANOTHER class.
+cat > "$TMP/pvirt/a_base.h" <<'EOF'
+#pragma once
+class Base
+{
+public:
+    virtual int area() = 0;
+};
+EOF
+cat > "$TMP/pvirt/derived.h" <<'EOF'
+#pragma once
+#include "a_base.h"
+class Derived : public Base
+{
+public:
+    int area() override { return 1; }
+};
+EOF
+cat > "$TMP/pvirt/use.cpp" <<'EOF'
+#include "derived.h"
+int total(Derived& d)
+{
+    return d.area();
+}
+EOF
+cp -R "$TMP/hord" "$TMP/mcp_hord" && cp -R "$TMP/legoh" "$TMP/mcp_legoh" || no "(E3) could not copy the corpora for the MCP twins"
+
+# The p= of the connect terminal row named NAME (<t n="NAME" … p="FILE:LINE">), outside comments: which definition a pick chose.
+termP(){ paste -d '|' <( elNC "$1" t n ) <( elNC "$1" t p ) | awk -F'|' -v n="$2" '$1 == n { print $2; exit }'; }
+
+# e3Pick <label> <file> <terminal-name> <want-p> <want-edges>
+e3Pick(){
+    _lbl="$1" _f="$2" _n="$3" _wp="$4" _we="$5"
+    _R="$( elNC "$_f" connect )"
+    nonempty "$_lbl: no <connect> root" "$_R" || return 0
+    _P="$( termP "$_f" "$_n" )"; _E="$( attr "$_R" edges )"
+    if [ "$_P" = "$_wp" ] && [ "$_E" = "$_we" ]; then
+        ok "$_lbl: the $_n terminal is $_P, and edges=\"$_E\""
+    else
+        no "$_lbl: the $_n terminal is ${_P:-<none>} with edges=\"$_E\", expected $_wp with edges=\"$_we\""
+    fi
+}
+
+echo
+echo "=== (E3a) --around on a bare name and a fully proven file:name reaches the caller through the definition ==="
+run "$TMP/hord" --around=helper       >"$TMP/e3_ar_bare.xml"
+run "$TMP/hctl" --around=api.h:helper >"$TMP/e3_ar_ctl.xml"
+run "$TMP/hord" --around=api.h:helper >"$TMP/e3_ar_drop.xml"
+for pair in "e3_ar_bare.xml:bare name, header first" "e3_ar_ctl.xml:every candidate proven, header first"; do
+    f="${pair%%:*}"; what="${pair#*:}"
+    R="$( elNC "$TMP/$f" r )"
+    nonempty "(E3a) no <r> root in $f" "$R" || continue
+    if rowNamesNC "$TMP/$f" | grep -qx useHelper && [ -z "$( attr "$R" unproven_defs )" ]; then
+        ok "(E3a) $f ($what): useHelper is in the neighbourhood, and nothing was dropped"
+    else
+        no "(E3a) $f ($what): the neighbourhood is { $( rowNamesNC "$TMP/$f" | paste -sd ' ' - ) } with unproven_defs=\"$( attr "$R" unproven_defs )\" — the focus is the declaration"
+    fi
+done
+R_E3D="$( elNC "$TMP/e3_ar_drop.xml" r )"
+if nonempty "(E3a) no <r> root for the dropping selector" "$R_E3D"; then
+    # The row set JOINED, never compared through tr: elNC prints no trailing newline, so a trailing-space spelling of the
+    # expected set could not match the right answer (measured: this row read red on a correct document).
+    if [ "$( rowNamesNC "$TMP/e3_ar_drop.xml" | paste -sd ' ' - )" = "helper" ] && [ "$( attr "$R_E3D" unproven_defs )" = "1" ]; then
+        ok "(E3a) kept: --around=api.h:helper matches declarations only, so its focus is still the declaration, with unproven_defs=\"1\""
+    else
+        no "(E3a) --around=api.h:helper no longer answers from the declaration with its residue: rows={ $( rowNamesNC "$TMP/e3_ar_drop.xml" | paste -sd ' ' - ) } unproven_defs=\"$( attr "$R_E3D" unproven_defs )\""
+    fi
+fi
+
+echo
+echo "=== (E3b) --connect and MCP connect join through the definition, and the terminal row names its file ==="
+run "$TMP/hord" --connect=helper,useHelper       >"$TMP/e3_cn_bare.xml"
+run "$TMP/hctl" --connect=api.h:helper,useHelper >"$TMP/e3_cn_ctl.xml"
+run "$TMP/hord" --connect=api.h:helper,useHelper >"$TMP/e3_cn_drop.xml"
+mcpText e3_mcp_cn_bare connect full "path=$TMP/mcp_hord" "symbols=helper,useHelper"
+e3Pick    "(E3b) --connect=helper,useHelper, header first"                  "$TMP/e3_cn_bare.xml"     helper impl.cpp:1 1
+e3Pick    "(E3b) --connect=api.h:helper,useHelper, every candidate proven"  "$TMP/e3_cn_ctl.xml"      helper impl.cpp:2 1
+e3Pick    "(E3b) MCP connect symbols=helper,useHelper, header first"        "$TMP/e3_mcp_cn_bare.xml" helper impl.cpp:1 1
+e3Present "(E3b) kept: --connect=api.h:helper,useHelper drops the definition" "$TMP/e3_cn_drop.xml" connect 1 connect edges 0
+
+echo
+echo "=== (E3c) --lego and MCP lego count the implementor through the definition, not the forward declaration ==="
+run "$TMP/legoh"    --lego=Shape         >"$TMP/e3_lg_bare.xml"
+run "$TMP/legohctl" --lego=a_fwd.h:Shape >"$TMP/e3_lg_ctl.xml"
+run "$TMP/legoh"    --lego=a_fwd.h:Shape >"$TMP/e3_lg_drop.xml"
+mcpText e3_mcp_lg_bare lego full "path=$TMP/mcp_legoh" "type=Shape"
+for triple in "e3_lg_bare.xml:--lego=Shape, forward declaration first" "e3_lg_ctl.xml:--lego=a_fwd.h:Shape, every candidate proven" \
+              "e3_mcp_lg_bare.xml:MCP lego type=Shape, forward declaration first"; do
+    f="${triple%%:*}"; what="${triple#*:}"
+    I="$( elNC "$TMP/$f" iface )"
+    nonempty "(E3c) no <iface> row in $f" "$I" || continue
+    if [ "$( attr "$I" implementors )" = "1" ] && [ "$( attr "$I" p )" = "shape.h" ] && [ -z "$( attr "$( elNC "$TMP/$f" lego )" unproven_defs )" ]; then
+        ok "(E3c) $what: <iface p=\"shape.h\" implementors=\"1\">, and nothing was dropped"
+    else
+        no "(E3c) $what: <iface p=\"$( attr "$I" p )\" implementors=\"$( attr "$I" implementors )\"> — the focus is the forward declaration"
+    fi
+done
+e3Present "(E3c) kept: --lego=a_fwd.h:Shape drops the definition" "$TMP/e3_lg_drop.xml" lego 1 iface implementors 0
+
+echo
+echo "=== (E3d) among several definitions, the lowest id is chosen ==="
+run "$TMP/free" --connect=helper,unrelatedCaller >"$TMP/e3_cn_free.xml"
+e3Pick "(E3d) --connect=helper,unrelatedCaller over api.h, other.cpp, third.cpp" "$TMP/e3_cn_free.xml" helper other.cpp:2 1
+
+echo
+echo "=== (E3e, E3f) kept as they were: a TypeScript overload signature, and a C++ pure virtual beside another class's override ==="
+run "$TMP/tsovl" --connect=describe,useDescribe >"$TMP/e3_cn_ts.xml"
+run "$TMP/pvirt" --connect=area,total           >"$TMP/e3_cn_pv.xml"
+for triple in "e3_cn_ts.xml:describe:ovl.ts:1:(E3e) TypeScript overload signature" "e3_cn_pv.xml:area:a_base.h:5:(E3f) C++ pure virtual, override in Derived"; do
+    f="${triple%%:*}"; rest="${triple#*:}"; n="${rest%%:*}"; rest="${rest#*:}"; wp="${rest%%:*}"; rest="${rest#*:}"; wp="$wp:${rest%%:*}"; what="${rest#*:}"
+    D="$( paste -d '|' <( elNC "$TMP/$f" t n ) <( elNC "$TMP/$f" t defs ) | awk -F'|' -v n="$n" '$1 == n { print $2; exit }' )"
+    P="$( termP "$TMP/$f" "$n" )"
+    if [ "$D" != "2" ]; then
+        no "$what: premise broken — the $n terminal carries defs=\"$D\", expected 2; with one definition there is no pick to keep"
+    elif [ "$P" = "$wp" ]; then
+        ok "$what: the $n terminal is still $P, the lowest id"
+    else
+        no "$what: the $n terminal moved to ${P:-<none>} (expected $wp) — the pick changed outside the C/C++ same-scope case"
+    fi
+done
+
 echo
 echo "=== (F) MUTATION — every assertion shape above is shown able to fail ==="
 # (A)/(B) shape: the row-name reader must SEE a wrong caller when one is present…
@@ -1527,6 +1680,11 @@ printf '<!-- <b p="impl.cpp"> --><ctx><bodies shown="3"><b p="api.h"/><b p="api.
 [ "$( pathsOf "$TMP/m_e2u.xml" b )" = "api.h caller.cpp" ] \
     && ok "(F) E2u-shape: pathsOf reads each served file once, never a commented row or a prefix-sharing tag" \
     || no "(F) pathsOf misread the served files: $( pathsOf "$TMP/m_e2u.xml" b )"
+# (E3b) shape: termP must return the p= of the terminal NAMED, never another terminal's or one spelled in a comment.
+printf '<!-- <t n="helper" p="api.h:2"/> --><connect edges="1"><g><t n="useHelper" p="caller.cpp:2"/><t n="helper" p="impl.cpp:1" defs="2"/></g></connect>' >"$TMP/m_e3b.xml"
+[ "$( termP "$TMP/m_e3b.xml" helper )" = "impl.cpp:1" ] && [ "$( termP "$TMP/m_e3b.xml" useHelper )" = "caller.cpp:2" ] && [ -z "$( termP "$TMP/m_e3b.xml" absent )" ] \
+    && ok "(F) E3b-shape: termP reads the named terminal's p=, never a commented row or another terminal's, and nothing for an absent name" \
+    || no "(F) termP misread a terminal: helper=$( termP "$TMP/m_e3b.xml" helper ) useHelper=$( termP "$TMP/m_e3b.xml" useHelper ) absent=$( termP "$TMP/m_e3b.xml" absent )"
 # VACUITY guard itself. Run in a subshell so it cannot set fail.
 if ( nonempty "probe" "" >/dev/null 2>&1 ); then
     no "(F) nonempty() accepts an empty capture — every arm's vacuity guard is inert"
@@ -1555,7 +1713,9 @@ if command -v xmllint >/dev/null 2>&1; then
        && xmllint --noout "$TMP/e2_ar.xml" 2>/dev/null && xmllint --noout "$TMP/e2_sl.xml" 2>/dev/null \
        && xmllint --noout "$TMP/e2_mcp_lg.xml" 2>/dev/null && xmllint --noout "$TMP/e2_mcp_cn.xml" 2>/dev/null \
        && xmllint --noout "$TMP/e2_ex.xml" 2>/dev/null && xmllint --noout "$TMP/e2_ex0.xml" 2>/dev/null \
-       && xmllint --noout "$TMP/e2_exol.xml" 2>/dev/null && xmllint --noout "$TMP/e2_ow.xml" 2>/dev/null; then
+       && xmllint --noout "$TMP/e2_exol.xml" 2>/dev/null && xmllint --noout "$TMP/e2_ow.xml" 2>/dev/null \
+       && xmllint --noout "$TMP/e3_ar_bare.xml" 2>/dev/null && xmllint --noout "$TMP/e3_cn_bare.xml" 2>/dev/null \
+       && xmllint --noout "$TMP/e3_lg_bare.xml" 2>/dev/null && xmllint --noout "$TMP/e3_cn_ts.xml" 2>/dev/null; then
         ok "xml well-formed"
     else
         no "xml malformed"

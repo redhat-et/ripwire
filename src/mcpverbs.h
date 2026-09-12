@@ -2823,7 +2823,8 @@ inline constexpr char kConnectHeader[] =
     " edges=, groups=) is a FLOOR, never a total; read a zero as \"none found\", never as \"none exists\"."
     " graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls"
     " whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=."
-    " defs= on a terminal row = that NAME has N definitions and the lowest-id one was used; qualify with file:name"
+    " defs= on a terminal row = that NAME has N definitions and the lowest-id one was used (a C/C++ declaration without"
+    " a body yields to the lowest-id definition of its scope that has one); qualify with file:name"
     " to pick another. Steiner rows never carry it."
     " connects= on a Steiner row = how many DISTINCT symbols that intermediary joins (its callers plus its"
     " callees, the undirected view this search walks), so you can see how much the join actually explains;"
@@ -3008,7 +3009,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
             {
                 symAttr( payload, "t", t );
                 // M20 (lens 6 F12): a TERMINAL is a caller-typed selector, resolved by resolveFocus's
-                // lowest-id pick. --callers/--uses/--impact/--path/--verify all disclose defs= for the same
+                // single pick (graph.h states the rule). --callers/--uses/--impact/--path/--verify all disclose defs= for the same
                 // name; the Steiner subgraph did not, so `--connect=size,…` was built from one of six `size`
                 // definitions with nothing on the row to say which question was answered. Steiner nodes (the
                 // "s" rows) carry no defs= because nobody selected them — the search found them.
@@ -3061,7 +3062,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
             payload.append( "<unconnected radius=\"" ).append( std::to_string( res.radius ) ).append( "\">" );
             symAttr( payload, "t", grp.terminals[ 0 ] );
             // The SAME disclosure the <g> arm makes above, on the arm that makes the STRONGER claim. An
-            // unconnected terminal is still resolveFocus's lowest-id pick among N same-named definitions,
+            // unconnected terminal is still resolveFocus's single pick among N same-named definitions,
             // and "no relationship within radius R" is exactly where answering about one of N silently
             // changes the answer. Derived from definitionCountOfName — the same call the <g> arm uses —
             // so the two can never drift into disagreeing about what the name resolved to.
@@ -4035,7 +4036,7 @@ inline FetchOutcome fetchBody( const std::string& root, const std::string& handl
                                RedactCounts* redact = nullptr );
 
 // R2c (the 2026-08-12 usage mine): serve fetch_body for a bare symbol NAME through the SAME lookup path
-// find_symbol uses (resolveAllByNameQualified → lowest-id pick, i.e. resolveFocus's convention), then
+// find_symbol uses (resolveAllByNameQualified → the lowest-id pick; resolveFocus's C/C++ body preference is NOT applied), then
 // RECURSE into fetchBody with the freshly-minted real handle — every staleness/overload guarantee applies
 // unchanged, and the result teaches the handle for next time. Disclosed: resolved_from_name always;
 // name_defs/other_defs (file:line + handle, capped) when the name has several DISTINCT defs — the honest

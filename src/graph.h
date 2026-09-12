@@ -3744,7 +3744,7 @@ inline std::vector<NodeId> resolveAllByScopeQualified( const IngestResult& ing, 
 }
 
 // resolveFocus — the --around/--lego/--edit-check single-pick resolver — is defined BELOW
-// resolveAllByNameQualified as its lowest-id projection (2026-08-30, selectorscopecheck): the two used to
+// resolveAllByNameQualified as its single-pick projection (2026-08-30, selectorscopecheck): the two used to
 // carry the same spec grammar as separate loops, and the moment the Scope::name tier landed in both, the
 // clone lens flagged the pair — one resolver, one pick rule, no drift.
 
@@ -4234,7 +4234,7 @@ inline std::vector<NodeId> declToDefCandidates( const IngestResult& ing, std::st
 // X9(b): qualified "file:name" variant of resolveAllByName, for --callers/--callees/--impact — a same-
 // named symbol living in more than one file (a common overload/shadow shape) previously had no way to
 // disambiguate on these verbs even though --around/--lego/--edit-check already could (resolveFocus). Uses
-// the SAME splitQualifiedSpec rule as resolveFocus, but returns EVERY match (not just the lowest-id pick)
+// the SAME splitQualifiedSpec rule as resolveFocus, but returns EVERY match (not just the single pick)
 // — --callers/--impact want the union across all matches (overloads share callers/impact by design),
 // unlike --around's single-target ego-graph. A bare "name" (no colon) is BYTE-IDENTICAL to the existing
 // resolveAllByName( ing, name ) — every symbol with that name, across every file — so this is purely
@@ -4810,11 +4810,23 @@ inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::
     return {};
 }
 
-// resolve a --around/--lego spec to the lowest-id matching symbol; kNoNode if none. The lowest-id
-// PROJECTION of resolveAllByNameQualified — matches ascend by NodeId there (symbols are walked in id
-// order and every tier preserves that), so front() IS the historic lowest-id pick; one grammar, one
-// resolver, and every tier the full resolver gains (canonical id, Scope::name) reaches the single-pick
-// verbs in the same commit. Declared here, below the full resolver, for exactly that reason.
+// resolve a --around/--lego/--connect spec to ONE matching symbol; kNoNode if none. A PROJECTION of
+// resolveAllByNameQualified — matches ascend by NodeId there (symbols are walked in id order and every tier preserves
+// that) — so one grammar, one resolver, and every tier the full resolver gains (canonical id, Scope::name) reaches the
+// single-pick verbs in the same commit. Declared here, below the full resolver, for exactly that reason.
+//
+// THE PICK is the lowest id, with ONE exception: a bodyless C/C++ lowest id (a header prototype, an in-class method
+// declaration, a forward-declared class) yields to the lowest-id C/C++ match WITH a body in the SAME scope, when the set
+// holds one. The lowest id alone made the declaration the focus whenever its header sorted first, and a declaration has
+// no call or extends edges — so --around served its own row, --connect found no join and --lego counted no implementor,
+// for a bare name and a fully proven file:name alike (decltodefcheck E3a..E3d). Everything else keeps the lowest id:
+//   * a set of declarations only, or a single match — nothing to prefer;
+//   * every other language — measured on this repository, an unscoped "bodied first" moved 69 non-C/C++ names (Python and
+//     JSON keys, Ruby classes, TypeScript overload signatures, even py -> cpp), none of them a declaration beside its
+//     definition; this rule moved 54 names, every one a C/C++ declaration to its definition (E3e);
+//   * a body in ANOTHER scope — a pure virtual's override in a derived class is a dispatch claim, not the declaration's
+//     definition, the same line declToDefFollowThrough draws (E3f).
+// `defs=` on these verbs still says how many definitions the NAME has, so a pick among several stays disclosed.
 //
 // `unprovenDefCountOut` (H1, optional): the residue the full resolver reports for the SAME selector — the same-named
 // definitions a file:name spelling dropped, which the single pick therefore never focuses on either. Passed straight
@@ -4822,7 +4834,25 @@ inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::
 inline NodeId resolveFocus( const IngestResult& ing, std::string_view spec, std::size_t* unprovenDefCountOut = nullptr )
 {
     const std::vector<NodeId> matches = resolveAllByNameQualified( ing, spec, unprovenDefCountOut );
-    return matches.empty() ? kNoNode : matches.front();
+    if( matches.empty() )
+    {
+        return kNoNode;
+    }
+    const Symbol& lowest = ing.symbols[ matches.front() ];
+    const auto    cOrCpp = []( Lang lang ) noexcept { return lang == Lang::Cpp || lang == Lang::C; };
+    if( isDefinitionNotDeclaration( lowest ) || !cOrCpp( lowest.lang ) )
+    {
+        return matches.front();
+    }
+    for( NodeId id : matches )
+    {
+        const Symbol& candidate = ing.symbols[ id ];
+        if( isDefinitionNotDeclaration( candidate ) && cOrCpp( candidate.lang ) && candidate.scope == lowest.scope )
+        {
+            return id;
+        }
+    }
+    return matches.front();
 }
 
 // clearly side-effecting C/C++ intrinsics (I/O, allocation, nondeterminism, process control). A
