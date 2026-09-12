@@ -14,8 +14,10 @@
 #                      precise=1 in the summary
 #   * deterministic (run twice → byte-identical), xmllint-clean well-formed XML
 #   * a CORRUPT (truncated) index → a stderr alert AND output byte-IDENTICAL to the no---scip run
-#     (degrade, never fail); a MISSING index → same
-#   * FUZZ: 20 random truncations / byte-flips of the index → ripwire never crashes (exit 0/degrades)
+#     (degrade, never fail); a MISSING index REFUSES, exit 1 (arm 5b) — and so do an empty file and a
+#     directory (namedfileinputcheck.sh arm F)
+#   * FUZZ: 20 random truncations / byte-flips of the index → ripwire never crashes (exit 0 and degrades, or
+#     the exit-1 refusal when a truncation leaves 0 bytes)
 # Exits non-zero on any failure. Does NOT touch regression.sh.
 
 set -u

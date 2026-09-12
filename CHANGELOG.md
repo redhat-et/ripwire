@@ -15,6 +15,20 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **A sidecar must be a regular file: a symlink at a sidecar name is refused, on read as well as on write.**
+  `.ripwire_notes`, `.ripwire_quality_baseline` and `.ripwire_arch_baseline` are opened with `O_NOFOLLOW`, so a
+  link at one of those names is not opened, wherever its target is. Anything else at the name that is not a regular
+  file, a FIFO for example, is refused as well instead of being waited on. If you symlinked one on purpose (into a shared
+  config directory, say), replace the link with a regular copy of its target. Until you do, every read of it prints
+  a refusal on stderr, no notes surface, `--quality-delta` reports `baseline="git-HEAD (symlinked sidecar refused)"`
+  and compares against HEAD, `--arch` reports every violation as new, and `--note-add`, `--quality-baseline`,
+  `--arch --baseline` and `--baseline-update` exit 1 without writing. `.ripwire_config` and
+  `.ripwire_quality_acks` are unchanged.
+
+### Changed — `VERIFY_NO_ALIAS` is a release optimizer fact, on LLVM 17 as well
+
 - **`VERIFY_NO_ALIAS` is now an optimizer fact in release, not an inert assume.** `src/infra/Diagnostics.h` §6 adds
   `__builtin_assume_separate_storage` (clang 17+, `__has_builtin`-guarded, `( (void)0 )` elsewhere) beside the debug
   check, so codegen matches `__restrict__` on the parameters (`out=a; out+=b; out+=a;` arm64 10 → 6 instructions);

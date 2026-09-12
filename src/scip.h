@@ -40,6 +40,10 @@
 #include <utility>
 #include <vector>
 
+#include <fcntl.h>      // ::open + O_NONBLOCK + ::fcntl — scipReadFile's own non-blocking open of the index
+#include <sys/stat.h>   // ::fstat + S_ISREG — scipReadFile reads a regular file only
+#include <unistd.h>     // ::close — a descriptor stdio never adopted
+
 namespace rw
 {
 
@@ -302,12 +306,26 @@ inline bool scipDecodeIndex( const std::uint8_t* data, std::size_t size, std::ve
 // ---- load the whole file (bounded) -----------------------------------------------------------------
 // Read a .scip file into a byte buffer. Empty on any I/O failure (caller degrades). Bounded at 256 MiB
 // — a SCIP index larger than that on a repo ripwire can parse is almost certainly the wrong file.
+// The open is checked HERE, on its own descriptor: main.cpp's probe closed the descriptor it judged, so by now the path may
+// name something else, and a FIFO put there would block a plain fopen waiting for a writer. So the path is opened O_NONBLOCK
+// (a read-only open of a FIFO returns at once) and fstat on THAT descriptor admits a regular file only; anything else yields
+// no bytes, and loadScipOverlay degrades exactly as for a file emptied after the probe. For a regular file O_NONBLOCK is then
+// cleared (fcntl) before fdopen hands the descriptor to stdio, so everything below is the blocking stdio read the plain
+// fopen gave — the same size bound, the same short-read rule — even on a filesystem that honours O_NONBLOCK for a file.
 inline std::vector<std::uint8_t> scipReadFile( const char* path )
 {
     std::vector<std::uint8_t> bytes;
-    std::FILE* f = std::fopen( path, "rb" );
+    const int indexFd = ::open( path, O_RDONLY | O_NONBLOCK | O_CLOEXEC );
+    if( indexFd < 0 )
+    {
+        return bytes;
+    }
+    struct stat indexStat;
+    const int   statusFlags = ( ::fstat( indexFd, &indexStat ) == 0 && S_ISREG( indexStat.st_mode ) ) ? ::fcntl( indexFd, F_GETFL ) : -1;
+    std::FILE*  f           = ( statusFlags >= 0 && ::fcntl( indexFd, F_SETFL, statusFlags & ~O_NONBLOCK ) == 0 ) ? ::fdopen( indexFd, "rb" ) : nullptr;
     if( !f )
     {
+        ::close( indexFd );   // not a regular file, or fcntl/fdopen failed — stdio never adopted the descriptor
         return bytes;
     }
     if( std::fseek( f, 0, SEEK_END ) != 0 ) { std::fclose( f ); return bytes; }
@@ -669,9 +687,14 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
 }
 
 // ---- top-level entry: path → overlay (degrade to empty on any failure) -----------------------------
-// The ONE seam main.cpp calls. Unreadable (empty file, directory) / corrupt / truncated / mismatched-tree index →
-// exactly one DEGRADED_PATH_ALERT + an empty overlay (the pipeline proceeds name-based, byte-identical to a
-// no---scip run). A path that cannot be opened never gets here: main.cpp refuses it first, exit 1. Never throws.
+// The ONE seam main.cpp calls, and only after main.cpp has REFUSED (exit 1) every path that cannot be read as an index at
+// all: one that cannot be opened, an empty regular file, and anything that is not a regular file (a directory, a FIFO, a
+// device) (scipIndexUnreadableReason, owner decision 2026-09-12). Only a path that was a regular, non-empty file at that
+// probe reaches this seam. It degrades with exactly one DEGRADED_PATH_ALERT and an empty overlay, and the pipeline proceeds
+// name-based, byte-identical to a no---scip run, when the read yields no bytes (an index over the 256 MiB bound, a short
+// read, a file emptied after main.cpp's probe, or a path replaced after it by something that is not a regular file, which
+// scipReadFile's own non-blocking open never reads) or the index is corrupt, truncated or built from a mismatched tree.
+// Never throws.
 inline ScipOverlay loadScipOverlay( std::string_view path, const IngestResult& ing )
 {
     const std::string             p( path );
