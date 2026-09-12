@@ -118,8 +118,12 @@ struct ElixirResolver
             if( external && privateFunction[ node ] ) { continue; }
             if( filter == "functions" && macroFunction[ node ] ) { continue; }
             if( filter == "macros" && !macroFunction[ node ] ) { continue; }
-            // Prefer executable clauses over a default-argument declaration of the same function.
-            if( symbol.endByte <= symbol.sigEndByte )
+            // Prefer executable clauses over a bodyless default-argument head of the same function — unless the call
+            // OMITS an argument the head defaults (its arity is not the head's): the head is then the one symbol that
+            // evaluates the default expression, and skipping it hid that expression's calls from every caller
+            // (--path/--impact never saw them; test/elixirnamearitycheck.sh K). A call spelling the head's own arity
+            // never evaluates a default and keeps reaching the clauses alone.
+            if( symbol.endByte <= symbol.sigEndByte && symbol.name == ref.calleeName )
             {
                 bool hasBody = false;
                 for( NodeId other : found->second )
