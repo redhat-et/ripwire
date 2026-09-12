@@ -125,8 +125,11 @@ regenerated (2026-09-11).
 - **Four more aliasing contracts at function entry, one of them the tree's only codegen row.** `waterFillRecallShares`
   (`src/recall.h`) reads `demand[i]` while writing `alloc[i]` and never resizes either, so it takes the buffer form:
   release codegen 309 → 301 instructions under the build's own flags. `splitNoteTail` (`src/notes.h`),
-  `takeAckNamedToken` and `computeDelta` (`src/quality.h`) take debug-only guards; `computeDelta`'s two out-pointers
-  both default to null, so its guard is a null-safe `VERIFY_TEXT` rather than the object form.
+  `takeAckNamedToken` and `computeDelta` (`src/quality.h`) take the object form, whose check runs in debug and whose
+  release residue is the `separate_storage` promise on the two objects (read on clang 18+ by default, on LLVM 17 /
+  AppleClang 16 only with the CMake-added flag and for scalar accesses, never on GCC or clang before 17); for these
+  it measured no codegen change. `computeDelta`'s two out-pointers both default to null, so its guard is a
+  null-safe `VERIFY_TEXT` rather than the object form.
   `markCandidateFilesIncludingDecl` (`src/graph.h`) and `partitionByScope` (`src/verbs_quality.h`) take the last two
   guards of the audit's apply list, which is now complete: 21 functions state their no-alias contract at entry.
 
