@@ -229,7 +229,8 @@ constexpr std::uint32_t kParserVer    = 95;           // bump on any grammar/.sc
                                                       //    lexical aliases, filtered imports, default arguments, pipes,
                                                       //    captures, delegates, attributes and protocol/behaviour
                                                       //    contracts. Existing bind/ref record layouts are unchanged
-                                                      //    (kCacheVersion stays #139's 21, kQSnapCacheScheme stays 10);
+                                                      //    (kCacheVersion stays #139's 21; the same PR's kQSnapCacheScheme
+                                                      //    10 -> 11 is quality.h's arity-key fold, not an extraction change);
                                                       //    old Elixir extraction facts must be re-parsed. The branch
                                                       //    carried 87; main spent 87..92 while it was open, #139 takes
                                                       //    93 and #172 takes 94 in the 0.6.1 round, so this lands on

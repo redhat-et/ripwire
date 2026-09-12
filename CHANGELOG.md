@@ -42,6 +42,7 @@ contract-change on `run` (params 1 → 2) with every caller of the old arity lis
 `--quality-delta` params row, rather than a dead symbol beside a new one; a default (`run(x, y \\ 1)`)
 still reports the change but flags nobody (`kQSnapCacheScheme` 10 → 11). `--for` by an exact function
 name (`generate_app`, `text`) routes name-exact and ranks the `name/N` symbol first.
+
 ### Upgrade notes
 
 - **A sidecar must be a regular file: a symlink at a sidecar name is refused, on read as well as on write.**
