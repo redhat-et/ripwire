@@ -54,9 +54,9 @@ needs it. If you are an agent making repeated calls, you are the case the CLI de
 two hops away, a read/write that never calls SYM, or an `#include` that pulls it in all fall outside a
 1-hop answer. Match the verb to the question:
 
-- **"Is it safe to change/delete X?"** → `ripwire <dir> --impact=SYM` (transitive blast radius: everything
+- **"Is it safe to change/delete X?"** → `ripwire <dir> --impact=SYM --legend=compact` (transitive blast radius: everything
   that transitively reaches SYM through the call graph, not just direct callers) **+**
-  `ripwire <dir> --uses=SYM` (the resolvable use-sites by role — `call|read|write|import|extends` — file:line; catches
+  `ripwire <dir> --uses=SYM --legend=compact` (the resolvable use-sites by role — `call|read|write|import|extends` — file:line; catches
   non-call references `--callers` never sees, e.g. a struct read or a header import). Run both — `--impact`
   gives depth (the call chain), `--uses` gives breadth (kinds of reference). `--callers` alone is the wrong
   tool for this question; reach for it only when you already know the change is local.
@@ -79,7 +79,7 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
   the inter-procedural half is `--callers`/`--impact`. Data dependence only — the guard deciding
   whether a def executes is never a row.
 - **"I have a FILE:LINE, not a name"** (a compiler error, a diff hunk, a stack frame) →
-  `ripwire <dir> --at=FILE:LINE` — the enclosing-definition chain at that location, outermost→innermost;
+  `ripwire <dir> --at=FILE:LINE --legend=compact` — the enclosing-definition chain at that location, outermost→innermost;
   `sym=` names the innermost. The SAME seed composes into any SYM selector as `@FILE:LINE`
   (`--callers=@src/f.cpp:120`, `--expand=@…`, `--edit-check=@…`, `--slice=@FILE:LINE:VAR`) and resolves
   to that innermost definition — skip the "what is this function called" grep entirely. A seed on a
@@ -96,7 +96,7 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
   [--around-depth=2]` (bounded neighborhood). Not `--for` — `--for` returns a ranked *set* of relevant
   signatures for a task, it does not trace a path between two named points.
 - **"N task symbols — how do A, B and C RELATE, which intermediaries join them?"** →
-  `ripwire <dir> --connect=A,B,C [--connect-radius=N]` — the minimal connecting subgraph: your terminals,
+  `ripwire <dir> --connect=A,B,C --legend=compact [--connect-radius=N]` — the minimal connecting subgraph: your terminals,
   the fewest joining intermediaries (with signatures), and the call edges in true caller→callee direction.
   Reach for `--connect` over `--path` in two cases: **N>2 symbols** (`--path` only ever takes SRC,DST — it
   has no notion of a third point), or **a pair `--path` calls unreachable**. The search is undirected, so it
@@ -106,24 +106,24 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
 
 ## Trace the call graph / locate code
 
-- **Who calls / what it calls** — `ripwire <dir> --callers=SYM` · `ripwire <dir> --callees=SYM`
-- **The resolvable use-sites of a name** (role=call|read|write|import|extends, file:line; `counts_floor="1"` — the count is a floor) — `ripwire <dir> --uses=SYM`
-- **Who reads/writes a MEMBER VARIABLE** (`t="field"` symbols; per-site owner resolution, `owner_candidates=K` where several owners could match, never a silent pin) — `ripwire <dir> --uses=Owner.field`
-- **Transitive blast radius** — `ripwire <dir> --impact=SYM`
-- **Neighborhood** (bounded k-hop ego graph) — `ripwire <dir> --around=SYM [--around-depth=2] [--around-fanout=32]`
-- **How does X reach Y** (shortest call-path) — `ripwire <dir> --path=SRC,DST`
-- **How do N symbols relate** (minimal connecting subgraph, shared-caller joins) — `ripwire <dir> --connect=A,B,C [--connect-radius=N]`
+- **Who calls / what it calls** — `ripwire <dir> --callers=SYM --legend=compact` · `ripwire <dir> --callees=SYM --legend=compact`
+- **The resolvable use-sites of a name** (role=call|read|write|import|extends, file:line; `counts_floor="1"` — the count is a floor) — `ripwire <dir> --uses=SYM --legend=compact`
+- **Who reads/writes a MEMBER VARIABLE** (`t="field"` symbols; per-site owner resolution, `owner_candidates=K` where several owners could match, never a silent pin) — `ripwire <dir> --uses=Owner.field --legend=compact`
+- **Transitive blast radius** — `ripwire <dir> --impact=SYM --legend=compact`
+- **Neighborhood** (bounded k-hop ego graph) — `ripwire <dir> --around=SYM --legend=compact [--around-depth=2] [--around-fanout=32]`
+- **How does X reach Y** (shortest call-path) — `ripwire <dir> --path=SRC,DST --legend=compact`
+- **How do N symbols relate** (minimal connecting subgraph, shared-caller joins) — `ripwire <dir> --connect=A,B,C --legend=compact [--connect-radius=N]`
 - **Verify a CLAIM in one call** — "does X really call Y?", "is Z ever used?", "does this file contain/define A?" →
-  `ripwire <dir> --verify='calls(A,B)'` (also `uses(SYM)` / `unused(SYM)` / `contains(FILE, "LIT")` /
+  `ripwire <dir> --verify='calls(A,B)' --legend=compact` (also `uses(SYM)` / `unused(SYM)` / `contains(FILE, "LIT")` /
   `defines(FILE, SYM)` / `reaches(SYM, "FILE")`): one three-valued verdict with the evidence inline —
   `confirmed` (witness printed) · `refuted` (only with complete evidence; a clean literal-scan no carries
   `complete="1"`) · `not-established` (`limit=` names the floor: dynamic dispatch and string-keyed references
   are invisible to the index, so this verdict is honest "the index cannot prove it", never "false").
   Replaces the grep-then-read chain you would otherwise run to check the claim yourself.
 - **Find a literal / regex / structural shape** —
-  `ripwire <dir> --grep=STR` (literal + enclosing symbol) ·
-  `ripwire <dir> --regex=PAT` ·
-  `ripwire <dir> --match='(<tree-sitter query>)'` (e.g. `(call_expression function: (identifier) @c)`) ·
+  `ripwire <dir> --grep=STR --legend=compact` (literal + enclosing symbol) ·
+  `ripwire <dir> --regex=PAT --legend=compact` ·
+  `ripwire <dir> --match='(<tree-sitter query>)' --legend=compact` (e.g. `(call_expression function: (identifier) @c)`) ·
   **`ripwire <dir> --pattern='foo($X, ...)'`** — the same structural search written in CODE instead of in
   node kinds, so you do not have to know whether this grammar calls it `call_expression`, `call`,
   `method_invocation` or `invocation_expression`. `$NAME` binds one node (repeat it and both sites must
@@ -170,7 +170,7 @@ passing `--scip`) — check header `precise=N` to confirm the overlay actually m
 
 When you need to understand a specific function/class/concept in full (its body, contract, and rationale):
 
-1. **Full body + callee signatures** — `ripwire <dir> --expand=SYM`
+1. **Full body + callee signatures** — `ripwire <dir> --expand=SYM --legend=compact`
    The ranked map, then `<bodies>` with SYM's full source in CDATA and a `<calls>` block of inline one-line
    signatures for everything it calls — read the body with the callee signatures beside it. (No `<doc>` block
    here; SYM's own doc-comment is in the CDATA body if it sits inside the definition — otherwise read the
@@ -180,12 +180,12 @@ When you need to understand a specific function/class/concept in full (its body,
    read doesn't need to start at line 1: Read at `l=`, not the whole file. Same for a `--for` hit before
    you've expanded it — its `<d>` row carries `l=` too. Over MCP, skip the Read requirement altogether —
    see ripwire-mcp's edit verbs.
-2. **Who calls it** — `ripwire <dir> --callers=SYM` → `<callers of="SYM" count="N">` with type, name,
+2. **Who calls it** — `ripwire <dir> --callers=SYM --legend=compact` → `<callers of="SYM" count="N">` with type, name,
    file:line. Callers reveal SYM's contract from the outside — expected preconditions.
-3. **What it calls** — `ripwire <dir> --callees=SYM` → cross with the `--expand` body to understand the flow.
-4. **Design docs that mention it** — `ripwire <dir> --mentions=SYM` → `<mentions of="SYM" defs="D" docs="N">`
+3. **What it calls** — `ripwire <dir> --callees=SYM --legend=compact` → cross with the `--expand` body to understand the flow.
+4. **Design docs that mention it** — `ripwire <dir> --mentions=SYM --legend=compact` → `<mentions of="SYM" defs="D" docs="N">`
    listing markdown files that backtick-name SYM: the design decisions and rationale around this symbol.
-5. **Neighborhood** (optional, when callers+callees don't close the picture) — `ripwire <dir> --around=SYM
+5. **Neighborhood** (optional, when callers+callees don't close the picture) — `ripwire <dir> --around=SYM --legend=compact
    [--around-depth=2]`.
    → **Explanation:** what SYM does (from the body + `<calls>`), who calls it and why, what it coordinates,
    and any design rationale (from `--mentions`). Note `amb="K"` if call edges are ambiguous — verify in source.
@@ -198,7 +198,7 @@ type mirrored into a stub or a second checkout — the question before you edit 
 "what is the byte layout, what pins it, and who else declares it":
 
 ```bash
-ripwire <dir> --layout=AudioUniforms         # file:name disambiguates, like --around/--lego
+ripwire <dir> --layout=AudioUniforms --legend=compact         # file:name disambiguates, like --around/--lego
 ```
 
 One call gives three things: the fields in declaration order with **computed** offsets/sizes and every byte
@@ -218,7 +218,7 @@ field un-places every field after it. A `modeled="1"` number that agrees with th
 
 ## `--query` (lexical) vs `--for` (task lens)
 
-- `ripwire <dir> --query="terms"` — **pure BM25 relatedness**: the map re-ranked by lexical match against
+- `ripwire <dir> --query="terms" --legend=compact` — **pure BM25 relatedness**: the map re-ranked by lexical match against
   your terms, nothing else. Use it when you want *what mentions these words*, uncolored by importance —
   chasing a domain term, an error string's neighborhood, a concept's vocabulary.
 - `ripwire <dir> --for="task in words"` — the **task lens**: relevance-ranked *signatures* plus doc-comments

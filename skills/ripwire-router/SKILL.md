@@ -14,7 +14,7 @@ ONE skill to enter. If you routed wrong, each skill's own routing header sends y
 
 ## Not sure which verb fits? Ask the tool itself
 
-`ripwire <dir> --help-task="<the task in words>"` returns ONE recommended command with the evidence
+`ripwire <dir> --help-task="<the task in words>" --legend=compact` returns ONE recommended command with the evidence
 behind the pick (intent, score/margin, repository facts) — or honestly abstains when the evidence is
 too thin to name a winner. One hop cheaper than reading this whole map: paste the task, run what it
 recommends. Advice only — it never executes the recommendation.
@@ -56,7 +56,7 @@ recommends. Advice only — it never executes the recommendation.
 | **Handoff** — writing a summary of a repo/change for the next agent or teammate | **ripwire-handoff** | the handoff bundle |
 | **What's built but DARK here** — "why don't I see feature X" (code compiled/flagged OFF, not a bug) | **ripwire-fresh-eyes** | `--flags[=SUBSTR]` (dark-gate dashboard) + `--flip=NAME` (blast radius of turning one ON) — **ripwire-find-bug** points here too when a symptom turns out to be a dark flag |
 | **Task spans multiple checkouts** — service+client, a split monorepo — one question over BOTH | any moment skill above | pass every root: `ripwire dir1 dir2 --for=…` (one merged graph; `--impact` across roots needs the workspace call). Refusal boundary: `--quality-delta`/`--test-gate`/`--eval*`/`--arch --baseline` stay single-root (HEAD-keyed baselines and corpora are per-repo) — run those per root. |
-| **Is my ripwire setup healthy / am I running a stale binary?** | (no skill — run directly) | `ripwire <dir> --doctor` — binary-vs-PATH staleness, grammar compile, cache-dir health, git reachability (single-root, diagnostic not deterministic) |
+| **Is my ripwire setup healthy / am I running a stale binary?** | (no skill — run directly) | `ripwire <dir> --doctor --legend=compact` — binary-vs-PATH staleness, grammar compile, cache-dir health, git reachability (single-root, diagnostic not deterministic) |
 
 ## You are not in a "moment" — you are about to reach for a default
 
@@ -116,11 +116,11 @@ them.
 The always-loaded ripwire primer trains the READ verbs (`--for`/`--recall`/`--callers`/`--expand`/
 `--hotspots`) but not the two WRITE-time reflexes, which is exactly where the most value leaks:
 
-- **Before you write a fn/class — even a "quick" one:** `ripwire <dir> --exemplar="<the sub-task in words>"`
+- **Before you write a fn/class — even a "quick" one:** `ripwire <dir> --exemplar="<the sub-task in words>" --legend=compact`
   → the repo's best-in-class instance of that shape to imitate (by ROLE, not text similarity), plus
   `--for="<task>"` to reuse before reinventing. Duplicates are born on tasks that felt too small to tool up
   for. (→ **ripwire-reuse-first**.)
-- **Before you call it DONE:** `ripwire <dir> --quality-delta` → ONLY what your change made worse across 10
+- **Before you call it DONE:** `ripwire <dir> --quality-delta --legend=compact` → ONLY what your change made worse across 10
   kinds (complexity, verbosity, nesting, params, duplication, dead-code, api-surface, error-masking,
   short-horizon-churn, new-clone-of-reused-helper); exit 2 = new debt.
   In a git repo it **auto-compares vs `git HEAD`** (no start-of-task ritual — just run it before you push).
@@ -131,7 +131,7 @@ The always-loaded ripwire primer trains the READ verbs (`--for`/`--recall`/`--ca
   For a mid-task convergence loop, run `ripwire <dir> --quality-baseline` at the start to pin an explicit
   floor (it takes precedence over HEAD), then re-run `--quality-delta` after each edit. (→ **ripwire-quality-bar**.)
   Want the wider "does this still look rotten" picture alongside the delta, not just what you changed? —
-  `ripwire <dir> --quality-panel[=strict|default|lenient]`, the six-family panel (→ **ripwire-fresh-eyes**).
+  `ripwire <dir> --quality-panel[=strict|default|lenient] --legend=compact`, the six-family panel (→ **ripwire-fresh-eyes**).
   **It is a lens, not a gate** — always exits 0; `--quality-delta` above is the only pass here that gates.
 
 `ripwire --help` lists every flag on one line; `--help=--FLAG` prints one flag in full and `--help=all` the whole catalog. Every skill re-verifies its commands against the shipped binary.

@@ -399,8 +399,9 @@ fi
 #      never from repository content. Quoting is for DISPLAY only; nothing here is ever executed. ----
 runCmd=""
 case "$recommended" in
-    --grep)   runCmd="ripwire $cwd --grep=$grepPattern" ;;
-    --expand) runCmd="ripwire $cwd --expand=$resolvedSym" ;;
+    # A1-2 (2026-09-12): the XML verbs ask for the compact legend; --for keeps the full one (its compact legend is its own)
+    --grep)   runCmd="ripwire $cwd --grep=$grepPattern --legend=compact" ;;
+    --expand) runCmd="ripwire $cwd --expand=$resolvedSym --legend=compact" ;;
     --for)    runCmd="ripwire $cwd --for=\"$file_path\"" ;;
 esac
 [ -n "$runCmd" ] || exit 0

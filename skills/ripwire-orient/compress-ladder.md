@@ -28,8 +28,8 @@ body output of `--expand`/`--outline`, `--for`'s auto/anchor bundle and `--detai
 **20–35%** of the body tokens.
 
 ```
-ripwire <dir> --expand=SYM1,SYM2 --compress     # bodies, comments stripped
-ripwire <dir> --outline=SYM1 --compress         # skeleton, comments stripped
+ripwire <dir> --expand=SYM1,SYM2 --legend=compact --compress     # bodies, comments stripped
+ripwire <dir> --outline=SYM1 --legend=compact --compress         # skeleton, comments stripped
 ```
 
 It is **string-literal-safe** — a `//` or `/* */` *inside a string* is kept verbatim:

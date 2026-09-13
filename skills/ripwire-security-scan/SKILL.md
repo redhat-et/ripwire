@@ -89,7 +89,7 @@ to the compiler/a real static analyzer (clang static analyzer, CodeQL, Semgrep w
 finding matters enough to need one; use this to decide fast where to point that tool, or when none is
 available.
 
-1. **Unsafe constructs** — `ripwire <dir> --lint`
+1. **Unsafe constructs** — `ripwire <dir> --lint --legend=compact`
    Output: `<lint findings="N">` with a per-rule count block, then one `<f rule=... p=file:line in=enclosing>`
    per hit. The security-relevant rules: `unsafe-c-fn` (banned/dangerous libc calls — `strcpy`/`gets`/`system`
    class), `c-style-cast` (masks a `reinterpret_cast` as an implicit conversion — hides type-safety holes),
@@ -108,7 +108,7 @@ available.
    the cap with `--limit=N` (or narrow the scan to the subsystem) before concluding the hits are elsewhere.
    Root `capped="0"` means you are seeing everything.
 
-2. **Taint-reach (structural, not real taint)** — `ripwire <dir> --graph-query='callees(name("SYM"),6)'`
+2. **Taint-reach (structural, not real taint)** — `ripwire <dir> --graph-query='callees(name("SYM"),6)' --legend=compact`
    where SYM is the parse/deserialize/handler entry point that receives untrusted input (the number bounds
    the hop depth; `--callees=SYM` is the 1-hop version for a quick first look).
    Output: `<query expr=... count="N">` — everything transitively reachable FROM that entry point via the
@@ -121,13 +121,13 @@ available.
    to modify the handler and need to know who depends on it — for forward taint-reach it's a false negative
    (on an entry point like `main` it returns an empty set).
 
-3. **Untested integration seams** — `ripwire <dir> --seams`
+3. **Untested integration seams** — `ripwire <dir> --seams --legend=compact`
    Output: `<seams>` — cross-module call edges no test file reaches. A parser/deserializer/auth boundary
    that shows up as an untested seam is doubly worth attention: it's both attack-surface-adjacent and has
    no regression net if you (or an attacker-triggered path) breaks it.
 
 4. **Find the sinks and their call sites** — `ripwire <dir> --grep-in=any --grep=STR` (literal, e.g.
-   `system(`, `eval`, `exec`, `pickle.loads`, `deserialize`) for a quick census, or `ripwire <dir> --uses=SYM` (e.g.
+   `system(`, `eval`, `exec`, `pickle.loads`, `deserialize`) for a quick census, or `ripwire <dir> --uses=SYM --legend=compact` (e.g.
    `--uses=deserialize`) once you know the exact symbol name — gives the statically-resolvable call/read/write sites by role (a floor: dynamic dispatch/callbacks/macros are unmodelled — counts_floor=) and
    file:line, and flags `external="1"` when the sink is a stdlib/third-party name with no in-corpus
    definition (the common case for `system`/`eval`-class calls). Treat the site list as a floor, not

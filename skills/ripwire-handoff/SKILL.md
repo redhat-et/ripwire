@@ -24,7 +24,7 @@ fast, accurate brief — not a wall of source code.
    Output: `<sigs>` ranked by relevance. The top 10 are the symbols the recipient most needs
    to know. Note their file paths, complexity (`cx=`), and reuse count (`in=`).
 
-2. **Expand the key symbols** — `ripwire <dir> --expand=SYM1,SYM2,SYM3`
+2. **Expand the key symbols** — `ripwire <dir> --expand=SYM1,SYM2,SYM3 --legend=compact`
    (Pick the top 3 by rank from step 1.)
    Output: full bodies + callee signatures. This is the actual contract — paste it into the
    handoff verbatim rather than paraphrasing. **Bodies are redacted by default** — high-confidence
@@ -36,7 +36,7 @@ fast, accurate brief — not a wall of source code.
    Output: most relevant markdown docs (planning/design notes, READMEs) in full. Read and
    summarize the key decisions — why this design, not another. That's what the recipient most
    needs and least gets from reading code.
-   Also check `ripwire <dir> --notes` for this subsystem's symbols/files — any gotcha a prior agent already
+   Also check `ripwire <dir> --notes --legend=compact` for this subsystem's symbols/files — any gotcha a prior agent already
    pinned (`<note d="date">…</note>`) surfaces automatically on the symbols step 1/2 emit; fold it into the
    brief instead of letting the recipient rediscover it. Before you hand off, `--note-add="SYM_or_path:
    text"` any trap you found yourself that isn't already written down — the cheapest thing you can leave
@@ -47,7 +47,7 @@ fast, accurate brief — not a wall of source code.
    filtering the whole-repo list: `ripwire <subdir> --hotspots` (verified: subdir scoping works, same as
    `--dead-code=DIR`). If the subsystem isn't a clean subdirectory, keep the repo root and `--exclude` the
    rest (repeatable flag) to fence the scan to just the area you're briefing on.
-   Also worth a look: `ripwire <dir> --hotspots` (whole-repo, no scoping) to see whether any subsystem file
+   Also worth a look: `ripwire <dir> --hotspots --legend=compact` (whole-repo, no scoping) to see whether any subsystem file
    also lands in the *global* top-10 — a file can be locally worst-in-subsystem and still unremarkable
    repo-wide, or vice versa; that distinction matters to the recipient. Tell them: "this file is gnarly —
    high churn, high complexity — be careful and run tests after any change here."
@@ -100,7 +100,7 @@ looks stale (no git history, non-git root). Aim for under 600 tokens.
 
 ## Mid-task session handoff — `--handoff`
 
-Handing off an INTERRUPTED WORKING SESSION (not a subsystem summary)? `ripwire <dir> --handoff` emits
+Handing off an INTERRUPTED WORKING SESSION (not a subsystem summary)? `ripwire <dir> --handoff --legend=compact` emits
 the whole continuation packet in one deterministic call: a `<verified>` section (branch, HEAD sha with
 `+dirty` marker, changed files + their symbols, transitive blast-radius size, tests-to-run) that is pure
 disk truth, and a `<heuristic>` section (co-change partners not in the diff, committed `--note-add`

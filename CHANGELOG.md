@@ -15,6 +15,36 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — agent surfaces ask for the compact legend
+
+The commands ripwire writes for an agent — the `ripwire wrap` paste block, the skills under `skills/`,
+the `<run>` line `--help-task` hands the prompt router, and the runnable line the tool-call router
+injects — spelled every XML verb with the default legend, the ~3 KB posture the `--legend` help text
+itself tells repeated callers to leave: most of a small `--callers`/`--uses`/`--impact` answer, byte-
+identical rows either way. Every one of those commands now carries `--legend=compact` where the verb
+accepts it (the XML verbs); `--for` keeps the default legend (its compact legend is its own, and the
+first call of a session wants the full one), and the text, JSON and writer verbs the binary refuses
+the flag on are untouched. Counted on this commit: 158 `ripwire <dir> --VERB` commands in 17 skill
+files (bodies only — no description changed, so no skill's stop rules or boundaries moved), 9
+commands in the wrap paste block (its 10–20 line band unchanged), 26 `--help-task` routes and the 2
+tool-call routes. Humans running the bare CLI see no difference. Gates, red first: `wrapverbscheck`
+arm 7 asserts the flag on every blurb command for the ten XML verbs it spells and its absence on
+`--for` (10 FAIL against the previous build); `skilltruthcheck` asserts it on every skill command for
+the shipped verb list (152 of 154 missing before the transform) and its absence on `--for`.
+
+### Fixed — the route hooks counted a directory named ripwire as a ripwire call
+
+The `--observe` arm of `hooks/ripwire-claude-route.sh` and `hooks/ripwire-codex-route.sh` closes the
+adoption-within-two window by inspecting the next two ripwire calls after a recommendation. It
+recognised a call by any token ending in `/ripwire`, so `cd …/ripwire && git log --oneline` — the
+directory, in argument position — consumed a window slot, and a real adoption two commands later was
+logged as `missed` (found in the local routing analysis of 2026-09-12; the numbers stay local). A call
+is now counted only when the command word itself is the binary — `ripwire`, `./build/ripwire`, any
+path whose basename is `ripwire` in command position (at the start, after `;` `&` `|` `(` or `$(`,
+past leading `VAR=value` assignments) — never a directory argument or a bare word after `echo`.
+`test/routehookcheck.sh` O8 and `test/codexpromptroutecheck.sh` carry the regression shape (red on
+the previous hooks: rows=3 where 1 was wanted; the Codex twin's position-2 adoption read as missed).
+
 ### Changed — `--for`'s compact legend is pinned at 500 bytes
 
 Under `--legend=compact` every other XML verb answers with a legend that defines only the terms its

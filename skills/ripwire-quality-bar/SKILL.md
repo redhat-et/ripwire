@@ -36,7 +36,7 @@ something — a clean `gating="0"` run on a leaf fix is confirmation, not ceremo
 
 ## Before you converge: the wide-angle read — `--quality-panel`
 
-`ripwire <dir> --quality-panel[=strict|default|lenient]` is THE SINGLE COMMAND for "does what I just
+`ripwire <dir> --quality-panel[=strict|default|lenient] --legend=compact` is THE SINGLE COMMAND for "does what I just
 touched still look rotten" — one ranked report over **six** evidence families (the four `--ensemble`
 joins — `structural`, `lexical`, `confusion`, `historical` — plus `colocation` and `state`; the full
 per-family breakdown lives in **ripwire-fresh-eyes**). Point it at the file or symbol you just edited for
@@ -185,7 +185,7 @@ something always fires.)
    id, or its **facet**:
 
    ```bash
-   ripwire <dir> --quality-delta --ack-only=contract-change --quality-ack="arity change required by <fix>"
+   ripwire <dir> --quality-delta --legend=compact --ack-only=contract-change --quality-ack="arity change required by <fix>"
    ```
 
    Prefer the facet over the kind when one exists: `api-surface` also covers the never-gating `new-symbol`
@@ -202,8 +202,8 @@ something always fires.)
    prevents it. `--scope=GLOB[,GLOB...]` files each finding by its `p=` path:
 
    ```bash
-   ripwire <dir> --quality-delta --scope=src/render,src/render_gl.h             # gate on MY subtree only
-   ripwire <dir> --quality-delta --scope=src/render --quality-ack="deliberate"  # …and ack only my rows
+   ripwire <dir> --quality-delta --legend=compact --scope=src/render,src/render_gl.h             # gate on MY subtree only
+   ripwire <dir> --quality-delta --legend=compact --scope=src/render --quality-ack="deliberate"  # …and ack only my rows
    ```
 
    Rows outside the scope are **still printed**, under an `<out-of-scope>` element with a do-not-ack
@@ -217,7 +217,7 @@ something always fires.)
    one path per changed indexed file. It is sugar for the **single-writer** case — in the shared tree
    this flag exists for, a sibling's edits are "changed" too, so name your own paths there.
 
-5. **Want ONE number instead of a list — `ripwire <dir> --dmm`.** `--quality-delta` says *which* kinds got
+5. **Want ONE number instead of a list — `ripwire <dir> --dmm --legend=compact`.** `--quality-delta` says *which* kinds got
    worse; it has no scale, so "is this change better than my last one?" has no answer. `--dmm` is that scale:
    the Delta Maintainability Model (di Biase, Rastogi, Bruntink & van Deursen, TechDebt 2019; thresholds and
    arithmetic from PyDriller's reference implementation) scores the share of the volume your change moved
@@ -285,7 +285,7 @@ still your call, and "leave it alone" is always on the menu.
 | **Deciding whether an extract-method is mechanical or a rewrite** — check `ev=` before picking a fix off this table | `ev=` absent (or `ev="1"`) on a `cx=` row means every region is single-entry/single-exit: **extract-method applies mechanically**, anywhere. `ev>=2` means a jump gave some region a second exit — the same extraction is now the "one deep tangle" row above, not a cheap lift. | `ev_why=tag:count` (guard-return, loop-escape, goto, ...) names which jumps raised it — a guard-return-heavy row is visibly not a knot. A FLOOR (`ev_floor="1"`): noreturn calls and macro-hidden exits can only push the true value higher. |
 | **Small AND dense** — small `loc`, but `deep` is a large fraction of it (roughly half or more), typically in one hump | **Read it before you prescribe anything.** Numeric kernels, tree walks, and state machines are *legitimately* dense: the depth is the algorithm. Often the right fix is a comment or a named constant, not a split. | This row is where a metric-driven agent does the most damage. `--expand=SYM` first. If the density is the algorithm, ack it (`--ack-only=`) and move on. |
 | **High fan-in AND untested** — big `in=`/`amp=`, `tested="0"`, or a `--quality-panel` row carrying `join="deep+untested"` | **Test first, refactor second.** The safety net is the fix's precondition, not its follow-up. → **ripwire-write-tests** (`--seams`, the `tested=` lens, `--callers=SYM` for the outside contract). | Confirm the annotation is real: `join=` is suppressed entirely at `tested_scope="0"`, so on an uncrawled-test corpus its *absence* proves nothing. |
-| **Duplication** — a `--quality-delta` `duplication` / `new-clone-of-reused-helper` row, or a `--clones` group | **Consolidate through the repo's own exemplar** — `ripwire <dir> --exemplar="<what this code does>"` names the best-in-class instance to converge on (chosen by ROLE, not text similarity), so the survivor matches house patterns instead of being whichever copy you happened to open. | **Rule of Three** — extract on the third occurrence, not the second; a wrong abstraction is worse than two honest copies. Check `type=` on the clone group: `type="3"` members are gapped near-misses and may differ on purpose. |
+| **Duplication** — a `--quality-delta` `duplication` / `new-clone-of-reused-helper` row, or a `--clones` group | **Consolidate through the repo's own exemplar** — `ripwire <dir> --exemplar="<what this code does>" --legend=compact` names the best-in-class instance to converge on (chosen by ROLE, not text similarity), so the survivor matches house patterns instead of being whichever copy you happened to open. | **Rule of Three** — extract on the third occurrence, not the second; a wrong abstraction is worse than two honest copies. Check `type=` on the clone group: `type="3"` members are gapped near-misses and may differ on purpose. |
 | **Churn-flagged, structurally quiet** — `historical` fires with thin other evidence | **Probably nothing here.** `churn=`/`hrank=` are FILE facts inherited by every symbol in the file. | Confirm at the symbol before acting: `git log -p <file>` or `--hotspots --since=` to see whether *this* function is what keeps moving. |
 
 **None of these has a corpus-derivable "correct" answer** — see the paragraph above the table. The playbook
@@ -299,9 +299,9 @@ answers a question the previous one cannot:
 
 ```bash
 # 1. make the fix (playbook above)
-ripwire <dir> --quality-delta        # 2. did the TARGETED kind improve, and did nothing else regress?
-ripwire <dir> --edit-check=SYM       # 3. is the CONTRACT intact?
-ripwire <dir> --affected=F1,F2       # 4. which tests PROVE it? (then run them)
+ripwire <dir> --quality-delta --legend=compact        # 2. did the TARGETED kind improve, and did nothing else regress?
+ripwire <dir> --edit-check=SYM --legend=compact       # 3. is the CONTRACT intact?
+ripwire <dir> --affected=F1,F2 --legend=compact       # 4. which tests PROVE it? (then run them)
 ```
 
 2. **`--quality-delta`** — the only step with a meaningful exit code, and it is doing *two* jobs here, not
@@ -339,7 +339,7 @@ still a hypothesis.
 `--quality-delta` exits 2 **only when a finding is preexisting-worse AND major AND unacked** — the
 `gating="N"` header count. Minor-tier, acked, and `origin="new-symbol"` findings all report but never gate,
 so **a green hook does not mean the diff added no debt** — it means nothing that already existed got worse.
-Non-zero is the hook contract, no wrapper needed: `ripwire <dir> --quality-delta || exit 1`. If you want CI
+Non-zero is the hook contract, no wrapper needed: `ripwire <dir> --quality-delta --legend=compact || exit 1`. If you want CI
 to also block on the debt a change ADDS, exit 2 will not do it for you — parse `new-symbol="N"` from the
 header (`--json` is supported for this verb) and apply your own policy. Chain the
 other deterministic gates in the same hook: det-gate (`diff <(ripwire <dir>) <(ripwire <dir>)`, must be

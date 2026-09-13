@@ -130,7 +130,7 @@ grep -q -- '--lint .*cache-\* data-layout' <<<"$helpOut" \
     && ok "--help's --lint line names the cache-* data-layout pack" \
     || no "--help's --lint line does not name the cache-* pack"
 
-pushBackRow="$( "$BIN" "$ROOT" --metrics --no-cache --top-k=5000 2>/dev/null | grep -o '<s[^>]*n="push_back"[^>]*svector\.h::svector::push_back[^>]*>' | head -1 )"
+pushBackRow="$( "$BIN" "$ROOT" --metrics --no-cache --top-k=5000 2>/dev/null | grep -o '<s[^>]*n="push_back" sc="svector"[^>]*>' | head -1 )"
 { [ -n "$pushBackRow" ] && grep -q 'ev="2"' <<<"$pushBackRow" && grep -q 'ev_why="guard-return:1"' <<<"$pushBackRow"; } \
     && ok "--metrics actually emits ev=/ev_why= on a known guard-return function (svector::push_back)" \
     || no "--metrics did not emit the expected ev=/ev_why= on svector::push_back"
@@ -173,5 +173,31 @@ helpOut2="$( "$BIN" --help=all 2>/dev/null )"
 { grep -q -- '--slice=' <<<"$helpOut2" && grep -q -- '--slice-flow' <<<"$helpOut2"; } \
     && ok "--help still ships --slice=/--slice-flow (the flags the find-bug skill now names)" \
     || no "--help no longer ships --slice=/--slice-flow — the skill fix now names a retired flag"
+
+# A1-2 (owner decision 2026-09-12): every `ripwire <dir> --VERB…` a skill spells for an XML verb carries
+# --legend=compact; --for is exempt (its compact legend is its own and the first call of a session wants the full
+# one), and so are the text/JSON/writer verbs the binary refuses the flag on. The list is the shipped policy —
+# the same list the 2026-09-12 transform applied — spelled here so a skill edit that drops the flag is red.
+SKILL_COMPACT_VERBS="callers callees impact uses expand around path connect mentions at exemplar lego pack-task pack-signatures from-trace edit-check safe-delete verify whereis affected test-gate quality-delta quality-panel hotspots clones lint seams deps communities community zoom tree cochange owners readability ensemble context-ratio naming-consistency comment-coherence nonlocal-state dead-code doc-drift notes stray-content skipped flags metrics grep regex match query map-diff pr-context external-surface exercises doctor dmm help-task merge-scout plan-lint scan-skills handoff layout graph-query slice outline"
+BT='`'
+missing=0; checked=0
+for _v in $SKILL_COMPACT_VERBS; do
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        checked=$(( checked + 1 ))
+        # the command span: from `ripwire <dir> --VERB` to the closing backtick (or end of line)
+        span="$( printf '%s\n' "$line" | grep -oE -- "ripwire <dir> --$_v(=|$BT|[[:space:]]|\$)[^$BT]*" | head -1 )"
+        case "$span" in *'--legend=compact'*) ;; *) missing=$(( missing + 1 )); [ $missing -le 5 ] && printf '        %s: %s\n' "$_v" "$( printf '%s' "$span" | head -c 120 )";; esac
+    done <<<"$( grep -rhE -- "ripwire <dir> --$_v(=|$BT|[[:space:]]|\$)" "$ROOT/skills" --include='*.md' )"
+done
+[ "$checked" -gt 0 ] || no "skills compact policy: no command spelled for any policy verb — the arm inspected nothing"
+[ "$missing" -eq 0 ] \
+    && ok "skills compact policy: all $checked \`ripwire <dir> --VERB\` commands on XML verbs carry --legend=compact" \
+    || no "skills compact policy: $missing of $checked XML-verb commands in skills/ lack --legend=compact"
+if grep -rhE -- 'ripwire <dir> --for=[^`]*--legend=compact' "$ROOT/skills" --include='*.md' | grep -q .; then
+    no "skills compact policy: a --for command carries --legend=compact (exempt: the first call wants the full legend)"
+else
+    ok "skills compact policy: no --for command carries --legend=compact"
+fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

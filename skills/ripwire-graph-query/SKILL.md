@@ -21,10 +21,10 @@ touching it affect" — which is exactly what a single fixed verb can't phrase:
 
 ```
 # the refactor short-list: high-complexity functions in the target area
-ripwire <dir> --graph-query='and(cx(all,15),file(all,"src/"))'
+ripwire <dir> --graph-query='and(cx(all,15),file(all,"src/"))' --legend=compact
 
 # now the blast radius: everyone who transitively calls into that cluster (≤3 hops)
-ripwire <dir> --graph-query='callers(and(cx(all,15),file(all,"src/")),3)'
+ripwire <dir> --graph-query='callers(and(cx(all,15),file(all,"src/")),3)' --legend=compact
 ```
 (Verified on this repo's shape, not its exact numbers — `count=` drifts every commit: the first query returns
 the high-cx symbols under `src/`, each `<s t= n= p=>` (kind/name/path); the second returns the transitive
@@ -36,7 +36,7 @@ Run the first to size the cluster, the second to size the risk — a small high-
 `callers()` closure is a refactor that needs a compatibility shim or a staged rollout, not a rewrite in
 place; a small cluster with a small closure is safe to just rewrite.
 
-`ripwire <dir> --graph-query='EXPR'` evaluates a small functional expression to a deterministic,
+`ripwire <dir> --graph-query='EXPR' --legend=compact` evaluates a small functional expression to a deterministic,
 ranked node set (capped at `--top-k`, default 200). It is a fixed, closed operator set — **not**
 Datalog: no user rules, no unbounded recursion.
 
@@ -59,22 +59,22 @@ Datalog: no user rules, no unbounded recursion.
 
 ```
 # the functions that transitively (≤2 hops) call buildGraph
-ripwire <dir> --graph-query='and(callers(name("buildGraph"),2),kind(all,fn))'
+ripwire <dir> --graph-query='and(callers(name("buildGraph"),2),kind(all,fn))' --legend=compact
 
 # high-complexity symbols in src/  (the refactor short-list)
-ripwire <dir> --graph-query='and(cx(all,15),file(all,"src/"))'
+ripwire <dir> --graph-query='and(cx(all,15),file(all,"src/"))' --legend=compact
 
 # heavily-depended-on symbols (10+ callers) — the de-facto API surface
-ripwire <dir> --graph-query='fanin(all,10)'
+ripwire <dir> --graph-query='fanin(all,10)' --legend=compact
 
 # everything main can reach within 2 hops
-ripwire <dir> --graph-query='callees(name("main"),2)'
+ripwire <dir> --graph-query='callees(name("main"),2)' --legend=compact
 
 # functions NOT reachable from main's callers  (difference)
-ripwire <dir> --graph-query='not(kind(all,fn),callers(name("main")))'
+ripwire <dir> --graph-query='not(kind(all,fn),callers(name("main")))' --legend=compact
 
 # a two-symbol watchlist
-ripwire <dir> --graph-query='or(name("buildGraph"),name("rankGraph"))'
+ripwire <dir> --graph-query='or(name("buildGraph"),name("rankGraph"))' --legend=compact
 ```
 
 ## Calibration
