@@ -113,9 +113,11 @@ EX
 "$BIN" "$TMP/boundaries" --no-cache > "$TMP/boundaries.xml"
 python3 - "$TMP/boundaries.xml" <<'PYBOUND'
 import sys, xml.etree.ElementTree as ET
-rows = list(ET.parse(sys.argv[1]).iter('s'))
+tree = ET.parse(sys.argv[1])
+rows = list(tree.iter('s'))
 syms = {s.get('n').split('/')[0]: s for s in rows}
-byid = {s.get('id'): s for s in rows if s.get('id')}
+# row 6 (2026-09-12): the row prints sc= (the scope); its canonical id composes as <f p=>::sc::n
+byid = {f.get('p') + '::' + s.get('sc') + '::' + s.get('n'): s for f in tree.iter('f') for s in f.iter('s') if s.get('sc')}
 def calls(node): return {c.get('n').split('/')[0] for c in node.iter('c')}
 # `defimpl P, for: T` defines the module Elixir itself generates, `P.T`, and its clauses are ordinary
 # executable functions. They are indexed under that scope, so a name the enclosing module also defines

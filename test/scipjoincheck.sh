@@ -64,7 +64,7 @@ else
     ok "(C) no phantom K.run -> sum row — \`local 0\` did not bind across files"
 fi
 if grep -q 'prov="scip"' "$TMP/scip.xml"; then ok "(C) the map still carries prov=\"scip\" edges (the control pinned)"; else no "(C) no prov=\"scip\" edge at all"; fi
-N_SUM_EDGE="$( tr '>' '\n' <"$TMP/scip.xml" | awk '/id="b.py::K::run"/{f=1} f&&/n="sum"/{c++} /\/s/{if(f)exit} END{print c+0}' )"
+N_SUM_EDGE="$( tr '>' '\n' <"$TMP/scip.xml" | awk '/n="run" sc="K"/{f=1} f&&/n="sum"/{c++} /\/s/{if(f)exit} END{print c+0}' )"   # row 6: n=/sc= is the row's identity now
 if [ "$N_SUM_EDGE" = 0 ]; then ok "(C) K.run emits no phantom edge to sum"; else no "(C) K.run carries $N_SUM_EDGE phantom sum edge(s) from the local collision"; fi
 
 # ── (D) the PARAMETER trap: a parameter never binds its function; the call is a NON-DEF resolution ─
@@ -77,7 +77,7 @@ EXT_ROW="$( awk -F'\t' '$1=="O" && $2 ~ /^a\.py::Box::total#/ && $3=="sum" {prin
 [ "$EXT_ROW" = "@external" ] && ok "(E) O row Box.total -> sum carries the @external sentinel (SCIP: builtins/sum)" \
     || no "(E) Box.total -> sum O row target is '${EXT_ROW:-<absent>}', want @external"
 # the sentinel is census-only: the shipped map must NOT drop or replace the name-based edge for it
-tr '>' '\n' <"$TMP/scip.xml" | awk '/id="a.py::Box::total"/{f=1} f&&/n="sum"/{c++} /\/s/{if(f)exit} END{exit !(c==1)}' \
+tr '>' '\n' <"$TMP/scip.xml" | awk '/n="total" sc="Box"/{f=1} f&&/n="sum"/{c++} /\/s/{if(f)exit} END{exit !(c==1)}' \
     && ok "(E) the map keeps Box.total's name-based sum edge (a sentinel never edits the graph)" \
     || no "(E) Box.total's sum edge changed under --scip"
 grep -c 'prov="scip"' "$TMP/scip.xml" >/dev/null

@@ -49,14 +49,15 @@ echo "pincensuscheck: BIN=$BIN  CORPUS=$CORPUS"
 # not raise `amb=`. It is the documented S6-C contract; a change that alters it must come with its own
 # registered justification, and this arm is where that shows up.
 MAP="$( "$BIN" "$CORPUS" --no-cache 2>/dev/null )"
-RUN_ROW="$( printf '%s' "$MAP" | tr '<' '\n' | grep 'id="pinned.py::Alpha::run"' )"
-GO_ROW="$( printf '%s' "$MAP" | tr '<' '\n' | grep 'id="tied.py::Eps::go"' )"
+# row 6 (2026-09-12): a scoped row prints n= then sc= (the short id); the canonical id composes as <f p=>::sc::n
+RUN_ROW="$( printf '%s' "$MAP" | tr '<' '\n' | grep 'n="run" sc="Alpha"' )"
+GO_ROW="$( printf '%s' "$MAP" | tr '<' '\n' | grep 'n="go" sc="Eps"' )"
 if printf '%s' "$RUN_ROW" | grep -q 'amb='; then
     no "(A) pinned.py::Alpha::run carries amb= — the locality pin is no longer silent: $RUN_ROW"
 else
     ok "(A) the locality pin is SILENT — pinned.py::Alpha::run carries no amb="
 fi
-N_HELPER="$( printf '%s' "$MAP" | tr '>' '\n' | awk '/id="pinned.py::Alpha::run"/{f=1} f{print} /\/s/{if(f)exit}' | grep -c 'n="helper"' )"
+N_HELPER="$( printf '%s' "$MAP" | tr '>' '\n' | awk '/n="run" sc="Alpha"/{f=1} f{print} /\/s/{if(f)exit}' | grep -c 'n="helper"' )"
 [ "$N_HELPER" = 1 ] && ok "(A) the pin emitted ONE confident edge (not a split)" \
     || no "(A) pinned.py::Alpha::run emitted $N_HELPER helper edges, want 1"
 printf '%s' "$GO_ROW" | grep -q 'amb="1"' && ok "(A) the tied control is HONEST — tied.py::Eps::go carries amb=\"1\"" \

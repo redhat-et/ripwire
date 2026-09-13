@@ -39,7 +39,8 @@ echo "lpincheck: BIN=$BIN  CORPUS=$CORPUS"
 
 "$BIN" "$CORPUS" --pin-census="$TMP/c.tsv" --no-cache >"$TMP/map.xml" 2>"$TMP/err" || { no "the map run exited non-zero"; sed 's/^/          /' "$TMP/err"; }
 MAP="$( cat "$TMP/map.xml" )"
-row(){ printf '%s' "$MAP" | tr '<' '\n' | grep "id=\"$1\"" | head -1; }
+# row 6 (2026-09-12): a scoped row prints n= then sc= (the short id); the canonical id composes as <f p=>::sc::n
+row(){ _n="${1##*::}"; _r="${1#*::}"; _s="${_r%::*}"; printf '%s' "$MAP" | tr '<' '\n' | grep "n=\"$_n\" sc=\"$_s\"" | head -1; }
 
 # ── (A) the pin is DISCLOSED on its row, and it is still not an amb ──────────────────────────────
 RUN_ROW="$( row 'pinned.py::Alpha::run' )"
@@ -47,7 +48,7 @@ printf '%s' "$RUN_ROW" | grep -q 'lpin="1"' && ok "(A) pinned.py::Alpha::run car
     || no "(A) pinned.py::Alpha::run has no lpin=\"1\": $RUN_ROW"
 printf '%s' "$RUN_ROW" | grep -q 'amb=' && no "(A) pinned.py::Alpha::run carries amb= — the marker inflated amb=: $RUN_ROW" \
     || ok "(A) the pin still contributes nothing to amb="
-N_HELPER="$( printf '%s' "$MAP" | tr '>' '\n' | awk '/id="pinned.py::Alpha::run"/{f=1} f{print} /\/s/{if(f)exit}' | grep -c 'n="helper"' )"
+N_HELPER="$( printf '%s' "$MAP" | tr '>' '\n' | awk '/n="run" sc="Alpha"/{f=1} f{print} /\/s/{if(f)exit}' | grep -c 'n="helper"' )"
 if [ "$N_HELPER" = 1 ]; then ok "(A) the pin still emits ONE confident edge"; else no "(A) $N_HELPER helper edges on Alpha::run, want 1"; fi
 
 # ── (B) the tied control — a split is not a pin ───────────────────────────────────────────────────
@@ -129,7 +130,7 @@ class Subscriber:
         return 2
 PYEOF
 "$BIN" "$SELFD" --no-cache >"$TMP/selfwin.xml" 2>/dev/null
-SW="$( sed 's/></>\n</g' "$TMP/selfwin.xml" | awk '/id="facade.py::Facade::publish_event"/{f=1;print;next} /^<s /{f=0} f' )"
+SW="$( sed 's/></>\n</g' "$TMP/selfwin.xml" | awk '/n="publish_event" sc="Facade"/{f=1;print;next} /^<s /{f=0} f' )"
 [ "$( printf '%s' "$SW" | grep -c '<c n="publish_event"' )" = 2 ] \
     && ok "(I) the facade keeps BOTH real targets (2 edges) — the caller no longer wins its own tie-break" \
     || no "(I) facade.py::Facade::publish_event has $( printf '%s' "$SW" | grep -c '<c n="publish_event"' ) publish_event edges, want 2: $SW"
