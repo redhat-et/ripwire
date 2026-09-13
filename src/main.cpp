@@ -1012,6 +1012,7 @@ struct ChurnRanking
     rw::RankDisclosure          pr;
     std::vector<rw::RecentFile> recent;       // F3: churn-decay, single-root only — the map's <recent> rows
     std::size_t                 recentOf = 0; // files any mined commit touched (the of= the rows were cut from)
+    std::uint32_t               mergeBombsSkipped = 0;   // commits the >kChurnMergeBombMaxFiles rule skipped in the window (<recent merge_bombs_skipped=>)
 };
 inline constexpr std::size_t kRecentRows = 40;   // F3: ~45 B a row; the file-level answer, not the file list
 
@@ -1066,14 +1067,15 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
         // F3: ONE mining pass feeds both the teleport prior (churnPriorFromDecayed, exactly what churnDecayTeleport
         // builds) and the map's file-level <recent> rows — so the file-level answer costs no second git walk.
         const std::string       windowArgs = isScoped ? sinceLogArgs( sinceScope, "" ) : std::string{};
-        const DecayedChurnMined mined      = gitLogDecayedFileMining( d.root, d.ing, windowArgs, 100 );   // same merge-bomb cap as churnTeleport
+        const DecayedChurnMined mined      = gitLogDecayedFileMining( d.root, d.ing, windowArgs, kChurnMergeBombMaxFiles );   // same merge-bomb cap as churnTeleport
         hasChurnEvidence                   = mined.anyHistory;
         rw::RankedGraph    ranked = rankGraphTeleport( d.g, churnPriorFromDecayed( d.ing, mined.weights, mined.anyHistory ) );
         std::string        window = churnWindowStamp( churnDecayWindowLabel( isScoped ? std::string_view( d.cfg.since ) : std::string_view( "all-history" ) ),
                                                       hasChurnEvidence );
         discloseEmptyChurn( window );
         ChurnRanking cr{ std::move( ranked.rank ), std::move( window ), { ranked.iterationCount, ranked.hasConverged, true } };
-        cr.recent = recentRowsFromDecayed( d.root, d.ing, mined, kRecentRows, &cr.recentOf );
+        cr.recent            = recentRowsFromDecayed( d.root, d.ing, mined, kRecentRows, &cr.recentOf );
+        cr.mergeBombsSkipped = mined.mergeBombsSkipped;
         return cr;
     }
     rw::RankedGraph    ranked = rankGraphTeleport( d.g, churnTeleport( d.root, d.ing, "18 months ago", d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
@@ -1186,6 +1188,7 @@ int runDefaultMap( const MainDispatch& d )
     bool               mapDiffActive  = false;  // true only under --map-diff — gates the header's changed= attribute
     std::vector<rw::RecentFile> recentFiles;   // F3: rank-by=churn-decay's file-level <recent> rows (empty = absent, byte-free)
     std::size_t                 recentOf = 0;
+    std::uint32_t               recentMergeBombsSkipped = 0;   // <recent merge_bombs_skipped=>: the window's skipped >100-file commits
     std::string        churnWindowLabel = rw::defaultWindowLabel( root, "18mo" );   // §A9.6: churn's window label (F1: "@HEAD" when anchored); an ACTIVE --since overrides it below
     if( !cfg.query.empty() )
     {
@@ -1268,6 +1271,7 @@ int runDefaultMap( const MainDispatch& d )
         churnWindowLabel = std::move( cr.window );   // §B2.2: already carries "(no churn evidence)" when the window mined nothing
         recentFiles      = std::move( cr.recent );   // F3: the <recent> rows (churn-decay, single-root; empty otherwise)
         recentOf         = cr.recentOf;
+        recentMergeBombsSkipped = cr.mergeBombsSkipped;
     }
     else
     {
@@ -1351,14 +1355,15 @@ int runDefaultMap( const MainDispatch& d )
                                   : ( cfg.rankBy == RankBy::Hub )       ? "hub"
                                   : ( cfg.rankBy == RankBy::Rrf )       ? "rrf"
                                                                        : nullptr;
-    const rw::MapAnnotations mapAnn{ mapDiffActive ? &mapDiffChanged : nullptr, &mapDiffAt,
-                                      isChurnRanked ? &churnWindowLabel : nullptr,
-                                      cfg.rankBy == RankBy::ChurnDecay ? "churn-decay" : "churn",   // P0-4
-                                      cfg.maxTokens > 0 ? &maxTokensFit : nullptr,   // §B13.4
-                                      rankByLabel,                                   // §B2.1
-                                      rankDisclosure,                                // W2-F: pr_iters= / pr_converged=
-                                      recentFiles.empty() ? nullptr : &recentFiles,  // F3: <recent> rows, churn-decay single-root only
-                                      recentOf };
+    rw::MapAnnotations mapAnn{ mapDiffActive ? &mapDiffChanged : nullptr, &mapDiffAt,
+                                isChurnRanked ? &churnWindowLabel : nullptr,
+                                cfg.rankBy == RankBy::ChurnDecay ? "churn-decay" : "churn",   // P0-4
+                                cfg.maxTokens > 0 ? &maxTokensFit : nullptr,   // §B13.4
+                                rankByLabel,                                   // §B2.1
+                                rankDisclosure,                                // W2-F: pr_iters= / pr_converged=
+                                recentFiles.empty() ? nullptr : &recentFiles,  // F3: <recent> rows, churn-decay single-root only
+                                recentOf };
+    mapAnn.recentMergeBombsSkipped = recentMergeBombsSkipped;   // rides <recent> (the rows' own window), filled by assignment like seed
     // T3's auto-flip changes the order= spelling ("important-last(auto:fill)" is 11 bytes longer than
     // "important-first"), so it is a BYTE fact, not only an ordering one — the comment that used to sit here
     // claimed the search was "unaffected by emit order", and at N=20000 on src/ the flip fires. One value,

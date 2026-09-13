@@ -1586,6 +1586,9 @@ struct MapAnnotations
     const std::vector<RecentFile>* recent   = nullptr;
     std::size_t                    recentOf = 0;
     SeedDisclosure seed{};
+    // merge_bombs_skipped= on <recent> (2026-09-12): commits in the mined window the >kChurnMergeBombMaxFiles rule
+    // skipped, uncounted. Filled by assignment (after the positional slots), always emitted with the block.
+    std::uint32_t                  recentMergeBombsSkipped = 0;
 };
 
 // F3: the <recent> element — rank_by=churn-decay's file-level answer FIRST, paths + age in days at HEAD's clock +
@@ -1598,8 +1601,8 @@ inline void writeRecentRows( XmlWriter& w, const MapAnnotations& ann, const Path
     {
         return;
     }
-    char rc[ 64 ];
-    rw::formatTo( rc, sizeof rc, "<recent n=\"{}\" of=\"{}\">", ann.recent->size(), ann.recentOf );
+    char rc[ 128 ];
+    rw::formatTo( rc, sizeof rc, "<recent n=\"{}\" of=\"{}\" merge_bombs_skipped=\"{}\">", ann.recent->size(), ann.recentOf, ann.recentMergeBombsSkipped );
     w.write( rc );
     for( const RecentFile& r : *ann.recent )
     {
@@ -1738,7 +1741,11 @@ inline constexpr const char* kChurnDecayRankLegend =
     "sibling when structure and recent churn agree, and diverge where a stale-but-central symbol meets a "
     "fresh, sparsely-called one. recent: the file-level answer to what changed recently, FIRST — the n= files the "
     "NEWEST commits touched, of the of= files any commit touched, as rc p= age_d= (days since the file's newest "
-    "commit, at HEAD's clock) w= (its decayed weight), age_d asc then w desc then path; absent under multi-root -->";
+    "commit, at HEAD's clock) w= (its decayed weight), age_d asc then w desc then path; absent under multi-root. "
+    "merge_bombs_skipped= counts the commits in the mined window that touched more than 100 files and were SKIPPED, "
+    "uncounted (bulk sweeps, wide merges): a file only such a commit touched is absent from these rows and from the "
+    "prior, so a 0 means no commit was skipped, never that none could be -->";
+static_assert( kChurnMergeBombMaxFiles == 100, "kChurnDecayRankLegend spells the merge-bomb threshold as 100 — move both together" );
 
 // Which churn legend belongs to which churn ranker — the table-driven form the sibling rankBy lookup uses,
 // so a third churn variant adds a row and not a branch.

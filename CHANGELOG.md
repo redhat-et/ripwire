@@ -15,6 +15,20 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Fixed — a churn window says how many commits it skipped as merge bombs
+
+The churn-decay miner behind `--rank-by=churn-decay` skips any commit touching more than 100 indexed
+files — bulk renames, reformats, wide merges — and counted nothing about it, so a `<recent>` block
+could silently omit the very commit a question was about: a held-out gold commit that touched 71
+source files (more than 100 in all) was invisible to the block, and nothing in the output said a commit
+had been dropped. The block now carries `merge_bombs_skipped="N"` on every run, `"0"` included, so its
+absence is never ambiguous; the full and compact legends define it and state the 100-file threshold
+(`kChurnMergeBombMaxFiles`, now a named constant in `src/gitmine.h`, listed in `docs/LIMITS.md`). On this
+repository's own tree the attribute reads `merge_bombs_skipped="5"` — five commits the map had been
+quietly built without. Gate: `test/churndecaycheck.sh` arm 7 builds a repository whose HEAD commit adds
+101 files and asserts the block reads `"1"`, that none of those files is a row, and that both legends
+define the attribute; red on the previous binary (no attribute anywhere), green now.
+
 ### Added — Elixir module and arity resolution (parser version 95)
 
 Elixir calls now resolve by module, name and arity, with lexical aliases, filtered imports, default

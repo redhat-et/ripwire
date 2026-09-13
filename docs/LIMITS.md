@@ -16,10 +16,10 @@ it once, marked `×N`.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 208 | 83 | 116 | **92** |
+| 209 | 83 | 117 | **92** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 208 + 7 is the 215 constants this generator parses out of `src/`.
+are not counted as caps, and 209 + 7 is the 216 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -37,8 +37,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **111 of 208 caps are classified
-(37 INDEXING, 39 OUTPUT, 35 BOUNDARY); the remaining 97 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **112 of 209 caps are classified
+(38 INDEXING, 39 OUTPUT, 35 BOUNDARY); the remaining 97 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -88,7 +88,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 
 ## Caps, by file
 
-One table for each of the 83 files that declare a cap — the 208 caps counted above, and no parameter.
+One table for each of the 83 files that declare a cap — the 209 caps counted above, and no parameter.
 
 ### `src/abicheck.h`
 
@@ -316,6 +316,7 @@ Discloses: `coboost_commits_capped`, `coboost_partners_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kChurnMergeBombMaxFiles` | `100` | INDEXING | the churn rankers' merge-bomb rule; skipped commits are disclosed as <recent merge_bombs_skipped=> |
 | `kCoBoostMaxFilesPerCommit` | `30` | INDEXING | same bulk-commit cap as the other co-change miners here |
 | `kCoBoostMaxPartnerFiles` | `8` | INDEXING | strongest partners only, by (deg desc, path asc) |
 | `kCoBoostMaxSymbolsPerFile` | `3` | INDEXING | per partner file: its top-3 symbols by (lens score desc, id asc) |

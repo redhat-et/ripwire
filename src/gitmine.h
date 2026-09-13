@@ -1923,7 +1923,18 @@ struct DecayedChurnMined
     std::vector<double>       weights;
     std::vector<std::int64_t> lastEpoch;
     bool                      anyHistory = false;
+    // merge_bombs_skipped= (2026-09-12): commits in the mined window the `maxFiles` rule SKIPPED — they touched more than
+    // kChurnMergeBombMaxFiles indexed files and contributed nothing to weights[] or lastEpoch[]. Counted so the <recent>
+    // block can say so: a held-out gold commit with 71 src files (>100 total) was invisible to it, and nothing in the
+    // output said a commit had been dropped. Always emitted, "0" included, so absence is never ambiguous.
+    std::uint32_t             mergeBombsSkipped = 0;
 };
+
+// The merge-bomb rule's threshold for the churn rankers: a commit touching more than this many INDEXED files is skipped
+// (bulk renames / reformats / license sweeps / wide merges destroy the signal). kChurnDecayRankLegend and the compact
+// `merge_bombs_skipped=` reading spell the number in prose, so a change here moves both (the static_assert beside
+// the legend pins that).
+inline constexpr std::size_t kChurnMergeBombMaxFiles = 100;   // the churn rankers' merge-bomb rule; skipped commits are disclosed as <recent merge_bombs_skipped=>
 
 inline DecayedChurnMined gitLogDecayedFileMining( const std::string& root, const IngestResult& ing, const std::string& windowArgs,
                                                   std::size_t maxFiles, std::uint32_t onlyRoot = UINT32_MAX )
@@ -1972,6 +1983,10 @@ inline DecayedChurnMined gitLogDecayedFileMining( const std::string& root, const
                 weights[f] += curWeight;
                 if( curEpoch > m.lastEpoch[f] ) { m.lastEpoch[f] = curEpoch; }
             }
+        }
+        else if( cur.size() > maxFiles )
+        {
+            ++m.mergeBombsSkipped;   // the rule fired: disclosed on <recent>, never silently absorbed
         }
         cur.clear();
     };
@@ -2059,7 +2074,7 @@ inline std::vector<float> churnDecayTeleport( const std::string& root, const Ing
     PROFILE_SCOPE_DESCRIBE( "gitmine: churnDecayTeleport (rank-by=churn-decay)" );
     const std::string windowArgs = ( scope && scope->active ) ? sinceLogArgs( *scope, "" ) : std::string{};
     bool              anyHistory = false;
-    const std::vector<double> weights = gitLogDecayedFileWeights( root, ing, windowArgs, 100, &anyHistory );   // same merge-bomb cap as churnTeleport
+    const std::vector<double> weights = gitLogDecayedFileWeights( root, ing, windowArgs, kChurnMergeBombMaxFiles, &anyHistory );   // same merge-bomb cap as churnTeleport
     if( outHasChurnEvidence )
     {
         *outHasChurnEvidence = anyHistory;
@@ -2125,7 +2140,7 @@ inline std::vector<float> churnDecayTeleportWorkspace( const std::vector<std::st
     for( std::uint32_t r = 0; r < rootDirs.size(); ++r )
     {
         bool                      rootHistory = false;
-        const std::vector<double> w           = gitLogDecayedFileWeights( rootDirs[r], ing, std::string{}, 100, &rootHistory, r );
+        const std::vector<double> w           = gitLogDecayedFileWeights( rootDirs[r], ing, std::string{}, kChurnMergeBombMaxFiles, &rootHistory, r );
         if( rootHistory )
         {
             anyHistory = true;

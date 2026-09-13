@@ -332,6 +332,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // of= on the map root is --around's seed, and n= is a name on every <s> row.
     { "children",          "children=K: K child modules below the levels_shown= cut, unprinted", true, "module" },
     { "of",                "<recent n= of=>: the n= newest-touched of of= touched files; <rc age_d=> days since its last commit, w= decayed weight", true, "recent" },
+    // merge_bombs_skipped= (2026-09-12): the cut the churn-decay miner makes, disclosed on the block it shapes (gitmine.h
+    // kChurnMergeBombMaxFiles). Always on <recent>, "0" included, so the term rides every churn-decay map.
+    { "merge_bombs_skipped", "merge_bombs_skipped=N: N commits touching more than 100 files skipped, uncounted; a file only they touched is absent", true, "recent" },
     // The map's ROW fields that are absent at their default, defined only inside the always-on `<!-- ripwire v1` legend (prose):
     // lpin= and overloads= on <s>, prov= on <c>. Row-level, because each has one meaning tool-wide and the map emitter is its one
     // XML writer. test/compactlegendcheck.sh (S) population 4 reads that legend's absence-marked row fields from source.
