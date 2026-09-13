@@ -202,7 +202,14 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 #   TOTAL             41,220 -> 42,084 B on the merged tree, attributed tool by tool against main's binary
 #                      (both lanes had re-anchored alone — 41,650 and 42,000 — and the sum is what ships).
 # Headroom after this line: 116 B, less than one declared argument, which is rule 5 above working.
-CEILING = 42200
+# RE-ANCHORED 2026-09-12 (lane for-widen, L-W): 42,200 → 42,384 = +184 B, EXACTLY the two declared optional arguments
+# `limit`/`offset` on `for` (the `for` schema 525 → 709 B in this arm's own json.dumps metric: the envelope plus the
+# description the contract obliges each property to carry), measured against a build of the lane's base (1cf3086e:
+# 42,177 B here, 23 B under the old ceiling) — the file-grain widening page (forpage.h) joins the paging family on
+# this twin. Its description gained NO prose: a first draft named coverage= and the page there (+109 B) and was
+# removed rather than re-anchored around, the L7 precedent above — the schema properties are where a client renders
+# an argument, and the answer's own legend defines coverage= and the page. Headroom after this line: 23 B.
+CEILING = 42384
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )

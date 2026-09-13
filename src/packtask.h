@@ -83,6 +83,10 @@ struct LensRanking
     // for words that named something. The T3 auto-body allowance reads it so the bundle serves the anchor's
     // OWN body or none at all (docs/EVALS.md, the anchor-only substitution round).
     std::vector<RouteAnchorDef> anchorDefs;
+    // L-W (forpage.h): the term evidence behind the RAW lexical pass — which query subtokens each symbol
+    // matched and how rare each is — read back out of the scorer (lexical.h LexTermEvidence) so coverage=
+    // and the --for --limit=N file page are computed from the same integers that ranked the head.
+    LexTermEvidence             evidence;
 };
 
 inline constexpr int         kPackTaskDefaultTokens  = 6000;   // the default budget when no explicit budget is given

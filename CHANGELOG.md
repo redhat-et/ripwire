@@ -15,6 +15,42 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — --for pages its answer one file per row, and says when to widen
+
+On the pre-registered follow-up ladder (a 2,066-file C++ corpus pinned at one commit, the frozen 30
+questions, six deterministic steps per tool, no model in the loop), every ripwire follow-up completed 0
+answers through step 4: `--for`'s `next=` pointed at `--expand` (a body, not a wider list), `--top-k` was
+inert on `--for`, and `--format=candidates` is symbol-grain (40 symbols is about 18 files in 11 KB). The
+one follow-up that completed answers in that ladder was a file-grain page — one row per file, about 6 KB.
+Local telemetry had `--for` → `--expand` followed 0 of 259 times.
+
+`--for=TASK --limit=N` (`--offset=M` pages it) is now that page: a `<files>` document of one
+`<f p= score= n= sym=/>` row per positive-score file, `p=` spelled root-relative exactly as every other
+verb spells it, ranked file-first by `score=` — the IDF-weighted share of the query's subtokens the file's
+top 8 symbols cover between them (a term counts once however often it recurs, so one huge file cannot
+monopolise; ties by the best symbol's lens score, then path). The root carries the house paging vocabulary
+(`shown= total= capped= has_more= next_offset= offset= limit=`) and a `next=` naming the next page.
+`--for`'s own root now carries `coverage=`, the IDF-weighted share (whole percent) of the query's subtokens
+found in the top-ranked symbol's name, doc or body, defined in both legends; an unmatched subtoken weighs
+as the rarest, so a `(#12147)` token lowers it honestly. When the answer is THIN — coverage under 50, or a
+ranked head spread over fewer than 3 files — the r=1 row's `next=` names `--for=TASK --limit=40` instead
+of the body. The MCP `for` twin takes the same `limit`/`offset` and serves the same page through the same
+renderer. Beside the page every bundle-shaping flag is refused, never ignored (`--limit=0` and non-numeric
+values were already refused). `--top-k` stays inert on `--for` and `--help` now says which flag widens.
+
+Measured, on the ladder re-registered with the page as step 2 on the `--for` shapes: ripwire's
+complete@step row is unchanged at 14/14/14/14/17/17 — the page completed no question, because the seven
+misses it ran on hold 3–21 gold files each — while adding gold files on four of the seven (+2, +1, +3 and
++6 files) at 5,539–6,212 B per page (mean 5,841 B), and the thin rule named the page on 4 of those 7
+misses. The frozen-30 single-call instrument is unchanged at 14/30 complete and 42/129 gold files named;
+its median bytes-to-answer moved 5,988 → 6,328 B, which is the coverage clause and attribute on every
+header. Gate: `test/forwidencheck.sh` — a generated 33-file fixture whose gold file sits at page rank 13
+and is absent from the default head and tail; one row per file, determinism, paging with no overlap,
+`coverage=` defined in both dialects, thin versus confident `next=`, the refusals, MCP parity — red on the
+pre-change binary. `coverage=` moved the byte pins that ride every `--for` header
+(forrankordercheck, forrootlegendcheck, compactlegendcheck's loop, the two `--no-route` goldens), each
+re-anchored with the measured number.
+
 ### Added — Elixir module and arity resolution (parser version 95)
 
 Elixir calls now resolve by module, name and arity, with lexical aliases, filtered imports, default

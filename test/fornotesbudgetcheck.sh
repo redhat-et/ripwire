@@ -83,6 +83,14 @@
 # that defines two of the four attributes it names. The replacement is 181 B against 182 B, so every number in
 # this block moved by at most one byte — the figures above are the re-measured ones, not the originals.)
 #
+# ── RE-ANCHORED 2026-09-12 (lane for-widen, L-W): the MIDDLE rung 1640 → 1700. ──────────────────────────────
+# The coverage= root fact and its legend clause (forpage.h kForCoverageLegend, ~300 B, byte-exempt like the confidence
+# clause it extends) landed on every --for header. Measured on this fixture at the gate's own (mktemp) path length: the
+# base build read est_tokens=1620 at 1640; this build's 7-row state reads 1780 there and over_ceiling="1" rides along;
+# its 8-row state fits from 1680 to 1770 at est_tokens=1556 (1660 and 1780 both read over). 1700 sits inside that
+# window with 144 tokens of headroom. The other two rungs stay: 1100 still reads 1032 (4 rows) and 3000 reads 2934
+# (16 rows, from 2802) inside its rung. The header's own rule: the signal is expected, the response is a deliberate
+# re-anchor with the number recorded.
 # ── RE-ANCHORED 2026-09-05 (terminality round A, lane R, P7 rank order): the MIDDLE rung 1600 → 1640. ──
 # The lens <sigs> is FLAT now: rows in rank order, each carrying p="src/modN.py" (16 B), no <f p=> wrapper (24 B
 # each). At this fixture's 7-row state that is 7 × 16 − 2 × 24 = +64 B = +26 tokens at the conservative rate.
@@ -218,7 +226,7 @@ jsonRows(){ "$BIN" "$CORPUS" --for="$TASK" --token-budget="$1" --json 2>/dev/nul
 
 # ── arm 1: est_tokens must fit the ceiling the user asked for, in BOTH dialects ────────────────────
 # (tight budget 1100, re-anchored 2026-09-11 — see the CEILING MARGIN block above for the arithmetic)
-for tb in 1100 1640 3000; do
+for tb in 1100 1700 3000; do
   xe="$( xmlEst "$tb" )"; je="$( jsonEst "$tb" )"
   if [ -z "$xe" ] || [ -z "$je" ]; then no "budget=$tb: could not read est_tokens from one of the dialects (xml='$xe' json='$je')"; continue; fi
   if [ "$xe" -le "$tb" ]; then ok "budget=$tb: XML est_tokens=$xe fits the ceiling"
@@ -229,7 +237,7 @@ done
 
 # ── arm 2: the two dialects select COMPARABLE row counts (they need not be equal) ──────────────────
 # Before the fix the XML lens bought 2-2.4x the rows with the same budget, because notes were free.
-for tb in 1100 1640 3000; do
+for tb in 1100 1700 3000; do
   xr="$( xmlRows "$tb" )"; jr="$( jsonRows "$tb" )"
   if [ -z "$jr" ] || [ "$jr" -eq 0 ]; then no "budget=$tb: JSON selected no rows — the comparison has no denominator"; continue; fi
   if [ "$xr" -le $(( jr * 13 / 10 + 1 )) ] && [ "$xr" -ge $(( jr * 7 / 10 )) ]; then

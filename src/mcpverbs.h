@@ -17,6 +17,7 @@
 #include "mention.h"       // B8: applyMentionBoost — the `for` verb's query-mention anchor (same default-on behavior as CLI --for)
 #include "filter.h"        // §P4: rankTierSymbolMultipliers — the fixture/present tier down-weight the CLI ranking lenses apply
 #include "redact.h"        // RedactCounts — the per-request redaction tally threaded through the body/doc verbs
+#include "forpage.h"    // L-W: the --for file page, coverage= and the thin rule — shared with the CLI twin
 #include "packtask.h"      // L4: the shared --pack-task / MCP explore+pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"     // the explore verb's `partition` argument (packTaskPartitionText)
 #include "tracelocus.h"    // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
@@ -1567,7 +1568,8 @@ inline void priceForTaskRoot( std::string& doc, std::size_t budgetTokens )
 }
 
 inline std::string forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
-                                std::size_t budgetTokens = 0, bool noRoute = false )
+                                std::size_t budgetTokens = 0, bool noRoute = false,
+                                McpPageArgs page = {} )   // L-W: limit/offset select the FILE PAGE (forpage.h), the CLI --for --limit twin
 {
     const std::size_t forBudgetBytes = budgetTokens > 0 ? budgetBytesForTokens( budgetTokens )
                                                         : kForPayloadBudgetBytes;
@@ -1606,9 +1608,17 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // deep-tail: this bundle now serves the file-grain tail, a full-distribution consumer — the H2
     // MaxScore prune bound is 0 (exhaustive) here for the same reason the CLI --for passes
     // fullDistribution (a pruned tail would make total= mode-dependent and its order incomplete).
+    // L-W: the term evidence behind the subtoken pass rides out for coverage= and the file page — the CLI
+    // twin's computeLensRanking makes the same two calls (one exhaustive subtoken pass on the identifier route).
+    LexTermEvidence    mcpEvidence;
     std::vector<float> lensRank  = ( rc.which == LexMode::NameExact )
                                        ? lexicalScoresNameExactRanked( ing, task, &tierMul )
-                                       : lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, &ifaceExact, &tierMul );
+                                       : lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, &ifaceExact, &tierMul,
+                                                              0, 0, {}, &mcpEvidence );
+    if( rc.which == LexMode::NameExact )
+    {
+        lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &mcpEvidence );
+    }
 
     // B8 (query-mention anchoring): same default-on contract as the CLI --for — files / dotted modules /
     // Scope.symbols literally NAMED in the task text are lifted to just below the top hit (the measured #1
@@ -1690,13 +1700,32 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     auto [ flooredTopN, floorNote ] = relevanceFloorCut( lensRank, forTopN );
     forTopN = flooredTopN;
 
+    // L-W: the FILE PAGE — the same ranking, the same evidence, the same renderer as the CLI --for --limit=N
+    // (forpage.h), so the two dialects cannot serve a different page. Its own <files> root; nothing below runs.
+    const std::string_view mcpRootArg = ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
+    if( page.limit > 0 || page.offset > 0 )
+    {
+        const ForFilePage filePage = computeForFilePage( ing, lensRank, mcpEvidence );
+        const std::string pageRootOpen = ctxRootOpen( task, noRoute ? std::string() : ( "routed: " + rc.reason + shapeDemotionNote( shape ) ), mcpRootArg );
+        return renderForFilePageXml( ing, filePage, ForPageRenderParts{ task, pageRootOpen, forCoveragePct( mcpEvidence, topLensId( lensRank ) ),
+                                                                        page.limit, page.offset, mcpRootArg, /*compactLegend=*/false } );
+    }
+
     // H14 (capture-audit 2026-09-04): the ROUTING TRUST GAUGE. The CLI --for root carries
     // confidence=/margin_pct= — "is this ranked head sharp, or is it flat and therefore a starting point
     // rather than an answer" — and this twin carried neither, on the surface whose whole job is to route an
     // agent. It is a pure function of the finished lensRank (lexical.h's adaptiveCut → deriveForConfidence,
     // the CLI's own call with the CLI's own arguments), so there was never a cost reason for the omission.
     const AdaptiveCut   mcpForCut = adaptiveCut( lensRank, 5, std::size_t( forTopN ), /*scanFullDistribution=*/true );
-    const ForConfidence mcpForConf = deriveForConfidence( mcpForCut, forTopN );
+    ForConfidence       mcpForConf = deriveForConfidence( mcpForCut, forTopN );
+    // L-W: coverage= joins the pair on this root too — same clause, same presence rule, same byte exemption
+    // (mcpConfidenceExemptBytes reads the sizes below) as the CLI twin.
+    const int mcpCoverage = forCoveragePct( mcpEvidence, topLensId( lensRank ) );
+    if( mcpCoverage >= 0 )
+    {
+        mcpForConf.attrs += " coverage=\"" + std::to_string( mcpCoverage ) + "\"";
+        mcpForConf.note  += kForCoverageLegend;
+    }
 
     const std::vector<char>  impure    = computeImpure( ing, ix.g );
 
@@ -1820,6 +1849,10 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     std::sort( lensSurfaceIds.begin(), lensSurfaceIds.end(),
                [ &lensRank ]( NodeId a, NodeId b ) { return lensRank[a] != lensRank[b] ? lensRank[a] > lensRank[b] : a < b; } );   // id tiebreak → deterministic (most lens scores tie at 0)
     lensSurfaceIds.resize( std::min<std::size_t>( std::size_t( forTopN ), S ) );
+    // L-W (L-N): the r=1 row's next= — the widening page on a THIN answer, the body otherwise; the CLI twin's rule
+    // (forpage.h forAnswerIsThin) over the same resolved surface.
+    const std::string mcpTopRowNext = forAnswerIsThin( mcpCoverage, distinctFilesOf( ing, lensSurfaceIds ) )
+                                          ? forWidenNext( task ) : std::string();
 
     // §P3: same scope + identity the CLI --for embeds — the MCP bundle must not carry wider scope (interfaces
     // this task never reached) or less identity (p= on every row) than its CLI twin.
@@ -1873,7 +1906,8 @@ inline std::string forTaskText( const std::string& root, const std::string& task
                         /*hasRelevanceFloor=*/true,           // LB-A: shrink past the zero-score tail, never pad
                         &mcpDroppedPositive,                  // A2: exact count, see droppedPositiveCount (serialize.h)
                         &mcpShownIds,                         // lane 2: see verbs_for.h shownSigIds
-                        &mcpSigsCapped );                     // the ladder's own verdict — see the budget_bytes= splice below
+                        &mcpSigsCapped,                       // the ladder's own verdict — see the budget_bytes= splice below
+                        mcpTopRowNext );                      // L-W: the widening page on a thin answer, else the body
     } );
     // A2: same insert-before-"-->" splice as the CLI twin (verbs_for.h) — absent entirely on the (overwhelming)
     // no-drop path, so headerStr's bytes are unchanged there (byte-identical to the pre-A2 output). Bare
@@ -4676,7 +4710,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         {
             return bad( missingField( "for" ) );
         }
-        r.payload = forTaskText( root, task, redactPtr );
+        r.payload = forTaskText( root, task, redactPtr, 0, false, pageParse.page );   // L-W: the batch arm pages the file page too
         if( r.payload.empty() )
         {
             return bad( "no symbols found" );

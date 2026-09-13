@@ -3373,6 +3373,9 @@ struct SigRowFacts
                                                            //   "<d l=" opening and every existing attribute adjacency
                                                            //   stay byte-stable. Same r= spelling AND meaning as the
                                                            //   <cand r=> flat export — one rank vocabulary, two shapes.
+    std::string_view                  topNext = {};         // L-W (forpage.h): the r=1 row's next= when the caller decided
+                                                           //   the answer is THIN — the file-grain widening page. Empty ⇒
+                                                           //   the body follow-up (--expand=FILE:NAME) exactly as before.
 };
 
 // P7 (terminality round A, lane R, 2026-09-05): a lens row's own file, spelled root-relative exactly as the
@@ -3455,7 +3458,10 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
     if( facts.rank == 1 )
     {
         head.pop_back();   // the '>'
-        head += nextAttrXml( nextFlag( "--expand=", lensRowPath( ing, s.fileId, rootArg ) + ":" + s.name ) );
+        // L-W (forpage.h): a THIN answer hands over the file-grain widening page instead of the body — the follow-up
+        // most likely to COMPLETE the answer, not the one most likely to be a body (L-N).
+        head += facts.topNext.empty() ? nextAttrXml( nextFlag( "--expand=", lensRowPath( ing, s.fileId, rootArg ) + ":" + s.name ) )
+                                      : nextAttrXml( facts.topNext );
         head += '>';
     }
     return head;
@@ -3711,13 +3717,16 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                             std::vector<NodeId>* shownIdsOut = nullptr,   // lane 2 (2026-09-07): the ids of the rows this call
                                                              //   EMITTED, emitted order — see pushShownSigId. nullptr ⇒ not
                                                              //   wanted. Filled on the flat lens path only.
-                            bool* cappedOut = nullptr )      // did the H1 ladder TRIM this block? The JSON twin
+                            bool* cappedOut = nullptr,       // did the H1 ladder TRIM this block? The JSON twin
                                                              //   (packSignaturesJson outCapped) has always reported it;
                                                              //   this side made the caller re-read the rendered bytes for
                                                              //   the same fact. A caller needs it to splice the legend
                                                              //   clause defining the budget_bytes= the capped open tag
                                                              //   carries — a clause that must cost nothing when the
                                                              //   ladder did not fire.
+                            std::string_view topRowNext = {} )   // L-W (forpage.h): the r=1 row's next= when the caller
+                                                             //   judged the answer THIN (the widening page); "" ⇒ the
+                                                             //   --expand body follow-up, byte-identical to before.
 {
     if( droppedPositiveOut )
     {
@@ -3938,7 +3947,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                     }
                 }
 
-                std::string head = sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure, globalRank }, esc, rootArg );   // d1: rank fact (ladder path)
+                std::string head = sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure, globalRank, topRowNext }, esc, rootArg );   // d1: rank fact (ladder path)
 
                 std::string doc = docCommentBefore( src, a );
                 redactInPlace( doc, redact );

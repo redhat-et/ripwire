@@ -511,7 +511,11 @@ echo
 # RE-MEASURED 2026-09-12 (that sweep's design review): 4,849 B, the pin unchanged at 4,900. Attributed against the last-pass build:
 # --impact 777 → 770 B (the shorter <f lazy=> reading) and --safe-delete 712 → 708 B (t= reads a match, dead_code_candidate= says
 # outside); nothing else in the loop moved.
-echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 4,900 B (29,824 B in full on the ripwire tree) ==="
+# RE-ANCHORED 2026-09-12 (lane for-widen, L-W): 4,900 → 5,100 B, measured 5,011 (from 4,849 on the lane's base build, same
+# tree, same day), by the same rule (next multiple of 100 B above the measured total). Attributed: --for's native compact
+# legend +162 B — the coverage= reading and the thin rule (kForCompactCoverageClause, forpage.h) beside the confidence clause;
+# nothing else in the loop moved.
+echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 5,100 B (29,824 B in full on the ripwire tree) ==="
 loopBytes=0; fullBytes=0
 for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--uses=distance" "--edit-check=total_area" \
          "--quality-delta" "--test-gate=geometry.cpp" "--affected=geometry.cpp" "--safe-delete=total_area" "--slice=total_area"; do
@@ -520,8 +524,8 @@ for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--u
     b="$( leg bytes "$TMP/l.c" )"; f="$( leg bytes "$TMP/l.f" )"
     loopBytes=$(( loopBytes + b )); fullBytes=$(( fullBytes + f ))
 done
-[ "$loopBytes" -le 4900 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
-                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 4,900 B; full: $fullBytes B)"
+[ "$loopBytes" -le 5100 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
+                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 5,100 B; full: $fullBytes B)"
 
 echo
 echo "=== (M) MCP: legend:\"compact\" on edit_check answers in ≤ 900 B on a clean tree; every XML verb takes the argument, within its per-verb legend pin ==="

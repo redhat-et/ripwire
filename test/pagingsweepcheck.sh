@@ -479,7 +479,8 @@ refuses(){   # $1=label $2=expected stderr substring $3..=argv after ROOT
 refuses "default map --limit=3"  "--top-k"   --limit=3
 refuses "default map --offset=3" "--top-k"   --offset=3
 refuses "--report --limit=3"     "--callers" --report --limit=3
-refuses "--for --limit=3"        "--callers" --for=rank --limit=3
+# (--for left this row 2026-09-12: --limit/--offset now select its FILE PAGE — forpage.h, test/forwidencheck.sh —
+#  so it is an honoring verb, listed in the table of arm (L) below and in --help's HONORED-by paragraph.)
 refuses "--metrics --limit=3"    "--callers" --metrics --limit=3
 refuses "--expand --limit=3"     "--callers" --expand=rankGraph --limit=3
 # §P15/§P16: --zoom joined the honoring set but --zoom --mermaid did NOT — it is a fixed-shape diagram, same
@@ -709,6 +710,10 @@ TABLE = {
     # shown=/total=/capped= facts in its section headers. Parsing a root element out of it would fail for a
     # reason that has nothing to do with paging, so it is checked as prose below instead.
     "--situ":               ( [ "--situ=src/situ.h" ], "PROSE" ),
+    # L-W (2026-09-12, forpage.h): --for joins for its FILE PAGE — --limit/--offset select a <files> document of
+    # one row per file, NOT a window over the bundle. The bare --for root (<ctx>) is therefore uncut by
+    # construction and carries no quintet; the page itself (test/forwidencheck.sh) carries the full quintet.
+    "--for":                ( [ "--for=escapeXml" ], None ),
 }
 fail = 0
 missing = [ v for v in universe if v not in TABLE ]

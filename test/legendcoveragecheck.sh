@@ -144,6 +144,10 @@ ROSTER = [
     # with no row is a dialect where the ratchet cannot see a gap, and this one carries `schema=` that the
     # default dialect does not emit.
     ("for-budgeted-compact", [SMALL, "--legend=compact", "--for=rank symbols by pagerank", "--token-budget=1300"]),
+    # …and the FILE PAGE (L-W, forpage.h): --for --limit=N answers with its own <files> root and <f> rows, a
+    # first screen no other row here reaches; both dialects, since the compact one carries its own short legend.
+    ("for-page",           [SMALL, "--for=rank symbols by pagerank", "--limit=10"]),
+    ("for-page-compact",   [SMALL, "--legend=compact", "--for=rank symbols by pagerank", "--limit=10"]),
     ("pack-task",          [SMALL, "--pack-task=rank symbols by pagerank"]),
     ("exemplar",           [SMALL, "--exemplar=rank symbols"]),
     ("hotspots",           [ROOT,  "--hotspots"]),
@@ -209,7 +213,7 @@ def legendOf( doc ):
     m    = LEAD.match( doc )
     lead = m.group( 0 ) if m else b""
     rest = doc[ len( lead ): ]
-    m2   = re.match( rb'\A\s*<ctx\b[^>]*>((?:\s*<!--.*?-->)+)', rest, re.S )   # <ctx …><!-- legend --> wrappers
+    m2   = re.match( rb'\A\s*<(?:ctx|files)\b[^>]*>((?:\s*<!--.*?-->)+)', rest, re.S )   # <ctx …><!-- legend --> wrappers; <files> = the --for file page (forpage.h)
     if m2: lead += m2.group( 1 )
     return lead.decode( 'utf-8', 'replace' )
 

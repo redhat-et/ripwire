@@ -4,6 +4,7 @@
 #endif
 
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 // verbs_for.h — the QUERY family (§A2's contiguous dispatch block), moved VERBATIM from main.cpp in
@@ -136,7 +137,16 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     if( routeOn )
     {
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
-                                                           : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul );
+                                                           : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul,
+                                                                                  0, 0, {}, &out.evidence );   // L-W: the term evidence rides out
+        if( rc.which == LexMode::NameExact )
+        {
+            // L-W: the name-exact ranker scores WHOLE names, so the subtoken evidence coverage= and the file page
+            // read comes from one exhaustive subtoken pass whose scores are discarded — pure lookups over the
+            // persisted statistics (lexindex.h), a small fraction of a --for call (measured ~520 ms warm on a
+            // 2,000-file C++ tree, most of it the cache load), paid on the identifier route only.
+            lexicalScoresTiered( ing, g.outOff, g.outTargets, task, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &out.evidence );
+        }
         // §L10b + verify-wave2 F6: no leading space+"[" AND no trailing "]". This string lands ONLY in the
         // route= attribute value (and its JSON "route" twin) now, never spliced into free comment prose, so
         // the brackets that used to demarcate it inside a sentence just left the value opening with a stray
@@ -152,7 +162,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     }
     else
     {
-        lensRank = lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul );
+        lensRank = lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul, 0, 0, {}, &out.evidence );
     }
 
     // R4: capture the RAW routed lexical score's max BEFORE --anchor/mention/cochange reshape lensRank — the
@@ -408,6 +418,7 @@ struct ForLensNotes
     // real keys here rather than a string spliced somewhere JSON cannot reach).
     const char*        confidence;  // "high" | "low"
     int                marginPct;   // the whole-percent relative drop the confidence derives from (0 = none)
+    int                coveragePct; // L-W: the XML root's coverage= (-1 = absent: nothing scored)
     bool               weak;
     // M10: gitstamp::stampAt(root) — the raw sha[+dirty] value, "" on multi-root/non-git (never "null" as
     // a STRING; the JSON emitter below distinguishes empty-string-absent from a real value the same way
@@ -582,7 +593,7 @@ inline constexpr std::string_view kForCompactConfidenceClause =
 // inside the budget beats the larger one past it. Two honest spellings were available and the shorter was taken;
 // that is not the same as trimming a disclosure until a pin goes green, and the day it is, the pin moves instead.
 inline constexpr std::string_view kForLegendDroppedNote =
-    " [legend clauses: confidence=/margin_pct=, budget_tokens=/max_tokens= and r=/tail (total= shown= capped=) "
+    " [legend clauses: confidence=/margin_pct=/coverage=, budget_tokens=/max_tokens= and r=/tail (total= shown= capped=) "
     "dropped (ceiling) - the attributes stay; a wider token-budget defines them]";
 
 // …and the COMPACT DIALECT's spelling, which names two fewer attributes because that dialect never had them.
@@ -595,7 +606,7 @@ inline constexpr std::string_view kForLegendDroppedNote =
 // reason kForCompactConfidenceClause is one constant — the byte ledgers that exempt and charge these strings
 // read their sizes, and a string built at runtime has no size to read at compile time.
 inline constexpr std::string_view kForLegendDroppedNoteCompact =
-    " [legend clauses: confidence=/margin_pct= and r=/tail (total= shown= capped=) dropped (ceiling) - "
+    " [legend clauses: confidence=/margin_pct=/coverage= and r=/tail (total= shown= capped=) dropped (ceiling) - "
     "the attributes stay; a wider token-budget defines them]";
 
 inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p, std::string_view extraNotes )
@@ -615,6 +626,10 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     if( !p.confidenceNote.empty() )
     {
         h += kForCompactConfidenceClause;
+        if( p.confidenceAttrs.find( " coverage=\"" ) != std::string_view::npos )
+        {
+            h += rw::kForCompactCoverageClause;   // L-W: defined where the root carries it, in this dialect's short form
+        }
     }
     if( p.tailLegend )
     {
@@ -826,6 +841,10 @@ inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes&
     h += ",\"confidence\":\"";
     h += notes.confidence;
     h += "\",\"margin_pct\":" + std::to_string( notes.marginPct );
+    if( notes.coveragePct >= 0 )
+    {
+        h += ",\"coverage\":" + std::to_string( notes.coveragePct );   // L-W: the XML root's third ranking fact, same presence rule
+    }
     // the adaptive cut's own counts — the abstention round-2 instrumentation described on ForLensNotes.
     // ALWAYS present (a count of zero is a measurement: "nothing scored", never "the field was dropped"),
     // and JSON-only BY DESIGN, which the struct's comment states in full rather than repeating here.
@@ -1843,6 +1862,20 @@ std::optional<int> runForLens( const MainDispatch& d )
         // §P12.2 fix: --adaptive used to no-op here (this block returned before the cliff-cut logic below ever
         // ran). emitCandidates() now cuts BEFORE the bypass, full-distribution scan like --for's own
         // default-map cut (the ceiling is --top-k, not the 40-row lens cap).
+        // L-W: `--for=TASK --limit=N` (offset=M pages it) is the FILE-GRAIN WIDENING PAGE — one <f> row per
+        // positive-score file, ranked file-first (forpage.h says how), the follow-up the routing-loop ladder
+        // showed completes answers where a body cannot. It owns its own <files> root, so it bypasses the whole
+        // <ctx> bundle below; cli.h refuses every bundle-shaping flag beside it rather than ignoring one.
+        if( cfg.pageLimit > 0 || cfg.pageOffset > 0 )
+        {
+            const ForFilePage page    = computeForFilePage( ing, lensRank, lr.evidence );
+            const std::string pageXml = renderForFilePageXml( ing, page, ForPageRenderParts{ cfg.forTask, ctxRootOpen( cfg.forTask, routeNoteRaw, flRootArg ),
+                                                                                              forCoveragePct( lr.evidence, topLensId( lensRank ) ),
+                                                                                              cfg.pageLimit, cfg.pageOffset, flRootArg, cfg.legend == "compact" } );
+            std::fwrite( pageXml.data(), 1, pageXml.size(), stdout );
+            return 0;
+        }
+
         if( cfg.candidates )
         {
             // §A4e/§A4f: the export carries the ranking's provenance — which ranker ran, how many mention
@@ -1928,6 +1961,17 @@ std::optional<int> runForLens( const MainDispatch& d )
         // deriveForConfidence (above runForLens) — forTopN is final here (floor cut applied), which is
         // what the completeness ground needs.
         ForConfidence forConf = deriveForConfidence( forCut, forTopN );
+        // L-W: coverage= rides the SAME sentence and the SAME byte exemption as confidence=/margin_pct= — a third
+        // root fact of every ranking (how much of the query the top-ranked symbol's own text carries), which is
+        // what tells a thin answer from a confident one. Absent (with its clause) only when nothing scored: there
+        // is no top-ranked symbol to measure, and a fabricated 0 is what non-negotiable #3 forbids.
+        const int  forCoverage   = forCoveragePct( lr.evidence, topLensId( lensRank ) );
+        const bool forCoverageOn = forCoverage >= 0;
+        if( forCoverageOn )
+        {
+            forConf.attrs += " coverage=\"" + std::to_string( forCoverage ) + "\"";
+            forConf.note  += kForCoverageLegend;
+        }
         // The confidence pair's own bytes, captured BEFORE the budget clause below is appended — see the
         // charging note there for why the two disclosures are charged differently.
         const std::size_t confidenceOwnBytes = forConf.attrs.size() + forConf.note.size();
@@ -2081,6 +2125,13 @@ std::optional<int> runForLens( const MainDispatch& d )
         // seam, so hoisting it above the --json branch changes no dialect's redaction tally.
         std::vector<std::vector<NodeId>> legoScoped = legoImplementorsOnSurface( ing, g.implementors, lensSurfaceIds );
 
+        // L-W (L-N): the r=1 row's next= names the file-grain widening page when the answer is THIN — coverage
+        // under kForThinCoveragePct, or the resolved surface (the head before any budget trim) over fewer than
+        // kForThinMinFiles files — and the body otherwise. Decided here, from facts the header already fixed, so
+        // the two dialects' rows and the legend's stated rule cannot disagree; "" keeps the --expand hint.
+        const std::string forTopRowNext = forAnswerIsThin( forCoverage, distinctFilesOf( ing, lensSurfaceIds ) )
+                                              ? forWidenNext( cfg.forTask ) : std::string();
+
         // DEEP-TAIL d2: the file-grain tail candidates — one shared walk (serialize.h computeFileTail) for
         // both dialects, computed from the SAME resolved surface <sigs> selects, so the two dialects (and
         // the MCP twin, which calls the same function) cannot select different tails.
@@ -2151,7 +2202,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                                                               docMentionNote, lr.anchorLifts, lr.docMentionCount,
                                                                                               adaptiveNote, floorNote,
                                                                                               forConf.level,
-                                                                                              forConf.marginPct, forWeak,
+                                                                                              forConf.marginPct, forCoverage, forWeak,
                                                                                               forAtStamp,
                                                                                               // abstention round 2: forCut is the SAME
                                                                                               // cut the confidence facts above derive
@@ -2276,7 +2327,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // (appendCompactForLegend), so the exemption must subtract what was emitted — the full constants left the
         // ledger 64 B short and the subtraction below underflowed (UBSan: "297 - 361 cannot be represented").
         const bool        compactLegendOn      = cfg.legend == "compact";
-        const std::size_t confidenceEmitted    = compactLegendOn ? ( confidenceEarlyNoteBytes == 0 ? 0 : kForCompactConfidenceClause.size() )
+        const std::size_t confidenceEmitted    = compactLegendOn ? ( confidenceEarlyNoteBytes == 0 ? 0 : kForCompactConfidenceClause.size() + ( forCoverageOn ? kForCompactCoverageClause.size() : 0 ) )
                                                                  : confidenceEarlyNoteBytes;
         const std::size_t confidenceExemptBytes = confidenceEarlyAttrsBytes + confidenceEmitted + forAtAttrStr.size();   // == confidenceOwnBytes + at= in the full dialect
         const std::size_t tailLegendEmitted    = compactLegendOn ? rw::kForFileTailLegendCompact.size() : rw::kForFileTailLegend.size();
@@ -2355,7 +2406,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 /*hasRelevanceFloor=*/true,                  // LB-A: shrink past the zero-score tail, never pad
                                 &forDroppedPositive,                         // A2: exact count, see droppedPositiveCount
                                 &shownSigIds,                                // lane 2: the rows actually emitted — the tail excludes THESE files
-                                &forSigsCapped );                            // did the ladder fire? — the budget_bytes= clause rides only then
+                                &forSigsCapped,                              // did the ladder fire? — the budget_bytes= clause rides only then
+                                forTopRowNext );                             // L-W: the widening page on a thin answer, else the body
                 std::fflush( sm );  std::fclose( sm );
                 if( sbuf ) { sigsStr.assign( sbuf, ssz );  std::free( sbuf ); }
                 sigsPreRendered = true;
@@ -2670,7 +2722,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             packSignatures( stdout, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
                             &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr, flRootArg,
-                            /*hasRelevanceFloor=*/true );   // LB-A: the direct-emission degrade path selects identically
+                            /*hasRelevanceFloor=*/true, nullptr, nullptr, nullptr,   // LB-A: the direct-emission degrade path selects identically
+                            forTopRowNext );                                         // L-W: same next= rule on the degrade path
         }
         if( legoPreRendered )
         {
