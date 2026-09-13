@@ -222,18 +222,19 @@ def run_bounded( argv, bound, timeout ):
 
 A = '{http://schemas.openxmlformats.org/drawingml/2006/main}'
 KINDS = ( 'slides', 'notesSlides', 'slideLayouts', 'slideMasters', 'notesMasters', 'handoutMasters', 'comments' )
-KIND_PART = re.compile( r'ppt/(%s)/[^/0-9]*([0-9]*)[^/]*\.xml' % '|'.join( KINDS ) )
+KIND_PART = re.compile( r'ppt/(%s)/[^/0-9]*([0-9]*)[^/]*\.xml' % '|'.join( k.lower() for k in KINDS ) )
 
 def is_part( name ):
-    """Every XML part in the archive, the relationship parts included."""
-    return name.endswith( ( '.xml', '.rels' ) )
+    """Every XML part in the archive, the relationship parts included, whatever the case of its suffix: the test folds
+    the case, the name itself is kept as written because that is how the archive addresses it."""
+    return name.lower().endswith( ( '.xml', '.rels' ) )
 
 def part_order( name ):
     """Slides, notes, layouts, masters, comments — each kind in numeric order (slide2 before slide10) — then every other
     part by name."""
-    match = KIND_PART.fullmatch( name )
+    match = KIND_PART.fullmatch( name.lower() )
     if match:
-        return ( KINDS.index( match.group( 1 ) ), int( match.group( 2 ) or 0 ), name )
+        return ( [ k.lower() for k in KINDS ].index( match.group( 1 ) ), int( match.group( 2 ) or 0 ), name )
     return ( len( KINDS ), 0, name )
 
 def displayed_lines( root ):
@@ -474,8 +475,9 @@ _ctlhash="7 $( python3 -c 'import hashlib; print( hashlib.sha256( b"qzvkwjx" ).h
 #     ONLY in a slide layout and only in a slide master, each linked from a clean slide the way a real deck links them,
 #     and must be reported from that part: inherited text is displayed on every slide that uses it. `comment.pptx` carries
 #     the token only in a PresentationML comment (`<p:text>`, not a DrawingML run) and `props.pptx` only in
-#     `docProps/core.xml`'s creator — text no slide displays, read all the same. All nine must be counted and read. GIT_*
-#     is cleared so an inherited GIT_DIR cannot redirect these calls.
+#     `docProps/core.xml`'s creator — text no slide displays, read all the same. `upper.pptx` stores its only slide as
+#     `ppt/slides/SLIDE1.XML`: an archive names its parts in any case, and the part is read as it is named. All ten must
+#     be counted and read. GIT_* is cleared so an inherited GIT_DIR cannot redirect these calls.
 { mkdir -p "$_ctlrepo" && ctlgit init -q 2>/dev/null; } || ctlfail "(1) could not create its temp repo"
 python3 - "$_ctlrepo" <<'PY' || ctlfail "(1) could not write the planted decks"
 import os, sys, zipfile, zlib
@@ -517,6 +519,8 @@ for name, kind, part in ( ( "layout.pptx", b"slideLayout", "slideLayouts/slideLa
 with zipfile.ZipFile( os.path.join( root, "talks", "comment.pptx" ), "w", zipfile.ZIP_DEFLATED ) as deck:
     deck.writestr( "ppt/slides/slide1.xml", slide( ( b"clean slide", ) ) )
     deck.writestr( "ppt/comments/comment1.xml", b'<p:cmLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cm authorId="0" idx="1"><p:text>see ' + word + b' here</p:text></p:cm></p:cmLst>' )
+with zipfile.ZipFile( os.path.join( root, "talks", "upper.pptx" ), "w", zipfile.ZIP_DEFLATED ) as deck:
+    deck.writestr( "ppt/slides/SLIDE1.XML", slide( ( b"see ", word ) ) )
 with zipfile.ZipFile( os.path.join( root, "talks", "props.pptx" ), "w", zipfile.ZIP_DEFLATED ) as deck:
     deck.writestr( "ppt/slides/slide1.xml", slide( ( b"clean slide", ) ) )
     deck.writestr( "docProps/core.xml", b'<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>' + word + b'</dc:creator></cp:coreProperties>' )
@@ -531,8 +535,8 @@ count_decks "$TMP/arm1b.ctl.z" || ctlfail "(1) could not read its own deck list"
 _ctldecks=$_decks
 run_scanner "$_ctlrepo" "$TMP/arm1b.ctl.z" "$_ctlhash" '' "$TMP/arm1b.ctl.report"
 judge_report "$TMP/arm1b.ctl.report" "$_status" "$_ctldecks"
-if [ "$_ctldecks" -ne 9 ] || [ "$_verdict" != dirty ] || [ "$_hits" -ne 1 ] || [ "$_unread" -ne 0 ]; then
-    ctlfail "(1) planted decks: counted $_ctldecks, verdict $_verdict${_why:+ ($_why)}, $_unread unread — want 9 decks, all read, the token found"
+if [ "$_ctldecks" -ne 10 ] || [ "$_verdict" != dirty ] || [ "$_hits" -ne 1 ] || [ "$_unread" -ne 0 ]; then
+    ctlfail "(1) planted decks: counted $_ctldecks, verdict $_verdict${_why:+ ($_why)}, $_unread unread — want 10 decks, all read, the token found"
 fi
 for _want in 'talks/new\x0aline.Pptx' 'talks/with space.pdf' 'talks/UPPER.PDF'; do
     grep -Fq "HIT $_want (extracted text):" "$TMP/arm1b.ctl.report" 2>/dev/null \
@@ -551,9 +555,9 @@ for _want in 'HIT talks/layout.pptx (extracted text):2' 'HIT talks/master.pptx (
     grep -Fxq "$_want" "$TMP/arm1b.ctl.report" 2>/dev/null \
         || ctlfail "(1) a token carried only by an inherited layout or master part was not reported (want '$_want')"
 done
-for _want in 'talks/comment.pptx' 'talks/props.pptx'; do
+for _want in 'talks/comment.pptx' 'talks/props.pptx' 'talks/upper.pptx'; do
     grep -Eq "^HIT $_want \(extracted text\):[0-9]+\$" "$TMP/arm1b.ctl.report" 2>/dev/null \
-        || ctlfail "(1) a token that no slide displays (a comment's p:text, docProps' creator) was not reported from $_want"
+        || ctlfail "(1) a token in a comment's p:text, in docProps' creator, or in a part named in upper case was not reported from $_want"
 done
 # (2) UNREADABLE INPUTS. The same list plus a junk .pdf, a junk .pptx and two tracked paths missing from disk: two
 #     unread files and three unread decks. Unread decides the verdict, never "zero findings".
