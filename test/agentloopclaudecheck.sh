@@ -275,7 +275,7 @@ if "minimal fix" not in p_base and "ISSUE:" not in p_base:
     ok( "no SWE-bench 'make the minimal fix' framing leaks into a question prompt" )
 else:
     no( "the question prompt still carries patch-task framing" )
-if "ripwire" not in p_base.replace( "Do not use ripwire or ctxpack", "" ):
+if "ripwire" not in p_base.replace( "Do not use ripwire", "" ):
     ok( "baseline question prompt names ripwire only to forbid it" )
 else:
     no( "baseline question prompt leaks ripwire guidance" )

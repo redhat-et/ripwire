@@ -21,7 +21,7 @@
 // Developers rename for many reasons that have nothing to do with name QUALITY: a project rebrand, a module
 // move, an API version bump, a type change, a merge resolution, an extract-function that happens to reuse a
 // nearby spelling. Measured on ripwire's own history the single largest rename family is a whole-project
-// rebrand (ctxpack → ripwire, 1686 supporting lines), which carries no information about naming quality at
+// rebrand (a private pre-release name → ripwire, 1686 supporting lines), which carries no information about naming quality at
 // all. So:
 //   * the numbers below are a PRECISION PROXY, never precision;
 //   * every emitted report states the sample size, and the gate SKIPS rather than passes when the sample is

@@ -1737,7 +1737,7 @@ std::optional<int> runLint( const MainDispatch& d )
         // ("trims to fit") kept and no way for a caller to see it coming; every other verb in the catalog has
         // a display default (--hotspots 40, --grep 100, …), --lint alone had none. Measured HERE before
         // choosing the cap: this repo prints 367,924 B / 3,213 findings (~114 B/finding); a second, larger
-        // polyglot fixture (ctxpack, 1,033 tracked files) prints 254,445 B / 2,312 findings (~110 B/finding).
+        // polyglot fixture (ripwire's pre-cutover ancestor, 1,033 tracked files) prints 254,445 B / 2,312 findings (~110 B/finding).
         // kLintDefaultPayloadBytes=100,000 lands an order of magnitude under E6's pathological case while
         // staying multiples of every other capped verb's default payload on this repo (--hotspots ~5.5 KB,
         // --clones ~17 KB, --grep(100 hits) ~57 KB) — --lint's own facts are individually smaller so it earns

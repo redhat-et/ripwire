@@ -41,7 +41,7 @@
 #   python3 bench/agentloop/grade_answers.py --instances bank.tsv --audit
 #   python3 bench/agentloop/grade_answers.py --instances bank.tsv --results run.json \
 #       --pin-root /tmp/e1-pins --key sealed.json
-import argparse, json, pathlib, re, subprocess, sys
+import argparse, json, os, pathlib, re, subprocess, sys
 
 SCHEMA_RESULTS = "ripwire-agentloop-results-v3"
 COLUMNS = ( "id", "status", "repo", "pin_ref", "scenario_class", "tier", "cap_calls", "cap_wall_s",
@@ -65,7 +65,15 @@ VERDICT_RE = re.compile( r"^\s*[-*]?\s*(?P<claim>[^\s:][^:]{0,60}?)\s*:\s*"
 # ripwire in COMMAND POSITION — start of the command, or after a pipe/;/&&/||/backtick/$( — which is
 # what protocol §3's "no gt_command invokes ripwire" actually forbids. `grep -rn X ripwire/src` names
 # a directory and is fine; nine admitted rows depend on that distinction.
-CIRCULAR_RE = re.compile( r"(?:^|[|;&`]|\$\(|&&|\|\|)\s*(?:[\w./\-]*/)?(ripwire|ctxpack)\b" )
+# A bank whose commands run an older build of the instrument under another command name must refuse
+# those rows too, and that name does not belong in a tracked file: AGENTLOOP_TOOL_ALIASES (comma- or
+# space-separated) adds each name to the same command-position test. Unset, only `ripwire` counts.
+# The name ends at `(?!\w)`, not `\b`. After a name ending in a word character the two are the same test, so
+# ripwire's own refusal set does not move; but `\b` never matches after an alias ending in `-` or `.` (no
+# boundary between two non-word characters), and it would take `tool.py` for the alias `tool.`.
+TOOL_ALIASES = tuple( n for n in re.split( r"[\s,]+", os.environ.get( "AGENTLOOP_TOOL_ALIASES", "" ) ) if n )
+CIRCULAR_RE = re.compile( r"(?:^|[|;&`]|\$\(|&&|\|\|)\s*(?:[\w./\-]*/)?(%s)(?!\w)"
+                          % "|".join( re.escape( n ) for n in ( "ripwire", ) + TOOL_ALIASES ) )
 
 
 # ── the bank ────────────────────────────────────────────────────────────────────────────────────────
@@ -103,10 +111,14 @@ def needs_seal( row ):
 def is_circular( gt_command ):
     return bool( CIRCULAR_RE.search( gt_command ) )
 
+def instrument_note():
+    """How the output DISCLOSES the command-position test: a count of aliases, never the names themselves."""
+    return f"circular test: ripwire + {len( TOOL_ALIASES )} name(s) from AGENTLOOP_TOOL_ALIASES"
+
 
 # ── the key: a COMMAND run at the pin (protocol §3) ─────────────────────────────────────────────────
 def pin_pairs( row ):
-    """[(repo_dir, sha)] for the row. `ctxpack@b5ac9f2 + ripwire@49f4d75` is the multi-root form."""
+    """[(repo_dir, sha)] for the row. `otherrepo@1234abc + ripwire@49f4d75` is the multi-root form."""
     pin = row[ "pin_ref" ].strip()
     if "@" not in pin:
         return [ ( row[ "repo" ].strip(), pin ) ]
@@ -255,7 +267,7 @@ def answer_verdicts( answer ):
 
 # ── scoring primitives ──────────────────────────────────────────────────────────────────────────────
 def basename_set( paths ):
-    """Compare on basenames. The bank's keys are repo-relative (`ctxpack/src/x.h`) while an agent
+    """Compare on basenames. The bank's keys are repo-relative (`otherrepo/src/x.h`) while an agent
     answering inside its checkout says `src/x.h`; scoring the prefix would fail every correct answer."""
     return { p.rsplit( "/", 1 )[ -1 ] for p in paths }
 
@@ -563,7 +575,7 @@ def audit( rows ):
         circular += circ; seals += seal; fully += ( not unparsed )
         print( f"{row['id']}\t{row['grader']}\t{row['tier']}\t{int(circ)}\t{int(seal)}\t"
                f"{len(parsed)}\t{len(unparsed)}" )
-    print( f"# {len(rows)} graded rows: {circular} circular (REFUSED), {seals} need a human-sealed key, "
+    print( f"# {len(rows)} graded rows: {circular} circular (REFUSED; {instrument_note()}), {seals} need a human-sealed key, "
            f"{fully} fully clause-parsed, {len(rows)-fully} carry at least one clause that is not "
            f"mechanically checkable (those rows can only reach PARTIAL)" )
     return 0
@@ -632,6 +644,7 @@ def main():
     notes = [ f"instances={a.instances} n_graded={len(graded)} keys={len(keys)}",
               f"pin_root={a.pin_root}" + ( "  UNPINNED FIXTURE MODE" if a.allow_unpinned else "" ),
               f"derivation shell={globstar_shell() or 'bash (NO globstar — `**` rows are REFUSED)'}",
+              instrument_note(),
               "verdicts: PASS/FAIL scored · PARTIAL = a clause was not mechanically checkable · "
               "REFUSED_* = owner action needed · cap=1 is CENSORED, not failed (protocol §8)" ]
     if unknown:
