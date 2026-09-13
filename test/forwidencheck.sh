@@ -169,10 +169,10 @@ else no "(2) a row lacks one of p= score= n= sym="; fi
 
 # ── (3) one file per row, deterministic, well-formed, paged ────────────────────────────────────────────
 dups="$( sort "$TMP/page40.rows" | uniq -d | grep -c . )"
-[ "$dups" = 0 ] && [ "$nrows" -ge 30 ] && ok "(3) one row per file: no duplicate p= among $nrows rows" || no "(3) $dups duplicate file row(s) on the page (rows=$nrows)"
+if [ "$dups" = 0 ] && [ "$nrows" -ge 30 ]; then ok "(3) one row per file: no duplicate p= among $nrows rows"; else no "(3) $dups duplicate file row(s) on the page (rows=$nrows)"; fi
 run --for="$THIN" --limit=40 >"$TMP/page40b.xml"
-[ -s "$TMP/page40.xml" ] && cmp -s "$TMP/page40.xml" "$TMP/page40b.xml" && ok "(3) two runs are byte-identical (determinism)" || no "(3) two runs of the same page differ (or the page is empty)"
-xmllint --noout "$TMP/page40.xml" 2>/dev/null && ok "(3) the page is well-formed XML" || no "(3) the page is not well-formed XML"
+if [ -s "$TMP/page40.xml" ] && cmp -s "$TMP/page40.xml" "$TMP/page40b.xml"; then ok "(3) two runs are byte-identical (determinism)"; else no "(3) two runs of the same page differ (or the page is empty)"; fi
+if xmllint --noout "$TMP/page40.xml" 2>/dev/null; then ok "(3) the page is well-formed XML"; else no "(3) the page is not well-formed XML"; fi
 
 run --for="$THIN" --limit=10 >"$TMP/p1.xml"
 run --for="$THIN" --limit=10 --offset=10 >"$TMP/p2.xml"
@@ -210,11 +210,11 @@ for dialect in "" "--legend=compact"; do
                                                  || no "(4) $label: the leading legend never spells coverage="
 done
 groot="$( grep -o '^<files [^>]*>' "$TMP/page40.xml" )"
-printf '%s' "$groot" | grep -q ' coverage="[0-9][0-9]*"' && ok "(4) the page root carries coverage= too" || no "(4) the page root lacks coverage="
-grep -o '<!--.*-->' "$TMP/page40.xml" | head -1 | grep -q 'coverage=' && ok "(4) the page legend defines coverage=" || no "(4) the page legend never spells coverage="
+if printf '%s' "$groot" | grep -q ' coverage="[0-9][0-9]*"'; then ok "(4) the page root carries coverage= too"; else no "(4) the page root lacks coverage="; fi
+if grep -o '<!--.*-->' "$TMP/page40.xml" | head -1 | grep -q 'coverage='; then ok "(4) the page legend defines coverage="; else no "(4) the page legend never spells coverage="; fi
 # the thin query's top symbol carries 2 of 5 terms (zeta is absent, and absent terms weigh most): under 50
 covthin="$( grep -o '^<ctx [^>]*>' "$TMP/default.xml" | grep -o 'coverage="[0-9]*"' | tr -dc '0-9' )"
-[ -n "$covthin" ] && [ "$covthin" -lt 50 ] && ok "(4) thin query: coverage=$covthin (under 50)" || no "(4) thin query: coverage='${covthin:-absent}' (expected under 50)"
+if [ -n "$covthin" ] && [ "$covthin" -lt 50 ]; then ok "(4) thin query: coverage=$covthin (under 50)"; else no "(4) thin query: coverage='${covthin:-absent}' (expected under 50)"; fi
 
 # ── (5) next= names the page on a thin answer, --expand on a confident one ─────────────────────────────
 top="$( grep -o '<d [^>]*r="1"[^>]*>' "$TMP/default.xml" | head -1 )"
@@ -227,7 +227,7 @@ fi
 run --for="$CONFIDENT" >"$TMP/conf.xml"
 croot="$( grep -o '^<ctx [^>]*>' "$TMP/conf.xml" )"
 covconf="$( printf '%s' "$croot" | grep -o 'coverage="[0-9]*"' | tr -dc '0-9' )"
-[ -z "$covconf" ] && ok "(5) confident answer: the root carries NO coverage= (present-only)" || no "(5) confident answer: the root carries coverage=$covconf — the gauge must ride thin answers only"
+if [ -z "$covconf" ]; then ok "(5) confident answer: the root carries NO coverage= (present-only)"; else no "(5) confident answer: the root carries coverage=$covconf — the gauge must ride thin answers only"; fi
 grep -o '<!--.*-->' "$TMP/conf.xml" | head -1 | grep -q 'coverage=' && no "(5) confident answer: the legend still spells coverage= for an attribute the root does not carry" \
                                                                   || ok "(5) confident answer: no coverage clause in the legend (present-only)"
 run --for="$CONFIDENT" --legend=compact >"$TMP/confc.xml"
@@ -235,7 +235,7 @@ run --for="$CONFIDENT" --legend=compact >"$TMP/confc.xml"
 grep -o '<!--.*-->' "$TMP/confc.xml" | head -1 | grep -q 'coverage=' && no "(5) confident answer, compact dialect: the legend spells coverage=" || true
 # the --json twin: the key rides thin answers only
 run --for="$THIN" --json >"$TMP/thin.json"; run --for="$CONFIDENT" --json >"$TMP/conf.json"
-grep -q '"coverage":[0-9]' "$TMP/thin.json" && ok "(5) --json thin answer carries \"coverage\":N" || no "(5) --json thin answer lacks the coverage key"
+if grep -q '"coverage":[0-9]' "$TMP/thin.json"; then ok "(5) --json thin answer carries \"coverage\":N"; else no "(5) --json thin answer lacks the coverage key"; fi
 grep -q '"coverage":' "$TMP/conf.json" && no "(5) --json confident answer carries a coverage key" || ok "(5) --json confident answer carries no coverage key"
 # the MCP twin, both states
 for pair in "thin:$THIN" "confident:$CONFIDENT"; do
@@ -256,7 +256,7 @@ ctop="$( grep -o '<d [^>]*r="1"[^>]*>' "$TMP/conf.xml" | head -1 )"
 printf '%s' "$ctop" | grep -q 'next="--expand=' && ok "(5) confident answer: the r=1 row keeps next=\"--expand=FILE:NAME\"" \
                                                  || no "(5) confident answer: the r=1 row's next= is '$( printf '%s' "$ctop" | grep -o 'next="[^"]*"' )'"
 others="$( grep -o '<d [^>]*next=' "$TMP/default.xml" | grep -vc 'r="1"' || true )"
-[ "$others" = 0 ] && ok "(5) next= rides the top row only" || no "(5) $others non-top row(s) carry next="
+if [ "$others" = 0 ]; then ok "(5) next= rides the top row only"; else no "(5) $others non-top row(s) carry next="; fi
 # the hint pastes: the ladder splits it with shlex, so the task must be quoted as a shell would
 hint="$( printf '%s' "$thinnext" | sed 's/^next="//; s/"$//' )"
 if [ -n "$hint" ]; then
@@ -273,9 +273,9 @@ fi
 
 # ── (6) refusals ────────────────────────────────────────────────────────────────────────────────────────
 run --for="$THIN" --limit=0 >/dev/null; rc=$?
-[ "$rc" != 0 ] && grep -q -- '--limit' "$TMP/err" && ok "(6) --limit=0 is refused (rc=$rc)" || no "(6) --limit=0 not refused: rc=$rc $( head -c 160 "$TMP/err" )"
+if [ "$rc" != 0 ] && grep -q -- '--limit' "$TMP/err"; then ok "(6) --limit=0 is refused (rc=$rc)"; else no "(6) --limit=0 not refused: rc=$rc $( head -c 160 "$TMP/err" )"; fi
 run --for="$THIN" --limit=abc >/dev/null; rc=$?
-[ "$rc" != 0 ] && grep -q -- '--limit' "$TMP/err" && ok "(6) --limit=abc is refused (rc=$rc)" || no "(6) --limit=abc not refused: rc=$rc $( head -c 160 "$TMP/err" )"
+if [ "$rc" != 0 ] && grep -q -- '--limit' "$TMP/err"; then ok "(6) --limit=abc is refused (rc=$rc)"; else no "(6) --limit=abc not refused: rc=$rc $( head -c 160 "$TMP/err" )"; fi
 for flag in --json --format=candidates --detail=1 --signatures-only --token-budget=2000; do
     run --for="$THIN" --limit=5 $flag >"$TMP/shape.out"; rc=$?
     if [ "$rc" != 0 ] && [ ! -s "$TMP/shape.out" ]; then
@@ -294,7 +294,7 @@ else
     no "(7) MCP for + limit did not answer with a <files> page: $( head -c 300 "$TMP/mcp.xml" | tr '\n' ' ' )"
 fi
 python3 "$TMP/rows.py" <"$TMP/mcp.xml" >"$TMP/mcp.rows"
-grep -qx "$GOLD" "$TMP/mcp.rows" && ok "(7) the MCP page names $GOLD" || no "(7) the MCP page does not name $GOLD"
+if grep -qx "$GOLD" "$TMP/mcp.rows"; then ok "(7) the MCP page names $GOLD"; else no "(7) the MCP page does not name $GOLD"; fi
 [ -s "$TMP/page40.rows" ] && cmp -s "$TMP/mcp.rows" "$TMP/page40.rows" && ok "(7) the MCP page's rows equal the CLI page's rows, in order" \
                                           || no "(7) the MCP page's rows differ from the CLI page's"
 cattrs="$( rootattrs <"$TMP/page40.xml" )"; mattrs="$( rootattrs <"$TMP/mcp.xml" )"

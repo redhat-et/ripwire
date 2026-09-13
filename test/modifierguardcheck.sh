@@ -84,8 +84,15 @@ guard "--limit on the default map"    'honored only by'                     "$NO
 guard "--offset on the default map"   'honored only by'                     "$NOROOT" --offset=3
 guard "--limit on the default map (names --top-k)" '--top-k'                "$NOROOT" --limit=3
 guard "--limit with --report"         'honored only by'                     "$NOROOT" --report --limit=3
-guard "--limit with --for"            'honored only by'                     "$NOROOT" --for=x --limit=3
+# L-W (2026-09-13, forpage.h): `--for --limit=N` is VALID now — it selects the file-grain widening page, so the
+# refusal this row pinned no longer exists. What still refuses beside the page is a byte budget (the page has
+# none to shape against; validateShapingFlagsHonored fires because --for joins the honoring set when a window
+# is asked for). The page itself is asserted below, after the guard table (test/forwidencheck.sh owns its shape).
+guard "--token-budget beside --for --limit (the page has no budget)" 'in the --limit/--offset-honoring set' "$NOROOT" --for=x --limit=3 --token-budget=1000
 guard "--offset with --metrics"       'honored only by'                     "$NOROOT" --metrics --offset=2
+# the positive half of the L-W row above: --for --limit=N answers with the <files> page (exit 0), on a real corpus
+"$BIN" "$ROOT/test/fixture" --for=x --limit=3 --no-cache >"$TMP/forpage.out" 2>"$TMP/forpage.err" </dev/null; forpage_rc=$?
+if [ "$forpage_rc" = 0 ] && grep -q '^<files ' "$TMP/forpage.out"; then ok "--for --limit=3: the file-grain page (exit 0, <files> root), not a refusal"; else no "--for --limit=3: rc=$forpage_rc, $( head -c 120 "$TMP/forpage.err" "$TMP/forpage.out" | tr '\n' ' ' )"; fi
 # §P15/§P16: --zoom/--stray-content joined the honoring set, but their fixed-shape sub-modes did not —
 # --zoom --mermaid stays a diagram (like plain --mermaid), --stray-content --plan/--abi route to emitters
 # that window nothing (landingplan::writePlan / abicheck::writeAbiCheck).
