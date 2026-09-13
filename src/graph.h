@@ -13,6 +13,7 @@
                                  // by hand with ingest.cpp's kLangTable per its own header comment)
 #include "infra/sparseCsr.h"     // first-party infra math (src/infra/)
 #include "infra/csrverify.h"     // structural gate, VERIFY'd after every production CSR build
+#include "infra/hashutil.h"      // fnv1aAbsorb — internDeclinedList buckets a declined call's candidate list by its bytes
 #include "pagerank.h"            // double-precision PageRank kernel over float CSR storage
 #include "prconverge.h"          // W2-F: RankDisclosure — the power iteration's own account, carried with its result
 #include "smallvec.h"            // rw::SmallVec — THE ONE ALIAS (src/smallvec.h picks the implementation)
@@ -28,6 +29,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>       // std::memcmp — internDeclinedList confirms a bucket hit against the stored list
 #include <span>          // std::span — transitiveCallers' seed seam takes any contiguous NodeId range
 #include <string>
 #include <string_view>
@@ -112,16 +114,15 @@ struct Graph
                                                      // external import binding, a `super()` whose MRO left the tree). No
                                                      // edge, never counted in ambOut/unresolvedOut. Serialized as the
                                                      // header `external=N` / JSON "external":N, absent when 0.
-    // Tier 3's DECLINES: a call whose candidates are two or more same-language definitions, none in the caller's
-    // file or directory, that no qualifier or receiver rule pinned. Still no edge — the ladder refuses to guess —
-    // but no longer silent. declinedOut is per CALLER, like ambOut: summed it is the header `declined=N` (JSON
-    // "declined":N, absent when 0), and over one selector's definitions it is the callees answer's declined_calls=.
-    // declinedCandOff/declinedCand are a CSR over the declined calls in resolve order — call k's candidates sit in
-    // [off[k], off[k+1]) — which the callers and impact answers read to count the declines that could have meant
-    // THEIR symbols, once per call however many of those symbols one call named.
+    // Tier 3's DECLINES: a call whose candidates are two or more same-language definitions, none in the caller's file or directory, that no qualifier or
+    // receiver rule pinned. Still no edge — the ladder refuses to guess — but no longer silent. declinedOut is per CALLER, like ambOut: summed it is the header
+    // `declined=N` (JSON "declined":N, absent when 0), and over one selector's definitions it is the callees answer's declined_calls=. The declinedList* triple
+    // stores what those calls could equally have meant ONCE PER DISTINCT candidate list (internDeclinedList): list k is declinedListCand[ off[k], off[k+1] ),
+    // named by declinedListCallCount[k] calls — what the callers and impact answers read to count, once per call, the declines that could have meant THEIR symbols.
     std::vector<std::uint32_t> declinedOut;
-    std::vector<std::uint32_t> declinedCandOff;
-    std::vector<NodeId>        declinedCand;
+    std::vector<std::uint32_t> declinedListOff{ 0u };   // the leading offset lives here, so a default Graph is already a valid zero-list CSR
+    std::vector<NodeId>        declinedListCand;
+    std::vector<std::size_t>   declinedListCallCount;
     // Every call reference's disposition (pincensus.h CallDisposition), one bucket per reference. Read by buildGraph's
     // unaccounted alert and copied into pinCensus when a census is armed; its external/unresolved/declined buckets
     // equal those header gauges by construction.
@@ -1672,6 +1673,7 @@ struct DispositionTally
 // changes NOTHING else — no candidate is admitted, dropped or reordered by it, so the emitted map is
 // byte-identical armed or not (test/pincensuscheck.sh arm (E) is the executable form of that sentence).
 
+inline void internDeclinedList( Graph& g, HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 1>>& listsByHash, std::span<const NodeId> cand );   // defined beside declinedCallsNaming, its one reader
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -1682,7 +1684,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     g.locPinOut.assign( N, 0u );   // counted in the resolve loop: calls the S6-C locality tie-break alone pinned to one def
     g.unresolvedOut.assign( N, 0u );   // counted in the resolve loop: calls whose in-repo defs were all lang-filtered
     g.declinedOut.assign( N, 0u );     // counted in the resolve loop: calls tier 3 declined to guess at (no edge)
-    g.declinedCandOff.assign( 1, 0u ); // the declined-call CSR's leading offset: call k's candidates are [off[k], off[k+1])
     if( scip ) { g.scipDocsSeen = scip->documentsSeen; g.scipEdgesPinned = scip->edgesPinned; }
     // #66: carry the crawl's own unindexed-extension roll-up onto the graph, so the verbs that answer off
     // this CSR can disclose the same gap the map header already prints. Summed HERE, from the identical
@@ -1999,6 +2000,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     HashMap<std::uint64_t, EdgeAcc> acc;
     acc.reserve( ing.references.size() );        // start past the 4-bucket / 0.8-load rehash cascade
     std::vector<NodeId>      cand, tier;
+    HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 1>> declinedListsByHash;   // tier-3 declines: list hash → list numbers (internDeclinedList)
+    declinedListsByHash.reserve( 4096 );
     std::vector<NodeId>      bindingTier;   // A4-R5 reused FFI-alias fallback candidate buffer
     std::string              bindKey;       // A4-R5 reused "<fileId>#var" key buffer for the ctypes-handle gate
     HashMap<std::uint64_t, char> bindingEdges;   // A4-R5 (from<<32|to) keys of edges resolved via an FFI alias —
@@ -2624,15 +2627,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 if( cand.size() == 1 || narrowed || canonical ) { tier = cand; tierConf = 0.2f; }
                 else
                 {
-                    // DECLINED. Still no edge and still no guess — that precision rule is the ladder's point. What
-                    // is gone is the silence: the decline counts on the caller (declinedOut → the header's
-                    // declined=, the callees answer's declined_calls=) and records the candidates it could equally
-                    // have meant (declinedCand → the callers and impact answers' declined_calls=), so a count="0"
-                    // there says a call was declined rather than reading as "no caller exists".
-                    // test/declinecheck.sh arms (A) and (B).
+                    // DECLINED. Still no edge and still no guess — that precision rule is the ladder's point. What is gone is the silence: the decline counts on the
+                    // caller (declinedOut → the header's declined=, the callees answer's declined_calls=) and records the candidate list it could equally have meant
+                    // (internDeclinedList → the callers and impact answers' declined_calls=), so a count="0" there says a call was declined. test/declinecheck.sh (A), (B).
                     ++g.declinedOut[ r.fromSymbol ];
-                    g.declinedCand.insert( g.declinedCand.end(), cand.begin(), cand.end() );
-                    g.declinedCandOff.push_back( std::uint32_t( g.declinedCand.size() ) );
+                    internDeclinedList( g, declinedListsByHash, cand );
                     disposition = CallDisposition::Declined;
                     continue;
                 }
@@ -3037,6 +3036,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( const E& e : edges ) { const std::uint32_t pos = cur[ e.to ]++; ci[ pos ] = e.from; val[ pos ] = e.w; }
     }
     VERIFY( verifyCsr( g.inEdges, N ) );
+    VERIFY( verifyOffsetCsr( g.declinedListOff, g.declinedListCand, g.declinedListCallCount.size(), N ) );
     }
 
     // inheritance edges (Lego view): isInherit refs (derived → base name) → implementors[base] += derived.
@@ -6617,13 +6617,69 @@ inline std::string graphCountFloorAttrJson( const Graph& g )
     return graphGaugeAttrJson( g.ambOut, g.unresolvedOut, g.unindexedFiles ) + kGraphCountFloorAttrJson;
 }
 
+// THE DECLINED-LIST INTERNER — tier 3's record of what a declined call could equally have meant, stored once per DISTINCT
+// candidate list rather than once per call. Measured on a sparse llvm-project tree: 715,735 declined calls held 27.9 M
+// candidate entries (114 MB, 167 MB of capacity) but only 9,879 distinct lists of 62 K entries, because every declined call
+// to a common name repeats that name's whole definition list (`get`: 7,270 calls over one 424-candidate list), and entries
+// per node grew super-linearly with the tree. The one reader, declinedCallsNaming, asks of each call only whether its set
+// includes a target, counting each call once — which a (list, call count) pair answers exactly.
+//
+// THE KEY IS THE EXACT NodeId SEQUENCE, never the called name: one name routinely owns several lists (the language filter
+// splits a C++ `size` from a Python one, the root filter splits `foo` per workspace root), and sharing by name would hand one
+// list's calls to the other's definitions — test/declinedlistcheck.sh arms (A) and (C). Equal sets arrive as equal sequences
+// with no sort: a declined call was never canonical, narrowed or SCIP-pinned, so its candidates come from the byName fill
+// alone — symbol-id order, each id once — and the decl/def collapse and every later filter (the namespace gate,
+// keepOwnJvmLanguageCandidates, keepRustQualifiedCandidates, keepStdQualifiedCandidates) keep a subset in order.
+//
+// The FNV-1a hash over the candidate bytes only picks a bucket; a hit is confirmed by length and memcmp against each list in
+// it, so a collision costs a compare, never a wrong share. List numbers are first-seen in the sequential resolve loop, and the
+// map is only probed and inserted into — neither reaches output.
+//
+// DEGRADE: the offsets are uint32. A new list that would carry the candidate array past UINT32_MAX entries is not recorded:
+// the call stays counted on its caller (declinedOut, the header's declined=), and declined_calls= on the callers and impact
+// answers can under-count, as the counts_floor="1" those answers carry already allows. A declined set holds two or more
+// candidates, so the list count stays under half the entry count and the uint32 list numbers cannot wrap first.
+inline void internDeclinedList( Graph& g, HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 1>>& listsByHash, std::span<const NodeId> cand )
+{
+    VERIFY( cand.size() >= 2 );   // tier 3 declines only a set it could not narrow to one
+    std::uint64_t     hash  = 14695981039346656037ull;   // the FNV-1a 64-bit offset basis
+    const char* const bytes = reinterpret_cast<const char*>( cand.data() );
+    for( std::size_t byteIndex = 0; byteIndex < cand.size_bytes(); ++byteIndex )
+    {
+        hash = hashutil::fnv1aAbsorb( hash, bytes[ byteIndex ] );
+    }
+    rw::SmallVec<std::uint32_t, 1>& bucket = listsByHash[ hash ];
+    for( const std::uint32_t listIndex : bucket )
+    {
+        const std::uint32_t listOffset = g.declinedListOff[ listIndex ];
+        const std::size_t   listCount  = g.declinedListOff[ listIndex + 1 ] - listOffset;
+        if( listCount == cand.size() && std::memcmp( g.declinedListCand.data() + listOffset, cand.data(), cand.size_bytes() ) == 0 )
+        {
+            ++g.declinedListCallCount[ listIndex ];
+            return;
+        }
+    }
+    constexpr std::size_t kOffsetCeiling = UINT32_MAX;
+    if( cand.size() > kOffsetCeiling - g.declinedListCand.size() )
+    {
+        DEGRADED_PATH_ALERT( "graph: the declined candidate lists would overflow their uint32 offsets — this call's list is not recorded, so declined_calls= can under-count" );
+        return;
+    }
+    bucket.push_back( std::uint32_t( g.declinedListCallCount.size() ) );
+    g.declinedListCand.insert( g.declinedListCand.end(), cand.begin(), cand.end() );
+    g.declinedListOff.push_back( std::uint32_t( g.declinedListCand.size() ) );
+    g.declinedListCallCount.push_back( 1 );
+}
+
 // declined_calls= on the callers and impact answers: how many tier-3 declines named at least one of `targets`
 // among their candidates. The unit is the CALL, never (call, candidate): a bare-name selector unions every
 // same-named definition, and a declined call that could have meant two of them is still ONE call the answer
-// may be missing.
+// may be missing. Calls that named the same candidate list share one stored list (internDeclinedList), so each distinct
+// list is scanned until its first target and then adds every call that named it — on a sparse llvm-project tree at most
+// 62 K candidate loads per answer, where one list per call scanned 27.9 M.
 inline std::size_t declinedCallsNaming( const Graph& g, std::span<const NodeId> targets )
 {
-    if( g.declinedCand.empty() || targets.empty() )
+    if( g.declinedListCallCount.empty() || targets.empty() )
     {
         return 0;
     }
@@ -6636,13 +6692,13 @@ inline std::size_t declinedCallsNaming( const Graph& g, std::span<const NodeId> 
         }
     }
     std::size_t callCount = 0;
-    for( std::size_t callIndex = 0; callIndex + 1 < g.declinedCandOff.size(); ++callIndex )
+    for( std::size_t listIndex = 0; listIndex < g.declinedListCallCount.size(); ++listIndex )
     {
-        for( std::uint32_t slot = g.declinedCandOff[ callIndex ]; slot < g.declinedCandOff[ callIndex + 1 ]; ++slot )
+        for( std::uint32_t slot = g.declinedListOff[ listIndex ]; slot < g.declinedListOff[ listIndex + 1 ]; ++slot )
         {
-            if( isTarget[ g.declinedCand[ slot ] ] )
+            if( isTarget[ g.declinedListCand[ slot ] ] )
             {
-                ++callCount;
+                callCount += g.declinedListCallCount[ listIndex ];
                 break;
             }
         }
