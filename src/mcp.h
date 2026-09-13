@@ -1480,9 +1480,19 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 else if( name == "for" && !path.empty() && !task.empty() )
                 {
                     // M13: `budget_tokens` — the same knob the CLI --for takes, absent here until now.
-                    const std::string t = forTaskText( path, task, redactPtr,
-                                                       budgetArg.isPresent ? std::size_t( budgetArg.value ) : 0, noRoute );
-                    resp = t.empty() ? errResult( -32602, "no symbols found" ) : textResult( t );
+                    // L-W: limit/offset select the FILE PAGE (the CLI --for --limit=N twin), read by the same
+                    // mcpPageArgs every paging twin uses; a budget beside a page is refused, as the CLI refuses
+                    // --token-budget beside --limit — the page has no byte ceiling to shape against.
+                    resp = pagedResult( [ & ]( McpPageArgs pg )
+                    {
+                        if( ( pg.limit > 0 || pg.offset > 0 ) && budgetArg.isPresent )
+                        {
+                            return errResultMsg( -32602, "for: limit/offset select the file page, which has no token budget to shape against — drop budget_tokens, or drop limit/offset for the budgeted bundle" );
+                        }
+                        const std::string t = forTaskText( path, task, redactPtr,
+                                                           budgetArg.isPresent ? std::size_t( budgetArg.value ) : 0, noRoute, pg );
+                        return t.empty() ? errResult( -32602, "no symbols found" ) : textResult( t );
+                    } );
                 }
                 else if( name == "lego" && !path.empty() && !type.empty() )
                 {

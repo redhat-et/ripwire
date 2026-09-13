@@ -988,7 +988,7 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "memory_recall",            "path task top_k budget_tokens" },
     { "situational_awareness",    "path diff files limit offset" },
     { "mentions",                 "path paths symbol limit offset" },
-    { "for",                      "path paths task budget_tokens no_route" },
+    { "for",                      "path paths task budget_tokens no_route limit offset" },   // L-W: limit/offset = the file page
     { "lego",                     "path paths type legend" },
     { "owners",                   "path symbol limit offset legend" },
     { "fetch_body",               "path handle start_line end_line" },

@@ -150,11 +150,14 @@ rrun --grep=zzqnothinghere >"$TMP/g4"; checkNext "grep zero-hit" "$TMP/g4" '^--f
 echo "=== (7) --for: the r=1 row carries --expand=FILE:NAME; every other row does not ==="
 rrun --for='geometry distance' >"$TMP/for"
 top="$( grep -o '<d [^>]*r="1"[^>]*>' "$TMP/for" | head -1 )"
-printf '%s' "$top" | grep -q 'next="--expand=' && ok "for: the r=1 row carries next= ($( printf '%s' "$top" | grep -o 'next="[^"]*"' ))" \
-                                                || no "for: the r=1 row has no next= — $( printf '%s' "$top" | cut -c1-160 )"
+# L-W (forpage.h, test/forwidencheck.sh pins the rule): on a THIN answer (coverage= under 50, or a head over
+# fewer than 3 files) the r=1 row hands over the FILE-GRAIN widening page instead of the body — either form
+# is the one pasteable follow-up this arm asserts; which form is right is forwidencheck's job, not this one's.
+printf '%s' "$top" | grep -Eq 'next="(--expand=|--for=)' && ok "for: the r=1 row carries next= ($( printf '%s' "$top" | grep -o 'next="[^"]*"' ))" \
+                                                        || no "for: the r=1 row has no next= — $( printf '%s' "$top" | cut -c1-160 )"
 others="$( grep -o '<d [^>]*next=' "$TMP/for" | grep -vc 'r="1"' || true )"
 if [ "$others" = 0 ]; then ok "for: next= rides the top row only"; else no "for: $others non-top row(s) carry next="; fi
-checkNext "for top row" "$TMP/for" '^--expand=[^ ]+:[A-Za-z_]+$' row
+checkNext "for top row" "$TMP/for" '^(--expand=[^ ]+:[A-Za-z_]+|--for=.* --limit=40)$' row
 
 echo "=== (8) well-formed + deterministic with the attribute in place ==="
 if command -v xmllint >/dev/null 2>&1; then

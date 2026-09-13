@@ -99,6 +99,11 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-09-13 (lane for-widen, L-W): docdemotegolden_for.xml 5517 -> 5901 B (est_tokens "2207" -> "2360").
+# The conceptual query is a THIN answer under the present-only rule (coverage="36"), so its root carries coverage=
+# with the legend clause and the r=1 row's next= names the file-grain page instead of --expand. Verified before
+# re-pinning: with coverage=, its clause, next= and est_tokens= normalized out, old and new are byte-identical —
+# no ranking byte moved, and arm (f)'s own demotion assertions still hold.
 # RE-PIN 2026-09-10 (cap-disclosure lane, fix 2): docdemotegolden_for.xml 5505 -> 5517 B (est_tokens
 # "2202" -> "2207") and docdemotegolden_noroute.xml 9556 -> 9568 B (est_tokens "3386" -> "3391"). ONE
 # identified change, +12 B on each = FOUR three-byte U+2026 markers: cleanSig's 240-byte cap
