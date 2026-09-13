@@ -90,15 +90,21 @@ same 185 rows), `test/cppqualfix` 2,935 → 2,781 B, `test/nestedqualfix` 2,045 
 four scoped rows (`test/accessshapefix`) grows 9 B, because the `sc=` reading is longer than the
 `id=canonical(…)` clause it replaces and four rows do not pay it back. On `--for` the bundle is
 byte-shaped, so the row savings became rows, not bytes: three conceptual and name-exact tasks on this
-tree served 25 → 28, 21 → 24 and 3 → 3 signature rows at 10,042 → 10,145, 10,256 → 10,316 and
-5,971 → 6,022 B, the difference being the new `sc=`/`route=` reading (259 B, ceiling-droppable with the
-confidence clause and exempt from the signature-trim charge like every other disclosure). The `--json`
+tree served 25 → 28, 21 → 24 and 3 → 3 signature rows at 10,042 → 10,142, 10,256 → 10,180 and
+5,971 → 5,886 B; the MCP `for` twin on the same tasks 8,752 → 9,008, 8,882 → 9,001 and 1,965 → 2,025 B
+with 26 → 31, 23 → 27 and 1 → 1 rows. The one new legend clause — the `sc=` composition rule and the
+`route=` code vocabulary, 123 B, ceiling-droppable with the confidence clause and exempt from the
+signature-trim charge like every other disclosure — keeps the readings of the codes in `--help`'s
+`--no-route` entry rather than on every answer: a 259 B first spelling grew a 2.9 KB fixture bundle by
+10% and tripped `test/forrankordercheck.sh`'s 4% ratchet. The `--json`
 twins mirror the attribute (`"sc"`), so `mcpattrparity` holds without a rename. Pins moved with the
 bytes: seven compact-legend schemas in `test/compactlegendcheck.sh` (map 810 → 920, map-diff 800 → 910,
 pack-signatures 680 → 780, metrics 720 → 820, query 630 → 730, pack-task 820 → 980, pack-top-n
 660 → 770) and the ten-verb loop 4,900 → 5,000 B, all for the one new whole-document `sc=` reading; the
-`test/fixture` map's `est_tokens` 884 → 894; five goldens regenerated for the row shape; the printf-parity
-manifest re-pinned for the six labels the rows move.
+`test/fixture` map's `est_tokens` 884 → 894; seven of `test/forrankordercheck.sh`'s nine frozen-fixture
+bundle bases follow the output (+84…+142 B each, the whole delta the tool's, the ten repository queries
+inside the ratchet at +0.8…+3.9%); five goldens regenerated for the row shape; the printf-parity manifest
+re-pinned for the labels the rows and the help text move.
 
 ### Added — Elixir module and arity resolution (parser version 95)
 

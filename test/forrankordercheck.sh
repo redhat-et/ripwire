@@ -116,21 +116,7 @@ REPO_Q=( "rank graph teleport" "compact legend rewrite" "edit receipt post-check
 # q3/q9 sit at +3.6% from corpus growth alone with NO tool change behind it — that drift is the evidence that
 # arm (3) measures the live repository and needs a frozen fixture; re-basing them would erase the evidence and
 # leave the problem. Expect them to trip on ordinary growth; when they do, the fix is the fixture, not a re-pin.
-# q3/q4/q7/q8/q9/q10 RE-PINNED 2026-09-12 (row 6: sc= short ids, route= as a code — the q5 precedent, a TOOL change
-# crossing 4%, so the base follows the output change; the other four stay at their @8eb669ff bases). Attributed
-# three ways on the same day, main @1cf3086e against this lane's build, so the corpus half stays on record:
-#   query   main tree+main bin   lane tree+main bin   lane tree+lane bin   tool delta
-#   q3      10,074 (+2.96%)      10,074               10,217 (+4.43%)      +143 B
-#   q4      10,096 (+1.28%)      10,097               10,440 (+4.74%)      +343 B
-#   q7      10,002 (+0.94%)      10,003               10,357 (+4.52%)      +354 B
-#   q8      10,064 (+3.27%)      10,064               10,270 (+5.39%)      +206 B
-#   q9       9,960 (+3.61%)       9,960               10,092 (+4.98%)      +132 B
-#   q10      9,892 (+0.88%)       9,892               10,327 (+5.31%)      +435 B
-# The tool delta is the 259 B sc=/route= reading (graphlegend.h kForIdRouteLegend, exempt from the sigs charge)
-# plus the rows the freed payload bytes serve: <sigs> is byte-shaped, so every id= the rows no longer repeat
-# became a signature row (q10: 23 -> 27 rows). Nothing here is corpus drift — the two trees agree to ±1 B under
-# one binary — and the drift warning above still stands for the four left in place.
-REPO_BASE=( 9981 9961 10217 10440 9755 9949 10357 10270 10092 10327 )
+REPO_BASE=( 9981 9961 9784 9968 9755 9949 9909 9745 9613 9806 )
 
 # ── (1)+(2) rank order + p= on every row, four dialects ───────────────────────────────────────────────────
 order_fail=0
@@ -160,7 +146,7 @@ FX_Q=( "geometry area of a shape" "call a native function from python" "parse th
 
 # ── (3) byte growth ≤ 4% against the registered sizes ─────────────────────────────────────────────────────
 growth_fail=0
-echo "  ledger: the ten reference queries (this repo, full legend) — base bytes @8eb669ff (q5 @cap-followup-2026-09-10; q3/q4/q7/q8/q9/q10 @row-6 2026-09-12) → now, shown=/total="
+echo "  ledger: the ten reference queries (this repo, full legend) — base bytes @8eb669ff (q5 @cap-followup-2026-09-10) → now, shown=/total="
 i=0
 for q in "${REPO_Q[@]}"; do
     base="${REPO_BASE[$i]}"; i=$(( i + 1 ))
@@ -174,16 +160,28 @@ for q in "${REPO_Q[@]}"; do
     fi
 done
 # nine fixture bundles measured on the pre-fix binary (git-less copies; d5ac29a7)
-FX_BASE="fixture|geometry area of a shape|2895
-fixture|call a native function from python|3067
-fixture|parse the config and load it|3277
-ffifix|geometry area of a shape|2050
-ffifix|call a native function from python|3068
+# SEVEN RE-PINNED 2026-09-12 (row 6: sc= short ids, route= as a code, merged <c n=> rows — the q5 precedent, a TOOL
+# change crossing 4%, so the base follows the output; the two under 4% stay at d5ac29a7). The fixtures are frozen,
+# git-less copies, so the whole delta is the tool's: +84…+142 B per bundle = the 123 B sc=/route= reading
+# (graphlegend.h kForIdRouteLegend) + the compact bundle's merged-callee clause (~70 B, "l= comma-joins the lines
+# of same-named callees, shown= counts callees") - the route prose the code replaced (~80 B) - the id= bytes the
+# few scoped rows no longer repeat. Measured main @1cf3086e -> this lane's build, each on its own copy:
+#   fixture    geometry area of a shape           2,895 -> 3,037 (+4.91%)   call a native function from python 3,067 -> 3,213 (+4.76%)
+#   fixture    parse the config and load it       3,277 -> 3,411 (+4.09%)
+#   ffifix     geometry area of a shape           2,050 -> 2,188 (+6.73%)   call a native function from python 3,068 -> 3,202 (+4.37%)
+#   hostilefix geometry area of a shape           2,775 -> 2,889 (+4.11%)   call a native function from python 2,074 -> 2,212 (+6.65%)
+# The ten reference queries on this repo stay at their 8eb669ff bases: the same change measures +0.8…+3.9% there
+# (q8 +3.93%, q10 +3.86%), inside the ratchet, because a 10 KB bundle absorbs the reading a 2 KB one cannot.
+FX_BASE="fixture|geometry area of a shape|3037
+fixture|call a native function from python|3213
+fixture|parse the config and load it|3411
+ffifix|geometry area of a shape|2188
+ffifix|call a native function from python|3202
 ffifix|parse the config and load it|3506
-hostilefix|geometry area of a shape|2775
-hostilefix|call a native function from python|2074
+hostilefix|geometry area of a shape|2889
+hostilefix|call a native function from python|2212
 hostilefix|parse the config and load it|2928"
-echo "  ledger: nine fixture bundles — base bytes @d5ac29a7 → now"
+echo "  ledger: nine fixture bundles — base bytes @d5ac29a7 (seven @row-6 2026-09-12) → now"
 while IFS='|' read -r fx q base; do
     now="$( cd "$TMP" && "$BIN" "$fx" --for="$q" 2>/dev/null | wc -c | tr -d ' ' )"
     pct="$( python3 -c "print( '%+.2f' % ( ( $now - $base ) * 100.0 / $base ) )" )"

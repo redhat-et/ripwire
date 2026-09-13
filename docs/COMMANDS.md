@@ -275,7 +275,7 @@ $ ./build/ripwire . --for="tree-sitter parse of a source file" --auto-bodies
 
 **Answers:** (with --for) skip the query-shape router and always rank by subtoken+body BM25 (with --for/--query) force plain subtoken+body BM25.
 
-Routing is now the DEFAULT: a deterministic, confidence-gated query-shape router picks name-exact BM25 when the query NAMES a symbol (identifier syntax, or every content word is a symbol name) else subtoken+body, and prints which/why in the header. It only routes with a query (the plain map is unaffected). --no-route restores the old behavior. A name-exact header also names its EVIDENCE: anchors: word(defining/file) per anchoring word, +N when N further definitions share that name, or word(syntax) when the word routed on camel/snake SHAPE and names nothing. Paths deeper than two segments print top/.../basename. Discount a one-use test helper yourself. Routing also carries the QUERY-SHAPE document demotion: when the task text parses as a stack trace, sanitizer report or compiler diagnostic, or as a pasted issue-template form, the DOCUMENT tier scores down (repo meta-prose - issue templates, CONTRIBUTING, changelogs - twice as hard) and route= names the shape, its evidence and both factors. Demotion, never exclusion, and the mention anchor still lifts a document the task NAMES. --no-route has no route= to disclose it in, so it does not demote either.
+Routing is now the DEFAULT: a deterministic, confidence-gated query-shape router picks name-exact BM25 when the query NAMES a symbol (identifier syntax, or every content word is a symbol name) else subtoken+body, and prints which/why in the header. It only routes with a query (the plain map is unaffected). --no-route restores the old behavior. A name-exact header also names its EVIDENCE: anchors: word(defining/file) per anchoring word, +N when N further definitions share that name, or word(syntax) when the word routed on camel/snake SHAPE and names nothing. Paths deeper than two segments print top/.../basename. Discount a one-use test helper yourself. Routing also carries the QUERY-SHAPE document demotion: when the task text parses as a stack trace, sanitizer report or compiler diagnostic, or as a pasted issue-template form, the DOCUMENT tier scores down (repo meta-prose - issue templates, CONTRIBUTING, changelogs - twice as hard) and route= names the shape, its evidence and both factors. Demotion, never exclusion, and the mention anchor still lifts a document the task NAMES. --no-route has no route= to disclose it in, so it does not demote either. route= is a CODE: name-exact(X) = the task names symbol X (the anchors: clause after it is the evidence); subtoken+body = the conceptual ranker over names and bodies; subtoken+body:broad = a one- or two-word query where plain rg may also win; subtoken+body:declined(word;N-carriers,M-defs) = a name hit refused because the word is a common name (N names carry it, M definitions); a shape demotion appends "; doc tier demoted (...)". On the rows, sc= is the enclosing scope and the full id is p::sc::n (p= of the row or its <f>) - the spelling --expand/--callers/--impact/--uses accept.
 
 **Try it**
 
@@ -301,6 +301,7 @@ $ ./build/ripwire . --for="rankGraphTeleport" --no-route
 
 - (with --for) skip the query-shape router and always rank by subtoken+body BM25 (with --for/--query) force plain subtoken+body BM25.
 - Demotion, never exclusion, and the mention anchor still lifts a document the task NAMES.
+- subtoken+body:declined(word;N-carriers,M-defs) = a name hit refused because the word is a common name (N names carry it, M definitions);
 
 ### `--adaptive`
 
@@ -730,7 +731,7 @@ $ ./build/ripwire . --callers=DoesNotExist
 (empty)
 ```
 
-**Shaped by:** `--callees`, `--uses`, `--impact`, `--expand`, `--edit-check`, `--slice-flow`, `--at`, `--format`
+**Shaped by:** `--no-route`, `--callees`, `--uses`, `--impact`, `--expand`, `--edit-check`, `--slice-flow`, `--at`
 
 **Caveats (stated by the binary):**
 
@@ -796,7 +797,7 @@ $ ./build/ripwire . --uses=rankGraphTeleport
 </uses>
 ```
 
-**Shaped by:** `--impact`, `--naming-consistency`, `--edit-check`, `--edit-target-file`, `--safe-delete`, `--doctor`, `--format`, `--legend`
+**Shaped by:** `--no-route`, `--impact`, `--naming-consistency`, `--edit-check`, `--edit-target-file`, `--safe-delete`, `--doctor`, `--format`
 
 **Caveats (stated by the binary):**
 
@@ -956,7 +957,7 @@ $ ./build/ripwire . --impact=rankGraphTeleport
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--uses`, `--metrics`, `--deps`, `--safe-delete`, `--slice-flow`, `--format`, `--legend`, `--json`
+**Shaped by:** `--no-route`, `--uses`, `--metrics`, `--deps`, `--safe-delete`, `--slice-flow`, `--format`, `--legend`
 
 **Caveats (stated by the binary):**
 
@@ -1577,7 +1578,7 @@ $ ./build/ripwire . --top-k=0 --expand=rankGraphTeleport
 ... [20 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--top-k`, `--for`, `--pack-signatures`, `--outline`, `--compress`, `--no-redact`, `--hotspots`, `--edit-check`
+**Shaped by:** `--top-k`, `--for`, `--no-route`, `--pack-signatures`, `--outline`, `--compress`, `--no-redact`, `--hotspots`
 
 **Caveats (stated by the binary):**
 

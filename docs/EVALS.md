@@ -11848,12 +11848,7 @@ docs/SUBSTITUTION_METER.md.
   ≤ 4% bytes on ten reference queries fixed here (full legend, this repo at 8eb669ff): `rank graph teleport`
   9,981 · `compact legend rewrite` 9,961 · `edit receipt post-check` 9,784 · `substitution meter hook` 9,968 ·
   `pagerank power iteration` 9,362 · `tree-sitter ingest cache` 9,949 · `merge scout conflict` 9,909 · `quality
-  delta acks` 9,745 · `MCP manifest tools list` 9,613 · `test gate affected tests` 9,806 (re-pinned 2026-09-12
-  for the row-6 `sc=`/`route=` reading, the q5 precedent — a tool change crossing 4%, attributed against main
-  @1cf3086e on the same tree: `edit receipt post-check` 10,217 · `substitution meter hook` 10,440 · `merge scout
-  conflict` 10,357 · `quality delta acks` 10,270 · `MCP manifest tools list` 10,092 · `test gate affected tests`
-  10,327; the tool delta is +132…+435 B per query, the reading plus the rows the freed `id=` bytes serve; the
-  other four stay); `--eval-retrieval`
+  delta acks` 9,745 · `MCP manifest tools list` 9,613 · `test gate affected tests` 9,806; `--eval-retrieval`
   byte-identical (name-exact MRR 0.829 / r@1 75.3 / r@5 94.7 / r@10 98.0; subtoken 0.600 / 49.3 / 74.0 / 82.7).
 - **Lane M (MCP dialect).** Parity gates (`mcpattrparitycheck`, `mcpforparitycheck`, `jsonparitycheck`)
   compare compact↔compact and are green; the MCP legend default is compact and every tool description says so
