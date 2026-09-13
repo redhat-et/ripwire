@@ -324,7 +324,8 @@ probeFor()
 # with attributes still undefined. Each schema's pin is its LARGEST measured (U) probe on this gate's fixture, rounded up to the
 # next multiple of 10 B, plus 10 B, so a verb whose legend grows is re-pinned in the commit that adds the bytes, with the bytes
 # attributed there. A schema with no row FAILS: a new XML verb is measured and pinned, never waved through under a default.
-# --for keeps its native dialect and is exempt (below).
+# --for's NATIVE compact legend joined the table 2026-09-12 (A1′, owner decision): pinned at 500 B, present-only
+# definitions — it used to spend 1,177–1,216 B on this fixture and was exempt by name (below).
 # ONE ROW PER SCHEMA: the pin, then the largest (U) probe it was measured from. Measured 2026-09-12 in the fourth sweep's last
 # pass, once every attribute the --impact, --safe-delete, --communities, --community and map-header answers print had a reading;
 # re-measured the same day after that sweep's design review corrected three readings, added the present-only <s tested=> reading
@@ -404,6 +405,7 @@ ripwire.layout/v1                160   149
 ripwire.pack-task/v1             980   974
 ripwire.pack-top-n/v1            770   761
 ripwire.expand/v1                280   265
+ripwire.for/v1                   500   494
 '
 pinFor()
 {
@@ -436,15 +438,15 @@ while IFS="$( printf '\t' )" read -r flag kind example policy; do
     schema="$( leg schema "$TMP/u.c" )"
     lb="$( leg prose "$TMP/u.c" "$TMP/u.full" )"; lball="$( leg bytes "$TMP/u.c" )"; lbfull="$( leg bytes "$TMP/u.full" )"
     case "$schema" in ripwire.*/v1) ;; *) no "(U) $probe compact root has no schema=\"ripwire.<key>/v1\" (got '$schema')" ;; esac
-    case "$flag" in
-        --for=) [ "$lb" -lt "$lbfull" ] || no "(U) --for compact legend ($lb B) did not shrink vs full ($lbfull B)" ;;   # native dialect, data in its comments (A10) — registered follow-up
-        *)      pin="$( pinFor "$schema" )"
-                if [ -z "$pin" ]; then
-                    no "(U) $probe answers $schema, which has no per-verb pin: measure its compact PROSE legend ($lb B here) and pin it in pinFor"
-                elif [ "$lb" -gt "$pin" ]; then
-                    no "(U) $probe compact PROSE legend is $lb B (> its $pin B pin for $schema; all comments $lball B, full $lbfull B): $( leg legend "$TMP/u.c" | head -c 200 )"
-                fi ;;
-    esac
+    # A1′ (2026-09-12): --for is pinned like every other verb now (ripwire.for/v1 at 500 B) — its native compact
+    # legend defines only the terms the document carries; the "shrinks vs full" arm below still runs on it.
+    pin="$( pinFor "$schema" )"
+    if [ -z "$pin" ]; then
+        no "(U) $probe answers $schema, which has no per-verb pin: measure its compact PROSE legend ($lb B here) and pin it in pinFor"
+    elif [ "$lb" -gt "$pin" ]; then
+        no "(U) $probe compact PROSE legend is $lb B (> its $pin B pin for $schema; all comments $lball B, full $lbfull B): $( leg legend "$TMP/u.c" | head -c 200 )"
+    fi
+    [ "$flag" != "--for=" ] || [ "$lb" -lt "$lbfull" ] || no "(U) --for compact legend ($lb B) did not shrink vs full ($lbfull B)"
     [ "$lball" -lt "$lbfull" ] || [ "$lbfull" -eq 0 ] || no "(U) $probe compact comments ($lball B) are not smaller than the full dialect's ($lbfull B)"
     fa="$( leg rootattrs "$TMP/u.full" )"; ca="$( leg rootattrs "$TMP/u.c" )"
     [ "$fa" = "$ca" ] || no "(U) $probe root attribute set moved under compact: full=[$fa] compact=[$ca]"
@@ -465,8 +467,7 @@ while IFS="$( printf '\t' )" read -r flag kind example policy; do
     # every completeness attribute the document carries is NAMED in the compact legend: the window names
     # (one reading tool-wide) anywhere in the payload; the head-scoped ones (at= on a nonlocal-state <cell>
     # row is a LINE, limit= on a skipped <f> row is a SIZE cap) on the root + first child only
-    legtxt="$( leg legend "$TMP/u.c" )"
-    [ "$flag" = "--for=" ] && legtxt="$legtxt $( leg legend "$TMP/u.full" )"   # --for keeps its native legend
+    legtxt="$( leg legend "$TMP/u.c" )"   # A1′: --for's compact legend stands alone here too — no union with the full one
     for a in capped shown total has_more next_offset; do
         if grep -q " $a=\"" "$TMP/u.cpay"; then
             case "$legtxt" in *"$a="*) ;; *) no "(U) $probe compact legend does not name $a= although the document carries it" ;; esac

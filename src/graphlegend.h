@@ -289,8 +289,6 @@ inline constexpr const char* kForRootRelAtLegendShort =
 inline constexpr std::string_view kForIdRouteLegend =
     "; sc=enclosing scope (full id p::sc::n; every selector takes it); route= ranker code: name-exact(X) = the task names X "
     "(its anchors list the evidence), subtoken+body = conceptual (:broad = 1-2 plain words, rg may win; :declined(w;carriers,defs) = common-name hit refused)";
-inline constexpr std::string_view kForIdRouteLegendCompact =
-    "; sc= scope (id=p::sc::n); route= ranker code: name-exact(X)|subtoken+body[:broad|:declined(...)]";
 
 inline const char* forRootRelPathsLegendShort( bool rootOn, bool atOn = false ) noexcept
 {

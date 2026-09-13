@@ -539,11 +539,6 @@ inline std::string rootOpenWithSchema( std::string rootOpen, std::string_view sc
 using rw::ForConfidence;
 using rw::deriveForConfidence;
 
-// P1 (L7): the compact dialect's confidence clause — ONE constant, because runForLens exempts its bytes from the sig
-// trim by size (the full dialect exempts forConf.note the same way); a second spelling would desynchronize the ledger.
-inline constexpr std::string_view kForCompactConfidenceClause =
-    " [confidence=/margin_pct=: the ranked head's largest relative score drop; low = flat ranking, a starting point]";
-
 // L1 — RUNG ZERO'S OWN DISCLOSURE. The ceiling ladder's rung zero (runForLens, below) buys header bytes back by
 // dropping the two clauses whose loss costs no UNIQUE information: the confidence=/margin_pct= +
 // budget_tokens=/max_tokens= sentence and the r=/tail sentence. Every fact they describe stays on the document;
@@ -591,46 +586,123 @@ inline constexpr std::string_view kForLegendDroppedNote =
 // …and the COMPACT DIALECT's spelling, which names two fewer attributes because that dialect never had them.
 // The full dialect's confidence sentence carries "[budget_tokens=/max_tokens=: the token ceiling this bundle was
 // shaped against]" appended to it (runForLens), so rung zero really does take those definitions down with it
-// there. The compact dialect emits kForCompactConfidenceClause instead, which defines confidence= and
+// there. The compact dialect emits kForCompactLegendConfidence instead, which defines confidence= and
 // margin_pct= and nothing else — budget_tokens= has never been defined in it at any budget. Telling a compact
 // reader it was "dropped (ceiling)" would be the exact error this note exists to prevent, pointed the other way:
 // a feature that is missing, reported as a cut. Two constants rather than one assembled at runtime, for the
-// reason kForCompactConfidenceClause is one constant — the byte ledgers that exempt and charge these strings
+// reason kForCompactLegendConfidence is one constant — the byte ledgers that exempt and charge these strings
 // read their sizes, and a string built at runtime has no size to read at compile time.
 inline constexpr std::string_view kForLegendDroppedNoteCompact =
     " [legend clauses: confidence=/margin_pct=, sc=/route= and r=/tail (total= shown= capped=) dropped (ceiling) - "
     "the attributes stay; a wider token-budget defines them]";
 
-inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p, std::string_view extraNotes )
+// A1′ (owner decision 2026-09-12): --for's COMPACT legend, pinned at 500 B (test/compactlegendcheck.sh, the
+// ripwire.for/v1 row) and PRESENT-ONLY — every clause below is emitted only when the document carries the
+// attribute it defines, and every reading is the shortest honest one. It used to spend 1,177–1,216 B here
+// (the same sentences as the default dialect with a schema id in front) and was exempt from the per-verb
+// pin by name; a compact dialect exempt from being compact is not one. The data notes (relevance floor,
+// doc mentions, mention anchor, co-change boost) keep their NUMBERS and lose their explanation
+// (compactForNote below); adaptive/siblift/expansion notes are kept verbatim — their text IS the data
+// (cliff rank, drop, the env knob). No "--" anywhere: an XML comment (G4).
+//
+// WHAT RIDES WHERE. Root facts that the root's own attributes state (bundle=/bodies=/reason=) get one
+// clause; the lens columns one clause (cx/ccx/in/churn/amp/clone/tested are always computed on this
+// surface, clone=/tested= appear only where 1); sc= and next= ride the <d> clause; route= only when the
+// root carries it (the ladder's rung (c) drops the attribute, and then its reading goes with it); the
+// confidence, sc=/route= and tail clauses are the ceiling-droppable trio (rung zero, kForLegendDroppedNoteCompact
+// names them); the compact bundle's hops/calls/noedge clause and the auto bundle's bodies clause are
+// mutually exclusive by construction (planForEnrichment).
+inline constexpr std::string_view kForCompactLegendRoot =
+    "bundle=/bodies=/reason= the body posture; ";
+inline constexpr std::string_view kForCompactLegendRows =
+    "d: cx= ccx= complexity, in= callers, churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; "
+    "total= shown= capped=1 if cut";
+inline constexpr std::string_view kForCompactLegendRoute =
+    "; route= name-exact(X)|subtoken+body[:broad|:declined]";
+inline constexpr std::string_view kForCompactLegendConfidence =
+    "; confidence=/margin_pct= head score drop (low=flat)";
+inline constexpr std::string_view kForCompactLegendHops =
+    "; h l= p= n=, c n= l= (joined for same-named callees, shown= counts them), noedge= no callee resolved";
+inline constexpr std::string_view kForCompactLegendBodies =
+    "; b t= n= p= l= full bodies, c n= l= callee signatures";
+inline constexpr std::string_view kForCompactLegendTail =
+    "; t p= file outside sigs (weaker), r= rank (gap = trimmed)";
+
+// The data notes in their compact spelling: the numbers stay, the sentence goes. Unknown shapes pass
+// through VERBATIM — a note this table does not know is never shortened into something it did not say.
+inline std::string compactForNote( std::string_view note )
 {
-    h += "<!-- ripwire for ripwire.for/v1: task/route/root and bundle/bodies/reason are root facts; "
-         "sigs and hops use total/requested, shown/printed and capped=1 for truncation; cx/ccx/in/churn/amp/clone/tested "
-         "are the quality/reuse lens; calls are resolved callees and counts remain floors where stated";
-    h.append( p.adaptiveNote );
-    h.append( p.mentionNote );
-    h.append( p.boostNote );
-    h.append( p.sibliftNote );
-    h.append( p.expandNote );
-    h.append( p.docMentionNote );
-    h.append( p.floorNote );
-    // P1 (L7): the compact dialect's reader meets the same two root facts (confidence=/margin_pct=) — in the
-    // SHORT form; the full sentence rides the default dialect only (forcompresscheck/mcpclidiffcheck pin it there).
+    // " [relevance floor: kept 7 of 40 - the other 33 scored zero…]" → " [floor: kept 7 of 40]"
+    if( note.starts_with( " [relevance floor: kept " ) )
+    {
+        const std::size_t cut = note.find( " - " );
+        return cut == std::string_view::npos ? std::string( note ) : " [floor: kept " + std::string( note.substr( 24, cut - 24 ) ) + "]";
+    }
+    // " [doc mentions: 2 docs discussing 1 top-ranked symbol surfaced; doc_mentions= …]" → " [doc mentions: 2 docs, 1 symbol; doc_mentions=]"
+    if( note.starts_with( " [doc mentions: " ) )
+    {
+        const std::size_t disc = note.find( " discussing " );
+        const std::size_t top  = note.find( " top-ranked symbol" );
+        if( disc != std::string_view::npos && top != std::string_view::npos && top > disc )
+        {
+            return " [doc mentions: " + std::string( note.substr( 16, disc - 16 ) ) + ", " + std::string( note.substr( disc + 12, top - disc - 12 ) )
+                 + " symbol" + ( note.substr( top + 18 ).starts_with( "s" ) ? "s" : "" ) + "; doc_mentions=]";
+        }
+        return std::string( note );
+    }
+    // " [mention anchor: 1 file + 2 symbols named in the task, …; mention_anchored= …]" → " [mention anchor: 1 file + 2 symbols; mention_anchored=]"
+    if( note.starts_with( " [mention anchor: " ) )
+    {
+        const std::size_t cut = note.find( " named in the task" );
+        return cut == std::string_view::npos ? std::string( note ) : std::string( note.substr( 0, cut ) ) + "; mention_anchored=]";
+    }
+    // " [cochange boost: promoted N symbols in M files that historically …]" → " [cochange boost: promoted N symbols in M files]"
+    if( note.starts_with( " [cochange boost: promoted " ) )
+    {
+        const std::size_t cut = note.find( " that " );
+        return cut == std::string_view::npos ? std::string( note ) : std::string( note.substr( 0, cut ) ) + "]";
+    }
+    return std::string( note );
+}
+
+inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p, bool withRouteAttr, std::string_view extraNotes )
+{
+    h += "<!-- ripwire for ripwire.for/v1: ";
+    h += kForCompactLegendRoot;
+    h += kForCompactLegendRows;
+    // the ceiling-droppable trio — rung zero clears confidenceNote/tailLegend/idRouteLegend together and splices the note below
+    if( p.idRouteLegend && withRouteAttr && p.rootOpenStr.find( " route=\"" ) != std::string_view::npos )
+    {
+        h += kForCompactLegendRoute;
+    }
     if( !p.confidenceNote.empty() )
     {
-        h += kForCompactConfidenceClause;
+        h += kForCompactLegendConfidence;
     }
-    if( p.idRouteLegend )
+    if( p.compactBundle )
     {
-        h += rw::kForIdRouteLegendCompact;   // row 6: sc= and the route= code, the short form; rung zero drops it with the clause above
+        h += kForCompactLegendHops;
+    }
+    else if( p.autoBundle )
+    {
+        h += kForCompactLegendBodies;
     }
     if( p.tailLegend )
     {
-        h += rw::kForFileTailLegendCompact;   // deep-tail: r= + <tail> definitions ride the compact legend too, short form
+        h += kForCompactLegendTail;
     }
     if( p.legendDropped )
     {
-        h += kForLegendDroppedNoteCompact;   // L1: the two clauses above went to the ceiling — in THIS dialect's inventory
+        h += kForLegendDroppedNoteCompact;   // L1: the trio went to the ceiling — the attributes stay, the note names them
     }
+    // the data notes, numbers kept — see compactForNote
+    h += compactForNote( p.adaptiveNote );
+    h += compactForNote( p.mentionNote );
+    h += compactForNote( p.boostNote );
+    h += compactForNote( p.sibliftNote );
+    h += compactForNote( p.expandNote );
+    h += compactForNote( p.docMentionNote );
+    h += compactForNote( p.floorNote );
     h.append( extraNotes );
     h += " -->";
     // M10: at= folded into the SAME trailing comment as root= (one wrapper, not two) — the
@@ -688,7 +760,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
                              p.compactLegend ? "ripwire.for/v1" : std::string_view() );
     if( p.compactLegend )
     {
-        appendCompactForLegend( h, p, extraNotes );
+        appendCompactForLegend( h, p, withRouteAttr, extraNotes );
         return h;
     }
     h += "<!-- ripwire lens for ";
@@ -1943,7 +2015,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // charging note there for why the two disclosures are charged differently.
         const std::size_t confidenceOwnBytes = forConf.attrs.size() + forConf.note.size();
         // P1 (L7): the two halves separately, captured at the SAME early point — the compact dialect emits its own
-        // short clause (kForCompactConfidenceClause) in place of the early note, and the exemption below must
+        // short clause (kForCompactLegendConfidence) in place of the early note, and the exemption below must
         // subtract what that dialect emitted, never the appended budget clause (which is charged, see below).
         const std::size_t confidenceEarlyAttrsBytes = forConf.attrs.size();
         const std::size_t confidenceEarlyNoteBytes  = forConf.note.size();
@@ -2287,10 +2359,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         // (appendCompactForLegend), so the exemption must subtract what was emitted — the full constants left the
         // ledger 64 B short and the subtraction below underflowed (UBSan: "297 - 361 cannot be represented").
         const bool        compactLegendOn      = cfg.legend == "compact";
-        const std::size_t confidenceEmitted    = compactLegendOn ? ( confidenceEarlyNoteBytes == 0 ? 0 : kForCompactConfidenceClause.size() )
+        const std::size_t confidenceEmitted    = compactLegendOn ? ( confidenceEarlyNoteBytes == 0 ? 0 : kForCompactLegendConfidence.size() )
                                                                  : confidenceEarlyNoteBytes;
         const std::size_t confidenceExemptBytes = confidenceEarlyAttrsBytes + confidenceEmitted + forAtAttrStr.size();   // == confidenceOwnBytes + at= in the full dialect
-        const std::size_t tailLegendEmitted    = compactLegendOn ? rw::kForFileTailLegendCompact.size() : rw::kForFileTailLegend.size();
+        const std::size_t tailLegendEmitted    = compactLegendOn ? kForCompactLegendTail.size() : rw::kForFileTailLegend.size();
         // DEEP-TAIL: the tail legend's bytes are exempt from the sig-trim charge in BOTH regimes, the
         // confidence-disclosure precedent verbatim — the tail's contract is that the ranked head is
         // byte-identical with and without it, and charging the clause here would shrink <sigs> to pay for
@@ -2300,8 +2372,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         // same contract — disclosure only; charging it shrank the explicit-ceiling sig section below the default's
         // (forbudgetmonotoncheck #1/#5 caught it, 6507 B against 6141 B at --token-budget=8000). Subtract what was
         // EMITTED in this dialect, exactly as the confidence and tail clauses above do.
+        // A1′: the compact dialect emits ONLY the route clause here (sc= rides its always-on row clause), and only when
+        // the root carries route= — subtract exactly what appendCompactForLegend appended.
         const std::size_t idRouteLegendEmitted = !headerParts.idRouteLegend ? 0u
-                                               : ( compactLegendOn ? rw::kForIdRouteLegendCompact.size() : rw::kForIdRouteLegend.size() );
+                                               : ( compactLegendOn ? ( routeNoteRaw.empty() ? 0u : kForCompactLegendRoute.size() ) : rw::kForIdRouteLegend.size() );
         const std::size_t exemptBytes = adaptiveNote.size() + autoLegendBytes + confidenceExemptBytes + tailLegendEmitted + idRouteLegendEmitted;
         if( exemptBytes > headerStr.size() )
         {

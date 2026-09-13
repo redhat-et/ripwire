@@ -15,6 +15,28 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — `--for`'s compact legend is pinned at 500 bytes
+
+Under `--legend=compact` every other XML verb answers with a legend that defines only the terms its
+document carries, measured and pinned per schema in `test/compactlegendcheck.sh`; `--for` did not. Its
+native compact dialect was the default dialect's sentences with a schema id in front — 1,177 to 1,216
+bytes on that gate's own fixture — and it was exempt from the per-verb pin by name, so a call an agent
+makes more than any other paid the one legend the compact dialect exists to shrink. It now answers with
+one present-only comment: a reading for each row and root attribute the bundle actually prints
+(`cx`/`ccx`/`in`/`churn`/`amp`/`clone`/`tested`, `sc=` and the `route=` code, `bundle`/`bodies`/`reason`,
+the `total=`/`shown=`/`capped=` window, the hops or bodies clause of the serving shape, the tail and the
+confidence gauge), and the data notes keep their numbers without their sentences
+(`[floor: kept 7 of 40]`, `[doc mentions: 1 doc, 1 symbol; doc_mentions=]`); the three
+ceiling-droppable clauses still fall together under a tight `--token-budget` and the dropped note still
+names them. Measured with the gate's own splitter (comment bytes not present verbatim in the default
+dialect's document) on its fixture probe `--for=geometry`: 915 → 494 B, pinned at 500 as the new
+`ripwire.for/v1` row, the exemption gone. Per call on this tree, three tasks under `--legend=compact`:
+9,947 → 9,669, 10,075 → 9,682 and 5,156 → 4,624 B (−278, −393, −532 B) with the same signature rows
+served (32, 26, 3). The MCP `for` twin declares no `legend` field and serves the default dialect only,
+so its bytes are unchanged (9,132, 9,149 and 2,173 B on the same tasks). `legendcoveragecheck` holds:
+every attribute the compact document carries on its first screen has a `name=` definition in that one
+comment, with `next=`, `pure=` and `schema=` on the recorded floor exactly as before.
+
 ### Changed — symbol rows carry a short id (`sc=`) instead of repeating their path
 
 Every scoped symbol row on the map and on the `--for`/`--pack-task`/`--from-trace`/`--pack-signatures`
