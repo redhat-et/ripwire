@@ -111,19 +111,27 @@ tag="$( scopedTag "$IN" )"
 printf '%s' "$tag" | grep -q '^<recent scope="db" n="40" of="45" ' \
     && ok "arm 1b: scoped block opens <recent scope=\"db\" n=\"40\" of=\"45\" …> (got: $tag)" \
     || no "arm 1b: scoped block tag wrong or missing (got: '$tag')"
-printf '%s' "$tag" | grep -q 'capped="1"' && ok "arm 1c: the 45-file directory is capped=\"1\" at 40 rows" || no "arm 1c: no capped=\"1\" on a 45-file directory"
+printf '%s' "$tag" | grep -q 'capped="1"' \
+    && ok "arm 1c: the 45-file directory is capped=\"1\" at 40 rows" \
+    || no "arm 1c: no capped=\"1\" on a 45-file directory"
 gpos="$( printf '%s' "$IN" | grep -bo '<recent n=' | head -1 | cut -d: -f1 )"
 spos="$( printf '%s' "$IN" | grep -bo '<recent scope="' | head -1 | cut -d: -f1 )"
 [ -n "$gpos" ] && [ -n "$spos" ] && [ "$gpos" -lt "$spos" ] \
     && ok "arm 1d: the global block (byte $gpos) precedes the scoped one (byte $spos)" \
     || no "arm 1d: block order wrong (global at '$gpos', scoped at '$spos')"
 rows1="$( scopedRows "$IN" )"
-[ "$( printf '%s\n' "$rows1" | grep -c . )" = 40 ] && ok "arm 1e: the scoped block prints 40 rows" || no "arm 1e: scoped block prints $( printf '%s\n' "$rows1" | grep -c . ) rows, not 40"
+[ "$( printf '%s\n' "$rows1" | grep -c . )" = 40 ] \
+    && ok "arm 1e: the scoped block prints 40 rows" \
+    || no "arm 1e: scoped block prints $( printf '%s\n' "$rows1" | grep -c . ) rows, not 40"
 bad="$( printf '%s\n' "$rows1" | grep -v '^db/' | head -3 | tr '\n' ' ' )"
-[ -z "$bad" ] && ok "arm 1f: every scoped p= starts with db/ (root-relative, the global block's own spelling)" || no "arm 1f: scoped rows not under db/: $bad"
+[ -z "$bad" ] \
+    && ok "arm 1f: every scoped p= starts with db/ (root-relative, the global block's own spelling)" \
+    || no "arm 1f: scoped rows not under db/: $bad"
 # the coordinator's binding finding: the SAME file must be spelled identically in both blocks
 common="$( comm -12 <( printf '%s\n' "$rows1" | sort ) <( globalRows "$IN" | sort ) | grep -c . )"
-[ "$common" -ge 1 ] && ok "arm 1g: $common db/ paths appear in BOTH blocks with the identical spelling" || no "arm 1g: no scoped p= matches a global p= byte-for-byte — the scoped spelling is not the global one"
+[ "$common" -ge 1 ] \
+    && ok "arm 1g: $common db/ paths appear in BOTH blocks with the identical spelling" \
+    || no "arm 1g: no scoped p= matches a global p= byte-for-byte — the scoped spelling is not the global one"
 
 # ── arm 2: the global block is byte-identical with and without --in= ────────────────────────────────
 gb_bare="$( firstBlock "$BARE" )"; gb_in="$( firstBlock "$IN" )"
@@ -145,11 +153,17 @@ tag2="$( scopedTag "$P2" )"
 [ "$ec" = 0 ] && printf '%s' "$tag2" | grep -q '^<recent scope="db" n="5" of="45" ' \
     && ok "arm 3b: page 2 opens <recent scope=\"db\" n=\"5\" of=\"45\" …> (got: $tag2)" \
     || no "arm 3b: page 2 exit=$ec, tag: '$tag2'"
-printf '%s' "$tag2" | grep -q 'offset="40"' && ok "arm 3c: page 2 says offset=\"40\"" || no "arm 3c: page 2 lacks offset=\"40\""
-[ -n "$tag2" ] && ! printf '%s' "$tag2" | grep -q 'capped=\|next=' && ok "arm 3d: the last page carries no capped= and no next=" || no "arm 3d: the last page must exist and carry neither capped= nor next= (got: '$tag2')"
+printf '%s' "$tag2" | grep -q 'offset="40"' \
+    && ok "arm 3c: page 2 says offset=\"40\"" \
+    || no "arm 3c: page 2 lacks offset=\"40\""
+[ -n "$tag2" ] && ! printf '%s' "$tag2" | grep -q 'capped=\|next=' \
+    && ok "arm 3d: the last page carries no capped= and no next=" \
+    || no "arm 3d: the last page must exist and carry neither capped= nor next= (got: '$tag2')"
 rows2="$( scopedRows "$P2" )"
 overlap="$( comm -12 <( printf '%s\n' "$rows1" | sort ) <( printf '%s\n' "$rows2" | sort ) | grep -c . )"
-[ -n "$rows1" ] && [ -n "$rows2" ] && [ "$overlap" = 0 ] && ok "arm 3e: pages 1 and 2 share no row" || no "arm 3e: $overlap rows appear on both pages (or a page is empty)"
+[ -n "$rows1" ] && [ -n "$rows2" ] && [ "$overlap" = 0 ] \
+    && ok "arm 3e: pages 1 and 2 share no row" \
+    || no "arm 3e: $overlap rows appear on both pages (or a page is empty)"
 union="$( printf '%s\n%s\n' "$rows1" "$rows2" | grep . | sort -u )"
 gitdb="$( git -C "$REPO" ls-files db | sort -u )"
 [ "$union" = "$gitdb" ] && ok "arm 3f: page 1 ∪ page 2 == git's own db/ file list (45 files, none dropped, none invented)" \
@@ -159,19 +173,29 @@ printf '%s\n' "$rows2" | grep -qx 'db/f00.py' && ! printf '%s\n' "$rows1" | grep
     || no "arm 3g: db/f00.py is not exactly on page 2 (page1: $( printf '%s\n' "$rows1" | grep -c 'db/f00.py' ), page2: $( printf '%s\n' "$rows2" | grep -c 'db/f00.py' ))"
 # the pasted next=, split the way a shell would, reproduces page 2 byte for byte
 PASTED="$( python3 -c 'import shlex,subprocess,sys; sys.stdout.write(subprocess.run([sys.argv[1],sys.argv[2],"--no-cache"]+shlex.split(sys.argv[3]),capture_output=True,text=True).stdout)' "$BIN" "$REPO" "$next1" )"
-[ -n "$PASTED" ] && [ "$PASTED" = "$P2" ] && ok "arm 3h: the pasted next= reproduces page 2 byte-for-byte" || no "arm 3h: the pasted next= does not reproduce page 2"
+[ -n "$PASTED" ] && [ "$PASTED" = "$P2" ] \
+    && ok "arm 3h: the pasted next= reproduces page 2 byte-for-byte" \
+    || no "arm 3h: the pasted next= does not reproduce page 2"
 L10="$( run --rank-by=churn-decay --in=db --limit=10 2>/dev/null )"
 tagL="$( scopedTag "$L10" )"
 printf '%s' "$tagL" | grep -q '^<recent scope="db" n="10" of="45" ' && printf '%s' "$tagL" | grep -q 'next="--rank-by=churn-decay --in=db --offset=10 --limit=10"' \
     && ok "arm 3i: --limit=10 windows the page (n=\"10\") and next= carries --offset=10 --limit=10" \
     || no "arm 3i: --limit=10 page wrong (got: $tagL)"
-[ "$( scopedRows "$L10" | grep -c . )" = 10 ] && [ "$( scopedRows "$L10" | head -10 )" = "$( printf '%s\n' "$rows1" | head -10 )" ] && ok "arm 3j: --limit=10's rows are the first 10 of the default page (same order)" || no "arm 3j: --limit=10's rows differ from the default page's head"
+[ "$( scopedRows "$L10" | grep -c . )" = 10 ] && [ "$( scopedRows "$L10" | head -10 )" = "$( printf '%s\n' "$rows1" | head -10 )" ] \
+    && ok "arm 3j: --limit=10's rows are the first 10 of the default page (same order)" \
+    || no "arm 3j: --limit=10's rows differ from the default page's head"
 P9="$( run --rank-by=churn-decay --in=db --offset=99 2>/dev/null )"
-printf '%s' "$( scopedTag "$P9" )" | grep -q '^<recent scope="db" n="0" of="45" ' && ok "arm 3k: an offset past the end is an empty page (n=\"0\" of=\"45\"), never an error" || no "arm 3k: offset past the end: $( scopedTag "$P9" )"
+printf '%s' "$( scopedTag "$P9" )" | grep -q '^<recent scope="db" n="0" of="45" ' \
+    && ok "arm 3k: an offset past the end is an empty page (n=\"0\" of=\"45\"), never an error" \
+    || no "arm 3k: offset past the end: $( scopedTag "$P9" )"
 
 # ── arm 4: a gold OUTSIDE the directory stays in the global block ───────────────────────────────────
-[ "$( globalRows "$IN" | head -1 )" = "gold_outside.py" ] && ok "arm 4a: gold_outside.py (HEAD's file) leads the global block under --in=db" || no "arm 4a: global block's first row is '$( globalRows "$IN" | head -1 )', not gold_outside.py"
-[ -n "$rows1" ] && ! printf '%s\n' "$rows1" "$rows2" | grep -q 'gold_outside' && ok "arm 4b: the scoped block does not list the outside gold" || no "arm 4b: gold_outside.py leaked into the scoped block (or the block is empty)"
+[ "$( globalRows "$IN" | head -1 )" = "gold_outside.py" ] \
+    && ok "arm 4a: gold_outside.py (HEAD's file) leads the global block under --in=db" \
+    || no "arm 4a: global block's first row is '$( globalRows "$IN" | head -1 )', not gold_outside.py"
+[ -n "$rows1" ] && ! printf '%s\n' "$rows1" "$rows2" | grep -q 'gold_outside' \
+    && ok "arm 4b: the scoped block does not list the outside gold" \
+    || no "arm 4b: gold_outside.py leaked into the scoped block (or the block is empty)"
 
 # ── arm 5: the symbol map collapses to a counted stub ───────────────────────────────────────────────
 stub="$( printf '%s' "$IN" | grep -oE '<symbols [^>]*/>' | head -1 )"
@@ -183,9 +207,13 @@ bareRows="$( printf '%s' "$BARE" | grep -o '<s ' | wc -l | tr -d ' ' )"
     && ok "arm 5a: the stub is $stub" \
     || no "arm 5a: stub is '$stub', expected <symbols total=\"$bareShown\" shown=\"0\" next=\"--rank-by=churn-decay\"/>"
 printf '%s' "$IN" | grep -q '<f p=' && no "arm 5b: <f> groups are still emitted under --in= (the map was not stubbed)" || ok "arm 5b: no <f> group under --in= (the map is the stub)"
-printf '%s' "$IN" | grep -qE ' shown=0 ' && ok "arm 5c: the header's own shown= reads 0 under the stub (it cannot claim rows the document lacks)" || no "arm 5c: header shown= is not 0 under the stub: $( printf '%s' "$IN" | grep -oE ' shown=[0-9]+' | head -1 )"
+printf '%s' "$IN" | grep -qE ' shown=0 ' \
+    && ok "arm 5c: the header's own shown= reads 0 under the stub (it cannot claim rows the document lacks)" \
+    || no "arm 5c: header shown= is not 0 under the stub: $( printf '%s' "$IN" | grep -oE ' shown=[0-9]+' | head -1 )"
 inBytes="$( printf '%s' "$IN" | wc -c | tr -d ' ' )"; bareBytes="$( printf '%s' "$BARE" | wc -c | tr -d ' ' )"
-[ "$inBytes" -lt "$bareBytes" ] && ok "arm 5d: the scoped answer is smaller than the bare map ($inBytes B < $bareBytes B) even with a second block added" || no "arm 5d: scoped answer $inBytes B is not smaller than the bare $bareBytes B"
+[ "$inBytes" -lt "$bareBytes" ] \
+    && ok "arm 5d: the scoped answer is smaller than the bare map ($inBytes B < $bareBytes B) even with a second block added" \
+    || no "arm 5d: scoped answer $inBytes B is not smaller than the bare $bareBytes B"
 
 # ── arm 6: refusals — exit 1, empty stdout, a message that names the remedy ─────────────────────────
 refuses(){   # $1 = label, $2 = expected stderr substring, $3.. = argv
@@ -212,7 +240,9 @@ refuses "arm 6h: DIR absolute"                "root-relative"          --rank-by
 refuses "arm 6i: DIR climbs out"              "root-relative"          --rank-by=churn-decay --in=../repo/db
 refuses "arm 6j: DIR is the root itself"      "root-relative"          --rank-by=churn-decay --in=.
 "$BIN" "$REPO" --no-cache --rank-by=churn-decay --in= >"$WORK/r.out" 2>"$WORK/r.err" </dev/null; rc=$?
-[ "$rc" = 1 ] && [ ! -s "$WORK/r.out" ] && ok "arm 6k: --in= with an empty value is refused" || no "arm 6k: --in= (empty) exit $rc"
+[ "$rc" = 1 ] && [ ! -s "$WORK/r.out" ] \
+    && ok "arm 6k: --in= with an empty value is refused" \
+    || no "arm 6k: --in= (empty) exit $rc"
 
 # ── arm 7: a space and a leading dash in DIR; a trailing slash normalises ───────────────────────────
 SP="$( run --rank-by=churn-decay "--in=my dir" 2>"$WORK/e7" )"; ec=$?
@@ -220,25 +250,41 @@ tagS="$( scopedTag "$SP" )"
 [ "$ec" = 0 ] && printf '%s' "$tagS" | grep -q '^<recent scope="my dir" n="2" of="2" ' \
     && ok "arm 7a: --in='my dir' works (exit 0, $tagS)" \
     || no "arm 7a: --in='my dir' exit=$ec, tag '$tagS'"; [ "$ec" = 0 ] || sed 's/^/    /' "$WORK/e7" | head -2
-[ "$( scopedRows "$SP" | grep -c '^my dir/' )" = 2 ] && ok "arm 7b: both rows are spelled 'my dir/…'" || no "arm 7b: rows under 'my dir' wrong: $( scopedRows "$SP" | tr '\n' ' ' )"
+[ "$( scopedRows "$SP" | grep -c '^my dir/' )" = 2 ] \
+    && ok "arm 7b: both rows are spelled 'my dir/…'" \
+    || no "arm 7b: rows under 'my dir' wrong: $( scopedRows "$SP" | tr '\n' ' ' )"
 printf '%s' "$tagS" | grep -q 'capped=\|next=' && no "arm 7c: a 2-file directory must not be capped" || ok "arm 7c: a 2-file directory carries no capped= and no next="
 DA2="$( run --rank-by=churn-decay "--in=-dash" 2>"$WORK/e7d" )"; ec=$?
 [ "$ec" = 0 ] && printf '%s' "$( scopedTag "$DA2" )" | grep -q '^<recent scope="-dash" n="2" of="2" ' \
     && ok "arm 7d: --in=-dash (a directory starting with '-') works" \
     || no "arm 7d: --in=-dash exit=$ec, tag '$( scopedTag "$DA2" )'"; [ "$ec" = 0 ] || sed 's/^/    /' "$WORK/e7d" | head -2
 TS="$( run --rank-by=churn-decay --in=db/ 2>/dev/null )"
-[ "$( scopedTag "$TS" )" = "$tag" ] && ok "arm 7e: --in=db/ (trailing slash) is the same answer as --in=db" || no "arm 7e: --in=db/ tag differs: $( scopedTag "$TS" )"
+[ "$( scopedTag "$TS" )" = "$tag" ] \
+    && ok "arm 7e: --in=db/ (trailing slash) is the same answer as --in=db" \
+    || no "arm 7e: --in=db/ tag differs: $( scopedTag "$TS" )"
 
 # ── arm 8: merge_bombs_skipped= rides both blocks ───────────────────────────────────────────────────
-printf '%s' "$( printf '%s' "$IN" | grep -oE '<recent n=[^>]*>' | head -1 )" | grep -q 'merge_bombs_skipped="0"' && ok "arm 8a: the global block carries merge_bombs_skipped=\"0\"" || no "arm 8a: global block lacks merge_bombs_skipped= ($( printf '%s' "$IN" | grep -oE '<recent n=[^>]*>' | head -1 ))"
-printf '%s' "$tag" | grep -q 'merge_bombs_skipped="0"' && ok "arm 8b: the scoped block carries merge_bombs_skipped=\"0\"" || no "arm 8b: scoped block lacks merge_bombs_skipped= ($tag)"
+printf '%s' "$( printf '%s' "$IN" | grep -oE '<recent n=[^>]*>' | head -1 )" | grep -q 'merge_bombs_skipped="0"' \
+    && ok "arm 8a: the global block carries merge_bombs_skipped=\"0\"" \
+    || no "arm 8a: global block lacks merge_bombs_skipped= ($( printf '%s' "$IN" | grep -oE '<recent n=[^>]*>' | head -1 ))"
+printf '%s' "$tag" | grep -q 'merge_bombs_skipped="0"' \
+    && ok "arm 8b: the scoped block carries merge_bombs_skipped=\"0\"" \
+    || no "arm 8b: scoped block lacks merge_bombs_skipped= ($tag)"
 
 # ── arm 9: determinism, well-formedness, legends ────────────────────────────────────────────────────
 IN2="$( run --rank-by=churn-decay --in=db 2>/dev/null )"
-[ -n "$IN" ] && [ "$IN" = "$IN2" ] && ok "arm 9a: two --in=db runs are byte-identical ($inBytes B)" || no "arm 9a: two --in=db runs differ"
+[ -n "$IN" ] && [ "$IN" = "$IN2" ] \
+    && ok "arm 9a: two --in=db runs are byte-identical ($inBytes B)" \
+    || no "arm 9a: two --in=db runs differ"
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$IN" | xmllint --noout - 2>"$WORK/xl" && ok "arm 9b: --in=db output is well-formed XML" || { no "arm 9b: xmllint rejected --in=db output"; head -3 "$WORK/xl" | sed 's/^/    /'; }
-    printf '%s' "$SP" | xmllint --noout - 2>/dev/null && ok "arm 9c: --in='my dir' output is well-formed XML" || no "arm 9c: xmllint rejected --in='my dir' output"
+    if printf '%s' "$IN" | xmllint --noout - 2>"$WORK/xl"; then
+        ok "arm 9b: --in=db output is well-formed XML"
+    else
+        no "arm 9b: xmllint rejected --in=db output"; head -3 "$WORK/xl" | sed 's/^/    /'
+    fi
+    printf '%s' "$SP" | xmllint --noout - 2>/dev/null \
+        && ok "arm 9c: --in='my dir' output is well-formed XML" \
+        || no "arm 9c: xmllint rejected --in='my dir' output"
 else
     no "arm 9b: xmllint missing — cannot verify well-formedness"
 fi
@@ -249,7 +295,9 @@ INC="$( run --rank-by=churn-decay --in=db --legend=compact 2>/dev/null )"; ec=$?
 [ "$ec" = 0 ] && printf '%s' "$INC" | grep -q 'scope=' && printf '%s' "$INC" | grep -q '<symbols total=' \
     && ok "arm 9e: the compact legend defines scope= and the <symbols> stub" \
     || no "arm 9e: compact legend (exit $ec) lacks scope= / the stub: $( printf '%s' "$INC" | grep -oE '<!-- ripwire map[^>]*-->' | head -c 400 )"
-[ "$( scopedTag "$INC" )" = "$tag" ] && ok "arm 9f: --legend=compact leaves the scoped block byte-identical" || no "arm 9f: the scoped tag moved under --legend=compact: $( scopedTag "$INC" )"
+[ "$( scopedTag "$INC" )" = "$tag" ] \
+    && ok "arm 9f: --legend=compact leaves the scoped block byte-identical" \
+    || no "arm 9f: the scoped tag moved under --legend=compact: $( scopedTag "$INC" )"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

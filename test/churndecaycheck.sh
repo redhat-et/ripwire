@@ -174,7 +174,9 @@ fi
 # age_d= on HEAD's clock and the weight the ranker used, and it precedes every <f> group.
 R6="$( perl -e 'alarm 20; exec @ARGV' "$BIN" "$WORK/recent" --rank-by=churn-decay --no-cache 2>/dev/null )"
 printf '%s' "$R6" | grep -q '<recent n="2" of="2" ' \
-    && ok "arm 6a: <recent n=\"2\" of=\"2\" …> is emitted" || no "arm 6a: no <recent n=\"2\" of=\"2\" …> element"
+ \
+        && ok "arm 6a: <recent n=\"2\" of=\"2\" …> is emitted" \
+        || no "arm 6a: no <recent n=\"2\" of=\"2\" …> element"
 r6_first="$( printf '%s' "$R6" | grep -oE '<rc p="[^"]*"' | head -1 )"
 [ "$r6_first" = '<rc p="new.py"' ] && ok "arm 6b: the file with the newest decayed weight leads (new.py)" \
                                     || no "arm 6b: first <rc> is '$r6_first', expected new.py"
@@ -247,7 +249,9 @@ printf '%s' "$R7c" | grep -q 'merge_bombs_skipped=N' && printf '%s' "$R7c" | gre
     && ok "arm 7f: the compact legend defines merge_bombs_skipped=N with the 100-file threshold" \
     || no "arm 7f: the compact legend does not define merge_bombs_skipped= (legend: $( printf '%s' "$R7c" | grep -oE '<!-- ripwire map[^>]*-->' | head -c 300 ))"
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$R7" | xmllint --noout - 2>/dev/null && ok "arm 7g: the bomb fixture's output is well-formed XML" || no "arm 7g: xmllint rejected the bomb fixture's output"
+    printf '%s' "$R7" | xmllint --noout - 2>/dev/null \
+        && ok "arm 7g: the bomb fixture's output is well-formed XML" \
+        || no "arm 7g: xmllint rejected the bomb fixture's output"
 fi
 # 7h: a window whose EVERY commit is a merge bomb (a shallow clone of a large tree is exactly this shape — llvm-project at
 # depth 1 is one 183,835-file commit) must still print the block, with zero rows and the count: an ABSENT block reads as
