@@ -1631,23 +1631,27 @@ inline void writeRecentRows( XmlWriter& w, const MapAnnotations& ann, const Path
     }
     // C1-b: the directory-scoped block, AFTER the global one and additive to it (three of the six reference questions have
     // their gold outside the named directory). n=/of= are this element's own count spelling (pageview.h, THE TRUNCATION
-    // VOCABULARY rule 2); a cut page says capped="1" and carries the next page verbatim in next=.
+    // VOCABULARY rule 2); a cut page says capped="1" and carries the next page verbatim in next=. Composed on std::string
+    // (the rule above escapeXml — fixedbufsweep): scope= is ESCAPED text and next= is already-markup, so neither may pass
+    // through a fixed char[] after the escaper has run.
     if( ann.scopedRecent )
     {
-        w.write( "<recent scope=\"" );  w.write( escapeXml( ann.scopeDir, esc ) );
-        rw::formatTo( rc, sizeof rc, "\" n=\"{}\" of=\"{}\" merge_bombs_skipped=\"{}\"", ann.scopedRecent->size(), ann.scopedRecentOf, ann.recentMergeBombsSkipped );
-        w.write( rc );
+        std::string open = "<recent scope=\"";
+        open += escapeXml( ann.scopeDir, esc );
+        open += "\" n=\"";                  open += std::to_string( ann.scopedRecent->size() );
+        open += "\" of=\"";                 open += std::to_string( ann.scopedRecentOf );
+        open += "\" merge_bombs_skipped=\""; open += std::to_string( ann.recentMergeBombsSkipped );  open += "\"";
         if( ann.scopedOffset > 0 )
         {
-            rw::formatTo( rc, sizeof rc, " offset=\"{}\"", ann.scopedOffset );
-            w.write( rc );
+            open += " offset=\"";  open += std::to_string( ann.scopedOffset );  open += "\"";
         }
         if( !ann.scopedNext.empty() )
         {
-            w.write( " capped=\"1\"" );
-            w.write( nextAttrXml( ann.scopedNext ) );
+            open += " capped=\"1\"";
+            open += nextAttrXml( ann.scopedNext );
         }
-        w.write( ">" );
+        open += ">";
+        w.write( open );
         writeRcRows( w, *ann.scopedRecent, pathRel, esc );
         w.write( "</recent>" );
     }
@@ -2552,9 +2556,12 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // shown="0" because none is printed, next= the run that prints them. The <f> loop then walks an empty order.
     if( ann.stubSymbols )
     {
-        char stub[ 64 ];
-        rw::formatTo( stub, sizeof stub, "<symbols total=\"{}\" shown=\"0\"", keep );
-        w.write( stub );  w.write( nextAttrXml( ann.stubNext ) );  w.write( "/>" );
+        std::string stub = "<symbols total=\"";   // std::string, not a char[]: next= is already-markup (fixedbufsweep's rule)
+        stub += std::to_string( keep );
+        stub += "\" shown=\"0\"";
+        stub += nextAttrXml( ann.stubNext );
+        stub += "/>";
+        w.write( stub );
     }
     static const std::vector<std::uint32_t> kNoFiles;
     for( std::uint32_t f : ann.stubSymbols ? kNoFiles : fileOrder )
