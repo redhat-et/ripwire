@@ -116,7 +116,21 @@ REPO_Q=( "rank graph teleport" "compact legend rewrite" "edit receipt post-check
 # q3/q9 sit at +3.6% from corpus growth alone with NO tool change behind it — that drift is the evidence that
 # arm (3) measures the live repository and needs a frozen fixture; re-basing them would erase the evidence and
 # leave the problem. Expect them to trip on ordinary growth; when they do, the fix is the fixture, not a re-pin.
-REPO_BASE=( 9981 9961 9784 9968 9755 9949 9909 9745 9613 9806 )
+# q3/q4/q7/q8/q9/q10 RE-PINNED 2026-09-12 (row 6: sc= short ids, route= as a code — the q5 precedent, a TOOL change
+# crossing 4%, so the base follows the output change; the other four stay at their @8eb669ff bases). Attributed
+# three ways on the same day, main @1cf3086e against this lane's build, so the corpus half stays on record:
+#   query   main tree+main bin   lane tree+main bin   lane tree+lane bin   tool delta
+#   q3      10,074 (+2.96%)      10,074               10,217 (+4.43%)      +143 B
+#   q4      10,096 (+1.28%)      10,097               10,440 (+4.74%)      +343 B
+#   q7      10,002 (+0.94%)      10,003               10,357 (+4.52%)      +354 B
+#   q8      10,064 (+3.27%)      10,064               10,270 (+5.39%)      +206 B
+#   q9       9,960 (+3.61%)       9,960               10,092 (+4.98%)      +132 B
+#   q10      9,892 (+0.88%)       9,892               10,327 (+5.31%)      +435 B
+# The tool delta is the 259 B sc=/route= reading (graphlegend.h kForIdRouteLegend, exempt from the sigs charge)
+# plus the rows the freed payload bytes serve: <sigs> is byte-shaped, so every id= the rows no longer repeat
+# became a signature row (q10: 23 -> 27 rows). Nothing here is corpus drift — the two trees agree to ±1 B under
+# one binary — and the drift warning above still stands for the four left in place.
+REPO_BASE=( 9981 9961 10217 10440 9755 9949 10357 10270 10092 10327 )
 
 # ── (1)+(2) rank order + p= on every row, four dialects ───────────────────────────────────────────────────
 order_fail=0
@@ -146,7 +160,7 @@ FX_Q=( "geometry area of a shape" "call a native function from python" "parse th
 
 # ── (3) byte growth ≤ 4% against the registered sizes ─────────────────────────────────────────────────────
 growth_fail=0
-echo "  ledger: the ten reference queries (this repo, full legend) — base bytes @8eb669ff (q5 @cap-followup-2026-09-10) → now, shown=/total="
+echo "  ledger: the ten reference queries (this repo, full legend) — base bytes @8eb669ff (q5 @cap-followup-2026-09-10; q3/q4/q7/q8/q9/q10 @row-6 2026-09-12) → now, shown=/total="
 i=0
 for q in "${REPO_Q[@]}"; do
     base="${REPO_BASE[$i]}"; i=$(( i + 1 ))
