@@ -597,7 +597,12 @@ inline std::string prBudgetTail( std::size_t changedFiles, std::uint32_t skipped
 // this comment IS ~91% of that document. Same bytes in the same order; they are simply measured before
 // they are written, the way every other priced root measures itself (serialize.h §H7). File scope, beside
 // kPrEmptyDiffBody, so the emitter reads as the decisions it makes rather than as the prose it ships.
-inline std::string prLegendText( const std::string& baseEscaped, bool hasUnindexed )
+// E1 (2026-09-12): `corpusHasTests` gates testmap.h's run=/run_unknown=/<g> clause. This legend is written
+// and PRICED before the files render (the budget ladder fits est_tokens= to the envelope), so the clause
+// cannot ride the rows the way --affected's does; it rides the one pre-render fact that decides whether a
+// <test>/<g> row is possible at all — the corpus holds a test file. Measured on test/defaultceilingcheck.sh's
+// 120-file, no-test fixture: unconditional, 7,989 -> 8,025 tokens, over the 8,000 default budget.
+inline std::string prLegendText( const std::string& baseEscaped, bool hasUnindexed, bool corpusHasTests )
 {
     return std::string(
                  "<!-- ripwire pr-context: no-LLM review-evidence bundle per changed file — defined symbols, their callers, blast radius (transitive dependents), affected tests, co-change partners not in the diff, and owners. "
@@ -625,7 +630,7 @@ inline std::string prLegendText( const std::string& baseEscaped, bool hasUnindex
                  // --impact reports, so the same floor applies to hundreds of attributes in this one document.
                  // The shared constants, never a pr-context wording — that is the §B4 echo-site rule.
                  + rw::graphCountDisclosure( hasUnindexed )
-                 + std::string( rw::kRunHintLegendClause )   // M21(b)/E1: the <test> row's run=/run_unknown= rule and the <g> group row, testmap.h's ONE wording
+                 + std::string( corpusHasTests ? rw::kRunHintLegendClause : std::string_view() )   // M21(b)/E1: the <test> row's run=/run_unknown= rule and the <g> group row, testmap.h's ONE wording — corpus-gated
                  + "-->";
 }
 
@@ -901,7 +906,8 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     }
     std::sort( changed.begin(), changed.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
 
-    const std::string legendText = prLegendText( escBase, g.unindexedFiles > 0 );
+    const bool corpusHasTests = std::any_of( ing.files.begin(), ing.files.end(), []( const std::string& f ) { return rw::isTestPath( f ); } );
+    const std::string legendText = prLegendText( escBase, g.unindexedFiles > 0, corpusHasTests );
     std::fwrite( legendText.data(), 1, legendText.size(), out );
 
     const std::string anchorNoteText = prAnchorNoteText( anchorAttr );

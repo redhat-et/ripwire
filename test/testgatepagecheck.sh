@@ -202,7 +202,9 @@ printf 'int lib0() { return 0; }\nint lib1() { return 1; }\nint lib2() { return 
 printf '#include "../src/lib.cpp"\nint test_lib0() { return lib0(); }\n' > "$TG/test/lib0_test.cpp"
 printf '#include "../src/lib.cpp"\nint test_lib1() { return lib1(); }\n' > "$TG/test/lib1_test.cpp"
 D="$( run "$TG" --test-gate=src/lib.cpp )"
-DTROWS="$( printf '%s' "$D" | grep -o '<t ' | wc -l | tr -d ' ' )"
+# E1 (2026-09-12): runner-less rows sharing their evidence ride ONE <g … n= p="a,b"/> row, so the emitted
+# count is FILES: the single <t> rows plus every <g> row's n= — shown_tests= must still equal that number.
+DTROWS="$( { printf '%s' "$D" | grep -o '<t ' | wc -l | tr -d ' '; printf '%s' "$D" | grep -oE '<g [^>]*/>' | grep -oE ' n="[0-9]+"' | grep -oE '[0-9]+'; } | awk '{ s += $1 } END { print s + 0 }' )"
 DSHOWN="$( attr "$D" shown_tests )"; DTOTAL="$( attr "$D" tests )"; DCAP="$( attr "$D" tests_capped )"
 DWANT=0; [ "${DSHOWN:-0}" -lt "${DTOTAL:-0}" ] && DWANT=1
 { [ -n "$DSHOWN" ] && [ "$DSHOWN" = "$DTROWS" ] && [ "$DCAP" = "$DWANT" ]; } \

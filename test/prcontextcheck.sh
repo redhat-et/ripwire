@@ -169,6 +169,29 @@ COUT="$( "$BIN" "$CLEAN" --pr-context --no-cache 2>/dev/null )"; CRC=$?
     && ok "clean tree degrades (files=0, exit 0)" \
     || no "clean-tree degrade wrong (rc=$CRC): $COUT"
 
+# ── E1 (2026-09-12): the run=/run_unknown=/<g> clause rides only a document whose corpus CAN carry a test row ─
+# The legend is written and priced before the files are rendered (the budget ladder fits est_tokens= to
+# the envelope), so this bundle cannot gate the clause on the rows it ends up emitting the way --affected
+# does. It gates on the one fact known before rendering that decides whether a <test>/<g> row is possible
+# at all: does the corpus hold a test file. A corpus without one paid 330 B for a rule about rows it can
+# never emit — measured on test/defaultceilingcheck.sh's 120-file fixture: est_tokens 7,989 -> 8,025,
+# over the 8,000-token default budget. Red on the pre-fix binary (the clause rode every bundle).
+{ echo "$OUT" | grep -q 'run_unknown=' && echo "$OUT" | grep -q '<g n= p='; } \
+    && ok "run clause: a corpus WITH a test file carries run_unknown= and the <g n= p=> definition in its legend" \
+    || no "run clause: the fixture has test/test_core.cpp yet the legend does not define run_unknown=/<g>"
+NT="$TMP/notests"; mkdir -p "$NT/src"; git -C "$NT" init -q
+git -C "$NT" config user.email a@x.com; git -C "$NT" config user.name A
+printf 'int g( int x ) { return x; }\n' >"$NT/src/a.cpp"; git -C "$NT" add -A; git -C "$NT" commit -qm init
+printf 'int h( int x ) { return g( x ) + 1; }\n' >>"$NT/src/a.cpp"
+NTOUT="$( "$BIN" "$NT" --pr-context --no-cache 2>/dev/null )"
+if echo "$NTOUT" | grep -q 'files="1"'; then
+    echo "$NTOUT" | grep -q 'run_unknown=' \
+        && no "run clause: a corpus with NO test file still pays for the run=/run_unknown=/<g> clause" \
+        || ok "run clause: a corpus with no test file carries no run=/run_unknown=/<g> clause (nothing it can be a rule about)"
+else
+    no "run clause: the no-test fixture did not produce a one-file bundle: $( echo "$NTOUT" | head -c 300 )"
+fi
+
 # ── §P11.7: files ordered by BLAST RADIUS, and a doc file's headings collapsed to a count ───────────
 #
 # The finding: the flagship review bundle emitted its <file> sections in PATH order, so on this repo

@@ -42,6 +42,11 @@ has a runner, so nothing groups and the only change is the legend that now defin
 `--test-gate` legend pin moves 2,720 → 2,900 B (measured 2,843) and the `ripwire.pack-task/v1` compact
 pin 820 → 880 B (measured 865), both because the compact dialect and every rows-bearing full legend now
 define `run_unknown=` and `<g n= p=>` — a definition `--affected` and the compact dialect never carried.
+The clause is rows-gated on `--affected`, `--exercises`, `--pack-task` and the partitioned bundle, and on
+`--pr-context` — whose legend is priced before its files render — gated on the corpus holding a test file
+at all (measured on `test/defaultceilingcheck.sh`'s 120-file, no-test fixture: unconditional, the default
+bundle went 7,989 → 8,025 tokens over its 8,000 budget; gated, 7,989; `test/prcontextcheck.sh` pins both
+sides, red first).
 
 ### Added — Elixir module and arity resolution (parser version 95)
 
