@@ -47,7 +47,7 @@ reviewing whether the codebase is trending toward or away from clean layering.
    are driving it (the `<m path=... ca= ce=>` per-module rows) and formalize a boundary between
    them — a `layer`/`deny` rule in `rules.txt` that would have caught the coupling.
 
-2. **Dependency health** — `ripwire <dir> --deps`
+2. **Dependency health** — `ripwire <dir> --deps --legend=compact`
    Output: `<deps>` with `<health>` metrics:
    - `acd` (average component dependency) — lower is better
    - `nccd` (normalized CCD) — < 0.25 is healthy
@@ -64,7 +64,7 @@ reviewing whether the codebase is trending toward or away from clean layering.
    its internals. A cycle in `--report` is worse than a high-afferent file — break it before
    formalizing anything downstream of it.
 
-3. **Module clustering** — `ripwire <dir> --communities`
+3. **Module clustering** — `ripwire <dir> --communities --legend=compact`
    Output: `<communities modules="N">` clusters with dominant directory and lead symbols.
    `<bridge edges="N">` shows where clusters are tightly coupled across module boundaries.
    High bridge counts between non-adjacent modules are the layering violations `--arch` catches.

@@ -77,7 +77,20 @@ EOF
   && git add -A && git commit -qm init >/dev/null 2>&1 )
 runw(){ ( cd "$WORK" && "$BIN" . --no-cache "$@" 2>/dev/null ); }
 
-PID="$( runw | grep -oE 'id="[^"]*BudgetPlanner::parseBudget"' | head -1 | sed -E 's/id="([^"]*)"/\1/' )"
+# row 6 (2026-09-12): the <d> row prints the short id sc= beside its own p=; the canonical id composes as p::sc::n
+PID="$( runw | python3 -c '
+import re, sys
+doc, name, scope = sys.stdin.read(), sys.argv[1], ( sys.argv[2] if len( sys.argv ) > 2 else None )
+for f in re.finditer( r"<f p=\"([^\"]*)\"[^>]*>(.*?)</f>", doc, re.S ):
+    for row in re.finditer( r"<[sd]\b([^>]*)>", f.group( 2 ) ):
+        a = dict( re.findall( r"\s([\w:.-]+)=\"([^\"]*)\"", row.group( 1 ) ) )
+        if a.get( "n" ) == name and "sc" in a and ( scope is None or a[ "sc" ] == scope ):
+            print( f.group( 1 ) + "::" + a[ "sc" ] + "::" + a[ "n" ] ); sys.exit( 0 )
+for row in re.finditer( r"<d\b([^>]*)>", doc ):
+    a = dict( re.findall( r"\s([\w:.-]+)=\"([^\"]*)\"", row.group( 1 ) ) )
+    if a.get( "n" ) == name and "sc" in a and "p" in a and ( scope is None or a[ "sc" ] == scope ):
+        print( a[ "p" ] + "::" + a[ "sc" ] + "::" + a[ "n" ] ); sys.exit( 0 )
+' parseBudget BudgetPlanner )"
 if [ -n "$PID" ]; then ok "discovered scoped canonical id: $PID"; else no "could not discover BudgetPlanner::parseBudget id"; fi
 runw --note-add="$PID: watch integer overflow when raw is INT_MAX" >/dev/null
 # D5 (see packtaskcheck.sh): --note-add normalizes the target's path segment to ROOT-RELATIVE on write

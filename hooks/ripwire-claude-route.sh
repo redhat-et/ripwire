@@ -121,7 +121,12 @@ if [ "${1:-}" = "--observe" ]; then
     observed=""
     case "$tool" in
         Bash)
-            printf '%s' "$command" | grep -Eq '(^|[;&|[:space:]])([^[:space:]]*/)?ripwire([[:space:]]|$)' || exit 0
+            # 2026-09-12: only the COMMAND WORD counts as a ripwire call — `ripwire`, `./build/ripwire`, any path whose
+            # basename is ripwire — in command position: at the start, after ; & | ( or $(, past any leading VAR=value
+            # assignments. A token ending in /ripwire in ARGUMENT position (`cd …/ripwire && git log`, `ls /opt/ripwire`)
+            # used to count, burn a window slot, and turn a real adoption two commands later into `missed` (the local
+            # routing analysis's instrument bug). Gate: test/routehookcheck.sh O7 / test/codexpromptroutecheck.sh.
+            printf '%s' "$command" | grep -Eq '(^|[;&|(]|\$\()[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*([^[:space:]]*/)?ripwire([[:space:]]|$)' || exit 0
             observed="$( printf '%s' "$command" | grep -oE -- '--[a-z0-9-]+' | head -1 )"
             [ -n "$observed" ] || observed="<map>"
             ;;

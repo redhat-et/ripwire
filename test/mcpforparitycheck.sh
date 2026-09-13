@@ -225,7 +225,11 @@ done
 # (the first returns -32602 "unknown field: 'no_route'").
 mcp_for_nr(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s","no_route":%s}}}\n' \
                      "$CORPUS" "$1" "$2" | "$BIN" --mcp 2>/dev/null | python3 "$TMP/mcptext.py"; }
-NR_Q="parse tree"
+# RE-AUTHORED 2026-09-12 (row 6, route= as a code): "parse tree" routes subtoken+body:broad on this corpus — the SAME
+# ranker no_route forces — so the served sets could only ever differ by what the 97 B route note displaced from the
+# byte-shaped <sigs>; with the note down to 23 B they were identical, and the arm went red on an artefact. An
+# identifier query routes name-exact, so no_route:true really changes the ranker (and the served set) here.
+NR_Q="escapeXml"
 mcp_for     "$NR_Q"        >"$TMP/nr.routed.xml"
 mcp_for_nr  "$NR_Q" true   >"$TMP/nr.off.xml"
 cli_for     "$NR_Q"        >"$TMP/nr.cli.routed.xml"

@@ -996,11 +996,6 @@ inline constexpr std::string_view kForFileTailLegend =
     "NOT among the shown sigs rows — the files of trimmed rows first, best-symbol rank order; rows are t p=file; total=such files, "
     "shown=printed, capped=1 when they differ. r= on a ranked row is its 1-based rank in this lens ranking, "
     "rows in r= order, p= the file (a gap = a budget-trimmed row)";
-// P1 (L7): the same two definitions for the compact dialect (verbs_for.h appendCompactForLegend) — nothing dropped,
-// the sentences shortened: the tail is file-grain and weaker, its counts are total/shown/capped, r= is the rank.
-inline constexpr std::string_view kForFileTailLegendCompact =
-    "; tail: file-grain tail (paths only, WEAKER than the ranked rows): every positive-score file not among the shown sigs rows, trimmed rows' files first; <t p=> rows, total=/shown=/capped=1 when cut; "
-    "r= = a ranked row's 1-based lens rank, rows in r= order, p= the file (a gap = a budget-trimmed row)";
 
 // Explicit-budget row fit: the largest shown count whose rendered XML fits `budgetBytes` (0 rows always
 // "fits" — the shell is reserved by the caller). Walks down from the collected count; deterministic.
@@ -1473,6 +1468,22 @@ inline OverloadRows collapseOverloadRows( const IngestResult& ing, const std::ve
 inline std::string countFieldIfAbove( std::uint32_t n, std::uint32_t floor, std::string_view prefix, std::string_view suffix = {} )
 {
     return n > floor ? std::string( prefix ) + std::to_string( n ) + std::string( suffix ) : std::string();
+}
+
+// Row 6 (2026-09-12): the SHORT id on a symbol row — ` sc="<scope>"`, the one segment of the canonical
+// `path::scope::name` that neither the row's own p= nor its enclosing <f p=> already carries. Absent when the
+// symbol has no enclosing scope, which is exactly the case where the canonical id degrades to the bare name
+// (resolve.h canonicalId) and the old id= was skipped too — so the SET of rows carrying an identity attribute
+// is unchanged, only its spelling shrinks. The legend spells the composition (id = p::sc::n) and every
+// selector keeps accepting the composed form: test/scroundtripcheck.sh. ONE writer for the map <s> row and
+// the signature <d> row, so the two can never drift on when sc= appears.
+template <typename W>
+inline void writeScopeAttr( W& w, const Symbol& s, std::vector<char>& esc )
+{
+    if( !s.scope.empty() )
+    {
+        w.write( " sc=\"" );  w.write( escapeXml( s.scope, esc ) );  w.write( "\"" );
+    }
 }
 
 // " overloads=\"N\"" when N>1 rows collapsed into this one; empty (writes nothing) in the overwhelming
@@ -2177,8 +2188,8 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // written once the document it describes has been measured (PHASE 2 below) and the legend's own bytes
     // are part of what it describes.
     std::string legend = outProv
-        ? "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=per-EDGE-confidence(orthogonal-to-k):scip(index-pinned;precise)|binding(cross-lang-FFI)|import(ES-named-import;module+export-named)|split(one-arm-of-a-k-way-pick;read-source;these-are-the-edges-amb=-counts)(absent=uniquely-resolved-name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree(builtin/stdlib-name-without-in-repo-evidence,external-import,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->"
-        : "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree(builtin/stdlib-name-without-in-repo-evidence,external-import,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->";
+        ? "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name sc=enclosing-scope(absent-if-unscoped;the-full-id-is-p::sc::n-with-p=-from-the-enclosing-f,and-expand/callers/impact/uses-accept-it) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=per-EDGE-confidence(orthogonal-to-k):scip(index-pinned;precise)|binding(cross-lang-FFI)|import(ES-named-import;module+export-named)|split(one-arm-of-a-k-way-pick;read-source;these-are-the-edges-amb=-counts)(absent=uniquely-resolved-name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree(builtin/stdlib-name-without-in-repo-evidence,external-import,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->"
+        : "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name sc=enclosing-scope(absent-if-unscoped;the-full-id-is-p::sc::n-with-p=-from-the-enclosing-f,and-expand/callers/impact/uses-accept-it) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree(builtin/stdlib-name-without-in-repo-evidence,external-import,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->";
     // EXTENT HONESTY (src/extentsuspect.h): how many definitions carry extent_suspect= corpus-wide — the header's
     // extent_suspect_syms= — and the row + header readings, appended ONLY when that is non-zero, so a corpus with
     // nothing flagged keeps every byte of this legend.
@@ -2499,16 +2510,17 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             const Symbol&        s   = ing.symbols[id];
             const std::uint32_t  out = outOff[id + 1] - outOff[id];
             w.write( "<s t=\"" );  w.write( symTag( s.kind ) );
-            w.write( "\" n=\"" );  w.write( escapeXml( s.name, esc ) );  w.write( "\"" );   // close n="…" here so id= can follow
+            w.write( "\" n=\"" );  w.write( escapeXml( s.name, esc ) );  w.write( "\"" );   // close n="…" here so sc= can follow
 
-            // S6-C: the canonical SCIP-style id `path::scope::name` — emitted ONLY when it ADDS disambiguation,
-            // i.e. it differs from the bare name (the symbol has an enclosing scope). For a free function the
-            // canonical id equals the name, so it is skipped — no token cost, no golden churn for scope-less
-            // symbols. Two same-named methods on different classes thus carry DISTINCT ids here.
-            // R-R: relativized against the SAME rootArg the <f p=…> above stripped, so one row's p= and id=
-            // can never disagree about how this file is spelled.
-            const std::string canon = canonicalIdForEmit( ing, s, rootArg );
-            if( canon != s.name ) { w.write( " id=\"" );  w.write( escapeXml( canon, esc ) );  w.write( "\"" ); }
+            // S6-C / row 6 (2026-09-12): the SHORT id. The canonical SCIP-style id is `path::scope::name`, and
+            // on a map row the path is the enclosing <f p=> verbatim — 942 of 942 scoped rows on this tree
+            // repeated it, 11.2% of a flagless map. The row now prints ONLY the segment the wrapper does not
+            // carry: sc= the enclosing scope. The legend states the composition (id = p::sc::n), the selectors
+            // keep accepting the composed spelling, and test/scroundtripcheck.sh proves the composed multiset is
+            // byte-identical to the id= multiset this row used to print. Emitted ONLY when a scope exists —
+            // exactly when the canonical id differed from the bare name (canonicalId degrades to the name on an
+            // empty scope), so the row set that carries an identity attribute is unchanged.
+            writeScopeAttr( w, s, esc );
 
             w.write( overloadsAttr( rows.overloads[i] ) );   // see overloadsAttr() above — empty in the common case
 
@@ -3342,20 +3354,6 @@ inline void appendJsonMetricFields( std::string& out, const Symbol& s, NodeId id
     { rw::formatTo( num, sizeof( num ), ",\"in\":{}", ( *fanIn )[ id ] );  out += num; }
 }
 
-// P2.3 — the canonical `path::scope::name` id, but ONLY when it ADDS an enclosing scope: a free function's
-// canonical id IS its bare name, so repeating it would cost tokens and disambiguate nothing. "" ⇒ emit no
-// id= / "id" at all. ONE definition of the rule, shared by the XML and JSON signature-row writers below and
-// matching the default map's <s id="…"> convention exactly.
-// R-R: `root` is the run's root argument (empty on a multi-root run — see canonicalIdForEmit). It is
-// REQUIRED rather than defaulted on purpose: a defaulted root is exactly how the four emitters below came
-// to disagree about whether their id= carried the checkout prefix, and a missing argument should be a
-// compile error, not a silently absolute row.
-inline std::string scopedCanonicalId( const IngestResult& ing, const Symbol& s, std::string_view root )
-{
-    VERIFY( s.fileId < ing.files.size() );
-    std::string canon = canonicalIdForEmit( ing, s, root );
-    return canon == s.name ? std::string{} : canon;
-}
 
 // P2.3/P2.4 — the per-row descriptive facts sigRowHead() folds in, grouped (not individual params) so the
 // helper stays well under the params-regression bar. `lens` is the pre-rendered churn/amp/clone/tested attr
@@ -3386,10 +3384,11 @@ inline std::string lensRowPath( const IngestResult& ing, std::uint32_t fileId, s
 // P2.3/P2.4 — the exact "<d …>" opening tag of ONE signature row, defined once so the two-phase (globally
 // budgeted) emitter and the streaming emitter can never drift by a byte: the budget ledger measures exactly
 // the string this returns.
-// P2.3 — n= (and id= when the canonical `path::scope::name` ADDS an enclosing scope; a free function's
-// canonical id IS its bare name, so it costs zero bytes there) is the CHAIN KEY: without it a reader had to
-// parse a C++ declarator out of the signature text to chain into --expand/--callers. Same canonicalId form
-// the default map's <s id="…"> uses, so an id read out of a bundle addresses the same symbol in either lens.
+// P2.3 — n= (and sc= when the symbol has an enclosing scope; a free function's canonical id IS its bare
+// name, so it costs zero bytes there) is the CHAIN KEY: without it a reader had to parse a C++ declarator
+// out of the signature text to chain into --expand/--callers. Row 6: the id composes as p::sc::n — the same
+// rule the default map's <s sc="…"> rows follow, so an id composed from a bundle row addresses the same
+// symbol in either lens.
 // The `l=` prefix is DELIBERATELY kept first — existing consumers key on the "<d l=" opening.
 // P2.4 — in= is emitted ONLY when a fan-in vector was actually supplied. A bundle assembled without one used
 // to print in="0", which reads as "nobody calls this" — a FALSE ZERO. An absent attribute means "not
@@ -3407,8 +3406,8 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
     std::string head = lineAttr;
     head += escapeXml( s.name, esc );          // escapeXml returns a view INTO esc — copy before the next call
     head += "\"";
-    if( const std::string canon = scopedCanonicalId( ing, s, rootArg ); !canon.empty() )
-    { head += " id=\"";  head += escapeXml( canon, esc );  head += "\""; }
+    if( !s.scope.empty() )   // row 6: the short id — the scope segment only; p= (this row's, or its <f>'s) supplies the rest
+    { head += " sc=\"";  head += escapeXml( s.scope, esc );  head += "\""; }
     // P7 (terminality round A, lane R, 2026-09-05): p= (and layer= when the file sits in a builtin layer) ride
     // EVERY row that carries r= — the lens serving is FLAT now (rows in rank order, no <f p=> wrapper), so the
     // row itself names its file; the non-lens serving (rank 0: --pack-signatures) keeps the wrapper and no p=.
@@ -4640,21 +4639,55 @@ inline std::vector<NodeId> calleeWalkOrder( NodeId id, const std::vector<std::ui
     return walk;
 }
 
-// One callee as `<c n= l=/>` — the names-only row. No file read, no signature slice, and no redaction
-// seam: a bare identifier is not a credential shape, which is why this row does not take a RedactCounts
-// the way the signature row below does. Charged at what it actually emits.
-inline void appendCalleeNameRow( std::string& callsBody, const Symbol& cs, std::vector<char>& esc,
-                                 std::size_t& used, const CalleeCallsSink& sink )
+// One callee of the names-only rendering (`<c n= l=/>`), COLLECTED rather than written: row 6 (2026-09-12)
+// merges the same-named callees of ONE block into one row whose l= comma-joins their definition lines
+// (`<c n="pick" l="203,206"/>` — two overloads, or a declaration and its definition, that used to cost a
+// full row each: 716 B over the twelve --for answers of the 2026-09-12 re-measure). Walk order is kept:
+// a merged row sits where its FIRST callee sat. shown= still counts callees, never rows — the legend says
+// so. No file read, no signature slice, and no redaction seam: a bare identifier is not a credential shape,
+// which is why this path does not take a RedactCounts the way the signature row below does. Charged at
+// what the unmerged row emitted (the merge only ever saves bytes past that charge).
+struct MergedCalleeNameRow
 {
-    char nb[ 32 ];
-    rw::formatTo( nb, sizeof( nb ), "\" l=\"{}\"/>", cs.line );
-    callsBody += "<c n=\"";
-    callsBody += escapeXml( cs.name, esc );
-    callsBody += nb;
+    std::string_view name;    // a view into ing.symbols — stable for the emitter's lifetime
+    std::string      lines;   // "203" or "203,206": every definition line of that name in walk order
+};
+
+inline void collectCalleeNameRow( std::vector<MergedCalleeNameRow>& rows, const Symbol& cs,
+                                  std::size_t& used, const CalleeCallsSink& sink )
+{
+    char lb[ 16 ];
+    rw::formatTo( lb, sizeof( lb ), "{}", cs.line );
+    bool merged = false;
+    for( MergedCalleeNameRow& r : rows )
+    {
+        if( r.name == cs.name )
+        {
+            r.lines += ',';  r.lines += lb;  merged = true;
+            break;
+        }
+    }
+    if( !merged )
+    {
+        rows.push_back( MergedCalleeNameRow { cs.name, lb } );
+    }
     used += cs.name.size() + 16;
     if( sink.recorded )
     {
         sink.recorded->push_back( EmittedBodyCall { cs.name, cs.line, std::string() } );   // §H5: no sig to record
+    }
+}
+
+// …and the rows written out, once the block's walk is complete.
+inline void appendMergedCalleeNameRows( std::string& callsBody, const std::vector<MergedCalleeNameRow>& rows, std::vector<char>& esc )
+{
+    for( const MergedCalleeNameRow& r : rows )
+    {
+        callsBody += "<c n=\"";
+        callsBody += escapeXml( r.name, esc );
+        callsBody += "\" l=\"";
+        callsBody += r.lines;
+        callsBody += "\"/>";
     }
 }
 
@@ -4684,8 +4717,9 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
 
     const std::vector<NodeId> walk = calleeWalkOrder( id, outOff, outTargets, sink );   // see it for the order
 
-    std::string callsBody;
-    int         shown = 0;
+    std::string                      callsBody;
+    std::vector<MergedCalleeNameRow> nameRows;   // names-only rendering: collected, merged by name, written after the walk
+    int                              shown = 0;
     for( std::uint32_t k = outOff[id]; k < outOff[id + 1] && shown < 16 && used < budgetBytes; ++k )
     {
         const NodeId cid = walk[ k - outOff[id] ];
@@ -4695,10 +4729,10 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
         }
         const Symbol& cs = ing.symbols[cid];
 
-        // COMPACT: the names-only rendering — see appendCalleeNameRow above for what it does and does not do.
+        // COMPACT: the names-only rendering — see collectCalleeNameRow above for what it does and does not do.
         if( sink.namesOnly )
         {
-            appendCalleeNameRow( callsBody, cs, esc, used, sink );
+            collectCalleeNameRow( nameRows, cs, used, sink );
             ++shown;
             continue;
         }
@@ -4723,6 +4757,7 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
             sink.recorded->push_back( EmittedBodyCall { cs.name, cs.line, sig } ); // §H5
         }
     }
+    appendMergedCalleeNameRows( callsBody, nameRows, esc );   // no-op on the signature rendering (nameRows stays empty)
     appendCallsBlock( out, total, shown, callsBody );
 }
 
@@ -7188,8 +7223,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
             w.write( "{\"t\":" );  writeJsonStr( w, symTag( s.kind ), esc );
             w.write( ",\"n\":" );  writeJsonStr( w, s.name, esc );
 
-            const std::string canon = canonicalIdForEmit( ing, s, rootArg );   // R-R: matches the XML sibling
-            if( canon != s.name ) { w.write( ",\"id\":" );  writeJsonStr( w, canon, esc ); }
+            if( !s.scope.empty() ) { w.write( ",\"sc\":" );  writeJsonStr( w, s.scope, esc ); }   // row 6: the XML sibling's sc=, same presence rule
 
             if( rows.overloads[ rowIndex ] > 1 )
             { rw::formatTo( num, sizeof( num ), ",\"overloads\":{}", rows.overloads[ rowIndex ] );  w.write( num ); }
@@ -7405,11 +7439,11 @@ inline std::string jsonSigRowHead( const IngestResult& ing, NodeId id, std::uint
     rw::formatTo( num, sizeof( num ), "{{\"l\":{}", s.line );
     head += num;
     // P2.3: the chain key — "n" always, "id" only when the canonical form adds an enclosing scope
-    // (the XML sibling's rule, scopedCanonicalId above), so a JSON consumer can chain onward too.
+    // (the XML sibling's rule, sigRowHead above), so a JSON consumer can chain onward too.
     appendJsonStrField( head, ",\"n\":", s.name );
-    if( const std::string canon = scopedCanonicalId( ing, s, rootArg ); !canon.empty() )
+    if( !s.scope.empty() )   // row 6: the XML sibling's sc= — keys mirror attribute names one to one
     {
-        appendJsonStrField( head, ",\"id\":", canon );
+        appendJsonStrField( head, ",\"sc\":", s.scope );
     }
     // P7: the row names its file (and its builtin layer) — the XML sibling's p=/layer=, same root-relative spelling
     appendJsonStrField( head, ",\"p\":", lensRowPath( ing, fileId, rootArg ) );

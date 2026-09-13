@@ -28,17 +28,17 @@ source shape.
    `--callers=SYM`, `--callees=SYM`, or `--around=SYM` as needed. This turns runtime evidence into a bounded
    source-reading set without pretending the graph measured execution.
 
-3. **Maintenance/change-risk context** — `ripwire <dir> --hotspots`
+3. **Maintenance/change-risk context** — `ripwire <dir> --hotspots --legend=compact`
    Output: `<hotspots>` ranked by `score = churn × ccx` (churn = git commit frequency over
    12mo; ccx = cognitive complexity). The `top=` attribute names the highest-complexity
    function in each file. High-score files are frequently changed and structurally complex: useful evidence
    about optimization risk and validation scope, but structural evidence, not runtime heat.
    **A slowdown/regression traced to a specific change, not an all-time read** — use the recent-churn
-   lens: `ripwire <dir> --hotspots --since="2 weeks ago"` (or `--since=HEAD~20` for a deterministic rev)
+   lens: `ripwire <dir> --hotspots --legend=compact --since="2 weeks ago"` (or `--since=HEAD~20` for a deterministic rev)
    ranks by commits after that point instead of all-history, which is the right lens for "this got slower
    after X" rather than a static hot-function scan.
 
-4. **Static dependency + shape hypotheses** — `ripwire <dir> --metrics --top-k=50`
+4. **Static dependency + shape hypotheses** — `ripwire <dir> --metrics --legend=compact --top-k=50`
    Output: the ranked map with `in=` (fan-in), `cx=`/`ccx=` (complexity), `cbo=` (coupling
    between objects — how many other types this symbol touches), `loc=` (body size), and
    `nest=` (max nesting depth) on each symbol. `in=` is static dependency fan-in, not execution frequency.
@@ -52,7 +52,7 @@ source shape.
    ALL `#else`/`#ifdef` branches, not just the one your build compiles, so a hot function that also happens
    to be preprocessor-heavy can look structurally worse than the code path actually executing.
 
-4a2. **Join the measured heat onto the static findings** — `ripwire <dir> --lint --with-profile=REPORT`
+4a2. **Join the measured heat onto the static findings** — `ripwire <dir> --lint --legend=compact --with-profile=REPORT`
 
    REPORT is a RIPWIRE_PROFILE build's own stderr report (its `#PROF_TSV` block, verbatim). Every `--lint`
    finding whose enclosing symbol contains a `PROFILE_SCOPE` site gains `heat_*` attributes — the scope's
@@ -61,7 +61,7 @@ source shape.
    actually HOT": static shape × PMU weight (SYZYGY's advice mode, Hundt CGO 2006). `heat_joined="0"` on
    the root is honest — no finding sits inside a profiled scope — never an error.
 
-4b. **If the profile points at MEMORY, not compute** — cheapest first, `ripwire <dir> --lint` runs the
+4b. **If the profile points at MEMORY, not compute** — cheapest first, `ripwire <dir> --lint --legend=compact` runs the
    built-in **cache-\* pack** (8 static data-layout checks, e.g. `cache-gather-subscript`,
    `cache-vector-of-indirect`, `cache-pointer-chase-loop`) as part of an ordinary lint pass — no profile
    required, so it is worth a look before reaching for the heavier lens below. When a specific struct is
@@ -112,7 +112,7 @@ source shape.
    access pattern. Confirm on hardware before changing a layout, exactly as with every other item on this
    list. Exit is always 0: a report, not a gate.
 
-5. **Expand measured candidates** — `ripwire <dir> --expand=SYM` for the implicated symbols.
+5. **Expand measured candidates** — `ripwire <dir> --expand=SYM --legend=compact` for the implicated symbols.
    Output: full body + callee signatures. Look for inner-loop allocations, redundant work,
    or O(N²) patterns that profiler data would confirm.
 

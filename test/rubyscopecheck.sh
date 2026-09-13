@@ -98,7 +98,10 @@ ROWS="$DIR/rows"
 sed 's/></>\n</g' "$MAP" | grep '^<s ' >"$ROWS"
 
 hasId(){ # $1=id $2=label
-  if grep -q "id=\"$1\"" "$ROWS"; then ok "$2 → id=\"$1\""; else no "$2 → id=\"$1\" MISSING: $( grep -o "n=\"${1##*::}\"[^>]*" "$ROWS" | head -2 | tr '\n' ' ' )"; fi
+  # row 6 (2026-09-12): the row prints n= then sc= (the enclosing scope); the canonical id $1 composes as p::sc::n,
+  # so "file::Scope::name" is read as n="name" sc="Scope" (the file half is the row's own <f p=>).
+  _name="${1##*::}"; _rest="${1#*::}"; _scope="${_rest%::*}"
+  if grep -q "n=\"$_name\" sc=\"$_scope\"" "$ROWS"; then ok "$2 → sc=\"$_scope\" (id $1)"; else no "$2 → n=\"$_name\" sc=\"$_scope\" (id $1) MISSING: $( grep -o "n=\"$_name\"[^>]*" "$ROWS" | head -2 | tr '\n' ' ' )"; fi
 }
 
 echo "=== ids: every Ruby def inside a class/module carries path::scope::name ==="
@@ -114,8 +117,8 @@ hasId "t.py::B::__init__"    "Python control: __init__ inside class B (unchanged
 echo "=== negative controls ==="
 TOP="$( grep 'n="toplevel"' "$ROWS" )"
 if [ -n "$TOP" ]; then ok "top-level def toplevel indexed"; else no "top-level def toplevel missing"; fi
-echo "$TOP" | grep -q ' id="' && no "top-level def carries an id= (the file is not a scope): $TOP" || ok "top-level def carries NO id= (no scope)"
-grep -q 'n="Outer" id=' "$ROWS" && no "top-level module Outer carries an id= (nothing encloses it)" || ok "top-level module Outer carries NO id="
+echo "$TOP" | grep -q ' sc="' && no "top-level def carries an sc= (the file is not a scope): $TOP" || ok "top-level def carries NO sc= (no scope)"
+grep -q 'n="Outer" sc=' "$ROWS" && no "top-level module Outer carries an sc= (nothing encloses it)" || ok "top-level module Outer carries NO sc="
 
 echo "=== overload folding: same name in DIFFERENT classes must stay separate rows ==="
 N_INIT="$( grep -c 'n="initialize"' "$ROWS" )"
@@ -160,7 +163,7 @@ RUBY
 DMAP="$( "$BIN" "$DEL" --no-cache 2>/dev/null | sed 's/></>\n</g' )"
 DEDGES="$( echo "$DMAP" | grep -o '<!-- files=[^>]*edges=[0-9]*' | grep -o 'edges=[0-9]*' | cut -d= -f2 )"
 if [ "${DEDGES:-0}" -eq 2 ]; then ok "facade delegation keeps both real targets (edges=2)"; else no "facade delegation: expected edges=2, got ${DEDGES:-0} — the caller won its own locality tie-break?"; fi
-FAC="$( echo "$DMAP" | awk '/id="n.rb::Facade::publish_event"/{f=1;print;next} /^<s /{f=0} f' )"
+FAC="$( echo "$DMAP" | awk '/n="publish_event" sc="Facade"/{f=1;print;next} /^<s /{f=0} f' )"
 if [ "$( echo "$FAC" | grep -c '<c n="publish_event"' )" -eq 2 ]; then ok "Facade::publish_event → two publish_event callee rows (Fanout, Subscriber)"; else no "Facade::publish_event callee rows: $( echo "$FAC" | grep -c '<c n="publish_event"' )"; fi
 if echo "$FAC" | grep -q 'amb="1"'; then ok "…disclosed as an honest split (amb=\"1\"), not a locality guess"; else no "Facade::publish_event is not marked amb=\"1\": $( echo "$FAC" | head -1 )"; fi
 echo "$FAC" | grep -q 'lpin=' && no "Facade::publish_event carries lpin= — the tie-break picked ONE target from a two-way tie" || ok "…and no lpin= (a two-way tie is left a tie)"
@@ -189,11 +192,11 @@ class B
 end
 RUBY
 RMAP="$( "$BIN" "$R1" --no-cache 2>/dev/null | sed 's/></>\n</g' )"
-GO="$( echo "$RMAP" | awk '/id="r.rb::A::go"/{f=1;print;next} /^<s /{f=0} f' )"
+GO="$( echo "$RMAP" | awk '/n="go" sc="A"/{f=1;print;next} /^<s /{f=0} f' )"
 echo "$GO" | grep -q 'amb=' && no "self.helper(1) inside A stayed ambiguous: $( echo "$GO" | head -1 )" || ok "self.helper(1) inside A is not ambiguous (Rule 1: ThisObj receiver)"
 if [ "$( echo "$GO" | grep -c '<c n="helper"' )" -eq 1 ]; then ok "…and resolves to exactly one helper"; else no "self.helper resolved to $( echo "$GO" | grep -c '<c n="helper"' ) helpers"; fi
 echo "$GO" | grep -q 'lpin=' && no "self.helper(1) was pinned by the LOCALITY prior (lpin=), not by Rule 1 — a disclosed guess where a fact exists" || ok "…pinned as a fact (no lpin=), not by the locality prior"
-GB="$( echo "$RMAP" | awk '/id="r.rb::A::go_bare"/{f=1;print;next} /^<s /{f=0} f' )"
+GB="$( echo "$RMAP" | awk '/n="go_bare" sc="A"/{f=1;print;next} /^<s /{f=0} f' )"
 echo "$GB" | grep -q 'amb=' && no "bare helper(2) inside A stayed ambiguous: $( echo "$GB" | head -1 )" || ok "bare helper(2) inside A is not ambiguous (Rule 1: implicit self)"
 if [ "$( echo "$GB" | grep -c '<c n="helper"' )" -eq 1 ]; then ok "…and resolves to exactly one helper"; else no "bare helper(2) resolved to $( echo "$GB" | grep -c '<c n="helper"' ) helpers"; fi
 echo "$GB" | grep -q 'lpin=' && no "bare helper(2) was pinned by the LOCALITY prior (lpin=), not by Rule 1" || ok "…pinned as a fact (no lpin=), not by the locality prior"
@@ -215,7 +218,7 @@ src = src.replace(body, "")
 src += "\ndef initialize(x, y)\n  @x = x\nend\n"
 open(sys.argv[2], "w").write(src)
 PYEOF
-"$BIN" "$MUT" --no-cache 2>/dev/null | sed 's/></>\n</g' | grep -q 'id="t.rb::B::initialize"' \
+"$BIN" "$MUT" --no-cache 2>/dev/null | sed 's/></>\n</g' | grep -q 'n="initialize" sc="B"' \
   && no "mutation: B::initialize id survived hoisting the def out of class B" \
   || ok "mutation: hoisted def lost its B:: id"
 

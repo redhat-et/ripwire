@@ -122,7 +122,20 @@ grep -q 'srcmut_sigchange' "$TMP/err" && no "the constant nonsense suggestion (s
 #    Bundle mode's <b> body tag carries no id= at all, so --expand is no longer a mode-independent way to
 #    fetch a canonical id; --outline always rides the classic 200-row map (no V1 lean default applies to
 #    it) and its <s> rows carry id= unconditionally, so it is the stable lookup path here.
-CANON_ID="$( "$BIN" "$ROOT" --outline='src/notes.h:empty' --no-cache 2>/dev/null | grep -o 'id="[^"]*NoteIndex::empty"' | head -1 | sed 's/^id="//;s/"$//' )"
+# row 6 (2026-09-12): the row prints the short id sc=; the canonical id composes as <f p=>::sc::n
+CANON_ID="$( "$BIN" "$ROOT" --outline='src/notes.h:empty' --no-cache 2>/dev/null | python3 -c '
+import re, sys
+doc, name, scope = sys.stdin.read(), sys.argv[1], ( sys.argv[2] if len( sys.argv ) > 2 else None )
+for f in re.finditer( r"<f p=\"([^\"]*)\"[^>]*>(.*?)</f>", doc, re.S ):
+    for row in re.finditer( r"<[sd]\b([^>]*)>", f.group( 2 ) ):
+        a = dict( re.findall( r"\s([\w:.-]+)=\"([^\"]*)\"", row.group( 1 ) ) )
+        if a.get( "n" ) == name and "sc" in a and ( scope is None or a[ "sc" ] == scope ):
+            print( f.group( 1 ) + "::" + a[ "sc" ] + "::" + a[ "n" ] ); sys.exit( 0 )
+for row in re.finditer( r"<d\b([^>]*)>", doc ):
+    a = dict( re.findall( r"\s([\w:.-]+)=\"([^\"]*)\"", row.group( 1 ) ) )
+    if a.get( "n" ) == name and "sc" in a and "p" in a and ( scope is None or a[ "sc" ] == scope ):
+        print( a[ "p" ] + "::" + a[ "sc" ] + "::" + a[ "n" ] ); sys.exit( 0 )
+' empty NoteIndex )"
 [ -n "$CANON_ID" ] || { no "could not look up NoteIndex::empty's canonical id via --outline"; CANON_ID="./src/notes.h::NoteIndex::empty"; }
 BARE_A="$( uses_elem 'buildGraph' )"
 BARE_B="$( uses_elem 'buildGraph' )"

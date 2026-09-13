@@ -414,7 +414,7 @@ else
     no "(A11) ffiVisitNode/linkage: the linkage string was not found past the flood — the extern \"C\" call edge is gone"
 fi
 "$BIN" "$TMP/pyenum/n1000" --no-cache --top-k=100000 >"$TMP/a_pyenum.xml" 2>/dev/null
-if [ "$( count_rows "$TMP/a_pyenum.xml" '<s t="var" n="A" id="big.py::C::A"' )" = 1 ]; then
+if [ "$( count_rows "$TMP/a_pyenum.xml" '<s t="var" n="A" sc="C"' )" = 1 ]; then
     ok "(A12) isPyEnumMemberTarget: \`A = 1\` is still an enum member when Enum sits past 1000 comments in the base list"
 else
     no "(A12) isPyEnumMemberTarget: the Enum base was not found past the flood — the member row is gone"

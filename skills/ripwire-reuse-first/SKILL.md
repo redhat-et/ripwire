@@ -35,22 +35,22 @@ though it's the tempting first instinct.
    the quality lens (`cx`/`ccx`/`in`/`churn`/`amp`/`tested`) so you see which
    candidates are safe to extend. Often the thing exists — compose from it.
 2. **Optionally get a style/shape exemplar** — if the retrieval result leaves a local-idiom question,
-   `ripwire <dir> --exemplar=fn|method|class|struct|iface|var` (a kind) or
+   `ripwire <dir> --exemplar=fn|method|class|struct|iface|var --legend=compact` (a kind) or
    `--exemplar="<task in words>"` (the top match's kind is inferred) returns the repo's single best-in-class
    instance of that shape: highest fan-in, lowest cognitive complexity, `tested=1` where possible — selected
    by ROLE, **not** text similarity. It returns the full body under `<bodies>`. **Copy its shape (structure,
    error handling, naming), not its text** — it is a model to imitate, not a relevant-code search.
-3. **Find candidates by behavior/shape** — `ripwire <dir> --grep="<a word from the behavior>"`, or a NARROWED
+3. **Find candidates by behavior/shape** — `ripwire <dir> --grep="<a word from the behavior>" --legend=compact`, or a NARROWED
    graph query: `--graph-query='and(file(all,"<area>"),kind(all,fn))'`. (Bare `kind(all,fn)` is ranked by
    importance + capped at `--top-k`, so it's safe — but narrowing by `file()`/`name()`/`callers()` finds the
    *relevant* building block, not just the globally-important one.) → implementations to reuse or extend.
-4. **Don't duplicate** — `ripwire <dir> --clones` → if your intended body matches an existing one, call it
+4. **Don't duplicate** — `ripwire <dir> --clones --legend=compact` → if your intended body matches an existing one, call it
    instead. **Rule of Three:** extract a shared helper on the *third* occurrence, not the second — and prefer
    a little duplication over the *wrong* abstraction (a helper you bend with boolean flags is worse than two
    honest copies).
 
 ## Before you add a dependency
-5. **Is it already here?** — `ripwire <dir> --external-surface` (what the tree already depends on; the default is a
+5. **Is it already here?** — `ripwire <dir> --external-surface --legend=compact` (what the tree already depends on; the default is a
    100-row window with the sh builtins dropped and counted as `builtins_excluded=` — `--include-builtins` keeps them) and
    `--uses=NAME` (the import role). Reuse an in-tree dependency before adding a new one: a new dep is build
    weight, supply-chain surface, and one more thing every reader must learn — it has to earn its place.

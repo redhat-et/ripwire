@@ -34,7 +34,8 @@ echo "clsrecvcheck: BIN=$BIN  CORPUS=$CORPUS"
 
 "$BIN" "$CORPUS" --pin-census="$TMP/c.tsv" --no-cache >"$TMP/map.xml" 2>"$TMP/err" || { no "the map run exited non-zero"; sed 's/^/          /' "$TMP/err"; }
 MAP="$( cat "$TMP/map.xml" )"
-row(){ printf '%s' "$MAP" | tr '<' '\n' | grep "id=\"$1\"" | head -1; }
+# row 6 (2026-09-12): a scoped row prints n= then sc= (the short id); the canonical id composes as <f p=>::sc::n
+row(){ _n="${1##*::}"; _r="${1#*::}"; _s="${_r%::*}"; printf '%s' "$MAP" | tr '<' '\n' | grep "n=\"$_n\" sc=\"$_s\"" | head -1; }
 # the census C row for a (caller, callee): "<mech> <targets>"
 crow(){ awk -F'\t' -v c="$1" -v n="$2" '$1=="C" && index($6, c"#")==1 && $7==n {print $2 "\t" $8; exit}' "$TMP/c.tsv"; }
 

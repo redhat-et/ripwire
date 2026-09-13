@@ -75,16 +75,16 @@ routing in the MCP `for` verb. Orienting from a pasted issue/bug-report's own te
 `--for` on Loc-Bench (n=560) — a mild win, not a default (`bench/locbench/README.md`). `--cochange-boost` is
 an experimental, off-by-default co-change prior — see `ripwire --help` before reaching for it.
 
-**3. File-by-file map** — `ripwire <dir> --tree` — each file with its top symbols, a quick "what's where".
+**3. File-by-file map** — `ripwire <dir> --tree --legend=compact` — each file with its top symbols, a quick "what's where".
 
-**4. Cohesive modules** — `ripwire <dir> --communities` — `<communities modules="N">`, each cluster with its
+**4. Cohesive modules** — `ripwire <dir> --communities --legend=compact` — `<communities modules="N">`, each cluster with its
 dominant directory and lead symbols; `<bridge>` edges show tight coupling between clusters. Use it to decide
 where a new feature belongs. Each row shows only its top five members — to see one module in full,
-`ripwire <dir> --community=ID` (the `id=` from a row, or from `--zoom`): its complete ranked member list
+`ripwire <dir> --community=ID --legend=compact` (the `id=` from a row, or from `--zoom`): its complete ranked member list
 (`--limit`/`--offset` page it) plus every bridge edge that module has. That is the call to make when a
 cluster looks like the one you'll be working in and five names aren't enough to judge it.
 
-**5. Maintenance pain** — `ripwire <dir> --hotspots` — files ranked by `score = churn × ccx`; `top=` names
+**5. Maintenance pain** — `ripwire <dir> --hotspots --legend=compact` — files ranked by `score = churn × ccx`; `top=` names
 the gnarliest function. Plan edits around this list.
 
 **6. Budget it** if the map is large — `--max-tokens=8000` or `--top-k=50`.
@@ -96,7 +96,7 @@ About to fan a single task out to several parallel agents? Do **not** let each o
 pay for the map N times. Run it **once**:
 
 ```bash
-ripwire <dir> --pack-task="<the task in words>" --partition=4
+ripwire <dir> --pack-task="<the task in words>" --legend=compact --partition=4
 ```
 
 You get one `<ctx-partitions>` document: a **shared common core** (the anchors the task is literally about,
@@ -117,7 +117,7 @@ boundary — one `--pack-task` and one agent is the honest answer there.
 
 ## When a flat module list is too coarse (big repos) — zoom out
 
-**7. Nested module hierarchy** — `ripwire <dir> --zoom` (`--zoom=DEPTH` to cap levels; the default prints the top 2
+**7. Nested module hierarchy** — `ripwire <dir> --zoom --legend=compact` (`--zoom=DEPTH` to cap levels; the default prints the top 2
 levels of the 40 largest modules — `levels_shown=`/`shown=` disclose it, `next=` pastes the next page, `--zoom-levels=0`
 prints every level): multi-level Louvain,
 `<module level=N id= size= dir=>`, indent = one level deeper, innermost `level="0"` lists top-ranked members.
@@ -125,7 +125,7 @@ Read top-down; a `dir=` that doesn't match its parent's is a cross-cutting conce
 Trailing `<bridge …>` entries name the high-traffic integration seams *between* top modules — pair with
 `--seams` to see which ones no test reaches.
 
-**8. Render it** — `ripwire <dir> --zoom --mermaid` (or `--mermaid` for the flat module graph): a
+**8. Render it** — `ripwire <dir> --zoom --legend=compact --mermaid` (or `--mermaid` for the flat module graph): a
 `flowchart TB`, paste at mermaid.live. For hand-exploring, `ripwire <dir> --html[=FILE]` writes a
 self-contained clickable wiki (module cards → subgraphs → Sourcetrail-style node recentering, no CDN);
 `--color-by=community|cx|churn|tested` sets its initial node-colour lens (a live selector covers the rest).
@@ -141,7 +141,7 @@ a CodeCharta `cc.json` for its 3D city view; the ladder's visualization end-poin
 **Read the specific files ripwire surfaces** (god-files + hotspots first) — don't grep blindly. A symbol's
 `amb="K"` means K of its calls are ambiguous (the resolver guessed) → read the source if which-target
 matters. A map header showing `skipped_oversize=N` means N otherwise-indexable files were dropped for
-exceeding a size ceiling — they are absent from `files=` and every ranking; `ripwire <dir> --skipped`
+exceeding a size ceiling — they are absent from `files=` and every ranking; `ripwire <dir> --skipped --legend=compact`
 names them (path + bytes + the ceiling that dropped each), so you know what the index cannot show you
 before you trust a "not found". A git root also drops every `.gitignore`d path by default (header `ignored_files=N`, absent when 0; `--skipped` lists them); `ripwire <dir> --no-ignore` restores the full walk when the symbol you want lives in an ignored tree. Caveat: *broad, common-word* questions can still favor plain `rg` —
 ripwire shines on specific technical asks. CI-enforceable module boundaries graduate to

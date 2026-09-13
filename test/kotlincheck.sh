@@ -155,18 +155,18 @@ if grep -q ' edges=14 ' "$MAP_OUT"; then ok "header: edges=14"; else no "header:
 if grep -q ' ambiguous=0 ' "$MAP_OUT"; then ok "header: ambiguous=0"; else no "header: expected ambiguous=0: $( grep -o 'ambiguous=[0-9]*' "$MAP_OUT" )"; fi
 if grep -q 'unresolved=0' "$MAP_OUT"; then ok "header: unresolved=0"; else no "header: expected unresolved=0: $( grep -o 'unresolved=[0-9]*' "$MAP_OUT" )"; fi
 
-grep -q 'id="Greeter.kt::Greeter::of"' "$MAP_OUT" && ok 'scope: companion-object factory carries id=Greeter.kt::Greeter::of' \
+grep -q 'n="of" sc="Greeter"' "$MAP_OUT" && ok 'scope: companion-object factory carries sc=Greeter (id Greeter.kt::Greeter::of)' \
     || no "scope: Greeter::of id missing — kotlinEnclosingScopeOf regressed: $( grep -o 'n="of"[^>]*' "$MAP_OUT" )"
-grep -q 'id="Greeter.kt::Greeter::greet"' "$MAP_OUT" && ok 'scope: member function carries id=Greeter.kt::Greeter::greet' \
+grep -q 'n="greet" sc="Greeter"' "$MAP_OUT" && ok 'scope: member function carries sc=Greeter (id Greeter.kt::Greeter::greet)' \
     || no "scope: Greeter::greet id missing: $( grep -o 'n="greet"[^>]*' "$MAP_OUT" )"
-grep -q 'id="Util.kt::Formatter::format"' "$MAP_OUT" && ok 'scope: plain class member carries id=Util.kt::Formatter::format' \
+grep -q 'n="format" sc="Formatter"' "$MAP_OUT" && ok 'scope: plain class member carries sc=Formatter (id Util.kt::Formatter::format)' \
     || no "scope: Formatter::format id missing: $( grep -o 'n="format"[^>]*' "$MAP_OUT" )"
-grep -q 'id="Util.kt::Extra::helper"' "$MAP_OUT" && ok 'scope: object member carries id=Util.kt::Extra::helper' \
+grep -q 'n="helper" sc="Extra"' "$MAP_OUT" && ok 'scope: object member carries sc=Extra (id Util.kt::Extra::helper)' \
     || no "scope: Extra::helper id missing: $( grep -o 'n="helper"[^>]*' "$MAP_OUT" )"
 # Negative: a TOP-LEVEL function must NOT pick up a spurious scope (kotlinEnclosingScopeOf's own
 # self-exclusion / walk-through-anonymous-companion logic must not over-fire).
-echo "$( grep -o '<s t="fn" n="doubled"[^>]*>' "$MAP_OUT" )" | grep -q 'id=' \
-    && no "scope: top-level extension function doubled() got a spurious id= (should be scope-less)" \
+echo "$( grep -o '<s t="fn" n="doubled"[^>]*>' "$MAP_OUT" )" | grep -q 'sc=' \
+    && no "scope: top-level extension function doubled() got a spurious sc= (should be scope-less)" \
     || ok "scope: top-level extension function doubled() is correctly scope-less"
 
 CR="$( "$BIN" "$FIX" --callers=square --no-cache 2>/dev/null )"

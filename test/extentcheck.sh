@@ -106,7 +106,7 @@ cap "$TMP/a.xml" "$TMP/leak" --no-cache
 SWALLOWED="accumulateOrders clampQuantity hasLabel drainQueue"
 leaked=0
 for n in $SWALLOWED; do
-    row "$TMP/a.xml" "$n" | grep -q "id=\"leak.cpp::IndiaError::$n\"" && leaked=$(( leaked + 1 ))
+    row "$TMP/a.xml" "$n" | grep -q "n=\"$n\" sc=\"IndiaError\"" && leaked=$(( leaked + 1 ))   # row 6: the scope rides sc=
 done
 [ "$leaked" -eq 4 ] && ok "(A) the fixture still reproduces the leak: 4/4 free functions filed under IndiaError::" \
     || no "(A) the fixture no longer reproduces the leak ($leaked/4 under IndiaError::) — every other arm is testing nothing"

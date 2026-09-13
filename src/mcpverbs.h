@@ -1747,7 +1747,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // §L10b + verify-wave2 F6: same trim as the CLI --for twin (verbs_for.h) — no leading " [" and no
     // trailing "]"; the value lands only in route=, where the attribute quote is the delimiter.
     const std::string mcpForAtAttrStr = gitstamp::atAttr( root );   // M10's at=, computed once: spliced onto the root AND exempted from the sigs charge below
-    std::string rootOpenStr = ctxRootOpen( task, noRoute ? std::string() : ( "routed: " + rc.reason + shapeDemotionNote( shape ) ),
+    std::string rootOpenStr = ctxRootOpen( task, noRoute ? std::string() : ( rc.reason + shapeDemotionNote( shape ) ),   // row 6: the route CODE, as the CLI twin
                                            flRootArg );   // §B1.7: same root attrs as the CLI twin (no route= under no_route, as --no-route)
     if( !rootOpenStr.empty() && rootOpenStr.back() == '>' )
     {
@@ -1794,7 +1794,8 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     std::string headerStr = rootOpenStr
                           + "<!-- ripwire lens for \"" + safeTask + "\"" + mentionNote + boostNote + docMentionNote + floorNote
                           + ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing"
-                            "; bundle=sigs: signatures only in this bundle, no inline bodies — fetch a symbol's full body with the fetch_body verb"
+                          + std::string( rw::kForIdRouteLegend )   // row 6: sc= and the route= code — the CLI twin's exact clause
+                          + "; bundle=sigs: signatures only in this bundle, no inline bodies — fetch a symbol's full body with the fetch_body verb"
                           + std::string( mcpForConf.note )
                           // No "--" anywhere in this clause: it rides inside an XML comment, where a double
                           // hyphen is ill-formed (G4), so the CLI verb is named without its dashes.
@@ -1846,7 +1847,10 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // ranked row the CLI still served (test/mcpforparitycheck.sh (2), two of four conceptual tasks). The
     // header bytes stay real downstream (the payload is what it is); only the sigs allowance stops paying.
     const std::size_t mcpConfidenceExemptBytes = mcpForConf.attrs.size() + mcpForConf.note.size() + mcpForAtAttrStr.size();
-    const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size() - mcpConfidenceExemptBytes
+    // Row 6 (2026-09-12): the sc=/route= reading (kForIdRouteLegend, appended above) is exempt on the same contract —
+    // charged, it grew this header by 259 B and dropped one ranked row the CLI still served (mcpforparitycheck (2),
+    // two of four conceptual tasks: the exact regression the paragraph above records for the 125 B of 2026-09-04).
+    const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size() - mcpConfidenceExemptBytes - rw::kForIdRouteLegend.size()
                                  + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
     const std::size_t sigsBudget = forBudgetBytes > fixedBytes ? forBudgetBytes - fixedBytes : 1;   // ≥1: 0 = "no budget"
 
@@ -3536,7 +3540,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                        : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, 0, &ifaceExact, &tierMul );
     // §L10b + verify-wave2 F6: same trim as the other route= construction sites — neither bracket.
-    lr.routeNote = noRoute ? std::string() : ( "routed: " + rc.reason + shapeDemotionNote( shape ) );
+    lr.routeNote = noRoute ? std::string() : ( rc.reason + shapeDemotionNote( shape ) );   // row 6: the route CODE, as the CLI twin
 
     if( !noRoute && !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {

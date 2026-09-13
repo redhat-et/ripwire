@@ -497,10 +497,10 @@ DEFCALLEES="$( run "$DEFFIX" --callees=deep2 --no-cache )"
 #     PRE-FIX binary, minted by the in-class DECLARATIONS — so an id-presence arm passes while the two
 #     definitions are missing entirely. The discriminating fact is which row the def MERGED INTO, read off
 #     `overloads=` (decl+def collapsed = 2) and off the caller line each sink names.
-printf '%s' "$DEFMAP" | grep -qE '<s t="method" n="deep3" id="[^"]*nesteddef\.cpp::InnerD::deep3" overloads="2"' \
+printf '%s' "$DEFMAP" | grep -qE '<s t="method" n="deep3" sc="InnerD" overloads="2"' \
     && ok "def §11 precision: the 3-segment def merged into the InnerD::deep3 row (overloads=2) — IMMEDIATE scope" \
     || no "def §11 precision: InnerD::deep3 is not overloads=2 — the def took the wrong scope or is absent"
-printf '%s' "$DEFMAP" | grep -qE '<s t="method" n="deep3" id="[^"]*nesteddef\.cpp::OuterD::deep3" overloads="2"' \
+printf '%s' "$DEFMAP" | grep -qE '<s t="method" n="deep3" sc="OuterD" overloads="2"' \
     && ok "def §11 precision: the decoy OuterD::deep3 kept exactly its own def (overloads=2, not 3)" \
     || no "def §11 precision: OuterD::deep3 is not overloads=2 — the two deep3 definitions merged"
 printf '%s' "$DEFMAP" | grep -qE 'id="[^"]*nesteddef\.cpp::nsD::deep3"' \

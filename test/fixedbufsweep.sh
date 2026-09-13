@@ -248,9 +248,9 @@ NUMERIC_ONLY = {
     ( "src/serialize.h", "gfb" ): 1,
     ( "src/serialize.h", "inAttr" ): 1,
     ( "src/serialize.h", "kbuf" ): 1,
-    ( "src/serialize.h", "lb" ): 2,
+    ( "src/serialize.h", "lb" ): 3,   # row 6 (2026-09-12): collectCalleeNameRow's line buffer (the merged <c n= l=> row) joined the two
     ( "src/serialize.h", "lineAttr" ): 1,
-    ( "src/serialize.h", "nb" ): 2,
+    ( "src/serialize.h", "nb" ): 1,   # row 6 (2026-09-12): appendCalleeNameRow's `"\" l=\"{}\"/>"` buffer went with the merge
     ( "src/serialize.h", "precAttr" ): 1,
     ( "src/serialize.h", "rankAttr" ): 1,
     ( "src/serialize.h", "rc" ): 2,

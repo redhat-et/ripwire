@@ -152,13 +152,11 @@ exercises | exercises@test_symbols
 external-surface | external-surface@capped
 external-surface | external-surface@shown
 external-surface | x@lang
-for | ctx@route
 for | ctx@task
 for | field@name
 for | field@owner
 for | field@rel
 for | field@type
-for-auto | ctx@route
 for-auto | ctx@task
 grep | grep@pattern
 hotspots | f@top_ccx
@@ -256,7 +254,6 @@ for | d@pure
 # the gate's own arm (F) census, which prints both elements' keys on every run and reds when a new one appears.
 for-budgeted | ctx@bodies
 for-budgeted | ctx@reason
-for-budgeted | ctx@route
 for-budgeted | ctx@task
 for-budgeted | d@next
 for-budgeted | d@pure

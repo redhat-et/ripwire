@@ -115,7 +115,7 @@ fi
     || no "member scope invariance failed (see the constructor assertion above)"
 
 # ── (f) ROUTE SCOPE ────────────────────────────────────────────────────────────────────────────────
-"$BIN" nestedqualfix --for=Inner 2>/dev/null | grep -q 'routed: name-exact' \
+"$BIN" nestedqualfix --for=Inner 2>/dev/null | grep -q 'route="name-exact(' \
     && ok "--for=Inner takes the name-exact route (the route this fix's ranking arms measure)" \
     || no "--for=Inner no longer routes name-exact"
 

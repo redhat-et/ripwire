@@ -263,6 +263,24 @@ observe "$( bashcall adopt3 'ripwire . --expand=targetSymbol' )" "$H9"
     && ok "O3 observe: a third call is OUTSIDE the window — the second non-adoption closes it as missed" \
     || no "O3 observe: rows=$( rows "$H9/routing.jsonl" ) third=[$( rowget "$H9/routing.jsonl" 3 outcome )]"
 
+# O8 (2026-09-12, the local routing analysis's instrument bug): a DIRECTORY named ripwire is not a ripwire call.
+# `cd /x/ripwire && git log --oneline` carries a token ending in /ripwire in ARGUMENT position; the observer
+# counted it as a call, burned a window slot, and a real adoption two commands later read as `missed`. Only the
+# COMMAND word counts — `ripwire`, `./build/ripwire`, any path whose basename is ripwire in command position
+# (after ^ ; & | ( or $( and any leading VAR=value assignments) — never an argument.
+H13="$TMP/h13"; mkdir -p "$H13"
+route_run "$H13" "$WITH_RIPWIRE" "$( promptjson adopt7 "$REPO" "$RECPROMPT" )" RIPWIRE_METER_ARM=treatment >/dev/null 2>&1
+observe "$( bashcall adopt7 'cd /tmp/x/ripwire && git log --oneline' )" "$H13"
+observe "$( bashcall adopt7 'ls -la /opt/ripwire' )" "$H13"
+observe "$( bashcall adopt7 'echo ripwire' )" "$H13"
+[ "$( rows "$H13/routing.jsonl" )" = 1 ] \
+    && ok "O8 observe: a directory argument ending in /ripwire (and a bare word in argument position) consumes no window slot" \
+    || no "O8 observe: a non-call consumed a window slot — rows=$( rows "$H13/routing.jsonl" ) (want 1: the prompt row only)"
+observe "$( bashcall adopt7 'cd /tmp/x/repo && ./build/ripwire . --expand=targetSymbol' )" "$H13"
+[ "$( rowget "$H13/routing.jsonl" 2 outcome )" = adopted ] && [ "$( rowget "$H13/routing.jsonl" 2 position )" = 1 ] \
+    && ok "O8 observe: the real call after them (a path in command position after &&) still adopts at position 1" \
+    || no "O8 observe: row 2 = outcome=[$( rowget "$H13/routing.jsonl" 2 outcome )] position=[$( rowget "$H13/routing.jsonl" 2 position )] (want adopted at 1)"
+
 # The CONTROL arm's adoption is observed identically. Without this the band has one arm.
 H10="$TMP/h10"; mkdir -p "$H10"
 route_run "$H10" "$WITH_RIPWIRE" "$( promptjson adopt4 "$REPO" "$RECPROMPT" )" RIPWIRE_METER_ARM=control >/dev/null 2>&1

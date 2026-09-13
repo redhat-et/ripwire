@@ -34,17 +34,19 @@ if diff -q "$TMP/a" "$TMP/b" >/dev/null; then ok "determinism (byte-identical, $
 MAP="$( "$BIN" "$CORPUS" --no-cache 2>/dev/null )"
 
 # 2) DISTINCT canonical ids — A::compute and B::compute each get their own `id=…::<Class>::compute`.
-if printf '%s' "$MAP" | grep -q 'id="[^"]*canon.cpp::A::compute"'; then ok "canonical id present: …::A::compute"; else { no "no canonical id …::A::compute"; printf '    %s\n' "$MAP"; }; fi
-if printf '%s' "$MAP" | grep -q 'id="[^"]*canon.cpp::B::compute"'; then ok "canonical id present: …::B::compute"; else { no "no canonical id …::B::compute"; printf '    %s\n' "$MAP"; }; fi
+# row 6 (2026-09-12): the row prints the short id sc= (the enclosing scope); the canonical id composes as p::sc::n
+# with the enclosing <f p=>, so "distinct canonical ids" is "same n=, distinct sc=" under the one canon.cpp file.
+if printf '%s' "$MAP" | grep -q 'n="compute" sc="A"'; then ok "canonical id present: …::A::compute (n=compute sc=A)"; else { no "no canonical id …::A::compute"; printf '    %s\n' "$MAP"; }; fi
+if printf '%s' "$MAP" | grep -q 'n="compute" sc="B"'; then ok "canonical id present: …::B::compute (n=compute sc=B)"; else { no "no canonical id …::B::compute"; printf '    %s\n' "$MAP"; }; fi
 # the two ids are genuinely DIFFERENT strings (the whole point: a same-name collision now disambiguates)
-A_ID="$( printf '%s' "$MAP" | grep -o 'id="[^"]*canon.cpp::A::compute"' | head -1 )"
-B_ID="$( printf '%s' "$MAP" | grep -o 'id="[^"]*canon.cpp::B::compute"' | head -1 )"
+A_ID="$( printf '%s' "$MAP" | grep -o 'n="compute" sc="A"' | head -1 )"
+B_ID="$( printf '%s' "$MAP" | grep -o 'n="compute" sc="B"' | head -1 )"
 if { [ -n "$A_ID" ] && [ -n "$B_ID" ] && [ "$A_ID" != "$B_ID" ]; }; then ok "the two compute() defs have DISTINCT canonical ids ($A_ID != $B_ID)"; else no "the two compute() ids are not distinct (A='$A_ID' B='$B_ID')"; fi
 
 # 3) a free-function-style collision is not the case here, but verify id= is ONLY on scoped symbols:
 #    every emitted id= must contain '::' (a scope) — never a bare name (that would be redundant churn).
-BAD_ID="$( printf '%s' "$MAP" | grep -o 'id="[^"]*"' | grep -v '::' | head -1 )"
-if [ -z "$BAD_ID" ]; then ok "id= emitted only when it disambiguates (every id= is scoped, none == bare name)"; else no "a bare (scope-less) id= leaked: $BAD_ID"; fi
+BAD_ID="$( printf '%s' "$MAP" | grep -o 'sc=""\| id="[^"]*"' | head -1 )"
+if [ -z "$BAD_ID" ]; then ok "sc= emitted only when it disambiguates (never empty, and no path-repeating id= on a row)"; else no "an empty sc= or a path-repeating id= leaked: $BAD_ID"; fi
 
 # 4) the member call resolves to A::compute ONLY (canonical scope + locality), NOT B::compute.
 #    --callees lists the resolved out-edges with file:line; A::compute is line 26, B::compute is line 31.

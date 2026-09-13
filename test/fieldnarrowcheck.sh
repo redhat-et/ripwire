@@ -112,8 +112,9 @@ MAP="$( "$BIN" "$FIX" --no-cache 2>/dev/null | tr '>' '\n' )"
 callees(){ "$BIN" "$FIX" "--callees=$1" --no-cache 2>/dev/null | grep -o '<callees.*</callees>' | tr '/' '\n'; }
 
 # ── presence guards (a gate that cannot observe what it asserts is green-while-inert) ──
-# TS symbols carry no scope string (no scoped id= attribute), so to_go is matched by its n= name.
-for want in '::Pool::acquire"' '::Decoy::acquire"' '::Owner::run"' '::Base::helper"' '::DecoyH::helper"' '::Owner4::inh_go"' '::POwner::po_go"' 'n="to_go"'; do
+# TS symbols carry no scope string (no sc= attribute), so to_go is matched by its n= name. Row 6: a scoped row
+# prints n= then sc= (the short id; the canonical id composes as p::sc::n with the enclosing <f p=>).
+for want in 'n="acquire" sc="Pool"' 'n="acquire" sc="Decoy"' 'n="run" sc="Owner"' 'n="helper" sc="Base"' 'n="helper" sc="DecoyH"' 'n="inh_go" sc="Owner4"' 'n="po_go" sc="POwner"' 'n="to_go"'; do
     printf '%s\n' "$MAP" | grep -qF "$want" || no "presence guard: fixture symbol $want not indexed"
 done
 [ "$fail" = 0 ] && ok "presence: all fixture symbols indexed"
@@ -202,7 +203,7 @@ AMB="$( printf '%s\n' "$MAP" | grep -o 'ambiguous=[0-9]*' | head -1 )"
 
 # ── (n) same-NAMED class collision (FIX2): conflicting same-named fields tombstone — NEITHER Dup::go narrows ──
 MAP2="$( "$BIN" "$FIX2" --no-cache 2>/dev/null | tr '>' '\n' )"
-printf '%s\n' "$MAP2" | grep -qF '::Dup::go"' || no "(n) presence guard: Dup::go not indexed in FIX2"
+printf '%s\n' "$MAP2" | grep -qF 'n="go" sc="Dup"' || no "(n) presence guard: Dup::go not indexed in FIX2"
 AMB2="$( printf '%s\n' "$MAP2" | grep -o 'ambiguous=[0-9]*' | head -1 )"
 [ "$AMB2" = "ambiguous=2" ] \
     && ok "(n) both n1::Dup::go and n2::Dup::go stay ambiguous (conflicting field types tombstoned)" \

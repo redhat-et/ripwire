@@ -15,6 +15,97 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — agent surfaces ask for the compact legend
+
+The commands ripwire writes for an agent — the `ripwire wrap` paste block, the skills under `skills/`,
+the `<run>` line `--help-task` hands the prompt router, and the runnable line the tool-call router
+injects — spelled every XML verb with the default legend, the ~3 KB posture the `--legend` help text
+itself tells repeated callers to leave: most of a small `--callers`/`--uses`/`--impact` answer, byte-
+identical rows either way. Every one of those commands now carries `--legend=compact` where the verb
+accepts it (the XML verbs); `--for` keeps the default legend (its compact legend is its own, and the
+first call of a session wants the full one), and the text, JSON and writer verbs the binary refuses
+the flag on are untouched. Counted on this commit: 158 `ripwire <dir> --VERB` commands in 17 skill
+files (bodies only — no description changed, so no skill's stop rules or boundaries moved), 9
+commands in the wrap paste block (its 10–20 line band unchanged), 26 `--help-task` routes and the 2
+tool-call routes. Humans running the bare CLI see no difference. Gates, red first: `wrapverbscheck`
+arm 7 asserts the flag on every blurb command for the ten XML verbs it spells and its absence on
+`--for` (10 FAIL against the previous build); `skilltruthcheck` asserts it on every skill command for
+the shipped verb list (152 of 154 missing before the transform) and its absence on `--for`.
+
+### Fixed — the route hooks counted a directory named ripwire as a ripwire call
+
+The `--observe` arm of `hooks/ripwire-claude-route.sh` and `hooks/ripwire-codex-route.sh` closes the
+adoption-within-two window by inspecting the next two ripwire calls after a recommendation. It
+recognised a call by any token ending in `/ripwire`, so `cd …/ripwire && git log --oneline` — the
+directory, in argument position — consumed a window slot, and a real adoption two commands later was
+logged as `missed` (found in the local routing analysis of 2026-09-12; the numbers stay local). A call
+is now counted only when the command word itself is the binary — `ripwire`, `./build/ripwire`, any
+path whose basename is `ripwire` in command position (at the start, after `;` `&` `|` `(` or `$(`,
+past leading `VAR=value` assignments) — never a directory argument or a bare word after `echo`.
+`test/routehookcheck.sh` O8 and `test/codexpromptroutecheck.sh` carry the regression shape (red on
+the previous hooks: rows=3 where 1 was wanted; the Codex twin's position-2 adoption read as missed).
+
+### Changed — `--for`'s compact legend is pinned at 500 bytes
+
+Under `--legend=compact` every other XML verb answers with a legend that defines only the terms its
+document carries, measured and pinned per schema in `test/compactlegendcheck.sh`; `--for` did not. Its
+native compact dialect was the default dialect's sentences with a schema id in front — 1,177 to 1,216
+bytes on that gate's own fixture — and it was exempt from the per-verb pin by name, so a call an agent
+makes more than any other paid the one legend the compact dialect exists to shrink. It now answers with
+one present-only comment: a reading for each row and root attribute the bundle actually prints
+(`cx`/`ccx`/`in`/`churn`/`amp`/`clone`/`tested`, `sc=` and the `route=` code, `bundle`/`bodies`/`reason`,
+the `total=`/`shown=`/`capped=` window, the hops or bodies clause of the serving shape, the tail and the
+confidence gauge), and the data notes keep their numbers without their sentences
+(`[floor: kept 7 of 40]`, `[doc mentions: 1 doc, 1 symbol; doc_mentions=]`); the three
+ceiling-droppable clauses still fall together under a tight `--token-budget` and the dropped note still
+names them. Measured with the gate's own splitter (comment bytes not present verbatim in the default
+dialect's document) on its fixture probe `--for=geometry`: 915 → 494 B, pinned at 500 as the new
+`ripwire.for/v1` row, the exemption gone. Per call on this tree, three tasks under `--legend=compact`:
+9,947 → 9,669, 10,075 → 9,682 and 5,156 → 4,624 B (−278, −393, −532 B) with the same signature rows
+served (32, 26, 3). The MCP `for` twin declares no `legend` field and serves the default dialect only,
+so its bytes are unchanged (9,132, 9,149 and 2,173 B on the same tasks). `legendcoveragecheck` holds:
+every attribute the compact document carries on its first screen has a `name=` definition in that one
+comment, with `next=`, `pure=` and `schema=` on the recorded floor exactly as before.
+
+### Changed — symbol rows carry a short id (`sc=`) instead of repeating their path
+
+Every scoped symbol row on the map and on the `--for`/`--pack-task`/`--from-trace`/`--pack-signatures`
+signature rows printed its canonical id in full — `id="src/mcpverbs.h::rw::applyCompactToBatchSubs"` on a
+row that already sits under `<f p="src/mcpverbs.h">` or carries `p="src/mcpverbs.h"` itself. On this
+repository's flagless map that was 137 of 137 scoped rows repeating the path the wrapper had just
+printed. The row now carries only the segment nothing else on the page holds, `sc=` (the enclosing scope),
+and the legend states the composition: the full id is `p::sc::n`, with `p=` taken from the row or its
+enclosing `<f>`. Nothing an agent could address before is unaddressable now — `--expand`, `--callers`,
+`--impact`, `--uses` and the MCP twins accept the composed `path::scope::name` exactly as they accepted
+the printed `id=`, and `test/scroundtripcheck.sh` proves it: the multiset of ids composed from the new
+rows is byte-identical to the multiset the previous binary printed on two fixtures, every composed id
+resolves through `--expand` to a body of that path and name, a mutated scope resolves to nothing, and the
+old spelling still resolves on input. Two smaller cuts ride the same rows: `route=` is a code
+(`name-exact(X)`, `subtoken+body`, `subtoken+body:broad`, `subtoken+body:declined(word;carriers,defs)`)
+with its reading in the legend instead of 107 bytes of prose per answer (23 bytes now; the `anchors:`
+evidence clause is unchanged), and a `--for` compact bundle merges the same-named callees of one `calls`
+block into one `<c n= l="70,69"/>` row (`shown=` still counts callees). Measured with `wc -c` against the
+pre-change build of the same commit: the flagless map of this repository 26,402 → 22,354 B (−15.3%, the
+same 185 rows), `test/cppqualfix` 2,935 → 2,781 B, `test/nestedqualfix` 2,045 → 1,937 B; a fixture with
+four scoped rows (`test/accessshapefix`) grows 9 B, because the `sc=` reading is longer than the
+`id=canonical(…)` clause it replaces and four rows do not pay it back. On `--for` the bundle is
+byte-shaped, so the row savings became rows, not bytes: three conceptual and name-exact tasks on this
+tree served 25 → 28, 21 → 24 and 3 → 3 signature rows at 10,042 → 10,142, 10,256 → 10,180 and
+5,971 → 5,886 B; the MCP `for` twin on the same tasks 8,752 → 9,008, 8,882 → 9,001 and 1,965 → 2,025 B
+with 26 → 31, 23 → 27 and 1 → 1 rows. The one new legend clause — the `sc=` composition rule and the
+`route=` code vocabulary, 123 B, ceiling-droppable with the confidence clause and exempt from the
+signature-trim charge like every other disclosure — keeps the readings of the codes in `--help`'s
+`--no-route` entry rather than on every answer: a 259 B first spelling grew a 2.9 KB fixture bundle by
+10% and tripped `test/forrankordercheck.sh`'s 4% ratchet. The `--json`
+twins mirror the attribute (`"sc"`), so `mcpattrparity` holds without a rename. Pins moved with the
+bytes: seven compact-legend schemas in `test/compactlegendcheck.sh` (map 810 → 920, map-diff 800 → 910,
+pack-signatures 680 → 780, metrics 720 → 820, query 630 → 730, pack-task 820 → 980, pack-top-n
+660 → 770) and the ten-verb loop 4,900 → 5,000 B, all for the one new whole-document `sc=` reading; the
+`test/fixture` map's `est_tokens` 884 → 894; seven of `test/forrankordercheck.sh`'s nine frozen-fixture
+bundle bases follow the output (+84…+142 B each, the whole delta the tool's, the ten repository queries
+inside the ratchet at +0.8…+3.9%); five goldens regenerated for the row shape; the printf-parity manifest
+re-pinned for the labels the rows and the help text move.
+
 ### Added — Elixir module and arity resolution (parser version 95)
 
 Elixir calls now resolve by module, name and arity, with lexical aliases, filtered imports, default

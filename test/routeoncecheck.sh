@@ -37,8 +37,10 @@ cd "$TMP"
 
 # (a) --for, routed: the disclosure text appears exactly once, and the attribute carries it.
 "$BIN" fix --for="buildGraph" --no-cache >"$TMP/for.xml" 2>/dev/null
-n="$( grep -o 'routed:' "$TMP/for.xml" | wc -l | tr -d ' ' )"
-if [ "$n" = 1 ]; then ok "--for emits 'routed:' exactly once (got $n)"; else no "--for emits 'routed:' $n times (want exactly 1 — the route= attribute)"; fi
+# row 6 (2026-09-12): the disclosure is a CODE now (name-exact(X) / subtoken+body…), no "routed:" prose — so the
+# once-and-only-once property is read off the attribute itself: exactly one route= on the document.
+n="$( grep -o ' route="' "$TMP/for.xml" | wc -l | tr -d ' ' )"
+if [ "$n" = 1 ]; then ok "--for emits route= exactly once (got $n)"; else no "--for emits route= $n times (want exactly 1 — the root attribute)"; fi
 grep -q 'route="' "$TMP/for.xml" \
     && ok "--for keeps the route= attribute (the machine-readable copy)" \
     || no "--for lost the route= attribute — the surviving copy must be the ATTRIBUTE, not the comment"
@@ -57,9 +59,9 @@ grep -oE 'route="[^"]*"' "$TMP/for.xml" | grep -q '^route=" \[' \
 grep -oE 'route="[^"]*"' "$TMP/for.xml" | grep -q ']"$' \
     && no "--for route= still ends with a stray unbalanced bracket" \
     || ok "--for route= ends with the route reason, not a bracket"
-grep -oE 'route="routed: ' "$TMP/for.xml" >/dev/null \
-    && ok "--for route= starts directly with 'routed: ' (no leading filler)" \
-    || no "--for route= does not start with 'routed: ' — the trim moved the anchor, not just the space"
+grep -oE 'route="(name-exact\(|subtoken\+body)' "$TMP/for.xml" >/dev/null \
+    && ok "--for route= starts directly with the ranker code (no leading filler)" \
+    || no "--for route= does not start with a ranker code (name-exact( / subtoken+body) — the trim moved the anchor, not just the space"
 
 # (a2) --for on the CONCEPTUAL route (2026-08-23 serving-shape sweep): the same single-copy contract on
 #      the COMPACT serving shape. (a)'s query anchors, so it pins the contract only on the auto body walk;
@@ -70,16 +72,16 @@ grep -oE 'route="routed: ' "$TMP/for.xml" >/dev/null \
 grep -q 'bundle="compact"' "$TMP/forc.xml" \
     && ok "--for conceptual presence: the query serves the COMPACT shape" \
     || no "--for conceptual presence: the query no longer serves bundle=\"compact\" — re-author it, the compact arm observes the wrong shape"
-n="$( grep -o 'routed:' "$TMP/forc.xml" | wc -l | tr -d ' ' )"
-if [ "$n" = 1 ]; then ok "--for (compact shape) emits 'routed:' exactly once (got $n)"; else no "--for (compact shape) emits 'routed:' $n times (want exactly 1 — the route= attribute)"; fi
+n="$( grep -o ' route="' "$TMP/forc.xml" | wc -l | tr -d ' ' )"
+if [ "$n" = 1 ]; then ok "--for (compact shape) emits route= exactly once (got $n)"; else no "--for (compact shape) emits route= $n times (want exactly 1 — the root attribute)"; fi
 grep -q 'route="' "$TMP/forc.xml" \
     && ok "--for (compact shape) keeps the route= attribute" \
     || no "--for (compact shape) lost the route= attribute"
 
 # (b) --pack-task, same contract.
 "$BIN" fix --pack-task="buildGraph" --no-cache >"$TMP/pt.xml" 2>/dev/null
-n="$( grep -o 'routed:' "$TMP/pt.xml" | wc -l | tr -d ' ' )"
-if [ "$n" = 1 ]; then ok "--pack-task emits 'routed:' exactly once (got $n)"; else no "--pack-task emits 'routed:' $n times (want exactly 1)"; fi
+n="$( grep -o ' route="' "$TMP/pt.xml" | wc -l | tr -d ' ' )"
+if [ "$n" = 1 ]; then ok "--pack-task emits route= exactly once (got $n)"; else no "--pack-task emits route= $n times (want exactly 1)"; fi
 grep -q 'route="' "$TMP/pt.xml" \
     && ok "--pack-task keeps the route= attribute" \
     || no "--pack-task lost the route= attribute"

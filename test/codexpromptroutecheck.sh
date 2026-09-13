@@ -67,7 +67,10 @@ grep -R -q 'SECRET_PROMPT_TEXT' "$TMP/meter/routing-pending" 2>/dev/null \
 
 # The next two RIPWIRE calls, rather than arbitrary tool calls, close the recommendation. A different
 # first verb stays pending; the recommended second verb records position=2 and clears the state.
-for command in 'ripwire . --grep=SECRET_COMMAND_TEXT' 'ripwire . --for=alpha'; do
+# 2026-09-12: the first command names a DIRECTORY ending in /ripwire in argument position — not a call. It must
+# consume no window slot, or the --grep below lands at position 2 and the --for reads as missed (the instrument bug
+# the local routing analysis found; test/routehookcheck.sh O5 is the Claude twin).
+for command in 'cd /tmp/x/ripwire && git status' 'ripwire . --grep=SECRET_COMMAND_TEXT' 'ripwire . --for=alpha'; do
     payload="$( jq -cn --arg cwd "$TMP/repo" --arg command "$command" \
         '{session_id:"route-test",cwd:$cwd,tool_name:"Bash",tool_input:{command:$command}}' )"
     printf '%s' "$payload" | PATH="$TMP/bin:$PATH" RIPWIRE_HOME="$TMP/meter" "$ADAPTER" >/dev/null

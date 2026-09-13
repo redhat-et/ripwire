@@ -264,7 +264,7 @@ OR="$( route 'clang says the inner loop was not vectorized - is that worth a dif
 case "$OR" in *'status="recommend"'*'intent="opt-remark"'*'skill="ripwire-opt-remarks"'*'--for='*) ok "a clang optimization remark -> the ranked lens, under the opt-remarks skill";; *) no "opt-remark route wrong: $OR";; esac
 # Execution check: the two catalog commands that carry a COMPOSED value are not placeholders. Unquote
 # what the router emitted and run it through the real verb, the same way the SYM:VAR arm above does.
-GQEXPR="$( printf '%s' "$GQ" | sed -n 's|.*--graph-query=&apos;\(.*\)&apos;</run>.*|\1|p' | sed 's/&quot;/"/g' )"
+GQEXPR="$( printf '%s' "$GQ" | sed -n 's|.*--graph-query=&apos;\(.*\)&apos;\( --legend=compact\)\{0,1\}</run>.*|\1|p' | sed 's/&quot;/"/g' )"
 GQRUN="$( "$BIN" "$REPO" --no-cache --graph-query="$GQEXPR" )"; rc=$?
 { [ $rc -eq 0 ] && printf '%s' "$GQRUN" | grep -q '<query expr='; } \
     && ok "the emitted --graph-query expression runs and returns a <query> root" \

@@ -2021,9 +2021,10 @@ inline void noteAnchorPlausibility( ImplausibleAnchor& imp, std::string_view low
 // phrase as a name-exact marker).
 inline std::string declinedRouteReason( const ImplausibleAnchor& imp )
 {
-    return "subtoken+body BM25 — name-exact declined: anchor '" + imp.word + "' is a common name ("
-         + std::to_string( imp.carriers ) + " name-carriers, " + std::to_string( imp.defs )
-         + " defs); conceptual ranker used";
+    // row 6 (2026-09-12): a CODE with the evidence in parentheses — the word that was refused, how many names
+    // carry it and how many definitions it has; the legend's route= reading spells what :declined means.
+    return "subtoken+body:declined(" + imp.word + ";" + std::to_string( imp.carriers ) + "-carriers,"
+         + std::to_string( imp.defs ) + "-defs)";
 }
 
 // split a query on whitespace into raw words (case preserved — camelCase detection needs it)
@@ -2141,7 +2142,7 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
     if( nameExact )
     {
         rc.which  = LexMode::NameExact;
-        rc.reason = "name-exact BM25 — query names a symbol (" + identifierHit + ")";
+        rc.reason = "name-exact(" + identifierHit + ")";   // row 6: a CODE; the reading lives in the legend (route=)
         // The evidence, appended and never substituted: downstream readers (test/taskechocheck.sh) parse the
         // clause above out of this same string. A subtoken+body route names no anchors because nothing
         // anchored it — an anchors list on a route the names did not decide would be evidence after the fact.
@@ -2156,12 +2157,12 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
     else if( nWords >= 3 )
     {
         rc.which  = LexMode::SubtokenBody;
-        rc.reason = "subtoken+body BM25 (--for's default) — no strong name hit, multi-word conceptual query";
+        rc.reason = "subtoken+body";   // row 6: the conceptual ranker, as a code — see the route= legend reading
     }
     else
     {
         rc.which  = LexMode::SubtokenBody;
-        rc.reason = "subtoken+body BM25 (--for's default) — no strong name hit; broad query, plain rg may also win";
+        rc.reason = "subtoken+body:broad";   // row 6: 1-2 plain words — the legend says plain rg may also win
     }
     return rc;
 }

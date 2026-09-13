@@ -138,7 +138,7 @@ printf '%s' "$MAP" | grep -qE 'n="launderIt"[^>]*amb=' \
 # Measured on the pre-fix binary: zero callees — the brace-initialised temporary names no call reference that
 # reaches operator(). Pinned at that literal so the guard is seen to invent nothing; the vacuity guard asserts
 # the specialization's operator() really is indexed (so the zero is about resolution, not a missing file).
-printf '%s' "$MAP" | grep -qE '<s t="method" n="operator\(\)" id="stdspec\.cpp::hash&lt;Mine&gt;::operator\(\)"' \
+printf '%s' "$MAP" | grep -qE '<s t="method" n="operator\(\)" sc="hash&lt;Mine&gt;"' \
     && ok "the std::hash<Mine> specialization's operator() IS indexed (scope hash<Mine>)" \
     || no "the specialization's operator() is missing from the map — the arm below is vacuous"
 expect callees hashMine            0 "std::hash<Mine>{}( m ) — no edge today, none after: pinned, not invented"
@@ -346,8 +346,8 @@ nrun --pin-census="$TMP/n.tsv" >"$TMP/nmap.xml"
 NMAP="$( cat "$TMP/nmap.xml" )"
 [ -s "$TMP/n.tsv" ] || no "§11: the nested-fixture census run wrote nothing — every census arm below would be vacuous"
 nmissing=""
-for want in 'id="decoys.h::Pool::move"' 'id="decoys.h::chrono::duration_cast"' 'id="compat.h::std::terminate"' \
-            'id="polyfill.h::ranges::contains"' 'n="shiftRange"' 'n="toMillis"' 'n="bail"' 'n="drain"' 'n="sampleTicks"' 'n="hasAnswer"'; do
+for want in 'n="move" sc="Pool"' 'n="duration_cast" sc="chrono"' 'n="terminate" sc="std"' \
+            'n="contains" sc="ranges"' 'n="shiftRange"' 'n="toMillis"' 'n="bail"' 'n="drain"' 'n="sampleTicks"' 'n="hasAnswer"'; do
     printf '%s' "$NMAP" | grep -qF "$want" || nmissing="$nmissing $want"
 done
 [ -z "$nmissing" ] \

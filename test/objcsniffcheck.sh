@@ -41,7 +41,8 @@ echo "objcsniffcheck: BIN=$BIN  FIX=$FIX"
 MAP="$( "$BIN" "$FIX" --no-cache 2>/dev/null )"
 
 # ── (a) the victim class of symbol: a struct METHOD in an anonymous namespace in a HEADER ───────────
-printf '%s' "$MAP" | grep -q 'id="cpp_mentions_objc.h::SniffVictim::sniffVictimMethod"' \
+# row 6 (2026-09-12): a scoped row prints n= then sc= (the short id); the canonical id composes as <f p=>::sc::n
+printf '%s' "$MAP" | grep -q 'n="sniffVictimMethod" sc="SniffVictim"' \
     && ok "(a) sniffVictimMethod indexed with its SniffVictim scope (the symbol class that vanished pre-74)" \
     || { no "(a) sniffVictimMethod missing or unscoped — the comment-mention header is misrouted again"; printf '%s\n' "$MAP" | tr '>' '>\n' | grep 'cpp_mentions_objc' | head -6; }
 

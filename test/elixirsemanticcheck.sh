@@ -186,7 +186,8 @@ end
         return subprocess.check_output([sys.argv[1], str(code), *args], env=env)
     def parse(data):
         tree = ET.fromstring(data)
-        return {s.get('id'): s for s in tree.iter('s') if s.get('id')}
+        # row 6 (2026-09-12): the row prints sc= (the scope); its canonical id composes as <f p=>::sc::n
+        return {f.get('p') + '::' + s.get('sc') + '::' + s.get('n'): s for f in tree.iter('f') for s in f.iter('s') if s.get('sc')}
     def targets(rows, name, scope='Client'):
         key = 'apps/client/main.ex::' + scope + '::' + name
         assert key in rows, ('missing definition', key, sorted(rows))

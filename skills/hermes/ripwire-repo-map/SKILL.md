@@ -37,13 +37,13 @@ questions — ripwire shines on specific technical asks.
 ```bash
 ripwire <dir> --report            # architecture summary: modules, god-files, cycles, top symbols
 ripwire <dir> --for="<task in your own words>"   # ranked task lens: what to touch first, with 1-hop edges
-ripwire <dir> --callers=someFunc  # who calls it (blast radius)
-ripwire <dir> --test-gate         # which tests must run before committing
-ripwire <dir> --tree              # file-by-file: top symbols per file
-ripwire <dir> --hotspots          # files ranked by churn × complexity
-ripwire <dir> --communities       # cohesive modules (Louvain) + bridges — where a new feature belongs
+ripwire <dir> --callers=someFunc --legend=compact  # who calls it (blast radius)
+ripwire <dir> --test-gate --legend=compact         # which tests must run before committing
+ripwire <dir> --tree --legend=compact              # file-by-file: top symbols per file
+ripwire <dir> --hotspots --legend=compact          # files ranked by churn × complexity
+ripwire <dir> --communities --legend=compact       # cohesive modules (Louvain) + bridges — where a new feature belongs
 ripwire <dir> --situ              # what the working tree already changed + its blast radius (resuming work)
-ripwire <dir> --notes             # pinned gotchas from past sessions (field notes)
+ripwire <dir> --notes --legend=compact             # pinned gotchas from past sessions (field notes)
 ripwire <git-url>                 # orient in a remote repo (shallow-clones into a cached temp dir; --refetch refreshes)
 ```
 

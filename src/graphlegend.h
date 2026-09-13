@@ -276,6 +276,22 @@ inline constexpr const char* kForRootRelAtLegendShort =
 
 // `rootOn` is the emitter's own root=-present condition; `atOn` is its at=-present condition (gitAtAttr
 // non-empty) — never re-derived from each other, since a non-git single-root run has rootOn without atOn.
+// Row 6 (2026-09-12): the sc= and route= readings on a --for bundle, ONE spelling for the CLI lens and the MCP
+// `for` twin. sc= is the short id (the enclosing scope; a row's full id composes as p::sc::n — see
+// serialize.h writeScopeAttr) and route= is a CODE now, not prose: name-exact(X) / subtoken+body[:broad|
+// :declined(word;carriers,defs)], with the anchors: clause riding after it on a name-exact route. On the CLI
+// lens this clause is CEILING-DROPPABLE (verbs_for.h rung zero, with the confidence and tail clauses): the
+// attributes stay on every rung, only the reading goes, and kForLegendDroppedNote names it. No "--" anywhere:
+// it rides inside an XML comment, where a double hyphen is ill-formed (G4).
+// TERSE ON PURPOSE, and measured twice. This clause rides EVERY default --for answer; a 259 B first spelling
+// (2026-09-12, the same day) grew a 2.9 KB fixture bundle by 10% and tripped forrankordercheck's 4% ratchet on
+// three fixtures and six reference queries. What the reader NEEDS beside the row is the composition rule for
+// sc= and the vocabulary of the route= code; the reading of each code (what :broad and :declined mean, where
+// the anchors are) lives once in the help text's --no-route entry, the next=/help precedent verbs_for.h records.
+// No "--" in the clause itself: it rides inside an XML comment, where a double hyphen is ill-formed (G4).
+inline constexpr std::string_view kForIdRouteLegend =
+    "; sc=scope (full id p::sc::n); route= name-exact(X)|subtoken+body[:broad|:declined(w;carriers,defs)], read in the help text";
+
 inline const char* forRootRelPathsLegendShort( bool rootOn, bool atOn = false ) noexcept
 {
     if( !rootOn )
