@@ -116,10 +116,13 @@ fi
 # skipped and never buffered whole. The tracked decks extract to tens of kilobytes, so the bound is a blow-up guard
 # for CI memory, not a size any real deck approaches.
 #
-# A PPTX IS SCANNED AS THE TEXT IT DISPLAYS, NOT AS RAW XML. Slide and notes-slide parts are parsed, and the `<a:t>`
-# runs of each paragraph are joined in document order into one line, because a name broken across two runs
-# (`<a:t>Na</a:t><a:t>me</a:t>`, which a slide editor produces whenever formatting changes mid-word) is displayed
-# whole while no raw scan can see it. Runs in different paragraphs stay on different lines. A part that declares a
+# A PPTX IS SCANNED AS THE TEXT IT DISPLAYS, NOT AS RAW XML. Every text-carrying part is parsed — slides, notes
+# slides, slide LAYOUTS and MASTERS (a footer or placeholder in a master is displayed on every slide that inherits
+# it), notes and handout masters, and comments — and the `<a:t>` runs of each paragraph are joined in document order
+# into one line, because a name broken across two runs (`<a:t>Na</a:t><a:t>me</a:t>`, which a slide editor produces
+# whenever formatting changes mid-word) is displayed whole while no raw scan can see it. Runs in different paragraphs
+# stay on different lines. Layouts and masters are scanned whether or not a slide links them: an unlinked layout still
+# ships inside the file, so reading all of them is a superset of resolving the relationships. A part that declares a
 # DTD is refused unparsed: slide XML never carries one, and entity expansion is the one way a part inside the bound
 # could grow past it.
 ARM1B_TEXT_BOUND=$(( 32 * 1024 * 1024 ))
@@ -216,12 +219,14 @@ def run_bounded( argv, bound, timeout ):
     return ( b''.join( chunks ), None ) if why is None else ( None, why )
 
 A = '{http://schemas.openxmlformats.org/drawingml/2006/main}'
-PART = re.compile( r'ppt/(slides|notesSlides)/[^/0-9]*([0-9]*)[^/]*\.xml' )
+KINDS = ( 'slides', 'notesSlides', 'slideLayouts', 'slideMasters', 'notesMasters', 'handoutMasters', 'comments' )
+PART = re.compile( r'ppt/(%s)/[^/0-9]*([0-9]*)[^/]*\.xml' % '|'.join( KINDS ) )
 
 def part_order( name ):
-    """Slides before notes, each in numeric order (slide2 before slide10), then the name for anything unnumbered."""
+    """Slides, notes, layouts, masters, then the rest, each kind in numeric order (slide2 before slide10), then the name
+    for anything unnumbered."""
     match = PART.fullmatch( name )
-    return ( 0 if match.group( 1 ) == 'slides' else 1, int( match.group( 2 ) or 0 ), name )
+    return ( KINDS.index( match.group( 1 ) ), int( match.group( 2 ) or 0 ), name )
 
 def displayed_lines( root ):
     """The text a slide part displays: one line per `<a:p>` paragraph, its `<a:t>` runs joined in document order and
@@ -243,8 +248,9 @@ def displayed_lines( root ):
     return lines
 
 def pptx_text( name, bound ):
-    """( text, None ) or ( None, why ). The uncompressed total the slide and notes parts DECLARE is checked before
-    any part is opened; each part is then read through the same bound, so a header that lies is caught by the read.
+    """( text, None ) or ( None, why ). Every text-carrying part kind in KINDS is read, linked or not. The uncompressed
+    total those parts DECLARE is checked before any part is opened; each part is then read through the same bound, so a
+    header that lies is caught by the read.
     A part carrying a DTD is refused unparsed: slide XML never has one, and entity expansion is the one way a part
     inside the bound could grow past it."""
     try:
@@ -452,8 +458,10 @@ _ctlhash="7 $( python3 -c 'import hashlib; print( hashlib.sha256( b"qzvkwjx" ).h
 #     a `.pdf.bak` decoy. Each deck holds the planted token only in compressed text. Two more PPTX decks pin the
 #     display-order reading: `split.pptx` carries the token broken across `<a:t>` runs, on a slide and again in a
 #     notes slide, and must be reported from both; `apart.pptx` carries the same two pieces in two PARAGRAPHS, which
-#     no slide displays as one word, and must be read yet report nothing. All five must be counted and read. GIT_* is
-#     cleared so an inherited GIT_DIR cannot redirect these calls.
+#     no slide displays as one word, and must be read yet report nothing. `layout.pptx` and `master.pptx` carry the token
+#     ONLY in a slide layout and only in a slide master, each linked from a clean slide the way a real deck links them,
+#     and must be reported from that part: inherited text is displayed on every slide that uses it. All seven must be
+#     counted and read. GIT_* is cleared so an inherited GIT_DIR cannot redirect these calls.
 { mkdir -p "$_ctlrepo" && ctlgit init -q 2>/dev/null; } || ctlfail "(1) could not create its temp repo"
 python3 - "$_ctlrepo" <<'PY' || ctlfail "(1) could not write the planted decks"
 import os, sys, zipfile, zlib
@@ -486,6 +494,12 @@ with zipfile.ZipFile( os.path.join( root, "talks", "split.pptx" ), "w", zipfile.
     deck.writestr( "ppt/notesSlides/notesSlide1.xml", slide( ( b"notes", ), ( word[ :5 ], word[ 5: ] ) ) )
 with zipfile.ZipFile( os.path.join( root, "talks", "apart.pptx" ), "w", zipfile.ZIP_DEFLATED ) as deck:
     deck.writestr( "ppt/slides/slide1.xml", slide( ( word[ :3 ], ), ( word[ 3: ], ) ) )
+REL = b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/%s" Target="../%s"/></Relationships>'
+for name, kind, part in ( ( "layout.pptx", b"slideLayout", "slideLayouts/slideLayout1.xml" ), ( "master.pptx", b"slideMaster", "slideMasters/slideMaster1.xml" ) ):
+    with zipfile.ZipFile( os.path.join( root, "talks", name ), "w", zipfile.ZIP_DEFLATED ) as deck:
+        deck.writestr( "ppt/slides/slide1.xml", slide( ( b"clean slide", ) ) )
+        deck.writestr( "ppt/slides/_rels/slide1.xml.rels", REL % ( kind, part.encode() ) )
+        deck.writestr( "ppt/" + part, slide( ( b"footer ", word ) ) )
 for name in ( "with space.pdf", "UPPER.PDF" ):
     with open( os.path.join( root, "talks", name ), "wb" ) as out:
         out.write( pdf_bytes() )
@@ -497,8 +511,8 @@ count_decks "$TMP/arm1b.ctl.z" || ctlfail "(1) could not read its own deck list"
 _ctldecks=$_decks
 run_scanner "$_ctlrepo" "$TMP/arm1b.ctl.z" "$_ctlhash" '' "$TMP/arm1b.ctl.report"
 judge_report "$TMP/arm1b.ctl.report" "$_status" "$_ctldecks"
-if [ "$_ctldecks" -ne 5 ] || [ "$_verdict" != dirty ] || [ "$_hits" -ne 1 ] || [ "$_unread" -ne 0 ]; then
-    ctlfail "(1) planted decks: counted $_ctldecks, verdict $_verdict${_why:+ ($_why)}, $_unread unread — want 5 decks, all read, the token found"
+if [ "$_ctldecks" -ne 7 ] || [ "$_verdict" != dirty ] || [ "$_hits" -ne 1 ] || [ "$_unread" -ne 0 ]; then
+    ctlfail "(1) planted decks: counted $_ctldecks, verdict $_verdict${_why:+ ($_why)}, $_unread unread — want 7 decks, all read, the token found"
 fi
 for _want in 'talks/new\x0aline.Pptx' 'talks/with space.pdf' 'talks/UPPER.PDF'; do
     grep -Fq "HIT $_want (extracted text):" "$TMP/arm1b.ctl.report" 2>/dev/null \
@@ -512,6 +526,11 @@ for _want in 'HIT talks/split.pptx (extracted text):1' 'HIT talks/split.pptx (ex
 done
 ! grep -Fq 'HIT talks/apart.pptx' "$TMP/arm1b.ctl.report" 2>/dev/null \
     || ctlfail "(1) two paragraphs that each carry half the token were reported as if a slide displayed them as one word"
+# The layout-only and master-only decks: the clean slide is line 1, the inherited part line 2.
+for _want in 'HIT talks/layout.pptx (extracted text):2' 'HIT talks/master.pptx (extracted text):2'; do
+    grep -Fxq "$_want" "$TMP/arm1b.ctl.report" 2>/dev/null \
+        || ctlfail "(1) a token carried only by an inherited layout or master part was not reported (want '$_want')"
+done
 # (2) UNREADABLE INPUTS. The same list plus a junk .pdf, a junk .pptx and two tracked paths missing from disk: two
 #     unread files and three unread decks. Unread decides the verdict, never "zero findings".
 { printf 'not a deck\n' > "$_ctlrepo/talks/junk.pdf" \
@@ -574,7 +593,7 @@ fi
 run_scanner "$_ctlrepo" "$TMP/arm1b.ctl6.z" "$_ctlhash" '' "$TMP/arm1b.ctl6b.report"
 judge_report "$TMP/arm1b.ctl6b.report" "$_status" "$_decks"
 [ "$_verdict" = clean ] || ctlfail "(6) the same two decks under the real bound were judged $_verdict${_why:+ ($_why)} — want clean"
-[ "$_ctl" -eq 0 ] && ok "arm 1b control — planted decks with a newline, a space and an upper-case extension are all read and scanned, a token split across <a:t> runs is caught; unreadable inputs, an unwritable report, a truncated report, a deck-count mismatch and a deck over the text bound each fail"
+[ "$_ctl" -eq 0 ] && ok "arm 1b control — planted decks with a newline, a space and an upper-case extension are all read and scanned, a token split across <a:t> runs or carried only by a layout or master is caught; unreadable inputs, an unwritable report, a truncated report, a deck-count mismatch and a deck over the text bound each fail"
 # THE SWEEP. The deck count comes from this shell, the scan and its accounting from the scanner, and the verdict
 # only from a report the judge read completely.
 if count_decks "$TMP/tracked.z"; then
