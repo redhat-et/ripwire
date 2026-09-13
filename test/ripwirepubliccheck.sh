@@ -98,13 +98,16 @@ fi
 # Every tracked PDF/PPTX (the deck) is extracted and scanned too, for arm 2b's reason: a name rendered into a
 # slide is invisible to every text sweep of the tree. A deck is CLEARED only by being READ. No extractor, a
 # failed extraction or an empty result FAILS this arm — never a SKIP beside a standing PASS, which pargates
-# counts as proving nothing while CI still goes green. deck_text below defines what counts as read.
+# counts as proving nothing while CI still goes green.
 #
-# DECK PATHS STAY NUL-DELIMITED END TO END. They come from `git ls-files -z`, are read with `read -r -d ''` from a
-# file, are matched by a glob on the whole path (extension in any case), never name a file on disk (a counter
-# names each text file), and reach python as NUL-separated pairs. Python prints every path with control
-# characters escaped, so a newline in a path can neither split one deck into two inputs nor split an output
-# record. A temp-repo control proves it on a newline, a space and an upper-case extension.
+# EVERY I/O STEP FAILS CLOSED. The scanner reads each tracked file and each deck itself: pdftotext writes to a
+# pipe and a PPTX is unzipped in memory, so no extracted text passes through a temp file whose write could fail.
+# A file it cannot read becomes an UNREAD record, never "no findings". Its report ends in a COUNT record and an END
+# record, and the judge reaches PASS only by reading all of it: exit 0, END last, a deck total equal to this
+# shell's own NUL-delimited count of the `git ls-files -z` list, and read totals that match the UNREAD records. A
+# report that is missing, cut short or inconsistent has no verdict, and that FAILS. Paths never split on a newline:
+# the list is NUL-delimited on both sides, and every printed path has its control characters escaped. The controls
+# below prove each of these on planted inputs.
 PRERELEASE_NAME_SHA256='7 904522dda28c1584057c235feec23321855e1760d01116dfc6bf851411c69c7c'
 PRERELEASE_EXEMPT_SHA256='bench/recalleval/snapshot.mdpack 6f60a279b582356f5e06091069d1c948889b6d3ccbc1b2d4e3b0d31321326717'
 # deck_kind PATH — sets _kind to pdf, pptx or nothing. A glob on the WHOLE path with the extension in any case:
@@ -116,56 +119,26 @@ deck_kind(){
       *)                  _kind= ;;
     esac
 }
-# deck_text DECK OUT — the deck's text into OUT. Exit 0 only when the file was READ: its extractor exists, exited
-# 0, and wrote at least one letter. Otherwise exit 1 with the reason on stdout. The PPTX needs nothing beyond
-# python3 (required above); the PDF needs pdftotext, which CI installs (poppler) for this arm.
-deck_text(){
-    deck_kind "$1"
-    case "$_kind" in
-      pdf)  command -v pdftotext >/dev/null 2>&1 || { printf 'pdftotext (poppler) is not installed'; return 1; }
-            pdftotext "$1" "$2" 2>/dev/null     || { printf 'pdftotext could not read it'; return 1; } ;;
-      pptx) python3 -c 'import re, sys, zipfile
-deck = zipfile.ZipFile( sys.argv[ 1 ] )
-parts = sorted( n for n in deck.namelist() if re.fullmatch( r"ppt/(slides|notesSlides)/[^/]+\.xml", n ) )
-open( sys.argv[ 2 ], "wb" ).write( b"\n".join( deck.read( n ) for n in parts ) )' "$1" "$2" 2>/dev/null \
-                || { printf 'it is not a readable PPTX archive'; return 1; } ;;
-      *)    printf 'there is no extractor for this file type'; return 1 ;;
-    esac
-    grep -q '[A-Za-z]' "$2" 2>/dev/null || { printf 'extraction produced no text'; return 1; }
-}
-# scan_decks ROOT LIST EXTRA TAG WHO — every deck in LIST (a `git ls-files -z` list of paths under ROOT) is read
-# into $TMP and appended to EXTRA as "path NUL textfile NUL". A deck that cannot be read prints a FAIL, with WHO
-# naming the run. Sets _decks (decks seen) and _unread (decks not read). The loop reads LIST through a
-# redirection, not a pipe, so no()'s fail=1 lands in THIS shell.
-scan_decks(){
-    local root="$1" list="$2" extra="$3" tag="$4" who="$5" deck out why shown
-    : > "$extra"
+# count_decks LIST — sets _decks to the decks in a `git ls-files -z` LIST, counted HERE, NUL-delimited and
+# independently of the scanner, so a scanner that skipped a deck cannot agree with it. Fails if LIST cannot be
+# opened; a list cut short can only count low, which the judge reports as a mismatch.
+count_decks(){
+    local path=
     _decks=0
-    _unread=0
-    while IFS= read -r -d '' deck; do
-        deck_kind "$deck"
-        [ -n "$_kind" ] || continue
-        _decks=$(( _decks + 1 ))
-        out="$TMP/arm1b.$tag.deck$_decks.txt"
-        if why="$( deck_text "$root/$deck" "$out" )"; then
-            printf '%s\0%s\0' "$deck" "$out" >> "$extra"
-        else
-            printf -v shown '%q' "$deck"
-            no "$who — $shown was NOT scanned: $why. A deck this arm could not read is not a deck it cleared."
-            _unread=$(( _unread + 1 ))
-        fi
-    done < "$list"
+    { while IFS= read -r -d '' path || [ -n "$path" ]; do
+          deck_kind "$path"
+          [ -z "$_kind" ] || _decks=$(( _decks + 1 ))
+          path=
+      done; } < "$1"
 }
-# The scanner. argv: tracked list (ls-files -z), deck list (path NUL textfile NUL pairs), target rows, exempt rows.
-# Written once and run twice: over the control repo below, then over this tree.
-cat > "$TMP/arm1b.py" <<'PY'
-import hashlib, re, sys
+# The scanner. argv: tracked list (ls-files -z), target rows, exempt rows. It writes nothing but its report, and
+# the report's last two records are COUNT and END: a report cut short anywhere has lost at least END.
+if ! cat > "$TMP/arm1b.py" <<'PY'
+import hashlib, os, re, shutil, subprocess, sys, zipfile
 paths = [ p for p in open( sys.argv[ 1 ], 'rb' ).read().split( b'\0' ) if p ]
-fields = open( sys.argv[ 2 ], 'rb' ).read().split( b'\0' )[ :-1 ]
-extra = list( zip( fields[ 0::2 ], fields[ 1::2 ] ) )
-exempt = dict( line.split() for line in sys.argv[ 4 ].splitlines() if line.strip() )
+exempt = dict( line.split() for line in sys.argv[ 3 ].splitlines() if line.strip() )
 targets = {}
-for line in sys.argv[ 3 ].splitlines():
+for line in sys.argv[ 2 ].splitlines():
     if not line.strip():
         continue
     length, digest = line.split()
@@ -181,6 +154,34 @@ def shown( path ):
     """A path as ONE output record: undecodable bytes and control characters (a newline above all) become \\xNN."""
     text = path.decode( 'utf-8', 'backslashreplace' ) if isinstance( path, bytes ) else path
     return re.sub( r'[\x00-\x1f\x7f]', lambda m: '\\x%02x' % ord( m.group() ), text )
+
+DECK = re.compile( rb'\.(pdf|pptx)\Z', re.I )
+
+def deck_text( path ):
+    """( text, None ) when the deck was READ, else ( None, reason ). Nothing is written to disk: pdftotext prints to
+    a pipe and the PPTX is unzipped in memory. './' keeps a path that starts with '-' from reading as an option."""
+    name = os.fsdecode( os.path.join( b'.', path ) )
+    if path.lower().endswith( b'.pdf' ):
+        tool = shutil.which( 'pdftotext' )
+        if not tool:
+            return None, 'pdftotext (poppler) is not installed'
+        try:
+            run = subprocess.run( [ tool, '-q', name, '-' ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=300 )
+        except ( OSError, subprocess.SubprocessError ) as exc:
+            return None, 'pdftotext could not run (%s)' % exc.__class__.__name__
+        if run.returncode != 0:
+            return None, 'pdftotext could not read it (exit %d)' % run.returncode
+        text = run.stdout
+    else:
+        try:
+            with zipfile.ZipFile( name ) as deck:
+                parts = sorted( n for n in deck.namelist() if re.fullmatch( r'ppt/(slides|notesSlides)/[^/]+\.xml', n ) )
+                text = b'\n'.join( deck.read( n ) for n in parts )
+        except Exception as exc:   # any failure to read the archive leaves the deck unread, never clean
+            return None, 'it is not a readable PPTX archive (%s)' % exc.__class__.__name__
+    if not re.search( rb'[A-Za-z]', text ):
+        return None, 'extraction produced no text'
+    return text, None
 
 def make_scan( targets ):
     """data (bytes) -> the 1-based line numbers carrying a target token. Each maximal letter run is hashed
@@ -217,52 +218,135 @@ if control( b'qzvkwj qzvk-wjx' ):
     sys.exit( 1 )
 
 scan = make_scan( targets )
-tracked = set()
+tracked, unread_files, decks, decks_read = set(), 0, 0, 0
 for raw in paths:
-    p = raw.decode( 'utf-8', 'surrogateescape' )
+    p = os.fsdecode( raw )
     tracked.add( p )
+    data = None
     try:
-        data = open( raw, 'rb' ).read()
-    except OSError:
-        continue
-    if b'\0' in data:
-        continue   # binary, skip (mirrors grep -I); the decks are scanned below as extracted text
-    found = scan( data )
-    if not found:
-        continue
-    if p in exempt and hashlib.sha256( data ).hexdigest() == exempt[ p ]:
-        print( f'EXEMPT {len( found )} {shown( raw )}' )
-        continue
-    for i in found:
-        print( f'HIT {shown( raw )}:{i}' )
-for label, txt in extra:
-    for i in scan( open( txt, 'rb' ).read() ):
-        print( f'HIT {shown( label )} (extracted text):{i}' )
+        if os.path.islink( raw ):
+            data = os.readlink( raw )   # a symlink's committed content is its target text
+        else:
+            with open( raw, 'rb' ) as handle:
+                data = handle.read()
+    except OSError as exc:
+        unread_files += 1
+        print( 'UNREAD %s — %s' % ( shown( raw ), exc.strerror or exc.__class__.__name__ ) )
+    if data is not None and b'\0' not in data:
+        found = scan( data )
+        if found and p in exempt and hashlib.sha256( data ).hexdigest() == exempt[ p ]:
+            print( 'EXEMPT %d %s' % ( len( found ), shown( raw ) ) )
+        else:
+            for i in found:
+                print( 'HIT %s:%d' % ( shown( raw ), i ) )
+    if DECK.search( raw ):
+        decks += 1
+        text, why = deck_text( raw )
+        if text is None:
+            print( 'UNREAD %s — %s' % ( shown( raw ), why ) )
+            continue
+        decks_read += 1
+        for i in scan( text ):
+            print( 'HIT %s (extracted text):%d' % ( shown( raw ), i ) )
 for p, digest in exempt.items():
     try:
         live = hashlib.sha256( open( p, 'rb' ).read() ).hexdigest() if p in tracked else None
     except OSError:
         live = None
     if live != digest:
-        print( f'STALE {shown( p )}' )
+        print( 'STALE %s' % shown( p ) )
+print( 'COUNT %d %d %d %d' % ( len( paths ), unread_files, decks, decks_read ) )
+print( 'END' )
+try:
+    sys.stdout.flush()
+except OSError:
+    os._exit( 1 )
 PY
-# CONTROL: the extractor must REFUSE what it cannot read. If it did not, a failed read would pass for a scanned,
-# clean deck — the exact hole this arm closes.
-printf 'not a deck\n' > "$TMP/arm1b.junk.pdf"
-printf 'not a deck\n' > "$TMP/arm1b.junk.pptx"
+then
+    no "arm 1b — could not write its scanner into $TMP"
+fi
+# run_scanner ROOT LIST TARGETS EXEMPT REPORT — the scanner over ROOT, its report to REPORT and stderr to REPORT.err.
+# Sets _status. A report that cannot even be opened is a non-zero status like any other failure; the shell's own
+# complaint about it stays out of the gate's output.
+run_scanner(){
+    ( cd "$1" && PYTHONIOENCODING=utf-8:backslashreplace python3 "$TMP/arm1b.py" "$2" "$3" "$4" > "$5" 2> "$5.err" ) 2>/dev/null
+    _status=$?
+}
+# is_count VALUE — true for a non-empty run of digits.
+is_count(){ case "$1" in ''|*[!0-9]*) return 1 ;; esac; }
+# judge_report REPORT STATUS DECKS — sets _verdict (clean, dirty or broken), _why, _hits (0/1), _unread and _files.
+# CLEAN is reached only through POSITIVE reads of REPORT: exit 0, END as its last record, a well-formed COUNT whose
+# deck total equals DECKS (this shell's own count) and whose read totals match the UNREAD records. A report that is
+# missing, truncated, unreadable or inconsistent is BROKEN — never clean, never "zero findings".
+judge_report(){
+    local report="$1" status="$2" decks="$3" last counts unreadf pydecks readd records rc
+    _verdict=broken
+    _why=
+    _hits=0
+    _unread=0
+    _files=0
+    if [ "$status" -ne 0 ]; then
+        _why="the scanner exited $status$( grep -m 1 '^REFUSE ' "$report" 2>/dev/null | sed 's/^REFUSE /: /' )"
+        return 0
+    fi
+    if ! last="$( tail -n 1 "$report" 2>/dev/null )"; then
+        _why="its report could not be read"
+        return 0
+    fi
+    if [ "$last" != END ]; then
+        _why="its report is incomplete (no END record)"
+        return 0
+    fi
+    if ! counts="$( grep -m 1 '^COUNT ' "$report" 2>/dev/null )"; then
+        _why="its report has no COUNT record"
+        return 0
+    fi
+    read -r _ _files unreadf pydecks readd <<< "$counts"
+    if ! is_count "$_files" || ! is_count "$unreadf" || ! is_count "$pydecks" || ! is_count "$readd" || [ "$readd" -gt "$pydecks" ]; then
+        _why="its COUNT record is malformed"
+        return 0
+    fi
+    if [ "$pydecks" -ne "$decks" ]; then
+        _why="the scanner enumerated $pydecks deck(s) where this shell counted $decks"
+        return 0
+    fi
+    records="$( grep -c '^UNREAD ' "$report" 2>/dev/null )"
+    rc=$?
+    if [ "$rc" -gt 1 ] || ! is_count "$records"; then
+        _why="its report could not be re-read"
+        return 0
+    fi
+    _unread=$(( unreadf + pydecks - readd ))
+    if [ "$records" -ne "$_unread" ]; then
+        _why="its COUNT record says $_unread unread but it carries $records UNREAD record(s)"
+        return 0
+    fi
+    grep -q '^HIT ' "$report" 2>/dev/null
+    rc=$?
+    if [ "$rc" -gt 1 ]; then
+        _why="its report could not be re-read"
+        return 0
+    fi
+    if [ "$rc" -eq 0 ]; then
+        _hits=1
+    fi
+    if [ "$_hits" -eq 1 ] || [ "$_unread" -ne 0 ]; then
+        _verdict=dirty
+    else
+        _verdict=clean
+    fi
+}
+# CONTROLS. Each runs the SAME count, scanner and judge as the sweep below.
 _ctl=0
-for _junk in "$TMP/arm1b.junk.pdf" "$TMP/arm1b.junk.pptx"; do
-    deck_text "$_junk" "$TMP/arm1b.junk.txt" >/dev/null && { no "arm 1b control — deck extraction accepted an unreadable .${_junk##*.} file"; _ctl=1; }
-done
-# CONTROL (end to end, in a temp repo): three TRACKED decks whose paths carry a NEWLINE, a SPACE and an UPPER-CASE
-# extension, beside a `.pdf.bak` decoy. Each deck holds the planted token only inside compressed, extractable text,
-# so nothing but the deck pipeline can find it. The same enumeration, extraction and scanner the real sweep uses
-# must count exactly three decks and report the token from every one's extracted text. GIT_* is cleared so an
-# inherited GIT_DIR cannot point these git calls at some other repository.
+ctlfail(){ no "arm 1b control — $*"; _ctl=1; }
 _ctlrepo="$TMP/arm1b.ctlrepo"
 ctlgit(){ env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$_ctlrepo" "$@"; }
-{ mkdir -p "$_ctlrepo" && ctlgit init -q 2>/dev/null; } || _ctl=1
-python3 - "$_ctlrepo" <<'PY' || _ctl=1
+_ctlhash="7 $( python3 -c 'import hashlib; print( hashlib.sha256( b"qzvkwjx" ).hexdigest() )' )"
+# (1) END TO END. A temp repo tracks decks whose paths carry a NEWLINE, a SPACE and an UPPER-CASE extension, beside
+#     a `.pdf.bak` decoy. Each deck holds the planted token only in compressed text. All three must be counted, read,
+#     and reported from their extracted text. GIT_* is cleared so an inherited GIT_DIR cannot redirect these calls.
+{ mkdir -p "$_ctlrepo" && ctlgit init -q 2>/dev/null; } || ctlfail "(1) could not create its temp repo"
+python3 - "$_ctlrepo" <<'PY' || ctlfail "(1) could not write the planted decks"
 import os, sys, zipfile, zlib
 root, word = sys.argv[ 1 ], b"qzvkwjx"
 def pdf_bytes():
@@ -289,38 +373,71 @@ for name in ( "with space.pdf", "UPPER.PDF" ):
 with open( os.path.join( root, "talks", "decoy.pdf.bak" ), "wb" ) as out:
     out.write( b"not a deck\n" )
 PY
-{ ctlgit add -A && ctlgit ls-files -z > "$TMP/arm1b.ctl.z"; } || _ctl=1
-scan_decks "$_ctlrepo" "$TMP/arm1b.ctl.z" "$TMP/arm1b.ctl.extra" ctl "arm 1b control"
-if [ "$_decks" -ne 3 ] || [ "$_unread" -ne 0 ]; then
-    no "arm 1b control — the temp repo tracks 3 decks and a .pdf.bak decoy; enumeration saw $_decks and read $(( _decks - _unread ))"
-    _ctl=1
+{ ctlgit add -A && ctlgit ls-files -z > "$TMP/arm1b.ctl.z"; } || ctlfail "(1) could not track the planted decks"
+count_decks "$TMP/arm1b.ctl.z" || ctlfail "(1) could not read its own deck list"
+_ctldecks=$_decks
+run_scanner "$_ctlrepo" "$TMP/arm1b.ctl.z" "$_ctlhash" '' "$TMP/arm1b.ctl.report"
+judge_report "$TMP/arm1b.ctl.report" "$_status" "$_ctldecks"
+if [ "$_ctldecks" -ne 3 ] || [ "$_verdict" != dirty ] || [ "$_hits" -ne 1 ] || [ "$_unread" -ne 0 ]; then
+    ctlfail "(1) planted decks: counted $_ctldecks, verdict $_verdict${_why:+ ($_why)}, $_unread unread — want 3 decks, all read, the token found"
 fi
-_ctlhash="7 $( python3 -c 'import hashlib; print( hashlib.sha256( b"qzvkwjx" ).hexdigest() )' )"
-( cd "$_ctlrepo" && PYTHONIOENCODING=utf-8:backslashreplace python3 "$TMP/arm1b.py" "$TMP/arm1b.ctl.z" "$TMP/arm1b.ctl.extra" "$_ctlhash" '' ) \
-    > "$TMP/arm1b.ctl.out" 2>&1 || _ctl=1
 for _want in 'talks/new\x0aline.Pptx' 'talks/with space.pdf' 'talks/UPPER.PDF'; do
-    grep -Fq "HIT $_want (extracted text):" "$TMP/arm1b.ctl.out" \
-        || { no "arm 1b control — the planted token in tracked deck $_want was not reported from its extracted text"; _ctl=1; }
+    grep -Fq "HIT $_want (extracted text):" "$TMP/arm1b.ctl.report" 2>/dev/null \
+        || ctlfail "(1) the token in tracked deck $_want was not reported from its extracted text"
 done
-[ "$_ctl" -eq 0 ] && ok "arm 1b control — extraction refuses unreadable input; tracked decks with a newline, a space and an upper-case extension in their paths are each enumerated, read and scanned"
-# THE SWEEP: every tracked deck of this tree, then the scanner over the tree and those decks.
-scan_decks "$ROOT" "$TMP/tracked.z" "$TMP/arm1b.extra" tree "arm 1b"
-_treedecks=$_decks
-_treeunread=$_unread
-PYTHONIOENCODING=utf-8:backslashreplace python3 "$TMP/arm1b.py" "$TMP/tracked.z" "$TMP/arm1b.extra" \
-    "$PRERELEASE_NAME_SHA256" "$PRERELEASE_EXEMPT_SHA256" > "$TMP/arm1b" 2> "$TMP/arm1b.err"
-py_status=$?
-if grep -q '^REFUSE' "$TMP/arm1b"; then
-    no "arm 1b — $( grep '^REFUSE' "$TMP/arm1b" | head -1 | cut -c8- )"
-elif [ "$py_status" -ne 0 ]; then
-    no "arm 1b — scanner crashed (python exit $py_status): $( tail -3 "$TMP/arm1b.err" | tr '\n' ' ' )"
-elif grep -q '^HIT ' "$TMP/arm1b"; then
-    no "arm 1b — private pre-release name on $( grep -c '^HIT ' "$TMP/arm1b" | tr -d ' ' ) line(s); locations only, the text is not echoed:"
-    grep '^HIT ' "$TMP/arm1b" | cut -c5- | sed 's/^/          /'
-elif [ "$_treeunread" -eq 0 ]; then
-    ok "arm 1b — no private pre-release name in the committed tree or in all $_treedecks tracked deck file(s)$( awk '/^EXEMPT /{ printf " (%s line(s) in byte-frozen %s exempt by content hash)", $2, $3 }' "$TMP/arm1b" )"
+# (2) UNREADABLE INPUTS. The same list plus a junk .pdf, a junk .pptx and two tracked paths missing from disk: two
+#     unread files and three unread decks. Unread decides the verdict, never "zero findings".
+{ printf 'not a deck\n' > "$_ctlrepo/talks/junk.pdf" \
+  && printf 'not a deck\n' > "$_ctlrepo/talks/junk.pptx" \
+  && cp "$TMP/arm1b.ctl.z" "$TMP/arm1b.ctl2.z" \
+  && printf 'talks/junk.pdf\0talks/junk.pptx\0talks/missing.txt\0talks/missing.pdf\0' >> "$TMP/arm1b.ctl2.z"; } \
+    || ctlfail "(2) could not build its unreadable-input list"
+count_decks "$TMP/arm1b.ctl2.z" || ctlfail "(2) could not read its deck list"
+run_scanner "$_ctlrepo" "$TMP/arm1b.ctl2.z" "$_ctlhash" '' "$TMP/arm1b.ctl2.report"
+judge_report "$TMP/arm1b.ctl2.report" "$_status" "$_decks"
+if [ "$_verdict" != dirty ] || [ "$_unread" -ne 5 ]; then
+    ctlfail "(2) unreadable inputs: verdict $_verdict${_why:+ ($_why)}, $_unread unread — want dirty with 5 unread"
 fi
-sed -n 's/^STALE //p' "$TMP/arm1b" | while IFS= read -r _path; do
+# (3) A WRITE THAT FAILS. The report's parent is a regular file, so the report cannot be opened — for root too.
+printf 'not a directory\n' > "$TMP/arm1b.notadir" || ctlfail "(3) could not plant its non-directory"
+run_scanner "$_ctlrepo" "$TMP/arm1b.ctl.z" "$_ctlhash" '' "$TMP/arm1b.notadir/report"
+judge_report "$TMP/arm1b.notadir/report" "$_status" "$_ctldecks"
+[ "$_verdict" = broken ] || ctlfail "(3) an unwritable report was judged $_verdict — want broken"
+# (4) A WRITE THAT STOPS SHORT. Control (1)'s report without its last record, judged with exit status 0, as if the
+#     failure had left no other trace.
+sed '$d' "$TMP/arm1b.ctl.report" > "$TMP/arm1b.ctl.cut" || ctlfail "(4) could not cut its report"
+judge_report "$TMP/arm1b.ctl.cut" 0 "$_ctldecks"
+[ "$_verdict" = broken ] || ctlfail "(4) a report missing its END record was judged $_verdict — want broken"
+# (5) A DECK THE SCANNER NEVER SAW. Control (1)'s complete report, judged against one more deck than it enumerated.
+judge_report "$TMP/arm1b.ctl.report" 0 "$(( _ctldecks + 1 ))"
+[ "$_verdict" = broken ] || ctlfail "(5) a deck-count mismatch was judged $_verdict — want broken"
+[ "$_ctl" -eq 0 ] && ok "arm 1b control — planted decks with a newline, a space and an upper-case extension are all read and scanned; unreadable inputs, an unwritable report, a truncated report and a deck-count mismatch each fail"
+# THE SWEEP. The deck count comes from this shell, the scan and its accounting from the scanner, and the verdict
+# only from a report the judge read completely.
+if count_decks "$TMP/tracked.z"; then
+    run_scanner "$ROOT" "$TMP/tracked.z" "$PRERELEASE_NAME_SHA256" "$PRERELEASE_EXEMPT_SHA256" "$TMP/arm1b"
+    judge_report "$TMP/arm1b" "$_status" "$_decks"
+else
+    _verdict=broken
+    _why="the tracked list could not be read"
+fi
+case "$_verdict" in
+  clean)
+    ok "arm 1b — no private pre-release name in all $_files tracked file(s), including the text of all $_decks deck(s)$( awk '/^EXEMPT /{ printf " (%s line(s) in byte-frozen %s exempt by content hash)", $2, $3 }' "$TMP/arm1b" 2>/dev/null )" ;;
+  dirty)
+    if [ "$_hits" -eq 1 ]; then
+        no "arm 1b — private pre-release name on $( grep -c '^HIT ' "$TMP/arm1b" ) line(s); locations only, the text is not echoed:"
+        grep '^HIT ' "$TMP/arm1b" | cut -c5- | sed 's/^/          /'
+    fi
+    if [ "$_unread" -ne 0 ]; then
+        no "arm 1b — $_unread input(s) NOT scanned; a file this arm could not read is not a file it cleared:"
+        grep '^UNREAD ' "$TMP/arm1b" | cut -c8- | sed 's/^/          /'
+    fi ;;
+  *)
+    no "arm 1b — no verdict, which is not a pass: $_why"
+    [ -s "$TMP/arm1b.err" ] && tail -n 3 "$TMP/arm1b.err" | sed 's/^/          /' ;;
+esac
+sed -n 's/^STALE //p' "$TMP/arm1b" 2>/dev/null | while IFS= read -r _path; do
     printf 'NOTE: arm 1b — the content-hash exemption for %s no longer matches its bytes; it exempts nothing and can be deleted\n' "$_path"
 done
 
