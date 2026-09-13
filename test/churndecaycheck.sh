@@ -27,7 +27,8 @@
 #      Laplace-smoothed tie; under the HEAD anchor the two are indistinguishable, which is the contract.
 #   6  the file-level <recent> block comes FIRST (H2H-Graft F3).
 #   7  merge_bombs_skipped= on <recent>: a commit touching more than 100 files is skipped by the miner, and
-#      the block SAYS how many it skipped (always, "0" included) — a >100-file fixture commit reads "1".
+#      the block SAYS how many it skipped (always, "0" included) — a >100-file fixture commit reads "1"; a window
+#      whose ONLY commit was skipped still prints the block, with zero rows and the count (7h).
 #
 # Determinism note: symbol ORDER is compared, never k= floats (CONTRIBUTING §3 — a sort has no tolerance
 # band, a float does; this gate uses the sort).
@@ -248,6 +249,28 @@ printf '%s' "$R7c" | grep -q 'merge_bombs_skipped=N' && printf '%s' "$R7c" | gre
 if command -v xmllint >/dev/null 2>&1; then
     printf '%s' "$R7" | xmllint --noout - 2>/dev/null && ok "arm 7g: the bomb fixture's output is well-formed XML" || no "arm 7g: xmllint rejected the bomb fixture's output"
 fi
+# 7h: a window whose EVERY commit is a merge bomb (a shallow clone of a large tree is exactly this shape — llvm-project at
+# depth 1 is one 183,835-file commit) must still print the block, with zero rows and the count: an ABSENT block reads as
+# "no history mined", which is a different fact, and the disclosure arm 7a exists for would vanish on the one run that
+# needs it most. Byte-free elsewhere is kept: a corpus with no git at all still prints no block (the goldens).
+ONLYBOMB="$WORK/onlybomb"; mkdir -p "$ONLYBOMB/bulk"
+git -C "$ONLYBOMB" init -q 2>/dev/null
+git -C "$ONLYBOMB" config user.email rw@example.invalid
+git -C "$ONLYBOMB" config user.name  ripwire-gate
+i=0
+while [ "$i" -le 100 ]; do
+    printf 'def bulk_%03d():\n    return %d\n' "$i" "$i" > "$ONLYBOMB/bulk/b$( printf '%03d' "$i" ).py"
+    i=$(( i + 1 ))
+done
+stamp="$(( RECENT_BASE + 5 * 86400 ))"
+GIT_AUTHOR_DATE="$stamp +0000" GIT_COMMITTER_DATE="$stamp +0000" git -C "$ONLYBOMB" add -A >/dev/null 2>&1
+GIT_AUTHOR_DATE="$stamp +0000" GIT_COMMITTER_DATE="$stamp +0000" git -C "$ONLYBOMB" commit -q -m "one bulk commit" >/dev/null 2>&1
+[ "$( git -C "$ONLYBOMB" rev-list --count HEAD 2>/dev/null )" = 1 ] && ok "arm 7h guard: the only-bomb fixture has exactly one commit" \
+                                                                    || no "arm 7h guard: the only-bomb fixture does not have exactly one commit"
+R7h="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$ONLYBOMB" --rank-by=churn-decay --no-cache 2>/dev/null )"
+printf '%s' "$R7h" | grep -q '<recent n="0" of="0" merge_bombs_skipped="1"></recent>' \
+    && ok "arm 7h: a window whose only commit was skipped still prints <recent n=\"0\" of=\"0\" merge_bombs_skipped=\"1\"> — zero rows, and the reason" \
+    || no "arm 7h: the only-bomb window prints no <recent> block (got: '$( printf '%s' "$R7h" | grep -oE '<recent [^>]*>' | head -1 )') — the disclosure vanished with the rows"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

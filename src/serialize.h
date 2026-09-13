@@ -1619,7 +1619,10 @@ template <typename PathRel>
 inline void writeRecentRows( XmlWriter& w, const MapAnnotations& ann, const PathRel& pathRel, std::vector<char>& esc )
 {
     char rc[ 128 ];
-    if( ann.recent && !ann.recent->empty() )
+    // The global block: absent only when there is NOTHING to say — no rows and no skipped commit. A window whose every
+    // commit was a merge bomb prints <recent n="0" of="0" merge_bombs_skipped="N"></recent>: zero rows and the reason,
+    // rather than an absent block a reader would take for "no history mined" (churndecaycheck arm 7h).
+    if( ann.recent && ( !ann.recent->empty() || ann.recentMergeBombsSkipped > 0 ) )
     {
         rw::formatTo( rc, sizeof rc, "<recent n=\"{}\" of=\"{}\" merge_bombs_skipped=\"{}\">", ann.recent->size(), ann.recentOf, ann.recentMergeBombsSkipped );
         w.write( rc );

@@ -1396,7 +1396,9 @@ int runDefaultMap( const MainDispatch& d )
                                 cfg.maxTokens > 0 ? &maxTokensFit : nullptr,   // §B13.4
                                 rankByLabel,                                   // §B2.1
                                 rankDisclosure,                                // W2-F: pr_iters= / pr_converged=
-                                recentFiles.empty() ? nullptr : &recentFiles,  // F3: <recent> rows, churn-decay single-root only
+                                // F3: <recent> rows, churn-decay single-root only. An all-bomb window (a shallow clone of a large
+                                // tree: one 183,835-file commit) has zero rows AND a count to disclose, so the block rides then too.
+                                recentFiles.empty() && recentMergeBombsSkipped == 0 ? nullptr : &recentFiles,
                                 recentOf };
     mapAnn.recentMergeBombsSkipped = recentMergeBombsSkipped;   // rides <recent> (the rows' own window), filled by assignment like seed
     // C1-b (2026-09-12): --in=DIR — the scoped block and the map stub, filled by assignment like seed. The two next= strings

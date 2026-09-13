@@ -59,7 +59,11 @@ absence is never ambiguous; the full and compact legends define it and state the
 repository's own tree the attribute reads `merge_bombs_skipped="5"` — five commits the map had been
 quietly built without. Gate: `test/churndecaycheck.sh` arm 7 builds a repository whose HEAD commit adds
 101 files and asserts the block reads `"1"`, that none of those files is a row, and that both legends
-define the attribute; red on the previous binary (no attribute anywhere), green now.
+define the attribute; red on the previous binary (no attribute anywhere), green now. A window whose
+every commit was skipped — a shallow clone of a large tree is exactly this shape: llvm-project at depth
+1 is one 183,835-file commit — used to print no block at all, which reads as "no history mined"; it now
+prints `<recent n="0" of="0" merge_bombs_skipped="1"></recent>`, zero rows and the reason (arm 7h, red
+on the previous binary). A tree with no git history still prints no block.
 
 ### Added — Elixir module and arity resolution (parser version 95)
 
