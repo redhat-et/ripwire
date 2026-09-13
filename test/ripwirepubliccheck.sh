@@ -108,6 +108,21 @@ fi
 # report that is missing, cut short or inconsistent has no verdict, and that FAILS. Paths never split on a newline:
 # the list is NUL-delimited on both sides, and every printed path has its control characters escaped. The controls
 # below prove each of these on planted inputs.
+#
+# EXTRACTION IS BOUNDED. A deck's text is read through a fixed byte bound, ARM1B_TEXT_BOUND: pdftotext's pipe is
+# drained as it fills and never held past the bound, and a PPTX is refused on the uncompressed total its slide and
+# notes parts DECLARE before any part is opened, then each part is read through the same bound, so a header that
+# understates its size is caught by the read. A deck over the bound is UNREAD, which fails the arm; it is never
+# skipped and never buffered whole. The tracked decks extract to tens of kilobytes, so the bound is a blow-up guard
+# for CI memory, not a size any real deck approaches.
+#
+# A PPTX IS SCANNED AS THE TEXT IT DISPLAYS, NOT AS RAW XML. Slide and notes-slide parts are parsed, and the `<a:t>`
+# runs of each paragraph are joined in document order into one line, because a name broken across two runs
+# (`<a:t>Na</a:t><a:t>me</a:t>`, which a slide editor produces whenever formatting changes mid-word) is displayed
+# whole while no raw scan can see it. Runs in different paragraphs stay on different lines. A part that declares a
+# DTD is refused unparsed: slide XML never carries one, and entity expansion is the one way a part inside the bound
+# could grow past it.
+ARM1B_TEXT_BOUND=$(( 32 * 1024 * 1024 ))
 PRERELEASE_NAME_SHA256='7 904522dda28c1584057c235feec23321855e1760d01116dfc6bf851411c69c7c'
 PRERELEASE_EXEMPT_SHA256='bench/recalleval/snapshot.mdpack 6f60a279b582356f5e06091069d1c948889b6d3ccbc1b2d4e3b0d31321326717'
 # deck_kind PATH — sets _kind to pdf, pptx or nothing. A glob on the WHOLE path with the extension in any case:
@@ -134,8 +149,13 @@ count_decks(){
 # The scanner. argv: tracked list (ls-files -z), target rows, exempt rows. It writes nothing but its report, and
 # the report's last two records are COUNT and END: a report cut short anywhere has lost at least END.
 if ! cat > "$TMP/arm1b.py" <<'PY'
-import hashlib, os, re, shutil, subprocess, sys, zipfile
+import hashlib, os, re, select, shutil, subprocess, sys, time, zipfile
+import xml.etree.ElementTree as ET
 paths = [ p for p in open( sys.argv[ 1 ], 'rb' ).read().split( b'\0' ) if p ]
+BOUND = int( sys.argv[ 4 ] ) if len( sys.argv ) > 4 and re.fullmatch( r'[0-9]+', sys.argv[ 4 ] ) else 0
+if BOUND < 1:
+    print( 'REFUSE the extracted-text bound must be a positive byte count' )
+    sys.exit( 1 )
 exempt = dict( line.split() for line in sys.argv[ 3 ].splitlines() if line.strip() )
 targets = {}
 for line in sys.argv[ 2 ].splitlines():
@@ -156,29 +176,114 @@ def shown( path ):
     return re.sub( r'[\x00-\x1f\x7f]', lambda m: '\\x%02x' % ord( m.group() ), text )
 
 DECK = re.compile( rb'\.(pdf|pptx)\Z', re.I )
+TIMEOUT = 300
+
+def run_bounded( argv, bound, timeout ):
+    """( stdout, None ) when ARGV exits 0 having written at most BOUND bytes within TIMEOUT seconds, else ( None, why ).
+    The pipe is drained as it fills, so the process is stopped after BOUND + 1 bytes rather than buffered whole."""
+    try:
+        proc = subprocess.Popen( argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
+    except OSError as exc:
+        return None, 'could not run (%s)' % exc.__class__.__name__
+    fd, deadline, chunks, size, why = proc.stdout.fileno(), time.monotonic() + timeout, [], 0, None
+    try:
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0 or not select.select( [ fd ], [], [], left )[ 0 ]:
+                why = 'produced no end of output within %d s' % timeout
+                break
+            chunk = os.read( fd, 1 << 16 )
+            if not chunk:
+                break
+            size += len( chunk )
+            if size > bound:
+                why = 'wrote more than the %d-byte bound of extracted text' % bound
+                break
+            chunks.append( chunk )
+        if why is None:
+            try:
+                code = proc.wait( timeout=max( deadline - time.monotonic(), 0 ) )
+            except subprocess.TimeoutExpired:
+                why = 'did not exit within %d s' % timeout
+            else:
+                if code != 0:
+                    why = 'could not read it (exit %d)' % code
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        proc.stdout.close()
+    return ( b''.join( chunks ), None ) if why is None else ( None, why )
+
+A = '{http://schemas.openxmlformats.org/drawingml/2006/main}'
+PART = re.compile( r'ppt/(slides|notesSlides)/[^/0-9]*([0-9]*)[^/]*\.xml' )
+
+def part_order( name ):
+    """Slides before notes, each in numeric order (slide2 before slide10), then the name for anything unnumbered."""
+    match = PART.fullmatch( name )
+    return ( 0 if match.group( 1 ) == 'slides' else 1, int( match.group( 2 ) or 0 ), name )
+
+def displayed_lines( root ):
+    """The text a slide part displays: one line per `<a:p>` paragraph, its `<a:t>` runs joined in document order and
+    an `<a:br/>` a line break inside it. A run outside every paragraph, which the schema never produces, is kept as its
+    own line rather than lost."""
+    lines, inside = [], 0
+    for para in root.iter( A + 'p' ):
+        pieces = []
+        for node in para.iter():
+            if node.tag == A + 't':
+                pieces.append( node.text or '' )
+                inside += 1
+            elif node.tag == A + 'br':
+                pieces.append( '\n' )
+        lines.extend( ''.join( pieces ).split( '\n' ) )
+    runs = [ node.text or '' for node in root.iter( A + 't' ) ]
+    if len( runs ) != inside:
+        lines.extend( runs )
+    return lines
+
+def pptx_text( name, bound ):
+    """( text, None ) or ( None, why ). The uncompressed total the slide and notes parts DECLARE is checked before
+    any part is opened; each part is then read through the same bound, so a header that lies is caught by the read.
+    A part carrying a DTD is refused unparsed: slide XML never has one, and entity expansion is the one way a part
+    inside the bound could grow past it."""
+    try:
+        with zipfile.ZipFile( name ) as deck:
+            parts = sorted( ( n for n in deck.namelist() if PART.fullmatch( n ) ), key=part_order )
+            declared = sum( deck.getinfo( n ).file_size for n in parts )
+            if declared > bound:
+                return None, 'its slide and notes parts declare %d bytes, over the %d-byte bound' % ( declared, bound )
+            lines, size = [], 0
+            for n in parts:
+                with deck.open( n ) as part:
+                    data = part.read( bound + 1 - size )
+                size += len( data )
+                if size > bound:
+                    return None, 'its slide and notes parts expand past the %d-byte bound' % bound
+                if b'<!DOCTYPE' in data or b'<!ENTITY' in data:
+                    return None, 'part %s declares a DTD, which slide XML never does' % n
+                lines.extend( displayed_lines( ET.fromstring( data ) ) )
+    except Exception as exc:   # any failure to read or parse the archive leaves the deck unread, never clean
+        return None, 'it is not a readable PPTX (%s)' % exc.__class__.__name__
+    return '\n'.join( lines ).encode( 'utf-8' ), None
 
 def deck_text( path ):
     """( text, None ) when the deck was READ, else ( None, reason ). Nothing is written to disk: pdftotext prints to
-    a pipe and the PPTX is unzipped in memory. './' keeps a path that starts with '-' from reading as an option."""
+    a pipe and the PPTX is unzipped in memory, each through BOUND. './' keeps a path that starts with '-' from reading
+    as an option. A deck that displays no letters at all is UNREAD, the same rule for an image-only PDF and PPTX: a
+    name rendered as pixels is invisible to every text tool, and this arm says so rather than clearing the deck."""
     name = os.fsdecode( os.path.join( b'.', path ) )
     if path.lower().endswith( b'.pdf' ):
         tool = shutil.which( 'pdftotext' )
         if not tool:
             return None, 'pdftotext (poppler) is not installed'
-        try:
-            run = subprocess.run( [ tool, '-q', name, '-' ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=300 )
-        except ( OSError, subprocess.SubprocessError ) as exc:
-            return None, 'pdftotext could not run (%s)' % exc.__class__.__name__
-        if run.returncode != 0:
-            return None, 'pdftotext could not read it (exit %d)' % run.returncode
-        text = run.stdout
+        text, why = run_bounded( [ tool, '-q', name, '-' ], BOUND, TIMEOUT )
+        if text is None:
+            return None, 'pdftotext ' + why
     else:
-        try:
-            with zipfile.ZipFile( name ) as deck:
-                parts = sorted( n for n in deck.namelist() if re.fullmatch( r'ppt/(slides|notesSlides)/[^/]+\.xml', n ) )
-                text = b'\n'.join( deck.read( n ) for n in parts )
-        except Exception as exc:   # any failure to read the archive leaves the deck unread, never clean
-            return None, 'it is not a readable PPTX archive (%s)' % exc.__class__.__name__
+        text, why = pptx_text( name, BOUND )
+        if text is None:
+            return None, why
     if not re.search( rb'[A-Za-z]', text ):
         return None, 'extraction produced no text'
     return text, None
@@ -265,11 +370,12 @@ PY
 then
     no "arm 1b — could not write its scanner into $TMP"
 fi
-# run_scanner ROOT LIST TARGETS EXEMPT REPORT — the scanner over ROOT, its report to REPORT and stderr to REPORT.err.
-# Sets _status. A report that cannot even be opened is a non-zero status like any other failure; the shell's own
-# complaint about it stays out of the gate's output.
+# run_scanner ROOT LIST TARGETS EXEMPT REPORT [BOUND] — the scanner over ROOT, its report to REPORT and stderr to
+# REPORT.err, every deck read through BOUND bytes (ARM1B_TEXT_BOUND unless a control passes a smaller one). Sets
+# _status. A report that cannot even be opened is a non-zero status like any other failure; the shell's own complaint
+# about it stays out of the gate's output.
 run_scanner(){
-    ( cd "$1" && PYTHONIOENCODING=utf-8:backslashreplace python3 "$TMP/arm1b.py" "$2" "$3" "$4" > "$5" 2> "$5.err" ) 2>/dev/null
+    ( cd "$1" && PYTHONIOENCODING=utf-8:backslashreplace python3 "$TMP/arm1b.py" "$2" "$3" "$4" "${6:-$ARM1B_TEXT_BOUND}" > "$5" 2> "$5.err" ) 2>/dev/null
     _status=$?
 }
 # is_count VALUE — true for a non-empty run of digits.
@@ -343,8 +449,11 @@ _ctlrepo="$TMP/arm1b.ctlrepo"
 ctlgit(){ env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$_ctlrepo" "$@"; }
 _ctlhash="7 $( python3 -c 'import hashlib; print( hashlib.sha256( b"qzvkwjx" ).hexdigest() )' )"
 # (1) END TO END. A temp repo tracks decks whose paths carry a NEWLINE, a SPACE and an UPPER-CASE extension, beside
-#     a `.pdf.bak` decoy. Each deck holds the planted token only in compressed text. All three must be counted, read,
-#     and reported from their extracted text. GIT_* is cleared so an inherited GIT_DIR cannot redirect these calls.
+#     a `.pdf.bak` decoy. Each deck holds the planted token only in compressed text. Two more PPTX decks pin the
+#     display-order reading: `split.pptx` carries the token broken across `<a:t>` runs, on a slide and again in a
+#     notes slide, and must be reported from both; `apart.pptx` carries the same two pieces in two PARAGRAPHS, which
+#     no slide displays as one word, and must be read yet report nothing. All five must be counted and read. GIT_* is
+#     cleared so an inherited GIT_DIR cannot redirect these calls.
 { mkdir -p "$_ctlrepo" && ctlgit init -q 2>/dev/null; } || ctlfail "(1) could not create its temp repo"
 python3 - "$_ctlrepo" <<'PY' || ctlfail "(1) could not write the planted decks"
 import os, sys, zipfile, zlib
@@ -364,9 +473,19 @@ def pdf_bytes():
     pdf += b"xref\n0 %d\n0000000000 65535 f \n" % ( len( objs ) + 1 ) + b"".join( b"%010d 00000 n \n" % o for o in offsets )
     pdf += b"trailer\n<</Size %d /Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n" % ( len( objs ) + 1, xref )
     return bytes( pdf )
+NS = b'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+def slide( *paragraphs ):
+    """A slide part whose paragraphs are given as tuples of runs."""
+    body = b"".join( b"<a:p>" + b"".join( b"<a:r><a:t>" + run + b"</a:t></a:r>" for run in runs ) + b"</a:p>" for runs in paragraphs )
+    return b"<p:sld " + NS + b"><p:cSld><p:spTree><p:sp><p:txBody>" + body + b"</p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
 os.makedirs( os.path.join( root, "talks" ), exist_ok=True )
 with zipfile.ZipFile( os.path.join( root, "talks", "new\nline.Pptx" ), "w", zipfile.ZIP_DEFLATED ) as deck:
-    deck.writestr( "ppt/slides/slide1.xml", b"<p:sld><a:t>" + word + b"</a:t></p:sld>" )
+    deck.writestr( "ppt/slides/slide1.xml", slide( ( word, ) ) )
+with zipfile.ZipFile( os.path.join( root, "talks", "split.pptx" ), "w", zipfile.ZIP_DEFLATED ) as deck:
+    deck.writestr( "ppt/slides/slide1.xml", slide( ( b"see ", word[ :3 ], word[ 3: ], b" here" ) ) )
+    deck.writestr( "ppt/notesSlides/notesSlide1.xml", slide( ( b"notes", ), ( word[ :5 ], word[ 5: ] ) ) )
+with zipfile.ZipFile( os.path.join( root, "talks", "apart.pptx" ), "w", zipfile.ZIP_DEFLATED ) as deck:
+    deck.writestr( "ppt/slides/slide1.xml", slide( ( word[ :3 ], ), ( word[ 3: ], ) ) )
 for name in ( "with space.pdf", "UPPER.PDF" ):
     with open( os.path.join( root, "talks", name ), "wb" ) as out:
         out.write( pdf_bytes() )
@@ -378,13 +497,21 @@ count_decks "$TMP/arm1b.ctl.z" || ctlfail "(1) could not read its own deck list"
 _ctldecks=$_decks
 run_scanner "$_ctlrepo" "$TMP/arm1b.ctl.z" "$_ctlhash" '' "$TMP/arm1b.ctl.report"
 judge_report "$TMP/arm1b.ctl.report" "$_status" "$_ctldecks"
-if [ "$_ctldecks" -ne 3 ] || [ "$_verdict" != dirty ] || [ "$_hits" -ne 1 ] || [ "$_unread" -ne 0 ]; then
-    ctlfail "(1) planted decks: counted $_ctldecks, verdict $_verdict${_why:+ ($_why)}, $_unread unread — want 3 decks, all read, the token found"
+if [ "$_ctldecks" -ne 5 ] || [ "$_verdict" != dirty ] || [ "$_hits" -ne 1 ] || [ "$_unread" -ne 0 ]; then
+    ctlfail "(1) planted decks: counted $_ctldecks, verdict $_verdict${_why:+ ($_why)}, $_unread unread — want 5 decks, all read, the token found"
 fi
 for _want in 'talks/new\x0aline.Pptx' 'talks/with space.pdf' 'talks/UPPER.PDF'; do
     grep -Fq "HIT $_want (extracted text):" "$TMP/arm1b.ctl.report" 2>/dev/null \
         || ctlfail "(1) the token in tracked deck $_want was not reported from its extracted text"
 done
+# The split-run deck reports the slide line (1) and the notes line (3: the slide's one paragraph, then "notes", then the
+# split pair); the split-paragraph deck reports nothing.
+for _want in 'HIT talks/split.pptx (extracted text):1' 'HIT talks/split.pptx (extracted text):3'; do
+    grep -Fxq "$_want" "$TMP/arm1b.ctl.report" 2>/dev/null \
+        || ctlfail "(1) a token split across <a:t> runs was not reported as the line that displays it (want '$_want')"
+done
+! grep -Fq 'HIT talks/apart.pptx' "$TMP/arm1b.ctl.report" 2>/dev/null \
+    || ctlfail "(1) two paragraphs that each carry half the token were reported as if a slide displayed them as one word"
 # (2) UNREADABLE INPUTS. The same list plus a junk .pdf, a junk .pptx and two tracked paths missing from disk: two
 #     unread files and three unread decks. Unread decides the verdict, never "zero findings".
 { printf 'not a deck\n' > "$_ctlrepo/talks/junk.pdf" \
@@ -411,7 +538,43 @@ judge_report "$TMP/arm1b.ctl.cut" 0 "$_ctldecks"
 # (5) A DECK THE SCANNER NEVER SAW. Control (1)'s complete report, judged against one more deck than it enumerated.
 judge_report "$TMP/arm1b.ctl.report" 0 "$(( _ctldecks + 1 ))"
 [ "$_verdict" = broken ] || ctlfail "(5) a deck-count mismatch was judged $_verdict — want broken"
-[ "$_ctl" -eq 0 ] && ok "arm 1b control — planted decks with a newline, a space and an upper-case extension are all read and scanned; unreadable inputs, an unwritable report, a truncated report and a deck-count mismatch each fail"
+# (6) THE BOUND. A PDF whose text and a PPTX whose declared slide part both exceed a 64-byte bound, and carry no token.
+#     Under that bound both are UNREAD, each naming the bound, and the verdict is dirty on unread alone; under the real
+#     bound the same two decks are read clean. So the bound, not the content, is what refused them, and refusal is
+#     never a pass.
+python3 - "$_ctlrepo" <<'PY' || ctlfail "(6) could not write its oversized decks"
+import os, sys, zipfile
+root = sys.argv[ 1 ]
+NS = b'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+with zipfile.ZipFile( os.path.join( root, "talks", "big.pptx" ), "w", zipfile.ZIP_DEFLATED ) as deck:
+    deck.writestr( "ppt/slides/slide1.xml", b"<p:sld " + NS + b"><a:p><a:r><a:t>" + b"abcdefgh " * 12 + b"</a:t></a:r></a:p></p:sld>" )
+stream = b"BT /F1 8 Tf 10 40 Td (" + b"abcdefgh " * 12 + b") Tj ET"
+objs = ( b"<</Type /Catalog /Pages 2 0 R>>", b"<</Type /Pages /Kids [3 0 R] /Count 1>>",
+         b"<</Type /Page /Parent 2 0 R /MediaBox [0 0 900 100] /Contents 4 0 R /Resources <</Font <</F1 5 0 R>>>>>>",
+         b"<</Length %d>>\nstream\n" % len( stream ) + stream + b"\nendstream",
+         b"<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>" )
+pdf, offsets = bytearray( b"%PDF-1.4\n" ), []
+for number, body in enumerate( objs, 1 ):
+    offsets.append( len( pdf ) )
+    pdf += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+xref = len( pdf )
+pdf += b"xref\n0 %d\n0000000000 65535 f \n" % ( len( objs ) + 1 ) + b"".join( b"%010d 00000 n \n" % o for o in offsets )
+pdf += b"trailer\n<</Size %d /Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n" % ( len( objs ) + 1, xref )
+with open( os.path.join( root, "talks", "big.pdf" ), "wb" ) as out:
+    out.write( bytes( pdf ) )
+PY
+printf 'talks/big.pdf\0talks/big.pptx\0' > "$TMP/arm1b.ctl6.z" || ctlfail "(6) could not write its deck list"
+count_decks "$TMP/arm1b.ctl6.z" || ctlfail "(6) could not read its deck list"
+run_scanner "$_ctlrepo" "$TMP/arm1b.ctl6.z" "$_ctlhash" '' "$TMP/arm1b.ctl6.report" 64
+judge_report "$TMP/arm1b.ctl6.report" "$_status" "$_decks"
+if [ "$_verdict" != dirty ] || [ "$_unread" -ne 2 ] || [ "$_hits" -ne 0 ] \
+   || [ "$( grep -c '^UNREAD .*bound' "$TMP/arm1b.ctl6.report" 2>/dev/null )" != 2 ]; then
+    ctlfail "(6) two decks over a 64-byte bound: verdict $_verdict${_why:+ ($_why)}, $_unread unread, hits $_hits — want dirty, both UNREAD naming the bound"
+fi
+run_scanner "$_ctlrepo" "$TMP/arm1b.ctl6.z" "$_ctlhash" '' "$TMP/arm1b.ctl6b.report"
+judge_report "$TMP/arm1b.ctl6b.report" "$_status" "$_decks"
+[ "$_verdict" = clean ] || ctlfail "(6) the same two decks under the real bound were judged $_verdict${_why:+ ($_why)} — want clean"
+[ "$_ctl" -eq 0 ] && ok "arm 1b control — planted decks with a newline, a space and an upper-case extension are all read and scanned, a token split across <a:t> runs is caught; unreadable inputs, an unwritable report, a truncated report, a deck-count mismatch and a deck over the text bound each fail"
 # THE SWEEP. The deck count comes from this shell, the scan and its accounting from the scanner, and the verdict
 # only from a report the judge read completely.
 if count_decks "$TMP/tracked.z"; then
