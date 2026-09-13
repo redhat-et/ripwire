@@ -593,6 +593,12 @@ inline constexpr std::string_view kForCompactConfidenceClause =
 // inside the budget beats the larger one past it. Two honest spellings were available and the shorter was taken;
 // that is not the same as trimming a disclosure until a pin goes green, and the day it is, the pin moves instead.
 inline constexpr std::string_view kForLegendDroppedNote =
+    " [legend clauses: confidence=/margin_pct=, budget_tokens=/max_tokens= and r=/tail (total= shown= capped=) "
+    "dropped (ceiling) - the attributes stay; a wider token-budget defines them]";
+// L-W: the same note on a THIN answer, whose root also carries coverage= (present-only) — the clause that defined it
+// rode the confidence sentence and fell with it, so this spelling names it too. Two constants, not one assembled at
+// runtime, for the byte-ledger reason kForCompactConfidenceClause states.
+inline constexpr std::string_view kForLegendDroppedNoteThin =
     " [legend clauses: confidence=/margin_pct=/coverage=, budget_tokens=/max_tokens= and r=/tail (total= shown= capped=) "
     "dropped (ceiling) - the attributes stay; a wider token-budget defines them]";
 
@@ -606,6 +612,9 @@ inline constexpr std::string_view kForLegendDroppedNote =
 // reason kForCompactConfidenceClause is one constant — the byte ledgers that exempt and charge these strings
 // read their sizes, and a string built at runtime has no size to read at compile time.
 inline constexpr std::string_view kForLegendDroppedNoteCompact =
+    " [legend clauses: confidence=/margin_pct= and r=/tail (total= shown= capped=) dropped (ceiling) - "
+    "the attributes stay; a wider token-budget defines them]";
+inline constexpr std::string_view kForLegendDroppedNoteCompactThin =
     " [legend clauses: confidence=/margin_pct=/coverage= and r=/tail (total= shown= capped=) dropped (ceiling) - "
     "the attributes stay; a wider token-budget defines them]";
 
@@ -637,7 +646,8 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     }
     if( p.legendDropped )
     {
-        h += kForLegendDroppedNoteCompact;   // L1: the two clauses above went to the ceiling — in THIS dialect's inventory
+        h += p.confidenceAttrs.find( " coverage=\"" ) != std::string_view::npos ? kForLegendDroppedNoteCompactThin
+                                                                                : kForLegendDroppedNoteCompact;   // L1: the two clauses above went to the ceiling — in THIS dialect's inventory
     }
     h.append( extraNotes );
     h += " -->";
@@ -744,7 +754,8 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     }
     if( p.legendDropped )
     {
-        h.append( kForLegendDroppedNote );   // L1: the confidence and tail clauses went to the ceiling — say so, and name what they defined
+        h.append( p.confidenceAttrs.find( " coverage=\"" ) != std::string_view::npos ? kForLegendDroppedNoteThin
+                                                                                    : kForLegendDroppedNote );   // L1: the confidence and tail clauses went to the ceiling — say so, and name what they defined
     }
     h.append( extraNotes );
     h += " -->";
@@ -1960,13 +1971,38 @@ std::optional<int> runForLens( const MainDispatch& d )
         // the mapping, the two derived strings, and the reasoning behind both live ONCE in
         // deriveForConfidence (above runForLens) — forTopN is final here (floor cut applied), which is
         // what the completeness ground needs.
+        // THE BUNDLE'S RESOLVED SURFACE: the top-N ids by lensRank — the exact set <sigs> selects. Three
+        // consumers now: the S5-E HAS-A compose view, the B6.3 route view, and (§P3) the <lego> scope
+        // filter, which keeps only interfaces this surface actually reaches. §B1.4 (capture-audit-4):
+        // HOISTED above the --json branch — both dialects need it now, XML to RENDER lego/compose/routes,
+        // JSON to COUNT them without rendering (see below). Computed once, kept alive for the
+        // direct-emission degrade paths further down too.
+        std::vector<NodeId> lensSurfaceIds;
+        {
+            const std::size_t S = ing.symbols.size();
+            lensSurfaceIds.resize( S );
+            for( NodeId i = 0; i < S; ++i )
+            {
+                lensSurfaceIds[i] = i;
+            }
+            // A4-F23c: score-only sort left ties straddling the cut stdlib-dependent. Use the (score desc, id
+            // asc) total order (same key packSignatures selects with) so the surface set is deterministic.
+            rw::sortutil::radixSortByScoreDescId( lensSurfaceIds, lensRank );
+            const std::size_t cap = std::min<std::size_t>( std::size_t( forTopN ), S );
+            lensSurfaceIds.resize( cap );
+        }
+
         ForConfidence forConf = deriveForConfidence( forCut, forTopN );
-        // L-W: coverage= rides the SAME sentence and the SAME byte exemption as confidence=/margin_pct= — a third
-        // root fact of every ranking (how much of the query the top-ranked symbol's own text carries), which is
-        // what tells a thin answer from a confident one. Absent (with its clause) only when nothing scored: there
-        // is no top-ranked symbol to measure, and a fabricated 0 is what non-negotiable #3 forbids.
+        // L-W: coverage= rides the SAME sentence and the SAME byte exemption as confidence=/margin_pct= — but ONLY
+        // on a THIN answer (owner decision 2026-09-12: present-only). The thin verdict is decided HERE, from the
+        // resolved surface above and the top symbol's term share, and it drives three things at once: the
+        // attribute, its legend clause (present-only, so the clause never explains an absent attribute) and the
+        // r=1 row's next= (the widening page instead of the body). A confident answer carries none of them and is
+        // byte-identical to the pre-L-W bundle. Nothing scored ⇒ no top symbol ⇒ thin by the files clause, and no
+        // coverage= to print (a fabricated 0 is what non-negotiable #3 forbids).
         const int  forCoverage   = forCoveragePct( lr.evidence, topLensId( lensRank ) );
-        const bool forCoverageOn = forCoverage >= 0;
+        const bool forThin       = forAnswerIsThin( forCoverage, distinctFilesOf( ing, lensSurfaceIds ) );
+        const bool forCoverageOn = forThin && forCoverage >= 0;
         if( forCoverageOn )
         {
             forConf.attrs += " coverage=\"" + std::to_string( forCoverage ) + "\"";
@@ -2098,26 +2134,6 @@ std::optional<int> runForLens( const MainDispatch& d )
             }
         }
 
-        // THE BUNDLE'S RESOLVED SURFACE: the top-N ids by lensRank — the exact set <sigs> selects. Three
-        // consumers now: the S5-E HAS-A compose view, the B6.3 route view, and (§P3) the <lego> scope
-        // filter, which keeps only interfaces this surface actually reaches. §B1.4 (capture-audit-4):
-        // HOISTED above the --json branch — both dialects need it now, XML to RENDER lego/compose/routes,
-        // JSON to COUNT them without rendering (see below). Computed once, kept alive for the
-        // direct-emission degrade paths further down too.
-        std::vector<NodeId> lensSurfaceIds;
-        {
-            const std::size_t S = ing.symbols.size();
-            lensSurfaceIds.resize( S );
-            for( NodeId i = 0; i < S; ++i )
-            {
-                lensSurfaceIds[i] = i;
-            }
-            // A4-F23c: score-only sort left ties straddling the cut stdlib-dependent. Use the (score desc, id
-            // asc) total order (same key packSignatures selects with) so the surface set is deterministic.
-            rw::sortutil::radixSortByScoreDescId( lensSurfaceIds, lensRank );
-            const std::size_t cap = std::min<std::size_t>( std::size_t( forTopN ), S );
-            lensSurfaceIds.resize( cap );
-        }
         // IS-A: socket → bricks — for the interfaces THIS task actually reaches (§P3: the implementors map is
         // pre-scoped to lensSurfaceIds; withPaths keeps two same-named impls apart, exactly as --lego=TYPE
         // spells them). No interface reached ⇒ no <lego> element. Kept alive for the §P3×§P4 narrowing below
@@ -2125,12 +2141,9 @@ std::optional<int> runForLens( const MainDispatch& d )
         // seam, so hoisting it above the --json branch changes no dialect's redaction tally.
         std::vector<std::vector<NodeId>> legoScoped = legoImplementorsOnSurface( ing, g.implementors, lensSurfaceIds );
 
-        // L-W (L-N): the r=1 row's next= names the file-grain widening page when the answer is THIN — coverage
-        // under kForThinCoveragePct, or the resolved surface (the head before any budget trim) over fewer than
-        // kForThinMinFiles files — and the body otherwise. Decided here, from facts the header already fixed, so
-        // the two dialects' rows and the legend's stated rule cannot disagree; "" keeps the --expand hint.
-        const std::string forTopRowNext = forAnswerIsThin( forCoverage, distinctFilesOf( ing, lensSurfaceIds ) )
-                                              ? forWidenNext( cfg.forTask ) : std::string();
+        // L-W (L-N): the r=1 row's next= names the file-grain widening page on the THIN verdict decided beside the
+        // header above, and the body otherwise; "" keeps the --expand hint.
+        const std::string forTopRowNext = forThin ? forWidenNext( cfg.forTask ) : std::string();
 
         // DEEP-TAIL d2: the file-grain tail candidates — one shared walk (serialize.h computeFileTail) for
         // both dialects, computed from the SAME resolved surface <sigs> selects, so the two dialects (and
@@ -2202,7 +2215,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                                                               docMentionNote, lr.anchorLifts, lr.docMentionCount,
                                                                                               adaptiveNote, floorNote,
                                                                                               forConf.level,
-                                                                                              forConf.marginPct, forCoverage, forWeak,
+                                                                                              forConf.marginPct, forCoverageOn ? forCoverage : -1, forWeak,
                                                                                               forAtStamp,
                                                                                               // abstention round 2: forCut is the SAME
                                                                                               // cut the confidence facts above derive

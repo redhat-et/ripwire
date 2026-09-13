@@ -1718,10 +1718,25 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // the CLI's own call with the CLI's own arguments), so there was never a cost reason for the omission.
     const AdaptiveCut   mcpForCut = adaptiveCut( lensRank, 5, std::size_t( forTopN ), /*scanFullDistribution=*/true );
     ForConfidence       mcpForConf = deriveForConfidence( mcpForCut, forTopN );
-    // L-W: coverage= joins the pair on this root too — same clause, same presence rule, same byte exemption
-    // (mcpConfidenceExemptBytes reads the sizes below) as the CLI twin.
-    const int mcpCoverage = forCoveragePct( mcpEvidence, topLensId( lensRank ) );
-    if( mcpCoverage >= 0 )
+    // THE BUNDLE'S RESOLVED SURFACE (top-N by lensRank — the set <sigs> selects), shared by the compose
+    // view, the B6.3 route view and (§P3) the <lego> scope filter. Same order the CLI --for uses. Hoisted
+    // above the header (L-W): the thin verdict reads it.
+    const std::size_t   S = ing.symbols.size();
+    std::vector<NodeId> lensSurfaceIds( S );
+    for( NodeId i = 0; i < NodeId( S ); ++i )
+    {
+        lensSurfaceIds[i] = i;
+    }
+    std::sort( lensSurfaceIds.begin(), lensSurfaceIds.end(),
+               [ &lensRank ]( NodeId a, NodeId b ) { return lensRank[a] != lensRank[b] ? lensRank[a] > lensRank[b] : a < b; } );   // id tiebreak → deterministic (most lens scores tie at 0)
+    lensSurfaceIds.resize( std::min<std::size_t>( std::size_t( forTopN ), S ) );
+    // L-W: coverage= joins the pair on this root on a THIN answer only (present-only, the CLI twin's rule in
+    // forpage.h) — same clause, same byte exemption (mcpConfidenceExemptBytes reads the sizes below); the same
+    // verdict puts the widening page on the r=1 row's next=.
+    const int         mcpCoverage   = forCoveragePct( mcpEvidence, topLensId( lensRank ) );
+    const bool        mcpThin       = forAnswerIsThin( mcpCoverage, distinctFilesOf( ing, lensSurfaceIds ) );
+    const std::string mcpTopRowNext = mcpThin ? forWidenNext( task ) : std::string();
+    if( mcpThin && mcpCoverage >= 0 )
     {
         mcpForConf.attrs += " coverage=\"" + std::to_string( mcpCoverage ) + "\"";
         mcpForConf.note  += kForCoverageLegend;
@@ -1730,7 +1745,6 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     const std::vector<char>  impure    = computeImpure( ing, ix.g );
 
     // fan-in counts: in-degree per node (how many symbols call this one — the "reuse" metric)
-    const std::size_t S = ing.symbols.size();
     std::vector<std::uint32_t> fanIn( S, 0 );
     {
         const auto* ro = ix.g.inEdges.rowOffsets();
@@ -1839,20 +1853,6 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // function's own comment for why a shorter wording, not the shared 18-verb kRootRelPathsLegend, closes
     // this gap: this lens's ceiling is the one place the full 159 B clause measurably does not fit.
     const auto renderToString = [ ]( auto&& emitFn ) -> std::string { return captureXml( emitFn ); };
-    // THE BUNDLE'S RESOLVED SURFACE (top-N by lensRank — the set <sigs> selects), shared by the compose
-    // view, the B6.3 route view and (§P3) the <lego> scope filter. Same order the CLI --for uses.
-    std::vector<NodeId> lensSurfaceIds( S );
-    for( NodeId i = 0; i < NodeId( S ); ++i )
-    {
-        lensSurfaceIds[i] = i;
-    }
-    std::sort( lensSurfaceIds.begin(), lensSurfaceIds.end(),
-               [ &lensRank ]( NodeId a, NodeId b ) { return lensRank[a] != lensRank[b] ? lensRank[a] > lensRank[b] : a < b; } );   // id tiebreak → deterministic (most lens scores tie at 0)
-    lensSurfaceIds.resize( std::min<std::size_t>( std::size_t( forTopN ), S ) );
-    // L-W (L-N): the r=1 row's next= — the widening page on a THIN answer, the body otherwise; the CLI twin's rule
-    // (forpage.h forAnswerIsThin) over the same resolved surface.
-    const std::string mcpTopRowNext = forAnswerIsThin( mcpCoverage, distinctFilesOf( ing, lensSurfaceIds ) )
-                                          ? forWidenNext( task ) : std::string();
 
     // §P3: same scope + identity the CLI --for embeds — the MCP bundle must not carry wider scope (interfaces
     // this task never reached) or less identity (p= on every row) than its CLI twin.

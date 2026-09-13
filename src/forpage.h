@@ -34,9 +34,10 @@
 //
 // THE THIN RULE (kForThinCoveragePct / kForThinMinFiles, stated in both legends): an answer is thin when the
 // top-ranked symbol covers under 50% of the query's IDF mass, or when the ranked head (the top rows before any
-// budget trim) spreads over fewer than 3 files. Thin ⇒ next= names `--for=TASK --limit=40`; otherwise it stays
-// `--expand=FILE:NAME`. The thresholds are a registered hypothesis (PLAN_OUTPUT_ROUTING_LOOP §1.5 L-N), not a
-// tuned number: the routing-loop ladder measures them, and a later round moves them with a measured reason.
+// budget trim) spreads over fewer than 3 files. Thin ⇒ the root carries coverage= with its clause and next= names
+// `--for=TASK --limit=40`; a CONFIDENT answer carries none of them (owner decision 2026-09-12: present-only) and
+// keeps `--expand=FILE:NAME`. The thresholds are a registered hypothesis (PLAN_OUTPUT_ROUTING_LOOP §1.5 L-N),
+// not a tuned number: the routing-loop ladder measures them, and a later round moves them with a measured reason.
 
 #include "lexical.h"     // LexTermEvidence — the term masks + df the BM25 pass already accumulated
 #include "model.h"
@@ -118,11 +119,11 @@ inline NodeId topLensId( const std::vector<float>& rank ) noexcept
 // without their dashes.
 inline constexpr std::string_view kForCoverageLegend =
     " [coverage= is the IDF-weighted share (whole percent) of the query's subtokens in the top-ranked symbol's name, "
-    "doc or body; an unmatched subtoken weighs as the rarest. THIN = under 50, or a head over fewer than 3 files: "
-    "the r=1 row's next= then names the file-grain page (limit=N, one row per file), not the body]";
+    "doc or body; an unmatched subtoken weighs as the rarest. It rides a THIN answer only (under 50, or a head over "
+    "fewer than 3 files), whose r=1 row's next= names the file-grain page (limit=N, one row per file), not the body]";
 inline constexpr std::string_view kForCompactCoverageClause =
-    " [coverage=: IDF share (%) of the query's subtokens in the top symbol's name/doc/body; thin = under 50 or head "
-    "files under 3: next= names the file page (limit=N)]";
+    " [coverage=: IDF share (%) of the query's subtokens in the top symbol's name/doc/body, on a THIN answer only "
+    "(under 50 or head files under 3); next= then names the file page (limit=N)]";
 
 inline bool forAnswerIsThin( int coveragePct, std::size_t distinctHeadFiles ) noexcept
 {

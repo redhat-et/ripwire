@@ -83,6 +83,10 @@
 # that defines two of the four attributes it names. The replacement is 181 B against 182 B, so every number in
 # this block moved by at most one byte — the figures above are the re-measured ones, not the originals.)
 #
+# ── MOVED BACK 2026-09-13 (lane for-widen, owner decision 22:55: coverage= present-only): 1700 → 1640. ───────────
+# This fixture's answer is CONFIDENT (coverage would read 100 over a 12-file head), so under present-only it carries no
+# coverage= and no clause and reads the base numbers again: 1640 → est_tokens=1620 (7 rows), 1100 → 1022, 3000 → 2802;
+# 1700 now overshoots (1779, the 8-row state). The paragraph below records the one-day excursion for the next reader.
 # ── RE-ANCHORED 2026-09-12 (lane for-widen, L-W): the MIDDLE rung 1640 → 1700. ──────────────────────────────
 # The coverage= root fact and its legend clause (forpage.h kForCoverageLegend, ~300 B, byte-exempt like the confidence
 # clause it extends) landed on every --for header. Measured on this fixture at the gate's own (mktemp) path length: the
@@ -226,7 +230,7 @@ jsonRows(){ "$BIN" "$CORPUS" --for="$TASK" --token-budget="$1" --json 2>/dev/nul
 
 # ── arm 1: est_tokens must fit the ceiling the user asked for, in BOTH dialects ────────────────────
 # (tight budget 1100, re-anchored 2026-09-11 — see the CEILING MARGIN block above for the arithmetic)
-for tb in 1100 1700 3000; do
+for tb in 1100 1640 3000; do
   xe="$( xmlEst "$tb" )"; je="$( jsonEst "$tb" )"
   if [ -z "$xe" ] || [ -z "$je" ]; then no "budget=$tb: could not read est_tokens from one of the dialects (xml='$xe' json='$je')"; continue; fi
   if [ "$xe" -le "$tb" ]; then ok "budget=$tb: XML est_tokens=$xe fits the ceiling"
@@ -237,7 +241,7 @@ done
 
 # ── arm 2: the two dialects select COMPARABLE row counts (they need not be equal) ──────────────────
 # Before the fix the XML lens bought 2-2.4x the rows with the same budget, because notes were free.
-for tb in 1100 1700 3000; do
+for tb in 1100 1640 3000; do
   xr="$( xmlRows "$tb" )"; jr="$( jsonRows "$tb" )"
   if [ -z "$jr" ] || [ "$jr" -eq 0 ]; then no "budget=$tb: JSON selected no rows — the comparison has no denominator"; continue; fi
   if [ "$xr" -le $(( jr * 13 / 10 + 1 )) ] && [ "$xr" -ge $(( jr * 7 / 10 )) ]; then

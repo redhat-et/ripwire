@@ -19,7 +19,9 @@
 #   (3) The page is deterministic and well-formed; a cut page carries the house paging vocabulary
 #       (shown= total= capped="1" has_more= next_offset=) and a next= naming the next page; the second page
 #       has no row in common with the first and the pages concatenate to the wider page in order.
-#   (4) coverage= rides --for's root (both dialects) and is DEFINED in the legend the reader meets first.
+#   (4) coverage= rides --for's root on a THIN answer (both dialects) and is DEFINED in the legend the reader meets
+#       first; a CONFIDENT answer carries neither the attribute nor the clause (owner decision 2026-09-12 22:55:
+#       present-only), and the --json and MCP twins follow the same rule in both states.
 #   (5) next= on the r=1 row names the widening page (`--for=... --limit=40`) when the answer is THIN
 #       (coverage under 50, or a ranked head spread over fewer than 3 files) and stays --expand=FILE:NAME
 #       on a confident answer.
@@ -225,7 +227,31 @@ fi
 run --for="$CONFIDENT" >"$TMP/conf.xml"
 croot="$( grep -o '^<ctx [^>]*>' "$TMP/conf.xml" )"
 covconf="$( printf '%s' "$croot" | grep -o 'coverage="[0-9]*"' | tr -dc '0-9' )"
-[ -n "$covconf" ] && [ "$covconf" -ge 50 ] && ok "(5) confident query: coverage=$covconf (50 or more)" || no "(5) confident query: coverage='${covconf:-absent}' (expected 50 or more)"
+[ -z "$covconf" ] && ok "(5) confident answer: the root carries NO coverage= (present-only)" || no "(5) confident answer: the root carries coverage=$covconf — the gauge must ride thin answers only"
+grep -o '<!--.*-->' "$TMP/conf.xml" | head -1 | grep -q 'coverage=' && no "(5) confident answer: the legend still spells coverage= for an attribute the root does not carry" \
+                                                                  || ok "(5) confident answer: no coverage clause in the legend (present-only)"
+run --for="$CONFIDENT" --legend=compact >"$TMP/confc.xml"
+{ grep -o '^<ctx [^>]*>' "$TMP/confc.xml" | grep -q ' coverage="'; } && no "(5) confident answer, compact dialect: coverage= present" || ok "(5) confident answer, compact dialect: no coverage=, no clause"
+grep -o '<!--.*-->' "$TMP/confc.xml" | head -1 | grep -q 'coverage=' && no "(5) confident answer, compact dialect: the legend spells coverage=" || true
+# the --json twin: the key rides thin answers only
+run --for="$THIN" --json >"$TMP/thin.json"; run --for="$CONFIDENT" --json >"$TMP/conf.json"
+grep -q '"coverage":[0-9]' "$TMP/thin.json" && ok "(5) --json thin answer carries \"coverage\":N" || no "(5) --json thin answer lacks the coverage key"
+grep -q '"coverage":' "$TMP/conf.json" && no "(5) --json confident answer carries a coverage key" || ok "(5) --json confident answer carries no coverage key"
+# the MCP twin, both states
+for pair in "thin:$THIN" "confident:$CONFIDENT"; do
+    state=${pair%%:*}; task=${pair#*:}
+    printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"}}}\n' "$FIX" "$task" | "$BIN" --mcp 2>/dev/null | python3 "$TMP/mcptext.py" >"$TMP/mcp_$state.xml"
+    mroot="$( grep -o '^<ctx [^>]*>' "$TMP/mcp_$state.xml" )"; mleg="$( grep -o '<!--.*-->' "$TMP/mcp_$state.xml" | head -1 )"
+    if [ "$state" = thin ]; then
+        printf '%s' "$mroot" | grep -q ' coverage="[0-9]*"' && printf '%s' "$mleg" | grep -q 'coverage=' && printf '%s' "$( grep -o '<d [^>]*r="1"[^>]*>' "$TMP/mcp_$state.xml" | head -1 )" | grep -q 'next="--for=' \
+            && ok "(5) MCP thin answer: coverage= on the root, defined, and the r=1 next= names the page" \
+            || no "(5) MCP thin answer: coverage=/clause/page next= missing: $( printf '%s' "$mroot" | cut -c1-160 )"
+    else
+        { printf '%s' "$mroot" | grep -q ' coverage="'; } || printf '%s' "$mleg" | grep -q 'coverage=' \
+            && no "(5) MCP confident answer: coverage= or its clause present" \
+            || ok "(5) MCP confident answer: no coverage=, no clause (parity with the CLI)"
+    fi
+done
 ctop="$( grep -o '<d [^>]*r="1"[^>]*>' "$TMP/conf.xml" | head -1 )"
 printf '%s' "$ctop" | grep -q 'next="--expand=' && ok "(5) confident answer: the r=1 row keeps next=\"--expand=FILE:NAME\"" \
                                                  || no "(5) confident answer: the r=1 row's next= is '$( printf '%s' "$ctop" | grep -o 'next="[^"]*"' )'"

@@ -512,6 +512,8 @@ echo
 # --impact 777 → 770 B (the shorter <f lazy=> reading) and --safe-delete 712 → 708 B (t= reads a match, dead_code_candidate= says
 # outside); nothing else in the loop moved.
 # RE-ANCHORED 2026-09-12 (lane for-widen, L-W): 4,900 → 5,100 B, measured 5,011 (from 4,849 on the lane's base build, same
+# tree, same day; re-measured 5,033 on 2026-09-13 under the present-only rule, whose compact clause is 22 B longer — the
+# loop's --for probe is a thin answer, so the clause still rides it)
 # tree, same day), by the same rule (next multiple of 100 B above the measured total). Attributed: --for's native compact
 # legend +162 B — the coverage= reading and the thin rule (kForCompactCoverageClause, forpage.h) beside the confidence clause;
 # nothing else in the loop moved.

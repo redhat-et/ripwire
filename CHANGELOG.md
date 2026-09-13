@@ -30,12 +30,13 @@ verb spells it, ranked file-first by `score=` — the IDF-weighted share of the 
 top 8 symbols cover between them (a term counts once however often it recurs, so one huge file cannot
 monopolise; ties by the best symbol's lens score, then path). The root carries the house paging vocabulary
 (`shown= total= capped= has_more= next_offset= offset= limit=`) and a `next=` naming the next page.
-`--for`'s own root now carries `coverage=`, the IDF-weighted share (whole percent) of the query's subtokens
-found in the top-ranked symbol's name, doc or body, defined in both legends; an unmatched subtoken weighs
-as the rarest, so a `(#12147)` token lowers it honestly. When the answer is THIN — coverage under 50, or a
-ranked head spread over fewer than 3 files — the r=1 row's `next=` names `--for=TASK --limit=40` instead
-of the body. The MCP `for` twin takes the same `limit`/`offset` and serves the same page through the same
-renderer. Beside the page every bundle-shaping flag is refused, never ignored (`--limit=0` and non-numeric
+When the answer is THIN — the top-ranked symbol's name, doc or body carries under 50% of the query's
+IDF-weighted subtokens (an unmatched subtoken weighs as the rarest, so a `(#12147)` token lowers the share
+honestly), or the ranked head spreads over fewer than 3 files — `--for`'s root carries `coverage=` (that
+share, whole percent) with its legend clause, and the r=1 row's `next=` names `--for=TASK --limit=40`
+instead of the body. A confident answer carries none of the three and is byte-identical to before; the
+`--json` and MCP twins follow the same present-only rule. The MCP `for` twin takes the same
+`limit`/`offset` and serves the same page through the same renderer. Beside the page every bundle-shaping flag is refused, never ignored (`--limit=0` and non-numeric
 values were already refused). `--top-k` stays inert on `--for` and `--help` now says which flag widens.
 
 Measured, on the ladder re-registered with the page as step 2 on the `--for` shapes: ripwire's
@@ -43,13 +44,15 @@ complete@step row is unchanged at 14/14/14/14/17/17 — the page completed no qu
 misses it ran on hold 3–21 gold files each — while adding gold files on four of the seven (+2, +1, +3 and
 +6 files) at 5,539–6,212 B per page (mean 5,841 B), and the thin rule named the page on 4 of those 7
 misses. The frozen-30 single-call instrument is unchanged at 14/30 complete and 42/129 gold files named;
-its median bytes-to-answer moved 5,988 → 6,328 B, which is the coverage clause and attribute on every
-header. Gate: `test/forwidencheck.sh` — a generated 33-file fixture whose gold file sits at page rank 13
+its median bytes-to-answer is 6,348 B (5,988 B before: 10 of the 12 `--for` questions on that instrument
+are thin — commit subjects with a `(#NNNN)` token, "how does A reach B" questions — and carry the clause;
+the 2 confident ones read the base again, and the 18 non-`--for` questions moved by the 2–4 B the git
+stamp moved on every verb). Gate: `test/forwidencheck.sh` — a generated 33-file fixture whose gold file sits at page rank 13
 and is absent from the default head and tail; one row per file, determinism, paging with no overlap,
 `coverage=` defined in both dialects, thin versus confident `next=`, the refusals, MCP parity — red on the
-pre-change binary. `coverage=` moved the byte pins that ride every `--for` header
-(forrankordercheck, forrootlegendcheck, compactlegendcheck's loop, the two `--no-route` goldens), each
-re-anchored with the measured number.
+pre-change binary. The byte pins that ride a thin `--for` header
+(forrankordercheck's fixture rows, forrootlegendcheck, compactlegendcheck's loop, the two `--no-route`
+goldens) were re-anchored with the measured number; the confident ones read the base again.
 
 ### Added — Elixir module and arity resolution (parser version 95)
 
