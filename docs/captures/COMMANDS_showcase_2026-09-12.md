@@ -3375,6 +3375,44 @@ ripwire scan: 0 finding(s) total (26 skill file(s) scanned, 0 unscannable file(s
 </r>
 `````
 
+## `./build/ripwire . --rank-by=churn-decay --in=src --limit=5`
+
+*Scope the recent-changes answer to ONE directory: the global <recent> block stays byte-identical, a second <recent scope="src"> page follows it (--limit=5 sets the page; capped="1" + a pasteable next= when the directory has more), and the symbol map collapses to a counted <symbols total= shown="0" next=/> stub — the map was not asked for. Both blocks carry merge_bombs_skipped=.*
+
+`````
+<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=per-EDGE-confidence(orthogonal-to-k):scip(index-pinned;precise)|binding(cross-lang-FFI)|import(ES-named-import;module+export-named)|split(one-arm-of-a-k-way-pick;read-source;these-are-the-edges-amb=-counts)(absent=uniquely-resolved-name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree(builtin/stdlib-name-without-in-repo-evidence,external-import,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->
+<!-- extent_suspect=containment-checks-this-definition-FAILED(its-span,id=-scope-and-t=-kind-may-be-parse-recovery-artifacts;loc/cx/ccx/nest-summed-over-that-span-too;read-source;the-row-stays):name(its-own-name-lies-outside-its-own-signature)|head(a-definition-sits-in-another's-return-type-position,before-its-name;C-family;marks-the-whole-top-level-definition-tree)|scope(filed-under-C::-while-inside-a-different-class;C++)|error(the-parse-recovered-its-class-or-kind;and-every-definition-inside-that-class)(comma-joined-in-this-order;absent=every-check-held,not-a-proof-the-extent-is-right) -->
+<!-- hdr:extent_suspect_syms=definitions-carrying-extent_suspect-corpus-wide(not-only-the-shown-rows;absent-if-0) -->
+<!-- hdr:macro_blanked_files=files-whose-symbols-come-from-a-RE-PARSE(their-first-parse-held-error-bytes;semicolon-less-ALL-CAPS-member-macro-invocations-blanked-to-spaces,offsets-unchanged;adopted-only-with-strictly-fewer-error-bytes;the-skipped-verb-rows-each-with-macro_blanked=N;absent-if-0) -->
+<!-- r:root=crawl-root-every-p=-is-relative-to(single-root-only;absent=>p=is-the-raw-ingest-path) -->
+<!-- rank_by=churn-decay: k= is a TIME-DECAYED git change-frequency prior, not call-graph importance. Each commit is weighted 0.5^(age_days/half_life) with the half-life in window= (90d default, a conventional choice, not a measurement on this corpus); age is measured from HEAD commit timestamp, never the system clock, so the same tree at the same HEAD ranks identically on any day or machine. window= names the mined span (all-history by default: the decay is the window). k= is PageRank re-run with the teleport biased by this decayed prior instead of the uniform one rank_by=pagerank uses, or the undecayed one rank_by=churn uses; top ranks can coincide with either sibling when structure and recent churn agree, and diverge where a stale-but-central symbol meets a fresh, sparsely-called one. recent: the file-level answer to what changed recently, FIRST — the n= files the NEWEST commits touched, of the of= files any commit touched, as rc p= age_d= (days since the file's newest commit, at HEAD's clock) w= (its decayed weight), age_d asc then w desc then path; absent under multi-root. merge_bombs_skipped= counts the commits in the mined window that touched more than 100 files and were SKIPPED, uncounted (bulk sweeps, wide merges): a file only such a commit touched is absent from these rows and from the prior, so a 0 means no commit was skipped, never that none could be -->
+<!-- in=DIR: recent scope=DIR is a SECOND recent block, after the unchanged global one, with DIR's files only — p= root-relative exactly as the global block spells them, same order; n= rows on this page of of= files under DIR any counted commit touched; offset= the row this page starts at (absent at 0); capped=1 means DIR has more rows than this page and next= is the next page (offset=N continues, limit=N sets the page size). next= is ONE pasteable follow-up — this tool's flags, or a shell line copied from a run= row — the call that ends this search; paste it as-is. symbols total= shown=0 next=: the symbol map this run did NOT ask for — total= the rows the same run without in= carries, shown=0 because none is printed here, next= fetches them -->
+<!-- at= is the git commit these numbers were computed at; a trailing +shallow means the clone's history is truncated (a depth-limited clone: churn counts only the commits present), and a trailing +dirty means the working tree differed from that commit, so the numbers describe the tree, not the commit -->
+<!-- pr_iters=pagerank-power-iterations(stop:L1-residual-below-tol,else-ceiling) pr_converged=0-only-when-ceiling-hit-first(absent=converged;no-such-attr=not-pagerank-ordered) -->
+<!-- hdr:declined=calls-tier-3-declined(two-or-more-same-language-defs,none-in-the-callers-file-or-dir,none-pinned-by-a-qualifier/receiver/include;no-edge,no-guess;absent-if-0;callers/callees/impact-answers-carry-declined_calls=) -->
+<!-- files=2031 symbols=18410 edges=21635 shown=0 est_tokens=3048 ambiguous=7737 unresolved=4863 locality_pinned=10 external=2568 declined=6450 extent_suspect_syms=10 macro_blanked_files=7 skipped_oversize=15 unindexed="txt:72,tsv:49,jsonl:26,scm:21,expected:15,lock:7" unindexed_exts=20 order=important-first -->
+<r at="616605315+dirty" root="." rank_by="churn-decay" window="all-history half-life=90d" est_tokens="3048" pr_iters="28">
+<recent n="40" of="1599" merge_bombs_skipped="5">
+<rc p="docs/EVALS.md" age_d="0" w="596"/>
+<rc p="README.md" age_d="0" w="557"/>
+<rc p="test/regression.sh" age_d="0" w="412"/>
+<rc p="src/main.cpp" age_d="0" w="256"/>
+<rc p="docs/COMMANDS.md" age_d="0" w="252"/>
+<rc p="src/cli.h" age_d="0" w="248"/>
+<rc p="present/deck5_ripwire_build.js" age_d="0" w="182"/>
+<rc p="src/mcpverbs.h" age_d="0" w="158"/>
+<rc p="src/quality.h" age_d="0" w="154"/>
+<rc p="src/serialize.h" age_d="0" w="129"/>
+<rc p="src/graph.h" age_d="0" w="92.6"/>
+<rc p="CHANGELOG.md" age_d="0" w="80.6"/>
+<rc p="src/model.h" age_d="0" w="70.8"/>
+<rc p="src/verbs_navigate.h" age_d="0" w="60.2"/>
+<rc p="src/graphlegend.h" age_d="0" w="55.5"/>
+<rc p="src/ingest_cache.h" age_d="0" w="55.2"/>
+<rc p="test/fixedbufsweep.sh" age_d="0" w="51.7"/>
+… [33 more display lines; full output is 7733 bytes on 1 raw line(s)]
+`````
+
 ## `./build/ripwire . --rank-by=bogus --top-k=5`
 
 *An unknown value REFUSES (exit 1), NAMED, with the supported set listed.*

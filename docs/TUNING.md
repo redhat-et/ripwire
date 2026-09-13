@@ -14,18 +14,18 @@ to production at defaults; that control is what makes these numbers mean anythin
 
 | cap declarations | distinct names | tunable | must stay `constexpr` | move >= 1 invocation | move nothing measurable |
 | --- | --- | --- | --- | --- | --- |
-| 126 | 125 | 112 | 12 | **37** | 75 |
+| 127 | 126 | 112 | 12 | **37** | 75 |
 
 The first two columns are not the same number, and the gap is not a rounding: `src/` holds
-**126 cap declarations** under **125 distinct names** (`kRowCap` declared in more than one file). The
-sweep patches by NAME, so `112 + 12` accounts for the 125 NAMES — not the 126 declarations. Quoting
-"113 of 126" would be wrong in both halves at once, which is exactly the shape of error a
+**127 cap declarations** under **126 distinct names** (`kRowCap` declared in more than one file). The
+sweep patches by NAME, so `112 + 12` accounts for the 126 NAMES — not the 127 declarations. Quoting
+"113 of 127" would be wrong in both halves at once, which is exactly the shape of error a
 generated table exists to prevent.
 
 ## Read this ratio before the tables
 
 **37 of 112 tunable caps move any invocation at all. 75 move nothing measurable.** That is the
-finding, and it says what NOT to do: this is not a 126-cap audit. Most of these constants are
+finding, and it says what NOT to do: this is not a 127-cap audit. Most of these constants are
 inert on real invocations and should be left alone. The work worth doing is the small set below,
 plus the caps that fire SILENTLY — a cap that bites without disclosing is a defect independent of
 whether its value is right, and that fix is both cheaper and larger than any retuning.

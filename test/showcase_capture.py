@@ -448,6 +448,7 @@ add(S6, f"{BIN} --scan-skills=skills", "Scan a whole skills directory (exit 2 = 
 
 S7 = "knobs / modes"
 add(S7, f"{BIN} . --rank-by=churn --top-k=5", "Rank by git change-frequency prior instead of PageRank.")
+add(S7, f"{BIN} . --rank-by=churn-decay --in=src --limit=5", "Scope the recent-changes answer to ONE directory: the global <recent> block stays byte-identical, a second <recent scope=\"src\"> page follows it (--limit=5 sets the page; capped=\"1\" + a pasteable next= when the directory has more), and the symbol map collapses to a counted <symbols total= shown=\"0\" next=/> stub — the map was not asked for. Both blocks carry merge_bombs_skipped=.")
 add(S7, f"{BIN} . --rank-by=bogus --top-k=5", "An unknown value REFUSES (exit 1), NAMED, with the supported set listed.")
 add(S7, f"{BIN} . --callers=rankGraphTeleport --format=columnar", "Columnar output: paths table + parallel arrays, ~15-60% fewer tokens on MANY-row lists — small results can be LARGER (the columnar legend is a fixed cost).")
 add(S7, f'{BIN} . --for="cache invalidation" --format=candidates --top-k=5', "Flat top-K export for an external reranker.")

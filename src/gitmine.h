@@ -1923,7 +1923,18 @@ struct DecayedChurnMined
     std::vector<double>       weights;
     std::vector<std::int64_t> lastEpoch;
     bool                      anyHistory = false;
+    // merge_bombs_skipped= (2026-09-12): commits in the mined window the `maxFiles` rule SKIPPED — they touched more than
+    // kChurnMergeBombMaxFiles indexed files and contributed nothing to weights[] or lastEpoch[]. Counted so the <recent>
+    // block can say so: a held-out gold commit with 71 src files (>100 total) was invisible to it, and nothing in the
+    // output said a commit had been dropped. Always emitted, "0" included, so absence is never ambiguous.
+    std::uint32_t             mergeBombsSkipped = 0;
 };
+
+// The merge-bomb rule's threshold for the churn rankers: a commit touching more than this many INDEXED files is skipped
+// (bulk renames / reformats / license sweeps / wide merges destroy the signal). kChurnDecayRankLegend and the compact
+// `merge_bombs_skipped=` reading spell the number in prose, so a change here moves both (the static_assert beside
+// the legend pins that).
+inline constexpr std::size_t kChurnMergeBombMaxFiles = 100;   // the churn rankers' merge-bomb rule; skipped commits are disclosed as <recent merge_bombs_skipped=>
 
 inline DecayedChurnMined gitLogDecayedFileMining( const std::string& root, const IngestResult& ing, const std::string& windowArgs,
                                                   std::size_t maxFiles, std::uint32_t onlyRoot = UINT32_MAX )
@@ -1972,6 +1983,10 @@ inline DecayedChurnMined gitLogDecayedFileMining( const std::string& root, const
                 weights[f] += curWeight;
                 if( curEpoch > m.lastEpoch[f] ) { m.lastEpoch[f] = curEpoch; }
             }
+        }
+        else if( cur.size() > maxFiles )
+        {
+            ++m.mergeBombsSkipped;   // the rule fired: disclosed on <recent>, never silently absorbed
         }
         cur.clear();
     };
@@ -2059,7 +2074,7 @@ inline std::vector<float> churnDecayTeleport( const std::string& root, const Ing
     PROFILE_SCOPE_DESCRIBE( "gitmine: churnDecayTeleport (rank-by=churn-decay)" );
     const std::string windowArgs = ( scope && scope->active ) ? sinceLogArgs( *scope, "" ) : std::string{};
     bool              anyHistory = false;
-    const std::vector<double> weights = gitLogDecayedFileWeights( root, ing, windowArgs, 100, &anyHistory );   // same merge-bomb cap as churnTeleport
+    const std::vector<double> weights = gitLogDecayedFileWeights( root, ing, windowArgs, kChurnMergeBombMaxFiles, &anyHistory );   // same merge-bomb cap as churnTeleport
     if( outHasChurnEvidence )
     {
         *outHasChurnEvidence = anyHistory;
@@ -2083,14 +2098,20 @@ struct RecentFile
 // top 40 (its 40th row was 21 days old) and is named by the age-first one. Age is measured on HEAD's clock, the
 // anchor the decay itself uses. `outOf` receives the number of files any mined commit touched. Empty when the
 // walk found no history.
-inline std::vector<RecentFile> recentRowsFromDecayed( const std::string& root, const IngestResult& ing, const DecayedChurnMined& m,
-                                                      std::size_t keep, std::size_t* outOf )
+// C1-b (2026-09-12): the same rows over the files `keepFile( fileId )` admits, as ONE page — rows [skip, skip+keep) of the
+// sorted list, pageWindow's semantics (a skip past the end is an empty page, never out of range). `outOf` receives the
+// admitted-file count BEFORE the window, so a caller can say capped= and spell the next page. The global block is this
+// with an admit-all predicate and skip 0 (recentRowsFromDecayed below), byte-identical to its pre-C1 form; --in=DIR
+// passes the root-relative directory-prefix predicate (main.cpp churnRankedGraph).
+template <typename KeepFile>
+inline std::vector<RecentFile> recentRowsFromDecayedIf( const std::string& root, const IngestResult& ing, const DecayedChurnMined& m,
+                                                        KeepFile&& keepFile, std::size_t keep, std::size_t skip, std::size_t* outOf )
 {
     std::vector<RecentFile> rows;
     const std::int64_t      headEpoch = m.anyHistory ? gitHeadCommitEpoch( root ) : 0;
     for( std::uint32_t f = 0; f < std::uint32_t( m.weights.size() ); ++f )
     {
-        if( m.weights[f] > 0.0 )
+        if( m.weights[f] > 0.0 && keepFile( f ) )
         {
             const std::int64_t age = ( headEpoch > m.lastEpoch[f] ) ? ( headEpoch - m.lastEpoch[f] ) : 0;
             rows.push_back( RecentFile{ f, std::uint32_t( age / 86400 ), m.weights[f] } );
@@ -2106,11 +2127,20 @@ inline std::vector<RecentFile> recentRowsFromDecayed( const std::string& root, c
                    if( a.weight != b.weight )   { return a.weight > b.weight; }
                    return ing.files[a.fileId] < ing.files[b.fileId];
                } );
-    if( rows.size() > keep )
+    const std::size_t pageBegin = std::min( skip, rows.size() );
+    const std::size_t pageEnd   = std::min( pageBegin + keep, rows.size() );
+    if( pageBegin > 0 )
     {
-        rows.resize( keep );
+        rows.erase( rows.begin(), rows.begin() + std::ptrdiff_t( pageBegin ) );
     }
+    rows.resize( pageEnd - pageBegin );
     return rows;
+}
+
+inline std::vector<RecentFile> recentRowsFromDecayed( const std::string& root, const IngestResult& ing, const DecayedChurnMined& m,
+                                                      std::size_t keep, std::size_t* outOf )
+{
+    return recentRowsFromDecayedIf( root, ing, m, []( std::uint32_t ) { return true; }, keep, 0, outOf );
 }
 
 // Multi-root --rank-by=churn-decay: mine each root's history AGAINST ITS OWN files, accumulate ONE weight
@@ -2125,7 +2155,7 @@ inline std::vector<float> churnDecayTeleportWorkspace( const std::vector<std::st
     for( std::uint32_t r = 0; r < rootDirs.size(); ++r )
     {
         bool                      rootHistory = false;
-        const std::vector<double> w           = gitLogDecayedFileWeights( rootDirs[r], ing, std::string{}, 100, &rootHistory, r );
+        const std::vector<double> w           = gitLogDecayedFileWeights( rootDirs[r], ing, std::string{}, kChurnMergeBombMaxFiles, &rootHistory, r );
         if( rootHistory )
         {
             anyHistory = true;

@@ -25,6 +25,10 @@
 #      commit spacing but absolute dates five years apart must produce the IDENTICAL symbol ORDER. Under
 #      a wall-clock anchor the 5-years-ago repo's commits all decay to ~0 and the order collapses to the
 #      Laplace-smoothed tie; under the HEAD anchor the two are indistinguishable, which is the contract.
+#   6  the file-level <recent> block comes FIRST (H2H-Graft F3).
+#   7  merge_bombs_skipped= on <recent>: a commit touching more than 100 files is skipped by the miner, and
+#      the block SAYS how many it skipped (always, "0" included) — a >100-file fixture commit reads "1"; a window
+#      whose ONLY commit was skipped still prints the block, with zero rows and the count (7h).
 #
 # Determinism note: symbol ORDER is compared, never k= floats (CONTRIBUTING §3 — a sort has no tolerance
 # band, a float does; this gate uses the sort).
@@ -169,8 +173,10 @@ fi
 # — new.py (2 commits at HEAD's day, weight ≈ 2.0) before old.py (6 commits 400 days back, ≈ 0.28) — with
 # age_d= on HEAD's clock and the weight the ranker used, and it precedes every <f> group.
 R6="$( perl -e 'alarm 20; exec @ARGV' "$BIN" "$WORK/recent" --rank-by=churn-decay --no-cache 2>/dev/null )"
-printf '%s' "$R6" | grep -q '<recent n="2" of="2">' \
-    && ok "arm 6a: <recent n=\"2\" of=\"2\"> is emitted" || no "arm 6a: no <recent n=\"2\" of=\"2\"> element"
+printf '%s' "$R6" | grep -q '<recent n="2" of="2" ' \
+ \
+        && ok "arm 6a: <recent n=\"2\" of=\"2\" …> is emitted" \
+        || no "arm 6a: no <recent n=\"2\" of=\"2\" …> element"
 r6_first="$( printf '%s' "$R6" | grep -oE '<rc p="[^"]*"' | head -1 )"
 [ "$r6_first" = '<rc p="new.py"' ] && ok "arm 6b: the file with the newest decayed weight leads (new.py)" \
                                     || no "arm 6b: first <rc> is '$r6_first', expected new.py"
@@ -188,6 +194,87 @@ printf '%s' "$R6" | grep -q 'recent: the file-level answer' && ok "arm 6e: the l
 R6p="$( perl -e 'alarm 20; exec @ARGV' "$BIN" "$WORK/recent" --rank-by=churn --no-cache 2>/dev/null )"
 printf '%s' "$R6p" | grep -q '<recent ' && no "arm 6f: --rank-by=churn must not emit <recent> (churn-decay only)" \
                                         || ok "arm 6f: plain churn carries no <recent>"
+
+# ── arm 7: merge_bombs_skipped= — the cut the miner makes is DISCLOSED on the block it shapes ────────────
+# The decayed walk skips any commit touching more than 100 files (the merge-bomb rule) and, until this arm,
+# counted NOTHING about it: a <recent> block could omit the very commit a question was about (a held-out gold
+# commit with 71 src files was invisible) and nothing in the output said a commit had been dropped. The
+# fixture: three ordinary commits on small.py, then ONE commit adding 101 files under bulk/. The block must
+# say merge_bombs_skipped="1", the bulk-only files must be ABSENT from its rows (that is what "skipped" means),
+# the plain fixture must say "0" (absence is never ambiguous), and both legends must define the attribute.
+# RED against the pre-change binary: no merge_bombs_skipped= anywhere.
+BOMB="$WORK/bomb"; mkdir -p "$BOMB/bulk"
+git -C "$BOMB" init -q 2>/dev/null
+git -C "$BOMB" config user.email rw@example.invalid
+git -C "$BOMB" config user.name  ripwire-gate
+for i in 1 2 3; do
+    stamp="$(( RECENT_BASE + i * 86400 ))"
+    printf 'def small_one():\n    return %d\n' "$i" > "$BOMB/small.py"
+    GIT_AUTHOR_DATE="$stamp +0000" GIT_COMMITTER_DATE="$stamp +0000" git -C "$BOMB" add -A >/dev/null 2>&1
+    GIT_AUTHOR_DATE="$stamp +0000" GIT_COMMITTER_DATE="$stamp +0000" git -C "$BOMB" commit -q -m "small $i" >/dev/null 2>&1
+done
+i=0
+while [ "$i" -le 100 ]; do
+    printf 'def bulk_%03d():\n    return %d\n' "$i" "$i" > "$BOMB/bulk/b$( printf '%03d' "$i" ).py"
+    i=$(( i + 1 ))
+done
+stamp="$(( RECENT_BASE + 4 * 86400 ))"
+GIT_AUTHOR_DATE="$stamp +0000" GIT_COMMITTER_DATE="$stamp +0000" git -C "$BOMB" add -A >/dev/null 2>&1
+GIT_AUTHOR_DATE="$stamp +0000" GIT_COMMITTER_DATE="$stamp +0000" git -C "$BOMB" commit -q -m "bulk sweep: 101 files" >/dev/null 2>&1
+# presence guards: the bomb commit really touches 101 files, and it is HEAD
+bombfiles="$( git -C "$BOMB" show --name-only --format= HEAD 2>/dev/null | grep -c . )"
+[ "$bombfiles" = 101 ] && ok "arm 7 guard: the bomb commit touches 101 files (> the 100-file rule)" \
+                       || no "arm 7 guard: the bomb commit touches $bombfiles files, not 101 — the arm below would be vacuous"
+R7="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$BOMB" --rank-by=churn-decay --no-cache 2>/dev/null )"
+r7_recent="$( printf '%s' "$R7" | grep -oE '<recent [^>]*>' | head -1 )"
+[ -n "$r7_recent" ] && ok "arm 7 guard: the bomb fixture emits a <recent> block ($r7_recent)" \
+                    || no "arm 7 guard: no <recent> block on the bomb fixture — nothing below can be asserted"
+printf '%s' "$r7_recent" | grep -q 'merge_bombs_skipped="1"' \
+    && ok "arm 7a: <recent> discloses merge_bombs_skipped=\"1\" — the 101-file commit was skipped and SAYS so" \
+    || no "arm 7a: <recent> does not carry merge_bombs_skipped=\"1\" (got: $r7_recent)"
+printf '%s' "$R7" | grep -q '<rc p="bulk/b000.py"' \
+    && no "arm 7b: bulk/b000.py is a <rc> row — the merge-bomb rule did not skip the commit, so the counter measures nothing" \
+    || ok "arm 7b: the bulk-only files are absent from the rows (the skipped commit contributed nothing)"
+printf '%s' "$r7_recent" | grep -q 'of="1"' \
+    && ok "arm 7c: of=\"1\" — only small.py was touched by a COUNTED commit" \
+    || no "arm 7c: of= is not 1 (got: $r7_recent)"
+printf '%s' "$R6" | grep -oE '<recent [^>]*>' | head -1 | grep -q 'merge_bombs_skipped="0"' \
+    && ok "arm 7d: a window with no merge bomb says merge_bombs_skipped=\"0\" (always emitted; absence is never ambiguous)" \
+    || no "arm 7d: the plain fixture's <recent> lacks merge_bombs_skipped=\"0\" (got: $( printf '%s' "$R6" | grep -oE '<recent [^>]*>' | head -1 ))"
+printf '%s' "$R7" | grep -q 'merge_bombs_skipped= ' && printf '%s' "$R7" | grep -q '100 files' \
+    && ok "arm 7e: the full legend defines merge_bombs_skipped= and states the 100-file threshold" \
+    || no "arm 7e: the full legend does not define merge_bombs_skipped= with its threshold"
+R7c="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$BOMB" --rank-by=churn-decay --no-cache --legend=compact 2>/dev/null )"
+printf '%s' "$R7c" | grep -q 'merge_bombs_skipped=N' && printf '%s' "$R7c" | grep -q '100 files' \
+    && ok "arm 7f: the compact legend defines merge_bombs_skipped=N with the 100-file threshold" \
+    || no "arm 7f: the compact legend does not define merge_bombs_skipped= (legend: $( printf '%s' "$R7c" | grep -oE '<!-- ripwire map[^>]*-->' | head -c 300 ))"
+if command -v xmllint >/dev/null 2>&1; then
+    printf '%s' "$R7" | xmllint --noout - 2>/dev/null \
+        && ok "arm 7g: the bomb fixture's output is well-formed XML" \
+        || no "arm 7g: xmllint rejected the bomb fixture's output"
+fi
+# 7h: a window whose EVERY commit is a merge bomb (a shallow clone of a large tree is exactly this shape — llvm-project at
+# depth 1 is one 183,835-file commit) must still print the block, with zero rows and the count: an ABSENT block reads as
+# "no history mined", which is a different fact, and the disclosure arm 7a exists for would vanish on the one run that
+# needs it most. Byte-free elsewhere is kept: a corpus with no git at all still prints no block (the goldens).
+ONLYBOMB="$WORK/onlybomb"; mkdir -p "$ONLYBOMB/bulk"
+git -C "$ONLYBOMB" init -q 2>/dev/null
+git -C "$ONLYBOMB" config user.email rw@example.invalid
+git -C "$ONLYBOMB" config user.name  ripwire-gate
+i=0
+while [ "$i" -le 100 ]; do
+    printf 'def bulk_%03d():\n    return %d\n' "$i" "$i" > "$ONLYBOMB/bulk/b$( printf '%03d' "$i" ).py"
+    i=$(( i + 1 ))
+done
+stamp="$(( RECENT_BASE + 5 * 86400 ))"
+GIT_AUTHOR_DATE="$stamp +0000" GIT_COMMITTER_DATE="$stamp +0000" git -C "$ONLYBOMB" add -A >/dev/null 2>&1
+GIT_AUTHOR_DATE="$stamp +0000" GIT_COMMITTER_DATE="$stamp +0000" git -C "$ONLYBOMB" commit -q -m "one bulk commit" >/dev/null 2>&1
+[ "$( git -C "$ONLYBOMB" rev-list --count HEAD 2>/dev/null )" = 1 ] && ok "arm 7h guard: the only-bomb fixture has exactly one commit" \
+                                                                    || no "arm 7h guard: the only-bomb fixture does not have exactly one commit"
+R7h="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$ONLYBOMB" --rank-by=churn-decay --no-cache 2>/dev/null )"
+printf '%s' "$R7h" | grep -q '<recent n="0" of="0" merge_bombs_skipped="1"></recent>' \
+    && ok "arm 7h: a window whose only commit was skipped still prints <recent n=\"0\" of=\"0\" merge_bombs_skipped=\"1\"> — zero rows, and the reason" \
+    || no "arm 7h: the only-bomb window prints no <recent> block (got: '$( printf '%s' "$R7h" | grep -oE '<recent [^>]*>' | head -1 )') — the disclosure vanished with the rows"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

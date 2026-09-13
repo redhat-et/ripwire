@@ -1012,6 +1012,13 @@ struct ChurnRanking
     rw::RankDisclosure          pr;
     std::vector<rw::RecentFile> recent;       // F3: churn-decay, single-root only — the map's <recent> rows
     std::size_t                 recentOf = 0; // files any mined commit touched (the of= the rows were cut from)
+    std::uint32_t               mergeBombsSkipped = 0;   // commits the >kChurnMergeBombMaxFiles rule skipped in the window (<recent merge_bombs_skipped=>)
+    // C1-b (2026-09-12): --in=DIR — ONE page of DIR's rows from the SAME mining pass (hasScoped ⇒ the block is emitted, even
+    // empty); scopedOf = DIR's files any counted commit touched (its of=); scopedOffset = the row the page started at.
+    std::vector<rw::RecentFile> scoped;
+    std::size_t                 scopedOf     = 0;
+    std::size_t                 scopedOffset = 0;
+    bool                        hasScoped    = false;
 };
 inline constexpr std::size_t kRecentRows = 40;   // F3: ~45 B a row; the file-level answer, not the file list
 
@@ -1026,6 +1033,23 @@ inline std::string churnDecayWindowLabel( std::string_view minedSpan )
     label += std::to_string( int( rw::kChurnDecayHalfLifeDays ) );
     label += "d";
     return label;
+}
+
+// C1-b (2026-09-12): --in=DIR's page of <recent scope=> rows, from the SAME mining pass as the global block. The prefix is
+// matched on the ROOT-RELATIVE spelling the map prints (serialize.h pathRel: rootRelativeUri against the crawl root as
+// typed), so a scoped row is byte-identical to its global twin — a sub-root-relative spelling missed every held-out gold
+// (0/30 raw vs 19/30 prefixed). DIR's trailing slash is stripped the way the crawl root's is (sarif::rootPrefixOf), so
+// `db/` and `db` are one answer and one next=. The page is [--offset, --offset + max(--limit, kRecentRows)).
+inline void scopedRecentPage( const MainDispatch& d, const rw::DecayedChurnMined& mined, ChurnRanking& cr )
+{
+    using namespace rw;
+    const std::string rootPrefix = sarif::rootPrefixOf( d.cfg.roots[0] );
+    const std::string dirPrefix  = sarif::rootPrefixOf( d.cfg.inDir ) + "/";
+    const auto        underDir   = [ & ]( std::uint32_t f ) { return sarif::rootRelativeUri( d.ing.files[f], rootPrefix ).starts_with( dirPrefix ); };
+    const std::size_t pageRows   = std::size_t( effectiveRowCap( d.cfg.pageLimit, int( kRecentRows ) ) );
+    cr.scopedOffset              = d.cfg.pageOffset > 0 ? std::size_t( d.cfg.pageOffset ) : 0;
+    cr.scoped                    = recentRowsFromDecayedIf( d.root, d.ing, mined, underDir, pageRows, cr.scopedOffset, &cr.scopedOf );
+    cr.hasScoped                 = true;
 }
 
 inline ChurnRanking churnRankedGraph( const MainDispatch& d )
@@ -1066,14 +1090,19 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
         // F3: ONE mining pass feeds both the teleport prior (churnPriorFromDecayed, exactly what churnDecayTeleport
         // builds) and the map's file-level <recent> rows — so the file-level answer costs no second git walk.
         const std::string       windowArgs = isScoped ? sinceLogArgs( sinceScope, "" ) : std::string{};
-        const DecayedChurnMined mined      = gitLogDecayedFileMining( d.root, d.ing, windowArgs, 100 );   // same merge-bomb cap as churnTeleport
+        const DecayedChurnMined mined      = gitLogDecayedFileMining( d.root, d.ing, windowArgs, kChurnMergeBombMaxFiles );   // same merge-bomb cap as churnTeleport
         hasChurnEvidence                   = mined.anyHistory;
         rw::RankedGraph    ranked = rankGraphTeleport( d.g, churnPriorFromDecayed( d.ing, mined.weights, mined.anyHistory ) );
         std::string        window = churnWindowStamp( churnDecayWindowLabel( isScoped ? std::string_view( d.cfg.since ) : std::string_view( "all-history" ) ),
                                                       hasChurnEvidence );
         discloseEmptyChurn( window );
         ChurnRanking cr{ std::move( ranked.rank ), std::move( window ), { ranked.iterationCount, ranked.hasConverged, true } };
-        cr.recent = recentRowsFromDecayed( d.root, d.ing, mined, kRecentRows, &cr.recentOf );
+        cr.recent            = recentRowsFromDecayed( d.root, d.ing, mined, kRecentRows, &cr.recentOf );
+        cr.mergeBombsSkipped = mined.mergeBombsSkipped;
+        if( !d.cfg.inDir.empty() )
+        {
+            scopedRecentPage( d, mined, cr );   // C1-b: --in=DIR's page, from the same pass (no second git walk)
+        }
         return cr;
     }
     rw::RankedGraph    ranked = rankGraphTeleport( d.g, churnTeleport( d.root, d.ing, "18 months ago", d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
@@ -1186,6 +1215,11 @@ int runDefaultMap( const MainDispatch& d )
     bool               mapDiffActive  = false;  // true only under --map-diff — gates the header's changed= attribute
     std::vector<rw::RecentFile> recentFiles;   // F3: rank-by=churn-decay's file-level <recent> rows (empty = absent, byte-free)
     std::size_t                 recentOf = 0;
+    std::uint32_t               recentMergeBombsSkipped = 0;   // <recent merge_bombs_skipped=>: the window's skipped >100-file commits
+    std::vector<rw::RecentFile> scopedRecent;                  // C1-b: --in=DIR's page of rows (hasScopedRecent ⇒ the block is emitted)
+    std::size_t                 scopedRecentOf = 0;
+    std::size_t                 scopedOffset   = 0;
+    bool                        hasScopedRecent = false;
     std::string        churnWindowLabel = rw::defaultWindowLabel( root, "18mo" );   // §A9.6: churn's window label (F1: "@HEAD" when anchored); an ACTIVE --since overrides it below
     if( !cfg.query.empty() )
     {
@@ -1268,6 +1302,11 @@ int runDefaultMap( const MainDispatch& d )
         churnWindowLabel = std::move( cr.window );   // §B2.2: already carries "(no churn evidence)" when the window mined nothing
         recentFiles      = std::move( cr.recent );   // F3: the <recent> rows (churn-decay, single-root; empty otherwise)
         recentOf         = cr.recentOf;
+        recentMergeBombsSkipped = cr.mergeBombsSkipped;
+        scopedRecent     = std::move( cr.scoped );
+        scopedRecentOf   = cr.scopedOf;
+        scopedOffset     = cr.scopedOffset;
+        hasScopedRecent  = cr.hasScoped;
     }
     else
     {
@@ -1351,14 +1390,41 @@ int runDefaultMap( const MainDispatch& d )
                                   : ( cfg.rankBy == RankBy::Hub )       ? "hub"
                                   : ( cfg.rankBy == RankBy::Rrf )       ? "rrf"
                                                                        : nullptr;
-    const rw::MapAnnotations mapAnn{ mapDiffActive ? &mapDiffChanged : nullptr, &mapDiffAt,
-                                      isChurnRanked ? &churnWindowLabel : nullptr,
-                                      cfg.rankBy == RankBy::ChurnDecay ? "churn-decay" : "churn",   // P0-4
-                                      cfg.maxTokens > 0 ? &maxTokensFit : nullptr,   // §B13.4
-                                      rankByLabel,                                   // §B2.1
-                                      rankDisclosure,                                // W2-F: pr_iters= / pr_converged=
-                                      recentFiles.empty() ? nullptr : &recentFiles,  // F3: <recent> rows, churn-decay single-root only
-                                      recentOf };
+    rw::MapAnnotations mapAnn{ mapDiffActive ? &mapDiffChanged : nullptr, &mapDiffAt,
+                                isChurnRanked ? &churnWindowLabel : nullptr,
+                                cfg.rankBy == RankBy::ChurnDecay ? "churn-decay" : "churn",   // P0-4
+                                cfg.maxTokens > 0 ? &maxTokensFit : nullptr,   // §B13.4
+                                rankByLabel,                                   // §B2.1
+                                rankDisclosure,                                // W2-F: pr_iters= / pr_converged=
+                                // F3: <recent> rows, churn-decay single-root only. An all-bomb window (a shallow clone of a large
+                                // tree: one 183,835-file commit) has zero rows AND a count to disclose, so the block rides then too.
+                                recentFiles.empty() && recentMergeBombsSkipped == 0 ? nullptr : &recentFiles,
+                                recentOf };
+    mapAnn.recentMergeBombsSkipped = recentMergeBombsSkipped;   // rides <recent> (the rows' own window), filled by assignment like seed
+    // C1-b (2026-09-12): --in=DIR — the scoped block and the map stub, filled by assignment like seed. The two next= strings
+    // outlive every serialize() call below (mapAnn holds views into them). The scoped next= is the SAME run at the next
+    // offset, page size carried when the caller set one; the stub's next= is the same run without in= (the map it stubbed).
+    std::string scopedNext;
+    std::string stubNext;
+    const std::string scopeDirStr = hasScopedRecent ? rw::sarif::rootPrefixOf( cfg.inDir ) : std::string();
+    if( hasScopedRecent )
+    {
+        mapAnn.scopedRecent   = &scopedRecent;
+        mapAnn.scopeDir       = scopeDirStr;
+        mapAnn.scopedRecentOf = scopedRecentOf;
+        mapAnn.scopedOffset   = scopedOffset;
+        const std::string sinceArg   = cfg.since.empty() ? std::string() : " " + rw::nextFlag( "--since=", cfg.since );
+        const std::size_t nextOffset = scopedOffset + scopedRecent.size();
+        if( nextOffset < scopedRecentOf )
+        {
+            scopedNext = "--rank-by=churn-decay" + sinceArg + " " + rw::nextFlag( "--in=", mapAnn.scopeDir ) + " --offset=" + std::to_string( nextOffset )
+                       + ( cfg.pageLimit > 0 ? " --limit=" + std::to_string( cfg.pageLimit ) : std::string() );
+            mapAnn.scopedNext = scopedNext;
+        }
+        stubNext           = "--rank-by=churn-decay" + sinceArg;
+        mapAnn.stubSymbols = true;
+        mapAnn.stubNext    = stubNext;
+    }
     // T3's auto-flip changes the order= spelling ("important-last(auto:fill)" is 11 bytes longer than
     // "important-first"), so it is a BYTE fact, not only an ordering one — the comment that used to sit here
     // claimed the search was "unaffected by emit order", and at N=20000 on src/ the flip fires. One value,
@@ -2713,6 +2779,43 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
 // 2026-09-06 stranger audit: a root that exists but cannot be opened (chmod 000, another user's checkout) came
 // back as an EMPTY map at exit 0 — indistinguishable from "no source here". Probe the directory the way the
 // crawl will; refuse with the reason instead of serving nothing. A non-directory root is left to the crawl.
+// C1-b (2026-09-12): --in=DIR names a directory UNDER the root, root-relative — not absolute, no '.' / '..' segment — and it
+// must exist as a directory. Checked here, before any crawl, because the alternative is a block scoped to nothing that says
+// so only by being empty: a typo would read as "nothing changed there". Trailing slashes are stripped (sarif::rootPrefixOf, the crawl root's own rule) so
+// `db/` and `db` are one answer; the syntactic refusal and the existence refusal are two messages because they have two
+// remedies.
+static bool inDirIsUnderRoot( std::string_view inDirArg, const std::string& resolvedRoot )
+{
+    namespace fs = std::filesystem;
+    const std::string dir = rw::sarif::rootPrefixOf( inDirArg );
+    bool isRelative = !dir.empty() && dir.front() != '/';
+    for( std::size_t at = 0; isRelative && at <= dir.size(); )
+    {
+        const std::size_t      slash = dir.find( '/', at );
+        const std::string_view seg   = std::string_view( dir ).substr( at, slash == std::string::npos ? std::string::npos : slash - at );
+        if( seg.empty() || seg == "." || seg == ".." )
+        {
+            isRelative = false;
+        }
+        at = slash == std::string::npos ? dir.size() + 1 : slash + 1;
+    }
+    if( !isRelative )
+    {
+        rw::emitTo( stderr, "ripwire: --in={} must be a root-relative directory (no leading '/', no '.' or '..' segment) — e.g. ripwire <dir> --rank-by=churn-decay --in=src\n",
+                    std::string_view( inDirArg.data(), inDirArg.size() ) );
+        return false;
+    }
+    std::error_code ec;
+    const fs::path  scoped = fs::path( resolvedRoot ) / fs::path( dir );
+    if( !fs::is_directory( scoped, ec ) || ec )
+    {
+        rw::emitTo( stderr, "ripwire: --in={}: {} is not a directory under the root {} — name an existing directory (e.g. ripwire <dir> --rank-by=churn-decay --in=src)\n",
+                    std::string_view( inDirArg.data(), inDirArg.size() ), std::string_view( dir ), resolvedRoot.c_str() );
+        return false;
+    }
+    return true;
+}
+
 static bool rootIsReadable( const std::string& resolvedRoot )
 {
     namespace fs = std::filesystem;
@@ -3584,6 +3687,10 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             if( !rootIsReadable( resolvedRoot ) )
             {
                 return 1;   // the refusal is on stderr (rootIsReadable)
+            }
+            if( !cfg.inDir.empty() && !inDirIsUnderRoot( cfg.inDir, resolvedRoot ) )
+            {
+                return 1;   // the refusal is on stderr (inDirIsUnderRoot)
             }
         }
         resolvedRoots.push_back( resolvedRoot );

@@ -515,6 +515,9 @@ struct Config
                                                              // per drop (oversize/excluded/unsupported-ext) plus <h p= why=/> rows for
                                                              // indexed-but-suspect files (degraded-parse/minified-suspect) and <e x=/>
                                                              // per unindexed extension. Read-only; exit 0 always.
+    std::string_view inDir;                                 // --in=DIR (C1-b, 2026-09-12): with --rank-by=churn-decay, a root-relative directory —
+                                                              // a second <recent scope=DIR> block follows the unchanged global one and the symbol
+                                                              // map collapses to a counted stub; refused with any other verb (validateModifierGuards)
     std::string_view since;                                 // --since=REV|DATE: scope churn/co-change mining to commits after this point
                                                               // (--hotspots/--cochange/--rank-by=churn). REV (e.g. HEAD~20, a tag) is
                                                               // deterministic; a git approxidate ("2 weeks ago") is wall-clock-relative
@@ -2325,6 +2328,18 @@ inline constexpr char kHelpTail[] =
         "                               counted equally, so recent edits outweigh old ones. Its age clock is HEAD's OWN commit\n"
         "                               timestamp, never the wall clock, so the default (whole-history) run is byte-stable for a\n"
         "                               fixed tree; the half-life is disclosed in window=. default pagerank)\n"
+        "    --in=DIR                   (with --rank-by=churn-decay) scope the recent-changes block to one directory\n"
+        "                               DIR is root-relative and must be an existing directory under the root (db, src/util;\n"
+        "                               a trailing slash is ignored; absolute paths and '..' are refused). The global <recent>\n"
+        "                               block stays exactly as without the flag — a change outside DIR is still answered — and a\n"
+        "                               SECOND block <recent scope=\"DIR\" n= of=> follows it with DIR's files only, p= spelled\n"
+        "                               root-relative exactly as the global block spells them, same order (newest commit first).\n"
+        "                               It pages: 40 rows by default, capped=\"1\" plus a pasteable next= when DIR has more\n"
+        "                               (--offset=N continues, --limit=N sets the page size, offset= on the block says where a\n"
+        "                               page started). The symbol map collapses to a counted stub <symbols total=N shown=\"0\"\n"
+        "                               next=/> — the map was not asked for; total= is the row count the same run without --in=\n"
+        "                               carries and next= fetches it. Both blocks carry merge_bombs_skipped=. Refused with any\n"
+        "                               other verb, under multi-root, with --top-k=0 and with --json.\n"
         "    --format=xml|columnar|rows   choose the output shape for the flat list verbs\n"
         "                               output shape for the FLAT list verbs (--callers/--callees/--uses/--impact):\n"
         "                               xml (default, byte-identical) or columnar (a <paths> table + parallel arrays: fields=\n"
@@ -2378,7 +2393,7 @@ inline constexpr char kHelpTail[] =
         "                               --zoom --external-surface --dead-code --mentions --graph-query --stray-content\n"
         "                               --test-gate --readability --ensemble --quality-panel --context-ratio\n"
         "                               --nonlocal-state --comment-coherence --naming-consistency --safe-delete --pr-context\n"
-        "                               --edit-check --flags --situ.\n"
+        "                               --edit-check --flags --situ --in.\n"
         "                               Emit at most N rows, skipping the first M; N overrides the verb's own display cap\n"
         "                               (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40\n"
         "                               impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio\n"
@@ -2940,6 +2955,7 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--cache=",       &Config::cacheFile       , EmptyValue::Refuse, "a cache file path",                      "--cache=.ripwirecache" },
     { "--index-out=",   &Config::indexOut        , EmptyValue::Refuse, "a base path for the index artifacts",    "--index-out=.ripwire/index" },
     { "--since=",       &Config::since           , EmptyValue::Refuse, "a git revision or date",                 "--since=HEAD~20" },
+    { "--in=",          &Config::inDir           , EmptyValue::Refuse, "a root-relative directory under the root", "--in=src" },
     { "--scip=",        &Config::scipIndex       , EmptyValue::Refuse, "a SCIP index file path",                 "--scip=index.scip" },
     { "--pin-census=",  &Config::pinCensus       , EmptyValue::Refuse, "a census output file path",              "--pin-census=census.tsv" },
 
@@ -3211,7 +3227,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 209;  // +2 P4 (capture-audit 2026-09-04, lane L7): --zoom-levels= (kIntFlags row, the printed-levels ceiling) and --include-builtins (kBoolFlags row, the external-surface builtin opt-in); +1 P9 (capture-audit 2026-09-04, lane L8): --no-post-check (kBoolFlags row, the edit receipt's folded verification opt-out); +1 lane/ca-L2 (2026-09-04, H11): --allow-dirty (kBoolFlags row) — the explicit consent --quality-baseline needs before it pins a floor on a tree that differs from HEAD; +1 lane/n6-c (2026-09-03): --no-ignore (kBoolFlags row, the .gitignore-by-default escape hatch); +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2); +2 lane/or-arise (2026-08-30): --slice-flow= (kViewFlags row) and --slice-depth= (kIntFlags row) — the ARISE rung-2 cross-statement data-flow slice; +1 lane/at-seed (2026-08-30): --at= (kViewFlags row) — the FILE:LINE enclosing-chain report, with the @FILE:LINE selector spelling resolved in graph.h (no flag arm of its own); +1 CARD-1 phase 2 (2026-08-31): --pin-census= (kViewFlags row) — the eval-only S6-C silent-pin census, written beside the map and never into it
+inline constexpr std::size_t kTotalFlagArms = 210;  // +1 lane/recent-scope (2026-09-12, C1-b): --in= (kViewFlags row) — the directory-scoped <recent scope=> block of --rank-by=churn-decay; +2 P4 (capture-audit 2026-09-04, lane L7): --zoom-levels= (kIntFlags row, the printed-levels ceiling) and --include-builtins (kBoolFlags row, the external-surface builtin opt-in); +1 P9 (capture-audit 2026-09-04, lane L8): --no-post-check (kBoolFlags row, the edit receipt's folded verification opt-out); +1 lane/ca-L2 (2026-09-04, H11): --allow-dirty (kBoolFlags row) — the explicit consent --quality-baseline needs before it pins a floor on a tree that differs from HEAD; +1 lane/n6-c (2026-09-03): --no-ignore (kBoolFlags row, the .gitignore-by-default escape hatch); +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2); +2 lane/or-arise (2026-08-30): --slice-flow= (kViewFlags row) and --slice-depth= (kIntFlags row) — the ARISE rung-2 cross-statement data-flow slice; +1 lane/at-seed (2026-08-30): --at= (kViewFlags row) — the FILE:LINE enclosing-chain report, with the @FILE:LINE selector spelling resolved in graph.h (no flag arm of its own); +1 CARD-1 phase 2 (2026-08-31): --pin-census= (kViewFlags row) — the eval-only S6-C silent-pin census, written beside the map and never into it
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -3415,7 +3431,7 @@ constexpr const char* kPagingHonoringVerbs =
     "--communities --community --whereis --grep/--regex --match --pattern --impact --uses --exercises "
     "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate "
     "--readability --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence "
-    "--naming-consistency --safe-delete --pr-context --edit-check --flags --situ";
+    "--naming-consistency --safe-delete --pr-context --edit-check --flags --situ --in";
 
 inline bool honorsPaging( const Config& c ) noexcept
 {
@@ -3429,7 +3445,8 @@ inline bool honorsPaging( const Config& c ) noexcept
         || c.namingConsistency || !c.safeDeleteSym.empty() || c.prContext   // P4 (L7): the changed-file window
         || !c.editCheckSym.empty()    // 2026-09-10: --edit-check windows its UNFLAGGED caller rows (editcheck.h)
         || c.darkFlags                // 2026-09-10 (C1 F-07): --flags' per-gate <read> sites, and --flip's six listings
-        || c.situ || !c.situFiles.empty();   // 2026-09-10 (C1 F-10): --situ sections [1] and [3] (section [2] is the answer)
+        || c.situ || !c.situFiles.empty()    // 2026-09-10 (C1 F-10): --situ sections [1] and [3] (section [2] is the answer)
+        || !c.inDir.empty();                 // 2026-09-12 (C1-b): the <recent scope=DIR> block pages by --offset/--limit (the global block does not)
 }
 
 // --limit/--offset on a verb that windows NOTHING. Same accept-then-silently-ignore class as every guard in
@@ -4179,6 +4196,30 @@ inline void validateModifierGuards( Config& c ) noexcept
     {
         rw::emitRaw( stderr, "ripwire: --since=REV|DATE scopes --hotspots/--cochange/--rank-by=churn|churn-decay, and beside --slice=SYM:VAR it names the revision to diff that variable's def-use slice against — pass one (e.g. ripwire <dir> --hotspots --since=\"1 week ago\")\n" );
         c.ok = false;
+    }
+
+    // --in=DIR (C1-b, 2026-09-12) scopes --rank-by=churn-decay's <recent> block to one directory and is read nowhere else:
+    // on any other verb it would be accepted and change nothing; the block it scopes is single-root only; and --top-k=0
+    // already suppresses the map the flag would stub. Same rule as --since above: a run where the flag would do nothing
+    // refuses instead, naming the remedy. The directory itself is checked against the resolved root in main.cpp
+    // (inDirIsUnderRoot), where <filesystem> is already in play; its trailing-slash normalisation is sarif::rootPrefixOf.
+    if( !c.inDir.empty() )
+    {
+        if( c.rankBy != RankBy::ChurnDecay )
+        {
+            rw::emitRaw( stderr, "ripwire: --in=DIR scopes the recent-changes block of --rank-by=churn-decay to one directory — pass it (e.g. ripwire <dir> --rank-by=churn-decay --in=src)\n" );
+            c.ok = false;
+        }
+        else if( c.roots.size() >= 2 )
+        {
+            rw::emitRaw( stderr, "ripwire: --in=DIR scopes a single-root map; the <recent> block it scopes is absent under multi-root — pass one root (e.g. ripwire <dir> --rank-by=churn-decay --in=src)\n" );
+            c.ok = false;
+        }
+        else if( c.topK == 0 )
+        {
+            rw::emitRaw( stderr, "ripwire: --top-k=0 already suppresses the symbol map that --in=DIR stubs — drop one of them (e.g. ripwire <dir> --rank-by=churn-decay --in=src)\n" );
+            c.ok = false;
+        }
     }
 
     // --cochange-recur=K / --cochange-groups are read ONLY inside the --cochange branch of

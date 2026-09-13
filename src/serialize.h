@@ -1586,27 +1586,75 @@ struct MapAnnotations
     const std::vector<RecentFile>* recent   = nullptr;
     std::size_t                    recentOf = 0;
     SeedDisclosure seed{};
+    // merge_bombs_skipped= on <recent> (2026-09-12): commits in the mined window the >kChurnMergeBombMaxFiles rule
+    // skipped, uncounted. Filled by assignment (after the positional slots), always emitted with the block.
+    std::uint32_t                  recentMergeBombsSkipped = 0;
+    // C1-b (2026-09-12): in=DIR. scopedRecent != nullptr ⇒ a SECOND <recent scope=> block follows the global one (even with
+    // zero rows: of="0" is "none found"); stubSymbols ⇒ the <f> groups collapse to <symbols total= shown="0" next=/>. Views
+    // point into main.cpp runDefaultMap locals that outlive every serialize() call. Filled by assignment, like seed.
+    const std::vector<RecentFile>* scopedRecent   = nullptr;
+    std::string_view               scopeDir;            // DIR as typed, trailing '/' stripped — the scope= value
+    std::size_t                    scopedRecentOf = 0;  // DIR's files any counted commit touched — the block's of=
+    std::size_t                    scopedOffset   = 0;  // the row this page starts at — offset=, absent at 0
+    std::string_view               scopedNext;          // the next page's invocation; empty ⇒ the page is not capped
+    bool                           stubSymbols    = false;
+    std::string_view               stubNext;            // the same run without in= — the map the stub stands for
 };
 
 // F3: the <recent> element — rank_by=churn-decay's file-level answer FIRST, paths + age in days at HEAD's clock +
 // decayed weight — written before the first <f> group so "what changed recently" is answered before the symbol
 // map, not buried behind it. Absent (byte-free) on every other map and under multi-root.
 template <typename PathRel>
-inline void writeRecentRows( XmlWriter& w, const MapAnnotations& ann, const PathRel& pathRel, std::vector<char>& esc )
+inline void writeRcRows( XmlWriter& w, const std::vector<RecentFile>& rows, const PathRel& pathRel, std::vector<char>& esc )
 {
-    if( !ann.recent || ann.recent->empty() )
-    {
-        return;
-    }
     char rc[ 64 ];
-    rw::formatTo( rc, sizeof rc, "<recent n=\"{}\" of=\"{}\">", ann.recent->size(), ann.recentOf );
-    w.write( rc );
-    for( const RecentFile& r : *ann.recent )
+    for( const RecentFile& r : rows )
     {
         rw::formatTo( rc, sizeof rc, "\" age_d=\"{}\" w=\"{:.3g}\"/>", r.ageDays, r.weight );
         w.write( "<rc p=\"" );  w.write( escapeXml( pathRel( r.fileId ), esc ) );  w.write( rc );
     }
-    w.write( "</recent>" );
+}
+
+template <typename PathRel>
+inline void writeRecentRows( XmlWriter& w, const MapAnnotations& ann, const PathRel& pathRel, std::vector<char>& esc )
+{
+    char rc[ 128 ];
+    // The global block: absent only when there is NOTHING to say — no rows and no skipped commit. A window whose every
+    // commit was a merge bomb prints <recent n="0" of="0" merge_bombs_skipped="N"></recent>: zero rows and the reason,
+    // rather than an absent block a reader would take for "no history mined" (churndecaycheck arm 7h).
+    if( ann.recent && ( !ann.recent->empty() || ann.recentMergeBombsSkipped > 0 ) )
+    {
+        rw::formatTo( rc, sizeof rc, "<recent n=\"{}\" of=\"{}\" merge_bombs_skipped=\"{}\">", ann.recent->size(), ann.recentOf, ann.recentMergeBombsSkipped );
+        w.write( rc );
+        writeRcRows( w, *ann.recent, pathRel, esc );
+        w.write( "</recent>" );
+    }
+    // C1-b: the directory-scoped block, AFTER the global one and additive to it (three of the six reference questions have
+    // their gold outside the named directory). n=/of= are this element's own count spelling (pageview.h, THE TRUNCATION
+    // VOCABULARY rule 2); a cut page says capped="1" and carries the next page verbatim in next=. Composed on std::string
+    // (the rule above escapeXml — fixedbufsweep): scope= is ESCAPED text and next= is already-markup, so neither may pass
+    // through a fixed char[] after the escaper has run.
+    if( ann.scopedRecent )
+    {
+        std::string open = "<recent scope=\"";
+        open += escapeXml( ann.scopeDir, esc );
+        open += "\" n=\"";                  open += std::to_string( ann.scopedRecent->size() );
+        open += "\" of=\"";                 open += std::to_string( ann.scopedRecentOf );
+        open += "\" merge_bombs_skipped=\""; open += std::to_string( ann.recentMergeBombsSkipped );  open += "\"";
+        if( ann.scopedOffset > 0 )
+        {
+            open += " offset=\"";  open += std::to_string( ann.scopedOffset );  open += "\"";
+        }
+        if( !ann.scopedNext.empty() )
+        {
+            open += " capped=\"1\"";
+            open += nextAttrXml( ann.scopedNext );
+        }
+        open += ">";
+        w.write( open );
+        writeRcRows( w, *ann.scopedRecent, pathRel, esc );
+        w.write( "</recent>" );
+    }
 }
 
 // ---- C2 (harvest B): the seeded map's BITE disclosure, attribute half and legend half -------------------
@@ -1738,7 +1786,22 @@ inline constexpr const char* kChurnDecayRankLegend =
     "sibling when structure and recent churn agree, and diverge where a stale-but-central symbol meets a "
     "fresh, sparsely-called one. recent: the file-level answer to what changed recently, FIRST — the n= files the "
     "NEWEST commits touched, of the of= files any commit touched, as rc p= age_d= (days since the file's newest "
-    "commit, at HEAD's clock) w= (its decayed weight), age_d asc then w desc then path; absent under multi-root -->";
+    "commit, at HEAD's clock) w= (its decayed weight), age_d asc then w desc then path; absent under multi-root. "
+    "merge_bombs_skipped= counts the commits in the mined window that touched more than 100 files and were SKIPPED, "
+    "uncounted (bulk sweeps, wide merges): a file only such a commit touched is absent from these rows and from the "
+    "prior, so a 0 means no commit was skipped, never that none could be -->";
+static_assert( kChurnMergeBombMaxFiles == 100, "kChurnDecayRankLegend spells the merge-bomb threshold as 100 — move both together" );
+
+// C1-b (2026-09-12): the in=DIR clause, spliced only when the scoped block is present (zero bytes elsewhere). Two halves around
+// kNextLegendClause, the ONE definition of next= every legend that meets it splices. No "--" inside a comment (G4).
+inline constexpr const char* kRecentScopeLegendOpen =
+    "<!-- in=DIR: recent scope=DIR is a SECOND recent block, after the unchanged global one, with DIR's files only — p= "
+    "root-relative exactly as the global block spells them, same order; n= rows on this page of of= files under DIR any "
+    "counted commit touched; offset= the row this page starts at (absent at 0); capped=1 means DIR has more rows than this "
+    "page and next= is the next page (offset=N continues, limit=N sets the page size). ";
+inline constexpr const char* kRecentScopeLegendClose =
+    "symbols total= shown=0 next=: the symbol map this run did NOT ask for — total= the rows the same run without in= "
+    "carries, shown=0 because none is printed here, next= fetches them -->";
 
 // Which churn legend belongs to which churn ranker — the table-driven form the sibling rankBy lookup uses,
 // so a third churn variant adds a row and not a branch.
@@ -2212,6 +2275,12 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     if( churnWindow != nullptr )
     {
         legend += churnRankLegendFor( ann.churnRankLabel ); // §A9.6 / P0-4, churn-only (see the constants)
+        if( ann.scopedRecent != nullptr )
+        {
+            legend += kRecentScopeLegendOpen;   // C1-b: in=DIR — the scoped block, its page, and the map stub (present-only)
+            legend += kNextLegendClause;
+            legend += kRecentScopeLegendClose;
+        }
     }
     // §B2.1: the same treatment for authority/hub/rrf. Mutually exclusive with the churn arm by construction
     // (main.cpp fills exactly one of the two fields), and null on the default pagerank map ⇒ zero bytes there.
@@ -2352,7 +2421,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         stats += std::to_string( ing.files.size() );
         stats += " symbols=";    stats += std::to_string( S );
         stats += " edges=";      stats += std::to_string( outTargets.size() );
-        stats += " shown=";      stats += std::to_string( keep );
+        stats += " shown=";      stats += std::to_string( ann.stubSymbols ? std::size_t( 0 ) : keep );   // C1-b: the stub prints no row
         stats += " est_tokens="; stats += std::to_string( estTokens );
         stats += " ambiguous=";  stats += std::to_string( ambTotal );
         stats += " unresolved="; stats += std::to_string( unresolvedTotal );
@@ -2482,7 +2551,20 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         }
     }
     writeRecentRows( w, ann, pathRel, esc );   // F3: rank_by=churn-decay's file-level answer, before the symbol map
-    for( std::uint32_t f : fileOrder )
+    // C1-b: under in=DIR the symbol map is a DISCLOSED stub (docs/METHODOLOGY.md §9.3) — the caller asked for DIR's recent
+    // files, not the map: total= is the row count the same run without in= carries (`keep`, the header's own shown= there),
+    // shown="0" because none is printed, next= the run that prints them. The <f> loop then walks an empty order.
+    if( ann.stubSymbols )
+    {
+        std::string stub = "<symbols total=\"";   // std::string, not a char[]: next= is already-markup (fixedbufsweep's rule)
+        stub += std::to_string( keep );
+        stub += "\" shown=\"0\"";
+        stub += nextAttrXml( ann.stubNext );
+        stub += "/>";
+        w.write( stub );
+    }
+    static const std::vector<std::uint32_t> kNoFiles;
+    for( std::uint32_t f : ann.stubSymbols ? kNoFiles : fileOrder )
     {
         w.write( "<f p=\"" );  w.write( escapeXml( pathRel( f ), esc ) );  w.write( "\"" );
         if( const char* fl = builtinLayer( ing.files[f] ); *fl ) { w.write( " layer=\"" );  w.write( fl );  w.write( "\"" ); }   // P3

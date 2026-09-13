@@ -15,6 +15,56 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — `--in=DIR` scopes the recent-changes block to a directory and stubs the map it was not asked for
+
+"What changed recently in DIR?" is six of the thirty reference questions, and `--rank-by=churn-decay`
+answered it with a whole-repository symbol map plus one global `<recent n="40">` block that a directory
+with more than 40 recently-touched files never fits into; nothing in the binary took a directory as a
+scope. `--in=DIR` (root-relative, an existing directory under the root; a trailing slash is ignored,
+absolute paths and `..` are refused) keeps the global block byte-identical — three of the six golds sit
+outside the named directory and complete only through it — and adds a second block
+`<recent scope="DIR" n= of= merge_bombs_skipped=>` after it with DIR's files only, `p=` spelled
+root-relative exactly as the global block spells them (a sub-root-relative spelling missed every
+held-out gold: 0/30 raw against 19/30 prefixed), same order. The block pages the way every listing here
+pages: 40 rows by default, `capped="1"` plus a pasteable `next="--rank-by=churn-decay --in=DIR
+--offset=40"` when DIR has more, `--limit=N` for the page size, `offset=` on a later page. The symbol
+map collapses to a disclosed stub `<symbols total=N shown="0" next="--rank-by=churn-decay"/>` — the
+map was not asked for, `total=` is the row count the same run without `--in=` carries, and the header's
+own `shown=` reads 0 so it cannot claim rows the document lacks (docs/METHODOLOGY.md §9.3: a disclosed
+cut is still terminal). The flag is refused, naming the remedy, with any other verb, under multi-root,
+with `--top-k=0` and with `--json`; the MCP surface exposes no churn ranker, so there is no twin to
+extend.
+
+Measured on the RocksDB corpus at `0e2801ac` (`--rank-by=churn-decay`, warm cache, bytes on stdout):
+39,813 B bare → 10,241 B with `--in=db`, 10,165 B with `--in=util`, 10,711 B with `--in=table`. The
+saving is the stub (61 B in place of the 200-row map); the scoped block itself costs 2.2–2.8 KB per
+answer, and the global block (2,395 B) is unchanged. On this repository's own tree: 46,843 B → 9,259 B
+with `--in=src`. Gate: `test/recentscopecheck.sh` — a 53-commit fixture with 45 files under `db/`
+proves the scoped rows are only DIR's and spelled as the global block spells them, the global block is
+byte-identical with and without the flag, page 2 (`--offset=40`) is the exact remainder with no
+overlap and the pasted `next=` reproduces it byte-for-byte, a gold outside DIR leads the global block,
+the stub's `total=` equals the un-stubbed map's `shown=` and `<s>` count, ten refusals name their
+remedy, a directory with a space and one starting with `-` work, and determinism, `xmllint` and both
+legends hold; 39 arms red on the previous binary, 54 green now.
+
+### Fixed — a churn window says how many commits it skipped as merge bombs
+
+The churn-decay miner behind `--rank-by=churn-decay` skips any commit touching more than 100 indexed
+files — bulk renames, reformats, wide merges — and counted nothing about it, so a `<recent>` block
+could silently omit the very commit a question was about: a held-out gold commit that touched 71
+source files (more than 100 in all) was invisible to the block, and nothing in the output said a commit
+had been dropped. The block now carries `merge_bombs_skipped="N"` on every run, `"0"` included, so its
+absence is never ambiguous; the full and compact legends define it and state the 100-file threshold
+(`kChurnMergeBombMaxFiles`, now a named constant in `src/gitmine.h`, listed in `docs/LIMITS.md`). On this
+repository's own tree the attribute reads `merge_bombs_skipped="5"` — five commits the map had been
+quietly built without. Gate: `test/churndecaycheck.sh` arm 7 builds a repository whose HEAD commit adds
+101 files and asserts the block reads `"1"`, that none of those files is a row, and that both legends
+define the attribute; red on the previous binary (no attribute anywhere), green now. A window whose
+every commit was skipped — a shallow clone of a large tree is exactly this shape: llvm-project at depth
+1 is one 183,835-file commit — used to print no block at all, which reads as "no history mined"; it now
+prints `<recent n="0" of="0" merge_bombs_skipped="1"></recent>`, zero rows and the reason (arm 7h, red
+on the previous binary). A tree with no git history still prints no block.
+
 ### Added — Elixir module and arity resolution (parser version 95)
 
 Elixir calls now resolve by module, name and arity, with lexical aliases, filtered imports, default

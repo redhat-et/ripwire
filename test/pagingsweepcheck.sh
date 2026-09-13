@@ -709,6 +709,11 @@ TABLE = {
     # shown=/total=/capped= facts in its section headers. Parsing a root element out of it would fail for a
     # reason that has nothing to do with paging, so it is checked as prose below instead.
     "--situ":               ( [ "--situ=src/situ.h" ], "PROSE" ),
+    # 2026-09-12 (C1-b): --in=DIR pages the <recent scope=DIR> block of --rank-by=churn-decay — a CHILD of the map's <r>
+    # root, which carries no window of its own (the global <recent> block and the symbol stub are not paged), so the
+    # root is uncut by construction and the "cut nothing ⇒ quintet absent" branch applies; the child's own capped="1"
+    # + next= page is test/recentscopecheck.sh's arm 3.
+    "--in":                 ( [ "--rank-by=churn-decay", "--in=src" ], None ),
 }
 fail = 0
 missing = [ v for v in universe if v not in TABLE ]
