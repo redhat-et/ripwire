@@ -231,11 +231,14 @@ jobs:
           sudo find /etc/apt/sources.list.d -type f \( -name '*.list' -o -name '*.sources' \) \
                ! -name 'ubuntu*' -print -delete || true
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc clang
+          # poppler-utils is pdftotext: ripwirepubliccheck arm 1b FAILS a tracked PDF deck it cannot read.
+          sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc clang poppler-utils
 
       - name: Install tooling (macOS)
         if: runner.os == 'macOS'
-        run: brew install ripgrep
+        # poppler is pdftotext, which ripwirepubliccheck arm 1b needs: it FAILS a tracked deck it cannot read. Only the
+        # Release legs install it, because the plain legs skip that gate (.github/pargates-macos-plain-skip.txt).
+        run: brew install ripgrep ${{ matrix.flavor == 'Release' && 'poppler' || '' }}
 
       # CC/CXX: the clang leg names clang; the gcc leg names gcc-14 (the std::print floor, 2026-09-08 — the
       # ubuntu-24.04 image ships GNU C++ 12.4 / 13.3 / 14.2, and the SYSTEM default `g++` is 13.3, whose

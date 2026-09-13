@@ -193,7 +193,7 @@ gold = { "problem_statement": "an issue" }
 p_base  = R.build_prompt( gold, 1, "baseline",       "/shim/ripwire", blurb )
 p_cli   = R.build_prompt( gold, 1, "ripwire_cli",    "/shim/ripwire", blurb )
 p_skill = R.build_prompt( gold, 1, "ripwire_skills", "/shim/ripwire", blurb )
-if "ripwire" not in p_base.replace( "Do not use ripwire or ctxpack", "" ):
+if "ripwire" not in p_base.replace( "Do not use ripwire", "" ):
     ok( "baseline prompt names ripwire only to forbid it" )
 else:
     no( "baseline prompt leaks ripwire guidance" )
