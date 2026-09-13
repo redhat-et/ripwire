@@ -31,6 +31,15 @@
 #   (B) FREE FUNCTIONS — `api.h:helper` has ZERO callers; two unrelated `helper`s in anonymous namespaces
 #       in TUs that do not include api.h must not be served. CONTROL: the BARE-name selector still unions
 #       both, so the fix narrowed the file: tier and nothing else.
+#   (B2) INTERNAL LINKAGE IN AN INCLUDING TU (2026-09-13, CodeRabbit on #139) — the gap (B) left: a TU that DOES
+#       #include api.h and defines its own `helper` in an anonymous namespace, and another with a namespace-scope
+#       `static helper`, both as OVERLOADS (`helper(double)`, `helper(long)` beside the declared `helper(int)`),
+#       which is the shape that compiles. Rule 2 proves the FILE, so both were gathered by name and served: the
+#       header-qualified count read 3 where the defining .cpp's read 1. Internal linkage is visible to its own TU
+#       alone, so `api.h:helper` must name the ONE real caller, equal to `api.cpp:helper`'s answer, and DISCLOSE the
+#       two it dropped as unproven_defs="2" — same-named definitions no row covers, exactly what the legend promises
+#       (the bare name still shows them). CONTROLS: the bare name unions all three, and the .cpp-qualified answer is
+#       unchanged — the same fixture red on a base binary shows the over-count.
 #   (C) #63'S OWN CASE — a header, its definition in a .cpp that #includes it, and a caller. The widening
 #       MUST still fire: the header-qualified count equals the .cpp-qualified count and both are non-zero.
 #       Trading the over-count for #63's silent zero is not a fix. Two shapes: same directory, and the
@@ -248,7 +257,7 @@ rowNamesNC(){ elNC "$1" s n; }
 
 # ── corpora, built here rather than committed: each is a minimal repro and a committed .h/.cpp fixture
 #    would also join every OTHER gate's view of test/. ────────────────────────────────────────────────
-mkdir -p "$TMP/ns/a" "$TMP/ns/b" "$TMP/free" "$TMP/hdr" "$TMP/split/include" "$TMP/split/src" "$TMP/same" "$TMP/two" "$TMP/combo/test"
+mkdir -p "$TMP/ns/a" "$TMP/ns/b" "$TMP/free" "$TMP/link" "$TMP/hdr" "$TMP/split/include" "$TMP/split/src" "$TMP/same" "$TMP/two" "$TMP/combo/test"
 
 # (A) two namespaces, one class name, one shared basename.
 cat > "$TMP/ns/a/Store.h" <<'EOF'
@@ -310,6 +319,51 @@ int helper(int a)
 }
 }
 int anotherUnrelated(int a)
+{
+    return helper(a);
+}
+EOF
+
+# (B2) internal linkage in TUs that DO include the header: the real definition and its one caller, then an
+#      anonymous-namespace overload and a namespace-scope `static` overload, each called by its own TU.
+cat > "$TMP/link/api.h" <<'EOF'
+#pragma once
+int helper(int a);
+EOF
+cat > "$TMP/link/api.cpp" <<'EOF'
+#include "api.h"
+int helper(int a)
+{
+    return a + 1;
+}
+EOF
+cat > "$TMP/link/consumer.cpp" <<'EOF'
+#include "api.h"
+int useApi(int a)
+{
+    return helper(a);
+}
+EOF
+cat > "$TMP/link/local.cpp" <<'EOF'
+#include "api.h"
+namespace {
+double helper(double a)
+{
+    return a * 0.5;
+}
+}
+double localUse(double a)
+{
+    return helper(a);
+}
+EOF
+cat > "$TMP/link/stat.cpp" <<'EOF'
+#include "api.h"
+static long helper(long a)
+{
+    return a - 3;
+}
+long statUse(long a)
 {
     return helper(a);
 }
@@ -556,6 +610,33 @@ if nonempty "(B) no <callers> root for api.h:helper" "$RB_F" \
         no "(B) api.h:helper count=\"$N_BF\", expected 0 — nothing calls the declared helper"
     else
         ok "(B) api.h:helper count=\"0\"; control: bare helper still count=\"2\""
+    fi
+fi
+
+echo
+echo "=== (B2) internal linkage in an INCLUDING TU — the file proof must not gather what the TU keeps to itself ==="
+run "$TMP/link" --callers=api.h:helper   >"$TMP/b2_hdr.xml"
+run "$TMP/link" --callers=api.cpp:helper >"$TMP/b2_cpp.xml"
+run "$TMP/link" --callers=helper         >"$TMP/b2_bare.xml"
+RB2_H="$( rootEl "$TMP/b2_hdr.xml" callers )"; RB2_C="$( rootEl "$TMP/b2_cpp.xml" callers )"; RB2_B="$( rootEl "$TMP/b2_bare.xml" callers )"
+if nonempty "(B2) no <callers> root for api.h:helper" "$RB2_H" \
+   && nonempty "(B2) no <callers> root for api.cpp:helper" "$RB2_C" \
+   && nonempty "(B2) no <callers> root for the bare helper" "$RB2_B"; then
+    N_B2H="$( attr "$RB2_H" count )"; N_B2C="$( attr "$RB2_C" count )"; N_B2B="$( attr "$RB2_B" count )"
+    LEAKED="$( rowNames "$TMP/b2_hdr.xml" | grep -xE 'localUse|statUse' | tr '\n' ' ' )"
+    # CONTROLS FIRST: the bare name unions all three TUs, and the defining .cpp's own answer is the one real caller.
+    if [ "$N_B2B" != "3" ]; then
+        no "(B2) control broken — the bare-name selector should union all three callers (count=\"$N_B2B\", expected 3)"
+    elif [ "$N_B2C" != "1" ] || ! rowNames "$TMP/b2_cpp.xml" | grep -qx 'useApi'; then
+        no "(B2) control broken — api.cpp:helper should name useApi alone (count=\"$N_B2C\")"
+    elif [ -n "$LEAKED" ]; then
+        no "(B2) api.h:helper serves ${LEAKED}— an anonymous-namespace / static helper in a TU that includes api.h (internal linkage, gathered by name)"
+    elif [ "$N_B2H" != "1" ] || ! rowNames "$TMP/b2_hdr.xml" | grep -qx 'useApi'; then
+        no "(B2) api.h:helper count=\"$N_B2H\", expected 1 naming useApi — the header must answer as its defining .cpp does"
+    elif [ "$( attr "$RB2_H" unproven_defs )" != "2" ]; then
+        no "(B2) api.h:helper unproven_defs=\"$( attr "$RB2_H" unproven_defs )\", expected 2 — the two internal-linkage definitions it dropped must be disclosed, not silently gone"
+    else
+        ok "(B2) api.h:helper count=\"1\" names useApi, unproven_defs=\"2\"; controls: api.cpp:helper count=\"1\", bare helper count=\"3\""
     fi
 fi
 
