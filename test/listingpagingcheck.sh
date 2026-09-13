@@ -346,7 +346,9 @@ case "$FP_NEXT" in
 esac
 # ANSWER: the <t> rows equal the tests= total at the DEFAULT cap
 T_TOTAL="$( attr "$TMP/fp_def" flip tests )"
-T_ROWS="$( countrows fp_def t )"
+# E1 (2026-09-12): runner-less rows with equal attributes ride ONE <g n= p="a,b"/> row, so the answer is
+# counted in test FILES: the single <t> rows plus every <g> row's n=.
+T_ROWS="$( { countrows fp_def t; grep -oE '<g [^>]*/>' "$TMP/fp_def" | grep -oE ' n="[0-9]+"' | grep -oE '[0-9]+'; } | awk '{ s += $1 } END { print s + 0 }' )"
 if [ "${T_TOTAL:-0}" = "$T_ROWS" ]; then ok "(C) answer: all ${T_TOTAL:-0} tests_to_run <t> rows ride the default page — never windowed"
 else no "(C) answer: tests=\"$T_TOTAL\" but $T_ROWS <t> rows at the default cap — the ANSWER rows are being paged"; fi
 
@@ -395,7 +397,12 @@ for text, which in ( ( d, "bare" ), ( a, "--limit=1000000" ) ):
     hdr = [ l for l in text.splitlines() if l.startswith( "  [2] tests to run" ) ]
     line = hdr[ 0 ] if hdr else ""
     total = int( re.search( r'\((\d+)\)', line ).group( 1 ) ) if re.search( r'\((\d+)\)', line ) else 0
-    served = len( rows( text, "  [2] tests to run", r'^        \S' ) ) - 1   # minus the script-gates disclosure line
+    # E1 (2026-09-12): a `[hops=N] (n): a, b, …` line serves n files on one line — count FILES, not lines
+    served = 0
+    for r in rows( text, "  [2] tests to run", r'^        \S' ):
+        gm = re.match( r'^        (?:\[[^\]]*\] )*\((\d+)\): ', r )
+        served += int( gm.group( 1 ) ) if gm else 1
+    served -= 1   # minus the script-gates disclosure line
     if total <= 25:
         print( "  FAIL  (D) answer: only %d test rows (%s) — the fixture cannot show the retired 25-row cap is gone" % ( total, which ) ); fail = 1
     elif "showing" in line or "capped=" in line:

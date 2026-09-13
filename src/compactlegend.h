@@ -285,6 +285,12 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // --uses=Owner.field's member form (fielduses.h appends kUsesFieldLegend to that answer alone). owner_candidates= is a
     // row attribute that exists only beside member=, so one head term defines the whole form.
     { "member",            "member=Owner.field: rows use that field; pinned=/amb_sites= rows with one owner/with owner_candidates=K; owners_of_name= fields so named" },
+    // M21(b) / E1 (2026-09-12): the tests_to_run family's not-derivable disclosure, and the <g> group row it rides
+    // once per group. Row-level (every dialect puts it on the row), present-only; the <g> reading is qualified
+    // to that element so a document of single rows never pays for it, and a --flags document's own <g> never
+    // triggers it (that element carries no run_unknown=).
+    { "run_unknown",       "run_unknown=1: no runner derivable (a guess would be worse)", true },
+    { "run_unknown",       "<g n= p=a,b,c>: n runner-less rows with equal attrs as ONE row, every path verbatim (&#44; a comma)", true, "g" },
     { "hits_capped",       "hits_capped=1: hits= is a floor" },
     // Both also ride the map header: est_tokens= alone there under order=stable (the root drops it), over_ceiling=1 there
     // under max-tokens. Same number, same reading, so one row reads both places.

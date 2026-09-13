@@ -624,7 +624,9 @@ inline std::string prLegendText( const std::string& baseEscaped, bool hasUnindex
                  // from the in-edge CSR --callers reads, and <impact dependents=> is the same transitive reach
                  // --impact reports, so the same floor applies to hundreds of attributes in this one document.
                  // The shared constants, never a pr-context wording — that is the §B4 echo-site rule.
-                 + rw::graphCountDisclosure( hasUnindexed ) + "-->";
+                 + rw::graphCountDisclosure( hasUnindexed )
+                 + std::string( rw::kRunHintLegendClause )   // M21(b)/E1: the <test> row's run=/run_unknown= rule and the <g> group row, testmap.h's ONE wording
+                 + "-->";
 }
 
 inline constexpr std::string_view kPrEmptyDiffBody =
@@ -1044,10 +1046,8 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             if( trim.testCap > 0 )
             {
                 rw::emitTo( o, "<tests count=\"{}\" shown=\"{}\" capped=\"{}\">", testFiles.size(), tSc.shown, tSc.capped );
-                for( std::size_t i = 0; i < tSc.shown; ++i )
-                {
-                    rw::emitTo( o, "<test p=\"{}\"{}/>", ex( prPathRel( testFiles[i] ) ).c_str(), runAttrDisclosed( prRunners, testFiles[i], ex ).c_str() );   // §A9.5
-                }
+                // §A9.5 / E1: the shown window, grouped where no runner is derivable (testmap.h's seam)
+                rw::emitRaw( o, testRowsJoined( prRunners, testRowsOutOf( std::span( testFiles ).first( tSc.shown ), prPathRel ), TestRowShape{ RowDialect::Xml, "test" }, ex ).c_str() );
                 rw::emitRaw( o, "</tests>" );
             }
             else

@@ -69,8 +69,9 @@ printf 'void unrelated_helper() { }\n'                             > "$R/test/de
 
 run(){ perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" "$@" --no-cache 2>/dev/null; }
 runec(){ perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" "$@" --no-cache >/dev/null 2>"$TMP/err.txt"; }
-# extract the basenames of the emitted <test p="..."/> entries, sorted
-tset(){ printf '%s' "$1" | grep -oE '<test p="[^"]*"' | grep -oE '[^/"]*"$' | sed 's/"$//' | sort | tr '\n' ','; }
+# extract the basenames of the emitted test rows, sorted. E1 (2026-09-12): a runner-less row may ride a
+# <g … n= p="a,b,c"/> GROUP row (testmap.h), so the p= value is split on ',' — every path is still verbatim.
+tset(){ printf '%s' "$1" | grep -oE '<(test|g) [^>]*/>' | grep -oE ' p="[^"]*"' | sed 's/^ p="//; s/"$//' | tr ',' '\n' | sed 's|.*/||' | sort | tr '\n' ','; }
 cnt(){  printf '%s' "$1" | grep -oE 'tests="[0-9]+"' | head -1 | grep -oE '[0-9]+'; }
 
 # ── 1) change core.cpp → exactly the two tests that reach its symbols ────────────────────────────────
@@ -285,7 +286,10 @@ printf '%s' "$D" | grep -q '<affected [^>]*order="evidence"' && printf '%s' "$D"
 # negative: no stem partner exists for core.cpp, so no row may claim one
 printf '%s' "$A" | grep -q 'partner="1"' && no "(7f) core.cpp has no *_test partner yet a row claims partner=\"1\"" \
     || ok "(7f) partner= never fires without a stem match"
-printf '%s' "$A" | grep -q '<test p="test/test_leaf.cpp" hops="1"' && ok "(7g) core.cpp's direct test row carries hops=\"1\"" \
+# E1 (2026-09-12): with no derivable runner the direct test rides a <g hops="1" n= p="…"/> group row when a
+# sibling shares its evidence, and a single <test p= hops="1"> row otherwise — hops="1" is asserted either way.
+printf '%s' "$A" | grep -qE '<test p="test/test_leaf\.cpp" hops="1"|<g hops="1" n="[0-9]+" p="([^"]*,)?test/test_leaf\.cpp(,[^"]*)?"' \
+    && ok "(7g) core.cpp's direct test row carries hops=\"1\"" \
     || no "(7g) core.cpp rows lack hops="
 
 # ── 6) xml well-formed ───────────────────────────────────────────────────────────────────────────────

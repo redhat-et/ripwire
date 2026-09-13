@@ -594,17 +594,14 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     // disclose when nothing can be dropped.
     rw::emitTo( out, "  [2] tests to run ({}){}", tests.size(),
                   tests.empty() ? ": (none transitively reach these files)\n"
-                                : " — evidence order: [changed] you edited it, [partner] named after a changed file, then hops (1 = calls a changed symbol directly):\n" );
+                                : " — evidence order: [changed] you edited it, [partner] named after a changed file, then hops (1 = calls a changed symbol directly); "
+                                  "a line (n): a, b lists n files sharing that evidence with no derivable runner:\n" );
     // §P11.4: this section says "tests to run" and named files that are not commands. The runner is appended
     // where one is DERIVABLE and omitted where it is not — see testmap.h; a guessed command is worse than none.
+    // E1: runner-less rows with equal evidence are ONE `[hops=N] (n): a, b` line — testmap.h's seam, the multiset unchanged
     const TestRunnerIndex situRunners( ing );
-    for( std::size_t i = 0; i < testRows.size(); ++i )
-    {
-        const TestRow&         r  = testRows[i];
-        const std::string_view rp = situPathRel( r.fileId );
-        rw::emitTo( out, "        {}{}{}\n", std::string_view( rp.data(), rp.size() ), testRowEvidence( r, EvDialect::Text ).c_str(),
-                      runSuffixTextDisclosed( situRunners, r.fileId ).c_str() );
-    }
+    rw::emitRaw( out, testRowsJoined( situRunners, evidenceRowsOut( testRows, EvDialect::Text, situPathRel ), TestRowShape{ RowDialect::Text, {}, "        " },
+                                      []( std::string_view s ) { return std::string( s ); } ).c_str() );
     // §B7.3: this section inherits --affected's blind spot without --affected's disclosure — a shell harness
     // runs the compiled BINARY as a subprocess, which is not a call edge, so no test/*.sh gate can EVER be
     // named above, however much of the change it exercises. Same number, same counter as --affected's
@@ -1181,11 +1178,7 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
                   pagingDisclosure( uab, sizeof( uab ), r.untested.size(), uw.end, pageLimit, pageOffset ),
                   gitstamp::atAttr( root ).c_str(), tgRootAttr.c_str(),
                   nextAttrXml( testGateNextInvocation( ing, r, gateRunners ) ).c_str()  );   // P3 (L7)
-    for( const TestRow& row : r.testRows )
-    {
-        rw::emitTo( out, "<t p=\"{}\"{}{}/>", ex( tgPathRel( row.fileId ) ).c_str(), testRowEvidence( row, EvDialect::Xml ).c_str(),
-                      runAttrDisclosed( gateRunners, row.fileId, ex ).c_str() );
-    }
+    rw::emitRaw( out, testRowsJoined( gateRunners, evidenceRowsOut( r.testRows, EvDialect::Xml, tgPathRel ), TestRowShape{ RowDialect::Xml, "t" }, ex ).c_str() );   // E1: <g> where no runner is derivable
     for( const ShellGateObligation& gate : r.shellGates.obligations )
     {
         rw::emitTo( out, "<t p=\"{}\" evidence=\"{}\" run=\"{}\"/>", ex( tgPathRel( gate.fileId ) ).c_str(), gate.evidence,
@@ -1254,11 +1247,7 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
                  nextFieldJson( testGateNextInvocation( ing, r, gateRunnersJ ) ).c_str()  );   // P3 (L7): the XML twin's next=
     const TestRunnerIndex gateRunners( ing );                       // §P11.4, the JSON sibling of the XML run=
     const auto            jesc = []( std::string_view s ) { return jsonStr( s ); };
-    for( std::size_t i = 0; i < r.testRows.size(); ++i )
-    {
-        rw::emitTo( out, "{}{{\"p\":\"{}\"{}{}}}", i == 0 ? "" : ",", jsonStr( tgJPathRel( r.testRows[i].fileId ) ).c_str(),
-                      testRowEvidence( r.testRows[i], EvDialect::Json ).c_str(), runFieldJsonDisclosed( gateRunners, r.testRows[i].fileId, jesc ).c_str() );
-    }
+    rw::emitRaw( out, testRowsJoined( gateRunners, evidenceRowsOut( r.testRows, EvDialect::Json, tgJPathRel ), TestRowShape{ RowDialect::Json, "p" }, jesc, "," ).c_str() );   // E1: the XML twin's <g>, "p" an array
     for( std::size_t i = 0; i < r.shellGates.obligations.size(); ++i )
     {
         const ShellGateObligation& gate = r.shellGates.obligations[i];

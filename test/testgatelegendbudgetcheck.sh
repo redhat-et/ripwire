@@ -90,10 +90,18 @@ EOF
 # --affected/--situ/--test-gate alike so the emitters cannot drift. Written long (477 B), measured, cut to
 # the shortest honest form (281 B). Measured on this fixture: 2205 -> 2486 B; 2540 leaves ~54 B — the same
 # posture as every pin above.
-if [ "$legend" -le 2720 ]; then
-    ok "(a) --test-gate legend is $legend B (<= 2540 B budget; total=$total payload=$payload)"
+# RE-PINNED 2720 -> 2900 (2026-09-12, output-routing loop E1 / A4-2, owner call). ONE new FACT, in the SAME
+# row-gated clause (testmap.h kRunHintLegendClause, so the zero-row report still pays nothing):
+#   +180 B  the <g> group row — 2+ runner-less rows with equal evidence attributes served as ONE row, n= how
+#           many, p= their paths in list order (&#44; a comma), every path verbatim. It is what lets the
+#           not-derivable disclosure be said once per GROUP instead of once per row (rocksdb, 127 rows: 126
+#           `run_unknown="1"` -> 9, test-gate 13,242 -> 9,594 B) and legendcoveragecheck wants n= defined
+#           wherever a document carries it.
+# Measured on this fixture: 2663 -> 2843 B; 2900 leaves ~57 B — the same posture as every pin above.
+if [ "$legend" -le 2900 ]; then
+    ok "(a) --test-gate legend is $legend B (<= 2900 B budget; total=$total payload=$payload)"
 else
-    no "(a) --test-gate legend is $legend B (> 2540 B budget) — the essay re-inflated"
+    no "(a) --test-gate legend is $legend B (> 2900 B budget) — the essay re-inflated"
 fi
 
 # (b) the honesty vocabulary + the §B12.5 cross-verb UNIT-collision anchors (test/testgatecheck.sh arm (g)

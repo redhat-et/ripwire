@@ -15,6 +15,34 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — tests-to-run rows without a runner are grouped by hop distance
+
+Every tests-to-run row that had no derivable runner said so on the row — `run_unknown="1"` in XML,
+`"run_unknown":true` in JSON, `(run: not derivable)` in `--situ`'s text — and on a corpus where almost
+no harness has a runner that was the same 16 or 23 bytes repeated once per row: on the RocksDB tree,
+`--affected=db/write_batch.cc` listed 127 tests, 126 of them runner-less, and paid 2,016 B of XML and
+2,898 B of text for one fact. Rows already come in evidence order (changed, partner, hops ascending,
+path), so runner-less rows whose per-row attributes are byte-equal are now served as one row,
+`<g hops="2" n="17" p="a,b,c" run_unknown="1"/>` (JSON: `"p"` — or `"test"` — becomes an array beside
+`"n"`; text: `[hops=2] (17): a, b, c   (run: not derivable)`), emitted where its first member stood. Rows
+with a runner stay single, a group of one stays a `<t>` row, a comma inside an XML path is `&#44;`, and
+every path is kept verbatim — the multiset of paths before and after is identical, which is what
+`test/testrowruncheck.sh` arm 12 proves on a fixture with three hop groups and a runner row in the
+middle of one of them, in all three dialects (red on the previous binary). All twelve emitters —
+`--affected`, `--exercises`, `--test-gate` XML and JSON, `--situ`, `--pr-context`, `--handoff`,
+`--flags --flip`, `--pack-task` XML and JSON, the MCP `situational_awareness` twin and the edit
+receipt — render through one seam in `testmap.h`, and the M21(b) rule keeps its meaning: a `<t>` or
+`<g>` row carries `run=` or `run_unknown="1"`, never neither. Measured on RocksDB (`wc -c`, same cache,
+same commit): `--affected=db/write_batch.cc` 10,668 → 6,839 B, `--test-gate=db/write_batch.cc` 13,242 →
+9,594 B (its JSON 11,055 → 7,121 B), `--situ=db/write_batch.cc` 11,769 → 7,313 B; 7 `<g>` rows replace
+124 single rows and the residual spent on the disclosure is 144 B (XML) and 207 B (text) per list.
+`--pack-task`'s byte-budgeted tests section caps a group at its own budget and counts `shown=`/`total=`
+in files, so the same bundle now names 54 of 109 tests where it named 28. On this tree every harness
+has a runner, so nothing groups and the only change is the legend that now defines `<g>`: the
+`--test-gate` legend pin moves 2,720 → 2,900 B (measured 2,843) and the `ripwire.pack-task/v1` compact
+pin 820 → 880 B (measured 865), both because the compact dialect and every rows-bearing full legend now
+define `run_unknown=` and `<g n= p=>` — a definition `--affected` and the compact dialect never carried.
+
 ### Added — Elixir module and arity resolution (parser version 95)
 
 Elixir calls now resolve by module, name and arity, with lexical aliases, filtered imports, default

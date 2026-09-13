@@ -1330,18 +1330,8 @@ inline std::string situationDiffJson( const std::string& root, const std::string
     out += "]";
     out += graphCountFloorAttrJson( ix.g );   // H5/M15: blast_radius[].dependent_symbols is read off the name-based CSR — a floor, with the gauge
     out += ",\"tests_to_run\":[";
-    {
-        bool first = true;
-        for( std::uint32_t f : facts.tests )
-        {
-            if( !first )
-            {
-                out += ",";
-            }
-            first = false;
-            out += "{\"test\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\"" + runFieldJsonDisclosed( runners, f, jsonEsc ) + "}";
-        }
-    }
+    // E1: grouped where no runner is derivable — "test" is then an ARRAY of paths (testmap.h's seam)
+    out += testRowsJoined( runners, testRowsOutOf( facts.tests, situJPathRel ), TestRowShape{ RowDialect::Json, "test" }, jsonEsc, "," );
 
     // F3: the decl/def partners of the changed set — the header/impl relationship the blast_radius array
     // above cannot carry, because a header does not transitively depend on the source that implements it.
