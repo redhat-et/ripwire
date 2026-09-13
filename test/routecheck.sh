@@ -112,28 +112,28 @@ diff -q "$TMP/concept_noroute.xml" "$ROOT/test/routefix/golden_for.xml" >/dev/nu
     || no "conceptual --for --no-route drifted from test/routefix/golden_for.xml"
 # the DEFAULT (routed) conceptual run must fall back to subtoken+body — same ranker, only a header note added.
 "$BIN" routefix --no-cache --for="$CONCEPT" >"$TMP/concept_default.xml" 2>/dev/null
-grep -q 'routed: subtoken+body' "$TMP/concept_default.xml" \
+grep -q 'route="subtoken+body' "$TMP/concept_default.xml" \
     && ok "safe fallback: conceptual --for DEFAULTS to subtoken+body (no over-fire to name-exact)" \
     || no "conceptual --for did not fall back to subtoken+body (router over-fired on prose)"
 
 # ── (b) identifier query DEFAULTS to name-exact (routing is on with no flag) ───────────────────────────
 "$BIN" routefix --no-cache --for="buildGraph" >"$TMP/ident.xml" 2>/dev/null
-grep -q 'routed: name-exact' "$TMP/ident.xml" \
+grep -q 'route="name-exact(' "$TMP/ident.xml" \
     && ok "identifier query 'buildGraph' DEFAULTS to name-exact BM25 (routing is on by default)" \
-    || no "identifier query did not route to name-exact (header missing 'routed: name-exact')"
+    || no "identifier query did not route to name-exact (root missing route=\"name-exact(\")"
 
 # A7: an identifier embedded in LONG issue/review prose is evidence, not the whole intent. The old
 # any-camel/snake rule discarded every prose/body term and cratered corrected LocBench train retrieval.
 "$BIN" routefix --no-cache --for="repair buildGraph when the serialized ranked map is empty after cache reload" >"$TMP/long_ident.xml" 2>/dev/null
-grep -q 'routed: subtoken+body' "$TMP/long_ident.xml" \
+grep -q 'route="subtoken+body' "$TMP/long_ident.xml" \
     && ok "long issue prose with one identifier stays subtoken+body" \
     || no "one identifier over-fired name-exact on a long conceptual query"
 
 # ── (c) --no-route forces subtoken+body and matches the pre-flip capture; header carries NO routed note ─
 "$BIN" routefix --no-cache --for="buildGraph" --no-route >"$TMP/ident_noroute.xml" 2>/dev/null
-{ ! grep -q 'routed:' "$TMP/ident_noroute.xml"; } \
-    && ok "--no-route on an identifier query forces subtoken+body (no 'routed:' header note)" \
-    || no "--no-route still emitted a 'routed:' note — the opt-out did not disable routing"
+{ ! grep -q ' route="' "$TMP/ident_noroute.xml"; } \
+    && ok "--no-route on an identifier query forces subtoken+body (no route= attribute)" \
+    || no "--no-route still emitted a route= attribute — the opt-out did not disable routing"
 
 # ── (d) determinism — two DEFAULT --for runs byte-identical ────────────────────────────────────────────
 "$BIN" routefix --no-cache --for="buildGraph" >"$TMP/r1" 2>/dev/null
@@ -168,7 +168,7 @@ fi
 # reconstructed from what the assertion expects.
 # verify-wave2 F6 re-pin: stop on the attribute quote. The trailing "]" this used to anchor on was the
 # unbalanced half of a bracket pair L10b half-trimmed; route= is delimited by its own quotes.
-reasonOf(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'routed: [^"]*' | head -1; }
+reasonOf(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -oE ' route="[^"]*' | head -1 | sed 's/^ route="//'; }
 routeOf(){  reasonOf "$@" | grep -oE 'name-exact|subtoken\+body' | head -1; }
 
 # (f1) the fixture's identifier query: buildGraph is defined once, in routefix/graph.cpp.
@@ -240,8 +240,8 @@ esac
 
 # (f5) the disclosure rides inside the EXISTING reason: the phrase downstream gates read must survive.
 case "$identReason" in
-    *'names a symbol (buildGraph)'*) ok "(f5) the pre-existing 'names a symbol (X)' phrasing is intact — the anchors were appended, not substituted" ;;
-    *)                               no "(f5) the anchors replaced the existing reason phrasing; test/taskechocheck.sh reads 'names a symbol (…)' out of this same string: [$identReason]" ;;
+    *'name-exact(buildGraph)'*) ok "(f5) the ranker code name-exact(X) is intact — the anchors were appended, not substituted (row 6: the code replaced the 'names a symbol (X)' prose; test/taskechocheck.sh reads the code out of this same string)" ;;
+    *)                          no "(f5) the anchors replaced the ranker code; test/taskechocheck.sh reads 'name-exact(…)' out of this same string: [$identReason]" ;;
 esac
 
 # ── (g) ANCHOR PLAUSIBILITY (LB-2): the all-words trigger at nWords>=2 additionally requires every
@@ -298,14 +298,14 @@ else
 fi
 # NOTE the quotes around the anchor word arrive attribute-escaped (&apos;) — match on the words, not the quotes.
 case "$declinedReason" in
-    *"name-exact declined: anchor"*"split"*"name-carriers"*"defs"*)
+    *"subtoken+body:declined("*"split"*"-carriers,"*"-defs)"*)
         ok "(g1) the declined reason names the failing anchor and its carrier count: [$declinedReason]" ;;
     *)  no "(g1) the declined reason must say WHY (failing anchor + carrier count) — got: [$declinedReason]" ;;
 esac
 case "$declinedReason" in
-    *"anchors:"*|*"names a symbol ("*)
-        no "(g1) a declined (subtoken+body) reason carried a name-exact-only literal ('anchors:' / 'names a symbol (') — downstream gates parse those as name-exact markers: [$declinedReason]" ;;
-    *)  ok "(g1) the declined reason carries neither 'anchors:' nor 'names a symbol ('" ;;
+    *"anchors:"*|*"name-exact("*)
+        no "(g1) a declined (subtoken+body) reason carried a name-exact-only literal ('anchors:' / 'name-exact(') — downstream gates parse those as name-exact markers: [$declinedReason]" ;;
+    *)  ok "(g1) the declined reason carries neither 'anchors:' nor 'name-exact('" ;;
 esac
 
 # (g2) the decline is a RECOVERY, not a shrug: the conceptual ranking surfaces the compound target.
@@ -340,12 +340,14 @@ fi
 # (g6) MUTATION arm — the declined-disclosure assertion must FAIL against a --no-route run of the same
 # query (no routed: note at all there), proving the assertion is live and reads real output.
 "$BIN" commonfix --no-cache --for="split chunks" --no-route >"$TMP/declined_noroute.xml" 2>/dev/null
-GMUT="$( grep -q 'name-exact declined' "$TMP/declined_noroute.xml" && echo BAD || echo TRIPPED )"
+# row 6: read the route ATTRIBUTE only — the legend's route= reading spells ':declined(' on every --for document,
+# routed or not, so a whole-document grep would never trip and the self-test would be shape 5 (no contrast).
+GMUT="$( grep -oE ' route="[^"]*"' "$TMP/declined_noroute.xml" | grep -q ':declined(' && echo BAD || echo TRIPPED )"
 [ "$GMUT" = "TRIPPED" ] && ok "(g6) mutation self-test (the declined assertion fails on the --no-route run, so it is live)" \
                         || no "(g6) mutation self-test broke — the declined assertion cannot fail"
 
 # ── MUTATION self-test — the name-exact routing assertion must FAIL against the --no-route run ─────────
-MUT="$( grep -q 'routed: name-exact' "$TMP/ident_noroute.xml" && echo BAD || echo TRIPPED )"
+MUT="$( grep -q 'route="name-exact(' "$TMP/ident_noroute.xml" && echo BAD || echo TRIPPED )"
 [ "$MUT" = "TRIPPED" ] && ok "mutation self-test (the routing assertion fails on the --no-route run, so it is live)" \
                        || no "mutation self-test broke — the routing assertion cannot fail"
 

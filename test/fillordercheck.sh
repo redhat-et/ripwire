@@ -112,7 +112,10 @@ est_of(){   "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | 
 # pin moved -- no contract did.
 EFIX="$( est_of test/fixture )"
 OFIX="$( order_of test/fixture )"
-{ [ "$EFIX" = "884" ] && [ "$OFIX" = "important-first" ]; } \
+# RE-PIN 2026-09-12 (row 6, sc=): 884 -> 894. The map legend's sc= reading (the composition rule id = p::sc::n,
+# replacing the shorter id=canonical(...) clause) is +40 B on a fixture whose 14 rows carry ONE scoped symbol, so the
+# legend outgrows the row saving here; on a real tree the rows win (this repo's flagless map: -15.3%). Only the pin moved.
+{ [ "$EFIX" = "894" ] && [ "$OFIX" = "important-first" ]; } \
     && ok "test/fixture (est_tokens=$EFIX) does NOT auto-flip — order=$OFIX (golden neutral)" \
     || no "test/fixture unexpectedly changed order or est_tokens (est=$EFIX order=$OFIX)"
 

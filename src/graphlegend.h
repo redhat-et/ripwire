@@ -276,6 +276,22 @@ inline constexpr const char* kForRootRelAtLegendShort =
 
 // `rootOn` is the emitter's own root=-present condition; `atOn` is its at=-present condition (gitAtAttr
 // non-empty) — never re-derived from each other, since a non-git single-root run has rootOn without atOn.
+// Row 6 (2026-09-12): the sc= and route= readings on a --for bundle, ONE spelling for the CLI lens and the MCP
+// `for` twin. sc= is the short id (the enclosing scope; a row's full id composes as p::sc::n — see
+// serialize.h writeScopeAttr) and route= is a CODE now, not prose: name-exact(X) / subtoken+body[:broad|
+// :declined(word;carriers,defs)], with the anchors: clause riding after it on a name-exact route. On the CLI
+// lens this clause is CEILING-DROPPABLE (verbs_for.h rung zero, with the confidence and tail clauses): the
+// attributes stay on every rung, only the reading goes, and kForLegendDroppedNote names it. No "--" anywhere:
+// it rides inside an XML comment, where a double hyphen is ill-formed (G4).
+// TERSE ON PURPOSE: this clause rides EVERY default --for answer, and the bytes it costs are the bytes the
+// sc= rows and the route code saved (measured 2026-09-12: 20 B per scoped row, 84 B per route note) — a
+// reading longer than that saving would make the change a net loss on a small bundle.
+inline constexpr std::string_view kForIdRouteLegend =
+    "; sc=enclosing scope (full id p::sc::n; every selector takes it); route= ranker code: name-exact(X) = the task names X "
+    "(its anchors list the evidence), subtoken+body = conceptual (:broad = 1-2 plain words, rg may win; :declined(w;carriers,defs) = common-name hit refused)";
+inline constexpr std::string_view kForIdRouteLegendCompact =
+    "; sc= scope (id=p::sc::n); route= ranker code: name-exact(X)|subtoken+body[:broad|:declined(...)]";
+
 inline const char* forRootRelPathsLegendShort( bool rootOn, bool atOn = false ) noexcept
 {
     if( !rootOn )

@@ -15,6 +15,39 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — symbol rows carry a short id (`sc=`) instead of repeating their path
+
+Every scoped symbol row on the map and on the `--for`/`--pack-task`/`--from-trace`/`--pack-signatures`
+signature rows printed its canonical id in full — `id="src/mcpverbs.h::rw::applyCompactToBatchSubs"` on a
+row that already sits under `<f p="src/mcpverbs.h">` or carries `p="src/mcpverbs.h"` itself. On this
+repository's flagless map that was 137 of 137 scoped rows repeating the path the wrapper had just
+printed. The row now carries only the segment nothing else on the page holds, `sc=` (the enclosing scope),
+and the legend states the composition: the full id is `p::sc::n`, with `p=` taken from the row or its
+enclosing `<f>`. Nothing an agent could address before is unaddressable now — `--expand`, `--callers`,
+`--impact`, `--uses` and the MCP twins accept the composed `path::scope::name` exactly as they accepted
+the printed `id=`, and `test/scroundtripcheck.sh` proves it: the multiset of ids composed from the new
+rows is byte-identical to the multiset the previous binary printed on two fixtures, every composed id
+resolves through `--expand` to a body of that path and name, a mutated scope resolves to nothing, and the
+old spelling still resolves on input. Two smaller cuts ride the same rows: `route=` is a code
+(`name-exact(X)`, `subtoken+body`, `subtoken+body:broad`, `subtoken+body:declined(word;carriers,defs)`)
+with its reading in the legend instead of 107 bytes of prose per answer (23 bytes now; the `anchors:`
+evidence clause is unchanged), and a `--for` compact bundle merges the same-named callees of one `calls`
+block into one `<c n= l="70,69"/>` row (`shown=` still counts callees). Measured with `wc -c` against the
+pre-change build of the same commit: the flagless map of this repository 26,402 → 22,354 B (−15.3%, the
+same 185 rows), `test/cppqualfix` 2,935 → 2,781 B, `test/nestedqualfix` 2,045 → 1,937 B; a fixture with
+four scoped rows (`test/accessshapefix`) grows 9 B, because the `sc=` reading is longer than the
+`id=canonical(…)` clause it replaces and four rows do not pay it back. On `--for` the bundle is
+byte-shaped, so the row savings became rows, not bytes: three conceptual and name-exact tasks on this
+tree served 25 → 28, 21 → 24 and 3 → 3 signature rows at 10,042 → 10,145, 10,256 → 10,316 and
+5,971 → 6,022 B, the difference being the new `sc=`/`route=` reading (259 B, ceiling-droppable with the
+confidence clause and exempt from the signature-trim charge like every other disclosure). The `--json`
+twins mirror the attribute (`"sc"`), so `mcpattrparity` holds without a rename. Pins moved with the
+bytes: seven compact-legend schemas in `test/compactlegendcheck.sh` (map 810 → 920, map-diff 800 → 910,
+pack-signatures 680 → 780, metrics 720 → 820, query 630 → 730, pack-task 820 → 980, pack-top-n
+660 → 770) and the ten-verb loop 4,900 → 5,000 B, all for the one new whole-document `sc=` reading; the
+`test/fixture` map's `est_tokens` 884 → 894; five goldens regenerated for the row shape; the printf-parity
+manifest re-pinned for the six labels the rows move.
+
 ### Added — Elixir module and arity resolution (parser version 95)
 
 Elixir calls now resolve by module, name and arity, with lexical aliases, filtered imports, default

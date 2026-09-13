@@ -78,18 +78,20 @@ printf '%s\n' "$MUT" | grep -qE '^<d [^>]* n="' \
 
 # ── 2) id= — emitted exactly when scoped, and identical to the DEFAULT map's canonical id ─────────────
 # The fixture's only scoped symbol is Point (a C++ class); free functions must stay id-less (zero token cost).
-MAP_ID="$( grep -o '<s [^>]*n="Point"[^>]*>' "$TMP/map.xml" | grep -o 'id="[^"]*"' | head -1 )"
-FOR_ID="$( drows "$TMP/for.xml" | grep -E ' n="Point"' | grep -o 'id="[^"]*"' | head -1 )"
+# row 6 (2026-09-12): the identity attribute is the SHORT id sc= (the enclosing scope) on both surfaces; the
+# canonical id composes as p::sc::n, so agreement is "the same sc= for Point" — the path half is the row's own p=.
+MAP_ID="$( grep -o '<s [^>]*n="Point"[^>]*>' "$TMP/map.xml" | grep -o 'sc="[^"]*"' | head -1 )"
+FOR_ID="$( drows "$TMP/for.xml" | grep -E ' n="Point"' | grep -o 'sc="[^"]*"' | head -1 )"
 if [ -n "$MAP_ID" ]; then
     [ "$MAP_ID" = "$FOR_ID" ] \
-        && ok "id= agrees with the default map's canonical id for Point ($MAP_ID)" \
-        || no "id= disagrees with the default map: map=$MAP_ID bundle=${FOR_ID:-<absent>}"
+        && ok "sc= agrees with the default map's scope for Point ($MAP_ID)" \
+        || no "sc= disagrees with the default map: map=$MAP_ID bundle=${FOR_ID:-<absent>}"
 else
-    no "default map emitted no id= for Point — the fixture changed; re-anchor this assertion"
+    no "default map emitted no sc= for Point — the fixture changed; re-anchor this assertion"
 fi
-SCOPELESS_WITH_ID="$( drows "$TMP/for.xml" | grep -E ' n="(distance|perimeter)"' | grep -c 'id="' )"
+SCOPELESS_WITH_ID="$( drows "$TMP/for.xml" | grep -E ' n="(distance|perimeter)"' | grep -c 'sc="\| id="' )"
 [ "$SCOPELESS_WITH_ID" = "0" ] \
-    && ok "id= omitted on scope-less symbols (canonical id == bare name → no token cost)" \
+    && ok "sc= omitted on scope-less symbols (canonical id == bare name → no token cost)" \
     || no "id= emitted on $SCOPELESS_WITH_ID scope-less row(s) — it must add disambiguation or be absent"
 
 # ── 3) --for and --pack-task agree on in= for every symbol BOTH bundles name ──────────────────────────

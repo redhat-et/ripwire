@@ -111,14 +111,14 @@ if [ $? -eq 0 ]; then ok "default map exits 0"; else no "default map exited non-
 command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP"; then ok "xmllint --noout"; else no "xmllint failed"; fi; }
 
 SPLIT="$DIR/split"; sed 's/></>\n</g' "$MAP" >"$SPLIT"
-rowOf(){ awk -v pat="$1" '$0 ~ pat{f=1;print;next} /^<s /{f=0} f' "$SPLIT"; }   # the <s> row matching an attribute + its <c> children (top-level defs carry no id=, so pass n="…")
+rowOf(){ awk -v pat="$1" '$0 ~ pat{f=1;print;next} /^<s /{f=0} f' "$SPLIT"; }   # the <s> row matching an attribute + its <c> children (top-level defs carry no sc=, so pass n="…")
 
 echo "=== setter definitions are indexed, scoped, and distinct from their getters ==="
-if grep -q '<s t="method" n="name=" id="s.rb::W::name="' "$SPLIT"; then ok "def name=(v) → t=\"method\" n=\"name=\" id=\"s.rb::W::name=\""; else no "def name=(v) not indexed as W::name=: $( grep -o 'n="name[^"]*"[^>]*' "$SPLIT" | head -3 | tr '\n' ' ' )"; fi
-if grep -q 'n="count=" id="s.rb::W::count="' "$SPLIT"; then ok "def count=(v) → W::count="; else no "def count=(v) not indexed"; fi
-if grep -q 'n="limit=" id="s.rb::W::limit="' "$SPLIT"; then ok "def self.limit=(v) → W::limit= (singleton setter)"; else no "def self.limit=(v) not indexed"; fi
-if grep -q 'n="name=" id="s.rb::Other::name="' "$SPLIT"; then ok "Other#name= indexed separately"; else no "Other#name= not indexed"; fi
-if grep -q '<s t="method" n="name" id="s.rb::W::name"' "$SPLIT"; then ok "getter def name still indexed as W::name"; else no "getter W::name missing"; fi
+if grep -q '<s t="method" n="name=" sc="W"' "$SPLIT"; then ok "def name=(v) → t=\"method\" n=\"name=\" sc=\"W\" (id s.rb::W::name=)"; else no "def name=(v) not indexed as W::name=: $( grep -o 'n="name[^"]*"[^>]*' "$SPLIT" | head -3 | tr '\n' ' ' )"; fi
+if grep -q 'n="count=" sc="W"' "$SPLIT"; then ok "def count=(v) → W::count="; else no "def count=(v) not indexed"; fi
+if grep -q 'n="limit=" sc="W"' "$SPLIT"; then ok "def self.limit=(v) → W::limit= (singleton setter)"; else no "def self.limit=(v) not indexed"; fi
+if grep -q 'n="name=" sc="Other"' "$SPLIT"; then ok "Other#name= indexed separately"; else no "Other#name= not indexed"; fi
+if grep -q '<s t="method" n="name" sc="W"' "$SPLIT"; then ok "getter def name still indexed as W::name"; else no "getter W::name missing"; fi
 if [ "$( grep -c 'n="name" ' "$SPLIT" )" -eq 1 ]; then ok "exactly one symbol named name (the getter)"; else no "expected one getter row, got $( grep -c 'n="name" ' "$SPLIT" )"; fi
 
 echo "=== a setter CALL edges to the setter, never to the getter ==="
@@ -128,7 +128,7 @@ echo "$WR" | grep -q '<c n="name"/>\|<c n="name" ' && no "writer: w.name = 3 ALS
 RD="$( rowOf 'n="reader" ' )"
 if echo "$RD" | grep -q '<c n="name"'; then ok "reader: w.name → edge to the getter name (unchanged)"; else no "reader: lost the getter edge: $RD"; fi
 echo "$RD" | grep -q '<c n="name="' && no "reader: a plain read edges to name=" || ok "reader: no edge to name="
-RN="$( rowOf 'id="s.rb::W::rename"' )"
+RN="$( rowOf 'n="rename" sc="W"' )"
 if echo "$RN" | grep -q '<c n="name="'; then ok "rename: self.name = v → edge to name="; else no "rename: no edge to name=: $RN"; fi
 echo "$RN" | grep -q 'amb=' && no "rename: self.name = v stayed ambiguous between W::name= and Other::name= (Rule 1 should pin the self receiver)" || ok "rename: pinned to W::name= (self receiver, no amb=)"
 echo "$RN" | grep -q '<c n="name"/>\|<c n="name" ' && no "rename: self.name = v also edges the getter" || ok "rename: no edge to the getter"

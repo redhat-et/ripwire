@@ -211,7 +211,7 @@ inline constexpr const char* kPackTaskBundleLegendBody =
          // measured, not estimated. Every key is still named; the prose around them is what went.
          // deep-tail d1 (2026-08-29): r= joins the explicit dictionary — same trap-#8 terseness, one key
          // (the full deep-tail contract lives in the --for legend's own clause, docs/EVALS.md registration).
-         "Row keys: n=name (chain it), id=canonical(when scoped), in=reuse-count (absent = not measured, never a false 0)"
+         "Row keys: n=name (chain it), sc=enclosing scope (when scoped; the full id is p::sc::n), in=reuse-count (absent = not measured, never a false 0)"
          ", l=line, p=path, t=kind, cx=cyclomatic, ccx=cognitive, rel=caller|callee, r=rank in this ranking "
          "(rows in r= order); far=ranked but over 1 hop out; "
          "of_top denominator is per-section. "

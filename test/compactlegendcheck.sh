@@ -24,7 +24,7 @@
 # jsoncheck #8b and shapingflagcheck (F) use — so a verb added tomorrow is probed tomorrow. Each flag runs at
 # defaults on a tmp git fixture; whatever answers with an XML root is an XML verb and must honor compact,
 # everything else must refuse it, and each verb's prose legend fits its per-verb pin (pinFor). LOOP arm (L): the ten-verb
-# loop's compact legend bill ≤ 4,900 B (was 29,824 on the ripwire tree). MCP arm (M): edit_check with legend:"compact" answers
+# loop's compact legend bill ≤ 5,000 B (was 29,824 on the ripwire tree). MCP arm (M): edit_check with legend:"compact" answers
 # in ≤ 900 B on a clean tree, and five more MCP verbs' legends fit their per-verb pins.
 # CONDITIONAL arm (D): an absent-at-zero or form-conditional attribute (declined_calls=, unproven_defs=, bodyless_defs=,
 # the member form, the multi-root <root label=> rows, --lego's caveat=; on the map family and --impact: pr_iters=,
@@ -331,12 +331,18 @@ probeFor()
 # (no probe on this fixture prints one) and shortened fourteen readings without losing accuracy. Ten pins moved down.
 # Re-measured at the lane's end, (D36): pack-task 327 -> 804 B (its purpose line spells the bundle's own vocabulary, and the
 # <d r= cx= ccx= in=> and route= readings ride its rows) and from-trace 290 -> 445 B (the same four <d> readings); no other schema moved.
+# RE-PINNED 2026-09-12 (row 6, sc= — the short symbol id): seven schemas moved up by the ONE new whole-document reading
+# `sc=: enclosing scope; the full id is p::sc::n …` (~95 B) that every root printing <s>/<d> rows now carries, plus the
+# route= reading's growth on the bundle family (route= is a CODE now and the reading spells the codes): map 810 -> 920
+# (measured 908, the --rank-by=churn probe), map-diff 800 -> 910 (901), pack-signatures 680 -> 780 (775), metrics 720 -> 820
+# (814), query 630 -> 730 (723), pack-task 820 -> 980 (974), pack-top-n 660 -> 770 (761). The bytes the reading costs are the
+# bytes the rows save: 20 B per scoped row (this repo's flagless map, 137 scoped rows: -4,048 B, -15.3%).
 # schema                      pin  measured
 PIN_TABLE='
-ripwire.map/v1                   810   799
-ripwire.map-diff/v1              800   789
-ripwire.pack-signatures/v1       680   663
-ripwire.metrics/v1               720   702
+ripwire.map/v1                   920   908
+ripwire.map-diff/v1              910   901
+ripwire.pack-signatures/v1       780   775
+ripwire.metrics/v1               820   814
 ripwire.deps/v1                  260   245
 ripwire.hotspots/v1              280   264
 ripwire.clones/v1                290   280
@@ -377,7 +383,7 @@ ripwire.mentions/v1              180   168
 ripwire.affected/v1              350   339
 ripwire.verify/v1                330   316
 ripwire.help-task/v1             170   153
-ripwire.query/v1                 630   611
+ripwire.query/v1                 730   723
 ripwire.grep/v1                  360   345
 ripwire.match/v1                 270   260
 ripwire.lego/v1                  290   275
@@ -395,8 +401,8 @@ ripwire.merge-scout/v1           220   208
 ripwire.whereis/v1               240   223
 ripwire.community/v1             730   719
 ripwire.layout/v1                160   149
-ripwire.pack-task/v1             820   804
-ripwire.pack-top-n/v1            660   649
+ripwire.pack-task/v1             980   974
+ripwire.pack-top-n/v1            770   761
 ripwire.expand/v1                280   265
 '
 pinFor()
@@ -508,10 +514,13 @@ echo
 # RE-ANCHORED 2026-09-12 (the fourth sweep's last pass): 4,400 → 4,900 B, measured 4,860 (from 4,392), by the same rule. Attributed
 # against the previous lane build: --impact 597 → 777 B (its <f lazy=> importer-row reading) and --safe-delete 424 → 712 B (t=/p=,
 # defs=, ambiguous_callers=, dead_code_candidate=); nothing else in the loop moved.
+# RE-ANCHORED 2026-09-12 (row 6, sc= — the short symbol id): 4,900 → 5,000 B, measured 4,946 (from 4,849), by the same rule. Attributed:
+# the one new whole-document reading `sc=: enclosing scope; the full id is p::sc::n …` rides every loop verb whose answer prints
+# a scoped symbol row (~95 B each where present) — the bytes the rows themselves give back at 20 B per scoped row.
 # RE-MEASURED 2026-09-12 (that sweep's design review): 4,849 B, the pin unchanged at 4,900. Attributed against the last-pass build:
 # --impact 777 → 770 B (the shorter <f lazy=> reading) and --safe-delete 712 → 708 B (t= reads a match, dead_code_candidate= says
 # outside); nothing else in the loop moved.
-echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 4,900 B (29,824 B in full on the ripwire tree) ==="
+echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 5,000 B (29,824 B in full on the ripwire tree) ==="
 loopBytes=0; fullBytes=0
 for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--uses=distance" "--edit-check=total_area" \
          "--quality-delta" "--test-gate=geometry.cpp" "--affected=geometry.cpp" "--safe-delete=total_area" "--slice=total_area"; do
@@ -520,8 +529,8 @@ for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--u
     b="$( leg bytes "$TMP/l.c" )"; f="$( leg bytes "$TMP/l.f" )"
     loopBytes=$(( loopBytes + b )); fullBytes=$(( fullBytes + f ))
 done
-[ "$loopBytes" -le 4900 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
-                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 4,900 B; full: $fullBytes B)"
+[ "$loopBytes" -le 5000 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
+                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 5,000 B; full: $fullBytes B)"
 
 echo
 echo "=== (M) MCP: legend:\"compact\" on edit_check answers in ≤ 900 B on a clean tree; every XML verb takes the argument, within its per-verb legend pin ==="

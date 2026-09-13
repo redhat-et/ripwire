@@ -98,9 +98,12 @@ callees(){
     python3 - "$1" "$2" <<'PY'
 import sys, xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
-for s in root.iter('s'):
-    if (s.get('id') or '').endswith(sys.argv[2]):
-        print(' '.join(sorted(c.get('n') for c in s.iter('c'))))
+# row 6: the row prints sc= (the scope) and its <f p=> the path — compose the canonical id the old id= spelled
+for f in root.iter('f'):
+    for s in f.iter('s'):
+        cid = f.get('p') + '::' + s.get('sc') + '::' + s.get('n') if s.get('sc') else s.get('n')
+        if cid.endswith(sys.argv[2]):
+            print(' '.join(sorted(c.get('n') for c in s.iter('c'))))
 PY
 }
 header_unresolved(){ grep -oE 'unresolved=[0-9]+' "$1" | head -1; }
@@ -226,11 +229,11 @@ firstd(){ grep -oE '<d [^>]*>' "$1" | head -1 | grep -oE ' n="[^"]*"'; }
     || no "(D) --for=generate_app: first row $( firstd "$TMP/for_snake.xml" ); ctx $( grep -oE 'reason="[^"]*"' "$TMP/for_snake.xml" | head -1 )"
 # the fixture copy is scanned by an absolute path, so the evidence is the elided form `<top>/.../work.ex`
 # (lexical.h routeAnchorPath); what matters is that it is a FILE, not the literal `syntax` of a name-less hit
-grep -qE 'route="routed: name-exact BM25[^"]*anchors: generate_app\([^)]*work\.ex\)' "$TMP/for_snake.xml" \
+grep -qE 'route="name-exact\(generate_app\)[^"]*anchors: generate_app\([^)]*work\.ex\)' "$TMP/for_snake.xml" \
     && ok "(D) the name-exact route's anchor evidence names the defining file (not \`syntax\`)" \
     || no "(D) anchor evidence wrong: $( grep -oE 'route="[^"]*"' "$TMP/for_snake.xml" | head -1 )"
 "$BIN" "$F" --for=text --no-cache >"$TMP/for_word.xml" 2>/dev/null
-grep -q 'route="routed: name-exact BM25' "$TMP/for_word.xml" && [ "$( firstd "$TMP/for_word.xml" )" = ' n="text/2"' ] \
+grep -q 'route="name-exact(' "$TMP/for_word.xml" && [ "$( firstd "$TMP/for_word.xml" )" = ' n="text/2"' ] \
     && ok "(D) --for=text: the plain word is a whole-name hit through the arity-less spelling — name-exact route, text/2 first" \
     || no "(D) --for=text: route $( grep -oE 'route="[^ ]* [^ ]*' "$TMP/for_word.xml" | head -1 ) first $( firstd "$TMP/for_word.xml" )"
 "$BIN" "$F" --for=text/2 --no-cache >"$TMP/for_arity.xml" 2>/dev/null

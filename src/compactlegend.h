@@ -52,13 +52,13 @@ struct CompactLegendSpec
 inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
 {
     // ── the ranked-map family (root <r>) — hinted by the map-shaping flag that rode along ──
-    { "r",   "map",        "ranked symbol map: <f p= layer=> groups <s t= n= id= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data" },
+    { "r",   "map",        "ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data" },
     { "r",   "map-diff",   "the ranked map anchored at at=: what the diff touched, the map's row vocabulary" },
     { "r",   "metrics",    "the ranked map with per-symbol metrics: in/out, cx/ccx, loc, params, nest, humps/deep, locals, cbo, amp, tested, ev" },
     { "r",   "around",     "call neighbourhood of of=: depth= hops, fanout= kept per hop; absent rows lie outside that boundary" },
     { "r",   "query",      "lexical-rank map for the query term, the map's row vocabulary" },
     // ── the bundle family (root <ctx>) ──
-    { "ctx", "pack-signatures", "the ranked map plus <sigs><d l= n= id= pure=> signature rows" },
+    { "ctx", "pack-signatures", "the ranked map plus <sigs><d l= n= sc= pure=> signature rows" },
     { "ctx", "pack-top-n", "the ranked map plus <src p=> bodies of the top-N symbols" },
     { "ctx", "skipped",    "why the index lacks a file <f p= why= bytes= limit= ext=>; indexed but unvouched <h p= why= err= err_ratio=>; <lang> census" },
     { "ctx", "notes",      "field notes by target: <target id= dangling=> holds <note d= sha= branch=>; counts = the rows" },
@@ -70,7 +70,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     // 1-hop neighbours in either direction, rel= which one, of_top= there the bodies that qualified (bodiesTotal), shared= how many
     // of them a row neighbours (emitted above 1); run= rides a <test> row only when a runner is derivable (testmap.h runHint). The
     // <d> lens facts and route= ride only some answers and are present-only terms below. compactlegendcheck (D36).
-    { "ctx", "pack-task",  "one-call task bundle for task= under budget_tokens=: <sigs><d n= id= l= p=> ranking, <far><s t= n= p=> ranked but over 1 hop out (of_top= ranked rows) > <bodies><b t= n= p= l=> with <calls><c n= l=> callees > <callers><s rel=caller|callee shared=> 1-hop from the bodies (of_top= bodies; shared= bodies reached, absent at 1) > notes > <tests><test p= run=> (run= when derivable)" },
+    { "ctx", "pack-task",  "one-call task bundle for task= under budget_tokens=: <sigs><d n= sc= l= p=> ranking, <far><s t= n= p=> ranked but over 1 hop out (of_top= ranked rows) > <bodies><b t= n= p= l=> with <calls><c n= l=> callees > <callers><s rel=caller|callee shared=> 1-hop from the bodies (of_top= bodies; shared= bodies reached, absent at 1) > notes > <tests><test p= run=> (run= when derivable)" },
     { "ctx", "from-trace", "trace frames mapped to indexed symbols, innermost first; the innermost in-corpus body included" },
     { "ctx", "exemplar",   "the best-in-class instance of kind= for the task, chosen by role: <exemplar n= p= in= ccx= tested=>, <bodies><b> to imitate" },
     { "ctx-partitions", "pack-task", "N minimally overlapping agent bundles carved along call-graph communities plus one shared core; each <bundle> wraps a <ctx>" },
@@ -423,7 +423,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "ccx",               "<d cx= ccx=>: cyclomatic/cognitive complexity", true, "d" },
     { "in",                "<d in=N>: N callers in the index (absent: not measured)", true, "d" },
     { "amp",               "<d amp=N>: direct callers + files sharing a commit with its file (absent at 0)", true, "d" },
-    { "route",             "route=: the ranker the task was routed to, and why", true, "ctx" },
+    { "route",             "route=: the ranker: name-exact(X) = the task names symbol X (anchors: its evidence), subtoken+body = conceptual BM25 (:broad = 1-2 plain words, plain rg may also win; :declined(...) = a name hit refused as a common name)", true, "ctx" },
+    // row 6 (2026-09-12): the SHORT id on symbol rows. A map <s> row and a lens <d> row carry sc= (the enclosing
+    // scope) instead of the path-repeating id=; the reading spells the composition once for every root that
+    // prints the rows, since the shared purposes above only name the attribute.
+    { "sc",                "sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it", true },
     { "parse_degraded",    "parse_degraded=1: ERROR nodes in that parse", true },
     { "tier_partial",      "tier_partial=1: tier elected under a partial classification" },
     { "dangling",          "dangling=1: matches nothing indexed", true },

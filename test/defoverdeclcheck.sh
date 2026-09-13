@@ -117,7 +117,7 @@ fi
 
 # ── (e) ROUTE SCOPE ───────────────────────────────────────────────────────────────────────────────
 for q in Widget Gadget Sprocket; do
-    "$BIN" defoverdeclfix --for="$q" 2>/dev/null | grep -q 'routed: name-exact' \
+    "$BIN" defoverdeclfix --for="$q" 2>/dev/null | grep -q 'route="name-exact(' \
         && ok "--for=$q takes the name-exact route (the route this rule is scoped to)" \
         || no "--for=$q no longer routes name-exact — the arms above are measuring the wrong ranker"
 done
@@ -129,7 +129,7 @@ done
 # inert arm in a gate written for a ranking change is the failure mode this suite has been bitten by
 # twice. The first row is also the one that survives every budget: it is what the defect actually
 # costs on a corpus where 85 declarations push the definition off the end.
-first="$( tr '>' '\n' <"$TMP/lens" | sed -n 's/.*<d l="\([0-9]*\)" n="Widget" id="\([^"]*\)".*/\2:\1/p' | sed 's#defoverdeclfix/##' | head -1 )"
+first="$( tr '>' '\n' <"$TMP/lens" | sed -n 's/.*<d l="\([0-9]*\)" n="Widget" sc="\([^"]*\)" p="\([^"]*\)".*/\3::\2::Widget:\1/p' | sed 's#defoverdeclfix/##' | head -1 )"
 [ "$first" = "z_widget.hpp::Widget::Widget:10" ] \
     && ok "the FIRST ranked row is the definition (z_widget.hpp:10) — the row that survives any budget" \
     || no "the first ranked row is $first, not the definition z_widget.hpp::Widget::Widget:10"
@@ -210,7 +210,7 @@ gadbody="$( tr '>' '\n' <"$TMP/gad" | sed -n 's/.*<b t="[^"]*" l="\([0-9]*\)" p=
 # from that same pre-rule binary against the GROWN fixture and then verified invariant across the
 # rule. A pin re-derived on the binary under test would be worthless; this one was not.
 CQ="forward declared widget and sprocket types"
-"$BIN" defoverdeclfix --for="$CQ" 2>/dev/null | grep -q 'routed: subtoken+body' \
+"$BIN" defoverdeclfix --for="$CQ" 2>/dev/null | grep -q 'route="subtoken+body' \
     && ok "the declaration-seeking conceptual query still routes subtoken+body" \
     || no "the declaration-seeking conceptual query changed route"
 want='a_headers.hpp::Sprocket::Sprocket

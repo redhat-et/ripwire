@@ -49,7 +49,20 @@ run(){ ( cd "$WORK" && "$BIN" . --no-cache "$@" 2>/dev/null ); }
 # them so the gate is independent of how ing spells the root prefix.
 MAP0="$( run )"
 FILE_TARGET="$( printf '%s' "$MAP0" | grep -oE '<f p="[^"]*a\.cpp"' | head -1 | sed -E 's/<f p="([^"]*)"/\1/' )"
-COMPUTE_ID="$( printf '%s' "$MAP0" | grep -oE 'id="[^"]*compute"' | head -1 | sed -E 's/id="([^"]*)"/\1/' )"
+# row 6 (2026-09-12): the row prints the short id sc=; the canonical id composes as <f p=>::sc::n
+COMPUTE_ID="$( printf '%s' "$MAP0" | python3 -c '
+import re, sys
+doc, name, scope = sys.stdin.read(), sys.argv[1], ( sys.argv[2] if len( sys.argv ) > 2 else None )
+for f in re.finditer( r"<f p=\"([^\"]*)\"[^>]*>(.*?)</f>", doc, re.S ):
+    for row in re.finditer( r"<[sd]\b([^>]*)>", f.group( 2 ) ):
+        a = dict( re.findall( r"\s([\w:.-]+)=\"([^\"]*)\"", row.group( 1 ) ) )
+        if a.get( "n" ) == name and "sc" in a and ( scope is None or a[ "sc" ] == scope ):
+            print( f.group( 1 ) + "::" + a[ "sc" ] + "::" + a[ "n" ] ); sys.exit( 0 )
+for row in re.finditer( r"<d\b([^>]*)>", doc ):
+    a = dict( re.findall( r"\s([\w:.-]+)=\"([^\"]*)\"", row.group( 1 ) ) )
+    if a.get( "n" ) == name and "sc" in a and "p" in a and ( scope is None or a[ "sc" ] == scope ):
+        print( a[ "p" ] + "::" + a[ "sc" ] + "::" + a[ "n" ] ); sys.exit( 0 )
+' compute )"
 if [ -n "$FILE_TARGET" ]; then ok "discovered file target: $FILE_TARGET"; else no "could not discover the a.cpp file path"; fi
 if [ -n "$COMPUTE_ID" ]; then ok "discovered scoped canonical id: $COMPUTE_ID"; else no "could not discover Widget::compute canonical id"; fi
 # D5: --note-add normalizes a target's path component to ROOT-RELATIVE on write, stripping any leading

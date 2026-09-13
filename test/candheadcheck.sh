@@ -119,7 +119,7 @@ else
 fi
 
 # ── (f) ROUTE SCOPE ───────────────────────────────────────────────────────────────────────────────────
-grep -q 'routed: name-exact' "$TMP/lens" \
+grep -q 'route="name-exact(' "$TMP/lens" \
     && ok "--for=Frobnicator takes the name-exact route (the route this fix's arms measure)" \
     || no "--for=Frobnicator no longer routes name-exact"
 

@@ -1213,7 +1213,7 @@ inline constexpr char kHelpHead[] =
         "                                 FILE:LINE:NAME      paste a row's p=\"path:line\" straight from --callers/--lint/--grep\n"
         "                                                     (NOT --hotspots: its p= is a BARE path — build FILE:LINE:NAME from its\n"
         "                                                      own p=/top_l=/top= instead, since top= is just the worst function's name)\n"
-        "                                 path::scope::name   the canonical id= --for/--pack-task emit\n"
+        "                                 path::scope::name   the id composed from a row's p= sc= n= (the map, --for, --pack-task)\n"
         "                                 Scope::name         the sym= spelling edit-check and grep's in= rows print — matches the name\n"
         "                                                     under any scope whose ::-boundary SUFFIX is Scope (Box::lid, deep::Box::lid);\n"
         "                                                     a wrong scope refuses, it never falls back to the bare-name union\n"

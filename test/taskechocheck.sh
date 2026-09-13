@@ -99,11 +99,14 @@ if [ "$jpt"  = "$xpt"  ]; then ok "--pack-task: the two dialects report the SAME
 
 # ── §B1.7 arm 3: the route note is recoverable verbatim too ────────────────────────────────────────
 rfor="$( printf '%s' "$XMLFOR" | rootAttr route )"
+# row 6 (2026-09-12): route= is a CODE (name-exact(X) / subtoken+body[:broad|:declined(...)]), so the value the
+# router produced is recoverable verbatim when it starts with one of the two codes — the dash-collapse defect
+# this arm was written for cannot recur on a value that never held a flag name, and the arm now asserts the
+# code itself rather than a flag spelling the value no longer carries.
 case "$rfor" in
-    "@@MISSING@@") no "--for XML root has no route= attribute";;
-    *"--for"*)     ok "--for XML root route= keeps its double-hyphen flag names verbatim";;
-    *"-for"*)      no "--for XML root route= is still dash-collapsed ('$rfor')";;
-    *)             no "--for XML root route= names no ranker flag at all ('$rfor')";;
+    "@@MISSING@@")                      no "--for XML root has no route= attribute";;
+    "name-exact("*|"subtoken+body"*)    ok "--for XML root route= carries the ranker code verbatim ('$rfor')";;
+    *)                                  no "--for XML root route= is not a ranker code ('$rfor')";;
 esac
 
 # ── §B1.7 arm 4: the SCRUB itself is untouched — the comment echo is still collapsed and G4-legal ──
@@ -229,10 +232,10 @@ if command -v xmllint >/dev/null 2>&1; then
     # the scrub is LOSSY BY DESIGN and the note says which bytes it eats: a control byte becomes a space and
     # an invalid sequence becomes '?'. Asserting the substitution (not just well-formedness) is what stops a
     # future "fix" from silently dropping the byte and shortening the user's own token.
-    grep -q 'names a symbol (ceilingArithmetic x)' "$TMP/route.c0.xml" \
+    grep -q 'name-exact(ceilingArithmetic x)' "$TMP/route.c0.xml" \
         && ok "§B4 the C0 byte became a SPACE inside the comment (xmlCommentText rule 2)" \
         || no "§B4 the C0 byte was not replaced by a space: [$( head -c 90 "$TMP/route.c0.xml" )]"
-    grep -q 'names a symbol (ceilingArithmetic?x)' "$TMP/route.utf8.xml" \
+    grep -q 'name-exact(ceilingArithmetic?x)' "$TMP/route.utf8.xml" \
         && ok "§B4 the invalid UTF-8 byte became '?' inside the comment (xmlCommentText rule 3)" \
         || no "§B4 the invalid UTF-8 byte was not replaced by '?': [$( head -c 90 "$TMP/route.utf8.xml" )]"
 else

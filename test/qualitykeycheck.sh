@@ -210,7 +210,20 @@ fi
 D="$( newrepo replay )"
 ( cd "$D" && scopedSimple > w.cpp && git add -A && git commit -qm base )
 ( cd "$D" && scopedComplex > w.cpp )
-CANON="$( cd "$D" && "$BIN" . --top-k=50 2>/dev/null | tr '>' '>\n' | sed -n 's/.*n="compute" id="\([^"]*\)".*/\1/p' | head -1 )"
+# row 6 (2026-09-12): the row prints the short id sc=; the canonical id composes as <f p=>::sc::n
+CANON="$( cd "$D" && "$BIN" . --top-k=50 2>/dev/null | python3 -c '
+import re, sys
+doc, name, scope = sys.stdin.read(), sys.argv[1], ( sys.argv[2] if len( sys.argv ) > 2 else None )
+for f in re.finditer( r"<f p=\"([^\"]*)\"[^>]*>(.*?)</f>", doc, re.S ):
+    for row in re.finditer( r"<[sd]\b([^>]*)>", f.group( 2 ) ):
+        a = dict( re.findall( r"\s([\w:.-]+)=\"([^\"]*)\"", row.group( 1 ) ) )
+        if a.get( "n" ) == name and "sc" in a and ( scope is None or a[ "sc" ] == scope ):
+            print( f.group( 1 ) + "::" + a[ "sc" ] + "::" + a[ "n" ] ); sys.exit( 0 )
+for row in re.finditer( r"<d\b([^>]*)>", doc ):
+    a = dict( re.findall( r"\s([\w:.-]+)=\"([^\"]*)\"", row.group( 1 ) ) )
+    if a.get( "n" ) == name and "sc" in a and "p" in a and ( scope is None or a[ "sc" ] == scope ):
+        print( a[ "p" ] + "::" + a[ "sc" ] + "::" + a[ "n" ] ); sys.exit( 0 )
+' compute )"
 if [ -z "$CANON" ]; then
     no "(C) could not read the emitted canonical id for Widget::compute"
 else
@@ -258,7 +271,7 @@ D="$( newrepo g4 )"
 ( cd "$D" && simpleA > a.cpp )
 row="$( "$BIN" "$D" --top-k=50 2>/dev/null | tr '>' '>\n' | grep -o '<s [^>]*n="helper"[^>]*' | head -1 )"
 case "$row" in
-    *' id="'*) no "(F) a scope-less symbol grew an id= attribute — canonicalId moved, and that is the +26.4% G4 breach: $row" ;;
+    *' sc="'*|*' id="'*) no "(F) a scope-less symbol grew an sc=/id= attribute — canonicalId moved, and that is the +26.4% G4 breach: $row" ;;
     '')        no "(F) could not find the helper row on the default map" ;;
     *)         ok "(F) scope-less symbols still emit no id= — canonicalId untouched, map density preserved" ;;
 esac
