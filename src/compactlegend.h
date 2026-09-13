@@ -335,6 +335,10 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // merge_bombs_skipped= (2026-09-12): the cut the churn-decay miner makes, disclosed on the block it shapes (gitmine.h
     // kChurnMergeBombMaxFiles). Always on <recent>, "0" included, so the term rides every churn-decay map.
     { "merge_bombs_skipped", "merge_bombs_skipped=N: N commits touching more than 100 files skipped, uncounted; a file only they touched is absent", true, "recent" },
+    // C1-b (2026-09-12): in=DIR — the scoped block (ELEMENT-qualified: scope= rides only a <recent>) and the map stub (total= on
+    // <symbols> alone; the paging window clause above already reads shown=/capped=). Both present-only.
+    { "scope",             "<recent scope=DIR>: a second block after the unchanged global one, DIR's files only (p= root-relative); offset= the row it starts at; capped=1 + next= page it (offset=/limit=)", true, "recent" },
+    { "total",             "<symbols total=N shown=0 next=>: the symbol map in= did not ask for, N rows in the same run without in=; next= fetches it", true, "symbols" },
     // The map's ROW fields that are absent at their default, defined only inside the always-on `<!-- ripwire v1` legend (prose):
     // lpin= and overloads= on <s>, prov= on <c>. Row-level, because each has one meaning tool-wide and the map emitter is its one
     // XML writer. test/compactlegendcheck.sh (S) population 4 reads that legend's absence-marked row fields from source.

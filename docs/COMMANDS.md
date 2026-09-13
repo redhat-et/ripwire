@@ -50,7 +50,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,** — [`--scan-skill`](#scan-skill-file) · [`--scan-skills`](#scan-skills-dir) · [`--force`](#force)
 
-**knobs / modes** — [`--rank-by`](#rank-by-pagerank-authority-hub-rrf-churn-churn-decay) · [`--format`](#format-xml-columnar-rows) · [`--format`](#format-candidates) · [`--legend`](#legend-full-compact) · [`--json`](#json) · [`--limit`](#limit-n-offset-m) · [`--exclude`](#exclude-substr) · [`--map-diff`](#map-diff) · [`--cache`](#cache-path) · [`--index-out`](#index-out-base) · [`--no-cache`](#no-cache) · [`--no-ignore`](#no-ignore) · [`--max-file-size`](#max-file-size-n-k-m-g) · [`--refetch`](#refetch) · [`--scip`](#scip-index-scip) · [`--pin-census`](#pin-census-file) · [`--mcp`](#mcp) · [`--listen`](#listen-host-port) · [`--mcp-token`](#mcp-token-t) · [`--allow-remote-edits`](#allow-remote-edits) · [`--eval-stray`](#eval-stray-file) · [`--eval`](#eval) · [`--eval-retrieval`](#eval-retrieval) · [`--eval-mined`](#eval-mined-file) · [`--eval-skills`](#eval-skills-file) · [`-h`](#h-help) · [`-v`](#v-version)
+**knobs / modes** — [`--rank-by`](#rank-by-pagerank-authority-hub-rrf-churn-churn-decay) · [`--in`](#in-dir) · [`--format`](#format-xml-columnar-rows) · [`--format`](#format-candidates) · [`--legend`](#legend-full-compact) · [`--json`](#json) · [`--limit`](#limit-n-offset-m) · [`--exclude`](#exclude-substr) · [`--map-diff`](#map-diff) · [`--cache`](#cache-path) · [`--index-out`](#index-out-base) · [`--no-cache`](#no-cache) · [`--no-ignore`](#no-ignore) · [`--max-file-size`](#max-file-size-n-k-m-g) · [`--refetch`](#refetch) · [`--scip`](#scip-index-scip) · [`--pin-census`](#pin-census-file) · [`--mcp`](#mcp) · [`--listen`](#listen-host-port) · [`--mcp-token`](#mcp-token-t) · [`--allow-remote-edits`](#allow-remote-edits) · [`--eval-stray`](#eval-stray-file) · [`--eval`](#eval) · [`--eval-retrieval`](#eval-retrieval) · [`--eval-mined`](#eval-mined-file) · [`--eval-skills`](#eval-skills-file) · [`-h`](#h-help) · [`-v`](#v-version)
 
 ---
 
@@ -85,7 +85,7 @@ $ ./build/ripwire . --top-k=5
 ... [10 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--token-budget`, `--recall`, `--graph-query`, `--pack-signatures`, `--expand`, `--from-trace`, `--run-trace`, `--format`
+**Shaped by:** `--token-budget`, `--recall`, `--graph-query`, `--pack-signatures`, `--expand`, `--from-trace`, `--run-trace`, `--in`
 
 **Caveats (stated by the binary):**
 
@@ -4254,12 +4254,26 @@ $ ./build/ripwire . --rank-by=churn --top-k=5
 ... [16 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--since`
+**Shaped by:** `--since`, `--in`
 
 **Caveats (stated by the binary):**
 
 - choose the ranking signal: structure, authority, hub, fusion or churn ranking signal (churn = git change-frequency prior, and stamps its own map with rank_by/window/at so it cannot pass for the structural one;
 - Its age clock is HEAD's OWN commit timestamp, never the wall clock, so the default (whole-history) run is byte-stable for a fixed tree;
+
+### `--in=DIR`
+
+**Answers:** (with --rank-by=churn-decay) scope the recent-changes block to one directory DIR is root-relative and must be an existing directory under the root (db, src/util;
+
+a trailing slash is ignored; absolute paths and '..' are refused). The global <recent> block stays exactly as without the flag — a change outside DIR is still answered — and a SECOND block <recent scope="DIR" n= of=> follows it with DIR's files only, p= spelled root-relative exactly as the global block spells them, same order (newest commit first). It pages: 40 rows by default, capped="1" plus a pasteable next= when DIR has more (--offset=N continues, --limit=N sets the page size, offset= on the block says where a page started). The symbol map collapses to a counted stub <symbols total=N shown="0" next=/> — the map was not asked for; total= is the row count the same run without --in= carries and next= fetches it. Both blocks carry merge_bombs_skipped=. Refused with any other verb, under multi-root, with --top-k=0 and with --json.
+
+**Shaped by:** `--external-surface`, `--doctor`, `--legend`, `--limit`
+
+**Caveats (stated by the binary):**
+
+- absolute paths and '..' are refused).
+- It pages: 40 rows by default, capped="1" plus a pasteable next= when DIR has more (--offset=N continues, --limit=N sets the page size, offset= on the block says where a page started).
+- The symbol map collapses to a counted stub <symbols total=N shown="0" next=/> — the map was not asked for;
 
 ### `--format=xml|columnar|rows`
 
@@ -4341,7 +4355,7 @@ $ ./build/ripwire . --hotspots --json
 (empty)
 ```
 
-**Shaped by:** `--max-tokens`, `--token-budget`, `--for`
+**Shaped by:** `--max-tokens`, `--token-budget`, `--for`, `--in`
 
 **Caveats (stated by the binary):**
 
@@ -4351,7 +4365,7 @@ $ ./build/ripwire . --hotspots --json
 
 **Answers:** paginate a high-cardinality verb paginate a high-cardinality verb.
 
-HONORED by: --deps --callers --callees --tree --lint --hotspots --clones --cochange --owners --communities --community --doc-drift --whereis --grep/--regex --match --pattern --impact --uses --exercises --seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate --readability --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence --naming-consistency --safe-delete --pr-context --edit-check --flags --situ. Emit at most N rows, skipping the first M; N overrides the verb's own display cap (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40 impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio symbol rows, 40 nonlocal-state rows, 200 graph-query rows / --top-k, 40 unflagged --edit-check caller rows, 8 --flags read sites per gate, 25 --flip context rows per listing, 8 --situ blast-radius files and 8 co-change partners). A verb NEVER pages the rows that ARE its answer: --edit-check's flagged callers, --flip's and --situ's tests-to-run rows and --flags' gate rows ride every page in full, and every verdict/count attribute is computed over the full set first. With --offset alone (no --limit) the verb's own default page size applies and the root discloses limit="0" — on OUTPUT that 0 means 'no explicit --limit', never a zero-row page (the flag itself refuses --limit=0). A BARE run whose default cap cut rows (capped="1") carries the same limit="0" and the whole paging block below, so you can page from the first answer without guessing. Deterministic seams (rows are already sorted) so --offset=N is the exact continuation of the previous --limit=N page. The root element then carries shown= capped= total= has_more= next_offset= offset= limit= — loop until has_more="0". capped= compares the PAGE to the total (1 ⇔ shown < total), so a page past the end reads shown="0" capped="1" has_more="0": nothing was cut, the offset skipped everything — EXCEPT the verbs with TWO INDEPENDENT listings, which carry the noun-prefixed form instead (one shown= could only describe one): --test-gate shown_tests=/tests_capped= + shown_untested=/untested_capped=, --communities shown_modules=/modules_capped= + shown_bridges=/bridges_capped=, --ensemble and --context-ratio shown_syms=/syms_capped= + shown_files=/files_capped=; the window takes the PRIMARY listing (--test-gate's <u> rows; its <t> rows repeat on every page, complete). --edit-check is the same shape for a different reason: its <c> rows split into the ANSWER (callers flagged incompatible="1", with their complete sites_l=) and the CONTEXT (unflagged callers). Only the context pages — shown_unflagged=/unflagged_capped=, with total= the unflagged count — while the flagged rows and the <def> overload census ride every page in full and status=/defs=/callers=/incompatible= are computed over the FULL caller set before any window, so a page can never make the verdict say less than it knows. Any verb NOT in that list REFUSES both flags (exit 1) rather than accepting and ignoring them: budget/top-k verbs (--for/--recall/--pack-task/--from-trace/ --expand/--outline/--pack-signatures/--format=candidates) are shaped by --top-k/--max-tokens/--token-budget, not a page; the rest (--path/--connect/ --around/--exemplar/--report/--mermaid/--map-diff/--metrics and the default map) answer with a single fixed-shape result that has no row list to window at all.
+HONORED by: --deps --callers --callees --tree --lint --hotspots --clones --cochange --owners --communities --community --doc-drift --whereis --grep/--regex --match --pattern --impact --uses --exercises --seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate --readability --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence --naming-consistency --safe-delete --pr-context --edit-check --flags --situ --in. Emit at most N rows, skipping the first M; N overrides the verb's own display cap (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40 impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio symbol rows, 40 nonlocal-state rows, 200 graph-query rows / --top-k, 40 unflagged --edit-check caller rows, 8 --flags read sites per gate, 25 --flip context rows per listing, 8 --situ blast-radius files and 8 co-change partners). A verb NEVER pages the rows that ARE its answer: --edit-check's flagged callers, --flip's and --situ's tests-to-run rows and --flags' gate rows ride every page in full, and every verdict/count attribute is computed over the full set first. With --offset alone (no --limit) the verb's own default page size applies and the root discloses limit="0" — on OUTPUT that 0 means 'no explicit --limit', never a zero-row page (the flag itself refuses --limit=0). A BARE run whose default cap cut rows (capped="1") carries the same limit="0" and the whole paging block below, so you can page from the first answer without guessing. Deterministic seams (rows are already sorted) so --offset=N is the exact continuation of the previous --limit=N page. The root element then carries shown= capped= total= has_more= next_offset= offset= limit= — loop until has_more="0". capped= compares the PAGE to the total (1 ⇔ shown < total), so a page past the end reads shown="0" capped="1" has_more="0": nothing was cut, the offset skipped everything — EXCEPT the verbs with TWO INDEPENDENT listings, which carry the noun-prefixed form instead (one shown= could only describe one): --test-gate shown_tests=/tests_capped= + shown_untested=/untested_capped=, --communities shown_modules=/modules_capped= + shown_bridges=/bridges_capped=, --ensemble and --context-ratio shown_syms=/syms_capped= + shown_files=/files_capped=; the window takes the PRIMARY listing (--test-gate's <u> rows; its <t> rows repeat on every page, complete). --edit-check is the same shape for a different reason: its <c> rows split into the ANSWER (callers flagged incompatible="1", with their complete sites_l=) and the CONTEXT (unflagged callers). Only the context pages — shown_unflagged=/unflagged_capped=, with total= the unflagged count — while the flagged rows and the <def> overload census ride every page in full and status=/defs=/callers=/incompatible= are computed over the FULL caller set before any window, so a page can never make the verdict say less than it knows. Any verb NOT in that list REFUSES both flags (exit 1) rather than accepting and ignoring them: budget/top-k verbs (--for/--recall/--pack-task/--from-trace/ --expand/--outline/--pack-signatures/--format=candidates) are shaped by --top-k/--max-tokens/--token-budget, not a page; the rest (--path/--connect/ --around/--exemplar/--report/--mermaid/--map-diff/--metrics and the default map) answer with a single fixed-shape result that has no row list to window at all.
 
 **Try it**
 
@@ -4376,7 +4390,7 @@ $ ./build/ripwire . --ensemble --limit=8
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--tree`, `--graph-query`, `--external-surface`, `--exercises`, `--community`, `--zoom`, `--pr-context`
+**Shaped by:** `--tree`, `--graph-query`, `--external-surface`, `--exercises`, `--community`, `--zoom`, `--pr-context`, `--in`
 
 **Caveats (stated by the binary):**
 

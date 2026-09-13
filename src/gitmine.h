@@ -2098,14 +2098,20 @@ struct RecentFile
 // top 40 (its 40th row was 21 days old) and is named by the age-first one. Age is measured on HEAD's clock, the
 // anchor the decay itself uses. `outOf` receives the number of files any mined commit touched. Empty when the
 // walk found no history.
-inline std::vector<RecentFile> recentRowsFromDecayed( const std::string& root, const IngestResult& ing, const DecayedChurnMined& m,
-                                                      std::size_t keep, std::size_t* outOf )
+// C1-b (2026-09-12): the same rows over the files `keepFile( fileId )` admits, as ONE page — rows [skip, skip+keep) of the
+// sorted list, pageWindow's semantics (a skip past the end is an empty page, never out of range). `outOf` receives the
+// admitted-file count BEFORE the window, so a caller can say capped= and spell the next page. The global block is this
+// with an admit-all predicate and skip 0 (recentRowsFromDecayed below), byte-identical to its pre-C1 form; --in=DIR
+// passes the root-relative directory-prefix predicate (main.cpp churnRankedGraph).
+template <typename KeepFile>
+inline std::vector<RecentFile> recentRowsFromDecayedIf( const std::string& root, const IngestResult& ing, const DecayedChurnMined& m,
+                                                        KeepFile&& keepFile, std::size_t keep, std::size_t skip, std::size_t* outOf )
 {
     std::vector<RecentFile> rows;
     const std::int64_t      headEpoch = m.anyHistory ? gitHeadCommitEpoch( root ) : 0;
     for( std::uint32_t f = 0; f < std::uint32_t( m.weights.size() ); ++f )
     {
-        if( m.weights[f] > 0.0 )
+        if( m.weights[f] > 0.0 && keepFile( f ) )
         {
             const std::int64_t age = ( headEpoch > m.lastEpoch[f] ) ? ( headEpoch - m.lastEpoch[f] ) : 0;
             rows.push_back( RecentFile{ f, std::uint32_t( age / 86400 ), m.weights[f] } );
@@ -2121,11 +2127,20 @@ inline std::vector<RecentFile> recentRowsFromDecayed( const std::string& root, c
                    if( a.weight != b.weight )   { return a.weight > b.weight; }
                    return ing.files[a.fileId] < ing.files[b.fileId];
                } );
-    if( rows.size() > keep )
+    const std::size_t pageBegin = std::min( skip, rows.size() );
+    const std::size_t pageEnd   = std::min( pageBegin + keep, rows.size() );
+    if( pageBegin > 0 )
     {
-        rows.resize( keep );
+        rows.erase( rows.begin(), rows.begin() + std::ptrdiff_t( pageBegin ) );
     }
+    rows.resize( pageEnd - pageBegin );
     return rows;
+}
+
+inline std::vector<RecentFile> recentRowsFromDecayed( const std::string& root, const IngestResult& ing, const DecayedChurnMined& m,
+                                                      std::size_t keep, std::size_t* outOf )
+{
+    return recentRowsFromDecayedIf( root, ing, m, []( std::uint32_t ) { return true; }, keep, 0, outOf );
 }
 
 // Multi-root --rank-by=churn-decay: mine each root's history AGAINST ITS OWN files, accumulate ONE weight
