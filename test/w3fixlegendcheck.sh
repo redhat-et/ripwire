@@ -304,7 +304,9 @@ printf 'int coreFn(){ return 7; }\n' >"$SITSB/core.cpp"
 i=1; while [ $i -le 30 ]; do printf 'int coreFn();\nint t%02d_main(){ return coreFn(); }\n' "$i" >"$SITSB/test/t$i.cpp"; i=$(( i + 1 )); done
 "$BIN" "$SITSB" --no-cache --situ=core.cpp >"$TMP/situ30" 2>&1
 S2LINE="$( grep -E '^  \[2\]' "$TMP/situ30" || true )"
-S2ROWS="$( sed -n '/\[2\]/,/\[3\]/p' "$TMP/situ30" | grep -c 'test/t[0-9]*\.cpp' || true )"
+# E1 (2026-09-12): runner-less rows sharing their evidence ride ONE `[hops=N] (n): a, b, …` line, so the
+# count is of PATHS (occurrences), not lines — `grep -c` would count the 30 tests as 1.
+S2ROWS="$( sed -n '/\[2\]/,/\[3\]/p' "$TMP/situ30" | grep -o 'test/t[0-9]*\.cpp' | wc -l | tr -d ' ' || true )"
 case "$S2LINE" in
     *"showing "*" of "*) no "situ [2] still discloses a cut on its ANSWER rows (the 25-row cap was retired): $S2LINE";;
     *"(30)"*)             ok "situ [2]: '(30)' with no cut disclosed — answer rows never page";;

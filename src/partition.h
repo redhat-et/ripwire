@@ -593,7 +593,17 @@ inline std::string packTaskPartitionText( const IngestResult& ing, const Graph& 
     whole += partitionSummaryAttrs( plan, sum, ov );
     whole += ">";
     whole += kPartitionLegend;
-    whole += "<!-- ripwire task bundle (every ctx below)";  whole += kPackTaskBundleLegendBody;  whole += " -->";   // P10 (L7): stated once
+    // M21(b)/E1: the <test>/<g> row rule rides the outer legend ONCE for every slice, and only when some slice kept a
+    // test row (a <tests …> section exists exactly then — packTaskListSection emits nothing at kept=0), the same
+    // rows-gating the single bundle applies to its own header; test/partitioncheck.sh P10 holds the two within 1.3x.
+    bool anySliceTests = core.xml.find( "<tests " ) != std::string::npos;
+    for( const auto& part : parts )
+    {
+        anySliceTests = anySliceTests || part.xml.find( "<tests " ) != std::string::npos;
+    }
+    whole += "<!-- ripwire task bundle (every ctx below)";  whole += kPackTaskBundleLegendBody;   // P10 (L7): stated once
+    if( anySliceTests ) { whole += rw::kRunHintLegendClause; }
+    whole += " -->";
     whole += bundleOpen( "core", -1, core );
     whole += core.xml;
     whole += "</bundle>";

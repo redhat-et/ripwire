@@ -279,14 +279,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
     // TestRunnerIndex is lazy: a packet with no test row reads no runner script.
     const rw::TestRunnerIndex hoRunners( ing );
     const auto                hoEsc = [ & ]( std::string_view t ) { return std::string( escapeXml( t, esc ) ); };
-    for( const std::uint32_t f : facts.tests )
-    {
-        v += "<t p=\"";
-        v += escapeXml( hoPathRel( f ), esc );
-        v += "\"";
-        v += rw::runAttrDisclosed( hoRunners, f, hoEsc );
-        v += "/>";
-    }
+    v += rw::testRowsJoined( hoRunners, rw::testRowsOutOf( facts.tests, hoPathRel ), rw::TestRowShape{ rw::RowDialect::Xml, "t" }, hoEsc );   // E1: <g> where no runner is derivable
     v += "</tests></verified>";
 
     // ── heuristic rows, priority order (dropped TAIL-FIRST under a budget) ───────────────────────────

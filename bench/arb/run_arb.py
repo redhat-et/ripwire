@@ -315,11 +315,19 @@ def trace_files(bin_path, snap, trace_text):
 
 
 TEST_RE = re.compile(r'<test p="([^"]+)"')
+# E1 (2026-09-12): runner-less rows sharing their evidence ride ONE <g … p="a,b,c"/> row; split its p= and
+# undo the &#44; comma escape so every path is read verbatim, as it was on the single rows.
+GROUP_RE = re.compile(r'<g [^>]*?\bp="([^"]+)"')
 
 
 def affected_tests(bin_path, snap, changed_file):
     out = run_bin_or_none(bin_path, snap, ["--affected=%s" % changed_file])
-    return [norm_path(m, snap) for m in TEST_RE.findall(out)] if out is not None else []
+    if out is None:
+        return []
+    paths = TEST_RE.findall(out)
+    for grp in GROUP_RE.findall(out):
+        paths += [p.replace("&#44;", ",") for p in grp.split(",")]
+    return [norm_path(m, snap) for m in paths]
 
 
 def impact_files(bin_path, snap, seeds):

@@ -1035,10 +1035,11 @@ namespace mcpedit
         const auto            jesc   = []( std::string_view t ) { return mcpdetail::jsonEscape( std::string( t ) ); };
         const std::string     prefix = rw::sarif::rootPrefixOf( root );
         std::string           out    = ",\"tests_to_run\":[";
+        std::vector<rw::TestRowOut> rcRows;
+        rcRows.reserve( ans.rows.size() );
         for( std::size_t i = 0; i < ans.rows.size(); ++i )
         {
             TestRow row = ans.rows[i];   // by value: see below
-            if( i ) { out += ","; }
             // A matched TEST file's changed= is spelled seed_kind="test" on --affected (verbs_change.h does
             // exactly this), because "the argument matched it, run it" is a different fact from "you edited
             // a file this test reaches". The receipt stands in for that verb, so it spells it the same way.
@@ -1048,11 +1049,10 @@ namespace mcpedit
             // use, so a receipt row can never say less than the verb it stands in for. A row that arrived on
             // partner= or seed_kind= alone is a WEAKER claim than a graph-reached one, and dropping the
             // attribute would serve it as though it were the same.
-            out += "{\"p\":\"" + mcpdetail::jsonEscape( std::string( rw::sarif::rootRelativeUri( ing.files[ row.fileId ], prefix ) ) ) + "\""
-                 + ( seedTest ? ",\"seed_kind\":\"test\"" : "" )
-                 + rw::testRowEvidence( row, rw::EvDialect::Json )
-                 + rw::runFieldJsonDisclosed( runners, row.fileId, jesc ) + "}";
+            rcRows.push_back( { row.fileId, std::string( rw::sarif::rootRelativeUri( ing.files[ row.fileId ], prefix ) ),
+                                std::string( seedTest ? ",\"seed_kind\":\"test\"" : "" ) + rw::testRowEvidence( row, rw::EvDialect::Json ) } );
         }
+        out += rw::testRowsJoined( runners, rcRows, rw::TestRowShape{ rw::RowDialect::Json, "p" }, jesc, "," );   // E1: --affected's <g>, "p" an array
         out += "]";
         // the root-level companions --affected carries beside its rows, so the two documents disclose the
         // same facts about the same list

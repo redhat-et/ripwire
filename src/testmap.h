@@ -674,11 +674,256 @@ inline std::string runSuffixTextDisclosed( const TestRunnerIndex& idx, std::uint
     return suffix.empty() ? std::string( "   (run: not derivable)" ) : suffix;
 }
 
+// ── E1 / A4-2 (output-routing loop, 2026-09-12, owner call) — runner-less rows GROUPED, the disclosure once ──
+// On a corpus where almost no harness has a derivable runner (rocksdb: 126 of 127 rows), every row paid the
+// same 16 bytes of `run_unknown="1"` (23 in --situ's text) — 2.0–2.5 KB per answer for one fact said 127
+// times. The rows come in EVIDENCE order (changed, partner, hops asc, path), so consecutive runner-less rows
+// share their attributes; those are served as ONE row:
+//
+//     <g hops="2" n="7" p="a,b,c" run_unknown="1"/>                 XML   (the per-row attrs, then n= p=)
+//     {"p":["a","b","c"],"hops":2,"n":7,"run_unknown":true}          JSON  ("p" — or "test" — becomes an ARRAY)
+//     [hops=2] (7): a, b, c   (run: not derivable)                   text
+//
+// What the grouping may never change — test/testrowruncheck.sh arm 12 proves it on every dialect — is the
+// MULTISET of paths: every path verbatim (a reader's grep for a file name still hits; E3's brace-grouped
+// directories were disqualified on exactly that), each exactly once, in the order the single rows had. The
+// rules, stated once here because they decide every emitter:
+//   * a row WITH a runner stays a single <t>/<test> row exactly as before — run= is per row;
+//   * only rows whose remaining per-row attributes are BYTE-EQUAL group (hops=, partner=, changed=,
+//     seed_kind= — the `attrs` string is the key), so a group never blurs two kinds of evidence;
+//   * a group is emitted where its FIRST member stood, its members in list order; a single row with a
+//     runner in the middle of a group stays where it was, so evidence order is preserved row for row;
+//   * a group of ONE is a single row (the <t> spelling is shorter and a consumer has one less shape);
+//   * a ',' inside an XML path is spelled &#44; (columnar.h's precedent: ordinary entity decoding restores
+//     it and escapeXml never emits a bare ',' itself); JSON needs nothing — the array carries the paths;
+//   * `maxGroupBytes` (pack-task, whose <tests> section is byte-budgeted per ROW): a group is split into
+//     consecutive <g> rows so no single row can starve the section (rocksdb's list would otherwise be ONE
+//     3 KB row that the tests quota cannot hold — measured shown="0"). 0 = unbounded, every other verb.
+// The ""-means-not-derivable test stays in runHint alone: the single rows below go through the Disclosed
+// wrappers, and a group exists only where commandFor is empty — one seam, one rule.
+struct TestRowOut
+{
+    std::uint32_t fileId = 0;
+    std::string   path;    // as the verb spells it (root-relative or not), UNESCAPED
+    std::string   attrs;   // the per-row attributes in the dialect's spelling (testRowEvidence + seed_kind=), possibly empty — the group key
+};
+
+enum class RowDialect : std::uint8_t { Xml, Json, Text };
+
+struct TestRowShape
+{
+    RowDialect       dialect       = RowDialect::Xml;
+    std::string_view tag           = "t";   // XML element name ("t" | "test") or JSON key ("p" | "test")
+    std::string_view indent        = "";    // text dialect: the line prefix
+    std::size_t      maxGroupBytes = 0;     // split a group so no row exceeds this (pre-escape estimate); 0 = never
+};
+
+// One rendered row: the text, and how many test FILES it carries (1 for a single row, n for a group), so a
+// caller counting files (pack-task's kept/shown arithmetic) never mistakes rows for tests.
+struct RenderedTestRow
+{
+    std::string   text;
+    std::uint32_t files = 1;
+};
+
+// The partition: index lists into `rows`, a run of one for a single row, a run of ≥2 for a group.
+inline std::vector<std::vector<std::uint32_t>> partitionTestRows( const TestRunnerIndex& idx, std::span<const TestRowOut> rows, std::size_t maxGroupBytes )
+{
+    std::vector<std::vector<std::uint32_t>> groups;
+    std::vector<char>                       taken( rows.size(), 0 );
+    for( std::uint32_t i = 0; i < rows.size(); ++i )
+    {
+        if( taken[i] )
+        {
+            continue;
+        }
+        taken[i] = 1;
+        if( !idx.commandFor( rows[i].fileId ).empty() )
+        {
+            groups.push_back( { i } );
+            continue;
+        }
+        // every later runner-less row with the same attrs joins; the scan is O(rows²) on lists of a few hundred rows
+        std::vector<std::uint32_t> members{ i };
+        std::size_t                bytes = rows[i].attrs.size() + 48 + rows[i].path.size();
+        for( std::uint32_t j = i + 1; j < rows.size(); ++j )
+        {
+            if( taken[j] || rows[j].attrs != rows[i].attrs || !idx.commandFor( rows[j].fileId ).empty() )
+            {
+                continue;
+            }
+            if( maxGroupBytes != 0 && members.size() >= 2 && bytes + rows[j].path.size() + 1 > maxGroupBytes )
+            {
+                groups.push_back( std::move( members ) );   // this chunk is full: close it, the next member opens another at the same key
+                members = {};
+                bytes   = rows[i].attrs.size() + 48;
+            }
+            taken[j] = 1;
+            members.push_back( j );
+            bytes += rows[j].path.size() + 1;
+        }
+        groups.push_back( std::move( members ) );
+    }
+    return groups;
+}
+
+// A single row, in the dialect — the disclosure through the Disclosed wrappers above, never re-spelled.
+template<class EscapeFn>
+inline std::string renderSingleTestRow( const TestRunnerIndex& idx, const TestRowOut& r, const TestRowShape& shape, EscapeFn esc )
+{
+    std::string s;
+    switch( shape.dialect )
+    {
+        case RowDialect::Xml:
+            s += "<";  s.append( shape.tag );  s += " p=\"";  s += esc( r.path );  s += "\"";  s += r.attrs;  s += runAttrDisclosed( idx, r.fileId, esc );  s += "/>";
+            break;
+        case RowDialect::Json:
+            s += "{\"";  s.append( shape.tag );  s += "\":\"";  s += esc( r.path );  s += "\"";  s += r.attrs;  s += runFieldJsonDisclosed( idx, r.fileId, esc );  s += "}";
+            break;
+        case RowDialect::Text:
+            s.append( shape.indent );  s += r.path;  s += r.attrs;  s += runSuffixTextDisclosed( idx, r.fileId );  s += "\n";
+            break;
+    }
+    return s;
+}
+
+// A group row (≥2 members, no runner by construction), in the dialect.
+template<class EscapeFn>
+inline std::string renderTestRowGroup( std::span<const TestRowOut> rows, std::span<const std::uint32_t> members, const TestRowShape& shape, EscapeFn esc )
+{
+    VERIFY( members.size() >= 2 );
+    const TestRowOut& first = rows[ members[0] ];
+    std::string       s;
+    switch( shape.dialect )
+    {
+        case RowDialect::Xml:
+        {
+            s += "<g";  s += first.attrs;  s += " n=\"";  s += std::to_string( members.size() );  s += "\" p=\"";
+            for( std::size_t k = 0; k < members.size(); ++k )
+            {
+                if( k ) { s += ','; }
+                for( char c : esc( rows[ members[k] ].path ) )
+                {
+                    if( c == ',' ) { s += "&#44;"; } else { s += c; }
+                }
+            }
+            s += "\" run_unknown=\"1\"/>";
+            break;
+        }
+        case RowDialect::Json:
+        {
+            s += "{\"";  s.append( shape.tag );  s += "\":[";
+            for( std::size_t k = 0; k < members.size(); ++k )
+            {
+                if( k ) { s += ','; }
+                s += '"';  s += esc( rows[ members[k] ].path );  s += '"';
+            }
+            s += "]";  s += first.attrs;  s += ",\"n\":";  s += std::to_string( members.size() );  s += ",\"run_unknown\":true}";
+            break;
+        }
+        case RowDialect::Text:
+        {
+            s.append( shape.indent );
+            if( !first.attrs.empty() )
+            {
+                s.append( first.attrs.substr( first.attrs.front() == ' ' ? 1 : 0 ) );  s += ' ';   // " [hops=2]" -> "[hops=2] "
+            }
+            s += '(';  s += std::to_string( members.size() );  s += "): ";
+            for( std::size_t k = 0; k < members.size(); ++k )
+            {
+                if( k ) { s += ", "; }
+                s += rows[ members[k] ].path;
+            }
+            s += "   (run: not derivable)\n";
+            break;
+        }
+    }
+    return s;
+}
+
+// The two ways a caller has its rows: a bare file list (--exercises' seeds, --pr-context, --handoff, --flags
+// --flip, --pack-task, situational_awareness — no per-row attributes), or rankTestRows' evidence rows
+// (--situ's three dialects). ONE builder each, so six sites do not carry six copies of the same loop.
+template<class PathFn>
+inline std::vector<TestRowOut> testRowsOutOf( std::span<const std::uint32_t> files, PathFn pathRel )
+{
+    std::vector<TestRowOut> rows;
+    rows.reserve( files.size() );
+    for( std::uint32_t f : files )
+    {
+        rows.push_back( { f, std::string( pathRel( f ) ), {} } );
+    }
+    return rows;
+}
+
+template<class PathFn>
+inline std::vector<TestRowOut> evidenceRowsOut( std::span<const TestRow> rows, EvDialect d, PathFn pathRel )
+{
+    std::vector<TestRowOut> out;
+    out.reserve( rows.size() );
+    for( const TestRow& r : rows )
+    {
+        out.push_back( { r.fileId, std::string( pathRel( r.fileId ) ), testRowEvidence( r, d ) } );
+    }
+    return out;
+}
+
+// THE SEAM every tests_to_run emitter calls (test/testrowruncheck.sh arm 0 censuses its call sites): the
+// partition and the rows, in the order the reader gets them. A caller that needs two dialects of ONE
+// partition (pack-task's XML section and its JSON tail) passes the partition it already has.
+template<class EscapeFn>
+inline std::vector<RenderedTestRow> testRowsRendered( const TestRunnerIndex& idx, std::span<const TestRowOut> rows, const TestRowShape& shape, EscapeFn esc,
+                                                      const std::vector<std::vector<std::uint32_t>>* partition = nullptr )
+{
+    const std::vector<std::vector<std::uint32_t>> own = partition ? std::vector<std::vector<std::uint32_t>>{} : partitionTestRows( idx, rows, shape.maxGroupBytes );
+    const std::vector<std::vector<std::uint32_t>>& groups = partition ? *partition : own;
+    std::vector<RenderedTestRow>                   out;
+    out.reserve( groups.size() );
+    for( const std::vector<std::uint32_t>& members : groups )
+    {
+        if( members.size() == 1 )
+        {
+            out.push_back( { renderSingleTestRow( idx, rows[ members[0] ], shape, esc ), 1 } );
+        }
+        else
+        {
+            out.push_back( { renderTestRowGroup( rows, members, shape, esc ), std::uint32_t( members.size() ) } );
+        }
+    }
+    return out;
+}
+
+// The joined form, for the emitters that print the list in one go (`sep` between rows: "," for JSON, "" else).
+template<class EscapeFn>
+inline std::string testRowsJoined( const TestRunnerIndex& idx, std::span<const TestRowOut> rows, const TestRowShape& shape, EscapeFn esc, std::string_view sep = {} )
+{
+    std::string joined;
+    bool        first = true;
+    for( const RenderedTestRow& r : testRowsRendered( idx, rows, shape, esc ) )
+    {
+        if( !first ) { joined.append( sep ); }
+        first = false;
+        joined += r.text;
+    }
+    return joined;
+}
+
 // The ONE sentence every legend that carries a tests_to_run row splices, so the seven cannot drift into
 // seven wordings of one rule. Deliberately short: it rides on --test-gate's own byte ratchets.
+// E1 (2026-09-12): the <g> row is defined in the same sentence, because it is the same rule said once per
+// group — and legendcoveragecheck wants n= defined wherever a document carries it.
 inline constexpr std::string_view kRunHintLegendClause =
     "run= is the command that discharges a test row; run_unknown=\"1\" means none is derivable for that "
-    "harness (a guess would be worse than none) — a row carries one or the other, never neither. ";
+    "harness (a guess would be worse than none) — a <t> or <g> row carries one or the other, never neither. "
+    "<g n= p=a,b,c> is 2+ runner-less rows with equal attributes served as ONE row: n= how many, p= their paths "
+    "in list order (&#44; a comma in a path), every path verbatim. ";
+
+// The clause is a rule about ROWS, so a legend splices it only when the rendered rows are non-empty — a
+// tests="0" answer pays nothing for it (--affected/--exercises; --test-gate and --pack-task gate it the same way).
+inline std::string_view runHintClauseIfRows( std::string_view rowsRendered ) noexcept
+{
+    return rowsRendered.empty() ? std::string_view() : kRunHintLegendClause;
+}
 
 // ── P9 (capture-audit 2026-09-04) — the tests_to_run row set for ONE changed file ────────────────────
 // The FILE reading of --affected, seeded by file id rather than by a path pattern, for callers that already

@@ -17,9 +17,17 @@
 # `"run_unknown":true` / `(run: not derivable)` disclosure — never neither. Plus M21(b)'s second half: the
 # untested blast-radius `<u>` rows carry `l=`, the line their sibling --flags --flip rows have always had.
 #
+# E1 / A4-2 (2026-09-12, owner call): runner-less rows that share their per-row attributes are served as ONE
+# `<g … n= p="a,b,c" run_unknown="1"/>` row (JSON `{"p":[…],…,"n":N,"run_unknown":true}`, text
+# `[hops=N] (n): a, b, c   (run: not derivable)`), so the disclosure is said once per GROUP. The rule keeps
+# its meaning — "a <t> or <g> row carries one or the other, never neither" — and arm 12 proves what the
+# grouping must never change: the MULTISET of paths (every path verbatim, each exactly once, across every
+# dialect), on a fixture with three hop groups and a runner row in the middle of one of them.
+#
 # ARM 0 is the DERIVATION arm: it enumerates the row emitters out of src/ and fails when a site appears that
 # the arms below do not drive. That is what makes this a family gate rather than seven instance gates — a
-# NEW verb that grows a tests_to_run row is a FAILURE here until it is driven and disclosed.
+# NEW verb that grows a tests_to_run row is a FAILURE here until it is driven and disclosed. Since E1 every
+# emitter renders its rows through testmap.h's ONE seam (testRowsRendered), so the census is its call sites.
 #
 # Usage:  test/testrowruncheck.sh              # uses build/ripwire
 #         RIPWIRE_BIN=asan/ripwire test/testrowruncheck.sh
@@ -40,8 +48,8 @@ echo "testrowruncheck: BIN=$BIN"
 # ── ARM 0 — the emitter census, derived from src/ ──────────────────────────────────────────────────────
 # Every site that prints a tests_to_run row. The list is the CONTRACT: a site added to src/ and not added
 # here fails, which is the only way a family gate stays a family gate.
-EXPECTED_SITES="src/verbs_change.h src/situ.h src/prcontext.h src/packtask.h src/handoff.h src/flipimpact.h src/mcpverbs.h"
-FOUND_SITES="$( cd "$ROOT" && grep -lE '"<(t|test) p=\\"|\{\\"test\\":|\{\\"p\\":\\"%s\\"%s\}' src/*.h src/*.cpp 2>/dev/null \
+EXPECTED_SITES="src/verbs_change.h src/situ.h src/prcontext.h src/packtask.h src/handoff.h src/flipimpact.h src/mcpverbs.h src/mcpedit.h"
+FOUND_SITES="$( cd "$ROOT" && grep -lE 'testRows(Rendered|Joined)\(|"<(t|test) p=\\"|\{\\"test\\":|\{\\"p\\":\\"%s\\"%s\}' src/*.h src/*.cpp 2>/dev/null \
                 | grep -vE 'src/(serialize|testmap)\.h' | sort | tr '\n' ' ' | sed 's/ $//' )"
 WANT_SITES="$( printf '%s\n' $EXPECTED_SITES | sort | tr '\n' ' ' | sed 's/ $//' )"
 [ "$FOUND_SITES" = "$WANT_SITES" ] \
@@ -142,10 +150,12 @@ rows_disclosed(){
         || printf '        NOTE  %s listed no not-derivable row (verb reached only the covered harness)\n' "$label"
 }
 
-XROW='<(t|test) p="[^"]*"[^>]*/>'
+# E1: a <g …> group row is a tests_to_run row too (its p= lists several paths); the JSON twin's "p"/"test"
+# is then an ARRAY. Both shapes must carry the disclosure like any single row.
+XROW='<(t|test) p="[^"]*"[^>]*/>|<g [^>]*/>'
 XHAS=' run="'
 XUNK=' run_unknown="1"'
-JROW='\{"(p|test)":"[^"]*"[^}]*\}'
+JROW='\{"(p|test)":("[^"]*"|\[[^]]*\])[^}]*\}'
 JHAS='"run":"'
 JUNK='"run_unknown":true'
 # the JSON dialects embed the tests_to_run LIST inside a document that also carries file rows keyed "p";
@@ -231,6 +241,121 @@ if printf '%s' "$TG" | grep -q 'run_unknown'; then
 else
     printf '  SKIP  (11) this document emitted no run_unknown row\n'
 fi
+
+# ── ARM 12 — E1: grouping never changes the MULTISET of paths, in any dialect ─────────────────────────
+# A fixture with THREE hop groups (tests reaching the changed symbol at depth 1, 2 and 3) and a runner row
+# in the MIDDLE of the depth-1 group (t_leaf_b.sh stem-matches t_leaf_b.cpp; path order a < b < c), so the
+# arm sees: a runner-less group interrupted by a single run= row, groups at three distinct hops=, and the
+# same seven paths in --affected, --test-gate (XML and JSON) and --situ's text. What it proves: every path
+# appears exactly once (verbatim — a reader's grep for a file name must still hit), the run= row stays a
+# single row, at least three <g> rows exist with distinct hops=, and the root's tests= count is the number
+# of FILES, not rows. Red on the pre-E1 binary (no <g> row at all).
+command -v python3 >/dev/null 2>&1 || no "(12) python3 missing — the multiset arm cannot run"
+W2="$( mktemp -d )"; trap 'rm -rf "$WORK" "$W2"' EXIT
+mkdir -p "$W2/src" "$W2/test"
+printf 'int leaf( int x )\n{\n    return x + 1;\n}\n' > "$W2/src/leaf.cpp"
+printf 'int leaf( int x );\nint mid( int x )\n{\n    return leaf( x );\n}\n' > "$W2/src/mid.cpp"
+printf 'int mid( int x );\nint top( int x )\n{\n    return mid( x );\n}\n' > "$W2/src/top.cpp"
+for n in leaf_a leaf_b leaf_c; do printf 'int leaf( int x );\nint test_%s( void )\n{\n    return leaf( 1 );\n}\n' "$n" > "$W2/test/t_$n.cpp"; done
+for n in mid_a mid_b; do printf 'int mid( int x );\nint test_%s( void )\n{\n    return mid( 1 );\n}\n' "$n" > "$W2/test/t_$n.cpp"; done
+for n in top_a top_b; do printf 'int top( int x );\nint test_%s( void )\n{\n    return top( 1 );\n}\n' "$n" > "$W2/test/t_$n.cpp"; done
+printf '#!/usr/bin/env bash\necho leaf_b\n' > "$W2/test/t_leaf_b.sh"; chmod +x "$W2/test/t_leaf_b.sh"
+( cd "$W2" && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init >/dev/null 2>&1 )
+printf 'int leaf2( int x ) { return x + 2; }\n' >> "$W2/src/leaf.cpp"
+rw2(){ ( cd "$W2" && "$BIN" . "$@" --no-cache 2>/dev/null ); }
+A12="$( rw2 --affected=src/leaf.cpp )"
+G12="$( rw2 --test-gate=src/leaf.cpp )"
+J12="$( rw2 --test-gate=src/leaf.cpp --json )"
+S12="$( rw2 --situ=src/leaf.cpp )"
+python3 - "$A12" "$G12" "$J12" "$S12" <<'PY12'
+import sys, re, json
+aff, tg, tgj, situ = sys.argv[1:5]
+EXPECT = sorted( "test/t_%s.cpp" % n for n in ( "leaf_a", "leaf_b", "leaf_c", "mid_a", "mid_b", "top_a", "top_b" ) )
+fails = []
+def xml_paths( doc ):
+    out, groups, singles_run = [], [], []
+    for m in re.finditer( r'<(t|test|g)( [^>]*)/>', doc ):
+        tag, attrs = m.group( 1 ), m.group( 2 )
+        at = dict( re.findall( r' ([a-z_]+)="([^"]*)"', attrs ) )
+        if tag == "g":
+            ps = [ p.replace( "&#44;", "," ) for p in at["p"].split( "," ) ]
+            if int( at.get( "n", "-1" ) ) != len( ps ): fails.append( "n=%s on a <g> row listing %d paths" % ( at.get( "n" ), len( ps ) ) )
+            if at.get( "run_unknown" ) != "1": fails.append( "a <g> row without run_unknown=1: %s" % m.group( 0 ) )
+            if len( ps ) < 2: fails.append( "a <g> row of one: %s" % m.group( 0 ) )
+            groups.append( at.get( "hops" ) ); out += ps
+        else:
+            if "run" in at: singles_run.append( at["p"] )
+            out.append( at["p"] )
+    return out, groups, singles_run
+a_paths, a_groups, a_run = xml_paths( aff )
+g_paths, g_groups, g_run = xml_paths( tg )
+if not a_paths: fails.append( "--affected emitted no test row at all (fixture broken)" )
+for label, paths in ( ( "--affected", a_paths ), ( "--test-gate", g_paths ) ):
+    if sorted( paths ) != EXPECT: fails.append( "%s multiset %r != %r" % ( label, sorted( paths ), EXPECT ) )
+for label, groups in ( ( "--affected", a_groups ), ( "--test-gate", g_groups ) ):
+    if len( set( groups ) ) < 3 or None in groups: fails.append( "%s: expected >=3 <g> rows at distinct hops=, got hops=%r" % ( label, groups ) )
+for label, run in ( ( "--affected", a_run ), ( "--test-gate", g_run ) ):
+    if run != [ "test/t_leaf_b.cpp" ]: fails.append( "%s: the run= row must be the single test/t_leaf_b.cpp, got %r" % ( label, run ) )
+m = re.search( r'<test-gate [^>]*\btests="(\d+)"', tg )
+if not m or int( m.group( 1 ) ) != len( EXPECT ): fails.append( "--test-gate tests= must count FILES (%d), got %s" % ( len( EXPECT ), m and m.group( 1 ) ) )
+# JSON twin: "p" is a string on a single row and an ARRAY on a group row
+# the list is sliced on bracket DEPTH: a group row's "p":[…] array sits inside it, so a lazy `\[.*?\]` would
+# stop at the first inner `]` (the shape that made this arm read red while the document was valid JSON)
+def balanced_list( doc, key ):
+    i = doc.find( key )
+    if i < 0: return None
+    i = doc.find( "[", i ); depth = 0; instr = False
+    for k in range( i, len( doc ) ):
+        c = doc[k]
+        if instr:
+            if c == "\\": continue
+            if c == '"': instr = False
+            continue
+        if c == '"': instr = True
+        elif c == "[": depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0: return doc[i:k+1]
+    return None
+jl = balanced_list( tgj, '"tests_to_run":' )
+try:
+    rows = json.loads( jl ) if jl else []
+except Exception as e:
+    rows = []; fails.append( "--test-gate --json tests_to_run is not JSON: %s" % e )
+j_paths = []
+for r in rows:
+    p = r.get( "p" )
+    if isinstance( p, list ):
+        j_paths += p
+        if r.get( "n" ) != len( p ) or r.get( "run_unknown" ) is not True: fails.append( "JSON group row without n=/run_unknown: %r" % r )
+    else:
+        j_paths.append( p )
+        if "run" not in r and r.get( "run_unknown" ) is not True: fails.append( "JSON single row carries neither: %r" % r )
+if sorted( j_paths ) != EXPECT: fails.append( "--test-gate --json multiset %r != %r" % ( sorted( j_paths ), EXPECT ) )
+# --situ text: `        path [hops=N]   (run: …)` singles and `        [hops=N] (n): a, b, c   (run: not derivable)` groups
+sec = situ.split( "tests to run", 1 )[1].split( "\n  [3]", 1 )[0] if "tests to run" in situ else ""
+s_paths, s_groups = [], 0
+for line in sec.split( "\n" ):
+    if not line.startswith( "        " ) or line.startswith( "        (" ): continue
+    body = line[8:]
+    gm = re.match( r'(\[[^\]]*\] )?\((\d+)\): (.*?)   \(run: not derivable\)$', body )
+    if gm:
+        ps = gm.group( 3 ).split( ", " ); s_groups += 1
+        if int( gm.group( 2 ) ) != len( ps ): fails.append( "situ group count (%s) != %d paths" % ( gm.group( 2 ), len( ps ) ) )
+        s_paths += ps
+    else:
+        if "   (run: " not in body: fails.append( "situ line carries no run recipe/disclosure: %r" % line )
+        s_paths.append( body.split( " ", 1 )[0] )
+if sorted( s_paths ) != EXPECT: fails.append( "--situ text multiset %r != %r" % ( sorted( s_paths ), EXPECT ) )
+if s_groups < 3: fails.append( "--situ text: expected >=3 group lines, got %d" % s_groups )
+if fails:
+    print( "\n".join( fails ) ); sys.exit( 1 )
+print( "OK %d paths, %d <g> rows on --affected" % ( len( EXPECT ), len( a_groups ) ) )
+PY12
+r12=$?
+[ "$r12" -eq 0 ] \
+    && ok "(12) E1: grouping keeps the path multiset in every dialect (7 paths, >=3 hop groups, the run= row single, tests= counts files)" \
+    || no "(12) E1: the grouped rows do not carry the same paths as the single rows did (details above)"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit "$fail"

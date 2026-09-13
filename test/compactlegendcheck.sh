@@ -395,7 +395,7 @@ ripwire.merge-scout/v1           220   208
 ripwire.whereis/v1               240   223
 ripwire.community/v1             730   719
 ripwire.layout/v1                160   149
-ripwire.pack-task/v1             820   804
+ripwire.pack-task/v1             880   865
 ripwire.pack-top-n/v1            660   649
 ripwire.expand/v1                280   265
 '

@@ -123,6 +123,21 @@ std::optional<int> runAffected( const MainDispatch& d )
         {
             return rw::sarif::rootRelativeUri( ing.files[ fileId ], afRootPrefix );
         };
+        // §P11.4 / E1: the rows are rendered FIRST (testmap.h's seam: run= where a REAL runner is derivable,
+        // runner-less rows with equal evidence grouped into one <g> row) so the legend below can splice the
+        // run=/run_unknown=/<g> clause only when there are rows for it to be a rule about — a tests="0" answer,
+        // the common clean case, pays nothing for it. The index is constructed here (not hoisted into
+        // MainDispatch) because it is lazy — a run with no test row reads no script.
+        const rw::TestRunnerIndex   runners( ing );
+        std::vector<rw::TestRowOut> afRows;
+        afRows.reserve( answer.rows.size() );
+        for( rw::TestRow row : answer.rows )   // by value: a matched test file's changed= is spelled seed_kind="test" on this verb
+        {
+            const std::uint32_t f = row.fileId;
+            row.changed           = false;
+            afRows.push_back( { f, std::string( afPathRel( f ) ), std::string( answer.isSeedTestFile[f] ? " seed_kind=\"test\"" : "" ) + rw::testRowEvidence( row, rw::EvDialect::Xml ) } );
+        }
+        const std::string afRowsXml = rw::testRowsJoined( runners, afRows, rw::TestRowShape{ rw::RowDialect::Xml, "test" }, ex );
         // seeded_by= is the honesty half of the file-first rule: the two readings answer DIFFERENT questions
         // over the same argument string and return different counts, so which one fired is a fact about the
         // measurement, not a detail. seeds= is the resolved seed-symbol count (1 for a lone function, ~84
@@ -134,7 +149,8 @@ std::optional<int> runAffected( const MainDispatch& d )
                      "script-to-binary edges are NOT modelled, so those gates are invisible to this walk and never counted in tests=/reached=. "
                      "{}"     // H2H-Graft F1: the evidence-order clause, testmap.h's ONE wording (changed= is spelled seed_kind="test" here: the argument matched it)
                      "order=evidence says so on the root; partners= counts the partner rows. "
-                     "{}{}-->{}", rw::kTestRowEvidenceLegend,
+                     "{}"     // M21(b)/E1: the run=/run_unknown= rule and the <g> group row, testmap.h's ONE wording — rows-gated
+                     "{}{}-->{}", rw::kTestRowEvidenceLegend, rw::runHintClauseIfRows( afRowsXml ),
                      // H1: the decl→def residue resolveAffectedSeeds summed over the symbol items. A file:name item whose
                      // definitions were dropped seeded the walk with declarations alone, which reached the reader as a bare
                      // tests="0" — on the verb whose answer is the list of tests to run. Exactly when the root carries it.
@@ -148,16 +164,7 @@ std::optional<int> runAffected( const MainDispatch& d )
                      rw::testRowPartnerCount( answer.rows ),      // F1: how many rows stand on the name convention alone or as well
                      afRootAttr.c_str(),                          // M12: root= says what every <test p=> below is relative to
                      rw::graphCountFloorAttrXml( g ).c_str()  );   // H5/M15: gauge + marker; tests=/reached= are a transitive-caller walk over the name-based CSR
-        // §P11.4: run= where a REAL runner is derivable, absent where it is not. The index is constructed
-        // here (not hoisted into MainDispatch) because it is lazy — a run with no test row reads no script.
-        const rw::TestRunnerIndex runners( ing );
-        for( rw::TestRow row : answer.rows )   // by value: a matched test file's changed= is spelled seed_kind="test" on this verb
-        {
-            const std::uint32_t f = row.fileId;
-            row.changed           = false;
-            rw::emitTo( stdout, "<test p=\"{}\"{}{}{}/>", ex( afPathRel( f ) ).c_str(), answer.isSeedTestFile[f] ? " seed_kind=\"test\"" : "",
-                         rw::testRowEvidence( row, rw::EvDialect::Xml ).c_str(), rw::runAttrDisclosed( runners, f, ex ).c_str() );
-        }
+        rw::emitRaw( stdout, afRowsXml.c_str() );   // E1: the rows rendered above — runner-less rows with equal evidence as ONE <g> row, the multiset unchanged
         rw::emitRaw( stdout, "</affected>" );
         return 0;
     }
@@ -231,11 +238,21 @@ std::optional<int> runExercises( const MainDispatch& d )
     // leading dashes (the same reason every other doc comment in the tool writes "quality-delta", not the
     // flag spelling). xmllint is the gate that catches a regression here.
     const std::string harnessAttr = exercisesHarnessAttr( ing, sel.testFiles );   // §A9.1, empty for a .cpp/.py harness
+    // §P11.4 / E1: the seed rows are the tests you are about to re-run — rendered before the legend so the
+    // run=/run_unknown=/<g> clause rides only a document that has rows (testmap.h's seam; grouped where no runner is derivable)
+    const rw::TestRunnerIndex     runners( ing );
+    const auto                    exPathRel = [ & ]( std::uint32_t f ) -> std::string_view
+    {
+        return exSingleRoot ? rw::sarif::rootRelativeUri( ing.files[f], exRootPrefix ) : std::string_view( ing.files[f] );
+    };
+    const std::vector<rw::TestRowOut> exRows    = rw::testRowsOutOf( std::span( sel.testFiles ).first( shownSeed ), exPathRel );
+    const std::string                 exRowsXml = rw::testRowsJoined( runners, exRows, rw::TestRowShape{ rw::RowDialect::Xml, "t" }, ex );
 
     rw::emitTo( stdout, "<!-- ripwire exercises: the NON-TEST symbols this test transitively calls into — what it covers (the inverse of the affected verb). "
                  "<t> = the seed test files the pattern matched; <s> = the covered symbols, PageRank desc. "
                  "harness=script|mixed says the seed set contains shell gates, whose subprocess coverage this walk cannot see. "
-                 "{}{}-->{}", rw::graphCountFloorBrief( g.unindexedFiles > 0 ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( exSingleRoot ) );
+                 "{}"     // M21(b)/E1: the run=/run_unknown= rule and the <g> group row, testmap.h's ONE wording — rows-gated
+                 "{}{}-->{}", rw::runHintClauseIfRows( exRowsXml ), rw::graphCountFloorBrief( g.unindexedFiles > 0 ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( exSingleRoot ) );
     const std::string exRootAttr = exSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
     rw::emitTo( stdout, "<exercises of=\"{}\" seed_files=\"{}\" shown_seed_files=\"{}\" seed_files_capped=\"{}\" test_symbols=\"{}\" reaches=\"{}\"{}{}{}{}>",
                  ex( cfg.exercisesFile ).c_str(), sel.testFiles.size(), shownSeed,
@@ -244,12 +261,7 @@ std::optional<int> runExercises( const MainDispatch& d )
                    + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
                  exRootAttr.c_str(),
                  rw::graphCountFloorAttrXml( g ).c_str()  );   // H5/M15: gauge + marker; reaches= is a transitive-callee walk over the name-based CSR
-    const rw::TestRunnerIndex runners( ing );      // §P11.4: the seed rows are the tests you are about to re-run
-    for( std::size_t i = 0; i < shownSeed; ++i )
-    {
-        const std::string_view rp = exSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ sel.testFiles[i] ], exRootPrefix ) : std::string_view( ing.files[ sel.testFiles[i] ] );
-        rw::emitTo( stdout, "<t p=\"{}\"{}/>", ex( rp ).c_str(), rw::runAttrDisclosed( runners, sel.testFiles[i], ex ).c_str() );
-    }
+    rw::emitRaw( stdout, exRowsXml.c_str() );   // E1: the seed rows rendered above
     for( std::size_t i = epw.begin; i < epw.end; ++i )
     {
         const Symbol&           s  = ing.symbols[ show[i] ];

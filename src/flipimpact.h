@@ -1261,11 +1261,12 @@ inline void writeFlip( std::FILE* out, const FlipResult& res, const IngestResult
     // with 26 reachable tests named 25 of them and dropped the 26th because it sorted last. --test-gate's
     // own <t> listing has never been windowed for exactly this reason; this listing is the same obligation
     // read from a different seed, so it is served whole on every page. SIZE_MAX, not maxRows.
+    // E1: rows without a runner are grouped (testmap.h's seam), so the listing is rendered whole and wrapped here
+    // exactly as writeCappedList wraps an uncut list — `<tests n="N">` with no cut attributes, n= the FILE count.
     const rw::TestRunnerIndex flipRunners( ing );
-    writeCappedList( out, "tests", res.tests, SIZE_MAX, [ & ]( std::uint32_t f )
-    {
-        rw::emitTo( out, "<t p=\"{}\"{}/>", ex( rel( f ) ).c_str(), rw::runAttrDisclosed( flipRunners, f, ex ).c_str() );
-    } );
+    rw::emitTo( out, "<tests n=\"{}\">", res.tests.size() );
+    rw::emitRaw( out, rw::testRowsJoined( flipRunners, rw::testRowsOutOf( res.tests, rel ), rw::TestRowShape{ rw::RowDialect::Xml, "t" }, ex ).c_str() );
+    rw::emitRaw( out, "</tests>" );
     writeCappedList( out, "untested", res.untested, maxRows, [ & ]( NodeId u )
     {
         const Symbol& s = ing.symbols[u];

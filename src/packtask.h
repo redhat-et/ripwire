@@ -144,7 +144,10 @@ inline constexpr int kPackTaskQuotaTestsPct   = 10;   // the cascaded remainder 
 static_assert( kPackTaskQuotaRankingPct + kPackTaskQuotaBodiesPct + kPackTaskQuotaCallersPct
              + kPackTaskQuotaNotesPct + kPackTaskQuotaTestsPct == 100, "pack-task section quotas must sum to 100%" );
 
-struct PackTaskSection { std::string xml; std::size_t kept = 0; };
+// E1 (2026-09-12): a list entry may carry several UNITS (a <g> test row is one entry of n= files). The cut is
+// still per entry (the budget is bytes per entry), but shown=/total= — and the JSON tests_total/tests_kept —
+// count units when the caller passes them, so "28 of 109 tests" stays 28 of 109 and never reads as "1 of 4".
+struct PackTaskSection { std::string xml; std::size_t kept = 0; std::size_t keptUnits = 0; std::size_t totalUnits = 0; };
 
 // W3FIX H2/M1 — the pieces the header comment is made of, so the header can be REBUILT in three shapes (as
 // built / task echo dropped / that plus route=) for serialize.h's climbCeilingLadder to price. A free function
@@ -165,6 +168,8 @@ struct PackTaskHeaderParts
     std::string_view rootArg;          // R-E (2026-08-17): the single-root run's own root= — the ladder's
                                         // route-dropped rebuild below calls ctxRootOpen a second time and
                                         // must carry the SAME root as the pre-built rootOpenStr did.
+    std::string_view runClause;        // M21(b)/E1: testmap.h's run=/run_unknown=/<g> clause — ROWS-GATED (empty when
+                                        // the tests section kept no row), so a bundle that omits tests pays nothing
 };
 
 // P10 (L7): the bundle legend's BODY, one constant, spliced by the standalone header (packTaskHeaderText) and
@@ -276,6 +281,7 @@ inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRo
     h.append( p.expandNote );
     h.append( p.docMentionNote );
     h += kPackTaskBundleLegendBody;   // P10 (L7): the body is ONE constant — the partitioned document states it once for all slices
+    h.append( p.runClause );          // M21(b)/E1: the <test> row's run=/run_unknown= rule and the <g> group row, testmap.h's ONE wording — rows-gated
     h.append( p.report );
     h.append( extraNotes );
     h += " -->";
@@ -297,9 +303,16 @@ inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRo
 // emitted <noun>_total/<noun>_kept for the same sections. Fixing the shared helper fixes <callers>, <far>,
 // <notes> and <tests> in one place, which is why it is fixed here and not at four call sites.
 inline PackTaskSection packTaskListSection( std::string_view tag, std::string_view extraAttr,
-                                            const std::vector<std::string>& entries, std::size_t budget, std::size_t wrapReserve )
+                                            const std::vector<std::string>& entries, std::size_t budget, std::size_t wrapReserve,
+                                            const std::vector<std::uint32_t>* unitsPerEntry = nullptr )
 {
     PackTaskSection out;
+    VERIFY( unitsPerEntry == nullptr || unitsPerEntry->size() == entries.size() );
+    const auto unitsOf = [ & ]( std::size_t i ) -> std::size_t { return unitsPerEntry ? ( *unitsPerEntry )[i] : 1; };
+    for( std::size_t i = 0; i < entries.size(); ++i )
+    {
+        out.totalUnits += unitsOf( i );
+    }
     if( entries.empty() || budget <= wrapReserve )
     {
         return out;
@@ -312,6 +325,7 @@ inline PackTaskSection packTaskListSection( std::string_view tag, std::string_vi
             break;
         }
         used += e.size();
+        out.keptUnits += unitsOf( out.kept );
         ++out.kept;
     }
     if( out.kept == 0 )
@@ -319,7 +333,7 @@ inline PackTaskSection packTaskListSection( std::string_view tag, std::string_vi
         return out;
     }
     char open[ 160 ];
-    rw::formatTo( open, sizeof( open ), "<{}{} shown=\"{}\" total=\"{}\" capped=\"{}\">", std::string_view( tag.data(), tag.size() ), std::string_view( extraAttr.data(), extraAttr.size() ), out.kept, entries.size(),
+    rw::formatTo( open, sizeof( open ), "<{}{} shown=\"{}\" total=\"{}\" capped=\"{}\">", std::string_view( tag.data(), tag.size() ), std::string_view( extraAttr.data(), extraAttr.size() ), out.keptUnits, out.totalUnits,
                    out.kept < entries.size() ? 1 : 0 );
     out.xml = open;
     for( std::size_t i = 0; i < out.kept; ++i )
@@ -907,14 +921,14 @@ inline MonotoneRoll monotoneRoll( bool sectionCapped, std::size_t granted, std::
 // first lap's conservative rule again, for the first lap's reason.
 inline std::size_t reflowListSection( PackTaskSection& section, std::string_view tag, std::string_view extraAttr,
                                       const std::vector<std::string>& entries, std::size_t& budget,
-                                      std::size_t wrapReserve, std::size_t reflow )
+                                      std::size_t wrapReserve, std::size_t reflow, const std::vector<std::uint32_t>* unitsPerEntry = nullptr )
 {
     if( reflow == 0 || section.kept >= entries.size() )
     {
         return reflow;
     }
     budget += reflow;
-    section = packTaskListSection( tag, extraAttr, entries, budget, wrapReserve );
+    section = packTaskListSection( tag, extraAttr, entries, budget, wrapReserve, unitsPerEntry );
     return section.kept < entries.size() || budget <= section.xml.size() ? 0 : budget - section.xml.size();
 }
 
@@ -1367,8 +1381,11 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     remaining = remaining > notesRoll.charge ? remaining - notesRoll.charge : 0;
 
     // ── section 5 — tests_to_run for the top files (the --affected mining: tests that transitively reach) ───
-    std::vector<std::string>   testRows;
-    std::vector<std::uint32_t> testFiles;   // hoisted for the L2 --json tail below
+    std::vector<std::string>                testRows;
+    std::vector<std::uint32_t>              testFiles;      // hoisted for the L2 --json tail below
+    std::vector<std::vector<std::uint32_t>> testPartition;  // E1: the XML rows' single/group partition, reused by the JSON tail so both dialects serve the same rows
+    std::vector<std::uint32_t>              testUnits;      // E1: files per row (n= on a <g> row), so shown=/total= keep counting FILES
+    std::size_t       testsBudget = sectionBudget( kPackTaskQuotaTestsPct, carry );   // E1: known before the rows, so a group row can be capped at it
     {
         std::vector<NodeId> testSeeds;
         for( NodeId b : bodyIds )
@@ -1402,22 +1419,26 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // §A9.5 / §P11.4: the one-call bundle names the tests you owe; it now also names how to RUN them,
         // from the same TestRunnerIndex --affected / --situ / --test-gate / --exercises read. Built here,
         // inside the section's scope, because it is lazy — a bundle with no test row reads no runner script.
-        const rw::TestRunnerIndex runners( ing );
-        for( std::uint32_t f : testFiles )
+        // §B14 — std::string rows, not char[512]: a row carries TWO unbounded interpolands (the test path AND
+        // the runner command), so it was the widest of the six breaching sites.
+        const rw::TestRunnerIndex         runners( ing );
+        const std::string                 ptPrefix = in.rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( in.rootArg );
+        const std::vector<rw::TestRowOut> ptRows   = rw::testRowsOutOf( testFiles, [ & ]( std::uint32_t f ) -> std::string_view
         {
-            // §B14 — std::string, not char[512]. This row carried TWO unbounded interpolands (the test path
-            // AND the runner command), so it was the widest of the six breaching sites.
-            const std::string_view rp = in.rootArg.empty() ? std::string_view( ing.files[f] ) : rw::sarif::rootRelativeUri( ing.files[f], rw::sarif::rootPrefixOf( in.rootArg ) );
-            std::string row = "<test p=\"";
-            row += ex( rp );
-            row += "\"";
-            row += rw::runAttrDisclosed( runners, f, ex );
-            row += "/>";
-            testRows.emplace_back( std::move( row ) );
+            return in.rootArg.empty() ? std::string_view( ing.files[f] ) : rw::sarif::rootRelativeUri( ing.files[f], ptPrefix );
+        } );
+        // E1: runner-less rows are grouped (testmap.h's seam). This section is byte-budgeted per ROW, so a group is
+        // capped at the section's own budget: rocksdb's 126 runner-less rows would otherwise be ONE ~3 KB row that
+        // a 10% tests quota cannot hold — measured shown="0" where the single rows had filled the section.
+        const std::size_t groupCap = testsBudget > kPackTaskWrapReserve ? testsBudget - kPackTaskWrapReserve : 0;
+        testPartition = rw::partitionTestRows( runners, ptRows, groupCap );
+        for( rw::RenderedTestRow& row : rw::testRowsRendered( runners, ptRows, rw::TestRowShape{ rw::RowDialect::Xml, "test", {}, groupCap }, ex, &testPartition ) )
+        {
+            testRows.emplace_back( std::move( row.text ) );
+            testUnits.push_back( row.files );
         }
     }
-    std::size_t       testsBudget = sectionBudget( kPackTaskQuotaTestsPct, carry );
-    PackTaskSection   tests       = packTaskListSection( "tests", "", testRows, testsBudget, kPackTaskWrapReserve );
+    PackTaskSection   tests       = packTaskListSection( "tests", "", testRows, testsBudget, kPackTaskWrapReserve, &testUnits );
     const std::size_t testsTotal  = testRows.size();
     const MonotoneRoll testsRoll  = monotoneRoll( tests.kept < testsTotal, testsBudget, tests.xml.size() );
     carry     = testsRoll.carry;
@@ -1490,7 +1511,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     }
     reflow = reflowListSection( callers, "callers", callersAttr, callerRows, callersBudget, kPackTaskWrapReserveWide, reflow );
     reflow = reflowListSection( notes,   "notes",   "",          noteEntries, notesBudget,   kPackTaskWrapReserve,     reflow );
-    reflow = reflowListSection( tests,   "tests",   "",          testRows,    testsBudget,   kPackTaskWrapReserve,     reflow );
+    reflow = reflowListSection( tests,   "tests",   "",          testRows,    testsBudget,   kPackTaskWrapReserve,     reflow, &testUnits );
 
     const std::string& callersStr = callers.xml;
     const std::size_t  callersKept = callers.kept;
@@ -1633,16 +1654,19 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         }
         j += "]";
 
-        const std::size_t testsShown = std::min( testsKept, testFiles.size() );
-        { char b[ 96 ];  rw::formatTo( b, sizeof( b ), ",\"tests_total\":{},\"tests_kept\":{},\"tests_to_run\":[", testsTotal, testsShown );  j += b; }
+        // E1: tests_total/tests_kept count test FILES exactly as the XML section's total=/shown= do (a <g> row is one
+        // entry of n= files); the JSON tail serves the SAME partition the XML section was cut over, so the two dialects
+        // list the same rows.
+        const std::size_t testsShown = std::min( testsKept, testRows.size() );
+        { char b[ 96 ];  rw::formatTo( b, sizeof( b ), ",\"tests_total\":{},\"tests_kept\":{},\"tests_to_run\":[", tests.totalUnits, tests.keptUnits );  j += b; }
         // §A9.5: the JSON sibling of the XML run= above — situ's tests_to_run already carries it, and one
         // computation path must not serialize two different obligations.
-        const rw::TestRunnerIndex jsonRunners( ing );
-        const auto                 jrun = [ & ]( std::string_view s ) { return jsonStr( s ); };
-        for( std::size_t i = 0; i < testsShown; ++i )
+        const rw::TestRunnerIndex   jsonRunners( ing );
+        const auto                  jrun = [ & ]( std::string_view s ) { return jsonStr( s ); };
+        const std::vector<rw::RenderedTestRow> jsonRows = rw::testRowsRendered( jsonRunners, rw::testRowsOutOf( testFiles, jPathRel ), rw::TestRowShape{ rw::RowDialect::Json, "p" }, jrun, &testPartition );
+        for( std::size_t i = 0; i < testsShown && i < jsonRows.size(); ++i )
         {
-            j += std::string( i == 0 ? "" : "," ) + "{\"p\":\"" + jsonStr( std::string( jPathRel( testFiles[i] ) ) ) + "\""
-               + rw::runFieldJsonDisclosed( jsonRunners, testFiles[i], jrun ) + "}";
+            j += std::string( i == 0 ? "" : "," ) + jsonRows[i].text;
         }
         j += "]";
 
@@ -1677,7 +1701,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     report += "bodies: "  + listStatus( bodiesTotal,  bodiesStr,  bodiesKept )  + ( bodiesTotal > 0 && !bodiesStr.empty() && bodiesKept < bodiesTotal ? " (capped)" : "" ) + " | ";
     report += "callers: " + listStatus( callersTotal, callersStr, callersKept ) + " | ";
     report += "notes: "   + listStatus( notesTotal,   notesStr,   notesKept )   + " | ";
-    report += "tests: "   + listStatus( testsTotal,   testsStr,   testsKept );
+    report += "tests: "   + listStatus( tests.totalUnits, testsStr, tests.keptUnits );   // E1: files, as the section's shown=/total= say
     report += " | far: "  + listStatus( farTotal,      rankOut.farXml, farKept );   // R2: d2plus name-only tier (nested in <sigs>)
     // A2 (survey card, 2026-09-03) — the pack-task twin of --for's dropped_positive= root fact: how many
     // rank>0 eligibleIds the section-1 ladder cut. Emitted ONLY when nonzero (the pr_converged precedent,
@@ -1710,7 +1734,8 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     droppedPositiveAttr += lr.capAttrs;
 
     const PackTaskHeaderParts headerParts{ task, rootOpenStr, taskNote, mentionNote, boostNote,
-                                            docMentionNote, sibliftNote, expandNote, report, droppedPositiveAttr, in.rootArg };
+                                            docMentionNote, sibliftNote, expandNote, report, droppedPositiveAttr, in.rootArg,
+                                            tests.kept > 0 ? rw::kRunHintLegendClause : std::string_view() };
     const auto buildHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
     {
         if( in.innerBundle )   // P10 (L7): a partition slice — the outer <ctx-partitions> legend speaks once for all of them
