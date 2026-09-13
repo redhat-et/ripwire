@@ -4153,7 +4153,16 @@ inline std::size_t definitionCountOfName( const IngestResult& ing, NodeId focus 
 //   2. its file #includes one of the declaration files, resolved PATH-precisely through
 //      resolve.h::resolvePreciseInclude — the same entry point buildPreciseIncludeAdj resolves every corpus
 //      include with, so quote-vs-angle and relative-to-includer handling stay in ONE place — and NEVER by
-//      basename: the two `Store.h` of the H1 repro differ only by path.
+//      basename: the two `Store.h` of the H1 repro differ only by path;
+//   3. (2026-09-13, CodeRabbit on #139, test/decltodefcheck.sh arm B2) and it has EXTERNAL linkage, or sits in
+//      the declaring file itself. Clause 2 proves a FILE, and a TU that includes `api.h` for its own reasons may
+//      define an unrelated `helper` in an anonymous namespace or as a namespace-scope `static` — an overload
+//      (`helper(double)` beside the declared `helper(int)`) compiles, and by name it was gathered and served.
+//      Internal linkage means the definition is visible to its own TU alone, so no other file's declaration can
+//      stand for it. The test is per SYMBOL (Symbol::internalLinkage), so it sits in the keep loop below beside
+//      the per-file proof, and a candidate it rejects is COUNTED in the residue like any other drop: the answer
+//      still tells the reader that same-named definitions exist which no row here covers (arm B2 asserts the
+//      count; the bare-name selector still shows them, as the legend says).
 // Anything else is DROPPED, which leaves the count under the truth (the floor's safe direction), and the
 // caller reports how many were dropped so the answer is not a bare zero.
 //
@@ -4252,6 +4261,47 @@ inline std::vector<char> includeProofOfDeclFiles( const IngestResult& ing, const
         markCandidateFilesIncludingDecl( ing, isDecl, isCand, proven );   // rule 2
     }
     return proven;
+}
+
+// True when one of the first `declCount` entries of `sel` — the declarations the selector named — sits in `fileId`.
+// Clause 3's "own file": an internal-linkage definition can stand for a declaration only in the file that holds both.
+inline bool declaredInFileOf( const IngestResult& ing, const std::vector<NodeId>& sel, std::size_t declCount, std::uint32_t fileId ) noexcept
+{
+    for( std::size_t declIndex = 0; declIndex < declCount; ++declIndex )
+    {
+        if( ing.symbols[ sel[ declIndex ] ].fileId == fileId )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// THE KEEP LOOP of declToDefFollowThrough: appends to `sel` every candidate whose file the proof marked (clauses 1
+// and 2) AND whose linkage lets another file's declaration stand for it (clause 3 — Symbol::internalLinkage, or the
+// declaration is in the candidate's own file). Returns the residue: candidates found and dropped, which the caller
+// DISCLOSES as unproven_defs= rather than serving a bare zero. Split out of declToDefFollowThrough so the bolted-on
+// per-symbol test does not push it over the complexity bar (the same reason H1 split markCandidateFilesIncludingDecl
+// out of the proof). `sel` holds ONLY declarations on entry — the bodied-def early return above guarantees it — so
+// the first sel.size() entries are what declaredInFileOf scans, and the kept definitions append after them.
+inline std::size_t keepProvenCandidates( const IngestResult& ing, const std::vector<NodeId>& cands, const std::vector<char>& proven, std::vector<NodeId>& sel )
+{
+    const std::size_t declCount     = sel.size();
+    std::size_t       unprovenCount = 0;
+    for( NodeId id : cands )
+    {
+        const Symbol& cand        = ing.symbols[ id ];
+        const bool    linkageFits = cand.internalLinkage == 0 || declaredInFileOf( ing, sel, declCount, cand.fileId );
+        if( linkageFits && proven[ cand.fileId ] != 0 )
+        {
+            sel.push_back( id );
+        }
+        else
+        {
+            ++unprovenCount;   // found, not provable (or not implementable from here): dropped, and DISCLOSED rather than served
+        }
+    }
+    return unprovenCount;
 }
 
 // The (scope, name) CANDIDATE gather — only a gather: what KEEPS a candidate is includeProofOfDeclFiles
@@ -4369,18 +4419,7 @@ inline void declToDefFollowThrough( const IngestResult& ing, std::string_view fi
     // of them is tied to the answer.
     const std::vector<char> proven = includeProofOfDeclFiles( ing, sel, cands );
 
-    std::size_t unprovenCount = 0;
-    for( NodeId id : cands )
-    {
-        if( proven[ ing.symbols[ id ].fileId ] != 0 )
-        {
-            sel.push_back( id );   // KEEP the decls - see the fifth clause of the call site's note
-        }
-        else
-        {
-            ++unprovenCount;       // found, not provable: dropped, and DISCLOSED rather than served
-        }
-    }
+    const std::size_t unprovenCount = keepProvenCandidates( ing, cands, proven, sel );   // KEEPS the decls - see the fifth clause of the call site's note
     if( unprovenDefCountOut != nullptr )
     {
         *unprovenDefCountOut = unprovenCount;

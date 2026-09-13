@@ -356,7 +356,18 @@ struct Symbol
     // 0 (the SAFE state) means "no in-file convention found", NEVER "this is production": the path
     // signal is the other half, and filter.h::isTestSymbol is the ONE predicate that ORs them — every
     // symbol-keyed consumer of the test partition must route through it so the two halves cannot drift.
-    std::uint8_t  testScope     = 0;
+    std::uint8_t  testScope       : 1 = 0;
+    // INTERNAL LINKAGE (C and C++ only; gate test/decltodefcheck.sh arm B2): 1 ⇒ this definition is visible to its
+    // own translation unit alone — it sits inside an anonymous `namespace { }` (at any depth) or carries a
+    // namespace-scope `static`. A class-scope `static` member has external linkage and is NOT marked. Read by
+    // graph.h::declToDefFollowThrough: a header's declaration can only be implemented by an external-linkage
+    // definition, so an internal one is kept only when it sits in the declaring file itself, and is otherwise
+    // counted in unproven_defs= like any other dropped candidate (the H1 note's clause 3). Computed at extraction
+    // (ingest_names.h::cppInternalLinkage), rides the per-file
+    // cache record, so kParserVer gates it like every other extracted fact. 0 (the SAFE state) means "no internal
+    // linkage found", so a grammar that never sets it keeps today's gather. Shares testScope's byte as a bit-field:
+    // Symbol has no pad byte left (the static_assert below holds unchanged).
+    std::uint8_t  internalLinkage : 1 = 0;
     // EXTENT HONESTY (src/extentsuspect.h, gate test/extentcheck.sh): the containment rules this def's extent,
     // scope or recovered kind FAILED, as extent::kSuspect* bits (name/head/scope/error); 0 ⇒ every rule held.
     // Computed at LOAD from facts the cache already carries (the extents, the name byte, the `recovered`

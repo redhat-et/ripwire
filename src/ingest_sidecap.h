@@ -1943,6 +1943,9 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     if( ( keyword == "defstruct" || keyword == "defexception" ) && elixir.scopeOf( call ) == d.name ) { d.kind = SymKind::Struct; break; }
                 }
             }
+            // Internal linkage (model.h Symbol::internalLinkage): C and C++ only, read off defNode — the node that owns
+            // the storage class and whose ancestors are the enclosing namespaces (ingest_names.h::cppInternalLinkage).
+            d.internalLinkage = internalLinkageBit( le.lang, defNode, src );
             if( le.lang == Lang::Cpp )                              // canonical scope (E#4): out-of-line `A::b` → "A", else enclosing class/namespace
             {
                 d.scope = qualifierOf( nameNode, src );

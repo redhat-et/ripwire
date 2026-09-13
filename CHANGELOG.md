@@ -15,6 +15,31 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Fixed — a header's declaration no longer widens to an internal-linkage definition (parser version 96)
+
+The decl-to-def widening behind every `file:name` selector (`--callers=api.h:helper`, `--impact`,
+`--uses`, `--safe-delete`, the MCP twins) kept a same-named definition when its file `#include`d the
+declaring header. That proof is per FILE, and a translation unit that includes `api.h` for its own
+reasons may define an unrelated `helper` in an anonymous namespace or as a namespace-scope `static` —
+an overload (`helper(double)` beside the declared `helper(int)`) compiles, and by name it was gathered
+and served. Internal linkage makes a definition visible to its own translation unit alone, so no other
+file's declaration can stand for it. Raised by CodeRabbit on #139 after merge, outside the diff.
+
+Every C and C++ definition now carries a syntactic `internalLinkage` bit — inside an anonymous
+`namespace { }` at any depth, or carrying a namespace-scope `static` (a class-scope `static` member has
+external linkage and is not marked). The widening keeps such a definition only for a declaration in its
+own file and otherwise counts it in `unproven_defs=`, so the reader still learns that same-named
+definitions exist which no row covers; the bare-name selector still shows them, as the legend says.
+
+Measured on the gate fixture (`test/decltodefcheck.sh` arm B2: a header, its defining `.cpp`, one real
+caller, and two including TUs with an anonymous-namespace and a `static` overload): `api.h:helper`
+answered `count="3"` on main where `api.cpp:helper` answered `count="1"`; it now answers `count="1"`
+naming the one real caller, with `unproven_defs="2"`. On this repository at `1cf3086e` the default map
+is byte-identical and none of the 11 header-qualified `--callers` selectors over `src/ingest.h`'s
+declarations moved (the tree has no colliding internal-linkage overload). `kParserVer` 95 → 96 and
+`kCacheVersion` 21 → 22 (the def record gains one byte) with `quality.h`'s mirrors in the same commit;
+old caches are rejected and rebuilt.
+
 ### Added — Elixir module and arity resolution (parser version 95)
 
 Elixir calls now resolve by module, name and arity, with lexical aliases, filtered imports, default

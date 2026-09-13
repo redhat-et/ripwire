@@ -255,6 +255,7 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         s.params       = d.params;   // Q4: parameter count (fns/methods)
         s.arityExact   = d.arityExact;   // B2.2: params is a fixed call-comparable arity
         s.testScope    = d.testScope;    // L8: an in-file test convention encloses this def
+        s.internalLinkage = d.internalLinkage;   // C/C++ anonymous-namespace or namespace-scope `static` def (model.h)
         s.maxNest      = d.maxNest;  // Q4: max control nesting (fns/methods)
         s.humps        = d.humps;   // nesting profile: regions reaching quality::kNestBar (model.h)
         s.deepLoc      = d.deepLoc; // nesting profile: lines inside them, a FLOOR (model.h)

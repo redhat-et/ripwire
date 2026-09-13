@@ -1157,6 +1157,53 @@ inline bool fieldCaptureKept( Lang lang, TSNode nameNode, TSNode roleNode, std::
     return false;       // no enclosing class — `self` is just a name here
 }
 
+// INTERNAL LINKAGE of a C/C++ definition (model.h Symbol::internalLinkage; gate test/decltodefcheck.sh arm B2).
+// `defNode` is the node that OWNS the definition — the function_definition a function_declarator climbed to
+// (ingest_sidecap.h), the declaration for a namespace-scope variable — so its direct children carry the storage
+// class and its ancestors are the enclosing scopes. Two shapes, either one suffices:
+//   1. an anonymous `namespace { … }` anywhere above it — the `name` field is null (enclosingScopeOf reads the
+//      same field and answers "no usable scope" for it). A NAMED class or namespace nested inside one is still
+//      internal, so the walk does not stop at the nearest scope owner the way enclosingScopeOf does;
+//   2. a `static` storage_class_specifier among defNode's direct children — the same scanner fieldCaptureKept
+//      uses for a class-static FIELD — unless the parent is a field_declaration_list: a class-scope `static`
+//      member has EXTERNAL linkage and must not be marked (a bodied in-class static method is the case).
+// Not covered, all on the "not marked" side, which keeps today's behaviour: an unnamed-struct member, a `static`
+// inside a linkage_specification (`extern "C" { static … }` is still internal, but the specifier sits on the
+// declaration, which this does see), and an `inline` variable/function in a header (external, correctly).
+inline bool cppInternalLinkage( TSNode defNode, std::string_view src ) noexcept
+{
+    if( ts_node_is_null( defNode ) )
+    {
+        return false;
+    }
+    const TSNode parent      = ts_node_parent( defNode );
+    const bool   classMember = !ts_node_is_null( parent ) && kindIs( ts_node_type( parent ), "field_declaration_list" );
+    if( !classMember && !childTokenAmong( defNode, src, "storage_class_specifier", /*acceptAnonymousToken=*/false, { "static" } ).empty() )
+    {
+        return true;   // shape 2
+    }
+    for( TSNode p = parent; !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    {
+        if( kindIs( ts_node_type( p ), "namespace_definition" ) && ts_node_is_null( fieldChild( p, NodeField::Name ) ) )
+        {
+            return true;   // shape 1
+        }
+    }
+    return false;
+}
+
+// The RawDef::internalLinkage value for a def of `lang`: cppInternalLinkage for C and C++, 0 (the SAFE state) for
+// every other grammar. The language test lives here so the capture loop in ingest_sidecap.h gains a call, not
+// decision points.
+inline std::uint8_t internalLinkageBit( Lang lang, TSNode defNode, std::string_view src ) noexcept
+{
+    if( lang != Lang::Cpp && lang != Lang::C )
+    {
+        return 0;
+    }
+    return cppInternalLinkage( defNode, src ) ? std::uint8_t( 1 ) : std::uint8_t( 0 );
+}
+
 // forward declarations for dropGatedCapture below — the helpers live after nodeTextOf's section.
 inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept;
 inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noexcept;

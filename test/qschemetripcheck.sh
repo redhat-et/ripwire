@@ -34,6 +34,11 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-13, INTERNAL LINKAGE (test/decltodefcheck.sh arm B2, CodeRabbit on #139): parserVer and its quality mirror
+#   move 95 -> 96 — every C/C++ def carries a syntactic `internalLinkage` bit (anonymous namespace at any depth, or
+#   a namespace-scope `static`), and the decl-to-def widening drops such a definition for another file's declaration.
+#   The def record grows by one u8, so kCacheVersion and its mirror move 21 -> 22 as well. kQSnapCacheScheme stays 11:
+#   no key or snapshot semantics changed, only the extraction identity. Old extraction facts must be re-parsed.
 # 2026-09-12, ELIXIR SEMANTICS (test/elixirsemanticcheck.sh, PR #81), merged onto main: parserVer and its quality
 #   mirror move 94 -> 95 for module/name/arity identities, lexical imports, defaults, captures, delegates,
 #   attributes and protocol/behaviour relationships. Binding/Reference record layouts are unchanged:
