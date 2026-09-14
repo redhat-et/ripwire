@@ -2488,6 +2488,20 @@ inline std::string usesSelectorRefusal( const IngestResult& ing, const std::stri
     const std::size_t lastColon = symbol.rfind( ':' );
     if( lastColon != std::string::npos && lastColon + 1 < symbol.size() )
     {
+        // Issue #164, option (b): a RESOLVING "::" spelling (canonical id or Scope::name) is the one
+        // qualified shape the CLI answers and this verb cannot narrow — its scan is name-wide with no
+        // narrowing machinery, so serving it is the silent count="0" the CLI just fixed. Refuse with the
+        // retry instead, the way a file:name spelling already refuses below. A non-resolving "::" spelling
+        // falls through to the shared refusal (byte-identical); a member spelling keeps its member answer
+        // (resolveFieldSelector is consulted first, mirroring the CLI's memberUsesArm precedence).
+        if( symbol.find( "::" ) != std::string::npos && !resolveAllByName( ing, symbol ).empty()
+            && resolveFieldSelector( ing, symbol ).empty() )
+        {
+            const std::string bareName = symbol.substr( symbol.rfind( ':' ) + 1 );
+            return "qualified '::' selectors are CLI-only on this verb — pass the bare name '" + bareName
+                 + "' (the union across its defs), or use the CLI form `ripwire <dir> --uses=" + symbol
+                 + "` for the narrowed answer";
+        }
         return qualifiedSelectorRefusal( ing, symbol, "--uses=" );   // "" when the qualified spelling resolves
     }
 
@@ -2624,11 +2638,11 @@ inline std::string usesText( const std::string& root, const std::string& symbol,
     // §H4 §3.4 item 2: the opener is the SHARED one (src/graphlegend.h) — this copy and the CLI's were the
     // same false "every use-site of SYM" promise emitted twice, and a fix applied to one of two echo sites
     // is the §B4 failure family. The BODY deliberately stays surface-specific: the CLI legend documents the
-    // file:name selector attributes, which this verb has no selector for and does not emit.
+    // qualified-selector attributes, which this verb has no selector for and does not emit.
     rw::emitTo( mem, "{}"
                        "Reference-name-based (same heuristic level as call edges) — verify in source if a name is overloaded. "
                        "external=\"1\" means SYM has no definition in the indexed tree under ANY spelling (stdlib/third-party); "
-                       "a qualified file:name spelling whose bare name IS defined refuses instead (the CLI uses verb narrows it). "
+                       "qualified file:name and \"::\" spellings whose bare name IS defined refuse instead (the CLI uses verb narrows them). "
                        "{}{}-->{}", kUsesLegendOpen,
                   capLegendClause( computePageDisclosure( upageRows, sites.size(), upw.end,
                                                           page.limit, page.offset, usDiscloseCap ).active ),

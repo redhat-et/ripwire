@@ -21,11 +21,11 @@
 #   test/usesselectorcheck.sh                      # uses build/ripwire on the repo root
 #   RIPWIRE_BIN=build_base/ripwire test/usesselectorcheck.sh   # must FAIL — the pre-fix binary (RED proof)
 #
-# (f), added 2026-09-11, is a KNOWN GAP section for the help-wanted prompt prompts/help-wanted/uses-qualified-selector.md:
-# a "::" selector (the canonical id path::scope::name, or Scope::name) resolves defs= and then answers count="0",
-# because the site scan matches the WHOLE spelling against reference names, which are always bare. Its KNOWN GAP arms,
-# and arm (d)'s canonical-id arm, pin TODAY's wrong answer and PASS; flipping them is that prompt's acceptance test.
-# Its premise and control arms pass before AND after the fix. It runs on two fixtures other gates own and pin:
+# (f), added 2026-09-11, was the KNOWN GAP section for the help-wanted prompt prompts/help-wanted/uses-qualified-selector.md
+# (issue #164): a "::" selector (the canonical id path::scope::name, or Scope::name) resolves defs= and then answers count="0",
+# because the site scan matches the WHOLE spelling against reference names, which are always bare. Its arms, and arm (d)'s
+# canonical-id arm, pinned that wrong answer and PASSED; issue #164's fix flipped each to its FIXED line, which is that
+# prompt's acceptance test. It runs on two fixtures other gates own and pin:
 # test/declinefix (C++, Python — declinecheck.sh) and test/rustqualfix (Rust — rustqualcheck.sh).
 
 set -u
@@ -142,16 +142,36 @@ BARE_B="$( uses_elem 'buildGraph' )"
 if [ "$BARE_A" = "$BARE_B" ]; then ok "bare-name form is stable/reproducible: $BARE_A"; else no "bare-name form not reproducible"; fi
 CANON_A="$( uses_elem "$CANON_ID" )"
 if [ -n "$CANON_A" ]; then ok "canonical-id form still resolves: $CANON_A"; else no "canonical-id form stopped resolving: $CANON_ID"; fi
-# KNOWN GAP (help wanted: prompts/help-wanted/uses-qualified-selector.md). This arm used to call the zero below
-# "documented, unchanged behaviour". It is the gap section (f) pins on fixtures: the canonical id resolves defs="1",
-# then the site scan compares the WHOLE spelling with reference names, which are always bare, so count="0" while
-# --callers on the same id counts hundreds of callers on this repo.
-# FIXED: 1 <= count= <= the bare --uses=empty count — the narrowing arm (b) already asserts for src/notes.h:empty.
+# FIXED (issue #164; was the KNOWN GAP for prompts/help-wanted/uses-qualified-selector.md). This arm used to call
+# the zero below "documented, unchanged behaviour": the canonical id resolved defs="1", then the site scan compared
+# the WHOLE spelling with reference names, which are always bare, so count="0" while --callers on the same id counts
+# hundreds of callers on this repo.
+# FIXED (issue #164): 1 <= count= <= the bare --uses=empty count — the narrowing arm (b) already asserts for src/notes.h:empty.
 if [ -n "$CANON_A" ]; then
-    if [ "$( attr "$CANON_A" count )" = "0" ]; then
-        ok "KNOWN GAP (help wanted: prompts/help-wanted/uses-qualified-selector.md): the canonical id $CANON_ID answers count=\"0\" — flipping this is the acceptance test"
+    CC="$( attr "$CANON_A" count )"; CBE="$( attr "$E_BARE" count )"
+    if [ -n "$CC" ] && [ -n "$CBE" ] && [ "$CC" -ge 1 ] && [ "$CC" -le "$CBE" ] \
+        && printf '%s' "$CANON_A" | grep -q 'narrowed_roles="call"' && [ -n "$( attr "$CANON_A" call_sites_of_name )" ]; then
+        ok "(d) FIXED: the canonical id $CANON_ID answers count=\"$CC\" (bare --uses=empty: $CBE) with the narrowing disclosure"
     else
-        no "KNOWN GAP MOVED (prompts/help-wanted/uses-qualified-selector.md): the canonical id now answers count=$( attr "$CANON_A" count ) — if the fix landed, rewrite this arm to its FIXED line"
+        no "(d) FIXED (issue #164): the canonical id $CANON_ID should answer 1 <= count <= ${CBE:-?} with narrowed_roles=: ${CANON_A:-no <uses> root}"
+    fi
+    # FIXED, same definition same rows: the canonical id against the file:name spelling arm (b) proves.
+    QR="$( "$BIN" "$ROOT" --uses="$CANON_ID" --no-cache 2>/dev/null | grep -o '<u [^>]*>' | sort )"
+    FR="$( "$BIN" "$ROOT" --uses='src/notes.h:empty' --no-cache 2>/dev/null | grep -o '<u [^>]*>' | sort )"
+    if [ -n "$QR" ] && [ "$QR" = "$FR" ]; then
+        ok "(d) FIXED: the canonical id and src/notes.h:empty list identical rows"
+    else
+        no "(d) FIXED (issue #164): canonical-id rows and file:name rows for one definition differ"
+    fi
+    # FIXED, the two verbs agree: every role="call" row sits inside a caller the --callers answer lists
+    # (the relation test/declinecheck.sh's call_sites helper reads).
+    "$BIN" "$ROOT" --uses="$CANON_ID" --no-cache >"$TMP/d_uses.xml" 2>/dev/null
+    "$BIN" "$ROOT" --callers="$CANON_ID" --no-cache >"$TMP/d_callers.xml" 2>/dev/null
+    DU="$( call_sites "$TMP/d_uses.xml" "$TMP/d_callers.xml" )"
+    if [ -z "$DU" ]; then
+        ok "(d) FIXED: every role=\"call\" row of the canonical-id answer sits inside a --callers-listed caller"
+    else
+        no "(d) FIXED (issue #164): call rows with no --callers edge: $( printf '%s' "$DU" | tr '\n' ' ' )"
     fi
 fi
 
@@ -167,19 +187,20 @@ if command -v xmllint >/dev/null 2>&1; then
         && ok "--uses=file:name xml well-formed" || no "--uses=file:name xml malformed"
 fi
 
-# ── (f) KNOWN GAP (help wanted: prompts/help-wanted/uses-qualified-selector.md) — a "::" selector's use-sites ────────
-# THE GAP. Every SYM-taking verb resolves a "::" spelling through graph.h resolveAllByNameQualified: the canonical-id
+# ── (f) FIXED (issue #164; was the KNOWN GAP for prompts/help-wanted/uses-qualified-selector.md) — a "::" selector's use-sites ─
+# THE GAP (pre-fix). Every SYM-taking verb resolves a "::" spelling through graph.h resolveAllByNameQualified: the canonical-id
 # tier (path::scope::name, the id= the map prints), then the scope tier (Scope::name, the sym= --edit-check prints).
 # --callers/--callees/--impact/--expand read the call graph by NodeId after that, so the spelling no longer matters.
-# --uses does not: verbs_navigate.h resolveUsesSelector sets fileQualified only for a ':' with no "::" and otherwise
-# keeps the WHOLE spelling as siteMatchName, and collectUseSites compares that with r.calleeName, which is always a bare
-# name. defs= resolves, count="0" follows, and nothing — no refusal, no call_sites_of_name= — says the zero is a
-# spelling artifact rather than "no use exists". --safe-delete's uses= and --verify's uses()/unused() ride the same
-# scan; the MCP uses twin (mcpverbs.h usesText) carries its own copy of the whole-spelling match.
+# --uses did not: verbs_navigate.h resolveUsesSelector set fileQualified only for a ':' with no "::" and otherwise
+# kept the WHOLE spelling as siteMatchName, and collectUseSites compared that with r.calleeName, which is always a bare
+# name. defs= resolved, count="0" followed, and nothing — no refusal, no call_sites_of_name= — said the zero was a
+# spelling artifact rather than "no use exists". --safe-delete's uses= and --verify's uses()/unused() rode the same
+# scan; the MCP uses twin (mcpverbs.h usesText) carried its own copy of the whole-spelling match.
 #
-# KNOWN GAP arms pin TODAY's wrong answer and PASS now; each one's FIXED comment says what it asserts once the gap is
-# closed. A FAIL on a KNOWN GAP arm means the gap moved: rewrite the arm to its FIXED line, never delete it. Premise
-# and control arms are not gaps — they pass before AND after the fix, and a fix that turns one red is wrong.
+# The gap arms below were KNOWN GAP arms pinning the wrong answer; each one's FIXED comment said what it asserts
+# once the gap is closed, and a FAIL on one meant the gap moved. (2026-09-14: issue #164's fix flipped every gap
+# arm below to its FIXED line. The premises, controls, precision and
+# negative arms are byte-identical to the pre-fix file — a change that turns one red is wrong.)
 #
 # Every site below is a literal read off the fixture source, never derived the way the code derives it:
 #   test/declinefix   cpp/pair/{one,two}.cpp share ctwin in one directory (called once, cpp/pair/user.cpp:3);
@@ -189,12 +210,29 @@ fi
 #   test/rustqualfix  util::tool (src/lib.rs:79) and Widget::new (src/lib.rs:77, src/gadget/mod.rs:47), each call
 #                     isolated in one function; Vec::<u32>::new() (src/lib.rs:91) binds nothing; Gadget::spin is never called
 UQ_PROMPT="prompts/help-wanted/uses-qualified-selector.md"
-UQ_GAP="KNOWN GAP (help wanted: $UQ_PROMPT)"
 fx(){ local d="$ROOT/test/$1"; shift; ( cd "$d" && "$BIN" . --no-cache "$@" 2>/dev/null </dev/null ); }   # every selector is fixture-relative
 tag_of(){ printf '%s' "$1" | grep -oE "<$2( [^>]*)?>" | head -1; }
 val_of(){ printf '%s' "$1" | grep -oE " $2=\"[^\"]*\"" | head -1 | sed -E 's/^[^"]*"([^"]*)"$/\1/'; }
 lists_site(){ printf '%s' "$1" | grep -qF "<u role=\"call\" p=\"$2\""; }   # rows QUOTE role=; the MCP legend spells <u role=call|… bare
-echo "=== (f) $UQ_GAP ==="
+# the role="call" sites (p=file:line) a uses answer lists that NO caller row of a callers answer holds —
+# test/declinecheck.sh's call_sites helper (line 107), copied verbatim: the enclosing symbol is (file, in_id
+# leaf), the caller rows are (p, n leaf). Empty output means the two verbs agree.
+call_sites(){ python3 - "$@" <<'PY'
+import sys, xml.etree.ElementTree as ET
+leaf = lambda s: s.rsplit( "::", 1 )[ -1 ]
+where = lambda p, n: ( p.rsplit( ":", 1 )[ 0 ], leaf( n ) )
+try:
+    uses = ET.parse( sys.argv[ 1 ] ).getroot()
+    rows = ET.parse( sys.argv[ 2 ] ).getroot().iter( "s" ) if len( sys.argv ) > 2 else []
+except ( ET.ParseError, OSError ):
+    sys.exit( 1 )
+bound = { where( s.get( "p", "" ), s.get( "n", "" ) ) for s in rows }
+for u in uses.iter( "u" ):
+    if u.get( "role" ) == "call" and where( u.get( "p", "" ), u.get( "in_id", "" ) ) not in bound:
+        print( u.get( "p" ) )
+PY
+}
+echo "=== (f) the \"::\" selector's use-sites (issue #164, fixed) ==="
 command -v python3 >/dev/null 2>&1 || no "(f) python3 is required by the MCP arms below — they would read nothing"
 
 # fixture | "::" selector | bare name | the call site a FIXED --uses lists | --callers= count (premise) | shape
@@ -204,7 +242,8 @@ command -v python3 >/dev/null 2>&1 || no "(f) python3 is required by the MCP arm
 # inside a caller that ALSO calls Widget::new. That is the file:name rule's own granularity, not this gap.
 while IFS='|' read -r fix sel bare site ncall shape; do
     [ -z "$fix" ] && continue
-    CR="$( tag_of "$( fx "$fix" --callers="$sel" )" callers )"
+    fx "$fix" --callers="$sel" >"$TMP/callers.xml" 2>/dev/null
+    CR="$( tag_of "$( cat "$TMP/callers.xml" )" callers )"
     [ "$( val_of "$CR" count )" = "$ncall" ] \
         && ok "(f) premise, $shape: --callers=$sel resolves and counts $ncall caller(s)" \
         || no "(f) premise, $shape: --callers=$sel should count $ncall — the fixture moved, so the arm below proves nothing: ${CR:-no <callers> root}"
@@ -212,12 +251,27 @@ while IFS='|' read -r fix sel bare site ncall shape; do
     lists_site "$BARE" "$site" \
         && ok "(f) control, $shape: the bare --uses=$bare lists $site" \
         || no "(f) control, $shape: the bare --uses=$bare no longer lists $site: $( tag_of "$BARE" uses )"
+    BARE_COUNT="$( val_of "$( tag_of "$BARE" uses )" count )"
     OUT="$( fx "$fix" --uses="$sel" )"; RC=$?
+    printf '%s' "$OUT" >"$TMP/uses.xml"
     U="$( tag_of "$OUT" uses )"
-    if [ "$RC" = 0 ] && [ -n "$U" ] && [ "$( val_of "$U" count )" = 0 ] && ! printf '%s' "$OUT" | grep -qE '<u role="[a-z]+" p="' && [ -z "$( val_of "$U" call_sites_of_name )" ]; then
-        ok "(f) $UQ_GAP, $shape: --uses=$sel answers count=\"0\", no rows, no disclosure, while --callers counts $ncall — flipping this is the acceptance test"
+    C="$( val_of "$U" count )"
+    # FIXED (issue #164): the narrowed answer — rc=0, the site listed, 1 <= count <= the bare-name union,
+    # and the qualifier disclosure a file:name selector carries.
+    if [ "$RC" = 0 ] && [ -n "$U" ] && lists_site "$OUT" "$site" && [ -n "$C" ] && [ -n "$BARE_COUNT" ] \
+        && [ "$C" -ge 1 ] && [ "$C" -le "$BARE_COUNT" ] \
+        && printf '%s' "$U" | grep -q 'narrowed_roles="call"' && [ -n "$( val_of "$U" call_sites_of_name )" ] \
+        && [ -n "$( val_of "$U" defs_of_name )" ]; then
+        ok "(f) FIXED, $shape: --uses=$sel lists $site at count=$C (bare: $BARE_COUNT) with the narrowing disclosure"
     else
-        no "(f) KNOWN GAP MOVED ($UQ_PROMPT), $shape: --uses=$sel is no longer the silent zero (rc=$RC ${U:-no <uses> root}) — if the fix landed, rewrite this arm to its FIXED line"
+        no "(f) FIXED ($UQ_PROMPT), $shape: --uses=$sel should list $site with 1 <= count <= ${BARE_COUNT:-?} plus narrowed_roles=/call_sites_of_name=: rc=$RC ${U:-no <uses> root}"
+    fi
+    # FIXED, the two verbs agree: every role="call" row sits inside a caller the --callers answer lists.
+    UNACC="$( call_sites "$TMP/uses.xml" "$TMP/callers.xml" )"
+    if [ -z "$UNACC" ]; then
+        ok "(f) FIXED, $shape: every role=\"call\" row sits inside a --callers-listed caller"
+    else
+        no "(f) FIXED ($UQ_PROMPT), $shape: call rows with no --callers edge: $( printf '%s' "$UNACC" | tr '\n' ' ' )"
     fi
 done <<'EOF'
 declinefix|cpp/pair/one.cpp::One::ctwin|ctwin|cpp/pair/user.cpp:3|1|C++ canonical id
@@ -231,7 +285,7 @@ EOF
 
 # the pointer --callers hands the reader. On a bound call next= is --uses on the SAME selector (the next-uses-bare-name
 # prompt changes next= only on answers with declined_calls, and this ctwin call is bound), so run verbatim it lands on
-# the silent zero. FIXED: that pointer, run verbatim, lists cpp/pair/user.cpp:3.
+# the fixed answer. FIXED: that pointer, run verbatim, lists cpp/pair/user.cpp:3 at count="1" with the disclosure.
 CR="$( tag_of "$( fx declinefix --callers=cpp/pair/one.cpp::One::ctwin )" callers )"
 NEXT="$( val_of "$CR" next )"
 [ "$NEXT" = "--uses=cpp/pair/one.cpp::One::ctwin" ] && [ "$( val_of "$CR" count )" = 1 ] \
@@ -240,26 +294,35 @@ NEXT="$( val_of "$CR" next )"
 : >"$TMP/next.xml"
 case "$NEXT" in --uses=*) fx declinefix "$NEXT" >"$TMP/next.xml" ;; esac
 NOUT="$( cat "$TMP/next.xml" )"
-if [ -n "$NOUT" ] && [ "$( val_of "$( tag_of "$NOUT" uses )" count )" = 0 ] && ! lists_site "$NOUT" cpp/pair/user.cpp:3; then
-    ok "(f) $UQ_GAP: the callers answer's own next=, run verbatim, lands on count=\"0\" — flipping this is the acceptance test"
+NU="$( tag_of "$NOUT" uses )"
+if lists_site "$NOUT" cpp/pair/user.cpp:3 && [ "$( val_of "$NU" count )" = 1 ] && [ -n "$( val_of "$NU" call_sites_of_name )" ]; then
+    ok "(f) FIXED: the callers answer's own next=, run verbatim, lists cpp/pair/user.cpp:3 with the narrowing disclosure"
 else
-    no "(f) KNOWN GAP MOVED ($UQ_PROMPT): next=\"${NEXT:-absent}\" run verbatim is no longer the silent zero — if the fix landed, rewrite this arm: it lists cpp/pair/user.cpp:3"
+    no "(f) FIXED ($UQ_PROMPT): next=\"${NEXT:-absent}\" run verbatim should list cpp/pair/user.cpp:3 at count=\"1\": ${NU:-no <uses> root}"
 fi
 # control: the file:name spelling of the SAME definition already lands — the contrast that makes the "::" zero a bug
 OUT="$( fx declinefix --uses=cpp/pair/one.cpp:ctwin )"
 lists_site "$OUT" cpp/pair/user.cpp:3 && [ "$( val_of "$( tag_of "$OUT" uses )" call_sites_of_name )" = 1 ] \
     && ok "(f) control: --uses=cpp/pair/one.cpp:ctwin (file:name, the same definition) lists cpp/pair/user.cpp:3 with call_sites_of_name=\"1\"" \
     || no "(f) control: --uses=cpp/pair/one.cpp:ctwin stopped listing cpp/pair/user.cpp:3: $( tag_of "$OUT" uses )"
+# FIXED, same definition same rows: the canonical id against the file:name spelling above.
+QROWS="$( printf '%s' "$( fx declinefix --uses=cpp/pair/one.cpp::One::ctwin )" | grep -o '<u [^>]*>' | sort )"
+FROWS="$( printf '%s' "$OUT" | grep -o '<u [^>]*>' | sort )"
+if [ -n "$QROWS" ] && [ "$QROWS" = "$FROWS" ]; then
+    ok "(f) FIXED: the canonical id and the file:name spelling of one definition list identical rows"
+else
+    no "(f) FIXED ($UQ_PROMPT): canonical-id rows and file:name rows for one definition differ"
+fi
 
 # --safe-delete's uses= rides the same scan. FIXED: --safe-delete=Solo::conly reads uses="1", the bare spelling's number.
 SDB="$( tag_of "$( fx declinefix --safe-delete=conly )" safe-delete )"
 SDQ="$( tag_of "$( fx declinefix --safe-delete=Solo::conly )" safe-delete )"
 [ "$( val_of "$SDB" uses )" = 1 ] && ok "(f) control: --safe-delete=conly reads uses=\"1\"" \
     || no "(f) control: --safe-delete=conly should read uses=\"1\": ${SDB:-no <safe-delete> root}"
-if [ "$( val_of "$SDQ" uses )" = 0 ] && [ "$( val_of "$SDQ" callers )" = 1 ]; then
-    ok "(f) $UQ_GAP: --safe-delete=Solo::conly reads uses=\"0\" beside callers=\"1\" — flipping this is the acceptance test"
+if [ "$( val_of "$SDQ" uses )" = 1 ] && [ "$( val_of "$SDQ" callers )" = 1 ]; then
+    ok "(f) FIXED: --safe-delete=Solo::conly reads uses=\"1\" beside callers=\"1\""
 else
-    no "(f) KNOWN GAP MOVED ($UQ_PROMPT): --safe-delete=Solo::conly is no longer uses=\"0\" callers=\"1\" (${SDQ:-no <safe-delete> root}) — rewrite this arm to uses=\"1\""
+    no "(f) FIXED ($UQ_PROMPT): --safe-delete=Solo::conly should read uses=\"1\" callers=\"1\": ${SDQ:-no <safe-delete> root}"
 fi
 
 # --verify's uses()/unused() claims read the same scan. FIXED: uses(Solo::conly) is verdict="confirmed" count="1".
@@ -267,15 +330,15 @@ VB="$( tag_of "$( fx declinefix --verify='uses(conly)' )" verify )"
 VQ="$( tag_of "$( fx declinefix --verify='uses(Solo::conly)' )" verify )"
 [ "$( val_of "$VB" verdict )" = confirmed ] && ok "(f) control: --verify=\"uses(conly)\" is confirmed" \
     || no "(f) control: --verify=\"uses(conly)\" should be confirmed: ${VB:-no <verify> root}"
-if [ "$( val_of "$VQ" verdict )" = not-established ] && [ "$( val_of "$VQ" count )" = 0 ]; then
-    ok "(f) $UQ_GAP: --verify=\"uses(Solo::conly)\" is not-established on count=\"0\" — flipping this is the acceptance test"
+if [ "$( val_of "$VQ" verdict )" = confirmed ] && [ "$( val_of "$VQ" count )" = 1 ]; then
+    ok "(f) FIXED: --verify=\"uses(Solo::conly)\" is confirmed on count=\"1\""
 else
-    no "(f) KNOWN GAP MOVED ($UQ_PROMPT): --verify=\"uses(Solo::conly)\" moved (${VQ:-no <verify> root}) — rewrite this arm to verdict=\"confirmed\" count=\"1\""
+    no "(f) FIXED ($UQ_PROMPT): --verify=\"uses(Solo::conly)\" should be confirmed count=\"1\": ${VQ:-no <verify> root}"
 fi
 
-# the MCP uses twin keeps its OWN copy of the whole-spelling match (mcpverbs.h usesText) — JSON-RPC over stdio, as a
-# client speaks it. FIXED: rows listing cpp/pair/user.cpp:3, OR a refusal that names the retry (the plan picks one) —
-# never a silent count="0".
+# the MCP uses twin kept its OWN copy of the whole-spelling match (mcpverbs.h usesText) — JSON-RPC over stdio, as a
+# client speaks it. FIXED (issue #164, the plan's option b): a resolving "::" spelling refuses as CLI-only, naming
+# the bare-name retry and the CLI form — never a silent count="0".
 mcp_uses(){
     printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
         "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"uses\",\"arguments\":{\"path\":\"$ROOT/test/declinefix\",\"symbol\":\"$1\"}}}" \
@@ -289,10 +352,11 @@ MB="$( mcp_uses ctwin )"
 lists_site "$MB" cpp/pair/user.cpp:3 && ok "(f) control: MCP uses symbol=\"ctwin\" lists cpp/pair/user.cpp:3" \
     || no "(f) control: MCP uses symbol=\"ctwin\" should list cpp/pair/user.cpp:3: $( printf '%s' "$MB" | head -c 240 )"
 MQ="$( mcp_uses One::ctwin )"
-if [ "$( val_of "$( tag_of "$MQ" uses )" count )" = 0 ] && ! printf '%s' "$MQ" | grep -qE '<u role="[a-z]+" p="'; then
-    ok "(f) $UQ_GAP: MCP uses symbol=\"One::ctwin\" answers count=\"0\" with no rows — flipping this is the acceptance test"
+if printf '%s' "$MQ" | grep -q '^__ERROR__:' && printf '%s' "$MQ" | grep -q 'CLI-only' \
+    && printf '%s' "$MQ" | grep -q "bare name 'ctwin'" && printf '%s' "$MQ" | grep -q -- '--uses=One::ctwin'; then
+    ok "(f) FIXED: MCP uses symbol=\"One::ctwin\" refuses as CLI-only, naming the bare-name retry and the CLI form"
 else
-    no "(f) KNOWN GAP MOVED ($UQ_PROMPT): MCP uses symbol=\"One::ctwin\" moved: $( printf '%s' "$MQ" | head -c 240 ) — rewrite this arm to the shape the plan chose"
+    no "(f) FIXED ($UQ_PROMPT): MCP uses symbol=\"One::ctwin\" should refuse as CLI-only with the retry: $( printf '%s' "$MQ" | head -c 240 )"
 fi
 
 # precision controls — the naive fix (strip the scope, then name-match the bare half) turns these red. Today they pass

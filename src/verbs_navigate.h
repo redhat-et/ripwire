@@ -334,15 +334,43 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
 }
 
 // §P10.2: --uses' selector-parsing seam, factored out so the file:name fix adds a new small symbol
-// instead of growing the already-hot runUses. fileQualified excludes a canonical id ("::") — that was
-// never a use-site match key and stays byte-identical. siteMatchName filters sites (name-only, can't
-// split per-def); suggestName is the NAME half for did-you-mean (--expand/--outline's Lane H rule), so a
+// instead of growing the already-hot runUses. fileQualified excludes a canonical id ("::") — that spelling
+// takes scopeNarrowed instead (issue #164): the resolved defs share one name, and the call role narrows to
+// it through usesChosenCallers exactly as a file:name selector does. siteMatchName filters sites (name-only,
+// can't split per-def); suggestName is the NAME half for did-you-mean (--expand/--outline's Lane H rule), so a
 // "file:" prefix never again poisons the suggester (the constant "srcmut_sigchange" bug). defsOfName is the
-// un-narrowed def count for the disclosure attribute — meaningful only when fileQualified.
-struct UsesSelector { bool fileQualified; std::string_view siteMatchName; std::string_view suggestName; std::size_t defsOfName; std::vector<rw::NodeId> elixirDefs; };
-inline UsesSelector resolveUsesSelector( const rw::IngestResult& ing, std::string_view sym, std::size_t defsCount )
+// un-narrowed def count for the disclosure attribute — meaningful only when the answer narrowed.
+struct UsesSelector { bool fileQualified; bool scopeNarrowed; std::string_view siteMatchName; std::string_view suggestName; std::size_t defsOfName; std::vector<rw::NodeId> elixirDefs; };
+
+// Issue #164: the site-match name for a "::" spelling, read off the RESOLVED defs, never off the spelling.
+// Every "::" tier keys on the trailing name (the canonical tier tail-matches path::scope::name, the scope
+// tier matches s.name plus a scope suffix), so a non-empty resolution shares ONE name — but only the defs
+// prove it (an Elixir arity suffixes the name: f/1 and f/2 are different site-match keys). Mixed names keep
+// today's whole-spelling key, which matches nothing, rather than a strip-and-match the precision controls
+// forbid. Bounds-checked: a def id past the symbol table cannot name anything.
+inline bool commonDefsName( const rw::IngestResult& ing, std::span<const rw::NodeId> defs, std::string_view& nameOut )
 {
-    UsesSelector u;
+    if( defs.empty() )
+    {
+        return false;
+    }
+    if( defs[ 0 ] >= ing.symbols.size() )
+    {
+        return false;
+    }
+    nameOut = ing.symbols[ defs[ 0 ] ].name;
+    for( std::size_t defIndex = 1; defIndex < defs.size(); ++defIndex )
+    {
+        if( defs[ defIndex ] >= ing.symbols.size() || ing.symbols[ defs[ defIndex ] ].name != nameOut )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+inline UsesSelector resolveUsesSelector( const rw::IngestResult& ing, std::string_view sym, std::span<const rw::NodeId> defs )
+{
+    UsesSelector u{};   // both narrowing flags start false; every arm below sets what it means
     u.elixirDefs = rw::resolveAllByNameQualified( ing, sym );
     std::erase_if( u.elixirDefs, [ & ]( rw::NodeId node ) { return ing.symbols[ node ].lang != rw::Lang::Elixir; } );
     if( !sym.empty() && sym.front() == '@' )
@@ -375,12 +403,21 @@ inline UsesSelector resolveUsesSelector( const rw::IngestResult& ing, std::strin
     {
         rw::splitQualifiedSpec( sym, file, u.siteMatchName );
     }
+    else if( sym.find( "::" ) != std::string_view::npos && commonDefsName( ing, defs, u.siteMatchName ) )
+    {
+        // A "::" spelling whose defs share one name narrows exactly like a file:name selector: the site
+        // scan matches that name, and the call role narrows to the defs through usesChosenCallers. Set
+        // only on a non-empty, single-named resolution, so a wrong scope (Nope::ctwin) keeps the
+        // whole-spelling key and the generic refusal's bytes. A member spelling backed by no symbol
+        // (empty defs) never sets the flag, so memberUsesArm still serves it upstream exactly as today.
+        u.scopeNarrowed = true;
+    }
     else
     {
         u.siteMatchName = sym;
     }
     rw::splitQualifiedSpec( sym, file, u.suggestName );
-    u.defsOfName = u.fileQualified ? rw::resolveAllByName( ing, u.siteMatchName ).size() : defsCount;
+    u.defsOfName = ( u.fileQualified || u.scopeNarrowed ) ? rw::resolveAllByName( ing, u.siteMatchName ).size() : defs.size();
     return u;
 }
 
@@ -457,10 +494,11 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
         {
             ++callSitesOfName;
         }
-        // the file: qualifier's call-role narrowing. A file-scope call site (fromSymbol==kNoNode) carries no
-        // resolved edge to test, so it cannot be SHOWN to reach the chosen def and is dropped with the rest —
-        // call_sites_of_name= keeps the size of what was dropped visible.
-        if( sel.fileQualified && r.role == RefRole::Call && ( r.fromSymbol >= isChosenCaller.size() || !isChosenCaller[r.fromSymbol] ) )
+        // the file: qualifier's call-role narrowing — and, since issue #164, a "::" spelling's too
+        // (scopeNarrowed, the same file:name semantics off a scope-qualified selector). A file-scope call site
+        // (fromSymbol==kNoNode) carries no resolved edge to test, so it cannot be SHOWN to reach the chosen
+        // def and is dropped with the rest — call_sites_of_name= keeps the size of what was dropped visible.
+        if( ( sel.fileQualified || sel.scopeNarrowed ) && r.role == RefRole::Call && ( r.fromSymbol >= isChosenCaller.size() || !isChosenCaller[r.fromSymbol] ) )
         {
             continue;
         }
@@ -525,8 +563,8 @@ std::optional<int> runUses( const MainDispatch& d )
     // ROLE (call/read/write/import/extends) and p="file:line", plus the enclosing symbol. Reference-name-based
     // (same heuristic level as the call edges), so a BARE name shared by several symbols reports the union of
     // all their use-sites. external="1" when SYM has NO in-corpus definition at all. §P10.2/§A6b: SYM also
-    // accepts "file:name" (resolveUsesSelector) — that narrows defs= AND the call-role sites (usesChosenCallers);
-    // the other roles stay name-matched, and defs_of_name=/call_sites_of_name= disclose both gaps.
+    // accepts "file:name" and "::" spellings (resolveUsesSelector) — both narrow defs= AND the call-role sites
+    // (usesChosenCallers); the other roles stay name-matched, and defs_of_name=/call_sites_of_name= disclose both gaps.
     // Deterministic: use-sites sorted by (file path, line, role, enclosing-id); every value XML-escaped.
     if( !cfg.usesSym.empty() )
     {
@@ -538,7 +576,7 @@ std::optional<int> runUses( const MainDispatch& d )
         // below drops every site that resolves to them, which reached the reader as a bare count="0".
         std::size_t               usUnprovenDefs = 0;
         const std::vector<NodeId> defs           = resolveAllByNameQualified( ing, sym, &usUnprovenDefs );
-        const UsesSelector        sel            = resolveUsesSelector( ing, sym, defs.size() );
+        const UsesSelector        sel            = resolveUsesSelector( ing, sym, defs );
 
         // member-variable round (card A3): ONE resolved field takes the per-site path (fielduses.h — the renderer
         // the MCP twin returns); a bare field name declared by several owners refuses with the Owner.field
@@ -549,7 +587,7 @@ std::optional<int> runUses( const MainDispatch& d )
         }
 
         // §A6b(iii): external="1" is the claim "this name has NO definition in the indexed tree" — it may only
-        // be made when that is what was measured. With a file: qualifier defs= is a NARROWED count, so the
+        // be made when that is what was measured. With a qualifier defs= is a NARROWED count, so the
         // un-narrowed defs_of_name= is the one that can license the claim; pre-fix a non-defining qualifier
         // printed external="1" beside defs_of_name="3", which says the opposite in the same element.
         const bool external = defs.empty() && sel.defsOfName == 0;
@@ -557,7 +595,7 @@ std::optional<int> runUses( const MainDispatch& d )
 
         // §A6b(i): the call sites that resolve to the CHOSEN defs (empty ⇒ nothing narrows, every role stays
         // name-matched, and the un-qualified output is byte-identical).
-        const std::vector<char> isChosenCaller = sel.fileQualified ? usesChosenCallers( ing, g, defs ) : std::vector<char>{};
+        const std::vector<char> isChosenCaller = ( sel.fileQualified || sel.scopeNarrowed ) ? usesChosenCallers( ing, g, defs ) : std::vector<char>{};
 
         // the sorted use-sites, plus the un-narrowed call-role total the disclosure reports.
         const auto [ sites, callSitesOfName ] = collectUseSites( ing, sel, isChosenCaller,
@@ -585,7 +623,7 @@ std::optional<int> runUses( const MainDispatch& d )
         // §A6b: the qualifier disclosure, built once for both emitters. defs_of_name= is the un-narrowed DEF
         // count; narrowed_roles="call" names which roles the qualifier actually narrowed and call_sites_of_name=
         // is that role's un-narrowed total, so "how much did the qualifier drop" is arithmetic, not a guess.
-        const std::string selectorAttrs = sel.fileQualified
+        const std::string selectorAttrs = ( sel.fileQualified || sel.scopeNarrowed )
             ? " defs_of_name=\"" + std::to_string( sel.defsOfName ) + "\" narrowed_roles=\"call\" call_sites_of_name=\"" + std::to_string( callSitesOfName ) + "\""
             : std::string{};
 
@@ -605,10 +643,10 @@ std::optional<int> runUses( const MainDispatch& d )
                      "Reference-name-based (same heuristic level as call edges) — verify in source if a name is overloaded. "
                      "external=\"1\" ⇒ SYM has no definition in the indexed tree under ANY spelling (stdlib/third-party) — "
                      "never merely none in the file you qualified with (that spelling refuses instead). "
-                     "A \"file:name\" SYM narrows defs= AND the role=\"call\" sites, which are kept only where the call RESOLVES to a "
+                     "A \"file:name\" or \"::\" SYM narrows defs= AND the role=\"call\" sites, which are kept only where the call RESOLVES to a "
                      "chosen def (the callers verb's own narrowing, read the other way, so the two agree); read/write/import/extends carry no "
                      "resolution and stay name-matched across every def sharing the name. narrowed_roles= names what narrowed, and "
-                     "defs_of_name=/call_sites_of_name= (file: qualifier only) are the un-narrowed totals. "
+                     "defs_of_name=/call_sites_of_name= (qualifier only) are the un-narrowed totals. "
                      "{}{}{}-->{}{}", rw::kUsesLegendOpen,
                      rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Uses, usUnprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=
                      rw::capLegendClause( rw::computePageDisclosure( pageRows, sites.size(), upw.end,
@@ -671,8 +709,7 @@ std::optional<int> runUses( const MainDispatch& d )
 // Composes four signals this tool already computes elsewhere, over ONE already-resolved selector, instead
 // of a new analysis: the transitive blast radius (rw::transitiveCallers, --impact's own walk), every
 // read/write/import/call/extends use-site (resolveUsesSelector/collectUseSites, --uses' own machinery,
-// called verbatim — this verb never takes the file: qualifier --uses does, so the selector is always
-// name-wide), whether an indexed test transitively reaches the symbol and how much of its blast radius
+// called verbatim — a qualified selector narrows here exactly as on --uses), whether an indexed test transitively reaches the symbol and how much of its blast radius
 // does too (the same forward test-seed BFS computeQMetrics's tested= column runs, re-derived locally here
 // rather than reached through MainDispatch's testedPtr — that pointer is null unless --metrics/--for/
 // --exemplar is ALSO given, and a single-symbol BFS has nothing to amortize against that gate), and
@@ -812,11 +849,11 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     // transitive blast radius: the --impact walk, verbatim.
     const std::vector<NodeId> reach = rw::transitiveCallers( g, defs );
 
-    // every use-site: the --uses walk, verbatim. Always a bare-name selector (fileQualified is only ever
-    // set by resolveUsesSelector when SYM itself carries a file: prefix, which still works here — --uses'
-    // own selector grammar, unchanged).
-    const UsesSelector        sel            = resolveUsesSelector( ing, cfg.safeDeleteSym, defs.size() );
-    const std::vector<char>   isChosenCaller = sel.fileQualified ? usesChosenCallers( ing, g, defs ) : std::vector<char>{};
+    // every use-site: the --uses walk, verbatim. A "file:name" or "::" selector narrows here exactly as on
+    // --uses (fileQualified/scopeNarrowed out of resolveUsesSelector) — --safe-delete takes --uses' own
+    // selector grammar, unchanged.
+    const UsesSelector        sel            = resolveUsesSelector( ing, cfg.safeDeleteSym, defs );
+    const std::vector<char>   isChosenCaller = ( sel.fileQualified || sel.scopeNarrowed ) ? usesChosenCallers( ing, g, defs ) : std::vector<char>{};
     const auto                sitesPair      = collectUseSites( ing, sel, isChosenCaller,
                                                                  sdSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{} );
                                                                                                // .second (the un-narrowed
@@ -1509,8 +1546,8 @@ std::optional<int> runVerify( const MainDispatch& d )
     {
         const std::string_view    sym  = claim.arg1;
         const std::vector<NodeId> defs = resolveAllByNameQualified( ing, sym, &vfUnprovenDefs );   // H1: the residue --uses discloses
-        const UsesSelector        sel  = resolveUsesSelector( ing, sym, defs.size() );
-        const std::vector<char>   isChosenCaller = sel.fileQualified ? usesChosenCallers( ing, g, defs ) : std::vector<char>{};
+        const UsesSelector        sel  = resolveUsesSelector( ing, sym, defs );
+        const std::vector<char>   isChosenCaller = ( sel.fileQualified || sel.scopeNarrowed ) ? usesChosenCallers( ing, g, defs ) : std::vector<char>{};
         const auto [ sites, callSitesOfName ]    = collectUseSites( ing, sel, isChosenCaller,
                                                                      verSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{} );
         (void) callSitesOfName;
