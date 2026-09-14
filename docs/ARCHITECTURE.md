@@ -38,6 +38,8 @@ sections in call order: the lazy tags.scm prewarm (`ingest_prewarm.h`), the para
 (`ingest_parsepool.h`), the document post-pass (`ingest_docpass.h`), and the build-model tail —
 dedup, symbol assignment, span attribution, ordered emit (`ingest_model.h`).
 
+`--doctor`'s `layout` row compares the shared model's recorded `sizeof`/`alignof` facts across translation units and fails a mixed binary instead of guessing which object is stale.
+
 **Crawl order is deterministic, and that is load-bearing.** The walk *collects every candidate path
 first*, sorts them lexicographically by byte, and only then assigns node IDs and parses. Node IDs are
 indices into that sorted list, so they are stable across runs of the same tree; if IDs followed

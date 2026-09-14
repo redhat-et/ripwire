@@ -77,7 +77,9 @@ cmake --build build --clean-first -j          # and the same for asan/ if that t
 `test/g1freshcheck.sh` catches the ordinary stale binary (binary older than source) and is worth
 believing when it fires — it is not noise. It cannot catch this variant, because here the binary is
 *newer* than the source and only its contents are stale. Nothing in CMake can repair a source that
-changed mid-compile; the discipline is the fix.
+changed mid-compile; the discipline is the fix. When this variant is suspected, `--doctor`'s `layout`
+row reports the cross-translation-unit `sizeof`/`alignof` evidence; treat `state="disagree"` as a
+clean-rebuild requirement.
 
 ## Verify
 

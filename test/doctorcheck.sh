@@ -3,7 +3,7 @@
 #
 # --doctor is a DIAGNOSTIC verb (environment-dependent output is its whole point), so unlike every
 # other absorb gate this one does NOT assert byte-identical / golden output. Instead it asserts:
-#   (A) happy path: exit 0, all 6 <c> rows present, xmllint-clean, checks="N" matches N emitted rows.
+#   (A) happy path: exit 0, every named <c> row present, xmllint-clean, checks="N" matches N emitted rows.
 #   (B) an unwritable cache dir (via TMPDIR) makes the cache-dir row ok="0" and the whole run exit 1.
 #   (C) a non-repo target dir makes the git row ok="1" repo="0" (degrade, not a failure).
 #   (D) non-vacuity without a source mutation: assert the check COUNT in checks="N" equals the number
@@ -88,7 +88,7 @@ DECLARED_CHECKS="$( echo "$OUT" | grep -o '<doctor checks="[0-9]*"' | grep -o '[
     && ok "checks=\"$DECLARED_CHECKS\" equals the emitted <c n=> row count" \
     || no "checks=\"${DECLARED_CHECKS:-<absent>}\" disagrees with the $EMITTED_ROWS rows actually emitted"
 
-for row in binary-path grammars cache-dir git tree-sitter tracked-binaries index-cache git-config-trust; do
+for row in binary-path grammars cache-dir git tree-sitter tracked-binaries index-cache git-config-trust layout; do
     echo "$OUT" | grep -q "<c n=\"$row\" ok=" \
         && ok "row present: $row" \
         || no "row missing: $row"

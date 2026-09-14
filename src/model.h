@@ -10,6 +10,7 @@
 
 #include "infra/profileScope.h"
 #include "smallvec.h"   // rw::SmallVec — THE ONE ALIAS; the per-key span lists and per-file id buckets below
+#include "structlayout.h"   // cross-translation-unit sizeof/alignof tripwire for the shared model
 
 #include <algorithm>   // std::sort — symbolsByFile below
 #include <tuple>       // std::tie — lessUnindexedExt's mixed-direction compare
@@ -1015,6 +1016,22 @@ struct IngestResult
     //    values, so one number describes the whole pass.
     std::size_t                reparsedFiles = 0;
 };
+
+// These aggregates cross the ingest/main translation-unit boundary. The record is emitted once per TU by
+// structlayout.h, so a header change that leaves a mixed binary can be diagnosed after linking instead of
+// passing a self-consistent static_assert in each half.
+RIPWIRE_LAYOUT_REGISTER_TYPES( RIPWIRE_LAYOUT_TYPE_ENTRY( std::string ),
+                               RIPWIRE_LAYOUT_TYPE_ENTRY( Symbol ),
+                               RIPWIRE_LAYOUT_TYPE_ENTRY( Reference ),
+                               RIPWIRE_LAYOUT_TYPE_ENTRY( Include ),
+                               RIPWIRE_LAYOUT_TYPE_ENTRY( ConstOpen ),
+                               RIPWIRE_LAYOUT_TYPE_ENTRY( Binding ),
+                               RIPWIRE_LAYOUT_TYPE_ENTRY( BindingAlias ),
+                               RIPWIRE_LAYOUT_TYPE_ENTRY( RouteDef ),
+                               RIPWIRE_LAYOUT_TYPE_ENTRY( RouteUse ),
+                               RIPWIRE_LAYOUT_TYPE_ENTRY( FileHealth ),
+                               RIPWIRE_LAYOUT_TYPE_ENTRY( SkippedOversize ),
+                               RIPWIRE_LAYOUT_TYPE_ENTRY( IngestResult ) );
 
 // multi-root workspace cap: a sane bound on N crawl roots — an agent joining a
 // handful of checkouts is the use case; hundreds of roots is a mis-glued path list, refused loudly.

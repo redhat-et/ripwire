@@ -282,6 +282,11 @@ inline const char* doctorLegendComment()
                        "COMMAND git would run on every read-only call, and neutralised=\"1\" says core.fsmonitor=false was "
                        "appended to git's environment override for this run (stderr said so as git_harden=fsmonitor-hook); "
                        "builtin, off and unset are left untouched and neutralised=\"0\". "
+                       "layout's state=\"agree\" means the layout records match; checked=\"1\" means the comparison ran; "
+                       "units=\"N\" counts translation units and types=\"N\" counts recorded types. On state=\"disagree\", "
+                       "type= names the first differing type, unit0=/unit1= name the two records, and "
+                       "present0=/present1=, size0=/size1=, and align0=/align1= disclose their values; the row gives the rebuild action; "
+                       "state=\"not-checked\" means fewer than two records survived into this binary. "
                        "NB no flag below is spelled with its leading dashes: an XML comment may not contain a "
                        "double hyphen, and this legend is one comment. -->";
 }
@@ -644,6 +649,57 @@ inline std::string doctorGitConfigTrustAttrs( const rw::Config& cfg )
     return attrs;
 }
 
+struct DoctorLayoutCheck
+{
+    bool        ok = false;
+    std::string attrs;
+};
+
+inline DoctorLayoutCheck doctorLayoutCheck( std::vector<char>& esc )
+{
+    using namespace rw::layout_registry;
+    const LayoutCheck check = compare();
+    DoctorLayoutCheck out;
+    const auto escaped = [ &esc ]( const char* value )
+    {
+        return std::string( rw::escapeXml( std::string_view( value == nullptr ? "" : value ), esc ) );
+    };
+
+    switch( check.state )
+    {
+        case CheckState::Agree:
+        {
+            out.ok = true;
+            out.attrs = "state=\"agree\" checked=\"1\" units=\"" + std::to_string( check.unitCount )
+                      + "\" types=\"" + std::to_string( check.typeCount ) + "\"";
+            break;
+        }
+        case CheckState::Disagree:
+        {
+            const LayoutMismatch& mismatch = check.mismatch;
+            out.attrs = "state=\"disagree\" checked=\"1\" units=\"" + std::to_string( check.unitCount )
+                      + "\" types=\"" + std::to_string( check.typeCount ) + "\" type=\"" + escaped( mismatch.typeName )
+                      + "\" unit0=\"" + escaped( mismatch.unit0 ) + "\" unit1=\"" + escaped( mismatch.unit1 )
+                      + "\" present0=\"" + std::string( mismatch.present0 ? "1" : "0" )
+                      + "\" present1=\"" + std::string( mismatch.present1 ? "1" : "0" )
+                      + "\" size0=\"" + std::to_string( mismatch.size0 ) + "\" size1=\"" + std::to_string( mismatch.size1 )
+                      + "\" align0=\"" + std::to_string( mismatch.align0 ) + "\" align1=\"" + std::to_string( mismatch.align1 )
+                      + "\" hint=\"mixed translation-unit layouts detected — rebuild with cmake --build build --clean-first -j\"";
+            break;
+        }
+        case CheckState::NoRecords:
+        case CheckState::NotChecked:
+        {
+            const char* const state = check.state == CheckState::NoRecords ? "no-records" : "not-checked";
+            out.attrs = "state=\"" + std::string( state ) + "\" checked=\"0\" units=\"" + std::to_string( check.unitCount )
+                      + "\" types=\"" + std::to_string( check.typeCount )
+                      + "\" hint=\"not checked: layout records from at least two translation units are required\"";
+            break;
+        }
+    }
+    return out;
+}
+
 int runDoctor( const rw::Config& cfg, const char* argv0 )
 {
     using namespace rw;
@@ -857,6 +913,14 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
     // ---- check 8: the git-config trust boundary — body in doctorGitConfigTrustAttrs above, for the same reason
     // check 7's lives in doctorIndexCacheRow: runDoctor is a dispatcher, and every check body it absorbs lands there.
     row( "git-config-trust", true, doctorGitConfigTrustAttrs( cfg ) );
+
+    // ---- check 9: cross-translation-unit layout agreement — this is the one check that can identify a
+    // binary no single source tree could produce. A single record is deliberately not a pass: there is no
+    // second compiler view against which to compare it.
+    {
+        const DoctorLayoutCheck layout = doctorLayoutCheck( esc );
+        row( "layout", layout.ok, layout.attrs );
+    }
 
     const DoctorAgentRows agentRows = doctorAgentRows( cfg, argv0 );
     checks += agentRows.checks;
