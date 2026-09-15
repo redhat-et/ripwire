@@ -51,6 +51,7 @@ extern "C"
     const TSLanguage* tree_sitter_elixir( void );
     const TSLanguage* tree_sitter_dart( void );
     const TSLanguage* tree_sitter_kotlin( void );
+    const TSLanguage* tree_sitter_gdscript( void );
 }
 
 // This process's own executable path, realpath'd. macOS uses _NSGetExecutablePath and Linux uses
@@ -463,6 +464,7 @@ inline DoctorGrammarProbe doctorProbeGrammars()
         { "elixir",     &tree_sitter_elixir,     "elixir"     },
         { "dart",       &tree_sitter_dart,       "dart"       },
         { "kotlin",     &tree_sitter_kotlin,     "kotlin"     },
+        { "gdscript",   &tree_sitter_gdscript,   "gdscript"   },
         // markdown carries NO tags.scm — ingest extracts sections by a custom tree walk, so the honest
         // probe is the pairing ingest actually uses: set_language + a real parse, not a query compile.
         { nullptr,      &tree_sitter_markdown,   "markdown"   },

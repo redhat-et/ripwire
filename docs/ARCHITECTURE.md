@@ -252,6 +252,31 @@ Elixir extraction landed at revision 78 (rich 79) — `kParserVer` in `src/inges
 `kIngestParserVerMirror` in `src/quality.h`. The required `qschemetrip` source-change pin is refreshed
 for this extraction change; snapshot scheme 8 is unchanged.
 
+<a id="gdscript-extraction"></a>
+
+GDScript needs no capture-filter module: unlike Elixir, its grammar carries real definition nodes, so
+`queries/gdscript/tags.scm` alone is the extraction. A `.gd` FILE IS A CLASS BODY — `class_name` names
+the class and file-scope `func`/`var` are its members — so a file-scope `func` is `fn` (as every other
+language treats a file-scope definition) while a `func` inside an explicit `class Inner:` is `method`.
+`enum` rides `@definition.type` as Java/C#/TypeScript do. Two capture choices are forced by gates in
+`ingest_names.h`, not taste: enum MEMBERS ride `@definition.constant` because `@definition.enummember`
+is gated by `isPyEnumMemberTarget` and would silently drop every GDScript enumerator, and member
+variables ride `@definition.var` because `fieldCaptureKept()` returns false for every language but
+Python and C/C++. A `signal` has no SymKind of its own and is DISCLOSED as `t="var"`. The Godot 4
+spellings were read off real parses, not node types; `queries/gdscript/tags.scm` records which shapes
+are not what the node-type list implies.
+
+THE FLOOR, measured before vendoring: 98.88% of 2938 real `.gd` files parse clean. Three upstream
+grammar gaps survive — the `%` unique-name inside a path, a column-0 comment in an indented block, and
+the Godot 3 RPC keywords still reserved — and none is patched (guardrail G3). Recovery is LOCAL, so a
+file holding them still yields every definition and call edge; `test/gdscriptcheck.sh` asserts that
+survival rather than the failure. `preload`/`load("res://…")` resolution is NOT implemented, so a `.gd`
+file is never a node in the `--deps`/`--arch` graph and `dependencyCapable()` is not claimed for it.
+`.tscn`, `.tres` and `.gdshader` are not indexed.
+
+GDScript extraction landed at revision 98 — `kParserVer` in `src/ingest_cache.h`, mirrored by
+`kIngestParserVerMirror` in `src/quality.h`; snapshot scheme is unchanged.
+
 The three config lanes are *data*, not code: they emit `t="sec"` symbols and **zero call edges**, and
 `langCompatible` keeps a config key from ever resolving a same-spelled code symbol. They differ in
 where the navigable unit sits. JSON cuts at document depth — top-level and second-level object

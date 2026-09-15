@@ -295,6 +295,7 @@ FAILFAST = {
     "elixirsemanticcheck.sh":  ( "set -e and Python assertions; missing protocol and branch-scope probes observed exit 1", 1 ),
     "dartcheck.sh":            ( "set -e and Python assertions; pre-Dart HEAD binary probed to exit 1", 1 ),
     "elixircheck.sh":          ( "set -e and Python assertions; pre-Elixir HEAD binary probed to exit 1", 1 ),
+    "gdscriptcheck.sh":        ( "set -e and Python assertions; same shape as elixircheck. rc READ, not inferred: run against the pre-GDScript baseline binary (which indexes no .gd, so the fixture yields zero symbols) it exits 1", 1 ),
     "agentloopcodexcheck.sh":  ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
     "clonebandcheck.sh":        ( "every check is `echo FAIL; exit 2` at the site",                      2 ),
     "clonelexcheck.sh":         ( "single terminal if/else on the harness binary, `exit 2` on failure",  2 ),

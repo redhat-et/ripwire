@@ -69,6 +69,7 @@ is why the sizes are what they are — `parser.c` is one big static table, not h
 | `deps/lua` | tree-sitter-lua (v0.5.0) | Munif Tanjim | MIT | `10fe0054734eec83049514ea2e718b2a56acd0c9` | https://github.com/tree-sitter-grammars/tree-sitter-lua | 392 KB |
 | `deps/markdown` | tree-sitter-markdown (v0.5.3; the block grammar `tree-sitter-markdown/` only) | Matthias Deiml | MIT | `f969cd3ae3f9fbd4e43205431d0ae286014c05b5` | https://github.com/tree-sitter-grammars/tree-sitter-markdown | 2.1 MB |
 | `deps/kotlin` | tree-sitter-kotlin (ABI 14) | fwcd | MIT | `1852ea17b7f60fb3f9d84e0b1555d56b46b39fb1` | https://github.com/fwcd/tree-sitter-kotlin | 32 MB |
+| `deps/gdscript` | tree-sitter-gdscript (master) | Preston Knopp | MIT | `c5c8fa4861b5a4f04a7e60d97587fc3b6cc5639e` | https://github.com/PrestonKnopp/tree-sitter-gdscript | 2624 KB |
 | `deps/doctest` | doctest (v2.4.12) | Viktor Kirilov | MIT | `1da23a3e8119ec5cce4f9388e91b065e20bf06f5` | https://github.com/doctest/doctest | 0.7 MB |
 
 Notes:
@@ -76,6 +77,8 @@ Notes:
 - `deps/tree_sitter` keeps upstream's own `CMakeLists.txt` (the build `add_subdirectory`s it),
   `lib/src`, `lib/include` and `lib/tree-sitter.pc.in`. Its `lib/src/unicode/` is a subset of ICU
   carrying its own `LICENSE` (Unicode-DFS-2016) and `ICU_SHA` provenance file, left untouched.
+- `deps/gdscript` is pinned to a bare commit for the same reason as `deps/swift`: upstream
+  publishes no release tags at all, so a 40-hex commit is the only immutable pin available.
 - `deps/swift` is pinned to a bare commit rather than a tag because upstream's default branch does
   not carry a generated `parser.c`; that commit's generated output is what is vendored here.
 - `deps/kotlin` is pinned to a bare commit rather than the last tag (`v0.3.8`, Aug 2024) because

@@ -271,6 +271,14 @@ serializeClassOf(){
                                            # is what keeps it from coming back.
         cpp|cuda)         echo static ;;
         python)           echo loop1 ;;
+        # gdscript: AUDITED against python's, which its scanner is derived from — the two serialize()
+        # bodies are structurally identical. Prefix: a delimiter_count clamped to UINT8_MAX then an
+        # UNGUARDED memcpy of that many bytes, so the pre-loop write is at most 1 + 255 = 256 against a
+        # 1024-byte buffer (python's is 257: it writes inside_f_string first). Bounded by the clamp, not
+        # by a buffer check — the same accepted shape as python's. Indent loop: bare
+        # `size < BUFFER_SIZE` guard paired with a 1-byte `buffer[size++]` write, which is exactly what
+        # loop1 asserts must stay paired.
+        gdscript)         echo loop1 ;;
         yaml)             echo loopwide ;;
         *)                echo unknown ;;
     esac
