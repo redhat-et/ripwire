@@ -319,7 +319,7 @@ if command -v git >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
     # '_test.py' suffix, which is what makes the payload valid Python rather than a SyntaxError — the first
     # version of this fixture was a syntax error and the bypass did not fire, which would have read as safe.
     DASHRUNNER='-cimport os;open("PWNED_PY","w")#_test.py'
-    printf '# drives test/area_harness.cpp\nimport sys\nsys.exit(7)\n' > "$DASH/$DASHRUNNER"
+    printf '# drives test/area_harness.cpp\nimport sys\nif __name__ == "__main__":\n    sys.exit(7)\n' > "$DASH/$DASHRUNNER"
     ( cd "$DASH" && git init -q && git config user.email t@t && git config user.name t && git add -A >/dev/null 2>&1 \
       && git commit -qm init >/dev/null 2>&1 )
     DOUT="$( cd "$DASH" && "$BIN" . --affected=geo.cpp --no-cache 2>/dev/null )"
@@ -353,6 +353,8 @@ if command -v git >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
 else
     printf '  SKIP  (6) leading-dash run= arm (needs git and python3)\n'
 fi
+
+python3 "$ROOT/test/runhint_python.py" "$BIN" "$TMP" || no "Python runner evidence regression"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

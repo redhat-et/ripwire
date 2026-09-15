@@ -28,6 +28,7 @@
 #include "infra/namesplit.h" // namesplit::isIdentChar — the canonical ASCII identifier-byte predicate
 #include "sarif.h"       // rootPrefixOf / rootRelativeUri — the ONE relativizer every p= emitter already shares (A3)
 #include "infra/jsonesc.h" // rw::shSingleQuote — the ONE shell quoter; run= is a COMMAND, see spell() below
+#include "pythonrunner.h" // main-guard / pytest evidence; a .py extension alone is not a runner
 
 #include <algorithm>
 #include <cstdio>
@@ -486,8 +487,8 @@ inline std::vector<NodeId> exercisedSymbols( const IngestResult& ing, const Grap
 // Stem beats mention; among several mentioners the path-ascending first wins, so the hint is deterministic.
 // Both are honest evidence: a script that names the harness does drive it.
 //
-// COST: the candidate scripts' texts are read at most ONCE per invocation and only LAZILY — nothing is read
-// until a row actually asks for a hint, so every verb that emits no test row pays nothing at all.
+// COST: runner evidence is lazy and commands are cached per file. The mention scan loads candidate texts
+// once when needed; verbs that emit no test rows perform none of these reads or parses.
 // A3 / review of #219: run= is spelled relative to root= exactly when the run HAS one root and declares it.
 // A multi-root run's disk path lies under no single root, so its command must stay absolute — and the legend
 // sentence below is gated on this SAME predicate, so the spelling and the claim cannot disagree.
@@ -499,11 +500,13 @@ inline bool runsAreRootRelative( const IngestResult& ing, std::string_view root 
 class TestRunnerIndex
 {
 public:
-    // A3 (one absolute root per document): `root` is the run's own crawl root, and its ONLY use is to spell
-    // the command below relative to it — the same rootPrefixOf/rootRelativeUri pair every p= emitter uses.
+    // A3 (one absolute root per document): `root` bounds Python runner evidence and spells commands relative
+    // to the crawl root — the same rootPrefixOf/rootRelativeUri pair every p= emitter uses.
     // Defaulted to "" so a caller that has no root (or a multi-root run, where the disk path is not under any
     // single root) keeps the absolute spelling: an unrelativizable command must stay pasteable, never become
     // a path relative to a root that does not contain it.
+    /// Index candidate test scripts in path order without reading their contents.
+    /// ing must outlive the index; root controls single-root evidence boundaries and command spelling.
     explicit TestRunnerIndex( const IngestResult& ing, std::string_view root = {} )
         : ing_( &ing ),
           rootPrefix_( runsAreRootRelative( ing, root ) ? rw::sarif::rootPrefixOf( root ) : std::string() )
@@ -538,11 +541,15 @@ public:
     // is gated on, read off the index rather than re-derived at each legend site.
     bool rootRelative() const noexcept { return !rootPrefix_.empty(); }
 
+    /// Return this file's own validated script command, or empty for an invalid ID or unknown runner.
+    /// Unlike commandFor, this does not search for another script that drives the file.
     std::string commandForScript( std::uint32_t fileId ) const
     { return fileId < ing_->files.size() && runnerVerb( ing_->files[fileId] ) != nullptr ? spell( fileId ) : std::string(); }
 
 private:
-    // A runner is a script we know how to invoke. A TABLE, not a switch (house style): extension → verb.
+    // Candidate script kinds. Python's verb is provisional until spellUncached verifies runner evidence.
+    /// Return the extension-based candidate interpreter, or nullptr for an unsupported script kind.
+    /// A Python candidate still needs main-guard or pytest evidence before a command can be emitted.
     static const char* runnerVerb( std::string_view path ) noexcept
     {
         struct RunnerRow { std::string_view ext; const char* verb; };
@@ -563,6 +570,13 @@ private:
     // "strip the LAST dot" convention that every other stemming call site in this repo shares.
     static std::string_view stemOf( std::string_view p ) noexcept { return mention_detail::pathStem( p ); }
 
+    /// Return whether two valid file IDs belong to the same crawl root; single-root files always do.
+    bool sameRoot( std::uint32_t a, std::uint32_t b ) const noexcept
+    {
+        return ing_->realPaths.empty() || ing_->fileRoot[a] == ing_->fileRoot[b];
+    }
+
+    /// Read candidate script contents once, aligned with runners_; unreadable files supply no mentions.
     void loadTexts() const
     {
         if( textsLoaded_ )
@@ -577,6 +591,8 @@ private:
         }
     }
 
+    /// Prefer the file's own command, then a same-root stem match, then a same-root text mention.
+    /// fileId must be valid; return empty when none of those candidates has a supported runner.
     std::string derive( std::uint32_t fileId ) const
     {
         const std::string& target = ing_->files[ fileId ];
@@ -587,24 +603,41 @@ private:
             // moment "" acquired a MEANING: run_unknown="1" asserts no runner is derivable, and for a row
             // whose own path is directly runnable that assertion is simply false. So the self-runnable case
             // now spells its own command, exactly as commandForScript already does for a shell gate.
-            return spell( fileId );
-        }
-
-        for( std::uint32_t r : runners_ )
-        { // (1) stem — runners_ is path-sorted, so the pick is deterministic
-            if( stemOf( ing_->files[r] ) == stemOf( target ) )
+            if( std::string command = spell( fileId ); !command.empty() )
             {
-                return spell( r );
+                return command;
             }
         }
 
-        loadTexts();                                                        // (2) mention — first (path asc) runner naming the harness's basename
-        const std::string_view targetBase = mention_detail::baseNameOf( target );
+        if( std::string command = matchingRunner( fileId, true ); !command.empty() )
+        {
+            return command;
+        }
+        loadTexts();
+        return matchingRunner( fileId, false );
+    }
+
+    // Stem first, then mention; skip candidates that have no runnable command. Both passes are path-sorted.
+    /// Return the first runnable same-root match in path order, or empty if there is none.
+    /// fileId must be valid; byStem selects stem matching, otherwise loadTexts must have run first.
+    std::string matchingRunner( std::uint32_t fileId, bool byStem ) const
+    {
+        const std::string_view target = ing_->files[fileId];
         for( std::size_t i = 0; i < runners_.size(); ++i )
         {
-            if( texts_[i].find( targetBase ) != std::string::npos )
+            const std::uint32_t candidate = runners_[i];
+            if( !sameRoot( fileId, candidate ) )
             {
-                return spell( runners_[i] );
+                continue;
+            }
+            const bool matches = byStem ? stemOf( ing_->files[candidate] ) == stemOf( target )
+                : texts_[i].find( mention_detail::baseNameOf( target ) ) != std::string::npos;
+            if( matches )
+            {
+                if( std::string command = spell( candidate ); !command.empty() )
+                {
+                    return command;
+                }
             }
         }
         return {};
@@ -644,15 +677,49 @@ private:
         return true;
     }
 
+    /// Cache a candidate file's command, including an empty result, to avoid repeated evidence reads.
+    /// runnerFile must identify an indexed file with a supported script extension.
     std::string spell( std::uint32_t runnerFile ) const
     {
+        if( scriptCache_.empty() )
+        {
+            scriptCache_.reserve( runners_.size() );
+        }
+        auto [ entry, inserted ] = scriptCache_.try_emplace( runnerFile );
+        if( inserted )
+        {
+            entry->second = spellUncached( runnerFile );
+        }
+        return entry->second;
+    }
+
+    /// Validate a candidate script and format its disk path as one shell argument.
+    /// runnerFile must have a supported extension; Python without main-guard or pytest evidence yields empty.
+    /// Commands are root-relative only for single-root scans, with quoting and option separation as needed.
+    std::string spellUncached( std::uint32_t runnerFile ) const
+    {
         const std::string& disk = diskPath( *ing_, runnerFile );
+        const char* verb = runnerVerb( disk );
+        if( disk.ends_with( ".py" ) )
+        {
+            const std::string source = docparse::detail::readWholeFile( disk ).value_or( "" );
+            if( !pythonrunner::hasMainGuard( source ) )
+            {
+                const std::string_view root = ing_->realPaths.empty() ? std::string_view( rootPrefix_ )
+                    : std::string_view( ing_->rootPaths[ ing_->fileRoot[ runnerFile ] ] );
+                if( !pythonrunner::hasPytestProject( disk, root ) )
+                {
+                    return {};   // Django / unittest modules need a project runner; python3 may run zero tests.
+                }
+                verb = "pytest";
+            }
+        }
         // A3: root-relative, like every p= beside it. rootRelativeUri strips a leading "./" unconditionally,
         // so the readability strip the pre-A3 code did by hand is the SAME call now, not a second rule.
         std::string_view p = rw::sarif::rootRelativeUri( disk, rootPrefix_ );
         if( isShellSafePath( p ) )
         {
-            return std::string( runnerVerb( p ) ) + " " + std::string( p );
+            return std::string( verb ) + " " + std::string( p );
         }
         // QUOTING WAS NECESSARY AND NOT SUFFICIENT — third review of #219, a bypass of the fix above. The
         // quoted form hands the path to the shell as ONE argument, which is the whole point, and then the
@@ -661,20 +728,19 @@ private:
         // as "execute this code". The path never reaches the shell as code; it reaches the interpreter as an
         // OPTION. Same trust boundary as the injection above: corpus filename → run= → a reader pastes it.
         //
-        // MEASURED, both directions, on the two verbs runnerVerb can emit (there are exactly two —
-        // kRunnerKinds is .sh→bash and .py→python3, so this is the whole population, not a sample):
+        // MEASURED, both directions, on the original shell and Python script verbs:
         //   python3 '<-c…#_test.py>'     rc=0, created the payload file   — bypass reproduced
         //   python3 -- '<same path>'     rc=7 (the file's own status), no side effect
         //   bash    -- '<-c…#_test.sh>'  rc=7, no side effect
         // bash did NOT reproduce the bypass with the equivalent payload (it rejected the combined -c form,
         // rc=1), so the confirmed case is python3; `--` is emitted for both because both honour it and the
-        // cost is zero on every real path. If a third interpreter is ever added here, check its `--` before
-        // relying on this line — a hopeful `--` on a verb that ignores it would be worse than none.
+        // cost is zero on every real path. pytest also honours `--`: runhint_python.py executes its emitted
+        // hints for both shell-metacharacter and leading-dash paths when pytest is available.
         //
         // Conditional for the same measured reason as the quoting: a leading '-' is already outside
         // isShellSafePath, so `--` costs bytes only where the path is hostile and every real corpus stays
         // byte-identical (printffmtparitycheck needs no re-pin).
-        return std::string( runnerVerb( p ) ) + " -- " + rw::shSingleQuote( std::string( p ) );
+        return std::string( verb ) + " -- " + rw::shSingleQuote( std::string( p ) );
     }
 
     const IngestResult*                         ing_;
@@ -683,6 +749,7 @@ private:
     mutable std::vector<std::string>            texts_;
     mutable bool                                textsLoaded_ = false;
     mutable HashMap<std::uint32_t, std::string> cache_;
+    mutable HashMap<std::uint32_t, std::string> scriptCache_;
 };
 
 // The ` run="…"` attribute for one test row, or "" — the ONE spelling, so the four emitters (--affected,
