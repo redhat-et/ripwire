@@ -376,17 +376,17 @@ echo
 echo "=== Java — test/callformfix/java/Main.java ==="
 uses java bareFn    1 "1. bare call"
 uses java memberFn  1 "2. member call"
-uses java makeFn    1 "3. static call through the type — and NOT the method reference on line 60"
+uses java makeFn    2 "3. static call through the type AND the Type::method reference on line 60"
 uses java threeSeg  1 "4. 3-segment invocation chain (method_invocation's name: is always final)"
 uses java thisFn    1 "6. explicit this receiver"
 uses java Widget    1 "5. new, unqualified"
 uses java Inner     1 "7. scoped new, 2 segments — dropped before this round"
 uses java Deep      1 "8. scoped new, 3 segments"
 uses java PkgType   1 "9. fully package-qualified new"
-# 10. method REFERENCE. `Widget::makeFn` names a target without invoking it; it belongs to the
-# disclosed callback caveat. Streams lean on it heavily, which is exactly why it is pinned.
+# 10. Type::method. `Widget::makeFn` is a statically resolvable call site (issue #74); the
+# lambda-equivalent form already produced an edge. The reference form now does too.
 fixtureHasLit java/Main.java 'Widget::makeFn' "10. the method-reference spelling is still WRITTEN"
-probeBlind java runAbsent makeFn "10. ABSENT (callback caveat): a method REFERENCE mints no call edge"
+probeSees java runAbsent makeFn "10. Type::method EXTRACTS makeFn — same target as Widget.makeFn()"
 fixtureHasLit java/Main.java 'new GenBox<String>()' "11. the bare generic-new spelling is still WRITTEN"
 uses java GenBox   0 "11. ABSENT: bare generic new — the type child is a generic_type"
 fixtureHasLit java/Main.java 'new GenOuter.GenInner<String>()' "12. the qualified generic-new spelling is still WRITTEN"

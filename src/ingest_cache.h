@@ -231,7 +231,21 @@ constexpr std::uint32_t kCacheVersion = 22;           // 22: RawDef gains `inter
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 96;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 98;           // bump on any grammar/.scm/extraction change
+                                                      // 98 = 2026-09-15 (Java Type::method review, issue #74,
+                                                      //    test/javamethodrefcheck.sh): Java shadow binds carry
+                                                      //    lexical spans (block / lambda / method body) and inferred
+                                                      //    lambda parameters (`Widget ->`, `(Widget) ->`) are captured.
+                                                      //    Extracted bind SET and span values change, so a v97 blob
+                                                      //    must be rejected. kCacheVersion stays 22 — Binding already
+                                                      //    has spans; RecvKind and record shapes are unchanged.
+                                                      // 97 = 2026-09-15 (Java Type::method candidates, issue #74,
+                                                      //    test/javamethodrefcheck.sh): method_reference member names
+                                                      //    after `::` plus declaration-aware resolver gating. The query
+                                                      //    cannot distinguish a type identifier from a value identifier.
+                                                      //    #216 already spent 96 on internalLinkage, so this RE-BUMPS
+                                                      //    (never-reuse / collision). kCacheVersion stays 22 — RecvKind
+                                                      //    is appended, record shapes are unchanged.
                                                       // 96 = 2026-09-13 (internal linkage, test/decltodefcheck.sh arm
                                                       //    B2): every C/C++ def carries a new syntactic
                                                       //    `internalLinkage` bit — inside an anonymous namespace at any

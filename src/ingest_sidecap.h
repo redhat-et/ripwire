@@ -1421,6 +1421,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
 
         // P2-D Rule 2: local var→type bindings (`Foo x;`), for receiver-variable narrowing. C++/ObjC/Python/TS
         // (the languages whose receiver shape `receiverOf` captures as a recvVar) — others have no consumer yet.
+        // Java contributes declaration-name vetoes only, for issue #74's ambiguous Identifier::method receiver.
         // L3 adds Lang::C for the fn-pointer/callback var→function capture only: the Rule-2 branches inside
         // gate themselves on Cpp/ObjC/Python/TS, so type narrowing is byte-identical on C files.
         BindCtx bindCtx;
@@ -1449,6 +1450,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
             arms.rust = &rustCtx;
         }
         if( le.lang == Lang::Cpp || le.lang == Lang::ObjC || le.lang == Lang::Python || le.lang == Lang::TypeScript
+            || le.lang == Lang::Java
             || le.lang == Lang::C )
         {
             arms.bind = &bindCtx;
@@ -2114,7 +2116,9 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
 
                 if( !isImportRef && le.lang != Lang::Elixir )                             // an import site has no receiver and no argument list —
                 {                                                                        //   the defaults (RecvKind::None, argCountKnown=false) are the truth
-                    RecvShape rs = receiverOf( nameNode, le.lang, src );                 // P2-D: `this`/`self`/`x`/`base.field` shape
+                    RecvShape rs = le.lang == Lang::Java
+                                 ? javaMethodReferenceReceiver( roleNode, src )
+                                 : receiverOf( nameNode, le.lang, src );                 // P2-D: `this`/`self`/`x`/`base.field` shape
                     r.recv = rs.kind;  r.recvVar = std::move( rs.var );                  //   → one-hop narrowing in resolve.h
                     r.fieldName = std::move( rs.field );                                 //   depth-2 intermediate field; "" otherwise
                     auto [ ac, ak ] = callArity( nameNode, le.lang, src );               // B2.2: call-site positional arg count

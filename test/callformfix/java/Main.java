@@ -56,8 +56,7 @@ class Main
 
     int runAbsent()
     {
-        // 10. ABSENT (disclosed callback caveat) — a method REFERENCE is not an invocation; it
-        //     names the target without calling it, so no call edge is minted.
+        // 10. Type::method — a statically resolvable call site (issue #74). Captured as makeFn.
         java.util.function.Supplier<Integer> s = Widget::makeFn;
         // 11. ABSENT — a BARE generic `new`: the type child is a generic_type, not a
         //     type_identifier, so the object_creation pattern does not bind.

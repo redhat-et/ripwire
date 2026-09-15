@@ -1096,6 +1096,8 @@ struct FieldNarrowTables
 {
     HashMap<std::string, std::string> fieldTypeByClass;
     HashMap<std::string, char>        localNameSet;
+    HashMap<std::string, rw::SmallVec<VarSpan, 1>> localShadowSpans; // VarDecl spans keyed "<fromSymbol>#<var>"
+    HashMap<std::string, char>        javaFieldShadow;              // class-field names copied onto methods
 };
 
 inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing )
@@ -1119,6 +1121,7 @@ inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing )
         }
     }
     t.localNameSet.reserve( ing.bindings.size() );
+    t.localShadowSpans.reserve( ing.bindings.size() );
     for( const Binding& b : ing.bindings )
     {
         if( b.fromSymbol == kNoNode || b.var.empty() )
@@ -1130,8 +1133,141 @@ inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing )
         key.push_back( '#' );
         key.append( b.var );
         t.localNameSet.try_emplace( key, 1 );
+        if( b.kind == LocalBindKind::VarDecl )
+        {
+            t.localShadowSpans[ key ].push_back( VarSpan{ b.spanStart, b.spanEnd } );
+        }
+    }
+    // Java fields attribute to the class symbol; method-reference sites attribute to the
+    // method. Copy class-scope names onto every contained method so a field named like a
+    // type vetoes Identifier::method the same way a parameter or local does — for the
+    // whole method, which is Java field lookup. Locals/parameters are NOT copied here;
+    // JavaTypeCandidate consults localShadowSpans at the call-site byte instead.
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.fromSymbol == kNoNode || b.fromSymbol >= ing.symbols.size() || b.var.empty() )
+        {
+            continue;
+        }
+        const Symbol& owner = ing.symbols[ b.fromSymbol ];
+        if( owner.lang != Lang::Java
+            || ( owner.kind != SymKind::Class && owner.kind != SymKind::Interface
+                 && owner.kind != SymKind::Struct ) )
+        {
+            continue;
+        }
+        key.clear();
+        Narrower::appendUint( key, owner.id );
+        key.push_back( '#' );
+        key.append( b.var );
+        t.javaFieldShadow.try_emplace( key, 1 );
+        for( const Symbol& s : ing.symbols )
+        {
+            if( s.fileId != owner.fileId
+                || ( s.kind != SymKind::Method && s.kind != SymKind::Function )
+                || s.sigStartByte < owner.sigStartByte
+                || s.endByte > owner.endByte
+                || s.id == owner.id )
+            {
+                continue;
+            }
+            key.clear();
+            Narrower::appendUint( key, s.id );
+            key.push_back( '#' );
+            key.append( b.var );
+            t.localNameSet.try_emplace( key, 1 );
+            t.javaFieldShadow.try_emplace( key, 1 );
+        }
     }
     return t;
+}
+
+inline bool javaClassNamed( const HashMap<std::string, char>& classNames, std::string_view name )
+{
+    return !name.empty() && classNames.find( std::string( name ) ) != classNames.end();
+}
+
+inline bool javaLeadingShadowed( const FieldNarrowTables& t, NodeId from, std::string_view name,
+                                std::uint32_t startByte, std::string& key )
+{
+    if( name.empty() || from == kNoNode )
+    {
+        return false;
+    }
+    key.clear();
+    Narrower::appendUint( key, from );
+    key.push_back( '#' );
+    key.append( name );
+    if( t.javaFieldShadow.find( key ) != t.javaFieldShadow.end() )
+    {
+        return true;
+    }
+    const auto it = t.localShadowSpans.find( key );
+    if( it == t.localShadowSpans.end() )
+    {
+        return false;
+    }
+    for( const VarSpan& v : it->second )
+    {
+        if( startByte >= v.startByte && startByte < v.endByte )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Prove a Java method-reference receiver is a type, not a value.
+//   Widget              — last (only) segment is an indexed class, leading name not shadowed
+//   Outer.Inner         — leading is a class: every segment is a class; only leading is shadowed
+//   com.example.Widget  — leading is not a class and not shadowed; last segment is a class
+// Expression receivers (this/super/calls) never reach here with a dotted type spelling;
+// System.out fails because leading is a class and `out` is not.
+inline bool javaTypeReceiverProven( const Reference& r, const HashMap<std::string, char>& classNames,
+                                    const FieldNarrowTables& fieldNarrow, std::string& qkey )
+{
+    if( r.recvVar.empty() || r.fromSymbol == kNoNode )
+    {
+        return false;
+    }
+    const std::string_view recv = r.recvVar;
+    const std::size_t firstDot = recv.find( '.' );
+    const std::string_view leading = firstDot == std::string_view::npos ? recv : recv.substr( 0, firstDot );
+    const std::size_t lastDot = recv.rfind( '.' );
+    const std::string_view last = lastDot == std::string_view::npos ? recv : recv.substr( lastDot + 1 );
+    if( leading.empty() || last.empty() || !javaClassNamed( classNames, last ) )
+    {
+        return false;
+    }
+    if( javaLeadingShadowed( fieldNarrow, r.fromSymbol, leading, r.startByte, qkey ) )
+    {
+        return false;
+    }
+    if( firstDot == std::string_view::npos )
+    {
+        return true;
+    }
+    if( !javaClassNamed( classNames, leading ) )
+    {
+        return true;   // package-qualified type: last is a class, leading is not a value
+    }
+    std::size_t begin = 0;
+    while( begin < recv.size() )
+    {
+        const std::size_t end = recv.find( '.', begin );
+        const std::string_view segment( recv.data() + begin,
+                                        ( end == std::string_view::npos ? recv.size() : end ) - begin );
+        if( !javaClassNamed( classNames, segment ) )
+        {
+            return false;
+        }
+        if( end == std::string_view::npos )
+        {
+            break;
+        }
+        begin = end + 1;
+    }
+    return true;
 }
 
 // ── Phase 5 external-name veto tables (docs/EVALS.md "Phase 5", mechanism 1; src/externalnames.h) ─────
@@ -2168,6 +2304,21 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             if( cb != ce )
             {
                 scipPinned = true;
+            }
+        }
+
+        // Java issue #74: the grammar labels both `Widget::makeFn` and `widget::makeFn`
+        // with an identifier receiver. A method-reference capture is therefore admitted only when
+        // repository evidence proves the receiver is a type at this site. Every other receiver is
+        // a known callback expression: stop before the bare-name ladder, which would otherwise
+        // manufacture an ordinary call edge by member spelling.
+        if( !scipPinned && r.recv == RecvKind::JavaTypeCandidate )
+        {
+            if( !javaTypeReceiverProven( r, classNames, fieldNarrow, qkey ) )
+            {
+                ++g.unresolvedOut[r.fromSymbol];
+                disposition = CallDisposition::Unresolved;
+                continue;
             }
         }
 
@@ -4763,6 +4914,10 @@ inline FieldUseAnswer collectFieldUseSites( const IngestResult& ing, FieldId fie
         {
             case RecvKind::ElixirModule:
             case RecvKind::ElixirSelfModule:
+            case RecvKind::JavaTypeCandidate:
+            {
+                // Call-only ingest stamp; read/write field collection can never own this site.
+            }
             break; // module receivers name callables, not instance fields
             case RecvKind::None:
             {

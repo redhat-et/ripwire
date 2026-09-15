@@ -193,6 +193,38 @@ inline RecvShape receiverOf( TSNode nameNode, Lang lang, std::string_view src )
     return rs;
 }
 
+// Java method references are not ordinary member-access nodes. The pinned grammar's first named
+// child is the receiver and deliberately uses the SAME `identifier` node for a simple type and a
+// variable. Preserve that uncertainty for graph.h: simple and dotted type candidates are retained
+// as JavaTypeCandidate with the receiver text (`Widget`, `Outer.Inner`, `com.example.Widget`);
+// `this`, `super`, arbitrary expressions, and `Type::new` remain unresolved here. The resolver
+// proves a type receiver from indexed class names and lexical shadowing at the site — it does
+// not require every dotted segment to be a class (package prefixes are not classes).
+// The member-name query already excludes `new`.
+inline RecvShape javaMethodReferenceReceiver( TSNode roleNode, std::string_view src )
+{
+    RecvShape out;
+    if( ts_node_is_null( roleNode ) || !kindIs( ts_node_type( roleNode ), "method_reference" ) )
+    {
+        return out;
+    }
+    out.kind = RecvKind::JavaTypeCandidate;
+    if( ts_node_named_child_count( roleNode ) == 0 )
+    {
+        return out;
+    }
+    const TSNode receiver = ts_node_named_child( roleNode, 0 );
+    if( kindIs( ts_node_type( receiver ), "identifier" ) )
+    {
+        out.var = std::string( nodeTextOf( receiver, src ) );
+    }
+    else if( kindIs( ts_node_type( receiver ), "field_access" ) )
+    {
+        out.var = std::string( nodeTextOf( receiver, src ) );
+    }
+    return out;
+}
+
 // ── P2-D Rule 2 LOCAL-VARIABLE TYPE BINDING capture (`Foo x;` → x:Foo) ───────────────────────────────
 // Walk a node subtree and emit one RawBind per local variable whose TYPE is syntactically decidable, so a
 // later `x.m()`/`x->m()` can narrow to `typeName::m`. Pure-syntactic, deterministic, allocation-light:
@@ -795,9 +827,27 @@ inline ShadowScope enclosingShadowScope( TSNode n )
         {
             return { ts_node_start_byte( p ), ts_node_end_byte( p ), true };
         }
+        // Java (and Go/Rust) spell a plain brace block `block`. C++ hits compound_statement
+        // first, so this arm is inert there. Checked before lambda/method so a body local
+        // stays in its block rather than the whole callable.
+        if( kindIs( pt, "block" ) )
+        {
+            return { ts_node_start_byte( p ), ts_node_end_byte( p ), true };
+        }
         if(    kindIs( pt, "for_statement" ) || kindIs( pt, "for_range_loop" )
             || kindIs( pt, "if_statement" )  || kindIs( pt, "while_statement" )
-            || kindIs( pt, "switch_statement" ) )
+            || kindIs( pt, "switch_statement" )
+            || kindIs( pt, "enhanced_for_statement" ) || kindIs( pt, "catch_clause" )
+            || kindIs( pt, "switch_block" ) || kindIs( pt, "try_with_resources_statement" ) )
+        {
+            return { ts_node_start_byte( p ), ts_node_end_byte( p ), false };
+        }
+        // Java parameters and inferred lambda names: the callable is the scope when no
+        // block sits between the declaration and it. C++ lambda bodies are
+        // compound_statement, so a C++ local still hits that first.
+        if(    kindIs( pt, "lambda_expression" )
+            || kindIs( pt, "method_declaration" )
+            || kindIs( pt, "constructor_declaration" ) )
         {
             return { ts_node_start_byte( p ), ts_node_end_byte( p ), false };
         }
@@ -1027,6 +1077,100 @@ inline TSNode fnDefParameterList( TSNode fnDef )
 // registered and measured for C++/ObjC only, so the Python call graph moves through Rule 2c alone. `self`
 // and `cls` are recorded like any other name (no class is spelled that way; a special case would be a
 // second rule to keep in step). Plain, typed, defaulted and splat parameters; tuple patterns bind nothing.
+
+// Java issue #74: a parameter or local named like a class is a value receiver for
+// Identifier::method, but only where Java lexical scope makes that binding active.
+// Class fields keep empty spans and are copied onto contained methods in graph.h.
+// Locals start at the declarator (plain block) or the enclosing statement; parameters
+// and inferred lambda names cover the callable body.
+inline bool javaKindIsFieldDecl( const char* t ) noexcept
+{
+    return kindIs( t, "field_declaration" ) || kindIs( t, "constant_declaration" );
+}
+
+inline bool javaKindIsCallable( const char* t ) noexcept
+{
+    return kindIs( t, "method_declaration" ) || kindIs( t, "constructor_declaration" )
+        || kindIs( t, "lambda_expression" );
+}
+
+inline BindSite javaShadowSite( TSNode declNode, TSNode nameNode ) noexcept
+{
+    const std::uint32_t start = ts_node_start_byte( nameNode );
+    TSNode p = ts_node_parent( declNode );
+    for( int guard = 0; guard < 128 && !ts_node_is_null( p ); ++guard )
+    {
+        const char* pt = ts_node_type( p );
+        if( javaKindIsFieldDecl( pt ) )
+        {
+            return { start, 0u, 0u };
+        }
+        if(    kindIs( pt, "block" ) || kindIs( pt, "for_statement" )
+            || kindIs( pt, "enhanced_for_statement" ) || kindIs( pt, "switch_block" )
+            || kindIs( pt, "catch_clause" ) || kindIs( pt, "try_with_resources_statement" ) )
+        {
+            break;
+        }
+        if( javaKindIsCallable( pt ) )
+        {
+            const TSNode body = fieldChild( p, NodeField::Body );
+            if( ts_node_is_null( body ) )
+            {
+                return { start, ts_node_start_byte( p ), ts_node_end_byte( p ) };
+            }
+            return { start, ts_node_start_byte( body ), ts_node_end_byte( body ) };
+        }
+        p = ts_node_parent( p );
+    }
+    const ShadowScope scope = enclosingShadowScope( declNode );
+    return { start, shadowSpanStart( scope, declNode ), scope.end };
+}
+
+inline void emitJavaShadowName( std::uint32_t fileId, Lang lang, TSNode declNode, TSNode nameNode,
+                               std::string_view src, std::vector<RawBind>& binds )
+{
+    if( ts_node_is_null( nameNode ) || !kindIs( ts_node_type( nameNode ), "identifier" ) )
+    {
+        return;
+    }
+    pushRawBind( fileId, lang, nodeTextOf( nameNode, src ), std::string{},
+                 javaShadowSite( declNode, nameNode ), LocalBindKind::VarDecl, binds );
+}
+
+inline void captureJavaShadowDecls( TSNode n, const char* t, std::uint32_t fileId, Lang lang,
+                                   std::string_view src, std::vector<RawBind>& binds )
+{
+    if( kindIs( t, "formal_parameter" ) || kindIs( t, "spread_parameter" )
+        || kindIs( t, "variable_declarator" ) )
+    {
+        emitJavaShadowName( fileId, lang, n, fieldChild( n, NodeField::Name ), src, binds );
+        return;
+    }
+    // `Widget -> ...` — the inferred parameter is the `parameters:` identifier of the lambda.
+    if( kindIs( t, "lambda_expression" ) )
+    {
+        const TSNode params = fieldChild( n, NodeField::Parameters );
+        if( !ts_node_is_null( params ) && kindIs( ts_node_type( params ), "identifier" ) )
+        {
+            emitJavaShadowName( fileId, lang, params, params, src, binds );
+        }
+        return;
+    }
+    // `(Widget) -> ...` / `(a, b) -> ...` — inferred_parameters holds identifier children.
+    if( kindIs( t, "inferred_parameters" ) )
+    {
+        const std::uint32_t cc = ts_node_named_child_count( n );
+        for( std::uint32_t i = 0; i < cc; ++i )
+        {
+            const TSNode c = ts_node_named_child( n, i );
+            if( kindIs( ts_node_type( c ), "identifier" ) )
+            {
+                emitJavaShadowName( fileId, lang, c, c, src, binds );
+            }
+        }
+    }
+}
+
 inline void capturePythonParamShadowDecls( TSNode n, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds )
 {
     const TSNode params = fieldChild( n, NodeField::Parameters );
@@ -1435,6 +1579,13 @@ void bindsVisitNode( BindCtx& cx, TSNode n, const char* t )
                 emitBind( fileId, lang, src.substr( a, b - a ), std::move( type ), ts_node_start_byte( n ), binds );
             }
         }
+    }
+    // Java declarations are resolver veto evidence for `Identifier::method`. Tree-sitter cannot
+    // distinguish a type receiver from a value receiver, so a parameter/local/field with the same
+    // spelling must prevent the class-name proof — but only where that binding is in scope.
+    else if( lang == Lang::Java )
+    {
+        captureJavaShadowDecls( n, t, fileId, lang, src, binds );
     }
     // TypeScript `const x = new Foo();` · `let y: Bar = ...;` — variable_declarator.
     else if( lang == Lang::TypeScript && kindIs( t, "variable_declarator" ) )

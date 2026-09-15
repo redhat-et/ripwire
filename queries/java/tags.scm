@@ -47,6 +47,15 @@
 (method_invocation
   name: (identifier) @name) @reference.call
 
+; Candidate Type::method member name (issue #74). This query CANNOT distinguish a simple type
+; receiver from a variable receiver: the pinned grammar spells both as `identifier`. Ingest stamps
+; the site as JavaTypeCandidate and graph.h admits it only with a type-receiver proof (indexed class
+; plus lexical shadowing at the site); every failed proof stops before name fallback. The anchor
+; captures only the member, and Type::new has no identifier after `::`, so it stays uncaptured.
+(method_reference
+  "::"
+  (identifier) @name .) @reference.call
+
 ; new Foo( .. ) — object creation resolves to the constructor / class name
 (object_creation_expression
   type: (type_identifier) @name) @reference.call
