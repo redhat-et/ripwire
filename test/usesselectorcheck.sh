@@ -42,6 +42,25 @@ echo "usesselectorcheck: BIN=$BIN  ROOT=$ROOT"
 
 uses_elem(){ "$BIN" "$ROOT" --uses="$1" --no-cache 2>/dev/null | grep -o '<uses[^>]*>'; }
 attr(){ printf '%s' "$1" | grep -o "$2=\"[0-9]*\"" | grep -o '[0-9]*'; }
+# the role="call" sites (p=file:line) a uses answer lists that NO caller row of a callers answer holds —
+# test/declinecheck.sh's call_sites helper (line 107), copied verbatim: the enclosing symbol is (file, in_id
+# leaf), the caller rows are (p, n leaf). Empty output means the two verbs agree.
+# Defined up here (not with the other helpers below) because arm (d) calls it at line ~170.
+call_sites(){ python3 - "$@" <<'PY'
+import sys, xml.etree.ElementTree as ET
+leaf = lambda s: s.rsplit( "::", 1 )[ -1 ]
+where = lambda p, n: ( p.rsplit( ":", 1 )[ 0 ], leaf( n ) )
+try:
+    uses = ET.parse( sys.argv[ 1 ] ).getroot()
+    rows = ET.parse( sys.argv[ 2 ] ).getroot().iter( "s" ) if len( sys.argv ) > 2 else []
+except ( ET.ParseError, OSError ):
+    sys.exit( 1 )
+bound = { where( s.get( "p", "" ), s.get( "n", "" ) ) for s in rows }
+for u in uses.iter( "u" ):
+    if u.get( "role" ) == "call" and where( u.get( "p", "" ), u.get( "in_id", "" ) ) not in bound:
+        print( u.get( "p" ) )
+PY
+}
 
 # ── (a) --uses=src/graph.h:buildGraph must resolve (not refuse), narrow defs= AND the call-role sites ───
 #
@@ -214,24 +233,7 @@ fx(){ local d="$ROOT/test/$1"; shift; ( cd "$d" && "$BIN" . --no-cache "$@" 2>/d
 tag_of(){ printf '%s' "$1" | grep -oE "<$2( [^>]*)?>" | head -1; }
 val_of(){ printf '%s' "$1" | grep -oE " $2=\"[^\"]*\"" | head -1 | sed -E 's/^[^"]*"([^"]*)"$/\1/'; }
 lists_site(){ printf '%s' "$1" | grep -qF "<u role=\"call\" p=\"$2\""; }   # rows QUOTE role=; the MCP legend spells <u role=call|… bare
-# the role="call" sites (p=file:line) a uses answer lists that NO caller row of a callers answer holds —
-# test/declinecheck.sh's call_sites helper (line 107), copied verbatim: the enclosing symbol is (file, in_id
-# leaf), the caller rows are (p, n leaf). Empty output means the two verbs agree.
-call_sites(){ python3 - "$@" <<'PY'
-import sys, xml.etree.ElementTree as ET
-leaf = lambda s: s.rsplit( "::", 1 )[ -1 ]
-where = lambda p, n: ( p.rsplit( ":", 1 )[ 0 ], leaf( n ) )
-try:
-    uses = ET.parse( sys.argv[ 1 ] ).getroot()
-    rows = ET.parse( sys.argv[ 2 ] ).getroot().iter( "s" ) if len( sys.argv ) > 2 else []
-except ( ET.ParseError, OSError ):
-    sys.exit( 1 )
-bound = { where( s.get( "p", "" ), s.get( "n", "" ) ) for s in rows }
-for u in uses.iter( "u" ):
-    if u.get( "role" ) == "call" and where( u.get( "p", "" ), u.get( "in_id", "" ) ) not in bound:
-        print( u.get( "p" ) )
-PY
-}
+
 echo "=== (f) the \"::\" selector's use-sites (issue #164, fixed) ==="
 command -v python3 >/dev/null 2>&1 || no "(f) python3 is required by the MCP arms below — they would read nothing"
 
