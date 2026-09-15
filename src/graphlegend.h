@@ -272,7 +272,7 @@ inline const char* rootRelPathsLegend( bool on ) noexcept { return on ? kRootRel
 // legends) rather than a third-per-verb drift: both --for dialects share this exact string, the same way
 // they already share every other opener in this file.
 inline constexpr const char* kForRootRelPathsLegendShort =
-    "<!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged). -->";
+    "<!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest path, unchanged). -->";
 
 // M10: the SAME clause, plus an at= mention, for the CLI --for path that also stamps at= (single-root AND
 // a git repo — a single-root run over a non-git directory gets root= alone, kForRootRelPathsLegendShort
@@ -282,7 +282,7 @@ inline constexpr const char* kForRootRelPathsLegendShort =
 // kAtStampLegend sentence every other stamped verb affords is not affordable here; see the comment above
 // kForRootRelPathsLegendShort for the same trade-off's original measurement.
 inline constexpr const char* kForRootRelAtLegendShort =
-    "<!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged); at=this commit(+dirty). -->";
+    "<!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest path, unchanged); at=this commit(+dirty). -->";
 
 // `rootOn` is the emitter's own root=-present condition; `atOn` is its at=-present condition (gitAtAttr
 // non-empty) — never re-derived from each other, since a non-git single-root run has rootOn without atOn.

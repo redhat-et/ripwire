@@ -71,6 +71,10 @@ echo "astqueryregexcheck: BIN=$BIN"
 # ── the fixture, written HERE so the corpus can never drift out from under the golden ────────────────
 FIX="$TMP/fix"
 mkdir -p "$FIX"
+FIX_NATIVE="$FIX"
+if command -v cygpath >/dev/null 2>&1; then
+    FIX_NATIVE="$( cygpath -m "$FIX" )"
+fi
 cat > "$FIX/a.cpp" <<'FIXA'
 #include <cstring>
 void Foo( char* dst, const char* srcText )
@@ -107,7 +111,9 @@ FN_DEF='(function_definition declarator: (function_declarator declarator: (ident
 probe(){                                      # $1 = label, rest = argv after the corpus
     local label="$1"; shift
     printf '===== %s\n' "$label"
-    "$BIN" "$FIX" --no-cache "$@" 2>/dev/null | sed "s#$FIX#<ROOT>#g"
+    local probe_root="$FIX"
+    [ "$FIX_NATIVE" != "$FIX" ] && probe_root="$FIX_NATIVE"
+    "$BIN" "$probe_root" --no-cache "$@" 2>/dev/null | sed -e "s#$FIX#<ROOT>#g" -e "s#$FIX_NATIVE#<ROOT>#g"
     # An EXPLICIT terminator, not a blank line: the map output carries no trailing newline (G4), so a
     # blank-line delimiter would not exist and every per-section `sed` range below would silently run to
     # end of file — which is exactly the shape of a differential arm that compares two identical
@@ -126,6 +132,12 @@ emit_all(){
 }
 
 emit_all > "$TMP/now.txt"
+GOLD_COMPARE="$TMP/gold.lf"
+if [ -f "$GOLD" ]; then
+    tr -d '\015' < "$GOLD" > "$GOLD_COMPARE"
+else
+    : > "$GOLD_COMPARE"
+fi
 
 # ── A. the golden ────────────────────────────────────────────────────────────────────────────────────
 if [ "${UPDATE_GOLDEN:-0}" = "1" ]; then
@@ -133,11 +145,11 @@ if [ "${UPDATE_GOLDEN:-0}" = "1" ]; then
     ok "A: UPDATE_GOLDEN=1 — re-recorded $( wc -c < "$GOLD" | tr -d ' ' ) B into test/astqueryregex_golden.txt (review the diff)"
 elif [ ! -f "$GOLD" ]; then
     no "A: no golden at test/astqueryregex_golden.txt — record it with UPDATE_GOLDEN=1 against the PRE-change binary"
-elif cmp -s "$TMP/now.txt" "$GOLD"; then
+elif cmp -s "$TMP/now.txt" "$GOLD_COMPARE"; then
     ok "A: --lint + 7 --match probes byte-identical to the recorded golden ($( wc -c < "$GOLD" | tr -d ' ' ) B)"
 else
     no "A: output differs from test/astqueryregex_golden.txt"
-    diff "$GOLD" "$TMP/now.txt" | head -20 | sed 's/^/    /'
+    diff "$GOLD_COMPARE" "$TMP/now.txt" | head -20 | sed 's/^/    /'
 fi
 
 # ── B. non-vacuity: the predicates must actually be deciding something ───────────────────────────────

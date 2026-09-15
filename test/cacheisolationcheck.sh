@@ -5,6 +5,10 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+WINDOWS_GATE=0
+case "$( uname -s 2>/dev/null || printf '%s' unknown )" in
+    MINGW*|MSYS*|CYGWIN*) WINDOWS_GATE=1 ;;
+esac
 fail=0
 ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
@@ -30,8 +34,25 @@ PRIVATE="$SHARED/ripwire"
 if [ -d "$PRIVATE" ]; then ok "creates a dedicated TMPDIR/ripwire directory"; else no "missing private directory: $PRIVATE"; fi
 
 if [ -d "$PRIVATE" ]; then
-    if stat --version >/dev/null 2>&1; then mode="$( stat -c %a "$PRIVATE" )"; else mode="$( stat -f %Lp "$PRIVATE" )"; fi
-    if [ "$mode" = "700" ]; then ok "private directory mode is 0700"; else no "private directory mode is $mode, expected 700"; fi
+    if [ "$WINDOWS_GATE" -eq 1 ]; then
+        PYTHON="${RIPWIRE_PYTHON:-python3}"
+        WINDOWS_PROBE="$ROOT/test/cacheisolationcheck_windows.py"
+        if command -v cygpath >/dev/null 2>&1; then
+            WINDOWS_PROBE="$( cygpath -m "$WINDOWS_PROBE" )"
+        fi
+        WINDOWS_PRIVATE="$PRIVATE"
+        if command -v cygpath >/dev/null 2>&1; then
+            WINDOWS_PRIVATE="$( cygpath -m "$WINDOWS_PRIVATE" )"
+        fi
+        if "$PYTHON" "$WINDOWS_PROBE" "$WINDOWS_PRIVATE"; then
+            ok "private directory has an owner/admin protected DACL"
+        else
+            no "private directory DACL is not owner/admin protected"
+        fi
+    else
+        if stat --version >/dev/null 2>&1; then mode="$( stat -c %a "$PRIVATE" )"; else mode="$( stat -f %Lp "$PRIVATE" )"; fi
+        if [ "$mode" = "700" ]; then ok "private directory mode is 0700"; else no "private directory mode is $mode, expected 700"; fi
+    fi
 fi
 
 topArtifacts="$( find "$SHARED" -mindepth 1 -maxdepth 1 -name 'ripwire-*' -print 2>/dev/null )"

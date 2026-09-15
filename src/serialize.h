@@ -17,6 +17,7 @@
 #include "infra/sortutil.h"    // numeric-key radix helpers for rank/file score order
 #include "infra/jsonesc.h"     // F9: jsonesc::utf8SeqLen — the canonical UTF-8-sequence-length core (was duplicated here)
 #include "infra/strkern.h"     // S5: appendCleanRun — the run-copy skip that replaces escapeXml's per-byte switch
+#include "infra/text.h"        // presentation-only CRLF normalization after raw byte spans are selected
 #include "notes.h"       // L3: field-notes NoteIndex — the retrieval-time surfacing lookup (INERT when null)
 #include "pageview.h"    // §P8: pageWindow / pageDisclosure — the shared --limit/--offset contract (packDeps)
 #include "sarif.h"       // R-E (2026-08-17): rootRelativeUri/rootPrefixOf — the same root= single-root-only
@@ -3061,7 +3062,7 @@ inline void packSource( std::FILE* out, const IngestResult& ing, const std::vect
 
     for( std::size_t k = 0; k < keep && used < budgetBytes; ++k )
     {
-        std::FILE* in = std::fopen( diskPath( ing, order[k] ).c_str(), "rb" );
+        std::FILE* in = rw::compat::rw_fopen_utf8( diskPath( ing, order[k] ).c_str(), "rb" );
         if( !in )
         {
             continue; // graceful: file gone
@@ -3075,6 +3076,7 @@ inline void packSource( std::FILE* out, const IngestResult& ing, const std::vect
             body.append( buf, n );
         }
         std::fclose( in );
+        normalizeCrlfInPlace( body );
 
         bool truncated = false;
         if( used + body.size() > budgetBytes )                 // truncate at a newline + UTF-8 boundary
@@ -4091,7 +4093,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                 break;
             }
 
-            std::FILE* in = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
+            std::FILE* in = rw::compat::rw_fopen_utf8( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
             if( !in )
             {
                 // A2: this file's whole bucket never gets a content-skip OR a collection attempt below — it is
@@ -4360,7 +4362,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             break;
         }
 
-        std::FILE* in = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
+        std::FILE* in = rw::compat::rw_fopen_utf8( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
         if( !in )
         {
             continue; // graceful: file gone
@@ -4576,7 +4578,7 @@ inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::
         std::string s;
         if( fid < ing.files.size() )
         {
-            if( std::FILE* in = std::fopen( diskPath( ing, fid ).c_str(), "rb" ) )
+            if( std::FILE* in = rw::compat::rw_fopen_utf8( diskPath( ing, fid ).c_str(), "rb" ) )
             {
                 char b[4096];
                 std::size_t n;
@@ -4700,7 +4702,7 @@ inline SlicedBody sliceBodyLines( std::string_view body, std::uint32_t startLine
     {
         ++bs;
     }
-    while( byteEnd > bs && ( static_cast<unsigned char>( body[byteEnd] ) & 0xC0 ) == 0x80 )
+    while( byteEnd > bs && byteEnd < body.size() && ( static_cast<unsigned char>( body[byteEnd] ) & 0xC0 ) == 0x80 )
     {
         --byteEnd;
     }
@@ -5220,9 +5222,11 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
                                                                         //   false (every caller but --expand) ⇒ byte-identical.
                         std::string_view rootArg = {},   // R-E (2026-08-17): same single-root-only root
                                                           // argument serialize() takes — see its comment.
-                        const std::vector<float>* calleeRank = nullptr )   // orders each body's CUT <calls> listing; nullptr (a verb with
+                        const std::vector<float>* calleeRank = nullptr,  // orders each body's CUT <calls> listing; nullptr (a verb with
                                                                             //   no query: --expand/--around/--exemplar) ⇒ node-id order,
                                                                             //   byte-identical. See CalleeCallsSink::rank.
+                        bool preserveSourceNewlines = false )             // --expand payloads must round-trip CRLF bytes; other emitters keep
+                                                                            //   their presentation-only normalization by default.
 {
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F2): the MCP `exemplar` verb has no byte budget, and 0 must never
     // mean "cap at zero bytes" (the cap fired before the first body and emitted a bare <bodies></bodies>).
@@ -5253,7 +5257,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
         std::string s;
         if( fid < ing.files.size() )
         {
-            if( std::FILE* in = std::fopen( diskPath( ing, fid ).c_str(), "rb" ) )
+            if( std::FILE* in = rw::compat::rw_fopen_utf8( diskPath( ing, fid ).c_str(), "rb" ) )
             {
                 char b[4096];
                 std::size_t n;
@@ -5329,6 +5333,10 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
             }
 
             std::string body( src.data() + a, b - a );
+            if( !preserveSourceNewlines )
+            {
+                normalizeCrlfInPlace( body );
+            }
 
             // octocode partial-fetch (--expand=SYM:START-END): slice to the requested 1-based lines,
             // relative to the def's own first line, BEFORE the budget/compress/redact pipeline below —
@@ -5567,7 +5575,7 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
         std::string s;
         if( fid < ing.files.size() )
         {
-            if( std::FILE* in = std::fopen( diskPath( ing, fid ).c_str(), "rb" ) )
+            if( std::FILE* in = rw::compat::rw_fopen_utf8( diskPath( ing, fid ).c_str(), "rb" ) )
             {
                 char        b[ 4096 ];
                 std::size_t n;
@@ -5688,7 +5696,8 @@ struct WholeFileRender
 inline WholeFileRender renderWholeFiles( const IngestResult& ing, const std::vector<NodeId>& nodes,
                                          RedactCounts* redact, const notes::NoteIndex* noteIndex,
                                          bool compress,
-                                         std::string_view rootArg = {} )   // R-R: the <src p=…> + anchor id= root
+                                         std::string_view rootArg = {},
+                                         bool preserveSourceNewlines = false )   // --expand keeps source bytes for edit round trips
 {
     WholeFileRender r;
     // R-R: same convention serialize()'s pathRel uses.
@@ -5718,7 +5727,7 @@ inline WholeFileRender renderWholeFiles( const IngestResult& ing, const std::vec
     std::vector<char> esc;
     for( std::uint32_t f : fileOrder )
     {
-        std::FILE* in = std::fopen( diskPath( ing, f ).c_str(), "rb" );
+        std::FILE* in = rw::compat::rw_fopen_utf8( diskPath( ing, f ).c_str(), "rb" );
         if( !in )
         {
             return WholeFileRender{};   // unreadable => not a candidate, never a partial "complete" answer
@@ -5731,6 +5740,10 @@ inline WholeFileRender renderWholeFiles( const IngestResult& ing, const std::vec
             body.append( buf, n );
         }
         std::fclose( in );
+        if( !preserveSourceNewlines )
+        {
+            normalizeCrlfInPlace( body );
+        }
         if( body.empty() )
         {
             return WholeFileRender{};   // vanished/empty since ingest => same fallback
@@ -5821,7 +5834,8 @@ inline std::size_t estimateExpandBodyTokens( const IngestResult& ing, const std:
                                              std::size_t budgetBytes,
                                              const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
                                              bool compress = false,
-                                             const HashMap<NodeId, LineRange>* ranges = nullptr )
+                                             const HashMap<NodeId, LineRange>* ranges = nullptr,
+                                             bool preserveSourceNewlines = false )
 {
     if( budgetBytes == 0 )
     {
@@ -5840,7 +5854,7 @@ inline std::size_t estimateExpandBodyTokens( const IngestResult& ing, const std:
         std::string s;
         if( fid < ing.files.size() )
         {
-            if( std::FILE* in = std::fopen( diskPath( ing, fid ).c_str(), "rb" ) )
+            if( std::FILE* in = rw::compat::rw_fopen_utf8( diskPath( ing, fid ).c_str(), "rb" ) )
             {
                 char b[4096];
                 std::size_t n;
@@ -5878,6 +5892,10 @@ inline std::size_t estimateExpandBodyTokens( const IngestResult& ing, const std:
         }
 
         std::string body( src.data() + a, b - a );
+        if( !preserveSourceNewlines )
+        {
+            normalizeCrlfInPlace( body );
+        }
         if( ranges )
         {
             if( const auto it = ranges->find( id ); it != ranges->end() && it->second.hasRange )
@@ -5975,7 +5993,7 @@ inline void packOutline( std::FILE* out, const IngestResult& ing, const std::vec
         {
             break;
         }
-        std::FILE* in = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
+        std::FILE* in = rw::compat::rw_fopen_utf8( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
         if( !in )
         {
             continue;
@@ -6535,7 +6553,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
             if( isym.fileId != loadedFile )
             {
                 src.clear();  loadedFile = isym.fileId;
-                std::FILE* in = std::fopen( diskPath( ing, isym.fileId ).c_str(), "rb" );
+                std::FILE* in = rw::compat::rw_fopen_utf8( diskPath( ing, isym.fileId ).c_str(), "rb" );
                 if( in )
                 {
                     char buf[4096];
@@ -7827,7 +7845,7 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
             break;
         }
 
-        std::FILE* in = std::fopen( diskPath( ing, f ).c_str(), "rb" );
+        std::FILE* in = rw::compat::rw_fopen_utf8( diskPath( ing, f ).c_str(), "rb" );
         if( !in )
         {
             if( rank && positivesContentSkippedOut )   // A2: content reason (the file is gone), not the budget

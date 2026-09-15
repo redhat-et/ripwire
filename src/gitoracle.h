@@ -322,7 +322,7 @@ inline bool saveOracleCache( const std::string& path, const HistoryIndex& idx )
     // Write-then-rename: a reader in another process must never see a half-written blob (the torn-read rule
     // the rest of the cache families follow).
     const std::string tmp = path + ".tmp";
-    std::FILE*        fp  = std::fopen( tmp.c_str(), "wb" );
+    std::FILE*        fp  = rw::compat::rw_fopen_utf8( tmp.c_str(), "wb" );
     if( !fp )
     {
         DEGRADED_PATH_ALERT( "gitoracle: cannot write the history cache — the probe stays correct but re-runs cold" );
@@ -332,7 +332,7 @@ inline bool saveOracleCache( const std::string& path, const HistoryIndex& idx )
     std::fclose( fp );
     if( !wrote || std::rename( tmp.c_str(), path.c_str() ) != 0 )
     {
-        std::remove( tmp.c_str() );
+        rw::compat::rw_remove_utf8( tmp.c_str() );
         DEGRADED_PATH_ALERT( "gitoracle: history cache write/rename failed — the probe stays correct but re-runs cold" );
         return false;
     }
@@ -343,7 +343,7 @@ inline bool loadOracleCache( const std::string& path, HistoryIndex& idx )
 {
     std::string bytes;
     {
-        std::FILE* fp = std::fopen( path.c_str(), "rb" );
+        std::FILE* fp = rw::compat::rw_fopen_utf8( path.c_str(), "rb" );
         if( !fp )
         {
             return false; // a plain miss, not a degrade
@@ -596,6 +596,7 @@ inline PatchWalk walkGitPatch( const std::string& cmd, OnLine onLine, KeepWalkin
 //                 a \x01-led header line per commit. \x01 cannot appear in a unified-diff marker column, so
 //                 the framing is unambiguous without a second pass. %cs is git's COMMITTER date — the same
 //                 deterministic clock quality::gitCommitterDateIso uses; the wall clock is never consulted.
+/// Runs the bounded git history probe and returns an honest, possibly truncated name-removal index.
 inline HistoryIndex runProbe( const std::string& root )
 {
     HistoryIndex idx;

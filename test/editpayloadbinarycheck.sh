@@ -32,7 +32,7 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 
 echo "editpayloadbinarycheck: BIN=$BIN"
 
-hashcorpus(){ ( cd "$1" && find . -type f -print | LC_ALL=C sort | xargs shasum -a 256 ) | shasum -a 256; }
+hashcorpus(){ ( cd "$1" && find . -type f -print | LC_ALL=C sort | xargs sha256sum ) | sha256sum; }
 
 mkdir -p "$TMP/template"
 cat >"$TMP/template/a.py" <<'PY'
@@ -44,8 +44,12 @@ def beta( x ):
     return alpha( x ) * 2
 PY
 
-# the payload: valid-looking Python with one NUL byte inside the sniff window.
-python3 -c 'open("'"$TMP"'/nulpay","wb").write(b"def alpha( x ):\n    return \x00 99\n")'
+# the payload: valid-looking Python with one NUL byte inside the sniff window. Pass the path as argv rather
+# than interpolating Git Bash's /c/... spelling into native Python source (the latter is not a Win32 path).
+python3 - "$TMP/nulpay" <<'PY'
+import sys
+open( sys.argv[1], "wb" ).write( b"def alpha( x ):\n    return \x00 99\n" )
+PY
 
 echo
 echo "=== 1. CLI: --edit-payload with a NUL byte is refused ==="
@@ -125,7 +129,10 @@ grep -q 'NUL byte' "$TMP/m.verdict" \
 echo
 echo "=== 4. disclosure: a hint naming an indexed-but-never-parsed file says so ==="
 W4="$TMP/unmeasured"; cp -R "$TMP/template" "$W4"
-python3 -c 'open("'"$W4"'/opaque.py","wb").write(b"def zeta():\n    return \x00\n")'
+python3 - "$W4/opaque.py" <<'PY'
+import sys
+open( sys.argv[1], "wb" ).write( b"def zeta():\n    return \x00\n" )
+PY
 printf 'def zeta():\n    return 1\n' >"$TMP/goodpay"
 "$BIN" "$W4" --replace-symbol-body=zeta --edit-target-file=opaque.py --edit-payload="$TMP/goodpay" \
     >"$TMP/u.out" 2>"$TMP/u.err" && no "edit into a never-parsed file unexpectedly succeeded"

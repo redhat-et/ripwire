@@ -37,8 +37,11 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
+BIN="${1:-${RIPWIRE_REAL_BIN:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}}"
+case "$BIN" in
+    /*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
+    *) BIN="$ROOT/$BIN";;
+esac
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -47,7 +50,8 @@ ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write th
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
-command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
+PYTHON3="${RIPWIRE_PYTHON:-python3}"
+"$PYTHON3" -c 'import sys' >/dev/null 2>&1 || { echo "native Python required for JSON assertions"; exit 2; }
 
 echo "mcpstalecheck: BIN=$BIN  FIX=$FIX"
 
@@ -61,7 +65,13 @@ git -C "$WORK" add -A 2>/dev/null
 git -C "$WORK" commit -q -m init 2>/dev/null
 GEO="$WORK/geometry.cpp"
 
-# ─── extract the tools/call inner text for a given id from the server's output ────────────────────
+if command -v cygpath >/dev/null 2>&1; then
+    PY_BIN="$( cygpath -w "$BIN" )"
+    PY_WORK="$( cygpath -w "$WORK" )"
+    PY_SCRIPT="$( cygpath -w "$ROOT/test/mcpstalecheck_windows.py" )"
+    "$PYTHON3" "$PY_SCRIPT" "$PY_BIN" "$PY_WORK"
+    exit $?
+fi
 inner_for_id() {
     # $1 = out file, $2 = id
     grep "\"id\":$2" "$1" | tail -1 | python3 -c '

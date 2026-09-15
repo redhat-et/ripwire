@@ -6,6 +6,21 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 REGRESSION="$ROOT/test/regression.sh"
 EVALS="$ROOT/docs/EVALS.md"
 fail=0
+if [ -n "${RIPWIRE_PYTHON:-}" ]; then
+    PYTHON3="$RIPWIRE_PYTHON"
+else
+    PYTHON3="$( command -v python3 2>/dev/null || command -v python 2>/dev/null || true )"
+fi
+if [ -z "$PYTHON3" ] || ! "$PYTHON3" -c 'import sys' >/dev/null 2>&1; then
+    printf 'FAIL: native Python is required by manifestcheck.sh\n'
+    exit 2
+fi
+PYTHON_REGRESSION="$REGRESSION"
+PYTHON_TEST="$ROOT/test"
+if command -v cygpath >/dev/null 2>&1; then
+    PYTHON_REGRESSION="$( cygpath -w "$REGRESSION" )"
+    PYTHON_TEST="$( cygpath -w "$PYTHON_TEST" )"
+fi
 
 while IFS= read -r gatePath; do
     gateName="$( basename "$gatePath" .sh )"
@@ -26,12 +41,12 @@ fi
 # gates); the four gates invoked individually above it (g1freshcheck, skillscan, htmlexport,
 # compresscheck) are NOT part of "the loop" and are deliberately excluded from this count, matching
 # what §8's prose actually refers to.
-loopNames="$( python3 -c "
+loopNames="$( "$PYTHON3" -c "
 import re, sys
 text = open(sys.argv[1]).read()
 m = re.search(r'for _g in (.*?); do', text, re.S)
 sys.exit('no loop found') if not m else print(len(m.group(1).split()))
-" "$REGRESSION" )"
+" "$PYTHON_REGRESSION" )"
 # ── SYNTAX ARM: test/regression.sh must actually PARSE ────────────────────────────────────────────
 # Nothing in this repository syntax-checks the file that drives every gate. Verified empirically:
 # appending an unterminated `if` to regression.sh leaves `bash -n` reporting "syntax error: unexpected
@@ -230,7 +245,7 @@ fi
 # 395). The scan below: every function `name(){` / `name()\n{` / `function name` defined in a gate, every
 # COMMAND-POSITION use of that name on an earlier NON-COMMENT line OUTSIDE any function body (a body only
 # runs when its function is called, which may be later — that is legal and excluded). One line per finding.
-usedBeforeDef="$( python3 - "$ROOT/test" <<'PY'
+usedBeforeDef="$( "$PYTHON3" - "$PYTHON_TEST" <<'PY'
 import os, re, sys
 testDir = sys.argv[ 1 ]
 defRe   = re.compile( r'^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*(\{?)\s*(.*)$' )

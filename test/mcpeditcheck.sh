@@ -197,7 +197,7 @@ mcp_call \
     || no "insert_before_symbol: returned an error: $( inner_or_err "$TMP/r2b" )"
 python3 - "$W2/geometry.cpp" <<'PY' >"$TMP/r2b_chk"
 import sys
-src = open(sys.argv[1], "rb").read().decode()
+src = open(sys.argv[1], "rb").read().decode().replace(chr(13) + chr(10), chr(10))
 i = src.find("// INSERTED-BEFORE")
 # exactly one '\n' between the marker and the following 'double distance'
 seg = src[i:]
@@ -221,7 +221,7 @@ mcp_call \
     || no "insert_after_symbol: returned an error: $( inner_or_err "$TMP/r2a" )"
 python3 - "$W2b/geometry.cpp" <<'PY' >"$TMP/r2a_chk"
 import sys
-src = open(sys.argv[1], "rb").read().decode()
+src = open(sys.argv[1], "rb").read().decode().replace(chr(13) + chr(10), chr(10))
 i = src.find("// INSERTED-AFTER")
 # the marker must be immediately preceded by "}\n" (def's closing brace, then the prepended newline),
 # and the byte at endByte (the original '\n' after '}') must be preserved right before it.
@@ -241,7 +241,7 @@ mcp_call \
     >/dev/null
 python3 - "$W2c/geometry.cpp" <<'PY' >"$TMP/r2c_chk"
 import sys
-src = open(sys.argv[1], "rb").read().decode()
+src = open(sys.argv[1], "rb").read().decode().replace(chr(13) + chr(10), chr(10))
 i = src.find("// PRENL")
 seg = src[i:]
 print("OK" if seg.startswith("// PRENL\n\ndouble distance") else "BAD:" + repr(seg[:40]))

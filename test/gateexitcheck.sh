@@ -54,7 +54,42 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-command -v python3 >/dev/null 2>&1 || { no "python3 is required by gateexitcheck"; echo "FAILURES ABOVE"; exit "$fail"; }
+if [ -n "${RIPWIRE_PYTHON:-}" ]; then
+    PYTHON3="$RIPWIRE_PYTHON"
+else
+    PYTHON3="$( command -v python3 2>/dev/null || command -v python 2>/dev/null || true )"
+fi
+if [ -z "$PYTHON3" ] || ! "$PYTHON3" -c 'import sys' >/dev/null 2>&1; then
+    no "native Python is required by gateexitcheck"
+    echo "FAILURES ABOVE"
+    exit "$fail"
+fi
+if [ -n "${RIPWIRE_BASH:-}" ]; then
+    BASH_CMD="$RIPWIRE_BASH"
+else
+    BASH_CMD="$( command -v bash 2>/dev/null || true )"
+fi
+if [ -z "$BASH_CMD" ]; then
+    no "Git Bash is required by gateexitcheck"
+    echo "FAILURES ABOVE"
+    exit "$fail"
+fi
+case "$BASH_CMD" in
+    *[Ww]indows/[Ss]ystem32/[Bb]ash.exe|*/windows/system32/bash.exe)
+        no "WSL bash is not accepted; set RIPWIRE_BASH to Git Bash"
+        echo "FAILURES ABOVE"
+        exit "$fail"
+        ;;
+esac
+export RIPWIRE_BASH="$BASH_CMD"
+if command -v cygpath >/dev/null 2>&1; then
+    nativeTmp="$( cygpath -m "$( cygpath -w /tmp )" )"
+    export TMPDIR="$nativeTmp" TEMP="$nativeTmp" TMP="$nativeTmp" RW_MSYS_TMP="$nativeTmp"
+fi
+PY_ROOT="$ROOT"
+if command -v cygpath >/dev/null 2>&1; then
+    PY_ROOT="$( cygpath -w "$ROOT" )"
+fi
 
 # ── (F) the probe copy is INVISIBLE to `git status --porcelain` ──────────────────────────────────────
 # (E) writes its probe copy BESIDE the gate it copies (a real gate finds its repo root from $0), which
@@ -96,7 +131,7 @@ else
     ok "(F) no git repository around this checkout -- nothing reads +dirty here, so no probe can flip it"
 fi
 
-python3 - "$ROOT" <<'PY' || fail=1
+"$PYTHON3" - "$PY_ROOT" <<'PY' || fail=1
 import atexit, os, re, shutil, subprocess, sys, tempfile
 
 ROOT = sys.argv[1]
@@ -178,7 +213,7 @@ def run_micro( acc, value, tail ):
         fh.write( "#!/usr/bin/env bash\n%s=%s\n%s\n" % ( acc, value, "\n".join( tail ) ) )
         p = fh.name
     try:
-        return subprocess.run( [ "bash", p ], capture_output=True, timeout=30 ).returncode
+        return subprocess.run( [ os.environ.get( "RIPWIRE_BASH" ) or "bash", p ], capture_output=True, timeout=30 ).returncode
     except subprocess.TimeoutExpired:
         return -99
     finally:
@@ -249,7 +284,7 @@ def inject_and_run( path, acc, probe_dir=None ):
             if not hidden:
                 no( "(F) the in-place probe %s is VISIBLE to `git status --porcelain` (%s) -- every stamped verb running beside this gate reads a dirty tree while it exists"
                     % ( os.path.relpath( d, ROOT ), detail ) )
-        r = subprocess.run( [ "bash", d ], cwd=ROOT, capture_output=True, timeout=420, text=True, errors="replace" )
+        r = subprocess.run( [ os.environ.get( "RIPWIRE_BASH" ) or "bash", d ], cwd=ROOT, capture_output=True, timeout=420, text=True, errors="replace" )
         return r.returncode, r.stdout + r.stderr
     except subprocess.TimeoutExpired:
         return -99, "TIMEOUT"
@@ -266,7 +301,7 @@ for name, want, forced_rc in FIXTURES:
     if got != want:
         no( "(A) fixture %s: classifier said %s, fixture declares %s — %s" % ( name, got, want, detail ) )
         continue
-    rc_plain = subprocess.run( [ "bash", p ], cwd=ROOT, capture_output=True ).returncode
+    rc_plain = subprocess.run( [ os.environ.get( "RIPWIRE_BASH" ) or "bash", p ], cwd=ROOT, capture_output=True ).returncode
     if rc_plain != 0:
         no( "(A) fixture %s exits %s unforced; a fixture must be green until a failure is forced" % ( name, rc_plain ) )
         continue
@@ -380,7 +415,7 @@ else:
 AV = os.path.join( T, "argvdiffcheck.sh" )
 if os.path.exists( AV ):
     env = { k: v for k, v in os.environ.items() if k != "RIPWIRE_BASE" }
-    r = subprocess.run( [ "bash", AV ], cwd=ROOT, env=env, capture_output=True, text=True, timeout=120 )
+    r = subprocess.run( [ os.environ.get( "RIPWIRE_BASH" ) or "bash", AV ], cwd=ROOT, env=env, capture_output=True, text=True, timeout=120 )
     txt = r.stdout + r.stderr
     if r.returncode != 0:
         no( "(D) argvdiffcheck without RIPWIRE_BASE exited %s; the sanctioned skip must be exit 0" % r.returncode )
@@ -472,7 +507,7 @@ PY
 # part of the change that added this arm, and a rule that forbade the one-line spelling while tolerating
 # the wrapped one would be a style pin wearing a correctness rule's clothes. G2 pins what the conversion
 # actually achieved; the count of wrapped sites is PRINTED, never asserted, so it cannot serialise lanes.
-python3 - "$ROOT" <<'PY' || fail=1
+"$PYTHON3" - "$PY_ROOT" <<'PY' || fail=1
 import glob, os, re, subprocess, sys
 
 T = os.path.join( sys.argv[1], "test" )
@@ -558,7 +593,7 @@ PROBE = ( '%s=0; %s; exec 3>&1; exec 1>&- 2>&-; ok "gateexit probe"; rc=$?; '
 
 def probe( defn, acc ):
     """Run one ok() definition with a stdout (and stderr) it cannot write to -> (rc, accumulator after)."""
-    p = subprocess.run( [ "bash", "-c", PROBE % ( acc, defn, acc ) ], capture_output=True, text=True, timeout=30 )
+    p = subprocess.run( [ os.environ.get( "RIPWIRE_BASH" ) or "bash", "-c", PROBE % ( acc, defn, acc ) ], capture_output=True, text=True, timeout=30 )
     m = re.search( r'PROBE rc=(\S+) acc=(\S+)', p.stdout )
     return ( m.group( 1 ), m.group( 2 ) ) if m else None
 

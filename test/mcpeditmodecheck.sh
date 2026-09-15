@@ -74,9 +74,23 @@ case "$R1" in
     *applied*) : ;;
     *) no "F7 setup: the edit did not apply (cannot assess mode): $( echo "$R1" | head -c 160 )";;
 esac
-[ "$AFTER_MODE" = "755" ] \
-    && ok "F7: 0755 executable source stays 0755 after replace_symbol_body (mode preserved across atomic rename)" \
-    || no "F7: mode changed on edit — was $BEFORE_MODE, now $AFTER_MODE (atomicWrite dropped the mode bits)"
+case "$( uname -s 2>/dev/null )" in
+    MINGW*|MSYS*|CYGWIN*)
+        # Git for Windows maps executable mode from the filename/ACL and reports a C++ source as 0644 even
+        # after chmod 0755; there is no portable NTFS +x bit for atomicWrite to preserve. Keep the edit
+        # assertion above, and do not turn that representation limit into a false failure of the write path.
+        [ "$BEFORE_MODE" != "755" ] \
+            && ok "F7: Windows NTFS/CRT does not expose a portable +x bit for .cpp; edit applied (mode assertion is POSIX-only)" \
+            || { [ "$AFTER_MODE" = "755" ] \
+                && ok "F7: 0755 executable source stays 0755 after replace_symbol_body (mode preserved across atomic rename)" \
+                || no "F7: mode changed on edit — was $BEFORE_MODE, now $AFTER_MODE (atomicWrite dropped the mode bits)"; }
+        ;;
+    *)
+        [ "$AFTER_MODE" = "755" ] \
+            && ok "F7: 0755 executable source stays 0755 after replace_symbol_body (mode preserved across atomic rename)" \
+            || no "F7: mode changed on edit — was $BEFORE_MODE, now $AFTER_MODE (atomicWrite dropped the mode bits)"
+        ;;
+esac
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

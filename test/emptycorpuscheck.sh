@@ -38,7 +38,7 @@ run_and_check() {
     local corpus="$1"
     local flag="$2"
     local name="$3"
-    local output_file="$TMP/out_$(echo "$name" | tr -d ' ')"
+    local output_file="$TMP/out_$(echo "$name" | tr -cd '[:alnum:]_')"
 
     # Run the command
     if [ -z "$flag" ]; then
@@ -117,11 +117,11 @@ run_and_check "$ONEFN_CORPUS" "" "onefn: default map" || true
 
 OUT_FILE="$TMP/out_onefndefaultmap"
 if [ -s "$OUT_FILE" ]; then
-    # Assert that the map contains symbols="1"
-    if grep -q 'symbols="1"' "$OUT_FILE"; then
-        ok "onefn: map contains symbols=\"1\""
+    # Assert that the map contains the canonical header count.
+    if grep -q 'files=1 symbols=1' "$OUT_FILE"; then
+        ok "onefn: map contains files=1 symbols=1"
     else
-        no "onefn: map missing symbols=\"1\""
+        no "onefn: map missing files=1 symbols=1"
     fi
 
     # Assert that the map contains the function name 'compute'

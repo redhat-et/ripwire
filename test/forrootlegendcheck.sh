@@ -22,6 +22,11 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+case "$BIN" in
+    [A-Za-z]:/*|[A-Za-z]:\\*)
+        if command -v cygpath >/dev/null 2>&1; then BIN="$( cygpath -u "$BIN" )"; fi
+        ;;
+esac
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -29,6 +34,51 @@ ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write th
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "forrootlegendcheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+
+WINDOWS_GATE=0
+case "$( uname -s 2>/dev/null )" in
+    MINGW*|MSYS*) WINDOWS_GATE=1;;
+esac
+if [ "$WINDOWS_GATE" = 1 ]; then
+    # Keep ordinary Git paths convertible, but preserve an embedded merge-scout ref if this fixture is run from a
+    # caller that exported a global MSYS_NO_PATHCONV/MSYS2_ARG_CONV_EXCL policy (the same boundary as pargates.py).
+    unset MSYS_NO_PATHCONV
+    export MSYS2_ARG_CONV_EXCL="--merge-scout="
+    PYTHON_NATIVE="${RIPWIRE_PYTHON:-$( command -v python.exe 2>/dev/null || command -v python 2>/dev/null || true )}"
+    [ -n "$PYTHON_NATIVE" ] || { echo "forrootlegendcheck: native Python is required on Windows"; exit 2; }
+    PYTOOLS="$TMP/python-tools"
+    mkdir -p "$PYTOOLS"
+    cat >"$PYTOOLS/python3" <<'PYEOF'
+#!/usr/bin/env bash
+PYTHON_NATIVE="${RIPWIRE_PYTHON:-python.exe}"
+map_native_arg()
+{
+    case "${1-}" in
+        /[A-Za-z]/*) printf '%s:%s' "${1:1:1}" "${1:2}";;
+        *) printf '%s' "${1-}";;
+    esac
+}
+mapped=()
+for arg in "$@"; do mapped+=( "$( map_native_arg "$arg" )" ); done
+exec "$PYTHON_NATIVE" "${mapped[@]}"
+PYEOF
+    chmod +x "$PYTOOLS/python3"
+    XMLCHECK_NATIVE="$ROOT/test/xmlcheck.py"
+    if command -v cygpath >/dev/null 2>&1; then
+        XMLCHECK_NATIVE="$( cygpath -w "$XMLCHECK_NATIVE" )"
+        PYTOOLS_PATH="$( cygpath -u "$PYTOOLS" )"
+    else
+        PYTOOLS_PATH="$PYTOOLS"
+    fi
+    cat >"$PYTOOLS/xmllint" <<'XMEOF'
+#!/usr/bin/env bash
+exec "${RIPWIRE_PYTHON:-python.exe}" "$RIPWIRE_XMLCHECK" "$@"
+XMEOF
+    chmod +x "$PYTOOLS/xmllint"
+    export RIPWIRE_PYTHON="$PYTHON_NATIVE"
+    export RIPWIRE_XMLCHECK="$XMLCHECK_NATIVE"
+    export PATH="$PYTOOLS_PATH:$PATH"
+fi
 command -v python3 >/dev/null 2>&1 || { echo "forrootlegendcheck: python3 is required"; exit 2; }
 command -v xmllint >/dev/null 2>&1 || { echo "forrootlegendcheck: xmllint is required"; exit 2; }
 echo "forrootlegendcheck: BIN=$BIN"

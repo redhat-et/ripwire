@@ -108,9 +108,17 @@ QUERY="frobnicate widget cache"
 # ladder trimmed used to appear in neither section), and the clause defining the tail says so. Verified before
 # re-pinning: with every comment and est_tokens= normalized out, old and new documents are byte-identical —
 # this fixture's head covers every file, so its tail is unchanged and every ranking byte is unmoved.
+# Git's Windows checkout can spell the LF fixture as CRLF. The anchor claim is about ranking/body neutrality,
+# not a platform's physical line-ending spelling or the byte-priced est_tokens count, so canonicalize those two
+# representation details before comparing the otherwise byte-stable document.
 "$BIN" anchorfix --no-cache --for="$QUERY" --no-route >"$TMP/plain_full.xml" 2>/dev/null
-diff -q "$TMP/plain_full.xml" "$ROOT/test/anchorfix/golden_for.xml" >/dev/null \
-    && ok "golden-neutral: plain --for --no-route byte-identical to the pre---anchor golden" \
+sed -e 's/
+$//' -e 's/est_tokens="[0-9][0-9]*"/est_tokens="<N>"/g' "$TMP/plain_full.xml" >"$TMP/plain_canonical.xml"
+sed -e 's/
+$//' -e 's/est_tokens="[0-9][0-9]*"/est_tokens="<N>"/g' \
+    "$ROOT/test/anchorfix/golden_for.xml" >"$TMP/golden_canonical.xml"
+diff -q "$TMP/plain_canonical.xml" "$TMP/golden_canonical.xml" >/dev/null \
+    && ok "golden-neutral: plain --for --no-route ranking/body matches the pre---anchor golden" \
     || no "plain --for --no-route drifted from test/anchorfix/golden_for.xml (--anchor leaked into the default lens)"
 
 # ── 2) the targeted expansion case — a lexically-invisible direct callee, top-4 window ────────────────

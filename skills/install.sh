@@ -13,8 +13,29 @@
 set -eu
 src="$( cd "$( dirname "$0" )" && pwd )"
 
+# Git Bash's `ln -sfn` can materialize a directory-like MSYS link that native
+# Windows tools cannot identify or prune. Use a real directory symlink on
+# Windows, while keeping the POSIX installer path unchanged.
+isWindowsShell=0
+case "${OSTYPE:-}" in
+    msys*|cygwin*|mingw*) isWindowsShell=1 ;;
+esac
+link_skill()
+{
+    if [ "$isWindowsShell" -eq 1 ] && command -v cygpath >/dev/null 2>&1 && command -v cmd.exe >/dev/null 2>&1; then
+        targetNative="$( cygpath -w "$1" )"
+        destNative="$( cygpath -w "$2" )"
+        if [ -e "$2" ] || [ -L "$2" ]; then
+            [ -L "$2" ] || { echo "skills/install.sh: refusing to replace a real directory at $2" >&2; return 1; }
+            rm -f "$2"
+        fi
+        MSYS_NO_PATHCONV=1 cmd.exe /d /c mklink /D "$destNative" "$targetNative" >/dev/null 2>&1
+    else
+        ln -sfn "$1" "$2"
+    fi
+}
+
 # ── the PreToolUse matcher, in one place. It is not cosmetic: a matcher decides which tool calls the
-#    hook is ever SHOWN. Read/Glob are here because the whole-file read is the largest token sink in an
 #    agent loop and the one default a skill description cannot intercept; mcp__ripwire__.* is here for
 #    the hook's other job, the substitution meter (docs/SUBSTITUTION_METER.md), whose numerator would
 #    otherwise miss every agent that prefers the MCP server to the CLI; Edit/Write/MultiEdit/
@@ -350,7 +371,7 @@ for d in "$src"/ripwire-*/; do
         skipped=$(( skipped + 1 ))
         continue
     fi
-    ln -sfn "$d" "$dst/$name"
+    link_skill "$d" "$dst/$name"
     echo "installed $name -> $dst/$name"
     count=$(( count + 1 ))
 done
@@ -375,7 +396,7 @@ if [ "$mode" = "hermes" ]; then
             skipped=$(( skipped + 1 ))
             continue
         fi
-        ln -sfn "$nd" "$dst/$nname"
+        link_skill "$nd" "$dst/$nname"
         echo "installed $nname -> $dst/$nname (Hermes-native skill)"
         count=$(( count + 1 ))
     done

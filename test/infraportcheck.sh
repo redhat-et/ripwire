@@ -190,10 +190,14 @@ fi
 
 # guard 3b: the prefixed spelling is actually in use. If the whole tree stopped naming the layer, or if
 # the detector's `*/*` skip swallowed everything, arm (D) would read clean for the wrong reason.
-PREFIXED_COUNT="$( printf '%s\n' "$OUTSIDE" | grep -v '^$' \
-                     | tr '\n' '\0' \
-                     | xargs -0 grep -hcE '^[[:space:]]*#[[:space:]]*include[[:space:]]*"infra/' 2>/dev/null \
-                     | awk '{ total += $1 } END { print total + 0 }' )"
+PREFIXED_COUNT=0
+while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    count="$( grep -hcE '^[[:space:]]*#[[:space:]]*include[[:space:]]*"infra/' "$file" 2>/dev/null )" || count=0
+    PREFIXED_COUNT=$(( PREFIXED_COUNT + count ))
+done <<EOF
+$OUTSIDE
+EOF
 if [ "$PREFIXED_COUNT" -ge 1 ]; then
     ok "the prefixed spelling is live: $PREFIXED_COUNT #include \"infra/…\" line(s) outside the layer"
 else
@@ -201,7 +205,8 @@ else
 fi
 
 # guard 4: detector (D) fires on a file that spells a real layer header bare
-LAYER_HEADER="$( find "$LAYER" -maxdepth 1 -type f -name '*.h' | LC_ALL=C sort | head -1 | xargs basename )"
+LAYER_HEADER_PATH="$( find "$LAYER" -maxdepth 1 -type f -name '*.h' | LC_ALL=C sort | head -1 )"
+LAYER_HEADER="${LAYER_HEADER_PATH##*/}"
 BAREPROBE="$TMP/bareprobe.cpp"
 {
     printf '#include "infra/%s"\n' "$LAYER_HEADER"

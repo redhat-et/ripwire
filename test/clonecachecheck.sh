@@ -33,6 +33,16 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
+WINDOWS_GATE=0
+case "$( uname -s 2>/dev/null )" in
+    MINGW*|MSYS*) WINDOWS_GATE=1 ;;
+esac
+[ "${OS:-}" = Windows_NT ] && WINDOWS_GATE=1
+if [ "$WINDOWS_GATE" -eq 1 ]; then
+    PYTHON_NATIVE="${RIPWIRE_PYTHON:-${PYTHON_NATIVE:-}}"
+    [ -n "$PYTHON_NATIVE" ] || PYTHON_NATIVE="$( command -v python.exe 2>/dev/null || command -v python 2>/dev/null || true )"
+    WINDOWS_ACL_PROBE="$ROOT/test/cacheisolationcheck_windows.py"
+fi
 
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -158,10 +168,18 @@ env -u TMPDIR XDG_CACHE_HOME="$XDG4" "$BIN" "$CORPUS" >/dev/null 2>"$TMP/d_stder
 
 if [ -d "$XDG4/ripwire" ]; then
     ok "defaultCachePath: creates \$XDG_CACHE_HOME/ripwire when TMPDIR is unset"
-    PERM="$( mode_of "$XDG4/ripwire" )"
-    [ "$PERM" = "700" ] \
-        && ok "defaultCachePath: \$XDG_CACHE_HOME/ripwire is mode 0700 ($PERM)" \
-        || no "defaultCachePath: \$XDG_CACHE_HOME/ripwire mode is $PERM, expected 700"
+    if [ "$WINDOWS_GATE" -eq 1 ]; then
+        WINDOWS_XDG4="$XDG4/ripwire"
+        command -v cygpath >/dev/null 2>&1 && WINDOWS_XDG4="$( cygpath -m "$WINDOWS_XDG4" )"
+        "$PYTHON_NATIVE" "$WINDOWS_ACL_PROBE" "$WINDOWS_XDG4" \
+            && ok "defaultCachePath: \$XDG_CACHE_HOME/ripwire has a protected owner/admin DACL" \
+            || no "defaultCachePath: \$XDG_CACHE_HOME/ripwire DACL is not protected"
+    else
+        PERM="$( mode_of "$XDG4/ripwire" )"
+        [ "$PERM" = "700" ] \
+            && ok "defaultCachePath: \$XDG_CACHE_HOME/ripwire is mode 0700 ($PERM)" \
+            || no "defaultCachePath: \$XDG_CACHE_HOME/ripwire mode is $PERM, expected 700"
+    fi
     # A4-P4: the auto-cache filename is now split by verb class → ripwire-<hash>-{lean,rich}.bin (a plain
   # map is the lean class). The <hash> stability + ladder/mode contract is unchanged. Y4: new blobs
     # live in a 2-hex-char shard subdir (legacy flat blobs are still honored in place), so look in BOTH layouts.
@@ -179,10 +197,18 @@ fi
 XDG5="$TMP/xdg_e"; mkdir -p "$XDG5"
 env -u TMPDIR XDG_CACHE_HOME="$XDG5" "$BIN" "$URL" >/dev/null 2>"$TMP/e_stderr"
 if [ -d "$XDG5/ripwire" ]; then
-    PERM_REMOTE="$( mode_of "$XDG5/ripwire" )"
-    [ "$PERM_REMOTE" = "700" ] \
-        && ok "resolveRemoteRoot: \$XDG_CACHE_HOME/ripwire (binary-created) is mode 0700 for the remote-clone cache too" \
-        || no "resolveRemoteRoot: \$XDG_CACHE_HOME/ripwire mode is $PERM_REMOTE, expected 700"
+    if [ "$WINDOWS_GATE" -eq 1 ]; then
+        WINDOWS_XDG5="$XDG5/ripwire"
+        command -v cygpath >/dev/null 2>&1 && WINDOWS_XDG5="$( cygpath -m "$WINDOWS_XDG5" )"
+        "$PYTHON_NATIVE" "$WINDOWS_ACL_PROBE" "$WINDOWS_XDG5" \
+            && ok "resolveRemoteRoot: \$XDG_CACHE_HOME/ripwire (binary-created) has a protected owner/admin DACL" \
+            || no "resolveRemoteRoot: \$XDG_CACHE_HOME/ripwire DACL is not protected"
+    else
+        PERM_REMOTE="$( mode_of "$XDG5/ripwire" )"
+        [ "$PERM_REMOTE" = "700" ] \
+            && ok "resolveRemoteRoot: \$XDG_CACHE_HOME/ripwire (binary-created) is mode 0700 for the remote-clone cache too" \
+            || no "resolveRemoteRoot: \$XDG_CACHE_HOME/ripwire mode is $PERM_REMOTE, expected 700"
+    fi
 else
     no "resolveRemoteRoot: \$XDG_CACHE_HOME/ripwire was not created by the clone-cache path"
 fi

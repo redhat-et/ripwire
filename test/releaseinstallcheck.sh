@@ -14,6 +14,10 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 # Detection and activation must use only the per-invocation homes below.
 unset CODEX_HOME AGENTS_HOME HERMES_HOME RIPWIRE_NO_ACTIVATE RIPWIRE_SKIP_CPU_CHECK RIPWIRE_CPUINFO
 FAKE="$TMP/fake"; mkdir -p "$FAKE" "$TMP/assets/ripwire-0.3.6-macos-arm64/skills/ripwire-router" "$TMP/assets/ripwire-0.3.6-macos-arm64/hooks"
+FAKE_SHELL="$FAKE"
+if command -v cygpath >/dev/null 2>&1; then
+    FAKE_SHELL="$( cygpath -u "$FAKE" )"
+fi
 
 printf '#!/bin/sh\necho "ripwire 0.3.6 (Release, Test)"\n' >"$TMP/assets/ripwire-0.3.6-macos-arm64/ripwire"
 chmod +x "$TMP/assets/ripwire-0.3.6-macos-arm64/ripwire"
@@ -69,7 +73,7 @@ chmod +x "$FAKE/curl" "$FAKE/uname" "$FAKE/sysctl"
 # below therefore names a sandbox HOME, the same contract test/hookcheck.sh states for the meter log.
 SBHOME="$TMP/home"; mkdir -p "$SBHOME"
 PREFIX="$TMP/prefix"
-if HOME="$SBHOME" PATH="$FAKE:$PATH" RELEASE_FIXTURE="$TMP/release.json" ASSET_FIXTURE="$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" \
+if HOME="$SBHOME" PATH="$FAKE_SHELL:$PATH" RELEASE_FIXTURE="$TMP/release.json" ASSET_FIXTURE="$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" \
    RIPWIRE_REPO=redhat-et/ripwire RIPWIRE_VERSION=v0.3.6 RIPWIRE_INSTALL_PREFIX="$PREFIX" RIPWIRE_INSTALL_YES=1 \
    bash "$INSTALL" >"$TMP/install.out" 2>"$TMP/install.err"; then
     ok "curl installer accepts a tag-matched checksummed archive"
@@ -84,7 +88,7 @@ fi
     && ok "installer stages bundled Codex hooks" || no "installer did not stage bundled Codex hooks"
 
 mv "$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz.sha256" "$TMP/assets/checksum.saved"
-if HOME="$SBHOME" PATH="$FAKE:$PATH" RELEASE_FIXTURE="$TMP/release.json" ASSET_FIXTURE="$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" \
+if HOME="$SBHOME" PATH="$FAKE_SHELL:$PATH" RELEASE_FIXTURE="$TMP/release.json" ASSET_FIXTURE="$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" \
    RIPWIRE_REPO=redhat-et/ripwire RIPWIRE_VERSION=v0.3.6 RIPWIRE_INSTALL_PREFIX="$TMP/no-checksum" RIPWIRE_INSTALL_YES=1 \
    bash "$INSTALL" >/dev/null 2>&1; then
     no "installer accepted an archive whose checksum is unavailable"
@@ -97,7 +101,7 @@ printf '#!/bin/sh\necho "ripwire 0.2.2 (Release, Test)"\n' >"$TMP/assets/ripwire
 chmod +x "$TMP/assets/ripwire-0.3.6-macos-arm64/ripwire"
 tar -C "$TMP/assets" -czf "$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" ripwire-0.3.6-macos-arm64
 ( cd "$TMP/assets" && shasum -a 256 ripwire-0.3.6-macos-arm64.tar.gz >ripwire-0.3.6-macos-arm64.tar.gz.sha256 )
-if HOME="$SBHOME" PATH="$FAKE:$PATH" RELEASE_FIXTURE="$TMP/release.json" ASSET_FIXTURE="$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" \
+if HOME="$SBHOME" PATH="$FAKE_SHELL:$PATH" RELEASE_FIXTURE="$TMP/release.json" ASSET_FIXTURE="$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" \
    RIPWIRE_REPO=redhat-et/ripwire RIPWIRE_VERSION=v0.3.6 RIPWIRE_INSTALL_PREFIX="$TMP/wrong-version" RIPWIRE_INSTALL_YES=1 \
    bash "$INSTALL" >/dev/null 2>&1; then
     no "installer accepted a checksummed 0.2.2 binary under release v0.3.6"
@@ -137,7 +141,7 @@ run_install()
     # HERMES_HOME= comes FIRST so an explicit HERMES_HOME from "$@" (as E7 passes) wins; env applies
     # assignments left to right, and a trailing default would silently clobber the override — leaving
     # E7 green via the $HOME/.hermes fallback instead of the override it claims to test.
-    env HERMES_HOME= "$@" HOME="$_h" PATH="$FAKE:$PATH" RELEASE_FIXTURE="$TMP/release.json" \
+    env HERMES_HOME= "$@" HOME="$_h" PATH="$FAKE_SHELL:$PATH" RELEASE_FIXTURE="$TMP/release.json" \
         ASSET_FIXTURE="$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" \
         RIPWIRE_REPO=redhat-et/ripwire RIPWIRE_VERSION=v0.3.6 RIPWIRE_INSTALL_PREFIX="$_p" RIPWIRE_INSTALL_YES=1 \
         bash "$INSTALL" >"$TMP/e.out" 2>"$TMP/e.err"; E_RC=$?
@@ -340,7 +344,7 @@ g_install()
     # default to EMPTY so no arm reads the host's real CPU by accident; each arm names the one it tests.
     _n="$1"; _s="$2"; _m="$3"; shift 3
     rm -rf "${GDIR:?}/$_n.prefix"; : >"$GDIR/$_n.curl"
-    env RIPWIRE_CPUINFO= RIPWIRE_SKIP_CPU_CHECK= FAKE_SYSCTL_DIR= "$@" HOME="$SBHOME" PATH="$FAKE:$PATH" \
+    env RIPWIRE_CPUINFO= RIPWIRE_SKIP_CPU_CHECK= FAKE_SYSCTL_DIR= "$@" HOME="$SBHOME" PATH="$FAKE_SHELL:$PATH" \
         FAKE_UNAME_S="$_s" FAKE_UNAME_M="$_m" CURL_LOG="$GDIR/$_n.curl" RELEASE_FIXTURE="$GDIR/release.json" ASSET_FIXTURE="$G_ASSET" \
         RIPWIRE_REPO=redhat-et/ripwire RIPWIRE_VERSION="$G_TAG" RIPWIRE_INSTALL_PREFIX="$GDIR/$_n.prefix" RIPWIRE_INSTALL_YES=1 \
         RIPWIRE_NO_ACTIVATE=1 bash "$INSTALL" >"$GDIR/$_n.out" 2>"$GDIR/$_n.err"; G_RC=$?

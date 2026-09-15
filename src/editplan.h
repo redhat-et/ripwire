@@ -3,6 +3,7 @@
 #include "mcpedit.h"
 #include "nextverb.h"   // E4: nextFlag — the shell-safe spelling of the rollback message's one next:
 
+#include <filesystem>
 #include <memory>
 
 namespace rw::editplan
@@ -54,21 +55,71 @@ struct FileStage
     std::vector<std::size_t> edits;
 };
 
+inline bool isEditPathAbsolute( std::string_view path ) noexcept
+{
+    if( path.empty() || path.front() == '/' )
+    {
+        return !path.empty();
+    }
+#if defined( _WIN32 )
+    return ( path.front() == '\\' ) || ( path.size() >= 2 && path[ 1 ] == ':' );
+#else
+    return false;
+#endif
+}
+
+inline std::size_t lastEditPathSeparator( std::string_view path ) noexcept
+{
+#if defined( _WIN32 )
+    return path.find_last_of( "/\\" );
+#else
+    return path.find_last_of( '/' );
+#endif
+}
+
 inline std::string siblingPath( std::string_view planPath, std::string_view payload )
 {
-    if( payload.empty() || payload.front() == '/' ) { return std::string( payload ); }
-    const std::size_t slash = planPath.find_last_of( '/' );
+    if( payload.empty() || isEditPathAbsolute( payload ) ) { return std::string( payload ); }
+    const std::size_t slash = lastEditPathSeparator( planPath );
     return slash == std::string_view::npos ? std::string( payload ) : std::string( planPath.substr( 0, slash + 1 ) ) + std::string( payload );
+}
+
+inline std::string canonicalEditPlanPath( std::string_view path )
+{
+#if defined( _WIN32 )
+    const std::string native = rw::compat::rw_windows_path_from_msys( path );
+    std::error_code    ec;
+    const std::filesystem::path absolute = std::filesystem::absolute( std::filesystem::path( native ), ec );
+    if( ec )
+    {
+        return {};
+    }
+    const std::filesystem::path canonical = std::filesystem::canonical( absolute, ec );
+    if( !ec )
+    {
+        return canonical.generic_string();
+    }
+    ec.clear();
+    const std::filesystem::path weak = std::filesystem::weakly_canonical( absolute, ec );
+    return ec ? std::string() : weak.generic_string();
+#else
+    char buf[ PATH_MAX ];
+    return ::realpath( std::string( path ).c_str(), buf ) != nullptr ? std::string( buf ) : std::string();
+#endif
 }
 
 // The directory a plan's payloads must live in: the plan file's own, canonicalized. "" when it cannot be
 // resolved, which the confinement check below treats as "cannot prove containment" and therefore refuses.
 inline std::string planDirAbs( const std::string& planPath )
 {
-    const std::size_t slash = planPath.find_last_of( '/' );
+    const std::size_t slash = lastEditPathSeparator( planPath );
     const std::string dir   = slash == std::string::npos ? std::string( "." ) : planPath.substr( 0, slash );
+#if defined( _WIN32 )
+    return canonicalEditPlanPath( dir.empty() ? std::string_view( "." ) : std::string_view( dir ) );
+#else
     char              buf[ PATH_MAX ];
     return ::realpath( dir.empty() ? "/" : dir.c_str(), buf ) != nullptr ? std::string( buf ) : std::string();
+#endif
 }
 
 // A5: a plan's `payload` names a file whose BYTES are spliced into a source file, so an unconfined payload
@@ -95,7 +146,7 @@ inline bool payloadWithinPlanDir( const std::string& planPath, const std::string
     // "../" payload, which is the exact bug this function exists to catch).
     char cwdBuf[ PATH_MAX ];
     const std::string cwd = ::getcwd( cwdBuf, sizeof( cwdBuf ) ) != nullptr ? std::string( cwdBuf ) : std::string();
-    if( cwd.empty() && payloadPath.front() != '/' )
+    if( cwd.empty() && !isEditPathAbsolute( payloadPath ) )
     {
         resolved = payloadPath;
         return false;   // cannot place a relative path in any frame ⇒ cannot prove containment ⇒ refuse
@@ -103,7 +154,7 @@ inline bool payloadWithinPlanDir( const std::string& planPath, const std::string
     // rw::lexicalNormalize (resolve.h) is the house's segment-stack `.`/`..` folder — the SAME primitive the
     // include resolver keys every path index through. It returns "" for a relative `..` that escapes above
     // its own base, which is already the answer this check wants.
-    const std::string lexical = lexicalNormalize( payloadPath.front() == '/' ? payloadPath : cwd + "/" + payloadPath );
+    const std::string lexical = lexicalNormalize( isEditPathAbsolute( payloadPath ) ? payloadPath : cwd + "/" + payloadPath );
     if( lexical.empty() )
     {
         resolved = payloadPath;
@@ -113,12 +164,26 @@ inline bool payloadWithinPlanDir( const std::string& planPath, const std::string
     // realpath is the AUTHORITY when the payload exists: `dir` is canonical, so only a canonical candidate
     // is comparable to it (a symlinked prefix such as /tmp -> /private/tmp otherwise reads as an escape),
     // and it is what catches a symlink sitting INSIDE the plan directory that points out of it.
+#if defined( _WIN32 )
+    const std::string canonical = canonicalEditPlanPath( lexical );
+    if( !canonical.empty() )
+    {
+        resolved = canonical;
+        return pathIsUnder( resolved, dir );
+    }
+    if( rw::pathguard::isSymlink( lexical ) )
+    {
+        resolved = lexical;
+        return false;
+    }
+#else
     char buf[ PATH_MAX ];
     if( ::realpath( lexical.c_str(), buf ) != nullptr )
     {
         resolved = std::string( buf );
         return pathIsUnder( resolved, dir );
     }
+#endif
     // The payload does not exist. realpath cannot speak, so judge it lexically: "../../../../etc/nope" must
     // still read as an escape rather than as a merely unreadable payload.
     resolved = lexical;

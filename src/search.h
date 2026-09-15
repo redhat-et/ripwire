@@ -22,6 +22,7 @@
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — graceful-degrade when regex matching throws mid-scan (never terminate)
 #include "didyoumean.h"         // R1a: the ONE near-miss suggester — the zero-hit follow-up reuses it, never a second one
 #include "docparse.h"           // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
+#include "infra/text.h"          // presentation-only CRLF normalization after raw line spans are selected
 #include "filter.h"             // §P11.1: rw::pathTierOf — the shared source/test/doc ORDERING tier
 #include "ingest.h"             // §R-J: rw::looksBinary / rw::kBinarySniffCap — the shared NUL-sniff, reused by grepCollectAux
 #include "model.h"
@@ -934,7 +935,9 @@ inline std::string grepContextSlice( const std::string& s, const std::vector<std
         const std::uint32_t want = lo + std::uint32_t( count ) - 1;
         hi = ( want < lineCount ) ? want : lineCount;
     }
-    return grepLineRangeText( s, lineStarts, lineCount, lo, hi );
+    std::string context = grepLineRangeText( s, lineStarts, lineCount, lo, hi );
+    normalizeCrlfInPlace( context );
+    return context;
 }
 
 // A single minified/generated line can be megabytes; the matched line is emitted for EVERY hit, so it is
@@ -967,11 +970,13 @@ inline std::string grepMatchedLine( const std::string& s, const std::vector<std:
         return {};
     }
     std::string text = grepLineRangeText( s, lineStarts, lineCount, line, line );
+    const std::uint32_t rawBytes = std::uint32_t( text.size() );
+    normalizeCrlfInPlace( text );
     if( text.size() > kGrepMatchedLineMaxBytes )
     {
         if( fullBytesOut != nullptr )
         {
-            *fullBytesOut = std::uint32_t( text.size() );
+            *fullBytesOut = rawBytes;
         }
         std::size_t cut = kGrepMatchedLineMaxBytes;
         while( cut > 0 && ( static_cast<unsigned char>( text[cut] ) & 0xC0 ) == 0x80 )
@@ -1528,7 +1533,7 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
     };
     {
         // symmetric bare scope: the workers live exactly as long as the scan
-        const unsigned    hwThreadCount = std::thread::hardware_concurrency();
+        const unsigned    hwThreadCount = rw::compat::rw_effective_hardware_concurrency();
         const std::size_t workerCount   = std::min<std::size_t>( { hwThreadCount ? hwThreadCount : 1u, fileCount, 16 } );
         if( workerCount <= 1 )
         {

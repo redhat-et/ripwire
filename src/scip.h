@@ -32,6 +32,7 @@
 #include "scipoverlay.h"        // ScipEdge / ScipCover / ScipOverlay — the data struct (also used by graph.h)
 #include "gitmine.h"            // resolveFileSuffix — map a SCIP relative_path to a ripwire fileId
 #include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT
+#include "infra/platform_compat.h" // UTF-8 aware regular-file input on Windows
 
 #include <algorithm>
 #include <cstdint>
@@ -359,6 +360,29 @@ inline bool scipDecodeIndex( const std::uint8_t* data, std::size_t size, std::ve
 // fopen gave — the same size bound, the same short-read rule — even on a filesystem that honours O_NONBLOCK for a file.
 inline std::vector<std::uint8_t> scipReadFile( const char* path )
 {
+#if defined( _WIN32 )
+    // The Windows CRT accepts the initial _open/fstat probe above, but its fcntl flags are not a
+    // portable POSIX stream contract: F_GETFL/F_SETFL can make fdopen fail even for a regular UTF-8
+    // path. Reopen through the wide CRT so non-ASCII paths and the bounded read keep the same behavior.
+    std::FILE* f = rw::compat::rw_fopen_utf8( path, "rb" );
+    if( f == nullptr )
+    {
+        return {};
+    }
+    if( std::fseek( f, 0, SEEK_END ) != 0 ) { std::fclose( f ); return {}; }
+    const long sz = std::ftell( f );
+    if( sz <= 0 || sz > ( 256L << 20 ) ) { std::fclose( f ); return {}; }
+    std::rewind( f );
+    std::vector<std::uint8_t> bytes;
+    bytes.resize( static_cast<std::size_t>( sz ) );
+    const std::size_t got = std::fread( bytes.data(), 1, bytes.size(), f );
+    std::fclose( f );
+    if( got != bytes.size() )
+    {
+        bytes.clear();
+    }
+    return bytes;
+#else
     std::vector<std::uint8_t> bytes;
     const int indexFd = ::open( path, O_RDONLY | O_NONBLOCK | O_CLOEXEC );
     if( indexFd < 0 )
@@ -385,6 +409,7 @@ inline std::vector<std::uint8_t> scipReadFile( const char* path )
         bytes.clear();
     }
     return bytes;
+#endif
 }
 
 // ---- map decoded SCIP → ripwire node ids (the overlay) ---------------------------------------------

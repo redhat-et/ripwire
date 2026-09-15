@@ -3297,6 +3297,26 @@ static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kI
 // flag matched, and did its value survive" is one question with one answer.
 enum class ViewFlagMatch : std::uint8_t { NoMatch, Assigned, Refused };
 
+inline constexpr std::string_view kPathValuePrefixes[] =
+{
+    "--eval-mined=", "--eval-skills=", "--arch=", "--cache=", "--index-out=", "--scip=", "--pin-census=",
+    "--lint-rules=", "--exercises=", "--cochange=", "--situ=", "--test-gate=", "--scan-skills=", "--dead-code=",
+    "--plan-lint=", "--scan-skill=", "--batch=", "--at=", "--edit-payload=", "--edit-target-file=", "--edit-plan=",
+    "--eval-stray=", "--from-trace=", "--with-profile=", "--brief=", "--html=", "--affected="
+};
+
+inline bool isPathValuePrefix( std::string_view prefix ) noexcept
+{
+    for( const std::string_view pathPrefix : kPathValuePrefixes )
+    {
+        if( prefix == pathPrefix )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 inline ViewFlagMatch applyViewFlag( std::string_view arg, Config& c )
 {
     for( const ViewFlag& vf : kViewFlags )
@@ -3306,6 +3326,13 @@ inline ViewFlagMatch applyViewFlag( std::string_view arg, Config& c )
             continue;
         }
         const std::string_view value = arg.substr( vf.prefix.size() );
+#if defined( _WIN32 )
+        if( isPathValuePrefix( vf.prefix ) )
+        {
+            // argv storage is mutable and Config deliberately borrows it as a view.
+            rw::compat::rw_normalize_msys_drive_paths_in_place( const_cast<char*>( value.data() ) );
+        }
+#endif
         // §B5: the EMPTY-value decision is the row's, never this loop's. Refuse prints here; Meaningful and
         // HandlerRefuses both fall through to the assignment — the difference between them is which code
         // OWNS the refusal, and the row records it (the consteval floor beside the table pins the columns).

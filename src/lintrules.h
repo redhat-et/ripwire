@@ -664,7 +664,7 @@ inline std::vector<LintRule> loadLintRules( const std::string& dir )
     for( const std::string& path : files )
     {
         // read the file
-        std::FILE* fp = std::fopen( path.c_str(), "rb" );
+        std::FILE* fp = rw::compat::rw_fopen_utf8( path.c_str(), "rb" );
         if( fp == nullptr ) { rw::emitTo( stderr, "ripwire: --lint-rules: cannot read {} — skipped\n", path.c_str() ); DEGRADED_PATH_ALERT( "lint-rules: unreadable file" ); continue; }
         std::string buf;
         {

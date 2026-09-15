@@ -46,6 +46,13 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
 SRC="$ROOT/test/verify_strkern.cpp"
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
+CM_ARGS=()
+if [ "${OS:-}" = Windows_NT ]; then
+    # The default Windows CMake generator is Visual Studio Debug, whose /RTC1 conflicts with the
+    # project's explicit /O2 profile. Use the same ClangCL frontend as the native build in a
+    # single-config generator instead of silently changing the target's flags or dropping this arm.
+    CM_ARGS=( -G Ninja -DCMAKE_C_COMPILER=clang-cl.exe -DCMAKE_CXX_COMPILER=clang-cl.exe )
+fi
 
 echo "emitescapecheck: CXX=$CXX  BIN=$BIN  target=ripwire_test_strkern -tc=escape:*"
 
@@ -66,7 +73,7 @@ read_counts()   # $1 = log; sets CASES, ASSERTS, ASSERTS_FAIL
 # network. No -DRIPWIRE_ASAN=ON here — test/strkerncheck.sh builds this same TU under the complete G1
 # stack and runs every one of its test cases, so a second sanitized copy would re-prove that at the price
 # of another build.
-if ! cmake -S "$ROOT" -B "$WORK/cmb" -DRIPWIRE_TESTS=ON -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
+if ! cmake -S "$ROOT" -B "$WORK/cmb" "${CM_ARGS[@]}" -DRIPWIRE_TESTS=ON -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
         > "$WORK/cfg.log" 2>&1; then
     no "cmake configure (-DRIPWIRE_TESTS=ON) failed"; tail -20 "$WORK/cfg.log" | sed 's/^/    /'
 elif ! cmake --build "$WORK/cmb" --target ripwire_test_strkern -j 2 > "$WORK/build.log" 2>&1; then

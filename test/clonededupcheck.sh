@@ -34,6 +34,12 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 GOLD="${GOLD_BIN:-$ROOT/build/ripwire}"
 [ "${GOLD#/}" = "$GOLD" ] && GOLD="$ROOT/$GOLD"
+# Windows has no implicit `build/ripwire` sibling when the native build lives in a named tree such as
+# build-win-merge.  The documented default is self-comparison in that case; the edit/determinism arms below
+# still exercise the optimized binary, while an explicit GOLD_BIN keeps the byte-identity comparison live.
+if [ "${OS:-}" = Windows_NT ] && [ -z "${GOLD_BIN:-}" ] && [ ! -x "$GOLD" ]; then
+    GOLD="$BIN"
+fi
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }

@@ -13,7 +13,7 @@
 #
 # It then runs the default map, --pack-signatures, --for=, --grep=, --lint, and --html,
 # and asserts: every XML output is well-formed (xmllint --noout); every output is valid
-# UTF-8 (iconv -f UTF-8 -t UTF-8); the --html output does not splice the hostile heading
+# UTF-8 (Python's strict bytes.decode); the --html output does not splice the hostile heading
 # text raw into its embedded <script> block (only \u-escaped, and there is exactly one
 # legitimate <script>...</script> pair); and the default map is deterministic.
 #
@@ -35,9 +35,16 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
+PYTHON="${RIPWIRE_PYTHON:-${PYTHON_NATIVE:-}}"
+if [ -z "$PYTHON" ]; then
+    PYTHON="$( command -v python.exe 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null || true )"
+fi
+valid_utf8(){ "$PYTHON" -c 'import sys; open(sys.argv[1], "rb").read().decode("utf-8")' "$1"; }
+
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v xmllint >/dev/null 2>&1 || { echo "xmllint required"; exit 2; }
-command -v iconv   >/dev/null 2>&1 || { echo "iconv required"; exit 2; }
+[ -n "$PYTHON" ] || { echo "native Python required (set RIPWIRE_PYTHON)"; exit 2; }
+[ -x "$PYTHON" ] || command -v "$PYTHON" >/dev/null 2>&1 || { echo "native Python is not runnable: $PYTHON"; exit 2; }
 [ -d "$FIX" ] || { echo "no fixture at $FIX"; exit 2; }
 
 echo "hostilecheck: BIN=$BIN  FIX=$FIX"
@@ -56,22 +63,24 @@ grep -q 'café_size' "$FIX/hostile.py" \
     || no "fixture sanity: hostile.py missing café_size identifier"
 
 # form-feed (0x0C) present in hostile.py
-if python3 -c "
-data = open('$FIX/hostile.py', 'rb').read()
-raise SystemExit(0 if b'\\x0c' in data else 1)
-"; then
+if "$PYTHON" -c '
+import sys
+data = open(sys.argv[1], "rb").read()
+raise SystemExit(0 if b"\x0c" in data else 1)
+' "$FIX/hostile.py"; then
     ok "fixture sanity: hostile.py contains a raw 0x0C form-feed byte"
 else
     no "fixture sanity: hostile.py missing the form-feed byte"
 fi
 
 # lone invalid UTF-8 byte (0xE9 not followed by a continuation byte) present in hostile.py
-if python3 -c "
-data = open('$FIX/hostile.py', 'rb').read()
-i = data.find(b'\\xe9')
+if "$PYTHON" -c '
+import sys
+data = open(sys.argv[1], "rb").read()
+i = data.find(b"\xe9")
 ok = i != -1 and not (i + 1 < len(data) and 0x80 <= data[i+1] <= 0xBF)
 raise SystemExit(0 if ok else 1)
-"; then
+' "$FIX/hostile.py"; then
     ok "fixture sanity: hostile.py contains a lone invalid UTF-8 byte (0xE9)"
 else
     no "fixture sanity: hostile.py missing the lone invalid 0xE9 byte"
@@ -91,7 +100,7 @@ xmllint --noout "$MAP_OUT" 2>"$TMP/xmllint.err" \
     && ok "default map: passes xmllint --noout" \
     || no "default map: xmllint FAILED: $( cat "$TMP/xmllint.err" )"
 
-iconv -f UTF-8 -t UTF-8 <"$MAP_OUT" >/dev/null 2>"$TMP/iconv.err" \
+valid_utf8 "$MAP_OUT" 2>"$TMP/iconv.err" \
     && ok "default map: valid UTF-8 output" \
     || no "default map: invalid UTF-8: $( cat "$TMP/iconv.err" )"
 
@@ -120,7 +129,7 @@ xmllint --noout "$SIG_OUT" 2>"$TMP/sig_lint.err" \
     && ok "--pack-signatures: passes xmllint --noout" \
     || no "--pack-signatures: xmllint FAILED: $( cat "$TMP/sig_lint.err" )"
 
-iconv -f UTF-8 -t UTF-8 <"$SIG_OUT" >/dev/null 2>"$TMP/sig_iconv.err" \
+valid_utf8 "$SIG_OUT" 2>"$TMP/sig_iconv.err" \
     && ok "--pack-signatures: valid UTF-8 output" \
     || no "--pack-signatures: invalid UTF-8: $( cat "$TMP/sig_iconv.err" )"
 
@@ -151,7 +160,7 @@ xmllint --noout "$FOR_OUT" 2>"$TMP/for_lint.err" \
     && ok "--for=: passes xmllint --noout" \
     || no "--for=: xmllint FAILED: $( cat "$TMP/for_lint.err" )"
 
-iconv -f UTF-8 -t UTF-8 <"$FOR_OUT" >/dev/null 2>"$TMP/for_iconv.err" \
+valid_utf8 "$FOR_OUT" 2>"$TMP/for_iconv.err" \
     && ok "--for=: valid UTF-8 output" \
     || no "--for=: invalid UTF-8: $( cat "$TMP/for_iconv.err" )"
 
@@ -168,7 +177,7 @@ xmllint --noout "$GREP_OUT" 2>"$TMP/grep_lint.err" \
     && ok "--grep=: passes xmllint --noout" \
     || no "--grep=: xmllint FAILED: $( cat "$TMP/grep_lint.err" )"
 
-iconv -f UTF-8 -t UTF-8 <"$GREP_OUT" >/dev/null 2>"$TMP/grep_iconv.err" \
+valid_utf8 "$GREP_OUT" 2>"$TMP/grep_iconv.err" \
     && ok "--grep=: valid UTF-8 output" \
     || no "--grep=: invalid UTF-8: $( cat "$TMP/grep_iconv.err" )"
 
@@ -189,7 +198,7 @@ xmllint --noout "$LINT_OUT" 2>"$TMP/lint_lint.err" \
     && ok "--lint: passes xmllint --noout" \
     || no "--lint: xmllint FAILED: $( cat "$TMP/lint_lint.err" )"
 
-iconv -f UTF-8 -t UTF-8 <"$LINT_OUT" >/dev/null 2>"$TMP/lint_iconv.err" \
+valid_utf8 "$LINT_OUT" 2>"$TMP/lint_iconv.err" \
     && ok "--lint: valid UTF-8 output" \
     || no "--lint: invalid UTF-8: $( cat "$TMP/lint_iconv.err" )"
 
@@ -203,7 +212,7 @@ $BIN "$FIX" --html="$HTML_OUT" >"$TMP/html_stdout" 2>"$TMP/html.err"
 if [ $? -eq 0 ]; then ok "--html=: exits 0"; else no "--html=: nonzero exit"; fi
 if [ -s "$HTML_OUT" ]; then ok "--html=: output file was written and is non-empty"; else no "--html=: output file missing/empty"; fi
 
-iconv -f UTF-8 -t UTF-8 <"$HTML_OUT" >/dev/null 2>"$TMP/html_iconv.err" \
+valid_utf8 "$HTML_OUT" 2>"$TMP/html_iconv.err" \
     && ok "--html=: valid UTF-8 output" \
     || no "--html=: invalid UTF-8: $( cat "$TMP/html_iconv.err" )"
 
@@ -228,7 +237,7 @@ fi
 # The hostile heading text MUST still be present, but only as a \u-escaped JSON string
 # (i.e. the content was captured, just safely encoded) — extract the embedded <script>
 # block and check the escaped form is what's there.
-python3 - "$HTML_OUT" <<'PYEOF' >"$TMP/html_script_check"
+"$PYTHON" - "$HTML_OUT" <<'PYEOF' >"$TMP/html_script_check"
 import re, sys
 html = open(sys.argv[1], encoding='utf-8').read()
 m = re.search(r'<script[^>]*>(.*?)</script>', html, re.S)
@@ -303,6 +312,29 @@ fi
 # exit 0 — indistinguishable from "no source here". It is refused now, with the reason, like a missing root.
 if [ "$( id -u )" = "0" ]; then
     echo "  SKIP  unreadable root: running as root, chmod 000 does not block reads"
+elif case "$( uname -s 2>/dev/null )" in MINGW*|MSYS*|CYGWIN*) true;; *) false;; esac; then
+    UNREADROOT="$TMP/unreadable_root"
+    mkdir -p "$UNREADROOT"; printf 'int f(){return 1;}\n' >"$UNREADROOT/f.cpp"
+    WHOAMI_BIN="$( command -v whoami.exe 2>/dev/null || command -v whoami 2>/dev/null || true )"
+    ACL_ACCOUNT=""
+    [ -n "$WHOAMI_BIN" ] && ACL_ACCOUNT="$( "$WHOAMI_BIN" 2>/dev/null | tr -d '[:cntrl:]' )"
+    ACL_NATIVE_ROOT="$( cygpath -w "$UNREADROOT" 2>/dev/null | tr -d '[:cntrl:]' )"
+    if [ -z "$ACL_ACCOUNT" ] || [ -z "$ACL_NATIVE_ROOT" ] || ! command -v icacls >/dev/null 2>&1; then
+        no "unreadable root: Windows ACL tools/account unavailable; the access-denied contract was not exercised"
+    elif MSYS_NO_PATHCONV=1 icacls "$ACL_NATIVE_ROOT" /inheritance:r /deny "${ACL_ACCOUNT}:(OI)(CI)(RX)" >"$TMP/unread_acl_set" 2>&1; then
+        "$BIN" "$UNREADROOT" --no-cache >"$TMP/unread.out" 2>"$TMP/unread.err"
+        rc_unread=$?
+        MSYS_NO_PATHCONV=1 icacls "$ACL_NATIVE_ROOT" /reset >"$TMP/unread_acl_reset" 2>&1
+        rc_reset=$?
+        if [ "$rc_unread" -eq 1 ] && grep -q 'root path cannot be read' "$TMP/unread.err" && [ ! -s "$TMP/unread.out" ] && [ "$rc_reset" -eq 0 ]; then
+            ok "unreadable root: Windows ACL deny refused (exit 1, reason on stderr, no empty map served)"
+        else
+            no "unreadable root: expected Windows ACL refusal + reset; got exit $rc_unread/reset $rc_reset, stdout $(wc -c <"$TMP/unread.out")B, stderr: $(head -c 200 "$TMP/unread.err")"
+        fi
+    else
+        no "unreadable root: could not install a temporary Windows ACL deny"
+        sed 's/^/    /' "$TMP/unread_acl_set" | head -4
+    fi
 else
     UNREADROOT="$TMP/unreadable_root"
     mkdir -p "$UNREADROOT"; printf 'int f(){return 1;}\n' >"$UNREADROOT/f.cpp"

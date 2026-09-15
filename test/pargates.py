@@ -9,11 +9,15 @@ usage: pargates.py <repo-root> <ripwire-bin> [-j N] [--only substr] [--json out.
                    [--shard K/N] [--shard-plan] [--budget-scale F] [--exclude-list FILE]
 """
 import concurrent.futures as cf
+import atexit
+import glob
 import hashlib
 import json
 import os
 import re
+import shutil
 import signal
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -22,6 +26,645 @@ import time
 
 root = os.path.abspath(sys.argv[1])
 binp = os.path.abspath(sys.argv[2])
+windows = os.name == "nt"
+
+if windows:
+    import ctypes
+    from ctypes import wintypes
+
+    class _LargeInteger( ctypes.Structure ):
+        _fields_ = [ ( "QuadPart", ctypes.c_longlong ) ]
+
+    class _BasicLimitInformation( ctypes.Structure ):
+        _fields_ = [
+            ( "PerProcessUserTimeLimit", _LargeInteger ),
+            ( "PerJobUserTimeLimit", _LargeInteger ),
+            ( "LimitFlags", wintypes.DWORD ),
+            ( "MinimumWorkingSetSize", ctypes.c_size_t ),
+            ( "MaximumWorkingSetSize", ctypes.c_size_t ),
+            ( "ActiveProcessLimit", wintypes.DWORD ),
+            ( "Affinity", ctypes.c_size_t ),
+            ( "PriorityClass", wintypes.DWORD ),
+            ( "SchedulingClass", wintypes.DWORD ),
+        ]
+
+    class _IoCounters( ctypes.Structure ):
+        _fields_ = [
+            ( "ReadOperationCount", _LargeInteger ),
+            ( "WriteOperationCount", _LargeInteger ),
+            ( "OtherOperationCount", _LargeInteger ),
+            ( "ReadTransferCount", _LargeInteger ),
+            ( "WriteTransferCount", _LargeInteger ),
+            ( "OtherTransferCount", _LargeInteger ),
+        ]
+
+    class _ExtendedLimitInformation( ctypes.Structure ):
+        _fields_ = [
+            ( "BasicLimitInformation", _BasicLimitInformation ),
+            ( "IoInfo", _IoCounters ),
+            ( "ProcessMemoryLimit", ctypes.c_size_t ),
+            ( "JobMemoryLimit", ctypes.c_size_t ),
+            ( "PeakProcessMemoryUsed", ctypes.c_size_t ),
+            ( "PeakJobMemoryUsed", ctypes.c_size_t ),
+        ]
+
+    class _BasicAccountingInformation( ctypes.Structure ):
+        _fields_ = [
+            ( "TotalUserTime", _LargeInteger ),
+            ( "TotalKernelTime", _LargeInteger ),
+            ( "ThisPeriodTotalUserTime", _LargeInteger ),
+            ( "ThisPeriodTotalKernelTime", _LargeInteger ),
+            ( "TotalPageFaultCount", wintypes.DWORD ),
+            ( "TotalProcesses", wintypes.DWORD ),
+            ( "ActiveProcesses", wintypes.DWORD ),
+            ( "TotalTerminatedProcesses", wintypes.DWORD ),
+        ]
+
+    _kernel32 = ctypes.WinDLL( "kernel32", use_last_error=True )
+    _kernel32.CreateJobObjectW.argtypes = [ wintypes.LPVOID, wintypes.LPCWSTR ]
+    _kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    _kernel32.SetInformationJobObject.argtypes = [ wintypes.HANDLE, wintypes.INT, wintypes.LPVOID, wintypes.DWORD ]
+    _kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    _kernel32.AssignProcessToJobObject.argtypes = [ wintypes.HANDLE, wintypes.HANDLE ]
+    _kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    _kernel32.QueryInformationJobObject.argtypes = [ wintypes.HANDLE, wintypes.INT, wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER( wintypes.DWORD ) ]
+    _kernel32.QueryInformationJobObject.restype = wintypes.BOOL
+    _kernel32.TerminateJobObject.argtypes = [ wintypes.HANDLE, wintypes.UINT ]
+    _kernel32.TerminateJobObject.restype = wintypes.BOOL
+    class _ProcessEntry32W( ctypes.Structure ):
+        _fields_ = [
+            ( "dwSize", wintypes.DWORD ),
+            ( "cntUsage", wintypes.DWORD ),
+            ( "th32ProcessID", wintypes.DWORD ),
+            ( "th32DefaultHeapID", ctypes.c_size_t ),
+            ( "th32ModuleID", wintypes.DWORD ),
+            ( "cntThreads", wintypes.DWORD ),
+            ( "th32ParentProcessID", wintypes.DWORD ),
+            ( "pcPriClassBase", ctypes.c_long ),
+            ( "dwFlags", wintypes.DWORD ),
+            ( "szExeFile", wintypes.WCHAR * 260 ),
+        ]
+    class _ThreadEntry32( ctypes.Structure ):
+        _fields_ = [
+            ( "dwSize", wintypes.DWORD ),
+            ( "cntUsage", wintypes.DWORD ),
+            ( "th32ThreadID", wintypes.DWORD ),
+            ( "th32OwnerProcessID", wintypes.DWORD ),
+            ( "tpBasePri", ctypes.c_long ),
+            ( "tpDeltaPri", ctypes.c_long ),
+            ( "dwFlags", wintypes.DWORD ),
+        ]
+    _kernel32.CreateToolhelp32Snapshot.argtypes = [ wintypes.DWORD, wintypes.DWORD ]
+    _kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    _kernel32.Process32FirstW.argtypes = [ wintypes.HANDLE, ctypes.POINTER( _ProcessEntry32W ) ]
+    _kernel32.Process32FirstW.restype = wintypes.BOOL
+    _kernel32.Process32NextW.argtypes = [ wintypes.HANDLE, ctypes.POINTER( _ProcessEntry32W ) ]
+    _kernel32.Process32NextW.restype = wintypes.BOOL
+    _kernel32.Thread32First.argtypes = [ wintypes.HANDLE, ctypes.POINTER( _ThreadEntry32 ) ]
+    _kernel32.Thread32First.restype = wintypes.BOOL
+    _kernel32.Thread32Next.argtypes = [ wintypes.HANDLE, ctypes.POINTER( _ThreadEntry32 ) ]
+    _kernel32.Thread32Next.restype = wintypes.BOOL
+    _kernel32.OpenThread.argtypes = [ wintypes.DWORD, wintypes.BOOL, wintypes.DWORD ]
+    _kernel32.OpenThread.restype = wintypes.HANDLE
+    _kernel32.ResumeThread.argtypes = [ wintypes.HANDLE ]
+    _kernel32.ResumeThread.restype = wintypes.DWORD
+    _kernel32.CloseHandle.argtypes = [ wintypes.HANDLE ]
+    _kernel32.CloseHandle.restype = wintypes.BOOL
+    _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+    _JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION = 1
+    _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+    _CREATE_SUSPENDED = 0x00000004
+
+    class _WindowsJob:
+        def __init__( self ):
+            self.handle = _kernel32.CreateJobObjectW( None, None )
+            if not self.handle:
+                raise ctypes.WinError( ctypes.get_last_error() )
+            info = _ExtendedLimitInformation()
+            info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            if not _kernel32.SetInformationJobObject( self.handle, _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                                                       ctypes.byref( info ), ctypes.sizeof( info ) ):
+                error = ctypes.get_last_error()
+                _kernel32.CloseHandle( self.handle )
+                self.handle = None
+                raise ctypes.WinError( error )
+
+        def assign( self, process ):
+            if _kernel32.AssignProcessToJobObject( self.handle, wintypes.HANDLE( process._handle ) ):
+                return True
+            error = ctypes.get_last_error()
+            _kernel32.CloseHandle( self.handle )
+            self.handle = None
+            raise OSError( error, "AssignProcessToJobObject failed" )
+
+        def alive( self ):
+            info = _BasicAccountingInformation()
+            size = wintypes.DWORD()
+            if not _kernel32.QueryInformationJobObject( self.handle, _JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION,
+                                                         ctypes.byref( info ), ctypes.sizeof( info ), ctypes.byref( size ) ):
+                return True
+            return info.ActiveProcesses != 0
+
+        def terminate( self ):
+            if self.handle:
+                _kernel32.TerminateJobObject( self.handle, 1 )
+
+        def close( self ):
+            if self.handle:
+                _kernel32.CloseHandle( self.handle )
+                self.handle = None
+
+
+def _attach_windows_job( process ):
+    if not windows:
+        return None
+    job = _WindowsJob()
+    job.assign( process )
+    return job
+
+
+def _resume_windows_process( process ):
+    """Resume the suspended primary thread after the process has entered its kill-on-close Job Object."""
+    if not windows:
+        return
+    snapshot = _kernel32.CreateToolhelp32Snapshot( 0x00000004, 0 )  # TH32CS_SNAPTHREAD
+    invalid = ctypes.c_void_p( -1 ).value
+    if not snapshot or snapshot == invalid:
+        raise ctypes.WinError( ctypes.get_last_error() )
+    entry = _ThreadEntry32()
+    entry.dwSize = ctypes.sizeof( entry )
+    try:
+        if not _kernel32.Thread32First( snapshot, ctypes.byref( entry ) ):
+            raise ctypes.WinError( ctypes.get_last_error() )
+        while True:
+            if entry.th32OwnerProcessID == process.pid:
+                thread = _kernel32.OpenThread( 0x0002, False, entry.th32ThreadID )  # THREAD_SUSPEND_RESUME
+                if not thread:
+                    raise ctypes.WinError( ctypes.get_last_error() )
+                try:
+                    previous = _kernel32.ResumeThread( thread )
+                finally:
+                    _kernel32.CloseHandle( thread )
+                if previous == 0xFFFFFFFF:
+                    raise ctypes.WinError( ctypes.get_last_error() )
+                return
+            if not _kernel32.Thread32Next( snapshot, ctypes.byref( entry ) ):
+                break
+    finally:
+        _kernel32.CloseHandle( snapshot )
+    raise OSError( "suspended gate has no resumable primary thread" )
+
+
+def _close_windows_job( process ):
+    job = getattr( process, "_ripwire_windows_job", None ) if process is not None else None
+    if job is not None:
+        job.close()
+
+
+def _windows_descendant_pids( root_pid ):
+    if not windows:
+        return []
+    snapshot = _kernel32.CreateToolhelp32Snapshot( 0x00000002, 0 )
+    invalid = ctypes.c_void_p( -1 ).value
+    if not snapshot or snapshot == invalid:
+        return []
+    parents = {}
+    entry = _ProcessEntry32W()
+    entry.dwSize = ctypes.sizeof( entry )
+    try:
+        if not _kernel32.Process32FirstW( snapshot, ctypes.byref( entry ) ):
+            return []
+        while True:
+            parents.setdefault( entry.th32ParentProcessID, [] ).append( entry.th32ProcessID )
+            if not _kernel32.Process32NextW( snapshot, ctypes.byref( entry ) ):
+                break
+    finally:
+        _kernel32.CloseHandle( snapshot )
+    descendants = []
+    pending = [ root_pid ]
+    while pending:
+        parent = pending.pop()
+        for child in parents.get( parent, [] ):
+            if child not in descendants:
+                descendants.append( child )
+                pending.append( child )
+    return descendants
+
+
+def _windows_terminate_pids( pids ):
+    if not windows:
+        return
+    for pid in sorted( set( pids ) ):
+        if pid <= 0:
+            continue
+        try:
+            subprocess.run( [ "taskkill", "/PID", str( pid ), "/F" ],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            timeout=KILL_GRACE_SEC, check=False )
+        except ( OSError, subprocess.TimeoutExpired ):
+            pass
+
+
+def _msys_path(path):
+    """Convert an absolute Windows path to the spelling consumed by Git Bash."""
+    if not windows:
+        return path
+    # Git Bash already uses /d/... for a native path on drive D:. Do not let
+    # ntpath.abspath reinterpret that spelling as C:\\d\\..., which breaks
+    # RIPWIRE_HEADBIN when the runner's TEMP directory is on another drive.
+    if len(path) >= 3 and path[0] == "/" and path[1].isalpha() and path[2] == "/":
+        return path.replace( "\\", "/" )
+    drive, tail = os.path.splitdrive(os.path.abspath(path))
+    if drive:
+        return "/" + drive[0].lower() + tail.replace("\\", "/")
+    return path.replace("\\", "/")
+
+
+def _native_windows_path(path):
+    """Translate a Git Bash absolute path before native Python joins or opens it."""
+    if not windows:
+        return path
+    if path == "/tmp":
+        return os.path.join( os.environ.get( "LOCALAPPDATA", os.path.dirname( tempfile.gettempdir() ) ), "Temp" )
+    if path.startswith( "/tmp/" ):
+        temp_root = os.path.join( os.environ.get( "LOCALAPPDATA", os.path.dirname( tempfile.gettempdir() ) ), "Temp" )
+        return temp_root.replace( "\\", "/" ) + path[ 4: ]
+    if len( path ) >= 3 and path[ 0 ] == "/" and path[ 1 ].isalpha() and path[ 2 ] in "/\\":
+        return path[ 1 ].upper() + ":" + path[ 2: ]
+    return path
+
+
+def _git_bash():
+    """Select Git Bash, never the Windows WSL launcher named bash.exe."""
+    if not windows:
+        return "bash"
+    requested = os.environ.get("RIPWIRE_BASH")
+    candidates = [requested] if requested else []
+    program_files = [os.environ.get("ProgramFiles", r"C:\\Program Files"),
+                     os.environ.get("ProgramW6432", r"C:\\Program Files")]
+    candidates.extend(os.path.join(p, "Git", "usr", "bin", "bash.exe") for p in program_files if p)
+    candidates.extend((shutil.which("bash.exe"), shutil.which("bash")))
+    for candidate in candidates:
+        if not candidate or not os.path.isfile(candidate):
+            continue
+        normalized = os.path.normcase(os.path.abspath(candidate))
+        if "\\windows\\system32\\" in normalized or "\\windowsapps\\" in normalized:
+            continue
+        return candidate
+    raise SystemExit("Windows gate harness needs Git Bash; refusing to invoke the WSL bash launcher")
+
+
+def _windows_vcvars_environment():
+    if not windows:
+        return {}
+    candidates = []
+    requested = os.environ.get( "RIPWIRE_VCVARS" )
+    if requested:
+        candidates.append( requested )
+    program_files_x86 = os.environ.get( "ProgramFiles(x86)", r"C:\Program Files (x86)" )
+    candidates.append( os.path.join( program_files_x86, "Microsoft Visual Studio", "2019", "BuildTools",
+                                     "VC", "Auxiliary", "Build", "vcvarsall.bat" ) )
+    candidates.append( os.path.join( program_files_x86, "Microsoft Visual Studio", "2022", "BuildTools",
+                                     "VC", "Auxiliary", "Build", "vcvarsall.bat" ) )
+    comspec = os.environ.get( "ComSpec", r"C:\Windows\System32\cmd.exe" )
+    for candidate in candidates:
+        if not candidate or not os.path.isfile( candidate ):
+            continue
+        try:
+            result = subprocess.run(
+                f'"{comspec}" /d /c call "{candidate}" amd64 10.0.19041.0 >nul && set',
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=60, check=False )
+        except ( OSError, subprocess.TimeoutExpired ):
+            continue
+        if result.returncode != 0:
+            continue
+        values = {}
+        for raw_line in result.stdout.decode( "mbcs", errors="replace" ).splitlines():
+            if "=" not in raw_line:
+                continue
+            key, value = raw_line.split( "=", 1 )
+            if key:
+                values[key] = value
+        return values
+    return {}
+
+
+def _windows_gate_environment():
+    """Provide native Python/temporary paths while shell gates keep POSIX syntax."""
+    if not windows:
+        return {}, _git_bash()
+    shell = _git_bash()
+    native_tmp = os.path.join( _native_windows_path( tempfile.gettempdir() ), f"ripwire-pargates-{os.getpid()}" )
+    native_tmp = native_tmp.replace( "\\", "/" )
+    native_python = sys.executable.replace( "\\", "/" )
+    os.makedirs(native_tmp, exist_ok=True)
+    tools = os.path.join(native_tmp, "bin")
+    os.makedirs(tools, exist_ok=True)
+    sitecustomize = os.path.join(tools, "sitecustomize.py")
+    with open(sitecustomize, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(
+            "import os, sys\n"
+            "for _name in (\"stdout\", \"stderr\"):\n"
+            "    _stream = getattr( sys, _name, None )\n"
+            "    if _stream is not None and hasattr( _stream, \"reconfigure\" ):\n"
+            "        _stream.reconfigure( newline=chr( 10 ) )\n"
+            "_tmp = os.environ.get( \"RW_MSYS_TMP\", \"\" ).rstrip( \"/\\\\\" )\n"
+            "def _map_tmp( _arg ):\n"
+            "    if not _tmp: return _arg\n"
+            "    if _arg == \"/tmp\": return _tmp\n"
+            "    if _arg.startswith( \"/tmp/\" ): return _tmp + _arg[ 4: ]\n"
+            "    return _arg\n"
+            "if _tmp: sys.argv = [ sys.argv[ 0 ] ] + [ _map_tmp( _arg ) for _arg in sys.argv[ 1: ] ]\n"
+            "def _native_env( _arg ):\n"
+            "    if _arg == \"/tmp\": return _tmp\n"
+            "    if _arg.startswith( \"/tmp/\" ): return _tmp + _arg[ 4: ]\n"
+            "    if len( _arg ) >= 3 and _arg[ 0 ] == \"/\" and _arg[ 1 ].isalpha() and _arg[ 2 ] == \"/\":\n"
+            "        return _arg[ 1 ].upper() + \":\" + _arg[ 2: ]\n"
+            "    return _arg\n"
+            "for _name in ( \"TMPDIR\", \"TEMP\", \"TMP\", \"XDG_CACHE_HOME\" ):\n"
+            "    _value = os.environ.get( _name, \"\" )\n"
+            "    if _value: os.environ[ _name ] = _native_env( _value )\n"
+        )
+    msys_tmp = os.path.join( os.environ.get( "LOCALAPPDATA", os.path.dirname( tempfile.gettempdir() ) ), "Temp" )
+    msys_tmp = msys_tmp.replace( "\\", "/" )
+    python3 = os.path.join(tools, "python3")
+    with open(python3, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("#!/usr/bin/env bash\n")
+        fh.write(f"PYTHON_NATIVE={shlex.quote(native_python)}\n")
+        fh.write(f"MSYS_TMP_NATIVE={shlex.quote(msys_tmp)}\n")
+        fh.write("map_native_arg() {\n"
+                 "    case \"${1-}\" in\n"
+                 "        /tmp) printf '%s' \"$MSYS_TMP_NATIVE\";;\n"
+                 "        /tmp/*) printf '%s%s' \"$MSYS_TMP_NATIVE\" \"${1#/tmp}\";;\n"
+                 "        /[A-Za-z]/*) printf '%s:%s' \"${1:1:1}\" \"${1:2}\";;\n"
+                 "        *) printf '%s' \"${1-}\";;\n"
+                 "    esac\n"
+                 "}\n"
+                 "map_native_args() {\n"
+                 "    mapped=()\n"
+                 "    for arg in \"$@\"; do mapped+=(\"$( map_native_arg \"$arg\" )\"); done\n"
+                 "}\n")
+        fh.write("if [ \"${1-}\" != \"-c\" ]; then\n")
+        fh.write("    map_native_args \"$@\"\n")
+        fh.write("    exec \"$PYTHON_NATIVE\" \"${mapped[@]}\"\n")
+        fh.write("fi\n")
+        inline_runner = (
+            "import os,sys\n"
+            "def msys_path(path):\n"
+            "    if len(path)>=3 and path[0]==\"/\" and path[1].isalpha() and path[2] in \"/\\\\\": return \"/\"+path[1].lower()+path[2:]\n"
+            "    if len(path)>=3 and path[1]==\":\" and path[0].isalpha(): return \"/\"+path[0].lower()+path[2:].replace(\"\\\\\",\"/\")\n"
+            "    return path\n"
+            "def map_embedded_paths(code):\n"
+            "    pairs=[]\n"
+            "    for name in (\"TMPDIR\",\"TMP\",\"TEMP\"):\n"
+            "        native=os.environ.get(name,\"\")\n"
+            "        if native: native_source=native.replace(\"\\\\\",\"/\"); pairs.append((native, native_source)); pairs.append((msys_path(native), native_source))\n"
+            "    native_root=os.environ.get(\"RIPWIRE_NATIVE_ROOT\",\"\"); pairs.append((os.environ.get(\"RIPWIRE_MSYS_ROOT\",\"\"), native_root.replace(\"\\\\\",\"/\")))\n"
+            "    for old,new in pairs:\n"
+            "        if old and new: code=code.replace(old,new)\n"
+            "    return code.replace(\"/tmp/\", os.environ.get(\"RW_MSYS_TMP\", \"/tmp\")+\"/\")\n"
+            "code=map_embedded_paths(sys.argv[1])\n"
+            "sys.argv=[\"-c\"]+sys.argv[2:]\n"
+            "exec(compile(code,\"<string>\",\"exec\"), {\"__name__\":\"__main__\",\"__file__\":\"<string>\"})"
+        )
+        fh.write("map_native_args \"$@\"\n")
+        fh.write("arg_bytes=0\n")
+        fh.write("for arg in \"${mapped[@]}\"; do arg_bytes=$(( arg_bytes + ${#arg} + 1 )); done\n")
+        fh.write("if [ \"$arg_bytes\" -le 20000 ]; then\n")
+        fh.write("    map_native_args \"$2\" \"${@:3}\"\n")
+        fh.write("    exec \"$PYTHON_NATIVE\" -c " + shlex.quote( inline_runner ) + " \"${mapped[@]}\"\n")
+        fh.write("fi\n")
+        fh.write("arg_dir=\"${TMPDIR:-/tmp}\"\n")
+        fh.write("case \"$arg_dir\" in /tmp) arg_dir=\"$MSYS_TMP_NATIVE\";; /tmp/*) arg_dir=\"$MSYS_TMP_NATIVE${arg_dir#/tmp}\";; esac\n")
+        fh.write("mkdir -p \"$arg_dir\" || exit 1\n")
+        fh.write("arg_file=\"$arg_dir/ripwire-python-args.$$\"\n")
+        fh.write("trap 'rm -f -- \"$arg_file\"' EXIT\n")
+        fh.write("printf '%s\\0' \"${mapped[@]}\" > \"$arg_file\" || exit 1\n")
+        python_runner = ( "import os,pathlib,sys; a=pathlib.Path(sys.argv[1]).read_bytes().split(bytes([0]))[:-1]; "
+                          "sys.argv=[\"-c\"]+[x.decode(\"utf-8\",\"surrogateescape\") for x in a[2:]]; "
+                          "exec(compile(a[1].decode(\"utf-8\",\"surrogateescape\").replace(\"/tmp/\", os.environ.get(\"RW_MSYS_TMP\", \"/tmp\")+\"/\"),\"<string>\",\"exec\"), "
+                          "{\"__name__\":\"__main__\",\"__file__\":\"<string>\"})" )
+        fh.write( "exec \"$PYTHON_NATIVE\" -c " + shlex.quote( python_runner ) + " \"$arg_file\"\n" )
+    try:
+        os.chmod(python3, 0o755)
+    except OSError:
+        pass
+
+    # Git for Windows does not ship xmllint.  Keep the existing XML assertions live instead of letting
+    # Windows-only runs turn them into skips: this shim exposes the small --noout/--format/--html surface
+    # used by the gates and delegates parsing to the stdlib implementation committed in test/xmlcheck.py.
+    xmllint = os.path.join(tools, "xmllint")
+    xmlcheck = os.path.join(root, "test", "xmlcheck.py").replace( "\\", "/" )
+    with open(xmllint, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("#!/usr/bin/env bash\n")
+        fh.write("exec " + shlex.quote( python3 ) + " " + shlex.quote( xmlcheck ) + " \"$@\"\n")
+    try:
+        os.chmod(xmllint, 0o755)
+    except OSError:
+        pass
+
+    vcvars = _windows_vcvars_environment()
+    llvm_candidates = [
+        os.environ.get( "RIPWIRE_LLVM_BIN", "" ),
+        os.path.join( os.environ.get( "ProgramFiles", r"C:\Program Files" ), "LLVM", "bin" ),
+        os.path.join( os.environ.get( "ProgramW6432", r"C:\Program Files" ), "LLVM", "bin" ),
+    ]
+    llvm_bin = next( ( path for path in llvm_candidates if path and os.path.isfile( os.path.join( path, "clang++.exe" ) ) ), "" )
+    if not llvm_bin:
+        clang_path = shutil.which( "clang++.exe" ) or shutil.which( "clang++" )
+        if clang_path:
+            llvm_bin = os.path.dirname( clang_path )
+    clangxx = os.path.join( llvm_bin, "clang++.exe" ) if llvm_bin else ""
+    clangcl = os.path.join( llvm_bin, "clang-cl.exe" ) if llvm_bin else ""
+    clang = os.path.join( llvm_bin, "clang.exe" ) if llvm_bin else ""
+    compiler = clangcl if os.path.isfile( clangcl ) else clangxx
+    if compiler and os.path.isfile( compiler ):
+        cxx_wrapper = os.path.join( tools, "ripwire-cxx" )
+        with open( cxx_wrapper, "w", encoding="utf-8", newline="\n" ) as fh:
+            fh.write( "#!/usr/bin/env bash\n" )
+            if compiler.lower().endswith( "clang-cl.exe" ):
+                fh.write( "export MSYS_NO_PATHCONV=1\n"
+                          "rw_native_path() {\n"
+                          "    case \"${1-}\" in\n"
+                          "        /tmp) printf '%s' \"$RIPWIRE_NATIVE_TMP\";;\n"
+                          "        /tmp/*) printf '%s%s' \"$RIPWIRE_NATIVE_TMP\" \"${1#/tmp}\";;\n"
+                          "        /[A-Za-z]/*) printf '%s:%s' \"${1:1:1}\" \"${1:2}\";;\n"
+                          "        *) printf '%s' \"${1-}\";;\n"
+                          "    esac\n"
+                          "}\n"
+                          "emit_source=0\n"
+                          "for arg in \"$@\"; do [ \"$arg\" = \"-S\" ] && emit_source=1; done\n"
+                          "args=()\n"
+                          "take_output=0\n"
+                          "for arg in \"$@\"; do\n"
+                          "    if [ \"$take_output\" = 1 ]; then\n"
+                          "        if [ \"$emit_source\" = 1 ]; then args+=(/clang:-o \"/clang:$( rw_native_path \"$arg\" )\"); else args+=(-o \"$( rw_native_path \"$arg\" )\"); fi\n"
+                          "        take_output=0\n"
+                          "        continue\n"
+                          "    fi\n"
+                          "    case \"$arg\" in\n"
+                          "        -o) take_output=1;;\n"
+                          "        -std=*|--std=*) ;;\n"
+                          "        -fsyntax-only) args+=(/Zs);;\n"
+                          "        -S) args+=(/clang:-S);;\n"
+                          "        -emit-llvm|-fno-discard-value-names|-mllvm) args+=(\"/clang:$arg\");;\n"
+                          "        -basic-aa-separate-storage*) args+=(\"/clang:$arg\");;\n"
+                          "        -I/*) args+=(\"-I$( rw_native_path \"${arg#-I}\" )\");;\n"
+                          "        /tmp/*|/[A-Za-z]/*) args+=(\"$( rw_native_path \"$arg\" )\");;\n"
+                          "        *) args+=(\"$arg\");;\n"
+                          "    esac\n"
+                          "done\n"
+                          "needs_link=1\n"
+                          "has_platform=0\n"
+                          "for arg in \"$@\"; do\n"
+                          "    case \"$arg\" in -c|/c|-E|-S|-fsyntax-only) needs_link=0;; *platform_compat.cpp) has_platform=1;; esac\n"
+                          "done\n"
+                          "if [ \"$needs_link\" = 1 ] && [ \"$has_platform\" = 0 ] && [ -n \"${RIPWIRE_PLATFORM_COMPAT_CPP:-}\" ]; then\n"
+                          "    args+=(\"$RIPWIRE_PLATFORM_COMPAT_CPP\" /link ws2_32.lib)\n"
+                          "fi\n"
+                          "exec \"$RIPWIRE_CXX_REAL\" /TP -clang:-std=c++23 /EHsc /permissive- "
+                          "/DWIN32 /D_WINDOWS /utf-8 /FI \"$RIPWIRE_PLATFORM_COMPAT\" /D_MSVC_LANG=202302L "
+                          "/D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_DEPRECATE \"${args[@]}\"\n" )
+            else:
+                fh.write( "exec \"$RIPWIRE_CXX_REAL\" -D_MSVC_LANG=202302L -D_CRT_SECURE_NO_WARNINGS "
+                          "-D_CRT_NONSTDC_NO_DEPRECATE \"$@\"\n" )
+        c_driver = os.path.join( tools, "ripwire-c" )
+        with open( c_driver, "w", encoding="utf-8", newline="\n" ) as fh:
+            fh.write( "#!/usr/bin/env bash\nexport MSYS_NO_PATHCONV=1\n" )
+            fh.write( "rw_native_path() {\n"
+                      "    case \"${1-}\" in\n"
+                      "        /tmp) printf '%s' \"$RIPWIRE_NATIVE_TMP\";;\n"
+                      "        /tmp/*) printf '%s%s' \"$RIPWIRE_NATIVE_TMP\" \"${1#/tmp}\";;\n"
+                      "        /[A-Za-z]/*) printf '%s:%s' \"${1:1:1}\" \"${1:2}\";;\n"
+                      "        *) printf '%s' \"${1-}\";;\n"
+                      "    esac\n"
+                      "}\n"
+                      "args=()\n"
+                      "for arg in \"$@\"; do\n"
+                      "    case \"$arg\" in\n"
+                      "        -I/*) args+=(\"-I$( rw_native_path \"${arg#-I}\" )\");;\n"
+                      "        /tmp/*|/[A-Za-z]/*) args+=(\"$( rw_native_path \"$arg\" )\");;\n"
+                      "        *) args+=(\"$arg\");;\n"
+                      "    esac\n"
+                      "done\n"
+                      "exec \"$RIPWIRE_CC_REAL\" -D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_DEPRECATE \"${args[@]}\"\n" )
+        for wrapper in ( cxx_wrapper, c_driver ):
+            try:
+                os.chmod( wrapper, 0o755 )
+            except OSError:
+                pass
+        driver_script = "#!/usr/bin/env bash\nexec \"$RIPWIRE_CXX\" \"$@\"\n"
+        c_driver_script = "#!/usr/bin/env bash\nexec \"$RIPWIRE_CC\" \"$@\"\n"
+        for name, content in ( ( "c++", driver_script ), ( "g++", driver_script ), ( "clang++", driver_script ),
+                                ( "cc", c_driver_script ), ( "gcc", c_driver_script ), ( "clang", c_driver_script ) ):
+            alias = os.path.join( tools, name )
+            with open( alias, "w", encoding="utf-8", newline="\n" ) as fh:
+                fh.write( content )
+            try:
+                os.chmod( alias, 0o755 )
+            except OSError:
+                pass
+
+    def cleanup():
+        shutil.rmtree(native_tmp, ignore_errors=True)
+
+    atexit.register(cleanup)
+    toolchain_path = vcvars.get( "PATH", vcvars.get( "Path", "" ) )
+    native_path = ";".join( part for part in ( toolchain_path + ";" + os.environ.get( "PATH", "" ) ).split( ";" ) if part )
+    path_components = []
+    seen_path_components = set()
+    for part in native_path.split( ";" ):
+        if not part:
+            continue
+        msys_part = _msys_path( part )
+        key = msys_part.rstrip( "/" ).casefold()
+        if key in seen_path_components:
+            continue
+        seen_path_components.add( key )
+        path_components.append( msys_part )
+    # The child is Git Bash with a deliberately rebuilt PATH.  Keep Git's own POSIX utilities in that PATH;
+    # otherwise dirname/mktemp/rm/cat disappear and a gate reports a misleading product or toolchain failure.
+    git_usr_bin = os.path.dirname( os.path.abspath( shell ) )
+    git_root = os.path.dirname( os.path.dirname( git_usr_bin ) )
+    git_bin = os.path.join( git_root, "bin" )
+    git_core_perl = os.path.join( git_usr_bin, "core_perl" )
+    path_components.insert( 0, _msys_path( git_bin ) )
+    if os.path.isdir( git_core_perl ):
+        path_components.insert( 0, _msys_path( git_core_perl ) )
+    path_components.insert( 0, _msys_path( git_usr_bin ) )
+    llvm_runtime = next( iter( sorted( glob.glob( os.path.join( llvm_bin, "..", "lib", "clang", "*", "lib", "windows" ) ) ) ), "" ) if llvm_bin else ""
+    if llvm_bin:
+        path_components.insert( 0, _msys_path( llvm_bin ) )
+    if llvm_runtime:
+        path_components.insert( 0, _msys_path( llvm_runtime ) )
+    gate_path = ":".join( [ _msys_path( tools ) ] + path_components )
+    fifo_bin = os.path.join( tools, "ripwire-fifo" )
+    with open( fifo_bin, "w", encoding="utf-8", newline="\n" ) as fh:
+        fh.write( "#!/usr/bin/env bash\n" )
+        fh.write( "if [ \"${1-}\" = \"--mcp\" ]; then\n" )
+        fh.write( "    cat | \"$RIPWIRE_REAL_BIN\" \"$@\"\n" )
+        fh.write( "else\n" )
+        fh.write( "    exec \"$RIPWIRE_REAL_BIN\" \"$@\"\n" )
+        fh.write( "fi\n" )
+    try:
+        os.chmod( fifo_bin, 0o755 )
+    except OSError:
+        pass
+    env = {
+        "RIPWIRE_BIN": _msys_path( binp ),
+        "RIPWIRE_FIFO_BIN": _msys_path( fifo_bin ),
+        "RIPWIRE_REAL_BIN": binp.replace( "\\", "/" ),
+        "RIPWIRE_PROBE": _msys_path( binp[:-4] + "_probe.exe" if binp.lower().endswith( ".exe" ) else binp + "_probe" ),
+        "RIPWIRE_BASH": shell.replace( "\\", "/" ),
+        "RW_BASH": shell.replace( "\\", "/" ),
+        "RIPWIRE_PLATFORM_COMPAT": os.path.join( root, "src", "infra", "platform_compat.h" ).replace( "\\", "/" ),
+        "RIPWIRE_PLATFORM_COMPAT_CPP": os.path.join( root, "src", "infra", "platform_compat.cpp" ).replace( "\\", "/" ),
+        "RIPWIRE_NATIVE_TMP": msys_tmp,
+        "RIPWIRE_NATIVE_PATH": native_path,
+        "RIPWIRE_NATIVE_ROOT": root.replace( "\\", "/" ),
+        "RIPWIRE_MSYS_ROOT": _msys_path( root ),
+        "RIPWIRE_PYTHON": native_python,
+        "RW_MSYS_TMP": msys_tmp,
+        "PATH": gate_path,
+        "PYTHONPATH": tools + os.pathsep + os.environ.get("PYTHONPATH", ""),
+        "TMPDIR": _msys_path( native_tmp ),
+        "TEMP": native_tmp,
+        "TMP": native_tmp,
+        "XDG_CACHE_HOME": _msys_path( native_tmp ),
+        # Preserve merge-scout ref tokens byte-for-byte.  MSYS would otherwise rewrite a payload such as
+        # --merge-scout=--output=/c/... into --merge-scout=--output=C:/..., changing the token before the
+        # product can reject it.  Keep conversion enabled for ordinary path arguments (Git needs C:/...)
+        # and exclude only this option's embedded ref payload.
+        "MSYS2_ARG_CONV_EXCL": "--merge-scout=",
+    }
+
+    if os.environ.get( "RIPWIRE_HEADBIN" ):
+        env[ "RIPWIRE_HEADBIN" ] = _msys_path( os.environ[ "RIPWIRE_HEADBIN" ] )
+    if compiler and os.path.isfile( compiler ):
+        env["RIPWIRE_CXX_REAL"] = _msys_path( compiler )
+        env["RIPWIRE_CC_REAL"] = _msys_path( clang if os.path.isfile( clang ) else compiler )
+        if os.path.isfile( clangxx ):
+            # GCC-shape probes must undefine __clang__ without first preincluding the MSVC CRT.  Keep the
+            # clang-cl wrapper for Windows-aware gates, but expose the sibling GNU driver for isolated probes.
+            env["RIPWIRE_CXX_GNU"] = _msys_path( clangxx )
+        env["RIPWIRE_CXX"] = _msys_path( os.path.join( tools, "ripwire-cxx" ) )
+        env["RIPWIRE_CC"] = _msys_path( os.path.join( tools, "ripwire-c" ) )
+        env["CXX"] = env["RIPWIRE_CXX"]
+        env["CC"] = env["RIPWIRE_CC"]
+    for key in ( "INCLUDE", "LIB", "LIBPATH", "VCToolsInstallDir", "WindowsSdkDir", "WindowsSDKVersion",
+                 "UniversalCRTSdkDir", "UCRTVersion" ):
+        if vcvars.get( key ):
+            env[key] = vcvars[key]
+    return env, shell
+
+
+WINDOWS_GATE_ENV, GATE_SHELL = _windows_gate_environment()
+WINDOWS_MSYS_SHELL = windows and "\\git\\" in os.path.normcase( os.path.abspath( GATE_SHELL ) )
+FIFO_GATES = {
+    "freshnesscheck.sh", "mcpeditcheck.sh", "mcpincrementalcheck.sh",
+    "mcpreloadcheck.sh", "mcpeditracecheck.sh", "mcpstalecheck.sh", "mcpwatchercheck.sh",
+    "qsnapprefetchcheck.sh",
+}
 jobs = 6
 only = None
 jsonout = None
@@ -50,6 +693,16 @@ for i, a in enumerate(args):
         budget_scale = float(args[i + 1])
         if budget_scale <= 0:
             sys.exit(f"--budget-scale needs a positive factor, got {args[i + 1]}")
+
+# One ripwire instance already sizes its parse pool to every logical CPU. Running the default six gates beside
+# one another therefore oversubscribes Windows hosts (six instances x sixteen workers on the dev machine),
+# making a healthy verification look like a runaway process storm. Keep the explicit escape hatch for a caller
+# that has measured a separately provisioned machine and deliberately wants process-level oversubscription.
+if windows and jobs > 1 and os.environ.get( "RIPWIRE_ALLOW_WINDOWS_OVERSUBSCRIPTION" ) != "1":
+    requested_jobs = jobs
+    jobs = 1
+    print( f"Windows scheduler: capped requested jobs={requested_jobs} to jobs=1; "
+           "set RIPWIRE_ALLOW_WINDOWS_OVERSUBSCRIPTION=1 to opt in", file=sys.stderr )
 
 testdir = os.path.join(root, "test")
 # item 7 (§B12 polish round): os.listdir returns dotfiles too (unlike a shell glob without dotglob), so a
@@ -164,6 +817,25 @@ if shard:
     print(f"shard {shard[0]}/{shard[1]}: {len(gates)} gates, predicted {load[shard[0] - 1]:.0f}s "
           f"(largest shard {max(load):.0f}s)")
 
+# One checkout must have one active scheduler. A second full/focused run would otherwise launch another
+# ripwire parse pool against the same cache and source tree, multiplying CPU and making the tree-writer
+# tripwire report misleading races. OS file locks release automatically if the scheduler is terminated.
+_run_lock_file = open( os.path.join( tempfile.gettempdir(), f"ripwire-pargates-lock-{_root_key()}.lock" ), "a+b" )
+_run_lock_file.seek( 0 )
+_run_lock_file.write( b"\0" )
+_run_lock_file.flush()
+_run_lock_file.seek( 0 )
+try:
+    if windows:
+        import msvcrt
+        msvcrt.locking( _run_lock_file.fileno(), msvcrt.LK_NBLCK, 1 )
+    else:
+        import fcntl
+        fcntl.flock( _run_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB )
+except ( OSError, BlockingIOError ):
+    _run_lock_file.close()
+    sys.exit( f"pargates: another run is already running for {root}" )
+
 # Sort longest-first using recorded durations. A gate with NO recorded duration is unknown, not
 # fast -- treat it as potentially the slowest thing in the batch (float('inf')) so it schedules
 # EARLY, alongside the known-long gates, rather than drifting to the tail of the run where an
@@ -172,9 +844,11 @@ if shard:
 gates.sort(key=lambda g: -prior_timings.get(g, float("inf")))
 
 # A wall-clock budget cannot be interpreted while five unrelated compiler/git-heavy gates are saturating
-# the machine beside it. Keep the measured gate in this same authoritative run, but give its timing window
-# exclusive ownership after the parallel correctness wave.
-exclusive = {"editcheckcheck.sh"}
+# the machine beside it. Keep the measured gates in this same authoritative run, but give their timing windows
+# exclusive ownership after the parallel correctness wave. agenttable's nine wrap/install probes, attrvocab's
+# repeated verb runs, agentloopgrader's Python grader, and the a9/deck diagnostic bundles are correct in isolation
+# but cross the 300 s tripwire when they compete with the compiler-heavy wave.
+exclusive = {"a9disclosurecheck.sh", "agentloopgradercheck.sh", "agenttablecheck.sh", "attrvocabcheck.sh", "deckcheck.sh", "editcheckcheck.sh"}
 
 # --- per-gate budget overrides (W1-V4, 2026-08-11) ---------------------------------------------
 # A flat cap is wrong for the minority of gates whose HONEST work exceeds it -- the fix is a per-gate
@@ -534,7 +1208,8 @@ def _on_stop_signal(signum, _frame):
             pass
 
 
-for _sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+_stop_signals = tuple(_sig for _sig in (signal.SIGINT, signal.SIGTERM, getattr( signal, "SIGHUP", None )) if _sig is not None)
+for _sig in _stop_signals:
     if signal.getsignal(_sig) is not signal.SIG_IGN:        # nohup, or `&` without job control: an inherited ignore stands
         signal.signal(_sig, _on_stop_signal)
 
@@ -542,6 +1217,11 @@ for _sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
 def _group_alive(p):
     """Whether the gate's process group still has a member. An exited leader is reaped first, so it does not count."""
     p.poll()
+    if windows:
+        job = getattr( p, "_ripwire_windows_job", None )
+        if job is not None:
+            return job.alive()
+        return p.returncode is None
     try:
         os.killpg(p.pid, 0)
     except ProcessLookupError:
@@ -586,6 +1266,7 @@ def _await_group(p, secs):
         left = max(0.0, min(STOP_POLL_SEC, end - time.monotonic()))
         if _wait_for(p, left):
             time.sleep(left)        # the leader is reaped: what is left to wait on is the group itself
+    return not _group_alive( p )
 
 
 def _stop_group(p):
@@ -593,7 +1274,35 @@ def _stop_group(p):
     whatever is still in it and give that the same. A group seen empty is not signalled again. Nothing the gate wrote
     is at risk here any more: it is already in the capture file, including what the last members wrote on their way
     out. A descendant that left the group can still be writing after this returns; the caller reads the file once,
-    so that tail is missed, exactly as the pipe version missed it."""
+    so tail is missed, exactly as the pipe version missed it."""
+    if windows:
+        descendant_pids = _windows_descendant_pids( p.pid )
+        if not _group_alive(p):
+            _windows_terminate_pids( descendant_pids )
+            return
+        if not WINDOWS_MSYS_SHELL:
+            try:
+                p.send_signal( signal.CTRL_BREAK_EVENT )
+            except ( OSError, ValueError, AttributeError ):
+                pass
+        if _await_group( p, KILL_GRACE_SEC ):
+            _windows_terminate_pids( descendant_pids + _windows_descendant_pids( p.pid ) )
+            return
+        job = getattr( p, "_ripwire_windows_job", None )
+        try:
+            subprocess.run( [ "taskkill", "/PID", str( p.pid ), "/T", "/F" ],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            timeout=KILL_GRACE_SEC, check=False )
+        except ( OSError, subprocess.TimeoutExpired ):
+            pass
+        _windows_terminate_pids( descendant_pids + _windows_descendant_pids( p.pid ) )
+        if job is not None:
+            job.terminate()
+        else:
+            # taskkill above is the only available tree operation when a Job Object could not be attached.
+            pass
+        _wait_for( p, STOP_POLL_SEC )
+        return
     for sig in (signal.SIGTERM, signal.SIGKILL):
         if not _group_alive(p):
             break
@@ -623,19 +1332,43 @@ def run_gate(argv, env, limit):
     fd, capture = tempfile.mkstemp(prefix="ripwire-pargates-capture-", suffix=".out")
     os.close(fd)
     try:
+        gate_env = env
+        if windows and os.path.basename( argv[ -1 ] ) in FIFO_GATES:
+            gate_env = dict( env )
+            gate_env[ "RIPWIRE_BIN" ] = env[ "RIPWIRE_FIFO_BIN" ]
         with open(capture, "wb") as fh, \
-             subprocess.Popen(argv, cwd=root, env=env, stdout=fh, stderr=subprocess.STDOUT,
-                              start_new_session=True) as p:
+             subprocess.Popen(argv, cwd=root, env=gate_env, stdout=fh, stderr=subprocess.STDOUT,
+                              **( { "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | _CREATE_SUSPENDED }
+                                  if windows else { "start_new_session": True } )) as p:
+            # Windows assigns the suspended leader before Git Bash can create its script shell; POSIX keeps
+            # start_new_session=True for the same isolation.
+            if windows:
+                try:
+                    p._ripwire_windows_job = _attach_windows_job( p )
+                    _resume_windows_process( p )
+                except OSError as exc:
+                    descendants = _windows_descendant_pids( p.pid )
+                    _windows_terminate_pids( [ p.pid ] + descendants )
+                    try:
+                        p.wait( timeout=KILL_GRACE_SEC )
+                    except subprocess.TimeoutExpired:
+                        pass
+                    fh.write( f"pargates: could not associate gate with Windows Job Object: {exc}\n".encode( "utf-8" ) )
+                    return 125, _capture_read( capture ), "error"
             while True:
                 if stop_signal is not None:     # before every wait, the first included: a gate admitted as the signal landed stops now
                     _stop_group(p)
                     return 128 + stop_signal, _capture_read(capture), "stopped"
                 if _wait_for(p, max(0.0, min(STOP_POLL_SEC, deadline - time.monotonic()))):
-                    return p.returncode, _capture_read(capture), "exited"
+                    if not windows or not _group_alive( p ):
+                        return p.returncode, _capture_read(capture), "exited"
+                    time.sleep( STOP_POLL_SEC )
+                    continue
                 if time.monotonic() >= deadline:
                     _stop_group(p)
                     return 124, _capture_read(capture), "timeout"
     finally:
+        _close_windows_job( locals().get( "p" ) )
         try:
             os.unlink(capture)
         except OSError:
@@ -650,6 +1383,15 @@ def run(g):
     # (corpus_pruned_dirs=). Created between the two re-crawls of pagingsweepcheck's cold grep (G) pair, it
     # made that pair disagree on main twice (CI runs 34534320580, 34536435376). pargatescheck.sh pins it.
     env = dict(os.environ, RIPWIRE_BIN=binp, PYTHONDONTWRITEBYTECODE="1")
+    # A standalone gate such as noaliascheck cross-checks compiler probes against the CMake configuration that
+    # produced the selected binary.  The historical fallback `$ROOT/build/CMakeCache.txt` is wrong for named build
+    # trees (build-win-final, ASAN, PGO, and staging bins), and silently compared a probe with an unrelated cache.
+    # Derive the cache from the binary's own build directory, but preserve an explicit override used to classify a
+    # deliberately different compiler.  Pass the path in the spelling consumed by the Git Bash child on Windows.
+    if "RIPWIRE_CMAKE_CACHE" not in env:
+        binary_cache = os.path.join( os.path.dirname( binp ), "CMakeCache.txt" )
+        if os.path.isfile( binary_cache ):
+            env[ "RIPWIRE_CMAKE_CACHE" ] = _msys_path( binary_cache ) if windows else binary_cache
     scaled_default = int( round( DEFAULT_TIMEOUT_SEC * budget_scale ) )
     if g in GATE_BUDGET_SEC:
         # A declared entry is a FLOOR, not a ceiling: it is the number below which this gate would be a
@@ -661,12 +1403,18 @@ def run(g):
         limit = scaled_default
         scaled = "" if budget_scale == 1.0 else f", default {DEFAULT_TIMEOUT_SEC}s x --budget-scale {budget_scale:g}"
     t0 = time.time()
+    env.update(WINDOWS_GATE_ENV)
+    if windows:
+        # Do not inherit a caller's global no-conversion switch: ordinary Git paths in the fixture need MSYS
+        # conversion, while WINDOWS_GATE_ENV excludes only the embedded merge-scout ref payload above.
+        env.pop( "MSYS_NO_PATHCONV", None )
     if stop_signal is not None:
         return g, 128 + stop_signal, 0.0, "", False     # pargates is stopping: no gate starts after the signal
     with running_lock:
         running.add(g)          # the tree tripwire names whoever is in flight when it sees new dirt
     try:
-        rc, raw, how = run_gate(["bash", os.path.join(testdir, g)], env, limit)
+        script = _msys_path(os.path.join(testdir, g))
+        rc, raw, how = run_gate([GATE_SHELL, script], env, limit)
     finally:
         with running_lock:
             running.discard(g)

@@ -30,19 +30,29 @@
 # the symmetry gateexitcheck's (C) enforces for exit-code propagation.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+PYTHON="${RIPWIRE_PYTHON:-${PYTHON_NATIVE:-python3}}"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-command -v python3 >/dev/null 2>&1 || { no "python3 is required by binoverridecheck"; echo "FAILURES ABOVE"; exit "$fail"; }
+command -v "$PYTHON" >/dev/null 2>&1 || { no "$PYTHON is required by binoverridecheck"; echo "FAILURES ABOVE"; exit "$fail"; }
 
-python3 - "$ROOT" <<'PY' || fail=1
+"$PYTHON" - "$ROOT" <<'PY' || fail=1
 import concurrent.futures as cf
 import os, re, subprocess, sys, tempfile
 
 ROOT = sys.argv[1]
 T = os.path.join( ROOT, "test" )
 SELF = "binoverridecheck.sh"
+
+def native_path( value ):
+    if re.match( r"^/[A-Za-z]/", value ):
+        return value[1].upper() + ":" + value[3:].replace( "/", "\\\\" )
+    return value
+
+BASH = native_path( os.environ.get( "RIPWIRE_BASH", "" ) )
+if not BASH:
+    BASH = r"C:\\Program Files\\Git\\usr\\bin\\bash.exe"
 
 bad = 0
 def ok( m ): print( "  PASS  %s" % m )
@@ -108,6 +118,7 @@ EXEMPT = {
     "pargatescheck.sh":          "meta-check of test/pargates.py's own source; pure file check",
     "noaliascheck.sh":           "compiles its OWN $CXX probes against src/infra/Diagnostics.h (debug trap, -O2 -DNDEBUG IR + objdump bands, the GCC-shape preprocess, the =false control) and greps src/ for a bare __restrict; READS build/CMakeCache.txt for the front end and CMake's -basic-aa-separate-storage probe result but never invokes build/ripwire — the file contains neither RIPWIRE_BIN nor $BIN",
     "pmccheck.sh":               "builds its OWN standalone harness binary, independent of build/ripwire",
+    "probecheck.sh":             "executes the auxiliary ripwire_probe selected by RIPWIRE_PROBE, not the main RIPWIRE_BIN under test; the subject is the probe's enum-table output",
     "portablebuildcheck.sh":     "CMake-configure-level gate only; the gate's own banner says 'no ripwire binary needed'",
     "qschemetripcheck.sh":       "greps src/quality.h's tripwire comment against the test/*.sh manifest; pure file check",
     "radixsimdcheck.sh":         "builds its OWN standalone harness binaries per SIMD arm, independent of build/ripwire",
@@ -150,7 +161,7 @@ else:
 #                          trailing comment says it is unused. There is no invocation to find.
 STATICALLY_UNREACHABLE = { "argvdiffcheck.sh", "nulbytecheck.sh",
                            "codexinstallhonestycheck.sh", "meterdisclosurecheck.sh", "routingreportcheck.sh",
-                           "agentloopeditsuitecheck.sh" }
+                           "agentloopeditsuitecheck.sh", "probecheck.sh" }
 grown = []
 for g in sorted( EXEMPT ):
     if g in STATICALLY_UNREACHABLE:
@@ -194,15 +205,19 @@ BUDGET = {
 def run_one( g ):
     env = dict( os.environ )
     env["RIPWIRE_BIN"] = SENTINEL
+    if os.name == "nt":
+        env["RIPWIRE_REAL_BIN"] = SENTINEL
     limit = BUDGET.get( g, DEFAULT_TIMEOUT )
     try:
         p = subprocess.run(
-            [ "bash", os.path.join( T, g ) ],
+            [ BASH, os.path.join( T, g ) ],
             cwd=ROOT, env=env, capture_output=True, timeout=limit,
         )
         rc, out = p.returncode, ( p.stdout + p.stderr ).decode( "utf-8", "replace" )
     except subprocess.TimeoutExpired:
         rc, out = 124, "TIMEOUT after %ds pointed at the sentinel" % limit
+    except OSError as exc:
+        rc, out = 1, "native subprocess launch failed: %s" % exc
     return g, rc, out[-800:]
 
 # ── (4) run every non-exempt gate pointed at the sentinel, modest parallelism (this gate is itself one

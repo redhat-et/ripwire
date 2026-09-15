@@ -261,7 +261,13 @@ inline McpObjectArg mcpObjectArg( const std::string& scope, const char* field )
 inline std::string mcpRootDirRefusal( const std::string& dir )
 {
     std::error_code                     ec;
-    const std::filesystem::file_status  st = std::filesystem::status( std::filesystem::path( dir ), ec );
+    const std::string                   nativeDir =
+#if defined( _WIN32 )
+        rw::compat::rw_windows_path_from_msys( dir );
+#else
+        dir;
+#endif
+    const std::filesystem::file_status  st = std::filesystem::status( std::filesystem::path( nativeDir ), ec );
     if( ec || !std::filesystem::exists( st ) )
     {
         return mcprefuse::rootRefusal( mcprefuse::RootFault::Missing, dir );
@@ -3007,7 +3013,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
         std::string s;
         if( fid < ing.files.size() )
         {
-            if( std::FILE* in = std::fopen( diskPath( ing, fid ).c_str(), "rb" ) )
+            if( std::FILE* in = rw::compat::rw_fopen_utf8( diskPath( ing, fid ).c_str(), "rb" ) )
             {
                 char b[4096];
                 std::size_t n;
@@ -3899,7 +3905,7 @@ inline SliceReply sliceText( const std::string& root, const std::string& symbol,
     // ── read + re-parse the ONE file holding the definition ───────────────────────────────────────────
     const std::string& path = diskPath( ing, sym.fileId );
     std::string        src;
-    if( std::FILE* in = std::fopen( path.c_str(), "rb" ) )
+    if( std::FILE* in = rw::compat::rw_fopen_utf8( path.c_str(), "rb" ) )
     {
         char        buf[ 4096 ];
         std::size_t n = 0;

@@ -955,7 +955,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 rw::emitRaw( stderr, "ripwire: lexical scan worker degraded (exception swallowed)\n" );
             }
         };
-        const std::size_t hwThreadCount = std::thread::hardware_concurrency();
+        const std::size_t hwThreadCount = rw::compat::rw_effective_hardware_concurrency();
         const std::size_t workerCount   = std::min( { hwThreadCount ? hwThreadCount : 1, fileCount ? fileCount : 1, std::size_t( 16 ) } );
         if( workerCount <= 1 )
         {

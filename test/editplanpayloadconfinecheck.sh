@@ -43,14 +43,21 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 
 echo "editplanpayloadconfinecheck: BIN=$BIN"
 
-hashcorpus(){ ( cd "$1" && find . -type f -print | LC_ALL=C sort | xargs shasum -a 256 ) | shasum -a 256; }
+hashcorpus(){ ( cd "$1" && find . -type f -print | LC_ALL=C sort | xargs sha256sum ) | sha256sum; }
 
 D="$TMP/w"
 mkdir -p "$D/corpus" "$D/plans" "$D/secret"
 printf 'def alpha( x ):\n    return x + 1\n' >"$D/corpus/a.py"
 printf 'RIPWIRE_GATE_SECRET_MARKER=abc123\n' >"$D/secret/creds.txt"
 printf 'def alpha( x ):\n    return 42\n' >"$D/plans/good"
-ln -s ../secret/creds.txt "$D/plans/link"
+if ! python3 - "$D/secret/creds.txt" "$D/plans/link" <<'PY'
+import os, sys
+os.symlink(sys.argv[1], sys.argv[2])
+PY
+then
+    echo "editplanpayloadconfinecheck: native symlink creation failed"
+    exit 2
+fi
 
 plan(){ printf '{"version":%s,"edits":[{"op":"replace_symbol_body","target":"alpha","payload":"%s"}]}\n' "$2" "$3" >"$D/plans/$1.json"; }
 plan escape 1 '../secret/creds.txt'
@@ -93,7 +100,7 @@ runplan escape plans/escape.json --apply
 grep -q 'outside the plan' "$TMP/escape.err" \
     && ok "the refusal explains the rule" \
     || no "the refusal does not explain the rule: $( head -1 "$TMP/escape.err" )"
-grep -q "resolves to '/.*secret/creds.txt'" "$TMP/escape.err" \
+grep -Eq 'resolves to .*[\\/]secret[\\/]creds[.]txt' "$TMP/escape.err" \
     && ok "the refusal names the path it actually resolved" \
     || no "the refusal does not name the resolved path: $( head -1 "$TMP/escape.err" )"
 
@@ -113,7 +120,7 @@ runplan sym plans/sym.json --apply
 [ "$RC" != 0 ] \
     && ok "a symlinked payload escaping the plan dir refuses" \
     || no "a symlinked payload escaped the plan dir"
-grep -q "resolves to '/.*secret/creds.txt'" "$TMP/sym.err" \
+grep -Eq 'resolves to .*[\\/]secret[\\/]creds[.]txt' "$TMP/sym.err" \
     && ok "the refusal names the symlink's real target" \
     || no "the refusal does not name the symlink's target: $( head -1 "$TMP/sym.err" )"
 

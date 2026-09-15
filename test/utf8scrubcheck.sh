@@ -35,13 +35,17 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v xmllint >/dev/null 2>&1 || { echo "xmllint required"; exit 2; }
-command -v iconv   >/dev/null 2>&1 || { echo "iconv required"; exit 2; }
-command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
+PYTHON="${RIPWIRE_PYTHON:-${PYTHON_NATIVE:-}}"
+[ -n "$PYTHON" ] || PYTHON="$( command -v python.exe 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null || true )"
+[ -n "$PYTHON" ] || { echo "native Python required"; exit 2; }
 [ -d "$FIX" ] || { echo "no fixture at $FIX"; exit 2; }
 echo "utf8scrubcheck: BIN=$BIN  FIX=$FIX"
 
+valid_utf8(){ "$PYTHON" -c 'import sys; open(sys.argv[1], "rb").read().decode("utf-8")' "$1"; }
+has_raw_e9(){ "$PYTHON" -c 'import sys; sys.exit(0 if b"\xe9" in open(sys.argv[1], "rb").read() else 1)' "$1"; }
+
 # ── fixture sanity: the raw invalid bytes are actually there ─────────────────────────────────────────
-if python3 -c "import sys; d=open('$FIX/latin1.cpp','rb').read(); sys.exit(0 if d.count(b'\xe9')>=2 else 1)"; then
+if "$PYTHON" -c 'import sys; d=open(sys.argv[1],"rb").read(); sys.exit(0 if d.count(b"\xe9")>=2 else 1)' "$FIX/latin1.cpp"; then
     ok "fixture sanity: latin1.cpp carries raw invalid 0xE9 bytes (doc-comment + body)"
 else
     no "fixture sanity: latin1.cpp missing the raw 0xE9 bytes"
@@ -56,11 +60,11 @@ for verb in "--pack-signatures" "--pack-top-n=1" "--expand=set_cafe_size"; do
         && ok "$verb: passes xmllint --noout (invalid UTF-8 scrubbed)" \
         || no "$verb: xmllint FAILED: $( cat "$TMP/lint.err" )"
 
-    iconv -f UTF-8 -t UTF-8 <"$OUT" >/dev/null 2>"$TMP/iconv.err" \
+    valid_utf8 "$OUT" 2>"$TMP/iconv.err" \
         && ok "$verb: output is valid UTF-8" \
         || no "$verb: invalid UTF-8 in output: $( cat "$TMP/iconv.err" )"
 
-    if python3 -c "import sys; sys.exit(0 if b'\xe9' in open('$OUT','rb').read() else 1)"; then
+    if has_raw_e9 "$OUT"; then
         no "$verb: raw 0xE9 byte leaked into the output (not scrubbed)"
     else
         ok "$verb: no raw 0xE9 byte in output (scrubbed to '?')"
@@ -78,11 +82,11 @@ HTMLOUT="$TMP/out.html"
 [ -s "$HTMLOUT" ] && ok "--html: produced non-empty output on the Latin-1 fixture" \
                    || no "--html: empty/missing output on the Latin-1 fixture"
 
-iconv -f UTF-8 -t UTF-8 <"$HTMLOUT" >/dev/null 2>"$TMP/iconv_html.err" \
+valid_utf8 "$HTMLOUT" 2>"$TMP/iconv_html.err" \
     && ok "--html: output is valid UTF-8" \
     || no "--html: invalid UTF-8 in output: $( cat "$TMP/iconv_html.err" )"
 
-if python3 -c "import sys; sys.exit(0 if b'\xe9' in open('$HTMLOUT','rb').read() else 1)"; then
+if has_raw_e9 "$HTMLOUT"; then
     no "--html: raw 0xE9 byte leaked into the output (not scrubbed)"
 else
     ok "--html: no raw 0xE9 byte in output (scrubbed)"

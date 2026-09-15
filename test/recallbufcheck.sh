@@ -73,7 +73,7 @@ for target in ( 600, 700, 756, 900, 1000 ):
         f.write( "# Kafka consumer rebalancing\n\n"
                  "Partition assignment, consumer group rebalancing, offset commits and the sticky "
                  "assignor for kafka streams. " * 40 )
-    print( root, doc )
+    print( root.replace( os.sep, "/" ), doc.replace( os.sep, "/" ) )
 PY
 
 pathline(){ grep -E "/r$1 " "$TMP/paths.txt"; }

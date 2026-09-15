@@ -165,6 +165,13 @@ inline std::string_view rootRelativeUri( std::string_view file, std::string_view
 inline std::string rootPrefixOf( std::string_view root )
 {
     std::string prefix( root );
+    for( char& c : prefix )
+    {
+        if( c == '\\' )
+        {
+            c = '/';
+        }
+    }
     while( prefix.size() > 1 && prefix.back() == '/' )
     {
         prefix.pop_back();

@@ -67,7 +67,11 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"      # BOTH seams: positional arg and RIPWIRE_BIN=
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # absolute BEFORE we cd away
-PROBE="${BIN}_probe"                                 # probecheck.sh's house pattern: the probe must
+PROBE="${RIPWIRE_PROBE:-${BIN}_probe}"
+case "$PROBE" in
+    *.exe_probe) PROBE="${BIN%.exe}_probe.exe" ;;
+    "${BIN}_probe") case "$BIN" in *.exe) PROBE="${BIN%.exe}_probe.exe" ;; esac ;;
+esac                                                 # probecheck.sh's house pattern: the probe must
                                                      # follow the BINARY UNDER TEST, never a hardcoded
                                                      # build/ path (two gates were dinged this round
                                                      # for greening against a pre-wave binary).

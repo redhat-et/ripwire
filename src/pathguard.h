@@ -33,10 +33,10 @@
 //     ::open( path, O_WRONLY | O_CREAT | O_NOFOLLOW | O_NONBLOCK, 0666 )   (round 4: O_NONBLOCK, then fstat, then ftruncate
 //                                                                          in place of the O_TRUNC it once carried)
 //
-// O_NOFOLLOW makes the KERNEL refuse a final component that is a symlink, at the instant of resolution.
-// There is no window because there is no second resolution — whatever the entry is when the kernel looks
-// is what the kernel acts on. POSIX, and present on both targets (macOS, Linux). MSVC is explicitly not a
-// target for this project, so there is no portability scaffolding here and none is wanted.
+// O_NOFOLLOW makes the KERNEL refuse a final component that is a symlink, at the instant of resolution on POSIX.
+// There is no window because there is no second resolution — whatever the entry is when the kernel looks is what
+// the kernel acts on. The Windows branch below uses the equivalent atomic CreateFileW flags plus the intermediate
+// reparse preflight, so the shared sidecar contract remains fail-closed on both targets.
 //
 // WHERE lstat SURVIVES, AND WHY THAT IS NOT A RELAPSE. isSymlink stays, for two callers that are not the
 // sidecar guard:
@@ -166,11 +166,17 @@
 // round-3 read arms were observed RED against the round-2 binary before the read below existed, and whose
 // round-4 arms were observed RED against the round-3 binary and source.
 
-#include "infra/emit.h"   // rw::emitTo — the refusal goes to stderr through THE emitter, not fprintf
+#include "infra/emit.h"             // rw::emitTo — the refusal goes to stderr through THE emitter, not fprintf
+#include "infra/platform_compat.h"  // Windows handle/CRT bridge for the same no-follow contract
 
-#include <fcntl.h>        // ::open + O_NOFOLLOW + O_NONBLOCK — the whole mechanism, in one syscall
-#include <sys/stat.h>     // ::lstat + S_ISLNK (mcpedit, and the post-ELOOP wording); ::fstat + S_ISREG (round 4)
-#include <unistd.h>       // ::write / ::close — the descriptor the writers hold instead of a stream
+#if defined( _WIN32 )
+  #include <windows.h>               // CreateFileW + FILE_FLAG_OPEN_REPARSE_POINT — Windows' atomic no-follow open
+  #include <io.h>                    // _open_osfhandle / _chsize_s / _write / _close
+#else
+  #include <fcntl.h>                 // ::open + O_NOFOLLOW + O_NONBLOCK — the whole mechanism, in one syscall
+  #include <sys/stat.h>              // ::lstat + S_ISLNK (mcpedit, and the post-ELOOP wording); ::fstat + S_ISREG (round 4)
+  #include <unistd.h>                // ::write / ::close — the descriptor the writers hold instead of a stream
+#endif
 #include <cerrno>
 #include <cstddef>
 #include <cstdio>         // std::FILE / ::fdopen / ::getline / std::fclose — the read half's line stream
@@ -178,7 +184,9 @@
 #include <cstring>        // std::strerror — an honest reason for a failure that is not a link
 #include <string>
 #include <string_view>
-#include <sys/types.h>    // ssize_t
+#if !defined( _WIN32 )
+  #include <sys/types.h>              // ssize_t
+#endif
 
 namespace rw::pathguard
 {
@@ -191,11 +199,35 @@ namespace rw::pathguard
 // THIS IS NOT A WRITE GUARD and must never be used as one again: between its answer and any subsequent open
 // the entry can change, which is the CWE-367 finding this header's round 2 closes. It answers a question
 // (mcpedit, which never opens the destination) and it words an error (openNoFollowTruncate, after the fact).
+#if defined( _WIN32 )
+inline bool isSymlink( const std::string& path ) noexcept
+{
+    // Windows calls these reparse points. Treat every final reparse point as link-like: opening it with
+    // FILE_FLAG_OPEN_REPARSE_POINT is the kernel-enforced no-follow equivalent of POSIX O_NOFOLLOW, and
+    // refusing junctions as well as symbolic links avoids a directory redirection through the same seam.
+    const std::string nativePath = rw::compat::rw_windows_path_from_msys( path );
+    const std::wstring widePath = rw::compat::rw_utf8_to_wide( nativePath );
+    const HANDLE handle = widePath.empty() ? INVALID_HANDLE_VALUE : ::CreateFileW( widePath.c_str(), 0,
+                                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                         FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_BACKUP_SEMANTICS,
+                                         nullptr );
+    if( handle == INVALID_HANDLE_VALUE )
+    {
+        return false;
+    }
+    BY_HANDLE_FILE_INFORMATION info{};
+    const bool reparse = ::GetFileInformationByHandle( handle, &info ) != 0
+                      && ( info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT ) != 0;
+    ::CloseHandle( handle );
+    return reparse;
+}
+#else
 inline bool isSymlink( const std::string& path ) noexcept
 {
     struct stat linkSt{};
     return ::lstat( path.c_str(), &linkSt ) == 0 && S_ISLNK( linkSt.st_mode );
 }
+#endif
 
 // What the atomic open produced: a descriptor, or the errno that explains why there is none. Both are
 // returned rather than left in `errno`, because the refusal is emitted before the caller looks and an
@@ -209,6 +241,90 @@ struct OpenedFile
     int err = 0;
 };
 
+#if defined( _WIN32 )
+// Translate the Win32 error from an atomic handle open into the errno vocabulary used by the shared refusal path.
+inline int errnoFromWinError( DWORD error ) noexcept
+{
+    switch( error )
+    {
+        case ERROR_FILE_NOT_FOUND:
+        case ERROR_PATH_NOT_FOUND: return ENOENT;
+        case ERROR_ACCESS_DENIED:
+        case ERROR_SHARING_VIOLATION:
+        case ERROR_LOCK_VIOLATION: return EACCES;
+        case ERROR_DISK_FULL: return ENOSPC;
+        case ERROR_TOO_MANY_OPEN_FILES: return EMFILE;
+        case ERROR_INVALID_PARAMETER: return EINVAL;
+        case ERROR_CANT_ACCESS_FILE:
+        case ERROR_INVALID_REPARSE_DATA:
+        case ERROR_REPARSE_TAG_INVALID: return ELOOP;
+        default: return EIO;
+    }
+}
+
+inline bool winHandleInfo( HANDLE handle, BY_HANDLE_FILE_INFORMATION& info ) noexcept
+{
+    return ::GetFileInformationByHandle( handle, &info ) != 0;
+}
+
+inline constexpr DWORD kNoFollowOpenFlags = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT
+                                           | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_BACKUP_SEMANTICS;
+
+enum class WindowsPathInspection { Clear, Reparse, Error };
+
+inline WindowsPathInspection windowsPathHasIntermediateReparse( const std::wstring& path ) noexcept
+{
+    std::wstring absolute( 32768, L'\0' );
+    const DWORD fullLength = ::GetFullPathNameW( path.c_str(), static_cast<DWORD>( absolute.size() ), absolute.data(), nullptr );
+    if( fullLength == 0 || fullLength >= absolute.size() )
+    {
+        return WindowsPathInspection::Error;
+    }
+    absolute.resize( fullLength );
+
+    wchar_t volume[ 32768 ]{};
+    const DWORD volumeLength = ::GetVolumePathNameW( absolute.c_str(), volume, static_cast<DWORD>( std::size( volume ) ) );
+    if( volumeLength == 0 || volumeLength >= std::size( volume ) )
+    {
+        return WindowsPathInspection::Error;
+    }
+
+    const std::size_t sidecarSeparator = absolute.find_last_of( L"\\/" );
+    if( sidecarSeparator == std::wstring::npos || sidecarSeparator == 0 )
+    {
+        return WindowsPathInspection::Clear;
+    }
+    std::size_t separator = absolute.find_first_of( L"\\/", volumeLength );
+    while( separator != std::wstring::npos && separator <= sidecarSeparator )
+    {
+        const std::wstring component = absolute.substr( 0, separator );
+        const HANDLE handle = ::CreateFileW( component.c_str(), FILE_READ_ATTRIBUTES,
+                                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                              FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr );
+        if( handle != INVALID_HANDLE_VALUE )
+        {
+            FILE_ATTRIBUTE_TAG_INFO tagInfo{};
+            const BOOL inspected = ::GetFileInformationByHandleEx( handle, FileAttributeTagInfo, &tagInfo, sizeof( tagInfo ) );
+            ::CloseHandle( handle );
+            if( inspected == 0 )
+            {
+                return WindowsPathInspection::Error;
+            }
+            if( ( tagInfo.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT ) != 0 )
+            {
+                return WindowsPathInspection::Reparse;
+            }
+        }
+        else
+        {
+            return WindowsPathInspection::Error;
+        }
+        separator = absolute.find_first_of( L"\\/", separator + 1 );
+    }
+    return WindowsPathInspection::Clear;
+}
+#endif
+
 // Create-or-truncate `path` for writing WITHOUT following a symlink at the final component, and tell the
 // user on stderr if that is refused. Returns a descriptor >= 0, or fd == -1 with the errno that failed.
 //
@@ -218,9 +334,10 @@ struct OpenedFile
 // does not — a committed baseline that is actually absent reads as "no debt", which is a worse answer than
 // an error. So this always emits on failure, and every caller turns it into a non-zero exit.
 //
-// O_NOFOLLOW constrains the FINAL component only; an intermediate symlinked directory is still traversed.
-// That is the same reach the lstat check had, so nothing regressed with the change — and widening it would
-// mean refusing every repository that lives under a symlinked path, which is most of them.
+// O_NOFOLLOW constrains the FINAL component only. On POSIX, an intermediate symlinked directory is still traversed,
+// which is the historical reach of the shared open. On Windows, the preflight above inspects every existing
+// intermediate component with FILE_FLAG_OPEN_REPARSE_POINT and refuses both a reparse point and an inspection error;
+// the final CreateFileW call therefore never relies on the final-component flag as the only boundary.
 //
 // NOT A REGULAR FILE (round 4). O_NONBLOCK lets the open return for a FIFO instead of waiting for a reader:
 // with nobody reading, it fails at once with ENXIO and takes the plain-errno branch below. The fstat then
@@ -233,6 +350,106 @@ struct OpenedFile
 // before that point leaves the old sidecar exactly as it was.
 inline OpenedFile openNoFollowTruncate( std::string_view what, const std::string& path )
 {
+#if defined( _WIN32 )
+    const std::string nativePath = rw::compat::rw_windows_path_from_msys( path );
+    const std::wstring widePath = rw::compat::rw_utf8_to_wide( nativePath );
+    const WindowsPathInspection inspection = windowsPathHasIntermediateReparse( widePath );
+    if( inspection != WindowsPathInspection::Clear )
+    {
+        const int err = inspection == WindowsPathInspection::Reparse ? ELOOP : EIO;
+        errno = err;
+        if( inspection == WindowsPathInspection::Reparse )
+        {
+            rw::emitTo( stderr, "ripwire: refusing to write {} at '{}': an intermediate directory is a reparse point. Nothing was written.\n", what, path );
+        }
+        else
+        {
+            rw::emitTo( stderr, "ripwire: could not inspect intermediate directories for {} at '{}'. Nothing was written.\n", what, path );
+        }
+        return { -1, err };
+    }
+    const HANDLE handle = widePath.empty() ? INVALID_HANDLE_VALUE : ::CreateFileW( widePath.c_str(), GENERIC_WRITE,
+                                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_ALWAYS,
+                                         kNoFollowOpenFlags, nullptr );
+    if( handle == INVALID_HANDLE_VALUE )
+    {
+        const int err = errnoFromWinError( ::GetLastError() );
+        errno = err;
+        if( err == ELOOP && isSymlink( path ) )
+        {
+            rw::emitTo( stderr,
+                        "ripwire: refusing to write {} at '{}': that path is a symlink, and writing through it would follow the link and\n"
+                        "  overwrite whatever it points at — outside this tree, if that is where it leads — while leaving the link itself in place.\n"
+                        "  Nothing was written. Remove the symlink (or replace it with a real file) and re-run.\n",
+                        what, path );
+        }
+        else if( err == ELOOP )
+        {
+            rw::emitTo( stderr,
+                        "ripwire: refusing to write {} at '{}': the path could not be resolved without following a symlink loop\n"
+                        "  in one of its directory components (ELOOP). Nothing was written.\n",
+                        what, path );
+        }
+        else
+        {
+            rw::emitTo( stderr,
+                        "ripwire: could not open {} at '{}' for writing: {}. Nothing was written.\n",
+                        what, path, std::strerror( err ) );
+        }
+        return { -1, err };
+    }
+
+    BY_HANDLE_FILE_INFORMATION info{};
+    if( !winHandleInfo( handle, info ) )
+    {
+        const int statErr = errnoFromWinError( ::GetLastError() );
+        ::CloseHandle( handle );
+        errno = statErr;
+        rw::emitTo( stderr, "ripwire: could not inspect {} at '{}': {}. Nothing was written.\n", what, path, std::strerror( statErr ) );
+        return { -1, statErr };
+    }
+    if( ( info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT ) != 0 )
+    {
+        ::CloseHandle( handle );
+        errno = ELOOP;
+        rw::emitTo( stderr,
+                    "ripwire: refusing to write {} at '{}': that path is a symlink, and writing through it would follow the link and\n"
+                    "  overwrite whatever it points at — outside this tree, if that is where it leads — while leaving the link itself in place.\n"
+                    "  Nothing was written. Remove the symlink (or replace it with a real file) and re-run.\n",
+                    what, path );
+        return { -1, ELOOP };
+    }
+    if( ( info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ) != 0 || ::GetFileType( handle ) != FILE_TYPE_DISK )
+    {
+        const char* kind = ( info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ) != 0 ? "a directory" : "a FIFO, for example";
+        ::CloseHandle( handle );
+        errno = EINVAL;
+        rw::emitTo( stderr,
+                    "ripwire: refusing to write {} at '{}': that path is not a regular file ({}), so there is no\n"
+                    "  sidecar there to write. Nothing was written. Remove it and re-run.\n",
+                    what, path, kind );
+        return { -1, EINVAL };
+    }
+
+    const int fd = ::_open_osfhandle( reinterpret_cast<intptr_t>( handle ), _O_WRONLY | _O_BINARY );
+    if( fd < 0 )
+    {
+        const int openErr = errno;
+        ::CloseHandle( handle );
+        rw::emitTo( stderr, "ripwire: could not open {} at '{}' for writing: {}. Nothing was written.\n", what, path, std::strerror( openErr ) );
+        return { -1, openErr };
+    }
+    const errno_t truncResult = ::_chsize_s( fd, 0 );
+    if( truncResult != 0 )
+    {
+        const int truncErr = static_cast<int>( truncResult );
+        ::_close( fd );
+        errno = truncErr;
+        rw::emitTo( stderr, "ripwire: could not truncate {} at '{}' for writing: {}. Nothing was written.\n", what, path, std::strerror( truncErr ) );
+        return { -1, truncErr };
+    }
+    return { fd, 0 };
+#else
     const int fd = ::open( path.c_str(), O_WRONLY | O_CREAT | O_NOFOLLOW | O_NONBLOCK, 0666 );
     if( fd >= 0 )
     {
@@ -292,6 +509,7 @@ inline OpenedFile openNoFollowTruncate( std::string_view what, const std::string
                     what, path, std::strerror( err ) );
     }
     return { -1, err };
+#endif
 }
 
 // Write every byte of `bytes` to `fd`, then close it — the descriptor is consumed either way. Returns false
@@ -307,7 +525,13 @@ inline bool writeAllAndClose( int fd, std::string_view bytes ) noexcept
     std::size_t off   = 0;
     while( off < bytes.size() )
     {
+#if defined( _WIN32 )
+        const std::size_t remaining = bytes.size() - off;
+        const unsigned int toWrite = remaining > ( 1u << 20 ) ? ( 1u << 20 ) : static_cast<unsigned int>( remaining );
+        const int n = ::_write( fd, bytes.data() + off, toWrite );
+#else
         const ssize_t n = ::write( fd, bytes.data() + off, bytes.size() - off );
+#endif
         if( n > 0 )
         {
             off += static_cast<std::size_t>( n );
@@ -320,7 +544,11 @@ inline bool writeAllAndClose( int fd, std::string_view bytes ) noexcept
         wrote = false;
         break;
     }
+#if defined( _WIN32 )
+    if( ::_close( fd ) != 0 )
+#else
     if( ::close( fd ) != 0 )
+#endif
     {
         wrote = false;
     }
@@ -345,6 +573,11 @@ struct NoFollowRead
     int         err     = 0;         // errno of the open or fdopen that failed; 0 when neither did
     char*       lineBuf = nullptr;   // POSIX getline's buffer: grown by getline, reused for every line, freed here
     std::size_t lineCap = 0;         // its capacity, as getline tracks it
+#if defined( _WIN32 )
+    char        readBuf[ 8192 ]{};   // fread buffer: keeps Windows line reads buffered without depending on POSIX getline
+    std::size_t readPos  = 0;
+    std::size_t readSize = 0;
+#endif
 
     NoFollowRead() = default;
     NoFollowRead( const NoFollowRead& )            = delete;
@@ -353,7 +586,15 @@ struct NoFollowRead
     NoFollowRead( NoFollowRead&& other ) noexcept
         : file( other.file ), opened( other.opened ), refused( other.refused ), err( other.err ),
           lineBuf( other.lineBuf ), lineCap( other.lineCap )
+#if defined( _WIN32 )
+          , readPos( other.readPos ), readSize( other.readSize )
+#endif
     {
+#if defined( _WIN32 )
+        std::memcpy( readBuf, other.readBuf, sizeof( readBuf ) );
+        other.readPos  = 0;
+        other.readSize = 0;
+#endif
         other.file    = nullptr;
         other.lineBuf = nullptr;
         other.lineCap = 0;
@@ -381,6 +622,32 @@ struct NoFollowRead
         {
             return false;
         }
+#if defined( _WIN32 )
+        line.clear();
+        for( ;; )
+        {
+            if( readPos == readSize )
+            {
+                readSize = std::fread( readBuf, 1, sizeof( readBuf ), file );
+                readPos  = 0;
+                if( readSize == 0 )
+                {
+                    if( std::ferror( file ) != 0 )
+                    {
+                        line.clear();
+                        return false;
+                    }
+                    return !line.empty();
+                }
+            }
+            const char c = readBuf[ readPos++ ];
+            if( c == '\n' )
+            {
+                return true;
+            }
+            line.push_back( c );
+        }
+#else
         const ssize_t got = ::getline( &lineBuf, &lineCap, file );
         if( got < 0 )
         {
@@ -393,6 +660,7 @@ struct NoFollowRead
         }
         line.assign( lineBuf, length );
         return true;
+#endif
     }
 };
 
@@ -411,6 +679,97 @@ struct NoFollowRead
 inline NoFollowRead openNoFollowRead( std::string_view what, const std::string& path )
 {
     NoFollowRead result;
+#if defined( _WIN32 )
+    const std::string nativePath = rw::compat::rw_windows_path_from_msys( path );
+    const std::wstring widePath = rw::compat::rw_utf8_to_wide( nativePath );
+    const WindowsPathInspection inspection = windowsPathHasIntermediateReparse( widePath );
+    if( inspection != WindowsPathInspection::Clear )
+    {
+        result.err = inspection == WindowsPathInspection::Reparse ? ELOOP : EIO;
+        errno = result.err;
+        if( inspection == WindowsPathInspection::Reparse )
+        {
+            rw::emitTo( stderr, "ripwire: refusing to read {} at '{}': an intermediate directory is a reparse point. Nothing was read.\n", what, path );
+        }
+        else
+        {
+            rw::emitTo( stderr, "ripwire: could not inspect intermediate directories for {} at '{}'. Nothing was read.\n", what, path );
+        }
+        return result;
+    }
+    const HANDLE handle = widePath.empty() ? INVALID_HANDLE_VALUE : ::CreateFileW( widePath.c_str(), GENERIC_READ,
+                                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                         kNoFollowOpenFlags, nullptr );
+    if( handle == INVALID_HANDLE_VALUE )
+    {
+        result.err = errnoFromWinError( ::GetLastError() );
+        errno = result.err;
+        if( result.err != ELOOP )
+        {
+            return result;
+        }
+        result.refused = true;
+        if( isSymlink( path ) )
+        {
+            rw::emitTo( stderr,
+                        "ripwire: refusing to read {} at '{}': that path is a symlink, and reading through it would open whatever it points at\n"
+                        "  — outside this tree, if that is where it leads — and use its contents as {}. Nothing was read. A sidecar behind a\n"
+                        "  symlink is refused on read exactly as on write: replace the link with a regular copy of its target (or remove it) and re-run.\n",
+                        what, path, what );
+        }
+        else
+        {
+            rw::emitTo( stderr,
+                        "ripwire: refusing to read {} at '{}': the path could not be resolved without following a symlink loop\n"
+                        "  in one of its directory components (ELOOP). Nothing was read.\n",
+                        what, path );
+        }
+        return result;
+    }
+
+    BY_HANDLE_FILE_INFORMATION info{};
+    if( !winHandleInfo( handle, info ) )
+    {
+        result.err = errnoFromWinError( ::GetLastError() );
+        ::CloseHandle( handle );
+        errno = result.err;
+        return result;
+    }
+    if( ( info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT ) != 0 )
+    {
+        ::CloseHandle( handle );
+        result.err = ELOOP;
+        errno = ELOOP;
+        result.refused = true;
+        rw::emitTo( stderr,
+                    "ripwire: refusing to read {} at '{}': that path is a symlink, and reading through it would open whatever it points at\n"
+                    "  — outside this tree, if that is where it leads — and use its contents as {}. Nothing was read. A sidecar behind a\n"
+                    "  symlink is refused on read exactly as on write: replace the link with a regular copy of its target (or remove it) and re-run.\n",
+                    what, path, what );
+        return result;
+    }
+
+    result.opened = true;
+    if( ( info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ) != 0 || ::GetFileType( handle ) != FILE_TYPE_DISK )
+    {
+        ::CloseHandle( handle );   // a FIFO, a directory, a device: present, and no lines — never a read that could wait
+        return result;
+    }
+    const int fd = ::_open_osfhandle( reinterpret_cast<intptr_t>( handle ), _O_RDONLY | _O_BINARY );
+    if( fd < 0 )
+    {
+        result.err = errno;
+        ::CloseHandle( handle );
+        return result;
+    }
+    result.file = ::_fdopen( fd, "rb" );
+    if( result.file == nullptr )
+    {
+        result.err = errno;
+        ::_close( fd );   // _fdopen did not take the descriptor, so it is still this function's to close
+    }
+    return result;
+#else
     const int    fd = ::open( path.c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK );
     if( fd < 0 )
     {
@@ -454,6 +813,7 @@ inline NoFollowRead openNoFollowRead( std::string_view what, const std::string& 
         ::close( fd );   // fdopen did not take the descriptor, so it is still this function's to close
     }
     return result;
+#endif
 }
 
 } // namespace rw::pathguard

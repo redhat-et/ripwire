@@ -51,8 +51,8 @@ signChangeDisableCount="$( grep -c -- '-fno-sanitize=implicit-integer-sign-chang
 swiftSignSectionCount="$( grep -c '\[implicit-integer-sign-change\]' "$CMAKE" )"
 swiftWhitespaceCount="$( grep -c 'fun:eat_whitespace' "$CMAKE" )"
 bashScanCount="$( grep -c 'fun:scan' "$CMAKE" )"
-# M2-era note: `[unsigned-integer-overflow]` now opens TWO ignorelists — bash's scanner (fun:scan) and
-# the libstdc++ one — so the SECTION count is 2, and every entry underneath is audited separately below
+# M2-era note: `[unsigned-integer-overflow]` opens the Bash scanner (fun:scan), the libstdc++ seams, and
+# the Windows filesystem prefix seam — so the SECTION count is 3, and every entry underneath is audited separately below
 # so that none can be added or dropped without moving this gate.
 # …counted by OCCURRENCE, not by line: an ignorelist here is one CMake string holding several `\n`-joined
 # entries, so `grep -c` (which counts matching LINES) reads a smuggled second entry on an existing line as
@@ -91,21 +91,26 @@ printRuleCount="$( occurrences 'src:\*/include/c\\\\+\\\\+/\*/print' )"
 formatPrintRuleCount="$(( formatRuleCount + printRuleCount ))"
 signedTruncationSectionCount="$( occurrences '\[implicit-signed-integer-truncation\]' )"
 srcScopedRuleCount="$( occurrences 'src:' )"
+windowsFilesystemRuleCount="$( occurrences 'src:\*/include/filesystem' )"
+windowsLegacyFilesystemRuleCount="$( occurrences 'src:\*filesystem' )"
+windowsDrivePrefixRuleCount="$( occurrences 'fun:\*_Is_drive_prefix\*' )"
+wildcardFunctionRuleCount="$( occurrences 'fun:\*' )"
 if [ "$unsignedTruncationSectionCount" = 2 ] && [ "$balanceCount" = 1 ] \
     && [ "$functionSectionCount" = 1 ] && [ "$scannerCreateCount" = 1 ] \
     && [ "$unsignedDisableCount" = 2 ] && [ "$signedTruncationDisableCount" = 2 ] \
     && [ "$signChangeDisableCount" = 2 ] \
     && [ "$swiftSignSectionCount" = 2 ] && [ "$swiftWhitespaceCount" = 1 ] \
-    && [ "$scannerUnsignedSectionCount" = 2 ] && [ "$bashScanCount" = 1 ] \
+    && [ "$scannerUnsignedSectionCount" = 3 ] && [ "$bashScanCount" = 1 ] \
     && [ "$signedTruncationSectionCount" = 1 ] \
     && [ "$stringViewRuleCount" = 1 ] && [ "$basicStringHeaderRuleCount" = 1 ] && [ "$basicStringTccRuleCount" = 1 ] \
     && [ "$libstdcxxHeaderRuleCount" = 3 ] \
     && [ "$formatRuleCount" = 4 ] && [ "$printRuleCount" = 4 ] && [ "$formatPrintRuleCount" = 8 ] \
-    && [ "$srcScopedRuleCount" = 11 ] \
-    && ! grep -Eq 'fun:\*' "$CMAKE"; then
-    ok "dependency policy is limited to audited Tree-sitter core, Swift/bash scanner, the 3 libstdc++ string seams and the 2 formatting seams (<format>/<print>, 4 checks each)"
+    && [ "$srcScopedRuleCount" = 13 ] \
+    && [ "$windowsFilesystemRuleCount" = 1 ] && [ "$windowsLegacyFilesystemRuleCount" = 1 ] \
+    && [ "$windowsDrivePrefixRuleCount" = 1 ] && [ "$wildcardFunctionRuleCount" = 1 ]; then
+    ok "dependency policy is limited to audited Tree-sitter core, Swift/bash scanner, the 3 libstdc++ string seams, the 2 formatting seams (<format>/<print>, 4 checks each), and the exact Windows filesystem prefix exception"
 else
-    no "sanitizer exemption policy differs from the audited list (sections uint=$scannerUnsignedSectionCount, src:-scoped=$srcScopedRuleCount of which string_view.tcc=$stringViewRuleCount basic_string.h=$basicStringHeaderRuleCount basic_string.tcc=$basicStringTccRuleCount format=$formatRuleCount print=$printRuleCount; sections sign-change=$swiftSignSectionCount signed-trunc=$signedTruncationSectionCount unsigned-trunc=$unsignedTruncationSectionCount)"
+    no "sanitizer exemption policy differs from the audited list (sections uint=$scannerUnsignedSectionCount, src:-scoped=$srcScopedRuleCount of which string_view.tcc=$stringViewRuleCount basic_string.h=$basicStringHeaderRuleCount basic_string.tcc=$basicStringTccRuleCount format=$formatRuleCount print=$printRuleCount; Windows filesystem=$windowsFilesystemRuleCount/$windowsLegacyFilesystemRuleCount drive-prefix=$windowsDrivePrefixRuleCount wildcard-fun=$wildcardFunctionRuleCount; sections sign-change=$swiftSignSectionCount signed-trunc=$signedTruncationSectionCount unsigned-trunc=$unsignedTruncationSectionCount)"
 fi
 # MUTATION CONTROL (live, not the historical note above): plant a twelfth `src:` entry in a COPY of the file
 # and re-run the identical occurrence extraction over it — the audited count must move. A control over an

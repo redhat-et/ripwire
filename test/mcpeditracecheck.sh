@@ -31,8 +31,14 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+# This gate starts the binary through native Python subprocess pipes. On Windows, pargates also exposes an
+# MSYS-spelled RIPWIRE_BIN for shell-only gates; embedded argv values are not translated by MSYS, so prefer the
+# native companion when the orchestrator provides it.
+BIN="${1:-${RIPWIRE_REAL_BIN:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}}"
+case "$BIN" in
+    /*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
+    *) BIN="$ROOT/$BIN";;
+esac
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 TRIALS="${RACE_TRIALS:-15}"
@@ -47,14 +53,65 @@ echo "mcpeditracecheck: BIN=$BIN  TRIALS=$TRIALS"
 
 # ─── the shared MCP-driver Python preamble (server spawn + JSON-RPC send/recv on a big-file corpus) ──────────
 read -r -d '' PREAMBLE <<'PYEOF'
-import sys, os, json, subprocess, threading, time, tempfile, fcntl
+import sys, os, json, subprocess, threading, time, tempfile
+if os.name == "nt":
+    import ctypes, msvcrt
+    from ctypes import wintypes
+    _kernel32 = ctypes.WinDLL( "kernel32", use_last_error=True )
+    class _Overlapped( ctypes.Structure ):
+        _fields_ = [ ( "Internal", ctypes.c_void_p ), ( "InternalHigh", ctypes.c_void_p ),
+                     ( "Offset", wintypes.DWORD ), ( "OffsetHigh", wintypes.DWORD ), ( "hEvent", wintypes.HANDLE ) ]
+    _kernel32.LockFileEx.argtypes = [ wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+                                      wintypes.DWORD, ctypes.POINTER( _Overlapped ) ]
+    _kernel32.LockFileEx.restype = wintypes.BOOL
+    _kernel32.UnlockFileEx.argtypes = [ wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+                                        ctypes.POINTER( _Overlapped ) ]
+    _kernel32.UnlockFileEx.restype = wintypes.BOOL
+    def lock_file( stream ):
+        handle = wintypes.HANDLE( msvcrt.get_osfhandle( stream.fileno() ) )
+        overlapped = _Overlapped()
+        if not _kernel32.LockFileEx( handle, 0x00000002, 0, 0xFFFFFFFF, 0xFFFFFFFF, ctypes.byref( overlapped ) ):
+            raise OSError( ctypes.get_last_error(), "LockFileEx" )
+    def unlock_file( stream ):
+        handle = wintypes.HANDLE( msvcrt.get_osfhandle( stream.fileno() ) )
+        overlapped = _Overlapped()
+        if not _kernel32.UnlockFileEx( handle, 0, 0xFFFFFFFF, 0xFFFFFFFF, ctypes.byref( overlapped ) ):
+            raise OSError( ctypes.get_last_error(), "UnlockFileEx" )
+else:
+    import fcntl
+    def lock_file( stream ):
+        fcntl.flock( stream, fcntl.LOCK_EX )
+    def unlock_file( stream ):
+        fcntl.flock( stream, fcntl.LOCK_UN )
+
+def canonical_path( path ):
+    value = os.path.normpath( os.path.abspath( path ) )
+    if os.name == "nt":
+        value = value.replace( "\\", "/" )
+        if len( value ) >= 2 and value[1] == ":":
+            value = value[0].upper() + value[1:]
+    return value
+
 BIN = sys.argv[1]
 
 def atomic_write(path, data):                          # a concurrent atomic commit (mirrors ripwire's atomicWrite)
     d = os.path.dirname(path)
     fd, tmp = tempfile.mkstemp(dir=d)
-    os.fdopen(fd, "w").write(data)
-    os.rename(tmp, path)
+    with os.fdopen(fd, "w", newline="") as stream:
+        stream.write(data)
+    last = None
+    for _ in range(200):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError as exc:
+            last = exc
+            time.sleep(0.005)
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    raise last
 
 def fnv1a64(data, offset=1469598103934665603):
     h = offset
@@ -63,7 +120,8 @@ def fnv1a64(data, offset=1469598103934665603):
     return h
 
 def edit_lock_path(target):                            # A3-F8: mirror C++ mcpedit::editLockPath (cache-dir keyed lock,
-    h = fnv1a64(target.encode("utf-8", "surrogateescape")) # NOT a repo-tree "<path>.ripwire-lock" sidecar). FNV-1a-64 of
+    key = target.replace("\\", "/") if os.name == "nt" else target
+    h = fnv1a64(key.encode("utf-8", "surrogateescape")) # NOT a repo-tree "<path>.ripwire-lock" sidecar). FNV-1a-64 of
     name = "ripwire-edit-%016x.lock" % h
     tmpdir = os.environ.get("TMPDIR")                  # same cacheDirLadder(): $TMPDIR/ripwire → XDG/ripwire → /tmp/ripwire-uid
     if tmpdir:
@@ -117,37 +175,58 @@ echo "=== 1. F1 — a COOPERATING concurrent writer NEVER loses its committed wr
 # ignores the lock, so it races and the writer's commit is silently lost. Deterministic: no timing residual.
 python3 - "$BIN" "$TRIALS" "$TMP/coop" <<PYEOF > "$TMP/coop.out" 2>/dev/null
 $PREAMBLE
-TRIALS = int(sys.argv[2]); WORK = sys.argv[3]; os.makedirs(WORK, exist_ok=True)
-lost = served = 0
+TRIALS = int(sys.argv[2]); WORK = canonical_path(sys.argv[3]); os.makedirs(WORK, exist_ok=True)
+lost = served = writer_failed = lock_refused = 0
 for t in range(TRIALS):
-    d = os.path.join(WORK, "t%03d" % t); os.makedirs(d, exist_ok=True)
-    tgt = os.path.join(d, "big.cpp"); atomic_write(tgt, src(0))
+    d = canonical_path(os.path.join(WORK, "t%03d" % t)); os.makedirs(d, exist_ok=True)
+    tgt = canonical_path(os.path.join(d, "big.cpp")); atomic_write(tgt, src(0))
     s = spawn()
     send(s, {"jsonrpc":"2.0","id":1,"method":"initialize"}); recv(s, 1)
     send(s, {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_symbol","arguments":{"path":d,"symbol":"target"}}}); recv(s, 2)
+    committed = {"ok": False}
+    lock_ready = threading.Event()
+    release_writer = threading.Event()
     def writer():
-        time.sleep(0.0005)
         lf = open(edit_lock_path(tgt), "a+")
-        fcntl.flock(lf, fcntl.LOCK_EX)                 # cooperate: block on the edit's lock
-        atomic_write(tgt, src(1))
-        fcntl.flock(lf, fcntl.LOCK_UN); lf.close()
+        lock_file(lf)                                  # cooperate: block on the edit's lock
+        lock_ready.set()
+        try:
+            release_writer.wait( timeout=5.0 )
+            atomic_write(tgt, src(1))
+            committed["ok"] = True
+        finally:
+            unlock_file(lf); lf.close()
     wt = threading.Thread(target=writer); wt.start()
+    if not lock_ready.wait( timeout=5.0 ):
+        release_writer.set()
+        wt.join()
+        kill(s)
+        writer_failed += 1
+        continue
     send(s, {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"replace_symbol_body","arguments":{"path":d,"symbol":"target","new_body":"int target() { return 999999; }"}}})
-    r = recv(s, 3); wt.join(); kill(s)
-    txt = inner_text(r); disk = open(tgt).read()
+    r = recv(s, 3)
+    txt = inner_text(r)
+    if "edit lock unavailable" in txt:
+        lock_refused += 1
+    release_writer.set(); wt.join(); kill(s)
+    disk = open(tgt).read()
     applied = '"applied"' in txt
     canary1 = "// CANARY=1" in disk
-    if applied and not canary1: lost += 1       # writer's commit silently gone → the F1 bug
+    if not committed["ok"]: writer_failed += 1
+    if applied and not canary1: lost += 1     # writer's committed write silently gone → the F1 bug
     else: served += 1                           # writer's commit survives (serialized or edit refused)
-print(json.dumps({"serialized": served, "lost": lost}))
+print(json.dumps({"serialized": served, "lost": lost, "writer_failed": writer_failed, "lock_refused": lock_refused,
+                  "trials": TRIALS}))
 PYEOF
 COOP="$( tail -1 "$TMP/coop.out" )"
 echo "  cooperating-writer summary: $COOP"
 COOP_LOST="$( printf '%s' "$COOP" | python3 -c 'import sys,json;print(json.load(sys.stdin)["lost"])' 2>/dev/null )"
 COOP_SER="$( printf '%s' "$COOP" | python3 -c 'import sys,json;print(json.load(sys.stdin)["serialized"])' 2>/dev/null )"
-[ "${COOP_LOST:-1}" = "0" ] && [ "${COOP_SER:-0}" = "$TRIALS" ] \
+COOP_FAILED="$( printf '%s' "$COOP" | python3 -c 'import sys,json;print(json.load(sys.stdin)["writer_failed"])' 2>/dev/null )"
+COOP_REFUSED="$( printf '%s' "$COOP" | python3 -c 'import sys,json;print(json.load(sys.stdin)["lock_refused"])' 2>/dev/null )"
+[ "${COOP_LOST:-1}" = "0" ] && [ "${COOP_SER:-0}" = "$TRIALS" ] && [ "${COOP_FAILED:-1}" = "0" ] && [ "${COOP_REFUSED:-1}" = "$TRIALS" ] \
     && ok "F1: cooperating writer serialized every trial (serialized=$COOP_SER, lost=0) — advisory lock holds" \
-    || no "F1: $COOP_LOST/$TRIALS cooperating-writer commits SILENTLY LOST (no lock serialization — the F1 bug)"
+    || no "F1: cooperative lock contract failed (lost=$COOP_LOST serialized=$COOP_SER writer_failed=${COOP_FAILED:-?} lock_refused=${COOP_REFUSED:-?}, expected $TRIALS refusal responses)"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -160,11 +239,11 @@ echo "=== 2. F1 — a NON-cooperating external writer is DETECTED (re-check), ne
 # 'applied', the on-disk file is well-formed (either the writer's content or the edit's, never a mangled mix).
 python3 - "$BIN" "$TRIALS" "$TMP/ext" <<PYEOF > "$TMP/ext.out" 2>/dev/null
 $PREAMBLE
-TRIALS = int(sys.argv[2]); WORK = sys.argv[3]; os.makedirs(WORK, exist_ok=True)
+TRIALS = int(sys.argv[2]); WORK = canonical_path(sys.argv[3]); os.makedirs(WORK, exist_ok=True)
 refused = applied_serialized = lost = torn = 0
 for t in range(TRIALS):
-    d = os.path.join(WORK, "t%03d" % t); os.makedirs(d, exist_ok=True)
-    tgt = os.path.join(d, "big.cpp"); atomic_write(tgt, src(0))
+    d = canonical_path(os.path.join(WORK, "t%03d" % t)); os.makedirs(d, exist_ok=True)
+    tgt = canonical_path(os.path.join(d, "big.cpp")); atomic_write(tgt, src(0))
     s = spawn()
     send(s, {"jsonrpc":"2.0","id":1,"method":"initialize"}); recv(s, 1)
     send(s, {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_symbol","arguments":{"path":d,"symbol":"target"}}}); recv(s, 2)
@@ -211,8 +290,8 @@ echo "=== 3. F1 ripwire-vs-ripwire — two concurrent EDIT ops on one file canno
 # EXACTLY ONE of the two edited bodies (never a torn interleave, never both-lost).
 python3 - "$BIN" "$TMP/vs" <<PYEOF > "$TMP/vs.out" 2>/dev/null
 $PREAMBLE
-WORK = sys.argv[2]; os.makedirs(WORK, exist_ok=True)
-tgt = os.path.join(WORK, "f.cpp")
+WORK = canonical_path(sys.argv[2]); os.makedirs(WORK, exist_ok=True)
+tgt = canonical_path(os.path.join(WORK, "f.cpp"))
 open(tgt, "w").write(PAD + "int fn() { return 1; }\n")
 def one(ret, out):
     s = spawn()
@@ -296,6 +375,57 @@ echo "=== 5. determinism of the staleness refusal message (edit refused when the
 stale_refusal() {
     local d="$1"; mkdir -p "$d"
     printf 'int detfn() { return 1; }\n' > "$d/d.cpp"
+    if command -v cmd.exe >/dev/null 2>&1; then
+        # A native Windows process cannot consume a Git-Bash mkfifo path through its standard handle.
+        python3 - "$BIN" "$d" <<'PY'
+import json
+import subprocess
+import sys
+
+binary, work = sys.argv[1:3]
+server = subprocess.Popen( [ binary, "--mcp" ], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, text=True, bufsize=1 )
+
+def request( value ):
+    server.stdin.write( json.dumps( value ) + chr( 10 ) )
+    server.stdin.flush()
+    while True:
+        line = server.stdout.readline()
+        if not line:
+            return None
+        try:
+            response = json.loads( line )
+        except json.JSONDecodeError:
+            continue
+        if response.get( "id" ) == value[ "id" ]:
+            return response
+
+try:
+    request( { "jsonrpc": "2.0", "id": 1, "method": "initialize" } )
+    request( { "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+               "params": { "name": "find_symbol", "arguments": { "path": work, "symbol": "detfn" } } } )
+    with open( work + "/d.cpp", "w", encoding="utf-8", newline="" ) as stream:
+        stream.write( "int other_symbol_entirely() { return 0; }" + chr( 10 ) )
+    response = request( { "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                          "params": { "name": "replace_symbol_body", "arguments": {
+                              "path": work, "symbol": "detfn", "new_body": "int detfn() { return 3; }" } } } )
+    if response is None:
+        print( "__ERROR__:server closed before id=3" )
+    elif "error" in response:
+        print( "__ERROR__:" + response[ "error" ].get( "message", "" ) )
+    else:
+        print( response[ "result" ][ "content" ][ 0 ][ "text" ] )
+finally:
+    server.stdin.close()
+    server.terminate()
+    try:
+        server.wait( timeout=5 )
+    except subprocess.TimeoutExpired:
+        server.kill()
+        server.wait()
+PY
+        return
+    fi
     local FIFO="$d/in.fifo"; mkfifo "$FIFO"
     "$BIN" --mcp <"$FIFO" >"$d/out.txt" 2>/dev/null &
     local SRV=$!

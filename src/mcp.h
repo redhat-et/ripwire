@@ -346,9 +346,47 @@ inline std::string mcpCanonRoot( const std::string& root )
     char buf[ PATH_MAX ];
     if( ::realpath( root.c_str(), buf ) )
     {
-        return std::string( buf );
+        std::string canonical( buf );
+#if defined( _WIN32 )
+        if( canonical.size() >= 2 && canonical[ 1 ] == ':'
+            && canonical[ 0 ] >= 'a' && canonical[ 0 ] <= 'z' )
+        {
+            canonical[ 0 ] = static_cast< char >( canonical[ 0 ] - 'a' + 'A' );
+        }
+#endif
+        return canonical;
     }
     return root;
+}
+
+inline bool mcpIsFilesystemRoot( const std::string& path )
+{
+    if( path == "/" || path == "\\" )
+    {
+        return true;
+    }
+#if defined( _WIN32 )
+    const bool driveLetter = path.size() == 3
+                           && ( ( path[ 0 ] >= 'A' && path[ 0 ] <= 'Z' ) || ( path[ 0 ] >= 'a' && path[ 0 ] <= 'z' ) )
+                           && path[ 1 ] == ':'
+                           && ( path[ 2 ] == '/' || path[ 2 ] == '\\' );
+    if( driveLetter )
+    {
+        return true;
+    }
+#endif
+    return false;
+}
+
+inline std::string mcpNormalizeDriveLetter( std::string path )
+{
+#if defined( _WIN32 )
+    if( path.size() >= 2 && path[ 1 ] == ':' && path[ 0 ] >= 'a' && path[ 0 ] <= 'z' )
+    {
+        path[ 0 ] = static_cast< char >( path[ 0 ] - 'a' + 'A' );
+    }
+#endif
+    return path;
 }
 
 // R2a: resolve the launch cwd as the bare stdio server's assumed root — see McpDispatchPolicy::
@@ -365,7 +403,7 @@ inline std::string mcpResolveAssumedRoot()
     std::string       launchCwd = mcpCanonRoot( cwdBuf );   // not const: returned, and a const local cannot be moved out
     const char* const homeEnv   = std::getenv( "HOME" );
     const std::string homeCanon = homeEnv ? mcpCanonRoot( homeEnv ) : std::string{};
-    if( launchCwd == "/" || ( !homeCanon.empty() && launchCwd == homeCanon ) )
+    if( mcpIsFilesystemRoot( launchCwd ) || ( !homeCanon.empty() && launchCwd == homeCanon ) )
     {
         return {};
     }
@@ -868,6 +906,12 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             };
 
             std::string       path    = strArg( "path" );     // may be REBOUND to a workspace key by `paths` below (A11)
+#if defined( _WIN32 )
+            if( !path.empty() )
+            {
+                path = mcpNormalizeDriveLetter( rw::compat::rw_windows_path_from_msys( path ) );
+            }
+#endif
             std::string       assumedRootNote;                // R2a: non-empty ⇒ path was defaulted to the launch cwd; disclosed by textResult (declared here so the lambda captures it)
             const std::string symbol  = strArg( "symbol" );
             const std::string pattern = strArg( "pattern" );

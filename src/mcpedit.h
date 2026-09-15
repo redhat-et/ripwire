@@ -21,7 +21,8 @@
 #include "redact.h"           // R1 (V3): kRedactRules — the marker table the write gate's predicate is derived FROM
 #include "pathguard.h"        // A4-F14: rw::pathguard::isSymlink — THE symlink predicate, shared with the sidecar writers
 
-#include <climits>            // PATH_MAX — the AbsHintFrame realpath/getcwd buffers (A2)
+#include <climits>            // PATH_MAX — the POSIX AbsHintFrame realpath/getcwd buffers (A2)
+#include <filesystem>
 
 namespace rw
 {
@@ -266,6 +267,33 @@ namespace mcpedit
 
         explicit AbsHintFrame( const std::string& pathHint )
         {
+#if defined( _WIN32 )
+            const std::string nativeHint = rw::compat::rw_windows_path_from_msys( pathHint );
+            std::error_code  ec;
+            const std::filesystem::path hintPath( nativeHint );
+            if( !hintPath.is_absolute() )
+            {
+                return;
+            }
+            const std::filesystem::path absoluteHint = std::filesystem::absolute( hintPath, ec );
+            if( ec )
+            {
+                hint = hintPath.lexically_normal().generic_string();
+            }
+            else
+            {
+                const std::filesystem::path canonicalHint = std::filesystem::weakly_canonical( absoluteHint, ec );
+                hint = ( ec ? absoluteHint.lexically_normal() : canonicalHint ).generic_string();
+            }
+            ec.clear();
+            const std::filesystem::path current = std::filesystem::current_path( ec );
+            if( ec )
+            {
+                return;
+            }
+            const std::filesystem::path canonicalCurrent = std::filesystem::weakly_canonical( current, ec );
+            cwd = ( ec ? current.lexically_normal() : canonicalCurrent ).generic_string();
+#else
             if( pathHint.empty() || pathHint.front() != '/' )
             {
                 return;
@@ -273,6 +301,7 @@ namespace mcpedit
             char buf[ PATH_MAX ];
             hint = ::realpath( pathHint.c_str(), buf ) != nullptr ? std::string( buf ) : pathHint;
             cwd  = ::getcwd( buf, sizeof( buf ) ) != nullptr ? std::string( buf ) : std::string();
+#endif
         }
 
         bool matches( const IngestResult& ing, std::uint32_t fileId ) const
@@ -281,8 +310,20 @@ namespace mcpedit
             {
                 return false;
             }
+#if defined( _WIN32 )
+            const std::string diskNative = rw::compat::rw_windows_path_from_msys( diskPath( ing, fileId ) );
+            std::error_code    ec;
+            std::filesystem::path candidate( diskNative );
+            if( !candidate.is_absolute() )
+            {
+                candidate = std::filesystem::path( cwd ) / candidate;
+            }
+            const std::filesystem::path absolute = std::filesystem::weakly_canonical( candidate, ec );
+            const std::string           abs = ( ec ? candidate.lexically_normal() : absolute ).generic_string();
+#else
             const std::string& disk = diskPath( ing, fileId );   // the on-disk spelling, never the label
             const std::string  abs  = !disk.empty() && disk.front() == '/' ? disk : cwd + "/" + disk;
+#endif
             return abs.find( hint ) != std::string::npos;
         }
     };
@@ -388,7 +429,19 @@ namespace mcpedit
             // "symbol 'size' not found under path 'svectr.h'; nearest: sized, size_of, Side, Site, sink",
             // sending the reader after a rename in a header that was never indexed under that spelling.
             // Same verdict, same words as the read verbs' file-half diagnosis (selectorrefuse.h).
-            if( !pathHint.empty() && !indexHasFileMatching( ing, pathHint ) )
+            bool pathMatches = false;
+            if( !pathHint.empty() )
+            {
+                for( std::size_t f = 0; f < ing.files.size(); ++f )
+                {
+                    if( editHintMatches( ing, std::uint32_t( f ), pathHint, frame ) )
+                    {
+                        pathMatches = true;
+                        break;
+                    }
+                }
+            }
+            if( !pathHint.empty() && !pathMatches )
             {
                 err = "no indexed file matches '" + pathHint + "' — the PATH half is the fault, so nothing is claimed about '"
                     + symbol + "'; drop the file qualifier to search every file, or pass a path the map lists"
@@ -629,8 +682,12 @@ namespace mcpedit
     // had 45,765 of these before that; a possibly-live (held, or fresh) lock inode is still never removed.
     inline std::string editLockPath( const std::string& targetPath )
     {
+        std::string lockKey = targetPath;
+#if defined( _WIN32 )
+        std::replace( lockKey.begin(), lockKey.end(), '\\', '/' );
+#endif
         std::uint64_t h = 1469598103934665603ULL;      // FNV-1a-64 of the target path → a stable per-file lock name
-        for( char c : targetPath ) { h ^= static_cast<unsigned char>( c ); h = hashutil::fnv1aMultiply( h ); }
+        for( char c : lockKey ) { h ^= static_cast<unsigned char>( c ); h = hashutil::fnv1aMultiply( h ); }
         char name[ 64 ];
         rw::formatTo( name, sizeof( name ), "ripwire-edit-{:016x}.lock", (unsigned long long)h );
         const std::string lockDir = quality::cacheDirLadder() + "/locks";
@@ -647,7 +704,8 @@ namespace mcpedit
     // HONEST LIMIT: this is ADVISORY — a non-cooperating external writer (an editor/formatter that doesn't take
     // this lock) is not serialized by it; that residual is handled by the re-check-before-rename in runEditVerb,
     // which shrinks (but cannot fully close) the external-writer window. Never blocks forever: LOCK_NB with a
-    // short bounded retry, then degrade to lock-free (the re-check still guards correctness). RAII: the fd is
+    // short bounded retry, then refuses the edit if the lock is still unavailable — proceeding lock-free would
+    // let a cooperating writer enter just after the last attempt and lose its committed update. RAII: the fd is
     // closed (releasing the flock) at scope exit, deterministically.
     struct EditLock
     {
@@ -658,10 +716,10 @@ namespace mcpedit
         {
             const std::string lockPath = editLockPath( targetPath );
             fd = ::open( lockPath.c_str(), O_RDWR | O_CREAT, 0644 );
-            if( fd < 0 ) { DEGRADED_PATH_ALERT( "edit lockfile open failed; proceeding lock-free (re-check still guards)" ); return; }
+            if( fd < 0 ) { DEGRADED_PATH_ALERT( "edit lockfile open failed; refusing the edit" ); return; }
 
-            // ~200 ms bounded acquire: 20 tries × 10 ms. If a peer holds it longer, degrade rather than hang —
-            // the freshness re-check before rename is the correctness floor, the lock is only the fast path.
+            // ~200 ms bounded acquire: 20 tries × 10 ms. If a peer holds it longer, refuse rather than hang or
+            // proceed lock-free — the latter can lose a cooperating writer's committed update.
             for( int attempt = 0; attempt < 20; ++attempt )
             {
                 if( ::flock( fd, LOCK_EX | LOCK_NB ) == 0 ) { locked = true; break; }
@@ -674,7 +732,7 @@ namespace mcpedit
             }
             if( !locked )
             {
-                DEGRADED_PATH_ALERT( "edit lock contended past timeout; proceeding lock-free (re-check still guards)" );
+                DEGRADED_PATH_ALERT( "edit lock contended past timeout; refusing the edit" );
             }
         }
 
@@ -714,7 +772,11 @@ namespace mcpedit
         const bool  haveOrig = ( ::stat( path.c_str(), &orig ) == 0 );
 
         const std::string tmp = path + "." + std::to_string( ::getpid() ) + ".tmp";
-        const int fd = ::open( tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644 );
+        int               openFlags = O_WRONLY | O_CREAT | O_TRUNC;
+#if defined( _WIN32 )
+        openFlags |= O_BINARY;
+#endif
+        const int fd = ::open( tmp.c_str(), openFlags, 0644 );
         if( fd < 0 )
         {
             return false;
@@ -1244,9 +1306,17 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
 
     // F1: hold a per-file advisory lock across the ENTIRE read→check→splice→rename below, so two cooperating
     //     ripwire MCP edit ops on one file serialize instead of racing (RAII: released at function return).
-    //     Degrades to lock-free on contention/failure — the re-check before the rename is the correctness floor.
+    //     Refuses on contention/failure after the bounded acquire — proceeding lock-free could lose a
+    //     cooperating writer's committed update; the re-check remains the floor for non-cooperating writers.
     //     Keyed by the REAL disk path so cross-process serialization lands on the actual file, not the label.
     const mcpedit::EditLock editLock( disk );
+    if( !editLock.locked )
+    {
+        oc.ok = false; oc.errCode = -32603;
+        oc.message = "edit lock unavailable for '" + path + "'; another edit is in progress or the lock directory "
+                   + "cannot be opened — retry after it is released; file left unchanged";
+        return oc;
+    }
 
     // 2. staleness: re-read the file NOW and verify its bytes still match what the index was built from.
     //    A mismatch means the span offsets below may address shifted bytes → refuse, tell the agent to

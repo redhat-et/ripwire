@@ -3581,10 +3581,44 @@ inline std::string_view stripLineLocator( std::string_view path ) noexcept
 // single-root corpus never allocates and is byte-identical).
 inline bool filePathContains( std::string_view haystack, std::string_view needle )
 {
+#if !defined( _WIN32 )
     if( haystack.find( needle ) != std::string_view::npos )
     {
         return true;
     }
+    if( haystack.find( "/./" ) == std::string_view::npos )
+    {
+        return false;
+    }
+#else
+    static constexpr char kWindowsSeparator = static_cast<char>( 0x5C );
+    if( haystack.find( needle ) != std::string_view::npos )
+    {
+        return true;
+    }
+    if( haystack.size() >= needle.size() )
+    {
+        for( std::size_t offset = 0; offset + needle.size() <= haystack.size(); ++offset )
+        {
+            bool matches = true;
+            for( std::size_t i = 0; i < needle.size(); ++i )
+            {
+                const char hay = haystack[ offset + i ];
+                const char ned = needle[i];
+                const bool sameSeparator = ( hay == '/' || hay == kWindowsSeparator ) && ( ned == '/' || ned == kWindowsSeparator );
+                if( hay != ned && !sameSeparator )
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            if( matches )
+            {
+                return true;
+            }
+        }
+    }
+#endif
     if( haystack.find( "/./" ) == std::string_view::npos )
     {
         return false;

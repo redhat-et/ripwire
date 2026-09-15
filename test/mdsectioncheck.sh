@@ -93,7 +93,7 @@ mkdir -p "$DEEPFIX"
 python3 -c "open('$DEEPFIX/deepquote.md','w').write('>'*300 + ' three hundred nested blockquote markers on one line\n')"
 [ "$( head -c 300 "$DEEPFIX/deepquote.md" | tr -dc '>' | wc -c | tr -d ' ' )" -eq 300 ] \
     && ok "deepquote.md (generated) opens 300 blockquote markers" || no "deepquote.md generation failed"
-if grep -q $'\r' "$FIX/crlf.md"; then ok "crlf.md really has CRLF line endings"; else no "crlf.md lost its CR bytes"; fi
+if grep -qU $'\r' "$FIX/crlf.md"; then ok "crlf.md really has CRLF line endings"; else no "crlf.md lost its CR bytes"; fi
 if grep -qF 'zqaltextension' "$FIX/alt.markdown"; then ok "alt.markdown carries zqaltextension"; else no "alt.markdown lost zqaltextension"; fi
 if grep -qF 'zqCodeAnchorFn' "$FIX/helpers.c"; then ok "helpers.c defines zqCodeAnchorFn"; else no "helpers.c lost zqCodeAnchorFn"; fi
 head -1 "$FIX/setext0.md" | grep -qx 'Setext At Byte Zero' \
@@ -215,7 +215,7 @@ absent 'n="Quoted Phantom'   'a blockquoted heading as a symbol'
 absent 'n=""'                'an empty-named symbol (the bare # heading)'
 grep -q 'n="Closed Heading #' "$MAP" && no "closing ##s survived into a heading name" \
     || ok "closing ##s stripped from the heading name"
-grep -q $'n="CRLF Heading\r' "$MAP" && no "a CR byte survived into a CRLF heading name" \
+grep -qU $'n="CRLF Heading\r' "$MAP" && no "a CR byte survived into a CRLF heading name" \
     || ok "CRLF heading name carries no CR byte"
 
 echo "--- hierarchy: a section's scope is its parent heading (canonical id path::Parent::Child) ---"

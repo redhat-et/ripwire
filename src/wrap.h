@@ -207,11 +207,25 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, c
 
     // (b) prebuilt install — the staged copy next to the binary's prefix
     ec.clear();
-    const fs::path stagedInstaller = fs::path( executablePath ).parent_path().parent_path() / "share" / "ripwire" / "skills" / "install.sh";
+#if defined( _WIN32 )
+    const fs::path executableFsPath( rw::compat::rw_utf8_to_wide( executablePath ) );
+#else
+    const fs::path executableFsPath( executablePath );
+#endif
+    const fs::path stagedInstaller = executableFsPath.parent_path().parent_path() / "share" / "ripwire" / "skills" / "install.sh";
     if( !executablePath.empty() && fs::is_regular_file( stagedInstaller, ec ) && !ec )
     {
-        rw::emitTo( out, "bash \"{}\"{}   # deploy to {} (drift-gated)\n", stagedInstaller.string().c_str(), codexFlag, destComment );
-        hookLine( stagedInstaller.string().c_str(), true );
+        std::string stagedInstallerText = stagedInstaller.generic_string();
+        for( char& ch : stagedInstallerText )
+        {
+            if( ch == char( 92 ) )
+            {
+                ch = '/';
+            }
+        }
+        const std::string quotedInstaller = std::string( 1, '"' ) + stagedInstallerText + std::string( 1, '"' );
+        rw::emitTo( out, "bash {}{}   # deploy to {} (drift-gated)\n", quotedInstaller, codexFlag, destComment );
+        hookLine( stagedInstallerText.c_str(), true );
         return;
     }
 
@@ -354,7 +368,7 @@ inline std::string wrapCommandToken( const std::string_view executablePath )
         }
         std::error_code ec;
         const fs::path  candidate = fs::path( std::string( dir ) ) / "ripwire";
-        if( fs::is_regular_file( candidate, ec ) && !ec && ::access( candidate.c_str(), X_OK ) == 0 )
+        if( fs::is_regular_file( candidate, ec ) && !ec && ::access( candidate.string().c_str(), X_OK ) == 0 )
         {
             return "ripwire";
         }

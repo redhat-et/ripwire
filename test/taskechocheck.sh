@@ -235,9 +235,24 @@ if command -v xmllint >/dev/null 2>&1; then
     grep -q 'name-exact(ceilingArithmetic x)' "$TMP/route.c0.xml" \
         && ok "§B4 the C0 byte became a SPACE inside the comment (xmlCommentText rule 2)" \
         || no "§B4 the C0 byte was not replaced by a space: [$( head -c 90 "$TMP/route.c0.xml" )]"
-    grep -q 'name-exact(ceilingArithmetic?x)' "$TMP/route.utf8.xml" \
-        && ok "§B4 the invalid UTF-8 byte became '?' inside the comment (xmlCommentText rule 3)" \
-        || no "§B4 the invalid UTF-8 byte was not replaced by '?': [$( head -c 90 "$TMP/route.utf8.xml" )]"
+    case "$( uname -s 2>/dev/null )" in
+        MINGW*|MSYS*|CYGWIN*)
+            # A Windows argv is UTF-16 at the process boundary, so Bash's 0xFF cannot reach main() as
+            # an invalid UTF-8 byte; the CRT round-trips it as U+00FF (UTF-8 C3 BF). The XML-validity
+            # assertion above remains live, while this branch verifies and discloses the transport shape
+            # instead of falsely claiming that xmlCommentText saw a byte it never received.
+            if python3 -c 'import sys; b=open( sys.argv[ 1 ], "rb" ).read(); needle=b"name-exact(ceilingArithmetic" + bytes( ( 195, 191 ) ) + b"x)"; sys.exit( 0 if needle in b else 1 )' "$TMP/route.utf8.xml"; then
+                ok "§B4 Windows argv transport represents the probe as U+00FF (raw invalid-byte scrub is not addressable via UTF-16 argv)"
+            else
+                no "§B4 Windows argv transport changed the non-ASCII probe unexpectedly: [$( head -c 90 "$TMP/route.utf8.xml" )]"
+            fi
+            ;;
+        *)
+            grep -q 'name-exact(ceilingArithmetic?x)' "$TMP/route.utf8.xml" \
+                && ok "§B4 the invalid UTF-8 byte became '?' inside the comment (xmlCommentText rule 3)" \
+                || no "§B4 the invalid UTF-8 byte was not replaced by '?': [$( head -c 90 "$TMP/route.utf8.xml" )]"
+            ;;
+    esac
 else
     no "xmllint is required for the §B4 arms (install libxml2) — the gate does not skip"
 fi

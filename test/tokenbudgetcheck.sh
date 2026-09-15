@@ -357,6 +357,7 @@ else
     est_abs_sum=0
     while read -r label o200k cl100k pinned_est rest; do
         case "$label" in ""|\#*) continue ;; esac
+        rest="${rest%$'\015'}"
         # shellcheck disable=SC2086  # $rest is the pinned argv: deliberately word-split, never quoted
         EST_OUT="$( cd "$EST_TMP" && "$BIN" f $rest 2>/dev/null )"
         EST_GOT="$( printf '%s' "$EST_OUT" | grep -oE 'est_tokens="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"

@@ -27,7 +27,7 @@ command -v python3 >/dev/null 2>&1 || { echo "agentloopclaudecheck: python3 requ
 [ -f "$ROOT/bench/agentloop/run_agentloop.py" ] || { echo "agentloopclaudecheck: harness missing"; exit 2; }
 
 python3 - "$ROOT" "$TMP" >"$TMP/out.txt" 2>&1 <<'PY'
-import hashlib, inspect, json, pathlib, subprocess, sys
+import hashlib, inspect, json, os, pathlib, subprocess, sys
 
 root, tmp = sys.argv[1], sys.argv[2]
 sys.path.insert( 0, str( pathlib.Path( root ) / "bench" / "agentloop" ) )
@@ -151,11 +151,11 @@ if pathlib.Path( shim ).parent.resolve().is_relative_to( pathlib.Path( run_home 
     ok( "the ripwire shim lives in the run home" )
 else:
     no( "the shim is outside the run home" )
-if env[ "PATH" ].split( ":" )[ 0 ] == str( pathlib.Path( shim ).parent ):
+if env[ "PATH" ].split( os.pathsep )[ 0 ] == str( pathlib.Path( shim ).parent ):
     ok( "the shim directory is PREPENDED to PATH (settings.json's own PATH re-prepend is excluded "
         "by --setting-sources '' — the two together are what item 8 of the scrub requires)" )
 else:
-    no( "the shim directory is not first on PATH: %r" % env[ "PATH" ].split( ":" )[ :2 ] )
+    no( "the shim directory is not first on PATH: %r" % env[ "PATH" ].split( os.pathsep )[ :2 ] )
 
 # ── 7. the transcript is retained — without it there is no ANSWER to grade ──────────────────────
 retain = pathlib.Path( tmp ) / "events" / "x.json"

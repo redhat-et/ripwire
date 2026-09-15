@@ -933,8 +933,16 @@ inline void printSkillScanArtifact( std::FILE* out, const std::vector<SkillScanR
     for( std::size_t i = 0; i < shown; ++i )
     {
         const SkillScanRow& r = rows[i];
+        std::string displayPath = r.path;
+        for( char& ch : displayPath )
+        {
+            if( ch == char( 92 ) )
+            {
+                ch = '/';
+            }
+        }
         rw::emitTo( out, "<f p=\"{}:{}\" rule=\"{}\" sev=\"{}\"/>",
-                     escapeXmlAttr( r.path ).c_str(), r.finding.line, r.finding.rule, skillSeverityAttr( r.finding.sev ).c_str() );
+                     escapeXmlAttr( displayPath ).c_str(), r.finding.line, r.finding.rule, skillSeverityAttr( r.finding.sev ).c_str() );
     }
     rw::emitRaw( out, "</skillscan>\n" );
 }

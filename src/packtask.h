@@ -688,7 +688,7 @@ inline const std::string& d1ReadSrcCached( const IngestResult& ing, std::uint32_
         return it->second;
     }
     std::string body;
-    if( std::FILE* in = std::fopen( diskPath( ing, fileId ).c_str(), "rb" ) )
+    if( std::FILE* in = rw::compat::rw_fopen_utf8( diskPath( ing, fileId ).c_str(), "rb" ) )
     {
         char buf[ 4096 ];  std::size_t n;
         while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )

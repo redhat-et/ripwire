@@ -44,6 +44,9 @@ concurrency:
   # superseded. A queued main run costs runner minutes; a cancelled one costs the answer.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 # Never RIPWIRE_NATIVE in CI: -march=native would bake in whatever ISA the CI runner's host happens to
 # expose that week, defeating the entire point of testing the portable default.
 
@@ -88,6 +91,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # churn/co-change gates read real git history — a shallow clone reddens them
+          persist-credentials: false
 
       - name: Install clang-format / clang-tidy (PINNED major — see the job comment)
         run: |
@@ -209,6 +213,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # churn/co-change gates read real git history — a shallow clone reddens them
+          persist-credentials: false
 
       # clang is installed on BOTH Linux legs, not only the clang one. optremarkscheck's Clang-only
       # configure arms pin `clang++` when the default front end is not Clang, so the gcc leg keeps that
@@ -397,6 +402,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # RHEL 9's default gcc is 11, which does not implement C++23 — CMakeLists sets CXX_STANDARD 23 with
       # STANDARD_REQUIRED ON, so the configure would fail outright. gcc-toolset-N is Red Hat's own supported
@@ -460,6 +466,65 @@ jobs:
       - name: G4 — xmllint --noout
         run: ./build/ripwire test/fixture --no-cache | xmllint --noout -
 
+  # ─── windows: native Windows validation with MSVC ABI + Clang ────────────────────────────────────────
+  windows:
+    name: windows (windows-latest, clang)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configure (portable — clang + ninja)
+        shell: bash
+        run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DRIPWIRE_LTO=OFF
+
+      - name: Build
+        run: cmake --build build -j
+
+      # Build the HEAD comparison binary once, before the suite. The monotonicity gates use it in staged
+      # mode; building it inside a gate would multiply the Windows compile cost and can race the gate budget.
+      - name: Stage the HEAD comparison binary (once before the Windows suite)
+        shell: bash
+        run: |
+          export TMPDIR="$( cygpath -u "$RUNNER_TEMP" )"
+          export RIPWIRE_HEADBIN_BUILD_LOG="$TMPDIR/headbin-build.log"
+          . test/lib/headbinlib.sh
+          hb="$( ripwire_head_binary "$PWD" "$TMPDIR" )" || { echo "HEAD binary build failed; last 80 lines of its log:"; tail -n 80 "$RIPWIRE_HEADBIN_BUILD_LOG"; exit 1; }
+          ripwire_headbin_verify "$hb" "$( git rev-parse HEAD )"
+          "$hb" --version
+          echo "RIPWIRE_HEADBIN=$hb" >> "$GITHUB_ENV"
+
+      - name: Doctor check
+        run: .\build\ripwire.exe . --doctor
+
+      - name: Self-run on the fixture
+        run: .\build\ripwire.exe test/fixture --no-cache
+
+      - name: det-gate — 2-run byte-identical diff
+        shell: bash
+        run: |
+          ./build/ripwire.exe test/fixture --no-cache > run_a.xml
+          ./build/ripwire.exe test/fixture --no-cache > run_b.xml
+          diff -q run_a.xml run_b.xml
+
+      - name: Determinism gate (test/det-gate.sh)
+        shell: bash
+        run: bash test/det-gate.sh build/ripwire.exe
+
+      - name: Full native Windows gate suite
+        shell: bash
+        run: python test/pargates.py . build/ripwire.exe -j 6 --budget-scale 4
+
   asan:
     name: asan (${{ matrix.os }})
     strategy:
@@ -490,6 +555,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # churn/co-change gates read real git history — a shallow clone reddens them
+          persist-credentials: false
 
       - name: Install tooling (Linux)
         if: runner.os == 'Linux'

@@ -56,7 +56,7 @@ if [ "$rc" = 1 ]; then ok "(1) oracle: a plan task with only one of its two file
 
 # ── 2–4. the python contract ───────────────────────────────────────────────────────────────────────────
 python3 - "$ROOT" "$BIN" "$TMP" >"$TMP/out.txt" 2>&1 <<'PY'
-import json, os, pathlib, subprocess, sys
+import json, os, pathlib, re, subprocess, sys
 root, ripwire_bin, tmp = sys.argv[1], sys.argv[2], sys.argv[3]
 sys.path.insert( 0, str( pathlib.Path( root ) / "bench" / "agentloop" ) )
 import run_editsuite as E
@@ -82,12 +82,22 @@ dup = [ n for n in ( "def prepare_opencode_environment", "def prepare_codex_envi
 ( ok if all( n in src for n in ( "R.prepare_environment(", "R.build_harness_command(", "R.sh(" ) ) else no )(
     "(2) run_one_edit calls R.prepare_environment / R.build_harness_command / R.sh" )
 env, run_home, shim = R.prepare_environment( "opencode", tmp, "edit-r1", "ripwire_edit", 1, ripwire_bin )
-( ok if env.get( "HOME" ) and env["HOME"].startswith( tmp ) and env.get( "OPENCODE_DISABLE_CLAUDE_CODE" ) == "1" else no )(
+( ok if env.get( "HOME" ) and pathlib.Path( env["HOME"] ).resolve().is_relative_to( pathlib.Path( tmp ).resolve() ) \
+      and env.get( "OPENCODE_DISABLE_CLAUDE_CODE" ) == "1" else no )(
     "(2) the opencode environment is the isolated one (HOME under the work dir, CLAUDE.md disabled)" )
 ( ok if env["PATH"].split( os.pathsep )[0] == str( pathlib.Path( shim ).parent ) else no )( "(2) the logging shim is first on PATH" )
 sub = pathlib.Path( tmp ) / "pwdprobe"; sub.mkdir( exist_ok=True )
 p = R.sh( [ "sh", "-c", "printf %s \"$PWD\"" ], cwd=str( sub ), env=dict( os.environ ) )
-( ok if p.stdout == str( sub ) else no )( "(2) sh(cwd=X) sets the child's \$PWD to X (opencode roots native tools at \$PWD): got %r" % p.stdout )
+def equivalent_path( value ):
+    value = value.strip()
+    if os.name == "nt":
+        match = re.match( r"^/([A-Za-z])(?:/|$)", value )
+        if match:
+            value = match.group( 1 ).upper() + ":" + value[ 2: ]
+        return os.path.normcase( os.path.normpath( value ) )
+    return value
+( ok if equivalent_path( p.stdout ) == equivalent_path( str( sub ) ) else no )(
+    "(2) sh(cwd=X) sets the child's \\$PWD to X (opencode roots native tools at \\$PWD): got %r" % p.stdout )
 
 # 3. alternating arm order, arms adjacent
 cells = E.matrix( tasks )

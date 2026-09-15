@@ -42,7 +42,16 @@ ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write th
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
-command -v xmllint >/dev/null 2>&1 || { echo "runtracecheck: xmllint required"; exit 2; }
+PYTHON3="${RIPWIRE_PYTHON:-python3}"
+command -v "$PYTHON3" >/dev/null 2>&1 || PYTHON3=python
+if command -v xmllint >/dev/null 2>&1; then
+    xmlcheck(){ xmllint --noout "$1"; }
+elif [ "$($PYTHON3 -c 'import os; print( os.name )' 2>/dev/null)" = nt ] && [ -f "$ROOT/test/xmlcheck.py" ]; then
+    xmlcheck(){ "$PYTHON3" "$ROOT/test/xmlcheck.py" --noout "$1"; }
+else
+    echo "runtracecheck: xmllint or the native Windows XML checker required"
+    exit 2
+fi
 
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/src" "$WORK/traces" "$WORK/out"
@@ -73,7 +82,7 @@ EOF
 # no-newline-outside-CDATA helper (G4). Strips CDATA sections, then counts surviving newlines.
 newlinesOutsideCdata()
 {
-    python3 - "$1" <<'PY'
+    "$PYTHON3" - "$1" <<'PY'
 import re, sys
 t = open( sys.argv[1], "rb" ).read().decode( "utf-8", "replace" )
 t = re.sub( r"<!\[CDATA\[.*?\]\]>", "", t, flags = re.S )
@@ -273,7 +282,7 @@ fi
 
 # ── (K) G4 on every surface: xmllint-clean, no newline outside CDATA ───────────────────────────────────
 for doc in fail pass tmo miss bare; do
-    if xmllint --noout "$WORK/out/$doc.xml" 2>/dev/null; then
+    if xmlcheck "$WORK/out/$doc.xml" 2>/dev/null; then
         ok "(K) $doc.xml is well-formed XML"
     else
         no "(K) $doc.xml fails xmllint"

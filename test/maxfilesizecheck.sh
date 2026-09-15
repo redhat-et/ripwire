@@ -27,6 +27,10 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "maxfilesizecheck: BIN=$BIN  ROOT=$ROOT"
+PYTHON="${RIPWIRE_PYTHON:-${PYTHON_NATIVE:-}}"
+[ -n "$PYTHON" ] || PYTHON="$( command -v python.exe 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null || true )"
+[ -n "$PYTHON" ] || { echo "native Python required"; exit 2; }
+if command -v cygpath >/dev/null 2>&1; then PYROOT="$( cygpath -w "$ROOT" )"; else PYROOT="$ROOT"; fi
 
 # ── 1. a low ceiling drops files and MUST disclose how many
 "$BIN" "$ROOT" --max-file-size=8K --top-k=3 >"$TMP/small" 2>/dev/null
@@ -100,7 +104,7 @@ T1M="$( totalAt --max-file-size=1M )";  TDEF="$( totalAt '' )"
 # `find ... -not -path '*/build*'`, which does not exclude a build dir named relbuild/ (trap #25: an
 # exclusion LIST silently admits the member that breaks its pattern) and counted 197 where the tool
 # reports 3. git ls-files is the tool's own population, so the two cannot drift apart again.
-BIGJSON="$( cd "$ROOT" && git ls-files -z '*.json' | xargs -0 -I{} sh -c 'test $(wc -c <"{}") -gt 262144 && echo {}' 2>/dev/null | wc -l | tr -d ' ' )"
+BIGJSON="$( "$PYTHON" -c 'import os,subprocess,sys; root=sys.argv[1]; raw=subprocess.check_output(["git","-C",root,"ls-files","-z","--","*.json"]); print(sum(os.path.getsize(os.path.join(root,p.decode("utf-8"))) > 262144 for p in raw.split(bytes([0])) if p))' "$PYROOT" )"
 [ "${BIGJSON:-0}" -ge 1 ] \
     && ok "premise holds: $BIGJSON .json over the 256 KB JSON-lane ceiling exist in this tree" \
     || no "premise FAILED: no >256K .json in the tree — the invariant arm above cannot discriminate"
@@ -151,7 +155,7 @@ fi
 # The JSON header is built separately from the XML one; §P0.5d's first landing covered only XML, so an
 # MCP/json reader was still shown the survivors as if they were the corpus.
 jskip="$( "$BIN" "$ROOT" --max-file-size=8K --json --top-k=3 2>/dev/null \
-          | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("skipped_oversize","ABSENT"))' )"
+          | "$PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d.get("skipped_oversize","ABSENT"))' )"
 case "$jskip" in
     ABSENT ) no "--json at 8K carries no skipped_oversize key (JSON reader gets zero disclosure)" ;;
     0 ) no "--json at 8K says skipped_oversize=0 — a false zero" ;;
@@ -160,12 +164,12 @@ esac
 # absence measured where absence is TRUE (test/fixture) — see §2's note: $ROOT carries three .json past the
 # JSON-lane ceiling, so its default run legitimately discloses skipped_oversize=3 (§B13.1).
 jdef="$( "$BIN" "$ROOT/test/fixture" --json --top-k=3 2>/dev/null \
-         | python3 -c 'import json,sys; d=json.load(sys.stdin); print("present" if "skipped_oversize" in d else "absent")' )"
+         | "$PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print("present" if "skipped_oversize" in d else "absent")' )"
 [ "$jdef" = "absent" ] && ok "--json on test/fixture omits skipped_oversize (absent = nothing skipped)" \
                        || no "--json on test/fixture unexpectedly carries skipped_oversize"
 # and the JSON header must carry the JSON-lane drop too — the XML/JSON dialects report ONE population
 jrootskip="$( "$BIN" "$ROOT" --json --top-k=1 2>/dev/null \
-              | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("skipped_oversize","ABSENT"))' )"
+              | "$PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d.get("skipped_oversize","ABSENT"))' )"
 [ "$jrootskip" = "${BIGJSON:-0}" ] \
     && ok "--json default run on \$ROOT discloses skipped_oversize=$jrootskip, same as XML" \
     || no "--json default run says skipped_oversize=$jrootskip, XML says ${BIGJSON:-0} — the two dialects disagree about the population"

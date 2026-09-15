@@ -164,29 +164,69 @@ headbin_refusal()
 # temp-dir cleanup does. Non-zero, with the reason on stderr, when REV names no commit or the clone fails.
 ripwire_private_checkout()
 {
-    local _root="$1" _rev="$2" _dest="$3" _sha _common
+    local _root="$1" _rev="$2" _dest="$3" _sha _common _clone_common _clone_dest
     _sha="$( cd "$_root" && git rev-parse -q --verify "$_rev^{commit}" )"
     case "$_sha" in
         ""|*[!0-9a-f]*) echo "headbinlib: '$_rev' names no commit in $_root" >&2; return 1 ;;
     esac
     _common="$( cd "$_root" && cd "$( git rev-parse --git-common-dir )" && pwd )" || return 1
-    git clone -q --shared --no-checkout "$_common" "$_dest" && git -C "$_dest" checkout -q --detach "$_sha"
+    _clone_common="$_common"; _clone_dest="$_dest"
+    if command -v cygpath >/dev/null 2>&1; then
+        _clone_common="$( cygpath -w "$_common" )"
+        _clone_dest="$( cygpath -w "$_dest" )"
+    fi
+    git clone -q --shared --no-checkout "$_clone_common" "$_clone_dest" \
+        && ( cd "$_dest" && git checkout -q --detach "$_sha" )
 }
 
 # _headbin_build ROOT SHA WORKDIR OUT  →  builds SHA from a private checkout under WORKDIR, copies the binary to OUT
 _headbin_build()
 {
-    local _root="$1" _sha="$2" _work="$3" _out="$4" _wt _bld _rc=1 _log="${RIPWIRE_HEADBIN_BUILD_LOG:-/dev/null}"
+    local _root="$1" _sha="$2" _work="$3" _out="$4" _wt _bld _cmake_wt _cmake_bld _build_config _clang_cl _ninja _llvm_dir _ninja_dir _built _rc=1 _log="${RIPWIRE_HEADBIN_BUILD_LOG:-/dev/null}"
+    local -a _cmake_args=()
     _wt="$_work/head"; _bld="$_work/build"
+    _cmake_wt="$_wt"; _cmake_bld="$_bld"
+    if command -v cygpath >/dev/null 2>&1; then
+        _cmake_wt="$( cygpath -w "$_wt" )"
+        _cmake_bld="$( cygpath -w "$_bld" )"
+        _clang_cl="clang-cl"
+        for _llvm_dir in \
+            "${RIPWIRE_LLVM_BIN:-}" \
+            "/c/Program Files/LLVM/bin" \
+            "/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/Llvm/x64/bin" \
+            "/c/Program Files/Microsoft Visual Studio/2019/BuildTools/VC/Tools/Llvm/x64/bin"; do
+            if [ -f "$_llvm_dir/clang-cl.exe" ]; then
+                _clang_cl="$( cygpath -w "$_llvm_dir/clang-cl.exe" )"
+                break
+            fi
+        done
+        _ninja="ninja"
+        for _ninja_dir in \
+            "/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja" \
+            "/c/Program Files/Microsoft Visual Studio/2019/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja"; do
+            if [ -f "$_ninja_dir/ninja.exe" ]; then
+                _ninja="$( cygpath -w "$_ninja_dir/ninja.exe" )"
+                break
+            fi
+        done
+        _cmake_args=( -G Ninja "-DCMAKE_C_COMPILER=$_clang_cl" "-DCMAKE_CXX_COMPILER=$_clang_cl"
+                      "-DCMAKE_MAKE_PROGRAM=$_ninja" -DRIPWIRE_LTO=OFF )
+        _build_config="--config Release"
+    fi
     mkdir -p "$_work" || return 1
     # stdout to the log as well: ripwire_head_binary runs inside $( ), where a stray line would become the binary path.
     if ripwire_private_checkout "$_root" "$_sha" "$_wt" >>"$_log" 2>&1; then
         # --target ripwire: the comparison needs that one binary. The default target also builds ripwire_probe and the
         # three doctest binaries, which took another 18 s after a 90 s ripwire-only build (dev machine, 2026-09-10).
-        if cmake -S "$_wt" -B "$_bld" -DRIPWIRE_NATIVE=ON >>"$_log" 2>&1 \
-           && cmake --build "$_bld" -j --target ripwire >>"$_log" 2>&1 \
-           && [ -x "$_bld/ripwire" ]; then
-            cp "$_bld/ripwire" "$_out" && chmod +x "$_out" && _rc=0
+        if cmake -S "$_cmake_wt" -B "$_cmake_bld" "${_cmake_args[@]}" -DRIPWIRE_NATIVE=ON >>"$_log" 2>&1 \
+           && cmake --build "$_cmake_bld" ${_build_config:+$_build_config} -j --target ripwire >>"$_log" 2>&1; then
+            _built="$_bld/ripwire"
+            [ -f "$_built" ] || _built="$_bld/Release/ripwire"
+            [ -f "$_built" ] || _built="$_bld/ripwire.exe"
+            [ -f "$_built" ] || _built="$_bld/Release/ripwire.exe"
+            if [ -f "$_built" ]; then
+                cp "$_built" "$_out" && chmod +x "$_out" && _rc=0
+            fi
         fi
     fi
     rm -rf "$_work" 2>/dev/null

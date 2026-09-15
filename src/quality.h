@@ -42,6 +42,11 @@
 #include <cerrno>      // EWOULDBLOCK — the LOCK_NB retry predicate
 #include <ctime>       // ::nanosleep — the lock's bounded 10 ms poll
 
+#if defined(_WIN32)
+#include <aclapi.h>
+#include <sddl.h>
+#endif
+
 #include <algorithm>
 #include <atomic>       // Phase-M: the tmp-name sequence counter (atomicWriteFile); also the A5 process-once cache-sweep guard
 #include <cctype>       // std::isxdigit/std::isdigit — B10.2d churn-blame porcelain parsing
@@ -1351,8 +1356,167 @@ inline ContentIdIndex contentIdsBySym( const IngestResult& ing, const Graph& g, 
 // /tmp/ripwire-<uid>, always mode 0700. Keeping our artifacts one level below TMPDIR is a performance
 // boundary as well as a security one: cache hygiene must never enumerate an unbounded shared TMPDIR full of
 // unrelated agent-session files. Returns the dir with NO trailing slash. Deterministic per (user, env).
+/// Selects and validates the per-user cache directory, using a fail-closed path on ownership errors.
 inline std::string cacheDirLadder()
 {
+#if defined(_WIN32)
+    std::string d;
+    const char* tmpDir = std::getenv( "TMPDIR" );
+    const char* localAppData = std::getenv( "LOCALAPPDATA" );
+    const char* tempDir = std::getenv( "TEMP" );
+    if( !tempDir ) tempDir = std::getenv( "TMP" );
+
+    // XDG_CACHE_HOME is the explicit cache root when a caller supplies one. TMPDIR is the per-process fallback
+    // used by the harness and by callers that need isolation. Either may arrive as a Git-Bash /tmp spelling even
+    // though this binary is native, so normalize it once before the Win32 directory/security checks below.
+    if( const char* xdgCache = std::getenv( "XDG_CACHE_HOME" ); xdgCache && *xdgCache )
+    {
+        d = rw::compat::rw_windows_path_from_msys( xdgCache );
+    }
+    else if( tmpDir && *tmpDir )
+    {
+        d = rw::compat::rw_windows_path_from_msys( tmpDir );
+    }
+    else if( localAppData && *localAppData )
+    {
+        d = localAppData;
+    }
+    else if( tempDir && *tempDir )
+    {
+        d = tempDir;
+    }
+    else
+    {
+        d = "C:/Windows/Temp";
+    }
+    while( d.size() > 1 && ( d.back() == '/' || d.back() == '\\' ) )
+    {
+        d.pop_back();
+    }
+    d += "/ripwire";
+
+    const std::wstring wideDir = rw::compat::rw_utf8_to_wide( d );
+    if( wideDir.empty() )
+    {
+        return "NUL";
+    }
+
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof( sa );
+    sa.bInheritHandle = FALSE;
+    PSECURITY_DESCRIPTOR pSD = nullptr;
+    if( !ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            L"D:P(A;OICI;GA;;;OW)(A;OICI;GA;;;BA)",
+            SDDL_REVISION_1,
+            &pSD,
+            nullptr ) )
+    {
+        return "NUL";
+    }
+    sa.lpSecurityDescriptor = pSD;
+
+    const BOOL created = CreateDirectoryW( wideDir.c_str(), &sa );
+    const DWORD createError = created ? ERROR_SUCCESS : GetLastError();
+    if( !created && createError != ERROR_ALREADY_EXISTS )
+    {
+        LocalFree( pSD );
+        return "NUL";
+    }
+
+    if( !created )
+    {
+        PACL existingDacl = nullptr;
+        BOOL daclPresent = FALSE;
+        BOOL daclDefaulted = FALSE;
+        if( !GetSecurityDescriptorDacl( pSD, &daclPresent, &existingDacl, &daclDefaulted ) || !daclPresent || !existingDacl
+            || SetNamedSecurityInfoW( const_cast<LPWSTR>( wideDir.c_str() ),
+                                       SE_FILE_OBJECT,
+                                       DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                                       nullptr,
+                                       nullptr,
+                                       existingDacl,
+                                       nullptr ) != ERROR_SUCCESS )
+        {
+            LocalFree( pSD );
+            return "NUL";
+        }
+    }
+    LocalFree( pSD );
+
+    const DWORD attrs = GetFileAttributesW( wideDir.c_str() );
+    if( attrs == INVALID_FILE_ATTRIBUTES || !( attrs & FILE_ATTRIBUTE_DIRECTORY ) )
+    {
+        return "NUL";
+    }
+
+    HANDLE hToken = NULL;
+    if( !OpenProcessToken( GetCurrentProcess(), TOKEN_QUERY, &hToken ) )
+    {
+        return "NUL";
+    }
+
+    DWORD tokenLen = 0;
+    GetTokenInformation( hToken, TokenUser, nullptr, 0, &tokenLen );
+    if( tokenLen == 0 )
+    {
+        CloseHandle( hToken );
+        return "NUL";
+    }
+    std::vector<BYTE> tokenBuf( tokenLen );
+    if( !GetTokenInformation( hToken, TokenUser, tokenBuf.data(), tokenLen, &tokenLen ) )
+    {
+        CloseHandle( hToken );
+        return "NUL";
+    }
+    const TOKEN_USER* pTokenUser = reinterpret_cast<const TOKEN_USER*>( tokenBuf.data() );
+    const PSID userSid = pTokenUser->User.Sid;
+
+    PSID pSidOwner = nullptr;
+    PSECURITY_DESCRIPTOR pSDGet = nullptr;
+    const DWORD res = GetNamedSecurityInfoW(
+        wideDir.c_str(),
+        SE_FILE_OBJECT,
+        OWNER_SECURITY_INFORMATION,
+        &pSidOwner,
+        nullptr,
+        nullptr,
+        nullptr,
+        &pSDGet );
+
+    bool ownerMatch = false;
+    if( res == ERROR_SUCCESS && pSidOwner && userSid )
+    {
+        if( EqualSid( pSidOwner, userSid ) )
+        {
+            ownerMatch = true;
+        }
+        else
+        {
+            SID_IDENTIFIER_AUTHORITY ntAuth = SECURITY_NT_AUTHORITY;
+            PSID adminSid = nullptr;
+            if( AllocateAndInitializeSid( &ntAuth, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &adminSid ) )
+            {
+                if( EqualSid( pSidOwner, adminSid ) )
+                {
+                    ownerMatch = true;
+                }
+                FreeSid( adminSid );
+            }
+        }
+    }
+
+    if( pSDGet )
+    {
+        LocalFree( pSDGet );
+    }
+    CloseHandle( hToken );
+
+    if( ownerMatch )
+    {
+        return d;
+    }
+    return "NUL";
+#else
     std::string d;
     const char* tmpDir = std::getenv( "TMPDIR" );
     if( tmpDir && *tmpDir )
@@ -1385,6 +1549,7 @@ inline std::string cacheDirLadder()
         }
     }
     return "/dev/null/ripwire-cache-unavailable";   // unsafe/unusable candidate: make cache I/O fail closed
+#endif
 }
 
 // popen a shell command and return its trimmed stdout ("" on any failure — never crashes). THE one copy of
@@ -1402,7 +1567,7 @@ using rw::gitResolveCommitSha;
 
 // Run one short git query against `root` and return its whitespace-trimmed output (expected single-line), or
 // "" on any failure. The shared shape behind gitHeadSha / gitWindowRefSha — `tail` is everything after
-// `git -C <root>` INCLUDING redirects (so a caller can pipe, e.g. "rev-list HEAD 2>/dev/null | tail -1").
+// `git -C <root>` INCLUDING redirects; callers must use git's own limiting flags so the command is portable.
 inline std::string gitOneLine( const std::string& root, const std::string& tail )
 {
     return popenTrimmed( "git -c core.quotepath=false -C " + shSingleQuote( root ) + " " + tail );
@@ -1615,7 +1780,11 @@ inline bool gitIsAncestor( const std::string& root, const std::string& ancestor,
     const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
                           + " merge-base --is-ancestor " + shSingleQuote( ancestor ) + " " + shSingleQuote( descendant )
                           + " >/dev/null 2>&1";
+#if defined( _WIN32 )
+    return rw::compat::rw_system( cmd.c_str() ) == 0;
+#else
     return std::system( cmd.c_str() ) == 0;
+#endif
 }
 
 // Signal-to-noise round — the CHURN-WINDOW reference commit: the newest commit STRICTLY OLDER than the
@@ -1646,32 +1815,16 @@ inline std::string gitWindowRefSha( const std::string& root, std::uint32_t days 
         return preWindow;
     }
 
-    return gitOneLine( root, "rev-list HEAD 2>/dev/null | tail -1" );   // repo younger than the window → its first commit
+    return gitOneLine( root, "rev-list --max-count=1 --reverse HEAD 2>/dev/null" );   // repo younger than the window → its first commit
 }
 
 // Does `root` sit in a git repo that HAS at least one commit? A WINDOWLESS probe (no --since), so it is true
 // whenever history exists. This tells "git unavailable / not-a-repo / no-history" apart from "git fine, history
-// exists, but a --since window matched zero commits". popen failure degrades to false.
+// exists, but a --since window matched zero commits". Reuse gitOneLine so the Windows shell bridge and its
+// byte-safe pipe reader have one implementation.
 inline bool gitRepoHasHistory( const std::string& root )
 {
-    const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
-                          + " rev-parse --verify --quiet HEAD 2>/dev/null";
-    std::FILE* pipe = popen( cmd.c_str(), "r" );
-    if( !pipe )
-    {
-        return false;
-    }
-    char buf[ 128 ];
-    bool gotHead = false;
-    while( std::fgets( buf, sizeof( buf ), pipe ) )
-    {
-        if( buf[0] != '\n' && buf[0] != '\0' )
-        {
-            gotHead = true;
-        }
-    }
-    const int rc = pclose( pipe );
-    return rc == 0 && gotHead;
+    return !gitOneLine( root, "rev-parse --verify --quiet HEAD 2>/dev/null" ).empty();
 }
 
 // A4-P1 — the HEAD-snapshot ingest cache. The HEAD tree is IMMUTABLE for a given HEAD sha, so its cold ingest
@@ -1753,12 +1906,12 @@ inline constexpr std::uint64_t kCacheRootKeySeed = 1469598103934665603ull;
 
 inline std::string cacheRootKeyHex( const std::string& root )
 {
-    char*       rp = ::realpath( root.c_str(), nullptr );
+    char        resolved[ PATH_MAX ];
+    const char* rp = ::realpath( root.c_str(), resolved );
     std::string absRoot;
     if( rp != nullptr )
     {
         absRoot = rp;
-        std::free( rp );
     }
     else
     {
@@ -2081,11 +2234,13 @@ inline std::string headSnapCachePath( const std::string& repoHex, const std::str
 // spellings drifted apart in the first place; one body means a future family joins by naming a prefix and
 // a suffix rather than by re-deriving a key. `prefix`/`suffix` bracket the 16-hex field because that is the
 // only thing the two shapes disagree about — everything the pin reads is in the middle.
-inline std::string rootKeyedCachePath( const std::string& root, const char* prefix, const char* suffix )
+inline std::string rootKeyedCachePath( const std::string& root, const char* prefix, const char* suffix,
+                                       std::string_view cacheDirOverride = {} )
 {
     char tail[ 64 ];
     rw::formatTo( tail, sizeof( tail ), "{}{}{}", prefix, cacheRootKeyHex( root ).c_str(), suffix );
-    return resolveCacheBlobPath( cacheDirLadder(), tail );
+    const std::string cacheDir = cacheDirOverride.empty() ? cacheDirLadder() : std::string( cacheDirOverride );
+    return resolveCacheBlobPath( cacheDir, tail );
 }
 
 // P1-1 (2026-09-10 full audit) — THE PIN KEY. Every cache blob's filename carries the SAME 16-hex root
@@ -2503,11 +2658,17 @@ inline void sweepStaleEditLocks( const std::string& dir )
         {
             continue;
         }
-        if( ::flock( fd, LOCK_EX | LOCK_NB ) == 0 )
+        const bool reclaimable = ::flock( fd, LOCK_EX | LOCK_NB ) == 0;
+        if( reclaimable )
         {
-            ::unlink( path.c_str() );   // unheld and old: reclaim; a later editor recreates it on demand
+            (void)::flock( fd, LOCK_UN );
         }
         ::close( fd );
+        if( reclaimable )
+        {
+            std::error_code ec;
+            std::filesystem::remove( std::filesystem::path( path ), ec );   // Windows cannot unlink an open CRT handle
+        }
     }
 }
 
@@ -3004,9 +3165,17 @@ inline std::string materializeCommitTree( const std::string& root, const std::st
     if( !fs::create_directories( fs::path( tmpRoot ), ec ) && ec )
     { DEGRADED_PATH_ALERT( "quality: cannot create commit-tree temp dir" ); return {}; }
 
-    const std::string extract = "git -c core.quotepath=false -C " + shSingleQuote( root )
-                              + " archive --format=tar " + shSingleQuote( rev ) + " -- 2>/dev/null | tar -x -C " + shSingleQuote( tmpRoot ) + " 2>/dev/null";
-    if( std::system( extract.c_str() ) != 0 )
+    const std::string shellTmpRoot = fs::path( tmpRoot ).generic_string();
+    // Git for Windows applies core.autocrlf while producing an archive.  The committed tree must retain blob
+    // bytes here: normalizing HEAD to CRLF would make a clean LF working tree look like a quality regression.
+    const std::string extract      = "git -c core.autocrlf=false -c core.quotepath=false -C " + shSingleQuote( root )
+                              + " archive --format=tar " + shSingleQuote( rev ) + " -- 2>/dev/null | tar -x -C " + shSingleQuote( shellTmpRoot ) + " 2>/dev/null";
+#if defined( _WIN32 )
+    const int extractStatus = rw::compat::rw_system( extract.c_str() );
+#else
+    const int extractStatus = std::system( extract.c_str() );
+#endif
+    if( extractStatus != 0 )
     {
         DEGRADED_PATH_ALERT( "quality: git archive failed — committed tree unavailable" );
         std::error_code e;
@@ -3139,6 +3308,7 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
 {
     (void)cacheNever;
 
+
     // 1) require a git repo with a resolvable HEAD tree — the SAME windowless `rev-parse --verify HEAD` probe
     //    gitRepoHasHistory runs (one source of truth; was an inline copy of it before F13 dedup).
     if( !gitRepoHasHistory( root ) )
@@ -3153,6 +3323,7 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     const std::string exclHex   = useCache ? headSnapExclHex( excludes, maxFileBytes ) : std::string{};   // ingest-cache family
     const std::string qExclHex  = useCache ? qsnapExclHex( excludes, maxFileBytes )    : std::string{};   // Snapshot-cache family
     const std::string qsnapPath = useCache ? qsnapCachePath( repoHex, qExclHex, headSha ) : std::string{};
+
 
     // 1b) SNAPSHOT cache probe — a warm hit returns the fully-computed HEAD Snapshot and skips git archive,
     //     ingest, buildGraph, AND clone detection entirely (the ~2.4 s the ingest cache alone could not save).
@@ -3180,6 +3351,7 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     // through the atomic write below; the warm cache-probe above stays OUTSIDE the lock (lock-free hit).
     std::lock_guard<std::mutex> ingestLk( headSnapshotIngestMutex() );
 
+
     // Re-probe under the lock: whoever else held it (the lazy path or the prefetch worker) may have JUST
     // written the qsnap for this exact sha — take that hit instead of redundantly recomputing (worker + lazy
     // converge on one compute). Same validation as the pre-lock probe; a corrupt blob still falls through.
@@ -3195,6 +3367,7 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     // 2) materialize HEAD into a private temp dir under the hardened cache ladder (per-user; not the repo).
     //    A unique suffix (pid) keeps concurrent runs from colliding. Cleaned up via RAII teardown.
     const std::string tmpRoot = materializeCommitTree( root, "HEAD", "qhead" );
+
     if( tmpRoot.empty() )
     {
         return { Snapshot {}, false };
@@ -3221,8 +3394,11 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     { DEGRADED_PATH_ALERT( "quality: HEAD tree ingested empty — falling back to run --quality-baseline first" ); return { Snapshot{}, false }; }
     const Graph headG = buildGraph( headIng, nullptr );
 
-    // root = tmpRoot so keys are root-relative and match the working-tree side key-for-key (S2).
-    Snapshot snap = computeSnapshot( headIng, headG, tmpRoot );
+    // `ingest()` stores materialized paths with generic separators on Windows, while tmpRoot is kept in the
+    // native spelling for filesystem teardown and shell I/O. Use the same lexical spelling for the baseline key
+    // calculation so relForHash strips the root on both sides (S2); no realpath or case folding is involved.
+    const std::string snapshotRoot = std::filesystem::path( tmpRoot ).generic_string();
+    Snapshot snap = computeSnapshot( headIng, headG, snapshotRoot );
 
     // Persist the computed Snapshot so the NEXT --quality-delta on this HEAD skips everything above (clone
     // detection included). Best-effort: a failed write just means the next run recomputes — never a crash. The
@@ -3576,6 +3752,7 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
             continue;
         }
         const std::uint64_t key = qualityKey( ing, i, root );   // path-qualified ALWAYS — see qualityKey
+
         const Symbol&       s   = ing.symbols[i];
         // overloads share a canonical id (scope+name) → keep the MAX of each per-symbol metric per id, not
         // last-writer-wins; otherwise a low-metric overload written last makes every later delta report a

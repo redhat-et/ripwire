@@ -209,11 +209,11 @@ SLICE_JSON="$( fetch_range 3 5 )"
 case "$SLICE_JSON" in
     __ERR__*) no "range 3..5 returned an error: $SLICE_JSON";;
     *)
-        echo "$SLICE_JSON" | python3 -c 'import sys,json;b=json.load(sys.stdin);open(sys.argv[1],"w").write(b["body"]);print("PARTIAL" if b["partial"] else "FULL", "start",b["start_line"],"end",b["end_line"])' "$TMP/slice_got" > "$TMP/slice_meta"
+        echo "$SLICE_JSON" | python3 -c 'import sys,json;b=json.load(sys.stdin);open(sys.argv[1],"wb").write(b["body"].encode("utf-8"));print("PARTIAL" if b["partial"] else "FULL", "start",b["start_line"],"end",b["end_line"])' "$TMP/slice_got" > "$TMP/slice_meta"
         # truth: def starts at the perimeter signature line; body lines 3..5 = def start line + (2..4).
         DEFLINE="$( grep -n '^double perimeter(' "$GEO" | head -1 | cut -d: -f1 )"
         A=$(( DEFLINE + 2 )); B=$(( DEFLINE + 4 ))
-        sed -n "${A},${B}p" "$GEO" > "$TMP/slice_truth"
+        python3 -c 'import sys; rows=open(sys.argv[1],"rb").read().splitlines(keepends=True); open(sys.argv[2],"wb").write(b"".join(rows[int(sys.argv[3])-1:int(sys.argv[4])]))' "$GEO" "$TMP/slice_truth" "$A" "$B"
         if [ "$( cat "$TMP/slice_got" )" = "$( cat "$TMP/slice_truth" )" ]; then
             ok "range 3..5 byte-matches source lines $A..$B ($( cat "$TMP/slice_meta" ))"
         else
@@ -279,7 +279,7 @@ src = (
     "    c = '\U0001F600\U0001F680'          # emoji (4-byte codepoints)\n"
     "    return a + b + c\n"
 )
-open(sys.argv[1], "w", encoding="utf-8").write(src)
+open(sys.argv[1], "wb").write(src.encode("utf-8"))
 PY
 UH="$( mcp_call \
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
@@ -306,12 +306,12 @@ except Exception:
 # 2. it must contain the multibyte characters intact (no split codepoint / no U+FFFD replacement).
 intact = ("café" in body) and ("你好世界" in body) and ("\U0001F600\U0001F680" in body)
 norepl = "�" not in body
-open(sys.argv[1], "w", encoding="utf-8").write(body)
+open(sys.argv[1], "wb").write(body.encode("utf-8"))
 print("UTF8_OK" if (valid and intact and norepl) else "UTF8_BAD valid=%s intact=%s norepl=%s" % (valid, intact, norepl))
 ' "$TMP/utf_got" > "$TMP/utfchk"
     if grep -q UTF8_OK "$TMP/utfchk"; then ok "range over multibyte body is valid UTF-8, codepoints intact, no U+FFFD"; else no "UTF-8 range unsafe: $( cat "$TMP/utfchk" )"; fi
     # cross-check the fetched slice byte-matches source lines 2..4 of the file.
-    sed -n '2,4p' "$UTF/uni.py" > "$TMP/utf_truth"
+    python3 -c 'import sys; rows=open(sys.argv[1],"rb").read().splitlines(keepends=True); open(sys.argv[2],"wb").write(b"".join(rows[1:4]))' "$UTF/uni.py" "$TMP/utf_truth"
     if [ "$( cat "$TMP/utf_got" )" = "$( cat "$TMP/utf_truth" )" ]; then
         ok "multibyte slice byte-matches source lines 2..4"
     else

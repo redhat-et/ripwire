@@ -66,6 +66,11 @@ ASAN_BIN="${RIPWIRE_ASAN_BIN:-$ROOT/asan/ripwire}"
 FIXTURE="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 fail=0
+WINDOWS_GATE=0
+case "$( uname -s 2>/dev/null )" in
+    MINGW*|MSYS*) WINDOWS_GATE=1 ;;
+esac
+[ "${OS:-}" = Windows_NT ] && WINDOWS_GATE=1
 
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -442,7 +447,23 @@ else
     ok "[disclose:control] an absent cache (cold start) is silent"
 fi
 rm -f "$TMP/absent_$$.cache"
-if [ "$( id -u )" = "0" ]; then
+if [ "$WINDOWS_GATE" -eq 1 ]; then
+    RODIR="$TMP/ro_cache_dir"; mkdir -p "$RODIR"
+    WINDOWS_RODIR="$RODIR"
+    command -v cygpath >/dev/null 2>&1 && WINDOWS_RODIR="$( cygpath -m "$WINDOWS_RODIR" )"
+    if ! MSYS_NO_PATHCONV=1 icacls.exe "$WINDOWS_RODIR" /deny '*S-1-1-0:(W)' >/dev/null 2>&1; then
+        no "[disclose:unwritable] could not deny write access to the cache directory"
+    else
+        "$BIN" "$FIXTURE" --cache="$RODIR/c.cache" --no-stable >"$TMP/disc_ro.xml" 2>"$TMP/disc_ro.err"
+        rc_ro=$?
+        MSYS_NO_PATHCONV=1 icacls.exe "$WINDOWS_RODIR" /remove:d '*S-1-1-0' >/dev/null 2>&1 || true
+        if [ "$rc_ro" -eq 0 ] && grep -q 'ripwire: cache .*cannot write' "$TMP/disc_ro.err" && diff -q "$TMP/truth.xml" "$TMP/disc_ro.xml" >/dev/null 2>&1; then
+            ok "[disclose:unwritable] an unwritable cache dir: map served (exit 0, ground truth), stderr says it cannot write"
+        else
+            no "[disclose:unwritable] expected exit 0 + a 'cannot write' notice; got exit $rc_ro, stderr: $(head -c 200 "$TMP/disc_ro.err")"
+        fi
+    fi
+elif [ "$( id -u )" = "0" ]; then
     note "[disclose:unwritable] running as root — chmod 500 does not block writes, skipping"
 else
     RODIR="$TMP/ro_cache_dir"; mkdir -p "$RODIR"; chmod 500 "$RODIR"

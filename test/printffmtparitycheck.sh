@@ -62,8 +62,8 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 hashfile(){
-    if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
-    else sha256sum "$1" | cut -d' ' -f1
+    if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1 | sed 's/[[:cntrl:]]//g'
+    else sha256sum "$1" | cut -d' ' -f1 | sed 's/[[:cntrl:]]//g'
     fi
 }
 
@@ -301,6 +301,8 @@ fi
 
 while read -r label wantRc wantOutHash wantErrHash; do
     [ -n "$label" ] || continue
+    wantOutHash="$( printf '%s' "$wantOutHash" | sed 's/[[:cntrl:]]//g' )"
+    wantErrHash="$( printf '%s' "$wantErrHash" | sed 's/[[:cntrl:]]//g' )"
     runVerb "$label"; rc=$?
     gotOutHash="$( hashfile "$TMP/out" )"
     gotErrHash="$( hashfile "$TMP/err" )"

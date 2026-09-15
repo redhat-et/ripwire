@@ -44,13 +44,43 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 cd "$ROOT"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
-echo "budgetpolicycheck: BIN=$BIN  CORPUS=$ROOT"
+CORPUS="$TMP/budget-corpus"
+mkdir -p "$CORPUS"
+{
+    printf '%s\n' \
+        'int main( int argc ) { return parseArgs( argc ) + escapeXml( argc ); }' \
+        'int parseArgs( int value ) { return value + pagerank( value ); }' \
+        'int escapeXml( int value ) { return value + power_iteration( value ); }' \
+        'int pagerank( int value ) { return value > 0 ? value - 1 : 0; }' \
+        'int power_iteration( int value ) { return value > 0 ? value - 1 : 0; }'
+    for i in $( seq 1 40 ); do
+        printf 'int budgetProbe%s( int value ) { return value + %s; }\n' "$i" "$i"
+    done
+} >"$CORPUS/budget.cpp"
+{
+    printf '# Quality delta budget policy\n\n'
+    for i in $( seq 1 120 ); do
+        printf 'quality delta gating exit codes budget disclosure withheld estimate token budget max tokens payload policy contract evidence %s\n' "$i"
+    done
+} >"$CORPUS/quality.md"
+printf 'budget policy probe\n' >"$CORPUS/README.md"
+git -C "$CORPUS" init -q
+git -C "$CORPUS" config user.email s@x.com
+git -C "$CORPUS" config user.name S
+git -C "$CORPUS" add .
+git -C "$CORPUS" commit -qm base
+for i in $( seq 1 12 ); do
+    printf '// revision %s\n' "$i" >>"$CORPUS/budget.cpp"
+    git -C "$CORPUS" add .
+    git -C "$CORPUS" commit -qm "revision-$i"
+done
+echo "budgetpolicycheck: BIN=$BIN  CORPUS=$CORPUS"
 
 # ── the two honoring lists, READ OFF THE BINARY ────────────────────────────────────────────────────────
 # Both guards fire on any honorsPaging verb, and each prints the set the flag IS honored by. `--hotspots` is
 # only the trigger: nothing about it appears in the sentence we parse.
-"$BIN" . --hotspots --max-tokens=10   >/dev/null 2>"$TMP/mt.msg"
-"$BIN" . --hotspots --token-budget=10 >/dev/null 2>"$TMP/tb.msg"
+"$BIN" "$CORPUS" --hotspots --max-tokens=10   >/dev/null 2>"$TMP/mt.msg"
+"$BIN" "$CORPUS" --hotspots --token-budget=10 >/dev/null 2>"$TMP/tb.msg"
 
 # honoring_list FILE — the flag names between "is honored by" and " — none of them", one per line.
 honoring_list() {
@@ -156,9 +186,9 @@ check_named() {   # check_named FLAG VERB VALUE
     args="$( probe_args "$verb" )"
     [ "$args" = "__SKIP__" ] && return 0
     if [ -z "$args" ]; then
-        "$BIN" . "$flag=$want" >"$TMP/out" 2>"$TMP/err"
+        "$BIN" "$CORPUS" "$flag=$want" >"$TMP/out" 2>"$TMP/err"
     else
-        "$BIN" . "$args" "$flag=$want" >"$TMP/out" 2>"$TMP/err"
+        "$BIN" "$CORPUS" "$args" "$flag=$want" >"$TMP/out" 2>"$TMP/err"
     fi
     # a probe that refused or emitted nothing measured nothing — say so rather than passing vacuously
     if [ ! -s "$TMP/out" ]; then
@@ -177,7 +207,7 @@ for v in $MT_LIST; do
     # --for honors --max-tokens ONLY under --detail=N (cli.h carves it out by hand and the sentence says
     # "--for --detail=N"): probe the shape the sentence actually names, not the bare one it excludes.
     if [ "$v" = "--for" ]; then
-        "$BIN" . '--for=pagerank power iteration' --detail=1 --max-tokens=$N >"$TMP/out" 2>/dev/null
+        "$BIN" "$CORPUS" '--for=pagerank power iteration' --detail=1 --max-tokens=$N >"$TMP/out" 2>/dev/null
         grep -qE "(max_tokens|budget_tokens|budget)=\"?$N\"?( |>|$)" "$TMP/out" \
             && ok "(B) --max-tokens --for --detail=1: names the ceiling it applied ($N)" \
             || no "(B) --max-tokens --for --detail=1: applied a $N-token ceiling and named no ceiling in the payload"
@@ -195,7 +225,7 @@ done
 # ── (C) the withheld disclosure is in the PAYLOAD, and CLI ≡ MCP for the same argument ─────────────────
 echo
 echo "=== (C) withheld facts in-band; CLI and MCP apply one policy ==="
-"$BIN" . --recall="quality delta gating exit codes" --token-budget=100 >"$TMP/gate.out" 2>"$TMP/gate.err"
+"$BIN" "$CORPUS" --recall="quality delta gating exit codes" --token-budget=100 >"$TMP/gate.out" 2>"$TMP/gate.err"
 if grep -q 'withheld' "$TMP/gate.err" && ! grep -q 'withheld' "$TMP/gate.out"; then
     no "(C) --recall --token-budget: the withheld disclosure is on stderr only — an MCP client never sees it"
 else
@@ -222,11 +252,11 @@ print("__ERROR__:" + r["error"].get("message","") if "error" in r else r["result
 # that catches "one surface discloses the ceiling and the other does not".
 for b in default 1500; do
     if [ "$b" = default ]; then
-        "$BIN" . --recall="quality delta" >"$TMP/c.out" 2>/dev/null
-        mcp_text memory_recall "{\"path\":\"$ROOT\",\"task\":\"quality delta\"}" >"$TMP/m.out"
+        "$BIN" "$CORPUS" --recall="quality delta" >"$TMP/c.out" 2>/dev/null
+        mcp_text memory_recall "{\"path\":\"$CORPUS\",\"task\":\"quality delta\"}" >"$TMP/m.out"
     else
-        "$BIN" . --recall="quality delta" --max-tokens=$b >"$TMP/c.out" 2>/dev/null
-        mcp_text memory_recall "{\"path\":\"$ROOT\",\"task\":\"quality delta\",\"budget_tokens\":$b}" >"$TMP/m.out"
+        "$BIN" "$CORPUS" --recall="quality delta" --max-tokens=$b >"$TMP/c.out" 2>/dev/null
+        mcp_text memory_recall "{\"path\":\"$CORPUS\",\"task\":\"quality delta\",\"budget_tokens\":$b}" >"$TMP/m.out"
     fi
     ch="$( head -1 "$TMP/c.out" )"; mh="$( head -1 "$TMP/m.out" )"
     if [ "$ch" = "$mh" ]; then
@@ -298,7 +328,7 @@ PY_EOF
 }
 label_probe() {   # label_probe LABEL ARGS...
     local label="$1"; shift
-    "$BIN" . "$@" >"$TMP/lab.out" 2>/dev/null
+    "$BIN" "$CORPUS" "$@" >"$TMP/lab.out" 2>/dev/null
     local nums; nums="$( root_nums "$TMP/lab.out" )"
     if [ -z "$nums" ]; then
         no "(D) $label: the root names no ceiling and no price — arm (B)'s subject vanished, fix this probe"
@@ -338,7 +368,7 @@ label_probe "--connect --max-tokens=8000"               '--connect=main,parseArg
 #   --recall --token-budget=1500 → over_ceiling=1 max_tokens=8000 est_tokens=182   (+ stderr: budget=1500)
 #   --recall --token-budget=6000 → max_tokens=8000                                 (still the default)
 for tb in 1500 6000 60000; do
-    "$BIN" . '--recall=quality delta gating exit codes' --token-budget=$tb >"$TMP/rtb.out" 2>/dev/null
+    "$BIN" "$CORPUS" '--recall=quality delta gating exit codes' --token-budget=$tb >"$TMP/rtb.out" 2>/dev/null
     head -1 "$TMP/rtb.out" | grep -qE "budget_tokens=$tb( |\$)" \
         && ok "(D) --recall --token-budget=$tb: the header names the ceiling that decided the run" \
         || no "(D) --recall --token-budget=$tb: applied a $tb-token gate and named only [$( head -1 "$TMP/rtb.out" | grep -oE '(max_tokens|budget_tokens)=[0-9]+' | tr '\n' ' ' )]"
@@ -349,7 +379,7 @@ label_probe "--recall --token-budget=1500 (refused)"  '--recall=quality delta ga
 label_probe "--recall --token-budget=60000 (honoured)" '--recall=quality delta gating exit codes' --token-budget=60000
 # and the withheld number the label refers to is an ATTRIBUTE, not only prose (arm (C) asserts it is in the
 # payload at all; this asserts a parser can read it beside the budget it lost to)
-"$BIN" . '--recall=quality delta gating exit codes' --token-budget=1500 >"$TMP/rtb.out" 2>/dev/null
+"$BIN" "$CORPUS" '--recall=quality delta gating exit codes' --token-budget=1500 >"$TMP/rtb.out" 2>/dev/null
 head -1 "$TMP/rtb.out" | grep -qE 'withheld_est_tokens=[0-9]+' \
     && ok "(D) --recall --token-budget=1500: withheld_est_tokens= rides the header beside the budget it lost to" \
     || no "(D) --recall --token-budget=1500: the withheld estimate is prose only — the header states a budget nothing on it exceeds"

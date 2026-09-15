@@ -70,14 +70,14 @@ d = sys.argv[1]
 wide   = "int wideOne( void ) { /* NEEDLEZQ " + ("x" * 2000) + " */ return 1; }"
 narrow = "int narrowOne( void ) { /* NEEDLEZQ short */ return 2; }"
 assert len(wide) > 512 and len(narrow) < 512
-open(os.path.join(d, "grep.c"), "w").write(wide + "\n" + narrow + "\n")
+open(os.path.join(d, "grep.c"), "wb").write((wide + "\n" + narrow + "\n").encode())
 # (B) one signature far past the 240 B cleanSig cap, and one comfortably under it.
 params = ", ".join("const unsigned long long int parameterNumber%02d" % i for i in range(12))
 wideSig = "int wideSignatureFunction( %s )" % params
 assert len(wideSig) > 240
-open(os.path.join(d, "sig.c"), "w").write(
+open(os.path.join(d, "sig.c"), "wb").write((
     wideSig + "\n{\n    return 0;\n}\n"
-    "int narrowSignatureFunction( int a, int b )\n{\n    return a + b;\n}\n")
+    "int narrowSignatureFunction( int a, int b )\n{\n    return a + b;\n}\n").encode())
 PY
 WIDE_LINE_BYTES="$( head -1 "$FIX/grep.c" | LC_ALL=C awk '{ print length( $0 ) }' )"
 

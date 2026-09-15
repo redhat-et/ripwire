@@ -60,7 +60,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kForLensDefaultTopN` = `40`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `320` — **12 verb(s) respond**
+`src\serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `320` — **12 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -79,7 +79,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kSpecificMinLen` = `8`
 
-`src/graph.h` — discloses: `importers_capped` — probe value `64` — **12 verb(s) respond**
+`src\graph.h` — discloses: `importers_capped` — probe value `64` — **12 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -98,7 +98,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kDocMentionMaxAnchors` = `8`
 
-`src/mention.h` — discloses: `doc_mentions_capped`, `mention_files_capped`, `mention_syms_capped`, `mention_tokens_capped` — probe value `64` — **11 verb(s) respond**
+`src\mention.h` — discloses: `doc_mentions_capped`, `mention_files_capped`, `mention_syms_capped`, `mention_tokens_capped` — probe value `64` — **11 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -116,7 +116,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kForFileTailShownCap` = `24`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `192` — **10 verb(s) respond**
+`src\serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `192` — **10 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -133,7 +133,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kForPayloadBudgetBytes` = `7500`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `60000` — **10 verb(s) respond**
+`src\serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `60000` — **10 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -150,7 +150,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kForCapTailSigBytes` = `96`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `768` — **8 verb(s) respond**
+`src\serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `768` — **8 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -165,7 +165,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kMaxExpandSibs` = `100`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `800` — **5 verb(s) respond**
+`src\serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `800` — **5 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -177,7 +177,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kCommonNameDefThreshold` = `5`
 
-`src/graph.h` — discloses: `importers_capped` — probe value `40` — **4 verb(s) respond**
+`src\graph.h` — discloses: `importers_capped` — probe value `40` — **4 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -188,7 +188,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kLintMaxPerRule` = `5000`
 
-`src/lintrules.h` — discloses: **none** — probe value `40000` — **4 verb(s) respond**
+`src\lintrules.h` — discloses: **none** — probe value `40000` — **4 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -199,7 +199,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kDocMentionMaxDocsPerAnchor` = `2`
 
-`src/mention.h` — discloses: `doc_mentions_capped`, `mention_files_capped`, `mention_syms_capped`, `mention_tokens_capped` — probe value `34` — **3 verb(s) respond**
+`src\mention.h` — discloses: `doc_mentions_capped`, `mention_files_capped`, `mention_syms_capped`, `mention_tokens_capped` — probe value `34` — **3 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -209,7 +209,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kExternalSurfaceRowCap` = `100`
 
-`src/pageview.h` — discloses: `count_capped`, `findings_capped`, `hits_capped`, `importers_capped`, `modules_capped` — probe value `800` — **2 verb(s) respond**
+`src\pageview.h` — discloses: `count_capped`, `findings_capped`, `hits_capped`, `importers_capped`, `modules_capped` — probe value `800` — **2 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -218,7 +218,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kForAutoBodyBudgetBytes` = `6000`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `48000` — **2 verb(s) respond**
+`src\serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `48000` — **2 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -227,7 +227,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kHandoffDocRows` = `4`
 
-`src/handoff.h` — discloses: `syms_capped` — probe value `36` — **2 verb(s) respond**
+`src\handoff.h` — discloses: `syms_capped` — probe value `36` — **2 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -236,7 +236,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kHandoffSymbolsPerCodeFile` = `50`
 
-`src/handoff.h` — discloses: `syms_capped` — probe value `400` — **2 verb(s) respond**
+`src\handoff.h` — discloses: `syms_capped` — probe value `400` — **2 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -245,7 +245,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kHandoffSymbolsPerDocFile` = `12`
 
-`src/handoff.h` — discloses: `syms_capped` — probe value `96` — **2 verb(s) respond**
+`src\handoff.h` — discloses: `syms_capped` — probe value `96` — **2 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -254,7 +254,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kOrdinalWindowCap` = `40`
 
-`src/ensemble.h` — discloses: `files_capped`, `findings_capped`, `syms_capped` — probe value `320` — **2 verb(s) respond**
+`src\ensemble.h` — discloses: `files_capped`, `findings_capped`, `syms_capped` — probe value `320` — **2 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -263,7 +263,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kPrDefaultBudgetTokens` = `8000`
 
-`src/prcontext.h` — discloses: **none** — probe value `64000` — **2 verb(s) respond**
+`src\prcontext.h` — discloses: **none** — probe value `64000` — **2 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -272,7 +272,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kUnitComplexityLowRiskMax` = `5`
 
-`src/dmm.h` — discloses: **none** — probe value `40` — **2 verb(s) respond**
+`src\dmm.h` — discloses: **none** — probe value `40` — **2 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -281,7 +281,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kUnitInterfacingLowRiskMax` = `2`
 
-`src/dmm.h` — discloses: **none** — probe value `34` — **2 verb(s) respond**
+`src\dmm.h` — discloses: **none** — probe value `34` — **2 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -290,7 +290,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kUnitSizeLowRiskMax` = `15`
 
-`src/dmm.h` — discloses: **none** — probe value `120` — **2 verb(s) respond**
+`src\dmm.h` — discloses: **none** — probe value `120` — **2 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -299,7 +299,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kZoomTopModuleCap` = `40`
 
-`src/pageview.h` — discloses: `count_capped`, `findings_capped`, `hits_capped`, `importers_capped`, `modules_capped` — probe value `320` — **2 verb(s) respond**
+`src\pageview.h` — discloses: `count_capped`, `findings_capped`, `hits_capped`, `importers_capped`, `modules_capped` — probe value `320` — **2 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -308,7 +308,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kBatchCap` = `16`
 
-`src/mcpverbs.h` — discloses: `blast_radius_capped`, `coboost_commits_capped`, `forgotten_capped`, `hits_capped`, `siblings_capped`, `unindexed_candidates_capped` — probe value `128` — **1 verb(s) respond**
+`src\mcpverbs.h` — discloses: `blast_radius_capped`, `coboost_commits_capped`, `forgotten_capped`, `hits_capped`, `siblings_capped`, `unindexed_candidates_capped` — probe value `128` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -316,7 +316,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kCallHierarchyRowCap` = `40`
 
-`src/pageview.h` — discloses: `count_capped`, `findings_capped`, `hits_capped`, `importers_capped`, `modules_capped` — probe value `320` — **1 verb(s) respond**
+`src\pageview.h` — discloses: `count_capped`, `findings_capped`, `hits_capped`, `importers_capped`, `modules_capped` — probe value `320` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -324,7 +324,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kCellsPerRowCap` = `12`
 
-`src/nonlocalstate.h` — discloses: `cells_capped`, `decls_capped` — probe value `96` — **1 verb(s) respond**
+`src\nonlocalstate.h` — discloses: `cells_capped`, `decls_capped` — probe value `96` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -332,7 +332,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kDefaultRecallMaxTokens` = `8000`
 
-`src/recall.h` — discloses: **none** — probe value `64000` — **1 verb(s) respond**
+`src\recall.h` — discloses: **none** — probe value `64000` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -340,7 +340,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kDefsPerNameCap` = `8`
 
-`src/contextratio.h` — discloses: `defs_capped`, `files_capped`, `syms_capped` — probe value `64` — **1 verb(s) respond**
+`src\contextratio.h` — discloses: `defs_capped`, `files_capped`, `syms_capped` — probe value `64` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -348,7 +348,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kEnsembleFileRowCap` = `20`
 
-`src/ensemble.h` — discloses: `files_capped`, `findings_capped`, `syms_capped` — probe value `160` — **1 verb(s) respond**
+`src\ensemble.h` — discloses: `files_capped`, `findings_capped`, `syms_capped` — probe value `160` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -356,7 +356,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kFileRowCap` = `40`
 
-`src/contextratio.h` — discloses: `defs_capped`, `files_capped`, `syms_capped` — probe value `320` — **1 verb(s) respond**
+`src\contextratio.h` — discloses: `defs_capped`, `files_capped`, `syms_capped` — probe value `320` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -364,7 +364,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kGrepMatchedLineMaxBytes` = `512`
 
-`src/search.h` — discloses: `hits_capped` — probe value `4096` — **1 verb(s) respond**
+`src\search.h` — discloses: `hits_capped` — probe value `4096` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -372,7 +372,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kMaxExpandIncludes` = `24`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `192` — **1 verb(s) respond**
+`src\serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `192` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -380,7 +380,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kMentionMaxSymbolsPerFile` = `3`
 
-`src/mention.h` — discloses: `doc_mentions_capped`, `mention_files_capped`, `mention_syms_capped`, `mention_tokens_capped` — probe value `35` — **1 verb(s) respond**
+`src\mention.h` — discloses: `doc_mentions_capped`, `mention_files_capped`, `mention_syms_capped`, `mention_tokens_capped` — probe value `35` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -388,7 +388,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kPanelRowCap` = `40`
 
-`src/qualitypanel.h` — discloses: `findings_capped` — probe value `320` — **1 verb(s) respond**
+`src\qualitypanel.h` — discloses: `findings_capped` — probe value `320` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -396,7 +396,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kSituBlastFilesShown` = `8`
 
-`src/situ.h` — discloses: `tests_capped`, `untested_capped` — probe value `64` — **1 verb(s) respond**
+`src\situ.h` — discloses: `tests_capped`, `untested_capped` — probe value `64` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -404,7 +404,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kSliceFlowDefaultDepth` = `8`
 
-`src/slice.h` — discloses: **none** — probe value `64` — **1 verb(s) respond**
+`src\slice.h` — discloses: **none** — probe value `64` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -412,7 +412,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kSymbolRowCap` = `40`
 
-`src/contextratio.h` — discloses: `defs_capped`, `files_capped`, `syms_capped` — probe value `320` — **1 verb(s) respond**
+`src\contextratio.h` — discloses: `defs_capped`, `files_capped`, `syms_capped` — probe value `320` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -420,7 +420,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kTreeRowCap` = `80`
 
-`src/pageview.h` — discloses: `count_capped`, `findings_capped`, `hits_capped`, `importers_capped`, `modules_capped` — probe value `640` — **1 verb(s) respond**
+`src\pageview.h` — discloses: `count_capped`, `findings_capped`, `hits_capped`, `importers_capped`, `modules_capped` — probe value `640` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -428,7 +428,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kWithGraphNodeCap` = `8`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `64` — **1 verb(s) respond**
+`src\serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `64` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |

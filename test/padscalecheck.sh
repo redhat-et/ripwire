@@ -24,6 +24,9 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+PYTHON="${RIPWIRE_PYTHON:-${PYTHON_NATIVE:-python3}}"
+PYCPU="$ROOT/test/process_cpu.py"
+if command -v cygpath >/dev/null 2>&1; then PYCPU="$( cygpath -m "$PYCPU" )"; fi
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -33,7 +36,7 @@ echo "padscalecheck: BIN=$BIN"
 # ── fixture: NLINES identical line comments, then one small function ─────────────────────────────────
 gen(){ # $1 = dir, $2 = line count
     mkdir -p "$1"
-    python3 - "$1/big.cpp" "$2" <<'PY'
+    "$PYTHON" - "$1/big.cpp" "$2" <<'PY'
 import sys
 path, n = sys.argv[ 1 ], int( sys.argv[ 2 ] )
 open( path, 'w' ).write( ( '// pad ' + 'x' * 60 + '\n' ) * n + 'int target() { return 424242; }\n' )
@@ -44,8 +47,7 @@ gen "$TMP/big"   28000
 
 # user-CPU seconds of one cold ingest of $1 (map to /dev/null; output correctness is checked separately)
 usercpu(){ # $1 = corpus dir
-    { /usr/bin/time -p "$BIN" "$1" --no-cache >/dev/null; } 2>"$TMP/t" || { echo FAIL; return; }
-    awk '/^user/ { print $2 }' "$TMP/t"
+    "$PYTHON" "$PYCPU" "$BIN" "$1"
 }
 
 # ── 1) correctness + determinism on the padded file — before any timing ──────────────────────────────

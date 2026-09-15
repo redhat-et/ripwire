@@ -745,7 +745,7 @@ inline FileHarvest harvestFile( std::string_view bytes, std::string_view path, b
 // through keeps what was read, and an empty file is an engaged empty string.
 inline std::optional<std::string> readWhole( const std::string& path )
 {
-    std::FILE* fp = std::fopen( path.c_str(), "rb" );
+    std::FILE* fp = rw::compat::rw_fopen_utf8( path.c_str(), "rb" );
     if( !fp )
     {
         return std::nullopt;

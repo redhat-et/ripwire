@@ -31,7 +31,21 @@ ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write th
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -f "$PARGATES" ] || { echo "no test/pargates.py at $PARGATES"; exit 2; }
-command -v python3 >/dev/null || { echo "python3 required"; exit 2; }
+PYTHON3="${RIPWIRE_PYTHON:-${PYTHON_NATIVE:-$( command -v python3 2>/dev/null || command -v python 2>/dev/null || true )}}"
+[ -n "$PYTHON3" ] && "$PYTHON3" -c 'import sys' >/dev/null 2>&1 || { echo "native Python required"; exit 2; }
+native_path(){
+    case "${1-}" in
+        /[A-Za-z]/*|/tmp/*)
+            if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi;;
+        *) printf '%s' "${1-}";;
+    esac
+}
+python3(){
+    local arg; local -a mapped=()
+    for arg in "$@"; do mapped+=( "$( native_path "$arg" )" ); done
+    "$PYTHON3" "${mapped[@]}"
+}
+export RIPWIRE_PYTHON="$PYTHON3"
 
 echo "pargatescheck: PARGATES=$PARGATES"
 
@@ -64,6 +78,12 @@ grep -qE '\{limit\}s' "$PARGATES" \
     && ok "static: the TimeoutExpired message embeds the numeric budget (a red names its own budget)" \
     || no "static: the timeout message no longer includes the declared limit — a red would not name its budget"
 
+for g in freshnesscheck mcpeditcheck mcpincrementalcheck mcpreloadcheck mcpeditracecheck mcpstalecheck mcpwatchercheck qsnapprefetchcheck; do
+    grep -q "\"${g}\.sh\"" "$PARGATES" \
+        && ok "static: ${g}.sh uses the native stdin-pipe adapter on Windows" \
+        || no "static: ${g}.sh is missing from the Windows stdin-pipe adapter"
+done
+
 # ── FUNCTIONAL: exercise the REAL mechanism at second-scale via two throwaway patched copies ─────────────
 # Only DEFAULT_TIMEOUT_SEC (and, in the second copy, one extra dict entry) are rewritten — the timeout
 # selection, the subprocess call, and the message formatting are byte-identical to the production script.
@@ -77,6 +97,97 @@ exit 0
 EOF
 chmod +x "$CORPUSROOT/test/probequickgate.sh"
 FAKEBIN="$TMP/fakebin"; printf '#!/usr/bin/env bash\ntrue\n' > "$FAKEBIN"; chmod +x "$FAKEBIN"
+mkdir -p "$CORPUSROOT/build"
+CACHEBIN="$CORPUSROOT/build/ripwire.exe"
+printf '#!/usr/bin/env bash\ntrue\n' > "$CACHEBIN"; chmod +x "$CACHEBIN"
+printf 'CMAKE_CXX_COMPILER:FILEPATH=C:/fake/clang-cl.exe\nRIPWIRE_CXX_HAS_BASIC_AA_SEPARATE_STORAGE:INTERNAL=1\n' > "$CORPUSROOT/build/CMakeCache.txt"
+
+# Windows' native ripwire parse pool already uses every logical CPU. Two synthetic gates are enough to
+# prove the scheduler does not multiply that pool by honoring an unsafe -j6 request by default; the
+# explicit opt-in below keeps deliberate oversubscription available for a benchmark or a CI host that
+# has independently provisioned the workload.
+cat > "$CORPUSROOT/test/probeparallel-a.sh" <<'EOF'
+#!/usr/bin/env bash
+sleep 0.2
+exit 0
+EOF
+cat > "$CORPUSROOT/test/probeparallel-b.sh" <<'EOF'
+#!/usr/bin/env bash
+sleep 0.2
+exit 0
+EOF
+chmod +x "$CORPUSROOT/test/probeparallel-a.sh" "$CORPUSROOT/test/probeparallel-b.sh"
+
+cat > "$CORPUSROOT/test/probeembeddedpython.sh" <<'EOF'
+#!/usr/bin/env bash
+set -u
+d="$( mktemp -d )"; trap 'rm -rf "$d"' EXIT
+python3 -c "open('$d/embedded.txt','wb').write(b'ok')"
+[ -f "$d/embedded.txt" ]
+EOF
+chmod +x "$CORPUSROOT/test/probeembeddedpython.sh"
+
+cat > "$CORPUSROOT/test/probecachepath.sh" <<'EOF'
+#!/usr/bin/env bash
+set -u
+expected="$PWD/build/CMakeCache.txt"
+[ -n "${RIPWIRE_CMAKE_CACHE:-}" ] && [ "$( basename "$RIPWIRE_CMAKE_CACHE" )" = CMakeCache.txt ] && [ -f "$RIPWIRE_CMAKE_CACHE" ] \
+    && grep -q '^RIPWIRE_CXX_HAS_BASIC_AA_SEPARATE_STORAGE:INTERNAL=1$' "$RIPWIRE_CMAKE_CACHE" || {
+    printf 'expected a readable selected CMakeCache.txt (%s), got %s\n' "$expected" "${RIPWIRE_CMAKE_CACHE:-<unset>}"
+    exit 1
+}
+EOF
+chmod +x "$CORPUSROOT/test/probecachepath.sh"
+
+cat > "$CORPUSROOT/test/probecacheisolation.sh" <<'EOF'
+#!/usr/bin/env bash
+set -u
+[ -n "${TMPDIR:-}" ] && [ -n "${XDG_CACHE_HOME:-}" ] && [ "$TMPDIR" = "$XDG_CACHE_HOME" ]
+EOF
+chmod +x "$CORPUSROOT/test/probecacheisolation.sh"
+
+if python3 -c 'import os; raise SystemExit(0 if os.name == "nt" else 1)' 2>/dev/null; then
+    outSafe="$( python3 "$PARGATES" "$CORPUSROOT" "$FAKEBIN" -j 6 --only probeparallel 2>&1 )"
+    echo "$outSafe" | grep -q 'jobs=1' \
+        && ok "functional(schedule): Windows caps unsafe -j6 to one gate (one ripwire already uses all CPUs)" \
+        || { no "functional(schedule): Windows did not cap unsafe -j6 to jobs=1"; echo "$outSafe" | sed 's/^/    /'; }
+    outOptIn="$( RIPWIRE_ALLOW_WINDOWS_OVERSUBSCRIPTION=1 python3 "$PARGATES" "$CORPUSROOT" "$FAKEBIN" -j 6 --only probeparallel 2>&1 )"
+    echo "$outOptIn" | grep -q 'jobs=6' \
+        && ok "functional(schedule): explicit Windows oversubscription opt-in keeps requested jobs=6" \
+        || { no "functional(schedule): explicit oversubscription opt-in did not preserve jobs=6"; echo "$outOptIn" | sed 's/^/    /'; }
+
+    outEmbedded="$( python3 "$PARGATES" "$CORPUSROOT" "$FAKEBIN" --only probeembeddedpython 2>&1 )"
+    echo "$outEmbedded" | grep -q 'gates=1 pass=1 skip=0 fail=0' \
+        && ok "functional(paths): embedded Git Bash temp prefixes are translated for native Python -c" \
+        || { no "functional(paths): native Python -c did not resolve an embedded Git Bash temp path"; echo "$outEmbedded" | sed 's/^/    /'; }
+
+    outCache="$( python3 "$PARGATES" "$CORPUSROOT" "$CACHEBIN" --only probecachepath 2>&1 )"
+    echo "$outCache" | grep -q 'gates=1 pass=1 skip=0 fail=0' \
+        && ok "functional(paths): CMake cache follows the selected binary's build directory" \
+        || { no "functional(paths): pargates.py did not pass the selected binary's CMake cache"; echo "$outCache" | sed 's/^/    /'; }
+
+    outCacheIsolation="$( python3 "$PARGATES" "$CORPUSROOT" "$FAKEBIN" --only probecacheisolation 2>&1 )"
+    echo "$outCacheIsolation" | grep -q 'gates=1 pass=1 skip=0 fail=0' \
+        && ok "functional(paths): Windows XDG_CACHE_HOME follows the private TMPDIR" \
+        || { no "functional(paths): Windows XDG_CACHE_HOME can escape the private TMPDIR"; echo "$outCacheIsolation" | sed 's/^/    /'; }
+
+    cat > "$CORPUSROOT/test/probelockgate.sh" <<'EOF'
+#!/usr/bin/env bash
+sleep 8
+exit 0
+EOF
+    chmod +x "$CORPUSROOT/test/probelockgate.sh"
+    firstOut="$TMP/pargates-lock-first.out"
+    python3 "$PARGATES" "$CORPUSROOT" "$FAKEBIN" --only probelockgate >"$firstOut" 2>&1 &
+    firstPid=$!
+    sleep 2
+    outLock="$( python3 "$PARGATES" "$CORPUSROOT" "$FAKEBIN" --only probelockgate 2>&1 )"
+    lockRc=$?
+    echo "$outLock" | grep -qi 'already running' \
+        && ok "functional(schedule): a second Windows run for the same checkout is rejected while the first is active" \
+        || { no "functional(schedule): a second Windows run was not rejected (rc=$lockRc)"; echo "$outLock" | sed 's/^/    /'; }
+    wait "$firstPid" || true
+fi
 
 patchPargates(){    # patchPargates <outfile> <extra-GATE_BUDGET_SEC-entry-or-empty>
     python3 - "$PARGATES" "$1" "$2" <<'PYEOF'
@@ -334,7 +445,7 @@ PYEOF
 
 # `env -u`: an outer PYTHONDONTWRITEBYTECODE (a developer's shell, a CI image) would make both arms pass for the
 # wrong reason -- the variable under test must come from pargates.py or from nowhere.
-outP="$( env -u PYTHONDONTWRITEBYTECODE python3 "$PARGATES" "$PYC" "$FAKEBIN" --only pycprobecheck 2>&1 )"; rcP=$?
+outP="$( env -u PYTHONDONTWRITEBYTECODE "$PYTHON3" "$( native_path "$PARGATES" )" "$( native_path "$PYC" )" "$( native_path "$FAKEBIN" )" --only pycprobecheck 2>&1 )"; rcP=$?
 printf '%s\n' "$outP" | grep -qE '^gates=1 pass=1 .* tree_writes=0$' && [ "$rcP" -eq 0 ] && [ "$( pycDirs "$PYC" )" = 0 ] \
     && ok "functional(bytecode): BYTECODE -- a gate importing from the checkout passes and leaves no __pycache__ (tree_writes=0, rc 0)" \
     || { no "functional(bytecode): BYTECODE -- expected pass, tree_writes=0, rc 0, 0 __pycache__ dirs; got rc=$rcP, $( pycDirs "$PYC" ) dir(s): $( printf '%s\n' "$outP" | grep -E '^gates=' )"; printf '%s\n' "$outP" | sed 's/^/    /' | head -20; }
@@ -342,7 +453,7 @@ printf '%s\n' "$outP" | grep -qE '^gates=1 pass=1 .* tree_writes=0$' && [ "$rcP"
 if [ ! -s "$NOPYC" ]; then
     no "functional(bytecode): MUTANT -- could not build the mutant: run()'s env line is not verbatim (the static arm above says why)"
 else
-    outM="$( env -u PYTHONDONTWRITEBYTECODE python3 "$NOPYC" "$PYCMUT" "$FAKEBIN" --only pycprobecheck 2>&1 )"; rcM=$?
+    outM="$( env -u PYTHONDONTWRITEBYTECODE "$PYTHON3" "$( native_path "$NOPYC" )" "$( native_path "$PYCMUT" )" "$( native_path "$FAKEBIN" )" --only pycprobecheck 2>&1 )"; rcM=$?
     [ "$( pycDirs "$PYCMUT" )" != 0 ] \
         && ok "functional(bytecode): MUTANT -- without the variable the same gate leaves __pycache__ behind (the probe is live)" \
         || no "functional(bytecode): MUTANT -- without the variable the probe still wrote no __pycache__: this Python never caches bytecode, so BYTECODE proves nothing"
@@ -528,9 +639,27 @@ fi
 # Liveness is read from the process table with zombies counted as dead (a container's pid 1 may never reap them). The
 # harness's own cleanup signals a group only while a recorded member of it is alive, so a reused pid is never hit, and it
 # never signals a recorded pid on its own: no probe leaves its group, so the group kill already reached every one.
-grep -q 'start_new_session=True' "$PARGATES" \
-    && ok "static(group): a gate starts in a session of its own (start_new_session=True)" \
-    || no "static(group): no start_new_session=True in pargates.py -- a gate shares pargates' process group and a stop cannot reach its children as one group"
+if python3 -c 'import os; raise SystemExit(0 if os.name == "nt" else 1)' 2>/dev/null; then
+    grep -q 'CREATE_NEW_PROCESS_GROUP' "$PARGATES" \
+        && ok "static(group): Windows gates use CREATE_NEW_PROCESS_GROUP" \
+        || no "static(group): Windows gates do not create a private process group"
+    grep -q '_CREATE_SUSPENDED = 0x00000004' "$PARGATES" \
+        && grep -q 'CREATE_NEW_PROCESS_GROUP | _CREATE_SUSPENDED' "$PARGATES" \
+        && ok "static(group): Windows gates join the Job Object before resuming the suspended leader" \
+        || no "static(group): Windows gates can create Git Bash children before Job Object association"
+    grep -q 'KILL_ON_JOB_CLOSE' "$PARGATES" \
+        && ok "static(group): Windows gates use KILL_ON_JOB_CLOSE for descendant cleanup" \
+        || no "static(group): Windows gates have no Job Object kill-on-close guard"
+    for exclusive_gate in a9disclosurecheck.sh agentloopgradercheck.sh agenttablecheck.sh attrvocabcheck.sh deckcheck.sh editcheckcheck.sh; do
+        grep -qE "exclusive = .*${exclusive_gate}" "$PARGATES" \
+            && ok "static(schedule): $exclusive_gate runs exclusively after the concurrent wave" \
+            || no "static(schedule): $exclusive_gate is exposed to concurrent contention"
+    done
+else
+    grep -q 'start_new_session=True' "$PARGATES" \
+        && ok "static(group): a gate starts in a session of its own (start_new_session=True)" \
+        || no "static(group): no start_new_session=True in pargates.py -- a gate shares pargates' process group and a stop cannot reach its children as one group"
+fi
 grep -qE '^KILL_GRACE_SEC = 10$' "$PARGATES" \
     && ok "static(group): KILL_GRACE_SEC is the declared 10 s between a stop's TERM and its KILL (the arms below patch it to 3 s)" \
     || no "static(group): KILL_GRACE_SEC is not the declared 10 -- the stop's TERM-to-KILL grace moved"
@@ -541,15 +670,30 @@ grep -qE '^STOP_POLL_SEC = 0\.5$' "$PARGATES" \
 GROUPPY="$TMP/groupstop.py"
 cat > "$GROUPPY" <<'PYEOF'
 # groupstop.py PARGATES WORK FAKEBIN -> ROW PASS|FAIL text ...; DONE n
-import ast, io, os, re, signal, subprocess, sys, time
+import ast, csv, io, os, re, signal, subprocess, sys, time
 from concurrent.futures import ThreadPoolExecutor
 
 PARGATES, WORK, FAKEBIN = sys.argv[1], sys.argv[2], sys.argv[3]
+WINDOWS = os.name == "nt"
 LABELS = ("gate", "bg", "noterm", "mid", "grandchild", "fg")
-CLEAN_LABELS = ("gate", "cleaner", "fg")
+CLEAN_LABELS = ("gate", "cleanhelper", "cleaner", "fg")
 BUDGET_T, BUDGET_I, GRACE = 6, 120, 3
 REACH_SEC, FINISH_SEC, STOP_BOUND_SEC, CONTROL_WAIT_SEC, SETTLE_SEC = 20, 30, 15, 8, 3
 TIMEOUT_LINE = "TIMEOUT after %ds (declared budget=%ds)" % (BUDGET_T, BUDGET_T)
+
+def launch_options():
+    return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {"start_new_session": True}
+
+
+def kill_windows(pid, tree=False):
+    args = ["taskkill", "/PID", str(pid)]
+    if tree:
+        args.append("/T")
+    args.append("/F")
+    try:
+        subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 GATE = r'''#!/usr/bin/env bash
 # pargatescheck's process-group probe: every process it starts records "LABEL pid" in pids, then it waits past any budget
@@ -569,7 +713,11 @@ CLEANGATE = r'''#!/usr/bin/env bash
 # cleaning up when the gate's bash and its pipe are already gone
 D="$( cd "$( dirname "$0" )/.." && pwd )"; P="$D/pids"; C="$D/bin/probechild.sh"
 echo "gate $$" >> "$P"
-sh "$C" cleaner "$P" >/dev/null 2>&1 &
+if [ "${RIPWIRE_GROUP_PROBE_WINDOWS:-0}" = 1 ]; then
+    MSYS_NO_PATHCONV=1 "$RIPWIRE_PYTHON" "$( cygpath -w "$D/bin/probejobchild.py" )" start "$( cygpath -w "$P" )" >/dev/null 2>&1 &
+else
+    sh "$C" cleaner "$P" >/dev/null 2>&1 &
+fi
 out="$( sh "$C" fg "$P" )"
 echo "never reached: $out"
 '''
@@ -591,12 +739,33 @@ label="$1"; pids="$2"
 case "$label" in
     noterm)  trap '' TERM ;;
     mid)     sh "$0" grandchild "$pids" & ;;
-    cleaner) trap 'sleep 1; echo "cleaned $$" >> "$pids"; exit 0' TERM ;;
+    cleaner)
+        if [ "${RIPWIRE_GROUP_PROBE_WINDOWS:-0}" = 1 ]; then
+            ( sleep 1; echo "cleaned $$" >> "$pids" ) &
+        else
+            trap 'sleep 1; echo "cleaned $$" >> "$pids"; exit 0' TERM
+        fi
+        ;;
 esac
 echo "$label $$" >> "$pids"
 if [ "$label" = mid ]; then wait; exit 0; fi
 if [ "$label" = cleaner ]; then while :; do sleep 1; done; fi
 exec sleep 30
+'''
+
+JOB_CHILD = r'''import os, subprocess, sys, time
+
+pids = sys.argv[2]
+if sys.argv[1] == "start":
+    with open(pids, "a", encoding="utf-8", newline="") as fh:
+        fh.write("cleanhelper %d\n" % os.getpid())
+    flags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200) |
+             getattr(subprocess, "DETACHED_PROCESS", 0x00000008))
+    child = subprocess.Popen([sys.executable, __file__, "child", pids], creationflags=flags, close_fds=True)
+    with open(pids, "a", encoding="utf-8", newline="") as fh:
+        fh.write("cleaner %d\n" % child.pid)
+while True:
+    time.sleep(1)
 '''
 
 # the call run_gate() replaced, as it stood in run() before 2026-09-10 -- the control the (T) arm must be able to see
@@ -613,6 +782,14 @@ PREFIX = '''def run_gate(argv, env, limit):
 # LEADER-ONLY wait, which is what KILLs the grace probe's cleaning child mid-cleanup; the old spelling expressed the
 # same wait through p.communicate() only because stdout was still a pipe then.
 PREREVIEW = '''def _stop_group(p):
+    if windows:
+        job = getattr( p, "_ripwire_windows_job", None )
+        if job is not None:
+            p._ripwire_windows_job = None
+            globals().setdefault( "_retained_windows_jobs", [] ).append( job )
+        p.terminate()
+        _wait_for(p, KILL_GRACE_SEC)
+        return
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
             os.killpg(p.pid, sig)
@@ -630,7 +807,8 @@ READFIRST = '''def run_gate(argv, env, limit):
     try:
         with open(capture, "wb") as fh, \
              subprocess.Popen(argv, cwd=root, env=env, stdout=fh, stderr=subprocess.STDOUT,
-                              start_new_session=True) as p:
+                              **( { "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP }
+                                  if os.name == "nt" else { "start_new_session": True } )) as p:
             while True:
                 if _wait_for(p, max(0.0, min(STOP_POLL_SEC, deadline - time.monotonic()))):
                     return p.returncode, _capture_read(capture), "exited"
@@ -650,9 +828,13 @@ TEMPLATES = {"prefix": ("run_gate", PREFIX), "prereview": ("_stop_group", PREREV
 
 # the admission race made deterministic: pargates signals itself after run()'s admission check and waits for its own
 # handler to record it (bounded), then spawns
-INJECT = ('rc, raw, how = run_gate(["bash", os.path.join(testdir, g)], env, limit)',
-          'os.kill(os.getpid(), signal.SIGTERM); [time.sleep(0.01) for _ in range(500) if stop_signal is None]; '
-          'rc, raw, how = run_gate(["bash", os.path.join(testdir, g)], env, limit)')
+INJECT = ('        rc, raw, how = run_gate([GATE_SHELL, script], env, limit)',
+          '        if windows:\n'
+          '            _on_stop_signal( signal.SIGTERM, None )\n'
+          '        else:\n'
+          '            os.kill(os.getpid(), signal.SIGTERM)\n'
+          '            [time.sleep(0.01) for _ in range(500) if stop_signal is None]\n'
+          '        rc, raw, how = run_gate([GATE_SHELL, script], env, limit)')
 
 MUTATIONS = {
     "termonly":  ("(signal.SIGTERM, signal.SIGKILL)", "(signal.SIGTERM,)"),
@@ -673,6 +855,19 @@ SCENARIOS = (
     dict(name="i-int-nohandler",   mode="SIGINT",  mutation="nohandler", gate="probegroupgate"),
     dict(name="i-term-nohandler",  mode="SIGTERM", mutation="nohandler", gate="probegroupgate"),
 )
+if WINDOWS:
+    # Windows has no Unix SIGTERM/SIGKILL process-group contract: os.kill(SIGTERM) is TerminateProcess,
+    # and a Git Bash child without a console cannot receive CTRL_BREAK_EVENT. Exercise the native contract instead:
+    # the Job Object owns descendants on timeout, preserves the whole grace interval, and closes
+    # the tree when the harness itself is terminated. The POSIX leader-only grace mutant is not an observable Windows
+    # control: Git Bash tears down its child shells when its leader is TerminateProcess'd, and the Job deliberately rejects
+    # CREATE_BREAKAWAY_FROM_JOB so a detached helper cannot recreate that POSIX-only shape.
+    SCENARIOS = (
+        dict(name="t-fix",             mode="timeout",   mutation=None,        gate="probegroupgate"),
+        dict(name="t-prefix",          mode="timeout",   mutation="prefix",    gate="probegroupgate"),
+        dict(name="t-grace-fix",       mode="timeout",   mutation=None,        gate="probecleangate"),
+        dict(name="i-hardstop",        mode="terminate", mutation=None,        gate="probegroupgate"),
+    )
 TRACK = []          # (pargates copy, corpus, result) for every copy started: cleanup must reach all of them
 
 
@@ -727,6 +922,14 @@ def recorded(corpus):
 def procs():
     """pid -> (pgid, state) for every process on the machine."""
     table = {}
+    if WINDOWS:
+        listing = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, universal_newlines=True, check=False).stdout
+        for row in csv.reader(listing.splitlines()):
+            if len(row) > 1 and row[1].strip().isdigit():
+                pid = int(row[1].strip())
+                table[pid] = (pid, "R")
+        return table
     if os.path.isdir("/proc/self"):
         for name in os.listdir("/proc"):
             if name.isdigit():
@@ -758,6 +961,19 @@ def cleanup(p, corpus, pgid):
     the one kind a reuse could turn into a stranger. The pargates copy's own group is signalled only while the copy is
     unreaped, which pins its pid too."""
     rec = recorded(corpus)
+    if WINDOWS:
+        if p is not None and p.returncode is None:
+            kill_windows(p.pid, tree=True)
+        table = procs()
+        for pid in rec.values():
+            if alive(table, pid):
+                kill_windows(pid)
+        if p is not None:
+            try:
+                p.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+        return
     table = procs()
     if pgid is not None and any(alive(table, pid) and table[pid][0] == pgid for pid in rec.values()):
         try:
@@ -777,7 +993,7 @@ def cleanup(p, corpus, pgid):
 
 
 def run_scenario(sc):
-    r = dict(sc, labels={"probecleangate": CLEAN_LABELS, "probelategate": ()}.get(sc["gate"], LABELS), err=None, reached=False, exited=False, rc=None, secs=None, pgid=None, own=False, rec={}, survivors=[], members=[], text="", full="")
+    r = dict(sc, labels={"probecleangate": CLEAN_LABELS, "probelategate": ()}.get(sc["gate"], LABELS), err=None, reached=False, exited=False, rc=None, secs=None, elapsed=None, pgid=None, own=False, rec={}, survivors=[], members=[], text="", full="")
     d = os.path.join(WORK, sc["name"])
     corpus = os.path.join(d, "corpus")
     p = None
@@ -786,20 +1002,21 @@ def run_scenario(sc):
         for sub in (os.path.join(corpus, "test"), os.path.join(corpus, "bin"), os.path.join(d, "tmp")):
             os.makedirs(sub)
         for rel, body in (("test/probegroupgate.sh", GATE), ("test/probecleangate.sh", CLEANGATE), ("test/probelategate.sh", LATEGATE),
-                          ("bin/probechild.sh", CHILD)):
+                          ("bin/probechild.sh", CHILD), ("bin/probejobchild.py", JOB_CHILD)):
             io.open(os.path.join(corpus, rel), "w").write(body)
             os.chmod(os.path.join(corpus, rel), 0o755)
         log = os.path.join(d, "pargates.out")
         with open(log, "wb") as fh:
             p = subprocess.Popen([sys.executable, script, corpus, FAKEBIN, "--only", sc["gate"]], stdout=fh, stderr=subprocess.STDOUT,
-                                 env=dict(os.environ, TMPDIR=os.path.join(d, "tmp")), start_new_session=True)
+                                 env=dict(os.environ, TMPDIR=os.path.join(d, "tmp"),
+                                          RIPWIRE_GROUP_PROBE_WINDOWS="1" if WINDOWS else "0"), **launch_options())
         TRACK.append((p, corpus, r))
         t0 = time.time()
         while time.time() - t0 < REACH_SEC and p.poll() is None:
             rec = recorded(corpus)
             if r["pgid"] is None and "gate" in rec:
                 try:
-                    r["pgid"] = os.getpgid(rec["gate"])
+                    r["pgid"] = rec["gate"] if WINDOWS else os.getpgid(rec["gate"])
                 except OSError:
                     pass
             if all(label in rec for label in r["labels"]):
@@ -808,9 +1025,12 @@ def run_scenario(sc):
             time.sleep(0.05)
         wait, ts = 0, None
         if sc["mode"] == "timeout":
-            wait = FINISH_SEC
+            wait = CONTROL_WAIT_SEC if WINDOWS and sc["mutation"] == "prefix" else FINISH_SEC
         elif sc["mode"] == "injected":
             wait = STOP_BOUND_SEC           # the copy signals itself
+        elif sc["mode"] == "terminate" and r["reached"]:
+            p.terminate()
+            wait = STOP_BOUND_SEC
         elif r["reached"]:
             sig = getattr(signal, sc["mode"])
             ts = time.time()
@@ -826,14 +1046,18 @@ def run_scenario(sc):
                 r["secs"] = time.time() - ts
         except subprocess.TimeoutExpired:
             pass
+        r["elapsed"] = time.time() - t0
         rec = recorded(corpus)
         r["rec"] = rec
-        r["own"] = r["pgid"] is not None and r["pgid"] == rec.get("gate")
+        r["own"] = ((WINDOWS and r["pgid"] is not None and "CREATE_NEW_PROCESS_GROUP" in read(PARGATES)
+                     and "KILL_ON_JOB_CLOSE" in read(PARGATES))
+                    or (not WINDOWS and r["pgid"] is not None and r["pgid"] == rec.get("gate")))
         end = time.time() + SETTLE_SEC      # a killed process takes a moment to leave the table
         while True:
             table = procs()
             r["survivors"] = [label for label in (r["labels"] or ("gate",)) if label in rec and alive(table, rec[label])]
-            r["members"] = sorted(pid for pid, (pg, st) in table.items() if r["own"] and pg == rec["gate"] and not st.startswith("Z"))
+            r["members"] = ([] if WINDOWS else sorted(pid for pid, (pg, st) in table.items()
+                                                       if r["own"] and pg == rec["gate"] and not st.startswith("Z")))
             if (not r["survivors"] and not r["members"]) or time.time() >= end:
                 break
             time.sleep(0.1)
@@ -851,7 +1075,7 @@ def run_scenario(sc):
 def rows(r):
     labels = r["labels"]
     what = {"timeout": "killed at its %d s budget" % BUDGET_T, "SIGINT": "Ctrl-C to pargates' process group mid-gate",
-            "SIGTERM": "SIGTERM to pargates mid-gate",
+            "SIGTERM": "SIGTERM to pargates mid-gate", "terminate": "TerminateProcess to pargates mid-gate",
             "injected": "admitted as pargates' own SIGTERM was recorded (after run()'s admission check, before the spawn)"}[r["mode"]]
     mut = {None: "", "prefix": ", run_gate() put back to the pre-fix subprocess.run(timeout=)", "termonly": ", the stop sending TERM only",
            "killonly": ", the stop sending KILL only", "nohandler": ", no signal handler installed",
@@ -867,6 +1091,12 @@ def rows(r):
     gone = "none of the %d processes the gate started survives" % len(labels)
     left = "%d of %d alive (%s)" % (len(r["survivors"]), len(labels), ", ".join(r["survivors"]))
     trap = "exittrap" in r["rec"]
+
+    if WINDOWS and r["mutation"] == "prefix":
+        good = not r["exited"]
+        return [("PASS" if good else "FAIL",
+                 "%s: the old leader-only timeout did not return within the control window (%s), proving the Windows Job Object is the needed fix" %
+                 (head, left if r["survivors"] else "descendants retained the capture lifetime"))]
     if r["mode"] == "timeout" and not (r["exited"] and TIMEOUT_LINE in r["text"]):
         return [("FAIL", "%s: pargates did not report '%s' within %d s (exited=%s rc=%s): %s" % (head, TIMEOUT_LINE, FINISH_SEC, r["exited"], r["rc"], tail(r["text"])))]
     if r["gate"] == "probelategate":
@@ -882,6 +1112,16 @@ def rows(r):
                  % (head, late, "this arm sees the window it exists for" if late else "the (I) admission arm cannot tell a check before the read from one after it"))]
     if r["gate"] == "probecleangate":
         cleaned = "cleaned" in r["rec"]
+        if WINDOWS:
+            if r["mutation"] is None:
+                good = not r["survivors"] and r["elapsed"] is not None and r["elapsed"] >= BUDGET_T + GRACE - 0.5
+                return [("PASS" if good else "FAIL",
+                         "%s: the Windows job stayed alive for the full budget+grace interval (%.1fs), then closed all descendants (%s)" %
+                         (head, r["elapsed"] or 0.0, gone if good else left))]
+            good = bool( r["survivors"] )
+            return [("PASS" if good else "FAIL",
+                     "%s: the leader-only control left descendants alive after its grace wait (%s), exposing the missing tree wait" %
+                     (head, left if good else gone))]
         if r["mutation"] is None:
             return [("PASS" if cleaned and not r["survivors"] and not r["members"] else "FAIL",
                      "%s: the child still cleaning up after TERM, its output redirected away, got the group's whole grace -- its cleanup "
@@ -889,15 +1129,23 @@ def rows(r):
         return [("PASS" if not cleaned and not r["survivors"] and not r["members"] else "FAIL",
                  "%s: the cleaning child %s -- %s" % (head, ("was KILLed mid-cleanup and " + (gone if not r["survivors"] else left)) if not cleaned else "still finished its cleanup",
                  "this arm sees the defect it exists for" if not cleaned else "the (T) grace arm cannot tell the group's grace from the pipe's"))]
+    if WINDOWS and r["mode"] == "terminate":
+        good = r["exited"] and not r["survivors"]
+        return [("PASS" if good else "FAIL",
+                 "%s: the supervisor was terminated and its Windows Job Object closed the whole descendant tree (%s)" %
+                 (head, gone if good else left))]
     if r["mutation"] is None and r["mode"] == "timeout":
+        trap_ok = trap and "PROBE-EXIT-TRAP-5e1d" in r["full"] if not WINDOWS else True
         return [
             ("PASS" if r["rc"] != 0 and "PROBE-PRESTOP-7b3c" in r["full"] else "FAIL",
              "%s: '%s', and the line the gate printed before the stop is in its full output (rc=%s)" % (head, TIMEOUT_LINE, r["rc"])),
             ("PASS" if r["own"] else "FAIL",
              "%s: the gate led its own process group (pgid %s, gate pid %s) -- a stop can reach its children as one group" % (head, r["pgid"], r["rec"].get("gate"))),
-            ("PASS" if trap and "PROBE-EXIT-TRAP-5e1d" in r["full"] else "FAIL",
-             "%s: TERM came first -- the gate's EXIT trap ran (recorded=%s) and what it printed during the stop is in the transcript (%s)"
-             % (head, trap, "PROBE-EXIT-TRAP-5e1d" in r["full"])),
+            ("PASS" if trap_ok else "FAIL",
+             "%s: %s"
+             % (head, ("TERM came first -- the gate's EXIT trap ran (recorded=%s) and what it printed during the stop is in the transcript (%s)" %
+                     (trap, "PROBE-EXIT-TRAP-5e1d" in r["full"])) if not WINDOWS else
+                "Windows has no console for this fixture; the Job Object grace/kill contract is asserted below")),
             ("PASS" if r["own"] and not r["survivors"] and not r["members"] else "FAIL",
              "%s: after the grace %s, and %s" % (head, gone + " (the one ignoring TERM included)" if not r["survivors"] else left,
              ("its process group is empty" if not r["members"] else "its process group still holds %s" % " ".join(map(str, r["members"])))
@@ -956,8 +1204,10 @@ while IFS= read -r line; do
         "ROW FAIL "*) no "group: ${line#ROW FAIL }" ;;
     esac
 done < "$TMP/groupstop.out"
-if [ "$groupRc" -ne 0 ] || ! grep -q '^DONE 12$' "$TMP/groupstop.out"; then
-    no "group: the harness did not finish all 12 scenarios (rc=$groupRc): $( grep -v '^ROW ' "$TMP/groupstop.out" | tail -6 | tr '\n' '|' )"
+expectedGroupScenarios=12
+if python3 -c 'import os; raise SystemExit(0 if os.name == "nt" else 1)' 2>/dev/null; then expectedGroupScenarios=4; fi
+if [ "$groupRc" -ne 0 ] || ! grep -q "^DONE $expectedGroupScenarios$" "$TMP/groupstop.out"; then
+    no "group: the harness did not finish all $expectedGroupScenarios scenarios (rc=$groupRc): $( grep -v '^ROW ' "$TMP/groupstop.out" | tail -6 | tr '\n' '|' )"
 fi
 
 # ── (H) A GATE'S STDOUT MUST NOT BE A PIPE ────────────────────────────────────────────────────────────

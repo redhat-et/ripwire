@@ -311,6 +311,10 @@ PY
 # user-CPU seconds (user+sys) of one cold run of "$@" against corpus $1
 usercpu(){ # $1 = corpus dir, rest = binary + flags
     local dir="$1"; shift
+    if [ "${OS:-}" = Windows_NT ] && [ -n "${RIPWIRE_PYTHON:-}" ]; then
+        "$RIPWIRE_PYTHON" "$ROOT/test/childwalktime_windows.py" "$dir" "$@" 2>"$TMP/t"
+        return
+    fi
     { /usr/bin/time -p "$@" "$dir" --no-cache >/dev/null; } 2>"$TMP/t" || { echo FAIL; return; }
     awk '/^user/ { u = $2 } /^sys/ { s = $2 } END { printf "%.2f", u + s }' "$TMP/t"
 }

@@ -47,13 +47,16 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 REF="${RIPWIRE_REF_BIN:-}"
 [ -n "$REF" ] && [ "${REF#/}" = "$REF" ] && REF="$ROOT/$REF"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+PYTHON="${RIPWIRE_PYTHON:-${PYTHON_NATIVE:-python3}}"
+PYCPU="$ROOT/test/process_cpu.py"
+if command -v cygpath >/dev/null 2>&1; then PYCPU="$( cygpath -m "$PYCPU" )"; fi
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
-command -v python3 >/dev/null 2>&1 || { echo "preprocdeadscalecheck: python3 required"; exit 2; }
+command -v "$PYTHON" >/dev/null 2>&1 || { echo "preprocdeadscalecheck: $PYTHON required"; exit 2; }
 echo "preprocdeadscalecheck: BIN=$BIN"
 [ -n "$REF" ] && echo "preprocdeadscalecheck: REF=$REF"
 
@@ -92,7 +95,7 @@ echo "preprocdeadscalecheck: BIN=$BIN"
 # (trap: a gate fixture that is also part of the live tree the tool indexes).
 gen(){ # $1 = dir, $2 = comment line count, $3 = "guard" | "plain"
     mkdir -p "$1"
-    python3 - "$1/big.c" "$2" "$3" <<'PY'
+    "$PYTHON" - "$1/big.c" "$2" "$3" <<'PY'
 import sys
 path, n, mode = sys.argv[ 1 ], int( sys.argv[ 2 ] ), sys.argv[ 3 ]
 L = []
@@ -117,8 +120,7 @@ gen "$TMP/plain/n16000" 16000 plain
 
 # user-CPU seconds (user+sys) of one cold ingest of $1
 usercpu(){ # $1 = corpus dir, $2 = binary
-    { /usr/bin/time -p "$2" "$1" --no-cache >/dev/null; } 2>"$TMP/t" || { echo FAIL; return; }
-    awk '/^user/ { u = $2 } /^sys/ { s = $2 } END { printf "%.2f", u + s }' "$TMP/t"
+    "$PYTHON" "$PYCPU" "$2" "$1"
 }
 
 # The one ratio verdict, so no arm hand-rolls a second arithmetic for the same job. Prints
@@ -133,12 +135,12 @@ verdict(){ awk -v s="$1" -v b="$2" -v cap="$3" -v floor="$4" 'BEGIN {
 echo
 echo "=== (A) the dead-range SET: a call inside \`#if 0\` is not a live call, the \`#else\`-side one is ==="
 "$BIN" "$TMP/guard/n1000" --no-cache --uses=big.c:target >"$TMP/a_uses.xml" 2>/dev/null
-A_ROOT="$( python3 -c '
+A_ROOT="$( "$PYTHON" -c '
 import re,sys
 d=open(sys.argv[1]).read()
 m=re.search(r"<uses\b[^>]*>",d)
 sys.stdout.write(m.group(0) if m else "")' "$TMP/a_uses.xml" )"
-rows(){ python3 -c '
+rows(){ "$PYTHON" -c '
 import re,sys
 d=open(sys.argv[1]).read()
 sys.stdout.write("\n".join(r for r in re.findall(r"<u\b[^>]*>",d) if sys.argv[2] in r))' "$1" "$2"; }

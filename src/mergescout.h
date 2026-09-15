@@ -92,7 +92,9 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <functional>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -201,24 +203,179 @@ inline SymTreeIndex buildTreeIndex( const IngestResult& ing, std::string_view ro
     return out;
 }
 
-// Y1 (P1) — the per-sha committish INGEST cache family. `committish` is always a fully-resolved
+// Y1 (P1) — the per-sha committish FINAL-INDEX cache family. `committish` is always a fully-resolved
 // commit sha by the time it reaches here (resolveAllRefs / merge-base already peeled any symbolic
 // ref), so its tree is immutable — the SAME per-sha cache convention quality.h uses for its own
-// qheadsnap/qbody families (shaKeyedCachePath + a real cacheFile handed to ingest()), but its OWN "qms"
-// family so a multi-arm scout run's ~2*refCount+1 distinct trees don't thrash quality.h's own 2-slot
-// keep cap. No extra per-family eviction cap here: the dir-wide 2 GiB / 30-day sweep
-// (quality::sweepStaleCacheBlobsOnce) already runs on every ingest() saveCache and matches the
-// "ripwire-" prefix generically, so it backstops this family too.
-constexpr std::uint32_t kMsCacheScheme = 1;
+// qheadsnap/qbody families (shaKeyedCachePath), but its OWN "qms" family. The raw ingest fallback uses
+// the separate "qms-raw" family, so a multi-arm scout run's ~2*refCount+1 distinct trees never confuses
+// an ingest blob with the final index. No extra per-family eviction cap here: the dir-wide 2 GiB / 30-day
+// sweep (quality::sweepStaleCacheBlobsOnce) already matches the "ripwire-" prefix generically.
+constexpr std::uint32_t kMsCacheScheme = 2;
 
-inline std::string msExclHex( const std::vector<std::string>& excludes )
+inline std::string msExclHex( const std::vector<std::string>& excludes, std::size_t maxFileBytes )
 {
-    return quality::exclConfigHex( excludes, "qms" + std::to_string( kMsCacheScheme ) );
+    return quality::exclConfigHex( excludes, "qms" + std::to_string( kMsCacheScheme ), maxFileBytes );
 }
 
 inline std::string msCachePath( const std::string& repoHex, const std::string& exclHex, const std::string& sha )
 {
     return quality::shaKeyedCachePath( "qms", repoHex, exclHex, sha );
+}
+
+inline std::string msRawCachePath( const std::string& repoHex, const std::string& exclHex, const std::string& sha )
+{
+    return quality::shaKeyedCachePath( "qms-raw", repoHex, exclHex, sha );
+}
+
+// qms stores the FINAL tree index, not another copy of the raw ingest facts. The raw facts remain in qms-raw as
+// the cold/miss fallback, while a valid qms blob lets a warm process skip git archive, ingest, model rebuild and
+// body-hash derivation entirely. The filename is already keyed by (repo, excludes, maxFileBytes, commit sha), but
+// the header repeats the extraction identity and checksum so a copied or torn blob is a safe miss, never a wrong map.
+constexpr char           kMsIndexMagic[] = "MSIX";
+constexpr std::uint32_t  kMsIndexFormat  = 1;
+constexpr std::uint32_t  kMsMaxEntries   = 4000000;
+
+inline bool msPutString( std::string& buf, std::string_view value )
+{
+    if( value.size() > std::numeric_limits<std::uint32_t>::max() )
+    {
+        return false;
+    }
+    quality::qsnapPut( buf, static_cast<std::uint32_t>( value.size() ) );
+    buf.append( value.data(), value.size() );
+    return true;
+}
+
+inline bool msGetString( const char*& p, const char* end, std::string& out )
+{
+    std::uint32_t size = 0;
+    if( !quality::qsnapGet( p, end, size ) || static_cast<std::uint64_t>( end - p ) < size )
+    {
+        return false;
+    }
+    out.assign( p, size );
+    p += size;
+    return true;
+}
+
+inline std::string serializeMsIndex( const SymTreeIndex& index, const std::string& sha )
+{
+    if( index.bodyHash.size() > kMsMaxEntries )
+    {
+        return {};
+    }
+    std::string blob;
+    blob.append( kMsIndexMagic, sizeof( kMsIndexMagic ) - 1 );
+    quality::qsnapPut( blob, kMsIndexFormat );
+    quality::qsnapPut( blob, quality::kIngestCacheVersionMirror );
+    quality::qsnapPut( blob, quality::kIngestParserVerMirror );
+    quality::qsnapPut( blob, fnv1a64( sha ) );
+    quality::qsnapPut( blob, static_cast<std::uint32_t>( index.bodyHash.size() ) );
+    for( const auto& [ key, hash ] : index.bodyHash )
+    {
+        quality::qsnapPut( blob, key );
+        quality::qsnapPut( blob, hash );
+        const auto identity = index.identity.find( key );
+        const std::uint8_t hasIdentity = identity == index.identity.end() ? 0 : 1;
+        quality::qsnapPut( blob, hasIdentity );
+        if( hasIdentity == 0 )
+        {
+            continue;
+        }
+        if( !msPutString( blob, identity->second.file ) || !msPutString( blob, identity->second.id ) )
+        {
+            return {};
+        }
+        quality::qsnapPut( blob, static_cast<std::uint8_t>( identity->second.fileLevel ? 1 : 0 ) );
+    }
+    quality::qsnapPut( blob, fnv1a64( std::string_view( blob.data(), blob.size() ) ) );
+    return blob;
+}
+
+inline bool deserializeMsIndex( const std::string& blob, const std::string& sha, SymTreeIndex& out )
+{
+    constexpr std::size_t kHeaderBytes = ( sizeof( kMsIndexMagic ) - 1 ) + 3 * sizeof( std::uint32_t ) + sizeof( std::uint64_t )
+                                        + sizeof( std::uint32_t );
+    if( blob.size() < kHeaderBytes + sizeof( std::uint64_t ) )
+    {
+        return false;
+    }
+    const std::size_t bodyBytes = blob.size() - sizeof( std::uint64_t );
+    std::uint64_t storedSum = 0;
+    std::memcpy( &storedSum, blob.data() + bodyBytes, sizeof( storedSum ) );
+    if( storedSum != fnv1a64( std::string_view( blob.data(), bodyBytes ) ) )
+    {
+        return false;
+    }
+
+    const char* p = blob.data();
+    const char* end = blob.data() + bodyBytes;
+    if( std::memcmp( p, kMsIndexMagic, sizeof( kMsIndexMagic ) - 1 ) != 0 )
+    {
+        return false;
+    }
+    p += sizeof( kMsIndexMagic ) - 1;
+    std::uint32_t format = 0, cacheVersion = 0, parserVersion = 0;
+    std::uint64_t shaHash = 0;
+    if( !quality::qsnapGet( p, end, format ) || format != kMsIndexFormat
+        || !quality::qsnapGet( p, end, cacheVersion ) || cacheVersion != quality::kIngestCacheVersionMirror
+        || !quality::qsnapGet( p, end, parserVersion ) || parserVersion != quality::kIngestParserVerMirror
+        || !quality::qsnapGet( p, end, shaHash ) || shaHash != fnv1a64( sha ) )
+    {
+        return false;
+    }
+    std::uint32_t count = 0;
+    if( !quality::qsnapGet( p, end, count ) || count > kMsMaxEntries )
+    {
+        return false;
+    }
+
+    SymTreeIndex candidate;
+    for( std::uint32_t i = 0; i < count; ++i )
+    {
+        std::uint64_t key = 0, hash = 0;
+        std::uint8_t  hasIdentity = 0;
+        if( !quality::qsnapGet( p, end, key ) || !quality::qsnapGet( p, end, hash )
+            || !quality::qsnapGet( p, end, hasIdentity ) || hasIdentity > 1 || !candidate.bodyHash.try_emplace( key, hash ).second )
+        {
+            return false;
+        }
+        if( hasIdentity == 0 )
+        {
+            continue;
+        }
+        std::string file, id;
+        std::uint8_t fileLevel = 0;
+        if( !msGetString( p, end, file ) || !msGetString( p, end, id ) || !quality::qsnapGet( p, end, fileLevel ) || fileLevel > 1 )
+        {
+            return false;
+        }
+        if( !candidate.identity.try_emplace( key, ChangedSym{ key, std::move( file ), std::move( id ), fileLevel != 0 } ).second )
+        {
+            return false;
+        }
+    }
+    if( p != end )
+    {
+        return false;
+    }
+    out = std::move( candidate );
+    return true;
+}
+
+inline bool readMsIndex( const std::string& path, const std::string& sha, SymTreeIndex& out )
+{
+    const std::optional<std::string> blob = quality::readQSnapBlob( path );
+    return blob && deserializeMsIndex( *blob, sha, out );
+}
+
+inline void writeMsIndex( const std::string& path, const SymTreeIndex& index, const std::string& sha )
+{
+    const std::string blob = serializeMsIndex( index, sha );
+    if( !blob.empty() )
+    {
+        quality::atomicWriteFile( path, blob );
+    }
 }
 
 // Materialize + ingest one committish (git-archive, read-only, TEMP copy) into a SymTreeIndex. Empty
@@ -238,19 +395,31 @@ inline SymTreeIndex indexCommittish( const std::string& root, const std::string&
     {
         return {};
     }
+    const std::string finalCachePath = msCachePath( repoHex, exclHex, committish );
+    SymTreeIndex cached;
+    if( readMsIndex( finalCachePath, committish, cached ) )
+    {
+        return cached;
+    }
     const std::string tmpRoot = quality::materializeCommitTree( root, committish, "qms" );
     if( tmpRoot.empty() )
     {
         return {};
     }
     quality::TmpTreeGuard guard{ tmpRoot };
-    const std::string cachePath = msCachePath( repoHex, exclHex, committish );
-    IngestResult ing = ingest( tmpRoot.c_str(), excludes, std::string_view( cachePath ), maxFileBytes, /*captureValueUses=*/false );
+    const std::string rawCachePath = msRawCachePath( repoHex, exclHex, committish );
+    IngestResult ing = ingest( tmpRoot.c_str(), excludes, std::string_view( rawCachePath ), maxFileBytes, /*captureValueUses=*/false );
     if( ing.symbols.empty() && ing.files.empty() )
     {
         return {};
     }
-    return buildTreeIndex( ing, tmpRoot );
+    // ingest() normalizes its own root to generic separators on Windows, while tmpRoot may inherit a native
+    // backslash spelling from LOCALAPPDATA. Use the same logical spelling for relForHash() so archived files
+    // are emitted root-relative; keep tmpRoot itself native for the guard and filesystem I/O above.
+    const std::string logicalRoot = std::filesystem::path( tmpRoot ).generic_string();
+    SymTreeIndex result = buildTreeIndex( ing, logicalRoot );
+    writeMsIndex( finalCachePath, result, committish );
+    return result;
 }
 
 // Diff `ref` against `base`: every key present in either with a DIFFERENT (or one-sided) body hash —
@@ -336,7 +505,7 @@ class TreeIndexMemo
 public:
     TreeIndexMemo( const std::string& root, const std::vector<std::string>& excludes, std::size_t maxFileBytes )
         : root_( root ), excludes_( excludes ), maxFileBytes_( maxFileBytes ),
-          repoHex_( quality::cacheRootKeyHex( root ) ), exclHex_( msExclHex( excludes ) ) {}
+          repoHex_( quality::cacheRootKeyHex( root ) ), exclHex_( msExclHex( excludes, maxFileBytes ) ) {}
 
     // Register one future get(sha) BEFORE the diff loop runs — see the class comment above.
     void reserve( const std::string& sha ) { ++pending_[ sha ]; }

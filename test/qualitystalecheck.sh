@@ -39,7 +39,52 @@ no(){ echo "  FAIL  $1"; fail=1; }
 # before the rm -rf, and that has to happen even when an assertion above it failed — a red gate that leaves an
 # unwritable tmpdir behind poisons the next run of every gate that shares /tmp.
 ROSANDBOXES=""
-cleanup(){ for d in $ROSANDBOXES; do chmod -R u+w "$d" 2>/dev/null; done; rm -rf $ROSANDBOXES "$REPO"; }
+WINDOWS_GATE=0
+case "$( uname -s 2>/dev/null )" in
+    MINGW*|MSYS*|CYGWIN*) WINDOWS_GATE=1 ;;
+esac
+
+native_path()
+{
+    if [ "$WINDOWS_GATE" -eq 1 ]; then
+        cygpath -m "$1"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+deny_unlink()
+{
+    local target="$1"
+    local parent="${target%/*}"
+    if [ "$WINDOWS_GATE" -ne 1 ]; then
+        chmod a-w "$parent"
+        return $?
+    fi
+    local target_native="$( native_path "$target" )"
+    MSYS_NO_PATHCONV=1 attrib.exe +R "$target_native" >/dev/null 2>&1 || return 1
+}
+
+restore_unlink()
+{
+    local target="$1"
+    local parent="${target%/*}"
+    if [ "$WINDOWS_GATE" -ne 1 ]; then
+        chmod u+w "$parent" 2>/dev/null || true
+        return 0
+    fi
+    local target_native="$( native_path "$target" )"
+    MSYS_NO_PATHCONV=1 attrib.exe -R "$target_native" >/dev/null 2>&1 || true
+}
+
+cleanup()
+{
+    for d in $ROSANDBOXES; do
+        restore_unlink "$d/.ripwire_quality_baseline"
+        chmod -R u+w "$d" 2>/dev/null || true
+    done
+    rm -rf -- $ROSANDBOXES "$REPO"
+}
 REPO="$(mktemp -d)"; trap cleanup EXIT
 cd "$REPO" || exit 1
 git init -q; git config user.email x@y; git config user.name x
@@ -219,10 +264,14 @@ RREPO="$(mktemp -d)"; ROSANDBOXES="$ROSANDBOXES $RREPO"
 "$BIN" "$RREPO" --quality-baseline --no-cache >/dev/null 2>&1
 [ -f "$RREPO/.ripwire_quality_baseline" ] || no "setup(7): could not pin a sidecar in the read-only-dir sandbox"
 git -C "$RREPO" commit -qam "advance HEAD (the pin goes stale)" --allow-empty >/dev/null 2>&1
-chmod a-w "$RREPO"                                     # unlink of an entry needs write on the PARENT dir → the self-heal must fail
+deny_unlink "$RREPO/.ripwire_quality_baseline" \
+    || no "read-only dir: could not deny sidecar unlink on the native filesystem"
 # stderr sink lives OUTSIDE the read-only sandbox, and stdout/stderr come from ONE invocation.
 ro_out="$("$BIN" "$RREPO" --quality-delta --no-cache 2>"$REPO/.ro.err")"
 ro_err="$(cat "$REPO/.ro.err")"; ro_alerts="$( grep -c 'math degraded' "$REPO/.ro.err" )"; rm -f "$REPO/.ro.err"
+printf '%s' "$ro_err" | grep -q 'rm: command not found' \
+    && no "Git Bash command bridge could not find rm while cleaning a temporary script" \
+    || ok "Git Bash command bridge cleans temporary scripts without a missing-rm warning"
 [ -f "$RREPO/.ripwire_quality_baseline" ] \
     && ok "read-only dir: the stale sidecar really did SURVIVE the self-heal (the premise of this arm)" \
     || no "read-only dir: the sidecar was deleted anyway — the sandbox is not read-only, arm 7 proves nothing"
@@ -247,7 +296,7 @@ elif [ "$ndebug_flavour" -eq 1 ]; then
 else
     no "arm 7: no DEGRADED_PATH_ALERT is observable, yet --version reports build type \"$BUILD_FLAVOUR\", which does NOT define NDEBUG — the alert seam regressed on a flavour that should be able to see it"
 fi
-chmod u+w "$RREPO"; rm -rf "$RREPO"; ROSANDBOXES=""
+restore_unlink "$RREPO/.ripwire_quality_baseline"; chmod u+w "$RREPO"; rm -rf "$RREPO"; ROSANDBOXES=""
 
 # 8) w1 MED #2 — STALE sidecar *and* no HEAD tree to fall back to: the CLI fatal used to print the flat
 #    "no <file> — run --quality-baseline BEFORE the change", which is stale-UNAWARE and, when the unlink failed,
@@ -282,7 +331,8 @@ rm -rf "$NOHEAD"
 # 8b) same shape, read-only dir: the unlink fails, so the file IS still there and the message must say so —
 #     "no <file>" would be a flat lie about the filesystem.
 NOHEADRO="$(mktemp -d)"; ROSANDBOXES="$ROSANDBOXES $NOHEADRO"; mkorphan "$NOHEADRO"
-chmod a-w "$NOHEADRO"
+deny_unlink "$NOHEADRO/.ripwire_quality_baseline" \
+    || no "8b setup: could not deny sidecar unlink on the native filesystem"
 "$BIN" "$NOHEADRO" --quality-delta --no-cache >/dev/null 2>"$REPO/.nohead2.err"
 nohead2_rc=$?; nohead2_err="$(cat "$REPO/.nohead2.err")"; rm -f "$REPO/.nohead2.err"
 if [ "$nohead2_rc" -eq 1 ]; then ok "stale + no-HEAD + failed unlink still exits 1"; else no "stale + no-HEAD + failed unlink exit code is $nohead2_rc, expected 1"; fi
@@ -321,6 +371,6 @@ elif [ "$ndebug_flavour" -eq 1 ]; then
 else
     no "8c: no DEGRADED_PATH_ALERT is observable, yet --version reports build type \"$BUILD_FLAVOUR\", which does NOT define NDEBUG — the alert seam regressed on a flavour that should be able to see it"
 fi
-chmod u+w "$NOHEADRO"; rm -rf "$NOHEADRO"; ROSANDBOXES=""
+restore_unlink "$NOHEADRO/.ripwire_quality_baseline"; chmod u+w "$NOHEADRO"; rm -rf "$NOHEADRO"; ROSANDBOXES=""
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

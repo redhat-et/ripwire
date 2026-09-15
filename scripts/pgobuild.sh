@@ -51,11 +51,11 @@ done
 command -v cmake >/dev/null || { echo "cmake required" >&2; exit 2; }
 [ -d "$CORPUS" ] || { echo "training corpus not found: $CORPUS" >&2; exit 2; }
 
-# llvm-profdata: inside the active toolchain on macOS, on PATH (often versioned) on Linux.
-PROFDATA="$( xcrun --find llvm-profdata 2>/dev/null || command -v llvm-profdata 2>/dev/null || true )"
+# llvm-profdata: inside the active toolchain on macOS, on PATH (often versioned) on Linux, or with .exe on Windows.
+PROFDATA="$( xcrun --find llvm-profdata 2>/dev/null || command -v llvm-profdata 2>/dev/null || command -v llvm-profdata.exe 2>/dev/null || true )"
 if [ -z "$PROFDATA" ]; then
-    for v in 21 20 19 18 17; do
-        cand="$( command -v "llvm-profdata-$v" 2>/dev/null || true )"
+    for v in 22 21 20 19 18 17; do
+        cand="$( command -v "llvm-profdata-$v" 2>/dev/null || command -v "llvm-profdata-$v.exe" 2>/dev/null || true )"
         [ -n "$cand" ] && { PROFDATA="$cand"; break; }
     done
 fi
@@ -75,6 +75,7 @@ if [ "$reuse" -eq 0 ]; then
     # ── phase 2: train ─────────────────────────────────────────────────────────────────────────────
     echo "pgobuild: [3/4] training on $CORPUS"
     BIN="$GEN/ripwire"
+    [ -f "$BIN.exe" ] && BIN="$BIN.exe"
     TRAIN="$( mktemp -d )"
     run(){ "$BIN" "$@" >/dev/null 2>&1 || echo "pgobuild: training run returned non-zero (continuing): $*" >&2; }
     run "$CORPUS" --no-cache
@@ -112,7 +113,11 @@ cmake --build "$OPT" -j "$JOBS" >"$OPT/build.log" 2>&1 || {
     echo "optimized build failed — see $OPT/build.log" >&2; tail -20 "$OPT/build.log" >&2; exit 1; }
 
 echo "pgobuild: done — $OPT/ripwire (profile: $PROFILE)"
+OPT_BIN="$OPT/ripwire"
+[ -f "$OPT_BIN.exe" ] && OPT_BIN="$OPT_BIN.exe"
+BASE_BIN="$ROOT/build/ripwire"
+[ -f "$BASE_BIN.exe" ] && BASE_BIN="$BASE_BIN.exe"
 echo "pgobuild: verify before you trust it:"
-echo "  $OPT/ripwire $ROOT >a; $OPT/ripwire $ROOT >b; diff -q a b        # determinism is a contract"
-echo "  diff -q <($OPT/ripwire $ROOT) <($ROOT/build/ripwire $ROOT)       # PGO must not change a byte of output"
-echo "  RIPWIRE_BIN=$OPT/ripwire python3 $ROOT/test/pargates.py $ROOT $OPT/ripwire -j 6"
+echo "  $OPT_BIN $ROOT >a; $OPT_BIN $ROOT >b; diff -q a b        # determinism is a contract"
+echo "  diff -q <($OPT_BIN $ROOT) <($BASE_BIN $ROOT)       # PGO must not change a byte of output"
+echo "  RIPWIRE_BIN=$OPT_BIN python3 $ROOT/test/pargates.py $ROOT $OPT_BIN -j 6"

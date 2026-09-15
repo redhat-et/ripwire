@@ -1,5 +1,7 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/platform_compat.h"
+#include <limits>
 
 #if !defined( RIPWIRE_INGEST_TU )
 #error "ingest_crawl.h is a SECTION of src/ingest.cpp's translation unit - include it only from ingest.cpp (see the ingest-family split note there)"
@@ -1499,7 +1501,10 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
             {
                 if( full.empty() )
                 {
-                    full = p.string();
+                    // `string()` uses the native separator on Windows.  `full` is the logical path carried
+                    // through the model and its serialized views, so keep it generic while `p`/`entry` remain
+                    // the native filesystem objects used for security checks, stats and reads.
+                    full = p.generic_string();
                 }
                 return full;
             };
@@ -1561,16 +1566,7 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
                 continue;
             }
 
-            if( !it->is_regular_file( ec ) )
-            {
-                continue;
-            }
-
             const std::string name = p.filename().string();
-            if( isDenylistedName( name ) )
-            {
-                continue;
-            }
 
             // §SEC1 — THE CRAWL BOUNDARY, and it is tested BEFORE the extension is classified. Order is the
             // contract here exactly as it is for the two drops below, but for a different reason: the
@@ -1587,6 +1583,16 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
             if( isLink && !crawlPathStaysInRoot( fullPath(), rootReal ) )
             {
                 recordRootEscape( skips, fullPath(), lowerExtensionOf( name ) );
+                continue;
+            }
+
+            if( !it->is_regular_file( ec ) )
+            {
+                continue;
+            }
+
+            if( isDenylistedName( name ) )
+            {
                 continue;
             }
 
@@ -1689,29 +1695,46 @@ bool readFile( const std::string& path, std::string& out )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/readFile: fopen+read whole file" );
 
-    std::FILE* fp = std::fopen( path.c_str(), "rb" );
+    std::FILE* fp = rw::compat::rw_fopen_utf8( path.c_str(), "rb" );
     if( fp == nullptr )
     {
         return false;
     }
 
+#if defined( _WIN32 )
+    if( ::_fseeki64( fp, 0, SEEK_END ) != 0 )
+#else
     if( std::fseek( fp, 0, SEEK_END ) != 0 )
+#endif
     {
         std::fclose( fp );
         return false;
     }
+#if defined( _WIN32 )
+    const long long len = ::_ftelli64( fp );
+#else
     const long len = std::ftell( fp );
+#endif
     if( len < 0 )
     {
         std::fclose( fp );
         return false;
     }
+#if defined( _WIN32 )
+    if( ::_fseeki64( fp, 0, SEEK_SET ) != 0 )
+#else
     if( std::fseek( fp, 0, SEEK_SET ) != 0 )
+#endif
     {
         std::fclose( fp );
         return false;
     }
 
+    if( static_cast<unsigned long long>( len ) > std::numeric_limits<std::size_t>::max() )
+    {
+        std::fclose( fp );
+        return false;
+    }
     out.resize( static_cast<std::size_t>( len ) );
     const std::size_t want = out.size();
     const std::size_t got  = want == 0 ? 0 : std::fread( out.data(), 1, want, fp );
@@ -1729,7 +1752,7 @@ bool readFilePrefix( const std::string& path, std::string& out, std::size_t maxB
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/readFilePrefix: fopen+read prefix" );
 
-    std::FILE* fp = std::fopen( path.c_str(), "rb" );
+    std::FILE* fp = rw::compat::rw_fopen_utf8( path.c_str(), "rb" );
     if( fp == nullptr )
     {
         return false;
@@ -1737,7 +1760,7 @@ bool readFilePrefix( const std::string& path, std::string& out, std::size_t maxB
 
     out.resize( maxBytes );
     const std::size_t got = maxBytes == 0 ? 0 : std::fread( out.data(), 1, maxBytes, fp );
-    const bool readOk = got > 0 || std::feof( fp ) != 0;
+    const bool readOk = std::ferror( fp ) == 0 && ( got > 0 || std::feof( fp ) != 0 );
     const bool closeOk = std::fclose( fp ) == 0;
     if( !readOk || !closeOk )
     {
@@ -1775,6 +1798,10 @@ bool readFilePrefix( const std::string& path, std::string& out, std::size_t maxB
 struct StatInfo { long long mtimeNs; long long sizeBytes; long long ctimeNs; };   // all -1 if the path cannot be stat'd
 inline StatInfo statSizeTimes( const std::string& path ) noexcept
 {
+#if defined( _WIN32 )
+    const rw::compat::RwFileTimes times = rw::compat::rw_file_times_of( path );
+    return { times.mtimeNs, times.sizeBytes, times.changeTimeNs };
+#else
     struct stat st;
     if( ::stat( path.c_str(), &st ) != 0 )
     {
@@ -1791,6 +1818,7 @@ inline StatInfo statSizeTimes( const std::string& path ) noexcept
     const long long c = (long long)st.st_ctime * 1000000000LL;
 #endif
     return { m, (long long)st.st_size, c };
+#endif
 }
 
 // L1 (Linux runtime probe) — what KIND of thing is at `path`? The cache seams need all three answers, so

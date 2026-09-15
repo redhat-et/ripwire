@@ -15,27 +15,154 @@ set -u
 # still counted by every crawl of the live repo (corpus_pruned_dirs=). test/pargates.py sets the same per gate.
 export PYTHONDONTWRITEBYTECODE=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+shell_path()
+{
+    case "$1" in
+        [A-Za-z]:/*|[A-Za-z]:\\*)
+            if command -v cygpath >/dev/null 2>&1; then
+                cygpath -u "$1"
+            else
+                printf '%s\n' "$1"
+            fi
+            ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+if [ -n "${RIPWIRE_BIN:-}" ]; then
+    BIN="$RIPWIRE_BIN"
+elif [ -f "$ROOT/build/ripwire.exe" ]; then
+    BIN="$ROOT/build/ripwire.exe"
+else
+    BIN="$ROOT/build/ripwire"
+fi
+BIN="$( shell_path "$BIN" )"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 usage(){ printf 'usage: test/regression.sh [CORPUS]   (default: test/fixture — one positional corpus path, no flags)\n' >&2; }
 CORPUS="${1:-test/fixture}"
 case "$CORPUS" in
     -*) printf "regression.sh: '%s' is not a flag this script accepts (there is no -j; parallelism lives in test/pargates.py)\n" "$CORPUS" >&2; usage; exit 2;;
 esac
+CORPUS="$( shell_path "$CORPUS" )"
 GOLD="$ROOT/test/golden.xml"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -f "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+
+WINDOWS_GATE=0
+if [[ "$( uname -s 2>/dev/null )" == MINGW* || "$( uname -s 2>/dev/null )" == MSYS* || "${OS:-}" == Windows_NT ]]; then
+    WINDOWS_GATE=1
+    GATE_SHELL="${RIPWIRE_BASH:-$( command -v bash.exe 2>/dev/null || command -v bash 2>/dev/null || true )}"
+else
+    GATE_SHELL="${RIPWIRE_BASH:-bash}"
+fi
+case "$( printf '%s' "$GATE_SHELL" | tr '[:upper:]' '[:lower:]' )" in
+    *'/windows/system32/bash.exe'|*'/windowsapps/*/bash.exe'|*'\\windows\\system32\\bash.exe')
+        printf 'regression.sh: refusing the WSL bash launcher (%s); use Git for Windows Bash\n' "$GATE_SHELL" >&2
+        exit 2
+        ;;
+esac
+if [ "$WINDOWS_GATE" = 1 ]; then
+    # Ordinary Git paths still need MSYS conversion; only the embedded merge-scout ref payload is literal.
+    unset MSYS_NO_PATHCONV
+    export MSYS2_ARG_CONV_EXCL="--merge-scout="
+fi
+if [ "$WINDOWS_GATE" = 1 ] && command -v cygpath >/dev/null 2>&1; then
+    # Native binaries must receive the same Windows spelling that the shell uses
+    # for temporary roots embedded in cache/edit/MCP payloads.
+    TMP="$( cygpath -m "$( cygpath -w "$TMP" )" )"
+fi
+
+# Git for Windows does not ship xmllint.  Keep regression's existing well-formedness checks live on the
+# native runner too, using the same stdlib-backed shim as pargates.py; Linux keeps its installed xmllint.
+if [ "$WINDOWS_GATE" = 1 ]; then
+    if [ -z "${RIPWIRE_PYTHON:-}" ]; then
+        RIPWIRE_PYTHON="$( command -v python.exe 2>/dev/null || command -v python 2>/dev/null || true )"
+    fi
+    [ -n "$RIPWIRE_PYTHON" ] || { echo "regression.sh: native Python is required on Windows" >&2; exit 2; }
+    PYTOOLS="$TMP/python-tools"
+    mkdir -p "$PYTOOLS"
+    PYTOOLS_PATH="$PYTOOLS"
+    if command -v cygpath >/dev/null 2>&1; then
+        PYTOOLS_PATH="$( cygpath -u "$PYTOOLS" )"
+    fi
+    cat >"$PYTOOLS/sitecustomize.py" <<'PYEOF'
+import os
+import sys
+
+_tmp = os.environ.get( "RW_MSYS_TMP", "" ).rstrip( "/\\" )
+
+def _native_arg( arg ):
+    if _tmp and arg == "/tmp":
+        return _tmp
+    if _tmp and arg.startswith( "/tmp/" ):
+        return _tmp + arg[ 4: ]
+    if len( arg ) >= 3 and arg[ 0 ] == "/" and arg[ 2 ] == "/" and arg[ 1 ].isalpha():
+        return arg[ 1 ].upper() + ":" + arg[ 2: ]
+    return arg
+
+sys.argv = [ sys.argv[ 0 ] ] + [ _native_arg( arg ) for arg in sys.argv[ 1: ] ]
+for _name in ( "stdout", "stderr" ):
+    _stream = getattr( sys, _name, None )
+    if _stream is not None and hasattr( _stream, "reconfigure" ):
+        _stream.reconfigure( newline=chr( 10 ) )
+PYEOF
+    cat >"$PYTOOLS/python3" <<'PYEOF'
+#!/usr/bin/env bash
+exec "${RIPWIRE_PYTHON:-python}" "$@"
+PYEOF
+    cat >"$PYTOOLS/python" <<'PYEOF'
+#!/usr/bin/env bash
+exec "${RIPWIRE_PYTHON:-python.exe}" "$@"
+PYEOF
+    chmod +x "$PYTOOLS/python3" "$PYTOOLS/python"
+    export RW_MSYS_TMP="$( cygpath -m "$( cygpath -w /tmp )" )"
+    export PYTHONPATH="$PYTOOLS${PYTHONPATH:+;$PYTHONPATH}"
+    export PATH="$PYTOOLS_PATH:$PATH"
+    export PYTHON_NATIVE="$RIPWIRE_PYTHON"
+    if [ -z "${RIPWIRE_PROBE:-}" ]; then
+        case "$BIN" in
+            *.exe) export RIPWIRE_PROBE="${BIN%.exe}_probe.exe" ;;
+            *)     export RIPWIRE_PROBE="${BIN}_probe" ;;
+        esac
+    fi
+    XMLTOOLS="$TMP/xml-tools"
+    mkdir -p "$XMLTOOLS"
+    XMLTOOLS_PATH="$XMLTOOLS"
+    if command -v cygpath >/dev/null 2>&1; then
+        XMLTOOLS_PATH="$( cygpath -u "$XMLTOOLS" )"
+    fi
+    cat >"$XMLTOOLS/xmllint" <<'EOF'
+#!/usr/bin/env bash
+exec "${RIPWIRE_PYTHON:-python}" "$RIPWIRE_XMLCHECK" "$@"
+EOF
+    chmod +x "$XMLTOOLS/xmllint"
+    if command -v cygpath >/dev/null 2>&1; then
+        export RIPWIRE_XMLCHECK="$( cygpath -w "$ROOT/test/xmlcheck.py" )"
+    else
+        export RIPWIRE_XMLCHECK="$ROOT/test/xmlcheck.py"
+    fi
+    export PATH="$XMLTOOLS_PATH:$PATH"
+fi
+run_gate()
+{
+    if [ "$WINDOWS_GATE" = 1 ]; then
+        RIPWIRE_BIN="$BIN" RIPWIRE_BASH="$GATE_SHELL" \
+            TMPDIR="$RW_MSYS_TMP" TEMP="$RW_MSYS_TMP" TMP="$RW_MSYS_TMP" \
+            "$GATE_SHELL" "$@"
+    else
+        RIPWIRE_BIN="$BIN" RIPWIRE_BASH="$GATE_SHELL" "$GATE_SHELL" "$@"
+    fi
+}
 cd "$ROOT"   # so the corpus path (and thus the XML) is repo-relative → golden is machine-independent
 [ -e "$CORPUS" ] || { printf "regression.sh: corpus '%s' does not exist\n" "$CORPUS" >&2; usage; exit 2; }
 
 echo "regression: BIN=$BIN  CORPUS=$CORPUS"
 
 # 0) G1 fresh-asan-binary check — detect if asan/ripwire is stale ( F-OPS).
-if RIPWIRE_BIN="$BIN" bash "$ROOT/test/g1freshcheck.sh" >/dev/null 2>&1; then ok "G1 fresh-asan-binary gate (test/g1freshcheck.sh)"; else no "G1 fresh-asan-binary gate (test/g1freshcheck.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/g1freshcheck.sh" 2>&1 | grep -E '(FAIL|stale asan binary)' | head -4; fi
+if run_gate "$ROOT/test/g1freshcheck.sh" >/dev/null 2>&1; then ok "G1 fresh-asan-binary gate (test/g1freshcheck.sh)"; else no "G1 fresh-asan-binary gate (test/g1freshcheck.sh failed)"; run_gate "$ROOT/test/g1freshcheck.sh" 2>&1 | grep -E '(FAIL|stale asan binary)' | head -4; fi
 
 # 1) determinism — same input, byte-identical baseline + three comparisons (§8).
 "$BIN" "$CORPUS" --no-cache >"$TMP/a" 2>/dev/null
@@ -181,27 +308,27 @@ printf '%s\n' "$mcpreq" | "$BIN" --mcp --no-stable >"$TMP/mcp_no"  2>/dev/null
 
 # 3j) skill security scan (P1-C) — run the dedicated gate (inject/exfil → exit 2; clean/docs → exit 0,
 #     incl. the documentation-not-attack precision case). Uses the same binary under test.
-if RIPWIRE_BIN="$BIN" bash "$ROOT/test/skillscan.sh" >/dev/null 2>&1; then ok "skill scan gate (test/skillscan.sh)"; else no "skill scan gate (test/skillscan.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/skillscan.sh" 2>&1 | grep -i fail | head -4; fi
+if run_gate "$ROOT/test/skillscan.sh" >/dev/null 2>&1; then ok "skill scan gate (test/skillscan.sh)"; else no "skill scan gate (test/skillscan.sh failed)"; run_gate "$ROOT/test/skillscan.sh" 2>&1 | grep -i fail | head -4; fi
 
 # 3m) --html graph export (P2-A) — run the dedicated gate (valid self-contained HTML, ≥3 nodes, deterministic,
 #     no external <script src>/<link href>). Uses the same binary under test.
-if RIPWIRE_BIN="$BIN" bash "$ROOT/test/htmlexport.sh" >/dev/null 2>&1; then ok "html export gate (test/htmlexport.sh)"; else no "html export gate (test/htmlexport.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/htmlexport.sh" 2>&1 | grep -i fail | head -4; fi
+if run_gate "$ROOT/test/htmlexport.sh" >/dev/null 2>&1; then ok "html export gate (test/htmlexport.sh)"; else no "html export gate (test/htmlexport.sh failed)"; run_gate "$ROOT/test/htmlexport.sh" 2>&1 | grep -i fail | head -4; fi
 
 # 3o) --compress body output (P2-B) — run the dedicated gate (comments stripped, string literals intact,
 #     blank-line runs collapsed, compressed < uncompressed, deterministic). Uses the same binary under test.
-if RIPWIRE_BIN="$BIN" bash "$ROOT/test/compresscheck.sh" >/dev/null 2>&1; then ok "compress gate (test/compresscheck.sh)"; else no "compress gate (test/compresscheck.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/compresscheck.sh" 2>&1 | grep -i fail | head -8; fi
+if run_gate "$ROOT/test/compresscheck.sh" >/dev/null 2>&1; then ok "compress gate (test/compresscheck.sh)"; else no "compress gate (test/compresscheck.sh failed)"; run_gate "$ROOT/test/compresscheck.sh" 2>&1 | grep -i fail | head -8; fi
 
 # 3p) --handoff continuation packet — run the dedicated gate (verified+heuristic sections present, verified
 #     names the edited file, determinism, xmllint-clean, additive/no side effect on the flagless map, the
 #     empty-diff contract, --token-budget composition). Uses the same binary under test.
-if RIPWIRE_BIN="$BIN" bash "$ROOT/test/handoffcheck.sh" >/dev/null 2>&1; then ok "handoff gate (test/handoffcheck.sh)"; else no "handoff gate (test/handoffcheck.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/handoffcheck.sh" 2>&1 | grep -i fail | head -8; fi
+if run_gate "$ROOT/test/handoffcheck.sh" >/dev/null 2>&1; then ok "handoff gate (test/handoffcheck.sh)"; else no "handoff gate (test/handoffcheck.sh failed)"; run_gate "$ROOT/test/handoffcheck.sh" 2>&1 | grep -i fail | head -8; fi
 
 # 3q) printf-family byte-parity fence — a
 #     printf/fprintf/snprintf -> std::format/std::print conversion must not move one byte of any verb's
 #     stdout/stderr; per-verb/per-stream SHA-256 against test/printf_parity.manifest. Individually invoked
 #     (not folded into the bulk absorb loop below) so this gate's addition does not perturb that loop's
 #     length, which docs/EVALS.md §8 quotes verbatim (owned by a different thread this round).
-if RIPWIRE_BIN="$BIN" bash "$ROOT/test/printffmtparitycheck.sh" >/dev/null 2>&1; then ok "printf/fmt parity gate (test/printffmtparitycheck.sh)"; else no "printf/fmt parity gate (test/printffmtparitycheck.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/printffmtparitycheck.sh" 2>&1 | grep -i fail | head -8; fi
+if run_gate "$ROOT/test/printffmtparitycheck.sh" >/dev/null 2>&1; then ok "printf/fmt parity gate (test/printffmtparitycheck.sh)"; else no "printf/fmt parity gate (test/printffmtparitycheck.sh failed)"; run_gate "$ROOT/test/printffmtparitycheck.sh" 2>&1 | grep -i fail | head -8; fi
 
 # Delivery contract is kept separate because it drives the curl installer with a sealed local release
 # fixture and inspects the release workflow itself. It USED to need no binary under test; since it gained
@@ -210,67 +337,67 @@ if RIPWIRE_BIN="$BIN" bash "$ROOT/test/printffmtparitycheck.sh" >/dev/null 2>&1;
 # `RIPWIRE_BIN=asan/ripwire test/regression.sh`, i.e. it would test a different binary than the one
 # named and report a pass for it. Restored on the #51 merge, which predated a5c95aa6 and dropped it
 # without a git conflict.
-if RIPWIRE_BIN="$BIN" bash "$ROOT/test/releaseinstallcheck.sh" >/dev/null 2>&1; then
+if run_gate "$ROOT/test/releaseinstallcheck.sh" >/dev/null 2>&1; then
     ok "release install gate (test/releaseinstallcheck.sh)"
 else
     no "release install gate (test/releaseinstallcheck.sh failed)"
-    RIPWIRE_BIN="$BIN" bash "$ROOT/test/releaseinstallcheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
+    run_gate "$ROOT/test/releaseinstallcheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
 fi
 
 # Source-build delivery is a separate contract from release archives: the binary, skills and hooks
 # installed by one component must be the same revision, so an update cannot leave stale agent routing.
-if RIPWIRE_BIN="$BIN" bash "$ROOT/test/sourceinstallcheck.sh" >/dev/null 2>&1; then
+if run_gate "$ROOT/test/sourceinstallcheck.sh" >/dev/null 2>&1; then
     ok "source install gate (test/sourceinstallcheck.sh)"
 else
     no "source install gate (test/sourceinstallcheck.sh failed)"
-    RIPWIRE_BIN="$BIN" bash "$ROOT/test/sourceinstallcheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
+    run_gate "$ROOT/test/sourceinstallcheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
 fi
 
 # Task router is a standalone contract gate and must run under the binary selected for this suite.
-if RIPWIRE_BIN="$BIN" bash "$ROOT/test/taskroutecheck.sh" >/dev/null 2>&1; then
+if run_gate "$ROOT/test/taskroutecheck.sh" >/dev/null 2>&1; then
     ok "task router gate (test/taskroutecheck.sh)"
 else
     no "task router gate (test/taskroutecheck.sh failed)"
-    RIPWIRE_BIN="$BIN" bash "$ROOT/test/taskroutecheck.sh" 2>&1 | grep -E 'FAIL|FAILURES' | head -8
+    run_gate "$ROOT/test/taskroutecheck.sh" 2>&1 | grep -E 'FAIL|FAILURES' | head -8
 fi
 
 # Prompt routing runs before the first retrieval decision; confidence-gated context and privacy-safe
 # telemetry are independent of the binary's held-out taskroute evaluator.
-if RIPWIRE_BIN="$BIN" bash "$ROOT/test/codexpromptroutecheck.sh" >/dev/null 2>&1; then
+if run_gate "$ROOT/test/codexpromptroutecheck.sh" >/dev/null 2>&1; then
     ok "Codex prompt route gate (test/codexpromptroutecheck.sh)"
 else
     no "Codex prompt route gate (test/codexpromptroutecheck.sh failed)"
-    RIPWIRE_BIN="$BIN" bash "$ROOT/test/codexpromptroutecheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
+    run_gate "$ROOT/test/codexpromptroutecheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
 fi
 
 # CLI edit delivery is a first-class gate: the preferred surface must share the MCP edit engine's
 # refusal/atomicity guarantees rather than leaving safe writes available only through MCP.
-if RIPWIRE_BIN="$BIN" bash "$ROOT/test/clieditcheck.sh" >/dev/null 2>&1; then
+if run_gate "$ROOT/test/clieditcheck.sh" >/dev/null 2>&1; then
     ok "CLI edit gate (test/clieditcheck.sh)"
 else
     no "CLI edit gate (test/clieditcheck.sh failed)"
-    RIPWIRE_BIN="$BIN" bash "$ROOT/test/clieditcheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
+    run_gate "$ROOT/test/clieditcheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
 fi
 
-if RIPWIRE_BIN="$BIN" bash "$ROOT/test/grephandlecheck.sh" >/dev/null 2>&1; then
+if run_gate "$ROOT/test/grephandlecheck.sh" >/dev/null 2>&1; then
     ok "grep handle gate (test/grephandlecheck.sh)"
 else
     no "grep handle gate (test/grephandlecheck.sh failed)"
-    RIPWIRE_BIN="$BIN" bash "$ROOT/test/grephandlecheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
+    run_gate "$ROOT/test/grephandlecheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
 fi
 
 # 3n) absorb gates (P3-B arch layer(), S6-A lint completion, S6-B swift purity, S5-C owners) — each a
 #     dedicated standalone gate; run with the binary under test (skip any not yet present).
-if RIPWIRE_BIN="$BIN" bash "$ROOT/test/codexdoctorcheck.sh" >/dev/null 2>&1; then
+if run_gate "$ROOT/test/codexdoctorcheck.sh" >/dev/null 2>&1; then
     ok "Codex active-surface doctor gate (codexdoctorcheck.sh)"
 else
     no "Codex active-surface doctor gate (codexdoctorcheck.sh failed)"
-    RIPWIRE_BIN="$BIN" bash "$ROOT/test/codexdoctorcheck.sh" 2>&1 | sed 's/^/        | /'
+    run_gate "$ROOT/test/codexdoctorcheck.sh" 2>&1 | sed 's/^/        | /'
 fi
 # retired: cacheexclkeycheck — the per-configuration auto-cache key it pinned is a registered NEGATIVE (docs/EVALS.md, "The auto-cache key ignores --exclude", RUN 2026-09-03: a 158K-file root with >= 12 gate configurations thrashed the 2 GiB sweep); the retry design keeps ONE superset blob per root and will bring its own gate
 for _g in a9disclosurecheck abicheck accessshapecheck ackonlycheck adaptivecheck adaptivecutshapecheck affectedcheck agentloopclaudecheck agentloopcodexcheck agentloopeditsuitecheck agentloopfollowupcheck agentloopgradercheck agentlooplockcheck agentloopopencodecheck agentsurfacecheck agenttablecheck aiderbytescheck anchorbodycheck anchorcheck archcheck archmetricscheck argvdiffcheck arisefollowupcheck ariseshimcheck aritycheck artifactcheck astqueryregexcheck atcheck atomscheck attrvocabcheck baselinecheck baselinedirtycheck baselineportcheck bashsourcecheck batchcheck binoverridecheck blindspotcheck bm25boundcheck bm25check bodiesshowncheck bodydialectcheck budgetpolicycheck bundleidcheck cachefuzzcheck cachehashcheck cacheidentitycheck cacheisolationcheck cachelintcheck cacheoffsetcheck cachereservecheck cachesplitcheck callerscheck callformcheck callsrankordercheck candheadcheck candidatescheck canoncheck capdisclosurecheck capsweepcheck ccheck ccjsoncheck ceilingverdictcheck chacheck chaconecheck chainguardcheck chainidcheck childwalkscalecheck churndecaycheck churnjoincheck churnjsonstampcheck claudeconfigdircheck clicheck clonebandcheck clonecachecheck clonededupcheck cloneidiomcheck clonelexcheck clsrecvcheck cochangeboostcheck cochangecliocheck cochangesurprisecheck codexinstallhonestycheck codexplugincheck codexwrapcheck collectioncapcheck columnarattrcheck columnarcheck columnarcommacheck commentcoherencecheck communitydrillcheck communitylabelcheck compactlegendcheck compactroutecheck completecheck composelangcheck connectcheck connectcorecheck connectjoincheck constcheck contextratiocheck coplintcheck cppbenchcheck cppoperatorcheck cppqualcheck crawlescapecheck crossdirincludecheck crossrefcheck crossrefdegradecheck csharpcheck csharpcondcheck cudacheck cyclecutcheck dartcheck deadcheck deadfiltercheck deadprecisioncheck deckcheck deckclaimcheck declinecheck declinedlistcheck decltodefcheck deeptailcheck defaultceilingcheck defoverdeclcheck degradedhintcheck dependencypincheck deplangscheck depsprecisecheck detailcheck didyoumeancheck dispatchordercheck dmmcheck docanchorcheck docdemotecheck docdriftcheck docdriftcommentcheck docmdcachecheck docmentioncheck docscommandscheck doctorcheck donelegendcheck droppedpositivecheck duprowcheck dynmapsimdcheck editcheckanswercheck editcheckcheck editchecknotecheck edithandlehintcheck editpayloadbinarycheck editplancheck editplanpayloadconfinecheck editplanrecheckcheck editplanrollbackmsgcheck editpreviewcheck editroundtripcheck edittargetfileabscheck eliximportcheck elixircheck elixirnamearitycheck elixirsemanticcheck emitescapecheck emittertruthcheck emptycorpuscheck emptyvaluerefusecheck ensembleavailcheck ensemblecheck essentialcxcheck estchargecheck evalcheck evictioncheck exemplarcheck exemplarconfcheck exercisescheck expandcallscheck expandmodecheck expandrangecheck expandsibscheck expandtokencheck expandtopk0check extentcheck externalvetocheck fficheck fieldaffinitycheck fieldidcheck fieldnarrowcheck fieldusescheck filerootcheck fileselectorrefusecheck fillordercheck fixedbufsweep flagscheck flagsnoisecheck flagsurfacecheck flagtablecheck flipcheck floormarkcheck fnptrcheck forautobodycheck forbudgetmonotoncheck forcalibfactscheck forcompresscheck fordisclosurecheck forlenscheck formatgatecheck formaxtokenscheck fornotesbudgetcheck fornotesjsoncheck forrankordercheck forrootlegendcheck forwidencheck freshclonecheck freshnesscheck g1configcheck gateabilitycheck gatecountcheck gateexitcheck genrecallcheck githardencheck gitignorecheck gitquotepathcheck gitstampcheck goinstcheck gointerfacecheck graphlegendbudgetcheck graphqueryrefusecheck grepanchorcheck grepandcheck grepbytescheck grepcheck grepcontextcheck grepcorpuscheck grepfastcheck grepfollowupcheck grepignorecheck grepscancheck grepseamcheck greptiercheck guardmsgcheck hasacheck headbinstagecheck headsnapcachecheck helpbudgetcheck hermesinstallcheck historyoraclecheck hookcheck hostilecheck hotspotsincecheck htmlcolorcheck htmlhostcheck htmlrendercheck identitycheck impactimportcheck impactpartitioncheck importnarrowcheck includeanglecheck includeprecisecheck indexoutcheck infraportcheck isolateprovenancecheck javarubycheck jslangcheck jsmetricscheck jsnestedcheck jsoncheck jsonlangcheck jsonparitycheck jsonredactcheck jsonrefusallegendcheck jsonwalkcheck jsshapecheck jsverbscheck knownitemcheck kotlincheck landingcheck langcensuscheck langcheck layerquerycheck layoutcheck lb3namecheck legendcostcheck legendcoveragecheck legenddriftcheck legobundlecheck legocheck liftdisclosurecheck limitstablecheck lintbudgetcheck lintcatalogcheck lintcheck lintdedupcheck lintpayloadcapcheck lintprecisioncheck lintrulescheck lintscopecheck lintselectcheck listingpagingcheck localitycheck localscountcheck loopconservationcheck lpincheck luacheck luarequirecheck macroedgecheck macroreparsecheck manifestcheck mapdiffcheck matchcapturecheck matchgrammarcheck maxfilesizecheck mcpattrparitycheck mcpaudit4hardencheck mcpclidiffcheck mcpcodexmetacheck mcpcontractcheck mcpdegradedhintcheck mcpeditcheck mcpeditkindcheck mcpeditmodecheck mcpeditpresencecheck mcpeditracecheck mcpflagshipcheck mcpforparitycheck mcpframehonestycheck mcpgrepdegradedcheck mcphandlecheck mcpincrementalcheck mcpmanifestcheck mcprangeedgecheck mcpreadloopcheck mcpredactcheck mcpreloadcheck mcpremotecheck mcprobustcheck mcpslicecheck mcpstalecheck mcpstrictschemacheck mcptoolprunecheck mcptranchecheck mcpverbscheck mcpw2fixcheck mcpw3fixcheck mcpwatchercheck mdembedcheck mdsectioncheck mentioncapcheck mentioncheck mentionsverbcheck mergechurncheck mergescoutcheck mergescoutlonglinecheck metalcheck meterdisclosurecheck metricscheck modifierguardcheck moduleconstcheck morecontractcheck mrowalkcheck multirootcheck multiswecheck namedfileinputcheck nameinfocheck namingcalibrationcheck namingconsistencycheck naminglenscheck naminglocalscheck narrowcheck narrowlangcheck neighbourcapcheck nestedimportcheck nestedqualcheck nestprofilecheck nextverbcheck noaliascheck nodekindcheck nongitqmetricscheck nonlocalstatecheck notecanoncheck notescheck nsfiltercheck nulbytecheck numericrefusecheck objcfieldcheck objcsniffcheck opencodewrapcheck optremarkscheck optremarkshotcheck ordercheck outlinecheck overbudgetcommentcheck ownerscheck packcallersharecheck packtaskcheck packtaskmonotoncheck packtaskquotacheck padscalecheck paginationcheck pagingsweepcheck panellegendcheck pargatescheck parsehealthcheck partitioncheck patterncheck perfharnesscheck phpcheck pincensuscheck planlanescheck planlintcheck pmccheck portablebuildcheck portablecachecheck postingscheck ppaltcheck ppdeadrolescheck pranchorcheck prbudgetcheck prcheck prcontextcheck prconvergecheck precedencecheck preproccondcheck preprocdeadscalecheck prmaskanchorcheck prnestedcapcheck probecheck propcostcheck prrefsafecheck prrenamecheck pyimportprecisecheck pyshapecheck qackconcurrencycheck qackorigincheck qchurncheck qchurnmemocheck qddialscheck qdrefpaircheck qextractionkeycheck qoriginoraclecheck qrevtokencheck qrowlocatorcheck qschemetripcheck qsnapcachecheck qsnapprefetchcheck qualifiedresolvecheck qualitycheck qualitycrosslangcheck qualityexcludecheck qualitykeycheck qualitykindscheck qualityorigincheck qualitypanelcheck qualityscopecheck qualitysignalcheck qualitystalecheck qualitysymcheck qualnewcheck querycheck queryfilescancheck racymtimecheck radixsimdcheck rangecomposecheck rankbycheck reachcheck readabilitycheck readmedriftcheck readmeexamplecheck recallanchorcheck recallboundarycheck recallbudgetcheck recallbufcheck recallevalcheck recallparitycheck recallpassagecheck recallrankdepthcheck recallrelcheck recalltablecheck recalltotalcheck receiptpostcheck recentscopecheck redactcheck redactfixcheck refusaltailcheck regexbombcheck regexcheck regexrefusecheck registermacrocheck relevancefloorcheck relinkcheck reportcheck resolvecheck resolverhonestycheck retrievalqualitycheck reusefirstworkflowcheck ripwirepubliccheck rootrelcheck rootrelemitcheck routecheck routeedgecheck routehookcheck routeoncecheck routingreportcheck rubyargcheck rubyconstcheck rubymetricscheck rubyrecvcheck rubyrequirecheck rubyscopecheck rubysettercheck runhintcheck runtracecheck rustanccheck rustimportprecisecheck rustqualcheck safedeletecheck sarifcheck savecachecheck scipcheck scipjoincheck scorecardcheck scoutheadconflictcheck scoutkeycheck scroundtripcheck seedboundscheck selectorchaincheck selectorhonestycheck selectorrefusecheck selectorscopecheck selfcontainedcheck shadowcheck shapingflagcheck shellgateindexcheck showcasecapturecheck sibliftcheck sidecarsymlinkcheck sigredactcheck sincecheck sincecochangecheck sincewindowcheck singledefcheck situdiffcheck situshapecheck skilldescbudgetcheck skillevalcheck skillevalsplitcheck skillinstallcheck skillroutingjudgedcheck skillscanreadcheck skilltruthcheck skipclassifycheck skippedcheck skipreasoncheck slicecheck slicediffcheck sliceflowcheck sliceflowsenscheck spectimingcheck staleackcheck statgatecheck stdqualcheck strkerncheck sublistcountcheck substrfiltercheck subtokencheck svectorcheck swiftcheck swiftmemberscheck swiftshapecheck taskechocheck termmargincheck testedreachcheck testgatecheck testgatelegendbudgetcheck testgatepagecheck testgaterefusecheck testmacrocheck testrowruncheck testscopecheck textdocscheck timsortcheck tokenbudgetcheck tomllangcheck toolcallroutecheck tornreadcheck tracecheck tracehandoffcapcheck tracehopcheck traceminecheck treecheck truncvocabcheck tsimportprecisecheck tsshapecheck type3check type3clonecheck typerefcheck unreachablecheck unresolvedcheck usescheck usesselectorcheck usingdeclcheck utf8scrubcheck vendoredassetcheck vendoredbundlecheck vendorpatchcheck verifycheck versioncheck w2verbscheck w3fixbudgetcheck w3fixlegendcheck weaksignalcheck withgraphcheck withprofilecheck worktreeleakcheck wrapverbscheck writetargetcheck xmlwellformed yamllangcheck zonecheck zoneconsistencycheck zoomcheck; do
     [ -f "$ROOT/test/$_g.sh" ] || continue
-    if RIPWIRE_BIN="$BIN" bash "$ROOT/test/$_g.sh" >/dev/null 2>&1; then
+    if run_gate "$ROOT/test/$_g.sh" >/dev/null 2>&1; then
         ok "absorb gate ($_g.sh)"
     else
         # A BARE NAME IS UNDIAGNOSABLE IN CI. The >/dev/null 2>&1 above eats the gate's own FAIL text, so the
@@ -287,7 +414,7 @@ for _g in a9disclosurecheck abicheck accessshapecheck ackonlycheck adaptivecheck
         # without ever printing one (missing tool, bad precondition, crash) has no such line, so fall back
         # to the TAIL, where those messages land.
         _rc_absorb=0
-        RIPWIRE_BIN="$BIN" bash "$ROOT/test/$_g.sh" >"$TMP/absorb.out" 2>&1 || _rc_absorb=$?
+        run_gate "$ROOT/test/$_g.sh" >"$TMP/absorb.out" 2>&1 || _rc_absorb=$?
         no "absorb gate ($_g.sh failed, rc=$_rc_absorb)"
         # the repo's OWN marker first (`  FAIL  …` / `FAILURES ABOVE`, case-sensitive and anchored, so a PASS
         # row whose prose contains "fail"/"failure" cannot hijack the window), then the shapes a gate that

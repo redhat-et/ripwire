@@ -50,17 +50,17 @@ inline constexpr std::uint32_t kNoTraceFile = UINT32_MAX;
 // mention-anchor precedent, src/mention.h) — first ascending fileId on a tie. kNoTraceFile ⇒ out of corpus.
 inline std::uint32_t traceMatchFile( const IngestResult& ing, std::string_view rawPath )
 {
-    // split the frame path into whole '/'-components (drop empties so a leading '/' or '//' is harmless)
+    // split the frame path into whole path components (drop empties so a leading '/' or '//' is harmless)
     std::vector<std::string> segments;
     std::size_t p = 0;
     while( p < rawPath.size() )
     {
-        while( p < rawPath.size() && rawPath[p] == '/' )
+        while( p < rawPath.size() && mention_detail::isPathSeparator( rawPath[p] ) )
         {
             ++p;
         }
         const std::size_t s = p;
-        while( p < rawPath.size() && rawPath[p] != '/' )
+        while( p < rawPath.size() && !mention_detail::isPathSeparator( rawPath[p] ) )
         {
             ++p;
         }

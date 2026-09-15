@@ -87,8 +87,8 @@ while IFS= read -r row; do
         grep -qF "install.sh${skillsflag:+ $skillsflag}" "$TMP/out" \
             || fail "(F) '$name' has a skills root but the recipe never prints 'install.sh ${skillsflag}'"
         if [ -n "$skillsflag" ]; then
-            out="$( HOME="$TMP/h-$name" AGENTS_HOME="$TMP/h-$name/.agents" CODEX_HOME="$TMP/h-$name/.codex" \
-                    bash "$ROOT/skills/install.sh" "$skillsflag" 2>&1 )"; irc=$?
+            out="$( HOME="$TMP/h-$name" HERMES_HOME="$TMP/h-$name/.hermes" AGENTS_HOME="$TMP/h-$name/.agents" CODEX_HOME="$TMP/h-$name/.codex" \
+                                bash "$ROOT/skills/install.sh" "$skillsflag" 2>&1 )"; irc=$?
             # STATUS AND EFFECT, not just the absence of a rejection message. The first version only
             # grepped for "unknown option", so an installer that accepted the flag and then died on an
             # unbound variable — or exited 0 having installed nothing — passed the arm that exists to

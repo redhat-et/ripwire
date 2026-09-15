@@ -110,7 +110,7 @@ if [ "$rc" != "0" ] && [ "$rc" != "1" ] && [ "$rc" != "2" ]; then
 else
     no "--scan-skills=nonexistent-dir exited $rc — collides with (or is) a scan verdict code"
 fi
-if grep -q "$NOSUCHDIR" "$TMP/err.txt"; then
+if grep -q "$( basename "$NOSUCHDIR" )" "$TMP/err.txt" || grep -q "$NOSUCHDIR" "$TMP/err.txt"; then
     ok "…stderr names the unreadable dir"
 else
     no "…stderr does not name the dir"; cat "$TMP/err.txt"
@@ -269,8 +269,19 @@ SYMFILES="$( grep -o 'files="[0-9]*"' "$TMP/b13s2.out" | head -1 | grep -o '[0-9
 #    arm hangs rather than fails, which is why it is worth having.
 B13Y="$TMP/b13cycle"; mkdir -p "$B13Y/root/sub"
 printf 'nothing to see\n' > "$B13Y/root/a.md"
-ln -s .. "$B13Y/root/sub/up"
-ln -s "$B13Y/root" "$B13Y/root/sub/self"
+B13Y_NATIVE="$B13Y"
+if command -v cygpath >/dev/null 2>&1; then
+    B13Y_NATIVE="$( cygpath -w "$B13Y" )"
+fi
+"${RIPWIRE_PYTHON:-python3}" - "$B13Y_NATIVE" <<'PY'
+import os
+import pathlib
+import sys
+
+root = pathlib.Path( sys.argv[ 1 ] ) / "root"
+os.symlink( "..", root / "sub" / "up", target_is_directory=True )
+os.symlink( str( root ), root / "sub" / "self", target_is_directory=True )
+PY
 CYCOUT="$TMP/b13cyc.out"; CYCERR="$TMP/b13cyc.err"
 if command -v timeout >/dev/null 2>&1; then timeout 60 "$BIN" "--scan-skills=$B13Y/root" >"$CYCOUT" 2>"$CYCERR"; CYCRC=$?
 else "$BIN" "--scan-skills=$B13Y/root" >"$CYCOUT" 2>"$CYCERR"; CYCRC=$?; fi

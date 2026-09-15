@@ -856,7 +856,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
         const Symbol& only = ing.symbols[ defs[0] ];
         if( deadCodeEligibleKind( ing, only ) )
         {
-            std::FILE* file = std::fopen( diskPath( ing, only.fileId ).c_str(), "rb" );
+            std::FILE* file = rw::compat::rw_fopen_utf8( diskPath( ing, only.fileId ).c_str(), "rb" );
             if( file )
             {
                 std::fseek( file, 0, SEEK_END );
@@ -1228,7 +1228,7 @@ std::optional<int> runSlice( const MainDispatch& d )
     // ── read + re-parse the ONE file holding the definition ────────────────────────────────────────────
     const std::string& path = diskPath( ing, sym.fileId );
     std::string        src;
-    if( std::FILE* in = std::fopen( path.c_str(), "rb" ) )
+    if( std::FILE* in = rw::compat::rw_fopen_utf8( path.c_str(), "rb" ) )
     {
         char        buf[ 4096 ];
         std::size_t n = 0;
