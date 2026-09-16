@@ -183,6 +183,10 @@ printf '%s\n' "$mcpreq" | "$BIN" --mcp --no-stable >"$TMP/mcp_no"  2>/dev/null
 #     incl. the documentation-not-attack precision case). Uses the same binary under test.
 if RIPWIRE_BIN="$BIN" bash "$ROOT/test/skillscan.sh" >/dev/null 2>&1; then ok "skill scan gate (test/skillscan.sh)"; else no "skill scan gate (test/skillscan.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/skillscan.sh" 2>&1 | grep -i fail | head -4; fi
 
+# 3j.1) skills embed step (configure-time) — run the dedicated gate (every skills/ and hooks/ file in
+#     generated header, deterministic across reconfigs, CMAKE_CONFIGURE_DEPENDS works). Uses build tree.
+if bash "$ROOT/test/skillsembedcheck.sh" >/dev/null 2>&1; then ok "skills embed gate (test/skillsembedcheck.sh)"; else no "skills embed gate (test/skillsembedcheck.sh failed)"; bash "$ROOT/test/skillsembedcheck.sh" 2>&1 | grep -i fail | head -4; fi
+
 # 3m) --html graph export (P2-A) — run the dedicated gate (valid self-contained HTML, ≥3 nodes, deterministic,
 #     no external <script src>/<link href>). Uses the same binary under test.
 if RIPWIRE_BIN="$BIN" bash "$ROOT/test/htmlexport.sh" >/dev/null 2>&1; then ok "html export gate (test/htmlexport.sh)"; else no "html export gate (test/htmlexport.sh failed)"; RIPWIRE_BIN="$BIN" bash "$ROOT/test/htmlexport.sh" 2>&1 | grep -i fail | head -4; fi
