@@ -74,10 +74,17 @@ BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 case "$BIN" in /*) ;; *) BIN="$ROOT/$BIN";; esac
 BUILDDIR="$( dirname "$BIN" )"
 TSLIB="$BUILDDIR/_deps/tree_sitter-build/libtree-sitter.a"
+if [ "${OS:-}" = Windows_NT ]; then
+    for candidate in "$BUILDDIR/_deps/tree_sitter-build/tree-sitter.lib" "$BUILDDIR/_deps/tree_sitter-build/libtree-sitter.lib"; do
+        if [ -f "$candidate" ]; then TSLIB="$candidate"; break; fi
+    done
+fi
 if [ ! -f "$TSLIB" ]; then
     echo "  no tree-sitter static lib under $BUILDDIR — build first (cmake --build build -j)"; exit 2
 fi
-GRAMMAR_OBJS="$( find "$BUILDDIR/CMakeFiles" -type d -name 'ts_*.dir' -exec find {} -name '*.o' \; 2>/dev/null | sort )"
+GRAMMAR_EXT='*.o'
+[ "${OS:-}" = Windows_NT ] && GRAMMAR_EXT='*.obj'
+GRAMMAR_OBJS="$( find "$BUILDDIR/CMakeFiles" -type d -name 'ts_*.dir' -exec find {} -name "$GRAMMAR_EXT" \; 2>/dev/null | sort )"
 if [ -z "$GRAMMAR_OBJS" ]; then
     echo "  no compiled grammar objects under $BUILDDIR/CMakeFiles — build first (cmake --build build -j)"; exit 2
 fi
@@ -97,7 +104,8 @@ TSCORE="$ROOT/third_party/deps/tree_sitter"
     || { echo "  no self-built tree-sitter core: $( head -3 "$TMP/gobj/core.log" )"; exit 2; }
 n_g=0
 for obj in $GRAMMAR_OBJS; do
-    rel="${obj#*/CMakeFiles/}"; rel="${rel#*.dir/}"; rel="${rel%.o}"     # ts_cpp.dir/third_party/deps/cpp/src/parser.c.o → third_party/deps/cpp/src/parser.c
+    rel="${obj#*/CMakeFiles/}"; rel="${rel#*.dir/}"
+    case "$rel" in *.obj) rel="${rel%.obj}";; *.o) rel="${rel%.o}";; esac     # ts_cpp.dir/third_party/deps/cpp/src/parser.c.obj → third_party/deps/cpp/src/parser.c
     src="$ROOT/$rel"; [ -f "$src" ] || { echo "  grammar source missing for $obj: $src"; exit 2; }
     name="$( printf '%s' "$rel" | tr '/' '_' )"
     case "$src" in

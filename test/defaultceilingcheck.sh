@@ -39,7 +39,24 @@ rootattr(){ sed 's/<!--[^>]*-->//g' "$1" | grep -o "<$2 [^>]*>" | head -1 | grep
 nextof(){ sed 's/<!--[^>]*-->//g' "$1" | grep -o "<$2 [^>]*>" | head -1 | grep -o ' next="[^"]*"' | sed 's/ next="//; s/"$//' | sed 's/&quot;/"/g; s/&amp;/\&/g'; }
 runs(){   # runs '<invocation>' → exit code, on the repo
     python3 -c 'import shlex, sys; print( "\0".join( shlex.split( sys.argv[1] ) ), end = "" )' "$1" > "$TMP/argv.bin"
-    ( cd "$ROOT" && xargs -0 "$BIN" . < "$TMP/argv.bin" >"$TMP/nx.out" 2>"$TMP/nx.err" ); echo $?
+    if [ -n "${RIPWIRE_PYTHON:-}" ] && [ -f "$RIPWIRE_PYTHON" ]; then
+        local bin_native="$BIN"; local root_native="$ROOT"; local out_native="$TMP/nx.out"; local err_native="$TMP/nx.err"
+        if command -v cygpath >/dev/null 2>&1; then
+            bin_native="$( cygpath -w "$BIN" )"; root_native="$( cygpath -w "$ROOT" )"
+            out_native="$( cygpath -w "$TMP/nx.out" )"; err_native="$( cygpath -w "$TMP/nx.err" )"
+        fi
+        MSYS_NO_PATHCONV=1 "$RIPWIRE_PYTHON" -c 'import shlex, subprocess, sys
+binary, root, invocation, out_path, err_path = sys.argv[1:]
+try:
+    with open(out_path, "wb") as out, open(err_path, "wb") as err:
+        result = subprocess.run([binary, root, *shlex.split(invocation)], cwd=root, stdout=out, stderr=err, timeout=120)
+except subprocess.TimeoutExpired:
+    print(124)
+else:
+    print(result.returncode)' "$bin_native" "$root_native" "$1" "$out_native" "$err_native"
+    else
+        ( cd "$ROOT" && xargs -0 "$BIN" . < "$TMP/argv.bin" >"$TMP/nx.out" 2>"$TMP/nx.err" ); echo $?
+    fi
 }
 bytes(){ wc -c <"$1" | tr -d ' '; }
 

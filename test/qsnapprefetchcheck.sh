@@ -42,6 +42,31 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/fixture"
+
+# Windows has no POSIX FIFO with the open/read/write semantics used by this shell fixture. Keep the Linux gate
+# unchanged, but run the equivalent native companion so the persistent MCP protocol and every qsnap assertion stay
+# live instead of replacing the binary with a non-vacuous stub.
+WINDOWS_GATE=0
+case "$( uname -s 2>/dev/null )" in
+    MINGW*|MSYS*) WINDOWS_GATE=1 ;;
+esac
+[ "${OS:-}" = Windows_NT ] && WINDOWS_GATE=1
+if [ "$WINDOWS_GATE" = 1 ]; then
+    PYTHON_NATIVE="${RIPWIRE_PYTHON:-${PYTHON_NATIVE:-}}"
+    [ -n "$PYTHON_NATIVE" ] || PYTHON_NATIVE="$( command -v python.exe 2>/dev/null || command -v python 2>/dev/null || true )"
+    [ -n "$PYTHON_NATIVE" ] || { echo "qsnapprefetchcheck.sh: native Python is required on Windows" >&2; exit 2; }
+    NATIVE_SCRIPT="$ROOT/test/qsnapprefetchcheck_windows.py"
+    NATIVE_BIN="${RIPWIRE_REAL_BIN:-$BIN}"
+    if command -v cygpath >/dev/null 2>&1; then
+        NATIVE_SCRIPT="$( cygpath -m "$NATIVE_SCRIPT" )"
+        NATIVE_BIN="$( cygpath -m "$NATIVE_BIN" )"
+        if [ -n "${RIPWIRE_BASH:-}" ]; then
+            export RIPWIRE_BASH="$( cygpath -m "$RIPWIRE_BASH" )"
+        fi
+    fi
+    exec "$PYTHON_NATIVE" "$NATIVE_SCRIPT" "$NATIVE_BIN"
+fi
+
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 

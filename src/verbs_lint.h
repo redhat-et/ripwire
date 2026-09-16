@@ -244,7 +244,7 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing, co
                 }
                 if( fileRead.find( fid ) == fileRead.end() )
                 {
-                    FILE* fp = std::fopen( diskPath( ing, fid ).c_str(), "rb" );
+                    FILE* fp = rw::compat::rw_fopen_utf8( diskPath( ing, fid ).c_str(), "rb" );
                     if( fp )
                     {
                         std::fseek( fp, 0, SEEK_END );
@@ -512,7 +512,7 @@ struct ProfScopeRow
 // silently, because "annotated zero findings" and "read the wrong file" must never look alike.
 std::optional<std::vector<ProfScopeRow>> parseProfTsv( const std::string& path )
 {
-    std::FILE* fp = std::fopen( path.c_str(), "rb" );
+    std::FILE* fp = rw::compat::rw_fopen_utf8( path.c_str(), "rb" );
     if( fp == nullptr )
     {
         return std::nullopt;

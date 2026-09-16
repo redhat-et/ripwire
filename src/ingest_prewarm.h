@@ -184,11 +184,7 @@ inline void prewarmTagsQueries( const std::vector<std::string>& files, const Has
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: detect cache misses" );
 
-        unsigned hwHash = std::thread::hardware_concurrency();
-        if( hwHash == 0 )
-        {
-            hwHash = 1;
-        }
+        const unsigned hwHash = rw::compat::rw_effective_hardware_concurrency();
         const unsigned nHashThreads = static_cast<unsigned>( std::min<std::size_t>( hwHash, std::max<std::size_t>( nfilesEarly, 1 ) ) );
         std::atomic<std::size_t> nextIdx{ 0 };
         std::vector<std::thread> hashPool;

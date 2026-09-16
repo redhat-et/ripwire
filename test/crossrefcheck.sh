@@ -93,7 +93,7 @@ g commit -qam "shared helper"
 # ── the live line (HEAD): rewrites the SAME base line feat-superseded rewrote, differently, and also
 #    takes feat-merged's content verbatim (a real merge) ────────────────────────────────────────────────
 g checkout -q main
-perl -0pi -e 's/    return 10;\n/    return computeBudget( 1 ) - 6;\n/' "$R/engine.cpp"
+perl -0pi -e 's/    return 10;\r?\n/    return computeBudget( 1 ) - 6;\n/' "$R/engine.cpp"
 g commit -qam "compute the limit from the budget (live line)"
 g merge -q --no-edit feat-merged
 

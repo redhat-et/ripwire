@@ -409,10 +409,11 @@ if out="$( python3 "$GEN" run-corpus --binary "$TMP/stub/ripwire" --corpus "$TMP
              --corpus-file "$TMP/rcedit/corpus.txt" --records "$TMP/rcedit-screen.tsv" 2>&1 )"; then
     no "(K2) a row that OVERWROTE a corpus file was measured anyway — the fingerprint is name-only"
 else
-    case "$out" in
+    out_normalized="$( printf '%s' "$out" | tr '\\' '/' )"
+    case "$out_normalized" in
         *'corpus CHANGED'*'~ src/a.h'*)
             ok "(K2) a corpus file overwritten IN PLACE aborts the run and names it as changed, not added" ;;
-        *)  no "(K2) the overwrite run failed for the wrong reason: $( echo "$out" | tail -3 | tr '\n' ' ' )" ;;
+        *)  no "(K2) the overwrite run failed for the wrong reason: $( echo "$out_normalized" | tail -3 | tr '\n' ' ' )" ;;
     esac
 fi
 # the control: the same corpus with only the non-writing row is measured, so (K2) is not refusing everything

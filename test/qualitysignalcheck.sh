@@ -375,7 +375,7 @@ printf '%s' "$OAR" | grep -q 'acked="1"' \
 # writer canonicalization: worsen the finding so a rewrite happens, then check the file is fully sorted + LF-only.
 printf 'int a( int x ){ int s=0;%s return s; }\nint b(){ return a(1); }\n' "$( ifs2 30 )" > "$AR/src/a.cpp"
 ( cd "$AR" && "$BIN" . --quality-ack='2nd' --no-cache >/dev/null 2>&1 )
-crcount="$( grep -c $'\r' "$AR/.ripwire_quality_acks" 2>/dev/null || true )"
+crcount="$( grep -cU $'\r' "$AR/.ripwire_quality_acks" 2>/dev/null || true )"
 [ "${crcount:-0}" = 0 ] \
     && ok "sorted acks round-trip: writer strips CRLF (LF-only canonical output)" \
     || no "sorted acks round-trip: rewritten acks file still contains CRLF"

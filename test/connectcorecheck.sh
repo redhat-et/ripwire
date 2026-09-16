@@ -30,6 +30,7 @@ CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
 HARNESS="$ROOT/test/connectcore_harness.cpp"
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 BIN="$WORK/connectcoreharness"
+ASAN_BIN="$WORK/connectcoreharness_asan"
 
 echo "connectcorecheck: CXX=$CXX"
 
@@ -54,10 +55,12 @@ ASAN_BIN="$WORK/connectcoreharness_asan"
 if "$CXX" "$CXXSTD" -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all \
         -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/src" \
         "$HARNESS" "$ROOT/src/infra/diagnostics.cpp" -o "$ASAN_BIN" 2> "$WORK/asan_cc.log"; then
-    if "$ASAN_BIN" > /dev/null; then
+    if "$ASAN_BIN" > "$WORK/asan_run.log" 2>&1; then
         echo "  PASS  ASan/UBSan run clean"
     else
-        echo "  FAIL  ASan/UBSan run failed"; exit 2
+        echo "  FAIL  ASan/UBSan run failed"
+        sed 's/^/    /' "$WORK/asan_run.log" | head -40
+        exit 2
     fi
 else
     echo "  WARN  sanitizer build unavailable on this toolchain (skipped)"; sed 's/^/    /' "$WORK/asan_cc.log"

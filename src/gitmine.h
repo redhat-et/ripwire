@@ -16,6 +16,7 @@
 #include "infra/stdinline.h"     // readByteSafeLine — THE line reader (R4); no fixed buffer to split a long path on
 #include "infra/jsonesc.h"       // A4-F27 residual: rw::shSingleQuote lives here (lightest shared header) —
                                  // gitmine.h no longer carries its own copy; see jsonesc.h for the dedup rationale
+#include "infra/platform_compat.h"
 
 #include <algorithm>
 #include <atomic>       // the join's once-per-process disclosure flags
@@ -26,6 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <filesystem>
 #include <mutex>        // gitRepoToplevel's per-directory memo — one rev-parse probe per root, not per miner
 #include <string>
 #include <string_view>
@@ -523,6 +525,36 @@ inline bool isBoundarySuffix( std::string_view indexedPath, std::string_view git
     return indexedPath.compare( off, gitRelPath.size(), gitRelPath ) == 0 && ( off == 0 || indexedPath[ off - 1 ] == '/' );
 }
 
+inline bool gitPathPrefixMatches( std::string_view path, std::string_view prefix ) noexcept
+{
+    if( path.size() < prefix.size() )
+    {
+        return false;
+    }
+    for( std::size_t i = 0; i < prefix.size(); ++i )
+    {
+#if defined( _WIN32 )
+        const bool driveLetter = i == 0 && prefix.size() >= 2 && path.size() >= 2 && path[1] == ':' && prefix[1] == ':'
+                               && ( ( path[0] >= 'A' && path[0] <= 'Z' ) || ( path[0] >= 'a' && path[0] <= 'z' ) )
+                               && ( ( prefix[0] >= 'A' && prefix[0] <= 'Z' ) || ( prefix[0] >= 'a' && prefix[0] <= 'z' ) );
+        if( driveLetter )
+        {
+            const char pathDrive   = path[0] >= 'a' && path[0] <= 'z' ? char( path[0] - 'a' + 'A' ) : path[0];
+            const char prefixDrive = prefix[0] >= 'a' && prefix[0] <= 'z' ? char( prefix[0] - 'a' + 'A' ) : prefix[0];
+            if( pathDrive == prefixDrive )
+            {
+                continue;
+            }
+        }
+#endif
+        if( path[i] != prefix[i] )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 // ONE normalisation, applied to BOTH sides of the join before any byte comparison, and the only latitude the
 // join has. Two rewrites, in ONE pass so there is no second place to keep in step:
 //   * every `/./` seam collapses — workspace.h spelled a merged-root file `<label>/./<rel>` this way through
@@ -616,11 +648,36 @@ inline std::string normalizeJoinPath( std::string_view path )
 {
     std::string out;
     out.reserve( path.size() );
+#if defined( _WIN32 )
+    static constexpr char kWindowsSeparator = static_cast<char>( 0x5C );
+#endif
     for( std::size_t i = 0; i < path.size(); )
     {
-        if( path.substr( i, 3 ) == "/./" )                      { out.push_back( '/' );      i += 3; continue; }
-        if( out.empty() && path.substr( i, 2 ) == "./" )        {                            i += 2; continue; }
-        out.push_back( path[i] );  ++i;
+        const auto isSlashAt = [ & ]( std::size_t index )
+        {
+#if defined( _WIN32 )
+            return index < path.size() && ( path[index] == '/' || path[index] == kWindowsSeparator );
+#else
+            return index < path.size() && path[index] == '/';
+#endif
+        };
+        if( i + 2 < path.size() && isSlashAt( i ) && path[i + 1] == '.' && isSlashAt( i + 2 ) )
+        {
+            out.push_back( '/' );
+            i += 3;
+            continue;
+        }
+        if( out.empty() && i + 1 < path.size() && path[i] == '.' && isSlashAt( i + 1 ) )
+        {
+            i += 2;
+            continue;
+        }
+#if defined( _WIN32 )
+        out.push_back( path[i] == kWindowsSeparator ? '/' : path[i] );
+#else
+        out.push_back( path[i] );
+#endif
+        ++i;
     }
     return out;
 }
@@ -971,7 +1028,8 @@ inline GitPathOffset deriveGitPathOffset( const IngestResult& ing, std::uint32_t
         {
             continue;
         }
-        probeOrder.emplace_back( std::uint32_t( std::count( ing.files[f].begin(), ing.files[f].end(), '/' ) ), f );
+        const std::string normalizedFile = normalizeJoinPath( ing.files[f] );
+        probeOrder.emplace_back( std::uint32_t( std::count( normalizedFile.begin(), normalizedFile.end(), '/' ) ), f );
     }
     std::sort( probeOrder.begin(), probeOrder.end() );
 
@@ -980,7 +1038,8 @@ inline GitPathOffset deriveGitPathOffset( const IngestResult& ing, std::uint32_t
         // The probe's ABSOLUTE path, resolved through its DIRECTORY rather than through the file itself: a
         // symlinked file inside a tree resolves to wherever it points (possibly another repo entirely), while
         // its directory is the tree's own. diskPath() is the disk spelling behind a labeled multi-root id.
-        const std::string& disk     = diskPath( ing, f );
+        const std::string  diskRaw  = diskPath( ing, f );
+        const std::string  disk     = normalizeJoinPath( diskRaw );
         const std::size_t  slash    = disk.rfind( '/' );
         const std::string  probeDir = ( slash == std::string::npos ) ? std::string{ "." } : ( slash == 0 ? std::string{ "/" } : disk.substr( 0, slash ) );
         char               resolvedDir[ PATH_MAX ];
@@ -989,7 +1048,7 @@ inline GitPathOffset deriveGitPathOffset( const IngestResult& ing, std::uint32_t
             continue; // this probe is unreadable — try the next file
         }
 
-        const std::string top = gitRepoToplevel( resolvedDir );
+        const std::string top = normalizeJoinPath( gitRepoToplevel( resolvedDir ) );
         if( top.empty() )
         {
             break; // not a git repo at all — no later file changes that
@@ -1004,19 +1063,19 @@ inline GitPathOffset deriveGitPathOffset( const IngestResult& ing, std::uint32_t
             topSlash += '/';
         }
 
-        std::string absProbe{ resolvedDir };
+        std::string absProbe = normalizeJoinPath( resolvedDir );
         if( absProbe.back() != '/' )
         {
             absProbe += '/';
         }
         absProbe += ( slash == std::string::npos ) ? disk : disk.substr( slash + 1 );
-        if( absProbe.size() <= topSlash.size() || absProbe.compare( 0, topSlash.size(), topSlash ) != 0 )
+        if( absProbe.size() <= topSlash.size() || !gitPathPrefixMatches( absProbe, topSlash ) )
         {
             break; // probe outside its own toplevel
         }
 
         const std::string  gitRelProbe = normalizeJoinPath( absProbe.substr( topSlash.size() ) );
-        const std::string& indexProbe  = ing.files[f];
+        const std::string  indexProbe  = normalizeJoinPath( ing.files[f] );
 
         // the longest DIRECTORY-ALIGNED tail the two spellings share (longest first: every boundary-aligned
         // start offset of the git spelling, in order)
@@ -1190,7 +1249,7 @@ inline void addRootFilesToGitPathIndex( const IngestResult& ing, std::uint32_t r
             continue;
         }
 
-        const std::string& fp = ing.files[f];
+        const std::string fp = normalizeJoinPath( ing.files[f] );
         if( fp.size() <= stripByteCount || fp.compare( 0, stripByteCount, offset.indexStripPrefix ) != 0 )
         {
             if( notes.unspelledFileCount++ == 0 )
@@ -1581,11 +1640,12 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
 inline std::string gitWindowBoundarySha( const std::string& root, const std::string& coSince )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitWindowBoundarySha (cheap window-drift probe)" );
-    // G3: the shared reader, not a private `char buf[128]` + fgets accumulate. `| tail -1` already reduces
-    // the output to one line, so `.back()` is that line; gitCommandLines has already stripped its CR/LF tail.
+    // G3: the shared reader, not a private `char buf[128]` + fgets accumulate. Git's reverse/max-count
+    // options reduce the output to one line, so `back()` is that line; gitCommandLines has already stripped
+    // its CR/LF tail.
     const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
                           + " log --since=" + shSingleQuote( defaultWindowSince( root, coSince ) )   // F1: the probe must resolve the window it guards, by the same rule
-                          + " --format=%H 2>/dev/null | tail -1";
+                          + " --format=%H --reverse --max-count=1 2>/dev/null";
     const GitCommandLines res = gitCommandLines( cmd );
     if( !res.isStarted || res.lines.empty() )
     {
@@ -2325,7 +2385,7 @@ inline std::vector<FileOwnership> gitFileAuthors(
         const std::uint32_t f = resolveGitPath( byGitPath, gp );
         return ( singleFile && f != onlyFileId ) ? UINT32_MAX : f;   // single-file query: the pathspec narrows git, this narrows us
     };
-    const std::string rootSlash = root + "/";
+    const std::string rootSlash = normalizeJoinPath( root ) + "/";
 
     // git log -c --name-only --format=tformat:__C__%ae|%at 2>/dev/null  (optionally scoped to one path with
     // -- <relpath>): one "__C__email|unix-ts" header per commit, then its changed files, one per line,
@@ -2334,8 +2394,8 @@ inline std::vector<FileOwnership> gitFileAuthors(
                      + " log " + kMergeDiffArgs + "--name-only --format=tformat:__C__%ae\\|%at";
     if( singleFile )
     {
-        const std::string& fp = ing.files[ onlyFileId ];
-        std::string        relPath = fp;
+        const std::string fp = normalizeJoinPath( ing.files[ onlyFileId ] );
+        std::string       relPath = fp;
         if( fp.size() > rootSlash.size() && fp.compare( 0, rootSlash.size(), rootSlash ) == 0 )
         {
             relPath = fp.substr( rootSlash.size() );
@@ -2910,6 +2970,29 @@ inline std::vector<CoPartner> cochangePartners( const std::string& root, const I
 // no-subprocess fast path. Pure filesystem reads; never spawns anything.
 inline bool hasEnclosingGitRepo( const std::string& root )
 {
+#if defined( _WIN32 ) || defined( _MSC_VER )
+    std::error_code ec;
+    std::filesystem::path dir = std::filesystem::absolute( rw::compat::rw_windows_path_from_msys( root ), ec );
+    if( ec )
+    {
+        return false; // unresolvable root → treat as no repo (degrade)
+    }
+    for( int levelIndex = 0; levelIndex < 64 && !dir.empty(); ++levelIndex )
+    {
+        ec.clear();
+        if( std::filesystem::exists( dir / ".git", ec ) && !ec )
+        {
+            return true;
+        }
+        const std::filesystem::path parent = dir.parent_path();
+        if( parent == dir )
+        {
+            break;
+        }
+        dir = parent;
+    }
+    return false;
+#else
     char resolved[ PATH_MAX ];
     if( !::realpath( root.c_str(), resolved ) )
     {
@@ -2937,6 +3020,7 @@ inline bool hasEnclosingGitRepo( const std::string& root )
         dir.resize( slash == 0 ? 1 : slash );   // parent dir; "/" is its own parent → loop exit above
     }
     return false;
+#endif
 }
 
 // ── co-change prior boost on the --for lens rank (B3) ───────────────────────────────────────────────

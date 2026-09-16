@@ -40,12 +40,16 @@
 # ripwire_cxx_std_flag CXX  →  prints the C++23 flag spelling CXX accepts; rc=1 if it accepts neither.
 ripwire_cxx_std_flag()
 {
-    local cxx="${1:-c++}" probe flag rc=1
+    local cxx="${1:-c++}" probe probe_arg flag rc=1
     probe="$( mktemp -d )"
     printf 'int main(){ return 0; }\n' > "$probe/cxxstd_probe.cpp"
+    probe_arg="$probe/cxxstd_probe.cpp"
+    case "$( uname -s 2>/dev/null )" in
+        MINGW*|MSYS*) probe_arg="$( cygpath -w "$probe_arg" )" ;;
+    esac
 
     for flag in -std=c++23 -std=c++2b; do
-        if "$cxx" "$flag" -fsyntax-only "$probe/cxxstd_probe.cpp" >/dev/null 2>&1; then
+        if "$cxx" "$flag" -fsyntax-only "$probe_arg" >/dev/null 2>&1; then
             rc=0
             break
         fi

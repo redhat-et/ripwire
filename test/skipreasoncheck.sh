@@ -38,6 +38,8 @@
 #       fits. The --skipped legend is under no such budget and is where the definition lives; unindexed_exts=
 #       had no definition anywhere, which is the half that was genuinely undefined. The arm ALSO pins the
 #       negative — the map legend must stay byte-identical — so a future clause cannot land there silently.
+#   (10) Windows shell probes do not invoke POSIX-only `tail` — a non-git fixture keeps stderr clean on
+#        every platform.
 #
 # Usage:  bash test/skipreasoncheck.sh      [RIPWIRE_BIN=path/to/binary]
 # Exits non-zero on any failure.
@@ -145,9 +147,12 @@ esac
 mkdir -p "$TMP/clean"
 printf 'int cleanOne( void ) { return 1; }\n' > "$TMP/clean/a.cpp"
 printf 'def clean_two():\n    return 2\n'     > "$TMP/clean/b.py"
-"$BIN" clean --no-cache > "$TMP/clean.xml" 2>/dev/null
+"$BIN" clean --no-cache > "$TMP/clean.xml" 2>"$TMP/clean.err"
 grep -q 'unindexed=' "$TMP/clean.xml" && no '(5) unindexed= emitted on a fully-indexable tree — not additive' \
                                       || ok '(5) no unindexed= attribute when nothing is unindexed (byte-identical default)'
+grep -qiE 'not recognized|command not found' "$TMP/clean.err" \
+  && no '(10) a platform-specific shell command leaked into stderr' \
+  || ok '(10) no POSIX-only shell command leaked into stderr'
 
 # ── (6) determinism ──────────────────────────────────────────────────────────────────────────────────
 "$BIN" corpus --skipped --max-file-size=1K --exclude=vendorgen --no-cache > "$TMP/sk2.xml" 2>/dev/null
@@ -165,30 +170,35 @@ else
 fi
 
 # ── (8) built-in subtree prunes are counted, and counted apart from the user ones ────────────────────
-# pruned/: one indexable .cpp at the top, three subtrees the CRAWL prunes by policy (node_modules and
-# dist from kCrawlSkipDirs, buildout/ via the CMakeCache.txt build-output sentinel) and one the USER
-# prunes (--exclude=genstuff). The two classes must land in two different counters.
-mkdir -p "$TMP/pruned/node_modules/pkg" "$TMP/pruned/dist" "$TMP/pruned/buildout" "$TMP/pruned/genstuff"
+# pruned/: one indexable .cpp at the top, five subtrees the CRAWL prunes by policy (node_modules, dist,
+# worktrees and .worktrees-clean from kCrawlSkipDirs, buildout/ via the CMakeCache.txt build-output
+# sentinel) and one the USER prunes (--exclude=genstuff). The two classes must land in two different counters.
+mkdir -p "$TMP/pruned/node_modules/pkg" "$TMP/pruned/dist" "$TMP/pruned/worktrees/nested" \
+         "$TMP/pruned/.worktrees-clean/nested" "$TMP/pruned/buildout" "$TMP/pruned/genstuff"
 printf 'int prunedKeep( void ) { return 1; }\n'  > "$TMP/pruned/keep.cpp"
 printf 'int nodeThing( void ) { return 2; }\n'   > "$TMP/pruned/node_modules/pkg/m.cpp"
 printf 'int distThing( void ) { return 3; }\n'   > "$TMP/pruned/dist/gen.cpp"
+printf 'int worktreeThing( void ) { return 4; }\n' > "$TMP/pruned/worktrees/nested/w.cpp"
+printf 'int cleanWorktreeThing( void ) { return 5; }\n' > "$TMP/pruned/.worktrees-clean/nested/w.cpp"
 printf '# CMake cache stub\n'                    > "$TMP/pruned/buildout/CMakeCache.txt"
-printf 'int builtThing( void ) { return 4; }\n'  > "$TMP/pruned/buildout/obj.cpp"
-printf 'int genThing( void ) { return 5; }\n'    > "$TMP/pruned/genstuff/g.cpp"
+printf 'int builtThing( void ) { return 6; }\n'  > "$TMP/pruned/buildout/obj.cpp"
+printf 'int genThing( void ) { return 7; }\n'    > "$TMP/pruned/genstuff/g.cpp"
 
 # (8a) presence guard — the fixture really holds a file under each pruned subtree
-[ -f "$TMP/pruned/node_modules/pkg/m.cpp" ] && [ -f "$TMP/pruned/dist/gen.cpp" ] && [ -f "$TMP/pruned/buildout/obj.cpp" ] \
-    && ok "(8) fixture has a source file under each of the 3 built-in-pruned subtrees" \
+[ -f "$TMP/pruned/node_modules/pkg/m.cpp" ] && [ -f "$TMP/pruned/dist/gen.cpp" ] \
+    && [ -f "$TMP/pruned/worktrees/nested/w.cpp" ] && [ -f "$TMP/pruned/.worktrees-clean/nested/w.cpp" ] \
+    && [ -f "$TMP/pruned/buildout/obj.cpp" ] \
+    && ok "(8) fixture has a source file under each of the 5 built-in-pruned subtrees" \
     || no "(8) fixture is missing a pruned-subtree source file — the arms below would pass by finding nothing"
 
 "$BIN" pruned --skipped --no-cache > "$TMP/prune_plain.xml" 2>/dev/null
 PR_PLAIN="$( attr "$TMP/prune_plain.xml" pruned_dirs )"
 EX_PLAIN="$( attr "$TMP/prune_plain.xml" excluded_dirs )"
 echo "    (8) no --exclude: pruned_dirs=\"$PR_PLAIN\" excluded_dirs=\"$EX_PLAIN\""
-if [ -n "$PR_PLAIN" ] && [ "$PR_PLAIN" -ge 3 ] 2>/dev/null; then
-  ok "(8) built-in prunes are COUNTED — pruned_dirs=$PR_PLAIN (node_modules, dist, the CMakeCache sentinel)"
+if [ -n "$PR_PLAIN" ] && [ "$PR_PLAIN" -ge 5 ] 2>/dev/null; then
+  ok "(8) built-in prunes are COUNTED — pruned_dirs=$PR_PLAIN (node_modules, dist, worktrees, .worktrees-clean, CMakeCache)"
 else
-  no "(8) pruned_dirs=\"${PR_PLAIN:-absent}\" — built-in subtree prunes are invisible (want >= 3)"
+  no "(8) pruned_dirs=\"${PR_PLAIN:-absent}\" — built-in subtree prunes are invisible (want >= 5)"
 fi
 [ "$EX_PLAIN" = "0" ] && ok "(8) excluded_dirs=0 with no --exclude — a policy prune is never miscounted as a user one" \
                       || no "(8) excluded_dirs=\"$EX_PLAIN\" with no --exclude given — want 0"

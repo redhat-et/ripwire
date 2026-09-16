@@ -556,26 +556,41 @@ inline std::uint64_t fnv1a64( std::string_view s ) noexcept
 // than an empty one. Empty root ⇒ just the leading-`./`/`/` normalization (equivalent to root ".").
 inline std::string_view relForHash( std::string_view path, std::string_view root ) noexcept
 {
+    const auto samePathChar = []( char a, char b ) noexcept
+    {
+        if( a == '\\' ) { a = '/'; }
+        if( b == '\\' ) { b = '/'; }
+#if defined( _WIN32 )
+        if( a >= 'A' && a <= 'Z' ) { a = char( a - 'A' + 'a' ); }
+        if( b >= 'A' && b <= 'Z' ) { b = char( b - 'A' + 'a' ); }
+#endif
+        return a == b;
+    };
+
     // 1) strip the ingest-root prefix if present (allow one optional trailing '/' on the root).
     std::string_view rootTrim = root;
-    while( rootTrim.size() > 1 && rootTrim.back() == '/' )
+    while( rootTrim.size() > 1 && ( rootTrim.back() == '/' || rootTrim.back() == '\\' ) )
     {
         rootTrim.remove_suffix( 1 ); // "/abs/repo/" → "/abs/repo"
     }
-    if( !rootTrim.empty() && rootTrim != "." && path.size() >= rootTrim.size()
-        && path.compare( 0, rootTrim.size(), rootTrim ) == 0 )
+    bool rootMatches = !rootTrim.empty() && rootTrim != "." && path.size() >= rootTrim.size();
+    for( std::size_t i = 0; rootMatches && i < rootTrim.size(); ++i )
+    {
+        rootMatches = samePathChar( path[i], rootTrim[i] );
+    }
+    if( rootMatches )
     {
         // matched the root; the next char (if any) must be a '/' so we strip whole path components only
         // ("/abs/repo" must not eat the "repo" in "/abs/repository/...").
         std::string_view rest = path.substr( rootTrim.size() );
-        if( rest.empty() || rest.front() == '/' )
+        if( rest.empty() || rest.front() == '/' || rest.front() == '\\' )
         {
             path = rest;
         }
     }
 
     // 2) normalize residual leading "./" then leading "/" so "." / "./x" / "/x" all collapse to "x".
-    while( path.size() >= 2 && path[0] == '.' && path[1] == '/' )
+    while( path.size() >= 2 && path[0] == '.' && ( path[1] == '/' || path[1] == '\\' ) )
     {
         path.remove_prefix( 2 );
     }
@@ -583,7 +598,7 @@ inline std::string_view relForHash( std::string_view path, std::string_view root
     {
         path.remove_prefix( 1 );
     }
-    while( path.size() >= 2 && path[0] == '.' && path[1] == '/' )
+    while( path.size() >= 2 && path[0] == '.' && ( path[1] == '/' || path[1] == '\\' ) )
     {
         path.remove_prefix( 2 );
     }

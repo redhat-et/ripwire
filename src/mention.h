@@ -247,6 +247,12 @@ inline std::pair<std::size_t, std::size_t> parseCappedCsvPair( std::string_view 
 namespace mention_detail
 {
 
+#if defined( _WIN32 )
+inline bool isPathSeparator( char c ) noexcept { return c == '/' || c == static_cast<char>( 0x5C ); }
+#else
+inline bool isPathSeparator( char c ) noexcept { return c == '/'; }
+#endif
+
 struct RawMention
 {
     std::vector<std::string> segments;   // path or dotted segments, in order
@@ -258,12 +264,16 @@ struct RawMention
 using rw::namesplit::isIdentChar;
 
 // token characters: identifiers plus the joiners that make a path/module/symbol mention ('.', '/', '-')
-inline bool isTokenChar( char c ) noexcept { return isIdentChar( c ) || c == '.' || c == '/' || c == '-'; }
+inline bool isTokenChar( char c ) noexcept { return isIdentChar( c ) || c == '.' || isPathSeparator( c ) || c == '-'; }
 
 // basename of an indexed path, and the same with its extension stripped ("src/a/b.py" → "b.py", "b")
 inline std::string_view baseNameOf( std::string_view path ) noexcept
 {
+#if defined( _WIN32 )
+    const std::size_t slash = path.find_last_of( "/\\" );
+#else
     const std::size_t slash = path.rfind( '/' );
+#endif
     return slash == std::string_view::npos ? path : path.substr( slash + 1 );
 }
 inline std::string_view stripExt( std::string_view name ) noexcept
@@ -309,7 +319,7 @@ inline bool pathSuffixMatches( std::string_view path, const std::vector<std::str
     for( std::size_t i = segments.size() - 1; i > 0; )
     {
         --i;
-        if( remaining.empty() || remaining.back() != '/' )
+        if( remaining.empty() || !isPathSeparator( remaining.back() ) )
         {
             return false;
         }
@@ -353,7 +363,7 @@ inline bool dirSuffixMatches( std::string_view path, const std::vector<std::stri
         remaining = remaining.substr( 0, remaining.size() - comp.size() );
         if( i > 0 )
         {
-            if( remaining.empty() || remaining.back() != '/' )
+            if( remaining.empty() || !isPathSeparator( remaining.back() ) )
             {
                 return false;
             }

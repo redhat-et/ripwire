@@ -1103,7 +1103,7 @@ PROFILE_SCOPE_DESCRIBE( "naminglens: namingLensChecks TOTAL" );
         if( !fileRead[fileId] )
         {
 PROFILE_SCOPE_DESCRIBE( "naminglens: getBytes whole-file read" );
-            std::FILE* fp = std::fopen( diskPath( ing, fileId ).c_str(), "rb" );
+            std::FILE* fp = rw::compat::rw_fopen_utf8( diskPath( ing, fileId ).c_str(), "rb" );
             if( fp )
             {
                 std::fseek( fp, 0, SEEK_END );

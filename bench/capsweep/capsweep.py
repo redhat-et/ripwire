@@ -135,6 +135,26 @@ def build(root, jobs):
     r = subprocess.run(['cmake', '--build', str(root / 'build'), '-j', str(jobs)], capture_output=True, text=True)
     return r.returncode, c.stdout + c.stderr + r.stdout + r.stderr
 
+def binary_argv(binary):
+    """Return an argv prefix that can execute a native binary or a POSIX shebang stub on Windows."""
+    binary = str(binary)
+    if os.name != 'nt':
+        return [binary]
+    try:
+        with open(binary, 'rb') as f:
+            is_script = f.read(2) == b'#!'
+    except OSError:
+        is_script = False
+    if not is_script:
+        return [binary]
+    bash = os.environ.get('RIPWIRE_BASH') or shutil.which('bash.exe') or shutil.which('bash')
+    if not bash:
+        raise RuntimeError('Windows run-corpus needs Git Bash to execute its shebang stub')
+    normalized = os.path.normcase(os.path.abspath(bash)).replace('/', '\\')
+    if '\\windows\\system32\\' in normalized or '\\windowsapps\\' in normalized:
+        raise RuntimeError('Windows run-corpus refuses the WSL bash launcher; set RIPWIRE_BASH to Git Bash')
+    return [bash, binary]
+
 def offenders(log, known):
     """Cap names the compiler rejected as non-constant — they must stay constexpr."""
     bad = set()
@@ -269,7 +289,7 @@ def run_corpus(binary, root, corpus, env, timeout=120):
             sizes[line], states[line] = None, '%s: $%s' % (kStateUnexpanded, missingVar.args[0])
             continue
         try:
-            r = subprocess.run([str(binary)] + argv + ['--no-cache'], cwd=str(root),
+            r = subprocess.run(binary_argv(binary) + argv + ['--no-cache'], cwd=str(root),
                                capture_output=True, stdin=subprocess.DEVNULL, env=e, timeout=timeout)
         except subprocess.TimeoutExpired:
             sizes[line], states[line] = None, kStateTimeout   # recorded, never silently dropped

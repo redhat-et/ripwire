@@ -47,6 +47,11 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"       # BOTH seams — positional and env
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+WINDOWS_GATE=0
+case "$( uname -s 2>/dev/null )" in
+    MINGW*|MSYS*) WINDOWS_GATE=1 ;;
+esac
+[ "${OS:-}" = Windows_NT ] && WINDOWS_GATE=1
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -492,14 +497,18 @@ R8="$( mktemp -d )"; TMPDIRS="$TMPDIRS $R8"
 mkdir -p "$R8/od d" "$R8/nested"
 mkfn spaceFn  > "$R8/od d/sp ace.cpp"
 mkfn utf8Fn   > "$R8/nested/héllo wörld.cpp"
-mkfn quoteFn  > "$R8/nested/tab$( printf '\t' )ed.cpp"
+if [ "$WINDOWS_GATE" = 0 ]; then
+    mkfn quoteFn  > "$R8/nested/tab$( printf '\t' )ed.cpp"
+fi
 mkfn caseFn   > "$R8/Case.cpp"
 git -C "$R8" init -q; git -C "$R8" config user.email s@x.com; git -C "$R8" config user.name S
 D 2026-06-01T12:00:00; git -C "$R8" add -A >/dev/null; git -C "$R8" commit -qm c1
 for i in 2 3; do
     printf '// t%s\n' "$i" >> "$R8/od d/sp ace.cpp"
     printf '// t%s\n' "$i" >> "$R8/nested/héllo wörld.cpp"
-    printf '// t%s\n' "$i" >> "$R8/nested/tab$( printf '\t' )ed.cpp"
+    if [ "$WINDOWS_GATE" = 0 ]; then
+        printf '// t%s\n' "$i" >> "$R8/nested/tab$( printf '\t' )ed.cpp"
+    fi
     printf '// t%s\n' "$i" >> "$R8/Case.cpp"
     D "2026-06-0${i}T12:00:00"; git -C "$R8" add -A >/dev/null; git -C "$R8" commit -qm "t$i"
 done
@@ -538,6 +547,7 @@ print( sum( 1 for line in sys.stdin.read().split( "\n" ) if line and unquote( li
 # spec = <repo-relative path>|<how the row is spelled in the XML>|<label>. The two differ for the control-byte
 # file: the join takes the RAW byte and the serializer escapes it to &#9; (G4), so a grep for the literal tab
 # finds nothing and would read as a broken join when both halves are in fact correct.
+if [ "$WINDOWS_GATE" = 0 ]; then
 for spec in "od d/sp ace.cpp|/od d/sp ace.cpp|spaces" \
             "nested/héllo wörld.cpp|/nested/héllo wörld.cpp|non-ASCII (UTF-8)" \
             "nested/tab$( printf '\t' )ed.cpp|/nested/tab&#9;ed.cpp|a C-quoted control byte, XML-escaped on the way out"; do
@@ -548,6 +558,9 @@ for spec in "od d/sp ace.cpp|/od d/sp ace.cpp|spaces" \
     [ "${got:-0}" = "${want:-0}" ] && ok "spelling ($label): '$rel' joins and reports its own $want commit(s)" \
         || no "spelling ($label): '$rel' churn=\"$got\", git's own walk names it in $want commit(s)"
 done
+else
+    ok "spelling (control-byte): Windows forbids TAB in Win32 filenames; the POSIX C-quoted join remains covered"
+fi
 # `Case.cpp` has 3 commits in git; `case.cpp` is what is indexed. Zero, not three.
 C8CASE="$( churn_of "$TMP/h8.out" /case.cpp )"
 [ -z "$C8CASE" ] || [ "$C8CASE" = 0 ] \
@@ -695,7 +708,9 @@ grep -q 'DECOMPOSED (NFD) filename' "$TMP/h8.err" \
 # gitCommandLines (--hotspots, the one wave 1 moved — the CONTROL here). The fifth,
 # gitFileCommitCountsInDayWindow, is reachable only through --quality-delta's short-horizon-churn kind, so it is
 # covered by the source arm at the end of this section instead.
-if git fast-import --help >/dev/null 2>&1; then
+git fast-import -h >/dev/null 2>&1
+FAST_IMPORT_RC=$?
+if [ "$FAST_IMPORT_RC" -eq 0 ] || [ "$FAST_IMPORT_RC" -eq 129 ]; then
     R9="$( mktemp -d )"; TMPDIRS="$TMPDIRS $R9"
     mkdir -p "$R9/src"
     mkfn xFn > "$R9/src/x.cpp"

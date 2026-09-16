@@ -80,7 +80,7 @@ PYEOF
 # This gate is left out: section (B) calls the library directly on purpose, to observe it, and is not a caller.
 SELF="$( basename "$0" )"
 GATE_FILES="$( cd "$ROOT/test" && ls ./*.sh 2>/dev/null | sed 's|^\./||' | grep -v -x -e 'regression\.sh' -e "$SELF" )"
-callOut="$( cd "$ROOT/test" && printf '%s\n' "$GATE_FILES" | tr '\n' '\0' | xargs -0 python3 "$CALLSCAN" 2>&1 )"
+callOut="$( cd "$ROOT/test" && python3 "$CALLSCAN" $GATE_FILES 2>&1 )"
 CALLERS="$( printf '%s\n' "$callOut" | awk '/^CALL /{ split($3, a, ":"); print a[1] }' | LC_ALL=C sort -u )"
 nCallers="$( printf '%s\n' "$CALLERS" | grep -c . || true )"
 
@@ -225,7 +225,7 @@ CORPUS="$TMP/corpus"; mkdir -p "$CORPUS"
 ( cd "$CORPUS" && git init -q . && git config user.email t@t && git config user.name t \
   && printf 'base\n' > f.txt && git add f.txt && git commit -qm base ) >/dev/null 2>&1 \
   || no "(B) could not initialise the synthetic git corpus at $CORPUS"
-HEADSHA="$( git -C "$CORPUS" rev-parse HEAD 2>/dev/null )"
+HEADSHA="$( cd "$CORPUS" && git rev-parse HEAD 2>/dev/null )"
 SHA9="$( printf '%s' "$HEADSHA" | cut -c1-9 )"
 SHA12="$( printf '%s' "$HEADSHA" | cut -c1-12 )"
 case "$SHA9" in 0*) OTHER9="1${SHA9#?}" ;; *) OTHER9="0${SHA9#?}" ;; esac
@@ -245,7 +245,7 @@ for a in "$@"; do
     prev="$a"
 done
 if [ -n "$build" ]; then
-    stamp="$( git -C "$( cat "$build/.shim-src" )" rev-parse --short=9 HEAD 2>/dev/null || echo unknown )"
+    stamp="$( cd "$( cat "$build/.shim-src" )" && git rev-parse --short=9 HEAD 2>/dev/null || echo unknown )"
     printf '#!/bin/sh\necho "ripwire 0.0.0 (dev, shim, built_from=%s)"\n' "$stamp" > "$build/ripwire"
     chmod +x "$build/ripwire"
 else
@@ -263,7 +263,12 @@ mkstub nostamp  "ripwire 0.0.0 (dev, stub)"
 mkstub unknown  "ripwire 0.0.0 (dev, stub, built_from=unknown)"
 mkstub head     "ripwire 0.0.0 (dev, stub, built_from=$SHA9)"
 mkstub head12   "ripwire 0.0.0 (dev, stub, built_from=$SHA12)"
-printf '#!/bin/sh\necho "ripwire 0.0.0 (dev, stub, built_from=%s)"\n' "$SHA9" > "$STUBS/noexec"   # right stamp, no +x
+# Windows has no POSIX executable bit for Git Bash to observe. A directory is the equivalent invalid
+# executable-file fixture there; keep the mode-bit arm on POSIX, where chmod is meaningful.
+case "$( uname -s 2>/dev/null || true )" in
+    MINGW*|MSYS*|CYGWIN*) mkdir -p "$STUBS/noexec" ;;
+    *) printf '#!/bin/sh\necho "ripwire 0.0.0 (dev, stub, built_from=%s)"\n' "$SHA9" > "$STUBS/noexec" ;;
+esac
 
 # hbrun DIR TAG VALUE [LIB] — one ripwire_head_binary call on a private TMPDIR. VALUE `--unset` unsets
 # RIPWIRE_HEADBIN (the CI job exports it, so "unset" must be said out loud). A watchdog stops the call at 120 s,
@@ -359,9 +364,9 @@ c2="$( shimCalls "$d" )"
 [ "$( rcOf "$d/second" )" = 0 ] && [ "$( cat "$d/second.out" 2>/dev/null )" = "$CACHED" ] && [ "$c2" -eq "$c1" ] \
     && ok "(B) unset: a second call hits the cache ($c1 cmake call(s) before, $c2 after)" \
     || no "(B) unset: the second call did not come from the cache: rc=$( rcOf "$d/second" ) stdout='$( cat "$d/second.out" 2>/dev/null )' cmake calls $c1 -> $c2"
-[ "$( git -C "$CORPUS" worktree list 2>/dev/null | grep -c . )" -eq 1 ] \
+[ "$( cd "$CORPUS" && git worktree list 2>/dev/null | grep -c . )" -eq 1 ] \
     && ok "(B) unset: the build registers no worktree in the corpus (its checkout is a private clone; test/worktreeleakcheck.sh kills it mid-build)" \
-    || no "(B) unset: the build left a worktree registered in the corpus: $( git -C "$CORPUS" worktree list 2>&1 | tr '\n' '|' )"
+    || no "(B) unset: the build left a worktree registered in the corpus: $( cd "$CORPUS" && git worktree list 2>&1 | tr '\n' '|' )"
 
 # mutation: the library without its staged dispatch must go back to building, so the refusal arm above can go red
 MUTLIB="$TMP/headbinlib.nostage.sh"

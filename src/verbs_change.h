@@ -599,7 +599,11 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         if( !cfg.exportFile.empty() )
         {
             const std::string ccPath( cfg.exportFile );
-            ccOut = std::fopen( ccPath.c_str(), "wb" );
+#if defined( _WIN32 )
+            ccOut = rw::compat::rw_fopen_utf8( ccPath, "wb" );
+#else
+            ccOut = rw::compat::rw_fopen_utf8( ccPath.c_str(), "wb" );
+#endif
             if( !ccOut )
             {
                 DEGRADED_PATH_ALERT( "writeCcJson: could not open output file" );
@@ -637,7 +641,7 @@ std::optional<std::string> readTraceText( const std::string& src )
         while( rw::readByteSafeLine( stdin, l ) ) { text += l; text += '\n'; }
         return text;
     }
-    std::FILE* f = std::fopen( src.c_str(), "rb" );
+    std::FILE* f = rw::compat::rw_fopen_utf8( src.c_str(), "rb" );
     if( !f ) { rw::emitTo( stderr, "ripwire: --from-trace: cannot open '{}'\n", src.c_str() ); return std::nullopt; }
     char buf[ 4096 ]; std::size_t n;
     while( ( n = std::fread( buf, 1, sizeof buf, f ) ) > 0 )
@@ -801,9 +805,197 @@ std::string runCaptureText( RunCapture& cap )
 }
 
 // fork/exec `sh -c CMD` in its own process group, drain the pipe under a poll() deadline, SIGKILL the whole
-// group at the cap, and decode the exit honestly. Zero new dependencies — POSIX only (G3/G5).
+// group at the cap, and decode the exit honestly. Windows uses the Git-for-Windows `sh.exe` when available so
+// the command contract stays `sh -c` on both platforms; cmd.exe is only the explicit fallback when no POSIX shell
+// can be found.
+/// Captures a bounded subprocess run while killing its complete process tree on timeout.
+#if defined( _WIN32 )
+std::string quoteWindowsProcessArg( std::string_view arg )
+{
+    std::string quoted;
+    quoted.reserve( arg.size() + 2 );
+    quoted.push_back( '"' );
+    std::size_t backslashes = 0;
+    for( const char c : arg )
+    {
+        if( c == '\\' )
+        {
+            ++backslashes;
+            continue;
+        }
+        if( c == '"' )
+        {
+            quoted.append( backslashes * 2 + 1, '\\' );
+            quoted.push_back( '"' );
+            backslashes = 0;
+            continue;
+        }
+        quoted.append( backslashes, '\\' );
+        backslashes = 0;
+        quoted.push_back( c );
+    }
+    quoted.append( backslashes * 2, '\\' );
+    quoted.push_back( '"' );
+    return quoted;
+}
+#endif
+
 RunCapture runCommandCapture( const std::string& cmd, std::uint32_t timeoutSec )
 {
+#if defined(_WIN32)
+    RunCapture cap;
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof( sa );
+    sa.bInheritHandle = TRUE;
+
+    HANDLE hRead = NULL, hWrite = NULL;
+    if( !CreatePipe( &hRead, &hWrite, &sa, 0 ) )
+    {
+        cap.isSpawnFailed = true;
+        return cap;
+    }
+    SetHandleInformation( hRead, HANDLE_FLAG_INHERIT, 0 );
+
+    HANDLE hJob = CreateJobObjectA( NULL, NULL );
+    if( hJob != NULL )
+    {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli{};
+        jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject( hJob, JobObjectExtendedLimitInformation, &jeli, sizeof( jeli ) );
+    }
+
+    STARTUPINFOA si{};
+    si.cb = sizeof( si );
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = NULL;
+    si.hStdOutput = hWrite;
+    si.hStdError = hWrite;
+
+    char shellPath[ MAX_PATH ]{};
+    DWORD shellPathLength = SearchPathA( nullptr, "sh.exe", nullptr, MAX_PATH, shellPath, nullptr );
+    if( shellPathLength == 0 || shellPathLength >= MAX_PATH )
+    {
+        shellPathLength = SearchPathA( nullptr, "bash.exe", nullptr, MAX_PATH, shellPath, nullptr );
+    }
+    const bool hasPosixShell = shellPathLength > 0 && shellPathLength < MAX_PATH;
+    if( !hasPosixShell )
+    {
+        char sysDir[ MAX_PATH ]{};
+        const UINT sysDirLen = GetSystemDirectoryA( sysDir, MAX_PATH );
+        if( sysDirLen == 0 || sysDirLen >= MAX_PATH )
+        {
+            CloseHandle( hRead );
+            if( hJob ) CloseHandle( hJob );
+            cap.isSpawnFailed = true;
+            return cap;
+        }
+        std::snprintf( shellPath, sizeof( shellPath ), "%s\\cmd.exe", sysDir );
+    }
+
+    PROCESS_INFORMATION pi{};
+    const std::string shell = shellPath;
+    const std::string fullCmd = hasPosixShell
+                                    ? quoteWindowsProcessArg( shell ) + " -c " + quoteWindowsProcessArg( cmd )
+                                    : quoteWindowsProcessArg( shell ) + " /d /c " + cmd;
+    std::vector<char> cmdBuf( fullCmd.begin(), fullCmd.end() );
+    cmdBuf.push_back( '\0' );
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto elapsedMs = [ & ]() -> std::int64_t
+    { return std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() - t0 ).count(); };
+
+    BOOL ok = CreateProcessA(
+        shell.c_str(),
+        cmdBuf.data(),
+        NULL,
+        NULL,
+        TRUE,
+        CREATE_SUSPENDED | CREATE_NO_WINDOW,
+        NULL,
+        NULL,
+        &si,
+        &pi
+    );
+
+    CloseHandle( hWrite );
+
+    if( !ok )
+    {
+        CloseHandle( hRead );
+        if( hJob ) CloseHandle( hJob );
+        cap.isSpawnFailed = true;
+        return cap;
+    }
+
+    if( hJob )
+    {
+        AssignProcessToJobObject( hJob, pi.hProcess );
+    }
+    ResumeThread( pi.hThread );
+    CloseHandle( pi.hThread );
+
+    const std::int64_t timeoutMs = std::int64_t( timeoutSec ) * 1000;
+    char buf[ 65536 ];
+
+    for( ;; )
+    {
+        const std::int64_t nowMs = elapsedMs();
+        if( !cap.isTimedOut && nowMs >= timeoutMs )
+        {
+            cap.isTimedOut = true;
+            if( hJob ) TerminateJobObject( hJob, 1 );
+            TerminateProcess( pi.hProcess, 1 );
+        }
+
+        DWORD bytesAvail = 0;
+        if( PeekNamedPipe( hRead, NULL, 0, NULL, &bytesAvail, NULL ) && bytesAvail > 0 )
+        {
+            DWORD bytesRead = 0;
+            if( ReadFile( hRead, buf, sizeof( buf ), &bytesRead, NULL ) && bytesRead > 0 )
+            {
+                runCaptureAppend( cap, buf, static_cast<std::size_t>( bytesRead ) );
+                continue;
+            }
+        }
+
+        DWORD waitRes = WaitForSingleObject( pi.hProcess, 15 );
+        if( waitRes == WAIT_OBJECT_0 || cap.isTimedOut )
+        {
+            // Drain remaining
+            DWORD bytesRead = 0;
+            while( PeekNamedPipe( hRead, NULL, 0, NULL, &bytesAvail, NULL ) && bytesAvail > 0 )
+            {
+                if( ReadFile( hRead, buf, sizeof( buf ), &bytesRead, NULL ) && bytesRead > 0 )
+                {
+                    runCaptureAppend( cap, buf, static_cast<std::size_t>( bytesRead ) );
+                }
+                else
+                {
+                    break;
+                }
+            }
+            break;
+        }
+    }
+
+    DWORD exitCode = 0;
+    GetExitCodeProcess( pi.hProcess, &exitCode );
+    cap.durationMs = static_cast<std::uint64_t>( elapsedMs() );
+    if( !cap.isTimedOut )
+    {
+        cap.isExitedNormally = true;
+        cap.exitCode = static_cast<int>( exitCode );
+    }
+    else
+    {
+        cap.termSignal = 9;
+    }
+
+    CloseHandle( hRead );
+    CloseHandle( pi.hProcess );
+    if( hJob ) CloseHandle( hJob );
+    return cap;
+#else
     RunCapture cap;
     int fds[2];
     if( pipe( fds ) != 0 )
@@ -906,6 +1098,7 @@ RunCapture runCommandCapture( const std::string& cmd, std::uint32_t timeoutSec )
         cap.termSignal = WTERMSIG( status );
     }
     return cap;
+#endif
 }
 
 // split the captured text into its NON-EMPTY lines (views into `text`) — wsdetail::segmentsOf is the shared
@@ -1104,7 +1297,7 @@ std::optional<int> runRunTrace( const MainDispatch& d )
     RunCapture cap = runCommandCapture( cmd, timeoutSec );
     if( cap.isSpawnFailed )
     {
-        rw::emitRaw( stderr, "ripwire: --run-trace: cannot spawn '/bin/sh -c' (pipe/fork failed) — nothing was executed\n" );
+        rw::emitRaw( stderr, "ripwire: --run-trace: cannot spawn 'sh -c' (pipe/process creation failed) — nothing was executed\n" );
         return 1;
     }
     if( cap.isTimedOut )
@@ -1229,7 +1422,7 @@ struct BriefFile { std::vector<std::string> lines; bool ok = false; };
 BriefFile readBriefFile( const std::string& path )
 {
     BriefFile  out;
-    std::FILE* fp = std::fopen( path.c_str(), "rb" );
+    std::FILE* fp = rw::compat::rw_fopen_utf8( path.c_str(), "rb" );
     if( !fp )
     {
         return out; // caller refuses loudly, naming the path

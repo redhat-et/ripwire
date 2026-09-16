@@ -2034,7 +2034,7 @@ inline void forEachIndexParallel( std::size_t count, const char* what, Work&& wo
         }
     };
 
-    const std::size_t hwThreadCount = std::thread::hardware_concurrency();
+    const std::size_t hwThreadCount = rw::compat::rw_effective_hardware_concurrency();
     const std::size_t workerCount   = std::min( { hwThreadCount ? hwThreadCount : 1, count, std::size_t( 16 ) } );
     if( workerCount <= 1 ) { indexWorker(); return; }
 
@@ -2153,7 +2153,7 @@ inline std::size_t scanCorpusFacts( const IngestResult& ing, const std::string& 
         return 0;
     }
 
-    const std::size_t hwThreadCount = std::thread::hardware_concurrency();
+    const std::size_t hwThreadCount = rw::compat::rw_effective_hardware_concurrency();
     const std::size_t blockCount    = std::min( { ( hwThreadCount ? hwThreadCount : 1 ) * 4, scanCount, std::size_t( 64 ) } );
     const std::size_t blockSpan     = ( scanCount + blockCount - 1 ) / blockCount;
 

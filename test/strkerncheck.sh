@@ -47,6 +47,13 @@ SRC="$ROOT/test/verify_strkern.cpp"
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 ARCH="$( uname -m )"
 fail=0
+CM_ARGS=()
+if [ "${OS:-}" = Windows_NT ]; then
+    # The default Windows CMake generator is Visual Studio Debug, whose /RTC1 conflicts with the
+    # project's explicit /O2 profile. Use the same ClangCL frontend as the native build in a
+    # single-config generator so the sanitizer target is actually compiled and run.
+    CM_ARGS=( -G Ninja -DCMAKE_BUILD_TYPE= -DCMAKE_C_COMPILER=clang-cl.exe -DCMAKE_CXX_COMPILER=clang-cl.exe )
+fi
 
 # The arm counts the two standalone harnesses carried before 2026-09-10, kept here so this gate can state
 # the before/after rather than assert the after alone. 14 + 4; the doctest target adds the compiled-path
@@ -60,7 +67,7 @@ echo "strkerncheck: CXX=$CXX arch=$ARCH  target=ripwire_test_strkern"
 # ── 1: the CMake target, under the complete G1 sanitizer stack ────────────────────────────────────────
 # FETCHCONTENT_FULLY_DISCONNECTED=ON because every dependency is vendored: a gate must not reach the
 # network, and if one ever tries, this is where it fails loudly instead of hanging.
-if ! cmake -S "$ROOT" -B "$WORK/cmb" -DRIPWIRE_TESTS=ON -DRIPWIRE_ASAN=ON \
+if ! cmake -S "$ROOT" -B "$WORK/cmb" "${CM_ARGS[@]}" -DRIPWIRE_TESTS=ON -DRIPWIRE_ASAN=ON \
         -DFETCHCONTENT_FULLY_DISCONNECTED=ON > "$WORK/cfg.log" 2>&1; then
     echo "  FAIL  cmake configure (-DRIPWIRE_TESTS=ON -DRIPWIRE_ASAN=ON) failed"
     tail -20 "$WORK/cfg.log" | sed 's/^/    /'
@@ -74,7 +81,7 @@ fi
 
 # Apple's arm64 runtime rejects LeakSanitizer at startup; mirror CMakeLists.txt's platform policy rather
 # than claiming a leak check that cannot run (see the note beside ripwire_asan_fixture there).
-if [ "$( uname -s )" = "Darwin" ]; then
+if [ "${OS:-}" = Windows_NT ] || [ "$( uname -s )" = "Darwin" ]; then
     ASAN_OPTS="detect_leaks=0:halt_on_error=1:abort_on_error=1"
 else
     ASAN_OPTS="detect_leaks=1:halt_on_error=1:abort_on_error=1"
@@ -98,6 +105,7 @@ read_counts "$WORK/out_main.log"
 if [ "$rc" -ne 0 ] || [ "${ASSERTS_FAIL:-1}" != "0" ]; then
     echo "  FAIL  parity/equivalence assertion failed (exit $rc, $ASSERTS_FAIL failed):"
     grep -B 2 -A 6 'ERROR\|FAILED' "$WORK/out_main.log" | sed 's/^/    /' | head -40
+    sed 's/^/    /' "$WORK/out_main.log" | tail -40
     exit 2
 fi
 if [ "$ASSERTS" -lt "$MIN_ASSERTIONS" ]; then

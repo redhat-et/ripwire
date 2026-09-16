@@ -62,6 +62,20 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 required for the rank asse
 echo "docdemotecheck: BIN=$BIN"
 
 cp -R "$ROOT/test/docdemotefix" "$TMP/docdemotefix"
+# Git's Windows checkout may materialize the text fixture as CRLF. Keep the
+# fixture bytes identical to the LF corpus used to capture the goldens; otherwise
+# whole-doc byte counts and calibrated est_tokens change.
+python3 - "$TMP/docdemotefix" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path( sys.argv[ 1 ] )
+for path in sorted( p for p in root.rglob( '*' ) if p.is_file() ):
+    data = path.read_bytes()
+    if b'\x00' not in data:
+        path.write_bytes( data.replace( bytes( ( 13, 10 ) ), bytes( ( 10, ) ) ) )
+
+PY
 cd "$TMP"
 
 # ── the three queries, spelled once ─────────────────────────────────────────────────────────────────────
@@ -87,6 +101,19 @@ import re, sys
 text = open( sys.argv[1], encoding='utf-8', errors='replace' ).read()
 m = re.search( r'<cand r="1"[^>]*? p="([^"]*)"', text )
 print( m.group( 1 ) if m else '' )
+PY
+}
+
+# Goldens are tracked text files and can themselves be CRLF in a Windows
+# checkout. Compare canonical newline bytes so this gate tests content and
+# metadata, not the checkout's text-mode representation.
+same_text(){ python3 - "$1" "$2" <<'PY'
+import sys
+
+def canonical( path ):
+    return open( path, 'rb' ).read().replace( bytes( ( 13, 10 ) ), bytes( ( 10, ) ) )
+
+sys.exit( 0 if canonical( sys.argv[ 1 ] ) == canonical( sys.argv[ 2 ] ) else 1 )
 PY
 }
 
@@ -230,17 +257,17 @@ grep -q 'doc tier demoted' "$TMP/concept.xml" \
 grep -q 'doc_tier="' "$TMP/conceptc.xml" \
     && no "(f) conceptual query emitted a doc_tier= attribute: the detector over-fires on ordinary prose" \
     || ok "(f) conceptual query: no doc_tier= attribute on the candidates export either"
-diff -q "$TMP/concept.xml" "$ROOT/test/docdemotegolden_for.xml" >/dev/null \
+same_text "$TMP/concept.xml" "$ROOT/test/docdemotegolden_for.xml" \
     && ok "(f) conceptual --for byte-identical to the pre-change golden" \
     || no "(f) conceptual --for drifted from test/docdemotegolden_for.xml"
 
 # ── (g) --recall untouched ──────────────────────────────────────────────────────────────────────────────
-diff -q "$TMP/recall.xml" "$ROOT/test/docdemotegolden_recall.golden" >/dev/null \
+same_text "$TMP/recall.xml" "$ROOT/test/docdemotegolden_recall.golden" \
     && ok "(g) --recall byte-identical to the pre-change golden on the same shaped query" \
     || no "(g) --recall drifted from test/docdemotegolden_recall.golden — the documents lens must not take the ranking tier"
 
 # ── (h) --no-route untouched ────────────────────────────────────────────────────────────────────────────
-diff -q "$TMP/noroutefor.xml" "$ROOT/test/docdemotegolden_noroute.xml" >/dev/null \
+same_text "$TMP/noroutefor.xml" "$ROOT/test/docdemotegolden_noroute.xml" \
     && ok "(h) --no-route byte-identical to the pre-change golden (no route= ⇒ no undisclosed demotion)" \
     || no "(h) --no-route drifted from test/docdemotegolden_noroute.xml"
 grep -q 'doc_tier="' "$TMP/noroute.xml" \

@@ -171,13 +171,25 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 # red-first run against a BASE binary — the exact way a red-first check fakes itself green (archcheck.sh
 # carries the same note for the same reason).
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow repo-relative RIPWIRE_BIN
+if [ -z "${1:-}" ] && [ -z "${RIPWIRE_BIN:-}" ] && [ -f "$ROOT/build/ripwire.exe" ]; then
+    BIN="$ROOT/build/ripwire.exe"
+fi
+case "$BIN" in
+    /*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
+    *) BIN="$ROOT/$BIN" ;;                              # allow repo-relative RIPWIRE_BIN
+esac
 
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+[ -f "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+
+PYTHON3="${RIPWIRE_PYTHON:-python3}"
+command -v "$PYTHON3" >/dev/null 2>&1 || PYTHON3=python
+if [ "$($PYTHON3 -c 'import os; print( os.name )' 2>/dev/null)" = nt ]; then
+    exec "$PYTHON3" "$ROOT/test/sidecarsymlinkcheck_windows.py" "$BIN"
+fi
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 

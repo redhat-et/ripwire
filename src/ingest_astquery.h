@@ -282,18 +282,43 @@ inline AstMatch makeAstMatch( std::uint32_t fileId, std::string_view bytes, cons
                               std::uint32_t a, std::uint32_t b, std::string tag )
 {
     PROFILE_SCOPE_DESCRIBE( "strings: capture text substr + whitespace scrub" );
-    std::size_t cutLen = std::min<std::size_t>( b - a, 120u );
-    if( cutLen < b - a )
+    const std::size_t rawLen = b - a;
+    const auto        isContinuation = []( unsigned char ch ) noexcept { return ( ch & 0xC0 ) == 0x80; };
+    std::string       text;
+    text.reserve( std::min<std::size_t>( rawLen, 120u ) );
+    std::size_t rawOffset = 0;
+    while( rawOffset < rawLen && text.size() < 120u )
     {
-        while( cutLen > 0 && ( static_cast<unsigned char>( bytes[a + cutLen] ) & 0xC0 ) == 0x80 )
+        if( bytes[ a + rawOffset ] == static_cast<char>( 13 ) && rawOffset + 1 < rawLen && bytes[ a + rawOffset + 1 ] == '\n' )
         {
-            --cutLen;
+            ++rawOffset;
+            continue;
+        }
+        text.push_back( bytes[ a + rawOffset ] );
+        ++rawOffset;
+    }
+    if( rawOffset < rawLen )
+    {
+        std::size_t probe = rawOffset;
+        while( probe < rawLen && bytes[ a + probe ] == static_cast<char>( 13 ) && probe + 1 < rawLen && bytes[ a + probe + 1 ] == '\n' )
+        {
+            ++probe;
+        }
+        if( probe < rawLen && isContinuation( static_cast<unsigned char>( bytes[ a + probe ] ) ) )
+        {
+            while( !text.empty() && isContinuation( static_cast<unsigned char>( text.back() ) ) )
+            {
+                text.pop_back();
+            }
+            if( !text.empty() && ( static_cast<unsigned char>( text.back() ) & 0xC0 ) == 0xC0 )
+            {
+                text.pop_back();
+            }
         }
     }
-    std::string text( bytes.substr( a, cutLen ) );
     for( char& ch : text )
     {
-        if( ch == '\n' || ch == '\r' || ch == '\t' )
+        if( ch == '\n' || ch == static_cast<char>( 13 ) || ch == '\t' )
         {
             ch = ' ';
         }
@@ -765,11 +790,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
     PROFILE_SCOPE_DESCRIBE( "astQuery: compile queries per grammar" );
     std::vector<GrammarQueries> compiledPerGrammar( presentGrammars.size() );
     {
-        unsigned compileHw = std::thread::hardware_concurrency();
-        if( compileHw == 0 )
-        {
-            compileHw = 1;
-        }
+        const unsigned compileHw = rw::compat::rw_effective_hardware_concurrency();
         const unsigned           compileThreads = static_cast<unsigned>( std::min<std::size_t>( compileHw, std::max<std::size_t>( presentGrammars.size(), std::size_t( 1 ) ) ) );
         std::atomic<std::size_t> nextGrammar{ 0 };
         std::vector<std::thread> compilers;  compilers.reserve( compileThreads );
@@ -870,11 +891,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
     computeGrammarDisclosure( ing, groups );
 
     const std::size_t nfiles = ing.files.size();
-    unsigned hw = std::thread::hardware_concurrency();
-    if( hw == 0 )
-    {
-        hw = 1;
-    }
+    const unsigned hw = rw::compat::rw_effective_hardware_concurrency();
     const unsigned nthreads = static_cast<unsigned>( std::min<std::size_t>( hw, nfiles ) );
 
     // NO mid-flight global cap: a shared match counter raced by workers makes WHICH matches survive the
@@ -1660,11 +1677,7 @@ SpanTierBatch spanTiersOfFiles( std::span<const std::string> diskPaths, bool use
                           } );
     }
 
-    unsigned hw = std::thread::hardware_concurrency();
-    if( hw == 0 )
-    {
-        hw = 1;
-    }
+    const unsigned hw = rw::compat::rw_effective_hardware_concurrency();
     const unsigned            threadCount = static_cast<unsigned>( std::min<std::size_t>( hw, fileCount ) );
     std::atomic<std::size_t>  nextSlot{ 0 };
     std::atomic<std::uint64_t> bytesParsed{ 0 };

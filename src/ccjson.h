@@ -54,7 +54,7 @@ struct CcFileMetrics
 // Degrades to 0 if the file cannot be opened (deleted between crawl and export).
 inline std::uint32_t ccCountLoc( const std::string& path ) noexcept
 {
-    std::FILE* fp = std::fopen( path.c_str(), "rb" );
+    std::FILE* fp = rw::compat::rw_fopen_utf8( path.c_str(), "rb" );
     if( !fp )
     {
         return 0;

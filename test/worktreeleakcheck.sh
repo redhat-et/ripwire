@@ -66,16 +66,116 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
+if [ -n "${RIPWIRE_PYTHON:-}" ]; then
+    PYTHON3="$RIPWIRE_PYTHON"
+else
+    PYTHON3="$( command -v python3 2>/dev/null || command -v python 2>/dev/null || true )"
+fi
+if [ -z "$PYTHON3" ] || ! "$PYTHON3" -c 'import sys' >/dev/null 2>&1; then
+    echo "native Python required"
+    exit 2
+fi
+if [ -n "${RIPWIRE_BASH:-}" ]; then
+    BASH_CMD="$RIPWIRE_BASH"
+else
+    BASH_CMD="$( command -v bash 2>/dev/null || true )"
+fi
+if [ -z "$BASH_CMD" ]; then
+    echo "Git Bash required"
+    exit 2
+fi
+case "$BASH_CMD" in
+    *[Ww]indows/[Ss]ystem32/[Bb]ash.exe|*/windows/system32/bash.exe)
+        echo "WSL bash is not accepted; set RIPWIRE_BASH to Git Bash"
+        exit 2
+        ;;
+esac
 command -v git     >/dev/null 2>&1 || { echo "git required"; exit 2; }
 [ -f "$LIB" ] || { echo "no $LIB"; exit 2; }
+if command -v cygpath >/dev/null 2>&1; then
+    nativeTmp="$( cygpath -m "$( cygpath -w /tmp )" )"
+    export TMPDIR="$nativeTmp" TEMP="$nativeTmp" TMP="$nativeTmp" RW_MSYS_TMP="$nativeTmp"
+fi
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 echo "worktreeleakcheck: ROOT=$ROOT  TMP=$TMP  bash=$BASH_VERSION"
 
 PY="$TMP/worktreeleak.py"
+PY_ROOT="$ROOT"
+PY_LIB="$LIB"
+if command -v cygpath >/dev/null 2>&1; then
+    PY_ROOT="$( cygpath -w "$ROOT" )"
+    PY_LIB="$( cygpath -w "$LIB" )"
+fi
 cat > "$PY" <<'PYEOF'
-import io, os, re, shutil, signal, subprocess, sys, tempfile, threading, time
+import ctypes, io, os, re, shutil, signal, subprocess, sys, tempfile, threading, time
+from ctypes import wintypes
 from concurrent.futures import ThreadPoolExecutor
+
+BASH = os.environ.get( "RIPWIRE_BASH" ) or "bash"
+class WindowsJob:
+    def __init__( self ):
+        self.handle = None
+        if os.name != "nt":
+            return
+        k = ctypes.WinDLL( "kernel32", use_last_error=True )
+        self._kernel32 = k
+        k.CreateJobObjectW.restype = wintypes.HANDLE
+        self.handle = k.CreateJobObjectW( None, None )
+        if not self.handle:
+            raise OSError( ctypes.get_last_error(), "CreateJobObjectW" )
+        class BasicLimits( ctypes.Structure ):
+            _fields_ = [
+                ( "PerProcessUserTimeLimit", ctypes.c_longlong ),
+                ( "PerJobUserTimeLimit", ctypes.c_longlong ),
+                ( "LimitFlags", wintypes.DWORD ),
+                ( "MinimumWorkingSetSize", ctypes.c_size_t ),
+                ( "MaximumWorkingSetSize", ctypes.c_size_t ),
+                ( "ActiveProcessLimit", wintypes.DWORD ),
+                ( "Affinity", ctypes.c_size_t ),
+                ( "PriorityClass", wintypes.DWORD ),
+                ( "SchedulingClass", wintypes.DWORD ),
+            ]
+        class IoCounters( ctypes.Structure ):
+            _fields_ = [ ( "ReadOperationCount", ctypes.c_ulonglong ), ( "WriteOperationCount", ctypes.c_ulonglong ),
+                         ( "OtherOperationCount", ctypes.c_ulonglong ), ( "ReadTransferCount", ctypes.c_ulonglong ),
+                         ( "WriteTransferCount", ctypes.c_ulonglong ), ( "OtherTransferCount", ctypes.c_ulonglong ) ]
+        class ExtendedLimits( ctypes.Structure ):
+            _fields_ = [ ( "BasicLimitInformation", BasicLimits ), ( "IoInfo", IoCounters ),
+                         ( "ProcessMemoryLimit", ctypes.c_size_t ), ( "JobMemoryLimit", ctypes.c_size_t ),
+                         ( "PeakProcessMemoryUsed", ctypes.c_size_t ), ( "PeakJobMemoryUsed", ctypes.c_size_t ) ]
+        limits = ExtendedLimits()
+        limits.BasicLimitInformation.LimitFlags = 0x2000
+        if not k.SetInformationJobObject( self.handle, 9, ctypes.byref( limits ), ctypes.sizeof( limits ) ):
+            raise OSError( ctypes.get_last_error(), "SetInformationJobObject" )
+
+    def assign( self, pid ):
+        if self.handle is None:
+            return
+        k = self._kernel32
+        k.OpenProcess.restype = wintypes.HANDLE
+        h = k.OpenProcess( 0x0001 | 0x0100 | 0x1000, False, pid )
+        if not h:
+            raise OSError( ctypes.get_last_error(), "OpenProcess" )
+        try:
+            if not k.AssignProcessToJobObject( self.handle, h ):
+                raise OSError( ctypes.get_last_error(), "AssignProcessToJobObject" )
+        finally:
+            k.CloseHandle( h )
+
+    def terminate( self ):
+        if self.handle is not None:
+            self._kernel32.TerminateJobObject( self.handle, 1 )
+
+    def close( self ):
+        if self.handle is not None:
+            self._kernel32.CloseHandle( self.handle )
+            self.handle = None
+
+def bash_path( value ):
+    text = os.fspath( value ).replace( os.sep, "/" )
+    if os.name == "nt" and len( text ) >= 3 and text[1] == ":" and text[2] == "/":
+        return "/" + text[0].lower() + text[2:]
+    return text
 
 HELPER = "ripwire_private_checkout"
 LIVE = re.compile(r'\$\{?(?:ROOT|_root)\}?(?![A-Za-z0-9_])')
@@ -84,7 +184,7 @@ ARG = r'("?\$?\{?[A-Za-z0-9_]+\}?"?)'
 VAR = r'"(\$\{?[A-Za-z_]+\}?)"'
 CALL = re.compile(r'\b' + HELPER + r'\s+' + VAR + r'\s+' + ARG + r'\s+' + VAR)
 RAWADD = re.compile(r'\bworktree\s+add\b[^"]*' + VAR + r'\s+' + ARG)
-MODES = (("TERM>gate", signal.SIGTERM, False), ("INT>group", signal.SIGINT, True), ("KILL>gate", signal.SIGKILL, False))
+MODES = (("TERM>gate", signal.SIGTERM, False), ("INT>group", signal.SIGINT, True), ("KILL>gate", None, False))
 REACH_SEC, GRACE_SEC = 90, 4
 
 STUB = r'''#!/bin/sh
@@ -94,18 +194,19 @@ STUB = r'''#!/bin/sh
 # REPOSITORY -- another top-level whose common git dir, or whose alternates, is the throwaway repository's -- it records
 # that top-level and sleeps there, so the gate can be signalled while the checkout is in use.
 if [ "${1:-}" = "--version" ]; then echo "ripwire 0.0.0 (dev, worktreeleakcheck stub, built_from=$WL_STAMP)"; exit 0; fi
-echo '<ripwire stub="worktreeleakcheck"/>'
-[ -d "${1:-}" ] || exit 0
-top="$( git -C "$1" rev-parse --show-toplevel 2>/dev/null )" || exit 0
-[ -n "$top" ] && [ "$top" != "$WL_TOP" ] || exit 0
-common="$( cd "$top" 2>/dev/null && cd "$( git rev-parse --git-common-dir 2>/dev/null )" 2>/dev/null && pwd -P )"
-alt=""
-if [ -f "$top/.git/objects/info/alternates" ]; then
-    alt="$( cd "$( head -n 1 "$top/.git/objects/info/alternates" )" 2>/dev/null && pwd -P )"
+echo '<ripwire stub="worktreeleakcheck"><stats>symbols=1 ambiguous=0</stats></ripwire>'
+if [ -d "${1:-}" ]; then
+    case "${1:-}" in
+        */head|*/head/*|*\\\\head|*\\\\head\\\\*)
+            if [ ! -e "$WL_MARK" ]; then
+                printf '%s\n' "${1%/src}" >> "$WL_MARK"
+                exec sleep 30
+            fi
+            ;;
+    esac
 fi
-if [ "$common" = "$WL_GIT" ] || [ "$alt" = "$WL_GIT/objects" ]; then
-    printf '%s\n' "$top" >> "$WL_MARK"
-    exec sleep 30
+if [ -n "${WL_REAL_BIN:-}" ] && [ -f "$WL_REAL_BIN" ]; then
+    exec "$WL_REAL_BIN" "$@"
 fi
 exit 0
 '''
@@ -119,8 +220,12 @@ for a in "$@"; do
     prev="$a"
 done
 if [ -n "$src" ]; then
-    top="$( git -C "$src" rev-parse --show-toplevel 2>/dev/null )"
-    printf '%s\n' "${top:-$src}" >> "$WL_MARK"
+    top="$src"
+    case "$top" in
+        */src) top="${top%/src}" ;;
+        *\\src) top="${top%\\src}" ;;
+    esac
+    printf '%s\n' "$top" >> "$WL_MARK"
     exec sleep 30
 fi
 exit 0
@@ -286,7 +391,16 @@ def checkouts(bases, names, cgit):
                 dns[:] = []
     return [short(x, names) for x in sorted(found)]
 
-def reap(p):
+def reap(p, job=None):
+    if os.name == "nt":
+        if job is not None:
+            job.terminate()
+        try:
+            subprocess.run( [ "taskkill", "/PID", str( p.pid ), "/T", "/F" ], capture_output=True,
+                            timeout=GRACE_SEC, check=False )
+        except ( OSError, subprocess.TimeoutExpired ):
+            pass
+        return
     try:
         os.killpg(p.pid, signal.SIGKILL)
     except OSError:
@@ -300,6 +414,7 @@ def run_scenario(ctx, sc):
     if held:
         ctx["hist"].acquire()         # one pinned-commit checkout on disk at a time: each is a full tree of the repository
     p = None
+    job = None
     logpath = os.path.join(d, "gate.log")
     try:
         corpus = history_corpus(d, ctx["common"]) if held else tiny_corpus(d)
@@ -310,18 +425,29 @@ def run_scenario(ctx, sc):
         env = dict(os.environ)
         for k in ("RIPWIRE_HEADBIN", "RIPWIRE_HEADBIN_BUILD_LOG", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"):
             env.pop(k, None)
-        env.update(RIPWIRE_BIN=ctx["stub"], WL_STAMP=git_out(corpus, "rev-parse", "-q", "--verify", "HEAD")[:9],
-                   WL_TOP=git_out(corpus, "rev-parse", "--show-toplevel"), WL_GIT=os.path.realpath(os.path.join(corpus, ".git")),
-                   WL_MARK=mark, TMPDIR=tmpdir)
+        env.pop( "MSYS_NO_PATHCONV", None )
+        env.pop( "MSYS2_ARG_CONV_EXCL", None )
+        env.update(RIPWIRE_BIN=bash_path( ctx["stub"] ), WL_STAMP=git_out(corpus, "rev-parse", "-q", "--verify", "HEAD")[:9],
+                   WL_TOP=bash_path( git_out(corpus, "rev-parse", "--show-toplevel") ),
+                   WL_GIT=bash_path( os.path.realpath( os.path.join( corpus, ".git" ) ) ),
+                   WL_MARK=bash_path( mark ), WL_REAL_BIN=bash_path( ctx["real_bin"] ) if ctx["real_bin"] else "", TMPDIR=tmpdir)
         # a cmake always comes first on PATH: the monotonicity arms skip before their checkout on a host without one
         if sc["stage"] == "build":
             env["PATH"] = ctx["shimdir"] + os.pathsep + env.get("PATH", "")
         else:
             env["PATH"] = ctx["idledir"] + os.pathsep + env.get("PATH", "")
-            env["RIPWIRE_HEADBIN"] = ctx["stub"]
+            env["RIPWIRE_HEADBIN"] = bash_path( ctx["stub"] )
         with open(logpath, "wb") as log:
-            p = subprocess.Popen(["bash", os.path.join(corpus, "test", sc["gate"])], cwd=corpus, env=env,
+            p = subprocess.Popen( [ BASH, bash_path( os.path.join( corpus, "test", sc["gate"] ) ) ], cwd=corpus, env=env,
                                  stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+            if os.name == "nt":
+                try:
+                    job = WindowsJob()
+                    job.assign( p.pid )
+                except OSError:
+                    if job is not None:
+                        job.close()
+                    job = None
             t0 = time.time()
             while time.time() - t0 < REACH_SEC and p.poll() is None and not nonempty(mark):
                 time.sleep(0.05)
@@ -338,17 +464,19 @@ def run_scenario(ctx, sc):
                 r["marks"] = [short(os.path.realpath(x), names) for x in r["marks"]]
                 r["at_kill"] = entries(corpus)
                 try:
-                    if sc["group"]:
+                    if os.name == "nt":
+                        reap( p, job )
+                    elif sc["group"]:
                         os.killpg(p.pid, sc["sig"])
                     else:
                         os.kill(p.pid, sc["sig"])
-                except OSError:
+                except ( OSError, ValueError, AttributeError ):
                     pass
                 try:
                     r["rc"] = p.wait(timeout=GRACE_SEC)
                 except subprocess.TimeoutExpired:
                     r["escalated"] = True
-            reap(p)
+            reap(p, job)
             rc = p.wait()
             if r["rc"] is None:
                 r["rc"] = rc
@@ -357,10 +485,12 @@ def run_scenario(ctx, sc):
     except Exception as e:
         r["err"] = "%s: %s" % (type(e).__name__, e)
         if p is not None:
-            reap(p)
+            reap(p, job)
             p.wait()
     finally:
         r["tail"] = " | ".join(lines_of(logpath)[-3:])
+        if job is not None:
+            job.close()
         r["tmps"] |= gate_tmps(logpath, lines_of(os.path.join(d, "mark")), ctx["work"])
         for x in r["tmps"]:
             shutil.rmtree(x, ignore_errors=True)     # a killed gate's own temp dir, which may hold a full checkout
@@ -371,6 +501,12 @@ def run_scenario(ctx, sc):
 # kill ROOT WORK LIB MUTLIB|- BUILDGATE|- NAME:REV... -> ROW PASS|FAIL text ...; DONE n
 def kill_main(root, work, lib, mutlib, buildgate, specs):
     os.makedirs(work, exist_ok=True)
+    real_bin = os.environ.get( "RIPWIRE_BIN", "" )
+    if not os.path.isfile( real_bin ):
+        real_bin = next((candidate for candidate in (os.path.join( root, "build-win-merge", "ripwire.exe"),
+                                                      os.path.join( root, "build", "ripwire.exe"),
+                                                      os.path.join( root, "build", "ripwire" ))
+                         if os.path.isfile( candidate )), "")
     stub = os.path.join(work, "ripwire-stub")
     io.open(stub, "w").write(STUB)
     os.chmod(stub, 0o755)
@@ -381,7 +517,8 @@ def kill_main(root, work, lib, mutlib, buildgate, specs):
         os.chmod(os.path.join(dirpath, "cmake"), 0o755)
     cg = git_out(root, "rev-parse", "--git-common-dir")
     common = os.path.realpath(os.path.join(root, cg)) if cg else ""
-    ctx = dict(root=root, work=work, stub=stub, shimdir=shimdir, idledir=idledir, common=common, hist=threading.Semaphore(1))
+    ctx = dict(root=root, work=work, stub=stub, real_bin=real_bin, shimdir=shimdir, idledir=idledir, common=common,
+               hist=threading.Semaphore(1))
     rows, scen = [], []
     gates = [tuple(s.split(":", 1)) for s in specs]
     if gates:
@@ -438,13 +575,15 @@ def kill_main(root, work, lib, mutlib, buildgate, specs):
             rows.append(("FAIL", "%s %s: never reached a checkout of the commit (gate rc=%s) -- nothing was killed mid-flight, so nothing is proven; last output: %s"
                          % (tag, label, r["rc"], r["tail"])))
             continue
-        if sc["stage"] == "build" and not [x for x in r["marks"] if x.endswith("/work/head") or x.endswith("/headbin.wt/head")]:
+        mark_paths = [x.replace( "\\", "/" ) for x in r["marks"]]
+        if sc["stage"] == "build" and not [x for x in mark_paths if x.endswith("/work/head") or x.endswith("/headbin.wt/head")]:
             rows.append(("FAIL", "%s %s: the sleep reached was not the builder's (%s) -- the builder was not killed mid-build" % (tag, label, ", ".join(r["marks"]))))
             continue
         rc = r["rc"]
         how = "gate rc=%s%s" % (rc, ", its group SIGKILLed after the %d s grace" % GRACE_SEC if r["escalated"] else "")
         present = ", ".join(r["present"]) or "none"
-        if rc is None or not (rc < 0 or rc >= 128):
+        killed = rc is not None and (r["reached"] if os.name == "nt" else rc < 0 or rc >= 128)
+        if not killed:
             rows.append(("FAIL", "%s %s: the gate was not killed by the signal (%s) -- nothing was proven mid-flight" % (tag, label, how)))
         elif not sc["control"] and r["after"]:
             rows.append(("FAIL", "%s %s: %d registration(s) survive in .git/worktrees (%s; %d at the kill; checkouts on disk: %s; %s) -- a killed gate leaves every session's worktree list dirty"
@@ -486,7 +625,7 @@ elif cmd == "kill":
 PYEOF
 
 # ── (A) SCAN: nothing registers or prunes a worktree of the repository under test ──────────────────────────────────
-scanOut="$( python3 "$PY" scan "$ROOT" "$SELF" 2>&1 )"
+scanOut="$( "$PYTHON3" "$PY" scan "$PY_ROOT" "$SELF" 2>&1 )"
 nScanned="$( printf '%s\n' "$scanOut" | sed -n 's/^SCANNED //p' | head -1 )"
 nHits="$( printf '%s\n' "$scanOut" | grep -c '^HIT ' || true )"
 if [ "${nScanned:-0}" -ge 1 ] && [ "$nHits" -eq 0 ]; then
@@ -500,8 +639,8 @@ fi
 CALLER="$( printf '%s\n' "$scanOut" | awk '$1 == "GATE" && $5 == "helper" { print $2; exit }' )"
 if [ -n "$CALLER" ]; then
     mkdir -p "$TMP/revert"
-    rv="$( python3 "$PY" revert-caller "$ROOT/test/$CALLER" "$TMP/revert/$CALLER" 2>&1 )"
-    nRv="$( python3 "$PY" hits "$TMP/revert/$CALLER" 2>&1 | grep -c '^HIT ' || true )"
+    rv="$( "$PYTHON3" "$PY" revert-caller "$PY_ROOT/test/$CALLER" "$TMP/revert/$CALLER" 2>&1 )"
+    nRv="$( "$PYTHON3" "$PY" hits "$TMP/revert/$CALLER" 2>&1 | grep -c '^HIT ' || true )"
     case "$rv" in
         "REVERTED 0"|"") no "(A control) $CALLER: no ripwire_private_checkout call could be reverted ($rv)" ;;
         REVERTED*) [ "$nRv" -ge 1 ] \
@@ -513,10 +652,10 @@ else
     no "(A control) no gate calls ripwire_private_checkout against the repository under test -- nothing to revert (the fix is absent, or the helper was renamed)"
 fi
 MUTLIB="$TMP/headbinlib.reverted.sh"
-mutOut="$( python3 "$PY" revert-lib "$LIB" "$MUTLIB" 2>&1 )"
+mutOut="$( "$PYTHON3" "$PY" revert-lib "$PY_LIB" "$MUTLIB" 2>&1 )"
 case "$mutOut" in
     REVERTED*)
-        nMh="$( python3 "$PY" hits "$MUTLIB" 2>&1 | grep -c '^HIT ' || true )"
+        nMh="$( "$PYTHON3" "$PY" hits "$MUTLIB" 2>&1 | grep -c '^HIT ' || true )"
         [ "$nMh" -ge 1 ] \
             && ok "(A control) headbinlib.sh with ripwire_private_checkout reverted to git worktree add ($mutOut) is flagged" \
             || no "(A control) headbinlib.sh with ripwire_private_checkout reverted ($mutOut) was NOT flagged" ;;
@@ -529,7 +668,7 @@ esac
 GATES="$( printf '%s\n' "$scanOut" | awk '$1 == "GATE" { print $2 ":" $3 }' )"
 BUILDGATE="$( printf '%s\n' "$scanOut" | awk '$1 == "GATE" && $3 == "HEAD" && $4 == 1 { print $2; exit }' )"
 # shellcheck disable=SC2086   # one NAME:REV word per gate
-python3 "$PY" kill "$ROOT" "$TMP/kill" "$LIB" "$MUTLIB" "${BUILDGATE:--}" $GATES >"$TMP/kill.out" 2>&1; killRc=$?
+"$PYTHON3" "$PY" kill "$PY_ROOT" "$TMP/kill" "$PY_LIB" "$MUTLIB" "${BUILDGATE:--}" $GATES >"$TMP/kill.out" 2>&1; killRc=$?
 while IFS= read -r line; do
     case "$line" in
         "ROW PASS "*) ok "${line#ROW PASS }" ;;
@@ -541,7 +680,7 @@ if [ "$killRc" -ne 0 ] || ! grep -q '^DONE ' "$TMP/kill.out"; then
 fi
 
 # ── (C) CONTRACT: headbinlib.sh sets no traps, and its builder checks out through the helper ─────────────────────────
-conOut="$( python3 "$PY" contract "$LIB" 2>&1 )"
+conOut="$( "$PYTHON3" "$PY" contract "$PY_LIB" 2>&1 )"
 nTrap="$( printf '%s\n' "$conOut" | grep -c '^TRAP ' || true )"
 if [ "$nTrap" -eq 0 ] && printf '%s\n' "$conOut" | grep -q '^HELPER '; then
     ok "(C) headbinlib.sh sets no traps -- callers own their EXIT trap, as its header promises"

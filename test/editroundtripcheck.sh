@@ -84,8 +84,8 @@ for name, (sym, text) in files.items():
 # CRLF: the whole file with \r\n line endings
 open(os.path.join(c, "crlf.py"), "w", newline="", encoding="utf-8").write('def probe_crlf(n):\r\n    if n < 3:\r\n        return "<a> & b"\r\n    return ""\r\n\r\n\r\ndef other_crlf():\r\n    return 1\r\n')
 PY
-( cd "$C" && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init ) >/dev/null 2>&1
-fresh(){ rm -rf "$TMP/w"; git clone --local -q "$C" "$TMP/w" 2>/dev/null; }
+( cd "$C" && git init -q && git config user.email t@t && git config user.name t && git config core.autocrlf false && git add -A && git commit -qm init ) >/dev/null 2>&1
+fresh(){ rm -rf "$TMP/w"; git clone --config core.autocrlf=false --local -q "$C" "$TMP/w" 2>/dev/null; }
 clean(){ ( cd "$TMP/w" && git diff --exit-code --quiet -- . ) ; }   # 0 = byte-identical to the commit
 
 # the body two ways: RAW = the text between <![CDATA[ and ]]></b> exactly as a copy-paste agent takes it;
@@ -129,7 +129,7 @@ for pair in $langs; do
             && ok "(D) $f: the raw CDATA text differs from the bytes (]]> split) and the element says scrubbed=\"1\"" \
             || no "(D) $f: the raw CDATA text differs from the bytes and NOTHING on the element says so"
     fi
-    grep -q 'probe_crlf' "$TMP/raw" && { if grep -q $'\r' "$TMP/raw"; then ok "(A) crlf.py: the served CDATA keeps its CRLF endings"; else no "(A) crlf.py: the served CDATA lost its CRLF endings"; fi; }
+    grep -q 'probe_crlf' "$TMP/raw" && { if grep -qU $'\r' "$TMP/raw"; then ok "(A) crlf.py: the served CDATA keeps its CRLF endings"; else no "(A) crlf.py: the served CDATA lost its CRLF endings"; fi; }
 done
 [ "$nclean" = "$nlang" ] && ok "(A) $nclean/$nlang languages round-trip byte-exact through --expand → --replace-symbol-body (C, C++, ObjC, Python, JS, TS, Go, Rust, Java, Ruby, Swift, C#, Bash, CRLF, ]]>)" \
                         || no "(A) only $nclean/$nlang languages round-trip byte-exact"
@@ -160,7 +160,8 @@ for pair in probe.py:probe_py probe.cpp:probe_cpp cdata.cpp:pick crlf.py:probe_c
 done
 
 # ── ARM C — the heredoc payload (one trailing newline) folds into the seam, disclosed ───────────────────
-fresh; extract <( cd "$TMP/w" && "$BIN" . --expand=probe.py:probe_py --top-k=0 --no-cache 2>/dev/null ) probe_py "$TMP/body" "$TMP/raw" "$TMP/attrs" 2>/dev/null
+fresh; ( cd "$TMP/w" && "$BIN" . --expand=probe.py:probe_py --top-k=0 --no-cache 2>/dev/null ) >"$TMP/probe.xml"
+extract "$TMP/probe.xml" probe_py "$TMP/body" "$TMP/raw" "$TMP/attrs" 2>/dev/null
 { cat "$TMP/body"; printf '\n'; } > "$TMP/heredoc"     # exactly what `cat > f <<'EOF' … EOF` produces
 ( cd "$TMP/w" && "$BIN" . --replace-symbol-body=probe_py --edit-target-file=probe.py --edit-payload="$TMP/heredoc" ) >"$TMP/c.json" 2>"$TMP/c.err"
 clean && ok "(C) a heredoc payload (body + one trailing newline) replaces byte-exact: the newline folds into the seam" \

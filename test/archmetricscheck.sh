@@ -137,12 +137,24 @@ COSRC="$TMP/checkout/wt-cf2src"          # ends in `src`, so the absolute path c
 mkdir -p "$COPLAIN" "$COSRC"
 cp -R "$FIX" "$COPLAIN/fixture"
 cp -R "$FIX" "$COSRC/fixture"
-archat(){ perl -e 'alarm 20; exec @ARGV' "$BIN" "$1" --arch="$1/sibling.arch" --no-cache 2>/dev/null; }
+archat(){
+    local corpus="$1"; local corpus_native="$corpus"
+    if command -v cygpath >/dev/null 2>&1; then
+        corpus_native="$( cygpath -m "$corpus" )"
+    fi
+    perl -e 'alarm 20; exec @ARGV' "$BIN" "$corpus_native" --arch="$corpus_native/sibling.arch" --no-cache 2>/dev/null
+}
 OP="$( archat "$COPLAIN/fixture" )"
 OS="$( archat "$COSRC/fixture" )"
 vcount(){ printf '%s' "$1" | grep -o '<v ' | wc -l | tr -d ' '; }
 # the violation SET, made comparable: strip each checkout's own prefix so only the fixture-relative edge remains
-vset(){ printf '%s' "$1" | tr '>' '\n' | grep '<v ' | sed "s#$2/##g" | sort; }
+vset(){
+    local prefix="$2"; local prefix_native="$prefix"
+    if command -v cygpath >/dev/null 2>&1; then
+        prefix_native="$( cygpath -m "$prefix" )"
+    fi
+    printf '%s' "$1" | tr '>' '\n' | grep '<v ' | sed -e "s#$prefix/##g" -e "s#$prefix_native/##g" | sort
+}
 np="$( vcount "$OP" )"; ns="$( vcount "$OS" )"
 [ "$np" = "$ns" ] && [ "$np" = "$nv" ] \
     && ok "path-rule verdict is independent of the checkout directory (quiet=$np, …src/=$ns, in-repo=$nv)" \

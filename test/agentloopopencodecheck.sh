@@ -27,7 +27,7 @@ command -v python3 >/dev/null 2>&1 || { echo "agentloopopencodecheck: python3 re
 [ -f "$ROOT/bench/agentloop/run_agentloop.py" ] || { echo "agentloopopencodecheck: harness missing"; exit 2; }
 
 python3 - "$ROOT" "$BIN" "$TMP" >"$TMP/out.txt" 2>&1 <<'PY'
-import json, os, pathlib, subprocess, sys
+import json, os, pathlib, shutil, subprocess, sys
 
 root, ripwire_bin, tmp = sys.argv[1], sys.argv[2], sys.argv[3]
 sys.path.insert( 0, str( pathlib.Path( root ) / "bench" / "agentloop" ) )
@@ -107,8 +107,16 @@ else:
 home = pathlib.Path( tmp ) / "shimtest"
 home.mkdir( parents=True, exist_ok=True )
 shim, log = R.install_ripwire_shim( home, "/bin/echo" )
-subprocess.run( [ shim, "hello", "world" ], capture_output=True, text=True )
-out = subprocess.run( [ shim, "second" ], capture_output=True, text=True )
+def run_shim( *args ):
+    command = [ shim, *args ]
+    if os.name == "nt":
+        bash = os.environ.get( "RIPWIRE_BASH" ) or shutil.which( "bash.exe" ) or shutil.which( "bash" )
+        if not bash:
+            raise RuntimeError( "Git Bash is required to execute the POSIX shim on Windows" )
+        command = [ bash, shim, *args ]
+    return subprocess.run( command, capture_output=True, text=True )
+run_shim( "hello", "world" )
+out = run_shim( "second" )
 calls, commands = R.read_shim_log( log )
 if calls == 2:
     ok( "shim logged both invocations (%d)" % calls )

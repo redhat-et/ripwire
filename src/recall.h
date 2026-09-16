@@ -12,6 +12,7 @@
 // graph half ([[links]]/PageRank) is intentionally NOT fused — the eval showed importance ≠ relatedness.
 
 #include "infra/Diagnostics.h" // VERIFY_NO_ALIAS_BUF — waterFillRecallShares reads demand[] while writing alloc[]
+#include "infra/text.h"        // presentation/index text uses one LF spelling across native platforms
 #include "docparse.h"    // §P2b: the generated-document signals (marker / size+fences) + the ONE markdown
                          //       fence scanner — a doc-side property, computed from the file's own bytes
 #include "layout.h"      // §L4.3: layout::lineOf — the ONE byte-offset-to-line-number helper (reused, not
@@ -1238,6 +1239,8 @@ inline std::optional<RecallSectionBody> buildSectionGranularBody(
     std::ostringstream ss;
     ss << in.rdbuf();
     const std::string raw = ss.str();
+    std::string       normalizedRaw = raw;
+    normalizeCrlfInPlace( normalizedRaw );
 
     const RecallSectionSelection          selection = selectRecallSectionPicks( ing, scores, fileId, raw, queryToks );
     const std::vector<RecallSectionPick>& picks     = selection.picks;
@@ -1264,7 +1267,7 @@ inline std::optional<RecallSectionBody> buildSectionGranularBody(
 
     RecallSectionBody out;
     out.sectionCount = selection.sectionCount;
-    out.wholeBytes   = raw.size();
+    out.wholeBytes   = normalizedRaw.size();
     out.rankOrder    = std::move( rankOrder );
     out.units.reserve( picks.size() );
     for( const RecallSectionPick& p : picks )   // document order — `picks` was built in it
@@ -1275,6 +1278,7 @@ inline std::optional<RecallSectionBody> buildSectionGranularBody(
             return std::nullopt;   // the file moved under us — fall back to the honest whole-doc re-read
         }
         std::string slice = raw.substr( s.sigStartByte, p.ownEndByte - s.sigStartByte );
+        normalizeCrlfInPlace( slice );
         redactInPlace( slice, redact );
         if( !out.body.empty() && out.body.back() != '\n' )
         {

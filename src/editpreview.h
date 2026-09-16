@@ -259,7 +259,7 @@ inline IngestResult ingestOneFile( const std::string& tmpDir, const std::string&
     std::error_code   ec;
     const fs::path    target = fs::path( tmpDir ) / fs::path( rel );
     fs::create_directories( target.parent_path(), ec );
-    std::FILE* fp = std::fopen( target.string().c_str(), "wb" );
+    std::FILE* fp = rw::compat::rw_fopen_utf8( target.string().c_str(), "wb" );
     if( fp == nullptr )
     {
         DEGRADED_PATH_ALERT( "edit-preview: cannot write the spliced file into the temp root" );
@@ -278,15 +278,19 @@ inline IngestResult ingestOneFile( const std::string& tmpDir, const std::string&
     return ingest( tmpDir.c_str(), {}, {}, maxFileBytes, captureValueUses );
 }
 
-// E3: `<overwrite l= end= bytes=>CDATA</overwrite>` — src[a,b) as on disk, budgeted by WHOLE LINES: over
-// kPreviewOverwriteBudgetBytes the CDATA is the head, with shown= its size, capped="1" and elided_lines= the rest.
-// The CDATA goes through appendCdataSafe like every served body (a ]]> inside the span is split, never broken).
+// E3: `<overwrite l= end= bytes=>CDATA</overwrite>` — the selected src[a,b) content, with the same presentation-only
+// CRLF normalization as served bodies. `bytes=` is the normalized content size carried by the CDATA; over
+// kPreviewOverwriteBudgetBytes the CDATA is the head by whole lines, with shown= its size, capped="1" and elided_lines= the rest. The CDATA goes
+// through appendCdataSafe like every served body (a ]]> inside the span is split, never broken).
 inline constexpr std::size_t kPreviewOverwriteBudgetBytes = 4096;
 
 inline std::string overwriteChildXml( const std::string& src, std::size_t a, std::size_t b )
 {
-    const std::string_view      span  = std::string_view( src ).substr( a, b - a );
-    const mcpedit::LineRange    lines = mcpedit::lineRangeOf( src, a, b );
+    const std::string_view      rawSpan = std::string_view( src ).substr( a, b - a );
+    const mcpedit::LineRange    lines   = mcpedit::lineRangeOf( src, a, b );
+    std::string                 spanText( rawSpan );
+    normalizeCrlfInPlace( spanText );
+    const std::string_view      span = spanText;
     std::size_t                 shown = span.size();
     std::uint32_t               elidedLines = 0;
     if( span.size() > kPreviewOverwriteBudgetBytes )

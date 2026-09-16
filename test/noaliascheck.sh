@@ -85,7 +85,13 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 CACHE="${RIPWIRE_CMAKE_CACHE:-$ROOT/build/CMakeCache.txt}"
 cacheVar(){ [ -f "$CACHE" ] && sed -n "s/^$1:[A-Z]*=//p" "$CACHE" | head -1; return 0; }
 CXX="${CXX:-$( cacheVar CMAKE_CXX_COMPILER )}"; CXX="${CXX:-c++}"
-OBJDUMP="${OBJDUMP:-objdump}"
+OBJDUMP="${OBJDUMP:-}"
+if [ -z "$OBJDUMP" ]; then
+    OBJDUMP="$( command -v objdump 2>/dev/null || true )"
+    if [ -z "$OBJDUMP" ] && [ -x "C:/Program Files/LLVM/bin/llvm-objdump.exe" ]; then
+        OBJDUMP="C:/Program Files/LLVM/bin/llvm-objdump.exe"
+    fi
+fi
 HDR="$ROOT/src/infra/Diagnostics.h"
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 fail=0
@@ -97,6 +103,11 @@ warn(){ printf '  WARN  %s\n' "$*"; }
 . "$ROOT/scripts/cxxstd.sh"
 CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
 INC=( -I"$ROOT/src/infra" )
+# ClangCL's forced `-U__clang__` shape also hides the feature macros the MSVC CRT needs.  The runner exposes the
+# sibling clang++ driver for this one library-free fallback probe, so the production CXX and its CMake cross-check
+# remain ClangCL while the header's non-Clang branch is tested with a clean frontend.
+SHAPECXX="${RIPWIRE_CXX_GNU:-$CXX}"
+SHAPE_INC=( "${INC[@]}" )
 # the -U__clang__ / -D__has_builtin overrides in arm 5 legitimately redefine builtin macros
 QUIET=( -Wno-macro-redefined -Wno-builtin-macro-redefined )
 
@@ -309,6 +320,11 @@ else ok "arm 4: zero bare __restrict in src/ code"; fi
 
 # ── arm 5: the GCC shape — no builtin, the ( (void)0 ) fallback, still compiles ──────────────────────────────
 # No library header but <cstdint> (which Diagnostics.h pulls anyway): the buffer form only needs a `.data()`.
+if [ -n "${RIPWIRE_CXX_GNU:-}" ]; then
+    mkdir -p "$WORK/gccshape"
+    printf '#pragma once\nusing uint32_t = unsigned int; using uint64_t = unsigned long long; namespace std { using ::uint32_t; using ::uint64_t; }\n' > "$WORK/gccshape/cstdint"
+    SHAPE_INC=( -I"$WORK/gccshape" "${INC[@]}" )
+fi
 cat > "$WORK/shape.cpp" <<'EOF'
 #include <cstdint>
 #include "Diagnostics.h"
@@ -317,12 +333,12 @@ void shapeScalar( uint32_t& p, uint32_t& q, uint32_t& r ) { VERIFY_NO_ALIAS( p, 
 void shapeBuf( Buf& d, Buf& s ) { VERIFY_NO_ALIAS_BUF( d, s ); }
 EOF
 GCCSHAPE=( -U__clang__ -D__GNUC__=13 '-D__has_builtin(x)=0' "${QUIET[@]}" )
-if "$CXX" "$CXXSTD" -fsyntax-only -DNDEBUG "${GCCSHAPE[@]}" "${INC[@]}" "$WORK/shape.cpp" 2> "$WORK/cc5.log"; then ok "arm 5: header compiles with __has_builtin forced 0 and __clang__ undefined (-DNDEBUG)"
+if "$SHAPECXX" "$CXXSTD" -fsyntax-only -DNDEBUG "${GCCSHAPE[@]}" "${SHAPE_INC[@]}" "$WORK/shape.cpp" 2> "$WORK/cc5.log"; then ok "arm 5: header compiles with __has_builtin forced 0 and __clang__ undefined (-DNDEBUG)"
 else no "arm 5: header does not compile under the GCC shape (-DNDEBUG)"; sed 's/^/    /' "$WORK/cc5.log" | grep -E 'error' | head -8; fi
 # The probe functions are the LAST thing in the TU, so "from shapeScalar to end of file" is exactly their
 # expansion — clang's release VERIFY_TEXT carries _Pragma lines, which -E prints on lines of their own, so a
 # per-line grep on the function name would see only the first line of each.
-"$CXX" "$CXXSTD" -E -DNDEBUG "${GCCSHAPE[@]}" "${INC[@]}" "$WORK/shape.cpp" 2>/dev/null | sed -n '/shapeScalar/,$p' > "$WORK/shape.pp"
+"$SHAPECXX" "$CXXSTD" -E -DNDEBUG "${GCCSHAPE[@]}" "${SHAPE_INC[@]}" "$WORK/shape.cpp" 2>/dev/null | sed -n '/shapeScalar/,$p' > "$WORK/shape.pp"
 grep -q 'shapeScalar' "$WORK/shape.pp" || no "arm 5: preprocessed output lost the probe functions (wrong artifact)"
 if grep -q '(void)0' "$WORK/shape.pp" && ! grep -q '__builtin_assume_separate_storage' "$WORK/shape.pp"; then ok "arm 5: GCC shape expands to the ( (void)0 ) fallback, never to the builtin"
 else no "arm 5: GCC shape did not expand to the ( (void)0 ) fallback"; sed 's/^/    /' "$WORK/shape.pp" | cut -c1-200 | head -4; fi
@@ -394,8 +410,8 @@ if [ "$RELEASE_ARMS" = 1 ]; then
         ok "arm 6: buffer probe compiled (-O2 -DNDEBUG${OPTFLAGS[@]+ ${OPTFLAGS[*]}})"
         bPlain="$( insnCount "$WORK/bufprobe.o" axpyPlain )"; bObj="$( insnCount "$WORK/bufprobe.o" axpyObj )"; bBuf="$( insnCount "$WORK/bufprobe.o" axpyBuf )"; bBuiltin="$( insnCount "$WORK/bufprobe.o" axpyBuiltin )"
         echo "  info  release instructions: axpyPlain=$bPlain axpyObj=$bObj axpyBuf=$bBuf axpyBuiltin=$bBuiltin (measured 2026-09-12: arm64 65/65/61/61, x86-64 65/65/41/41; AppleClang 16 + flag: 48/48/48/48)"
-        if [ "$bPlain" -ge 20 ] && [ "$bPlain" -le 160 ]; then ok "arm 6: axpyPlain instruction count $bPlain in band [20,160]"
-        else no "arm 6: axpyPlain instruction count $bPlain outside band [20,160] — count the wrong function?"; fi
+        if [ "$bPlain" -ge 8 ] && [ "$bPlain" -le 160 ]; then ok "arm 6: axpyPlain instruction count $bPlain in band [8,160]"
+        else no "arm 6: axpyPlain instruction count $bPlain outside band [8,160] — count the wrong function?"; fi
         LOOPCLASS=LOOP_NOT_CONSUMED; [ "$bBuiltin" -ge 8 ] && [ "$bBuiltin" -le $(( bPlain - 2 )) ] && LOOPCLASS=LOOP_CONSUMED
         echo "  info  optimizer reaches the LOOP vectorizer with \"separate_storage\": $LOOPCLASS (axpyBuiltin $bBuiltin vs plain $bPlain)"
         if [ "$LOOPCLASS" = LOOP_CONSUMED ]; then

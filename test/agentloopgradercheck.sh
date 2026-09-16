@@ -33,10 +33,23 @@ unset AGENTLOOP_TOOL_ALIASES
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 
+# Native Python receives Windows paths as argv. An inherited MSYS conversion opt-out would turn `/c/...`
+# into `C:\c\...`, so remove it at this shell-to-native boundary instead of relying on the caller.
+unset MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
+
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
-command -v python3 >/dev/null 2>&1 || { echo "agentloopgradercheck: python3 required"; exit 2; }
+if [ -n "${RIPWIRE_PYTHON:-}" ]; then
+    PYTHON="$RIPWIRE_PYTHON"
+elif [ -n "${PYTHON_NATIVE:-}" ]; then
+    PYTHON="$PYTHON_NATIVE"
+elif command -v python.exe >/dev/null 2>&1; then
+    PYTHON="$( command -v python.exe )"
+else
+    PYTHON="python3"
+fi
+command -v "$PYTHON" >/dev/null 2>&1 || { echo "agentloopgradercheck: native Python required (set RIPWIRE_PYTHON)"; exit 2; }
 [ -f "$GRADER" ]            || { echo "agentloopgradercheck: no grader at $GRADER"; exit 2; }
 [ -f "$FIX/instances.tsv" ] || { echo "agentloopgradercheck: no fixture bank at $FIX"; exit 2; }
 
@@ -64,14 +77,16 @@ printf 'first doc\n'  >"$PINS/fixturerepo/docs/one.md"
 printf 'second doc\n' >"$PINS/fixturerepo/docs/two.md"
 cp "$PINS/fixturerepo/src/alpha.h" "$PINS/ripwire/src/alpha.h"
 
-grade(){ python3 "$GRADER" --instances "$1" --results "$FIX/results.json" --pin-root "$PINS" \
+grade(){ "$PYTHON" "$GRADER" --instances "$1" --results "$FIX/results.json" --pin-root "$PINS" \
                            --allow-unpinned "${@:2}"; }
 
-# ── 1. the committed fixture grade table, byte for byte ─────────────────────────────────────────────
+# ── 1. the committed fixture grade table, fields byte for byte; newline is platform-specific ─────────
 grade "$FIX/instances.tsv" --key "$FIX/sealed_key.json" >"$TMP/out.txt" 2>&1
 rc=$?
 grep -v '^#' "$TMP/out.txt" >"$TMP/table.tsv"
-if diff -u "$FIX/expected.tsv" "$TMP/table.tsv" >"$TMP/diff.txt"; then
+"$PYTHON" -c 'import sys; sys.stdout.buffer.write(sys.stdin.buffer.read().replace(bytes([13]), b""))' <"$FIX/expected.tsv" >"$TMP/expected.lf"
+"$PYTHON" -c 'import sys; sys.stdout.buffer.write(sys.stdin.buffer.read().replace(bytes([13]), b""))' <"$TMP/table.tsv" >"$TMP/table.lf"
+if diff -u "$TMP/expected.lf" "$TMP/table.lf" >"$TMP/diff.txt"; then
     ok "fixture grade table matches bench/agentloop/fixtures/grader/expected.tsv exactly"
 else
     no "fixture grade table drifted from the committed expectation:"
@@ -122,7 +137,7 @@ else
 fi
 
 # ── 4. the pin is verified, and the fixture escape hatch is not reachable by accident ───────────────
-python3 "$GRADER" --instances "$FIX/instances.tsv" --results "$FIX/results.json" \
+"$PYTHON" "$GRADER" --instances "$FIX/instances.tsv" --results "$FIX/results.json" \
                   --pin-root "$PINS" --key "$FIX/sealed_key.json" 2>&1 | grep -v '^#' >"$TMP/pinned.txt"
 if grep -q 'REFUSED_PIN' "$TMP/pinned.txt"; then
     ok "pin_ref=FIXTURE rows refuse without --allow-unpinned (a real run cannot take that path)"
@@ -146,7 +161,7 @@ else
 fi
 
 # ── 6. contract checks that need no fixture run ─────────────────────────────────────────────────────
-python3 - "$ROOT" >"$TMP/contract.txt" 2>&1 <<'PY'
+"$PYTHON" - "$ROOT" >"$TMP/contract.txt" 2>&1 <<'PY'
 import pathlib, sys
 sys.path.insert( 0, str( pathlib.Path( sys.argv[1] ) / "bench" / "agentloop" ) )
 import grade_answers as G

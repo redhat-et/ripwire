@@ -423,10 +423,19 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // Purely lexical (no realpath), so a symlinked or `..`-bearing root stays deterministic; a path that
         // is not under the root degrades to itself, leading-`./`-normalized — the same degrade the baseline
         // hash takes, and the only shape a multi-root invocation could reach here.
-        std::vector<std::string_view> relFiles( ing.files.size() );
+        std::vector<std::string>       relStorage( ing.files.size() );
+        std::vector<std::string_view>  relFiles( ing.files.size() );
         for( std::size_t f = 0; f < ing.files.size(); ++f )
         {
-            relFiles[f] = relForHash( ing.files[f], cfg.rootPath );
+            relStorage[f] = std::string( relForHash( ing.files[f], cfg.rootPath ) );
+            for( char& c : relStorage[f] )
+            {
+                if( c == '\\' )
+                {
+                    c = '/';
+                }
+            }
+            relFiles[f] = relStorage[f];
         }
 
         std::vector<int> lof( ing.files.size() );

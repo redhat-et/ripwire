@@ -156,10 +156,25 @@ def globstar_shell():
     probed once and a row that NEEDS `**` is REFUSED when no capable shell exists, never guessed at."""
     if not _SHELL:
         _SHELL.append( None )
-        for candidate in ( "bash", "/opt/homebrew/bin/bash", "/usr/local/bin/bash", "/bin/bash" ):
+        if os.name == "nt":
+            configured = os.environ.get( "RIPWIRE_BASH", "" )
+            candidates = [ configured, r"C:\\Program Files\\Git\\usr\\bin\\bash.exe",
+                           r"C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe" ]
+            candidates = [ c for c in candidates if c and os.path.isfile( c ) ]
+        else:
+            candidates = ( "bash", "/opt/homebrew/bin/bash", "/usr/local/bin/bash", "/bin/bash" )
+        for candidate in candidates:
+            if os.name == "nt":
+                normalized = os.path.normcase( os.path.abspath( candidate ) )
+                if "\\windows\\system32\\" in normalized or "\\windowsapps\\" in normalized:
+                    continue
+            probe_env = None
+            if os.name == "nt":
+                probe_env = os.environ.copy()
+                probe_env[ "PATH" ] = "/usr/bin:/bin:" + probe_env.get( "PATH", "" )
             try:
                 probe = subprocess.run( [ candidate, "-O", "globstar", "-c", "true" ],
-                                        capture_output=True, text=True, timeout=30 )
+                                        capture_output=True, text=True, timeout=30, env=probe_env )
             except ( OSError, subprocess.SubprocessError ):
                 continue
             if probe.returncode == 0:
@@ -170,9 +185,15 @@ def globstar_shell():
 def run_gt( gt_command, pin_root, timeout_s=300 ):
     """Execute the derivation command at the pin, under bash (never the operator's zsh — §4)."""
     shell = globstar_shell()
+    if os.name == "nt" and shell is None:
+        return "", "no supported Git Bash executable found", 127
     argv = ( [ shell, "-O", "globstar", "-O", "nullglob", "-c", gt_command ] if shell
              else [ "bash", "-c", gt_command ] )
-    proc = subprocess.run( argv, capture_output=True, text=True, cwd=str( pin_root ), timeout=timeout_s )
+    run_env = None
+    if os.name == "nt":
+        run_env = os.environ.copy()
+        run_env[ "PATH" ] = "/usr/bin:/bin:" + run_env.get( "PATH", "" )
+    proc = subprocess.run( argv, capture_output=True, text=True, cwd=str( pin_root ), timeout=timeout_s, env=run_env )
     return proc.stdout, proc.stderr, proc.returncode
 
 def derive_key( stdout ):

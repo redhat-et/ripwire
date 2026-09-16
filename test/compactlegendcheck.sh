@@ -56,6 +56,29 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
+PYTHON="${RIPWIRE_PYTHON:-${PYTHON_NATIVE:-python3}}"
+WINDOWS_GATE=0
+case "$( uname -s 2>/dev/null )" in
+    MINGW*|MSYS*) WINDOWS_GATE=1 ;;
+esac
+[ "${OS:-}" = Windows_NT ] && WINDOWS_GATE=1
+
+make_symlink()
+{
+    local target="$1" link="$2"
+    if [ "$WINDOWS_GATE" -eq 1 ]; then
+        case "$target" in
+            /*) target="$( cygpath -w "$target" )" ;;
+        esac
+        "$PYTHON" - "$target" "$( cygpath -w "$link" )" <<'PY'
+import os, sys
+os.symlink( sys.argv[1], sys.argv[2] )
+PY
+    else
+        ln -s "$target" "$link"
+    fi
+}
+
 # ── ONE INGEST FOR THE WHOLE GATE (2026-09-05, terminality round A lane V2) ───────────────────────────────
 # Every probe below used to carry --no-cache, so this gate paid a COLD PARSE per invocation — 23 verb rows in
 # the (A)/(F)/(L) arms plus two runs of every XML flag in the (U) universe sweep, and each one re-parsed the
@@ -1077,7 +1100,16 @@ OVR="$TMP/oversize"; mkdir -p "$OVR"; cp -R "$FIX"/. "$OVR"/; head -c 5000 /dev/
 UNX="$TMP/unindexed"; mkdir -p "$UNX"; printf 'x = 1\n' >"$UNX/a.py"
 for e in zzqa zzqb zzqc zzqd zzqe zzqf zzqg; do printf 'text\n' >"$UNX/a.$e"; done
 ESC="$TMP/escape"; mkdir -p "$ESC/inner" "$ESC/outside"; cp -R "$FIX"/. "$ESC/inner"/
-printf 'def far():\n    return 2\n' >"$ESC/outside/far.py"; ln -s ../outside/far.py "$ESC/inner/far.py"
+printf 'def far():\n    return 2\n' >"$ESC/outside/far.py"
+if ! make_symlink ../outside/far.py "$ESC/inner/far.py"; then
+    no "(D28) fixture symlink creation failed — escaped_root control is not executable"
+elif [ "$WINDOWS_GATE" -eq 1 ] && ! "$PYTHON" - "$( cygpath -w "$ESC/inner/far.py" )" <<'PY'
+import os, sys
+raise SystemExit( 0 if os.path.islink( sys.argv[1] ) else 1 )
+PY
+then
+    no "(D28) fixture symlink is not a native reparse point — escaped_root control is not executable"
+fi
 CHA="$ROOT/test/chafix"; SCIPF="$ROOT/test/scipfix"
 for d in "$CHA" "$SCIPF"; do [ -d "$d" ] || no "(D25/D28) fixture missing: $d — every row reading it would be vacuous"; done
 

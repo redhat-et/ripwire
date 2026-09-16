@@ -246,14 +246,19 @@ mkdir -p "$TMP/prefix/bin" "$TMP/prefix/share/ripwire/skills" "$TMP/case_b"
 cp "$BIN" "$TMP/prefix/bin/ripwire-copy"
 : > "$TMP/prefix/share/ripwire/skills/install.sh"
 STAGED="$REAL_TMP/prefix/share/ripwire/skills/install.sh"
+if command -v cygpath >/dev/null 2>&1; then
+    STAGED_EXPECTED="$( cygpath -w "$STAGED" | tr '\\' '/' )"
+else
+    STAGED_EXPECTED="$STAGED"
+fi
 B_OUT="$( cd "$TMP/case_b" && "$TMP/prefix/bin/ripwire-copy" wrap claude 2>/dev/null )"
-if echo "$B_OUT" | grep -qF "bash \"$STAGED\""; then
-    ok "case b (prebuilt prefix): absolute staged path printed ($STAGED)"
+if echo "$B_OUT" | grep -qF "bash \"$STAGED_EXPECTED\""; then
+    ok "case b (prebuilt prefix): absolute staged path printed ($STAGED_EXPECTED)"
 else
     no "case b (prebuilt prefix): absolute staged path NOT printed"
 fi
 B_CODEX_OUT="$( cd "$TMP/case_b" && "$TMP/prefix/bin/ripwire-copy" wrap codex 2>/dev/null )"
-if echo "$B_CODEX_OUT" | grep -qF "bash \"$STAGED\" --codex"; then
+if echo "$B_CODEX_OUT" | grep -qF "bash \"$STAGED_EXPECTED\" --codex"; then
     ok "case b (prebuilt prefix, codex): staged path printed with --codex"
 else
     no "case b (prebuilt prefix, codex): staged --codex line NOT printed"

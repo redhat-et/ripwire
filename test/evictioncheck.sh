@@ -58,6 +58,28 @@ no(){ echo "  FAIL  $1"; fail=1; }
 command -v truncate >/dev/null 2>&1 || { echo "truncate required (sparse-file filler)"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+PYTHON="${RIPWIRE_PYTHON:-${PYTHON_NATIVE:-python3}}"
+WINDOWS_GATE=0
+case "$( uname -s 2>/dev/null )" in
+    MINGW*|MSYS*) WINDOWS_GATE=1 ;;
+esac
+[ "${OS:-}" = Windows_NT ] && WINDOWS_GATE=1
+
+make_symlink()
+{
+    local target="$1" link="$2"
+    if [ "$WINDOWS_GATE" -eq 1 ]; then
+        case "$target" in
+            /*) target="$( cygpath -w "$target" )" ;;
+        esac
+        "$PYTHON" - "$target" "$( cygpath -w "$link" )" <<'PYLINK'
+import os, sys
+os.symlink( sys.argv[1], sys.argv[2], target_is_directory=True )
+PYLINK
+    else
+        ln -s "$target" "$link"
+    fi
+}
 CACHEBASE="$TMP/cachebase"; CACHEDIR="$CACHEBASE/ripwire"; mkdir -p "$CACHEDIR"
 REPO="$TMP/repo"; mkdir -p "$REPO"
 
@@ -220,10 +242,26 @@ touch -t 202001010000 "$OLDLOCK"
 printf 'ancient-advisory-lock-HELD' > "$HELDLOCK"
 touch -t 202001010000 "$HELDLOCK"
 printf 'fresh-advisory-lock' > "$FRESHLOCK"
-python3 - "$HELDLOCK" <<'PYHOLD' &
-import fcntl, sys, time
+"$PYTHON" - "$HELDLOCK" <<'PYHOLD' &
+import os, sys, time
 f = open( sys.argv[1], "r+" )
-fcntl.flock( f, fcntl.LOCK_EX )
+if os.name == "nt":
+    import ctypes, msvcrt
+    from ctypes import wintypes
+    class OVERLAPPED( ctypes.Structure ):
+        _fields_ = [ ( "Internal", ctypes.c_void_p ), ( "InternalHigh", ctypes.c_void_p ),
+                     ( "Offset", wintypes.DWORD ), ( "OffsetHigh", wintypes.DWORD ), ( "hEvent", wintypes.HANDLE ) ]
+    kernel32 = ctypes.WinDLL( "kernel32", use_last_error=True )
+    kernel32.LockFileEx.argtypes = [ wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+                                     wintypes.DWORD, ctypes.POINTER( OVERLAPPED ) ]
+    kernel32.LockFileEx.restype = wintypes.BOOL
+    ov = OVERLAPPED()
+    if not kernel32.LockFileEx( wintypes.HANDLE( msvcrt.get_osfhandle( f.fileno() ) ), 2, 0, 0xffffffff, 0xffffffff,
+                                ctypes.byref( ov ) ):
+        raise ctypes.WinError( ctypes.get_last_error() )
+else:
+    import fcntl
+    fcntl.flock( f, fcntl.LOCK_EX )
 time.sleep( 120 )
 PYHOLD
 HOLDER=$!
@@ -531,7 +569,7 @@ else
 fi
 
 # ---- (l) trailing slash and a symlinked spelling of the SAME tree add no new key --------------------
-ln -s "$R6" "$TMP6/link"
+make_symlink "$R6" "$TMP6/link"
 primeallfamilies "$CB6" "$R6/"
 primeallfamilies "$CB6" "$TMP6/link"
 keysl="$( allrootkeys "$CD6" )"

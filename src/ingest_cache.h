@@ -232,14 +232,14 @@ constexpr std::uint32_t kCacheVersion = 22;           // 22: RawDef gains `inter
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
 constexpr std::uint32_t kParserVer    = 96;           // bump on any grammar/.scm/extraction change
-                                                      // 96 = 2026-09-13 (internal linkage, test/decltodefcheck.sh arm
-                                                      //    B2): every C/C++ def carries a new syntactic
-                                                      //    `internalLinkage` bit — inside an anonymous namespace at any
-                                                      //    depth, or a namespace-scope `static`. The def record grows
-                                                      //    by one u8 (kCacheVersion 21 -> 22 in the same commit). Next
-                                                      //    free number over the merged tip (main at 95 after #81);
-                                                      //    quality.h's kIngestParserVerMirror and
-                                                      //    kIngestCacheVersionMirror bumped in the SAME commit.
+                                                       // 96 = 2026-09-13 (internal linkage, test/decltodefcheck.sh arm
+                                                       //    B2): every C/C++ def carries a new syntactic
+                                                       //    `internalLinkage` bit — inside an anonymous namespace at any
+                                                       //    depth, or a namespace-scope `static`. The def record grows
+                                                       //    by one u8 (kCacheVersion 21 -> 22 in the same commit). Next
+                                                       //    free number over the merged tip (main at 95 after #81);
+                                                       //    quality.h's kIngestParserVerMirror and
+                                                       //    kIngestCacheVersionMirror bumped in the SAME commit.
                                                       // 95 = 2026-09-12 (Elixir module/name/arity resolution, PR #81,
                                                       //    test/elixirsemanticcheck.sh): module/name/arity identities,
                                                       //    lexical aliases, filtered imports, default arguments, pipes,
@@ -379,6 +379,7 @@ constexpr std::uint32_t kParserVer    = 96;           // bump on any grammar/.sc
                                                       //    against the pre-change binary on src/ and the test/ corpus);
                                                       //    only rows the new check flags gain extent_suspect=.
                                                       //    quality.h's kIngestParserVerMirror bumped in the SAME commit.
+
                                                       // 88 = 2026-09-10 (Dart, test/dartcheck.sh): a 23rd grammar joins
                                                       //    kLangTable, so the CRAWL ADMITS FILES IT PREVIOUSLY REFUSED —
                                                       //    a v87 blob has no record for the `.dart` it never saw, so the
@@ -1215,6 +1216,8 @@ struct ReadFd
     ReadFd& operator=( const ReadFd& ) = delete;
     ReadFd( ReadFd&& other ) noexcept : fd( other.fd ) { other.fd = -1; }
     ~ReadFd() { if( fd >= 0 ) { ::close( fd ); } }
+    /// Releases the descriptor early so Windows can publish a replacement cache file.
+    void close() noexcept { if( fd >= 0 ) { ::close( fd ); fd = -1; } }
 
     // openOnce, not a move-assignment: the only mutation this type needs is "fill an empty guard", and
     // a move-assign operator here would be a byte-for-byte clone of ingest_sidecap.h's TreeGuard one
@@ -1279,6 +1282,8 @@ struct CacheFrame
     long long               mtimeNs     = -1;// the blob's own mtime — the warm-run racy-rule reference
     bool                    ok          = false;
     CacheReject             reason      = CacheReject::Absent;   // meaningful only while ok == false
+    /// Closes the held cache frame before an atomic replacement is attempted.
+    void close() noexcept { blob.close(); }
 };
 
 // pread the whole of [ off, off+n ) into `dst`. Short reads are retried (a pread on a regular file can
@@ -1768,7 +1773,13 @@ inline RawRouteUse readRouteUse( ByteR& r ) { RawRouteUse u; u.startByte = r.u32
 inline std::string reAbsolutize( std::string_view rel, std::string_view root )
 {
     std::string_view rootTrim = root;
-    while( rootTrim.size() > 1 && rootTrim.back() == '/' )
+#if defined( _WIN32 )
+    // collectSources() stores p.generic_string() and ingest() normalizes the root to forward slashes.
+    constexpr char separator = '/';
+#else
+    constexpr char separator = '/';
+#endif
+    while( rootTrim.size() > 1 && ( rootTrim.back() == '/' || rootTrim.back() == '\\' ) )
     {
         rootTrim.remove_suffix( 1 );
     }
@@ -1779,8 +1790,15 @@ inline std::string reAbsolutize( std::string_view rel, std::string_view root )
     std::string out;
     out.reserve( rootTrim.size() + 1 + rel.size() );
     out.append( rootTrim );
-    out.push_back( '/' );
-    out.append( rel );
+    out.push_back( separator );
+    while( !rel.empty() && ( rel.front() == '/' || rel.front() == '\\' ) )
+    {
+        rel.remove_prefix( 1 );
+    }
+    for( const char c : rel )
+    {
+        out.push_back( c == '/' || c == '\\' ? separator : c );
+    }
     return out;
 }
 
@@ -2295,6 +2313,7 @@ inline void finishCacheBlob( ByteW& w, const std::vector<CacheEntry>& table )
 // write the cache atomically (path.tmp → rename); groups the merged raw facts back by file.
 // T5: `rootDir` is the CURRENT invocation's ingest root — every file key is stored root-relative
 // (relForHash) rather than verbatim, so the cache blob is committable/portable (see kCacheVersion=3).
+/// Persists the cache through a validated carry-forward and a platform-safe atomic publication.
 inline void saveCache( const std::string& path, std::string_view rootDir, const std::vector<std::string>& files,
                        const std::vector<std::uint64_t>& fileHash,
                        const std::vector<long long>& fileSize, const std::vector<long long>& fileMtime,
@@ -2339,7 +2358,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     // validate — absent, foreign version/parserVer/arch, torn — CARRY is simply empty and this run
     // writes its own file set, which is exactly v14's behaviour and self-heals on the next wider run.
     const CachePathKeys              keys  = buildCachePathKeys( files, rootDir );
-    const CacheFrame                 prev  = openCacheFrame( path, captureValueUses );
+    CacheFrame                       prev  = openCacheFrame( path, captureValueUses );
     std::vector<CacheEntry>          carry;
     const std::vector<CacheWriteRow> plan  = buildCacheWritePlan( keys.order, keys.pathHashes, prev.entries, carry );
 
@@ -2523,6 +2542,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
         PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: offset table + trailer" );
         finishCacheBlob( w, table );
     }
+    prev.close();
     PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: write + rename" );
 
     // unique per-process temp so two concurrent runs (this repo runs ~20 parallel sessions) don't
@@ -2536,7 +2556,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     // (src/mcp.h): check the write byte-count AND fclose's return, and on any failure unlink the temp
     // and leave the prior on-disk cache (if any) untouched.
     const std::string tmp = path + "." + std::to_string( getpid() ) + ".tmp";
-    std::FILE* fp = std::fopen( tmp.c_str(), "wb" );
+    std::FILE* fp = rw::compat::rw_fopen_utf8( tmp.c_str(), "wb" );
     if( !fp )
     {
         DEGRADED_PATH_ALERT( "ingest: saveCache could not open temp file for write — cache left unchanged" );
@@ -2548,19 +2568,28 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     const bool wErr = wrote != w.b.size() || std::fclose( fp ) != 0;
     if( wErr )
     {
-        std::remove( tmp.c_str() );   // never rename a short/torn write over a good cache
+        rw::compat::rw_remove_utf8( tmp.c_str() );   // never rename a short/torn write over a good cache
         DEGRADED_PATH_ALERT( "ingest: saveCache write failed (short write or fclose error) — old cache preserved" );
         rw::emitTo( stderr, "ripwire: cache {}: write failed (short write; disk full?) — old cache kept, this run was parsed from source\n", path.c_str() );
         return;
     }
+#if defined(_WIN32)
+    if( rw::compat::rw_rename( tmp.c_str(), path.c_str() ) != 0 )
+    {
+        rw::compat::rw_remove_utf8( tmp.c_str() );
+        DEGRADED_PATH_ALERT( "ingest: saveCache rename(tmp -> cache) failed — old cache preserved" );
+        return;
+    }
+#else
     if( std::rename( tmp.c_str(), path.c_str() ) != 0 )
     {
-        std::remove( tmp.c_str() );   // clean up on failure
+        rw::compat::rw_remove_utf8( tmp.c_str() );   // clean up on failure
         DEGRADED_PATH_ALERT( "ingest: saveCache rename(tmp -> cache) failed — old cache preserved" );
         rw::emitTo( stderr, "ripwire: cache {}: cannot replace ({}) — old cache kept, this run was parsed from source\n",
                       path.c_str(), std::strerror( errno ) );
         return;
     }
+#endif
 
     // A5 (cache-dir hygiene): --doctor measured ~11,914 ripwire-* blobs / 2.4 GB accumulating in the cache-ladder
     // dir because only the qsnap/qheadsnap families ever evicted — this main parse-cache family (this very

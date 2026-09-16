@@ -388,7 +388,7 @@ inline void writePinCensusSymbolRows( std::FILE* f, const IngestResult& ing, con
 // exactly as the map's `p=`/`id=`. Returns false if the file cannot be opened.
 inline bool writePinCensus( const char* path, const PinCensus& pc, const IngestResult& ing, std::string_view root )
 {
-    std::FILE* f = std::fopen( path, "wb" );
+    std::FILE* f = rw::compat::rw_fopen_utf8( path, "wb" );
     if( f == nullptr )
     {
         return false;

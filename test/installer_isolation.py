@@ -19,6 +19,13 @@ def snapshot(root):
     }
 
 
+def shell_path(value):
+    text = os.fspath(value).replace("\\", "/")
+    if os.name == "nt" and len(text) >= 3 and text[1] == ":" and text[2] == "/":
+        return "/" + text[0].lower() + text[2:]
+    return text
+
+
 root = Path(__file__).resolve().parent.parent
 binary = Path(sys.argv[1])
 if not binary.is_absolute():
@@ -34,11 +41,16 @@ with tempfile.TemporaryDirectory(prefix="ripwire-installer-sentinels-") as tempo
         home.mkdir()
         (home / "sentinel").write_text("leave unchanged\n")
         environment[variable] = str(home)
-    # Without this the PR's third claim has no regression proof: removing RIPWIRE_NO_ACTIVATE from the
-    # release gate's unset (releaseinstallcheck.sh:15) leaves this helper GREEN in a clean environment,
-    # and it only reds if the operator's own shell happens to export the variable. A gate whose liveness
-    # depends on who runs it is not a gate. Injected so the mutation fails on any machine.
-    environment["RIPWIRE_NO_ACTIVATE"] = "1"
+    native_tmp = str(outside / "msys-tmp").replace("\\", "/")
+    (outside / "msys-tmp").mkdir()
+    # Git Bash creates POSIX-looking /tmp paths by default, while native jq and Python resolve
+    # those paths independently. Give every child the same native temporary root used by pargates.py.
+    environment.update({
+        "RW_MSYS_TMP": native_tmp,
+        "TMPDIR": native_tmp,
+        "TEMP": native_tmp,
+        "TMP": native_tmp,
+    })
 
     claude = outside / "HOME" / ".claude"
     claude.mkdir()
@@ -47,7 +59,8 @@ with tempfile.TemporaryDirectory(prefix="ripwire-installer-sentinels-") as tempo
     before = snapshot(outside)
     sentinel = outside / "CODEX_HOME" / "hooks.json"
     mode = stat.S_IMODE(sentinel.lstat().st_mode)
-    sentinel.chmod(mode ^ stat.S_IXUSR)
+    permission_bit = stat.S_IWRITE if os.name == "nt" else stat.S_IXUSR
+    sentinel.chmod(mode ^ permission_bit)
     if snapshot(outside) == before:
         sys.exit("  FAIL  snapshot missed a permission-only sentinel change")
     sentinel.chmod(mode)
@@ -55,11 +68,21 @@ with tempfile.TemporaryDirectory(prefix="ripwire-installer-sentinels-") as tempo
         sys.exit("  FAIL  sentinel permissions were not restored")
     print("  PASS  snapshot detects permission-only changes")
     failed = False
-    for gate, argument in (("skillinstallcheck.sh", str(binary)),
+    shell = os.environ.get("RIPWIRE_BASH", "bash")
+    if os.name == "nt" and shell == "bash":
+        shell = r"C:\Program Files\Git\usr\bin\bash.exe"
+    for gate, argument in (("skillinstallcheck.sh", shell_path(binary)),
                            ("releaseinstallcheck.sh", "--isolation-child")):
+        child_environment = environment.copy()
+        child_environment.pop("MSYS_NO_PATHCONV", None)
+        child_environment.pop("MSYS2_ARG_CONV_EXCL", None)
+        if gate == "releaseinstallcheck.sh":
+            # Exercise the release gate's unset of inherited overrides without changing the
+            # skill gate's own activation contract (E1-E6 require activation by default).
+            child_environment["RIPWIRE_NO_ACTIVATE"] = "1"
         result = subprocess.run(
-            ["bash", str(root / "test" / gate), argument],
-            cwd=root, env=environment, capture_output=True, text=True,
+            [shell, shell_path(root / "test" / gate), argument],
+            cwd=root, env=child_environment, capture_output=True, text=True,
         )
         if result.returncode:
             print(result.stdout)

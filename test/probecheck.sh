@@ -33,7 +33,11 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
-PROBE="${BIN}_probe"                                  # same build dir as the binary under test
+PROBE="${RIPWIRE_PROBE:-${BIN}_probe}"
+case "$PROBE" in
+    *.exe_probe) PROBE="${BIN%.exe}_probe.exe" ;;
+    "${BIN}_probe") case "$BIN" in *.exe) PROBE="${BIN%.exe}_probe.exe" ;; esac ;;
+esac                                                   # same build dir as the binary under test
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 

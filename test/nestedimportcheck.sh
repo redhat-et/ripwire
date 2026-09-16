@@ -339,13 +339,37 @@ monotonicity_check()
     OLDBIN="$( ripwire_head_binary "$ROOT" "$TMP" )" || { headbin_refusal $? "monotonicity"; return; }
 
     local IN="$WT/src"
+    local NORMALIZE_PATHS="$TMP/normalize_monotonic_paths.py"
+    cat >"$NORMALIZE_PATHS" <<'PYEOF'
+import re
+import sys
+
+mode = sys.argv[1]
+root = sys.argv[2].replace("\\", "/").rstrip("/") + "/"
+
+def norm(value):
+    value = value.replace("\\", "/")
+    return value[len(root):] if value.casefold().startswith(root.casefold()) else value
+
+for raw in sys.stdin:
+    line = raw.rstrip()
+    if mode == "count":
+        parts = line.split(" ", 1)
+        path = norm(parts[0])
+        print(path + ((" " + parts[1]) if len(parts) > 1 else ""))
+    else:
+        print(re.sub(r'(a|b)="([^"]*)"', lambda m: m.group(1) + '="' + norm(m.group(2)) + '"', line))
+PYEOF
+    normalize_count_paths(){ python3 "$NORMALIZE_PATHS" count "$IN"; }
+    normalize_pair_paths(){ python3 "$NORMALIZE_PATHS" pair "$IN"; }
     # (a) captured includes — compare the PER-FILE COUNT, never the emitted <inc> rows. serialize.h caps
     #     a file's <inc> children at 40 and discloses the rest as `+more`, so a file that GAINS imports
     #     pushes later ones out of the listing: an <inc>-row diff would read that display truncation as a
     #     lost capture and this arm would red on a correct change. `includes=` in the <f> header is the raw
     #     uncapped statement count (serialize.h says so explicitly), which is the number that must not drop.
     inccounts(){ "$1" "$IN" --deps --no-cache --limit=5000 2>/dev/null | tr '>' '\n' \
-                     | grep -oE '<f p="[^"]*" includes="[0-9]+"' | sed -E 's/<f p="([^"]*)" includes="([0-9]+)"/\1 \2/' | sort; }
+                    | grep -oE '<f p="[^"]*" includes="[0-9]+"' | sed -E 's/<f p="([^"]*)" includes="([0-9]+)"/\1 \2/' \
+                    | normalize_count_paths | sort; }
     inccounts "$OLDBIN" >"$TMP/inc.old"
     inccounts "$BIN"    >"$TMP/inc.new"
     if [ ! -s "$TMP/inc.old" ]; then
@@ -365,10 +389,13 @@ monotonicity_check()
     fi
 
     # (b) surprising="1" — the NEW set must be a SUBSET of the OLD set.
-    surpset(){ "$1" "$IN" --cochange --pack-top-n=5000 --no-cache 2>/dev/null | tr '>' '\n' | grep 'surprising="1"' | grep -oE 'a="[^"]*" b="[^"]*"' | sort; }
-    surpset "$OLDBIN" >"$TMP/surp.old"
-    surpset "$BIN"    >"$TMP/surp.new"
-    if [ ! -s "$TMP/surp.old" ] && [ ! -s "$TMP/surp.new" ]; then
+    surpset(){ local _side="$2"; "$1" "$IN" --cochange --pack-top-n=5000 --no-cache 2>"$TMP/surp.$_side.err" | tr '>' '\n' | grep 'surprising="1"' \
+                    | grep -oE 'a="[^"]*" b="[^"]*"' | normalize_pair_paths | sort; }
+    surpset "$OLDBIN" old >"$TMP/surp.old"
+    surpset "$BIN"    new >"$TMP/surp.new"
+    if grep -q 'git unavailable / no history' "$TMP/surp.old.err"; then
+        skip "monotonicity(b): pre-change binary cannot mine git history on this platform; comparison unavailable"
+    elif [ ! -s "$TMP/surp.old" ] && [ ! -s "$TMP/surp.new" ]; then
         skip "monotonicity(b): no surprising= rows on $IN in either binary (needs git history — shallow clone?)"
     elif [ "$( comm -13 "$TMP/surp.old" "$TMP/surp.new" | wc -l | tr -d ' ' )" = "0" ]; then
         ok "monotonicity(b): surprising=\"1\" only ever SUPPRESSED, never added"

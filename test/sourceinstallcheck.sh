@@ -15,6 +15,9 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 BUILD="$( cd "$( dirname "$BIN" )" && pwd )"
+if command -v cygpath >/dev/null 2>&1 && cygpath -w / >/dev/null 2>&1; then
+    BUILD="$( cygpath -m "$BUILD" )"
+fi
 [ -f "$BUILD/cmake_install.cmake" ] || { echo "no cmake_install.cmake beside $BIN"; exit 2; }
 
 echo "sourceinstallcheck: BIN=$BIN"
@@ -41,8 +44,12 @@ else
 fi
 
 WRAP="$( cd "$TMP" && "$TMP/prefix/bin/ripwire" wrap codex --force 2>&1 )"
+EXPECTED_INSTALLER="$TMP/prefix/share/ripwire/skills/install.sh"
+if command -v cygpath >/dev/null 2>&1; then
+    EXPECTED_INSTALLER="$( cygpath -m "$EXPECTED_INSTALLER" )"
+fi
 case "$WRAP" in
-    *"$TMP/prefix/share/ripwire/skills/install.sh\" --codex"*)
+    *"$EXPECTED_INSTALLER\" --codex"*)
         ok "installed wrap recipe resolves the staged Codex installer" ;;
     *)  no "installed wrap recipe does not resolve the staged Codex installer" ;;
 esac

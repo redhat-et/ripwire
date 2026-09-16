@@ -120,19 +120,20 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+PYTHON="${RIPWIRE_PYTHON:-${PYTHON_NATIVE:-python3}}"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 . "$ROOT/test/lib/cxxflags.sh"                          # the ONE flags.make parse (CWE-78: never eval a generated file)
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
-command -v python3 >/dev/null 2>&1 || { echo "decltodefcheck: python3 required"; exit 2; }
+command -v "$PYTHON" >/dev/null 2>&1 || { echo "decltodefcheck: $PYTHON required"; exit 2; }
 echo "decltodefcheck: BIN=$BIN"
 
 # ── readers (one each, so no arm hand-rolls a second regex for the same job) ──────────────────────────
 # The document is minified onto ONE line and the legend is a comment on that same line, so nothing here is
 # ever filtered line-wise: the root element is extracted BY NAME with a non-greedy match instead.
-rootEl(){ python3 -c '
+rootEl(){ "$PYTHON" -c '
 import re,sys
 d=open(sys.argv[1]).read()
 m=re.search(r"<"+sys.argv[2]+r"\b[^>]*>",d)
@@ -143,7 +144,7 @@ sys.stdout.write(m.group(0) if m else "")' "$1" "$2"; }
 # ABSENCE of one of them, which is exactly the assertion a suffix match makes vacuous.
 # anchoredMatch <text> <head> <tail-regex> <group> — the ONE left-anchored reader: HEAD literal, then TAIL; prints GROUP of
 # the first match, or nothing. attr reads an attribute's value with it, readingOf (below) one legend term's reading.
-anchoredMatch(){ python3 -c '
+anchoredMatch(){ "$PYTHON" -c '
 import re,sys
 m=re.search(r"(?<![A-Za-z0-9_])"+re.escape(sys.argv[2])+sys.argv[3],sys.argv[1],re.S)
 sys.stdout.write(m.group(int(sys.argv[4])) if m else "")' "$1" "$2" "$3" "$4"; }
@@ -151,21 +152,21 @@ attr(){ anchoredMatch "$1" "$2=\"" '([^"]*)"' 1; }
 
 # The LEADING comment block — the legend a reader meets before the first element, read as a span because G4
 # minifies the whole document onto one line (the same extraction test/graphlegendbudgetcheck.sh uses).
-legendOf(){ python3 -c '
+legendOf(){ "$PYTHON" -c '
 import re,sys
 d=open(sys.argv[1]).read()
 m=re.match(r"\A(?:\s*<!--.*?-->)+",d,re.S)
 sys.stdout.write(m.group(0) if m else "")' "$1"; }
 
 # One JSON key off the top-level object, as text; empty when the key is absent.
-jsonKey(){ python3 -c '
+jsonKey(){ "$PYTHON" -c '
 import json,sys
 d=json.load(open(sys.argv[1]))
 sys.stdout.write("" if sys.argv[2] not in d else str(d[sys.argv[2]]))' "$1" "$2"; }
 
 # Every `n="…"` row name in a document, one per line — the arms below assert on the NAME SET, never on a
 # substring of the whole document (of="…" echoes the selector, so a bare grep matches itself).
-rowNames(){ python3 -c '
+rowNames(){ "$PYTHON" -c '
 import re,sys
 d=open(sys.argv[1]).read()
 sys.stdout.write("\n".join(re.findall(r"<s\b[^>]*\bn=\"([^\"]*)\"",d)))' "$1"; }
@@ -183,7 +184,7 @@ run2(){ # run <corpus> <selector-flag> <dialect-flag> — the --json / --format=
 # decodes it can be shown able to fail on its own (arm F). <legend> is "full", or "" to leave the server's default.
 mcpTranscript(){ # mcpTranscript <out-file> <tool> <legend|""> <key=value>...
     _out="$1" _tool="$2" _legend="$3"; shift 3
-    python3 - "$_tool" "$_legend" "$@" <<'PY' | "$BIN" --mcp >"$_out" 2>/dev/null
+    "$PYTHON" - "$_tool" "$_legend" "$@" <<'PY' | "$BIN" --mcp >"$_out" 2>/dev/null
 import json, sys
 tool, legend = sys.argv[1], sys.argv[2]
 args = dict( kv.split( "=", 1 ) for kv in sys.argv[3:] )
@@ -195,7 +196,7 @@ PY
 }
 
 # The payload text of a transcript's last response; an error response yields `__ERROR__:message`, never a payload.
-mcpPayload(){ python3 -c '
+mcpPayload(){ "$PYTHON" -c '
 import json,sys
 lines=[l for l in open(sys.argv[1]).read().splitlines() if l.strip()]
 try:
@@ -210,7 +211,7 @@ else:
 # The unproven_defs= clause of a legend, as a span: from its `unproven_defs=K` opening to the floor tail every graph
 # verb's legend closes on (`counts_floor=`), or the comment's end. Lets (E2f) assert WHAT the clause addresses rather
 # than that a word occurs somewhere in a 3 KB legend.
-clauseOf(){ python3 -c '
+clauseOf(){ "$PYTHON" -c '
 import re,sys
 m=re.search(r"unproven_defs=K\b.*?(?=counts_floor=|-->)",sys.argv[1],re.S)
 sys.stdout.write(m.group(0) if m else "")' "$1"; }
@@ -232,7 +233,7 @@ refusesAsCliOnly(){ case "$( mcpPayload "$1" )" in '__ERROR__:'*'CLI-only'*) pri
 # document whose root leads it; (E2n..E2z) read roots that do not lead (<lego> inside <ctx>, the map's <r> behind a legend
 # that may spell `<r` in prose) and rows below them, so a tag named inside a comment must never be read as the element.
 # Without ATTR: the first <EL …> start tag. With it: ATTR's value on EVERY <EL> row, one per line (left-anchored, as attr).
-elNC(){ python3 -c '
+elNC(){ "$PYTHON" -c '
 import re,sys
 d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S)
 tags=re.findall(r"<"+re.escape(sys.argv[2])+r"(?=[\s/>])[^>]*>",d)
@@ -244,7 +245,7 @@ else:
 
 # Every comment met before the first <EL> start tag outside a comment: the legend a reader has read by the time they
 # reach that element, wherever it sits (the lego legend rides inside <ctx>). Empty when the document has no such element.
-legendBefore(){ python3 -c '
+legendBefore(){ "$PYTHON" -c '
 import re,sys
 d=open(sys.argv[1]).read()
 seen=[]
@@ -686,9 +687,17 @@ echo "=== (E) the residue is COUNTED — candidates found and dropped are report
 BUILD_DIR="$( cd "$( dirname "$BIN" )" && pwd )"
 FLAGS_MK="$BUILD_DIR/CMakeFiles/ripwire.dir/flags.make"
 LINK_TXT="$BUILD_DIR/CMakeFiles/ripwire.dir/link.txt"
-if [ ! -f "$FLAGS_MK" ] || [ ! -f "$LINK_TXT" ]; then
+NINJA_BUILD=0
+INCLUDE_ROOT="$ROOT"
+TMP_NATIVE="$TMP"
+if [ -f "$FLAGS_MK" ] && [ -f "$LINK_TXT" ]; then
+    :
+elif [ -f "$BUILD_DIR/build.ninja" ] && [ -f "$BUILD_DIR/CMakeFiles/rules.ninja" ]; then
+    NINJA_BUILD=1
+else
     echo "cannot find CMake flags/link under $BUILD_DIR — build with CMake first"; exit 2
 fi
+if [ "$NINJA_BUILD" = 0 ]; then
 CXX="$( awk 'NR==1{ print $1; exit }' "$LINK_TXT" )"
 command -v "$CXX" >/dev/null 2>&1 || CXX="$( command -v c++ || command -v clang++ )"
 # The flags parse is SHARED and shlex-based, never `eval`: test/lib/cxxflags.sh carries the CWE-78
@@ -714,11 +723,53 @@ LINK_BODY="$( printf '%s' "$LINK_BODY" | sed -E 's#-o +ripwire##' )"
 LINK_BODY="$( printf '%s' "$LINK_BODY" | sed -E 's#[^ "]*ripwire.dir/src/main.cpp.o##' )"
 LINK_BODY="$( printf '%s' "$LINK_BODY" | tr -d '"' )"
 
+else
+    CXX="${RIPWIRE_CXX_REAL:-}"
+    if [ -z "$CXX" ]; then
+        CXX="$( command -v clang-cl.exe || command -v clang-cl || true )"
+    fi
+    [ -n "$CXX" ] || { echo "cannot find ClangCL in the Ninja build under $BUILD_DIR"; exit 2; }
+    TMP_NATIVE="$( cygpath -m "$TMP" )"
+    INCLUDE_ROOT="$( cygpath -m "$ROOT" )"
+    "$PYTHON" - "$BUILD_DIR/build.ninja" "$TMP/ninja.vars" > "$TMP/ninja.vars" <<'PYNINJAVARS'
+import sys
+from pathlib import Path
+lines = Path( sys.argv[1] ).read_text( errors="replace" ).splitlines()
+def block( marker ):
+    start = next( i for i, line in enumerate( lines ) if marker in line and line.startswith( "build " ) )
+    return [ line for line in lines[ start + 1 : start + 12 ]
+             if line.startswith( "  FLAGS = " ) or line.startswith( "  DEFINES = " )
+             or line.startswith( "  INCLUDES = " ) or line.startswith( "  LINK_FLAGS = " )
+             or line.startswith( "  LINK_LIBRARIES = " ) ]
+print( "[compile]" )
+print( "\n".join( block( "main.cpp.obj" ) ) )
+print( "[link]" )
+print( "\n".join( block( "ripwire.exe:" ) ) )
+PYNINJAVARS
+    read -r -a CXX_FLAGS <<< "$( sed -n '/^\[compile\]$/,/^\[link\]$/ { s/^  FLAGS = //p; }' "$TMP/ninja.vars" )"
+    read -r -a CXX_DEFINES <<< "$( sed -n '/^\[compile\]$/,/^\[link\]$/ { s/^  DEFINES = //p; }' "$TMP/ninja.vars" )"
+    read -r -a CXX_INCLUDES <<< "$( sed -n '/^\[compile\]$/,/^\[link\]$/ { s/^  INCLUDES = //p; }' "$TMP/ninja.vars" )"
+    read -r -a LINK_FLAGS <<< "$( sed -n '/^\[link\]$/,$ { s/^  LINK_FLAGS = //p; }' "$TMP/ninja.vars" )"
+    read -r -a LINK_LIBRARIES <<< "$( sed -n '/^\[link\]$/,$ { s/^  LINK_LIBRARIES = //p; }' "$TMP/ninja.vars" )"
+    for i in "${!LINK_LIBRARIES[@]}"; do LINK_LIBRARIES[$i]="${LINK_LIBRARIES[$i]//\\//}"; done
+    "$PYTHON" - "$BUILD_DIR/build.ninja" "$TMP/link.objects" > "$TMP/link.objects" <<'PYLINKOBJECTS'
+import sys
+from pathlib import Path
+line = next( line for line in Path( sys.argv[1] ).read_text( errors="replace" ).splitlines()
+             if line.startswith( "build ripwire.exe:" ) )
+for token in line.split()[3:]:
+    if token == "|":
+        break
+    if "main.cpp.obj" not in token:
+        print( token.replace( "\\", "/" ) )
+PYLINKOBJECTS
+    mapfile -t LINK_OBJECTS < "$TMP/link.objects"
+fi
 cat > "$TMP/decltodef_unit.cpp" <<EOF
 // generated by test/decltodefcheck.sh — the residue count at the seam that produces it.
-#include "$ROOT/src/model.h"
-#include "$ROOT/src/ingest.h"
-#include "$ROOT/src/graph.h"
+#include "$INCLUDE_ROOT/src/model.h"
+#include "$INCLUDE_ROOT/src/ingest.h"
+#include "$INCLUDE_ROOT/src/graph.h"
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -769,7 +820,23 @@ EOF
 
 UNIT_OK=1
 # compiled+linked FROM the build dir: link.txt's object and library paths are relative to it.
-if ( cd "$BUILD_DIR" && "$CXX" "${CXX_FLAGS[@]}" "${CXX_DEFINES[@]}" "${CXX_INCLUDES[@]}" -c "$TMP/decltodef_unit.cpp" -o "$TMP/unit.o" ) 2>"$TMP/cc.err"; then
+if [ "$NINJA_BUILD" = 1 ]; then
+    COMPILE_UNIT=( /TP "${CXX_FLAGS[@]}" "${CXX_DEFINES[@]}" "${CXX_INCLUDES[@]}" /c "$TMP_NATIVE/decltodef_unit.cpp" /Fo"$TMP_NATIVE/unit.o" )
+else
+    COMPILE_UNIT=( "${CXX_FLAGS[@]}" "${CXX_DEFINES[@]}" "${CXX_INCLUDES[@]}" -c "$TMP/decltodef_unit.cpp" -o "$TMP/unit.o" )
+fi
+if [ "$NINJA_BUILD" = 1 ]; then
+    if ( cd "$BUILD_DIR" && MSYS_NO_PATHCONV=1 "$CXX" "${COMPILE_UNIT[@]}" ) 2>"$TMP/cc.err"; then
+        :
+    else
+        false
+    fi
+elif ( cd "$BUILD_DIR" && "$CXX" "${COMPILE_UNIT[@]}" ) 2>"$TMP/cc.err"; then
+    :
+else
+    false
+fi
+if [ "$?" -eq 0 ]; then
     ok "(E) residue driver compiles against the ripwire flags"
 else
     no "(E) residue driver failed to compile — the residue count is not reported at the resolver seam"
@@ -778,14 +845,28 @@ else
 fi
 # shellcheck disable=SC2086
 if [ "$UNIT_OK" = 1 ]; then
-    if ( cd "$BUILD_DIR" && "$CXX" "${CXX_FLAGS[@]}" "$TMP/unit.o" $LINK_BODY -o "$TMP/unit" ) 2>"$TMP/ld.err"; then
+    if [ "$NINJA_BUILD" = 1 ]; then
+        LINK_UNIT=( "${CXX_FLAGS[@]}" "$TMP_NATIVE/unit.o" "${LINK_OBJECTS[@]}" /Fe:"$TMP_NATIVE/unit.exe" /link "${LINK_FLAGS[@]}" "${LINK_LIBRARIES[@]}" )
+        if ( cd "$BUILD_DIR" && MSYS_NO_PATHCONV=1 "$CXX" "${LINK_UNIT[@]}" ) 2>"$TMP/ld.err"; then
+            :
+        else
+            false
+        fi
+    elif ( cd "$BUILD_DIR" && "$CXX" "${CXX_FLAGS[@]}" "$TMP/unit.o" $LINK_BODY -o "$TMP/unit" ) 2>"$TMP/ld.err"; then
+        :
+    else
+        false
+    fi
+    if [ "$?" -eq 0 ]; then
         ok "(E) residue driver links against the ripwire objects"
     else
         no "(E) residue driver failed to link"; sed -n '1,25p' "$TMP/ld.err"; UNIT_OK=0
     fi
 fi
 if [ "$UNIT_OK" = 1 ]; then
-    "$TMP/unit" "$TMP/ns" "$TMP/hdr" >"$TMP/unit.out" 2>&1
+    UNIT_BIN="$TMP/unit"
+    [ "$NINJA_BUILD" = 1 ] && UNIT_BIN="$TMP/unit.exe"
+    "$UNIT_BIN" "$TMP/ns" "$TMP/hdr" >"$TMP/unit.out" 2>&1
     urc=$?
     grep -E '^  (PASS|FAIL) ' "$TMP/unit.out" || true
     if [ "$urc" -eq 0 ] && grep -q '^UNIT ALL PASS$' "$TMP/unit.out"; then
@@ -1541,7 +1622,7 @@ cp -R "$TMP/naamb" "$TMP/naamb_bare" && cp -R "$TMP/dctl" "$TMP/na_ctl" || no "(
 
 # naDisclosure <stderr-file> — the stderr line carrying unproven_defs=, from that key on, when it comes BEFORE the ambiguity
 # refusal (or there is no refusal); `AFTER: …` when it follows the refusal; empty when there is no such line.
-naDisclosure(){ python3 -c '
+naDisclosure(){ "$PYTHON" -c '
 import sys
 lines=open(sys.argv[1],errors="replace").read().splitlines()
 d=[i for i,l in enumerate(lines) if "unproven_defs=" in l]

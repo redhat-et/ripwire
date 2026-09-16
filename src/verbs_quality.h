@@ -1749,7 +1749,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                 return sourceByFile[fileId];
             }
             sourceLoaded[fileId] = 1;
-            std::FILE* file = std::fopen( diskPath( ing, fileId ).c_str(), "rb" );
+            std::FILE* file = rw::compat::rw_fopen_utf8( diskPath( ing, fileId ).c_str(), "rb" );
             if( !file )
             {
                 return sourceByFile[fileId];

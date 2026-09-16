@@ -11,6 +11,20 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 SK="$ROOT/skills"
+GATE_BASH="${RIPWIRE_BASH:-bash}"
+make_dangling_link()
+{
+    case "${OSTYPE:-}" in
+        msys*|cygwin*|mingw*)
+            if command -v cygpath >/dev/null 2>&1 && command -v cmd.exe >/dev/null 2>&1; then
+                targetNative="$( cygpath -w "$1" )"
+                destNative="$( cygpath -w "$2" )"
+                MSYS_NO_PATHCONV=1 cmd.exe /d /c mklink /D "$destNative" "$targetNative" >/dev/null 2>&1
+                return $?
+            fi ;;
+    esac
+    ln -sfn "$1" "$2"
+}
 fail=0
 ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
 no(){ echo "  FAIL  $1"; fail=1; }
@@ -21,6 +35,14 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 # Each invocation below owns its HOME; inherited agent overrides must not escape it.
 unset CODEX_HOME AGENTS_HOME HERMES_HOME
 DST="$TMP/skills"
+count_skill_files()
+{
+    local count=0 link
+    for link in "$1"/ripwire-*; do
+        [ -e "$link/SKILL.md" ] && count=$(( count + 1 ))
+    done
+    printf '%s' "$count"
+}
 
 # ---- 1) install.sh deploys EVERY user-facing shipped skill (the deployment-drift catch) ----
 # 2026-09-06 (stranger audit): a skill whose SKILL.md front matter says `audience: contributor` is about
@@ -30,7 +52,7 @@ DST="$TMP/skills"
 shippedAll=$( ls -d "$SK"/ripwire-*/ 2>/dev/null | wc -l | tr -d ' ' )
 contributorSkills=$( grep -l '^audience: contributor' "$SK"/ripwire-*/SKILL.md 2>/dev/null | wc -l | tr -d ' ' )
 shipped=$(( shippedAll - contributorSkills ))
-bash "$SK/install.sh" "$DST" >/dev/null 2>&1
+"$GATE_BASH" "$SK/install.sh" "$DST" >/dev/null 2>&1
 live=0; for l in "$DST"/ripwire-*; do [ -e "$l" ] && live=$(( live + 1 )); done
 { [ "$shipped" -gt 0 ] && [ "$live" -eq "$shipped" ]; } \
     && ok "install.sh deploys all $shipped user-facing shipped skills (live=$live; $contributorSkills contributor-only held back)" \
@@ -45,18 +67,18 @@ grep -q 'skill=ripwire-opt-remarks' "$DST/.ripwire-manifest-v1" 2>/dev/null \
     && no "(1b) the manifest declares the contributor-only skill that was not linked (manifest parity broken)" \
     || ok "(1b) the manifest declares exactly the linked set (no contributor-only entry)"
 CONTRIB="$TMP/skills-contrib"
-bash "$SK/install.sh" --contributor "$CONTRIB" >/dev/null 2>&1
+"$GATE_BASH" "$SK/install.sh" --contributor "$CONTRIB" >/dev/null 2>&1
 [ -e "$CONTRIB/ripwire-opt-remarks" ] \
     && ok "(1c) --contributor activates the contributor-only skill too ($shippedAll linked)" \
     || no "(1c) --contributor did not activate ripwire-opt-remarks"
-bash "$SK/install.sh" "$CONTRIB" >/dev/null 2>&1
+"$GATE_BASH" "$SK/install.sh" "$CONTRIB" >/dev/null 2>&1
 [ ! -e "$CONTRIB/ripwire-opt-remarks" ] && [ ! -L "$CONTRIB/ripwire-opt-remarks" ] \
     && ok "(1c) a re-run without --contributor prunes the contributor-only link (a setup that stops being one does not keep it)" \
     || no "(1c) the contributor-only link survived a re-run without --contributor"
 
 # ---- 2) PRUNE removes a stale/dangling skill (the deleted-skill catch) ----
-ln -sfn "$SK/ripwire-does-not-exist/" "$DST/ripwire-ghost"     # a dangling symlink (deleted skill)
-bash "$SK/install.sh" "$DST" >/dev/null 2>&1                    # re-run: must prune it
+make_dangling_link "$SK/ripwire-does-not-exist/" "$DST/ripwire-ghost"     # a dangling link (deleted skill)
+"$GATE_BASH" "$SK/install.sh" "$DST" >/dev/null 2>&1                    # re-run: must prune it
 if [ -e "$DST/ripwire-ghost" ] || [ -L "$DST/ripwire-ghost" ]; then
     no "install.sh did NOT prune a dangling ripwire-ghost symlink (stale skills linger)"
 else
@@ -65,8 +87,8 @@ fi
 
 # ---- 2b) AGENT HOMES: default Claude + explicit Codex installs are discoverable in isolation ----
 CLAUDE_HOME="$TMP/claude-home"
-HOME="$CLAUDE_HOME" bash "$SK/install.sh" >/dev/null 2>&1
-claudeFound=$( find -L "$CLAUDE_HOME/.claude/skills" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null | wc -l | tr -d ' ' )
+HOME="$CLAUDE_HOME" "$GATE_BASH" "$SK/install.sh" >/dev/null 2>&1
+claudeFound=$( count_skill_files "$CLAUDE_HOME/.claude/skills" )
 [ "$claudeFound" -eq "$shipped" ] \
     && ok "default install exposes all $shipped skills to Claude discovery" \
     || no "default install exposed $claudeFound of $shipped skills to Claude discovery"
@@ -74,8 +96,8 @@ claudeFound=$( find -L "$CLAUDE_HOME/.claude/skills" -mindepth 2 -maxdepth 2 -na
 AGENTS_ROOT="$TMP/agents-root"
 CODEX_ROOT="$TMP/codex-root"
 CODEX_FALLBACK_HOME="$TMP/codex-fallback-home"
-HOME="$CODEX_FALLBACK_HOME" AGENTS_HOME="$AGENTS_ROOT" bash "$SK/install.sh" --codex >/dev/null 2>&1
-codexFound=$( find -L "$AGENTS_ROOT/skills" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null | wc -l | tr -d ' ' )
+HOME="$CODEX_FALLBACK_HOME" AGENTS_HOME="$AGENTS_ROOT" "$GATE_BASH" "$SK/install.sh" --codex >/dev/null 2>&1
+codexFound=$( count_skill_files "$AGENTS_ROOT/skills" )
 [ "$codexFound" -eq "$shipped" ] \
     && ok "--codex exposes all $shipped skills under AGENTS_HOME/skills" \
     || no "--codex exposed $codexFound of $shipped skills under AGENTS_HOME/skills"
@@ -85,7 +107,7 @@ codexFound=$( find -L "$AGENTS_ROOT/skills" -mindepth 2 -maxdepth 2 -name SKILL.
 
 # Codex hook install is explicit, composes with the skill destination, and uses Codex's native
 # hooks.json schema through the bundled adapter. It must never touch Claude settings.
-HOME="$CODEX_FALLBACK_HOME" AGENTS_HOME="$AGENTS_ROOT" bash "$SK/install.sh" --codex --hook >/dev/null 2>&1
+HOME="$CODEX_FALLBACK_HOME" AGENTS_HOME="$AGENTS_ROOT" "$GATE_BASH" "$SK/install.sh" --codex --hook >/dev/null 2>&1
 CODEX_HOOKS="$CODEX_FALLBACK_HOME/.codex/hooks.json"
 if [ -f "$CODEX_HOOKS" ]; then
     jq -e '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-codex-nudge")) |
@@ -120,7 +142,7 @@ ADAPTER_BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 ADAPTER_JSON='{"session_id":"codex-adapter","cwd":"'"$ROOT"'","tool_name":"Grep","tool_input":{"pattern":"releaseTag|buildTag","path":"."}}'
 ADAPTER_ERR="$TMP/adapter.err"
 ADAPTER_OUT="$( printf '%s' "$ADAPTER_JSON" | PATH="$( dirname "$ADAPTER_BIN" ):$PATH" TMPDIR="$ADAPTER_TMP" \
-    RIPWIRE_HOME="$ADAPTER_TMP" RIPWIRE_METER_FIXTURE=1 bash "$CODEX_ADAPTER" 2>"$ADAPTER_ERR" )"
+    RIPWIRE_HOME="$ADAPTER_TMP" RIPWIRE_METER_FIXTURE=1 "$GATE_BASH" "$CODEX_ADAPTER" 2>"$ADAPTER_ERR" )"
 ADAPTER_RC=$?
 [ "$ADAPTER_RC" -eq 0 ] && [ -z "$ADAPTER_OUT" ] \
     && ok "Codex adapter passes the retired PreToolUse path through as silence, exit 0" \
@@ -129,8 +151,8 @@ ADAPTER_RC=$?
     && ok "Codex adapter writes nothing to the hooked call's stderr" \
     || no "Codex adapter leaked stderr: $( cat "$ADAPTER_ERR" )"
 
-HOME="$CODEX_FALLBACK_HOME" CODEX_HOME="$CODEX_ROOT" bash "$SK/install.sh" --codex-legacy >/dev/null 2>&1
-legacyFound=$( find -L "$CODEX_ROOT/skills" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null | wc -l | tr -d ' ' )
+HOME="$CODEX_FALLBACK_HOME" CODEX_HOME="$CODEX_ROOT" "$GATE_BASH" "$SK/install.sh" --codex-legacy >/dev/null 2>&1
+legacyFound=$( count_skill_files "$CODEX_ROOT/skills" )
 [ "$legacyFound" -eq "$shipped" ] \
     && ok "--codex-legacy retains the CODEX_HOME/skills compatibility path" \
     || no "--codex-legacy exposed $legacyFound of $shipped skills under CODEX_HOME/skills"
@@ -218,7 +240,7 @@ if [ -n "$BIN" ] && [ -x "$BIN" ]; then
     # with an intentionally minimal PATH.
     codexCommand=$( sed -n 's/^command = "\([^"]*\)"$/\1/p' "$TMP/wrap-codex" | head -1 )
     case "$codexCommand" in
-        /*) ;;
+        /*|[A-Za-z]:[/\\]* ) ;;
         *) no "wrap codex MCP command is not absolute (Codex Desktop may not resolve shell PATH): $codexCommand" ;;
     esac
     if [ -x "$codexCommand" ]; then
@@ -257,7 +279,7 @@ D_HOME="$TMP/dup-home"; mkdir -p "$D_HOME/.claude"
 cat >"$D_HOME/.claude/settings.json" <<'DUPJSON'
 {"hooks":{"PreToolUse":[{"matcher":"Read|Glob|Grep|Bash|mcp__ripwire__","hooks":[{"type":"command","command":"/opt/homebrew/share/ripwire/hooks/ripwire-nudge.sh"}]}],"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"/opt/homebrew/share/ripwire/hooks/ripwire-nudge.sh --session-start"}]}],"UserPromptSubmit":[{"matcher":"*","hooks":[{"type":"command","command":"/opt/homebrew/share/ripwire/hooks/ripwire-claude-route.sh"}]}]}}
 DUPJSON
-HOME="$D_HOME" bash "$SK/install.sh" --hook >"$TMP/dup.out" 2>&1
+HOME="$D_HOME" "$GATE_BASH" "$SK/install.sh" --hook >"$TMP/dup.out" 2>&1
 DUPSET="$D_HOME/.claude/settings.json"
 if jq -e . "$DUPSET" >/dev/null 2>&1
 then
@@ -281,7 +303,7 @@ jq -e --arg m "$hookMatcherExpected" 'any((.hooks.PreToolUse // [])[]?; (any(.ho
 # walks away believing a hook is armed. Temp HOME: the refusal fires after linking, so this must never
 # run against the real ~/.agents.
 OC_HOME="$TMP/openclaw-hook-home"; mkdir -p "$OC_HOME"
-HOME="$OC_HOME" bash "$SK/install.sh" --openclaw --hook >/dev/null 2>&1
+HOME="$OC_HOME" "$GATE_BASH" "$SK/install.sh" --openclaw --hook >/dev/null 2>&1
 OC_HOOK_STATUS=$?
 { [ "$OC_HOOK_STATUS" -eq 2 ]; } \
     && ok "(E) --openclaw --hook fails with exit status 2 (no shell hook slot for the openclaw target)" \

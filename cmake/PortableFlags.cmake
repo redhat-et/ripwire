@@ -44,6 +44,12 @@ option(RIPWIRE_PRETEND_LINUX
 # clang >= 17 (AppleClang 16, the Xcode 16.2 the release pins), and on clang 16 a baseline x86-64 binary
 # running strkern.h's scalar twins. test/portablebuildcheck.sh #2d-#2g hold both directions.
 set(RIPWIRE_TARGET_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+if(NOT RIPWIRE_TARGET_ARCH AND DEFINED CMAKE_CXX_COMPILER_ARCHITECTURE_ID)
+  set(RIPWIRE_TARGET_ARCH "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
+endif()
+if(RIPWIRE_TARGET_ARCH MATCHES "^(x64|X64|amd64|AMD64)$")
+  set(RIPWIRE_TARGET_ARCH "x86_64")
+endif()
 if(APPLE AND CMAKE_OSX_ARCHITECTURES)
   list(LENGTH CMAKE_OSX_ARCHITECTURES _ripwire_osx_arch_count)
   if(_ripwire_osx_arch_count EQUAL 1)
@@ -71,7 +77,22 @@ if(RIPWIRE_TARGET_ARCH MATCHES "^(x86_64|x86_64h|amd64|AMD64)$")
 endif()
 
 if(RIPWIRE_NATIVE)
-  set(RIPWIRE_ARCH_FLAGS -O3 -march=native -ffast-math -fno-finite-math-only)
+  if(MSVC)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      set(RIPWIRE_ARCH_FLAGS /O3 /clang:-march=native /fp:precise /permissive- /utf-8)
+    else()
+      set(RIPWIRE_ARCH_FLAGS /O2 /fp:precise /permissive- /utf-8)
+    endif()
+  else()
+    set(RIPWIRE_ARCH_FLAGS -O3 -march=native -ffast-math -fno-finite-math-only)
+  endif()
+elseif(MSVC AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND RIPWIRE_IS_X86_64)
+  # ClangCL accepts the MSVC frontend flags but still needs the LLVM architecture level explicitly;
+  # keeping this branch ahead of the generic MSVC one is what enables strkern.h's AVX2 path on Windows.
+  set(RIPWIRE_ARCH_FLAGS /O2 /clang:-march=x86-64-v3 /fp:precise /permissive- /utf-8)
+elseif(MSVC)
+  # MSVC compiler flags: precise math (preserves isnan/isfinite), conformant C++ mode, UTF-8 source/exec charset
+  set(RIPWIRE_ARCH_FLAGS /O2 /fp:precise /permissive- /utf-8)
 elseif(RIPWIRE_IS_APPLE_SILICON)
   set(RIPWIRE_ARCH_FLAGS -O2 -mcpu=apple-m1 -ffast-math -fno-finite-math-only)
 elseif(RIPWIRE_IS_X86_64)

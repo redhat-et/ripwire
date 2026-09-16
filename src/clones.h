@@ -350,7 +350,7 @@ inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minToken
         {
             continue;
         }
-        std::FILE* fp = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
+        std::FILE* fp = rw::compat::rw_fopen_utf8( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
         if( !fp )
         {
             continue;
@@ -647,7 +647,7 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
         {
             continue;
         }
-        std::FILE* fp = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
+        std::FILE* fp = rw::compat::rw_fopen_utf8( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
         if( !fp )
         {
             continue; // degrade: unreadable file just contributes no candidates (never a crash)

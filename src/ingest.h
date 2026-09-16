@@ -14,6 +14,7 @@
 // not thread-safe, so multithreading would need one parser per worker (deferred).
 
 #include "model.h"
+#include "infra/platform_compat.h"
 
 #include <atomic>       // AstQueryGroup::ellipsisCappedOut — a summed counter across the parallel file walk
 #include <cctype>
@@ -234,7 +235,7 @@ inline bool looksBinary( std::string_view bytes ) noexcept
 constexpr std::string_view kCrawlSkipDirs[] = {
     ".git", ".claude", ".hg", ".svn", "node_modules", "vendor", "third_party",
     ".cache", "build", "dist", "out", "target", ".venv", "venv", "__pycache__",
-    ".idea", ".vscode",
+    ".idea", ".vscode", ".worktrees", ".worktrees-clean", "worktrees",
     // CMake / compiler-id build dirs (generated stubs, not source — break --around=main etc.)
     "asan", "build_prof", "CMakeFiles",
     // Generated output captures (docs/captures/ here): a doc that quotes every verb's output out-scores
@@ -315,16 +316,25 @@ inline bool withinCanonicalRoot( std::string_view real, std::string_view rootRea
     }
     // "/" already ends in the separator; every other root needs the next byte to BE one, or this is a sibling
     // whose name merely starts with the root's ("/x/repo" vs "/x/repo-evil").
-    return rootReal.back() == '/' || real[ rootReal.size() ] == '/';
+    return rootReal.back() == '/' || rootReal.back() == '\\' || real[ rootReal.size() ] == '/' || real[ rootReal.size() ] == '\\';
 }
 
 // The canonical spelling of a crawl root, computed ONCE per walk. Falls back to the literal argument when the
 // root will not resolve (fail closed: an unresolved root matches fewer targets, never more).
 inline std::string canonicalCrawlRoot( std::string_view rootDir )
 {
-    const std::string dir( rootDir.empty() ? std::string_view( "." ) : rootDir );
+    const std::string requested( rootDir.empty() ? std::string_view( "." ) : rootDir );
+#if defined( _WIN32 )
+    const std::string dir = rw::compat::rw_windows_path_from_msys( requested );
+#else
+    const std::string& dir = requested;
+#endif
     char              resolved[ PATH_MAX ];
+#if defined( _WIN32 )
+    return rw::compat::rw_realpath( dir.c_str(), resolved ) != nullptr ? std::string( resolved ) : dir;
+#else
     return ::realpath( dir.c_str(), resolved ) != nullptr ? std::string( resolved ) : dir;
+#endif
 }
 
 // Does `path` (as the walk spelled it) still live inside `rootReal` once every link on it is resolved?
@@ -363,7 +373,7 @@ inline bool crawlPathStaysInRoot( const std::string& path, const std::string& ro
 IngestResult ingest( const char* rootDir, const std::vector<std::string>& excludeSubstr = {},
                      std::string_view cacheFile = {}, std::size_t maxFileBytes = kDefaultMaxFileBytes,
                      bool captureValueUses = true, std::string_view excludeLabel = {},
-                     bool respectGitignore = true );
+                     bool respectGitignore = true, std::string_view cacheDir = {} );
 
 // ---- index-identity disclosure (the two functions behind --doctor's index-cache row) ----
 //

@@ -26,6 +26,7 @@
 #include "quality.h"            // computeSnapshot/computeDelta + writeBaseline + gitHeadSha/computeHeadSnapshot — the quality_delta/quality_baseline verbs reuse the exact CLI logic
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — no-op in release; the visible line on a watcher-degrade path
 #include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/platform_compat.h"
 
 #include <sys/stat.h>
 #include <sys/time.h>  // struct timespec for a non-blocking kevent poll
@@ -108,12 +109,16 @@ namespace mcpdetail
     // nanosecond mtime of a path, or -1 if it can't be stat'd. The staleness signal for the in-memory index.
     inline long long mtimeOf( const std::string& p )
     {
+#if defined( _WIN32 )
+        return rw::compat::rw_file_times_of( p ).mtimeNs;
+#else
         struct stat st;
         if( ::stat( p.c_str(), &st ) != 0 )
         {
             return -1;
         }
         return mtimeNsOf( st );
+#endif
     }
 
     // ctime-ns out of a filled `struct stat`, spelled per platform exactly like mtimeNsOf above. POSIX
@@ -137,12 +142,17 @@ namespace mcpdetail
     struct FileStat { long long mtimeNs; long long sizeBytes; long long ctimeNs; };
     inline FileStat statOf( const std::string& p )
     {
+#if defined( _WIN32 )
+        const rw::compat::RwFileTimes times = rw::compat::rw_file_times_of( p );
+        return { times.mtimeNs, times.sizeBytes, times.changeTimeNs };
+#else
         struct stat st;
         if( ::stat( p.c_str(), &st ) != 0 )
         {
             return { -1, -1, -1 };
         }
         return { mtimeNsOf( st ), (long long)st.st_size, ctimeNsOf( st ) };
+#endif
     }
 
     // ALL directories under root (root itself included) → their mtimes, pruning the same noise/vendor/build
@@ -353,7 +363,12 @@ namespace mcpdetail
     inline std::string readFileBytes( const std::string& path, bool& readOk )
     {
         readOk = false;
-        std::FILE* in = std::fopen( path.c_str(), "rb" );
+        std::FILE* in = nullptr;
+#if defined( _WIN32 )
+        in = rw::compat::rw_fopen_utf8( path, "rb" );
+#else
+        in = rw::compat::rw_fopen_utf8( path.c_str(), "rb" );
+#endif
         if( !in )
         {
             return {};
@@ -1098,8 +1113,14 @@ inline void maybePrefetchHeadSnapshot( const std::string& root, std::size_t file
     std::thread( [ root, timingsOn ]()
     {
         struct FlagGuard { ~FlagGuard(){ mcpPrefetchInFlight().store( false, std::memory_order_release ); } } guard;
-        try   { (void)rw::quality::computeHeadSnapshot( root ); }      // side effect: warm the sha-keyed qsnap (atomic publish)
-        catch( ... ) { /* optional work — drop silently (§2b rule 3) */ }
+        try
+        {
+            (void)rw::quality::computeHeadSnapshot( root );
+        }
+        catch( ... )
+        {
+            /* optional work — drop silently (§2b rule 3) */
+        }
         if( timingsOn ) { rw::emitTo( stderr, "ripwire-prefetch done root={}\n", root.c_str() ); std::fflush( stderr ); }
     } ).detach();
 }

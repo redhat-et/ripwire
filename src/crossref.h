@@ -462,6 +462,7 @@ struct StreamBlobStats
     }
 };
 
+/// Streams requested git objects in one framed batch while bounding buffered blob memory.
 template<class OnBlob>
 inline void streamBlobs( const std::string& root, const std::vector<std::string>& shas, OnBlob onBlob,
                          StreamBlobStats* stats = nullptr )
@@ -478,7 +479,7 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
 
     const std::string listPath = quality::cacheDirLadder() + "/ripwire-crossref-" + std::to_string( ::getpid() ) + ".shas";
     {
-        std::FILE* lf = std::fopen( listPath.c_str(), "wb" );
+        std::FILE* lf = rw::compat::rw_fopen_utf8( listPath.c_str(), "wb" );
         if( !lf )
         {
             st.startFailed = true;
@@ -689,6 +690,7 @@ struct RefInfo
 // out.size(): a filter matching only the checked-out branch has SELECTED something (the answer is "nothing
 // but the ref you are on"), while a filter matching no branch name at all has selected nothing and must
 // refuse rather than report refs="0" — which reads as "no branch carries stray work".
+/// Enumerates local branches in deterministic order and excludes the checked-out ref from stray-content results.
 inline std::vector<RefInfo> enumerateRefs( const std::string& root, std::string_view filter, const std::string& headSha,
                                            std::size_t* filterNameHits = nullptr )
 {
@@ -814,11 +816,7 @@ inline void parallelIndexed( std::size_t count, Body body )
         return;
     }
 
-    std::size_t hwThreadCount = std::thread::hardware_concurrency();
-    if( hwThreadCount == 0 )
-    {
-        hwThreadCount = 1;
-    }
+    const std::size_t hwThreadCount = rw::compat::rw_effective_hardware_concurrency();
     const std::size_t workerCount = std::min( { hwThreadCount, count, kMaxGitWorkers } );
     if( workerCount <= 1 )
     {
@@ -1778,7 +1776,7 @@ inline EvalReport evalStray( const std::string& root, const std::string& labelsP
 
     std::string bytes;
     {
-        std::FILE* fp = std::fopen( labelsPath.c_str(), "rb" );
+        std::FILE* fp = rw::compat::rw_fopen_utf8( labelsPath.c_str(), "rb" );
         if( !fp ) { rep.ok = false; return rep; }
         char        buf[ 65536 ];
         std::size_t n = 0;

@@ -15,3 +15,7 @@
 # unusually well, and shrinking those headers to win a byte count would destroy the most useful thing in
 # the files.
 test/*.sh linguist-detectable=false
+
+# Frozen evaluation packs are length-prefixed binary artifacts; Git must not rewrite their LF bytes on Windows.
+bench/recalleval/*.mdpack -text
+bench/recalleval/*.srcpack -text

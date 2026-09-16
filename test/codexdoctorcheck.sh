@@ -4,6 +4,17 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+case "${OS:-}:$( uname -s 2>/dev/null || true )" in
+    Windows_NT:*|*:MINGW*|*:MSYS*|*:CYGWIN*)
+        PYTHON_NATIVE="${PYTHON_NATIVE:-${RIPWIRE_PYTHON:-python}}"
+        PY_ROOT="$ROOT"; PY_BIN="$BIN"
+        if command -v cygpath >/dev/null 2>&1; then
+            PY_ROOT="$( cygpath -w "$ROOT" )"
+            PY_BIN="$( cygpath -w "$BIN" )"
+        fi
+        MSYS_NO_PATHCONV=1 exec "$PYTHON_NATIVE" "$PY_ROOT/test/codexdoctorcheck_windows.py" "$PY_BIN"
+        ;;
+esac
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0

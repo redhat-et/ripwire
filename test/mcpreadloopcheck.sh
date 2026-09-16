@@ -86,7 +86,8 @@ def feed( binPath, args, stdinBytes, outPath, errPath, timeoutSec = 300 ):
 
 def torn( binPath, root, outPath, errPath ):
     """(e): send a request in pieces with the newline held back. Reports what arrived when."""
-    import selectors
+    import queue
+    import threading
     head = ( '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' ).encode()
     piece1 = ( '{"method":"tools/call","params":{"name":"grep","arguments":'
                '{"path":"' + root + '","pattern":"perimeter"' ).encode()
@@ -96,7 +97,17 @@ def torn( binPath, root, outPath, errPath ):
     with open( errPath, "wb" ) as fe:
         p = subprocess.Popen( [ binPath, "--mcp" ], stdin = subprocess.PIPE,
                               stdout = subprocess.PIPE, stderr = fe )
-        sel = selectors.DefaultSelector(); sel.register( p.stdout, selectors.EVENT_READ )
+        chunks = queue.Queue()
+
+        def read_stdout():
+            while True:
+                chunk = os.read( p.stdout.fileno(), 65536 )
+                if not chunk:
+                    chunks.put( None )
+                    return
+                chunks.put( chunk )
+
+        reader = threading.Thread( target = read_stdout, daemon = True ); reader.start()
         got = b""
 
         def drain( budgetSec, wantLines = None ):
@@ -108,10 +119,12 @@ def torn( binPath, root, outPath, errPath ):
             deadline = time.monotonic() + budgetSec
             while time.monotonic() < deadline:
                 if wantLines is not None and got.count( b"\n" ) >= wantLines: return
-                for _ in sel.select( timeout = min( 0.1, max( 0.0, deadline - time.monotonic() ) ) ):
-                    chunk = os.read( p.stdout.fileno(), 65536 )
-                    if not chunk: return
-                    got += chunk
+                try:
+                    chunk = chunks.get( timeout = min( 0.1, max( 0.0, deadline - time.monotonic() ) ) )
+                except queue.Empty:
+                    continue
+                if chunk is None: return
+                got += chunk
 
         p.stdin.write( head ); p.stdin.flush(); drain( 120.0, 1 )   # initialize answers -> 1 line
         linesAfterInit = got.count( b"\n" )
@@ -121,7 +134,13 @@ def torn( binPath, root, outPath, errPath ):
         p.stdin.write( piece3 ); p.stdin.flush(); drain( 120.0, linesAfterInit + 1 )
         linesAfterNewline = got.count( b"\n" )
         p.stdin.close()
-        rest = p.stdout.read(); got += rest
+        reader.join( timeout = 120.0 )
+        while True:
+            try:
+                chunk = chunks.get_nowait()
+            except queue.Empty:
+                break
+            if chunk is not None: got += chunk
         code = p.wait()
     open( outPath, "wb" ).write( got )
     err = open( errPath, "rb" ).read().decode( "utf-8", "replace" )

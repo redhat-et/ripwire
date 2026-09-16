@@ -288,6 +288,7 @@ inline void foldHunk( HunkBuffer& hunk, HashMap<std::string, std::uint32_t>& vot
 // difference that matters here: --no-renames is what turns a file rename into a delete+add of every line,
 // which is exactly the shape a MOVE has and a name change does not. A moved file therefore contributes hunks
 // whose lines pair perfectly and differ nowhere, so it votes for nothing; that is the desired behaviour.
+/// Mines deterministic rename-pair evidence from git history without inferring similarity-based renames.
 inline RenameHarvest mineRenamePairs( const std::string& root )
 {
     RenameHarvest harvest;

@@ -94,7 +94,8 @@ inline std::string lexicalNormalize( std::string_view path )
     // `segs.back() != ".."` guard was invariant-true and is gone with it. `rootLen` is the prefix a `..`
     // may never eat — 1 for an absolute path, 0 for a relative one — which is what makes the two degrade
     // rules ("no-op at the filesystem root" vs "escaping above the base is unsound") one comparison.
-    const bool  isAbsolute = ( !path.empty() && path.front() == '/' );
+    const auto  isSlash    = []( char c ) noexcept { return c == '/' || c == '\\'; };
+    const bool  isAbsolute = ( !path.empty() && isSlash( path.front() ) );
     std::string out;
     out.reserve( path.size() );
     if( isAbsolute )
@@ -108,7 +109,7 @@ inline std::string lexicalNormalize( std::string_view path )
     {
         // consume one '/'-delimited segment [i, j)
         std::size_t j = i;
-        while( j < path.size() && path[j] != '/' )
+        while( j < path.size() && !isSlash( path[j] ) )
         {
             ++j;
         }
@@ -122,7 +123,7 @@ inline std::string lexicalNormalize( std::string_view path )
         {
             if( out.size() > rootLen )
             {
-                const std::size_t cut = out.rfind( '/' );                       // pop the previous real segment
+                const std::size_t cut = out.find_last_of( "/\\" );              // pop the previous real segment
                 out.resize( ( cut == std::string::npos || cut < rootLen ) ? rootLen : cut );
             }
             else if( isAbsolute )                       { /* `..` at the filesystem root is a no-op */ }
@@ -140,7 +141,7 @@ inline std::string lexicalNormalize( std::string_view path )
             out.append( seg );
         }
 
-        i = ( j < path.size() ) ? j + 1 : j;             // skip the '/'
+        i = ( j < path.size() ) ? j + 1 : j;             // skip the path separator
     }
     return out;
 }
@@ -212,7 +213,7 @@ inline IncludeLang includeLangOf( std::string_view path ) noexcept
 // The includer's directory (everything before the last '/'; empty when the file sits at the crawl root).
 inline std::string_view includerDir( std::string_view includerPath ) noexcept
 {
-    const std::size_t sl = includerPath.rfind( '/' );
+    const std::size_t sl = includerPath.find_last_of( "/\\" );
     return ( sl == std::string_view::npos ) ? std::string_view{} : includerPath.substr( 0, sl );
 }
 
@@ -526,6 +527,26 @@ inline std::uint32_t resolveTsImport( std::string_view includerPath, std::string
     };
     // FIRST an exact hit (specifier already has an extension, e.g. `./x.js`), then extension-appended, then index.
     probe( std::string( target ) );
+    // TypeScript permits a runtime `.js`/`.jsx` specifier to name its typed source file. Appending `.ts` to
+    // `api.js` would probe the wrong spelling (`api.js.ts`); substitute the runtime suffix while keeping the
+    // exact probe above. All candidates still share the unique-or-degrade accumulator, so a tree containing
+    // both `api.ts` and `api.js` remains unresolved rather than guessing which module the author meant.
+    for( const std::string_view runtimeExt : { std::string_view{ ".js" }, std::string_view{ ".jsx" },
+                                                std::string_view{ ".mjs" }, std::string_view{ ".cjs" } } )
+    {
+        if( target.size() > runtimeExt.size() && target.compare( target.size() - runtimeExt.size(), runtimeExt.size(), runtimeExt ) == 0 )
+        {
+            const std::string stem( target.substr( 0, target.size() - runtimeExt.size() ) );
+            probe( stem + ".ts" );
+            probe( stem + ".tsx" );
+            probe( stem + ".d.ts" );
+            for( const std::string_view indexRel : kIndexRel )
+            {
+                probe( stem + std::string( indexRel ) );
+            }
+            break;
+        }
+    }
     for( std::string_view e : kFileExt )
     {
         probe( std::string( target ) + std::string( e ) );
@@ -682,7 +703,7 @@ inline std::uint32_t resolveRustImport( std::string_view includerPath, std::stri
 inline std::string readConfigBytes( const std::string& path )
 {
     std::string out;
-    std::FILE*  f = std::fopen( path.c_str(), "rb" );
+    std::FILE*  f = rw::compat::rw_fopen_utf8( path.c_str(), "rb" );
     if( !f )
     {
         return out;
@@ -704,11 +725,58 @@ inline std::string readConfigBytes( const std::string& path )
 // (a cross-root alias) — an intra-root alias stays external exactly as a bare specifier is single-root.
 inline bool pathIsUnder( std::string_view abs, std::string_view root ) noexcept
 {
-    if( abs == root )
+    const auto isSeparator = []( char c ) noexcept
     {
+#if defined( _WIN32 )
+        return c == '/' || c == '\\';
+#else
+        return c == '/';
+#endif
+    };
+    const auto fold = []( char c ) noexcept
+    {
+#if defined( _WIN32 )
+        return ( c >= 'A' && c <= 'Z' ) ? char( c - 'A' + 'a' ) : c;
+#else
+        return c;
+#endif
+    };
+    const auto samePrefix = [ & ]( std::string_view left, std::string_view right, std::size_t count ) noexcept
+    {
+        for( std::size_t i = 0; i < count; ++i )
+        {
+            if( isSeparator( left[ i ] ) && isSeparator( right[ i ] ) )
+            {
+                continue;
+            }
+            if( fold( left[ i ] ) != fold( right[ i ] ) )
+            {
+                return false;
+            }
+        }
         return true;
+    };
+
+    // Ignore a trailing separator except for the POSIX root itself. This keeps a Windows directory
+    // boundary equivalent to the same directory spelled with the other separator.
+    std::size_t rootLength = root.size();
+    while( rootLength > 1 && isSeparator( root[ rootLength - 1 ] ) )
+    {
+        --rootLength;
     }
-    return abs.size() > root.size() && abs.compare( 0, root.size(), root ) == 0 && abs[ root.size() ] == '/';
+    if( rootLength == 1 && isSeparator( root.front() ) )
+    {
+#if defined( _WIN32 )
+        return !abs.empty() && isSeparator( abs.front() );
+#else
+        return !abs.empty() && abs.front() == '/';
+#endif
+    }
+    if( abs.size() < rootLength || !samePrefix( abs, root, rootLength ) )
+    {
+        return false;
+    }
+    return abs.size() == rootLength || ( abs.size() > rootLength && isSeparator( abs[ rootLength ] ) );
 }
 
 // trim ASCII whitespace from both ends of a view (no allocation).

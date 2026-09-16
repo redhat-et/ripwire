@@ -33,6 +33,7 @@
 #include "gitmine.h"         // rw::popenTrimmed — the one popen-and-trim shape in the tree (never a second)
 #include "infra/emit.h"      // rw::emitTo — the house emitter; no new printf-family site
 #include "infra/jsonesc.h"   // rw::shSingleQuote
+#include "infra/platform_compat.h"
 
 #include <cstdint>
 #include <cstdlib>
@@ -209,7 +210,11 @@ inline bool appendGitConfigOverride( const char* key, const char* value )
     const std::string   keyN  = "GIT_CONFIG_KEY_" + std::to_string( n );
     const std::string   valN  = "GIT_CONFIG_VALUE_" + std::to_string( n );
     const std::string   count = std::to_string( n + 1 );
+#if defined(_WIN32)
+    return ::_putenv_s( keyN.c_str(), key ) == 0 && ::_putenv_s( valN.c_str(), value ) == 0 && ::_putenv_s( "GIT_CONFIG_COUNT", count.c_str() ) == 0;
+#else
     return ::setenv( keyN.c_str(), key, 1 ) == 0 && ::setenv( valN.c_str(), value, 1 ) == 0 && ::setenv( "GIT_CONFIG_COUNT", count.c_str(), 1 ) == 0;
+#endif
 }
 
 // ── the startup record, kept so --doctor reports the SAME probe main() acted on ─────────────────────────────
@@ -247,12 +252,17 @@ inline const Report& hardenForRoots( std::span<const std::string_view> roots )
     bool anyHook = false;
     for( std::string_view root : roots )
     {
+        const std::string rootStr =
+#if defined( _WIN32 )
+            rw::compat::rw_windows_path_from_msys( root );
+#else
+            std::string( root );
+#endif
         std::error_code ec;
-        if( root.empty() || !std::filesystem::is_directory( std::filesystem::path( root ), ec ) || ec )
+        if( rootStr.empty() || !std::filesystem::is_directory( std::filesystem::path( rootStr ), ec ) || ec )
         {
             continue;
         }
-        const std::string   rootStr = std::string( root );
         const FsmonitorForm form    = localConfigMayCarryFsmonitor( rootStr ) ? probeFsmonitorForm( rootStr ) : FsmonitorForm::Unset;
         r.forms.emplace_back( rootStr, form );
         anyHook = anyHook || form == FsmonitorForm::Hook;

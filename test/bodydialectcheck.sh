@@ -59,14 +59,15 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 # the emit path over a warm index, which is the half this gate is about.
 export TMPDIR="$TMP/cachehome"
 mkdir -p "$TMPDIR"
-command -v python3 >/dev/null 2>&1 || { echo "bodydialectcheck: python3 is required"; exit 2; }
+PYTHON="${RIPWIRE_PYTHON:-${PYTHON_NATIVE:-python3}}"
+command -v "$PYTHON" >/dev/null 2>&1 || { echo "bodydialectcheck: Python is required (set RIPWIRE_PYTHON)"; exit 2; }
 
 echo "bodydialectcheck: BIN=$BIN"
 
 # ── (A) §H5 — the two dialects name the SAME bodies, in the same order, at every budget ────────────────────
 # Tasks chosen so the bodies do NOT fall in one-per-file rank order: that is the only shape where a
 # file-grouped emission and a rank-ordered re-slice can disagree, and a single-task gate would miss it.
-python3 - "$BIN" "$ROOT" <<'PY'
+"$PYTHON" - "$BIN" "$ROOT" <<'PY'
 import json, subprocess, sys, xml.etree.ElementTree as ET
 
 BIN, ROOT = sys.argv[1], sys.argv[2]
@@ -141,7 +142,7 @@ PY
 for BUD in 5000 8000 12000; do
     "$BIN" "$ROOT" --pack-task="serializeJson runDefaultMap" --token-budget=$BUD --json >"$TMP/big.json" 2>/dev/null
     JB="$( wc -c < "$TMP/big.json" | tr -d ' ' )"
-    CEIL="$( python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["budget_ceiling_bytes"])' "$TMP/big.json" 2>/dev/null )"
+    CEIL="$( "$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["budget_ceiling_bytes"])' "$TMP/big.json" 2>/dev/null )"
     if [ -z "$CEIL" ]; then
         no "(B) --token-budget=$BUD --json: no budget_ceiling_bytes in the document"
     elif [ "$JB" -le "$CEIL" ]; then
@@ -156,7 +157,7 @@ done
 # element that emits NO shown= is invisible to it. Here the roster is named, so a section that drops the
 # triple is a FAILURE rather than an absence.
 "$BIN" "$ROOT/src" --pack-task="rank symbols by pagerank" >"$TMP/sec.xml" 2>/dev/null
-python3 - "$TMP/sec.xml" <<'PY'
+"$PYTHON" - "$TMP/sec.xml" <<'PY'
 import sys, xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
 # <sigs> is rule 5 (a bare capped="1" on a byte-trimmed payload, no row total) and is deliberately excluded.
@@ -242,7 +243,7 @@ grep -qF 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789' "$TMP/r.out" \
 
 # ── (E) §C4 — the --max-tokens fit discloses itself in the JSON dialect too ────────────────────────────────
 "$BIN" "$ROOT/src" --max-tokens=1200 --json >"$TMP/mt.json" 2>/dev/null
-python3 - "$TMP/mt.json" <<'PY'
+"$PYTHON" - "$TMP/mt.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
 bad = [k for k in ("max_tokens", "fit_bytes", "fit_measured_in") if k not in d]
@@ -333,7 +334,7 @@ printf 'int scrubProbe( int a, int b )\n{\n    // \033 caf\351 marker\n    if( a
 bd_probe(){    # $1 = corpus dir -> prints "<xmlbytes> <jsonbytes> <xmlflag> <jsonflag>"
     "$BIN" "$1" --pack-task="scrubProbe marker"        >"$TMP/bd.xml"  2>/dev/null
     "$BIN" "$1" --pack-task="scrubProbe marker" --json >"$TMP/bd.json" 2>/dev/null
-    python3 - "$TMP/bd.xml" "$TMP/bd.json" <<'PY'
+    "$PYTHON" - "$TMP/bd.xml" "$TMP/bd.json" <<'PY'
 import json, sys, xml.etree.ElementTree as ET
 x = ET.parse( sys.argv[1] ).getroot()
 b = x.find( ".//bodies/b" )
