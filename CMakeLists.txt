@@ -288,6 +288,9 @@ file(APPEND "${_ripwire_embedded_queries}" "}};\n\ninline constexpr std::string_
 # src/skillsinstall.h reads only the binary's read-only data at runtime — no filesystem dependency
 # on skills/ or hooks/ existing on disk (redhat-et/ripwire#225).
 set(_ripwire_embedded_skills "${_ripwire_generated_dir}/embedded_skills.h")
+# *.md only: every file under skills/<name>/ is currently markdown; a non-.md companion file added
+# later (a script, JSON, image) needs this glob widened too, or test/selfcontainedcheck.sh's
+# byte-exact cross-check (which walks every file under skills/*/, no extension filter) goes red.
 file(GLOB_RECURSE _ripwire_skill_files CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/skills" "${CMAKE_CURRENT_SOURCE_DIR}/skills/*.md")
 # Only files inside a skills/<name>/ subdirectory are an embeddable skill — top-level files such as
 # skills/CONSOLIDATION.md are repo-maintainer notes, not a skill payload, and must not be embedded.
