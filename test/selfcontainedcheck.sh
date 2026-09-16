@@ -110,5 +110,98 @@ else
     no "complete embedded-query inventory or contents differ from committed queries"
 fi
 
+# === SKILLS/HOOKS EMBEDDING (configure-time) ===
+# Parallel checks to queries: no source-tree paths embedded, probe verifies header contents, cross-check Python.
+
+if strings "$BIN" | grep -Fq "$ROOT/skills" || strings "$BIN" | grep -Fq "$ROOT/hooks"; then
+    no "binary contains source-tree skills or hooks path"
+else
+    ok "binary contains no source-tree skills or hooks path"
+fi
+
+# Execute the generated C++ interface for skills/hooks embedding.
+generatedDir_skills="$( dirname "$BIN" )/generated"
+if [ ! -f "$generatedDir_skills/embedded_skills.h" ]; then
+    if cmake -S "$ROOT" -B "$TMP/skills-model" -DFETCHCONTENT_FULLY_DISCONNECTED=ON >"$TMP/configure-skills.log" 2>&1; then
+        generatedDir_skills="$TMP/skills-model/generated"
+    else
+        no "could not configure the embedded-skills model"
+        cat "$TMP/configure-skills.log"
+    fi
+fi
+
+# Only proceed if the header now exists (it should, either in build dir or after configure above).
+if [ -f "$generatedDir_skills/embedded_skills.h" ]; then
+    cat > "$TMP/skills-model.cpp" <<'CPP'
+#include "embedded_skills.h"
+#include <cstdio>
+
+/// Emit each embedded skill/hook's relative path and exact bytes through the public generated lookup interface.
+int main()
+{
+    for( const auto& f : rw::embedded_skills::kSkillFiles )
+    {
+        std::printf( "%.*s\t", int( f.relativePath.size() ), f.relativePath.data() );
+        for( unsigned char byte : f.bytes ) std::printf( "%02x", unsigned( byte ) );
+        std::putchar( '\n' );
+    }
+    for( const auto& f : rw::embedded_skills::kHookFiles )
+    {
+        std::printf( "%.*s\t", int( f.relativePath.size() ), f.relativePath.data() );
+        for( unsigned char byte : f.bytes ) std::printf( "%02x", unsigned( byte ) );
+        std::putchar( '\n' );
+    }
+}
+CPP
+    if "${CXX:-c++}" -std=c++17 -I"$generatedDir_skills" "$TMP/skills-model.cpp" -o "$TMP/skills-model-bin" \
+        && "$TMP/skills-model-bin" > "$TMP/skills.tsv" \
+        && python3 - "$ROOT" "$TMP/skills.tsv" <<'PYSKILLS'
+import pathlib, sys
+# Walk skills/*/**  (each skills/ripwire-*/ or skills/hermes/ subdirectory and its files)
+skill_dirs = list(pathlib.Path(sys.argv[1], 'skills').glob('*/'))
+expected = {}
+for skill_dir in skill_dirs:
+    for f in skill_dir.rglob('*'):
+        if f.is_file():
+            rel = str(f.relative_to(pathlib.Path(sys.argv[1])))
+            expected[rel] = f.read_bytes()
+
+# Walk hooks/*.sh
+hooks_dir = pathlib.Path(sys.argv[1], 'hooks')
+if hooks_dir.exists():
+    for f in hooks_dir.glob('*.sh'):
+        rel = str(f.relative_to(pathlib.Path(sys.argv[1])))
+        expected[rel] = f.read_bytes()
+
+# Parse probe output
+rows = [line.split('\t') for line in pathlib.Path(sys.argv[2]).read_text().splitlines()]
+actual = {name: bytes.fromhex(source) for name, source in rows}
+
+# Validate
+assert len(actual) == len(rows), 'duplicate embedded skill/hook names'
+assert expected and actual == expected, f'skill/hook set or contents differ: missing={expected.keys()-actual.keys()}, extra={actual.keys()-expected.keys()}'
+PYSKILLS
+    then
+        ok "generated skills/hooks lookup serves every committed file with identical contents and no extras"
+    else
+        no "complete embedded-skills/hooks inventory or contents differ from committed files"
+    fi
+else
+    # Header doesn't exist yet (expected during red-gate phase before CMake step implemented)
+    no "generated/embedded_skills.h does not exist (embed step not yet implemented)"
+fi
+
+# Verify that `ripwire skills install` is not a missing-source-tree error (once added, will use embedded files).
+# Today: the subcommand doesn't exist, so any failure is acceptable as long as it's not a source-tree complaint.
+if HOME="$TMP/home" CLAUDE_CONFIG_DIR="$TMP/config" "$TMP/isolated/ripwire" skills install >"$TMP/skills_install.out" 2>"$TMP/skills_install.err"; then
+    # If it succeeds, that's OK (subcommand was added in a later task)
+    ok "ripwire skills install succeeded (subcommand now implemented)"
+elif grep -qi "cannot find.*skills\|cannot find.*hooks\|source.*tree\|checkout" "$TMP/skills_install.err"; then
+    no "ripwire skills install looked for source-tree skills/hooks (should use embedded)"
+    head -3 "$TMP/skills_install.err"
+else
+    ok "ripwire skills install fails as expected (command not yet implemented, will use embedded files later)"
+fi
+
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"
