@@ -517,6 +517,7 @@
 "skillroutingjudgedcheck.sh": 0.2,
 "skillscan.sh": 0.8,
 "skillscanreadcheck.sh": 0.4,
+"skillsinstallcheck.sh": 2.2,
 "skilltruthcheck.sh": 5.4,
 "skippedcheck.sh": 0.9,
 "skipreasoncheck.sh": 1.6,
