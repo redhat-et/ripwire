@@ -1024,7 +1024,7 @@ roots = (['src', 'src/infra', 'third_party', '']                        # our ta
          + [f'{_deps}/doctest', f'{_deps}/doctest/doctest/parts'])      # doctest INTERFACE + dev root
 inc = re.compile(r'^\s*#\s*include\s*"([^"]+)"')
 # Generated headers: produced into the build dir by CMake, never committed. Named, not pattern-matched.
-generated = {'version.h', 'embedded_queries.h'}
+generated = {'version.h', 'embedded_queries.h', 'embedded_skills.h'}
 for p in paths:
     if not p.endswith(('.h', '.hpp', '.inl', '.cpp', '.c', '.cc')):
         continue
