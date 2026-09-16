@@ -9,15 +9,17 @@ ripwire="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 
 fail() { echo "FAIL ($CURRENT_ARM): $1" >&2; exit 1; }
 
+# Call directly (`sandbox`), never as `x="$( sandbox )"` — command substitution forks a subshell, and
+# an export made there never reaches the parent, so "$ripwire" would see the real, not the sandboxed, env.
 sandbox() {
     d="$( mktemp -d )"
     export HOME="$d" CLAUDE_CONFIG_DIR="$d/.claude" RIPWIRE_DATA_HOME="$d/.local/share/ripwire"
-    echo "$d"
 }
 
 # ── arm 1: fresh install, claude default ──────────────────────────────────────────────────────
 CURRENT_ARM="1-fresh-install"
-d1="$( sandbox )"
+sandbox
+d1="$d"
 "$ripwire" skills install >/dev/null
 [ -d "$CLAUDE_CONFIG_DIR/skills" ] || fail "no skills directory created"
 [ -f "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" ] || fail "no v2 manifest written"
@@ -29,7 +31,8 @@ rm -rf "$d1"
 
 # ── arm 2: idempotent store extraction ────────────────────────────────────────────────────────
 CURRENT_ARM="2-idempotent-store"
-d2="$( sandbox )"
+sandbox
+d2="$d"
 "$ripwire" skills install >/dev/null
 store_dir="$( find "$RIPWIRE_DATA_HOME/skills" -maxdepth 1 -mindepth 1 -type d | head -1 )"
 [ -n "$store_dir" ] || fail "no store directory created"
@@ -42,7 +45,8 @@ rm -rf "$d2"
 
 # ── arm 3: link-safety — refuses to write through a pre-planted symlink at the destination ────
 CURRENT_ARM="3-link-safety-destination"
-d3="$( sandbox )"
+sandbox
+d3="$d"
 mkdir -p "$CLAUDE_CONFIG_DIR/skills"
 outside="$( mktemp -d )"
 ln -s "$outside" "$CLAUDE_CONFIG_DIR/skills/ripwire-orient"   # plant a symlink where install would write
