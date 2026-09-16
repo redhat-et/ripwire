@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # test/skillsinstallcheck.sh — the native `ripwire skills install` subcommand: store extraction,
 # link-safety, prune, manifest v2, per-agent modes, --all, --hook merge + preservation.
-set -eu
-cd "$( dirname "$0" )/.."
-ripwire="${1:-./build/ripwire}"
+set -u
+ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+ripwire="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+[ "${ripwire#/}" = "$ripwire" ] && ripwire="$ROOT/$ripwire"          # allow repo-relative RIPWIRE_BIN
 [ -x "$ripwire" ] || { echo "SKIP: $ripwire not built" >&2; exit 0; }
 
 fail() { echo "FAIL ($CURRENT_ARM): $1" >&2; exit 1; }
