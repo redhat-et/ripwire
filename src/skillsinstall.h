@@ -365,9 +365,13 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
     for( const embedded_skills::EmbeddedFile& f : embedded_skills::kSkillFiles )
     {
         const std::string skillDir = skillDirNameOf( f.relativePath );
-        // Claude-default mode links only the flat "ripwire-*" set, matching skills/install.sh's own
-        // Claude-mode loop (`for d in "$src"/ripwire-*/`) — skills/hermes/ is Hermes-native content
-        // that install.sh only links under --hermes, and never under the bare "hermes" name.
+        // Every agent — not just Claude — currently links only the flat "ripwire-*" set; this filter
+        // does not vary by `agentName` today. skills/install.sh's Claude-mode loop
+        // (`for d in "$src"/ripwire-*/`) only ever applied this same filter for Claude, and
+        // skills/hermes/ is Hermes-native content install.sh links under --hermes specifically — but
+        // that per-agent differentiation has NOT been ported here yet; it is later-task territory
+        // (this task is agent DESTINATION selection, not agent-specific skill SELECTION). Until then,
+        // `--hermes` links the identical "ripwire-*" set every other mode does.
         if( skillDir.empty() || skillDir.rfind( "ripwire-", 0 ) != 0 ) { continue; }
         if( std::find( currentSkillNames.begin(), currentSkillNames.end(), skillDir ) != currentSkillNames.end() ) { continue; }
         if( !contributor && skillDirIsContributorOnly( skillDir ) ) { continue; }   // --contributor gate
@@ -451,6 +455,8 @@ inline int runSkillsInstall( int argc, char** argv, std::string_view executableP
                                                           // twice as "2 agents configured" would overstate
                                                           // distinct work done
         int skipped = 0;
+        bool anyFailure = false;   // any per-agent install OR --hook merge failure — --all must not
+                                    // exit 0 while quietly having failed one of its agents
         for( const rw::AgentConfig& ac : agents )
         {
             const rw::AgentTarget* row = rw::agentTarget( ac.name );
@@ -474,9 +480,10 @@ inline int runSkillsInstall( int argc, char** argv, std::string_view executableP
             if( !result.ok )
             {
                 rw::emitTo( stderr, "ripwire skills install --all: {}: {}\n", std::string( ac.name ), result.error );
+                anyFailure = true;
                 continue;
             }
-            if( hook ) { mergeHookConfig( ac.name ); }   // Task 12; today this reports "not implemented" and fails, on purpose
+            if( hook && mergeHookConfig( ac.name ) != 0 ) { anyFailure = true; }   // Task 12; today this reports "not implemented" and fails, on purpose — --all must surface that, not swallow it
             rw::emitTo( stdout, "ripwire skills install --all: {} configured ({} linked into {})\n",
                         std::string( ac.name ), result.linked, result.dest.string() );
             const std::string destStr = result.dest.string();
@@ -487,7 +494,7 @@ inline int runSkillsInstall( int argc, char** argv, std::string_view executableP
         }
         rw::emitTo( stdout, "ripwire skills install --all: {} agent(s) configured, {} skipped\n",
                     static_cast<int>( configuredDestPaths.size() ), skipped );
-        return 0;
+        return anyFailure ? 1 : 0;
     }
 
     const InstallOutcome result = installForAgent( agentArg, contributor, force, executablePath );
