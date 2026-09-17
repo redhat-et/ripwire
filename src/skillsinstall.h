@@ -2,6 +2,8 @@
 #include "infra/emit.h"
 #include "pathguard.h"
 #include "embedded_skills.h"
+#include "wrap.h"   // AgentTarget / agentTarget / kAgentTargets / AgentConfig / getAgentConfigs / resolveSkillsRoot —
+                    // per-agent destinations and --all's presence detection are wrap.h's, not a second table here.
 
 #include <algorithm>
 #include <array>
@@ -208,6 +210,27 @@ inline std::string skillDirNameOf( std::string_view relativePath )
     return it->string();
 }
 
+// True iff `skillDir`'s embedded SKILL.md declares "audience: contributor" in its own YAML front
+// matter (the region between the file's opening "---" line and the next one). Scanning only that
+// region — not the whole file — matters: the content here is embedded bytes, not a file on disk, so
+// this can't be a grep over a path; and a plain substring scan over the WHOLE body would let a skill
+// that merely MENTIONS "contributor" in its prose (ripwire-opt-remarks' own body does, among others)
+// flip the gate. `ripwire-opt-remarks` is the one such skill in the embedded set today.
+inline bool skillDirIsContributorOnly( std::string_view skillDir )
+{
+    for( const embedded_skills::EmbeddedFile& f : embedded_skills::kSkillFiles )
+    {
+        if( !f.relativePath.ends_with( "/SKILL.md" ) ) { continue; }
+        if( skillDirNameOf( f.relativePath ) != std::string( skillDir ) ) { continue; }
+        const std::string_view bytes = f.bytes;
+        if( !bytes.starts_with( "---" ) ) { return false; }   // no front matter — nothing to gate on
+        const std::size_t closing = bytes.find( "\n---", 3 );
+        const std::string_view frontMatter = ( closing == std::string_view::npos ) ? bytes : bytes.substr( 0, closing );
+        return frontMatter.find( "audience: contributor" ) != std::string_view::npos;
+    }
+    return false;   // no SKILL.md found for this dir — a build defect, treated as "not gated" not "gated"
+}
+
 // The `.ripwire-manifest-v2` sidecar this dispatch's gates check: which executable performed the
 // install (`source=`), the manifest schema version, and — as of Task 6 — one `skill=<name>` line per
 // currently-linked skill, so a later run can tell a renamed-away skill from one still current and
@@ -279,23 +302,60 @@ inline int pruneStale( const std::filesystem::path& destDir, const ManifestV2& p
     return removed;
 }
 
-inline int runSkillsInstall( int /*argc*/, char** /*argv*/, std::string_view executablePath )
+// Everything one agent's install needs, for the caller to report (bare install, one line; `--all`,
+// one line per agent) without re-deriving it.
+struct InstallOutcome
+{
+    bool ok = false;
+    std::string error;
+    std::filesystem::path dest;
+    int linked = 0;
+    int pruned = 0;
+};
+
+// The per-agent core: resolve `agentName`'s skills destination via wrap.h's kAgentTargets (empty
+// `agentName` means Claude, the installer default — same convention the bare `ripwire skills install`
+// always had), extract the store if needed, link the current skill set (contributor-gated per
+// skillDirIsContributorOnly), prune anything the previous manifest tracked that fell out of that set,
+// and write the manifest back. `force`: re-link a destination entry only when it is ALREADY one of
+// ours — a symlink pointing at our own store for this exact skill — never a foreign entry or a
+// planted link; that is a stricter check than "does it exist", not a looser one, so it cannot regress
+// the link-safety arms that never pass --force.
+//
+// `--codex-legacy` is NOT a fifth agent identity — skills/install.sh never treated it as one (its own
+// `dst` switch has `codex) ... ;; codex-legacy) ...` as two DESTINATION cases sharing one hook branch,
+// `codex|codex-legacy) install_codex_hook`). It is Codex's OLDER discovery root
+// (`${CODEX_HOME:-$HOME/.codex}/skills`, distinct from the current `AGENTS_HOME/skills` `codex` uses),
+// kept for back-compat. So it is not a `kAgentTargets` row: adding one would misrepresent it as a
+// distinct agent when it shares "codex" identity for contributor filtering and (later) hook behavior —
+// it is handled here, as a destination override, not in wrap.h's agent table.
+inline InstallOutcome installForAgent( std::string_view agentName, bool contributor, bool force, std::string_view executablePath )
 {
     const Outcome extracted = ensureStoreExtracted();
-    if( !extracted.ok )
+    if( !extracted.ok ) { return { false, extracted.error, {}, 0, 0 }; }
+
+    const std::string effectiveAgent = agentName.empty() ? std::string( "claude" ) : std::string( agentName );
+    const bool        isCodexLegacy  = ( effectiveAgent == "codex-legacy" );
+    // codex-legacy shares codex's row for everything (contributor filtering, future hook behavior) —
+    // only its resolved destination differs, so the table lookup below is by "codex" for that case.
+    const rw::AgentTarget* row = rw::agentTarget( isCodexLegacy ? std::string_view( "codex" ) : std::string_view( effectiveAgent ) );
+    if( row == nullptr || row->skillsRoot.empty() )
     {
-        rw::emitTo( stderr, "ripwire skills install: {}\n", extracted.error );
-        return 1;
+        return { false, "no verified skills discovery path for '" + effectiveAgent + "'", {}, 0, 0 };
+    }
+    const std::filesystem::path skillsDest = isCodexLegacy
+        ? ( std::filesystem::path( envOr( "CODEX_HOME", ( homeDir() / ".codex" ).string() ) ) / "skills" )
+        : rw::resolveSkillsRoot( *row, homeDir().string() );
+    if( skillsDest.empty() )
+    {
+        return { false, "could not resolve skills destination for '" + effectiveAgent + "'", {}, 0, 0 };
     }
 
-    const std::filesystem::path dest = envOr( "CLAUDE_CONFIG_DIR", ( homeDir() / ".claude" ).string() );
-    const std::filesystem::path skillsDest = std::filesystem::path( dest ) / "skills";
     std::error_code mkdirEc;
     std::filesystem::create_directories( skillsDest, mkdirEc );
     if( mkdirEc )
     {
-        rw::emitTo( stderr, "ripwire skills install: create_directories failed for {}: {}\n", skillsDest.string(), mkdirEc.message() );
-        return 1;
+        return { false, "create_directories failed for " + skillsDest.string() + ": " + mkdirEc.message(), skillsDest, 0, 0 };
     }
 
     // Collect the current, deduped set of ripwire-* skill directory names up front: pruneStale needs
@@ -310,6 +370,7 @@ inline int runSkillsInstall( int /*argc*/, char** /*argv*/, std::string_view exe
         // that install.sh only links under --hermes, and never under the bare "hermes" name.
         if( skillDir.empty() || skillDir.rfind( "ripwire-", 0 ) != 0 ) { continue; }
         if( std::find( currentSkillNames.begin(), currentSkillNames.end(), skillDir ) != currentSkillNames.end() ) { continue; }
+        if( !contributor && skillDirIsContributorOnly( skillDir ) ) { continue; }   // --contributor gate
         currentSkillNames.push_back( skillDir );
     }
 
@@ -321,6 +382,7 @@ inline int runSkillsInstall( int /*argc*/, char** /*argv*/, std::string_view exe
     for( const std::string& skillDir : currentSkillNames )
     {
         const std::filesystem::path destLink = skillsDest / skillDir;
+        const std::filesystem::path storeFile = skillsStoreDir() / "skills" / skillDir;
         std::error_code statusEc;
         const std::filesystem::file_status destStatus = std::filesystem::symlink_status( destLink, statusEc );
         // libc++ (unlike the letter of the standard) sets ec=ENOENT for a plain "nothing there" —
@@ -331,19 +393,115 @@ inline int runSkillsInstall( int /*argc*/, char** /*argv*/, std::string_view exe
             rw::emitTo( stderr, "ripwire skills install: could not check {}: {}\n", destLink.string(), statusEc.message() );
             continue;   // cannot verify the destination is safe to write — skip rather than risk it
         }
-        if( std::filesystem::exists( destStatus ) ) { continue; }   // arm 3: never overwrite
-        const Outcome linkResult = linkOrRefuse( skillsStoreDir() / "skills" / skillDir, destLink );
+        if( std::filesystem::exists( destStatus ) )
+        {
+            if( !force ) { continue; }   // arm 3: never overwrite without --force
+            std::error_code readEc;
+            const std::filesystem::path currentTarget = std::filesystem::read_symlink( destLink, readEc );
+            if( readEc || !std::filesystem::is_symlink( destStatus ) || currentTarget != storeFile )
+            {
+                continue;   // foreign entry or a planted link — --force refuses it exactly like the bare path does
+            }
+            std::error_code removeEc;
+            std::filesystem::remove( destLink, removeEc );
+            if( removeEc ) { continue; }
+        }
+        const Outcome linkResult = linkOrRefuse( storeFile, destLink );
         if( linkResult.ok ) { ++linked; }
     }
 
     if( !writeManifestV2( skillsDest, executablePath, currentSkillNames ) )
     {
-        rw::emitTo( stderr, "ripwire skills install: could not write the skills manifest at {}\n", ( skillsDest / ".ripwire-manifest-v2" ).string() );
-        return 1;
+        return { false, "could not write the skills manifest at " + manifestPath.string(), skillsDest, linked, pruned };
     }
 
+    return { true, {}, skillsDest, linked, pruned };
+}
+
+// `--hook` merge lands in redhat-et/ripwire#225 task 12. This is deliberately not a stub that quietly
+// reports success — CLAUDE.md's "do not add a surface that quietly rounds, guesses, or omits" applies
+// to a CLI exit code exactly as much as to the XML map: an agent that installed with `--hook` and got
+// rc=0 back would reasonably believe the hook is wired.
+inline int mergeHookConfig( std::string_view agentName )
+{
+    rw::emitTo( stderr, "ripwire skills install --hook: hook merge for '{}' is not implemented yet (redhat-et/ripwire#225 task 12)\n", std::string( agentName ) );
+    return 1;
+}
+
+inline int runSkillsInstall( int argc, char** argv, std::string_view executablePath )
+{
+    std::string_view agentArg;
+    bool hook = false, contributor = false, force = false, all = false;
+    for( int i = 3; i < argc; ++i )
+    {
+        const std::string_view a = argv[ i ];
+        if( a == "--hook" )              { hook = true; }
+        else if( a == "--contributor" )  { contributor = true; }
+        else if( a == "--force" )        { force = true; }
+        else if( a == "--all" )          { all = true; }
+        else if( a.rfind( "--", 0 ) == 0 && a.size() > 2 ) { agentArg = a.substr( 2 ); }   // --codex -> "codex"
+    }
+
+    if( all )
+    {
+        const std::vector<rw::AgentConfig> agents = rw::getAgentConfigs();   // src/wrap.h — same detection `wrap --all` uses
+        const std::string home = homeDir().string();
+        std::vector<std::string> configuredDestPaths;   // dedup by resolved directory: codex and openclaw
+                                                          // can share ~/.agents/skills, and counting that
+                                                          // twice as "2 agents configured" would overstate
+                                                          // distinct work done
+        int skipped = 0;
+        for( const rw::AgentConfig& ac : agents )
+        {
+            const rw::AgentTarget* row = rw::agentTarget( ac.name );
+            if( row == nullptr || row->skillsRoot.empty() ) { continue; }   // no verified skills discovery path for this agent at all — out of scope for --all, not a "skip"
+
+            const std::filesystem::path resolvedDest = rw::resolveSkillsRoot( *row, home );
+            std::error_code presentEc;
+            // "Configured" for --all means either wrap.h's own config-dir detector says so, OR this
+            // agent's skills root itself already looks live (its parent directory exists) — the second
+            // check matters because a fresh machine can have ~/.agents present (Codex/openclaw's shared
+            // discovery root) without ~/.codex or ~/.openclaw existing yet.
+            const bool rootLooksPresent = ac.isInstalled() || std::filesystem::exists( resolvedDest.parent_path(), presentEc );
+            if( !rootLooksPresent )
+            {
+                rw::emitTo( stdout, "ripwire skills install --all: {} skipped (not detected)\n", std::string( ac.name ) );
+                ++skipped;
+                continue;
+            }
+
+            const InstallOutcome result = installForAgent( ac.name, contributor, force, executablePath );
+            if( !result.ok )
+            {
+                rw::emitTo( stderr, "ripwire skills install --all: {}: {}\n", std::string( ac.name ), result.error );
+                continue;
+            }
+            if( hook ) { mergeHookConfig( ac.name ); }   // Task 12; today this reports "not implemented" and fails, on purpose
+            rw::emitTo( stdout, "ripwire skills install --all: {} configured ({} linked into {})\n",
+                        std::string( ac.name ), result.linked, result.dest.string() );
+            const std::string destStr = result.dest.string();
+            if( std::find( configuredDestPaths.begin(), configuredDestPaths.end(), destStr ) == configuredDestPaths.end() )
+            {
+                configuredDestPaths.push_back( destStr );
+            }
+        }
+        rw::emitTo( stdout, "ripwire skills install --all: {} agent(s) configured, {} skipped\n",
+                    static_cast<int>( configuredDestPaths.size() ), skipped );
+        return 0;
+    }
+
+    const InstallOutcome result = installForAgent( agentArg, contributor, force, executablePath );
+    if( !result.ok )
+    {
+        rw::emitTo( stderr, "ripwire skills install: {}\n", result.error );
+        return 1;
+    }
+    if( hook )
+    {
+        return mergeHookConfig( agentArg.empty() ? std::string_view( "claude" ) : agentArg );
+    }
     rw::emitTo( stdout, "ripwire skills install: {} skill(s) linked into {}, {} stale entr{} pruned\n",
-                linked, skillsDest.string(), pruned, pruned == 1 ? "y" : "ies" );
+                result.linked, result.dest.string(), result.pruned, result.pruned == 1 ? "y" : "ies" );
     return 0;
 }
 

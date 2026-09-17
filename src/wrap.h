@@ -145,6 +145,43 @@ inline constexpr const AgentTarget* agentTarget( const std::string_view name ) n
     return findByField( kAgentTargets, &AgentTarget::name, name );
 }
 
+// Resolve a kAgentTargets `skillsRoot` DOC STRING into a real filesystem path — the piece that was
+// missing here: every caller until `ripwire skills install` (redhat-et/ripwire#225 task 8) only ever
+// PRINTED skillsRoot as a comment (wrapPrintSkillsLine below), never resolved it. Two shapes:
+//   - "${ENV_VAR:-~/default}/suffix"  — read ENV_VAR (empty is unset, same rule envOr() and every
+//     other ${VAR:-...} in this codebase follow), else the literal default, then append suffix;
+//   - a literal path with no `${...}`, e.g. openclaw's "~/.agents/skills" — used AS-IS, no env var
+//     honoured, because that row deliberately does not read one (see its own comment above).
+// A leading "~/" or a bare "~" then expands against `home`. Empty `row.skillsRoot` (no verified
+// discovery path for that agent) returns an empty path; the caller decides what that means.
+inline std::filesystem::path resolveSkillsRoot( const AgentTarget& row, const std::string& home )
+{
+    if( row.skillsRoot.empty() ) { return {}; }
+    const std::string doc( row.skillsRoot );
+    std::string resolved;
+    if( doc.rfind( "${", 0 ) == 0 )
+    {
+        const std::size_t colonDash  = doc.find( ":-" );
+        const std::size_t closeBrace = doc.find( '}' );
+        if( colonDash == std::string::npos || closeBrace == std::string::npos || closeBrace < colonDash )
+        {
+            return {};   // malformed doc string — a build defect in the table, not a runtime condition
+        }
+        const std::string envVar   = doc.substr( 2, colonDash - 2 );
+        const std::string fallback = doc.substr( colonDash + 2, closeBrace - ( colonDash + 2 ) );
+        const std::string suffix   = doc.substr( closeBrace + 1 );
+        const char* const value = std::getenv( envVar.c_str() );
+        resolved = ( ( value != nullptr ) && ( *value != '\0' ) ) ? ( std::string( value ) + suffix ) : ( fallback + suffix );
+    }
+    else
+    {
+        resolved = doc;   // a literal root — no env var honoured on purpose (see comment above)
+    }
+    if( resolved.rfind( "~/", 0 ) == 0 ) { resolved = home + resolved.substr( 1 ); }
+    else if( resolved == "~" )           { resolved = home; }
+    return std::filesystem::path( resolved );
+}
+
 // Append the install command only where this repo owns a verified discovery path. Claude is the installer
 // default; Codex uses the cross-agent ~/.agents/skills discovery root documented by current Codex.
 //
