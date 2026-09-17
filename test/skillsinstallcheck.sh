@@ -124,4 +124,18 @@ d8="$d"
 [ -e "$CLAUDE_CONFIG_DIR/skills/ripwire-opt-remarks" ] || fail "contributor skill missing after --contributor"
 rm -rf "$d8"
 
-echo "OK: skillsinstallcheck (arms 1-8)"
+# ── arm 9: --hook merges into settings.json, preserving pre-existing unrelated entries ─────────
+CURRENT_ARM="9-hook-merge-preservation"
+sandbox
+d9="$d"
+mkdir -p "$CLAUDE_CONFIG_DIR"
+cat > "$CLAUDE_CONFIG_DIR/settings.json" <<'JSON'
+{"hooks":{"PreToolUse":[{"matcher":"SomeOtherTool","hooks":[{"type":"command","command":"/somewhere/unrelated.sh"}]}]}}
+JSON
+"$ripwire" skills install --hook >/dev/null
+grep -q "unrelated.sh" "$CLAUDE_CONFIG_DIR/settings.json" || fail "pre-existing unrelated hook entry was dropped by the merge"
+grep -q "ripwire-nudge.sh" "$CLAUDE_CONFIG_DIR/settings.json" || fail "ripwire's own hook was not added"
+python3 -c "import json; json.load(open('$CLAUDE_CONFIG_DIR/settings.json'))" || fail "settings.json is not valid JSON after merge"
+rm -rf "$d9"
+
+echo "OK: skillsinstallcheck (arms 1-9)"
