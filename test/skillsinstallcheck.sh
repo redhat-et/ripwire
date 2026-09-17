@@ -81,6 +81,7 @@ outside="$( mktemp -d )"
 touch "$outside/canary"
 # repoint a manifest-tracked entry at something outside the destination, then force a prune of it
 tracked="$( grep '^skill=' "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" | head -1 | cut -d= -f2 )"
+[ -n "$tracked" ] || fail "no manifest-tracked skill to repoint"
 rm "$CLAUDE_CONFIG_DIR/skills/$tracked"
 ln -s "$outside" "$CLAUDE_CONFIG_DIR/skills/$tracked"
 sed -i.bak "/^skill=$tracked\$/d" "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2"   # force it to look "renamed away"
