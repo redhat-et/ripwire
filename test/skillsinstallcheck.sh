@@ -91,4 +91,31 @@ echo "skill=ripwire-renamed-away" >> "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifes
 [ -e "$CLAUDE_CONFIG_DIR/skills/ripwire-renamed-away" ] && fail "the link-unsafe stale entry was not pruned"
 rm -rf "$d5" "$outside"
 
-echo "OK: skillsinstallcheck (arms 1-5)"
+# ── arm 6: per-agent modes reach the right destination ──────────────────────────────────────────
+CURRENT_ARM="6-per-agent-modes"
+d6="$( sandbox )"
+"$ripwire" skills install --codex >/dev/null
+[ -d "$HOME/.agents/skills" ] || fail "--codex did not install to \$AGENTS_HOME/skills"
+"$ripwire" skills install --hermes >/dev/null
+[ -d "$HOME/.hermes/skills" ] || fail "--hermes did not install to \$HERMES_HOME/skills"
+rm -rf "$d6"
+
+# ── arm 7: --all detects and activates every present agent ─────────────────────────────────────
+CURRENT_ARM="7-all-detection"
+d7="$( sandbox )"
+mkdir -p "$HOME/.claude" "$HOME/.agents"   # make claude + codex "present" per whatever getAgentConfigs checks
+out="$( "$ripwire" skills install --all )"
+echo "$out" | grep -qi claude || fail "--all summary did not mention claude"
+[ -d "$CLAUDE_CONFIG_DIR/skills" ] || fail "--all did not activate claude"
+rm -rf "$d7"
+
+# ── arm 8: --contributor gates the contributor-only skill ──────────────────────────────────────
+CURRENT_ARM="8-contributor-gating"
+d8="$( sandbox )"
+"$ripwire" skills install >/dev/null
+[ -e "$CLAUDE_CONFIG_DIR/skills/ripwire-opt-remarks" ] && fail "contributor skill installed without --contributor"
+"$ripwire" skills install --contributor >/dev/null
+[ -e "$CLAUDE_CONFIG_DIR/skills/ripwire-opt-remarks" ] || fail "contributor skill missing after --contributor"
+rm -rf "$d8"
+
+echo "OK: skillsinstallcheck (arms 1-8)"
