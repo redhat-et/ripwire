@@ -56,4 +56,36 @@ target="$( readlink "$CLAUDE_CONFIG_DIR/skills/ripwire-orient" )"
 [ "$target" = "$outside" ] || fail "planted symlink's target changed — install wrote through it"
 rm -rf "$d3" "$outside" skills_install.err
 
-echo "OK: skillsinstallcheck (arms 1-3)"
+# ── arm 4: manifest v2 round-trip and prune-on-rename ─────────────────────────────────────────
+CURRENT_ARM="4-manifest-prune"
+sandbox
+d4="$d"
+"$ripwire" skills install >/dev/null
+before_count="$( grep -c '^skill=' "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" )"
+[ "$before_count" -gt 0 ] || fail "manifest recorded zero skills"
+# simulate a renamed/removed skill: manually add a bogus manifest entry + matching stale symlink,
+# then re-run install and confirm both are pruned.
+ln -sfn "$RIPWIRE_DATA_HOME/skills/does-not-exist-anymore" "$CLAUDE_CONFIG_DIR/skills/ripwire-renamed-away"
+echo "skill=ripwire-renamed-away" >> "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2"
+"$ripwire" skills install >/dev/null
+[ -e "$CLAUDE_CONFIG_DIR/skills/ripwire-renamed-away" ] && fail "stale skill symlink was not pruned"
+grep -q '^skill=ripwire-renamed-away$' "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" && fail "stale manifest entry was not pruned"
+rm -rf "$d4"
+
+# ── arm 5: prune is link-safe — never follows a symlink to delete through it ──────────────────
+CURRENT_ARM="5-prune-link-safety"
+sandbox
+d5="$d"
+"$ripwire" skills install >/dev/null
+outside="$( mktemp -d )"
+touch "$outside/canary"
+# repoint a manifest-tracked entry at something outside the destination, then force a prune of it
+tracked="$( grep '^skill=' "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" | head -1 | cut -d= -f2 )"
+rm "$CLAUDE_CONFIG_DIR/skills/$tracked"
+ln -s "$outside" "$CLAUDE_CONFIG_DIR/skills/$tracked"
+sed -i.bak "/^skill=$tracked\$/d" "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2"   # force it to look "renamed away"
+"$ripwire" skills install >/dev/null
+[ -f "$outside/canary" ] || fail "prune followed the symlink and deleted through it into $outside"
+rm -rf "$d5" "$outside"
+
+echo "OK: skillsinstallcheck (arms 1-5)"
