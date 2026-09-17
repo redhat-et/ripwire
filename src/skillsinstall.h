@@ -3,6 +3,7 @@
 #include "pathguard.h"
 #include "embedded_skills.h"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstdio>
@@ -207,19 +208,75 @@ inline std::string skillDirNameOf( std::string_view relativePath )
     return it->string();
 }
 
-// Write the minimal `.ripwire-manifest-v2` sidecar this dispatch's arm 1 gate checks for: which
-// executable performed the install (`source=`), and the manifest schema version. The richer manifest
-// (per-agent entries, prune inventory, tracked-link bookkeeping) is Task 8's scope — this is only the
-// two fields a fresh install already needs to record honestly. Goes through pathguard's
-// openNoFollowTruncate (Amendment 2/3): this sidecar is rewritten on every install, so it is a
-// truncate-an-existing-file case, not an extraction-into-a-fresh-directory case.
-inline bool writeManifestV2( const std::filesystem::path& skillsDest, std::string_view executablePath )
+// The `.ripwire-manifest-v2` sidecar this dispatch's gates check: which executable performed the
+// install (`source=`), the manifest schema version, and — as of Task 6 — one `skill=<name>` line per
+// currently-linked skill, so a later run can tell a renamed-away skill from one still current and
+// prune only the former. Per-agent entries and tracked-hook bookkeeping remain Task 8's scope.
+struct ManifestV2
+{
+    bool read = false;   // true only when a manifest actually opened and parsed — false is "no manifest yet"
+    int version = 0;
+    std::string source;
+    std::vector<std::string> skills;
+};
+
+// Read back a manifest written by writeManifestV2 below. Goes through pathguard's openNoFollowRead
+// (Amendment 2/3's read twin of the write side): never follows a symlink at the final component, and
+// — like every other sidecar reader — stays silent on a plain "nothing there yet", which is the
+// ordinary first-install case, not a failure.
+inline ManifestV2 readManifestV2( const std::filesystem::path& manifestPath )
+{
+    ManifestV2 out;
+    rw::pathguard::NoFollowRead in = rw::pathguard::openNoFollowRead( "the skills manifest", manifestPath.string() );
+    if( !in.opened ) { return out; }
+    out.read = true;
+    std::string line;
+    while( in.readLine( line ) )
+    {
+        if( line == "version=1" ) { out.version = 1; }
+        else if( line == "version=2" ) { out.version = 2; }
+        else if( line.rfind( "source=", 0 ) == 0 ) { out.source = line.substr( 7 ); }
+        else if( line.rfind( "skill=", 0 ) == 0 ) { out.skills.push_back( line.substr( 6 ) ); }
+    }
+    return out;
+}
+
+// Write the sidecar: schema version, the executable that performed the install, and one `skill=`
+// line per name in `skillNames`. Goes through pathguard's openNoFollowTruncate (Amendment 2/3): this
+// sidecar is rewritten on every install, so it is a truncate-an-existing-file case, not an
+// extraction-into-a-fresh-directory case.
+inline bool writeManifestV2( const std::filesystem::path& skillsDest, std::string_view executablePath, const std::vector<std::string>& skillNames )
 {
     const std::filesystem::path manifestPath = skillsDest / ".ripwire-manifest-v2";
     const rw::pathguard::OpenedFile opened = rw::pathguard::openNoFollowTruncate( "the skills manifest", manifestPath.string() );
     if( opened.fd < 0 ) { return false; }
-    const std::string body = "version=2\nsource=" + std::string( executablePath ) + "\n";
+    std::string body = "version=2\nsource=" + std::string( executablePath ) + "\n";
+    for( const std::string& s : skillNames ) { body += "skill=" + s + "\n"; }
     return rw::pathguard::writeAllAndClose( opened.fd, body );
+}
+
+// Remove every destination entry the PREVIOUS manifest tracked that is no longer in
+// `currentSkillNames` — a skill renamed or removed since the last install. ::unlink() itself never
+// follows a symlink at the final path component (it removes the directory entry, never the target
+// the entry points at), so this is link-safe by construction; no extra isSymlink guard is needed
+// here the way one is needed before a CREATE or a READ. Returns the count removed.
+inline int pruneStale( const std::filesystem::path& destDir, const ManifestV2& previous, const std::vector<std::string>& currentSkillNames )
+{
+    int removed = 0;
+    for( const std::string& old : previous.skills )
+    {
+        // The name came straight out of a user-writable text file — refuse anything that could walk
+        // `destDir / old` outside destDir (a bare "..", an embedded "/", ...) rather than unlink
+        // wherever that resolves. A plain skill directory name never contains a slash.
+        if( old.empty() || old == "." || old == ".." || old.find( '/' ) != std::string::npos ) { continue; }
+        const bool stillPresent = std::find( currentSkillNames.begin(), currentSkillNames.end(), old ) != currentSkillNames.end();
+        if( stillPresent ) { continue; }
+        const std::filesystem::path entry = destDir / old;
+        struct stat st{};
+        if( ::lstat( entry.c_str(), &st ) != 0 ) { continue; }   // already gone — nothing to remove
+        if( ::unlink( entry.c_str() ) == 0 ) { ++removed; }      // unlink, never follow — S_ISLNK or not
+    }
+    return removed;
 }
 
 inline int runSkillsInstall( int /*argc*/, char** /*argv*/, std::string_view executablePath )
@@ -241,8 +298,10 @@ inline int runSkillsInstall( int /*argc*/, char** /*argv*/, std::string_view exe
         return 1;
     }
 
-    std::vector<std::string> seen;
-    int linked = 0;
+    // Collect the current, deduped set of ripwire-* skill directory names up front: pruneStale needs
+    // it to tell a still-current skill from a renamed-away one, and the previous manifest has to be
+    // read before anything is linked so a rename is prunable in the very same run.
+    std::vector<std::string> currentSkillNames;
     for( const embedded_skills::EmbeddedFile& f : embedded_skills::kSkillFiles )
     {
         const std::string skillDir = skillDirNameOf( f.relativePath );
@@ -250,14 +309,17 @@ inline int runSkillsInstall( int /*argc*/, char** /*argv*/, std::string_view exe
         // Claude-mode loop (`for d in "$src"/ripwire-*/`) — skills/hermes/ is Hermes-native content
         // that install.sh only links under --hermes, and never under the bare "hermes" name.
         if( skillDir.empty() || skillDir.rfind( "ripwire-", 0 ) != 0 ) { continue; }
-        bool already = false;
-        for( const std::string& name : seen )
-        {
-            if( name == skillDir ) { already = true; break; }
-        }
-        if( already ) { continue; }
-        seen.push_back( skillDir );
+        if( std::find( currentSkillNames.begin(), currentSkillNames.end(), skillDir ) != currentSkillNames.end() ) { continue; }
+        currentSkillNames.push_back( skillDir );
+    }
 
+    const std::filesystem::path manifestPath = skillsDest / ".ripwire-manifest-v2";
+    const ManifestV2 previous = readManifestV2( manifestPath );
+    const int pruned = pruneStale( skillsDest, previous, currentSkillNames );
+
+    int linked = 0;
+    for( const std::string& skillDir : currentSkillNames )
+    {
         const std::filesystem::path destLink = skillsDest / skillDir;
         std::error_code statusEc;
         const std::filesystem::file_status destStatus = std::filesystem::symlink_status( destLink, statusEc );
@@ -274,13 +336,14 @@ inline int runSkillsInstall( int /*argc*/, char** /*argv*/, std::string_view exe
         if( linkResult.ok ) { ++linked; }
     }
 
-    if( !writeManifestV2( skillsDest, executablePath ) )
+    if( !writeManifestV2( skillsDest, executablePath, currentSkillNames ) )
     {
         rw::emitTo( stderr, "ripwire skills install: could not write the skills manifest at {}\n", ( skillsDest / ".ripwire-manifest-v2" ).string() );
         return 1;
     }
 
-    rw::emitTo( stdout, "ripwire skills install: {} skill(s) linked into {}\n", linked, skillsDest.string() );
+    rw::emitTo( stdout, "ripwire skills install: {} skill(s) linked into {}, {} stale entr{} pruned\n",
+                linked, skillsDest.string(), pruned, pruned == 1 ? "y" : "ies" );
     return 0;
 }
 
