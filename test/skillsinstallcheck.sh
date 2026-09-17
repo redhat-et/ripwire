@@ -79,14 +79,16 @@ d5="$d"
 "$ripwire" skills install >/dev/null
 outside="$( mktemp -d )"
 touch "$outside/canary"
-# repoint a manifest-tracked entry at something outside the destination, then force a prune of it
-tracked="$( grep '^skill=' "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" | head -1 | cut -d= -f2 )"
-[ -n "$tracked" ] || fail "no manifest-tracked skill to repoint"
-rm "$CLAUDE_CONFIG_DIR/skills/$tracked"
-ln -s "$outside" "$CLAUDE_CONFIG_DIR/skills/$tracked"
-sed -i.bak "/^skill=$tracked\$/d" "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2"   # force it to look "renamed away"
+# Simulate a stale, manifest-TRACKED entry (mirrors arm 4's construction) that is itself a symlink
+# pointing OUTSIDE the destination — pruneStale must recognize it as previously-tracked-but-no-
+# longer-current (it must be IN the previous manifest's skill= list for pruneStale to ever consider
+# it at all) and remove the destination ENTRY via unlink, without ever following the link into
+# $outside to delete through it.
+ln -s "$outside" "$CLAUDE_CONFIG_DIR/skills/ripwire-renamed-away"
+echo "skill=ripwire-renamed-away" >> "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2"
 "$ripwire" skills install >/dev/null
 [ -f "$outside/canary" ] || fail "prune followed the symlink and deleted through it into $outside"
+[ -e "$CLAUDE_CONFIG_DIR/skills/ripwire-renamed-away" ] && fail "the link-unsafe stale entry was not pruned"
 rm -rf "$d5" "$outside"
 
 echo "OK: skillsinstallcheck (arms 1-5)"
