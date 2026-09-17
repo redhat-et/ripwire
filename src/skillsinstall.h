@@ -100,7 +100,12 @@ inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_vi
     {
         return { false, "refusing to write through existing symlink: " + dest.string() };
     }
-    std::filesystem::create_directories( dest.parent_path() );
+    std::error_code mkdirEc;
+    std::filesystem::create_directories( dest.parent_path(), mkdirEc );
+    if( mkdirEc )
+    {
+        return { false, "create_directories failed for " + dest.parent_path().string() + ": " + mkdirEc.message() };
+    }
     const int fd = ::open( dest.c_str(), O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY, 0644 );
     if( fd < 0 )
     {
@@ -170,7 +175,12 @@ inline Outcome ensureStoreExtracted()
 // "is it ours, and is it already correct" logic that wraps this.
 inline Outcome linkOrRefuse( const std::filesystem::path& storeFile, const std::filesystem::path& destLink )
 {
-    std::filesystem::create_directories( destLink.parent_path() );
+    std::error_code mkdirEc;
+    std::filesystem::create_directories( destLink.parent_path(), mkdirEc );
+    if( mkdirEc )
+    {
+        return { false, "create_directories failed for " + destLink.parent_path().string() + ": " + mkdirEc.message() };
+    }
     if( symlinkOrRefuse( storeFile, destLink ) )
     {
         return { true, {} };
@@ -223,7 +233,13 @@ inline int runSkillsInstall( int /*argc*/, char** /*argv*/, std::string_view exe
 
     const std::filesystem::path dest = envOr( "CLAUDE_CONFIG_DIR", ( homeDir() / ".claude" ).string() );
     const std::filesystem::path skillsDest = std::filesystem::path( dest ) / "skills";
-    std::filesystem::create_directories( skillsDest );
+    std::error_code mkdirEc;
+    std::filesystem::create_directories( skillsDest, mkdirEc );
+    if( mkdirEc )
+    {
+        rw::emitTo( stderr, "ripwire skills install: create_directories failed for {}: {}\n", skillsDest.string(), mkdirEc.message() );
+        return 1;
+    }
 
     std::vector<std::string> seen;
     int linked = 0;
@@ -243,7 +259,17 @@ inline int runSkillsInstall( int /*argc*/, char** /*argv*/, std::string_view exe
         seen.push_back( skillDir );
 
         const std::filesystem::path destLink = skillsDest / skillDir;
-        if( std::filesystem::exists( std::filesystem::symlink_status( destLink ) ) ) { continue; }   // arm 3: never overwrite
+        std::error_code statusEc;
+        const std::filesystem::file_status destStatus = std::filesystem::symlink_status( destLink, statusEc );
+        // libc++ (unlike the letter of the standard) sets ec=ENOENT for a plain "nothing there" —
+        // that is the ordinary first-install case, not a failure; any OTHER ec is a real one (a
+        // symlinked parent directory that can't be traversed, permission denied, ...).
+        if( statusEc && statusEc != std::errc::no_such_file_or_directory )
+        {
+            rw::emitTo( stderr, "ripwire skills install: could not check {}: {}\n", destLink.string(), statusEc.message() );
+            continue;   // cannot verify the destination is safe to write — skip rather than risk it
+        }
+        if( std::filesystem::exists( destStatus ) ) { continue; }   // arm 3: never overwrite
         const Outcome linkResult = linkOrRefuse( skillsStoreDir() / "skills" / skillDir, destLink );
         if( linkResult.ok ) { ++linked; }
     }
