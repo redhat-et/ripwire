@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
 
@@ -422,14 +423,202 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
     return { true, {}, skillsDest, linked, pruned };
 }
 
-// `--hook` merge lands in redhat-et/ripwire#225 task 12. This is deliberately not a stub that quietly
-// reports success — CLAUDE.md's "do not add a surface that quietly rounds, guesses, or omits" applies
-// to a CLI exit code exactly as much as to the XML map: an agent that installed with `--hook` and got
-// rc=0 back would reasonably believe the hook is wired.
+// ── the jq-based settings.json merge (Task 10) ──────────────────────────────────────────────────────
+//
+// Ported from skills/install.sh's install_claude_hook — that script is still the shipping mechanism
+// for a source checkout, so its merge is the reference this has to agree with byte-for-byte in shape.
+// Only the write mechanism differs: install.sh pipes jq's stdout straight into a `mktemp` + `mv`, this
+// goes through rw::pathguard::openNoFollowTruncate/writeAllAndClose (Amendment 2/3's house pattern,
+// already used by writeManifestV2 above) so a symlinked settings.json is refused the same way every
+// other sidecar write in this file is, and a non-regular-file destination is caught before anything
+// is touched.
+//
+// jq itself still does the actual JSON surgery — reimplementing a JSON merge in C++ to avoid a
+// dependency that G3 already tolerates (jq is invoked, not linked; its absence degrades to an
+// actionable message, never a crash) would be a second point of truth for a filter this file has to
+// keep in lockstep with install.sh's anyway.
+//
+// runCommandCapture (src/verbs_change.h) is NOT reused here even though its signature would fit: that
+// function's struct and body live lexically inside main.cpp's verb-dispatch anonymous namespace (opened
+// at main.cpp's RIPWIRE_MAIN_TU point), so moving this header's #include far enough down to see it would
+// nest `rw::skillsinstall` INSIDE that anonymous namespace too — silently forking it into a second,
+// unrelated namespace distinct from the `::rw::skillsinstall` this file's other callers (main.cpp's own
+// dispatch, `runSkillsInstall` itself) already reference. Its 8 MB head/tail capture cap is also sized for
+// build logs, not a settings.json this call then writes back whole. A small, local popen() reader — in the
+// same "one small POSIX-call-named function" spirit as symlinkOrRefuse/renameAtomic above — is the
+// correctly-scoped tool, not a second general-purpose mechanism.
+inline bool shellSingleQuote( std::string_view s, std::string& out )
+{
+    out += '\'';
+    for( const char c : s )
+    {
+        if( c == '\'' ) { out += "'\\''"; }
+        else            { out += c; }
+    }
+    out += '\'';
+    return true;
+}
+
+// Run `cmd` through /bin/sh -c via popen(), capturing stdout only (the jq command below redirects its
+// own stderr to /dev/null so a parse error never lands in the JSON this writes back). Returns false if
+// the shell could not even be started; `exitedNormally`/`exitCode` decode pclose()'s status the same
+// way runCommandCapture decodes waitpid's, so a caller can tell "jq is missing" (exit 127) from
+// "jq ran and rejected the input" (any other nonzero).
+struct ShellCaptureResult
+{
+    bool        spawned         = false;
+    bool        exitedNormally  = false;
+    int         exitCode        = -1;
+    std::string output;
+};
+
+inline ShellCaptureResult runShellCapture( const std::string& cmd )
+{
+    ShellCaptureResult result;
+    FILE* pipe = ::popen( cmd.c_str(), "r" );
+    if( pipe == nullptr ) { return result; }
+    result.spawned = true;
+    char buf[ 4096 ];
+    std::size_t n;
+    while( ( n = std::fread( buf, 1, sizeof( buf ), pipe ) ) > 0 )
+    {
+        result.output.append( buf, n );
+    }
+    const int status = ::pclose( pipe );
+    if( status >= 0 && WIFEXITED( status ) )
+    {
+        result.exitedNormally = true;
+        result.exitCode = WEXITSTATUS( status );
+    }
+    return result;
+}
+
+// matcher string is LOAD-BEARING (skills/install.sh:16-33, `hookMatcher`): Claude Code reads a matcher
+// made only of letters, digits, `_`, `-`, spaces, `,` and `|` as a literal LIST of exact tool names —
+// any other character (the `.*` here) puts it on the regex path instead, where `^(...)$` anchors it to
+// a whole-name match. Copied verbatim; do not rederive it.
+inline constexpr std::string_view kClaudeHookMatcher = "^(Read|Glob|Grep|Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)$";
+
+// `--hook`: merge ripwire's PreToolUse (+ SessionStart, on first registration) entries into an agent's
+// settings file, identifying any EXISTING registration by the hook script's basename (skills/install.sh's
+// `jqIsScript`) rather than by exact path — a machine that has ripwire installed from more than one
+// location (a package copy and a git checkout, say) must recognise its own prior registration and
+// refresh it in place, never append a second one that doubles every counted call.
 inline int mergeHookConfig( std::string_view agentName )
 {
-    rw::emitTo( stderr, "ripwire skills install --hook: hook merge for '{}' is not implemented yet (redhat-et/ripwire#225 task 12)\n", std::string( agentName ) );
-    return 1;
+    const std::string effectiveAgent = agentName.empty() ? std::string( "claude" ) : std::string( agentName );
+    const rw::AgentTarget* row = rw::agentTarget( effectiveAgent );
+    if( row == nullptr || !row->hookSlot )
+    {
+        rw::emitTo( stderr, "ripwire skills install: --hook is not supported for {} yet\n", effectiveAgent );
+        return 2;
+    }
+    if( effectiveAgent != "claude" )
+    {
+        // codex is the only OTHER row with hookSlot=true today, and its real merge target
+        // (${CODEX_HOME:-~/.codex}/hooks.json, a different matcher, a route script this call does not
+        // check for) is not this port's scope — writing to the wrong file, or a half-shaped one, would
+        // be a worse answer than refusing outright (CLAUDE.md: no surface that quietly guesses).
+        rw::emitTo( stderr, "ripwire skills install: --hook merge for {} is not implemented yet\n", effectiveAgent );
+        return 2;
+    }
+
+    const std::filesystem::path settingsDir = std::filesystem::path( envOr( "CLAUDE_CONFIG_DIR", ( homeDir() / ".claude" ).string() ) );
+    std::error_code mkdirEc;
+    std::filesystem::create_directories( settingsDir, mkdirEc );
+    if( mkdirEc )
+    {
+        rw::emitTo( stderr, "ripwire skills install: could not create {}: {}\n", settingsDir.string(), mkdirEc.message() );
+        return 1;
+    }
+    const std::filesystem::path settingsPath = settingsDir / "settings.json";
+    const std::filesystem::path nudgeScript  = hooksStoreDir() / "hooks" / "ripwire-nudge.sh";   // relativePath is "hooks/<name>" (CMake's group prefix)
+
+    std::error_code existsEc;
+    if( !std::filesystem::exists( settingsPath, existsEc ) )
+    {
+        const rw::pathguard::OpenedFile opened = rw::pathguard::openNoFollowTruncate( "the agent settings file", settingsPath.string() );
+        if( opened.fd < 0 ) { return 1; }   // openNoFollowTruncate already emitted the reason
+        if( !rw::pathguard::writeAllAndClose( opened.fd, "{}\n" ) )
+        {
+            rw::emitTo( stderr, "ripwire skills install: could not initialize {}\n", settingsPath.string() );
+            return 1;
+        }
+    }
+
+    // jqIsScript identifies an existing registration by SCRIPT BASENAME, not exact path (skills/
+    // install.sh:35-49) — any prior copy's registration is recognised and refreshed, never duplicated.
+    // The first-registration branch adds both PreToolUse and SessionStart, exactly as
+    // install_claude_hook's "not yet registered" path does; the refresh branch touches only PreToolUse
+    // (matcher + command), matching refresh_hook_matcher.
+    const std::string jqProgram =
+        "def isScript($n): (.command // \"\") | split(\" \")[0] | endswith(\"/hooks/\" + $n);"
+        "if any((.hooks.PreToolUse // [])[]?.hooks[]?; isScript($n)) then "
+        "  .hooks.PreToolUse |= map( if any(.hooks[]?; isScript($n)) "
+        "    then .matcher = $m | .hooks |= map( if isScript($n) then .command = $cmd else . end ) "
+        "    else . end ) "
+        "else "
+        "  .hooks //= {} | "
+        "  .hooks.PreToolUse //= [] | "
+        "  .hooks.PreToolUse += [{\"matcher\": $m, \"hooks\": [{\"type\": \"command\", \"command\": $cmd}]}] | "
+        "  .hooks.SessionStart //= [] | "
+        "  .hooks.SessionStart += [{\"matcher\": \"startup|resume|clear\", \"hooks\": [{\"type\": \"command\", \"command\": $scmd}]}] "
+        "end";
+
+    // `jq --arg NAME VALUE ... PROGRAM SETTINGSPATH`, each token individually single-quoted for the
+    // shell — NAME itself needs no quoting (it is always one of the four bare identifiers below), but
+    // quoting it too is harmless and keeps every appended token going through the same one function.
+    const auto appendArg = [ ]( std::string& out, std::string_view name, std::string_view value )
+    {
+        out += " --arg ";
+        shellSingleQuote( name, out );
+        out += ' ';
+        shellSingleQuote( value, out );
+    };
+    std::string cmd = "jq";
+    appendArg( cmd, "cmd",  nudgeScript.string() );
+    appendArg( cmd, "scmd", nudgeScript.string() + " --session-start" );
+    appendArg( cmd, "m",    kClaudeHookMatcher );
+    appendArg( cmd, "n",    "ripwire-nudge.sh" );
+    cmd += ' ';
+    shellSingleQuote( jqProgram, cmd );
+    cmd += ' ';
+    shellSingleQuote( settingsPath.string(), cmd );
+    cmd += " 2>/dev/null";
+
+    const ShellCaptureResult result = runShellCapture( cmd );
+    if( !result.spawned )
+    {
+        rw::emitTo( stderr, "ripwire skills install: could not start a shell to run jq\n" );
+        return 1;
+    }
+    if( result.exitedNormally && result.exitCode == 127 )
+    {
+        rw::emitTo( stderr,
+                    "ripwire skills install: --hook needs jq on PATH to safely merge {} (not found).\n"
+                    "Add these by hand instead:\n"
+                    "  hooks.PreToolUse   += [{{\"matcher\":\"{}\",\"hooks\":[{{\"type\":\"command\",\"command\":\"{}\"}}]}}]\n"
+                    "  hooks.SessionStart += [{{\"matcher\":\"startup|resume|clear\",\"hooks\":[{{\"type\":\"command\",\"command\":\"{} --session-start\"}}]}}]\n",
+                    settingsPath.string(), kClaudeHookMatcher, nudgeScript.string(), nudgeScript.string() );
+        return 1;
+    }
+    // [ -s "$tmp" ] in install.sh's own words: an empty or non-zero-exit result never overwrites the
+    // existing file — a jq failure (malformed input JSON, say) has to be reported, not applied.
+    if( !result.exitedNormally || result.exitCode != 0 || result.output.empty() )
+    {
+        rw::emitTo( stderr, "ripwire skills install: --hook merge failed (is {} valid JSON?); nothing changed\n", settingsPath.string() );
+        return 1;
+    }
+
+    const rw::pathguard::OpenedFile opened = rw::pathguard::openNoFollowTruncate( "the agent settings file", settingsPath.string() );
+    if( opened.fd < 0 ) { return 1; }
+    if( !rw::pathguard::writeAllAndClose( opened.fd, result.output ) )
+    {
+        rw::emitTo( stderr, "ripwire skills install: could not write the merged hook config to {}\n", settingsPath.string() );
+        return 1;
+    }
+    rw::emitTo( stdout, "ripwire skills install: hook registered in {}\n", settingsPath.string() );
+    return 0;
 }
 
 inline int runSkillsInstall( int argc, char** argv, std::string_view executablePath )
