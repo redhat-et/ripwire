@@ -327,6 +327,7 @@ FAILFAST = {
     "mcpcodexmetacheck.sh":     ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
     "readmeexamplecheck.sh":    ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
     "radixsimdcheck.sh":        ( "compile-and-run parity harness; every arm is `echo FAIL; exit 2`",    2 ),
+    "skillsinstallcheck.sh":    ( "each arm's fail() prints and exits 1 directly, no accumulator", 1 ),
 }
 
 # ── (B) the sweep ─────────────────────────────────────────────────────────────────────────────────────
