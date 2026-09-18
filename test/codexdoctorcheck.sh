@@ -24,9 +24,9 @@ git -C "$REPO" add -A && git -C "$REPO" commit -qm init
 # The real installer owns the manifest contract. This remains isolated to AGENTS_FAKE.
 HOME="$HOME_FAKE" CODEX_HOME="$CODEX_FAKE" AGENTS_HOME="$AGENTS_FAKE" \
     bash "$ROOT/skills/install.sh" --codex >/dev/null
-[ -f "$AGENTS_FAKE/skills/.ripwire-manifest-v1" ] \
+[ -f "$AGENTS_FAKE/skills/.ripwire-manifest-v2" ] \
     && ok "Codex install emits the versioned skills manifest" \
-    || no "Codex install omitted .ripwire-manifest-v1"
+    || no "Codex install omitted .ripwire-manifest-v2"
 
 HOOKDIR="$TMP/hooks"; mkdir -p "$HOOKDIR"
 for h in ripwire-codex-nudge.sh ripwire-codex-route.sh; do
@@ -82,12 +82,12 @@ printf '%s' "$OUT" | xmllint --noout - 2>/dev/null \
 printf '%s' "$OUT" | grep -q 'DO_NOT_PRINT_CODEX_DOCTOR_SECRET' \
     && no "Codex doctor leaked an unrelated config secret" || ok "Codex doctor does not print config secrets"
 
-before="$( cksum "$CODEX_FAKE/hooks.json" "$CODEX_FAKE/config.toml" "$AGENTS_FAKE/skills/.ripwire-manifest-v1"; find "$AGENTS_FAKE/skills" -mindepth 1 -maxdepth 1 -print | sort )"
+before="$( cksum "$CODEX_FAKE/hooks.json" "$CODEX_FAKE/config.toml" "$AGENTS_FAKE/skills/.ripwire-manifest-v2"; find "$AGENTS_FAKE/skills" -mindepth 1 -maxdepth 1 -print | sort )"
 run_doctor >/dev/null
-after="$( cksum "$CODEX_FAKE/hooks.json" "$CODEX_FAKE/config.toml" "$AGENTS_FAKE/skills/.ripwire-manifest-v1"; find "$AGENTS_FAKE/skills" -mindepth 1 -maxdepth 1 -print | sort )"
+after="$( cksum "$CODEX_FAKE/hooks.json" "$CODEX_FAKE/config.toml" "$AGENTS_FAKE/skills/.ripwire-manifest-v2"; find "$AGENTS_FAKE/skills" -mindepth 1 -maxdepth 1 -print | sort )"
 if [ "$before" = "$after" ]; then ok "Codex doctor is read-only"; else no "Codex doctor mutated the active surface"; fi
 
-declared="$( sed -n 's/^skill=//p' "$AGENTS_FAKE/skills/.ripwire-manifest-v1" | head -1 )"
+declared="$( sed -n 's/^skill=//p' "$AGENTS_FAKE/skills/.ripwire-manifest-v2" | head -1 )"
 mv "$AGENTS_FAKE/skills/$declared" "$TMP/$declared"
 SOUT="$( run_doctor )"; SRC=$?
 [ "$SRC" -eq 1 ] && printf '%s' "$SOUT" | grep -q '<c n="codex-skills" ok="0"' \

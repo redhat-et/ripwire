@@ -41,8 +41,12 @@ else
 fi
 
 WRAP="$( cd "$TMP" && "$TMP/prefix/bin/ripwire" wrap codex --force 2>&1 )"
+# realpath, not $TMP literally: the recipe prints the binary's OWN resolved path, and on macOS
+# $TMP (under /var/folders) and its canonical form (under /private/var/folders) are different strings
+# for the same file — comparing against $TMP unresolved fails there even though the binary is right.
+CANON_PREFIX="$( cd "$TMP/prefix" && pwd -P )"
 case "$WRAP" in
-    *"$TMP/prefix/share/ripwire/skills/install.sh\" --codex"*)
+    *"\"$CANON_PREFIX/bin/ripwire\" skills install --codex"*)
         ok "installed wrap recipe resolves the staged Codex installer" ;;
     *)  no "installed wrap recipe does not resolve the staged Codex installer" ;;
 esac
