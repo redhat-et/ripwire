@@ -275,16 +275,23 @@ inline ManifestV2 readManifestV2( const std::filesystem::path& manifestPath )
     return out;
 }
 
-// Write the sidecar: schema version, the executable that performed the install, and one `skill=`
-// line per name in `skillNames`. Goes through pathguard's openNoFollowTruncate (Amendment 2/3): this
-// sidecar is rewritten on every install, so it is a truncate-an-existing-file case, not an
-// extraction-into-a-fresh-directory case.
-inline bool writeManifestV2( const std::filesystem::path& skillsDest, std::string_view executablePath, const std::vector<std::string>& skillNames )
+// Write the sidecar: schema version, the embedded store's content-hash key (`source=`), and one
+// `skill=` line per name in `skillNames`. Goes through pathguard's openNoFollowTruncate (Amendment
+// 2/3): this sidecar is rewritten on every install, so it is a truncate-an-existing-file case, not
+// an extraction-into-a-fresh-directory case.
+//
+// `source=` MUST be `embedded_skills::kStoreKey` (a `<version>-<hash8>` string) — codexdoctor.h's
+// `skillsCheck` compares this same field against that exact value to decide `stale`. It was
+// previously the resolved BINARY PATH, which can never equal a version-hash string, so `stale` was
+// `true` on every real install, forever; see the "fresh real install must not read stale"
+// end-to-end arm in test/skillsinstallcheck.sh, and test/doctorstalecheck.sh's own hand-constructed
+// fixtures for the reader side of this contract.
+inline bool writeManifestV2( const std::filesystem::path& skillsDest, const std::vector<std::string>& skillNames )
 {
     const std::filesystem::path manifestPath = skillsDest / ".ripwire-manifest-v2";
     const rw::pathguard::OpenedFile opened = rw::pathguard::openNoFollowTruncate( "the skills manifest", manifestPath.string() );
     if( opened.fd < 0 ) { return false; }
-    std::string body = "version=2\nsource=" + std::string( executablePath ) + "\n";
+    std::string body = "version=2\nsource=" + std::string( embedded_skills::kStoreKey ) + "\n";
     for( const std::string& s : skillNames ) { body += "skill=" + s + "\n"; }
     return rw::pathguard::writeAllAndClose( opened.fd, body );
 }
@@ -345,7 +352,7 @@ struct InstallOutcome
 // own pre-#225 `mode="path"` branch (`dst="$explicitPath"`): the path IS the skills root itself, used
 // verbatim, with no agent lookup at all. `agentName` is then irrelevant to destination resolution (it
 // still selects nothing here — contributor filtering below is agent-independent) and is ignored.
-inline InstallOutcome installForAgent( std::string_view agentName, bool contributor, bool force, std::string_view executablePath,
+inline InstallOutcome installForAgent( std::string_view agentName, bool contributor, bool force,
                                         const std::filesystem::path& explicitDest = {} )
 {
     const Outcome extracted = ensureStoreExtracted();
@@ -439,7 +446,7 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
         if( linkResult.ok ) { ++linked; }
     }
 
-    if( !writeManifestV2( skillsDest, executablePath, currentSkillNames ) )
+    if( !writeManifestV2( skillsDest, currentSkillNames ) )
     {
         return { false, "could not write the skills manifest at " + manifestPath.string(), skillsDest, linked, pruned };
     }
@@ -667,7 +674,11 @@ inline int acceptPositionalDest( std::string_view a, std::string& dest, bool& gi
     return 0;
 }
 
-inline int runSkillsInstall( int argc, char** argv, std::string_view executablePath )
+// `executablePath` is no longer forwarded into the manifest (writeManifestV2 now writes
+// `embedded_skills::kStoreKey` directly — see its own comment) but stays in this signature because
+// main.cpp:3485 calls this as `runSkillsInstall( argc, argv, selfExecutablePath( argv[0] ) )`; changing
+// that call site is out of scope for this fix.
+inline int runSkillsInstall( int argc, char** argv, [[maybe_unused]] std::string_view executablePath )
 {
     std::string_view agentArg;
     bool hook = false, contributor = false, force = false, all = false;
@@ -732,7 +743,7 @@ inline int runSkillsInstall( int argc, char** argv, std::string_view executableP
                 continue;
             }
 
-            const InstallOutcome result = installForAgent( ac.name, contributor, force, executablePath );
+            const InstallOutcome result = installForAgent( ac.name, contributor, force );
             if( !result.ok )
             {
                 rw::emitTo( stderr, "ripwire skills install --all: {}: {}\n", std::string( ac.name ), result.error );
@@ -753,7 +764,7 @@ inline int runSkillsInstall( int argc, char** argv, std::string_view executableP
         return anyFailure ? 1 : 0;
     }
 
-    const InstallOutcome result = installForAgent( agentArg, contributor, force, executablePath,
+    const InstallOutcome result = installForAgent( agentArg, contributor, force,
                                                     destGiven ? std::filesystem::path( explicitDest ) : std::filesystem::path{} );
     if( !result.ok )
     {

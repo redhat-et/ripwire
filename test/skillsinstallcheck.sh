@@ -197,4 +197,22 @@ grep -qi "hook" skills_install.err || fail "refusal did not mention --hook"
 [ -e "$d13/dest" ] && fail "explicit DEST_PATH was installed to despite the --hook refusal"
 rm -rf "$d13" skills_install.err
 
-echo "OK: skillsinstallcheck (arms 1-13)"
+# ── arm 14: end-to-end — a real install followed by a real --doctor must not read stale ────────
+# Closes the gap that let writeManifestV2 write the BINARY'S PATH into source= while skillsCheck
+# compares it against kStoreKey (a version-hash string): every fresh install then read as stale,
+# forever. doctorstalecheck.sh's arm c never caught this because it hand-writes source=<kStoreKey>
+# directly rather than going through a real install. This arm goes through the real path: real
+# `skills install`, then a real `--doctor --agent=claude` against the same sandboxed HOME.
+CURRENT_ARM="14-fresh-install-not-stale"
+sandbox
+d14="$d"
+"$ripwire" skills install >/dev/null
+doctor_out="$( "$ripwire" "$ROOT" --doctor --agent=claude 2>&1 )"
+echo "$doctor_out" | grep -q 'n="claude-skills"[^>]*stale="1"' && fail "a fresh real install was reported stale=\"1\" by a real --doctor run"
+# positive assertion too — a missing/renamed row or a silently-failed install would otherwise pass
+# the negative check above vacuously, the same blind spot that let the underlying bug through.
+echo "$doctor_out" | grep -q 'n="claude-skills" ok="1"' \
+    || fail "fresh real install did not produce an ok=\"1\" claude-skills row: $doctor_out"
+rm -rf "$d14"
+
+echo "OK: skillsinstallcheck (arms 1-14)"
