@@ -129,6 +129,7 @@
 "docmentioncheck.sh": 0.9,
 "docscommandscheck.sh": 1.4,
 "doctorcheck.sh": 61.0,
+"doctorstalecheck.sh": 3.0,
 "donelegendcheck.sh": 10.8,
 "droppedpositivecheck.sh": 42.7,
 "duprowcheck.sh": 1.5,
