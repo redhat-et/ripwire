@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h"
+#include "infra/jsonesc.h"  // rw::shSingleQuote — the canonical shell single-quoting helper (see its own header comment)
 #include "pathguard.h"
 #include "embedded_skills.h"
 #include "wrap.h"   // AgentTarget / agentTarget / kAgentTargets / AgentConfig / getAgentConfigs / resolveSkillsRoot —
@@ -438,26 +439,18 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
 // actionable message, never a crash) would be a second point of truth for a filter this file has to
 // keep in lockstep with install.sh's anyway.
 //
-// runCommandCapture (src/verbs_change.h) is NOT reused here even though its signature would fit: that
-// function's struct and body live lexically inside main.cpp's verb-dispatch anonymous namespace (opened
-// at main.cpp's RIPWIRE_MAIN_TU point), so moving this header's #include far enough down to see it would
-// nest `rw::skillsinstall` INSIDE that anonymous namespace too — silently forking it into a second,
-// unrelated namespace distinct from the `::rw::skillsinstall` this file's other callers (main.cpp's own
-// dispatch, `runSkillsInstall` itself) already reference. Its 8 MB head/tail capture cap is also sized for
-// build logs, not a settings.json this call then writes back whole. A small, local popen() reader — in the
-// same "one small POSIX-call-named function" spirit as symlinkOrRefuse/renameAtomic above — is the
-// correctly-scoped tool, not a second general-purpose mechanism.
-inline bool shellSingleQuote( std::string_view s, std::string& out )
-{
-    out += '\'';
-    for( const char c : s )
-    {
-        if( c == '\'' ) { out += "'\\''"; }
-        else            { out += c; }
-    }
-    out += '\'';
-    return true;
-}
+// runCommandCapture (src/verbs_change.h) is NOT reused here, even though its signature would fit, because
+// it is textually unreachable from this file: verbs_change.h opens with
+// `#if !defined( RIPWIRE_MAIN_TU ) #error ...`, and RIPWIRE_MAIN_TU is only #defined at main.cpp:529 —
+// 477 lines AFTER main.cpp:52's `#include "skillsinstall.h"`. Moving this header's own #include down past
+// that point to dodge the guard would put `rw::skillsinstall` inside main.cpp's verb-dispatch anonymous
+// namespace instead, a different and equally real problem: `runSkillsInstall` is called elsewhere in
+// main.cpp as `rw::skillsinstall::runSkillsInstall` (main.cpp:3485, outside that namespace), so anything
+// this header defines from inside it would live in a distinct, unreachable namespace. Its 8 MB head/tail
+// capture cap is also sized for build logs, not a settings.json this call then writes back whole. A
+// small, local popen() reader — in the same "one small POSIX-call-named function" spirit as
+// symlinkOrRefuse/renameAtomic above — is the correctly-scoped tool, not a second general-purpose
+// mechanism.
 
 // Run `cmd` through /bin/sh -c via popen(), capturing stdout only (the jq command below redirects its
 // own stderr to /dev/null so a parse error never lands in the JSON this writes back). Returns false if
@@ -566,24 +559,25 @@ inline int mergeHookConfig( std::string_view agentName )
         "end";
 
     // `jq --arg NAME VALUE ... PROGRAM SETTINGSPATH`, each token individually single-quoted for the
-    // shell — NAME itself needs no quoting (it is always one of the four bare identifiers below), but
-    // quoting it too is harmless and keeps every appended token going through the same one function.
-    const auto appendArg = [ ]( std::string& out, std::string_view name, std::string_view value )
+    // shell via rw::shSingleQuote (src/infra/jsonesc.h) — NAME itself needs no quoting (it is always
+    // one of the four bare identifiers below), but quoting it too is harmless and keeps every appended
+    // token going through the same one function.
+    const auto appendArg = [ ]( std::string& out, const std::string& name, const std::string& value )
     {
         out += " --arg ";
-        shellSingleQuote( name, out );
+        out += rw::shSingleQuote( name );
         out += ' ';
-        shellSingleQuote( value, out );
+        out += rw::shSingleQuote( value );
     };
     std::string cmd = "jq";
     appendArg( cmd, "cmd",  nudgeScript.string() );
     appendArg( cmd, "scmd", nudgeScript.string() + " --session-start" );
-    appendArg( cmd, "m",    kClaudeHookMatcher );
+    appendArg( cmd, "m",    std::string( kClaudeHookMatcher ) );
     appendArg( cmd, "n",    "ripwire-nudge.sh" );
     cmd += ' ';
-    shellSingleQuote( jqProgram, cmd );
+    cmd += rw::shSingleQuote( jqProgram );
     cmd += ' ';
-    shellSingleQuote( settingsPath.string(), cmd );
+    cmd += rw::shSingleQuote( settingsPath.string() );
     cmd += " 2>/dev/null";
 
     const ShellCaptureResult result = runShellCapture( cmd );
