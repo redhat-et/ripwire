@@ -80,28 +80,28 @@ while IFS= read -r row; do
         esac
     fi
 
-    # (F) THE SKILLS FLAG MUST BE REAL. The recipe printing `install.sh --openclaw` while the installer
+    # (F) THE SKILLS FLAG MUST BE REAL. The recipe printing `skills install --openclaw` while the binary
     # rejects `--openclaw` is a two-file defect that no single-file gate can see. This arm spans both:
-    # it runs the installer with the flag the recipe printed and requires it to be understood.
+    # it runs the binary with the flag the recipe printed and requires it to be understood.
     if [ -n "$skillsroot" ]; then
-        grep -qF "install.sh${skillsflag:+ $skillsflag}" "$TMP/out" \
-            || fail "(F) '$name' has a skills root but the recipe never prints 'install.sh ${skillsflag}'"
+        grep -qF "skills install${skillsflag:+ $skillsflag}" "$TMP/out" \
+            || fail "(F) '$name' has a skills root but the recipe never prints 'skills install ${skillsflag}'"
         if [ -n "$skillsflag" ]; then
             out="$( HOME="$TMP/h-$name" AGENTS_HOME="$TMP/h-$name/.agents" CODEX_HOME="$TMP/h-$name/.codex" \
-                    bash "$ROOT/skills/install.sh" "$skillsflag" 2>&1 )"; irc=$?
+                    "$BIN" skills install "$skillsflag" 2>&1 )"; irc=$?
             # STATUS AND EFFECT, not just the absence of a rejection message. The first version only
             # grepped for "unknown option", so an installer that accepted the flag and then died on an
             # unbound variable — or exited 0 having installed nothing — passed the arm that exists to
             # catch exactly that. Review caught this; my mutation pass did not.
             if [ "$irc" -ne 0 ]; then
-                fail "(F) recipe tells the user to run 'install.sh $skillsflag' for '$name', but it exits $irc: $( printf '%s' "$out" | tail -1 )"
-            elif ! printf '%s' "$out" | grep -q '^installed '; then
-                fail "(F) 'install.sh $skillsflag' for '$name' exits 0 but installs nothing"
+                fail "(F) recipe tells the user to run 'skills install $skillsflag' for '$name', but it exits $irc: $( printf '%s' "$out" | tail -1 )"
+            elif ! printf '%s' "$out" | grep -q 'skill(s) linked into'; then
+                fail "(F) 'skills install $skillsflag' for '$name' exits 0 but installs nothing"
             fi
         fi
     else
-        if grep -q 'install\.sh' "$TMP/out"; then
-            fail "(G) '$name' has NO verified skills root but the recipe still prints an install.sh line"
+        if grep -q 'skills install' "$TMP/out"; then
+            fail "(G) '$name' has NO verified skills root but the recipe still prints a skills install line"
         fi
     fi
 
