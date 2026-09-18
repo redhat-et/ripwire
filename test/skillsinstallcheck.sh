@@ -151,4 +151,17 @@ skill_store="$( find "$RIPWIRE_DATA_HOME/skills" -name 'SKILL.md' | head -1 )"
 [ -x "$skill_store" ] && fail "extracted skill file $skill_store is unexpectedly executable"
 rm -rf "$d10"
 
-echo "OK: skillsinstallcheck (arms 1-10)"
+# ── arm 11: a bare positional path is loudly refused, never silently installed to the default home ──
+CURRENT_ARM="11-positional-path-refused"
+sandbox
+d11="$d"
+bogus_dest="$d11/somewhere-explicit"
+"$ripwire" skills install "$bogus_dest" >skills_install.out 2>skills_install.err
+rc=$?
+[ "$rc" -ne 0 ] || fail "positional destination path was accepted (exit 0) instead of refused"
+grep -q "$bogus_dest" skills_install.err || fail "refusal did not name the rejected path in stderr"
+[ -e "$CLAUDE_CONFIG_DIR/skills" ] && fail "refused run still created the default agent home ($CLAUDE_CONFIG_DIR/skills)"
+[ -e "$bogus_dest" ] && fail "refused run still created the (unsupported) explicit destination"
+rm -rf "$d11" skills_install.out skills_install.err
+
+echo "OK: skillsinstallcheck (arms 1-11)"
