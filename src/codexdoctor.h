@@ -184,8 +184,10 @@ inline Check shimBinaryCheck( const std::string& selfPath )
     {
         const bool haveSelf = !selfPath.empty();
         const bool sameFile = haveSelf && filesByteIdentical( selfPath, *managed );
-        return { "codex-binary", !haveSelf || sameFile,
-                 "on_path=\"1\" managed=\"1\" same_file=\"" + std::string( sameFile ? "1" : "0" ) + "\"" };
+        Check out{ "codex-binary", !haveSelf || sameFile,
+                   "on_path=\"1\" managed=\"1\" same_file=\"" + std::string( sameFile ? "1" : "0" ) + "\"" };
+        if( !out.ok ) { out.attrs += " hint=\"the version manager's installed ripwire differs from this one — re-run its install (e.g. `mise install`/`aqua install`) to update it\""; }
+        return out;
     }
     // The shim itself is recognised, but the manager's on-disk layout does not resolve to exactly
     // one candidate — disclosed unknown, distinct from both ok=1 and a broken/STALE report.
