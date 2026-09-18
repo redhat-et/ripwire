@@ -92,7 +92,7 @@ mv "$AGENTS_FAKE/skills/$declared" "$TMP/$declared"
 SOUT="$( run_doctor )"; SRC=$?
 [ "$SRC" -eq 1 ] && printf '%s' "$SOUT" | grep -q '<c n="codex-skills" ok="0"' \
     && ok "missing manifest-declared skill fails parity" || no "missing declared skill did not fail parity"
-printf '%s' "$SOUT" | grep -q 'skills/install.sh --codex' \
+printf '%s' "$SOUT" | grep -q 'ripwire skills install --codex' \
     && ok "skill failure names the exact repair command" || no "skill failure omitted repair command"
 mv "$TMP/$declared" "$AGENTS_FAKE/skills/$declared"
 mkdir "$AGENTS_FAKE/skills/ripwire-undocumented"

@@ -482,7 +482,10 @@ inline std::vector<Check> inspect( const std::string& selfPath )
     const std::string home = envOr( "HOME", "" );
     const std::filesystem::path agentHome = envOr( "AGENTS_HOME", home + "/.agents" );
     const std::filesystem::path codexHome = envOr( "CODEX_HOME", home + "/.codex" );
-    return { binaryCheck( selfPath ), skillsCheck( agentHome / "skills", "bash skills/install.sh --codex" ), hooksCheck( codexHome / "hooks.json" ),
+    // I6 (2026-09-18 review round 1): `skills install --codex` is implemented and works (unlike
+    // hooksCheck's own hint just below, which still names the shell installer on purpose — the Codex
+    // --hook merge is unimplemented and refuses loudly, so pointing at it would be a worse hint).
+    return { binaryCheck( selfPath ), skillsCheck( agentHome / "skills", "ripwire skills install --codex" ), hooksCheck( codexHome / "hooks.json" ),
              mcpCheck( codexHome / "config.toml" ) };
 }
 
