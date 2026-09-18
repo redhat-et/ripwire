@@ -39,7 +39,7 @@ OUT="$( "$BIN" wrap "$AGENT" --force 2>&1 )" \
     && ok "\`ripwire wrap $AGENT\` exits 0" \
     || no "\`ripwire wrap $AGENT\` failed: $( printf '%s' "$OUT" | head -1 )"
 
-CMD="$( printf '%s' "$OUT" | grep -oE '^"[^"]+" skills install( --[a-z-]+)?' | head -1 )"
+CMD="$( printf '%s' "$OUT" | grep -oE "^'[^']+' skills install( --[a-z-]+)?" | head -1 )"
 DEST="$( printf '%s' "$OUT" | sed -n 's/.*# deploy to \([^ ]*\) (.*/\1/p' | head -1 )"
 
 if [ -n "$CMD" ]; then
@@ -79,6 +79,12 @@ if [ -n "$CMD" ]; then
         no "\`$CMD\` FAILED: $( printf '%s' "$OUTPUT" | head -1 )"
     fi
     rm -rf "$SANDBOX"
+elif printf '%s' "$OUT" | grep -q 'skills install'; then
+    # A "skills install" line is present but did not match the single-quoted-path regex above — that
+    # is a real regression (an unescaped or malformed recipe line), not the legitimate "this agent has
+    # no skills root" case the empty-match branch below reports. An "arm that cannot fail" is CLAUDE.md
+    # §2's own named failure mode: this branch exists so a print-site regression is a FAIL, not a note.
+    no "\`ripwire wrap $AGENT\` printed a skills-install line that did not match the expected \"'<path>' skills install\" shape"
 else
     note "no skills line for $AGENT — this agent has no verified skills-discovery root, which is itself the claim"
 fi
