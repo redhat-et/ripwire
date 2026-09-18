@@ -19,7 +19,17 @@ no(){ echo "  FAIL  $1"; fail=1; }
 [ -f "$SK/install.sh" ] || { echo "no skills/install.sh"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+<<<<<<< HEAD
+=======
+# Each invocation below owns its HOME; inherited agent overrides must not escape it.
+unset CODEX_HOME AGENTS_HOME HERMES_HOME CLAUDE_CONFIG_DIR
+>>>>>>> 1ef69c11 (test: sandbox CLAUDE_CONFIG_DIR against ambient leaks in install/hook/release gates)
 DST="$TMP/skills"
+# `ripwire skills install <DEST_PATH>` extracts its embedded store cache under $HOME/.local/share/
+# ripwire even when the destination is explicit — a real write, not a symlink-only op. An explicit-
+# DEST_PATH call below with no HOME= of its own inherits whatever HOME the caller's shell has, which
+# is exactly the leak test/installer_isolation.py exists to catch. Every such call gets this sandbox.
+NOHOME="$TMP/dest-path-home"; mkdir -p "$NOHOME"
 
 # ---- 1) install.sh deploys EVERY user-facing shipped skill (the deployment-drift catch) ----
 # 2026-09-06 (stranger audit): a skill whose SKILL.md front matter says `audience: contributor` is about
@@ -29,7 +39,7 @@ DST="$TMP/skills"
 shippedAll=$( ls -d "$SK"/ripwire-*/ 2>/dev/null | wc -l | tr -d ' ' )
 contributorSkills=$( grep -l '^audience: contributor' "$SK"/ripwire-*/SKILL.md 2>/dev/null | wc -l | tr -d ' ' )
 shipped=$(( shippedAll - contributorSkills ))
-bash "$SK/install.sh" "$DST" >/dev/null 2>&1
+HOME="$NOHOME" bash "$SK/install.sh" "$DST" >/dev/null 2>&1
 live=0; for l in "$DST"/ripwire-*; do [ -e "$l" ] && live=$(( live + 1 )); done
 { [ "$shipped" -gt 0 ] && [ "$live" -eq "$shipped" ]; } \
     && ok "install.sh deploys all $shipped user-facing shipped skills (live=$live; $contributorSkills contributor-only held back)" \
@@ -44,18 +54,18 @@ grep -q 'skill=ripwire-opt-remarks' "$DST/.ripwire-manifest-v1" 2>/dev/null \
     && no "(1b) the manifest declares the contributor-only skill that was not linked (manifest parity broken)" \
     || ok "(1b) the manifest declares exactly the linked set (no contributor-only entry)"
 CONTRIB="$TMP/skills-contrib"
-bash "$SK/install.sh" --contributor "$CONTRIB" >/dev/null 2>&1
+HOME="$NOHOME" bash "$SK/install.sh" --contributor "$CONTRIB" >/dev/null 2>&1
 [ -e "$CONTRIB/ripwire-opt-remarks" ] \
     && ok "(1c) --contributor activates the contributor-only skill too ($shippedAll linked)" \
     || no "(1c) --contributor did not activate ripwire-opt-remarks"
-bash "$SK/install.sh" "$CONTRIB" >/dev/null 2>&1
+HOME="$NOHOME" bash "$SK/install.sh" "$CONTRIB" >/dev/null 2>&1
 [ ! -e "$CONTRIB/ripwire-opt-remarks" ] && [ ! -L "$CONTRIB/ripwire-opt-remarks" ] \
     && ok "(1c) a re-run without --contributor prunes the contributor-only link (a setup that stops being one does not keep it)" \
     || no "(1c) the contributor-only link survived a re-run without --contributor"
 
 # ---- 2) PRUNE removes a stale/dangling skill (the deleted-skill catch) ----
 ln -sfn "$SK/ripwire-does-not-exist/" "$DST/ripwire-ghost"     # a dangling symlink (deleted skill)
-bash "$SK/install.sh" "$DST" >/dev/null 2>&1                    # re-run: must prune it
+HOME="$NOHOME" bash "$SK/install.sh" "$DST" >/dev/null 2>&1     # re-run: must prune it
 if [ -e "$DST/ripwire-ghost" ] || [ -L "$DST/ripwire-ghost" ]; then
     no "install.sh did NOT prune a dangling ripwire-ghost symlink (stale skills linger)"
 else
@@ -204,10 +214,10 @@ fi
 if [ -n "$BIN" ] && [ -x "$BIN" ]; then
     "$BIN" wrap codex --force >"$TMP/wrap-codex" 2>/dev/null
     { grep -q '^\[mcp_servers\.ripwire\]$' "$TMP/wrap-codex" \
-      && grep -q '^bash skills/install\.sh --codex' "$TMP/wrap-codex"; } \
+      && grep -qE '^"[^"]+" skills install --codex[[:space:]]+#' "$TMP/wrap-codex"; } \
         && ok "wrap codex emits Codex MCP config plus the Codex skill-install command" \
         || no "wrap codex does not emit a complete Codex install/discovery recipe"
-    grep -q '^bash skills/install\.sh --codex --hook' "$TMP/wrap-codex" \
+    grep -qE '^"[^"]+" skills install --codex --hook' "$TMP/wrap-codex" \
         && ok "wrap codex recommends the Codex-native advisory hook" \
         || no "wrap codex omits the Codex-native advisory hook install"
 

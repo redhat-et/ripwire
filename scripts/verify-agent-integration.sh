@@ -39,25 +39,33 @@ OUT="$( "$BIN" wrap "$AGENT" --force 2>&1 )" \
     && ok "\`ripwire wrap $AGENT\` exits 0" \
     || no "\`ripwire wrap $AGENT\` failed: $( printf '%s' "$OUT" | head -1 )"
 
-FLAG="$( printf '%s' "$OUT" | grep -oE 'install\.sh( --[a-z-]+)?' | head -1 | sed 's/install\.sh *//' )"
-DEST="$( printf '%s' "$OUT" | sed -n 's/.*# deploy to \(.*\) (drift-gated).*/\1/p' | head -1 )"
+CMD="$( printf '%s' "$OUT" | grep -oE '^"[^"]+" skills install( --[a-z-]+)?' | head -1 )"
+DEST="$( printf '%s' "$OUT" | sed -n 's/.*# deploy to \([^ ]*\) (.*/\1/p' | head -1 )"
 
-if printf '%s' "$OUT" | grep -q 'install\.sh'; then
+if [ -n "$CMD" ]; then
     SANDBOX="$( mktemp -d )"
     if [ "$LIVE" -eq 1 ]; then
         H="$HOME"; echo "  (--live: installing into your REAL home)"
+        AGENTS_D="${AGENTS_HOME:-$H/.agents}"; CODEX_D="${CODEX_HOME:-$H/.codex}"; CLAUDE_D="${CLAUDE_CONFIG_DIR:-$H/.claude}"
     else
         H="$SANDBOX"; echo "  (sandbox HOME=$SANDBOX — pass --live to install for real)"
+        # FORCED to the sandbox, never falling through to an ambient AGENTS_HOME/CODEX_HOME/
+        # CLAUDE_CONFIG_DIR: those resolve ahead of HOME for their agents, so a dev shell that already
+        # has one exported (ordinary for this repo's own wiring) would otherwise write past $H no
+        # matter what HOME says, defeating the "sandbox" this branch of LIVE claims to be.
+        AGENTS_D="$H/.agents"; CODEX_D="$H/.codex"; CLAUDE_D="$H/.claude"
     fi
-    if OUTPUT="$( HOME="$H" AGENTS_HOME="${AGENTS_HOME:-$H/.agents}" CODEX_HOME="${CODEX_HOME:-$H/.codex}" \
-                  bash "$ROOT/skills/install.sh" ${FLAG:+$FLAG} 2>&1 )"; then
-        ok "\`skills/install.sh ${FLAG:-(no flag)}\` — the exact command the recipe printed — succeeds"
-        N="$( printf '%s' "$OUTPUT" | grep -c '^installed ' )"
-        [ "$N" -gt 0 ] && ok "$N skills deployed" || no "installer reported success but deployed 0 skills"
+    # $CMD is already the resolved, runnable command the recipe printed — run it verbatim, no reconstruction.
+    if OUTPUT="$( HOME="$H" AGENTS_HOME="$AGENTS_D" CODEX_HOME="$CODEX_D" CLAUDE_CONFIG_DIR="$CLAUDE_D" \
+                  eval "$CMD" 2>&1 )"; then
+        ok "\`$CMD\` — the exact command the recipe printed — succeeds"
+        N="$( printf '%s' "$OUTPUT" | sed -n 's/.*: \([0-9][0-9]*\) skill(s) linked.*/\1/p' | head -1 )"
+        [ -n "$N" ] && [ "$N" -gt 0 ] && ok "$N skills deployed" || no "installer reported success but deployed 0 skills"
         # `sh -c "echo \"$DEST\""` does NOT expand a leading ~ inside double quotes, so this resolved to a
         # literal "~/.claude/skills", the glob below matched nothing, and the "every skill resolves" check
         # passed having examined zero files. Expand the tilde explicitly.
-        RESOLVED="$( HOME="$H" AGENTS_HOME="${AGENTS_HOME:-$H/.agents}" sh -c "echo ${DEST/#\~/$H}" 2>/dev/null )"
+        RESOLVED="$( HOME="$H" AGENTS_HOME="$AGENTS_D" CLAUDE_CONFIG_DIR="$CLAUDE_D" \
+                     sh -c "echo ${DEST/#\~/$H}" 2>/dev/null )"
         BROKEN=0; SEEN=0
         for l in "$RESOLVED"/ripwire-*; do
             [ -e "$l" ] || continue
@@ -68,7 +76,7 @@ if printf '%s' "$OUT" | grep -q 'install\.sh'; then
         [ "$BROKEN" -eq 0 ] && ok "every deployed skill resolves to a readable SKILL.md" \
                             || no "$BROKEN deployed skill(s) have no readable SKILL.md — a symlink the agent cannot follow"
     else
-        no "\`skills/install.sh ${FLAG:-}\` FAILED: $( printf '%s' "$OUTPUT" | head -1 )"
+        no "\`$CMD\` FAILED: $( printf '%s' "$OUTPUT" | head -1 )"
     fi
     rm -rf "$SANDBOX"
 else
