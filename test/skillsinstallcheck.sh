@@ -138,4 +138,17 @@ grep -q "ripwire-nudge.sh" "$CLAUDE_CONFIG_DIR/settings.json" || fail "ripwire's
 python3 -c "import json; json.load(open('$CLAUDE_CONFIG_DIR/settings.json'))" || fail "settings.json is not valid JSON after merge"
 rm -rf "$d9"
 
-echo "OK: skillsinstallcheck (arms 1-9)"
+# ── arm 10: extracted hook scripts are executable (0755), extracted skill files are not ────────
+CURRENT_ARM="10-hook-mode-executable"
+sandbox
+d10="$d"
+"$ripwire" skills install >/dev/null
+hook_store="$( find "$RIPWIRE_DATA_HOME/hooks" -name '*.sh' | head -1 )"
+[ -n "$hook_store" ] || fail "no extracted hook script found under \$RIPWIRE_DATA_HOME/hooks"
+[ -x "$hook_store" ] || fail "extracted hook script $hook_store is not executable"
+skill_store="$( find "$RIPWIRE_DATA_HOME/skills" -name 'SKILL.md' | head -1 )"
+[ -n "$skill_store" ] || fail "no extracted SKILL.md found under \$RIPWIRE_DATA_HOME/skills"
+[ -x "$skill_store" ] && fail "extracted skill file $skill_store is unexpectedly executable"
+rm -rf "$d10"
+
+echo "OK: skillsinstallcheck (arms 1-10)"
