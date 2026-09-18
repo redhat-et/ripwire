@@ -13,6 +13,7 @@ fail() { echo "FAIL ($CURRENT_ARM): $1" >&2; exit 1; }
 # an export made there never reaches the parent, so "$ripwire" would see the real, not the sandboxed, env.
 sandbox() {
     d="$( mktemp -d )"
+    . "$ROOT/test/lib/unset-agent-env-variables.sh"
     export HOME="$d" CLAUDE_CONFIG_DIR="$d/.claude" RIPWIRE_DATA_HOME="$d/.local/share/ripwire"
 }
 

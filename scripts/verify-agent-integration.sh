@@ -47,16 +47,21 @@ if [ -n "$CMD" ]; then
     if [ "$LIVE" -eq 1 ]; then
         H="$HOME"; echo "  (--live: installing into your REAL home)"
         AGENTS_D="${AGENTS_HOME:-$H/.agents}"; CODEX_D="${CODEX_HOME:-$H/.codex}"; CLAUDE_D="${CLAUDE_CONFIG_DIR:-$H/.claude}"
+        HERMES_D="${HERMES_HOME:-$H/.hermes}"; DATA_D="${RIPWIRE_DATA_HOME:-$H/.local/share/ripwire}"
     else
         H="$SANDBOX"; echo "  (sandbox HOME=$SANDBOX — pass --live to install for real)"
         # FORCED to the sandbox, never falling through to an ambient AGENTS_HOME/CODEX_HOME/
-        # CLAUDE_CONFIG_DIR: those resolve ahead of HOME for their agents, so a dev shell that already
-        # has one exported (ordinary for this repo's own wiring) would otherwise write past $H no
-        # matter what HOME says, defeating the "sandbox" this branch of LIVE claims to be.
+        # CLAUDE_CONFIG_DIR/HERMES_HOME/RIPWIRE_DATA_HOME: those resolve ahead of HOME for their
+        # agents, so a dev shell that already has one exported (ordinary for this repo's own wiring)
+        # would otherwise write past $H no matter what HOME says, defeating the "sandbox" this branch
+        # of LIVE claims to be. ($AGENT is a free CLI argument, so e.g. `hermes` must not leak into
+        # the operator's ambient $HERMES_HOME while this banner says "sandbox".)
         AGENTS_D="$H/.agents"; CODEX_D="$H/.codex"; CLAUDE_D="$H/.claude"
+        HERMES_D="$H/.hermes"; DATA_D="$H/.local/share/ripwire"
     fi
     # $CMD is already the resolved, runnable command the recipe printed — run it verbatim, no reconstruction.
     if OUTPUT="$( HOME="$H" AGENTS_HOME="$AGENTS_D" CODEX_HOME="$CODEX_D" CLAUDE_CONFIG_DIR="$CLAUDE_D" \
+                  HERMES_HOME="$HERMES_D" RIPWIRE_DATA_HOME="$DATA_D" \
                   eval "$CMD" 2>&1 )"; then
         ok "\`$CMD\` — the exact command the recipe printed — succeeds"
         N="$( printf '%s' "$OUTPUT" | sed -n 's/.*: \([0-9][0-9]*\) skill(s) linked.*/\1/p' | head -1 )"
@@ -64,7 +69,7 @@ if [ -n "$CMD" ]; then
         # `sh -c "echo \"$DEST\""` does NOT expand a leading ~ inside double quotes, so this resolved to a
         # literal "~/.claude/skills", the glob below matched nothing, and the "every skill resolves" check
         # passed having examined zero files. Expand the tilde explicitly.
-        RESOLVED="$( HOME="$H" AGENTS_HOME="$AGENTS_D" CLAUDE_CONFIG_DIR="$CLAUDE_D" \
+        RESOLVED="$( HOME="$H" AGENTS_HOME="$AGENTS_D" CLAUDE_CONFIG_DIR="$CLAUDE_D" HERMES_HOME="$HERMES_D" \
                      sh -c "echo ${DEST/#\~/$H}" 2>/dev/null )"
         BROKEN=0; SEEN=0
         for l in "$RESOLVED"/ripwire-*; do
