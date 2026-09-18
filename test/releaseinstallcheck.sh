@@ -82,10 +82,14 @@ else
 fi
 [ -x "$PREFIX/bin/ripwire" ] && [ "$( "$PREFIX/bin/ripwire" --version | awk '{print $2}' )" = "0.3.6" ] \
     && ok "installed binary reports the release tag version" || no "installed binary/version mismatch"
-[ -f "$PREFIX/share/ripwire/skills/ripwire-router/SKILL.md" ] \
-    && ok "installer stages bundled skills" || no "installer did not stage bundled skills"
-[ -x "$PREFIX/share/ripwire/hooks/ripwire-codex-nudge.sh" ] \
-    && ok "installer stages bundled Codex hooks" || no "installer did not stage bundled Codex hooks"
+# I2: $prefix/share/ripwire/{skills,hooks} staging was deleted by design (redhat-et/ripwire#225 —
+# skills/hooks are embedded in the binary; `ripwire skills install --all`, covered by arm (E1) below,
+# is what activates them now). These two used to assert the staging directory existed; asserting it
+# does NOT is the current, correct contract — not a duplicate of (E1), which checks activation.
+[ ! -d "$PREFIX/share/ripwire/skills" ] \
+    && ok "installer no longer stages a \$prefix/share/ripwire/skills directory" || no "installer staged the removed \$prefix/share/ripwire/skills directory"
+[ ! -d "$PREFIX/share/ripwire/hooks" ] \
+    && ok "installer no longer stages a \$prefix/share/ripwire/hooks directory" || no "installer staged the removed \$prefix/share/ripwire/hooks directory"
 
 mv "$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz.sha256" "$TMP/assets/checksum.saved"
 if HOME="$SBHOME" PATH="$FAKE:$PATH" RELEASE_FIXTURE="$TMP/release.json" ASSET_FIXTURE="$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" \
