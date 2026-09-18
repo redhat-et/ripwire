@@ -312,7 +312,8 @@ inline Check skillsCheck( const std::filesystem::path& skillHome, std::string_vi
     {
         out.attrs += stale
             ? " hint=\"run " + std::string( installCmd ) + " (embedded skills have moved on since this was installed)\""
-            : " hint=\"run " + std::string( installCmd ) + " to restore exact manifest parity\"";
+            : " hint=\"run " + std::string( installCmd ) + " --force to restore exact manifest parity"
+              " (a plain re-run is a no-op if a foreign entry is blocking it)\"";
     }
     return out;
 }
