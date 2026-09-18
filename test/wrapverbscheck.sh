@@ -10,7 +10,7 @@
 #   2. Run `ripwire wrap claude`.
 #   3. Assert every live verb name appears in the wrap output (word-boundary match, so e.g.
 #      "for" doesn't false-positive on "before").
-#   4. Assert the wrap output names skills/install.sh.
+#   4. Assert the wrap output prints the collapsed "<path>" skills install line.
 #   5. Every agent recipe (and every --all stanza) carries the pasteable use-when blurb block,
 #      naming the right context file per client (CLAUDE.md / AGENTS.md / .cursor/rules / …).
 #   6. The blurb body is emitted from ONE shared source — byte-identical across agents.
@@ -93,12 +93,12 @@ done <"$TMP/live_verbs"
                      || no "$missing live verb(s) missing from 'ripwire wrap claude'"
 
 echo
-echo "=== 3. skills/install.sh line present ==="
+echo "=== 3. collapsed skills install line present ==="
 
-if echo "$WRAP_OUT" | grep -q 'skills/install\.sh'; then
-    ok "wrap claude names skills/install.sh"
+if echo "$WRAP_OUT" | grep -qE '^"[^"]+" skills install( --[a-z-]+)?( --hook)?([[:space:]]|$)'; then
+    ok "wrap claude prints the collapsed \"<path>\" skills install line"
 else
-    no "wrap claude does NOT mention skills/install.sh — the skill-adoption step is invisible"
+    no "wrap claude does NOT print the collapsed skills-install line — the skill-adoption step is invisible"
 fi
 
 echo
