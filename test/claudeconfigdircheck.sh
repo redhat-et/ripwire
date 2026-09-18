@@ -42,13 +42,13 @@
 # writes the operator's real ~/.claude. HOME is redirected for every child process that could
 # otherwise fall back to it. Exits non-zero on any failure. Does NOT edit regression.sh.
 set -u
-# Arm (G) deliberately runs commands with no CLAUDE_CONFIG_DIR assignment of its own, to exercise the
-# UNSET path — but an operator or CI shell that already exports CLAUDE_CONFIG_DIR (this repo's own
-# agents run under one) leaks straight through a bare `VAR=x cmd`, which does not clear anything else
-# already in the environment. That silently defeats arm (G)'s intent AND writes into the operator's
-# REAL config dir. Unset it here, once, so every arm's environment is exactly what it declares.
-unset CLAUDE_CONFIG_DIR
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+# Arm (G) deliberately runs commands with no CLAUDE_CONFIG_DIR assignment of its own, to exercise the
+# UNSET path — but an operator or CI shell that already exports CLAUDE_CONFIG_DIR, AGENTS_HOME,
+# CODEX_HOME, HERMES_HOME or RIPWIRE_DATA_HOME (this repo's own agents run under some of these)
+# leaks straight through a bare `VAR=x cmd`. The (I) --all arm below is exactly this shape: --all
+# walks every detected agent, so all of those are live vectors. Clear the whole set here, once.
+. "$ROOT/test/lib/unset-agent-env-variables.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
