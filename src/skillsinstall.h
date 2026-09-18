@@ -340,26 +340,40 @@ struct InstallOutcome
 // kept for back-compat. So it is not a `kAgentTargets` row: adding one would misrepresent it as a
 // distinct agent when it shares "codex" identity for contributor filtering and (later) hook behavior —
 // it is handled here, as a destination override, not in wrap.h's agent table.
-inline InstallOutcome installForAgent( std::string_view agentName, bool contributor, bool force, std::string_view executablePath )
+// `explicitDest`, when non-empty, is the CLI surface's DEST_PATH form
+// ([--claude|--codex|--codex-legacy|--hermes|--openclaw|--all|DEST_PATH]) — mirrors skills/install.sh's
+// own pre-#225 `mode="path"` branch (`dst="$explicitPath"`): the path IS the skills root itself, used
+// verbatim, with no agent lookup at all. `agentName` is then irrelevant to destination resolution (it
+// still selects nothing here — contributor filtering below is agent-independent) and is ignored.
+inline InstallOutcome installForAgent( std::string_view agentName, bool contributor, bool force, std::string_view executablePath,
+                                        const std::filesystem::path& explicitDest = {} )
 {
     const Outcome extracted = ensureStoreExtracted();
     if( !extracted.ok ) { return { false, extracted.error, {}, 0, 0 }; }
 
-    const std::string effectiveAgent = agentName.empty() ? std::string( "claude" ) : std::string( agentName );
-    const bool        isCodexLegacy  = ( effectiveAgent == "codex-legacy" );
-    // codex-legacy shares codex's row for everything (contributor filtering, future hook behavior) —
-    // only its resolved destination differs, so the table lookup below is by "codex" for that case.
-    const rw::AgentTarget* row = rw::agentTarget( isCodexLegacy ? std::string_view( "codex" ) : std::string_view( effectiveAgent ) );
-    if( row == nullptr || row->skillsRoot.empty() )
+    std::filesystem::path skillsDest;
+    if( !explicitDest.empty() )
     {
-        return { false, "no verified skills discovery path for '" + effectiveAgent + "'", {}, 0, 0 };
+        skillsDest = explicitDest;
     }
-    const std::filesystem::path skillsDest = isCodexLegacy
-        ? ( std::filesystem::path( envOr( "CODEX_HOME", ( homeDir() / ".codex" ).string() ) ) / "skills" )
-        : rw::resolveSkillsRoot( *row, homeDir().string() );
-    if( skillsDest.empty() )
+    else
     {
-        return { false, "could not resolve skills destination for '" + effectiveAgent + "'", {}, 0, 0 };
+        const std::string effectiveAgent = agentName.empty() ? std::string( "claude" ) : std::string( agentName );
+        const bool        isCodexLegacy  = ( effectiveAgent == "codex-legacy" );
+        // codex-legacy shares codex's row for everything (contributor filtering, future hook behavior) —
+        // only its resolved destination differs, so the table lookup below is by "codex" for that case.
+        const rw::AgentTarget* row = rw::agentTarget( isCodexLegacy ? std::string_view( "codex" ) : std::string_view( effectiveAgent ) );
+        if( row == nullptr || row->skillsRoot.empty() )
+        {
+            return { false, "no verified skills discovery path for '" + effectiveAgent + "'", {}, 0, 0 };
+        }
+        skillsDest = isCodexLegacy
+            ? ( std::filesystem::path( envOr( "CODEX_HOME", ( homeDir() / ".codex" ).string() ) ) / "skills" )
+            : rw::resolveSkillsRoot( *row, homeDir().string() );
+        if( skillsDest.empty() )
+        {
+            return { false, "could not resolve skills destination for '" + effectiveAgent + "'", {}, 0, 0 };
+        }
     }
 
     std::error_code mkdirEc;
@@ -624,10 +638,41 @@ inline int mergeHookConfig( std::string_view agentName )
     return 0;
 }
 
+// Accepts ONE bare positional token as the DEST_PATH form of the CLI surface
+// ([--claude|--codex|--codex-legacy|--hermes|--openclaw|--all|DEST_PATH]) — mirrors skills/install.sh's
+// own pre-#225 `mode="path"` branch. Returns 2 (refusal already emitted to stderr) for an empty token
+// or a second one; otherwise records it into `dest`/`given` and returns 0. Split out of
+// runSkillsInstall's argv loop so that loop's own five flag checks and this token's own two-way
+// refusal stay two small functions instead of one that braids both kinds of branching together.
+inline int acceptPositionalDest( std::string_view a, std::string& dest, bool& given )
+{
+    // An empty token is not a path — refuse it rather than let `installForAgent`'s
+    // `!explicitDest.empty()` override fall through silently to the default agent home (the exact
+    // silent-misdirection bug this function exists to close).
+    if( a.empty() )
+    {
+        rw::emitTo( stderr, "ripwire skills install: an empty destination path is not a path\n" );
+        return 2;
+    }
+    // Mirrors skills/install.sh's own "only one destination path is allowed" refusal — a second bare
+    // token is a mistake to report, never a silent overwrite of the first.
+    if( given )
+    {
+        rw::emitTo( stderr, "ripwire skills install: only one destination path is allowed (already have '{}', got '{}')\n",
+                    dest, std::string( a ) );
+        return 2;
+    }
+    dest = std::string( a );
+    given = true;
+    return 0;
+}
+
 inline int runSkillsInstall( int argc, char** argv, std::string_view executablePath )
 {
     std::string_view agentArg;
     bool hook = false, contributor = false, force = false, all = false;
+    std::string explicitDest;
+    bool destGiven = false;
     for( int i = 3; i < argc; ++i )
     {
         const std::string_view a = argv[ i ];
@@ -638,19 +683,23 @@ inline int runSkillsInstall( int argc, char** argv, std::string_view executableP
         else if( a.rfind( "--", 0 ) == 0 && a.size() > 2 ) { agentArg = a.substr( 2 ); }   // --codex -> "codex"
         else
         {
-            // Any other token is a bare positional — the plan's own CLI surface lists DEST_PATH as
-            // part of it, but no code path here resolves one to a destination: `agentArg` would stay
-            // empty and installForAgent() would silently fall through to the caller's DEFAULT agent
-            // home. That is exactly the silent-misdirection bug this arm exists to close (mirrors
-            // skills/install.sh's own wrapper-level refusal, which only covers the bash script, not
-            // this binary) — refuse loudly, before ensureStoreExtracted() touches disk, rather than
-            // guess what the caller meant.
-            rw::emitTo( stderr,
-                        "ripwire skills install: an explicit destination path ('{}') is not supported by the embedded installer yet.\n"
-                        "  Use an agent flag instead (--claude, --codex, --hermes, --openclaw, --codex-legacy).\n",
-                        std::string( a ) );
-            return 2;
+            const int rc = acceptPositionalDest( a, explicitDest, destGiven );
+            if( rc != 0 ) { return rc; }
         }
+    }
+
+    if( destGiven && hook )
+    {
+        // Mirrors skills/install.sh's `path) echo "...--hook needs --claude or --codex, not an
+        // explicit skill path" ;;` verbatim: an explicit DEST_PATH has no agent identity to register
+        // a hook under, so this is refused rather than guessing one.
+        rw::emitTo( stderr, "ripwire skills install: --hook needs --claude or --codex, not an explicit skill path\n" );
+        return 2;
+    }
+    if( destGiven && all )
+    {
+        rw::emitTo( stderr, "ripwire skills install: --all installs to every detected agent's own destination; an explicit path is not supported with --all\n" );
+        return 2;
     }
 
     if( all )
@@ -704,13 +753,14 @@ inline int runSkillsInstall( int argc, char** argv, std::string_view executableP
         return anyFailure ? 1 : 0;
     }
 
-    const InstallOutcome result = installForAgent( agentArg, contributor, force, executablePath );
+    const InstallOutcome result = installForAgent( agentArg, contributor, force, executablePath,
+                                                    destGiven ? std::filesystem::path( explicitDest ) : std::filesystem::path{} );
     if( !result.ok )
     {
         rw::emitTo( stderr, "ripwire skills install: {}\n", result.error );
         return 1;
     }
-    if( hook )
+    if( hook )   // destGiven && hook was already refused above, so this is always the agent-flag form here
     {
         return mergeHookConfig( agentArg.empty() ? std::string_view( "claude" ) : agentArg );
     }

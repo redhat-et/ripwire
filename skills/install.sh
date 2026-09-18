@@ -27,16 +27,9 @@ ripwire_bin="$( find_ripwire )" || {
     exit 1
 }
 
-# `ripwire skills install` selects a destination by agent flag only — no explicit-path positional yet
-# (redhat-et/ripwire#225). Refuse loudly rather than silently install to the caller's default agent
-# home, which is what a bare exec of an unrecognized positional would otherwise do.
-for arg in "$@"; do
-    case "$arg" in
-        --*) ;;
-        *) echo "skills/install.sh: an explicit destination path ('$arg') is not supported by the embedded installer yet." >&2
-           echo "  Use an agent flag instead (--claude, --codex, --hermes, --openclaw, --codex-legacy)." >&2
-           exit 2 ;;
-    esac
-done
-
+# An explicit destination path positional is passed straight through — `ripwire skills install` (the
+# binary this wrapper delegates to) supports it natively as of the fix landed alongside redhat-et/
+# ripwire#225 Task 15: a bare, non-"--"-prefixed argument installs into that literal path, refusing
+# loudly (not silently falling back to the caller's default agent home) on anything ambiguous, such as
+# a second positional or `--hook` combined with one.
 exec "$ripwire_bin" skills install "$@"

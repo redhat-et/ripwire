@@ -151,17 +151,50 @@ skill_store="$( find "$RIPWIRE_DATA_HOME/skills" -name 'SKILL.md' | head -1 )"
 [ -x "$skill_store" ] && fail "extracted skill file $skill_store is unexpectedly executable"
 rm -rf "$d10"
 
-# ── arm 11: a bare positional path is loudly refused, never silently installed to the default home ──
-CURRENT_ARM="11-positional-path-refused"
+# ── arm 11: explicit DEST_PATH positional installs into that literal path, not the default agent home ──
+CURRENT_ARM="11-explicit-dest-path"
 sandbox
 d11="$d"
-bogus_dest="$d11/somewhere-explicit"
-"$ripwire" skills install "$bogus_dest" >skills_install.out 2>skills_install.err
-rc=$?
-[ "$rc" -ne 0 ] || fail "positional destination path was accepted (exit 0) instead of refused"
-grep -q "$bogus_dest" skills_install.err || fail "refusal did not name the rejected path in stderr"
-[ -e "$CLAUDE_CONFIG_DIR/skills" ] && fail "refused run still created the default agent home ($CLAUDE_CONFIG_DIR/skills)"
-[ -e "$bogus_dest" ] && fail "refused run still created the (unsupported) explicit destination"
-rm -rf "$d11" skills_install.out skills_install.err
+explicit_dest="$d11/an-explicit-dest"
+"$ripwire" skills install "$explicit_dest" >/dev/null
+[ -d "$explicit_dest" ] || fail "explicit DEST_PATH was not created"
+[ "$( find "$explicit_dest" -maxdepth 1 -name 'ripwire-*' -type l | wc -l )" -gt 0 ] \
+    || fail "no ripwire-* skill symlinks created under the explicit DEST_PATH"
+[ -f "$explicit_dest/.ripwire-manifest-v2" ] || fail "no v2 manifest written under the explicit DEST_PATH"
+[ -e "$CLAUDE_CONFIG_DIR/skills" ] && fail "explicit DEST_PATH silently installed into the default agent home instead"
+rm -rf "$d11"
 
-echo "OK: skillsinstallcheck (arms 1-11)"
+# ── arm 12: a second bare positional is refused loudly, not silently accepted as a second dest ────
+CURRENT_ARM="12-second-positional-refused"
+sandbox
+d12="$d"
+"$ripwire" skills install "$d12/one" "$d12/two" >skills_install.err 2>&1
+rc=$?
+[ "$rc" -ne 0 ] || fail "a second destination positional exited 0 instead of being refused"
+grep -qi "only one destination path" skills_install.err || fail "refusal did not name the reason"
+[ -e "$d12/one" ] && fail "first destination was installed to despite the refusal"
+[ -e "$d12/two" ] && fail "second destination was installed to despite the refusal"
+rm -rf "$d12" skills_install.err
+
+# an empty positional is not a path either — must not silently fall through to the default agent home
+# (installForAgent's `!explicitDest.empty()` override is the exact seam this would slip through).
+sandbox
+d12b="$d"
+"$ripwire" skills install "" >skills_install.err 2>&1
+rc=$?
+[ "$rc" -ne 0 ] || fail "an empty destination positional exited 0 instead of being refused"
+[ -e "$CLAUDE_CONFIG_DIR/skills" ] && fail "an empty destination positional silently installed into the default agent home"
+rm -rf "$d12b" skills_install.err
+
+# ── arm 13: --hook with an explicit DEST_PATH is refused (path installs have no hook target) ──────
+CURRENT_ARM="13-hook-with-dest-path-refused"
+sandbox
+d13="$d"
+"$ripwire" skills install --hook "$d13/dest" >skills_install.err 2>&1
+rc=$?
+[ "$rc" -ne 0 ] || fail "--hook with an explicit DEST_PATH exited 0 instead of being refused"
+grep -qi "hook" skills_install.err || fail "refusal did not mention --hook"
+[ -e "$d13/dest" ] && fail "explicit DEST_PATH was installed to despite the --hook refusal"
+rm -rf "$d13" skills_install.err
+
+echo "OK: skillsinstallcheck (arms 1-13)"
