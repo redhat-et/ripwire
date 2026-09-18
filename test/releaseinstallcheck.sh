@@ -12,7 +12,8 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 # Detection and activation must use only the per-invocation homes below.
-unset CODEX_HOME AGENTS_HOME HERMES_HOME CLAUDE_CONFIG_DIR RIPWIRE_NO_ACTIVATE RIPWIRE_SKIP_CPU_CHECK RIPWIRE_CPUINFO
+. "$ROOT/test/lib/unset-agent-env-variables.sh"       # every HOME= below is per-invocation only
+unset RIPWIRE_NO_ACTIVATE RIPWIRE_SKIP_CPU_CHECK RIPWIRE_CPUINFO
 FAKE="$TMP/fake"; mkdir -p "$FAKE" "$TMP/assets/ripwire-0.3.6-macos-arm64/skills/ripwire-router" "$TMP/assets/ripwire-0.3.6-macos-arm64/hooks"
 
 printf '#!/bin/sh\necho "ripwire 0.3.6 (Release, Test)"\n' >"$TMP/assets/ripwire-0.3.6-macos-arm64/ripwire"

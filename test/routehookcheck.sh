@@ -29,6 +29,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/unset-agent-env-variables.sh"       # every HOME= below is per-invocation only
 HOOK="$ROOT/hooks/ripwire-claude-route.sh"
 NUDGE="$ROOT/hooks/ripwire-nudge.sh"
 INSTALL="$ROOT/skills/install.sh"

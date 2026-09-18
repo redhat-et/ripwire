@@ -24,7 +24,7 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HERMES_HOME="$TMP/hermes-home"; rm -rf "$HERMES_HOME"; mkdir -p "$HERMES_HOME"
 # The bare (Claude-default) install.sh call below (line ~79) resolves settings/skills through
 # CLAUDE_CONFIG_DIR ahead of its own HOME= override — an ambient CLAUDE_CONFIG_DIR writes past it.
-unset CLAUDE_CONFIG_DIR
+. "$ROOT/test/lib/unset-agent-env-variables.sh"       # every HOME= below is per-invocation only
 
 # helper: skill NAMES shipped in the repo — the flat Agent-Skills-standard set plus the Hermes-native
 # set under skills/hermes/ (both deploy via --hermes; a flat dir of the same name wins and the native
