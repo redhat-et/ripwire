@@ -66,25 +66,26 @@ first command to build for that machine's own CPU, or use `./install.sh` below, 
 
 To put a source build on your `PATH`, run `./install.sh` from the checkout. It builds a Release binary tuned
 for this machine's CPU in `build-install/` and installs it under `RIPWIRE_INSTALL_PREFIX`, or under
-`brew --prefix` when Homebrew is present, or else under `~/.local`. Like the prebuilt installer, it stages
-skills and hooks under `<prefix>/share/ripwire/` and activates the skills for Claude Code and Codex when it
-finds them. `RIPWIRE_NO_ACTIVATE=1` stages only; `RIPWIRE_ACTIVATE_CODEX=1` also registers the Codex hooks.
+`brew --prefix` when Homebrew is present, or else under `~/.local`. Like the prebuilt installer, it activates
+the skills for Claude Code and Codex when it finds them — skills and hooks are embedded in the `ripwire`
+binary itself, not staged as separate files. `RIPWIRE_NO_ACTIVATE=1` stages only; `RIPWIRE_ACTIVATE_CODEX=1`
+also registers the Codex hooks.
 
 ## Connect your coding agent
 
 ### Skills
 
 Skills tell an agent *when* to reach for which ripwire verb. The installers activate them for the agents they
-detect. To activate them yourself, run the staged skills installer (replace `~/.local` with your prefix if
-you changed it):
+detect. To activate them yourself (or re-activate after an upgrade), run `ripwire skills install` — replace
+`ripwire` with the absolute path to your binary if it is not on `PATH`:
 
 | Agent | Command | Links into |
 | --- | --- | --- |
-| Claude Code | `bash ~/.local/share/ripwire/skills/install.sh` | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills` |
-| Codex | `bash ~/.local/share/ripwire/skills/install.sh --codex` | `${AGENTS_HOME:-~/.agents}/skills` |
-| Hermes (initial support) | `bash ~/.local/share/ripwire/skills/install.sh --hermes` | `${HERMES_HOME:-~/.hermes}/skills` |
-| openclaw (initial support) | `bash ~/.local/share/ripwire/skills/install.sh --openclaw` | `~/.agents/skills` |
-| Anything else | `bash ~/.local/share/ripwire/skills/install.sh <dir>` | `<dir>` |
+| Claude Code | `ripwire skills install --claude` | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills` |
+| Codex | `ripwire skills install --codex` | `${AGENTS_HOME:-~/.agents}/skills` |
+| Hermes (initial support) | `ripwire skills install --hermes` | `${HERMES_HOME:-~/.hermes}/skills` |
+| openclaw (initial support) | `ripwire skills install --openclaw` | `~/.agents/skills` |
+| Anything else | `ripwire skills install <dir>` | `<dir>` |
 
 Hermes and openclaw support is initial. CI checks what the installers write on disk. For Hermes, a contributor
 also ran the installer and the MCP registration against a real Hermes install when support landed
@@ -100,11 +101,11 @@ itself.
 
 ### Advisory hooks (optional)
 
-`bash ~/.local/share/ripwire/skills/install.sh --hook` registers ripwire's advisory hooks for Claude Code in
+`ripwire skills install --claude --hook` registers ripwire's advisory hooks for Claude Code in
 its `settings.json`: a SessionStart primer that adds ripwire's when-to-use guidance, a UserPromptSubmit router
 that suggests one ready-to-run command when it is confident, and a PreToolUse hook that suggests nothing and
-only records, on your machine, which tool calls ripwire could have answered. Adding `--codex --hook` does the
-same for Codex in `~/.codex/hooks.json`; open `/hooks` in Codex to review and trust them. The hooks never
+only records, on your machine, which tool calls ripwire could have answered. `ripwire skills install --codex
+--hook` does the same for Codex in `~/.codex/hooks.json`; open `/hooks` in Codex to review and trust them. The hooks never
 block a tool call, they need `jq`, and they are registered only when you pass `--hook`.
 
 ### MCP server (optional)
