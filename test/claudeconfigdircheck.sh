@@ -42,6 +42,12 @@
 # writes the operator's real ~/.claude. HOME is redirected for every child process that could
 # otherwise fall back to it. Exits non-zero on any failure. Does NOT edit regression.sh.
 set -u
+# Arm (G) deliberately runs commands with no CLAUDE_CONFIG_DIR assignment of its own, to exercise the
+# UNSET path — but an operator or CI shell that already exports CLAUDE_CONFIG_DIR (this repo's own
+# agents run under one) leaks straight through a bare `VAR=x cmd`, which does not clear anything else
+# already in the environment. That silently defeats arm (G)'s intent AND writes into the operator's
+# REAL config dir. Unset it here, once, so every arm's environment is exactly what it declares.
+unset CLAUDE_CONFIG_DIR
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -125,15 +131,17 @@ if unguarded:
 else:
     ok( "(A) census: all %d Claude-config resolution site(s) honour CLAUDE_CONFIG_DIR" % len( sites ) )
 
-# A floor, never a total: the census this gate was written against found ELEVEN resolution lines —
-# install.sh x2, scripts/install.sh x2, skills/install.sh x2, src/cli.h, src/codexdoctor.h,
-# src/main.cpp, src/wrap.h x2. Fewer means sites were deleted (or the scan stopped seeing them)
-# rather than fixed, and the arm above would then be vacuously green. A legitimate refactor that
-# merges two of them lowers this number on purpose and should say so in its commit.
-if len( sites ) < 11:
-    no( "(A) only %d resolution site(s) found; at least 11 are expected — the scan lost its subject" % len( sites ) )
+# A floor, never a total. redhat-et/ripwire#225 collapsed scripts/install.sh and skills/install.sh
+# into thin delegates to `ripwire skills install` — those 4 lines legitimately stopped resolving the
+# directory themselves, and src/skillsinstall.h picked up 1 in their place: install.sh x2, src/cli.h,
+# src/codexdoctor.h, src/main.cpp, src/skillsinstall.h, src/wrap.h x2 = EIGHT. Fewer means sites were
+# deleted (or the scan stopped seeing them) rather than fixed, and the arm above would then be
+# vacuously green. A legitimate refactor that merges two of them lowers this number on purpose and
+# should say so in its commit.
+if len( sites ) < 8:
+    no( "(A) only %d resolution site(s) found; at least 8 are expected — the scan lost its subject" % len( sites ) )
 else:
-    ok( "(A) the scan still sees its subject (%d site(s) >= the floor of 11)" % len( sites ) )
+    ok( "(A) the scan still sees its subject (%d site(s) >= the floor of 8)" % len( sites ) )
 
 if len( exempt ) != 2:
     no( "(A) %d crawl-denylist row(s) exempted, expected exactly 2 (src/ingest.h, src/mcpindex.h): %s"
@@ -298,16 +306,29 @@ if ! grep -q '^# ──── claude ────' "$I_WRAP"; then
 else
     no "(I) wrap --all claimed Claude Code is installed at a config dir that does not exist"
 fi
-# the installers' own guard, evaluated the way a reader's shell evaluates it: a relocation to a
+# the installer's own guard, evaluated the way a reader's shell evaluates it: a relocation to a
 # missing directory must SKIP activation, never activate into the ~/.claude sitting beside it.
+# scripts/install.sh no longer builds this path itself (#225: it delegates to `ripwire skills
+# install --all`, which owns the guard in src/skillsinstall.h — arm (A)'s census counts that site);
+# only install.sh, the top-level bootstrap, still shells the guard out textually.
 GUARDS=0; GUARD_OK=0
-for f in "$ROOT/install.sh" "$ROOT/scripts/install.sh"; do
+for f in "$ROOT/install.sh"; do
     G=$( grep -m1 -o 'if \[ -d "\${CLAUDE_CONFIG_DIR:-\$HOME/\.claude}" \]' "$f" || true )
     [ -n "$G" ] || continue
     GUARDS=$(( GUARDS + 1 ))
     HOME="$FULL" CLAUDE_CONFIG_DIR="$MISSING" bash -c '[ -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ]' \
         || GUARD_OK=$(( GUARD_OK + 1 ))
 done
+# scripts/install.sh's half of the same claim: `ripwire skills install --all` (what it now calls
+# instead of shelling the guard out itself) must not activate claude into $HOME/.claude when
+# CLAUDE_CONFIG_DIR names a directory that does not exist.
+ALL_HOME="$TMP/guard-all-home"; mkdir -p "$ALL_HOME/.claude"
+SKIP_OUT="$( HOME="$ALL_HOME" CLAUDE_CONFIG_DIR="$MISSING" "$BIN" skills install --all 2>&1 )"
+GUARDS=$(( GUARDS + 1 ))
+if printf '%s' "$SKIP_OUT" | grep -q '^ripwire skills install --all: claude skipped' \
+   && [ ! -e "$ALL_HOME/.claude/skills" ]; then
+    GUARD_OK=$(( GUARD_OK + 1 ))
+fi
 if [ "$GUARDS" -eq 2 ] && [ "$GUARD_OK" -eq 2 ]; then
     ok "(I) both installers' activation guards refuse a missing relocation instead of using \$HOME/.claude"
 else
