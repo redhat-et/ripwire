@@ -215,4 +215,60 @@ echo "$doctor_out" | grep -q 'n="claude-skills" ok="1"' \
     || fail "fresh real install did not produce an ok=\"1\" claude-skills row: $doctor_out"
 rm -rf "$d14"
 
-echo "OK: skillsinstallcheck (arms 1-14)"
+# ── arm 15: C1 — a DANGLING symlink (a v1-upgrade checkout link whose target is gone) is repaired
+# by a BARE install, no --force needed. This is the exact redhat-et/ripwire#225 review-round-1 C1
+# repro: symlink_status() on a dangling link reports type()==symlink, not not_found, so the old code's
+# `exists( destStatus )` read it as "already there" and skipped it forever.
+CURRENT_ARM="15-dangling-symlink-repaired"
+sandbox
+d15="$d"
+"$ripwire" skills install >/dev/null
+deadTarget="$d15/dead-checkout-does-not-exist/ripwire-orient"
+rm -f "$CLAUDE_CONFIG_DIR/skills/ripwire-orient"
+ln -s "$deadTarget" "$CLAUDE_CONFIG_DIR/skills/ripwire-orient"   # dangling: nothing at $deadTarget
+"$ripwire" skills install >/dev/null || fail "a bare re-run with a dangling entry present exited non-zero"
+newTarget="$( readlink "$CLAUDE_CONFIG_DIR/skills/ripwire-orient" )"
+[ "$newTarget" != "$deadTarget" ] || fail "the dangling v1-style symlink was left pointing at the dead checkout"
+[ -f "$CLAUDE_CONFIG_DIR/skills/ripwire-orient/SKILL.md" ] || fail "ripwire-orient does not resolve to a readable SKILL.md after repair"
+rm -rf "$d15"
+
+# ── arm 16: C1 — --force also repairs a FOREIGN but LIVE symlink (an old, still-existing checkout),
+# which the pre-fix --force could not: it only ever relinked an entry already pointing at THIS store.
+CURRENT_ARM="16-force-repairs-foreign-live-symlink"
+sandbox
+d16="$d"
+"$ripwire" skills install >/dev/null
+oldCheckout="$( mktemp -d )/ripwire-orient"; mkdir -p "$oldCheckout"
+rm -f "$CLAUDE_CONFIG_DIR/skills/ripwire-orient"
+ln -s "$oldCheckout" "$CLAUDE_CONFIG_DIR/skills/ripwire-orient"   # live, but not our store
+"$ripwire" skills install >/dev/null   # bare: must NOT touch it (arm 3's contract)
+[ "$( readlink "$CLAUDE_CONFIG_DIR/skills/ripwire-orient" )" = "$oldCheckout" ] \
+    || fail "a bare re-run touched a foreign-but-live symlink without --force"
+"$ripwire" skills install --force >/dev/null || fail "--force on a foreign-but-live entry exited non-zero"
+[ "$( readlink "$CLAUDE_CONFIG_DIR/skills/ripwire-orient" )" != "$oldCheckout" ] \
+    || fail "--force did not repair a symlink pointing at a foreign but still-live checkout"
+rm -rf "$d16" "$( dirname "$oldCheckout" )"
+
+# ── arm 17: C2 — the manifest records OUTCOME, not intent: a permission-denied destination fails
+# loudly (non-zero exit, a message per failed entry) and the manifest lists only what actually linked.
+CURRENT_ARM="17-manifest-outcome-not-intent"
+sandbox
+d17="$d"
+"$ripwire" skills install >/dev/null
+before_linked="$( grep -c '^skill=' "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" )"
+[ "$before_linked" -gt 0 ] || fail "nothing linked on the setup run — arm measures nothing"
+victim="$( grep '^skill=' "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" | head -1 | sed 's/^skill=//' )"
+rm -f "$CLAUDE_CONFIG_DIR/skills/$victim"
+chmod 0555 "$CLAUDE_CONFIG_DIR/skills"   # dir still traversable/listable, not writable: symlink() there fails EACCES
+"$ripwire" skills install >skills_install.err 2>&1
+rc=$?
+chmod 0755 "$CLAUDE_CONFIG_DIR/skills"   # restore before any further access (incl. cleanup)
+[ "$rc" -ne 0 ] || fail "a run that failed to link an entry exited 0"
+[ -s skills_install.err ] || fail "a link-loop failure produced no message at all"
+after_linked="$( grep -c '^skill=' "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" )"
+after_live="$( find "$CLAUDE_CONFIG_DIR/skills" -maxdepth 1 -name 'ripwire-*' -type l | wc -l | tr -d ' ' )"
+[ "$after_linked" -eq "$after_live" ] \
+    || fail "manifest skill= count ($after_linked) does not equal the actually-linked entries on disk ($after_live) — manifest still records intent, not outcome"
+rm -rf "$d17" skills_install.err
+
+echo "OK: skillsinstallcheck (arms 1-17)"
