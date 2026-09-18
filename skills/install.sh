@@ -16,7 +16,12 @@ find_ripwire()
     for candidate in "$here/build/ripwire" "$here/build-release/ripwire"; do
         [ -x "$candidate" ] && { echo "$candidate"; return; }
     done
-    command -v ripwire >/dev/null 2>&1 && { command -v ripwire; return; }
+    if command -v ripwire >/dev/null 2>&1; then
+        # M6: no checkout build beside this script — falling back to PATH, which a version-manager
+        # shim can resolve differently depending on the CURRENT DIRECTORY (see the comment above).
+        echo "skills/install.sh: no checkout build found; falling back to '$( command -v ripwire )' from PATH" >&2
+        command -v ripwire; return
+    fi
     return 1
 }
 
