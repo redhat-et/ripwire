@@ -261,7 +261,10 @@ fi
 # does not even buy the fix it was run for. Found 2026-09-05 on the operator's own machine while
 # closing the terminality round: PreToolUse, SessionStart and UserPromptSubmit each ended up doubled.
 # An existing registration is therefore identified by the SCRIPT, never by which copy registered it.
-hookMatcherExpected="$( sed -n 's/^hookMatcher="\(.*\)"$/\1/p' "$SK/install.sh" | head -n1 )"
+# I3: skills/install.sh is now a thin wrapper (redhat-et/ripwire#225) with no `hookMatcher=` line of
+# its own — the matcher lives in src/skillsinstall.h's kClaudeHookMatcher, read from there instead.
+hookMatcherExpected="$( sed -n 's/^inline constexpr std::string_view kClaudeHookMatcher = "\(.*\)";$/\1/p' "$ROOT/src/skillsinstall.h" | head -n1 )"
+[ -n "$hookMatcherExpected" ] || no "(D) could not read kClaudeHookMatcher from src/skillsinstall.h — this arm would otherwise pass vacuously"
 D_HOME="$TMP/dup-home"; mkdir -p "$D_HOME/.claude"
 cat >"$D_HOME/.claude/settings.json" <<'DUPJSON'
 {"hooks":{"PreToolUse":[{"matcher":"Read|Glob|Grep|Bash|mcp__ripwire__","hooks":[{"type":"command","command":"/opt/homebrew/share/ripwire/hooks/ripwire-nudge.sh"}]}],"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"/opt/homebrew/share/ripwire/hooks/ripwire-nudge.sh --session-start"}]}],"UserPromptSubmit":[{"matcher":"*","hooks":[{"type":"command","command":"/opt/homebrew/share/ripwire/hooks/ripwire-claude-route.sh"}]}]}}
