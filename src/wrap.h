@@ -1,5 +1,8 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/jsonesc.h"   // rw::shSingleQuote — C3 (2026-09-18 review round 1): the skills-install
+                              // recipe line below is a resolved BINARY PATH, printed for the user to
+                              // paste into a shell; double quotes do not stop `$(...)` or a backtick.
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -204,7 +207,11 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, c
         rw::emitTo( out, "# skills install: could not determine this binary's own path — reinvoke with an absolute path\n" );
         return;
     }
-    const std::string quotedPath = "\"" + std::string( executablePath ) + "\"";
+    // Single-quoted, via the canonical shell-quoting helper (already used elsewhere in this file's
+    // recipes) — a double-quoted path lets `$(...)`/backtick command substitution execute when the
+    // recipe is pasted (redhat-et/ripwire#225 review round 1, C3); a single-quoted path is inert to
+    // every shell metacharacter except a literal `'`, which shSingleQuote itself closes/reopens for.
+    const std::string quotedPath = rw::shSingleQuote( std::string( executablePath ) );
     rw::emitTo( out, "{} skills install{}   # deploy to {} (embedded, versioned — rerun after an upgrade)\n",
                 quotedPath.c_str(), flagStr.c_str(), destStr.c_str() );
     if( hasHook )

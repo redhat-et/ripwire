@@ -210,10 +210,10 @@ fi
 if [ -n "$BIN" ] && [ -x "$BIN" ]; then
     "$BIN" wrap codex --force >"$TMP/wrap-codex" 2>/dev/null
     { grep -q '^\[mcp_servers\.ripwire\]$' "$TMP/wrap-codex" \
-      && grep -qE '^"[^"]+" skills install --codex[[:space:]]+#' "$TMP/wrap-codex"; } \
+      && grep -qE '^'\''[^'\'']+'\'' skills install --codex[[:space:]]+#' "$TMP/wrap-codex"; } \
         && ok "wrap codex emits Codex MCP config plus the Codex skill-install command" \
         || no "wrap codex does not emit a complete Codex install/discovery recipe"
-    grep -qE '^"[^"]+" skills install --codex --hook' "$TMP/wrap-codex" \
+    grep -qE '^'\''[^'\'']+'\'' skills install --codex --hook' "$TMP/wrap-codex" \
         && ok "wrap codex recommends the Codex-native advisory hook" \
         || no "wrap codex omits the Codex-native advisory hook install"
 

@@ -95,7 +95,7 @@ done <"$TMP/live_verbs"
 echo
 echo "=== 3. collapsed skills install line present ==="
 
-if echo "$WRAP_OUT" | grep -qE '^"[^"]+" skills install( --[a-z-]+)?( --hook)?([[:space:]]|$)'; then
+if echo "$WRAP_OUT" | grep -qE '^'\''[^'\'']+'\'' skills install( --[a-z-]+)?( --hook)?([[:space:]]|$)'; then
     ok "wrap claude prints the collapsed \"<path>\" skills install line"
 else
     no "wrap claude does NOT print the collapsed skills-install line — the skill-adoption step is invisible"
@@ -236,7 +236,7 @@ REAL_TMP="$( cd "$TMP" && pwd -P )"
 # for. Not `$`-anchored: the real line carries a trailing `# deploy to ... ` comment.
 assert_skills_line() {
     _label="$1"; _out="$2"
-    if echo "$_out" | grep -qE '^"[^"]+" skills install( --[a-z-]+)?( --hook)?([[:space:]]|$)'; then
+    if echo "$_out" | grep -qE '^'\''[^'\'']+'\'' skills install( --[a-z-]+)?( --hook)?([[:space:]]|$)'; then
         ok "$_label: prints the collapsed \"<path>\" skills install line"
     else
         no "$_label: does NOT print the collapsed skills-install line"
@@ -269,7 +269,7 @@ B_OUT="$( cd "$TMP/case_b" && "$TMP/prefix/bin/ripwire-copy" wrap claude 2>/dev/
 assert_skills_line "case b (prebuilt prefix)" "$B_OUT"
 B_CODEX_OUT="$( cd "$TMP/case_b" && "$TMP/prefix/bin/ripwire-copy" wrap codex 2>/dev/null )"
 assert_skills_line "case b (prebuilt prefix, codex)" "$B_CODEX_OUT"
-if echo "$B_CODEX_OUT" | grep -qE '^"[^"]+" skills install --codex([[:space:]]|$)'; then
+if echo "$B_CODEX_OUT" | grep -qE '^'\''[^'\'']+'\'' skills install --codex([[:space:]]|$)'; then
     ok "case b (prebuilt prefix, codex): the --codex flag is carried on the collapsed line"
 else
     no "case b (prebuilt prefix, codex): the --codex flag is missing from the collapsed line"

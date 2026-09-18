@@ -117,7 +117,7 @@ else
     if ! "$BIN" wrap hermes >"$WRAP" 2>"$TMP/wrap-hermes.err"; then
         no "ripwire wrap hermes exited non-zero — the binary cannot print its own Hermes recipe"
     else
-        RECIPE=$( grep -m1 -E '^"[^"]+" skills install ' "$WRAP" || true )
+        RECIPE=$( grep -m1 -E '^'\''[^'\'']+'\'' skills install ' "$WRAP" || true )
         FLAG=$( printf '%s\n' "$RECIPE" | awk '{ print $4 }' )
         ADV=$( printf '%s\n' "$RECIPE" | sed -n 's/.*# deploy to \([^ ]*\) (.*/\1/p' )
 
