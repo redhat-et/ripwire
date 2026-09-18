@@ -308,8 +308,12 @@ inline int pruneStale( const std::filesystem::path& destDir, const ManifestV2& p
     {
         // The name came straight out of a user-writable text file — refuse anything that could walk
         // `destDir / old` outside destDir (a bare "..", an embedded "/", ...) rather than unlink
-        // wherever that resolves. A plain skill directory name never contains a slash.
+        // wherever that resolves. A plain skill directory name never contains a slash. I7 (2026-09-18
+        // review round 1): also refuse anything that isn't a `ripwire-*` name — every skill this
+        // installer ever links is one, so a manifest line that isn't (hand-edited, or a future format
+        // confusion) has no business being unlinked by this scope-of-authority sweep.
         if( old.empty() || old == "." || old == ".." || old.find( '/' ) != std::string::npos ) { continue; }
+        if( old.rfind( "ripwire-", 0 ) != 0 ) { continue; }
         const bool stillPresent = std::find( currentSkillNames.begin(), currentSkillNames.end(), old ) != currentSkillNames.end();
         if( stillPresent ) { continue; }
         const std::filesystem::path entry = destDir / old;
@@ -321,7 +325,15 @@ inline int pruneStale( const std::filesystem::path& destDir, const ManifestV2& p
 }
 
 // Everything one agent's install needs, for the caller to report (bare install, one line; `--all`,
-// one line per agent) without re-deriving it.
+// one line per agent) without re-deriving it. `linked` counts every skill whose destination ends the
+// run pointing at this store's file — newly created, repaired, or already correct — NOT "how many
+// symlink() calls this run made"; `failed` counts entries that did NOT reach that state (a real
+// failure, not the ordinary "already exists, no --force" skip — see installForAgent's own comment).
+// `ok=false` is reserved for "could not even attempt the install" (bad destination, extraction
+// failure, ...); a partial in-loop failure is reported through `failed`, not by flipping `ok`, so the
+// caller can tell "nothing was attempted" from "most of it worked, N entries did not" — collapsing
+// those into one bit was the C2 finding (a permission-denied install exited 0 with a manifest that
+// claimed full success).
 struct InstallOutcome
 {
     bool ok = false;
@@ -329,6 +341,7 @@ struct InstallOutcome
     std::filesystem::path dest;
     int linked = 0;
     int pruned = 0;
+    int failed = 0;
 };
 
 // The per-agent core: resolve `agentName`'s skills destination via wrap.h's kAgentTargets (empty
@@ -414,7 +427,18 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
     const ManifestV2 previous = readManifestV2( manifestPath );
     const int pruned = pruneStale( skillsDest, previous, currentSkillNames );
 
-    int linked = 0;
+    // C1/C2 (2026-09-18 review round 1): `linkedNames` is what actually ends the run pointing at THIS
+    // store's file — not "every name we attempted", which is what `currentSkillNames` is and what the
+    // manifest wrote unconditionally before this fix. A run that fails half its links must not claim
+    // the other half in the manifest; a later prune reading that manifest would then unlink entries
+    // that were never actually placed.
+    std::vector<std::string> linkedNames;
+    int failed = 0;
+    const auto reportFailed = [ & ]( const std::string& msg )
+    {
+        rw::emitTo( stderr, "ripwire skills install: {}\n", msg );
+        ++failed;
+    };
     for( const std::string& skillDir : currentSkillNames )
     {
         const std::filesystem::path destLink = skillsDest / skillDir;
@@ -426,32 +450,86 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
         // symlinked parent directory that can't be traversed, permission denied, ...).
         if( statusEc && statusEc != std::errc::no_such_file_or_directory )
         {
-            rw::emitTo( stderr, "ripwire skills install: could not check {}: {}\n", destLink.string(), statusEc.message() );
+            reportFailed( "could not check " + destLink.string() + ": " + statusEc.message() );
             continue;   // cannot verify the destination is safe to write — skip rather than risk it
         }
-        if( std::filesystem::exists( destStatus ) )
+        // `std::filesystem::exists( file_status )` is true for a SYMLINK regardless of whether its
+        // target resolves — symlink_status reports the link itself (type()==symlink), never the
+        // dangling-ness of what it points at. Before this fix that made EVERY entry here (v1 checkout
+        // symlinks included) read as "already exists" and get skipped forever, even when the target no
+        // longer existed (redhat-et/ripwire#225 review round 1, C1) — `--force` could not repair it
+        // either, since its own check below only ever matched a link already pointing at THIS store.
+        if( std::filesystem::exists( destStatus ) && std::filesystem::is_symlink( destStatus ) )
         {
-            if( !force ) { continue; }   // arm 3: never overwrite without --force
             std::error_code readEc;
             const std::filesystem::path currentTarget = std::filesystem::read_symlink( destLink, readEc );
-            if( readEc || !std::filesystem::is_symlink( destStatus ) || currentTarget != storeFile )
+            if( readEc )
             {
-                continue;   // foreign entry or a planted link — --force refuses it exactly like the bare path does
+                reportFailed( "could not read the symlink at " + destLink.string() + ": " + readEc.message() );
+                continue;
+            }
+            if( currentTarget == storeFile )
+            {
+                linkedNames.push_back( skillDir );   // already correct — nothing to write, still counts as linked
+                continue;
+            }
+            // Points somewhere ELSE. Two sub-cases, deliberately treated differently:
+            //   - the target does not exist at all (a dangling symlink: a v1 checkout that moved or was
+            //     deleted, or a store extracted under an old, now-gone RIPWIRE_DATA_HOME) — nothing of
+            //     the user's is there to lose, so this is repaired unconditionally, `--force` or not.
+            //     This is the C1 fix: the exact v1-manifest-upgrade repro this task names.
+            //   - the target DOES exist (a foreign symlink, or a still-live old checkout) — `--force`
+            //     is required, same as it always was for anything not already ours; this is what
+            //     test/skillsinstallcheck.sh arm 3 (a planted symlink into a real, live directory)
+            //     pins, and that contract is intentionally NOT loosened by this fix.
+            std::error_code existsFollowEc;
+            const bool danglingTarget = !std::filesystem::exists( destLink, existsFollowEc );   // follows the link
+            if( !danglingTarget && !force )
+            {
+                continue;   // foreign, live entry, no --force: refused exactly like the bare-path case (arm 3)
             }
             std::error_code removeEc;
             std::filesystem::remove( destLink, removeEc );
-            if( removeEc ) { continue; }
+            if( removeEc )
+            {
+                reportFailed( "could not remove the stale link at " + destLink.string() + ": " + removeEc.message() );
+                continue;
+            }
+        }
+        else if( std::filesystem::exists( destStatus ) )
+        {
+            // A real file or directory sits at this name — never ours to replace, `--force` or not;
+            // `--force` licenses relinking a symlink that is stale/foreign, never clobbering real
+            // content (that was already the rule; this branch just now REPORTS the refusal instead of
+            // silently `continue`-ing past it, per C2).
+            if( force )
+            {
+                reportFailed( "refusing to replace non-symlink content at " + destLink.string() + " even with --force" );
+            }
+            continue;
         }
         const Outcome linkResult = linkOrRefuse( storeFile, destLink );
-        if( linkResult.ok ) { ++linked; }
+        if( linkResult.ok )
+        {
+            linkedNames.push_back( skillDir );
+        }
+        else
+        {
+            reportFailed( linkResult.error );
+        }
     }
 
-    if( !writeManifestV2( skillsDest, currentSkillNames ) )
+    // C2: the manifest records what actually linked, not what was attempted — writing
+    // `currentSkillNames` here unconditionally is exactly the "intent, not outcome" bug (a failed
+    // entry would be declared present, and a later prune reading that manifest would then treat a
+    // never-linked name as "still current" instead of pruning it).
+    if( !writeManifestV2( skillsDest, linkedNames ) )
     {
-        return { false, "could not write the skills manifest at " + manifestPath.string(), skillsDest, linked, pruned };
+        return { false, "could not write the skills manifest at " + manifestPath.string(), skillsDest,
+                 static_cast<int>( linkedNames.size() ), pruned, failed };
     }
 
-    return { true, {}, skillsDest, linked, pruned };
+    return { failed == 0, {}, skillsDest, static_cast<int>( linkedNames.size() ), pruned, failed };
 }
 
 // ── the jq-based settings.json merge (Task 10) ──────────────────────────────────────────────────────
@@ -746,7 +824,14 @@ inline int runSkillsInstall( int argc, char** argv, [[maybe_unused]] std::string
             const InstallOutcome result = installForAgent( ac.name, contributor, force );
             if( !result.ok )
             {
-                rw::emitTo( stderr, "ripwire skills install --all: {}: {}\n", std::string( ac.name ), result.error );
+                // `result.error` is set only for a could-not-even-attempt failure (bad destination,
+                // extraction failure, ...); a per-entry link-loop failure instead leaves it empty and
+                // reports through `result.failed` — the per-entry messages already went to stderr as
+                // they happened (installForAgent's own reportFailed), this line just states the count
+                // so `--all`'s own summary line cannot omit it (C2: a run with any refusal must not
+                // read as quiet success).
+                rw::emitTo( stderr, "ripwire skills install --all: {}: {}\n", std::string( ac.name ),
+                            result.error.empty() ? ( std::to_string( result.failed ) + " skill(s) failed to link" ) : result.error );
                 anyFailure = true;
                 continue;
             }
@@ -768,7 +853,12 @@ inline int runSkillsInstall( int argc, char** argv, [[maybe_unused]] std::string
                                                     destGiven ? std::filesystem::path( explicitDest ) : std::filesystem::path{} );
     if( !result.ok )
     {
-        rw::emitTo( stderr, "ripwire skills install: {}\n", result.error );
+        // Same split as the --all branch above: an empty `result.error` means the run got as far as
+        // attempting links and some of them failed (each already reported to stderr as it happened) —
+        // print the count rather than an empty line, and still exit non-zero (C2: a run with any
+        // refusal must not exit 0).
+        rw::emitTo( stderr, "ripwire skills install: {}\n",
+                    result.error.empty() ? ( std::to_string( result.failed ) + " skill(s) failed to link into " + result.dest.string() ) : result.error );
         return 1;
     }
     if( hook )   // destGiven && hook was already refused above, so this is always the agent-flag form here
