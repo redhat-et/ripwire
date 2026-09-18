@@ -271,4 +271,15 @@ after_live="$( find "$CLAUDE_CONFIG_DIR/skills" -maxdepth 1 -name 'ripwire-*' -t
     || fail "manifest skill= count ($after_linked) does not equal the actually-linked entries on disk ($after_live) — manifest still records intent, not outcome"
 rm -rf "$d17" skills_install.err
 
-echo "OK: skillsinstallcheck (arms 1-17)"
+# ── arm 18: M2 — an unknown/typo'd --flag is refused by name, not silently treated as an agent ────
+CURRENT_ARM="18-unknown-flag-refused"
+sandbox
+d18="$d"
+"$ripwire" skills install --forc >skills_install.err 2>&1
+rc=$?
+[ "$rc" -ne 0 ] || fail "an unknown --flag exited 0 instead of being refused"
+grep -qi "unknown flag" skills_install.err || fail "the refusal did not name the flag as unknown"
+[ -e "$CLAUDE_CONFIG_DIR/skills" ] && fail "an unknown --flag installed anyway before refusing"
+rm -rf "$d18" skills_install.err
+
+echo "OK: skillsinstallcheck (arms 1-18)"

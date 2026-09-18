@@ -769,7 +769,21 @@ inline int runSkillsInstall( int argc, char** argv, [[maybe_unused]] std::string
         else if( a == "--contributor" )  { contributor = true; }
         else if( a == "--force" )        { force = true; }
         else if( a == "--all" )          { all = true; }
-        else if( a.rfind( "--", 0 ) == 0 && a.size() > 2 ) { agentArg = a.substr( 2 ); }   // --codex -> "codex"
+        else if( a.rfind( "--", 0 ) == 0 && a.size() > 2 )
+        {
+            // M2 (2026-09-18 review round 1): a typo'd or unknown `--flag` used to become `agentArg`
+            // silently — it eventually failed, but only downstream in installForAgent, with a message
+            // that reads as "no such agent" rather than "no such flag". Refuse it here instead, against
+            // the same set wrap.h's own kAgentTargets names plus codex-legacy (a destination override,
+            // not a kAgentTargets row — see installForAgent's own comment on it).
+            const std::string_view candidate = a.substr( 2 );
+            if( rw::agentTarget( candidate ) == nullptr && candidate != "codex-legacy" )
+            {
+                rw::emitTo( stderr, "ripwire skills install: unknown flag {}\n", std::string( a ) );
+                return 2;
+            }
+            agentArg = candidate;   // --codex -> "codex"
+        }
         else
         {
             const int rc = acceptPositionalDest( a, explicitDest, destGiven );
