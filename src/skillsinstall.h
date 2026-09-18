@@ -99,7 +99,7 @@ inline bool symlinkOrRefuse( const std::filesystem::path& storeFile, const std::
 // openNoFollowTruncate (which TRUNCATES an existing regular file, sidecar-style): store extraction must
 // never succeed against an already-existing file, since the store is immutable-by-hash and a fresh temp
 // directory should never have pre-existing content.
-inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_view bytes )
+inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_view bytes, mode_t mode )
 {
     if( rw::pathguard::isSymlink( dest.string() ) )
     {
@@ -111,7 +111,7 @@ inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_vi
     {
         return { false, "create_directories failed for " + dest.parent_path().string() + ": " + mkdirEc.message() };
     }
-    const int fd = ::open( dest.c_str(), O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY, 0644 );
+    const int fd = ::open( dest.c_str(), O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY, mode );
     if( fd < 0 )
     {
         return { false, "open(O_EXCL) failed for " + dest.string() + ": " + std::string( std::strerror( errno ) ) };
@@ -135,7 +135,7 @@ inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_vi
 // atomic-renamed into place only once every file is written — a killed/interrupted run can never
 // leave a directory with the final name that reads back as "already extracted, trust it".
 template <std::size_t N>
-inline Outcome extractGroup( const std::array<embedded_skills::EmbeddedFile, N>& files, const std::filesystem::path& storeRoot )
+inline Outcome extractGroup( const std::array<embedded_skills::EmbeddedFile, N>& files, const std::filesystem::path& storeRoot, mode_t mode )
 {
     std::error_code ec;
     if( std::filesystem::exists( storeRoot, ec ) ) { return { true, {} }; }   // immutable-by-hash: already extracted
@@ -144,7 +144,7 @@ inline Outcome extractGroup( const std::array<embedded_skills::EmbeddedFile, N>&
     std::filesystem::remove_all( tmp, ec );
     for( const embedded_skills::EmbeddedFile& f : files )
     {
-        const Outcome o = writeStoreFile( tmp / std::string( f.relativePath ), f.bytes );
+        const Outcome o = writeStoreFile( tmp / std::string( f.relativePath ), f.bytes, mode );
         if( !o.ok )
         {
             std::filesystem::remove_all( tmp, ec );
@@ -171,8 +171,14 @@ inline Outcome ensureStoreExtracted()
     {
         return { false, "embedded skill set is empty — this is a build defect, not a runtime condition" };
     }
-    if( const Outcome o = extractGroup( embedded_skills::kSkillFiles, skillsStoreDir() ); !o.ok ) { return o; }
-    return extractGroup( embedded_skills::kHookFiles, hooksStoreDir() );
+    // Skill files are markdown — never executable. Hook scripts (hooks/*.sh) are tracked at 0755 in
+    // the repo and must stay executable: settings.json's --hook registration (mergeHookConfig below)
+    // writes the extracted path as a bare `command`, which the shell execs directly — 0644 would make
+    // every installed hook silently unrunnable (verified: `sh -c "<0644 path>"` fails, Permission
+    // denied, exit 126). The group-level split is sufficient: no file in either group mixes with the
+    // other today.
+    if( const Outcome o = extractGroup( embedded_skills::kSkillFiles, skillsStoreDir(), 0644 ); !o.ok ) { return o; }
+    return extractGroup( embedded_skills::kHookFiles, hooksStoreDir(), 0755 );
 }
 
 // Symlink storeFile -> destLink. Refuses (does not overwrite) if destLink already exists and is NOT
