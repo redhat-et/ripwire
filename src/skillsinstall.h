@@ -138,7 +138,10 @@ template <std::size_t N>
 inline Outcome extractGroup( const std::array<embedded_skills::EmbeddedFile, N>& files, const std::filesystem::path& storeRoot, mode_t mode )
 {
     std::error_code ec;
-    if( std::filesystem::exists( storeRoot, ec ) ) { return { true, {} }; }   // immutable-by-hash: already extracted
+    // immutable-by-hash: already extracted. `mode` is not part of `kStoreKey`, so an existing
+    // store's file modes are never re-verified/updated here — a store extracted before a `mode`
+    // change stays on its old modes until removed and re-extracted.
+    if( std::filesystem::exists( storeRoot, ec ) ) { return { true, {} }; }
 
     const std::filesystem::path tmp = storeRoot.parent_path() / ( ".tmp-" + std::to_string( ::getpid() ) + "-" + storeRoot.filename().string() );
     std::filesystem::remove_all( tmp, ec );
