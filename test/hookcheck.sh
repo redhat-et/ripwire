@@ -16,10 +16,6 @@
 # the real ~/.ripwire/substitution.jsonl either. See FIXTURE ISOLATION below before adding an arm.
 
 set -u
-# Every HOME= below is per-invocation, but a --hook install resolves Claude's settings.json through
-# CLAUDE_CONFIG_DIR first, ahead of HOME — an ambient CLAUDE_CONFIG_DIR (ordinary in a dev shell
-# already wired for this repo's own hook) writes straight past every sandboxed HOME here otherwise.
-unset CLAUDE_CONFIG_DIR
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 HOOK="$ROOT/hooks/ripwire-nudge.sh"

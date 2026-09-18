@@ -19,11 +19,6 @@ no(){ echo "  FAIL  $1"; fail=1; }
 [ -f "$SK/install.sh" ] || { echo "no skills/install.sh"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
-<<<<<<< HEAD
-=======
-# Each invocation below owns its HOME; inherited agent overrides must not escape it.
-unset CODEX_HOME AGENTS_HOME HERMES_HOME CLAUDE_CONFIG_DIR
->>>>>>> 1ef69c11 (test: sandbox CLAUDE_CONFIG_DIR against ambient leaks in install/hook/release gates)
 DST="$TMP/skills"
 # `ripwire skills install <DEST_PATH>` extracts its embedded store cache under $HOME/.local/share/
 # ripwire even when the destination is explicit — a real write, not a symlink-only op. An explicit-
