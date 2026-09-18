@@ -636,6 +636,21 @@ inline int runSkillsInstall( int argc, char** argv, std::string_view executableP
         else if( a == "--force" )        { force = true; }
         else if( a == "--all" )          { all = true; }
         else if( a.rfind( "--", 0 ) == 0 && a.size() > 2 ) { agentArg = a.substr( 2 ); }   // --codex -> "codex"
+        else
+        {
+            // Any other token is a bare positional — the plan's own CLI surface lists DEST_PATH as
+            // part of it, but no code path here resolves one to a destination: `agentArg` would stay
+            // empty and installForAgent() would silently fall through to the caller's DEFAULT agent
+            // home. That is exactly the silent-misdirection bug this arm exists to close (mirrors
+            // skills/install.sh's own wrapper-level refusal, which only covers the bash script, not
+            // this binary) — refuse loudly, before ensureStoreExtracted() touches disk, rather than
+            // guess what the caller meant.
+            rw::emitTo( stderr,
+                        "ripwire skills install: an explicit destination path ('{}') is not supported by the embedded installer yet.\n"
+                        "  Use an agent flag instead (--claude, --codex, --hermes, --openclaw, --codex-legacy).\n",
+                        std::string( a ) );
+            return 2;
+        }
     }
 
     if( all )
