@@ -29,7 +29,7 @@ if not binary.is_file() or not os.access(binary, os.X_OK):
 with tempfile.TemporaryDirectory(prefix="ripwire-installer-sentinels-") as temporary:
     outside = Path(temporary)
     environment = os.environ.copy()
-    for variable in ("HOME", "CODEX_HOME", "AGENTS_HOME", "HERMES_HOME"):
+    for variable in ("HOME", "CODEX_HOME", "AGENTS_HOME", "HERMES_HOME", "CLAUDE_CONFIG_DIR", "RIPWIRE_DATA_HOME"):
         home = outside / variable
         home.mkdir()
         (home / "sentinel").write_text("leave unchanged\n")
