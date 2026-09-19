@@ -6,18 +6,16 @@
 #include "wrap.h"   // AgentTarget / agentTarget / kAgentTargets / AgentConfig / getAgentConfigs / resolveSkillsRoot —
                     // per-agent destinations and --all's presence detection are wrap.h's, not a second table here.
 
+#include "infra/os.h"
+
 #include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
-#include <fcntl.h>
 #include <filesystem>
 #include <string>
 #include <string_view>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#include <unistd.h>
 #include <vector>
 
 // skillsinstall.h — `ripwire skills install`: extract the binary's embedded skills/hooks into a
@@ -47,7 +45,7 @@ struct FdGuard
 {
     int fd = -1;
     explicit FdGuard( int f ) noexcept : fd( f ) {}
-    ~FdGuard() { if( fd >= 0 ) { ::close( fd ); } }
+    ~FdGuard() { if( fd >= 0 ) { os::close( fd ); } }
     FdGuard( const FdGuard& ) = delete;
     FdGuard& operator=( const FdGuard& ) = delete;
 };
@@ -82,13 +80,13 @@ inline std::filesystem::path hooksStoreDir()  { return dataHome() / "hooks"  / s
 // the caller decides whether a concurrent winner already occupies the target (see extractGroup).
 inline bool renameAtomic( const std::filesystem::path& from, const std::filesystem::path& to )
 {
-    return ::rename( from.c_str(), to.c_str() ) == 0;
+    return os::rename( from.c_str(), to.c_str() ) == 0;
 }
 
 // ::symlink() storeFile -> destLink. Returns false on failure, with errno left intact for the caller.
 inline bool symlinkOrRefuse( const std::filesystem::path& storeFile, const std::filesystem::path& destLink )
 {
-    return ::symlink( storeFile.c_str(), destLink.c_str() ) == 0;
+    return os::symlink( storeFile.c_str(), destLink.c_str() ) == 0;
 }
 
 // Write one embedded file's bytes to `dest`, refusing if anything at `dest` already exists as a
@@ -99,7 +97,7 @@ inline bool symlinkOrRefuse( const std::filesystem::path& storeFile, const std::
 // openNoFollowTruncate (which TRUNCATES an existing regular file, sidecar-style): store extraction must
 // never succeed against an already-existing file, since the store is immutable-by-hash and a fresh temp
 // directory should never have pre-existing content.
-inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_view bytes, mode_t mode )
+inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_view bytes, os::mode_t mode )
 {
     if( rw::pathguard::isSymlink( dest.string() ) )
     {
@@ -111,7 +109,7 @@ inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_vi
     {
         return { false, "create_directories failed for " + dest.parent_path().string() + ": " + mkdirEc.message() };
     }
-    const int fd = ::open( dest.c_str(), O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY, mode );
+    const int fd = os::open( dest.c_str(), O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY, mode );
     if( fd < 0 )
     {
         return { false, "open(O_EXCL) failed for " + dest.string() + ": " + std::string( std::strerror( errno ) ) };
@@ -120,7 +118,7 @@ inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_vi
     std::size_t written = 0;
     while( written < bytes.size() )
     {
-        const ssize_t n = ::write( fd, bytes.data() + written, bytes.size() - written );
+        const os::ssize_t n = os::write( fd, bytes.data() + written, bytes.size() - written );
         if( n < 0 )
         {
             if( errno == EINTR ) { continue; }
@@ -135,7 +133,7 @@ inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_vi
 // atomic-renamed into place only once every file is written — a killed/interrupted run can never
 // leave a directory with the final name that reads back as "already extracted, trust it".
 template <std::size_t N>
-inline Outcome extractGroup( const std::array<embedded_skills::EmbeddedFile, N>& files, const std::filesystem::path& storeRoot, mode_t mode )
+inline Outcome extractGroup( const std::array<embedded_skills::EmbeddedFile, N>& files, const std::filesystem::path& storeRoot, os::mode_t mode )
 {
     std::error_code ec;
     // immutable-by-hash: already extracted. `mode` is not part of `kStoreKey`, so an existing
@@ -143,7 +141,7 @@ inline Outcome extractGroup( const std::array<embedded_skills::EmbeddedFile, N>&
     // change stays on its old modes until removed and re-extracted.
     if( std::filesystem::exists( storeRoot, ec ) ) { return { true, {} }; }
 
-    const std::filesystem::path tmp = storeRoot.parent_path() / ( ".tmp-" + std::to_string( ::getpid() ) + "-" + storeRoot.filename().string() );
+    const std::filesystem::path tmp = storeRoot.parent_path() / ( ".tmp-" + std::to_string( os::getpid() ) + "-" + storeRoot.filename().string() );
     std::filesystem::remove_all( tmp, ec );
     for( const embedded_skills::EmbeddedFile& f : files )
     {
@@ -317,9 +315,9 @@ inline int pruneStale( const std::filesystem::path& destDir, const ManifestV2& p
         const bool stillPresent = std::find( currentSkillNames.begin(), currentSkillNames.end(), old ) != currentSkillNames.end();
         if( stillPresent ) { continue; }
         const std::filesystem::path entry = destDir / old;
-        struct stat st{};
-        if( ::lstat( entry.c_str(), &st ) != 0 ) { continue; }   // already gone — nothing to remove
-        if( ::unlink( entry.c_str() ) == 0 ) { ++removed; }      // unlink, never follow — S_ISLNK or not
+        os::stat_t st{};
+        if( os::lstat( entry.c_str(), &st ) != 0 ) { continue; }   // already gone — nothing to remove
+        if( os::unlink( entry.c_str() ) == 0 ) { ++removed; }      // unlink, never follow — S_ISLNK or not
     }
     return removed;
 }
@@ -585,7 +583,7 @@ struct ShellCaptureResult
 inline ShellCaptureResult runShellCapture( const std::string& cmd )
 {
     ShellCaptureResult result;
-    FILE* pipe = ::popen( cmd.c_str(), "r" );
+    FILE* pipe = os::popen( cmd.c_str(), "r" );
     if( pipe == nullptr ) { return result; }
     result.spawned = true;
     char buf[ 4096 ];
@@ -594,7 +592,7 @@ inline ShellCaptureResult runShellCapture( const std::string& cmd )
     {
         result.output.append( buf, n );
     }
-    const int status = ::pclose( pipe );
+    const int status = os::pclose( pipe );
     if( status >= 0 && WIFEXITED( status ) )
     {
         result.exitedNormally = true;
