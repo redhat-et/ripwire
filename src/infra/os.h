@@ -179,6 +179,7 @@ static_assert( requires( const stat_t& st ) { st.st_mode; st.st_size; st.st_mtim
 [[gnu::always_inline]] inline int   unlink( const char* path )                                     { return ::unlink( path ); }
 [[gnu::always_inline]] inline int   remove( const char* path )                                     { return ::remove( path ); }
 [[gnu::always_inline]] inline int   rename( const char* from, const char* to )                     { return ::rename( from, to ); }
+[[gnu::always_inline]] inline int   symlink( const char* target, const char* linkPath )             { return ::symlink( target, linkPath ); }
 [[gnu::always_inline]] inline int   mkdir( const char* path, mode_t mode )                         { return ::mkdir( path, mode ); }
 [[gnu::always_inline]] inline int   chmod( const char* path, mode_t mode )                         { return ::chmod( path, mode ); }
 [[gnu::always_inline]] inline int   access( const char* path, int mode )                           { return ::access( path, mode ); }
