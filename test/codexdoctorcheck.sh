@@ -2,6 +2,7 @@
 # codexdoctorcheck.sh — isolated active-surface gate for `--doctor --agent=codex`.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/unset-agent-env-variables.sh"    # this file binds HOME/CODEX_HOME/AGENTS_HOME per invocation but never touched HERMES_HOME/CLAUDE_CONFIG_DIR/RIPWIRE_DATA_HOME — canary sweep found dataHome() reading an ambient RIPWIRE_DATA_HOME
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }

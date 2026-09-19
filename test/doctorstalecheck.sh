@@ -14,6 +14,8 @@ fail() { echo "FAIL ($CURRENT_ARM): $1" >&2; exit 1; }
 # an export made there never reaches the parent, so "$ripwire" would see the real, not the sandboxed, env.
 sandbox() {
     d="$( mktemp -d )"
+    trap 'rm -rf "$d"' EXIT
+    . "$ROOT/test/lib/unset-agent-env-variables.sh"
     export HOME="$d" CLAUDE_CONFIG_DIR="$d/.claude"
 }
 
@@ -32,6 +34,14 @@ SH
 chmod +x "$MISE_DATA_DIR/shims/ripwire"
 out_a="$( PATH="$MISE_DATA_DIR/shims:$PATH" "$ripwire" "$ROOT" --doctor --agent=claude 2>&1 )"
 echo "$out_a" | grep -q 'n="claude-binary" ok="0"' && fail "shim was misreported as broken/STALE"
+# Positive counterpart (skillsinstallcheck.sh arm 14 pairs a negative with an explicit positive the
+# same way): the row must exist and read healthy, not merely fail to read ok="0" because it never
+# printed at all — a renamed or silently-dropped row would pass the line above having checked nothing.
+echo "$out_a" | grep -q 'n="claude-binary" ok="1"' || fail "claude-binary row missing or not ok=1 — the negative check above proved nothing"
+# The gate's OWN stated purpose is "must never execute anything to figure that out" — enforce it: the
+# shim's sentinel string must never appear in --doctor's output, because the only way it can is if
+# --doctor actually ran the shim instead of reasoning about it from the filesystem.
+echo "$out_a" | grep -qF 'this is a shim, not the real binary' && fail "the shim was ACTUALLY EXECUTED by --doctor (sentinel string leaked into output)"
 rm -rf "$da"
 unset MISE_DATA_DIR
 
