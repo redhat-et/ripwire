@@ -337,7 +337,8 @@ esac
 # carry a data-capture disclosure a user must read and accept.
 # RIPWIRE_NO_ACTIVATE=1 installs without activating; test/releaseinstallcheck.sh arms (E1)-(E6) pin it.
 if [ -z "${RIPWIRE_NO_ACTIVATE:-}" ]; then
-    ACTIVATE_OUT="$( "$binDir/ripwire" skills install --all )"; ACTIVATE_RC=$?
+    ACTIVATE_RC=0
+    ACTIVATE_OUT="$( "$binDir/ripwire" skills install --all )" || ACTIVATE_RC=$?
     printf '%s\n' "$ACTIVATE_OUT"
     if [ "$ACTIVATE_RC" -ne 0 ]; then
         echo "install.sh: could not activate ripwire skills for one or more agents; run: \"$binDir/ripwire\" skills install --all" >&2
