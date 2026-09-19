@@ -66,10 +66,13 @@ first command to build for that machine's own CPU, or use `./install.sh` below, 
 
 To put a source build on your `PATH`, run `./install.sh` from the checkout. It builds a Release binary tuned
 for this machine's CPU in `build-install/` and installs it under `RIPWIRE_INSTALL_PREFIX`, or under
-`brew --prefix` when Homebrew is present, or else under `~/.local`. Like the prebuilt installer, it activates
-the skills for Claude Code and Codex when it finds them — skills and hooks are embedded in the `ripwire`
-binary itself, not staged as separate files. `RIPWIRE_NO_ACTIVATE=1` stages only; `RIPWIRE_ACTIVATE_CODEX=1`
-also registers the Codex hooks.
+`brew --prefix` when Homebrew is present, or else under `~/.local`. Unlike the prebuilt installer, this route
+still stages `skills/` and `hooks/` as separate files under `<prefix>/share/ripwire/`, and activates Claude
+Code and Codex (when it finds them) by running that staged `skills/install.sh`. `RIPWIRE_NO_ACTIVATE=1`
+stages the files without activating either agent; `RIPWIRE_ACTIVATE_CODEX=1` also registers the Codex hooks.
+The prebuilt release installer (`scripts/install.sh`) is the one with skills and hooks embedded in the
+`ripwire` binary itself — nothing staged — and its own `RIPWIRE_NO_ACTIVATE=1` skips activation outright
+(there is nothing to stage).
 
 ## Connect your coding agent
 
