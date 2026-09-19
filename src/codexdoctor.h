@@ -132,17 +132,30 @@ struct ManagerLayout
     std::optional<std::string> candidate;
 };
 
+// One level of `dir`'s immediate subdirectories, never via a throwing range-for: `directory_iterator`'s
+// `operator++` throws on a permission change or race mid-scan, which a doctor check must survive, not
+// SIGABRT on. `ec` carries any construction/iteration error; the caller treats that as "give up",
+// never as "empty".
+inline std::vector<std::filesystem::path> listSubdirectories( const std::filesystem::path& dir, std::error_code& ec )
+{
+    namespace fs = std::filesystem;
+    std::vector<fs::path> out;
+    fs::directory_iterator it( dir, ec ), last;
+    while( !ec && it != last )
+    {
+        std::error_code dec;
+        if( it->is_directory( dec ) && !dec ) { out.push_back( it->path() ); }
+        it.increment( ec );
+    }
+    return out;
+}
+
 inline ManagerLayout resolveMiseLayout( const std::string& installsRoot )
 {
     namespace fs = std::filesystem;
     ManagerLayout out;
     std::error_code ec;
-    std::vector<fs::path> versions;
-    for( const auto& entry : fs::directory_iterator( installsRoot, ec ) )
-    {
-        std::error_code dec;
-        if( entry.is_directory( dec ) && !dec ) { versions.push_back( entry.path() ); }
-    }
+    const std::vector<fs::path> versions = listSubdirectories( installsRoot, ec );
     if( ec || versions.size() > 1 ) { out.ambiguous = versions.size() > 1; return out; }
     if( versions.size() != 1 ) { return out; }
     const fs::path candidate = versions.front() / "bin" / "ripwire";
@@ -156,21 +169,11 @@ inline ManagerLayout resolveAquaLayout( const std::string& pkgsRoot )
     namespace fs = std::filesystem;
     ManagerLayout out;
     std::error_code ec;
-    std::vector<fs::path> versions;
-    for( const auto& entry : fs::directory_iterator( pkgsRoot, ec ) )
-    {
-        std::error_code dec;
-        if( entry.is_directory( dec ) && !dec ) { versions.push_back( entry.path() ); }
-    }
+    const std::vector<fs::path> versions = listSubdirectories( pkgsRoot, ec );
     if( ec || versions.size() > 1 ) { out.ambiguous = versions.size() > 1; return out; }
     if( versions.size() != 1 ) { return out; }
-    std::vector<fs::path> assets;
     std::error_code aec;
-    for( const auto& entry : fs::directory_iterator( versions.front(), aec ) )
-    {
-        std::error_code dec;
-        if( entry.is_directory( dec ) && !dec ) { assets.push_back( entry.path() ); }
-    }
+    const std::vector<fs::path> assets = listSubdirectories( versions.front(), aec );
     if( aec || assets.size() > 1 ) { out.ambiguous = assets.size() > 1; return out; }
     if( assets.size() != 1 ) { return out; }
     const fs::path candidate = assets.front() / "ripwire";
