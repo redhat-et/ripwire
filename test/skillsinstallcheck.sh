@@ -9,6 +9,15 @@ ripwire="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 
 fail() { echo "FAIL ($CURRENT_ARM): $1" >&2; exit 1; }
 
+# GNU `stat -f` is filesystem stat, not BSD's format flag — it succeeds with junk, so a
+# `stat -f ... || stat -c ...` one-liner never reaches the fallback on Linux (see cachehashcheck.sh's
+# comment on this exact trap). Detect the flavour once instead, matching the rest of the suite.
+if stat --version >/dev/null 2>&1; then   # GNU coreutils
+    mtime_of() { stat -c '%Y' "$1" 2>/dev/null; }
+else                                       # BSD / macOS
+    mtime_of() { stat -f '%m' "$1" 2>/dev/null; }
+fi
+
 # Call directly (`sandbox`), never as `x="$( sandbox )"` — command substitution forks a subshell, and
 # an export made there never reaches the parent, so "$ripwire" would see the real, not the sandboxed, env.
 sandbox() {
@@ -37,10 +46,10 @@ d2="$d"
 "$ripwire" skills install >/dev/null
 store_dir="$( find "$RIPWIRE_DATA_HOME/skills" -maxdepth 1 -mindepth 1 -type d | head -1 )"
 [ -n "$store_dir" ] || fail "no store directory created"
-before="$( stat -f '%m' "$store_dir" 2>/dev/null || stat -c '%Y' "$store_dir" )"
+before="$( mtime_of "$store_dir" )"
 sleep 1
 "$ripwire" skills install >/dev/null   # second run: must not re-extract
-after="$( stat -f '%m' "$store_dir" 2>/dev/null || stat -c '%Y' "$store_dir" )"
+after="$( mtime_of "$store_dir" )"
 [ "$before" = "$after" ] || fail "store directory was re-extracted on a second run (should be idempotent)"
 rm -rf "$d2"
 
