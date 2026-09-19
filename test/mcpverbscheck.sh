@@ -302,6 +302,76 @@ if [ "$L4_EDITCHK" = "True" ]; then ok "tools/list includes 'edit_check'"; else 
 [ "$L4_PACKTASK" = "False" ] && ok "'pack_task' is NOT separately advertised in tools/list (dispatch-only alias)" \
                               || no "'pack_task' unexpectedly appears in tools/list"
 
+# ── (6b) THE EXACT ADVERTISED ROSTER — a constant-count swap must not slip a verb in ─────────────
+# WHY THIS ARM. The L4_COUNT==31 assertion above fails closed on a verb ADDED; the per-name checks pin
+# the L4/field-notes verbs individually. Neither catches a RENAME or SWAP that keeps the count at 31 and
+# touches a verb no arm names (analyze, grep, the edit trio, …) — CONTRIBUTING §2 shape 7 ("true but
+# narrower"): "same count + these names present" is strictly weaker than "the roster is EXACTLY this set".
+# A verb that reaches a subprocess (a hypothetical run_trace MCP twin of the CLI-only --run-trace) could
+# replace an unnamed read verb at count 31 with every arm above still green. Pinning the FULL sorted
+# roster reddens on ANY add/remove/rename until a human updates this list — the point being that a new
+# MCP verb, above all one that reaches an exec, is signed for, never a silent drift.
+# The set is the ADVERTISED roster (kMcpVerbTable, mcp.h); pack_task stays out (dispatch-only alias,
+# already asserted absent above). Sorted so the diff reads name-by-name.
+EXPECTED_VERBS="analyze
+batch
+cochange
+connect
+doc_drift
+edit_check
+exemplar
+explore
+fetch_body
+find_referencing_symbols
+find_symbol
+flags
+for
+from_trace
+grep
+impact
+insert_after_symbol
+insert_before_symbol
+lego
+memory_recall
+mentions
+owners
+path_between
+quality_baseline
+quality_delta
+replace_symbol_body
+situational_awareness
+slice
+stray_content
+uses
+whereis"
+
+LIVE_VERBS_SORTED="$( l4_field 'chr(10).join(sorted(names))' )"
+EXPECTED_SORTED="$( printf '%s\n' "$EXPECTED_VERBS" | sort )"
+
+if [ "$LIVE_VERBS_SORTED" = "$EXPECTED_SORTED" ]; then
+    ok "(6b) advertised roster matches the pinned set exactly ($L4_COUNT verbs; no unpinned add/rename/swap)"
+else
+    no "(6b) advertised roster DRIFTED from the pinned set — a verb was added, removed, or renamed; review it (a subprocess-reaching verb must never join silently), then update EXPECTED_VERBS consciously:"
+    diff <(printf '%s\n' "$EXPECTED_SORTED") <(printf '%s\n' "$LIVE_VERBS_SORTED") | sed 's/^/      /'
+fi
+
+# ── (6c) LIVENESS of (6b) + the named shell-exec tripwire (CONTRIBUTING §2: prove the arm can fail) ─
+# (6b) is only as live as its ability to SEE a new verb. Prove it on a mutated copy of the live list:
+# inject a synthetic run_trace and assert the SAME comparison reddens. Guards shape 3 (empty==empty) if
+# a future edit ever broke the extraction. Computed here, run every time — never a fixture of the server.
+MUT_LIVE="$( printf '%s\nrun_trace\n' "$LIVE_VERBS_SORTED" | sort )"
+if [ "$MUT_LIVE" != "$EXPECTED_SORTED" ]; then
+    ok "(6c) mutation control: a synthetic 'run_trace' verb is correctly seen as roster drift"
+else
+    no "(6c) mutation control VACUOUS: injecting 'run_trace' did not disturb the comparison — (6b) cannot fail"
+fi
+# The invariant, named for the reader who greps for it: no shell/exec-shaped verb is advertised.
+if printf '%s\n' "$LIVE_VERBS_SORTED" | grep -qxE 'run_trace|run|shell|exec'; then
+    no "(6c) an MCP verb named like a shell/exec entry point is advertised — --run-trace must stay CLI-only (runtracecheck.sh)"
+else
+    ok "(6c) no shell/exec-shaped verb advertised (MCP surface reaches no subprocess exec; --run-trace stays CLI-only)"
+fi
+
 # ── explore round-trip: a pack-task-shaped bundle (same shape as CLI --pack-task) ────────────────
 EXPLORE_MSGS=(
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
