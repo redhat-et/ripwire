@@ -342,6 +342,9 @@ struct InstallOutcome
     int linked = 0;
     int pruned = 0;
     int failed = 0;
+    // A foreign-but-live entry refused because --force was not given (I1, round-2 review) —
+    // distinct from `failed`, which is an attempted-and-failed link.
+    int foreignSkipped = 0;
 };
 
 // The per-agent core: resolve `agentName`'s skills destination via wrap.h's kAgentTargets (empty
@@ -434,6 +437,7 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
     // that were never actually placed.
     std::vector<std::string> linkedNames;
     int failed = 0;
+    int foreignSkipped = 0;
     const auto reportFailed = [ & ]( const std::string& msg )
     {
         rw::emitTo( stderr, "ripwire skills install: {}\n", msg );
@@ -486,6 +490,7 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
             const bool danglingTarget = !std::filesystem::exists( destLink, existsFollowEc );   // follows the link
             if( !danglingTarget && !force )
             {
+                ++foreignSkipped;
                 continue;   // foreign, live entry, no --force: refused exactly like the bare-path case (arm 3)
             }
             std::error_code removeEc;
@@ -505,6 +510,10 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
             if( force )
             {
                 reportFailed( "refusing to replace non-symlink content at " + destLink.string() + " even with --force" );
+            }
+            else
+            {
+                ++foreignSkipped;
             }
             continue;
         }
@@ -526,10 +535,10 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
     if( !writeManifestV2( skillsDest, linkedNames ) )
     {
         return { false, "could not write the skills manifest at " + manifestPath.string(), skillsDest,
-                 static_cast<int>( linkedNames.size() ), pruned, failed };
+                 static_cast<int>( linkedNames.size() ), pruned, failed, foreignSkipped };
     }
 
-    return { failed == 0, {}, skillsDest, static_cast<int>( linkedNames.size() ), pruned, failed };
+    return { failed == 0, {}, skillsDest, static_cast<int>( linkedNames.size() ), pruned, failed, foreignSkipped };
 }
 
 // ── the jq-based settings.json merge (Task 10) ──────────────────────────────────────────────────────
@@ -850,8 +859,11 @@ inline int runSkillsInstall( int argc, char** argv, [[maybe_unused]] std::string
                 continue;
             }
             if( hook && mergeHookConfig( ac.name ) != 0 ) { anyFailure = true; }   // Task 12; today this reports "not implemented" and fails, on purpose — --all must surface that, not swallow it
-            rw::emitTo( stdout, "ripwire skills install --all: {} configured ({} linked into {})\n",
-                        std::string( ac.name ), result.linked, result.dest.string() );
+            const std::string allSkippedSuffix = result.foreignSkipped > 0
+                ? ( ", " + std::to_string( result.foreignSkipped ) + " skipped (run --force to relink foreign entries)" )
+                : std::string{};
+            rw::emitTo( stdout, "ripwire skills install --all: {} configured ({} linked into {}{})\n",
+                        std::string( ac.name ), result.linked, result.dest.string(), allSkippedSuffix );
             const std::string destStr = result.dest.string();
             if( std::find( configuredDestPaths.begin(), configuredDestPaths.end(), destStr ) == configuredDestPaths.end() )
             {
@@ -879,8 +891,11 @@ inline int runSkillsInstall( int argc, char** argv, [[maybe_unused]] std::string
     {
         return mergeHookConfig( agentArg.empty() ? std::string_view( "claude" ) : agentArg );
     }
-    rw::emitTo( stdout, "ripwire skills install: {} skill(s) linked into {}, {} stale entr{} pruned\n",
-                result.linked, result.dest.string(), result.pruned, result.pruned == 1 ? "y" : "ies" );
+    const std::string skippedSuffix = result.foreignSkipped > 0
+        ? ( ", " + std::to_string( result.foreignSkipped ) + " skipped (run --force to relink foreign entries)" )
+        : std::string{};
+    rw::emitTo( stdout, "ripwire skills install: {} skill(s) linked into {}, {} stale entr{} pruned{}\n",
+                result.linked, result.dest.string(), result.pruned, result.pruned == 1 ? "y" : "ies", skippedSuffix );
     return 0;
 }
 
