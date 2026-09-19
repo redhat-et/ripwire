@@ -51,11 +51,11 @@ d3="$d"
 mkdir -p "$CLAUDE_CONFIG_DIR/skills"
 outside="$( mktemp -d )"
 ln -s "$outside" "$CLAUDE_CONFIG_DIR/skills/ripwire-orient"   # plant a symlink where install would write
-"$ripwire" skills install >/dev/null 2>skills_install.err || true
+"$ripwire" skills install >/dev/null 2>"$d3/skills_install.err" || true
 [ -L "$CLAUDE_CONFIG_DIR/skills/ripwire-orient" ] || fail "planted symlink was replaced instead of refused"
 target="$( readlink "$CLAUDE_CONFIG_DIR/skills/ripwire-orient" )"
 [ "$target" = "$outside" ] || fail "planted symlink's target changed — install wrote through it"
-rm -rf "$d3" "$outside" skills_install.err
+rm -rf "$d3" "$outside"
 
 # ── arm 4: manifest v2 round-trip and prune-on-rename ─────────────────────────────────────────
 CURRENT_ARM="4-manifest-prune"
@@ -169,34 +169,34 @@ rm -rf "$d11"
 CURRENT_ARM="12-second-positional-refused"
 sandbox
 d12="$d"
-"$ripwire" skills install "$d12/one" "$d12/two" >skills_install.err 2>&1
+"$ripwire" skills install "$d12/one" "$d12/two" >"$d12/skills_install.err" 2>&1
 rc=$?
 [ "$rc" -ne 0 ] || fail "a second destination positional exited 0 instead of being refused"
-grep -qi "only one destination path" skills_install.err || fail "refusal did not name the reason"
+grep -qi "only one destination path" "$d12/skills_install.err" || fail "refusal did not name the reason"
 [ -e "$d12/one" ] && fail "first destination was installed to despite the refusal"
 [ -e "$d12/two" ] && fail "second destination was installed to despite the refusal"
-rm -rf "$d12" skills_install.err
+rm -rf "$d12"
 
 # an empty positional is not a path either — must not silently fall through to the default agent home
 # (installForAgent's `!explicitDest.empty()` override is the exact seam this would slip through).
 sandbox
 d12b="$d"
-"$ripwire" skills install "" >skills_install.err 2>&1
+"$ripwire" skills install "" >"$d12b/skills_install.err" 2>&1
 rc=$?
 [ "$rc" -ne 0 ] || fail "an empty destination positional exited 0 instead of being refused"
 [ -e "$CLAUDE_CONFIG_DIR/skills" ] && fail "an empty destination positional silently installed into the default agent home"
-rm -rf "$d12b" skills_install.err
+rm -rf "$d12b"
 
 # ── arm 13: --hook with an explicit DEST_PATH is refused (path installs have no hook target) ──────
 CURRENT_ARM="13-hook-with-dest-path-refused"
 sandbox
 d13="$d"
-"$ripwire" skills install --hook "$d13/dest" >skills_install.err 2>&1
+"$ripwire" skills install --hook "$d13/dest" >"$d13/skills_install.err" 2>&1
 rc=$?
 [ "$rc" -ne 0 ] || fail "--hook with an explicit DEST_PATH exited 0 instead of being refused"
-grep -qi "hook" skills_install.err || fail "refusal did not mention --hook"
+grep -qi "hook" "$d13/skills_install.err" || fail "refusal did not mention --hook"
 [ -e "$d13/dest" ] && fail "explicit DEST_PATH was installed to despite the --hook refusal"
-rm -rf "$d13" skills_install.err
+rm -rf "$d13"
 
 # ── arm 14: end-to-end — a real install followed by a real --doctor must not read stale ────────
 # Closes the gap that let writeManifestV2 write the BINARY'S PATH into source= while skillsCheck
@@ -261,26 +261,26 @@ before_linked="$( grep -c '^skill=' "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest
 victim="$( grep '^skill=' "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" | head -1 | sed 's/^skill=//' )"
 rm -f "$CLAUDE_CONFIG_DIR/skills/$victim"
 chmod 0555 "$CLAUDE_CONFIG_DIR/skills"   # dir still traversable/listable, not writable: symlink() there fails EACCES
-"$ripwire" skills install >skills_install.err 2>&1
+"$ripwire" skills install >"$d17/skills_install.err" 2>&1
 rc=$?
 chmod 0755 "$CLAUDE_CONFIG_DIR/skills"   # restore before any further access (incl. cleanup)
 [ "$rc" -ne 0 ] || fail "a run that failed to link an entry exited 0"
-[ -s skills_install.err ] || fail "a link-loop failure produced no message at all"
+[ -s "$d17/skills_install.err" ] || fail "a link-loop failure produced no message at all"
 after_linked="$( grep -c '^skill=' "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" )"
 after_live="$( find "$CLAUDE_CONFIG_DIR/skills" -maxdepth 1 -name 'ripwire-*' -type l | wc -l | tr -d ' ' )"
 [ "$after_linked" -eq "$after_live" ] \
     || fail "manifest skill= count ($after_linked) does not equal the actually-linked entries on disk ($after_live) — manifest still records intent, not outcome"
-rm -rf "$d17" skills_install.err
+rm -rf "$d17"
 
 # ── arm 18: M2 — an unknown/typo'd --flag is refused by name, not silently treated as an agent ────
 CURRENT_ARM="18-unknown-flag-refused"
 sandbox
 d18="$d"
-"$ripwire" skills install --forc >skills_install.err 2>&1
+"$ripwire" skills install --forc >"$d18/skills_install.err" 2>&1
 rc=$?
 [ "$rc" -ne 0 ] || fail "an unknown --flag exited 0 instead of being refused"
-grep -qi "unknown flag" skills_install.err || fail "the refusal did not name the flag as unknown"
+grep -qi "unknown flag" "$d18/skills_install.err" || fail "the refusal did not name the flag as unknown"
 [ -e "$CLAUDE_CONFIG_DIR/skills" ] && fail "an unknown --flag installed anyway before refusing"
-rm -rf "$d18" skills_install.err
+rm -rf "$d18"
 
 echo "OK: skillsinstallcheck (arms 1-18)"

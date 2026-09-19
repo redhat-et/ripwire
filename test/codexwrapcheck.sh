@@ -29,8 +29,8 @@ grep -q '^enabled_tools = \["analyze", "quality_delta", "flags", "doc_drift"\]$'
     || { echo "codexwrapcheck: MCP is not restricted to audit/health verbs"; exit 1; }
 grep -q '^default_tools_approval_mode = "approve"$' "$TMP/out" \
     || { echo "codexwrapcheck: audit-only MCP approval mode missing"; exit 1; }
-grep -q '^bash skills/install\.sh --codex' "$TMP/out" || { echo "codexwrapcheck: canonical skill install missing"; exit 1; }
-grep -q '^bash skills/install\.sh --codex --hook' "$TMP/out" || { echo "codexwrapcheck: Codex hook install missing"; exit 1; }
+grep -qE "^'[^']+' skills install --codex([[:space:]]|\$)" "$TMP/out" || { echo "codexwrapcheck: canonical skill install missing"; exit 1; }
+grep -qE "^'[^']+' skills install --codex --hook" "$TMP/out" || { echo "codexwrapcheck: Codex hook install missing"; exit 1; }
 # A skills tree the pre-recipe scan cannot descend. wrapScanSkillDir is noexcept, and its range-for advanced a
 # recursive_directory_iterator with the THROWING operator++, so any directory it could not open mid-walk ended
 # `ripwire wrap` in std::terminate (SIGABRT, exit 134) before any recipe. The walk now advances with increment(ec),
