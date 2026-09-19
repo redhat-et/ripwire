@@ -59,7 +59,7 @@ H_FOUND=$( find -L "$HERMES_HOME/skills" -mindepth 2 -maxdepth 2 -name SKILL.md 
     || no "--hermes exposed $H_FOUND of $shipped skills under HERMES_HOME/skills"
 
 # ---- 1b) the manifest names EXACTLY the linked user-facing set (no contributor-only, nothing omitted) ----
-MANIFEST="$HERMES_HOME/skills/.ripwire-manifest-v1"
+MANIFEST="$HERMES_HOME/skills/.ripwire-manifest-v2"
 manifest_set=$( grep '^skill=' "$MANIFEST" 2>/dev/null | sed 's/^skill=//' | sort )
 wanted_set=$( skill_names user )
 if [ "$manifest_set" != "$wanted_set" ]; then
@@ -183,10 +183,10 @@ HERMES_HOME="$H7_HOME" bash "$H7_SK/install.sh" --hermes >"$TMP/h7.out" 2>&1
     && ok "a non-ripwire-* entry under skills/hermes/ is skipped — the user's own 'notes' skill is untouched" \
     || no "the Hermes-native loop linked 'notes' over the user's own file (ln -sfn removed it), and the ripwire-* prune loop can never take it back out"
 # (c) and it is not claimed in the manifest either — the manifest loop globs the same set as the install loop.
-{ ! grep -qx 'skill=notes' "$H7_HOME/skills/.ripwire-manifest-v1" 2>/dev/null; } \
+{ ! grep -qx 'skill=notes' "$H7_HOME/skills/.ripwire-manifest-v2" 2>/dev/null; } \
     && ok "the --hermes manifest does not claim the non-ripwire-* 'notes' entry" \
     || no "the --hermes manifest claims 'skill=notes', a name this installer does not own"
-{ grep -qx 'skill=ripwire-decoy-map' "$H7_HOME/skills/.ripwire-manifest-v1" 2>/dev/null; } \
+{ grep -qx 'skill=ripwire-decoy-map' "$H7_HOME/skills/.ripwire-manifest-v2" 2>/dev/null; } \
     && ok "the --hermes manifest claims the ripwire-* Hermes-native skill it linked" \
     || no "the --hermes manifest omits ripwire-decoy-map, which it linked"
 
