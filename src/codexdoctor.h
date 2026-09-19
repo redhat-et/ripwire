@@ -244,10 +244,11 @@ inline Check binaryCheck( const std::string& selfPath )
     return fallbackBinaryCheck( selfPath, active );
 }
 
-// This is codexdoctor's OWN small manifest-v1/v2 reader — deliberately not `rw::skillsinstall`'s
-// `ManifestV2`/`readManifestV2`: this header does read-only checks of the LIVE surface independent of
-// the checkout/install mechanism (see the file banner above), and the only real dependency it takes
-// from the embed step is `rw::embedded_skills::kStoreKey` for the staleness comparison below.
+// This is codexdoctor's OWN small manifest-v1/v2 reader, deliberately separate from
+// `rw::skillsinstall`'s manifest writer: this header does read-only checks of the LIVE surface
+// independent of the checkout/install mechanism (see the file banner above), and the only real
+// dependency it takes from the embed step is `rw::embedded_skills::kStoreKey` for the staleness
+// comparison below.
 struct SkillManifest
 {
     bool read = false;
