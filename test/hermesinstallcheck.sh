@@ -21,6 +21,10 @@ no(){ echo "  FAIL  $1"; fail=1; }
 [ -f "$SK/install.sh" ] || { echo "no skills/install.sh"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# The bare (Claude-default) install.sh call below (line ~79) resolves settings/skills through
+# CLAUDE_CONFIG_DIR ahead of its own HOME= override — an ambient CLAUDE_CONFIG_DIR writes past it.
+# Source BEFORE our own HERMES_HOME export: it unsets HERMES_HOME too, so sourcing after clobbers it.
+. "$ROOT/test/lib/unset-agent-env-variables.sh"       # every HOME= below is per-invocation only
 export HERMES_HOME="$TMP/hermes-home"; rm -rf "$HERMES_HOME"; mkdir -p "$HERMES_HOME"
 
 # helper: skill NAMES shipped in the repo — the flat Agent-Skills-standard set plus the Hermes-native
@@ -54,7 +58,7 @@ H_FOUND=$( find -L "$HERMES_HOME/skills" -mindepth 2 -maxdepth 2 -name SKILL.md 
     || no "--hermes exposed $H_FOUND of $shipped skills under HERMES_HOME/skills"
 
 # ---- 1b) the manifest names EXACTLY the linked user-facing set (no contributor-only, nothing omitted) ----
-MANIFEST="$HERMES_HOME/skills/.ripwire-manifest-v1"
+MANIFEST="$HERMES_HOME/skills/.ripwire-manifest-v2"
 manifest_set=$( grep '^skill=' "$MANIFEST" 2>/dev/null | sed 's/^skill=//' | sort )
 wanted_set=$( skill_names user )
 if [ "$manifest_set" != "$wanted_set" ]; then
@@ -114,9 +118,9 @@ else
     if ! "$BIN" wrap hermes >"$WRAP" 2>"$TMP/wrap-hermes.err"; then
         no "ripwire wrap hermes exited non-zero — the binary cannot print its own Hermes recipe"
     else
-        RECIPE=$( grep -m1 -E '^bash skills/install\.sh ' "$WRAP" || true )
-        FLAG=$( printf '%s\n' "$RECIPE" | awk '{ print $3 }' )
-        ADV=$( printf '%s\n' "$RECIPE" | sed -n 's/.*# deploy to \(.*\) (drift-gated).*/\1/p' )
+        RECIPE=$( grep -m1 -E '^'\''[^'\'']+'\'' skills install ' "$WRAP" || true )
+        FLAG=$( printf '%s\n' "$RECIPE" | awk '{ print $4 }' )
+        ADV=$( printf '%s\n' "$RECIPE" | sed -n 's/.*# deploy to \([^ ]*\) (.*/\1/p' )
 
         { [ "$FLAG" = "--hermes" ]; } \
             && ok "wrap hermes recommends the installer flag this gate exercises ($FLAG)" \
@@ -178,10 +182,10 @@ HERMES_HOME="$H7_HOME" bash "$H7_SK/install.sh" --hermes >"$TMP/h7.out" 2>&1
     && ok "a non-ripwire-* entry under skills/hermes/ is skipped — the user's own 'notes' skill is untouched" \
     || no "the Hermes-native loop linked 'notes' over the user's own file (ln -sfn removed it), and the ripwire-* prune loop can never take it back out"
 # (c) and it is not claimed in the manifest either — the manifest loop globs the same set as the install loop.
-{ ! grep -qx 'skill=notes' "$H7_HOME/skills/.ripwire-manifest-v1" 2>/dev/null; } \
+{ ! grep -qx 'skill=notes' "$H7_HOME/skills/.ripwire-manifest-v2" 2>/dev/null; } \
     && ok "the --hermes manifest does not claim the non-ripwire-* 'notes' entry" \
     || no "the --hermes manifest claims 'skill=notes', a name this installer does not own"
-{ grep -qx 'skill=ripwire-decoy-map' "$H7_HOME/skills/.ripwire-manifest-v1" 2>/dev/null; } \
+{ grep -qx 'skill=ripwire-decoy-map' "$H7_HOME/skills/.ripwire-manifest-v2" 2>/dev/null; } \
     && ok "the --hermes manifest claims the ripwire-* Hermes-native skill it linked" \
     || no "the --hermes manifest omits ripwire-decoy-map, which it linked"
 

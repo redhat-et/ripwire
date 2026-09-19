@@ -17,6 +17,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/unset-agent-env-variables.sh"       # every HOME= below is per-invocation only
 HOOK="$ROOT/hooks/ripwire-nudge.sh"
 INSTALL="$ROOT/skills/install.sh"
 fail=0
@@ -361,7 +362,9 @@ echo "-- install.sh --hook output --"; echo "$INSTOUT1"
 if [ "$INSTRC1" -eq 0 ]; then ok "install.sh --hook: exit 0"; else no "install.sh --hook: exit was $INSTRC1"; fi
 if [ -f "$SETTINGS" ]; then ok "install.sh --hook: wrote $SETTINGS"; else no "install.sh --hook: $SETTINGS not created"; fi
 if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
-    jq -e --arg cmd "$HOOK" 'any((.hooks.PreToolUse // [])[]?.hooks[]?; .command == $cmd)' "$SETTINGS" >/dev/null 2>&1 \
+    # Name match, not exact path against $HOOK: the embedded installer serves a content-identical
+    # extracted store copy, never the checkout's own hooks/ripwire-nudge.sh.
+    jq -e 'any((.hooks.PreToolUse // [])[]?.hooks[]?; .command | test("ripwire-nudge\\.sh$"))' "$SETTINGS" >/dev/null 2>&1 \
         && ok "settings.json references hooks/ripwire-nudge.sh" \
         || no "settings.json does not reference the hook script"
     # Re-pinned 2026-09-05 (lane T): the matcher is a whole-name REGEX now. The 2026-09-04 form

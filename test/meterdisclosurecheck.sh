@@ -25,6 +25,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/unset-agent-env-variables.sh"       # every HOME=/AGENTS_HOME= below is per-invocation only
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 : "$BIN"   # unused (this gate inspects install.sh's own source/output text, no ripwire binary needed)
 INSTALL="$ROOT/skills/install.sh"

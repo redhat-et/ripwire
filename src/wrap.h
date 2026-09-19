@@ -1,5 +1,8 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/jsonesc.h"   // rw::shSingleQuote — C3 (2026-09-18 review round 1): the skills-install
+                              // recipe line below is a resolved BINARY PATH, printed for the user to
+                              // paste into a shell; double quotes do not stop `$(...)` or a backtick.
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -145,81 +148,77 @@ inline constexpr const AgentTarget* agentTarget( const std::string_view name ) n
     return findByField( kAgentTargets, &AgentTarget::name, name );
 }
 
-// Append the install command only where this repo owns a verified discovery path. Claude is the installer
-// default; Codex uses the cross-agent ~/.agents/skills discovery root documented by current Codex.
-//
-// The line is a deterministic three-way probe, not an unconditional checkout command — a prebuilt-binary
-// user has no checkout, and printing `bash skills/install.sh` at them is a dead instruction:
-//   (a) ./skills/install.sh exists relative to cwd            → the relative checkout line;
-//   (b) else <exeDir>/../share/ripwire/skills/install.sh      → `bash "<that absolute path>"` — the copy
-//       the curl installer stages at <prefix>/share/ripwire/skills (fixed design contract vs
-//       <prefix>/bin/<binary>; executablePath is already realpath'd by selfExecutablePath);
-//   (c) else                                                  → a clone-pointer comment, never a dead command.
+// Resolve a kAgentTargets `skillsRoot` DOC STRING into a real filesystem path — the piece that was
+// missing here: every caller until `ripwire skills install` (redhat-et/ripwire#225 task 8) only ever
+// PRINTED skillsRoot as a comment (wrapPrintSkillsLine below), never resolved it. Two shapes:
+//   - "${ENV_VAR:-~/default}/suffix"  — read ENV_VAR (empty is unset, same rule envOr() and every
+//     other ${VAR:-...} in this codebase follow), else the literal default, then append suffix;
+//   - a literal path with no `${...}`, e.g. openclaw's "~/.agents/skills" — used AS-IS, no env var
+//     honoured, because that row deliberately does not read one (see its own comment above).
+// A leading "~/" or a bare "~" then expands against `home`. Empty `row.skillsRoot` (no verified
+// discovery path for that agent) returns an empty path; the caller decides what that means.
+inline std::filesystem::path resolveSkillsRoot( const AgentTarget& row, const std::string& home )
+{
+    if( row.skillsRoot.empty() ) { return {}; }
+    const std::string doc( row.skillsRoot );
+    std::string resolved;
+    if( doc.rfind( "${", 0 ) == 0 )
+    {
+        const std::size_t colonDash  = doc.find( ":-" );
+        const std::size_t closeBrace = doc.find( '}' );
+        if( colonDash == std::string::npos || closeBrace == std::string::npos || closeBrace < colonDash )
+        {
+            return {};   // malformed doc string — a build defect in the table, not a runtime condition
+        }
+        const std::string envVar   = doc.substr( 2, colonDash - 2 );
+        const std::string fallback = doc.substr( colonDash + 2, closeBrace - ( colonDash + 2 ) );
+        const std::string suffix   = doc.substr( closeBrace + 1 );
+        const char* const value = std::getenv( envVar.c_str() );
+        resolved = ( ( value != nullptr ) && ( *value != '\0' ) ) ? ( std::string( value ) + suffix ) : ( fallback + suffix );
+    }
+    else
+    {
+        resolved = doc;   // a literal root — no env var honoured on purpose (see comment above)
+    }
+    if( resolved.rfind( "~/", 0 ) == 0 ) { resolved = home + resolved.substr( 1 ); }
+    else if( resolved == "~" )           { resolved = home; }
+    return std::filesystem::path( resolved );
+}
+
+// Print the skills-install recipe line for `agent`. Collapsed to one unconditional command
+// (redhat-et/ripwire#225): since skills are embedded in the binary itself, there is no sibling
+// install.sh to probe for — `executablePath` (already realpath'd by selfExecutablePath) is always
+// enough. Replaces the old three-arm filesystem probe entirely.
 inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, const std::string_view executablePath )
 {
     const AgentTarget* row = agentTarget( agent );
     if( row == nullptr || row->skillsRoot.empty() )
     {
-        return;                      // no verified discovery path for this agent — say nothing
+        return;   // no verified discovery path for this agent — say nothing, unchanged from before
     }
     const std::string flagStr( row->skillsFlag );
     const std::string destStr( row->skillsRoot );
-    const char* const codexFlag   = flagStr.c_str();
-    const char* const destComment = destStr.c_str();
-    const bool        hasHook     = row->hookSlot;   // a COLUMN, not inferred from the skills flag
+    const bool hasHook = row->hookSlot;
 
-    namespace fs = std::filesystem;
-    std::error_code ec;
-
-    // The `--hook` line rides along on the SAME resolved installer for Claude and Codex. It is RECOMMENDED
-    // because it is the only lever here that intercepts a default at the moment it is chosen: a skill
-    // fires only if the agent recognizes a moment AND spends a call to load it, whereas reaching for
-    // Read costs nothing. Still a SEPARATE command, never folded into the line above — opt-in is the
-    // hook's design contract, and hookcheck.sh asserts a bare install never touches settings.json.
-    // openclaw was the case that proved this has to be a column: it shares Codex's skills root, so any
-    // rule inferring "codex-shaped" from a non-empty skills flag hands it a --codex --hook line for a
-    // hook slot it does not have. A row now states it.
-    const auto hookLine = [ out, hasHook, &flagStr ]( const char* installer, const bool quoted )
+    if( executablePath.empty() )
     {
-        if( !hasHook )
-        {
-            return;
-        }
-        const std::string hookFlagStr = flagStr + " --hook";
-        const char* hookFlags = hookFlagStr.c_str();
-        // Split from a ternary over two format strings — see packtask.h for the same shape and reason.
-        if( quoted )
-        {
-            rw::emitTo( out, "bash \"{}\"{}   # RECOMMENDED: advisory Read/Grep -> ripwire CLI nudge + session primer (opt-in, never blocks)\n",
-                        installer, hookFlags );
-        }
-        else
-        {
-            rw::emitTo( out, "bash {}{}   # RECOMMENDED: advisory Read/Grep -> ripwire CLI nudge + session primer (opt-in, never blocks)\n",
-                        installer, hookFlags );
-        }
-    };
-
-    // (a) checkout cwd — the repo's own installer is right here
-    if( fs::is_regular_file( "skills/install.sh", ec ) && !ec )
-    {
-        rw::emitTo( out, "bash skills/install.sh{}   # deploy to {} (drift-gated)\n", codexFlag, destComment );
-        hookLine( "skills/install.sh", false );
+        // selfExecutablePath degrades to "" rather than crash (verbs_doctor.h) — printing an empty-quoted
+        // command would be a dead instruction, the exact failure mode this collapse was meant to retire.
+        rw::emitTo( out, "# skills install: could not determine this binary's own path — reinvoke with an absolute path\n" );
         return;
     }
-
-    // (b) prebuilt install — the staged copy next to the binary's prefix
-    ec.clear();
-    const fs::path stagedInstaller = fs::path( executablePath ).parent_path().parent_path() / "share" / "ripwire" / "skills" / "install.sh";
-    if( !executablePath.empty() && fs::is_regular_file( stagedInstaller, ec ) && !ec )
+    // Single-quoted, via the canonical shell-quoting helper (already used elsewhere in this file's
+    // recipes) — a double-quoted path lets `$(...)`/backtick command substitution execute when the
+    // recipe is pasted (redhat-et/ripwire#225 review round 1, C3); a single-quoted path is inert to
+    // every shell metacharacter except a literal `'`, which shSingleQuote itself closes/reopens for.
+    const std::string quotedPath = rw::shSingleQuote( std::string( executablePath ) );
+    rw::emitTo( out, "{} skills install{}   # deploy to {} (embedded, versioned — rerun after an upgrade)\n",
+                quotedPath.c_str(), flagStr.c_str(), destStr.c_str() );
+    if( hasHook )
     {
-        rw::emitTo( out, "bash \"{}\"{}   # deploy to {} (drift-gated)\n", stagedInstaller.string().c_str(), codexFlag, destComment );
-        hookLine( stagedInstaller.string().c_str(), true );
-        return;
+        rw::emitTo( out, "{} skills install{} --hook   # RECOMMENDED: advisory Read/Grep -> ripwire CLI nudge + session primer (opt-in, never blocks)\n",
+                    quotedPath.c_str(), flagStr.c_str() );
     }
-
-    // (c) nothing local — point at the source instead of printing a command that cannot run
-    rw::emitTo( out, "# skills not found locally — clone https://github.com/redhat-et/ripwire and run skills/install.sh{}\n", codexFlag );
 }
 
 // agent → the context/rules file its use-when blurb belongs in (declarative table, one row per client)

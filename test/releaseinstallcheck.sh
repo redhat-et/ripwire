@@ -12,7 +12,8 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 # Detection and activation must use only the per-invocation homes below.
-unset CODEX_HOME AGENTS_HOME HERMES_HOME RIPWIRE_NO_ACTIVATE RIPWIRE_SKIP_CPU_CHECK RIPWIRE_CPUINFO
+. "$ROOT/test/lib/unset-agent-env-variables.sh"       # every HOME= below is per-invocation only
+unset RIPWIRE_NO_ACTIVATE RIPWIRE_SKIP_CPU_CHECK RIPWIRE_CPUINFO
 FAKE="$TMP/fake"; mkdir -p "$FAKE" "$TMP/assets/ripwire-0.3.6-macos-arm64/skills/ripwire-router" "$TMP/assets/ripwire-0.3.6-macos-arm64/hooks"
 
 printf '#!/bin/sh\necho "ripwire 0.3.6 (Release, Test)"\n' >"$TMP/assets/ripwire-0.3.6-macos-arm64/ripwire"
@@ -78,10 +79,14 @@ else
 fi
 [ -x "$PREFIX/bin/ripwire" ] && [ "$( "$PREFIX/bin/ripwire" --version | awk '{print $2}' )" = "0.3.6" ] \
     && ok "installed binary reports the release tag version" || no "installed binary/version mismatch"
-[ -f "$PREFIX/share/ripwire/skills/ripwire-router/SKILL.md" ] \
-    && ok "installer stages bundled skills" || no "installer did not stage bundled skills"
-[ -x "$PREFIX/share/ripwire/hooks/ripwire-codex-nudge.sh" ] \
-    && ok "installer stages bundled Codex hooks" || no "installer did not stage bundled Codex hooks"
+# I2: $prefix/share/ripwire/{skills,hooks} staging was deleted by design (redhat-et/ripwire#225 —
+# skills/hooks are embedded in the binary; `ripwire skills install --all`, covered by arm (E1) below,
+# is what activates them now). These two used to assert the staging directory existed; asserting it
+# does NOT is the current, correct contract — not a duplicate of (E1), which checks activation.
+[ ! -d "$PREFIX/share/ripwire/skills" ] \
+    && ok "installer no longer stages a \$prefix/share/ripwire/skills directory" || no "installer staged the removed \$prefix/share/ripwire/skills directory"
+[ ! -d "$PREFIX/share/ripwire/hooks" ] \
+    && ok "installer no longer stages a \$prefix/share/ripwire/hooks directory" || no "installer staged the removed \$prefix/share/ripwire/hooks directory"
 
 mv "$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz.sha256" "$TMP/assets/checksum.saved"
 if HOME="$SBHOME" PATH="$FAKE:$PATH" RELEASE_FIXTURE="$TMP/release.json" ASSET_FIXTURE="$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" \
@@ -125,7 +130,20 @@ grep -q 'cp -R hooks' "$WORKFLOW" \
 # The version-mismatch arm above deliberately leaves a 0.2.2 binary in the fixture. Restore a pristine
 # 0.3.6 archive before driving the installer for real, or every arm below fails for that reason instead
 # of the one it is testing.
-printf '#!/bin/sh\necho "ripwire 0.3.6 (Release, Test)"\n' >"$TMP/assets/ripwire-0.3.6-macos-arm64/ripwire"
+#
+# A pure echo stub answers `--version` but cannot answer `skills install --all` (#225: skills are
+# embedded in the binary, not a bundled dir a stub could fake). Wrap the real, locally-built ripwire
+# instead: version stub for the check above, exec the real binary for everything else.
+REAL_BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${REAL_BIN#/}" = "$REAL_BIN" ] && REAL_BIN="$ROOT/$REAL_BIN"
+[ -x "$REAL_BIN" ] || { echo "no ripwire binary at $REAL_BIN — build first"; exit 2; }
+cat >"$TMP/assets/ripwire-0.3.6-macos-arm64/ripwire" <<EOF
+#!/bin/sh
+case "\$1" in
+    --version) echo "ripwire 0.3.6 (Release, Test)" ;;
+    *) exec "$REAL_BIN" "\$@" ;;
+esac
+EOF
 chmod +x "$TMP/assets/ripwire-0.3.6-macos-arm64/ripwire"
 tar -C "$TMP/assets" -czf "$TMP/assets/ripwire-0.3.6-macos-arm64.tar.gz" ripwire-0.3.6-macos-arm64
 ( cd "$TMP/assets" && shasum -a 256 ripwire-0.3.6-macos-arm64.tar.gz >ripwire-0.3.6-macos-arm64.tar.gz.sha256 )
@@ -156,7 +174,9 @@ run_install "$EH1" "$TMP/prefix-e1"
 [ -e "$EH1/.claude/skills/ripwire-router" ] \
     && ok "(E1) Claude Code skills are ACTIVE after the one-liner, not merely staged" \
     || no "(E1) Claude Code was detected but its skills were left staged — the new user still has a menu"
-grep -qi 'activated' "$TMP/e.out" \
+# "configured"/"linked into", not "activated": `ripwire skills install --all` owns this wording now
+# (#225), not scripts/install.sh's own now-removed per-agent activation loop.
+grep -qi 'configured' "$TMP/e.out" \
     && ok "(E1) the run reports what it activated" \
     || no "(E1) skills were activated but the run never said so"
 

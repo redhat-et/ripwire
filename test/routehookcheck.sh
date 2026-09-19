@@ -29,6 +29,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/unset-agent-env-variables.sh"       # every HOME= below is per-invocation only
 HOOK="$ROOT/hooks/ripwire-claude-route.sh"
 NUDGE="$ROOT/hooks/ripwire-nudge.sh"
 INSTALL="$ROOT/skills/install.sh"
@@ -479,9 +480,10 @@ DOC2="$( HOME="$DEFHOME" "$BIN" "$REPO" --doctor --agent=claude 2>/dev/null )"
 printf '%s' "$DOC2" | grep -Eq '<c n="claude-hooks"[^>]*route_hook="0"' \
     && ok "V3 doctor: route_hook=\"0\" when it is not registered (the negative control)" \
     || no "V3 doctor: route_hook is not 0 against an untouched home"
-printf '%s' "$DOC1" | grep -Fqi 'codex' \
-    && no "V4 doctor: the claude report mentions Codex (a hint pointing at the wrong installer)" \
-    || ok "V4 doctor: the claude report names no Codex remediation"
+# The legend names codex-skills unconditionally, on every --agent; V4 cares about the rows, so strip it.
+printf '%s' "$DOC1" | sed 's/<!--.*-->//' | grep -Fqi 'codex' \
+    && no "V4 doctor: the claude report's rows mention Codex (a hint pointing at the wrong installer)" \
+    || ok "V4 doctor: the claude report's rows name no Codex remediation"
 "$BIN" "$REPO" --doctor --agent=bogus >/dev/null 2>"$TMP/v.err"; VRC=$?
 [ "$VRC" -ne 0 ] && grep -Fq 'claude' "$TMP/v.err" \
     && ok "V5 doctor: an unsupported --agent value is refused and the message lists claude" \
