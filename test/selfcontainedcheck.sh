@@ -191,16 +191,12 @@ else
     no "generated/embedded_skills.h does not exist (embed step not yet implemented)"
 fi
 
-# Verify that `ripwire skills install` is not a missing-source-tree error (once added, will use embedded files).
-# Today: the subcommand doesn't exist, so any failure is acceptable as long as it's not a source-tree complaint.
+# I3 (round-2 review): `skills install` has been a real subcommand for ~40 commits — assert success
+# outright instead of the pre-implementation "any failure that isn't a source-tree complaint is fine".
 if HOME="$TMP/home" CLAUDE_CONFIG_DIR="$TMP/config" "$TMP/isolated/ripwire" skills install >"$TMP/skills_install.out" 2>"$TMP/skills_install.err"; then
-    # If it succeeds, that's OK (subcommand was added in a later task)
-    ok "ripwire skills install succeeded (subcommand now implemented)"
-elif grep -qi "cannot find.*skills\|cannot find.*hooks\|source.*tree\|checkout" "$TMP/skills_install.err"; then
-    no "ripwire skills install looked for source-tree skills/hooks (should use embedded)"
-    head -3 "$TMP/skills_install.err"
+    ok "ripwire skills install succeeds against the isolated (embedded-skills) binary"
 else
-    ok "ripwire skills install fails as expected (command not yet implemented, will use embedded files later)"
+    no "ripwire skills install failed against the isolated binary: $( head -1 "$TMP/skills_install.err" )"
 fi
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'

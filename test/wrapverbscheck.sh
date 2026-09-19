@@ -18,7 +18,7 @@
 #      install layout (checkout, curl-staged prefix, a mise shim, an aqua proxy, or nothing local
 #      at all): `"<resolved binary path>" skills install[ <agent flag>]`, never the old three-arm
 #      filesystem probe or its dead-end `# skills not found locally` comment. Byte-determinism per
-#      case. RED until `wrapPrintSkillsLine` (src/wrap.h) is rewritten to match (redhat-et/ripwire#225).
+#      case.
 #
 # Usage:
 #   test/wrapverbscheck.sh                          # uses build/ripwire
@@ -230,10 +230,10 @@ echo "=== 7. skills-line: collapsed 'skills install' command, every layout ==="
 
 REAL_TMP="$( cd "$TMP" && pwd -P )"
 
-# The collapsed contract (redhat-et/ripwire#225 task 12, not yet implemented — this section is RED
-# until then): ONE unconditional line, `"<resolved binary path>" skills install[ <agent flag>]`,
-# on every layout, since the skills are embedded in the binary and there is nothing left to probe
-# for. Not `$`-anchored: the real line carries a trailing `# deploy to ... ` comment.
+# The collapsed contract (redhat-et/ripwire#225 task 12): ONE unconditional line,
+# `"<resolved binary path>" skills install[ <agent flag>]`, on every layout, since the skills are
+# embedded in the binary and there is nothing left to probe for. Not `$`-anchored: the real line
+# carries a trailing `# deploy to ... ` comment.
 assert_skills_line() {
     _label="$1"; _out="$2"
     if echo "$_out" | grep -qE '^'\''[^'\'']+'\'' skills install( --[a-z-]+)?( --hook)?([[:space:]]|$)'; then
@@ -292,6 +292,17 @@ printf '#!/bin/sh\nexec "%s" "$@"\n' "$MISE_INSTALL/ripwire" >"$TMP/mise/shims/r
 chmod +x "$TMP/mise/shims/ripwire"
 MISE_OUT="$( cd "$TMP/case_mise" && "$TMP/mise/shims/ripwire" wrap claude 2>/dev/null )"
 assert_skills_line "case mise (shim)" "$MISE_OUT"
+# I3b: a generic single-quoted-path shape matches ANY path — this arm exists specifically to prove
+# the recipe names the SHIM's own resolved target, not just some path, so assert that exact string.
+# realpath, not $TMP literally: the recipe prints the binary's OWN resolved path, and on macOS $TMP
+# (/var/folders/...) and its canonical form (/private/var/folders/...) differ as strings for the
+# same file (sourceinstallcheck.sh hit this same gotcha) — compare against REAL_TMP instead.
+MISE_INSTALL_REAL="$REAL_TMP/mise/installs/ripwire/0.0.0/$ARCHIVE"
+if echo "$MISE_OUT" | grep -qF "'$MISE_INSTALL_REAL/ripwire' skills install"; then
+    ok "case mise (shim): the recipe names the shim's own resolved path ($MISE_INSTALL_REAL/ripwire)"
+else
+    no "case mise (shim): the recipe does not name $MISE_INSTALL_REAL/ripwire specifically"
+fi
 
 # case aqua — pkgs/github_release/github.com/<owner>/<repo>/<version>/<archive>.tar.gz/<archive>/,
 # bin/ripwire -> aqua-proxy, a shim that execs the real binary (aqua never symlinks straight to it)
@@ -304,6 +315,12 @@ chmod +x "$TMP/aqua/bin/aqua-proxy"
 ln -s aqua-proxy "$TMP/aqua/bin/ripwire"
 AQUA_OUT="$( cd "$TMP/case_aqua" && "$TMP/aqua/bin/ripwire" wrap claude 2>/dev/null )"
 assert_skills_line "case aqua (proxy shim)" "$AQUA_OUT"
+AQUA_INSTALL_REAL="$REAL_TMP/aqua/pkgs/github_release/github.com/redhat-et/ripwire/v0.0.0/$ARCHIVE.tar.gz/$ARCHIVE"
+if echo "$AQUA_OUT" | grep -qF "'$AQUA_INSTALL_REAL/ripwire' skills install"; then
+    ok "case aqua (proxy shim): the recipe names the shim's own resolved path ($AQUA_INSTALL_REAL/ripwire)"
+else
+    no "case aqua (proxy shim): the recipe does not name $AQUA_INSTALL_REAL/ripwire specifically"
+fi
 
 # determinism per fixture: same invocation twice, byte-identical
 B_OUT2="$( cd "$TMP/case_b" && "$TMP/prefix/bin/ripwire-copy" wrap claude 2>/dev/null )"
