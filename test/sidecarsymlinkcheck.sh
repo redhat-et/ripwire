@@ -951,7 +951,27 @@ readArchCheck(){ ( cd "$1" && "$BIN" "$1" --arch=rules.txt --no-cache ); }
 printf 'a.c\t2026-01-01\t%s\n' "$READ_SENTINEL" >"$TMP/payload_notes"
 RN="$TMP/notes_read/tree"
 mkTree "$RN"
-readArm notes "$RN" .ripwire_notes "$TMP/payload_notes" "$READ_SENTINEL" '<notes>' readNotesList
+readArm notes "$RN" .ripwire_notes "$TMP/payload_notes" "$READ_SENTINEL" '<notes' readNotesList
+# (q-notes) the refusal is named IN the document, in EVERY build flavour: DISCLOSE( sink, why ) sets the read's
+# symlinkRefused, which --notes prints as <notes refused="symlink"> — the stderr alert is a debug trace a Release binary
+# never prints, so the attribute is the only disclosure the shipped binary has. The control must NOT carry it.
+docRefusedArm()
+{
+    local label="$1" marker="$2" mode
+    if grep -qF "$marker" "$TMP/${label}_read_ctl.out" 2>/dev/null; then
+        no "$label: (q-doc) the REGULAR sidecar's document carries $marker — the marker would say nothing"
+    else
+        ok "$label: (q-doc) a regular sidecar's document carries no refusal marker"
+    fi
+    for mode in out in; do
+        if grep -qF "$marker" "$TMP/${label}_read_$mode.out" 2>/dev/null; then
+            ok "$label: (q-doc) the refused link ($mode) is named in the document: $marker"
+        else
+            no "$label: (q-doc) the refused link ($mode) is NOT named in the document — 'no sidecar' and 'a sidecar refused' read the same: $( grep -o '<notes[^>]*>\|<arch [^>]*>' "$TMP/${label}_read_$mode.out" 2>/dev/null | head -1 )"
+        fi
+    done
+}
+docRefusedArm notes '<notes refused="symlink">'
 
 # ── quality baseline: (n)/(k)/(i), then (q) — where the refusal is disclosed ──────────────────────────────
 RQ="$TMP/qualitybaseline_read/tree"
@@ -1033,6 +1053,7 @@ mkArchViolTree "$RA"
 if [ -f "$RA/.ripwire_arch_baseline" ] && grep -qE '^[0-9a-f]{8,}' "$RA/.ripwire_arch_baseline"; then
     mv "$RA/.ripwire_arch_baseline" "$TMP/payload_arch"
     readArm archbaseline "$RA" .ripwire_arch_baseline "$TMP/payload_arch" 'baselined="1"' '<arch layers=' readArchCheck
+    docRefusedArm archbaseline 'baseline="symlink-refused"'
     # FAIL-CLOSED, not merely unused: the one violation the refused baseline would have accepted is reported NEW
     # and the verb exits 2, exactly as with no sidecar at all.
     if grep -qF 'new_violations="1"' "$TMP/archbaseline_read_out.out" 2>/dev/null \
@@ -1188,18 +1209,18 @@ readMechArm()
     fi
 }
 
-readMechArm notes           src/notes.h   'inline std::vector<Note> readNotes( const std::string& path )' readNotes \
-            'readNotesSidecar( const std::string& path )' readNotesSidecar \
+readMechArm notes           src/notes.h   'inline std::vector<Note> readNotes( const std::string& path, NotesReadStats& stats )' readNotes \
+            'readNotesSidecar( const std::string& path, NotesReadStats& stats )' readNotesSidecar \
             'notes: refusing to read the notes sidecar through a symlink' 1
 readMechArm qualitybaseline src/quality.h 'inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadStats& stats )' readBaseline \
-            'readBaselineSidecar( const std::string& path )' readBaselineSidecar \
+            'readBaselineSidecar( const std::string& path, BaselineReadStats& stats )' readBaselineSidecar \
             'quality: refusing to read the baseline sidecar through a symlink' 1
 readMechArm qualitybaseline src/quality.h 'inline std::string readBaselineHeadSha( const std::string& path )' readBaselineHeadSha \
-            'readBaselineSidecar( const std::string& path )' readBaselineSidecar '' 0
+            'readBaselineSidecar( const std::string& path, BaselineReadStats& stats )' readBaselineSidecar '' 0
 readMechArm qualitybaseline src/quality.h 'inline std::size_t readBaselineAbsorbed( const std::string& path )' readBaselineAbsorbed \
-            'readBaselineSidecar( const std::string& path )' readBaselineSidecar '' 0
+            'readBaselineSidecar( const std::string& path, BaselineReadStats& stats )' readBaselineSidecar '' 0
 readMechArm archbaseline    src/arch.h    'archReadBaseline( const std::string& sidecarPath )' archReadBaseline \
-            'readArchBaselineSidecar( const std::string& sidecarPath )' readArchBaselineSidecar \
+            'readArchBaselineSidecar( const std::string& sidecarPath, ArchBaselineRead& baseline )' readArchBaselineSidecar \
             'arch: refusing to read the arch baseline sidecar through a symlink' 1
 
 # The arch verb used to open the sidecar a SECOND time, with a bare stream, only to learn whether it existed. It

@@ -551,7 +551,8 @@ std::thread startGrepScanPrefetch( const rw::Config& cfg, const rw::IngestResult
                             catch( ... )   // a throw crossing this thread boundary would be std::terminate
                             {
                                 out.valid = false;
-                                DISCLOSE( "grep: scan prefetch degraded (exception swallowed) — the verb recomputes inline" );
+                                DISCLOSE( Diagnostics::answerUnchanged, "the verb recomputes the prefetched phases inline: same bytes, no overlap",
+                                          "grep: scan prefetch degraded (exception swallowed) — the verb recomputes inline" );
                             }
                         } );
 }
@@ -688,6 +689,12 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // `hits=` is itself a FLOOR, not a total. §A1: that ceiling no longer moves with --limit/--offset, so
     // hits=/files=/total= now read the SAME on every page of a walk.
     const int         hitsCapped = found.isBudgetReached ? 1 : 0;
+    // The scan's OWN shortfall, which no ceiling explains: an indexed file the scan could not read, or a scan that threw
+    // part-way (the DISCLOSE sinks in search.h set `degraded`; an abandoned regex also sets it, but that answer was
+    // refused above and never reaches here). Either one makes hits= a floor, so each is named on the root with
+    // counts_floor="1" — withholding complete= alone left a count that read as a total.
+    const bool        isScanDegraded = ( found.degraded && found.regexAbandonedFiles == 0 ) || ( aux.degraded && aux.regexAbandonedFiles == 0 );
+    const bool        isScanShort    = isScanDegraded || found.unreadableFiles != 0;
     // T1 (completeness claims — the mirror of the floor vocabulary). complete="1" appears on the root
     // exactly when this listing is EXHAUSTIVE over the index, so a consumer need not re-derive (re-grep)
     // the answer. Four conditions, each with a mutation arm in test/completecheck.sh:
@@ -780,6 +787,13 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                              "stack every thread was held to, and regex_line_max= then rides even beside a 0 wherever the engine's bound is finite. A pattern that is a literal (or literals joined by |) never reaches the engine, so no line is too long "
                              "for it; neither is a line holding none of the pattern's required literal text. " );
     }
+    // Gated on its own attributes' condition, like the clauses above: a clean scan pays nothing for it.
+    if( isScanShort )
+    {
+        rw::emitRaw( stdout, "SHORT SCAN: unread_files= counts indexed files the scan could not read when it ran (removed or unreadable since the "
+                             "index); scan_degraded=\"1\" means a scan stopped part-way on an internal failure, keeping the hits it had. Either one "
+                             "makes hits= a floor, so the root also carries counts_floor: a match may sit in what was not read. " );
+    }
     rw::emitTo( stdout,
                  // G1 (2026-08-15 harvest): byte-identical match text within one file's hits on the UNPAGINATED default view folds into
                  // ONE <hit> row plus <at l=… in=…/> children for the extra sites — n= on the <hit> (present only when >1) is 1+the <at>
@@ -865,6 +879,21 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // §R-J: unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped= (helper above).
     const std::string auxAttr = grepUnindexedAttrs( aux );
     const std::string regexSkipAttr = grepRegexSkipAttrs( cfg, found, aux, /*floorAlreadyEmitted=*/hitsCapped != 0 || tierReport.budgetHit != nullptr );
+    std::string       scanShortAttr;
+    if( found.unreadableFiles != 0 )
+    {
+        scanShortAttr += " unread_files=\"" + std::to_string( found.unreadableFiles ) + "\"";
+    }
+    if( isScanDegraded )
+    {
+        scanShortAttr += " scan_degraded=\"1\"";
+    }
+    const bool isFloorAlreadyEmitted = hitsCapped != 0 || tierReport.budgetHit != nullptr
+                                    || regexSkipAttr.find( rw::kGraphCountFloorAttrXml ) != std::string::npos;
+    if( isScanShort && !isFloorAlreadyEmitted )
+    {
+        scanShortAttr += rw::kGraphCountFloorAttrXml;
+    }
     const char* schemaAttr = cfg.legend == "compact" ? " schema=\"ripwire.grep/v1\"" : "";
     // P3 (L7, nextverb.h): the one follow-up. A CUT answer → the next page, under the compact legend (the page
     // is what the agent wants, not the prose it has already read); a hit → the enclosing-definition chain at the
@@ -882,13 +911,13 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     {
         grepNext = rw::nextFlag( "--for=", pat );
     }
-    rw::emitTo( stdout, "<grep pattern=\"{}\"{}{}{} files=\"{}\" hits=\"{}\"{} hits_capped=\"{}\"{}{}{}{}{}{}>",
+    rw::emitTo( stdout, "<grep pattern=\"{}\"{}{}{} files=\"{}\" hits=\"{}\"{} hits_capped=\"{}\"{}{}{}{}{}{}{}>",
                  ex( pat ).c_str(), schemaAttr, rootAttr.c_str(), termsAttr.c_str(), filesMatched, hitCount,
                  pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
                                  cfg.pageLimit, cfg.pageOffset, true, kXmlPageSyntax,
                                  /*collectionCapped=*/ hitsCapped != 0 ),   // H8: the cap hits_capped= names floors the root
                  hitsCapped, completeAttr, tierAttr.c_str(), corpusAttr.c_str(), auxAttr.c_str(), regexSkipAttr.c_str(),
-                 rw::nextAttrXml( grepNext ).c_str() );
+                 scanShortAttr.c_str(), rw::nextAttrXml( grepNext ).c_str() );
     // G1 (2026-08-15 harvest): hits GROUP by file under <f p="…">, root-relative when this is a single-root
     // run (report-memgraph §F6: the absolute root prefix alone was 42.5% of a real --grep payload; the
     // repeated-per-hit path was report-octocode §F1's 31.4%). Byte-identical text within one file's group

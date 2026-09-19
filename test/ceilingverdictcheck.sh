@@ -225,5 +225,30 @@ else
     no "(5) the rung verdict is re-derived from emitted text, or no longer assigned from the ladder's return: verbs_for.h header.find(=$badfind lastRungNote=$badnote rung-assignment=$forasn; packtask.h chosen.find(=$badpack rung-assignment=$packasn — each of the last two must be >= 1)"
 fi
 
+# ── (9) AN UNMEASURED FIT IS NOT A HELD CAP — the map's --max-tokens verdict when its probe cannot measure ──────────
+# Both fit probes in runDefaultMap return 0 when their charge buffer fails, and 0 reads as "fits": the map used to
+# print max_tokens=/fit_bytes= with NO over_ceiling, whose legend says absent = cap held — a verdict no measurement
+# backed. The probes now DISCLOSE into MaxTokensFit, which prints over_ceiling=1 fail-closed beside fit_unmeasured=1
+# (defined in its own legend comment), XML and JSON alike. The fault switch is non-NDEBUG only, so the arm reads the
+# flavour and SKIPs on Release; the control (no switch) must carry neither.
+CV_FLAVOUR="$( "$BIN" --version 2>/dev/null | sed -nE 's/^[^(]*\(([^,)]*).*/\1/p' )"
+case "$CV_FLAVOUR" in
+    Release|RelWithDebInfo|MinSizeRel)
+        printf '  SKIP  (9) the charge-buffer fault switch is compiled out of this %s (NDEBUG) binary — the plain-flavour leg proves it\n' "$CV_FLAVOUR" ;;
+    *)
+        RIPWIRE_FAULT_CHARGE_BUFFER=1 "$BIN" "$ROOT/test/fixture" --max-tokens=3000 --no-cache >"$TMP/m8.xml" 2>/dev/null
+        grep -q 'max_tokens=3000 fit_bytes=[0-9]* over_ceiling=1 fit_unmeasured=1' "$TMP/m8.xml" \
+            && ok "(9) an unmeasured --max-tokens fit is labelled: over_ceiling=1 fit_unmeasured=1" \
+            || no "(9) an unmeasured --max-tokens fit printed as a held cap: $( grep -o 'max_tokens=[0-9]* fit_bytes=[^-]*' "$TMP/m8.xml" | head -1 )"
+        grep -q 'fit_unmeasured=1: ' "$TMP/m8.xml" \
+            && ok "(9) fit_unmeasured= is defined in the same document" || no "(9) fit_unmeasured= rides with no definition"
+        RIPWIRE_FAULT_CHARGE_BUFFER=1 "$BIN" "$ROOT/test/fixture" --max-tokens=3000 --json --no-cache 2>/dev/null | grep -q '"fit_bytes":[0-9]*,"fit_measured_in":"xml","over_ceiling":true,"fit_unmeasured":true' \
+            && ok "(9) the JSON map carries over_ceiling:true AND fit_unmeasured:true on the same degrade (XML parity)" \
+            || no "(9) the JSON map's unmeasured fit reads as a held cap, or as a measured overflow (no fit_unmeasured key)"
+        "$BIN" "$ROOT/test/fixture" --max-tokens=3000 --no-cache 2>/dev/null | grep -q 'fit_unmeasured\|max_tokens=3000 fit_bytes=[0-9]* over_ceiling' \
+            && no "(9) control: the unfaulted map carries fit_unmeasured/over_ceiling" \
+            || ok "(9) control: the unfaulted map carries neither (the cap is measured and held)" ;;
+esac
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "ceilingverdictcheck: FAILURES ABOVE"
 exit "$fail"

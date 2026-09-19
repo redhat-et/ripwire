@@ -776,10 +776,71 @@ struct CMakeScan
 
     // rv-s2 review LOW-4: CMakeScan IS the field the caller already reads for this answer, so it models
     // Diagnostics::DisclosureSink directly rather than the flag being set beside a sink-less DISCLOSE — the
-    // flag-setting becomes the disclosure itself, and disclose() is the ONE place rootWalkFailed is written.
-    enum class DisclosureWhy : std::uint8_t { RootWalkFailed };
-    void disclose( DisclosureWhy ) noexcept { rootWalkFailed = true; }
+    // flag-setting becomes the disclosure itself, and disclose() is the ONE place rootWalkFailed and escaped are written.
+    enum class DisclosureWhy : std::uint8_t
+    {
+        RootWalkFailed,
+        SymlinkEscapesRoot,
+    };
+    void disclose( DisclosureWhy why ) noexcept   // the DISCLOSE sink: the fields the emitter reads
+    {
+        rootWalkFailed = rootWalkFailed || why == DisclosureWhy::RootWalkFailed;
+        escaped += why == DisclosureWhy::SymlinkEscapesRoot ? 1u : 0u;
+    }
 };
+
+// Can the root itself be LISTED? libc++ AND libstdc++ swallow EACCES on the root under skip_permission_denied (the flag is
+// meant for entries met mid-walk, not the walk's own starting point), so a recursive walk of an unlistable root reads as
+// an EMPTY SUCCESSFUL walk with its error_code clear (measured: `ec=0 atEnd=1` with the flag, `ec=13` without it, on both
+// libraries). A walker that must not mistake that for an empty tree probes here first, without the flag.
+inline bool crawlRootIsListable( const std::string& root )
+{
+    std::error_code                             ec;
+    const std::filesystem::directory_iterator  probe( root, ec );
+    return !ec;
+}
+
+// THE prune-aware file walk the two non-ingest walkers share (collectCMakeFiles below, docdrift.h collectRepoPaths):
+// every entry under `root` in readdir order, a directory pruned when `isPrunedDir( base )` holds or it holds a
+// CMakeCache.txt (a build-output tree), a path containing any non-empty `excludes` substring skipped, and each remaining
+// non-directory handed to `onFile( entry, fullPath, base )`. A per-entry error is skipped, as the walk always did. Returns
+// false — having visited nothing — when the root itself cannot be walked (crawlRootIsListable, or the iterator's own
+// error): the caller discloses that through its own sink, because an empty walk and a failed one must not read alike.
+template<class PruneDir, class OnFile>
+inline bool walkCrawlFiles( const std::string& root, const std::vector<std::string>& excludes, PruneDir&& isPrunedDir, OnFile&& onFile )
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const bool      isListable = crawlRootIsListable( root );   // checked together with `ec` below: one verdict, no TOCTOU gap
+    fs::recursive_directory_iterator it( root, fs::directory_options::skip_permission_denied, ec );
+    if( !isListable || ec )
+    {
+        return false;
+    }
+    const fs::recursive_directory_iterator end;
+    for( ; it != end; it.increment( ec ) )
+    {
+        if( ec ) { ec.clear(); continue; }
+        const std::string base = it->path().filename().string();
+        if( it->is_directory( ec ) )
+        {
+            std::error_code sec;
+            if( isPrunedDir( base ) || fs::exists( it->path() / "CMakeCache.txt", sec ) )
+            {
+                it.disable_recursion_pending();
+            }
+            continue;
+        }
+        const std::string full = it->path().string();
+        const bool isExcluded = std::any_of( excludes.begin(), excludes.end(),
+                                             [ & ]( const std::string& x ) { return !x.empty() && full.find( x ) != std::string::npos; } );
+        if( !isExcluded )
+        {
+            onFile( *it, full, base );
+        }
+    }
+    return true;
+}
 
 // The CMake files under `root`, sorted. ingest() never collects these (CMake is not one of the indexed
 // grammars), so this is the ONE crawl this module owns; every other file it reads comes from the caller's
@@ -790,9 +851,7 @@ struct CMakeScan
 // the same reason kCrawlSkipDirs is shared — a boundary two walkers disagreed about is not a boundary.
 inline CMakeScan collectCMakeFiles( const std::string& root, const std::vector<std::string>& excludes )
 {
-    namespace fs = std::filesystem;
     CMakeScan       out;
-    std::error_code ec;
     // libc++ AND libstdc++ swallow EACCES on the ROOT itself under skip_permission_denied below (the flag is
     // meant for subdirectories encountered mid-walk, not the root the walk starts from): an unreadable root
     // then reads as an EMPTY successful walk with `ec` clear — exactly the false zero rootWalkFailed exists
@@ -800,56 +859,34 @@ inline CMakeScan collectCMakeFiles( const std::string& root, const std::vector<s
     // and libstdc++). Probe the root without the flag first, mirroring main.cpp's rootIsReadable shape, which
     // this walk cannot rely on: `--flags` reaches this walk on a warm index even after the root's mode
     // changed out from under it, a path rootIsReadable's own one-shot CLI check never revisits. One combined
-    // check below (not two DISCLOSE sites) so a TOCTOU between the two constructions is still caught.
-    std::error_code pec;
-    { const fs::directory_iterator probe( root, pec ); }
-    fs::recursive_directory_iterator it( root, fs::directory_options::skip_permission_denied, ec );
-    if( pec || ec ) { DISCLOSE( out, CMakeScan::DisclosureWhy::RootWalkFailed, "flags: cannot walk root for CMake files — cmake gates omitted" ); return out; }
+    // check (walkCrawlFiles, not two DISCLOSE sites) so a TOCTOU between the two constructions is still caught.
     const std::string rootReal = canonicalCrawlRoot( root );
-
-    const fs::recursive_directory_iterator end;
-    for( ; it != end; it.increment( ec ) )
+    // Prune with ingest's OWN denylist (ingest.h kCrawlSkipDirs), plus walkCrawlFiles' CMakeCache.txt sentinel for
+    // build-output trees. Without this the walk finds every nested agent worktree's and build dir's copy
+    // of CMakeLists.txt, and a stale copy declaring `option(X … OFF)` shadows the real `ON` — measured on
+    // the motivating repo, where a worktree copy inverted CANYON_SPHERE_FIRE's reported default.
+    const bool isWalked = walkCrawlFiles( root, excludes, []( const std::string& base ) { return isSkippedCrawlDir( base ); },
+                                          [ & ]( const std::filesystem::directory_entry& entry, const std::string& p, const std::string& base )
     {
-        if( ec ) { ec.clear(); continue; }
-        const std::string base = it->path().filename().string();
-
-        // Prune with ingest's OWN denylist (ingest.h kCrawlSkipDirs), plus a CMakeCache.txt sentinel for
-        // build-output trees. Without this the walk finds every nested agent worktree's and build dir's copy
-        // of CMakeLists.txt, and a stale copy declaring `option(X … OFF)` shadows the real `ON` — measured on
-        // the motivating repo, where a worktree copy inverted CANYON_SPHERE_FIRE's reported default.
-        if( it->is_directory( ec ) )
-        {
-            std::error_code sec;
-            if( isSkippedCrawlDir( base ) || std::filesystem::exists( it->path() / "CMakeCache.txt", sec ) )
-            { it.disable_recursion_pending(); continue; }
-            continue;
-        }
-
-        const std::string p = it->path().string();
-        bool skip = false;
-        for( const std::string& x : excludes )
-        {
-            if( !x.empty() && p.find( x ) != std::string::npos ) { skip = true; break; }
-        }
-        if( skip )
-        {
-            continue;
-        }
         if( base == "CMakeLists.txt" || ( base.size() > 6 && base.compare( base.size() - 6, 6, ".cmake" ) == 0 ) )
         {
             // §SEC1 — the crawl boundary, tested only once the file is one this walk would actually OPEN, so
             // escaped= counts refusals and nothing else. is_symlink() reads the cached readdir type; only a
             // symlink pays the realpath.
             std::error_code lec;
-            const bool      isLink = it->is_symlink( lec );
+            const bool      isLink = entry.is_symlink( lec );
             if( isLink && !rw::crawlPathStaysInRoot( p, rootReal ) )
             {
-                ++out.escaped;
-                DISCLOSE( "flags: a CMake file's symlink target leaves the root — file refused" );
-                continue;
+                DISCLOSE( out, CMakeScan::DisclosureWhy::SymlinkEscapesRoot, "flags: a CMake file's symlink target leaves the root — file refused" );
+                return;
             }
             out.files.push_back( p );
         }
+    } );
+    if( !isWalked )
+    {
+        DISCLOSE( out, CMakeScan::DisclosureWhy::RootWalkFailed, "flags: cannot walk root for CMake files — cmake gates omitted" );
+        return out;
     }
     std::sort( out.files.begin(), out.files.end() );
     return out;

@@ -1176,11 +1176,7 @@ inline PlanLanesResult computePlanLanes( const LanesInputs& in )
         lane.execution = recommendExecution( executionSignals( lane, result.pairs ) );
     }
 
-    buildWarnings( in, result );
-    if( result.lanes.empty() )
-    {
-        DISCLOSE( "plan-lanes: the task's ranked surface produced no assignable lane — emitting a plan with zero lanes" );
-    }
+    buildWarnings( in, result );   // zero lanes is a legitimate answer, not a degrade: the no-lane-surface warning says it
     return result;
 }
 

@@ -243,6 +243,55 @@ if command -v git >/dev/null 2>&1; then
         no "whereis: fixture yields fewer than 2 hits ($WHITS) — the cap mutation has no room"
     fi
 
+    # ── 14b) MUTATION: a ref DROPPED at enumeration must drop the claim — in every build flavour ───────────
+    # enumerateRefs skips a for-each-ref row whose tip is not an object name. It used to do so with a one-argument
+    # DISCLOSE (a debug trace, nothing at all in Release) and no counter, so --whereis still claimed complete="1"
+    # over a sweep that never searched that ref. The DISCLOSE( sink, why ) now counts it and the claim is withheld.
+    # The fault is planted with a PATH shim around the real git that appends one malformed row to for-each-ref's
+    # output — a seam that reaches the Release binary too, unlike the non-NDEBUG fault switches. Control: the same
+    # shim passing everything through keeps the claim, so the arm cannot pass by breaking git.
+    REALGIT="$( command -v git )"; SHIM="$TMP/gitshim"; mkdir -p "$SHIM"
+    cat >"$SHIM/git" <<SHEOF
+#!/usr/bin/env bash
+case " \$* " in
+    *" for-each-ref "*) "$REALGIT" "\$@"; rc=\$?; [ -n "\${RW_SHIM_MANGLE:-}" ] && printf 'zz-dropped|not-an-object-name|2026-01-01\n'; exit \$rc ;;
+    *) exec "$REALGIT" "\$@" ;;
+esac
+SHEOF
+    chmod +x "$SHIM/git"
+    PATH="$SHIM:$PATH" "$BIN" "$R" --whereis=zqWhereToken --no-cache >"$TMP/w14c.xml" 2>/dev/null
+    PATH="$SHIM:$PATH" RW_SHIM_MANGLE=1 "$BIN" "$R" --whereis=zqWhereToken --no-cache >"$TMP/w14m.xml" 2>/dev/null
+    W14C="$( root_of whereis <"$TMP/w14c.xml" )"; W14M="$( root_of whereis <"$TMP/w14m.xml" )"
+    if printf '%s' "$W14C" | grep -q 'complete="1"'; then
+        ok 'whereis (14b control): the pass-through git shim keeps complete="1"'
+        { [ -n "$W14M" ] && ! printf '%s' "$W14M" | grep -q 'complete='; } \
+            && ok 'whereis MUTATION: a ref dropped at enumeration (tip not an object name) makes complete= vanish' \
+            || { no 'whereis MUTATION: complete= survived a ref the sweep never searched'; printf '%s\n' "$W14M"; }
+    else
+        no "whereis (14b control): the pass-through shim lost complete= — the shim is broken and the mutation is void: $W14C"
+    fi
+
+    # ── 14c) MUTATION: the same dropped ref must be DISCLOSED by --stray-content and its --plan ──────────────
+    # --stray-content called enumerateRefs with no sink, so the ref dropped above vanished from refs= and every
+    # bucket with nothing on the root saying a branch was skipped (CodeRabbit on #295). The sweep now carries the
+    # count to the root as refs_dropped=, on --plan as well. Same shim, same control discipline as 14b.
+    for V in "--stray-content" "--stray-content --plan"; do
+        TAG="$( [ "$V" = "--stray-content" ] && echo stray-content || echo landing-plan )"
+        # shellcheck disable=SC2086
+        PATH="$SHIM:$PATH" "$BIN" "$R" $V --no-cache >"$TMP/s14c.xml" 2>/dev/null; rcC=$?
+        # shellcheck disable=SC2086
+        PATH="$SHIM:$PATH" RW_SHIM_MANGLE=1 "$BIN" "$R" $V --no-cache >"$TMP/s14m.xml" 2>/dev/null; rcM=$?
+        S14C="$( root_of "$TAG" <"$TMP/s14c.xml" )"; S14M="$( root_of "$TAG" <"$TMP/s14m.xml" )"
+        if [ "$rcC" = 0 ] && [ -n "$S14C" ] && ! printf '%s' "$S14C" | grep -q 'refs_dropped='; then
+            ok "$V (14c control): the pass-through shim answers (exit 0) with no refs_dropped="
+            { [ "$rcM" = 0 ] && printf '%s' "$S14M" | grep -q 'refs_dropped="1"'; } \
+                && ok "$V MUTATION: a ref dropped at enumeration is disclosed on the root (refs_dropped=\"1\")" \
+                || { no "$V MUTATION: a ref the sweep never read left no refs_dropped= on <$TAG> (exit $rcM)"; printf '%s\n' "$S14M"; }
+        else
+            no "$V (14c control): the pass-through run did not answer cleanly (exit $rcC) — the mutation is void: $S14C"
+        fi
+    done
+
     # ── 15) MUTATION: an OVERSIZED text blob (silently unscannable) must drop the claim ────────────────
     # kMaxBlobBytes is 2 MB; a symbol inside a larger blob is invisible to the scan, so the scan may
     # not claim exhaustiveness over a tree that contains one.
@@ -273,6 +322,39 @@ PYEOF
     fi
 else
     printf '  SKIP  whereis arms (git unavailable)\n'
+fi
+
+# ── 17) an indexed file the scan cannot READ floors grep's count — in every build flavour ──────────────────
+# Indexed from a warm cache, then made unreadable: the scan skips it. complete= was already withheld, but hits=
+# carried no floor and read as a total. The root now names the shortfall (unread_files=) and carries
+# counts_floor="1", with the SHORT SCAN clause defining both — and the compact dialect defines them too.
+UG="$TMP/unreadgrep"; mkdir -p "$UG/tree" "$UG/xdg"
+printf 'int zqUnreadTok( void ) { return 1; }\n' >"$UG/tree/a.c"
+printf 'int zqOther( void ) { return zqUnreadTok(); }\n' >"$UG/tree/b.c"
+XDG_CACHE_HOME="$UG/xdg" "$BIN" "$UG/tree" --grep=zqUnreadTok >"$UG/warm.xml" 2>/dev/null
+if grep -o '<grep [^>]*>' "$UG/warm.xml" | grep -q ' hits="2".* complete="1"'; then
+    ok 'grep (17 control): both files readable → hits="2" complete="1", no floor'
+    chmod 000 "$UG/tree/b.c"
+    if cat "$UG/tree/b.c" >/dev/null 2>&1; then
+        printf '  SKIP  17: chmod 000 does not stop this user reading the file (root?) — the arm cannot plant its fault\n'
+    else
+        XDG_CACHE_HOME="$UG/xdg" "$BIN" "$UG/tree" --grep=zqUnreadTok >"$UG/cold.xml" 2>/dev/null
+        XDG_CACHE_HOME="$UG/xdg" "$BIN" "$UG/tree" --grep=zqUnreadTok --legend=compact >"$UG/coldc.xml" 2>/dev/null
+        G17="$( grep -o '<grep [^>]*>' "$UG/cold.xml" )"
+        { printf '%s' "$G17" | grep -q ' unread_files="1"' && printf '%s' "$G17" | grep -q ' counts_floor="1"' \
+          && ! printf '%s' "$G17" | grep -q 'complete='; } \
+            && ok 'grep: an unreadable indexed file is named on the root (unread_files="1") and floors hits= (counts_floor="1")' \
+            || no "grep: an unreadable indexed file left hits= reading as a total: $G17"
+        grep -q 'SHORT SCAN: unread_files= ' "$UG/cold.xml" \
+            && ok 'grep: unread_files= is defined in the full legend' || no 'grep: unread_files= rides with no full-legend definition'
+        grep -q 'unread_files=N: ' "$UG/coldc.xml" \
+            && ok 'grep: unread_files= is defined in the compact legend' || no 'grep: unread_files= rides with no compact-legend definition'
+        command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$UG/cold.xml" 2>/dev/null \
+            && ok 'grep: the short-scan document is well-formed' || no 'grep: the short-scan document fails xmllint'; }
+    fi
+    chmod 644 "$UG/tree/b.c"
+else
+    no "grep (17 control): the readable fixture did not claim complete over 2 hits — the arm is void: $( grep -o '<grep [^>]*>' "$UG/warm.xml" )"
 fi
 
 [ $fail -eq 0 ] && printf 'completecheck: ALL PASS\n' || printf 'completecheck: FAILURES ABOVE\n'

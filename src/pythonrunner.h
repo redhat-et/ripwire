@@ -30,23 +30,20 @@ inline bool topLevelEvidence( std::string_view source, const TSLanguage* languag
     {
         return false;
     }
+    // The parser cannot come back null (tree-sitter's allocator aborts rather than return null (third_party/deps/tree_sitter/lib/src/alloc.c), and no ripwire code calls ts_set_allocator), and `language` is one of this file's two statically linked
+    // grammars (tree_sitter_python / tree_sitter_toml — the only callers), whose ABI version is fixed at build time.
     TSParser* parser = ts_parser_new();
-    if( parser == nullptr )
-    {
-        DISCLOSE( "Python runner: parser allocation failed" );
-        return false;
-    }
-    if( !ts_parser_set_language( parser, language ) )
-    {
-        ts_parser_delete( parser );
-        DISCLOSE( "Python runner: grammar unavailable" );
-        return false;
-    }
+    ASSUME( parser != nullptr, "ts_parser_new: the default tree-sitter allocator aborts on failure" );
+    const bool isLanguageSet = ts_parser_set_language( parser, language );
+    ASSUME( isLanguageSet, "the Python and TOML grammars are linked into this binary at a supported ABI" );
     TSTree* tree = ts_parser_parse_string( parser, nullptr, source.data(), std::uint32_t( source.size() ) );
     ts_parser_delete( parser );
     if( tree == nullptr )
     {
-        DISCLOSE( "Python runner: parse failed" );
+        // The one real degrade: an external scanner error on this (external) text ends the parse with no tree. No evidence
+        // is found, and a test row without evidence already says so — run_unknown="1", no runner guessed.
+        DISCLOSE( Diagnostics::answerUnchanged, "an unparsed file yields no evidence, and a row without evidence reads run_unknown=1, never a guessed runner",
+                  "Python runner: parse failed" );
         return false;
     }
     const TSNode root = ts_tree_root_node( tree );

@@ -1766,9 +1766,8 @@ private:
         // New key: enforce the declared capacity bound BEFORE any mutation.
         if (size_ >= capacity_)
         {
-#if defined(DISCLOSE)
-            DISCLOSE("dynamic_map: insert of a new key rejected -- map at declared capacity");
-#endif
+            // The rejection IS the report: insert() returns {end(), false} and the caller, which declared the
+            // capacity, owns what that means (the container cannot know whether its bound was a promise).
             out.rejected = true;
             return;
         }

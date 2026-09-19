@@ -284,6 +284,17 @@ struct DiffAnchor
                                        // and has NO divergent work (what --merge-scout reports as changed="0")
     bool        badRef       = false;  // ref given, root has git history, ref does not resolve ⇒ refuse (exit 1)
     bool        gitUnusable  = false;  // no HEAD at all (non-git root / git unavailable) ⇒ the exit-0 degrade
+
+    // The DISCLOSE sink for the unrelated-history degrade: the diff falls back to two-dot against the resolved tip, and
+    // baseAnchored=false is what the root prints as the anchor actually used (anchor="ref-tip-two-dot").
+    enum class DisclosureWhy : std::uint8_t
+    {
+        NoMergeBase,
+    };
+    void disclose( DisclosureWhy ) noexcept
+    {
+        baseAnchored = false;
+    }
 };
 
 inline DiffAnchor resolveDiffAnchor( const std::string& root, std::string_view baseRef )
@@ -314,7 +325,7 @@ inline DiffAnchor resolveDiffAnchor( const std::string& root, std::string_view b
                                                         + " " + shSingleQuote( headSha ) + " 2>/dev/null" );
     if( base.empty() )
     {
-        DISCLOSE( "pr-context: no merge-base with the base ref (unrelated history?) — falling back to a two-dot diff against its tip" );
+        DISCLOSE( out, DiffAnchor::DisclosureWhy::NoMergeBase, "pr-context: no merge-base with the base ref (unrelated history?) — falling back to a two-dot diff against its tip" );
         out.revArgs = shSingleQuote( out.refSha );   // the RESOLVED sha, never the raw ref
         return out;
     }
@@ -545,8 +556,7 @@ template< typename EmitFn >
 inline PrTrimRender prRenderLevel( const EmitFn& emitFiles, const PrTrim& trim )
 {
     PrTrimRender out;
-    const rw::Rendered r = rw::renderToString( [ & ]( std::FILE* ms ) { emitFiles( ms, trim, &out.testFiles ); },
-                                                "pr-context: open_memstream failed — this level was not measured" );
+    const rw::Rendered r = rw::renderToString( [ & ]( std::FILE* ms ) { emitFiles( ms, trim, &out.testFiles ); } );
     out.body     = r.text;
     out.rendered = r.ok;
     if( !r.ok )

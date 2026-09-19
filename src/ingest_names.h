@@ -93,6 +93,39 @@ inline bool isCppCastKeyword( std::string_view name ) noexcept
     return name == "static_cast" || name == "reinterpret_cast" || name == "const_cast" || name == "dynamic_cast";
 }
 
+// #285: a JSX element invocation (`<Foo />`, `<Foo>…</Foo>`) is a call to Foo, exactly like `Foo()` —
+// but tree-sitter's jsx_self_closing_element/jsx_opening_element `name:` field binds an (identifier)
+// for BOTH a real component (`<Widget />`) and an intrinsic HTML/SVG tag (`<div>`, `<h1>`); the
+// grammar carries no case distinction, so an intrinsic tag would otherwise mint a phantom call edge
+// to a symbol that is never defined. react.dev's own rule is the filter: a user component's tag name
+// MUST start with an uppercase letter for JSX to treat it as one rather than an HTML tag, so a
+// lower-case-first-letter name at this shape is never a component. Query predicates cannot do this:
+// passesPredicates is wired into --match/--lint only, not the tags pass (same measured fact
+// isCppCastKeyword's note above relies on) — so, exactly like that cast filter, this is VALID INPUT,
+// skipped at capture time, never ASSUME/DISCLOSE.
+//
+// Scope is deliberately narrow: only the bare-(identifier) shape is tested. A qualified tag
+// (`<Foo.Bar />`) binds through a *different* tags.scm pattern (member_expression), never reaches
+// this function, and is always kept — a property access is never mistaken for an intrinsic tag,
+// upper-case or not, the same convention `Foo.Bar()` already gets as a plain member call. A
+// namespaced tag (`<svg:rect />`) needs no test here at all: its name field is a distinct grammar
+// node (jsx_namespace_name) that no tags.scm pattern names, so it never reaches captureTagsFacts as
+// a reference in the first place — verified with `--match`, not assumed.
+inline bool isJsxIntrinsicTagIdentifier( TSNode roleNode, TSNode nameNode, std::string_view name ) noexcept
+{
+    if( name.empty() || !kindIs( ts_node_type( nameNode ), "identifier" ) )
+    {
+        return false;
+    }
+    const char* roleType = ts_node_type( roleNode );
+    if( !kindIs( roleType, "jsx_self_closing_element" ) && !kindIs( roleType, "jsx_opening_element" ) )
+    {
+        return false;
+    }
+    const unsigned char c = static_cast<unsigned char>( name.front() );
+    return !( c >= 'A' && c <= 'Z' );   // keep only a Capitalised tag name — react.dev's own component convention
+}
+
 // using-declaration re-exports (r9 loss bucket 1): TRUE when a C++ `using_declaration` node is a grammar
 // KEYWORD form rather than a single-symbol re-export — `using namespace ns;` (its qualified spelling
 // `using namespace lib::nested;` carries a qualified_identifier and so matches the tags pattern) or

@@ -384,6 +384,13 @@ inline const std::vector<TemplateSet>& templateTable()
                           "class RwWrapCls { void RwWrapFn(){ var rwwrapv = @@; } }", "class RwWrapCls { @@ }" } },
         { "javascript", { "@@", "function rwwrapfn(){ @@; }", "function rwwrapfn(){ @@ }", "class RwWrapCls { @@ }" } },
         { "typescript", { "@@", "function rwwrapfn(){ @@; }", "function rwwrapfn(){ @@ }", "class RwWrapCls { @@ }" } },
+        // #285: .tsx moved to its own querySub ("tsx", not "typescript" — see kLangTable's .tsx row and
+        // queries/typescript/tags.scm's header for why) so this table needs its own entry too, or
+        // templatesFor("tsx") returns nullptr and supportedPatternGrammars() silently drops .tsx from
+        // --pattern's served set entirely (measured: test/patterncheck.sh arm 4e's `<Foo bar={$V} />`
+        // against a .tsx fixture went from hits>0 to hits=0 the moment the querySub split landed). Same
+        // wrapper shapes as "typescript"/"javascript" — JSX is an expression, so it wraps the same.
+        { "tsx",        { "@@", "function rwwrapfn(){ @@; }", "function rwwrapfn(){ @@ }", "class RwWrapCls { @@ }" } },
         { "python",     { "@@", "def rwwrapfn():\n    @@\n", "class RwWrapCls:\n    @@\n" } },
         { "go",         { "@@", "package rwwrappkg\n\nfunc rwwrapfn() {\n@@\n}\n", "package rwwrappkg\n\n@@\n",
                           "package rwwrappkg\n\nfunc rwwrapfn() {\nrwwrapv := @@\n}\n" } },
@@ -581,11 +588,7 @@ inline PatternProgram compileFor( const TSLanguage* grammar, std::string_view gr
             src += std::string( tmpl.substr( slot + 2 ) );
 
             TSParser* parser = ts_parser_new();
-            if( parser == nullptr )
-            {
-                DISCLOSE( "pattern: ts_parser_new returned null" );
-                continue;
-            }
+            ASSUME( parser != nullptr, "ts_parser_new: the default tree-sitter allocator aborts on failure (alloc.c)" );
             if( !ts_parser_set_language( parser, grammar ) )
             {
                 ts_parser_delete( parser );
@@ -649,9 +652,10 @@ struct GrammarRow
 {
     const TSLanguage* grammar = nullptr;
     std::string_view  name;      // kLangTable querySub — the TEMPLATE key: "cpp", "python", …
-    // V-3 (adversarial verification 2026-08-20). querySub is NOT unique per grammar OBJECT: `.cu`/`.cuh`
-    // ride tree_sitter_cuda under querySub "cpp", and `.tsx` rides tree_sitter_tsx under "typescript".
-    // The template key MUST stay shared (the cpp tags.scm is what compiles against the cuda grammar), but
+    // V-3 (adversarial verification 2026-08-20). querySub is NOT always unique per grammar OBJECT: `.cu`/
+    // `.cuh` ride tree_sitter_cuda under querySub "cpp" (`.tsx` was the other example, under "typescript",
+    // until #285 gave it its own querySub "tsx" — see kLangTable's .tsx row). The template key MUST stay
+    // shared where it genuinely can (the cpp tags.scm is what compiles against the cuda grammar), but
     // the DISCLOSURE name must not be, or `grammars="cpp"` claims the C++ grammar resolved when only the
     // CUDA one did — while eligible_files=, which is keyed on the grammar OBJECT, correctly counts the
     // .cpp file as unscanned. Two attributes on one element, contradicting each other, on a run where

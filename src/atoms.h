@@ -319,6 +319,26 @@ struct Exclusions
     bool      stmtAssignPartial  = false;
     bool      innerCommaPartial  = false;
 
+    // The DISCLOSE sink for an exclusion stream that spent its whole budget: its Partial flag suppresses the rules that
+    // read it, and those rules then carry count_capped="1" (see isRuleSuppressed below and runAtoms' saturatedTags).
+    enum class DisclosureWhy : std::uint8_t
+    {
+        ForHeaderSaturated,
+        StmtCrementSaturated,
+        StmtAssignSaturated,
+        InnerCommaSaturated,
+    };
+    void disclose( DisclosureWhy why ) noexcept
+    {
+        switch( why )
+        {
+            case DisclosureWhy::ForHeaderSaturated:   forHeaderPartial   = true; break;
+            case DisclosureWhy::StmtCrementSaturated: stmtCrementPartial = true; break;
+            case DisclosureWhy::StmtAssignSaturated:  stmtAssignPartial  = true; break;
+            case DisclosureWhy::InnerCommaSaturated:  innerCommaPartial  = true; break;
+        }
+    }
+
     explicit Exclusions( std::size_t fileCount )
         : forHeader( fileCount ), stmtCrement( fileCount ), stmtAssign( fileCount ), innerComma( fileCount )
     {
@@ -346,13 +366,22 @@ inline Exclusions collectExclusions( const IngestResult& ing, const std::vector<
         else if( m.tag == kTagStmtAssign )  { ex.stmtAssign.add( span );  ++stmtAssignRaw; }
         else if( m.tag == kTagInnerComma )  { ex.innerComma.add( span );  ++innerCommaRaw; }
     }
-    ex.forHeaderPartial   = forHeaderRaw   >= budget;
-    ex.stmtCrementPartial = stmtCrementRaw >= budget;
-    ex.stmtAssignPartial  = stmtAssignRaw  >= budget;
-    ex.innerCommaPartial  = innerCommaRaw  >= budget;
-    if( ex.forHeaderPartial || ex.stmtCrementPartial || ex.stmtAssignPartial || ex.innerCommaPartial )
+    // Each stream that spent its whole budget is untrusted: the rules reading it are suppressed this run (count_capped="1").
+    if( forHeaderRaw >= budget )
     {
-        DISCLOSE( "atoms: an exclusion capture stream spent its whole budget; the rules reading it are suppressed this run" );
+        DISCLOSE( ex, Exclusions::DisclosureWhy::ForHeaderSaturated, "atoms: the for-header exclusion stream spent its whole budget; the rules reading it are suppressed this run" );
+    }
+    if( stmtCrementRaw >= budget )
+    {
+        DISCLOSE( ex, Exclusions::DisclosureWhy::StmtCrementSaturated, "atoms: the statement-crement exclusion stream spent its whole budget; the rules reading it are suppressed this run" );
+    }
+    if( stmtAssignRaw >= budget )
+    {
+        DISCLOSE( ex, Exclusions::DisclosureWhy::StmtAssignSaturated, "atoms: the statement-assign exclusion stream spent its whole budget; the rules reading it are suppressed this run" );
+    }
+    if( innerCommaRaw >= budget )
+    {
+        DISCLOSE( ex, Exclusions::DisclosureWhy::InnerCommaSaturated, "atoms: the inner-comma exclusion stream spent its whole budget; the rules reading it are suppressed this run" );
     }
     return ex;
 }

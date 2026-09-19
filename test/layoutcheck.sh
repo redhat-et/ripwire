@@ -391,5 +391,56 @@ has 'f n="cb"' \
     && ok "StdFunctionFieldCase: the std::function field is still COUNTED (not silently dropped)" \
     || no "StdFunctionFieldCase: field 'cb' vanished with no trace: $( printf '%s' "$L" | tr '<' '\n' | grep '^f ' )"
 
+# ── UNREADABLE DEFINITION: a mirror whose second half could not be read is DISCLOSED, in every build flavour ──────
+# A definition indexed from a warm cache whose file is unreadable when the verb runs used to be dropped with a
+# one-argument DISCLOSE — a debug trace, nothing at all in a Release binary — so a drifting mirror read
+# found="1" defs="1" mirror="single" and exited 0: "one definition, nothing to compare". Now the verb's DISCLOSE
+# sink counts it into unreadable="N" on <layout>, defined in the legend of the same document.
+UR="$TMP/unreadable"; mkdir -p "$UR/tree/a" "$UR/tree/b" "$UR/xdg"
+printf 'struct UnreadMirror { int x; int y; };\n'  >"$UR/tree/a/p.h"
+printf 'struct UnreadMirror { int x; long y; };\n' >"$UR/tree/b/p.h"
+XDG_CACHE_HOME="$UR/xdg" TMPDIR="$UR/xdg" "$BIN" "$UR/tree" --layout=UnreadMirror >"$UR/warm.out" 2>/dev/null; urc=$?
+if [ "$urc" -eq 2 ] && grep -q 'mirror="mismatch"' "$UR/warm.out"; then
+    ok "unreadable (control): both halves readable → mirror=\"mismatch\", exit 2, and no unreadable= ($( grep -c 'unreadable=' "$UR/warm.out" ) hit)"
+    chmod 000 "$UR/tree/b/p.h"
+    if cat "$UR/tree/b/p.h" >/dev/null 2>&1; then
+        printf '  SKIP  unreadable: chmod 000 does not stop this user reading the file (root?) — the arm cannot plant its fault\n'
+    else
+        XDG_CACHE_HOME="$UR/xdg" TMPDIR="$UR/xdg" "$BIN" "$UR/tree" --layout=UnreadMirror >"$UR/cold.out" 2>/dev/null; urc3=$?
+        # OWNER DECISION 2026-09-19: a definition it could not read is "could not verify" — exit 3 (2 stays drift, 0 verified)
+        [ "$urc3" -eq 3 ] \
+            && ok "unreadable: exit 3 (could not verify) — not 0 (verified) and not 2 (a drift it saw)" \
+            || no "unreadable: a mirror with an unreadable half exited $urc3, expected 3"
+        chmod 000 "$UR/tree/a/p.h"
+        XDG_CACHE_HOME="$UR/xdg" TMPDIR="$UR/xdg" "$BIN" "$UR/tree" --layout=UnreadMirror >"$UR/none.out" 2>"$UR/none.err"; urcN=$?
+        chmod 644 "$UR/tree/a/p.h"
+        { [ "$urcN" -eq 3 ] && grep -q 'could not be read' "$UR/none.err"; } \
+            && ok "unreadable: every definition unreadable → exit 3 with the reason on stderr, no document" \
+            || no "unreadable: every definition unreadable exited $urcN (expected 3): $( head -c 160 "$UR/none.err" )"
+        grep -o '<layout [^>]*>' "$UR/cold.out" | grep -q ' defs="1" .*unreadable="1"' \
+            && ok "unreadable: the unread definition is named on the root — unreadable=\"1\" beside defs=\"1\" (every build flavour)" \
+            || no "unreadable: a definition whose file could not be read vanished silently: $( grep -o '<layout [^>]*>' "$UR/cold.out" )"
+        grep -q 'unreadable="N": ' "$UR/cold.out" \
+            && ok "unreadable: the attribute is defined in the legend of the same document" \
+            || no "unreadable: unreadable= is emitted with no legend definition"
+        command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$UR/cold.out" 2>/dev/null \
+            && ok "unreadable: the disclosing document is well-formed" || no "unreadable: the disclosing document fails xmllint"; }
+    fi
+    chmod 644 "$UR/tree/b/p.h"
+else
+    no "unreadable (control): the readable mirror did not report mismatch/exit 2 (rc=$urc) — the arm is void: $( grep -o '<layout [^>]*>' "$UR/warm.out" )"
+fi
+
+# exit-code control for the owner decision: a single readable definition still exits 0, a matching mirror 0, drift 2
+for ec in PadCase:0:"a single readable definition" TwinUniforms:0:"a matching mirror" MirrorUniforms:2:"mirror drift"; do
+    ecName="${ec%%:*}"; ecRest="${ec#*:}"; ecWant="${ecRest%%:*}"; ecWhat="${ecRest#*:}"
+    run "$ecName"
+    if [ "$RC" -eq "$ecWant" ]; then
+        ok "exit codes: $ecWhat ($ecName) exits $ecWant"
+    else
+        no "exit codes: $ecName exited $RC, expected $ecWant"
+    fi
+done
+
 [ $fail -eq 0 ] && echo "layoutcheck: ALL PASS" || echo "layoutcheck: FAILURES"
 exit $fail

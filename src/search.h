@@ -1104,7 +1104,8 @@ struct GrepScanVerdict
         } );
         if( scan.verdict == RegexVerdict::Exhausted )
         {
-            DISCLOSE( "grep: the regex engine abandoned a match (catastrophic backtracking?) — the verb refuses the answer" );
+            DISCLOSE( Diagnostics::answerRefused, "the verdict makes --regex refuse by name (the file and the cause on stderr, exit 1); no hit is reported",
+                      "grep: the regex engine abandoned a match (catastrophic backtracking?) — the verb refuses the answer" );
         }
         scanned = text.size();   // the literal branch's cursor is not shared with this one; keep it honest
         return { scan.verdict == RegexVerdict::Exhausted, scan.skippedLineCount };
@@ -1204,6 +1205,21 @@ inline constexpr std::size_t kGrepCollectionBudget = 4000000;
 // indexed file end to end — a file the worker could not read, or a worker that died mid-scan, makes the
 // hit set a floor, and a floor must never wear the claim. Both are deterministic facts of the corpus/disk
 // state, not of thread timing (the read either succeeds or fails per file, whichever worker draws it).
+// The DISCLOSE sink a grepCollect worker writes from its own thread: the flag GrepCollection::degraded is built from
+// after the join. Atomic because any worker may be the one that throws; relaxed because the join orders it.
+struct ScanWorkerDegrade
+{
+    enum class DisclosureWhy : std::uint8_t
+    {
+        WorkerThrew,   // an exception escaped the per-file loop: the files that worker had not reached are unscanned
+    };
+    std::atomic<bool>& degraded;
+    void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
+    {
+        degraded.store( true, std::memory_order_relaxed );
+    }
+};
+
 struct GrepCollection
 {
     std::vector<GrepRawHit> raw;
@@ -1304,6 +1320,7 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
     std::atomic<std::uint32_t>              nextFileId { 0 };
     std::atomic<std::uint32_t>              unreadableCount { 0 };       // T1: files the scan could not read
     std::atomic<bool>                       workerDegraded { false };    // T1: a worker died mid-scan
+    ScanWorkerDegrade                       workerDegradeSink{ workerDegraded };   // the DISCLOSE sink a worker writes it through
     const auto                              fileWorker = [ & ]( std::size_t stackBytes )
     {
         const RegexCompile reLocal = regex ? compileGuardedRegex( pat, kGrepRegexSyntax ) : RegexCompile{};
@@ -1344,8 +1361,8 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
         }
         catch( ... )   // a throw escaping a worker thread is std::terminate — degrade to partial hits instead
         {
-            workerDegraded.store( true, std::memory_order_relaxed );     // T1: the hit set is partial now
-            DISCLOSE( "grep: scan worker degraded (exception swallowed) — partial hit set" );
+            // T1: the hit set is partial now — the CLI prints scan_degraded="1" and counts_floor="1" from it
+            DISCLOSE( workerDegradeSink, ScanWorkerDegrade::DisclosureWhy::WorkerThrew, "grep: scan worker degraded (exception swallowed) — partial hit set" );
         }
     };
     // symmetric bare scope: the workers live exactly as long as the scan. A regex scan runs on the scan threads
@@ -1495,6 +1512,17 @@ struct GrepAuxCollection
     std::size_t             regexLineBytesMax    = 0;       // the engine line bound of this scan's one thread (see GrepCollection)
     std::size_t             regexStackBytes      = 0;       // that thread's stack (see GrepCollection); 0 for a literal scan
 
+    // The DISCLOSE sink for the unindexed scan's own degrade: the scan threw part-way, so `degraded` (which the CLI
+    // prints as scan_degraded="1" with counts_floor="1") is set and the hits so far are kept.
+    enum class DisclosureWhy : std::uint8_t
+    {
+        ScanThrew,
+    };
+    void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
+    {
+        degraded = true;
+    }
+
     void noteRegexAbandoned( const std::string& path )
     {
         if( regexAbandonedFiles++ == 0 )
@@ -1593,8 +1621,7 @@ inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::str
         }
         catch( ... )
         {
-            out.degraded = true;
-            DISCLOSE( "grep: the unindexed scan degraded (exception swallowed) — partial hit set" );
+            DISCLOSE( out, GrepAuxCollection::DisclosureWhy::ScanThrew, "grep: the unindexed scan degraded (exception swallowed) — partial hit set" );
         }
     };
     if( regex )

@@ -67,6 +67,7 @@
 #include <deque>       // SliceRdWalker::arena — stable references across growth, for the explicit work stack's per-branch locals
 #include <functional>  // SliceRdWalker::SliceRdStep — the explicit work stack's pending continuations
 #include <iterator>    // std::size — the kOccTagNames extent
+#include <cstdlib>     // getenv — the RIPWIRE_TEST_SLICE_RD_MAXITERS arming hook
 #include <cstring>
 #include <memory>      // shared_ptr — a child list / flag shared across a chain of scheduled continuations
 #include <string>
@@ -317,6 +318,28 @@ struct SliceScan
     // a def-only occurrence, or a use nothing inside the definition reaches); reachRule = how it was computed
     std::vector<std::vector<std::uint32_t>> reach;
     std::uint8_t                            reachRule = 0;   // SliceReach, stored narrow (declared below the scan types)
+    // A loop's reaching-definition fixpoint stopped at kSliceRdMaxIter with the state still moving: every rd= that loop
+    // feeds is the LAST state, an under-approximation. The scan is the DISCLOSE sink for it, and the root then carries
+    // reach_converged="0" beside reach= (defined in the same header) — reach="cfg" alone claims a finished flow analysis.
+    bool                                    rdUnconverged = false;
+    // The same sink records a parse that never happened: parseOk stays false, which every surface refuses by name.
+    enum class DisclosureWhy : std::uint8_t
+    {
+        FixpointBoundHit,
+        ParserUnavailable,    // ts_parser_new returned null
+        GrammarAbiMismatch,   // the grammar's ABI is not this tree-sitter's
+        ParseFailed,          // the parse returned no tree
+    };
+    void disclose( DisclosureWhy why ) noexcept
+    {
+        switch( why )
+        {
+            case DisclosureWhy::FixpointBoundHit:   rdUnconverged = true; break;
+            case DisclosureWhy::ParserUnavailable:
+            case DisclosureWhy::GrammarAbiMismatch:
+            case DisclosureWhy::ParseFailed:        parseOk = false; break;
+        }
+    }
 };
 
 // how many distinct bindings the occurrences of `name` fall into (an unbound group counts as one) —
@@ -1337,8 +1360,37 @@ inline const char* sliceReachName( std::uint8_t rule ) noexcept
 
 // the fixpoint bound — a loop's header state is monotone so it converges in at most (defs of its bindings + 1)
 // rounds; the bound only guards a broken lattice, and hitting it is a degrade (the state is used as is)
-// (2026-09-10: 4,528 fixpoints over 3,026 symbols, max iteration count 1; bound inert, no disclosure attribute)
+// (2026-09-10: 4,528 fixpoints over 3,026 symbols, max iteration count 1; bound inert — if it ever fires, the root says so
+// with reach_converged="0", through SliceScan's DISCLOSE sink)
 inline constexpr std::uint32_t kSliceRdMaxIter = 64;
+
+// RIPWIRE_TEST_SLICE_RD_MAXITERS=N LOWERS that bound (never raises it) — the arming hook for the one gate arm that must see
+// reach_converged="0", because no input reaches the shipped bound (see the measurement above). It is pagerank.cpp's
+// RIPWIRE_TEST_PR_MAXITERS, for the same reason and with the same rules: not a flag and in no --help text (G5), honoured
+// in EVERY build flavour (the question is whether an NDEBUG build discloses after its trace is compiled out), a strict
+// decimal or nothing, read once per process. Gate: test/slicecheck.sh arm (rd-bound).
+inline std::uint32_t sliceRdIterationCeiling() noexcept
+{
+    static const std::uint32_t ceiling = []() noexcept -> std::uint32_t
+    {
+        const char* value = std::getenv( "RIPWIRE_TEST_SLICE_RD_MAXITERS" );
+        if( value == nullptr || *value == '\0' || std::strlen( value ) > 9 )
+        {
+            return kSliceRdMaxIter;
+        }
+        std::uint32_t parsed = 0;
+        for( const char* c = value; *c != '\0'; ++c )
+        {
+            if( *c < '0' || *c > '9' )
+            {
+                return kSliceRdMaxIter;   // never a prefix parse of "12x"
+            }
+            parsed = parsed * 10 + std::uint32_t( *c - '0' );
+        }
+        return ( parsed == 0 || parsed > kSliceRdMaxIter ) ? kSliceRdMaxIter : parsed;   // lower-only; 0 means no override
+    }();
+    return ceiling;
+}
 
 // the dataflow state at one program point: per SLOT (a binding, or an unbound name) the sorted all-indices
 // of the defs that reach the point; dead = NO path reaches it (after return/break/continue/throw/raise)
@@ -1413,6 +1465,7 @@ struct SliceRdWalker
     using SliceRdStep = std::function<void()>;
 
     const SliceScan*                         scan = nullptr;
+    SliceScan*                               disclosure = nullptr;   // the same scan, as the DISCLOSE sink for a fixpoint that did not settle
     std::string_view                         src;
     SliceFam                                 fam  = SliceFam::None;
     bool                                     cfg  = false;                // the control table is in force (else: linear)
@@ -1768,7 +1821,7 @@ struct SliceRdWalker
             auto next = stateBox( *entry );
             sliceRdJoin( *next, *bodyOut );
             const bool converged = sliceRdEqual( *next, *hin );
-            if( !converged && iter + 1 < kSliceRdMaxIter )
+            if( !converged && iter + 1 < sliceRdIterationCeiling() )
             {
                 *hin = *next;
                 loopRound( header, body, update, elseBody, bodyFirst, iter + 1, entry, brk, cont, headerExit, hin, outState, std::move( done ) );
@@ -1776,7 +1829,7 @@ struct SliceRdWalker
             }
             if( !converged )
             {
-                DISCLOSE( "slice: reaching-definition loop did not converge — using the last state" );
+                DISCLOSE( *disclosure, SliceScan::DisclosureWhy::FixpointBoundHit, "slice: reaching-definition loop did not converge — using the last state" );
             }
             breakAcc.pop_back();
             continueAcc.pop_back();
@@ -2444,6 +2497,7 @@ inline void sliceComputeReach( SliceScan& scan, TSNode root, const SliceWalkCtx&
     }
     SliceRdWalker w;
     w.scan  = &scan;
+    w.disclosure = &scan;
     w.src   = ctx.src;
     w.fam   = ctx.fam;
     w.cfg   = sliceReachRuleOf( ctx.fam ) == SliceReach::Cfg;
@@ -2554,19 +2608,19 @@ inline SliceScan sliceScanDefinition( const std::string& src, const Symbol& sym,
     TSParser* parser = ts_parser_new();
     if( parser == nullptr )
     {
-        DISCLOSE( "slice: ts_parser_new returned null" );
+        DISCLOSE( scan, SliceScan::DisclosureWhy::ParserUnavailable, "slice: ts_parser_new returned null" );
         return scan;
     }
     if( !ts_parser_set_language( parser, grammar ) )
     {
-        DISCLOSE( "slice: grammar ABI mismatch" );
+        DISCLOSE( scan, SliceScan::DisclosureWhy::GrammarAbiMismatch, "slice: grammar ABI mismatch" );
         ts_parser_delete( parser );
         return scan;
     }
     TSTree* tree = ts_parser_parse_string( parser, nullptr, src.data(), std::uint32_t( src.size() ) );
     if( tree == nullptr )
     {
-        DISCLOSE( "slice: parse returned null" );
+        DISCLOSE( scan, SliceScan::DisclosureWhy::ParseFailed, "slice: parse returned null" );
         ts_parser_delete( parser );
         return scan;
     }
@@ -3287,6 +3341,12 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
     const auto        ex = [ & ]( std::string_view v ) -> std::string { return std::string( escapeXml( v, esc ) ); };
 
     std::string out = sliceLegendText( opts );
+    if( scan.rdUnconverged )
+    {
+        // only on the degrade that sets it, so every converged slice's header is byte-identical
+        out += "<!-- reach_converged=\"0\": a loop's reaching-definition fixpoint hit its iteration bound before it settled — the rd= "
+               "sets (and flow/since edges) it feeds are its last state, an UNDER-approximation, not the finished analysis reach= names -->";
+    }
 
     out += "<slice sym=\"";  out += ex( s.name );
     out += "\" p=\"";        out += ex( rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix ) );
@@ -3327,6 +3387,10 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
         out += " reach=\"";   // the rule the rows' rd= (and every flow / since edge) follow — cfg or linear, per family
         out += sliceReachName( scan.reachRule );
         out += "\"";
+        if( scan.rdUnconverged )
+        {
+            out += " reach_converged=\"0\"";
+        }
         if( seedBindingGroups > 1 )
         {
             out += " bindings=\"" + std::to_string( seedBindingGroups ) + "\"";

@@ -316,19 +316,45 @@ inline void splitNoteTail( std::string_view rest, std::string& text, std::string
 // the same O_NOFOLLOW the write uses, one syscall with nothing in front of it to race; why an in-tree link is
 // refused too, rather than followed the way the crawl follows one, is round 3 of src/pathguard.h. Refused or
 // absent, the caller reads no notes, and only the refusal says anything.
-inline rw::pathguard::NoFollowRead readNotesSidecar( const std::string& path )
+//
+// What one read found BESIDE the notes: the two ways it comes back short. It is the DISCLOSE sink for this file's read
+// degrades — --notes prints both on <notes> (lines_skipped=, refused=), and addNote refuses to rewrite a sidecar holding
+// lines it could not parse, because the sorted rewrite would delete them. A reader with no channel for either (--for,
+// --expand, the MCP verbs, handoff) passes a local one: pathguard.h round 3 names that gap.
+struct NotesReadStats
+{
+    enum class DisclosureWhy : std::uint8_t
+    {
+        MalformedLine,    // a line missing the target/date tabs: on disk, absent from the answer
+        EmptyTarget,      // a line whose target is empty: on disk, absent from the answer
+        SymlinkRefused,   // a link at the name: refused unopened, so no note at all was read
+    };
+    std::uint32_t linesSkipped   = 0;
+    bool          symlinkRefused = false;
+    void disclose( DisclosureWhy why ) noexcept
+    {
+        switch( why )
+        {
+            case DisclosureWhy::MalformedLine:
+            case DisclosureWhy::EmptyTarget:    ++linesSkipped; break;
+            case DisclosureWhy::SymlinkRefused: symlinkRefused = true; break;
+        }
+    }
+};
+
+inline rw::pathguard::NoFollowRead readNotesSidecar( const std::string& path, NotesReadStats& stats )
 {
     rw::pathguard::NoFollowRead sidecar = rw::pathguard::openNoFollowRead( "the field-notes sidecar", path );
-    if( sidecar.refused ) { DISCLOSE( "notes: refusing to read the notes sidecar through a symlink" ); }
+    if( sidecar.refused ) { DISCLOSE( stats, NotesReadStats::DisclosureWhy::SymlinkRefused, "notes: refusing to read the notes sidecar through a symlink" ); }
     return sidecar;
 }
 
 // tolerant read (readAckRecords precedent): skip blank/'#'/CRLF; a line missing either of the first two tabs
 // degrades+skips. splitNoteTail (above) owns the legacy-vs-stamped decision for everything after them.
-inline std::vector<Note> readNotes( const std::string& path )
+inline std::vector<Note> readNotes( const std::string& path, NotesReadStats& stats )
 {
     std::vector<Note>           notes;
-    rw::pathguard::NoFollowRead sidecar = readNotesSidecar( path );
+    rw::pathguard::NoFollowRead sidecar = readNotesSidecar( path, stats );
     if( !sidecar.opened )
     {
         return notes;
@@ -347,31 +373,38 @@ inline std::vector<Note> readNotes( const std::string& path )
         const std::size_t t1 = line.find( '\t' );
         const std::size_t t2 = ( t1 == std::string::npos ) ? std::string::npos : line.find( '\t', t1 + 1 );
         if( t1 == std::string::npos || t2 == std::string::npos )
-        { DISCLOSE( "notes: malformed line skipped (want <target>\\t<date>\\t<text>)" ); continue; }
+        { DISCLOSE( stats, NotesReadStats::DisclosureWhy::MalformedLine, "notes: malformed line skipped (want <target>\\t<date>\\t<text>)" ); continue; }
         Note n;
         n.target = line.substr( 0, t1 );
         n.date   = line.substr( t1 + 1, t2 - t1 - 1 );
         splitNoteTail( std::string_view( line ).substr( t2 + 1 ), n.text, n.sha, n.branch );
-        if( n.target.empty() ) { DISCLOSE( "notes: empty-target line skipped" ); continue; }
+        if( n.target.empty() ) { DISCLOSE( stats, NotesReadStats::DisclosureWhy::EmptyTarget, "notes: empty-target line skipped" ); continue; }
         notes.push_back( std::move( n ) );
     }
     return notes;
 }
+
 
 // D5 read-side normalization: re-relativize every target against `root` on load. This is what keeps a
 // LEGACY .ripwire_notes (absolute targets, written before this fix or hand-edited) surfacing correctly on
 // the current checkout without a rewrite. Best-effort like the rest of this file: an out-of-root absolute
 // target degrades to itself unchanged (normalizeNoteTarget's outsideRoot signal is ignored here — a read
 // never fails; the entry simply stays dangling, which --notes already reports).
-inline std::vector<Note> readNotesRelative( const std::string& path, const std::string& root )
+inline std::vector<Note> readNotesRelative( const std::string& path, const std::string& root, NotesReadStats& stats )
 {
-    std::vector<Note> notes = readNotes( path );
+    std::vector<Note> notes = readNotes( path, stats );
     for( Note& n : notes )
     {
         bool outsideRoot = false;
         n.target = normalizeNoteTarget( n.target, root, outsideRoot );
     }
     return notes;
+}
+
+inline std::vector<Note> readNotesRelative( const std::string& path, const std::string& root )
+{
+    NotesReadStats stats;   // no channel at this caller (see NotesReadStats)
+    return readNotesRelative( path, root, stats );
 }
 
 // the exact data line writeNotes emits for one Note — shared by writeNotes (per-line) and addNote (the
@@ -402,8 +435,10 @@ inline int openNotesSidecar( const std::string& path )
     auto [ fd, openErr ] = rw::pathguard::openNoFollowTruncate( "the field-notes sidecar", path );
     if( fd < 0 )
     {
-        if( openErr == ELOOP ) { DISCLOSE( "notes: refusing to write the notes sidecar through a symlink" ); }
-        else                   { DISCLOSE( "notes: cannot write notes file" ); }
+        if( openErr == ELOOP ) { DISCLOSE( Diagnostics::answerRefused, "--note-add exits 1: pathguard names the refused link on stderr and the verb says it could not write",
+                                           "notes: refusing to write the notes sidecar through a symlink" ); }
+        else                   { DISCLOSE( Diagnostics::answerRefused, "--note-add exits 1: pathguard names the OS reason on stderr and the verb says it could not write",
+                                           "notes: cannot write notes file" ); }
     }
     return fd;
 }
@@ -432,10 +467,18 @@ inline bool writeNotes( const std::string& path, std::vector<Note> notes )
 // sha,branch) is not duplicated (re-running the same add is a no-op line, still printed) — sha/branch are
 // part of the identity so a legacy unstamped entry and a later re-add of the SAME text from a real commit
 // are both kept (they are genuinely different provenance claims, not a duplicate).
-inline std::string addNote( const std::string& path, std::string_view target, std::string_view date, std::string_view text,
+//
+// A sidecar holding lines readNotes could not parse is NOT rewritten: the sorted rewrite keeps only what was read, so it
+// would delete committed text nobody asked to delete. `stats` comes back with linesSkipped > 0 and "" is returned; the
+// caller names the refusal.
+inline std::string addNote( const std::string& path, NotesReadStats& stats, std::string_view target, std::string_view date, std::string_view text,
                             std::string_view sha = {}, std::string_view branch = {} )
 {
-    std::vector<Note> notes = readNotes( path );
+    std::vector<Note> notes = readNotes( path, stats );
+    if( stats.linesSkipped != 0 )
+    {
+        return {};
+    }
     Note n{ std::string( target ), std::string( date ), std::string( text ), std::string( sha ), std::string( branch ) };
     bool dup = false;
     for( const Note& e : notes )

@@ -47,6 +47,9 @@
 #                   plain and the NDEBUG flavour, it must compile WITHOUT A WARNING (its static_asserts pin what does and
 #                   does not model Diagnostics::DisclosureSink); and once per RW_NEG_* case, in both flavours, it must
 #                   FAIL, with a diagnostic naming the defect. The as-is compile is every negative's contrast.
+#   (S) SHIPS       the same TU built as a program (RW_RUN_SINKS) at -O2, NDEBUG and plain: both sink-form sites must RECORD
+#                   (truncated=1 unreadable=1, exit 0). The NDEBUG leg is the release expansion a user runs; it is what lets a
+#                   plain-flavour-only gate (a non-NDEBUG fault switch) stand for the Release wiring of a converted site.
 #   (F) CONTROLS    every arm above runs the SAME scanner over a fixture holding one planted defect per arm plus a
 #                   look-alike that must stay clean; each plant must be found by the right arm, the look-alikes by
 #                   none, and each plant is re-read from disk before the verdict is trusted.
@@ -79,7 +82,12 @@ BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 # form — CMakeScan now models Diagnostics::DisclosureSink directly (disclose() sets rootWalkFailed itself) —
 # retiring its one sink-less DISCLOSE( msg ) site. 217 -> 216.
 # Train 6 (2026-09-18): re-measured on the merged 14-member tree — (R) prints 216; no other member adds or retires one.
-DISCLOSE_SINKLESS_PIN=216
+# lane/disclose-sink-form (2026-09-19): converted the bulk of the sink-less sites to DISCLOSE( sink, why ) — 51 on its tree.
+# Train 7 (2026-09-19): re-measured on the merged tree — (R) prints 50: main's darkflags root-walk site (above) was one of
+# the lane's 51 and is already in sink form; the lane's mcpedit lock site took main's new wording in its sink form.
+# train7-fix1 (2026-09-19): docdrift.h's collectRepoPaths root-walk site converted to the RepoPaths sink (RootWalkFailed),
+# the doc-drift twin of the darkflags conversion above. 50 -> 49.
+DISCLOSE_SINKLESS_PIN=49
 WORK="$( mktemp -d "${TMPDIR:-/tmp}/selfcheck.XXXXXX" )"
 trap 'rm -rf "$WORK"' EXIT
 T=$'\t'
@@ -296,13 +304,15 @@ def scan_code( rel, text, findings, counts, ratchet = True, contract_tu = False 
                     counts[ "disclose_sink" ] += 1; byfile[ 1 ] += 1
             if argc >= 2 and ratchet and not contract_tu:
                 parts = raw_args( arg, raw )
-                if re.sub( r"\s+", "", parts[ 0 ] ).lstrip( ":" ) == "Diagnostics::answerUnchanged":
+                sinkName = re.sub( r"\s+", "", parts[ 0 ] ).lstrip( ":" )
+                if sinkName in ( "Diagnostics::answerUnchanged", "Diagnostics::answerRefused" ):
                     reason = parts[ 1 ].strip()
                     body = "".join( re.findall( r'"((?:[^"\\\n]|\\.)*)"', reason ) )
+                    key = "unchanged" if sinkName.endswith( "answerUnchanged" ) else "refused"
                     if LITERAL_REASON.fullmatch( reason ) and body.strip():
-                        counts[ "unchanged" ].append( [ where, " ".join( reason.split() ) ] )
+                        counts[ key ].append( [ where, " ".join( reason.split() ) ] )
                     else:
-                        findings.append( ( "U", where, "answerUnchanged reason is not a non-empty string literal: %s" % " ".join( reason.split() )[ :80 ] ) )
+                        findings.append( ( "U", where, "%s reason is not a non-empty string literal: %s" % ( sinkName.split( "::" )[ 1 ], " ".join( reason.split() )[ :80 ] ) ) )
             continue
         if name == "VALIDATE":
             counts[ "validate" ] += 1
@@ -398,7 +408,7 @@ def main():
     else:
         files = sorted( os.path.relpath( os.path.join( d, f ), root ) for d, _, fs in os.walk( root ) for f in fs )
     findings = []; counts = { "promise": 0, "all": 0, "validate": 0, "files": 0, "disclose_all": 0, "disclose1": 0, "disclose_sink": 0,
-                              "disclose_by_file": {}, "unchanged": [] }
+                              "disclose_by_file": {}, "unchanged": [], "refused": [] }
     perfile = {}
     for rel in files:
         if not rel: continue
@@ -665,6 +675,35 @@ NEGS
     done
 fi
 
+# ── (S) SHIPS: the sink form records in the flavour a user runs ────────────────────────────────────────────────────
+# (K) proves the contract COMPILES; this proves it RUNS where it matters. The same TU, built as a program (RW_RUN_SINKS)
+# at -O2, once with -DNDEBUG (the release expansion, where the one-argument trace is `do { } while( 0 )`) and once plain
+# (the trace linked from src/infra/diagnostics.cpp): both must print truncated=1 unreadable=1 — the two sink-form sites
+# recorded their reasons — and exit 0. This is the flavour-independence every converted site in src/ rests on: a gate
+# that can only drive a degrade on the plain build (a non-NDEBUG fault switch) still proves the Release wiring, because
+# the sink call is this same expansion in both. Red on a header whose sink form were compiled out under NDEBUG.
+if [ ! -f "$TU" ] || ! command -v "$KCXX" >/dev/null 2>&1; then
+    skip "S: no contract TU or no C++ compiler — the shipped sink form was not run"
+else
+    for flav in NDEBUG plain; do
+        fl=( -O2 -DRW_RUN_SINKS ); src=( "$TU" )
+        if [ "$flav" = NDEBUG ]; then fl+=( -DNDEBUG ); else src+=( "$ROOT/src/infra/diagnostics.cpp" ); fi
+        if "$KCXX" "$KSTD" "${fl[@]}" -I"$ROOT/src" "${src[@]}" -o "$WORK/sinks_$flav" > "$WORK/s_$flav.log" 2>&1; then
+            out="$( "$WORK/sinks_$flav" 2>"$WORK/s_$flav.err" )"; rc=$?
+            if [ "$rc" = 0 ] && [ "$out" = "truncated=1 unreadable=1" ]; then
+                ok "S($flav): DISCLOSE( sink, why ) recorded both reasons in an -O2 $flav program ($out)"
+            else
+                no "S($flav): the sink form did not record (rc=$rc, printed '$out') — a converted site would disclose nothing in this flavour"
+            fi
+            if [ "$flav" = NDEBUG ] && [ -s "$WORK/s_$flav.err" ]; then
+                no "S(NDEBUG): the release-flavour program wrote a trace to stderr — is NDEBUG really in force? $( head -c 160 "$WORK/s_$flav.err" )"
+            fi
+        else
+            no "S($flav): the contract TU does not build as a program:"; grep -m5 'error' "$WORK/s_$flav.log" | sed 's/^/    /'
+        fi
+    done
+fi
+
 # ── the tree ──────────────────────────────────────────────────────────────────────────────────────────────────────
 python3 "$WORK/scan.py" "$ROOT" tree > "$WORK/tree.json" 2> "$WORK/tree.err" || { no "the scanner crashed on the tree"; sed 's/^/    /' "$WORK/tree.err"; }
 python3 - "$WORK/tree.json" > "$WORK/tree.tsv" <<'PY'
@@ -674,6 +713,7 @@ c = d[ "counts" ]
 print( "COUNT\t%d\t%d\t%d\t%d" % ( c[ "promise" ], c[ "all" ], c[ "validate" ], c[ "files" ] ) )
 print( "DISC\t%d\t%d\t%d" % ( c[ "disclose1" ], c[ "disclose_sink" ], c[ "disclose_all" ] ) )
 for where, reason in c[ "unchanged" ]: print( "UNCH\t%s\t%s" % ( where, reason ) )
+for where, reason in c.get( "refused", [] ): print( "REFU\t%s\t%s" % ( where, reason ) )
 for rel, n in sorted( d[ "perfile" ].items() ): print( "FILE\t%s\t%d" % ( rel, n ) )
 for arm, where, what in d[ "findings" ]: print( "HIT\t%s\t%s\t%s" % ( arm, where, what ) )
 PY
@@ -702,6 +742,11 @@ if [ "$unchN" = 0 ]; then
 else
     grep '^UNCH' "$WORK/tree.tsv" | cut -f2,3 | sed 's/^/  INFO  U: /; s/\t/  /'
     ok "U: $unchN answerUnchanged site(s) listed above, each with a non-empty literal reason"
+fi
+refuN="$( grep -c '^REFU' "$WORK/tree.tsv" )"
+if [ "$refuN" != 0 ]; then
+    grep '^REFU' "$WORK/tree.tsv" | cut -f2,3 | sed 's/^/  INFO  U(refused): /; s/\t/  /'
+    ok "U: $refuN answerRefused site(s) listed above, each with a non-empty literal reason (the refusal is the disclosure)"
 fi
 
 # (P) population

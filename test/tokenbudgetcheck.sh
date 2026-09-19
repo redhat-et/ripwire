@@ -399,5 +399,27 @@ else
     fi
 fi
 
+# ── #20: an UNBUFFERED over-budget map is never called withheld ─────────────────────────────────────────────────
+# When the --token-budget buffer cannot open, the map streams straight to stdout. The gate then printed
+# withheld_est_tokens= on stderr beside the very map it claimed to withhold — stdout and stderr contradicting each
+# other. The buffer now opens through rw::openChargeStream, so RIPWIRE_FAULT_CHARGE_BUFFER reaches it (it was the one
+# buffer that bypassed the seam), and its DISCLOSE sink makes the gate say the map was NOT withheld (still exit 3).
+# The switch is non-NDEBUG only: read the flavour and SKIP on Release rather than pass blind.
+TB_FLAVOUR="$( "$BIN" --version 2>/dev/null | sed -nE 's/^[^(]*\(([^,)]*).*/\1/p' )"
+case "$TB_FLAVOUR" in
+    Release|RelWithDebInfo|MinSizeRel)
+        printf '  SKIP  #20 the charge-buffer fault switch is compiled out of this %s (NDEBUG) binary — the plain-flavour leg proves it\n' "$TB_FLAVOUR" ;;
+    *)
+        RIPWIRE_FAULT_CHARGE_BUFFER=1 "$BIN" "$ROOT/test/fixture" --token-budget=10 --no-cache >"$TMP_TB_DIR/t20.out" 2>"$TMP_TB_DIR/t20.err"; rc20=$?
+        if [ "$rc20" = 3 ] && grep -q '<r [^>]*est_tokens=' "$TMP_TB_DIR/t20.out" && grep -q '</r>' "$TMP_TB_DIR/t20.out"; then
+            ok "#20 the unbuffered over-budget map streamed whole and the run still exits 3"
+        else
+            no "#20 expected the whole streamed map and exit 3 (rc=$rc20): $( head -c 120 "$TMP_TB_DIR/t20.out" )"
+        fi
+        { grep -q 'the map above was NOT withheld' "$TMP_TB_DIR/t20.err" && ! grep -q 'withheld_est_tokens' "$TMP_TB_DIR/t20.err"; } \
+            && ok "#20 stderr says the map was NOT withheld, and never uses the withheld_ spelling beside it" \
+            || no "#20 stderr contradicts stdout: $( grep -v 'math degraded' "$TMP_TB_DIR/t20.err" | head -2 | tr '\n' ' ' )" ;;
+esac
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

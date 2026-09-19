@@ -843,6 +843,10 @@ inline constexpr std::string_view kForAutoBundleLegend =
     "differ; each body's calls child lists its callee signatures, total= always, shown=/capped= only "
     "when that list is cut";
 
+// The clause defining the degraded reason, spliced into the header ONLY on that path (no "--": it rides in a comment).
+inline constexpr std::string_view kForDegradedBundleNote =
+    "; reason=degraded: the signature block could not be measured, so no bodies were served and est_tokens is omitted";
+
 // COMPACT conceptual serving — the legend that REPLACES the one above on the subtoken+body route
 // (pre-registered: docs/EVALS.md, the T3 route-narrowing round). Same constraints as its sibling: a
 // named constant so the sigs-budget exemption subtracts exactly what it adds, and no "--" anywhere,
@@ -1152,8 +1156,26 @@ inline bool forLensOverCeiling( bool ladderFired, std::size_t tokenBudget, int m
 // is 2.36 x 1.15 = 2.714 B/tok. So a bundle in that band carried 70 bytes the ladder never saw, and one it had
 // fitted within 70 B of the allowance shipped past it with no rung fired: estchargecheck #11 A7, 5 429 B against
 // 5 428 B (the sweep beside it reds the same defect on a git-less corpus at 12 of 52 budgets).
-// `measured` is sigsPreRendered: the direct-emission degrade path gets the splices but no number, because its
+// `measured` is ForLensBlockCharge::isMeasured: the direct-emission degrade path gets the splices but no number, because its
 // header goes to stdout before the bundle it would describe has been measured.
+// The DISCLOSE sink for runForLens's pre-rendered blocks. est_tokens= prices the whole bundle, so ANY block the charge
+// buffer could not measure — <sigs> or a sibling (<lego>, <compose>, <routes>) streamed directly and uncharged — leaves
+// it unmeasurable, and ForLensRootFinish::measured (this flag) then omits it rather than print a number that left
+// those bytes out. The sigs block also drops the auto bodies and the ladder, which key on sigsPreRendered itself.
+struct ForLensBlockCharge
+{
+    enum class DisclosureWhy : std::uint8_t
+    {
+        SigsUnmeasured,           // <sigs> streams directly: no bundle measurement at all
+        SiblingBlockUnmeasured,   // <lego>/<compose>/<routes> streams directly: its bytes are outside the charge
+    };
+    bool isMeasured = true;
+    void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
+    {
+        isMeasured = false;
+    }
+};
+
 struct ForLensRootFinish
 {
     std::string_view autoAttr, sigsCeilingAttr, capAttrs;                 // root attributes, before the first "><!--"
@@ -1391,11 +1413,16 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
                 sigsJson.assign( block.bytes );
             }
         }
+        ForLensBlockCharge sigsCharge;   // the sink: an unmeasured block takes the omitting path below
         if( !isSigsBuffered )
+        {
+            DISCLOSE( sigsCharge, ForLensBlockCharge::DisclosureWhy::SigsUnmeasured,
+                      "main: open_memstream failed (or its buffer lost a write) for the --for --json sigs block — emitting unbudgeted, est_tokens omitted" );
+        }
+        if( !sigsCharge.isMeasured )
         {
             // ENOMEM-class, at the open or inside the buffer: emit unbudgeted rather than nothing, and report no
             // est_tokens/capped at all — a number this path cannot compute must never be fabricated.
-            DISCLOSE( "main: open_memstream failed (or its buffer lost a write) for the --for --json sigs block — emitting unbudgeted, est_tokens omitted" );
             if( redactBeforeSigs )
             {
                 *in.redact = *redactBeforeSigs;   // the rows below are the ones the summary counts
@@ -2475,7 +2502,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         // direct-emission path further down renders that block straight to stdout, whole — the budget just cannot see it.
         // A false return also restores the run's redaction tally to what it was before the render: the direct path
         // renders the block again, and a secret it redacts must be counted once, not once per rendering.
-        const auto preRender = [ & ]( const auto& render, std::string& into, const char* degradeMsg ) -> bool
+        // The caller discloses a false return through `blockCharge` (ForLensBlockCharge), so each block keeps its own message.
+        const auto preRender = [ & ]( const auto& render, std::string& into ) -> bool
         {
             const std::optional<RedactCounts> redactBefore = redactPtr != nullptr ? std::optional<RedactCounts>( *redactPtr ) : std::nullopt;
             const auto restoreRedact = [ & ]() noexcept { if( redactBefore ) { *redactPtr = *redactBefore; } };
@@ -2483,7 +2511,6 @@ std::optional<int> runForLens( const MainDispatch& d )
             std::FILE* const buffer = rw::openChargeStream( stream );
             if( buffer == nullptr )
             {
-                DISCLOSE( degradeMsg );
                 restoreRedact();
                 return false;
             }
@@ -2491,19 +2518,29 @@ std::optional<int> runForLens( const MainDispatch& d )
             const rw::MemoryStreamBytes block = stream.finish();
             if( !block.isWhole )
             {
-                DISCLOSE( degradeMsg );
                 restoreRedact();
                 return false;
             }
             into.assign( block.bytes );
             return true;
         };
+        ForLensBlockCharge blockCharge;   // a sibling block the budget could not see: est_tokens= is then omitted, not wrong
         legoPreRendered = preRender( [ & ]( std::FILE* lm ) { packLego( lm, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true, flRootArg ); },
-                                     legoStr, "main: open_memstream failed (or its buffer lost a write) for the lego block — budget will not see its size" );
+                                     legoStr );
+        if( !legoPreRendered )
+        {
+            DISCLOSE( blockCharge, ForLensBlockCharge::DisclosureWhy::SiblingBlockUnmeasured,
+                      "main: open_memstream failed (or its buffer lost a write) for the lego block — budget will not see its size" );
+        }
         if( !g.composeEdges.empty() )
         {
             composePreRendered = preRender( [ & ]( std::FILE* cm ) { packCompose( cm, ing, g.composeEdges, lensSurfaceIds ); },
-                                            composeStr, "main: open_memstream failed (or its buffer lost a write) for the compose block — budget will not see its size" );
+                                            composeStr );
+            if( !composePreRendered )
+            {
+                DISCLOSE( blockCharge, ForLensBlockCharge::DisclosureWhy::SiblingBlockUnmeasured,
+                          "main: open_memstream failed (or its buffer lost a write) for the compose block — budget will not see its size" );
+            }
         }
         else
         {
@@ -2513,7 +2550,12 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             // B6.3: route view for the same relevant symbol set (top-N by lensRank)
             routePreRendered = preRender( [ & ]( std::FILE* rm ) { packRoutes( rm, ing, g.routeEdges, lensSurfaceIds ); },
-                                          routeStr, "main: open_memstream failed (or its buffer lost a write) for the routes block — budget will not see its size" );
+                                          routeStr );
+            if( !routePreRendered )
+            {
+                DISCLOSE( blockCharge, ForLensBlockCharge::DisclosureWhy::SiblingBlockUnmeasured,
+                          "main: open_memstream failed (or its buffer lost a write) for the routes block — budget will not see its size" );
+            }
         }
         else
         {
@@ -2653,9 +2695,11 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 &forSigsCapped,                              // did the ladder fire? — the budget_bytes= clause rides only then
                                 forTopRowNext );                             // L-W: the widening page on a thin answer, else the body
             },
-            sigsStr, "main: open_memstream failed (or its buffer lost a write) for the sigs block — est_tokens omitted from the header" );
+            sigsStr );
         if( !sigsPreRendered )
         {
+            DISCLOSE( blockCharge, ForLensBlockCharge::DisclosureWhy::SigsUnmeasured,
+                      "main: open_memstream failed (or its buffer lost a write) for the sigs block — est_tokens omitted from the header" );
             // what a render into a failed buffer measured belongs to bytes that will not be printed: dropped, exactly as a
             // failed open never sets it, and the direct-emission path below renders the block whole
             forDroppedPositive = 0;
@@ -2765,6 +2809,11 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             graphSection = rw::chargeSection( [ & ]( std::FILE* f ) { packGraphBlock( f, ing, lensRank, g.outOff, g.outTargets ); },
                                                rw::kBytesPerTokenDefault );
+            if( !graphSection.isRendered )
+            {
+                // the block streams uncharged below: the lens's own contract omits an est_tokens that left it out
+                DISCLOSE( blockCharge, ForLensBlockCharge::DisclosureWhy::SiblingBlockUnmeasured, "runForLens: the graph block streams uncharged — est_tokens omitted" );
+            }
         }
 
         // both kept alive past the render so the isRendered=false degrade path below re-emits the SAME set at
@@ -2811,6 +2860,10 @@ std::optional<int> runForLens( const MainDispatch& d )
                               /*ranges=*/nullptr, notesPtr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
                               /*withFileContext=*/false, flRootArg, &lensRank ); },   // L3: --detail bodies surface notes too (part of the --for bundle)
                 rw::kBytesPerTokenBody );
+            if( !detailSection.isRendered )
+            {
+                DISCLOSE( blockCharge, ForLensBlockCharge::DisclosureWhy::SiblingBlockUnmeasured, "runForLens: the --detail bodies stream uncharged — est_tokens omitted" );
+            }
         }
 
         // ── T3: the terminal-by-default auto <bodies> section (pre-registered: docs/EVALS.md §4) ────────────
@@ -2838,6 +2891,15 @@ std::optional<int> runForLens( const MainDispatch& d )
                 headerParts.autoBundle = headerParts.compactBundle = false;
                 headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
             }
+        }
+        else if( autoBundleMode )
+        {
+            // The <sigs> pre-render degraded (disclosed above through blockCharge), so no body is served: the bodies
+            // decision and the ladder both need the measured signatures. The root says so with a THIRD reason beside
+            // budget/no_candidates, defined in the same header — the legend promising bodies used to ship with neither
+            // a bodies section nor any attribute saying why.
+            enrich.attr = headerParts.compactBundle ? " bundle=\"compact\" bodies=\"0\" reason=\"degraded\"" : " bundle=\"auto\" bodies=\"0\" reason=\"degraded\"";
+            headerStr   = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, kForDegradedBundleNote );
         }
         const rw::ChargedSection& autoSection = enrich.section;
         const std::string&        autoAttr    = enrich.attr;
@@ -2876,7 +2938,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             .droppedPositiveNote  = droppedPositiveNote,
             .sigsCeilingNote      = sigsCeilingNote,
             .capNote              = capNoteStr,
-            .measured             = sigsPreRendered,
+            .measured             = blockCharge.isMeasured,   // every pre-rendered block whole: sigs AND its siblings
             .estTokensLegend      = kForEstTokensLegend,
             .overCeilingLegend    = kForOverCeilingLegend,
             // F2: everything OUTSIDE the header at the markup rate. enrich.markupBytes is the compact <hops> section,
@@ -3390,6 +3452,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
         graphSection        = rw::chargeSection( [ & ]( std::FILE* f ) { packGraphBlock( f, ing, lr.rank, g.outOff, g.outTargets ); },
                                                   rw::kBytesPerTokenDefault );
         in.trailingSectionBytes = graphSection.xml.size();   // 0 on the degrade path — the pre-§F1 accounting for that one run
+        in.isTrailingUncharged  = !graphSection.isRendered;  // that degrade was disclosed by the section's sink; the root says so
     }
 
     std::string bundle = packTaskBundleText( ing, g, task, lr, in );

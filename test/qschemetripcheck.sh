@@ -34,12 +34,22 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-19, TRAIN 7 (integration/train-7 on main 21547208: lane/disclose-sink-form 6998265d, lane/jsx-element-calls
+#   86bc0151): RE-DERIVED ON THE FINAL MERGED TREE. Both lanes bumped kParserVer 114 -> 115 over main e54b688e; main is
+#   116 after train 6, so the train sets ONE value past all, 117, and its mirror with it (extract-partial re-extraction;
+#   #285 JSX element calls + the .tsx query). No member changes a manifest function (git diff -W shows no hunk inside
+#   one); the kParserVer declaration text is the only manifest input that moved. kCacheVersion stays 24,
+#   kQSnapCacheScheme stays 14. The two member entries below record their lane-local 115.
 # 2026-09-18, TRAIN 6 (integration/train-6 on main e54b688e: 14 members, lane/py-module-alias-ambiguous e7ee52c0 the only
 #   extraction change): RE-DERIVED ON THE FINAL MERGED TREE. kParserVer and its mirror 114 -> 116 as that lane declared
 #   (115 = the RawBind "module" marker on a Python `import a.b [as c]` bind, 116 = the rebinding-form VarDecl binds that
 #   veto a rebound alias); no other member changes extraction, so no second bump. The lane left this pin at main's value
 #   (the gate was red on its head). kCacheVersion stays 24, kQSnapCacheScheme stays 14 (no member changes a manifest
 #   function; the ingest_cache.h declaration text is the only manifest input that moved).
+# 2026-09-19, DEGRADE DISCLOSURE (test/skipreasoncheck.sh arm 10, lane/disclose-sink-form): kParserVer and its mirror
+#   114 -> 115 over main e54b688e (the landing train re-derives the number) — a partially extracted file is written to the
+#   cache as UNKNOWN and itemized why="extract-partial"; a cache written before stored its partial facts under the real
+#   hash, which a warm run would serve as whole. kCacheVersion stays 24, kQSnapCacheScheme stays 14.
 # 2026-09-17, TRAIN 5 (integration/train-5 on main a6868f75: #282 ad7a9d56, lane/rule2b-assignment-veto 626810b3,
 #   lane/field-base-member 6b8f539e): RE-DERIVED ON THE FINAL MERGED TREE, carried from no side. kParserVer and its
 #   mirror in merge order over main's 112: #282 = 113, the veto lane = 114 (its ingest fix records a reference-returning

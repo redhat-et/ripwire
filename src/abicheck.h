@@ -253,6 +253,14 @@ struct AbiResult
     std::size_t    unmodelable = 0;   // sites skipped because HEAD's own copy carries no baseline to diff
     std::size_t    headOnly    = 0;   // candidate sites on paths only the live line changed (outside scope)
     std::uint32_t  unrelated   = 0;   // refs with no merge-base at all (unrelated history) — skipped, counted
+    enum class DisclosureWhy : std::uint8_t
+    {
+        NoMergeBase,
+    };
+    void disclose( DisclosureWhy ) noexcept   // the DISCLOSE sink: the field the emitter reads
+    {
+        ++unrelated;
+    }
     std::uint32_t  quietRefs   = 0;   // scanned, nothing to LIST — omitted from the body, counted here
     KindCounts     counts;            // every classified row, by kind, across every ref
     std::vector<RefRow> refs;         // only refs with >=1 LISTED struct row
@@ -482,8 +490,7 @@ inline void collectAuthoredSites( const std::string& root, const std::vector<cro
                                                           + shSingleQuote( result.headSha ) + " 2>/dev/null" );
         if( base.empty() )
         {
-            DISCLOSE( "abi: no merge-base for a ref (unrelated history?) — that ref is counted, not compared" );
-            ++result.unrelated;
+            DISCLOSE( result, AbiResult::DisclosureWhy::NoMergeBase, "abi: no merge-base for a ref (unrelated history?) — that ref is counted, not compared" );
             continue;
         }
         rows[i].base = base;

@@ -305,6 +305,15 @@ struct RevSide
     std::string path;             // the root-relative path READ at REV (may differ from now: renamed_from=)
     std::string src;              // the blob, exactly as both the ingest and the scan below saw it
     SliceScan   scan;
+    // The DISCLOSE sink for a side that could not be parsed: status="unparsed_at_rev" comparable="0" on the row.
+    enum class DisclosureWhy : std::uint8_t
+    {
+        TempRootUnavailable,
+    };
+    void disclose( DisclosureWhy ) noexcept
+    {
+        status = Status::UnparsedAtRev;
+    }
 };
 
 // The blob at `sha:rel`, following a git-RECORDED rename chain (never a similarity guess of our own —
@@ -379,8 +388,7 @@ inline RevSide sliceAtRev( const std::string& root, const std::string& sha, cons
     fs::remove_all( fs::path( tmpRoot ), ec );                   // a leftover from a crashed prior run
     if( !fs::create_directories( fs::path( tmpRoot ), ec ) && ec )
     {
-        DISCLOSE( "slicediff: cannot create the temp parse root" );
-        r.status = Status::UnparsedAtRev;
+        DISCLOSE( r, RevSide::DisclosureWhy::TempRootUnavailable, "slicediff: cannot create the temp parse root" );
         return r;
     }
     quality::TmpTreeGuard guard{ tmpRoot };

@@ -1388,7 +1388,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
                        std::vector<RawRef>& refs, std::vector<Include>& incs, std::vector<RawBind>& binds,
                        std::vector<BindingAlias>& ffis, std::vector<RouteDef>& routeDefs,
                        std::vector<RawRouteUse>& routeUses, std::vector<ConstOpen>& constOpens, bool captureValueUses,
-                       const std::vector<PreprocDeadRange>& ppDead )
+                       const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall )
 {
     const std::size_t firstRefOfFile  = refs.size();
     const std::size_t firstIncOfFile  = incs.size();
@@ -1406,7 +1406,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
 
         if( le.lang != Lang::Elixir )
         {
-            captureIncludes( root, le.lang, fileId, src, incs, refs, binds, constOpens );   // Elixir directives share the lexical tags context below.
+            captureIncludes( root, le.lang, fileId, src, incs, refs, binds, constOpens, shortfall );   // Elixir directives share the lexical tags context below.
         }
         captureJsImportFacts( root, le.lang, fileId, src, binds );
 
@@ -1564,7 +1564,7 @@ inline void foldFieldDefs( std::vector<RawDef>& defs, std::size_t first, Lang la
 /// file's tags pass runs later, at the prewarm flush).
 void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawDef>& defs, std::vector<RawRef>& refs, std::vector<RawBind>& binds, std::vector<Include>& includes,
-                       const std::vector<PreprocDeadRange>& ppDead )
+                       const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall )
 {
     if( cursor == nullptr )
     {
@@ -1574,6 +1574,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     TSQuery* query = compiledQueryFor( le );   // shared immutable query, compiled once per grammar (pre-warmed) — do NOT delete
     if( query == nullptr )
     {
+        if( le.grammar != nullptr )   // markdown has no grammar and no query: that is not a shortfall
+        {
+            // A transient readFile failure can make the prewarm miss-detection skip a grammar the pool later needs;
+            // compiling here would WRITE the shared cache from a worker thread, so the file's definitions are not
+            // extracted this run, and the sink says so (its row, and no cache record that reads as whole).
+            DISCLOSE( shortfall, ExtractShortfall::DisclosureWhy::TagsQueryUnavailable, "ingest: tags query not prewarmed for a grammar — file skipped" );
+        }
         return;
     }
 
@@ -1582,6 +1589,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     const std::size_t firstBindOfFile = binds.size();
 
     ElixirContext elixir;
+    elixir.shortfall = &shortfall;
     if( le.lang == Lang::Elixir ) { elixir.prepare( cursor, query, root, src, fileId, binds, includes, refs ); }
 
     // extent honesty: the recovered-bit walk (parseRecoveredBits) only exists in a file the parser had to recover.
@@ -2044,6 +2052,15 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             {
                 // H4: a C++ cast keyword is not a call — see isCppCastKeyword. Valid input, skipped, no alert.
                 if( le.lang == Lang::Cpp && isCppCastKeyword( nameTxt ) )
+                {
+                    continue;
+                }
+
+                // #285: an intrinsic JSX tag (`<div>`, `<h1>`) is not a call — see isJsxIntrinsicTagIdentifier.
+                // Valid input, skipped, no alert; a qualified (`<Foo.Bar />`) or namespaced (`<svg:rect />`)
+                // tag never reaches this test (see that function's note for why).
+                if( ( le.lang == Lang::TypeScript || le.lang == Lang::JavaScript )
+                    && isJsxIntrinsicTagIdentifier( roleNode, nameNode, nameTxt ) )
                 {
                     continue;
                 }

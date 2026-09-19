@@ -25,6 +25,7 @@
 #include "os.h"            // rw::os::open_memstream — the MemoryStream buffer
 
 #include <cstddef>
+#include <cstdint>        // std::uint8_t — Rendered::DisclosureWhy
 #include <cstdlib>
 #include <new>            // std::bad_alloc — renderToString's injected emitter-throw fault, below
 #include <type_traits>
@@ -181,6 +182,19 @@ struct Rendered
 {
     std::string text;
     bool        ok = false;
+    // The DISCLOSE sink for renderToString's three failures: each leaves `ok` false and `text` empty — the value every
+    // caller is handed, and must read, instead of a partial buffer.
+    enum class DisclosureWhy : std::uint8_t
+    {
+        BufferFailed,   // the memory stream did not open, or did not finish whole
+        EmitterThrew,   // the emitter threw part-way
+        CopyThrew,      // the copy out of a complete buffer threw
+    };
+    void disclose( DisclosureWhy ) noexcept
+    {
+        ok = false;
+        text.clear();
+    }
 };
 
 // ── THE EMITTER ITSELF MAY THROW, and that is a degrade, not a way out ───────────────────────────────
@@ -328,14 +342,14 @@ private:
 };
 
 template<class Emit>
-inline Rendered renderToString( Emit&& emit, const char* degradeMsg )
+inline Rendered renderToString( Emit&& emit )
 {
     Rendered     out;
     MemoryStream stream;
     std::FILE* const m = stream.open();
     if( m == nullptr )
     {
-        DISCLOSE( degradeMsg );
+        DISCLOSE( out, Rendered::DisclosureWhy::BufferFailed, "renderToString: the memory buffer did not open — the caller takes its documented fallback" );
         return out;
     }
     try
@@ -349,11 +363,10 @@ inline Rendered renderToString( Emit&& emit, const char* degradeMsg )
     {
         // What this function owns is released by `stream` on the way out: the unfinished stream is closed and its
         // buffer freed, once. `out` is still the default-constructed failure — empty text, ok == false.
-        // NOT degradeMsg: that one says the BUFFER failed, and here it did not — the emitter did. The macro
-        // takes a const char*, so this is its own literal rather than a composed string; the caller is named
-        // anyway, because __PRETTY_FUNCTION__ carries the Emit lambda's own file and line.
-        DISCLOSE( "renderToString: the emitter THREW — nothing was measured, "
-                             "the caller takes its documented fallback" );
+        // Its own reason, not the buffer's: the emitter threw. The caller is named anyway, because __PRETTY_FUNCTION__
+        // carries the Emit lambda's own file and line.
+        DISCLOSE( out, Rendered::DisclosureWhy::EmitterThrew, "renderToString: the emitter THREW — nothing was measured, "
+                                                              "the caller takes its documented fallback" );
         return out;
     }
     // MemoryStream::finish owns the order (flush, error flag, close) and the null-buffer rule — an emitter that wrote
@@ -375,18 +388,15 @@ inline Rendered renderToString( Emit&& emit, const char* degradeMsg )
         }
         catch( ... )
         {
-            out.ok = false;
-            out.text.clear();
-            // NOT degradeMsg, and not the emitter's literal either: the buffer did not fail and the emitter
-            // did not throw — the copy out of a complete buffer did. Same reasoning as the catch above, so
-            // the caller reads which of the three failures it actually hit.
-            DISCLOSE( "renderToString: the final COPY out of the buffer THREW — nothing was "
-                                 "measured, the caller takes its documented fallback" );
+            // Neither the buffer nor the emitter: the copy out of a complete buffer threw. Its own reason, so the trace
+            // says which of the three failures it hit; the sink empties `text` and clears `ok`.
+            DISCLOSE( out, Rendered::DisclosureWhy::CopyThrew, "renderToString: the final COPY out of the buffer THREW — nothing was "
+                                                           "measured, the caller takes its documented fallback" );
         }
     }
     else
     {
-        DISCLOSE( degradeMsg );
+        DISCLOSE( out, Rendered::DisclosureWhy::BufferFailed, "renderToString: the memory buffer did not finish whole — the caller takes its documented fallback" );
     }
     return out;
 }

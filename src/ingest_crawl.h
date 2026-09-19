@@ -155,7 +155,11 @@ constexpr std::array<LangEntry, 50> kLangTable = {{
     { ".go",   Lang::Go,         &tree_sitter_go,         "go"         },
     { ".rs",   Lang::Rust,       &tree_sitter_rust,       "rust"       },
     { ".ts",   Lang::TypeScript, &tree_sitter_typescript, "typescript" },
-    { ".tsx",  Lang::TypeScript, &tree_sitter_tsx,        "typescript" },
+    // #285: .tsx gets its OWN querySub ("tsx", queries/tsx/tags.scm), not "typescript" — the tsx
+    // grammar is a superset of the plain one, but a query naming a JSX-only node type (added for
+    // JSX element call edges) fails to compile against the plain grammar WHOLESALE, which would have
+    // taken every .ts symbol/reference down with it. See queries/typescript/tags.scm's header.
+    { ".tsx",  Lang::TypeScript, &tree_sitter_tsx,        "tsx"        },
     { ".mts",  Lang::TypeScript, &tree_sitter_typescript, "typescript" },
     { ".cts",  Lang::TypeScript, &tree_sitter_typescript, "typescript" },
     { ".swift", Lang::Swift,     &tree_sitter_swift,      "swift"      },
@@ -1193,12 +1197,11 @@ void recordCrawlDrop( std::vector<SkippedFile>& rows, std::uint64_t& exactCount,
 // The count is EXACT and always incremented; only the row is capped, exactly like every sibling class.
 void recordRootEscape( CrawlSkips& skips, const std::string& path, std::string_view ext )
 {
-    ++skips.escapedFiles;
+    DISCLOSE( skips, CrawlSkips::DisclosureWhy::SymlinkEscapesRoot, "ingest: a symlink's target leaves the crawl root — file refused (see --skipped why=escaped-root)" );
     if( skips.escaped.size() < kMaxSkipRowsPerClass )
     {
         skips.escaped.push_back( { path, 0ull, std::string( ext ) } );
     }
-    DISCLOSE( "ingest: a symlink's target leaves the crawl root — file refused (see --skipped why=escaped-root)" );
 }
 
 // §L1: the crawl's two NON-SIZE drop tests, together, because they are one decision with one ordering
@@ -1282,6 +1285,17 @@ struct GitIgnoreSet
     bool                     rootIgnored = false; // git answered "./" — the ROOT is itself ignored (see IgnoreMode)
     std::vector<std::string> dirs;                // root-relative, NO trailing '/', sorted
     std::vector<std::string> files;               // root-relative, sorted
+    // The DISCLOSE sink for a probe git could not answer whole: `available` stays false, which --skipped prints as
+    // ignore_mode="unavailable" (and the crawl walks everything, never a partial ignore set).
+    enum class DisclosureWhy : std::uint8_t
+    {
+        GitNotRunnable,
+        ProbeOverCeiling,
+    };
+    void disclose( DisclosureWhy ) noexcept
+    {
+        available = false;
+    }
 };
 
 // A probe answer larger than this is refused whole rather than applied in part: a PARTIAL ignore set
@@ -1332,7 +1346,7 @@ GitIgnoreSet collectGitIgnored( const char* rootDir )
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
     if( pipe == nullptr )
     {
-        DISCLOSE( "ingest: cannot run git for the ignore probe — full walk" );
+        DISCLOSE( out, GitIgnoreSet::DisclosureWhy::GitNotRunnable, "ingest: cannot run git for the ignore probe — full walk" );
         return out;
     }
     std::string buf;
@@ -1354,7 +1368,7 @@ GitIgnoreSet collectGitIgnored( const char* rootDir )
     }
     if( overflowed )
     {
-        DISCLOSE( "ingest: git ignore probe exceeded its byte ceiling — full walk" );
+        DISCLOSE( out, GitIgnoreSet::DisclosureWhy::ProbeOverCeiling, "ingest: git ignore probe exceeded its byte ceiling — full walk" );
         return out;
     }
 
@@ -1880,7 +1894,8 @@ inline bool isReadableCacheBlob( const std::string& path ) noexcept
     const PathShape shape = shapeOfPath( path );
     if( shape == PathShape::Other )
     {
-        DISCLOSE( "ingest: cache path is not a regular file (directory/device/fifo) — cache treated as corrupt (full reparse)" );
+        DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                  "ingest: cache path is not a regular file (directory/device/fifo) — cache treated as corrupt (full reparse)" );
     }
     return shape == PathShape::RegularFile;
 }
@@ -2044,9 +2059,8 @@ TSQuery* compiledQueryFor( const LangEntry& le )
 
     // not prewarmed — a transient readFile failure can make the prewarm miss-detection skip a grammar the
     // pool later needs. Compiling here would WRITE the shared cache from a worker thread (data race on the
-    // non-thread-safe map). Degrade instead: skip the file (caller treats nullptr as "skip"); the normal
-    // prewarm path repopulates on the next run.
-    DISCLOSE( "ingest: tags query not prewarmed for a grammar — file skipped" );
+    // non-thread-safe map). Degrade instead: nullptr, which captureTagsFacts discloses into the file's
+    // ExtractShortfall (an extract-partial --skipped row, and no cache record, so the next run re-extracts).
     return nullptr;
 }
 }   // namespace — ingest_crawl.h section of ingest.cpp

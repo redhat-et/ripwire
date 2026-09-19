@@ -1285,7 +1285,8 @@ std::optional<int> runSlice( const MainDispatch& d )
     }
     else
     {
-        DISCLOSE( "slice: definition file unreadable" );
+        DISCLOSE( Diagnostics::answerRefused, "--slice exits 1 naming the unreadable file on stderr; no slice is printed",
+                  "slice: definition file unreadable" );
         rw::emitTo( stderr, "ripwire: --slice: cannot read {} — the slice re-parses the definition's file and has nothing to walk\n", path.c_str() );
         return 1;
     }
@@ -1300,7 +1301,8 @@ std::optional<int> runSlice( const MainDispatch& d )
     }
     if( !scan.parseOk )
     {
-        DISCLOSE( "slice: definition re-parse failed" );
+        DISCLOSE( Diagnostics::answerRefused, "--slice exits 1 naming the file it could not re-parse on stderr; no slice is printed",
+                  "slice: definition re-parse failed" );
         rw::emitTo( stderr, "ripwire: --slice: could not re-parse {} (grammar missing, or the indexed span no longer fits the "
                               "file — a stale index; re-run without --no-reindex or check --doctor)\n", path.c_str() );
         return 1;

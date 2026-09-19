@@ -150,14 +150,12 @@ inline std::string configPath( std::string_view root ) { return rootQualifiedSid
 template<class Value>
 using ScratchMap = stree::dyn::dynamic_map<std::uint64_t, Value, 32>;   // uint64 keys on Apple cache lines; use only when a hard capacity bound is obvious
 
-inline bool insertScratchSeen( ScratchMap<std::uint8_t>& seen, std::uint64_t key, const char* capacityMsg )
+// Every caller sizes `seen` at ing.symbols.size() and inserts at most one key per symbol it iterates (traced 2026-09-19:
+// the per-symbol, api, mask and churn passes of quality.h), so the container can never reject a new key.
+inline bool insertScratchSeen( ScratchMap<std::uint8_t>& seen, std::uint64_t key )
 {
     const auto [ it, inserted ] = seen.insert( { key, 1 } );
-    if( it == seen.end() )
-    {
-        DISCLOSE( capacityMsg );
-        return false;
-    }
+    ASSUME( it != seen.end(), "a scratch map is sized at the symbol count and takes at most one key per symbol" );
     return inserted;
 }
 
@@ -1975,7 +1973,9 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 24;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 116;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 117;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 117 = 2026-09-19 (train 7, both members: extract-partial
+                                                          //    re-extraction; #285 JSX element calls + the .tsx query; see src/ingest_cache.h)
                                                           // 116 = 2026-09-18 (issue #287 round 2:
                                                           //    capturePythonRebindShadowDecls' rebind
                                                           //    veto evidence; see src/ingest_cache.h)
@@ -3029,7 +3029,8 @@ inline bool qsnapCountFits( const char* p, const char* end, std::uint32_t count,
     {
         return true;
     }
-    DISCLOSE( "quality: a cache blob's record count exceeds its remaining bytes — blob rejected" );
+    DISCLOSE( Diagnostics::answerUnchanged, "the rejected blob is recomputed from the tree: same answer, slower",
+              "quality: a cache blob's record count exceeds its remaining bytes — blob rejected" );
     return false;
 }
 
@@ -3306,9 +3307,27 @@ struct TmpTreeGuard
 // Materialize `committish`'s committed tree into a fresh pid-suffixed temp dir under the hardened cache
 // ladder (per-user; never the repo) via `git archive | tar -x`. Returns the temp root, or "" on any failure
 // (degrade-alerted; a half-made dir is cleaned up here — on success the CALLER owns cleanup via TmpTreeGuard).
+// What materializeCommitTree hands back: the temp root, or EMPTY — the one field every caller reads as "no tree". It is
+// the DISCLOSE sink for the three ways the tree is not made; each caller then refuses, or marks its own answer.
+struct MaterializedTree
+{
+    enum class DisclosureWhy : std::uint8_t
+    {
+        RevisionUnresolved,
+        TempDirUnavailable,
+        ArchiveFailed,
+    };
+    std::string root;
+    void disclose( DisclosureWhy ) noexcept
+    {
+        root.clear();
+    }
+};
+
 inline std::string materializeCommitTree( const std::string& root, const std::string& committish, const char* tag )
 {
     namespace fs = std::filesystem;
+    MaterializedTree tree;
 
     // r27 (Lane C routing) — RESOLVE THE REVISION FIRST. `git archive --output=FILE` really does write a file
     // (measured), so this is the P0.1 shape one careless caller away from being the same data-loss bug. Every
@@ -3319,22 +3338,28 @@ inline std::string materializeCommitTree( const std::string& root, const std::st
     // the separator goes AFTER the revision.
     const std::string rev = gitResolveCommitSha( root, committish );
     if( rev.empty() )
-    { DISCLOSE( "quality: commit-tree revision does not resolve to a commit — refusing to archive" ); return {}; }
+    {
+        DISCLOSE( tree, MaterializedTree::DisclosureWhy::RevisionUnresolved, "quality: commit-tree revision does not resolve to a commit — refusing to archive" );
+        return tree.root;
+    }
 
     std::error_code ec;
     std::string tmpRoot = cacheDirLadder() + "/ripwire-" + tag + "-" + std::to_string( os::getpid() );   // not const: moved out on return
     fs::remove_all( fs::path( tmpRoot ), ec );                 // stale leftover from a crashed prior run
     if( !fs::create_directories( fs::path( tmpRoot ), ec ) && ec )
-    { DISCLOSE( "quality: cannot create commit-tree temp dir" ); return {}; }
+    {
+        DISCLOSE( tree, MaterializedTree::DisclosureWhy::TempDirUnavailable, "quality: cannot create commit-tree temp dir" );
+        return tree.root;
+    }
 
     const std::string extract = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
                               + " archive --format=tar " + shSingleQuote( rev ) + " -- 2>/dev/null | tar -x -C " + shSingleQuote( tmpRoot ) + " 2>/dev/null";
     if( os::system( extract.c_str() ) != 0 )
     {
-        DISCLOSE( "quality: git archive failed — committed tree unavailable" );
+        DISCLOSE( tree, MaterializedTree::DisclosureWhy::ArchiveFailed, "quality: git archive failed — committed tree unavailable" );
         std::error_code e;
         fs::remove_all( fs::path( tmpRoot ), e );
-        return {};
+        return tree.root;
     }
     return tmpRoot;
 }
@@ -3494,7 +3519,7 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
             // the fprintf is the visible line in ALL build types (test/qsnapcachecheck.sh (e) gates on it);
             // DISCLOSE compiles out under NDEBUG.
             rw::emitRaw( stderr, "ripwire: quality: HEAD Snapshot cache corrupt — recomputing\n" );
-            DISCLOSE( "quality: HEAD Snapshot cache corrupt — recomputing" );
+            DISCLOSE( Diagnostics::answerUnchanged, "the corrupt cache is recomputed from the tree: same answer, slower", "quality: HEAD Snapshot cache corrupt — recomputing" );
         }
     }
 
@@ -3620,7 +3645,8 @@ inline bool loadRefTree( const std::string& repoRoot, const std::string& sha, co
     }
     if( out.ing.symbols.empty() && out.ing.files.empty() )
     {
-        DISCLOSE( "quality: a materialized commit tree ingested empty" );
+        DISCLOSE( Diagnostics::answerRefused, "the only caller, --quality-delta=A..B, refuses with the sha named; nothing is scored",
+                  "quality: a materialized commit tree ingested empty" );
         return false;
     }
     out.g    = buildGraph( out.ing, nullptr );
@@ -3667,7 +3693,7 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
         if( hit == -1 )
         {
             rw::emitRaw( stderr, "ripwire: quality: window-ref body cache corrupt — recomputing\n" );
-            DISCLOSE( "quality: window-ref body cache corrupt — recomputing" );
+            DISCLOSE( Diagnostics::answerUnchanged, "the corrupt cache is recomputed from the tree: same answer, slower", "quality: window-ref body cache corrupt — recomputing" );
         }
     }
 
@@ -3970,8 +3996,10 @@ inline int openBaselineSidecar( const std::string& path )
     auto [ fd, openErr ] = rw::pathguard::openNoFollowTruncate( "the quality baseline sidecar", path );
     if( fd < 0 )
     {
-        if( openErr == ELOOP ) { DISCLOSE( "quality: refusing to write the baseline sidecar through a symlink" ); }
-        else                   { DISCLOSE( "quality: cannot write baseline file" ); }
+        if( openErr == ELOOP ) { DISCLOSE( Diagnostics::answerRefused, "the baseline write fails on every surface: pathguard names the refused link, and the CLI exits non-zero",
+                                           "quality: refusing to write the baseline sidecar through a symlink" ); }
+        else                   { DISCLOSE( Diagnostics::answerRefused, "the baseline write fails on every surface: pathguard names the OS reason, and the CLI exits non-zero",
+                                           "quality: cannot write baseline file" ); }
     }
     return fd;
 }
@@ -4117,6 +4145,23 @@ struct BaselineReadStats
     bool        preQ1          = false;   // structure, but no per-symbol loc records: origin cannot be classified
     std::size_t badLines       = 0;       // lines of a known kind whose payload did not parse — skipped
     std::string producer;                 // the `producer` record: 64 lowercase hex, or "" when absent or malformed
+    // The DISCLOSE sink for the read's degrades: each sets the field selectBaseline turns into the root's baseline=
+    // marker or baseline_bad_lines=, so a refused, empty or partly unparsed sidecar is never read as a clean one.
+    enum class DisclosureWhy : std::uint8_t
+    {
+        SymlinkRefused,   // a link at the name, refused unopened
+        MalformedLine,    // a known record kind whose payload did not parse (skipped)
+        Unrecognizable,   // opened, but no line of the format's structure
+    };
+    void disclose( DisclosureWhy why ) noexcept
+    {
+        switch( why )
+        {
+            case DisclosureWhy::SymlinkRefused: symlinkRefused = true; break;
+            case DisclosureWhy::MalformedLine:  ++badLines; break;
+            case DisclosureWhy::Unrecognizable: unrecognizable = true; break;
+        }
+    }
 };
 
 // The v6 `producer` record's payload, into `stats.producer` when it is identity-shaped (64 lowercase hex). Only the
@@ -4130,8 +4175,7 @@ inline void readProducerRecord( std::istream& is, BaselineReadStats& stats )
     const auto isLowerHexDigit = []( char c ) { return ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'f' ); };
     if( value.size() != 64 || !std::all_of( value.begin(), value.end(), isLowerHexDigit ) )
     {
-        DISCLOSE( "quality: malformed baseline producer line skipped" );
-        ++stats.badLines;
+        DISCLOSE( stats, BaselineReadStats::DisclosureWhy::MalformedLine, "quality: malformed baseline producer line skipped" );
         return;
     }
     if( stats.producer.empty() )
@@ -4144,20 +4188,20 @@ inline void readProducerRecord( std::istream& is, BaselineReadStats& stats )
 // readBaselineAbsorbed, and openBaselineSidecar's other half with the same answer to a link: O_NOFOLLOW, refused
 // in the open itself. A link here used to be followed on the way in, so the link chose which file was honored as
 // the floor. Why an in-tree link is refused too is round 3 of src/pathguard.h.
-inline rw::pathguard::NoFollowRead readBaselineSidecar( const std::string& path )
+inline rw::pathguard::NoFollowRead readBaselineSidecar( const std::string& path, BaselineReadStats& stats )
 {
     rw::pathguard::NoFollowRead sidecar = rw::pathguard::openNoFollowRead( "the quality baseline sidecar", path );
-    if( sidecar.refused ) { DISCLOSE( "quality: refusing to read the baseline sidecar through a symlink" ); }
+    if( sidecar.refused ) { DISCLOSE( stats, BaselineReadStats::DisclosureWhy::SymlinkRefused, "quality: refusing to read the baseline sidecar through a symlink" ); }
     return sidecar;
 }
 
 inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadStats& stats )
 {
     stats = BaselineReadStats{};
-    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path );
+    // "no sidecar" and "a sidecar refused unopened" are different answers: the seam's sink records the refusal
+    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path, stats );
     if( !sidecar.opened )
     {
-        stats.symlinkRefused = sidecar.refused;   // "no sidecar" and "a sidecar refused unopened" are different answers
         return false;
     }
     stats.present = true;
@@ -4189,16 +4233,16 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
         // per-symbol MAX metrics: "<kind> <hexhash> <value>". A malformed line degrades + skips (never the
         // silent hash-0 insert). An UNKNOWN kind (e.g. a future record read by this binary) is skipped
         // gracefully so forward/backward baseline versions never crash.
-        const auto readValMap = [ & ]( gtl::btree_map<std::uint64_t, std::uint32_t>& m, const char* what )
+        const auto readValMap = [ & ]( gtl::btree_map<std::uint64_t, std::uint32_t>& m )
         { std::uint64_t h = 0; std::uint32_t v = 0; is >> std::hex >> h >> std::dec >> v;
-          if( is.fail() ) { DISCLOSE( what ); ++stats.badLines; return; } m[h] = v; };
-        const auto readSet = [ & ]( std::vector<std::uint64_t>& v, const char* what )
+          if( is.fail() ) { DISCLOSE( stats, BaselineReadStats::DisclosureWhy::MalformedLine ); return; } m[h] = v; };
+        const auto readSet = [ & ]( std::vector<std::uint64_t>& v )
         { std::uint64_t h = 0; is >> std::hex >> h;
-          if( is.fail() ) { DISCLOSE( what ); ++stats.badLines; return; } v.push_back( h ); };
+          if( is.fail() ) { DISCLOSE( stats, BaselineReadStats::DisclosureWhy::MalformedLine ); return; } v.push_back( h ); };
         // "<kind> <hexkey> <hexval>" — both 64-bit hex (the raw-body-hash map). Malformed → degrade + skip.
-        const auto readHashMap = [ & ]( gtl::btree_map<std::uint64_t, std::uint64_t>& m, const char* what )
+        const auto readHashMap = [ & ]( gtl::btree_map<std::uint64_t, std::uint64_t>& m )
         { std::uint64_t h = 0, v = 0; is >> std::hex >> h >> v;
-          if( is.fail() ) { DISCLOSE( what ); ++stats.badLines; return; } m[h] = v; };
+          if( is.fail() ) { DISCLOSE( stats, BaselineReadStats::DisclosureWhy::MalformedLine ); return; } m[h] = v; };
 
         if( kind == "ccx" || kind == "loc" || kind == "nest" || kind == "params" || kind == "mask" || kind == "body" || kind == "clone" || kind == "dead" || kind == "api" || kind == "head" || kind == "defs"
          || kind == "producer" )
@@ -4208,43 +4252,43 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
 
         if( kind == "ccx" )
         {
-            readValMap( out.ccxBySym, "quality: malformed baseline ccx line skipped" );
+            readValMap( out.ccxBySym );
         }
         else if( kind == "loc" )
         {
-            readValMap( out.locBySym, "quality: malformed baseline loc line skipped" );
+            readValMap( out.locBySym );
         }
         else if( kind == "nest" )
         {
-            readValMap( out.nestBySym, "quality: malformed baseline nest line skipped" );
+            readValMap( out.nestBySym );
         }
         else if( kind == "params" )
         {
-            readValMap( out.paramsBySym, "quality: malformed baseline params line skipped" );
+            readValMap( out.paramsBySym );
         }
         else if( kind == "mask" )
         {
-            readValMap( out.maskBySym, "quality: malformed baseline mask line skipped" );
+            readValMap( out.maskBySym );
         }
         else if( kind == "defs" )
         {
-            readValMap( out.defsBySym, "quality: malformed baseline defs line skipped" );
+            readValMap( out.defsBySym );
         }
         else if( kind == "bodyq" )   // v3 tag — a v2 `body` line is bare-canonId-keyed (a different key space) and falls through to the unknown-kind skip
         {
-            readHashMap( out.bodyHashBySym, "quality: malformed baseline bodyq line skipped" );
+            readHashMap( out.bodyHashBySym );
         }
         else if( kind == "clone" )
         {
-            readSet( out.cloneGroups, "quality: malformed baseline clone line skipped" );
+            readSet( out.cloneGroups );
         }
         else if( kind == "dead" )
         {
-            readSet( out.dead, "quality: malformed baseline dead line skipped" );
+            readSet( out.dead );
         }
         else if( kind == "api" )
         {
-            readSet( out.publicApi, "quality: malformed baseline api line skipped" );
+            readSet( out.publicApi );
         }
         else if( kind == "producer" )
         {
@@ -4254,8 +4298,7 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
     }
     if( recognizedLineCount == 0 )
     {
-        DISCLOSE( "quality: baseline file is empty/unrecognizable — treating it as absent" );
-        stats.unrecognizable = true;
+        DISCLOSE( stats, BaselineReadStats::DisclosureWhy::Unrecognizable, "quality: baseline file is empty/unrecognizable — treating it as absent" );
         out = Snapshot{};
         return false;
     }
@@ -4291,7 +4334,8 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
 // obeyed. `writeBaseline` only ever writes `gitHeadSha`'s output, so no legitimate sidecar is affected.
 inline std::string readBaselineHeadSha( const std::string& path )
 {
-    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path );
+    BaselineReadStats           unread;   // no channel here: readBaseline's own read records the refusal the report prints
+    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path, unread );
     if( !sidecar.opened )
     {
         return {};
@@ -4325,7 +4369,8 @@ inline std::string readBaselineHeadSha( const std::string& path )
 // one the report has something to say about.
 inline std::size_t readBaselineAbsorbed( const std::string& path )
 {
-    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path );
+    BaselineReadStats           unread;   // no channel here: readBaseline's own read records the refusal the report prints
+    rw::pathguard::NoFollowRead sidecar = readBaselineSidecar( path, unread );
     if( !sidecar.opened )
     {
         return 0;
@@ -4517,11 +4562,13 @@ inline BaselineSelection selectBaseline( const std::string& root, const std::str
         // today — but the alert itself should not assert a fallback that does not exist.
         else if( headSha.empty() )
         {
-            DISCLOSE( "quality: could not unlink the stale .ripwire_quality_baseline sidecar — it STAYS on disk and is merely IGNORED this run; this tree has no git HEAD to fall back to either, so this run has no baseline floor at all" );
+            DISCLOSE( Diagnostics::answerRefused, "with no git HEAD either, the run refuses and names the sidecar that stayed on disk",
+                      "quality: could not unlink the stale .ripwire_quality_baseline sidecar — it STAYS on disk and is merely IGNORED this run; this tree has no git HEAD to fall back to either, so this run has no baseline floor at all" );
         }
         else
         {
-            DISCLOSE( "quality: could not unlink the stale .ripwire_quality_baseline sidecar — it STAYS on disk and is merely IGNORED this run; the baseline still falls back to git HEAD" );
+            DISCLOSE( Diagnostics::answerUnchanged, "the stale sidecar is ignored either way and the baseline is git HEAD; the marker says ignored, not removed",
+                      "quality: could not unlink the stale .ripwire_quality_baseline sidecar — it STAYS on disk and is merely IGNORED this run; the baseline still falls back to git HEAD" );
         }
     }
     return sel;
@@ -5515,7 +5562,8 @@ inline bool writeAckRecords( const std::string& path, const gtl::btree_map<std::
     // concurrent run in eight left a single stray character on its own line in the committed ledger.
     if( !atomicWriteFile( path, renderAckRecords( acks ) ) )
     {
-        DISCLOSE( "quality: cannot write acks file" );
+        DISCLOSE( Diagnostics::answerRefused, "both callers report the failed publish and exit non-zero; no ledger is claimed written",
+                  "quality: cannot write acks file" );
         return false;
     }
     return true;
@@ -6725,7 +6773,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 continue;
             }
             const std::uint64_t key   = keyByNode[i];
-            if( !insertScratchSeen( reported, key, "quality: per-symbol seen scratch capacity exceeded" ) )
+            if( !insertScratchSeen( reported, key ) )
             {
                 continue; // already reported at an earlier overload
             }
@@ -7001,7 +7049,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             continue;
         }
         const std::uint64_t key = keyByNode[i];
-        if( !insertScratchSeen( apiSeen, key, "quality: api seen scratch capacity exceeded" ) )
+        if( !insertScratchSeen( apiSeen, key ) )
         {
             continue; // overload of an already-reported symbol
         }
@@ -7082,7 +7130,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             {
                 continue; // this symbol masks no errors now
             }
-            if( !insertScratchSeen( maskSeen, key, "quality: mask seen scratch capacity exceeded" ) )
+            if( !insertScratchSeen( maskSeen, key ) )
             {
                 continue; // already reported at an earlier overload of this id
             }
@@ -7177,7 +7225,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                     // bare-canonId key folded every same-named symbol in the tree into one identity, so
                     // gates 2+3 judged cross-file FOLDS (see bodyHashesBySym's doc; gate: §1d).
                     const std::uint64_t key = pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s );
-                    if( !insertScratchSeen( churnSeen, key, "quality: churn seen scratch capacity exceeded" ) )
+                    if( !insertScratchSeen( churnSeen, key ) )
                     {
                         continue; // one report per (file, scope, name) identity — same-file overloads fold
                     }

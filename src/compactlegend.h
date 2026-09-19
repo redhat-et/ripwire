@@ -352,6 +352,15 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // --regex's long-line disclosure (search.h grepScanText / regexguard.h maxEngineSubjectBytes): the count rides every
     // regex answer, the bound only beside a nonzero count.
     { "regex_lines_skipped", "regex_lines_skipped=N: N lines too long for the regex engine, never matched" },
+    // The degrade-disclosure lane's attributes (each set through a DISCLOSE( sink, why ) sink, present only on the degrade,
+    // so a clean answer's legend is unchanged). Element-qualified where the name alone is generic.
+    { "unread_files",      "unread_files=N: N indexed files unreadable when scanned (hits= is a floor)" },
+    { "scan_degraded",     "scan_degraded=1: the scan stopped part-way (hits= is a floor)" },
+    { "unreadable",        "unreadable=N: N same-name definitions unreadable when this ran, absent from defs=", false, "layout" },
+    { "lines_skipped",     "lines_skipped=N: N sidecar lines unparsed, absent from notes=", false, "notes" },
+    { "refused",           "refused=symlink: the sidecar is a symlink, refused unopened: no note was read", false, "notes" },
+    { "baseline",          "baseline=symlink-refused: the sidecar is a symlink, refused unopened: every violation is new", false, "arch",
+      MapHeaderRead::No, "symlink-refused" },
     { "regex_line_max",    "regex_line_max=: the longest line it could take" },
     { "regex_stack_bytes", "regex_stack_bytes=: the smaller stack every scan thread was held to" },
     // Both also ride the map header: est_tokens= alone there under order=stable (the root drops it), over_ceiling=1 there
@@ -394,6 +403,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "ignored_files",     "ignored_files=K: K files git's ignore rules dropped", false, {}, MapHeaderRead::Only },
     { "ignored_dirs",      "ignored_dirs=K: K subtrees git's ignore rules pruned, contents unknown", false, {}, MapHeaderRead::Only },
     { "max_tokens",        "max_tokens=/fit_bytes=: tokens asked/the byte cap applied", false, {}, MapHeaderRead::Only },
+    { "est_measured",      "est_measured=0: est_tokens is the MODELLED estimate (a charge buffer failed), typically below the emitted size", false, {}, MapHeaderRead::Also },
+    { "fit_unmeasured",    "fit_unmeasured=1: the fit probe could not measure the map; the cap is unverified", false, {}, MapHeaderRead::Only },
     // THE THIRD SWEEP (2026-09-12), the same defect on conditional fields the first two sweeps never produced. --zoom's
     // <module children=> rides only a module AT the levels_shown= cut, and a map's <recent> file rows only a single-root
     // rank_by=churn-decay (kChurnDecayRankLegend's `recent:` clause). Both clauses are prose. Both rows are ELEMENT-qualified:
@@ -526,6 +537,13 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "redacted",          "redacted=1: a credential shape rewritten to [REDACTED:kind]; the no-redact flag serves the bytes", true },
     // extent honesty (serialize.h kExtentSuspectRowLegend): a ROW-level term on the map, <d> and <b> rows alike.
     { "extent_suspect",    "extent_suspect=: span/scope/kind failed containment (name|head|scope|error)", true },
+    // train-7 fix round (CodeRabbit on #295): four present-only degrade disclosures whose full clauses ride only the
+    // answer that carries them, so the compact strip must put a reading back. Head terms, except head_conflicts_ok=
+    // (on each <arm>) and render_failed= (also on the <sigs>/<bodies> element it marks).
+    { "disk_walk_failed",  "disk_walk_failed=1: the root could not be listed, so a missing-file row may name an unindexed file that exists" },
+    { "refs_dropped",      "refs_dropped=K: K listed branches could not be read, in no count or row" },
+    { "head_conflicts_ok", "head_conflicts_ok=0: that arm's base or HEAD tree was unavailable, head_conflicts= unknown", true, "arm" },
+    { "render_failed",     "render_failed=: sections whose render FAILED (empty, not budget-omitted)", true },
 };
 
 // the paging window: these five mean the same on every element (L4's one-attribute-one-reading law), so they are

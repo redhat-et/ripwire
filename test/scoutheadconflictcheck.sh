@@ -113,5 +113,42 @@ else
     ok "G4: xmllint unavailable — skipped"
 fi
 
+# ── UNAVAILABLE HEAD TREE: an unindexed HEAD is NOT an empty one — every diff against it is refused ────────────
+# computeNamedArm refuses an arm whose base or tip tree could not be materialized (SymTreeIndex::isIndexed). Two
+# other diffs read the memo without that check (CodeRabbit on #295): the head-conflict lane diffed base vs an
+# unavailable HEAD as an empty tree — every base symbol "landed", so armB's beta became a false head conflict —
+# and the working-tree arm diffed the real tree against it, so every symbol read as uncommitted work. The fault
+# is a PATH shim that fails `git archive` of exactly HEAD's commit (a seam that reaches the Release binary too);
+# control: the same shim passing everything through reproduces the healthy answer.
+REALGIT="$( command -v git )"; SHIM="$TMP/gitshim"; mkdir -p "$SHIM"
+cat >"$SHIM/git" <<SHEOF
+#!/usr/bin/env bash
+if [ -n "\${RW_SHIM_FAIL_ARCHIVE:-}" ]; then
+    case " \$* " in *" archive "*"\${RW_SHIM_FAIL_ARCHIVE}"*) exit 128 ;; esac
+fi
+exec "$REALGIT" "\$@"
+SHEOF
+chmod +x "$SHIM/git"
+HEADSHA="$( git -C "$REPO" rev-parse HEAD )"
+printf 'def alpha():\n    return 777\n\ndef beta():\n    return 1\n\ndef gamma():\n    return 3\n' >"$REPO/a.py"   # dirty: the working-tree arm runs
+PATH="$SHIM:$PATH" "$BIN" "$REPO" --merge-scout=armA,armB --no-cache >"$TMP/uc.xml" 2>/dev/null; rcC=$?
+PATH="$SHIM:$PATH" RW_SHIM_FAIL_ARCHIVE="$HEADSHA" "$BIN" "$REPO" --merge-scout=armA,armB --no-cache >"$TMP/um.xml" 2>/dev/null; rcM=$?
+git -C "$REPO" checkout -q -- a.py
+WTREF="$( tr '<' '\n' <"$TMP/uc.xml" | sed -n 's/^arm ref="\([^"]*\)".*/\1/p' | grep -v '^arm[AB]$' | head -1 )"
+if [ "$rcC" = 0 ] && armAttrs "$TMP/uc.xml" armB | grep -q 'head_conflicts="0">' \
+   && [ -n "$WTREF" ] && armAttrs "$TMP/uc.xml" "$WTREF" | grep -q 'ok="1" changed="1"'; then
+    ok "UNAVAIL control: pass-through shim — armB head_conflicts=0 (row carries no head_conflicts_ok=), working tree changed=1 (gamma)"
+    armAttrs "$TMP/um.xml" armB | grep -q 'head_conflicts="0" head_conflicts_ok="0"' \
+        && ok "UNAVAIL: an unavailable HEAD tree leaves armB's head conflicts UNKNOWN (head_conflicts_ok=\"0\"), not a false beta row" \
+        || no "UNAVAIL: head-conflict lane diffed an unavailable HEAD as empty (exit $rcM): $( armAttrs "$TMP/um.xml" armB )"
+    armAttrs "$TMP/um.xml" "$WTREF" | grep -q 'ok="0" changed="0"' \
+        && ok "UNAVAIL: the working-tree arm refuses an unavailable HEAD (ok=\"0\" changed=\"0\"), not every symbol as new work" \
+        || no "UNAVAIL: working-tree arm diffed against an unavailable HEAD: $( armAttrs "$TMP/um.xml" "$WTREF" )"
+    grep -q 'head_conflicts_ok="0" (absent' "$TMP/um.xml" \
+        && ok "UNAVAIL: the legend defines head_conflicts_ok=" || no "UNAVAIL: head_conflicts_ok= emitted with no definition in the legend"
+else
+    no "UNAVAIL control: the pass-through shim run is not the healthy answer (exit $rcC) — the mutation is void: $( armAttrs "$TMP/uc.xml" armB ) / ${WTREF:-no working-tree arm}"
+fi
+
 [ "$fail" = 0 ] && { echo "ALL PASS"; exit 0; }
 echo "FAILURES"; exit 1

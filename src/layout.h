@@ -1025,6 +1025,18 @@ struct LayoutResult
     // the refusal can say "this is an enum, --layout models structs" instead of silently degrading to a
     // confident modeled="1" zero-field struct, or falling through to the generic bodiless-candidate message.
     std::size_t             enumCandidates = 0;
+    // Definitions whose FILE could not be read when the verb ran (removed, or unreadable since it was indexed). They
+    // are absent from defs=/mirror=, so the root says so with unreadable="N" — a mirror="single" beside it is one
+    // definition READ, not one definition that exists. This struct is the DISCLOSE sink for that degrade.
+    std::size_t             unreadableDefs = 0;
+    enum class DisclosureWhy : std::uint8_t
+    {
+        UnreadableFile,
+    };
+    void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
+    {
+        ++unreadableDefs;
+    }
 };
 
 // The verb's own verdict. A definition that could NOT be modelled is not a break — there is no number to
@@ -2627,7 +2639,7 @@ inline LayoutResult computeLayout( const IngestResult& ing, std::string_view spe
             const std::string& src = fileBytes( ctx, s.fileId );
             if( src.empty() )
             {
-                DISCLOSE( "layout: cannot read a definition's file — that definition is omitted" );
+                DISCLOSE( result, LayoutResult::DisclosureWhy::UnreadableFile, "layout: cannot read a definition's file — that definition is omitted" );
                 continue;
             }
             if( !findDefBody( src, name, s.sigStartByte, site ) )
@@ -2804,12 +2816,15 @@ inline void writeLayout( std::FILE* out, const LayoutResult& res, std::string_vi
                        "exits non-zero); kind=\"stub\" is an empty placeholder aggregate and kind=\"spelling\" is the two "
                        "arms of one ifdef block naming the same bytes differently (simd::float4 vs float4) — both reported, "
                        "neither a break. agree=\"0\" on an assert row means a sizeof tripwire contradicts the computed size. "
-                       "Definitions and asserts come from the INDEXED files. -->{}",
+                       "Definitions and asserts come from the INDEXED files.{} -->{}",
+                 res.unreadableDefs != 0 ? " unreadable=\"N\": N same-name definitions whose file could not be read when this ran —"
+                                           " absent from defs= and from the mirror comparison, so mirror= compares only what was read (exit 3: not verified)." : "",
                  rw::rootRelPathsLegend( !rootArg.empty() )  );   // R-E fix (2026-08-19): defines root= (graphlegend.h)
     const std::string layoutRootAttr = rootArg.empty() ? std::string() : ( " root=\"" + ex( rootArg ) + "\"" );
-    rw::emitTo( out, "<layout sym=\"{}\" found=\"{}\" defs=\"{}\" mirror=\"{}\" asserts=\"{}\" conflicts=\"{}\" scanned=\"{}\"{}>",
+    const std::string unreadableAttr = res.unreadableDefs != 0 ? ( " unreadable=\"" + std::to_string( res.unreadableDefs ) + "\"" ) : std::string();
+    rw::emitTo( out, "<layout sym=\"{}\" found=\"{}\" defs=\"{}\" mirror=\"{}\" asserts=\"{}\" conflicts=\"{}\" scanned=\"{}\"{}{}>",
                   ex( res.sym ).c_str(), res.found ? 1 : 0, res.defsFound, mirror, res.asserts.size(),
-                  res.assertConflicts, res.filesScanned, layoutRootAttr.c_str() );
+                  res.assertConflicts, res.filesScanned, unreadableAttr.c_str(), layoutRootAttr.c_str() );
 
     for( const LayoutDef& d : res.defs )
     {

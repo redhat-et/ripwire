@@ -16,7 +16,7 @@ it once, marked `×N`.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 221 | 88 | 120 | **101** |
+| 221 | 88 | 121 | **100** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
 are not counted as caps, and 221 + 7 is the 228 constants this generator parses out of `src/`.
@@ -109,7 +109,7 @@ Discloses: `loops_capped`
 
 ### `src/atoms.h`
 
-Discloses: **none**
+Discloses: `count_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

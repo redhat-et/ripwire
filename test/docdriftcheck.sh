@@ -333,5 +333,64 @@ if command -v xmllint >/dev/null 2>&1; then
                                                || no "L10b: --doc-drift --with-history XML malformed"
 fi
 
+# ── WALK: an on-disk walk that cannot LIST the root is disclosed, not read as "the file is missing" ──────────
+# collectRepoPaths is the fallback that keeps an existing-but-unindexed file from reading missing-file. A root the
+# walk cannot list used to come back as an EMPTY successful walk (libc++/libstdc++ swallow EACCES on the root under
+# skip_permission_denied, and the one-argument DISCLOSE beside it shipped nothing), so an anchor into such a file
+# flipped to a missing-file row with nothing on the root saying why (CodeRabbit on #295). The plain CLI never gets
+# here — main.cpp's rootIsReadable refuses first — so the door is flagscheck.sh (11)'s: a WARM MCP index, the root
+# chmod'd 0311 (open-by-name works, readdir does not) between two doc_drift calls in one session.
+if [ "$( id -u )" = "0" ] || ! command -v python3 >/dev/null 2>&1; then
+    printf '  NOTE  WALK: running as root or without python3 — chmod 0311 cannot block the walk here, skipping\n'
+else
+    WFIX="$TMP/walkfix"; mkdir -p "$WFIX/data"
+    printf 'int liveFn() { return 2; }\n' > "$WFIX/a.cpp"
+    printf 'row one\nrow two\n' > "$WFIX/data/table.txt"
+    printf '# Notes\n\nThe table lives at `data/table.txt:1` and `liveFn` reads it.\n' > "$WFIX/README.md"
+    trap 'chmod -R u+rwx "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
+    WALK_OUT="$( python3 - "$BIN" "$WFIX" <<'PY'
+import sys, subprocess, json, os
+bin_path, fixture = sys.argv[1], sys.argv[2]
+p = subprocess.Popen( [ bin_path, "--mcp" ], stdin = subprocess.PIPE, stdout = subprocess.PIPE,
+                      stderr = subprocess.DEVNULL, text = True, bufsize = 1 )
+def call( req ):
+    p.stdin.write( json.dumps( req ) + "\n" ); p.stdin.flush()
+    return p.stdout.readline()
+def text( raw ):
+    d = json.loads( raw )
+    return "__ERROR__:%s" % d[ "error" ] if "error" in d else d[ "result" ][ "content" ][ 0 ][ "text" ]
+call( { "jsonrpc": "2.0", "id": 1, "method": "initialize" } )
+args = { "path": fixture }
+r1 = call( { "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "doc_drift", "arguments": args } } )
+os.chmod( fixture, 0o311 )   # x-only: open-by-name still works, readdir (the walk) does not
+try:
+    r2 = call( { "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "doc_drift", "arguments": args } } )
+finally:
+    os.chmod( fixture, 0o755 )
+p.stdin.close(); p.terminate()
+print( "CALL1\t" + text( r1 ).replace( "\n", " " ) )
+print( "CALL2\t" + text( r2 ).replace( "\n", " " ) )
+PY
+)"
+    chmod u+rwx "$WFIX" 2>/dev/null
+    W1="$( printf '%s\n' "$WALK_OUT" | grep '^CALL1' | grep -o '<doc-drift [^>]*>' | head -1 )"
+    W2="$( printf '%s\n' "$WALK_OUT" | grep '^CALL2' )"
+    W2ROOT="$( printf '%s' "$W2" | grep -o '<doc-drift [^>]*>' | head -1 )"
+    if [ -n "$W1" ] && printf '%s' "$WALK_OUT" | grep '^CALL1' | grep -q 'r="not-indexed"' && ! printf '%s' "$W1" | grep -q 'disk_walk_failed'; then
+        ok "WALK control: a listable root reads the unindexed data/table.txt as not-indexed, no disk_walk_failed="
+        if [ -z "$W2ROOT" ]; then
+            no "WALK: the second (0311) call produced no <doc-drift> root — the door moved: $( printf '%s' "$W2" | head -c 200 )"
+        elif printf '%s' "$W2ROOT" | grep -q 'disk_walk_failed="1"'; then
+            ok "WALK: a root the on-disk walk cannot list is disclosed on the root (disk_walk_failed=\"1\")"
+            printf '%s' "$W2" | grep -q 'disk_walk_failed="1" means\|disk_walk_failed=1: the root could not be listed' \
+                && ok "WALK: the clause defining disk_walk_failed= rides with it" || no "WALK: disk_walk_failed= emitted with no clause defining it"
+        else
+            no "WALK: the on-disk walk failed with nothing on the root saying so: $W2ROOT"
+        fi
+    else
+        no "WALK control: the listable-root call did not read not-indexed cleanly: $( printf '%s\n' "$WALK_OUT" | grep '^CALL1' | head -c 300 )"
+    fi
+fi
+
 [ $fail -eq 0 ] && echo "docdriftcheck: ALL PASS" || echo "docdriftcheck: FAILURES"
 exit $fail

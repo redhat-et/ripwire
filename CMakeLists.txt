@@ -260,6 +260,7 @@ set(_ripwire_query_names
   rust
   swift
   toml
+  tsx
   typescript
   yaml)
 set(_ripwire_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")

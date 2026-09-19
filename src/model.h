@@ -1085,6 +1085,11 @@ struct CrawlSkips
     // invariant's drop classes — a refused file is already inside indexed=.
     std::vector<SkippedFile>  nestRefused;          // capped rows, path-sorted
     std::uint64_t             nestRefusedFiles = 0; // EXACT count (rows may be fewer)
+    // The second PARSE-time class, filled beside nestRefused: indexed files whose facts are PARTIAL — an extraction pass
+    // stopped at a nesting bound, the grammar's tags query was unavailable, or the extraction threw part-way (the facts
+    // before the throw are kept). Inside indexed=, never cached as whole; NOT one of the accounting invariant's drop classes.
+    std::vector<SkippedFile>  extractPartial;       // capped rows, path-sorted
+    std::uint64_t             extractPartialFiles = 0; // EXACT count (rows may be fewer)
 
     // §SEC1 — files the crawl REFUSED because a symlink took them out of the root they were crawled under
     // (ingest.h's crawl-boundary rule; darkflags.h's CMake walk applies the same rule to its own harvest).
@@ -1100,6 +1105,15 @@ struct CrawlSkips
     // IN-ROOT link, never the target, for the same reason.
     std::vector<SkippedFile>  escaped;              // capped rows, path-sorted (bytes 0 = not measured)
     std::uint64_t             escapedFiles    = 0;  // EXACT count (rows may be fewer)
+    // The DISCLOSE sink for a file the crawl refused because its link left the root: the exact count escaped_root= prints.
+    enum class DisclosureWhy : std::uint8_t
+    {
+        SymlinkEscapesRoot,
+    };
+    void disclose( DisclosureWhy ) noexcept
+    {
+        ++escapedFiles;
+    }
 };
 
 // §L1 — PARSE HEALTH: a per-indexed-file record of how much of the file the parser actually understood,

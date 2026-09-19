@@ -326,5 +326,42 @@ grep -qE 'budget="-|target, ceiling -' "$HUGE" \
     || ok "F5: header carries no negative budget/ceiling value"
 if xmllint --noout "$HUGE" 2>/dev/null; then ok "F5: --token-budget=3000000000 bundle is xmllint-clean"; else no "F5: --token-budget=3000000000 bundle is not well-formed"; fi
 
+# ── RENDER: a section whose render FAILS is marked, named on the root, and never breaks the JSON ─────────────
+# packTaskRenderToString kept only Rendered::text, so a failed ranking/bodies render was an empty string: the XML
+# lost the section with a ledger saying "ranking: full", and the JSON wrote `"ranking":` with no value — not JSON
+# (CodeRabbit on #295). INFRA_FAULT_RENDER_EMIT_THROW=1 (infra/emit.h) makes every renderToString fail; it is
+# compiled out under NDEBUG together with the DISCLOSE trace, so the trace on stderr is the proof the switch is live.
+RFX="$TMP/renderfix"; mkdir -p "$RFX"
+printf 'int helper( int x )\n{\n    return x * 2;\n}\nint compute( int y )\n{\n    return helper( y ) + 1;\n}\n' > "$RFX/a.cpp"
+"$BIN" "$RFX" --pack-task="compute helper" --no-cache >"$TMP/rf_ok.xml" 2>/dev/null; rcOK=$?
+INFRA_FAULT_RENDER_EMIT_THROW=1 "$BIN" "$RFX" --pack-task="compute helper" --no-cache >"$TMP/rf.xml" 2>"$TMP/rf.err"; rcX=$?
+INFRA_FAULT_RENDER_EMIT_THROW=1 "$BIN" "$RFX" --pack-task="compute helper" --json --no-cache >"$TMP/rf.json" 2>/dev/null; rcJ=$?
+if [ "$rcOK" = 0 ] && grep -q '<sigs' "$TMP/rf_ok.xml" && ! grep -q 'render_failed' "$TMP/rf_ok.xml"; then
+    ok "RENDER control: an unfaulted bundle has its sections and no render_failed="
+else
+    no "RENDER control: the unfaulted bundle is not clean (exit $rcOK)"
+fi
+if grep -q 'emitter THREW' "$TMP/rf.err"; then
+    RFROOT="$( grep -o '<ctx [^>]*>' "$TMP/rf.xml" | head -1 )"
+    { [ "$rcX" = 0 ] && printf '%s' "$RFROOT" | grep -q 'render_failed="ranking,bodies' ; } \
+        && ok "RENDER: the root names the sections whose render failed ($( printf '%s' "$RFROOT" | grep -o 'render_failed="[^"]*"' ))" \
+        || no "RENDER: a failed section render left no render_failed= on the root (exit $rcX): $RFROOT"
+    grep -q '<sigs render_failed="1">' "$TMP/rf.xml" && grep -q '<bodies [^>]*render_failed="1"' "$TMP/rf.xml" \
+        && ok "RENDER: the ranking and bodies sections are present and marked render_failed=\"1\"" \
+        || no "RENDER: a failed section is absent or unmarked: $( grep -o '<sigs[^>]*>\|<bodies[^>]*>' "$TMP/rf.xml" | tr '\n' ' ' )"
+    if xmllint --noout "$TMP/rf.xml" 2>/dev/null; then
+        ok "RENDER: the faulted bundle is well-formed XML"
+    else
+        no "RENDER: the faulted bundle fails xmllint"
+    fi
+    if [ "$rcJ" = 0 ] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("ranking",1) is None and d.get("bodies",1) is None and "ranking" in d.get("render_failed","") else 1)' "$TMP/rf.json" 2>/dev/null; then
+        ok "RENDER: --json stays valid JSON: ranking/bodies null, render_failed names them"
+    else
+        no "RENDER: --json under a failed render is not valid JSON or does not say so (exit $rcJ): $( head -c 300 "$TMP/rf.json" )"
+    fi
+else
+    printf '  INFO  RENDER: this binary compiles fault switches out (NDEBUG); the failed-render arm is proved on the plain-flavour leg\n'
+fi
+
 echo
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

@@ -302,6 +302,7 @@ every input the tool ever sees, costs nothing in release, and tells the optimize
 | `VALIDATE( e[, "why"] )` | nothing: e is external input | evaluated, one compare | the condition of the refusing or degrading `if` | invariants |
 | `DISCLOSE( sink, why[, "msg"] )` | the answer carries its incompleteness | `sink.disclose( why )` runs | every degrade: the sink is the struct whose field the emitter reads; `why` is its own scoped enum | — |
 | `DISCLOSE( Diagnostics::answerUnchanged, "reason" )` | this degrade changes cost, never content | nothing, but the reason is listed by the gate | a rejected or unwritable cache, a same-bytes fallback, a lock skipped under a re-check | dropped/truncated/guessed rows, stored partial facts, refusals, unreachable guards |
+| `DISCLOSE( Diagnostics::answerRefused, "reason" )` | this degrade refuses the answer by name | nothing, but the reason is listed by the gate | a path that, in every build, prints no answer and says why (non-zero exit + stderr, an MCP error, a query's named failure) | anything that still prints part of an answer |
 | `DISCLOSE( "msg" )` | **nothing to the user**: a debug trace | nothing | existing sites only, until converted (ratchet) | any new degrade |
 | `PANIC( "why" )` | we cannot continue | report and abort | a corrupt state | anything recoverable |
 
@@ -316,9 +317,14 @@ every input the tool ever sees, costs nothing in release, and tells the optimize
   - `docs/ARCHITECTURE.md`: "A disclosure that lives only in an assertion is a disclosure that does not ship."
   - If the degrade genuinely cannot change this answer (a cache rejected and rebuilt, a cache write that only
     makes the next run cold), write `DISCLOSE( Diagnostics::answerUnchanged, "why this answer is unchanged" )`.
-    The gate prints that reason on every run.
+    If it REFUSES the answer — no document at all, and the cause named where the caller reads it (stderr with a
+    non-zero exit, an MCP error, a query's named failure) — write `DISCLOSE( Diagnostics::answerRefused, "how" )`.
+    The gate prints both kinds of reason on every run. Neither is for a path that still prints an answer: if any
+    answer goes out, it needs a real sink, and if the document has no field for the fact yet, ADD one (absent on the
+    happy path, defined in the same document's legend and in `compactlegend.h`) — never leave the degrade to the trace.
   - The one-argument `DISCLOSE( msg )` is a debug trace that ships nothing. It remains only on sites not yet
-    converted, and `test/selfcheckcheck.sh` refuses a new one.
+    converted, and `test/selfcheckcheck.sh` refuses a new one (arm R: the count may only go down), and arm S proves
+    the sink form still records in an `-O2 -DNDEBUG` build — the flavour users run.
 - **External input** is checked with `VALIDATE` in the condition of the refusal, never `ASSUME`d.
 - A **corrupt invariant** is a `PANIC`.
 - **Never `ASSUME( false )` (or an `EXPECTS`/`ENSURES` of false) on a degrade path.** In release the assert
@@ -409,6 +415,10 @@ the declaration and every `os::name(` call expand before the compiler sees a fun
 sites, like the `O_*`/`X_OK`/`PATH_MAX` constants, and `os.h`'s Windows branch defines them. `test/osswitchcheck.sh`
 refuses all of the above outside `os.h`; its one allowlisted file is `src/infra/profilePmc.h`, the profiler's
 undocumented-ABI counter backends.
+
+**Platforms.** Unix, Linux and macOS come first; native Windows is second, with clang-cl the primary compiler and
+MSVC `cl.exe` also required to build. A `cl.exe` portability problem is worth fixing, but it does not block a change
+to a POSIX-only code path.
 
 ### Aliasing: spelling, placement, contract
 

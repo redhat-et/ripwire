@@ -663,7 +663,12 @@ namespace mcpedit
         {
             const std::string lockPath = editLockPath( targetPath );
             fd = os::open( lockPath.c_str(), O_RDWR | O_CREAT, 0644 );
-            if( fd < 0 ) { DISCLOSE( "edit lockfile open failed; proceeding lock-free (re-check still guards)" ); return; }
+            if( fd < 0 )
+            {
+                DISCLOSE( Diagnostics::answerUnchanged, "the edit re-checks the file before its rename, which still refuses a stale write",
+                          "edit lockfile open failed; proceeding lock-free (re-check still guards)" );
+                return;
+            }
 
             // ~200 ms bounded acquire: 20 tries × 10 ms. If a peer holds it longer, refuse rather than hang or
             // proceed lock-free — the latter can lose a cooperating writer's committed update.
@@ -681,12 +686,12 @@ namespace mcpedit
             // `contended` is disclosed to the caller in full via runEditVerb's -32603 message below — a real
             // refusal, not a degrade, so it needs no debug-trace-only DISCLOSE of its own here (Diagnostics.h
             // §4b: the one-argument form tells the release user nothing; the refusal already tells them
-            // everything). Only the still-degrading, still-sink-less case keeps its trace, unchanged from before
-            // this branch split the two outcomes apart — this DISCLOSE call, and its ratchet count, is the same
-            // one main already carries.
+            // everything). Only the still-degrading case keeps a DISCLOSE — the answerUnchanged form, since the
+            // re-check before the rename is what still guards the answer.
             if( !contended && !locked )
             {
-                DISCLOSE( "edit lock unsupported on this filesystem; proceeding lock-free (re-check still guards)" );
+                DISCLOSE( Diagnostics::answerUnchanged, "the edit re-checks the file before its rename, which still refuses a stale write",
+                          "edit lock unsupported on this filesystem; proceeding lock-free (re-check still guards)" );
             }
         }
 

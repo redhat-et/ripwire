@@ -82,7 +82,46 @@ cat >"$REPO/pyproject.toml" <<'TOML'
 [tool.poetry]
 name = "router-fixture"
 TOML
-git -C "$REPO" add router.cpp package.json storage/queue.cpp widget.hxx pyproject.toml
+# Round-1 L4 (first-verb cards for test-coverage/change-impact/reach-flow): the round's own mining and
+# paraphrase questions name file paths this fixture must actually index, or --affected/--situ's own
+# refusal on an unindexed path (measured: exit 1) would make every positive arm below red for the wrong
+# reason. Paths echo the round's rocksdb-flavoured mining/paraphrase corpus (PLAN_OUTPUT_ROUTING_LOOP
+# 11_round1_PREREG.md §E) so the SAME task strings this round measured against a real checkout also route
+# here; the symbol names are fresh (no collision with router.cpp/storage/queue.cpp/widget.hxx above).
+mkdir -p "$REPO/db/db_impl" "$REPO/db/wide" "$REPO/table" "$REPO/cache" "$REPO/util"
+cat >"$REPO/db/write_batch.cc" <<'SRC'
+int writeBatchAppend() { return 1; }
+SRC
+cat >"$REPO/db/wal_manager.cc" <<'SRC'
+int walManagerFlush() { return 1; }
+SRC
+cat >"$REPO/db/db_impl/db_impl.cc" <<'SRC'
+int dbImplWriteRow() { return 1; }
+SRC
+cat >"$REPO/db/db_iter.cc" <<'SRC'
+int dbIterNextRow() { return 1; }
+SRC
+cat >"$REPO/db/wide/wide_columns_helper.h" <<'SRC'
+int wideColumnsConvert();
+SRC
+cat >"$REPO/table/get_context.cc" <<'SRC'
+int getContextLookup() { return 1; }
+SRC
+cat >"$REPO/table/block_fetcher.cc" <<'SRC'
+int blockFetcherFetch() { return 1; }
+SRC
+cat >"$REPO/table/iter_heap.h" <<'SRC'
+int iterHeapUse();
+SRC
+cat >"$REPO/cache/lru_cache.cc" <<'SRC'
+int lruCacheGet() { return 1; }
+SRC
+cat >"$REPO/util/heap.h" <<'SRC'
+int heapPushEntry();
+SRC
+git -C "$REPO" add router.cpp package.json storage/queue.cpp widget.hxx pyproject.toml \
+    db/write_batch.cc db/wal_manager.cc db/db_impl/db_impl.cc db/db_iter.cc db/wide/wide_columns_helper.h \
+    table/get_context.cc table/block_fetcher.cc table/iter_heap.h cache/lru_cache.cc util/heap.h
 git -C "$REPO" commit -qm base
 routeRaw(){ "$BIN" "$REPO" --no-cache --help-task="$1" 2>"$TMP/err"; }
 # The document opens with its LEGEND, and the legend names the attributes it defines (next=, <run>, …).
@@ -620,6 +659,87 @@ esac
 
 EVAL="$( python3 "$ROOT/bench/taskroute_eval.py" --bin "$BIN" --corpus "$ROOT/test/taskroutefix/prompts.tsv" --split test 2>&1 )"; rc=$?
 if [ "$rc" -eq 0 ]; then ok "held-out command-routing floors ($EVAL)"; else no "held-out command-routing floors failed: $EVAL"; fi
+
+# ── round-1 L4: first-verb cards for the four shapes the router used to abstain on (PLAN_OUTPUT_ROUTING_
+# LOOP_2026-09-12_REPORTS/11_round1_PREREG.md §E, restated) ─────────────────────────────────────────────
+# The mining finding (--help-task over the round's 60-question corpus): the router recommended NOTHING on
+# all 48 S1-S4 instances of "which tests cover F", "if I change F what else has to change", "how does A
+# reach B" and "where is X implemented" — every arm below is RED against the pre-lane binary (origin/
+# integration/train-6, 7d72e723): each of TC1/CI1/RF1/LI1 abstained with score="0" there.
+TC1="$( route 'Which tests cover db/write_batch.cc?' )"
+case "$TC1" in *'status="recommend"'*'intent="test-coverage"'*'--affected='*'db/write_batch.cc'*) ok "S3 mining template -> --affected=F";; *) no "test-coverage route wrong: $TC1";; esac
+TC2="$( route 'is table/block_fetcher.cc covered by any test' )"
+case "$TC2" in *'intent="test-coverage"'*'--affected='*'table/block_fetcher.cc'*) ok "S3 paraphrase (covered by any test) -> --affected=F";; *) no "test-coverage paraphrase missed: $TC2";; esac
+TC0="$( route 'Which tests cover db/does_not_exist.cc?' )"
+case "$TC0" in *'--affected='*) no "test-coverage recommended a file this build never indexed: $TC0";; *) ok "test-coverage abstains on a file this build never indexed (the verb would refuse it)";; esac
+
+CI1="$( route 'If I change db/wal_manager.cc, what else has to change with it?' )"
+case "$CI1" in *'status="recommend"'*'intent="change-impact"'*'--situ='*'db/wal_manager.cc'*) ok "S2 mining template -> --situ=F";; *) no "change-impact route wrong: $CI1";; esac
+case "$CI1" in *'--legend=compact'*) no "change-impact illegally carries --legend=compact on a --situ command: $CI1";; *) ok "change-impact carries no --legend=compact (the verb refuses the flag)";; esac
+CI2="$( route 'blast radius of modifying table/get_context.cc' )"
+case "$CI2" in *'intent="change-impact"'*'--situ='*'table/get_context.cc'*) ok "S2 paraphrase (blast radius) -> --situ=F";; *) no "change-impact paraphrase missed: $CI2";; esac
+CI0="$( route 'If I change db/does_not_exist.cc, what else has to change with it?' )"
+case "$CI0" in *'--situ='*) no "change-impact recommended a file this build never indexed: $CI0";; *) ok "change-impact abstains on a file this build never indexed";; esac
+
+RF1="$( route 'How does db/db_iter.cc reach db/wide/wide_columns_helper.h?' )"
+case "$RF1" in *'status="recommend"'*'intent="reach-flow"'*'--for='*) ok "S4 mining template -> --for=task";; *) no "reach-flow route wrong: $RF1";; esac
+RF2="$( route 'how is util/heap.h used by table/iter_heap.h' )"
+case "$RF2" in *'intent="reach-flow"'*'--for='*) ok "S4 paraphrase (used by) -> --for=task";; *) no "reach-flow paraphrase missed: $RF2";; esac
+RF0="$( route 'how does targetSymbol reach the cache layer' )"
+case "$RF0" in *'intent="reach-flow"'*) no "reach-flow fired with fewer than two indexed files named: $RF0";; *) ok "reach-flow needs two indexed files, not reach/call-chain wording alone";; esac
+
+LI1="$( route 'Where is the write batch implemented?' )"
+case "$LI1" in *'status="recommend"'*'intent="locate-implementation"'*'--for='*) ok "S1 mining template -> --for=task";; *) no "locate-implementation route wrong: $LI1";; esac
+LI2="$( route 'which file implements the WRITE_STALL start time fix' )"
+case "$LI2" in *'intent="locate-implementation"'*'--for='*) ok "S1 paraphrase (which file implements) -> --for=task";; *) no "locate-implementation paraphrase missed: $LI2";; esac
+LI0="$( route 'where is the nearest coffee shop' )"
+case "$LI0" in *'intent="locate-implementation"'*) no "'where is' alone (no 'implemented') minted locate-implementation: $LI0";; *) ok "'where is' alone never mints locate-implementation without 'implemented'";; esac
+
+# ── PARAPHRASE ARM (Amendment 1 §E, wording frozen at pre-registration) — every prompt below is written
+# OUTSIDE derive_questions_window.py's four generation templates on purpose: this arm measures
+# generalisation, not template lookup. Pass condition, pre-registered: recommend-with-the-registered-verb
+# >= 2/3 per shape, and 0 wrong-verb recommendations overall (an abstention on the third of each triple
+# is an acceptable miss — it costs another call, never a wrong one).
+PARA_S3=( 'what test files exercise db/write_batch.cc'
+          'I touched cache/lru_cache.cc — which unit tests should I run?'
+          'is table/block_fetcher.cc covered by any test' )
+PARA_S2=( 'what breaks if I edit db/wal_manager.cc'
+          'blast radius of modifying table/get_context.cc'
+          'what depends on db/db_impl/db_impl.cc, what do I need to update alongside it' )
+PARA_S1=( 'which file implements the WRITE_STALL start time fix'
+          'find the code for MultiGet skip_memtable handling'
+          'where does rocksdb record persist_user_defined_timestamps in the manifest' )
+PARA_S4=( 'call chain from db/db_iter.cc into db/wide/wide_columns_helper.h'
+          'how is util/heap.h used by table/iter_heap.h' )
+PARA_WRONG=0
+para_check(){
+    local shape="$1" acceptRe="$2"; shift 2
+    local total=0 pass=0 p out status intent
+    for p in "$@"; do
+        total=$(( total + 1 ))
+        out="$( route "$p" )"
+        status="$( printf '%s' "$out" | grep -o 'status="[a-z]*"' | head -1 )"
+        intent="$( printf '%s' "$out" | grep -o 'intent="[a-zA-Z-]*"' | head -1 )"
+        if [ "$status" = 'status="recommend"' ] && printf '%s' "$intent" | grep -qE "$acceptRe"; then
+            pass=$(( pass + 1 ))
+        elif [ "$status" = 'status="recommend"' ]; then
+            PARA_WRONG=$(( PARA_WRONG + 1 ))
+            printf '        WRONG-VERB (%s): %s -> %s\n' "$shape" "$p" "$intent"
+        fi
+    done
+    if [ "$pass" -ge 2 ]; then
+        ok "paraphrase arm $shape: $pass/$total recommend-with-registered-verb (>= 2/3 floor)"
+    else
+        no "paraphrase arm $shape: only $pass/$total recommend-with-registered-verb (< 2/3 floor)"
+    fi
+}
+para_check S3 'intent="test-coverage"' "${PARA_S3[@]}"
+para_check S2 'intent="change-impact"' "${PARA_S2[@]}"
+para_check S1 'intent="locate-implementation"|intent="locate-task"' "${PARA_S1[@]}"
+para_check S4 'intent="reach-flow"' "${PARA_S4[@]}"
+[ "$PARA_WRONG" -eq 0 ] \
+    && ok "paraphrase arm: 0 wrong-verb recommendations across all 12 (self-reject floor)" \
+    || no "paraphrase arm: $PARA_WRONG wrong-verb recommendation(s) (listed above)"
 
 # ── the document defines what it prints (2026-09-13 review) ──────────────────────────────────────────
 # The default dialect carried NO legend: every attribute on its only screen was undefined, and the compact

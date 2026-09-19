@@ -370,13 +370,13 @@ inline std::string mcpUnknownFieldRefusal( const std::string& scope, std::string
     return {};
 }
 
-// Capture one FILE*-writing renderer into a string — infra/emit.h's ONE renderToString seam with this
-// surface's own degrade wording. It kept its own copy of the memstream dance until the review of #214
+// Capture one FILE*-writing renderer into a string — infra/emit.h's ONE renderToString seam (whose Rendered sink
+// discloses a failure as ok == false; this surface keeps only the text). It kept its own copy of the memstream dance until the review of #214
 // gave the tree a single seam for it; the contract is unchanged (an allocation failure is an empty string,
 // never a NULL deref), and it now also ALERTS, which this copy never did.
 inline std::string captureXml( const std::function<void( std::FILE* )>& render )
 {
-    return rw::renderToString( render, "mcp: open_memstream failed — this verb answers empty" ).text;
+    return rw::renderToString( render ).text;
 }
 
 // The seven verbs below that render into their own memstream (for, owners, exemplar, impact, uses, path_between,
@@ -388,7 +388,8 @@ inline std::optional<std::string> mcpAnswerText( rw::MemoryStream& stream )
     const rw::MemoryStreamBytes answer = stream.finish();
     if( !answer.isWhole )
     {
-        DISCLOSE( "mcp: an answer buffer did not finish whole — this verb answers as if the buffer never opened" );
+        DISCLOSE( Diagnostics::answerRefused, "every caller answers the MCP internal error (-32603) it gives a failed open; no short answer is served",
+                  "mcp: an answer buffer did not finish whole — this verb answers as if the buffer never opened" );
         return std::nullopt;
     }
     return std::string( answer.bytes );
@@ -4000,7 +4001,8 @@ inline SliceReply sliceText( const std::string& root, const std::string& symbol,
     }
     else
     {
-        DISCLOSE( "mcp slice: definition file unreadable" );
+        DISCLOSE( Diagnostics::answerRefused, "the MCP slice answers an error naming the unreadable file; no slice is served",
+                  "mcp slice: definition file unreadable" );
         return SliceReply{ {}, "cannot read " + path + " — the slice re-parses the definition's file and has nothing to walk" };
     }
 
@@ -4013,7 +4015,8 @@ inline SliceReply sliceText( const std::string& root, const std::string& symbol,
     }
     if( !scan.parseOk )
     {
-        DISCLOSE( "mcp slice: definition re-parse failed" );
+        DISCLOSE( Diagnostics::answerRefused, "the MCP slice answers an error naming the file it could not re-parse; no slice is served",
+                  "mcp slice: definition re-parse failed" );
         return SliceReply{ {}, "could not re-parse " + path + " (grammar missing, or the indexed span no longer fits "
                                "the file — a stale index; call any read verb to refresh, or check the CLI --doctor)" };
     }
@@ -5098,7 +5101,8 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         // Unreachable by construction: unknownSubVerbRefusal above already refused anything outside
         // kBatchServedVerbs + kBatchVerbAliases, and every member of those has an arm. If a verb joins the
         // registry without one, THIS is the honest failure — never a silent ok="1" with an empty payload.
-        DISCLOSE( "batch: a verb in the served registry has no dispatch arm" );
+        DISCLOSE( Diagnostics::answerRefused, "the batch sub-query is refused with an explicit bug message, never an empty ok",
+                  "batch: a verb in the served registry has no dispatch arm" );
         return bad( "batch cannot answer '" + r.verb + "' — it is in the served registry but has no dispatch "
                     "arm (a ripwire bug: kBatchServedVerbs and runBatchSub have drifted)" );
     }

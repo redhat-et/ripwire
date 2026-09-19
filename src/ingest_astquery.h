@@ -452,7 +452,8 @@ GrammarQueries compileGrammarQueries( const TSLanguage* g, const std::vector<Ast
             {
                 ts_query_delete( comb );
             }
-            DISCLOSE( "astQuery: combined per-grammar query did not compile - falling back to one tree walk per spec" );
+            DISCLOSE( Diagnostics::answerUnchanged, "the per-spec walks emit the same captures, total-key sorted: only slower",
+                      "astQuery: combined per-grammar query did not compile - falling back to one tree walk per spec" );
         }
     }
     return gqs;
@@ -1288,20 +1289,24 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
 }
 
 // R2: the grammars the pattern surface serves, derived from kLangTable so it can never disagree with the
-// crawler about which extension is which language. One row per distinct grammar OBJECT — .ts and .tsx are
-// two objects sharing the name "typescript", and .cu's CUDA grammar shares "cpp", and BOTH need their own
-// compiled program even though the disclosure prints one name. Membership is decided by pattern.h's
-// template table: a family with no wrap templates is a family this verb does not serve, stated in exactly
-// one place. kLangTable order makes the result deterministic without a sort.
+// crawler about which extension is which language. One row per distinct grammar OBJECT — .cu's CUDA
+// grammar shares querySub "cpp" with .cpp, and both need their own compiled program even though the
+// disclosure used to print one name for both. (.ts and .tsx were the other example of this until #285:
+// tree_sitter_tsx used to borrow querySub "typescript" the same way CUDA borrows "cpp" — but #285 needed
+// JSX-only node types in .tsx's query, which do not exist in the plain typescript grammar, so .tsx now has
+// its own querySub "tsx" — see kLangTable's .tsx row. The two are no longer a shared-querySub pair; cpp/cuda
+// is the mechanism's one surviving real example.) Membership is decided by pattern.h's template table: a
+// family with no wrap templates is a family this verb does not serve, stated in exactly one place.
+// kLangTable order makes the result deterministic without a sort.
 // The DISCLOSURE label for one grammar object, given the labels already handed out. querySub is the
-// TEMPLATE key and is deliberately shared by dialects — the C++ tags.scm and the C++ pattern templates are
-// what compile against tree_sitter_cuda, and tree_sitter_tsx borrows "typescript" the same way — but a
-// shared disclosure NAME is how V-3 happened: `grammars="cpp"` asserted the C++ grammar resolved on a run
-// where only the CUDA object had, while eligible_files=, keyed on the object, counted the .cpp file as
-// unscanned. The first object to claim a querySub keeps it verbatim (so every single-dialect language's
+// TEMPLATE key and is deliberately shared by dialects that genuinely have nothing pattern-relevant to
+// diverge on — the C++ tags.scm and the C++ pattern templates are what compile against tree_sitter_cuda —
+// but a shared disclosure NAME is how V-3 happened: `grammars="cpp"` asserted the C++ grammar resolved on
+// a run where only the CUDA object had, while eligible_files=, keyed on the object, counted the .cpp file
+// as unscanned. The first object to claim a querySub keeps it verbatim (so every single-dialect language's
 // output is unchanged); a later object under the same key is qualified by the extension that introduced
-// it — "cpp/cu", "typescript/tsx". DERIVED, not enumerated, so a dialect grammar added tomorrow cannot
-// silently re-collide by being forgotten in a table.
+// it — "cpp/cu". DERIVED, not enumerated, so a dialect grammar added tomorrow cannot silently re-collide by
+// being forgotten in a table.
 static std::string patternGrammarLabel( std::string_view querySub, std::string_view ext, const std::vector<pattern::GrammarRow>& taken )
 {
     bool claimed = false;
@@ -1649,7 +1654,8 @@ inline bool spanTierMemoLoad( const std::string& diskPath, const StatInfo& now, 
     const bool tiersInRange = std::all_of( loaded.tier.begin(), loaded.tier.end(), []( const std::uint8_t tier ) noexcept { return tier < kSpanTierCount; } );
     if( !VALIDATE( tiersInRange ) )
     {
-        DISCLOSE( "grep: span-tier memo carries a tier byte past SpanTier — memo refused, the file is re-parsed" );
+        DISCLOSE( Diagnostics::answerUnchanged, "the memo is refused and the file re-parsed: the tiers are recomputed, never guessed",
+                  "grep: span-tier memo carries a tier byte past SpanTier — memo refused, the file is re-parsed" );
         return false;
     }
     loaded.isParsed = true;

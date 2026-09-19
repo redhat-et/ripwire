@@ -239,6 +239,7 @@ inline void mergeCrawlDisclosures( IngestResult& m, IngestResult& part, const Wo
     relabel( part.crawlSkips.ignored,        m.crawlSkips.ignored );          // §N6-C, per root, labeled like its siblings
     relabel( part.crawlSkips.ignoredDirRows, m.crawlSkips.ignoredDirRows );   // §N6-C
     relabel( part.crawlSkips.nestRefused,    m.crawlSkips.nestRefused );      // the Kotlin nesting guard's refusals
+    relabel( part.crawlSkips.extractPartial, m.crawlSkips.extractPartial );   // files whose extraction came back partial
     // §SEC1 — the crawl boundary is applied PER ROOT (a file is bounded by the root it was crawled under, not
     // by the workspace's union), so its rows relabel and its count sums exactly like every sibling above. A
     // link in root A pointing into root B is an escape from A; B's own copy is indexed under B, where it lives.
@@ -246,6 +247,7 @@ inline void mergeCrawlDisclosures( IngestResult& m, IngestResult& part, const Wo
 
     m.crawlSkips.escapedFiles     += part.crawlSkips.escapedFiles;
     m.crawlSkips.nestRefusedFiles += part.crawlSkips.nestRefusedFiles;
+    m.crawlSkips.extractPartialFiles += part.crawlSkips.extractPartialFiles;
     m.crawlSkips.excludedFiles    += part.crawlSkips.excludedFiles;
     m.crawlSkips.unsupportedFiles += part.crawlSkips.unsupportedFiles;
     m.crawlSkips.excludedDirs     += part.crawlSkips.excludedDirs;

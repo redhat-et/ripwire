@@ -502,7 +502,8 @@ inline ArchRules parseArchRules( const std::string& path )
     const auto badLine = [ & ]( std::size_t lineNo, std::string_view why ) -> bool
     {
         rw::emitTo( stderr, "ripwire: --arch: {}:{}: {} — rules file rejected\n", path.c_str(), lineNo, why );
-        DISCLOSE( "arch: malformed rules line — rules file rejected" );
+        DISCLOSE( Diagnostics::answerRefused, "--arch exits 1 with path:line and the reason on stderr; no report is printed",
+                  "arch: malformed rules line — rules file rejected" );
         return false;
     };
 
@@ -751,34 +752,47 @@ inline std::string archBaselinePath( const std::string& /*rulesPath*/ ) noexcept
     return ".ripwire_arch_baseline";
 }
 
-// THE ONE PLACE THE ARCH BASELINE SIDECAR IS READ — openArchBaselineSidecar's other half, with the same answer
-// to a link: O_NOFOLLOW, refused in the open itself. A link here used to be followed, so the link chose which
-// file's hashes were accepted as debt. Why an in-tree link is refused too is round 3 of src/pathguard.h.
-// noexcept like its neighbours, with the same allocation exposure openArchBaselineSidecar describes.
-inline rw::pathguard::NoFollowRead readArchBaselineSidecar( const std::string& sidecarPath ) noexcept
-{
-    rw::pathguard::NoFollowRead sidecar = rw::pathguard::openNoFollowRead( "the arch baseline sidecar", sidecarPath );
-    if( sidecar.refused ) { DISCLOSE( "arch: refusing to read the arch baseline sidecar through a symlink" ); }
-    return sidecar;
-}
-
 // What archReadBaseline found: the violation hashes committed as accepted debt, and whether there was a sidecar
 // to read at all. `present` is the open, not the hash count — a sidecar holding only its comment header accepts
 // nothing and is still a baseline in force. It replaces a SECOND open of the same path that the arch verb used
 // to make with a bare stream just to ask that question; that open followed a link as well and read nothing, so
 // no check on the verb's output could ever have seen it.
+//
+// It is also the DISCLOSE sink for the read: a link at the name is refused unopened, and `symlinkRefused` is what the
+// verb prints as baseline="symlink-refused" — "no baseline" and "a baseline refused unopened" are different answers
+// (every violation reads as new either way, and only the attribute says why).
 struct ArchBaselineRead
 {
+    enum class DisclosureWhy : std::uint8_t
+    {
+        SymlinkRefused,
+    };
     std::unordered_set<std::uint64_t> hashes;
-    bool                              present = false;
+    bool                              present        = false;
+    bool                              symlinkRefused = false;
+    void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
+    {
+        symlinkRefused = true;
+    }
 };
 
+// THE ONE PLACE THE ARCH BASELINE SIDECAR IS READ — openArchBaselineSidecar's other half, with the same answer
+// to a link: O_NOFOLLOW, refused in the open itself. A link here used to be followed, so the link chose which
+// file's hashes were accepted as debt. Why an in-tree link is refused too is round 3 of src/pathguard.h.
+// noexcept like its neighbours, with the same allocation exposure openArchBaselineSidecar describes.
+inline rw::pathguard::NoFollowRead readArchBaselineSidecar( const std::string& sidecarPath, ArchBaselineRead& baseline ) noexcept
+{
+    rw::pathguard::NoFollowRead sidecar = rw::pathguard::openNoFollowRead( "the arch baseline sidecar", sidecarPath );
+    if( sidecar.refused ) { DISCLOSE( baseline, ArchBaselineRead::DisclosureWhy::SymlinkRefused, "arch: refusing to read the arch baseline sidecar through a symlink" ); }
+    return sidecar;
+}
+
 // Read the baseline sidecar. An absent file (first run) and a refused link both come back with no hashes and not
-// present, which callers treat as "no baseline".
+// present, which callers treat as "no baseline" — a refused link also sets symlinkRefused, which the verb prints.
 inline ArchBaselineRead archReadBaseline( const std::string& sidecarPath ) noexcept
 {
     ArchBaselineRead            baseline;
-    rw::pathguard::NoFollowRead sidecar = readArchBaselineSidecar( sidecarPath );
+    rw::pathguard::NoFollowRead sidecar = readArchBaselineSidecar( sidecarPath, baseline );
     if( !sidecar.opened )
     {
         return baseline;
@@ -820,7 +834,8 @@ inline int openArchBaselineSidecar( const std::string& sidecarPath ) noexcept
     auto [ fd, openErr ] = rw::pathguard::openNoFollowTruncate( "the arch baseline sidecar", sidecarPath );
     if( fd < 0 && openErr == ELOOP )
     {
-        DISCLOSE( "arch: refusing to write the arch baseline sidecar through a symlink" );
+        DISCLOSE( Diagnostics::answerRefused, "--baseline exits 1: pathguard names the refused link on stderr and the verb says it cannot write the sidecar",
+                  "arch: refusing to write the arch baseline sidecar through a symlink" );
     }
     return fd;
 }

@@ -152,3 +152,32 @@
 (new_expression
   constructor: (member_expression
     property: (property_identifier) @name)) @reference.call
+
+; #285: `<Foo />` / `<Foo>…</Foo>` invokes Foo exactly like `Foo()` — bind the OPENING tag's name only
+; (self-closing has no separate closing tag; a paired element's jsx_closing_element repeats the same
+; name and is deliberately NOT captured, so one JSX invocation mints exactly one edge, not two).
+; `<Foo.Bar />` binds through member_expression, the identical shape `Foo.Bar()` already captures two
+; rules up, so it carries a receiver the resolver narrows on the same as a member call (ingest_binds.h
+; receiverOf reads the parent of @name generically; it does not care whether the grandparent is a
+; call_expression or a jsx_*_element). An intrinsic tag (`<div>`, `<h1>`) parses as the SAME
+; (identifier) shape as a component tag — the grammar carries no case distinction — so the
+; lower-case-first-letter filter lives in C++ at capture time (isJsxIntrinsicTagIdentifier,
+; src/ingest_names.h): tags-pass predicates never run (`(#match? @name "^[A-Z]")` here would be
+; silently ignored — see isCppCastKeyword's note above, measured, not assumed). A namespaced tag
+; (`<svg:rect />`) needs no filter at all: verified with --match that its name field is a DIFFERENT
+; grammar node, jsx_namespace_name, which no pattern below names, so it is never captured in the
+; first place. A `<>…</>` fragment has no `name:` field and is likewise never captured. (.jsx routes
+; through this same javascript grammar — test/jsshapecheck.sh §6 already pins that route.)
+(jsx_self_closing_element
+  name: (identifier) @name) @reference.call
+
+(jsx_self_closing_element
+  name: (member_expression
+    property: (property_identifier) @name)) @reference.call
+
+(jsx_opening_element
+  name: (identifier) @name) @reference.call
+
+(jsx_opening_element
+  name: (member_expression
+    property: (property_identifier) @name)) @reference.call

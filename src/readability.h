@@ -106,6 +106,14 @@ struct ReadabilityScan
 {
     std::vector<ReadabilityRow> rows;
     std::uint32_t               unreadableFileCount;   // >0 ⇒ rows is a FLOOR, disclosed on the root
+    enum class DisclosureWhy : std::uint8_t
+    {
+        UnreadableFile,
+    };
+    void disclose( DisclosureWhy ) noexcept   // the DISCLOSE sink: the field the emitter reads
+    {
+        ++unreadableFileCount;
+    }
 };
 
 inline double posnettScore( double volume, double lineCount, double entropy ) noexcept
@@ -153,8 +161,7 @@ inline ReadabilityScan computeReadability( const IngestResult& ing )
             if( !bytes )
             {
                 fileFailed[s.fileId] = 1;
-                ++scan.unreadableFileCount;
-                DISCLOSE( "readability: an indexed file could not be read — its functions are absent from the report" );
+                DISCLOSE( scan, ReadabilityScan::DisclosureWhy::UnreadableFile, "readability: an indexed file could not be read — its functions are absent from the report" );
             }
             fileBytes[s.fileId] = std::move( bytes ).value_or( std::string() );
         }

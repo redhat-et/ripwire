@@ -457,5 +457,35 @@ bounded(){ if command -v timeout >/dev/null 2>&1; then timeout 60 "$@"; else per
     || no "(15d) blocks:y exit $rc15c (expected 1 with the stack-guard refusal): $( head -c 200 "$DEEPDIR/blocks.err" )"
 rm -rf "$DEEPDIR"
 
+# ── (rd-bound) an UNSETTLED reaching-definition fixpoint is disclosed on the root, in every build flavour ─────────
+# The loop fixpoint stops at kSliceRdMaxIter; no input reaches it (it settles in one round on every measured corpus),
+# so the arm LOWERS the bound with RIPWIRE_TEST_SLICE_RD_MAXITERS — pagerank's RIPWIRE_TEST_PR_MAXITERS pattern, honoured
+# in every flavour. The walk used to keep reach="cfg" and a one-argument DISCLOSE (a debug trace, nothing in Release);
+# the scan's DISCLOSE sink now puts reach_converged="0" on the root, defined in the same header.
+RD="$WORK/rdbound"; mkdir -p "$RD"
+printf 'int loopy( int n )\n{\n    int x = 0;\n    while( n > 0 )\n    {\n        n = n - x;\n        x = x + 1;\n    }\n    return x;\n}\n' >"$RD/a.c"
+"$BIN" "$RD" --slice=loopy:x --no-cache >"$RD/ctl.xml" 2>/dev/null
+RIPWIRE_TEST_SLICE_RD_MAXITERS=1 "$BIN" "$RD" --slice=loopy:x --no-cache >"$RD/hit.xml" 2>/dev/null
+RDCTL="$( grep -o '<slice [^>]*>' "$RD/ctl.xml" )"; RDHIT="$( grep -o '<slice [^>]*>' "$RD/hit.xml" )"
+{ printf '%s' "$RDCTL" | grep -q ' reach="cfg"' && ! grep -q 'reach_converged' "$RD/ctl.xml"; } \
+    && ok "(rd-bound) control: the settled slice reads reach=\"cfg\" with no reach_converged=" \
+    || no "(rd-bound) control: the unhooked slice is not the settled cfg shape: $RDCTL"
+printf '%s' "$RDHIT" | grep -q ' reach="cfg" reach_converged="0"' \
+    && ok "(rd-bound) a fixpoint stopped at its bound says so on the root: reach_converged=\"0\" (every build flavour)" \
+    || no "(rd-bound) a fixpoint stopped at its bound still reads as a finished flow analysis: $RDHIT"
+grep -q 'reach_converged="0": ' "$RD/hit.xml" \
+    && ok "(rd-bound) reach_converged= is defined in the same document" || no "(rd-bound) reach_converged= rides with no definition"
+command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$RD/hit.xml" 2>/dev/null \
+    && ok "(rd-bound) the disclosing document is well-formed" || no "(rd-bound) the disclosing document fails xmllint"; }
+rdbad=0
+for v in 64 65 1000 1x '' 0 ' 1'; do
+    RIPWIRE_TEST_SLICE_RD_MAXITERS="$v" "$BIN" "$RD" --slice=loopy:x --no-cache >"$RD/v.xml" 2>/dev/null
+    cmp -s "$RD/v.xml" "$RD/ctl.xml" || { no "(rd-bound) RIPWIRE_TEST_SLICE_RD_MAXITERS='$v' changed the document — the hook is not lower-only/strict"; rdbad=1; }
+done
+[ "$rdbad" = 0 ] && ok "(rd-bound) the hook cannot raise the bound and parses strictly: 7 non-lowering values are byte-identical to unset"
+"$BIN" --help=all 2>&1 | grep -q 'RIPWIRE_TEST_SLICE_RD_MAXITERS' \
+    && no "(rd-bound) the arming hook is advertised in --help — it is a gate's hook, not a user surface (G5)" \
+    || ok "(rd-bound) the arming hook appears in no --help text (G5)"
+
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"

@@ -337,10 +337,16 @@ struct ElixirContext
     HashMap<std::string, std::vector<ElixirLexicalName>> aliases;
     HashMap<std::string, std::vector<ElixirLexicalName>> variables;
     HashMap<std::uint32_t, std::string> modules;
+    ExtractShortfall*                   shortfall = nullptr;   // the file's sink, set by captureTagsFacts before any lookup
 
     std::string scopeOf( TSNode node, unsigned depth = 0 ) const
     {
-        if( depth > 128 ) { DISCLOSE( "Elixir module nesting exceeds 128" ); return {}; }
+        if( depth > 128 )
+        {
+            ASSUME( shortfall != nullptr );
+            DISCLOSE( *shortfall, ExtractShortfall::DisclosureWhy::ElixirScopeTooDeep, "Elixir module nesting exceeds 128" );
+            return {};
+        }
         for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
         {
             if( elixirModuleKeyword( elixirTarget( p, src ) ) || elixirTarget( p, src ) == "defimpl" )
@@ -393,7 +399,12 @@ struct ElixirContext
     std::string moduleOf( TSNode name, TSNode site, unsigned depth = 0 ) const
     {
         if( ts_node_is_null( name ) ) { return {}; }
-        if( depth > 128 ) { DISCLOSE( "Elixir module nesting exceeds 128" ); return {}; }
+        if( depth > 128 )
+        {
+            ASSUME( shortfall != nullptr );
+            DISCLOSE( *shortfall, ExtractShortfall::DisclosureWhy::ElixirScopeTooDeep, "Elixir module nesting exceeds 128" );
+            return {};
+        }
         if( elixirNodeIs( name, "alias" ) ) { return expandAlias( std::string( nodeTextOf( name, src ) ), site ); }
         if( elixirNodeIs( name, "atom" ) ) { return std::string( nodeTextOf( name, src ) ); }
         if( nodeTextOf( name, src ) == "__MODULE__" ) { return scopeOf( site, depth + 1 ); }
@@ -410,7 +421,12 @@ struct ElixirContext
 
     std::string moduleName( TSNode node, unsigned depth = 0 ) const
     {
-        if( depth > 128 ) { DISCLOSE( "Elixir module nesting exceeds 128" ); return {}; }
+        if( depth > 128 )
+        {
+            ASSUME( shortfall != nullptr );
+            DISCLOSE( *shortfall, ExtractShortfall::DisclosureWhy::ElixirScopeTooDeep, "Elixir module nesting exceeds 128" );
+            return {};
+        }
         if( const auto it = modules.find( ts_node_start_byte( node ) ); it != modules.end() ) { return it->second; }
         const auto target = elixirTarget( node, src );
         const TSNode name = elixirFirstArgument( node );

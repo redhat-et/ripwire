@@ -415,6 +415,45 @@ noteAddBlank "$( printf 'chose a\302\240b over c because d' )"; rc=$?
 
 rm -f "$OUT_F" "$ERR_F"
 
+# ── SKIPPED LINES: a sidecar line the reader cannot parse is DISCLOSED, and never deleted by a rewrite ─────────
+# readNotes skips a line with no target/date tabs, or an empty target. It used to do that with a one-argument
+# DISCLOSE — a debug trace, nothing at all in a Release binary — so --notes counted notes= without it, and the next
+# --note-add's sorted rewrite silently DELETED the committed text. Now the read's DISCLOSE( sink, why ) counts it into
+# <notes lines_skipped="N"> in every build flavour, and --note-add refuses to rewrite while any remain.
+SK="$( mktemp -d )"
+( cd "$SK" && git init -q && git config user.email t@t && git config user.name t ) >/dev/null 2>&1
+printf 'int helper( int x ) { return x + 1; }\n' >"$SK/a.c"
+( cd "$SK" && git add -A && git commit -qm init ) >/dev/null 2>&1
+printf 'a.c\t2026-01-01\tkept note\nthis line has no tabs at all\n\t2026-01-01\tempty target\n' >"$SK/.ripwire_notes"
+cp "$SK/.ripwire_notes" "$SK/notes.before"
+SKOUT="$( "$BIN" "$SK" --notes --no-cache 2>/dev/null )"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s' "$SKOUT" | grep -qF 'kept note' \
+    && ok "skipped-lines (guard): --notes exits 0 and lists the one parseable note" \
+    || no "skipped-lines (guard): --notes exited $rc or lost the parseable note — the arms below are void"
+printf '%s' "$SKOUT" | grep -qF '<notes lines_skipped="2">' \
+    && ok "skipped-lines: <notes lines_skipped=\"2\"> names the two lines the reader could not use (every build flavour)" \
+    || no "skipped-lines: the two unparseable lines are not disclosed on <notes>: $( printf '%s' "$SKOUT" | grep -o '<notes[^>]*>' | head -1 )"
+printf '%s' "$SKOUT" | grep -qF 'lines_skipped= counts' \
+    && ok "skipped-lines: the attribute carries its definition where it is met" \
+    || no "skipped-lines: lines_skipped= appears with no definition in the header"
+command -v xmllint >/dev/null 2>&1 && { printf '%s' "$SKOUT" | xmllint --noout - 2>/dev/null \
+    && ok "skipped-lines: the disclosing document is well-formed" || no "skipped-lines: the disclosing document fails xmllint"; }
+"$BIN" "$SK" --note-add="a.c: a new note" --no-cache >/dev/null 2>"$SK/add.err"; rc=$?
+{ [ "$rc" -ne 0 ] && cmp -s "$SK/.ripwire_notes" "$SK/notes.before"; } \
+    && ok "skipped-lines: --note-add refuses (exit $rc) and leaves the sidecar byte-identical — the unparseable lines survive" \
+    || no "skipped-lines: --note-add exited $rc and/or rewrote the sidecar — committed lines deleted: $( diff "$SK/notes.before" "$SK/.ripwire_notes" | head -3 | tr '\n' ' ' )"
+grep -q 'refusing to rewrite' "$SK/add.err" \
+    && ok "skipped-lines: the refusal says why" || no "skipped-lines: the refusal names no reason: $( head -c 200 "$SK/add.err" )"
+# CONTROL: the same tree with only the parseable line — no attribute, and --note-add writes.
+printf 'a.c\t2026-01-01\tkept note\n' >"$SK/.ripwire_notes"
+"$BIN" "$SK" --notes --no-cache 2>/dev/null | grep -qF '<notes>' \
+    && ok "skipped-lines (control): a clean sidecar prints a bare <notes> — the attribute appears only when true" \
+    || no "skipped-lines (control): a clean sidecar's <notes> carries an attribute"
+"$BIN" "$SK" --note-add="a.c: a new note" --no-cache >/dev/null 2>&1 \
+    && ok "skipped-lines (control): --note-add on a clean sidecar still writes" \
+    || no "skipped-lines (control): --note-add on a clean sidecar was refused"
+rm -rf "$SK"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 # CA4 §B15 / trap #27: this file used to stop at the line above and return 0 — `||`'s echo succeeds, so
 # every FAIL printed above rode along green, because regression.sh's verdict is the EXIT CODE. Wave 3's own

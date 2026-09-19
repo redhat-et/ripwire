@@ -89,6 +89,31 @@ rule under the new fail-closed guards FAILs both blocks (`onefn: … is missing 
 proves the old rule was truly vacuous rather than just differently spelled. `test/emptycorpuscheck.sh` is
 the gate: on main its one-function checks never ran; with this fix they run and pass.
 
+### Added — a JSX element invocation (`<Foo />`, `<Foo>…</Foo>`) is now a call edge in TS/TSX/JS (#285)
+
+`--callers`/`--uses`/`--test-gate` used to read a component invoked only via JSX as having zero callers —
+`<UniqueWidget />` sat in plain sight and `--callers=UniqueWidget` still answered `count="0"`, because
+`queries/typescript/tags.scm` and `queries/javascript/tags.scm` captured `call_expression`/`new_expression`
+only, never a JSX element name. Both query files now bind the OPENING tag's name (self-closing has no
+separate closing tag; a paired element's closing tag repeats the same name and is deliberately not
+captured, so one invocation mints exactly one edge) as a call reference, for a plain identifier
+(`<Foo />`) and a qualified one (`<Foo.Bar />`, which binds through `member_expression` exactly like
+`Foo.Bar()` and carries the same receiver). An intrinsic tag (`<div>`, `<h1>`) parses as the identical
+node shape a real component's tag has — the grammar carries no case distinction — so a new capture-time
+filter (`isJsxIntrinsicTagIdentifier`, `src/ingest_names.h`) drops any tag whose name does not start with
+an uppercase letter; a namespaced tag (`<svg:rect />`) needs no filter at all, because its name field is a
+different grammar node (`jsx_namespace_name`) that no pattern names, and a `<>…</>` fragment has no `name:`
+field to capture. `.tsx` moved to its own query (`queries/tsx/tags.scm`, `querySub` `"tsx"` rather than
+`"typescript"`): the plain TypeScript grammar has no JSX node types at all, and tree-sitter refuses a
+whole query the moment one pattern names a node type the grammar doesn't have, so sharing the query with
+the new JSX patterns would have silently dropped every `.ts` symbol and reference along with them — see
+that file's header for the measurement. `kParserVer` 116 → 117. Reported by
+@mariadb-KyleHutchinson in #285, with fixture files that dropped straight into `test/jsxcallfix/`
+(`test/jsxcallcheck.sh` is the gate — RED on the base binary, GREEN after). **Not covered**: the issue's
+secondary ask — a synthetic framework-caller edge for a Next.js App Router entry point (`page.tsx`)
+invoked by file-path convention with no in-repo call site at all — is a separate, smaller follow-up and is
+not part of this change.
+
 ### Changed — `lane/os-header` refreshed onto main (~1,400 commits, `30f14a27` → `57d713dd`)
 
 `src/infra/os.h`'s POSIX seam (below) was built on v0.6.1; this refresh carries it forward onto everything main
@@ -2269,6 +2294,45 @@ again within the same function. `--flags` could not tell a CMake root it failed 
 CMake: it now reports `cmake_scan_failed="1"` in every build (`test/flagscheck.sh` arm 11). Five
 `ASSUME_NO_ALIAS_BUF` promises on fresh local buffers state that separate storage to the compiler; each was
 checked against every caller.
+
+### Fixed — a degraded answer now says so in every build, including Release
+
+Before this change, 217 degrade paths recorded that an answer was incomplete only through a debug-build assertion.
+Release builds compile those checks out, so the binary users run printed a partial answer as if it were whole. The
+self-check `DISCLOSE( sink, why )` form now records the degrade into the output document in every build. 51
+one-argument sites remain, each listed with its reason. Where an answer was wrong rather than just incomplete, the
+output now says so:
+- `--note-add` refuses a sidecar line it cannot parse instead of deleting it, and `--notes` reports `lines_skipped=`.
+- A refused symlinked notes or arch sidecar is named.
+- `--grep` marks its hit count as a floor when a file could not be read or the scan stopped part-way.
+- `--for` reports `reason="degraded"` when it could not serve bodies.
+- `--max-tokens` reports `fit_unmeasured` when it could not measure the fit, in both XML and JSON.
+- `--whereis` no longer claims `complete="1"` after dropping a ref, and a failed git worker's refs read as unknown,
+  not merged.
+- `--slice` reports `reach_converged="0"` when its fixpoint stopped at the bound, and it refuses (and says why)
+  when git's answer for a date baseline is not an object name.
+- merge-scout no longer diffs against an unavailable tree as if it were empty.
+- A file whose extraction came back partial is listed under the new `--skipped` class `extract-partial`, is no
+  longer cached as complete, and older caches are invalidated.
+- When the token measurement fails, `est_tokens` keeps its modelled number and is labelled `est_measured="0"`.
+- `--layout` exits **3** when a definition's file cannot be read (2 still means drift, 0 means verified), so a CI
+  gate on its exit code no longer passes an unverified mirror.
+
+Refusals whose only disclosure is the refusal itself (a non-zero exit, an MCP error, a query failure) are recorded
+through `answerRefused`. Ten guards that could not fire were removed after tracing each one: those guarded by our own
+code became `ASSUME`/`EXPECTS`, and those touching external input kept a checked, disclosed path.
+`CONTRIBUTING.md`'s error ladder now says a degrade that still prints an answer must record into the document.
+
+### Changed — `--help-task` routes four more question shapes to a first verb
+
+`--help-task` used to abstain on four common question shapes. It now routes them:
+- which tests cover a file → `--affected`
+- what else changes with a file → `--situ`
+- how one named file reaches another → `--for`
+- where a named thing is implemented → `--for`
+
+On the labelled routing corpus none of the 254 decisions changed, and held-out precision stays 1.000 with harmful
+recommendations at 0.000. A 12-question paraphrase arm routes 10 correctly, with no wrong verb.
 
 ## [0.6.1] — 2026-09-14
 

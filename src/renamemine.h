@@ -126,6 +126,24 @@ struct RenameHarvest
     bool                         ok         = false;
     bool                         truncated  = false;  // a walk bound was hit ⇒ candidates= is a FLOOR
     bool                         nonGitRoot = false;
+    // The DISCLOSE sink for the walk's degrades: no answer reads probed="0", a partial one truncated="1".
+    enum class DisclosureWhy : std::uint8_t
+    {
+        WalkNotStarted,
+        NoCommits,
+        WalkBounded,
+        WalkExitedNonZero,
+    };
+    void disclose( DisclosureWhy why ) noexcept
+    {
+        switch( why )
+        {
+            case DisclosureWhy::WalkNotStarted:
+            case DisclosureWhy::NoCommits:         ok = false; break;
+            case DisclosureWhy::WalkBounded:
+            case DisclosureWhy::WalkExitedNonZero: truncated = true; break;
+        }
+    }
 };
 
 // ── line tokenizing: identifiers, and the text between them ──────────────────────────────────────────────
@@ -352,26 +370,25 @@ inline RenameHarvest mineRenamePairs( const std::string& root )
 
     if( !walk.started )
     {
-        DISCLOSE( "renamemine: git log failed to start — the calibration corpus is empty, which the report states rather than scoring zero" );
+        DISCLOSE( harvest, RenameHarvest::DisclosureWhy::WalkNotStarted,
+                  "renamemine: git log failed to start — the calibration corpus is empty, which the report states rather than scoring zero" );
         return harvest;
     }
     if( walk.truncated )
     {
-        harvest.truncated = true;
-        DISCLOSE( "renamemine: the history walk hit its bound — candidates= is a floor, not a total" );
+        DISCLOSE( harvest, RenameHarvest::DisclosureWhy::WalkBounded, "renamemine: the history walk hit its bound — candidates= is a floor, not a total" );
     }
     // The dangerous failure, guarded the way gitoracle guards it: the caller has established that HEAD
     // resolves, so ZERO commit headers means git failed (stderr is swallowed, popen still succeeds). An empty
     // candidate set with ok=true reads as "this repo has no renames", which is a claim, not an observation.
     if( harvest.commitsWalked == 0 )
     {
-        DISCLOSE( "renamemine: git log produced no commits despite a resolvable HEAD — reporting no answer rather than 'no renames'" );
+        DISCLOSE( harvest, RenameHarvest::DisclosureWhy::NoCommits, "renamemine: git log produced no commits despite a resolvable HEAD — reporting no answer rather than 'no renames'" );
         return harvest;
     }
     if( walk.status != 0 )
     {
-        harvest.truncated = true;
-        DISCLOSE( "renamemine: git log exited non-zero mid-walk — the partial answer is kept and marked truncated" );
+        DISCLOSE( harvest, RenameHarvest::DisclosureWhy::WalkExitedNonZero, "renamemine: git log exited non-zero mid-walk — the partial answer is kept and marked truncated" );
     }
 
     harvest.candidates.reserve( votes.size() );

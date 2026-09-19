@@ -2147,8 +2147,27 @@ inline void capturePythonImportBinds( TSNode stmt, const char* t, std::uint32_t 
     } );
 }
 
+// The DISCLOSE sink every extraction pass shares for ONE file: a pass that could not extract all of the file's facts
+// (a nesting bound it will not descend past, a tags query that is not available) says so here, and the parse worker
+// turns a short file into its --skipped row (why="extract-partial") and keeps its facts out of the cache, so a warm run
+// re-extracts rather than reusing a partial answer as a whole one.
+struct ExtractShortfall
+{
+    enum class DisclosureWhy : std::uint8_t
+    {
+        TagsQueryUnavailable,     // the grammar's tags query was not prewarmed: no definition was extracted
+        ElixirScopeTooDeep,       // an Elixir module/alias chain past the resolver's depth bound: scope or name lost
+        ImportNestingTooDeep,     // imports nested past kMaxImportContainerDepth containers: the deeper ones not captured
+    };
+    bool isShort = false;
+    void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
+    {
+        isShort = true;
+    }
+};
+
 void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_view src, std::vector<Include>& incs, std::vector<RawRef>& refs,
-                      std::vector<RawBind>& binds, std::vector<ConstOpen>& constOpens )
+                      std::vector<RawBind>& binds, std::vector<ConstOpen>& constOpens, ExtractShortfall& shortfall )
 {
     ChildCursor         cursor( root );
     std::vector<TSNode> kids;
@@ -2228,7 +2247,8 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
             // descent reaches every arm of a chain — no separate alternative-following pass.
             if( frame.depth >= kMaxImportContainerDepth )
             {
-                DISCLOSE( "ingest: import-container nesting past the depth bound — deeper imports not captured" );
+                DISCLOSE( shortfall, ExtractShortfall::DisclosureWhy::ImportNestingTooDeep,
+                          "ingest: import-container nesting past the depth bound — deeper imports not captured" );
             }
             else
             {

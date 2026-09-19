@@ -884,6 +884,40 @@ PY
         && ok "#14d degraded est_tokens=$DGE is the MODELLED number, below the charged $CTLE (documented fallback, not a fabrication)" \
         || no "#14d degraded est_tokens=$DGE vs charged $CTLE — the fallback is not observable in the document"
 
+    #    (d2) RE-PIN 2026-09-19 (owner decision, lane/disclose-sink-form): the modelled fallback STAYS (the number
+    #         above) and is LABELLED — before, "the fallback is observable" meant only that the number was lower,
+    #         which a reader cannot tell from a smaller map. est_measured="0" rides beside it in every build flavour
+    #         (the MapEstimate / ChargedSection DISCLOSE sinks set it), defined in the same document, and the
+    #         undegraded control carries none. One arm per site class, each isolating the buffer that failed:
+    #         the XML map's own children buffer, the JSON map's rows + header-probe buffers, and a payload section
+    #         on a map-less (--top-k=0) document, where the est rests on the section alone.
+    grep -aq '<r [^>]* est_tokens="[0-9]*" est_measured="0"' "$TMP/dg.out" \
+        && ok "#14d2 [XML map buffer] the modelled est_tokens is labelled est_measured=\"0\" on <r>" \
+        || no "#14d2 [XML map buffer] the modelled est_tokens carries no est_measured=\"0\": $( grep -aoE '<r [^>]*>' "$TMP/dg.out" | head -1 | head -c 200 )"
+    grep -aq 'est_measured=0: ' "$TMP/dg.out" \
+        && ok "#14d2 [XML map buffer] est_measured= is defined in the same document" || no "#14d2 [XML map buffer] est_measured= rides undefined"
+    grep -aq 'est_measured' "$TMP/dg_ctl.out" \
+        && no "#14d2 control: the undegraded map carries est_measured" || ok "#14d2 control: the undegraded map carries no est_measured (measured is the default)"
+    RIPWIRE_FAULT_CHARGE_BUFFER=1 "$BIN" test/fixture --json --no-cache >"$TMP/dgj.out" 2>/dev/null
+    "$BIN" test/fixture --json --no-cache >"$TMP/dgj_ctl.out" 2>/dev/null
+    { grep -aq '"est_tokens":[0-9]*,.*"est_measured":false' "$TMP/dgj.out" && ! grep -aq 'est_measured' "$TMP/dgj_ctl.out"; } \
+        && ok "#14d2 [JSON map + header probe] \"est_measured\":false on the degrade, absent on the control (XML parity)" \
+        || no "#14d2 [JSON map + header probe] the JSON map's modelled est_tokens is unlabelled: $( head -c 200 "$TMP/dgj.out" )"
+    FXSYM="$( "$BIN" test/fixture --no-cache 2>/dev/null | grep -aoE ' n="[A-Za-z_]+"' | head -1 | sed 's/ n="//; s/"//' )"
+    RIPWIRE_FAULT_CHARGE_BUFFER=1 "$BIN" test/fixture --top-k=0 --expand="$FXSYM" --no-cache >"$TMP/dgk0.out" 2>/dev/null
+    "$BIN" test/fixture --top-k=0 --expand="$FXSYM" --no-cache >"$TMP/dgk0_ctl.out" 2>/dev/null
+    { grep -aq '<ctx [^>]*est_tokens="[0-9]*" est_measured="0"' "$TMP/dgk0.out" && grep -aq 'est_measured=0: ' "$TMP/dgk0.out" \
+      && ! grep -aq 'est_measured' "$TMP/dgk0_ctl.out"; } \
+        && ok "#14d2 [payload section, --top-k=0 --expand=$FXSYM] the section-only est_tokens is labelled and defined; the control carries none" \
+        || no "#14d2 [payload section] the uncharged section's est_tokens is unlabelled: $( grep -aoE '<ctx [^>]*>' "$TMP/dgk0.out" | head -1 )"
+
+    RIPWIRE_FAULT_CHARGE_BUFFER=1 "$BIN" test/fixture --pack-task="parse the config" --with-graph --no-cache >"$TMP/dgpt.out" 2>/dev/null
+    "$BIN" test/fixture --pack-task="parse the config" --with-graph --no-cache >"$TMP/dgpt_ctl.out" 2>/dev/null
+    { grep -aq '<ctx [^>]*est_measured="0"' "$TMP/dgpt.out" && grep -aq 'est_measured=0: ' "$TMP/dgpt.out" \
+      && ! grep -aq 'est_measured' "$TMP/dgpt_ctl.out"; } \
+        && ok "#14d2 [trailing section, --pack-task --with-graph] the graph block streamed uncharged and the root says est_measured=\"0\"" \
+        || no "#14d2 [trailing section] the pack-task est_tokens that left the graph block out is unlabelled: $( grep -aoE '<ctx [^>]*>' "$TMP/dgpt.out" | head -1 )"
+
     #    and the --for lens's own contract is the OTHER honest answer: it omits est_tokens rather than
     #    fabricate one it cannot compute. Both are acceptable; silently keeping a stale number is not.
     #
@@ -953,7 +987,11 @@ fi
 #    (h) the MCP `uses` verb answers -32603 under the fault, never a success with empty text;
 #    (i) the --for lens (XML and --json) reports each redacted secret once when a degraded pre-render renders again.
 #    These arms cover those surfaces, not every MemoryStream holder; #14g is the fence over the rest.
-mask_est(){ sed -E 's/est_tokens(="?|":)[0-9]+/est_tokens\1N/g' "$1"; }
+# RE-PIN 2026-09-19 (lane/disclose-sink-form, owner decision): the degraded document now LABELS its modelled number —
+# est_measured="0" on the root, est_measured=0 in the header comment, "est_measured":false in JSON, and the one legend
+# comment defining it. Those four spellings are the disclosure (asserted present by #14f(b2)), so they are masked with
+# est_tokens: "byte-identical outside the estimate" is still the claim, and the estimate now carries its own label.
+mask_est(){ sed -E 's/<!-- est_measured=0: [^>]*-->//g; s/est_tokens(="?|":)[0-9]+/est_tokens\1N/g; s/ est_measured="0"//g; s/ est_measured=0//g; s/"est_measured":false,//g' "$1"; }
 INFRA_FAULT_MEMSTREAM_FINISH=1 "$BIN" src --top-k=10 --pack-signatures --no-cache >"$TMP/mf.out" 2>"$TMP/mf.err"
 rc_mf=$?
 if grep -aq 'chargeSection: the charge buffer did not finish whole' "$TMP/mf.err"; then
@@ -967,6 +1005,9 @@ if grep -aq 'chargeSection: the charge buffer did not finish whole' "$TMP/mf.err
     else
         no "#14f(b) the degraded document DIFFERS from the undegraded one outside est_tokens — a finish failure lost or corrupted content"
     fi
+    grep -aq '<r [^>]* est_measured="0"' "$TMP/mf.out" && ! grep -aq 'est_measured' "$TMP/mf_ctl.out" \
+        && ok "#14f(b2) the finish-degraded map labels its modelled est_tokens est_measured=\"0\"; the control carries none" \
+        || no "#14f(b2) the finish-degraded map's modelled est_tokens is unlabelled"
     if [ "$rc_mf" -eq 0 ]; then
         ok "#14f(c) the degraded run exits 0"
     else

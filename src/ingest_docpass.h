@@ -31,19 +31,22 @@ inline void publishDocBridgeBlob( const std::string& bridgeBlobPath, std::uint32
         {
             os::close( rawFd );
         }
-        DISCLOSE( "ingest: doc bridge cache could not create its temp file — the text is kept, the cache is not written" );
+        DISCLOSE( Diagnostics::answerUnchanged, "the doc text is kept for this run: only the bridge cache is not written",
+                  "ingest: doc bridge cache could not create its temp file — the text is kept, the cache is not written" );
         return;
     }
     const bool wroteAll = std::fwrite( text.data(), 1, text.size(), fp ) == text.size();
     const bool closed   = std::fclose( fp ) == 0;
     if( !wroteAll || !closed )
     {
-        DISCLOSE( "ingest: doc bridge cache write failed — the text is kept, the cache is not written" );
+        DISCLOSE( Diagnostics::answerUnchanged, "the doc text is kept for this run: only the bridge cache is not written",
+                  "ingest: doc bridge cache write failed — the text is kept, the cache is not written" );
         return;
     }
     if( !temp.commit( bridgeBlobPath ) )
     {
-        DISCLOSE( "ingest: doc bridge cache rename failed — the text is kept, the cache is not written" );
+        DISCLOSE( Diagnostics::answerUnchanged, "the doc text is kept for this run: only the bridge cache is not written",
+                  "ingest: doc bridge cache rename failed — the text is kept, the cache is not written" );
     }
 }
 

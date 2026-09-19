@@ -21,6 +21,7 @@
 //  PANIC( "msg" )           a corrupt state we cannot continue from   report, abort                 report, abort
 //  DISCLOSE( sink, why[, "msg"] )  the answer says it is incomplete  sink.disclose( why ), trace  sink.disclose( why ) — ships
 //  DISCLOSE( msg )          NOTHING — a debug trace only (§4b, ratchet) trace once per site           NOTHING: the user is not told
+//  (sinks answerUnchanged / answerRefused: the degrade changes only cost / the verb refuses the answer by name — §4b)
 //
 //  The line between ASSUME and VALIDATE is the whole design: ASSUME hands the optimizer a fact and costs nothing in
 //  release, so it is ONLY for predicates this code makes true; VALIDATE is for anything that crossed the process
@@ -455,6 +456,13 @@ template<class Site>
 // There is no pin on these sites; test/selfcheckcheck.sh arm (U) LISTS every one with its reason on every run, and
 // refuses one whose reason is not a non-empty literal.
 //
+// Diagnostics::answerRefused — THE EXPLICIT "THIS DEGRADE REFUSES THE ANSWER" SINK, the one shape answerUnchanged may not
+// take. Its `why` is the same kind of non-empty string LITERAL, and it sets nothing, because the disclosure is the refusal
+// itself: legitimate ONLY where the same path, in EVERY build, emits NO answer and says why where the caller will read it —
+// a non-zero exit with the cause on stderr, an MCP error result, a query's named failure. NOT legitimate where any part of
+// an answer is still printed (that answer needs a real sink), or where the only message is this trace. Arm (U) lists these
+// sites too, apart from the answerUnchanged ones.
+//
 // THE ONE-ARGUMENT FORM, `DISCLOSE( msg )`, DISCLOSES NOTHING TO THE USER OF THE RELEASE BINARY. It is the pre-0.6.2
 // degraded-path alert under a new name, byte for byte: in debug one "[math degraded]" line per call site on stderr,
 // under NDEBUG (every shipped build) nothing at all. It exists so the rename could be mechanical; each of those sites
@@ -492,7 +500,7 @@ struct AnswerUnchanged
         template<decltype( sizeof( 0 ) ) N>
         constexpr DisclosureWhy( const char( &literal )[N] ) noexcept : reason( literal )
         {
-            static_assert( N > 1, "Diagnostics::answerUnchanged needs a non-empty literal reason: say why this degrade cannot change the answer" );
+            static_assert( N > 1, "Diagnostics::answerUnchanged / answerRefused needs a non-empty literal reason: say why this degrade cannot change the answer, or how the answer is refused" );
         }
         constexpr const char* text() const noexcept { return reason; }
 
@@ -504,12 +512,20 @@ struct AnswerUnchanged
 };
 inline constexpr AnswerUnchanged answerUnchanged{};
 
+struct AnswerRefused
+{
+    using DisclosureWhy = AnswerUnchanged::DisclosureWhy;   // the same literal-reason type: a reason a person reads
+    constexpr void disclose( DisclosureWhy ) const noexcept {}
+};
+inline constexpr AnswerRefused answerRefused{};
+
 // The sink contract DISCLOSE( sink, why ) checks at compile time: a nested DisclosureWhy — a scoped enum (or
-// answerUnchanged's literal reason) — and `void disclose( DisclosureWhy ) noexcept` callable on the sink as written.
+// answerUnchanged's / answerRefused's literal reason) — and `void disclose( DisclosureWhy ) noexcept` callable on the sink as written.
 template<class S>
 concept DisclosureSink =
     requires { typename detail::Bare<S>::DisclosureWhy; }
-    && ( detail::ScopedEnum<typename detail::Bare<S>::DisclosureWhy> || detail::isSame<detail::Bare<S>, AnswerUnchanged> )
+    && ( detail::ScopedEnum<typename detail::Bare<S>::DisclosureWhy> || detail::isSame<detail::Bare<S>, AnswerUnchanged>
+         || detail::isSame<detail::Bare<S>, AnswerRefused> )
     && requires( typename detail::NoRef<S>::type& sink, const typename detail::Bare<S>::DisclosureWhy why ) {
            { sink.disclose( why ) } noexcept -> detail::SameAs<void>;
        };

@@ -493,13 +493,18 @@ if [ "$NEST_RC" -eq 0 ]; then
     grep -q 'Deep.kt: kotlin string-template nesting > 128 levels' "$TMP/nest.err" && grep -q 'OverCeiling.kt: kotlin string-template nesting > 128 levels' "$TMP/nest.err" \
         && ok "hostile nesting: both refusals are named on stderr (the json/yaml house skip style)" \
         || no "hostile nesting: stderr does not name both refusals: $( head -5 "$TMP/nest.err" )"
-    # DISCLOSE prints only where NDEBUG is undefined (the plain dev build, the asan build); Release compiles it
-    # out. The flavour is read from --version's build-type token, the reading estchargecheck and versioncheck share, so
-    # this arm neither goes red on a Release leg nor passes blind on the plain build.
+    # THE DISCLOSURE THAT SHIPS is the document's, in EVERY build flavour: the refusal is recorded through
+    # DISCLOSE( sink, why ) into the scan slot --skipped renders, so --skipped carries nest_refused="2" whether or not
+    # NDEBUG compiled the trace out (the row-level arms below check the rows). The "[math degraded]" trace is the debug
+    # half only: it prints where NDEBUG is undefined (the plain dev build, the asan build). The flavour is read from
+    # --version's build-type token, the reading estchargecheck and versioncheck share.
+    "$BIN" "$NEST" --skipped --no-cache 2>/dev/null | grep -o '<skipped [^>]*>' | grep -q ' nest_refused="2"' \
+        && ok "hostile nesting: the refusals are disclosed IN THE DOCUMENT (--skipped nest_refused=\"2\") — every build flavour" \
+        || no "hostile nesting: --skipped does not carry nest_refused=\"2\" — the refusal would be silent in a Release binary"
     NEST_FLAVOUR="$( "$BIN" --version 2>/dev/null | sed -nE 's/^[^(]*\(([^,)]*).*/\1/p' )"
     case "$NEST_FLAVOUR" in
         Release|RelWithDebInfo|MinSizeRel)
-            ok "hostile nesting: $NEST_FLAVOUR build defines NDEBUG — DISCLOSE is compiled out, nothing to assert" ;;
+            ok "hostile nesting: $NEST_FLAVOUR build defines NDEBUG — the debug trace is compiled out; the document arm above is its disclosure" ;;
         *)
             # ONE line on purpose, never with newlines stripped first: the notice must arrive whole. This arm went red on
             # CI when the reporter wrote the notice in nine writes and the second refusal's line landed between two of

@@ -602,7 +602,8 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             ccOut = std::fopen( ccPath.c_str(), "wb" );
             if( !ccOut )
             {
-                DISCLOSE( "writeCcJson: could not open output file" );
+                DISCLOSE( Diagnostics::answerRefused, "the export exits 1 naming the file it cannot open on stderr; nothing is written",
+                          "writeCcJson: could not open output file" );
                 rw::emitTo( stderr, "ripwire: --export=cc.json:{}: cannot open file for writing\n", ccPath.c_str() );
                 return 1;
             }

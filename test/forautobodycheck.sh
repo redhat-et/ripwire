@@ -212,5 +212,38 @@ else
     printf '  SKIP  xmllint (not installed)\n'
 fi
 
+# ── #11: the DEGRADED bundle — the signature block could not be measured, so no body is served ─────────────
+# RIPWIRE_FAULT_CHARGE_BUFFER=1 fails every charge buffer. The bundle then has no measured <sigs>, so the bodies
+# decision never runs; the root used to keep the bundle legend promising bodies with NO bundle= attribute and no
+# <bodies> — the silent surface T3 abolished. Now a third reason rides beside budget/no_candidates, defined in the
+# same header. The switch exists only on the non-NDEBUG flavour (src/infra/emit.h faultSwitchOn), so this arm reads
+# the flavour from --version (kotlincheck/estchargecheck's reading) and SKIPs on Release rather than pass blind;
+# the DISCLOSE( sink, why ) that sets the attribute is the same code in both flavours (selfcheckcheck arm (S)).
+DG_FLAVOUR="$( "$BIN" --version 2>/dev/null | sed -nE 's/^[^(]*\(([^,)]*).*/\1/p' )"
+case "$DG_FLAVOUR" in
+    Release|RelWithDebInfo|MinSizeRel)
+        printf '  SKIP  #11 the charge-buffer fault switch is compiled out of this %s (NDEBUG) binary — the plain-flavour leg proves it\n' "$DG_FLAVOUR" ;;
+    *)
+        for q in parseConfig "parse the config file"; do
+            RIPWIRE_FAULT_CHARGE_BUFFER=1 "$BIN" "$ROOT/test/fixture" --for="$q" --no-cache >"$TMP/dg11" 2>/dev/null; rc=$?
+            root11="$( grep -o '<ctx [^>]*>' "$TMP/dg11" | head -1 )"
+            case "$root11" in
+                *' bodies="0" reason="degraded"'*) ok "#11 [$q] a degraded bundle names itself on the root: ${root11##*bundle=}" ;;
+                *) no "#11 [$q] the degraded bundle carries no reason (rc=$rc): $root11" ;;
+            esac
+            grep -q 'reason=degraded: ' "$TMP/dg11" \
+                && ok "#11 [$q] reason=degraded is defined in the same header" \
+                || no "#11 [$q] reason=degraded is emitted with no definition"
+            ! grep -q '<bodies' "$TMP/dg11" && ! printf '%s' "$root11" | grep -q 'est_tokens=' \
+                && ok "#11 [$q] no <bodies> and no est_tokens= — nothing is claimed the degrade could not measure" \
+                || no "#11 [$q] the degraded bundle still carries <bodies> or an est_tokens= it could not measure"
+            command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$TMP/dg11" 2>/dev/null \
+                && ok "#11 [$q] the degraded bundle is well-formed" || no "#11 [$q] the degraded bundle fails xmllint"; }
+        done
+        "$BIN" "$ROOT/test/fixture" --for=parseConfig --no-cache 2>/dev/null | grep -o '<ctx [^>]*>' | grep -q 'reason="degraded"' \
+            && no "#11 control: the UNFAULTED run carries reason=\"degraded\"" \
+            || ok "#11 control: the unfaulted run carries no degraded reason" ;;
+esac
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

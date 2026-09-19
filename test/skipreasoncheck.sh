@@ -253,5 +253,79 @@ case "$MAPLEG" in
   *)           ok '(9) the map legend is unchanged — the --max-tokens floor keeps its headroom' ;;
 esac
 
+# ── (10) EXTRACT-PARTIAL: a file the extraction could not finish is itemized, never cached as whole ────────────────
+# An extraction pass that stops at a nesting bound (here: an #include nested inside 260 #if containers, past
+# kMaxImportContainerDepth), a grammar whose tags query is unavailable, or an extraction that throws part-way, used
+# to leave only a one-argument DISCLOSE — nothing at all in a Release binary — and the partial facts were CACHED under
+# the file's real hash, so every warm run reused them as the whole answer. The pass now discloses into the file's
+# ExtractShortfall sink: --skipped carries extract_partial="N" and one <f why="extract-partial"> row, defined in the
+# same document, in every build flavour; and the file's cache record is written UNKNOWN, so the row survives warm runs.
+XP="$TMP/xpartial"; mkdir -p "$XP/tree" "$XP/xdg"
+python3 - "$XP/tree/deep.c" <<'PYEOF'
+import sys
+open(sys.argv[1], "w").write( "#if 1\n" * 260 + '#include "deep.h"\n' + "#endif\n" * 260 + "int cfn( void ) { return 1; }\n" )
+PYEOF
+printf 'int ok( void ) { return 0; }\n' >"$XP/tree/clean.c"
+XPBYTES="$( wc -c <"$XP/tree/deep.c" | tr -d ' ' )"
+# The cache ladder is $TMPDIR/ripwire FIRST, then $XDG_CACHE_HOME (quality.h cacheDirLadder): isolate both.
+for run in cold warm; do
+    TMPDIR="$XP/xdg" XDG_CACHE_HOME="$XP/xdg" "$BIN" "$XP/tree" --skipped >"$XP/$run.xml" 2>/dev/null
+    XPROOT="$( grep -o '<skipped [^>]*>' "$XP/$run.xml" )"
+    printf '%s' "$XPROOT" | grep -q ' extract_partial="1"' \
+        && ok "(10/$run) --skipped counts the partially-extracted file: extract_partial=\"1\" (every build flavour)" \
+        || no "(10/$run) the partially-extracted file is not counted on <skipped>: $XPROOT"
+    grep -q "<f p=\"deep.c\" why=\"extract-partial\" bytes=\"$XPBYTES\" ext=\".c\"/>" "$XP/$run.xml" \
+        && ok "(10/$run) the file is itemized: <f p=\"deep.c\" why=\"extract-partial\" bytes=\"$XPBYTES\">" \
+        || no "(10/$run) no exact extract-partial row for deep.c: $( grep -o '<f p="[^"]*" why="[^"]*"[^/]*/>' "$XP/$run.xml" | head -3 )"
+done
+grep -q 'extract_partial= counts' "$XP/cold.xml" \
+    && ok "(10) extract_partial= is defined in the same document" || no "(10) extract_partial= rides with no definition"
+grep -q 'p="clean.c" why="extract-partial"' "$XP/cold.xml" \
+    && no "(10) control: the clean file was itemized extract-partial" || ok "(10) control: the clean file carries no extract-partial row"
+command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$XP/cold.xml" 2>/dev/null \
+    && ok "(10) the disclosing document is well-formed" || no "(10) the disclosing document fails xmllint"; }
+
+# ── (10a) THE PARSER-VERSION FLOOR — the CI half of (10b), which runs without a base binary ─────────────────────
+# (10b) needs RIPWIRE_BASE and SKIPs in CI. What makes it true everywhere is the bump itself: a cache whose header names
+# an older kParserVer is refused (test/cacheidentitycheck.sh forges one and asserts reason="parser-version"), so every
+# cache written before extract-partial existed (kParserVer <= 116) is re-extracted. This pins the floor, from source:
+# kParserVer >= 117 and quality.h's mirror equal to it. The lane pinned 115 over its own base (114); train 7 landed it
+# as 117 (one past main's 116 from train 6), so a 115/116 cache predates extract-partial and the floor is 117. A later
+# bump keeps it green; only a revert below 117 reds it.
+PV_FLOOR=117
+PV="$( sed -nE 's/^constexpr std::uint32_t kParserVer +=[ ]*([0-9]+);.*/\1/p' "$ROOT/src/ingest_cache.h" )"
+PVM="$( sed -nE 's/^constexpr std::uint32_t kIngestParserVerMirror +=[ ]*([0-9]+);.*/\1/p' "$ROOT/src/quality.h" )"
+if [ -n "$PV" ] && [ "$PV" -ge "$PV_FLOOR" ] && [ "$PVM" = "$PV" ]; then
+    ok "(10a) kParserVer=$PV >= $PV_FLOOR and quality.h's mirror agrees — a pre-extract-partial cache cannot be served warm"
+else
+    no "(10a) kParserVer='$PV' (mirror '$PVM'): below the extract-partial floor $PV_FLOOR, or the mirror disagrees — a cache holding partial facts as whole would be trusted"
+fi
+
+# ── (10b) THE UPGRADE LADDER: a cache written by a PRE-extract-partial binary is not trusted as whole ──────────
+# Before this class existed, the partial facts of such a file were cached under its real content hash, and a warm
+# run served them as the whole answer. kParserVer's bump (ingest_cache.h) is what rejects every such cache: the
+# branch binary, run warm on a cache the base binary wrote, must re-extract and list the file. Needs a pre-bump
+# binary as RIPWIRE_BASE (the argvdiffcheck convention); SKIPs, and says so, without one — CI has no "previous" binary.
+BASE="${RIPWIRE_BASE:-}"
+if [ -z "$BASE" ]; then
+    printf '  SKIP  (10b) no RIPWIRE_BASE — the upgrade ladder needs a pre-bump binary to write the cache\n'
+elif [ ! -x "$BASE" ]; then
+    no "(10b) RIPWIRE_BASE=$BASE is not an executable"
+else
+    UL="$TMP/upgrade"; mkdir -p "$UL/cache"; cp -R "$XP/tree" "$UL/tree"
+    TMPDIR="$UL/cache" XDG_CACHE_HOME="$UL/cache" "$BASE" "$UL/tree" --skipped >"$UL/base.xml" 2>/dev/null; brc=$?
+    ls "$UL/cache/ripwire" 2>/dev/null | grep -q . \
+        && ok "(10b) guard: the base binary ran (rc=$brc) and wrote a cache under the isolated ladder" \
+        || no "(10b) guard: the base binary wrote no cache under $UL/cache — the ladder is void"
+    TMPDIR="$UL/cache" XDG_CACHE_HOME="$UL/cache" "$BIN" "$UL/tree" --skipped >"$UL/warm.xml" 2>/dev/null
+    grep -q "<f p=\"deep.c\" why=\"extract-partial\"" "$UL/warm.xml" \
+        && ok "(10b) the branch binary, warm on the base binary's cache, re-extracts and lists deep.c as extract-partial" \
+        || no "(10b) a cache written before the class existed was served as whole: no extract-partial row ($( grep -o '<skipped [^>]*>' "$UL/warm.xml" | grep -o 'extract_partial="[0-9]*"' ))"
+    TMPDIR="$UL/cache" XDG_CACHE_HOME="$UL/cache" "$BIN" "$UL/tree" --skipped >"$UL/warm2.xml" 2>/dev/null
+    grep -q "<f p=\"deep.c\" why=\"extract-partial\"" "$UL/warm2.xml" \
+        && ok "(10b) and again on the cache the branch binary rewrote" \
+        || no "(10b) the second warm run lost the extract-partial row"
+fi
+
 echo
 [ "$fail" -eq 0 ] && { echo "ALL PASS"; exit 0; } || { echo "FAILURES"; exit 1; }

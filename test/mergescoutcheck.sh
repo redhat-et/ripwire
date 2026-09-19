@@ -502,6 +502,40 @@ WARMOUT="$( "$BIN" "$PREPO" --merge-scout="$PERF_REFS" --no-cache 2>/dev/null )"
 if [ -n "$SAVED_TMPDIR" ]; then export TMPDIR="$SAVED_TMPDIR"; else unset TMPDIR; fi
 rm -rf "$PERFTMP" "$PERF_ISOTMP"
 
+# ── TREE UNAVAILABLE: an arm whose tree could not be materialized is refused, never diffed as EMPTY ─────────────
+# materializeCommitTree (quality.h) returns no tree when `git archive` fails. indexCommittish used to hand back an EMPTY
+# index for it, and computeNamedArm diffed the other side against that under ok="1": every symbol on the base side
+# reported as the arm's own work (base_fn below). The tree's DISCLOSE sink now marks the index unavailable and the arm's
+# sink refuses it — ok="0" changed="0", the unrelated-history shape. The fault is a PATH shim around the real git that
+# fails `git archive <lane tip>` — a seam that reaches the Release binary too. Control: the pass-through shim.
+TU="$TMP/treeunavail"; mkdir -p "$TU/repo" "$TU/shim" "$TU/cache"
+tu(){ git -C "$TU/repo" "$@" >/dev/null 2>&1; }
+tu init -q -b main; tu config user.email t@t; tu config user.name t; tu config commit.gpgsign false
+printf 'int base_fn( void ) { return 1; }\n' >"$TU/repo/a.c"; tu add a.c; tu commit -qm a
+tu checkout -qb lane; printf 'int lane_fn( void ) { return 2; }\n' >>"$TU/repo/a.c"; tu commit -qam lane
+tu checkout -q main; printf 'int main2_fn( void ) { return 3; }\n' >"$TU/repo/b.c"; tu add b.c; tu commit -qm main2
+LANESHA="$( git -C "$TU/repo" rev-parse lane )"; REALGIT="$( command -v git )"
+cat >"$TU/shim/git" <<SHEOF
+#!/usr/bin/env bash
+case " \$* " in
+    *" archive "*" $LANESHA "*) [ -n "\${RW_SHIM_MANGLE:-}" ] && exit 128; exec "$REALGIT" "\$@" ;;
+    *) exec "$REALGIT" "\$@" ;;
+esac
+SHEOF
+chmod +x "$TU/shim/git"
+PATH="$TU/shim:$PATH" TMPDIR="$TU/cache" XDG_CACHE_HOME="$TU/cache" "$BIN" "$TU/repo" --merge-scout=lane --no-cache >"$TU/ctl.xml" 2>/dev/null
+rm -rf "$TU/cache"; mkdir -p "$TU/cache"
+PATH="$TU/shim:$PATH" TMPDIR="$TU/cache" XDG_CACHE_HOME="$TU/cache" RW_SHIM_MANGLE=1 "$BIN" "$TU/repo" --merge-scout=lane --no-cache >"$TU/mut.xml" 2>/dev/null
+TUCTL="$( grep -o '<arm ref="lane"[^>]*>' "$TU/ctl.xml" )"; TUMUT="$( grep -o '<arm ref="lane"[^>]*>' "$TU/mut.xml" )"
+if printf '%s' "$TUCTL" | grep -q 'ok="1" changed="1"'; then
+    ok "tree unavailable (control): the pass-through shim scouts the lane — ok=\"1\" changed=\"1\" (lane_fn)"
+    printf '%s' "$TUMUT" | grep -q 'ok="0" changed="0"' \
+        && ok "tree unavailable: an arm whose tree git could not archive is refused — ok=\"0\" changed=\"0\", nothing fabricated" \
+        || no "tree unavailable: the arm was diffed against an EMPTY tree — $TUMUT (the base's own symbols reported as the arm's work)"
+else
+    no "tree unavailable (control): the pass-through shim did not scout the lane as ok=1 changed=1 — the arm is void: $TUCTL"
+fi
+
 # ── Summary ─────────────────────────────────────────────────────────────────────────────────────────
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "SOME CHECKS FAILED"; exit 1; fi

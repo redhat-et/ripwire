@@ -19,8 +19,13 @@ reviews:
   path_instructions:
     - path: "src/**"
       instructions: >-
-        MSVC is not a target; do not raise MSVC-only portability. Never suggest std::map/unordered_map.
-        ASSUME/EXPECTS/ENSURES are free invariants: flag only side effects, external input (VALIDATE), ASSUME(false).
+        Platforms: Unix/Linux/macOS first; native Windows second (clang-cl primary, MSVC cl.exe must also build).
+        Flag cl.exe portability, but not as a blocker for a POSIX-only code path. Never suggest std::map/unordered_map.
+        Determinism is a contract: output must never depend on crawl, path or thread order, and no float-equality
+        ties; a tie breaks on canonical content keys or exact integer arithmetic.
+        Pins and gate counts are re-derived by their generators, never hand-edited. Gates take the binary as $1.
+        ASSUME/EXPECTS/ENSURES are free invariants: flag only side effects, external input, ASSUME(false).
+        External input (files, git, env, argv, MCP/JSON, data read back from a cache) is checked with VALIDATE.
         A degrade path uses DISCLOSE( sink, why ), never ASSUME(false): a one-argument DISCLOSE( msg ) is a debug trace
         that ships nothing, and a Diagnostics::answerUnchanged reason must be true. A count that cannot be a total must be
         labelled a floor; a zero means none found. Flag silent zeros, undisclosed truncation, and gate arms

@@ -165,6 +165,14 @@ struct CommentCoherenceScan
     std::vector<CommentCoherenceRow> rows;
     std::uint32_t                    noCommentCount     = 0;  // documented=false symbols — UNAVAILABLE, never scored
     std::uint32_t                    unreadableFileCount = 0; // >0 ⇒ rows is a FLOOR, disclosed on the root
+    enum class DisclosureWhy : std::uint8_t
+    {
+        UnreadableFile,
+    };
+    void disclose( DisclosureWhy ) noexcept   // the DISCLOSE sink: the field the emitter reads
+    {
+        ++unreadableFileCount;
+    }
 };
 
 inline CommentCoherenceScan computeCommentCoherence( const IngestResult& ing )
@@ -205,8 +213,7 @@ inline CommentCoherenceScan computeCommentCoherence( const IngestResult& ing )
             if( !bytes )
             {
                 fileFailed[s.fileId] = 1;
-                ++scan.unreadableFileCount;
-                DISCLOSE( "comment-coherence: an indexed file could not be read — its functions are absent from the report" );
+                DISCLOSE( scan, CommentCoherenceScan::DisclosureWhy::UnreadableFile, "comment-coherence: an indexed file could not be read — its functions are absent from the report" );
             }
             fileBytes[s.fileId] = std::move( bytes ).value_or( std::string() );
         }

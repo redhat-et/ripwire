@@ -49,6 +49,21 @@ struct EditCheckContract
     std::uint32_t nowDefs;      //   baseline fact a MAX cannot express; see editCheckVerdict for why it exists
     bool          wasPublic;
     bool          nowPublic;
+    bool          defsUnmeasured;   // the baseline carried no definition COUNT: that fact is not compared (defs_unmeasured="1")
+    // The DISCLOSE sink for a comparison that cannot be made, in whole or in part: the emitter prints what it sets.
+    enum class DisclosureWhy : std::uint8_t
+    {
+        NoHeadBaseline,           // no git HEAD: status="no-baseline", nothing claimed
+        BaselineDefsCountMissing, // a snapshot with no definition count for the key (a cache defect): that dimension is skipped
+    };
+    void disclose( DisclosureWhy why ) noexcept
+    {
+        switch( why )
+        {
+            case DisclosureWhy::NoHeadBaseline:           status = "no-baseline"; break;
+            case DisclosureWhy::BaselineDefsCountMissing: defsUnmeasured = true; wasDefs = nowDefs; break;
+        }
+    }
 };
 
 // the overload set sharing `focus`'s DEFINITION SITE (same file + scope + name) — the was/now comparison MUST
@@ -262,8 +277,7 @@ inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const
         // 2026-09-06 stranger audit: a tarball, an export, any non-git tree used to answer "new-symbol" for a
         // symbol that plainly exists — a false contract claim whose only tell was a missing at=. No HEAD means
         // no comparison: say so, claim nothing.
-        res.status = "no-baseline";
-        DISCLOSE( "edit-check: no git HEAD baseline — status no-baseline" );
+        DISCLOSE( res, EditCheckContract::DisclosureWhy::NoHeadBaseline, "edit-check: no git HEAD baseline — status no-baseline" );
         return res;
     }
     if( base.locBySym.find( key ) == base.locBySym.end() )
@@ -283,8 +297,9 @@ inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const
     const auto dit = base.defsBySym.find( key );
     if( dit == base.defsBySym.end() )
     {
-        res.wasDefs = res.nowDefs;
-        DISCLOSE( "edit-check: baseline snapshot has no definition count for SYM — defs_was suppressed" );
+        // the count cannot move the verdict (no phantom contract-change out of a cache defect), and the root says the
+        // dimension was not compared, so an "unchanged" is never read as covering a removed overload
+        DISCLOSE( res, EditCheckContract::DisclosureWhy::BaselineDefsCountMissing, "edit-check: baseline snapshot has no definition count for SYM — defs_was suppressed" );
     }
     else
     {
@@ -900,6 +915,11 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     {
         out += kEditCheckWindowLegend;
     }
+    if( contract.defsUnmeasured )
+    {
+        out += "defs_unmeasured=\"1\": the HEAD baseline carries no definition COUNT for this symbol (a cache defect), so that "
+               "fact was not compared — status= rests on the params MAX and publicness alone and cannot see a removed overload. ";
+    }
     // H1: what callers= and incompatible= did not read, addressed to incompatible= by name — ahead of the floor tail, and
     // emitted exactly when the root carries unproven_defs= (graphlegend.h unprovenDefsVerbLegend).
     out += unprovenDefsVerbLegend( UnprovenDefsVerb::EditCheck, unprovenDefs > 0 );
@@ -928,6 +948,10 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     char defsAttr[ 32 ];
     rw::formatTo( defsAttr, sizeof( defsAttr ), " defs=\"{}\"", overloadNodes.size() );
     out += defsAttr;
+    if( contract.defsUnmeasured )
+    {
+        out += " defs_unmeasured=\"1\"";   // defined in the legend clause emitted only beside it
+    }
     if( std::string_view( verdict.status ) == "contract-change" )
     {
         char cc[ 192 ];

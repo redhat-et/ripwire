@@ -71,6 +71,19 @@ struct SinceScope
     // Nothing displayed it (window= and <since rev=> print cfg.since), so it is gone rather than left for a future
     // caller to hand git by mistake. Invariant: active && isRev ⇒ isBareCommitSha( baselineSha ).
     std::string baselineSha;
+    // The DISCLOSE sink for a baseline git answered with something that is not a commit object name: the value is
+    // DROPPED (never handed back to git), so a host that needs a baseline refuses and says why
+    // (sinceNoBaselineRefusal names it), and a window host keeps its --since window. Absent ⇒ nothing was refused.
+    bool        baselineRefused = false;
+    enum class DisclosureWhy : std::uint8_t
+    {
+        BaselineNotObjectName,
+    };
+    void disclose( DisclosureWhy ) noexcept
+    {
+        baselineRefused = true;
+        baselineSha.clear();
+    }
 };
 
 // A --since value "looks like a date" only if EVERY alphabetic run in it is a date word (or an ISO
@@ -194,9 +207,10 @@ inline bool looksLikeDate( std::string_view s )
 // N4: THE ONE no-baseline refusal — a --since that is a real window but names no commit at or before it, on a
 // host that compares against a commit. Spelled here alone (sincecheck.sh's N4 source arm counts the files);
 // main.cpp decides it beside the M8 validation, slicediff.h prints the same sentence on its own degrade path.
-inline std::string sinceNoBaselineRefusal( std::string_view value, const std::string& root )
+inline std::string sinceNoBaselineRefusal( std::string_view value, const std::string& root, bool isBaselineRefused = false )
 {
-    return "ripwire: --since=" + std::string( value ) + " resolves to no commit in '" + root
+    return "ripwire: --since=" + std::string( value ) + ( isBaselineRefused ? " resolved to an answer from git that is not a commit object name in '"
+                                                                             : " resolves to no commit in '" ) + root
          + "' — beside --slice it names the revision to compare this variable's def-use slice against "
            "(e.g. --since=HEAD~1, --since=<sha>, --since=\"2 weeks ago\")";
 }
@@ -343,6 +357,13 @@ inline SinceScope resolveSinceScope( const std::string& root, std::string_view v
         scope.isRev       = false;
         scope.sinceDate   = val;
         scope.baselineSha = popenTrimmed( gitCmd( " -C " ) + shSingleQuote( root ) + " rev-list -1 --before=" + shSingleQuote( val ) + " HEAD 2>/dev/null" );
+        // git's OUTPUT is external input, and this sha goes straight back to git (--slice's `git show <sha>:path`).
+        // Empty is the honest "history never reaches the date"; anything else must be a bare object name.
+        if( !VALIDATE( scope.baselineSha.empty() || isBareCommitSha( scope.baselineSha ) ) )
+        {
+            DISCLOSE( scope, SinceScope::DisclosureWhy::BaselineNotObjectName,
+                      "resolveSinceScope: rev-list answered a date's baseline with something that is not an object name — dropped" );
+        }
         return scope;
     }
 
@@ -377,11 +398,13 @@ inline std::string sinceLogArgs( const SinceScope& scope, const char* fallbackSi
         // optimizer the promise that external data is well formed — and under NDEBUG that promise is all that
         // would be left of the check. A malformed baseline degrades to the caller's own fallback window, which is
         // exactly what an inactive scope yields, rather than reaching `git log` as a positional argument.
-        if( !VALIDATE( isBareCommitSha( scope.baselineSha ) ) )
-        {
-            DISCLOSE( "sinceLogArgs: the baseline is not a bare object name — falling back to the caller's window" );
-            return "--since=" + shSingleQuote( fallbackSince ) + " ";
-        }
+        // FIX ROUND 2: that check moved to the one PRODUCER, where the value crosses from git into this process —
+        // resolveSinceScope's revision step stores only gitResolveCommitSha's answer, which returns a bare sha or
+        // nothing (VALIDATEd there), and its date step VALIDATEs its own rev-list answer and discloses a refusal into
+        // the scope. So an active REV scope reaching here with anything else is a caller that built a SinceScope by
+        // hand: a DASSERT catches that in debug (a checked call, not an optimizer promise — selfcheckcheck arm C), and there
+        // is no silent fallback window left for window= to misreport.
+        DASSERT( isBareCommitSha( scope.baselineSha ), "an active REV scope carries the bare sha resolveSinceScope validated" );
         return shSingleQuote( scope.baselineSha + ".." ) + " ";   // positional rev-range, not a --since flag
     }
     return "--since=" + shSingleQuote( scope.sinceDate ) + " ";
@@ -2725,12 +2748,9 @@ inline std::vector<CoGroup> cochangeViolationGroups( std::vector<CoViolation>& v
                 core = f;
             }
         }
-        if( core == UINT32_MAX )
-        {   // unreachable while `remaining` counts the same set the degrees are built from — but a silent
-            // infinite loop is the failure mode if it ever is, so degrade loudly and stop covering.
-            DISCLOSE( "cochangeViolationGroups: uncovered pairs remain but no file carries one — cover abandoned" );
-            break;
-        }
+        // remaining > 0 means some violation is uncovered, and the degree pass just counted both of its endpoints, so
+        // best >= 1 and a core was chosen: `remaining` and `degree` are built from the same `covered` set, by this function.
+        ASSUME( core != UINT32_MAX, "an uncovered violation gives its endpoints a nonzero degree" );
         CoGroup g{ core, {} };
         for( std::size_t vi = 0; vi < viol.size(); ++vi )
         {

@@ -32,6 +32,15 @@ struct PageRankRun
 {
     std::uint32_t iterationCount = 0;
     bool hasConverged = true;
+    // The DISCLOSE sink for the truncating exit: it clears hasConverged, which prconverge.h prints as pr_converged="0".
+    enum class DisclosureWhy : std::uint8_t
+    {
+        MaxIterationsReached,
+    };
+    void disclose( DisclosureWhy ) noexcept
+    {
+        hasConverged = false;
+    }
 };
 
 // Float edge storage stays cache-compact; every iterative vector and reduction is double precision.

@@ -396,7 +396,8 @@ inline Outcome run( const IngestResult& ing, const Graph& g, const std::string& 
     fs::remove_all( fs::path( tmpRoot ), ec );                    // a leftover from a crashed prior run
     if( !fs::create_directories( fs::path( tmpRoot ), ec ) && ec )
     {
-        DISCLOSE( "edit-preview: cannot create the temp parse root" );
+        DISCLOSE( Diagnostics::answerRefused, "the preview refuses by name (no private temp directory); no preview is served",
+                  "edit-preview: cannot create the temp parse root" );
         return refuse( "cannot create a private temp directory to parse the payload in" );
     }
     quality::TmpTreeGuard guard{ tmpRoot };

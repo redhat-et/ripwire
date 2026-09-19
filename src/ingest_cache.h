@@ -249,7 +249,27 @@ constexpr std::uint32_t kCacheVersion = 24;           // 24: RawRef gains `viaAr
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 116;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 117;          // bump on any grammar/.scm/extraction change
+                                                      // 117 = 2026-09-19 (train 7: one bump past main's 116 for
+                                                      //   both members; each lane had bumped 114 -> 115)
+                                                      //   (a) 2026-09-19 lane/disclose-sink-form (degrade disclosure, test/skipreasoncheck.sh
+                                                      //    arm 10): a PARTIALLY extracted file (an ExtractShortfall — a
+                                                      //    nesting bound, an unavailable tags query, a throw part-way) is
+                                                      //    itemized why="extract-partial" and written to the cache as
+                                                      //    UNKNOWN. A cache written before this stored such a file's
+                                                      //    partial facts under its real hash, which a warm run would
+                                                      //    serve as whole: every such cache must be re-extracted.
+                                                      //   (b) 2026-09-18 lane/jsx-element-calls (#285 JSX element invocation:
+                                                      //    queries/typescript/tags.scm's `<Foo/>`/`<Foo.Bar/>`
+                                                      //    patterns moved to a NEW queries/tsx/tags.scm — plain
+                                                      //    .ts's grammar has no jsx_*_element node types, so a
+                                                      //    shared query with them fails to compile AT ALL for
+                                                      //    .ts — kLangTable's .tsx row now uses querySub "tsx",
+                                                      //    not "typescript"; queries/javascript/tags.scm gained
+                                                      //    the same patterns in place, since .js/.jsx/.mjs/.cjs
+                                                      //    already share one grammar that has the nodes. New
+                                                      //    isJsxIntrinsicTagIdentifier (src/ingest_names.h) drops
+                                                      //    an intrinsic tag (`<div>`) at capture time.
                                                       // 116 = 2026-09-18 (issue #287 round 2, review
                                                       //   rv-p6.md HIGH: capturePythonRebindShadowDecls
                                                       //   emits a LocalBindKind::VarDecl RawBind for every
@@ -1563,19 +1583,22 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
             // shipped binary reads this. Same for the two guards below, split from one fused test because
             // "your binary's extraction changed" and "this artifact came from another architecture" are
             // different things to be told about a committed artifact.
-            DISCLOSE( "ingest: cache blob is a different format version — rejected and rebuilt (full reparse)" );
+            DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                      "ingest: cache blob is a different format version — rejected and rebuilt (full reparse)" );
             frame.reason = CacheReject::FormatVersion;
             return frame;
         }
         if( parserVer != parserVerFor( captureValueUses ) )
         {
-            DISCLOSE( "ingest: cache blob parserVer mismatch (older binary, or the other lean/rich family) — rejected and rebuilt (full reparse)" );
+            DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                      "ingest: cache blob parserVer mismatch (older binary, or the other lean/rich family) — rejected and rebuilt (full reparse)" );
             frame.reason = CacheReject::ParserVersion;
             return frame;
         }
         if( arch != kArtifactArch )
         {
-            DISCLOSE( "ingest: cache blob arch mismatch (foreign endianness/pointer width) — rejected and rebuilt (full reparse)" );
+            DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                      "ingest: cache blob arch mismatch (foreign endianness/pointer width) — rejected and rebuilt (full reparse)" );
             frame.reason = CacheReject::ArtifactArch;
             return frame;
         }
@@ -1606,7 +1629,8 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
         || entryCount > ( fileBytes - kCacheHeaderBytes - kCacheTrailerBytes ) / kCacheEntryBytes
         || tableOffset != fileBytes - kCacheTrailerBytes - std::uint64_t( entryCount ) * kCacheEntryBytes )
     {
-        DISCLOSE( "ingest: cache blob trailer does not describe the file (torn write) — cache treated as corrupt" );
+        DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                  "ingest: cache blob trailer does not describe the file (torn write) — cache treated as corrupt" );
         frame.reason = CacheReject::CorruptFrame;
         return frame;
     }
@@ -1623,7 +1647,8 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
     }
     if( blobChecksum( std::string_view( hdrTable.data(), hdrTable.size() ) ) != tableSum )
     {
-        DISCLOSE( "ingest: cache offset-table checksum mismatch — cache treated as corrupt (full reparse)" );
+        DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                  "ingest: cache offset-table checksum mismatch — cache treated as corrupt (full reparse)" );
         frame.reason = CacheReject::Checksum;
         return frame;
     }
@@ -1644,7 +1669,8 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
             || e.recLength > tableOffset || e.recOffset > tableOffset - e.recLength   // recOffset + recLength > tableOffset, without the wrap
             || ( i != 0 && frame.entries[ i - 1 ].pathHash > e.pathHash ) )
         {
-            DISCLOSE( "ingest: cache offset-table entry out of bounds or out of order — cache treated as corrupt" );
+            DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                      "ingest: cache offset-table entry out of bounds or out of order — cache treated as corrupt" );
             frame.entries.clear();
             frame.reason = CacheReject::CorruptFrame;
             return frame;
@@ -1738,7 +1764,8 @@ struct ByteR
     {
         if( !VALIDATE( v < count ) )
         {
-            DISCLOSE( "ingest: cache record carries a field past its range (an enum byte past its last enumerator, or a 16-bit field wider than 16 bits) — cache treated as corrupt" );
+            DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                      "ingest: cache record carries a field past its range (an enum byte past its last enumerator, or a 16-bit field wider than 16 bits) — cache treated as corrupt" );
             ok = false;
             return false;
         }
@@ -2057,7 +2084,8 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         {
             return true;
         }
-        DISCLOSE( "ingest: cache record count exceeds remaining bytes — cache treated as corrupt" );
+        DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                  "ingest: cache record count exceeds remaining bytes — cache treated as corrupt" );
         r.ok = false;
         return false;
     };
@@ -2094,7 +2122,8 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         {
             if( fileDict[k] <= fileDict[ k - 1 ] )
             {
-                DISCLOSE( "ingest: cache file dictionary not strictly ascending — cache treated as corrupt" );
+                DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                          "ingest: cache file dictionary not strictly ascending — cache treated as corrupt" );
                 r.ok = false;
                 return false;
             }
@@ -2304,7 +2333,8 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
             fileBuf.resize( std::size_t( spanEnd - spanStart ) );
             if( !preadExact( frame.blob.fd, fileBuf.data(), fileBuf.size(), spanStart ) )
             {
-                DISCLOSE( "ingest: cache blob read failed mid-load — the unread records are reparsed" );
+                DISCLOSE( Diagnostics::answerUnchanged, "the affected files are reparsed from source: the answer is byte-identical, only slower",
+                          "ingest: cache blob read failed mid-load — the unread records are reparsed" );
                 break;
             }
 
@@ -2316,7 +2346,8 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
                 {
                     // A record torn on its own while the table survived: drop THIS file (it reparses) and
                     // keep the rest of the blob. The table is what must be trusted whole, not each record.
-                    DISCLOSE( "ingest: cache record checksum mismatch — that file is reparsed, the rest of the blob stands" );
+                    DISCLOSE( Diagnostics::answerUnchanged, "the affected files are reparsed from source: the answer is byte-identical, only slower",
+                              "ingest: cache record checksum mismatch — that file is reparsed, the rest of the blob stands" );
                     continue;
                 }
                 ByteR       r{ rec, rec + e.recLength };
@@ -2330,7 +2361,8 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
                 {
                     // The pathHash matched but the record is for a DIFFERENT file — a 64-bit collision.
                     // Serving it would be a wrong answer, so the file reparses instead.
-                    DISCLOSE( "ingest: cache path-hash collision — the colliding file is reparsed" );
+                    DISCLOSE( Diagnostics::answerUnchanged, "the affected files are reparsed from source: the answer is byte-identical, only slower",
+                              "ingest: cache path-hash collision — the colliding file is reparsed" );
                     continue;
                 }
                 // T5: the on-disk key is ROOT-RELATIVE; re-absolutize against the CURRENT rootDir so the
@@ -2498,7 +2530,8 @@ inline bool appendCarryRecord( ByteW& w, int fd, const CacheEntry& src, std::str
     if( !preadExact( fd, scratch.data(), scratch.size(), src.recOffset )
         || recordSum32( std::string_view( scratch.data(), scratch.size() ) ) != src.recSum )
     {
-        DISCLOSE( "ingest: cache carry-over record failed its checksum — dropped (that file reparses)" );
+        DISCLOSE( Diagnostics::answerUnchanged, "a carry-over record for a file this run did not crawl: this answer never reads it",
+                  "ingest: cache carry-over record failed its checksum — dropped (that file reparses)" );
         return false;
     }
     w.raw( scratch.data(), scratch.size() );
@@ -2557,7 +2590,8 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     // directory at `path` costs no wasted pass and temp write before rename(tmp,dir) fails EISDIR.
     if( shapeOfPath( path ) == PathShape::Other )
     {
-        DISCLOSE( "ingest: cache path is not a regular file (directory/device/fifo) — cache not written" );
+        DISCLOSE( Diagnostics::answerUnchanged, "this answer is already computed in memory: only the next run starts cold",
+                  "ingest: cache path is not a regular file (directory/device/fifo) — cache not written" );
         return;
     }
 
@@ -2795,7 +2829,8 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
         {
             os::close( rawFd );   // fdopen did not adopt the descriptor; the holder still removes the temp name
         }
-        DISCLOSE( "ingest: saveCache could not open temp file for write — cache left unchanged" );
+        DISCLOSE( Diagnostics::answerUnchanged, "this answer is already computed in memory: only the next run starts cold",
+                  "ingest: saveCache could not open temp file for write — cache left unchanged" );
         rw::emitTo( stderr, "ripwire: cache {}: cannot write ({}) — every run parses from source until this is fixed\n",
                       path.c_str(), std::strerror( openErr )  );   // 2026-09-06: Release kept no signal for this
         return;
@@ -2808,14 +2843,15 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     if( wErr )
     {
         // never rename a short/torn write over a good cache — the holder removes the temp on return
-        DISCLOSE( "ingest: saveCache write failed (short write or fclose error) — old cache preserved" );
+        DISCLOSE( Diagnostics::answerUnchanged, "this answer is already computed in memory: only the next run starts cold",
+                  "ingest: saveCache write failed (short write or fclose error) — old cache preserved" );
         rw::emitTo( stderr, "ripwire: cache {}: write failed (short write; disk full?) — old cache kept, this run was parsed from source\n", path.c_str() );
         return;
     }
     if( !temp.commit( path ) )
     {
         // the holder removes the temp on return
-        DISCLOSE( "ingest: saveCache rename(tmp -> cache) failed — old cache preserved" );
+        DISCLOSE( Diagnostics::answerUnchanged, "this answer is already computed in memory: only the next run starts cold", "ingest: saveCache rename(tmp -> cache) failed — old cache preserved" );
         rw::emitTo( stderr, "ripwire: cache {}: cannot replace ({}) — old cache kept, this run was parsed from source\n",
                       path.c_str(), std::strerror( errno ) );
         return;

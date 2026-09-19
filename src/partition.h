@@ -285,8 +285,7 @@ inline PartitionPlan planPartition( const IngestResult& ing, const Graph& g, con
     const std::vector<NodeId> assignable( surface.begin() + std::ptrdiff_t( coreCount ), surface.end() );
     if( assignable.empty() )                       // nothing beyond the core to carve — 0 partitions, honestly reported
     {
-        DISCLOSE( "pack-task partition: the task's ranked surface fits entirely in the shared core — no partitions to carve" );
-        return plan;
+        return plan;   // not a degrade: partitions="0" beside requested= is the honest, whole answer (no trace needed)
     }
 
     // ── decision 3 — communities → partitions ─────────────────────────────────────────────────────────────
@@ -296,10 +295,7 @@ inline PartitionPlan planPartition( const IngestResult& ing, const Graph& g, con
     plan.splitCount       = splitGroupsUpTo( grp, partitionCount );          // no-op when K >= N
 
     const std::uint32_t binCount = std::min<std::uint32_t>( partitionCount, std::uint32_t( grp.members.size() ) );
-    if( binCount < partitionCount )
-    {
-        DISCLOSE( "pack-task partition: fewer separable modules than partitions requested — emitting the modules that exist" );
-    }
+    // fewer separable modules than requested is not a degrade: partitions= below requested= (and the lanes warning) says it
 
     const std::vector<std::vector<std::uint32_t>> bins = packGroupsIntoBins( grp, binCount );
     plan.groups.resize( binCount );

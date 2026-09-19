@@ -283,7 +283,8 @@ inline bool ingestCommitTree( const std::string& root, const std::string& sha, c
     out = ingest( tmpRoot.c_str(), excludes, cachePath.empty() ? std::string_view {} : std::string_view( cachePath ), maxFileBytes );
     if( out.symbols.empty() && out.files.empty() )
     {
-        DISCLOSE( "dmm: a materialized commit tree ingested empty" );
+        DISCLOSE( Diagnostics::answerRefused, "the DMM report says available=0 dmm=UNAVAILABLE with the reason; nothing is scored",
+                  "dmm: a materialized commit tree ingested empty" );
         return false;
     }
     return true;

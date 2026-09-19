@@ -451,6 +451,45 @@ inline std::string packTaskOmittedBodiesJson( const IngestResult& ing, const rw:
 // nullptr-omits-the-attr contract), so a caller with NONE of these (a bare MCP call) still gets a complete,
 // correctly-shaped bundle — matching how a plain CLI `--pack-task` run (without `--for`/`--metrics` also set)
 // already leaves fanIn/impure/churn/tested/amp unset today.
+// The DISCLOSE sink for a pack-task section whose render degraded (infra/emit.h renderToString: Rendered::ok == false,
+// empty text). Such a section is EMPTY because its render failed — not because the budget omitted it, and not because
+// nothing matched — so the bundle marks the section itself (render_failed="1") and names it on the root
+// (render_failed="ranking,bodies"), in the XML and the JSON dialect alike. A body-cost PROBE that fails prices that body
+// as unaffordable (it is then omitted like any over-budget body) and is named on the root as "body-probe".
+struct PackTaskRenderFaults
+{
+    enum class DisclosureWhy : std::uint8_t
+    {
+        RankingRenderFailed,
+        BodiesRenderFailed,
+        BodyProbeRenderFailed,
+    };
+    std::uint8_t failedMask = 0;   // bit i ⇔ DisclosureWhy value i
+    void disclose( DisclosureWhy why ) noexcept
+    {
+        failedMask = std::uint8_t( failedMask | ( 1u << unsigned( why ) ) );
+    }
+    bool hasFailed( DisclosureWhy why ) const noexcept
+    {
+        return ( failedMask & ( 1u << unsigned( why ) ) ) != 0;
+    }
+    // "ranking,bodies,body-probe" in DisclosureWhy order — the root attribute's value ("" when nothing failed)
+    std::string names() const
+    {
+        static constexpr const char* kNames[] = { "ranking", "bodies", "body-probe" };
+        std::string out;
+        for( unsigned i = 0; i < std::size( kNames ); ++i )
+        {
+            if( ( failedMask & ( 1u << i ) ) != 0 )
+            {
+                out += out.empty() ? "" : ",";
+                out += kNames[ i ];
+            }
+        }
+        return out;
+    }
+};
+
 struct PackTaskInputs
 {
     std::size_t                        budgetTokens         = 0;       // 0 = kPackTaskDefaultTokens
@@ -496,6 +535,12 @@ struct PackTaskInputs
     // here, at the two places the budget is spent: the section shares trim to leave room for it, and the ladder
     // prices it, so the label fires when the trim cannot get there. 0 ⇒ every other caller, byte-identical.
     std::size_t                        trailingSectionBytes = 0;
+    // The caller's trailing section could not be charged (its chargeSection degraded, so trailingSectionBytes is 0 and
+    // it streams directly): est_tokens leaves those bytes out and the root labels itself est_measured="0".
+    bool                               isTrailingUncharged  = false;
+    // Where this bundle's section renders record a failure (see PackTaskRenderFaults). packTaskBundleText points it at
+    // its own local; nullptr ⇒ a render failure is still returned as empty text, just not recorded.
+    PackTaskRenderFaults*              renderFaults         = nullptr;
 
     // R-E (2026-08-17 harvest): the single-root run's OWN root argument — same convention serialize()'s
     // rootArg takes (empty ⇒ multi-root, or a caller that never resolved one, e.g. an MCP call against a
@@ -838,13 +883,28 @@ inline std::vector<float> buildMaskedRank( const IngestResult& ing, const std::v
 }
 
 // every packTaskBundleText section (and renderRankingWithFar below) renders through infra/emit.h's ONE
-// renderToString seam, with this file's own degrade wording. It keeps the name it had: a section that
-// degrades is SKIPPED from the budget (empty string, the caller's documented path), so the `ok` flag the
-// seam returns has no second reading here and the call sites stay one expression long.
-template<class Emit>
-inline std::string packTaskRenderToString( Emit&& emit )
+// renderToString seam. A section whose render degrades comes back EMPTY; this wrapper records WHICH one in the
+// bundle's PackTaskRenderFaults, so the caller can mark the section and the root instead of letting an empty
+// string read as a budget omission (or, in the JSON dialect, as a missing value after its key).
+struct PackTaskRendered
 {
-    return rw::renderToString( std::forward<Emit>( emit ), "pack-task: open_memstream failed — section skipped from the budget" ).text;
+    std::string text;
+    bool        ok = false;
+};
+
+template<PackTaskRenderFaults::DisclosureWhy kWhy, class Emit>
+inline PackTaskRendered packTaskRender( Emit&& emit, PackTaskRenderFaults* faults )
+{
+    rw::Rendered r = rw::renderToString( std::forward<Emit>( emit ) );
+    if( !r.ok )
+    {
+        ASSUME( r.text.empty() );   // renderToString's contract: a failed render hands back no partial buffer
+        if( faults != nullptr )
+        {
+            DISCLOSE( *faults, kWhy, "pack-task: a section's render failed — the section is marked render_failed and named on the root" );
+        }
+    }
+    return PackTaskRendered{ std::move( r.text ), r.ok };
 }
 
 // R2: section 1 as ONE cohesive unit — the distance-masked packSignatures call (eligibleIds only) PLUS the
@@ -873,7 +933,7 @@ template<class EscFn>
 inline RankingSection renderRankingWithFar( const IngestResult& ing, const RankingSectionInputs& ri, EscFn&& ex )
 {
     RankingSection out;
-    out.sigsStr = ri.eligibleIds->empty() ? std::string( "<sigs></sigs>" ) : packTaskRenderToString( [ & ]( std::FILE* m )
+    out.sigsStr = ri.eligibleIds->empty() ? std::string( "<sigs></sigs>" ) : packTaskRender<PackTaskRenderFaults::DisclosureWhy::RankingRenderFailed>( [ & ]( std::FILE* m )
     {
         packSignatures( m, ing, *ri.maskedRank, int( ri.eligibleIds->size() ), ri.in->sigLadderBudgetBytes, /*metrics=*/true,
                         ri.in->fanIn, ri.in->impure, ri.in->redact,
@@ -885,7 +945,12 @@ inline RankingSection renderRankingWithFar( const IngestResult& ing, const Ranki
                                                      //   not a floor-narrowed topN — droppedPositiveCount re-checks
                                                      //   rank>0 per symbol regardless, so this is unaffected either way
                         &out.droppedPositive );      // A2: exact count, see droppedPositiveCount (serialize.h)
-    } );
+    }, ri.in->renderFaults ).text;
+    if( !ri.eligibleIds->empty() && out.sigsStr.empty() )
+    {
+        out.sigsStr = "<sigs render_failed=\"1\"></sigs>";   // the section is there and says why it is empty
+        return out;
+    }
     // §P8 vocabulary: the ladder's marker is `<sigs shown="S" total="T" capped="1">` (src/pageview.h, THE
     // TRUNCATION VOCABULARY, rule 5) — it was payload="capped", and THIS was the string-match that made a
     // string enum load-bearing. Read off the OPENING TAG only, so a capped= on any nested child can never
@@ -1018,12 +1083,16 @@ inline std::size_t probeBodyCost( const IngestResult& ing, const Graph& g, NodeI
     // in.calleeRank is threaded through the PROBE, not only the real render: it decides WHICH callee rows
     // survive the <calls> cut, and different rows are different signature bytes. A probe run without it
     // would price a listing the bundle will never emit, and every fit decision downstream inherits that.
-    const std::string one = packTaskRenderToString( [ & ]( std::FILE* m )
+    const PackTaskRendered one = packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodyProbeRenderFailed>( [ & ]( std::FILE* m )
     {
         packBodies( m, ing, { id }, SIZE_MAX, g.outOff, g.outTargets, in.compress, in.redact, nullptr, nullptr, &dummy,
                    /*truncateOversizedFirst=*/true, /*withFileContext=*/false, in.rootArg, in.calleeRank );
-    } );
-    return one.size() > wrapperLen ? one.size() - wrapperLen : 0;
+    }, in.renderFaults );
+    if( !one.ok )
+    {
+        return SIZE_MAX;   // an unmeasured body is never "free": priced out, it is omitted like any over-budget body
+    }
+    return one.text.size() > wrapperLen ? one.text.size() - wrapperLen : 0;
 }
 
 // a mask's "keep the higher ranks" tie-break score: bit i (rank i, 0 = top) contributes a MORE significant
@@ -1147,10 +1216,10 @@ inline std::vector<NodeId> selectMonotoneBodySubset( const IngestResult& ing, co
     {
         const RedactTallyFreeze freeze( in.redact );   // every probe below is off the books
         EmittedBodies            dummy;
-        wrapperLen = packTaskRenderToString( [ & ]( std::FILE* m )
+        wrapperLen = packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodyProbeRenderFailed>( [ & ]( std::FILE* m )
         {
             packBodies( m, ing, {}, SIZE_MAX, g.outOff, g.outTargets, in.compress, in.redact, nullptr, nullptr, &dummy );
-        } ).size();
+        }, in.renderFaults ).text.size();
         for( std::size_t i = 0; i < n; ++i )
         {
             cost[i] = probeBodyCost( ing, g, bodyIds[i], in, wrapperLen );
@@ -1230,6 +1299,8 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     // `localFanIn` is declared BEFORE `in` so it outlives the pointer `in` holds into it.
     std::vector<std::uint32_t> localFanIn;
     PackTaskInputs             in = inArg;
+    PackTaskRenderFaults       renderFaults;   // every section render below records into it (see PackTaskRenderFaults)
+    in.renderFaults                   = &renderFaults;
     if( !in.fanIn ) { localFanIn = fanInFromInEdges( ing, g );  in.fanIn = &localFanIn; }
 
     const std::vector<float>& rank     = lr.rank;
@@ -1532,16 +1603,27 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // bodies?" — the XML is those bytes, the JSON tail below re-serializes the same record, and bodiesKept
         // counts it.
         const std::vector<NodeId> renderIds = selectMonotoneBodySubset( ing, g, bodyIds, bodiesBudget, in );
-        bodiesStr  = packTaskRenderToString( [ & ]( std::FILE* m )
+        const PackTaskRendered bodies = packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodiesRenderFailed>( [ & ]( std::FILE* m )
         {
             packBodies( m, ing, renderIds, bodiesBudget, g.outOff, g.outTargets, in.compress, in.redact,
                         /*ranges=*/nullptr, /*noteIndex=*/nullptr, &emittedBodies, /*truncateOversizedFirst=*/true,
                         /*withFileContext=*/false, in.rootArg, in.calleeRank );
-        } );
-        bodiesKept = emittedBodies.kept.size();
-        // §W2-K: restate total=/capped= and splice in omission markers for whatever OUR pre-selection
-        // dropped that packBodies itself never saw — see restatePackTaskBodiesWrapper's own comment.
-        bodiesStr  = restatePackTaskBodiesWrapper( ing, bodiesStr, bodyIds, emittedBodies, ex, in.compress );
+        }, in.renderFaults );
+        if( bodies.ok )
+        {
+            bodiesKept = emittedBodies.kept.size();
+            // §W2-K: restate total=/capped= and splice in omission markers for whatever OUR pre-selection
+            // dropped that packBodies itself never saw — see restatePackTaskBodiesWrapper's own comment.
+            bodiesStr  = restatePackTaskBodiesWrapper( ing, bodies.text, bodyIds, emittedBodies, ex, in.compress );
+        }
+        else
+        {
+            // Nothing was emitted, so nothing was kept: the JSON tail re-serializes this same (empty) record.
+            emittedBodies = EmittedBodies{};
+            char tag[ 112 ];
+            rw::formatTo( tag, sizeof( tag ), "<bodies shown=\"0\" total=\"{}\" render_failed=\"1\"></bodies>", bodyIds.size() );
+            bodiesStr = tag;
+        }
     }
     else
     {
@@ -1663,7 +1745,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
 
         // R2: the SAME distance mask the XML <sigs> used (eligibleIds only) — one eligibility decision, two shapes.
         j += std::string( ",\"ranking_capped\":" ) + ( sigsCapped ? "true" : "false" ) + ",\"ranking\":";
-        j += eligibleIds.empty() ? "[]" : packTaskRenderToString( [ & ]( std::FILE* m )
+        const PackTaskRendered rankingJson = eligibleIds.empty() ? PackTaskRendered{ "[]", true } : packTaskRender<PackTaskRenderFaults::DisclosureWhy::RankingRenderFailed>( [ & ]( std::FILE* m )
         {
             packSignaturesJson( m, ing, maskedRank, int( eligibleIds.size() ),
                                 JsonSigLens{ /*metrics=*/true, in.fanIn, in.impure, in.churn, &forClone,
@@ -1671,7 +1753,8 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
                                 in.redact,   // §B0: the same redaction the XML <sigs> above already applied
                                 /*budgetBytes=*/0, /*payloadBudgetBytes=*/0, /*outCapped=*/nullptr, /*outNotes=*/nullptr,
                                 in.rootArg );
-        } );
+        }, in.renderFaults );
+        j += rankingJson.ok ? rankingJson.text : std::string( "null" );   // null, never an empty value after its key
 
         // R2: d2plus — the topRanked members NOT within 1 hop of an anchor, name-only (mirrors XML's <far>).
         const std::size_t farShown = std::min( farKept, d2plusIds.size() );
@@ -1693,8 +1776,14 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // ceiling). Both halves are gone by construction: there is one selection, and this is its record.
         { char b[ 96 ];  rw::formatTo( b, sizeof( b ), ",\"bodies_total\":{},\"bodies_kept\":{},\"bodies\":",
                                         bodiesTotal, emittedBodies.kept.size()  );  j += b; }
-        j += packTaskRenderToString( [ & ]( std::FILE* m ) { packBodiesJson( m, ing, emittedBodies, in.rootArg ); } );
+        const PackTaskRendered bodiesJson = packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodiesRenderFailed>( [ & ]( std::FILE* m ) { packBodiesJson( m, ing, emittedBodies, in.rootArg ); },
+                                                            in.renderFaults );
+        j += bodiesJson.ok && !renderFaults.hasFailed( PackTaskRenderFaults::DisclosureWhy::BodiesRenderFailed ) ? bodiesJson.text : std::string( "null" );
         j += packTaskOmittedBodiesJson( ing, emittedBodies );   // §H5 — see its header
+        if( renderFaults.failedMask != 0 )
+        {
+            j += ",\"render_failed\":\"" + renderFaults.names() + "\"";   // the sections a null above stands for, and any failed probe
+        }
 
         const std::size_t callersShown = std::min( callersKept, d1.ids.size() );
         { char b[ 128 ];  rw::formatTo( b, sizeof( b ), ",\"callers_total\":{},\"callers_kept\":{},\"callers_of_top\":{},\"callers\":[",
@@ -1777,7 +1866,8 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     std::string report = "budget=";
     { char b[ 160 ];  rw::formatTo( b, sizeof( b ), "{} bytes ({}-token target, ceiling {}) | ",
                                     bundleBudget, budgetTokens, rw::declaredByteCeiling( budgetTokens )  );  report += b; }
-    report += std::string( "ranking: " ) + ( sigsCapped ? "capped" : "full" ) + " | ";
+    const bool isRankingFailed = renderFaults.hasFailed( PackTaskRenderFaults::DisclosureWhy::RankingRenderFailed );
+    report += std::string( "ranking: " ) + ( isRankingFailed ? "render-failed" : sigsCapped ? "capped" : "full" ) + " | ";
     report += "bodies: "  + listStatus( bodiesTotal,  bodiesStr,  bodiesKept )  + ( bodiesTotal > 0 && !bodiesStr.empty() && bodiesKept < bodiesTotal ? " (capped)" : "" ) + " | ";
     report += "callers: " + listStatus( callersTotal, callersStr, callersKept ) + " | ";
     report += "notes: "   + listStatus( notesTotal,   notesStr,   notesKept )   + " | ";
@@ -1812,6 +1902,14 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     // same way M1 gave that path dropped_positive=. Same attribute names as the --for and MCP twins, so
     // mcpattrparitycheck still sees one spelling on every root.
     droppedPositiveAttr += lr.capAttrs;
+    if( renderFaults.failedMask != 0 )
+    {
+        // Not a budget fact: these sections' renders FAILED. Marked on the root (and on the section element itself),
+        // with the clause that defines it riding the ledger, so an empty section never reads as an omission.
+        droppedPositiveAttr += " render_failed=\"" + renderFaults.names() + "\"";
+        report += " | render_failed= names sections whose render FAILED (the section is empty and marked render_failed=\"1\"; "
+                  "not a budget omission; body-probe = a body priced out because its cost could not be measured)";
+    }
 
     // The clause is now BUILT (the root-relative sentence is conditional, so the seam composes a string
     // rather than handing back one of two constants), and PackTaskHeaderParts holds VIEWS — so it is owned
@@ -1886,6 +1984,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             std::string       attrs       = rw::pricedRootAttr( markupBytes, rw::kBytesPerTokenDefault, bodiesStr.size(), &estTokens );
             attrs += " budget_tokens=\"" + std::to_string( budgetTokens ) + "\"";
             if( lastRungFired || ( budgetTokens > 0 && estTokens > budgetTokens ) ) { attrs += " over_ceiling=\"1\""; }
+            if( in.isTrailingUncharged ) { attrs += " est_measured=\"0\""; }   // defined by the comment spliced in below
             return attrs;
         };
         const std::size_t             rootAttrsBound = rootAttrsFor( whole, /*lastRungFired=*/true ).size();
@@ -1917,6 +2016,13 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // rung now (serialize.h CeilingLadderChoice). The token comparison beside it is unchanged and is still
         // what labels an honest overshoot the ladder did not fire on. Gate: test/ceilingverdictcheck.sh (6)-(8).
         rw::spliceRootAttrs( whole, rootAttrsFor( whole, chosen.rung == rw::CeilingRung::OverCeiling ) );
+        if( in.isTrailingUncharged )
+        {
+            // est_measured= is defined where it is met: the clause rides first inside the root it qualifies
+            const std::size_t rootOpenEnd = whole.find( '>', whole.find( "<ctx" ) );
+            ASSUME( rootOpenEnd != std::string::npos );   // this function composed the <ctx …> start tag itself, above
+            whole.insert( rootOpenEnd + 1, rw::kEstModelledLegend );
+        }
     }
 
     // §6 --partition: the bundle's own surface (see the contract above). topRanked already contains bodyIds

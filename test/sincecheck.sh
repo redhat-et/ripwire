@@ -368,4 +368,34 @@ while read -r flag needsBaseline <&3; do
   rm -f "$err"
 done 3<<< "$SINCE_ROWS"
 
+# ── B1 (lane/disclose-sink-form, fix round 2): a DATE's baseline is git's OUTPUT, and is validated before it is kept ──
+# resolveSinceScope's date step stores `git rev-list -1 --before=DATE HEAD` verbatim, and --slice hands it straight back
+# to git (`git show <sha>:path`). A PATH shim around the real git answers that rev-list with a non-object-name. Before,
+# the value was kept and --slice compared against it; now SinceScope's DISCLOSE sink drops it (baselineRefused) and the
+# baseline host refuses, naming WHY. Control: the pass-through shim still answers. A PATH shim reaches Release too.
+B1SHIM="$( mktemp -d )"; REALGIT="$( command -v git )"
+cat >"$B1SHIM/git" <<SHEOF
+#!/usr/bin/env bash
+case " \$* " in
+    *" rev-list -1 --before="*) if [ -n "\${RW_SHIM_MANGLE:-}" ]; then printf 'not-an-object-name\n'; exit 0; fi; exec "$REALGIT" "\$@" ;;
+    *) exec "$REALGIT" "\$@" ;;
+esac
+SHEOF
+chmod +x "$B1SHIM/git"
+B1DATE="$( git -C "$REPO" log -1 --format=%cI HEAD )"
+err="$(mktemp)"
+PATH="$B1SHIM:$PATH" "$BIN" "$REPO" --slice=a:x --since="$B1DATE" --no-cache >/dev/null 2>"$err"; rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "B1 control: --slice=a:x --since=<HEAD's date> through the pass-through shim answers (exit 0)"
+  PATH="$B1SHIM:$PATH" RW_SHIM_MANGLE=1 "$BIN" "$REPO" --slice=a:x --since="$B1DATE" --no-cache >"$B1SHIM/out" 2>"$err"; rc=$?
+  if [ "$rc" -eq 1 ] && [ ! -s "$B1SHIM/out" ] && grep -q 'not a commit object name' "$err"; then
+    ok "B1 a date baseline git answered with a non-object-name is dropped: --slice refuses (exit 1) and says why"
+  else
+    no "B1 a non-object-name baseline was kept (exit $rc, $(wc -c <"$B1SHIM/out" | tr -d ' ') B on stdout): $(head -c 200 "$err")"
+  fi
+else
+  no "B1 control: the pass-through shim did not answer (exit $rc) — the arm is void: $(head -c 200 "$err")"
+fi
+rm -rf "$err" "$B1SHIM"
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

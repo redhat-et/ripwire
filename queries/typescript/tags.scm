@@ -1,9 +1,24 @@
 ; ripwire TypeScript tags — written for ripwire.
 ; The upstream tree-sitter-typescript tags.scm targets .d.ts declaration files
 ; (function_signature / method_signature) and ships no @reference.call, so it extracts
-; almost nothing from ordinary .ts/.tsx source. This set covers real source: concrete
-; declarations + arrow-function-bound consts + call/new references. Used for BOTH
-; typescript and tsx (the tsx grammar is a superset).
+; almost nothing from ordinary .ts source. This set covers real source: concrete
+; declarations + arrow-function-bound consts + call/new references.
+;
+; .ts/.mts/.cts ONLY. tree-sitter-typescript ships two grammars: plain "typescript" (this
+; one — a .ts file cannot contain JSX, by the TypeScript language's own rule) and "tsx" (a
+; real superset that adds jsx_self_closing_element/jsx_opening_element/…). Until #285 the
+; plain grammar really was a strict subset of tsx for every node THIS file names, so one
+; query text served both (kLangTable's .tsx row pointed at this same "typescript" querySub,
+; the CUDA-on-cpp precedent: tree-sitter-cuda is a generated superset of tree-sitter-cpp and
+; the two share querySub "cpp" the same way). #285's JSX patterns broke that: tree-sitter's
+; ts_query_new refuses the WHOLE query when even one pattern names a node type the grammar
+; does not have (measured — adding jsx_self_closing_element here made `[ripwire] tags.scm
+; compile error for typescript at byte N (err 2) — skipping language` and took EVERY .ts
+; symbol/reference with it, not just the JSX ones). queries/tsx/tags.scm is this file's
+; content plus the JSX additions, kept in its own file for the grammar that actually has
+; those nodes — see its header. Keep the two in sync by hand for every pattern below, the
+; same duplication precedent queries/c/tags.scm vs queries/cpp/tags.scm already carries for
+; two related-but-diverging grammars.
 
 ; ---- definitions ----
 
