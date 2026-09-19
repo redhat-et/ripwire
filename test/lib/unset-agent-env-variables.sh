@@ -5,8 +5,9 @@
 # WHY. `src/skillsinstall.h` and `src/wrap.h` resolve each agent's config location through an env var
 # that is checked AHEAD of HOME (CLAUDE_CONFIG_DIR for Claude, CODEX_HOME/AGENTS_HOME for Codex,
 # HERMES_HOME for Hermes; RIPWIRE_DATA_HOME for the shared skills store in dataHome()). openclaw
-# honours no such env var — it always resolves a literal ~/.agents/skills, so nothing here applies
-# to it. A gate that overrides only HOME= per invocation is not sandboxed in any dev shell where one
+# honours no such env var — it always resolves a literal ~/.agents/skills — so OPENCLAW_STATE_DIR
+# below is belt-and-braces, kept for when/if that changes, not because anything reads it today. A
+# gate that overrides only HOME= per invocation is not sandboxed in any dev shell where one
 # of these is already exported ambiently — an ordinary state once this repo's own hook/skills wiring
 # is set up. Reproduced live, twice, against the operator's real ~/.claude-work/settings.json: once
 # via `test/routehookcheck.sh` (missed by the CLAUDE_CONFIG_DIR fix in d038282c, which touched four
@@ -21,4 +22,4 @@
 #
 # Any agent added to `kAgentTargets` (src/wrap.h) that resolves its own home through a NEW env var
 # needs that var added here in the same commit.
-unset CODEX_HOME AGENTS_HOME HERMES_HOME CLAUDE_CONFIG_DIR RIPWIRE_DATA_HOME
+unset CODEX_HOME AGENTS_HOME HERMES_HOME CLAUDE_CONFIG_DIR RIPWIRE_DATA_HOME OPENCLAW_STATE_DIR
