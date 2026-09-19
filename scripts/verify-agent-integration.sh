@@ -50,12 +50,8 @@ if [ -n "$CMD" ]; then
         HERMES_D="${HERMES_HOME:-$H/.hermes}"; DATA_D="${RIPWIRE_DATA_HOME:-$H/.local/share/ripwire}"
     else
         H="$SANDBOX"; echo "  (sandbox HOME=$SANDBOX — pass --live to install for real)"
-        # FORCED to the sandbox, never falling through to an ambient AGENTS_HOME/CODEX_HOME/
-        # CLAUDE_CONFIG_DIR/HERMES_HOME/RIPWIRE_DATA_HOME: those resolve ahead of HOME for their
-        # agents, so a dev shell that already has one exported (ordinary for this repo's own wiring)
-        # would otherwise write past $H no matter what HOME says, defeating the "sandbox" this branch
-        # of LIVE claims to be. ($AGENT is a free CLI argument, so e.g. `hermes` must not leak into
-        # the operator's ambient $HERMES_HOME while this banner says "sandbox".)
+        # FORCED to the sandbox: these resolve ahead of HOME for their agents, so an ambient one
+        # (ordinary for this repo's own wiring) would write past $H no matter what HOME says.
         AGENTS_D="$H/.agents"; CODEX_D="$H/.codex"; CLAUDE_D="$H/.claude"
         HERMES_D="$H/.hermes"; DATA_D="$H/.local/share/ripwire"
     fi
