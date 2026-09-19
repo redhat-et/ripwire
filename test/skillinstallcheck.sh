@@ -46,7 +46,7 @@ live=0; for l in "$DST"/ripwire-*; do [ -e "$l" ] && live=$(( live + 1 )); done
 [ ! -e "$DST/ripwire-opt-remarks" ] && [ ! -L "$DST/ripwire-opt-remarks" ] \
     && ok "(1b) the contributor-only skill is NOT activated by default" \
     || no "(1b) ripwire-opt-remarks was activated for a plain user install"
-grep -q 'skill=ripwire-opt-remarks' "$DST/.ripwire-manifest-v1" 2>/dev/null \
+grep -q 'skill=ripwire-opt-remarks' "$DST/.ripwire-manifest-v2" 2>/dev/null \
     && no "(1b) the manifest declares the contributor-only skill that was not linked (manifest parity broken)" \
     || ok "(1b) the manifest declares exactly the linked set (no contributor-only entry)"
 CONTRIB="$TMP/skills-contrib"
