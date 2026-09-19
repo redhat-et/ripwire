@@ -105,8 +105,9 @@ chmod -x "$HOOKDIR/ripwire-codex-route.sh"
 HOUT="$( run_doctor )"; HRC=$?
 [ "$HRC" -eq 1 ] && printf '%s' "$HOUT" | grep -q '<c n="codex-hooks" ok="0"' \
     && ok "non-executable Codex hook fails" || no "non-executable Codex hook did not fail"
-printf '%s' "$HOUT" | grep -q 'skills/install.sh --codex --hook' \
-    && ok "hook failure names the exact repair command" || no "hook failure omitted repair command"
+printf '%s' "$HOUT" | grep -q 'not implemented in this build' \
+    && ok "hook failure states plainly that Codex hook registration does not work, rather than naming a command that silently no-ops (I2b)" \
+    || no "hook failure did not state that Codex hook registration is unavailable"
 chmod +x "$HOOKDIR/ripwire-codex-route.sh"
 
 sed "s#command = \"$BINDIR/ripwire\"#command = \"$TMP/missing-ripwire\"#" "$CODEX_FAKE/config.toml" >"$TMP/bad.toml"

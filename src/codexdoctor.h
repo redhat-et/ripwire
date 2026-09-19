@@ -310,10 +310,28 @@ inline Check skillsCheck( const std::filesystem::path& skillHome, std::string_vi
     if( stale ) { out.attrs += " stale=\"1\""; }
     if( !out.ok )
     {
-        out.attrs += stale
-            ? " hint=\"run " + std::string( installCmd ) + " (embedded skills have moved on since this was installed)\""
-            : " hint=\"run " + std::string( installCmd ) + " --force to restore exact manifest parity"
-              " (a plain re-run is a no-op if a foreign entry is blocking it)\"";
+        if( stale )
+        {
+            out.attrs += " hint=\"run " + std::string( installCmd ) + " (embedded skills have moved on since this was installed)\"";
+        }
+        else if( live.size() > manifest.declared.size() )
+        {
+            // I2 (round-2 review): declared < live means an untracked ripwire-* entry sits at a name
+            // ripwire never linked — real content --force refuses to touch (installForAgent), not a
+            // foreign symlink it can repair, so naming --force here would print a remedy that refuses.
+            std::vector<std::string> untracked;
+            std::set_difference( live.begin(), live.end(), manifest.declared.begin(), manifest.declared.end(),
+                                  std::back_inserter( untracked ) );
+            std::string names;
+            for( const std::string& n : untracked ) { names += ( names.empty() ? "" : ", " ) + n; }
+            out.attrs += " hint=\"" + names + " exist" + ( untracked.size() == 1 ? "s" : "" ) +
+                         " at this skill home but " + std::string( installCmd ) + " never linked "
+                         + ( untracked.size() == 1 ? "it" : "them" ) + " — remove it manually if it is not meant to be there\"";
+        }
+        else
+        {
+            out.attrs += " hint=\"run " + std::string( installCmd ) + " --force to restore exact manifest parity\"";
+        }
     }
     return out;
 }
@@ -393,8 +411,10 @@ inline Check hooksCheck( const std::filesystem::path& hooksPath )
     const HookSurvey survey = surveyHooks( hooksPath, "ripwire-codex-nudge.sh", "ripwire-codex-route.sh" );
     const bool ok = survey.read && namesEvents( survey, { "PreToolUse", "SessionStart", "UserPromptSubmit" } )
                  && survey.nudge.size() >= 2 && !survey.route.empty() && survey.nudgeExecutable && survey.routeExecutable;
+    // I2b (round-2 review): the old hint's command now routes into the Codex --hook merge refusal
+    // ("not implemented yet", exit 2, no hooks.json written) — printing it would silently no-op.
     return hookRow( "codex-hooks", survey, ok, "route_refs", std::to_string( survey.route.size() ),
-                    "run bash skills/install.sh --codex --hook to refresh all advisory Codex hooks" );
+                    "Codex advisory hook registration is not implemented in this build (skills install --codex --hook refuses); edit ~/.codex/hooks.json manually if you need it" );
 }
 
 inline std::string tomlString( std::string_view section, std::string_view key )
