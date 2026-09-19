@@ -219,58 +219,43 @@ inline std::string skillDirNameOf( std::string_view relativePath )
     return it->string();
 }
 
-// True iff `skillDir`'s embedded SKILL.md declares "audience: contributor" in its own YAML front
-// matter (the region between the file's opening "---" line and the next one). Scanning only that
-// region — not the whole file — matters: the content here is embedded bytes, not a file on disk, so
-// this can't be a grep over a path; and a plain substring scan over the WHOLE body would let a skill
-// that merely MENTIONS "contributor" in its prose (ripwire-opt-remarks' own body does, among others)
-// flip the gate. `ripwire-opt-remarks` is the one such skill in the embedded set today.
+// True iff a SKILL.md's own bytes declare "audience: contributor" in its YAML front matter (the
+// region between the opening "---" line and the next one). Scanning only that region — not the whole
+// file — matters: a plain substring scan over the WHOLE body would let a skill that merely MENTIONS
+// "contributor" in its prose (ripwire-opt-remarks' own body does, among others) flip the gate.
+inline bool isContributorOnlyFrontMatter( std::string_view bytes )
+{
+    if( !bytes.starts_with( "---" ) ) { return false; }   // no front matter — nothing to gate on
+    const std::size_t closing = bytes.find( "\n---", 3 );
+    const std::string_view frontMatter = ( closing == std::string_view::npos ) ? bytes : bytes.substr( 0, closing );
+    return frontMatter.find( "audience: contributor" ) != std::string_view::npos;
+}
+
+// True iff `skillDir`'s embedded SKILL.md is contributor-only. `ripwire-opt-remarks` is the one such
+// skill in the embedded set today.
 inline bool skillDirIsContributorOnly( std::string_view skillDir )
 {
     for( const embedded_skills::EmbeddedFile& f : embedded_skills::kSkillFiles )
     {
         if( !f.relativePath.ends_with( "/SKILL.md" ) ) { continue; }
         if( skillDirNameOf( f.relativePath ) != std::string( skillDir ) ) { continue; }
-        const std::string_view bytes = f.bytes;
-        if( !bytes.starts_with( "---" ) ) { return false; }   // no front matter — nothing to gate on
-        const std::size_t closing = bytes.find( "\n---", 3 );
-        const std::string_view frontMatter = ( closing == std::string_view::npos ) ? bytes : bytes.substr( 0, closing );
-        return frontMatter.find( "audience: contributor" ) != std::string_view::npos;
+        return isContributorOnlyFrontMatter( f.bytes );
     }
     return false;   // no SKILL.md found for this dir — a build defect, treated as "not gated" not "gated"
 }
 
-// The `.ripwire-manifest-v2` sidecar this dispatch's gates check: which executable performed the
-// install (`source=`), the manifest schema version, and — as of Task 6 — one `skill=<name>` line per
-// currently-linked skill, so a later run can tell a renamed-away skill from one still current and
-// prune only the former. Per-agent entries and tracked-hook bookkeeping remain Task 8's scope.
-struct ManifestV2
+// Extract "<name>" out of a Hermes-native embedded skill's relativePath ("skills/hermes/<name>/
+// SKILL.md", ...) — the third path component. Returns empty for anything not under skills/hermes/.
+inline std::string hermesSkillDirNameOf( std::string_view relativePath )
 {
-    bool read = false;   // true only when a manifest actually opened and parsed — false is "no manifest yet"
-    int version = 0;
-    std::string source;
-    std::vector<std::string> skills;
-};
-
-// Read back a manifest written by writeManifestV2 below. Goes through pathguard's openNoFollowRead
-// (Amendment 2/3's read twin of the write side): never follows a symlink at the final component, and
-// — like every other sidecar reader — stays silent on a plain "nothing there yet", which is the
-// ordinary first-install case, not a failure.
-inline ManifestV2 readManifestV2( const std::filesystem::path& manifestPath )
-{
-    ManifestV2 out;
-    rw::pathguard::NoFollowRead in = rw::pathguard::openNoFollowRead( "the skills manifest", manifestPath.string() );
-    if( !in.opened ) { return out; }
-    out.read = true;
-    std::string line;
-    while( in.readLine( line ) )
-    {
-        if( line == "version=1" ) { out.version = 1; }
-        else if( line == "version=2" ) { out.version = 2; }
-        else if( line.rfind( "source=", 0 ) == 0 ) { out.source = line.substr( 7 ); }
-        else if( line.rfind( "skill=", 0 ) == 0 ) { out.skills.push_back( line.substr( 6 ) ); }
-    }
-    return out;
+    const std::filesystem::path rel( relativePath );
+    auto it = rel.begin();
+    if( it == rel.end() || *it != "skills" ) { return {}; }
+    ++it;
+    if( it == rel.end() || *it != "hermes" ) { return {}; }
+    ++it;
+    if( it == rel.end() ) { return {}; }
+    return it->string();
 }
 
 // Write the sidecar: schema version, the embedded store's content-hash key (`source=`), and one
@@ -294,30 +279,24 @@ inline bool writeManifestV2( const std::filesystem::path& skillsDest, const std:
     return rw::pathguard::writeAllAndClose( opened.fd, body );
 }
 
-// Remove every destination entry the PREVIOUS manifest tracked that is no longer in
-// `currentSkillNames` — a skill renamed or removed since the last install. ::unlink() itself never
-// follows a symlink at the final path component (it removes the directory entry, never the target
-// the entry points at), so this is link-safe by construction; no extra isSymlink guard is needed
-// here the way one is needed before a CREATE or a READ. Returns the count removed.
-inline int pruneStale( const std::filesystem::path& destDir, const ManifestV2& previous, const std::vector<std::string>& currentSkillNames )
+// Remove every `ripwire-*` symlink actually sitting in `destDir` that is no longer in
+// `currentSkillNames`. Scans the directory itself, not `.ripwire-manifest-v2`'s `skill=` lines: a
+// stray entry the manifest never tracked (hand-planted, left by an older installer, ...) is exactly
+// as stale, and manifest-only pruning leaves it forever (I7's ripwire-* filter still applies, so a
+// non-skill entry is never touched). Every entry this installer creates is a symlink
+// (symlinkOrRefuse); the isSymlink test excludes real content sitting under destDir by mistake.
+inline int pruneStale( const std::filesystem::path& destDir, const std::vector<std::string>& currentSkillNames )
 {
     int removed = 0;
-    for( const std::string& old : previous.skills )
+    std::error_code ec;
+    for( std::filesystem::directory_iterator it( destDir, ec ), end; !ec && it != end; it.increment( ec ) )
     {
-        // The name came straight out of a user-writable text file — refuse anything that could walk
-        // `destDir / old` outside destDir (a bare "..", an embedded "/", ...) rather than unlink
-        // wherever that resolves. A plain skill directory name never contains a slash. I7 (2026-09-18
-        // review round 1): also refuse anything that isn't a `ripwire-*` name — every skill this
-        // installer ever links is one, so a manifest line that isn't (hand-edited, or a future format
-        // confusion) has no business being unlinked by this scope-of-authority sweep.
-        if( old.empty() || old == "." || old == ".." || old.find( '/' ) != std::string::npos ) { continue; }
-        if( old.rfind( "ripwire-", 0 ) != 0 ) { continue; }
-        const bool stillPresent = std::find( currentSkillNames.begin(), currentSkillNames.end(), old ) != currentSkillNames.end();
-        if( stillPresent ) { continue; }
-        const std::filesystem::path entry = destDir / old;
-        os::stat_t st{};
-        if( os::lstat( entry.c_str(), &st ) != 0 ) { continue; }   // already gone — nothing to remove
-        if( os::unlink( entry.c_str() ) == 0 ) { ++removed; }      // unlink, never follow — S_ISLNK or not
+        if( ec ) { break; }
+        const std::string name = it->path().filename().string();
+        if( name.rfind( "ripwire-", 0 ) != 0 ) { continue; }
+        if( std::find( currentSkillNames.begin(), currentSkillNames.end(), name ) != currentSkillNames.end() ) { continue; }
+        if( !rw::pathguard::isSymlink( it->path().string() ) ) { continue; }
+        if( os::unlink( it->path().c_str() ) == 0 ) { ++removed; }
     }
     return removed;
 }
@@ -366,6 +345,46 @@ struct InstallOutcome
 // own pre-#225 `mode="path"` branch (`dst="$explicitPath"`): the path IS the skills root itself, used
 // verbatim, with no agent lookup at all. `agentName` is then irrelevant to destination resolution (it
 // still selects nothing here — contributor filtering below is agent-independent) and is ignored.
+// A skill to link: `name` is the destination symlink's own name, `storeSub` is its path fragment
+// under skillsStoreDir()/"skills" (equal to `name` for a flat skill, "hermes/<name>" for a
+// Hermes-native one).
+struct SkillEntry
+{
+    std::string name;
+    std::string storeSub;
+};
+
+// The current, deduped set of skills `effectiveAgent` should link, contributor-gated. Every agent
+// links the flat "ripwire-*" set; --hermes additionally links skills/hermes/ripwire-*/ (Hermes-native
+// content, e.g. ripwire-repo-map), skipped when the flat set already ships a same-named entry (mirrors
+// skills/install.sh's pre-#225 Hermes loop: one link wins, and a non-"ripwire-*" entry under hermes/ is
+// never this installer's to touch).
+inline std::vector<SkillEntry> collectCurrentSkills( std::string_view effectiveAgent, bool contributor )
+{
+    std::vector<SkillEntry> currentSkills;
+    for( const embedded_skills::EmbeddedFile& f : embedded_skills::kSkillFiles )
+    {
+        const std::string skillDir = skillDirNameOf( f.relativePath );
+        if( skillDir.empty() || skillDir.rfind( "ripwire-", 0 ) != 0 ) { continue; }
+        if( std::any_of( currentSkills.begin(), currentSkills.end(), [ & ]( const SkillEntry& e ) { return e.name == skillDir; } ) ) { continue; }
+        if( !contributor && skillDirIsContributorOnly( skillDir ) ) { continue; }   // --contributor gate
+        currentSkills.push_back( { skillDir, skillDir } );
+    }
+    if( effectiveAgent == "hermes" )
+    {
+        for( const embedded_skills::EmbeddedFile& f : embedded_skills::kSkillFiles )
+        {
+            if( !f.relativePath.ends_with( "/SKILL.md" ) ) { continue; }
+            const std::string hermesDir = hermesSkillDirNameOf( f.relativePath );
+            if( hermesDir.empty() || hermesDir.rfind( "ripwire-", 0 ) != 0 ) { continue; }
+            if( std::any_of( currentSkills.begin(), currentSkills.end(), [ & ]( const SkillEntry& e ) { return e.name == hermesDir; } ) ) { continue; }
+            if( !contributor && isContributorOnlyFrontMatter( f.bytes ) ) { continue; }   // --contributor gate
+            currentSkills.push_back( { hermesDir, "hermes/" + hermesDir } );
+        }
+    }
+    return currentSkills;
+}
+
 inline InstallOutcome installForAgent( std::string_view agentName, bool contributor, bool force,
                                         const std::filesystem::path& explicitDest = {} )
 {
@@ -404,29 +423,13 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
         return { false, "create_directories failed for " + skillsDest.string() + ": " + mkdirEc.message(), skillsDest, 0, 0 };
     }
 
-    // Collect the current, deduped set of ripwire-* skill directory names up front: pruneStale needs
-    // it to tell a still-current skill from a renamed-away one, and the previous manifest has to be
-    // read before anything is linked so a rename is prunable in the very same run.
+    const std::string effectiveAgentForSkills = agentName.empty() ? std::string( "claude" ) : std::string( agentName );
+    const std::vector<SkillEntry> currentSkills = collectCurrentSkills( effectiveAgentForSkills, contributor );
     std::vector<std::string> currentSkillNames;
-    for( const embedded_skills::EmbeddedFile& f : embedded_skills::kSkillFiles )
-    {
-        const std::string skillDir = skillDirNameOf( f.relativePath );
-        // Every agent — not just Claude — currently links only the flat "ripwire-*" set; this filter
-        // does not vary by `agentName` today. skills/install.sh's Claude-mode loop
-        // (`for d in "$src"/ripwire-*/`) only ever applied this same filter for Claude, and
-        // skills/hermes/ is Hermes-native content install.sh links under --hermes specifically — but
-        // that per-agent differentiation has NOT been ported here yet; it is later-task territory
-        // (this task is agent DESTINATION selection, not agent-specific skill SELECTION). Until then,
-        // `--hermes` links the identical "ripwire-*" set every other mode does.
-        if( skillDir.empty() || skillDir.rfind( "ripwire-", 0 ) != 0 ) { continue; }
-        if( std::find( currentSkillNames.begin(), currentSkillNames.end(), skillDir ) != currentSkillNames.end() ) { continue; }
-        if( !contributor && skillDirIsContributorOnly( skillDir ) ) { continue; }   // --contributor gate
-        currentSkillNames.push_back( skillDir );
-    }
+    for( const SkillEntry& e : currentSkills ) { currentSkillNames.push_back( e.name ); }
 
     const std::filesystem::path manifestPath = skillsDest / ".ripwire-manifest-v2";
-    const ManifestV2 previous = readManifestV2( manifestPath );
-    const int pruned = pruneStale( skillsDest, previous, currentSkillNames );
+    const int pruned = pruneStale( skillsDest, currentSkillNames );
 
     // C1/C2 (2026-09-18 review round 1): `linkedNames` is what actually ends the run pointing at THIS
     // store's file — not "every name we attempted", which is what `currentSkillNames` is and what the
@@ -441,10 +444,11 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
         rw::emitTo( stderr, "ripwire skills install: {}\n", msg );
         ++failed;
     };
-    for( const std::string& skillDir : currentSkillNames )
+    for( const SkillEntry& entry : currentSkills )
     {
+        const std::string& skillDir = entry.name;
         const std::filesystem::path destLink = skillsDest / skillDir;
-        const std::filesystem::path storeFile = skillsStoreDir() / "skills" / skillDir;
+        const std::filesystem::path storeFile = skillsStoreDir() / "skills" / entry.storeSub;
         std::error_code statusEc;
         const std::filesystem::file_status destStatus = std::filesystem::symlink_status( destLink, statusEc );
         // libc++ (unlike the letter of the standard) sets ec=ENOENT for a plain "nothing there" —
@@ -606,53 +610,137 @@ inline ShellCaptureResult runShellCapture( const std::string& cmd )
 // any other character (the `.*` here) puts it on the regex path instead, where `^(...)$` anchors it to
 // a whole-name match. Copied verbatim; do not rederive it.
 inline constexpr std::string_view kClaudeHookMatcher = "^(Read|Glob|Grep|Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)$";
+inline constexpr std::string_view kCodexHookMatcher  = "^(Bash|Read|Glob|Grep|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)$";
+
+// `jq --arg NAME VALUE ... PROGRAM FILE`, each token individually single-quoted for the shell via
+// rw::shSingleQuote (src/infra/jsonesc.h).
+inline void appendJqArg( std::string& out, const std::string& name, const std::string& value )
+{
+    out += " --arg ";
+    out += rw::shSingleQuote( name );
+    out += ' ';
+    out += rw::shSingleQuote( value );
+}
+
+// Runs a jq FILTER (already carrying its own --arg tokens) against `file`, validates the result the
+// way skills/install.sh's own `[ -s "$tmp" ] && mv` chain did (an empty or non-zero-exit result never
+// overwrites the existing file — a jq failure, e.g. malformed input JSON, is reported, never applied),
+// and on success writes the merged JSON back through pathguard. Returns 0 on success, else a message
+// already emitted to stderr and the same exit code skills/install.sh used for each case (1 for a
+// missing jq / a merge failure / a write failure).
+inline int runJqMergeFile( const std::filesystem::path& file, const std::string& jqArgsAndProgram, std::string_view missingJqAdvice )
+{
+    std::string cmd = "jq";
+    cmd += jqArgsAndProgram;
+    cmd += ' ';
+    cmd += rw::shSingleQuote( file.string() );
+
+    const ShellCaptureResult result = runShellCapture( cmd );
+    if( !result.spawned )
+    {
+        rw::emitTo( stderr, "ripwire skills install: could not start a shell to run jq\n" );
+        return 1;
+    }
+    if( result.exitedNormally && result.exitCode == 127 )
+    {
+        rw::emitTo( stderr, "ripwire skills install: --hook needs jq on PATH to safely merge {} (not found).\n{}",
+                    file.string(), missingJqAdvice );
+        return 1;
+    }
+    if( !result.exitedNormally || result.exitCode != 0 || result.output.empty() )
+    {
+        rw::emitTo( stderr, "ripwire skills install: --hook merge failed (is {} valid JSON?); nothing changed\n", file.string() );
+        return 1;
+    }
+    const rw::pathguard::OpenedFile opened = rw::pathguard::openNoFollowTruncate( "the agent settings file", file.string() );
+    if( opened.fd < 0 ) { return 1; }
+    if( !rw::pathguard::writeAllAndClose( opened.fd, result.output ) )
+    {
+        rw::emitTo( stderr, "ripwire skills install: could not write the merged hook config to {}\n", file.string() );
+        return 1;
+    }
+    return 0;
+}
+
+// True iff `file` already carries an entry under `hooksField` whose command names `scriptName`
+// (matched by basename, like `jqIsScript` — skills/install.sh:35-49). A plain boolean `jq -e` probe,
+// run before the mutating merge, so the caller can print the right banner (first-registration's full
+// disclosure vs. a refresh's one-line notice) BEFORE changing anything, exactly as skills/install.sh
+// echoes its banner ahead of the jq call it describes.
+inline bool jqScriptAlreadyRegistered( const std::filesystem::path& file, std::string_view hooksField, const std::string& scriptName )
+{
+    std::string cmd = "jq -e";
+    appendJqArg( cmd, "n", scriptName );
+    cmd += " 'def isScript($n): (.command // \"\") | split(\" \")[0] | endswith(\"/hooks/\" + $n); any((.hooks.";
+    cmd += std::string( hooksField );
+    cmd += " // [])[]?.hooks[]?; isScript($n))' ";
+    cmd += rw::shSingleQuote( file.string() );
+    cmd += " >/dev/null 2>&1";
+    return os::system( cmd.c_str() ) == 0;
+}
+
+// `--hook` router half: merge/refresh hooks/ripwire-claude-route.sh (the UserPromptSubmit prompt
+// router) into `settingsPath`, identified by script basename like the nudge merge above. Ported from
+// skills/install.sh's install_claude_route — called unconditionally after the nudge merge, first-time
+// or refresh, exactly as that function was called from both of its caller's branches.
+inline int mergeClaudeRoute( const std::filesystem::path& settingsPath )
+{
+    const std::filesystem::path routeScript = hooksStoreDir() / "hooks" / "ripwire-claude-route.sh";
+    const bool already = jqScriptAlreadyRegistered( settingsPath, "UserPromptSubmit", "ripwire-claude-route.sh" );
+
+    std::string jqArgs;
+    appendJqArg( jqArgs, "cmd", routeScript.string() );
+    appendJqArg( jqArgs, "n",   "ripwire-claude-route.sh" );
+    std::string jqProgram =
+        "def isScript($n): (.command // \"\") | split(\" \")[0] | endswith(\"/hooks/\" + $n);";
+    if( already )
+    {
+        jqProgram += ".hooks.UserPromptSubmit |= map( .hooks |= map( if isScript($n) then .command = $cmd else . end ) )";
+    }
+    else
+    {
+        rw::emitTo( stdout,
+                    "ripwire skills install --hook will add this OPT-IN, advisory-only entry to {}:\n"
+                    "  hooks.UserPromptSubmit += [{{ matcher: \"*\", hooks: [{{ type: \"command\", command: \"{}\" }}] }}]\n"
+                    "  behavior: asks ripwire --help-task before the first tool is chosen and, ONLY at high\n"
+                    "            confidence, adds one paste-ready command as context. It never blocks a prompt.\n"
+                    "  counting: appends one row per prompt to ~/.ripwire/routing.jsonl carrying a CHECKSUM and\n"
+                    "            byte length of the prompt and a hashed session id — never the prompt text.\n"
+                    "            RIPWIRE_ROUTE_METER=0 opts out of that without disabling routing.\n",
+                    settingsPath.string(), routeScript.string() );
+        jqArgs += " --argjson tmo 8";
+        jqProgram +=
+            ".hooks //= {} | .hooks.UserPromptSubmit //= [] | "
+            ".hooks.UserPromptSubmit += [{\"matcher\": \"*\", \"hooks\": [{\"type\": \"command\", \"command\": $cmd, \"timeout\": $tmo}]}]";
+    }
+    jqArgs += ' ';
+    jqArgs += rw::shSingleQuote( jqProgram );
+
+    const int rc = runJqMergeFile( settingsPath, jqArgs, "" );
+    if( rc == 0 )
+    {
+        if( already )
+        {
+            rw::emitTo( stdout, "ripwire UserPromptSubmit router already registered in {} — command refreshed to {}.\n",
+                        settingsPath.string(), routeScript.string() );
+        }
+        else
+        {
+            rw::emitTo( stdout, "done. Registered ripwire's UserPromptSubmit prompt router in {}.\n", settingsPath.string() );
+        }
+    }
+    return rc;
+}
 
 // `--hook`: merge ripwire's PreToolUse (+ SessionStart, on first registration) entries into an agent's
 // settings file, identifying any EXISTING registration by the hook script's basename (skills/install.sh's
 // `jqIsScript`) rather than by exact path — a machine that has ripwire installed from more than one
 // location (a package copy and a git checkout, say) must recognise its own prior registration and
 // refresh it in place, never append a second one that doubles every counted call.
-inline int mergeHookConfig( std::string_view agentName )
+inline int mergeClaudeHook( const std::filesystem::path& settingsPath )
 {
-    const std::string effectiveAgent = agentName.empty() ? std::string( "claude" ) : std::string( agentName );
-    const rw::AgentTarget* row = rw::agentTarget( effectiveAgent );
-    if( row == nullptr || !row->hookSlot )
-    {
-        rw::emitTo( stderr, "ripwire skills install: --hook is not supported for {} yet\n", effectiveAgent );
-        return 2;
-    }
-    if( effectiveAgent != "claude" )
-    {
-        // codex is the only OTHER row with hookSlot=true today, and its real merge target
-        // (${CODEX_HOME:-~/.codex}/hooks.json, a different matcher, a route script this call does not
-        // check for) is not this port's scope — writing to the wrong file, or a half-shaped one, would
-        // be a worse answer than refusing outright (CLAUDE.md: no surface that quietly guesses).
-        rw::emitTo( stderr, "ripwire skills install: --hook merge for {} is not implemented yet\n", effectiveAgent );
-        return 2;
-    }
-
-    const std::filesystem::path settingsDir = std::filesystem::path( envOr( "CLAUDE_CONFIG_DIR", ( homeDir() / ".claude" ).string() ) );
-    std::error_code mkdirEc;
-    std::filesystem::create_directories( settingsDir, mkdirEc );
-    if( mkdirEc )
-    {
-        rw::emitTo( stderr, "ripwire skills install: could not create {}: {}\n", settingsDir.string(), mkdirEc.message() );
-        return 1;
-    }
-    const std::filesystem::path settingsPath = settingsDir / "settings.json";
-    const std::filesystem::path nudgeScript  = hooksStoreDir() / "hooks" / "ripwire-nudge.sh";   // relativePath is "hooks/<name>" (CMake's group prefix)
-
-    std::error_code existsEc;
-    if( !std::filesystem::exists( settingsPath, existsEc ) )
-    {
-        const rw::pathguard::OpenedFile opened = rw::pathguard::openNoFollowTruncate( "the agent settings file", settingsPath.string() );
-        if( opened.fd < 0 ) { return 1; }   // openNoFollowTruncate already emitted the reason
-        if( !rw::pathguard::writeAllAndClose( opened.fd, "{}\n" ) )
-        {
-            rw::emitTo( stderr, "ripwire skills install: could not initialize {}\n", settingsPath.string() );
-            return 1;
-        }
-    }
+    const std::filesystem::path nudgeScript = hooksStoreDir() / "hooks" / "ripwire-nudge.sh";   // relativePath is "hooks/<name>" (CMake's group prefix)
+    const bool already = jqScriptAlreadyRegistered( settingsPath, "PreToolUse", "ripwire-nudge.sh" );
 
     // jqIsScript identifies an existing registration by SCRIPT BASENAME, not exact path (skills/
     // install.sh:35-49) — any prior copy's registration is recognised and refreshed, never duplicated.
@@ -673,61 +761,143 @@ inline int mergeHookConfig( std::string_view agentName )
         "  .hooks.SessionStart += [{\"matcher\": \"startup|resume|clear\", \"hooks\": [{\"type\": \"command\", \"command\": $scmd}]}] "
         "end";
 
-    // `jq --arg NAME VALUE ... PROGRAM SETTINGSPATH`, each token individually single-quoted for the
-    // shell via rw::shSingleQuote (src/infra/jsonesc.h) — NAME itself needs no quoting (it is always
-    // one of the four bare identifiers below), but quoting it too is harmless and keeps every appended
-    // token going through the same one function.
-    const auto appendArg = [ ]( std::string& out, const std::string& name, const std::string& value )
+    if( already )
     {
-        out += " --arg ";
-        out += rw::shSingleQuote( name );
-        out += ' ';
-        out += rw::shSingleQuote( value );
-    };
-    std::string cmd = "jq";
-    appendArg( cmd, "cmd",  nudgeScript.string() );
-    appendArg( cmd, "scmd", nudgeScript.string() + " --session-start" );
-    appendArg( cmd, "m",    std::string( kClaudeHookMatcher ) );
-    appendArg( cmd, "n",    "ripwire-nudge.sh" );
-    cmd += ' ';
-    cmd += rw::shSingleQuote( jqProgram );
-    cmd += ' ';
-    cmd += rw::shSingleQuote( settingsPath.string() );
-    cmd += " 2>/dev/null";
-
-    const ShellCaptureResult result = runShellCapture( cmd );
-    if( !result.spawned )
-    {
-        rw::emitTo( stderr, "ripwire skills install: could not start a shell to run jq\n" );
-        return 1;
+        rw::emitTo( stdout, "ripwire PreToolUse hook already registered in {} ({}) — refreshing its matcher.\n",
+                    settingsPath.string(), nudgeScript.string() );
     }
-    if( result.exitedNormally && result.exitCode == 127 )
+    else
     {
-        rw::emitTo( stderr,
-                    "ripwire skills install: --hook needs jq on PATH to safely merge {} (not found).\n"
-                    "Add these by hand instead:\n"
-                    "  hooks.PreToolUse   += [{{\"matcher\":\"{}\",\"hooks\":[{{\"type\":\"command\",\"command\":\"{}\"}}]}}]\n"
-                    "  hooks.SessionStart += [{{\"matcher\":\"startup|resume|clear\",\"hooks\":[{{\"type\":\"command\",\"command\":\"{} --session-start\"}}]}}]\n",
-                    settingsPath.string(), kClaudeHookMatcher, nudgeScript.string(), nudgeScript.string() );
-        return 1;
-    }
-    // [ -s "$tmp" ] in install.sh's own words: an empty or non-zero-exit result never overwrites the
-    // existing file — a jq failure (malformed input JSON, say) has to be reported, not applied.
-    if( !result.exitedNormally || result.exitCode != 0 || result.output.empty() )
-    {
-        rw::emitTo( stderr, "ripwire skills install: --hook merge failed (is {} valid JSON?); nothing changed\n", settingsPath.string() );
-        return 1;
+        // Read and Glob are in the matcher deliberately: the whole-file read is the largest token sink
+        // in an agent loop and the one default a skill description cannot intercept. mcp__ripwire__.*
+        // is in the matcher for the substitution meter: it counts ripwire's own calls as the
+        // numerator, and an agent that prefers the MCP server to the CLI would otherwise be a pure
+        // undercount (docs/SUBSTITUTION_METER.md). Ported verbatim from skills/install.sh's own banner
+        // (the D2 fix — a shorter wording read as anonymous counts/metadata and was not honest about
+        // what the meter actually captures).
+        rw::emitTo( stdout,
+                    "ripwire skills install --hook will add these OPT-IN, advisory-only entries to {}:\n"
+                    "  hooks.PreToolUse  += [{{ matcher: \"{}\", hooks: [{{ type: \"command\", command: \"{}\" }}] }}]\n"
+                    "  hooks.SessionStart += [{{ matcher: \"startup|resume|clear\", hooks: [{{ type: \"command\", command: \"{} --session-start\" }}] }}]\n"
+                    "  behavior: never blocks/denies/rewrites a tool call, and since 2026-09-02 never speaks on it\n"
+                    "            either — the advisory nudge was measured inert and retired (docs/EVALS.md §4).\n"
+                    "            What remains on PreToolUse is the substitution meter and the router's adoption\n"
+                    "            observation. The SessionStart entry still injects the use-when guidance.\n"
+                    "  counting: appends one JSONL row per observed call to ~/.ripwire/substitution.jsonl, and that row\n"
+                    "            carries the RAW file path (Read, and the Edit/Write/MultiEdit/NotebookEdit target), RAW\n"
+                    "            grep/glob pattern, the first 200 B of the RAW command (Bash), or an MCP verb's symbol/file\n"
+                    "            arguments you just passed, plus the absolute repo path and session id — in cleartext.\n"
+                    "            Local-only: this file is never transmitted anywhere, but it has no automatic retention\n"
+                    "            limit and grows for as long as counting stays on. RIPWIRE_METER=0 opts out of counting\n"
+                    "            (the nudge itself keeps working). Details: docs/SUBSTITUTION_METER.md.\n"
+                    "  remove:   delete those two entries from {} (or re-run with the entries already absent).\n",
+                    settingsPath.string(), kClaudeHookMatcher, nudgeScript.string(), nudgeScript.string(), settingsPath.string() );
     }
 
-    const rw::pathguard::OpenedFile opened = rw::pathguard::openNoFollowTruncate( "the agent settings file", settingsPath.string() );
-    if( opened.fd < 0 ) { return 1; }
-    if( !rw::pathguard::writeAllAndClose( opened.fd, result.output ) )
-    {
-        rw::emitTo( stderr, "ripwire skills install: could not write the merged hook config to {}\n", settingsPath.string() );
-        return 1;
-    }
-    rw::emitTo( stdout, "ripwire skills install: hook registered in {}\n", settingsPath.string() );
+    std::string jqArgs;
+    appendJqArg( jqArgs, "cmd",  nudgeScript.string() );
+    appendJqArg( jqArgs, "scmd", nudgeScript.string() + " --session-start" );
+    appendJqArg( jqArgs, "m",    std::string( kClaudeHookMatcher ) );
+    appendJqArg( jqArgs, "n",    "ripwire-nudge.sh" );
+    jqArgs += ' ';
+    jqArgs += rw::shSingleQuote( jqProgram );
+
+    const std::string missingJqAdvice = std::format(
+        "Add these by hand instead:\n"
+        "  hooks.PreToolUse   += [{{\"matcher\":\"{}\",\"hooks\":[{{\"type\":\"command\",\"command\":\"{}\"}}]}}]\n"
+        "  hooks.SessionStart += [{{\"matcher\":\"startup|resume|clear\",\"hooks\":[{{\"type\":\"command\",\"command\":\"{} --session-start\"}}]}}]\n",
+        kClaudeHookMatcher, nudgeScript.string(), nudgeScript.string() );
+    const int rc = runJqMergeFile( settingsPath, jqArgs, missingJqAdvice );
+    if( rc != 0 ) { return rc; }
+    rw::emitTo( stdout, "done. Registered ripwire's PreToolUse meter + SessionStart primer hooks in {}.\n", settingsPath.string() );
+    return mergeClaudeRoute( settingsPath );
+}
+
+// `--codex --hook`: merge Codex's prompt router (UserPromptSubmit), PreToolUse nudge and SessionStart
+// primer into Codex's own hooks.json schema, in one jq call. Ported from skills/install.sh's
+// install_codex_hook — that merge identifies an existing entry by EXACT command match, not by script
+// basename (unlike the Claude merge above): Codex has exactly one supported install channel today (no
+// package-manager copy to reconcile with a checkout the way Claude's does), so the simpler exact match
+// is what the reference implementation used and this keeps agreeing with it byte-for-byte.
+inline int mergeCodexHook( const std::filesystem::path& settingsPath )
+{
+    const std::filesystem::path hookScript  = hooksStoreDir() / "hooks" / "ripwire-codex-nudge.sh";
+    const std::filesystem::path routeScript = hooksStoreDir() / "hooks" / "ripwire-codex-route.sh";
+
+    const std::string jqProgram =
+        "$cmd as $cmd | $scmd as $scmd | $rcmd as $rcmd | "
+        ".hooks //= {} | .hooks.PreToolUse //= [] | .hooks.SessionStart //= [] | .hooks.UserPromptSubmit //= [] | "
+        "if any(.hooks.PreToolUse[]?.hooks[]?; .command == $cmd) then "
+        "  .hooks.PreToolUse |= map(if any(.hooks[]?; .command == $cmd) then .matcher = $m else . end) "
+        "else "
+        "  .hooks.PreToolUse += [{\"matcher\": $m, \"hooks\": [{\"type\": \"command\", \"command\": $cmd, "
+        "    \"timeout\": 3, \"statusMessage\": \"Checking for a cheaper Ripwire CLI query\"}]}] "
+        "end | "
+        "if any(.hooks.SessionStart[]?.hooks[]?; .command == $scmd) then "
+        "  .hooks.SessionStart |= map(if any(.hooks[]?; .command == $scmd) then .matcher = \"^(startup|resume|clear|compact)$\" else . end) "
+        "else "
+        "  .hooks.SessionStart += [{\"matcher\": \"^(startup|resume|clear|compact)$\", \"hooks\": [{\"type\": \"command\", "
+        "    \"command\": $scmd, \"timeout\": 3, \"statusMessage\": \"Loading Ripwire CLI-first guidance\", "
+        "    \"additionalContextLimit\": 2000}]}] "
+        "end | "
+        "if any(.hooks.UserPromptSubmit[]?.hooks[]?; .command == $rcmd) then "
+        "  .hooks.UserPromptSubmit |= map(if any(.hooks[]?; .command == $rcmd) then .matcher = \".*\" else . end) "
+        "else "
+        "  .hooks.UserPromptSubmit += [{\"matcher\": \".*\", \"hooks\": [{\"type\": \"command\", \"command\": $rcmd, "
+        "    \"timeout\": 6, \"statusMessage\": \"Selecting a focused Ripwire CLI route\", "
+        "    \"additionalContextLimit\": 3000}]}] "
+        "end";
+
+    rw::emitTo( stdout, "ripwire skills install --codex --hook will add or refresh advisory-only entries in {}.\n", settingsPath.string() );
+
+    std::string jqArgs;
+    appendJqArg( jqArgs, "cmd",  hookScript.string() );
+    appendJqArg( jqArgs, "scmd", hookScript.string() + " --session-start" );
+    appendJqArg( jqArgs, "rcmd", routeScript.string() );
+    appendJqArg( jqArgs, "m",    std::string( kCodexHookMatcher ) );
+    jqArgs += ' ';
+    jqArgs += rw::shSingleQuote( jqProgram );
+
+    const int rc = runJqMergeFile( settingsPath, jqArgs, "" );
+    if( rc != 0 ) { return rc; }
+    rw::emitTo( stdout, "done. Registered Ripwire's Codex prompt router + PreToolUse nudge + SessionStart primer in {}.\n"
+                        "Open /hooks in Codex to review and trust the installed command hooks.\n", settingsPath.string() );
     return 0;
+}
+
+inline int mergeHookConfig( std::string_view agentName )
+{
+    const std::string effectiveAgent = agentName.empty() ? std::string( "claude" ) : std::string( agentName );
+    const rw::AgentTarget* row = rw::agentTarget( effectiveAgent );
+    if( row == nullptr || !row->hookSlot )
+    {
+        rw::emitTo( stderr, "ripwire skills install: --hook is not supported for {} yet\n", effectiveAgent );
+        return 2;
+    }
+
+    const std::filesystem::path settingsPath = ( effectiveAgent == "claude" )
+        ? std::filesystem::path( envOr( "CLAUDE_CONFIG_DIR", ( homeDir() / ".claude" ).string() ) ) / "settings.json"
+        : std::filesystem::path( envOr( "CODEX_HOME", ( homeDir() / ".codex" ).string() ) ) / "hooks.json";
+    std::error_code mkdirEc;
+    std::filesystem::create_directories( settingsPath.parent_path(), mkdirEc );
+    if( mkdirEc )
+    {
+        rw::emitTo( stderr, "ripwire skills install: could not create {}: {}\n", settingsPath.parent_path().string(), mkdirEc.message() );
+        return 1;
+    }
+    std::error_code existsEc;
+    if( !std::filesystem::exists( settingsPath, existsEc ) )
+    {
+        const rw::pathguard::OpenedFile opened = rw::pathguard::openNoFollowTruncate( "the agent settings file", settingsPath.string() );
+        if( opened.fd < 0 ) { return 1; }   // openNoFollowTruncate already emitted the reason
+        if( !rw::pathguard::writeAllAndClose( opened.fd, "{}\n" ) )
+        {
+            rw::emitTo( stderr, "ripwire skills install: could not initialize {}\n", settingsPath.string() );
+            return 1;
+        }
+    }
+
+    return ( effectiveAgent == "claude" ) ? mergeClaudeHook( settingsPath ) : mergeCodexHook( settingsPath );
 }
 
 // Accepts ONE bare positional token as the DEST_PATH form of the CLI surface

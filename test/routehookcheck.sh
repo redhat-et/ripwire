@@ -426,9 +426,10 @@ IHOME="$TMP/ihome"; mkdir -p "$IHOME"
 IOUT1="$( HOME="$IHOME" bash "$INSTALL" --hook 2>&1 )"; IRC1=$?
 SETTINGS="$IHOME/.claude/settings.json"
 if [ "$IRC1" -eq 0 ]; then ok "I1 install: --hook exits 0"; else no "I1 install: exit was $IRC1"; fi
-jq -e --arg cmd "$HOOK" 'any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; .command == $cmd)' "$SETTINGS" >/dev/null 2>&1 \
+# Matched by script basename, not exact path: #225's installer registers its extracted store copy.
+jq -e 'any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; (.command // "") | endswith("/hooks/ripwire-claude-route.sh"))' "$SETTINGS" >/dev/null 2>&1 \
     && ok "I2 install: settings.json registers the router as a UserPromptSubmit hook" \
-    || no "I2 install: no UserPromptSubmit entry for $HOOK"
+    || no "I2 install: no UserPromptSubmit entry for ripwire-claude-route.sh"
 IOUT2="$( HOME="$IHOME" bash "$INSTALL" --hook 2>&1 )"
 CNT="$( jq '[(.hooks.UserPromptSubmit // [])[] | select(.hooks[]?.command | test("ripwire-claude-route"))] | length' "$SETTINGS" )"
 [ "$CNT" = "1" ] \
@@ -461,7 +462,7 @@ OLDHOME="$TMP/oldhome"; mkdir -p "$OLDHOME/.claude"
 jq -n --arg cmd "$NUDGE" '{hooks:{PreToolUse:[{matcher:"Bash",hooks:[{type:"command",command:$cmd}]}]}}' \
     >"$OLDHOME/.claude/settings.json"
 HOME="$OLDHOME" bash "$INSTALL" --hook >/dev/null 2>&1
-jq -e --arg cmd "$HOOK" 'any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; .command == $cmd)' \
+jq -e 'any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; (.command // "") | endswith("/hooks/ripwire-claude-route.sh"))' \
     "$OLDHOME/.claude/settings.json" >/dev/null 2>&1 \
     && ok "I6 install: a machine that already had the nudge registered still gets the router" \
     || no "I6 install: the early return skipped the router — every pre-2026-09-02 install would miss it"
