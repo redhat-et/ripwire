@@ -29,6 +29,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/statcompat.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -65,21 +66,6 @@ echo "fake-object" > "$CACHEDIR/.git/HEAD"
 FIVE_DAYS_AGO=$(( $(date +%s) - 5*86400 ))
 touch -t "$(date -r "$FIVE_DAYS_AGO" +%Y%m%d%H%M.%S 2>/dev/null || date -d "@$FIVE_DAYS_AGO" +%Y%m%d%H%M.%S)" "$CACHEDIR" 2>/dev/null \
     || touch -d "@$FIVE_DAYS_AGO" "$CACHEDIR" 2>/dev/null
-
-# L3 (Linux probe): portable stat reader(s). GNU coreutils and BSD/macOS disagree on both the flag and the
-# format directives, and the `stat -f FMT ... || stat -c FMT ...` fallback this gate used is a TRAP. On GNU,
-# `-f` means FILESYSTEM status and takes NO format argument, so FMT is parsed as a second FILE: measured on
-# coreutils 9.11, `stat -f %i FILE` PRINTS a six-line filesystem block for FILE on stdout and exits 1. The
-# `||` arm then appends the right number under six lines of junk -- so a string compare fails, a numeric
-# compare dies with "integer expression expected", and a `|| echo MISSING` variant reports MISSING forever
-# (a gate that then passes by comparing nothing to nothing). Detect the flavour ONCE, use one form.
-if stat --version >/dev/null 2>&1; then   # GNU coreutils
-    mtime_of(){ stat -c '%Y'  "$1" 2>/dev/null; }
-    mode_of(){  stat -c '%a'  "$1" 2>/dev/null; }
-else                                     # BSD / macOS
-    mtime_of(){ stat -f '%m'  "$1" 2>/dev/null; }
-    mode_of(){  stat -f '%Lp' "$1" 2>/dev/null; }
-fi
 
 BEFORE_MTIME="$( mtime_of "$CACHEDIR" )"
 

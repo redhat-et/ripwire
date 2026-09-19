@@ -46,6 +46,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/statcompat.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/fixture"
@@ -110,16 +111,7 @@ wait_for_id() { local i; for i in $( seq 1 200 ); do grep -q "\"id\":$2" "$1" 2>
 blob_paths() { find "$1" -maxdepth 3 -type f -name "$2" 2>/dev/null; }
 blob_first() { blob_paths "$1" "$2" | head -1; }
 qsnap_count() { blob_paths "$1" 'ripwire-qsnap-*.bin' | grep -c . ; }
-# L3 (Linux probe): portable stat reader(s). GNU coreutils and BSD/macOS disagree on both the flag and the
-# format directives, and the `stat -f FMT ... || stat -c FMT ...` fallback this gate used is a TRAP. On GNU,
-# `-f` means FILESYSTEM status and takes NO format argument, so FMT is parsed as a second FILE: measured on
-# coreutils 9.11, `stat -f %i FILE` PRINTS a six-line filesystem block for FILE on stdout and exits 1. The
-# `||` arm then appends the right number under six lines of junk -- so a string compare fails, a numeric
-# compare dies with "integer expression expected", and a `|| echo MISSING` variant reports MISSING forever
-# (a gate that then passes by comparing nothing to nothing). Detect the flavour ONCE, use one form.
-if stat --version >/dev/null 2>&1; then inode_mtime(){ stat -c '%i %Y' "$1" 2>/dev/null || echo "MISSING"; }   # GNU coreutils
-else                                    inode_mtime(){ stat -f '%i %m' "$1" 2>/dev/null || echo "MISSING"; }   # BSD / macOS
-fi
+inode_mtime(){ inode_mtime_of "$1" || echo "MISSING"; }
 skip(){ printf '  SKIP  %s\n' "$*"; }
 # The no-warning row only measures something on a ThreadSanitizer build; on any other binary it is a SKIP by name, never
 # a PASS, because a plain binary prints no warning whether or not the race is there (arm (f) passes on the unfixed

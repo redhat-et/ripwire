@@ -18,6 +18,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/statcompat.sh"
 ASAN_BIN="$ROOT/asan/ripwire"
 ASAN_DIR="$ROOT/asan"
 SRC_DIR="$ROOT/src"
@@ -46,19 +47,6 @@ if [ ! -f "$ASAN_BIN" ]; then
 fi
 
 # Both asan/ripwire and src/ exist. Check if the binary is older than the newest src file.
-# L3 (Linux probe): portable stat reader(s). GNU coreutils and BSD/macOS disagree on both the flag and the
-# format directives, and the `stat -f FMT ... || stat -c FMT ...` fallback this gate used is a TRAP. On GNU,
-# `-f` means FILESYSTEM status and takes NO format argument, so FMT is parsed as a second FILE: measured on
-# coreutils 9.11, `stat -f %i FILE` PRINTS a six-line filesystem block for FILE on stdout and exits 1. The
-# `||` arm then appends the right number under six lines of junk -- so a string compare fails, a numeric
-# compare dies with "integer expression expected", and a `|| echo MISSING` variant reports MISSING forever
-# (a gate that then passes by comparing nothing to nothing). Detect the flavour ONCE, use one form.
-if stat --version >/dev/null 2>&1; then   # GNU coreutils
-    mtime_of(){ stat -c '%Y' "$1" 2>/dev/null; }
-else                                     # BSD / macOS
-    mtime_of(){ stat -f '%m' "$1" 2>/dev/null; }
-fi
-
 asan_mtime="$( mtime_of "$ASAN_BIN" )" || {
     no "could not stat asan/ripwire"
     exit 1

@@ -4,6 +4,7 @@
 # and length, never prompt text, and hook installation stays idempotent.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 HOOK="$ROOT/hooks/ripwire-codex-route.sh"
@@ -137,9 +138,9 @@ OFF="$( printf '%s\n' "{\"prompt\":\"$PROMPT\",\"cwd\":\"$TMP/repo\",\"session_i
     && ok "routing-meter opt-out keeps advice but writes no log or pending state" \
     || no "routing-meter opt-out suppressed advice or wrote state"
 
-HOME="$TMP/home" CODEX_HOME="$TMP/home/.codex" AGENTS_HOME="$TMP/home/.agents" \
+HOME="$TMP/home" CODEX_HOME="$TMP/home/.codex" AGENTS_HOME="$TMP/home/.agents" RIPWIRE_DATA_HOME="$TMP/home/.local/share/ripwire" \
     bash "$ROOT/skills/install.sh" --codex --hook >/dev/null
-HOME="$TMP/home" CODEX_HOME="$TMP/home/.codex" AGENTS_HOME="$TMP/home/.agents" \
+HOME="$TMP/home" CODEX_HOME="$TMP/home/.codex" AGENTS_HOME="$TMP/home/.agents" RIPWIRE_DATA_HOME="$TMP/home/.local/share/ripwire" \
     bash "$ROOT/skills/install.sh" --codex --hook >/dev/null
 SETTINGS="$TMP/home/.codex/hooks.json"
 jq -e --arg cmd "$HOOK" '[.hooks.UserPromptSubmit[]?.hooks[]? | select(.command == $cmd)] | length == 1' "$SETTINGS" >/dev/null 2>&1 \
