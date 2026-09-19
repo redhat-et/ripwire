@@ -51,10 +51,14 @@ d3="$d"
 mkdir -p "$CLAUDE_CONFIG_DIR/skills"
 outside="$( mktemp -d )"
 ln -s "$outside" "$CLAUDE_CONFIG_DIR/skills/ripwire-orient"   # plant a symlink where install would write
-"$ripwire" skills install >/dev/null 2>"$d3/skills_install.err" || true
+out3="$( "$ripwire" skills install 2>"$d3/skills_install.err" )" || true
 [ -L "$CLAUDE_CONFIG_DIR/skills/ripwire-orient" ] || fail "planted symlink was replaced instead of refused"
 target="$( readlink "$CLAUDE_CONFIG_DIR/skills/ripwire-orient" )"
 [ "$target" = "$outside" ] || fail "planted symlink's target changed — install wrote through it"
+# I1 (round-2 review): a foreign-but-live entry skipped without --force must be COUNTED, not silent —
+# the summary line must say so, not just report a linked count one short of the shipped total.
+printf '%s' "$out3" | grep -qE '[0-9]+ skipped \(run --force to relink foreign entries\)' \
+    || fail "a bare install that skipped a foreign symlink did not report a skipped count (I1)"
 rm -rf "$d3" "$outside"
 
 # ── arm 4: manifest v2 round-trip and prune-on-rename ─────────────────────────────────────────
