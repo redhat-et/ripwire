@@ -606,20 +606,39 @@ those methods; ripwire does not capture them). Every floor is stated and pinned,
 
 ### Added — skills and hooks are embedded in the binary; `ripwire skills install` replaces the checkout-symlink installer
 
-`skills/` and `hooks/` are now baked into the `ripwire` binary at configure time (CMake globs both directories,
-recursively, into a generated content-addressed header), so a curl or source install carries the whole skill/hook
-set with no separate `$prefix/share/ripwire/{skills,hooks}` staging step. Activation is one command, `ripwire
-skills install [--claude|--codex|--codex-legacy|--hermes|--openclaw|--all|DEST_PATH]`, which extracts the
-embedded set into a versioned, immutable-by-hash store under `$RIPWIRE_DATA_HOME` (every created directory forced
-to `0755` regardless of the process umask) and symlinks from there into the target agent's own skill-discovery
-directory; `--hook` additionally registers each agent's PreToolUse/SessionStart nudge and, for Codex and Claude,
-the UserPromptSubmit prompt router, merged via a PATH-resolved `jq`. `--doctor` reports install provenance —
-`not_installed=`/`stale=` against the binary's own embedded version — and recognises a mise/aqua version-manager
-shim by its real on-disk install layout (not a hardcoded shape) instead of ever calling it STALE by mtime.
-`skills/install.sh` is now a thin wrapper over the same binary path. Windows is out of scope for this round
-(blocked on the separate native port, #44). Gates: `test/skillsinstallcheck.sh` (new, 21 arms),
+`skills/` and `hooks/` are baked into the `ripwire` binary at configure time (CMake globs both directories,
+recursively, into a generated content-addressed header), replacing the two previously separate mechanisms that
+staged them: `skills/install.sh`'s checkout-symlink installer, and the curl installer's `$prefix/share/ripwire/
+{skills,hooks}` copy step. Activation is one command, `ripwire skills install
+[--claude|--codex|--codex-legacy|--hermes|--openclaw|--all|DEST_PATH]`, which extracts the embedded set into a
+versioned, content-addressed store under `$RIPWIRE_DATA_HOME` (every directory it creates forced to `0755`
+regardless of the process umask, contents verified byte-for-byte against the binary's own embedded copy before an
+extraction is ever trusted) and symlinks from there into the target agent's own skill-discovery directory,
+including `skills/hermes/ripwire-*/`'s Hermes-native set. A dangling or foreign-but-live symlink at the
+destination is repaired; a real file or a planted symlink is refused even under `--force`; a stale entry no
+longer current is pruned only when it is ours to prune (manifest-tracked, or resolving under our own store) —
+never a user's own symlink that merely shares the `ripwire-*` naming. `--all` installs into every detected agent
+at once; `--contributor` also installs repo-maintainer-only skills; `--hook` registers each agent's
+PreToolUse/SessionStart nudge and, for Codex and Claude, the UserPromptSubmit prompt router and the
+substitution-meter disclosure banner, merged into the agent's own config via a PATH-resolved `jq`. The manifest
+and any hook config are written atomically (temp file + rename), and record what actually linked, never what was
+merely attempted. `--doctor` reports install provenance — `not_installed=`/`stale=` against the binary's own
+embedded version — and recognises a mise/aqua version-manager shim by its real on-disk install layout (an
+arbitrarily nested archive extraction, not a hardcoded shape) instead of ever calling a shim-managed install
+STALE by mtime; an unresolvable self path is disclosed as `self_unverified=`, never silently claimed as a byte
+match. `skills/install.sh` is now a thin wrapper over the same binary path. Bare `ripwire skills` and `ripwire
+skills install --help`/`-h` now print usage instead of mapping `skills/` as a crawl root or refusing as an
+unknown flag. Windows is out of scope for this round (blocked on the separate native port, #44). Gates:
+`test/skillsinstallcheck.sh` (new, 21 arms), `test/skillinstallcheck.sh`, `test/hermesinstallcheck.sh`,
 `test/hooksembedrecursivecheck.sh` (new), `test/shimselfunverifiedcheck.sh` (new), `test/doctorstalecheck.sh`,
-`test/selfcontainedcheck.sh`'s embed cross-check. (#225)
+`test/codexinstallhonestycheck.sh`, `test/selfcontainedcheck.sh`'s embed cross-check. (#225)
+
+### Fixed — `ripwire wrap`'s printed `skills install` recipe line could execute shell metacharacters in a resolved binary path
+
+The recipe line names this process's own resolved executable path verbatim; a path containing `$(...)` or a
+backtick (a version-manager shim resolved through an unusual install layout) was pasted, and would run, as live
+shell. The path is now single-quote-escaped (`rw::shSingleQuote`) before printing, so it is always inert text to
+paste, never executable. Gate: `test/wrapverbscheck.sh`.
 
 ### Added — Microsoft's `cl.exe` builds the tree, so both Windows front ends compile and both gate
 
