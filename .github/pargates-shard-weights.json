@@ -227,6 +227,7 @@
 "headsnapcachecheck.sh": 19.9,
 "historyoraclecheck.sh": 6.9,
 "hookcheck.sh": 78.0,
+"hooksembedrecursivecheck.sh": 8.0,
 "hostilecheck.sh": 6.2,
 "hotspotsincecheck.sh": 8.6,
 "htmlcolorcheck.sh": 12.4,

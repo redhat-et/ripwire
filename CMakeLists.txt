@@ -325,7 +325,7 @@ file(GLOB_RECURSE _ripwire_skill_files CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRE
 # Only files inside a skills/<name>/ subdirectory are an embeddable skill — top-level files such as
 # skills/CONSOLIDATION.md are repo-maintainer notes, not a skill payload, and must not be embedded.
 list(FILTER _ripwire_skill_files EXCLUDE REGEX "^[^/]+$")
-file(GLOB _ripwire_hook_files CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/hooks" "${CMAKE_CURRENT_SOURCE_DIR}/hooks/*.sh")
+file(GLOB_RECURSE _ripwire_hook_files CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/hooks" "${CMAKE_CURRENT_SOURCE_DIR}/hooks/*.sh")
 list(SORT _ripwire_skill_files)   # deterministic iteration order — G4/determinism contract
 list(SORT _ripwire_hook_files)
 

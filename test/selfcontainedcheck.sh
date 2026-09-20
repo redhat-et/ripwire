@@ -167,10 +167,11 @@ for skill_dir in skill_dirs:
             rel = str(f.relative_to(pathlib.Path(sys.argv[1])))
             expected[rel] = f.read_bytes()
 
-# Walk hooks/*.sh
+# Walk hooks/**/*.sh — nested (a hooks/lib/x.sh) as well as flat, matching CMakeLists.txt's
+# GLOB_RECURSE for this group.
 hooks_dir = pathlib.Path(sys.argv[1], 'hooks')
 if hooks_dir.exists():
-    for f in hooks_dir.glob('*.sh'):
+    for f in hooks_dir.rglob('*.sh'):
         rel = str(f.relative_to(pathlib.Path(sys.argv[1])))
         expected[rel] = f.read_bytes()
 
