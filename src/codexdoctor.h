@@ -196,9 +196,15 @@ inline Check shimBinaryCheck( const std::string& selfPath )
 {
     if( const std::optional<std::string> managed = resolveManagedInstall() )
     {
-        const bool haveSelf = !selfPath.empty();
-        const bool sameFile = haveSelf && filesByteIdentical( selfPath, *managed );
-        Check out{ "codex-binary", !haveSelf || sameFile,
+        if( selfPath.empty() )
+        {
+            // Nothing to compare `managed` against — this is exactly as unknowable as the ambiguous-
+            // layout case above, not a pass: reporting same_file="0" alongside ok=1 (the prior
+            // behavior) claimed a comparison that never ran (review item 3, optional list).
+            return { "codex-binary", true, "on_path=\"1\" managed=\"1\" self_unverified=\"1\"" };
+        }
+        const bool sameFile = filesByteIdentical( selfPath, *managed );
+        Check out{ "codex-binary", sameFile,
                    "on_path=\"1\" managed=\"1\" same_file=\"" + std::string( sameFile ? "1" : "0" ) + "\"" };
         if( !out.ok ) { out.attrs += " hint=\"the version manager's installed ripwire differs from this one — re-run its install (e.g. `mise install`/`aqua install`) to update it\""; }
         return out;

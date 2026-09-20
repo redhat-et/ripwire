@@ -504,6 +504,7 @@
 "shadowcheck.sh": 11.2,
 "shapingflagcheck.sh": 193.7,
 "shellgateindexcheck.sh": 1.2,
+"shimselfunverifiedcheck.sh": 1.8,
 "showcasecapturecheck.sh": 20.9,
 "sibliftcheck.sh": 0.5,
 "sigredactcheck.sh": 0.9,
