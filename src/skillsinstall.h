@@ -112,6 +112,35 @@ inline bool symlinkOrRefuse( const std::filesystem::path& storeFile, const std::
     return os::symlink( storeFile.c_str(), destLink.c_str() ) == 0;
 }
 
+// create_directories() on POSIX creates with mode 0777 masked by the process umask — a permissive
+// umask (e.g. 000) would otherwise leave a freshly created content-addressed store or agent skills
+// directory world-writable (review item 9). Every create_directories call site in this file goes
+// through this instead, walking the path one level at a time (create_directories()'s own "created"
+// bool reports only on the LEAF of a multi-level create, which undersells it: extractGroup's tmp
+// extraction directory, later renamed into place as the store root, is an INTERMEDIATE level of one
+// such call and would otherwise keep whatever the umask gave it) and forcing every level THIS call
+// actually creates to exactly 0755. A pre-existing directory anywhere in the chain — however unusual
+// its mode, such as a deliberately locked-down one or a symlinked root a user manages themselves — is
+// never touched.
+inline void createDirectoriesMode0755( const std::filesystem::path& dir, std::error_code& ec )
+{
+    ec.clear();
+    std::filesystem::path built;
+    for( const std::filesystem::path& part : dir )
+    {
+        built /= part;
+        std::error_code segEc;
+        const bool created = std::filesystem::create_directory( built, segEc );
+        if( segEc ) { ec = segEc; return; }
+        if( !created ) { continue; }   // already existed — not ours to chmod
+        std::filesystem::permissions( built,
+            std::filesystem::perms::owner_all | std::filesystem::perms::group_read | std::filesystem::perms::group_exec
+                                              | std::filesystem::perms::others_read | std::filesystem::perms::others_exec,
+            std::filesystem::perm_options::replace, segEc );
+        if( segEc ) { ec = segEc; return; }
+    }
+}
+
 // Write one embedded file's bytes to `dest`, refusing if anything at `dest` already exists as a
 // symlink (never write through a planted link — reuses rw::pathguard::isSymlink, the shared predicate,
 // rather than a second lstat/S_ISLNK check). O_EXCL means "fail if it exists at all" — combined with a
@@ -129,7 +158,7 @@ inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_vi
         return { false, "refusing to write through existing symlink: " + dest.string() };
     }
     std::error_code mkdirEc;
-    std::filesystem::create_directories( dest.parent_path(), mkdirEc );
+    createDirectoriesMode0755( dest.parent_path(), mkdirEc );
     if( mkdirEc )
     {
         return { false, "create_directories failed for " + dest.parent_path().string() + ": " + mkdirEc.message() };
@@ -213,7 +242,7 @@ inline Outcome extractGroup( const std::array<embedded_skills::EmbeddedFile, N>&
             return o;
         }
     }
-    std::filesystem::create_directories( storeRoot.parent_path(), ec );
+    createDirectoriesMode0755( storeRoot.parent_path(), ec );
     if( !renameAtomic( tmp, storeRoot ) )
     {
         // someone else extracted the same content concurrently and won the race — that's fine,
@@ -256,7 +285,7 @@ inline Outcome ensureStoreExtracted()
 inline Outcome linkOrRefuse( const std::filesystem::path& storeFile, const std::filesystem::path& destLink )
 {
     std::error_code mkdirEc;
-    std::filesystem::create_directories( destLink.parent_path(), mkdirEc );
+    createDirectoriesMode0755( destLink.parent_path(), mkdirEc );
     if( mkdirEc )
     {
         return { false, "create_directories failed for " + destLink.parent_path().string() + ": " + mkdirEc.message() };
@@ -540,7 +569,7 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
     }
 
     std::error_code mkdirEc;
-    std::filesystem::create_directories( skillsDest, mkdirEc );
+    createDirectoriesMode0755( skillsDest, mkdirEc );
     if( mkdirEc )
     {
         return { false, "create_directories failed for " + skillsDest.string() + ": " + mkdirEc.message(), skillsDest, 0, 0 };
@@ -694,11 +723,12 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
 // symlinkOrRefuse/renameAtomic above — is the correctly-scoped tool, not a second general-purpose
 // mechanism.
 
-// Run `cmd` through /bin/sh -c via popen(), capturing stdout only (the jq command below redirects its
-// own stderr to /dev/null so a parse error never lands in the JSON this writes back). Returns false if
-// the shell could not even be started; `exitedNormally`/`exitCode` decode pclose()'s status the same
-// way runCommandCapture decodes waitpid's, so a caller can tell "jq is missing" (exit 127) from
-// "jq ran and rejected the input" (any other nonzero).
+// Run `cmd` through /bin/sh -c via popen(), capturing stdout only — jq's own stderr is left to
+// inherit the caller's (codexinstallhonestycheck.sh pins this: a jq parse-error diagnostic must still
+// reach the operator, never be swallowed). Returns false if the shell could not even be started;
+// `exitedNormally`/`exitCode` decode pclose()'s status the same way runCommandCapture decodes
+// waitpid's, so a caller can tell "jq is missing" (exit 127) from "jq ran and rejected the input"
+// (any other nonzero).
 struct ShellCaptureResult
 {
     bool        spawned         = false;
@@ -735,6 +765,26 @@ inline ShellCaptureResult runShellCapture( const std::string& cmd )
 inline constexpr std::string_view kClaudeHookMatcher = "^(Read|Glob|Grep|Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)$";
 inline constexpr std::string_view kCodexHookMatcher  = "^(Bash|Read|Glob|Grep|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)$";
 
+// Resolve `jq` to an absolute path via PATH — the same walk codexdoctor.h's resolveExecutable does,
+// kept local here rather than pulled in as a cross-file dependency. Pins the interpreter the shell
+// strings below run instead of leaving a bare "jq" token for /bin/sh to resolve on its own each time
+// (review item 10). Empty return means not found.
+inline std::string resolveJqPath()
+{
+    const char* pathEnv = std::getenv( "PATH" );
+    std::string_view remaining = pathEnv ? std::string_view( pathEnv ) : std::string_view();
+    while( !remaining.empty() )
+    {
+        const std::size_t split = remaining.find( ':' );
+        const std::string_view dir = remaining.substr( 0, split );
+        const std::string candidate = std::string( dir.empty() ? "." : dir ) + "/jq";
+        if( os::access( candidate.c_str(), X_OK ) == 0 ) { return candidate; }
+        if( split == std::string_view::npos ) { break; }
+        remaining.remove_prefix( split + 1 );
+    }
+    return {};
+}
+
 // `jq --arg NAME VALUE ... PROGRAM FILE`, each token individually single-quoted for the shell via
 // rw::shSingleQuote (src/infra/jsonesc.h).
 inline void appendJqArg( std::string& out, const std::string& name, const std::string& value )
@@ -753,7 +803,14 @@ inline void appendJqArg( std::string& out, const std::string& name, const std::s
 // missing jq / a merge failure / a write failure).
 inline int runJqMergeFile( const std::filesystem::path& file, const std::string& jqArgsAndProgram, std::string_view missingJqAdvice )
 {
-    std::string cmd = "jq";
+    const std::string jqPath = resolveJqPath();
+    if( jqPath.empty() )
+    {
+        rw::emitTo( stderr, "ripwire skills install: --hook needs jq on PATH to safely merge {} (not found).\n{}",
+                    file.string(), missingJqAdvice );
+        return 1;
+    }
+    std::string cmd = rw::shSingleQuote( jqPath );
     cmd += jqArgsAndProgram;
     cmd += ' ';
     cmd += rw::shSingleQuote( file.string() );
@@ -762,12 +819,6 @@ inline int runJqMergeFile( const std::filesystem::path& file, const std::string&
     if( !result.spawned )
     {
         rw::emitTo( stderr, "ripwire skills install: could not start a shell to run jq\n" );
-        return 1;
-    }
-    if( result.exitedNormally && result.exitCode == 127 )
-    {
-        rw::emitTo( stderr, "ripwire skills install: --hook needs jq on PATH to safely merge {} (not found).\n{}",
-                    file.string(), missingJqAdvice );
         return 1;
     }
     if( !result.exitedNormally || result.exitCode != 0 || result.output.empty() )
@@ -791,7 +842,12 @@ inline int runJqMergeFile( const std::filesystem::path& file, const std::string&
 // echoes its banner ahead of the jq call it describes.
 inline bool jqScriptAlreadyRegistered( const std::filesystem::path& file, std::string_view hooksField, const std::string& scriptName )
 {
-    std::string cmd = "jq -e";
+    const std::string jqPath = resolveJqPath();
+    // No jq to probe with — reads as "not yet registered"; the mutating merge this feeds into runs
+    // its own resolveJqPath() and reports the real reason (missing jq), never this one silently.
+    if( jqPath.empty() ) { return false; }
+    std::string cmd = rw::shSingleQuote( jqPath );
+    cmd += " -e";
     appendJqArg( cmd, "n", scriptName );
     cmd += " 'def isScript($n): (.command // \"\") | split(\" \")[0] | endswith(\"/hooks/\" + $n); any((.hooks.";
     cmd += std::string( hooksField );
@@ -1011,7 +1067,7 @@ inline int mergeHookConfig( std::string_view agentName )
         ? ( agentHome / "settings.json" )
         : ( agentHome / "hooks.json" );
     std::error_code mkdirEc;
-    std::filesystem::create_directories( settingsPath.parent_path(), mkdirEc );
+    createDirectoriesMode0755( settingsPath.parent_path(), mkdirEc );
     if( mkdirEc )
     {
         rw::emitTo( stderr, "ripwire skills install: could not create {}: {}\n", settingsPath.parent_path().string(), mkdirEc.message() );

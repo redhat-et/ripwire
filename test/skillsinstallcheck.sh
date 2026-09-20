@@ -331,4 +331,24 @@ rc=$?
 echo "$out20" | grep -qi "usage" || fail "bare 'ripwire skills' did not print a usage line"
 echo "$out20" | grep -q '<s ' && fail "bare 'ripwire skills' emitted a symbol map instead of usage — skills/ was mapped as a crawl root"
 
-echo "OK: skillsinstallcheck (arms 1-20)"
+# ── arm 21: a freshly created skills directory is 0755 under umask 000, not umask-dependent ────────
+# umask 000 is what makes this discriminating (CONTRIBUTING §1 / sidecarsymlinkcheck.sh's own (g)
+# arm): under the usual 022, create_directories()'s default 0777 already reads back as 0755, so this
+# is the only umask that actually distinguishes "explicit 0755" from "whatever the umask left" (review
+# item 9).
+if stat --version >/dev/null 2>&1; then
+    dirMode(){ stat -c '%a' "$1"; }
+else
+    dirMode(){ stat -f '%Lp' "$1"; }
+fi
+CURRENT_ARM="21-fresh-store-dir-mode-under-umask-000"
+sandbox
+d21="$d"
+( umask 000; "$ripwire" skills install >/dev/null )
+skillsMode="$( dirMode "$CLAUDE_CONFIG_DIR/skills" )"
+[ "$skillsMode" = "755" ] || fail "skills destination directory created 0$skillsMode under umask 000, expected 0755"
+storeMode="$( dirMode "$RIPWIRE_DATA_HOME/skills" )"
+[ "$storeMode" = "755" ] || fail "content-addressed store directory created 0$storeMode under umask 000, expected 0755"
+rm -rf "$d21"
+
+echo "OK: skillsinstallcheck (arms 1-21)"

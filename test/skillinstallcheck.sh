@@ -299,4 +299,44 @@ OC_HOOK_STATUS=$?
     && ok "(E) the refused run contained its skill links to the temp HOME" \
     || no "(E) the refused run linked nowhere visible — HOME= containment may be broken"
 
+# ── (F) jq is resolved via an actual PATH walk, not a fixed location (review item 10) ──────────────
+# A wrapper "jq" placed FIRST on PATH touches a sentinel before exec'ing the real jq — the sentinel
+# only appears if the merge's own PATH search, not some hardcoded /usr/bin/jq, is what ran it.
+REAL_JQ="$( command -v jq )" || no "(F) no system jq to copy for this arm"
+if [ -n "${REAL_JQ:-}" ]
+then
+    F_BINDIR="$TMP/f-wrapper-path-bin"; mkdir -p "$F_BINDIR"
+    F_SENTINEL="$TMP/f-jq-wrapper-ran"
+    printf '#!/bin/sh\ntouch "%s"\nexec "%s" "$@"\n' "$F_SENTINEL" "$REAL_JQ" > "$F_BINDIR/jq"
+    chmod +x "$F_BINDIR/jq"
+    F_HOME="$TMP/f-custom-path-home"; mkdir -p "$F_HOME"
+    HOME="$F_HOME" PATH="$F_BINDIR:$PATH" bash "$SK/install.sh" --hook >"$TMP/f.out" 2>"$TMP/f.err"
+    F_STATUS=$?
+    [ "$F_STATUS" -eq 0 ] && [ -f "$F_HOME/.claude/settings.json" ] \
+        && ok "(F) --hook merges successfully with a jq found via PATH search" \
+        || no "(F) --hook failed with a PATH-resolved jq (rc=$F_STATUS): $( cat "$TMP/f.err" )"
+    [ -f "$F_SENTINEL" ] \
+        && ok "(F) the PATH-first jq wrapper was the one actually invoked" \
+        || no "(F) the PATH-first jq wrapper never ran — jq is not being resolved via PATH search"
+fi
+
+# ── (G) no jq anywhere on PATH — --hook refuses cleanly, no shell/settings.json touched ────────────
+# A minimal PATH built from copies of ONLY what install.sh's own plumbing needs before it execs the
+# (absolute-path) ripwire binary — bash to run it, dirname for find_ripwire — with no jq anywhere.
+G_BINDIR="$TMP/g-no-jq-bin"; mkdir -p "$G_BINDIR"
+ln -s "$( command -v bash )" "$G_BINDIR/bash"
+ln -s "$( command -v dirname )" "$G_BINDIR/dirname"
+G_HOME="$TMP/g-no-jq-home"; mkdir -p "$G_HOME"
+HOME="$G_HOME" PATH="$G_BINDIR" bash "$SK/install.sh" --hook >"$TMP/g.out" 2>"$TMP/g.err"
+G_STATUS=$?
+{ [ "$G_STATUS" -ne 0 ]; } \
+    && ok "(G) --hook with no jq on PATH exits non-zero" \
+    || no "(G) --hook with no jq on PATH exited 0"
+grep -qi "jq" "$TMP/g.err" \
+    && ok "(G) the failure names jq as the missing piece" \
+    || no "(G) the failure did not mention jq: $( cat "$TMP/g.err" )"
+{ [ ! -e "$G_HOME/.claude/settings.json" ] || ! grep -q '"hooks"' "$G_HOME/.claude/settings.json" 2>/dev/null; } \
+    && ok "(G) no hook registration was written without jq" \
+    || no "(G) settings.json carries a hooks registration despite jq being unavailable"
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
