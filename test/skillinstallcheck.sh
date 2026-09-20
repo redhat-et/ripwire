@@ -10,6 +10,7 @@
 # Exits non-zero on any failure. Does NOT edit regression.sh or ~/.claude.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/clean-env.sh"
 SK="$ROOT/skills"
 fail=0
 ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
@@ -18,8 +19,6 @@ no(){ echo "  FAIL  $1"; fail=1; }
 [ -f "$SK/install.sh" ] || { echo "no skills/install.sh"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
-# Each invocation below owns its HOME; inherited agent overrides must not escape it.
-unset CODEX_HOME AGENTS_HOME HERMES_HOME
 DST="$TMP/skills"
 
 # ---- 1) install.sh deploys EVERY user-facing shipped skill (the deployment-drift catch) ----

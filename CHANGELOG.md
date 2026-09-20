@@ -188,6 +188,30 @@ the arm compares normally. When an arm is still refused, the root carries `reaso
 debug trace. Both `ok=` postures and `reason=` are defined in the legend. Gates:
 `test/scoutheadconflictcheck.sh` arms T9(a)–(e), `test/mergescoutcheck.sh`. (CodeRabbit review on #295)
 
+### Fixed — sixteen gates now share one GNU/BSD `stat` compat helper instead of a per-gate copy
+
+`stat -f` is GNU coreutils' filesystem-stat flag, not BSD's format-string flag, so it succeeds with junk
+instead of failing — a caller-local `stat -f ... || stat -c ...` one-liner never reaches its own fallback on
+Linux. Sixteen gates each hand-rolled the same detect-once-and-redefine fix independently:
+`cachehashcheck.sh`, `cachesplitcheck.sh`, `clonecachecheck.sh`, `codexpromptroutecheck.sh`,
+`evictioncheck.sh`, `g1freshcheck.sh`, `headsnapcachecheck.sh`, `mcpeditmodecheck.sh`,
+`portablecachecheck.sh`, `prcontextcheck.sh`, `qsnapcachecheck.sh`, `qsnapprefetchcheck.sh`,
+`statgatecheck.sh`, `cacheisolationcheck.sh`, `qsnapproducercheck.sh`, `sidecarsymlinkcheck.sh` and
+`tempfilesymlinkcheck.sh` all now source the new shared `test/lib/statcompat.sh` instead — one place defines
+the GNU-vs-BSD `stat` compat logic, not seventeen.
+
+### Fixed — a gate that varies `HOME=` per invocation could still leak into an ambiently-set agent-home variable
+
+`CODEX_HOME`/`AGENTS_HOME`/`HERMES_HOME`/`CLAUDE_CONFIG_DIR`/`RIPWIRE_DATA_HOME` override the default an
+agent's tools derive from `HOME`, so a gate that only sets `HOME=` per invocation is not actually sandboxed
+on a machine where any of these is already exported ambiently. `codexpromptroutecheck.sh`,
+`claudeconfigdircheck.sh`, `skillinstallcheck.sh` and `hermesinstallcheck.sh` now source the new shared
+`test/lib/clean-env.sh` before varying `HOME=`, closing that leak in each. `claudeconfigdircheck.sh` — the
+gate that exists specifically to test `CLAUDE_CONFIG_DIR` relocation — was the one this hit hardest: with
+`CLAUDE_CONFIG_DIR` exported ambiently (a developer whose real Claude Code config is relocated, exactly the
+case this gate tests for), its "unset" baseline arm wrote real files into that directory and then failed
+comparing against its own contaminated baseline.
+
 ### Fixed — an ambiguous `--expand` buried its body behind the ranked map, and the escape hatch was stderr-only
 
 Reported by @mariadb-KyleHutchinson in #289: `--expand=SYM` on a name matching more than one definition, in a

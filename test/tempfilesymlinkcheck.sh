@@ -42,6 +42,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/statcompat.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow repo-relative RIPWIRE_BIN
 fail=0
@@ -63,9 +64,7 @@ OUTSIDE_MODE=700
 place_outside(){ printf '%s' "$OUTSIDE_BYTES" > "$1"; chmod "$OUTSIDE_MODE" "$1"; }
 
 # filemode FILE — permission bits in octal (GNU coreutils stat, else BSD / macOS stat).
-if stat --version >/dev/null 2>&1; then filemode(){ stat -c %a "$1" 2>/dev/null; }
-else                                    filemode(){ stat -f %Lp "$1" 2>/dev/null; }
-fi
+filemode(){ mode_of "$1"; }
 
 # assert_outside TAG OUTSIDE_FILE — (a) bytes and (b) mode are unchanged.
 assert_outside(){

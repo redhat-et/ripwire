@@ -13,6 +13,7 @@
 # Exits non-zero on any failure. Does NOT edit regression.sh.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/clean-env.sh"
 SK="$ROOT/skills"
 fail=0
 ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }

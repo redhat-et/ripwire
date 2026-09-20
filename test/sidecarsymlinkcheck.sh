@@ -166,6 +166,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/statcompat.sh"
 # BOTH seams: regression.sh and every differential run pass the binary POSITIONALLY; RIPWIRE_BIN is the
 # env form. A gate reading only one of them comes back ALL PASS against whatever is in build/ during a
 # red-first run against a BASE binary — the exact way a red-first check fakes itself green (archcheck.sh
@@ -534,11 +535,7 @@ fi
 # ── (g) MODE CONTROL: the hand-written mode must equal what ofstream/fopen asked for ──────────────────
 # umask 000 is what makes this discriminating: under the usual 022 a wrong 0644 is indistinguishable from
 # the correct 0666. GNU stat and BSD stat disagree about -f, so pick the flavour once (CONTRIBUTING §1).
-if stat --version >/dev/null 2>&1; then
-    fileMode(){ stat -c '%a' "$1"; }
-else
-    fileMode(){ stat -f '%Lp' "$1"; }
-fi
+fileMode(){ mode_of "$1"; }
 
 modeArm()
 {

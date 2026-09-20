@@ -3,6 +3,7 @@
 set -u
 
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/statcompat.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
@@ -30,7 +31,7 @@ PRIVATE="$SHARED/ripwire"
 if [ -d "$PRIVATE" ]; then ok "creates a dedicated TMPDIR/ripwire directory"; else no "missing private directory: $PRIVATE"; fi
 
 if [ -d "$PRIVATE" ]; then
-    if stat --version >/dev/null 2>&1; then mode="$( stat -c %a "$PRIVATE" )"; else mode="$( stat -f %Lp "$PRIVATE" )"; fi
+    mode="$( mode_of "$PRIVATE" )"
     if [ "$mode" = "700" ]; then ok "private directory mode is 0700"; else no "private directory mode is $mode, expected 700"; fi
 fi
 
