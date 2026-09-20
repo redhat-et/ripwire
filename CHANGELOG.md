@@ -604,6 +604,23 @@ those methods; ripwire does not capture them). Every floor is stated and pinned,
 
 ## [0.6.2] — 2026-09-21
 
+### Added — skills and hooks are embedded in the binary; `ripwire skills install` replaces the checkout-symlink installer
+
+`skills/` and `hooks/` are now baked into the `ripwire` binary at configure time (CMake globs both directories,
+recursively, into a generated content-addressed header), so a curl or source install carries the whole skill/hook
+set with no separate `$prefix/share/ripwire/{skills,hooks}` staging step. Activation is one command, `ripwire
+skills install [--claude|--codex|--codex-legacy|--hermes|--openclaw|--all|DEST_PATH]`, which extracts the
+embedded set into a versioned, immutable-by-hash store under `$RIPWIRE_DATA_HOME` (every created directory forced
+to `0755` regardless of the process umask) and symlinks from there into the target agent's own skill-discovery
+directory; `--hook` additionally registers each agent's PreToolUse/SessionStart nudge and, for Codex and Claude,
+the UserPromptSubmit prompt router, merged via a PATH-resolved `jq`. `--doctor` reports install provenance —
+`not_installed=`/`stale=` against the binary's own embedded version — and recognises a mise/aqua version-manager
+shim by its real on-disk install layout (not a hardcoded shape) instead of ever calling it STALE by mtime.
+`skills/install.sh` is now a thin wrapper over the same binary path. Windows is out of scope for this round
+(blocked on the separate native port, #44). Gates: `test/skillsinstallcheck.sh` (new, 21 arms),
+`test/hooksembedrecursivecheck.sh` (new), `test/shimselfunverifiedcheck.sh` (new), `test/doctorstalecheck.sh`,
+`test/selfcontainedcheck.sh`'s embed cross-check. (#225)
+
 ### Added — Microsoft's `cl.exe` builds the tree, so both Windows front ends compile and both gate
 
 The native Windows port (#44) built with clang-cl only; `cl.exe` stopped at the GCC/Clang language extensions
