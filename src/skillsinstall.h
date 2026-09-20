@@ -6,6 +6,7 @@
 #include "wrap.h"   // AgentTarget / agentTarget / kAgentTargets / AgentConfig / getAgentConfigs / resolveSkillsRoot —
                     // per-agent destinations and --all's presence detection are wrap.h's, not a second table here.
 
+#include "infra/envutil.h"   // rw::envOr
 #include "infra/os.h"
 
 #include <algorithm>
@@ -50,28 +51,50 @@ struct FdGuard
     FdGuard& operator=( const FdGuard& ) = delete;
 };
 
-inline std::string envOr( const char* name, std::string fallback )
-{
-    const char* value = std::getenv( name );
-    return ( value && *value ) ? std::string( value ) : std::move( fallback );
-}
+using rw::envOr;
 
+// HOME, verbatim — empty when unset, NEVER a default. A silent fallback (this used to be "/tmp") would
+// write real files somewhere the operator never chose; every caller below refuses instead.
 inline std::filesystem::path homeDir()
 {
-    return std::filesystem::path( envOr( "HOME", "/tmp" ) );
+    return std::filesystem::path( envOr( "HOME", "" ) );
+}
+
+// ${ENV_VAR:-$HOME/suffix} — the shape every one of this file's agent/data-home overrides uses
+// (RIPWIRE_DATA_HOME, CLAUDE_CONFIG_DIR, CODEX_HOME). Empty on failure: ENV_VAR is set but not
+// absolute, or ENV_VAR is unset and HOME is empty/relative — never resolves against the process's cwd.
+inline std::filesystem::path agentHomeOr( const char* envVar, std::string_view homeSuffix )
+{
+    const std::string override_ = envOr( envVar, "" );
+    if( !override_.empty() )
+    {
+        const std::filesystem::path p( override_ );
+        if( VALIDATE( p.is_absolute() ) ) { return p; }
+        return {};
+    }
+    const std::filesystem::path home = homeDir();
+    if( home.empty() || !VALIDATE( home.is_absolute() ) ) { return {}; }
+    return home / homeSuffix;
 }
 
 // ${RIPWIRE_DATA_HOME:-~/.local/share/ripwire} — same literal path the curl installer already
 // stages skills under today (README.md:874,2215,2217); this just versions it.
 inline std::filesystem::path dataHome()
 {
-    const char* override_ = std::getenv( "RIPWIRE_DATA_HOME" );
-    if( override_ && *override_ ) { return std::filesystem::path( override_ ); }
-    return homeDir() / ".local" / "share" / "ripwire";
+    return agentHomeOr( "RIPWIRE_DATA_HOME", ".local/share/ripwire" );
 }
 
-inline std::filesystem::path skillsStoreDir() { return dataHome() / "skills" / std::string( embedded_skills::kStoreKey ); }
-inline std::filesystem::path hooksStoreDir()  { return dataHome() / "hooks"  / std::string( embedded_skills::kStoreKey ); }
+// Empty when dataHome() failed — never a path built on cwd via an empty prefix.
+inline std::filesystem::path skillsStoreDir()
+{
+    const std::filesystem::path home = dataHome();
+    return home.empty() ? std::filesystem::path{} : home / "skills" / std::string( embedded_skills::kStoreKey );
+}
+inline std::filesystem::path hooksStoreDir()
+{
+    const std::filesystem::path home = dataHome();
+    return home.empty() ? std::filesystem::path{} : home / "hooks" / std::string( embedded_skills::kStoreKey );
+}
 
 // ── the small POSIX-call-named group (Amendment 3): every OS-differing call in this file lives here,
 //    so a later port to rw::os::... is a mechanical rename with no logic change. ──────────────────────
@@ -99,6 +122,8 @@ inline bool symlinkOrRefuse( const std::filesystem::path& storeFile, const std::
 // directory should never have pre-existing content.
 inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_view bytes, os::mode_t mode )
 {
+    EXPECTS( !dest.empty() && !bytes.empty(), "writeStoreFile: an embedded skill/hook file is baked in at build "
+                                               "time and is never empty by construction" );
     if( rw::pathguard::isSymlink( dest.string() ) )
     {
         return { false, "refusing to write through existing symlink: " + dest.string() };
@@ -129,6 +154,36 @@ inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_vi
     return { true, {} };
 }
 
+// True iff every embedded file in `files` exists under `storeRoot` with byte-identical content — the
+// only way `storeRoot`'s NAME (a content-hash key) can be trusted without opening what it names. Opened
+// O_NOFOLLOW (never follow a symlink planted at a store file's name) and compared by size then bytes;
+// the reference bytes are already resident in the binary, so this costs one read per file, not a hash.
+template <std::size_t N>
+inline bool storeContentsMatch( const std::array<embedded_skills::EmbeddedFile, N>& files, const std::filesystem::path& storeRoot )
+{
+    for( const embedded_skills::EmbeddedFile& f : files )
+    {
+        const std::filesystem::path path = storeRoot / std::string( f.relativePath );
+        const int fd = os::open( path.c_str(), O_RDONLY | O_NOFOLLOW );
+        if( fd < 0 ) { return false; }
+        FdGuard guard( fd );
+        os::stat_t st{};
+        if( os::fstat( fd, &st ) != 0 || !S_ISREG( st.st_mode ) ) { return false; }
+        if( static_cast<std::uintmax_t>( st.st_size ) != f.bytes.size() ) { return false; }
+        std::string buf( f.bytes.size(), '\0' );
+        std::size_t readSoFar = 0;
+        while( readSoFar < buf.size() )
+        {
+            const os::ssize_t n = os::read( fd, buf.data() + readSoFar, buf.size() - readSoFar );
+            if( n < 0 ) { if( errno == EINTR ) { continue; } return false; }
+            if( n == 0 ) { return false; }   // short read: truncated/corrupted, never matches
+            readSoFar += static_cast<std::size_t>( n );
+        }
+        if( buf != f.bytes ) { return false; }
+    }
+    return true;
+}
+
 // Extract every entry in `files` under `storeRoot`, via a fresh temp sibling directory that is
 // atomic-renamed into place only once every file is written — a killed/interrupted run can never
 // leave a directory with the final name that reads back as "already extracted, trust it".
@@ -136,10 +191,16 @@ template <std::size_t N>
 inline Outcome extractGroup( const std::array<embedded_skills::EmbeddedFile, N>& files, const std::filesystem::path& storeRoot, os::mode_t mode )
 {
     std::error_code ec;
-    // immutable-by-hash: already extracted. `mode` is not part of `kStoreKey`, so an existing
-    // store's file modes are never re-verified/updated here — a store extracted before a `mode`
-    // change stays on its old modes until removed and re-extracted.
-    if( std::filesystem::exists( storeRoot, ec ) ) { return { true, {} }; }
+    // immutable-by-hash: already extracted AND verified. `mode` is not part of `kStoreKey`, so an
+    // existing store's file modes are never re-verified/updated here — a store extracted before a
+    // `mode` change stays on its old modes until removed and re-extracted. A name match alone is not
+    // trusted: `storeRoot` must be a real directory (not a symlink someone planted at that name) whose
+    // contents are byte-identical to the binary's own embedded copy; anything else — missing, a link,
+    // a partial extraction a killed run left behind, tampering — is re-extracted from scratch below.
+    os::stat_t rootSt{};
+    const bool rootIsRealDir = os::lstat( storeRoot.c_str(), &rootSt ) == 0 && S_ISDIR( rootSt.st_mode );
+    if( rootIsRealDir && storeContentsMatch( files, storeRoot ) ) { return { true, {} }; }
+    if( rootIsRealDir ) { std::filesystem::remove_all( storeRoot, ec ); }   // stale/corrupted — clear it; a symlink at this name is removed as itself, never followed
 
     const std::filesystem::path tmp = storeRoot.parent_path() / ( ".tmp-" + std::to_string( os::getpid() ) + "-" + storeRoot.filename().string() );
     std::filesystem::remove_all( tmp, ec );
@@ -172,14 +233,21 @@ inline Outcome ensureStoreExtracted()
     {
         return { false, "embedded skill set is empty — this is a build defect, not a runtime condition" };
     }
+    const std::filesystem::path skillsRoot = skillsStoreDir();
+    const std::filesystem::path hooksRoot  = hooksStoreDir();
+    if( skillsRoot.empty() || hooksRoot.empty() )
+    {
+        return { false, "could not resolve a data home for the skills store: set RIPWIRE_DATA_HOME to an "
+                         "absolute path, or HOME to an absolute path" };
+    }
     // Skill files are markdown — never executable. Hook scripts (hooks/*.sh) are tracked at 0755 in
     // the repo and must stay executable: settings.json's --hook registration (mergeHookConfig below)
     // writes the extracted path as a bare `command`, which the shell execs directly — 0644 would make
     // every installed hook silently unrunnable (verified: `sh -c "<0644 path>"` fails, Permission
     // denied, exit 126). The group-level split is sufficient: no file in either group mixes with the
     // other today.
-    if( const Outcome o = extractGroup( embedded_skills::kSkillFiles, skillsStoreDir(), 0644 ); !o.ok ) { return o; }
-    return extractGroup( embedded_skills::kHookFiles, hooksStoreDir(), 0755 );
+    if( const Outcome o = extractGroup( embedded_skills::kSkillFiles, skillsRoot, 0644 ); !o.ok ) { return o; }
+    return extractGroup( embedded_skills::kHookFiles, hooksRoot, 0755 );
 }
 
 // Symlink storeFile -> destLink. Refuses (does not overwrite) if destLink already exists and is NOT
@@ -258,10 +326,33 @@ inline std::string hermesSkillDirNameOf( std::string_view relativePath )
     return it->string();
 }
 
+// Every `skill=<name>` line the PREVIOUS run's manifest recorded — this installer's own name for "I
+// created this entry", independent of where it currently points (a manifest-tracked name is prunable
+// by pruneStale below regardless of target; an untracked one needs pruneTargetIsOurs). Empty (not an
+// error) when there is no manifest yet, matches every other "nothing there yet" sidecar reader.
+inline std::vector<std::string> readManifestSkillNames( const std::filesystem::path& skillsDest )
+{
+    std::vector<std::string> names;
+    rw::pathguard::NoFollowRead in = rw::pathguard::openNoFollowRead( "the skills manifest", ( skillsDest / ".ripwire-manifest-v2" ).string() );
+    if( !in.opened ) { return names; }
+    std::string line;
+    while( in.readLine( line ) )
+    {
+        if( line.rfind( "skill=", 0 ) != 0 ) { continue; }
+        const std::string name = line.substr( 6 );
+        // The manifest is external input (on-disk, hand-editable) — VALIDATE, not ASSUME. Nothing here
+        // refuses on a false result: pruneStale's own `ripwire-*` directory-entry filter is the actual
+        // gate a malformed name would have to pass, so a bad line here is a trace, not a silent trust.
+        if( !VALIDATE( !name.empty() && name.rfind( "ripwire-", 0 ) == 0 ) ) { continue; }
+        names.push_back( name );
+    }
+    return names;
+}
+
 // Write the sidecar: schema version, the embedded store's content-hash key (`source=`), and one
-// `skill=` line per name in `skillNames`. Goes through pathguard's openNoFollowTruncate (Amendment
-// 2/3): this sidecar is rewritten on every install, so it is a truncate-an-existing-file case, not
-// an extraction-into-a-fresh-directory case.
+// `skill=` line per name in `skillNames`. Goes through pathguard's createExclTempFile/commit — a
+// temp built beside the sidecar, then renamed over it — so a crash mid-write, or a symlink planted at
+// the final name, can never leave a truncated or link-followed manifest.
 //
 // `source=` MUST be `embedded_skills::kStoreKey` (a `<version>-<hash8>` string) — codexdoctor.h's
 // `skillsCheck` compares this same field against that exact value to decide `stale`. It was
@@ -272,21 +363,45 @@ inline std::string hermesSkillDirNameOf( std::string_view relativePath )
 inline bool writeManifestV2( const std::filesystem::path& skillsDest, const std::vector<std::string>& skillNames )
 {
     const std::filesystem::path manifestPath = skillsDest / ".ripwire-manifest-v2";
-    const rw::pathguard::OpenedFile opened = rw::pathguard::openNoFollowTruncate( "the skills manifest", manifestPath.string() );
-    if( opened.fd < 0 ) { return false; }
     std::string body = "version=2\nsource=" + std::string( embedded_skills::kStoreKey ) + "\n";
     for( const std::string& s : skillNames ) { body += "skill=" + s + "\n"; }
-    return rw::pathguard::writeAllAndClose( opened.fd, body );
+    rw::pathguard::ExclTempFile temp = rw::pathguard::createExclTempFile( manifestPath.string() + ".tmp.", "", 0666 );
+    if( !temp.ok() || !temp.write( body ) ) { return false; }
+    return temp.commit( manifestPath.string() );
+}
+
+// True iff `entry` is safe to prune: EITHER its target is dangling (nothing of the user's is there to
+// lose — the same C1 reasoning linkOrRefuse's dangling-repair case uses), OR its target resolves under
+// `ourStoreRoot` (this installer's own store, any version key — an orphaned symlink from a superseded
+// version is still ours). A LIVE symlink pointing anywhere else is a user's own asset that merely
+// happens to be named `ripwire-<something>`, and a name match alone is not ownership.
+inline bool pruneTargetIsOurs( const std::filesystem::path& entry, const std::filesystem::path& ourStoreRoot )
+{
+    std::error_code readEc;
+    const std::filesystem::path target = std::filesystem::read_symlink( entry, readEc );
+    if( readEc ) { return false; }   // could not even read the link — leave it alone
+    const std::filesystem::path resolved = target.is_absolute() ? target : ( entry.parent_path() / target );
+    std::error_code existsEc;
+    if( !std::filesystem::exists( resolved, existsEc ) ) { return true; }   // dangling: safe regardless of where it pointed
+    const std::string resolvedStr = resolved.lexically_normal().string();
+    const std::string rootStr     = ourStoreRoot.lexically_normal().string();
+    return resolvedStr.compare( 0, rootStr.size(), rootStr ) == 0;
 }
 
 // Remove every `ripwire-*` symlink actually sitting in `destDir` that is no longer in
-// `currentSkillNames`. Scans the directory itself, not `.ripwire-manifest-v2`'s `skill=` lines: a
-// stray entry the manifest never tracked (hand-planted, left by an older installer, ...) is exactly
-// as stale, and manifest-only pruning leaves it forever (I7's ripwire-* filter still applies, so a
-// non-skill entry is never touched). Every entry this installer creates is a symlink
-// (symlinkOrRefuse); the isSymlink test excludes real content sitting under destDir by mistake.
+// `currentSkillNames`. Scans the directory itself, not just the previous manifest's `skill=` lines: a
+// stray entry the manifest never tracked (hand-planted, left by an older installer, ...) is exactly as
+// stale, and manifest-only pruning leaves it forever (I7's ripwire-* filter still applies, so a
+// non-skill entry is never touched). A name the previous manifest DID track is prunable regardless of
+// its current target — this installer's own record that it created that entry is ownership proof on
+// its own (the manifest might record a name whose target a user later hand-edited; that is still this
+// installer's slot to reclaim). An UNTRACKED name additionally needs pruneTargetIsOurs, so a user's
+// own symlink that merely happens to be named `ripwire-<something>` is left alone — a name match alone
+// is not ownership.
 inline int pruneStale( const std::filesystem::path& destDir, const std::vector<std::string>& currentSkillNames )
 {
+    const std::vector<std::string> previousManifestNames = readManifestSkillNames( destDir );
+    const std::filesystem::path ourStoreRoot = dataHome() / "skills";
     int removed = 0;
     std::error_code ec;
     for( std::filesystem::directory_iterator it( destDir, ec ), end; !ec && it != end; it.increment( ec ) )
@@ -296,6 +411,8 @@ inline int pruneStale( const std::filesystem::path& destDir, const std::vector<s
         if( name.rfind( "ripwire-", 0 ) != 0 ) { continue; }
         if( std::find( currentSkillNames.begin(), currentSkillNames.end(), name ) != currentSkillNames.end() ) { continue; }
         if( !rw::pathguard::isSymlink( it->path().string() ) ) { continue; }
+        const bool manifestTracked = std::find( previousManifestNames.begin(), previousManifestNames.end(), name ) != previousManifestNames.end();
+        if( !manifestTracked && !pruneTargetIsOurs( it->path(), ourStoreRoot ) ) { continue; }
         if( os::unlink( it->path().c_str() ) == 0 ) { ++removed; }
     }
     return removed;
@@ -407,9 +524,15 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
         {
             return { false, "no verified skills discovery path for '" + effectiveAgent + "'", {}, 0, 0 };
         }
-        skillsDest = isCodexLegacy
-            ? ( std::filesystem::path( envOr( "CODEX_HOME", ( homeDir() / ".codex" ).string() ) ) / "skills" )
-            : rw::resolveSkillsRoot( *row, homeDir().string() );
+        if( isCodexLegacy )
+        {
+            const std::filesystem::path codexHome = agentHomeOr( "CODEX_HOME", ".codex" );
+            skillsDest = codexHome.empty() ? std::filesystem::path{} : ( codexHome / "skills" );
+        }
+        else
+        {
+            skillsDest = rw::resolveSkillsRoot( *row, homeDir().string() );
+        }
         if( skillsDest.empty() )
         {
             return { false, "could not resolve skills destination for '" + effectiveAgent + "'", {}, 0, 0 };
@@ -547,11 +670,11 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
 //
 // Ported from skills/install.sh's install_claude_hook — that script is still the shipping mechanism
 // for a source checkout, so its merge is the reference this has to agree with byte-for-byte in shape.
-// Only the write mechanism differs: install.sh pipes jq's stdout straight into a `mktemp` + `mv`, this
-// goes through rw::pathguard::openNoFollowTruncate/writeAllAndClose (Amendment 2/3's house pattern,
-// already used by writeManifestV2 above) so a symlinked settings.json is refused the same way every
-// other sidecar write in this file is, and a non-regular-file destination is caught before anything
-// is touched.
+// The write is the same `mktemp` + rename shape install.sh's own `mv` uses, via
+// rw::pathguard::createExclTempFile/ExclTempFile::commit: the temp is created exclusively beside the
+// target, and commit()'s rename replaces whatever directory entry sits at the final name — including a
+// symlink there, which rename(2) never follows — atomically, with no truncate-then-write window a
+// crash mid-write could catch settings.json in.
 //
 // jq itself still does the actual JSON surgery — reimplementing a JSON merge in C++ to avoid a
 // dependency that G3 already tolerates (jq is invoked, not linked; its absence degrades to an
@@ -652,9 +775,8 @@ inline int runJqMergeFile( const std::filesystem::path& file, const std::string&
         rw::emitTo( stderr, "ripwire skills install: --hook merge failed (is {} valid JSON?); nothing changed\n", file.string() );
         return 1;
     }
-    const rw::pathguard::OpenedFile opened = rw::pathguard::openNoFollowTruncate( "the agent settings file", file.string() );
-    if( opened.fd < 0 ) { return 1; }
-    if( !rw::pathguard::writeAllAndClose( opened.fd, result.output ) )
+    rw::pathguard::ExclTempFile temp = rw::pathguard::createExclTempFile( file.string() + ".tmp.", "", 0666 );
+    if( !temp.ok() || !temp.write( result.output ) || !temp.commit( file.string() ) )
     {
         rw::emitTo( stderr, "ripwire skills install: could not write the merged hook config to {}\n", file.string() );
         return 1;
@@ -875,9 +997,19 @@ inline int mergeHookConfig( std::string_view agentName )
         return 2;
     }
 
+    const std::filesystem::path agentHome = ( effectiveAgent == "claude" )
+        ? agentHomeOr( "CLAUDE_CONFIG_DIR", ".claude" )
+        : agentHomeOr( "CODEX_HOME", ".codex" );
+    if( agentHome.empty() )
+    {
+        rw::emitTo( stderr, "ripwire skills install: could not resolve a home for {} — set {} to an absolute "
+                             "path, or HOME to an absolute path\n",
+                    effectiveAgent, ( effectiveAgent == "claude" ) ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME" );
+        return 1;
+    }
     const std::filesystem::path settingsPath = ( effectiveAgent == "claude" )
-        ? std::filesystem::path( envOr( "CLAUDE_CONFIG_DIR", ( homeDir() / ".claude" ).string() ) ) / "settings.json"
-        : std::filesystem::path( envOr( "CODEX_HOME", ( homeDir() / ".codex" ).string() ) ) / "hooks.json";
+        ? ( agentHome / "settings.json" )
+        : ( agentHome / "hooks.json" );
     std::error_code mkdirEc;
     std::filesystem::create_directories( settingsPath.parent_path(), mkdirEc );
     if( mkdirEc )

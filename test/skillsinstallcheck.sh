@@ -281,8 +281,18 @@ chmod 0755 "$CLAUDE_CONFIG_DIR/skills"   # restore before any further access (in
 [ -s "$d17/skills_install.err" ] || fail "a link-loop failure produced no message at all"
 after_linked="$( grep -c '^skill=' "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" )"
 after_live="$( find "$CLAUDE_CONFIG_DIR/skills" -maxdepth 1 -name 'ripwire-*' -type l | wc -l | tr -d ' ' )"
-[ "$after_linked" -eq "$after_live" ] \
-    || fail "manifest skill= count ($after_linked) does not equal the actually-linked entries on disk ($after_live) — manifest still records intent, not outcome"
+# The manifest write is atomic (temp file + rename), which needs WRITE on the directory itself — a
+# fully read-only "$CLAUDE_CONFIG_DIR/skills" cannot support that either, same as it cannot support
+# the symlink() this arm is actually testing. The honest outcome there is a reported manifest-write
+# failure and a manifest left exactly as it was, never a manifest silently rewritten with the wrong
+# count; a truncate-in-place write is the ONLY way the counts could match here, and that is the
+# non-atomic write this review round replaced on purpose.
+if grep -q 'could not write the skills manifest' "$d17/skills_install.err"; then
+    :
+else
+    [ "$after_linked" -eq "$after_live" ] \
+        || fail "manifest skill= count ($after_linked) does not equal the actually-linked entries on disk ($after_live) — manifest still records intent, not outcome"
+fi
 rm -rf "$d17"
 
 # ── arm 18: M2 — an unknown/typo'd --flag is refused by name, not silently treated as an agent ────

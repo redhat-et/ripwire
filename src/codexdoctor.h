@@ -14,6 +14,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include "infra/envutil.h"   // rw::envOr
 #include "infra/os.h"   // rw::os::which / stat — the PATH search and the same-file check
 #include <vector>
 
@@ -30,12 +31,6 @@ struct Check
     bool ok = false;
     std::string attrs;
 };
-
-inline std::string envOr( const char* name, std::string fallback )
-{
-    const char* value = std::getenv( name );
-    return value && *value ? std::string( value ) : std::move( fallback );
-}
 
 inline std::string readSmallFile( const std::filesystem::path& path, bool& ok )
 {
@@ -281,6 +276,32 @@ inline std::vector<std::string> liveSkills( const std::filesystem::path& skillHo
 // after the fact the way `retargetHint` does for the other two agent-generic checks, is deliberate:
 // this row now has THREE distinct hint bodies (not-installed / stale / parity), and a post-hoc
 // string-splice would have to duplicate that branching to retarget any one of them correctly.
+// The one hint line a not-ok skillsCheck prints, chosen from three distinct causes (stale source=,
+// an untracked live entry the installer would refuse to touch, or plain non-parity) — split out of
+// skillsCheck so that function is fact-gathering only, this one is message-formatting only.
+inline std::string skillsCheckHint( bool stale, const std::vector<std::string>& live,
+                                     const std::vector<std::string>& declared, std::string_view installCmd )
+{
+    if( stale )
+    {
+        return "run " + std::string( installCmd ) + " (embedded skills have moved on since this was installed)";
+    }
+    if( live.size() > declared.size() )
+    {
+        // I2 (round-2 review): declared < live means an untracked ripwire-* entry sits at a name
+        // ripwire never linked — real content --force refuses to touch (installForAgent), not a
+        // foreign symlink it can repair, so naming --force here would print a remedy that refuses.
+        std::vector<std::string> untracked;
+        std::set_difference( live.begin(), live.end(), declared.begin(), declared.end(), std::back_inserter( untracked ) );
+        std::string names;
+        for( const std::string& n : untracked ) { names += ( names.empty() ? "" : ", " ) + n; }
+        return names + " exist" + ( untracked.size() == 1 ? "s" : "" ) + " at this skill home but "
+             + std::string( installCmd ) + " never linked " + ( untracked.size() == 1 ? "it" : "them" )
+             + " — remove it manually if it is not meant to be there";
+    }
+    return "run " + std::string( installCmd ) + " --force to restore exact manifest parity";
+}
+
 inline Check skillsCheck( const std::filesystem::path& skillHome, std::string_view installCmd )
 {
     // v2 (schema-versioned, carries `source=`) is preferred when present; a still-unmigrated v1
@@ -312,31 +333,7 @@ inline Check skillsCheck( const std::filesystem::path& skillHome, std::string_vi
                "manifest=\"" + std::string( manifest.read ? "1" : "0" ) + "\" declared=\"" + std::to_string( manifest.declared.size() )
                + "\" live=\"" + std::to_string( live.size() ) + "\"" };
     if( stale ) { out.attrs += " stale=\"1\""; }
-    if( !out.ok )
-    {
-        if( stale )
-        {
-            out.attrs += " hint=\"run " + std::string( installCmd ) + " (embedded skills have moved on since this was installed)\"";
-        }
-        else if( live.size() > manifest.declared.size() )
-        {
-            // I2 (round-2 review): declared < live means an untracked ripwire-* entry sits at a name
-            // ripwire never linked — real content --force refuses to touch (installForAgent), not a
-            // foreign symlink it can repair, so naming --force here would print a remedy that refuses.
-            std::vector<std::string> untracked;
-            std::set_difference( live.begin(), live.end(), manifest.declared.begin(), manifest.declared.end(),
-                                  std::back_inserter( untracked ) );
-            std::string names;
-            for( const std::string& n : untracked ) { names += ( names.empty() ? "" : ", " ) + n; }
-            out.attrs += " hint=\"" + names + " exist" + ( untracked.size() == 1 ? "s" : "" ) +
-                         " at this skill home but " + std::string( installCmd ) + " never linked "
-                         + ( untracked.size() == 1 ? "it" : "them" ) + " — remove it manually if it is not meant to be there\"";
-        }
-        else
-        {
-            out.attrs += " hint=\"run " + std::string( installCmd ) + " --force to restore exact manifest parity\"";
-        }
-    }
+    if( !out.ok ) { out.attrs += " hint=\"" + skillsCheckHint( stale, live, manifest.declared, installCmd ) + "\""; }
     return out;
 }
 

@@ -181,8 +181,15 @@ inline std::filesystem::path resolveSkillsRoot( const AgentTarget& row, const st
     {
         resolved = doc;   // a literal root — no env var honoured on purpose (see comment above)
     }
-    if( resolved.rfind( "~/", 0 ) == 0 ) { resolved = home + resolved.substr( 1 ); }
-    else if( resolved == "~" )           { resolved = home; }
+    if( resolved.rfind( "~/", 0 ) == 0 || resolved == "~" )
+    {
+        // `home` is needed to expand "~" and wasn't overridden away above — an empty `home` (HOME
+        // unset, no env-var override for this row) must not silently resolve to "/.claude/skills" or
+        // similar: home + "/.claude/skills" with an empty home IS "/.claude/skills", an absolute path
+        // at the filesystem root, not a signal the caller can recognise as "unresolved".
+        if( home.empty() ) { return {}; }
+        resolved = ( resolved == "~" ) ? home : ( home + resolved.substr( 1 ) );
+    }
     return std::filesystem::path( resolved );
 }
 
