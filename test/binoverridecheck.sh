@@ -74,6 +74,7 @@ EXEMPT = {
     "codexinstallhonestycheck.sh": "exercises skills/install.sh's jq/mv merge honesty inside hermetic temp HOMEs; the subject is the shell installer, so BIN is bound for interface uniformity and never executed (verified by reading the gate)",
     "meterdisclosurecheck.sh":   "runs skills/install.sh's --hook banner and asserts what it discloses about the substitution meter; the subject is banner TEXT, so BIN is bound for interface uniformity and never executed (verified by reading the gate)",
     "adaptivecutshapecheck.sh":  "compiles an isolated $CXX probe .cpp; never invokes build/ripwire",
+    "shimselfunverifiedcheck.sh": "compiles an isolated $CXX probe against src/codexdoctor.h and calls shimBinaryCheck(\"\") directly; RIPWIRE_BIN/$BIN is only ever `cp`'d as inert bytes into a fixture mise install path (the managed-candidate side of the byte comparison shimBinaryCheck would run against a NON-empty selfPath), never executed",
     "aiderbytescheck.sh":        "pure-python test of bench/headtohead/r4-2026-08-06/r4_worker.py's aider byte-count wiring; no ripwire binary invocation",
     "argvdiffcheck.sh":          "sanctioned skip fires BEFORE the RIPWIRE_BIN guard, gated on a second env var (RIPWIRE_BASE) neither pargates.py nor regression.sh ever sets; independent of RIPWIRE_BIN/broken-binary state, and already asserted intentional by gateexitcheck.sh arm (D)",
     "nodekindcheck.sh":         "compiles an isolated $CXX harness against src/infra/nodekind.h (plus two mutated copies of that header) and greps the git-tracked walk sections; the subject is a header-inline function and the source that calls it, so no ripwire binary is bound or executed at all",
@@ -154,9 +155,12 @@ else:
 #                          annotated "unused"; the subject is bench/routing_ab_report.py, pure python.
 #                          a usage comment, the shared BIN= convention line, and a `: "$BIN"` no-op whose
 #                          trailing comment says it is unused. There is no invocation to find.
+#      shimselfunverifiedcheck.sh — the shared BIN= convention line, then $BIN appears twice more: once
+#                          to derive the sibling `generated/` dir for the standalone $CXX probe's include
+#                          path, once as the argument to a bare `cp` into a fixture path. Neither runs it.
 STATICALLY_UNREACHABLE = { "argvdiffcheck.sh", "nulbytecheck.sh",
                            "codexinstallhonestycheck.sh", "meterdisclosurecheck.sh", "routingreportcheck.sh",
-                           "agentloopeditsuitecheck.sh" }
+                           "agentloopeditsuitecheck.sh", "shimselfunverifiedcheck.sh" }
 grown = []
 for g in sorted( EXEMPT ):
     if g in STATICALLY_UNREACHABLE:

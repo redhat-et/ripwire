@@ -25,11 +25,17 @@ if ! ripwire_private_checkout "$ROOT" HEAD "$WT" 2>"$TMP/checkout.err"; then
     exit 1
 fi
 
-# A real ripwire run against the fresh checkout — best-effort, not gated on — confirms the checkout is
-# a genuine, parseable ripwire tree, not merely something `git checkout` reported success on.
+# A real ripwire run against the fresh checkout confirms it is a genuine, parseable ripwire tree, not
+# merely something `git checkout` reported success on — and, gated on its exit status, is this gate's
+# own dependency on a working binary that test/binoverridecheck.sh's broken-RIPWIRE_BIN sentinel expects
+# every gate touching the binary to have (a best-effort, ignored-exit-status call would false-green there).
 BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-[ -x "$BIN" ] && "$BIN" "$WT" --no-cache >/dev/null 2>&1
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+if ! "$BIN" "$WT" --no-cache >"$TMP/probe.out" 2>"$TMP/probe.err"; then
+    no "ripwire failed against the fresh checkout: $( head -1 "$TMP/probe.err" )"
+    exit 1
+fi
 
 mkdir -p "$WT/hooks/lib"
 printf '#!/bin/sh\necho nested-hook-sentinel\n' > "$WT/hooks/lib/x.sh"
