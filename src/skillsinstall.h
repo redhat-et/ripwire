@@ -40,17 +40,6 @@ struct Outcome
     std::string error;
 };
 
-// A tiny RAII fd guard — every ::open() in this file goes through one of these so an early return
-// can never leak a descriptor.
-struct FdGuard
-{
-    int fd = -1;
-    explicit FdGuard( int f ) noexcept : fd( f ) {}
-    ~FdGuard() { if( fd >= 0 ) { os::close( fd ); } }
-    FdGuard( const FdGuard& ) = delete;
-    FdGuard& operator=( const FdGuard& ) = delete;
-};
-
 using rw::envOr;
 
 // HOME, verbatim — empty when unset, NEVER a default. A silent fallback (this used to be "/tmp") would
@@ -168,7 +157,7 @@ inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_vi
     {
         return { false, "open(O_EXCL) failed for " + dest.string() + ": " + std::string( std::strerror( errno ) ) };
     }
-    FdGuard guard( fd );
+    rw::pathguard::OwnedFd guard( fd );
     std::size_t written = 0;
     while( written < bytes.size() )
     {
@@ -195,7 +184,7 @@ inline bool storeContentsMatch( const std::array<embedded_skills::EmbeddedFile, 
         const std::filesystem::path path = storeRoot / std::string( f.relativePath );
         const int fd = os::open( path.c_str(), O_RDONLY | O_NOFOLLOW );
         if( fd < 0 ) { return false; }
-        FdGuard guard( fd );
+        rw::pathguard::OwnedFd guard( fd );
         os::stat_t st{};
         if( os::fstat( fd, &st ) != 0 || !S_ISREG( st.st_mode ) ) { return false; }
         if( static_cast<std::uintmax_t>( st.st_size ) != f.bytes.size() ) { return false; }
@@ -737,11 +726,35 @@ struct ShellCaptureResult
     std::string output;
 };
 
+// pclose(), never fclose() — a popen() stream MUST be closed by the function that knows it forked a
+// child to reap (rw::OwnedFile closes via fclose and would be the wrong tool here, not merely a
+// different one). Move-only, mirrors OwnedFd's shape (review item 2, optional list): a future early
+// return added to runShellCapture's read loop can no longer leak the pipe or skip reaping the child.
+struct PopenGuard
+{
+    std::FILE* pipe = nullptr;
+    explicit PopenGuard( std::FILE* p ) noexcept : pipe( p ) {}
+    ~PopenGuard() { if( pipe != nullptr ) { os::pclose( pipe ); } }
+    PopenGuard( const PopenGuard& )            = delete;
+    PopenGuard& operator=( const PopenGuard& ) = delete;
+
+    // Close now and report pclose()'s raw status — the one thing the destructor cannot hand back.
+    // Idempotent: nothing is left to close on a second call, including the one the destructor makes.
+    int closeAndStatus() noexcept
+    {
+        if( pipe == nullptr ) { return -1; }
+        const int status = os::pclose( pipe );
+        pipe = nullptr;
+        return status;
+    }
+};
+
 inline ShellCaptureResult runShellCapture( const std::string& cmd )
 {
     ShellCaptureResult result;
     FILE* pipe = os::popen( cmd.c_str(), "r" );
     if( pipe == nullptr ) { return result; }
+    PopenGuard guard( pipe );
     result.spawned = true;
     char buf[ 4096 ];
     std::size_t n;
@@ -749,7 +762,7 @@ inline ShellCaptureResult runShellCapture( const std::string& cmd )
     {
         result.output.append( buf, n );
     }
-    const int status = os::pclose( pipe );
+    const int status = guard.closeAndStatus();
     if( status >= 0 && WIFEXITED( status ) )
     {
         result.exitedNormally = true;
