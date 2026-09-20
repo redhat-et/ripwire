@@ -306,4 +306,29 @@ grep -qi "unknown flag" "$d18/skills_install.err" || fail "the refusal did not n
 [ -e "$CLAUDE_CONFIG_DIR/skills" ] && fail "an unknown --flag installed anyway before refusing"
 rm -rf "$d18"
 
-echo "OK: skillsinstallcheck (arms 1-18)"
+# ── arm 19: --help/-h print usage and exit 0, not "unknown flag" (review item 11) ─────────────────
+CURRENT_ARM="19-help-flag"
+sandbox
+d19="$d"
+"$ripwire" skills install --help >"$d19/help.out" 2>"$d19/help.err"
+rc=$?
+[ "$rc" -eq 0 ] || fail "skills install --help exited $rc, not 0"
+[ -s "$d19/help.out" ] || fail "skills install --help printed nothing to stdout"
+grep -qi "usage" "$d19/help.out" || fail "skills install --help did not print a usage line"
+[ -e "$CLAUDE_CONFIG_DIR/skills" ] && fail "skills install --help installed anyway instead of just printing help"
+"$ripwire" skills install -h >"$d19/h.out" 2>"$d19/h.err"
+[ $? -eq 0 ] || fail "skills install -h exited nonzero"
+diff -q "$d19/help.out" "$d19/h.out" >/dev/null || fail "-h and --help printed different text"
+rm -rf "$d19"
+
+# ── arm 20: bare `ripwire skills` prints usage, does not silently map skills/ as a repo ───────────
+# Run from $ROOT so a pre-fix binary really would resolve "skills" to the real skills/ directory —
+# the exact silent-misdirection this arm exists to close.
+CURRENT_ARM="20-bare-skills-subcommand"
+out20="$( cd "$ROOT" && "$ripwire" skills 2>/dev/null )"
+rc=$?
+[ "$rc" -eq 0 ] || fail "bare 'ripwire skills' exited $rc, not 0"
+echo "$out20" | grep -qi "usage" || fail "bare 'ripwire skills' did not print a usage line"
+echo "$out20" | grep -q '<s ' && fail "bare 'ripwire skills' emitted a symbol map instead of usage — skills/ was mapped as a crawl root"
+
+echo "OK: skillsinstallcheck (arms 1-20)"

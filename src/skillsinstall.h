@@ -1061,6 +1061,39 @@ inline int acceptPositionalDest( std::string_view a, std::string& dest, bool& gi
     return 0;
 }
 
+// The `--flag` catalog printed by `skills install --help`/`-h` and by bare `ripwire skills` (see
+// printSkillsUsage below) — one place, so the two surfaces cannot drift (review item 11).
+inline void printSkillsInstallHelp( std::FILE* out ) noexcept
+{
+    rw::emitRaw( out,
+        "usage: ripwire skills install [--claude|--codex|--codex-legacy|--hermes|--openclaw|--all|DEST_PATH] [--hook] [--force] [--contributor]\n\n"
+        "Extract the skills/hooks embedded in this binary into a versioned, content-addressed store\n"
+        "(under RIPWIRE_DATA_HOME, default ~/.local/share/ripwire), then symlink them into an agent's own\n"
+        "skill-discovery directory.\n\n"
+        "  --claude        install into Claude Code's skills directory (${CLAUDE_CONFIG_DIR:-~/.claude}/skills)\n"
+        "  --codex         install into Codex's current skills directory (${AGENTS_HOME:-~/.agents}/skills)\n"
+        "  --codex-legacy  install into Codex's OLDER skills directory (${CODEX_HOME:-~/.codex}/skills)\n"
+        "  --hermes        install into Hermes's skills directory\n"
+        "  --openclaw      install into openclaw's skills directory\n"
+        "  --all           detect every installed agent and install into each one\n"
+        "  DEST_PATH       install into an explicit directory instead of any agent's own (not with --hook or --all)\n"
+        "  --hook          also register the PreToolUse/SessionStart nudge (Claude and Codex only)\n"
+        "  --force         overwrite a foreign file/symlink at the destination instead of refusing\n"
+        "  --contributor   also install repo-maintainer-only skills\n" );
+}
+
+// Bare `ripwire skills` (no `install`) — main.cpp used to let this fall through to `parseArgs`,
+// which treated "skills" as a crawl-root directory (it happens to exist in this checkout) and
+// silently mapped it instead of naming the one real subcommand (review item 11).
+inline void printSkillsUsage( std::FILE* out ) noexcept
+{
+    rw::emitRaw( out,
+        "usage: ripwire skills install [--claude|--codex|--codex-legacy|--hermes|--openclaw|--all|DEST_PATH] [--hook] [--force] [--contributor]\n"
+        "       ripwire skills install --help          # full flag reference\n\n"
+        "`skills` alone is not a command. To map the skills/ directory itself as a corpus, name it as a\n"
+        "path instead: `ripwire ./skills`.\n" );
+}
+
 // `executablePath` is no longer forwarded into the manifest (writeManifestV2 now writes
 // `embedded_skills::kStoreKey` directly — see its own comment) but stays in this signature because
 // main.cpp:3485 calls this as `runSkillsInstall( argc, argv, selfExecutablePath( argv[0] ) )`; changing
@@ -1074,6 +1107,7 @@ inline int runSkillsInstall( int argc, char** argv, [[maybe_unused]] std::string
     for( int i = 3; i < argc; ++i )
     {
         const std::string_view a = argv[ i ];
+        if( a == "--help" || a == "-h" ) { printSkillsInstallHelp( stdout ); return 0; }
         if( a == "--hook" )              { hook = true; }
         else if( a == "--contributor" )  { contributor = true; }
         else if( a == "--force" )        { force = true; }
