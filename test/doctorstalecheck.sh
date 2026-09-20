@@ -53,7 +53,9 @@ export MISE_DATA_DIR="$db/mise"
 mkdir -p "$MISE_DATA_DIR/shims" "$MISE_DATA_DIR/installs/ripwire/0.9.8/bin" "$MISE_DATA_DIR/installs/ripwire/0.9.9/bin"
 cp "$ripwire" "$MISE_DATA_DIR/installs/ripwire/0.9.9/bin/ripwire"
 cp "$ripwire" "$MISE_DATA_DIR/shims/ripwire"   # a real binary here would make this NOT a shim; that's fine for this arm
-PATH="$MISE_DATA_DIR/shims:$PATH" "$ripwire" "$ROOT" --doctor --agent=claude 2>&1 | grep -q 'managed_unverified="1"' \
+# Scoped to the claude-binary ROW, not the whole --doctor output: the legend's own prose explains
+# managed_unverified= in words, so an unscoped grep here would pass even if the row never set it.
+PATH="$MISE_DATA_DIR/shims:$PATH" "$ripwire" "$ROOT" --doctor --agent=claude 2>&1 | grep -q 'n="claude-binary"[^>]*managed_unverified="1"' \
     || fail "ambiguous managed layout was not reported as disclosed-unknown"
 rm -rf "$db"
 unset MISE_DATA_DIR
@@ -67,5 +69,37 @@ mkdir -p "$CLAUDE_CONFIG_DIR/skills"
 printf 'version=2\nsource=0.0.1-deadbeef\n' > "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2"
 "$ripwire" "$ROOT" --doctor --agent=claude 2>&1 | grep -q 'n="claude-skills"[^>]*stale="1"' || fail "mismatched source= was not reported as stale"
 rm -rf "$dc"
+
+# ── arm d: mise's REAL layout — <version>/<archive-name>/ripwire, no "bin/" — resolves (review item 8)
+CURRENT_ARM="d-real-mise-archive-layout"
+sandbox
+dd="$d"
+export MISE_DATA_DIR="$dd/mise"
+ARCHIVE="ripwire-0.9.9-fixture"
+mkdir -p "$MISE_DATA_DIR/shims" "$MISE_DATA_DIR/installs/ripwire/0.9.9/$ARCHIVE"
+cp "$ripwire" "$MISE_DATA_DIR/installs/ripwire/0.9.9/$ARCHIVE/ripwire"
+cp "$ripwire" "$MISE_DATA_DIR/shims/ripwire"
+out_d="$( PATH="$MISE_DATA_DIR/shims:$PATH" "$ripwire" "$ROOT" --doctor --agent=claude 2>&1 )"
+echo "$out_d" | grep -q 'n="claude-binary" ok="1"' || fail "mise's real (no bin/) archive layout was not resolved — reported broken/STALE"
+echo "$out_d" | grep -q 'n="claude-binary"[^>]*managed_unverified="1"' && fail "mise's real archive layout should resolve, not disclose-unknown"
+rm -rf "$dd"
+unset MISE_DATA_DIR
+
+# ── arm e: aqua's REAL layout — pkgs/github_release/github.com/<owner>/<repo>/<ver>/<archive>.tar.gz/
+# <archive>/ripwire, behind a bin/ripwire -> aqua-proxy shim — resolves (review item 8) ────────────
+CURRENT_ARM="e-real-aqua-archive-layout"
+sandbox
+de="$d"
+export AQUA_ROOT_DIR="$de/aqua"
+ARCHIVE="ripwire-0.9.9-fixture"
+AQUA_INSTALL="$AQUA_ROOT_DIR/pkgs/github_release/github.com/redhat-et/ripwire/v0.9.9/$ARCHIVE.tar.gz/$ARCHIVE"
+mkdir -p "$AQUA_INSTALL" "$AQUA_ROOT_DIR/bin"
+cp "$ripwire" "$AQUA_INSTALL/ripwire"
+cp "$ripwire" "$AQUA_ROOT_DIR/bin/ripwire"
+out_e="$( PATH="$AQUA_ROOT_DIR/bin:$PATH" "$ripwire" "$ROOT" --doctor --agent=claude 2>&1 )"
+echo "$out_e" | grep -q 'n="claude-binary" ok="1"' || fail "aqua's real double-nested archive layout was not resolved — reported broken/STALE"
+echo "$out_e" | grep -q 'n="claude-binary"[^>]*managed_unverified="1"' && fail "aqua's real archive layout should resolve, not disclose-unknown"
+rm -rf "$de"
+unset AQUA_ROOT_DIR
 
 echo "OK: doctorstalecheck"

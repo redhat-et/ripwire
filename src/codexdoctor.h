@@ -124,35 +124,47 @@ inline std::vector<std::filesystem::path> listSubdirectories( const std::filesys
     return out;
 }
 
-inline ManagerLayout resolveMiseLayout( const std::string& installsRoot )
+// Files named exactly "ripwire" anywhere under `dir` — never following a symlink, and never
+// throwing (recursive_directory_iterator's own operator++ can throw on a permission change or race
+// mid-scan, same reason listSubdirectories above hand-rolls its own increment(ec) loop). Depth is
+// capped at 8: real manager trees are 2-3 levels deep (mise: <version>/<archive>/; aqua:
+// <version>/<archive>.tar.gz/<archive>/), and a cap turns a hostile/huge tree into "found nothing
+// this deep", never a runaway walk.
+inline std::vector<std::filesystem::path> findRipwireBinaries( const std::filesystem::path& dir )
 {
     namespace fs = std::filesystem;
-    ManagerLayout out;
+    std::vector<fs::path> out;
     std::error_code ec;
-    const std::vector<fs::path> versions = listSubdirectories( installsRoot, ec );
-    if( ec || versions.size() > 1 ) { out.ambiguous = versions.size() > 1; return out; }
-    if( versions.size() != 1 ) { return out; }
-    const fs::path candidate = versions.front() / "bin" / "ripwire";
-    std::error_code eec;
-    if( fs::exists( candidate, eec ) ) { out.candidate = candidate.string(); }
+    fs::recursive_directory_iterator it( dir, fs::directory_options::skip_permission_denied, ec ), last;
+    while( !ec && it != last )
+    {
+        std::error_code fec;
+        if( it->path().filename() == "ripwire" && it->is_regular_file( fec ) && !fec ) { out.push_back( it->path() ); }
+        if( it.depth() >= 8 ) { it.disable_recursion_pending(); }
+        it.increment( ec );
+    }
     return out;
 }
 
-inline ManagerLayout resolveAquaLayout( const std::string& pkgsRoot )
+// A manager's version directory may nest the real binary arbitrarily deep — mise extracts a release
+// archive as <version>/<archive-name>/ripwire (no fixed "bin/"; a prior version of this function
+// assumed one and misreported every real mise install as managed_unverified), aqua nests one level
+// deeper still behind its own proxy (<version>/<archive>.tar.gz/<archive>/ripwire). Rather than
+// hardcode a second exact shape that will rot the next time either manager repackages, this searches
+// for exactly one file named "ripwire" under the version directory and reports the same
+// ambiguous/no-candidate contract listSubdirectories' caller already relies on: more than one match
+// is exactly as undecidable as more than one version directory.
+inline ManagerLayout resolveManagerVersionLayout( const std::string& root )
 {
     namespace fs = std::filesystem;
     ManagerLayout out;
     std::error_code ec;
-    const std::vector<fs::path> versions = listSubdirectories( pkgsRoot, ec );
+    const std::vector<fs::path> versions = listSubdirectories( root, ec );
     if( ec || versions.size() > 1 ) { out.ambiguous = versions.size() > 1; return out; }
     if( versions.size() != 1 ) { return out; }
-    std::error_code aec;
-    const std::vector<fs::path> assets = listSubdirectories( versions.front(), aec );
-    if( aec || assets.size() > 1 ) { out.ambiguous = assets.size() > 1; return out; }
-    if( assets.size() != 1 ) { return out; }
-    const fs::path candidate = assets.front() / "ripwire";
-    std::error_code cec;
-    if( fs::exists( candidate, cec ) ) { out.candidate = candidate.string(); }
+    const std::vector<fs::path> binaries = findRipwireBinaries( versions.front() );
+    if( binaries.size() > 1 ) { out.ambiguous = true; return out; }
+    if( binaries.size() == 1 ) { out.candidate = binaries.front().string(); }
     return out;
 }
 
@@ -162,9 +174,13 @@ inline ManagerLayout resolveAquaLayout( const std::string& pkgsRoot )
 inline std::optional<std::string> resolveManagedInstall()
 {
     const std::string miseInstalls = envOr( "MISE_DATA_DIR", envOr( "HOME", "" ) + "/.local/share/mise" ) + "/installs/ripwire";
-    const std::string aquaPkgs = envOr( "AQUA_ROOT_DIR", envOr( "HOME", "" ) + "/.local/share/aquaproj-aqua" ) + "/pkgs/redhat-et/ripwire";
-    const ManagerLayout mise = resolveMiseLayout( miseInstalls );
-    const ManagerLayout aqua = resolveAquaLayout( aquaPkgs );
+    // aqua nests every package under pkgs/<registry>/<host>/<owner>/<repo>/ — "github_release/github.com"
+    // is aqua's own registry/host pair for a GitHub Releases-sourced package, not a ripwire-specific
+    // choice, and redhat-et/ripwire is this project's own coordinates (review item 8: the prior root
+    // omitted the registry/host segment entirely and could never resolve a real aqua install).
+    const std::string aquaPkgs = envOr( "AQUA_ROOT_DIR", envOr( "HOME", "" ) + "/.local/share/aquaproj-aqua" ) + "/pkgs/github_release/github.com/redhat-et/ripwire";
+    const ManagerLayout mise = resolveManagerVersionLayout( miseInstalls );
+    const ManagerLayout aqua = resolveManagerVersionLayout( aquaPkgs );
     if( mise.ambiguous || aqua.ambiguous ) { return std::nullopt; }
     std::vector<std::string> candidates;
     if( mise.candidate ) { candidates.push_back( *mise.candidate ); }
