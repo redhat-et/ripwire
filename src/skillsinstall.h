@@ -92,13 +92,13 @@ inline std::filesystem::path hooksStoreDir()
 // the caller decides whether a concurrent winner already occupies the target (see extractGroup).
 inline bool renameAtomic( const std::filesystem::path& from, const std::filesystem::path& to )
 {
-    return os::rename( from.c_str(), to.c_str() ) == 0;
+    return os::rename( from.string().c_str(), to.string().c_str() ) == 0;
 }
 
 // ::symlink() storeFile -> destLink. Returns false on failure, with errno left intact for the caller.
 inline bool symlinkOrRefuse( const std::filesystem::path& storeFile, const std::filesystem::path& destLink )
 {
-    return os::symlink( storeFile.c_str(), destLink.c_str() ) == 0;
+    return os::symlink( storeFile.string().c_str(), destLink.string().c_str() ) == 0;
 }
 
 // create_directories() on POSIX creates with mode 0777 masked by the process umask — a permissive
@@ -152,7 +152,7 @@ inline Outcome writeStoreFile( const std::filesystem::path& dest, std::string_vi
     {
         return { false, "create_directories failed for " + dest.parent_path().string() + ": " + mkdirEc.message() };
     }
-    const int fd = os::open( dest.c_str(), O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY, mode );
+    const int fd = os::open( dest.string().c_str(), O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY, mode );
     if( fd < 0 )
     {
         return { false, "open(O_EXCL) failed for " + dest.string() + ": " + std::string( std::strerror( errno ) ) };
@@ -182,7 +182,7 @@ inline bool storeContentsMatch( const std::array<embedded_skills::EmbeddedFile, 
     for( const embedded_skills::EmbeddedFile& f : files )
     {
         const std::filesystem::path path = storeRoot / std::string( f.relativePath );
-        const int fd = os::open( path.c_str(), O_RDONLY | O_NOFOLLOW );
+        const int fd = os::open( path.string().c_str(), O_RDONLY | O_NOFOLLOW );
         if( fd < 0 ) { return false; }
         rw::pathguard::OwnedFd guard( fd );
         os::stat_t st{};
@@ -216,7 +216,7 @@ inline Outcome extractGroup( const std::array<embedded_skills::EmbeddedFile, N>&
     // contents are byte-identical to the binary's own embedded copy; anything else — missing, a link,
     // a partial extraction a killed run left behind, tampering — is re-extracted from scratch below.
     os::stat_t rootSt{};
-    const bool rootIsRealDir = os::lstat( storeRoot.c_str(), &rootSt ) == 0 && S_ISDIR( rootSt.st_mode );
+    const bool rootIsRealDir = os::lstat( storeRoot.string().c_str(), &rootSt ) == 0 && S_ISDIR( rootSt.st_mode );
     if( rootIsRealDir && storeContentsMatch( files, storeRoot ) ) { return { true, {} }; }
     if( rootIsRealDir ) { std::filesystem::remove_all( storeRoot, ec ); }   // stale/corrupted — clear it; a symlink at this name is removed as itself, never followed
 
@@ -431,7 +431,7 @@ inline int pruneStale( const std::filesystem::path& destDir, const std::vector<s
         if( !rw::pathguard::isSymlink( it->path().string() ) ) { continue; }
         const bool manifestTracked = std::find( previousManifestNames.begin(), previousManifestNames.end(), name ) != previousManifestNames.end();
         if( !manifestTracked && !pruneTargetIsOurs( it->path(), ourStoreRoot ) ) { continue; }
-        if( os::unlink( it->path().c_str() ) == 0 ) { ++removed; }
+        if( os::unlink( it->path().string().c_str() ) == 0 ) { ++removed; }
     }
     return removed;
 }
