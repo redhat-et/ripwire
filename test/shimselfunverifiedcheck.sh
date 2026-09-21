@@ -50,7 +50,7 @@ fi
 # probe actually reaches the branch under test (an empty resolveManagedInstall() would instead hit the
 # managed_unverified arm below it, proving nothing about the fix).
 d="$( mktemp -d )"
-. "$ROOT/test/lib/unset-agent-env-variables.sh"
+. "$ROOT/test/lib/clean-env.sh"
 export HOME="$d"
 export MISE_DATA_DIR="$d/mise"
 mkdir -p "$MISE_DATA_DIR/installs/ripwire/0.9.9/bin"

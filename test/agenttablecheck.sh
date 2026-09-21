@@ -13,7 +13,6 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-. "$ROOT/test/lib/unset-agent-env-variables.sh"    # arm (F) binds HOME/AGENTS_HOME/CODEX_HOME/HERMES_HOME per invocation; nothing here reads CLAUDE_CONFIG_DIR or RIPWIRE_DATA_HOME, so those two just need clearing once
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 # ACCUMULATOR, not fail-fast: this gate iterates every row, and a stop at the first bad row hides the
 # other seven. gateexitcheck.sh arm (C) requires this shape and caught the fail-fast version.

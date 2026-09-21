@@ -15,7 +15,7 @@ fail() { echo "FAIL ($CURRENT_ARM): $1" >&2; exit 1; }
 sandbox() {
     d="$( mktemp -d )"
     trap 'rm -rf "$d"' EXIT
-    . "$ROOT/test/lib/unset-agent-env-variables.sh"
+    . "$ROOT/test/lib/clean-env.sh"
     export HOME="$d" CLAUDE_CONFIG_DIR="$d/.claude"
 }
 

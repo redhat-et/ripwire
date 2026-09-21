@@ -9,20 +9,13 @@ ripwire="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 
 fail() { echo "FAIL ($CURRENT_ARM): $1" >&2; exit 1; }
 
-# GNU `stat -f` is filesystem stat, not BSD's format flag — it succeeds with junk, so a
-# `stat -f ... || stat -c ...` one-liner never reaches the fallback on Linux (see cachehashcheck.sh's
-# comment on this exact trap). Detect the flavour once instead, matching the rest of the suite.
-if stat --version >/dev/null 2>&1; then   # GNU coreutils
-    mtime_of() { stat -c '%Y' "$1" 2>/dev/null; }
-else                                       # BSD / macOS
-    mtime_of() { stat -f '%m' "$1" 2>/dev/null; }
-fi
+. "$ROOT/test/lib/statcompat.sh"
 
 # Call directly (`sandbox`), never as `x="$( sandbox )"` — command substitution forks a subshell, and
 # an export made there never reaches the parent, so "$ripwire" would see the real, not the sandboxed, env.
 sandbox() {
     d="$( mktemp -d )"
-    . "$ROOT/test/lib/unset-agent-env-variables.sh"
+    . "$ROOT/test/lib/clean-env.sh"
     export HOME="$d" CLAUDE_CONFIG_DIR="$d/.claude" RIPWIRE_DATA_HOME="$d/.local/share/ripwire"
 }
 
@@ -336,18 +329,13 @@ echo "$out20" | grep -q '<s ' && fail "bare 'ripwire skills' emitted a symbol ma
 # arm): under the usual 022, create_directories()'s default 0777 already reads back as 0755, so this
 # is the only umask that actually distinguishes "explicit 0755" from "whatever the umask left" (review
 # item 9).
-if stat --version >/dev/null 2>&1; then
-    dirMode(){ stat -c '%a' "$1"; }
-else
-    dirMode(){ stat -f '%Lp' "$1"; }
-fi
 CURRENT_ARM="21-fresh-store-dir-mode-under-umask-000"
 sandbox
 d21="$d"
 ( umask 000; "$ripwire" skills install >/dev/null )
-skillsMode="$( dirMode "$CLAUDE_CONFIG_DIR/skills" )"
+skillsMode="$( mode_of "$CLAUDE_CONFIG_DIR/skills" )"
 [ "$skillsMode" = "755" ] || fail "skills destination directory created 0$skillsMode under umask 000, expected 0755"
-storeMode="$( dirMode "$RIPWIRE_DATA_HOME/skills" )"
+storeMode="$( mode_of "$RIPWIRE_DATA_HOME/skills" )"
 [ "$storeMode" = "755" ] || fail "content-addressed store directory created 0$storeMode under umask 000, expected 0755"
 rm -rf "$d21"
 

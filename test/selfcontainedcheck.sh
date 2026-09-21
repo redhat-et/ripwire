@@ -3,7 +3,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-. "$ROOT/test/lib/unset-agent-env-variables.sh"    # canary sweep found the skills-install arm's dataHome() reading an ambient RIPWIRE_DATA_HOME
+. "$ROOT/test/lib/clean-env.sh"    # canary sweep found the skills-install arm's dataHome() reading an ambient RIPWIRE_DATA_HOME
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"

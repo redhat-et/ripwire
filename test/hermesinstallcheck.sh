@@ -22,10 +22,6 @@ no(){ echo "  FAIL  $1"; fail=1; }
 [ -f "$SK/install.sh" ] || { echo "no skills/install.sh"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
-# The bare (Claude-default) install.sh call below (line ~79) resolves settings/skills through
-# CLAUDE_CONFIG_DIR ahead of its own HOME= override — an ambient CLAUDE_CONFIG_DIR writes past it.
-# Source BEFORE our own HERMES_HOME export: it unsets HERMES_HOME too, so sourcing after clobbers it.
-. "$ROOT/test/lib/unset-agent-env-variables.sh"       # every HOME= below is per-invocation only
 export HERMES_HOME="$TMP/hermes-home"; rm -rf "$HERMES_HOME"; mkdir -p "$HERMES_HOME"
 
 # helper: skill NAMES shipped in the repo — the flat Agent-Skills-standard set plus the Hermes-native
