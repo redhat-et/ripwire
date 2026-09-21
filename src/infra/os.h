@@ -771,6 +771,7 @@ int        fclose( std::FILE* stream );   // publishes a memstream's buffer; any
 int   unlink( const char* path );
 int   remove( const char* path );
 int   rename( const char* from, const char* to );
+int   symlink( const char* target, const char* linkPath );   // not yet implemented — see os_win32.cpp
 int   mkdir( const char* path, mode_t mode );
 int   chmod( const char* path, mode_t mode );
 int   access( const char* path, int mode );

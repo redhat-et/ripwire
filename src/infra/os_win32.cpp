@@ -1543,6 +1543,15 @@ UniqueLocal ownerOnlyDescriptor()
     return UniqueLocal( descriptor );
 }
 
+// Not yet implemented (skillsinstall.h's own header already documents this: "Windows: symlink-only
+// for now... deferred until src/infra/os.h's POSIX seam lands" — CreateSymbolicLinkW needs privilege
+// or developer-mode detection this port has not built yet). Declared, not silently unavailable: the
+// ENOSYS/-1 shape matches os.h's own exepath() fallback for the same reason.
+int symlink( const char*, const char* )
+{
+    return fail( ENOSYS );
+}
+
 int mkdir( const char* path, mode_t mode )
 {
     const NativePath native( path );
