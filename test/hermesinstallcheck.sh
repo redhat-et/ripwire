@@ -163,6 +163,9 @@ fi
 H7_HOME="$TMP/hermes-home-7"; rm -rf "$H7_HOME"; mkdir -p "$H7_HOME/skills"
 printf 'USER SKILL — must survive a ripwire install\n' >"$H7_HOME/skills/ripwire-repo-map-notes"
 HERMES_HOME="$H7_HOME" bash "$SK/install.sh" --hermes >"$TMP/h7.out" 2>&1
+[ -f "$H7_HOME/skills/ripwire-repo-map-notes" ] \
+    && ok "a user file whose name begins with ripwire- survives the install" \
+    || no "the install removed the planted user file ripwire-repo-map-notes"
 { [ -L "$H7_HOME/skills/ripwire-repo-map" ] && [ -f "$H7_HOME/skills/ripwire-repo-map/SKILL.md" ]; } \
     && ok "the Hermes-native loop links the real ripwire-repo-map skill" \
     || no "the Hermes-native loop did not link ripwire-repo-map — the loop that pattern-matches skills/hermes/ripwire-*/ never ran"
