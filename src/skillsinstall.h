@@ -383,8 +383,15 @@ inline bool writeManifestV2( const std::filesystem::path& skillsDest, const std:
     const std::filesystem::path manifestPath = skillsDest / ".ripwire-manifest-v2";
     std::string body = "version=2\nsource=" + std::string( embedded_skills::kStoreKey ) + "\n";
     for( const std::string& s : skillNames ) { body += "skill=" + s + "\n"; }
+    // Same mode-preservation as mcpedit.h::atomicWrite (A3-F7): a temp-then-rename over an EXISTING
+    // manifest must not silently loosen it to whatever 0666 & ~umask happens to leave (CWE-732,
+    // review round) — restore its exact bits before the rename. A first-ever manifest (no original)
+    // keeps the umask default, same as atomicWrite's own new-file case.
+    os::stat_t orig{};
+    const bool haveOrig = ( os::stat( manifestPath.string().c_str(), &orig ) == 0 );
     rw::pathguard::ExclTempFile temp = rw::pathguard::createExclTempFile( manifestPath.string() + ".tmp.", "", 0666 );
     if( !temp.ok() || !temp.write( body ) ) { return false; }
+    if( haveOrig ) { os::fchmod( temp.fd(), orig.st_mode & 07777 ); }
     return temp.commit( manifestPath.string() );
 }
 
@@ -778,10 +785,13 @@ inline ShellCaptureResult runShellCapture( const std::string& cmd )
 inline constexpr std::string_view kClaudeHookMatcher = "^(Read|Glob|Grep|Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)$";
 inline constexpr std::string_view kCodexHookMatcher  = "^(Bash|Read|Glob|Grep|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)$";
 
-// Resolve `jq` to an absolute path via PATH — the same walk codexdoctor.h's resolveExecutable does,
-// kept local here rather than pulled in as a cross-file dependency. Pins the interpreter the shell
-// strings below run instead of leaving a bare "jq" token for /bin/sh to resolve on its own each time
-// (review item 10). Empty return means not found.
+// Resolve `jq` to an absolute path via PATH — pins the interpreter the shell strings below run
+// instead of leaving a bare "jq" token for /bin/sh to resolve on its own each time (review item 10).
+// Deliberately NOT os::which/codexdoctor.h's resolveExecutable: both mimic sh's own PATH semantics,
+// where an empty entry means the current directory — correct for "what would a shell run", wrong
+// here, where the answer is spliced into a shell command string --hook can run inside an untrusted
+// repository (CWE-426, review round). Only an ABSOLUTE entry is ever considered; an empty or
+// relative one is skipped, never substituted with ".". Empty return means not found.
 inline std::string resolveJqPath()
 {
     const char* pathEnv = std::getenv( "PATH" );
@@ -790,8 +800,11 @@ inline std::string resolveJqPath()
     {
         const std::size_t split = remaining.find( ':' );
         const std::string_view dir = remaining.substr( 0, split );
-        const std::string candidate = std::string( dir.empty() ? "." : dir ) + "/jq";
-        if( os::access( candidate.c_str(), X_OK ) == 0 ) { return candidate; }
+        if( !dir.empty() && dir.front() == '/' )
+        {
+            const std::string candidate = std::string( dir ) + "/jq";
+            if( os::access( candidate.c_str(), X_OK ) == 0 ) { return candidate; }
+        }
         if( split == std::string_view::npos ) { break; }
         remaining.remove_prefix( split + 1 );
     }
@@ -839,8 +852,16 @@ inline int runJqMergeFile( const std::filesystem::path& file, const std::string&
         rw::emitTo( stderr, "ripwire skills install: --hook merge failed (is {} valid JSON?); nothing changed\n", file.string() );
         return 1;
     }
+    // Same mode-preservation as mcpedit.h::atomicWrite (A3-F7) and writeManifestV2 above: settings.json/
+    // hooks.json is a live agent config a user may have set restrictively (0600); a temp-then-rename
+    // must not silently loosen it to 0666 & ~umask (CWE-732, review round). A first-ever file (no
+    // original) keeps the umask default.
+    os::stat_t origCfg{};
+    const bool haveOrigCfg = ( os::stat( file.string().c_str(), &origCfg ) == 0 );
     rw::pathguard::ExclTempFile temp = rw::pathguard::createExclTempFile( file.string() + ".tmp.", "", 0666 );
-    if( !temp.ok() || !temp.write( result.output ) || !temp.commit( file.string() ) )
+    const bool wrote = temp.ok() && temp.write( result.output );
+    if( wrote && haveOrigCfg ) { os::fchmod( temp.fd(), origCfg.st_mode & 07777 ); }
+    if( !wrote || !temp.commit( file.string() ) )
     {
         rw::emitTo( stderr, "ripwire skills install: could not write the merged hook config to {}\n", file.string() );
         return 1;

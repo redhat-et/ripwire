@@ -11,6 +11,7 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
+. "$ROOT/test/lib/statcompat.sh"
 SK="$ROOT/skills"
 fail=0
 ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
@@ -338,5 +339,42 @@ grep -qi "jq" "$TMP/g.err" \
 { [ ! -e "$G_HOME/.claude/settings.json" ] || ! grep -q '"hooks"' "$G_HOME/.claude/settings.json" 2>/dev/null; } \
     && ok "(G) no hook registration was written without jq" \
     || no "(G) settings.json carries a hooks registration despite jq being unavailable"
+
+# ── (H) an empty/relative PATH entry never resolves jq from the current directory (CWE-426) ────────
+# A malicious "jq" sits in CWD; PATH has an empty leading entry (":$H_BINDIR", sh's own spelling for
+# "search the current directory") plus a genuinely relative one ("h-relative-jq-bin"). Neither may
+# ever be tried — --hook must fail exactly as arm (G) does, and the planted jq must never run.
+H_CWD="$TMP/h-untrusted-repo"; mkdir -p "$H_CWD"
+H_SENTINEL="$TMP/h-planted-jq-ran"
+printf '#!/bin/sh\ntouch "%s"\nexit 0\n' "$H_SENTINEL" > "$H_CWD/jq"
+chmod +x "$H_CWD/jq"
+mkdir -p "$H_CWD/h-relative-jq-bin"
+printf '#!/bin/sh\ntouch "%s"\nexit 0\n' "$H_SENTINEL" > "$H_CWD/h-relative-jq-bin/jq"
+chmod +x "$H_CWD/h-relative-jq-bin/jq"
+H_BINDIR="$TMP/h-plumbing-bin"; mkdir -p "$H_BINDIR"
+ln -s "$( command -v bash )" "$H_BINDIR/bash"
+ln -s "$( command -v dirname )" "$H_BINDIR/dirname"
+H_HOME="$TMP/h-empty-relative-path-home"; mkdir -p "$H_HOME"
+( cd "$H_CWD" && HOME="$H_HOME" PATH=":h-relative-jq-bin:$H_BINDIR" bash "$SK/install.sh" --hook >"$TMP/h.out" 2>"$TMP/h.err" )
+H_STATUS=$?
+{ [ "$H_STATUS" -ne 0 ]; } \
+    && ok "(H) --hook with only an empty/relative PATH entry for jq exits non-zero" \
+    || no "(H) --hook with only an empty/relative PATH entry for jq exited 0"
+{ [ ! -f "$H_SENTINEL" ]; } \
+    && ok "(H) the planted current-directory jq was never executed" \
+    || no "(H) the planted current-directory jq RAN — an empty/relative PATH entry resolved it (CWE-426)"
+
+# ── (I) a pre-existing settings.json's mode survives a --hook merge (CWE-732) ───────────────────────
+# umask 022 is what makes this discriminating: the temp's own create mode is 0666, and 0666 & ~022 ==
+# 0644 — a DIFFERENT value than the 0600 planted below, so a preservation failure is not masked by
+# umask happening to land on the same bits.
+I_HOME="$TMP/i-mode-preserve-home"; mkdir -p "$I_HOME/.claude"
+printf '{}' > "$I_HOME/.claude/settings.json"
+chmod 0600 "$I_HOME/.claude/settings.json"
+( umask 022; HOME="$I_HOME" bash "$SK/install.sh" --hook >"$TMP/i.out" 2>"$TMP/i.err" )
+I_MODE="$( mode_of "$I_HOME/.claude/settings.json" )"
+[ "$I_MODE" = "600" ] \
+    && ok "(I) a pre-existing 0600 settings.json keeps its mode across a --hook merge" \
+    || no "(I) settings.json mode changed from 0600 to 0$I_MODE across a --hook merge (CWE-732)"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

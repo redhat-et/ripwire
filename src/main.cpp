@@ -3962,10 +3962,10 @@ int main( int argc, char** argv )
         return rw::skillsinstall::runSkillsInstall( argc, argv, selfExecutablePath( argv[0] ) );
     }
 
-    if( argc == 2 && std::string_view( argv[1] ) == "skills" )
-    { // bare `ripwire skills` — name the subcommand instead of silently mapping skills/ as a crawl root
+    if( argc >= 2 && std::string_view( argv[1] ) == "skills" )
+    { // bare or misspelled `ripwire skills …` — name the subcommand instead of silently mapping skills/ as a crawl root
         rw::skillsinstall::printSkillsUsage( stdout );
-        return 0;
+        return argc == 2 ? 0 : 2;
     }
 
     const Config cfg = parseArgs( argc, argv );

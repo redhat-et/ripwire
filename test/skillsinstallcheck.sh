@@ -75,7 +75,7 @@ before_count="$( grep -c '^skill=' "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-
 ln -sfn "$RIPWIRE_DATA_HOME/skills/does-not-exist-anymore" "$CLAUDE_CONFIG_DIR/skills/ripwire-renamed-away"
 echo "skill=ripwire-renamed-away" >> "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2"
 "$ripwire" skills install >/dev/null
-[ -e "$CLAUDE_CONFIG_DIR/skills/ripwire-renamed-away" ] && fail "stale skill symlink was not pruned"
+[ -L "$CLAUDE_CONFIG_DIR/skills/ripwire-renamed-away" ] && fail "stale skill symlink was not pruned"
 grep -q '^skill=ripwire-renamed-away$' "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" && fail "stale manifest entry was not pruned"
 rm -rf "$d4"
 
@@ -339,4 +339,30 @@ storeMode="$( mode_of "$RIPWIRE_DATA_HOME/skills" )"
 [ "$storeMode" = "755" ] || fail "content-addressed store directory created 0$storeMode under umask 000, expected 0755"
 rm -rf "$d21"
 
-echo "OK: skillsinstallcheck (arms 1-21)"
+# ── arm 22: a MISSPELLED skills subcommand also refuses instead of mapping skills/ as a repo ───────
+# `ripwire skills instal` has argc==3, so the old `argc == 2` bare-only guard never caught it and it
+# fell through to parseArgs, which took "skills" and "instal" as two positional crawl roots — the
+# exact silent-misdirection arm 20 closed for the bare case, still open here (review comment on #293).
+CURRENT_ARM="22-misspelled-skills-subcommand"
+out22="$( cd "$ROOT" && "$ripwire" skills instal 2>/dev/null )"
+rc=$?
+[ "$rc" -eq 2 ] || fail "'ripwire skills instal' exited $rc, not 2"
+echo "$out22" | grep -qi "usage" || fail "'ripwire skills instal' did not print a usage line"
+echo "$out22" | grep -q '<s ' && fail "'ripwire skills instal' emitted a symbol map instead of usage — skills/ was mapped as a crawl root"
+
+# ── arm 23: a pre-existing manifest's mode survives a re-install (CWE-732) ──────────────────────────
+# umask 022 is what makes this discriminating: writeManifestV2's temp is created 0666, and 0666 & ~022
+# == 0644 — a DIFFERENT value than the 0600 planted below, so a preservation failure is not masked by
+# umask happening to land on the same bits. writeManifestV2 rewrites the manifest on every install run
+# (not only when its contents change), so a second run is enough to exercise the preserve-or-default path.
+CURRENT_ARM="23-manifest-mode-preserved"
+sandbox
+d23="$d"
+"$ripwire" skills install >/dev/null
+chmod 0600 "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2"
+( umask 022; "$ripwire" skills install >/dev/null )
+manifestMode="$( mode_of "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" )"
+[ "$manifestMode" = "600" ] || fail "manifest mode changed from 0600 to 0$manifestMode across a re-install (CWE-732)"
+rm -rf "$d23"
+
+echo "OK: skillsinstallcheck (arms 1-23)"
