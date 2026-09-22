@@ -17,8 +17,8 @@ The installer:
 - downloads the latest [GitHub Release](https://github.com/redhat-et/ripwire/releases) for your OS and CPU
   and verifies its SHA-256;
 - installs the binary to `~/.local/bin/ripwire`, with no sudo;
-- stages the agent skills and hooks under `~/.local/share/ripwire/`;
-- activates the skills for each agent it finds on the machine (Claude Code, Codex, and Hermes with
+- activates the skills and hooks embedded in the binary (nothing is staged on disk) for each agent it
+  finds on the machine (Claude Code, Codex, and Hermes with
   [initial support](#skills)) and prints one line per agent;
 - never registers hooks and never edits your shell profile.
 
@@ -40,7 +40,7 @@ reports x86-64; the installer sends it to a native arm64 shell, where the arm64 
 | `RIPWIRE_INSTALL_PREFIX` | Install under this prefix instead of `~/.local`; the binary goes in `<prefix>/bin`. |
 | `RIPWIRE_INSTALL_YES=1` | Skip the confirmation prompt. |
 | `RIPWIRE_SKIP_CPU_CHECK=1` | Skip the x86-64-v3 CPU check. The binary is still test-run before it is installed. |
-| `RIPWIRE_NO_ACTIVATE=1` | Stage the skills without activating them. |
+| `RIPWIRE_NO_ACTIVATE=1` | Skip activation; run `ripwire skills install --all` later. |
 
 Then try it in a repository:
 
@@ -124,8 +124,8 @@ claude mcp add ripwire -- ripwire --mcp
 ## Check and upgrade
 
 `ripwire . --doctor` checks the install: the binary, the skills and the hooks. To upgrade, run the same
-install command again (pin a release with `RIPWIRE_VERSION`). It replaces the binary and the staged skills
-and refreshes their links.
+install command again (pin a release with `RIPWIRE_VERSION`). It replaces the binary and re-links the
+skills and hooks from the new binary's own embedded store.
 
 ## Uninstall
 
