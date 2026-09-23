@@ -1,0 +1,1213 @@
+[
+  {
+    "instance_id": "ultralytics__ultralytics-17810",
+    "r0_at1": 0.0,
+    "r1_at1": 0.3333333333333333,
+    "r3_at1": 0.3333333333333333,
+    "ctl_at1": 0.05500000000000001
+  },
+  {
+    "instance_id": "sympy__sympy-27223",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0
+  },
+  {
+    "instance_id": "dmlc__dgl-5240",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.07
+  },
+  {
+    "instance_id": "micropython__micropython-lib-947",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0
+  },
+  {
+    "instance_id": "scikit-learn__scikit-learn-29130",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.055
+  },
+  {
+    "instance_id": "django__django-18435",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.045
+  },
+  {
+    "instance_id": "aiortc__aiortc-795",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0125
+  },
+  {
+    "instance_id": "python__cpython-7926",
+    "r0_at1": 0.0,
+    "r1_at1": 0.25,
+    "r3_at1": 0.25,
+    "ctl_at1": 0.00625
+  },
+  {
+    "instance_id": "numpy__numpy-10615",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0
+  },
+  {
+    "instance_id": "sympy__sympy-27051",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.014186046511627925
+  },
+  {
+    "instance_id": "django__django-19009",
+    "r0_at1": 0.0,
+    "r1_at1": 0.041666666666666664,
+    "r3_at1": 0.041666666666666664,
+    "ctl_at1": 0.037083333333333426
+  },
+  {
+    "instance_id": "django__django-13134",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01
+  },
+  {
+    "instance_id": "duncanscanga__VDRS-Solutions-73",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.016000000000000004
+  },
+  {
+    "instance_id": "openwisp__openwisp-users-286",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.13
+  },
+  {
+    "instance_id": "AzureAD__microsoft-authentication-library-for-python-407",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.005
+  },
+  {
+    "instance_id": "netbox-community__netbox-7676",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.055
+  },
+  {
+    "instance_id": "pandas-dev__pandas-35029",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.03499999999999999
+  },
+  {
+    "instance_id": "PlasmaPy__PlasmaPy-2542",
+    "r0_at1": 0.008620689655172414,
+    "r1_at1": 0.008620689655172414,
+    "r3_at1": 0.008620689655172414,
+    "ctl_at1": 0.0036206896551724105
+  },
+  {
+    "instance_id": "ansys__pymapdl-3705",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.021666666666666664
+  },
+  {
+    "instance_id": "aio-libs__aiohttp-9692",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.315
+  },
+  {
+    "instance_id": "celery__django-celery-beat-835",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 1.0,
+    "ctl_at1": 0.095
+  },
+  {
+    "instance_id": "scikit-learn__scikit-learn-8478",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.025
+  },
+  {
+    "instance_id": "numpy__numpy-17394",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.03
+  },
+  {
+    "instance_id": "numpy__numpy-8206",
+    "r0_at1": 0.3333333333333333,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.011666666666666665
+  },
+  {
+    "instance_id": "scikit-learn__scikit-learn-13290",
+    "r0_at1": 0.0,
+    "r1_at1": 0.16666666666666666,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01
+  },
+  {
+    "instance_id": "feast-dev__feast-2371",
+    "r0_at1": 0.0,
+    "r1_at1": 0.058823529411764705,
+    "r3_at1": 0.058823529411764705,
+    "ctl_at1": 0.02647058823529406
+  },
+  {
+    "instance_id": "NVIDIA__NeMo-9100",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0057142857142857125
+  },
+  {
+    "instance_id": "streamlit__streamlit-9754",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01
+  },
+  {
+    "instance_id": "streamlit__streamlit-8741",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.035
+  },
+  {
+    "instance_id": "mesonbuild__meson-14013",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.04333333333333332
+  },
+  {
+    "instance_id": "scikit-learn__scikit-learn-30327",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.02375
+  },
+  {
+    "instance_id": "scikit-learn__scikit-learn-28678",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0016666666666666666
+  },
+  {
+    "instance_id": "dask__dask-11609",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.003333333333333333
+  },
+  {
+    "instance_id": "dask__dask-11541",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.00375
+  },
+  {
+    "instance_id": "dask__dask-11479",
+    "r0_at1": 0.3333333333333333,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.009999999999999998
+  },
+  {
+    "instance_id": "dask__dask-11434",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.035
+  },
+  {
+    "instance_id": "dask__dask-11393",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0725
+  },
+  {
+    "instance_id": "dask__dask-11183",
+    "r0_at1": 0.0,
+    "r1_at1": 0.2,
+    "r3_at1": 0.2,
+    "ctl_at1": 0.03800000000000002
+  },
+  {
+    "instance_id": "dask__dask-10963",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.015
+  },
+  {
+    "instance_id": "dask__dask-10796",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0975
+  },
+  {
+    "instance_id": "dask__dask-10785",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.135
+  },
+  {
+    "instance_id": "DS4SD__docling-314",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0125
+  },
+  {
+    "instance_id": "BerriAI__litellm-6563",
+    "r0_at1": 0.0,
+    "r1_at1": 0.03225806451612903,
+    "r3_at1": 0.03225806451612903,
+    "ctl_at1": 0.0027419354838709663
+  },
+  {
+    "instance_id": "keras-team__keras-20626",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0225
+  },
+  {
+    "instance_id": "keras-team__keras-20550",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0125
+  },
+  {
+    "instance_id": "keras-team__keras-20537",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.005
+  },
+  {
+    "instance_id": "keras-team__keras-20456",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0525
+  },
+  {
+    "instance_id": "keras-team__keras-20443",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.1075
+  },
+  {
+    "instance_id": "huggingface__accelerate-3248",
+    "r0_at1": 0.0,
+    "r1_at1": 1.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.04
+  },
+  {
+    "instance_id": "pydantic__pydantic-10789",
+    "r0_at1": 0.0,
+    "r1_at1": 0.05,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.03449999999999992
+  },
+  {
+    "instance_id": "pydantic__pydantic-10601",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.17
+  },
+  {
+    "instance_id": "pydantic__pydantic-10210",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.006111111111111112
+  },
+  {
+    "instance_id": "pydantic__pydantic-8706",
+    "r0_at1": 0.2,
+    "r1_at1": 0.2,
+    "r3_at1": 0.2,
+    "ctl_at1": 0.030000000000000013
+  },
+  {
+    "instance_id": "facebookresearch__xformers-1166",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.09000000000000002
+  },
+  {
+    "instance_id": "conan-io__conan-17369",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.065
+  },
+  {
+    "instance_id": "python__mypy-18290",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01375
+  },
+  {
+    "instance_id": "python__mypy-18197",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.015
+  },
+  {
+    "instance_id": "python__mypy-18164",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.023125
+  },
+  {
+    "instance_id": "python__mypy-18163",
+    "r0_at1": 0.0,
+    "r1_at1": 0.08333333333333333,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.032083333333333304
+  },
+  {
+    "instance_id": "python__mypy-18160",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.105
+  },
+  {
+    "instance_id": "python__mypy-18141",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.08
+  },
+  {
+    "instance_id": "python__mypy-18119",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.02
+  },
+  {
+    "instance_id": "python__mypy-18102",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0075
+  },
+  {
+    "instance_id": "python__mypy-18091",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.006666666666666666
+  },
+  {
+    "instance_id": "pandas-dev__pandas-60407",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.02
+  },
+  {
+    "instance_id": "pandas-dev__pandas-59900",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.035
+  },
+  {
+    "instance_id": "secdev__scapy-4586",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.16625
+  },
+  {
+    "instance_id": "django__django-18986",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.005555555555555557
+  },
+  {
+    "instance_id": "django__django-18941",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.02
+  },
+  {
+    "instance_id": "django__django-18925",
+    "r0_at1": 0.0,
+    "r1_at1": 0.04,
+    "r3_at1": 0.04,
+    "ctl_at1": 0.020400000000000015
+  },
+  {
+    "instance_id": "django__django-18911",
+    "r0_at1": 1.0,
+    "r1_at1": 1.0,
+    "r3_at1": 1.0,
+    "ctl_at1": 0.05
+  },
+  {
+    "instance_id": "django__django-18906",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.06
+  },
+  {
+    "instance_id": "django__django-18905",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.265
+  },
+  {
+    "instance_id": "django__django-18888",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.5
+  },
+  {
+    "instance_id": "django__django-18846",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.1675
+  },
+  {
+    "instance_id": "django__django-18820",
+    "r0_at1": 0.0,
+    "r1_at1": 1.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01
+  },
+  {
+    "instance_id": "django__django-18796",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.03
+  },
+  {
+    "instance_id": "django__django-18795",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.02
+  },
+  {
+    "instance_id": "django__django-18785",
+    "r0_at1": 0.0,
+    "r1_at1": 0.25,
+    "r3_at1": 0.25,
+    "ctl_at1": 0.01125
+  },
+  {
+    "instance_id": "django__django-18752",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01
+  },
+  {
+    "instance_id": "django__django-18653",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0575
+  },
+  {
+    "instance_id": "django__django-18508",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01
+  },
+  {
+    "instance_id": "django__django-18470",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01214285714285714
+  },
+  {
+    "instance_id": "django__django-18105",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.015535714285714278
+  },
+  {
+    "instance_id": "django__django-18059",
+    "r0_at1": 1.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.035
+  },
+  {
+    "instance_id": "django__django-17885",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.016666666666666666
+  },
+  {
+    "instance_id": "django__django-17874",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.275
+  },
+  {
+    "instance_id": "roboflow__supervision-1739",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.027272727272727258
+  },
+  {
+    "instance_id": "roboflow__supervision-1698",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.02
+  },
+  {
+    "instance_id": "UKPLab__sentence-transformers-3035",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0075
+  },
+  {
+    "instance_id": "huggingface__trl-2450",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.02
+  },
+  {
+    "instance_id": "huggingface__trl-2398",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.05599999999999996
+  },
+  {
+    "instance_id": "rq__rq-2138",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.1
+  },
+  {
+    "instance_id": "tobymao__sqlglot-4524",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.025
+  },
+  {
+    "instance_id": "tobymao__sqlglot-4523",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01
+  },
+  {
+    "instance_id": "tobymao__sqlglot-4519",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.015833333333333328
+  },
+  {
+    "instance_id": "tobymao__sqlglot-4515",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.02
+  },
+  {
+    "instance_id": "tobymao__sqlglot-4480",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.014999999999999993
+  },
+  {
+    "instance_id": "tobymao__sqlglot-4415",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01875
+  },
+  {
+    "instance_id": "tobymao__sqlglot-4390",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0275
+  },
+  {
+    "instance_id": "tobymao__sqlglot-4366",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.03666666666666669
+  },
+  {
+    "instance_id": "tobymao__sqlglot-3901",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.015
+  },
+  {
+    "instance_id": "tobymao__sqlglot-3436",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.045
+  },
+  {
+    "instance_id": "tobymao__sqlglot-3417",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.06
+  },
+  {
+    "instance_id": "tobymao__sqlglot-3167",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.03625
+  },
+  {
+    "instance_id": "ansible__ansible-84275",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.06
+  },
+  {
+    "instance_id": "sympy__sympy-27325",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.015
+  },
+  {
+    "instance_id": "sympy__sympy-27287",
+    "r0_at1": 0.0,
+    "r1_at1": 0.3333333333333333,
+    "r3_at1": 0.3333333333333333,
+    "ctl_at1": 0.04833333333333333
+  },
+  {
+    "instance_id": "sympy__sympy-26358",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0
+  },
+  {
+    "instance_id": "huggingface__transformers-32652",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.015
+  },
+  {
+    "instance_id": "huggingface__transformers-31783",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.04
+  },
+  {
+    "instance_id": "huggingface__transformers-31566",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0
+  },
+  {
+    "instance_id": "huggingface__transformers-29511",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0
+  },
+  {
+    "instance_id": "huggingface__transformers-28940",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.025
+  },
+  {
+    "instance_id": "mlflow__mlflow-13888",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.2525
+  },
+  {
+    "instance_id": "mlflow__mlflow-13802",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.008333333333333333
+  },
+  {
+    "instance_id": "huggingface__diffusers-10189",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0025
+  },
+  {
+    "instance_id": "huggingface__diffusers-9659",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.004999999999999999
+  },
+  {
+    "instance_id": "UKPLab__sentence-transformers-3126",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.015
+  },
+  {
+    "instance_id": "UKPLab__sentence-transformers-3122",
+    "r0_at1": 1.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.18
+  },
+  {
+    "instance_id": "UKPLab__sentence-transformers-3110",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0325
+  },
+  {
+    "instance_id": "UKPLab__sentence-transformers-3096",
+    "r0_at1": 0.0,
+    "r1_at1": 1.0,
+    "r3_at1": 1.0,
+    "ctl_at1": 0.155
+  },
+  {
+    "instance_id": "UKPLab__sentence-transformers-3076",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01
+  },
+  {
+    "instance_id": "UKPLab__sentence-transformers-3073",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0275
+  },
+  {
+    "instance_id": "DS4SD__docling-528",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01625
+  },
+  {
+    "instance_id": "DS4SD__docling-472",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.025
+  },
+  {
+    "instance_id": "DS4SD__docling-442",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.03999999999999998
+  },
+  {
+    "instance_id": "DS4SD__docling-322",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.22
+  },
+  {
+    "instance_id": "DS4SD__docling-307",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.017291666666666646
+  },
+  {
+    "instance_id": "DS4SD__docling-302",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.04
+  },
+  {
+    "instance_id": "vitalik__django-ninja-1349",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.15
+  },
+  {
+    "instance_id": "pandas-dev__pandas-60543",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.015
+  },
+  {
+    "instance_id": "pandas-dev__pandas-60518",
+    "r0_at1": 0.03571428571428571,
+    "r1_at1": 0.03571428571428571,
+    "r3_at1": 0.03571428571428571,
+    "ctl_at1": 0.015535714285714278
+  },
+  {
+    "instance_id": "pandas-dev__pandas-60512",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.02
+  },
+  {
+    "instance_id": "pandas-dev__pandas-60461",
+    "r0_at1": 0.16666666666666666,
+    "r1_at1": 0.16666666666666666,
+    "r3_at1": 0.16666666666666666,
+    "ctl_at1": 0.04333333333333335
+  },
+  {
+    "instance_id": "pandas-dev__pandas-60415",
+    "r0_at1": 1.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0
+  },
+  {
+    "instance_id": "pandas-dev__pandas-60310",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0025
+  },
+  {
+    "instance_id": "pandas-dev__pandas-60277",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0075
+  },
+  {
+    "instance_id": "pandas-dev__pandas-60187",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01
+  },
+  {
+    "instance_id": "huggingface__accelerate-3261",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0
+  },
+  {
+    "instance_id": "huggingface__trl-2433",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0
+  },
+  {
+    "instance_id": "huggingface__trl-2417",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.005
+  },
+  {
+    "instance_id": "huggingface__trl-2332",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.00875
+  },
+  {
+    "instance_id": "huggingface__trl-2325",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0016666666666666666
+  },
+  {
+    "instance_id": "sympy__sympy-27301",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01
+  },
+  {
+    "instance_id": "mlflow__mlflow-13821",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.2675
+  },
+  {
+    "instance_id": "dask__dask-11539",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0075
+  },
+  {
+    "instance_id": "feast-dev__feast-4727",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.003333333333333333
+  },
+  {
+    "instance_id": "python__mypy-18292",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.02
+  },
+  {
+    "instance_id": "robotframework__robotframework-5265",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0575
+  },
+  {
+    "instance_id": "ShishirPatil__gorilla-754",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.06
+  },
+  {
+    "instance_id": "Netflix__metaflow-2141",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.014565217391304362
+  },
+  {
+    "instance_id": "tobymao__sqlglot-4526",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0
+  },
+  {
+    "instance_id": "kornia__kornia-3084",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.02375
+  },
+  {
+    "instance_id": "speechbrain__speechbrain-2742",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01
+  },
+  {
+    "instance_id": "mesonbuild__meson-13881",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.055
+  },
+  {
+    "instance_id": "ultralytics__ultralytics-17872",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.04
+  },
+  {
+    "instance_id": "ultralytics__ultralytics-17728",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 1.0,
+    "ctl_at1": 0.005
+  },
+  {
+    "instance_id": "ultralytics__ultralytics-17544",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.035
+  },
+  {
+    "instance_id": "ultralytics__ultralytics-17499",
+    "r0_at1": 0.0,
+    "r1_at1": 1.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.05
+  },
+  {
+    "instance_id": "huggingface__diffusers-10262",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0025
+  },
+  {
+    "instance_id": "huggingface__diffusers-10185",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01
+  },
+  {
+    "instance_id": "huggingface__diffusers-10182",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.02
+  },
+  {
+    "instance_id": "huggingface__diffusers-10115",
+    "r0_at1": 0.0,
+    "r1_at1": 1.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.04
+  },
+  {
+    "instance_id": "huggingface__diffusers-10086",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.003333333333333333
+  },
+  {
+    "instance_id": "huggingface__diffusers-10067",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.03
+  },
+  {
+    "instance_id": "huggingface__diffusers-9885",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.003333333333333333
+  },
+  {
+    "instance_id": "ccxt__ccxt-24388",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.015
+  },
+  {
+    "instance_id": "numpy__numpy-27595",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.0
+  },
+  {
+    "instance_id": "mlflow__mlflow-13390",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01
+  },
+  {
+    "instance_id": "huggingface__transformers-34279",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.013333333333333332
+  },
+  {
+    "instance_id": "huggingface__transformers-34208",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.03
+  },
+  {
+    "instance_id": "sktime__sktime-7221",
+    "r0_at1": 0.0,
+    "r1_at1": 0.0,
+    "r3_at1": 0.0,
+    "ctl_at1": 0.01571428571428571
+  }
+]

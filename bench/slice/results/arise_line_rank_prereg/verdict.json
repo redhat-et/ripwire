@@ -1,0 +1,31 @@
+{
+  "fingerprint": {
+    "dataset": 560,
+    "multi_function": 208,
+    "single_function": 352,
+    "carried": 182,
+    "carried_gold_lines": 1040
+  },
+  "binary_drift_disclosed": false,
+  "verdict": {
+    "pass": false,
+    "n_instances": 173,
+    "r3_at1_mean": 0.03439547149882863,
+    "r1_at1_mean": 0.04769026918668989,
+    "r0_at1_mean": 0.029350683865334053,
+    "ctl_at1_mean": 0.0423028905300165,
+    "margin_r3_minus_ctl": -0.007907419031187876,
+    "margin_ci95": [
+      -0.031029288565001496,
+      0.01890302647649497
+    ],
+    "clears_margin_bar": false,
+    "ci_excludes_zero": false,
+    "beats_r1": false,
+    "beats_r0": true,
+    "bootstrap_seed": "ripwire-arise-line-rank-v1",
+    "bootstrap_resamples": 10000,
+    "margin_bar": 0.02
+  },
+  "stopped_at": null
+}

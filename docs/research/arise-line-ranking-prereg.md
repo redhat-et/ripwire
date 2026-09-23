@@ -657,3 +657,66 @@ attribute). This is not only argued in prose: `test/slicerank_unit.cpp` item (6)
 tree-sitter classifier on a real Python fixture (`sliceScanDefinition`, not a hand-built `SliceScan`)
 and checks `sliceRowHasAnyDef`'s output against an independently-computed second pass over the same
 real `scan.all` — the binary-level half of the equivalence claim the harness-level half above states.
+
+## 9. Results — SCORED, outcome FAIL (2026-09-23, `lane/arise-result`)
+
+Scored against the owner-supplied `<assets>/r4-arise` tree (88 held-out repos, all 182 rows' `base_commit`
+resolved; row list sha256 `8f2069c3bd7b0a0d23599b619786c5d71eabc5a9dc25510fac72c69d3f659028`). Full raw
+outputs and this same table live at `bench/slice/results/arise_line_rank_prereg/` (this lane, committed
+after this section).
+
+**Binaries.** Lane `built_from=5b12674fa`, sha256
+`f07ffc6f550ba52ab173c70422e4a77db69eb8306926d3d3920e91ec64c40c39`. Baseline (§1.3 re-fingerprint)
+`built_from=755f9026f`, sha256 `8bf705fe9e49b8714c079853e3312b04017baea9839eb572eccd3bc4b5c8706a` — built
+as a precaution, never invoked: tiers (b)/(c) matched directly under the lane binary, so no drift rescue
+fired (`binary_drift_disclosed: false`).
+
+**Tier (a), dataset-only — exact match.** dataset=560, multi_function=208 (gold 6,809), single_function=352,
+carried=**182**, carried_gold_lines=**1,040**. `no_checkout=170, no_commit=0` on this tree.
+
+**Tier (b), binary-dependent counts — exact match.** scored_instances=**173**, var_instances=**498**;
+skips: selector_refused_plain=3, selector_refused_scoped=2, expand_no_body=2, gold_outside_span=2.
+
+**Tier (c), statistics (tolerance ±0.0005+1e-9) — exact match, lane binary directly, no drift rescue
+needed.** R0@1 0.02935 (reg. 0.029), CTL@1 0.04230 (reg. 0.042), R1@1 0.04769 (reg. 0.048), R2@1 0.04769
+(reg. 0.048); MRR R0 0.15388 (reg. 0.154), CTL 0.23428 (reg. 0.234), R1 0.28887 (reg. 0.289), R2 0.28887
+(reg. 0.289). All four fingerprints pass under the lane binary — a real population, no binary drift.
+
+**§4.2 verdict, wide pool.** R3@1 = **0.03440**, MRR = 0.26311, against CTL@1 0.04230, R1@1 0.04769, R0@1
+0.02935, n = 173. Margin (R3@1 − CTL@1) = **−0.00791**, 95% CI (paired bootstrap, seed
+`ripwire-arise-line-rank-v1`, 10,000 resamples) = **[−0.03103, 0.01890]**. Of the four required
+conditions: clears margin bar (≥0.02) **false**; CI excludes zero **false**; beats R1 **false** (0.0344 <
+0.0477); beats R0 **true** (0.0344 > 0.0294). **1 of 4 holds — FAIL.** Per-instance vs R1 (n=173): better
+2, worse 7, tied 164. Hand-checked one loss (`huggingface__accelerate-3248`, gold line 439): R3 promotes
+the `child` declaration line (438, hasAnyDef=1, coverage=2) ahead of the actual gold call-site line (439,
+coverage=4, no def) — R1's coverage-max correctly picks 439; R3's def-primacy does not. Not the §3.4
+signature-line case — a plain instance of the mechanism not helping.
+
+**§4.3.2, narrow-pool arm (informational — a wide-pool FAIL already means nothing ships regardless).**
+Re-measured in this run with the now-committed `bench/slice/score_arise_narrowpool.py`: defuse
+(re-measured) MRR 0.60212 over 506 pairs; defrole (this attempt) MRR 0.57042 over the same 506 pairs;
+defuse's EVALS.md-published figure was 0.628 over 478 pairs. Both the pair count and defuse's re-measured
+MRR are disclosed mismatches against EVALS' own registration — expected, since this arm is a fresh,
+committed re-implementation of EVALS' uncommitted scratch diff, not an import of it (§4.3.2's own
+anticipation of exactly this kind of drift). `defrole < defuse` either way: the narrow-pool bar
+(`MRR(defrole) >= MRR(defuse)`) does not clear, consistent with the wide-pool result.
+
+**Outcome: FAIL.** Licensed sentence (§6, verbatim):
+
+> "We pre-registered one honest attempt — definitions before uses, then coverage — before running it,
+> per your rule that a ranking claiming to rank at chance is the `--adaptive` defect in another costume.
+> It did not clear the pre-registered bar over the whole function span (R3@1 0.034 vs CTL@1 0.042, Δ =
+> −0.008, 95% CI [−0.031, 0.019]; at our sample size this could mean either no real effect or an effect
+> too small to detect — we report the numbers, not a claim about which). `--slice` does not claim to
+> rank lines over the whole function beyond what is proven, and says so in the legend and `--help`. The
+> narrower, already-shipped claim — that among the lines `--slice` already selects, def-use coverage
+> beats a random shuffle — is unaffected and stays the default: source order was measured WORSE than
+> random on those same rows, so replacing it with source order would be a regression, not a fix."
+
+**What ships: nothing in `src/`.** `order="defuse"` stays the default; `kSliceLineRankVerdict` stays
+`Pending`. Per §4.3.1 the legend/help disclosure change this document pre-registers is deliberately NOT
+shipped by this lane — it is worded above for a future, separately reviewed commit to land with this
+verdict, per §4.5's rule that outcome-describing prose belongs to the commit that ships the outcome.
+
+**Replication population.** 170 rows / 45 repos — not fetched or scored (owner decision, stated per
+§4.4, moot for shipping either way since the wide-pool result already FAILs).
