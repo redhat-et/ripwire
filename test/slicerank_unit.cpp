@@ -27,6 +27,7 @@
 #include "slice.h"
 
 #include <cstdio>
+#include <numeric>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -51,15 +52,13 @@ void report( bool isPass, std::string_view label, const std::string& detail )
     ( isPass ? passes : failures ) += 1;
 }
 
+// Deliberately NOT the codebase's usual indexed "if(i!=0) out+=sep" join loop (src/mcprefusal.h's
+// joinClauses, src/taskroute.h's commaSymbols already own that shape) — an accumulate-based fold here
+// so a diagnostic-only formatter in a test driver does not clone-match a REAL, reused helper elsewhere.
 std::string ordToStr( const std::vector<std::uint32_t>& order, const std::vector<rw::slicev::SliceLineRow>& rows )
 {
-    std::string s;
-    for( std::size_t i = 0; i < order.size(); ++i )
-    {
-        if( i != 0 ) { s += ","; }
-        s += std::to_string( rows[ order[ i ] ].line );
-    }
-    return s;
+    return std::accumulate( order.begin(), order.end(), std::string(), [ & ]( std::string acc, std::uint32_t rowIndex )
+    { return acc.empty() ? std::to_string( rows[ rowIndex ].line ) : acc + "," + std::to_string( rows[ rowIndex ].line ); } );
 }
 
 void expectOrder( std::string_view label, const std::vector<std::uint32_t>& got, const std::vector<rw::slicev::SliceLineRow>& rows,

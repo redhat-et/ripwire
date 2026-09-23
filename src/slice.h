@@ -3295,27 +3295,46 @@ inline std::vector<std::uint32_t> sliceRowHasAnyDef( const SliceScan& scan, cons
     return hasAnyDef;
 }
 
-inline std::vector<std::uint32_t> sliceDefUseRowOrder( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
+// the identity permutation [0, rows.size()) — the common starting point every row-order function below
+// sorts in place. Factored out so the three order functions share this line instead of repeating it
+// (quality-delta's own duplication lens polices exactly this kind of repeated shape).
+inline std::vector<std::uint32_t> sliceRowIdentityOrder( std::size_t rowCount )
 {
-    const std::vector<std::uint32_t> coverage = sliceRowCoverage( scan, rows );
-    std::vector<std::uint32_t>       order( rows.size() );
-    for( std::uint32_t rowIndex = 0; rowIndex < rows.size(); ++rowIndex )
+    std::vector<std::uint32_t> order( rowCount );
+    for( std::uint32_t rowIndex = 0; rowIndex < rowCount; ++rowIndex )
     {
         order[ rowIndex ] = rowIndex;
     }
+    return order;
+}
+
+// the tail every row order falls through to once its own primary/secondary keys tie: line ascending,
+// then binding line ascending, then row index ascending — a total order, so nothing is left to container
+// order. Shared by sliceDefUseRowOrder, sliceLineRankAttemptOrder and sliceStatedOrder so the tail cannot
+// drift between them (it did not before this extraction either — this is a pure, behavior-preserving
+// factoring of what was three copies of the same four lines).
+inline bool sliceRowLineOrderLess( const SliceScan& scan, const std::vector<SliceLineRow>& rows, std::uint32_t a, std::uint32_t b )
+{
+    if( rows[ a ].line != rows[ b ].line )
+    {
+        return rows[ a ].line < rows[ b ].line;
+    }
+    const std::uint32_t bindA = sliceBindingLine( scan, rows[ a ].bindingIdx );
+    const std::uint32_t bindB = sliceBindingLine( scan, rows[ b ].bindingIdx );
+    return bindA != bindB ? bindA < bindB : a < b;
+}
+
+inline std::vector<std::uint32_t> sliceDefUseRowOrder( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
+{
+    const std::vector<std::uint32_t> coverage = sliceRowCoverage( scan, rows );
+    std::vector<std::uint32_t>       order    = sliceRowIdentityOrder( rows.size() );
     std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
     {
         if( coverage[ a ] != coverage[ b ] )
         {
             return coverage[ a ] > coverage[ b ];
         }
-        if( rows[ a ].line != rows[ b ].line )
-        {
-            return rows[ a ].line < rows[ b ].line;
-        }
-        const std::uint32_t bindA = sliceBindingLine( scan, rows[ a ].bindingIdx );
-        const std::uint32_t bindB = sliceBindingLine( scan, rows[ b ].bindingIdx );
-        return bindA != bindB ? bindA < bindB : a < b;
+        return sliceRowLineOrderLess( scan, rows, a, b );
     } );
     return order;
 }
@@ -3354,11 +3373,7 @@ inline std::vector<std::uint32_t> sliceLineRankAttemptOrder( const SliceScan& sc
 {
     const std::vector<std::uint32_t> coverage  = sliceRowCoverage( scan, rows );
     const std::vector<std::uint32_t> hasAnyDef = sliceRowHasAnyDef( scan, rows );
-    std::vector<std::uint32_t>       order( rows.size() );
-    for( std::uint32_t rowIndex = 0; rowIndex < rows.size(); ++rowIndex )
-    {
-        order[ rowIndex ] = rowIndex;
-    }
+    std::vector<std::uint32_t>       order     = sliceRowIdentityOrder( rows.size() );
     std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
     {
         if( hasAnyDef[ a ] != hasAnyDef[ b ] )
@@ -3369,13 +3384,7 @@ inline std::vector<std::uint32_t> sliceLineRankAttemptOrder( const SliceScan& sc
         {
             return coverage[ a ] > coverage[ b ];
         }
-        if( rows[ a ].line != rows[ b ].line )
-        {
-            return rows[ a ].line < rows[ b ].line;
-        }
-        const std::uint32_t bindA = sliceBindingLine( scan, rows[ a ].bindingIdx );
-        const std::uint32_t bindB = sliceBindingLine( scan, rows[ b ].bindingIdx );
-        return bindA != bindB ? bindA < bindB : a < b;
+        return sliceRowLineOrderLess( scan, rows, a, b );
     } );
     return order;
 }
@@ -3384,21 +3393,9 @@ inline std::vector<std::uint32_t> sliceLineRankAttemptOrder( const SliceScan& sc
 // (line-ascending) order, the same tie-break tail as the other two orders so the total order is still exact.
 inline std::vector<std::uint32_t> sliceStatedOrder( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
 {
-    std::vector<std::uint32_t> order( rows.size() );
-    for( std::uint32_t rowIndex = 0; rowIndex < rows.size(); ++rowIndex )
-    {
-        order[ rowIndex ] = rowIndex;
-    }
+    std::vector<std::uint32_t> order = sliceRowIdentityOrder( rows.size() );
     std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
-    {
-        if( rows[ a ].line != rows[ b ].line )
-        {
-            return rows[ a ].line < rows[ b ].line;
-        }
-        const std::uint32_t bindA = sliceBindingLine( scan, rows[ a ].bindingIdx );
-        const std::uint32_t bindB = sliceBindingLine( scan, rows[ b ].bindingIdx );
-        return bindA != bindB ? bindA < bindB : a < b;
-    } );
+    { return sliceRowLineOrderLess( scan, rows, a, b ); } );
     return order;
 }
 
