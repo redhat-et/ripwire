@@ -605,7 +605,14 @@ against any asset tree as this is written, so nothing below is a reaction to a r
 disclosed**: **0.579 (file_hit) / 0.604 (func_hit)** (`reports/rv-margin-resolution.md`) — no better
 than the shipped `confidence=`/`margin_pct=` pair it would replace, and not itself re-measured here.
 This section fixes what that lane's fate is, entirely as a function of §5.4's served_syms verdict,
-decided in advance of that verdict:
+decided in advance of that verdict.
+
+**Neither branch below fires before the population is proven.** A `"fingerprint_mismatch"` (§5.4.6)
+is **not** a §5.4 verdict — it licenses no decision about `margin_bp` or `lane/for-margin-resolution`
+at all, only the report that the asset tree on hand is not the pre-registered 92. The two branches
+below are read off whatever `"pass"` / non-`"pass"` outcome a run reaches **once §5.4.1's fingerprint
+has actually reproduced** on that run; until then this section is silent, not pending toward either
+branch.
 
 - **If served_syms reaches the band — a real `"pass"` outcome, exactly as §5.4.6 defines it (`band_met
   = True` and `sr1_met = True`; a `"pass_fire_rate_rejected"` outcome does **not** count, since §5.4.6
@@ -615,23 +622,38 @@ decided in advance of that verdict:
   `hitCeiling` (`out.marginPct = cut.hitCeiling ? 0 : cut.dropPct;`) — a fact **already stated in round
   1's own pre-registration** (`docs/EVALS.md` ~9101, 2026-08-29: *"`margin_pct` … is not independent of
   confidence: `confidence="low"` always ships `margin_pct="0"`"*, per `reports/rv-margin-resolution.md`
-  MEDIUM-2), not a discovery this round makes.
-- **If served_syms does NOT reach the band — any outcome other than a real `"pass"`: `"fail"`,
-  `"pass_fire_rate_rejected"`, or `"fingerprint_mismatch"`** (including a fingerprint mismatch on this
-  run that a later run resolves — the lane's fate still depends on whatever §5.4 verdict is finally
-  reached, never on the mismatch itself) **— `margin_bp` gets exactly ONE re-score**, on the same
-  pre-registered 92, with the same band (false-warn ≤ 0.20 at miss-recall ≥ 0.50), the same gating grain
-  (`func_hit`), and the same threshold procedure as §5.4 (§5.4.4's candidate set, tie rule, and SR-1 —
-  substituting `margin_bp` for `served_syms` and re-deriving its own orientation and fingerprint check
-  the same way, since it is a different statistic). **The lane may land only if that one re-score
-  PASSES**, under the identical definition of PASS this section uses for served_syms. No second
-  attempt if it does not, no new sample, no threshold search beyond §5.4's own procedure applied to
-  `margin_bp`'s numbers — the same in-sample-once discipline §5.4 holds itself to.
+  MEDIUM-2), not a discovery this round makes. It already lives in that EVALS note; this document
+  carries it too — §1 states it directly on the 92 (*"`margin_pct=` is `0` for every single `"low"` row
+  (74 of 74)"*) and §2 states the mechanism (*"`margin_pct=` is that drop as a whole percent, and `0`
+  when the ceiling was hit"*) — so "closes" names two real, checkable places rather than a promise to
+  write one later.
+- **If, on a run whose fingerprint has reproduced, served_syms does NOT reach the band — a `"fail"` or
+  a `"pass_fire_rate_rejected"` outcome (§5.4.6) — `margin_bp` gets exactly ONE re-score.** The
+  population check for that re-score is **§5.4.1's fingerprint, unchanged** — not a fingerprint
+  re-derived for `margin_bp`, because the fingerprint is a property of the *population* (n=92, the
+  74/18 split, 15/38 misses, the shipped score's 670.5/1155 and 1276.5/2052 lattice points), not of
+  whichever statistic is being scored against it; `margin_bp` changes none of those figures. The
+  re-score runs **on the same run and the same asset tree that produced the §5.4 non-pass**, with the
+  same lane binary (`reports/rv-margin-resolution.md` already showed that binary reproduces
+  0.5805/0.6221 on the 92) — never a fresh checkout, never a second attempt at reproducing the
+  fingerprint. It uses the same band (false-warn ≤ 0.20 at miss-recall ≥ 0.50), the same gating grain
+  (`func_hit`), and the same §5.4.4 threshold procedure (candidate set, tie rule, SR-1), substituting
+  `margin_bp` for `served_syms`. **The orientation is fixed now, not left to be settled at re-score
+  time:** the lane's own hypothesis is that a larger `margin_bp` (a sharper, more decisive cliff) is
+  **less** miss evidence — the opposite sense from `served_syms` — so the registered rule is **warn
+  iff `margin_bp` ≤ t**, disclosed, as §5.4.3 discloses `served_syms`'s orientation, as informed by
+  the already-seen 0.579/0.604 (`reports/rv-margin-resolution.md`) having most plausibly been computed
+  under that direction, not blind. **The lane may land only if that one re-score PASSES**, under the
+  identical definition of PASS this section uses for served_syms. No second attempt if it does not, no
+  new sample, no threshold search beyond §5.4's own procedure applied to `margin_bp`'s numbers under
+  this fixed orientation — the same in-sample-once discipline §5.4 holds itself to.
 
 This rule is pre-committed, not a description of what has already happened: as of this commit,
-`margin_bp` has not been re-scored, and `served_syms` has not been scored under §5.4 at all. Whichever
-outcome §5.4 reaches first decides which of the two branches above applies to `margin_bp` — the branch
-is not chosen after seeing that outcome, it is read off a rule fixed now.
+`margin_bp` has not been re-scored, and `served_syms` has not been scored under §5.4 at all — no run
+has yet reproduced §5.4.1's fingerprint. Whichever outcome the first such run reaches decides which of
+the two branches above applies to `margin_bp`; the branch is not chosen after seeing that outcome, it
+is read off a rule fixed now, and a mismatched run decides nothing until it is superseded by one that
+reproduces the population.
 
 ---
 
