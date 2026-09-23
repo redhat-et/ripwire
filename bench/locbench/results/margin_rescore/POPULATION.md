@@ -59,3 +59,18 @@ sorted. sha256 of that file (trailing newline included):
 served_syms result's own `instance_ids.txt` hash**
 (`bench/locbench/results/served_syms_prereg/instance_ids.txt`), confirming this run scored
 exactly the same 92 instances the served_syms non-pass did, not merely a same-sized population.
+
+## The `served_syms_5_4` block in this directory's `calib.json`/`calib.md` is a by-product, not a §5.4 result
+
+`calibrate_confidence.py` scores `served_syms` against §5.4's band on every invocation, not behind
+a flag (unconditional by design — see that script's own comment at the call site). Because this
+run's binary is `lane/for-margin-resolution`'s (`built_from=e6f8942e9`), the `served_syms_5_4`
+block in this directory's `calib.json` (`func_hit` AUROC 0.2768, `file_hit` AUROC 0.3307) and the
+matching "§5.4 `served_syms`" section in `calib.md` are computed on a **different binary** than
+the one that produced the signed §10 result (`built_from=860b4dfb3`: `func_hit` 0.2780, `file_hit`
+0.3312) — a different served head, different numbers, present here only because the harness always
+computes them, not because this run re-decided §5.4. **§5.4 was scored once, at §10, on the binary
+named there, and that verdict stands.** No sentence from this directory's `served_syms_5_4` block
+or its `calib.md` section is a licensed §5.4 report (§5.4.1 requires naming the binary a report
+used; this one is not that report). The two binaries agree on the outcome (FAIL) and on the §5.2
+rung (`does_not_meet_opposite_direction`), so this is a disclosure gap, not a discrepancy.

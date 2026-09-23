@@ -913,6 +913,12 @@ instance ids, and this run's own provenance are committed at
 `statistic` parameter, `score_margin_bp()` — is committed separately, before this result, with
 synthetic tests proving the generalization reproduces `served_syms`'s own procedure byte-for-byte and
 that `margin_bp`'s "le" direction is the exact mirror image of `served_syms`'s "ge" one.
+`calibrate_confidence.py` also scores `served_syms` against §5.4's band on every run, unconditionally
+— so this directory's `calib.json`/`calib.md` additionally carry a `served_syms_5_4` block (func_hit
+0.277, file_hit 0.331) computed on `e6f8942e`'s served head, a by-product of running the pipeline with
+this binary, **not a §5.4 result**: §5.4 was scored once, at §10, on the binary named there
+(`860b4dfb3`), and that verdict (0.278/0.331) stands unchanged (`margin_rescore/POPULATION.md` has the
+full disclosure).
 
 ### Run identity
 
