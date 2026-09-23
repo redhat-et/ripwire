@@ -3211,7 +3211,11 @@ inline void sliceAppendReachAttr( std::string& out, const std::vector<std::uint3
 // row order".
 inline constexpr const char* kSliceRowOrderName = "defuse";
 
-inline std::vector<std::uint32_t> sliceDefUseRowOrder( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
+// shared by sliceDefUseRowOrder and sliceLineRankAttemptOrder (docs/research/arise-line-ranking-prereg.md
+// §3.1's `coverage(l)`, R1's own already-registered statistic): row[i]'s count of DISTINCT inventory local
+// names with any occurrence (def or use) on its line. Pure extraction, no behavior change — the coverage
+// values this returns are identical to what sliceDefUseRowOrder computed inline before this split.
+inline std::vector<std::uint32_t> sliceRowCoverage( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
 {
     std::vector<std::string_view> localNames;
     localNames.reserve( scan.bindings.size() );
@@ -3237,7 +3241,6 @@ inline std::vector<std::uint32_t> sliceDefUseRowOrder( const SliceScan& scan, co
     lineNames.erase( std::unique( lineNames.begin(), lineNames.end() ), lineNames.end() );
 
     std::vector<std::uint32_t> coverage( rows.size(), 0 );
-    std::vector<std::uint32_t> order( rows.size() );
     for( std::uint32_t rowIndex = 0; rowIndex < rows.size(); ++rowIndex )
     {
         const auto lineLess = []( const std::pair<std::uint32_t, std::string_view>& e, std::uint32_t line ) { return e.first < line; };
@@ -3248,7 +3251,57 @@ inline std::vector<std::uint32_t> sliceDefUseRowOrder( const SliceScan& scan, co
             ++last;
         }
         coverage[ rowIndex ] = std::uint32_t( last - first );
-        order[ rowIndex ]    = rowIndex;
+    }
+    return coverage;
+}
+
+// shared substrate for sliceLineRankAttemptOrder (docs/research/arise-line-ranking-prereg.md §3.1's
+// `hasDef(l)`): for each row's line, whether AT LEAST ONE inventory local (any of scan.bindings, not
+// only the row's own seed variable) has a DEFINITION-role occurrence there — the same seed-free,
+// whole-inventory population sliceRowCoverage's coverage(l) already ranges over (R1's own convention,
+// "unions over the whole inventory" — docs/research/slice-line-recall.md §4b). This is deliberately NOT
+// SliceLineRow::hasDef: that field is folded from scan.occ, which is the ONE SEED variable's own
+// occurrences only (documented at its declaration as "VAR-mode... empty when var empty"), so it answers
+// "does the seed have a def on l", not "does the function's inventory have one" — the wider question R1
+// (and therefore R3) is defined against. Returns 0/1 per row, never a bool vector (kept an integer so
+// the comparator below stays in the same integer-lexicographic-key family as coverage() and line()).
+inline std::vector<std::uint32_t> sliceRowHasAnyDef( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
+{
+    std::vector<std::string_view> localNames;
+    localNames.reserve( scan.bindings.size() );
+    for( const SliceBinding& binding : scan.bindings )
+    {
+        localNames.emplace_back( binding.name );
+    }
+    std::sort( localNames.begin(), localNames.end(), rw::sortutil::svLess );   // svLess — see sliceRowCoverage above
+
+    std::vector<std::uint32_t> defLines;
+    defLines.reserve( scan.all.size() );
+    for( const SliceNamedOcc& no : scan.all )
+    {
+        if( no.occ.isDef && std::binary_search( localNames.begin(), localNames.end(), std::string_view( no.name ), rw::sortutil::svLess ) )
+        {
+            defLines.push_back( no.occ.line );
+        }
+    }
+    std::sort( defLines.begin(), defLines.end() );
+    defLines.erase( std::unique( defLines.begin(), defLines.end() ), defLines.end() );
+
+    std::vector<std::uint32_t> hasAnyDef( rows.size(), 0 );
+    for( std::uint32_t rowIndex = 0; rowIndex < rows.size(); ++rowIndex )
+    {
+        hasAnyDef[ rowIndex ] = std::binary_search( defLines.begin(), defLines.end(), rows[ rowIndex ].line ) ? 1u : 0u;
+    }
+    return hasAnyDef;
+}
+
+inline std::vector<std::uint32_t> sliceDefUseRowOrder( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
+{
+    const std::vector<std::uint32_t> coverage = sliceRowCoverage( scan, rows );
+    std::vector<std::uint32_t>       order( rows.size() );
+    for( std::uint32_t rowIndex = 0; rowIndex < rows.size(); ++rowIndex )
+    {
+        order[ rowIndex ] = rowIndex;
     }
     std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
     {
@@ -3265,6 +3318,112 @@ inline std::vector<std::uint32_t> sliceDefUseRowOrder( const SliceScan& scan, co
         return bindA != bindB ? bindA < bindB : a < b;
     } );
     return order;
+}
+
+// ── ARISE line ranking — the pre-registered attempt (docs/research/arise-line-ranking-prereg.md) ──────────────
+//
+// The ARISE draft PR (#318): --slice's line ranking, measured over the WHOLE function span an agent sees before
+// filtering (docs/research/slice-line-recall.md §R4, unmerged origin/lane/research-arise-slice), is at
+// chance: R1 def-use coverage (= sliceDefUseRowOrder above) scores Recall@1 = 0.048 against a 0.042 random
+// control — "no effect worth naming" in that note's own words. The owner's stop condition: one honest
+// attempt, or stop claiming to rank and emit a stated order instead. This is that attempt, and its fallback,
+// wired behind ONE constant so a future round with the real corpus can select the verdict by flipping it —
+// no other code changes. Both paths compile, are exercised by test/slicerank_unit.cpp against synthetic
+// fixtures, and are NOT reachable from the CLI today (kSliceLineRankVerdict == Pending leaves sliceRowEmitOrder
+// calling sliceDefUseRowOrder exactly as before — zero behavior change to the shipped, already-ADOPTED
+// order="defuse" claim, which this file does not touch or retract).
+enum class SliceLineRankVerdict : std::uint8_t
+{
+    Pending,      // no verdict yet (default): emit exactly today's shipped order="defuse" behavior, unchanged
+    Ranked,       // the pre-registered attempt PASSED its verdict rule: emit order="defrole"
+    StatedOrder,  // the pre-registered attempt FAILED (the stop condition fired): emit order="source", disclosed as not ranked
+};
+
+// A future round flips this ONE constant once docs/research/arise-line-ranking-prereg.md §4's verdict is
+// computed on the real corpus — nothing else in this file changes. Pending until then.
+inline constexpr SliceLineRankVerdict kSliceLineRankVerdict = SliceLineRankVerdict::Pending;
+
+// the ONE attempt (pre-reg §3.1, "def-primacy"): score = ( hasAnyDef(l) desc, coverage(l) desc, l asc ),
+// then the SAME binding-line / index tie-break sliceDefUseRowOrder already uses. hasAnyDef and coverage
+// are both seed-free, whole-inventory facts computed from data --slice already scans (sliceRowHasAnyDef
+// and sliceRowCoverage above; NOT SliceLineRow::hasDef, which is the one seed's own role only — see
+// sliceRowHasAnyDef's own comment) — zero fitted parameters, nothing tuned against a corpus. A pure
+// integer lexicographic sort: no float score, no epsilon tie-break (CONTRIBUTING.md "a sort has no
+// tolerance band").
+inline std::vector<std::uint32_t> sliceLineRankAttemptOrder( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
+{
+    const std::vector<std::uint32_t> coverage  = sliceRowCoverage( scan, rows );
+    const std::vector<std::uint32_t> hasAnyDef = sliceRowHasAnyDef( scan, rows );
+    std::vector<std::uint32_t>       order( rows.size() );
+    for( std::uint32_t rowIndex = 0; rowIndex < rows.size(); ++rowIndex )
+    {
+        order[ rowIndex ] = rowIndex;
+    }
+    std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
+    {
+        if( hasAnyDef[ a ] != hasAnyDef[ b ] )
+        {
+            return hasAnyDef[ a ] > hasAnyDef[ b ];   // definitions first: hasAnyDef=1 sorts before hasAnyDef=0
+        }
+        if( coverage[ a ] != coverage[ b ] )
+        {
+            return coverage[ a ] > coverage[ b ];
+        }
+        if( rows[ a ].line != rows[ b ].line )
+        {
+            return rows[ a ].line < rows[ b ].line;
+        }
+        const std::uint32_t bindA = sliceBindingLine( scan, rows[ a ].bindingIdx );
+        const std::uint32_t bindB = sliceBindingLine( scan, rows[ b ].bindingIdx );
+        return bindA != bindB ? bindA < bindB : a < b;
+    } );
+    return order;
+}
+
+// the stop-condition fallback (pre-reg §4 FAIL branch): a STATED order, never claiming to rank — pure source
+// (line-ascending) order, the same tie-break tail as the other two orders so the total order is still exact.
+inline std::vector<std::uint32_t> sliceStatedOrder( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
+{
+    std::vector<std::uint32_t> order( rows.size() );
+    for( std::uint32_t rowIndex = 0; rowIndex < rows.size(); ++rowIndex )
+    {
+        order[ rowIndex ] = rowIndex;
+    }
+    std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
+    {
+        if( rows[ a ].line != rows[ b ].line )
+        {
+            return rows[ a ].line < rows[ b ].line;
+        }
+        const std::uint32_t bindA = sliceBindingLine( scan, rows[ a ].bindingIdx );
+        const std::uint32_t bindB = sliceBindingLine( scan, rows[ b ].bindingIdx );
+        return bindA != bindB ? bindA < bindB : a < b;
+    } );
+    return order;
+}
+
+// the single dispatch point the emitter calls (replacing a direct sliceDefUseRowOrder call) — kSliceLineRankVerdict
+// is the ONE flag the pre-registered verdict flips; everything downstream (row order AND the order= attribute
+// name, sliceRowOrderName below) follows it automatically.
+inline std::vector<std::uint32_t> sliceRowEmitOrder( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
+{
+    switch( kSliceLineRankVerdict )
+    {
+        case SliceLineRankVerdict::Ranked:      return sliceLineRankAttemptOrder( scan, rows );
+        case SliceLineRankVerdict::StatedOrder: return sliceStatedOrder( scan, rows );
+        case SliceLineRankVerdict::Pending:     default: return sliceDefUseRowOrder( scan, rows );
+    }
+}
+
+// the root order= attribute value, paired 1:1 with sliceRowEmitOrder's choice above.
+inline constexpr const char* sliceRowOrderName() noexcept
+{
+    switch( kSliceLineRankVerdict )
+    {
+        case SliceLineRankVerdict::Ranked:      return "defrole";
+        case SliceLineRankVerdict::StatedOrder: return "source";
+        case SliceLineRankVerdict::Pending:     default: return kSliceRowOrderName;
+    }
 }
 
 // the element BODY: the inventory (<v> per binding) or the seed rows + flow rows (<s> per line per
@@ -3338,10 +3497,12 @@ inline void sliceEmitBody( std::string& out, const SliceScan& scan, std::string_
         };
 
         // the seed variable's rows — the v1 emission, byte-stable with or without a flow. Folded line-ascending
-        // (occ is a pre-order pass over one file's AST), EMITTED in the order="defuse" ranking the root states
+        // (occ is a pre-order pass over one file's AST), EMITTED in the order the root's order= names —
+        // sliceRowEmitOrder dispatches on kSliceLineRankVerdict (docs/research/arise-line-ranking-prereg.md);
+        // today (Pending) this is exactly sliceDefUseRowOrder, unchanged.
         const std::vector<SliceLineRow>                rows       = sliceFoldLines( scan.occ );
         const std::vector<std::vector<std::uint32_t>> reachLines = sliceRowReachLines( scan );
-        for( const std::uint32_t rowIndex : sliceDefUseRowOrder( scan, rows ) )
+        for( const std::uint32_t rowIndex : sliceRowEmitOrder( scan, rows ) )
         {
             const SliceLineRow& r = rows[ rowIndex ];
             out += "<s l=\"" + std::to_string( r.line ) + "\" k=\"";
@@ -3493,7 +3654,7 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
             }
         }
         out += " order=\"";   // the seed rows' emission order — an ordering the reader cannot see is a quiet claim
-        out += kSliceRowOrderName;
+        out += sliceRowOrderName();   // paired 1:1 with sliceRowEmitOrder's choice above; "defuse" while Pending
         out += "\"";
     }
 

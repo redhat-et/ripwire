@@ -13,12 +13,14 @@ this branch; every figure below quoted from it is a citation, not a number this 
 
 ## 0. Why this document exists — the owner's ruling
 
-`$ORCH/PLAN_063.md` §3, row **#318**: *"line ranking is at chance (0.048 vs 0.042) and source order is
-worse than random — fix it or stop ranking lines."* §"ARISE line ranking" stop condition: *"If ranking
-still does not beat random after one honest attempt, stop ranking lines and emit them in a stated
-order."* Owner ruling 1, 2026-09-21: *"prioritize the fix, then send the email"* — line ranking is now
-the first priority of 0.6.3. Owner ruling, 2026-09-23: pre-register and write the one honest attempt
-now, committed before any data; scoring waits for the corpus.
+The 0.6.3 planning record's row for the ARISE draft PR (#318) reads: *"line ranking is at chance (0.048
+vs 0.042) and source order is worse than random — fix it or stop ranking lines."* Its "ARISE line
+ranking" stop condition: *"If ranking still does not beat random after one honest attempt, stop ranking
+lines and emit them in a stated order."* Owner ruling, 2026-09-21: *"prioritize the fix, then send the
+email"* — line ranking is now the first priority of 0.6.3. Owner ruling, 2026-09-23: pre-register and
+write the one honest attempt now, committed before any data; scoring waits for the corpus. (That
+planning record is an internal orchestration document, not part of this tree, and is not cited by path
+here for that reason — the quotations above are reproduced in full so this section stands on its own.)
 
 The **0.048 vs 0.042** the owner cites is `docs/research/slice-line-recall.md` §R4's **R1 def-use
 coverage @1** against its **CTL random-control @1**, over the candidate pool of **every line in the
@@ -113,26 +115,41 @@ already measures at chance-adjacent margin. R3 adds one bit R1 discards.
 
 ### 3.1 The rule, fully specified, zero fitted parameters
 
-For a candidate line `l` in the resolved function's span (same pool as §R4):
+**Two drafting corrections, made before any code or number existed, recorded so the final rule is not
+mistaken for the first thing tried.** First: `--slice=SYM:VAR`'s rows are pre-filtered to lines where
+the **seed variable VAR itself** occurs (`sliceFoldLines( scan.occ )`, `src/slice.h`, where `scan.occ`
+is documented as *"VAR-mode occurrences... empty when var empty"* — the seed's own occurrences, not
+every local's) — so `SliceLineRow::hasDef` (folded from `scan.occ`) answers "does the seed have a def
+on `l`", not the seed-free question R1 is defined against. Second, having caught that: R1 itself
+(§4b of the baseline note) is explicitly **seed-free — "it unions over the whole inventory and never
+looks at the gold"** — so a `hasDef` built from one seed would not even be R1's own kind of statistic.
+The rule below reads role information the SAME seed-free way R1 already reads coverage, from every
+local's occurrences (`scan.all`), not from one seed's rows:
 
-- `hasDef(l)` — **1** iff any inventory-tracked local has a **definition-role** occurrence on `l`
-  (`SliceLineRow::hasDef`, `src/slice.h:2687`, already folded by `sliceFoldOcc` — `src/slice.h:2696`
-  — from each occurrence's `isDef` flag, `src/slice.h:274`, set for `OccT::Param`, `OccT::Decl` and a
-  def-shaped `OccT::Assign`, `src/slice.h:578-623`); **0** otherwise.
+For a candidate line `l` in the pool `--slice=SYM:VAR` ranks (its own seed-restricted row set, the
+same pool `sliceDefUseRowOrder` orders today):
+
+- `hasAnyDef(l)` — **1** iff **any** inventory local (not only the seed; every binding in
+  `scan.bindings`, read through `scan.all`, the same whole-inventory substrate `coverage(l)` below
+  already scans) has a **definition-role** occurrence on `l` (`SliceOcc::isDef`, `src/slice.h:274`, set
+  for `OccT::Param`, `OccT::Decl` and a def-shaped `OccT::Assign`, `src/slice.h:578-623`); **0**
+  otherwise. New code (`sliceRowHasAnyDef`), but new only in the sense of a new SCAN over facts
+  `--slice` already classifies — no new classification rule.
 - `coverage(l)` — R1's own already-registered statistic, unchanged: the count of distinct inventory
   local names with **any** occurrence (def or use) on `l` (`docs/EVALS.md` "`--slice=SYM:VAR` def-use
-  row order"; computed identically to `sliceDefUseRowOrder`'s `coverage[]`, `src/slice.h:3239-3250`).
-- **Score = the lexicographic key `( hasDef(l) desc, coverage(l) desc, l asc )`.** A line the def-use
-  filter never touches (`coverage(l) = 0`) sorts after every touched line, ties broken by source line
-  ascending — the same "never left to container order" total-order discipline `sliceDefUseRowOrder`'s
-  own doc comment states (`src/slice.h:3204-3211`).
+  row order"; computed identically to `sliceDefUseRowOrder`'s original inline coverage computation,
+  extracted unchanged into the shared `sliceRowCoverage` helper for this attempt).
+- **Score = the lexicographic key `( hasAnyDef(l) desc, coverage(l) desc, l asc )`**, then the same
+  binding-line / row-index tail `sliceDefUseRowOrder` already uses so nothing is left to container
+  order (`src/slice.h`).
 
-**Zero fitted parameters.** `hasDef`, `coverage` and `l` are all facts `--slice` already computes for
-every row it emits; nothing here is a threshold, weight or cutoff chosen by looking at gold lines. R3
-is a **refinement** of R1, not a replacement: wherever R1 already places one line ahead of another, R3
-either agrees or promotes a definition line ahead of a use-only line of equal or lower coverage — it
-can only move rank **within** an R1 tie-class or **across** the def/non-def boundary, never invert an
-R1 coverage difference.
+**Zero fitted parameters.** `hasAnyDef`, `coverage` and `l` are all facts computed from data `--slice`
+already classifies; nothing here is a threshold, weight or cutoff chosen by looking at gold lines.
+**R3 is not a strict refinement of R1.** Making `hasAnyDef` the primary key CAN invert an R1 coverage
+difference: a line with a definition but otherwise low coverage is promoted ahead of a higher-coverage
+line with no definition on it at all. That inversion is not a bug to disclaim; it is the one bit R1
+discards and the entire mechanism §3.2 argues should matter — a rule that only ever agreed with R1
+would have no chance of moving Recall@1 away from R1's own 0.048.
 
 ### 3.2 Mechanistic justification, from the baseline's own analysis — no new inspection performed here
 
@@ -144,9 +161,9 @@ R1 coverage difference.
    keyword-argument name shadowing a local — a case §8 Q4 already flags as an open question about the
    **oracle**, not the classifier. **The def/use role split (`isDef`/`isUse`) is computed by the exact
    same occurrence classifier this 99.5% figure already validates** (`SliceOcc::t`/`isDef`/`isUse`,
-   `src/slice.h:266-278`) — conditioning R3 on `hasDef` does not import the oracle's own noise (comment
-   and string false positives) back into the rule, because that noise was never in the classifier to
-   begin with; it was in a subset of the *gold* labels the classifier was scored against.
+   `src/slice.h:266-278`) — conditioning R3 on `hasAnyDef` does not import the oracle's own noise
+   (comment and string false positives) back into the rule, because that noise was never in the
+   classifier to begin with; it was in a subset of the *gold* labels the classifier was scored against.
 2. **A structural prior, independent of this corpus.** A fix to a bug is disproportionately the line
    that *computes or reassigns* the value that turns out wrong — the definition site — rather than an
    arbitrary later read of it; this is the same intuition classical backward program slicing seeds a
@@ -161,18 +178,34 @@ R1 coverage difference.
 
 ### 3.3 Determinism
 
-`hasDef` is a `bool` (0/1), `coverage` is a `std::uint32_t`, `l` is a `std::uint32_t` — a pure integer
-lexicographic sort, the same discipline `sliceDefUseRowOrder` already uses and `CONTRIBUTING.md`
-requires (*"A sort has no tolerance band... run twice, `diff -q` the bytes"*; no float score, no
-epsilon tie-break). No `string_view` comparator is introduced by this rule; where the implementation
-touches one (name lookups reused from `sliceDefUseRowOrder`), it uses `rw::sortutil::svLess`, never
-`operator<` (`src/infra/sortutil.h`; the exact rule `847c9d89` fixed for the existing function).
+`hasAnyDef` is a `std::uint32_t` valued 0 or 1, `coverage` is a `std::uint32_t`, `l` is a
+`std::uint32_t` — a pure integer lexicographic sort, the same discipline `sliceDefUseRowOrder` already
+uses and `CONTRIBUTING.md` requires (*"A sort has no tolerance band... run twice, `diff -q` the
+bytes"*; no float score, no epsilon tie-break). No `string_view` comparator is introduced by this rule;
+where the implementation touches one (the same tracked-local-name lookup `sliceRowCoverage` already
+performs, reused by `sliceRowHasAnyDef`), it uses `rw::sortutil::svLess`, never `operator<`
+(`src/infra/sortutil.h`; the exact rule `847c9d89` fixed for the existing function).
 
 ## 4. The verdict rule — fixed now, before any number exists
 
 Computed identically to `docs/research/slice-line-recall.md` §R4's own harness: same population (§1),
-same candidate pool (every line of the resolved function span), same metrics (Recall@{1,3,5,10,20},
-MRR, instance mean, n = 173).
+same candidate pool (**every line of the resolved function span** — not `--slice=SYM:VAR`'s own,
+narrower, seed-restricted row set), same metrics (Recall@{1,3,5,10,20}, MRR, instance mean, n = 173).
+
+**Scope note, flagged explicitly rather than left implicit.** §3's `hasAnyDef(l)`/`coverage(l)` are
+seed-free by construction (§3.1), so they are well-defined over R4's full candidate pool exactly the
+way R1/R0/CTL already are — the harness that scores this verdict computes them over **every** line of
+the function (most of which no one seed's `--slice=SYM:VAR` output ever lists), the same way
+`run_slice_linerecall.py` already computes R1 there (§9). **Commit 2's `src/` change is a narrower
+thing: it applies the identical formula to `--slice=SYM:VAR`'s own existing, seed-restricted row set**
+— because that is the one CLI surface that shows a human or agent a ranked list of lines today; there is
+no existing verb that emits "every line of the function, ranked." This is the same relationship the
+already-shipped `order="defuse"` feature has to R1's own wider measurement: R1 is defined seed-free, but
+ships restricted to one seed's rows, and was ADOPTED under that narrower, separately-measured claim
+(`docs/EVALS.md`). If §4's verdict PASSES, "ship it" means the same thing here: `--slice=SYM:VAR`'s row
+order changes for whichever seed a caller queries, using the whole-inventory `hasAnyDef`/`coverage`
+computed over that seed's own file — it does not mean a new "rank the whole function" verb gets built.
+§7 flags this scope split as a judgement call.
 
 **Margin bar, pre-registered rather than "CI excludes zero" alone.** R1's own margin over chance was
 +0.006 (0.048 − 0.042 @1) — the baseline note's own reading of that number: *"no effect worth naming"*
@@ -244,9 +277,19 @@ or update this section.
 
 ## 7. Judgement calls for an adversarial reviewer
 
+- **The verdict (§4) is scored at the whole-function candidate pool by a harness computation; the
+  shipped `src/` change (commit 2) only ever reorders one seed's own, already-narrower row set.** These
+  are the same formula (`hasAnyDef`/`coverage`, both seed-free) applied at two different scopes, not two
+  different rules — but a reviewer should not assume a PASS at the harness level automatically means
+  every `--slice=SYM:VAR` call "ranks the function": it means that seed's own rows are ordered by a
+  formula that, measured at the wider scope, beat chance. A caller who queries a seed touching few gold
+  lines gets a locally-correct ordering of a locally-small set; the wide-pool number is what licenses
+  shipping the rule, not a promise that any one call sees the whole win. §4's scope note states this
+  plainly; this bullet exists so it cannot be skimmed past.
 - **§0's reading of "0.048 vs 0.042" as the R4 whole-pool figure, not the EVALS.md 0.285-vs-0.268
-  figure.** Both exist on `main`/the cited branch; PLAN_063's own row quotes the R4 numbers verbatim, so
-  this reading is textual, not inferred — but a reviewer should check `$ORCH/PLAN_063.md` line 127 and
+  figure.** Both exist on `main`/the cited branch; the internal planning record's own row quotes the R4
+  numbers verbatim (reproduced in full in §0, since that record is not part of this tree), so this
+  reading is textual, not inferred — but a reviewer with access to that record should check it and
   `docs/research/slice-line-recall.md` §R4 against this claim directly rather than trust this document.
 - **The margin bar (`≥ 0.02`, "3× R1's own margin") is a judgement call, not a fact the baseline note
   states.** It is derived from the note's own qualitative reading ("no effect worth naming" at +0.006)

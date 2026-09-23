@@ -37,6 +37,10 @@
 #        order="defuse" — the legend (both tiers) and --help define it; a flow run's seed rows keep that order
 #   (14) Python `global X` / `nonlocal X` row k="scope" t="global"|"nonlocal" — a scope declaration,
 #        neither read nor write — and introduce the name in the inventory with that role
+#   (rank) the pre-registered ARISE line-ranking attempt (docs/research/arise-line-ranking-prereg.md):
+#        the unit driver test/slicerank_unit.cpp, on synthetic fixtures — kSliceLineRankVerdict is
+#        Pending (unwired from the CLI), so this proves the new paths compile/run/behave as registered
+#        without changing anything the (order) arms above already pin
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/slicecheck.sh   |   bash test/slicecheck.sh path/to/ripwire
 
@@ -535,6 +539,40 @@ grep -q 'order="defuse"' "$ORD/o.xml" && sed 's/<slice .*//' "$ORD/o.xml" | grep
     || no "(order) a flow run's seed rows emit '$FLINES', expected 4,2,5"
 "$BIN" --help=all 2>&1 | grep -q 'order="defuse"' \
     && ok "(order) --help documents order=\"defuse\"" || no "(order) --help does not document order=\"defuse\""
+
+# ── (rank) the pre-registered ARISE line-ranking attempt — docs/research/arise-line-ranking-prereg.md ──
+# kSliceLineRankVerdict is Pending (unwired from the CLI, verdict awaits the real corpus — the (order)
+# arms above already prove today's shipped behavior is untouched). The two new paths
+# (sliceLineRankAttemptOrder, sliceStatedOrder) and the seed-free sliceRowHasAnyDef substrate are
+# exercised directly, on SYNTHETIC fixtures, by test/slicerank_unit.cpp — compiled ad hoc against the
+# real CMake flags, the same shape test/macroreparsecheck.sh's (U) arm already uses.
+BUILD_DIR="$( cd "$( dirname "$BIN" )" && pwd )"
+FLAGS_MK="$BUILD_DIR/CMakeFiles/ripwire.dir/flags.make"
+LINK_TXT="$BUILD_DIR/CMakeFiles/ripwire.dir/link.txt"
+if [ ! -f "$FLAGS_MK" ] || [ ! -f "$LINK_TXT" ]; then
+    no "(rank) cannot find CMake flags under $BUILD_DIR — the unit arm needs a CMake-built binary"
+else
+    # shellcheck source=test/lib/cxxflags.sh
+    . "$ROOT/test/lib/cxxflags.sh"
+    if ! cxxflags_load "$FLAGS_MK"; then
+        no "(rank) cannot parse $FLAGS_MK without executing it (see the cxxflags: line on stderr)"
+    else
+        CXX="$( awk 'NR==1{ print $1; exit }' "$LINK_TXT" )"
+        [ -n "$CXX" ] && command -v "$CXX" >/dev/null 2>&1 || CXX="$( command -v c++ || command -v clang++ )"
+        DIAG_OBJ="$BUILD_DIR/CMakeFiles/ripwire.dir/src/infra/diagnostics.cpp.o"
+        DIAG_LINK=(); [ -f "$DIAG_OBJ" ] && DIAG_LINK=( "$DIAG_OBJ" )
+        if "$CXX" "${CXX_FLAGS[@]}" "${CXX_DEFINES[@]}" "${CXX_INCLUDES[@]}" -I"$ROOT/src" \
+             "$ROOT/test/slicerank_unit.cpp" "${DIAG_LINK[@]}" -o "$WORK/slicerank_unit" >"$WORK/rank_build.log" 2>&1; then
+            if "$WORK/slicerank_unit" >"$WORK/rank_run.log" 2>&1; then
+                ok "(rank) slicerank_unit: $( grep -c '  PASS' "$WORK/rank_run.log" | tr -d ' ' ) cases hold"
+            else
+                no "(rank) slicerank_unit failed:"; grep FAIL "$WORK/rank_run.log" | head -12 | sed 's/^/        /'
+            fi
+        else
+            no "(rank) slicerank_unit does not compile:"; grep -m4 -E 'error' "$WORK/rank_build.log" | sed 's/^/        /'
+        fi
+    fi
+fi
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"
