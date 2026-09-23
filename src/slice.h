@@ -3296,15 +3296,18 @@ inline std::vector<std::uint32_t> sliceRowHasAnyDef( const SliceScan& scan, cons
 }
 
 // the identity permutation [0, rows.size()) — the common starting point every row-order function below
-// sorts in place. Factored out so the three order functions share this line instead of repeating it
-// (quality-delta's own duplication lens polices exactly this kind of repeated shape).
-inline std::vector<std::uint32_t> sliceRowIdentityOrder( std::size_t rowCount )
+// sorts in place, then the sort itself — the whole "identity, sort by Less, return" skeleton every row
+// order below shares, templated on the comparator so the skeleton has exactly one body rather than one
+// copy per order function (quality-delta's own duplication lens polices exactly this kind of repeat).
+template<class Less>
+inline std::vector<std::uint32_t> sliceRowSortedOrder( std::size_t rowCount, Less less )
 {
     std::vector<std::uint32_t> order( rowCount );
     for( std::uint32_t rowIndex = 0; rowIndex < rowCount; ++rowIndex )
     {
         order[ rowIndex ] = rowIndex;
     }
+    std::sort( order.begin(), order.end(), less );
     return order;
 }
 
@@ -3340,10 +3343,8 @@ inline bool sliceRowCoverageOrderLess( const SliceScan& scan, const std::vector<
 inline std::vector<std::uint32_t> sliceDefUseRowOrder( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
 {
     const std::vector<std::uint32_t> coverage = sliceRowCoverage( scan, rows );
-    std::vector<std::uint32_t>       order    = sliceRowIdentityOrder( rows.size() );
-    std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
+    return sliceRowSortedOrder( rows.size(), [ & ]( std::uint32_t a, std::uint32_t b )
     { return sliceRowCoverageOrderLess( scan, rows, coverage, a, b ); } );
-    return order;
 }
 
 // ── ARISE line ranking — the pre-registered attempt (docs/research/arise-line-ranking-prereg.md) ──────────────
@@ -3380,8 +3381,7 @@ inline std::vector<std::uint32_t> sliceLineRankAttemptOrder( const SliceScan& sc
 {
     const std::vector<std::uint32_t> coverage  = sliceRowCoverage( scan, rows );
     const std::vector<std::uint32_t> hasAnyDef = sliceRowHasAnyDef( scan, rows );
-    std::vector<std::uint32_t>       order     = sliceRowIdentityOrder( rows.size() );
-    std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
+    return sliceRowSortedOrder( rows.size(), [ & ]( std::uint32_t a, std::uint32_t b )
     {
         if( hasAnyDef[ a ] != hasAnyDef[ b ] )
         {
@@ -3389,17 +3389,14 @@ inline std::vector<std::uint32_t> sliceLineRankAttemptOrder( const SliceScan& sc
         }
         return sliceRowCoverageOrderLess( scan, rows, coverage, a, b );   // R1's own comparator, unchanged
     } );
-    return order;
 }
 
 // the stop-condition fallback (pre-reg §4 FAIL branch): a STATED order, never claiming to rank — pure source
 // (line-ascending) order, the same tie-break tail as the other two orders so the total order is still exact.
 inline std::vector<std::uint32_t> sliceStatedOrder( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
 {
-    std::vector<std::uint32_t> order = sliceRowIdentityOrder( rows.size() );
-    std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
+    return sliceRowSortedOrder( rows.size(), [ & ]( std::uint32_t a, std::uint32_t b )
     { return sliceRowLineOrderLess( scan, rows, a, b ); } );
-    return order;
 }
 
 // the single dispatch point the emitter calls (replacing a direct sliceDefUseRowOrder call) — kSliceLineRankVerdict
