@@ -34,7 +34,11 @@ FROZEN = dict(
     pilot_rows         = 10,          # R3 — first ten unsampled scoreable rows in instance_id order; never estimated
     rater_tool_budget  = 25,          # R3 — tree reads per row per rater; over budget = UNDECIDED
     rater_output_tokens= 1500,        # R3 — output budget per row per rater; over budget = UNDECIDED
-    rater_families     = ( "anthropic-claude", "openai-gpt" ),   # R3 — two different model families, named now
+    rater_families     = ( "anthropic-claude", "openai-gpt" ),   # R3 — the PREFERRED pair: two different model families
+    # R3 — the FALLBACK pair, used if and only if a second family is unavailable at run time, decided before any
+    # packet is built: two different Claude model lines/generations, strictly separate contexts per row, kappa floor
+    # unchanged, disclosed in the Outcome as WEAKER independence. A same-family result is never restated as two-family.
+    rater_families_fallback = ( "anthropic-claude-opus-5.5", "anthropic-claude-sonnet-5" ),
     kappa_floor        = 0.60,        # R7 — quotable
     kappa_moderate     = 0.40,        # R7 — "moderate agreement", not quotable for §9
     untagged_ceiling   = 0.50,        # §3.4 / §9 — U above this is INDETERMINATE

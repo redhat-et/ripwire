@@ -240,6 +240,15 @@ def file_grain( records, primary_of ):
         out.append( r )
     return out
 
+def unedited_second_site_only( records ):
+    """§7 lower bound: a CROSS whose second site (either rater's) the fix ALSO edited is counted as LOCAL, so only
+    CROSS rows whose second site needed no edit remain CROSS. Closes the MULTI-row gameability (naming any other
+    edited site passes verification) from below; the primary estimate keeps them CROSS, as §3.3 says."""
+    return [ r._replace( label="LOCAL" ) if r.label == "CROSS" and "second_site_edited" in r.flags else r for r in records ]
+
+def second_site_edited_count( records ):
+    return sum( 1 for r in records if r.label == "CROSS" and "second_site_edited" in r.flags )
+
 def resolve_disagreements( records, toward ):
     return [ r._replace( label=toward, sub=None ) if r.sub == "DISAGREE" else r for r in records ]
 
@@ -289,10 +298,13 @@ def outcome_table( manifest_rows, records, stratum_of, primary_of, fingerprint_c
     sens[ "otherlang-dropped" ] = S.post_stratified_estimate( strata_from( manifest_rows, no_ol, stratum_of ) )
     sens[ "disagree->CROSS" ] = S.post_stratified_estimate( strata_from( manifest_rows, resolve_disagreements( records, "CROSS" ), stratum_of ) )
     sens[ "disagree->LOCAL" ] = S.post_stratified_estimate( strata_from( manifest_rows, resolve_disagreements( records, "LOCAL" ), stratum_of ) )
+    sens[ "unedited-second-site-only" ] = S.post_stratified_estimate( strata_from( manifest_rows, unedited_second_site_only( records ), stratum_of ) )
     tagged = [ r for r in records if r.label in ( "CROSS", "LOCAL" ) ]
     unw = sum( 1 for r in tagged if r.label == "CROSS" ) / float( len( tagged ) ) if tagged else None
     lines.append( "  sensitivities          " + "  ".join( "%s %s" % ( k, "%.3f" % v[ "point" ] if v[ "point" ] is not None else "n/a" )
                                                           for k, v in sens.items() ) + "  unweighted %s" % ( "%.3f" % unw if unw is not None else "n/a" ) )
+    lines.append( "  second_site_edited     %d CROSS rows whose second site the fix also edited (kept CROSS in P; LOCAL in the unedited-second-site-only lower bound)"
+                  % second_site_edited_count( records ) )
     n_tdo = sum( 1 for m in manifest_rows if "test_dir_only" in m[ "flags" ].split( "," ) )
     lines.append( "  TEST-ONLY by dir-rule  %d rows (bound: unrated; would enter the denominator at 0%%..100%% CROSS)" % n_tdo )
     ic, icc = S.internal_comparator(), S.internal_comparator( S.INTERNAL_CHAIN_CODE_ONLY )
@@ -300,7 +312,13 @@ def outcome_table( manifest_rows, records, stratum_of, primary_of, fingerprint_c
         ic[ "cross" ], ic[ "tagged" ], 100 * ic[ "rate" ], 100 * ic[ "lo" ], 100 * ic[ "hi" ],
         icc[ "cross" ], icc[ "tagged" ], 100 * icc[ "rate" ], 100 * icc[ "lo" ], 100 * icc[ "hi" ] ) )
     if est[ "point" ] is not None:
-        lines.append( "  contrast               internal - P = %.3f  [%.3f, %.3f]" % ( ic[ "rate" ] - est[ "point" ], ic[ "lo" ] - est[ "hi" ], ic[ "hi" ] - est[ "lo" ] ) )
-    lines.append( "  raters                 %s; transcripts %s" % ( ", ".join( rater_families ), ", ".join( d[ :16 ] for d in transcript_digests ) or "none" ) )
+        lines.append( "  contrast               internal - P = %.3f  [%.3f, %.3f]; code-only - P = %.3f  [%.3f, %.3f]" % (
+            ic[ "rate" ] - est[ "point" ], ic[ "lo" ] - est[ "hi" ], ic[ "hi" ] - est[ "lo" ],
+            icc[ "rate" ] - est[ "point" ], icc[ "lo" ] - est[ "hi" ], icc[ "hi" ] - est[ "lo" ] ) )
+    pair = tuple( rater_families )
+    independence = "two model families" if pair == tuple( S.FROZEN[ "rater_families" ] ) else \
+                   ( "FALLBACK pair: one family, two generations — WEAKER independence, kappa is within-family" if pair == tuple( S.FROZEN[ "rater_families_fallback" ] )
+                     else "UNREGISTERED pair" )
+    lines.append( "  raters                 %s (%s); transcripts %s" % ( ", ".join( pair ), independence, ", ".join( d[ :16 ] for d in transcript_digests ) or "none" ) )
     lines.append( "  decision (§9)          %s — %s" % ( verdict, clause ) )
     return "\n".join( lines ), dict( verdict=verdict, clause=clause, estimate=est, kappa3=k3, kappa_binary=kb, n_binary=nb, U=U, sensitivities=sens )

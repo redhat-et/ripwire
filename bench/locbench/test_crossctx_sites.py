@@ -372,6 +372,10 @@ def test_frozen_constants_are_the_registered_ones():
     assert ( F[ "enlargement_steps" ], F[ "enlargement_offset" ], F[ "pilot_rows" ] ) == ( 1, "k//2", 10 )
     assert ( F[ "rater_tool_budget" ], F[ "rater_output_tokens" ] ) == ( 25, 1500 )
     assert F[ "rater_families" ] == ( "anthropic-claude", "openai-gpt" ) and len( set( F[ "rater_families" ] ) ) == 2
+    fb = F[ "rater_families_fallback" ]
+    assert fb == ( "anthropic-claude-opus-5.5", "anthropic-claude-sonnet-5" ) and fb[ 0 ] != fb[ 1 ]
+    assert all( m.startswith( "anthropic-claude-" ) for m in fb ), "the fallback is one family, two generations, and says so"
+    assert set( fb ).isdisjoint( F[ "rater_families" ] )
 
 def test_manifest_line_and_hash():
     line = X.manifest_line( "id", "o/r", "abc", "ONE-SITE", 1, { "move", "otherlang" }, "ONE-SITE" )

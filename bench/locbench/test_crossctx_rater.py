@@ -166,7 +166,35 @@ def test_strata_file_grain_and_outcome_table():
                   "contrast", "anthropic-claude, openai-gpt", "decision (§9)" ):
         assert must in text, ( must, text )
     assert res[ "verdict" ] == "INDETERMINATE", "four synthetic rows cannot reach a verdict"
-    assert set( res[ "sensitivities" ] ) == { "file-grain", "moves-collapsed", "otherlang-dropped", "disagree->CROSS", "disagree->LOCAL" }
+    assert set( res[ "sensitivities" ] ) == { "file-grain", "moves-collapsed", "otherlang-dropped", "disagree->CROSS", "disagree->LOCAL", "unedited-second-site-only" }
+
+def test_second_site_edited_is_printed_and_bounded():
+    man = manifest()
+    stratum_of = lambda idx: "r%02d" % idx
+    primary_of = lambda idx: "pkg/a.py:helper"
+    ed = frozenset( { "second_site_edited" } )
+    recs = [ R.Record( 0, "CROSS", "CROSS", "CROSS", None, ed, "pkg/a.py:tail", "pkg/a.py:tail" ),
+             R.Record( 1, "CROSS", "CROSS", "CROSS", None, frozenset(), "pkg/b.py:tail", "pkg/b.py:tail" ),
+             R.Record( 2, "LOCAL", "LOCAL", "LOCAL", None, frozenset(), None, None ),
+             R.Record( 3, "CROSS", "LOCAL", "UNTAGGED", "DISAGREE", ed, "pkg/b.py:tail", None ) ]
+    assert R.second_site_edited_count( recs ) == 1, "only CROSS-labelled rows count; the DISAGREE row does not"
+    low = R.unedited_second_site_only( recs )
+    assert [ r.label for r in low ] == [ "LOCAL", "CROSS", "LOCAL", "UNTAGGED" ]
+    strata = R.strata_from( man, recs, stratum_of )
+    assert strata[ "ONE-SITE" ][ "labels" ] == [ "CROSS", "CROSS", "LOCAL" ]
+    text, res = R.outcome_table( man, recs, stratum_of, primary_of, { "CROSS": 94, "SPREAD-IN-FILE": 254, "LOCAL": 212 }, True, 0.9, True,
+                                 "m" * 64, "b" * 64, [], S.FROZEN[ "rater_families" ] )
+    assert "second_site_edited     1 CROSS rows" in text, text
+    assert "unedited-second-site-only" in text and res[ "sensitivities" ][ "unedited-second-site-only" ][ "point" ] < res[ "estimate" ][ "point" ], \
+        "the bound is below the primary estimate when an edited second site exists"
+    assert "code-only - P" in text, "the contrast is printed against both internal chains"
+    assert "(two model families)" in text
+    fb_text, _ = R.outcome_table( man, recs, stratum_of, primary_of, { "CROSS": 94, "SPREAD-IN-FILE": 254, "LOCAL": 212 }, True, 0.9, True,
+                                  "m" * 64, "b" * 64, [], S.FROZEN[ "rater_families_fallback" ] )
+    assert "FALLBACK pair" in fb_text and "WEAKER independence" in fb_text, "a same-family run says so in its own table"
+    odd_text, _ = R.outcome_table( man, recs, stratum_of, primary_of, { "CROSS": 94, "SPREAD-IN-FILE": 254, "LOCAL": 212 }, True, 0.9, True,
+                                   "m" * 64, "b" * 64, [], ( "some-model", "other-model" ) )
+    assert "UNREGISTERED pair" in odd_text
 
 def test_outcome_table_with_no_records():
     man = manifest()

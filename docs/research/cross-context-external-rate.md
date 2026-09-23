@@ -1,7 +1,7 @@
 # What fraction of human defect fixes are cross-context? — a pre-registration
 
-**Status: pre-registration, written 2026-09-23, before any data; amendment 1 the same day, after an
-adversarial review and still before any data.** No LocBench asset is on the machine this was written
+**Status: pre-registration, written 2026-09-23, before any data; amendments 1 and 2 the same day, after an
+adversarial review and its re-review, still before any data.** No LocBench asset is on the machine this was written
 on, no row has been scored under this recipe, and no external number below is a result. The commits that
 add and amend this file precede every measurement it describes; that ordering is the point of the file.
 A number produced by the recipe is reported by *amending this note* with a dated "Outcome" section —
@@ -342,9 +342,15 @@ leak words (the internal percentage, the verdict names, "bias", "roadmap", "hypo
 **R3 — raters and protocol (executable, not aspirational).**
 
 - **Who.** Two model agents of **different model families**, named now: one Anthropic Claude model and
-  one OpenAI GPT model; the exact model identifiers are recorded in the Outcome. If only one family is
-  available when the run happens, the Outcome says so and states that κ is then agreement *within* a
-  family and inflated. The run's operator is not a rater and never edits a label. A human blind read of
+  one OpenAI GPT model (`rater_families` in the frozen constants); the exact model identifiers are recorded
+  in the Outcome. **Fallback pair, pinned now** (`rater_families_fallback`): two different Claude
+  lines/generations — `anthropic-claude-opus-5.5` and `anthropic-claude-sonnet-5` — in strictly separate
+  contexts per row, κ floor **unchanged** at 0.60. It is used **if and only if** a second model family is
+  unavailable when the run happens, and that choice is made and written down **before any packet is
+  built**; the Outcome then states which pair rated and, for the fallback, that independence is weaker
+  (κ is agreement within one family and may be inflated by shared training). A same-family result is never
+  restated as a two-family one. The run is not blocked on the second family, because the decision rule does
+  not depend on which pair rated. The run's operator is not a rater and never edits a label. A human blind read of
   a fixed 20-row subset (the first 20 sampled rows in `instance_id` order) by the owner is recommended
   as a third, **non-decision-bearing** check.
 - **What they read.** Exactly the frozen file
@@ -420,7 +426,10 @@ sees any aggregate.
 - **Sensitivities**, each one line, all recomputable from the manifest and the labels: file grain (a
   CROSS whose second site lies in the primary site's file is LOCAL); moves collapsed (strata re-weighted
   by `mclass_collapsed`); `otherlang` rows dropped; disagreements resolved toward CROSS and toward LOCAL
-  (the two bounds); the sample's unweighted rate; and the `test_dir_only` bound — the count of
+  (the two bounds); the sample's unweighted rate; **unedited-second-site-only** — the count of CROSS rows
+  whose second site the fix *also* edited (`second_site_edited`) is printed, and the estimate with those rows
+  counted LOCAL is the **lower bound** of `P̂` (it closes from below the multi-site gameability that naming any
+  other *edited* site passes verification while the quote test barely bites); and the `test_dir_only` bound — the count of
   `TEST-ONLY` rows that would have been scoreable without the directory rule, which are unrated and so
   can only be shown as the range they would produce at 0% and at 100% CROSS.
 - **Internal comparator:** 149/169 with its Wilson interval, and the code-only chain 109/124 with its
@@ -449,11 +458,12 @@ enlargement was used, and the date:
   M9 descriptive         MULTI-FILE share, 1 - ONE-SITE share
   kappa                  3-way κ, binary κ over n  [quotable|moderate|failed]
   P (post-stratified)    p  [lo, hi]      U = untagged share     dropped strata
-  sensitivities          file-grain p, moves-collapsed p, otherlang-dropped p, disagree->CROSS p, disagree->LOCAL p, unweighted p
+  sensitivities          file-grain p, moves-collapsed p, otherlang-dropped p, disagree->CROSS p, disagree->LOCAL p, unedited-second-site-only p (lower bound), unweighted p
+  second_site_edited     n CROSS rows whose second site the fix also edited
   TEST-ONLY by dir-rule  n rows (bound: unrated)
   internal               149/169 = 88.2% [82.4, 92.2]; code-only 109/124 = 87.9% [81.0, 92.5]
-  contrast               internal - P = d  [lo, hi]
-  raters                 families and model ids; transcript hashes
+  contrast               internal - P = d  [lo, hi]; code-only - P = d  [lo, hi]
+  raters                 pair used (preferred two-family | FALLBACK one-family, weaker independence), model ids; transcript hashes
   decision (§9)          STARK | THIN | INDETERMINATE, with the clause that fired
 ```
 
@@ -603,6 +613,11 @@ python3 bench/locbench/crossctx_sites.py --rows ROWS.json --repos-dir DIR --out 
     and a fixed budget** (R3). An LLM rater is a proxy for a human colleague, disclosed as such.
 16. **The one-step enlargement at offset ⌊k/2⌋** (§9) is declared now so that an INDETERMINATE by
     width alone has a pre-registered remedy instead of an after-the-fact one.
+17. **The fallback rater pair is pinned, not chosen at run time** (R3, amendment 2): two Claude
+    generations, weaker independence disclosed, used only if the second family is unavailable, decided
+    before any packet. A pair chosen after seeing anything would be a degree of freedom.
+18. **Edited second sites stay CROSS in `P̂`, and their count and lower bound are printed** (§7,
+    amendment 2), so a reader can see how much of the CROSS mass rests on second sites the fix touched.
 
 ## 13. Amendments
 
@@ -626,5 +641,14 @@ LocBench row was read under this recipe. What changed, by finding:
 | F11 "the ledger is not on this machine" was false | corrected; the code-only chain produced from the frozen 377-row snapshot by the ledger's own rule with its "not a code defect" class (`klass = d`) and its unusable class (`u`) removed: **209 usable → 124 tagged, 85 untagged (40.7%) → 109 CROSS (87.9%) / 15 LOCAL**, Wilson [81.0%, 92.5%]; the unrestricted run of the same script reproduces 292 → 169 → 149/20 exactly. Pinned as `INTERNAL_CHAIN_CODE_ONLY` and tested |
 | F12 wording | §2 "paraphrased"; §4.2 the registered step; R1 "40–79 per stratum, ≤ 237" |
 | F13 `test_patch` | R2 states the fingerprint and M-stage read `patch` only and that the packet includes `test_patch` when the row carries it |
+
+Nothing in this amendment was informed by any external number: none exists.
+
+### Amendment 2 — 2026-09-23, after the re-review of amendment 1 (READY with two conditions); before any packet
+
+| condition | change |
+| --- | --- |
+| print the `second_site_edited` count and the unedited-second-site-only lower bound | `outcome_table` prints the count of CROSS rows whose second site the fix also edited, and a new sensitivity `unedited-second-site-only` (those rows counted LOCAL) as the lower bound of `P̂`; §7 and §8 name it; the contrast line is also printed against the code-only chain 109/124 (the re-review's nit). Tested. |
+| pin the fallback rater pair now | `rater_families_fallback = (anthropic-claude-opus-5.5, anthropic-claude-sonnet-5)` in the frozen constants; R3 says it is used if and only if a second family is unavailable at run time, decided before any packet, κ floor unchanged, disclosed as weaker independence; `outcome_table` labels the pair it was given as preferred / FALLBACK / UNREGISTERED. Tested. |
 
 Nothing in this amendment was informed by any external number: none exists.
