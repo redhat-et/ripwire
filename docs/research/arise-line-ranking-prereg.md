@@ -1,10 +1,22 @@
 # ARISE line ranking — one honest attempt, PRE-REGISTERED 2026-09-23 (before any src/ change, before any number below exists)
 
-**Status: PRE-REGISTRATION ONLY, round 2. No number in this document was computed by a harness — the
+**Status: PRE-REGISTRATION ONLY, round 3. No number in this document was computed by a harness — the
 corpus (LocBench V1) is not on this machine and is not fetched, read or scored here.** This document
 fixes the population, the one ranking attempt, the verdict rule and the bands before any of them touch
 data, so that whichever way the eventual measurement comes out, nothing here can be read as chosen
 after seeing it.
+
+**Round 3 fixes round 2's own review (READY-WITH-CHANGES, `rv-arise-line-ranking.md`'s round-2 section):
+§1.1 now cites the 88-repo list by its committed path and states `base_commit` presence as a
+precondition of a complete checkout rather than a filter that could read as defining a smaller
+population (MEDIUM-6); §4.3.2's narrow-pool bar now requires `defuse` to be RE-MEASURED in the same run
+rather than compared against its published 3dp figure, and registers that EVALS' own narrow-pool arm is
+an uncommitted scratch diff that must land before this section can run at all (MEDIUM-5); and
+`bench/slice/score_arise_linerank.py` — the code this doc's §8 cites — is fixed to compute real gold-line
+counts from each row's own patch (it was silently summing a field the dataset does not carry, reading 0
+instead of the registered 1,040) and to genuinely STOP, printing no verdict, on any tier mismatch, with
+tiers (b)/(c) now implemented via a `--summary` file (HIGH-6 — the code fix, not the doc; §8 states the
+schema).
 
 **Round 2 revises round 1 after an adversarial review found it NOT READY (`rv-arise-line-ranking.md`),
 all before any data existed under either round — the review read the round-1 code and prose, never a
@@ -65,15 +77,24 @@ by fingerprinting the CARRIED set rather than the disk-state cascade that produc
 this lane — the asset tree is supplied by the owner; this machine's standing rule is not to fetch
 third-party data from a lane.
 
-**The population is registered, before any run, as:** *the 352 single-function rows of the dataset
-(`edit_functions_length == 1`) whose `repo` is one of the 88 repositories already checked out for this
-project's held-out measurement round, AND whose `base_commit` object is present in that checkout* —
-predicted **182 rows / 1,040 gold lines**, computable from the dataset json ALONE, independent of which
-machine or which binary reads it. Either an export of the old measurement round's own tree (every row's
+**The population is registered, before any run, as (revised, MEDIUM-6 — cite the repo list by path and
+state `base_commit` presence as a precondition, not a filter, since the earlier wording could be read
+as defining a smaller "population" out of a shallow tree's own incompleteness):**
+
+*rows = the 352 single-function rows of the dataset (`edit_functions_length == 1`) whose `repo` is one
+of the 88 repositories named in `bench/locbench/results/r3_pathtok/heldout_baseline.json` (the distinct
+`repo` values across that committed file's own `instances` list — an unrelated, already-committed
+measurement round's held-out split, whose repo set this document cites rather than duplicates)* —
+predicted **182 rows / 1,040 gold lines**, computable from the dataset json and that ONE committed file
+ALONE, independent of which machine or which binary reads it.
+
+**`base_commit` presence is a PRECONDITION of the checkout being complete, not part of the rule that
+selects rows.** The 182 rows are named by `repo ∈ held-out-88 ∧ single-function` alone; a tree that
+cannot resolve one of their `base_commit`s is an INCOMPLETE checkout of the registered population, not
+evidence of a smaller one. Either an export of the old measurement round's own tree (every row's
 `base_commit` present by construction) or a freshly cloned 88-repo tree with every one of those 182
-rows' `base_commit` objects fetched satisfies the rule — **both are the SAME 182 rows**, because the
-construction rule names the rows by `repo ∈ held-out-88 ∧ single-function`, not by which specific disk
-happened to serve them.
+rows' `base_commit` objects fetched satisfies the precondition — **both serve the SAME 182 rows**,
+because which rows are IN the population never depended on which disk happened to serve them.
 
 **Adjudicating the 169/1 vs 170/0 mismatch, in advance, per HIGH-1:** these two disk-state cascades
 (*"…no local checkout"* / *"…base_commit absent"*) are NOT part of the registered population — they are
@@ -385,20 +406,44 @@ prose in what ships today" defect §4.5 (HIGH-5) already found and reverted. It 
 commit makes WITH the verdict, not before it — this document is where its wording is pre-registered
 (§6), not where it is shipped early.
 
-#### 4.3.2 PASS: `defrole` ships only if it ALSO clears EVALS' own narrow-pool bar
+#### 4.3.2 PASS: `defrole` ships only if it ALSO clears EVALS' own narrow-pool bar, RE-MEASURED in the same run
 
 A wide-pool PASS (§4.2) is necessary but not sufficient to ship `order="defrole"`. Before `defrole`
 replaces `defuse`, it must ALSO be measured on EVALS' own narrow pool — the SAME 478 (scored instance,
 inventory variable) pairs, the SAME emission-order MRR metric, the SAME RNG — and clear:
 
-**`defrole`'s narrow-pool MRR ≥ `defuse`'s already-measured 0.628.**
+**`MRR(defrole) ≥ MRR(defuse)`, BOTH re-measured in the SAME run, on the SAME 478 pairs, with the SAME
+RNG stream — never `defrole`'s fresh MRR against `defuse`'s already-published `0.628`.** *(Revised,
+MEDIUM-5: a first draft of this section compared against the published 3dp figure directly — pinning a
+ROUNDED, already-printed value rather than re-measuring the comparator in-run is exactly the kind of
+drift-vs-population confusion §1.3 exists to prevent, just at the narrow pool instead of the wide one.
+Non-inferiority on the point estimate, `≥` with ties allowed, is the least a replacement of an
+already-proven order can be asked to clear — a confidence-interval requirement here would be over-tight
+at 478 pairs.)* `defuse`'s re-measured MRR is reported beside the published `0.628`; a mismatch between
+them is EVALS' OWN fingerprint failing (a different question, reported, not adjudicated by this
+document) and does not by itself block scoring `defrole` against whatever `defuse` re-measures to here.
 
-- **Wide-pool PASS AND narrow-pool clears:** `order="defrole"` ships (`kSliceLineRankVerdict` flips to
-  `Ranked`, plus the legend/help/COMMANDS sites §4.5/MEDIUM-1 lists).
-- **Wide-pool PASS but narrow-pool does NOT clear:** the wide-pool result is REPORTED (it is real and
-  belongs in the #318 reply) but nothing ships — `order="defuse"` stays the default, exactly as a FAIL
-  would leave it, because shipping a row order never measured to be at least as good on the rows
-  themselves would repeat round 1's PASS defect. `kSliceLineRankVerdict` stays `Pending`.
+**Before this run: EVALS' narrow-pool arm must be a committed command, not a scratch diff.** The
+emitted-order MRR measurement `docs/EVALS.md`'s own "def-use row order" ADOPT cites is, as registered
+there, a 43-line SCRATCH arm over `run_slice_linerecall.py` that was never committed to either tree
+(`docs/research/arise-line-ranking-prereg.md`'s own earlier §8 already disclosed this for the wide-pool
+harness; the narrow-pool arm has the identical gap). **This section's verdict cannot run until that
+43-line arm is committed** (the research branch or `bench/slice/`, whichever the wide-pool harness
+extension in §8 lands in) — scoring §4.3.2 against a script that does not exist is not a verdict, it is
+a promise of one.
+
+`defrole`'s own row order needs no new binary invocation to compute: it can be derived OFFLINE from the
+`Pending` binary's already-emitted v1 output (`k=` per row plus the union-of-inventory coverage count
+per line, exactly `sliceRowHasAnyDef`/`sliceRowCoverage`'s harness-side twins, §8) — this is licensed by
+`test/slicerank_unit.cpp` item (6)'s equivalence proof (the harness-side `hasdef[n]` rule and the
+binary's `sliceRowHasAnyDef` agree on real, tree-sitter-parsed data), not assumed fresh here.
+
+- **Wide-pool PASS AND narrow-pool clears (re-measured):** `order="defrole"` ships (`kSliceLineRankVerdict`
+  flips to `Ranked`, plus the legend/help/COMMANDS sites §4.5/MEDIUM-1 lists).
+- **Wide-pool PASS but narrow-pool does NOT clear (re-measured):** the wide-pool result is REPORTED (it
+  is real and belongs in the #318 reply) but nothing ships — `order="defuse"` stays the default, exactly
+  as a FAIL would leave it, because shipping a row order never measured to be at least as good on the
+  rows themselves would repeat round 1's PASS defect. `kSliceLineRankVerdict` stays `Pending`.
 
 Either way, "the constant just flips" (§3's own design) still holds: the CODE decision is binary
 (`Pending` stays, or flips to `Ranked`) even though the REASONING that decides it now has two gates
@@ -466,8 +511,8 @@ PASS is split into two outcomes, since a wide-pool PASS alone does not license s
 | outcome | what is reported | the sentence it licenses |
 | --- | --- | --- |
 | **Fingerprint mismatch** | which §1 check failed, what was measured instead, both asset tree paths + both binaries' shas if §1.3 fired | *"Line ranking over the whole function span had never been scored against a pre-registered rule with a margin and a confidence interval — only the narrower, already-shipped 'rank the lines `--slice` already chose to show' claim had. We pre-registered one honest attempt (def-primacy: definitions before uses, coverage as the tie-break), a construction rule for the population, and a decision rule, all before looking at any number. The population we could reproduce did not match the pre-registered construction rule, so no verdict is reported from this attempt."* |
-| **PASS, ships** (wide-pool clears §4.2 AND narrow-pool clears §4.3.2) | R3's Recall@{1,3,5,10,20} and MRR, the margin over CTL/R1/R0 with its 95% CI (10,000-resample, seed named), the per-instance better/worse/tied split against R1, `defrole`'s narrow-pool MRR vs `defuse`'s 0.628, the signature-line structural note (§3.4) | *"We pre-registered one honest attempt at ranking — definitions before uses, then coverage, zero fitted parameters — before running it. It clears the bar we set in advance for the whole function span (`<margin>` over chance `[CI]`), and it separately matches or beats the coverage-only rule already shipped on the narrower pool that rule was itself measured on, so we are replacing it: `order="defrole"` is now the default. This is a single-sample, in-corpus result on the 173 held-out instances; a 170-instance, 45-repository complement exists in the dataset and has not been measured, and we [have / have not] fetched and scored it."* |
-| **PASS, reported not shipped** (wide-pool clears §4.2, narrow-pool does not clear §4.3.2) | the same wide-pool numbers, plus `defrole`'s narrow-pool MRR falling short of `defuse`'s 0.628 | *"The same honest attempt clears our pre-registered bar for ranking over the whole function span (`<margin>` over chance `[CI]`), but on the narrower pool our already-shipped ordering was itself measured on, it does not match that ordering's own result (`<defrole MRR>` vs `0.628`). We are reporting the wide-pool result rather than dropping it, and shipping neither `defrole` in its place — `order="defuse"` stays the default, since we will not replace a row order proven on its own rows with one that is not."* |
+| **PASS, ships** (wide-pool clears §4.2 AND narrow-pool clears §4.3.2) | R3's Recall@{1,3,5,10,20} and MRR, the margin over CTL/R1/R0 with its 95% CI (10,000-resample, seed named), the per-instance better/worse/tied split against R1, `defrole`'s and `defuse`'s narrow-pool MRR — BOTH re-measured in the same run, same 478 pairs, same RNG (`defuse`'s reported beside the published 0.628, a mismatch there flagged separately) — the signature-line structural note (§3.4) | *"We pre-registered one honest attempt at ranking — definitions before uses, then coverage, zero fitted parameters — before running it. It clears the bar we set in advance for the whole function span (`<margin>` over chance `[CI]`), and it separately matches or beats the coverage-only rule already shipped, re-measured in the same run on the narrower pool that rule was itself measured on, so we are replacing it: `order="defrole"` is now the default. This is a single-sample, in-corpus result on the 173 held-out instances; a 170-instance, 45-repository complement exists in the dataset and has not been measured, and we [have / have not] fetched and scored it."* |
+| **PASS, reported not shipped** (wide-pool clears §4.2, narrow-pool does not clear §4.3.2) | the same wide-pool numbers, plus `defrole`'s and re-measured `defuse`'s narrow-pool MRR | *"The same honest attempt clears our pre-registered bar for ranking over the whole function span (`<margin>` over chance `[CI]`), but on the narrower pool our already-shipped ordering was itself measured on, it does not match that ordering's own result, re-measured in the same run (`<defrole MRR>` vs `<defuse MRR, re-measured>`). We are reporting the wide-pool result rather than dropping it, and shipping neither `defrole` in its place — `order="defuse"` stays the default, since we will not replace a row order proven on its own rows with one that is not."* |
 | **FAIL** | R3's numbers against the same bands, stated as a negative result with the same rigor a PASS would carry, and the power note (§4.2) | *"We pre-registered one honest attempt — definitions before uses, then coverage — before running it, per your rule that a ranking claiming to rank at chance is the `--adaptive` defect in another costume. It did not clear the pre-registered bar over the whole function span (`<numbers>`; at our sample size this could mean either no real effect or an effect too small to detect — we report the numbers, not a claim about which). `--slice` does not claim to rank lines over the whole function beyond what is proven, and says so in the legend and `--help`. The narrower, already-shipped claim — that among the lines `--slice` already selects, def-use coverage beats a random shuffle — is unaffected and stays the default: source order was measured WORSE than random on those same rows, so replacing it with source order would be a regression, not a fix."* |
 
 ## 7. Judgement calls for an adversarial reviewer
@@ -510,13 +555,22 @@ PASS is split into two outcomes, since a wide-pool PASS alone does not license s
   run `run_slice_linerecall.py` and cannot independently confirm that function's exact shape beyond the
   baseline note's own description and the review's citation of it.** A reviewer with access to that
   script should check `rank_scores()` directly against §4.2's wording before trusting it.
-- **§4.3.2's narrow-pool bar (`defrole` MRR ≥ `defuse`'s 0.628) is a NEW judgement call, not dictated by
-  the review in exactly this form** — the review's own recommendation (i) states the requirement
-  qualitatively (*"the narrow-pool arm... to show `defrole` MRR ≥ defuse's 0.628"*) and this document
-  operationalizes it as a hard gate with a binary PASS-ships/PASS-reported-not-shipped split. A reviewer
-  could reasonably ask for a softer treatment (e.g. reporting a narrow-pool REGRESSION as its own,
-  named outcome rather than folding it into "not shipped") — the current form was chosen for symmetry
-  with §4.2's own four-condition, all-or-nothing PASS rule.
+- **§4.3.2's narrow-pool bar is a NEW judgement call, not dictated by either review round in exactly
+  this final form** — round 2's review recommendation (i) stated the requirement qualitatively
+  (*"the narrow-pool arm... to show `defrole` MRR ≥ defuse's 0.628"*) and this document initially
+  operationalized it as a hard gate against the PUBLISHED `0.628`; round 3's review (MEDIUM-5) corrected
+  that to a paired RE-MEASUREMENT in the same run — right, since pinning a rounded, already-printed
+  figure is the same drift-vs-population confusion §1.3 exists to prevent, one level down. A reviewer
+  could reasonably ask for a softer treatment still (e.g. reporting a narrow-pool REGRESSION as its own,
+  named outcome rather than folding it into "not shipped") — the current binary PASS-ships/
+  PASS-reported-not-shipped split was chosen for symmetry with §4.2's own four-condition, all-or-nothing
+  PASS rule, not dictated by either review.
+- **§4.3.2 now also registers a PRECONDITION on ITSELF: EVALS' narrow-pool measurement is an uncommitted
+  43-line scratch arm.** This document cannot verify that arm's exact behavior (it has not been
+  committed anywhere this lane can read it) — the requirement to commit it before scoring is this
+  document's own inference from `docs/EVALS.md`'s row-order section disclosing the scratch arm's
+  existence, not a fact independently confirmed here. A reviewer with access to that scratch diff
+  should check it directly before trusting §4.3.2's re-measurement plan matches what it actually does.
 - **§3.4's signature-line disclosure states a STRUCTURAL fact about the rule's own ceiling, derived from
   reading `src/slice.h`'s param classification, not from running the rule on real data** — it is a priori
   reasoning about the classifier's known behavior (params are `k="def"`), the same status as §3.2's other
@@ -549,18 +603,50 @@ Identical to `docs/research/slice-line-recall.md` §9's first three commands —
 tree, same as the baseline note itself states).
 
 **`bench/slice/score_arise_linerank.py`** (this lane, self-tested only — `rv-arise-line-ranking.md`
-MEDIUM-2's "no command exists" fix) states the R3 rule in harness terms and computes the fingerprint
-(§1.2a) and the verdict (§4.1/§4.2) from a per-instance results file a future round's harness run would
-produce:
+MEDIUM-2's "no command exists" fix, and HIGH-6's fix to it) states the R3 rule in harness terms and
+computes all three fingerprint tiers (§1.2) and the verdict (§4.1/§4.2). Tier (a)'s `carried_gold_lines`
+is computed from each carried row's own `patch` field (`file_sections()`/`gold_pre_lines()`, ported from
+`locbench_gold.py` — §1.1's G2 rule, not a field the dataset carries under any other name) — **the run
+genuinely STOPS (exit 2, no `verdict` key at all) on any tier-(a)/(b)/(c) mismatch**, checked against the
+constants this document registers, hardcoded in the module on purpose (HIGH-6.2):
 
 ```bash
-python3 bench/slice/score_arise_linerank.py --self-test    # this lane: synthetic rows only, no corpus
+python3 bench/slice/score_arise_linerank.py --self-test    # this lane: synthetic rows + the committed
+                                                             # --heldout default only, no corpus content
 
-# a future round, once run_slice_linerecall.py has been extended to also emit r3_at1 per instance:
+# a future round, once run_slice_linerecall.py has been extended (see the results-key mapping below):
 python3 bench/slice/score_arise_linerank.py \
-    --dataset rows_czlll__Loc-Bench_V1_test_560.json --heldout heldout_88.json \
+    --dataset rows_czlll__Loc-Bench_V1_test_560.json \
+    --heldout bench/locbench/results/r3_pathtok/heldout_baseline.json \
+    --summary results-summary.json --results results.json --verdict-out verdict.json
+# with the §1.3 binary-drift re-fingerprint (built_from=755f9026f's own summary):
+python3 bench/slice/score_arise_linerank.py \
+    --dataset rows_czlll__Loc-Bench_V1_test_560.json \
+    --summary results-summary.json --drift-summary drift-summary.json \
     --results results.json --verdict-out verdict.json
 ```
+
+**`--summary` schema** (tiers b/c; a future harness extension must emit this — not committed by this
+lane, since the corpus needed to produce real values is not here):
+
+```json
+{
+  "scored_instances": 173, "var_instances": 498,
+  "skips": {"selector_refused_plain": 3, "selector_refused_scoped": 2,
+            "expand_no_body": 2, "gold_outside_span": 2},
+  "recall_at_k": {"r0": {"1": 0.029}, "ctl": {"1": 0.042}, "r1": {"1": 0.048}, "r2": {"1": 0.048}},
+  "mrr": {"r0": 0.154, "ctl": 0.234, "r1": 0.289, "r2": 0.289}
+}
+```
+
+**`--results` results-key mapping** (per-instance, for the verdict's own bootstrap): the harness
+extension's `r0@1`/`ctl@1`/`r1@1` become `r0_at1`/`ctl_at1`/`r1_at1`; the NEW `r3@1` (this attempt)
+becomes `r3_at1`; `mrr_r3` and `r3@{3,5,10,20}` are reported beside `r3_at1` (not required by `score()`,
+which reads `r3_at1` only, per §4.2's registered @1-gates-the-rest rule). Computing `r3@1` needs
+`hasdef[n]` added to the harness's own per-instance measurement — today `slice_rows()` captures a row's
+`t=` attribute, not its `k=`; the extension is a one-line change to read `k=` (`"def"`/`"both"` →
+`hasdef[n]=1`) instead, exactly the field `test/slicerank_unit.cpp` item (6) already validated against
+the real classifier.
 
 **Code↔harness equivalence, stated explicitly (MEDIUM-2 asks that a PASS transfer to the binary):** the
 harness's `hasdef[n] = 1 iff some inventory var's v1 rows contain <s l=n k="def"|"both">` and the
