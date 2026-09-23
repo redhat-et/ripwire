@@ -799,3 +799,93 @@ python3 bench/arb/score_abstention_calibration.py       # the registered bands, 
 - The `coverage=` observation in §3.3 is not a finding and must not be cited as one.
 - 214 held-out instances were not scored because their snapshots are not on the disk this ran on. The
   92 that were scored are a floor, and a replication on the remainder is part of §5.2.
+
+---
+
+## 10. Result — `served_syms` scored under §5.4 (2026-09-23)
+
+**Outcome: FAIL.** Run identity, fingerprint, numbers, the licensed sentence, and §5.5's consequence,
+in that order. Full machine-readable output, the rendered tables, the 92 scored instance ids and
+their sha256, and the asset tree's construction rule are committed at
+`bench/locbench/results/served_syms_prereg/` (`calib.json`, `calib.md`, `instance_ids.txt`,
+`POPULATION.md`).
+
+### Run identity
+
+- **Binary:** `ripwire 0.6.1 (dev, AppleClang 17.0.0.17000604, emit=std::print, built_from=860b4dfb3)`
+  — built from this registration's own pinned commit (`860b4dfb34b364b46634b4e5af2208bf01d652bd`);
+  §5.4 does not pin a separate binary sha, only that every report name the one it used.
+- **Dataset:** LocBench V1 test, frozen 560-row slice, sha256
+  `5bbcea4bff11396f38f8aca3e64d697a8ea1da2bc54d705da7f6e34886804c97` — matches §3.2's pinned hash.
+- **Asset tree:** rebuilt locally (the original 92-instance tree lived on different hardware).
+  Construction rule: each held-out repository left checked out at its *last* instance's
+  `base_commit` in dataset order, giving 92 instances across 88 repositories. 87 repositories via
+  the standard `run_locbench.checkout()` path; **`UCL/TLOmodel` was checked out by hand with Git LFS
+  disabled, so its 152 LFS-tracked files are unresolved pointer files, not their real binary
+  content** (`git-lfs` was not installed on the machine that rebuilt the tree). Full provenance in
+  the committed `POPULATION.md`.
+- **Instance identity:** the 92 scored `instance_id` values are byte-identical, as a set, to the
+  asset tree's own `candidate92.json` — this run's 92 are provably the tree's intended 92, not
+  merely 92 rows that happened to score. List committed at `instance_ids.txt`, sha256
+  `73c4414d7863bb48bb7721f071d2891d1424ab670e62e88f4b16a857c7f8a02f`.
+
+### §5.4.1 fingerprint — reproduced
+
+| check | registered | measured | ok |
+| --- | --- | --- | --- |
+| n scored | 92 | 92 | yes |
+| `confidence="high"` / `"low"` | 18 / 74 | 18 / 74 | yes |
+| misses, file grain / func grain | 15 / 38 | 15 / 38 | yes |
+| `rows_len == n_scored` | — | 92 == 92 | yes |
+| score AUROC, file_hit (lattice 670.5/1155, tol 0.0006) | 0.580519 | 0.580087 | yes |
+| score AUROC, func_hit (lattice 1276.5/2052, tol 0.0003) | 0.622076 | 0.621832 | yes |
+
+All eight checks under §5.4.1 passed. This asset tree's 92 rows count as "the 92" per the fingerprint
+rule, not by disk provenance.
+
+### `served_syms` — AUROC by grain (bootstrap 95% CI, repo-clustered, seed
+`"ripwire-served-syms-prereg-v1"`, 10,000 resamples, 10,000 of 10,000 usable on both grains)
+
+| grain (gating) | n | misses | AUROC | 95% CI | §5.2 rung |
+| --- | --- | --- | --- | --- | --- |
+| `func_hit` **(gating)** | 92 | 38 | 0.2780 | [0.1775, 0.3846] | `does_not_meet_opposite_direction` |
+| `file_hit` (exploratory, non-gating) | 92 | 15 | 0.3312 | [0.2022, 0.4726] | `does_not_meet_opposite_direction` |
+
+Both grains land at or below §5.2's `≤ 0.35` directional-refutation rung, under the registered
+orientation (larger `served_syms` == more miss evidence, §5.4.3). Per §5.4.3 this is reported as a
+clean result under that orientation — an AUROC anti-correlated with the registered direction — and
+is **not** flipped to report `1 − AUROC` as evidence for the opposite orientation.
+
+**Threshold sweep (§5.4.4):** every candidate `t` in `V ∪ {max(V)+1}` was checked on `func_hit`
+(the sole gating grain); **no threshold reaches `false_warn ≤ 0.20` at `recall ≥ 0.50` together** —
+`band_met = False`, so `sr1_met` is not evaluated (SR-1 only applies to `t`s that already clear the
+band). The same is true on `file_hit`'s own sweep (reported, non-gating). The complete
+per-threshold table (`false_warn`, `recall`, `warn_rate`, `band`, `safe` for every candidate `t`, both
+grains) is committed in `calib.json`/`calib.md`.
+
+### Outcome and the licensed sentence
+
+**`served_syms_outcome = "fail"`** (`band_met = False`). Per §5.4.6's table, the sentence a public
+reply may use, produced verbatim by the scoring code itself (not hand-composed here):
+
+> "served_syms had never been scored against our pre-registered band -- an exploratory AUROC (0.669
+> file_hit / 0.723 func_hit) had been computed once in a prior review, on this same 92, without an
+> operating point or a recorded orientation. Scored now under a named procedure, with the
+> orientation fixed in advance as the raw value -- informed by that exploratory AUROC having already
+> been seen, not blind (§5.4.3), it does not reach the band (false-warn <= 0.20 at miss-recall >=
+> 0.50) on func_hit: AUROC 0.278 [0.177, 0.385] (§5.2 rung: does_not_meet_opposite_direction), and no
+> threshold clears both floors together."
+
+### §5.5 consequence for `margin_bp` / `lane/for-margin-resolution`
+
+The fingerprint reproduced (§5.4.1) and the outcome is **FAIL**, not a real `"pass"` — so §5.5's
+second branch applies: **`margin_bp` gets exactly ONE re-score.** It runs on this same run and this
+same asset tree, with this same lane binary (`built_from=860b4dfb3`), reusing this section's
+already-proven §5.4.1 fingerprint unchanged (population, not statistic, gates it), the same band
+(false-warn ≤ 0.20 at miss-recall ≥ 0.50), the same gating grain (`func_hit`), and the same §5.4.4
+threshold procedure — substituting `margin_bp` for `served_syms` under the orientation §5.5 already
+fixed in advance (warn iff `margin_bp ≤ t`). `lane/for-margin-resolution` may land only if that one
+re-score PASSES (band met **and** SR-1 met); no second attempt, no new sample, no threshold search
+beyond §5.4's own procedure. **That re-score has not been run as part of this result** — this section
+only states which branch applies and what the re-score's terms are.
+
