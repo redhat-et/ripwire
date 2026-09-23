@@ -38,9 +38,10 @@
 #   (14) Python `global X` / `nonlocal X` row k="scope" t="global"|"nonlocal" — a scope declaration,
 #        neither read nor write — and introduce the name in the inventory with that role
 #   (rank) the pre-registered ARISE line-ranking attempt (docs/research/arise-line-ranking-prereg.md):
-#        the unit driver test/slicerank_unit.cpp, on synthetic fixtures — kSliceLineRankVerdict is
-#        Pending (unwired from the CLI), so this proves the new paths compile/run/behave as registered
-#        without changing anything the (order) arms above already pin
+#        the unit driver test/slicerank_unit.cpp, on synthetic fixtures AND a real tree-sitter-parsed
+#        Python fixture — kSliceLineRankVerdict is Pending (unwired from the CLI), so this proves the
+#        attempt compiles/runs/behaves as registered without changing anything the (order) arms above
+#        already pin
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/slicecheck.sh   |   bash test/slicecheck.sh path/to/ripwire
 
@@ -542,10 +543,12 @@ grep -q 'order="defuse"' "$ORD/o.xml" && sed 's/<slice .*//' "$ORD/o.xml" | grep
 
 # ── (rank) the pre-registered ARISE line-ranking attempt — docs/research/arise-line-ranking-prereg.md ──
 # kSliceLineRankVerdict is Pending (unwired from the CLI, verdict awaits the real corpus — the (order)
-# arms above already prove today's shipped behavior is untouched). The two new paths
-# (sliceLineRankAttemptOrder, sliceStatedOrder) and the seed-free sliceRowHasAnyDef substrate are
-# exercised directly, on SYNTHETIC fixtures, by test/slicerank_unit.cpp — compiled ad hoc against the
-# real CMake flags, the same shape test/macroreparsecheck.sh's (U) arm already uses.
+# arms above already prove today's shipped behavior is untouched). sliceLineRankAttemptOrder and the
+# seed-free sliceRowHasAnyDef substrate are exercised directly — on synthetic fixtures AND on a real
+# tree-sitter-parsed Python fixture (rv-arise-line-ranking.md MEDIUM-4/MEDIUM-2's code<->real-classifier
+# equivalence) — by test/slicerank_unit.cpp, compiled ad hoc against the real CMake flags, the same shape
+# test/macroreparsecheck.sh's (U) arm already uses, plus the tree-sitter core lib and the ts_python
+# grammar object CMake already built for the main binary (TARGET_OBJECTS:ts_python).
 BUILD_DIR="$( cd "$( dirname "$BIN" )" && pwd )"
 FLAGS_MK="$BUILD_DIR/CMakeFiles/ripwire.dir/flags.make"
 LINK_TXT="$BUILD_DIR/CMakeFiles/ripwire.dir/link.txt"
@@ -561,8 +564,15 @@ else
         [ -n "$CXX" ] && command -v "$CXX" >/dev/null 2>&1 || CXX="$( command -v c++ || command -v clang++ )"
         DIAG_OBJ="$BUILD_DIR/CMakeFiles/ripwire.dir/src/infra/diagnostics.cpp.o"
         DIAG_LINK=(); [ -f "$DIAG_OBJ" ] && DIAG_LINK=( "$DIAG_OBJ" )
-        if "$CXX" "${CXX_FLAGS[@]}" "${CXX_DEFINES[@]}" "${CXX_INCLUDES[@]}" -I"$ROOT/src" \
-             "$ROOT/test/slicerank_unit.cpp" "${DIAG_LINK[@]}" -o "$WORK/slicerank_unit" >"$WORK/rank_build.log" 2>&1; then
+        TS_PY_DIR="$BUILD_DIR/CMakeFiles/ts_python.dir/third_party/deps/python/src"
+        TS_PY_OBJS=(); [ -d "$TS_PY_DIR" ] && TS_PY_OBJS=( "$TS_PY_DIR"/*.o )
+        TS_CORE="$BUILD_DIR/_deps/tree_sitter-build/libtree-sitter.a"
+        TS_CORE_LINK=(); [ -f "$TS_CORE" ] && TS_CORE_LINK=( "$TS_CORE" )
+        if [ "${#TS_PY_OBJS[@]}" -eq 0 ] || [ "${#TS_CORE_LINK[@]}" -eq 0 ]; then
+            no "(rank) cannot find the ts_python grammar objects or libtree-sitter.a under $BUILD_DIR — build first"
+        elif "$CXX" "${CXX_FLAGS[@]}" "${CXX_DEFINES[@]}" "${CXX_INCLUDES[@]}" -I"$ROOT/src" \
+             "$ROOT/test/slicerank_unit.cpp" "${DIAG_LINK[@]}" "${TS_PY_OBJS[@]}" "${TS_CORE_LINK[@]}" \
+             -o "$WORK/slicerank_unit" >"$WORK/rank_build.log" 2>&1; then
             if "$WORK/slicerank_unit" >"$WORK/rank_run.log" 2>&1; then
                 ok "(rank) slicerank_unit: $( grep -c '  PASS' "$WORK/rank_run.log" | tr -d ' ' ) cases hold"
             else
@@ -572,6 +582,18 @@ else
             no "(rank) slicerank_unit does not compile:"; grep -m4 -E 'error' "$WORK/rank_build.log" | sed 's/^/        /'
         fi
     fi
+fi
+
+# the harness-side twin of the same rule (bench/slice/score_arise_linerank.py, rv-arise-line-ranking.md
+# MEDIUM-2) — self-test only, no corpus read.
+if command -v python3 >/dev/null 2>&1; then
+    if PYRANK_OUT="$( python3 "$ROOT/bench/slice/score_arise_linerank.py" --self-test 2>&1 )"; then
+        ok "(rank) score_arise_linerank.py --self-test: $( printf '%s\n' "$PYRANK_OUT" | grep -c '  PASS' | tr -d ' ' ) cases hold"
+    else
+        no "(rank) score_arise_linerank.py --self-test failed:"; printf '%s\n' "$PYRANK_OUT" | grep FAIL | sed 's/^/        /'
+    fi
+else
+    echo "  SKIP  (rank) score_arise_linerank.py --self-test — python3 unavailable"
 fi
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'

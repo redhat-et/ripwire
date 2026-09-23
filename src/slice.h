@@ -67,6 +67,7 @@
 #include <deque>       // SliceRdWalker::arena — stable references across growth, for the explicit work stack's per-branch locals
 #include <functional>  // SliceRdWalker::SliceRdStep — the explicit work stack's pending continuations
 #include <iterator>    // std::size — the kOccTagNames extent
+#include <numeric>     // std::iota — the identity permutation in sliceRowSortedOrder
 #include <cstdlib>     // getenv — the RIPWIRE_TEST_SLICE_RD_MAXITERS arming hook
 #include <cstring>
 #include <memory>      // shared_ptr — a child list / flag shared across a chain of scheduled continuations
@@ -3299,23 +3300,21 @@ inline std::vector<std::uint32_t> sliceRowHasAnyDef( const SliceScan& scan, cons
 // sorts in place, then the sort itself — the whole "identity, sort by Less, return" skeleton every row
 // order below shares, templated on the comparator so the skeleton has exactly one body rather than one
 // copy per order function (quality-delta's own duplication lens polices exactly this kind of repeat).
+// std::iota, the standard spelling this codebase already uses for an identity permutation (ingest_astquery.h,
+// ingest_parsepool.h) — not a hand-rolled index loop.
 template<class Less>
 inline std::vector<std::uint32_t> sliceRowSortedOrder( std::size_t rowCount, Less less )
 {
     std::vector<std::uint32_t> order( rowCount );
-    for( std::uint32_t rowIndex = 0; rowIndex < rowCount; ++rowIndex )
-    {
-        order[ rowIndex ] = rowIndex;
-    }
+    std::iota( order.begin(), order.end(), 0u );
     std::sort( order.begin(), order.end(), less );
     return order;
 }
 
 // the tail every row order falls through to once its own primary/secondary keys tie: line ascending,
 // then binding line ascending, then row index ascending — a total order, so nothing is left to container
-// order. Shared by sliceDefUseRowOrder, sliceLineRankAttemptOrder and sliceStatedOrder so the tail cannot
-// drift between them (it did not before this extraction either — this is a pure, behavior-preserving
-// factoring of what was three copies of the same four lines).
+// order. Shared by sliceDefUseRowOrder and sliceLineRankAttemptOrder so the tail cannot drift between
+// them (it did not before this extraction either — this is a pure, behavior-preserving factoring).
 inline bool sliceRowLineOrderLess( const SliceScan& scan, const std::vector<SliceLineRow>& rows, std::uint32_t a, std::uint32_t b )
 {
     if( rows[ a ].line != rows[ b ].line )
@@ -3352,22 +3351,44 @@ inline std::vector<std::uint32_t> sliceDefUseRowOrder( const SliceScan& scan, co
 // The ARISE draft PR (#318): --slice's line ranking, measured over the WHOLE function span an agent sees before
 // filtering (docs/research/slice-line-recall.md §R4, unmerged origin/lane/research-arise-slice), is at
 // chance: R1 def-use coverage (= sliceDefUseRowOrder above) scores Recall@1 = 0.048 against a 0.042 random
-// control — "no effect worth naming" in that note's own words. The owner's stop condition: one honest
-// attempt, or stop claiming to rank and emit a stated order instead. This is that attempt, and its fallback,
-// wired behind ONE constant so a future round with the real corpus can select the verdict by flipping it —
-// no other code changes. Both paths compile, are exercised by test/slicerank_unit.cpp against synthetic
-// fixtures, and are NOT reachable from the CLI today (kSliceLineRankVerdict == Pending leaves sliceRowEmitOrder
-// calling sliceDefUseRowOrder exactly as before — zero behavior change to the shipped, already-ADOPTED
-// order="defuse" claim, which this file does not touch or retract).
+// control — "no effect worth naming" in that note's own words. This is that attempt, wired behind ONE
+// constant so a future round with the real corpus can select the verdict by flipping it. It compiles, is
+// exercised by test/slicerank_unit.cpp against synthetic fixtures AND a real parsed fixture, and is NOT
+// reachable from the CLI today (kSliceLineRankVerdict == Pending leaves sliceRowEmitOrder calling
+// sliceDefUseRowOrder exactly as before — zero behavior change to the shipped, already-ADOPTED
+// order="defuse" claim).
+//
+// NO STATED-ORDER FALLBACK HERE (revised after adversarial review, rv-arise-line-ranking.md HIGH-4). A first
+// draft of this section also wired an order="source" fallback for a FAIL verdict — wrong: `docs/EVALS.md`'s
+// "def-use row order" registration already ADOPTED order="defuse" on ITS OWN pool (the rows --slice emits),
+// measured to beat a random shuffle there (MRR 0.628 vs 0.602) while plain source order measured WORSE than
+// random on the same pool (0.525). A FAIL on THIS (wider, whole-function-span) attempt is a negative answer
+// to a DIFFERENT question than the one EVALS already answered YES to; un-shipping defuse in response would
+// replace an order proven to beat random with one proven to lose to random, on the very rows in play. So:
+// FAIL keeps order="defuse" exactly as it ships today — nothing in this file changes — and only the
+// LEGEND DISCLOSURE (scoping "ranked" to "these rows", not "the whole function") changes, which pre-reg §4
+// says explicitly is a future commit that ships WITH the verdict, not speculative prose landed now (§4's own
+// byte-identity finding, rv-arise-line-ranking.md HIGH-5). PASS additionally requires the attempt to also
+// clear EVALS' own narrow-pool bar (defrole's MRR on the 478 pairs >= defuse's measured 0.628) before it may
+// replace defuse — a PASS that clears the wide pool but not the narrow one is reported, not shipped: the
+// constant simply stays Pending. This is why the enum below has two states, not three.
 enum class SliceLineRankVerdict : std::uint8_t
 {
-    Pending,      // no verdict yet (default): emit exactly today's shipped order="defuse" behavior, unchanged
-    Ranked,       // the pre-registered attempt PASSED its verdict rule: emit order="defrole"
-    StatedOrder,  // the pre-registered attempt FAILED (the stop condition fired): emit order="source", disclosed as not ranked
+    Pending,   // no verdict yet (the default) — OR a verdict that does not license shipping defrole (a
+               // wide-pool FAIL, or a wide-pool PASS that does not also clear EVALS' narrow-pool bar): emit
+               // exactly today's shipped order="defuse" behavior, unchanged.
+    Ranked,    // the attempt cleared BOTH the wide-pool margin-bar rule AND the narrow-pool MRR floor:
+               // emit order="defrole".
 };
 
 // A future round flips this ONE constant once docs/research/arise-line-ranking-prereg.md §4's verdict is
-// computed on the real corpus — nothing else in this file changes. Pending until then.
+// computed on the real corpus. Pending until then. NOT a "nothing else changes" flip, though: the static
+// legend/help strings below (sliceRowOrderName's Pending branch, and the "order" readings in
+// src/slice.h's own v1/v2 legend blocks and src/compactlegend.h) describe order="defuse" only and would
+// then be WRONG about a live Ranked build — the flip commit must ALSO edit those three sites (listed here
+// so it cannot miss one; rv-arise-line-ranking.md MEDIUM-1). Deliberately not solved by a compile-time
+// legend-text switch here: that would mean carrying unverified "defrole" prose in this tree today, which is
+// exactly the forward-looking-prose byte growth HIGH-5 found and this file no longer ships.
 inline constexpr SliceLineRankVerdict kSliceLineRankVerdict = SliceLineRankVerdict::Pending;
 
 // the ONE attempt (pre-reg §3.1, "def-primacy"): score = ( hasAnyDef(l) desc, coverage(l) desc, l asc ),
@@ -3376,7 +3397,12 @@ inline constexpr SliceLineRankVerdict kSliceLineRankVerdict = SliceLineRankVerdi
 // and sliceRowCoverage above; NOT SliceLineRow::hasDef, which is the one seed's own role only — see
 // sliceRowHasAnyDef's own comment) — zero fitted parameters, nothing tuned against a corpus. A pure
 // integer lexicographic sort: no float score, no epsilon tie-break (CONTRIBUTING.md "a sort has no
-// tolerance band").
+// tolerance band"). KNOWN STRUCTURAL LIMIT, disclosed rather than fixed after seeing it (pre-reg §3.4,
+// rv-arise-line-ranking.md's Attack 2): a function's signature line rows every parameter as k="def"
+// t="param", so on a function whose parameter count is that function's own maximum per-line coverage, R0
+// (source order — the signature is line 1), R1 (coverage-max) AND this attempt (hasAnyDef=1 from the
+// params, coverage-max too) all rank the signature line first alike — this attempt's gains over R1 are
+// concentrated in instances where R1's own top pick was a pure-use line, not the signature.
 inline std::vector<std::uint32_t> sliceLineRankAttemptOrder( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
 {
     const std::vector<std::uint32_t> coverage  = sliceRowCoverage( scan, rows );
@@ -3391,35 +3417,29 @@ inline std::vector<std::uint32_t> sliceLineRankAttemptOrder( const SliceScan& sc
     } );
 }
 
-// the stop-condition fallback (pre-reg §4 FAIL branch): a STATED order, never claiming to rank — pure source
-// (line-ascending) order, the same tie-break tail as the other two orders so the total order is still exact.
-inline std::vector<std::uint32_t> sliceStatedOrder( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
+// the single dispatch point the emitter calls (replacing a direct sliceDefUseRowOrder call). Takes the
+// verdict as a PARAMETER rather than reading kSliceLineRankVerdict itself (rv-arise-line-ranking.md
+// MEDIUM-4: a dispatcher that reads a compile-time constant internally can never have its non-default arm
+// exercised by a test — the constant is always Pending in any build a test can run) — the one production
+// call site below passes kSliceLineRankVerdict, so "one constant selects the path" is still exactly true
+// there, while test code can pass Ranked directly and genuinely exercise that switch arm.
+inline std::vector<std::uint32_t> sliceRowEmitOrder( SliceLineRankVerdict verdict, const SliceScan& scan, const std::vector<SliceLineRow>& rows )
 {
-    return sliceRowSortedOrder( rows.size(), [ & ]( std::uint32_t a, std::uint32_t b )
-    { return sliceRowLineOrderLess( scan, rows, a, b ); } );
-}
-
-// the single dispatch point the emitter calls (replacing a direct sliceDefUseRowOrder call) — kSliceLineRankVerdict
-// is the ONE flag the pre-registered verdict flips; everything downstream (row order AND the order= attribute
-// name, sliceRowOrderName below) follows it automatically.
-inline std::vector<std::uint32_t> sliceRowEmitOrder( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
-{
-    switch( kSliceLineRankVerdict )
+    switch( verdict )
     {
-        case SliceLineRankVerdict::Ranked:      return sliceLineRankAttemptOrder( scan, rows );
-        case SliceLineRankVerdict::StatedOrder: return sliceStatedOrder( scan, rows );
-        case SliceLineRankVerdict::Pending:     default: return sliceDefUseRowOrder( scan, rows );
+        case SliceLineRankVerdict::Ranked:  return sliceLineRankAttemptOrder( scan, rows );
+        case SliceLineRankVerdict::Pending: default: return sliceDefUseRowOrder( scan, rows );
     }
 }
 
-// the root order= attribute value, paired 1:1 with sliceRowEmitOrder's choice above.
-inline constexpr const char* sliceRowOrderName() noexcept
+// the root order= attribute value, paired 1:1 with sliceRowEmitOrder's choice above. Same parameterization
+// reason as sliceRowEmitOrder.
+inline constexpr const char* sliceRowOrderName( SliceLineRankVerdict verdict ) noexcept
 {
-    switch( kSliceLineRankVerdict )
+    switch( verdict )
     {
-        case SliceLineRankVerdict::Ranked:      return "defrole";
-        case SliceLineRankVerdict::StatedOrder: return "source";
-        case SliceLineRankVerdict::Pending:     default: return kSliceRowOrderName;
+        case SliceLineRankVerdict::Ranked:  return "defrole";
+        case SliceLineRankVerdict::Pending: default: return kSliceRowOrderName;
     }
 }
 
@@ -3499,7 +3519,7 @@ inline void sliceEmitBody( std::string& out, const SliceScan& scan, std::string_
         // today (Pending) this is exactly sliceDefUseRowOrder, unchanged.
         const std::vector<SliceLineRow>                rows       = sliceFoldLines( scan.occ );
         const std::vector<std::vector<std::uint32_t>> reachLines = sliceRowReachLines( scan );
-        for( const std::uint32_t rowIndex : sliceRowEmitOrder( scan, rows ) )
+        for( const std::uint32_t rowIndex : sliceRowEmitOrder( kSliceLineRankVerdict, scan, rows ) )
         {
             const SliceLineRow& r = rows[ rowIndex ];
             out += "<s l=\"" + std::to_string( r.line ) + "\" k=\"";
@@ -3651,7 +3671,7 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
             }
         }
         out += " order=\"";   // the seed rows' emission order — an ordering the reader cannot see is a quiet claim
-        out += sliceRowOrderName();   // paired 1:1 with sliceRowEmitOrder's choice above; "defuse" while Pending
+        out += sliceRowOrderName( kSliceLineRankVerdict );   // paired 1:1 with sliceRowEmitOrder's choice above; "defuse" while Pending
         out += "\"";
     }
 

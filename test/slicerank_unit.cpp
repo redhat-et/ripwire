@@ -1,9 +1,15 @@
 // slicerank_unit.cpp — the unit-level half of test/slicecheck.sh's "(rank)" arm, mirroring
 // test/macroreparse_unit.cpp's shape: compiled ad hoc against the real CMake flags and run standalone.
 //
-// What this pins, on SYNTHETIC fixtures built in-process (no parser, no corpus — the real LocBench
-// scoring lives on origin/lane/research-arise-slice and needs a corpus this machine does not have,
-// docs/research/arise-line-ranking-prereg.md §1):
+// Revised after adversarial review (rv-arise-line-ranking.md MEDIUM-4): item (3) — a synthetic
+// sliceStatedOrder test — is REMOVED, because sliceStatedOrder itself was removed (HIGH-4: a FAIL verdict
+// keeps order="defuse", it does not introduce a new fallback order). Item (4) is FIXED to genuinely
+// exercise sliceRowEmitOrder's switch (the dispatcher now takes the verdict as a parameter, so a test can
+// pass Ranked directly instead of only ever observing the compile-time Pending default). Item (6) is NEW:
+// the real tree-sitter Python classifier, not a hand-built synthetic scan.
+//
+// What this pins (no corpus — the real LocBench scoring lives on origin/lane/research-arise-slice and
+// needs a corpus this machine does not have, docs/research/arise-line-ranking-prereg.md §1):
 //
 //   (1) sliceRowEmitOrder( Pending, ... ) reproduces sliceDefUseRowOrder( ... ) EXACTLY — the default
 //       path is byte-for-byte the shipped, already-ADOPTED order="defuse" behavior. This is the
@@ -12,25 +18,33 @@
 //       sliceDefUseRowOrder on a fixture built so the two rules MUST disagree — a line with a
 //       definition but lower coverage is promoted ahead of a higher-coverage line with no definition.
 //       This is the RED (against the coverage-only rule) / GREEN (against this rule) proof.
-//   (3) sliceStatedOrder (the stop-condition fallback, pre-reg §4 FAIL branch) is pure source
-//       (line-ascending) order — no coverage or def signal at all, even on the same fixture where (1)
-//       and (2) disagree.
-//   (4) sliceRowEmitOrder dispatches to each of the three by kSliceLineRankVerdict — proven by calling
-//       it three times against a stub scope (the switch itself, not the constant, since the constant is
-//       a compile-time Pending default; the dispatch arms are exercised directly here).
+//   (4) sliceRowEmitOrder(verdict, ...) genuinely dispatches on its VERDICT PARAMETER: passing Pending
+//       and Ranked directly exercises both switch arms and each matches its own named function's output
+//       on the same fixture. (Determinism is also checked: each arm called twice agrees.)
 //   (5) sliceRowHasAnyDef is seed-free: it is 1 on a line whenever ANY tracked local (not only the
 //       fixture's own "seed" rows) has a definition there — proven by a local that never appears in
 //       `rows` at all still setting hasAnyDef=1 on a line `rows` DOES cover.
+//   (6) sliceRowHasAnyDef, run on a REAL Python fixture parsed by the real tree-sitter grammar
+//       (sliceScanDefinition, not a hand-built SliceScan), agrees with an INDEPENDENT second computation
+//       over the same real scan.all (a per-binding scan rather than sliceRowHasAnyDef's own single-pass,
+//       sorted-name-set binary search) — the code<->real-classifier equivalence rv-arise-line-ranking.md
+//       MEDIUM-2 says a harness PASS needs to transfer to the binary.
 //
 // Exit 0 = all cases hold.
 
 #include "slice.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <numeric>
 #include <string>
 #include <string_view>
 #include <vector>
+
+// The Python grammar object CMake already builds into the ripwire target (TARGET_OBJECTS:ts_python) —
+// forward-declared rather than pulling in a grammar header, the same minimal-declaration shape
+// src/verbs_doctor.h already uses for tree_sitter_cpp().
+extern "C" const TSLanguage* tree_sitter_python( void );
 
 namespace
 {
@@ -134,10 +148,11 @@ int main()
 
     // ── (1) Pending reproduces sliceDefUseRowOrder exactly ──────────────────────────────────────────
     {
-        const std::vector<std::uint32_t> viaOrder    = rw::slicev::sliceDefUseRowOrder( scan, rows );
-        const std::vector<std::uint32_t> viaDispatch  = rw::slicev::sliceRowEmitOrder( scan, rows );   // kSliceLineRankVerdict == Pending
-        const bool                       same         = viaOrder == viaDispatch;
-        report( same, "(1) sliceRowEmitOrder( Pending ) == sliceDefUseRowOrder — byte-for-byte, zero regression",
+        const std::vector<std::uint32_t> viaOrder = rw::slicev::sliceDefUseRowOrder( scan, rows );
+        const std::vector<std::uint32_t> viaDispatch =
+            rw::slicev::sliceRowEmitOrder( rw::slicev::SliceLineRankVerdict::Pending, scan, rows );
+        const bool same = viaOrder == viaDispatch;
+        report( same, "(1) sliceRowEmitOrder( Pending, ... ) == sliceDefUseRowOrder — byte-for-byte, zero regression",
                 same ? "" : "orders " + ordToStr( viaOrder, rows ) + " vs " + ordToStr( viaDispatch, rows ) + " differ" );
         // coverage-only expectation on this fixture: line 10 (cov=3) > line 11 (cov=2) > line 12 (cov=1)
         expectOrder( "(1) sliceDefUseRowOrder on the fixture: coverage-descending", viaOrder, rows, "10,11,12" );
@@ -157,22 +172,20 @@ int main()
                 ranked == base ? "orders are identical — the fixture failed to separate the two rules" : "" );
     }
 
-    // ── (3) sliceStatedOrder is pure source order, ignoring both coverage and def signal ────────────
+    // ── (4) sliceRowEmitOrder(verdict, ...) genuinely dispatches on its parameter ────────────────────
     {
-        const std::vector<std::uint32_t> stated = rw::slicev::sliceStatedOrder( scan, rows );
-        expectOrder( "(3) sliceStatedOrder is line-ascending regardless of coverage/def (10,11,12, unchanged"
-                     " from the fixture's own row order since rows are already line-sorted)",
-                     stated, rows, "10,11,12" );
-    }
-
-    // ── (4) sliceRowEmitOrder dispatches to each rule ────────────────────────────────────────────────
-    {
-        // The dispatcher's Ranked/StatedOrder arms are exercised directly (kSliceLineRankVerdict is a
-        // compile-time Pending default in production; this proves the SWITCH bodies, not the constant).
-        const std::vector<std::uint32_t> viaRanked = rw::slicev::sliceLineRankAttemptOrder( scan, rows );
-        const std::vector<std::uint32_t> viaStated = rw::slicev::sliceStatedOrder( scan, rows );
-        report( viaRanked == rw::slicev::sliceLineRankAttemptOrder( scan, rows ), "(4) the Ranked path is deterministic (called twice, same order)", "" );
-        report( viaStated == rw::slicev::sliceStatedOrder( scan, rows ), "(4) the StatedOrder path is deterministic (called twice, same order)", "" );
+        const std::vector<std::uint32_t> viaPending =
+            rw::slicev::sliceRowEmitOrder( rw::slicev::SliceLineRankVerdict::Pending, scan, rows );
+        const std::vector<std::uint32_t> viaRanked =
+            rw::slicev::sliceRowEmitOrder( rw::slicev::SliceLineRankVerdict::Ranked, scan, rows );
+        report( viaPending == rw::slicev::sliceDefUseRowOrder( scan, rows ),
+                "(4) sliceRowEmitOrder( Pending, ... ) matches sliceDefUseRowOrder — the switch's Pending arm, exercised directly", "" );
+        report( viaRanked == rw::slicev::sliceLineRankAttemptOrder( scan, rows ),
+                "(4) sliceRowEmitOrder( Ranked, ... ) matches sliceLineRankAttemptOrder — the switch's Ranked arm, exercised directly", "" );
+        report( viaPending != viaRanked,
+                "(4) the two dispatched arms actually differ on this fixture (10,11,12 vs 11,12,10) — the switch is not a no-op", "" );
+        report( viaRanked == rw::slicev::sliceRowEmitOrder( rw::slicev::SliceLineRankVerdict::Ranked, scan, rows ),
+                "(4) the Ranked arm is deterministic (dispatched twice, same order)", "" );
     }
 
     // ── (5) sliceRowHasAnyDef is seed-free — line 11 is hasAnyDef=1 from OTHER1's def, not the seed's ──
@@ -187,6 +200,85 @@ int main()
                 ok ? "" : "hasAnyDef=[" + std::to_string( hasAnyDef.size() > 0 ? hasAnyDef[0] : 9 )
                              + "," + std::to_string( hasAnyDef.size() > 1 ? hasAnyDef[1] : 9 )
                              + "," + std::to_string( hasAnyDef.size() > 2 ? hasAnyDef[2] : 9 ) + "]" );
+    }
+
+    // ── (6) sliceRowHasAnyDef vs. an independent scan of a REAL, tree-sitter-parsed Python fixture ───
+    {
+        const std::string src =
+            "def compute(a, b):\n"
+            "    total = a + b\n"
+            "    scale = 2\n"
+            "    return total * scale\n";
+
+        rw::Symbol sym;
+        sym.sigStartByte = 0;
+        sym.endByte      = static_cast<std::uint32_t>( src.size() );
+        sym.lang         = rw::Lang::Python;
+        sym.name         = "compute";
+
+        const rw::slicev::SliceScan real =
+            rw::slicev::sliceScanDefinition( src, sym, rw::slicev::SliceFam::Py, tree_sitter_python(), std::string_view() );
+
+        const bool parsed = real.parseOk && !real.bindings.empty();
+        report( parsed, "(6) a real Python fixture parses through the actual tree-sitter grammar and finds sliceable locals",
+                parsed ? "" : "parseOk=" + std::string( real.parseOk ? "1" : "0" ) + " bindings=" + std::to_string( real.bindings.size() ) );
+
+        if( parsed )
+        {
+            // Independent computation #1: a per-BINDING scan of scan.all (loop order and shape different
+            // from sliceRowHasAnyDef's own single-pass, sorted-name binary search) — not a call to the
+            // function under test.
+            std::vector<std::uint32_t> expectedDefLines;
+            for( const rw::slicev::SliceBinding& b : real.bindings )
+            {
+                for( const rw::slicev::SliceNamedOcc& no : real.all )
+                {
+                    if( no.name == b.name && no.occ.isDef )
+                    {
+                        expectedDefLines.push_back( no.occ.line );
+                    }
+                }
+            }
+            std::sort( expectedDefLines.begin(), expectedDefLines.end() );
+            expectedDefLines.erase( std::unique( expectedDefLines.begin(), expectedDefLines.end() ), expectedDefLines.end() );
+
+            std::vector<std::uint32_t> allLines;
+            for( const rw::slicev::SliceNamedOcc& no : real.all ) { allLines.push_back( no.occ.line ); }
+            std::sort( allLines.begin(), allLines.end() );
+            allLines.erase( std::unique( allLines.begin(), allLines.end() ), allLines.end() );
+
+            std::vector<rw::slicev::SliceLineRow> testRows;
+            for( std::uint32_t line : allLines )
+            {
+                rw::slicev::SliceLineRow r;
+                r.line = line;
+                testRows.push_back( r );
+            }
+
+            const std::vector<std::uint32_t> got = rw::slicev::sliceRowHasAnyDef( real, testRows );
+            bool        allMatch = got.size() == testRows.size();
+            std::string mismatch;
+            for( std::size_t i = 0; allMatch && i < testRows.size(); ++i )
+            {
+                const bool expectedIsDef = std::binary_search( expectedDefLines.begin(), expectedDefLines.end(), testRows[ i ].line );
+                const bool gotIsDef      = got[ i ] != 0;
+                if( expectedIsDef != gotIsDef )
+                {
+                    allMatch = false;
+                    mismatch = "line " + std::to_string( testRows[ i ].line ) + ": independent scan says "
+                             + std::to_string( expectedIsDef ) + ", sliceRowHasAnyDef says " + std::to_string( gotIsDef );
+                }
+            }
+            // Not vacuous: the fixture must actually contain both a def line (params/assignments) and a
+            // non-def line (the pure-use `return` line) for this to test anything.
+            const bool separates = !expectedDefLines.empty() && expectedDefLines.size() < allLines.size();
+            report( allMatch && separates,
+                    "(6) sliceRowHasAnyDef on the real parse agrees, line for line, with an independent per-binding"
+                    " scan of the same real scan.all — the def/non-def split is genuine (not every line is a def, not none are)",
+                    !allMatch ? mismatch
+                              : ( separates ? "" : "expectedDefLines=" + std::to_string( expectedDefLines.size() )
+                                                  + " allLines=" + std::to_string( allLines.size() ) + " — fixture did not separate def/non-def lines" ) );
+        }
     }
 
     std::fprintf( stderr, "slicerank_unit: %d pass, %d fail\n", passes, failures );
