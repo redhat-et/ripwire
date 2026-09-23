@@ -1,6 +1,6 @@
 # ripwire documentation
 
-Sixteen entries, each written for one reader. Start with the row that matches why you are here.
+Twenty-one entries, each written for one reader. Start with the row that matches why you are here.
 
 | File | Who it is for | What it answers |
 | --- | --- | --- |
@@ -22,6 +22,7 @@ Sixteen entries, each written for one reader. Start with the row that matches wh
 | **[`gatecount_build.py`](gatecount_build.py)** | Maintainers, and anyone adding a gate | The generator behind the **published gate count**. Derives it from the single `for _g in …; do` loop in `test/regression.sh` and rewrites all eight marked sites across `README.md`, `EVALS.md` and the deck; `--check` is the drift comparison that `test/gatecountcheck.sh` runs. Never edit that number by hand — two lanes hand-writing the same N+1 auto-merge clean against a loop of N+2. |
 | **[`limits_classes.tsv`](limits_classes.tsv)** | Maintainers | Cap name -> INDEXING or OUTPUT, the taxonomy `LIMITS.md` renders in its `class` column: does this cap bound what can EVER be found, or only what is shown from what was found. A sidecar with a known expiry — the tag belongs on the declaration in `src/` — kept honest by `limitstablecheck.sh`, which fails if a row names a cap that no longer exists. |
 | **[`lineage-paper-dates.tsv`](lineage-paper-dates.tsv)** | Maintainers | arXiv id -> publication date for every 2026 paper in `LINEAGE.md`. The ID stem does not track the date (`2607.09691` was published 2026-06-19), so the README's recency claim is re-derived from this file by `readmedriftcheck.sh` arm (H2) rather than from the ids. Adding a 2026 paper without a date row fails that arm. |
+| **[`research/`](research/)** | Anyone working on an open question here, or offering to help with one | Investigation notes: a question this tool has not answered, the measurement run against it, and the pre-registration that says what would license a change. Not a claim surface — a number here is local evidence for a decision not yet taken, and nothing in it is quoted on `README.md`. |
 | **[`assets/`](assets/)** | The front page | The README banner and tagline artwork (SVG, self-contained). |
 | **[`captures/`](captures/)** | Maintainers, and the curious | One recorded run of every verb against a real repository — the source of `COMMANDS.md`'s sample output, and the harvest source for the differential argv harness. |
 
