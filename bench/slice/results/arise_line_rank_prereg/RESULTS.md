@@ -15,6 +15,15 @@ The baseline binary was built as a precaution for §1.3's binary-drift re-finger
 invoked — tiers (b)/(c) matched directly under the lane binary, so no drift rescue fired
 (`binary_drift_disclosed: false` in `verdict.json`).
 
+## Harness code (Condition B)
+
+`bench/slice/run_slice_linerecall_r3.py` (committed alongside this results commit) is the exact script
+that produced `results.json`/`scorer-results.json` in this directory — a fork of
+`run_slice_linerecall.py` (`origin/lane/research-arise-slice`) adding the R3 arm. An independent
+reviewer's own reconstruction from the pre-reg text alone reproduced this lane's per-instance results
+with 0 field differences and a byte-identical `verdict.json` (`reports/rv-arise-line-ranking.md`,
+result-review §2).
+
 ## Asset tree
 
 `<assets>/r4-arise` (owner-supplied, not fetched by this lane). 88 held-out repo checkouts, all 182
@@ -89,19 +98,31 @@ case; a plain instance of the mechanism itself failing to help.
 Re-measured in this run, same corpus, `bench/slice/score_arise_narrowpool.py` (committed
 `5b12674f` — the branch's second commit, before this scoring run):
 
-| arm | var_instances (pairs) | MRR |
-| --- | ---: | ---: |
-| defuse (re-measured here) | 506 | 0.60212 |
-| defrole (this attempt) | 506 | 0.57042 |
-| defuse (EVALS.md published, for reference) | 478 | 0.628 |
+| arm | population | var_instances (pairs) | MRR |
+| --- | --- | ---: | ---: |
+| defuse, this script's own definition | wider (no span/skip restriction, regex-named-gold pairing) | 506 | 0.60212 |
+| defrole, this script's own definition | (same) | 506 | 0.57042 |
+| defuse, filtered to EVALS' own definition | span-restricted + expand/gold-outside-span skips, "rows hold a gold line" pairing | 484 | 0.6295 |
+| defrole, filtered to EVALS' own definition | (same) | 484 | 0.5963 |
+| defuse, EVALS.md published (for reference) | EVALS' own run, same definition | 478 | 0.628 |
 
-Both counts (506 vs the registered 478) and defuse's re-measured MRR (0.602 vs the published 0.628) are
-disclosed mismatches — expected per §4.3.2's own note that this is a fresh, committed re-implementation
-of EVALS' uncommitted scratch arm, not an import of it, run against a possibly slightly different tree
-construction. `defrole < defuse` either way: the narrow-pool bar (`MRR(defrole) >= MRR(defuse)`,
-re-measured) also does not clear. Consistent with the wide-pool result, not merely uncontradicted by it.
+**Correction (independent review, `reports/rv-arise-line-ranking.md` result-review §1, Condition A):**
+506 vs 478 and 0.602 vs 0.628 are a **definition difference between the two scripts, not tree drift or a
+re-measured control.** `score_arise_narrowpool.py` (i) never restricts gold to the resolved span and
+never applies the `--expand`-no-body / gold-outside-span skips `run_slice_linerecall_r3.py` applies —
+its 506 pairs include 7 extra pairs from 3 instances (`Chainlit__chainlit-1534`, `django__django-6478`,
+`scikit-learn__scikit-learn-30241`) the wide-pool harness excludes; (ii) defines a pair by the regex
+oracle (gold line TEXT names the variable) rather than EVALS' "rows hold a gold line," giving 22 pairs
+with `defuse_mrr == 0` by construction that EVALS' own definition would not count the same way. Filtering
+to EVALS' own definition reproduces its published figure closely (484 pairs, defuse MRR 0.6295 vs the
+published 478/0.628) — no control was re-measured either way; only `defuse`/`defrole` orderings were
+computed, both fixed row orderings with no shuffle involved. `defrole < defuse` holds under BOTH
+definitions: the narrow-pool bar (`MRR(defrole) >= MRR(defuse)`) does not clear either way, consistent
+with the wide-pool result. Since a wide-pool FAIL already means nothing ships, this correction changes
+no outcome.
 
-## Outcome and licensed sentence (verbatim, `docs/research/arise-line-ranking-prereg.md` §6, FAIL row)
+## Outcome and licensed sentence (`docs/research/arise-line-ranking-prereg.md` §6, FAIL row, numbers
+filled in; one tense correction below the quote)
 
 **FAIL.**
 
@@ -110,10 +131,17 @@ re-measured) also does not clear. Consistent with the wide-pool result, not mere
 > It did not clear the pre-registered bar over the whole function span (R3@1 0.034 vs CTL@1 0.042, Δ =
 > −0.008, 95% CI [−0.031, 0.019]; at our sample size this could mean either no real effect or an effect
 > too small to detect — we report the numbers, not a claim about which). `--slice` does not claim to
-> rank lines over the whole function beyond what is proven, and says so in the legend and `--help`. The
-> narrower, already-shipped claim — that among the lines `--slice` already selects, def-use coverage
-> beats a random shuffle — is unaffected and stays the default: source order was measured WORSE than
-> random on those same rows, so replacing it with source order would be a regression, not a fix."
+> rank lines over the whole function beyond what is proven, and will say so once the disclosure change
+> lands. The narrower, already-shipped claim — that among the lines `--slice` already selects, def-use
+> coverage beats a random shuffle — is unaffected and stays the default: source order was measured
+> WORSE than random on those same rows, so replacing it with source order would be a regression, not a
+> fix."
+
+**Tense correction (independent review, Condition C):** §6's frozen template reads "...and says so in
+the legend and `--help`" (present tense). That is FALSE today: the legend/help disclosure §4.3.1
+pre-registers is not shipped by this lane (by design — see "What ships" below), so `--slice`'s current
+output does not yet say this. The quote above changes only that clause to future/conditional tense; §6's
+own template text is unedited (it was signed before any data and is not retroactively amended here).
 
 ## What ships
 

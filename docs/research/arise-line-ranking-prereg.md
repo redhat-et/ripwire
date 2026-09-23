@@ -694,29 +694,47 @@ signature-line case — a plain instance of the mechanism not helping.
 
 **§4.3.2, narrow-pool arm (informational — a wide-pool FAIL already means nothing ships regardless).**
 Re-measured in this run with the now-committed `bench/slice/score_arise_narrowpool.py`: defuse
-(re-measured) MRR 0.60212 over 506 pairs; defrole (this attempt) MRR 0.57042 over the same 506 pairs;
-defuse's EVALS.md-published figure was 0.628 over 478 pairs. Both the pair count and defuse's re-measured
-MRR are disclosed mismatches against EVALS' own registration — expected, since this arm is a fresh,
-committed re-implementation of EVALS' uncommitted scratch diff, not an import of it (§4.3.2's own
-anticipation of exactly this kind of drift). `defrole < defuse` either way: the narrow-pool bar
-(`MRR(defrole) >= MRR(defuse)`) does not clear, consistent with the wide-pool result.
+(this script's own definition) MRR 0.60212 over 506 pairs; defrole (this attempt, same definition) MRR
+0.57042 over the same 506 pairs; defuse's EVALS.md-published figure was 0.628 over 478 pairs.
+**Correction (independent review, Condition A): 506 vs 478 and 0.602 vs 0.628 are a DEFINITION
+difference between the two scripts, not tree drift, and no control was re-measured.**
+`score_arise_narrowpool.py` never restricts gold to the resolved span and never applies the
+`--expand`-no-body / gold-outside-span skips the wide-pool harness applies (7 extra pairs from 3
+instances outside the wide pool), and pairs a gold line by regex-naming the variable rather than
+EVALS' "rows hold a gold line" (22 pairs scoring 0 by construction under this script's definition).
+Filtered to EVALS' own definition, the SAME run gives 484 pairs, defuse MRR 0.6295, defrole MRR
+0.5963 — close to the published 478/0.628. `defrole < defuse` holds under BOTH definitions: the
+narrow-pool bar (`MRR(defrole) >= MRR(defuse)`) does not clear either way, consistent with the
+wide-pool result.
 
-**Outcome: FAIL.** Licensed sentence (§6, verbatim):
+**Outcome: FAIL.** Licensed sentence (§6, numbers filled in; one tense correction — see below):
 
 > "We pre-registered one honest attempt — definitions before uses, then coverage — before running it,
 > per your rule that a ranking claiming to rank at chance is the `--adaptive` defect in another costume.
 > It did not clear the pre-registered bar over the whole function span (R3@1 0.034 vs CTL@1 0.042, Δ =
 > −0.008, 95% CI [−0.031, 0.019]; at our sample size this could mean either no real effect or an effect
 > too small to detect — we report the numbers, not a claim about which). `--slice` does not claim to
-> rank lines over the whole function beyond what is proven, and says so in the legend and `--help`. The
-> narrower, already-shipped claim — that among the lines `--slice` already selects, def-use coverage
-> beats a random shuffle — is unaffected and stays the default: source order was measured WORSE than
-> random on those same rows, so replacing it with source order would be a regression, not a fix."
+> rank lines over the whole function beyond what is proven, and will say so once the disclosure change
+> lands. The narrower, already-shipped claim — that among the lines `--slice` already selects, def-use
+> coverage beats a random shuffle — is unaffected and stays the default: source order was measured
+> WORSE than random on those same rows, so replacing it with source order would be a regression, not a
+> fix."
+
+**Tense correction (independent review, Condition C):** §6's frozen template reads "...and says so in
+the legend and `--help`" (present tense) — false today, since the legend/help disclosure is not
+shipped by this lane (below). Only that clause is changed to future/conditional tense above; §6's own
+template, signed before any data, is unedited.
 
 **What ships: nothing in `src/`.** `order="defuse"` stays the default; `kSliceLineRankVerdict` stays
 `Pending`. Per §4.3.1 the legend/help disclosure change this document pre-registers is deliberately NOT
 shipped by this lane — it is worded above for a future, separately reviewed commit to land with this
 verdict, per §4.5's rule that outcome-describing prose belongs to the commit that ships the outcome.
+
+**Harness code (Condition B).** `bench/slice/run_slice_linerecall_r3.py`, committed alongside this
+results section, is the exact script (a fork of `run_slice_linerecall.py`,
+`origin/lane/research-arise-slice`, adding the R3 arm) that produced the `results.json` this section's
+numbers come from. An independent reviewer's own reconstruction from this document's text alone
+reproduced the per-instance results with 0 field differences and a byte-identical `verdict.json`.
 
 **Replication population.** 170 rows / 45 repos — not fetched or scored (owner decision, stated per
 §4.4, moot for shipping either way since the wide-pool result already FAILs).
