@@ -817,13 +817,16 @@ their sha256, and the asset tree's construction rule are committed at
   §5.4 does not pin a separate binary sha, only that every report name the one it used.
 - **Dataset:** LocBench V1 test, frozen 560-row slice, sha256
   `5bbcea4bff11396f38f8aca3e64d697a8ea1da2bc54d705da7f6e34886804c97` — matches §3.2's pinned hash.
-- **Asset tree:** rebuilt locally (the original 92-instance tree lived on different hardware).
+- **Asset tree:** `bench-assets/r4-rebuild`, rebuilt locally (host-directory prefix redacted from
+  the committed `calib.json`; the original 92-instance tree lived on different hardware).
   Construction rule: each held-out repository left checked out at its *last* instance's
-  `base_commit` in dataset order, giving 92 instances across 88 repositories. 87 repositories via
-  the standard `run_locbench.checkout()` path; **`UCL/TLOmodel` was checked out by hand with Git LFS
-  disabled, so its 152 LFS-tracked files are unresolved pointer files, not their real binary
-  content** (`git-lfs` was not installed on the machine that rebuilt the tree). Full provenance in
-  the committed `POPULATION.md`.
+  `base_commit` in dataset order, giving 92 instances across 88 repositories (rule inferred on this
+  machine from two recorded memberships and confirmed by the fingerprint — `POPULATION.md`). 87
+  repositories via the standard `run_locbench.checkout()` path; **`UCL/TLOmodel` was checked out by
+  hand with Git LFS disabled, so its ~150 LFS-tracked files (152 by the rebuild log; 159 pointer
+  files found on disk) are unresolved pointer files, not their real binary content**, none with an
+  extension the harness indexes (`git-lfs` was not installed on the machine that rebuilt the tree).
+  Full provenance in the committed `POPULATION.md`.
 - **Instance identity:** the 92 scored `instance_id` values are byte-identical, as a set, to the
   asset tree's own `candidate92.json` — this run's 92 are provably the tree's intended 92, not
   merely 92 rows that happened to score. List committed at `instance_ids.txt`, sha256
@@ -851,10 +854,18 @@ rule, not by disk provenance.
 | `func_hit` **(gating)** | 92 | 38 | 0.2780 | [0.1775, 0.3846] | `does_not_meet_opposite_direction` |
 | `file_hit` (exploratory, non-gating) | 92 | 15 | 0.3312 | [0.2022, 0.4726] | `does_not_meet_opposite_direction` |
 
-Both grains land at or below §5.2's `≤ 0.35` directional-refutation rung, under the registered
-orientation (larger `served_syms` == more miss evidence, §5.4.3). Per §5.4.3 this is reported as a
-clean result under that orientation — an AUROC anti-correlated with the registered direction — and
-is **not** flipped to report `1 − AUROC` as evidence for the opposite orientation.
+The intervals describe sampling variability on this one 92-row draw and are not a substitute for
+§5.2's replication on an independent sample (§5.4.5). Both grains land at or below §5.2's `≤ 0.35`
+directional-refutation rung, under the registered orientation (larger `served_syms` == more miss
+evidence, §5.4.3). Per §5.4.3 this is reported as a clean result under that orientation — an AUROC
+anti-correlated with the registered direction — and is **not** flipped to report `1 − AUROC` as
+evidence for the opposite orientation.
+
+**Post-hoc, not a result under this registration:** under the opposite orientation the same rows
+would read `1 − AUROC` = 0.722 (func_hit) / 0.669 (file_hit); the latter equals the prior exploratory
+file-grain figure (0.669, §5.4 header), which suggests the exploratory look was computed under that
+direction. That is a hypothesis for a fresh registration on ≥ 92 new held-out instances, not evidence
+about this sample, and it decides nothing here.
 
 **Threshold sweep (§5.4.4):** every candidate `t` in `V ∪ {max(V)+1}` was checked on `func_hit`
 (the sole gating grain); **no threshold reaches `false_warn ≤ 0.20` at `recall ≥ 0.50` together** —
@@ -879,13 +890,15 @@ reply may use, produced verbatim by the scoring code itself (not hand-composed h
 ### §5.5 consequence for `margin_bp` / `lane/for-margin-resolution`
 
 The fingerprint reproduced (§5.4.1) and the outcome is **FAIL**, not a real `"pass"` — so §5.5's
-second branch applies: **`margin_bp` gets exactly ONE re-score.** It runs on this same run and this
-same asset tree, with this same lane binary (`built_from=860b4dfb3`), reusing this section's
-already-proven §5.4.1 fingerprint unchanged (population, not statistic, gates it), the same band
-(false-warn ≤ 0.20 at miss-recall ≥ 0.50), the same gating grain (`func_hit`), and the same §5.4.4
-threshold procedure — substituting `margin_bp` for `served_syms` under the orientation §5.5 already
-fixed in advance (warn iff `margin_bp ≤ t`). `lane/for-margin-resolution` may land only if that one
-re-score PASSES (band met **and** SR-1 met); no second attempt, no new sample, no threshold search
-beyond §5.4's own procedure. **That re-score has not been run as part of this result** — this section
-only states which branch applies and what the re-score's terms are.
+second branch applies: **`margin_bp` gets exactly ONE re-score.** It runs on this same asset tree
+with `lane/for-margin-resolution`'s own binary — the only one that emits `margin_bp`; the binary used
+here (`built_from=860b4dfb3`) does not — and that run must itself reproduce §5.4.1's fingerprint
+unchanged (a property of the population, not of the statistic) before its `margin_bp` numbers count;
+a run that does not reproduce it decides nothing (§5.5). Same band (false-warn ≤ 0.20 at miss-recall
+≥ 0.50), same gating grain (`func_hit`), same §5.4.4 threshold procedure — substituting `margin_bp`
+for `served_syms` under the orientation §5.5 already fixed in advance (warn iff `margin_bp ≤ t`).
+`lane/for-margin-resolution` may land only if that one re-score PASSES (band met **and** SR-1 met);
+no second attempt, no new sample, no threshold search beyond §5.4's own procedure. **That re-score
+has not been run as part of this result** — this section only states which branch applies, on which
+binary, and what the re-score's terms are.
 

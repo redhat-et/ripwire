@@ -17,12 +17,20 @@ tree from the prior measurement round lived on different hardware. Construction 
 - **Population rule:** each held-out repository is left checked out at its *last* instance's
   `base_commit` in dataset order, giving **92 instances across 88 repositories**
   (`candidate92.json` in that tree).
+
+  **This rule was not carried over from the original tree** — it was inferred on this machine as the
+  simplest rule that reproduces the two membership facts the margin review put on record
+  (`django/django` @ `c334c1a8` and `openwisp/openwisp-users-286`; both hold in `candidate92.json`),
+  and then confirmed by §5.4.1's fingerprint and by the 92/92 instance-id identity below. It is a way
+  of building a candidate tree; the fingerprint is what decides whether it is the pre-registered one.
 - 87 of the 88 repositories were checked out by `run_locbench.checkout()` (depth-1 clone,
   `git clean -fdx`, one `.ripwire_at_<sha>` marker each).
 - **Manual deviation — `UCL/TLOmodel`.** Its checkout failed under `run_locbench.checkout()`
   because the machine's global gitconfig requires the Git LFS filter and `git-lfs` was not
-  installed. It was checked out by hand instead: LFS disabled, so its **152 LFS-tracked files are
-  unresolved pointer files, not their real binary content**; `git clean -fdx` was still run and the
+  installed. It was checked out by hand instead: LFS disabled, so its **~150 LFS-tracked files (152
+  by the rebuild log; 159 pointer files found on disk — a count nit, not material) are unresolved
+  pointer files, not their real binary content**, and none of them carry an extension the harness
+  indexes, so none can enter the index or the served head; `git clean -fdx` was still run and the
   checkout marker was written by hand to match what `checkout()` would have written. If a future
   re-run's fingerprint (below) ever fails, this repository is the first thing to redo, this time
   with real LFS content.
