@@ -367,6 +367,9 @@ def score(dataset: Sequence[dict], heldout_repos: set, summary: Optional[dict] =
     if not ok:
         return {"fingerprint": fp, "verdict": None, "stopped_at": "tier_a", "mismatches": mismatches}
 
+    if results is not None and summary is None:  # LOW-4: --results without --summary must not skip (b)/(c)
+        return {"fingerprint": fp, "verdict": None, "stopped_at": "tier_b_c_missing"}
+
     drift_disclosed = False
     if summary is not None:
         ok_b, mism_b = check_tier_b(summary)
@@ -511,6 +514,12 @@ def _self_test() -> int:
     check("score(): tier_a + tier_b/c pass + results given -> a real verdict, not None",
           end_to_end["verdict"] is not None and end_to_end["stopped_at"] is None, json.dumps(end_to_end))
     check("exit_code_for(): a real verdict (tiers passed) is exit 0", exit_code_for(end_to_end) == 0)
+
+    end_to_end_no_summary = score(dataset, heldout, results=results, registered_tier_a=stand_in_registered)
+    check("score(): --results without --summary must not skip tiers (b)/(c) (LOW-4)",
+          end_to_end_no_summary["verdict"] is None
+          and end_to_end_no_summary["stopped_at"] == "tier_b_c_missing", json.dumps(end_to_end_no_summary))
+    check("exit_code_for(): a tier_b_c_missing stop is exit 2", exit_code_for(end_to_end_no_summary) == 2)
 
     end_to_end_bad_summary = score(dataset, heldout, summary=drifted_summary, results=results,
                                     registered_tier_a=stand_in_registered)
