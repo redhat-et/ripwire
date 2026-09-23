@@ -32,12 +32,24 @@ from score_abstention_calibration import auroc
 
 
 # ── fixtures ─────────────────────────────────────────────────────────────────────────────────────────
-def mkrow( repo, served_syms, file_hit, func_hit, confidence="low", margin_pct=0 ):
+def mkrow( repo, served_syms, file_hit, func_hit, confidence="low", margin_pct=0, margin_bp=None ):
     """A hand-built row in exactly the shape calibrate_confidence.py's grade()/measure_instance()
     produce: instance_id/repo/served_syms/file_hit/func_hit/confidence/margin_pct at minimum — the
-    fields served_syms_signal.py actually reads."""
+    fields served_syms_signal.py actually reads. `margin_bp` (R-MARGIN, §5.5) defaults to None like a
+    row scored on a binary that does not emit it; tests that exercise `score_margin_bp` pass it."""
     return dict( instance_id="%s#%d" % ( repo, served_syms ), repo=repo, served_syms=served_syms,
-                file_hit=file_hit, func_hit=func_hit, confidence=confidence, margin_pct=margin_pct )
+                file_hit=file_hit, func_hit=func_hit, confidence=confidence, margin_pct=margin_pct,
+                margin_bp=margin_bp )
+
+
+def mkrow_margin( repo, margin_bp, file_hit, func_hit, confidence="low", margin_pct=0, served_syms=0 ):
+    """R-MARGIN (§5.5) fixture helper: a row keyed by `margin_bp` instead of `served_syms` (the field
+    `score_margin_bp` actually reads). `served_syms` defaults to 0 and is irrelevant to every test that
+    uses this helper -- present only because `mkrow`'s shape carries it and some shared code paths
+    (none that `score_margin_bp` itself uses) might expect the key to exist."""
+    return dict( instance_id="%s#%d" % ( repo, margin_bp ), repo=repo, served_syms=served_syms,
+                file_hit=file_hit, func_hit=func_hit, confidence=confidence, margin_pct=margin_pct,
+                margin_bp=margin_bp )
 
 
 def synthetic_summary( n=92, confidence_low=74, confidence_high=18,
@@ -461,6 +473,179 @@ def test_score_served_syms_pass_sentence_reports_other_grain_band_vs_safe_separa
     assert "does not meet the same band" not in sentence         # the retired (ambiguous) phrasing
 
 
+# ── R-MARGIN (§5.5) — the generalised direction/statistic primitives, and score_margin_bp() ──────────
+def test_sweep_direction_ge_default_matches_original_sweep():
+    """The generalisation must not change served_syms's own table: `sweep(labels, values)` (the
+    original, still-exported name) must equal `S._sweep_dir(labels, values, "ge")` (the new internal
+    engine's "ge" path) EXACTLY, on the same fixture `test_sweep_candidate_set_and_boundary_rows`
+    already uses -- proof that generalising for margin_bp did not perturb served_syms's own numbers."""
+    labels = [ True, True, False, False, False ]
+    values = [ 10, 12, 3, 4, 5 ]
+    assert S.sweep( labels, values ) == S._sweep_dir( labels, values, "ge" )
+
+
+def test_confusion_le_hand_computed():
+    """`_confusion_le`'s rule is `warn(row) <=> value(row) <= t` -- the mirror image of
+    `_confusion_ge`'s hand-computed fixture (`test_confusion_ge_hand_computed`), but flipped: here
+    the LOW values are the misses (labels[0:2] = True on values 3, 4), so a LOW threshold catches
+    them, matching §5.5's actual margin_bp orientation (small margin = more miss evidence)."""
+    labels = [ True, True, False, False, False ]
+    values = [ 3, 4, 10, 11, 12 ]
+    # t=4: warn iff value<=4 -> warns {3,4} (both misses, tp=2,fn=0) and no hit (fp=0,tn=3)
+    assert S._confusion_le( labels, values, 4 ) == ( 2, 0, 0, 3 )
+    # t=2: warn on nobody -> both misses missed (fn=2), no hit false-warned
+    assert S._confusion_le( labels, values, 2 ) == ( 0, 2, 0, 3 )
+    # t=12: warn on everybody -> every hit false-warned (fp=3)
+    assert S._confusion_le( labels, values, 12 ) == ( 2, 0, 3, 0 )
+
+
+def test_confusion_dir_dispatch_and_rejects_bad_direction():
+    labels, values, t = [ True, False ], [ 5, 10 ], 7
+    assert S._confusion_dir( labels, values, t, "ge" ) == S._confusion_ge( labels, values, t )
+    assert S._confusion_dir( labels, values, t, "le" ) == S._confusion_le( labels, values, t )
+    try:
+        S._confusion_dir( labels, values, t, "sideways" )
+        assert False, "expected ValueError for an invalid direction"
+    except ValueError:
+        pass
+
+
+def test_sweep_dir_le_candidate_set_and_boundary_rows():
+    """The "le" mirror of test_sweep_candidate_set_and_boundary_rows: the "warn on nobody" sentinel
+    sits BELOW the minimum (min(values)-1), not above the maximum, because "le" warns on the LOW side."""
+    labels = [ True, True, False, False, False ]
+    values = [ 3, 5, 10, 11, 12 ]
+    table = S._sweep_dir( labels, values, "le" )
+    thresholds = [ r["threshold"] for r in table ]
+    assert thresholds == [ 2, 3, 5, 10, 11, 12 ], thresholds   # {min-1} ∪ distinct(values), sorted
+
+    nobody = next( r for r in table if r["threshold"] == 2 )
+    assert nobody["recall"] == 0.0 and nobody["false_warn"] == 0.0 and nobody["warn_rate"] == 0.0
+
+    everybody = next( r for r in table if r["threshold"] == 12 )
+    assert everybody["recall"] == 1.0 and everybody["false_warn"] == 1.0 and everybody["warn_rate"] == 1.0
+
+    mid = next( r for r in table if r["threshold"] == 5 )      # catches both misses (3,5), no hit
+    assert mid["recall"] == 1.0 and mid["false_warn"] == 0.0
+    assert abs( mid["warn_rate"] - 0.4 ) < 1e-9
+
+
+def test_le_direction_is_mirror_image_of_ge_direction():
+    """THE symmetry proof this whole generalisation rests on: take any "ge" dataset, negate every
+    value, and score it under "le" -- the achieved (recall, false_warn, warn_rate) triples at
+    corresponding thresholds must be IDENTICAL to the original "ge" table's, because `warn(v) <=> v
+    >= t` on `v` is the exact same partition of rows as `warn(v) <=> -v <= -t` on `-v`. This is what
+    "only the column differs, the procedure is identical" means, proven rather than asserted: the set
+    of (recall, false_warn, warn_rate) triples reachable is the same set either way, not merely
+    similar-looking numbers on two different hand-picked fixtures."""
+    labels = [ True, True, False, False, False, False, True ]
+    values_ge = [ 12, 9, 2, 3, 5, 1, 20 ]
+    table_ge = S._sweep_dir( labels, values_ge, "ge" )
+    triples_ge = sorted( ( r["recall"], r["false_warn"], r["warn_rate"] ) for r in table_ge )
+
+    values_le = [ -v for v in values_ge ]
+    table_le = S._sweep_dir( labels, values_le, "le" )
+    triples_le = sorted( ( r["recall"], r["false_warn"], r["warn_rate"] ) for r in table_le )
+
+    assert triples_ge == triples_le, ( triples_ge, triples_le )
+    # and the threshold correspondence is exact too: t_le == -t_ge for the matching triple.
+    by_triple_ge = { ( r["recall"], r["false_warn"], r["warn_rate"] ): r["threshold"] for r in table_ge }
+    for r in table_le:
+        key = ( r["recall"], r["false_warn"], r["warn_rate"] )
+        assert r["threshold"] == -by_triple_ge[key], ( r["threshold"], by_triple_ge[key] )
+
+
+def test_choose_operating_point_tie_rule_le_prefers_smaller_threshold():
+    """The "le" mirror of test_choose_operating_point_tie_rule_prefers_larger_threshold: on a recall
+    tie, the SMALLER threshold is more conservative (fewer false-warnings) under "warn iff value<=t",
+    so it must win -- the opposite side from the "ge" rule, same underlying principle."""
+    table = [
+        dict( threshold=8, recall=0.6, false_warn=0.10, warn_rate=0.20, tp=3, fn=2, fp=1, tn=9 ),
+        dict( threshold=5, recall=0.6, false_warn=0.05, warn_rate=0.15, tp=3, fn=2, fp=1, tn=9 ),
+        dict( threshold=20, recall=0.9, false_warn=0.50, warn_rate=0.60, tp=4, fn=1, fp=6, tn=4 ),  # out of band
+    ]
+    op = S.choose_operating_point( table, n_rows=15, direction="le" )
+    assert op["chosen"] is not None and op["chosen"]["threshold"] == 5
+
+
+def test_choose_operating_point_rejects_bad_direction():
+    try:
+        S.choose_operating_point( [], n_rows=0, direction="up" )
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
+def _clean_margin_rows( n_miss_repos=6, n_hit_repos=6, miss_bp=100, hit_bp=9000 ):
+    """§5.5's rows: SMALL margin_bp is more miss evidence (the opposite sense from served_syms), so
+    miss rows get the LOW basis-point values here and hit rows the HIGH ones -- deliberately mirrored
+    from `_clean_rows` above, not a copy-paste of the same direction under a different name."""
+    rows = []
+    for i in range( n_miss_repos ):
+        rows += [ mkrow_margin( "miss-repo-%d" % i, bp, file_hit=False, func_hit=False )
+                 for bp in ( miss_bp + i, miss_bp + i + 1 ) ]
+    for i in range( n_hit_repos ):
+        rows += [ mkrow_margin( "hit-repo-%d" % i, bp, file_hit=True, func_hit=True )
+                 for bp in ( hit_bp + i, hit_bp + i + 1 ) ]
+    return rows
+
+
+def test_score_margin_bp_end_to_end_pass():
+    rows = _clean_margin_rows( n_miss_repos=6, n_hit_repos=40 )
+    assert len( rows ) == 92
+    out = S.score_margin_bp( synthetic_summary(), rows )
+    assert out["outcome"] == "pass", out
+    assert out["pass"] is True
+    assert out["statistic"] == "margin_bp" and out["direction"] == "le"
+    assert out["lane_fate"] == "eligible for review and landing"
+    assert "0.579" in out["public_sentence"] and "0.604" in out["public_sentence"]
+    assert "warn iff margin_bp <= t" in out["public_sentence"]
+    assert "eligible for review and landing" in out["public_sentence"]
+
+
+def test_score_margin_bp_end_to_end_fail_on_no_signal():
+    rows = ( [ mkrow_margin( "r/%d" % i, 500, file_hit=( i % 2 == 0 ), func_hit=( i % 2 == 0 ) )
+              for i in range( 46 ) ]
+            + [ mkrow_margin( "s/%d" % i, 500, file_hit=( i % 2 == 0 ), func_hit=( i % 2 == 0 ) )
+               for i in range( 46 ) ] )
+    out = S.score_margin_bp( synthetic_summary( n=len( rows ) ), rows )
+    assert out["outcome"] == "fail", out
+    assert out["pass"] is False
+    assert out["lane_fate"] == "CLOSED"
+    assert "does not reach the band" in out["public_sentence"]
+    assert "CLOSED" in out["public_sentence"]
+    assert "deriveForConfidence zeroes margin_pct on hitCeiling" in out["public_sentence"]
+
+
+def test_score_margin_bp_end_to_end_pass_fire_rate_rejected():
+    # mirror of test_score_served_syms_end_to_end_pass_fire_rate_rejected, direction flipped: the
+    # "wide net" value is now the SAME LOW number for most misses+some hits (warn iff <= 30 catches
+    # both), forcing warn_rate over the 0.25 ceiling at the only band-satisfying threshold.
+    rows = ( [ mkrow_margin( "m/%d" % i, 30 if i < 24 else 9000, file_hit=False, func_hit=False )
+              for i in range( 38 ) ]
+            + [ mkrow_margin( "h/%d" % i, 30 if i < 6 else 9000, file_hit=True, func_hit=True )
+               for i in range( 54 ) ] )
+    assert len( rows ) == 92
+    out = S.score_margin_bp( synthetic_summary(), rows )
+    assert out["outcome"] == "pass_fire_rate_rejected", out
+    assert out["pass"] is False
+    assert out["band_met"] is True
+    assert out["sr1_met"] is False
+    assert out["lane_fate"] == "CLOSED"
+    assert out["best_band_only_threshold"]["threshold"] == 30
+    assert "above the 25% fire-rate ceiling" in out["public_sentence"]
+    assert "not a PASS" in out["public_sentence"]
+    assert "CLOSED" in out["public_sentence"]
+
+
+def test_score_margin_bp_reports_fingerprint_mismatch():
+    bad_summary = synthetic_summary( n=91 )    # wrong population size
+    out = S.score_margin_bp( bad_summary, _clean_margin_rows()[:91] )
+    assert out["outcome"] == "fingerprint_mismatch"
+    assert "public_sentence" in out
+    assert "band_met" not in out         # nothing about discrimination may be asserted (§5.4.6 table)
+
+
 TESTS = [
     test_fingerprint_matches,
     test_fingerprint_rejects_wrong_split,
@@ -487,6 +672,17 @@ TESTS = [
     test_score_served_syms_end_to_end_fail_on_no_signal,
     test_score_served_syms_end_to_end_pass_fire_rate_rejected,
     test_score_served_syms_pass_sentence_reports_other_grain_band_vs_safe_separately,
+    test_sweep_direction_ge_default_matches_original_sweep,
+    test_confusion_le_hand_computed,
+    test_confusion_dir_dispatch_and_rejects_bad_direction,
+    test_sweep_dir_le_candidate_set_and_boundary_rows,
+    test_le_direction_is_mirror_image_of_ge_direction,
+    test_choose_operating_point_tie_rule_le_prefers_smaller_threshold,
+    test_choose_operating_point_rejects_bad_direction,
+    test_score_margin_bp_end_to_end_pass,
+    test_score_margin_bp_end_to_end_fail_on_no_signal,
+    test_score_margin_bp_end_to_end_pass_fire_rate_rejected,
+    test_score_margin_bp_reports_fingerprint_mismatch,
 ]
 
 

@@ -61,6 +61,22 @@
 # produced it. Direct unit tests live in the sibling `test_served_syms_signal.py` (synthetic, hand-built
 # rows only — never touches LocBench data or the network; run `python3
 # bench/locbench/test_served_syms_signal.py`).
+#
+# R-MARGIN ADDENDUM (lane/margin-rescore, 2026-09-23; docs/research/confidence-and-abstention.md §5.5).
+# §5.5 pre-commits that if `served_syms` does NOT reach the band, `margin_bp` gets exactly ONE
+# re-score, "the same §5.4.4 threshold procedure (candidate set, tie rule, SR-1), substituting
+# margin_bp for served_syms" but under margin_bp's OWN fixed orientation ("warn iff margin_bp <= t" —
+# the opposite direction from served_syms's "warn iff served_syms >= t"). Rather than fork a second
+# copy of this module (and risk the two drifting), the internal primitives below (`_confusion_ge` /
+# `sweep` / `choose_operating_point` / the two bootstrap functions) are generalised to take an explicit
+# `direction` ("ge" or "le") and, for the bootstrap/AUROC helpers, an explicit `statistic` (the row key)
+# and `orientation` (the AUROC score sign) — each with a DEFAULT that reproduces the served_syms
+# behaviour exactly, so `score_served_syms` and every existing call site are unchanged byte-for-byte
+# (proven in `test_served_syms_signal.py`'s `test_sweep_direction_ge_default_matches_original_sweep`
+# and the end-to-end served_syms regression tests, which all still pass unmodified). `score_margin_bp`
+# at the bottom of this file is the new, parallel entry point: same band (0.20/0.50/0.25), same gating
+# grain (func_hit), same §5.4.1 fingerprint check (a population property, not a statistic property, so
+# entirely unchanged), different statistic key, different direction, different frozen orientation.
 import pathlib, random, sys
 
 HERE = pathlib.Path( __file__ ).resolve().parent
@@ -210,20 +226,58 @@ def _confusion_ge( labels, values, t ):
     return fn2, tp2, tn2, fp2
 
 
-def sweep( labels, values ):
-    """The full §5.4.4 threshold table. T = distinct(values) ∪ {max(values)+1} (the "warn on nobody"
-    sentinel `V` alone cannot represent). One row per candidate t: recall, false_warn (= prf()'s
-    `false_abstain_rate`, relabelled to this round's vocabulary), warn_rate (= (tp+fp)/n, the fraction
-    of the 92 this t would warn on — what SR-1 gates), `band` (recall/false_warn alone, the owner's
-    actual question, per HIGH-3), `safe` (`band` AND warn_rate under SR-1's ceiling — what
-    `choose_operating_point`'s real-PASS branch requires), and the raw confusion counts."""
+def _confusion_le( labels, values, t ):
+    """tp/fn/fp/tn for the rule `warn(row) <=> value(row) <= t` — §5.5's margin_bp orientation
+    ("warn iff margin_bp <= t"), the mirror image of `_confusion_ge`. Unlike `_confusion_ge`, this
+    needs no swap-and-shift trick: `confusion(labels, values, t)`'s own predicate is already
+    `predicted_abstain = value <= t`, i.e. exactly this rule's `warn`, cell for cell — "abstain" in
+    that function's vocabulary and "warn" in this round's are the same decision (flag the row for a
+    human), just named for two different registrations of the same underlying idea. So `confusion()`'s
+    tp/fn/fp/tn ARE this rule's tp/fn/fp/tn, unrelabelled. Kept as its own named function (rather than
+    calling `confusion` directly at each call site) so every `<=`/`>=` counting decision in this module
+    still goes through one of exactly two named, docstringed functions — never a bare comparison."""
+    tp, fn, fp, tn = confusion( labels, values, t )
+    return tp, fn, fp, tn
+
+
+def _confusion_dir( labels, values, t, direction ):
+    """Dispatch to `_confusion_ge` or `_confusion_le` by `direction` ("ge" | "le") — the one place a
+    caller that is generic over direction (R-MARGIN's `sweep`/bootstrap helpers) picks which rule
+    applies, so the two counting functions above stay the only places comparisons happen."""
+    if direction == "ge":
+        return _confusion_ge( labels, values, t )
+    if direction == "le":
+        return _confusion_le( labels, values, t )
+    raise ValueError( "_confusion_dir: direction must be 'ge' or 'le', got %r" % ( direction, ) )
+
+
+def _sweep_dir( labels, values, direction ):
+    """The full §5.4.4 threshold table, generalised over `direction` ("ge": warn iff value >= t, the
+    served_syms rule; "le": warn iff value <= t, §5.5's margin_bp rule). Candidate set T is always
+    distinct(values) plus ONE sentinel that represents "warn on nobody" — which value that sentinel
+    takes depends on direction, since "warn on nobody" sits on the opposite side of the data for each
+    rule: `max(values)+1` for "ge" (a threshold above every value warns on none), `min(values)-1` for
+    "le" (a threshold below every value warns on none). `sweep(labels, values)` (unchanged, below) is
+    exactly `_sweep_dir(labels, values, "ge")` — this function does not change served_syms's own table
+    in any way, it only factors out what `sweep` already did so `direction="le"` can reuse it.
+    One row per candidate t: recall, false_warn (= prf()'s `false_abstain_rate`, relabelled to this
+    round's vocabulary), warn_rate (= (tp+fp)/n, the fraction of rows this t would warn on — what SR-1
+    gates), `band` (recall/false_warn alone, the owner's actual question, per HIGH-3), `safe` (`band`
+    AND warn_rate under SR-1's ceiling — what `choose_operating_point`'s real-PASS branch requires),
+    and the raw confusion counts."""
     if not values:
         return []
-    candidates = sorted( set( values ) ) + [ max( values ) + 1 ]
+    distinct = sorted( set( values ) )
+    if direction == "ge":
+        candidates = distinct + [ max( values ) + 1 ]
+    elif direction == "le":
+        candidates = [ min( values ) - 1 ] + distinct
+    else:
+        raise ValueError( "_sweep_dir: direction must be 'ge' or 'le', got %r" % ( direction, ) )
     n = len( labels )
     table = []
     for t in candidates:
-        tp, fn, fp, tn = _confusion_ge( labels, values, t )
+        tp, fn, fp, tn = _confusion_dir( labels, values, t, direction )
         stats = prf( tp, fn, fp, tn )
         recall, false_warn = stats["recall"], stats["false_abstain_rate"]
         warn_rate = ( tp + fp ) / n if n else None
@@ -236,7 +290,13 @@ def sweep( labels, values ):
     return table
 
 
-def choose_operating_point( table, n_rows ):
+def sweep( labels, values ):
+    """served_syms's own §5.4.4 table — `warn(row) <=> served_syms(row) >= t` — unchanged from before
+    the R-MARGIN generalisation: exactly `_sweep_dir(labels, values, "ge")`."""
+    return _sweep_dir( labels, values, "ge" )
+
+
+def choose_operating_point( table, n_rows, direction="ge" ):
     """The §5.4.4 tie rule, SR-1, and the HIGH-3 split, applied to a threshold table (either `sweep()`'s
     own, or any hand-built table of {threshold, recall, false_warn, warn_rate, ...} rows — this function
     derives band/SR-1 membership itself from those four raw fields rather than trusting `sweep()`'s own
@@ -244,14 +304,27 @@ def choose_operating_point( table, n_rows ):
     omits those columns still works). Returns {"band_met", "sr1_met", "chosen", "best_band_only"}:
       - band_met: True iff SOME t satisfies the owner's actual band (false_warn<=0.20, recall>=0.50),
         regardless of SR-1 — this is what "PASS on the 92" means per §5.4.4's verbatim verdict rule.
-      - best_band_only: the highest-recall (ties -> larger t) row among ALL band-satisfying rows,
-        ignoring SR-1 — the point a pass_fire_rate_rejected sentence cites.
+      - best_band_only: the highest-recall row among ALL band-satisfying rows, ties broken toward the
+        MORE CONSERVATIVE (fewer-false-warnings) threshold, ignoring SR-1 — the point a
+        pass_fire_rate_rejected sentence cites.
       - sr1_met: True iff some band-satisfying row ALSO clears the fire-rate ceiling.
       - chosen: the tie-rule winner among band-AND-SR1 rows (None unless sr1_met) — the point a real
         PASS sentence cites, and what SR-3 freezes for §5.2's replication.
     n_rows is accepted for symmetry with the doc's phrasing but is not needed separately: `warn_rate`
-    in each row already carries the (tp+fp)/n_rows fraction."""
-    del n_rows
+    in each row already carries the (tp+fp)/n_rows fraction.
+
+    `direction` ("ge", the default — unchanged behaviour for served_syms; or "le" — R-MARGIN's
+    margin_bp rule): which threshold is "more conservative" on a recall tie is the OPPOSITE side of
+    the data for each rule, because each warns on a different subset as its threshold moves. For "ge"
+    (`warn iff value >= t`), a LARGER t warns on a subset of what a smaller t warns on (fewer
+    false-warnings) — §5.4.4's own stated tie rule, "ties broken toward the more conservative side …
+    translated to this rule's >=-warns-on-large direction", i.e. larger t wins. For "le" (`warn iff
+    value <= t`), the subset relationship flips: a SMALLER t warns on a subset of what a larger t
+    warns on, so the more-conservative, fewer-false-warnings choice at a given recall is the SMALLER t
+    — the same general principle (ties broken toward fewer false warnings), translated to the opposite
+    inequality, not a new rule."""
+    if direction not in ( "ge", "le" ):
+        raise ValueError( "choose_operating_point: direction must be 'ge' or 'le', got %r" % ( direction, ) )
 
     def in_band( r ):
         return ( r["false_warn"] is not None and r["false_warn"] <= FALSE_WARN_MAX
@@ -260,8 +333,13 @@ def choose_operating_point( table, n_rows ):
     def clears_sr1( r ):
         return r["warn_rate"] is not None and r["warn_rate"] <= FIRE_RATE_CEILING
 
+    # tie key: always maximise recall first; among recall ties, favour the more-conservative threshold
+    # — largest t for "ge" (matches the unmodified served_syms behaviour exactly), smallest t for "le".
+    def tie_key( r ):
+        return ( r["recall"], r["threshold"] if direction == "ge" else -r["threshold"] )
+
     def pick( rows ):
-        return max( rows, key=lambda r: ( r["recall"], r["threshold"] ) ) if rows else None
+        return max( rows, key=tie_key ) if rows else None
 
     band_rows = [ r for r in table if in_band( r ) ]
     safe_rows = [ r for r in band_rows if clears_sr1( r ) ]
@@ -287,15 +365,18 @@ def _quantile_ci( boots, alpha=0.025 ):
     return lo, hi, len( boots )
 
 
-def bootstrap_auroc_ci( rows, grain, seed=BOOTSTRAP_SEED, n_boot=BOOTSTRAP_RESAMPLES ):
-    """Repository-clustered bootstrap 95% CI for served_syms's AUROC against `grain`'s miss label.
-    Method: bench/agentloop/analyze.py's `clustered_bootstrap_lower` (resample REPOS with replacement,
-    `len(repos)` draws per resample, pool every row belonging to the sampled repos, recompute).
-    Independent re-implementation for this row shape and for a single-arm AUROC rather than a paired
-    delta — that function is not imported (it is paired-delta-specific and inlined in its own module).
-    A resample whose pooled sample is single-class on `grain` yields no AUROC (auroc() returns None)
-    and is excluded from the interval; the number actually used is returned as n_usable.
-    (lo, hi, n_usable) — the point estimate is computed by the caller, once, on the real 92 rows."""
+def bootstrap_auroc_ci( rows, grain, seed=BOOTSTRAP_SEED, n_boot=BOOTSTRAP_RESAMPLES,
+                        statistic="served_syms", orientation=ORIENTATION ):
+    """Repository-clustered bootstrap 95% CI for `statistic`'s AUROC against `grain`'s miss label.
+    Default `statistic="served_syms"`, `orientation=ORIENTATION` — reproduces the pre-generalisation
+    (R-MARGIN) behaviour exactly. Method: bench/agentloop/analyze.py's `clustered_bootstrap_lower`
+    (resample REPOS with replacement, `len(repos)` draws per resample, pool every row belonging to
+    the sampled repos, recompute). Independent re-implementation for this row shape and for a
+    single-arm AUROC rather than a paired delta — that function is not imported (it is
+    paired-delta-specific and inlined in its own module). A resample whose pooled sample is
+    single-class on `grain` yields no AUROC (auroc() returns None) and is excluded from the interval;
+    the number actually used is returned as n_usable. (lo, hi, n_usable) — the point estimate is
+    computed by the caller, once, on the real 92 rows."""
     by_repo = _by_repo( rows )
     repos = sorted( by_repo )
     if not repos:
@@ -306,7 +387,7 @@ def bootstrap_auroc_ci( rows, grain, seed=BOOTSTRAP_SEED, n_boot=BOOTSTRAP_RESAM
         sampled_repos = [ rng.choice( repos ) for _ in repos ]
         pooled = [ row for repo in sampled_repos for row in by_repo[repo] ]
         labels = [ not row[grain] for row in pooled ]
-        scores = [ ORIENTATION * row["served_syms"] for row in pooled ]
+        scores = [ orientation * row[statistic] for row in pooled ]
         a = auroc( labels, scores )
         if a is not None:
             boots.append( a )
@@ -314,15 +395,17 @@ def bootstrap_auroc_ci( rows, grain, seed=BOOTSTRAP_SEED, n_boot=BOOTSTRAP_RESAM
     return lo, hi, n_usable
 
 
-def bootstrap_operating_point_ci( rows, grain, t, seed=BOOTSTRAP_SEED, n_boot=BOOTSTRAP_RESAMPLES ):
+def bootstrap_operating_point_ci( rows, grain, t, seed=BOOTSTRAP_SEED, n_boot=BOOTSTRAP_RESAMPLES,
+                                  statistic="served_syms", direction="ge" ):
     """Same repo-clustered bootstrap, at the FIXED threshold t — never re-swept per resample (§5.4.5:
     this answers "how stable is THIS t's cell counts", not "would a fresh sweep pick a different t").
-    Returns {"false_warn": {...}, "recall": {...}}, each {point, ci_lo, ci_hi, n_resamples}. A resample
-    with no positive (or no negative) row on `grain` contributes no reading to whichever statistic needs
-    that class and is excluded from that statistic's count only."""
+    Default `statistic="served_syms"`, `direction="ge"` — reproduces the pre-generalisation (R-MARGIN)
+    behaviour exactly. Returns {"false_warn": {...}, "recall": {...}}, each {point, ci_lo, ci_hi,
+    n_resamples}. A resample with no positive (or no negative) row on `grain` contributes no reading
+    to whichever statistic needs that class and is excluded from that statistic's count only."""
     labels_point = [ not r[grain] for r in rows ]
-    values_point = [ r["served_syms"] for r in rows ]
-    tp, fn, fp, tn = _confusion_ge( labels_point, values_point, t )
+    values_point = [ r[statistic] for r in rows ]
+    tp, fn, fp, tn = _confusion_dir( labels_point, values_point, t, direction )
     point = prf( tp, fn, fp, tn )
 
     by_repo = _by_repo( rows )
@@ -333,8 +416,8 @@ def bootstrap_operating_point_ci( rows, grain, t, seed=BOOTSTRAP_SEED, n_boot=BO
         sampled_repos = [ rng.choice( repos ) for _ in repos ]
         pooled = [ row for repo in sampled_repos for row in by_repo[repo] ]
         labels = [ not row[grain] for row in pooled ]
-        values = [ row["served_syms"] for row in pooled ]
-        tp2, fn2, fp2, tn2 = _confusion_ge( labels, values, t )
+        values = [ row[statistic] for row in pooled ]
+        tp2, fn2, fp2, tn2 = _confusion_dir( labels, values, t, direction )
         stats = prf( tp2, fn2, fp2, tn2 )
         if stats["false_abstain_rate"] is not None:
             fw_boots.append( stats["false_abstain_rate"] )
@@ -478,4 +561,189 @@ def score_served_syms( summary, rows ):
         out["outcome"] = "fail"
         out["pass"] = False
         out["public_sentence"] = _public_sentence_fail( GATING_GRAIN, grains[GATING_GRAIN] )
+    return out
+
+
+# ── R-MARGIN (docs/research/confidence-and-abstention.md §5.5) — margin_bp's ONE pre-committed re-score ──
+# Fires only because served_syms's own §5.4 run reached a non-pass outcome ("fail" or
+# "pass_fire_rate_rejected") on a fingerprint-reproduced population (§5.5, second branch) — that
+# branch, and only that branch, licenses this function being called at all; if served_syms had
+# reached a real "pass", §5.5's FIRST branch fires instead and `lane/for-margin-resolution` is
+# CLOSED without any re-score (a doc-level consequence, not something this module enforces, since
+# this module has no way to know which branch applies — it only implements what running the
+# re-score means once the caller has determined it is licensed).
+#
+# FROZEN BY §5.5 — same status as §5.4's own frozen block above, and for the same reason (no tuning
+# after a margin_bp number computed under this procedure exists):
+#   MARGIN_BP_STATISTIC   — the row key this run scores: `margin_bp` (calibrate_confidence.py's
+#                           `root_attrs()`, the unzeroed full-precision drop `deriveForConfidence`
+#                           computes — see docs/EVALS.md and confidence-and-abstention.md §1/§2 for
+#                           the zeroing mechanism `margin_pct` hides that `margin_bp` does not).
+#   MARGIN_BP_DIRECTION    — "le": §5.5 fixes the rule as `warn iff margin_bp <= t`, the OPPOSITE
+#                           sense from served_syms's `>= t`, informed by (not derived from) the
+#                           already-seen 0.579 (file_hit) / 0.604 (func_hit) AUROC
+#                           (reports/rv-margin-resolution.md) having most plausibly been computed
+#                           under that direction — the same "informed by a seen number, not blind"
+#                           disclosure §5.4.3 makes for served_syms, restated here for margin_bp.
+#   MARGIN_BP_ORIENTATION  — -1: AUROC's score must rank "more miss evidence" high regardless of
+#                           which raw inequality direction warns, so the oriented score fed to
+#                           `auroc()` is `-margin_bp` (smaller margin_bp == larger oriented score ==
+#                           more miss evidence), consistent with MARGIN_BP_DIRECTION="le".
+#   band / gating grain / fire-rate ceiling — UNCHANGED from served_syms's own (§5.5: "the same
+#                           band …, the same gating grain …, the same §5.4.4 threshold procedure").
+#   FINGERPRINT             — UNCHANGED, reused via `check_fingerprint` as-is: §5.5 is explicit that
+#                           "the population check for that re-score is §5.4.1's fingerprint,
+#                           unchanged — not a fingerprint re-derived for margin_bp, because the
+#                           fingerprint is a property of the population … not of whichever statistic
+#                           is being scored against it". This module never redefines it for margin_bp.
+#   BOOTSTRAP_SEED,
+#   BOOTSTRAP_RESAMPLES     — UNCHANGED (§5.4.5, reused verbatim: "same seed, same 10,000 resamples").
+MARGIN_BP_STATISTIC = "margin_bp"
+MARGIN_BP_DIRECTION = "le"
+MARGIN_BP_ORIENTATION = -1
+assert MARGIN_BP_DIRECTION == "le" and MARGIN_BP_ORIENTATION == -1, (
+    "MARGIN_BP_DIRECTION/MARGIN_BP_ORIENTATION changed without a fresh §5.5 registration -- this "
+    "module encodes ONE pre-committed orientation, not a free parameter" )
+
+_MARGIN_BP_SEEN_CLAUSE = (
+    "margin_bp had not been scored under a named, reproducible procedure against our pre-registered "
+    "band -- an exploratory AUROC (0.579 file_hit / 0.604 func_hit, reports/rv-margin-resolution.md) "
+    "had been computed once on this same 92, without an operating point. Scored now under "
+    "docs/research/confidence-and-abstention.md §5.5's pre-committed, exactly-one re-score, with the "
+    "orientation fixed in advance as warn iff margin_bp <= t -- the opposite sense from served_syms, "
+    "informed by that exploratory 0.579/0.604 AUROC having already been seen, not blind" )
+
+PUBLIC_SENTENCE_MARGIN_MISMATCH = (
+    _MARGIN_BP_SEEN_CLAUSE + ": the asset tree available today does not reproduce the pre-registered "
+    "92-instance population (§5.4.1's fingerprint, reused unchanged), so no margin_bp number under "
+    "this procedure is reported as measured on it, and §5.5's re-score has not been run." )
+
+
+def _public_sentence_margin_fail( grain, g ):
+    return ( _MARGIN_BP_SEEN_CLAUSE + ", it does not reach the band (false-warn <= 0.20 at "
+            "miss-recall >= 0.50) on %s: AUROC %s [%s, %s] (§5.2 rung: %s), and no threshold clears "
+            "both floors together. Per §5.5, lane/for-margin-resolution is CLOSED: no second "
+            "attempt, no new sample; only the zeroing-mechanism finding (deriveForConfidence zeroes "
+            "margin_pct on hitCeiling) survives, as a doc note, not as code." %
+            ( grain, _fmt3( g["auroc"] ), _fmt3( g["auroc_ci_lo"] ), _fmt3( g["auroc_ci_hi"] ),
+             g["auroc_band_5_2"] or "n/a" ) )
+
+
+def _public_sentence_margin_pass( grain, chosen, op_ci, grain_honesty ):
+    fw, rc = op_ci["false_warn"], op_ci["recall"]
+    if grain_honesty["other_safe"]:
+        other_verdict = "also meets the band and the fire-rate ceiling"
+    elif grain_honesty["other_band"]:
+        other_verdict = "meets the band but only above the 25% fire-rate ceiling"
+    else:
+        other_verdict = "does not meet the band"
+    return ( _MARGIN_BP_SEEN_CLAUSE + ", at threshold t=%d (warn iff margin_bp <= t) it reaches "
+            "false-warn=%.3f [%s, %s] and miss-recall=%.3f [%s, %s] on %s (%d/%d and %d/%d bootstrap "
+            "resamples usable) -- inside the pre-registered band and within the 25%% fire-rate "
+            "ceiling (warns on %.1f%% of the 92). At its own best threshold, %s %s. Per §5.5, this "
+            "single pre-committed re-score PASSES: lane/for-margin-resolution becomes eligible for "
+            "review and landing -- not itself 'shippable' yet (per §5.3's SR-3, an in-sample result "
+            "on one 92-row sample still licenses only 'worth replicating' until §5.2's independent "
+            "replication, at this same frozen threshold and orientation, is run), but no longer "
+            "closed by §5.5." %
+            ( chosen["threshold"], chosen["false_warn"], _fmt3( fw["ci_lo"] ), _fmt3( fw["ci_hi"] ),
+             chosen["recall"], _fmt3( rc["ci_lo"] ), _fmt3( rc["ci_hi"] ), grain,
+             fw["n_resamples"], BOOTSTRAP_RESAMPLES, rc["n_resamples"], BOOTSTRAP_RESAMPLES,
+             chosen["warn_rate"] * 100.0, grain_honesty["other_grain"], other_verdict ) )
+
+
+def _public_sentence_margin_fire_rate_rejected( grain, best_band_only ):
+    return ( _MARGIN_BP_SEEN_CLAUSE + ", it reaches the band at t=%d (warn iff margin_bp <= t) "
+            "(false-warn=%.3f, miss-recall=%.3f on %s) -- but that threshold warns on %.1f%% of the "
+            "92, above the 25%% fire-rate ceiling (SR-1). §5.5 requires band met AND SR-1 met for a "
+            "PASS; band-met-alone is `pass_fire_rate_rejected`, not a PASS, so lane/for-margin-"
+            "resolution is CLOSED: no second attempt, no new sample; only the zeroing-mechanism "
+            "finding survives, as a doc note, not as code." %
+            ( best_band_only["threshold"], best_band_only["false_warn"], best_band_only["recall"],
+             grain, best_band_only["warn_rate"] * 100.0 ) )
+
+
+def score_margin_bp( summary, rows ):
+    """§5.5's pre-committed, exactly-ONE margin_bp re-score. Same shape and same four outcomes as
+    `score_served_syms` (this function is the direction/statistic-generalised twin of that one, not
+    a rewrite of its logic) but: statistic=`margin_bp` (not `served_syms`), direction="le" (not
+    "ge"), orientation=-1 (not +1) -- MARGIN_BP_DIRECTION/MARGIN_BP_ORIENTATION above, both frozen by
+    §5.5. Band, gating grain, fingerprint check, bootstrap seed/resamples: all UNCHANGED from
+    served_syms's own (§5.5: "the same band …, the same gating grain …, the same §5.4.4 threshold
+    procedure … substituting margin_bp for served_syms").
+
+    Caller contract (§5.5, second branch only): call this ONLY once, and only after confirming (a)
+    served_syms's own §5.4 run reached "fail" or "pass_fire_rate_rejected" -- never after a real
+    "pass" ("pass" CLOSES the lane per §5.5's first branch without any re-score existing to run --
+    and (b) `rows` come from `lane/for-margin-resolution`'s own binary run on the SAME asset tree
+    §5.4's non-pass used (§5.5's C2-ruling reading: "same asset tree … lane-binary run must itself
+    reproduce §5.4.1's fingerprint"). This function itself only checks the fingerprint (population,
+    not provenance) -- it has no way to check which binary produced `rows` or which prior run's
+    outcome licensed calling it; those are the caller's (and the report's) responsibility, exactly as
+    the served_syms report above must name asset tree and binary sha itself."""
+    fp_ok, fp_detail = check_fingerprint( summary, rows )
+    out = dict( fingerprint_ok=fp_ok, fingerprint=fp_detail, statistic=MARGIN_BP_STATISTIC,
+               direction=MARGIN_BP_DIRECTION, orientation=MARGIN_BP_ORIENTATION,
+               gating_grain=GATING_GRAIN,
+               band=dict( false_warn_max=FALSE_WARN_MAX, recall_min=RECALL_MIN,
+                         fire_rate_ceiling=FIRE_RATE_CEILING ),
+               auroc_band_5_2=dict( meets=AUROC_MEETS_5_2, weak=AUROC_WEAK_5_2,
+                                    refutation=AUROC_REFUTATION_5_2 ),
+               asset_tree=summary.get( "meta", {} ).get( "assets" ),
+               binary_version=summary.get( "meta", {} ).get( "binary_version" ) )
+    if not fp_ok:
+        out["outcome"] = "fingerprint_mismatch"
+        out["public_sentence"] = PUBLIC_SENTENCE_MARGIN_MISMATCH
+        return out
+
+    n = len( rows )
+    grains = {}
+    for grain in ( "file_hit", "func_hit" ):
+        labels = [ not r[grain] for r in rows ]
+        scores = [ MARGIN_BP_ORIENTATION * r[MARGIN_BP_STATISTIC] for r in rows ]
+        auc = auroc( labels, scores )
+        ci_lo, ci_hi, n_res = bootstrap_auroc_ci( rows, grain, statistic=MARGIN_BP_STATISTIC,
+                                                  orientation=MARGIN_BP_ORIENTATION )
+        table = _sweep_dir( labels, [ r[MARGIN_BP_STATISTIC] for r in rows ], MARGIN_BP_DIRECTION )
+        grains[grain] = dict( n=n, misses=sum( labels ), auroc=auc,
+                              auroc_ci_lo=ci_lo, auroc_ci_hi=ci_hi, auroc_ci_resamples=n_res,
+                              auroc_band_5_2=auroc_band_5_2( auc ), sweep=table )
+    out["grains"] = grains
+
+    op = choose_operating_point( grains[GATING_GRAIN]["sweep"], n, direction=MARGIN_BP_DIRECTION )
+    out["band_met"] = op["band_met"]
+    out["sr1_met"] = op["sr1_met"]
+    out["chosen_threshold"] = op["chosen"]
+    out["best_band_only_threshold"] = op["best_band_only"]
+
+    if op["band_met"] and op["sr1_met"]:
+        chosen = op["chosen"]
+        op_ci = bootstrap_operating_point_ci( rows, GATING_GRAIN, chosen["threshold"],
+                                              statistic=MARGIN_BP_STATISTIC,
+                                              direction=MARGIN_BP_DIRECTION )
+        out["operating_point_ci"] = op_ci
+        other_grain = "file_hit" if GATING_GRAIN == "func_hit" else "func_hit"
+        other_sweep = grains[other_grain]["sweep"]
+        other_band = any( r["band"] for r in other_sweep )
+        other_safe = any( r["safe"] for r in other_sweep )
+        out["grain_honesty"] = dict( gating_grain=GATING_GRAIN, gating_grain_pass=True,
+                                     other_grain=other_grain,
+                                     other_band=other_band, other_safe=other_safe,
+                                     other_grain_pass=other_safe )
+        out["outcome"] = "pass"
+        out["pass"] = True
+        out["lane_fate"] = "eligible for review and landing"
+        out["public_sentence"] = _public_sentence_margin_pass( GATING_GRAIN, chosen, op_ci,
+                                                                out["grain_honesty"] )
+    elif op["band_met"]:
+        out["outcome"] = "pass_fire_rate_rejected"
+        out["pass"] = False
+        out["lane_fate"] = "CLOSED"
+        out["public_sentence"] = _public_sentence_margin_fire_rate_rejected(
+            GATING_GRAIN, op["best_band_only"] )
+    else:
+        out["outcome"] = "fail"
+        out["pass"] = False
+        out["lane_fate"] = "CLOSED"
+        out["public_sentence"] = _public_sentence_margin_fail( GATING_GRAIN, grains[GATING_GRAIN] )
     return out

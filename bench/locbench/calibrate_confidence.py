@@ -80,6 +80,12 @@ def root_attrs( xml ):
         except ( TypeError, ValueError ):
             return None
     return dict( confidence=root.attrib.get( "confidence" ), margin_pct=as_int( "margin_pct" ),
+                 # R-MARGIN (lane/margin-rescore, docs/research/confidence-and-abstention.md §5.5):
+                 # margin_bp= is the SAME drop deriveForConfidence computes, at full precision
+                 # (hundredths of a percent) and never zeroed by hitCeiling the way margin_pct= is —
+                 # only lane/for-margin-resolution's binary emits it; on any other binary this reads
+                 # None, and served_syms_signal.score_margin_bp is never called in that case (see main()).
+                 margin_bp=as_int( "margin_bp" ),
                  coverage=as_int( "coverage" ), dropped_positive=as_int( "dropped_positive" ),
                  est_tokens=as_int( "est_tokens" ), route=root.attrib.get( "route" ) )
 
@@ -553,6 +559,79 @@ def md_served_syms_section( summary ):
     return L
 
 
+def md_margin_bp_section( summary ):
+    """docs/research/confidence-and-abstention.md §5.5 — margin_bp's ONE pre-committed re-score,
+    present only when this run's binary emits `margin_bp` (see main() — `summary` carries the key
+    "margin_bp_5_5" only in that case). Mirrors md_served_syms_section's layout so the two read the
+    same way; the differences are exactly §5.5's: the warn direction (`margin_bp <= t`, not `>= t`)
+    and the outcome's consequence for `lane/for-margin-resolution` (eligible for review and landing,
+    or CLOSED) rather than a bare pass/fail."""
+    s = summary.get( "margin_bp_5_5" )
+    if s is None:
+        return []
+    L = [ "### §5.5 `margin_bp` — the ONE pre-committed re-score", "",
+         "Fingerprint reproduced: **%s** (§5.4.1's fingerprint, reused unchanged)." % s["fingerprint_ok"] ]
+    if s["outcome"] == "fingerprint_mismatch":
+        f = s["fingerprint"]
+        L += [ "", "| check | expected | measured | ok |", "| --- | --- | --- | --- |" ]
+        for k, ok in sorted( f["checks"].items() ):
+            L.append( "| %s | — | — | %s |" % ( k, ok ) )
+        L += [ "", "> %s" % s["public_sentence"], "" ]
+        return L
+    L += [ "", "Orientation (§5.5, fixed in advance): **warn iff `margin_bp` ≤ t** — the opposite "
+          "sense from served_syms, informed by an exploratory AUROC already seen (0.579 file_hit / "
+          "0.604 func_hit on this population, `reports/rv-margin-resolution.md`), not blind. Gating "
+          "grain (unchanged from §5.4.2): **%s**." % s["gating_grain"], "",
+         "| grain | n | misses | AUROC | 95%% CI (n=%d resamples) | §5.2 rung |" %
+         served_syms_signal.BOOTSTRAP_RESAMPLES,
+         "| --- | --- | --- | --- | --- | --- |" ]
+    for grain in ( "file_hit", "func_hit" ):
+        g = s["grains"][grain]
+        L.append( "| %s%s | %d | %d | %s | [%s, %s] | %s |" %
+                 ( grain, " (gating)" if grain == s["gating_grain"] else "", g["n"], g["misses"],
+                  md_num( g["auroc"], "%.4f" ), md_num( g["auroc_ci_lo"], "%.4f" ),
+                  md_num( g["auroc_ci_hi"], "%.4f" ), g["auroc_band_5_2"] or "n/a" ) )
+    L += [ "", "#### Threshold sweep (%s, the gating grain) — every candidate `t`, none hidden" %
+          s["gating_grain"], "",
+         "| t (warn iff margin_bp ≤ t) | recall | false_warn | warn_rate | band (§5.2) | "
+         "safe (band + SR-1) |",
+         "| --- | --- | --- | --- | --- | --- |" ]
+    for row in s["grains"][s["gating_grain"]]["sweep"]:
+        L.append( "| %d | %s | %s | %s | %s | %s |" %
+                 ( row["threshold"], md_num( row["recall"] ), md_num( row["false_warn"] ),
+                  md_num( row["warn_rate"] ), "yes" if row["band"] else "no",
+                  "yes" if row["safe"] else "no" ) )
+    L += [ "", "**Outcome: %s.** band_met=%s, sr1_met=%s. **§5.5 consequence: "
+          "lane/for-margin-resolution is %s.**" %
+          ( s["outcome"].upper(), s["band_met"], s["sr1_met"], s["lane_fate"] ) ]
+    if s["outcome"] == "pass":
+        c, op = s["chosen_threshold"], s["operating_point_ci"]
+        gh = s["grain_honesty"]
+        if gh["other_safe"]:
+            other_txt = "also meets the band and the fire-rate ceiling"
+        elif gh["other_band"]:
+            other_txt = "meets the band but only above the 25% fire-rate ceiling"
+        else:
+            other_txt = "does not meet the band"
+        L.append( "Chosen operating point (§5.4.4 tie rule, translated to margin_bp's ≤ direction — "
+                 "ties favour the SMALLER, more conservative t; band AND SR-1): `t=%d` — "
+                 "false_warn=%.4f [%s, %s], recall=%.4f [%s, %s], warn_rate=%.4f. Grain honesty "
+                 "(SR-2): %s meets the band; at its own best threshold, %s %s." %
+                 ( c["threshold"], c["false_warn"],
+                  md_num( op["false_warn"]["ci_lo"], "%.4f" ), md_num( op["false_warn"]["ci_hi"], "%.4f" ),
+                  c["recall"],
+                  md_num( op["recall"]["ci_lo"], "%.4f" ), md_num( op["recall"]["ci_hi"], "%.4f" ),
+                  c["warn_rate"], s["gating_grain"], gh["other_grain"], other_txt ) )
+    elif s["outcome"] == "pass_fire_rate_rejected":
+        b = s["best_band_only_threshold"]
+        L.append( "Best band-only point (SR-1 ignored): `t=%d` — false_warn=%.4f, recall=%.4f, "
+                 "warn_rate=%.4f (> the %.2f fire-rate ceiling — SR-1 rejects it; §5.4.4, reused)." %
+                 ( b["threshold"], b["false_warn"], b["recall"], b["warn_rate"],
+                  served_syms_signal.FIRE_RATE_CEILING ) )
+    L += [ "", "> %s" % s["public_sentence"], "" ]
+    return L
+
+
 def markdown( summary ):
     m = summary["meta"]
     L = [ "<!-- generated by bench/locbench/calibrate_confidence.py — do not hand-edit -->", "",
@@ -561,7 +640,8 @@ def markdown( summary ):
           "### Skipped, by reason (zero-silent-skip)", "", "| reason | n |", "| --- | --- |" ]
     L += [ "| %s | %d |" % ( k, v ) for k, v in sorted( summary["skips"].items() ) ]
     return "\n".join( L + [ "" ] + md_band_sections( summary ) + md_signal_sections( summary )
-                       + md_miss_section( summary ) + md_served_syms_section( summary ) )
+                       + md_miss_section( summary ) + md_served_syms_section( summary )
+                       + md_margin_bp_section( summary ) )
 
 
 def print_metric_lines( summary, rows ):
@@ -584,6 +664,43 @@ def print_metric_lines( summary, rows ):
     for metric in ( "file_hit", "func_hit" ):
         print( "LOCBENCH\tcalib\t%s_auroc\t%s" % ( metric, md_num( summary["discrimination"][metric]["auroc"], "%.4f" ) ) )
     print_served_syms_lines( summary["served_syms_5_4"] )
+    if summary.get( "margin_bp_5_5" ) is not None:
+        print_margin_bp_lines( summary["margin_bp_5_5"] )
+
+
+def print_margin_bp_lines( s ):
+    """§5.5's outcome, same greppable TSV convention as print_served_syms_lines — mirrors it exactly,
+    plus one extra `margin_bp_lane_fate` line (§5.5's actual consequence for lane/for-margin-resolution,
+    not just the bare band/SR-1 outcome)."""
+    print( "LOCBENCH\tcalib\tmargin_bp_fingerprint_ok\t%s" % s["fingerprint_ok"] )
+    if s["outcome"] == "fingerprint_mismatch":
+        print( "LOCBENCH\tcalib\tmargin_bp_outcome\tfingerprint_mismatch" )
+        print( "LOCBENCH\tcalib\tmargin_bp_public_sentence\t%s" % s["public_sentence"] )
+        return
+    for grain in ( "file_hit", "func_hit" ):
+        g = s["grains"][grain]
+        print( "LOCBENCH\tcalib\tmargin_bp_%s_auroc\t%s [%s, %s] (n_resamples=%d) auroc_band_5_2=%s" %
+              ( grain, md_num( g["auroc"], "%.4f" ), md_num( g["auroc_ci_lo"], "%.4f" ),
+               md_num( g["auroc_ci_hi"], "%.4f" ), g["auroc_ci_resamples"], g["auroc_band_5_2"] ) )
+    print( "LOCBENCH\tcalib\tmargin_bp_outcome\t%s" % s["outcome"] )
+    print( "LOCBENCH\tcalib\tmargin_bp_band_met\t%s" % s["band_met"] )
+    print( "LOCBENCH\tcalib\tmargin_bp_sr1_met\t%s" % s["sr1_met"] )
+    if s["outcome"] == "pass":
+        c = s["chosen_threshold"]
+        op = s["operating_point_ci"]
+        print( "LOCBENCH\tcalib\tmargin_bp_operating_point\tt=%d false_warn=%.4f [%s, %s] "
+              "recall=%.4f [%s, %s] warn_rate=%.4f" %
+              ( c["threshold"], c["false_warn"],
+               md_num( op["false_warn"]["ci_lo"], "%.4f" ), md_num( op["false_warn"]["ci_hi"], "%.4f" ),
+               c["recall"],
+               md_num( op["recall"]["ci_lo"], "%.4f" ), md_num( op["recall"]["ci_hi"], "%.4f" ),
+               c["warn_rate"] ) )
+    elif s["outcome"] == "pass_fire_rate_rejected":
+        b = s["best_band_only_threshold"]
+        print( "LOCBENCH\tcalib\tmargin_bp_best_band_only\tt=%d false_warn=%.4f recall=%.4f "
+              "warn_rate=%.4f" % ( b["threshold"], b["false_warn"], b["recall"], b["warn_rate"] ) )
+    print( "LOCBENCH\tcalib\tmargin_bp_lane_fate\t%s" % s["lane_fate"] )
+    print( "LOCBENCH\tcalib\tmargin_bp_public_sentence\t%s" % s["public_sentence"] )
 
 
 def print_served_syms_lines( s ):
@@ -684,6 +801,18 @@ def main():
     # check (and therefore the "is this even the pre-registered 92" question) is answered on every
     # run rather than only when someone remembers to ask.
     summary["served_syms_5_4"] = served_syms_signal.score_served_syms( summary, rows )
+
+    # docs/research/confidence-and-abstention.md §5.5 — margin_bp's ONE pre-committed re-score.
+    # Only meaningful when this run's binary actually emits `margin_bp` (lane/for-margin-resolution's
+    # binary; every other binary leaves `row["margin_bp"]` as None on every row, via root_attrs()'s
+    # as_int() falling through to None on a missing attribute) — gated on that here, not behind a CLI
+    # flag, so a run against the wrong binary reports NOTHING under this key rather than a
+    # fingerprint-only dict that could be mistaken for a real attempt. §5.5 itself (not this script)
+    # is what decides whether calling this at all is licensed by a prior served_syms non-pass; this
+    # script has no way to know that and does not gate on it -- it only computes the number when the
+    # rows on hand carry margin_bp at all.
+    if rows and rows[0].get( "margin_bp" ) is not None:
+        summary["margin_bp_5_5"] = served_syms_signal.score_margin_bp( summary, rows )
 
     print_metric_lines( summary, rows )
 
