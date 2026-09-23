@@ -902,3 +902,94 @@ no second attempt, no new sample, no threshold search beyond §5.4's own procedu
 has not been run as part of this result** — this section only states which branch applies, on which
 binary, and what the re-score's terms are.
 
+## 11. Result — `margin_bp` re-scored under §5.5 (2026-09-23)
+
+**Outcome: FAIL. `lane/for-margin-resolution` is CLOSED.** §5.5's second branch (§10 above) licensed
+exactly ONE re-score; it has now been run, once. Run identity, fingerprint, numbers, and the licensed
+sentence follow, in that order. Full machine-readable output, the rendered tables, the 92 scored
+instance ids, and this run's own provenance are committed at
+`bench/locbench/results/margin_rescore/` (`calib.json`, `calib.md`, `instance_ids.txt`,
+`POPULATION.md`). The scoring code itself — `served_syms_signal.py` generalized to a `direction`/
+`statistic` parameter, `score_margin_bp()` — is committed separately, before this result, with
+synthetic tests proving the generalization reproduces `served_syms`'s own procedure byte-for-byte and
+that `margin_bp`'s "le" direction is the exact mirror image of `served_syms`'s "ge" one.
+
+### Run identity
+
+- **Binary:** `ripwire 0.6.2 (dev, AppleClang 17.0.0.17000604, emit=std::print, built_from=e6f8942e9)`
+  — built from `origin/lane/for-margin-resolution` @ `e6f8942e9646e5dcf8d8701eec14339fe777fe14` (full
+  sha verified against the branch tip before building), in `$ORCH/wt/margin-rescore`. Per the result's
+  C2 ruling, this is the only binary in the repo's history that emits `margin_bp=`.
+- **Dataset:** LocBench V1 test, frozen 560-row slice, sha256
+  `5bbcea4bff11396f38f8aca3e64d697a8ea1da2bc54d705da7f6e34886804c97` — matches §3.2's pinned hash.
+- **Asset tree:** the identical `bench-assets/r4-rebuild` tree the `served_syms` §5.4 result (§10)
+  used — not a fresh checkout, per §5.5 ("the same asset tree that produced the §5.4 non-pass"). Full
+  construction provenance is at `bench/locbench/results/served_syms_prereg/POPULATION.md`.
+- **Instance identity:** the 92 scored `instance_id` values are byte-identical, as a set, to the
+  `served_syms` result's own 92 — `instance_ids.txt`'s sha256
+  (`73c4414d7863bb48bb7721f071d2891d1424ab670e62e88f4b16a857c7f8a02f`) matches
+  `served_syms_prereg/instance_ids.txt`'s exactly, confirming the same 92 rows, not merely a
+  same-sized population.
+
+### §5.4.1 fingerprint — reproduced, reused unchanged
+
+| check | registered | measured | ok |
+| --- | --- | --- | --- |
+| n scored | 92 | 92 | yes |
+| `confidence="high"` / `"low"` | 18 / 74 | 18 / 74 | yes |
+| misses, file grain / func grain | 15 / 38 | 15 / 38 | yes |
+| `rows_len == n_scored` | — | 92 == 92 | yes |
+| score AUROC, file_hit (lattice 670.5/1155) | 0.580519 | 0.580519 | yes |
+| score AUROC, func_hit (lattice 1276.5/2052) | 0.622076 | 0.622076 | yes |
+
+All eight checks passed — this run's measured score AUROC landed exactly on both pinned lattice
+points (not merely within the admitted-neighbour tolerance, as the `served_syms` result run's did).
+
+### `margin_bp` — AUROC by grain (bootstrap 95% CI, repo-clustered, seed
+`"ripwire-served-syms-prereg-v1"`, 10,000 resamples, 10,000 of 10,000 usable on both grains)
+
+| grain (gating) | n | misses | AUROC | 95% CI | §5.2 rung |
+| --- | --- | --- | --- | --- | --- |
+| `func_hit` **(gating)** | 92 | 38 | 0.6038 | [0.4843, 0.7189] | `weak` |
+| `file_hit` (exploratory, non-gating) | 92 | 15 | 0.5792 | [0.4112, 0.7407] | `does_not_meet` |
+
+Both figures are close to the already-seen exploratory 0.579 (file_hit) / 0.604 (func_hit) from
+`reports/rv-margin-resolution.md`, under the same orientation registered here in advance (§5.5:
+informed by, not derived from, that exploratory pair) — consistent with the orientation having been
+guessed correctly, not with any new discrimination appearing under a named procedure.
+
+**Threshold sweep (§5.4.4, translated to margin_bp's `≤` direction per §5.5):** every candidate `t` in
+`{min(V) − 1} ∪ V` was checked on `func_hit` (the sole gating grain); **no threshold reaches
+`false_warn ≤ 0.20` at `recall ≥ 0.50` together** — `band_met = False`, so `sr1_met` is not evaluated.
+Concretely: false_warn stays at or below 0.20 only while recall is at or below 0.21 (thresholds up to
+`t=1522`), and recall first reaches 0.50 only once false_warn has already climbed to 0.46 (`t=2578`)
+— the two floors are never in reach at the same threshold. The complete per-threshold table (both
+grains) is committed in `calib.json`/`calib.md`.
+
+### Outcome and the licensed sentence
+
+**`margin_bp_outcome = "fail"`** (`band_met = False`). The sentence a public reply may use, produced
+verbatim by the scoring code itself:
+
+> "margin_bp had not been scored under a named, reproducible procedure against our pre-registered
+> band -- an exploratory AUROC (0.579 file_hit / 0.604 func_hit, reports/rv-margin-resolution.md) had
+> been computed once on this same 92, without an operating point. Scored now under
+> docs/research/confidence-and-abstention.md §5.5's pre-committed, exactly-one re-score, with the
+> orientation fixed in advance as warn iff margin_bp <= t -- the opposite sense from served_syms,
+> informed by that exploratory 0.579/0.604 AUROC having already been seen, not blind, it does not
+> reach the band (false-warn <= 0.20 at miss-recall >= 0.50) on func_hit: AUROC 0.604 [0.484, 0.719]
+> (§5.2 rung: weak), and no threshold clears both floors together. Per §5.5, lane/for-margin-
+> resolution is CLOSED: no second attempt, no new sample; only the zeroing-mechanism finding
+> (deriveForConfidence zeroes margin_pct on hitCeiling) survives, as a doc note, not as code."
+
+### §5.5 consequence, applied
+
+Per §5.5's second branch, band_met is False, so **`lane/for-margin-resolution` is CLOSED.** No second
+attempt, no new sample, no threshold search beyond §5.4's own procedure applied to `margin_bp`'s
+numbers under the fixed orientation. Only the lane's one true mechanism finding survives, and only as
+a doc note, not as code: `deriveForConfidence` zeroes `margin_pct` on `hitCeiling`
+(`out.marginPct = cut.hitCeiling ? 0 : cut.dropPct;`) — already stated in round 1's own
+pre-registration (`docs/EVALS.md` ~9101, 2026-08-29) and restated in §1/§2 above; this result adds no
+new claim about that mechanism, only closes the lane that would have shipped `margin_bp` as a
+replacement signal.
+
