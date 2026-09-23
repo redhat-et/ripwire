@@ -1,6 +1,6 @@
 # ripwire documentation
 
-Sixteen entries, each written for one reader. Start with the row that matches why you are here.
+Seventeen entries, each written for one reader. Start with the row that matches why you are here.
 
 | File | Who it is for | What it answers |
 | --- | --- | --- |
@@ -24,6 +24,18 @@ Sixteen entries, each written for one reader. Start with the row that matches wh
 | **[`lineage-paper-dates.tsv`](lineage-paper-dates.tsv)** | Maintainers | arXiv id -> publication date for every 2026 paper in `LINEAGE.md`. The ID stem does not track the date (`2607.09691` was published 2026-06-19), so the README's recency claim is re-derived from this file by `readmedriftcheck.sh` arm (H2) rather than from the ids. Adding a 2026 paper without a date row fails that arm. |
 | **[`assets/`](assets/)** | The front page | The README banner and tagline artwork (SVG, self-contained). |
 | **[`captures/`](captures/)** | Maintainers, and the curious | One recorded run of every verb against a real repository — the source of `COMMANDS.md`'s sample output, and the harvest source for the differential argv harness. |
+| **[`research/`](research/)** | Anyone checking a pre-registered measurement before it is run, or an adversarial reviewer of one | Research notes: population, rule and verdict bands fixed in writing before any number exists, committed ahead of the data that will score them. See the research table below. |
+
+## Research notes (`docs/research/`)
+
+Each row's population, rule and decision bands are fixed **before** the number that scores them exists
+— the discipline `docs/EVALS.md`'s own "PRE-REGISTERED" / "MEASURED" section pairs use, applied to
+work still in progress rather than already landed. "Status" says whether a verdict has been computed
+yet; a blank verdict is not a gap, it is the point.
+
+| File | Status | What it answers |
+| --- | --- | --- |
+| **[`research/arise-line-ranking-prereg.md`](research/arise-line-ranking-prereg.md)** | **PRE-REGISTRATION ONLY — no number computed.** Scoring needs the LocBench corpus, not on this machine. | Whether a specific, mechanistically-motivated `--slice` line-ranking rule ("def-primacy": definitions before uses, then def-use coverage) beats chance, source order and the already-shipped coverage-only rule over the *whole function span* an agent actually sees — the ARISE (#318) "line ranking is at chance" finding. Cites `docs/research/slice-line-recall.md` on the unmerged `origin/lane/research-arise-slice` (draft PR #318) as its baseline; that file is not on `main`. |
 
 Outside this directory:
 
