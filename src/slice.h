@@ -3324,18 +3324,25 @@ inline bool sliceRowLineOrderLess( const SliceScan& scan, const std::vector<Slic
     return bindA != bindB ? bindA < bindB : a < b;
 }
 
+// R1's own comparator (coverage descending, then sliceRowLineOrderLess's tail) — shared by
+// sliceDefUseRowOrder (which IS this comparator) and sliceLineRankAttemptOrder (which falls through to
+// this comparator once its own hasAnyDef key ties), so the coverage-then-line rule has exactly one body.
+inline bool sliceRowCoverageOrderLess( const SliceScan& scan, const std::vector<SliceLineRow>& rows,
+                                        const std::vector<std::uint32_t>& coverage, std::uint32_t a, std::uint32_t b )
+{
+    if( coverage[ a ] != coverage[ b ] )
+    {
+        return coverage[ a ] > coverage[ b ];
+    }
+    return sliceRowLineOrderLess( scan, rows, a, b );
+}
+
 inline std::vector<std::uint32_t> sliceDefUseRowOrder( const SliceScan& scan, const std::vector<SliceLineRow>& rows )
 {
     const std::vector<std::uint32_t> coverage = sliceRowCoverage( scan, rows );
     std::vector<std::uint32_t>       order    = sliceRowIdentityOrder( rows.size() );
     std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
-    {
-        if( coverage[ a ] != coverage[ b ] )
-        {
-            return coverage[ a ] > coverage[ b ];
-        }
-        return sliceRowLineOrderLess( scan, rows, a, b );
-    } );
+    { return sliceRowCoverageOrderLess( scan, rows, coverage, a, b ); } );
     return order;
 }
 
@@ -3380,11 +3387,7 @@ inline std::vector<std::uint32_t> sliceLineRankAttemptOrder( const SliceScan& sc
         {
             return hasAnyDef[ a ] > hasAnyDef[ b ];   // definitions first: hasAnyDef=1 sorts before hasAnyDef=0
         }
-        if( coverage[ a ] != coverage[ b ] )
-        {
-            return coverage[ a ] > coverage[ b ];
-        }
-        return sliceRowLineOrderLess( scan, rows, a, b );
+        return sliceRowCoverageOrderLess( scan, rows, coverage, a, b );   // R1's own comparator, unchanged
     } );
     return order;
 }
