@@ -596,6 +596,43 @@ run reports (`no_snapshot`, `wrong_split`, `index_fail`, `for_fail`, `parse_fail
 were *available* to be skipped for that reason, never a claim that no more exist; a `0` in any of those
 buckets means the run found none under that reason on this disk, not that the failure mode cannot occur.
 
+### 5.5 Pre-committed fate: `lane/for-margin-resolution` (`margin_bp`)
+
+**Fixed by the owner on 2026-09-23, before any served_syms number exists** — §5.4 has not been scored
+against any asset tree as this is written, so nothing below is a reaction to a result. The held lane
+`lane/for-margin-resolution` proposes `margin_bp` (the adaptive cut's raw drop fraction, unzeroed on
+`confidence="low"`) as a signal; its own AUROC on the pre-registered 92 is **already known and
+disclosed**: **0.579 (file_hit) / 0.604 (func_hit)** (`reports/rv-margin-resolution.md`) — no better
+than the shipped `confidence=`/`margin_pct=` pair it would replace, and not itself re-measured here.
+This section fixes what that lane's fate is, entirely as a function of §5.4's served_syms verdict,
+decided in advance of that verdict:
+
+- **If served_syms reaches the band — a real `"pass"` outcome, exactly as §5.4.6 defines it (`band_met
+  = True` and `sr1_met = True`; a `"pass_fire_rate_rejected"` outcome does **not** count, since §5.4.6
+  itself says that one "is not a candidate for shipping") — `lane/for-margin-resolution` is
+  **CLOSED**.** No re-score, no second look at `margin_bp`. Only its one true mechanism finding
+  survives, and only as a doc note, not as code: `deriveForConfidence` zeroes `margin_pct` on
+  `hitCeiling` (`out.marginPct = cut.hitCeiling ? 0 : cut.dropPct;`) — a fact **already stated in round
+  1's own pre-registration** (`docs/EVALS.md` ~9101, 2026-08-29: *"`margin_pct` … is not independent of
+  confidence: `confidence="low"` always ships `margin_pct="0"`"*, per `reports/rv-margin-resolution.md`
+  MEDIUM-2), not a discovery this round makes.
+- **If served_syms does NOT reach the band — any outcome other than a real `"pass"`: `"fail"`,
+  `"pass_fire_rate_rejected"`, or `"fingerprint_mismatch"`** (including a fingerprint mismatch on this
+  run that a later run resolves — the lane's fate still depends on whatever §5.4 verdict is finally
+  reached, never on the mismatch itself) **— `margin_bp` gets exactly ONE re-score**, on the same
+  pre-registered 92, with the same band (false-warn ≤ 0.20 at miss-recall ≥ 0.50), the same gating grain
+  (`func_hit`), and the same threshold procedure as §5.4 (§5.4.4's candidate set, tie rule, and SR-1 —
+  substituting `margin_bp` for `served_syms` and re-deriving its own orientation and fingerprint check
+  the same way, since it is a different statistic). **The lane may land only if that one re-score
+  PASSES**, under the identical definition of PASS this section uses for served_syms. No second
+  attempt if it does not, no new sample, no threshold search beyond §5.4's own procedure applied to
+  `margin_bp`'s numbers — the same in-sample-once discipline §5.4 holds itself to.
+
+This rule is pre-committed, not a description of what has already happened: as of this commit,
+`margin_bp` has not been re-scored, and `served_syms` has not been scored under §5.4 at all. Whichever
+outcome §5.4 reaches first decides which of the two branches above applies to `margin_bp` — the branch
+is not chosen after seeing that outcome, it is read off a rule fixed now.
+
 ---
 
 ## 6. Does abstention help the caller? — the downstream experiment we cannot run here
