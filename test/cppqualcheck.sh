@@ -236,9 +236,10 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # 19 -> 22: Python runner evidence reads source, pyproject.toml and setup.cfg (#229).
 # 22 -> 23 2026-09-17 (#279 --lsp, @mpapis, on integration/train-4): src/lsp.h's hover reads the whole file through the
 # same canonical detail::readWholeFile helper rather than growing another fopen/fread.
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 23 ] \
-    && ok "repo: --uses=readWholeFile count=23 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 23"
+# 23 -> 24 (#323): the Vitest hint reads the nearest package.json through that same helper.
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 24 ] \
+    && ok "repo: --uses=readWholeFile count=24 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 24"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"

@@ -356,6 +356,7 @@ else
 fi
 
 python3 "$ROOT/test/runhint_python.py" "$BIN" "$TMP" || no "Python runner evidence regression"
+python3 "$ROOT/test/runhint_vitest.py" "$BIN" || no "Vitest runner evidence regression"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

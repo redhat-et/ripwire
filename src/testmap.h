@@ -29,12 +29,14 @@
 #include "sarif.h"       // rootPrefixOf / rootRelativeUri — the ONE relativizer every p= emitter already shares (A3)
 #include "infra/jsonesc.h" // rw::shSingleQuote — the ONE shell quoter; run= is a COMMAND, see spell() below
 #include "pythonrunner.h" // main-guard / pytest evidence; a .py extension alone is not a runner
+#include "vitestrunner.h" // nearest-package Vitest hints; the script-runner index delegates only this evidence lane
 #include "serialize.h"    // lane/t10-mcp-coverage: escapeXml — writeAffectedReport's ONE escaper (CLI ≡ MCP)
 #include "graphlegend.h"  // lane/t10-mcp-coverage: unprovenDefsVerbLegend/unprovenDefsAttrXml/graphCountFloorBrief/
                           // rootRelPathsLegend — writeAffectedReport's shared legend vocabulary
 
 #include <algorithm>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -620,7 +622,15 @@ private:
             return command;
         }
         loadTexts();
-        return matchingRunner( fileId, false );
+        if( std::string command = matchingRunner( fileId, false ); !command.empty() )
+        {
+            return command;
+        }
+        if( !vitest_ )
+        {
+            vitest_.emplace( *ing_, rootPrefix_ );
+        }
+        return vitest_->commandFor( fileId );
     }
 
     // Stem first, then mention; skip candidates that have no runnable command. Both passes are path-sorted.
@@ -665,23 +675,7 @@ private:
     // set (measured: 0 of either outside it), so the conditional form is byte-identical on every real corpus
     // while a hostile name is still quoted. The predicate is an ALLOWLIST, so a byte nobody enumerated is
     // quoted by default instead of passed through — which is the direction a quoting bug should fail in.
-    static bool isShellSafePath( std::string_view p ) noexcept
-    {
-        if( p.empty() || p.front() == '-' )   // a leading '-' is read as a FLAG, not a path
-        {
-            return false;
-        }
-        for( const char c : p )
-        {
-            const bool isSafeByte = ( c >= 'A' && c <= 'Z' ) || ( c >= 'a' && c <= 'z' ) || ( c >= '0' && c <= '9' )
-                                    || c == '.' || c == '_' || c == '/' || c == '-';
-            if( !isSafeByte )
-            {
-                return false;
-            }
-        }
-        return true;
-    }
+    static bool isShellSafePath( std::string_view p ) noexcept { return vitestrunner::shellSafePath( p ); }
 
     /// Cache a candidate file's command, including an empty result, to avoid repeated evidence reads.
     /// runnerFile must identify an indexed file with a supported script extension.
@@ -751,6 +745,7 @@ private:
 
     const IngestResult*                         ing_;
     std::string                                 rootPrefix_;   // A3: "" ⇒ the command keeps its stored spelling
+    mutable std::optional<vitestrunner::Index>  vitest_;      // lazy: no package scan until a JS test row needs it
     std::vector<std::uint32_t>                  runners_;
     mutable std::vector<std::string>            texts_;
     mutable bool                                textsLoaded_ = false;
