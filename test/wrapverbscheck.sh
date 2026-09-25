@@ -10,14 +10,15 @@
 #   2. Run `ripwire wrap claude`.
 #   3. Assert every live verb name appears in the wrap output (word-boundary match, so e.g.
 #      "for" doesn't false-positive on "before").
-#   4. Assert the wrap output names skills/install.sh.
+#   4. Assert the wrap output prints the collapsed "<path>" skills install line.
 #   5. Every agent recipe (and every --all stanza) carries the pasteable use-when blurb block,
 #      naming the right context file per client (CLAUDE.md / AGENTS.md / .cursor/rules / …).
 #   6. The blurb body is emitted from ONE shared source — byte-identical across agents.
-#   7. The skills-install line is a three-way probe, not an unconditional `bash skills/install.sh`:
-#      (a) cwd has ./skills/install.sh → the checkout line; (b) else <exeDir>/../share/ripwire/
-#      skills/install.sh exists (the curl installer's staged copy) → `bash "<abs path>"`;
-#      (c) else a clone-pointer comment, never a dead command. Plus byte-determinism per case.
+#   7. The skills-install line is ONE unconditional collapsed command, the same shape on every
+#      install layout (checkout, curl-staged prefix, a mise shim, an aqua proxy, or nothing local
+#      at all): `"<resolved binary path>" skills install[ <agent flag>]`, never the old three-arm
+#      filesystem probe or its dead-end `# skills not found locally` comment. Byte-determinism per
+#      case.
 #
 # Usage:
 #   test/wrapverbscheck.sh                          # uses build/ripwire
@@ -92,12 +93,12 @@ done <"$TMP/live_verbs"
                      || no "$missing live verb(s) missing from 'ripwire wrap claude'"
 
 echo
-echo "=== 3. skills/install.sh line present ==="
+echo "=== 3. collapsed skills install line present ==="
 
-if echo "$WRAP_OUT" | grep -q 'skills/install\.sh'; then
-    ok "wrap claude names skills/install.sh"
+if echo "$WRAP_OUT" | grep -qE '^'\''[^'\'']+'\'' skills install( --[a-z-]+)?( --hook)?([[:space:]]|$)'; then
+    ok "wrap claude prints the collapsed \"<path>\" skills install line"
 else
-    no "wrap claude does NOT mention skills/install.sh — the skill-adoption step is invisible"
+    no "wrap claude does NOT print the collapsed skills-install line — the skill-adoption step is invisible"
 fi
 
 echo
@@ -225,68 +226,115 @@ for _needle in '--for=' '--pack-task=' '--from-trace=' '--callers=' '--impact=' 
 done
 
 echo
-echo "=== 7. skills-line three-way probe ==="
+echo "=== 7. skills-line: collapsed 'skills install' command, every layout ==="
 
 REAL_TMP="$( cd "$TMP" && pwd -P )"
 
-# case a — cwd is a checkout (./skills/install.sh exists) → the relative checkout line
+# The collapsed contract (redhat-et/ripwire#225 task 12): ONE unconditional line,
+# `"<resolved binary path>" skills install[ <agent flag>]`, on every layout, since the skills are
+# embedded in the binary and there is nothing left to probe for. Not `$`-anchored: the real line
+# carries a trailing `# deploy to ... ` comment.
+assert_skills_line() {
+    _label="$1"; _out="$2"
+    if echo "$_out" | grep -qE '^'\''[^'\'']+'\'' skills install( --[a-z-]+)?( --hook)?([[:space:]]|$)'; then
+        ok "$_label: prints the collapsed \"<path>\" skills install line"
+    else
+        no "$_label: does NOT print the collapsed skills-install line"
+    fi
+    if echo "$_out" | grep -q 'bash skills/install\.sh'; then
+        no "$_label: still prints the OLD 'bash skills/install.sh' probe line"
+    else
+        ok "$_label: no old 'bash skills/install.sh' probe line"
+    fi
+    if echo "$_out" | grep -q 'skills not found locally'; then
+        no "$_label: still prints the OLD 'skills not found locally' dead-end comment"
+    else
+        ok "$_label: no old 'skills not found locally' dead-end comment"
+    fi
+}
+
+# case a — cwd is a checkout (./skills/install.sh exists)
 mkdir -p "$TMP/case_a/skills"
 : > "$TMP/case_a/skills/install.sh"
 A_OUT="$( cd "$TMP/case_a" && "$BIN" wrap claude 2>/dev/null )"
-if echo "$A_OUT" | grep -q '^bash skills/install\.sh'; then
-    ok "case a (checkout cwd): relative 'bash skills/install.sh' line kept"
-else
-    no "case a (checkout cwd): relative skills line missing"
-fi
+assert_skills_line "case a (checkout cwd)" "$A_OUT"
 
 # case b — prebuilt prefix layout: <prefix>/bin/<binary> + <prefix>/share/ripwire/skills/install.sh
-# (the curl installer's staged copy — a fixed design contract). Copy, don't symlink: the binary
-# realpath()s itself, and a symlink would resolve back to the build tree.
+# (the curl installer's staged copy). Copy, don't symlink: the binary realpath()s itself, and a
+# symlink would resolve back to the build tree.
 mkdir -p "$TMP/prefix/bin" "$TMP/prefix/share/ripwire/skills" "$TMP/case_b"
 cp "$BIN" "$TMP/prefix/bin/ripwire-copy"
 : > "$TMP/prefix/share/ripwire/skills/install.sh"
-STAGED="$REAL_TMP/prefix/share/ripwire/skills/install.sh"
 B_OUT="$( cd "$TMP/case_b" && "$TMP/prefix/bin/ripwire-copy" wrap claude 2>/dev/null )"
-if echo "$B_OUT" | grep -qF "bash \"$STAGED\""; then
-    ok "case b (prebuilt prefix): absolute staged path printed ($STAGED)"
-else
-    no "case b (prebuilt prefix): absolute staged path NOT printed"
-fi
+assert_skills_line "case b (prebuilt prefix)" "$B_OUT"
 B_CODEX_OUT="$( cd "$TMP/case_b" && "$TMP/prefix/bin/ripwire-copy" wrap codex 2>/dev/null )"
-if echo "$B_CODEX_OUT" | grep -qF "bash \"$STAGED\" --codex"; then
-    ok "case b (prebuilt prefix, codex): staged path printed with --codex"
+assert_skills_line "case b (prebuilt prefix, codex)" "$B_CODEX_OUT"
+if echo "$B_CODEX_OUT" | grep -qE '^'\''[^'\'']+'\'' skills install --codex([[:space:]]|$)'; then
+    ok "case b (prebuilt prefix, codex): the --codex flag is carried on the collapsed line"
 else
-    no "case b (prebuilt prefix, codex): staged --codex line NOT printed"
+    no "case b (prebuilt prefix, codex): the --codex flag is missing from the collapsed line"
 fi
 
-# case c — no checkout, no staged copy → a clone-pointer comment, never a dead command
+# case c — no checkout, no staged copy: the embedded binary still needs no sibling to find
 mkdir -p "$TMP/bare/bin" "$TMP/case_c"
 cp "$BIN" "$TMP/bare/bin/ripwire-copy"
 C_OUT="$( cd "$TMP/case_c" && "$TMP/bare/bin/ripwire-copy" wrap claude 2>/dev/null )"
-if echo "$C_OUT" | grep -q 'skills not found locally' && echo "$C_OUT" | grep -qF 'github.com/redhat-et/ripwire'; then
-    ok "case c (nothing local): clone-pointer comment printed"
+assert_skills_line "case c (nothing local)" "$C_OUT"
+
+# case mise — installs/<tool>/<version>/<archive>/, shims/ripwire execs the real binary (mise never
+# symlinks a shim straight to the target — see prompts/help-wanted/install-discovery-mise-aqua.md)
+ARCHIVE="ripwire-0.0.0-fixture"
+MISE_INSTALL="$TMP/mise/installs/ripwire/0.0.0/$ARCHIVE"
+mkdir -p "$MISE_INSTALL/skills" "$TMP/mise/shims" "$TMP/case_mise"
+cp "$BIN" "$MISE_INSTALL/ripwire"
+: > "$MISE_INSTALL/skills/install.sh"
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$MISE_INSTALL/ripwire" >"$TMP/mise/shims/ripwire"
+chmod +x "$TMP/mise/shims/ripwire"
+MISE_OUT="$( cd "$TMP/case_mise" && "$TMP/mise/shims/ripwire" wrap claude 2>/dev/null )"
+assert_skills_line "case mise (shim)" "$MISE_OUT"
+# I3b: a generic single-quoted-path shape matches ANY path — this arm exists specifically to prove
+# the recipe names the SHIM's own resolved target, not just some path, so assert that exact string.
+# realpath, not $TMP literally: the recipe prints the binary's OWN resolved path, and on macOS $TMP
+# (/var/folders/...) and its canonical form (/private/var/folders/...) differ as strings for the
+# same file (sourceinstallcheck.sh hit this same gotcha) — compare against REAL_TMP instead.
+MISE_INSTALL_REAL="$REAL_TMP/mise/installs/ripwire/0.0.0/$ARCHIVE"
+if echo "$MISE_OUT" | grep -qF "'$MISE_INSTALL_REAL/ripwire' skills install"; then
+    ok "case mise (shim): the recipe names the shim's own resolved path ($MISE_INSTALL_REAL/ripwire)"
 else
-    no "case c (nothing local): clone-pointer comment missing"
-fi
-if echo "$C_OUT" | grep -q '^bash skills/install\.sh'; then
-    no "case c (nothing local): still prints the DEAD 'bash skills/install.sh' command"
-else
-    ok "case c (nothing local): no dead install command"
+    no "case mise (shim): the recipe does not name $MISE_INSTALL_REAL/ripwire specifically"
 fi
 
-# determinism per probe case: same invocation twice, byte-identical
+# case aqua — pkgs/github_release/github.com/<owner>/<repo>/<version>/<archive>.tar.gz/<archive>/,
+# bin/ripwire -> aqua-proxy, a shim that execs the real binary (aqua never symlinks straight to it)
+AQUA_INSTALL="$TMP/aqua/pkgs/github_release/github.com/redhat-et/ripwire/v0.0.0/$ARCHIVE.tar.gz/$ARCHIVE"
+mkdir -p "$AQUA_INSTALL/skills" "$TMP/aqua/bin" "$TMP/case_aqua"
+cp "$BIN" "$AQUA_INSTALL/ripwire"
+: > "$AQUA_INSTALL/skills/install.sh"
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$AQUA_INSTALL/ripwire" >"$TMP/aqua/bin/aqua-proxy"
+chmod +x "$TMP/aqua/bin/aqua-proxy"
+ln -s aqua-proxy "$TMP/aqua/bin/ripwire"
+AQUA_OUT="$( cd "$TMP/case_aqua" && "$TMP/aqua/bin/ripwire" wrap claude 2>/dev/null )"
+assert_skills_line "case aqua (proxy shim)" "$AQUA_OUT"
+AQUA_INSTALL_REAL="$REAL_TMP/aqua/pkgs/github_release/github.com/redhat-et/ripwire/v0.0.0/$ARCHIVE.tar.gz/$ARCHIVE"
+if echo "$AQUA_OUT" | grep -qF "'$AQUA_INSTALL_REAL/ripwire' skills install"; then
+    ok "case aqua (proxy shim): the recipe names the shim's own resolved path ($AQUA_INSTALL_REAL/ripwire)"
+else
+    no "case aqua (proxy shim): the recipe does not name $AQUA_INSTALL_REAL/ripwire specifically"
+fi
+
+# determinism per fixture: same invocation twice, byte-identical
 B_OUT2="$( cd "$TMP/case_b" && "$TMP/prefix/bin/ripwire-copy" wrap claude 2>/dev/null )"
-if [ "$B_OUT" = "$B_OUT2" ]; then
-    ok "case b output is deterministic (byte-identical on two runs)"
-else
-    no "case b output is NOT deterministic"
-fi
+[ "$B_OUT" = "$B_OUT2" ] && ok "case b output is deterministic (byte-identical on two runs)" \
+                          || no "case b output is NOT deterministic"
 C_OUT2="$( cd "$TMP/case_c" && "$TMP/bare/bin/ripwire-copy" wrap claude 2>/dev/null )"
-if [ "$C_OUT" = "$C_OUT2" ]; then
-    ok "case c output is deterministic (byte-identical on two runs)"
-else
-    no "case c output is NOT deterministic"
-fi
+[ "$C_OUT" = "$C_OUT2" ] && ok "case c output is deterministic (byte-identical on two runs)" \
+                          || no "case c output is NOT deterministic"
+MISE_OUT2="$( cd "$TMP/case_mise" && "$TMP/mise/shims/ripwire" wrap claude 2>/dev/null )"
+[ "$MISE_OUT" = "$MISE_OUT2" ] && ok "case mise output is deterministic (byte-identical on two runs)" \
+                                || no "case mise output is NOT deterministic"
+AQUA_OUT2="$( cd "$TMP/case_aqua" && "$TMP/aqua/bin/ripwire" wrap claude 2>/dev/null )"
+[ "$AQUA_OUT" = "$AQUA_OUT2" ] && ok "case aqua output is deterministic (byte-identical on two runs)" \
+                               || no "case aqua output is NOT deterministic"
 
 echo
 echo "=== 8. one-shot --for recipes budget with --token-budget, never --max-tokens ==="

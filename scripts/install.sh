@@ -331,90 +331,26 @@ case ":$PATH:" in
     *) echo "install.sh: $binDir is not on PATH — add it, e.g. export PATH=\"$binDir:\$PATH\"" ;;
 esac
 
-# ── stage bundled skills (curl-pipe users never get a repo checkout otherwise) ─────────────────────────
-# skills/ teaches a coding agent WHEN to reach for ripwire mid-task; release.yml packages it into the
-# tarball alongside the binary. $prefix/share/ripwire/skills is a fixed, shared contract with the rest of
-# the toolchain (other pieces are being wired to look there) — do not relocate this path independently.
-# This directory is a STAGING AREA OWNED BY THIS INSTALLER (nothing else writes here), so blowing it away
-# and recopying on every run is safe and keeps a stale skill from a previous version lingering forever.
-shareDir="$prefix/share/ripwire"
-skillsShareDir="$shareDir/skills"
-hooksShareDir="$shareDir/hooks"
-if [ -d "$extractedDir/skills" ]; then
-    rm -rf "$skillsShareDir"
-    mkdir -p "$( dirname "$skillsShareDir" )"
-    cp -R "$extractedDir/skills" "$skillsShareDir"
-    chmod +x "$skillsShareDir/install.sh" 2>/dev/null || true
-
-    echo "install.sh: staged agent skills at $skillsShareDir"
-
-    # ── ACTIVATE, don't hand the user a menu (2026-09-06) ──────────────────────────────────────────
-    # This block used to print four commands and stop: activate for Claude Code, or for Codex, then
-    # optionally hooks for either. A new user finished the one-liner facing a decision rather than a
-    # working setup, and the README's headline — the same line "ships the task-shaped skills that
-    # teach your agent WHEN to reach for it" — was carrying its weight on the word "ships". Skills
-    # that sit staged teach nothing.
-    #
-    # So: activate for each agent actually PRESENT on this machine, and print one receipt line each.
-    # Detection is the agent's own home directory, which is the same signal `ripwire wrap --all` uses
-    # and the only one available before the binary is on PATH. An agent that is not installed is
-    # never given a skills directory — inventing ~/.claude on a machine with no Claude Code would be
-    # this installer writing somebody else's config.
-    #
-    # TWO THINGS THIS DELIBERATELY DOES NOT DO. It never registers HOOKS: those carry a data-capture
-    # disclosure (raw paths, patterns and commands into a local log with no retention limit) that a
-    # user must read and accept, and no amount of convenience justifies arming that silently — they
-    # stay behind an explicit `--hook`. And it never fails the install over an activation: the binary
-    # is the product, so a symlink that cannot be written degrades to the manual line, exactly like a
-    # release with no bundled skills does.
-    #
-    # RIPWIRE_NO_ACTIVATE=1 stages without activating, for image builds and scripted installs that
-    # provision agent homes later. test/releaseinstallcheck.sh arms (E1)-(E6) pin all of it.
-    activated=0
-    if [ -z "${RIPWIRE_NO_ACTIVATE:-}" ]; then
-        if [ -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ]; then
-            if bash "$skillsShareDir/install.sh" >/dev/null 2>&1; then
-                echo "install.sh: activated the ripwire skills for Claude Code (${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills)"
-                activated=$(( activated + 1 ))
-            else
-                echo "install.sh: could not activate the Claude Code skills; run: bash \"$skillsShareDir/install.sh\"" >&2
-            fi
-        fi
-        if [ -d "${CODEX_HOME:-$HOME/.codex}" ] || [ -d "${AGENTS_HOME:-$HOME/.agents}" ]; then
-            if bash "$skillsShareDir/install.sh" --codex >/dev/null 2>&1; then
-                echo "install.sh: activated the ripwire skills for Codex (${AGENTS_HOME:-$HOME/.agents}/skills)"
-                activated=$(( activated + 1 ))
-            else
-                echo "install.sh: could not activate the Codex skills; run: bash \"$skillsShareDir/install.sh\" --codex" >&2
-            fi
-        fi
-        if [ -d "${HERMES_HOME:-$HOME/.hermes}" ]; then
-            if bash "$skillsShareDir/install.sh" --hermes >/dev/null 2>&1; then
-                echo "install.sh: activated the ripwire skills for Hermes (${HERMES_HOME:-$HOME/.hermes}/skills)"
-                activated=$(( activated + 1 ))
-            else
-                echo "install.sh: could not activate the Hermes skills; run: bash \"$skillsShareDir/install.sh\" --hermes" >&2
-            fi
-        fi
+# ── activate skills/hooks (#225: embedded in the binary, no more $prefix/share/ripwire staging) ────
+# `ripwire skills install --all` does its own per-agent detection; never fails the install over an
+# activation failure (degrades to a printed hint), and never registers hooks without `--hook` — those
+# carry a data-capture disclosure a user must read and accept.
+# RIPWIRE_NO_ACTIVATE=1 installs without activating; test/releaseinstallcheck.sh arms (E1)-(E6) pin it.
+if [ -z "${RIPWIRE_NO_ACTIVATE:-}" ]; then
+    ACTIVATE_RC=0
+    ACTIVATE_OUT="$( "$binDir/ripwire" skills install --all )" || ACTIVATE_RC=$?
+    printf '%s\n' "$ACTIVATE_OUT"
+    if [ "$ACTIVATE_RC" -ne 0 ]; then
+        echo "install.sh: could not activate ripwire skills for one or more agents; run: \"$binDir/ripwire\" skills install --all" >&2
     fi
-    if [ "$activated" -eq 0 ]; then
-        echo "  Activate them (symlinks into the agent's skill dir, safe to re-run):"
-        echo "    Claude Code: bash \"$skillsShareDir/install.sh\""
-        echo "    Codex:       bash \"$skillsShareDir/install.sh\" --codex"
-        echo "    Hermes:      bash \"$skillsShareDir/install.sh\" --hermes"
-    fi
-    if [ -d "$extractedDir/hooks" ]; then
-        rm -rf "$hooksShareDir"
-        cp -R "$extractedDir/hooks" "$hooksShareDir"
-        chmod +x "$hooksShareDir/"*.sh 2>/dev/null || true
-        echo "  Optional advisory hooks:"
-        echo "    Claude Code: bash \"$skillsShareDir/install.sh\" --hook"
-        echo "    Codex:       bash \"$skillsShareDir/install.sh\" --codex --hook"
+    # M9 (round-2 review): the hint is only useful if something was actually activated to hook —
+    # printing it after "0 agent(s) configured" would advertise a --hook flag with nothing to attach to.
+    CONFIGURED="$( printf '%s' "$ACTIVATE_OUT" | sed -n 's/.*: \([0-9][0-9]*\) agent(s) configured.*/\1/p' )"
+    if [ -n "$CONFIGURED" ] && [ "$CONFIGURED" -gt 0 ]; then
+        echo "  Optional advisory hooks: \"$binDir/ripwire\" skills install --all --hook"
     else
-        echo "install.sh: this release has no bundled hooks; skills remain usable without them" >&2
+        echo "  Nothing was activated — no detected agent to hook into."
     fi
 else
-    # Older releases (pre-skills-bundling) simply don't have this directory — never fail the install over
-    # a missing extra; just tell the user honestly how to get them.
-    echo "install.sh: this release predates bundled skills — clone https://github.com/redhat-et/ripwire and run skills/install.sh to get them"
+    echo "install.sh: RIPWIRE_NO_ACTIVATE set — skills not activated. Run \"$binDir/ripwire\" skills install --all when ready."
 fi

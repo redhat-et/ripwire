@@ -312,6 +312,65 @@ foreach(_ripwire_query_name IN LISTS _ripwire_query_names)
 endforeach()
 file(APPEND "${_ripwire_embedded_queries}" "}};\n\ninline constexpr std::string_view queryFor( std::string_view sub ) noexcept\n{\n    for( const EmbeddedQuery& query : kEmbeddedQueries )\n    {\n        if( query.sub == sub )\n            return query.source;\n    }\n    return {};\n}\n\n} // namespace rw::embedded_queries\n")
 
+# ---- configure-time skills/hooks embedding (same model as _ripwire_embedded_queries above) ----
+# skills/*/SKILL.md (+ companion .md files) and hooks/*.sh remain the editable source of truth.
+# CMake regenerates this constexpr table whenever any of those files change; the subcommand in
+# src/skillsinstall.h reads only the binary's read-only data at runtime — no filesystem dependency
+# on skills/ or hooks/ existing on disk (redhat-et/ripwire#225).
+set(_ripwire_embedded_skills "${_ripwire_generated_dir}/embedded_skills.h")
+# *.md only: every file under skills/<name>/ is currently markdown; a non-.md companion file added
+# later (a script, JSON, image) needs this glob widened too, or test/selfcontainedcheck.sh's
+# byte-exact cross-check (which walks every file under skills/*/, no extension filter) goes red.
+file(GLOB_RECURSE _ripwire_skill_files CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/skills" "${CMAKE_CURRENT_SOURCE_DIR}/skills/*.md")
+# Only files inside a skills/<name>/ subdirectory are an embeddable skill — top-level files such as
+# skills/CONSOLIDATION.md are repo-maintainer notes, not a skill payload, and must not be embedded.
+list(FILTER _ripwire_skill_files EXCLUDE REGEX "^[^/]+$")
+file(GLOB_RECURSE _ripwire_hook_files CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/hooks" "${CMAKE_CURRENT_SOURCE_DIR}/hooks/*.sh")
+list(SORT _ripwire_skill_files)   # deterministic iteration order — G4/determinism contract
+list(SORT _ripwire_hook_files)
+
+set(_ripwire_embed_hash_input "")
+string(ASCII 30 _ripwire_embed_rs)   # ASCII record separator — CMake has no \x escape, so build the byte via string(ASCII ...)
+file(WRITE "${_ripwire_embedded_skills}" "#pragma once\n\n#include <array>\n#include <cstddef>\n#include <string_view>\n\nnamespace rw::embedded_skills\n{\n\nstruct EmbeddedFile\n{\n    std::string_view relativePath;\n    std::string_view bytes;\n};\n\n")
+
+foreach(_ripwire_group skill hook)
+  if(_ripwire_group STREQUAL "skill")
+    set(_ripwire_group_files ${_ripwire_skill_files})
+    set(_ripwire_group_root "${CMAKE_CURRENT_SOURCE_DIR}/skills")
+    set(_ripwire_group_prefix "skills")
+    set(_ripwire_group_array "kSkillFiles")
+    set(_ripwire_group_count_name "kSkillFileCount")
+  else()
+    set(_ripwire_group_files ${_ripwire_hook_files})
+    set(_ripwire_group_root "${CMAKE_CURRENT_SOURCE_DIR}/hooks")
+    set(_ripwire_group_prefix "hooks")
+    set(_ripwire_group_array "kHookFiles")
+    set(_ripwire_group_count_name "kHookFileCount")
+  endif()
+  list(LENGTH _ripwire_group_files _ripwire_group_count)
+  file(APPEND "${_ripwire_embedded_skills}" "inline constexpr std::size_t ${_ripwire_group_count_name} = ${_ripwire_group_count};\ninline constexpr std::array<EmbeddedFile, ${_ripwire_group_count_name}> ${_ripwire_group_array} = {{\n")
+  set(_ripwire_embed_index 0)
+  foreach(_ripwire_rel IN LISTS _ripwire_group_files)
+    set(_ripwire_abs "${_ripwire_group_root}/${_ripwire_rel}")
+    set(_ripwire_stored_rel "${_ripwire_group_prefix}/${_ripwire_rel}")
+    file(READ "${_ripwire_abs}" _ripwire_file_content)
+    string(APPEND _ripwire_embed_hash_input "${_ripwire_stored_rel}${_ripwire_embed_rs}${_ripwire_file_content}${_ripwire_embed_rs}")
+    set(_ripwire_delim "CTXE_${_ripwire_group}_${_ripwire_embed_index}")
+    string(FIND "${_ripwire_file_content}" ")${_ripwire_delim}\"" _ripwire_embed_collision)
+    if(NOT _ripwire_embed_collision EQUAL -1)
+      message(FATAL_ERROR "embedded file ${_ripwire_abs} collides with its generated raw-string delimiter")
+    endif()
+    file(APPEND "${_ripwire_embedded_skills}" "    { \"${_ripwire_stored_rel}\", R\"${_ripwire_delim}(${_ripwire_file_content})${_ripwire_delim}\" },\n")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_ripwire_abs}")
+    math(EXPR _ripwire_embed_index "${_ripwire_embed_index} + 1")
+  endforeach()
+  file(APPEND "${_ripwire_embedded_skills}" "}};\n\n")
+endforeach()
+
+string(SHA256 _ripwire_embed_full_hash "${_ripwire_embed_hash_input}")
+string(SUBSTRING "${_ripwire_embed_full_hash}" 0 8 _ripwire_embed_hash8)
+file(APPEND "${_ripwire_embedded_skills}" "inline constexpr std::string_view kVersion = \"${PROJECT_VERSION}\";\ninline constexpr std::string_view kHash8 = \"${_ripwire_embed_hash8}\";\ninline constexpr std::string_view kStoreKey = \"${PROJECT_VERSION}-${_ripwire_embed_hash8}\";\n\n} // namespace rw::embedded_skills\n")
+
 # ---- generated version.h ----
 # The version string lives in ONE place: the project(ripwire VERSION ...) call above. --version reads
 # this generated header; test/versioncheck.sh diffs its output against CMakeLists.txt's own VERSION so

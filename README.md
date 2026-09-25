@@ -962,9 +962,10 @@ ripwire --version
   `degraded="1"` and may report as failing even when `ripwire` is on `Path` (its PATH lookup is a known gap).
   The cache lives in `%LOCALAPPDATA%\Temp\ripwire-<uid>`.
 - **Agent skills** (Claude Code, Codex): from Git Bash, in the unzipped folder, `bash skills/install.sh` (Claude Code)
-  or `bash skills/install.sh --codex`. Or copy them by hand in PowerShell:
-  `New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null; Copy-Item -Recurse -Force "$bin\skills\ripwire-*" "$HOME\.claude\skills\"`
-  (Codex reads `$HOME\.agents\skills`). `--hook` is untested on Windows, and `scripts/install.sh` (the curl installer) does not run there.
+  or `bash skills/install.sh --codex`. Without Developer Mode / `SeCreateSymbolicLinkPrivilege`, `ripwire.exe` has no
+  symlink support and copies each skill's files instead of linking them — a later reinstall still refreshes them, it
+  just will not notice a store update on its own the way a symlink would. `--hook` is untested on Windows, and
+  `scripts/install.sh` (the curl installer) does not run there.
 </details>
 
 **Building it yourself needs CMake 3.24+ and a C++23 compiler, and nothing else installed first** —
@@ -1942,9 +1943,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>648 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>651 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **648 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **651 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a

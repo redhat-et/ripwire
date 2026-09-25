@@ -362,6 +362,9 @@ serialize.h	packOutline	fopen	1	closes	skips only a failed open; fclose after th
 serialize.h	packSignatures	fopen	2	closes	both skip only a failed open; fclose after each read loop
 serialize.h	packSource	fopen	1	closes	skips only a failed open; fclose after the read loop
 serialize.h	renderWholeFiles	fopen	1	closes	returns only on a failed open; fclose before the empty-body return
+skillsinstall.h	runShellCapture	popen	1	closes	no exit between popen and pclose; the read loop leaves by fread returning 0
+skillsinstall.h	storeContentsMatch	open	1	closes	every early return (open/fstat/size/read failure) happens after FdGuard takes the fd; the read loop leaves by size reached or a mismatch return
+skillsinstall.h	writeStoreFile	open	1	closes	the only early exit is the failed open; FdGuard closes it on every remaining path
 verbs_change.h	readBriefFile	fopen	1	closes	continue-only loop; fclose before the return
 verbs_change.h	readTraceText	fopen	1	closes	returns only on a failed open; fclose after the read loop
 verbs_change.h	runChangeViews	fopen	1	closes	returns only on a failed open; fclose after the write

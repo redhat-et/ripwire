@@ -426,9 +426,10 @@ IHOME="$TMP/ihome"; mkdir -p "$IHOME"
 IOUT1="$( HOME="$IHOME" bash "$INSTALL" --hook 2>&1 )"; IRC1=$?
 SETTINGS="$IHOME/.claude/settings.json"
 if [ "$IRC1" -eq 0 ]; then ok "I1 install: --hook exits 0"; else no "I1 install: exit was $IRC1"; fi
-jq -e --arg cmd "$HOOK" 'any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; .command == $cmd)' "$SETTINGS" >/dev/null 2>&1 \
+# Matched by script basename, not exact path: #225's installer registers its extracted store copy.
+jq -e 'any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; (.command // "") | endswith("/hooks/ripwire-claude-route.sh"))' "$SETTINGS" >/dev/null 2>&1 \
     && ok "I2 install: settings.json registers the router as a UserPromptSubmit hook" \
-    || no "I2 install: no UserPromptSubmit entry for $HOOK"
+    || no "I2 install: no UserPromptSubmit entry for ripwire-claude-route.sh"
 IOUT2="$( HOME="$IHOME" bash "$INSTALL" --hook 2>&1 )"
 CNT="$( jq '[(.hooks.UserPromptSubmit // [])[] | select(.hooks[]?.command | test("ripwire-claude-route"))] | length' "$SETTINGS" )"
 [ "$CNT" = "1" ] \
@@ -461,7 +462,7 @@ OLDHOME="$TMP/oldhome"; mkdir -p "$OLDHOME/.claude"
 jq -n --arg cmd "$NUDGE" '{hooks:{PreToolUse:[{matcher:"Bash",hooks:[{type:"command",command:$cmd}]}]}}' \
     >"$OLDHOME/.claude/settings.json"
 HOME="$OLDHOME" bash "$INSTALL" --hook >/dev/null 2>&1
-jq -e --arg cmd "$HOOK" 'any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; .command == $cmd)' \
+jq -e 'any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; (.command // "") | endswith("/hooks/ripwire-claude-route.sh"))' \
     "$OLDHOME/.claude/settings.json" >/dev/null 2>&1 \
     && ok "I6 install: a machine that already had the nudge registered still gets the router" \
     || no "I6 install: the early return skipped the router — every pre-2026-09-02 install would miss it"
@@ -480,9 +481,10 @@ DOC2="$( HOME="$DEFHOME" "$BIN" "$REPO" --doctor --agent=claude 2>/dev/null )"
 printf '%s' "$DOC2" | grep -Eq '<c n="claude-hooks"[^>]*route_hook="0"' \
     && ok "V3 doctor: route_hook=\"0\" when it is not registered (the negative control)" \
     || no "V3 doctor: route_hook is not 0 against an untouched home"
-printf '%s' "$DOC1" | grep -Fqi 'codex' \
-    && no "V4 doctor: the claude report mentions Codex (a hint pointing at the wrong installer)" \
-    || ok "V4 doctor: the claude report names no Codex remediation"
+# The legend names codex-skills unconditionally, on every --agent; V4 cares about the rows, so strip it.
+printf '%s' "$DOC1" | sed 's/<!--.*-->//' | grep -Fqi 'codex' \
+    && no "V4 doctor: the claude report's rows mention Codex (a hint pointing at the wrong installer)" \
+    || ok "V4 doctor: the claude report's rows name no Codex remediation"
 "$BIN" "$REPO" --doctor --agent=bogus >/dev/null 2>"$TMP/v.err"; VRC=$?
 [ "$VRC" -ne 0 ] && grep -Fq 'claude' "$TMP/v.err" \
     && ok "V5 doctor: an unsupported --agent value is refused and the message lists claude" \

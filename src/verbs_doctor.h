@@ -249,7 +249,17 @@ inline const char* doctorLegendComment()
                        "useful claim when both matter; locks= counts the advisory edit-lock files under locks/ (never unlinked by "
                        "their holder; the unheld ones older than a day are swept on the next cache write). binary-path compares "
                        "CONTENT: same_bytes 1 is the copied-install case (ok, copied 1) whatever the mtimes say; on_path 0 fails "
-                       "the row and its hint carries the export line, the state a fresh install is in until PATH is fixed. git's "
+                       "the row and its hint carries the export line, the state a fresh install is in until PATH is fixed. When "
+                       "PATH resolves to a version-manager SHIM (mise/aqua), the row instead carries managed=\"1\" same_file=, "
+                       "comparing the manager's own managed install byte-for-byte; managed_unverified=\"1\" means the shim was "
+                       "recognised but the manager's on-disk layout did not resolve to exactly one candidate (disclosed unknown, "
+                       "not a failure); self_unverified=\"1\" means the OTHER side of that comparison — this process's own "
+                       "executable path — could not be determined, so no byte comparison ran at all (also disclosed unknown, "
+                       "not a failure, and never paired with same_file= since none was computed). The agent skills rows "
+                       "(claude-skills/codex-skills) carry not_installed=\"1\" for a fresh "
+                       "checkout with no manifest yet (still ok=\"1\" there, since that is not a broken install) and stale=\"1\" "
+                       "when a manifest's source no longer matches this binary's embedded skill set — distinct from "
+                       "tracked-binaries' own stale= below, which is about committed source vs binary, not an install manifest. git's "
                        "shallow 1 means the clone's history is depth-limited, so every churn number counts only the commits "
                        "present. volatile= on a row NAMES that row's own attributes that read LIVE machine "
                        "state — cache-dir scans a per-user directory every ripwire process writes into, so two runs of this "
@@ -741,6 +751,17 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
             // not found". Not being on PATH is the commonest state a fresh install is in; it fails this row, with the fix.
             ok = false;
             attrs += " on_path=\"0\"" + doctorNotOnPathHint( selfPath, esc );
+        }
+        else if( haveSelf && rw::codexdoctor::isKnownShimPath( whichPath ) )
+        {
+            // I1 (2026-09-18 review round 1): a mise/aqua shim's mtime/size are the SHIM's, not the
+            // managed binary's, and differ from `self` on every install by construction — the plain
+            // dev/ino-then-mtime/size path below therefore false-positived STALE on every shim user.
+            // codexdoctor.h's codex-binary row already solved this (Task 14); reuse it verbatim rather
+            // than re-deriving a second copy of "recognise the shim, resolve what it manages".
+            const rw::codexdoctor::Check shim = rw::codexdoctor::shimBinaryCheck( selfPath );   // its attrs already carry on_path=
+            ok = shim.ok;
+            attrs += " " + shim.attrs;
         }
         else if( haveSelf )
         {

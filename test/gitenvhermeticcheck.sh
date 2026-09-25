@@ -110,7 +110,7 @@ done
 echo
 echo "=== (C) THE LIST: the helper clears exactly the pinned names ==="
 # ═══════════════════════════════════════════════════════════════════════════
-PINNED="AGENTS_HOME CLAUDE_CONFIG_DIR CODEX_HOME GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_PREFIX GIT_WORK_TREE HERMES_HOME RIPWIRE_DATA_HOME"
+PINNED="AGENTS_HOME CLAUDE_CONFIG_DIR CODEX_HOME GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_PREFIX GIT_WORK_TREE HERMES_HOME OPENCLAW_STATE_DIR RIPWIRE_DATA_HOME"
 DERIVED="$( grep -E '^unset ' "$HELPER" | sed 's/^unset //' | tr ' ' '\n' | grep -v '^$' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ *$//' )"
 [ "$DERIVED" = "$PINNED" ] \
     && ok "(C) the helper's unset lines name exactly the pinned set ($( printf '%s' "$PINNED" | wc -w | tr -d ' ' ) variables, both families)" \

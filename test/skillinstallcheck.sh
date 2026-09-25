@@ -11,6 +11,7 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
+. "$ROOT/test/lib/statcompat.sh"
 SK="$ROOT/skills"
 fail=0
 ok(){ echo "  PASS  $1" || { fail=1; echo "  FAIL  could not write the PASS line for: $1"; }; return 0; }
@@ -20,6 +21,11 @@ no(){ echo "  FAIL  $1"; fail=1; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 DST="$TMP/skills"
+# `ripwire skills install <DEST_PATH>` extracts its embedded store cache under $HOME/.local/share/
+# ripwire even when the destination is explicit — a real write, not a symlink-only op. An explicit-
+# DEST_PATH call below with no HOME= of its own inherits whatever HOME the caller's shell has, which
+# is exactly the leak test/installer_isolation.py exists to catch. Every such call gets this sandbox.
+NOHOME="$TMP/dest-path-home"; mkdir -p "$NOHOME"
 
 # ---- 1) install.sh deploys EVERY user-facing shipped skill (the deployment-drift catch) ----
 # 2026-09-06 (stranger audit): a skill whose SKILL.md front matter says `audience: contributor` is about
@@ -29,7 +35,7 @@ DST="$TMP/skills"
 shippedAll=$( ls -d "$SK"/ripwire-*/ 2>/dev/null | wc -l | tr -d ' ' )
 contributorSkills=$( grep -l '^audience: contributor' "$SK"/ripwire-*/SKILL.md 2>/dev/null | wc -l | tr -d ' ' )
 shipped=$(( shippedAll - contributorSkills ))
-bash "$SK/install.sh" "$DST" >/dev/null 2>&1
+HOME="$NOHOME" bash "$SK/install.sh" "$DST" >/dev/null 2>&1
 live=0; for l in "$DST"/ripwire-*; do [ -e "$l" ] && live=$(( live + 1 )); done
 { [ "$shipped" -gt 0 ] && [ "$live" -eq "$shipped" ]; } \
     && ok "install.sh deploys all $shipped user-facing shipped skills (live=$live; $contributorSkills contributor-only held back)" \
@@ -40,22 +46,22 @@ live=0; for l in "$DST"/ripwire-*; do [ -e "$l" ] && live=$(( live + 1 )); done
 [ ! -e "$DST/ripwire-opt-remarks" ] && [ ! -L "$DST/ripwire-opt-remarks" ] \
     && ok "(1b) the contributor-only skill is NOT activated by default" \
     || no "(1b) ripwire-opt-remarks was activated for a plain user install"
-grep -q 'skill=ripwire-opt-remarks' "$DST/.ripwire-manifest-v1" 2>/dev/null \
+grep -q 'skill=ripwire-opt-remarks' "$DST/.ripwire-manifest-v2" 2>/dev/null \
     && no "(1b) the manifest declares the contributor-only skill that was not linked (manifest parity broken)" \
     || ok "(1b) the manifest declares exactly the linked set (no contributor-only entry)"
 CONTRIB="$TMP/skills-contrib"
-bash "$SK/install.sh" --contributor "$CONTRIB" >/dev/null 2>&1
+HOME="$NOHOME" bash "$SK/install.sh" --contributor "$CONTRIB" >/dev/null 2>&1
 [ -e "$CONTRIB/ripwire-opt-remarks" ] \
     && ok "(1c) --contributor activates the contributor-only skill too ($shippedAll linked)" \
     || no "(1c) --contributor did not activate ripwire-opt-remarks"
-bash "$SK/install.sh" "$CONTRIB" >/dev/null 2>&1
+HOME="$NOHOME" bash "$SK/install.sh" "$CONTRIB" >/dev/null 2>&1
 [ ! -e "$CONTRIB/ripwire-opt-remarks" ] && [ ! -L "$CONTRIB/ripwire-opt-remarks" ] \
     && ok "(1c) a re-run without --contributor prunes the contributor-only link (a setup that stops being one does not keep it)" \
     || no "(1c) the contributor-only link survived a re-run without --contributor"
 
 # ---- 2) PRUNE removes a stale/dangling skill (the deleted-skill catch) ----
 ln -sfn "$SK/ripwire-does-not-exist/" "$DST/ripwire-ghost"     # a dangling symlink (deleted skill)
-bash "$SK/install.sh" "$DST" >/dev/null 2>&1                    # re-run: must prune it
+HOME="$NOHOME" bash "$SK/install.sh" "$DST" >/dev/null 2>&1     # re-run: must prune it
 if [ -e "$DST/ripwire-ghost" ] || [ -L "$DST/ripwire-ghost" ]; then
     no "install.sh did NOT prune a dangling ripwire-ghost symlink (stale skills linger)"
 else
@@ -204,10 +210,10 @@ fi
 if [ -n "$BIN" ] && [ -x "$BIN" ]; then
     "$BIN" wrap codex --force >"$TMP/wrap-codex" 2>/dev/null
     { grep -q '^\[mcp_servers\.ripwire\]$' "$TMP/wrap-codex" \
-      && grep -q '^bash skills/install\.sh --codex' "$TMP/wrap-codex"; } \
+      && grep -qE '^'\''[^'\'']+'\'' skills install --codex[[:space:]]+#' "$TMP/wrap-codex"; } \
         && ok "wrap codex emits Codex MCP config plus the Codex skill-install command" \
         || no "wrap codex does not emit a complete Codex install/discovery recipe"
-    grep -q '^bash skills/install\.sh --codex --hook' "$TMP/wrap-codex" \
+    grep -qE '^'\''[^'\'']+'\'' skills install --codex --hook' "$TMP/wrap-codex" \
         && ok "wrap codex recommends the Codex-native advisory hook" \
         || no "wrap codex omits the Codex-native advisory hook install"
 
@@ -251,7 +257,10 @@ fi
 # does not even buy the fix it was run for. Found 2026-09-05 on the operator's own machine while
 # closing the terminality round: PreToolUse, SessionStart and UserPromptSubmit each ended up doubled.
 # An existing registration is therefore identified by the SCRIPT, never by which copy registered it.
-hookMatcherExpected="$( sed -n 's/^hookMatcher="\(.*\)"$/\1/p' "$SK/install.sh" | head -n1 )"
+# I3: skills/install.sh is now a thin wrapper (redhat-et/ripwire#225) with no `hookMatcher=` line of
+# its own — the matcher lives in src/skillsinstall.h's kClaudeHookMatcher, read from there instead.
+hookMatcherExpected="$( sed -n 's/^inline constexpr std::string_view kClaudeHookMatcher = "\(.*\)";$/\1/p' "$ROOT/src/skillsinstall.h" | head -n1 )"
+[ -n "$hookMatcherExpected" ] || no "(D) could not read kClaudeHookMatcher from src/skillsinstall.h — this arm would otherwise pass vacuously"
 D_HOME="$TMP/dup-home"; mkdir -p "$D_HOME/.claude"
 cat >"$D_HOME/.claude/settings.json" <<'DUPJSON'
 {"hooks":{"PreToolUse":[{"matcher":"Read|Glob|Grep|Bash|mcp__ripwire__","hooks":[{"type":"command","command":"/opt/homebrew/share/ripwire/hooks/ripwire-nudge.sh"}]}],"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"/opt/homebrew/share/ripwire/hooks/ripwire-nudge.sh --session-start"}]}],"UserPromptSubmit":[{"matcher":"*","hooks":[{"type":"command","command":"/opt/homebrew/share/ripwire/hooks/ripwire-claude-route.sh"}]}]}}
@@ -290,5 +299,102 @@ OC_HOOK_STATUS=$?
 { [ -e "$OC_HOME/.agents/skills/ripwire-router" ]; } \
     && ok "(E) the refused run contained its skill links to the temp HOME" \
     || no "(E) the refused run linked nowhere visible — HOME= containment may be broken"
+
+# ── (F) jq is resolved via an actual PATH walk, not a fixed location (review item 10) ──────────────
+# A wrapper "jq" placed FIRST on PATH touches a sentinel before exec'ing the real jq — the sentinel
+# only appears if the merge's own PATH search, not some hardcoded /usr/bin/jq, is what ran it.
+REAL_JQ="$( command -v jq )" || no "(F) no system jq to copy for this arm"
+if [ -n "${REAL_JQ:-}" ]
+then
+    F_BINDIR="$TMP/f-wrapper-path-bin"; mkdir -p "$F_BINDIR"
+    F_SENTINEL="$TMP/f-jq-wrapper-ran"
+    printf '#!/bin/sh\ntouch "%s"\nexec "%s" "$@"\n' "$F_SENTINEL" "$REAL_JQ" > "$F_BINDIR/jq"
+    chmod +x "$F_BINDIR/jq"
+    F_HOME="$TMP/f-custom-path-home"; mkdir -p "$F_HOME"
+    HOME="$F_HOME" PATH="$F_BINDIR:$PATH" bash "$SK/install.sh" --hook >"$TMP/f.out" 2>"$TMP/f.err"
+    F_STATUS=$?
+    [ "$F_STATUS" -eq 0 ] && [ -f "$F_HOME/.claude/settings.json" ] \
+        && ok "(F) --hook merges successfully with a jq found via PATH search" \
+        || no "(F) --hook failed with a PATH-resolved jq (rc=$F_STATUS): $( cat "$TMP/f.err" )"
+    [ -f "$F_SENTINEL" ] \
+        && ok "(F) the PATH-first jq wrapper was the one actually invoked" \
+        || no "(F) the PATH-first jq wrapper never ran — jq is not being resolved via PATH search"
+fi
+
+# ── (G) no jq anywhere on PATH — --hook refuses cleanly, no shell/settings.json touched ────────────
+# A minimal PATH built from copies of ONLY what install.sh's own plumbing needs before it execs the
+# (absolute-path) ripwire binary — bash to run it, dirname for find_ripwire — with no jq anywhere.
+G_BINDIR="$TMP/g-no-jq-bin"; mkdir -p "$G_BINDIR"
+ln -s "$( command -v bash )" "$G_BINDIR/bash"
+ln -s "$( command -v dirname )" "$G_BINDIR/dirname"
+G_HOME="$TMP/g-no-jq-home"; mkdir -p "$G_HOME"
+HOME="$G_HOME" PATH="$G_BINDIR" bash "$SK/install.sh" --hook >"$TMP/g.out" 2>"$TMP/g.err"
+G_STATUS=$?
+{ [ "$G_STATUS" -ne 0 ]; } \
+    && ok "(G) --hook with no jq on PATH exits non-zero" \
+    || no "(G) --hook with no jq on PATH exited 0"
+grep -qi "jq" "$TMP/g.err" \
+    && ok "(G) the failure names jq as the missing piece" \
+    || no "(G) the failure did not mention jq: $( cat "$TMP/g.err" )"
+{ [ ! -e "$G_HOME/.claude/settings.json" ] || ! grep -q '"hooks"' "$G_HOME/.claude/settings.json" 2>/dev/null; } \
+    && ok "(G) no hook registration was written without jq" \
+    || no "(G) settings.json carries a hooks registration despite jq being unavailable"
+
+# ── (H) an empty/relative PATH entry never resolves jq from the current directory (CWE-426) ────────
+# A malicious "jq" sits in CWD; PATH has an empty leading entry (":$H_BINDIR", sh's own spelling for
+# "search the current directory") plus a genuinely relative one ("h-relative-jq-bin"). Neither may
+# ever be tried — --hook must fail exactly as arm (G) does, and the planted jq must never run.
+H_CWD="$TMP/h-untrusted-repo"; mkdir -p "$H_CWD"
+H_SENTINEL="$TMP/h-planted-jq-ran"
+printf '#!/bin/sh\ntouch "%s"\nexit 0\n' "$H_SENTINEL" > "$H_CWD/jq"
+chmod +x "$H_CWD/jq"
+mkdir -p "$H_CWD/h-relative-jq-bin"
+printf '#!/bin/sh\ntouch "%s"\nexit 0\n' "$H_SENTINEL" > "$H_CWD/h-relative-jq-bin/jq"
+chmod +x "$H_CWD/h-relative-jq-bin/jq"
+H_BINDIR="$TMP/h-plumbing-bin"; mkdir -p "$H_BINDIR"
+ln -s "$( command -v bash )" "$H_BINDIR/bash"
+ln -s "$( command -v dirname )" "$H_BINDIR/dirname"
+H_HOME="$TMP/h-empty-relative-path-home"; mkdir -p "$H_HOME"
+( cd "$H_CWD" && HOME="$H_HOME" PATH=":h-relative-jq-bin:$H_BINDIR" bash "$SK/install.sh" --hook >"$TMP/h.out" 2>"$TMP/h.err" )
+H_STATUS=$?
+{ [ "$H_STATUS" -ne 0 ]; } \
+    && ok "(H) --hook with only an empty/relative PATH entry for jq exits non-zero" \
+    || no "(H) --hook with only an empty/relative PATH entry for jq exited 0"
+{ [ ! -f "$H_SENTINEL" ]; } \
+    && ok "(H) the planted current-directory jq was never executed" \
+    || no "(H) the planted current-directory jq RAN — an empty/relative PATH entry resolved it (CWE-426)"
+
+# ── (I) a pre-existing settings.json's mode survives a --hook merge (CWE-732) ───────────────────────
+# umask 022 is what makes this discriminating: the temp's own create mode is 0666, and 0666 & ~022 ==
+# 0644 — a DIFFERENT value than the 0600 planted below, so a preservation failure is not masked by
+# umask happening to land on the same bits.
+I_HOME="$TMP/i-mode-preserve-home"; mkdir -p "$I_HOME/.claude"
+printf '{}' > "$I_HOME/.claude/settings.json"
+chmod 0600 "$I_HOME/.claude/settings.json"
+( umask 022; HOME="$I_HOME" bash "$SK/install.sh" --hook >"$TMP/i.out" 2>"$TMP/i.err" )
+I_MODE="$( mode_of "$I_HOME/.claude/settings.json" )"
+[ "$I_MODE" = "600" ] \
+    && ok "(I) a pre-existing 0600 settings.json keeps its mode across a --hook merge" \
+    || no "(I) settings.json mode changed from 0600 to 0$I_MODE across a --hook merge (CWE-732)"
+
+
+# ── (J) find_ripwire probes the archive root (release-tarball layout) before falling back ──────────
+# A release tarball or the Windows zip ships ripwire(.exe) at the archive root, beside skills/install.sh
+# — not under build/ or build-release/. Without this probe, `bash skills/install.sh` from an unpacked
+# archive fails with "no built or installed ripwire binary found" (review round on #293, item 3).
+J_ARCHIVE="$TMP/j-archive"; mkdir -p "$J_ARCHIVE/skills"
+cp "$SK/install.sh" "$J_ARCHIVE/skills/install.sh"
+J_BIN_REAL="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+if [ -x "$J_BIN_REAL" ]; then
+    cp "$J_BIN_REAL" "$J_ARCHIVE/ripwire"
+    J_HOME="$TMP/j-archive-home"; mkdir -p "$J_HOME"
+    ( HOME="$J_HOME" PATH="/usr/bin:/bin" bash "$J_ARCHIVE/skills/install.sh" >"$TMP/j.out" 2>"$TMP/j.err" )
+    J_STATUS=$?
+    { [ "$J_STATUS" -eq 0 ]; } \
+        && ok "(J) skills/install.sh finds ripwire at the archive root (release-tarball layout)" \
+        || no "(J) skills/install.sh with ripwire only at the archive root exited $J_STATUS: $( cat "$TMP/j.err" )"
+else
+    no "(J) skipped — no built ripwire binary to test the archive-root probe with (\$RIPWIRE_BIN/build/ripwire not found)"
+fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

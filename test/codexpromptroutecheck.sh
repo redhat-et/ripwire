@@ -145,7 +145,8 @@ HOME="$TMP/home" CODEX_HOME="$TMP/home/.codex" AGENTS_HOME="$TMP/home/.agents" R
 HOME="$TMP/home" CODEX_HOME="$TMP/home/.codex" AGENTS_HOME="$TMP/home/.agents" RIPWIRE_DATA_HOME="$TMP/home/.local/share/ripwire" \
     bash "$ROOT/skills/install.sh" --codex --hook >/dev/null
 SETTINGS="$TMP/home/.codex/hooks.json"
-jq -e --arg cmd "$HOOK" '[.hooks.UserPromptSubmit[]?.hooks[]? | select(.command == $cmd)] | length == 1' "$SETTINGS" >/dev/null 2>&1 \
+# Matched by script basename, not exact path: #225's installer registers its extracted store copy.
+jq -e '[.hooks.UserPromptSubmit[]?.hooks[]? | select((.command // "") | endswith("/hooks/ripwire-codex-route.sh"))] | length == 1' "$SETTINGS" >/dev/null 2>&1 \
     && ok "Codex installer registers exactly one prompt router after two runs" \
     || no "Codex installer did not idempotently register UserPromptSubmit"
 
