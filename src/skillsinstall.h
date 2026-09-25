@@ -216,9 +216,12 @@ inline Outcome extractGroup( const std::array<embedded_skills::EmbeddedFile, N>&
     // contents are byte-identical to the binary's own embedded copy; anything else — missing, a link,
     // a partial extraction a killed run left behind, tampering — is re-extracted from scratch below.
     os::stat_t rootSt{};
-    const bool rootIsRealDir = os::lstat( storeRoot.string().c_str(), &rootSt ) == 0 && S_ISDIR( rootSt.st_mode );
+    const bool rootExists = os::lstat( storeRoot.string().c_str(), &rootSt ) == 0;
+    const bool rootIsRealDir = rootExists && S_ISDIR( rootSt.st_mode );
     if( rootIsRealDir && storeContentsMatch( files, storeRoot ) ) { return { true, {} }; }
-    if( rootIsRealDir ) { std::filesystem::remove_all( storeRoot, ec ); }   // stale/corrupted — clear it; a symlink at this name is removed as itself, never followed
+    // stale/corrupted real dir, or a symlink/regular file planted at the key — clear it either way;
+    // remove_all removes a symlink or a plain file as itself, same as POSIX remove, never following it
+    if( rootExists ) { std::filesystem::remove_all( storeRoot, ec ); }
 
     const std::filesystem::path tmp = storeRoot.parent_path() / ( ".tmp-" + std::to_string( os::getpid() ) + "-" + storeRoot.filename().string() );
     std::filesystem::remove_all( tmp, ec );
@@ -235,11 +238,15 @@ inline Outcome extractGroup( const std::array<embedded_skills::EmbeddedFile, N>&
     if( !renameAtomic( tmp, storeRoot ) )
     {
         // someone else extracted the same content concurrently and won the race — that's fine,
-        // the store is immutable-by-hash, so whichever copy exists now is correct either way.
+        // the store is immutable-by-hash, so whichever copy exists now is correct either way. Checked
+        // the same way as the top of this function (lstat + byte comparison, never exists()/is_directory()
+        // — both follow a symlink a racing writer, or an attacker, could have planted at this name instead.
         std::filesystem::remove_all( tmp, ec );
-        if( !std::filesystem::exists( storeRoot, ec ) )
+        os::stat_t wonSt{};
+        const bool wonIsRealDir = os::lstat( storeRoot.string().c_str(), &wonSt ) == 0 && S_ISDIR( wonSt.st_mode );
+        if( !wonIsRealDir || !storeContentsMatch( files, storeRoot ) )
         {
-            return { false, "rename to store dir failed and the target still doesn't exist: " + storeRoot.string() };
+            return { false, "rename to store dir failed and the target still doesn't verify: " + storeRoot.string() };
         }
     }
     return { true, {} };

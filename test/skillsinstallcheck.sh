@@ -365,4 +365,38 @@ manifestMode="$( mode_of "$CLAUDE_CONFIG_DIR/skills/.ripwire-manifest-v2" )"
 [ "$manifestMode" = "600" ] || fail "manifest mode changed from 0600 to 0$manifestMode across a re-install (CWE-732)"
 rm -rf "$d23"
 
-echo "OK: skillsinstallcheck (arms 1-23)"
+# ── arm 24: a SYMLINK planted at the store key is never trusted as an already-extracted store ──────
+# extractGroup's old "trust the name" check only cleared storeRoot when it was a real directory; a
+# symlink pointing elsewhere fell through untouched, rename(tmp, storeRoot) failed ENOTDIR, and the
+# fallback std::filesystem::exists() followed the link and reported ok (review round on #293, item 1).
+CURRENT_ARM="24-symlink-at-store-key-not-trusted"
+sandbox
+d24="$d"
+"$ripwire" skills install >/dev/null
+store_dir24="$( find "$RIPWIRE_DATA_HOME/skills" -maxdepth 1 -mindepth 1 -type d | head -1 )"
+[ -n "$store_dir24" ] || fail "no store directory created"
+elsewhere24="$d24/elsewhere-24"
+mkdir -p "$elsewhere24"
+echo "not a real skill" > "$elsewhere24/decoy.md"
+rm -rf "$store_dir24"
+ln -s "$elsewhere24" "$store_dir24"
+"$ripwire" skills install >/dev/null
+[ -L "$store_dir24" ] && fail "store key is still a symlink — the planted link was never cleared"
+[ -f "$store_dir24/skills/ripwire-orient/SKILL.md" ] || fail "store key was not re-extracted for real after a symlink was planted at it"
+rm -rf "$d24"
+
+# ── arm 25: a REGULAR FILE planted at the store key is never trusted as an already-extracted store ─
+CURRENT_ARM="25-file-at-store-key-not-trusted"
+sandbox
+d25="$d"
+"$ripwire" skills install >/dev/null
+store_dir25="$( find "$RIPWIRE_DATA_HOME/skills" -maxdepth 1 -mindepth 1 -type d | head -1 )"
+[ -n "$store_dir25" ] || fail "no store directory created"
+rm -rf "$store_dir25"
+echo "not a directory" > "$store_dir25"
+"$ripwire" skills install >/dev/null
+[ -d "$store_dir25" ] || fail "store key is still not a directory — the planted file was never cleared"
+[ -f "$store_dir25/skills/ripwire-orient/SKILL.md" ] || fail "store key was not re-extracted for real after a file was planted at it"
+rm -rf "$d25"
+
+echo "OK: skillsinstallcheck (arms 1-25)"
