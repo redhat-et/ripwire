@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -275,6 +276,23 @@ inline Outcome ensureStoreExtracted()
     return extractGroup( embedded_skills::kHookFiles, hooksRoot, 0755 );
 }
 
+// Byte-for-byte comparison of two regular files, for recognising a copy-fallback install (see
+// linkOrRefuse's ENOSYS branch) as already correct on a later run — the same content-addressed
+// trust storeContentsMatch already uses, applied to a real file instead of the embedded reference.
+inline bool regularFileContentsMatch( const std::filesystem::path& a, const std::filesystem::path& b )
+{
+    std::error_code ec;
+    const std::uintmax_t sizeA = std::filesystem::file_size( a, ec );
+    if( ec ) { return false; }
+    const std::uintmax_t sizeB = std::filesystem::file_size( b, ec );
+    if( ec || sizeA != sizeB ) { return false; }
+    std::ifstream fa( a, std::ios::binary );
+    std::ifstream fb( b, std::ios::binary );
+    if( !fa || !fb ) { return false; }
+    return std::equal( std::istreambuf_iterator<char>( fa ), std::istreambuf_iterator<char>(),
+                        std::istreambuf_iterator<char>( fb ) );
+}
+
 // Symlink storeFile -> destLink. Refuses (does not overwrite) if destLink already exists and is NOT
 // a symlink this subcommand itself would have created pointing at storeFile — see Task 6 for the
 // "is it ours, and is it already correct" logic that wraps this.
@@ -293,6 +311,20 @@ inline Outcome linkOrRefuse( const std::filesystem::path& storeFile, const std::
     if( errno == EEXIST )
     {
         return { false, "already exists: " + destLink.string() };   // caller decides refuse-vs-already-correct
+    }
+    if( errno == ENOSYS )
+    {
+        // No symlink support (Windows without Developer Mode/SeCreateSymbolicLinkPrivilege, or any
+        // platform os::symlink is not implemented on): copy the store file's bytes to destLink instead.
+        // The store is content-addressed and immutable, so a copy is exactly as correct as a link — it
+        // just does not follow a later store update automatically; a fresh extraction still replaces it,
+        // and regularFileContentsMatch is what lets a later run recognise this copy as already correct.
+        std::error_code copyEc;
+        if( std::filesystem::copy_file( storeFile, destLink, std::filesystem::copy_options::overwrite_existing, copyEc ) )
+        {
+            return { true, {} };
+        }
+        return { false, "symlink unsupported and the copy fallback failed for " + destLink.string() + ": " + copyEc.message() };
     }
     return { false, "symlink failed for " + destLink.string() + ": " + std::string( std::strerror( errno ) ) };
 }
@@ -657,6 +689,14 @@ inline InstallOutcome installForAgent( std::string_view agentName, bool contribu
                 reportFailed( "could not remove the stale link at " + destLink.string() + ": " + removeEc.message() );
                 continue;
             }
+        }
+        else if( std::filesystem::exists( destStatus ) && std::filesystem::is_regular_file( destStatus ) &&
+                 regularFileContentsMatch( destLink, storeFile ) )
+        {
+            // A regular file here byte-matches the current store's copy — a prior ENOSYS copy-fallback
+            // install (linkOrRefuse), not foreign content; the store is content-addressed, so this is
+            // exactly as "already correct" as an up-to-date symlink would be.
+            linkedNames.push_back( skillDir );
         }
         else if( std::filesystem::exists( destStatus ) )
         {

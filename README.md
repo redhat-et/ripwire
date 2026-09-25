@@ -962,9 +962,10 @@ ripwire --version
   `degraded="1"` and may report as failing even when `ripwire` is on `Path` (its PATH lookup is a known gap).
   The cache lives in `%LOCALAPPDATA%\Temp\ripwire-<uid>`.
 - **Agent skills** (Claude Code, Codex): from Git Bash, in the unzipped folder, `bash skills/install.sh` (Claude Code)
-  or `bash skills/install.sh --codex`. Or copy them by hand in PowerShell:
-  `New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null; Copy-Item -Recurse -Force "$bin\skills\ripwire-*" "$HOME\.claude\skills\"`
-  (Codex reads `$HOME\.agents\skills`). `--hook` is untested on Windows, and `scripts/install.sh` (the curl installer) does not run there.
+  or `bash skills/install.sh --codex`. Without Developer Mode / `SeCreateSymbolicLinkPrivilege`, `ripwire.exe` has no
+  symlink support and copies each skill's files instead of linking them — a later reinstall still refreshes them, it
+  just will not notice a store update on its own the way a symlink would. `--hook` is untested on Windows, and
+  `scripts/install.sh` (the curl installer) does not run there.
 </details>
 
 **Building it yourself needs CMake 3.24+ and a C++23 compiler, and nothing else installed first** —

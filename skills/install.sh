@@ -13,7 +13,9 @@ set -eu
 find_ripwire()
 {
     local here; here="$( cd "$( dirname "$0" )/.." && pwd )"
-    for candidate in "$here/build/ripwire" "$here/build-release/ripwire"; do
+    # A release tarball or the Windows zip ships ripwire(.exe) at the archive root, beside skills/ —
+    # exactly as unambiguous as a checkout build (see the comment above), so it is checked first.
+    for candidate in "$here/ripwire" "$here/ripwire.exe" "$here/build/ripwire" "$here/build-release/ripwire"; do
         [ -x "$candidate" ] && { echo "$candidate"; return; }
     done
     if command -v ripwire >/dev/null 2>&1; then

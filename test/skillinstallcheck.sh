@@ -377,4 +377,24 @@ I_MODE="$( mode_of "$I_HOME/.claude/settings.json" )"
     && ok "(I) a pre-existing 0600 settings.json keeps its mode across a --hook merge" \
     || no "(I) settings.json mode changed from 0600 to 0$I_MODE across a --hook merge (CWE-732)"
 
+
+# ── (J) find_ripwire probes the archive root (release-tarball layout) before falling back ──────────
+# A release tarball or the Windows zip ships ripwire(.exe) at the archive root, beside skills/install.sh
+# — not under build/ or build-release/. Without this probe, `bash skills/install.sh` from an unpacked
+# archive fails with "no built or installed ripwire binary found" (review round on #293, item 3).
+J_ARCHIVE="$TMP/j-archive"; mkdir -p "$J_ARCHIVE/skills"
+cp "$SK/install.sh" "$J_ARCHIVE/skills/install.sh"
+J_BIN_REAL="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+if [ -x "$J_BIN_REAL" ]; then
+    cp "$J_BIN_REAL" "$J_ARCHIVE/ripwire"
+    J_HOME="$TMP/j-archive-home"; mkdir -p "$J_HOME"
+    ( HOME="$J_HOME" PATH="/usr/bin:/bin" bash "$J_ARCHIVE/skills/install.sh" >"$TMP/j.out" 2>"$TMP/j.err" )
+    J_STATUS=$?
+    { [ "$J_STATUS" -eq 0 ]; } \
+        && ok "(J) skills/install.sh finds ripwire at the archive root (release-tarball layout)" \
+        || no "(J) skills/install.sh with ripwire only at the archive root exited $J_STATUS: $( cat "$TMP/j.err" )"
+else
+    no "(J) skipped — no built ripwire binary to test the archive-root probe with (\$RIPWIRE_BIN/build/ripwire not found)"
+fi
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
