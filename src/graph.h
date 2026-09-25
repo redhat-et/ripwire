@@ -6053,13 +6053,14 @@ struct StructuralIncludeAdj
     std::vector<std::uint32_t>              lazyEdgesByFile;   // distinct (f, to) pairs left out, per f
     std::uint64_t                           lazyEdges = 0;     // Σ lazyEdgesByFile
     std::uint64_t                           importsUnresolved = 0;   // #220: in-repo TS/JS directives with no edge
+    TsImportExtras                          tsExtras;                // #220 part 2: imports_dts= / tsconfig_unread=
 };
 
 inline StructuralIncludeAdj resolveStructuralIncludeAdj( const IngestResult& ing )
 {
     HashMap<std::uint64_t, char> lazyPairs;
     StructuralIncludeAdj         out;
-    out.adj = buildPreciseIncludeAdj( ing, /*dedup=*/false, &lazyPairs, &out.importsUnresolved );
+    out.adj = buildPreciseIncludeAdj( ing, /*dedup=*/false, &lazyPairs, &out.importsUnresolved, &out.tsExtras );
     out.lazyEdgesByFile.assign( out.adj.size(), 0 );
     if( lazyPairs.empty() )
     {

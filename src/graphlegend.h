@@ -617,6 +617,28 @@ inline constexpr const char* kArchImportsUnresolvedLegend =
     " imports_unresolved=N counts_floor=1 (absent at 0): N TS/JS imports name this tree (a paths alias, a baseUrl path, a workspace package) yet drew no edge, so violations= and the metrics are floors: an edge through one was never judged.";
 inline constexpr const char* kImpactImportsUnresolvedLegend =
     "imports_unresolved=N (absent at 0): N TS/JS imports name this tree (a tsconfig/jsconfig paths alias, a baseUrl path, a workspace package) yet drew no edge, so importers= is a floor. ";
+// #220 part 2 — the resolver's two further disclosures, beside imports_unresolved= and absent at zero like it:
+// imports_dts= counts the edges that land only on a declaration file (types, not source — every count includes them),
+// tsconfig_unread= the owning configs whose `extends` base is not in the tree and could have declared an alias (so,
+// like imports_unresolved=, it makes the root's counts floors). One composer for the --deps and --arch roots, so the
+// attribute order is fixed: a root that carries only imports_unresolved= is byte-identical to part 1's.
+inline std::string tsImportRootAttrXml( std::uint64_t importsUnresolved, std::uint64_t importsDts, std::uint64_t tsconfigUnread )
+{
+    std::string s = importsUnresolvedAttrXml( importsUnresolved ) + countAttrXmlOrEmpty( "imports_dts", std::size_t( importsDts ) )
+                  + countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( tsconfigUnread ) );
+    return importsUnresolved > 0 || tsconfigUnread > 0 ? s + kGraphCountFloorAttrXml : s;
+}
+inline constexpr const char* kDepsImportsDtsLegend =
+    "imports_dts=N (root, absent at 0): N TS/JS imports resolved through a paths alias, a baseUrl path or a workspace package only to a .d.ts declaration, not to source; their edges are in every count. ";
+inline constexpr const char* kDepsTsconfigUnreadLegend =
+    "tsconfig_unread=N counts_floor=1 (root, absent at 0): N owning tsconfig/jsconfig files extend a base that is not in the tree (a package not installed in node_modules, an excluded file) and could declare an alias, so the counts are floors. ";
+inline constexpr const char* kArchTsImportExtrasLegend =
+    " imports_dts=N (absent at 0): N TS/JS imports resolved only to a .d.ts declaration. tsconfig_unread=N counts_floor=1 (absent at 0): N owning tsconfig/jsconfig files extend a base not in the tree that could declare an alias, so violations= and the metrics are floors.";
+inline std::string depsTsImportExtrasLegend( std::uint64_t importsDts, std::uint64_t tsconfigUnread )
+{
+    return std::string( importsDts > 0 ? kDepsImportsDtsLegend : "" ) + ( tsconfigUnread > 0 ? kDepsTsconfigUnreadLegend : "" );
+}
+inline const char* archTsImportExtrasLegend( bool on ) noexcept { return on ? kArchTsImportExtrasLegend : ""; }
 inline const char* depsImportsUnresolvedLegend( bool on ) noexcept { return on ? kDepsImportsUnresolvedLegend : ""; }
 inline const char* archImportsUnresolvedLegend( bool on ) noexcept { return on ? kArchImportsUnresolvedLegend : ""; }
 inline const char* impactImportsUnresolvedLegend( bool on ) noexcept { return on ? kImpactImportsUnresolvedLegend : ""; }

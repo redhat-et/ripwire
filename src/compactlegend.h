@@ -320,6 +320,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // #220 part 1: the FILE graph's gauge (graphlegend.h importsUnresolvedAttrXml), absent at zero, on the --deps/--arch/
     // --impact roots and the MCP impact twin; counts_floor= beside it reads from its own row above.
     { "imports_unresolved", "imports_unresolved=N: N TS/JS imports naming this tree (paths alias, baseUrl path, workspace package) drew no edge; graph counts are floors" },
+    // #220 part 2: the resolver's other two root gauges (graphlegend.h tsImportRootAttrXml), absent at zero, --deps/--arch.
+    { "imports_dts",       "imports_dts=N: N TS/JS imports resolved only to a .d.ts declaration, not source" },
+    { "tsconfig_unread",   "tsconfig_unread=N: N tsconfig extends bases not in the tree could declare aliases; graph counts are floors" },
     // #60: <bodies bodyless=N> — requested symbols with no body BY CONSTRUCTION (a module-scope owner), so
     // capped= stays 0. Absent at zero, like every term here.
     { "bodyless",          "bodyless=N of total=: requested symbols with NO body by construction (t=modscope), never in shown=, never raising capped=", true },
