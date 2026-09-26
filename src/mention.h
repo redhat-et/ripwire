@@ -779,6 +779,11 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
 //     lens-ranking pass in this file uses); doc ids within an anchor are already sorted+deduped by buildGraph.
 //   * ROUTE-AGNOSTIC — unlike B8 (routed path only), this runs identically whether or not --no-route is given:
 //     "which doc explains the resolved symbol" does not depend on which BM25 mode picked that symbol.
+//   * DEMOTED DOCS LAST — a doc the change-log / translation tier demotes (`docNoiseMul`, filter.h
+//     docNoiseSymbolMultipliers; routed callers only) is consulted only after every full-weight doc of every
+//     consulted anchor, and lifts to target × its factor. Rank before cut: the caps spend on explanation first,
+//     and a demoted doc takes only what is left, still under the same caps and the same refusal count. With no
+//     demoted doc in any consulted anchor's list the lift is byte-identical to a call without the vector.
 // The two DOC caps disclose (doc_mentions_capped=, below): a doc they refuse is nowhere in the bundle, so
 // its absence reads as "no doc explains this". kDocMentionMaxAnchors does NOT, by the same rule stated at
 // CapDisclosure: it is a window over the top of a ranked list this bundle prints in full, so every anchor
@@ -809,8 +814,16 @@ struct DocMentionBoostInfo
 //
 // It collects rather than returning bool because the disclosure needs a COUNT: lifted + refused is exactly
 // how many docs the caps had to choose from, which is what doc_mentions_total= reports.
+// A doc's factor under the change-log / translation tier: 1 (full weight) when the caller passed no tier or the doc
+// is not demoted. A demoted doc belongs to the second consult pass below, never to the first.
+inline float docNoiseFactorOf( const std::vector<float>* docNoiseMul, NodeId doc ) noexcept
+{
+    return ( docNoiseMul != nullptr && doc < docNoiseMul->size() ) ? ( *docNoiseMul )[doc] : 1.0f;
+}
+
 inline void collectRefusedDocLifts( const Graph& g, const std::vector<float>& lensRank, const std::vector<NodeId>& order,
-                                    std::size_t from, std::size_t to, std::vector<NodeId>& out )
+                                    std::size_t from, std::size_t to, std::vector<NodeId>& out,
+                                    const std::vector<float>* docNoiseMul = nullptr )   // demoted docs: the second pass's to count
 {
     ASSUME_NO_ALIAS( order, out );
     for( std::size_t k = from; k < to; ++k )
@@ -823,7 +836,7 @@ inline void collectRefusedDocLifts( const Graph& g, const std::vector<float>& le
         const float target = lensRank[anchor] * kDocMentionDecay;
         for( const NodeId doc : g.mentions[anchor] )
         {
-            if( doc < lensRank.size() && lensRank[doc] < target )
+            if( doc < lensRank.size() && lensRank[doc] < target && !( docNoiseFactorOf( docNoiseMul, doc ) < 1.0f ) )
             {
                 out.push_back( doc );
             }
@@ -831,8 +844,14 @@ inline void collectRefusedDocLifts( const Graph& g, const std::vector<float>& le
     }
 }
 
-inline bool applyDocMentionBoost( const Graph& g, std::vector<float>& lensRank, DocMentionBoostInfo* outInfo = nullptr )
+inline bool applyDocMentionBoost( const Graph& g, std::vector<float>& lensRank, DocMentionBoostInfo* outInfo = nullptr,
+                                  const std::vector<float>* docNoiseMul = nullptr )   // filter.h docNoiseSymbolMultipliers; empty = inert
 {
+    if( docNoiseMul != nullptr && docNoiseMul->empty() )
+    {
+        docNoiseMul = nullptr;   // the tier's own "nothing demoted" answer: identical to no tier at all
+    }
+    EXPECTS( docNoiseMul == nullptr || docNoiseMul->size() == lensRank.size(), "both are per-symbol over the same index" );
     const std::size_t N = lensRank.size();
     ASSUME( g.mentions.empty() || g.mentions.size() == N );
     if( N == 0 || g.mentions.empty() )
@@ -857,6 +876,7 @@ inline bool applyDocMentionBoost( const Graph& g, std::vector<float>& lensRank, 
     std::vector<NodeId> refusedDocs;  // docs a cap turned away — the count half of the disclosure
     std::size_t   stoppedAt  = 0;    // how far the consult loop actually got — the post-loop sweep resumes here
     std::uint32_t liftedDocs = 0, usedAnchors = 0;
+    std::array<std::uint8_t, kDocMentionMaxAnchors> liftsOf{};   // per consulted anchor, shared by both passes
     for( std::size_t k = 0; k < topN && liftedDocs < kDocMentionMaxDocsTotal; ++k )
     {
         stoppedAt           = k + 1;
@@ -874,6 +894,10 @@ inline bool applyDocMentionBoost( const Graph& g, std::vector<float>& lensRank, 
         std::size_t   perAnchor = 0;
         for( NodeId doc : g.mentions[anchor] )
         {
+            if( docNoiseFactorOf( docNoiseMul, doc ) < 1.0f )
+            {
+                continue;   // a demoted doc: the second pass's, lifted or refused there
+            }
             if( perAnchor >= kDocMentionMaxDocsPerAnchor || liftedDocs >= kDocMentionMaxDocsTotal )
             {
                 // A cap, not the fan-out, ended this anchor. The whole remaining fan-out is walked rather
@@ -900,11 +924,52 @@ inline bool applyDocMentionBoost( const Graph& g, std::vector<float>& lensRank, 
         {
             ++usedAnchors;
         }
+        ASSUME( perAnchor <= kDocMentionMaxDocsPerAnchor, "the per-anchor cap above bounds it" );
+        liftsOf[k] = std::uint8_t( perAnchor );
     }
 
     // The other half of the total cap: it can also end the OUTER loop, leaving consulted-window anchors
     // whose docs were never looked at (see collectRefusedDocLifts).
-    collectRefusedDocLifts( g, lensRank, order, stoppedAt, topN, refusedDocs );
+    collectRefusedDocLifts( g, lensRank, order, stoppedAt, topN, refusedDocs, docNoiseMul );
+
+    // The second pass: the demoted docs, in the same anchor order, lifted to target x their factor with whatever
+    // the caps left. Every consulted anchor is walked to the end — a demoted doc a cap turns away is a refusal,
+    // counted like any other, so doc_mentions_total= stays lifted + refused.
+    for( std::size_t k = 0; docNoiseMul != nullptr && k < topN; ++k )
+    {
+        const NodeId anchor = order[k];
+        if( !( lensRank[anchor] > 0.0f ) )
+        {
+            break; // rest of `order` only gets worse
+        }
+        if( anchor >= g.mentions.size() )
+        {
+            continue;
+        }
+        for( const NodeId doc : g.mentions[anchor] )
+        {
+            const float factor = docNoiseFactorOf( docNoiseMul, doc );
+            if( !( factor < 1.0f ) || doc >= lensRank.size() )
+            {
+                continue;
+            }
+            const float target = lensRank[anchor] * kDocMentionDecay * factor;
+            if( !( lensRank[doc] < target ) )
+            {
+                continue;   // already at or above where the lift would put it: nothing to lift, nothing refused
+            }
+            if( liftsOf[k] >= kDocMentionMaxDocsPerAnchor || liftedDocs >= kDocMentionMaxDocsTotal )
+            {
+                refusedDocs.push_back( doc );
+                continue;
+            }
+            lensRank[doc] = target;
+            ++liftedDocs;
+            usedAnchors += liftsOf[k] == 0 ? 1u : 0u;
+            ++liftsOf[k];
+        }
+    }
+    ENSURES( liftedDocs <= kDocMentionMaxDocsTotal, "both passes spend one total cap" );
     std::sort( refusedDocs.begin(), refusedDocs.end() );      // one doc under two anchors is ONE refusal
     refusedDocs.erase( std::unique( refusedDocs.begin(), refusedDocs.end() ), refusedDocs.end() );
     // doc_mentions_total= is lifted + refused: how many docs the caps had to choose from. It was nullptr —

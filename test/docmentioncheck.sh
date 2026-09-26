@@ -20,6 +20,9 @@
 #         boost-on vs boost-off.
 #   (v)   DETERMINISM x3, xmllint-clean, env (RIPWIRE_NO_DOC_MENTION=1) == flag (--no-doc-mention) byte-for-
 #         byte, and the flag alone refuses loudly; --pack-task carries the same note (shared computeLensRanking).
+#   (vi)  CHANGE LOGS AND TRANSLATIONS RANK BELOW CODE on a code question (filter.h docNoiseSymbolMultipliers):
+#         lifted last and lower, never dropped; the default-language docs keep the lift; a change / translation
+#         question, a named file, --no-route and a single-language repo all keep the untiered ranking.
 #
 # Usage:  bash test/docmentioncheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/docmentioncheck.sh
 
@@ -177,6 +180,104 @@ JSON_HIT="$( "$BIN" "$FIX" --for="$Q" --json --no-cache 2>/dev/null )"
 printf '%s' "$JSON_HIT" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("doc_mentions")==2, d.get("doc_mentions")' \
     && ok "L10b: --json carries the matching \"doc_mentions\":2" \
     || no "L10b: --json doc_mentions key missing or wrong"
+
+# ── (vi) CHANGE LOGS AND TRANSLATIONS RANK BELOW CODE on a code question (filter.h docNoiseSymbolMultipliers) ──
+# Dogfood 2026-09-26: on a public repo, three CHANGELOG `### Added` sections and a translated README section took
+# 4 of the top 20 --for slots for a code question. Both kinds backtick the identifiers the code defines, so the
+# doc-mention lift raised them to 0.55 x their anchor, above weaker real code — and, taking the lowest node ids
+# first under the per-anchor cap, ahead of the default-language README that actually explains the code.
+# Fixture NF: 8 stage functions that match the question strongly, 40 weaker helpers that match it too, a README
+# explaining stage 1, a CHANGELOG and two translated READMEs (basename form) that backtick the stages, a docs/en +
+# docs/ko pair (directory form), and ui/README.md — a two-letter directory that is NOT a language, beside a root
+# README.md (the removal-twin guard's control).
+NF="$TMP/noisefix"
+mkdir -p "$NF/search" "$NF/docs/en" "$NF/docs/ko" "$NF/ui"
+for i in 1 2 3 4 5 6 7 8; do
+cat > "$NF/search/stage$i.py" <<PY
+def rank_search_results_stage$i(query, results):
+    """Rank the search results for a query: stage $i ranks results by query score."""
+    return sorted(results, key=lambda r: r.score, reverse=True)
+PY
+done
+for i in $( seq 1 40 ); do
+cat > "$NF/search/helper$i.py" <<PY
+def helper_$i(items):
+    """Helper $i used while results are ranked."""
+    return list(items)
+PY
+done
+printf '# Search\n\n## How ranking works\n\nThe ranker runs `rank_search_results_stage1` first.\n' > "$NF/README.md"
+for lang in zh-CN ja; do
+    { printf '# Search %s\n' "$lang"; for i in 1 2 3 4 5 6 7 8; do printf '\n## %s\n\n`rank_search_results_stage%s`\n' "$i" "$i"; done; } > "$NF/README.$lang.md"
+done
+{ printf '# Changelog\n'; for i in 1 2 3 4 5 6 7 8; do printf '\n## [1.%s.0]\n\n### Added\n\n- `rank_search_results_stage%s`\n' "$i" "$i"; done; } > "$NF/CHANGELOG.md"
+printf '# Guide\n\n## Stage two\n\n`rank_search_results_stage2` runs second.\n' > "$NF/docs/en/guide.md"
+printf '# Guide ko\n\n## 2\n\n`rank_search_results_stage2`\n' > "$NF/docs/ko/guide.md"
+printf '# UI\n\n## Stage three in the UI\n\n`rank_search_results_stage3` feeds the results panel.\n' > "$NF/ui/README.md"
+# presence guards: every file the arms below read must exist, or an arm can pass on nothing
+for f in CHANGELOG.md README.md README.zh-CN.md README.ja.md docs/en/guide.md docs/ko/guide.md ui/README.md search/helper40.py; do
+    [ -f "$NF/$f" ] || no "fixture NF: $f was not written"
+done
+
+NQ="how are search results ranked for a query"
+ncands(){ "$BIN" "$NF" --for="$1" --format=candidates --top-k=60 --no-cache "${@:2}" 2>/dev/null; }
+# rank of the first candidate row whose path matches $2 (an ERE), or 999 when none does
+rankOf(){ printf '%s' "$1" | grep -oE '<cand r="[0-9]+"[^>]* p="[^"]*"' | grep -E " p=\"$2\"" | head -1 | grep -oE 'r="[0-9]+"' | grep -oE '[0-9]+' || echo 999; }
+# rank of the LAST code (k="fn") row, and how many code rows there are
+lastFnRank(){ printf '%s' "$1" | grep -oE '<cand r="[0-9]+"[^>]* k="fn"' | tail -1 | grep -oE 'r="[0-9]+"' | grep -oE '[0-9]+'; }
+fnCount(){ printf '%s' "$1" | grep -oE '<cand r="[0-9]+"[^>]* k="fn"' | wc -l | tr -d ' '; }
+NOISE='(CHANGELOG\.md|README\.(zh-CN|ja)\.md|docs/ko/guide\.md)'
+
+CQ="$( ncands "$NQ" )"
+lastFn="$( lastFnRank "$CQ" )"; firstNoise="$( rankOf "$CQ" "$NOISE" )"
+[ "$( fnCount "$CQ" )" = 48 ] && ok "(vi) NF: all 48 code rows are in the 60-row candidate list (non-vacuity)" \
+    || no "(vi) NF: expected the 48 code rows in the candidate list, found $( fnCount "$CQ" )"
+[ "$firstNoise" != 999 ] && ok "(vi) NF: the change-log/translation rows are still candidates (r=$firstNoise): demoted, never dropped" \
+    || no "(vi) NF: no change-log/translation row among the candidates — the tier must rank them lower, not drop them"
+[ "$firstNoise" -gt "${lastFn:-0}" ] && ok "(vi) code question: every code row ranks above every change-log/translation row ($lastFn < $firstNoise)" \
+    || no "(vi) code question: a change-log/translation row (r=$firstNoise) ranks above code (last code row r=${lastFn:-none})"
+rReadme="$( rankOf "$CQ" 'README\.md' )"
+[ "$rReadme" = 9 ] && ok "(vi) the default-language README section is lifted right after the 8 stages it explains (r=9)" \
+    || no "(vi) README.md's explaining section is at r=$rReadme, not r=9 — the cap still spent on demoted docs first"
+rEn="$( rankOf "$CQ" 'docs/en/guide\.md' )"; rUi="$( rankOf "$CQ" 'ui/README\.md' )"
+[ "$rEn" -lt "${lastFn:-0}" ] && ok "(vi) directory form: docs/en/guide.md (the default-language twin) keeps its lift (r=$rEn)" \
+    || no "(vi) directory form: docs/en/guide.md is not lifted above code (r=$rEn): demoted, or its cap slot spent on a demoted doc"
+[ "$rUi" -lt "${lastFn:-0}" ] && ok "(vi) removal-twin guard: ui/README.md beside README.md is not taken for a translation (r=$rUi)" \
+    || no "(vi) removal-twin guard: ui/README.md is not lifted above code (r=$rUi): taken for a translation, or its cap slot spent on a demoted doc"
+# the served head (<sigs>, default --for) holds no change-log/translation row on the code question
+"$BIN" "$NF" --for="$NQ" --no-cache >"$TMP/nf1.xml" 2>/dev/null
+grep -q '<sigs[ >]' "$TMP/nf1.xml" || no "(vi) NF: --for served no <sigs> head"
+if sed 's/></>\n</g' "$TMP/nf1.xml" | grep -E '^<d ' | grep -qE " p=\"$NOISE\""; then
+    no "(vi) served head carries a change-log/translation row on a code question"
+else ok "(vi) served head carries no change-log/translation row on a code question"; fi
+
+# controls — the tier yields whenever the question is about what those files hold: the SAME code question plus
+# one cue word gets the old lift back for exactly the family the cue names
+CC="$( ncands "$NQ, and what changed in 1.3.0" )"
+rCl="$( rankOf "$CC" 'CHANGELOG\.md' )"; lastFnC="$( lastFnRank "$CC" )"
+[ "$rCl" -lt "${lastFnC:-0}" ] && ok "(vi) control: a change question still lifts the CHANGELOG above code (r=$rCl)" \
+    || no "(vi) control: a change question lost the CHANGELOG (r=$rCl, last code r=${lastFnC:-none})"
+CN="$( ncands "what does README.zh-CN.md say about how search results are ranked" )"
+rZh="$( rankOf "$CN" 'README\.zh-CN\.md' )"
+[ "$rZh" -le 10 ] && ok "(vi) control: a question naming README.zh-CN.md ranks it in the top 10 (r=$rZh)" \
+    || no "(vi) control: a question naming README.zh-CN.md ranked it at r=$rZh"
+CT="$( ncands "$NQ, per the translated docs" )"
+rTr="$( rankOf "$CT" 'README\.(zh-CN|ja)\.md' )"; lastFnT="$( lastFnRank "$CT" )"
+[ "$rTr" -lt "${lastFnT:-0}" ] && ok "(vi) control: a translation question keeps translated READMEs above code (r=$rTr)" \
+    || no "(vi) control: a translation question lost the translated READMEs (r=$rTr)"
+NR="$( ncands "$NQ" --no-route )"
+[ "$( rankOf "$NR" "$NOISE" )" -lt "$( lastFnRank "$NR" )" ] && ok "(vi) --no-route restores the untiered lift (the A/B handle)" \
+    || no "(vi) --no-route did not restore the untiered lift"
+
+# control — a single-language repo: no change log, no translation, so the tier is inert (its README keeps r=9)
+SL="$TMP/singlelang"; mkdir -p "$SL"; cp -R "$NF/search" "$SL/"; cp "$NF/README.md" "$SL/"
+SQ="$( "$BIN" "$SL" --for="$NQ" --format=candidates --top-k=60 --no-cache 2>/dev/null )"
+[ "$( rankOf "$SQ" 'README\.md' )" = 9 ] && ok "(vi) control: a single-language repo's README keeps its lift (r=9)" \
+    || no "(vi) control: a single-language repo's README moved to r=$( rankOf "$SQ" 'README\.md' )"
+
+"$BIN" "$NF" --for="$NQ" --no-cache >"$TMP/nf2.xml" 2>/dev/null
+cmp -s "$TMP/nf1.xml" "$TMP/nf2.xml" && ok "(vi) determinism: the tiered --for answer is byte-identical across runs" \
+    || no "(vi) tiered --for answer differs between two runs"
 
 [ "$fail" = 0 ] && echo 'ALL PASS' || echo 'FAILURES ABOVE'
 exit "$fail"

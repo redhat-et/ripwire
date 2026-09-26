@@ -587,6 +587,328 @@ inline float maxScoreUndoingTier( const std::vector<float>& rank, const std::vec
     return rawMax;
 }
 
+// ── the CHANGE-LOG and TRANSLATION document tier (query-conditional; path half + query half, both here) ───
+// Dogfood 2026-09-26, a public Python repo (10,606 symbols): for a CODE question, three `### Added` sections of
+// CHANGELOG.md and one section of README.hi-IN.md took 4 of the top 20 --for slots. Neither kind of file explains
+// code: a change log records THAT something changed, and a translated README repeats the default-language one,
+// which is itself a candidate. They reached the head through doc-mention surfacing (mention.h
+// applyDocMentionBoost): both kinds backtick the same identifiers the code defines, and the per-anchor cap took
+// the lowest node ids, which path order hands to `CHANGELOG.md` and `README.hi-IN.md` ahead of `README.md`.
+//
+// The mechanism is the §P4 one — a shrink-only per-symbol factor, never exclusion — at the SAME calibrated 0.35
+// (no second constant): folded into BM25 through tierMul (foldDocNoiseTier), and read by the doc-mention lift,
+// which consults these docs only AFTER every full-weight doc and lifts them to target × this factor. The files
+// stay indexed, scored and in the candidate pool; `--mentions=SYM` still lists them.
+//
+// It does NOT apply when the question is ABOUT what these files hold — both exemptions are per file, so they
+// can only ever restore the pre-tier ranking:
+//   * a change log keeps full weight when the task carries a change cue (kChangeQuestionCues: "what changed in
+//     1.2", "when was X added", "which version …") or spells the file's own stem (`news`, `history`, `changes`);
+//   * a translation keeps full weight when the task carries a translation cue (kTranslationQuestionCues) or spells
+//     its language tag (`zh-CN`, `ja`) — which a task naming `README.zh-CN.md` does;
+//   * and the mention anchor (applyMentionBoost, which runs after this tier) still lifts any file the task names.
+// Routed path only, like the shape tier above: --no-route is the A/B handle and restores the old ranking.
+
+// Change-log BASENAMES, lowercased: a stem matches as a PREFIX followed by the end or a non-letter, so
+// CHANGELOG.md, CHANGES.rst, HISTORY.md, NEWS, RELEASE_NOTES.md and changelog-2023.md match while newsletter.md
+// and historyoracle.md do not. `release.md` is deliberately absent: that name usually documents how to CUT a
+// release, which is process, not a record of changes.
+inline constexpr std::string_view kChangeLogStems[] = { "changelog", "changes", "history", "news",
+                                                        "release-notes", "release_notes", "releasenotes", "releases" };
+
+// Whole directory components that hold per-release notes (towncrier's changelog.d/, docs/releases/<ver>.rst).
+inline constexpr std::string_view kChangeLogDirs[] = { "changelog/", "changelog.d/", "changelogs/", "release-notes/",
+                                                       "release_notes/", "releasenotes/", "releases/" };
+
+// Question cues, matched word-bounded in the lowercased task ([a-z0-9_] is a word byte); `prefix` lets the cue
+// end inside a word (`release` covers releases/released, `version` covers versions/versioning). These are the
+// only word lists the tier uses. A false cue is the cheap side to be wrong on: it restores the old ranking.
+struct DocNoiseCue
+{
+    std::string_view word;
+    bool             prefix;
+};
+inline constexpr DocNoiseCue kChangeQuestionCues[] = { { "added", false },     { "changed", false }, { "changelog", true },
+                                                       { "deprecat", true },   { "introduced", false }, { "release", true },
+                                                       { "removed", false },   { "version", true } };
+inline constexpr DocNoiseCue kTranslationQuestionCues[] = { { "i18n", false }, { "l10n", false }, { "locali", true },
+                                                            { "translat", true } };
+
+// English spellings a parallel docs tree names its DEFAULT-language directory with (docs/en/, docs/source/en/).
+inline constexpr std::string_view kDefaultLanguageDirs[] = { "en", "en-gb", "en-us", "en_gb", "en_us" };
+
+inline constexpr float kDocNoiseMul = kRankTierDemoMul;
+static_assert( kDocNoiseMul > 0.f && kDocNoiseMul < 1.f, "a shrink-only (0,1) factor keeps the MaxScore bound in lexical.h safe" );
+
+inline bool isAsciiWordByte( char c ) noexcept
+{
+    return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_';
+}
+
+inline bool isAsciiLetter( char c ) noexcept
+{
+    return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' );
+}
+
+inline std::string lowerAsciiCopy( std::string_view s )
+{
+    std::string out;
+    out.reserve( s.size() );
+    for( const char ch : s )   // EXPLICIT narrowing, as elsewhere in this tree
+    {
+        const unsigned char c = static_cast<unsigned char>( ch );
+        out.push_back( ( c >= 'A' && c <= 'Z' ) ? char( c - 'A' + 'a' ) : char( c ) );
+    }
+    return out;
+}
+
+// `word` occurs in the (already lowercased) task with a word boundary before it, and after it unless `prefix`.
+inline bool taskHasCue( std::string_view lowerTask, std::string_view word, bool prefix ) noexcept
+{
+    EXPECTS( !word.empty(), "an empty cue would match everywhere" );
+    for( std::size_t pos = lowerTask.find( word ); pos != std::string_view::npos; pos = lowerTask.find( word, pos + 1 ) )
+    {
+        const std::size_t end = pos + word.size();
+        if( ( pos == 0 || !isAsciiWordByte( lowerTask[pos - 1] ) ) && ( prefix || end == lowerTask.size() || !isAsciiWordByte( lowerTask[end] ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+template<std::size_t N>
+inline bool taskHasAnyCue( std::string_view lowerTask, const DocNoiseCue ( &cues )[N] ) noexcept
+{
+    return std::any_of( std::begin( cues ), std::end( cues ), [lowerTask]( const DocNoiseCue& c ) { return taskHasCue( lowerTask, c.word, c.prefix ); } );
+}
+
+// The change-log stem a LOWERCASED root-relative path matches (a basename stem, or a kChangeLogDirs component
+// without its slash); empty when it is not a change log. The caller has already established the file is prose.
+inline std::string_view changeLogStemOf( std::string_view lowerPath ) noexcept
+{
+    for( const std::string_view dir : kChangeLogDirs )
+    {
+        if( hasDirSegment( lowerPath, dir ) )
+        {
+            return dir.substr( 0, dir.size() - 1 );
+        }
+    }
+    const std::size_t      slashPos = lowerPath.rfind( '/' );
+    const std::string_view fileName = ( slashPos == std::string_view::npos ) ? lowerPath : lowerPath.substr( slashPos + 1 );
+    for( const std::string_view stem : kChangeLogStems )
+    {
+        if( fileName.starts_with( stem ) && ( fileName.size() == stem.size() || !isAsciiLetter( fileName[stem.size()] ) ) )
+        {
+            return stem;
+        }
+    }
+    return {};
+}
+
+// An ISO 639-1-shaped language tag: two letters, optionally joined by '-' or '_' to a region (two letters, or
+// three digits as in es-419) or a script (four letters, zh-Hant). Case-insensitive. SHAPE only — which is why
+// every caller also demands a default-language twin before it calls a file a translation.
+inline bool isLanguageTagShape( std::string_view tag ) noexcept
+{
+    if( tag.size() < 2 || !isAsciiLetter( tag[0] ) || !isAsciiLetter( tag[1] ) )
+    {
+        return false;
+    }
+    if( tag.size() == 2 )
+    {
+        return true;
+    }
+    if( tag[2] != '-' && tag[2] != '_' )
+    {
+        return false;
+    }
+    const std::string_view sub = tag.substr( 3 );
+    if( sub.size() == 3 )
+    {
+        return std::all_of( sub.begin(), sub.end(), []( char c ) { return c >= '0' && c <= '9'; } );
+    }
+    return ( sub.size() == 2 || sub.size() == 4 ) && std::all_of( sub.begin(), sub.end(), isAsciiLetter );
+}
+
+// English is the default language this tier assumes; an `en` tag is never a translation. A repository whose
+// default README is in another language (README.md in Chinese beside README.en.md) is therefore left alone:
+// neither file carries a non-English tag with an untagged twin.
+inline bool isDefaultLanguageTag( std::string_view tag ) noexcept
+{
+    return tag.size() >= 2 && ( tag[0] == 'e' || tag[0] == 'E' ) && ( tag[1] == 'n' || tag[1] == 'N' );
+}
+
+// Per-symbol factor for the change-log / translation tier under THIS task: kDocNoiseMul on every symbol of a file
+// the rules above demote, 1 elsewhere. EMPTY when nothing is demoted — the caller's cue that the whole tier is inert
+// and every downstream consumer must be byte-identical to a build without it.
+//
+// A file is a TRANSLATION on filename evidence plus a default-language TWIN that the index also holds (compared
+// lowercased, same extension):
+//   * basename form: README.zh-CN.md / README_ja.md / guide-ko.rst, twin README.md / guide.rst in the same directory;
+//   * directory form: docs/ja/guide.md with a twin at docs/en/guide.md (any kDefaultLanguageDirs spelling), or at
+//     docs/guide.md with the component removed. The removal twin is weaker evidence — `ui/README.md` beside
+//     `README.md` is not a Ukrainian page — so it counts only for a tag with a region/script subtag, or for a
+//     language directory holding at least two such files (a parallel tree, not a coincidence of one name).
+inline std::vector<float> docNoiseSymbolMultipliers( const IngestResult& ing, std::string_view task )
+{
+    const std::string lowerTask      = lowerAsciiCopy( task );
+    const bool        changeAsked    = taskHasAnyCue( lowerTask, kChangeQuestionCues );
+    const bool        translateAsked = taskHasAnyCue( lowerTask, kTranslationQuestionCues );
+    if( changeAsked && translateAsked )
+    {
+        return {};
+    }
+
+    // the prose files, lowercased root-relative — the only population either rule can match or twin against
+    std::vector<std::uint32_t> proseIds;
+    std::vector<std::string>   lowerOf( ing.files.size() );
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        const std::string_view p = rootRelPath( ing, f );
+        if( pathTierOf( p ) == PathTier::Doc )
+        {
+            proseIds.push_back( f );
+            lowerOf[f] = lowerAsciiCopy( p );
+        }
+    }
+    if( proseIds.empty() )
+    {
+        return {};
+    }
+
+    std::vector<std::uint8_t> fileDemoted( ing.files.size(), 0 );
+    bool                      anyDemoted = false;
+    auto                      demote     = [ & ]( std::uint32_t f ) { fileDemoted[f] = 1; anyDemoted = true; };
+
+    if( !changeAsked )
+    {
+        for( const std::uint32_t f : proseIds )
+        {
+            const std::string_view stem = changeLogStemOf( lowerOf[f] );
+            if( !stem.empty() && !taskHasCue( lowerTask, stem, false ) )
+            {
+                demote( f );
+            }
+        }
+    }
+
+    if( !translateAsked )
+    {
+        std::vector<std::string_view> sortedLower;   // the twin index: binary-searched, so no hash order can reach output
+        sortedLower.reserve( proseIds.size() );
+        for( const std::uint32_t f : proseIds )
+        {
+            sortedLower.push_back( lowerOf[f] );
+        }
+        std::sort( sortedLower.begin(), sortedLower.end() );
+        const auto has = [ & ]( const std::string& p ) { return std::binary_search( sortedLower.begin(), sortedLower.end(), std::string_view( p ) ); };
+
+        // removal-twin evidence per language directory (its lowercased prefix, through the tag's slash)
+        struct RemovalHit { std::string langDir; std::uint32_t fileId; std::string tag; bool strong; };
+        std::vector<RemovalHit> removalHits;
+
+        for( const std::uint32_t f : proseIds )
+        {
+            const std::string&     lp       = lowerOf[f];
+            const std::size_t      slashPos = lp.rfind( '/' );
+            const std::string      dirPart  = ( slashPos == std::string::npos ) ? std::string() : lp.substr( 0, slashPos + 1 );
+            const std::string_view fileName = std::string_view( lp ).substr( dirPart.size() );
+            const std::size_t      dotPos   = fileName.rfind( '.' );
+            const std::string_view stem     = ( dotPos == std::string_view::npos ) ? fileName : fileName.substr( 0, dotPos );
+            const std::string_view ext      = ( dotPos == std::string_view::npos ) ? std::string_view() : fileName.substr( dotPos );
+
+            std::string_view tag;
+            // basename form: <base><sep><tag><ext>, twin <base><ext> beside it
+            for( std::size_t i = 1; i + 1 < stem.size() && tag.empty(); ++i )
+            {
+                const std::string_view cand = stem.substr( i + 1 );
+                if( ( stem[i] == '.' || stem[i] == '_' || stem[i] == '-' ) && isLanguageTagShape( cand ) && !isDefaultLanguageTag( cand )
+                 && has( dirPart + std::string( stem.substr( 0, i ) ) + std::string( ext ) ) )
+                {
+                    tag = cand;
+                }
+            }
+            // directory form: a language-tag component with an English sibling tree, or (weaker) with the component removed
+            for( std::size_t begin = 0; begin < dirPart.size() && tag.empty(); )
+            {
+                const std::size_t      end  = dirPart.find( '/', begin );
+                const std::string_view comp = std::string_view( dirPart ).substr( begin, end - begin );
+                if( isLanguageTagShape( comp ) && !isDefaultLanguageTag( comp ) )
+                {
+                    const std::string head = dirPart.substr( 0, begin );
+                    const std::string rest = lp.substr( end + 1 );
+                    for( const std::string_view en : kDefaultLanguageDirs )
+                    {
+                        if( tag.empty() && has( head + std::string( en ) + "/" + rest ) )
+                        {
+                            tag = comp;
+                        }
+                    }
+                    if( tag.empty() && has( head + rest ) )
+                    {
+                        removalHits.push_back( { dirPart.substr( 0, end + 1 ), f, std::string( comp ), comp.size() > 2 } );
+                    }
+                }
+                begin = end + 1;
+            }
+            if( !tag.empty() && !taskHasCue( lowerTask, tag, false ) )
+            {
+                demote( f );
+            }
+        }
+
+        // the removal form: strong on its own, else only where the same language directory has two or more hits
+        std::sort( removalHits.begin(), removalHits.end(), []( const RemovalHit& a, const RemovalHit& b )
+                   { return a.langDir != b.langDir ? a.langDir < b.langDir : a.fileId < b.fileId; } );
+        for( std::size_t i = 0; i < removalHits.size(); )
+        {
+            std::size_t j = i;
+            while( j < removalHits.size() && removalHits[j].langDir == removalHits[i].langDir )
+            {
+                ++j;
+            }
+            for( std::size_t k = i; k < j; ++k )
+            {
+                const RemovalHit& h = removalHits[k];
+                if( ( h.strong || j - i >= 2 ) && !fileDemoted[h.fileId] && !taskHasCue( lowerTask, h.tag, false ) )
+                {
+                    demote( h.fileId );
+                }
+            }
+            i = j;
+        }
+    }
+
+    if( !anyDemoted )
+    {
+        return {};
+    }
+    std::vector<float> mul( ing.symbols.size(), 1.f );
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        const std::uint32_t f = ing.symbols[i].fileId;
+        if( f < fileDemoted.size() && fileDemoted[f] != 0 )
+        {
+            mul[i] = kDocNoiseMul;
+        }
+    }
+    ENSURES( mul.size() == ing.symbols.size(), "one factor per symbol, or none at all" );
+    return mul;
+}
+
+// Fold the tier above into the §P4 tier vector BM25 scores with. min(), not a product, for the reason
+// rankTierSymbolMultipliersShaped gives: one file de-prioritized twice is one claim, not a compounding penalty —
+// a change log a trace-shaped query already demoted as repository meta-prose keeps that deeper factor.
+inline void foldDocNoiseTier( std::vector<float>& tierMul, const std::vector<float>& docNoiseMul ) noexcept
+{
+    EXPECTS( docNoiseMul.empty() || docNoiseMul.size() == tierMul.size(), "both are per-symbol over the same index" );
+    for( std::size_t i = 0; i < docNoiseMul.size() && i < tierMul.size(); ++i )
+    {
+        tierMul[i] = std::min( tierMul[i], docNoiseMul[i] );
+    }
+}
+
 // Order a file-id list by a per-id KEY descending, PATH ascending as the tiebreak — the shared
 // "most-consequential-first, and deterministically so" ordering the first-screen verbs need (§P11.7
 // --pr-context by blast radius, §P11.8 --tree by best-symbol rank). Templated on the key because one of

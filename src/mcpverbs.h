@@ -1776,8 +1776,10 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // Query SHAPE + §P4 tier de-prioritization — same classifier, same multiplier, same order (before the
     // mention anchor) as the CLI --for. This dialect always routes, so the shape is always asked for and
     // the disclosure always has a route= to ride in.
-    const queryshape::Verdict shape   = queryshape::classify( task );
-    const std::vector<float>  tierMul = rankTierSymbolMultipliersShaped( ing, !noRoute && shape.fires() );
+    const queryshape::Verdict shape       = queryshape::classify( task );
+    std::vector<float>        tierMul     = rankTierSymbolMultipliersShaped( ing, !noRoute && shape.fires() );
+    const std::vector<float>  docNoiseMul = !noRoute ? docNoiseSymbolMultipliers( ing, task ) : std::vector<float>{};   // the CLI twin's tier
+    foldDocNoiseTier( tierMul, docNoiseMul );
     // deep-tail: this bundle now serves the file-grain tail, a full-distribution consumer — the H2
     // MaxScore prune bound is 0 (exhaustive) here for the same reason the CLI --for passes
     // fullDistribution (a pruned tail would make total= mode-dependent and its order incomplete).
@@ -1867,7 +1869,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     if( !std::getenv( "RIPWIRE_NO_DOC_MENTION" ) )
     {
         DocMentionBoostInfo docMentionInfo;
-        if( applyDocMentionBoost( ix.g, lensRank, &docMentionInfo ) )
+        if( applyDocMentionBoost( ix.g, lensRank, &docMentionInfo, &docNoiseMul ) )
         {
             char nb[ 220 ];
             rw::formatTo( nb, sizeof( nb ), " [doc mentions: {} doc{} discussing {} top-ranked symbol{} surfaced; doc_mentions= on the root repeats the doc count]",
@@ -4023,8 +4025,10 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     }
     // Query SHAPE + §P4 tier de-prioritization — same classifier, same multiplier, same order (before the
     // mention anchor) as CLI --pack-task.
-    const queryshape::Verdict shape   = queryshape::classify( task );
-    const std::vector<float>  tierMul = rankTierSymbolMultipliersShaped( ing, !noRoute && shape.fires() );
+    const queryshape::Verdict shape       = queryshape::classify( task );
+    std::vector<float>        tierMul     = rankTierSymbolMultipliersShaped( ing, !noRoute && shape.fires() );
+    const std::vector<float>  docNoiseMul = !noRoute ? docNoiseSymbolMultipliers( ing, task ) : std::vector<float>{};   // the CLI twin's tier
+    foldDocNoiseTier( tierMul, docNoiseMul );
     lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                        : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, 0, &ifaceExact, &tierMul,
                                                                               0, 0, {}, &lr.evidence );
@@ -4073,7 +4077,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     if( !std::getenv( "RIPWIRE_NO_DOC_MENTION" ) )
     {
         DocMentionBoostInfo docMentionInfo;
-        if( applyDocMentionBoost( g, lr.rank, &docMentionInfo ) )
+        if( applyDocMentionBoost( g, lr.rank, &docMentionInfo, &docNoiseMul ) )
         {
             char nb[ 160 ];
             rw::formatTo( nb, sizeof( nb ), " [doc mentions: {} doc{} discussing {} top-ranked symbol{} surfaced]",
