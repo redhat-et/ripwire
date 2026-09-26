@@ -82,7 +82,9 @@ inline const char* symTag( SymKind k ) noexcept
         case SymKind::Struct:    return "struct";
         case SymKind::Interface: return "iface";
         case SymKind::Var:       return "var";
-        case SymKind::Section:   return "sec";    // markdown heading (doc structure; isolated in the graph)
+        case SymKind::Section:   return "sec";    // data-kind defs: doc headings, JSON/YAML keys, and Ruby db/schema.rb
+                                                  // columns (parser 122) — the Ruby ones admit call edges, so a Section
+                                                  // is "isolated" only when its language is not the caller's (best-effort)
         case SymKind::Macro:     return "macro";  // #define (disclosed-degraded: replacement text, not a parsed body)
         case SymKind::Field:     return "field";  // member variable (id=path::Owner::field; use-sites via --uses=Owner.field)
         case SymKind::Other:     return "other";

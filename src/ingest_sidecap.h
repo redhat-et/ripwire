@@ -2321,6 +2321,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     if( le.lang == Lang::Ruby )
     {
         captureRubyAttrDefs( root, fileId, src, defs );
+        captureRubySchemaDefs( root, fileId, src, defs );
     }
 }
 

@@ -1,0 +1,5 @@
+# spike_names.yml — the cross-language Section def for `name`.
+# The all-four collision (def + attribute + column + yaml) in all_four.rb; the YAML
+# key is counted, never edgeable (Ruby<->Yaml is not langCompatible).
+name:
+  display: "Spike"

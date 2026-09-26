@@ -1199,6 +1199,338 @@ inline void captureRubyAttrDefs( TSNode root, std::uint32_t fileId, std::string_
     }
 }
 
+
+// ─── parser version 122 (test/rubyschemacheck.sh): RUBY db/schema.rb COLUMNS ARE Section DEFS ───
+// A schema file is recognized BY CONTENT, never by path: any Ruby file whose tree holds a
+// `create_table "x", … do |t| … end` call — the call's `block:` field is a do_block whose `parameters:`
+// field is a block_parameters carrying ONE bare identifier — is a rendered-schema document (the block
+// is the create_table call's OWN do_block, found by named-child kind because the shared NodeField set
+// has no Block enumerator). Path plays no part: a schema dumped inside `ActiveRecord::Schema[8.1]
+// .define … do`, a migration's class-level table, or a plain top-level one all look identical to this
+// walk — the container does not matter. The file signal below is a contains-"create_table" reject like
+// the attribute-family capture's contains-"attr" reject; the semantic gate is the AST shape.
+//
+// Each `t.<type> "name"` / `t.<type> :name` receiver-CALL in the table's do-block body mints ONE
+// SymKind::Section def at Lang::Ruby — the same data-kind slot as a YAML key / doc heading (model.h;
+// note the wording change there: a Section is no longer "isolated in the graph" once these are
+// Lang::Ruby and admit call edges) — with span = the name token and name = the literal (both quote
+// spellings via stringLiteralText, or a simple_symbol's text minus ':'). The DSL CALLS keep their
+// external-surface reference posture exactly like the attr family: no def named `string`/`datetime`
+// appears. `t.timestamps` (a receiver call with NO arguments field) mints `created_at` AND `updated_at`
+// — the DSL names them literally, symmetric with the id rule; the two defs anchor at the method
+// token's start/end bytes, since no literal name tokens exist in the source.
+//
+// Non-column DSL — t.index / t.references / t.belongs_to / t.polymorphic — names no column and defines
+// nothing (stated floor: `t.references :owner` would otherwise mint a phantom "owner" column). A column
+// call whose receiver is not a bare identifier (`registry.string`, a receiver-less `string`) is not a
+// column; a string named by a leading-comment-skipped FIRST argument is (the attribute-DSL comment posture).
+//
+// The id rule — the four grounded spellings, all pinned by test/rubyschemacheck.sh:
+//   – no column named `id`, no `id:` pair, no primary_key pair    → an implicit `id` def anchored at
+//     the TABLE-NAME string's content start (no `id` token exists; the anchor is per-table unique, so
+//     the multi-def floor — `id` on N tables → --uses=id defs="N" — holds naturally)
+//   – `id: false` (the pair VALUE is the anonymous `false` token)  → no id def (a key-less table)
+//   – `id: :uuid` (pair value a simple_symbol)                     → `id` def AT THE PAIR KEY (the key's
+//     text minus its trailing ':'; the uuid TYPE is not modelled — stated floor)
+//   – `primary_key: "x"` (pair value a string)                     → a def named the string's content
+//     instead of the implicit `id`
+// Duplicate column NAMES across tables stay SEPARATE defs (distinct nameByte identities — the dedup
+// ladder only folds same-byte captures).
+inline constexpr std::array<std::string_view, 4> kRubySchemaNonColumns = { "index", "references", "belongs_to", "polymorphic" };
+
+// The FIRST non-comment named child of an argument_list — the attribute-DSL comment posture ("attribute( # note
+// then :x"): a comment is an n-ary extra, never an argument. Null when the list is all comments/empty.
+inline TSNode rubyFirstNonCommentArg( TSNode args, std::string_view /*src*/ ) noexcept
+{
+    ChildCursor cursor( args );
+    TSNode      first{};
+    bool        got = false;
+    forEachNamedChild( args, cursor.cur, [ & ]( TSNode c )
+    {
+        if( kindIs( ts_node_type( c ), "comment" ) )
+        {
+            return true;   // skip the comment train, keep looking
+        }
+        first = c;
+        got   = true;
+        return false;      // stop at the first real argument
+    } );
+    return got ? first : TSNode{};
+}
+
+// A pair node's KEY text: a hash_key_symbol carries its trailing ':' (the whole `force:` token) — strip
+// it so the id/primary_key comparisons see the bare word. A key without the colon (already bare) passes
+// through unchanged.
+inline std::string_view rubyPairKeyText( TSNode pair, std::string_view src ) noexcept
+{
+    const TSNode       key = fieldChild( pair, NodeField::Key );
+    std::string_view   t   = nodeTextOf( key, src );
+    if( !t.empty() && t.back() == ':' )
+    {
+        t.remove_suffix( 1 );
+    }
+    return t;
+}
+
+// One `t.<method> <args>` receiver-call inside a table block: a Section def per the rules above. The
+// RECEIVER must BE the block parameter the create_table call bound (`t` in a rendered schema's do |t|);
+// any other bare identifier (`helper.string "x"`) is somebody's own helper call and names no column.
+// The `sawId` out-param records an explicit `id` column so the implicit rule can see it.
+inline void rubySchemaColumnCall( TSNode c, std::uint32_t fileId, std::string_view src, std::string_view receiverName, std::vector<RawDef>& defs, bool& sawId )
+{
+    if( !kindIs( ts_node_type( c ), "call" ) )
+    {
+        return;
+    }
+    const TSNode recv = fieldChild( c, NodeField::Receiver );
+    if( ts_node_is_null( recv ) || !kindIs( ts_node_type( recv ), "identifier" ) || nodeTextOf( recv, src ) != receiverName )
+    {
+        return;   // receiver-less, receiver-qualified, or a DIFFERENT bare name: not a column on the block parameter
+    }
+    const std::string_view m = fieldIdentifierText( c, NodeField::Method, src );
+    if( m.empty() )
+    {
+        return;
+    }
+    const std::uint32_t line = ts_node_start_point( c ).row + 1;
+    if( m == "timestamps" && ts_node_is_null( fieldChild( c, NodeField::Arguments ) ) )
+    {
+        const TSNode     meth = fieldChild( c, NodeField::Method );
+        const std::uint32_t s = ts_node_start_byte( meth ), e = ts_node_end_byte( meth );
+        RawDef d;
+        d.fileId = fileId; d.line = line; d.startByte = s; d.endByte = e; d.loc = 1;
+        d.kind = SymKind::Section; d.lang = Lang::Ruby;
+        d.nameByte = s;      d.name = "created_at"; defs.push_back( d );   // the two anchors are the
+        d.nameByte = e;      d.name = "updated_at"; defs.push_back( d );   // method token's edges — no literal tokens exist
+        return;
+    }
+    if( std::find( kRubySchemaNonColumns.begin(), kRubySchemaNonColumns.end(), m ) != kRubySchemaNonColumns.end() )
+    {
+        return;   // t.index / references / belongs_to / polymorphic name no column (stated floor)
+    }
+    const TSNode args = fieldChild( c, NodeField::Arguments );
+    if( ts_node_is_null( args ) )
+    {
+        return;
+    }
+    const TSNode nameNode = rubyFirstNonCommentArg( args, src );
+    if( ts_node_is_null( nameNode ) )
+    {
+        return;
+    }
+    const std::string lit = stringLiteralText( nameNode, src );   // "" when not a string node
+    std::string_view txt = lit;
+    if( txt.empty() && kindIs( ts_node_type( nameNode ), "simple_symbol" ) )
+    {
+        txt = nodeTextOf( nameNode, src );
+        if( txt.size() > 1 && txt.front() == ':' )
+        {
+            txt.remove_prefix( 1 );
+        }
+    }
+    if( txt.empty() )
+    {
+        return;   // `""` / `: ` defensive: an empty name is no column
+    }
+    const std::uint32_t s = ts_node_start_byte( nameNode ), e = ts_node_end_byte( nameNode );
+    RawDef d;
+    d.fileId = fileId; d.line = line; d.startByte = s; d.endByte = e; d.loc = 1;
+    d.kind = SymKind::Section; d.lang = Lang::Ruby; d.nameByte = s + 1;   // content start — past the quote or ':'
+    d.name = std::string( txt );
+    if( d.name == "id" )
+    {
+        sawId = true;
+    }
+    defs.push_back( d );
+}
+
+// One create_table call: the schema-file gate plus the whole table's defs (name, options, columns, id).
+inline void rubySchemaTableCall( TSNode n, std::uint32_t fileId, std::string_view src, std::vector<RawDef>& defs )
+{
+    std::string_view receiverName;   // the block parameter's name (`t`); empty until Gate 2 passes
+    // Gate 0: a rendered schema's tables live at file level or under `ActiveRecord::Schema[].define … do`
+    // — NEVER inside a class/module body. A MIGRATION's `create_table "users" … do |t|` (class-wrapped,
+    // often string-named) is the same AST shape, and without this gate it would mint the SAME columns as
+    // the schema that migration created — double-counting every added column on every corpus with both
+    // files indexed. `add_column`/`remove_column` are not read anywhere (a column added then dropped never
+    // registers; pinned by the migration fixtures), but the create_table of a real migration must not
+    // double its schema either. Excluding at least one `class`/`module` ancestor keeps the capture
+    // content-gated (still no path heuristic): a migration file next to the schema contributes ZERO defs.
+    // Checked FIRST — the cheapest gate — before the argument/block walks.
+    {
+        for( TSNode p = ts_node_parent( n ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+        {
+            const std::string_view k( ts_node_type( p ) );
+            if( k == "class" || k == "module" )   // a locals distilled walk — no cross-helper dependency
+            {
+                return;
+            }
+        }
+    }
+    const TSNode args = fieldChild( n, NodeField::Arguments );
+    if( ts_node_is_null( args ) )
+    {
+        return;
+    }
+    // Gate 1: a STRING table name as the first argument (a symbol-named table is a migration spelling,
+    // not a rendered-schema shape — stated floor; no name node → no schema surface either).
+    const TSNode tableName = rubyFirstNonCommentArg( args, src );
+    if( ts_node_is_null( tableName ) || !kindIs( ts_node_type( tableName ), "string" ) )
+    {
+        return;
+    }
+    // Gate 2: the call's OWN do_block, and its parameters: field carries ONE bare identifier (the `|t|`).
+    TSNode block{};
+    {
+        ChildCursor cursor( n );
+        forEachNamedChild( n, cursor.cur, [ & ]( TSNode c )
+        {
+            if( kindIs( ts_node_type( c ), "do_block" ) )
+            {
+                block = c;
+                return false;
+            }
+            return true;
+        } );
+    }
+    if( ts_node_is_null( block ) )
+    {
+        return;
+    }
+    const TSNode params = fieldChild( block, NodeField::Parameters );
+    if( ts_node_is_null( params ) )
+    {
+        return;   // `create_table "x" do … end` with no handle — not the schema shape
+    }
+    {
+        ChildCursor cursor( params );
+        TSNode      only{};
+        std::size_t named = 0;
+        forEachNamedChild( params, cursor.cur, [ & ]( TSNode c ) { only = c; ++named; return true; } );
+        if( named != 1 || !kindIs( ts_node_type( only ), "identifier" ) )
+        {
+            return;   // multi-parameter or non-identifier handle — not a rendered schema's do |t|
+        }
+        receiverName = nodeTextOf( only, src );   // the `|t|` spelling — column calls must use it
+    }
+    // Options: the id/primary_key pairs among the call's arguments.
+    bool   idFalse = false, primaryKey = false;
+    TSNode idKey{}, pkValue{};
+    {
+        ChildCursor cursor( args );
+        forEachNamedChild( args, cursor.cur, [ & ]( TSNode a )
+        {
+            if( !kindIs( ts_node_type( a ), "pair" ) )
+            {
+                return true;
+            }
+            const std::string_view k = rubyPairKeyText( a, src );
+            const TSNode           v = fieldChild( a, NodeField::Value );
+            if( k == "id" )
+            {
+                if( kindIs( ts_node_type( v ), "false" ) )
+                {
+                    idFalse = true;
+                }
+                else if( kindIs( ts_node_type( v ), "simple_symbol" ) )
+                {
+                    idKey = fieldChild( a, NodeField::Key );
+                }
+            }
+            else if( k == "primary_key" )
+            {
+                primaryKey = true;
+                pkValue    = v;
+            }
+            return true;
+        } );
+    }
+    // The columns: the do_block's body: field (its body_statement) — walk its named children directly
+    // (a fresh cursor; the outer walks cannot be reused mid-flight, tschildren.h).
+    bool sawIdColumn = false;
+    const TSNode body = fieldChild( block, NodeField::Body );
+    if( !ts_node_is_null( body ) )
+    {
+        ChildCursor cursor( body );
+        forEachNamedChild( body, cursor.cur, [ & ]( TSNode c )
+        {
+            rubySchemaColumnCall( c, fileId, src, receiverName, defs, sawIdColumn );
+            return true;
+        } );
+    }
+    // The id rule, in the grounded order: an explicit id column wins; then the pairs decide.
+    if( sawIdColumn || idFalse )
+    {
+        return;
+    }
+    if( primaryKey && !ts_node_is_null( pkValue ) && kindIs( ts_node_type( pkValue ), "string" ) )
+    {
+        const std::string name = stringLiteralText( pkValue, src );
+        if( name.empty() )
+        {
+            return;
+        }
+        const std::uint32_t s = ts_node_start_byte( pkValue ), e = ts_node_end_byte( pkValue );
+        RawDef d;
+        d.fileId = fileId; d.line = ts_node_start_point( pkValue ).row + 1; d.startByte = s; d.endByte = e; d.loc = 1;
+        d.kind = SymKind::Section; d.lang = Lang::Ruby; d.nameByte = s + 1; d.name = name;
+        defs.push_back( d );
+        return;
+    }
+    if( !ts_node_is_null( idKey ) )
+    {
+        const std::uint32_t s = ts_node_start_byte( idKey ), e = ts_node_end_byte( idKey );
+        RawDef d;
+        d.fileId = fileId; d.line = ts_node_start_point( idKey ).row + 1; d.startByte = s; d.endByte = e; d.loc = 1;
+        d.kind = SymKind::Section; d.lang = Lang::Ruby; d.nameByte = s; d.name = "id";
+        defs.push_back( d );
+        return;
+    }
+    // Implicit `id` — anchored at the table-name string's content start (a stable per-table byte).
+    {
+        const std::uint32_t s = ts_node_start_byte( tableName ), e = ts_node_end_byte( tableName );
+        RawDef d;
+        d.fileId = fileId; d.line = ts_node_start_point( tableName ).row + 1; d.startByte = s; d.endByte = e; d.loc = 1;
+        d.kind = SymKind::Section; d.lang = Lang::Ruby; d.nameByte = s + 1; d.name = "id";
+        defs.push_back( d );
+    }
+}
+
+// The schema walk: ONE pass over the whole tree (the same explicit-stack shape as captureRubyAttrDefs —
+// root's width is file-controlled, never index it, O(C²)). Every create_table-with-handle call in the
+// file mints its table's defs; anything that is not such a call contributes nothing.
+inline void captureRubySchemaDefs( TSNode root, std::uint32_t fileId, std::string_view src, std::vector<RawDef>& defs )
+{
+    if( src.find( "create_table" ) == std::string_view::npos )   // file signal: the gate name must appear
+    {
+        return;
+    }
+    ChildCursor         cursor( root );
+    std::vector<TSNode> kids;
+    kids.reserve( 64 );
+    std::vector<TSNode> stack;
+    stack.reserve( 64 );
+    collectChildren( root, cursor.cur, kids );   // root's width is file-controlled — never index it (O(C²))
+    for( std::size_t i = kids.size(); i > 0; --i )
+    {
+        stack.push_back( kids[i - 1] );
+    }
+    while( !stack.empty() )
+    {
+        const TSNode n = stack.back();
+        stack.pop_back();
+        if( kindIs( ts_node_type( n ), "call" ) && fieldIdentifierText( n, NodeField::Method, src ) == "create_table" )
+        {
+            rubySchemaTableCall( n, fileId, src, defs );
+        }
+        collectChildren( n, cursor.cur, kids );
+        for( std::size_t i = kids.size(); i > 0; --i )
+        {
+            stack.push_back( kids[i - 1] );
+        }
+    }
+}
+
 // F5: a Swift LOCAL binding — `let a = f()` / `var b = ...` inside a function/closure body — parses to the
 // same `property_declaration` node as a real stored/computed MEMBER property, so the @definition.var pattern
 // captures it as a spurious top-level `var` symbol AND (being the nearest enclosing symbol above the body's

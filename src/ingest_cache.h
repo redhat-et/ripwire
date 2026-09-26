@@ -279,7 +279,30 @@ constexpr std::uint32_t kCacheVersion = 25;           // 25: #150 AND #157 (trai
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 122;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 123;          // bump on any grammar/.scm/extraction change
+                                                      // 123 = 2026-09-25 (Rails schema-column capture,
+                                                      //   test/rubyschemacheck.sh, unreleased; carried 122 on the
+                                                      //   branch and renumbered 123 on rebase, because train-20's
+                                                      //   .astro work (below) took 122): a Ruby file whose
+                                                      //   tree holds a `create_table "x", … do |t| … end` call is a
+                                                      //   rendered db/schema.rb BY CONTENT, and every
+                                                      //   `t.<type> "name"` / `t.<type> :name` in the table block
+                                                      //   mints a SymKind::Section def (the data-kind slot, same
+                                                      //   as a doc heading / YAML key) at Lang::Ruby — so
+                                                      //   `record.price` call refs bind to the column and reach
+                                                      //   the call graph (a Rails corpus gains call edges +
+                                                      //   PageRank weight on every column, row). Also: the
+                                                      //   four-spelling id rule (implicit / id: false / id: :uuid /
+                                                      //   primary_key: "x") and `t.timestamps` -> created_at +
+                                                      //   updated_at. MIGRATIONS contribute nothing (class/module-
+                                                      //   nest gate). Review round at 123 (unreleased): a column
+                                                      //   call's receiver must BE the block parameter — a
+                                                      //   different bare-identifier receiver (`helper.string "x"`)
+                                                      //   names nothing; a 122/123 cache written before that
+                                                      //   round differs only there. No record layout change:
+                                                      //   kCacheVersion stays, kQSnapCacheScheme stays. A 121/122
+                                                      //   cache written before this round differs only in the
+                                                      //   schema defs it lacks.
                                                       // 122 = 2026-09-25 (#320/#67, test/astrocheck.sh): .astro joins
                                                       //   kLangTable on the TypeScript grammar, parsed through ONE
                                                       //   included range over its `---` frontmatter; blank lines
