@@ -2825,8 +2825,15 @@ private:
     {
         AliasScope out;
         JsonNode   root;
-        if( chain.size() >= 16 || std::find( chain.begin(), chain.end(), rel ) != chain.end() || !parseJsonObject( readConfigBytes( disk ), root ) )
+        if( chain.size() >= 16 || std::find( chain.begin(), chain.end(), rel ) != chain.end() )
         {
+            return out;
+        }
+        if( !parseJsonObject( readConfigBytes( disk ), root ) )
+        {
+            // A config that does not parse (not tsc's JSONC, or empty) was not read: whatever aliases it declares are
+            // unknown, so it is disclosed like an unread base (tsconfig_unread=), never read as "declares none".
+            ( inTreeTarget( rel ) ? out.unreadRelativeBase : out.unreadPackageBase ) = true;
             return out;
         }
         chain.push_back( rel );

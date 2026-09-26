@@ -618,4 +618,14 @@ for SP in rel alias; do
         || no "#220 (P2-O) re-exports ($SP) drew no edge — $( ncyc "$TMP/p2o-$SP.deps" ) cycle(s), $( grep -o '<f p="src/index.ts"[^>]*>' "$TMP/p2o-$SP.deps" )"
 done
 
+# (P2-P) an owning tsconfig that does not parse (single quotes are not JSONC) was not read: its aliases are unknown, so
+# the root discloses tsconfig_unread="1" graph_partial="1" instead of reading "no alias here" as a complete graph.
+D="$TMP/p2-badcfg"
+w220 "$D/tsconfig.json" "{ 'compilerOptions': { 'paths': { '@/*': ['src/*'] } } }\n"
+w220 "$D/src/a.ts" "import { b } from '@/b';\nexport const a = b;\n"; w220 "$D/src/b.ts" "import { a } from '@/a';\nexport const b = a;\n"
+d220 "$D" >"$TMP/p2p.deps"
+grep -q 'tsconfig_unread="1" graph_partial="1"' "$TMP/p2p.deps" \
+    && ok "#220 (P2-P) an unparseable owning tsconfig: tsconfig_unread=\"1\" graph_partial=\"1\" (never a silent 'no alias')" \
+    || no "#220 (P2-P) an unparseable tsconfig was read as declaring nothing — $( root_of "$TMP/p2p.deps" )"
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

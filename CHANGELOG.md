@@ -36,7 +36,7 @@ includes all gain the edges. On the issue's own tree the alias spelling now find
   with one name, `import`/`require` exports naming different files, two referenced projects that disagree) stays
   in `imports_unresolved=` with `graph_partial="1"`. New root attributes, absent at zero: `imports_dts=N` (edges
   that land only on a `.d.ts`) and `tsconfig_unread=N` (an `extends` base or referenced project not in the tree
-  that could declare an alias; `graph_partial="1"` on `--deps`/`--arch`, a qualified `--report` cycle line,
+  that could declare an alias, or an owning config that does not parse; `graph_partial="1"` on `--deps`/`--arch`, a qualified `--report` cycle line,
   beside `counts_floor="1"` on `--impact`). An asset import (a stylesheet, an image, a font) that no indexed file
   answers is not counted: the graph has no node for it.
 - The `--deps` help line now says which imports the counter holds (those that name the tree yet drew no edge),
