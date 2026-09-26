@@ -2454,6 +2454,7 @@ public:
 
     void step( std::string_view line )   // a trimmed, non-empty, comment-free line
     {
+        EXPECTS( !line.empty() );
         if( at_ == At::Flow )
         {
             flow_.append( "," ).append( line );
@@ -3037,6 +3038,8 @@ public:
         {
             o = {};   // an asset no indexed file answers: the graph has no node for it (isAssetSpecifier)
         }
+        ENSURES( ( o.file != kNoFile ) == ( o.verdict == Verdict::Resolved || o.verdict == Verdict::Declaration ),
+                 "an edge exactly when the verdict names a file" );
         memo_.emplace( std::move( key ), o );
         return o;
     }
