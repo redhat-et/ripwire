@@ -80,6 +80,14 @@ SIMPLICITY_ORDER = ( "CCX", "FANIN", "HOT", "CHURN", "HOTFN", "PRIOR" )
 PARSE_FLOOR, JOIN_FLOOR, CCX_FLOOR = 0.95, 0.90, 0.95
 JOIN_LINE_SLACK = 3
 RIPWIRE_VERSION = "0.6.4"
+# ripwire 0.6.4's built-in crawl prune (src/ingest.h kCrawlSkipDirs, plus the "cmake-build-*" prefix): a directory
+# with one of these NAMES is never read, wherever it sits, and `--skipped` counts it (pruned_dirs=) without naming
+# it. Product source under such a directory (a Python package called `build`, a Go package called `out`) is
+# therefore invisible to HOT/CCX/FANIN; the parse floor below counts it as unread.
+RIPWIRE_PRUNED_DIRS = frozenset( """
+.git .claude .hg .svn node_modules vendor third_party .cache build dist out target .venv venv __pycache__ .idea .vscode
+asan build_prof CMakeFiles captures
+""".split() )
 
 # ── product source (§1) ─────────────────────────────────────────────────────────────────────────────────
 STRATUM_EXTS = {
@@ -150,3 +158,7 @@ def git( repo, *args, check=True, text=True ):
     if check and out.returncode != 0:
         raise RuntimeError( "git %s failed rc=%d: %s" % ( " ".join( args[ :3 ] ), out.returncode, out.stderr[ :400 ] ) )
     return out.stdout
+
+
+def ripwire_prunes( path ):
+    return any( seg in RIPWIRE_PRUNED_DIRS or seg.startswith( "cmake-build-" ) for seg in path.split( "/" )[ :-1 ] )

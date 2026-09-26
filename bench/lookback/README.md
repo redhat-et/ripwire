@@ -45,6 +45,22 @@ machine, and this harness does not fall back to ripwire's own parse. Until an in
   line (±3). `--metrics` rows carry no start line, so that join needs `--pack-signatures` (whose `<d l=>` rows do).
 - `runrepo.py --grain function` refuses to run rather than degrade.
 
+## ripwire's own blind spots the health floors must catch
+
+- ripwire 0.6.4 prunes every directory NAMED `build`, `dist`, `out`, `target`, `vendor`, `captures` (and a few more;
+  `common.RIPWIRE_PRUNED_DIRS`) wherever it sits, so tracked product source inside, say, a Python package called
+  `build` is never read, and `--skipped` counts such directories (`pruned_dirs=`) without naming them. Those files
+  fall into HOT's bottom tie block with CCX = FANIN = 0. `runrepo.py` counts them against the parse floor
+  (`ripwire_read` in the manifest); a (repository, T) below 95% fails its health check and is replaced.
+- `--metrics` rows carry no start line, so the function-grain join needs a second call (`--pack-signatures`).
+
+## Budget notes (measured, for planning the main run)
+
+- The GitHub GraphQL budget (5,000 points an hour) is the metadata screen's bottleneck: route A pages issue
+  searches 100 at a time. Route B reads the REST commits list instead (a separate 5,000-an-hour budget). Every
+  screen verdict is cached per repository, so an interrupted screen resumes.
+- A GitHub budget wait is never a failed attempt, and an unanswered call is never cached as a verdict.
+
 ## Known interpretations (each is a registration detail to confirm before freeze)
 
 - Route-B eligibility counts **non-merge** 2025 commits; a merge's subject is the PR title when the merge is a

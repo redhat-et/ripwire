@@ -346,6 +346,35 @@ def route_b( api, name, total_hint ):
         after = h[ "pageInfo" ][ "endCursor" ]
 
 
+def route_b_rest( api, name, branch, total ):
+    """route_b() over the REST commits list (the core budget, not GraphQL's): the same quantity — 2025 non-merge
+    default-branch subjects. `total` is stage 1's GraphQL count of 2025 commits (w1 + w2); the early FAIL treats
+    max(total, commits seen) as the denominator's upper bound, which is exact when REST lists no more 2025 commits
+    than GraphQL counts (they agreed where both were read: tokio-rs/tokio 352 = 352). A pass needs every page."""
+    cc = non = seen = 0
+    page = 1
+    while True:
+        res = api.rest( "repos/%s/commits?sha=%s&since=%s&until=%s&per_page=100&page=%d"
+                        % ( name, branch, common.YEAR_2025[ 0 ], common.YEAR_2025[ 1 ], page ) )
+        if not isinstance( res, list ):
+            return None
+        for c in res:
+            seen += 1
+            if len( c.get( "parents" ) or [] ) > 1:
+                continue
+            subject = ( ( c.get( "commit" ) or {} ).get( "message" ) or "" ).split( "\n", 1 )[ 0 ]
+            if common.CONVENTIONAL_RE.match( subject ):
+                cc += 1
+            else:
+                non += 1
+        upper = max( total, seen )
+        if len( res ) < 100:
+            return dict( cc=cc, non_cc=non, total_2025=seen, cc_frac_seen=cc / max( 1, cc + non ), decided="complete", via="rest" )
+        if non > ( 1 - common.ROUTE_B_MIN_CC_FRACTION ) * upper:
+            return dict( cc=cc, non_cc=non, total_2025=upper, cc_frac_seen=cc / max( 1, cc + non ), decided="early_fail", via="rest" )
+        page += 1
+
+
 # ── the census driver ───────────────────────────────────────────────────────────────────────────────────
 def census( a ):
     os.makedirs( a.cache, exist_ok=True )
@@ -428,7 +457,8 @@ def census( a ):
             labels = C[ n ][ "s1" ][ "cols" ][ "labels" ]
             bug = sorted( l for l in labels if is_bug_label( l ) )
             ra = route_a( api, n, bug ) if bug else dict( bug_issues_2025=0, linked=0, linked_frac=0.0, capped=False )
-            rb = route_b( api, n, C[ n ][ "s1" ][ "cols" ][ "windows" ] )
+            cols = C[ n ][ "s1" ][ "cols" ]
+            rb = route_b_rest( api, n, cols[ "default_branch" ], cols[ "windows" ][ 0 ] + cols[ "windows" ][ 1 ] )
             if ra is None or rb is None:
                 log( "%s stage4 %s: no answer, left uncached" % ( st, n ) )
                 continue

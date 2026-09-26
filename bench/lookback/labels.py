@@ -159,11 +159,16 @@ class GhLinks:
             os.replace( tmp, self.path )
 
     def _gql( self, q ):
-        for attempt in range( 6 ):
+        attempt = 0
+        while attempt < 6:
             p = subprocess.run( [ "gh", "api", "graphql", "-f", "query=" + q ], capture_output=True, text=True )
             self.calls += 1
             if p.returncode == 0:
                 return json.loads( p.stdout )
+            if "rate limit" in ( p.stderr + p.stdout ).lower():      # a budget wait, not a failed attempt
+                time.sleep( self._reset_wait() )
+                continue
+            attempt += 1
             # partial data with per-field errors still returns JSON on stdout
             try:
                 j = json.loads( p.stdout )
@@ -171,8 +176,17 @@ class GhLinks:
                     return j
             except ValueError:
                 pass
-            time.sleep( 20 * ( attempt + 1 ) )
+            time.sleep( 20 * attempt )
         raise RuntimeError( "gh graphql failed: " + p.stderr[ :300 ] )
+
+    @staticmethod
+    def _reset_wait():
+        try:
+            p = subprocess.run( [ "gh", "api", "graphql", "-f", "query=query{ rateLimit{ remaining resetAt } }" ], capture_output=True, text=True )
+            r = json.loads( p.stdout )[ "data" ][ "rateLimit" ]
+            return max( 5, iso_to_epoch( r[ "resetAt" ] ) - int( time.time() ) + 10 ) if r[ "remaining" ] < 50 else 30
+        except ( ValueError, KeyError, TypeError ):
+            return 120
 
     def fetch_commits( self, shas ):
         todo = sorted( s for s in shas if s not in self.data[ "commit_prs" ] )

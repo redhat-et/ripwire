@@ -241,13 +241,14 @@ def test_frozen_constants_pinned():
         scopeveto=sorted( common.ROUTE_B_SCOPE_VETO ), exts=common.STRATUM_EXTS, dirs=sorted( common.NON_PRODUCT_DIRS ),
         osi=sorted( common.OSI_SPDX ), m=[ common.RECALL_AT, common.BOOTSTRAP_SEED, common.BOOTSTRAP_RESAMPLES, common.MARGIN_M,
                                             common.DELTA_SIMPLER, common.SIGN_CONSISTENCY ], order=common.SIMPLICITY_ORDER,
-        floors=[ common.PARSE_FLOOR, common.JOIN_FLOOR, common.CCX_FLOOR, common.JOIN_LINE_SLACK ], rw=common.RIPWIRE_VERSION )
+        floors=[ common.PARSE_FLOOR, common.JOIN_FLOOR, common.CCX_FLOOR, common.JOIN_LINE_SLACK ], rw=common.RIPWIRE_VERSION,
+        pruned=sorted( common.RIPWIRE_PRUNED_DIRS ) )
     import hashlib
     digest = hashlib.sha256( json.dumps( frozen, sort_keys=True ).encode() ).hexdigest()
     assert digest == PINNED_CONSTANTS, "frozen constants changed: %s" % digest
 
 
-PINNED_CONSTANTS = "f3fead853a0b1f2638542d106d328dca84c74209e37324221965820d27b9ae80"
+PINNED_CONSTANTS = "06aeb464902b157abe325e66efa8a77f4e4e91c3f787da621019415b7522bfb6"
 
 
 def test_salted_rank_is_stable():
@@ -415,6 +416,13 @@ def test_file_arms_and_lookback():
         assert arms[ "src/b.c" ][ "HOT" ] == -1 and arms[ "src/b.c" ][ "CCX" ] == 1 and arms[ "src/b.c" ][ "PRIOR" ] == 0
     finally:
         g.close()
+
+
+def test_ripwire_read_fraction():
+    units = { "pkg/a.py": 10, "pkg/build/b.py": 10, "pkg/out/c.py": 5, "pkg/big.py": 9, "pkg/d.py": 1 }
+    frac, pruned, unread = rankers.ripwire_read_fraction( units, { "pkg/big.py": "oversize", "pkg/d.py": "degraded-parse" } )
+    assert ( pruned, unread ) == ( 2, 1 ) and abs( frac - 0.4 ) < 1e-12
+    assert common.ripwire_prunes( "a/cmake-build-debug/x.c" ) and not common.ripwire_prunes( "build.py" )
 
 
 def test_function_join():

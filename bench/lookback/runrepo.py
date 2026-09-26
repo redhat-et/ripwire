@@ -138,8 +138,13 @@ def main( argv ):
         ts = time.time()
         mcounts, mrows = rankers.run_metrics( wt, a.ripwire )
         clock[ "ripwire_metrics" ] = clock.get( "ripwire_metrics", 0 ) + time.time() - ts
+        skipped = rankers.run_skipped( wt, a.ripwire )
         dirty = common.git( wt, "status", "--porcelain", "--untracked-files=all" ).strip()
         health = rankers.health_hotspots( header, t_sha )
+        read_frac, n_pruned, n_unread = rankers.ripwire_read_fraction( units, skipped )
+        w[ "ripwire_read" ] = dict( fraction=round( read_frac, 4 ), pruned_dir_units=n_pruned, skipped_units=n_unread )
+        if read_frac < common.PARSE_FLOOR:
+            health.append( "ripwire read %.3f of product files < %.2f (pruned dirs %d, skipped %d)" % ( read_frac, common.PARSE_FLOOR, n_pruned, n_unread ) )
         if dirty:
             health.append( "checkout dirty after ripwire: %d paths" % len( dirty.split( "\n" ) ) )
         w[ "ripwire" ] = dict( hotspots_header={ k2: header.get( k2 ) for k2 in ( "window", "at", "files", "ranked", "unranked_no_churn",

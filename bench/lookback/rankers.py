@@ -99,6 +99,26 @@ def run_metrics( checkout, binary="ripwire", topk=10 ** 7 ):
     return counts, rows
 
 
+def run_skipped( checkout, binary="ripwire" ):
+    """{path: why} for every file row `--skipped` lists (why = oversize, excluded, ignored, unsupported-ext, ...)."""
+    p = subprocess.run( [ binary, checkout, "--skipped", "--no-cache", "--legend=compact" ], capture_output=True, text=True, errors="replace" )
+    if p.returncode != 0:
+        raise RuntimeError( "ripwire --skipped rc=%d: %s" % ( p.returncode, p.stderr[ :300 ] ) )
+    root = ET.fromstring( XML_COMMENT_RE.sub( "", p.stdout ) )
+    return { f.attrib[ "p" ]: f.attrib.get( "why", "" ) for f in root.iter( "f" ) if "p" in f.attrib }
+
+
+NOT_READ_WHY = ( "oversize", "excluded", "ignored", "unsupported-ext", "binary", "read-error" )
+
+
+def ripwire_read_fraction( units, skipped ):
+    """§4.3's parse floor, ripwire's half, at file grain: the share of product files ripwire read — not under a
+    built-in pruned directory, and not listed by --skipped as unread. Returns (fraction, pruned, skipped_unread)."""
+    pruned = sum( 1 for p in units if common.ripwire_prunes( p ) )
+    unread = sum( 1 for p in units if not common.ripwire_prunes( p ) and any( skipped.get( p, "" ).startswith( w ) for w in NOT_READ_WHY ) )
+    return ( 1 - ( pruned + unread ) / len( units ) ) if units else 0.0, pruned, unread
+
+
 def health_hotspots( header, t_sha ):
     """§4.3's two --hotspots floors. Returns a list of failure strings (empty = healthy)."""
     fails = []
