@@ -243,6 +243,101 @@ else
     printf '  SKIP  (n) xml well-formed, TS/JS fixtures (no xmllint)\n'
 fi
 
+# ── (z1)-(z7) #335: a vitest/jest package in a SUBDIRECTORY runs from that package, and a path with glob or
+# regex syntax is passed as a literal. npx resolves the runner, and the runner its config, from the working
+# directory, so the root-relative command failed from root= (no runner) and from the package (no file
+# matched). A `--` made vitest drop its filter and run the whole suite; jest reads a positional argument as a
+# regex, so `[id]` never matched its own file; node --test (Node 21+) reads it as a glob — zero tests, exit 0.
+# Fixtures are built here, in $TMP (the bracketed and leading-dash names stay out of the committed tree).
+Z="$TMP/js335"
+mkz(){ mkdir -p "$( dirname "$Z/$1" )" && printf '%s\n' "$2" > "$Z/$1"; }
+mkz issue/web/package.json '{ "name": "web", "private": true, "type": "module", "scripts": { "test": "vitest run" }, "devDependencies": { "vitest": "3.2.4" } }'
+mkz issue/web/src/lib.ts 'export function add(a: number, b: number): number { return a + b; }'
+mkz issue/web/src/lib.test.ts 'import { it, expect } from "vitest"; import { add } from "./lib"; it("adds", () => { expect(add(1, 2)).toBe(3); });'
+mkz 'issue/web/app/[slug]/page.ts' 'import { add } from "../../src/lib"; export const total = () => add(2, 3);'
+mkz 'issue/web/app/[slug]/page.test.ts' 'import { it, expect } from "vitest"; import { total } from "./page"; it("totals", () => { expect(total()).toBe(5); });'
+mkz wsjest/package.json '{ "name": "root", "private": true, "workspaces": ["packages/*"] }'
+mkz wsjest/packages/app/package.json '{ "name": "app", "private": true, "scripts": { "test": "jest" }, "devDependencies": { "jest": "30.0.0" } }'
+mkz wsjest/packages/app/src/lib.js 'function add(a, b) { return a + b; } module.exports = { add };'
+mkz wsjest/packages/app/src/lib.test.js 'const { add } = require("./lib"); it("adds", () => { expect(add(1, 2)).toBe(3); });'
+mkz 'wsjest/packages/app/src/[id]/x.test.js' 'const { add } = require("../lib"); it("ids", () => { expect(add(2, 3)).toBe(5); });'
+mkz hoisted/package.json '{ "name": "root", "private": true, "workspaces": ["packages/*"], "devDependencies": { "vitest": "3.2.4" } }'
+mkz hoisted/packages/app/package.json '{ "name": "app", "private": true }'
+mkz hoisted/packages/app/src/lib.ts 'export function add(a: number, b: number): number { return a + b; }'
+mkz hoisted/packages/app/src/lib.test.ts 'import { it, expect } from "vitest"; import { add } from "./lib"; it("adds", () => { expect(add(1, 2)).toBe(3); });'
+mkz wsnode/packages/app/package.json '{ "name": "app", "private": true, "scripts": { "test": "node --test" } }'
+mkz wsnode/packages/app/src/lib.mjs 'export function add(a, b) { return a + b; }'
+mkz wsnode/packages/app/src/lib.test.mjs 'import { it } from "node:test"; import { add } from "./lib.mjs"; it("adds", () => add(1, 2));'
+mkz 'wsnode/packages/app/src/[id]/x.test.mjs' 'import { it } from "node:test"; import { add } from "../lib.mjs"; it("ids", () => add(2, 3));'
+mkz dash/package.json '{ "name": "dash", "private": true, "scripts": { "test": "vitest run" }, "devDependencies": { "vitest": "3.2.4" } }'
+mkz dash/lib.ts 'export function add(a: number, b: number): number { return a + b; }'
+mkz dash/-dash.test.ts 'import { it, expect } from "vitest"; import { add } from "./lib"; it("adds", () => { expect(add(1, 2)).toBe(3); });'
+runz(){ perl -e 'alarm 15; exec @ARGV' "$BIN" "$Z/$1" --test-gate="$2" --no-cache "${@:3}" 2>/dev/null; }
+
+# (z1) item 1: the package's own directory, the path relative to it — in a subshell, so each row still
+#      pastes from root= on its own. The issue's layout: no package.json at the crawl root at all.
+Z1="$( runz issue web/src/lib.ts )"
+printf '%s' "$Z1" | grep -qF 'run="(cd web &amp;&amp; npx vitest run src/lib.test.ts)"' \
+    && ! printf '%s' "$Z1" | grep -qF 'run="npx vitest run web/' \
+    && ok '(z1) #335: vitest package in web/ -> run="(cd web && npx vitest run src/lib.test.ts)"' \
+    || no "(z1) #335: subdirectory vitest run= not spelled from its package: $Z1"
+
+# (z2) item 2: a bracketed path is ONE quoted literal with no `--` (vitest dropped the filter after it and
+#      ran every test file); header next= carries the same command form as the rows.
+printf '%s' "$Z1" | grep -qF 'run="(cd web &amp;&amp; npx vitest run &apos;app/[slug]/page.test.ts&apos;)"' \
+    && ! printf '%s' "$Z1" | grep -qF 'vitest run --' \
+    && printf '%s' "$Z1" | grep -qF 'next="(cd web &amp;&amp; npx vitest run ' \
+    && ok "(z2) #335: [slug] path is a quoted vitest filter with no -- (never the whole suite); next= matches" \
+    || no "(z2) #335: bracketed vitest path spelled wrong: $Z1"
+
+# (z3) jest reads a positional argument as a REGEX: an unsafe path goes through --runTestsByPath; a safe one
+#      keeps its bytes. A workspace root that decides nothing (no runner, no script) is climbed past as before.
+Z3="$( runz wsjest packages/app/src/lib.js )"
+printf '%s' "$Z3" | grep -qF 'run="(cd packages/app &amp;&amp; npx jest src/lib.test.js)"' \
+    && printf '%s' "$Z3" | grep -qF 'run="(cd packages/app &amp;&amp; npx jest --runTestsByPath &apos;src/[id]/x.test.js&apos;)"' \
+    && ok '(z3) #335: jest package in packages/app/ runs there; [id] path via --runTestsByPath' \
+    || no "(z3) #335: jest subdirectory/regex spelling wrong: $Z3"
+
+# (z4) guard, GREEN on both binaries: a hoisted workspace whose ROOT package.json decides keeps today's
+#      root-relative bytes — the cwd is the deciding manifest's directory, which here is root= itself.
+Z4="$( runz hoisted packages/app/src/lib.ts )"
+printf '%s' "$Z4" | grep -qF 'run="npx vitest run packages/app/src/lib.test.ts"' && ! printf '%s' "$Z4" | grep -qF '(cd ' \
+    && ok '(z4) #335 guard: root-decided hoisted workspace keeps run="npx vitest run packages/app/src/lib.test.ts"' \
+    || no "(z4) #335 guard: root-decided run= changed: $Z4"
+
+# (z5) node --test needs no cd (node resolves nothing through the cwd): the plain row keeps its root-relative
+#      bytes, and a glob-syntax path — a glob from Node 21, a literal path before — is run_unknown="1".
+Z5="$( runz wsnode packages/app/src/lib.mjs )"
+printf '%s' "$Z5" | grep -qF 'run="node --test packages/app/src/lib.test.mjs"' \
+    && printf '%s' "$Z5" | grep -qE '<t p="packages/app/src/\[id\]/x\.test\.mjs" hops="[0-9]+" run_unknown="1"/>' \
+    && ! printf '%s' "$Z5" | grep -qF 'x.test.mjs&apos;' \
+    && ok '(z5) #335: node --test keeps root-relative rows; [id] (a glob on Node 21+) -> run_unknown="1"' \
+    || no "(z5) #335: node --test glob path spelled: $Z5"
+
+# (z6) a leading '-' is `./-…`, never `--` (after which vitest runs the whole suite).
+Z6="$( runz dash lib.ts )"
+printf '%s' "$Z6" | grep -qF 'run="npx vitest run &apos;./-dash.test.ts&apos;"' \
+    && ok "(z6) #335: leading-dash vitest path -> './-dash.test.ts', no --" \
+    || no "(z6) #335: leading-dash vitest path spelled wrong: $Z6"
+
+# (z7) the JSON sibling and --affected share TestRunnerIndex: the same command reaches both.
+Z7J="$( runz issue web/src/lib.ts --json )"
+Z7A="$( perl -e 'alarm 15; exec @ARGV' "$BIN" "$Z/issue" --affected=web/src/lib.ts --no-cache --legend=compact 2>/dev/null )"
+printf '%s' "$Z7J" | grep -qF '(cd web && npx vitest run src/lib.test.ts)' \
+    && printf '%s' "$Z7A" | grep -qF 'run="(cd web &amp;&amp; npx vitest run src/lib.test.ts)"' \
+    && ok '(z7) #335: --json and --affected carry the same package-directory command' \
+    || no "(z7) #335: JSON/--affected disagree: JSON=$Z7J AFFECTED=$Z7A"
+
+if command -v xmllint >/dev/null 2>&1; then
+    z8ok=1
+    for X in "$Z1" "$Z3" "$Z4" "$Z5" "$Z6" "$Z7A"; do
+        printf '%s' "$X" | xmllint --noout - 2>/dev/null || z8ok=0
+    done
+    if [ "$z8ok" = 1 ]; then ok "(z8) xml well-formed (#335 fixtures)"; else no "(z8) xml malformed (#335 fixtures)"; fi
+else
+    printf '  SKIP  (z8) xml well-formed, #335 fixtures (no xmllint)\n'
+fi
+
 # ── (o)-(u) rv-test-gate-tsjs fix round — F1 (lost shell-driver fallback), F2 (wrong runner), F3 (silent
 # pass, the fsonly half), F4 (false fail on non-test JS), F5 (marker package.json stops the walk) ──────────
 # Fixtures reused from the review's own $ORCH/tmp/rv-test-gate/fx/ (per the coordinator's instruction),
