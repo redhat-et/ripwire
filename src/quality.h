@@ -1995,8 +1995,8 @@ constexpr std::uint32_t kHeadSnapCacheScheme = 1;
 // ─── THE ROOT KEY — one canonical spelling, for every cache family ────────────────────────────────────
 //
 // The 16-hex field every cache blob's filename carries, identifying the ROOT the blob belongs to:
-// `ripwire-<rootKey>-{lean,rich}.bin` (main.cpp::defaultCachePath), `ripwire-mcp-<rootKey>.cache`
-// (mcpindex.h::mcpCachePath) and `ripwire-<family>-<rootKey>-<exclHex>-<shaHex>.bin`
+// `ripwire-<rootKey>-{lean,rich}-c<format>p<parser>.bin` (main.cpp::defaultCachePath),
+// `ripwire-mcp-<rootKey>-c<format>p<parser>.cache` (mcpindex.h::mcpCachePath) and `ripwire-<family>-<rootKey>-<exclHex>-<shaHex>.bin`
 // (shaKeyedCachePath below: qheadsnap, qsnap, qbody, qhist, qms, qchurn, stier). It is what makes
 // "which root does this blob belong to?" answerable from the NAME alone — see cacheBlobRootKey and the
 // byte-budget pin in evictBySizeBudget, which is only ever as wide as the set of blobs that spell the
@@ -2593,18 +2593,24 @@ inline bool isCacheBuildTagField( std::string_view field ) noexcept
 //     which from this change on only an older release writes.
 // Every other name (qheadsnap/qsnap/qbody/qchurn/…, whose keys already fold the extraction identity) answers
 // false and keeps exactly the pin it had.
-inline bool isOtherBuildRootBlob( std::string_view name, const OwnBuildBlobTails& own ) noexcept
+// A name THIS build writes for one of its root-keyed families (any root).
+inline bool isThisBuildRootBlobName( std::string_view name, const OwnBuildBlobTails& own ) noexcept
 {
-    if( !name.starts_with( "ripwire-" ) )
-    {
-        return false;
-    }
     for( std::size_t f = 0; f < own.size(); ++f )
     {
         if( name.starts_with( kRootBlobShapes[ f ].prefix ) && name.ends_with( own[ f ] ) )
         {
-            return false;   // this build's own name
+            return true;
         }
+    }
+    return false;
+}
+
+inline bool isOtherBuildRootBlob( std::string_view name, const OwnBuildBlobTails& own ) noexcept
+{
+    if( !name.starts_with( "ripwire-" ) || isThisBuildRootBlobName( name, own ) )
+    {
+        return false;
     }
     const bool             isMcp = name.starts_with( "ripwire-mcp-" );
     const std::size_t      dot   = name.rfind( '.' );
@@ -2723,9 +2729,10 @@ struct CacheBlobStat
     std::string                     path;
 };
 
-// P1-1 (2026-09-10 full audit) — THE BYTE-BUDGET PASS: delete oldest-first until the family is under a
-// LOW-WATER mark of 7/8 budget, taking OTHER roots' blobs first and the MRU root's last. Returns the blobs
-// that survived. `mine` arrives unsorted; it is sorted oldest-first here.
+// P1-1 (2026-09-10 full audit) — THE BYTE-BUDGET PASS: delete until the family is under a LOW-WATER mark of
+// 7/8 budget, in THREE TIERS, oldest-first within each: (0) other roots' blobs and unowned ones, (1) another
+// ripwire build's blobs of the root being written, (2) never — this build's blobs of that root and `keepPath`.
+// Returns the blobs that survived. `mine` arrives unsorted.
 //
 // THE LOW-WATER MARK is F6's live-cache finding (B7.4, 2026-07-14): trimming to exactly the budget left the
 // dir hovering AT the ceiling, so every subsequent process re-crossed it on its first write and paid
@@ -2754,13 +2761,19 @@ struct CacheBlobStat
 // NEVER DISCLOSE: NDEBUG compiles that out, and a Release binary is exactly where a 10x
 // slowdown needs to be visible.
 //
-// ANOTHER BUILD'S BLOBS OF THIS ROOT ARE NOT PINNED (#334 follow-up). Since the auto names carry the build tag,
-// one root can hold a blob per build that ran on it (isOtherBuildRootBlob above). Pinning those too would make
-// every upgrade leave the previous version's blobs pinned for the 30 days the age pass waits — on llvm-project
-// 1.76 GB of them against a 2 GiB budget, which is the self-sustaining "kept anyway" state this pass exists to
-// avoid. So only THIS build's blobs of the MRU root are pinned; another build's compete oldest-first with other
-// roots' blobs. Two builds alternating on one tree therefore both stay warm while their blobs fit the budget and
-// fall back to the old refuse-and-rewrite cost only when they do not — never worse than before the tag.
+// ANOTHER BUILD'S BLOBS OF THIS ROOT ARE TIER 1, NEITHER PINNED NOR FIRST (#334 follow-up). Since the auto names
+// carry the build tag, one root can hold a blob per build that ran on it (isOtherBuildRootBlob above).
+//   * Pinning them would make every upgrade leave the previous version's blobs pinned for the 30 days the age pass
+//     waits — on llvm-project 1.76 GB of them against a 2 GiB budget, the self-sustaining "kept anyway" state this
+//     pass exists to avoid.
+//   * Taking them oldest-first WITH other roots' blobs (the first cut of this change) evicted blobs still in use:
+//     a live MCP server of another build indexing this root, or the other build's class when two builds alternate,
+//     while evicting another root alone would have been enough. Measured by review: the server's next rebuild went
+//     from reparsed=1 to reparsed=5 of 5 files.
+// So they go only after every other root's blob is gone and the dir is still over the low-water mark. The cost that
+// remains: where one root's blobs from two builds do not fit the budget together (llvm-project, 1.76 GB per build),
+// the other build's blobs of it are evicted and that build re-parses on its next run — the pre-tag cost, paid now
+// only in that regime, and after every other root's blob was spent first.
 inline std::vector<CacheBlobStat> evictBySizeBudget( std::vector<CacheBlobStat>& mine, const std::string& dir,
                                                      const std::string& keepPath, std::uintmax_t maxTotalBytes )
 {
@@ -2780,18 +2793,38 @@ inline std::vector<CacheBlobStat> evictBySizeBudget( std::vector<CacheBlobStat>&
     const std::string       pinRootKey    = cacheBlobRootKey( fs::path( keepPath ).filename().string() );
     const OwnBuildBlobTails ownTails      = ownBuildBlobTails();
     const std::uintmax_t    lowWaterBytes = maxTotalBytes - maxTotalBytes / 8;
-    std::sort( mine.begin(), mine.end(), []( const CacheBlobStat& a, const CacheBlobStat& b ){ return a.mtime < b.mtime; } );   // oldest first
+
+    // The tier, read off each name ONCE (a comparator that re-derived it would parse every name O(n log n) times).
+    constexpr std::uint8_t kTierPinned = 2;
+    struct Ranked
+    {
+        std::uint8_t tier;
+        std::size_t  blobIndex;
+    };
+    std::vector<Ranked> order;
+    order.reserve( mine.size() );
+    for( std::size_t i = 0; i < mine.size(); ++i )
+    {
+        const std::string name     = fs::path( mine[ i ].path ).filename().string();
+        const bool        thisRoot = !pinRootKey.empty() && cacheBlobRootKey( name ) == pinRootKey;
+        const std::uint8_t tier    = mine[ i ].path == keepPath                    ? kTierPinned
+                                   : !thisRoot                                     ? std::uint8_t( 0 )
+                                   : isOtherBuildRootBlob( name, ownTails )        ? std::uint8_t( 1 )
+                                                                                   : kTierPinned;
+        order.push_back( Ranked{ tier, i } );
+    }
+    std::sort( order.begin(), order.end(), [ & ]( const Ranked& a, const Ranked& b )
+               { return a.tier != b.tier ? a.tier < b.tier : mine[ a.blobIndex ].mtime < mine[ b.blobIndex ].mtime; } );   // tier, then oldest first
 
     std::vector<CacheBlobStat> kept;
     kept.reserve( mine.size() );
     std::size_t    evictedCount = 0;
     std::uintmax_t pinnedBytes  = 0;
-    for( const CacheBlobStat& b : mine )
+    for( const Ranked& r : order )
     {
-        const std::string name   = fs::path( b.path ).filename().string();
-        const bool        pinned = b.path == keepPath
-                                || ( !pinRootKey.empty() && cacheBlobRootKey( name ) == pinRootKey && !isOtherBuildRootBlob( name, ownTails ) );
-        if( pinned )
+        ASSUME( r.blobIndex < mine.size(), "order holds one entry per index of mine, built above" );
+        const CacheBlobStat& b = mine[ r.blobIndex ];
+        if( r.tier == kTierPinned )
         {
             pinnedBytes += b.byteSize;
         }
@@ -2814,7 +2847,7 @@ inline std::vector<CacheBlobStat> evictBySizeBudget( std::vector<CacheBlobStat>&
     }
     if( totalBytes > maxTotalBytes )
     {
-        rw::emitTo( stderr, "ripwire: cache {}: this root's own families are {} MiB, past the {} MiB budget — kept anyway (evicting one costs a full re-parse)\n",
+        rw::emitTo( stderr, "ripwire: cache {}: this build's blobs for this root are {} MiB, past the {} MiB budget — kept anyway (evicting one costs a full re-parse)\n",
                       dir.c_str(), pinnedBytes / kMiB, maxTotalBytes / kMiB );
     }
     return kept;

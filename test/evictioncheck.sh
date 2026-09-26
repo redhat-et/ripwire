@@ -36,7 +36,9 @@
 #   (h) P1-1: the MRU root's SIBLING family is PINNED through a byte-budget sweep — the sweep takes another
 #       root's blob instead, and says so once on stderr.
 #  (h2) #334 follow-up: only THIS build's blobs of the MRU root are pinned; another build's (tagged or pre-tag)
-#       are evicted like another root's.
+#       are evictable.
+#  (h3) …but only after every other root's blob: another build's MCP index of the MRU root survives when
+#       evicting another root was enough.
 #   (i) P1-1: when the pinned set ALONE exceeds the budget it is kept anyway, said once on stderr.
 #   (j) P1-1: a sweep that evicts nothing writes ZERO bytes to stderr (the disclosure is conditional).
 #   (k) ONE ROOT KEY FOR EVERY FAMILY: prime lean/rich/qheadsnap/qsnap/qchurn against one root; every blob
@@ -290,7 +292,7 @@ dirbytesof(){
 }
 
 # The names THIS build writes for a root's rich blob and MCP index. Read, never re-derived: rich_path= is
-# --doctor's own answer, and the MCP index carries the rich class's build tag (quality.h mcpCacheBlobSuffix), or
+# --doctor's own answer, and the MCP index carries the rich class's build tag (quality.h rootBlobTail, the RootBlobFamily::Mcp row), or
 # none on a binary from before build-keyed names — so every arm below seeds this binary's real sibling names.
 ownrichname(){ env -u XDG_CACHE_HOME TMPDIR="$1" "$BIN" "$2" --doctor 2>/dev/null | tr '<' '\n' | grep '^c n="index-cache"' \
                  | grep -o ' rich_path="[^"]*"' | sed 's/^ rich_path="//; s/"$//' | xargs basename 2>/dev/null; }
@@ -406,8 +408,48 @@ grep -q '^ripwire: cache .* evicted 2 blob(s) of other roots or other ripwire bu
     && ok "(h2) the eviction line says other BUILDS as well as other roots" \
     || { no "(h2) no 'evicted 2 blob(s) of other roots or other ripwire builds' line"; cat "$TMP7/run.err"; }
 
+# ---- (h3) the #334 review, F1: another build's blobs of the MRU root go AFTER every other root's -------------------
+# (h2)'s first cut took another build's blobs oldest-first TOGETHER with other roots' blobs, and that evicted blobs still in
+# use: a live MCP server of another build indexing this very root (a 0.6.4 server during the upgrade window, or a server
+# of a newer format), while evicting another root alone would have freed enough. The review measured the server's next
+# rebuild at reparsed=5 of 5 instead of 1. Tiered order: other roots first, then other builds' blobs of this root, then
+# nothing. Seed: this root's MCP index as two OTHER builds write it (tagged and pre-tag), two days old; another root's
+# blob, one hour old and big enough that evicting it alone reaches the low-water mark. Red-first: a079f26c (untiered)
+# evicts both indexes first because they are the oldest.
+TMP8="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3" "$TMP7" "$TMP8"' EXIT
+CB8="$TMP8/cachebase"; CD8="$CB8/ripwire"; mkdir -p "$CD8"
+R8="$TMP8/repo"; mkdir -p "$R8"
+printf 'int tiered( void )\n{\n    return 1;\n}\n' > "$R8/f.cpp"
+env -u XDG_CACHE_HOME TMPDIR="$CB8" "$BIN" "$R8" >/dev/null 2>/dev/null
+OWN8="$( find "$CD8" -mindepth 1 -maxdepth 2 -name 'ripwire-*-lean*.bin' 2>/dev/null | head -1 )"
+ROOTHEX8="$( basename "${OWN8:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-lean(-c[0-9]+p[0-9]+)?\.bin$/\1/' )"
+if printf '%s' "$ROOTHEX8" | grep -qE '^[0-9a-f]{16}$'; then
+    ok "(h3) primed: root key $ROOTHEX8"
+else
+    no "(h3) could not read a 16-hex root key off the primed blob (own='$OWN8')"
+fi
+MCPOLD8="$CD8/ripwire-mcp-$ROOTHEX8.cache"            # a 0.6.4 MCP server's index of THIS root
+MCPOTH8="$CD8/ripwire-mcp-$ROOTHEX8-c1p1.cache"       # another format's MCP server's index of THIS root (c1p1: no real build)
+truncate -s 40M "$MCPOLD8"; truncate -s 40M "$MCPOTH8"
+touch -t "$( date -v-2d +%Y%m%d%H%M 2>/dev/null || date -d '2 days ago' +%Y%m%d%H%M )" "$MCPOLD8" "$MCPOTH8"
+OTHER8="$CD8/ripwire-00000000feedf00d-lean.bin"      # another root, newer, and alone enough to free
+truncate -s 2500M "$OTHER8"
+touch -t "$( date -v-1H +%Y%m%d%H%M 2>/dev/null || date -d '1 hour ago' +%Y%m%d%H%M )" "$OTHER8"
+printf 'int tiered2( void )\n{\n    return 2;\n}\n' >> "$R8/f.cpp"
+env -u XDG_CACHE_HOME TMPDIR="$CB8" "$BIN" "$R8" >"$TMP8/run.xml" 2>"$TMP8/run.err"
+rc8=$?
+if [ "$rc8" -eq 0 ]; then ok "(h3) run exits 0"; else { no "(h3) run exited $rc8"; cat "$TMP8/run.err"; }; fi
+[ ! -e "$OTHER8" ] && ok "(h3) the other root's blob is evicted first" \
+    || no "(h3) the other root's blob survived — the sweep freed nothing from the tier that goes first"
+{ [ -e "$MCPOLD8" ] && [ -e "$MCPOTH8" ]; } \
+    && ok "(h3) other builds' MCP indexes of THIS root survive when evicting the other root was enough (a live server keeps its index)" \
+    || no "(h3) another build's MCP index of this root was evicted although evicting the other root sufficed (old='$( [ -e "$MCPOLD8" ] && echo kept || echo gone )' other='$( [ -e "$MCPOTH8" ] && echo kept || echo gone )')"
+grep -q '^ripwire: cache .* evicted 1 blob(s) of other roots or other ripwire builds' "$TMP8/run.err" 2>/dev/null \
+    && ok "(h3) exactly one blob evicted, and said so" \
+    || { no "(h3) expected 'evicted 1 blob(s)'"; cat "$TMP8/run.err"; }
+
 # ---- (i) the pinned set ALONE exceeds the budget → kept anyway, said once ---------------------------
-TMP4="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3" "$TMP4" "$TMP7"' EXIT
+TMP4="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3" "$TMP4" "$TMP7" "$TMP8"' EXIT
 CB4="$TMP4/cachebase"; CD4="$CB4/ripwire"; mkdir -p "$CD4"
 R4="$TMP4/repo"; mkdir -p "$R4"
 printf 'int solo( void )\n{\n    return 1;\n}\n' > "$R4/f.cpp"
@@ -438,7 +480,7 @@ if [ "$errlines4" -eq 1 ]; then ok "(i) exactly ONE stderr line"; else no "(i) e
 
 # ---- (j) nothing evicted → ZERO stderr bytes -------------------------------------------------------
 # The disclosure must be conditional, or every warm run in every gate that compares stderr grows a line.
-TMP5="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3" "$TMP4" "$TMP5" "$TMP7"' EXIT
+TMP5="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3" "$TMP4" "$TMP5" "$TMP7" "$TMP8"' EXIT
 CB5="$TMP5/cachebase"; CD5="$CB5/ripwire"; mkdir -p "$CD5"
 R5="$TMP5/repo"; mkdir -p "$R5"
 printf 'int quiet( void )\n{\n    return 1;\n}\n' > "$R5/f.cpp"
@@ -520,7 +562,7 @@ WANT_NONROOT="$( printf '%s\n' $NONROOT_PREFIXES | sort | tr '\n' ' ' )"
     && ok "(k) the non-root-keyed family list matches quality.h::kNonRootKeyedBlobPrefixes ($WANT_NONROOT)" \
     || no "(k) family-list drift: quality.h says '$SRC_NONROOT', this gate reads '$WANT_NONROOT'"
 
-TMP6="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3" "$TMP4" "$TMP5" "$TMP6" "$TMP7"' EXIT
+TMP6="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3" "$TMP4" "$TMP5" "$TMP6" "$TMP7" "$TMP8"' EXIT
 CB6="$TMP6/cachebase"; CD6="$CB6/ripwire"; mkdir -p "$CD6"
 R6="$TMP6/repo"; mkdir -p "$R6"
 cat > "$R6/f.cpp" <<'EOF_K'
