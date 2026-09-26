@@ -8570,6 +8570,26 @@ reference's declaration-as-def. Both make ripwire's slice a still-larger superse
 that earned the paper's +17pp; the "matching the published number does not require matching the
 published slicer" reading stands, with one more reason.
 
+**Cross-reference — the py-family, issue-derived reading of this shape (2026-09-20).** The
+line-recall shape registered above has now also been run on a **Python** corpus of issue-derived fix
+patches, addressed at the **pre-fix** tree, under its own pre-registration in
+`docs/research/slice-line-recall.md` (protocol committed with its results section empty, before any
+number existed). It is a research note, not a published claim, and its numbers are **not**
+comparable to the four cpp corpora above and are never averaged with them: it scores PRE-image lines
+at the base commit where those runs score ADDED lines at the post-commit tree — a gap the 2026-08-28
+registration left open, closed there as a dated amendment rather than chosen after the fact. What it
+adds that this section never measured: a rank metric against a random-order control, the fraction of
+the corpus that is out of reach for an intra-procedural primitive by construction, wall time beside
+bytes, and a byte-budgeted file/symbol/line granularity comparison. Two of its findings bear on the
+registrations above and are recorded here so a reader of this section is not left with a rosier
+picture than the evidence supports: (1) under a tokenizer-decided relevance oracle the v1 per-
+variable line-recall is 0.995 and every one of the three residual misses is a keyword-argument name
+colliding with a local, which replicates the 2026-08-30 reading that the misses belong to the oracle;
+(2) unioned over a function's whole sliceable inventory, `--slice-flow=both` reaches no line the flat
+v1 rows do not already reach — a flow row at depth ≥ 1 is by construction a line in some other
+variable's own flat slice — so rung 2's value is confined to the seeded case. Numbers stay in that
+document and nowhere public until an owner pass.
+
 ## `--slice-guards` — control dependence for the slice, PRE-REGISTERED 2026-08-31 (before any feature code)
 
 **What this registers.** The survey lane's proposal: control-dependence rows beside the flow
