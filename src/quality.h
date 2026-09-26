@@ -43,6 +43,7 @@
 #include <ctime>       // ::nanosleep — the lock's bounded 10 ms poll
 
 #include <algorithm>
+#include <array>        // OwnBuildBlobTails — one tagged tail per root-keyed family
 #include <atomic>       // the A5 process-once cache-sweep guard
 #include <cctype>       // std::isxdigit/std::isdigit — B10.2d churn-blame porcelain parsing
 #include <chrono>       // A5: the 30-day cache-blob age cutoff (evictOldCacheFamily)
@@ -2491,23 +2492,6 @@ inline std::string headSnapCachePath( const std::string& repoHex, const std::str
     return shaKeyedCachePath( "qheadsnap", repoHex, exclHex, headSha );
 }
 
-// The builder for the two families whose whole key IS the root — the main parse cache
-// (`ripwire-<rootKey>-lean-<tag>.bin` / `-rich-<tag>.bin`, main.cpp::defaultCachePath) and the MCP index
-// (`ripwire-mcp-<rootKey>-<tag>.cache`, mcpindex.h::mcpCachePath; <tag> is the build tag below). They sat in different translation units and
-// each open-coded the same three lines around its own copy of the hash, which is exactly how the two root
-// spellings drifted apart in the first place; one body means a future family joins by naming a prefix and
-// a suffix rather than by re-deriving a key. `prefix`/`suffix` bracket the 16-hex field because that is the
-// only thing the two shapes disagree about — everything the pin reads is in the middle.
-inline std::string rootKeyedCachePath( const std::string& root, std::string_view prefix, std::string_view suffix )
-{
-    // Bounded: the longest prefix is "ripwire-mcp-" (12), the key is 16 hex, and the longest suffix is
-    // "-rich-c<u32>p<u32>.bin" (32 at ten digits a side) — 60 of the 63 usable bytes.
-    EXPECTS( prefix.size() + 16 + suffix.size() < 64, "a root-keyed cache name is a fixed-width prefix, key and build-tagged suffix" );
-    char tail[ 64 ];
-    rw::formatTo( tail, sizeof( tail ), "{}{}{}", prefix, cacheRootKeyHex( root ), suffix );
-    return resolveCacheBlobPath( cacheDirLadder(), tail );
-}
-
 // ─── THE BUILD TAG — which ingest format a root-keyed blob holds, spelled in its NAME ─────────────────────────
 //
 // #334 (follow-up). Both root-keyed families were keyed by root and verb class only, so two builds of different
@@ -2531,35 +2515,61 @@ inline constexpr std::uint32_t ingestParserVerFor( bool captureValueUses ) noexc
     return kIngestParserVerMirror + ( captureValueUses ? 1u : 0u );
 }
 
-inline std::string cacheBuildTag( bool captureValueUses )
+// The families whose whole key IS the root — the main parse cache's two verb classes (main.cpp::defaultCachePath)
+// and the MCP index (mcpindex.h::mcpCachePath, always the rich class) — as ONE table: the builder and the eviction
+// pin below read the same rows, so "is this blob this build's?" cannot disagree with "what does this build write?".
+enum class RootBlobFamily : std::uint8_t
 {
-    return "c" + std::to_string( kIngestCacheVersionMirror ) + "p" + std::to_string( ingestParserVerFor( captureValueUses ) );
-}
-
-// The tagged tail of the main parse cache (main.cpp::defaultCachePath) and of the MCP index
-// (mcpindex.h::mcpCachePath, always the rich class). One definition each: the builders and the eviction pin
-// below read the SAME strings, so "is this blob this build's?" cannot disagree with "what does this build write?".
-inline std::string autoCacheBlobSuffix( bool captureValueUses )
-{
-    return ( captureValueUses ? "-rich-" : "-lean-" ) + cacheBuildTag( captureValueUses ) + ".bin";
-}
-
-inline std::string mcpCacheBlobSuffix()
-{
-    return "-" + cacheBuildTag( /*captureValueUses=*/true ) + ".cache";
-}
-
-// This build's three tagged tails, built once per sweep rather than once per blob.
-struct OwnBuildBlobTails
-{
-    std::string lean;
-    std::string rich;
-    std::string mcp;
+    Lean,
+    Rich,
+    Mcp,
+    Count
 };
+
+struct RootBlobShape
+{
+    std::string_view prefix;       // before the 16-hex root key
+    std::string_view classField;   // between the key and the build tag ("" for the MCP index)
+    std::string_view ext;
+    bool             rich;         // which parserVer the tag names
+};
+
+inline constexpr RootBlobShape kRootBlobShapes[] = {
+    { "ripwire-",     "-lean", ".bin",   false },
+    { "ripwire-",     "-rich", ".bin",   true  },
+    { "ripwire-mcp-", "",      ".cache", true  },
+};
+static_assert( std::size( kRootBlobShapes ) == static_cast<std::size_t>( RootBlobFamily::Count ), "one shape per root-keyed family" );
+
+// Everything after the root key, build tag included: `-lean-c25p122.bin`, `-rich-c25p123.bin`, `-c25p123.cache`.
+inline std::string rootBlobTail( const RootBlobShape& shape )
+{
+    return std::format( "{}-c{}p{}{}", shape.classField, kIngestCacheVersionMirror, ingestParserVerFor( shape.rich ), shape.ext );
+}
+
+// The builder for every root-keyed family. They sat in different translation units and each open-coded the same
+// three lines around its own copy of the hash, which is exactly how the two root spellings drifted apart in the
+// first place; one body means a future family joins by adding a row rather than by re-deriving a key.
+inline std::string rootKeyedCachePath( const std::string& root, RootBlobFamily family )
+{
+    EXPECTS( family < RootBlobFamily::Count );
+    const RootBlobShape& shape = kRootBlobShapes[ static_cast<std::size_t>( family ) ];
+    const std::string    after = rootBlobTail( shape );
+    // Bounded: the longest prefix is "ripwire-mcp-" (12), the key is 16 hex, and the longest tail is
+    // "-rich-c<u32>p<u32>.bin" (32 at ten digits a side) — 60 of the 63 usable bytes.
+    EXPECTS( shape.prefix.size() + 16 + after.size() < 64, "a root-keyed cache name is a fixed-width prefix, key and build-tagged tail" );
+    char tail[ 64 ];
+    rw::formatTo( tail, sizeof( tail ), "{}{}{}", shape.prefix, cacheRootKeyHex( root ), after );
+    return resolveCacheBlobPath( cacheDirLadder(), tail );
+}
+
+// This build's tagged tails, one per family, built once per sweep rather than once per blob.
+using OwnBuildBlobTails = std::array<std::string, static_cast<std::size_t>( RootBlobFamily::Count )>;
 
 inline OwnBuildBlobTails ownBuildBlobTails()
 {
-    return OwnBuildBlobTails{ autoCacheBlobSuffix( false ), autoCacheBlobSuffix( true ), mcpCacheBlobSuffix() };
+    static_assert( std::tuple_size_v<OwnBuildBlobTails> == 3, "one tail per kRootBlobShapes row, in row order" );
+    return OwnBuildBlobTails{ rootBlobTail( kRootBlobShapes[ 0 ] ), rootBlobTail( kRootBlobShapes[ 1 ] ), rootBlobTail( kRootBlobShapes[ 2 ] ) };
 }
 
 // `c<digits>p<digits>` — the tag shape, and nothing else.
@@ -2578,7 +2588,7 @@ inline bool isCacheBuildTagField( std::string_view field ) noexcept
 }
 
 // A root-keyed blob ANOTHER build wrote, read off its name alone:
-//   * a build tag that is not one of this build's three tails (another kCacheVersion or parserVer), or
+//   * a build tag that is not one of this build's tails (another kCacheVersion or parserVer), or
 //   * a pre-tag name — `ripwire-<16hex>-lean.bin`, `ripwire-<16hex>-rich.bin`, `ripwire-mcp-<16hex>.cache` —
 //     which from this change on only an older release writes.
 // Every other name (qheadsnap/qsnap/qbody/qchurn/…, whose keys already fold the extraction identity) answers
@@ -2589,16 +2599,19 @@ inline bool isOtherBuildRootBlob( std::string_view name, const OwnBuildBlobTails
     {
         return false;
     }
-    const bool isMcp = name.starts_with( "ripwire-mcp-" );
-    if( name.ends_with( own.lean ) || name.ends_with( own.rich ) || ( isMcp && name.ends_with( own.mcp ) ) )
+    for( std::size_t f = 0; f < own.size(); ++f )
     {
-        return false;
+        if( name.starts_with( kRootBlobShapes[ f ].prefix ) && name.ends_with( own[ f ] ) )
+        {
+            return false;   // this build's own name
+        }
     }
-    const std::size_t      dot  = name.rfind( '.' );
-    const std::string_view stem = name.substr( 0, dot );
-    const std::string_view ext  = dot == std::string_view::npos ? std::string_view{} : name.substr( dot );
-    const std::size_t      dash = stem.rfind( '-' );
-    const std::string_view last = dash == std::string_view::npos ? stem : stem.substr( dash + 1 );
+    const bool             isMcp = name.starts_with( "ripwire-mcp-" );
+    const std::size_t      dot   = name.rfind( '.' );
+    const std::string_view stem  = name.substr( 0, dot );
+    const std::string_view ext   = dot == std::string_view::npos ? std::string_view{} : name.substr( dot );
+    const std::size_t      dash  = stem.rfind( '-' );
+    const std::string_view last  = dash == std::string_view::npos ? stem : stem.substr( dash + 1 );
     if( isCacheBuildTagField( last ) )
     {
         return true;   // tagged, and not with this build's tag

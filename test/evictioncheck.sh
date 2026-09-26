@@ -364,7 +364,7 @@ errlines3="$( wc -l < "$TMP3/run.err" | tr -d ' ' )"
     || no "(h) expected 1 stderr line, got $errlines3"
 
 # ---- (h2) #334 follow-up: ANOTHER BUILD's blobs of the MRU root are NOT pinned ------------------------
-# The auto names carry a build tag (quality.h cacheBuildTag), so one root can hold a blob per format that ran on it.
+# The auto names carry a build tag (quality.h rootBlobTail), so one root can hold a blob per format that ran on it.
 # Pinning those with this build's would leave every upgraded-from version pinned for the 30 days the age pass waits —
 # on llvm-project 1.76 GB of them against the 2 GB budget. So only THIS build's blobs of the root are pinned: another
 # build's tagged blob and a pre-tag name (`ripwire-<key>-rich.bin`, which only a release before the tag writes) are
@@ -538,7 +538,7 @@ EOF_K
 primeallfamilies "$CB6" "$R6"
 
 # The MCP index family, seeded by hand: `ripwire wrap` is not something this gate can drive, but the family
-# exists (mcpindex.h::mcpCachePath → quality::rootKeyedCachePath( root, "ripwire-mcp-", ".cache" )) and it is
+# exists (mcpindex.h::mcpCachePath → quality::rootKeyedCachePath( root, RootBlobFamily::Mcp ), ripwire-mcp-<key>-<tag>.cache) and it is
 # the one whose key field is terminated by '.' rather than '-'. Without it in the dir the key-agreement arm
 # below never asked the question that #127/3985249706 answered.
 MCPKEY6="$( find "$CD6" -mindepth 1 -maxdepth 2 -type f -name 'ripwire-*-lean*.bin' 2>/dev/null | head -1 )"

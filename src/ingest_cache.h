@@ -1430,7 +1430,7 @@ inline constexpr std::uint32_t parserVerFor( bool captureValueUses ) noexcept
     return kParserVer + ( captureValueUses ? 1u : 0u );   // lean and full-use caches must never cross-hit
 }
 
-// The auto blob's NAME carries the same pair its header does (quality.h cacheBuildTag): a build tag that disagreed
+// The auto blob's NAME carries the same pair its header does (quality.h rootBlobTail): a build tag that disagreed
 // with the stamp would put a blob this binary refuses at the path it reads, which is the #334 thrash back again.
 static_assert( quality::ingestParserVerFor( false ) == parserVerFor( false ) && quality::ingestParserVerFor( true ) == parserVerFor( true ),
                "quality.h's ingestParserVerFor must derive both classes exactly as parserVerFor does — the build tag names what the header stamps" );
@@ -2384,7 +2384,7 @@ struct CacheLoadStats
 // #334: a Windows tester alternating 0.6.2 and 0.6.3 on one tree saw `format-version — not used` on every run and read
 // it as "the CLI never reuses its cache". The auto path was keyed by root and verb class only, so two builds of
 // different formats refused and rewrote each other's blob every time. The auto path now carries the build tag
-// (quality.h cacheBuildTag), so this notice on an AUTO blob means a hand-copied or foreign file; on a --cache file
+// (quality.h rootBlobTail), so this notice on an AUTO blob means a hand-copied or foreign file; on a --cache file
 // the user named, it still means another build (or the other verb class) wrote that one file. A version refusal
 // names the number it found and the one this binary reads, so the cause is on the line. It is APPENDED: the line up
 // to "rewrites it" is unchanged, and gates grep that prefix (test/localscountcheck.sh, test/cachefuzzcheck.sh).

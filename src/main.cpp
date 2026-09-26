@@ -202,10 +202,10 @@ using rw::quality::deadCodeEligibleKind;
 // each other's blob on every run. This is NOT the reverted key change above: that one multiplied blobs per root
 // by CONFIGURATION inside one build, which every gate battery exercises; this one adds a blob per root only per
 // FORMAT that actually ran on it, the budget sweep unpins another build's blobs (quality.h evictBySizeBudget),
-// and the age pass retires a version nobody runs any more. See quality.h cacheBuildTag.
+// and the age pass retires a version nobody runs any more. See quality.h rootBlobTail.
 std::string defaultCachePath( const std::string& root, bool captureValueUses )
 {
-    return rw::quality::rootKeyedCachePath( root, "ripwire-", rw::quality::autoCacheBlobSuffix( captureValueUses ) );
+    return rw::quality::rootKeyedCachePath( root, captureValueUses ? rw::quality::RootBlobFamily::Rich : rw::quality::RootBlobFamily::Lean );
 }
 
 // computeHeadSnapshot / gitHeadSha / gitRepoHasHistory / cacheDirLadder now live in quality.h (the
