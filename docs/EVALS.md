@@ -12987,7 +12987,7 @@ reproduces Round C's published value exactly and re-ran stable on the four rows 
   days at HEAD's clock, from the same mining pass the teleport already ran. The first cut ordered rows by
   decayed weight and named none of the S5 gold; the age analysis showed q25's gold at 9 days and the
   weight-first 40th row at 21 days, so the order became newest-first — and q25 completes at 4,562 B where it
-  was 37,845 B incomplete. The other five S5 rows carry gold aged 26–484 days (the questions are
+  was 35,238 B incomplete (corrected 2026-09-26 from 37,845 B, which matches no committed results file). The other five S5 rows carry gold aged 26–484 days (the questions are
   stride-sampled from a 1,200-commit window, so their "recently" is not recent): no recency verb can serve
   them, the placebo wins three of them on budget alone, and that is the honest shape.
 - **L4 — "where is `<commit subject>` implemented" (S1: 1/6 ripwire, 0/6 graft-ask, 4/6 floor) and "how
@@ -13026,7 +13026,7 @@ tier" resolves no cross-file call for them.
 Per shape, complete / gold named, post-fix: S1 ripwire 1/6 · 7/43 (graft-ask 0/6 · 3/43) · S2 4/6 · 5/14
 (2/6 · 3/14) · S3 **4/6 · 9/11** (2/6 · 2/11) · S4 1/6 · 7/31 (1/6 · 5/31) · S5 **1/6 · 6/30** (0/6 · 5/30).
 The rows that flipped: q10 (S3, the stem partner, 1,814 B incomplete → 2,095 B complete), q25 (S5, `<recent>`,
-37,845 B incomplete → 4,562 B complete); q12 went 6,233 → 2,073 B. The cost: +281 B of legend on every
+35,238 B incomplete → 4,562 B complete; `results.json`, corrected 2026-09-26 from 37,845 B); q12 went 6,233 → 2,073 B. The cost: +281 B of legend on every
 rows-bearing `--affected`/`--situ`/`--test-gate` document (`testgatelegendbudgetcheck` re-pinned 2260 → 2540
 with the measurement), and +2.6 KB on every `--rank-by=churn-decay` map for the 40 `<rc>` rows.
 
