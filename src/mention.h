@@ -627,9 +627,10 @@ struct NamedIdent
 
 // A qualifier that names no place: Python's `self.`/`cls.`, Rust's `crate::`/`super::`/`self::`/`Self::`,
 // JavaScript's `this.`. Treated as bare, so `self.hybrid_search` reads as `hybrid_search`.
+inline constexpr std::array<std::string_view, 6> kPlaceholderQualifiers = { "self", "cls", "this", "Self", "crate", "super" };
 inline bool isPlaceholderQualifier( std::string_view q ) noexcept
 {
-    return q == "self" || q == "cls" || q == "this" || q == "Self" || q == "crate" || q == "super";
+    return std::ranges::find( kPlaceholderQualifiers, q ) != kPlaceholderQualifiers.end();
 }
 
 // append (name, qualifier) once, in task-text order — the order the kMentionMaxDirectSymbols cap keeps.
@@ -737,6 +738,22 @@ inline bool qualifierPlaces( const IngestResult& ing, const Symbol& s, std::stri
     return dir.size() > 1 && baseNameOf( dir.substr( 0, dir.size() - 1 ) ) == q;
 }
 
+// keep, per file, the one definition with the best (lensRank desc, id asc) — a total order, so ties are integer-exact.
+inline void keepBestPerFile( std::vector<std::pair<std::uint32_t, NodeId>>& v, const Symbol& s, const std::vector<float>& rank )
+{
+    const auto at = std::ranges::find( v, s.fileId, &std::pair<std::uint32_t, NodeId>::first );
+    if( at == v.end() )
+    {
+        v.emplace_back( s.fileId, s.id );
+        return;
+    }
+    const NodeId b = at->second;
+    if( rank[s.id] > rank[b] || ( rank[s.id] == rank[b] && s.id < b ) )
+    {
+        at->second = s.id;
+    }
+}
+
 // Resolve each identifier, in `named` order, to at most kMentionMaxNameFiles symbols — each named file's best
 // definition by (lensRank desc, id asc) — skipping an ambiguous or unmatched name. Appends to `out`, deduplicated.
 inline void resolveNamedIdents( const IngestResult& ing, const std::vector<float>& lensRank, const std::vector<NamedIdent>& named,
@@ -749,22 +766,6 @@ inline void resolveNamedIdents( const IngestResult& ing, const std::vector<float
     {
         const bool bareFallback = n.qualifier.empty() || hasIdentifierShape( n.name );
         std::vector<std::pair<std::uint32_t, NodeId>> narrowed, bare;
-        const auto keepBest = []( std::vector<std::pair<std::uint32_t, NodeId>>& v, const Symbol& s, const std::vector<float>& rank )
-        {
-            for( auto& fileBest : v )
-            {
-                if( fileBest.first == s.fileId )
-                {
-                    const NodeId b = fileBest.second;
-                    if( rank[s.id] > rank[b] || ( rank[s.id] == rank[b] && s.id < b ) )
-                    {
-                        fileBest.second = s.id;
-                    }
-                    return;
-                }
-            }
-            v.emplace_back( s.fileId, s.id );
-        };
         for( const Symbol& s : ing.symbols )
         {
             if( s.kind == SymKind::Section || s.kind == SymKind::ModuleScope || !symbolNameSpells( s, n.name ) )
@@ -774,11 +775,11 @@ inline void resolveNamedIdents( const IngestResult& ing, const std::vector<float
             ASSUME( s.id < lensRank.size() );
             if( !n.qualifier.empty() && qualifierPlaces( ing, s, n.qualifier ) )
             {
-                keepBest( narrowed, s, lensRank );
+                keepBestPerFile( narrowed, s, lensRank );
             }
             if( bareFallback && narrowed.empty() && bare.size() <= kMentionMaxNameFiles )
             {
-                keepBest( bare, s, lensRank );   // stops growing once ambiguous — the verdict is already decided
+                keepBestPerFile( bare, s, lensRank );   // stops growing once ambiguous — the verdict is already decided
             }
         }
         perFile = !narrowed.empty() ? std::move( narrowed ) : ( bareFallback ? std::move( bare ) : decltype( bare ){} );
