@@ -37,3 +37,8 @@ tiangolo/fastapi
 encode/httpx
 gin-gonic/gin
 expressjs/express
+# the out-of-sample SD pilot (A3): picked by its own salted walk before the main selection, run through the
+# harness, and therefore removed from the main pool
+aws/aws-sam-cli
+crate/crate
+hajimehoshi/ebiten
