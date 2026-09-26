@@ -18,12 +18,12 @@
 //
 // NEAREST MANIFEST, WALKING UP (mirrors pythonrunner::hasPytestProject exactly): monorepo/workspace layouts
 // are common (the issue's own point 1), so the search starts at the test file's own directory and climbs to
-// the crawl root, inclusive, stopping at the first package.json found. The command is still spelled ROOT-
-// RELATIVE, same as every other run= this codebase emits (testmap.h::spellUncached) — a package.json found
-// in a subdirectory is evidence of WHICH runner, not a cd target; running the emitted command may need the
-// reader's own shell to be inside that subdirectory on a workspace where the runner is not hoisted to the
-// crawl root's node_modules. That is a stated scope limit (see the fix report), not a silent one: it is the
-// SAME limit testmap.h's Python branch already carries (a nested pyproject.toml is evidence, not a `cd`).
+// the crawl root, inclusive, stopping at the first package.json found. #335: that package.json's DIRECTORY
+// is also where a vitest/jest command runs — npx resolves the runner, and the runner its config, from the
+// working directory, which is where `npm test` runs scripts.test — so a manifest in a subdirectory yields
+// `(cd <dir> && npx … <path relative to dir>)`, and one at the crawl root keeps the plain root-relative
+// form (see "WHERE a vitest/jest command runs" below). node --test and Python need no cd: node resolves
+// nothing through the cwd, and pytest finds its rootdir and ini-file from the path argument itself.
 //
 // LANGUAGE NEUTRALITY (BRIEF_COMMON, standing house rule): the mechanism — walk up from a test file to the
 // nearest project manifest and read its OWN declared scripts/dependencies as evidence, never guess — is the
@@ -526,6 +526,95 @@ inline const char* verbFor( Framework fw ) noexcept
     return nullptr;   // Framework::None, or a byte past the enum: never a guessed verb
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// #335: WHERE a vitest/jest command runs, and how it names ONE test file literally.
+//
+// npx resolves `vitest`/`jest` from the node_modules/.bin of the directory it starts in (then its
+// ancestors), and both runners read their config from that same working directory — the directory `npm
+// test` runs scripts.test in. So a command decided by a package.json in a SUBDIRECTORY of the crawl root
+// runs there, with the path relative to it: `(cd web && npx vitest run src/lib.test.ts)`. Measured on the
+// issue's own layout (vitest 5.0.2, no root manifest): the root-relative command fails from root= (npx
+// finds no vitest and offers to download a different major) and from web/ ("No test files found"); the
+// form above passes. The subshell keeps each row pasteable from root= on its own, where a bare `cd` would
+// move the reader's shell for every row after it. A hoisted workspace (the runner installed at the root)
+// still resolves from the package directory, because npx walks up. node --test resolves nothing through
+// the working directory, so its rows keep the root-relative form.
+//
+// A LITERAL path, per runner, where the path is not shell-safe:
+//   vitest  a filter is a case-insensitive SUBSTRING of the file path, so a single-quoted path is literal
+//           (`[slug]` included). A `--` before it made the CLI drop the filter and run the WHOLE suite
+//           (the issue's item 2), so a leading '-' is spelled `./-…` (vitest resolves a filter against its
+//           root) instead.
+//   jest    a positional argument is a REGEX — `[id]` is a character class, so the file is never matched
+//           ("No tests found", exit 1). An unsafe path goes through --runTestsByPath, which takes exact
+//           paths. A safe path's only regex byte is '.', which still matches itself, so those rows keep
+//           their bytes.
+// ---------------------------------------------------------------------------------------------------------
+
+/// Whether a `fw` command runs from its deciding package.json's directory (#335): the two npx-resolved
+/// runners. node's own runner resolves nothing through its working directory.
+inline bool runsFromPackageDir( Framework fw ) noexcept
+{
+    return fw == Framework::Vitest || fw == Framework::Jest;
+}
+
+/// `file` relative to `dir`, '/'-separated — `dir` being a directory nearestPackageJson's walk visited for
+/// `file`, under the same lexical normalization — or "" when `dir` is not an ancestor of `file`.
+inline std::string pathUnderDir( const std::string& file, const std::filesystem::path& dir )
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path  abs = fs::absolute( fs::path( file ), ec ).lexically_normal();
+    const fs::path  rel = abs.lexically_relative( dir );
+    if( ec || dir.empty() || rel.empty() || *rel.begin() == ".." )
+    {
+        return {};
+    }
+    return rel.generic_string();
+}
+
+/// One test file as a LITERAL argument to a vitest/jest command (#335; this section's banner). `isShellSafe`
+/// is the caller's allowlist verdict on `path` (testmap.h's isShellSafePath); a safe path goes in bare.
+inline std::string literalTestArg( Framework fw, std::string_view path, bool isShellSafe )
+{
+    EXPECTS( fw == Framework::Vitest || fw == Framework::Jest, "only npx-resolved runners take a package-relative path" );
+    EXPECTS( !path.empty() );
+    if( isShellSafe )
+    {
+        return std::string( path );
+    }
+    const std::string literal = path.front() == '-' ? "./" + std::string( path ) : std::string( path );   // an option never, a path always
+    const std::string quoted  = rw::shSingleQuote( literal );
+    return fw == Framework::Jest ? "--runTestsByPath " + quoted : quoted;
+}
+
+/// Whether `path` holds syntax node --test reads as a GLOB (#335). From Node 21 every positional argument
+/// is a glob pattern, so `app/[id]/x.test.js` matches `app/i/x.test.js` and never itself — measured on
+/// Node 26: zero tests, exit 0, a silent pass. Before 21 the same argument is a literal path, so no single
+/// escaping is right for every Node a .js row can mean; the caller answers run_unknown="1" instead.
+/// Conservative: every class/wildcard/brace byte, an extglob `!( @( +(` (`?(`/`*(` are already wildcards),
+/// and a leading `!` or `#`.
+inline bool hasNodeGlobSyntax( std::string_view path ) noexcept
+{
+    if( !path.empty() && ( path.front() == '!' || path.front() == '#' ) )
+    {
+        return true;
+    }
+    for( std::size_t i = 0; i < path.size(); ++i )
+    {
+        const char c = path[i];
+        if( c == '*' || c == '?' || c == '[' || c == ']' || c == '{' || c == '}' )
+        {
+            return true;
+        }
+        if( c == '(' && i > 0 && ( path[i - 1] == '!' || path[i - 1] == '@' || path[i - 1] == '+' ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 /// Search from `file`'s own directory through `root`, inclusive, for the nearest package.json that can
 /// actually DECIDE a framework, and return its bytes — or, failing that, the nearest package.json found at
 /// all (so a caller still reads its honest "names none of the three" rather than a silent miss), or "" when
@@ -554,7 +643,11 @@ inline const char* verbFor( Framework fw ) noexcept
 /// package's own evidence, not deferred to a root manifest. `test/testgatecheck.sh` arm (p1)
 /// (`fx/mochavitestdep`, mocha script + vitest dependency, single package) already pins the single-
 /// package half of this; monorepo arm (u2) below pins that the SAME rule holds one level up a tree.
-inline std::string nearestPackageJson( const std::string& file, std::string_view root )
+///
+/// #335: `decidingDir`, when given, receives the DECIDING manifest's directory (the walk's own absolute,
+/// lexically normalized spelling), and stays empty when no manifest decided — the fallback marker is never
+/// a place to run a command from. An out-parameter so every existing caller keeps its one-string return.
+inline std::string nearestPackageJson( const std::string& file, std::string_view root, std::filesystem::path* decidingDir = nullptr )
 {
     namespace fs = std::filesystem;
     std::string fallback;   // the NEAREST manifest found, even if it decides nothing (F5)
@@ -582,6 +675,10 @@ inline std::string nearestPackageJson( const std::string& file, std::string_view
             return false;   // F5: a true marker (no script, no decisive dependency) decides nothing HERE
         }
         decisive = std::move( bytes );   // G1: an authoritative-but-unrecognized script also ends the walk
+        if( decidingDir != nullptr )
+        {
+            *decidingDir = dir;
+        }
         return true;
     } );
     return decisive.empty() ? fallback : decisive;

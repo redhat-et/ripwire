@@ -781,36 +781,77 @@ private:
     // extension refusal, F2 relative-import resolvability) in addition to `engines.node` (F3) — a run=
     // that fails is worse than an honest run_unknown="1" — so `source` is read on BOTH paths that can reach
     // it, not only the import-fallback path below.
-    const char* resolveJsVerb( std::uint32_t runnerFile, const std::string& disk ) const
+    //
+    // #335: the answer carries WHERE the command runs too. vitest/jest (jsrunner::runsFromPackageDir) run
+    // from the deciding package.json's directory, so `packagePath` is the test file relative to it; node
+    // --test keeps the root-relative spelling (jsrunner.h's "WHERE a vitest/jest command runs" banner).
+    struct JsVerb
+    {
+        const char*         verb      = nullptr;                          // nullptr ⇒ no runner derivable
+        jsrunner::Framework framework = jsrunner::Framework::None;       // NodeTest for the import fallback too
+        std::string         packagePath;                                  // vitest/jest only; "" ⇒ not spellable
+    };
+    JsVerb resolveJsVerb( std::uint32_t runnerFile, const std::string& disk ) const
     {
         const std::string_view relPath = rootRelPath( *ing_, runnerFile );
         if( !jsrunner::looksLikeJsTestFile( relPath ) )
         {
-            return nullptr;
+            return {};
         }
-        const std::string manifest = jsrunner::nearestPackageJson( disk, evidenceRoot( runnerFile ) );
-        const jsrunner::Framework fw = jsrunner::detectFramework( manifest );
+        std::filesystem::path     manifestDir;
+        const std::string         manifest = jsrunner::nearestPackageJson( disk, evidenceRoot( runnerFile ), &manifestDir );
+        const jsrunner::Framework fw       = jsrunner::detectFramework( manifest );
         if( fw == jsrunner::Framework::NodeTest )
         {
             // #60: node's own runner needs a Node-version decision (see jsrunner.h's own banner) whether it
             // was named by scripts.test or (below) inferred from the test file's own import — one spelling.
             const std::string source = docparse::detail::readWholeFile( disk ).value_or( "" );
-            return jsrunner::nodeTestVerb( relPath, manifest, source, disk );
+            return { jsrunner::nodeTestVerb( relPath, manifest, source, disk ), fw, {} };
         }
         if( const char* verb = jsrunner::verbFor( fw ); verb != nullptr )
         {
-            return verb;   // vitest/jest: explicit package.json evidence, never overridden by import evidence
+            // vitest/jest: explicit package.json evidence, never overridden by import evidence
+            return { verb, fw, jsrunner::pathUnderDir( disk, manifestDir ) };
         }
         if( !manifest.empty() && jsrunner::hasAuthoritativeScript( manifest ) )
         {
-            return nullptr;   // an explicit (if unrecognized) scripts.test still wins — never overridden
+            return {};   // an explicit (if unrecognized) scripts.test still wins — never overridden
         }
         const std::string source = docparse::detail::readWholeFile( disk ).value_or( "" );
         if( !jsrunner::hasNodeTestImport( source, relPath ) )
         {
-            return nullptr;   // no package.json evidence, and the file's own bytes name no runner either
+            return {};   // no package.json evidence, and the file's own bytes name no runner either
         }
-        return jsrunner::nodeTestVerb( relPath, manifest, source, disk );
+        return { jsrunner::nodeTestVerb( relPath, manifest, source, disk ), jsrunner::Framework::NodeTest, {} };
+    }
+
+    // #335: a vitest/jest command, spelled to run from the directory of the package.json that decided it.
+    // `p` is the root-relative spelling every other p= uses; the package directory is `p` minus the
+    // package-relative path, so the cd target is relative to root= exactly like the path it replaces (and
+    // absolute where p= is, on a multi-root run). A deciding manifest AT root= keeps the plain command. When
+    // the two spellings do not line up (the walk's lexical normalization and p= disagree), no cwd is
+    // guessed: "" ⇒ run_unknown="1".
+    static std::string spellInPackage( const JsVerb& js, std::string_view p )
+    {
+        const std::string& rel = js.packagePath;
+        if( rel.empty() )
+        {
+            return {};
+        }
+        const std::string command = std::string( js.verb ) + " " + jsrunner::literalTestArg( js.framework, rel, isShellSafePath( rel ) );
+        if( p == rel )
+        {
+            return command;
+        }
+        const bool underDir = p.size() > rel.size() + 1 && p.ends_with( rel ) && p[ p.size() - rel.size() - 1 ] == '/';
+        if( !underDir )
+        {
+            return {};
+        }
+        const std::string dir( p.substr( 0, p.size() - rel.size() - 1 ) );
+        ASSUME( !dir.empty(), "underDir leaves at least one byte before the separator" );
+        const std::string cdTarget = isShellSafePath( dir ) ? dir : rw::shSingleQuote( dir.front() == '-' ? "./" + dir : dir );
+        return "(cd " + cdTarget + " && " + command + ")";
     }
 
     /// Validate a candidate script and format its disk path as one shell argument.
@@ -820,7 +861,8 @@ private:
     std::string spellUncached( std::uint32_t runnerFile ) const
     {
         const std::string& disk = diskPath( *ing_, runnerFile );
-        const char* verb = runnerVerb( disk );
+        const char* verb          = runnerVerb( disk );
+        bool        argIsNodeGlob = false;
         if( disk.ends_with( ".py" ) )
         {
             const std::string source = docparse::detail::readWholeFile( disk ).value_or( "" );
@@ -835,15 +877,25 @@ private:
         }
         else if( verb == kJsEvidenceVerb )
         {
-            verb = resolveJsVerb( runnerFile, disk );
-            if( verb == nullptr )
+            const JsVerb js = resolveJsVerb( runnerFile, disk );
+            if( js.verb == nullptr )
             {
                 return {};   // no package.json in the crawl boundary, or none of the three named runners it declares
             }
+            if( jsrunner::runsFromPackageDir( js.framework ) )
+            {
+                return spellInPackage( js, rw::sarif::rootRelativeUri( disk, rootPrefix_ ) );   // #335
+            }
+            verb          = js.verb;
+            argIsNodeGlob = true;   // #335: node --test from Node 21 reads each argument as a glob pattern
         }
         // A3: root-relative, like every p= beside it. rootRelativeUri strips a leading "./" unconditionally,
         // so the readability strip the pre-A3 code did by hand is the SAME call now, not a second rule.
         std::string_view p = rw::sarif::rootRelativeUri( disk, rootPrefix_ );
+        if( argIsNodeGlob && jsrunner::hasNodeGlobSyntax( p ) )
+        {
+            return {};   // #335: a glob from Node 21, a literal path before it — no one spelling is right for both
+        }
         if( isShellSafePath( p ) )
         {
             return std::string( verb ) + " " + std::string( p );

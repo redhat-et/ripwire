@@ -13,6 +13,28 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
+## [Unreleased]
+
+### Fixed — `run=` for a TS/JS package in a subdirectory, and for a path with glob or regex syntax (#335)
+
+Reported by @mariadb-KyleHutchinson (follow-up to #323).
+- **A vitest/jest package in a subdirectory runs from that package.** npx resolves the runner, and the
+  runner reads its config, from the working directory. So the root-relative command found no runner from
+  `root=`, and from the package directory it matched no file. The command now runs from the directory of
+  the `package.json` that decided the runner, with the path relative to it:
+  `(cd web && npx vitest run src/lib.test.ts)`. The subshell keeps each row pasteable from `root=`.
+  When the deciding `package.json` is at `root=`, including a hoisted workspace whose root manifest names
+  the runner, the output is unchanged. `node --test` rows keep the root-relative form.
+- **A path with glob or regex syntax is passed as a literal.**
+  - vitest: the path is one quoted filter without `--`. The CLI dropped the filter after `--` and ran the
+    whole suite. A leading `-` is now spelled `./-…`.
+  - jest: a positional argument is a regex, so `[id]` never matched its own file. Such a path now goes
+    through `--runTestsByPath`.
+  - `node --test`: from Node 21 an argument is a glob (zero tests, exit 0) and before 21 a literal path.
+    A path with glob syntax is `run_unknown="1"`.
+- **Not a change:** `--test-gate` still exits 4 while tests-to-run or untested reach is non-empty, as
+  documented. The #323 closing comment that showed `exit=0` was wrong.
+
 ## [0.6.4] — 2026-09-25
 
 ### Added — Astro (`.astro`) frontmatter is indexed on the TypeScript grammar (#320, #67)
