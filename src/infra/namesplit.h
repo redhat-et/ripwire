@@ -112,5 +112,20 @@ inline std::string_view stripTrailingGroup( std::string_view f, char open, char 
 // drop a trailing balanced `<…>` template-argument group: `make<Foo,Bar>` -> `make`.
 inline std::string_view stripTemplateArgs( std::string_view f ) noexcept { return stripTrailingGroup( f, '<', '>' ); }
 
+/// Strip exactly one matched `'...'`/`"..."` pair from `text` — the ONE quote-strip
+/// ingest_relations.h::importSpecifierText (a TS/JS/Python import/require specifier) and
+/// jsrunner.h::isNodeTestStringLiteral (#60's node:test import/require check) both apply to a `string`
+/// node's own span text, kept once rather than duplicated in each (measured: --quality-delta's
+/// duplication kind). Any other shape — no matching quote pair, an unquoted identifier, an empty span —
+/// is returned unchanged.
+inline std::string_view stripQuotePair( std::string_view text ) noexcept
+{
+    if( text.size() >= 2 && ( text.front() == '\'' || text.front() == '"' ) && text.back() == text.front() )
+    {
+        return text.substr( 1, text.size() - 2 );
+    }
+    return text;
+}
+
 } // namespace namesplit
 } // namespace rw

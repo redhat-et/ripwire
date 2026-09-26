@@ -172,6 +172,76 @@ inline std::size_t doctorEditLockCount( const std::string& dir )
     return count;
 }
 
+// The ripwire a bare `ripwire` runs, as `which` names it, and its stat. "" when none resolves. #334: Git Bash's MSYS
+// `which` prints "/c/.../ripwire" with no ".exe" (os::which_spelling_is_exact() is false there), so the stat of that
+// spelling fails and the row used to say NOT ON PATH while an older ripwire.exe sat in that very directory. Before
+// concluding "not on PATH", the spelling the file really has is tried. Identity is then decided by the caller from
+// the stat (device + inode, the volume serial + file index on Windows) and the bytes, never from the name.
+inline std::string doctorWhichRipwire( rw::os::stat_t& st )
+{
+    std::string path = doctorPopenTrim( "which ripwire 2>/dev/null" );
+    if( path.empty() || rw::os::stat( path.c_str(), &st ) == 0 )
+    {
+        return path;
+    }
+    if( !rw::os::which_spelling_is_exact() )
+    {
+        path += ".exe";
+        if( rw::os::stat( path.c_str(), &st ) == 0 )
+        {
+            return path;
+        }
+    }
+    return {};
+}
+
+// The first line the PATH copy prints for --version: the build a bare `ripwire` actually runs, so a mismatch names two
+// builds (#334: "0.6.2" beside this run's "0.6.3") instead of two paths and two mtimes. "" when it prints nothing
+// (not a ripwire, or it failed) — the row has already failed on identity either way.
+inline std::string doctorWhichVersionLine( const std::string& whichPath )
+{
+    std::string line = doctorPopenTrim( rw::shSingleQuote( whichPath ) + " --version 2>/dev/null" );
+    const std::size_t eol = line.find( '\n' );
+    if( eol != std::string::npos )
+    {
+        line.resize( eol );
+    }
+    return line;
+}
+
+// "X.Y.Z" at the front of `v` as three numbers; nullopt when it is not one. Only the release number is read.
+inline std::optional<std::array<int, 3>> doctorReleaseTriple( std::string_view v )
+{
+    std::array<int, 3> out {};
+    const char*        at  = v.data();
+    const char* const  end = v.data() + v.size();
+    for( std::size_t i = 0; i < out.size(); ++i )
+    {
+        const auto [ next, ec ] = std::from_chars( at, end, out[ i ] );
+        const bool dotFollows   = next != end && *next == '.';
+        if( ec != std::errc() || ( i < 2 && !dotFollows ) )
+        {
+            return std::nullopt;
+        }
+        at = next + ( i < 2 ? 1 : 0 );
+    }
+    return out;
+}
+
+// Order a `--version` line's X.Y.Z against this binary's: <0 the line's is older, >0 newer, 0 equal or unreadable.
+// Equal numbers on different bytes (two builds of one release) are left to the mtime rule, the only fact that remains.
+inline int doctorVersionOrder( std::string_view versionLine, std::string_view mine )
+{
+    constexpr std::string_view kPrefix = "ripwire ";
+    const auto theirs = versionLine.starts_with( kPrefix ) ? doctorReleaseTriple( versionLine.substr( kPrefix.size() ) ) : std::nullopt;
+    const auto ours   = doctorReleaseTriple( mine );
+    if( !theirs || !ours || *theirs == *ours )
+    {
+        return 0;
+    }
+    return *theirs < *ours ? -1 : 1;
+}
+
 // 2026-09-06 stranger audit: the not-on-PATH verdict, with the fix spelled out (see the call site).
 inline std::string doctorNotOnPathHint( const std::string& selfPath, std::vector<char>& esc )
 {
@@ -179,21 +249,30 @@ inline std::string doctorNotOnPathHint( const std::string& selfPath, std::vector
     const std::string selfDir = ( slash == std::string::npos ) ? std::string( "." ) : selfPath.substr( 0, slash );
     return " hint=\"" + std::string( rw::escapeXml( std::string_view(
                   "NOT ON PATH: no ripwire resolves from PATH; this run used " + selfPath
-                + " — add its directory: export PATH=\"" + selfDir + ":$PATH\" (and put that line in your shell rc file)" ), esc ) ) + "\"";
+                + " — add its directory: " + rw::os::path_prepend_hint( selfDir ) ), esc ) ) + "\"";   // #334: PowerShell's spelling on Windows
 }
 
-inline std::string doctorBinaryPathVerdictAttr( bool copied, const std::string& selfPath, const std::string& whichPath,
-                                                const rw::os::stat_t& selfSt, const rw::os::stat_t& whichSt, std::vector<char>& esc )
+inline std::string doctorBinaryPathVerdictAttr( const std::string& selfPath, const std::string& whichPath,
+                                                  const rw::os::stat_t& selfSt, const rw::os::stat_t& whichSt, std::vector<char>& esc )
 {
-    if( copied )
-    {
-        return " copied=\"1\"";
-    }
-    const bool        selfIsOlder = selfSt.st_mtime < whichSt.st_mtime;
-    const std::string olderPath   = selfIsOlder ? selfPath : whichPath;
-    const std::string newerPath   = selfIsOlder ? whichPath : selfPath;
-    return " hint=\"" + std::string( rw::escapeXml( std::string_view(
-                  "STALE: " + olderPath + " is older than " + newerPath
+    // #334: a different ripwire earlier on PATH read as a timestamp puzzle. Its own --version line names the build a
+    // bare `ripwire` actually runs. Asked only here, on a mismatch — never when the PATH copy is this file or its
+    // byte-identical copy: a version stamp alone is not identity (a byte-flipped copy prints the same one;
+    // test/doctorcheck.sh's genuine-stale fixture is exactly that).
+    const std::string whichVersion = doctorWhichVersionLine( whichPath );
+    std::string       out = whichVersion.empty() ? std::string()
+                          : " which_version=\"" + std::string( rw::escapeXml( whichVersion, esc ) ) + "\"";
+    // The release number each binary states outranks the mtimes. A 0.6.2 copied onto PATH after 0.6.3 has the newer
+    // mtime, and the mtime rule alone called the running 0.6.3 STALE and told the user to run the 0.6.2 instead.
+    const int         order       = doctorVersionOrder( whichVersion, rw::kRipwireVersion );
+    const bool        selfIsOlder = order != 0 ? order > 0 : selfSt.st_mtime < whichSt.st_mtime;
+    const std::string selfName    = order != 0 ? selfPath + " (ripwire " + rw::kRipwireVersion + ")" : selfPath;
+    const std::string whichName   = order != 0 ? whichPath + " (" + whichVersion + ")" : whichPath;
+    const std::string& olderName  = selfIsOlder ? selfName : whichName;
+    const std::string& newerName  = selfIsOlder ? whichName : selfName;
+    const std::string& newerPath  = selfIsOlder ? whichPath : selfPath;
+    return out + " hint=\"" + std::string( rw::escapeXml( std::string_view(
+                  "STALE: " + olderName + " is older than " + newerName
                 + " and their contents differ — rebuild/reinstall so PATH points at the newer one, or invoke "
                 + newerPath + " directly" ), esc ) ) + "\"";
 }
@@ -718,16 +797,15 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
         rows += "/>";
     };
 
-    // ---- check 1: binary-vs-PATH staleness (no --version mechanism exists — checked; compare
-    // realpath'd identity via (device,inode), then mtime/size, of argv[0]'s resolved binary vs
-    // `which ripwire`'s) ----
+    // ---- check 1: binary-vs-PATH staleness: identity via (device,inode), then content, of this process's own
+    // binary vs `which ripwire`'s; on a mismatch the PATH copy's own --version line names its build ----
     {
         const std::string selfPath  = selfExecutablePath( argv0 );
-        const std::string whichPath = doctorPopenTrim( "which ripwire 2>/dev/null" );
         rw::os::stat_t        selfSt {};
         rw::os::stat_t         whichSt {};
         const bool haveSelf  = !selfPath.empty()  && rw::os::stat( selfPath.c_str(),  &selfSt )  == 0;
-        const bool haveWhich = !whichPath.empty() && rw::os::stat( whichPath.c_str(), &whichSt ) == 0;
+        const std::string whichPath = doctorWhichRipwire( whichSt );
+        const bool haveWhich = !whichPath.empty();
 
         bool        ok    = true;
         std::string attrs = "self=\"" + std::string( escapeXml( selfPath, esc ) ) + "\"";
@@ -764,7 +842,7 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
                 // §P11 doctor item: a raw ok="0" with four raw timestamps made the reader do the
                 // subtraction themselves — name which of the two IS the stale one (older mtime) and the
                 // fix, so the LocBench-round failure this check exists for reads as a VERDICT.
-                attrs += doctorBinaryPathVerdictAttr( copied, selfPath, whichPath, selfSt, whichSt, esc );
+                attrs += copied ? std::string( " copied=\"1\"" ) : doctorBinaryPathVerdictAttr( selfPath, whichPath, selfSt, whichSt, esc );
             }
         }
         else
@@ -777,9 +855,9 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
         // release rather than silently trusted: `ok` above is still whatever the (possibly Windows-spelling-confused)
         // comparison found, but a reader now sees why it may be wrong. The call site never asks which OS it is on
         // (osswitchcheck arm G) — it asks os::which_spelling_is_exact(), true on POSIX (byte-identical: the branch
-        // below never taken) and false only on Windows. The honest fix is a native os::which( "ripwire" )
-        // PATH/PATHEXT search (D4 follow-up), once --doctor itself is shown byte-identical between the two `which`
-        // sources.
+        // below never taken) and false only on Windows. #334: doctorWhichRipwire now retries the ".exe" spelling
+        // before concluding NOT ON PATH, so the identity compare above runs on Windows too; the disclosure stays
+        // until the native os::which( "ripwire" ) PATH/PATHEXT search (D4 follow-up) replaces the shell's `which`.
         if( !os::which_spelling_is_exact() )
         {
             // The disclosure IS the attribute (a reader of this row's own output sees it); no separate DISCLOSE()

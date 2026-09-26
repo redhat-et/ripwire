@@ -818,6 +818,12 @@ inline std::string_view nodeText( TSNode n, std::string_view src ) noexcept
     return src.substr( a, b - a );
 }
 
+// stripQuotePair lives in infra/namesplit.h (a tree-sitter-free leaf) so lintrules.h, which graph.h
+// includes, can share it without pulling <tree_sitter/api.h> into every graph.h consumer (the gate
+// harnesses build graph.h with no tree-sitter include path). Spelled pattern::stripQuotePair here, as
+// before, so every call site is unchanged.
+using namesplit::stripQuotePair;
+
 // Structural equality for metavariable unification (ast-grep does_node_match_exactly). NOT whole-subtree
 // text equality: `a + b` and `a  +  b` must unify (only whitespace differs) while `a + b` and `a - b`
 // must not, and re-serializing text cannot tell those two cases apart.

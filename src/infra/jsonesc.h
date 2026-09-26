@@ -36,6 +36,7 @@
 // this header is a pure internal refactor: verified byte-identical against the pre-unification
 // implementations.
 
+#include "shquote.h"        // rw::shSingleQuote — the one POSIX shell-literal quoter (standard library only)
 #include "strkern.h"        // S5: appendCleanRun — the run-copy skip that replaces escapeInto's per-byte switch.
                         // Still zero includes ABOVE src/infra (strkern.h itself pulls only <cstddef>/<cstdint>/
                         // <cstring>/<string_view> plus the ISA intrinsic header), so the no-cycle property this
@@ -300,27 +301,11 @@ inline bool isJsonWs( char c ) noexcept
 //
 // Was duplicated as rw::shSingleQuote (gitmine.h) and docparse::detail::shellQuote (docparse.h) —
 // byte-identical bodies (0.87-similar per --clones), security-relevant duplication: a quoting-bug
-// fix in one wouldn't reach the other. Homed here, not in gitmine.h or docparse.h, because jsonesc.h
-// is the lightest header both can include without a coupling cost: gitmine.h already pulls model.h +
-// graph.h + Diagnostics.h (heavy, ingest-graph dependency chain), while docparse.h is deliberately
-// STL-only (Diagnostics.h) so ingest.cpp's doc-parsing path stays decoupled from the graph. jsonesc.h
-// has zero project includes beyond <cstdint>/<cstdio>/<string>/<string_view>, so either side can pull
-// it in for free. gitmine.h's rw::shSingleQuote is the more widely used name (main.cpp, prcontext.h,
-// quality.h, mcp server) — kept as the canonical spelling; docparse.h's detail::shellQuote now
-// forwards here instead of carrying its own copy.
-inline std::string shSingleQuote( const std::string& s )
-{
-    std::string out = "'";
-    for( char c : s )
-    {
-        if( c == '\'' ) { out += "'\\''"; }
-        else
-        {
-            out += c;
-        }
-    }
-    out += "'";
-    return out;
-}
+// fix in one wouldn't reach the other. gitmine.h's rw::shSingleQuote is the more widely used name
+// (main.cpp, prcontext.h, quality.h, mcp server) — kept as the canonical spelling; docparse.h's
+// detail::shellQuote forwards to it instead of carrying its own copy. Every caller reaches it through
+// this header, as before; the ONE definition lives in shquote.h (included at the top), which is
+// standard-library only so that os.h — which emit.h, and so this header, already includes — can use
+// it too without an include cycle or a declaration that outruns its definition.
 
 }   // namespace rw

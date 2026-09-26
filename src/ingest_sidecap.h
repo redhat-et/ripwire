@@ -125,13 +125,11 @@ inline std::uint32_t bindSiteByte( const RawBind& b ) noexcept { return b.startB
 // pybind pass is GATED on a `pybind11`/`PYBIND11` signal in the file, so a repo without pybind captures
 // NOTHING (the whole feature is inert → byte-identical output on any binding-free corpus). JNI needs no
 // capture here — buildGraph decodes it straight from `Java_*` def names.
-inline std::string ffiUnquote( std::string_view s )   // strip one layer of "..." / '...'; leaves interior verbatim
+// strip one layer of "..." / '...'; leaves interior verbatim. pattern::stripQuotePair IS this same strip
+// (measured: --quality-delta's duplication kind, once #60's jsrunner.h needed a third copy of it).
+inline std::string ffiUnquote( std::string_view s )
 {
-    if( s.size() >= 2 && ( s.front() == '"' || s.front() == '\'' ) && s.back() == s.front() )
-    {
-        return std::string( s.substr( 1, s.size() - 2 ) );
-    }
-    return std::string( s );
+    return std::string( pattern::stripQuotePair( s ) );
 }
 
 // "A::B::method" → { scope="B", name="method" }; "foo" → { "", "foo" }. Scope is the IMMEDIATE enclosing
@@ -1198,6 +1196,148 @@ struct TreeGuard
         return out;
     }
 };
+
+// ── .astro frontmatter: the ONE included range this build sets ────────────────────────────────────
+// An `.astro` file is `---`-fenced frontmatter (TypeScript) followed by a template the TypeScript
+// grammar cannot read. Parsing one WHOLESALE was MEASURED before this code existed (issue #67 STEP 0,
+// 1902 real .astro files over withastro/{docs,astro,starlight}, astrowind, astro-paper and two private
+// sites): EVERY file came back degraded, median ERROR-byte ratio 0.33-1.00 per corpus. `.metal` ships at
+// 0.0081 and the C grammar was REJECTED for CUDA at 0.123, so wholesale is 27x-120x worse than the
+// option this project already turned down. The parse is therefore restricted to the frontmatter and the
+// template is a DISCLOSED blind spot (README, docs/ARCHITECTURE.md#astro-extraction) rather than a
+// poisoned tree.
+//
+// THE FENCES ARE FOUND BY BYTES, never by a parse. tree-sitter-astro lexes this whole block as ONE
+// opaque external token (`frontmatter_js_block`, grammar.js:81) and ships no tags.scm — only
+// highlights/injections — so vendoring it would buy exactly this scan and no definitions at all.
+//
+// WHY THE POINT IS SET AND NOT ONLY THE BYTES. tree-sitter's lexer takes its row/column straight from
+// TSRange::start_point (lib/src/lexer.c), and ripwire never converts bytes->lines on the ingest path
+// (`d.line = nameRow + 1` below). A range carrying {0,0} still yields correct BYTE spans, so --expand
+// would look right while every p="file:line" lied by the fence offset. test/astrocheck.sh pins a
+// frontmatter symbol's LINE for exactly that reason.
+/// True when src[from, to) holds only what may trail a `---` fence on its own line.
+/// npos (nothing but blanks to the end of the file) is >= `to`, which is the answer this wants.
+inline bool astroFenceTailIsBlank( std::string_view src, std::size_t from, std::size_t to ) noexcept
+{
+    return src.find_first_not_of( " \t\r", from ) >= to;
+}
+
+/// True when the line src[lineStart, lineEnd) is a `---` fence and nothing else.
+inline bool astroIsFenceLine( std::string_view src, std::size_t lineStart, std::size_t lineEnd ) noexcept
+{
+    return lineEnd - lineStart >= 3 && src.compare( lineStart, 3, "---" ) == 0
+        && astroFenceTailIsBlank( src, lineStart + 3, lineEnd );
+}
+
+/// Advance `pos` past blank lines before the opening fence; returns how many rows were skipped.
+/// Astro's compiler accepts them (@astrojs/compiler 4.0.0), and each one moves the frontmatter down a row,
+/// which is what TSRange::start_point must carry.
+inline std::uint32_t astroSkipBlankLines( std::string_view src, std::size_t& pos ) noexcept
+{
+    std::uint32_t rows = 0;
+    for( std::size_t nl = src.find( '\n', pos ); nl != std::string_view::npos && astroFenceTailIsBlank( src, pos, nl ); nl = src.find( '\n', pos ) )
+    {
+        pos = nl + 1;
+        ++rows;
+    }
+    return rows;
+}
+
+// A template-only .astro and a MALFORMED one are different answers and must not share one `false`.
+// `None` is ordinary Astro and says nothing; `Unterminated` is a file whose frontmatter we can see the
+// start of and cannot extract, which is a silent zero unless it is disclosed (guardrail: honesty in output).
+enum class AstroFrontmatter : std::uint8_t { Ok, None, Unterminated };
+
+/// Byte range of an .astro file's frontmatter, with absolute points.
+inline AstroFrontmatter astroFrontmatterRange( std::string_view src, TSRange& out ) noexcept
+{
+    std::size_t pos = 0;
+    if( src.size() >= 3 && src.compare( 0, 3, "\xEF\xBB\xBF" ) == 0 )   // UTF-8 BOM, then the fence
+    {
+        pos = 3;
+    }
+    const std::uint32_t fenceRow = astroSkipBlankLines( src, pos );
+    const std::size_t   openEnd  = src.find( '\n', pos );
+    // After any blank lines, the opening fence must be the first thing in the file; anything else is a template-only
+    // component, which is legal and simply carries no TypeScript.
+    if( openEnd == std::string_view::npos || !astroIsFenceLine( src, pos, openEnd ) )
+    {
+        return AstroFrontmatter::None;
+    }
+
+    const std::size_t   contentStart = openEnd + 1;
+    const std::uint32_t contentRow   = fenceRow + 1;   // the opening fence owns fenceRow
+    std::uint32_t       row          = contentRow;
+    for( std::size_t lineStart = contentStart; lineStart <= src.size(); )
+    {
+        const std::size_t nl      = src.find( '\n', lineStart );
+        const std::size_t lineEnd = ( nl == std::string_view::npos ) ? src.size() : nl;
+        if( astroIsFenceLine( src, lineStart, lineEnd ) )
+        {
+            if( lineStart <= contentStart )
+            {
+                return AstroFrontmatter::None;   // empty frontmatter — a zero-length range is nothing to parse
+            }
+            out.start_byte  = static_cast<std::uint32_t>( contentStart );
+            out.end_byte    = static_cast<std::uint32_t>( lineStart );
+            out.start_point = TSPoint{ contentRow, 0u };
+            out.end_point   = TSPoint{ row, 0u };
+            return AstroFrontmatter::Ok;
+        }
+        if( nl == std::string_view::npos )
+        {
+            break;
+        }
+        lineStart = nl + 1;
+        ++row;
+    }
+    return AstroFrontmatter::Unterminated;   // refused, never guessed — and disclosed by the caller
+}
+
+// ts_parser_set_included_ranges is LEXER state. It survives ts_parser_parse_string, `ts_parser_reset`
+// does NOT clear it, and a TSParser is worker-local and REUSED for every file that worker draws. A
+// missed reset therefore truncates some LATER file, in another language, nondeterministically by
+// work-stealing order — so the reset is not left to the happy path or to an early `continue`.
+struct IncludedRangeGuard
+{
+    TSParser* parser = nullptr;
+
+    IncludedRangeGuard() noexcept = default;
+    IncludedRangeGuard( const IncludedRangeGuard& )            = delete;
+    IncludedRangeGuard& operator=( const IncludedRangeGuard& ) = delete;
+
+    /// Restrict `parserIn` to `range`; the restriction is lifted when this guard dies.
+    void set( TSParser* parserIn, const TSRange& range ) noexcept
+    {
+        parser = parserIn;
+        ts_parser_set_included_ranges( parser, &range, 1 );
+    }
+    ~IncludedRangeGuard()
+    {
+        if( parser != nullptr )
+        {
+            ts_parser_set_included_ranges( parser, nullptr, 0 );
+        }
+    }
+};
+
+/// Restrict `parser` to this file's frontmatter when it is an .astro. `Ok` = parse; anything else = skip,
+/// and the caller must DISCLOSE an `Unterminated` rather than drop it quietly.
+inline AstroFrontmatter restrictAstroToFrontmatter( TSParser* parser, const LangEntry& le, std::string_view src, IncludedRangeGuard& guard ) noexcept
+{
+    if( le.ext != kAstroExt )
+    {
+        return AstroFrontmatter::Ok;
+    }
+    TSRange range{};
+    const AstroFrontmatter status = astroFrontmatterRange( src, range );
+    if( status == AstroFrontmatter::Ok )
+    {
+        guard.set( parser, range );
+    }
+    return status;
+}
 
 // ── THE MEMBER-MACRO RE-PARSE (src/macroreparse.h; gate test/macroreparsecheck.sh) ──────────────────────────────────
 // Per-worker scratch, reused across files: the scanner's scope stack, the spans the CURRENT file's adopted re-parse

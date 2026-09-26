@@ -89,7 +89,7 @@ same-size layout change or a stale constant is invisible, so `agree` does not ru
 python3 test/pargates.py . ./build/ripwire -j 6         # the full gate suite, in parallel
 test/regression.sh                                      # the same set, sequentially (authoritative list)
 LSAN_OPTIONS=suppressions=lsan_suppressions.txt ./asan/ripwire <dir> >/dev/null
-./build/ripwire <dir> >a; ./build/ripwire <dir> >b; diff -q a b     # determinism gate
+t=$(mktemp -d); ./build/ripwire <dir> >"$t/a"; ./build/ripwire <dir> >"$t/b"; diff -q "$t/a" "$t/b"   # determinism gate (outputs outside <dir>)
 ./build/ripwire <dir> | xmllint --noout -                          # well-formedness gate
 ```
 

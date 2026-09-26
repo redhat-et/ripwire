@@ -294,6 +294,7 @@ if seen == len( FIXTURES ):
 # status; do not infer it from the `exit` literal you can see, because the one that fires may be another.
 FAILFAST = {
     "elixirsemanticcheck.sh":  ( "set -e and Python assertions; missing protocol and branch-scope probes observed exit 1", 1 ),
+    "astrocheck.sh":           ( "set -e and Python assertions; same shape as elixircheck. rc READ, not inferred: run against the stock 0.6.2 binary (which has no .astro row in kLangTable, so every fixture file is unindexed and arm 1 asserts first) it exits 1", 1 ),
     "dartcheck.sh":            ( "set -e and Python assertions; pre-Dart HEAD binary probed to exit 1", 1 ),
     "elixircheck.sh":          ( "set -e and Python assertions; pre-Elixir HEAD binary probed to exit 1", 1 ),
     "gdscriptcheck.sh":        ( "set -e and Python assertions; same shape as elixircheck. rc READ, not inferred: run against the pre-GDScript baseline binary (which indexes no .gd, so the fixture yields zero symbols) it exits 1", 1 ),

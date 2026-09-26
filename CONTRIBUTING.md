@@ -146,8 +146,11 @@ path on a Mac with `cmake -S . -B build-nokqueue -DCMAKE_CXX_FLAGS=-DRW_OS_HAS_K
 Output is a sorted top-K. A sort has no tolerance band, so the contract is byte-identity:
 
 ```bash
-./build/ripwire <dir> >a; ./build/ripwire <dir> >b; diff -q a b
+t=$(mktemp -d); ./build/ripwire <dir> >"$t/a"; ./build/ripwire <dir> >"$t/b"; diff -q "$t/a" "$t/b"
 ```
+
+Write the two outputs OUTSIDE `<dir>`. Written inside it, the second run crawls the first run's output
+file, a new unindexed text file, and the `unindexed=` histogram can change between the two runs (#334).
 
 Run it three times — scheduling-dependent nondeterminism does not show up reliably in one pair.
 Warm (cached) output must equal cold output exactly.
@@ -259,10 +262,10 @@ The exception is `scripts/tidycheck.sh`, a separate CI step with `--warnings-as-
 only checks whose every finding is a silently wrong answer and that sat at **zero rows** on the five CI
 TUs when admitted (0.6.3, clang-tidy 22; `bugprone-use-after-move` had one row, brought to zero by a
 behaviour-neutral fix that `.clang-tidy` describes): `bugprone-use-after-move`, `bugprone-dangling-handle`,
-`bugprone-sizeof-expression`, `bugprone-integer-division`, `bugprone-infinite-loop`,
-`modernize-use-override` and `clang-analyzer-core.*`. It is a ratchet, not a style gate: a new row is a
+`bugprone-sizeof-expression`, `bugprone-integer-division`, `bugprone-infinite-loop` and
+`clang-analyzer-core.*`. It is a ratchet, not a style gate: a new row is a
 bug to fix, never a `NOLINT`, and a gated check that proves noisy leaves the list with its count, the way
-it came in (`.clang-tidy`'s header has the counts, and the two candidates that stayed out). Run it
+it came in (`.clang-tidy`'s header has the counts, and the candidates that stayed out or left). Run it
 before a PR that touches C++: `scripts/tidycheck.sh` finds clang-tidy 22 on `PATH` or, on macOS, at
 Homebrew's keg-only `/opt/homebrew/opt/llvm@22/bin/clang-tidy` — pin that path, not
 `/opt/homebrew/opt/llvm`, which may be another major — and prints a `SKIP` line (not a pass) when it
@@ -523,7 +526,7 @@ contract and well-formedness. The GCC/Clang language extensions this tree uses g
 refuses a new `__builtin_*`, inline asm or `__attribute__` outside that pair, so a Windows break is caught on every
 POSIX leg rather than discovered on Windows.
 
-A green Windows matrix is **not** the same as a validated platform. The 647-gate suite does not run there — it needs
+A green Windows matrix is **not** the same as a validated platform. The 649-gate suite does not run there — it needs
 the harness on #44 — and the ASan flavour is compiled on Windows but never executed.
 
 The **windows-x64 release zip** (a preview from 0.6.3) is built by `.github/workflows/windows-package.yml`, which
@@ -780,6 +783,12 @@ ls /tmp/tsanlog.*     # one file per process that raced; none means no report
 6. If your change alters emitted output, regenerate the goldens as their **own** commit with the
    diff reviewed by eye — never bundled with logic.
 7. Keep formatting churn out of logic commits.
+8. **Cutting a release:** bump the version in `CMakeLists.txt`'s `project()` call, rename
+   `CHANGELOG.md`'s `## [Unreleased]` section to the new version, and add the release's blurb to
+   README.md's `## Release notes` section (newest first, with a `Thanks to` line where one applies) —
+   never to a `## What's new` section, which no longer exists (moved 2026-09-25; see git history if
+   you are looking for it). Update the one-line **Latest: 0.6.x** pointer near the top of README.md to
+   match.
 
 **The gate count is a build product.** It is stated in `README.md`, `docs/EVALS.md` and
 `present/deck5_ripwire_build.js` — eight sites — and every one of them is written by

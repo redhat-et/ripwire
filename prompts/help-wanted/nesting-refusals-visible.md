@@ -301,7 +301,8 @@ keeps hiding them until the file changes.
   Do not copy §12's flavour-dependent alert arm into `test/yamllangcheck.sh`, `test/mdsectioncheck.sh` or
   `test/jsonlangcheck.sh`.
 - **Determinism.** Rows are sorted and counts exact, independent of worker arrival order. Check with
-  `./build/ripwire <dir> >a; ./build/ripwire <dir> >b; diff -q a b`.
+  `t=$(mktemp -d); ./build/ripwire <dir> >"$t/a"; ./build/ripwire <dir> >"$t/b"; diff -q "$t/a" "$t/b"`
+  (outputs outside `<dir>`, or the second run crawls the first one's output).
 - **Honesty in output.**
   - Absent-at-zero attributes.
   - Legend clauses only where their attribute is present (`test/legendcoveragecheck.sh`).

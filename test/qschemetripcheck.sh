@@ -34,6 +34,11 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-25 (PR #320/#67, Astro frontmatter, merged in train 20 after #310): RE-DERIVED with UPDATE_GOLDEN=1
+#   (hash 98afcd66a2…c2123ebfc64). kParserVer 121 -> 122 (.astro joins kLangTable, parsed through one included
+#   range over its `---` frontmatter; the PR carried 120, which #150 took first, and #310 took 121). Only the
+#   extraction-identity declaration moves — kCacheVersion stays 25, kQSnapCacheScheme stays 14 — so no cached
+#   Snapshot MEANING changes.
 # 2026-09-24 (PR #310, Ruby attr DSL, merged in train 19 after #150): RE-DERIVED with UPDATE_GOLDEN=1
 #   (hash acd95b16fc…1ac9a7d). kParserVer 120 -> 121 (indexes the Ruby attr-family's names AND the
 #   inline-visibility lift; the PR carried 120, which #150 took first). Only the extraction-identity

@@ -1,0 +1,7 @@
+---
+import { astroSquare } from "./svc";
+const doubled = astroSquare( 4 );
+function pageHelper( n: number ): number { return astroSquare( n ); }
+---
+<h1>{doubled}</h1>
+<p>{pageHelper( 2 )}</p>

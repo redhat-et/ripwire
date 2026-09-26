@@ -16,7 +16,7 @@ current shape.
 > ripwire — the "ripgrep of AI context": parse a codebase, rank symbols by Personalized PageRank,
 > stream a deterministic minified XML map to stdout. Zero runtime deps. Languages: C++, C, ObjC/ObjC++,
 > Metal (MSL, .metal — C++ grammar), CUDA (.cu/.cuh — tree-sitter-cuda, <<<>>> launches are call edges),
-> Python, TypeScript, JavaScript, Java, Ruby, PHP (.php/.phtml), Lua, Elixir (.ex/.exs), Dart (.dart), Kotlin (.kt), Bash, Go, Rust, Swift, C#,
+> Python, TypeScript (.ts/.tsx/.mts/.cts; .astro frontmatter), JavaScript, Java, Ruby, PHP (.php/.phtml), Lua, Elixir (.ex/.exs), Dart (.dart), Kotlin (.kt), Bash, Go, Rust, Swift, C#,
 > GDScript (.gd — Godot; .tscn/.tres/.gdshader are NOT indexed);
 > JSON, TOML, YAML (config keys); Markdown (.md/.markdown — headings are section symbols with spans).
 
@@ -1745,7 +1745,7 @@ $ ./build/ripwire . --metrics --top-k=10
 
 **Answers:** build the file-to-file dependency graph — god-files and cycles file->file dependency graph (god-files, cycles — validated);
 
-its nccd (Lakos) is a design heuristic, not independently outcome-validated. instab= (Martin's I=Ce/(Ca+Ce)) counts project includes ONLY -- system/third-party headers are excluded from Ce, matching stabledeps' gap= so gap == consumer's instab - provider's instab always. <health>'s ccd/acd/nccd/shape are computed over dep_files= (files whose language has #include/import syntax) not files= (the raw corpus, incl. md/json/toml/yaml, which can't participate in the graph) -- --arch's propagation_cost uses the same N. <health dep_langs=> names that language set, which is what makes a dep_files=/ccd/ acd/nccd number comparable across builds: sh, rb, lua and ex joined it at parser version 81 and every one of those numbers moved on a corpus holding them. STRUCTURE vs USE (parser version 83): a LAZY edge -- every directive of the pair written inside a closure (Ruby method/lambda/block, TS/JS function body), a Ruby autoload or rescue class -- is a use, not a load-time dependency: it is in --impact's importer tier (lazy=1) and in the row's inc t= list, NOT in afferent/instab/transitive/godfiles/ stabledeps/cycles/ccd/acd/nccd/shape. <health lazy_edges=> counts the pairs left out, a row's lazy_edges= its own; both absent when 0. A TS/JS import through a tsconfig paths alias, a baseUrl path or a workspace package draws no edge yet: the root's imports_unresolved=N counts_floor=1 counts them, and every number above is then a floor
+its nccd (Lakos) is a design heuristic, not independently outcome-validated. instab= (Martin's I=Ce/(Ca+Ce)) counts project includes ONLY -- system/third-party headers are excluded from Ce, matching stabledeps' gap= so gap == consumer's instab - provider's instab always. <health>'s ccd/acd/nccd/shape are computed over dep_files= (files whose language has #include/import syntax) not files= (the raw corpus, incl. md/json/toml/yaml, which can't participate in the graph) -- --arch's propagation_cost uses the same N. <health dep_langs=> names that language set, which is what makes a dep_files=/ccd/ acd/nccd number comparable across builds: sh, rb, lua and ex joined it at parser version 81 and every one of those numbers moved on a corpus holding them. STRUCTURE vs USE (parser version 83): a LAZY edge -- every directive of the pair written inside a closure (Ruby method/lambda/block, TS/JS function body), a Ruby autoload or rescue class -- is a use, not a load-time dependency: it is in --impact's importer tier (lazy=1) and in the row's inc t= list, NOT in afferent/instab/transitive/godfiles/ stabledeps/cycles/ccd/acd/nccd/shape. <health lazy_edges=> counts the pairs left out, a row's lazy_edges= its own; both absent when 0. A TS/JS import through a tsconfig paths alias, a baseUrl path or a workspace package draws no edge yet: the root's imports_unresolved=N graph_partial=1 counts them: numbers above are over resolved edges only
 
 **Try it**
 
@@ -1775,7 +1775,7 @@ $ ./build/ripwire . --deps
 **Caveats (stated by the binary):**
 
 - its nccd (Lakos) is a design heuristic, not independently outcome-validated.
-- A TS/JS import through a tsconfig paths alias, a baseUrl path or a workspace package draws no edge yet: the root's imports_unresolved=N counts_floor=1 counts them, and every number above is then a floor
+- A TS/JS import through a tsconfig paths alias, a baseUrl path or a workspace package draws no edge yet: the root's imports_unresolved=N graph_partial=1 counts them: numbers above are over resolved edges only
 
 ### `--hotspots`
 
@@ -4388,7 +4388,7 @@ _The session legend dictionary the MCP server serves as ripwire://legend-dict/fu
 
 ```
 $ ./build/ripwire . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=6f45f81307e1ecb3 entries=722
+ripwire legend dictionary ripwire.dict/v1 dictv=dbc0a02944a50858 entries=723
 <about legend="ref" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and this LAST child carries every other root attribute unchanged (schema= included); legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that ne … [line truncated: 83 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)

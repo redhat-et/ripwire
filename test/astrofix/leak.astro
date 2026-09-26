@@ -1,0 +1,7 @@
+---
+function keptFromFrontmatter(): number { return 1; }
+---
+<script>
+function templateLeak() { return 2; }
+</script>
+<div>{(function alsoLeaked(){ return 3; })()}</div>

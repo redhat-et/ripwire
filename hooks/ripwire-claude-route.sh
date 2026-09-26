@@ -344,6 +344,12 @@ cwd="$( printf '%s' "$input" | jq -r '.cwd // .workdir // empty' 2>/dev/null )"
 # project too; a missed recommendation is the direction this hook already takes on every doubt.
 # The answer must be `true`, not only exit 0: a bare repository, or a cwd inside a `.git` directory, prints
 # `false` with status 0, and routing there would walk git's own metadata.
+# The hook answers for the JSON cwd, so git's repository-selection variables inherited from the caller are
+# cleared first (git's own list, plus GIT_DIR/GIT_WORK_TREE if git cannot print it). With GIT_DIR exported,
+# `git -C "$cwd"` answers for THAT repository: a non-git cwd reads `true` and routes, and the classifier,
+# which runs git too, would read that repository's file list instead of the cwd's.
+# shellcheck disable=SC2046 # word splitting is intended: one variable name per word
+unset $( git rev-parse --local-env-vars 2>/dev/null ) GIT_DIR GIT_WORK_TREE
 insideWorkTree="$( git -C "$cwd" rev-parse --is-inside-work-tree 2>/dev/null )" || exit 0
 [ "$insideWorkTree" = true ] || exit 0
 session="$( printf '%s' "$input" | jq -r '.session_id // .conversation_id // empty' 2>/dev/null )"

@@ -124,3 +124,6 @@
 --ref	bench/slice/run_slicerecall.py's own flag (argparse "--ref", default v0.6.2: the git ref the slice-recall mine walks history from) quoted in docs/EVALS.md's --slice-guards pre-registration corpus note — not a ripwire flag
 --warnings-as-errors	clang-tidy's own option, quoted in CONTRIBUTING.md where it describes scripts/tidycheck.sh's gating subset — not a ripwire flag
 --fresh	CMake's own configure flag ("cmake --fresh -S . -B asan …"), quoted in CONTRIBUTING.md's LLVM 22 sanitizer recipe so a tree first configured with AppleClang is rebuilt from a clean cache — not a ripwire flag
+--is-inside-work-tree	git's own rev-parse option ("git rev-parse --is-inside-work-tree"), quoted in the CHANGELOG entry for the nudge-hook bare-repo fix (2026-09-25) as the check whose exit-status-only reading missed the bare/`.git`-dir `false` case — not a ripwire flag
+--test	Node's own test-runner flag ("node --test <file>"), quoted in README.md and the CHANGELOG where --test-gate/--affected derive that command for a node:test file (#60) — not a ripwire flag
+--experimental-strip-types	Node's own type-stripping flag ("node --experimental-strip-types --test <file>"), quoted in README.md and the CHANGELOG as the form derived for .ts tests where engines.node admits Node below 22.18 (#60) — not a ripwire flag

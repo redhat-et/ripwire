@@ -55,6 +55,10 @@ struct LangEntry
     std::string_view querySub;   // key into the configure-generated embedded tags.scm table
 };
 
+// The one extension whose parse is RESTRICTED to a sub-range of the file (its `---` frontmatter).
+// Named once so the table row and ingest_sidecap.h's restrictAstroToFrontmatter cannot drift apart.
+inline constexpr std::string_view kAstroExt = ".astro";
+
 // Order does not matter (linear scan); kept grouped by language for readability.
 // The extent is EXACT, not headroom: it was 32 with 32 rows, .toml made it 33, .pyi made it 34 and the
 // .yml/.yaml pair made it 36, the .php/.phtml/.lua trio made it 40, the .ex/.exs pair made it 42, the
@@ -87,7 +91,7 @@ struct LangEntry
 // the latter a list item), so those files carry the file-level node alone and serve as ONE whole-file
 // unit. A heading detector per format is a later lane with its own measurement. `.mdx` is markdown with
 // JSX, which the block grammar already reads as html blocks (opaque). Gate: test/textdocscheck.sh.
-constexpr std::array<LangEntry, 50> kLangTable = {{
+constexpr std::array<LangEntry, 51> kLangTable = {{
     { ".cpp",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cc",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cxx",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
@@ -162,6 +166,11 @@ constexpr std::array<LangEntry, 50> kLangTable = {{
     { ".tsx",  Lang::TypeScript, &tree_sitter_tsx,        "tsx"        },
     { ".mts",  Lang::TypeScript, &tree_sitter_typescript, "typescript" },
     { ".cts",  Lang::TypeScript, &tree_sitter_typescript, "typescript" },
+    // Astro: the FRONTMATTER ONLY, via the one ts_parser_set_included_ranges call this build makes
+    // (ingest_sidecap.h). Rides Lang::TypeScript deliberately — langCompatible() admits only same-Lang
+    // pairs, so a Lang of its own would not resolve a frontmatter call into the .ts service it names,
+    // which is the entire point of issue #67. Same shape as .tsx/.mts above and .metal/.cu below.
+    { ".astro", Lang::TypeScript, &tree_sitter_typescript, "typescript" },
     { ".swift", Lang::Swift,     &tree_sitter_swift,      "swift"      },
     { ".m",    Lang::ObjC,       &tree_sitter_objc,       "objc"       },   // Objective-C
     { ".mm",   Lang::ObjC,       &tree_sitter_objc,       "objc"       },   // Objective-C++ (ObjC layer + C-style; C++ partial)

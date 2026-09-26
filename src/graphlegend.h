@@ -595,10 +595,14 @@ inline std::string declinedCallsKeyJson( std::size_t declinedCalls )
 // import directives that drew no edge although the project's own config places their specifier in this tree — a
 // tsconfig/jsconfig `paths` alias, a `baseUrl` path, a workspace member's package name (resolve.h, namespace
 // tsimport, states the three rules). Absent at zero, like graph_unindexed=: a tree with no such import is byte-
-// identical. On a root that carried no floor marker before (--deps, --arch) counts_floor="1" rides with it — THE
-// TRUNCATION VOCABULARY's rule-4 pairing (pageview.h): the marker names the cause, counts_floor says every count on
-// the answer is a floor. --impact's root carries counts_floor="1" already, so there the count rides alone. Each
-// legend clause below is emitted exactly when its attribute is (the caller passes the count, never a re-derivation).
+// identical. On --deps and --arch graph_partial="1" rides with it: the cause/reading pair of THE TRUNCATION
+// VOCABULARY's rule 4 (pageview.h), but the reading is NOT counts_floor. A missing edge only ADDS edges, yet adding one
+// can MERGE two reported cycles into one (cycles are SCCs, so the complete count can be LOWER) and moves every ratio
+// either way (instab = Ce/(Ca+Ce): a missing INCOMING edge leaves it too high), so "every count here is a floor"
+// would be false on both roots. graph_partial="1" says what is true: the values were measured over the resolved edges
+// only (the `<scope>_partial="1"` family of tier_partial=). --impact's root keeps counts_floor="1", which is true
+// there: importers= only rises as edges are added. Each legend clause below is emitted exactly when its attribute is
+// (the caller passes the count, never a re-derivation).
 inline std::string importsUnresolvedAttrXml( std::uint64_t importsUnresolved )
 {
     return countAttrXmlOrEmpty( "imports_unresolved", std::size_t( importsUnresolved ) );
@@ -607,38 +611,48 @@ inline std::string importsUnresolvedKeyJson( std::uint64_t importsUnresolved )
 {
     return countFieldOrEmpty( "imports_unresolved", std::size_t( importsUnresolved ), /*json=*/true );
 }
-inline std::string importsUnresolvedFloorAttrXml( std::uint64_t importsUnresolved )
+inline constexpr const char* kGraphPartialAttrXml = " graph_partial=\"1\"";
+inline std::string importsUnresolvedPartialAttrXml( std::uint64_t importsUnresolved )
 {
-    return importsUnresolved > 0 ? importsUnresolvedAttrXml( importsUnresolved ) + kGraphCountFloorAttrXml : std::string();
+    return importsUnresolved > 0 ? importsUnresolvedAttrXml( importsUnresolved ) + kGraphPartialAttrXml : std::string();
 }
+// graph_partial='s reading is ONE sentence, spelled identically in both full legends below and in the compact term
+// (compactlegend.h); test/depsprecisecheck.sh's #220 (I) arms pin it in all three, so the wordings cannot fork.
 inline constexpr const char* kDepsImportsUnresolvedLegend =
-    "imports_unresolved=N counts_floor=1 (root, absent at 0): N TS/JS imports name this tree (a tsconfig/jsconfig paths alias, a baseUrl path, a workspace package) yet drew no edge, so cycles (an absent cycles element too), afferent=/transitive=, godfiles and ccd/acd/nccd are floors over a partial graph. ";
+    "imports_unresolved=N graph_partial=1 (root, absent at 0): N TS/JS imports name this tree (a tsconfig/jsconfig paths alias, a baseUrl path, a workspace package) yet drew no edge, so every value here is measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios (an absent cycles element is no proof of none); afferent=/transitive=/ccd/acd/nccd can only rise. ";
 inline constexpr const char* kArchImportsUnresolvedLegend =
-    " imports_unresolved=N counts_floor=1 (absent at 0): N TS/JS imports name this tree (a paths alias, a baseUrl path, a workspace package) yet drew no edge, so violations= and the metrics are floors: an edge through one was never judged.";
+    " imports_unresolved=N graph_partial=1 (absent at 0): N TS/JS imports name this tree (a paths alias, a baseUrl path, a workspace package) yet drew no edge, so an edge through one was never judged: violations= can only rise, and the metrics are measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios.";
 inline constexpr const char* kImpactImportsUnresolvedLegend =
     "imports_unresolved=N (absent at 0): N TS/JS imports name this tree (a tsconfig/jsconfig paths alias, a baseUrl path, a workspace package) yet drew no edge, so importers= is a floor. ";
 // #220 part 2 — the resolver's two further disclosures, beside imports_unresolved= and absent at zero like it:
 // imports_dts= counts the edges that land only on a declaration file (types, not source — every count includes them),
-// tsconfig_unread= the owning configs whose `extends` base is not in the tree and could have declared an alias (so,
-// like imports_unresolved=, it makes the root's counts floors). One composer for the --deps and --arch roots, so the
-// attribute order is fixed: a root that carries only imports_unresolved= is byte-identical to part 1's.
+// tsconfig_unread= the owning configs whose `extends` base is not in the tree and could have declared an alias. An
+// alias nobody read is an import that drew no edge, so tsconfig_unread= makes the root partial exactly as
+// imports_unresolved= does: graph_partial="1", never counts_floor (the part-1 reasoning above holds unchanged). One
+// composer for the --deps and --arch roots, so the attribute order is fixed: a root that carries only
+// imports_unresolved= is byte-identical to part 1's. Each legend clause defines graph_partial= itself, so a root with
+// tsconfig_unread= and no imports_unresolved= still has its reading defined.
 inline std::string tsImportRootAttrXml( std::uint64_t importsUnresolved, std::uint64_t importsDts, std::uint64_t tsconfigUnread )
 {
     std::string s = importsUnresolvedAttrXml( importsUnresolved ) + countAttrXmlOrEmpty( "imports_dts", std::size_t( importsDts ) )
                   + countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( tsconfigUnread ) );
-    return importsUnresolved > 0 || tsconfigUnread > 0 ? s + kGraphCountFloorAttrXml : s;
+    return importsUnresolved > 0 || tsconfigUnread > 0 ? s + kGraphPartialAttrXml : s;
 }
 inline constexpr const char* kDepsImportsDtsLegend =
     "imports_dts=N (root, absent at 0): N TS/JS imports resolved through a paths alias, a baseUrl path or a workspace package only to a .d.ts declaration, not to source; their edges are in every count. ";
 inline constexpr const char* kDepsTsconfigUnreadLegend =
-    "tsconfig_unread=N counts_floor=1 (root, absent at 0): N owning tsconfig/jsconfig files extend a base that is not in the tree (a package not installed in node_modules, an excluded file) and could declare an alias, so the counts are floors. ";
-inline constexpr const char* kArchTsImportExtrasLegend =
-    " imports_dts=N (absent at 0): N TS/JS imports resolved only to a .d.ts declaration. tsconfig_unread=N counts_floor=1 (absent at 0): N owning tsconfig/jsconfig files extend a base not in the tree that could declare an alias, so violations= and the metrics are floors.";
+    "tsconfig_unread=N graph_partial=1 (root, absent at 0): N owning tsconfig/jsconfig files extend a base that is not in the tree (a package not installed in node_modules, an excluded file) and could declare an alias, so every value here is measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios. ";
+inline constexpr const char* kArchImportsDtsLegend = " imports_dts=N (absent at 0): N TS/JS imports resolved only to a .d.ts declaration.";
+inline constexpr const char* kArchTsconfigUnreadLegend =
+    " tsconfig_unread=N graph_partial=1 (absent at 0): N owning tsconfig/jsconfig files extend a base not in the tree that could declare an alias, so an edge through one was never judged: violations= can only rise, and the metrics are measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios.";
 inline std::string depsTsImportExtrasLegend( std::uint64_t importsDts, std::uint64_t tsconfigUnread )
 {
     return std::string( importsDts > 0 ? kDepsImportsDtsLegend : "" ) + ( tsconfigUnread > 0 ? kDepsTsconfigUnreadLegend : "" );
 }
-inline const char* archTsImportExtrasLegend( bool on ) noexcept { return on ? kArchTsImportExtrasLegend : ""; }
+inline std::string archTsImportExtrasLegend( std::uint64_t importsDts, std::uint64_t tsconfigUnread )
+{
+    return std::string( importsDts > 0 ? kArchImportsDtsLegend : "" ) + ( tsconfigUnread > 0 ? kArchTsconfigUnreadLegend : "" );
+}
 inline const char* depsImportsUnresolvedLegend( bool on ) noexcept { return on ? kDepsImportsUnresolvedLegend : ""; }
 inline const char* archImportsUnresolvedLegend( bool on ) noexcept { return on ? kArchImportsUnresolvedLegend : ""; }
 inline const char* impactImportsUnresolvedLegend( bool on ) noexcept { return on ? kImpactImportsUnresolvedLegend : ""; }

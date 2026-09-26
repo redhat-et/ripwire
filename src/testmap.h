@@ -769,14 +769,48 @@ private:
     // over an absolute path also matched directories ABOVE the crawl root, so a checkout under /work/__tests__/repo/
     // spelled test/setup.ts as a vitest target that every other checkout reads run_unknown="1" — output that
     // depended on where the repo sits (the #228/A1 rule isTestPath already follows).
+    //
+    // #60 (train 20): package.json evidence still goes first and, when it DECIDES anything — including an
+    // authoritative-but-unrecognized scripts.test (mocha, say) — still WINS; only when it decides nothing
+    // (no manifest anywhere in the boundary, or the nearest one is a true marker per nearestPackageJson's
+    // own F5 rule) does the test file's OWN node:test import/require get a say. That ordering is what makes
+    // the precedence gate arm hold without any special-casing here: a manifest naming vitest/jest/node --test
+    // already returns below, before jsrunner::hasNodeTestImport is ever consulted.
+    //
+    // rv-nodetest-runner-60 fix round: jsrunner::nodeTestVerb now also needs the test file's OWN bytes (F1
+    // extension refusal, F2 relative-import resolvability) in addition to `engines.node` (F3) — a run=
+    // that fails is worse than an honest run_unknown="1" — so `source` is read on BOTH paths that can reach
+    // it, not only the import-fallback path below.
     const char* resolveJsVerb( std::uint32_t runnerFile, const std::string& disk ) const
     {
-        if( !jsrunner::looksLikeJsTestFile( rootRelPath( *ing_, runnerFile ) ) )
+        const std::string_view relPath = rootRelPath( *ing_, runnerFile );
+        if( !jsrunner::looksLikeJsTestFile( relPath ) )
         {
             return nullptr;
         }
         const std::string manifest = jsrunner::nearestPackageJson( disk, evidenceRoot( runnerFile ) );
-        return manifest.empty() ? nullptr : jsrunner::verbFor( jsrunner::detectFramework( manifest ) );
+        const jsrunner::Framework fw = jsrunner::detectFramework( manifest );
+        if( fw == jsrunner::Framework::NodeTest )
+        {
+            // #60: node's own runner needs a Node-version decision (see jsrunner.h's own banner) whether it
+            // was named by scripts.test or (below) inferred from the test file's own import — one spelling.
+            const std::string source = docparse::detail::readWholeFile( disk ).value_or( "" );
+            return jsrunner::nodeTestVerb( relPath, manifest, source, disk );
+        }
+        if( const char* verb = jsrunner::verbFor( fw ); verb != nullptr )
+        {
+            return verb;   // vitest/jest: explicit package.json evidence, never overridden by import evidence
+        }
+        if( !manifest.empty() && jsrunner::hasAuthoritativeScript( manifest ) )
+        {
+            return nullptr;   // an explicit (if unrecognized) scripts.test still wins — never overridden
+        }
+        const std::string source = docparse::detail::readWholeFile( disk ).value_or( "" );
+        if( !jsrunner::hasNodeTestImport( source, relPath ) )
+        {
+            return nullptr;   // no package.json evidence, and the file's own bytes name no runner either
+        }
+        return jsrunner::nodeTestVerb( relPath, manifest, source, disk );
     }
 
     /// Validate a candidate script and format its disk path as one shell argument.

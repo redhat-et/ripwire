@@ -807,6 +807,41 @@ TEST_CASE( "shell: only an absolute, non-WSL bash is acceptable" )
     CHECK( !isAcceptableShell( "C:bash.exe" ) );                                                   // drive-relative
 }
 
+TEST_CASE( "doctor PATH remedy: PowerShell's assignment, native separators, never a POSIX export line (#334)" )
+{
+    const std::string h = powerShellPathPrependHint( "C:/Program Files/ripwire tools/ripwire-0.6.4-windows-x64" );
+    CHECK( h.starts_with( "$env:Path = 'C:\\Program Files\\ripwire tools\\ripwire-0.6.4-windows-x64;' + $env:Path" ) );
+    CHECK( h.find( "export PATH" ) == std::string::npos );
+    CHECK( h.find( '/' ) == std::string::npos );
+    CHECK( powerShellPathPrependHint( "//server/share/bin" ).starts_with( "$env:Path = '\\\\server\\share\\bin;' + $env:Path" ) );   // UNC
+}
+
+// CodeRabbit 4109273959: an unquoted (or double-quoted) directory pasted into PowerShell would let a `$`, a
+// backtick or `$(...)` inside it expand or run. Single-quoting makes it a literal — asserted byte for byte,
+// rather than trusting that "looks quoted" is "is safe".
+TEST_CASE( "doctor PATH remedy: a directory with $, a backtick, a quote and a space stays a literal" )
+{
+    const std::string h = powerShellPathPrependHint( "C:/tools/$env:UserProfile `whoami` it'is weird/bin" );
+    // '/' -> '\\', then the whole (dir + ";") is single-quoted; an embedded ' doubles to ''.
+    CHECK( h == "$env:Path = 'C:\\tools\\$env:UserProfile `whoami` it''is weird\\bin;' + $env:Path"
+                " in PowerShell (this window; add the directory to your user Path for new ones)" );
+}
+
+// PowerShell's tokenizer also closes a single-quoted literal on the typographic quotes U+2018..U+201B, so a directory
+// named with one (a curly apostrophe, as in O’Brien) must have it doubled like the ASCII quote, or the rest of the name
+// runs as code when the hint is pasted.
+TEST_CASE( "doctor PATH remedy: PowerShell's typographic single quotes are doubled too" )
+{
+    CHECK( powerShellPathPrependHint( "C:/O\xE2\x80\x99" "Brien/bin" )
+           == "$env:Path = 'C:\\O\xE2\x80\x99\xE2\x80\x99" "Brien\\bin;' + $env:Path"
+              " in PowerShell (this window; add the directory to your user Path for new ones)" );
+    CHECK( powerShellSingleQuote( "\xE2\x80\x98|\xE2\x80\x9A|\xE2\x80\x9B" )
+           == "'\xE2\x80\x98\xE2\x80\x98|\xE2\x80\x9A\xE2\x80\x9A|\xE2\x80\x9B\xE2\x80\x9B'" );
+    // neighbours of the range, and a truncated sequence at the end, are not quotes and pass through once
+    CHECK( powerShellSingleQuote( "\xE2\x80\x97\xE2\x80\x9C\xE2\x80" ) == "'\xE2\x80\x97\xE2\x80\x9C\xE2\x80'" );
+    CHECK( powerShellSingleQuote( "it's" ) == "'it''s'" );
+}
+
 TEST_CASE( "executables: extension detection and PATHEXT membership" )
 {
     CHECK( hasExtension( "tool.exe" ) );

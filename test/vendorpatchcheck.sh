@@ -96,12 +96,15 @@
 #      ordinal is >= 32 (swift's OP_SYMBOL_SUPPRESSOR table, FAKE_TRY_BANG = 32) is undefined
 #      behaviour there, even though it is well-defined on every LP64 host this repo is built and
 #      tested on — so the bug is invisible locally and on Linux/macOS CI alike. This scans every
-#      vendored `.c`/`.h` file for a bare `1UL << IDENT` (or `1UL << N`), resolves IDENT's ordinal
-#      from the nearest enclosing `enum { … }` in the same file (explicit `= N` members reset the
-#      count), and fails on any shift >= 32; a shift whose operand cannot be resolved statically
-#      fails loudly too (H's "unclassified fails loudly" convention), rather than passing while
-#      unproven. A re-vendor that reintroduces this shape in any grammar — not just swift — turns
-#      this arm red the moment it lands, before it ever reaches a Windows build.
+#      vendored `.c`/`.h` file for a bare `1UL << IDENT` (or `1UL << N`), in every spelling of a
+#      `long` literal (`1UL`/`1ul`/`1LU`/`1lu`/… unsigned, `1L`/`1l` signed; not `1ULL`/`1LL`, 64 bits
+#      everywhere), resolves IDENT's ordinal from the nearest enclosing `enum { … }` in the same file
+#      (explicit `= N` members reset the count), and fails on any unsigned shift >= 32 or signed shift
+#      >= 31 (a signed 32-bit `1L << 31` overflows into the sign bit, undefined in C); a shift whose
+#      operand cannot be resolved statically fails loudly too (H's "unclassified fails loudly"
+#      convention), rather than passing while unproven. A re-vendor that reintroduces this shape in
+#      any grammar — not just swift — turns this arm red the moment it lands, before it ever reaches
+#      a Windows build.
 #
 # Usage:
 #   test/vendorpatchcheck.sh
@@ -859,7 +862,8 @@ files = sorted(deps_dir.rglob("*.c")) + sorted(deps_dir.rglob("*.h"))
 if not files:
     sys.exit(f"no *.c or *.h under {deps_dir}: the audit would read nothing")
 
-shift_re = re.compile(r'\b1UL\b\s*<<')
+# every spelling of a `long` 1: unsigned (u and l in either order and case) or signed; `1ULL`/`1LL` fail the \b
+shift_re = re.compile(r'\b1(?P<suffix>[uU][lL]|[lL][uU]?)\b\s*<<')
 ident_re = re.compile(r'[A-Za-z_]\w*')
 num_re = re.compile(r'(0[xX][0-9A-Fa-f]+|[0-9]+)[uUlL]*(?![\w.])')
 enum_block_re = re.compile(r'\benum\b[^{;]*\{([^}]*)\}', re.S)
@@ -946,21 +950,26 @@ for f in files:
             ordv = None if ordv is None else ordv + 1
     for sm in shift_re.finditer(text):
         lineno = text.count('\n', 0, sm.start()) + 1
+        lit = '1' + sm.group('suffix')
+        # 32-bit long on LLP64: an unsigned 1 may shift by up to 31; a signed 1 by up to 30 (31 reaches the sign bit)
+        limit = 32 if 'u' in lit.lower() else 31
         tok, why = operand(text, sm.end())
         if tok is None:
-            print(f"UNRESOLVED\t{rel}\t{lineno}\t-\t{why}")
+            print(f"UNRESOLVED\t{rel}\t{lineno}\t-\t{why}\t{lit}\t{limit}")
             continue
         val = c_int(tok) if tok[0].isdigit() else ordmap.get(tok)
         if val is None:
-            print(f"UNRESOLVED\t{rel}\t{lineno}\t{tok}\tcould not resolve {tok}'s ordinal statically (unknown, or after a non-literal enumerator initializer)")
-        elif val >= 32:
-            print(f"BAD\t{rel}\t{lineno}\t{tok}\t{val}")
+            print(f"UNRESOLVED\t{rel}\t{lineno}\t{tok}\tcould not resolve {tok}'s ordinal statically (unknown, or after a non-literal enumerator initializer)\t{lit}\t{limit}")
+        elif val >= limit:
+            print(f"BAD\t{rel}\t{lineno}\t{tok}\t{val}\t{lit}\t{limit}")
         else:
-            print(f"OK\t{rel}\t{lineno}\t{tok}\t{val}")
+            print(f"OK\t{rel}\t{lineno}\t{tok}\t{val}\t{lit}\t{limit}")
 PYEOF
 # M0 — the audit's own control. Each shape below is one the previous per-line, first-token audit passed (1UL << 32,
 # an operand continued by `+ 1` or onto the next line, a parenthesised operand, an implicit enumerator after a
-# non-literal initializer); each must now be BAD or UNRESOLVED, while the plainly safe shifts stay OK.
+# non-literal initializer); each must now be BAD or UNRESOLVED, while the plainly safe shifts stay OK. g() is the
+# other `long` spellings: unsigned ones (`1ul`, `1LU`, `1lu`, `1Ul`) are held to < 32 and the signed `1L`/`1l` to < 31,
+# while `1ULL`/`1LL` (64 bits on every model) are not shift sites at all.
 M0="$TMP/shiftwidth-m0/deps"; mkdir -p "$M0/x"
 cat > "$M0/x/s.c" <<'CEOF'
 enum Tok { A = 0, B = 1 << 5, C, D = 3, E };
@@ -968,11 +977,14 @@ unsigned long f( int n ) {
     return 1UL << 32 | 1UL << 31 + 1 | 1UL <<
         40 | 1UL << ( 2 ) | 1UL << C | 1UL << E | 1UL << 0x1f | 1UL << 5, 0;
 }
+long g( void ) {
+    return 1ul << 33 | 1LU << 34 | 1L << 31 | 1l << 30 | 1lu << 31 | 1Ul << 3 | 1ULL << 40 | 1LL << 40;
+}
 CEOF
 m0got="$( python3 "$TMP/shiftwidth.py" "$M0" 2>&1 | cut -f1,3,4 | tr '\t\n' ': ' )"
-m0want='BAD:3:32 UNRESOLVED:3:- BAD:3:40 UNRESOLVED:4:- UNRESOLVED:4:C OK:4:E OK:4:0x1f OK:4:5 '
+m0want='BAD:3:32 UNRESOLVED:3:- BAD:3:40 UNRESOLVED:4:- UNRESOLVED:4:C OK:4:E OK:4:0x1f OK:4:5 BAD:7:33 BAD:7:34 BAD:7:31 OK:7:30 OK:7:31 OK:7:3 '
 if [ "$m0got" = "$m0want" ]; then
-    ok "M0: the shift-width audit rejects the 5 shapes a first-token, per-line audit passed (numeric 32, \`31 + 1\`, 40 on the next line, \`( 2 )\`, an enumerator after a non-literal initializer) and passes 3 safe shifts"
+    ok "M0: the shift-width audit rejects the 5 shapes a first-token, per-line audit passed (numeric 32, \`31 + 1\`, 40 on the next line, \`( 2 )\`, an enumerator after a non-literal initializer) and passes 3 safe shifts; in the other long spellings it rejects \`1ul << 33\`, \`1LU << 34\` and signed \`1L << 31\`, passes \`1l << 30\`, \`1lu << 31\` and \`1Ul << 3\`, and skips \`1ULL\`/\`1LL\`"
 else
     no "M0: the shift-width audit's own control: got [$m0got], want [$m0want]"
 fi
@@ -987,20 +999,20 @@ if [ "$mrc" != 0 ] || [ -s "$TMP/shiftwidth.err" ]; then
     no "M: the shift-width audit did not complete (rc=$mrc): $( head -3 "$TMP/shiftwidth.err" | tr '\n' ' ' )"
 else
     mBad=0; mUnresolved=0
-    while IFS=$'\t' read -r kind rel lineno tok val; do
+    while IFS=$'\t' read -r kind rel lineno tok val lit limit; do
         case "$kind" in
             BAD)
                 mBad=$(( mBad + 1 ))
-                no "M: $rel:$lineno — \`1UL << $tok\` shifts by $val (>= 32): undefined behaviour on LLP64 (unsigned long is 32 bits there); use 1ULL"
+                no "M: $rel:$lineno — \`$lit << $tok\` shifts by $val (>= $limit): undefined behaviour on LLP64 (long is 32 bits there); use a 64-bit literal (1ULL / 1LL)"
                 ;;
             UNRESOLVED)
                 mUnresolved=$(( mUnresolved + 1 ))
-                no "M: $rel:$lineno — \`1UL << …\`: $val; cannot prove this shift is in range"
+                no "M: $rel:$lineno — \`$lit << …\`: $val; cannot prove this shift is in range"
                 ;;
         esac
     done < "$TMP/shiftwidth.out"
     if [ "$mBad" = 0 ] && [ "$mUnresolved" = 0 ]; then
-        ok "M: no \`1UL << \` shift with a width >= 32 (or an operand the audit cannot establish) under third_party/deps/ ($( wc -l < "$TMP/shiftwidth.out" | tr -d ' ' ) bare-1UL shift site(s) checked)"
+        ok "M: no \`long\` 1 shifted past its 32-bit width (unsigned >= 32, signed >= 31) or by an operand the audit cannot establish under third_party/deps/ ($( wc -l < "$TMP/shiftwidth.out" | tr -d ' ' ) bare-long-1 shift site(s) checked)"
     fi
 fi
 

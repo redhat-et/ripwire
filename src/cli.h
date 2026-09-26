@@ -779,7 +779,7 @@ inline constexpr char kHelpHead[] =
         "ripwire — the \"ripgrep of AI context\": parse a codebase, rank symbols by Personalized PageRank,\n"
         "stream a deterministic minified XML map to stdout. Zero runtime deps. Languages: C++, C, ObjC/ObjC++,\n"
         "Metal (MSL, .metal — C++ grammar), CUDA (.cu/.cuh — tree-sitter-cuda, <<<>>> launches are call edges),\n"
-        "Python, TypeScript, JavaScript, Java, Ruby, PHP (.php/.phtml), Lua, Elixir (.ex/.exs), Dart (.dart), Kotlin (.kt), Bash, Go, Rust, Swift, C#,\n"
+        "Python, TypeScript (.ts/.tsx/.mts/.cts; .astro frontmatter), JavaScript, Java, Ruby, PHP (.php/.phtml), Lua, Elixir (.ex/.exs), Dart (.dart), Kotlin (.kt), Bash, Go, Rust, Swift, C#,\n"
         "GDScript (.gd — Godot; .tscn/.tres/.gdshader are NOT indexed);\n"
         "JSON, TOML, YAML (config keys); Markdown (.md/.markdown — headings are section symbols with spans).\n\n"
         "usage: ripwire <dir> [flags]            # default = the ranked map of <dir> on stdout\n"
@@ -1375,8 +1375,9 @@ inline constexpr char kHelpHead[] =
         "                               (lazy=1) and in the row's inc t= list, NOT in afferent/instab/transitive/godfiles/\n"
         "                               stabledeps/cycles/ccd/acd/nccd/shape. <health lazy_edges=> counts the pairs left out,\n"
         "                               a row's lazy_edges= its own; both absent when 0. A TS/JS import through a tsconfig paths\n"
-        "                               alias, a baseUrl path or a workspace package resolves as tsc would; one that cannot is\n"
-        "                               counted in the root's imports_unresolved=N counts_floor=1, and every number is then a floor\n"
+        "                               alias, a baseUrl path or a workspace package resolves as tsc would; one naming this tree that\n"
+        "                               draws no edge is counted in the root's imports_unresolved=N graph_partial=1: numbers above\n"
+        "                               are then over resolved edges only\n"
         "    --hotspots                 rank files by complexity times recent git churn — where maintenance hurts\n"
         "                               complexity x recent git churn (maintenance pain); each row's top= is the worst function's\n"
         "                               BARE name, top_ccx= its cognitive complexity, top_l= its source line (build an --expand\n"
@@ -2647,7 +2648,7 @@ inline constexpr char kHelpTail[] =
         "    -v, --version              print the version + short build info, exit 0\n\n"
         "every line above is a summary. --help=--FLAG prints that flag's full text — the caveats, the units, what it\n"
         "refuses and why. --help=SECTION does one family; --help=all is the whole catalog (~46K tokens).\n"
-        "determinism: output is byte-identical run-to-run  (ripwire <dir> >a; ripwire <dir> >b; diff -q a b)\n";
+        "determinism: output is byte-identical run-to-run  (t=$(mktemp -d); ripwire <dir> >$t/a; ripwire <dir> >$t/b; diff -q $t/a $t/b)\n";
 
 // ── the two tiers ───────────────────────────────────────────────────────────────────────────────────
 // The catalog above is ONE text and stays one text — nothing here deletes a line of it. What changed is

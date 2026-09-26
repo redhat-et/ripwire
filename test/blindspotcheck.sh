@@ -141,8 +141,12 @@ mcpLegoArgs(){ case "$2" in
     esac; }
 
 # ── corpora ───────────────────────────────────────────────────────────────────────────────────────────
-# Built here, not committed: each is the reporter's own minimal repro, and a committed .astro/.h fixture
+# Built here, not committed: each is the reporter's own minimal repro, and a committed .vue/.h fixture
 # would also join every OTHER gate's view of test/.
+# THE UNINDEXED HALF IS `.vue`, NOT `.astro`: issue #67 made .astro indexable (it rides the TypeScript
+# grammar over its `---` frontmatter), which broke every arm below that needed a language NO grammar
+# reads. `.vue` is the same shape — an SFC whose script block imports TypeScript — and the presence
+# guards in (A)/(F) fail loudly rather than going vacuous if it is ever indexed too.
 mkdir -p "$TMP/unind/src" "$TMP/clean/src" "$TMP/hdr" "$TMP/if0" "$TMP/cxx" "$TMP/cxxclean"
 
 # (A)/(B): #66 — the caller differs from the contrast arm ONLY in file extension.
@@ -152,15 +156,15 @@ export function greet(name: string): string {
 }
 EOF
 cp "$TMP/unind/src/util.ts" "$TMP/clean/src/util.ts"
-cat > "$TMP/unind/src/page.astro" <<'EOF'
----
+cat > "$TMP/unind/src/page.vue" <<'EOF'
+<script setup lang="ts">
 import { greet } from "./util.ts";
 function render(): string {
   return greet("world");
 }
 const message = render();
----
-<p>{message}</p>
+</script>
+<template><p>{{ message }}</p></template>
 EOF
 cat > "$TMP/clean/src/consumer.ts" <<'EOF'
 import { greet } from "./util.ts";
@@ -250,11 +254,11 @@ EOF
 cp "$TMP/cxx/iface.h" "$TMP/cxxclean/iface.h"
 cp "$TMP/cxx/s3.cpp"  "$TMP/cxxclean/s3.cpp"
 # the ONE difference: a file with an extension the crawl walks and no grammar reads
-cat > "$TMP/cxx/page.astro" <<'EOF'
----
+cat > "$TMP/cxx/page.vue" <<'EOF'
+<script setup lang="ts">
 const x = 1;
----
-<p>{x}</p>
+</script>
+<template><p>{{ x }}</p></template>
 EOF
 
 echo

@@ -52,6 +52,8 @@
 #include <string>
 #include <string_view>
 
+#include "shquote.h"   // rw::shSingleQuote: path_prepend_hint quotes its directory as a shell literal
+
 namespace rw::os
 {
 
@@ -243,6 +245,16 @@ static_assert( requires( const stat_t& st ) { st.st_mode; st.st_size; st.st_mtim
 // where a name IS the spelling. False only on Windows, where Git Bash's MSYS `which` never prints ".exe" — a call
 // site comparing that answer to a real path must not read the difference alone as proof the two files differ.
 [[gnu::always_inline]] inline bool which_spelling_is_exact() { return true; }
+// path_prepend_hint: the line a user pastes to put `dir` (a program path) first on PATH in the shell they use there, as
+// --doctor's NOT ON PATH hint prints it. POSIX: an `export PATH=` line and the rc-file reminder. Windows: PowerShell's
+// `$env:Path =` (oswin::powerShellPathPrependHint), since a POSIX line pasted there does nothing (#334).
+// `dir` is single-quoted as a shell literal (CodeRabbit 4109273959): unquoted or double-quoted, a `$`, a backtick or
+// a `$(...)` in the directory name would expand or run when the user pastes the hint. `$PATH` stays outside the
+// quotes so it still expands to the existing PATH.
+inline std::string path_prepend_hint( std::string_view dir )
+{
+    return "export PATH=" + shSingleQuote( std::string( dir ) ) + ":\"$PATH\" (and put that line in your shell rc file)";
+}
 
 // ── process start and path intake ──────────────────────────────────────────────────────────────────────────
 // Inside the program a path is UTF-8 with '/' separators on every platform, so the spelling is fixed where a path
@@ -790,6 +802,8 @@ std::string which( std::string_view command );   // PATH is ';'-separated; PATHE
 // Git Bash's MSYS `which` never prints ".exe" — always false here, unlike the POSIX branch (see the POSIX branch
 // above for the full contract); no Windows API call needed, so this stays inline rather than in os_win32.cpp.
 [[gnu::always_inline]] inline bool which_spelling_is_exact() { return false; }
+// path_prepend_hint (see the POSIX branch): PowerShell's spelling, native separators
+inline std::string path_prepend_hint( std::string_view dir ) { return oswin::powerShellPathPrependHint( dir ); }
 void init_process( int& argc, char**& argv );
 void normalize_path_arg( char* text );
 

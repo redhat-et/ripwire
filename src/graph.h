@@ -6045,8 +6045,9 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
 // rule decides laziness: one load-time directive for the pair makes the whole pair load-time.
 // #220 part 1: `importsUnresolved` counts the TS/JS import directives that drew no edge although the project's own
 // config places their specifier in this tree (resolve.h tsimport::InRepoImportCounter). While it is non-zero the
-// graph is PARTIAL and every number read off it is a floor; the verbs say so beside it (imports_unresolved= with
-// counts_floor="1", absent at zero, so a tree without one stays byte-identical).
+// graph is PARTIAL: every number read off it was measured over the resolved edges only, and not every one is a floor
+// (a missing edge can merge two cycles; a ratio moves either way). The verbs say so beside it (imports_unresolved=
+// with graph_partial="1", absent at zero, so a tree without one stays byte-identical; graphlegend.h states the rule).
 struct StructuralIncludeAdj
 {
     std::vector<std::vector<std::uint32_t>> adj;               // UN-deduped occurrences, minus the all-lazy pairs

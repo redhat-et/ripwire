@@ -103,10 +103,11 @@ Notes:
   built only when the repository is configured with `-DRIPWIRE_TESTS=ON`.
 - `third_party/deps/` is upstream's code except for the local patches recorded under
   `third_party/patches/<dep>/` (`third_party/patches/README.md` lists each one and why). The tree
-  ships patched. Re-deriving a row is
-  `git clone` + `git checkout <pinned commit>` + the prune described above + `git apply` of that
-  dependency's patches in number order. A diff against the upstream commit is the audit: it must
-  equal those patches, and `test/vendorpatchcheck.sh` checks that every patch is still applied.
+  ships patched. Re-deriving a row is `git clone` + `git checkout <pinned commit>` + the prune
+  described above + `git apply` of that dependency's patches in number order. The audit compares
+  the files that are kept: diff the vendored tree against the upstream commit's tree after the same
+  prune, so the pruned paths are not counted as deletions. That diff must equal those patches, and
+  `test/vendorpatchcheck.sh` checks that every patch is still applied.
 
 ## Adapted code under `src/`
 

@@ -528,6 +528,10 @@ ingest_astquery.h	spanTiersOfFiles	ts_parser_parse_string	1	the tree is deleted 
 ingest_crawl.h	compileQueryStandalone	ts_query_new	1	returned into the process-lifetime CompiledQueryCache, whose destructor deletes every query
 ingest_parsepool.h	runParseWorker	ts_query_cursor_new	1	deleted at the end of the worker; the returns in between belong to lambdas
 ingest_sidecap.h	parseTree	ts_parser_parse_string	1	returned to the caller, which adopts it into TreeGuard
+jsrunner.h	hasNodeTestImport	ts_parser_new	1	deleted right after the parse, before the null-tree return
+jsrunner.h	hasNodeTestImport	ts_parser_parse_string	1	the tree is deleted by hand after the whole-tree walk, before the return
+jsrunner.h	relativeImportsResolvable	ts_parser_new	1	deleted right after the parse, before the null-tree return
+jsrunner.h	relativeImportsResolvable	ts_parser_parse_string	1	deleted on the has-error return and right after the specifier walk
 main.cpp	runWithCompactLegend	dup	1	closed on the failure path and after the restore on the success path
 mcpindex.h	arm	dirwatch_open	1	owned	held by the FS watcher, closed by its reset and its destructor
 mcpserver.h	runMcpHttp	accept	1	each accepted connection is closed after its one request

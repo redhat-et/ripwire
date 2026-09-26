@@ -150,14 +150,23 @@ inline std::string nextFlag( std::string_view flag, std::string_view value )
 // for, and the page boundaries stopped lining up. `pageLimit` is the caller's --limit (0 = none was given, and
 // then none is added: the default window is what the next page uses too). `invocation` carries every other flag
 // that shapes the rows (--zoom=D, --zoom-levels=N), since the next page must be a page of the SAME listing.
-inline std::string pagedNext( std::string_view invocation, int pageLimit, std::size_t nextOffset )
+//
+// `offsetAtZero` (folded in on 2026-09-25 with the next=-length-ceiling removal): --tree/--zoom/--external-surface
+// always page an already-cut
+// listing, so their next offset is never 0 and `--offset=` always belongs — the default keeps that. --for's
+// widening page (forpage.h's forPageInvocation) is the one caller whose FIRST page is offset 0, and there
+// `--offset=0` must stay unemitted (forwidencheck.sh arm 5 pins the bare `--limit=40` tail); it passes false.
+inline std::string pagedNext( std::string_view invocation, int pageLimit, std::size_t nextOffset, bool offsetAtZero = true )
 {
     std::string out( invocation );
     if( pageLimit > 0 )
     {
         out += " --limit=" + std::to_string( pageLimit );
     }
-    out += " --offset=" + std::to_string( nextOffset );
+    if( nextOffset > 0 || offsetAtZero )
+    {
+        out += " --offset=" + std::to_string( nextOffset );
+    }
     return out;
 }
 

@@ -93,10 +93,18 @@ has not been verified against a real install yet. If you use one, the help-wante
 [#69 (Hermes)](https://github.com/redhat-et/ripwire/issues/69) and
 [#68 (openclaw)](https://github.com/redhat-et/ripwire/issues/68) ask for exactly that check.
 
-The skills are symlinks named `ripwire-*`. Re-running the installer is safe: it refreshes the links and
-removes any that a newer release no longer ships. openclaw reads `~/.agents/skills` only while its state
-directory is the default `~/.openclaw`. Add `--contributor` to also activate the skill for building ripwire
-itself.
+The skills are symlinks named `ripwire-*` — a copy instead, marked as the installer's own, when a symlink
+can't be made (e.g. Windows without Developer Mode). Re-running the installer is safe: it refreshes the
+links and copies it manages and removes any that a newer release no longer ships, but it only ever
+replaces a real directory it can prove is its own; a real `ripwire-*` directory it did not create (yours)
+is left untouched, with a one-line note, and is never counted as installed. A copied skill is ours; edit
+your own copy under a different name. openclaw reads `~/.agents/skills` only while its state directory is
+the default `~/.openclaw`. Add `--contributor` to also activate the skill for building ripwire itself.
+
+On Windows (the release zip), run the installer in the unzipped folder from a Git Bash window, or from PowerShell by
+Git Bash's full path:
+`& "C:\Program Files\Git\bin\bash.exe" skills/install.sh`. A bare `bash` there is often WSL's
+(`C:\Windows\System32\bash.exe`), which installs into the WSL home, where Windows agents never look.
 
 ### Advisory hooks (optional)
 
@@ -136,14 +144,22 @@ rm -f ~/.local/bin/ripwire
 rm -rf ~/.local/share/ripwire
 ```
 
-**2. Skill links.** This deletes only symlinks named `ripwire-*`, never a real directory or another skill.
+**2. Skills.** This deletes symlinks named `ripwire-*`, the `ripwire-*` copies the installer made where a symlink
+could not be (their `.ripwire-installed-copy` marker names the directory itself, the installer's own ownership rule),
+and its manifest. It never deletes another skill, or a `ripwire-*` directory without that marker, such as your own.
 
 ```bash
 for d in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills" "${AGENTS_HOME:-$HOME/.agents}/skills" \
          "$HOME/.agents/skills" "${CODEX_HOME:-$HOME/.codex}/skills" "${HERMES_HOME:-$HOME/.hermes}/skills"; do
-  [ -d "$d" ] && find "$d" -maxdepth 1 -name 'ripwire-*' -type l -delete
+  [ -d "$d" ] || continue
+  find "$d" -maxdepth 1 -name 'ripwire-*' -type l -delete
+  find "$d" -mindepth 1 -maxdepth 1 -name 'ripwire-*' -type d -exec sh -c \
+    'm="$1/.ripwire-installed-copy"; [ -f "$m" ] && [ "$(cat "$m")" = "${1##*/}" ] && rm -rf "$1"' sh {} \;
+  rm -f "$d/.ripwire-manifest-v1"
 done
 ```
+
+A skill you copied by hand carries no marker, so this keeps it; delete that copy yourself.
 
 **3. Hooks** (only if you ran `--hook`). This removes ripwire's entries from Claude Code's `settings.json` and
 Codex's `hooks.json`, keeps every other hook, and saves a `.bak` copy of each file first.

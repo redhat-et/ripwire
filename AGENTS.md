@@ -19,7 +19,7 @@ No build type. `-DCMAKE_BUILD_TYPE=Release` defines `NDEBUG`, which compiles the
 
 ```bash
 python3 test/pargates.py . ./build/ripwire -j 6     # full gate suite, parallel — run in the foreground
-./build/ripwire . >a; ./build/ripwire . >b; diff -q a b   # determinism: output must be byte-identical
+t=$(mktemp -d); ./build/ripwire . >"$t/a"; ./build/ripwire . >"$t/b"; diff -q "$t/a" "$t/b"   # determinism: byte-identical (outputs OUTSIDE the crawled tree)
 ./build/ripwire . | xmllint --noout -                     # XML well-formedness
 ```
 

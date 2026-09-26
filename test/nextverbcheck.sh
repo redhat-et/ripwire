@@ -122,6 +122,36 @@ rrun --callers=@geometry.cpp:5 >"$TMP/ca2"; checkNext "callers @FILE:LINE" "$TMP
 rrun --callees=total_area >"$TMP/ce"; checkNext "callees" "$TMP/ce" '^--expand=total_area$'
 rrun --callers=distance --format=columnar >"$TMP/cac"; checkNext "callers columnar" "$TMP/cac" '^--uses=distance$'
 
+echo "=== (2b) 2026-09-25 regression: --impact with a LONG name keeps its full, runnable --safe-delete= ==="
+# From independent review, 2026-09-25: a long symbol name pushes --impact's root
+# next= past 120 B on an UNCUT answer, and the first draft of this lane's fix replaced a complete,
+# correctly-quoted, runnable next="--safe-delete=NAME" with next_dropped="1" — a working follow-up lost for
+# no reason but its own length. The ruling: nextAttrXml carries no length ceiling at all, so this stays the
+# FULL invocation whatever it costs. checkNext's own `${#v} -le 120` line is a fixture artifact of every
+# OTHER arm in this file, not a runtime contract, so this arm builds a fixture
+# deliberately over it and checks the invocation directly instead of through checkNext.
+LONGSYM="a_very_long_python_function_name_that_a_caller_uses_and_that_pushes_the_next_invocation_well_past_one_hundred_and_twenty_bytes_total"
+LREPO="$TMP/longsym"; mkdir -p "$LREPO"
+printf 'def %s():\n    return 1\n\ndef caller():\n    return %s()\n' "$LONGSYM" "$LONGSYM" > "$LREPO/mod.py"
+( cd "$LREPO" && git init -q && git config user.email "t@example.com" && git config user.name "t" \
+  && git add -A && git commit -q -m "one" ) || { echo "long-symbol fixture git setup failed"; exit 2; }
+( cd "$LREPO" && "$BIN" . --impact="$LONGSYM" --no-cache >"$TMP/im2" 2>"$TMP/im2err" )
+NEXTIM2LINE="$( nexts "$TMP/im2" | grep '^root|' | head -1 )"
+NEXTIM2="${NEXTIM2LINE#*|}"
+if [ -z "$NEXTIM2" ]; then
+    no "impact long-name regression: no next= on --impact=\$LONGSYM's root (want the full --safe-delete= invocation)"
+else
+    if [ "${#NEXTIM2}" -gt 120 ]; then ok "impact long-name regression: fixture next= is ${#NEXTIM2} B (>120) — a real test of the no-ceiling rule"
+    else no "impact long-name regression: fixture next= is only ${#NEXTIM2} B (<=120) — not a real test"; fi
+    printf '%s' "$NEXTIM2" | grep -qE -- "^--safe-delete=${LONGSYM}\$" \
+        && ok "impact long-name regression: next=\"$NEXTIM2\" is the full --safe-delete=$LONGSYM, never dropped" \
+        || no "impact long-name regression: next=\"$NEXTIM2\" does not match /^--safe-delete=$LONGSYM\$/"
+    python3 -c 'import shlex, sys; print( "\0".join( shlex.split( sys.argv[1] ) ), end = "" )' "$NEXTIM2" > "$TMP/argv2.bin"
+    rc2="$( ( cd "$LREPO" && xargs -0 "$BIN" . --no-cache < "$TMP/argv2.bin" >"$TMP/nx2.out" 2>"$TMP/nx2.err" ); echo $? )"
+    if [ "$rc2" = 0 ] || [ "$rc2" = 4 ]; then ok "impact long-name regression: next=\"$NEXTIM2\" parses and runs (exit $rc2)"
+    else no "impact long-name regression: next=\"$NEXTIM2\" exits $rc2: $( head -c 160 "$TMP/nx2.err" | tr '\n' ' ' )"; fi
+fi
+
 echo "=== (3) --quality-delta: every gating row carries --expand=FILE:NAME ==="
 rrun --quality-delta >"$TMP/qd"
 gating="$( grep -o '<r [^>]*gating="1"[^>]*>' "$TMP/qd" | wc -l | tr -d ' ' )"

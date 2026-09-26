@@ -281,6 +281,48 @@ its base are unrelated in the graph and `--uses` on the base reports no `role="e
 GDScript extraction landed at revision 98 — `kParserVer` in `src/ingest_cache.h`, mirrored by
 `kIngestParserVerMirror` in `src/quality.h`; snapshot scheme is unchanged.
 
+<a id="astro-extraction"></a>
+
+Astro is the first extension whose parse is restricted to a SUB-RANGE of the file. An `.astro` file is a
+`---`-fenced frontmatter block (TypeScript) followed by a template, and only the frontmatter is parsed —
+through the one `ts_parser_set_included_ranges()` call in this tree (`src/ingest_sidecap.h`,
+`astroFrontmatterRange`/`IncludedRangeGuard`), applied at all three parse drivers so the symbol index, the
+span tiers and the AST-query pass cannot disagree. The fences are found by BYTES, never by a parse.
+
+THE FLOOR, measured before the row was added, on 1902 real `.astro` files (withastro/{docs,astro,starlight},
+onwidget/astrowind, satnaing/astro-paper and two private sites). Mapping `.astro` to the TypeScript grammar
+WHOLESALE degrades **1878 of 1902** files, median ERROR-byte ratio 0.33–1.00 per corpus — against the 0.0081
+`.metal` ships at and the 0.123 the C grammar was REJECTED at for CUDA. Frontmatter-only degrades **1 of
+1902**, and that one file is `astro-frontmatter-syntax-error.astro`, which Astro ships deliberately to test
+its own error reporting. That gap is why the template is refused rather than error-recovered.
+
+WHAT IT CANNOT SEE, and every item is a real loss, not a rounding:
+- **The template half is not read at all.** A `<script>` body, an `{ expression }` interpolation and a
+  `client:*` directive are all invisible, so a call made ONLY from the template produces no edge. On
+  withastro/docs the wholesale parse found 2375 edges against frontmatter-only's 2309; the difference is
+  template-side calls plus error-recovery noise, and this build takes none of it.
+- **An `.astro` file reports `lang="ts"`.** It rides `Lang::TypeScript` deliberately: `langCompatible()`
+  admits only same-`Lang` pairs, so a `Lang::Astro` of its own would not resolve a frontmatter call into the
+  `.ts` service it imports — which is the entire point of issue #67.
+- **Most recovered callers are `<file-scope>`.** Astro frontmatter is module-level code, so its top-level
+  calls are owned by the module-scope node issue #60 mints, not by a named function.
+- **A `---` inside a template literal or a comment in the frontmatter ends the block early.** The scan is
+  lexical: symbols before the stray fence are kept, the rest are lost, and the file is flagged
+  `degraded-parse`. The two refusals are NOT the same answer: a
+  file with no fence at all is an ordinary template-only component and is silent, while a file that opens
+  `---` and never closes it is frontmatter we can see the start of and cannot extract — that one is
+  disclosed through `ExtractShortfall` and appears as `<f why="extract-partial"/>` under `--skipped`,
+  because a silent zero there is exactly what the honesty guardrail refuses. `test/astrocheck.sh` pins
+  both shapes, including that the ordinary ones stay undisclosed.
+- No Astro grammar is vendored. `virchau13/tree-sitter-astro` at the revision the ecosystem pins
+  (`213f6e69`, 2025-04-19) lexes the whole frontmatter as ONE opaque external token and ships no `tags.scm`,
+  so it yields no definitions; `PRRPCHT/tree-sitter-astro-next` has the same design and no adoption.
+- `.vue`, `.svelte` and `.mdx` are still not indexed as code. The included-range primitive this adds is what
+  each of them would reuse.
+
+Astro extraction landed at revision 122 — `kParserVer` in `src/ingest_cache.h`, mirrored by
+`kIngestParserVerMirror` in `src/quality.h`; snapshot scheme is unchanged.
+
 The three config lanes are *data*, not code: they emit `t="sec"` symbols and **zero call edges**, and
 `langCompatible` keeps a config key from ever resolving a same-spelled code symbol. They differ in
 where the navigable unit sits. JSON cuts at document depth — top-level and second-level object
@@ -568,7 +610,8 @@ fixed-canonical-merge-order reduction strategy this one does — independent agr
 strategy is right — and then partitions it by `hardware_concurrency()`, inheriting exactly this
 class. The strategy is only half the property; the partition has to be a property of the source.
 
-The gate is `./build/ripwire DIR > a; ./build/ripwire DIR > b; diff -q a b`, run three times.
+The gate is `t=$(mktemp -d); ./build/ripwire DIR >"$t/a"; ./build/ripwire DIR >"$t/b"; diff -q "$t/a" "$t/b"`, run three
+times, with both outputs outside `DIR` so the second run does not crawl the first run's output.
 Anything that makes output depend on timing is a bug even when the ranking still looks right.
 
 Tests follow from this. Float comparisons assert a **tolerance band** and the top-K **order**, never

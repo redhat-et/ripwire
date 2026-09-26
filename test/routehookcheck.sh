@@ -768,6 +768,44 @@ if [ -s "$O11LOG" ]; then
 else
     no "O11 route: the codex hook never reached the stub in a git work tree, so its O11 arms proved nothing"
 fi
+# Git's repository-selection variables inherited from the caller. With GIT_DIR exported (alone, or with GIT_WORK_TREE
+# naming an ancestor of cwd), `git -C "$cwd" rev-parse --is-inside-work-tree` answers for THAT repository and prints
+# `true` in a non-git cwd; with both naming another repository, a real work tree cwd reads `false`. Both hooks clear
+# them, so the answer, and the classifier's own git calls, belong to the JSON cwd. This stub also records whether
+# GIT_DIR reached the classifier. RED on the hooks without the clear: the two non-git cwds reached the stub, and the
+# work tree cwd never did.
+O11ENVBIN="$TMP/o11envbin"; mkdir -p "$O11ENVBIN"
+printf '#!/bin/sh\nprintf "%%s GIT_DIR=%%s\\n" "$*" "${GIT_DIR-unset}" >>"%s"\n' "$O11LOG" >"$O11ENVBIN/ripwire"
+chmod +x "$O11ENVBIN/ripwire"
+O11OTHER="$TMP/o11other"; mkdir -p "$O11OTHER"; git -C "$O11OTHER" init -q
+for o11hook in "$HOOK" "$ROOT/hooks/ripwire-codex-route.sh"; do
+    o11h="$( basename "$o11hook" )"
+    for o11case in "GIT_DIR only" "GIT_DIR and an ancestor GIT_WORK_TREE" "GIT_DIR and GIT_WORK_TREE"; do
+        case "$o11case" in
+            "GIT_DIR only")                          o11env="GIT_DIR=$REPO/.git" ;;
+            "GIT_DIR and an ancestor GIT_WORK_TREE") o11env="GIT_DIR=$REPO/.git GIT_WORK_TREE=$TMP" ;;
+            *)                                       o11env="GIT_DIR=$REPO/.git GIT_WORK_TREE=$REPO" ;;
+        esac
+        : >"$O11LOG"
+        # shellcheck disable=SC2086 # o11env is one or two VAR=VAL words, split on purpose
+        printf '%s' "$( promptjson o11e "$NONREPO" "$RECPROMPT" )" \
+            | env HOME="$TMP/fakehome" RIPWIRE_HOME="$H11" PATH="$O11ENVBIN:$PATH" $o11env bash "$o11hook" >/dev/null 2>&1
+        if [ -s "$O11LOG" ]; then
+            no "O11 route: $o11h called ripwire in a non-git cwd with an inherited $o11case: [$( tr '\n' ' ' <"$O11LOG" )]"
+        else
+            ok "O11 route: $o11h never calls ripwire in a non-git cwd with an inherited $o11case"
+        fi
+    done
+    : >"$O11LOG"
+    printf '%s' "$( promptjson o11f "$REPO" "$RECPROMPT" )" \
+        | env HOME="$TMP/fakehome" RIPWIRE_HOME="$H11" PATH="$O11ENVBIN:$PATH" \
+              GIT_DIR="$O11OTHER/.git" GIT_WORK_TREE="$O11OTHER" bash "$o11hook" >/dev/null 2>&1
+    if grep -q ' GIT_DIR=unset$' "$O11LOG" 2>/dev/null; then
+        ok "O11 route: $o11h routes a work tree cwd whose inherited GIT_DIR/GIT_WORK_TREE name another repository, with GIT_DIR cleared"
+    else
+        no "O11 route: $o11h, work tree cwd with an inherited GIT_DIR/GIT_WORK_TREE naming another repository: want a call with GIT_DIR unset, got [$( tr '\n' ' ' <"$O11LOG" )]"
+    fi
+done
 
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "SOME CHECKS FAILED"; exit 1; fi

@@ -114,6 +114,6 @@ cmake --build "$OPT" -j "$JOBS" >"$OPT/build.log" 2>&1 || {
 
 echo "pgobuild: done — $OPT/ripwire (profile: $PROFILE)"
 echo "pgobuild: verify before you trust it:"
-echo "  $OPT/ripwire $ROOT >a; $OPT/ripwire $ROOT >b; diff -q a b        # determinism is a contract"
+echo "  t=\$(mktemp -d); $OPT/ripwire $ROOT >\"\$t/a\"; $OPT/ripwire $ROOT >\"\$t/b\"; diff -q \"\$t/a\" \"\$t/b\"   # determinism is a contract (outputs outside the tree)"
 echo "  diff -q <($OPT/ripwire $ROOT) <($ROOT/build/ripwire $ROOT)       # PGO must not change a byte of output"
 echo "  RIPWIRE_BIN=$OPT/ripwire python3 $ROOT/test/pargates.py $ROOT $OPT/ripwire -j 6"

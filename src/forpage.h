@@ -139,18 +139,15 @@ inline std::size_t distinctFilesOf( const IngestResult& ing, const std::vector<N
     return split.src.size() + split.tests.size();
 }
 
-// `--for=TASK --limit=N [--offset=M]`, the task quoted as a shell would need it (nextFlag). "" when the
-// invocation would not fit kNextAttrMaxBytes — a hint that pastes wrong is worse than no hint (the flipimpact.h
-// rule), and the paging quintet still says how to continue.
+// `--for=TASK --limit=N [--offset=M]`, the task quoted as a shell would need it (nextFlag). Built and emitted
+// in FULL, whatever its length: nextAttrXml (nextverb.h) carries no ceiling on next= (2026-09-25 fix: a
+// cut answer's next= used to be dropped past 120 B)
+// — the paging quintet still says how to continue, but the attribute itself is never truncated or dropped.
+// Folded onto pagedNext (nextverb.h), the same composer --tree/--zoom/--external-surface use, with
+// offsetAtZero=false: --for's page 0 must stay `--limit=N` with no `--offset=0` tail (forwidencheck.sh arm 5).
 inline std::string forPageInvocation( std::string_view task, int limit, int offset )
 {
-    std::string inv = nextFlag( "--for=", task );
-    inv += " --limit=" + std::to_string( limit );
-    if( offset > 0 )
-    {
-        inv += " --offset=" + std::to_string( offset );
-    }
-    return inv.size() > kNextAttrMaxBytes ? std::string() : inv;
+    return pagedNext( nextFlag( "--for=", task ), limit, std::size_t( std::max( offset, 0 ) ), /*offsetAtZero=*/false );
 }
 
 // the r=1 row's widening follow-up: the page at its default width

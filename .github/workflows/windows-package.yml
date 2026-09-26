@@ -218,10 +218,12 @@ jobs:
           fi
 
       # --doctor with the unzipped directory on PATH, under the conditions a PowerShell user has (no TMPDIR, no
-      # XDG_CACHE_HOME). Every row must pass except binary-path, which on Windows is DISCLOSED as degraded
-      # (degrade_reason="win32-which-spelling": Git Bash's `which` never prints ".exe", src/verbs_doctor.h) and may
-      # read ok="0" on a correct install; the README says so. The cache directory (#326) must be the user's temp
-      # directory's ripwire-<uid>, under %LOCALAPPDATA% — compared in long form, the runner's TEMP is 8.3 (RUNNER~1).
+      # XDG_CACHE_HOME). Every row must pass. binary-path stays DISCLOSED as degraded on Windows
+      # (degrade_reason="win32-which-spelling": Git Bash's `which` never prints ".exe", src/verbs_doctor.h), but since
+      # #334 it retries the ".exe" spelling, so the unzipped exe first on PATH must read ok="1" same_file="1". Then a
+      # fake older `ripwire` put first on PATH must fail the row on identity and be named by its own --version line.
+      # The cache directory (#326) must be the user's temp directory's ripwire-<uid>, under %LOCALAPPDATA% — compared
+      # in long form, the runner's TEMP is 8.3 (RUNNER~1).
       - name: "--doctor passes, and the cache directory is under %LOCALAPPDATA% (#326)"
         run: |
           unset TMPDIR XDG_CACHE_HOME
@@ -236,9 +238,18 @@ jobs:
           [ -z "$bad" ] || { echo "windows-package: --doctor rows failed (rc=$rc): $bad" >&2; exit 1; }
           bp="$( grep -o '<c n="binary-path"[^>]*>' doctor.xml )"
           case "$bp" in
-            *'ok="1"'*) echo "binary-path ok" ;;
-            *'degraded="1" degrade_reason="win32-which-spelling"'*) echo "binary-path: disclosed Windows degrade (expected): $bp" ;;
-            *) echo "windows-package: binary-path failed without the disclosed Windows degrade: $bp" >&2; exit 1 ;;
+            *' ok="1"'*' same_file="1"'*) echo "binary-path ok, the unzipped exe itself: $bp" ;;
+            *) echo "windows-package: binary-path does not resolve the unzipped ripwire.exe on PATH as this binary: $bp" >&2; exit 1 ;;
+          esac
+          fake="$( cygpath -u "$RUNNER_TEMP" )/rw-older-ripwire"; mkdir -p "$fake"
+          printf '%s\n' '#!/bin/sh' 'echo "ripwire 0.6.2 (Release, fake, emit=std::print, built_from=0000000f334)"' > "$fake/ripwire"
+          chmod +x "$fake/ripwire"
+          PATH="$fake:$PATH" "$pkgdir/ripwire.exe" "$( cygpath -w "$GITHUB_WORKSPACE" )" --doctor > doctor-stale.xml || true   # the real exe, by path: `ripwire` is the fake now
+          sp="$( grep -o '<c n="binary-path"[^>]*>' doctor-stale.xml )"
+          echo "with an older ripwire first on PATH: $sp"
+          case "$sp" in
+            *' ok="0"'*' same_file="0"'*'which_version="ripwire 0.6.2 (Release, fake'*'hint="STALE: '*'rw-older-ripwire/ripwire (ripwire 0.6.2'*) ;;
+            *) echo "windows-package: an older ripwire first on PATH was not reported as the stale 0.6.2" >&2; exit 1 ;;
           esac
           dir="$( grep -o '<c n="cache-dir"[^>]*>' doctor.xml | sed -n 's/.* dir="\([^"]*\)".*/\1/p' )"
           long="$( cygpath -m -l "$dir" )"; lad="$( cygpath -m -l "$LOCALAPPDATA" )"; tmp="$( cygpath -m -l "$( cygpath -w "$TEMP" )" )"
@@ -253,7 +264,10 @@ jobs:
           esac
 
       # (g) A cold crawl of a fresh copy creates a cache blob; a warm crawl reuses it: same bytes out, no new blob,
-      # and --doctor's index-cache row reads the lean artifact for that root as present and openable.
+      # and --doctor's index-cache row reads the lean artifact for that root as present and openable. Counting blobs
+      # cannot tell reuse from a refuse-and-rewrite of the same path (#334: a tester saw `format-version — not used`
+      # on every run), so the warm run's own cache-stats line must say every file was reused and none re-parsed, and
+      # its stderr must carry no "not used" refusal.
       - name: The cache is created on the first run and reused on the second
         run: |
           unset TMPDIR XDG_CACHE_HOME
@@ -265,7 +279,8 @@ jobs:
           grep -o '<c n="index-cache"[^>]*>' d0.xml | grep -o ' lean="[a-z-]*"'
           "$exe" cachefx > cold.xml
           b1="$( blobs d1.xml )"
-          "$exe" cachefx > warm.xml
+          RIPWIRE_CACHE_STATS=1 "$exe" cachefx > warm.xml 2> warm.err
+          cat warm.err
           b2="$( blobs d2.xml )"
           lean="$( grep -o '<c n="index-cache"[^>]*>' d2.xml | grep -o ' lean="[a-z-]*"' )"
           echo "blobs: before=$b0 after-cold=$b1 after-warm=$b2; index-cache$lean"
@@ -273,10 +288,19 @@ jobs:
           [ "$b2" = "$b1" ] || { echo "windows-package: the warm run wrote a new blob instead of reusing one ($b1 -> $b2)" >&2; exit 1; }
           [ "$lean" = ' lean="ok"' ] || { echo "windows-package: --doctor does not see the root's lean artifact as ok after two runs:$lean" >&2; exit 1; }
           cmp cold.xml warm.xml || { echo "windows-package: cold and warm runs printed different bytes" >&2; exit 1; }
+          if grep 'not used' warm.err; then echo "windows-package: the warm run refused the blob the cold run wrote" >&2; exit 1; fi
+          stats="$( grep -o 'cache-stats reparsed=[0-9]* reused=[0-9]* files=[0-9]*' warm.err )"
+          reparsed="$( printf '%s' "$stats" | sed -n 's/.*reparsed=\([0-9]*\).*/\1/p' )"
+          reused="$( printf '%s' "$stats" | sed -n 's/.*reused=\([0-9]*\).*/\1/p' )"
+          nfiles="$( printf '%s' "$stats" | sed -n 's/.*files=\([0-9]*\).*/\1/p' )"
+          { [ "$reparsed" = 0 ] && [ -n "$reused" ] && [ "$reused" -ge 1 ] && [ "$reused" = "$nfiles" ]; } \
+            || { echo "windows-package: the warm run was not a cache hit: '$stats'" >&2; exit 1; }
+          echo "warm run: cache hit, $reused of $nfiles files reused, 0 re-parsed"
 
       # The README's skills route for Windows: skills/install.sh, from the unzipped folder (a path with a space), under
-      # Git Bash, into a sandbox HOME. Git Bash's `ln -s` may copy rather than link; either way every skill must land
-      # with a readable SKILL.md. --hook is not exercised: the hooks are bash scripts and the README calls them untested.
+      # Git Bash, into a sandbox HOME. Whether Git Bash's `ln -s` links or not, EVERY user-facing skill must land with
+      # a SKILL.md that a NATIVE Windows program (python.exe, not an MSYS tool) can read, and the manifest must declare
+      # exactly those. --hook is not exercised: the hooks are bash scripts and the README calls them untested.
       - name: skills/install.sh from the unzipped folder under Git Bash (Claude Code and Codex destinations)
         run: |
           h="$( cygpath -u "$RUNNER_TEMP" )/rw skills home"
@@ -284,12 +308,37 @@ jobs:
           cd "$( cygpath -u "$RW_DIR" )"
           env -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u AGENTS_HOME HOME="$h" bash skills/install.sh
           env -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u AGENTS_HOME HOME="$h" bash skills/install.sh --codex
-          want=0; for s in skills/ripwire-*/SKILL.md; do [ -f "$s" ] && want=$(( want + 1 )); done
+          want=0; for s in skills/ripwire-*/SKILL.md; do grep -q '^audience: contributor' "$s" || want=$(( want + 1 )); done
+          chk="$( cygpath -u "$GITHUB_WORKSPACE" )/scripts/ci-windows-skills-check.sh"   # scripts/ is not in the package
           for d in "$h/.claude/skills" "$h/.agents/skills"; do
-            n=0; for s in "$d"/ripwire-*/SKILL.md; do [ -f "$s" ] && n=$(( n + 1 )); done
-            echo "$d: $n of $want skills installed with a readable SKILL.md"
-            [ "$n" -ge 10 ] || { echo "windows-package: skills/install.sh installed $n skills into $d" >&2; exit 1; }
+            bash "$chk" "$d" "$want"
           done
+
+      # (h) #334: on a Windows machine WITHOUT symlink privilege, Git Bash's `ln -sfn DIR DEST` exits 0 and leaves an
+      # EMPTY directory, and the 0.6.3 installer announced sixteen empty directories as active skills. This runner HAS
+      # the privilege, so the step above never takes that path. Here an `ln` that behaves like that Git Bash comes
+      # first on PATH: every skill must be reported `copied`, read back natively, and be declared in the manifest.
+      # Then MSYS=winsymlinks:nativestrict, the mode that must either make a real native link or fall back the same way.
+      - name: "skills/install.sh where ln -s links nothing (#334): every skill copied, verified, declared"
+        run: |
+          h="$( cygpath -u "$RUNNER_TEMP" )/rw nolink home"; shim="$( cygpath -u "$RUNNER_TEMP" )/rw-ln-shim"
+          rm -rf "$h" "$shim" && mkdir -p "$h" "$shim"
+          cat > "$shim/ln" <<'LNSHIM'
+          #!/bin/sh
+          for last in "$@"; do :; done
+          [ -e "$last" ] || [ -L "$last" ] || mkdir -p "$last"
+          exit 0
+          LNSHIM
+          chmod +x "$shim/ln"
+          chk="$( cygpath -u "$GITHUB_WORKSPACE" )/scripts/ci-windows-skills-check.sh"
+          cd "$( cygpath -u "$RW_DIR" )"
+          want=0; for s in skills/ripwire-*/SKILL.md; do grep -q '^audience: contributor' "$s" || want=$(( want + 1 )); done
+          PATH="$shim:$PATH" bash skills/install.sh "$h/copied" | tee copied.out
+          [ "$( grep -c '^copied ripwire-' copied.out )" -eq "$want" ] || { echo "windows-package: expected $want 'copied' lines under a no-op ln" >&2; exit 1; }
+          if grep '^installed ripwire-' copied.out; then echo "windows-package: a skill was reported linked by an ln that links nothing" >&2; exit 1; fi
+          bash "$chk" "$h/copied" "$want"
+          MSYS=winsymlinks:nativestrict bash skills/install.sh "$h/native" | tee native.out
+          bash "$chk" "$h/native" "$want"
 
       # (c, d, f) The fixed cross-platform verb set on the unzipped exe, TWICE: the two runs must be byte-identical
       # (determinism), the script itself fails on a malformed MCP handshake, and the first run's outputs go to

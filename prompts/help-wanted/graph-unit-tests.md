@@ -423,7 +423,7 @@ bash test/csrpagerankcheck.sh
 bash test/manifestcheck.sh && bash test/gatecountcheck.sh && bash test/binoverridecheck.sh && bash test/gateexitcheck.sh
 bash test/strkerncheck.sh && bash test/dependencypincheck.sh    # both configure RIPWIRE_TESTS too
 bash test/formatgatecheck.sh                                    # clang-format 22 on the gated files; skips without it
-./build/ripwire . > a; ./build/ripwire . > b; diff -q a b       # determinism; src/ is unchanged
+t=$(mktemp -d); ./build/ripwire . >"$t/a"; ./build/ripwire . >"$t/b"; diff -q "$t/a" "$t/b"   # determinism; src/ is unchanged
 ```
 
 Keep extra build trees outside the checkout. A gitignored directory inside it is still counted by the

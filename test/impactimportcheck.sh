@@ -306,6 +306,13 @@ R_NX="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$RS" $INX --no-cache 2>/dev/null
 ri --json | grep -q '"importers_next":"--impact=importHubFn --limit=48"' \
     && ok "next: the --json dialect carries the same importers_next" \
     || no "next: --json lacks \"importers_next\" on the cut tier"
+# --format=columnar serves the import tier as its count only, and its lens= names what it withholds that the XML root
+# carries. importers_next= is on the XML root only when the tier is cut, so lens= names it exactly then. RED on
+# 17963410: the cut tier's lens= named only shown_importers,importers_capped.
+LCUT="$( attr lens "$( ri --format=columnar )" )"; LALL="$( attr lens "$( ri --limit=100 --format=columnar )" )"
+{ [ "$LCUT" = "shown_importers,importers_capped,importers_next" ] && [ "$LALL" = "shown_importers,importers_capped" ]; } \
+    && ok "next: --format=columnar's lens= names importers_next on the cut tier, and not on the uncut one" \
+    || no "next: --format=columnar lens='$LCUT' on the cut tier (want shown_importers,importers_capped,importers_next), lens='$LALL' uncut (want shown_importers,importers_capped)"
 rm -rf "$RS"
 
 # ── #10 determinism + well-formedness ─────────────────────────────────────────────────────────────────

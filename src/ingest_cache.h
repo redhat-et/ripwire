@@ -279,7 +279,14 @@ constexpr std::uint32_t kCacheVersion = 25;           // 25: #150 AND #157 (trai
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 121;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 122;          // bump on any grammar/.scm/extraction change
+                                                      // 122 = 2026-09-25 (#320/#67, test/astrocheck.sh): .astro joins
+                                                      //   kLangTable on the TypeScript grammar, parsed through ONE
+                                                      //   included range over its `---` frontmatter; blank lines
+                                                      //   before the opening fence are skipped. Carried as 120 on
+                                                      //   the PR; renumbered 122 after #150 (120) and #310 (121).
+                                                      //   No record layout change: kCacheVersion stays 25 (NOT 24);
+                                                      //   kQSnapCacheScheme stays 14.
                                                       // 121 = 2026-09-24 (#310, Ruby class-level attribute DSL,
                                                       //   test/rubyattrscheck.sh — the attr_* floor reversal): a
                                                       //   class-body-level receiver-less attr_reader/attr_writer/
@@ -1628,6 +1635,7 @@ struct CacheFrame
     long long               mtimeNs     = -1;// the blob's own mtime — the warm-run racy-rule reference
     bool                    ok          = false;
     CacheReject             reason      = CacheReject::Absent;   // meaningful only while ok == false
+    std::uint32_t           foundStamp  = 0; // FormatVersion: the blob's kCacheVersion; ParserVersion: its parserVer
 };
 
 // pread the whole of [ off, off+n ) into `dst`. Short reads are retried (a pread on a regular file can
@@ -1711,14 +1719,16 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
             // different things to be told about a committed artifact.
             DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
                       "ingest: cache blob is a different format version — rejected and rebuilt (full reparse)" );
-            frame.reason = CacheReject::FormatVersion;
+            frame.reason     = CacheReject::FormatVersion;
+            frame.foundStamp = version;
             return frame;
         }
         if( parserVer != parserVerFor( captureValueUses ) )
         {
             DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
                       "ingest: cache blob parserVer mismatch (older binary, or the other lean/rich family) — rejected and rebuilt (full reparse)" );
-            frame.reason = CacheReject::ParserVersion;
+            frame.reason     = CacheReject::ParserVersion;
+            frame.foundStamp = parserVer;
             return frame;
         }
         if( arch != kArtifactArch )
@@ -2361,6 +2371,36 @@ struct CacheLoadStats
     std::size_t recordsRead = 0;    // records actually deserialised: how many this crawl asked for and got
 };
 
+// The stderr notice for a blob loadCache refused. 2026-09-06 stranger audit: every reject self-healed to a full
+// reparse with NO signal a Release binary keeps (the debug-only alert compiles out under NDEBUG) — a torn blob, an older
+// binary's blob, a directory passed as --cache: all byte-identical to a healthy run, just slower, every time. The
+// ordinary cold-start miss (absent) stays silent; anything else says what it found, once per run.
+//
+// #334: a Windows tester alternating 0.6.2 and 0.6.3 on one tree saw `format-version — not used` on every run and read
+// it as "the CLI never reuses its cache". The blob path is keyed by root and verb class, not by build, so two builds of
+// different formats that alternate on one tree refuse and rewrite each other's blob every time, while one build run
+// twice reuses its own. A version refusal now names the number it found and the one this binary reads, so the cause is
+// on the line. It is APPENDED: the line up to "rewrites it" is unchanged, and gates grep that prefix
+// (test/localscountcheck.sh, test/cachefuzzcheck.sh).
+inline void noteCacheReject( const std::string& path, const CacheFrame& frame, bool captureValueUses )
+{
+    if( frame.reason == CacheReject::Absent )
+    {
+        return;
+    }
+    const bool format  = frame.reason == CacheReject::FormatVersion;
+    const bool version = format || frame.reason == CacheReject::ParserVersion;
+    char detail[ 192 ] = "";
+    if( version )
+    {
+        rw::formatTo( detail, sizeof( detail ),
+                      " (blob {} {}, this binary {}: another ripwire build wrote it; two builds alternating on one tree re-parse every run)",
+                      format ? "format" : "parser", frame.foundStamp, format ? kCacheVersion : parserVerFor( captureValueUses ) );
+    }
+    rw::emitTo( stderr, "ripwire: cache {}: {} — not used; this run parses from source and rewrites it{}\n",
+                path.c_str(), cacheRejectName( frame.reason ), rw::cstr( detail ) );
+}
+
 // load cache → map<path, FileFacts>, keyed by the ABSOLUTE-AS-CRAWLED path under `rootDir` (matching
 // result.files' spelling) even though the on-disk record key is root-relative (T5 portability — see
 // kCacheVersion=3 above). Empty on missing / corrupt / version-or-parserVer mismatch.
@@ -2390,15 +2430,7 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
     const CacheFrame frame = openCacheFrame( path, captureValueUses );
     if( !frame.ok )
     {
-        // 2026-09-06 stranger audit: every reject here self-healed to a full reparse with NO signal a Release
-        // binary keeps (the debug-only alert compiles out under NDEBUG) — a torn blob, an older binary's blob, a
-        // directory passed as --cache: all byte-identical to a healthy run, just slower, every time. The
-        // ordinary cold-start miss (absent) stays silent; anything else says what it found, once per run.
-        if( frame.reason != CacheReject::Absent )
-        {
-            rw::emitTo( stderr, "ripwire: cache {}: {} — not used; this run parses from source and rewrites it\n",
-                          path.c_str(), cacheRejectName( frame.reason ) );
-        }
+        noteCacheReject( path, frame, captureValueUses );
         return out;
     }
     stats.blobWriteNs = frame.mtimeNs;

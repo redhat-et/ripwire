@@ -278,5 +278,47 @@ printf '%s' "$D10" | grep -q '<capped what="depth" at="8"/>' \
 printf '%s' "$D10" | grep -q 'what=depth' \
     && ok "depth: the capped clause defining what=depth rides with the row" || no "depth: <capped what=\"depth\"> emitted with no clause defining it"
 
+# ── 2026-09-25: a next= over 120 B used to be dropped SILENTLY (base), then this lane's
+# first draft replaced a complete, runnable invocation with next_dropped="1" instead — a working follow-up
+# lost either way for no reason but its own length. The ruling: nextAttrXml carries NO length ceiling, so
+# flipNextInvocation's full "--flags --flip=NAME --limit=N" is now always emitted, and it must actually
+# paste and run. RED on origin/main's binary: this fixture's gate name alone pushes the invocation past
+# 120 B, and the pre-fix binary emits no next= at all.
+LONGGATE="FIXTURE_ANSWERSNEXT064_A_VERY_LONG_MACRO_GATE_NAME_THAT_PUSHES_THE_NEXT_INVOCATION_PAST_ONE_HUNDRED_TWENTY_BYTES_XYZ"
+LG="$TMP/longgate"; mkdir -p "$LG"
+{ printf '#pragma once\n#ifndef %s\n#define %s 0\n#endif\n#if %s\n' "$LONGGATE" "$LONGGATE" "$LONGGATE"
+  i=0; while [ $i -lt 30 ]; do printf 'int hostFn%d() { return %d; }\n' $i $i; i=$(( i + 1 )); done
+  printf '#endif\n'; } >"$LG/gate.h"
+NEXTLONG="$( flip "$LG" "$LONGGATE" )"
+[ "$( attr "$NEXTLONG" flip hosts )" = "30" ] && [ "$( attr "$NEXTLONG" hosts hosts_capped )" = "1" ] \
+    && ok "E2 guard: the 30-host fixture really cuts hosts at 25 (hosts_capped=\"1\") — the arms below can fail" \
+    || no "E2 guard: fixture did not cut (hosts=$( attr "$NEXTLONG" flip hosts ) hosts_capped=$( attr "$NEXTLONG" hosts hosts_capped )) — the next= arms below are vacuous"
+NEXTLONGVAL="$( attr "$NEXTLONG" flip next )"
+if [ -z "$NEXTLONGVAL" ]; then
+    no "E2: no next= on the cut, over-120-byte flip report (want the full --flags --flip=$LONGGATE --limit=…)"
+else
+    if [ "${#NEXTLONGVAL}" -gt 120 ]; then ok "E2: the over-120-byte next= is emitted in full (${#NEXTLONGVAL} B), never dropped"
+    else no "E2: fixture next= is only ${#NEXTLONGVAL} B (<=120) — not a real test of the no-ceiling rule"; fi
+    python3 -c 'import shlex, sys; print( "\0".join( shlex.split( sys.argv[1] ) ), end = "" )' "$NEXTLONGVAL" > "$TMP/e2argv.bin"
+    E2RC="$( ( cd "$LG" && xargs -0 "$BIN" . --no-cache < "$TMP/e2argv.bin" >"$TMP/e2.out" 2>"$TMP/e2.err" ); echo $? )"
+    if [ "$E2RC" = 0 ]; then
+        E2RERUN="$( cat "$TMP/e2.out" )"
+        [ "$( attr "$E2RERUN" hosts hosts_capped )" != "1" ] \
+            && ok "E2: the pasted next= re-runs and its own --limit= now shows every host uncapped" \
+            || no "E2: the pasted next=\"$NEXTLONGVAL\" re-ran but hosts are STILL capped: $( printf '%s' "$E2RERUN" | grep -o '<hosts[^>]*>' )"
+    else
+        no "E2: the pasted next=\"$NEXTLONGVAL\" exits $E2RC instead of running: $( head -c 160 "$TMP/e2.err" | tr '\n' ' ' )"
+    fi
+fi
+# control: a short gate name that still cuts DOES carry a real, runnable next=
+SHORTLONG="$( flip "$FIX" FIXTURE_DARK_FEATURE --limit=1 )"
+SN="$( attr "$SHORTLONG" flip next )"
+if [ -n "$SN" ]; then
+    [ "${#SN}" -le 120 ] && ok "E2 control: a short-name cut flip's next= is ${#SN} B (<=120), and present" \
+                         || no "E2 control: a short-name cut flip's next= is ${#SN} B (>120)"
+else
+    no "E2 control: FIXTURE_DARK_FEATURE --limit=1 carries no next= at all — the control case is vacuous"
+fi
+
 [ $fail -eq 0 ] && echo "flipcheck: ALL PASS" || echo "flipcheck: FAILURES"
 exit $fail

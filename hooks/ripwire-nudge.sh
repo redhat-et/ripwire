@@ -1160,7 +1160,11 @@ then
     [ "$meter_arm" = "control" ] && exit 0
 
     command -v ripwire >/dev/null 2>&1 || exit 0
-    git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
+    # The answer must be `true`, not only exit 0: a bare repository, or a cwd inside a `.git` directory,
+    # prints `false` with status 0 (the #327 shape fixed in the two route hooks, 1cd00d4d) — this primer
+    # would otherwise fire there too and walk git's own metadata for `ripwire wrap`.
+    insideWorkTree="$( git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null )" || exit 0
+    [ "$insideWorkTree" = true ] || exit 0
 
     marker="${TMPDIR:-/tmp}/ripwire-nudge.${session}.session-start"
     [ -e "$marker" ] && exit 0

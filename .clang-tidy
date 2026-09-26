@@ -14,7 +14,6 @@
 # 2026-09-24 on 60b65f02, clang-tidy 22.1.8, the five CI TUs, rows de-duplicated by file:line:col:
 #   gated, 0 rows:  bugprone-use-after-move (1 row, below), bugprone-dangling-handle 0,
 #                   bugprone-sizeof-expression 0, bugprone-integer-division 0, bugprone-infinite-loop 0,
-#                   modernize-use-override 0 (an override whose signature drifted overrides nothing),
 #                   clang-analyzer-core.* 0.
 #     The one use-after-move row, src/ingest_parsepool.h:528, is not a bug: the worker's `bytes` buffer is
 #     moved into the pending queue and every path to the next read refills it with readFile first. The
@@ -28,6 +27,10 @@
 #                   no getenv can race it, worker thread or not; exit is argument parsing; strerror
 #                   formats a stderr line; glibc's and Apple's system() serialise themselves. Too noisy to
 #                   report, so it is NOT in the advisory list.
+#                   modernize-use-override 0 rows (src/ declares no virtual function), gated at first and
+#                   moved to the advisory list after review: it reports a function that DOES override a base
+#                   and only lacks the `override` keyword, so none of its findings is a wrong answer. (A
+#                   drifted signature that overrides nothing is not what it reports.)
 # A new finding in the gating subset is a bug to fix; a gated check that turns out to be noisy is removed
 # from GATING with its count, the way it was admitted. Local run: scripts/tidycheck.sh (it SKIPs, loudly,
 # without clang-tidy 22; on macOS it finds Homebrew's keg-only /opt/homebrew/opt/llvm@22/bin/clang-tidy).
@@ -52,6 +55,7 @@ Checks: >
   performance-*,
   misc-dangling-*,
   misc-redundant-expression,
+  modernize-use-override,
   -readability-*,
   -modernize-avoid-c-arrays,
   -cppcoreguidelines-pro-bounds-*

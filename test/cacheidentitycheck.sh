@@ -244,6 +244,38 @@ else
 fi
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
+# (D2) #334 — THE AUTO BLOB ACROSS TWO BUILDS. A Windows tester alternating 0.6.2 and 0.6.3 on one tree saw
+#      `format-version — not used` on every CLI run. The auto blob's path is keyed by root and verb class, not by
+#      build, so a blob another build wrote is refused, rewritten, and then reused by the NEXT run of this one.
+#      The notice must name both numbers, so the cause is on the line; and a second run must be a real hit.
+# ════════════════════════════════════════════════════════════════════════════════════════════════════
+TH="$TMP/thrash"; mkdir -p "$TH"; cp "$FIXTURE"/*.c "$TH/"
+"$BIN" "$TH" >/dev/null 2>&1
+AUTO="$( find "$TMPDIR" -name 'ripwire-*-lean.bin' -newer "$TH/a.c" 2>/dev/null | head -1 )"
+if [ -n "$AUTO" ]; then
+    ok "(D2) a cold run wrote the auto lean blob"
+else
+    no "(D2) no auto lean blob after a cold run"
+fi
+if [ -n "$AUTO" ]; then
+    patch_u32 "$AUTO" "$TMP/th_other.bin" 4 $(( SRC_CACHEVER - 1 )) && cp "$TMP/th_other.bin" "$AUTO"
+    RIPWIRE_CACHE_STATS=1 "$BIN" "$TH" 2>"$TMP/th1.err" >/dev/null
+    grep -qF "format-version — not used; this run parses from source and rewrites it (blob format $(( SRC_CACHEVER - 1 )), this binary $SRC_CACHEVER: another ripwire build wrote it" "$TMP/th1.err" \
+        && ok "(D2) a blob another build wrote is refused with both format numbers on the line" \
+        || no "(D2) the refusal does not name the blob's format and this binary's: $( grep -m1 'not used' "$TMP/th1.err" )"
+    RIPWIRE_CACHE_STATS=1 "$BIN" "$TH" 2>"$TMP/th2.err" >/dev/null
+    reused="$( sed -n 's/.*cache-stats reparsed=0 reused=\([0-9]*\) .*/\1/p' "$TMP/th2.err" | head -1 )"
+    { ! grep -q 'not used' "$TMP/th2.err" && [ "${reused:-0}" -ge 2 ]; } \
+        && ok "(D2) the next run of this build reuses the blob it rewrote (reparsed=0 reused=$reused, no 'not used')" \
+        || no "(D2) the next run did not reuse the rewritten blob: $( grep -m1 'cache' "$TMP/th2.err" )"
+    patch_u32 "$AUTO" "$TMP/th_parser.bin" 8 $(( SRC_PARSERVER - 3 )) && cp "$TMP/th_parser.bin" "$AUTO"
+    RIPWIRE_CACHE_STATS=1 "$BIN" "$TH" 2>"$TMP/th3.err" >/dev/null
+    grep -qF "parser-version — not used; this run parses from source and rewrites it (blob parser $(( SRC_PARSERVER - 3 )), this binary $SRC_PARSERVER: another ripwire build wrote it" "$TMP/th3.err" \
+        && ok "(D2) a parser-version refusal names both parser numbers too" \
+        || no "(D2) the parser-version refusal does not name both numbers: $( grep -m1 'not used' "$TMP/th3.err" )"
+fi
+
+# ════════════════════════════════════════════════════════════════════════════════════════════════════
 # (E) ok= AND THE EXIT CODE — a self-healing miss on the AUTO blob is normal and must never fail doctor
 #     (a first run on a cold machine has no blob). An artifact the USER NAMED and this binary cannot read
 #     is a stated expectation that was not met: that, and only that, is ok="0".

@@ -133,9 +133,10 @@ printf '%s' "$DOUT" | grep -q 'health dep_files= = the dependency-CAPABLE subset
 # --deps resolves only relative TS/JS specifiers. An import through a tsconfig/jsconfig `paths` alias, a `baseUrl`-
 # relative path or a workspace package name draws no edge, so a cycle spelled through one is missing and the absent
 # <cycles> element read as "acyclic": a confident wrong zero. Part 1 does not resolve them; it counts them on the
-# ROOT as imports_unresolved=N with counts_floor="1" beside it (pageview.h THE TRUNCATION VOCABULARY rule 4's pairing:
-# the marker names the cause, counts_floor says every count here is a floor), on --deps, --arch, --impact (all three
-# dialects and the MCP twin), and in --report's cycle line. Absent at zero, so a tree with no such import is byte-
+# ROOT as imports_unresolved=N, on --deps, --arch, --impact (all three dialects and the MCP twin), and in --report's
+# cycle line. Its READING is graph_partial="1" on --deps/--arch — measured over resolved edges, NOT counts_floor: a
+# missing edge can merge two reported cycles into one and moves instab= either way, so "every count is a floor" was
+# false there (arm J proves it); --impact keeps its own counts_floor="1" (importers= only rises). Absent at zero, so a tree with no such import is byte-
 # identical. A bare package that matches none of the three (react, left-pad) is never counted. Fixtures are GENERATED
 # here, never committed: this repository indexes itself, and a committed tsconfig would become live evidence.
 mkts() {   # mkts DIR alias|relative|unbuilt — issue #220's matched pair: an npm-workspaces tree; `relative` respells three
@@ -157,18 +158,18 @@ mkts() {   # mkts DIR alias|relative|unbuilt — issue #220's matched pair: an n
     printf "import { c } from './c';\nexport function d(): number { return typeof c === 'function' ? 1 : 0; }\n" >"$D/packages/app/src/d.ts"
 }
 root_of() { sed -n 's/.*\(<deps [^>]*>\).*/\1/p; s/.*\(<arch [^>]*>\).*/\1/p' "$1" | head -1; }
+# partial_root N ROOT — the partial-graph pair, and NO counts_floor= (not every count on --deps/--arch is a floor)
+partial_root() { case "$2" in *"imports_unresolved=\"$1\" graph_partial=\"1\""*) case "$2" in *counts_floor=*) return 1 ;; esac; return 0 ;; esac; return 1; }
 # #220 part 2 resolves the `alias` spelling (its arms are below); the disclosure arms here run on the `unbuilt` one.
 TA="$TMP/ts-alias"; TR="$TMP/ts-rel"; mkts "$TA" unbuilt; mkts "$TR" relative
 "$BIN" "$TA" --deps --no-cache >"$TMP/ta.deps" 2>/dev/null
 "$BIN" "$TR" --deps --no-cache >"$TMP/tr.deps" 2>/dev/null
 
 # (220-A) the unbuilt alias tree: three in-repo specifiers unresolved (@app/b, @app/a through `paths` onto a missing gen/;
-# @acme/lib a workspace member with an unbuilt entry), react NOT counted, and the floor rides the root — base: absent (RED).
+# @acme/lib a workspace member with an unbuilt entry), react NOT counted, and the partial-graph pair rides the root.
 ROOTA="$( root_of "$TMP/ta.deps" )"
-case "$ROOTA" in
-    *'imports_unresolved="3" counts_floor="1"'*) ok "#220 (A) alias tree: <deps imports_unresolved=\"3\" counts_floor=\"1\"> (react not counted)" ;;
-    *) no "#220 (A) alias tree root lacks imports_unresolved=\"3\" counts_floor=\"1\" — got: $ROOTA" ;;
-esac
+partial_root 3 "$ROOTA" && ok "#220 (A) alias tree: <deps imports_unresolved=\"3\" graph_partial=\"1\">, no counts_floor (react not counted)" \
+    || no "#220 (A) alias tree root lacks imports_unresolved=\"3\" graph_partial=\"1\" or still claims counts_floor — got: $ROOTA"
 # the missing cycle is the reason: only c<->d is found through the alias spelling, a<->b is not
 [ "$( grep -o '<cycle ' "$TMP/ta.deps" | wc -l | tr -d ' ' )" = 1 ] \
     && ok "#220 (A) the unbuilt alias spelling finds 1 cycle (a<->b names no file) — disclosed, never guessed" \
@@ -176,18 +177,16 @@ esac
 
 # (220-B) the relative control: the same tree, relative specifiers — both cycles found EXACTLY, no count, no floor.
 ROOTR="$( root_of "$TMP/tr.deps" )"
-{ [ "$( grep -o '<cycle ' "$TMP/tr.deps" | wc -l | tr -d ' ' )" = 2 ] && ! grep -q 'imports_unresolved=\|counts_floor=' "$TMP/tr.deps"; } \
-    && ok "#220 (B) relative control: 2 cycles, exact — no imports_unresolved=, no counts_floor=" \
+{ [ "$( grep -o '<cycle ' "$TMP/tr.deps" | wc -l | tr -d ' ' )" = 2 ] && ! grep -q 'imports_unresolved=\|counts_floor=\|graph_partial=' "$TMP/tr.deps"; } \
+    && ok "#220 (B) relative control: 2 cycles, exact — no imports_unresolved=, graph_partial=, counts_floor=" \
     || no "#220 (B) relative control wrong — root: $ROOTR"
 
 # (220-C) mutation: respell @acme/lib as left-pad (names nothing here) — the count drops by exactly one.
 sed -i.bak "s#'@acme/lib'#'left-pad'#" "$TA/packages/app/src/a.ts" && rm -f "$TA/packages/app/src/a.ts.bak"
 if grep -q "'left-pad'" "$TA/packages/app/src/a.ts"; then
     "$BIN" "$TA" --deps --no-cache 2>/dev/null >"$TMP/ta2.deps"
-    case "$( root_of "$TMP/ta2.deps" )" in
-        *'imports_unresolved="2" counts_floor="1"'*) ok "#220 (C) mutation @acme/lib -> left-pad: 3 -> 2 (a bare package is never counted)" ;;
-        *) no "#220 (C) mutation did not drop the count to 2 — got: $( root_of "$TMP/ta2.deps" )" ;;
-    esac
+    partial_root 2 "$( root_of "$TMP/ta2.deps" )" && ok "#220 (C) mutation @acme/lib -> left-pad: 3 -> 2 (a bare package is never counted)" \
+        || no "#220 (C) mutation did not drop the count to 2 — got: $( root_of "$TMP/ta2.deps" )"
 else
     no "#220 (C) the mutation did not take (a.ts unchanged) — nothing measured"
 fi
@@ -200,7 +199,7 @@ printf '{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["src/*"], "*":
 printf "import React from 'react';\nimport { x } from 'lodash/fp';\nimport fs from 'node:fs';\nimport { y } from './y';\nexport function a(): number { return y(); }\n" >"$TX/src/a.ts"
 printf "import { a } from './a';\nexport function y(): number { return typeof a === 'function' ? 1 : 0; }\n" >"$TX/src/y.ts"
 "$BIN" "$TX" --deps --no-cache 2>/dev/null >"$TMP/tx.deps"
-{ ! grep -q 'imports_unresolved=\|counts_floor=' "$TMP/tx.deps" && [ "$( grep -o '<cycle ' "$TMP/tx.deps" | wc -l | tr -d ' ' )" = 1 ]; } \
+{ ! grep -q 'imports_unresolved=\|counts_floor=\|graph_partial=' "$TMP/tx.deps" && [ "$( grep -o '<cycle ' "$TMP/tx.deps" | wc -l | tr -d ' ' )" = 1 ]; } \
     && ok "#220 (D) external-only imports under paths/\"*\"/baseUrl: no count, no floor; the relative cycle exact" \
     || no "#220 (D) an external package was counted as in-repo — root: $( root_of "$TMP/tx.deps" )"
 
@@ -212,8 +211,8 @@ printf '{ "compilerOptions": {\n    // "paths": { "@x/*": ["./*"] },\n    "baseU
 printf "import { u } from 'lib/util';\nimport { v } from '@x/lib/util';\nexport const a = u + v;\n" >"$TB/src/a.ts"
 printf "export const u = 1;\n" >"$TB/src/lib/util.ts"
 "$BIN" "$TB" --deps --no-cache 2>/dev/null >"$TMP/tb.deps"
-{ grep -q '<f p="src/lib/util.ts" afferent="1"/>' "$TMP/tb.deps" && ! grep -q 'imports_unresolved=\|counts_floor=' "$TMP/tb.deps"; } \
-    && ok "#220 (E1) baseUrl: 'lib/util' resolves to src/lib/util.ts (afferent=1, no floor); the commented-out paths key is not read" \
+{ grep -q '<f p="src/lib/util.ts" afferent="1"/>' "$TMP/tb.deps" && ! grep -q 'imports_unresolved=\|counts_floor=\|graph_partial=' "$TMP/tb.deps"; } \
+    && ok "#220 (E1) baseUrl: 'lib/util' resolves to src/lib/util.ts (afferent=1, not partial); the commented-out paths key is not read" \
     || no "#220 (E1) baseUrl/jsonc arm wrong — got: $( root_of "$TMP/tb.deps" )"
 # the jsonc arm is live: uncomment the key and @x/lib/util resolves too (assert the mutation took first)
 sed -i.bak 's#// "paths"#"paths"#' "$TB/tsconfig.json" && rm -f "$TB/tsconfig.json.bak"
@@ -230,8 +229,8 @@ printf '{ "extends": "../tsconfig.base", "compilerOptions": { "strict": true } }
 printf "import { b } from '#core/b';\nexport const a = b;\n" >"$TE/app/src/a.ts"
 printf "import { a } from '#core/a';\nexport const b = a;\n" >"$TE/app/src/b.ts"
 "$BIN" "$TE" --deps --no-cache 2>/dev/null >"$TMP/te.deps"
-{ [ "$( grep -o '<cycle ' "$TMP/te.deps" | wc -l | tr -d ' ' )" = 1 ] && ! grep -q 'imports_unresolved=\|counts_floor=' "$TMP/te.deps"; } \
-    && ok "#220 (E2) an alias inherited through a relative extends (no .json suffix) resolves: the a<->b cycle, no floor" \
+{ [ "$( grep -o '<cycle ' "$TMP/te.deps" | wc -l | tr -d ' ' )" = 1 ] && ! grep -q 'imports_unresolved=\|counts_floor=\|graph_partial=' "$TMP/te.deps"; } \
+    && ok "#220 (E2) an alias inherited through a relative extends (no .json suffix) resolves: the a<->b cycle, not partial" \
     || no "#220 (E2) extends arm wrong — got: $( root_of "$TMP/te.deps" )"
 TP="$TMP/ts-pnpm"; mkdir -p "$TP/packages/shared/src" "$TP/packages/app/src"
 printf "packages:\n  - 'packages/*'\n" >"$TP/pnpm-workspace.yaml"
@@ -239,31 +238,31 @@ printf '{ "name": "@acme/shared", "main": "dist/index.js" }\n' >"$TP/packages/sh
 printf "export function helper(): number { return 1; }\n" >"$TP/packages/shared/src/index.ts"
 printf "import { helper } from '@acme/shared';\nimport { h2 } from '@acme/shared/sub';\nimport { z } from '@acme/other';\nexport const a = helper() + h2 + z;\n" >"$TP/packages/app/src/a.ts"
 "$BIN" "$TP" --deps --no-cache 2>/dev/null >"$TMP/tp.deps"
-case "$( root_of "$TMP/tp.deps" )" in
-    *'imports_unresolved="2" counts_floor="1"'*) ok "#220 (E3) pnpm-workspace.yaml member @acme/shared (unbuilt dist/ entry) and its subpath count; @acme/other (no member) does not" ;;
-    *) no "#220 (E3) workspace arm wrong — got: $( root_of "$TMP/tp.deps" )" ;;
-esac
+partial_root 2 "$( root_of "$TMP/tp.deps" )" && ok "#220 (E3) pnpm-workspace.yaml member @acme/shared (unbuilt dist/ entry) and its subpath count; @acme/other (no member) does not" \
+    || no "#220 (E3) workspace arm wrong — got: $( root_of "$TMP/tp.deps" )"
 
-# (220-F) --arch, the CI gate: violations= and propagation_cost= are floors on the alias tree (exit code unchanged —
-# part 1 discloses; it does not change what a CI gate exits with). The relative control carries nothing.
+# (220-F) --arch, the CI gate: the answer is partial on the alias tree — violations= can only rise, the <metrics> ratios
+# move either way, so graph_partial="1" and no counts_floor (exit code unchanged — part 1 discloses; it does not change
+# what a CI gate exits with). The relative control carries nothing.
 printf 'layer app = packages/app\nlayer lib = packages/lib\ndeny app -> lib\n' >"$TMP/rules220.txt"
 "$BIN" "$TA" --arch="$TMP/rules220.txt" --no-cache >"$TMP/ta.arch" 2>"$TMP/ta.arch.err"; RCA=$?
 "$BIN" "$TR" --arch="$TMP/rules220.txt" --no-cache >"$TMP/tr.arch" 2>/dev/null
-case "$( root_of "$TMP/ta.arch" )" in
-    *'imports_unresolved="3" counts_floor="1"'*) ok "#220 (F) --arch alias tree: <arch … imports_unresolved=\"3\" counts_floor=\"1\"> (rc=$RCA)" ;;
-    *) no "#220 (F) --arch root lacks the floor — got: $( root_of "$TMP/ta.arch" )" ;;
-esac
-grep -q 'imports_unresolved=' "$TMP/tr.arch" && no "#220 (F) --arch relative control carries imports_unresolved=" \
+partial_root 3 "$( root_of "$TMP/ta.arch" )" && ok "#220 (F) --arch alias tree: <arch … imports_unresolved=\"3\" graph_partial=\"1\">, no counts_floor (rc=$RCA)" \
+    || no "#220 (F) --arch root lacks the partial pair or still claims counts_floor — got: $( root_of "$TMP/ta.arch" )"
+grep -q 'imports_unresolved=\|graph_partial=' "$TMP/tr.arch" && no "#220 (F) --arch relative control carries imports_unresolved=/graph_partial=" \
     || ok "#220 (F) --arch relative control: no count"
 grep -q 'did not resolve' "$TMP/ta.arch.err" && ok "#220 (F) --arch says it on stderr too, where a CI log reads it" \
     || no "#220 (F) --arch stderr carries no floor note"
 
-# (220-G) --report's cycle line is a floor, not "acyclic", on the alias tree; unchanged on the control.
+# (220-G) --report's cycle line is qualified as measured over the resolved edges (not a floor, not "acyclic") on the
+# alias tree; unchanged on the control.
 "$BIN" "$TA" --report --no-cache >"$TMP/ta.rep" 2>/dev/null
 "$BIN" "$TR" --report --no-cache >"$TMP/tr.rep" 2>/dev/null
-grep -q '^## Dependency cycles (showing 1 of 1; a floor: 3 imports unresolved)' "$TMP/ta.rep" \
-    && ok "#220 (G) --report: '## Dependency cycles (showing 1 of 1; a floor: 3 imports unresolved)'" \
-    || no "#220 (G) --report cycle line is not a floor — got: $( grep '^## Dependency cycles' "$TMP/ta.rep" )"
+grep -q '^## Dependency cycles (showing 1 of 1; measured over resolved edges: 3 imports unresolved)$' "$TMP/ta.rep" \
+    && ok "#220 (G) --report: '## Dependency cycles (showing 1 of 1; measured over resolved edges: 3 imports unresolved)'" \
+    || no "#220 (G) --report cycle line is not qualified as partial — got: $( grep '^## Dependency cycles' "$TMP/ta.rep" )"
+grep -q 'a floor' "$TMP/ta.rep" && no "#220 (G) --report still calls the cycle count a floor" \
+    || ok "#220 (G) --report no longer calls the cycle count a floor"
 grep -q '^## Dependency cycles (showing 2 of 2)$' "$TMP/tr.rep" \
     && ok "#220 (G) --report relative control unchanged: (showing 2 of 2)" \
     || no "#220 (G) --report relative control moved — got: $( grep '^## Dependency cycles' "$TMP/tr.rep" )"
@@ -275,8 +274,10 @@ IJ="$( "$BIN" "$TA" --impact=packages/app/src/b.ts:b --json --no-cache 2>/dev/nu
 IC="$( "$BIN" "$TA" --impact=packages/app/src/b.ts:b --format=columnar --no-cache 2>/dev/null )"
 printf '%s' "$IX" | grep -q 'importers="0" shown_importers="0" importers_capped="0" imports_unresolved="3"' \
     && ok "#220 (H) --impact XML: importers=\"0\" … imports_unresolved=\"3\"" || no "#220 (H) --impact XML lacks imports_unresolved=\"3\""
-printf '%s' "$IJ" | grep -q '"imports_unresolved":3' && ok "#220 (H) --impact json: \"imports_unresolved\":3" || no "#220 (H) --impact json lacks the key"
-printf '%s' "$IC" | grep -q 'imports_unresolved="3"' && ok "#220 (H) --impact columnar: imports_unresolved=\"3\"" || no "#220 (H) --impact columnar lacks it"
+printf '%s' "$IJ" | grep -q '"imports_unresolved":3' \
+    && ok "#220 (H) --impact json: \"imports_unresolved\":3" || no "#220 (H) --impact json lacks the key"
+printf '%s' "$IC" | grep -q 'imports_unresolved="3"' \
+    && ok "#220 (H) --impact columnar: imports_unresolved=\"3\"" || no "#220 (H) --impact columnar lacks it"
 MCP220="$( printf '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}\n{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"impact","arguments":{"path":"%s","symbol":"packages/app/src/b.ts:b"}}}\n' "$TA" \
             | perl -e 'alarm 60; exec @ARGV' "$BIN" --mcp 2>/dev/null | tail -1 )"
 printf '%s' "$MCP220" | grep -q 'imports_unresolved=\\"3\\"' \
@@ -287,16 +288,58 @@ printf '%s' "$MCP220" | grep -q 'imports_unresolved=\\"3\\"' \
 
 # (220-I) the definitions ride the legend exactly when the attribute does — compact and full — and the answer is
 # deterministic, warm == cold, well-formed.
-"$BIN" "$TA" --deps --no-cache --legend=full 2>/dev/null | grep -q 'imports_unresolved=N counts' \
-    && ok "#220 (I) full --deps legend defines imports_unresolved=" || no "#220 (I) full --deps legend lacks the definition"
-grep -q 'imports_unresolved=N' "$TMP/ta.deps" && ok "#220 (I) compact --deps legend defines imports_unresolved=" \
-    || no "#220 (I) compact --deps legend lacks the definition"
+# graph_partial='s reading is ONE sentence in all three legends (graphlegend.h/compactlegend.h say so and point here).
+READ220='measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios'
+"$BIN" "$TA" --deps --no-cache --legend=full 2>/dev/null >"$TMP/ta.full"
+{ grep -q 'imports_unresolved=N graph_partial=1' "$TMP/ta.full" && grep -qF "$READ220" "$TMP/ta.full"; } \
+    && ok "#220 (I) full --deps legend defines imports_unresolved=/graph_partial= in the partial-graph words" || no "#220 (I) full --deps legend lacks the partial-graph definition"
+{ grep -q 'imports_unresolved=N' "$TMP/ta.deps" && grep -qF "graph_partial=1: $READ220" "$TMP/ta.deps"; } \
+    && ok "#220 (I) compact --deps legend defines imports_unresolved= and graph_partial= (same words)" \
+    || no "#220 (I) compact --deps legend lacks the definitions"
+"$BIN" "$TA" --arch="$TMP/rules220.txt" --no-cache --legend=full 2>/dev/null | grep -qF "$READ220" \
+    && ok "#220 (I) full --arch legend reads graph_partial= in the same words" || no "#220 (I) full --arch legend lacks the partial-graph words"
+# the old wording is gone from every legend form: the numbers are no longer called floors
+grep -q 'are floors over a partial graph\|graph counts are floors\|the metrics are floors' "$TMP/ta.full" "$TMP/ta.deps" "$TMP/ta.arch" \
+    && no "#220 (I) a legend still calls the partial graph's numbers floors" || ok "#220 (I) no legend calls the partial graph's numbers floors"
 "$BIN" "$TR" --deps --no-cache --legend=full 2>/dev/null | grep -q 'imports_unresolved' \
     && no "#220 (I) the full legend pays for imports_unresolved= on a tree without one" || ok "#220 (I) the legend clause is absent where the attribute is"
+grep -q 'graph_partial' "$TMP/tr.deps" && no "#220 (I) the compact legend pays for graph_partial= on a tree without one" \
+    || ok "#220 (I) the compact graph_partial= term is absent where the attribute is"
 "$BIN" "$TA" --deps --cache="$TMP/c220.bin" >"$TMP/ta.cold" 2>/dev/null
 "$BIN" "$TA" --deps --cache="$TMP/c220.bin" >"$TMP/ta.warm" 2>/dev/null
 cmp -s "$TMP/ta.cold" "$TMP/ta.warm" && cmp -s "$TMP/ta.cold" "$TMP/ta.deps" \
     && ok "#220 (I) deterministic, warm == cold" || no "#220 (I) warm != cold or non-deterministic"
+
+# (220-J) WHY it is not a floor — CodeRabbit on PR #336. Two cycles c<->d and e<->f; d imports e (relative, resolved)
+# and f imports c. Spelled `./c` the graph is complete: ONE cycle {c,d,e,f}, c.ts instab=0.33. Spelled as the workspace
+# package `@m/c` the f->c edge is missing: TWO cycles, c.ts instab=0.50 — both ABOVE the complete answer, so a
+# counts_floor="1" on that root claimed a lower bound that is false. The root must say partial, and nothing floor.
+# Part 2 resolves a plain alias, so the missing edge here is one it still cannot draw: the member's `exports` sends
+# `import` to c.ts and `require` to c2.ts, and the directive's syntax (which would decide) is not in the record (P2-E).
+mkmerge() {   # mkmerge DIR SPEC — SPEC is how f.ts spells its import of c.ts
+    rm -rf "$1"; mkdir -p "$1/src"
+    printf '{ "private": true, "workspaces": ["src"] }\n' >"$1/package.json"
+    printf '{ "name": "@m/c", "exports": { ".": { "import": "./c.ts", "require": "./c2.ts" } } }\n' >"$1/src/package.json"
+    printf "export const c2 = 2;\n" >"$1/src/c2.ts"
+    printf "import { d } from './d';\nexport function c(): number { return d(); }\n" >"$1/src/c.ts"
+    printf "import { c } from './c';\nimport { e } from './e';\nexport function d(): number { return typeof c === 'function' ? e() : 0; }\n" >"$1/src/d.ts"
+    printf "import { f } from './f';\nexport function e(): number { return f(); }\n" >"$1/src/e.ts"
+    printf "import { e } from './e';\nimport { c } from '%s';\nexport function f(): number { return typeof e === 'function' ? 1 : 0; }\n" "$2" >"$1/src/f.ts"
+}
+TMA="$TMP/ts-merge-alias"; TMR="$TMP/ts-merge-rel"; mkmerge "$TMA" '@m/c'; mkmerge "$TMR" './c'
+"$BIN" "$TMA" --deps --no-cache >"$TMP/tma.deps" 2>/dev/null
+"$BIN" "$TMR" --deps --no-cache >"$TMP/tmr.deps" 2>/dev/null
+CYA="$( grep -o '<cycle ' "$TMP/tma.deps" | wc -l | tr -d ' ' )"; CYR="$( grep -o '<cycle ' "$TMP/tmr.deps" | wc -l | tr -d ' ' )"
+IA="$( sed -n 's/.*<f p="src\/c.ts" [^>]*instab="\([0-9.]*\)".*/\1/p' "$TMP/tma.deps" )"
+IR="$( sed -n 's/.*<f p="src\/c.ts" [^>]*instab="\([0-9.]*\)".*/\1/p' "$TMP/tmr.deps" )"
+{ [ "$CYA" = 2 ] && [ "$CYR" = 1 ] && [ "$IA" = 0.50 ] && [ "$IR" = 0.33 ]; } \
+    && ok "#220 (J) the missing edge MERGES: 2 cycles over resolved edges vs 1 complete; c.ts instab 0.50 vs 0.33 — neither a floor" \
+    || no "#220 (J) merge fixture did not reproduce (cycles alias=$CYA rel=$CYR, instab alias=$IA rel=$IR) — nothing measured"
+partial_root 1 "$( root_of "$TMP/tma.deps" )" \
+    && ok "#220 (J) so its root says graph_partial=\"1\" and claims no counts_floor" \
+    || no "#220 (J) merge tree root claims a floor it does not have — got: $( root_of "$TMP/tma.deps" )"
+grep -q 'imports_unresolved=\|graph_partial=\|counts_floor=' "$TMP/tmr.deps" && no "#220 (J) the complete (relative) spelling carries a disclosure" \
+    || ok "#220 (J) the complete (relative) spelling carries none"
 command -v xmllint >/dev/null 2>&1 \
   && { xmllint --noout "$TMP/ta.deps" 2>/dev/null && xmllint --noout "$TMP/ta.arch" 2>/dev/null && ok "#220 (I) xml well-formed" || no "#220 (I) xml malformed"; } \
   || ok "#220 (I) xml well-formed (xmllint absent — skipped)"
@@ -334,7 +377,7 @@ w220() { mkdir -p "$( dirname "$1" )"; printf '%b' "$2" >"$1"; }
 # → dist/index.js → outDir→rootDir → src/index.js → .ts).
 I2A="$TMP/p2-issue"; I2R="$TMP/p2-issue-rel"; mk220 "$I2A" alias; mk220 "$I2R" relative
 d220 "$I2A" >"$TMP/p2a.deps"; d220 "$I2R" >"$TMP/p2r.deps"
-{ [ "$( ncyc "$TMP/p2a.deps" )" = 2 ] && ! grep -q 'imports_unresolved=\|counts_floor=' "$TMP/p2a.deps"; } \
+{ [ "$( ncyc "$TMP/p2a.deps" )" = 2 ] && ! grep -q 'imports_unresolved=\|counts_floor=\|graph_partial=' "$TMP/p2a.deps"; } \
     && ok "#220 (P2-A) issue tree: cycles exact (2: a<->b through @/ and c<->d), no imports_unresolved=, no counts_floor=" \
     || no "#220 (P2-A) issue tree: $( ncyc "$TMP/p2a.deps" ) cycle(s), root $( root_of "$TMP/p2a.deps" )"
 { [ -n "$( blk "$TMP/p2a.deps" cycles )" ] && [ "$( blk "$TMP/p2a.deps" cycles )" = "$( blk "$TMP/p2r.deps" cycles )" ] \
@@ -375,7 +418,7 @@ D="$TMP/p2-base"
 w220 "$D/tsconfig.json" '{ "compilerOptions": { "baseUrl": "src" } }\n'
 w220 "$D/src/lib/util.ts" "import { a } from 'app';\nexport const u = a;\n"; w220 "$D/src/app.ts" "import { u } from 'lib/util';\nimport React from 'react';\nexport const a = u;\n"
 d220 "$D" >"$TMP/p2c.deps"
-{ [ "$( ncyc "$TMP/p2c.deps" )" = 1 ] && ! grep -q 'imports_unresolved=\|counts_floor=' "$TMP/p2c.deps"; } \
+{ [ "$( ncyc "$TMP/p2c.deps" )" = 1 ] && ! grep -q 'imports_unresolved=\|counts_floor=\|graph_partial=' "$TMP/p2c.deps"; } \
     && ok "#220 (P2-C) baseUrl: lib/util <-> app is a cycle; react stays external (no count)" || no "#220 (P2-C) baseUrl arm — $( root_of "$TMP/p2c.deps" )"
 
 # (P2-D) npm workspaces (array form) through `exports`: the `.` entry by condition (types skipped), a subpath, a `*` pattern;
@@ -388,7 +431,7 @@ w220 "$D/packages/lib/src/util.ts" "export const util = 1;\n"; w220 "$D/packages
 w220 "$D/packages/app/package.json" '{ "name": "@acme/app", "main": "src/main.ts" }\n'
 w220 "$D/packages/app/src/main.ts" "import { lib } from '@acme/lib';\nimport { util } from '@acme/lib/util';\nimport { f } from '@acme/lib/feat/f';\nimport { i } from '@acme/lib/internal/i';\nexport const app = lib + util + f + i;\n"
 d220 "$D" >"$TMP/p2d.deps"
-{ [ "$( ncyc "$TMP/p2d.deps" )" = 1 ] && grep -q 'imports_unresolved="1" counts_floor="1"' "$TMP/p2d.deps" \
+{ [ "$( ncyc "$TMP/p2d.deps" )" = 1 ] && grep -q 'imports_unresolved="1" graph_partial="1"' "$TMP/p2d.deps" \
   && grep -q '<f p="packages/lib/src/util.ts" afferent="1"/>' "$TMP/p2d.deps" && grep -q '<f p="packages/lib/src/feat/f.ts" afferent="1"/>' "$TMP/p2d.deps" \
   && ! grep -q 'internal/i.ts\|index.d.ts' "$TMP/p2d.deps"; } \
     && ok "#220 (P2-D) npm workspaces + exports: . (import, types skipped), ./util, ./feat/* resolve; ./internal/* is null → counted (1)" \
@@ -413,7 +456,7 @@ w220 "$D/libs/nested/ui/package.json" '{ "name": "ui", "exports": { ".": { "impo
 w220 "$D/libs/nested/ui/src/other.ts" "export const other = 1;\n"
 if grep -q 'other.ts' "$D/libs/nested/ui/package.json"; then
     d220 "$D" >"$TMP/p2e2.deps"
-    { [ "$( ncyc "$TMP/p2e2.deps" )" = 0 ] && grep -q 'imports_unresolved="1" counts_floor="1"' "$TMP/p2e2.deps"; } \
+    { [ "$( ncyc "$TMP/p2e2.deps" )" = 0 ] && grep -q 'imports_unresolved="1" graph_partial="1"' "$TMP/p2e2.deps"; } \
         && ok "#220 (P2-E) exports import/require naming two files: ambiguous → no edge, counted (1)" \
         || no "#220 (P2-E) import/require disagreement guessed — $( root_of "$TMP/p2e2.deps" )"
 else
@@ -431,20 +474,20 @@ d220 "$D" >"$TMP/p2f.deps"
     && ok "#220 (P2-F) pnpm workspace: exports string and the default index resolve (web <-> shared cycle)" || no "#220 (P2-F) pnpm arm — $( root_of "$TMP/p2f.deps" )"
 
 # (P2-G) a PACKAGE-form extends read from the tree's node_modules (and its own relative extends): its `paths` under the
-# child's baseUrl resolve. With node_modules absent the base is unread: tsconfig_unread="1" counts_floor="1", defined.
+# child's baseUrl resolve. With node_modules absent the base is unread: tsconfig_unread="1" graph_partial="1", defined.
 D="$TMP/p2-extpkg"
 w220 "$D/tsconfig.json" '{ "extends": "@acme/tsconfig/base.json", "compilerOptions": { "baseUrl": "." } }\n'
 w220 "$D/node_modules/@acme/tsconfig/base.json" '{ "extends": "./inner", "compilerOptions": { "strict": true } }\n'
 w220 "$D/node_modules/@acme/tsconfig/inner.json" '{ "compilerOptions": { "paths": { "~/*": ["src/*"] } } }\n'
 w220 "$D/src/a.ts" "import { b } from '~/b';\nexport const a = b;\n"; w220 "$D/src/b.ts" "import { a } from '~/a';\nexport const b = a;\n"
 d220 "$D" >"$TMP/p2g.deps"
-{ [ "$( ncyc "$TMP/p2g.deps" )" = 1 ] && ! grep -q 'tsconfig_unread=\|counts_floor=' "$TMP/p2g.deps"; } \
+{ [ "$( ncyc "$TMP/p2g.deps" )" = 1 ] && ! grep -q 'tsconfig_unread=\|counts_floor=\|graph_partial=' "$TMP/p2g.deps"; } \
     && ok "#220 (P2-G) extends @acme/tsconfig/base.json → ./inner from node_modules: ~/a <-> ~/b is a cycle" || no "#220 (P2-G) package extends not followed — $( root_of "$TMP/p2g.deps" )"
 rm -rf "$D/node_modules"
 d220 "$D" >"$TMP/p2g2.deps"
-{ [ "$( ncyc "$TMP/p2g2.deps" )" = 0 ] && grep -q 'tsconfig_unread="1" counts_floor="1"' "$TMP/p2g2.deps" && grep -q 'tsconfig_unread=N' "$TMP/p2g2.deps" \
-  && "$BIN" "$D" --deps --no-cache --legend=full 2>/dev/null | grep -q 'tsconfig_unread=N counts_floor=1'; } \
-    && ok "#220 (P2-G) the package not installed: tsconfig_unread=\"1\" counts_floor=\"1\", in the compact and full legends" \
+{ [ "$( ncyc "$TMP/p2g2.deps" )" = 0 ] && grep -q 'tsconfig_unread="1" graph_partial="1"' "$TMP/p2g2.deps" && grep -q 'tsconfig_unread=N' "$TMP/p2g2.deps" \
+  && "$BIN" "$D" --deps --no-cache --legend=full 2>/dev/null | grep -q 'tsconfig_unread=N graph_partial=1'; } \
+    && ok "#220 (P2-G) the package not installed: tsconfig_unread=\"1\" graph_partial=\"1\", in the compact and full legends" \
     || no "#220 (P2-G) an unread extends base was not disclosed — $( root_of "$TMP/p2g2.deps" )"
 
 # (P2-H) two workspace members declaring ONE name: never choose — no edge, counted.
@@ -454,7 +497,7 @@ w220 "$D/a/one/package.json" '{ "name": "dup", "main": "index.ts" }\n'; w220 "$D
 w220 "$D/b/two/package.json" '{ "name": "dup", "main": "index.ts" }\n'; w220 "$D/b/two/index.ts" "export const two = 2;\n"
 w220 "$D/a/app/package.json" '{ "name": "app" }\n'; w220 "$D/a/app/index.ts" "import { one } from 'dup';\nexport const x = one;\n"
 d220 "$D" >"$TMP/p2h.deps"
-{ grep -q 'imports_unresolved="1" counts_floor="1"' "$TMP/p2h.deps" && ! grep -q '<godfiles total=\|p="a/one/\|p="b/two/' "$TMP/p2h.deps"; } \
+{ grep -q 'imports_unresolved="1" graph_partial="1"' "$TMP/p2h.deps" && ! grep -q '<godfiles total=\|p="a/one/\|p="b/two/' "$TMP/p2h.deps"; } \
     && ok "#220 (P2-H) ambiguous name (two members named dup): unresolved, counted (1), no edge" || no "#220 (P2-H) ambiguous name arm — $( root_of "$TMP/p2h.deps" )"
 
 # (P2-I) an external package never resolves by name coincidence: react beside an in-repo src/react/, lodash beside a
@@ -466,7 +509,7 @@ w220 "$D/src/react/index.ts" "export const r = 1;\n"; w220 "$D/src/lodash.ts" "e
 w220 "$D/examples/lodash/package.json" '{ "name": "lodash", "main": "index.ts" }\n'; w220 "$D/examples/lodash/index.ts" "export const l = 2;\n"
 w220 "$D/src/a.ts" "import React from 'react';\nimport _ from 'lodash';\nimport fs from 'node:fs';\nimport { r } from './react';\nexport const a = r;\n"
 d220 "$D" >"$TMP/p2i.deps"
-{ ! grep -q 'imports_unresolved=\|counts_floor=\|p="examples/\|p="src/lodash' "$TMP/p2i.deps" && grep -q '<f p="src/react/index.ts" afferent="1"/>' "$TMP/p2i.deps"; } \
+{ ! grep -q 'imports_unresolved=\|counts_floor=\|graph_partial=\|p="examples/\|p="src/lodash' "$TMP/p2i.deps" && grep -q '<f p="src/react/index.ts" afferent="1"/>' "$TMP/p2i.deps"; } \
     && ok "#220 (P2-I) react/lodash/node:fs: no edge, no count (only the relative ./react control resolves)" || no "#220 (P2-I) an external package resolved in-repo — $( blk "$TMP/p2i.deps" godfiles )"
 
 # (P2-J) a declaration only when no source answers, and disclosed: @t/x → types/x.d.ts is imports_dts="1"; @s/y has both
@@ -476,7 +519,7 @@ w220 "$D/tsconfig.json" '{ "compilerOptions": { "paths": { "@t/*": ["types/*"], 
 w220 "$D/types/x.d.ts" "export declare const x: number;\n"; w220 "$D/src/y.ts" "export const y = 1;\n"; w220 "$D/src/y.d.ts" "export declare const y: number;\n"
 w220 "$D/src/a.ts" "import { x } from '@t/x';\nimport { y } from '@s/y';\nexport const a = x + y;\n"
 d220 "$D" >"$TMP/p2j.deps"
-{ grep -q 'imports_dts="1"' "$TMP/p2j.deps" && ! grep -q 'counts_floor=' "$TMP/p2j.deps" && grep -q '<f p="src/y.ts" afferent="1"/>' "$TMP/p2j.deps" \
+{ grep -q 'imports_dts="1"' "$TMP/p2j.deps" && ! grep -q 'counts_floor=\|graph_partial=' "$TMP/p2j.deps" && grep -q '<f p="src/y.ts" afferent="1"/>' "$TMP/p2j.deps" \
   && grep -q 'imports_dts=N' "$TMP/p2j.deps"; } \
     && ok "#220 (P2-J) .d.ts fallback: imports_dts=\"1\" (no floor, defined); source beats its declaration" || no "#220 (P2-J) declaration arm — $( root_of "$TMP/p2j.deps" )"
 

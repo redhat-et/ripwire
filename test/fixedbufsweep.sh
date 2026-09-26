@@ -152,6 +152,8 @@ TABLE = {
     # reporters wrote through std::cerr until 2026-09-16, when they began formatting first so a notice is ONE write).
     ( "src/infra/diagnostics.cpp", "notice" ): ( 1, "not-markup", "notice[4096] in writeNotice: every reporter's whole notice — the assert, panic and thread-violation banners and the one-line degraded notice — interpolating the caller's expression text, file name, __PRETTY_FUNCTION__ and description, none escaped and none needing it, because the bytes go to stderr in one stdio call. A longer notice is cut by markTruncated and the cut is stated on the notice's own last line (test/diagnoticecheck.sh arm L)." ),
     ( "src/infra/diagnostics.cpp", "marker" ): ( 1, "not-markup", "marker[96] in markTruncated: ' ... [notice truncated: kept {} of {} bytes]\\n' of TWO std::size_t (bytes kept, full length) and no string argument — 42 literal B + two 20-digit counts + NUL = 83 B against 96, so it cannot truncate; formatted twice through one lambda (sized with the largest K first, then the real K), which is one call site. Copied over the tail of notice[] on stderr; never a document." ),
+    # Not markup: the cache-refusal detail goes to STDERR (noteCacheReject, lane windows-334), never into a document.
+    ( "src/ingest_cache.h", "detail" ): ( 1, "not-markup", "detail[192] in noteCacheReject: ' (blob {} {}, this binary {}: another ripwire build wrote it; two builds alternating on one tree re-parse every run)' of one of the literals \"format\"/\"parser\" and TWO std::uint32_t (<= 10 digits each) — at most 136 B + NUL, so it cannot truncate. Appended to a stderr cache notice, never a document." ),
     # ── src/lanes.h — THE REFERENCE SAFE SHAPE ───────────────────────────────────────────────────────────
     ( "src/lanes.h", "buf" ): ( 10, "safe",       "buf[640] x3: snprintf-THEN-escape. :723 interpolates an UNBOUNDED file path and is still safe for exactly that reason — the warning text is escaped downstream, so a cut shortens prose and can never land inside markup. This is the shape §B14's six were not." ),
     # ── src/main.cpp ─────────────────────────────────────────────────────────────────────────────────────
@@ -588,7 +590,11 @@ if not bad:
 #            348 mentions / 238 calls / 238 sites / 104 rows = main's 344/234/234/103 plus A's +1/+1/+1/0, B's
 #            +2/+2/+2/0 and this lane's +1/+1/+1/+1 (the new verbs_navigate.h `pab` row). The sites are disjoint;
 #            fixedbufsweep ALL PASS on the merged binary.
-EXPECTED = { "mentions": 348, "calls": 238, "sites": 238, "rows": 104, "widthforms": 0 }
+#            2026-09-25 (train 20, lane/windows-334): +1 call/+1 mention/+1 site/+1 row (348 -> 349 mentions,
+#            238 -> 239 calls/sites, 104 -> 105 rows). noteCacheReject's new `char detail[192]` names both version
+#            numbers on a refused cache blob; one formatTo of a literal and two std::uint32_t, rowed 'not-markup'
+#            (a stderr notice). Re-derived on the train 20 merged tree; no other train lane moves the population.
+EXPECTED = { "mentions": 349, "calls": 239, "sites": 239, "rows": 105, "widthforms": 0 }
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the
 #            H9 ` max_tokens="%d"` ceiling disclosure: a single %d of a caller-supplied INTEGER, no %s,

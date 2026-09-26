@@ -269,7 +269,8 @@ Plan three parts that land independently, in this order of risk.
   - Changing the cross-root rule, the inheritance spray or the HAS-A pick is a different change that
     needs its own measurement. Flag it; do not do it here.
 - **Determinism.** Every new count is independent of thread timing and iteration order. Check with
-  `./build/ripwire <dir> >a; ./build/ripwire <dir> >b; diff -q a b`.
+  `t=$(mktemp -d); ./build/ripwire <dir> >"$t/a"; ./build/ripwire <dir> >"$t/b"; diff -q "$t/a" "$t/b"`
+  (outputs outside `<dir>`, or the second run crawls the first one's output).
 - **Honesty in output.** A zero means *none found*.
   - Every new attribute is **absent at zero**.
   - Its legend clause is written exactly when the attribute is. Pass the emitter's own condition, as

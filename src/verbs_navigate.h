@@ -2244,7 +2244,10 @@ int emitImpactColumnar( const ImpactView& v )
                                  // could only learn by running the other dialect. Naming it costs 44 bytes
                                  // and turns a silent difference into a stated one. Gate:
                                  // test/mcpattrparitycheck.sh (which also fails if a name here IS emitted).
-                                 + " lens=\"shown_importers,importers_capped\""
+                                 // importers_next= rides the XML root only on a cut tier (cut-fix E), so it is
+                                 // declared here exactly when the other forms carry it.
+                                 + ( v.imports.next.empty() ? " lens=\"shown_importers,importers_capped\""
+                                                            : " lens=\"shown_importers,importers_capped,importers_next\"" )
                                  + rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs )   // W2-F
                                  + rw::nextAttrXml( rw::nextFlag( "--safe-delete=", v.sym ) );   // P3 (L7): the XML root's next=, same set
     emitColumnarSymbolRows( stdout, v.ing, "impact", attr.c_str(), rows, v.rootPrefix, v.testReach );

@@ -239,9 +239,16 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # 23 -> 24 2026-09-24 (train 18, lane/test-gate-tsjs): src/jsrunner.h's nearestPackageJson reads package.json through
 # the same canonical detail::readWholeFile helper (measured: the one new <u> row in --uses=readWholeFile on the merged
 # tree; main 60b65f02 has 23, the lane tip 7bf48500 already had 24).
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 24 ] \
-    && ok "repo: --uses=readWholeFile count=24 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 24"
+# 24 -> 25 2026-09-25 (train 20, lane/nodetest-runner-60, #60): src/testmap.h's resolveJsVerb reads a TS/JS test
+# file's own bytes through the same canonical helper, to check them for a node:test import/require when
+# package.json evidence decided nothing — one new call site, same helper, no new fopen/fread.
+# 25 -> 26 2026-09-25 (fix round, rv-nodetest-runner-60): resolveJsVerb's OTHER branch — an explicit
+# scripts.test: "node --test" — now also reads the test file's own bytes (through the same helper), because
+# jsrunner::nodeTestVerb needs them too (F2's relative-import-resolvability check applies whichever path
+# decided NodeTest, not only the import-fallback path) — one new call site, same helper, no new fopen/fread.
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 26 ] \
+    && ok "repo: --uses=readWholeFile count=26 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 26"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"

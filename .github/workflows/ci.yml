@@ -772,8 +772,8 @@ jobs:
   # that means less than it looks. What runs instead is the part that needs no harness: the unit tests
   # (ctest — including ripwire.oswin32logic, the Windows port's own pure-logic suite), `--version`/`--help`,
   # a real crawl of test/fixture, the two-run byte-identical determinism contract, and G4 well-formedness.
-  # Everything beyond that is still a contributor's run on real hardware; see the checklist on #44. The cl.exe
-  # leg asserts the failure it is expected to have; the comment below says exactly what it is waiting on.
+  # Everything beyond that is still a contributor's run on real hardware; see the checklist on #44. Both legs
+  # run every step below; only the ASan flavour's compile is clang-cl-only.
   #
   # Ninja, and the VC environment from vcvars64.bat rather than the Visual Studio generator: single-config is
   # what every flavour rule in CMakeLists.txt assumes (an empty CMAKE_BUILD_TYPE IS the plain flavour), and it
@@ -788,15 +788,11 @@ jobs:
       matrix:
         toolchain: [clang-cl, cl]
     runs-on: windows-latest
-    # cl.exe does not build yet: it configures, takes every flag, and compiles our C++ until it meets the
-    # GCC/Clang language extensions the tree is written in — `[[gnu::always_inline]]`/`[[gnu::cold]]`,
-    # `__attribute__((…))`, a set of `__builtin_*`, and the `asm volatile` barriers, one of which
-    # (src/infra/fastmath.h::isFiniteFast) exists to defeat -ffinite-math-only and has no MSVC counterpart
-    # because MSVC has no such mode. Mapping them is a portability SEAM (src/infra/platform.h already owns
-    # ALWAYS_INLINE and is where it goes), with a real design question at the asm barriers.
-    # This job does NOT carry continue-on-error. The cl leg asserts its own expectation instead (see its
-    # step below) and is green while cl.exe fails exactly where it is documented to — so a new break, or
-    # cl.exe starting to work, is a red leg either way, and this job can gate like every other.
+    # cl.exe builds: the GCC/Clang language extensions the tree is written in (`[[gnu::…]]` attributes,
+    # `__attribute__((…))`, `__builtin_*`, the `asm volatile` barriers) go through the compiler-extension seam
+    # in src/infra/platform.h. Until that seam landed this leg asserted its own documented failure; it now
+    # builds, links, runs the binary and ctest, and holds the determinism and well-formedness contracts, the
+    # same steps as clang-cl. This job does NOT carry continue-on-error: a break on either front end is red.
     defaults:
       run:
         shell: bash   # Git Bash: the smoke steps below are POSIX shell; the build steps override to cmd

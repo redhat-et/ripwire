@@ -193,6 +193,12 @@ inline IncludeLang includeLangOf( std::string_view path ) noexcept
         { ".ts",  IncludeLang::Ts },      { ".tsx", IncludeLang::Ts },      { ".mts", IncludeLang::Ts },
         { ".cts", IncludeLang::Ts },      { ".js",  IncludeLang::Ts },      { ".jsx", IncludeLang::Ts },
         { ".mjs", IncludeLang::Ts },      { ".cjs", IncludeLang::Ts },
+        // `.astro` joins for the SAME reason the shader/CUDA trio above did, in the same change that gave it a
+        // langOfPath row (issue #67): it is Lang::TypeScript, so it is dependency-CAPABLE and enters the
+        // dep_files= denominator — without this row it would be counted and never resolve, which
+        // test/deplangscheck.sh arm (G) refuses. Its imports are ordinary relative TypeScript specifiers and
+        // live in the `---` frontmatter, which is the only part of the file this build parses at all.
+        { ".astro", IncludeLang::Ts },
         { ".rs",  IncludeLang::Rust },
         { ".go",  IncludeLang::Go },       // Go: single-root DEFERRED (kNoFile); cross-root via go.mod `replace` (§3.2)
         // kParserVer 81 — the four-language import round. Each has a SOUND Step-A below (unique-or-degrade,

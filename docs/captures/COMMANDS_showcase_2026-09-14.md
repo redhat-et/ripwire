@@ -5351,7 +5351,7 @@ ripwire: --run-timeout=SECONDS modifies --run-trace — pass it too (e.g. ripwir
 *The session legend dictionary the MCP server serves as ripwire://legend-dict/full — one definition per line, headed by its dictv= version; no corpus needed. =roster lists the completeness attributes it defines.*
 
 `````
-ripwire legend dictionary ripwire.dict/v1 dictv=6f45f81307e1ecb3 entries=722
+ripwire legend dictionary ripwire.dict/v1 dictv=dbc0a02944a50858 entries=723
 <about legend="ref" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and this LAST child carries every other root attribute unchanged (schema= included); legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that ne … [line truncated: 83 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
@@ -5381,7 +5381,7 @@ ripwire.impact/v1 <impact>: transitive blast radius of of=: <s t= n= p=> reach s
 ripwire.path/v1 <path>: one DIRECTED call path from= to to=, each <s t= n= p=> a hop; reachable=0 hops=0 when none
 ripwire.connect/v1 <connect>: minimal joining subgraph: <g> groups, <t> terminals, <s connects=> joins, <e f= t=> edges, <unconnected>
 ripwire.at/v1 <at>: enclosing-definition chain at p=:l=: sym= innermost, chain= outermost-first, <s n= t= l= el=> spans
-… [693 more display lines; full output is 70496 bytes on 723 raw line(s)]
+… [694 more display lines; full output is 70658 bytes on 724 raw line(s)]
 `````
 
 ## `./build/ripwire . --lint --lint-select=cache-`

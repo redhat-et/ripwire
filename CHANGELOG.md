@@ -13,7 +13,103 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
-## [Unreleased]
+## [0.6.4] — 2026-09-25
+
+### Added — Astro (`.astro`) frontmatter is indexed on the TypeScript grammar (#320, #67)
+
+An `.astro` file's `---` frontmatter is now parsed with the vendored TypeScript grammar, restricted to that
+block by one included range, so a frontmatter call resolves into the `.ts` service it imports. The template
+half is not read at all, and an `.astro` file reports `lang="ts"`; both are disclosed blind spots in
+`docs/ARCHITECTURE.md#astro-extraction`. `kParserVer` 121 → 122; `kCacheVersion` is unchanged.
+
+### Documented — README: release notes moved to a section near the end
+
+The four release blurbs (0.6.3, 0.6.2, 0.6.1, 0.6.0, with their "Thanks to" lines) sat near the top of
+README.md, right after the Languages line — a lot for a first-time reader to get through before
+Quickstart. They now live in a new `## Release notes` section near the end, just before
+`## Documentation`, text and thanks lines unchanged. The top of the README keeps one short line
+naming the current version and pointing at that section and at CHANGELOG.md. The old `## What's new`
+section (a stale, differently-worded duplicate of the 0.6.0 blurb) is removed.
+
+### Fixed — `next=` is never dropped silently, and the nudge hook reads rev-parse's answer
+- `next=` is no longer silently dropped past its old 120-byte ceiling. `--for`'s page/widen
+  follow-up (`forPageInvocation`/`forWidenNext`), `--flip`'s cut-listing follow-up, and the
+  churn-decay map's `--in=DIR` scoped/stub follow-ups (including the task-router's `--for`-shaped
+  `<choice>` widening hint) used to build the full invocation and then throw it away when it
+  exceeded `kNextAttrMaxBytes`, leaving `next=` absent — indistinguishable from a root with nothing
+  to suggest, so a cut answer with a long follow-up (a deep path, a long symbol name) silently lost
+  its only route to the rest. `nextAttrXml` (the one place every next= producer funnels through)
+  now carries no length ceiling at all and always emits the full, runnable invocation; an answer
+  whose next= was already ≤120 B is unchanged.
+- `hooks/ripwire-nudge.sh`'s SessionStart primer read `git rev-parse --is-inside-work-tree` by exit
+  status only. A bare repository, or a cwd inside a work tree's own `.git` directory, prints `false`
+  with status 0 there, so the primer could still run in a population it was never meant to reach (the
+  same shape CodeRabbit flagged and 1cd00d4d fixed in the two route hooks). It now reads the answer.
+- CONTRIBUTING.md's Windows-matrix note named a stale gate count (647); the live count is 649.
+
+### Fixed — `--test-gate` derives `node --test` from a bare `node:test` import, with no `package.json` at all
+
+#60's core defect (a TS/JS test file's call-graph reach and `--affected`/`--test-gate` listing) was fixed
+in 0.6.2. What was left: the reporter's own repro (`src/bounded.ts` + `test/behavior.test.ts`, `import test
+from "node:test"`, **no `package.json` anywhere in the repo**) still read `run_unknown="1"`, because
+`jsrunner.h`'s runner derivation (#323) reads only the nearest `package.json`'s own evidence, and a repo
+with none has no evidence for that walk to find. Thanks to @YogevKr for the report and the clean two-arm
+repro, and to @alex-michaud for the non-test `--callers` arm that helped confirm the core fix.
+
+- **New evidence source: the test file's own import/require.** When `package.json` evidence decides
+  nothing for a TS/JS test file — no manifest anywhere in the crawl boundary, or the nearest one is a true
+  marker (no `scripts.test`, no `vitest`/`jest` dependency) — the file's own bytes are read for a `node:test`
+  import: `import test from "node:test"`, `import { test, describe } from "node:test"`, or
+  `require("node:test")`, single or double quoted. This is a real parse (the same grammar the file's own
+  extension selects), not a substring scan: a `"node:test"` mention inside a comment or an unrelated string
+  literal is not evidence and does not derive a runner.
+- **Precedence is unchanged.** An explicit `package.json` `scripts.test` (or a `vitest`/`jest` dependency)
+  still wins exactly as #323/#331 already decided — including an authoritative-but-unrecognized script
+  (mocha, say), which is a decided "no" and is never overridden by the weaker, file-local import evidence.
+  The import fallback applies ONLY to today's `run_unknown="1"` case.
+- **`.ts`/`.mts`/`.cts` get a Node-version-aware command, never a command proven to fail.** Node's own
+  `--test` runner needs `--experimental-strip-types` to strip TypeScript types at all from Node 22.6
+  onward; below that the flag itself is a fatal "bad option" and there is no way to run a `.ts` file with
+  plain `node`. Stripping is ON BY DEFAULT (the flag becomes a harmless no-op) from two separate floors —
+  Node 22.18 and Node 23.6 — because 23.6 turned it on first and the 22.x line got it later, by backport, so
+  a bare 23.0–23.5 does not have it. This tool cannot see which
+  Node will run the emitted command, so it reads `engines.node` from the nearest manifest
+  (if any): the bare form when that range proves every satisfying Node has stripping on by default; the
+  flagged form when it proves >= 22.6 but not provably default-on, or when there is no manifest at all (an
+  honest, stated assumption of Node >= 22.6, never a guess at an unseen runtime); and `run_unknown="1"`
+  when the range admits ANY Node below 22.6 — a plain `>=18`/`^20`, or a compound range such as
+  `>=24 || ^20` (the LOWEST admitted alternative decides it, not the highest) — or cannot be read with
+  confidence at all. This applies to BOTH the new import-evidence path and the existing
+  `scripts.test: "node --test"` path (previously spelled `node --test <file>` unconditionally for a `.ts`
+  file, with no version awareness at all). `.js`/`.mjs`/`.cjs` never need the flag and always get the bare
+  form, unless `engines.node` admits a Node below 18 (`node:test` itself does not exist there).
+- **`.tsx` and `.jsx` are never derived, on purpose.** Node's type stripping does not cover `.tsx` at all
+  (`ERR_UNKNOWN_FILE_EXTENSION`), and plain `node` cannot load a `.jsx` file either, on any Node version, with
+  or without any flag — both stay `run_unknown="1"`, the same as before this evidence source existed.
+- **A `.ts`/`.mts`/`.cts` command is derived only when the test file's own relative imports can actually
+  load.** Node's module resolver, under type stripping, never probes an extension and never maps a `.js`
+  specifier onto a `.ts` source — both are exactly how tsc-, tsx- and bundler-run TS code imports its own
+  siblings. So the command is derived only when every relative (`./`/`../`) static `import`/`export … from`
+  specifier or `require(...)` argument in the test file's own bytes names a file that exists on disk at
+  EXACTLY that path; an extensionless specifier, or one whose exact spelling does not exist, stays the
+  honest `run_unknown="1"` instead of a command the file's own bytes already prove would fail.
+- New fixtures, `test/testgatenodetestimportfix/` through `test/testgatenodetestimportprecedencefix/`
+  (`test/testgatecheck.sh` arms x1-x6): the exact repro, a `.js` variant, `require("node:test")`, a negative
+  control (`"node:test"` only in a comment/string — parsed, not matched), and a precedence control
+  (`scripts.test: "vitest run"` still wins over a `node:test` import in the same file). Five more,
+  `test/testgatenodetesttsxfix/` through `test/testgatenodetestenginescompoundfix/` (arms y1-y6, fix round):
+  red-first controls for the three refusal shapes above — `.tsx`, `.jsx`, an extensionless relative import,
+  and two `engines.node` shapes (`>=18`, and the compound `>=24 || ^20`) that admit a pre-22.6 Node.
+
+### Documented — TS/JS test runners this still cannot derive (`run_unknown="1"` stays honest, not a bug)
+
+Narrowed from the 0.6.3 list: the fourth gap below (node's test runner against a `.ts` file on an unknown
+Node version) is now derived, honestly bounded — see the fix above, including the cases it deliberately
+still refuses (`.tsx`/`.jsx`, an unresolvable relative import, a declared floor below Node 22.6). Still not
+derived, and correctly `run_unknown="1"`: node's own test runner invoked through `tsx` (a common way to run
+it against `.ts` files, when neither `package.json` nor the test file's own bytes name `node:test`
+directly) and `bun`'s test runner. See #323's own discussion for a user-declared runner template, which
+would be the way to name either of these explicitly once implemented.
 
 ### Fixed — `--deps` no longer reports a TS/JS graph with missing alias edges as complete (#220, part 1)
 
@@ -21,11 +117,13 @@ A TypeScript or JavaScript import written through a tsconfig/jsconfig `paths` al
 `baseUrl`-relative path, or a workspace package name (`@acme/lib`) draws no file-graph edge, so a cycle
 spelled through one was missing and the absent `<cycles>` element read as "acyclic". Those imports are still
 not resolved (that is part 2); they are now counted. A tree without one is byte-identical.
-- `--deps` and `--arch` carry `imports_unresolved="N" counts_floor="1"` on the root: cycles, cones,
-  `ccd`/`acd`/`nccd`, `violations=` and `propagation_cost=` are floors over a partial graph. `--arch`
-  also says so on stderr; its exit code is unchanged.
-- `--report` reads `## Dependency cycles (showing 1 of 1; a floor: 3 imports unresolved)`, and an empty
-  list reads "none found over the resolved edges" instead of "none (acyclic)".
+- `--deps` and `--arch` carry `imports_unresolved="N" graph_partial="1"` on the root: every value is
+  measured over the resolved edges only. Not every one is a lower bound: a missing edge can merge two
+  reported cycles into one, and `instab=`/`I=`/`D=` can move either way. `afferent=`, `transitive=`,
+  `ccd`/`acd`/`nccd` and `violations=` can only rise. `--arch` also says on stderr that `violations=` can
+  only rise; its exit code is unchanged.
+- `--report` reads `## Dependency cycles (showing 1 of 1; measured over resolved edges: 3 imports unresolved)`,
+  and an empty list reads "none found over the resolved edges" instead of "none (acyclic)".
 - `--impact` (XML, `--json`, `--format=columnar`, and the MCP `impact` tool) carries `imports_unresolved=`
   beside `importers=` when a TS/JS import could land on one of the symbol's files.
 - Only a specifier the project's own config places in the tree counts: a `paths` key with a literal prefix
@@ -37,6 +135,50 @@ not resolved (that is part 2); they are now counted. A tree without one is byte-
   (paths). Zulip and sktime report none and are byte-identical. An independent re-derivation from the
   `--deps` rows and the config files agrees: mlflow exactly, Chainlit within 1, and Streamlit within the
   48 rows `--deps` does not print (it lists at most 40 per file).
+
+### Fixed — Windows findings from the 0.6.3 preview test (#334, reported by @elsRobin)
+
+- `skills/install.sh` no longer reports empty directories as installed skills. On Windows without symlink
+  privilege, Git Bash's `ln -sfn` exits 0 and leaves an empty directory; the installer printed `installed`
+  for each one, wrote all of them to the manifest and announced them as active. It now checks each link by
+  its result (a symlink whose `SKILL.md` reads back). When the link did not take, it copies the skill and
+  prints `copied`. When the copy fails too, it prints `FAILED`, leaves the skill out of the count and the
+  manifest, and exits 1. The prune step recognises its own copies (a marker file, an empty leftover
+  directory, or a name its last manifest listed) and leaves any other `ripwire-*` directory alone; before,
+  a user's own `ripwire-*` directory made the installer stop with `rm: … is a directory`.
+- A cache blob written by a different ripwire build is now refused with both numbers on the line:
+  `format-version — not used; … rewrites it (blob format 24, this binary 25: another ripwire build wrote
+  it; …)`. The
+  per-tree cache path does not depend on the build, so two builds that alternate on one tree (0.6.2 and
+  0.6.3 in the report) each refuse and rewrite the other's cache and re-parse on every run. One build run
+  twice in a row reuses its own cache, on Windows as elsewhere. The Windows CI job now checks that
+  directly: the second run's `RIPWIRE_CACHE_STATS` line must show every file reused and none re-parsed.
+- `--doctor`'s `binary-path` row, when a different `ripwire` comes first on PATH, now names that
+  binary's build: `which_version=` is the line it prints for `--version`. Its `STALE:` hint goes by the
+  release numbers the two binaries state, where it used to go by mtime. A 0.6.2 copied onto PATH after
+  0.6.3 was installed had the newer mtime, so the hint called the running 0.6.3 stale and said to run the
+  0.6.2. On Windows, Git Bash's `which` prints the name without `.exe`; the row now also tries the `.exe`
+  name before it reports `on_path="0"`, so it compares the two files there too. It still marks
+  `degraded="1"` on Windows. When no `ripwire` is on PATH, its hint on Windows is PowerShell's
+  `$env:Path = '<dir>;' + $env:Path` with native separators, where it used to print a POSIX
+  `export PATH=` line that does nothing in PowerShell (reported by @lennix1337 and @antoniojosedev).
+  On every platform the hint now single-quotes the directory (`export PATH='<dir>':"$PATH"`
+  elsewhere), so a `$`, a backtick or `$(…)` in the directory's name cannot expand or run when the
+  line is pasted; the PowerShell form also doubles `'` and the typographic quotes ‘ ’ ‚ ‛, which
+  PowerShell reads as quotes too.
+- The determinism check in AGENTS.md, CLAUDE.md, CONTRIBUTING, README, `--help`, the skills and the docs
+  now writes its two outputs outside the crawled tree:
+  `t=$(mktemp -d); ripwire . >"$t/a"; ripwire . >"$t/b"; diff -q "$t/a" "$t/b"`. Written inside it, the
+  second run crawled the first run's output as a new unindexed text file, and the map header's top-6
+  `unindexed=` list could change between the two runs. The engine was deterministic; the recipe was not.
+  The top-6 cut itself is well-defined (count descending, then extension name) and is unchanged.
+- The Windows cache location with `TMPDIR`, `TEMP` and `TMP` all unset is now documented and kept as it
+  is. Windows' own temp-directory rule then falls back to the profile folder, so the cache is
+  `%USERPROFILE%\ripwire-<uid>`. That is per-user, and `--doctor`'s `cache-dir` row names it.
+- README's Windows section adds three notes. The hash check passes because `-eq` ignores case; use
+  `.Hash.ToLower() -ceq` for a case-sensitive compare. `Expand-Archive` does not pass Mark-of-the-Web on
+  to the files it extracts, so no SmartScreen prompt is not a verdict on the exe. In Git Bash, `fc` is a
+  shell builtin, so compare outputs with `cmp`, or with `MSYS_NO_PATHCONV=1 fc.exe /b`.
 
 ## [0.6.3] — 2026-09-25
 

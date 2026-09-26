@@ -318,11 +318,16 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "unproven_defs",     "unproven_defs=K: K same-named defs not tied to that file, in no count or row (bare name shows them)" },
     { "declined_calls",    "declined_calls=K: K call sites left unbound (several defs, none chosen), in no count or row" },
     // #220 part 1: the FILE graph's gauge (graphlegend.h importsUnresolvedAttrXml), absent at zero, on the --deps/--arch/
-    // --impact roots and the MCP impact twin; counts_floor= beside it reads from its own row above.
-    { "imports_unresolved", "imports_unresolved=N: N TS/JS imports naming this tree (paths alias, baseUrl path, workspace package) drew no edge; graph counts are floors" },
-    // #220 part 2: the resolver's other two root gauges (graphlegend.h tsImportRootAttrXml), absent at zero, --deps/--arch.
+    // --impact roots and the MCP impact twin. What it means for the numbers is the reading BESIDE it, never this row:
+    // graph_partial= on --deps/--arch (next row), counts_floor= on --impact (its own row above; importers= only rises).
+    { "imports_unresolved", "imports_unresolved=N: N TS/JS imports naming this tree (paths alias, baseUrl path, workspace package) drew no edge" },
+    // Its reading on --deps/--arch, the same sentence both full legends carry (graphlegend.h kGraphPartialAttrXml): not a
+    // floor, because a missing edge can merge two cycles into one and moves a ratio either way.
+    { "graph_partial",     "graph_partial=1: measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios" },
+    // #220 part 2: the resolver's other two root gauges (graphlegend.h tsImportRootAttrXml), absent at zero, --deps/--arch;
+    // tsconfig_unread= makes the root partial exactly as imports_unresolved= does (graph_partial= above is its reading).
     { "imports_dts",       "imports_dts=N: N TS/JS imports resolved only to a .d.ts declaration, not source" },
-    { "tsconfig_unread",   "tsconfig_unread=N: N tsconfig extends bases not in the tree could declare aliases; graph counts are floors" },
+    { "tsconfig_unread",   "tsconfig_unread=N: N tsconfig extends bases not in the tree could declare aliases (graph_partial=1)" },
     // #60: <bodies bodyless=N> — requested symbols with no body BY CONSTRUCTION (a module-scope owner), so
     // capped= stays 0. Absent at zero, like every term here.
     { "bodyless",          "bodyless=N of total=: requested symbols with NO body by construction (t=modscope), never in shown=, never raising capped=", true },
@@ -1075,7 +1080,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // doctor: src/verbs_doctor.h runDoctor (+ doctorBinaryPathVerdictAttr, doctorNotOnPathHint)
     { "checks", "checks=/passed=: checks run / how many passed; exit 1 when passed= is below checks=", false, "doctor", MapHeaderRead::No, {}, "doctor" },   // also defines passed=
     { "built_from", "built_from=: the commit this binary was built from; at= is the tree HEAD now, a mismatch is normal", false, "doctor", MapHeaderRead::No, {}, "doctor" },
-    { "self", "self=/which=: this binary's path and the one which ripwire finds on PATH", true, "c", MapHeaderRead::No, {}, "doctor" },   // also defines which=
+    { "self", "self=/which=: this binary's path and the one which ripwire finds on PATH; which_version= is the version line that one prints when they differ", true, "c", MapHeaderRead::No, {}, "doctor" },   // also defines which= which_version=
     { "on_path", "on_path=0|1: whether a ripwire is on PATH; 0 fails the row and hint= carries the export line", true, "c", MapHeaderRead::No, {}, "doctor" },
     { "same_file", "same_file=1: the PATH copy is this very file (same device and inode)", true, "c", MapHeaderRead::No, {}, "doctor" },
     { "same_bytes", "same_bytes=1: a different file with identical content, a copied install (ok); 0 fails the row", true, "c", MapHeaderRead::No, {}, "doctor" },

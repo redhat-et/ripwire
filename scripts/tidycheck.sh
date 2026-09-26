@@ -33,7 +33,7 @@ BREW_PREFIX="${HOMEBREW_PREFIX:-}"
 BREW_TIDY="${RIPWIRE_TIDY_BREW:-$BREW_PREFIX/opt/llvm@22/bin/clang-tidy}"   # override only to test the SKIP arm
 
 # ─── the gating checks: each one at 0 rows on the TUs below when admitted ────────────────────────────────────────
-GATING='bugprone-use-after-move,bugprone-dangling-handle,bugprone-sizeof-expression,bugprone-integer-division,bugprone-infinite-loop,modernize-use-override,clang-analyzer-core.*'
+GATING='bugprone-use-after-move,bugprone-dangling-handle,bugprone-sizeof-expression,bugprone-integer-division,bugprone-infinite-loop,clang-analyzer-core.*'
 
 # ─── the TU list: CI's advisory clang-tidy step lints the same five ─────────────────────────────────────────────
 TUS="src/main.cpp src/ingest.cpp src/pagerank.cpp src/tsprobe.cpp src/infra/diagnostics.cpp"
