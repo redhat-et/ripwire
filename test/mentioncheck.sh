@@ -288,13 +288,15 @@ named "ns::fn"               "where does ranking::rescore reorder the search res
 named "PHP case-folded call" "why does mergerankings() drop the ranked search results"  MergeRankings
 named "call syntax"          "why does helper() return stale search results"            helper
 ON1="$( headOf "How does hybrid_search rank search results" )"
-printf '%s' "$ON1" | grep -q 'mention_anchored="1"' && ok "vii the root discloses the lift: mention_anchored=\"1\"" \
-    || no "vii mention_anchored=\"1\" missing on the anchored head"
+if printf '%s' "$ON1" | grep -q 'mention_anchored="1"'; then
+    ok "vii the root discloses the lift: mention_anchored=\"1\""
+else no "vii mention_anchored=\"1\" missing on the anchored head"; fi
 # controls: each byte-identical to --no-mention-boost
 inert(){ # $1=label $2=query
     A="$( headOf "$2" )"; Bq="$( headOf "$2" --no-mention-boost )"
-    [ -n "$A" ] && [ "$A" = "$Bq" ] && ok "vii control $1: byte-identical to --no-mention-boost" \
-        || no "vii control $1: the anchor moved bytes on a task whose named identifier must not lift"
+    if [ -n "$A" ] && [ "$A" = "$Bq" ]; then
+        ok "vii control $1: byte-identical to --no-mention-boost"
+    else no "vii control $1: the anchor moved bytes on a task whose named identifier must not lift"; fi
 }
 inert "plain words (get, results, rank)" "how do I get the search results and rank them"
 inert "call syntax inside a fenced paste" 'why does it rank search results ```x = helper(cache)```'
@@ -319,7 +321,8 @@ if printf '%s' "$CAP" | grep -q 'mention_syms_capped="1" mention_syms_total="3"'
     ok "vii three named identifiers: two lift, the third is disclosed (mention_syms_capped=\"1\" mention_syms_total=\"3\")"
 else no "vii cap: expected mention_anchored=\"2\" with mention_syms_capped=\"1\" mention_syms_total=\"3\""; fi
 D1="$( headOf "How does hybrid_search rank search results" )"; D2="$( headOf "How does hybrid_search rank search results" )"
-[ -n "$D1" ] && [ "$D1" = "$D2" ] && ok "vii determinism (anchored twice, byte-identical)" || no "vii anchored output not deterministic"
+if [ -n "$D1" ] && [ "$D1" = "$D2" ]; then ok "vii determinism (anchored twice, byte-identical)"
+else no "vii anchored output not deterministic"; fi
 
 [ "$fail" = 0 ] && echo 'ALL PASS' || echo 'FAILURES ABOVE'
 exit "$fail"
