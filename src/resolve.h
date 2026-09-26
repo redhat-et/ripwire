@@ -2153,6 +2153,34 @@ struct PathPattern
     }
 };
 
+// Which files a project holds: tsc's `files`/`include`/`exclude`, each entry joined root-relative against the config
+// that declared it; a base's key replaces the one inherited so far, and a child's own key replaces the base's.
+struct ProjectFileSet
+{
+    std::vector<std::string> files, include, exclude;
+    bool                     hasFiles = false, hasInclude = false, hasExclude = false;
+
+    void inherit( ProjectFileSet&& base )
+    {
+        take( base.hasFiles, base.files, hasFiles, files );
+        take( base.hasInclude, base.include, hasInclude, include );
+        take( base.hasExclude, base.exclude, hasExclude, exclude );
+    }
+
+    static void take( bool baseHas, std::vector<std::string>& baseSet, bool& has, std::vector<std::string>& set )
+    {
+        if( baseHas )
+        {
+            set = std::move( baseSet );
+            has = true;
+        }
+    }
+
+    // Does the project hold root-relative `file`? tsc's rule: a `files` entry names it, or an `include` pattern matches
+    // it (the default `**/*` under `projectDir` only when neither key is declared) and no `exclude` pattern does.
+    bool holds( std::string_view file, std::string_view projectDir ) const;
+};
+
 // The effective alias view of one config after its `extends` chain.
 struct AliasScope
 {
@@ -2167,11 +2195,9 @@ struct AliasScope
     bool                     hasRootDir = false;
     bool                     unreadRelativeBase = false;   // a relative `extends` the crawl did not index
     bool                     unreadPackageBase  = false;   // a package-form `extends` not installed in the tree
-    // Which files the project holds (tsc's `files`/`include`/`exclude`), each entry joined root-relative against the
-    // config that declared it; a child's key replaces the inherited one. `references` belongs to the config itself
-    // and is never inherited: the root-relative paths of the configs it names that the crawl indexed.
-    std::vector<std::string> files, include, exclude;
-    bool                     hasFiles = false, hasInclude = false, hasExclude = false;
+    ProjectFileSet           fileSet;                      // which files the project holds (inherited through extends)
+    // `references` belongs to the config itself and is never inherited: the root-relative paths of the configs it
+    // names that the crawl indexed.
     std::string              projectDir;                   // the owning config's own directory (the default `include`)
     std::vector<std::string> references;
     bool                     unreadReference = false;      // a `references` entry the crawl did not index
@@ -2202,23 +2228,10 @@ struct AliasScope
         }
         unreadRelativeBase = unreadRelativeBase || base.unreadRelativeBase;
         unreadPackageBase  = unreadPackageBase || base.unreadPackageBase;
-        inheritFileSet( base.hasFiles, base.files, hasFiles, files );
-        inheritFileSet( base.hasInclude, base.include, hasInclude, include );
-        inheritFileSet( base.hasExclude, base.exclude, hasExclude, exclude );
+        fileSet.inherit( std::move( base.fileSet ) );
     }
 
-    static void inheritFileSet( bool baseHas, std::vector<std::string>& baseSet, bool& has, std::vector<std::string>& set )
-    {
-        if( baseHas )
-        {
-            set = std::move( baseSet );
-            has = true;
-        }
-    }
-
-    // Does this project hold root-relative `file`? tsc's rule: a `files` entry names it, or an `include` pattern matches
-    // it (the default `**/*` under the config only when neither key is declared) and no `exclude` pattern does.
-    bool holds( std::string_view file ) const;
+    bool holds( std::string_view file ) const { return fileSet.holds( file, projectDir ); }
 
     // Could a base that was named but not read have changed what this scope resolves? A relative one could have
     // supplied `paths` or `baseUrl`. A package-form one sits in node_modules, so its own `paths`/`baseUrl` resolve
@@ -2320,7 +2333,7 @@ inline bool projectPatternMatches( std::string_view pattern, std::string_view fi
     return globPath( pat, segs );
 }
 
-inline bool AliasScope::holds( std::string_view file ) const
+inline bool ProjectFileSet::holds( std::string_view file, std::string_view projectDir ) const
 {
     if( hasFiles && std::find( files.begin(), files.end(), file ) != files.end() )
     {
@@ -2357,9 +2370,9 @@ inline void applyProjectFiles( const JsonNode& root, const std::string& dir, Ali
             }
         }
     };
-    read( "files", out.files, out.hasFiles );
-    read( "include", out.include, out.hasInclude );
-    read( "exclude", out.exclude, out.hasExclude );
+    read( "files", out.fileSet.files, out.fileSet.hasFiles );
+    read( "include", out.fileSet.include, out.fileSet.hasInclude );
+    read( "exclude", out.fileSet.exclude, out.fileSet.hasExclude );
 }
 
 // A config's `extends` specifiers, in order (a string, or an array of them), relative and package-form alike.
@@ -2423,78 +2436,81 @@ struct WorkspaceDecl
     }
 };
 
-// One YAML scalar as a glob: surrounding quotes (either style) dropped. Empty for an empty item.
-inline std::string_view yamlGlobItem( std::string_view v ) noexcept
+// One YAML list item as a glob — trimmed, surrounding quotes (either style) dropped — appended unless empty.
+inline void appendYamlGlob( std::string_view item, std::vector<std::string>& out )
 {
-    v = trimWs( v );
-    if( v.size() >= 2 && ( v.front() == '\'' || v.front() == '"' ) && v.back() == v.front() )
+    if( const std::string_view g = namesplit::stripQuotePair( trimWs( item ) ); !g.empty() )
     {
-        v = v.substr( 1, v.size() - 2 );
+        out.emplace_back( g );
     }
-    return v;
 }
 
 // pnpm-workspace.yaml's `packages:` key — the one key read — as a block list (`- 'glob'` items under it) or a flow
 // list (`packages: ['a/*', "b/*"]`, which may span lines up to its `]`). An item holding a `,` or `]` inside quotes
-// is not a glob pnpm documents and is split at it (an under-count, never a false member).
+// is not a glob pnpm documents and is split at it (an under-count, never a false member). One line at a time.
+class PnpmGlobReader
+{
+public:
+    std::vector<std::string> globs;
+
+    void step( std::string_view line )   // a trimmed, non-empty, comment-free line
+    {
+        if( at_ == At::Flow )
+        {
+            flow_.append( "," ).append( line );
+        }
+        else if( line.starts_with( "packages:" ) || ( at_ == At::Block && line.front() == '[' ) )   // the flow list on its key's line, or the next
+        {
+            openKey( line.front() == '[' ? line : trimWs( line.substr( 9 ) ) );
+        }
+        else if( at_ == At::Block && line.front() == '-' )
+        {
+            appendYamlGlob( line.substr( 1 ), globs );
+        }
+        else
+        {
+            at_ = At::Other;   // any other key ends the block
+        }
+        closeFlow();
+    }
+
+private:
+    enum class At : std::uint8_t { Other, Block, Flow };
+    At          at_ = At::Other;
+    std::string flow_;   // a flow list's text so far, after its `[`
+
+    void openKey( std::string_view rest )
+    {
+        at_ = rest.empty() ? At::Block : ( rest.front() == '[' ? At::Flow : At::Other );
+        flow_.assign( at_ == At::Flow ? rest.substr( 1 ) : std::string_view() );
+    }
+
+    void closeFlow()
+    {
+        if( at_ != At::Flow || flow_.find( ']' ) == std::string::npos )
+        {
+            return;
+        }
+        for( const std::string_view item : splitSegments( std::string_view( flow_ ).substr( 0, flow_.find( ']' ) ), ',' ) )
+        {
+            appendYamlGlob( item, globs );
+        }
+        at_ = At::Other;
+    }
+};
+
 inline std::vector<std::string> pnpmWorkspaceGlobs( std::string_view y )
 {
-    std::vector<std::string> out;
-    bool                     inList = false, inFlow = false;
-    std::string              flow;   // a flow list's text so far, after its `[`
-    const auto               takeFlow = [ & ]
-    {
-        for( const std::string_view item : splitSegments( std::string_view( flow ).substr( 0, flow.find( ']' ) ), ',' ) )
-        {
-            if( const std::string_view g = yamlGlobItem( item ); !g.empty() )
-            {
-                out.emplace_back( g );
-            }
-        }
-        inFlow = false;
-    };
+    PnpmGlobReader reader;
     for( std::string_view line : splitSegments( y, '\n' ) )
     {
         line = trimWs( line.substr( 0, line.find( " #" ) ) );
-        if( line.empty() || line.front() == '#' )
+        if( !line.empty() && line.front() != '#' )
         {
-            continue;
-        }
-        if( inFlow )
-        {
-            flow.append( "," ).append( line );
-            if( flow.find( ']' ) != std::string::npos )
-            {
-                takeFlow();
-            }
-            continue;
-        }
-        if( line.starts_with( "packages:" ) || ( inList && line.front() == '[' ) )   // the flow list on its key's line, or the next
-        {
-            const std::string_view rest = line.front() == '[' ? line : trimWs( line.substr( 9 ) );
-            inList                      = rest.empty();
-            if( rest.starts_with( '[' ) )
-            {
-                flow.assign( rest.substr( 1 ) );
-                inFlow = true;
-                if( flow.find( ']' ) != std::string::npos )
-                {
-                    takeFlow();
-                }
-            }
-            continue;
-        }
-        if( !inList || line.front() != '-' )
-        {
-            inList = false;   // any other key ends the block
-            continue;
-        }
-        if( const std::string_view g = yamlGlobItem( line.substr( 1 ) ); !g.empty() )
-        {
-            out.emplace_back( g );
+            reader.step( line );
         }
     }
-    return out;
+    return std::move( reader.globs );
 }
 
 // The package.json `workspaces` globs (an array, or yarn's `{ "packages": [...] }`); empty when it declares none.
@@ -2738,9 +2754,15 @@ private:
     HashMap<std::string, Outcome>                   memo_;
     HashMap<std::string, std::vector<int>>          owners_;         // importer path → its owning scopes (ownersFor)
 
+    // A config or manifest's bytes as a JSON object; false for an empty read, a parse failure or a non-object root.
     static bool parseBytes( const std::string& bytes, JsonNode& out )
     {
-        return !bytes.empty() && JsoncReader( bytes ).parse( out ) && out.kind == JsonNode::Kind::Obj;
+        if( bytes.empty() )
+        {
+            return false;
+        }
+        JsoncReader reader( bytes );
+        return reader.parse( out ) && out.kind == JsonNode::Kind::Obj;
     }
 
     // Several owning projects (a file two `references` include) answer as one only when they agree: the edit a user

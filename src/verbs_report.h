@@ -390,7 +390,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
             }
         }
         packDeps( stdout, ing, cfg.packTopN > 0 ? cfg.packTopN : 40, cycles, h.transitive, afferent, adj, rh.ccd, rh.acd, rh.nccd, sa.lazyEdgesByFile, sa.lazyEdges, cfg.pageLimit, cfg.pageOffset, avRootArg,
-                  sa.importsUnresolved, sa.tsExtras.declarationOnly, sa.tsExtras.extendsUnread );   // #220: the partial-graph disclosures, absent at 0
+                  { sa.importsUnresolved, sa.tsExtras.declarationOnly, sa.tsExtras.extendsUnread } );   // #220: the partial-graph disclosures, absent at 0
         return 0;
     }
 
