@@ -17,8 +17,8 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ### Changed — `--for` lifts change logs and translated docs last in doc-mention surfacing
 
-**Before.** On a public Python repository, a code question ("How does hybrid_search rank search results") served
-three `### Added` sections of `CHANGELOG.md` and one section of `README.hi-IN.md` at ranks 17–20 of its head.
+**Before.** On a public Python repository, a code question about how search results are ranked served three
+`### Added` sections of `CHANGELOG.md` and one section of `README.hi-IN.md` at ranks 17–20 of its head.
 None of them came from their own match score:
 - Doc-mention surfacing lifted them, because both kinds of file backtick the identifiers the code defines.
 - Its per-anchor cap spent in node-id order, which is path order. So `CHANGELOG.md` and `README.hi-IN.md` took the
