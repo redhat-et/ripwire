@@ -531,4 +531,19 @@ command -v xmllint >/dev/null 2>&1 \
   && { xmllint --noout "$TMP/p2a.deps" "$TMP/p2g2.deps" "$TMP/p2j.deps" 2>/dev/null && ok "#220 (P2-K) xml well-formed" || no "#220 (P2-K) xml malformed"; } \
   || ok "#220 (P2-K) xml well-formed (xmllint absent — skipped)"
 
+# (P2-L) pnpm-workspace.yaml's FLOW list: `packages: [...]` on one line, and spanning lines (both quote styles, a
+# trailing comma, a comment) — the same members as the block list in P2-F. An empty item admits nothing.
+for FORM in one multi; do
+    D="$TMP/p2-pnpmflow-$FORM"
+    if [ "$FORM" = one ]; then w220 "$D/pnpm-workspace.yaml" "packages: ['apps/*', \"pkgs/*\"]  # flow\n"
+    else w220 "$D/pnpm-workspace.yaml" "packages:\n  [\n    'apps/*', # web\n    \"pkgs/*\",\n    '',\n  ]\nonlyBuiltDependencies:\n  - esbuild\n"; fi
+    w220 "$D/pkgs/shared/package.json" '{ "name": "@p/shared", "exports": "./index.ts" }\n'
+    w220 "$D/pkgs/shared/index.ts" "import { web } from '@p/web';\nexport const s = web;\n"
+    w220 "$D/apps/web/package.json" '{ "name": "@p/web" }\n'; w220 "$D/apps/web/index.ts" "import { s } from '@p/shared';\nexport const web = s;\n"
+    d220 "$D" >"$TMP/p2l-$FORM.deps"
+    { [ "$( ncyc "$TMP/p2l-$FORM.deps" )" = 1 ] && ! grep -q 'imports_unresolved=\|graph_partial=' "$TMP/p2l-$FORM.deps"; } \
+        && ok "#220 (P2-L) pnpm flow list ($FORM line): web <-> shared cycle, nothing unresolved" \
+        || no "#220 (P2-L) pnpm flow list ($FORM line) not read — $( root_of "$TMP/p2l-$FORM.deps" )"
+done
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

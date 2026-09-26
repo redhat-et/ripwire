@@ -2324,6 +2324,10 @@ struct WorkspaceDecl
         bool                                in   = false;
         for( const std::string& g : globs )   // a later `!glob` excludes; a later positive glob re-admits
         {
+            if( g.empty() )
+            {
+                continue;   // both producers drop empties today; an empty glob admits nothing and has no front()
+            }
             const bool        neg  = g.front() == '!';
             const std::string norm = lexicalNormalize( std::string_view( g ).substr( neg ? 1 : 0 ) );   // `./packages/*`
             if( globPath( splitSegments( norm ), segs ) )
@@ -2335,12 +2339,36 @@ struct WorkspaceDecl
     }
 };
 
-// pnpm-workspace.yaml's `packages:` block list — the one key read, as `- 'glob'` items under it. A flow list
-// (`packages: [a, b]`) is not read, and says nothing (an under-count, never a false one).
+// One YAML scalar as a glob: surrounding quotes (either style) dropped. Empty for an empty item.
+inline std::string_view yamlGlobItem( std::string_view v ) noexcept
+{
+    v = trimWs( v );
+    if( v.size() >= 2 && ( v.front() == '\'' || v.front() == '"' ) && v.back() == v.front() )
+    {
+        v = v.substr( 1, v.size() - 2 );
+    }
+    return v;
+}
+
+// pnpm-workspace.yaml's `packages:` key — the one key read — as a block list (`- 'glob'` items under it) or a flow
+// list (`packages: ['a/*', "b/*"]`, which may span lines up to its `]`). An item holding a `,` or `]` inside quotes
+// is not a glob pnpm documents and is split at it (an under-count, never a false member).
 inline std::vector<std::string> pnpmWorkspaceGlobs( std::string_view y )
 {
     std::vector<std::string> out;
-    bool                     inList = false;
+    bool                     inList = false, inFlow = false;
+    std::string              flow;   // a flow list's text so far, after its `[`
+    const auto               takeFlow = [ & ]
+    {
+        for( const std::string_view item : splitSegments( std::string_view( flow ).substr( 0, flow.find( ']' ) ), ',' ) )
+        {
+            if( const std::string_view g = yamlGlobItem( item ); !g.empty() )
+            {
+                out.emplace_back( g );
+            }
+        }
+        inFlow = false;
+    };
     for( std::string_view line : splitSegments( y, '\n' ) )
     {
         line = trimWs( line.substr( 0, line.find( " #" ) ) );
@@ -2348,19 +2376,38 @@ inline std::vector<std::string> pnpmWorkspaceGlobs( std::string_view y )
         {
             continue;
         }
-        if( line == "packages:" || !inList || line.front() != '-' )
+        if( inFlow )
         {
-            inList = ( line == "packages:" );   // any other key ends the block
+            flow.append( "," ).append( line );
+            if( flow.find( ']' ) != std::string::npos )
+            {
+                takeFlow();
+            }
             continue;
         }
-        std::string_view v = trimWs( line.substr( 1 ) );
-        if( v.size() >= 2 && ( v.front() == '\'' || v.front() == '"' ) && v.back() == v.front() )
+        if( line.starts_with( "packages:" ) || ( inList && line.front() == '[' ) )   // the flow list on its key's line, or the next
         {
-            v = v.substr( 1, v.size() - 2 );
+            const std::string_view rest = line.front() == '[' ? line : trimWs( line.substr( 9 ) );
+            inList                      = rest.empty();
+            if( rest.starts_with( '[' ) )
+            {
+                flow.assign( rest.substr( 1 ) );
+                inFlow = true;
+                if( flow.find( ']' ) != std::string::npos )
+                {
+                    takeFlow();
+                }
+            }
+            continue;
         }
-        if( !v.empty() )
+        if( !inList || line.front() != '-' )
         {
-            out.emplace_back( v );
+            inList = false;   // any other key ends the block
+            continue;
+        }
+        if( const std::string_view g = yamlGlobItem( line.substr( 1 ) ); !g.empty() )
+        {
+            out.emplace_back( g );
         }
     }
     return out;
