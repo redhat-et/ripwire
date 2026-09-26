@@ -551,13 +551,6 @@ inline const char* verbFor( Framework fw ) noexcept
 //           their bytes.
 // ---------------------------------------------------------------------------------------------------------
 
-/// Whether a `fw` command runs from its deciding package.json's directory (#335): the two npx-resolved
-/// runners. node's own runner resolves nothing through its working directory.
-inline bool runsFromPackageDir( Framework fw ) noexcept
-{
-    return fw == Framework::Vitest || fw == Framework::Jest;
-}
-
 /// `file` relative to `dir`, '/'-separated — `dir` being a directory nearestPackageJson's walk visited for
 /// `file`, under the same lexical normalization — or "" when `dir` is not an ancestor of `file`.
 inline std::string pathUnderDir( const std::string& file, const std::filesystem::path& dir )
