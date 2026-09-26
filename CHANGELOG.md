@@ -32,6 +32,12 @@ Reported by @mariadb-KyleHutchinson (follow-up to #323).
     through `--runTestsByPath`.
   - `node --test`: from Node 21 an argument is a glob (zero tests, exit 0) and before 21 a literal path.
     A path with glob syntax is `run_unknown="1"`.
+- **A vitest/jest command only for a file the runner's default include collects.** The name must end in
+  `.test.<ext>` or `.spec.<ext>`, or, for jest only, sit under `__tests__/`. `x.test.helper.ts` (both
+  runners) and a vitest `__tests__/x.ts` got a command that exits 1 with "No test files found". They are
+  now `run_unknown="1"`. The vitest rule follows `defaultVitestFileName` from PR #330 by @rainhuang0220.
+  Floor: a `vitest.config.*` or `jest.config.*` `include`/`testMatch` is not read, so a config that narrows
+  the default still gets a command.
 - **Not a change:** `--test-gate` still exits 4 while tests-to-run or untested reach is non-empty, as
   documented. The #323 closing comment that showed `exit=0` was wrong.
 

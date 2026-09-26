@@ -813,7 +813,12 @@ private:
         {
             // vitest/jest: explicit package.json evidence, never overridden by import evidence
             ASSUME( fw != jsrunner::Framework::NodeTest, "NodeTest returned above" );
-            return { verb, fw, true, jsrunner::pathUnderDir( disk, manifestDir ) };
+            std::string packagePath = jsrunner::pathUnderDir( disk, manifestDir );
+            if( !jsrunner::matchesDefaultInclude( fw, packagePath ) )
+            {
+                return {};   // #335: the runner's own default include would not collect it ("No test files found")
+            }
+            return { verb, fw, true, std::move( packagePath ) };
         }
         if( !manifest.empty() && jsrunner::hasAuthoritativeScript( manifest ) )
         {

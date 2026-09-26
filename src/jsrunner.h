@@ -566,6 +566,43 @@ inline std::string pathUnderDir( const std::string& file, const std::filesystem:
     return rel.generic_string();
 }
 
+/// Whether `path` (relative to the deciding package.json's directory) is a file vitest's or jest's DEFAULT
+/// include collects (#335; found by the review of #330, whose `defaultVitestFileName` states the vitest
+/// half). looksLikeJsTestFile above is the broad pre-filter and accepts `.test.` ANYWHERE in the name and a
+/// `__tests__/` segment for every runner; measured with vitest 5.0.2 and jest 30.5.2, `x.test.helper.ts`
+/// fails on both ("No test files found" / "No tests found", exit 1) and `__tests__/y.ts` fails on vitest.
+///   vitest  `**/*.{test,spec}.?(c|m)[jt]s?(x)`
+///   jest    `**/?(*.)+(spec|test).?([mc])[jt]s?(x)` and `**/__tests__/**/*.?([mc])[jt]s?(x)`
+/// FLOOR, stated: a vitest.config.* / jest.config.* `include`/`testMatch` is NOT read. A config that narrows
+/// the default still gets a command (that command then finds no file); one that widens it gets
+/// run_unknown="1" for the files only the wider pattern adds. The bare `test.js`/`spec.js` jest also
+/// collects never reaches here (isTestPath and looksLikeJsTestFile refuse it first).
+inline bool matchesDefaultInclude( Framework fw, std::string_view path ) noexcept
+{
+    static constexpr std::string_view kExts[] = { ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts" };
+    std::string_view stem;
+    for( const std::string_view ext : kExts )
+    {
+        if( path.size() > ext.size() && path.ends_with( ext ) )
+        {
+            stem = path.substr( 0, path.size() - ext.size() );
+            break;
+        }
+    }
+    if( stem.empty() )
+    {
+        return false;   // not one of the eight extensions either runner's default names
+    }
+    const std::size_t      slash = stem.rfind( '/' );
+    const std::string_view name  = ( slash == std::string_view::npos ) ? stem : stem.substr( slash + 1 );
+    const bool             named = name.size() > 5 && ( name.ends_with( ".test" ) || name.ends_with( ".spec" ) );
+    if( named || fw != Framework::Jest )
+    {
+        return named;
+    }
+    return path.starts_with( "__tests__/" ) || path.find( "/__tests__/" ) != std::string_view::npos;
+}
+
 /// One test file as a LITERAL argument to a vitest/jest command (#335; this section's banner). `isShellSafe`
 /// is the caller's allowlist verdict on `path` (testmap.h's isShellSafePath); a safe path goes in bare.
 inline std::string literalTestArg( Framework fw, std::string_view path, bool isShellSafe )

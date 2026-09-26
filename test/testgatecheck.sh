@@ -243,7 +243,7 @@ else
     printf '  SKIP  (n) xml well-formed, TS/JS fixtures (no xmllint)\n'
 fi
 
-# ── (z1)-(z7) #335: a vitest/jest package in a SUBDIRECTORY runs from that package, and a path with glob or
+# ── (z1)-(z10) #335: a vitest/jest package in a SUBDIRECTORY runs from that package, and a path with glob or
 # regex syntax is passed as a literal. npx resolves the runner, and the runner its config, from the working
 # directory, so the root-relative command failed from root= (no runner) and from the package (no file
 # matched). A `--` made vitest drop its filter and run the whole suite; jest reads a positional argument as a
@@ -328,9 +328,37 @@ printf '%s' "$Z7J" | grep -qF '(cd web && npx vitest run src/lib.test.ts)' \
     && ok '(z7) #335: --json and --affected carry the same package-directory command' \
     || no "(z7) #335: JSON/--affected disagree: JSON=$Z7J AFFECTED=$Z7A"
 
+# (z9) found by the review of #330: a vitest/jest row needs a file the runner's DEFAULT include collects.
+#      `.test.` mid-name (x.test.helper.ts) fails on both runners and `__tests__/` without .test./.spec.
+#      fails on vitest ("No test files found", exit 1): run_unknown="1". jest's own `__tests__/` default
+#      still gets its command (arm (v) pins the single-package case; this one sits in a subdirectory).
+mkz shape/web/package.json '{ "name": "web", "private": true, "scripts": { "test": "vitest run" }, "devDependencies": { "vitest": "3.2.4" } }'
+mkz shape/web/src/lib.ts 'export function add(a: number, b: number): number { return a + b; }'
+mkz shape/web/src/lib.test.helper.ts 'import { it, expect } from "vitest"; import { add } from "./lib"; it("h", () => { expect(add(1, 2)).toBe(3); });'
+mkz shape/web/src/__tests__/lib.ts 'import { it, expect } from "vitest"; import { add } from "../lib"; it("t", () => { expect(add(1, 2)).toBe(3); });'
+mkz shape/web/src/lib.test.ts 'import { it, expect } from "vitest"; import { add } from "./lib"; it("adds", () => { expect(add(1, 2)).toBe(3); });'
+mkz 'wsjest/packages/app/src/__tests__/lib.js' 'const { add } = require("../lib"); it("t", () => { expect(add(1, 2)).toBe(3); });'
+Z9="$( runz shape web/src/lib.ts )"; Z9J="$( runz wsjest packages/app/src/lib.js )"
+printf '%s' "$Z9" | grep -qF 'run="(cd web &amp;&amp; npx vitest run src/lib.test.ts)"' \
+    && printf '%s' "$Z9" | grep -qF 'n="2" p="web/src/__tests__/lib.ts,web/src/lib.test.helper.ts" run_unknown="1"/>' \
+    && printf '%s' "$Z9J" | grep -qF 'run="(cd packages/app &amp;&amp; npx jest src/__tests__/lib.js)"' \
+    && ok '(z9) #335: only a default-include name gets a vitest/jest command (x.test.helper.ts, vitest __tests__/ -> none)' \
+    || no "(z9) #335: default-include shape not enforced: VITEST=$Z9 JEST=$Z9J"
+
+# (z10) FLOOR, pinned so a change to it is deliberate: a vitest.config.* include is NOT read — the default
+#       include decides, so a narrowing config does not remove the command (jsrunner.h matchesDefaultInclude).
+mkz cfg/package.json '{ "name": "cfg", "private": true, "scripts": { "test": "vitest run" }, "devDependencies": { "vitest": "3.2.4" } }'
+mkz cfg/vitest.config.ts 'export default { test: { include: ["src/**/*.test.ts"] } };'
+mkz cfg/src/lib.ts 'export function add(a: number, b: number): number { return a + b; }'
+mkz cfg/test/lib.test.ts 'import { it, expect } from "vitest"; import { add } from "../src/lib"; it("adds", () => { expect(add(1, 2)).toBe(3); });'
+Z10="$( runz cfg src/lib.ts )"
+printf '%s' "$Z10" | grep -qF 'run="npx vitest run test/lib.test.ts"' \
+    && ok '(z10) #335 floor: vitest.config.ts include is not read (the default include decides; stated in jsrunner.h)' \
+    || no "(z10) #335 floor changed — update jsrunner.h's stated floor and the CHANGELOG with it: $Z10"
+
 if command -v xmllint >/dev/null 2>&1; then
     z8ok=1
-    for X in "$Z1" "$Z3" "$Z4" "$Z5" "$Z6" "$Z7A"; do
+    for X in "$Z1" "$Z3" "$Z4" "$Z5" "$Z6" "$Z7A" "$Z9" "$Z9J" "$Z10"; do
         printf '%s' "$X" | xmllint --noout - 2>/dev/null || z8ok=0
     done
     if [ "$z8ok" = 1 ]; then ok "(z8) xml well-formed (#335 fixtures)"; else no "(z8) xml malformed (#335 fixtures)"; fi
