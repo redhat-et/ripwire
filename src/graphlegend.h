@@ -649,13 +649,18 @@ inline constexpr const char* kDepsTsconfigUnreadLegend =
 inline constexpr const char* kArchImportsDtsLegend = " imports_dts=N (absent at 0): N TS/JS imports resolved only to a .d.ts declaration.";
 inline constexpr const char* kArchTsconfigUnreadLegend =
     " tsconfig_unread=N graph_partial=1 (absent at 0): N owning tsconfig/jsconfig files extend a base or reference a project not in the tree that could declare an alias, so an edge through one was never judged: violations= can only rise, and the metrics are measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios.";
+// Two legend clauses, each exactly when its count is non-zero (the #220 composers below all have this shape).
+inline std::string clausesForCounts( std::uint64_t countA, const char* clauseA, std::uint64_t countB, const char* clauseB )
+{
+    return std::string( countA > 0 ? clauseA : "" ) + ( countB > 0 ? clauseB : "" );
+}
 inline std::string depsTsImportExtrasLegend( std::uint64_t importsDts, std::uint64_t tsconfigUnread )
 {
-    return std::string( importsDts > 0 ? kDepsImportsDtsLegend : "" ) + ( tsconfigUnread > 0 ? kDepsTsconfigUnreadLegend : "" );
+    return clausesForCounts( importsDts, kDepsImportsDtsLegend, tsconfigUnread, kDepsTsconfigUnreadLegend );
 }
 inline std::string archTsImportExtrasLegend( std::uint64_t importsDts, std::uint64_t tsconfigUnread )
 {
-    return std::string( importsDts > 0 ? kArchImportsDtsLegend : "" ) + ( tsconfigUnread > 0 ? kArchTsconfigUnreadLegend : "" );
+    return clausesForCounts( importsDts, kArchImportsDtsLegend, tsconfigUnread, kArchTsconfigUnreadLegend );
 }
 inline const char* depsImportsUnresolvedLegend( bool on ) noexcept { return on ? kDepsImportsUnresolvedLegend : ""; }
 inline const char* archImportsUnresolvedLegend( bool on ) noexcept { return on ? kArchImportsUnresolvedLegend : ""; }
@@ -667,7 +672,7 @@ inline constexpr const char* kImpactTsconfigUnreadLegend =
     "tsconfig_unread=N (absent at 0): N owning tsconfig/jsconfig files extend a base or reference a project not in the tree that could declare an alias, so importers= is a floor. ";
 inline std::string impactTsImportLegend( std::uint64_t importsUnresolved, std::uint64_t tsconfigUnread )
 {
-    return std::string( impactImportsUnresolvedLegend( importsUnresolved > 0 ) ) + ( tsconfigUnread > 0 ? kImpactTsconfigUnreadLegend : "" );
+    return clausesForCounts( importsUnresolved, kImpactImportsUnresolvedLegend, tsconfigUnread, kImpactTsconfigUnreadLegend );
 }
 
 // ── THE DECL→DEF RESIDUE — unproven_defs= on the callers/callees answers (test/decltodefcheck.sh arm E2) ──
