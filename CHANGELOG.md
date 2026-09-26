@@ -811,44 +811,6 @@ block are not unwrapped either (each defines real methods at runtime); and only 
 define — a quoted (`:"x"`/`:'x'`), string, or splat/`%i[]` argument stays an honest nothing (Ruby defines
 those methods; ripwire does not capture them). Every floor is stated and pinned, never silent.
 
-### Added — a Ruby `db/schema.rb` renders its columns as Section definitions
-
-A Rails schema is recognized BY CONTENT, never by path: a Ruby file whose tree holds a
-`create_table "x", … do |t| … end` call — the call's do-block carries one block parameter — is a rendered
-schema, wherever it lives. Each `t.<type> "name"` / `t.<type> :name` in a table block mints ONE
-`SymKind::Section` def at `Lang::Ruby` — the data-kind slot a doc heading or YAML key already occupies
-(model.h's wording changes with it: a Section is no longer "isolated in the graph"; the Ruby ones admit
-call edges) — span = the name token, both quote spellings and the `:symbol` form. Rails-generated
-attribute uses (`product.price`) then D-BIND to the column and leave the external surface; because Call
-refs are language-gated, not kind-gated, columns receive real call edges and PageRank weight on every
-Rails corpus (accepted churn, disclosed here). The id rule covers the four grounded spellings: no id
-column/spelling → an implicit `id` def (the anchor is the table-name string — no `id` token exists
-there); `id: false` → no id def; `id: :uuid` → an `id` def at the pair key (the uuid TYPE is not
-modelled); `primary_key: "x"` → a def named the string instead. `t.timestamps` mints `created_at` AND
-`updated_at` (the DSL names them literally, symmetric with the id rule) — the two defs anchor at the
-method token's edges. The DSL CALLS keep their reference posture exactly like the attr family:
-`string`/`datetime`/`create_table` stay external-surface names. Duplicate columns across tables stay
-SEPARATE defs (same name, distinct identity bytes): `id` on N tables is `defs="N"`, and the map row
-merges them with `overloads`, never hiding the multiplicity. MIGRATIONS never interfere: a
-class-wrapped create_table — the migration shape, string- or symbol-named — is refused by a
-class/module-nest gate (a rendered schema's tables live at file level or under `Schema[].define`, never
-inside a class body), so the rendered `db/schema.rb` stays the ONE source of column names and indexing
-the migration beside its schema cannot double the defs (or their PageRank weight); `add_column` /
-`remove_column` / `change_column` are argument data and read nowhere — a column added then dropped
-never registers (pinned by the three migration fixtures). kParserVer 121 → 122 (extraction facts
-changed; no record layout change — kCacheVersion and kQSnapCacheScheme stay).
-Gate: `test/rubyschemacheck.sh` on `test/rubyschemafix/` — schema text byte-faithful to a real, running
-Rails 8.1 app's dump (verified `db:schema:load`-able), scrubbed to `spike_*` tables; two spellings no
-dump ever emits are restored by hand and marked in-file (`id: :uuid`, which that dump actually failed
-on, and a literal `t.timestamps`). Stated capture floors, each pinned by a gate arm: `t.index` /
-`t.references` / `t.belongs_to` / `t.polymorphic` name no column; a symbol-named table
-(`create_table :users`) is a migration spelling, not a schema surface; `where("price > ?")` string
-fragments stay opaque; the picker splits honestly (`rec.name` on a plain local and a rich `X.new.name`
-receiver are `graph_ambiguous`, `self.name` inside the defining class pins its own def). The before-
-evidence: on the pre-change binary every column was `defs=0 external=1` — the fixture's `--uses=name`
-read `defs="9"` (what attrs/defs/yaml already made) with the schema columns invisible; it now reads
-`defs="19" external="0"` with `count` rows binding.
-
 ## [0.6.2] — 2026-09-21
 
 ### Added — Microsoft's `cl.exe` builds the tree, so both Windows front ends compile and both gate

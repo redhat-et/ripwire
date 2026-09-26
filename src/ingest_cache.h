@@ -295,9 +295,14 @@ constexpr std::uint32_t kParserVer    = 123;          // bump on any grammar/.sc
                                                       //   four-spelling id rule (implicit / id: false / id: :uuid /
                                                       //   primary_key: "x") and `t.timestamps` -> created_at +
                                                       //   updated_at. MIGRATIONS contribute nothing (class/module-
-                                                      //   nest gate). No record layout change: kCacheVersion stays,
-                                                      //   kQSnapCacheScheme stays. A 121/122 cache written before
-                                                      //   this round differs only in the schema defs it lacks.
+                                                      //   nest gate). Review round at 123 (unreleased): a column
+                                                      //   call's receiver must BE the block parameter — a
+                                                      //   different bare-identifier receiver (`helper.string "x"`)
+                                                      //   names nothing; a 122/123 cache written before that
+                                                      //   round differs only there. No record layout change:
+                                                      //   kCacheVersion stays, kQSnapCacheScheme stays. A 121/122
+                                                      //   cache written before this round differs only in the
+                                                      //   schema defs it lacks.
                                                       // 122 = 2026-09-25 (#320/#67, test/astrocheck.sh): .astro joins
                                                       //   kLangTable on the TypeScript grammar, parsed through ONE
                                                       //   included range over its `---` frontmatter; blank lines

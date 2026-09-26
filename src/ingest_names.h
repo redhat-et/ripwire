@@ -1273,17 +1273,19 @@ inline std::string_view rubyPairKeyText( TSNode pair, std::string_view src ) noe
 }
 
 // One `t.<method> <args>` receiver-call inside a table block: a Section def per the rules above. The
-// `sawId` out-param records an explicit `id` column so the implicit rule can see it.
-inline void rubySchemaColumnCall( TSNode c, std::uint32_t fileId, std::string_view src, std::vector<RawDef>& defs, bool& sawId )
+// RECEIVER must BE the block parameter the create_table call bound (`t` in a rendered schema's do |t|);
+// any other bare identifier (`helper.string "x"`) is somebody's own helper call and names no column.
+// The `sawId` out-param records an explicit `id` column so the implicit rule can see it.
+inline void rubySchemaColumnCall( TSNode c, std::uint32_t fileId, std::string_view src, std::string_view receiverName, std::vector<RawDef>& defs, bool& sawId )
 {
     if( !kindIs( ts_node_type( c ), "call" ) )
     {
         return;
     }
     const TSNode recv = fieldChild( c, NodeField::Receiver );
-    if( ts_node_is_null( recv ) || !kindIs( ts_node_type( recv ), "identifier" ) )
+    if( ts_node_is_null( recv ) || !kindIs( ts_node_type( recv ), "identifier" ) || nodeTextOf( recv, src ) != receiverName )
     {
-        return;   // receiver-less or receiver-qualified: not a column on the block parameter
+        return;   // receiver-less, receiver-qualified, or a DIFFERENT bare name: not a column on the block parameter
     }
     const std::string_view m = fieldIdentifierText( c, NodeField::Method, src );
     if( m.empty() )
@@ -1345,6 +1347,7 @@ inline void rubySchemaColumnCall( TSNode c, std::uint32_t fileId, std::string_vi
 // One create_table call: the schema-file gate plus the whole table's defs (name, options, columns, id).
 inline void rubySchemaTableCall( TSNode n, std::uint32_t fileId, std::string_view src, std::vector<RawDef>& defs )
 {
+    std::string_view receiverName;   // the block parameter's name (`t`); empty until Gate 2 passes
     // Gate 0: a rendered schema's tables live at file level or under `ActiveRecord::Schema[].define … do`
     // — NEVER inside a class/module body. A MIGRATION's `create_table "users" … do |t|` (class-wrapped,
     // often string-named) is the same AST shape, and without this gate it would mint the SAME columns as
@@ -1408,6 +1411,7 @@ inline void rubySchemaTableCall( TSNode n, std::uint32_t fileId, std::string_vie
         {
             return;   // multi-parameter or non-identifier handle — not a rendered schema's do |t|
         }
+        receiverName = nodeTextOf( only, src );   // the `|t|` spelling — column calls must use it
     }
     // Options: the id/primary_key pairs among the call's arguments.
     bool   idFalse = false, primaryKey = false;
@@ -1450,7 +1454,7 @@ inline void rubySchemaTableCall( TSNode n, std::uint32_t fileId, std::string_vie
         ChildCursor cursor( body );
         forEachNamedChild( body, cursor.cur, [ & ]( TSNode c )
         {
-            rubySchemaColumnCall( c, fileId, src, defs, sawIdColumn );
+            rubySchemaColumnCall( c, fileId, src, receiverName, defs, sawIdColumn );
             return true;
         } );
     }

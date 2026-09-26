@@ -59,6 +59,7 @@ create_table "spike_quote_symbol", force: :cascade do |t|
     t.string :name
     t.references :owner
     t.index ["name"], name: "idx_spike"
+    helper.string "unbound_column"
   end
 
   create_table "spike_single_columns", force: :cascade do |t|

@@ -53,3 +53,5 @@ fragment). They are indexed as text; nothing here executes at gate time.
 - `where("price > ?")` string fragments are opaque to any static extractor.
 - The DSL calls (`string`, `datetime`, `create_table`, …) stay external-surface references — no def
   named `string` appears; only the NAME args gain defs (same posture as the attr family).
+- A column call's receiver must BE the block parameter: `helper.string "unbound_column"` (a different
+  bare identifier) names no column — the gate accepts only `t.<type>` (the `|t|` handle) forms.

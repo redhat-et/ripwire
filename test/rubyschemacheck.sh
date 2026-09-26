@@ -20,7 +20,9 @@
 #   event_id        `primary_key: "event_id"` renames the key off `id`
 #   ref             `id: false` table's only column; NO id def there
 #   created_at/updated_at  both the rendered t.datetime pair AND the literal t.timestamps call
-#   quote_symbol    t.string :name + t.references :owner (floor) + t.index ["name"] (floor)
+#   quote_symbol    t.string :name + t.references :owner (floor) + t.index ["name"] (floor) +
+#                   helper.string "unbound_column" — a column call on a DIFFERENT bare identifier
+#                   names nothing (the receiver must be the block parameter, `t`)
 #   migration_string/migration_symbol/migration_columns  the migration INTERFERENCE floors: a
 #     class-wrapped create_table (string- OR symbol-named) mints NOTHING — the schema is the only
 #     source of column names, indexing a migration beside its schema would double every def and its
@@ -92,6 +94,9 @@ undefinable bla \
 undefinable gonna_die \
     && ok 'migration: a column added then REMOVED never registers (remove_column is read nowhere)' \
     || no 'migration: gonna_die — a removed column minted a def'
+undefinable unbound_column \
+    && ok 'receiver: a column call on a DIFFERENT bare identifier (`helper.string "unbound_column"`) names no column — the receiver must BE the block parameter (`t`) the create_table call bound' \
+    || no 'receiver: unbound_column — a non-t receiver minted a def'
 for dsl in string define datetime timestamps create_table; do
     [ "$( useshead "$dsl" | grep -oE 'defs="[0-9]+" external="[0-9]+"' )" = 'defs="0" external="1"' ] \
         && ok "posture: the DSL call \`$dsl\` itself is still no def (reference capture posture)" \
@@ -127,16 +132,27 @@ grep -q 'p="column_consumers.rb:6"' "$TMP/uses_name" \
 
 # ── 5. MAP KINDS: the defs carry t="sec" with the DSL row family merged by name ─────────────────────
 "$BIN" "$FIX" --no-cache 2>/dev/null >"$TMP/map"
-grep -q '<s t="sec" n="name"' "$TMP/map" \
-    && ok 'kind: the 9 columns merge as one t="sec" n="name" row (overloads, not collisions)' \
+# The schema.rb file block, extracted once; every kind arm asserts INSIDE it (the yaml Section key is a
+# different file and must never satisfy a schema assertion).
+python3 - "$TMP/map" >"$TMP/schema_block" <<'PYEOF'
+import re, sys
+xml = open(sys.argv[1], encoding='utf-8').read()
+m = re.search(r'<f p="schema\.rb"[^>]*>(.*?)</f>', xml, re.S)
+sys.stdout.write(m.group(1) if m else "")
+PYEOF
+grep -q '<s t="sec" n="name"' "$TMP/schema_block" \
+    && ok 'kind: schema.rb holds a t="sec" n="name" row (the 9 columns; the yaml Section key is a different file and cannot satisfy this arm)' \
     || no 'kind: schema.rb name section row missing'
-grep -q '<s t="sec" n="id"' "$TMP/map" \
+grep -q '<s t="sec" n="name" overloads="9"' "$TMP/schema_block" \
+    && ok 'kind: the 9 schema name defs are one overloads="9" row — every column counts, none hidden' \
+    || no 'kind: schema.rb name overloads != 9'
+grep -q '<s t="sec" n="id"' "$TMP/schema_block" \
     && ok 'kind: the 14 keys merge as one t="sec" n="id" row — the multi-def floor is visible, not hidden' \
     || no 'kind: schema.rb id section row missing'
-grep -q '<s t="sec" n="event_id"' "$TMP/map" \
+grep -q '<s t="sec" n="event_id"' "$TMP/schema_block" \
     && ok 'kind: the primary_key rename def is a Section row too' \
     || no 'kind: event_id section row missing'
-grep -q '<s t="method" n="name" sc="PairDefColumn"' "$TMP/map" && grep -q '<s t="sec" n="name"' "$TMP/map" \
+grep -q '<s t="method" n="name" sc="PairDefColumn"' "$TMP/map" && grep -q '<s t="sec" n="name"' "$TMP/schema_block" \
     && ok 'collision: the method def and the column def share the NAME, never the identity — both stand' \
     || no 'collision: method/column name defs lost one side'
 
