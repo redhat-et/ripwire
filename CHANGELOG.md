@@ -13,6 +13,45 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
+## [Unreleased]
+
+### Changed — `--for` lifts change logs and translated docs last in doc-mention surfacing
+
+**Before.** On a public Python repository, a code question ("How does hybrid_search rank search results") served
+three `### Added` sections of `CHANGELOG.md` and one section of `README.hi-IN.md` at ranks 17–20 of its head.
+None of them came from their own match score:
+- Doc-mention surfacing lifted them, because both kinds of file backtick the identifiers the code defines.
+- Its per-anchor cap spent in node-id order, which is path order. So `CHANGELOG.md` and `README.hi-IN.md` took the
+  slots ahead of `README.md`, whose "Usage" section the Hindi one translates.
+
+**Now.** On the routed path, doc-mention surfacing handles two kinds of document after every other document of every
+anchor. It lifts them to 0.35 of the usual height (the calibrated tier factor; no new constant). The same per-anchor
+and total caps and the same `doc_mentions_total=` count apply. The two kinds are:
+- **Change logs**, by filename: `CHANGELOG*`, `CHANGES*`, `HISTORY*`, `NEWS*`, `RELEASES*`, `RELEASE_NOTES*`,
+  and the `changelog/`, `changelog.d/`, `release-notes/` and `releases/` directories.
+- **Translations of a default-language document** that the index also holds: `README.zh-CN.md` beside
+  `README.md`, or `docs/ja/x.md` beside `docs/en/x.md` or `docs/x.md`. A bare two-letter directory counts only
+  when it holds two or more such files, so `ui/README.md` is not a translation. An `en` tag is never a translation.
+
+What is left alone:
+- **Match scores.** BM25 is untouched. A first version also scored these files ×0.35. On the 92 held-out LocBench
+  instances, that pushed a gold change log out of the bundle three times, because a bug fix edits CHANGELOG. It was
+  dropped.
+- **Questions about the files themselves.** The ordinary lift stays when the task asks about changes (`added`,
+  `changed`, `removed`, `introduced`, `deprecat…`, `release…`, `version…`, `changelog…`), asks about translation,
+  or names the file's stem or language tag. `--no-route` turns the ordering off.
+
+The MCP `for` and `pack_task` verbs apply the same order.
+
+Measured:
+- **The question above.** The four rows leave the head, replaced by `docs/FEATURES.md`, the `README.md` "Usage"
+  section, `docs/COMMANDS.md` and one more code row. Bytes go from 9,534 to 9,677.
+- **The 92 held-out LocBench instances** (pre-registered band, measured once). Gold file in head 75 → 75, gold
+  function 51 → 51, every gold file 55 → 55, gold file anywhere in the bundle 86 → 86. No gold change log left a
+  bundle. 84 of 92 answers are byte-identical, and total bytes are +160 (+0.023 %).
+- **The test.** `test/docmentioncheck.sh` arm (vi) pins the order and its controls, and was shown failing on the
+  0.6.4 binary.
+
 ## [0.6.4] — 2026-09-25
 
 ### Added — Astro (`.astro`) frontmatter is indexed on the TypeScript grammar (#320, #67)
