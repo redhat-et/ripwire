@@ -136,7 +136,7 @@ class Blobs:
     """`git cat-file --batch` over one long-lived process: rev:path or blob sha -> bytes (None if missing)."""
 
     def __init__( self, repo ):
-        self.p = subprocess.Popen( [ "git", "-C", repo, "cat-file", "--batch" ], stdin=subprocess.PIPE, stdout=subprocess.PIPE )
+        self.p = subprocess.Popen( common.git_argv( repo, "cat-file", "--batch" ), env=common.git_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE )
 
     def get( self, spec ):
         self.p.stdin.write( ( spec + "\n" ).encode() )
@@ -309,10 +309,9 @@ def first_parent_diffs( repo, shas ):
     if not shas:
         return {}
     env_in = "\n".join( shas ) + "\n"
-    p = subprocess.run( [ "git", "-C", repo, "-c", "core.quotepath=off", "log", "--no-walk=unsorted", "--stdin", "--diff-merges=first-parent",
-                          "-M", "-U0", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", "--format=%x00%H" ],
-                        input=env_in, capture_output=True, text=True, errors="replace",
-                        env=dict( os.environ, GIT_PAGER="cat", LC_ALL="C", GIT_CONFIG_NOSYSTEM="1" ) )
+    p = subprocess.run( common.git_argv( repo, "log", "--no-walk=unsorted", "--stdin", "--diff-merges=first-parent", "-M", "-U0", "--no-color",
+                                         "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", "--format=%x00%H" ),
+                        input=env_in, capture_output=True, text=True, errors="replace", env=common.git_env() )
     if p.returncode != 0:
         raise RuntimeError( "git log --stdin failed: " + p.stderr[ :300 ] )
     return { sha: parse_unified( text ) for sha, text in _split_log( p.stdout ) }

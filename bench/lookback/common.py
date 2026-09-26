@@ -107,15 +107,6 @@ GENERATED_RE = re.compile( r"(?i)(@generated|do not edit|auto-?generated|generat
 GENERATED_HEAD_LINES = 5
 
 
-def stratum_of_path( path ):
-    """The stratum whose extension set owns this path, or None."""
-    low = path.lower()
-    for stratum in STRATUM_ORDER:
-        if low.endswith( STRATUM_EXTS[ stratum ] ):
-            return stratum
-    return None
-
-
 def is_product_path( path, stratum ):
     """§1's frozen path+name rule (the generated-marker half needs the blob; see is_generated_head)."""
     if not path.lower().endswith( STRATUM_EXTS[ stratum ] ):
@@ -137,20 +128,25 @@ def salted_rank( salt, name ):
 
 
 def sha256_file( path ):
-    h = hashlib.sha256()
     with open( path, "rb" ) as fh:
-        for block in iter( lambda: fh.read( 1 << 20 ), b"" ):
-            h.update( block )
-    return h.hexdigest()
+        return hashlib.file_digest( fh, "sha256" ).hexdigest()
 
 
-def git( repo, *args, check=True, text=True ):
-    """Run git in `repo` with a fixed, config-independent environment (no pager, no user config, C locale)."""
+def git_env():
+    """A fixed, config-independent environment for git (no pager, no system config, C locale, no inherited repo)."""
     env = dict( os.environ, GIT_PAGER="cat", LC_ALL="C", GIT_CONFIG_NOSYSTEM="1", HOME=os.environ.get( "HOME", "/" ) )
     for k in ( "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE" ):
         env.pop( k, None )
-    out = subprocess.run( [ "git", "-C", repo, "-c", "core.quotepath=off", "-c", "diff.renames=true", *args ],
-                          capture_output=True, env=env, text=text, errors="replace" if text else None )
+    return env
+
+
+def git_argv( repo, *args ):
+    return [ "git", "-C", repo, "-c", "core.quotepath=off", "-c", "diff.renames=true", *args ]
+
+
+def git( repo, *args, check=True, text=True ):
+    """Run git in `repo` under git_env()."""
+    out = subprocess.run( git_argv( repo, *args ), capture_output=True, env=git_env(), text=text, errors="replace" if text else None )
     if check and out.returncode != 0:
         raise RuntimeError( "git %s failed rc=%d: %s" % ( " ".join( args[ :3 ] ), out.returncode, out.stderr[ :400 ] ) )
     return out.stdout

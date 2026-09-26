@@ -54,8 +54,7 @@ def ripwire_version( binary="ripwire" ):
     return v
 
 
-def _strip_comments( xml_text ):
-    return re.sub( r"<!--.*?-->", "", xml_text, flags=re.S )
+XML_COMMENT_RE = re.compile( r"<!--.*?-->", re.S )     # ripwire's legends live in comments; the rows do not
 
 
 def run_hotspots( checkout, binary="ripwire", page=100000 ):
@@ -66,7 +65,7 @@ def run_hotspots( checkout, binary="ripwire", page=100000 ):
                             capture_output=True, text=True, errors="replace" )
         if p.returncode != 0:
             raise RuntimeError( "ripwire --hotspots rc=%d: %s" % ( p.returncode, p.stderr[ :300 ] ) )
-        root = ET.fromstring( _strip_comments( p.stdout ) )
+        root = ET.fromstring( XML_COMMENT_RE.sub( "", p.stdout ) )
         el = root if root.tag == "hotspots" else root.find( ".//hotspots" )
         if el is None:
             raise RuntimeError( "no <hotspots> element" )
@@ -89,7 +88,7 @@ def run_metrics( checkout, binary="ripwire", topk=10 ** 7 ):
     for m in re.finditer( r"<!-- (files=\d+ symbols=\d+[^>]*?) -->", p.stdout ):
         for k, v in re.findall( r'(\w+)="?([^\s"]+)"?', m.group( 1 ) ):
             counts[ k ] = v
-    root = ET.fromstring( _strip_comments( p.stdout ) )
+    root = ET.fromstring( XML_COMMENT_RE.sub( "", p.stdout ) )
     rows = []
     for f in root.iter( "f" ):
         path = f.attrib.get( "p" )
