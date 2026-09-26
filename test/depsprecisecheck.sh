@@ -546,4 +546,17 @@ for FORM in one multi; do
         || no "#220 (P2-L) pnpm flow list ($FORM line) not read — $( root_of "$TMP/p2l-$FORM.deps" )"
 done
 
+# (P2-M) asset imports through an alias: a stylesheet, an image with a bundler `?query`, a missing stylesheet name no
+# module of the import graph, so they are never counted; an indexed data file (`.json`) is an edge like a relative
+# import's; a `.vue` component is code the crawl does not index, so it stays counted (disclosed, not dropped).
+D="$TMP/p2-asset"
+w220 "$D/tsconfig.json" '{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["src/*"] } } }\n'
+w220 "$D/src/a.ts" "import '@/styles/globals.css';\nimport Logo from '@/logo.SVG?react';\nimport '@/gone.scss';\nimport data from '@/data.json';\nimport C from '@/Comp.vue';\nexport const a = data;\n"
+w220 "$D/src/styles/globals.css" "body {}\n"; w220 "$D/src/logo.SVG" "<svg/>\n"; w220 "$D/src/data.json" '{ "a": 1 }\n'
+w220 "$D/src/Comp.vue" "<template><div/></template>\n"
+d220 "$D" >"$TMP/p2m.deps"
+{ grep -q '<f p="src/data.json" afferent="1"/>' "$TMP/p2m.deps" && [ "$( root_of "$TMP/p2m.deps" | grep -o 'imports_unresolved="[0-9]*"' )" = 'imports_unresolved="1"' ]; } \
+    && ok "#220 (P2-M) assets: css/svg?query/missing scss not counted, @/data.json an edge, the unindexed .vue counted (1)" \
+    || no "#220 (P2-M) asset arm — $( root_of "$TMP/p2m.deps" ) $( blk "$TMP/p2m.deps" godfiles )"
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

@@ -2456,6 +2456,37 @@ inline bool isDeclarationFile( std::string_view p ) noexcept
     return p.ends_with( ".d.ts" ) || p.ends_with( ".d.mts" ) || p.ends_with( ".d.cts" );
 }
 
+// A specifier whose last segment names a non-code asset by its extension (a stylesheet, an image, a font, media, a
+// data or markup file, wasm), matched case-insensitively. Such an import names no module of the import graph: when
+// the crawl indexed the file, the exact-spelling probe draws its edge like a relative import's; when no indexed file
+// answers, the graph has no node it could have reached, so it is never counted as an in-repo import that drew no
+// edge (ImportResolver::resolve). `.vue`/`.svelte` components are code, so they are not on the list.
+inline bool isAssetSpecifier( std::string_view spec ) noexcept
+{
+    static constexpr std::string_view kAssetExts[] = {
+        "css", "scss", "sass", "less", "styl", "pcss",                                           // stylesheets
+        "svg", "png", "jpg", "jpeg", "gif", "webp", "avif", "ico", "bmp",                        // images
+        "woff", "woff2", "ttf", "otf", "eot",                                                    // fonts
+        "mp4", "webm", "mp3", "wav", "ogg",                                                      // media
+        "json", "yaml", "yml", "toml", "csv", "txt", "md", "html", "xml", "graphql", "gql", "wasm" };
+    const std::size_t      slash = spec.rfind( '/' );
+    const std::string_view last  = spec.substr( slash == std::string_view::npos ? 0 : slash + 1 );
+    const std::size_t      dot   = last.rfind( '.' );
+    if( dot == std::string_view::npos || last.size() - dot - 1 > 8 )
+    {
+        return false;
+    }
+    char              lower[8] = {};
+    const std::size_t n        = last.size() - dot - 1;
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        const char c = last[ dot + 1 + i ];
+        lower[i]     = ( c >= 'A' && c <= 'Z' ) ? char( c - 'A' + 'a' ) : c;
+    }
+    const std::string_view ext( lower, n );
+    return std::find( std::begin( kAssetExts ), std::end( kAssetExts ), ext ) != std::end( kAssetExts );
+}
+
 // npm's split of a bare specifier: the package name (`@scope/name`, else the first segment) and the rest as an
 // `exports` key (`.` or `./sub`). The name is empty for a scope alone (`@scope`).
 inline std::pair<std::string_view, std::string> splitPackageSpecifier( std::string_view spec )
@@ -2563,20 +2594,26 @@ public:
         collectWorkspaceMembers();
     }
 
-    // `importer` is the importing file's normalized root-relative path, `spec` a bare specifier it wrote.
+    // `importer` is the importing file's normalized root-relative path, `spec` a bare specifier it wrote. A bundler's
+    // `?query` suffix (`logo.svg?react`, `a.css?inline`) is not part of the path: the file it names is probed.
     Outcome resolve( std::string_view importer, std::string_view spec )
     {
         if( spec.find( ':' ) != std::string_view::npos )
         {
             return {};   // node:fs, https://…, data:… — a scheme, never a path in this tree
         }
+        spec = spec.substr( 0, spec.find( '?' ) );
         const std::string dir( includerDir( importer ) );
         std::string       key = dir + '\x1f' + std::string( spec );
         if( const auto it = memo_.find( key ); it != memo_.end() )
         {
             return it->second;
         }
-        const Outcome o = resolveUncached( dir, spec );
+        Outcome o = spec.empty() ? Outcome{} : resolveUncached( dir, spec );
+        if( o.verdict == Verdict::InRepoUnresolved && isAssetSpecifier( spec ) )
+        {
+            o = {};   // an asset no indexed file answers: the graph has no node for it (isAssetSpecifier)
+        }
         memo_.emplace( std::move( key ), o );
         return o;
     }
