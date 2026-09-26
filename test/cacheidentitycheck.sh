@@ -345,6 +345,18 @@ grep -qF "parser-version — not used; this run parses from source and rewrites 
     && ok "(D3) a lean run over a rich-written --cache file names this build's rich class, not another build" \
     || no "(D3) the lean run misattributes the rich-written blob: $( grep -m1 'not used' "$TMP/m1_lean.err" )"
 
+# (D3) the #334 review, N1 — the advice follows WHO named the file. An AUTOMATIC blob carries this build's own name, so
+#      a stamp from the other verb class there means a hand-copied file; "give each verb class its own --cache file"
+#      would be advice about a flag the user never passed.
+if [ -f "$TK_LEAN" ]; then
+    patch_u32 "$TK_LEAN" "$TMP/tk_rich_stamp.bin" 8 $(( SRC_PARSERVER + 1 )) && cp "$TMP/tk_rich_stamp.bin" "$TK_LEAN"
+    rm -f "$TK_OTHER" "$TK_LEGACY"
+    "$BIN" "$TK" >/dev/null 2>"$TMP/n1_auto.err"
+    grep -qF "parser-version — not used; this run parses from source and rewrites it (blob parser $(( SRC_PARSERVER + 1 )), this binary $SRC_PARSERVER: this build's rich verb class writes that number, or another ripwire build wrote it; an automatic cache file holds it only when copied in by hand)" "$TMP/n1_auto.err" \
+        && ok "(D3) on an automatic blob the other-class refusal says 'copied in by hand', not '--cache' advice" \
+        || no "(D3) the automatic-blob refusal gives the wrong advice: $( grep -m1 'not used' "$TMP/n1_auto.err" )"
+fi
+
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 # (E) ok= AND THE EXIT CODE — a self-healing miss on the AUTO blob is normal and must never fail doctor
 #     (a first run on a cold machine has no blob). An artifact the USER NAMED and this binary cannot read

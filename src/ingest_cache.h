@@ -2392,15 +2392,24 @@ struct CacheLoadStats
 // WHO WROTE IT (the #334 review, M1). A parser stamp equal to this build's OTHER verb class is what one --cache file
 // shared by a lean and a rich verb holds, and it used to be blamed on "another ripwire build". The stamp alone
 // cannot tell that apart from an older build whose parserVer was one lower or higher (a rich class of kParserVer-1
-// stamps exactly this build's lean number), so that case names both and says what fixes the first.
-inline std::string_view cacheRejectCause( const CacheFrame& frame, bool captureValueUses ) noexcept
+// stamps exactly this build's lean number), so that case names both. The advice then depends on WHO named the file:
+// a --cache file the user named is fixed by giving each class its own file; an automatic file carries this build's
+// own name (quality.h isThisBuildRootBlobName), which no build writes with another stamp, so it was copied in by
+// hand — and "two builds alternating on one cache file" cannot happen to it either.
+inline std::string_view cacheRejectCause( const CacheFrame& frame, bool captureValueUses, bool automaticPath ) noexcept
 {
     if( frame.reason == CacheReject::ParserVersion && frame.foundStamp == parserVerFor( !captureValueUses ) )
     {
+        if( automaticPath )
+        {
+            return captureValueUses ? "this build's lean verb class writes that number, or another ripwire build wrote it; an automatic cache file holds it only when copied in by hand"
+                                    : "this build's rich verb class writes that number, or another ripwire build wrote it; an automatic cache file holds it only when copied in by hand";
+        }
         return captureValueUses ? "this build's lean verb class writes that number, or another ripwire build wrote it; give each verb class its own --cache file"
                                 : "this build's rich verb class writes that number, or another ripwire build wrote it; give each verb class its own --cache file";
     }
-    return "another ripwire build wrote it; two builds alternating on one cache file re-parse every run";
+    return automaticPath ? "another ripwire build wrote it; an automatic cache file holds that only when copied in by hand"
+                         : "another ripwire build wrote it; two builds alternating on one cache file re-parse every run";
 }
 
 inline void noteCacheReject( const std::string& path, const CacheFrame& frame, bool captureValueUses )
@@ -2411,12 +2420,15 @@ inline void noteCacheReject( const std::string& path, const CacheFrame& frame, b
     }
     const bool format  = frame.reason == CacheReject::FormatVersion;
     const bool version = format || frame.reason == CacheReject::ParserVersion;
-    char detail[ 224 ] = "";
+    char detail[ 256 ] = "";
     if( version )
     {
+        const std::size_t slash     = path.find_last_of( "/\\" );
+        const bool        automatic = quality::isThisBuildRootBlobName( std::string_view( path ).substr( slash == std::string::npos ? 0 : slash + 1 ),
+                                                                        quality::ownBuildBlobTails() );
         rw::formatTo( detail, sizeof( detail ), " (blob {} {}, this binary {}: {})",
                       format ? "format" : "parser", frame.foundStamp, format ? kCacheVersion : parserVerFor( captureValueUses ),
-                      cacheRejectCause( frame, captureValueUses ) );
+                      cacheRejectCause( frame, captureValueUses, automatic ) );
     }
     rw::emitTo( stderr, "ripwire: cache {}: {} — not used; this run parses from source and rewrites it{}\n",
                 path.c_str(), cacheRejectName( frame.reason ), rw::cstr( detail ) );
