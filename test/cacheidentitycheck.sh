@@ -331,7 +331,7 @@ fi
     && ok "(D3) --cache=PATH writes exactly the file the user named (not build-keyed)" \
     || no "(D3) --cache=PATH did not write the named file verbatim"
 
-# (D3) rv-windows-334 M1 — ONE --cache file shared by a lean verb and a rich verb of THIS build. The refusal used to
+# (D3) the #334 review, M1 — ONE --cache file shared by a lean verb and a rich verb of THIS build. The refusal used to
 #      say "another ripwire build wrote it"; the same build wrote it. Both directions, the number the other class
 #      stamps named as such (it may also be an older build's, which the line says too).
 rm -f "$TMP/shared.ripwirecache"

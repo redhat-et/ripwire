@@ -2389,7 +2389,7 @@ struct CacheLoadStats
 // names the number it found and the one this binary reads, so the cause is on the line. It is APPENDED: the line up
 // to "rewrites it" is unchanged, and gates grep that prefix (test/localscountcheck.sh, test/cachefuzzcheck.sh).
 //
-// WHO WROTE IT (rv-windows-334 M1). A parser stamp equal to this build's OTHER verb class is what one --cache file
+// WHO WROTE IT (the #334 review, M1). A parser stamp equal to this build's OTHER verb class is what one --cache file
 // shared by a lean and a rich verb holds, and it used to be blamed on "another ripwire build". The stamp alone
 // cannot tell that apart from an older build whose parserVer was one lower or higher (a rich class of kParserVer-1
 // stamps exactly this build's lean number), so that case names both and says what fixes the first.
