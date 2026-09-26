@@ -628,10 +628,6 @@ struct NamedIdent
 // A qualifier that names no place: Python's `self.`/`cls.`, Rust's `crate::`/`super::`/`self::`/`Self::`,
 // JavaScript's `this.`. Treated as bare, so `self.hybrid_search` reads as `hybrid_search`.
 inline constexpr std::array<std::string_view, 6> kPlaceholderQualifiers = { "self", "cls", "this", "Self", "crate", "super" };
-inline bool isPlaceholderQualifier( std::string_view q ) noexcept
-{
-    return std::ranges::find( kPlaceholderQualifiers, q ) != kPlaceholderQualifiers.end();
-}
 
 // append (name, qualifier) once, in task-text order — the order the kMentionMaxDirectSymbols cap keeps.
 inline void addNamedIdent( std::vector<NamedIdent>& out, std::string_view name, std::string_view qualifier )
@@ -640,7 +636,7 @@ inline void addNamedIdent( std::vector<NamedIdent>& out, std::string_view name, 
     {
         return;   // the same 3-byte floor extractMentions applies; a digit-led token is a number, not a name
     }
-    const std::string_view q = isPlaceholderQualifier( qualifier ) ? std::string_view() : qualifier;
+    const std::string_view q = std::ranges::find( kPlaceholderQualifiers, qualifier ) != kPlaceholderQualifiers.end() ? std::string_view() : qualifier;
     for( const NamedIdent& n : out )
     {
         if( n.name == name && n.qualifier == q )
