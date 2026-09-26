@@ -553,7 +553,7 @@ extraction change bumps the parser version and costs one cold re-parse. Warm out
 tradeoff.
 
 Its blob holds ONE superset of records per tree, verb class and cache format, shared by every configuration run
-against that tree. The format is in the name (`ripwire-<rootKey>-lean-c25p122.bin`: `kCacheVersion` and the
+against that tree. The format is in the name (`ripwire-<rootKey>-lean-c<format>p<parser>.bin`: `kCacheVersion` and the
 class's parser version), so two builds of different formats on one tree each keep their own blob instead of
 refusing and rewriting one; an explicit `--cache=PATH` keeps the name the user gave it. Within one format
 the key deliberately ignores `--exclude` and `--max-file-size`, because keying on them instead was built,

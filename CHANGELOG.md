@@ -21,25 +21,31 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   and the verb class only (`ripwire-<key>-lean.bin`). Two builds whose cache formats differ — an installed
   release and a local build, or two installed versions — that alternate on one tree refused and rewrote
   each other's blob every time. Measured on `test/fixture`, alternating a format-24 build with this one for
-  three rounds: before, every run printed `format-version — not used` and `reparsed=5 reused=0`; now every
-  run after each build's first reports `reparsed=0 reused=5`. The names now carry `c<kCacheVersion>p<parser
-  version>`: `ripwire-<key>-lean-c25p122.bin`, `ripwire-<key>-rich-c25p123.bin`, and for the MCP index
-  `ripwire-mcp-<key>-c25p123.cache`. Two builds of one format still share a blob.
+  three rounds: before, every run after the first printed `format-version — not used` and every run reported
+  `reparsed=5 reused=0`; now every run after each build's first reports `reparsed=0 reused=5`. The names now
+  carry `c<kCacheVersion>p<parser version>` — at kCacheVersion 25, kParserVer 122: `ripwire-<key>-lean-c25p122.bin`,
+  `ripwire-<key>-rich-c25p123.bin`, and for the MCP index `ripwire-mcp-<key>-c25p123.cache`. Two builds of
+  one format still share a blob.
 - **`--cache=PATH` is not renamed.** A file you name is used under exactly that name (a committed
   `--index-out` artifact is consumed by its exact name). Two builds that share one `--cache` file still
   refuse each other's blob, and the notice says so.
 - **The 2 GiB cache budget is unchanged; the eviction order changed.** When the directory is over budget,
-  only the writing build's own blobs for the tree in use are protected. Another build's blobs for that tree,
-  and the untagged names 0.6.4 and older wrote, are evicted oldest-first like another tree's. Blobs untouched
-  for 30 days are deleted, as before. Where two builds' blobs do not both fit (llvm-project needs 1.76 GB per
-  build), those two builds still re-parse when they alternate, as they did before. The eviction notice now
-  reads `evicted N blob(s) of other roots or other ripwire builds`.
-- **Upgrading costs one cold run per tree**, because the name changed. The old untagged blob is left in
-  place until the budget or the 30-day rule removes it.
+  blobs are evicted in tiers, oldest first within each: other trees' blobs first; then another build's blobs
+  for the tree in use (including the untagged names 0.6.4 and older wrote, and another build's MCP index);
+  never the writing build's own blobs for that tree. Blobs untouched for 30 days are deleted, as before.
+  Where one tree's blobs from two builds do not fit together (llvm-project needs 1.76 GB per build), the
+  other build's blobs are evicted once no other tree's are left, and that build re-parses when it runs next.
+  The eviction notice now reads `evicted N blob(s) of other roots or other ripwire builds`.
+- **Upgrading costs one cold run per tree and verb class** — the map (lean), `--for`-class verbs (rich) and
+  the MCP index each re-parse once — because the names changed. The old untagged blobs stay until the budget
+  or the 30-day rule removes them. Near the 2 GiB budget, the new blobs written beside the old ones can push
+  the directory over it, so one other tree may lose its cache once.
 - **A `parser-version` refusal no longer blames another build for this build's other verb class.** One
   `--cache` file used by both a lean verb (the map) and a rich verb (`--for`) used to read "another ripwire
   build wrote it". It now reads "this build's lean verb class writes that number, or another ripwire build
-  wrote it; give each verb class its own --cache file". The stamp alone cannot tell the two apart.
+  wrote it; give each verb class its own --cache file". The stamp alone cannot tell the two apart. On an
+  automatic cache file, which only a hand copy can put there, the advice reads "an automatic cache file holds
+  it only when copied in by hand" instead.
 
 ## [0.6.4] — 2026-09-25
 
