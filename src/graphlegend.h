@@ -663,7 +663,6 @@ inline std::string archTsImportExtrasLegend( std::uint64_t importsDts, std::uint
 }
 inline const char* depsImportsUnresolvedLegend( bool on ) noexcept { return on ? kDepsImportsUnresolvedLegend : ""; }
 inline const char* archImportsUnresolvedLegend( bool on ) noexcept { return on ? kArchImportsUnresolvedLegend : ""; }
-inline const char* impactImportsUnresolvedLegend( bool on ) noexcept { return on ? kImpactImportsUnresolvedLegend : ""; }
 // --impact's import tier (CLI and MCP twin): imports_unresolved='s clause, then tsconfig_unread='s, each exactly when
 // the root carries its attribute. An unread config makes importers= a floor for the same reason (an alias nobody read
 // drew no edge; importers= only rises as edges are added).
