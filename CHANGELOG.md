@@ -13,6 +13,34 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
+## [Unreleased]
+
+### Changed — `--for`: a symbol the task names verbatim is lifted into the head
+
+Before this change, `--for="How does hybrid_search rank search results"` on a public Python repo served
+`hybrid_search` at r=8. Three evaluation `run()` functions that call it matched more of the question's words, and
+the query-mention anchor read only paths, dotted modules and `Type.method`. The anchor now also lifts an
+identifier the task names verbatim: a snake_case or camelCase word, `name()` call syntax (not inside pasted code),
+a backticked word, `ns::fn` or `mod.fn`.
+- The name must be defined in at most 3 files. Each file's best definition is lifted into the slot `Type.method`
+  mentions already use, just below the top hit, so #1 is never displaced; on the example above, `hybrid_search`
+  is now r=2.
+- A test or fixture definition is lifted only when the task also names its file.
+- At most two identifier lifts per task; any further ones are disclosed with `mention_syms_capped=` /
+  `mention_syms_total=`.
+- Plain English words that happen to be symbol names (`get`, `run`, `results`) are never lifted.
+- Output is byte-identical when the task names no such identifier.
+
+Measured on the 92-question LocBench held-out set, pre-registered, one run against v0.6.4:
+- gold file in the served head: 75 → 76
+- every gold file in the head: 55 → 56
+- gold function in the head: 51 → 52
+- mean reciprocal rank of the first gold-file row: 0.6017 → 0.6040
+- served bytes: +0.38%
+
+A first design that put named symbols above the top hit, with no paste, fixture or per-task rule, lowered the
+gold-file count (75 → 74) and was not shipped. Gate: `test/mentioncheck.sh` arm (vii).
+
 ## [0.6.4] — 2026-09-25
 
 ### Added — Astro (`.astro`) frontmatter is indexed on the TypeScript grammar (#320, #67)
