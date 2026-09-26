@@ -23,7 +23,9 @@ recall@5 / @10 / @20:
 | random | 0.3% | 0.6% | 1.3% | floor |
 
 **→ ripwire's lexical retrieval recovers ~40% of a real change's files at top-5 (≈53% at top-20) —
-a 30–130× lift over random, and far above the same-directory prior.**
+a 30–130× lift over random, and far above the same-directory prior.** (Disclosed 2026-09-26: ranked on the
+index at HEAD, which already contains each graded commit, so these absolute values are upper bounds; the
+ordering over PageRank holds, because HEAD helps PageRank too. `docs/EVALS.md` §"Co-change".)
 
 **The honest finding (ripwire's own `--eval` has said this all along):** *relatedness is lexical,
 importance is structural.* PageRank — ripwire's headline ranker — is the wrong tool for "what else does

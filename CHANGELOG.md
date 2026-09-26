@@ -647,7 +647,8 @@ importers: `--callers` hit rate 0.41 → 0.71, recall 0.32 → 0.51; `--uses` hi
 `--callers` recall is 0.62 → 0.67 and `--uses` 0.51 → 0.54. The import tier's recall is 0.47 → 0.46, a slight
 drop at that depth. `--callees` rows and default output are byte-identical to before on representative
 symbols, both on the CLI and in the MCP `calls` array. Bytes on the ranked lists are otherwise unchanged apart from the legend: the
-rows are the same set whenever nothing is cut.
+rows are the same set whenever nothing is cut. (Disclosed 2026-09-26: these figures rank on the graph at `60b65f02`,
+which already contains each gold commit; the forward-in-time gold below is the check measured without that.)
 
 **Honesty, from an independent review.** The review re-ran this instrument with
 paired bootstrap 95% CIs and two baselines — path order (above) and a within-tier random shuffle — plus a
@@ -3838,7 +3839,9 @@ files each — while adding gold files on four of the seven (+2, +1, +3 and +6 f
 14/30 complete and 42/129 gold files named; its median bytes-to-answer is 6,348 B (5,988 B before: 10 of the 12
 `--for` questions on that instrument are thin — commit subjects with a `(#NNNN)` token, "how does A reach B" questions
 — and carry the clause; the 2 confident ones read the base again, and the 18 non-`--for` questions moved by the 2–4 B
-the git stamp moved on every verb). Gate: `test/forwidencheck.sh` — a generated 33-file fixture whose gold file sits at
+the git stamp moved on every verb). **Correction (2026-09-26):** both figures include q25, measured at a pin that
+already contained its graded commit; without it they are 13/30 and 38–40/129, and q25's paired win is not
+established (`docs/EVALS.md`, Graft round). Gate: `test/forwidencheck.sh` — a generated 33-file fixture whose gold file sits at
 page rank 13 and is absent from the default head and tail; one row per file, determinism, paging with no overlap,
 `coverage=` defined in both dialects, thin versus confident `next=`, the refusals, MCP parity — red on the pre-change
 binary. The byte pins that ride a thin `--for` header (forrankordercheck's fixture rows, forrootlegendcheck,
@@ -5423,7 +5426,10 @@ skills. The static one, Lanza & Marinescu's CM×CC detection strategy, was proto
 not built: its top flags were stable hubs, and per-file static fan-in tracked how widely edits actually scatter at
 Spearman +0.158 and +0.163. The shipped `--situ` co-change rule, backtested against prior history only, scores
 precision@8 of 0.352 and 0.427 on the same two corpora. The tables are in `docs/EVALS.md` and re-derive from
-`bench/shotgun/` ([8dfd7380](https://github.com/redhat-et/ripwire/commit/8dfd7380)).
+`bench/shotgun/` ([8dfd7380](https://github.com/redhat-et/ripwire/commit/8dfd7380)). **Correction (2026-09-26):**
+0.352 and +0.158 were unpinned runs, superseded by 0.313 and +0.207 at `v0.6.2`; 0.427 and +0.163 are
+**RETRACTED** — that corpus is private and cannot be pinned or re-measured. `docs/EVALS.md` carries all of them;
+this entry is otherwise left as written.
 
 ### Changed — skill descriptions get their routing triggers and stop rules back
 
