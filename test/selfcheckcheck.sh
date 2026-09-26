@@ -146,6 +146,7 @@ ALLOW = {
     "std::max":               "comparison of two values",
     "std::string_view":       "a non-owning view over storage the caller already holds",
     "rfind":                  "read-only search of a string the caller owns",
+    "ends_with":              "read-only suffix comparison of a string the caller owns (mcpCachePath's .cache postcondition)",
     "std::all_of":            "read-only walk of the given range (#150 keepStdQualifiedCandidates postcondition)",
     "isDefinitionNotDeclaration": "read-only span comparison (model.h); no state — the predicate std::all_of walks above",
     "isFunctionLikeKind":        "read-only enum comparison (graph.h, a local lambda); no state — the F2 body-test scope guard",
