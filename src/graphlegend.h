@@ -626,7 +626,8 @@ inline constexpr const char* kImpactImportsUnresolvedLegend =
     "imports_unresolved=N (absent at 0): N TS/JS imports name this tree (a tsconfig/jsconfig paths alias, a baseUrl path, a workspace package) yet drew no edge, so importers= is a floor. ";
 // #220 part 2 — the resolver's two further disclosures, beside imports_unresolved= and absent at zero like it:
 // imports_dts= counts the edges that land only on a declaration file (types, not source — every count includes them),
-// tsconfig_unread= the owning configs whose `extends` base is not in the tree and could have declared an alias. An
+// tsconfig_unread= the owning configs whose `extends` base or `references` project is not in the tree and could have
+// declared an alias (or, for a reference, owned the importer). An
 // alias nobody read is an import that drew no edge, so tsconfig_unread= makes the root partial exactly as
 // imports_unresolved= does: graph_partial="1", never counts_floor (the part-1 reasoning above holds unchanged). One
 // composer for the --deps and --arch roots, so the attribute order is fixed: a root that carries only
@@ -641,10 +642,10 @@ inline std::string tsImportRootAttrXml( std::uint64_t importsUnresolved, std::ui
 inline constexpr const char* kDepsImportsDtsLegend =
     "imports_dts=N (root, absent at 0): N TS/JS imports resolved through a paths alias, a baseUrl path or a workspace package only to a .d.ts declaration, not to source; their edges are in every count. ";
 inline constexpr const char* kDepsTsconfigUnreadLegend =
-    "tsconfig_unread=N graph_partial=1 (root, absent at 0): N owning tsconfig/jsconfig files extend a base that is not in the tree (a package not installed in node_modules, an excluded file) and could declare an alias, so every value here is measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios. ";
+    "tsconfig_unread=N graph_partial=1 (root, absent at 0): N owning tsconfig/jsconfig files extend a base or reference a project that is not in the tree (a package not installed in node_modules, an excluded file) and could declare an alias, so every value here is measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios. ";
 inline constexpr const char* kArchImportsDtsLegend = " imports_dts=N (absent at 0): N TS/JS imports resolved only to a .d.ts declaration.";
 inline constexpr const char* kArchTsconfigUnreadLegend =
-    " tsconfig_unread=N graph_partial=1 (absent at 0): N owning tsconfig/jsconfig files extend a base not in the tree that could declare an alias, so an edge through one was never judged: violations= can only rise, and the metrics are measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios.";
+    " tsconfig_unread=N graph_partial=1 (absent at 0): N owning tsconfig/jsconfig files extend a base or reference a project not in the tree that could declare an alias, so an edge through one was never judged: violations= can only rise, and the metrics are measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios.";
 inline std::string depsTsImportExtrasLegend( std::uint64_t importsDts, std::uint64_t tsconfigUnread )
 {
     return std::string( importsDts > 0 ? kDepsImportsDtsLegend : "" ) + ( tsconfigUnread > 0 ? kDepsTsconfigUnreadLegend : "" );
@@ -656,6 +657,15 @@ inline std::string archTsImportExtrasLegend( std::uint64_t importsDts, std::uint
 inline const char* depsImportsUnresolvedLegend( bool on ) noexcept { return on ? kDepsImportsUnresolvedLegend : ""; }
 inline const char* archImportsUnresolvedLegend( bool on ) noexcept { return on ? kArchImportsUnresolvedLegend : ""; }
 inline const char* impactImportsUnresolvedLegend( bool on ) noexcept { return on ? kImpactImportsUnresolvedLegend : ""; }
+// --impact's import tier (CLI and MCP twin): imports_unresolved='s clause, then tsconfig_unread='s, each exactly when
+// the root carries its attribute. An unread config makes importers= a floor for the same reason (an alias nobody read
+// drew no edge; importers= only rises as edges are added).
+inline constexpr const char* kImpactTsconfigUnreadLegend =
+    "tsconfig_unread=N (absent at 0): N owning tsconfig/jsconfig files extend a base or reference a project not in the tree that could declare an alias, so importers= is a floor. ";
+inline std::string impactTsImportLegend( std::uint64_t importsUnresolved, std::uint64_t tsconfigUnread )
+{
+    return std::string( impactImportsUnresolvedLegend( importsUnresolved > 0 ) ) + ( tsconfigUnread > 0 ? kImpactTsconfigUnreadLegend : "" );
+}
 
 // ── THE DECL→DEF RESIDUE — unproven_defs= on the callers/callees answers (test/decltodefcheck.sh arm E2) ──
 // H1's fix (graph.h::declToDefFollowThrough) stopped a `file:name` selector from answering with same-named

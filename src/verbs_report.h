@@ -544,7 +544,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
         }
         if( archSa.tsExtras.extendsUnread != 0 )   // #220 part 2: an alias an unread `extends` base declares was never seen
         {
-            rw::emitTo( stderr, "ripwire arch: {} tsconfig/jsconfig file(s) extend a base that is not in the tree and could declare an "
+            rw::emitTo( stderr, "ripwire arch: {} tsconfig/jsconfig file(s) extend a base or reference a project that is not in the tree and could declare an "
                                 "alias, so an edge through one was never judged: violations= is a floor\n", archSa.tsExtras.extendsUnread );
         }
 
@@ -3430,18 +3430,26 @@ std::optional<int> runStructureText( const MainDispatch& d )
 
         const std::size_t reportCycles = std::min<std::size_t>( cycles.size(), 6 );
         // #220 part 1: while in-repo TS/JS imports drew no edge, the total is measured over the resolved edges only — NOT a
-        // floor: a missing edge can merge two of these cycles into one — and an empty list is not "acyclic".
-        if( reportSa.importsUnresolved == 0 )
+        // floor: a missing edge can merge two of these cycles into one — and an empty list is not "acyclic". Part 2: an
+        // unread tsconfig `extends`/`references` hides aliases the same way, so it qualifies the line too.
+        const std::uint64_t reportUnread  = reportSa.tsExtras.extendsUnread;
+        const bool          reportPartial = reportSa.importsUnresolved != 0 || reportUnread != 0;
+        if( !reportPartial )
         {
             rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {})\n", reportCycles, cycles.size() );
         }
-        else
+        else if( reportUnread == 0 )
         {
             rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {}; measured over resolved edges: {} imports unresolved)\n", reportCycles, cycles.size(), reportSa.importsUnresolved );
         }
+        else
+        {
+            rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {}; measured over resolved edges: {} imports unresolved, {} tsconfig files unread)\n",
+                         reportCycles, cycles.size(), reportSa.importsUnresolved, reportUnread );
+        }
         if( cycles.empty() )
         {
-            rw::emitTo( stdout, "{}", reportSa.importsUnresolved == 0 ? "- none (acyclic)\n" : "- none found over the resolved edges\n" );
+            rw::emitTo( stdout, "{}", reportPartial ? "- none found over the resolved edges\n" : "- none (acyclic)\n" );
         }
         else
         {

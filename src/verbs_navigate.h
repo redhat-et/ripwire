@@ -2230,6 +2230,7 @@ int emitImpactColumnar( const ImpactView& v )
                                  + rw::unprovenDefsAttrXml( v.unprovenDefs )                      // H1: where the XML root carries it
                                  + " importers=\"" + std::to_string( v.imports.files.size() ) + "\""
                                  + rw::importsUnresolvedAttrXml( v.imports.importsUnresolved )   // #220: the XML root's, absent at 0
+                                 + rw::countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ) )
                                  + " radius_tested=\"" + std::to_string( v.radiusTested )       // A6
                                  + "\" radius_untested=\"" + std::to_string( v.radiusUntested ) + "\""
                                  + rw::declinedCallsAttrXml( v.declinedCalls )                    // tier-3 declines into the radius
@@ -2274,7 +2275,8 @@ int emitImpactJson( const ImpactView& v )
     {
         rw::emitTo( stdout, ",\"importers_next\":\"{}\"", jsonStr( v.imports.next ).c_str() );
     }
-    rw::emitTo( stdout, "{}", rw::importsUnresolvedKeyJson( v.imports.importsUnresolved ) );   // #220: the XML root's, absent at 0
+    rw::emitTo( stdout, "{}{}", rw::importsUnresolvedKeyJson( v.imports.importsUnresolved ),   // #220: the XML root's, absent at 0
+                 rw::countFieldOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ), /*json=*/true ) );
     rw::emitTo( stdout, ",\"radius_tested\":{},\"radius_untested\":{}{}", v.radiusTested, v.radiusUntested,
                  rw::declinedCallsKeyJson( v.declinedCalls ) );   // A6; then the XML root's declined_calls=
     if( v.singleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( v.rootRaw ).c_str() ); }   // R-E
@@ -2395,7 +2397,7 @@ std::optional<int> runImpact( const MainDispatch& d )
             const bool imHasModScope = anyModuleScopeRow( ing, std::span<const NodeId>( show ).subspan( imPage.begin, imPage.end - imPage.begin ) );
             rw::emitTo( stdout, "{}{}. {}{}{}{}{}{}{}{}{}{}-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
                          cfg.columnar ? rw::kImpactImportTierColumnarLegend : rw::kImpactImportTierLegend,
-                         rw::impactImportsUnresolvedLegend( imports.importsUnresolved > 0 ),   // #220: exactly when the root carries it
+                         rw::impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread ).c_str(),   // #220: exactly when the root carries them
                          rw::testedLensLegend( cfg.columnar ), rw::kImpactTestedPartitionLegend,   // A6: the columnar form reads its dense column
                          rw::kTestedLensBlindSpotLegend,                           // F-02: rides with the partition
                          rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Impact, imUnprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=

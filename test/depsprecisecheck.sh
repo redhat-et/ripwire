@@ -559,4 +559,45 @@ d220 "$D" >"$TMP/p2m.deps"
     && ok "#220 (P2-M) assets: css/svg?query/missing scss not counted, @/data.json an edge, the unindexed .vue counted (1)" \
     || no "#220 (P2-M) asset arm — $( root_of "$TMP/p2m.deps" ) $( blk "$TMP/p2m.deps" godfiles )"
 
+# (P2-N) tsconfig `references`: create-vite's layout — tsconfig.json is `files: []` plus references to tsconfig.app.json
+# (which holds `paths` and includes src/) and tsconfig.node.json (vite.config.ts only). src/ is owned by the app project,
+# so @/a <-> @/b is a cycle; vite.config.ts is owned by the node project, which declares no alias, so its '@/a' is
+# neither an edge nor counted (tsc would not resolve it there either).
+mkvite() {   # mkvite DIR — the create-vite layout
+    rm -rf "$1"
+    w220 "$1/tsconfig.json" '{\n  "files": [],\n  "references": [ { "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" } ]\n}\n'
+    w220 "$1/tsconfig.app.json" '{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./src/*"] } }, "include": ["src"] }\n'
+    w220 "$1/tsconfig.node.json" '{ "compilerOptions": { "strict": true }, "include": ["vite.config.ts"] }\n'
+    w220 "$1/src/a.ts" "import { b } from '@/b';\nexport const a = b;\n"; w220 "$1/src/b.ts" "import { a } from '@/a';\nexport const b = a;\n"
+    w220 "$1/vite.config.ts" "import { a } from '@/a';\nexport default a;\n"
+}
+D="$TMP/p2-vite"; mkvite "$D"
+d220 "$D" >"$TMP/p2n.deps"
+{ [ "$( ncyc "$TMP/p2n.deps" )" = 1 ] && ! grep -q 'imports_unresolved=\|graph_partial=\|tsconfig_unread=' "$TMP/p2n.deps" && grep -q '<f p="vite.config.ts" includes="1" afferent="0" instab="0.00" transitive="1">' "$TMP/p2n.deps"; } \
+    && ok "#220 (P2-N) references (create-vite): src/ resolves under tsconfig.app.json (a <-> b cycle); vite.config.ts under the node project draws nothing" \
+    || no "#220 (P2-N) references not followed — $( ncyc "$TMP/p2n.deps" ) cycle(s), $( root_of "$TMP/p2n.deps" )"
+# two referenced projects hold src/ and disagree on @/*: never choose — no edge, counted
+w220 "$D/tsconfig.test.json" '{ "compilerOptions": { "paths": { "@/*": ["./test/*"] } }, "include": ["src", "test"] }\n'
+w220 "$D/test/a.ts" "export const a = 0;\n"; w220 "$D/test/b.ts" "export const b = 0;\n"
+w220 "$D/tsconfig.json" '{ "files": [], "references": [ { "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }, { "path": "./tsconfig.test.json" } ] }\n'
+d220 "$D" >"$TMP/p2n2.deps"
+{ [ "$( ncyc "$TMP/p2n2.deps" )" = 0 ] && grep -q 'imports_unresolved="2" graph_partial="1"' "$TMP/p2n2.deps"; } \
+    && ok "#220 (P2-N) two projects hold src/ and resolve @/* apart: ambiguous, counted (2), no edge" \
+    || no "#220 (P2-N) overlapping projects guessed — $( root_of "$TMP/p2n2.deps" )"
+# a reference the crawl did not index could own the file: disclosed as tsconfig_unread, not guessed
+mkvite "$D"; rm -f "$D/tsconfig.app.json"
+d220 "$D" >"$TMP/p2n3.deps"
+{ [ "$( ncyc "$TMP/p2n3.deps" )" = 0 ] && grep -q 'tsconfig_unread="1" graph_partial="1"' "$TMP/p2n3.deps"; } \
+    && ok "#220 (P2-N) a referenced project not in the tree: tsconfig_unread=\"1\" graph_partial=\"1\"" \
+    || no "#220 (P2-N) an unread reference was not disclosed — $( root_of "$TMP/p2n3.deps" )"
+# the same disclosure on the other file-graph answers: --report's cycle line, --impact's importer tier (CLI XML/JSON)
+"$BIN" "$D" --report --no-cache 2>/dev/null | grep -q '^## Dependency cycles (showing 0 of 0; measured over resolved edges: 0 imports unresolved, 1 tsconfig files unread)$' \
+    && ok "#220 (P2-N) --report: the cycle line is qualified by the unread project (never '(acyclic)')" || no "#220 (P2-N) --report cycle line unqualified"
+w220 "$D/src/b.ts" "import { a } from '@/a';\nexport function b() { return typeof a; }\n"
+"$BIN" "$D" --impact=src/b.ts:b --no-cache >"$TMP/p2n3.imp" 2>/dev/null
+{ grep -q 'importers="0" shown_importers="0" importers_capped="0" tsconfig_unread="1"' "$TMP/p2n3.imp" && grep -q 'counts_floor="1"' "$TMP/p2n3.imp" \
+  && grep -q 'tsconfig_unread=N' "$TMP/p2n3.imp" && "$BIN" "$D" --impact=src/b.ts:b --no-cache --json 2>/dev/null | grep -q '"tsconfig_unread":1'; } \
+    && ok "#220 (P2-N) --impact importer tier: tsconfig_unread=\"1\" beside counts_floor, defined; the JSON key too" \
+    || no "#220 (P2-N) --impact did not disclose the unread project"
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

@@ -6200,7 +6200,8 @@ inline void countFileImporters( const std::vector<std::vector<std::uint32_t>>& a
 inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, const std::vector<std::uint32_t>& defFiles,
                                                      std::vector<char>* lazyOut = nullptr,
                                                      std::vector<std::uint32_t>* fileFanInOut = nullptr,
-                                                     std::uint64_t* importsUnresolvedOut = nullptr )
+                                                     std::uint64_t* importsUnresolvedOut = nullptr,
+                                                     TsImportExtras* tsExtrasOut = nullptr )
 {
     std::vector<std::uint32_t> importers;
     if( lazyOut != nullptr )
@@ -6225,7 +6226,7 @@ inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, con
     // dedup=true: this is a MEMBERSHIP question ("does this file import a def file"), not an
     // occurrence-count one, so the deduped adjacency is both the right shape and the cheaper scan.
     HashMap<std::uint64_t, char>  lazyPairs;
-    const std::vector<std::vector<std::uint32_t>> adj = buildPreciseIncludeAdj( ing, /*dedup=*/true, lazyOut ? &lazyPairs : nullptr, importsUnresolvedOut );
+    const std::vector<std::vector<std::uint32_t>> adj = buildPreciseIncludeAdj( ing, /*dedup=*/true, lazyOut ? &lazyPairs : nullptr, importsUnresolvedOut, tsExtrasOut );
     // No `isDef[f]` pre-filter here (barrel-exclusion lane): a def file is not skipped wholesale, because
     // it may ALSO be a genuine importer of a DIFFERENT def file (the barrel-getter shape — see
     // scanImporterEdges' own comment). The narrower, correct exclusion — f is never its own importer — is
@@ -6275,6 +6276,7 @@ struct ImportTier
                                            //   [+ imports_unresolved= when > 0]
     std::string                next;       // cut-fix E: the call that lists the whole tier; empty when uncut
     std::uint64_t              importsUnresolved = 0;   // #220 part 1: importers= is a floor while > 0
+    std::uint64_t              tsconfigUnread    = 0;   // #220 part 2: configs with an unread extends/references base (tsconfig_unread=)
 };
 
 // cut-fix C: the tier's DISPLAY size, split from its measurement (callhierarchy.h's rule: the cap policy is the
@@ -6304,7 +6306,8 @@ inline void sizeImportTier( ImportTier& t, int pageLimit, std::string_view sym =
                + " shown_importers=\"" + std::to_string( t.shown ) + "\""
                + " importers_capped=\"" + ( t.capped ? "1" : "0" ) + "\""
                + rw::nextAttrXml( t.next, "importers_next" )
-               + rw::importsUnresolvedAttrXml( t.importsUnresolved );   // #220: absent at zero; the root's counts_floor covers it
+               + rw::importsUnresolvedAttrXml( t.importsUnresolved )   // #220: absent at zero; the root's counts_floor covers it
+               + rw::countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( t.tsconfigUnread ) );   // #220 part 2: likewise
     ENSURES( t.shown <= t.files.size(), "the page is a prefix of the ranked tier" );
     ENSURES( t.next.empty() || t.capped, "a follow-up is offered only for a cut tier" );
 }
@@ -6327,7 +6330,9 @@ inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<N
     // symbol's importers cannot hide behind a TS alias, so its answer neither pays for the count nor carries it.
     const bool tsTarget = std::any_of( defFiles.begin(), defFiles.end(), [ & ]( std::uint32_t f )
                                        { return f < ing.files.size() && tsimport::couldBeTsImportTarget( ing.files[f] ); } );
-    t.files = importersOfFiles( ing, defFiles, &lazyByFileOrder, &fileFanIn, tsTarget ? &t.importsUnresolved : nullptr );
+    TsImportExtras tsExtras;
+    t.files          = importersOfFiles( ing, defFiles, &lazyByFileOrder, &fileFanIn, tsTarget ? &t.importsUnresolved : nullptr, tsTarget ? &tsExtras : nullptr );
+    t.tsconfigUnread = tsExtras.extendsUnread;
 
     // t.files is about to be RESORTED into tier/path order; lazyByFileOrder must move WITH each entry, not
     // stay behind at its ascending-file-id slot — sort an index permutation, then rebuild both in lockstep.

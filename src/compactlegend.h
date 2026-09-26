@@ -327,7 +327,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // #220 part 2: the resolver's other two root gauges (graphlegend.h tsImportRootAttrXml), absent at zero, --deps/--arch;
     // tsconfig_unread= makes the root partial exactly as imports_unresolved= does (graph_partial= above is its reading).
     { "imports_dts",       "imports_dts=N: N TS/JS imports resolved only to a .d.ts declaration, not source" },
-    { "tsconfig_unread",   "tsconfig_unread=N: N tsconfig extends bases not in the tree could declare aliases (graph_partial=1)" },
+    { "tsconfig_unread",   "tsconfig_unread=N: N tsconfig extends/references not in the tree could declare aliases, so edges may be missing" },
     // #60: <bodies bodyless=N> — requested symbols with no body BY CONSTRUCTION (a module-scope owner), so
     // capped= stays 0. Absent at zero, like every term here.
     { "bodyless",          "bodyless=N of total=: requested symbols with NO body by construction (t=modscope), never in shown=, never raising capped=", true },
