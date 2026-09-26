@@ -160,7 +160,7 @@ using rw::quality::deadCodeEligibleKind;
 // cacheDirLadder(), so repeated invocations on the same tree re-parse only changed files.
 //
 // The 16-hex root field comes from quality.h's `cacheRootKeyHex` — the ONE canonical spelling every cache
-// family now shares (lean/rich here, `ripwire-mcp-<key>.cache`, and shaKeyedCachePath's qheadsnap/qsnap/
+// family now shares (lean/rich here, `ripwire-mcp-<key>-<tag>.cache`, and shaKeyedCachePath's qheadsnap/qsnap/
 // qbody/qhist/qms/qchurn/stier). This function used to open-code the hash with a TRUNCATED FNV-1a offset
 // basis while quality.h used the real one, so one root minted two key families and the byte-budget pin
 // (evictBySizeBudget) could only ever see half of them. The seed that survived is this function's, because
@@ -195,9 +195,17 @@ using rw::quality::deadCodeEligibleKind;
 // TABLE, so a run deserialises only the records for the files it actually crawled, and a save carries
 // over verbatim the records for files it did not crawl — so a narrower configuration is cheap to load
 // and can no longer truncate the shared blob. Gate: test/cacheoffsetcheck.sh.
+//
+// #334 follow-up — THE BUILD TAG. The name also carries (kCacheVersion, the class's parserVer):
+// `ripwire-<rootKey>-lean-c25p122.bin`. Keyed by root and class alone, two builds of different formats that
+// alternate on one tree (an installed release and a local build, or two installed versions) refused and rewrote
+// each other's blob on every run. This is NOT the reverted key change above: that one multiplied blobs per root
+// by CONFIGURATION inside one build, which every gate battery exercises; this one adds a blob per root only per
+// FORMAT that actually ran on it, the budget sweep unpins another build's blobs (quality.h evictBySizeBudget),
+// and the age pass retires a version nobody runs any more. See quality.h cacheBuildTag.
 std::string defaultCachePath( const std::string& root, bool captureValueUses )
 {
-    return rw::quality::rootKeyedCachePath( root, "ripwire-", captureValueUses ? "-rich.bin" : "-lean.bin" );
+    return rw::quality::rootKeyedCachePath( root, "ripwire-", rw::quality::autoCacheBlobSuffix( captureValueUses ) );
 }
 
 // computeHeadSnapshot / gitHeadSha / gitRepoHasHistory / cacheDirLadder now live in quality.h (the

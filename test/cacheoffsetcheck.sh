@@ -92,7 +92,7 @@ newphase(){
     mkdir -p "$CACHEDIR"
 }
 # Y4: a blob may sit flat under $CACHEDIR or in a 2-hex-char shard subdir — look at both.
-leanblobs(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-*-lean.bin' 2>/dev/null | sort; }
+leanblobs(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-*-lean*.bin' 2>/dev/null | sort; }
 nleanblobs(){ leanblobs | wc -l | tr -d ' '; }
 
 # run the tool against the fixture with the phase's private cache dir; stdout to $1, stderr to $TMP/err.

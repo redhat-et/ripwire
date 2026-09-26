@@ -1425,10 +1425,15 @@ constexpr std::uint8_t kArtifactArch =
 //         orientation path" therefore overstates: lean speeds the default map + nav/read + --pr-context;
 //         --for-led sessions need the rich family too. See the ingest-report to the wiring wave for the
 //         measured lean-vs-rich blob sizes and the both-families recommendation.
-inline std::uint32_t parserVerFor( bool captureValueUses ) noexcept
+inline constexpr std::uint32_t parserVerFor( bool captureValueUses ) noexcept
 {
     return kParserVer + ( captureValueUses ? 1u : 0u );   // lean and full-use caches must never cross-hit
 }
+
+// The auto blob's NAME carries the same pair its header does (quality.h cacheBuildTag): a build tag that disagreed
+// with the stamp would put a blob this binary refuses at the path it reads, which is the #334 thrash back again.
+static_assert( quality::ingestParserVerFor( false ) == parserVerFor( false ) && quality::ingestParserVerFor( true ) == parserVerFor( true ),
+               "quality.h's ingestParserVerFor must derive both classes exactly as parserVerFor does — the build tag names what the header stamps" );
 
 // T5: renamed from fnv1a64 to contentHash64 to avoid an ODR clash now that this file also includes
 // arch.h (which defines its OWN fnv1a64 for the baseline-hash path, quality.h's canonId hashing, etc.

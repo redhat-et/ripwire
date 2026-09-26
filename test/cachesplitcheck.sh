@@ -49,8 +49,8 @@ CACHEDIR="$XDG/ripwire"
 
 # glob helper: echo the single matching class file (or empty). Y4: shard-aware lookup — a blob may
 # live flat under $CACHEDIR or under $CACHEDIR/<xx>/ (2-hex-char shard), so search both via find -maxdepth 2.
-richfile(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-*-rich.bin' 2>/dev/null | head -1; }
-leanfile(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-*-lean.bin' 2>/dev/null | head -1; }
+richfile(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-*-rich*.bin' 2>/dev/null | head -1; }
+leanfile(){ find "$CACHEDIR" -maxdepth 2 -type f -name 'ripwire-*-lean*.bin' 2>/dev/null | head -1; }
 
 run(){ env -u TMPDIR XDG_CACHE_HOME="$XDG" "$BIN" "$CORPUS" "$@"; }
 
@@ -69,7 +69,7 @@ if [ -n "$LF" ]; then ok "lean verb creates a SEPARATE -lean.bin auto-cache"; el
 # CLASS files specifically (not the bare 'ripwire-*.bin' wildcard): Y2's qchurn family now also writes a
 # ripwire-qchurn-*.bin blob during the --for pass, which the old broad wildcard would incorrectly count
 # toward "class cache files" — the gate's stated intent here is exactly 2 class files (rich + lean).
-NFILES="$( find "$CACHEDIR" -maxdepth 2 -type f \( -name 'ripwire-*-rich.bin' -o -name 'ripwire-*-lean.bin' \) 2>/dev/null | wc -l | tr -d ' ' )"
+NFILES="$( find "$CACHEDIR" -maxdepth 2 -type f \( -name 'ripwire-*-rich*.bin' -o -name 'ripwire-*-lean*.bin' \) 2>/dev/null | wc -l | tr -d ' ' )"
 [ "$NFILES" = "2" ] && ok "rich + lean caches coexist (exactly 2 class files — split confirmed)" \
     || no "expected exactly 2 class cache files after rich→lean, found $NFILES"
 

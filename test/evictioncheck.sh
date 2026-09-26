@@ -35,6 +35,8 @@
 #
 #   (h) P1-1: the MRU root's SIBLING family is PINNED through a byte-budget sweep — the sweep takes another
 #       root's blob instead, and says so once on stderr.
+#  (h2) #334 follow-up: only THIS build's blobs of the MRU root are pinned; another build's (tagged or pre-tag)
+#       are evicted like another root's.
 #   (i) P1-1: when the pinned set ALONE exceeds the budget it is kept anyway, said once on stderr.
 #   (j) P1-1: a sweep that evicts nothing writes ZERO bytes to stderr (the disclosure is conditional).
 #   (k) ONE ROOT KEY FOR EVERY FAMILY: prime lean/rich/qheadsnap/qsnap/qchurn against one root; every blob
@@ -287,6 +289,14 @@ dirbytesof(){
     echo "$total"
 }
 
+# The names THIS build writes for a root's rich blob and MCP index. Read, never re-derived: rich_path= is
+# --doctor's own answer, and the MCP index carries the rich class's build tag (quality.h mcpCacheBlobSuffix), or
+# none on a binary from before build-keyed names — so every arm below seeds this binary's real sibling names.
+ownrichname(){ env -u XDG_CACHE_HOME TMPDIR="$1" "$BIN" "$2" --doctor 2>/dev/null | tr '<' '\n' | grep '^c n="index-cache"' \
+                 | grep -o ' rich_path="[^"]*"' | sed 's/^ rich_path="//; s/"$//' | xargs basename 2>/dev/null; }
+ownmcpname(){ local tag; tag="$( printf '%s' "$2" | sed -nE 's/.*-rich-(c[0-9]+p[0-9]+)\.bin$/\1/p' )"
+              printf 'ripwire-mcp-%s%s.cache' "$1" "${tag:+-$tag}"; }
+
 # ---- (h) two roots, the MRU root's sibling family is the OLDEST blob in the dir --------------------
 TMP3="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3"' EXIT
 CB3="$TMP3/cachebase"; CD3="$CB3/ripwire"; mkdir -p "$CD3"
@@ -299,8 +309,8 @@ env -u XDG_CACHE_HOME TMPDIR="$CB3" "$BIN" "$R3" >/dev/null 2>"$TMP3/prime.err"
 # glob then returns whichever the filesystem happens to list first, ROOTHEX3 keeps the whole basename, and
 # the 16-hex check goes red for a directory-ordering reason. Arm (k) at the bottom of this file already
 # uses the precise pattern for the same job.
-OWN3="$( find "$CD3" -mindepth 1 -maxdepth 2 -name 'ripwire-*-lean.bin' 2>/dev/null | head -1 )"
-ROOTHEX3="$( basename "${OWN3:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-lean\.bin$/\1/' )"
+OWN3="$( find "$CD3" -mindepth 1 -maxdepth 2 -name 'ripwire-*-lean*.bin' 2>/dev/null | head -1 )"
+ROOTHEX3="$( basename "${OWN3:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-lean(-c[0-9]+p[0-9]+)?\.bin$/\1/' )"
 if printf '%s' "$ROOTHEX3" | grep -qE '^[0-9a-f]{16}$'; then
     ok "(h) primed: this root's lean blob names root key $ROOTHEX3"
 else
@@ -308,8 +318,11 @@ else
 fi
 
 # the SIBLING family of the SAME root — seeded FLAT (the sweep must find it in either layout) and made
-# the OLDEST blob in the dir, which is exactly what the pre-change oldest-first sweep deletes first.
-SIB3="$CD3/ripwire-$ROOTHEX3-rich.bin"
+# the OLDEST blob in the dir, which is exactly what the pre-change oldest-first sweep deletes first. Its name is
+# the one THIS build writes for the rich class (--doctor's rich_path=): since the #334 follow-up the auto names
+# carry a build tag, and a sibling under another build's name is exactly what the pin must NOT hold ((h2) below).
+SIB3="$CD3/$( ownrichname "$CB3" "$R3" )"
+[ -f "$SIB3" ] || case "$( basename "$SIB3" )" in ripwire-*-rich*.bin) ;; *) no "(h) could not name this build's rich sibling (got '$SIB3') — the seed below would test nothing";; esac
 truncate -s 1200M "$SIB3"
 # …and the SAME root's MCP index blob. It is the one family whose name is nothing but a root key, and it
 # is the only one that ends `.cache` rather than `-<something>.bin` — so quality.h::cacheBlobRootKey, which
@@ -317,7 +330,7 @@ truncate -s 1200M "$SIB3"
 # key. An empty key pins nothing: the sweep kept this root's lean and rich blobs and evicted the MCP index
 # of the very root it was serving, and the MCP server paid a full re-parse for it. Zero-size on purpose —
 # survival is the question, not bytes (CodeRabbit #127 / 3985249706).
-MCP3="$CD3/ripwire-mcp-$ROOTHEX3.cache"
+MCP3="$CD3/$( ownmcpname "$ROOTHEX3" "$( basename "$SIB3" )" )"
 : > "$MCP3"
 sleep 1
 # a DIFFERENT root's blob, newer and bigger — the one an oldest-first sweep would keep, and the one the
@@ -339,8 +352,8 @@ if grep -q 'n="pinme"' "$TMP3/run.xml" 2>/dev/null; then ok "(h) run output stil
     || no "(h) the MRU root's sibling family was EVICTED — the sweep still takes the blob this root is about to need"
 [ ! -e "$OTHER3" ] && ok "(h) the OTHER root's blob is what the sweep took instead" \
     || no "(h) the other root's blob survived — the sweep did not free the bytes it needed"
-[ -e "$MCP3" ] && ok "(h) the MRU root's MCP index blob survives too — ripwire-mcp-<key>.cache reads as THIS root" \
-    || no "(h) the MRU root's ripwire-mcp-<key>.cache was EVICTED — cacheBlobRootKey cannot read a '.'-terminated key field"
+[ -e "$MCP3" ] && ok "(h) the MRU root's MCP index blob survives too — ripwire-mcp-<key>[-<tag>].cache reads as THIS root" \
+    || no "(h) the MRU root's ripwire-mcp-<key>[-<tag>].cache was EVICTED — cacheBlobRootKey cannot read its key field"
 
 [ -s "$TMP3/run.err" ] && ok "(h) the eviction is DISCLOSED on stderr (was 0 bytes before this change)" \
     || no "(h) an eviction happened with ZERO disclosure — the honesty rule does not reach the cache layer"
@@ -350,16 +363,60 @@ errlines3="$( wc -l < "$TMP3/run.err" | tr -d ' ' )"
 [ "$errlines3" -eq 1 ] && ok "(h) exactly ONE disclosure line (not one per evicted blob)" \
     || no "(h) expected 1 stderr line, got $errlines3"
 
+# ---- (h2) #334 follow-up: ANOTHER BUILD's blobs of the MRU root are NOT pinned ------------------------
+# The auto names carry a build tag (quality.h cacheBuildTag), so one root can hold a blob per format that ran on it.
+# Pinning those with this build's would leave every upgraded-from version pinned for the 30 days the age pass waits —
+# on llvm-project 1.76 GB of them against the 2 GB budget. So only THIS build's blobs of the root are pinned: another
+# build's tagged blob and a pre-tag name (`ripwire-<key>-rich.bin`, which only a release before the tag writes) are
+# evicted oldest-first like another root's. Red-first: the pre-change binary pins every blob by root key alone, so
+# both survive and the sweep reports the pinned set "kept anyway".
+TMP7="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3" "$TMP7"' EXIT
+CB7="$TMP7/cachebase"; CD7="$CB7/ripwire"; mkdir -p "$CD7"
+R7="$TMP7/repo"; mkdir -p "$R7"
+printf 'int twobuilds( void )\n{\n    return 1;\n}\n' > "$R7/f.cpp"
+env -u XDG_CACHE_HOME TMPDIR="$CB7" "$BIN" "$R7" >/dev/null 2>/dev/null
+OWN7="$( find "$CD7" -mindepth 1 -maxdepth 2 -name 'ripwire-*-lean*.bin' 2>/dev/null | head -1 )"
+ROOTHEX7="$( basename "${OWN7:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-lean(-c[0-9]+p[0-9]+)?\.bin$/\1/' )"
+if printf '%s' "$ROOTHEX7" | grep -qE '^[0-9a-f]{16}$'; then
+    ok "(h2) primed: root key $ROOTHEX7"
+else
+    no "(h2) could not read a 16-hex root key off the primed blob (own='$OWN7')"
+fi
+SIB7="$CD7/$( ownrichname "$CB7" "$R7" )"          # THIS build's rich sibling: oldest, must be kept
+[ -f "$SIB7" ] || case "$( basename "$SIB7" )" in ripwire-*-rich*.bin) ;; *) no "(h2) could not name this build's rich sibling (got '$SIB7') — the seed below would test nothing";; esac
+truncate -s 1200M "$SIB7"
+sleep 1
+LEGACY7="$CD7/ripwire-$ROOTHEX7-rich.bin"           # a release before the build tag wrote this root's rich blob
+[ "$LEGACY7" = "$SIB7" ] && LEGACY7="$CD7/ripwire-$ROOTHEX7-rich-legacy-seed-collides.bin"   # pre-change binary: its own name IS the pre-tag one
+truncate -s 400M "$LEGACY7"
+sleep 1
+OTHERB7="$CD7/ripwire-$ROOTHEX7-lean-c1p1.bin"      # another format's lean blob of this SAME root (c1p1: no real build)
+truncate -s 1500M "$OTHERB7"
+printf 'int twobuilds2( void )\n{\n    return 2;\n}\n' >> "$R7/f.cpp"
+env -u XDG_CACHE_HOME TMPDIR="$CB7" "$BIN" "$R7" >"$TMP7/run.xml" 2>"$TMP7/run.err"
+rc7=$?
+if [ "$rc7" -eq 0 ]; then ok "(h2) run exits 0"; else { no "(h2) run exited $rc7"; cat "$TMP7/run.err"; }; fi
+[ -e "$SIB7" ] && ok "(h2) THIS build's sibling family of the MRU root survives (pinned)" \
+    || no "(h2) this build's own sibling family was evicted"
+[ ! -e "$OTHERB7" ] && ok "(h2) another build's tagged blob of the SAME root is evicted, not pinned" \
+    || no "(h2) another build's blob of this root was PINNED — every upgrade would keep the old version's blobs for 30 days"
+[ ! -e "$LEGACY7" ] && ok "(h2) a pre-tag blob of the SAME root is evicted, not pinned" \
+    || no "(h2) a pre-tag blob of this root was PINNED — the one-time upgrade leaves it holding the budget"
+grep -q '^ripwire: cache .* evicted 2 blob(s) of other roots or other ripwire builds' "$TMP7/run.err" 2>/dev/null \
+    && ok "(h2) the eviction line says other BUILDS as well as other roots" \
+    || { no "(h2) no 'evicted 2 blob(s) of other roots or other ripwire builds' line"; cat "$TMP7/run.err"; }
+
 # ---- (i) the pinned set ALONE exceeds the budget → kept anyway, said once ---------------------------
-TMP4="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3" "$TMP4"' EXIT
+TMP4="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3" "$TMP4" "$TMP7"' EXIT
 CB4="$TMP4/cachebase"; CD4="$CB4/ripwire"; mkdir -p "$CD4"
 R4="$TMP4/repo"; mkdir -p "$R4"
 printf 'int solo( void )\n{\n    return 1;\n}\n' > "$R4/f.cpp"
 
 env -u XDG_CACHE_HOME TMPDIR="$CB4" "$BIN" "$R4" >/dev/null 2>/dev/null
-OWN4="$( find "$CD4" -mindepth 1 -maxdepth 2 -name 'ripwire-*.bin' 2>/dev/null | head -1 )"
-ROOTHEX4="$( basename "${OWN4:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-lean\.bin$/\1/' )"
-SIB4="$CD4/ripwire-$ROOTHEX4-rich.bin"
+OWN4="$( find "$CD4" -mindepth 1 -maxdepth 2 -name 'ripwire-*-lean*.bin' 2>/dev/null | head -1 )"
+ROOTHEX4="$( basename "${OWN4:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-lean(-c[0-9]+p[0-9]+)?\.bin$/\1/' )"
+SIB4="$CD4/$( ownrichname "$CB4" "$R4" )"
+[ -f "$SIB4" ] || case "$( basename "$SIB4" )" in ripwire-*-rich*.bin) ;; *) no "(i) could not name this build's rich sibling (got '$SIB4') — the seed below would test nothing";; esac
 if printf '%s' "$ROOTHEX4" | grep -qE '^[0-9a-f]{16}$'; then
     truncate -s 2600M "$SIB4"   # this root's own sibling ALONE blows the 2 GB budget (llvm's rich blob is 1.19 GB; a second root doubles it)
     ok "(i) primed: root key $ROOTHEX4, sibling family seeded at 2600M (over budget on its own)"
@@ -381,7 +438,7 @@ if [ "$errlines4" -eq 1 ]; then ok "(i) exactly ONE stderr line"; else no "(i) e
 
 # ---- (j) nothing evicted → ZERO stderr bytes -------------------------------------------------------
 # The disclosure must be conditional, or every warm run in every gate that compares stderr grows a line.
-TMP5="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3" "$TMP4" "$TMP5"' EXIT
+TMP5="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3" "$TMP4" "$TMP5" "$TMP7"' EXIT
 CB5="$TMP5/cachebase"; CD5="$CB5/ripwire"; mkdir -p "$CD5"
 R5="$TMP5/repo"; mkdir -p "$R5"
 printf 'int quiet( void )\n{\n    return 1;\n}\n' > "$R5/f.cpp"
@@ -463,7 +520,7 @@ WANT_NONROOT="$( printf '%s\n' $NONROOT_PREFIXES | sort | tr '\n' ' ' )"
     && ok "(k) the non-root-keyed family list matches quality.h::kNonRootKeyedBlobPrefixes ($WANT_NONROOT)" \
     || no "(k) family-list drift: quality.h says '$SRC_NONROOT', this gate reads '$WANT_NONROOT'"
 
-TMP6="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3" "$TMP4" "$TMP5" "$TMP6"' EXIT
+TMP6="$( mktemp -d )"; trap 'rm -rf "$TMP" "$TMP2" "$TMP3" "$TMP4" "$TMP5" "$TMP6" "$TMP7"' EXIT
 CB6="$TMP6/cachebase"; CD6="$CB6/ripwire"; mkdir -p "$CD6"
 R6="$TMP6/repo"; mkdir -p "$R6"
 cat > "$R6/f.cpp" <<'EOF_K'
@@ -484,11 +541,12 @@ primeallfamilies "$CB6" "$R6"
 # exists (mcpindex.h::mcpCachePath → quality::rootKeyedCachePath( root, "ripwire-mcp-", ".cache" )) and it is
 # the one whose key field is terminated by '.' rather than '-'. Without it in the dir the key-agreement arm
 # below never asked the question that #127/3985249706 answered.
-MCPKEY6="$( find "$CD6" -mindepth 1 -maxdepth 2 -type f -name 'ripwire-*-lean.bin' 2>/dev/null | head -1 )"
-MCPKEY6="$( basename "${MCPKEY6:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-lean\.bin$/\1/' )"
+MCPKEY6="$( find "$CD6" -mindepth 1 -maxdepth 2 -type f -name 'ripwire-*-lean*.bin' 2>/dev/null | head -1 )"
+MCPKEY6="$( basename "${MCPKEY6:-none}" | sed -E 's/^ripwire-([0-9a-f]{16})-lean(-c[0-9]+p[0-9]+)?\.bin$/\1/' )"
 if printf '%s' "$MCPKEY6" | grep -qE '^[0-9a-f]{16}$'; then
-    : > "$CD6/ripwire-mcp-$MCPKEY6.cache"
-    ok "(k) the MCP index family is present (ripwire-mcp-$MCPKEY6.cache) — the '.'-terminated key field"
+    MCPNAME6="$( ownmcpname "$MCPKEY6" "$( ownrichname "$CB6" "$R6" )" )"
+    : > "$CD6/$MCPNAME6"
+    ok "(k) the MCP index family is present ($MCPNAME6) — the key field it ends with '.' or a build tag"
 else
     no "(k) could not derive this root's key from its lean blob, so the MCP family could not be seeded"
 fi
@@ -513,7 +571,7 @@ else
 fi
 
 # the qchurn blob must carry the SAME key as the main parse cache, by name — the specific gap P1-1 stated.
-lean6="$( find "$CD6" -mindepth 1 -maxdepth 2 -type f -name 'ripwire-*-lean.bin' 2>/dev/null | head -1 )"
+lean6="$( find "$CD6" -mindepth 1 -maxdepth 2 -type f -name 'ripwire-*-lean*.bin' 2>/dev/null | head -1 )"
 churn6="$( find "$CD6" -mindepth 1 -maxdepth 2 -type f -name 'ripwire-qchurn-*' 2>/dev/null | head -1 )"
 if [ -n "$lean6" ] && [ -n "$churn6" ]; then
     kl6="$( blobrootkey "$lean6" )"; kc6="$( blobrootkey "$churn6" )"

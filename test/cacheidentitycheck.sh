@@ -244,14 +244,15 @@ else
 fi
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
-# (D2) #334 — THE AUTO BLOB ACROSS TWO BUILDS. A Windows tester alternating 0.6.2 and 0.6.3 on one tree saw
-#      `format-version — not used` on every CLI run. The auto blob's path is keyed by root and verb class, not by
-#      build, so a blob another build wrote is refused, rewritten, and then reused by the NEXT run of this one.
-#      The notice must name both numbers, so the cause is on the line; and a second run must be a real hit.
+# (D2) #334 — A REFUSED VERSION NAMES BOTH NUMBERS. A Windows tester alternating 0.6.2 and 0.6.3 on one tree saw
+#      `format-version — not used` on every CLI run: the auto blob's path was keyed by root and verb class only, so a
+#      blob another build wrote was refused and rewritten every time. (D3) below proves the path is now keyed by build
+#      too; this arm doctors THIS build's own auto blob in place (a hand-copied foreign file), so the refusal still
+#      fires: the notice must name both numbers, and the next run must be a real hit.
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 TH="$TMP/thrash"; mkdir -p "$TH"; cp "$FIXTURE"/*.c "$TH/"
 "$BIN" "$TH" >/dev/null 2>&1
-AUTO="$( find "$TMPDIR" -name 'ripwire-*-lean.bin' -newer "$TH/a.c" 2>/dev/null | head -1 )"
+AUTO="$( find "$TMPDIR" -name 'ripwire-*-lean*.bin' -newer "$TH/a.c" 2>/dev/null | head -1 )"
 if [ -n "$AUTO" ]; then
     ok "(D2) a cold run wrote the auto lean blob"
 else
@@ -274,6 +275,61 @@ if [ -n "$AUTO" ]; then
         && ok "(D2) a parser-version refusal names both parser numbers too" \
         || no "(D2) the parser-version refusal does not name both numbers: $( grep -m1 'not used' "$TMP/th3.err" )"
 fi
+
+# ════════════════════════════════════════════════════════════════════════════════════════════════════
+# (D3) #334 follow-up — THE AUTO NAME IS KEYED BY BUILD, so two builds alternating on one tree both stay warm.
+#      Red on the pre-change binary: its auto name is `ripwire-<rootKey>-lean.bin` for every build, so "another
+#      build's blob" sits at the very path this build reads, and every round below re-parses (reparsed=N reused=0).
+#      "Another build" is simulated the way it really lands: this build's blob with the header stamp of another
+#      format, written FLAT (resolveCacheBlobPath uses a flat blob before its shard) under the name THAT build would
+#      write — this binary's own name with the other format in its tag, and the pre-tag name every release up to
+#      0.6.4 writes. Each round re-plants both, as the other build's own run would.
+# ════════════════════════════════════════════════════════════════════════════════════════════════════
+TK="$TMP/buildkey"; mkdir -p "$TK"; cp "$FIXTURE"/*.c "$TK/"
+"$BIN" "$TK" >/dev/null 2>&1
+"$BIN" "$TK" --doctor > "$TMP/tk_doc.xml" 2>/dev/null
+TK_LEAN="$( attr lean_path "$( row "$TMP/tk_doc.xml" )" )"
+TK_RICH="$( attr rich_path "$( row "$TMP/tk_doc.xml" )" )"
+TK_LB="$( basename "${TK_LEAN:-none}" )"
+TK_RB="$( basename "${TK_RICH:-none}" )"
+printf '%s' "$TK_LB" | grep -qE "^ripwire-[0-9a-f]{16}-lean-c${SRC_CACHEVER}p${SRC_PARSERVER}\.bin\$" \
+    && ok "(D3) the auto lean name carries this build's tag: $TK_LB" \
+    || no "(D3) the auto lean name '$TK_LB' does not carry c${SRC_CACHEVER}p${SRC_PARSERVER} — another format would read and rewrite this path"
+printf '%s' "$TK_RB" | grep -qE "^ripwire-[0-9a-f]{16}-rich-c${SRC_CACHEVER}p$(( SRC_PARSERVER + 1 ))\.bin\$" \
+    && ok "(D3) the auto rich name carries the rich class's tag: $TK_RB" \
+    || no "(D3) the auto rich name '$TK_RB' does not carry c${SRC_CACHEVER}p$(( SRC_PARSERVER + 1 ))"
+if [ -f "$TK_LEAN" ]; then
+    TK_KEY="$( printf '%s' "$TK_LB" | sed -E 's/^ripwire-([0-9a-f]{16})-.*/\1/' )"
+    TK_FLAT="$( dirname "$( dirname "$TK_LEAN" )" )"       # the cache dir: <dir>/<2-hex shard>/<name>
+    TK_OTHER="$TK_FLAT/$( printf '%s' "$TK_LB" | sed -E "s/-c${SRC_CACHEVER}p${SRC_PARSERVER}\.bin\$/-c$(( SRC_CACHEVER - 1 ))p${SRC_PARSERVER}.bin/" )"
+    TK_LEGACY="$TK_FLAT/ripwire-$TK_KEY-lean.bin"
+    patch_u32 "$TK_LEAN" "$TMP/tk_foreign.bin" 4 $(( SRC_CACHEVER - 1 ))
+    tk_hits=0
+    for round in 1 2 3; do
+        cp "$TMP/tk_foreign.bin" "$TK_OTHER"; cp "$TMP/tk_foreign.bin" "$TK_LEGACY"       # the other builds ran
+        RIPWIRE_CACHE_STATS=1 "$BIN" "$TK" 2>"$TMP/tk_$round.err" >/dev/null
+        st="$( grep -o 'cache-stats reparsed=[0-9]* reused=[0-9]* files=[0-9]*' "$TMP/tk_$round.err" | head -1 )"
+        if ! grep -q 'not used' "$TMP/tk_$round.err" && [ "$st" = "cache-stats reparsed=0 reused=2 files=2" ]; then
+            tk_hits=$(( tk_hits + 1 ))
+        else
+            printf '          round %s: %s %s\n' "$round" "${st:-no cache-stats line}" "$( grep -m1 'not used' "$TMP/tk_$round.err" )"
+        fi
+    done
+    [ "$tk_hits" -eq 3 ] \
+        && ok "(D3) alternating with two other builds' blobs, every round of this build is a full hit (reparsed=0 reused=2, 3 of 3)" \
+        || no "(D3) only $tk_hits of 3 rounds reused this build's blob — builds alternating on one tree still re-parse"
+    { cmp -s "$TMP/tk_foreign.bin" "$TK_OTHER" && cmp -s "$TMP/tk_foreign.bin" "$TK_LEGACY"; } \
+        && ok "(D3) this build left the other builds' blobs byte-identical (neither read-and-rewritten)" \
+        || no "(D3) this build rewrote another build's blob — the next run of that build pays a full parse"
+else
+    no "(D3) --doctor's lean_path '$TK_LEAN' is not a file after a cold run — cannot test build keying"
+fi
+
+# (D3) an explicit --cache=PATH is the user's file and keeps the user's name: no tag is added or looked for.
+"$BIN" "$TK" --cache="$TMP/named.ripwirecache" >/dev/null 2>&1
+{ [ -f "$TMP/named.ripwirecache" ] && [ -z "$( find "$TMP" -maxdepth 1 -name 'named.ripwirecache?*' 2>/dev/null )" ]; } \
+    && ok "(D3) --cache=PATH writes exactly the file the user named (not build-keyed)" \
+    || no "(D3) --cache=PATH did not write the named file verbatim"
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 # (E) ok= AND THE EXIT CODE — a self-healing miss on the AUTO blob is normal and must never fail doctor
