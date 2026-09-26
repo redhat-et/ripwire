@@ -611,7 +611,7 @@ inline std::string importsUnresolvedKeyJson( std::uint64_t importsUnresolved )
 {
     return countFieldOrEmpty( "imports_unresolved", std::size_t( importsUnresolved ), /*json=*/true );
 }
-inline constexpr const char* kGraphPartialAttrXml = " graph_partial=\"1\"";   // tsImportRootAttrXml below composes it
+inline constexpr const char* kGraphPartialAttrXml = " graph_partial=\"1\""; // tsImportRootAttrXml below composes it
 // graph_partial='s reading is ONE sentence, spelled identically in both full legends below and in the compact term
 // (compactlegend.h); test/depsprecisecheck.sh's #220 (I) arms pin it in all three, so the wordings cannot fork.
 inline constexpr const char* kDepsImportsUnresolvedLegend =
@@ -632,14 +632,13 @@ inline constexpr const char* kImpactImportsUnresolvedLegend =
 // The three counts one --deps/--arch root discloses (packDeps' parameter; graph.h StructuralIncludeAdj fills them).
 struct TsImportRootCounts
 {
-    std::uint64_t unresolved = 0;   // imports_unresolved=
-    std::uint64_t dts        = 0;   // imports_dts=
-    std::uint64_t unread     = 0;   // tsconfig_unread=
+    std::uint64_t unresolved = 0; // imports_unresolved=
+    std::uint64_t dts = 0; // imports_dts=
+    std::uint64_t unread = 0; // tsconfig_unread=
 };
 inline std::string tsImportRootAttrXml( std::uint64_t importsUnresolved, std::uint64_t importsDts, std::uint64_t tsconfigUnread )
 {
-    std::string s = importsUnresolvedAttrXml( importsUnresolved ) + countAttrXmlOrEmpty( "imports_dts", std::size_t( importsDts ) )
-                  + countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( tsconfigUnread ) );
+    std::string s = importsUnresolvedAttrXml( importsUnresolved ) + countAttrXmlOrEmpty( "imports_dts", std::size_t( importsDts ) ) + countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( tsconfigUnread ) );
     return importsUnresolved > 0 || tsconfigUnread > 0 ? s + kGraphPartialAttrXml : s;
 }
 inline constexpr const char* kDepsImportsDtsLegend =
