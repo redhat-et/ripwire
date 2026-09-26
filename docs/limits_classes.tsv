@@ -103,6 +103,7 @@ kMeasuredDigitsPricedWidth	OUTPUT
 kMemberSpellingsShown	OUTPUT
 kMentionMaxDirectSymbols	INDEXING
 kMentionMaxFiles	INDEXING
+kMentionMaxNameFiles	BOUNDARY
 kMentionMaxRawTokens	INDEXING
 kMentionMaxSymbolsPerFile	INDEXING
 kMinIdentLen	BOUNDARY

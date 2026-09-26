@@ -17,6 +17,13 @@
 #         (not a file) lifts that package's index file (__init__.py & friends). Measured: r2 head-to-head
 #         loss micropython-lib-947 (gold requests/__init__.py at 35; the `requests` mention anchored
 #         nothing). Precision-first: only the dir's index file lifts, never the whole directory.
+#   (vii) NAMED IDENTIFIER (dogfood G2, 2026-09-26) — a symbol the task names VERBATIM leads the head: a bare
+#         snake_case/camelCase word, `name()` call syntax, a backticked word, `ns::fn`, or `mod.fn`, defined in
+#         at most 3 files. Measured: "How does hybrid_search rank search results" served the named function at
+#         r=8 on a public Python repo, under a flat head of three eval run()s whose bodies CALL it. RED on the
+#         base binary (absent from the served head behind 40 tied decoys), GREEN after. Controls: plain English
+#         words that ARE symbol names ("get", "results", "rank"), and an ambiguous `run()` defined in 40 files,
+#         stay byte-identical to --no-mention-boost. PHP folds case for function names, as PHP itself does.
 #
 # Usage:  bash test/mentioncheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/mentioncheck.sh
 
@@ -181,6 +188,95 @@ JSON_HIT="$( "$BIN" "$FIX" --for="$QM" --json --no-cache 2>/dev/null )"
 printf '%s' "$JSON_HIT" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d.get('mention_anchored')==$NOTE_TOTAL, d.get('mention_anchored')" \
     && ok "L10b: --json carries the matching \"mention_anchored\":$NOTE_TOTAL" \
     || no "L10b: --json mention_anchored key missing or wrong"
+
+# ── (vii) NAMED IDENTIFIER — the row the task names verbatim leads the head (answer first) ──────────────
+# core/search.py defines hybrid_search once; forty eval/bench_NN.py run()s CALL it and repeat the question's
+# prose, so they tie at the top of the lexical ranking and bury the named function past the served head.
+FIXN="$TMP/fixn"
+mkdir -p "$FIXN/core" "$FIXN/eval"
+cat > "$FIXN/core/search.py" <<'PY'
+def hybrid_search(store, query):
+    """Blend the keyword and vector legs."""
+    return store.lookup(query) + store.nearest(query)
+PY
+cat > "$FIXN/core/util.py" <<'PY'
+def get(cache, key):
+    """Return the cached value for key."""
+    return cache.value_for(key)
+
+def results(rows):
+    return list(rows)
+
+def rank(rows):
+    return sorted(rows)
+PY
+cat > "$FIXN/core/ranking.cpp" <<'CPP'
+namespace ranking
+{
+int rescore( int x )
+{
+    return x * 2;
+}
+}
+CPP
+cat > "$FIXN/core/merge.php" <<'PHP'
+<?php
+function MergeRankings($a, $b) {
+    return array_merge($a, $b);
+}
+PHP
+for n in $( seq -w 1 40 ); do
+cat > "$FIXN/eval/bench_$n.py" <<'PY'
+from core.search import hybrid_search
+
+def run(store, questions):
+    """Rank the search results for each question, rescore them, merge the rankings and get stale results back."""
+    results = []
+    for q in questions:
+        search_results = hybrid_search(store, q)
+        ranked = sorted(search_results, key=lambda r: r.rank)
+        results.append(ranking_rescore_merge_rankings_get(ranked))
+    return results
+PY
+done
+headOf(){ "$BIN" "$FIXN" --for="$1" --no-cache "${@:2}" 2>/dev/null; }
+servedRank(){ printf '%s' "$1" | grep -o "<d [^>]*n=\"$2\"[^>]*>" | grep -o ' r="[0-9]*"' | grep -o '[0-9]*' | head -1; }
+named(){ # $1=label $2=query $3=symbol — served at r=1 by default, absent or lower with the anchor off
+    ON="$( headOf "$2" )"; OFF="$( headOf "$2" --no-mention-boost )"
+    rOn="$( servedRank "$ON" "$3" )"; rOff="$( servedRank "$OFF" "$3" )"
+    if [ "$rOn" = "1" ] && { [ -z "$rOff" ] || [ "$rOff" -gt 1 ]; }; then
+        ok "vii $1: $3 served at r=1 (anchor off: ${rOff:-absent from the served head})"
+    else no "vii $1: $3 expected at r=1, got on=${rOn:-absent} off=${rOff:-absent}"; fi
+}
+named "bare snake_case"      "How does hybrid_search rank search results"               hybrid_search
+named "backticked"           'How does `hybrid_search` rank search results'             hybrid_search
+named "module.fn"            "How does search.hybrid_search rank search results"        hybrid_search
+named "self.fn"              "why is self.hybrid_search slow to rank search results"    hybrid_search
+named "ns::fn"               "where does ranking::rescore reorder the search results"   rescore
+named "PHP case-folded call" "why does mergerankings() drop the merged search results"  MergeRankings
+named "call syntax"          "why does get() return stale search results for a question" get
+# the red half, stated on its own: on the anchor-off ranking the named function is not in the served head at all
+OFFH="$( headOf "How does hybrid_search rank search results" --no-mention-boost )"
+[ -z "$( servedRank "$OFFH" hybrid_search )" ] \
+    && ok "vii fixture: without the anchor hybrid_search is absent from the served head (40 tied run()s bury it)" \
+    || no "vii fixture drifted: hybrid_search is in the anchor-off head at r=$( servedRank "$OFFH" hybrid_search ) — the RED arm no longer tests anything"
+ON1="$( headOf "How does hybrid_search rank search results" )"
+printf '%s' "$ON1" | grep -q 'mention_anchored="1"' && ok "vii the root discloses the lift: mention_anchored=\"1\"" \
+    || no "vii mention_anchored=\"1\" missing on the anchored head"
+top2="$( printf '%s' "$ON1" | grep -o '<d [^>]* r="2"[^>]*>' | grep -o ' n="[^"]*"' )"
+[ "$top2" = ' n="run"' ] && ok "vii the displaced lexical head follows the named row (r=2 is a run())" || no "vii r=2 is '$top2', expected a run()"
+# controls: English words that are also symbol names, and an ambiguous call, move nothing
+inert(){ # $1=label $2=query
+    A="$( headOf "$2" )"; Bq="$( headOf "$2" --no-mention-boost )"
+    [ -n "$A" ] && [ "$A" = "$Bq" ] && ok "vii control $1: byte-identical to --no-mention-boost" \
+        || no "vii control $1: the anchor moved bytes on a task that names no identifier"
+}
+inert "plain words (get, results, rank)" "how do I get the search results and rank them"
+inert "ambiguous run() in 40 files"      "why does run() rank search results"
+inert "std::vector names no user symbol" "does std::vector hold the search results"
+inert "a qualifier that places nothing"  "does ranking::results rank the search results"
+D1="$( headOf "How does hybrid_search rank search results" )"; D2="$( headOf "How does hybrid_search rank search results" )"
+[ -n "$D1" ] && [ "$D1" = "$D2" ] && ok "vii determinism (anchored twice, byte-identical)" || no "vii anchored output not deterministic"
 
 [ "$fail" = 0 ] && echo 'ALL PASS' || echo 'FAILURES ABOVE'
 exit "$fail"

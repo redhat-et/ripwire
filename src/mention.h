@@ -14,11 +14,16 @@
 // Contract (each promise pinned in test/mentioncheck.sh):
 //   * INERT WITHOUT MENTIONS — a task that names no indexed file/module/symbol leaves lensRank untouched
 //     and the output BYTE-IDENTICAL (extraction is pure string work; no I/O, no subprocess).
-//   * NEVER DISPLACES #1 — boosted scores are strictly BELOW the current maximum (the top hit the ranker
-//     already believes in cannot be dethroned by an anchor). This is a SCORE promise (within
-//     kMentionTopGapStep of the top score for the first anchored slot), not a rank promise: on a flat or
-//     tied head, several unanchored candidates can sit inside that same 5% band above the anchor, so the
-//     anchored hit can still land a few ranks below #1 (§L10, 2026-09-04 — measured r=5 on a flat head).
+//   * A FILE ANCHOR NEVER DISPLACES #1 — a mentioned file's lifted symbols score strictly BELOW the current
+//     maximum (the top hit the ranker already believes in cannot be dethroned by a file mention). This is a
+//     SCORE promise (within kMentionTopGapStep of the top score for the first anchored slot), not a rank
+//     promise: on a flat or tied head, several unanchored candidates can sit inside that same 5% band above
+//     the anchor, so the anchored hit can still land a few ranks below #1 (§L10, 2026-09-04 — measured r=5 on
+//     a flat head).
+//   * A NAMED SYMBOL LEADS — a symbol the task names directly (Scope.name, or a verbatim identifier: see NAMED
+//     IDENTIFIERS) lands one kMentionTopGapStep ABOVE the top score: answer first (METHODOLOGY §9.1 #3). It
+//     takes the evidence the writer supplied (identifier syntax, a qualifier, backticks) AND a name defined in
+//     at most kMentionMaxNameFiles files; anything weaker or ambiguous lifts nothing.
 //   * BOUNDED — at most kMentionMaxFiles files x kMentionMaxSymbolsPerFile symbols, plus at most
 //     kMentionMaxDirectSymbols directly-named symbols, are touched.
 //   * DETERMINISTIC — mentions keep task-text appearance order; every match set is reduced with a total
@@ -26,6 +31,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -158,7 +164,7 @@ inline void noteCap( InfoT* outInfo, const char* cappedAttr, const char* totalAt
 inline constexpr std::size_t kMentionMaxRawTokens      = 16;     // extraction cap: first N candidate mention tokens, text order
 inline constexpr std::size_t kMentionMaxFiles          = 4;      // strongest evidence only: files named first in the text
 inline constexpr std::size_t kMentionMaxSymbolsPerFile = 3;      // per mentioned file: its top symbols by (lens score desc, id asc)
-inline constexpr std::size_t kMentionMaxDirectSymbols  = 8;      // directly-named (Scope.name / `name`) symbols, id asc
+inline constexpr std::size_t kMentionMaxDirectSymbols  = 8;      // directly-named (Scope.name / identifier) symbols, task-text order kept
 inline constexpr float       kMentionTopGapStep        = 0.05f;  // slot i lands at top*(1 - step*(i+1)) — below #1, above the pack
 
 struct MentionBoostInfo
@@ -256,6 +262,8 @@ struct RawMention
 // Hoisted to infra/namesplit.h (a leaf header) when pattern.h needed the same predicate; the spelling
 // stays via a using-declaration so every call site below — and its gates — are byte-identical.
 using rw::namesplit::isIdentChar;
+using rw::namesplit::isIdentStart;
+using rw::namesplit::hasIdentifierShape;
 
 // token characters: identifiers plus the joiners that make a path/module/symbol mention ('.', '/', '-')
 inline bool isTokenChar( char c ) noexcept { return isIdentChar( c ) || c == '.' || c == '/' || c == '-'; }
@@ -580,6 +588,215 @@ inline std::vector<RawMention> extractMentions( std::string_view task, std::uint
     return raw;
 }
 
+// ── NAMED IDENTIFIERS (dogfood G2, 2026-09-26) ──────────────────────────────────────────────────────
+//
+// A task that names a symbol VERBATIM — `hybrid_search`, computeLensRanking, `run()`, `mod::fn`, `mod.fn` —
+// names the place a reader looks first. extractMentions above reads only paths, dotted chains and backticked
+// words, and resolves a dotted chain only as a file or as an exact Scope.name, so "How does hybrid_search rank
+// search results" anchored nothing: the identifier was split into the subtokens `hybrid` and `search`, the three
+// eval `run()` functions whose bodies CALL hybrid_search matched more of the prose, and the function itself was
+// served at r=8 behind them (a public Python repo, 10,606 symbols).
+//
+// WHAT QUALIFIES (identifier evidence the writer supplied — plain prose never does):
+//   * a bare word with identifier SHAPE (namesplit::hasIdentifierShape: snake_case, SCREAMING_CASE, camelCase);
+//   * a word written with call syntax, `name(` — so `run()` qualifies and "run the tests" does not;
+//   * a `::`-qualified spelling (`ns::fn`, `Type::method`, `crate::mod::fn`) — the last segment, qualified by the one before;
+//   * a backticked word or a dotted chain that extractMentions kept but that resolved to NO file, NO Scope.name and
+//     NO package directory — read here as its last segment, qualified by the one before (`search.hybrid_search`).
+// Tokens joined to a '.' or '/' are extractMentions' territory and are never read twice.
+//
+// WHAT IT MATCHES: a symbol whose name EQUALS the identifier, byte for byte — every indexed language is
+// case-sensitive except PHP's function, method and class names, which PHP resolves case-insensitively and so
+// are compared case-folded here. Markdown sections and synthetic module scopes are not code symbols and never
+// match. A qualifier NARROWS the match to definitions whose scope, file stem or directory is spelled that way;
+// a qualifier that narrows to nothing (`df.to_csv`, a local variable) is not evidence, so the bare name is used
+// instead — but only when the name carries identifier shape of its own (`std::vector` lifts no user `vector`).
+//
+// PRECISION OVER RECALL, the rule every lookup in this file follows: a name defined in more than
+// kMentionMaxNameFiles files is AMBIGUOUS and lifts nothing (no reordering is better than a wrong head row —
+// METHODOLOGY §9.1 #3). Within the files it names, only each file's best-scoring definition is lifted, so
+// overloads and a header's decl beside its def never flood the head. The lifted symbols join the direct-symbol
+// slot (the Scope.name slot), under the same kMentionMaxDirectSymbols cap and mention_syms_capped= disclosure.
+inline constexpr std::size_t kMentionMaxNameFiles = 3;   // the same specificity bound as lexical.h kMaxAnchorDefs
+
+struct NamedIdent
+{
+    std::string name;        // the identifier as the task spells it
+    std::string qualifier;   // the segment before it in a qualified spelling; "" when bare or a placeholder
+};
+
+// A qualifier that names no place: Python's `self.`/`cls.`, Rust's `crate::`/`super::`/`self::`/`Self::`,
+// JavaScript's `this.`. Treated as bare, so `self.hybrid_search` reads as `hybrid_search`.
+inline bool isPlaceholderQualifier( std::string_view q ) noexcept
+{
+    return q == "self" || q == "cls" || q == "this" || q == "Self" || q == "crate" || q == "super";
+}
+
+// append (name, qualifier) once, in task-text order — the order the kMentionMaxDirectSymbols cap keeps.
+inline void addNamedIdent( std::vector<NamedIdent>& out, std::string_view name, std::string_view qualifier )
+{
+    if( name.size() < 3 || !isIdentStart( name.front() ) )
+    {
+        return;   // the same 3-byte floor extractMentions applies; a digit-led token is a number, not a name
+    }
+    const std::string_view q = isPlaceholderQualifier( qualifier ) ? std::string_view() : qualifier;
+    for( const NamedIdent& n : out )
+    {
+        if( n.name == name && n.qualifier == q )
+        {
+            return;
+        }
+    }
+    out.push_back( { std::string( name ), std::string( q ) } );
+}
+
+// Scan the task for the bare, call-syntax and `::`-qualified identifiers described above, appending to `out`.
+// Pure string work over the task text; no index access.
+inline void extractNamedIdentifiers( std::string_view task, std::vector<NamedIdent>& out )
+{
+    std::size_t i = 0;
+    while( i < task.size() )
+    {
+        if( !isIdentChar( task[i] ) )
+        {
+            ++i;
+            continue;
+        }
+        const std::size_t start = i;
+        std::string_view  prev, last;
+        std::size_t       segCount = 0;
+        for( ;; )
+        {
+            const std::size_t segStart = i;
+            while( i < task.size() && isIdentChar( task[i] ) )
+            {
+                ++i;
+            }
+            prev = last;
+            last = task.substr( segStart, i - segStart );
+            ++segCount;
+            if( i + 2 < task.size() && task[i] == ':' && task[i + 1] == ':' && isIdentChar( task[i + 2] ) )
+            {
+                i += 2;
+                continue;
+            }
+            break;
+        }
+        ASSUME( i > start && segCount >= 1 && !last.empty() );
+        const char before = start > 0 ? task[start - 1] : ' ';
+        const char after  = i < task.size() ? task[i] : ' ';
+        const bool joined = before == '/' || ( before == '.' && start >= 2 && isIdentChar( task[start - 2] ) ) || after == '/'
+                         || ( after == '.' && i + 1 < task.size() && isIdentChar( task[i + 1] ) );
+        if( joined )
+        {
+            while( i < task.size() && ( isTokenChar( task[i] ) || task[i] == ':' ) )
+            {
+                ++i;   // the rest of the path / dotted chain: extractMentions reads it, its tail is no bare name
+            }
+            continue;
+        }
+        if( segCount == 1 && before == '`' && after == '`' )
+        {
+            continue;   // a backticked word is a RawMention; applyMentionBoost falls back to it only if nothing else resolved
+        }
+        if( segCount == 1 && after != '(' && !hasIdentifierShape( last ) )
+        {
+            continue;   // plain prose ("run", "get", "search") — no identifier evidence
+        }
+        addNamedIdent( out, last, segCount > 1 ? prev : std::string_view() );
+    }
+}
+
+// Does the symbol's name spell `name` under its language's own case rule?
+inline bool symbolNameSpells( const Symbol& s, std::string_view name ) noexcept
+{
+    if( s.name == name )
+    {
+        return true;
+    }
+    const bool foldsCase = s.lang == Lang::Php
+                        && ( s.kind == SymKind::Function || s.kind == SymKind::Method || s.kind == SymKind::Class || s.kind == SymKind::Interface );
+    return foldsCase && std::ranges::equal( s.name, name, []( char a, char b )
+                                            { return std::tolower( static_cast<unsigned char>( a ) ) == std::tolower( static_cast<unsigned char>( b ) ); } );
+}
+
+// Is `q` the symbol's scope, its file's stem, or its file's directory name?
+inline bool qualifierPlaces( const IngestResult& ing, const Symbol& s, std::string_view q ) noexcept
+{
+    if( s.scope == q )
+    {
+        return true;
+    }
+    const std::string_view path = rootRelPath( ing, s.fileId );
+    const std::string_view base = baseNameOf( path );
+    if( stripExt( base ) == q )
+    {
+        return true;
+    }
+    const std::string_view dir = path.substr( 0, path.size() - base.size() );
+    return dir.size() > 1 && baseNameOf( dir.substr( 0, dir.size() - 1 ) ) == q;
+}
+
+// Resolve each identifier, in `named` order, to at most kMentionMaxNameFiles symbols — each named file's best
+// definition by (lensRank desc, id asc) — skipping an ambiguous or unmatched name. Appends to `out`, deduplicated.
+inline void resolveNamedIdents( const IngestResult& ing, const std::vector<float>& lensRank, const std::vector<NamedIdent>& named,
+                                std::vector<NodeId>& out )
+{
+    EXPECTS( lensRank.size() == ing.symbols.size() );
+    ASSUME_NO_ALIAS( lensRank, out );
+    std::vector<std::pair<std::uint32_t, NodeId>> perFile;   // (fileId, best symbol in it) for one identifier
+    for( const NamedIdent& n : named )
+    {
+        const bool bareFallback = n.qualifier.empty() || hasIdentifierShape( n.name );
+        std::vector<std::pair<std::uint32_t, NodeId>> narrowed, bare;
+        const auto keepBest = []( std::vector<std::pair<std::uint32_t, NodeId>>& v, const Symbol& s, const std::vector<float>& rank )
+        {
+            for( auto& fileBest : v )
+            {
+                if( fileBest.first == s.fileId )
+                {
+                    const NodeId b = fileBest.second;
+                    if( rank[s.id] > rank[b] || ( rank[s.id] == rank[b] && s.id < b ) )
+                    {
+                        fileBest.second = s.id;
+                    }
+                    return;
+                }
+            }
+            v.emplace_back( s.fileId, s.id );
+        };
+        for( const Symbol& s : ing.symbols )
+        {
+            if( s.kind == SymKind::Section || s.kind == SymKind::ModuleScope || !symbolNameSpells( s, n.name ) )
+            {
+                continue;
+            }
+            ASSUME( s.id < lensRank.size() );
+            if( !n.qualifier.empty() && qualifierPlaces( ing, s, n.qualifier ) )
+            {
+                keepBest( narrowed, s, lensRank );
+            }
+            if( bareFallback && narrowed.empty() && bare.size() <= kMentionMaxNameFiles )
+            {
+                keepBest( bare, s, lensRank );   // stops growing once ambiguous — the verdict is already decided
+            }
+        }
+        perFile = !narrowed.empty() ? std::move( narrowed ) : ( bareFallback ? std::move( bare ) : decltype( bare ){} );
+        if( perFile.empty() || perFile.size() > kMentionMaxNameFiles )
+        {
+            continue;   // unmatched, or ambiguous: precision over recall — no lift, no reordering
+        }
+        std::sort( perFile.begin(), perFile.end() );   // file order, a total order on (fileId, id)
+        for( const auto& fileBest : perFile )
+        {
+            if( std::find( out.begin(), out.end(), fileBest.second ) == out.end() )
+            {
+                out.push_back( fileBest.second );
+            }
+        }
+    }
+}
+
 } // namespace mention_detail
 
 // Apply the mention anchor to `lensRank` (size == ing.symbols.size()). Returns true if anything moved.
@@ -601,7 +818,9 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
     std::uint32_t qualifiedTokens = 0;
     const std::vector<RawMention> raw = extractMentions( task, &qualifiedTokens );
     noteCap( outInfo, "mention_tokens_capped", "mention_tokens_total", qualifiedTokens > kMentionMaxRawTokens, qualifiedTokens );
-    if( raw.empty() )
+    std::vector<NamedIdent> bareNamed;   // (d): bare / call-syntax / `::`-qualified identifiers — NAMED IDENTIFIERS above
+    extractNamedIdentifiers( task, bareNamed );
+    if( raw.empty() && bareNamed.empty() )
     {
         return false;
     }
@@ -622,6 +841,7 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
     std::vector<NodeId>        directSymbols;                        // deduped, id asc at the end
     const std::size_t          fileCount = ing.files.size();
     std::uint32_t              directSymbolTotal = 0;                // Scope.name matches found, cap or no cap
+    std::vector<NamedIdent>    named;                                // (d): identifiers named verbatim, text order
     for( const RawMention& m : raw )
     {
         // (a) file match: path-suffix / basename / basename-sans-ext against every indexed path, trying
@@ -675,11 +895,43 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
         }
 
         // (c) package-directory match — see liftPackageDirMention.
+        const std::size_t filesBeforeDir = mentionedFiles.size();
         if( !matchedFile && !matchedSymbol )
         {
             liftPackageDirMention( ing, m, mentionedFiles );
         }
+
+        // (d) a backticked word or dotted chain that named no file, no Scope.name and no package directory is read
+        //     as the identifier it spells — its last segment, qualified by the one before (NAMED IDENTIFIERS,
+        //     above). Only while the file list has room: a full list stopped (a) and (c) early, so "matched
+        //     nothing" would not be proven, and an earlier rule's reading must never be taken over by this one.
+        if( !matchedFile && !matchedSymbol && !m.isPath && mentionedFiles.size() == filesBeforeDir && mentionedFiles.size() < kMentionMaxFiles )
+        {
+            addNamedIdent( named, m.segments.back(), m.segments.size() >= 2 ? std::string_view( m.segments[ m.segments.size() - 2 ] ) : std::string_view() );
+        }
     }
+
+    // (d) continued — the bare, call-syntax and `::`-qualified identifiers extractMentions does not read, then one
+    //     resolution for all of them. Each lifted symbol is one more direct symbol: same slot, same cap, same total.
+    for( const NamedIdent& n : bareNamed )
+    {
+        addNamedIdent( named, n.name, n.qualifier );
+    }
+    std::vector<NodeId> namedSymbols;
+    resolveNamedIdents( ing, lensRank, named, namedSymbols );
+    for( const NodeId id : namedSymbols )
+    {
+        if( std::find( directSymbols.begin(), directSymbols.end(), id ) != directSymbols.end() )
+        {
+            continue;   // already a Scope.name match — counted once
+        }
+        ++directSymbolTotal;
+        if( directSymbols.size() < kMentionMaxDirectSymbols )
+        {
+            directSymbols.push_back( id );
+        }
+    }
+    ENSURES( directSymbols.size() <= kMentionMaxDirectSymbols && directSymbols.size() <= directSymbolTotal );
     // a STOP is not a CUT (mentionUnkeptFiles), and a CUT without a total is a fact the caller cannot act on:
     // mention_files_total= is every distinct file the task names, so `total - shown` is what the cap withheld.
     const std::uint32_t mentionFilesTotal = mentionFilesNamedTotal( ing, raw, mentionedFiles );
@@ -691,20 +943,31 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
         return false;
     }
 
-    // pass 2 — lift. Slot ladder: file i's symbols land at top*(1 - step*(i+1)); direct symbols land at
-    // the first slot. max() keeps anything the ranker already scored higher exactly where it was.
+    // pass 2 — lift. Slot ladder: file i's symbols land at top*(1 - step*(i+1)). max() keeps anything the
+    // ranker already scored higher exactly where it was.
     std::uint32_t liftedSymbolCount = 0;
-    const auto lift = [ & ]( NodeId id, std::size_t slotIndex )
+    const auto lift = [ & ]( NodeId id, float target )
     {
-        const float target = topScore * ( 1.0f - kMentionTopGapStep * float( slotIndex + 1 ) );
         if( lensRank[id] < target ) { lensRank[id] = target; ++liftedSymbolCount; }
     };
 
+    // ANSWER FIRST (METHODOLOGY §9.1 #3): a symbol the task names DIRECTLY — Scope.name, or a verbatim identifier
+    // (NAMED IDENTIFIERS above) — lands one step ABOVE the current top, so the row the question names leads the
+    // head. The 5%-below slot this used to share with file anchors is a score promise that a flat head defeats:
+    // with several unanchored candidates tied at the top, the named symbol landed below every one of them (the
+    // r=8 dogfood miss sat under a 3-way flat head). File anchors keep the below-#1 slot — a file mention says where
+    // to look, not which of its symbols is the answer. Nothing moves when every named symbol already scores at the
+    // top: the ranker agreed, and re-scoring it would only perturb the head's cliff statistics for no reordering.
     std::sort( directSymbols.begin(), directSymbols.end() );
     directSymbols.erase( std::unique( directSymbols.begin(), directSymbols.end() ), directSymbols.end() );
-    for( const NodeId id : directSymbols )
+    const bool namedAlreadyLead = std::all_of( directSymbols.begin(), directSymbols.end(), [ & ]( NodeId id ) { return lensRank[id] >= topScore; } );
+    if( !namedAlreadyLead )
     {
-        lift( id, 0 );
+        const float answerFirstSlot = topScore * ( 1.0f + kMentionTopGapStep );
+        for( const NodeId id : directSymbols )
+        {
+            lift( id, answerFirstSlot );
+        }
     }
 
     for( std::size_t fi = 0; fi < mentionedFiles.size(); ++fi )
@@ -741,7 +1004,7 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
         }
         for( std::uint32_t k = 0; k < bestCount; ++k )
         {
-            lift( best[k], fi );
+            lift( best[k], topScore * ( 1.0f - kMentionTopGapStep * float( fi + 1 ) ) );
         }
     }
 

@@ -355,9 +355,9 @@ $ ./build/ripwire . --for="tree-sitter parse of a source file" --adaptive
 
 ### `--no-mention-boost`
 
-**Answers:** (with --for) stop lifting symbols the task text names by path, module or Type.method (with --for) disable the query-mention anchor.
+**Answers:** (with --for) stop lifting what the task text names: a path, module, Type.method or identifier (with --for) disable the query-mention anchor.
 
-By DEFAULT, a file, dotted module, or Scope.symbol literally NAMED in the task text (a path, `pkg.module`, `Type.method` — even inside a URL) has its SCORE lifted to within 5% of the top score; the header says what anchored. That is a score promise, not a rank one: on a flat/tied head the anchored hit can still land several ranks below #1. Inert (byte-identical) when the text names nothing indexed. RIPWIRE_NO_MENTION=1 disables it everywhere (incl. MCP `for`).
+By DEFAULT, a file or dotted module literally NAMED in the task text (a path, `pkg.module` — even inside a URL) has its symbols' SCORE lifted to within 5% of the top score; the header says what anchored. That is a score promise, not a rank one: on a flat/tied head the anchored hit can still land several ranks below #1. A SYMBOL named directly — `Type.method`, `ns::fn`, `mod.fn`, or a verbatim identifier with identifier shape (snake_case, camelCase), call syntax (`name()`) or backticks — defined in at most 3 files leads the head instead (answer first; each file's best definition). Plain words never qualify ("run the tests" lifts no run()). Inert (byte-identical) when the text names nothing indexed. RIPWIRE_NO_MENTION=1 disables it everywhere (incl. MCP `for`).
 
 **Try it**
 
@@ -382,6 +382,7 @@ $ ./build/ripwire . --for="why does src/lexical.h chooseForRanker pick name-exac
 **Caveats (stated by the binary):**
 
 - That is a score promise, not a rank one: on a flat/tied head the anchored hit can still land several ranks below #1.
+- Plain words never qualify ("run the tests" lifts no run()).
 - Inert (byte-identical) when the text names nothing indexed.
 
 ### `--no-doc-mention`

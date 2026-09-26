@@ -39,6 +39,28 @@ inline bool isIdentChar( char c ) noexcept
 // ...and the same minus the digits: what may START an identifier.
 inline bool isIdentStart( char c ) noexcept { return isIdentChar( c ) && !( c >= '0' && c <= '9' ); }
 
+// The ONE "is this word spelled like an identifier" test: an interior underscore (snake_case, SCREAMING_CASE —
+// an '_' past the first byte with at least one byte after it) or a lower-to-upper step (camelCase, PascalCase
+// compounds). Plain English words fail both, which is what lets a caller treat a match as the writer's intent to
+// name code rather than a coincidence of vocabulary. Shared by the --for route chooser (lexical.h chooseForRanker)
+// and the named-identifier mention anchor (mention.h) so the two can never disagree about what counts.
+inline bool hasIdentifierShape( std::string_view w ) noexcept
+{
+    for( std::size_t k = 1; k < w.size(); ++k )
+    {
+        const char c = w[k];
+        if( c >= 'A' && c <= 'Z' && w[k - 1] >= 'a' && w[k - 1] <= 'z' )
+        {
+            return true;
+        }
+        if( c == '_' && k + 1 < w.size() )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // rv-test-gate-tsjs: the ONE "find `word` in `text`, bounded on both sides by a byte `isWordByte` says NO
 // to" scan — planlint.h::containsWholeWord and jsrunner.h::detail::matchesWord both needed exactly this
 // walk (--quality-delta's duplication kind found the pair), over two DIFFERENT boundary predicates

@@ -16,10 +16,10 @@ it once, marked `×N`.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 225 | 89 | 125 | **100** |
+| 226 | 89 | 126 | **100** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 225 + 7 is the 232 constants this generator parses out of `src/`.
+are not counted as caps, and 226 + 7 is the 233 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -37,8 +37,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **123 of 225 caps are classified
-(40 INDEXING, 41 OUTPUT, 42 BOUNDARY); the remaining 102 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **124 of 226 caps are classified
+(40 INDEXING, 41 OUTPUT, 43 BOUNDARY); the remaining 102 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -88,7 +88,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 
 ## Caps, by file
 
-One table for each of the 89 files that declare a cap — the 225 caps counted above, and no parameter.
+One table for each of the 89 files that declare a cap — the 226 caps counted above, and no parameter.
 
 ### `src/abicheck.h`
 
@@ -605,8 +605,9 @@ Discloses: `doc_mentions_capped`, `mention_files_capped`, `mention_syms_capped`,
 | `kDocMentionMaxAnchors` | `8` | INDEXING | consult only the current top-N anchors |
 | `kDocMentionMaxDocsPerAnchor` | `2` | INDEXING | strongest-anchor-first, capped per anchor |
 | `kDocMentionMaxDocsTotal` | `6` | INDEXING | global cap — bounds token cost regardless of fan-out |
-| `kMentionMaxDirectSymbols` | `8` | INDEXING | directly-named (Scope.name / `name`) symbols, id asc |
+| `kMentionMaxDirectSymbols` | `8` | INDEXING | directly-named (Scope.name / identifier) symbols, task-text order kept |
 | `kMentionMaxFiles` | `4` | INDEXING | strongest evidence only: files named first in the text |
+| `kMentionMaxNameFiles` | `3` | BOUNDARY | the same specificity bound as lexical.h kMaxAnchorDefs |
 | `kMentionMaxRawTokens` | `16` | INDEXING | extraction cap: first N candidate mention tokens, text order |
 | `kMentionMaxSymbolsPerFile` | `3` | INDEXING | per mentioned file: its top symbols by (lens score desc, id asc) |
 

@@ -19,6 +19,7 @@
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "infra/strkern.h"      // Byteset256 — the head set below is that type, not a second bitmap
 #include "infra/sortutil.h"      // deterministic sanitizer-clean score sorting for adaptive cuts
+#include "infra/namesplit.h"     // hasIdentifierShape — the ONE camel/snake predicate chooseForRanker shares with mention.h
 #include "infra/charconvcompat.h" // rw::parseFloating — envKnob's full-token finite parse of a RIPWIRE_* knob
 
 #include <algorithm>
@@ -2243,21 +2244,9 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
         }
         ++nWords;
 
-        // camelCase / snake_case shape: an interior uppercase (aB) or an interior underscore (a_b)
-        bool camel = false, snake = false;
-        for( std::size_t k = 1; k < w.size(); ++k )
-        {
-            const char c = w[k];
-            if( c >= 'A' && c <= 'Z' && w[k - 1] >= 'a' && w[k - 1] <= 'z' )
-            {
-                camel = true;
-            }
-            if( c == '_' && k + 1 < w.size() )
-            {
-                snake = true;
-            }
-        }
-        if( camel || snake )
+        // camelCase / snake_case shape: an interior uppercase (aB) or an interior underscore (a_b) — the ONE
+        // predicate (infra/namesplit.h), shared with the named-identifier mention anchor (mention.h)
+        if( namesplit::hasIdentifierShape( w ) )
         {
             hasCamelSnake = true;
             if( identifierHit.empty() )
