@@ -552,9 +552,12 @@ extraction change bumps the parser version and costs one cold re-parse. Warm out
 **byte-identical** to cold output by a gate — a cache that changes the answer is a bug, not a
 tradeoff.
 
-Its blob holds ONE superset of records per tree and verb class, shared by every configuration run
-against that tree: the key deliberately ignores `--exclude` and `--max-file-size`, because keying on
-them instead was built, measured and reverted (`docs/EVALS.md`, "The auto-cache key ignores
+Its blob holds ONE superset of records per tree, verb class and cache format, shared by every configuration run
+against that tree. The format is in the name (`ripwire-<rootKey>-lean-c25p122.bin`: `kCacheVersion` and the
+class's parser version), so two builds of different formats on one tree each keep their own blob instead of
+refusing and rewriting one; an explicit `--cache=PATH` keeps the name the user gave it. Within one format
+the key deliberately ignores `--exclude` and `--max-file-size`, because keying on them instead was built,
+measured and reverted (`docs/EVALS.md`, "The auto-cache key ignores
 `--exclude`"). Sharing is made cheap by the blob's shape rather than by the key. A **record offset
 table** (`pathHash → offset, length, contentHash, recordSum`, ascending, binary-searched) lets a run
 deserialise only the records for the files it crawled, and a save carries over — byte for byte — the

@@ -194,7 +194,10 @@ rmdir "$h" 2>/dev/null || true
 `.windsurfrules` or `~/.openclaw/workspace/AGENTS.md`, delete that block.
 
 **6. The cache.** ripwire keeps its index cache, and any repositories it cloned, in one private directory:
-`$TMPDIR/ripwire`, else `$XDG_CACHE_HOME/ripwire`, else `/tmp/ripwire-<uid>`. Remove all three candidates:
+`$TMPDIR/ripwire`, else `$XDG_CACHE_HOME/ripwire`, else `/tmp/ripwire-<uid>`. Each tree's blobs are named for the
+tree and for the cache format of the ripwire that wrote them (`ripwire-<key>-lean-c25p122.bin`), so two installed
+versions keep separate blobs. The directory is capped at 2 GiB, and blobs untouched for 30 days are deleted on
+the next cache write. Remove all three candidates:
 
 ```bash
 [ -n "${TMPDIR:-}" ] && rm -rf "${TMPDIR%/}/ripwire"
