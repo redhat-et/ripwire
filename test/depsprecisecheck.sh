@@ -600,4 +600,22 @@ w220 "$D/src/b.ts" "import { a } from '@/a';\nexport function b() { return typeo
     && ok "#220 (P2-N) --impact importer tier: tsconfig_unread=\"1\" beside counts_floor, defined; the JSON key too" \
     || no "#220 (P2-N) --impact did not disclose the unread project"
 
+# (P2-O) RE-EXPORTS are imports (kParserVer 124): a barrel `index.ts` made of `export … from` lines. Relative: a.ts
+# imports the barrel, the barrel re-exports b.ts, b.ts imports a.ts — one 3-file cycle, found only through the barrel.
+# Aliased: the same through `@/` (paths) and `export *`/`export * as`/`export type` forms. Part 1 and the pre-124 part 2
+# drew no edge out of a barrel, so both trees read acyclic, silently.
+for SP in rel alias; do
+    D="$TMP/p2-barrel-$SP"; P="./"; [ "$SP" = alias ] && P="@/"
+    [ "$SP" = alias ] && w220 "$D/tsconfig.json" '{ "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }\n'
+    w220 "$D/src/index.ts" "export { b } from '${P}b';\nexport * from '${P}c';\nexport * as dns from '${P}d';\nexport type { T } from '${P}t';\nexport function local() { return 1; }\n"
+    w220 "$D/src/a.ts" "import { b } from '${P}index';\nexport function a() { return b(); }\n"
+    w220 "$D/src/b.ts" "import { a } from '${P}a';\nexport function b() { return typeof a; }\n"
+    w220 "$D/src/c.ts" "export const c = 1;\n"; w220 "$D/src/d.ts" "export const d = 1;\n"; w220 "$D/src/t.ts" "export type T = number;\n"
+    d220 "$D" >"$TMP/p2o-$SP.deps"
+    { [ "$( ncyc "$TMP/p2o-$SP.deps" )" = 1 ] && grep -q '<cycle size="3"' "$TMP/p2o-$SP.deps" && grep -q '<f p="src/index.ts" includes="4" ' "$TMP/p2o-$SP.deps" \
+      && ! grep -q 'imports_unresolved=\|graph_partial=' "$TMP/p2o-$SP.deps"; } \
+        && ok "#220 (P2-O) re-exports ($SP): the barrel's 4 export…from lines are edges; a -> index -> b -> a is one 3-file cycle" \
+        || no "#220 (P2-O) re-exports ($SP) drew no edge — $( ncyc "$TMP/p2o-$SP.deps" ) cycle(s), $( grep -o '<f p="src/index.ts"[^>]*>' "$TMP/p2o-$SP.deps" )"
+done
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

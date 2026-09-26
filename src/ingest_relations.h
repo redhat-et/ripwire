@@ -1970,6 +1970,19 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
             target = importSpecifierText( nm, src );                      // Python: the dotted module head
         }
     }
+    else if( kindIs( t, "export_statement" ) && ( lang == Lang::TypeScript || lang == Lang::JavaScript ) )
+    {
+        // kParserVer 124 (#220 part 2): a RE-EXPORT — `export { x } from './y'`, `export * from './y'`,
+        // `export * as ns from './y'`, `export type { T } from './y'` — loads its module exactly as an import does,
+        // and a barrel file is made of nothing else, so an import graph without them misses every cycle through a
+        // barrel. The grammar gives the specifier the same `source:` field import_statement has; every other
+        // export_statement (`export function …`, `export { x }`, `export default …`) has none and reads empty, and
+        // the walk still descends into it (it is a kJsImportContainers entry) for the requires inside.
+        if( const TSNode src_ = fieldChild( n, NodeField::Source );  !ts_node_is_null( src_ ) )
+        {
+            target = importSpecifierText( src_, src );
+        }
+    }
     else if( kindIs( t, "import_from_statement" ) )            // Python `from pkg.mod import Z`
     {
         // module_name:(dotted_name)  → `pkg.mod`;  module_name:(relative_import)  → `.rel` / `..up` (leading

@@ -2102,7 +2102,7 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 25;   // MUST equal ingest.cpp's kCacheVersion (gated); 25 = #157 + #150
-constexpr std::uint32_t kIngestParserVerMirror    = 122;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 124;  // MUST equal ingest.cpp's kParserVer   (gated)
                                                           // 122 = 2026-09-25 (#320/#67, Astro frontmatter, see kParserVer note;
                                                           //   kIngestCacheVersionMirror stays 25)
                                                           // 121 = 2026-09-24 (#310, Ruby attr DSL, see kParserVer note)

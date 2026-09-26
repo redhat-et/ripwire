@@ -279,7 +279,14 @@ constexpr std::uint32_t kCacheVersion = 25;           // 25: #150 AND #157 (trai
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 122;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 124;          // bump on any grammar/.scm/extraction change
+                                                      // 124 = 2026-09-26 (#220 part 2, test/depsprecisecheck.sh
+                                                      //   P2-O): a TS/JS RE-EXPORT (`export … from './y'`) is an
+                                                      //   Include like an import (ingest_relations.h
+                                                      //   directiveTargetOf's export_statement branch), so a
+                                                      //   barrel's edges exist. 123 stays reserved for #325.
+                                                      //   No record layout change: kCacheVersion stays 25 (NOT 24);
+                                                      //   kQSnapCacheScheme stays 14.
                                                       // 122 = 2026-09-25 (#320/#67, test/astrocheck.sh): .astro joins
                                                       //   kLangTable on the TypeScript grammar, parsed through ONE
                                                       //   included range over its `---` frontmatter; blank lines
