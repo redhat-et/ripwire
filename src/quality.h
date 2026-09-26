@@ -2729,6 +2729,49 @@ struct CacheBlobStat
     std::string                     path;
 };
 
+// The byte-budget pass's eviction ORDER (evictBySizeBudget below): each blob's tier, read off its name ONCE — a
+// comparator that re-derived it would parse every name O(n log n) times — then sorted by tier, oldest first within a
+// tier. Tier 0: another root's blob, or one no root owns. Tier 1: another ripwire build's blob of the root being
+// written (isOtherBuildRootBlob). Tier 2 (kEvictTierPinned): this build's blobs of that root, and keepPath itself.
+inline constexpr std::uint8_t kEvictTierPinned = 2;
+
+struct RankedBlob
+{
+    std::uint8_t tier;
+    std::size_t  blobIndex;   // into the vector that was ranked
+};
+
+inline std::uint8_t evictionTier( const std::string& blobPath, const std::string& keepPath, const std::string& pinRootKey,
+                                  const OwnBuildBlobTails& ownTails )
+{
+    if( blobPath == keepPath )
+    {
+        return kEvictTierPinned;
+    }
+    const std::string name = std::filesystem::path( blobPath ).filename().string();
+    if( pinRootKey.empty() || cacheBlobRootKey( name ) != pinRootKey )
+    {
+        return 0;
+    }
+    return isOtherBuildRootBlob( name, ownTails ) ? std::uint8_t( 1 ) : kEvictTierPinned;
+}
+
+inline std::vector<RankedBlob> rankBlobsForEviction( const std::vector<CacheBlobStat>& blobs, const std::string& keepPath )
+{
+    const std::string       pinRootKey = cacheBlobRootKey( std::filesystem::path( keepPath ).filename().string() );
+    const OwnBuildBlobTails ownTails   = ownBuildBlobTails();
+    std::vector<RankedBlob> order;
+    order.reserve( blobs.size() );
+    for( std::size_t i = 0; i < blobs.size(); ++i )
+    {
+        order.push_back( RankedBlob{ evictionTier( blobs[ i ].path, keepPath, pinRootKey, ownTails ), i } );
+    }
+    std::sort( order.begin(), order.end(), [ &blobs ]( const RankedBlob& a, const RankedBlob& b )
+               { return a.tier != b.tier ? a.tier < b.tier : blobs[ a.blobIndex ].mtime < blobs[ b.blobIndex ].mtime; } );
+    ENSURES( order.size() == blobs.size(), "every blob is ranked exactly once" );
+    return order;
+}
+
 // P1-1 (2026-09-10 full audit) — THE BYTE-BUDGET PASS: delete until the family is under a LOW-WATER mark of
 // 7/8 budget, in THREE TIERS, oldest-first within each: (0) other roots' blobs and unowned ones, (1) another
 // ripwire build's blobs of the root being written, (2) never — this build's blobs of that root and `keepPath`.
@@ -2790,41 +2833,18 @@ inline std::vector<CacheBlobStat> evictBySizeBudget( std::vector<CacheBlobStat>&
         return std::move( mine );
     }
 
-    const std::string       pinRootKey    = cacheBlobRootKey( fs::path( keepPath ).filename().string() );
-    const OwnBuildBlobTails ownTails      = ownBuildBlobTails();
-    const std::uintmax_t    lowWaterBytes = maxTotalBytes - maxTotalBytes / 8;
-
-    // The tier, read off each name ONCE (a comparator that re-derived it would parse every name O(n log n) times).
-    constexpr std::uint8_t kTierPinned = 2;
-    struct Ranked
-    {
-        std::uint8_t tier;
-        std::size_t  blobIndex;
-    };
-    std::vector<Ranked> order;
-    order.reserve( mine.size() );
-    for( std::size_t i = 0; i < mine.size(); ++i )
-    {
-        const std::string name     = fs::path( mine[ i ].path ).filename().string();
-        const bool        thisRoot = !pinRootKey.empty() && cacheBlobRootKey( name ) == pinRootKey;
-        const std::uint8_t tier    = mine[ i ].path == keepPath                    ? kTierPinned
-                                   : !thisRoot                                     ? std::uint8_t( 0 )
-                                   : isOtherBuildRootBlob( name, ownTails )        ? std::uint8_t( 1 )
-                                                                                   : kTierPinned;
-        order.push_back( Ranked{ tier, i } );
-    }
-    std::sort( order.begin(), order.end(), [ & ]( const Ranked& a, const Ranked& b )
-               { return a.tier != b.tier ? a.tier < b.tier : mine[ a.blobIndex ].mtime < mine[ b.blobIndex ].mtime; } );   // tier, then oldest first
+    const std::uintmax_t          lowWaterBytes = maxTotalBytes - maxTotalBytes / 8;
+    const std::vector<RankedBlob> order         = rankBlobsForEviction( mine, keepPath );
 
     std::vector<CacheBlobStat> kept;
     kept.reserve( mine.size() );
     std::size_t    evictedCount = 0;
     std::uintmax_t pinnedBytes  = 0;
-    for( const Ranked& r : order )
+    for( const RankedBlob& r : order )
     {
-        ASSUME( r.blobIndex < mine.size(), "order holds one entry per index of mine, built above" );
+        ASSUME( r.blobIndex < mine.size(), "rankBlobsForEviction returns one entry per index of mine" );
         const CacheBlobStat& b = mine[ r.blobIndex ];
-        if( r.tier == kTierPinned )
+        if( r.tier == kEvictTierPinned )
         {
             pinnedBytes += b.byteSize;
         }
