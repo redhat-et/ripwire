@@ -2382,11 +2382,27 @@ struct CacheLoadStats
 // ordinary cold-start miss (absent) stays silent; anything else says what it found, once per run.
 //
 // #334: a Windows tester alternating 0.6.2 and 0.6.3 on one tree saw `format-version — not used` on every run and read
-// it as "the CLI never reuses its cache". The blob path is keyed by root and verb class, not by build, so two builds of
-// different formats that alternate on one tree refuse and rewrite each other's blob every time, while one build run
-// twice reuses its own. A version refusal now names the number it found and the one this binary reads, so the cause is
-// on the line. It is APPENDED: the line up to "rewrites it" is unchanged, and gates grep that prefix
-// (test/localscountcheck.sh, test/cachefuzzcheck.sh).
+// it as "the CLI never reuses its cache". The auto path was keyed by root and verb class only, so two builds of
+// different formats refused and rewrote each other's blob every time. The auto path now carries the build tag
+// (quality.h cacheBuildTag), so this notice on an AUTO blob means a hand-copied or foreign file; on a --cache file
+// the user named, it still means another build (or the other verb class) wrote that one file. A version refusal
+// names the number it found and the one this binary reads, so the cause is on the line. It is APPENDED: the line up
+// to "rewrites it" is unchanged, and gates grep that prefix (test/localscountcheck.sh, test/cachefuzzcheck.sh).
+//
+// WHO WROTE IT (rv-windows-334 M1). A parser stamp equal to this build's OTHER verb class is what one --cache file
+// shared by a lean and a rich verb holds, and it used to be blamed on "another ripwire build". The stamp alone
+// cannot tell that apart from an older build whose parserVer was one lower or higher (a rich class of kParserVer-1
+// stamps exactly this build's lean number), so that case names both and says what fixes the first.
+inline std::string_view cacheRejectCause( const CacheFrame& frame, bool captureValueUses ) noexcept
+{
+    if( frame.reason == CacheReject::ParserVersion && frame.foundStamp == parserVerFor( !captureValueUses ) )
+    {
+        return captureValueUses ? "this build's lean verb class writes that number, or another ripwire build wrote it; give each verb class its own --cache file"
+                                : "this build's rich verb class writes that number, or another ripwire build wrote it; give each verb class its own --cache file";
+    }
+    return "another ripwire build wrote it; two builds alternating on one cache file re-parse every run";
+}
+
 inline void noteCacheReject( const std::string& path, const CacheFrame& frame, bool captureValueUses )
 {
     if( frame.reason == CacheReject::Absent )
@@ -2395,12 +2411,12 @@ inline void noteCacheReject( const std::string& path, const CacheFrame& frame, b
     }
     const bool format  = frame.reason == CacheReject::FormatVersion;
     const bool version = format || frame.reason == CacheReject::ParserVersion;
-    char detail[ 192 ] = "";
+    char detail[ 224 ] = "";
     if( version )
     {
-        rw::formatTo( detail, sizeof( detail ),
-                      " (blob {} {}, this binary {}: another ripwire build wrote it; two builds alternating on one tree re-parse every run)",
-                      format ? "format" : "parser", frame.foundStamp, format ? kCacheVersion : parserVerFor( captureValueUses ) );
+        rw::formatTo( detail, sizeof( detail ), " (blob {} {}, this binary {}: {})",
+                      format ? "format" : "parser", frame.foundStamp, format ? kCacheVersion : parserVerFor( captureValueUses ),
+                      cacheRejectCause( frame, captureValueUses ) );
     }
     rw::emitTo( stderr, "ripwire: cache {}: {} — not used; this run parses from source and rewrites it{}\n",
                 path.c_str(), cacheRejectName( frame.reason ), rw::cstr( detail ) );

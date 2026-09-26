@@ -331,6 +331,20 @@ fi
     && ok "(D3) --cache=PATH writes exactly the file the user named (not build-keyed)" \
     || no "(D3) --cache=PATH did not write the named file verbatim"
 
+# (D3) rv-windows-334 M1 — ONE --cache file shared by a lean verb and a rich verb of THIS build. The refusal used to
+#      say "another ripwire build wrote it"; the same build wrote it. Both directions, the number the other class
+#      stamps named as such (it may also be an older build's, which the line says too).
+rm -f "$TMP/shared.ripwirecache"
+"$BIN" "$TK" --cache="$TMP/shared.ripwirecache" >/dev/null 2>&1
+"$BIN" "$TK" --cache="$TMP/shared.ripwirecache" --for=alphaaa >/dev/null 2>"$TMP/m1_rich.err"
+grep -qF "parser-version — not used; this run parses from source and rewrites it (blob parser $SRC_PARSERVER, this binary $(( SRC_PARSERVER + 1 )): this build's lean verb class writes that number" "$TMP/m1_rich.err" \
+    && ok "(D3) a rich run over a lean-written --cache file names this build's lean class, not another build" \
+    || no "(D3) the rich run misattributes the lean-written blob: $( grep -m1 'not used' "$TMP/m1_rich.err" )"
+"$BIN" "$TK" --cache="$TMP/shared.ripwirecache" >/dev/null 2>"$TMP/m1_lean.err"
+grep -qF "parser-version — not used; this run parses from source and rewrites it (blob parser $(( SRC_PARSERVER + 1 )), this binary $SRC_PARSERVER: this build's rich verb class writes that number" "$TMP/m1_lean.err" \
+    && ok "(D3) a lean run over a rich-written --cache file names this build's rich class, not another build" \
+    || no "(D3) the lean run misattributes the rich-written blob: $( grep -m1 'not used' "$TMP/m1_lean.err" )"
+
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 # (E) ok= AND THE EXIT CODE — a self-healing miss on the AUTO blob is normal and must never fail doctor
 #     (a first run on a cold machine has no blob). An artifact the USER NAMED and this binary cannot read
