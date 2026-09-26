@@ -1,0 +1,39 @@
+# The prose half of §2's exclusion list E. One lowercased owner/name per line; `name:<repo-name>` excludes a
+# repository NAME under any owner. Comments after '#'.
+redhat-et/ripwire                 # the tool itself (pilot only)
+name:ripwire
+# SWE-bench Lite and Verified (the agent-loop rounds) — the same twelve repositories in both
+astropy/astropy
+django/django
+matplotlib/matplotlib
+mwaskom/seaborn
+pallets/flask
+psf/requests
+pydata/xarray
+pylint-dev/pylint
+pytest-dev/pytest
+scikit-learn/scikit-learn
+sphinx-doc/sphinx
+sympy/sympy
+# corpora the house docs name in prose
+webpack/webpack
+facebook/rocksdb
+tree-sitter/tree-sitter
+# peer tools and their eval corpora
+tirth8205/code-review-graph
+name:code-review-graph
+scanaislop/aislop
+name:aislop
+abhigyanpatwari/gitnexus
+name:gitnexus
+zzet/gortex
+name:gortex
+cocoindex-io/cocoindex-code
+cocoindex-io/cocoindex
+name:cocoindex-code
+whitelonng/mancode
+fastapi/fastapi
+tiangolo/fastapi
+encode/httpx
+gin-gonic/gin
+expressjs/express
