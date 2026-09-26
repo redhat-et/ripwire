@@ -99,12 +99,6 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
-# RE-PIN 2026-09-26 (lane/for-docnoise-065, the change-log / translation doc tier): docdemotegolden_for.xml
-# 5,821 -> 5,821 B, the same bytes in a new order. CONCEPTQ has no change cue, so CHANGELOG.md now scores x0.35
-# (filter.h docNoiseSymbolMultipliers), and its three rows (Unreleased, CHANGELOG, Changelog) move from r=10-12
-# to r=16-18, below CONTRIBUTING and the two tier_probe docs. Every other row, the route=, the legend and the
-# root are byte-identical. The new tier writes no route= note and no doc_tier= attribute, so the two other (f)
-# assertions ('no demotion claimed', 'no doc_tier=') are unchanged and pass.
 # RE-PIN 2026-09-13 (merge of lane/sc-legend and lane/for-widen): docdemotegolden_for.xml RE-MEASURED on the
 # MERGED tree at 5,809 B (est_tokens "2328"), from 5,887 on for-widen's tree and 5,425 on sc-legend's. Neither
 # lane's own number is the merged one, so this is measured, not summed. Three identified changes, and the golden

@@ -131,11 +131,10 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     // §P4 tier de-prioritization (filter.h): fixtures / present/ decks / generated captures score down,
     // folded INTO BM25 scoring (pruning-bound-safe) and BEFORE the B8 mention anchor — a fixture the task
     // literally NAMES is still lifted near the top. Plus, when a shape fired, the document tier.
-    // Plus (filter.h docNoiseSymbolMultipliers) the change-log / translation tier, unless the task asks about
-    // what those files hold; the same vector later orders the doc-mention lift. Routed path only, like the shape.
-    std::vector<float>       tierMul     = rankTierSymbolMultipliersShaped( ing, shape.fires() );
+    const std::vector<float> tierMul = rankTierSymbolMultipliersShaped( ing, shape.fires() );
+    // Change logs and translations go LAST in the doc-mention lift below (filter.h docNoiseSymbolMultipliers), unless
+    // the task asks about what those files hold. BM25 is untouched. Routed path only, like the shape.
     const std::vector<float> docNoiseMul = routeOn ? docNoiseSymbolMultipliers( ing, task ) : std::vector<float>{};
-    foldDocNoiseTier( tierMul, docNoiseMul );
 
     LensRanking out;
     std::vector<float>& lensRank = out.rank;
@@ -301,7 +300,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     if( !cfg.noDocMention && !std::getenv( "RIPWIRE_NO_DOC_MENTION" ) )
     {
         DocMentionBoostInfo docMentionInfo;
-        if( applyDocMentionBoost( g, lensRank, &docMentionInfo, &docNoiseMul ) )
+        if( applyDocMentionBoost( g, lensRank, &docMentionInfo, docNoiseMul ) )
         {
             char nb[ 220 ];
             rw::formatTo( nb, sizeof( nb ), " [doc mentions: {} doc{} discussing {} top-ranked symbol{} surfaced; doc_mentions= on the root repeats the doc count]",

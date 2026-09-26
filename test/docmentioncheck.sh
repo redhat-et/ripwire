@@ -20,9 +20,9 @@
 #         boost-on vs boost-off.
 #   (v)   DETERMINISM x3, xmllint-clean, env (RIPWIRE_NO_DOC_MENTION=1) == flag (--no-doc-mention) byte-for-
 #         byte, and the flag alone refuses loudly; --pack-task carries the same note (shared computeLensRanking).
-#   (vi)  CHANGE LOGS AND TRANSLATIONS RANK BELOW CODE on a code question (filter.h docNoiseSymbolMultipliers):
-#         lifted last and lower, never dropped; the default-language docs keep the lift; a change / translation
-#         question, a named file, --no-route and a single-language repo all keep the untiered ranking.
+#   (vi)  CHANGE LOGS AND TRANSLATIONS GO LAST IN THE LIFT on a code question (filter.h docNoiseSymbolMultipliers):
+#         consulted after every other doc and lifted lower, never dropped; the default-language docs keep the lift;
+#         a change / translation question, a named file, --no-route and a single-language repo keep the old lift.
 #
 # Usage:  bash test/docmentioncheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/docmentioncheck.sh
 
@@ -181,7 +181,7 @@ printf '%s' "$JSON_HIT" | python3 -c 'import json,sys; d=json.load(sys.stdin); a
     && ok "L10b: --json carries the matching \"doc_mentions\":2" \
     || no "L10b: --json doc_mentions key missing or wrong"
 
-# ── (vi) CHANGE LOGS AND TRANSLATIONS RANK BELOW CODE on a code question (filter.h docNoiseSymbolMultipliers) ──
+# ── (vi) CHANGE LOGS AND TRANSLATIONS GO LAST IN THE LIFT on a code question (filter.h docNoiseSymbolMultipliers) ──
 # Dogfood 2026-09-26: on a public repo, three CHANGELOG `### Added` sections and a translated README section took
 # 4 of the top 20 --for slots for a code question. Both kinds backtick the identifiers the code defines, so the
 # doc-mention lift raised them to 0.55 x their anchor, above weaker real code — and, taking the lowest node ids
